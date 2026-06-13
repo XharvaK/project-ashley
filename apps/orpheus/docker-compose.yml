@@ -1,0 +1,41 @@
+services:
+  llama-server:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    ports:
+      - "8080:8080"
+    volumes:
+      - ../../models:/models:ro
+    command:
+      - -m
+      - /models/orpheus-3b-0.1-ft-q4_k_m.gguf
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8080"
+      - --n-gpu-layers
+      - "99"
+      - --ctx-size
+      - "2048"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+
+  orpheus-fastapi:
+    build:
+      context: ./Orpheus-FastAPI
+      dockerfile: Dockerfile.gpu
+    ports:
+      - "8881:5005"
+    environment:
+      - ORPHEUS_API_URL=http://llama-server:8080/v1/completions
+      - ORPHEUS_HOST=0.0.0.0
+      - ORPHEUS_PORT=5005
+      - ORPHEUS_SAMPLE_RATE=24000
+    depends_on:
+      - llama-server
+    restart: unless-stopped

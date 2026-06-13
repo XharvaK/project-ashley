@@ -1,0 +1,34 @@
+name: test
+
+on:
+  push:
+    paths:
+      - "apps/agent-service/**"
+      - "scripts/phase0/**"
+      - "workspace/prompts/**"
+  pull_request:
+    paths:
+      - "apps/agent-service/**"
+      - "apps/discord-bot/**"
+      - "scripts/phase0/**"
+      - "workspace/prompts/**"
+
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install agent-service deps
+        working-directory: apps/agent-service
+        run: npm ci
+      - name: Build
+        working-directory: apps/agent-service
+        run: npm run build
+      - name: Vitest
+        working-directory: apps/agent-service
+        run: npm test
+      - name: Recall patterns
+        run: node scripts/phase0/test-recall-patterns.mjs

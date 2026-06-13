@@ -1,0 +1,41 @@
+# Ashley Discord stack — always-on VM (Compute Engine)
+# Voice / Orpheus stay on your PC; this is agent + discord-bot only.
+
+services:
+  agent:
+    build:
+      context: ../..
+      dockerfile: deploy/gcp/Dockerfile.agent
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      AGENT_BIND_HOST: 0.0.0.0
+      COMPOSER_DATA_DIR: /data
+      COMPOSER_WORKSPACE: /app/workspace
+    env_file:
+      - .env
+    volumes:
+      - ashley-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:3710/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  discord-bot:
+    build:
+      context: ../..
+      dockerfile: deploy/gcp/Dockerfile.discord
+    restart: unless-stopped
+    depends_on:
+      agent:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      AGENT_SERVICE_URL: http://agent:3710
+    env_file:
+      - .env
+
+volumes:
+  ashley-data:

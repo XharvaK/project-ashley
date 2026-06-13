@@ -1,0 +1,45 @@
+{
+
+  "name": "composer-assistant",
+
+  "private": true,
+
+  "version": "0.2.0",
+
+  "description": "Discord + voice companion (Mistral + Ashley)",
+
+  "scripts": {
+
+    "dev": "powershell -ExecutionPolicy Bypass -File scripts/dev.ps1",
+
+    "dev:discord": "powershell -ExecutionPolicy Bypass -File scripts/dev.ps1 -Discord",
+
+    "dev:agent": "powershell -ExecutionPolicy Bypass -File scripts/dev.ps1 -AgentOnly",
+
+    "start:ashley": "powershell -ExecutionPolicy Bypass -File scripts/start-production.ps1",
+
+    "stop:ashley": "powershell -ExecutionPolicy Bypass -File scripts/start-production.ps1 -Stop",
+
+    "build:agent": "npm run build --prefix apps/agent-service",
+
+    "build:discord": "npm run build --prefix apps/discord-bot",
+
+    "phase0": "powershell -ExecutionPolicy Bypass -File scripts/phase0/run-all.ps1",
+
+    "phase0:offline": "powershell -ExecutionPolicy Bypass -File scripts/phase0/run-all.ps1 -Tier offline",
+
+    "phase0:agent": "powershell -ExecutionPolicy Bypass -File scripts/phase0/run-all.ps1 -Tier agent",
+
+    "phase0:mistral": "node scripts/phase0/test-mistral.mjs",
+
+    "test": "npm test --prefix apps/agent-service",
+
+    "test:recall": "powershell -ExecutionPolicy Bypass -File scripts/phase0/run-all.ps1 -Tier agent",
+
+    "config": "powershell -ExecutionPolicy Bypass -File scripts/install-config.ps1"
+
+  }
+
+}
+
+
