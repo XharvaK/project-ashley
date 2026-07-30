@@ -38,7 +38,7 @@ describe("parseMediaMarkers", () => {
     assert.equal(r.text, "just text");
   });
 
-  it("allows marker-only replies (empty text)", () => {
+  it("parses marker-only raw (bot must not send react-only)", () => {
     const r = parseMediaMarkers("[[gif:shocked face]]\n[[react:😲]]");
     assert.equal(r.text, "");
     assert.equal(r.gifQuery, "shocked face");

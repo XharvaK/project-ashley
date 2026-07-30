@@ -49,15 +49,26 @@ export async function handleMessage(message: Message): Promise<void> {
         const result = await chatText(content);
 
         const markers = parseMediaMarkers(result.text);
-        const chunks = splitMessage(markers.text);
+        let chunks = splitMessage(markers.text);
+        let react = markers.react;
 
         let gifUrl: string | null = null;
         if (markers.gifQuery) {
           gifUrl = await searchGif(markers.gifQuery, message.channel.id);
         }
 
-        // Marker-only replies (gif/react, no text) used to return silently — never do that.
-        if (chunks.length === 0 && !gifUrl && !markers.react) return;
+        // React/GIF markers are addons. React-only = typing then void (Doc sees ghost).
+        if (chunks.length === 0 && !gifUrl) {
+          if (react) {
+            console.warn(
+              "[discord-bot] dropping react-only reply; forcing text bubble",
+            );
+            react = null;
+          }
+          chunks = ["blanked on that one, hit me again"];
+        }
+
+        if (chunks.length === 0 && !gifUrl) return;
 
         // Orchid-style: no reply-quote theater for normal chat
         if (chunks.length > 0) {
@@ -88,9 +99,9 @@ export async function handleMessage(message: Message): Promise<void> {
           }
         }
 
-        if (markers.react) {
+        if (react) {
           try {
-            await message.react(markers.react);
+            await message.react(react);
           } catch (err) {
             console.warn("[discord-bot] react failed:", err);
           }
