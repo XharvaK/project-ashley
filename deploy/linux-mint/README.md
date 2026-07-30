@@ -39,11 +39,31 @@ bash ~/composer-assistant/deploy/linux-mint/status.sh
 bash ~/composer-assistant/deploy/linux-mint/bootstrap.sh --env-file /path/to/ashley-mint-transfer/.env
 ```
 
-## Update (after Windows `git push`)
+## Updates later
+
+After you push from Windows:
 
 ```bash
 bash ~/composer-assistant/deploy/linux-mint/update.sh
 ```
+
+### Without opening the laptop (SSH)
+
+On Mint once:
+
+```bash
+bash ~/composer-assistant/deploy/linux-mint/enable-ssh.sh
+```
+
+From Windows (after you know Mint’s LAN IP / hostname):
+
+```powershell
+cd C:\Users\Xharv\Projects\composer-assistant
+# optional: commit first, then:
+powershell -File scripts\mint\remote-update.ps1 -HostName 192.168.x.x -User YOUR_MINT_USER -PushFirst
+```
+
+That SSHs in, `git pull`s, rebuilds, restarts systemd units. Lid can stay closed.
 
 ## Ops
 
