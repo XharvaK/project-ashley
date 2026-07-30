@@ -37,4 +37,11 @@ describe("parseMediaMarkers", () => {
     assert.equal(r.gifQuery, null);
     assert.equal(r.text, "just text");
   });
+
+  it("allows marker-only replies (empty text)", () => {
+    const r = parseMediaMarkers("[[gif:shocked face]]\n[[react:😲]]");
+    assert.equal(r.text, "");
+    assert.equal(r.gifQuery, "shocked face");
+    assert.equal(r.react, "😲");
+  });
 });

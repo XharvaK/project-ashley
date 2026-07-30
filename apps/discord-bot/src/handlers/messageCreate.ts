@@ -1,9 +1,9 @@
 import type { Message } from "discord.js";
 import { chatText, checkHealth } from "../agent-client.js";
 import { channelQueue } from "../chat/channel-queue.js";
+import { searchGif } from "../chat/gif-search.js";
 import { parseMediaMarkers } from "../chat/media-markers.js";
 import { splitMessage } from "../chat/split-message.js";
-import { searchTenorGif } from "../chat/tenor.js";
 import { runTypingLoop } from "../chat/typing-loop.js";
 
 function agentErrorMessage(code?: string, retryAfterSec?: number): string {
@@ -50,25 +50,42 @@ export async function handleMessage(message: Message): Promise<void> {
 
       const markers = parseMediaMarkers(result.text);
       const chunks = splitMessage(markers.text);
-      if (chunks.length === 0) return;
 
       let gifUrl: string | null = null;
       if (markers.gifQuery) {
-        gifUrl = await searchTenorGif(markers.gifQuery, message.channel.id);
+        gifUrl = await searchGif(markers.gifQuery, message.channel.id);
       }
+
+      // Marker-only replies (gif/react, no text) used to return silently — never do that.
+      if (chunks.length === 0 && !gifUrl && !markers.react) return;
 
       // Orchid-style: no reply-quote theater for normal chat
-      if (gifUrl) {
-        await message.channel.send({
-          content: chunks[0],
-          files: [{ attachment: gifUrl, name: "ashley.gif" }],
-        });
-      } else {
-        await message.channel.send(chunks[0]!);
-      }
+      if (chunks.length > 0) {
+        try {
+          if (gifUrl) {
+            await message.channel.send({
+              content: chunks[0],
+              files: [{ attachment: gifUrl, name: "ashley.gif" }],
+            });
+          } else {
+            await message.channel.send(chunks[0]!);
+          }
+        } catch (err) {
+          console.warn("[discord-bot] send with gif failed, text only:", err);
+          await message.channel.send(chunks[0]!);
+        }
 
-      for (let i = 1; i < chunks.length; i++) {
-        await message.channel.send(chunks[i]!);
+        for (let i = 1; i < chunks.length; i++) {
+          await message.channel.send(chunks[i]!);
+        }
+      } else if (gifUrl) {
+        try {
+          await message.channel.send({
+            files: [{ attachment: gifUrl, name: "ashley.gif" }],
+          });
+        } catch (err) {
+          console.warn("[discord-bot] gif-only send failed:", err);
+        }
       }
 
       if (markers.react) {
