@@ -71,6 +71,9 @@ export const config = {
   proactiveCheckIntervalMin: Number(
     process.env.PROACTIVE_CHECK_INTERVAL_MIN ?? 20,
   ),
+  tenorApiKey: process.env.TENOR_API_KEY ?? "",
+  gifEnabled: process.env.GIF_ENABLED !== "false",
+  gifCooldownSec: Number(process.env.GIF_COOLDOWN_SEC ?? 120),
 };
 
 export function validateConfig(): void {
