@@ -9,6 +9,7 @@ from pathlib import Path
 from . import client as tg
 from . import loop as orchid_loop
 from .gates import ensure_incident_lock_seeded
+from .rubric import run_default_corpus
 from .voice_lock import ensure_style_card, load_voice_lock, voice_lock_count
 from .waits import TIERS
 
@@ -80,6 +81,11 @@ def build_parser() -> argparse.ArgumentParser:
     watch.add_argument("--daytime", action="store_true")
 
     sub.add_parser("style-card", help="Ensure bootstrap style card exists")
+
+    sub.add_parser(
+        "rubric",
+        help="Score existing orchid-logs JSONL into reply-rubric + pattern-card",
+    )
 
     turn = sub.add_parser(
         "turn",
@@ -173,6 +179,8 @@ def main(argv: list[str] | None = None) -> None:
                     "sample": load_voice_lock(5),
                 }
             )
+        elif args.cmd == "rubric":
+            _print(run_default_corpus())
         elif args.cmd == "turn":
             ensure_incident_lock_seeded()
             if args.status:

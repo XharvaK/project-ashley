@@ -42,72 +42,76 @@ export async function handleMessage(message: Message): Promise<void> {
 
       if (!message.channel.isSendable()) return;
 
+      // Keep typing through GIF fetch until the first Discord send lands.
       stopTyping = await runTypingLoop(message.channel, () => done);
 
-      const result = await chatText(content);
-      done = true;
-      stopTyping?.();
+      try {
+        const result = await chatText(content);
 
-      const markers = parseMediaMarkers(result.text);
-      const chunks = splitMessage(markers.text);
+        const markers = parseMediaMarkers(result.text);
+        const chunks = splitMessage(markers.text);
 
-      let gifUrl: string | null = null;
-      if (markers.gifQuery) {
-        gifUrl = await searchGif(markers.gifQuery, message.channel.id);
-      }
+        let gifUrl: string | null = null;
+        if (markers.gifQuery) {
+          gifUrl = await searchGif(markers.gifQuery, message.channel.id);
+        }
 
-      // Marker-only replies (gif/react, no text) used to return silently — never do that.
-      if (chunks.length === 0 && !gifUrl && !markers.react) return;
+        // Marker-only replies (gif/react, no text) used to return silently — never do that.
+        if (chunks.length === 0 && !gifUrl && !markers.react) return;
 
-      // Orchid-style: no reply-quote theater for normal chat
-      if (chunks.length > 0) {
-        try {
-          if (gifUrl) {
-            await message.channel.send({
-              content: chunks[0],
-              files: [{ attachment: gifUrl, name: "ashley.gif" }],
-            });
-          } else {
+        // Orchid-style: no reply-quote theater for normal chat
+        if (chunks.length > 0) {
+          try {
+            if (gifUrl) {
+              await message.channel.send({
+                content: chunks[0],
+                files: [{ attachment: gifUrl, name: "ashley.gif" }],
+              });
+            } else {
+              await message.channel.send(chunks[0]!);
+            }
+          } catch (err) {
+            console.warn("[discord-bot] send with gif failed, text only:", err);
             await message.channel.send(chunks[0]!);
           }
-        } catch (err) {
-          console.warn("[discord-bot] send with gif failed, text only:", err);
-          await message.channel.send(chunks[0]!);
+
+          for (let i = 1; i < chunks.length; i++) {
+            await message.channel.send(chunks[i]!);
+          }
+        } else if (gifUrl) {
+          try {
+            await message.channel.send({
+              files: [{ attachment: gifUrl, name: "ashley.gif" }],
+            });
+          } catch (err) {
+            console.warn("[discord-bot] gif-only send failed:", err);
+          }
         }
 
-        for (let i = 1; i < chunks.length; i++) {
-          await message.channel.send(chunks[i]!);
+        if (markers.react) {
+          try {
+            await message.react(markers.react);
+          } catch (err) {
+            console.warn("[discord-bot] react failed:", err);
+          }
         }
-      } else if (gifUrl) {
-        try {
+
+        if (
+          result.memoryDigest?.length &&
+          message.channel.isDMBased() &&
+          message.channel.isSendable()
+        ) {
+          const labels = result.memoryDigest
+            .slice(0, 3)
+            .map((f) => `• ${f.display}`)
+            .join("\n");
           await message.channel.send({
-            files: [{ attachment: gifUrl, name: "ashley.gif" }],
+            content: `Not ettim:\n${labels}`,
           });
-        } catch (err) {
-          console.warn("[discord-bot] gif-only send failed:", err);
         }
-      }
-
-      if (markers.react) {
-        try {
-          await message.react(markers.react);
-        } catch (err) {
-          console.warn("[discord-bot] react failed:", err);
-        }
-      }
-
-      if (
-        result.memoryDigest?.length &&
-        message.channel.isDMBased() &&
-        message.channel.isSendable()
-      ) {
-        const labels = result.memoryDigest
-          .slice(0, 3)
-          .map((f) => `• ${f.display}`)
-          .join("\n");
-        await message.channel.send({
-          content: `Not ettim:\n${labels}`,
-        });
+      } finally {
+        done = true;
+        stopTyping?.();
       }
     } catch (err) {
       done = true;

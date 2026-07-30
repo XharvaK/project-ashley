@@ -26,7 +26,7 @@ powershell -File scripts\orchid-tg\watch.ps1 10
 
 ## Cover-safe ops
 
-**Whitelist:** `status | history | wait | voice-lock | style-card | send | export | watch | turn | incident | login`
+**Whitelist:** `status | history | wait | voice-lock | style-card | send | export | watch | turn | incident | login | rubric`
 
 **Forbidden:** scripts under `scripts/orchid-tg/` that call `send --text "..."` with a literal; inventing `day0-*.py`; parallel senders.
 
@@ -57,7 +57,10 @@ orchid-tg login | status | send --text "..." [--force-unrelated REASON]
 orchid-tg wait | history | export | watch | voice-lock | style-card
 orchid-tg turn [--status] [--wait-reply]
 orchid-tg incident status | clear
+orchid-tg rubric
 ```
+
+`rubric` scores existing `orchid-logs/*.jsonl` into `reply-rubric.csv` / `reply-rubric.md` + `pattern-card.md` (deterministic corpus pass; no send).
 
 Waits use `--wait-tier` (micro/short/gap/reply/think/idle/long/overnight), never fixed `--timeout 60`.
 
