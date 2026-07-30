@@ -12,13 +12,14 @@ export function getLastUserMessageAt(
   db: DatabaseSync,
   ownerId: string,
 ): string | null {
+  const channel = env.proactiveChannel;
   const row = db
     .prepare(
       `SELECT ts FROM mem_messages
-       WHERE owner_id = ? AND role = 'user' AND channel = 'discord'
+       WHERE owner_id = ? AND role = 'user' AND channel = ?
        ORDER BY id DESC LIMIT 1`,
     )
-    .get(ownerId) as { ts: string } | undefined;
+    .get(ownerId, channel) as { ts: string } | undefined;
   return row?.ts ?? null;
 }
 

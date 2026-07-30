@@ -308,6 +308,10 @@ export class ChatService {
     return this.db;
   }
 
+  getAssembler() {
+    return this.assembler;
+  }
+
   async evaluateInitiative(ownerId: string) {
     if (isProactivePausedDb(this.db, ownerId)) {
       return {

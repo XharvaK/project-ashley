@@ -47,7 +47,7 @@ export async function evaluateInitiative(
     };
   }
 
-  const threadId = resolveActiveThread(db, ownerId, "discord");
+  const threadId = resolveActiveThread(db, ownerId, env.proactiveChannel);
   if (!hasMemoryContext(db, ownerId, threadId)) {
     return {
       shouldReachOut: false,

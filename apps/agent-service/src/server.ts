@@ -10,6 +10,22 @@ import { env } from "./env.js";
 
 import { toErrorResponse, AppError } from "./errors.js";
 
+import {
+  createReminder,
+  draftHabitNudge,
+  listDueSchedulerItems,
+  listHabits,
+  markHabitFired,
+  markReminderSent,
+  pauseHabit,
+  upsertHabit,
+} from "./habits/scheduler.js";
+
+import {
+  createPendingAction,
+  resolvePendingAction,
+} from "./habits/actions.js";
+
 
 
 const MAX_DISCORD_MESSAGE = 4000;
@@ -216,11 +232,15 @@ export function createServer(manager: AgentManager): express.Application {
 
 
 
-      if (channel !== "discord" && channel !== "voice") {
+      if (
+        channel !== "discord" &&
+        channel !== "voice" &&
+        channel !== "telegram"
+      ) {
 
         throw new AppError(
           "invalid_channel",
-          "channel must be discord or voice",
+          "channel must be discord, voice, or telegram",
           400,
         );
 
@@ -723,7 +743,7 @@ export function createServer(manager: AgentManager): express.Application {
 
       const ownerId = String(req.query.owner_id ?? "");
 
-      if (!ownerId || (env.discordOwnerId && ownerId !== env.discordOwnerId)) {
+      if (!ownerId || (env.memoryOwnerId && ownerId !== env.memoryOwnerId)) {
 
         throw new AppError("forbidden", "Forbidden", 403);
 
@@ -739,6 +759,239 @@ export function createServer(manager: AgentManager): express.Application {
 
     }
 
+  });
+
+
+
+  app.post("/habits/upsert", (req, res) => {
+    try {
+      const body = req.body as {
+        userId?: string;
+        id?: number;
+        name?: string;
+        cronExpr?: string;
+        promptText?: string;
+        timezone?: string;
+        enabled?: boolean;
+      };
+      const ownerId = body.userId?.trim() ?? "";
+      if (!ownerId || (env.memoryOwnerId && ownerId !== env.memoryOwnerId)) {
+        throw new AppError("forbidden", "Forbidden", 403);
+      }
+      if (!body.name?.trim() || !body.cronExpr?.trim() || !body.promptText?.trim()) {
+        throw new AppError("bad_request", "name, cronExpr, promptText required", 400);
+      }
+      const habit = upsertHabit(manager.chat.getDb(), {
+        ownerId,
+        id: body.id,
+        name: body.name.trim(),
+        cronExpr: body.cronExpr.trim(),
+        promptText: body.promptText.trim(),
+        timezone: body.timezone,
+        enabled: body.enabled,
+      });
+      res.json({ ok: true, habit });
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.get("/habits/list", (req, res) => {
+    try {
+      const ownerId = String(req.query.owner_id ?? "");
+      if (!ownerId || (env.memoryOwnerId && ownerId !== env.memoryOwnerId)) {
+        throw new AppError("forbidden", "Forbidden", 403);
+      }
+      res.json({ habits: listHabits(manager.chat.getDb(), ownerId) });
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/habits/pause", (req, res) => {
+    try {
+      const body = req.body as { userId?: string; habitId?: number };
+      const ownerId = body.userId?.trim() ?? "";
+      if (!ownerId || (env.memoryOwnerId && ownerId !== env.memoryOwnerId)) {
+        throw new AppError("forbidden", "Forbidden", 403);
+      }
+      if (body.habitId == null) {
+        throw new AppError("bad_request", "habitId required", 400);
+      }
+      pauseHabit(manager.chat.getDb(), ownerId, body.habitId);
+      res.json({ ok: true });
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/reminders/create", (req, res) => {
+    try {
+      const body = req.body as {
+        userId?: string;
+        text?: string;
+        dueAt?: string;
+        timezone?: string;
+        channel?: string;
+      };
+      const ownerId = body.userId?.trim() ?? "";
+      if (!ownerId || (env.memoryOwnerId && ownerId !== env.memoryOwnerId)) {
+        throw new AppError("forbidden", "Forbidden", 403);
+      }
+      if (!body.text?.trim() || !body.dueAt?.trim()) {
+        throw new AppError("bad_request", "text and dueAt required", 400);
+      }
+      const reminder = createReminder(manager.chat.getDb(), {
+        ownerId,
+        text: body.text.trim(),
+        dueAt: body.dueAt.trim(),
+        timezone: body.timezone,
+        channel: body.channel,
+      });
+      res.json({ ok: true, reminder });
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/scheduler/tick", async (req, res) => {
+    try {
+      const body = req.body as { userId?: string };
+      const ownerId = body.userId?.trim() ?? "";
+      if (!ownerId || (env.memoryOwnerId && ownerId !== env.memoryOwnerId)) {
+        throw new AppError("forbidden", "Forbidden", 403);
+      }
+      const due = listDueSchedulerItems(manager.chat.getDb(), ownerId);
+      const items: Array<{
+        kind: "reminder" | "habit";
+        id: number;
+        text: string;
+        channel: string;
+      }> = [];
+      for (const d of due) {
+        let text = d.text;
+        if (d.kind === "habit") {
+          text = await draftHabitNudge(
+            manager.chat.getAssembler(),
+            ownerId,
+            d.text,
+          );
+        }
+        items.push({
+          kind: d.kind,
+          id: d.id,
+          text,
+          channel: d.channel,
+        });
+      }
+      res.json({ items });
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/scheduler/commit", (req, res) => {
+    try {
+      const body = req.body as {
+        userId?: string;
+        kind?: "reminder" | "habit";
+        id?: number;
+        externalMessageId?: string;
+        text?: string;
+      };
+      const ownerId = body.userId?.trim() ?? "";
+      if (!ownerId || (env.memoryOwnerId && ownerId !== env.memoryOwnerId)) {
+        throw new AppError("forbidden", "Forbidden", 403);
+      }
+      if (!body.kind || body.id == null || !body.externalMessageId) {
+        throw new AppError(
+          "bad_request",
+          "kind, id, externalMessageId required",
+          400,
+        );
+      }
+      if (body.kind === "reminder") {
+        markReminderSent(
+          manager.chat.getDb(),
+          body.id,
+          body.externalMessageId,
+        );
+      } else {
+        markHabitFired(
+          manager.chat.getDb(),
+          body.id,
+          ownerId,
+          body.text ?? "",
+        );
+      }
+      res.json({ ok: true });
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/actions/propose", (req, res) => {
+    try {
+      const body = req.body as {
+        userId?: string;
+        actionType?: "pin_fact" | "create_reminder" | "create_habit";
+        payload?: unknown;
+        channel?: string;
+      };
+      const ownerId = body.userId?.trim() ?? "";
+      if (!ownerId || (env.memoryOwnerId && ownerId !== env.memoryOwnerId)) {
+        throw new AppError("forbidden", "Forbidden", 403);
+      }
+      if (!body.actionType || body.payload == null) {
+        throw new AppError("bad_request", "actionType and payload required", 400);
+      }
+      const action = createPendingAction(manager.chat.getDb(), {
+        ownerId,
+        actionType: body.actionType,
+        payload: body.payload,
+        channel: body.channel,
+      });
+      res.json({ ok: true, action });
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/actions/resolve", (req, res) => {
+    try {
+      const body = req.body as {
+        userId?: string;
+        actionId?: number;
+        decision?: "approved" | "rejected";
+      };
+      const ownerId = body.userId?.trim() ?? "";
+      if (!ownerId || (env.memoryOwnerId && ownerId !== env.memoryOwnerId)) {
+        throw new AppError("forbidden", "Forbidden", 403);
+      }
+      if (body.actionId == null || !body.decision) {
+        throw new AppError("bad_request", "actionId and decision required", 400);
+      }
+      const result = resolvePendingAction(
+        manager.chat.getDb(),
+        ownerId,
+        body.actionId,
+        body.decision,
+      );
+      if (!result.ok) {
+        throw new AppError("bad_request", result.error ?? "resolve_failed", 400);
+      }
+      res.json(result);
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
   });
 
 

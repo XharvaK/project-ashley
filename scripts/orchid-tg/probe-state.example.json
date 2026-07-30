@@ -1,0 +1,14 @@
+{
+  "mode": "day0",
+  "goals": [
+    { "id": "habit_seed", "status": "pending" },
+    { "id": "memory_crumb", "status": "pending" },
+    { "id": "draft_only", "status": "pending" },
+    { "id": "trial_end", "status": "pending" },
+    { "id": "go_dark", "status": "pending" },
+    { "id": "overnight_watch", "status": "pending" },
+    { "id": "day1_companion", "status": "pending" },
+    { "id": "day2_habits", "status": "pending" },
+    { "id": "day3_close", "status": "pending" }
+  ]
+}

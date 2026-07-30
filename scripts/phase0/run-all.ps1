@@ -28,6 +28,22 @@ Write-Host ""
 Write-Host "=== Recall patterns ==="
 Run-Node "scripts\phase0\test-recall-patterns.mjs"
 
+Write-Host ""
+Write-Host "=== Orchid script seed guard ==="
+powershell -ExecutionPolicy Bypass -File (Join-Path $Root "scripts\phase0\check-orchid-no-seed-scripts.ps1")
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+Write-Host ""
+Write-Host "=== Orchid gates (unit) ==="
+$orchidPy = Join-Path $Root "tools\orchid-tg"
+Push-Location $orchidPy
+try {
+  python -m unittest orchid_tg.tests.test_gates -v
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+} finally {
+  Pop-Location
+}
+
 if ($Tier -eq "offline") {
   Write-Host ""
   Write-Host "OK offline tier"

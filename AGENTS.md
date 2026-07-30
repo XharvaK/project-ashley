@@ -2,7 +2,7 @@
 
 
 
-Discord + voice companion with shared local SQLite memory and Mistral API.
+Discord + Telegram + voice companion with shared local SQLite memory and Mistral API.
 
 
 
@@ -16,11 +16,59 @@ Discord + voice companion with shared local SQLite memory and Mistral API.
 
 cd C:\Users\Xharv\Projects\composer-assistant
 
-npm run dev:discord    # agent + voice + orpheus + discord bot
+npm run start:ashley   # Discord text smoke: agent + discord only (no voice/Orpheus)
+
+npm run stop:ashley
+
+npm run dev:discord    # agent + voice + orpheus + discord bot (heavy)
 
 npm run dev:agent      # agent only
 
+npm run build:telegram # Ashley Telegram bot (needs TELEGRAM_BOT_TOKEN)
+
 ```
+
+
+
+### Discord smoke (acceptance)
+
+
+
+1. Ensure `~/.composer-assistant/.env` has `DISCORD_BOT_TOKEN`, `DISCORD_OWNER_ID`, `MISTRAL_API_KEY`.
+
+2. `npm run start:ashley`
+
+3. `curl http://127.0.0.1:3710/health` — want `"ready": true` and Mistral configured.
+
+4. Once (or after slash changes): `cd apps\discord-bot; npm run deploy-commands` (needs `DISCORD_GUILD_ID`).
+
+5. DM Ashley or send a short guild message. Stop with `npm run stop:ashley`.
+
+Only one host may run the Discord bot at a time (Windows vs Mint laptop).
+
+
+
+### 24/7 on Linux Mint (~4GB)
+
+
+
+See [`deploy/linux-mint/README.md`](deploy/linux-mint/README.md).
+
+
+
+Windows transfer pack (USB):
+
+
+
+```powershell
+
+powershell -File scripts\mint\prepare-mint-transfer.ps1 -StopAshley
+
+```
+
+
+
+Then on Mint (in the USB folder, after `gh auth login`): `bash first-boot-from-usb.sh`
 
 
 
@@ -39,6 +87,8 @@ npm run dev:agent      # agent only
 | Orpheus TTS | 8881 | `apps/orpheus/` |
 
 | discord-bot | gateway | `apps/discord-bot/` |
+
+| telegram-bot | gateway | `apps/telegram-bot/` |
 
 
 
@@ -137,5 +187,37 @@ DM-only outreach when idle (default: max 4/day, 2h min idle). Tick is atomic (`/
 
 
 Set `PROACTIVE_ENABLED=false` to disable.
+
+
+
+## Orchid study (cover-safe)
+
+
+
+Personal UX study of `@OrchidHQBot` via `tools/orchid-tg`. Not Ashley.
+
+
+
+**Whitelist only:** `orchid-tg status | history | wait | voice-lock | style-card | send | export | watch | turn | incident | login`
+
+
+
+**Forbidden:** any new `*.py` / `*.ps1` that embeds Telegram outbound text; restoring `day0-plant` sends; parallel agents that both call `send`.
+
+
+
+**Single writer:** only one agent titled Orchid chatter may send. Others: read-only.
+
+
+
+**Post-incident:** until Doc types `CLEAR` in Cursor and `orchid-tg incident clear` runs, chatter may draft / `NO_SEND` only.
+
+
+
+**Loop:** `orchid-tg turn` (history → one draft in `~/.composer-assistant/orchid-logs/pending-draft.txt` → gated send). Never canned Day-N seed lists.
+
+
+
+Director: `scripts/orchid-tg/prompts/director.md`. Log: `~/.composer-assistant/orchid-logs/doc-engagement.md`.
 
 

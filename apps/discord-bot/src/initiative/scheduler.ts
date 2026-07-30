@@ -38,6 +38,14 @@ export function startProactiveScheduler(client: Client): void {
 
   }
 
+  const proactiveChannel = process.env.PROACTIVE_CHANNEL ?? "discord";
+  if (proactiveChannel !== "discord") {
+    console.log(
+      `[discord-bot] proactive owned by ${proactiveChannel}; discord scheduler idle`,
+    );
+    return;
+  }
+
 
 
   const intervalMs = config.proactiveCheckIntervalMin * 60 * 1000;

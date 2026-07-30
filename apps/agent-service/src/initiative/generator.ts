@@ -42,7 +42,10 @@ export async function draftInitiativeMessage(
 
 ): Promise<InitiativeDraft> {
 
-  const assembled = await assembler.buildForInitiative(ownerId, "discord");
+  const assembled = await assembler.buildForInitiative(
+    ownerId,
+    env.proactiveChannel,
+  );
 
   const system = appendMemoryBlock(
 
@@ -174,9 +177,9 @@ export function commitInitiativeMessage(
 
   db.prepare(
 
-    `INSERT INTO mem_initiative_log (owner_id, thread_id, angle, reason, message_text, discord_message_id, sent_at)
+    `INSERT INTO mem_initiative_log (owner_id, thread_id, angle, reason, message_text, discord_message_id, external_message_id, sent_at)
 
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 
   ).run(
 
@@ -189,6 +192,8 @@ export function commitInitiativeMessage(
     draft.reason,
 
     draft.text,
+
+    discordMessageId,
 
     discordMessageId,
 

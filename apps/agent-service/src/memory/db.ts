@@ -168,6 +168,88 @@ export function migrate(db: DatabaseSync): void {
       );
     }
     db.exec("PRAGMA user_version = 4");
+    version = 4;
+  }
+  if (version < 5) {
+    const tables = db
+      .prepare(`SELECT name FROM sqlite_master WHERE type='table'`)
+      .all() as Array<{ name: string }>;
+    const tableNames = new Set(tables.map((t) => t.name));
+    if (!tableNames.has("mem_initiative_log")) {
+      db.exec(SCHEMA_V2);
+    }
+    const initCols = db
+      .prepare(`PRAGMA table_info(mem_initiative_log)`)
+      .all() as Array<{ name: string }>;
+    if (!initCols.some((c) => c.name === "external_message_id")) {
+      db.exec(
+        `ALTER TABLE mem_initiative_log ADD COLUMN external_message_id TEXT`,
+      );
+      db.exec(
+        `UPDATE mem_initiative_log
+         SET external_message_id = discord_message_id
+         WHERE external_message_id IS NULL
+           AND discord_message_id IS NOT NULL`,
+      );
+    }
+    db.exec(`
+CREATE TABLE IF NOT EXISTS mem_reminders (
+  id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_id             TEXT NOT NULL,
+  text                 TEXT NOT NULL,
+  due_at               TEXT NOT NULL,
+  timezone             TEXT NOT NULL DEFAULT 'Europe/Istanbul',
+  status               TEXT NOT NULL DEFAULT 'pending'
+                         CHECK (status IN ('pending','sent','cancelled','done')),
+  channel              TEXT NOT NULL DEFAULT 'telegram',
+  external_message_id  TEXT,
+  created_at           TEXT NOT NULL,
+  fired_at             TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_mem_reminders_due
+  ON mem_reminders (status, due_at);
+
+CREATE TABLE IF NOT EXISTS mem_habits (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_id        TEXT NOT NULL,
+  name            TEXT NOT NULL,
+  cron_expr       TEXT NOT NULL,
+  timezone        TEXT NOT NULL DEFAULT 'Europe/Istanbul',
+  prompt_text     TEXT NOT NULL,
+  enabled         INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+  last_fired_at   TEXT,
+  streak_count    INTEGER NOT NULL DEFAULT 0,
+  created_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_mem_habits_owner
+  ON mem_habits (owner_id, enabled);
+
+CREATE TABLE IF NOT EXISTS mem_habit_events (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  habit_id       INTEGER NOT NULL REFERENCES mem_habits(id),
+  owner_id       TEXT NOT NULL,
+  fired_at       TEXT NOT NULL,
+  response_text  TEXT,
+  status         TEXT NOT NULL DEFAULT 'logged'
+                   CHECK (status IN ('logged','skipped','missed','sent'))
+);
+
+CREATE TABLE IF NOT EXISTS mem_pending_actions (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_id        TEXT NOT NULL,
+  action_type     TEXT NOT NULL
+                    CHECK (action_type IN ('pin_fact','create_reminder','create_habit')),
+  payload_json    TEXT NOT NULL,
+  status          TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending','approved','rejected','expired')),
+  channel         TEXT NOT NULL DEFAULT 'telegram',
+  created_at      TEXT NOT NULL,
+  resolved_at     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_mem_pending_owner
+  ON mem_pending_actions (owner_id, status);
+`);
+    db.exec("PRAGMA user_version = 5");
   }
 }
 

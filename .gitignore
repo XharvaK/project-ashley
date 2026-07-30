@@ -8,6 +8,10 @@ venv/
 .env
 .env.local
 *.log
+*.session
+*.session-journal
+.tmp-orchid*/
+artifacts/orchid-probe/
 .DS_Store
 models/*.gguf
 models/*.onnx
@@ -15,3 +19,6 @@ models/*.bin
 !models/.gitkeep
 apps/desktop/src-tauri/gen/
 apps/orpheus/Orpheus-FastAPI/
+*.egg-info/
+
+*.egg-info/

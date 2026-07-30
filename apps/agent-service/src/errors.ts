@@ -2,6 +2,7 @@ export type ErrorCode =
   | "message_required"
   | "invalid_channel"
   | "invalid_json"
+  | "bad_request"
   | "forbidden"
   | "chat_in_progress"
   | "message_too_long"

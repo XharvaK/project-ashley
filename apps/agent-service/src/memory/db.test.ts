@@ -2,21 +2,28 @@ import { describe, expect, it } from "vitest";
 import { DatabaseSync } from "node:sqlite";
 import { migrate } from "./db.js";
 
-describe("migrate v4", () => {
-  it("adds facts_cutoff_message_id on fresh db", () => {
+describe("migrate", () => {
+  it("reaches schema v5 with habits and facts_cutoff", () => {
     const db = new DatabaseSync(":memory:");
     migrate(db);
     const cols = db
       .prepare(`PRAGMA table_info(mem_threads)`)
       .all() as Array<{ name: string }>;
     expect(cols.some((c) => c.name === "facts_cutoff_message_id")).toBe(true);
+    const tables = db
+      .prepare(`SELECT name FROM sqlite_master WHERE type='table'`)
+      .all() as Array<{ name: string }>;
+    const names = tables.map((t) => t.name);
+    expect(names).toContain("mem_habits");
+    expect(names).toContain("mem_reminders");
+    expect(names).toContain("mem_pending_actions");
     const version = db
       .prepare("PRAGMA user_version")
       .get() as { user_version: number };
-    expect(version.user_version).toBe(4);
+    expect(version.user_version).toBe(5);
   });
 
-  it("migrates v3 to v4 idempotently", () => {
+  it("migrates v3 to v5 idempotently", () => {
     const db = new DatabaseSync(":memory:");
     db.exec(`
       PRAGMA user_version = 3;
@@ -39,5 +46,9 @@ describe("migrate v4", () => {
     expect(cols.filter((c) => c.name === "facts_cutoff_message_id").length).toBe(
       1,
     );
+    const version = db
+      .prepare("PRAGMA user_version")
+      .get() as { user_version: number };
+    expect(version.user_version).toBe(5);
   });
 });

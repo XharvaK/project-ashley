@@ -6,12 +6,14 @@ on:
       - "apps/agent-service/**"
       - "scripts/phase0/**"
       - "workspace/prompts/**"
+      - "tools/orchid-tg/**"
   pull_request:
     paths:
       - "apps/agent-service/**"
       - "apps/discord-bot/**"
       - "scripts/phase0/**"
       - "workspace/prompts/**"
+      - "tools/orchid-tg/**"
 
 jobs:
   offline:
@@ -32,3 +34,12 @@ jobs:
         run: npm test
       - name: Recall patterns
         run: node scripts/phase0/test-recall-patterns.mjs
+      - name: Orchid seed script guard
+        shell: pwsh
+        run: pwsh -File scripts/phase0/check-orchid-no-seed-scripts.ps1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Orchid gates unit
+        working-directory: tools/orchid-tg
+        run: python -m unittest orchid_tg.tests.test_gates -v

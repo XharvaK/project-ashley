@@ -1,4 +1,4 @@
-export type ChatChannel = "discord" | "voice";
+export type ChatChannel = "discord" | "voice" | "telegram";
 
 export type MemMessage = {
   id: number;

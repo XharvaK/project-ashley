@@ -1,0 +1,17 @@
+[Unit]
+Description=Ashley discord-bot
+After=network-online.target ashley-agent.service
+Wants=network-online.target
+Requires=ashley-agent.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/composer-assistant/apps/discord-bot
+EnvironmentFile=%h/.composer-assistant/.env
+ExecStart=/usr/bin/node dist/index.js
+Restart=on-failure
+RestartSec=5
+MemoryMax=256M
+
+[Install]
+WantedBy=default.target

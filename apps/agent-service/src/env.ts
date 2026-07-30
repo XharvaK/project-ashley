@@ -72,6 +72,13 @@ export const env = {
   proactiveColdStartHours: Number(
     process.env.PROACTIVE_COLD_START_HOURS ?? 24,
   ),
+  proactiveChannel: (process.env.PROACTIVE_CHANNEL ?? "discord") as
+    | "discord"
+    | "telegram",
+  telegramOwnerId: process.env.TELEGRAM_OWNER_ID ?? "",
+  docTimezone: process.env.DOC_TIMEZONE ?? "Europe/Istanbul",
+  quietHoursStart: process.env.QUIET_HOURS_START ?? "",
+  quietHoursEnd: process.env.QUIET_HOURS_END ?? "",
 };
 
 export function validateBoot(): { ok: boolean; warnings: string[] } {
