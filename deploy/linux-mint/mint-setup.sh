@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Ashley Mint setup — no Nodesource/GitHub apt GPG repos.
-# Run from the ashley-mint-transfer folder on Mint:
+# Survives broken third-party apt sources (e.g. Spotify).
+#
+# Run from ashley-mint-transfer:
 #   sed -i 's/\r$//' mint-setup.sh
 #   bash mint-setup.sh
 set -euo pipefail
@@ -21,11 +23,39 @@ need_sudo() {
   fi
 }
 
-echo "--- apt: curl git wget only (no third-party repos) ---"
-need_sudo apt-get update -y
-need_sudo apt-get install -y curl ca-certificates git wget
+echo "--- disable broken third-party apt lists (Spotify etc.) ---"
+need_sudo mkdir -p /etc/apt/sources.list.d/disabled-by-ashley
+shopt -s nullglob
+for f in /etc/apt/sources.list.d/*spotify* \
+         /etc/apt/sources.list.d/*Spotify* \
+         /etc/apt/sources.list.d/*.list; do
+  [[ -f "$f" ]] || continue
+  base="$(basename "$f")"
+  # Only move known-noisy third parties; keep official mint/ubuntu lists
+  case "$base" in
+    *spotify*|*Spotify*|*nodesource*|*github-cli*|*vscode*|*google-chrome*|*brave*)
+      echo "Disabling apt source: $f"
+      need_sudo mv -f "$f" "/etc/apt/sources.list.d/disabled-by-ashley/$base" || true
+      ;;
+  esac
+done
+shopt -u nullglob
 
-echo "--- Node 22 via nvm ---"
+echo "--- apt: curl git wget (ignore leftover repo noise) ---"
+set +e
+need_sudo apt-get update -y
+APT_UPD=$?
+set -e
+if [[ "$APT_UPD" -ne 0 ]]; then
+  echo "WARN: apt-get update had errors (often a leftover Spotify/Chrome repo)."
+  echo "Continuing with package install anyway..."
+fi
+
+# Prefer install even if update was partial
+need_sudo apt-get install -y curl ca-certificates git wget || \
+  need_sudo apt-get install -y --fix-missing curl ca-certificates git wget
+
+echo "--- Node 22 via nvm (no apt Node repo) ---"
 export NVM_DIR="${HOME}/.nvm"
 if [[ ! -s "${NVM_DIR}/nvm.sh" ]]; then
   curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
@@ -47,7 +77,7 @@ need_sudo ln -sfn "${HOME}/.local/bin/npx" /usr/bin/npx
 
 echo "Node: $(node -v)  npm: $(npm -v)"
 
-echo "--- GitHub CLI ---"
+echo "--- GitHub CLI (snap or .deb, not apt repo) ---"
 if ! command -v gh >/dev/null 2>&1; then
   if command -v snap >/dev/null 2>&1 && need_sudo snap install gh; then
     echo "gh via snap"
@@ -80,7 +110,6 @@ elif [[ -f "$ENV_DST" ]]; then
   echo "Using existing $ENV_DST"
 else
   echo "Missing .env next to this script (and no $ENV_DST)." >&2
-  echo "Copy ashley-mint-transfer from Windows first." >&2
   exit 3
 fi
 
@@ -106,7 +135,6 @@ sed -i 's/\r$//' "${CLONE_DIR}/deploy/linux-mint/"*.sh 2>/dev/null || true
 sed -i 's/\r$//' "${HERE}/deploy-linux-mint/"*.sh 2>/dev/null || true
 
 echo "--- systemd install (agent + discord) ---"
-# ensure nvm node visible in non-login shells used by install
 export PATH="${HOME}/.local/bin:${PATH}"
 bash "$INSTALL"
 
@@ -115,3 +143,6 @@ echo "=== DONE ==="
 echo "  bash ~/composer-assistant/deploy/linux-mint/status.sh"
 echo "  curl -s http://127.0.0.1:3710/health"
 echo "Stop Windows Ashley if it is still running (one Discord token)."
+echo ""
+echo "Note: broken Spotify apt list was moved to /etc/apt/sources.list.d/disabled-by-ashley/"
+echo "Re-enable later if you fix its GPG key."
