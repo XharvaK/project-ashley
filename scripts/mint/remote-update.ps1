@@ -42,7 +42,8 @@ $lines = @(
   "cd $RepoDir",
   'git pull --ff-only',
   'bash deploy/linux-mint/update.sh',
-  'sleep 2',
+  'echo waiting for agent...',
+  'for i in 1 2 3 4 5 6 7 8 9 10; do curl -sf http://127.0.0.1:3710/health >/dev/null && break; sleep 1; done',
   'bash deploy/linux-mint/status.sh',
   'curl -s http://127.0.0.1:3710/health || true',
   'echo'
