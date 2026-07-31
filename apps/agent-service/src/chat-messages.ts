@@ -19,7 +19,8 @@ export function buildChatMessages(params: {
   /** Doc-supplied page body. Same non-system rule as searchContext. */
   pageContext?: string | null;
 }): ChatMessage[] {
-  const hot = [...params.hot];
+  // Empty assistant/user rows poison Mistral (400 invalid_request_assistant_message).
+  const hot = params.hot.filter((m) => m.content.trim().length > 0);
   const last = hot[hot.length - 1];
   if (last?.role === "user" && last.content.trim() === params.message.trim()) {
     hot.pop();

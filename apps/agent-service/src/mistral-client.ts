@@ -115,9 +115,26 @@ function parseRetryAfterSec(err: unknown): number | undefined {
   return undefined;
 }
 
+function mistralStatusCode(err: unknown): number | undefined {
+  if (!err || typeof err !== "object") return undefined;
+  const e = err as { statusCode?: number; status?: number };
+  const code = e.statusCode ?? e.status;
+  return typeof code === "number" && Number.isFinite(code) ? code : undefined;
+}
+
 export function mapMistralError(err: unknown): AppError {
+  if (err instanceof Error && err.name === "AbortError") {
+    throw err;
+  }
   const msg = err instanceof Error ? err.message : String(err);
-  if (/429|rate.?limit/i.test(msg)) {
+  const status = mistralStatusCode(err);
+  console.error(
+    "[mistral]",
+    status ?? "no-status",
+    msg.slice(0, 500),
+  );
+
+  if (status === 429 || /429|rate.?limit/i.test(msg)) {
     return new AppError(
       "rate_limited",
       "Mistral rate limited",
@@ -125,9 +142,13 @@ export function mapMistralError(err: unknown): AppError {
       parseRetryAfterSec(err) ?? 30,
     );
   }
-  if (/5\d{2}|unavailable|timeout|ECONNREFUSED/i.test(msg)) {
+  if (
+    (status !== undefined && status >= 500) ||
+    /5\d{2}|unavailable|timeout|ECONNREFUSED|ECONNRESET|ETIMEDOUT/i.test(msg)
+  ) {
     return new AppError("mistral_unavailable", "Mistral unavailable", 503);
   }
+  // 400/422 stay internal_error for Doc, but logs above carry the real status.
   return new AppError("internal_error", "Mistral request failed", 500);
 }
 
@@ -155,6 +176,7 @@ export async function* streamChat(
       if (text) yield text;
     }
   } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") throw err;
     throw mapMistralError(err);
   } finally {
     release();
@@ -184,6 +206,7 @@ export async function completeChat(
       typeof raw === "string" ? raw : extractTextDelta(raw);
     return { text, model };
   } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") throw err;
     throw mapMistralError(err);
   } finally {
     release();
@@ -213,6 +236,7 @@ export async function embedTexts(
       return Float32Array.from(arr);
     });
   } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") throw err;
     throw mapMistralError(err);
   } finally {
     release();

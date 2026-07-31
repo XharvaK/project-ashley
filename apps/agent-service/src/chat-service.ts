@@ -543,11 +543,24 @@ export class ChatService {
         yield { type: "delta", text: full };
       }
 
-      // Only after a reply actually went out does the surfacing count, so a
-      // regenerated turn does not burn the daily cap.
-      if (curiosity && full) commitCuriosity(this.db, curiosity);
-
       const persisted = stripMediaMarkers(full);
+      // Marker-only / empty drafts must not land in hot history — Mistral 400s
+      // on empty assistant content and every later turn glitches.
+      if (!persisted.trim()) {
+        console.warn("[chat] skipping empty assistant persist");
+        yield {
+          type: "done",
+          text: full,
+          model: env.mistralModel,
+          threadId: assembled.threadId,
+        };
+        return;
+      }
+
+      // Only after a real reply persists does the surfacing count, so a
+      // regenerated or empty turn does not burn the daily cap.
+      if (curiosity) commitCuriosity(this.db, curiosity);
+
       const assistantId = insertMessage(this.db, {
         threadId,
         ownerId: request.ownerId,

@@ -121,4 +121,26 @@ describe("buildChatMessages", () => {
 
     expect(messages.at(-1)).toEqual({ role: "user", content: "hey" });
   });
+
+  it("drops empty hot turns so Mistral never sees void assistants", () => {
+    const messages = buildChatMessages({
+      system,
+      hot: [
+        { role: "user", content: "ahahah" },
+        { role: "assistant", content: "" },
+        { role: "user", content: "   " },
+        { role: "assistant", content: "real reply" },
+      ],
+      message: "its ok",
+    });
+
+    expect(messages).toEqual([
+      { role: "system", content: system },
+      { role: "user", content: "ahahah" },
+      { role: "assistant", content: "real reply" },
+      { role: "user", content: "its ok" },
+    ]);
+    expect(messages.some((m) => !m.content.trim())).toBe(false);
+  });
 });
+
