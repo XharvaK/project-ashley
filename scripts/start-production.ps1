@@ -10,12 +10,14 @@ $LogDir = Join-Path $env:USERPROFILE ".composer-assistant\logs"
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
 $agentLog = Join-Path $LogDir "agent-service.log"
+$agentErrLog = Join-Path $LogDir "agent-service.err.log"
 $botLog = Join-Path $LogDir "discord-bot.log"
+$botErrLog = Join-Path $LogDir "discord-bot.err.log"
 $pidFile = Join-Path $LogDir "ashley-pids.json"
 
 function Stop-Ashley {
     if (-not (Test-Path $pidFile)) {
-        Write-Host "No pid file — nothing to stop."
+        Write-Host "No pid file - nothing to stop."
         return
     }
     $pids = Get-Content $pidFile -Raw | ConvertFrom-Json
@@ -55,7 +57,7 @@ $agentProc = Start-Process -FilePath "node" `
     -WorkingDirectory $agentDir `
     -WindowStyle Hidden `
     -RedirectStandardOutput $agentLog `
-    -RedirectStandardError $agentLog `
+    -RedirectStandardError $agentErrLog `
     -PassThru
 
 Start-Sleep -Seconds 3
@@ -65,7 +67,7 @@ $botProc = Start-Process -FilePath "node" `
     -WorkingDirectory $botDir `
     -WindowStyle Hidden `
     -RedirectStandardOutput $botLog `
-    -RedirectStandardError $botLog `
+    -RedirectStandardError $botErrLog `
     -PassThru
 
 @{ agent = $agentProc.Id; discord = $botProc.Id } | ConvertTo-Json | Set-Content $pidFile
