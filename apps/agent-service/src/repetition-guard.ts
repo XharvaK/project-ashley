@@ -114,6 +114,7 @@ function isSoftPad(first: string, second: string): boolean {
   const prose = proseOf(second);
   if (!prose) return false;
   // Questions and concrete jabs are licensed dual beats.
+  // Truncated restates with a fake "?" are handled separately.
   if (/\?\s*$/.test(prose)) return false;
 
   const firstWords = wordSet(contentWords(first));
@@ -131,8 +132,45 @@ function isSoftPad(first: string, second: string): boolean {
   return false;
 }
 
+/**
+ * Short second bubble that only rewrites the first opener (content-word
+ * subset). Trailing "?" does not license this — that is how fake duals escape.
+ * Playful short riffs (heh/hejaa) are carved out.
+ */
+function isTruncatedRestatement(first: string, second: string): boolean {
+  const firstWords = contentWords(first);
+  const secondWords = contentWords(second);
+  if (secondWords.length < 1) return false;
+
+  // Short riff / short riff: not a longer answer chopped into a pad.
+  if (
+    firstWords.length <= 3 &&
+    secondWords.length <= 3 &&
+    proseOf(first).length <= 24 &&
+    proseOf(second).length <= 24
+  ) {
+    return false;
+  }
+
+  const short =
+    secondWords.length <= 12 && proseOf(second).length <= 100;
+  if (!short) return false;
+
+  const firstSet = wordSet(firstWords);
+  if (!secondWords.every((w) => firstSet.has(w))) return false;
+
+  const firstRicher =
+    firstWords.length > secondWords.length ||
+    proseOf(first).length >= proseOf(second).length + 12;
+  return firstRicher;
+}
+
 export type WithinTurnHit =
-  | { kind: "near_dup" | "lexical" | "soft_pad"; i: number; j: number }
+  | {
+      kind: "near_dup" | "lexical" | "soft_pad" | "truncated";
+      i: number;
+      j: number;
+    }
   | null;
 
 /** Consecutive blank-line paras that restate each other. */
@@ -147,17 +185,20 @@ export function looksLikeWithinTurnRepeat(reply: string): WithinTurnHit {
 
     if (isNearDuplicate(a, b)) return { kind: "near_dup", i, j: i + 1 };
     if (isLexicalRestate(a, b)) return { kind: "lexical", i, j: i + 1 };
+    if (isTruncatedRestatement(a, b)) {
+      return { kind: "truncated", i, j: i + 1 };
+    }
     if (isSoftPad(a, b)) return { kind: "soft_pad", i, j: i + 1 };
   }
   return null;
 }
 
 function preferKeep(
-  kind: "near_dup" | "lexical" | "soft_pad",
+  kind: "near_dup" | "lexical" | "soft_pad" | "truncated",
   first: string,
   second: string,
 ): string {
-  if (kind === "soft_pad") return first;
+  if (kind === "soft_pad" || kind === "truncated") return first;
 
   const na = normalize(first);
   const nb = normalize(second);

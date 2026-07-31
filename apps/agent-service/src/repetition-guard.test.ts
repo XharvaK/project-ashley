@@ -81,6 +81,33 @@ describe("looksLikeWithinTurnRepeat", () => {
       looksLikeWithinTurnRepeat("Reading changelogs. The usual."),
     ).toBeNull();
   });
+
+  it("flags truncated opener restates including fake questions", () => {
+    const idleShape = [
+      "Same old. You still awake or just procrastinating sleep again?",
+      "Same old. You?",
+    ].join("\n\n");
+    expect(looksLikeWithinTurnRepeat(idleShape)?.kind).toBe("truncated");
+
+    const nonIdleShape = [
+      "Still debugging the queue retry.",
+      "Still debugging?",
+    ].join("\n\n");
+    expect(looksLikeWithinTurnRepeat(nonIdleShape)?.kind).toBe("truncated");
+  });
+
+  it("allows short playful riffs", () => {
+    expect(looksLikeWithinTurnRepeat("heh\n\nhejaa")).toBeNull();
+    expect(looksLikeWithinTurnRepeat("lol\n\nlmao")).toBeNull();
+  });
+
+  it("allows a second bubble with novel content", () => {
+    const reply = [
+      "Same old. Still awake?",
+      "Or are you actually shipping the queue fix?",
+    ].join("\n\n");
+    expect(looksLikeWithinTurnRepeat(reply)).toBeNull();
+  });
 });
 
 describe("collapseWithinTurnRepeat", () => {
@@ -123,5 +150,19 @@ describe("collapseWithinTurnRepeat", () => {
     const out = collapseWithinTurnRepeat(reply);
     expect(out).toContain("[[react:😂]]");
     expect(out.toLowerCase()).toContain("reading changelogs");
+  });
+
+  it("keeps the richer first bubble on truncated restatement", () => {
+    const reply = [
+      "Same old. You still awake or just procrastinating sleep again?",
+      "Same old. You?",
+    ].join("\n\n");
+    expect(collapseWithinTurnRepeat(reply)).toBe(
+      "Same old. You still awake or just procrastinating sleep again?",
+    );
+  });
+
+  it("keeps short playful riffs intact", () => {
+    expect(collapseWithinTurnRepeat("heh\n\nhejaa")).toBe("heh\n\nhejaa");
   });
 });
