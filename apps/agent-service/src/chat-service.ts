@@ -32,8 +32,10 @@ import {
   CAPABILITY_GUARD,
   LINK_FAILED_CAPABILITY_GUARD,
   NO_ACTIVITY_GUARD,
+  applyCapabilityHardFloor,
   claimsOwnActivity,
   deniesOwnCapability,
+  isBrowseCapabilityChallenge,
 } from "./curiosity/claim-gate.js";
 import {
   extractImmediateHttpsUrl,
@@ -351,8 +353,13 @@ export class ChatService {
       const lookupGuard =
         !activityAsk && !searchContext && wantedLookup ? NO_LOOKUP_GUARD : null;
       const linkGuard = linkResult.guard;
+      const capabilityChallengeGuard =
+        env.curiosityEnabled && isBrowseCapabilityChallenge(request.message)
+          ? CAPABILITY_GUARD.text
+          : null;
       const guardParts = [
         isPremiseCheck(request.message) ? PREMISE_GUARD : null,
+        capabilityChallengeGuard,
         lookupGuard,
         linkGuard,
       ].filter(Boolean);
@@ -509,6 +516,13 @@ export class ChatService {
           full = "";
           for await (const delta of streamChat(regen.messages, sampling)) {
             full += delta;
+          }
+          if (regen.reason === "capability") {
+            const floored = applyCapabilityHardFloor(full);
+            if (floored !== full) {
+              console.warn("[chat] capability hard floor after regen");
+              full = floored;
+            }
           }
         }
 

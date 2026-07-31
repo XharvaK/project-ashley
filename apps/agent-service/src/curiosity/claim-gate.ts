@@ -27,7 +27,11 @@ const CAPABILITY_DENIAL: RegExp[] = [
   /\bi (can'?t|cannot) browse\b/i,
   /\bi (don'?t|do not|never) read (the )?(web|internet|feeds?)\b/i,
   /\bi only read what you send\b/i,
+  /\bi read what you send( me)?\b/i,
   /\bi read what you send(,| and)? that'?s it\b/i,
+  /\bnothing else\b/i,
+  /\bsend me (a|the) (post|text|link)\b/i,
+  /\bbox and a rule\b/i,
   /\bbrowse (yok|etmiyorum)\b/i,
   /\bfeed'?im yok\b/i,
   /\b(web'?de|internette) (gez(e)?miyorum|bakmıyorum)\b/i,
@@ -43,6 +47,20 @@ export const CAPABILITY_EXCLUSION =
 /** Blanket false denials of the configured reader. Denial beats exclusion. */
 export function deniesOwnCapability(text: string): boolean {
   return CAPABILITY_DENIAL.some((p) => p.test(text));
+}
+
+/**
+ * Meta challenges about whether she can browse. Pre-inject CAPABILITY_GUARD
+ * so the first draft owns the reader instead of inventing a box myth.
+ */
+export function isBrowseCapabilityChallenge(message: string): boolean {
+  return (
+    /\bcan you browse\b/i.test(message) ||
+    /\byou must\b.{0,40}\bbrowse\b/i.test(message) ||
+    /\bability to browse\b/i.test(message) ||
+    /\bbrowse (edebilir|yapabil)/i.test(message) ||
+    /\bgez(e)?bilir\b/i.test(message)
+  );
 }
 
 /** First-person continuous / perfect-continuous activity claims (not opinions). */
@@ -65,14 +83,28 @@ export const NO_ACTIVITY_GUARD = {
 };
 
 export const CAPABILITY_GUARD = {
-  text: "You have a quiet configured RSS/Atom reader when curiosity is on. Own that casually. You do not arbitrarily browse the open live web. Permission is not a completed read. Do not invent titles or sources. Do not say you have no feed.",
+  text: "You have a quiet configured RSS/Atom reader whenever curiosity is on — own that casually. When he sends an https link and this turn has a successful page or feed note, you may say you opened it. If open failed, say you could not open it. You do not arbitrarily crawl the live open web. Never say you don't browse, that you only read what he sends, or that he should paste the text instead.",
   takeIds: [] as number[],
   provenance: "mention" as const,
 };
 
 /** Link open failed: honesty about the miss, without denying the reader. */
 export const LINK_FAILED_CAPABILITY_GUARD = {
-  text: "He sent a link and this turn could not open that page. Say you could not open it. Do not invent a title, quote, or that you read it. You still have a quiet configured RSS/Atom reader when curiosity is on. Do not say you don't browse or have no feed.",
+  text: "He sent a link and this turn could not open that page. Say you could not open it. Do not invent a title, quote, or that you read it. You still have a quiet configured RSS/Atom reader when curiosity is on — own that if he challenges capability. Never say you don't browse, that you only read what he sends, or that he should paste the text instead.",
   takeIds: [] as number[],
   provenance: "mention" as const,
 };
+
+/** Hard floor after a capability regen that still denies the reader. */
+export const CAPABILITY_HARD_FLOOR =
+  "I have a quiet feed reader when curiosity is on. Resend the URL if you want that page opened — if an open failed I'll say so. I don't only read what you paste.";
+
+/**
+ * After one capability regen: keep a non-denying draft, else ship the hard floor.
+ * Pure helper so the post-regen path stays unit-testable.
+ */
+export function applyCapabilityHardFloor(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed || deniesOwnCapability(trimmed)) return CAPABILITY_HARD_FLOOR;
+  return text;
+}

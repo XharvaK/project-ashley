@@ -2,7 +2,13 @@ import { DatabaseSync } from "node:sqlite";
 import { beforeEach, describe, expect, it } from "vitest";
 import { migrate } from "../memory/db.js";
 import { activityAskKind, isActivityAsk } from "./activity-ask.js";
-import { claimsOwnActivity, deniesOwnCapability } from "./claim-gate.js";
+import {
+  CAPABILITY_HARD_FLOOR,
+  applyCapabilityHardFloor,
+  claimsOwnActivity,
+  deniesOwnCapability,
+  isBrowseCapabilityChallenge,
+} from "./claim-gate.js";
 import {
   assembleCuriosity,
   buildCuriosityBlock,
@@ -393,6 +399,10 @@ describe("deniesOwnCapability", () => {
       "I don't browse. I don't have a feed.",
       "I don't browse. Send me a post if you want me to read it.",
       "I only read what you send, and that's it.",
+      "I read what you send me, nothing else.",
+      "I read what you send. Box and a rule.",
+      "Send me the text.",
+      "Send me a post and I'll look.",
       "I can't browse the web",
       "Couldn't open that link. I don't browse.",
     ]) {
@@ -409,6 +419,38 @@ describe("deniesOwnCapability", () => {
     ]) {
       expect(deniesOwnCapability(text), text).toBe(false);
     }
+  });
+});
+
+describe("applyCapabilityHardFloor", () => {
+  it("keeps a non-denying regen draft", () => {
+    const ok = "Quiet reader’s on. Couldn’t open that URL — resend it if you want another try.";
+    expect(applyCapabilityHardFloor(ok)).toBe(ok);
+  });
+
+  it("replaces a still-denying regen with the hard floor", () => {
+    expect(
+      applyCapabilityHardFloor("I read what you send me, nothing else."),
+    ).toBe(CAPABILITY_HARD_FLOOR);
+    expect(applyCapabilityHardFloor("")).toBe(CAPABILITY_HARD_FLOOR);
+  });
+});
+
+describe("isBrowseCapabilityChallenge", () => {
+  it("detects meta browse challenges", () => {
+    for (const text of [
+      "but you must have the ability to browse",
+      "can you browse?",
+      "ability to browse or not?",
+    ]) {
+      expect(isBrowseCapabilityChallenge(text), text).toBe(true);
+    }
+  });
+
+  it("ignores ordinary link pastes", () => {
+    expect(isBrowseCapabilityChallenge("https://spiralseekr.substack.com")).toBe(
+      false,
+    );
   });
 });
 
