@@ -10,19 +10,25 @@ Discord + Telegram + voice companion with shared local SQLite memory and Mistral
 
 
 
+**Production Discord host is Linux Mint only.** Never start the Discord bot on Windows — it steals the token from Mint.
+
+
+
 ```powershell
 
 # ~/.composer-assistant/.env — see config/env.example
 
 cd C:\Users\Xharv\Projects\composer-assistant
 
-npm run start:ashley   # Discord text smoke: agent + discord only (no voice/Orpheus)
+npm run start:ashley   # SSH to Mint: git pull + rebuild + restart systemd units
 
-npm run stop:ashley
+npm run stop:ashley    # stops accidental Windows pids only (Mint keeps running)
 
-npm run dev:discord    # agent + voice + orpheus + discord bot (heavy)
+# Rare local override (stop Mint first): npm run start:ashley:windows
 
-npm run dev:agent      # agent only
+npm run dev:discord    # agent + voice + orpheus + discord bot (heavy; conflicts with Mint)
+
+npm run dev:agent      # agent only (no Discord gateway)
 
 npm run build:telegram # Ashley Telegram bot (needs TELEGRAM_BOT_TOKEN)
 
@@ -34,17 +40,17 @@ npm run build:telegram # Ashley Telegram bot (needs TELEGRAM_BOT_TOKEN)
 
 
 
-1. Ensure `~/.composer-assistant/.env` has `DISCORD_BOT_TOKEN`, `DISCORD_OWNER_ID`, `MISTRAL_API_KEY`.
+1. Ensure Mint `~/.composer-assistant/.env` has `DISCORD_BOT_TOKEN`, `DISCORD_OWNER_ID`, `MISTRAL_API_KEY`.
 
-2. `npm run start:ashley`
+2. From Windows: `npm run start:ashley` (deploys/restarts on Mint via SSH host `mint`).
 
-3. `curl http://127.0.0.1:3710/health` — want `"ready": true` and Mistral configured.
+3. On Mint: `curl http://127.0.0.1:3710/health` — want `"ready": true` and Mistral configured. Or: `bash ~/composer-assistant/deploy/linux-mint/status.sh`.
 
 4. Once (or after slash changes): `cd apps\discord-bot; npm run deploy-commands` (needs `DISCORD_GUILD_ID`).
 
-5. DM Ashley or send a short guild message. Stop with `npm run stop:ashley`.
+5. DM Ashley or send a short guild message.
 
-Only one host may run the Discord bot at a time (Windows vs Mint laptop).
+Only one host may run the Discord bot. That host is Mint.
 
 
 

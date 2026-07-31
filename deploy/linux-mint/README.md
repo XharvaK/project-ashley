@@ -76,7 +76,7 @@ systemctl --user stop ashley-discord ashley-agent
 
 ## Important
 
-- **One Discord token** — stop Windows `npm run stop:ashley` before Mint starts (prepare script can `-StopAshley`).
+- **One Discord token** — production is Mint only. From Windows, `npm run start:ashley` SSHs here (never starts a local Discord bot). Windows local start requires `-AllowWindows` and Mint must be stopped first.
 - Never commit `.env`.
 - Delete the USB transfer folder after install.
 

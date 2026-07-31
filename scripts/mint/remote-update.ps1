@@ -2,14 +2,14 @@
 # Prereq on Mint (once): bash ~/composer-assistant/deploy/linux-mint/enable-ssh.sh
 #
 # Usage:
-#   powershell -File scripts\mint\remote-update.ps1 -HostName 192.168.x.x -User doc
-#   powershell -File scripts\mint\remote-update.ps1 -HostName mint -User doc -PushFirst
+#   powershell -File scripts\mint\remote-update.ps1
+#   powershell -File scripts\mint\remote-update.ps1 -PushFirst
+#   powershell -File scripts\mint\remote-update.ps1 -HostName 192.168.x.x -User xarvak
 param(
-  [Parameter(Mandatory = $true)]
-  [string]$HostName,
+  # Defaults match ~/.ssh/config Host mint (production Discord host).
+  [string]$HostName = "mint",
 
-  [Parameter(Mandatory = $true)]
-  [string]$User,
+  [string]$User = "xarvak",
 
   [int]$Port = 22,
 

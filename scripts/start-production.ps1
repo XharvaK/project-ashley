@@ -1,7 +1,9 @@
-# Start Ashley production stack in background (survives closing Cursor terminal).
-# Discord + agent only. Voice/Orpheus not started.
+# Windows local Ashley stack. Production Discord bot runs on Mint only.
+# Prefer: npm run start:ashley  →  scripts/mint/remote-update.ps1
 param(
-    [switch]$Stop
+    [switch]$Stop,
+    # Explicit override for rare local smoke. Never use while Mint owns the token.
+    [switch]$AllowWindows
 )
 
 $ErrorActionPreference = "Stop"
@@ -34,6 +36,20 @@ function Stop-Ashley {
 if ($Stop) {
     Stop-Ashley
     exit 0
+}
+
+if (-not $AllowWindows) {
+    Write-Host @"
+Ashley production runs on Mint only (SSH host 'mint').
+
+  npm run start:ashley
+  # → powershell -File scripts\mint\remote-update.ps1
+
+Windows local start is blocked so the Discord token is not stolen.
+Rare smoke only:  powershell -File scripts\start-production.ps1 -AllowWindows
+(Stop Mint first: ssh mint 'systemctl --user stop ashley-discord ashley-agent')
+"@
+    exit 1
 }
 
 Stop-Ashley
@@ -72,7 +88,7 @@ $botProc = Start-Process -FilePath "node" `
 
 @{ agent = $agentProc.Id; discord = $botProc.Id } | ConvertTo-Json | Set-Content $pidFile
 
-Write-Host "Ashley running in background."
+Write-Host "Ashley running in background on WINDOWS (override)."
 Write-Host "  agent log:  $agentLog"
 Write-Host "  bot log:    $botLog"
 Write-Host "  health:     http://127.0.0.1:3710/health"
