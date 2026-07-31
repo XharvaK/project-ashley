@@ -4,7 +4,7 @@ import type {
   PartialMessageReaction,
   PartialUser,
 } from "discord.js";
-import { forgetTopic } from "../agent-client.js";
+import { forgetTopic, reportReaction } from "../agent-client.js";
 
 const pendingForget = new Map<
   string,
@@ -19,13 +19,30 @@ export function registerForgetPending(
   pendingForget.set(userId, { topic, messageId });
 }
 
+/**
+ * A reaction on her own message is a signal she should know about. Reactions on
+ * Doc's own messages are his business and are not reported.
+ */
+async function reportOwnMessageReaction(
+  reaction: MessageReaction | PartialMessageReaction,
+): Promise<void> {
+  const emoji = reaction.emoji.name;
+  if (!emoji) return;
+  try {
+    const message = reaction.message.partial
+      ? await reaction.message.fetch()
+      : reaction.message;
+    if (!message.author?.bot) return;
+    await reportReaction(message.id, emoji);
+  } catch (err) {
+    console.warn("[discord-bot] reaction report failed:", err);
+  }
+}
+
 export async function handleReaction(
   reaction: MessageReaction | PartialMessageReaction,
   userId: string,
 ): Promise<void> {
-  const pending = pendingForget.get(userId);
-  if (!pending) return;
-
   if (reaction.partial) {
     try {
       await reaction.fetch();
@@ -34,7 +51,16 @@ export async function handleReaction(
     }
   }
 
-  if (reaction.message.id !== pending.messageId) return;
+  const pending = pendingForget.get(userId);
+  if (!pending) {
+    await reportOwnMessageReaction(reaction);
+    return;
+  }
+
+  if (reaction.message.id !== pending.messageId) {
+    await reportOwnMessageReaction(reaction);
+    return;
+  }
   const emoji = reaction.emoji.name;
   if (emoji !== "✅" && emoji !== "❌") return;
 

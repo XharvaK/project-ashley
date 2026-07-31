@@ -42,7 +42,9 @@ describe("buildCorrectionGuard", () => {
     const guard = buildCorrectionGuard(db, threadId);
     expect(guard).toContain("Valorant");
     expect(guard).toContain("3-MeO-PCP");
-    expect(guard).toContain("correction_guard");
+    // syncDenylistFromThread parses this exact phrase out of the guard.
+    expect(guard).toContain("do not mention again unless Doc reintroduces them:");
+    expect(guard).not.toContain("—");
   });
 
   it("returns null when no corrections", () => {

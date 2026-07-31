@@ -19,6 +19,8 @@
     "phase0:mistral": "node scripts/phase0/test-mistral.mjs",
     "test": "npm test --prefix apps/agent-service",
     "test:recall": "powershell -ExecutionPolicy Bypass -File scripts/phase0/run-all.ps1 -Tier agent",
-    "config": "powershell -ExecutionPolicy Bypass -File scripts/install-config.ps1"
+    "config": "powershell -ExecutionPolicy Bypass -File scripts/install-config.ps1",
+    "eval:replay": "powershell -ExecutionPolicy Bypass -File scripts/persona-eval/run-isolated.ps1",
+    "eval:full": "powershell -ExecutionPolicy Bypass -File scripts/persona-eval/run-full.ps1"
   }
 }

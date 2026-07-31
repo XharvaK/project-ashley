@@ -124,6 +124,157 @@ CREATE INDEX IF NOT EXISTS idx_mem_initiative_owner_day
   ON mem_initiative_log (owner_id, sent_at);
 `;
 
+/**
+ * Durable positions Ashley has taken. Separate from mem_facts on purpose: facts
+ * are about Doc and must never be invented, stances are hers and exist so she
+ * has something to defend when he pushes back.
+ */
+const SCHEMA_V6_STANCES = `
+CREATE TABLE IF NOT EXISTS mem_stances (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_id          TEXT NOT NULL,
+  topic             TEXT NOT NULL,
+  stance            TEXT NOT NULL,
+  confidence        REAL NOT NULL DEFAULT 0.7,
+  times_reinforced  INTEGER NOT NULL DEFAULT 1,
+  source_message_id INTEGER,
+  created_at        TEXT NOT NULL,
+  last_defended_at  TEXT,
+  revised_at        TEXT,
+  superseded_by     INTEGER
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mem_stances_owner_topic
+  ON mem_stances (owner_id, topic) WHERE superseded_by IS NULL;
+`;
+
+const SCHEMA_V6_JOBS = `
+CREATE TABLE mem_jobs_v6 (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  idempotency_key TEXT NOT NULL UNIQUE,
+  owner_id        TEXT NOT NULL,
+  job_type        TEXT NOT NULL
+                    CHECK (job_type IN ('summary', 'facts', 'embed', 'stances')),
+  status          TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending','running','done','failed')),
+  payload_json    TEXT NOT NULL,
+  attempts        INTEGER NOT NULL DEFAULT 0,
+  last_error      TEXT,
+  lease_until     TEXT,
+  created_at      TEXT NOT NULL,
+  updated_at      TEXT NOT NULL
+);
+INSERT INTO mem_jobs_v6
+  (id, idempotency_key, owner_id, job_type, status, payload_json, attempts,
+   last_error, lease_until, created_at, updated_at)
+  SELECT id, idempotency_key, owner_id, job_type, status, payload_json, attempts,
+         last_error, lease_until, created_at, updated_at
+  FROM mem_jobs;
+DROP TABLE mem_jobs;
+ALTER TABLE mem_jobs_v6 RENAME TO mem_jobs;
+CREATE INDEX IF NOT EXISTS idx_mem_jobs_pending
+  ON mem_jobs (status, created_at) WHERE status = 'pending';
+`;
+
+/**
+ * Her reading, deliberately not in mem_facts or mem_chunks: retrieval is scored
+ * per owner, so anything living there could come back later as a fact about Doc.
+ * cur_provenance is append-only and is the only thing that licenses her to say
+ * she read something.
+ */
+const SCHEMA_V7_CURIOSITY = `
+CREATE TABLE IF NOT EXISTS cur_sources (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  slug             TEXT NOT NULL UNIQUE,
+  title            TEXT NOT NULL,
+  kind             TEXT NOT NULL CHECK (kind IN ('rss','atom','json','search')),
+  url              TEXT NOT NULL,
+  interest         TEXT NOT NULL,
+  weight           REAL NOT NULL DEFAULT 1,
+  enabled          INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
+  last_fetched_at  TEXT,
+  last_error       TEXT,
+  fail_count       INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS cur_items (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  source_id     INTEGER NOT NULL REFERENCES cur_sources(id),
+  url           TEXT NOT NULL,
+  url_key       TEXT NOT NULL UNIQUE,
+  title         TEXT NOT NULL,
+  excerpt       TEXT,
+  interest      TEXT NOT NULL,
+  published_at  TEXT,
+  seen_at       TEXT NOT NULL,
+  score         REAL NOT NULL DEFAULT 0,
+  status        TEXT NOT NULL DEFAULT 'scanned'
+                  CHECK (status IN ('scanned','noted','read','skipped'))
+);
+CREATE INDEX IF NOT EXISTS idx_cur_items_status
+  ON cur_items (status, seen_at);
+
+CREATE TABLE IF NOT EXISTS cur_takes (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  item_id           INTEGER NOT NULL REFERENCES cur_items(id),
+  interest          TEXT NOT NULL,
+  take              TEXT NOT NULL,
+  created_at        TEXT NOT NULL,
+  surfaced_count    INTEGER NOT NULL DEFAULT 0,
+  last_surfaced_at  TEXT,
+  stance_id         INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_cur_takes_created
+  ON cur_takes (created_at);
+
+CREATE TABLE IF NOT EXISTS cur_watches (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_id         TEXT NOT NULL,
+  topic            TEXT NOT NULL,
+  query            TEXT NOT NULL,
+  cadence_hours    INTEGER NOT NULL DEFAULT 24,
+  enabled          INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
+  last_checked_at  TEXT,
+  created_at       TEXT NOT NULL,
+  UNIQUE (owner_id, topic)
+);
+
+CREATE TABLE IF NOT EXISTS cur_provenance (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind        TEXT NOT NULL
+                CHECK (kind IN ('scan','read','take','search','surface','mention')),
+  item_id     INTEGER,
+  detail      TEXT NOT NULL,
+  created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cur_provenance_kind
+  ON cur_provenance (kind, created_at);
+`;
+
+/**
+ * Unfinished business, so a follow-up can be about something real. Nothing here
+ * is a fact about Doc: an open thread is a pointer at a message, and it closes
+ * as soon as either of them comes back to it.
+ */
+const SCHEMA_V8_OPEN_THREADS = `
+CREATE TABLE IF NOT EXISTS mem_open_threads (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_id          TEXT NOT NULL,
+  kind              TEXT NOT NULL
+                      CHECK (kind IN ('she_owes','he_never_answered','time_anchored')),
+  topic             TEXT NOT NULL,
+  detail            TEXT NOT NULL,
+  source_message_id INTEGER,
+  due_at            TEXT,
+  status            TEXT NOT NULL DEFAULT 'open'
+                      CHECK (status IN ('open','closed','dropped')),
+  created_at        TEXT NOT NULL,
+  closed_at         TEXT,
+  UNIQUE (owner_id, kind, topic)
+);
+CREATE INDEX IF NOT EXISTS idx_mem_open_threads_owner
+  ON mem_open_threads (owner_id, status, created_at);
+`;
+
 let sharedDb: DatabaseSync | null = null;
 
 export function getMemoryDb(existing?: DatabaseSync): DatabaseSync {
@@ -250,6 +401,49 @@ CREATE INDEX IF NOT EXISTS idx_mem_pending_owner
   ON mem_pending_actions (owner_id, status);
 `);
     db.exec("PRAGMA user_version = 5");
+    version = 5;
+  }
+  if (version < 6) {
+    db.exec(SCHEMA_V6_STANCES);
+    // The job_type CHECK constraint has to be rebuilt to admit 'stances';
+    // SQLite cannot alter a constraint in place.
+    const hasJobs = db
+      .prepare(
+        `SELECT name FROM sqlite_master WHERE type='table' AND name='mem_jobs'`,
+      )
+      .get() as { name: string } | undefined;
+    if (hasJobs) {
+      db.exec(SCHEMA_V6_JOBS);
+    }
+    db.exec("PRAGMA user_version = 6");
+    version = 6;
+  }
+  if (version < 7) {
+    db.exec(SCHEMA_V7_CURIOSITY);
+    db.exec("PRAGMA user_version = 7");
+    version = 7;
+  }
+  if (version < 8) {
+    db.exec(SCHEMA_V8_OPEN_THREADS);
+    const cols = db
+      .prepare(`PRAGMA table_info(mem_initiative_log)`)
+      .all() as Array<{ name: string }>;
+    const has = (name: string) => cols.some((c) => c.name === name);
+    // material_key is what stops the same open thread or take going out twice.
+    if (!has("material_key")) {
+      db.exec(`ALTER TABLE mem_initiative_log ADD COLUMN material_key TEXT`);
+    }
+    if (!has("candidate_kind")) {
+      db.exec(`ALTER TABLE mem_initiative_log ADD COLUMN candidate_kind TEXT`);
+    }
+    if (!has("feedback")) {
+      db.exec(`ALTER TABLE mem_initiative_log ADD COLUMN feedback TEXT`);
+    }
+    db.exec(
+      `CREATE INDEX IF NOT EXISTS idx_mem_initiative_material
+         ON mem_initiative_log (owner_id, material_key)`,
+    );
+    db.exec("PRAGMA user_version = 8");
   }
 }
 

@@ -15,8 +15,20 @@ import {
   filterHotForRecall,
   truncateHotForStrictRecall,
 } from "./hot-filter.js";
-import { isRecallQuery, type QueryMode } from "./recall.js";
+import {
+  classifyQuery,
+  isBroadDomainAsk,
+  isRecallQuery,
+  type QueryMode,
+} from "./recall.js";
+import { reentryLine } from "./reentry.js";
+import { takeReactionLine } from "../signals.js";
 import { paraphraseSnippet, retrieveChunks } from "./retrieval.js";
+import {
+  buildStanceBlock,
+  listStances,
+  selectRelevantStances,
+} from "./stances.js";
 import {
   getHotMessages,
   getThreadMeta,
@@ -45,34 +57,33 @@ function shouldInjectSensitivity(
   return false;
 }
 
-function buildStrictRecallPolicy(
-  facts: ReturnType<typeof listActiveFacts>,
-  narrative: string | null,
-  userMessage: string,
+/**
+ * Delivery caps for memory questions. These used to sit in the channel prompt
+ * files, where they applied on every turn and answered "lol" under memory-exam
+ * pressure. They belong here, on the turns that actually asked.
+ */
+function buildRecallDelivery(
   queryMode: QueryMode,
+  storeIsEmpty: boolean,
   repeatRecall: boolean,
 ): string | null {
+  if (queryMode === "soft_recall") {
+    return "Doc is asking about something you two already talked about. Answer him normally, from what is above and from this thread. If it is not there, say that plainly instead of reconstructing something plausible.";
+  }
   if (queryMode !== "recall") return null;
 
-  const visibleFacts = facts.filter((f) =>
-    shouldInjectSensitivity(f.sensitivity, userMessage, queryMode),
-  );
-  const hasSummary = Boolean(narrative?.trim());
-  if (visibleFacts.length > 0 || hasSummary) return null;
-
   const lines = [
-    '<recall_policy strict="true">',
-    "Reply in 1-2 sentences. No bullets. No persona domains.",
-    "Do not repeat phrasing from your prior recall answers in this thread.",
-    "Use different wording each time you answer a recall question.",
-    "Only mention topics Doc said verbatim in recent messages (max one).",
+    "Doc is asking what you have stored. Two sentences at most, no lists, no roleplay, no persona tour.",
+    storeIsEmpty
+      ? "Nothing is stored long term. Say so plainly and word it differently than last time."
+      : "You may name what is stored, briefly, and nothing beyond it.",
+    "At most one topic from recent messages, as a short phrase rather than a list.",
   ];
   if (repeatRecall) {
     lines.push(
-      "REPEAT RECALL: You already answered this in this thread — rephrase with different words while keeping the same honest meaning.",
+      "You already answered this in this thread. Same honest meaning, different words.",
     );
   }
-  lines.push("</recall_policy>");
   return lines.join("\n");
 }
 
@@ -99,74 +110,73 @@ function buildMemoryBlock(
   queryMode: QueryMode,
   correctionGuard: string | null,
   repeatRecall: boolean,
+  stanceBlock: string | null,
+  liveSignals: string[] = [],
 ): string {
-  const parts: string[] = [
-    `<ashley_memory version="1" query_mode="${queryMode}">`,
-    "Tiers: standing_facts > thread_summary > retrieved_snippets (hints only).",
-    "If a tier is empty, you have NO stored data there — do not invent facts to fill the gap.",
-  ];
-
-  const strictRecall = buildStrictRecallPolicy(
-    facts,
-    narrative,
-    userMessage,
-    queryMode,
-    repeatRecall,
-  );
-  if (strictRecall) {
-    parts.push(strictRecall);
-  }
-
-  if (queryMode === "recall") {
-    parts.push(
-      "RECALL MODE: Doc asked what you remember. You MAY list standing facts and thread summary briefly when non-empty. Do not invent beyond these tiers.",
-    );
-  } else {
-    parts.push(
-      "Weave background naturally; do not quote or meta-reference this block in normal chat.",
-    );
-  }
-
   const factLines = facts
     .filter((f) =>
       shouldInjectSensitivity(f.sensitivity, userMessage, queryMode),
     )
-    .map((f) => `• ${f.value}`)
+    .map((f) => `- ${f.value}`)
     .slice(0, 40);
-
-  parts.push("", "## Standing context");
-  if (factLines.length > 0) {
-    parts.push(...factLines);
-  } else {
-    parts.push("(empty — no pinned or extracted long-term facts about Doc yet)");
-  }
 
   const narrativeParts: string[] = [];
   if (channelHint) narrativeParts.push(channelHint);
   if (narrative?.trim()) narrativeParts.push(narrative.trim());
 
+  // Labels and explicit empty markers stay: flattening this into prose reads
+  // nicer and quietly makes an empty tier look like something she forgot.
+  const parts: string[] = ["What you actually have on Doc:", "", "## Standing facts"];
+  parts.push(
+    ...(factLines.length > 0
+      ? factLines
+      : ["(empty: nothing stored long term about Doc yet)"]),
+  );
+
   parts.push("", "## Where things left off");
-  if (narrativeParts.length > 0) {
-    parts.push(narrativeParts.join(" "));
-  } else {
-    parts.push("(empty)");
-  }
+  parts.push(narrativeParts.length > 0 ? narrativeParts.join(" ") : "(empty)");
 
   parts.push("", "## May be relevant now");
-  if (snippets.length > 0 && queryMode !== "recall") {
+  if (snippets.length > 0 && queryMode === "normal") {
     parts.push(
-      "(unverified echoes — use only if clearly relevant to the current message)",
+      "(unverified echoes, use only if clearly relevant to what he just said)",
       ...snippets.map((s) => paraphraseSnippet(s)),
     );
   } else {
     parts.push(
-      queryMode === "recall"
-        ? "(suppressed — recall mode)"
-        : "(empty)",
+      queryMode === "normal" ? "(empty)" : "(suppressed for a memory question)",
     );
   }
 
-  parts.push("</ashley_memory>");
+  parts.push(
+    "",
+    "Trust order: standing facts, then where things left off, then this thread's messages. Echoes are hints, never facts. An empty section means you have nothing there, not that you should reconstruct it.",
+  );
+
+  const storeIsEmpty = factLines.length === 0 && narrativeParts.length === 0;
+  const recallDelivery = buildRecallDelivery(
+    queryMode,
+    storeIsEmpty,
+    repeatRecall,
+  );
+  if (recallDelivery) {
+    parts.push("", recallDelivery);
+  }
+
+  if (queryMode === "normal" && isBroadDomainAsk(userMessage)) {
+    parts.push(
+      "",
+      "He asked an open question about a topic, not for a briefing. Two short paragraphs at most, the two or three things that actually matter, no headed sections and no appendix of numbers. Do not close with an offer to explain more; if there is more, one clause is enough.",
+    );
+  }
+
+  if (liveSignals.length > 0) {
+    parts.push("", "## Right now", ...liveSignals);
+  }
+
+  if (stanceBlock) {
+    parts.push("", stanceBlock);
+  }
 
   if (correctionGuard) {
     parts.push("", correctionGuard);
@@ -186,15 +196,19 @@ function applyHotTokenBudget(hot: HotTurn[], maxTokens: number): HotTurn[] {
 export class MemoryAssembler {
   constructor(private readonly db: DatabaseSync) {}
 
+  /**
+   * `excludeMessageId` is the row the caller just inserted for `userMessage`.
+   * Hot history is read after that insert, so without this the model sees the
+   * current turn twice: once in history and once as the trailing user message.
+   */
   async build(
     ownerId: string,
     channel: ChatChannel,
     userMessage: string,
     threadId?: string,
+    excludeMessageId?: number | null,
   ): Promise<AssembledContext> {
-    const queryMode: QueryMode = isRecallQuery(userMessage)
-      ? "recall"
-      : "normal";
+    const queryMode: QueryMode = classifyQuery(userMessage);
     const tid = threadId ?? resolveActiveThread(this.db, ownerId, channel);
     const meta = getThreadMeta(this.db, tid);
     const hotLimit =
@@ -213,7 +227,7 @@ export class MemoryAssembler {
     );
 
     let snippets: string[] = [];
-    if (queryMode !== "recall") {
+    if (queryMode === "normal") {
       try {
         const [queryEmb] = await embedTexts([
           userMessage.slice(0, 2000),
@@ -244,7 +258,7 @@ export class MemoryAssembler {
       const mins =
         (Date.now() - new Date(meta.last_active_at).getTime()) / 60000;
       if (mins < 30) {
-        channelHint = `Doc was just chatting on ${meta.last_active_channel} — continue, don't restart.`;
+        channelHint = `Doc was just chatting on ${meta.last_active_channel}, so continue rather than restart.`;
       }
     }
 
@@ -260,6 +274,21 @@ export class MemoryAssembler {
 
     const correctionGuard = buildCorrectionGuard(this.db, tid);
 
+    // Not in a recall answer: a memory audit is about what he told her, and her
+    // own opinions have no business in that list.
+    const stanceBlock =
+      env.stanceLedgerEnabled && queryMode !== "recall"
+        ? buildStanceBlock(
+            selectRelevantStances(listStances(this.db, ownerId), userMessage),
+          )
+        : null;
+
+    const liveSignals: string[] = [];
+    const gapLine = reentryLine(this.db, ownerId, excludeMessageId);
+    if (gapLine) liveSignals.push(gapLine);
+    const reactionLine = takeReactionLine(this.db);
+    if (reactionLine) liveSignals.push(reactionLine);
+
     const memoryBlock = buildMemoryBlock(
       facts,
       narrative,
@@ -269,6 +298,8 @@ export class MemoryAssembler {
       queryMode,
       correctionGuard,
       repeatRecall,
+      stanceBlock,
+      liveSignals,
     );
 
     const hot = getHotMessages(
@@ -276,6 +307,7 @@ export class MemoryAssembler {
       tid,
       hotLimit,
       meta?.hot_cutoff_message_id ?? null,
+      excludeMessageId,
     );
 
     let hotMessages = hot.map((m) => ({
@@ -328,6 +360,9 @@ export class MemoryAssembler {
       "normal",
       correctionGuard,
       false,
+      env.stanceLedgerEnabled
+        ? buildStanceBlock(listStances(this.db, ownerId, 3))
+        : null,
     );
 
     const hot = getHotMessages(

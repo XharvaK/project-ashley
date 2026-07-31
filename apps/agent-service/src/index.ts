@@ -1,6 +1,7 @@
 import "./env.js";
 import { AgentManager } from "./agent.js";
 import { createServer, listen } from "./server.js";
+import { startCuriosityLoop, stopCuriosityLoop } from "./curiosity/tick.js";
 
 const manager = new AgentManager();
 
@@ -8,9 +9,11 @@ async function main(): Promise<void> {
   await manager.init();
   const app = createServer(manager);
   const server = listen(app);
+  startCuriosityLoop(manager.chat.database);
 
   const shutdown = async (signal: string) => {
     console.log(`[agent-service] ${signal}`);
+    stopCuriosityLoop();
     await manager.shutdown();
     server.close();
     process.exit(0);
@@ -21,6 +24,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error(err);
+  console.error("[agent-service] fatal:", err);
   process.exit(1);
 });

@@ -5,6 +5,8 @@ import { AppError } from "./errors.js";
 export type ChatMessage = {
   role: "system" | "user" | "assistant";
   content: string;
+  /** Public URLs only. Set on the current turn so the model can actually see. */
+  imageUrls?: string[];
 };
 
 export type TokenUsage = {
@@ -16,6 +18,7 @@ export type CompletionOptions = {
   model?: string;
   maxTokens?: number;
   temperature?: number;
+  presencePenalty?: number;
   reasoningEffort?: "none" | "high";
   signal?: AbortSignal;
 };
@@ -58,11 +61,25 @@ function buildChatBody(
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {
     model: options.model ?? env.mistralModel,
-    messages: messages.map((m) => ({ role: m.role, content: m.content })),
+    messages: messages.map((m) => ({
+      role: m.role,
+      content: m.imageUrls?.length
+        ? [
+            ...(m.content ? [{ type: "text", text: m.content }] : []),
+            ...m.imageUrls.map((url) => ({ type: "image_url", imageUrl: url })),
+          ]
+        : m.content,
+    })),
     maxTokens: options.maxTokens ?? 2048,
     temperature: options.temperature ?? env.mistralChatTemperature,
     stream,
   };
+  // Camel case on purpose: the SDK's outbound schema maps these to snake_case
+  // and drops keys it does not know, which is why reasoning_effort never lands.
+  // topP stays unset; Mistral advises tuning temperature or top_p, not both.
+  if (options.presencePenalty !== undefined) {
+    body.presencePenalty = options.presencePenalty;
+  }
   const effort = options.reasoningEffort ?? env.mistralReasoningEffort;
   if (effort) {
     body.reasoning_effort = effort;

@@ -83,15 +83,17 @@ export function getHotMessages(
   threadId: string,
   limit: number,
   hotCutoffId: number | null,
+  excludeMessageId?: number | null,
 ): Array<{ id: number; role: "user" | "assistant"; text: string }> {
   const cutoff = hotCutoffId ?? 0;
   const rows = db
     .prepare(
       `SELECT id, role, text FROM mem_messages
        WHERE thread_id = ? AND id > ? AND role IN ('user', 'assistant')
+         AND id != COALESCE(?, -1)
        ORDER BY id DESC LIMIT ?`,
     )
-    .all(threadId, cutoff, limit) as Array<{
+    .all(threadId, cutoff, excludeMessageId ?? null, limit) as Array<{
     id: number;
     role: "user" | "assistant";
     text: string;

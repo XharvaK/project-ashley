@@ -1,12 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { env } from "../env.js";
+import { localParts } from "../local-time.js";
 import { isProactivePausedDb } from "./lease.js";
-
-export type CooldownResult = {
-  allowed: boolean;
-  reason: string;
-  cooldownRemainingSec: number;
-};
 
 export function getLastUserMessageAt(
   db: DatabaseSync,
@@ -37,79 +32,28 @@ export function getLastInitiativeAt(
   return row?.sent_at ?? null;
 }
 
-export function countInitiativesToday(
+function asDate(ts: string): Date {
+  return new Date(ts.includes("T") ? ts : `${ts}Z`);
+}
+
+/**
+ * Doc's calendar day. The old count used UTC date(), which handed her a fresh
+ * daily quota at 03:00 Istanbul time.
+ */
+export function countInitiativesLocalToday(
   db: DatabaseSync,
   ownerId: string,
+  now = new Date(),
 ): number {
-  const row = db
+  const today = localParts(now).dateKey;
+  const rows = db
     .prepare(
-      `SELECT COUNT(*) AS c FROM mem_initiative_log
-       WHERE owner_id = ? AND date(sent_at) = date('now')`,
+      `SELECT sent_at FROM mem_initiative_log
+       WHERE owner_id = ? AND sent_at >= datetime('now', '-36 hours')`,
     )
-    .get(ownerId) as { c: number };
-  return row.c;
-}
-
-function hoursSince(iso: string | null): number {
-  if (!iso) return Infinity;
-  return (Date.now() - new Date(iso).getTime()) / 3600000;
-}
-
-export function checkHardCooldown(
-  db: DatabaseSync,
-  ownerId: string,
-  options: { busy: boolean; enabled: boolean },
-): CooldownResult {
-  if (!options.enabled) {
-    return {
-      allowed: false,
-      reason: "proactive_disabled",
-      cooldownRemainingSec: 0,
-    };
-  }
-  if (options.busy) {
-    return {
-      allowed: false,
-      reason: "chat_in_progress",
-      cooldownRemainingSec: 60,
-    };
-  }
-
-  const lastUser = getLastUserMessageAt(db, ownerId);
-  const idleH = hoursSince(lastUser);
-  if (idleH < env.proactiveMinIdleHours) {
-    const sec = Math.ceil(
-      (env.proactiveMinIdleHours - idleH) * 3600,
-    );
-    return {
-      allowed: false,
-      reason: "user_active_recently",
-      cooldownRemainingSec: sec,
-    };
-  }
-
-  const lastInit = getLastInitiativeAt(db, ownerId);
-  const sinceInitH = hoursSince(lastInit);
-  if (sinceInitH < env.proactiveMinIdleHours) {
-    const sec = Math.ceil(
-      (env.proactiveMinIdleHours - sinceInitH) * 3600,
-    );
-    return {
-      allowed: false,
-      reason: "initiative_cooldown",
-      cooldownRemainingSec: sec,
-    };
-  }
-
-  if (countInitiativesToday(db, ownerId) >= env.proactiveMaxPerDay) {
-    return {
-      allowed: false,
-      reason: "daily_cap_reached",
-      cooldownRemainingSec: 0,
-    };
-  }
-
-  return { allowed: true, reason: "ok", cooldownRemainingSec: 0 };
+    .all(ownerId) as Array<{ sent_at: string }>;
+  return rows.filter((r) => localParts(asDate(r.sent_at)).dateKey === today)
+    .length;
 }
 
 export function getInitiativeStatus(
@@ -123,7 +67,7 @@ export function getInitiativeStatus(
   return {
     enabled: enabled && !effectivePaused,
     paused: effectivePaused,
-    sentToday: countInitiativesToday(db, ownerId),
+    sentToday: countInitiativesLocalToday(db, ownerId),
     maxPerDay: env.proactiveMaxPerDay,
     lastSentAt: getLastInitiativeAt(db, ownerId),
     lastUserMessageAt: getLastUserMessageAt(db, ownerId),

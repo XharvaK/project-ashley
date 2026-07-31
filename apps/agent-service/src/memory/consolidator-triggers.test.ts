@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   shouldEnqueueFacts,
   shouldEnqueueSummary,
+  summaryBatchSize,
 } from "./consolidator-triggers.js";
 
 describe("consolidator triggers", () => {
@@ -23,5 +24,12 @@ describe("consolidator triggers", () => {
     expect(shouldEnqueueSummary(39, 1000, 40, 10000)).toBe(false);
     expect(shouldEnqueueSummary(40, 1000, 40, 10000)).toBe(true);
     expect(shouldEnqueueSummary(10, 10001, 40, 10000)).toBe(true);
+  });
+
+  it("never lets a summary eat into the residual floor", () => {
+    expect(summaryBatchSize(48, 16, 24)).toBe(16);
+    expect(summaryBatchSize(30, 16, 24)).toBe(6);
+    // Token-triggered summary over a handful of long messages: defer instead.
+    expect(summaryBatchSize(10, 16, 24)).toBeLessThan(5);
   });
 });

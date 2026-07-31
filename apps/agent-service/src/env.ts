@@ -36,7 +36,15 @@ export const env = {
   mistralReasoningEffort:
     (process.env.MISTRAL_REASONING_EFFORT as "none" | "high" | undefined) ??
     "none",
-  mistralChatTemperature: Number(process.env.MISTRAL_CHAT_TEMPERATURE ?? 0.55),
+  // Mistral documents 0.0-0.7; above that a bilingual bot starts switching
+  // language mid-sentence, so the ceiling is enforced here rather than trusted.
+  mistralChatTemperature: Math.min(
+    Number(process.env.MISTRAL_CHAT_TEMPERATURE ?? 0.65),
+    0.7,
+  ),
+  mistralChatPresencePenalty: Number(
+    process.env.MISTRAL_CHAT_PRESENCE_PENALTY ?? 0.15,
+  ),
   mistralVoiceTemperature: Number(process.env.MISTRAL_VOICE_TEMPERATURE ?? 0.5),
   mistralRecallTemperature: Number(
     process.env.MISTRAL_RECALL_TEMPERATURE ?? 0.3,
@@ -50,11 +58,22 @@ export const env = {
   agentPort: Number(process.env.AGENT_PORT ?? 3710),
   agentBindHost: process.env.AGENT_BIND_HOST ?? "127.0.0.1",
   nodeEnv: process.env.NODE_ENV ?? "development",
-  memoryHotMaxMessages: Number(process.env.MEMORY_HOT_MAX_MESSAGES ?? 40),
-  memoryHotMaxTokens: Number(process.env.MEMORY_HOT_MAX_TOKENS ?? 10000),
+  memoryHotMaxMessages: Number(process.env.MEMORY_HOT_MAX_MESSAGES ?? 48),
+  memoryHotMaxTokens: Number(process.env.MEMORY_HOT_MAX_TOKENS ?? 12000),
   memoryVoiceHotMessages: Number(process.env.MEMORY_VOICE_HOT_MESSAGES ?? 8),
-  memorySummaryBatch: Number(process.env.MEMORY_SUMMARY_BATCH ?? 20),
+  memorySummaryBatch: Number(process.env.MEMORY_SUMMARY_BATCH ?? 16),
+  memorySummaryResidualFloor: Number(
+    process.env.MEMORY_SUMMARY_RESIDUAL_FLOOR ?? 24,
+  ),
   memoryFactEveryN: Number(process.env.MEMORY_FACT_EVERY_N ?? 4),
+  personaFewshotEnabled: process.env.PERSONA_FEWSHOT_ENABLED !== "false",
+  personaFewshotCount: Number(process.env.PERSONA_FEWSHOT_COUNT ?? 4),
+  stanceLedgerEnabled: process.env.STANCE_LEDGER_ENABLED !== "false",
+  stanceEveryN: Number(process.env.STANCE_EVERY_N ?? 6),
+  friction: (process.env.ASHLEY_FRICTION ?? "high") as
+    | "off"
+    | "normal"
+    | "high",
   autoRememberEnabled: process.env.AUTO_REMEMBER_ENABLED !== "false",
   memoryJobsPendingAlert: Number(
     process.env.MEMORY_JOBS_PENDING_ALERT ?? 50,
@@ -64,8 +83,34 @@ export const env = {
     process.env.MEMORY_RETRIEVAL_MIN_SCORE ?? 0.35,
   ),
   proactiveEnabled: process.env.PROACTIVE_ENABLED !== "false",
-  proactiveMaxPerDay: Number(process.env.PROACTIVE_MAX_PER_DAY ?? 4),
+  proactiveMaxPerDay: Number(process.env.PROACTIVE_MAX_PER_DAY ?? 8),
   proactiveMinIdleHours: Number(process.env.PROACTIVE_MIN_IDLE_HOURS ?? 2),
+  // Material queue: nothing goes out under the floor, and there is no filler.
+  proactiveMinScore: Number(process.env.PROACTIVE_MIN_SCORE ?? 20),
+  proactiveCheckInIdleHours: Number(
+    process.env.PROACTIVE_CHECKIN_IDLE_HOURS ?? 20,
+  ),
+  // Burst, not metronome: a few close together, then a long quiet stretch.
+  proactiveBurstMax: Number(process.env.PROACTIVE_BURST_MAX ?? 3),
+  proactiveBurstWindowMinutes: Number(
+    process.env.PROACTIVE_BURST_WINDOW_MINUTES ?? 90,
+  ),
+  proactiveBurstGapMinutes: Number(
+    process.env.PROACTIVE_BURST_GAP_MINUTES ?? 12,
+  ),
+  proactiveBurstRestMinutes: Number(
+    process.env.PROACTIVE_BURST_REST_MINUTES ?? 150,
+  ),
+  proactiveMaxUnanswered: Number(process.env.PROACTIVE_MAX_UNANSWERED ?? 4),
+  proactiveBackoffStepHours: Number(
+    process.env.PROACTIVE_BACKOFF_STEP_HOURS ?? 1.5,
+  ),
+  proactiveSessionWindowHours: Number(
+    process.env.PROACTIVE_SESSION_WINDOW_HOURS ?? 3,
+  ),
+  proactiveNudgeIdleMinutes: Number(
+    process.env.PROACTIVE_NUDGE_IDLE_MINUTES ?? 25,
+  ),
   proactiveCheckIntervalMin: Number(
     process.env.PROACTIVE_CHECK_INTERVAL_MIN ?? 20,
   ),
@@ -76,6 +121,25 @@ export const env = {
     | "discord"
     | "telegram",
   telegramOwnerId: process.env.TELEGRAM_OWNER_ID ?? "",
+  curiosityEnabled: process.env.CURIOSITY_ENABLED !== "false",
+  curiosityTickMinutes: Number(process.env.CURIOSITY_TICK_MINUTES ?? 45),
+  curiositySourcesPerTick: Number(process.env.CURIOSITY_SOURCES_PER_TICK ?? 2),
+  curiositySourceIntervalHours: Number(
+    process.env.CURIOSITY_SOURCE_INTERVAL_HOURS ?? 6,
+  ),
+  curiosityItemsPerSource: Number(process.env.CURIOSITY_ITEMS_PER_SOURCE ?? 12),
+  // She reads a few things well: scanned wide, noted narrow, read almost never.
+  curiosityNotePerDay: Number(process.env.CURIOSITY_NOTE_PER_DAY ?? 12),
+  curiosityReadPerDay: Number(process.env.CURIOSITY_READ_PER_DAY ?? 3),
+  curiositySurfacePerDay: Number(process.env.CURIOSITY_SURFACE_PER_DAY ?? 2),
+  tavilyApiKey: process.env.TAVILY_API_KEY ?? "",
+  // Search credits: ~450/mo for mid-chat lookups, the rest for watches.
+  curiosityLookupEnabled: process.env.CURIOSITY_LOOKUP_ENABLED !== "false",
+  curiosityLookupPerDay: Number(process.env.CURIOSITY_LOOKUP_PER_DAY ?? 15),
+  curiosityWatchMax: Number(process.env.CURIOSITY_WATCH_MAX ?? 3),
+  curiosityWatchCadenceHours: Number(
+    process.env.CURIOSITY_WATCH_CADENCE_HOURS ?? 24,
+  ),
   docTimezone: process.env.DOC_TIMEZONE ?? "Europe/Istanbul",
   quietHoursStart: process.env.QUIET_HOURS_START ?? "",
   quietHoursEnd: process.env.QUIET_HOURS_END ?? "",

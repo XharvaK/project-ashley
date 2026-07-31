@@ -21,3 +21,17 @@ export function shouldEnqueueSummary(
 ): boolean {
   return count >= maxMessages || tokenSum >= maxTokens;
 }
+
+/**
+ * How many of the oldest hot messages a summary may consume.
+ * A token-triggered summary over a few long messages would otherwise swallow the
+ * whole window and take her recent rhythm with it, so the newest `residualFloor`
+ * messages are never eligible.
+ */
+export function summaryBatchSize(
+  totalSinceCutoff: number,
+  batch: number,
+  residualFloor: number,
+): number {
+  return Math.min(batch, totalSinceCutoff - residualFloor);
+}

@@ -15,6 +15,9 @@ param(
 
   [switch]$PushFirst,
 
+  # Run the per-wave live check after the units restart ("4", "5", or "all").
+  [string]$LiveCheck = "",
+
   [string]$RepoDir = "~/composer-assistant"
 )
 
@@ -44,6 +47,9 @@ $lines = @(
   'curl -s http://127.0.0.1:3710/health || true',
   'echo'
 )
+if ($LiveCheck) {
+  $lines += "bash deploy/linux-mint/live-check.sh $LiveCheck"
+}
 $remote = ($lines -join "`n") + "`n"
 $tmp = Join-Path $env:TEMP "ashley-mint-remote-update.sh"
 [IO.File]::WriteAllText($tmp, $remote, [Text.UTF8Encoding]::new($false))

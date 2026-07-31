@@ -59,9 +59,6 @@ export function buildCorrectionGuard(
 
   if (blocked.size === 0) return null;
 
-  return [
-    "<correction_guard>",
-    `Doc rejected these as fabricated — do not mention again unless Doc reintroduces them: ${[...blocked].join(", ")}.`,
-    "</correction_guard>",
-  ].join("\n");
+  // The substring after "fabricated," is parsed by syncDenylistFromThread.
+  return `Doc rejected these as fabricated, so do not mention again unless Doc reintroduces them: ${[...blocked].join(", ")}.`;
 }

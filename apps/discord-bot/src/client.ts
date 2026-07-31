@@ -11,6 +11,7 @@ import { handleSlash } from "./handlers/interactionCreate.js";
 import { handleMessage } from "./handlers/messageCreate.js";
 import { handleReaction } from "./handlers/reactionAdd.js";
 import { startProactiveScheduler } from "./initiative/scheduler.js";
+import { startPresence } from "./presence.js";
 
 export function createClient(): Client {
   const client = new Client({
@@ -20,6 +21,9 @@ export function createClient(): Client {
       GatewayIntentBits.DirectMessages,
       GatewayIntentBits.MessageContent,
       GatewayIntentBits.GuildMessageReactions,
+      // Without this, a laugh reaction on her message in a DM never arrives at
+      // all, which is most of where Doc actually talks to her.
+      GatewayIntentBits.DirectMessageReactions,
     ],
     partials: [Partials.Channel, Partials.Message, Partials.Reaction],
   });
@@ -27,6 +31,7 @@ export function createClient(): Client {
   client.once(Events.ClientReady, (c) => {
     console.log(`[discord-bot] logged in as ${c.user.tag}`);
     startProactiveScheduler(client);
+    startPresence(client);
   });
 
   client.on(Events.InteractionCreate, (interaction) => {

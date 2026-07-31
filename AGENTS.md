@@ -156,11 +156,13 @@ npm run test:recall                     # agent integration (agent must be runni
 
 powershell -File scripts/phase0/run-all.ps1 -Tier full
 
+npm run eval:full -- -Baseline wave0-baseline -Label wave5   # persona probes + judge
+
 ```
 
 
 
-See `docs/memory-and-recall.md` for debug endpoints, backup, and manual DM checks.
+See `docs/memory-and-recall.md` for debug endpoints, backup, and manual DM checks, and `docs/persona-eval.md` for the probe suite, hard gates, and staged ship.
 
 
 
@@ -182,7 +184,7 @@ npm run phase0:mistral
 
 
 
-DM-only outreach when idle (default: max 4/day, 2h min idle). Tick is atomic (`/initiative/tick`); log commits after successful DM send. Pause persists across bot restarts. See `docs/proactive-initiative.md` and `docs/memory-and-recall.md`.
+DM-only outreach when she has material (default: max 8/day in bursts, 2h min idle, quiet hours enforced). Tick is atomic (`/initiative/tick`); the log row is reserved before the send and committed after. Pause persists across bot restarts and a bare "stop" in chat pauses her. See `docs/proactive-initiative.md` and `docs/memory-and-recall.md`.
 
 
 

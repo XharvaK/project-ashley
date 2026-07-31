@@ -320,6 +320,8 @@ export class AgentManager {
 
     auditSessionId?: string,
 
+    imageUrls?: string[],
+
   ): Promise<{
     text: string;
     threadId: string;
@@ -373,6 +375,8 @@ export class AgentManager {
         threadId,
 
         auditSessionId,
+
+        imageUrls,
 
       });
 

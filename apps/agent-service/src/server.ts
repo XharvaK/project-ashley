@@ -26,9 +26,34 @@ import {
   resolvePendingAction,
 } from "./habits/actions.js";
 
+import { runCuriosityTick } from "./curiosity/tick.js";
+
+import { curiosityStats } from "./curiosity/store.js";
+
 
 
 const MAX_DISCORD_MESSAGE = 4000;
+
+const MAX_IMAGES = 4;
+
+/**
+ * Mistral fetches these URLs server side, so anything that is not a plain https
+ * link is a request to make the model fetch something on someone else's behalf.
+ */
+function parseImageUrls(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const urls = raw
+    .filter((u): u is string => typeof u === "string")
+    .filter((u) => {
+      try {
+        return new URL(u).protocol === "https:";
+      } catch {
+        return false;
+      }
+    })
+    .slice(0, MAX_IMAGES);
+  return urls.length > 0 ? urls : undefined;
+}
 
 
 
@@ -214,7 +239,7 @@ export function createServer(manager: AgentManager): express.Application {
 
     try {
 
-      const { message, channel, userId, threadId, auditSessionId } =
+      const { message, channel, userId, threadId, auditSessionId, imageUrls } =
 
         req.body as {
 
@@ -227,6 +252,8 @@ export function createServer(manager: AgentManager): express.Application {
           threadId?: string;
 
           auditSessionId?: string;
+
+          imageUrls?: unknown;
 
         };
 
@@ -266,6 +293,8 @@ export function createServer(manager: AgentManager): express.Application {
 
       }
 
+      const images = parseImageUrls(imageUrls);
+
 
 
       const result = await manager.handleTextChat(
@@ -277,6 +306,8 @@ export function createServer(manager: AgentManager): express.Application {
         threadId,
 
         auditSessionId,
+
+        images,
 
       );
 
@@ -293,6 +324,79 @@ export function createServer(manager: AgentManager): express.Application {
         usage: { promptTokens: 0, completionTokens: 0 },
 
       });
+
+    } catch (err) {
+
+      const { status, body } = toErrorResponse(err);
+
+      res.status(status).json(body);
+
+    }
+
+  });
+
+
+
+  app.post("/signals/reaction", (req, res) => {
+
+    try {
+
+      const { userId, messageId, emoji } = req.body as {
+        userId?: string;
+        messageId?: string;
+        emoji?: string;
+      };
+
+      if (!userId || (env.discordOwnerId && userId !== env.discordOwnerId)) {
+
+        throw new AppError("forbidden", "Forbidden", 403);
+
+      }
+
+      if (!messageId?.trim() || !emoji?.trim()) {
+
+        throw new AppError(
+          "message_required",
+          "messageId and emoji required",
+          400,
+        );
+
+      }
+
+      const result = manager.chat.recordReaction(userId, {
+        messageId: messageId.trim(),
+        emoji: emoji.trim().slice(0, 32),
+      });
+
+      res.json({ ok: true, ...result });
+
+    } catch (err) {
+
+      const { status, body } = toErrorResponse(err);
+
+      res.status(status).json(body);
+
+    }
+
+  });
+
+
+
+  app.post("/chat/preflight", (req, res) => {
+
+    try {
+
+      const { message } = req.body as { message?: string };
+
+      const text = message?.trim() ?? "";
+
+      if (!text) {
+
+        throw new AppError("message_required", "message required", 400);
+
+      }
+
+      res.json({ lookup: manager.chat.lookupPreflight(text) });
 
     } catch (err) {
 
@@ -510,6 +614,50 @@ export function createServer(manager: AgentManager): express.Application {
 
 
 
+  app.post("/curiosity/tick", async (_req, res) => {
+
+    try {
+
+      const result = await runCuriosityTick(manager.chat.database);
+
+      res.json(result);
+
+    } catch (err) {
+
+      const { status, body } = toErrorResponse(err);
+
+      res.status(status).json(body);
+
+    }
+
+  });
+
+
+
+  app.get("/curiosity/status", (_req, res) => {
+
+    try {
+
+      res.json({
+
+        enabled: env.curiosityEnabled,
+
+        ...curiosityStats(manager.chat.database),
+
+      });
+
+    } catch (err) {
+
+      const { status, body } = toErrorResponse(err);
+
+      res.status(status).json(body);
+
+    }
+
+  });
+
+
+
   app.post("/initiative/tick", async (req, res) => {
 
     try {
@@ -542,15 +690,27 @@ export function createServer(manager: AgentManager): express.Application {
 
     try {
 
-      const { userId, text, threadId, angle, reason, discordMessageId } =
-        req.body as {
-          userId?: string;
-          text?: string;
-          threadId?: string;
-          angle?: "question" | "opinion" | "check_in";
-          reason?: string;
-          discordMessageId?: string;
-        };
+      const {
+        userId,
+        text,
+        threadId,
+        angle,
+        reason,
+        discordMessageId,
+        materialKey,
+        candidateKind,
+        reservationId,
+      } = req.body as {
+        userId?: string;
+        text?: string;
+        threadId?: string;
+        angle?: "question" | "opinion" | "check_in";
+        reason?: string;
+        discordMessageId?: string;
+        materialKey?: string;
+        candidateKind?: string;
+        reservationId?: number;
+      };
 
       if (!userId || (env.discordOwnerId && userId !== env.discordOwnerId)) {
 
@@ -575,9 +735,49 @@ export function createServer(manager: AgentManager): express.Application {
           threadId,
           angle: angle ?? "check_in",
           reason: reason ?? "committed",
+          materialKey,
+          candidateKind,
+          reservationId,
         },
         discordMessageId.trim(),
       );
+
+      res.json({ ok: true });
+
+    } catch (err) {
+
+      const { status, body } = toErrorResponse(err);
+
+      res.status(status).json(body);
+
+    }
+
+  });
+
+
+
+  app.post("/initiative/abort", (req, res) => {
+
+    try {
+
+      const { userId, reservationId } = req.body as {
+        userId?: string;
+        reservationId?: number;
+      };
+
+      if (!userId || (env.discordOwnerId && userId !== env.discordOwnerId)) {
+
+        throw new AppError("forbidden", "Forbidden", 403);
+
+      }
+
+      if (!reservationId) {
+
+        throw new AppError("message_required", "reservationId required", 400);
+
+      }
+
+      manager.chat.abortInitiative(userId, reservationId);
 
       res.json({ ok: true });
 

@@ -1,9 +1,30 @@
 import type { DatabaseSync } from "node:sqlite";
 import { AppError } from "./errors.js";
 import { env } from "./env.js";
-import { streamChat, type ChatMessage } from "./mistral-client.js";
+import { buildChatMessages } from "./chat-messages.js";
+import { streamChat } from "./mistral-client.js";
+import { sanitizeTypography } from "./typography.js";
+import { recordReaction } from "./signals.js";
+import {
+  buildVoiceBlock,
+  looksLikeParrot,
+  selectVoiceExamples,
+  type VoiceExample,
+} from "./voice-bank.js";
 import { appendMemoryBlock, loadSystemPrompt } from "./prompts.js";
+import { PREMISE_GUARD, acceptedUncheckedPremise, isPremiseCheck } from "./premise-guard.js";
+import { NO_ECHO_GUARD, isEchoOfUser } from "./echo-guard.js";
+import {
+  assembleCuriosity,
+  commitCuriosity,
+  type CuriosityInjection,
+} from "./curiosity/inject.js";
+import { NO_ACTIVITY_GUARD, claimsOwnActivity } from "./curiosity/claim-gate.js";
+import { NO_LOOKUP_GUARD, shouldLookup } from "./curiosity/lookup.js";
+import { buildSearchContext, searchWeb } from "./curiosity/search.js";
+import { countProvenance, hasReadActivity } from "./curiosity/store.js";
 import { MemoryAssembler } from "./memory/assembler.js";
+import { classifyQuery } from "./memory/recall.js";
 import { ConsolidationWorker } from "./memory/consolidator.js";
 import { getMemoryDb, getMemoryHealth } from "./memory/db.js";
 import { applyAutoRemember } from "./memory/auto-remember.js";
@@ -14,11 +35,21 @@ import {
 } from "./memory/correction-denylist.js";
 import { forgetByTopic, getActiveSummary, listActiveFacts, pinFact } from "./memory/facts.js";
 import { archiveAndNewThread, insertMessage, resolveActiveThread } from "./memory/threads.js";
+import { stripMediaMarkers } from "./memory/strip-markers.js";
 import { estimateTokens } from "./memory/tokens.js";
-import { evaluateInitiative } from "./initiative/evaluator.js";
+import { evaluateInitiative, type EvaluateResult } from "./initiative/evaluator.js";
+import type { CandidateKind } from "./initiative/queue.js";
+import {
+  closeThreadsTouchedBy,
+  lastAssistantText,
+  noteOpenThreads,
+  noteUnansweredQuestion,
+} from "./initiative/open-threads.js";
 import {
   draftInitiativeMessage,
   commitInitiativeMessage,
+  releaseReservation,
+  reserveInitiative,
   type InitiativeDraft,
 } from "./initiative/generator.js";
 import {
@@ -38,7 +69,13 @@ export type ChatRequest = {
   ownerId: string;
   threadId?: string;
   auditSessionId?: string | null;
+  imageUrls?: string[];
 };
+
+const NUDGE_KINDS = new Set<CandidateKind>([
+  "she_owes",
+  "he_never_answered",
+]);
 
 export type ChatStreamEvent =
   | { type: "delta"; text: string }
@@ -75,6 +112,37 @@ export class ChatService {
     this.activeOwner = null;
   }
 
+  /**
+   * The bot asks this before the turn so it can say "hang on, looking" while the
+   * search and the generation are still running. Pure predicates plus one count,
+   * no network, so it stays well inside the interim-bubble window.
+   */
+  lookupPreflight(message: string): boolean {
+    return this.lookupAllowed(message, classifyQuery(message));
+  }
+
+  private lookupAllowed(message: string, queryMode: string): boolean {
+    if (!env.curiosityLookupEnabled || !env.tavilyApiKey) return false;
+    if (queryMode !== "normal") return false;
+    if (!shouldLookup(message)) return false;
+    return countProvenance(this.db, "search", 24) < env.curiosityLookupPerDay;
+  }
+
+  /**
+   * A search credit is only spent when he asked her to look or the question is
+   * about something current. Recall turns never search: those are about him.
+   */
+  private async maybeLookUp(
+    message: string,
+    queryMode: string,
+  ): Promise<string | null> {
+    if (!this.lookupAllowed(message, queryMode)) return null;
+    const query = shouldLookup(message);
+    if (!query) return null;
+    const hits = await searchWeb(this.db, query);
+    return buildSearchContext(query, hits);
+  }
+
   async *stream(request: ChatRequest): AsyncGenerator<ChatStreamEvent> {
     if (!env.mistralApiKey) {
       yield {
@@ -102,6 +170,8 @@ export class ChatService {
         request.threadId ??
         resolveActiveThread(this.db, request.ownerId, request.channel);
 
+      const herLast = lastAssistantText(this.db, request.ownerId);
+
       const userMsgId = insertMessage(this.db, {
         threadId,
         ownerId: request.ownerId,
@@ -110,6 +180,16 @@ export class ChatService {
         channel: request.channel,
         tokenEstimate: estimateTokens(request.message),
         auditSessionId: request.auditSessionId,
+      });
+
+      // Anything he comes back to stops being unfinished; what he anchors to a
+      // time, or leaves hanging, becomes material for a follow-up later.
+      closeThreadsTouchedBy(this.db, request.ownerId, request.message);
+      noteUnansweredQuestion(this.db, request.ownerId, herLast, request.message);
+      noteOpenThreads(this.db, request.ownerId, {
+        role: "user",
+        text: request.message,
+        messageId: userMsgId,
       });
 
       handleForgetRequest(this.db, request.ownerId, request.message);
@@ -145,21 +225,59 @@ export class ChatService {
         request.channel,
         request.message,
         threadId,
+        userMsgId,
       );
 
-      const system = appendMemoryBlock(
-        loadSystemPrompt(request.channel),
-        assembled.memoryBlock,
+      const promptParts = loadSystemPrompt(request.channel);
+      const examples =
+        env.personaFewshotEnabled && assembled.queryMode !== "recall"
+          ? selectVoiceExamples({
+              message: request.message,
+              seed: assembled.threadId,
+              max: env.personaFewshotCount,
+              extraTags:
+                assembled.queryMode === "soft_recall"
+                  ? ["fabrication_bait", "recall_empty"]
+                  : [],
+            })
+          : [];
+
+      const curiosity =
+        request.channel === "voice"
+          ? null
+          : assembleCuriosity(this.db, request.message);
+
+      const searchContext = await this.maybeLookUp(
+        request.message,
+        assembled.queryMode,
       );
 
-      const messages: ChatMessage[] = [
-        { role: "system", content: system },
-        ...assembled.hotMessages.map((m) => ({
-          role: m.role as "user" | "assistant",
-          content: m.content,
-        })),
-        { role: "user", content: request.message },
-      ];
+      // Wanted a lookup, did not get one: she has to say so instead of guessing.
+      const lookupGuard =
+        !searchContext && shouldLookup(request.message)
+          ? NO_LOOKUP_GUARD
+          : null;
+      const guard = isPremiseCheck(request.message)
+        ? [PREMISE_GUARD, lookupGuard].filter(Boolean).join("\n\n")
+        : lookupGuard;
+
+      const buildMessages = (
+        withExamples: VoiceExample[],
+        withCuriosity: CuriosityInjection = curiosity,
+      ) =>
+        buildChatMessages({
+          system: appendMemoryBlock(promptParts, assembled.memoryBlock, {
+            curiosity: withCuriosity?.text,
+            voice: buildVoiceBlock(withExamples),
+            guard,
+          }),
+          hot: assembled.hotMessages,
+          message: request.message,
+          imageUrls: request.imageUrls,
+          searchContext,
+        });
+
+      const messages = buildMessages(examples);
 
       let full = "";
       const temp =
@@ -168,6 +286,9 @@ export class ChatService {
           : request.channel === "voice"
             ? env.mistralVoiceTemperature
             : env.mistralChatTemperature;
+      // soft_recall stays on the conversational budget: it is a question about a
+      // past exchange, not a memory audit, and clamping it to 120 is what makes
+      // her sound like she is reading off an index card.
       const maxTokens =
         assembled.queryMode === "recall"
           ? 120
@@ -175,24 +296,114 @@ export class ChatService {
             ? 512
             : 2048;
 
-      for await (const delta of streamChat(messages, {
+      // Text chat only: recall wants stable phrasing and voice is short enough
+      // that penalising repeats mostly costs coherence.
+      const presencePenalty =
+        assembled.queryMode !== "recall" && request.channel !== "voice"
+          ? env.mistralChatPresencePenalty
+          : undefined;
+
+      const sampling = {
         maxTokens,
         temperature: temp,
-        reasoningEffort: "none",
+        presencePenalty,
+        reasoningEffort: "none" as const,
         signal: this.abortController.signal,
-      })) {
+      };
+
+      // Text channels hold the deltas back so a copied sample or a fabricated
+      // "I read" can be regenerated before Doc sees it. Voice keeps streaming,
+      // because there the latency is audible.
+      const buffered = request.channel !== "voice";
+
+      for await (const delta of streamChat(messages, sampling)) {
         full += delta;
-        yield { type: "delta", text: delta };
+        if (!buffered) yield { type: "delta", text: delta };
       }
 
+      if (buffered && examples.length > 0 && looksLikeParrot(full, examples)) {
+        console.warn("[chat] reply copied a voice sample, regenerating once");
+        full = "";
+        for await (const delta of streamChat(buildMessages([]), sampling)) {
+          full += delta;
+        }
+      }
+
+      if (buffered && isEchoOfUser(full, request.message)) {
+        console.warn("[chat] reply echoed him, regenerating once");
+        full = "";
+        for await (const delta of streamChat(
+          buildMessages(examples, {
+            text: NO_ECHO_GUARD,
+            takeIds: [],
+          }),
+          sampling,
+        )) {
+          full += delta;
+        }
+      }
+
+      if (
+        buffered &&
+        isPremiseCheck(request.message) &&
+        acceptedUncheckedPremise(full)
+      ) {
+        console.warn("[chat] accepted a premise unchecked, regenerating once");
+        full = "";
+        for await (const delta of streamChat(
+          buildMessages(examples, {
+            text: PREMISE_GUARD,
+            takeIds: [],
+          }),
+          sampling,
+        )) {
+          full += delta;
+        }
+      }
+
+      // Nothing licenses "I was reading about that" except a provenance row.
+      if (
+        buffered &&
+        !curiosity &&
+        !searchContext &&
+        claimsOwnActivity(full) &&
+        !hasReadActivity(this.db, 24)
+      ) {
+        console.warn("[chat] unbacked activity claim, regenerating once");
+        full = "";
+        for await (const delta of streamChat(
+          buildMessages(examples, NO_ACTIVITY_GUARD),
+          sampling,
+        )) {
+          full += delta;
+        }
+      }
+
+      full = sanitizeTypography(full);
+
+      if (buffered && full) {
+        yield { type: "delta", text: full };
+      }
+
+      // Only after a reply actually went out does the surfacing count, so a
+      // regenerated turn does not burn the daily cap.
+      if (curiosity && full) commitCuriosity(this.db, curiosity);
+
+      const persisted = stripMediaMarkers(full);
       const assistantId = insertMessage(this.db, {
         threadId,
         ownerId: request.ownerId,
         role: "assistant",
-        text: full,
+        text: persisted,
         channel: request.channel,
-        tokenEstimate: estimateTokens(full),
+        tokenEstimate: estimateTokens(persisted),
         auditSessionId: request.auditSessionId,
+      });
+
+      noteOpenThreads(this.db, request.ownerId, {
+        role: "assistant",
+        text: persisted,
+        messageId: assistantId,
       });
 
       this.consolidator.afterMessage(
@@ -304,6 +515,15 @@ export class ChatService {
     return getMemoryHealth(this.db);
   }
 
+  recordReaction(ownerId: string, input: { messageId: string; emoji: string }) {
+    return recordReaction(this.db, ownerId, input);
+  }
+
+  /** For the curiosity loop, which owns its own tables in the same file. */
+  get database(): DatabaseSync {
+    return this.db;
+  }
+
   getDb() {
     return this.db;
   }
@@ -312,7 +532,7 @@ export class ChatService {
     return this.assembler;
   }
 
-  async evaluateInitiative(ownerId: string) {
+  async evaluateInitiative(ownerId: string): Promise<EvaluateResult> {
     if (isProactivePausedDb(this.db, ownerId)) {
       return {
         shouldReachOut: false,
@@ -320,10 +540,39 @@ export class ChatService {
         cooldownRemainingSec: 0,
       };
     }
-    return evaluateInitiative(this.db, ownerId, {
+    const cold = evaluateInitiative(this.db, ownerId, {
       busy: this.isBusy(ownerId),
       enabled: env.proactiveEnabled,
     });
+    if (cold.shouldReachOut || cold.reason !== "user_active_recently") {
+      return cold;
+    }
+    // He is around and she dropped something inside this session. That is a
+    // nudge, not cold outreach, and it costs the same daily budget.
+    if (!this.nudgeReady(ownerId)) return cold;
+    const nudge = evaluateInitiative(this.db, ownerId, {
+      busy: this.isBusy(ownerId),
+      enabled: env.proactiveEnabled,
+      nudge: true,
+    });
+    return nudge.candidate && NUDGE_KINDS.has(nudge.candidate.kind)
+      ? nudge
+      : cold;
+  }
+
+  /** Her own last word has to be stale, or a nudge is just interrupting. */
+  private nudgeReady(ownerId: string): boolean {
+    const row = this.db
+      .prepare(
+        `SELECT ts FROM mem_messages
+         WHERE owner_id = ? AND role = 'assistant'
+         ORDER BY id DESC LIMIT 1`,
+      )
+      .get(ownerId) as { ts: string } | undefined;
+    if (!row) return false;
+    const ageMin =
+      (Date.now() - new Date(row.ts).getTime()) / 60_000;
+    return ageMin >= env.proactiveNudgeIdleMinutes;
   }
 
   async tickInitiative(ownerId: string): Promise<
@@ -355,7 +604,9 @@ export class ChatService {
         ownerId,
         evalResult.angle ?? "check_in",
         evalResult.reason,
+        evalResult.candidate,
       );
+      draft.reservationId = reserveInitiative(this.db, ownerId, draft);
       return { shouldSend: true, ...draft };
     } catch (err) {
       releaseInitiativeLease(this.db, ownerId);
@@ -363,6 +614,12 @@ export class ChatService {
     } finally {
       this.activeOwner = null;
     }
+  }
+
+  /** The send failed, so the claimed material goes back on the queue. */
+  abortInitiative(ownerId: string, reservationId: number): void {
+    releaseReservation(this.db, reservationId);
+    releaseInitiativeLease(this.db, ownerId);
   }
 
   commitInitiative(

@@ -6,12 +6,15 @@ import {
   FACT_MIN_CONFIDENCE,
   shouldEnqueueFacts,
   shouldEnqueueSummary,
+  summaryBatchSize,
 } from "./consolidator-triggers.js";
 import { SummaryBatchTooSmallError } from "./consolidator-errors.js";
 import { getDenylist } from "./correction-denylist.js";
 import { parseJsonObject } from "./extract-json.js";
 import { filterHotForRecall } from "./hot-filter.js";
 import { getActiveSummary, listActiveFacts, mergeFacts } from "./facts.js";
+import { getKv, setKv } from "./kv.js";
+import { listStances, upsertStance } from "./stances.js";
 import { incrementMemoryMetric, pruneOldDoneJobs } from "./db.js";
 import type { FactInput } from "./types.js";
 import {
@@ -25,7 +28,7 @@ import {
 } from "./threads.js";
 import { estimateTokens } from "./tokens.js";
 
-type JobType = "summary" | "facts" | "embed";
+type JobType = "summary" | "facts" | "embed" | "stances";
 
 type CoalescePayload = {
   threadId: string;
@@ -38,6 +41,7 @@ type CoalescePayload = {
 const CONSOLIDATION_TIMEOUT_MS = 4 * 60 * 1000;
 const MAX_JOBS_PER_TICK = 5;
 const FACTS_WINDOW_MAX_MESSAGES = 30;
+const STANCE_WINDOW_MAX_MESSAGES = 12;
 
 function apiSignal(): AbortSignal {
   return AbortSignal.timeout(CONSOLIDATION_TIMEOUT_MS);
@@ -118,7 +122,7 @@ export class ConsolidationWorker {
 
   enqueueCoalesced(
     ownerId: string,
-    jobType: "facts" | "summary",
+    jobType: "facts" | "summary" | "stances",
     threadId: string,
     triggerMessageId: number,
     extra: Record<string, unknown> = {},
@@ -226,6 +230,14 @@ export class ConsolidationWorker {
     }
 
     if (
+      env.stanceLedgerEnabled &&
+      assistantCount > 0 &&
+      assistantCount % env.stanceEveryN === 0
+    ) {
+      this.enqueueCoalesced(ownerId, "stances", threadId, messageId);
+    }
+
+    if (
       shouldEnqueueSummary(
         count,
         tokenSum,
@@ -329,6 +341,10 @@ export class ConsolidationWorker {
         payload.triggerMessageId,
       );
       return payload;
+    }
+    if (job.job_type === "stances" && payload.threadId) {
+      await this.runStances(job.owner_id, payload.threadId);
+      return null;
     }
     return null;
   }
@@ -553,6 +569,82 @@ ${existingBlock}`,
     }
   }
 
+  /**
+   * Harvest the positions she actually took, from her own messages only.
+   * Doc's opinions are not her stances, and inferring them would give her
+   * something to "defend" that she never said.
+   */
+  private async runStances(ownerId: string, threadId: string): Promise<void> {
+    const cutoffKey = `stance_cutoff:${threadId}`;
+    const cutoff = Number(getKv(this.db, cutoffKey) ?? 0);
+    const rows = this.db
+      .prepare(
+        `SELECT id, text FROM mem_messages
+         WHERE thread_id = ? AND role = 'assistant' AND id > ?
+         ORDER BY id ASC LIMIT ?`,
+      )
+      .all(threadId, cutoff, STANCE_WINDOW_MAX_MESSAGES) as Array<{
+      id: number;
+      text: string;
+    }>;
+
+    if (rows.length === 0) return;
+
+    const lastId = rows[rows.length - 1]!.id;
+    const transcript = rows.map((r) => `- ${r.text}`).join("\n");
+    const existing = listStances(this.db, ownerId, 20);
+    const existingBlock = existing.length
+      ? existing.map((s) => `- ${s.topic}: ${s.stance}`).join("\n")
+      : "(none)";
+
+    const { text } = await completeChat(
+      [
+        {
+          role: "system",
+          content: `Extract opinions the speaker asserted as their own. Output JSON only.
+Schema: { "stances": [{ "topic": "short slug", "stance": "one clause, first person, max 18 words", "confidence": 0-1 }] }
+Rules:
+- only positions the speaker took, not questions, not facts, not the other person's views
+- topic is a lowercase noun phrase, 1-3 words, stable across rephrasings
+- skip hedged or throwaway remarks; a stance is something worth defending later
+- max 4 stances; if none, return { "stances": [] }
+EXISTING_STANCES (reuse the same topic slug when it is the same subject):
+${existingBlock}`,
+        },
+        { role: "user", content: transcript },
+      ],
+      {
+        maxTokens: 500,
+        temperature: 0.1,
+        reasoningEffort: "none",
+        signal: apiSignal(),
+      },
+    );
+
+    let parsed: { stances?: Array<{ topic?: string; stance?: string; confidence?: number }> };
+    try {
+      parsed = parseJsonObject(text);
+    } catch {
+      incrementMemoryMetric(this.db, "stances_parse_errors");
+      setKv(this.db, cutoffKey, String(lastId));
+      return;
+    }
+
+    let stored = 0;
+    for (const s of parsed.stances ?? []) {
+      if (!s.topic?.trim() || !s.stance?.trim()) continue;
+      upsertStance(
+        this.db,
+        ownerId,
+        { topic: s.topic, stance: s.stance, confidence: s.confidence },
+        lastId,
+      );
+      stored += 1;
+    }
+    incrementMemoryMetric(this.db, "stances_stored", stored);
+    setKv(this.db, cutoffKey, String(lastId));
+  }
+
   private async runSummary(
     ownerId: string,
     threadId: string,
@@ -560,12 +652,22 @@ ${existingBlock}`,
   ): Promise<void> {
     const meta = getThreadMeta(this.db, threadId);
     const cutoff = meta?.hot_cutoff_message_id ?? 0;
+    const batchSize = summaryBatchSize(
+      countMessagesSinceCutoff(this.db, threadId, cutoff),
+      env.memorySummaryBatch,
+      env.memorySummaryResidualFloor,
+    );
+
+    if (batchSize < 5) {
+      throw new SummaryBatchTooSmallError();
+    }
+
     const fullBatch = getHotMessages(
       this.db,
       threadId,
-      env.memorySummaryBatch + 100,
+      batchSize + 100,
       cutoff,
-    ).slice(0, env.memorySummaryBatch);
+    ).slice(0, batchSize);
 
     if (fullBatch.length < 5) {
       throw new SummaryBatchTooSmallError();

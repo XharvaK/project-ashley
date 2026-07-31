@@ -1,8 +1,12 @@
-import type { Client } from "discord.js";
+import type { Client, Message } from "discord.js";
 
 import { config } from "../config.js";
 
+import { channelQueue } from "../chat/channel-queue.js";
+
 import {
+
+  abortInitiative,
 
   checkHealth,
 
@@ -102,7 +106,25 @@ export function startProactiveScheduler(client: Client): void {
 
       const dm = await user.createDM();
 
-      const sent = await dm.send(result.text);
+      // Through the channel queue, or a proactive DM lands between two bubbles
+      // of a reply she is still delivering.
+      const delivery: { sent?: Message } = {};
+      try {
+        await channelQueue.enqueue(dm.id, async () => {
+          delivery.sent = await dm.send(result.text);
+        });
+      } catch (err) {
+        console.warn("[discord-bot] proactive send failed:", err);
+      }
+
+      const sent = delivery.sent;
+      if (!sent) {
+        // Hand the material back, otherwise a failed send burns it for good.
+        if (result.reservationId) {
+          await abortInitiative(result.reservationId).catch(() => {});
+        }
+        return;
+      }
 
       await commitInitiative({
 
@@ -115,6 +137,12 @@ export function startProactiveScheduler(client: Client): void {
         reason: result.reason,
 
         discordMessageId: sent.id,
+
+        candidateKind: result.candidateKind,
+
+        materialKey: result.materialKey,
+
+        reservationId: result.reservationId,
 
       });
 

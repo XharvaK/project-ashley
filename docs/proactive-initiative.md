@@ -2,42 +2,64 @@
 
 ## Goal
 
-Ashley sends unprompted DM messages when context warrants it — not on a fixed spam schedule.
+Ashley messages first when she has something to say. Volume is capped, but the
+binding constraint is material, not permission: there is no filler path, so an
+empty queue means silence.
 
 ## Doc preferences
 
 - **Surface:** DM only
-- **Cadence:** 3–4 per day max, min 2 hours since Doc's last message, min 2 hours between proactive sends
-- **Hours:** 7/24 (no quiet hours)
-- **Rollback:** `PROACTIVE_ENABLED=false` or `/proactive pause`
+- **Cadence:** up to 8 a day, in bursts rather than on a metronome
+- **Hours:** `QUIET_HOURS_START`–`QUIET_HOURS_END` in `DOC_TIMEZONE`, enforced
+- **Rollback:** `PROACTIVE_ENABLED=false`, `/proactive pause`, or a bare "stop" in chat
 
 ## Pipeline
 
 1. **Scheduler** (discord-bot, every `PROACTIVE_CHECK_INTERVAL_MIN` minutes)
-2. **Hard cooldown** (agent-service, no LLM) — idle time, daily cap, busy lock, cold start
-3. **Soft gate** (`mistral-small-latest`, JSON) — is there enough context for a natural outreach?
-4. **Generate** (`mistral-medium-latest`, `proactive-companion.md`) — one short message, persisted to `mem_messages` + `mem_initiative_log`
+2. **Gate** (`initiative/schedule.ts`, deterministic, no LLM) — quiet hours, local
+   daily cap, silence backoff, burst rhythm, idle floor
+3. **Material queue** (`initiative/queue.ts`) — candidates from open threads,
+   watches, curiosity takes, stances, facts, and real silence, each decayed by
+   age; nothing under `PROACTIVE_MIN_SCORE` may interrupt him
+4. **Draft** (`mistral-medium-latest`, `proactive-companion.md`) — wording only,
+   bounded to the candidate's material
+5. **Reserve, send, commit** — the log row is claimed before the send, so a lost
+   commit cannot double-fire after a restart
+
+Candidate kinds, ranked: `she_owes`, `time_anchored`, `he_never_answered`,
+`watch_fired`, `curiosity_take`, `stance`, `callback`, `check_in`, `ambient`.
 
 ## API
 
 | Method | Path | Body | Response |
 |--------|------|------|----------|
-| POST | `/initiative/evaluate` | `{ userId }` | `{ shouldReachOut, reason?, angle?, cooldownRemainingSec? }` |
-| POST | `/initiative/generate` | `{ userId }` | `{ text, threadId, angle, reason }` |
+| POST | `/initiative/evaluate` | `{ userId }` | `{ shouldReachOut, reason, angle?, cooldownRemainingSec }` |
+| POST | `/initiative/tick` | `{ userId }` | `{ shouldSend, text?, threadId?, angle?, materialKey?, reservationId? }` |
+| POST | `/initiative/commit` | `{ userId, ...draft, discordMessageId }` | `{ ok }` |
+| POST | `/initiative/abort` | `{ userId, reservationId }` | `{ ok }` |
 | GET | `/initiative/status?owner_id=` | — | `{ enabled, sentToday, lastSentAt, lastUserMessageAt, paused }` |
 
 ## DB
 
-`mem_initiative_log` (schema v2): owner_id, thread_id, angle, reason, message_text, discord_message_id, sent_at
+- `mem_initiative_log` (v8 adds `material_key`, `candidate_kind`, `feedback`):
+  `material_key` is what stops the same open thread or take going out twice.
+- `mem_open_threads` (v8): unfinished business, closed as soon as either of them
+  comes back to it.
 
 ## Env
 
 ```
 PROACTIVE_ENABLED=true
-PROACTIVE_MAX_PER_DAY=4
+PROACTIVE_MAX_PER_DAY=8
 PROACTIVE_MIN_IDLE_HOURS=2
-PROACTIVE_CHECK_INTERVAL_MIN=20
-PROACTIVE_COLD_START_HOURS=24
-MISTRAL_REASONING_EFFORT=none
-MISTRAL_CHAT_TEMPERATURE=0.55
+PROACTIVE_MIN_SCORE=20
+PROACTIVE_BURST_MAX=3
+PROACTIVE_BURST_GAP_MINUTES=12
+PROACTIVE_BURST_REST_MINUTES=150
+PROACTIVE_MAX_UNANSWERED=4
+PROACTIVE_BACKOFF_STEP_HOURS=1.5
+PROACTIVE_SESSION_WINDOW_HOURS=3
+PROACTIVE_NUDGE_IDLE_MINUTES=25
+QUIET_HOURS_START=23:30
+QUIET_HOURS_END=07:30
 ```

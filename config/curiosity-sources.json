@@ -1,0 +1,134 @@
+{
+  "version": 1,
+  "note": "Her reading list. interest drives relevance matching; weight biases what gets read in full. Verified feeds only: anything bot-walled or dead belongs in a watch query instead.",
+  "sources": [
+    {
+      "slug": "hn-front",
+      "title": "Hacker News",
+      "kind": "rss",
+      "url": "https://hnrss.org/frontpage?points=150",
+      "interest": "dev",
+      "weight": 1.2
+    },
+    {
+      "slug": "lobsters",
+      "title": "Lobsters",
+      "kind": "rss",
+      "url": "https://lobste.rs/rss",
+      "interest": "dev",
+      "weight": 1
+    },
+    {
+      "slug": "sqlite-news",
+      "title": "SQLite commit timeline",
+      "kind": "rss",
+      "url": "https://sqlite.org/src/timeline.rss",
+      "interest": "dev",
+      "weight": 0.9
+    },
+    {
+      "slug": "arxiv-neuro",
+      "title": "arXiv neurons and cognition",
+      "kind": "atom",
+      "url": "https://rss.arxiv.org/atom/q-bio.NC",
+      "interest": "pharma",
+      "weight": 1.1
+    },
+    {
+      "slug": "biorxiv-neuro",
+      "title": "bioRxiv neuroscience",
+      "kind": "rss",
+      "url": "https://connect.biorxiv.org/biorxiv_xml.php?subject=neuroscience",
+      "interest": "pharma",
+      "weight": 1
+    },
+    {
+      "slug": "nature-npp",
+      "title": "Neuropsychopharmacology",
+      "kind": "rss",
+      "url": "https://www.nature.com/npp.rss",
+      "interest": "pharma",
+      "weight": 1.1
+    },
+    {
+      "slug": "bandcamp-daily",
+      "title": "Bandcamp Daily",
+      "kind": "rss",
+      "url": "https://daily.bandcamp.com/feed",
+      "interest": "music",
+      "weight": 1
+    },
+    {
+      "slug": "xlr8r",
+      "title": "XLR8R",
+      "kind": "rss",
+      "url": "https://xlr8r.com/feed/",
+      "interest": "music",
+      "weight": 0.8
+    },
+    {
+      "slug": "rockpapershotgun",
+      "title": "Rock Paper Shotgun",
+      "kind": "rss",
+      "url": "https://www.rockpapershotgun.com/feed",
+      "interest": "gaming",
+      "weight": 0.9
+    },
+    {
+      "slug": "aeon",
+      "title": "Aeon",
+      "kind": "rss",
+      "url": "https://aeon.co/feed.rss",
+      "interest": "philosophy",
+      "weight": 1.1
+    },
+    {
+      "slug": "acx",
+      "title": "Astral Codex Ten",
+      "kind": "rss",
+      "url": "https://www.astralcodexten.com/feed",
+      "interest": "philosophy",
+      "weight": 1
+    },
+    {
+      "slug": "lesswrong",
+      "title": "LessWrong",
+      "kind": "rss",
+      "url": "https://www.lesswrong.com/feed.xml?view=curated-rss",
+      "interest": "philosophy",
+      "weight": 0.9
+    },
+    {
+      "slug": "bbc-turkce",
+      "title": "BBC Türkçe",
+      "kind": "rss",
+      "url": "https://feeds.bbci.co.uk/turkce/rss.xml",
+      "interest": "turkey",
+      "weight": 1
+    },
+    {
+      "slug": "bianet",
+      "title": "Bianet",
+      "kind": "rss",
+      "url": "https://bianet.org/bianet.rss",
+      "interest": "turkey",
+      "weight": 0.9
+    },
+    {
+      "slug": "gazete-duvar",
+      "title": "Gazete Duvar",
+      "kind": "rss",
+      "url": "https://www.gazeteduvar.com.tr/rss",
+      "interest": "turkey",
+      "weight": 0.8
+    },
+    {
+      "slug": "wikipedia-featured",
+      "title": "Wikipedia featured",
+      "kind": "rss",
+      "url": "https://en.wikipedia.org/w/api.php?action=featuredfeed&feed=featured&feedformat=rss",
+      "interest": "wildcard",
+      "weight": 0.7
+    }
+  ]
+}

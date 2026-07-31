@@ -75,6 +75,10 @@ export const config = {
   tenorApiKey: process.env.TENOR_API_KEY ?? "",
   gifEnabled: process.env.GIF_ENABLED !== "false",
   gifCooldownSec: Number(process.env.GIF_COOLDOWN_SEC ?? 120),
+  // Opt-in, not opt-out: pacing is the one change here that can only be judged
+  // live, so it stays off until Doc has watched it in a real conversation.
+  paceEnabled: process.env.DISCORD_PACE_ENABLED === "true",
+  reactPolicyEnabled: process.env.DISCORD_REACT_POLICY_ENABLED === "true",
 };
 
 export function validateConfig(): void {

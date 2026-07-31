@@ -1,54 +1,40 @@
 import type { DatabaseSync } from "node:sqlite";
 import { env } from "../env.js";
-import { completeChat } from "../mistral-client.js";
-import { getActiveSummary, listActiveFacts } from "../memory/facts.js";
-import { resolveActiveThread } from "../memory/threads.js";
-import {
-  checkHardCooldown,
-  getLastUserMessageAt,
-  type CooldownResult,
-} from "./cooldown.js";
+import { getLastUserMessageAt } from "./cooldown.js";
+import { pickCandidate, type Candidate } from "./queue.js";
+import { hoursSince, initiativeGate } from "./schedule.js";
 
 export type EvaluateResult = {
   shouldReachOut: boolean;
   reason: string;
   angle?: "question" | "opinion" | "check_in";
+  candidate?: Candidate;
   cooldownRemainingSec: number;
 };
 
-function hasMemoryContext(
+/**
+ * Two independent questions, in this order: may she speak at all, and is there
+ * anything worth saying. Nothing invents material to fill a permitted slot, so
+ * an empty queue is silence rather than "hey, how's it going".
+ */
+export function evaluateInitiative(
   db: DatabaseSync,
   ownerId: string,
-  threadId: string,
-): boolean {
-  const facts = listActiveFacts(db, ownerId);
-  const narrative = getActiveSummary(db, threadId);
-  if (facts.length > 0 || narrative?.trim()) return true;
-
-  const lastUser = getLastUserMessageAt(db, ownerId);
-  if (!lastUser) return false;
-  const idleH =
-    (Date.now() - new Date(lastUser).getTime()) / 3600000;
-  return idleH < env.proactiveColdStartHours;
-}
-
-export async function evaluateInitiative(
-  db: DatabaseSync,
-  ownerId: string,
-  options: { busy: boolean; enabled: boolean },
-): Promise<EvaluateResult> {
-  const hard: CooldownResult = checkHardCooldown(db, ownerId, options);
-  if (!hard.allowed) {
-    console.log(`[initiative] evaluate skip: ${hard.reason}`);
+  options: { busy: boolean; enabled: boolean; nudge?: boolean },
+): EvaluateResult {
+  const gate = initiativeGate(db, ownerId, options);
+  if (!gate.allowed) {
     return {
       shouldReachOut: false,
-      reason: hard.reason,
-      cooldownRemainingSec: hard.cooldownRemainingSec,
+      reason: gate.reason,
+      cooldownRemainingSec: gate.cooldownRemainingSec,
     };
   }
 
-  const threadId = resolveActiveThread(db, ownerId, env.proactiveChannel);
-  if (!hasMemoryContext(db, ownerId, threadId)) {
+  const idleHours = hoursSince(getLastUserMessageAt(db, ownerId));
+  if (!Number.isFinite(idleHours) && env.proactiveColdStartHours > 0) {
+    // Never talked to her: there is nothing to follow up on and nothing to
+    // check in about, so she waits until he starts.
     return {
       shouldReachOut: false,
       reason: "cold_start_no_context",
@@ -56,54 +42,20 @@ export async function evaluateInitiative(
     };
   }
 
-  const facts = listActiveFacts(db, ownerId).slice(0, 15);
-  const narrative = getActiveSummary(db, threadId) ?? "";
-  const factLines = facts.map((f) => `- ${f.value}`).join("\n");
-
-  try {
-    const { text } = await completeChat(
-      [
-        {
-          role: "system",
-          content: `You gate proactive Discord outreach for a personal companion bot.
-Output JSON only: { "reach_out": boolean, "angle": "question"|"opinion"|"check_in"|null, "reason": string }
-reach_out true only if there is a natural, memory-grounded reason to message Doc now.
-Never suggest outreach based on invented facts. Prefer false when uncertain.`,
-        },
-        {
-          role: "user",
-          content: `Standing facts:\n${factLines || "(none)"}\n\nThread summary:\n${narrative || "(none)"}\n\nShould Ashley reach out now?`,
-        },
-      ],
-      { maxTokens: 200, temperature: 0.1 },
-    );
-
-    const parsed = JSON.parse(text) as {
-      reach_out?: boolean;
-      angle?: "question" | "opinion" | "check_in";
-      reason?: string;
-    };
-
-    if (!parsed.reach_out) {
-      return {
-        shouldReachOut: false,
-        reason: parsed.reason ?? "gate_declined",
-        cooldownRemainingSec: 0,
-      };
-    }
-
-    const angle = parsed.angle ?? "check_in";
-    return {
-      shouldReachOut: true,
-      reason: parsed.reason ?? "gate_approved",
-      angle,
-      cooldownRemainingSec: 0,
-    };
-  } catch {
+  const candidate = pickCandidate(db, ownerId, { idleHours });
+  if (!candidate) {
     return {
       shouldReachOut: false,
-      reason: "gate_parse_failed",
+      reason: "no_material",
       cooldownRemainingSec: 0,
     };
   }
+
+  return {
+    shouldReachOut: true,
+    reason: `${candidate.kind} (${Math.round(candidate.score)})`,
+    angle: candidate.angle,
+    candidate,
+    cooldownRemainingSec: 0,
+  };
 }

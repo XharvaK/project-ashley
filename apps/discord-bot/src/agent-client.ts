@@ -29,7 +29,11 @@ async function agentFetch<T>(
   return body;
 }
 
-export async function chatText(message: string, threadId?: string) {
+export async function chatText(
+  message: string,
+  threadId?: string,
+  imageUrls?: string[],
+) {
   return agentFetch<{
     text: string;
     threadId: string;
@@ -47,8 +51,44 @@ export async function chatText(message: string, threadId?: string) {
       channel: "discord",
       userId: config.ownerId,
       threadId,
+      imageUrls: imageUrls?.length ? imageUrls : undefined,
     }),
   });
+}
+
+export async function curiosityStatus() {
+  return agentFetch<{
+    enabled: boolean;
+    sources: number;
+    itemsToday: number;
+    readToday: number;
+    takesToday: number;
+    lastTakeAt: string | null;
+  }>("/curiosity/status");
+}
+
+export async function reportReaction(messageId: string, emoji: string) {
+  return agentFetch<{ ok: boolean; feedback: string }>("/signals/reaction", {
+    method: "POST",
+    body: JSON.stringify({ userId: config.ownerId, messageId, emoji }),
+  });
+}
+
+/** Cheap and best effort: a failure here just means no interim bubble. */
+export async function lookupPreflight(message: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${config.agentUrl}/chat/preflight`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message }),
+      signal: AbortSignal.timeout(2500),
+    });
+    if (!res.ok) return false;
+    const body = (await res.json()) as { lookup?: boolean };
+    return Boolean(body.lookup);
+  } catch {
+    return false;
+  }
 }
 
 export async function pinMemory(text: string, sensitivity: "none" | "private" = "none") {
@@ -117,6 +157,9 @@ export async function tickInitiative() {
         threadId: string;
         angle: "question" | "opinion" | "check_in";
         reason: string;
+        candidateKind?: string;
+        materialKey?: string;
+        reservationId?: number;
       }
   >("/initiative/tick", {
     method: "POST",
@@ -130,10 +173,20 @@ export async function commitInitiative(body: {
   angle: "question" | "opinion" | "check_in";
   reason: string;
   discordMessageId: string;
+  candidateKind?: string;
+  materialKey?: string;
+  reservationId?: number;
 }) {
   return agentFetch<{ ok: boolean }>("/initiative/commit", {
     method: "POST",
     body: JSON.stringify({ userId: config.ownerId, ...body }),
+  });
+}
+
+export async function abortInitiative(reservationId: number) {
+  return agentFetch<{ ok: boolean }>("/initiative/abort", {
+    method: "POST",
+    body: JSON.stringify({ userId: config.ownerId, reservationId }),
   });
 }
 

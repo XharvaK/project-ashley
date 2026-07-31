@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import { DatabaseSync } from "node:sqlite";
 import { migrate } from "./db.js";
 
+const LATEST_VERSION = 8;
+
 describe("migrate", () => {
-  it("reaches schema v5 with habits and facts_cutoff", () => {
+  it("reaches the latest schema with habits, facts_cutoff and stances", () => {
     const db = new DatabaseSync(":memory:");
     migrate(db);
     const cols = db
@@ -17,13 +19,28 @@ describe("migrate", () => {
     expect(names).toContain("mem_habits");
     expect(names).toContain("mem_reminders");
     expect(names).toContain("mem_pending_actions");
+    expect(names).toContain("mem_stances");
     const version = db
       .prepare("PRAGMA user_version")
       .get() as { user_version: number };
-    expect(version.user_version).toBe(5);
+    expect(version.user_version).toBe(LATEST_VERSION);
   });
 
-  it("migrates v3 to v5 idempotently", () => {
+  it("keeps queued jobs when the job_type constraint is rebuilt", () => {
+    const db = new DatabaseSync(":memory:");
+    migrate(db);
+    const now = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO mem_jobs (idempotency_key, owner_id, job_type, payload_json, created_at, updated_at)
+       VALUES ('k1', 'o1', 'stances', '{}', ?, ?)`,
+    ).run(now, now);
+    const row = db
+      .prepare(`SELECT job_type FROM mem_jobs WHERE idempotency_key = 'k1'`)
+      .get() as { job_type: string };
+    expect(row.job_type).toBe("stances");
+  });
+
+  it("migrates a partial v3 database idempotently", () => {
     const db = new DatabaseSync(":memory:");
     db.exec(`
       PRAGMA user_version = 3;
@@ -49,6 +66,6 @@ describe("migrate", () => {
     const version = db
       .prepare("PRAGMA user_version")
       .get() as { user_version: number };
-    expect(version.user_version).toBe(5);
+    expect(version.user_version).toBe(LATEST_VERSION);
   });
 });
