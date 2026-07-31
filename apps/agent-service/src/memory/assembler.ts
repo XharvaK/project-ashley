@@ -21,6 +21,7 @@ import {
   isRecallQuery,
   type QueryMode,
 } from "./recall.js";
+import { isActivityAsk } from "../curiosity/activity-ask.js";
 import { reentryLine } from "./reentry.js";
 import { takeReactionLine } from "../signals.js";
 import { paraphraseSnippet, retrieveChunks } from "./retrieval.js";
@@ -287,7 +288,9 @@ export class MemoryAssembler {
       queryMode !== "recall" ? buildMoodBlock(this.db, ownerId) : null;
 
     const liveSignals: string[] = [];
-    const gapLine = reentryLine(this.db, ownerId, excludeMessageId);
+    const gapLine = reentryLine(this.db, ownerId, excludeMessageId, {
+      allowActivityRecap: isActivityAsk(userMessage),
+    });
     if (gapLine) liveSignals.push(gapLine);
     const reactionLine = takeReactionLine(this.db);
     if (reactionLine) liveSignals.push(reactionLine);

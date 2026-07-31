@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { env } from "../env.js";
+import type { ActivityAskKind } from "./activity-ask.js";
 import {
   countProvenance,
   logProvenance,
@@ -74,13 +75,36 @@ export function buildCuriosityBlock(takes: TakeRow[]): string | null {
   ].join("\n");
 }
 
-export function buildSolicitedCuriosityBlock(takes: TakeRow[]): string {
+export function buildSolicitedCuriosityBlock(
+  takes: TakeRow[],
+  kind: ActivityAskKind = "reading",
+): string {
+  if (kind === "general") {
+    if (takes.length === 0) {
+      return [
+        "He asked what you were doing / what you have been up to.",
+        "You have no takes logged for this stretch.",
+        "Nothing logged worth mentioning. One honest disposition is fine (flat, meh, irritated, quiet).",
+        "Do not invent titles, waiting-as-plot, counting seconds, or that you don't feel.",
+      ].join(" ");
+    }
+    const lines = takes.map((t) => `- ${t.take} (from: ${t.title})`);
+    return [
+      "He asked what you were doing. These are your real takes — answer from them, or say the stretch was quiet if none fit. Do not invent waiting-as-plot:",
+      "",
+      ...lines,
+      "",
+      "One or two clauses. Never list them as a briefing. Do not invent titles beyond these.",
+    ].join("\n");
+  }
+
   if (takes.length === 0) {
     return [
       "He asked what you have been reading.",
       "You have no takes logged today.",
       "Say you have not been reading anything worth mentioning.",
       "Do not invent titles or sources.",
+      "Do not invent waiting-as-plot or that you don't feel.",
     ].join(" ");
   }
   const lines = takes.map((t) => `- ${t.take} (from: ${t.title})`);
@@ -117,12 +141,15 @@ function assembleOrganic(
   };
 }
 
-function assembleSolicited(db: DatabaseSync): CuriosityInjection {
+function assembleSolicited(
+  db: DatabaseSync,
+  kind: ActivityAskKind,
+): CuriosityInjection {
   // Always license an answer: empty honesty when curiosity is off or no takes,
   // so we never leave hasReadActivity with a null inject on a direct ask.
   if (!env.curiosityEnabled) {
     return {
-      text: buildSolicitedCuriosityBlock([]),
+      text: buildSolicitedCuriosityBlock([], kind),
       takeIds: [],
       provenance: "mention",
     };
@@ -130,7 +157,7 @@ function assembleSolicited(db: DatabaseSync): CuriosityInjection {
 
   const takes = selectSolicitedTakes(recentTakes(db, 48), 2);
   return {
-    text: buildSolicitedCuriosityBlock(takes),
+    text: buildSolicitedCuriosityBlock(takes, kind),
     takeIds: takes.map((t) => t.id),
     provenance: "mention",
   };
@@ -139,10 +166,12 @@ function assembleSolicited(db: DatabaseSync): CuriosityInjection {
 export function assembleCuriosity(
   db: DatabaseSync,
   message: string,
-  opts?: { mode?: CuriosityMode },
+  opts?: { mode?: CuriosityMode; askKind?: ActivityAskKind },
 ): CuriosityInjection {
   const mode = opts?.mode ?? "organic";
-  if (mode === "solicited") return assembleSolicited(db);
+  if (mode === "solicited") {
+    return assembleSolicited(db, opts?.askKind ?? "reading");
+  }
   return assembleOrganic(db, message);
 }
 

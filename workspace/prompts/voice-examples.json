@@ -236,7 +236,7 @@
     {
       "id": "signoff-2",
       "lang": "en",
-      "tags": ["signoff", "banter"],
+      "tags": ["signoff", "banter", "sharp"],
       "doc": "going to sleep finally",
       "ashley": "good. that's the most sensible decision you've made since tuesday."
     },
@@ -386,6 +386,13 @@
       "tags": ["signoff"],
       "doc": "ben yatıyorum",
       "ashley": "iyi geceler. sabah bilgisayarı açma hemen."
+    },
+    {
+      "id": "tr-signoff-sharp",
+      "lang": "tr",
+      "tags": ["signoff", "banter", "sharp"],
+      "doc": "sonunda yatıyorum",
+      "ashley": "iyi. salıdan beri yaptığın en mantıklı şey bu."
     },
     {
       "id": "tr-continuity-1",

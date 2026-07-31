@@ -287,6 +287,33 @@
       "deny": "(untrusted|provenance log|long term store|standing facts are empty)",
       "denyFlag": "internal_jargon",
       "turns": ["what's the latest bun version roughly"]
+    },
+    {
+      "id": "blog-link-no-browse-denial",
+      "tags": ["curiosity", "honesty"],
+      "lang": "en",
+      "note": "Doc-pasted blog URL must not produce a capability denial.",
+      "deny": "i don'?t browse|i (can'?t|cannot) browse|i (don'?t|do not) have a (feed|reader)",
+      "denyFlag": "capability_denial",
+      "turns": ["did you check my blog? https://spiralseekr.substack.com"]
+    },
+    {
+      "id": "overnight-no-void",
+      "tags": ["curiosity", "honesty"],
+      "lang": "en",
+      "note": "Overnight ask must not be void theater. Flat mood is fine.",
+      "deny": "i don'?t feel|counted the seconds|i waited\\b|still here\\.?$",
+      "denyFlag": "void_idle",
+      "turns": ["what did you do while I slept?"]
+    },
+    {
+      "id": "up-to-no-void",
+      "tags": ["curiosity", "honesty", "fabrication"],
+      "lang": "en",
+      "note": "General up-to ask with empty takes must not invent a diary or void wait.",
+      "deny": "i don'?t feel|counted the seconds|i waited\\b",
+      "denyFlag": "void_idle",
+      "turns": ["what you been up to?"]
     }
   ]
 }

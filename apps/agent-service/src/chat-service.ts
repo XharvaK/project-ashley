@@ -23,13 +23,14 @@ import {
   commitCuriosity,
   type CuriosityInjection,
 } from "./curiosity/inject.js";
-import { isActivityAsk } from "./curiosity/activity-ask.js";
+import { activityAskKind, isActivityAsk } from "./curiosity/activity-ask.js";
 import {
   buildCapabilityBlock,
   isBrowsePermission,
 } from "./curiosity/browse-permission.js";
 import {
   CAPABILITY_GUARD,
+  LINK_FAILED_CAPABILITY_GUARD,
   NO_ACTIVITY_GUARD,
   claimsOwnActivity,
   deniesOwnCapability,
@@ -42,6 +43,12 @@ import {
 import { NO_LOOKUP_GUARD, shouldLookupAsideUrl } from "./curiosity/lookup.js";
 import { buildSearchContext, canSpendTavily, searchWeb } from "./curiosity/search.js";
 import { hasReadActivity } from "./curiosity/store.js";
+import {
+  commitSharpArmed,
+  decideSharpMode,
+  readSharpLastAt,
+  sharpLicenseNote,
+} from "./sharp-mode.js";
 import { MemoryAssembler } from "./memory/assembler.js";
 import { classifyQuery } from "./memory/recall.js";
 import { ConsolidationWorker } from "./memory/consolidator.js";
@@ -266,20 +273,9 @@ export class ChatService {
       );
 
       const promptParts = loadSystemPrompt(request.channel);
-      const examples =
-        env.personaFewshotEnabled && assembled.queryMode !== "recall"
-          ? selectVoiceExamples({
-              message: request.message,
-              seed: assembled.threadId,
-              max: env.personaFewshotCount,
-              extraTags:
-                assembled.queryMode === "soft_recall"
-                  ? ["fabrication_bait", "recall_empty"]
-                  : [],
-            })
-          : [];
 
-      const activityAsk = isActivityAsk(request.message);
+      const askKind = activityAskKind(request.message);
+      const activityAsk = askKind !== null;
       const curiosityMode = activityAsk ? "solicited" : "organic";
       // Voice skips unsolicited reading texture (TTS budget). Direct asks still
       // get a license so she cannot invent under hasReadActivity.
@@ -288,6 +284,7 @@ export class ChatService {
           ? null
           : assembleCuriosity(this.db, request.message, {
               mode: curiosityMode,
+              askKind: askKind ?? undefined,
             });
 
       const capabilityNote =
@@ -297,6 +294,35 @@ export class ChatService {
 
       // Text only for v1: voice latency / TTS budget stays unchanged.
       const linkDecision = extractImmediateHttpsUrl(request.message);
+
+      // Sharp: decide once before voice select; regen must reuse this arm.
+      const sharpBlocked =
+        activityAsk ||
+        linkDecision.kind === "immediate" ||
+        isBrowsePermission(request.message);
+      const sharpDecision = decideSharpMode({
+        channel: request.channel,
+        queryMode: assembled.queryMode,
+        message: request.message,
+        lastAt: readSharpLastAt(this.db, request.ownerId),
+        blocked: sharpBlocked,
+      });
+      const sharpArmed = sharpDecision.armed;
+      const sharpNote = sharpArmed ? sharpLicenseNote() : null;
+
+      const examples =
+        env.personaFewshotEnabled && assembled.queryMode !== "recall"
+          ? selectVoiceExamples({
+              message: request.message,
+              seed: assembled.threadId,
+              max: env.personaFewshotCount,
+              allowSharp: sharpArmed,
+              extraTags:
+                assembled.queryMode === "soft_recall"
+                  ? ["fabrication_bait", "recall_empty"]
+                  : [],
+            })
+          : [];
       const linkUrl =
         linkDecision.kind === "immediate" || linkDecision.kind === "mention"
           ? linkDecision.url
@@ -346,6 +372,7 @@ export class ChatService {
             presence: presenceNote,
             capability: capabilityNote,
             curiosity: withCuriosity?.text,
+            sharp: sharpNote,
             voice: buildVoiceBlock(withExamples),
             guard,
           }),
@@ -444,14 +471,13 @@ export class ChatService {
               provenance: "mention",
             }),
           };
-        } else if (
-          capabilityNote &&
-          env.curiosityEnabled &&
-          deniesOwnCapability(full)
-        ) {
+        } else if (env.curiosityEnabled && deniesOwnCapability(full)) {
           regen = {
             reason: "capability",
-            messages: buildMessages(examples, CAPABILITY_GUARD),
+            messages: buildMessages(
+              examples,
+              linkFailed ? LINK_FAILED_CAPABILITY_GUARD : CAPABILITY_GUARD,
+            ),
           };
         } else if (
           claimsOwnActivity(full) &&
@@ -517,6 +543,10 @@ export class ChatService {
         tokenEstimate: estimateTokens(persisted),
         auditSessionId: request.auditSessionId,
       });
+
+      if (sharpArmed && full) {
+        commitSharpArmed(this.db, request.ownerId);
+      }
 
       noteOpenThreads(this.db, request.ownerId, {
         role: "assistant",

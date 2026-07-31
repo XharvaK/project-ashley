@@ -93,6 +93,7 @@ export function appendMemoryBlock(
     guard?: string | null;
     presence?: string | null;
     capability?: string | null;
+    sharp?: string | null;
   } = {},
 ): string {
   return [
@@ -101,6 +102,7 @@ export function appendMemoryBlock(
     extras.presence,
     extras.capability,
     extras.curiosity,
+    extras.sharp,
     extras.voice,
     extras.guard,
     parts.suffix,

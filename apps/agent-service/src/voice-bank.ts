@@ -90,11 +90,17 @@ export function selectVoiceExamples(params: {
   extraTags?: string[];
   max?: number;
   bank?: VoiceExample[];
+  /** When false, drop sharp-tagged samples. When true, force-include one. */
+  allowSharp?: boolean;
 }): VoiceExample[] {
   const max = params.max ?? 4;
   const bank = params.bank ?? loadVoiceBank();
   const lang = detectLanguage(params.message);
-  const pool = bank.filter((e) => e.lang === lang);
+  const allowSharp = params.allowSharp === true;
+  let pool = bank.filter((e) => e.lang === lang);
+  if (!allowSharp) {
+    pool = pool.filter((e) => !e.tags.includes("sharp"));
+  }
   if (pool.length === 0) return [];
 
   const wanted = new Set([
@@ -110,7 +116,14 @@ export function selectVoiceExamples(params: {
     }))
     .sort((a, b) => b.score - a.score);
 
-  return scored.slice(0, max).map((r) => r.e);
+  const picked = scored.slice(0, max).map((r) => r.e);
+  if (allowSharp && !picked.some((e) => e.tags.includes("sharp"))) {
+    const sharp = scored.find((r) => r.e.tags.includes("sharp"));
+    if (sharp) {
+      picked[picked.length - 1] = sharp.e;
+    }
+  }
+  return picked;
 }
 
 export function buildVoiceBlock(examples: VoiceExample[]): string | null {

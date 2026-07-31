@@ -64,7 +64,17 @@ export function describeIntake(message: Message): Intake {
   }
 
   const parts: string[] = [];
-  const content = message.content.trim();
+  let content = message.content.trim();
+  // Embed-only pastes sometimes leave content empty; fold the first embed URL.
+  if (!/https:\/\//i.test(content)) {
+    for (const embed of message.embeds) {
+      const embedUrl = embed.url?.trim();
+      if (embedUrl?.startsWith("https://")) {
+        content = content ? `${content}\n${embedUrl}` : embedUrl;
+        break;
+      }
+    }
+  }
   if (content) parts.push(content);
   if (notes.length > 0) {
     parts.push(`(Doc sent ${notes.join(", ")}.)`);

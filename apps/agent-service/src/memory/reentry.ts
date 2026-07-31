@@ -2,6 +2,11 @@ import type { DatabaseSync } from "node:sqlite";
 
 const GAP_HOURS = 20;
 
+export type ReentryOpts = {
+  /** When he asked what she did, allow answering from activity notes. */
+  allowActivityRecap?: boolean;
+};
+
 /**
  * Coming back after four days should not read like coming back after four
  * minutes. Fires on the first turn after a real gap only, so the previous user
@@ -11,6 +16,7 @@ export function reentryLine(
   db: DatabaseSync,
   ownerId: string,
   excludeMessageId?: number | null,
+  opts?: ReentryOpts,
 ): string | null {
   const row = db
     .prepare(
@@ -31,6 +37,10 @@ export function reentryLine(
     days >= 1
       ? `about ${days} day${days === 1 ? "" : "s"}`
       : `about ${Math.round(hours)} hours`;
+
+  if (opts?.allowActivityRecap) {
+    return `He has been gone ${gap}. Note the gap once, in a clause, then answer what he actually said. No guilt, no "where have you been". If an activity note is present this turn, you may answer from it; do not invent waiting-as-plot.`;
+  }
 
   return `He has been gone ${gap}. Note the gap once, in a clause, then answer what he actually said. No guilt, no "where have you been", no recap of what you did meanwhile.`;
 }

@@ -34,6 +34,23 @@ describe("extractImmediateHttpsUrl", () => {
     ).toMatchObject({ kind: "immediate" });
   });
 
+  it("normalizes scheme-less blog URLs with check-my-blog cues", () => {
+    expect(
+      extractImmediateHttpsUrl("did you check my blog? spiralseekr.substack.com"),
+    ).toEqual({
+      kind: "immediate",
+      url: "https://spiralseekr.substack.com",
+    });
+    expect(
+      extractImmediateHttpsUrl(
+        "hey did you get a chance to check my blog yet? https://spiralseekr.substack.com",
+      ),
+    ).toMatchObject({
+      kind: "immediate",
+      url: "https://spiralseekr.substack.com",
+    });
+  });
+
   it("rejects http, media, private hosts, quotes, and mere mentions", () => {
     expect(extractImmediateHttpsUrl("http://example.com/a")).toEqual({
       kind: "none",

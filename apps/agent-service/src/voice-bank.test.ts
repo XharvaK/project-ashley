@@ -62,6 +62,24 @@ describe("messageTags", () => {
 });
 
 describe("selectVoiceExamples", () => {
+  it("excludes sharp samples unless allowSharp", () => {
+    const off = selectVoiceExamples({
+      message: "going to sleep finally",
+      seed: "t1",
+      allowSharp: false,
+      max: 8,
+    });
+    expect(off.some((e) => e.tags.includes("sharp"))).toBe(false);
+
+    const on = selectVoiceExamples({
+      message: "going to sleep finally",
+      seed: "t1",
+      allowSharp: true,
+      max: 4,
+    });
+    expect(on.some((e) => e.tags.includes("sharp"))).toBe(true);
+  });
+
   it("never mixes languages into the sample set", () => {
     const en = selectVoiceExamples({ message: "which one should i pick", seed: "t1" });
     expect(en.every((e) => e.lang === "en")).toBe(true);

@@ -74,6 +74,16 @@ export const env = {
     | "off"
     | "normal"
     | "high",
+  sharpEnabled: process.env.ASHLEY_SHARP_ENABLED !== "false",
+  sharpChanceBanter: Number(process.env.ASHLEY_SHARP_CHANCE_BANTER ?? 0.1),
+  sharpChancePeak: Number(process.env.ASHLEY_SHARP_CHANCE_PEAK ?? 0.28),
+  /** Rolling hours after a fire before another sharp turn may arm. */
+  sharpMaxPer24hHours: Number(process.env.ASHLEY_SHARP_MAX_HOURS ?? 24),
+  sharpMinGapHours: Number(process.env.ASHLEY_SHARP_MIN_GAP_HOURS ?? 6),
+  sharpForce: (process.env.ASHLEY_SHARP_FORCE ?? "auto") as
+    | "on"
+    | "off"
+    | "auto",
   autoRememberEnabled: process.env.AUTO_REMEMBER_ENABLED !== "false",
   memoryJobsPendingAlert: Number(
     process.env.MEMORY_JOBS_PENDING_ALERT ?? 50,

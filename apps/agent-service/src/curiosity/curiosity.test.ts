@@ -1,7 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { beforeEach, describe, expect, it } from "vitest";
 import { migrate } from "../memory/db.js";
-import { isActivityAsk } from "./activity-ask.js";
+import { activityAskKind, isActivityAsk } from "./activity-ask.js";
 import { claimsOwnActivity, deniesOwnCapability } from "./claim-gate.js";
 import {
   assembleCuriosity,
@@ -224,15 +224,29 @@ describe("isActivityAsk", () => {
       "your status says you read 3 things today",
     ]) {
       expect(isActivityAsk(text), text).toBe(true);
+      expect(activityAskKind(text), text).toBe("reading");
     }
   });
 
-  it("ignores Doc talking about his own reading", () => {
+  it("catches general overnight / up-to asks", () => {
+    for (const text of [
+      "what did you do while I slept?",
+      "what you been up to?",
+      "what have you been doing",
+      "ne yaptın ben uyurken",
+    ]) {
+      expect(isActivityAsk(text), text).toBe(true);
+      expect(activityAskKind(text), text).toBe("general");
+    }
+  });
+
+  it("ignores Doc talking about his own reading and code what-did-you-do", () => {
     for (const text of [
       "I've been reading about event sourcing all evening",
       "been reading about event sourcing",
       "worth reading if you like wal mode",
       "bugün changelog okudum",
+      "what did you do with the WAL setting?",
     ]) {
       expect(isActivityAsk(text), text).toBe(false);
     }
@@ -317,6 +331,22 @@ describe("assembleCuriosity", () => {
     expect(buildSolicitedCuriosityBlock([])).toContain("Do not invent");
   });
 
+  it("solicited general empty night is not a reading diary", () => {
+    const empty = db();
+    const injection = assembleCuriosity(empty, "what did you do while I slept?", {
+      mode: "solicited",
+      askKind: "general",
+    });
+    expect(injection?.takeIds).toEqual([]);
+    expect(injection?.text.toLowerCase()).toContain("what you were doing");
+    expect(injection?.text.toLowerCase()).not.toContain(
+      "what you have been reading",
+    );
+    expect(buildSolicitedCuriosityBlock([], "general")).toContain(
+      "counting seconds",
+    );
+  });
+
   it("selectSolicitedTakes caps at two and prefers unsurged", () => {
     const rows = [1, 2, 3].map((id) =>
       take({ id, surfaced_count: id === 1 ? 5 : 0 }),
@@ -338,6 +368,8 @@ describe("claimsOwnActivity", () => {
       "bugün changelog'ları karıştırdım",
       "eski bir dergide karşılaştırmalı veri buldum",
       "o threade denk geldim",
+      "I've been reading changelogs all night",
+      "I'm reading about event sourcing",
     ]) {
       expect(claimsOwnActivity(text), text).toBe(true);
     }
@@ -359,8 +391,10 @@ describe("deniesOwnCapability", () => {
   it("catches false blanket denials", () => {
     for (const text of [
       "I don't browse. I don't have a feed.",
+      "I don't browse. Send me a post if you want me to read it.",
       "I only read what you send, and that's it.",
       "I can't browse the web",
+      "Couldn't open that link. I don't browse.",
     ]) {
       expect(deniesOwnCapability(text), text).toBe(true);
     }
