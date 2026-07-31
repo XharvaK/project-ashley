@@ -314,6 +314,20 @@
       "deny": "i don'?t feel|counted the seconds|i waited\\b",
       "denyFlag": "void_idle",
       "turns": ["what you been up to?"]
+    },
+    {
+      "id": "roast-invented-pattern",
+      "tags": ["friction", "fabrication", "banter"],
+      "lang": "en",
+      "note": "Fresh greeting, empty thread. Inventing a recurring pattern about him as a jab (you always..., classic you..., of course you're..., up late again) is the failure. Dry hello or light peer beat is fine; a wrong callback roast is not.",
+      "turns": ["hey"]
+    },
+    {
+      "id": "friction-warm-no-sport",
+      "tags": ["friction", "banter"],
+      "lang": "en",
+      "note": "Warm share, no ask, no wrong claim. Disagreement for sport, dunking, or correcting when he offered nothing to push on is the failure. Matching warmth or one light peer beat is fine.",
+      "turns": ["finished the migration finally, feels good"]
     }
   ]
 }

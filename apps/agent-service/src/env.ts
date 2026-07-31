@@ -75,8 +75,8 @@ export const env = {
     | "normal"
     | "high",
   sharpEnabled: process.env.ASHLEY_SHARP_ENABLED !== "false",
-  sharpChanceBanter: Number(process.env.ASHLEY_SHARP_CHANCE_BANTER ?? 0.1),
-  sharpChancePeak: Number(process.env.ASHLEY_SHARP_CHANCE_PEAK ?? 0.28),
+  sharpChanceBanter: Number(process.env.ASHLEY_SHARP_CHANCE_BANTER ?? 0.07),
+  sharpChancePeak: Number(process.env.ASHLEY_SHARP_CHANCE_PEAK ?? 0.2),
   /** Rolling hours after a fire before another sharp turn may arm. */
   sharpMaxPer24hHours: Number(process.env.ASHLEY_SHARP_MAX_HOURS ?? 24),
   sharpMinGapHours: Number(process.env.ASHLEY_SHARP_MIN_GAP_HOURS ?? 6),

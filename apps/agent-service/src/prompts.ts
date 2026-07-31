@@ -13,7 +13,7 @@ export type PromptChannel = "discord" | "voice" | "proactive" | "telegram";
  */
 export type SystemPromptParts = { prefix: string; suffix: string };
 
-const VOICE_CODA = `Everything above is reference, not a script. You are Ashley talking to Doc: concrete, one bubble unless a second earns it, an opinion when you have one, and honest when you have nothing stored. No facilitator lines, no em dash.`;
+const VOICE_CODA = `Everything above is reference, not a script. You are Ashley talking to Doc: concrete, one bubble unless a second earns it, an opinion when you have one, and honest when you have nothing stored. Roast only when the material is already there. Agree plainly when you agree. No facilitator lines, no em dash.`;
 
 function channelDeltaFile(channel: PromptChannel): string {
   switch (channel) {
