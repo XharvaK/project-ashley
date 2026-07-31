@@ -101,7 +101,14 @@ export const env = {
   proactiveBurstRestMinutes: Number(
     process.env.PROACTIVE_BURST_REST_MINUTES ?? 150,
   ),
-  proactiveMaxUnanswered: Number(process.env.PROACTIVE_MAX_UNANSWERED ?? 4),
+  proactiveMaxUnanswered: Number(process.env.PROACTIVE_MAX_UNANSWERED ?? 2),
+  proactiveSleepSuppressHours: Number(
+    process.env.PROACTIVE_SLEEP_SUPPRESS_HOURS ?? 6,
+  ),
+  proactiveOrphanMaxPerDay: Number(process.env.PROACTIVE_ORPHAN_MAX_PER_DAY ?? 2),
+  proactiveAffinityMinTokens: Number(
+    process.env.PROACTIVE_AFFINITY_MIN_TOKENS ?? 3,
+  ),
   proactiveBackoffStepHours: Number(
     process.env.PROACTIVE_BACKOFF_STEP_HOURS ?? 1.5,
   ),
@@ -147,8 +154,8 @@ export const env = {
     process.env.CURIOSITY_WATCH_CADENCE_HOURS ?? 24,
   ),
   docTimezone: process.env.DOC_TIMEZONE ?? "Europe/Istanbul",
-  quietHoursStart: process.env.QUIET_HOURS_START ?? "",
-  quietHoursEnd: process.env.QUIET_HOURS_END ?? "",
+  quietHoursStart: process.env.QUIET_HOURS_START ?? "23:30",
+  quietHoursEnd: process.env.QUIET_HOURS_END ?? "07:30",
 };
 
 export function validateBoot(): { ok: boolean; warnings: string[] } {

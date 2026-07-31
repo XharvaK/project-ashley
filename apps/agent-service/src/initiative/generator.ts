@@ -8,7 +8,13 @@ import { stripMediaMarkers } from "../memory/strip-markers.js";
 import { sanitizeTypography } from "../typography.js";
 import { insertMessage } from "../memory/threads.js";
 import { estimateTokens } from "../memory/tokens.js";
+import {
+  draftLanguageMatches,
+  resolveDocLanguage,
+} from "./language.js";
 import type { Candidate } from "./queue.js";
+import { unansweredCount } from "./schedule.js";
+import { validateInitiativeDraft } from "./validate-draft.js";
 
 export type InitiativeDraft = {
   text: string;
@@ -19,6 +25,8 @@ export type InitiativeDraft = {
   materialKey?: string;
   /** Log row claimed before the send, so a lost commit cannot double-fire. */
   reservationId?: number;
+  langForced?: boolean;
+  lane?: string;
 };
 
 const KIND_BRIEF: Record<string, string> = {
@@ -29,17 +37,28 @@ const KIND_BRIEF: Record<string, string> = {
   time_anchored:
     "He anchored this to a time that has now passed. Ask how it went, specifically.",
   watch_fired:
-    "Something moved in his world. Lead with the thing, then what you think about it.",
+    "Name the piece or topic first (title tokens must appear), then your take. Prefer found-this then take as two short bubbles when it fits. Soft hook only if allowed.",
   curiosity_take:
-    "You read this and have an opinion. Open with the opinion, not with the fact that you were reading.",
+    "Found→take. Title must be recognizable in the text. Dry title+take is fine. Never a bare orphan stat with no piece. Soft hook only if allowed.",
   callback:
     "Pick up this thread of his. One concrete question about it, nothing general.",
   stance:
     "This is a position you hold and want to argue about. State it and invite the fight.",
   check_in:
-    "It has actually been quiet. One line, no guilt, no status report.",
-  ambient: "Say the one small thing you have. Do not stretch it.",
+    "Presence only. One short line. No question mark. No inventing his day, projects, or mood. Pure still-here or one tiny beat from your own reading if the material says so.",
 };
+
+async function completeDraft(
+  messages: ChatMessage[],
+): Promise<string> {
+  const { text } = await completeChat(messages, {
+    model: env.mistralModel,
+    maxTokens: 256,
+    temperature: 0.6,
+    reasoningEffort: "none",
+  });
+  return stripMediaMarkers(sanitizeTypography(text)).trim();
+}
 
 /**
  * The material is the message. The model's job is wording, not invention: it may
@@ -51,6 +70,7 @@ export async function draftInitiativeMessage(
   angle: "question" | "opinion" | "check_in",
   reason: string,
   candidate?: Candidate,
+  db?: DatabaseSync,
 ): Promise<InitiativeDraft> {
   const assembled = await assembler.buildForInitiative(
     ownerId,
@@ -63,17 +83,28 @@ export async function draftInitiativeMessage(
   );
 
   const hot = assembled.hotMessages.slice(-6);
+  const hotUserTexts = hot
+    .filter((m) => m.role === "user")
+    .map((m) => m.content);
+  const targetLang = resolveDocLanguage(hotUserTexts);
+  const unanswered = db ? unansweredCount(db, ownerId) : 0;
+  const softHookOk = unanswered === 0;
+
   const brief = candidate
     ? [
-        `Material: ${candidate.material}`,
+        `Material:\n${candidate.material}`,
         KIND_BRIEF[candidate.kind] ?? "",
-        "Use only this material. Do not add a fact about Doc, a memory, or anything you did that is not stated here. One or two short bubbles, no greeting ritual.",
+        softHookOk
+          ? "Soft hook allowed: one light invite is OK if it fits; never guilt."
+          : "Do not ask a question. No soft hook. Opinion or presence only.",
+        `Reply in ${targetLang === "tr" ? "Turkish" : "English"} only.`,
+        "Use only this material. Do not add a fact about Doc, a memory, or anything you did that is not stated here. One or two short bubbles separated by a blank line, no greeting ritual.",
       ]
         .filter(Boolean)
         .join("\n")
-    : `Generate one proactive ${angle} message for Doc. Context reason: ${reason}.`;
+    : `Generate one proactive ${angle} message for Doc. Context reason: ${reason}. Reply in ${targetLang === "tr" ? "Turkish" : "English"} only.`;
 
-  const messages: ChatMessage[] = [
+  const baseMessages: ChatMessage[] = [
     { role: "system", content: system },
     ...hot.map((m) => ({
       role: m.role as "user" | "assistant",
@@ -85,16 +116,48 @@ export async function draftInitiativeMessage(
     },
   ];
 
-  const { text } = await completeChat(messages, {
-    model: env.mistralModel,
-    maxTokens: 256,
-    temperature: 0.6,
-    reasoningEffort: "none",
-  });
-
-  const trimmed = stripMediaMarkers(sanitizeTypography(text));
+  let trimmed = await completeDraft(baseMessages);
   if (!trimmed) {
     throw new Error("empty_initiative_message");
+  }
+
+  let langForced = false;
+  if (!draftLanguageMatches(trimmed, targetLang)) {
+    const regenMessages: ChatMessage[] = [
+      ...baseMessages,
+      { role: "assistant", content: trimmed },
+      {
+        role: "user",
+        content: `Wrong language. Rewrite the entire message in ${targetLang === "tr" ? "Turkish" : "English"} only. Keep meaning and bubble breaks. Output only the message.`,
+      },
+    ];
+    trimmed = await completeDraft(regenMessages);
+    if (!trimmed) {
+      throw new Error("empty_initiative_message");
+    }
+  }
+
+  if (!draftLanguageMatches(trimmed, targetLang)) {
+    // F12B: after one regen, force English and send (never abort on language).
+    trimmed = await completeDraft([
+      {
+        role: "system",
+        content:
+          "Rewrite into English. Keep meaning, length, and blank-line bubbles. Output only the message.",
+      },
+      { role: "user", content: trimmed },
+    ]);
+    langForced = true;
+    if (!trimmed) {
+      throw new Error("empty_initiative_message");
+    }
+  }
+
+  const validation = validateInitiativeDraft(trimmed, candidate, {
+    unanswered,
+  });
+  if (!validation.ok) {
+    throw new Error(`initiative_draft_rejected:${validation.reason}`);
   }
 
   return {
@@ -104,6 +167,8 @@ export async function draftInitiativeMessage(
     reason,
     candidateKind: candidate?.kind,
     materialKey: candidate?.materialKey,
+    langForced,
+    lane: candidate?.lane,
   };
 }
 

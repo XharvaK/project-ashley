@@ -5,7 +5,7 @@
 const DEPTH =
   /\b(mechanism|receptor|kinetics|benchmark|postmortem|why|proof|deterministic|sqlite|latency|dose[- ]response|replication|failure|internals|from scratch|teardown)\b/i;
 
-const HYPE =
+export const HYPE =
   /\b(changes everything|revolutionary|game[- ]changer|you won'?t believe|top \d+|best \d+|ultimate guide|ai[- ]powered|supercharge|unlock)\b/i;
 
 export function scoreItem(params: {

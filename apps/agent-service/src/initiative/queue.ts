@@ -1,10 +1,17 @@
 import type { DatabaseSync } from "node:sqlite";
 import { env } from "../env.js";
-import { recentTakes } from "../curiosity/store.js";
+import { words } from "../curiosity/inject.js";
+import { HYPE } from "../curiosity/scoring.js";
+import { recentTakes, type TakeRow } from "../curiosity/store.js";
+import { localParts } from "../local-time.js";
 import { listActiveFacts } from "../memory/facts.js";
 import { listStances } from "../memory/stances.js";
 import { kindFeedbackMultiplier } from "../signals.js";
-import { listOpenThreads } from "./open-threads.js";
+import {
+  ageOutOpenThreads,
+  listOpenThreads,
+} from "./open-threads.js";
+import { unansweredCount } from "./schedule.js";
 
 export type CandidateKind =
   | "she_owes"
@@ -14,8 +21,9 @@ export type CandidateKind =
   | "curiosity_take"
   | "callback"
   | "stance"
-  | "check_in"
-  | "ambient";
+  | "check_in";
+
+export type CuriosityLane = "A" | "B" | "C";
 
 export type Angle = "question" | "opinion" | "check_in";
 
@@ -29,6 +37,8 @@ export type Candidate = {
   strength: number;
   ageHours: number;
   score: number;
+  lane?: CuriosityLane;
+  title?: string;
 };
 
 type Spec = {
@@ -38,11 +48,6 @@ type Spec = {
   angle: Angle;
 };
 
-/**
- * Ranked by how much the material earns an interruption. Ambient exists so the
- * bottom of the ladder is visible, not so it gets used: at base 8 it only ever
- * clears the floor when the floor is lowered on purpose.
- */
 const SPECS: Record<CandidateKind, Spec> = {
   she_owes: { base: 95, halfLifeHours: 30, ripeAfterHours: 1, angle: "question" },
   he_never_answered: {
@@ -67,7 +72,6 @@ const SPECS: Record<CandidateKind, Spec> = {
   callback: { base: 48, halfLifeHours: 96, ripeAfterHours: 12, angle: "question" },
   stance: { base: 58, halfLifeHours: 120, ripeAfterHours: 24, angle: "opinion" },
   check_in: { base: 38, halfLifeHours: 48, ripeAfterHours: 0, angle: "check_in" },
-  ambient: { base: 8, halfLifeHours: 6, ripeAfterHours: 0, angle: "check_in" },
 };
 
 function hoursSince(iso: string | null): number {
@@ -93,8 +97,10 @@ function make(
   material: string,
   ageHours: number,
   feedbackMultiplier = 1,
+  extra?: { lane?: CuriosityLane; title?: string; scoreScale?: number },
 ): Candidate | null {
-  const score = decayedScore(kind, ageHours) * feedbackMultiplier;
+  let score = decayedScore(kind, ageHours) * feedbackMultiplier;
+  if (extra?.scoreScale !== undefined) score *= extra.scoreScale;
   if (score <= 0) return null;
   return {
     kind,
@@ -104,6 +110,8 @@ function make(
     strength: SPECS[kind].base,
     ageHours,
     score,
+    lane: extra?.lane,
+    title: extra?.title,
   };
 }
 
@@ -117,6 +125,93 @@ function alreadySent(db: DatabaseSync, ownerId: string, key: string): boolean {
   return row !== undefined;
 }
 
+function asDate(ts: string): Date {
+  return new Date(ts.includes("T") ? ts : `${ts}Z`);
+}
+
+export function countOrphansLocalToday(
+  db: DatabaseSync,
+  ownerId: string,
+  now = new Date(),
+): number {
+  const today = localParts(now).dateKey;
+  const rows = db
+    .prepare(
+      `SELECT sent_at, material_key FROM mem_initiative_log
+       WHERE owner_id = ?
+         AND material_key LIKE 'orphan:take:%'
+         AND sent_at >= datetime('now', '-36 hours')`,
+    )
+    .all(ownerId) as Array<{ sent_at: string; material_key: string }>;
+  return rows.filter((r) => localParts(asDate(r.sent_at)).dateKey === today)
+    .length;
+}
+
+/** Shared content tokens between a take and Doc's durable facts. */
+export function docAffinity(
+  db: DatabaseSync,
+  ownerId: string,
+  title: string,
+  take: string,
+): number {
+  const takeTokens = new Set(words(`${title} ${take}`));
+  if (takeTokens.size === 0) return 0;
+  const facts = listActiveFacts(db, ownerId, 40).filter(
+    (f) =>
+      f.category === "project" ||
+      f.category === "ongoing" ||
+      f.category === "preference",
+  );
+  const factTokens = new Set(
+    facts.flatMap((f) => words(`${f.key} ${f.value}`)),
+  );
+  let n = 0;
+  for (const w of takeTokens) {
+    if (factTokens.has(w)) n++;
+  }
+  return n;
+}
+
+function coherentOrphan(take: TakeRow): boolean {
+  if (!take.take.trim()) return false;
+  if (words(take.title).length < 3) return false;
+  if (HYPE.test(`${take.title} ${take.take}`)) return false;
+  return true;
+}
+
+function packTakeMaterial(take: TakeRow): string {
+  return `Piece: ${take.title}\nTake: ${take.take}`;
+}
+
+function presenceMaterial(
+  db: DatabaseSync,
+  idleHours: number,
+): { material: string; materialKey: string } {
+  const dateKey = localParts().dateKey;
+  const days = Math.floor(idleHours / 24);
+  const silence =
+    days >= 1
+      ? `Quiet ~${days} day${days === 1 ? "" : "s"}.`
+      : `Quiet ~${Math.round(idleHours)}h.`;
+  if (Math.random() < 0.5) {
+    return {
+      materialKey: `checkin:${dateKey}`,
+      material: `${silence} One still-here line. No question. No agenda. Do not invent Doc's day or projects.`,
+    };
+  }
+  const beat = recentTakes(db, 72, 8).find((t) => t.take.trim().length > 0);
+  if (!beat) {
+    return {
+      materialKey: `checkin:${dateKey}`,
+      material: `${silence} One still-here line. No question. No agenda. Do not invent Doc's day or projects.`,
+    };
+  }
+  return {
+    materialKey: `checkin:${dateKey}`,
+    material: `${silence} Her beat only — title "${beat.title}", one tiny aside from her reading. Do not invent Doc topics. No question.`,
+  };
+}
+
 /**
  * The whole point of this file: candidates come from things that happened, so an
  * empty return means silence by construction. There is no filler branch.
@@ -126,7 +221,11 @@ export function collectCandidates(
   ownerId: string,
   context: { idleHours: number },
 ): Candidate[] {
+  ageOutOpenThreads(db, ownerId);
+
   const out: Candidate[] = [];
+  const unanswered = unansweredCount(db, ownerId);
+  const orphanToday = countOrphansLocalToday(db, ownerId);
   const cachedMultipliers = new Map<CandidateKind, number>();
   const mult = (kind: CandidateKind): number => {
     const cached = cachedMultipliers.get(kind);
@@ -137,7 +236,6 @@ export function collectCandidates(
   };
 
   for (const thread of listOpenThreads(db, ownerId, 20)) {
-    // Time anchors stay silent until due_at; undated threads are fair game.
     if (thread.due_at) {
       const raw = thread.due_at.includes("T")
         ? thread.due_at
@@ -162,16 +260,43 @@ export function collectCandidates(
   }
 
   for (const take of recentTakes(db, 48, 12)) {
-    // A watch take is about his world, which outranks anything she read for
-    // herself, so the two are separate candidate kinds.
-    const kind: CandidateKind =
-      take.source_slug === "doc-world-watch" ? "watch_fired" : "curiosity_take";
+    if (take.source_slug === "doc-world-watch") {
+      const c = make(
+        "watch_fired",
+        `take:${take.id}`,
+        packTakeMaterial(take),
+        hoursSince(take.created_at),
+        mult("watch_fired"),
+        { lane: "A", title: take.title },
+      );
+      if (c) out.push(c);
+      continue;
+    }
+
+    const affinity = docAffinity(db, ownerId, take.title, take.take);
+    if (affinity >= env.proactiveAffinityMinTokens) {
+      const c = make(
+        "curiosity_take",
+        `take:${take.id}`,
+        packTakeMaterial(take),
+        hoursSince(take.created_at),
+        mult("curiosity_take"),
+        { lane: "B", title: take.title },
+      );
+      if (c) out.push(c);
+      continue;
+    }
+
+    if (!coherentOrphan(take)) continue;
+    if (unanswered >= 1) continue;
+    if (orphanToday >= env.proactiveOrphanMaxPerDay) continue;
     const c = make(
-      kind,
-      `take:${take.id}`,
-      `${take.take} (from: ${take.title})`,
+      "curiosity_take",
+      `orphan:take:${take.id}`,
+      packTakeMaterial(take),
       hoursSince(take.created_at),
-      mult(kind),
+      mult("curiosity_take"),
+      { lane: "C", title: take.title, scoreScale: 0.55 },
     );
     if (c) out.push(c);
   }
@@ -199,36 +324,21 @@ export function collectCandidates(
     if (c) out.push(c);
   }
 
-  // A check-in is material only when the silence itself is the material.
-  if (context.idleHours >= env.proactiveCheckInIdleHours) {
-    const days = Math.floor(context.idleHours / 24);
+  // Presence lives in check_in: silence material only, no score cheat, ≤1/day.
+  // Counts toward unanswered once sent; never dig the ignore hole further.
+  if (
+    context.idleHours >= env.proactiveCheckInIdleHours &&
+    unanswered === 0
+  ) {
+    const presence = presenceMaterial(db, context.idleHours);
     const c = make(
       "check_in",
-      `checkin:${new Date().toISOString().slice(0, 10)}`,
-      days >= 1
-        ? `He has been quiet for about ${days} day${days === 1 ? "" : "s"}.`
-        : `He has been quiet for about ${Math.round(context.idleHours)} hours.`,
+      presence.materialKey,
+      presence.material,
       0,
       mult("check_in"),
     );
     if (c) out.push(c);
-  }
-
-  // Low-stakes presence when silence is long and nothing sharper exists. A friend
-  // who only texts with an agenda is itself a tell. Base score sits under the
-  // floor; lift it so it can clear the gate once check-in idle is met.
-  if (context.idleHours >= env.proactiveCheckInIdleHours) {
-    const ambient = make(
-      "ambient",
-      `ambient:${new Date().toISOString().slice(0, 10)}`,
-      "No agenda - a small human presence ping, one short line.",
-      0,
-      mult("ambient"),
-    );
-    if (ambient) {
-      ambient.score = Math.max(ambient.score, env.proactiveMinScore + 1);
-      out.push(ambient);
-    }
   }
 
   return out
@@ -244,5 +354,42 @@ export function pickCandidate(
   const ripe = collectCandidates(db, ownerId, context).filter(
     (c) => c.score >= env.proactiveMinScore,
   );
-  return ripe[0] ?? null;
+  if (ripe.length === 0) return null;
+
+  const hasAgenda = ripe.some(
+    (c) =>
+      c.kind !== "check_in" &&
+      (c.lane === "A" ||
+        c.lane === "B" ||
+        c.kind === "she_owes" ||
+        c.kind === "he_never_answered" ||
+        c.kind === "time_anchored" ||
+        c.kind === "callback" ||
+        c.kind === "stance" ||
+        (c.kind === "curiosity_take" && c.lane !== "C") ||
+        c.kind === "watch_fired"),
+  );
+
+  // Presence only when nothing sharper is ripe.
+  let pool = ripe;
+  if (hasAgenda) {
+    pool = ripe.filter((c) => c.kind !== "check_in");
+  }
+
+  const hasAB = pool.some((c) => c.lane === "A" || c.lane === "B");
+  if (hasAB) {
+    pool = pool.filter((c) => c.lane !== "C");
+  }
+
+  // A > B > C among curiosity; otherwise best score.
+  const laneRank = (c: Candidate): number => {
+    if (c.lane === "A") return 3;
+    if (c.lane === "B") return 2;
+    if (c.lane === "C") return 1;
+    return 0;
+  };
+  pool.sort(
+    (a, b) => laneRank(b) - laneRank(a) || b.score - a.score,
+  );
+  return pool[0] ?? null;
 }

@@ -1,4 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
+import { detectLanguage } from "../voice-bank.js";
+import { words } from "../curiosity/inject.js";
 
 export type OpenThreadKind = "she_owes" | "he_never_answered" | "time_anchored";
 
@@ -20,9 +22,15 @@ const SHE_OWES =
 /** She asked him something and he moved on without answering. */
 const SHE_ASKED = /\?\s*$/;
 
+/** Soft check-ins / greetings never become he_never_answered material. */
+const SOFT_UNANSWERED =
+  /^(same\s+old[.!]?\s*)?(you|u)\s*\??$|\byou\s*\?\s*$|^(hey|hi|hello|yo|sup|naber|selam)\b|\b(how('?s| is) it going|how are you|what('?s| is) up|ne haber|nasılsın)\b|\b(same old|the usual|as usual)\b/i;
+
 /** He named a time, so there is something to come back to. */
 const TIME_ANCHOR =
   /\b(tomorrow|tonight|later today|this week|next week|on (monday|tuesday|wednesday|thursday|friday|saturday|sunday)|yarın|bu akşam|bu hafta|haftaya|akşam)\b/i;
+
+export const OPEN_THREAD_MAX_AGE_HOURS = 6;
 
 function topicOf(text: string): string {
   return text
@@ -114,25 +122,66 @@ export function closeThreadsTouchedBy(
   ownerId: string,
   message: string,
 ): number {
-  const words = new Set(
+  const msgWords = new Set(
     message
       .toLowerCase()
       .split(/[^\p{L}\p{N}]+/u)
       .filter((w) => w.length > 4),
   );
-  if (words.size === 0) return 0;
+  if (msgWords.size === 0) return 0;
 
   let closed = 0;
   for (const thread of listOpenThreads(db, ownerId, 40)) {
     const topicWords = thread.topic
       .split(/[^\p{L}\p{N}]+/u)
       .filter((w) => w.length > 4);
-    if (topicWords.some((w) => words.has(w))) {
+    if (topicWords.some((w) => msgWords.has(w))) {
       closeOpenThread(db, thread.id);
       closed++;
     }
   }
   return closed;
+}
+
+/**
+ * EN (or other) pivot after a Turkish unanswered question closes the stale Q so
+ * she does not revive "Ne oynuyordun?" hours later in the wrong language.
+ */
+export function closeMismatchedOpenThreads(
+  db: DatabaseSync,
+  ownerId: string,
+  message: string,
+): number {
+  const msgLang = detectLanguage(message);
+  let closed = 0;
+  for (const thread of listOpenThreads(db, ownerId, 40)) {
+    if (thread.kind !== "he_never_answered") continue;
+    const detailLang = detectLanguage(thread.detail);
+    if (msgLang === "en" && detailLang === "tr") {
+      closeOpenThread(db, thread.id, "closed");
+      closed++;
+    }
+  }
+  return closed;
+}
+
+/** Drop stale open threads before they can score into a proactive DM. */
+export function ageOutOpenThreads(
+  db: DatabaseSync,
+  ownerId: string,
+  maxAgeHours = OPEN_THREAD_MAX_AGE_HOURS,
+): number {
+  const result = db
+    .prepare(
+      `UPDATE mem_open_threads
+       SET status = 'dropped', closed_at = datetime('now')
+       WHERE owner_id = ? AND status = 'open'
+         AND kind IN ('he_never_answered', 'she_owes')
+         AND created_at <= datetime('now', ?)
+         AND (due_at IS NULL OR due_at <= datetime('now'))`,
+    )
+    .run(ownerId, `-${maxAgeHours} hours`);
+  return Number(result.changes);
 }
 
 /**
@@ -173,6 +222,7 @@ export function noteOpenThreads(
 /**
  * Her own unanswered question, seen from the next user turn: if she asked and he
  * replied with something short and unrelated, the question is still open.
+ * Soft check-ins and bare "You?" never open a thread.
  */
 export function noteUnansweredQuestion(
   db: DatabaseSync,
@@ -182,9 +232,12 @@ export function noteUnansweredQuestion(
 ): void {
   if (!herLast || !SHE_ASKED.test(herLast.trim())) return;
   if (hisReply.trim().length > 80) return;
+  const trimmed = herLast.trim();
+  if (SOFT_UNANSWERED.test(trimmed)) return;
+  if (words(trimmed).length < 2) return;
   openThread(db, ownerId, {
     kind: "he_never_answered",
     topic: herLast,
-    detail: herLast.trim().slice(0, 400),
+    detail: trimmed.slice(0, 400),
   });
 }

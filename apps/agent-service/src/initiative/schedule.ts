@@ -6,6 +6,7 @@ import {
   getLastInitiativeAt,
   getLastUserMessageAt,
 } from "./cooldown.js";
+import { inSleepSuppress } from "./sleep.js";
 
 export type GateResult = {
   allowed: boolean;
@@ -58,8 +59,11 @@ export function burstGate(db: DatabaseSync, ownerId: string): GateResult {
   }>;
 
   const lastGapMin = hoursSince(getLastInitiativeAt(db, ownerId)) * 60;
+  // Into silence: one bubble at a time. Engaged (unanswered=0): keep burst max.
+  const unanswered = unansweredCount(db, ownerId);
+  const burstMax = unanswered >= 1 ? 1 : env.proactiveBurstMax;
 
-  if (recent.length >= env.proactiveBurstMax) {
+  if (recent.length >= burstMax) {
     const restMin = env.proactiveBurstRestMinutes;
     if (lastGapMin < restMin) {
       return deny("burst_spent", Math.ceil((restMin - lastGapMin) * 60));
@@ -91,6 +95,7 @@ export function initiativeGate(
   if (!options.enabled) return deny("proactive_disabled");
   if (options.busy) return deny("chat_in_progress", 60);
   if (inQuietHours(now)) return deny("quiet_hours");
+  if (inSleepSuppress(db, ownerId, now)) return deny("sleep_suppress");
 
   if (countInitiativesLocalToday(db, ownerId, now) >= env.proactiveMaxPerDay) {
     return deny("daily_cap_reached");

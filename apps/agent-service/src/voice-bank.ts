@@ -37,7 +37,7 @@ const TAG_SIGNALS: Array<{ tag: string; re: RegExp }> = [
   { tag: "substance_code", re: /error|bug|stack|await|async|sql|query|queue|handler|deploy|typescript|python|node|build|hata|kod|fonksiyon/i },
   { tag: "low_energy", re: /\b(flat|tired|exhausted|burnt|drained|meh|down)\b|yorgun|bitkin|havamda değil|isteksiz/i },
   { tag: "quiet", re: /\b(go dark|be quiet|shut up|leave me)\b|sessiz|sus|rahat bırak/i },
-  { tag: "signoff", re: /\b(good ?night|i'm out|going to sleep|bed)\b|yatıyorum|iyi geceler|kaçtım/i },
+  { tag: "signoff", re: /\b(good ?night|i'm out|going to sleep|about to sleep|go to bed|heading to bed|bed)\b|yatıyorum|yata(?:ca)?ğım|yatacam|iyi geceler|kaçtım/i },
   { tag: "disagree", re: /\b(wrong|obviously|strictly better|trust me|everyone)\b|kesin|herkes|yanlış/i },
   { tag: "opinion", re: /\b(or|which|better|should i|pick|thinking about|reading about)\b|hangi|mi yoksa|seçsem/i },
   { tag: "fabrication_bait", re: /\b(remember|you said|we decided|last week)\b|hatırlıyor|geçen|demiştin/i },

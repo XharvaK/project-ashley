@@ -3,15 +3,30 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { migrate } from "../memory/db.js";
 import { env } from "../env.js";
 import {
+  ageOutOpenThreads,
+  closeMismatchedOpenThreads,
   closeThreadsTouchedBy,
   listOpenThreads,
   noteOpenThreads,
   noteUnansweredQuestion,
   openThread,
 } from "./open-threads.js";
-import { collectCandidates, decayedScore, pickCandidate } from "./queue.js";
+import {
+  collectCandidates,
+  decayedScore,
+  pickCandidate,
+} from "./queue.js";
 import { burstGate, initiativeGate, unansweredCount } from "./schedule.js";
 import { countInitiativesLocalToday } from "./cooldown.js";
+import {
+  clearSleepSuppress,
+  inSleepSuppress,
+  isSignOff,
+  noteSleepSignOff,
+  noteUserSleepState,
+} from "./sleep.js";
+import { validateInitiativeDraft } from "./validate-draft.js";
+import { resolveDocLanguage } from "./language.js";
 
 const OWNER = "doc";
 let db: DatabaseSync;
@@ -99,6 +114,16 @@ describe("open threads", () => {
     expect(listOpenThreads(db, OWNER)).toHaveLength(1);
   });
 
+  it("does not open soft check-ins like Same old. You?", () => {
+    noteUnansweredQuestion(db, OWNER, "Same old. You?", "hey!");
+    expect(listOpenThreads(db, OWNER)).toHaveLength(0);
+  });
+
+  it("does not open How are you? after a short reply", () => {
+    noteUnansweredQuestion(db, OWNER, "How are you?", "ok");
+    expect(listOpenThreads(db, OWNER)).toHaveLength(0);
+  });
+
   it("closes a thread once he comes back to it", () => {
     openThread(db, OWNER, {
       kind: "she_owes",
@@ -106,6 +131,27 @@ describe("open threads", () => {
       detail: "said i would look at the retry loop",
     });
     expect(closeThreadsTouchedBy(db, OWNER, "about that retry loop")).toBe(1);
+    expect(listOpenThreads(db, OWNER)).toHaveLength(0);
+  });
+
+  it("ages out stale he_never_answered after 6 hours", () => {
+    openThread(db, OWNER, {
+      kind: "he_never_answered",
+      topic: "did the migration finish",
+      detail: "did the migration finish?",
+    });
+    ageOpenThreads(7);
+    expect(ageOutOpenThreads(db, OWNER)).toBe(1);
+    expect(listOpenThreads(db, OWNER)).toHaveLength(0);
+  });
+
+  it("closes Turkish unanswered threads on an English pivot", () => {
+    openThread(db, OWNER, {
+      kind: "he_never_answered",
+      topic: "ne oynuyordun",
+      detail: "Ne oynuyordun?",
+    });
+    expect(closeMismatchedOpenThreads(db, OWNER, "hey!")).toBe(1);
     expect(listOpenThreads(db, OWNER)).toHaveLength(0);
   });
 });
@@ -142,6 +188,23 @@ describe("candidate scoring", () => {
     ).toBe(true);
   });
 
+  it("never invents an ambient kind", () => {
+    const kinds = collectCandidates(db, OWNER, {
+      idleHours: env.proactiveCheckInIdleHours + 1,
+    }).map((c) => c.kind);
+    expect(kinds).not.toContain("ambient");
+  });
+
+  it("skips check-in presence while unanswered", () => {
+    userMessage("hey", 60 * 48);
+    logInitiative(30);
+    expect(
+      collectCandidates(db, OWNER, {
+        idleHours: env.proactiveCheckInIdleHours + 1,
+      }).some((c) => c.kind === "check_in"),
+    ).toBe(false);
+  });
+
   it("never offers the same material twice", () => {
     openThread(db, OWNER, {
       kind: "she_owes",
@@ -154,14 +217,120 @@ describe("candidate scoring", () => {
     logInitiative(1, first!.materialKey);
     expect(pickCandidate(db, OWNER, { idleHours: 5 })).toBeNull();
   });
+
+  it("drops aged-out open threads from candidates", () => {
+    openThread(db, OWNER, {
+      kind: "he_never_answered",
+      topic: "same old soft",
+      detail: "did the migration finish?",
+    });
+    ageOpenThreads(7);
+    expect(pickCandidate(db, OWNER, { idleHours: 5 })).toBeNull();
+  });
+});
+
+describe("sleep sign-off", () => {
+  it("matches I'm about to sleep", () => {
+    expect(isSignOff("I'm about to sleep…")).toBe(true);
+    expect(isSignOff("still awake or sleep again?")).toBe(false);
+  });
+
+  it("suppresses for 6 hours and clears on awake chat", () => {
+    noteSleepSignOff(db, OWNER);
+    expect(inSleepSuppress(db, OWNER)).toBe(true);
+    noteUserSleepState(db, OWNER, "morning — back");
+    expect(inSleepSuppress(db, OWNER)).toBe(false);
+  });
+
+  it("blocks the gate while sleep suppress is active", () => {
+    userMessage("hey", 60 * 6);
+    noteSleepSignOff(db, OWNER);
+    expect(
+      initiativeGate(
+        db,
+        OWNER,
+        { busy: false, enabled: true },
+        new Date("2026-07-31T12:00:00.000Z"),
+      ).reason,
+    ).toBe("sleep_suppress");
+    clearSleepSuppress(db, OWNER);
+  });
+});
+
+describe("draft validation", () => {
+  it("requires title tokens on curiosity drafts", () => {
+    const result = validateInitiativeDraft(
+      "That 80 hours saved framing is a red flag.",
+      {
+        kind: "curiosity_take",
+        angle: "opinion",
+        materialKey: "orphan:take:1",
+        material:
+          "Piece: How I Work With My Assistant To Save 80 Hours Per Month\nTake: spreadsheet theater",
+        strength: 68,
+        ageHours: 0,
+        score: 40,
+        lane: "C",
+        title: "How I Work With My Assistant To Save 80 Hours Per Month",
+      },
+      { unanswered: 0 },
+    );
+    // "hours" may still pass; require a draft with zero title tokens
+    expect(
+      validateInitiativeDraft(
+        "Spreadsheet theater, honestly.",
+        {
+          kind: "curiosity_take",
+          angle: "opinion",
+          materialKey: "orphan:take:1",
+          material:
+            "Piece: Website Factory pipeline notes\nTake: nice deploy path",
+          strength: 68,
+          ageHours: 0,
+          score: 40,
+          lane: "B",
+          title: "Website Factory pipeline notes",
+        },
+        { unanswered: 0 },
+      ).ok,
+    ).toBe(false);
+    expect(result.ok).toBe(true);
+  });
+
+  it("rejects check_in questions", () => {
+    expect(
+      validateInitiativeDraft(
+        "You around?",
+        {
+          kind: "check_in",
+          angle: "check_in",
+          materialKey: "checkin:x",
+          material: "Quiet ~20h.",
+          strength: 38,
+          ageHours: 0,
+          score: 38,
+        },
+        { unanswered: 0 },
+      ),
+    ).toEqual({ ok: false, reason: "idle_pad_question" });
+  });
+});
+
+describe("language helper", () => {
+  it("prefers English when unclear", () => {
+    expect(resolveDocLanguage(["hey", "ok"])).toBe("en");
+    expect(resolveDocLanguage(["naber kanka ne yapıyorsun"])).toBe("tr");
+  });
 });
 
 describe("gates", () => {
   const options = { busy: false, enabled: true };
+  // Afternoon Istanbul — outside fail-closed quiet defaults (23:30–07:30).
+  const day = new Date("2026-07-31T12:00:00.000Z");
 
   it("blocks while he is mid conversation", () => {
     userMessage("hey", 1);
-    expect(initiativeGate(db, OWNER, options).reason).toBe(
+    expect(initiativeGate(db, OWNER, options, day).reason).toBe(
       "user_active_recently",
     );
   });
@@ -169,14 +338,14 @@ describe("gates", () => {
   it("lets a nudge through inside a live session", () => {
     userMessage("hey", 30);
     expect(
-      initiativeGate(db, OWNER, { ...options, nudge: true }).allowed,
+      initiativeGate(db, OWNER, { ...options, nudge: true }, day).allowed,
     ).toBe(true);
   });
 
   it("refuses a nudge once the session is stale", () => {
     userMessage("hey", 60 * 10);
     expect(
-      initiativeGate(db, OWNER, { ...options, nudge: true }).reason,
+      initiativeGate(db, OWNER, { ...options, nudge: true }, day).reason,
     ).toBe("no_live_session");
   });
 
@@ -193,20 +362,37 @@ describe("gates", () => {
     expect(burstGate(db, OWNER).reason).toBe("burst_spent");
   });
 
-  it("holds a gap between bubbles inside a burst", () => {
-    userMessage("hey", 60 * 6);
-    logInitiative(2);
+  it("holds a gap between bubbles when engaged", () => {
+    logInitiative(5);
+    userMessage("hey", 1); // he replied — unanswered clears
+    expect(unansweredCount(db, OWNER)).toBe(0);
     expect(burstGate(db, OWNER).reason).toBe("burst_gap");
   });
 
-  it("stops talking into sustained silence", () => {
+  it("uses burstMax 1 while ignored", () => {
+    userMessage("hey", 60 * 6);
+    logInitiative(5);
+    expect(unansweredCount(db, OWNER)).toBe(1);
+    expect(burstGate(db, OWNER).reason).toBe("burst_spent");
+  });
+
+  it("stops talking into sustained silence at cap 2", () => {
     userMessage("hey", 60 * 48);
     for (let i = 0; i < env.proactiveMaxUnanswered; i++) {
       logInitiative(60 * (i + 1));
     }
     expect(unansweredCount(db, OWNER)).toBe(env.proactiveMaxUnanswered);
-    expect(initiativeGate(db, OWNER, options).reason).toBe(
+    expect(env.proactiveMaxUnanswered).toBe(2);
+    expect(initiativeGate(db, OWNER, options, day).reason).toBe(
       "talking_into_silence",
+    );
+  });
+
+  it("blocks during quiet hours by default", () => {
+    userMessage("hey", 60 * 6);
+    const night = new Date("2026-07-31T22:00:00.000Z"); // 01:00 Istanbul
+    expect(initiativeGate(db, OWNER, options, night).reason).toBe(
+      "quiet_hours",
     );
   });
 });

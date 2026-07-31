@@ -61,6 +61,7 @@ import { detectMoodFromText, recordMood } from "./memory/mood.js";
 import { evaluateInitiative, type EvaluateResult } from "./initiative/evaluator.js";
 import type { CandidateKind } from "./initiative/queue.js";
 import {
+  closeMismatchedOpenThreads,
   closeThreadsTouchedBy,
   lastAssistantText,
   noteOpenThreads,
@@ -82,6 +83,7 @@ import {
   setProactivePausedDb,
   tryAcquireInitiativeLease,
 } from "./initiative/lease.js";
+import { noteUserSleepState } from "./initiative/sleep.js";
 import type { ChatChannel } from "./memory/types.js";
 
 export type DiscordPresence = {
@@ -226,7 +228,9 @@ export class ChatService {
 
       // Anything he comes back to stops being unfinished; what he anchors to a
       // time, or leaves hanging, becomes material for a follow-up later.
+      noteUserSleepState(this.db, request.ownerId, request.message);
       closeThreadsTouchedBy(this.db, request.ownerId, request.message);
+      closeMismatchedOpenThreads(this.db, request.ownerId, request.message);
       noteUnansweredQuestion(this.db, request.ownerId, herLast, request.message);
       noteOpenThreads(this.db, request.ownerId, {
         role: "user",
@@ -721,6 +725,7 @@ export class ChatService {
         evalResult.angle ?? "check_in",
         evalResult.reason,
         evalResult.candidate,
+        this.db,
       );
       draft.reservationId = reserveInitiative(this.db, ownerId, draft);
       return { shouldSend: true, ...draft };
@@ -768,6 +773,8 @@ export class ChatService {
         ownerId,
         angle,
         reason,
+        undefined,
+        this.db,
       );
     } finally {
       this.activeOwner = null;

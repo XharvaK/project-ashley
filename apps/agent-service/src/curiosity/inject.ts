@@ -12,7 +12,8 @@ import {
 const STOP =
   /^(the|a|an|and|or|but|for|with|that|this|what|when|why|how|you|your|i'?m|about|from|have|has|had|was|were|are|is|be|been|it|its|to|of|in|on|at|as|by|not|do|does|did|just|like|bir|bu|ne|ama|için|ile|çok|daha|gibi|var|yok|ben|sen)$/i;
 
-function words(text: string): string[] {
+/** Content tokens shared by curiosity overlap and watch/affinity gates. */
+export function words(text: string): string[] {
   return text
     .toLowerCase()
     .replace(/[^\p{L}\p{N} ]/gu, " ")

@@ -30,7 +30,7 @@ import {
   upsertSource,
   type SourceRow,
 } from "./store.js";
-import { deriveWatchTopics, runOneDueWatch, upsertWatch } from "./watches.js";
+import { runOneDueWatch, syncWatchesFromFacts } from "./watches.js";
 
 export type CuriosityTickResult = {
   scanned: number;
@@ -207,9 +207,12 @@ export async function runCuriosityTick(
       }
       try {
         const facts = listActiveFacts(db, env.memoryOwnerId);
-        for (const watch of deriveWatchTopics(facts, env.curiosityWatchMax)) {
-          upsertWatch(db, env.memoryOwnerId, watch);
-        }
+        syncWatchesFromFacts(
+          db,
+          env.memoryOwnerId,
+          facts,
+          env.curiosityWatchMax,
+        );
         const fired = await runOneDueWatch(db, env.memoryOwnerId);
         if (fired) {
           result.watched = 1;
