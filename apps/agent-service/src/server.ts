@@ -309,6 +309,8 @@ export function createServer(manager: AgentManager): express.Application {
 
         images,
 
+        channel === "telegram" ? "telegram" : "discord",
+
       );
 
       res.json({
@@ -318,8 +320,6 @@ export function createServer(manager: AgentManager): express.Application {
         threadId: result.threadId,
 
         model: result.model,
-
-        memoryDigest: result.memoryDigest,
 
         usage: { promptTokens: 0, completionTokens: 0 },
 

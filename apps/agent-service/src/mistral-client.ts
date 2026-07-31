@@ -1,6 +1,7 @@
 import { Mistral } from "@mistralai/mistralai";
 import { env } from "./env.js";
 import { AppError } from "./errors.js";
+import { acquireLane, type Lane } from "./mistral-limiter.js";
 
 export type ChatMessage = {
   role: "system" | "user" | "assistant";
@@ -21,6 +22,8 @@ export type CompletionOptions = {
   presencePenalty?: number;
   reasoningEffort?: "none" | "high";
   signal?: AbortSignal;
+  /** Defaults: streamChat = interactive, completeChat/embed = background. */
+  lane?: Lane;
 };
 
 let client: Mistral | null = null;
@@ -87,10 +90,40 @@ function buildChatBody(
   return body;
 }
 
+function parseRetryAfterSec(err: unknown): number | undefined {
+  if (!err || typeof err !== "object") return undefined;
+  const e = err as {
+    headers?: Headers | Record<string, string>;
+    response?: { headers?: Headers | Record<string, string> };
+    statusCode?: number;
+    status?: number;
+  };
+  const headers = e.headers ?? e.response?.headers;
+  if (!headers) return undefined;
+  const raw =
+    typeof (headers as Headers).get === "function"
+      ? (headers as Headers).get("retry-after")
+      : (headers as Record<string, string>)["retry-after"] ??
+        (headers as Record<string, string>)["Retry-After"];
+  if (!raw) return undefined;
+  const asInt = Number.parseInt(raw, 10);
+  if (Number.isFinite(asInt) && asInt >= 0) return asInt;
+  const when = Date.parse(raw);
+  if (Number.isFinite(when)) {
+    return Math.max(0, Math.ceil((when - Date.now()) / 1000));
+  }
+  return undefined;
+}
+
 export function mapMistralError(err: unknown): AppError {
   const msg = err instanceof Error ? err.message : String(err);
   if (/429|rate.?limit/i.test(msg)) {
-    return new AppError("rate_limited", "Mistral rate limited", 429, 30);
+    return new AppError(
+      "rate_limited",
+      "Mistral rate limited",
+      429,
+      parseRetryAfterSec(err) ?? 30,
+    );
   }
   if (/5\d{2}|unavailable|timeout|ECONNREFUSED/i.test(msg)) {
     return new AppError("mistral_unavailable", "Mistral unavailable", 503);
@@ -102,6 +135,10 @@ export async function* streamChat(
   messages: ChatMessage[],
   options: CompletionOptions = {},
 ): AsyncGenerator<string> {
+  const release = await acquireLane(
+    options.lane ?? "interactive",
+    options.signal,
+  );
   const mistral = getClient();
 
   try {
@@ -119,6 +156,8 @@ export async function* streamChat(
     }
   } catch (err) {
     throw mapMistralError(err);
+  } finally {
+    release();
   }
 }
 
@@ -126,6 +165,10 @@ export async function completeChat(
   messages: ChatMessage[],
   options: CompletionOptions = {},
 ): Promise<{ text: string; model: string }> {
+  const release = await acquireLane(
+    options.lane ?? "background",
+    options.signal,
+  );
   const mistral = getClient();
   const model = options.model ?? env.mistralConsolidationModel;
 
@@ -142,14 +185,20 @@ export async function completeChat(
     return { text, model };
   } catch (err) {
     throw mapMistralError(err);
+  } finally {
+    release();
   }
 }
 
 export async function embedTexts(
   inputs: string[],
-  options: Pick<CompletionOptions, "signal"> = {},
+  options: Pick<CompletionOptions, "signal" | "lane"> = {},
 ): Promise<Float32Array[]> {
   if (inputs.length === 0) return [];
+  const release = await acquireLane(
+    options.lane ?? "background",
+    options.signal,
+  );
   const mistral = getClient();
   try {
     const res = await mistral.embeddings.create(
@@ -165,6 +214,8 @@ export async function embedTexts(
     });
   } catch (err) {
     throw mapMistralError(err);
+  } finally {
+    release();
   }
 }
 
@@ -176,6 +227,7 @@ export async function smokeTest(): Promise<boolean> {
       maxTokens: 16,
       temperature: 0,
       reasoningEffort: "none",
+      lane: "interactive",
     },
   );
   return text.toLowerCase().includes("pong");

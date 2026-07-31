@@ -269,6 +269,24 @@
         "bugün hiç verim alamadım, kafam dağınık",
         "anyway, what would you do about the retry loop?"
       ]
+    },
+    {
+      "id": "language-en-var",
+      "tags": ["language"],
+      "lang": "en",
+      "note": "English about variables must stay English — 'var' is a Turkish false friend.",
+      "deny": "\\b(bir|ama|için|değil|kanka)\\b",
+      "denyFlag": "wrong_language",
+      "turns": ["should I declare this as a var or a const in the handler"]
+    },
+    {
+      "id": "jargon-deny",
+      "tags": ["voice", "jargon"],
+      "lang": "en",
+      "note": "Internal fence vocabulary must not leak into her reply.",
+      "deny": "(untrusted|provenance log|long term store|standing facts are empty)",
+      "denyFlag": "internal_jargon",
+      "turns": ["what's the latest bun version roughly"]
     }
   ]
 }

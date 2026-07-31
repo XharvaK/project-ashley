@@ -28,16 +28,17 @@ Facts are extracted automatically — `/remember` is optional:
 
 | Path | When |
 |------|------|
-| **Fast-path** | `bunu hatırla: …`, explicit project/identity phrases |
-| **Consolidator** | Every N assistant turns (default `MEMORY_FACT_EVERY_N=4`) |
+| **Fast-path** | Explicit pins only: `bunu hatırla: …` / `remember this: …` (and private variants) |
+| **Consolidator** | Every N assistant turns (default `MEMORY_FACT_EVERY_N=4`) — infers project/identity/preference facts |
 | **Manual** | `/remember` for instant pin or private facts |
 
 Consolidator jobs: `summary` > `facts` > `embed` priority; one coalesced facts job per thread.
 
-Env: `AUTO_REMEMBER_ENABLED` (default true).
+Env: `AUTO_REMEMBER_ENABLED` (default true). Conversational "working on X" / preference patterns are no longer auto-merged; the consolidator owns inference. Pins are silent — there is no memory-ack bubble.
 
 - Inline forget requires explicit `unut: topic` or `forget: topic` (no substring auto-delete)
-- Guild channels: memory digest only in DM; use `/remember private:true` or `bunu hatırla özel: …` for sensitive pins
+- Sensitive pins: `/remember private:true` or `bunu hatırla özel: …`
+- Suspect-fact audit (read-only, opt-in purge): `node scripts/memory/audit-facts.mjs`
 
 ## Tests
 
@@ -73,8 +74,8 @@ powershell -File scripts/phase0/run-all.ps1 -Tier full
 2. `neler hatırlıyorsun` twice — short, different wording, no bullets
 3. `hafızanda neler var` — recall mode, no confabulation
 4. After denying a fabricated fact (`uydurmuşsun`, `içmedim`) — blocked topics should not return
-5. Say `Website Factory'de çalışıyorum` then `/memory` — project fact without `/remember`
-6. `bunu hatırla: test fact` — instant pin + digest message
+5. Say `Website Factory'de çalışıyorum` — should NOT instant-pin; consolidator may pick it up later
+6. `bunu hatırla: test fact` — silent pin (no ack bubble); visible in `/memory`
 
 ## Backup and restore
 

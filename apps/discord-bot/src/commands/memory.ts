@@ -8,17 +8,17 @@ export async function execute(
   const includePrivate = interaction.options.getBoolean("private") ?? false;
   const data = await memorySummary(includePrivate);
 
-  const lines: string[] = ["**What I know**", ""];
+  const lines: string[] = ["Here's what I've got:", ""];
   if (data.narrative) {
-    lines.push("**Where things left off**", data.narrative, "");
+    lines.push("Where we left off:", data.narrative, "");
   }
   if (data.facts.length) {
-    lines.push("**Standing facts**");
+    lines.push("Standing notes:");
     for (const f of data.facts.slice(0, 20)) {
       lines.push(`• ${formatFactLabel(f.category, f.value)}`);
     }
   } else {
-    lines.push("_No standing facts yet — say something explicit or use /remember._");
+    lines.push("Nothing pinned yet — tell me something to keep, or use /remember.");
   }
 
   await interaction.editReply(lines.join("\n").slice(0, 2000));

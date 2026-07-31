@@ -1,29 +1,11 @@
 import type { ChatInputCommandInteraction } from "discord.js";
+import { agentErrorMessage } from "../chat/agent-errors.js";
 import { isOwner } from "../security/gate.js";
 import * as remember from "../commands/remember.js";
 import * as memory from "../commands/memory.js";
 import * as newCmd from "../commands/new.js";
 import * as forget from "../commands/forget.js";
 import * as proactive from "../commands/proactive.js";
-
-function agentErrorMessage(code?: string, retryAfterSec?: number): string {
-  switch (code) {
-    case "agent_not_ready":
-      return "I'm offline — agent-service isn't ready. Check that it's running locally.";
-    case "mistral_unavailable":
-      return "Mistral API is unreachable right now. Try again in a bit.";
-    case "rate_limited":
-      return retryAfterSec
-        ? `Rate limited — try again in about ${retryAfterSec}s.`
-        : "Rate limited — try again in a minute.";
-    case "message_too_long":
-      return "That message is too long for me to process.";
-    case "forbidden":
-      return "Not authorized.";
-    default:
-      return "Something went wrong on my end. Try again?";
-  }
-}
 
 export async function handleSlash(
   interaction: ChatInputCommandInteraction,

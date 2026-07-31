@@ -28,7 +28,7 @@ import {
 
 
 
-let timer: ReturnType<typeof setInterval> | null = null;
+let timer: ReturnType<typeof setTimeout> | null = null;
 
 
 
@@ -52,15 +52,24 @@ export function startProactiveScheduler(client: Client): void {
 
 
 
-  const intervalMs = config.proactiveCheckIntervalMin * 60 * 1000;
+  const baseIntervalMs = config.proactiveCheckIntervalMin * 60 * 1000;
 
   console.log(
 
-    `[discord-bot] proactive scheduler every ${config.proactiveCheckIntervalMin}m`,
+    `[discord-bot] proactive scheduler every ~${config.proactiveCheckIntervalMin}m (jittered)`,
 
   );
 
 
+
+  const scheduleNext = (): void => {
+    // ±20% jitter so the poll never lands on a fixed wall-clock rhythm.
+    const jitter = 0.8 + Math.random() * 0.4;
+    const delay = Math.round(baseIntervalMs * jitter);
+    timer = setTimeout(() => {
+      void tick().finally(scheduleNext);
+    }, delay);
+  };
 
   const tick = async () => {
 
@@ -172,9 +181,7 @@ export function startProactiveScheduler(client: Client): void {
 
 
 
-  void tick();
-
-  timer = setInterval(() => void tick(), intervalMs);
+  void tick().finally(scheduleNext);
 
 }
 
@@ -184,7 +191,7 @@ export function stopProactiveScheduler(): void {
 
   if (timer) {
 
-    clearInterval(timer);
+    clearTimeout(timer);
 
     timer = null;
 

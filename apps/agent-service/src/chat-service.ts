@@ -28,7 +28,6 @@ import { classifyQuery } from "./memory/recall.js";
 import { ConsolidationWorker } from "./memory/consolidator.js";
 import { getMemoryDb, getMemoryHealth } from "./memory/db.js";
 import { applyAutoRemember } from "./memory/auto-remember.js";
-import { buildMemoryDigestItems, type MemoryDigestItem } from "./memory/memory-digest.js";
 import {
   handleForgetRequest,
   syncDenylistFromThread,
@@ -37,6 +36,9 @@ import { forgetByTopic, getActiveSummary, listActiveFacts, pinFact } from "./mem
 import { archiveAndNewThread, insertMessage, resolveActiveThread } from "./memory/threads.js";
 import { stripMediaMarkers } from "./memory/strip-markers.js";
 import { estimateTokens } from "./memory/tokens.js";
+import { NO_REPEAT_GUARD, looksLikeRepeat } from "./repetition-guard.js";
+import { setTurnBusy } from "./turn-gate.js";
+import { detectMoodFromText, recordMood } from "./memory/mood.js";
 import { evaluateInitiative, type EvaluateResult } from "./initiative/evaluator.js";
 import type { CandidateKind } from "./initiative/queue.js";
 import {
@@ -84,7 +86,6 @@ export type ChatStreamEvent =
       text: string;
       model: string;
       threadId: string;
-      memoryDigest?: MemoryDigestItem[];
     }
   | { type: "error"; code: string; message: string };
 
@@ -110,6 +111,7 @@ export class ChatService {
     this.abortController?.abort();
     this.abortController = null;
     this.activeOwner = null;
+    setTurnBusy(false);
   }
 
   /**
@@ -164,6 +166,7 @@ export class ChatService {
 
     this.activeOwner = request.ownerId;
     this.abortController = new AbortController();
+    setTurnBusy(true);
 
     try {
       const threadId =
@@ -195,7 +198,7 @@ export class ChatService {
       handleForgetRequest(this.db, request.ownerId, request.message);
       syncDenylistFromThread(this.db, request.ownerId, threadId);
 
-      const autoResult = applyAutoRemember(
+      applyAutoRemember(
         this.db,
         request.ownerId,
         threadId,
@@ -203,15 +206,6 @@ export class ChatService {
         request.message,
         this.consolidator,
       );
-      const digestPromise =
-        autoResult?.facts.length ?
-          buildMemoryDigestItems(
-            autoResult.facts,
-            request.message,
-            request.channel,
-            this.abortController.signal,
-          )
-        : Promise.resolve([] as MemoryDigestItem[]);
 
       this.consolidator.afterMessage(
         request.ownerId,
@@ -303,12 +297,23 @@ export class ChatService {
           ? env.mistralChatPresencePenalty
           : undefined;
 
+      // Banter stays fast; recall and soft_recall get the extra thinking budget.
+      const reasoningEffort =
+        assembled.queryMode === "normal" && request.message.trim().length < 80
+          ? ("none" as const)
+          : assembled.queryMode === "recall" ||
+              assembled.queryMode === "soft_recall" ||
+              request.message.trim().length > 160
+            ? ("high" as const)
+            : ("none" as const);
+
       const sampling = {
         maxTokens,
         temperature: temp,
         presencePenalty,
-        reasoningEffort: "none" as const,
+        reasoningEffort,
         signal: this.abortController.signal,
+        lane: "interactive" as const,
       };
 
       // Text channels hold the deltas back so a copied sample or a fabricated
@@ -321,61 +326,63 @@ export class ChatService {
         if (!buffered) yield { type: "delta", text: delta };
       }
 
-      if (buffered && examples.length > 0 && looksLikeParrot(full, examples)) {
-        console.warn("[chat] reply copied a voice sample, regenerating once");
-        full = "";
-        for await (const delta of streamChat(buildMessages([]), sampling)) {
-          full += delta;
-        }
-      }
+      // At most one regeneration per turn — stacked rewrites become compliance prose.
+      if (buffered && full) {
+        const recentAssistant = assembled.hotMessages
+          .filter((m) => m.role === "assistant")
+          .map((m) => m.content)
+          .slice(-6);
 
-      if (buffered && isEchoOfUser(full, request.message)) {
-        console.warn("[chat] reply echoed him, regenerating once");
-        full = "";
-        for await (const delta of streamChat(
-          buildMessages(examples, {
-            text: NO_ECHO_GUARD,
-            takeIds: [],
-          }),
-          sampling,
-        )) {
-          full += delta;
-        }
-      }
+        type Regen = { reason: string; messages: ReturnType<typeof buildMessages> };
+        let regen: Regen | null = null;
 
-      if (
-        buffered &&
-        isPremiseCheck(request.message) &&
-        acceptedUncheckedPremise(full)
-      ) {
-        console.warn("[chat] accepted a premise unchecked, regenerating once");
-        full = "";
-        for await (const delta of streamChat(
-          buildMessages(examples, {
-            text: PREMISE_GUARD,
-            takeIds: [],
-          }),
-          sampling,
-        )) {
-          full += delta;
+        if (examples.length > 0 && looksLikeParrot(full, examples)) {
+          regen = { reason: "parrot", messages: buildMessages([]) };
+        } else if (isEchoOfUser(full, request.message)) {
+          regen = {
+            reason: "echo",
+            messages: buildMessages(examples, {
+              text: NO_ECHO_GUARD,
+              takeIds: [],
+            }),
+          };
+        } else if (
+          isPremiseCheck(request.message) &&
+          acceptedUncheckedPremise(full)
+        ) {
+          regen = {
+            reason: "premise",
+            messages: buildMessages(examples, {
+              text: PREMISE_GUARD,
+              takeIds: [],
+            }),
+          };
+        } else if (
+          !curiosity &&
+          !searchContext &&
+          claimsOwnActivity(full) &&
+          !hasReadActivity(this.db, 24)
+        ) {
+          regen = {
+            reason: "activity",
+            messages: buildMessages(examples, NO_ACTIVITY_GUARD),
+          };
+        } else if (looksLikeRepeat(full, recentAssistant)) {
+          regen = {
+            reason: "repeat",
+            messages: buildMessages(examples, {
+              text: NO_REPEAT_GUARD,
+              takeIds: [],
+            }),
+          };
         }
-      }
 
-      // Nothing licenses "I was reading about that" except a provenance row.
-      if (
-        buffered &&
-        !curiosity &&
-        !searchContext &&
-        claimsOwnActivity(full) &&
-        !hasReadActivity(this.db, 24)
-      ) {
-        console.warn("[chat] unbacked activity claim, regenerating once");
-        full = "";
-        for await (const delta of streamChat(
-          buildMessages(examples, NO_ACTIVITY_GUARD),
-          sampling,
-        )) {
-          full += delta;
+        if (regen) {
+          console.warn(`[chat] ${regen.reason}, regenerating once`);
+          full = "";
+          for await (const delta of streamChat(regen.messages, sampling)) {
+            full += delta;
+          }
         }
       }
 
@@ -406,6 +413,13 @@ export class ChatService {
         messageId: assistantId,
       });
 
+      const mood = detectMoodFromText(persisted);
+      if (mood) {
+        recordMood(this.db, request.ownerId, mood, {
+          sourceMessageId: assistantId,
+        });
+      }
+
       this.consolidator.afterMessage(
         request.ownerId,
         threadId,
@@ -413,14 +427,11 @@ export class ChatService {
         "assistant",
       );
 
-      const memoryDigest = await digestPromise;
-
       yield {
         type: "done",
         text: full,
         model: env.mistralModel,
         threadId: assembled.threadId,
-        memoryDigest: memoryDigest.length ? memoryDigest : undefined,
       };
     } catch (err) {
       if (err instanceof AppError) {
@@ -437,6 +448,7 @@ export class ChatService {
     } finally {
       this.activeOwner = null;
       this.abortController = null;
+      setTurnBusy(false);
     }
   }
 
@@ -444,12 +456,10 @@ export class ChatService {
     text: string;
     threadId: string;
     model: string;
-    memoryDigest?: MemoryDigestItem[];
   }> {
     let text = "";
     let threadId = request.threadId ?? "";
     let model = env.mistralModel;
-    let memoryDigest: MemoryDigestItem[] | undefined;
 
     for await (const event of this.stream(request)) {
       if (event.type === "delta") text += event.text;
@@ -457,7 +467,6 @@ export class ChatService {
         text = event.text;
         model = event.model;
         threadId = event.threadId;
-        memoryDigest = event.memoryDigest;
       }
       if (event.type === "error") {
         throw new AppError(
@@ -471,7 +480,7 @@ export class ChatService {
     const tid =
       threadId ||
       resolveActiveThread(this.db, request.ownerId, request.channel);
-    return { text, threadId: tid, model, memoryDigest };
+    return { text, threadId: tid, model };
   }
 
   pinMemory(

@@ -51,7 +51,7 @@ export function buildCuriosityBlock(takes: TakeRow[]): string | null {
   if (takes.length === 0) return null;
   const lines = takes.map((t) => `- ${t.take} (from: ${t.title})`);
   return [
-    "Things you actually read since you last talked, with the provenance log to back it. This is optional texture, not a briefing:",
+    "Things you actually read since you last talked. Optional texture, not a briefing:",
     "",
     ...lines,
     "",

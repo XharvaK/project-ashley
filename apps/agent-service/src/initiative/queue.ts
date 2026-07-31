@@ -137,6 +137,14 @@ export function collectCandidates(
   };
 
   for (const thread of listOpenThreads(db, ownerId, 20)) {
+    // Time anchors stay silent until due_at; undated threads are fair game.
+    if (thread.due_at) {
+      const raw = thread.due_at.includes("T")
+        ? thread.due_at
+        : `${thread.due_at}Z`;
+      const due = Date.parse(raw);
+      if (Number.isFinite(due) && due > Date.now()) continue;
+    }
     const kind: CandidateKind =
       thread.kind === "she_owes"
         ? "she_owes"
@@ -204,6 +212,23 @@ export function collectCandidates(
       mult("check_in"),
     );
     if (c) out.push(c);
+  }
+
+  // Low-stakes presence when silence is long and nothing sharper exists. A friend
+  // who only texts with an agenda is itself a tell. Base score sits under the
+  // floor; lift it so it can clear the gate once check-in idle is met.
+  if (context.idleHours >= env.proactiveCheckInIdleHours) {
+    const ambient = make(
+      "ambient",
+      `ambient:${new Date().toISOString().slice(0, 10)}`,
+      "No agenda - a small human presence ping, one short line.",
+      0,
+      mult("ambient"),
+    );
+    if (ambient) {
+      ambient.score = Math.max(ambient.score, env.proactiveMinScore + 1);
+      out.push(ambient);
+    }
   }
 
   return out

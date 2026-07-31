@@ -17,7 +17,7 @@ export function isPremiseCheck(message: string): boolean {
 }
 
 export const PREMISE_GUARD =
-  "He is asking you to confirm a claim he already made. Check the claim itself before you answer: if it is wrong, say so in the first clause and give the actual behaviour, and if it is right, confirm it plainly. Never open with agreement you have not checked.";
+  "He wants a check on a claim he already made. Lead with the actual behaviour: correct it in the first clause if it is wrong, or confirm it plainly if it is right.";
 
 /** Openers that mean she nodded along before checking. */
 const ACCEPTED =

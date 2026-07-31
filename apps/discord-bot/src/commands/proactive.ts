@@ -13,13 +13,12 @@ export async function execute(
   if (action === "status") {
     const status = await getProactiveStatus();
     const lines = [
-      `**Proactive initiative**`,
-      `Enabled: ${status.enabled}`,
-      `Paused: ${status.paused}`,
+      `Unprompted messages: ${status.enabled ? "on" : "off"}`,
+      status.paused ? "Paused right now." : "Not paused.",
       `Sent today: ${status.sentToday}/${status.maxPerDay}`,
-      `Min idle: ${status.minIdleHours}h`,
-      `Last sent: ${status.lastSentAt ?? "never"}`,
-      `Last user message: ${status.lastUserMessageAt ?? "never"}`,
+      `Quiet until you've been idle ~${status.minIdleHours}h`,
+      `Last time I texted first: ${status.lastSentAt ?? "never"}`,
+      `Last thing you said: ${status.lastUserMessageAt ?? "never"}`,
     ];
     await interaction.editReply(lines.join("\n"));
     return;
@@ -28,7 +27,7 @@ export async function execute(
   if (action === "pause") {
     await pauseProactive();
     await interaction.editReply({
-      content: "Proactive outreach paused until `/proactive resume`.",
+      content: "Okay — I won't text first until you `/proactive resume`.",
     });
     return;
   }
@@ -36,7 +35,7 @@ export async function execute(
   if (action === "resume") {
     await resumeProactive();
     await interaction.editReply({
-      content: "Proactive outreach resumed.",
+      content: "Alright, I might text first again when there's a reason.",
     });
   }
 }

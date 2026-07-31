@@ -13,17 +13,33 @@ const NOT_A_LOOKUP =
   /\b(remember|hatırl|you said|demiştin)\b|^\s*(lol|haha|ok|tamam|evet|hayır)\b/i;
 
 /**
+ * Claims a web search cannot verify: her own runtime, Doc's private state,
+ * second-person subjects about Ashley, token/spend metering, and memory guts.
+ */
+const NOT_CHECKABLE =
+  /\b(you|your|ashley|sen|senin|sende)\b.{0,40}\b(token|spend|usage|quota|rpm|rate.?limit|memory|hafıza|box|runtime|prompt|context window)\b|\b(my|benim)\b.{0,40}\b(token|spend|usage|quota|api key|bill|fatura)\b|\b(working on you|on you\b|senin üzerinde|seninle ilgili)\b|\b(did you|have you|are you)\b.{0,30}\b(read|look|check|search|lookup)\b/i;
+
+/**
  * A turn that wanted a search but got none. Without this she fills the gap with
  * a plausible version number, which reads as knowledge and is a guess.
  */
 export const NO_LOOKUP_GUARD =
-  "He asked about something current and you could not check it this turn. Say plainly that you cannot check right now. You may add the rough shape of what you last knew, marked as stale, but no exact figures: a major version line at most, never a patch version, a price, a score, or a date. A precise number you cannot check is a guess wearing a hedge.";
+  "He asked about something current and this turn has no search results. Answer with what you can: say you cannot check right now, and if you add a remembered shape mark it stale. Prefer a major version line over any patch, price, score, or date.";
+
+/** Network-free: true when a matched query is still worth a web search. */
+export function isCheckableLookup(message: string): boolean {
+  const text = message.trim();
+  if (!text) return false;
+  if (NOT_CHECKABLE.test(text)) return false;
+  return true;
+}
 
 export function shouldLookup(message: string): string | null {
   const text = message.trim();
   if (text.length < 8 || text.length > 400) return null;
   if (NOT_A_LOOKUP.test(text)) return null;
   if (!EXPLICIT.test(text) && !FRESH.test(text)) return null;
+  if (!isCheckableLookup(text)) return null;
 
   const query = text
     .replace(EXPLICIT, " ")

@@ -38,12 +38,6 @@ export async function chatText(
     text: string;
     threadId: string;
     model: string;
-    memoryDigest?: Array<{
-      key: string;
-      value: string;
-      category: string;
-      display: string;
-    }>;
   }>("/chat/text", {
     method: "POST",
     body: JSON.stringify({

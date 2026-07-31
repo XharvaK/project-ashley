@@ -5,26 +5,10 @@ import {
   checkHealth,
   proposeAction,
 } from "../agent-client.js";
+import { agentErrorMessage } from "../chat/agent-errors.js";
 import { channelQueue } from "../chat/channel-queue.js";
 import { splitMessage } from "../chat/split-message.js";
 import { isOwner } from "../security/gate.js";
-
-function agentErrorMessage(code?: string): string {
-  switch (code) {
-    case "agent_not_ready":
-      return "I'm offline right now. Agent service isn't reachable.";
-    case "mistral_unavailable":
-      return "Mistral API is down or unreachable. Try again in a bit.";
-    case "rate_limited":
-      return "Rate limit hit. Try again in a minute.";
-    case "message_too_long":
-      return "That message is too long (max 4000 chars).";
-    case "chat_in_progress":
-      return "Still thinking about the last message. Give me a sec.";
-    default:
-      return "Something went wrong on my end. Try again?";
-  }
-}
 
 const REMIND_RE =
   /^(?:remind me|hatirlat|hatırlat)\s+(.+)$/i;

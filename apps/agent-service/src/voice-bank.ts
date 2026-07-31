@@ -23,8 +23,9 @@ export function loadVoiceBank(): VoiceExample[] {
 }
 
 const TR_CHARS = /[ğşıçöüİĞŞÇÖÜ]/;
+// Omit bare "var": it is a real English word (variables) and a Turkish false friend.
 const TR_WORDS =
-  /\b(bir|bu|ne|ama|için|ile|çok|daha|gibi|var|yok|ben|sen|kanka|valla|olur|hiç|neden|nasıl|mı|mi|değil|bana|beni|senin|şu|abi|tamam|evet|hayır)\b/i;
+  /\b(bir|bu|ne|ama|için|ile|çok|daha|gibi|yok|ben|sen|kanka|valla|olur|hiç|neden|nasıl|mı|mi|değil|bana|beni|senin|şu|abi|tamam|evet|hayır)\b/i;
 
 export function detectLanguage(message: string): "en" | "tr" {
   if (TR_CHARS.test(message)) return "tr";

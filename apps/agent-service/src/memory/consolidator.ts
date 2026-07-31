@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { env } from "../env.js";
 import { completeChat, embedTexts } from "../mistral-client.js";
+import { isTurnBusy } from "../turn-gate.js";
 import { chunkText, float32ToBuffer } from "./embeddings.js";
 import {
   FACT_MIN_CONFIDENCE,
@@ -39,6 +40,8 @@ type CoalescePayload = {
 };
 
 const CONSOLIDATION_TIMEOUT_MS = 4 * 60 * 1000;
+/** Lease must outlive the job timeout so a queued limiter wait cannot double-run. */
+const LEASE_MINUTES = 6;
 const MAX_JOBS_PER_TICK = 5;
 const FACTS_WINDOW_MAX_MESSAGES = 30;
 const STANCE_WINDOW_MAX_MESSAGES = 12;
@@ -357,6 +360,9 @@ export class ConsolidationWorker {
       );
     }
 
+    // Don't claim leases while a live chat turn needs the interactive lane.
+    if (isTurnBusy()) return;
+
     if (this.running) return;
     this.running = true;
 
@@ -373,7 +379,7 @@ export class ConsolidationWorker {
         const now = new Date().toISOString();
         const claimed = this.db
           .prepare(
-            `UPDATE mem_jobs SET status = 'running', lease_until = datetime('now', '+5 minutes'), updated_at = ?
+            `UPDATE mem_jobs SET status = 'running', lease_until = datetime('now', '+${LEASE_MINUTES} minutes'), updated_at = ?
              WHERE id = ? AND status = 'pending'`,
           )
           .run(now, job.id);

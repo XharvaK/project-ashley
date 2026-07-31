@@ -322,16 +322,12 @@ export class AgentManager {
 
     imageUrls?: string[],
 
+    channel: "discord" | "telegram" = "discord",
+
   ): Promise<{
     text: string;
     threadId: string;
     model: string;
-    memoryDigest?: Array<{
-      key: string;
-      value: string;
-      category: string;
-      display: string;
-    }>;
   }> {
 
     if (this.state === "paused" || this.state === "booting") {
@@ -368,7 +364,7 @@ export class AgentManager {
 
         message,
 
-        channel: "discord",
+        channel,
 
         ownerId: userId,
 
@@ -387,7 +383,7 @@ export class AgentManager {
           ts: new Date().toISOString(),
           role: "user",
           text: message,
-          source: "discord",
+          source: channel,
           session_id: auditSessionId,
         });
         this.logger.append({
@@ -456,7 +452,7 @@ export class AgentManager {
 
       this.broadcast({ type: "offline", reason: "no_network_or_key" });
 
-      await this.speakText("I'm offline. Ashley needs internet.", sessionId, onAudio);
+      await this.speakText("I'm offline. I need internet.", sessionId, onAudio);
 
       return;
 
@@ -473,7 +469,6 @@ export class AgentManager {
     const tts = new OrpheusStreamer();
 
     let assistantText = "";
-    let memoryDigestLine = "";
 
     const ownerId = this.resolveOwnerId();
 
@@ -503,13 +498,6 @@ export class AgentManager {
 
         }
 
-        if (event.type === "done" && event.memoryDigest?.length) {
-          memoryDigestLine = event.memoryDigest
-            .slice(0, 2)
-            .map((f) => f.display)
-            .join(" ");
-        }
-
         if (event.type === "error") {
 
           throw new Error(event.message);
@@ -521,16 +509,6 @@ export class AgentManager {
 
 
       await tts.flush(onAudio);
-
-      if (memoryDigestLine) {
-        await this.speakText(
-          `Not ettim: ${memoryDigestLine}`,
-          sessionId,
-          onAudio,
-        );
-      }
-
-
 
       if (assistantText) {
 

@@ -23,6 +23,6 @@ export function claimsOwnActivity(text: string): boolean {
 }
 
 export const NO_ACTIVITY_GUARD = {
-  text: "You have no activity log this turn, so you did not read, watch, or look anything up. Say what you think without claiming any activity. If he asked what you have been reading, say plainly that you have not been reading anything worth mentioning.",
+  text: "Talk about what you think. This turn has no reading or lookup note, so speak from opinion and the thread. If he asked what you have been reading, say you have not been reading anything worth mentioning.",
   takeIds: [] as number[],
 };

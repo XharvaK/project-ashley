@@ -29,6 +29,7 @@ import {
   listStances,
   selectRelevantStances,
 } from "./stances.js";
+import { buildMoodBlock } from "./mood.js";
 import {
   getHotMessages,
   getThreadMeta,
@@ -112,45 +113,40 @@ function buildMemoryBlock(
   repeatRecall: boolean,
   stanceBlock: string | null,
   liveSignals: string[] = [],
+  moodBlock: string | null = null,
 ): string {
   const factLines = facts
     .filter((f) =>
       shouldInjectSensitivity(f.sensitivity, userMessage, queryMode),
     )
-    .map((f) => `- ${f.value}`)
+    .map((f) => `- [${f.category}/${f.key}] ${f.value}`)
     .slice(0, 40);
 
   const narrativeParts: string[] = [];
   if (channelHint) narrativeParts.push(channelHint);
   if (narrative?.trim()) narrativeParts.push(narrative.trim());
 
-  // Labels and explicit empty markers stay: flattening this into prose reads
-  // nicer and quietly makes an empty tier look like something she forgot.
+  // Keep section labels; leave empty tiers blank so she is not handed a
+  // quotable "nothing stored" sentence to parrot.
   const parts: string[] = ["What you actually have on Doc:", "", "## Standing facts"];
-  parts.push(
-    ...(factLines.length > 0
-      ? factLines
-      : ["(empty: nothing stored long term about Doc yet)"]),
-  );
+  if (factLines.length > 0) parts.push(...factLines);
 
   parts.push("", "## Where things left off");
-  parts.push(narrativeParts.length > 0 ? narrativeParts.join(" ") : "(empty)");
+  if (narrativeParts.length > 0) parts.push(narrativeParts.join(" "));
 
   parts.push("", "## May be relevant now");
   if (snippets.length > 0 && queryMode === "normal") {
     parts.push(
-      "(unverified echoes, use only if clearly relevant to what he just said)",
+      "(possible echoes — only if clearly relevant to what he just said)",
       ...snippets.map((s) => paraphraseSnippet(s)),
     );
-  } else {
-    parts.push(
-      queryMode === "normal" ? "(empty)" : "(suppressed for a memory question)",
-    );
+  } else if (queryMode !== "normal") {
+    parts.push("(suppressed for a memory question)");
   }
 
   parts.push(
     "",
-    "Trust order: standing facts, then where things left off, then this thread's messages. Echoes are hints, never facts. An empty section means you have nothing there, not that you should reconstruct it.",
+    "Trust order: standing facts, then where things left off, then this thread's messages. Echoes are hints, never facts. A blank section means you have nothing there, not that you should reconstruct it.",
   );
 
   const storeIsEmpty = factLines.length === 0 && narrativeParts.length === 0;
@@ -176,6 +172,10 @@ function buildMemoryBlock(
 
   if (stanceBlock) {
     parts.push("", stanceBlock);
+  }
+
+  if (moodBlock) {
+    parts.push("", moodBlock);
   }
 
   if (correctionGuard) {
@@ -283,6 +283,9 @@ export class MemoryAssembler {
           )
         : null;
 
+    const moodBlock =
+      queryMode !== "recall" ? buildMoodBlock(this.db, ownerId) : null;
+
     const liveSignals: string[] = [];
     const gapLine = reentryLine(this.db, ownerId, excludeMessageId);
     if (gapLine) liveSignals.push(gapLine);
@@ -300,6 +303,7 @@ export class MemoryAssembler {
       repeatRecall,
       stanceBlock,
       liveSignals,
+      moodBlock,
     );
 
     const hot = getHotMessages(
@@ -363,6 +367,8 @@ export class MemoryAssembler {
       env.stanceLedgerEnabled
         ? buildStanceBlock(listStances(this.db, ownerId, 3))
         : null,
+      [],
+      buildMoodBlock(this.db, ownerId),
     );
 
     const hot = getHotMessages(

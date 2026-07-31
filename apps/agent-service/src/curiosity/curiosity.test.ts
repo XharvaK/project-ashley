@@ -202,7 +202,7 @@ describe("selectCuriosityTakes", () => {
 describe("buildCuriosityBlock", () => {
   it("frames reading as optional texture, not a briefing", () => {
     const block = buildCuriosityBlock([take()])!;
-    expect(block).toContain("optional texture");
+    expect(block.toLowerCase()).toContain("optional texture");
     expect(block).toContain("Never open with it");
     expect(block).not.toContain("Standing facts");
   });

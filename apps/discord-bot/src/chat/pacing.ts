@@ -57,12 +57,20 @@ export function sleepAbortable(ms: number, signal: AbortSignal): Promise<void> {
 /** Per-channel record of how fast Doc is going. */
 export class TempoTracker {
   private readonly last = new Map<string, number>();
+  private readonly gaps = new Map<string, number | null>();
 
   /** Gap since his previous message, then remembers this one. */
   mark(channelId: string, now = Date.now()): number | null {
     const prev = this.last.get(channelId) ?? null;
     this.last.set(channelId, now);
-    return prev === null ? null : now - prev;
+    const gap = prev === null ? null : now - prev;
+    this.gaps.set(channelId, gap);
+    return gap;
+  }
+
+  /** Most recent gap from mark(), for drains that run after a debounce. */
+  lastGapMs(channelId: string): number | null {
+    return this.gaps.get(channelId) ?? null;
   }
 }
 

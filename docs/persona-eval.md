@@ -19,14 +19,18 @@ probe 2's content.
 powershell -File scripts\persona-eval\run-isolated.ps1 -Label wave5 -Seeds 1
 
 # full: 3 seeds per probe, then judged against a baseline label
-powershell -File scripts\persona-eval\run-full.ps1 -Baseline wave0-baseline -Label wave5
+powershell -File scripts\persona-eval\run-full.ps1 -Baseline baseline-w0 -Label wave5
 
 # gates only, no judge spend
-powershell -File scripts\persona-eval\run-full.ps1 -Baseline wave0-baseline -Label wave5 -Offline
+powershell -File scripts\persona-eval\run-full.ps1 -Baseline baseline-w0 -Label wave5 -Offline
+
+# compare against the shipped persona overhaul replay
+powershell -File scripts\persona-eval\run-full.ps1 -Baseline w6-ship3 -Label naturalness
 ```
 
 Output lands in `~/.composer-assistant/persona-eval/<label>/` as `run.json` plus
-`replies.md`, and the comparison in `judge-<label>/judge.md`.
+`replies.md`, and the comparison in `judge-<label>/judge.md`. The on-disk baseline
+label is `baseline-w0` (not `wave0-baseline`).
 
 ## What the judge sees
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { DatabaseSync } from "node:sqlite";
 import { migrate } from "./db.js";
 
-const LATEST_VERSION = 8;
+const LATEST_VERSION = 9;
 
 describe("migrate", () => {
   it("reaches the latest schema with habits, facts_cutoff and stances", () => {

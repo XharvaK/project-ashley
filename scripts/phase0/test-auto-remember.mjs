@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Agent integration: auto-remember fast-path returns memoryDigest.
+ * Agent integration: explicit pin via auto-remember lands in /memory/summary.
  * Requires running agent-service + MISTRAL_API_KEY.
  */
 import { loadEnv } from "./load-env.mjs";
@@ -40,12 +40,7 @@ if (!health.ready) {
 }
 
 const pinMsg = "bunu hatırla: auto-remember integration test";
-const pinResult = await chat(pinMsg);
-if (!pinResult.memoryDigest?.length) {
-  console.error("FAIL: expected memoryDigest on imperative pin");
-  process.exit(1);
-}
-console.log("OK: memoryDigest on pin", pinResult.memoryDigest[0]?.value);
+await chat(pinMsg);
 
 const summaryRes = await fetch(
   `${AGENT}/memory/summary?owner_id=${encodeURIComponent(OWNER)}`,

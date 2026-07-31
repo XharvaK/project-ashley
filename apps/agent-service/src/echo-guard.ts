@@ -24,4 +24,4 @@ function normalize(text: string): string {
 }
 
 export const NO_ECHO_GUARD =
-  "You just mirrored his words. That is not a reply. Bring something of your own: a jab, a short question, or a concrete observation. Never send his own word back as the whole message.";
+  "Answer with something of your own — a jab, a short question, or a concrete observation — rather than sending his words back as the whole message.";

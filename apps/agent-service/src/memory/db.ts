@@ -444,6 +444,23 @@ CREATE INDEX IF NOT EXISTS idx_mem_pending_owner
          ON mem_initiative_log (owner_id, material_key)`,
     );
     db.exec("PRAGMA user_version = 8");
+    version = 8;
+  }
+  if (version < 9) {
+    db.exec(`
+CREATE TABLE IF NOT EXISTS mem_mood (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_id          TEXT NOT NULL,
+  mood              TEXT NOT NULL,
+  rapport           REAL NOT NULL DEFAULT 0.5,
+  note              TEXT,
+  source_message_id INTEGER,
+  created_at        TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_mem_mood_owner
+  ON mem_mood (owner_id, id DESC);
+`);
+    db.exec("PRAGMA user_version = 9");
   }
 }
 

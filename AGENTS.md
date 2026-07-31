@@ -130,7 +130,7 @@ Then on Mint (in the USB folder, after `gh auth login`): `bash first-boot-from-u
 
 |---------|--------|
 
-| `/remember` | Pin fact |
+| `/remember` | Pin fact (silent — no ack bubble) |
 
 | `/memory` | Show memory (ephemeral) |
 

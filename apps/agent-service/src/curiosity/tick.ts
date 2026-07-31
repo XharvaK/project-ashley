@@ -4,6 +4,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { env } from "../env.js";
 import { listActiveFacts } from "../memory/facts.js";
 import { REPO_CONFIG_PATH } from "../paths.js";
+import { isTurnBusy } from "../turn-gate.js";
 import { parseFeed } from "./feed.js";
 import { fetchArticleText } from "./read.js";
 import { scoreItem } from "./scoring.js";
@@ -126,6 +127,7 @@ export async function runCuriosityTick(
 
   if (!env.curiosityEnabled) return { ...result, skipped: "disabled" };
   if (!env.mistralApiKey) return { ...result, skipped: "no_api_key" };
+  if (isTurnBusy()) return { ...result, skipped: "chat_busy" };
 
   if (!seeded) {
     seedSources(db);

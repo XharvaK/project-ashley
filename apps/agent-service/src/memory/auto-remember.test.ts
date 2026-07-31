@@ -14,31 +14,34 @@ describe("auto-remember", () => {
     }
   });
 
-  it("merges explicit project statement (de çalışıyorum)", () => {
-    const r = detectAutoRemember("Website Factory'de çalışıyorum");
-    expect(r?.action).toBe("merge");
-  });
-
-  it("does not merge banter after çalışıyorum", () => {
-    const r = detectAutoRemember(
-      "artık çalışıyorum sensin şapşik. Evet, sanırım bugünlük bu kadar yeterli. Bira",
-    );
-    expect(r).toBeNull();
-  });
-
-  it("does not merge casual speech with çalışıyorum", () => {
-    expect(detectAutoRemember("yeter artık çalışıyorum sensin şapşik")).toBeNull();
-  });
-
-  it("merges Ashley self-project from playful projem phrase", () => {
-    const r = detectAutoRemember(
-      "cursordaki projem sensin şapşik. Evet, sanırım bugünlük bu kadar yeterli.",
-    );
-    expect(r?.action).toBe("merge");
-    if (r?.action === "merge") {
-      expect(r.fact.value).toBe("composer-assistant (Ashley)");
-      expect(r.fact.category).toBe("project");
+  it("pins on English remember this", () => {
+    const r = detectAutoRemember("remember this: Doc prefers dark mode");
+    expect(r?.action).toBe("pin");
+    if (r?.action === "pin") {
+      expect(r.fact.value).toContain("dark mode");
     }
+  });
+
+  it("does not merge conversational project statements", () => {
+    expect(detectAutoRemember("Website Factory'de çalışıyorum")).toBeNull();
+    expect(detectAutoRemember("Working on you, fixing the lookup gate")).toBeNull();
+    expect(detectAutoRemember("working on composer-assistant")).toBeNull();
+  });
+
+  it("does not merge banter or self-project jokes", () => {
+    expect(
+      detectAutoRemember(
+        "cursordaki projem sensin şapşik. Evet, sanırım bugünlük bu kadar yeterli.",
+      ),
+    ).toBeNull();
+    expect(
+      detectAutoRemember("yeter artık çalışıyorum sensin şapşik"),
+    ).toBeNull();
+  });
+
+  it("does not merge identity or preference chatter", () => {
+    expect(detectAutoRemember("my name is Doc")).toBeNull();
+    expect(detectAutoRemember("I like strong coffee")).toBeNull();
   });
 
   it("coalesces priority facts job for bare remember", () => {
