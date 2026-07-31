@@ -21,6 +21,7 @@ import {
   sleepAbortable,
   tempoTracker,
 } from "../chat/pacing.js";
+import { getDiscordPresence } from "../presence.js";
 import { splitMessage } from "../chat/split-message.js";
 import { TurnBuffer } from "../chat/turn-buffer.js";
 import { runTypingLoop } from "../chat/typing-loop.js";
@@ -61,7 +62,12 @@ async function drainTurn(channelId: string): Promise<void> {
       try {
         // Both start together so the interim bubble costs the answer nothing.
         const looking = lookupPreflight(turn.text);
-        const reply = chatText(turn.text, undefined, turn.imageUrls);
+        const reply = chatText(
+          turn.text,
+          undefined,
+          turn.imageUrls,
+          getDiscordPresence(),
+        );
         // The real handler is the await below; this only stops Node from calling
         // an early rejection unhandled while the preflight is still in flight.
         void reply.catch(() => {});

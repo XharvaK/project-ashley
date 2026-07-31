@@ -25,4 +25,5 @@ export function claimsOwnActivity(text: string): boolean {
 export const NO_ACTIVITY_GUARD = {
   text: "Talk about what you think. This turn has no reading or lookup note, so speak from opinion and the thread. If he asked what you have been reading, say you have not been reading anything worth mentioning.",
   takeIds: [] as number[],
+  provenance: "mention" as const,
 };

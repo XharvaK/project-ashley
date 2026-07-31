@@ -11,7 +11,11 @@ import {
   selectVoiceExamples,
   type VoiceExample,
 } from "./voice-bank.js";
-import { appendMemoryBlock, loadSystemPrompt } from "./prompts.js";
+import {
+  appendMemoryBlock,
+  buildDiscordPresenceNote,
+  loadSystemPrompt,
+} from "./prompts.js";
 import { PREMISE_GUARD, acceptedUncheckedPremise, isPremiseCheck } from "./premise-guard.js";
 import { NO_ECHO_GUARD, isEchoOfUser } from "./echo-guard.js";
 import {
@@ -19,6 +23,7 @@ import {
   commitCuriosity,
   type CuriosityInjection,
 } from "./curiosity/inject.js";
+import { isActivityAsk } from "./curiosity/activity-ask.js";
 import { NO_ACTIVITY_GUARD, claimsOwnActivity } from "./curiosity/claim-gate.js";
 import { NO_LOOKUP_GUARD, shouldLookup } from "./curiosity/lookup.js";
 import { buildSearchContext, searchWeb } from "./curiosity/search.js";
@@ -65,6 +70,11 @@ import {
 } from "./initiative/lease.js";
 import type { ChatChannel } from "./memory/types.js";
 
+export type DiscordPresence = {
+  status: "online" | "idle";
+  label: string;
+};
+
 export type ChatRequest = {
   message: string;
   channel: ChatChannel;
@@ -72,6 +82,8 @@ export type ChatRequest = {
   threadId?: string;
   auditSessionId?: string | null;
   imageUrls?: string[];
+  /** Discord bot's last applied custom status; omitted on telegram/voice. */
+  discordPresence?: DiscordPresence;
 };
 
 const NUDGE_KINDS = new Set<CandidateKind>([
@@ -236,10 +248,16 @@ export class ChatService {
             })
           : [];
 
+      const activityAsk = isActivityAsk(request.message);
+      const curiosityMode = activityAsk ? "solicited" : "organic";
+      // Voice skips unsolicited reading texture (TTS budget). Direct asks still
+      // get a license so she cannot invent under hasReadActivity.
       const curiosity =
-        request.channel === "voice"
+        request.channel === "voice" && curiosityMode === "organic"
           ? null
-          : assembleCuriosity(this.db, request.message);
+          : assembleCuriosity(this.db, request.message, {
+              mode: curiosityMode,
+            });
 
       const searchContext = await this.maybeLookUp(
         request.message,
@@ -247,13 +265,21 @@ export class ChatService {
       );
 
       // Wanted a lookup, did not get one: she has to say so instead of guessing.
+      // Activity asks are not lookups; skip the offline-lookup guard for them.
       const lookupGuard =
-        !searchContext && shouldLookup(request.message)
+        !activityAsk &&
+        !searchContext &&
+        shouldLookup(request.message)
           ? NO_LOOKUP_GUARD
           : null;
       const guard = isPremiseCheck(request.message)
         ? [PREMISE_GUARD, lookupGuard].filter(Boolean).join("\n\n")
         : lookupGuard;
+
+      const presenceNote =
+        request.channel === "discord"
+          ? buildDiscordPresenceNote(request.discordPresence)
+          : null;
 
       const buildMessages = (
         withExamples: VoiceExample[],
@@ -261,6 +287,7 @@ export class ChatService {
       ) =>
         buildChatMessages({
           system: appendMemoryBlock(promptParts, assembled.memoryBlock, {
+            presence: presenceNote,
             curiosity: withCuriosity?.text,
             voice: buildVoiceBlock(withExamples),
             guard,
@@ -344,6 +371,7 @@ export class ChatService {
             messages: buildMessages(examples, {
               text: NO_ECHO_GUARD,
               takeIds: [],
+              provenance: "mention",
             }),
           };
         } else if (
@@ -355,14 +383,16 @@ export class ChatService {
             messages: buildMessages(examples, {
               text: PREMISE_GUARD,
               takeIds: [],
+              provenance: "mention",
             }),
           };
         } else if (
-          !curiosity &&
           !searchContext &&
           claimsOwnActivity(full) &&
-          !hasReadActivity(this.db, 24)
+          !hasReadActivity(this.db, 24) &&
+          !(curiosity && curiosity.takeIds.length > 0)
         ) {
+          // Empty solicited honesty still counts as no content license.
           regen = {
             reason: "activity",
             messages: buildMessages(examples, NO_ACTIVITY_GUARD),
@@ -373,6 +403,7 @@ export class ChatService {
             messages: buildMessages(examples, {
               text: NO_REPEAT_GUARD,
               takeIds: [],
+              provenance: "mention",
             }),
           };
         }

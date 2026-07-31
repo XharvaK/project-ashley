@@ -239,7 +239,15 @@ export function createServer(manager: AgentManager): express.Application {
 
     try {
 
-      const { message, channel, userId, threadId, auditSessionId, imageUrls } =
+      const {
+        message,
+        channel,
+        userId,
+        threadId,
+        auditSessionId,
+        imageUrls,
+        discordPresence,
+      } =
 
         req.body as {
 
@@ -254,6 +262,8 @@ export function createServer(manager: AgentManager): express.Application {
           auditSessionId?: string;
 
           imageUrls?: unknown;
+
+          discordPresence?: { status?: string; label?: string };
 
         };
 
@@ -295,7 +305,17 @@ export function createServer(manager: AgentManager): express.Application {
 
       const images = parseImageUrls(imageUrls);
 
-
+      const presence =
+        channel === "discord" &&
+        (discordPresence?.status === "online" ||
+          discordPresence?.status === "idle") &&
+        typeof discordPresence.label === "string" &&
+        discordPresence.label.trim()
+          ? {
+              status: discordPresence.status as "online" | "idle",
+              label: discordPresence.label.trim().slice(0, 80),
+            }
+          : undefined;
 
       const result = await manager.handleTextChat(
 
@@ -310,6 +330,8 @@ export function createServer(manager: AgentManager): express.Application {
         images,
 
         channel === "telegram" ? "telegram" : "discord",
+
+        presence,
 
       );
 

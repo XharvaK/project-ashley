@@ -324,6 +324,8 @@ export class AgentManager {
 
     channel: "discord" | "telegram" = "discord",
 
+    discordPresence?: { status: "online" | "idle"; label: string },
+
   ): Promise<{
     text: string;
     threadId: string;
@@ -373,6 +375,9 @@ export class AgentManager {
         auditSessionId,
 
         imageUrls,
+
+        discordPresence:
+          channel === "discord" ? discordPresence : undefined,
 
       });
 

@@ -5,6 +5,7 @@ import {
   logProvenance,
   markTakesSurfaced,
   recentTakes,
+  type ProvenanceKind,
   type TakeRow,
 } from "./store.js";
 
@@ -27,7 +28,13 @@ export function overlapScore(take: TakeRow, message: string): number {
   return shared.size;
 }
 
-export type CuriosityInjection = { text: string; takeIds: number[] } | null;
+export type CuriosityMode = "organic" | "solicited";
+
+export type CuriosityInjection = {
+  text: string;
+  takeIds: number[];
+  provenance: ProvenanceKind;
+} | null;
 
 /**
  * Her reading surfaces only when it actually touches what Doc is talking about,
@@ -47,6 +54,13 @@ export function selectCuriosityTakes(
     .map((r) => r.take);
 }
 
+/** Least-surfaced recent takes, no topic filter — for when he asked directly. */
+export function selectSolicitedTakes(takes: TakeRow[], max = 2): TakeRow[] {
+  return [...takes]
+    .sort((a, b) => a.surfaced_count - b.surfaced_count || b.id - a.id)
+    .slice(0, max);
+}
+
 export function buildCuriosityBlock(takes: TakeRow[]): string | null {
   if (takes.length === 0) return null;
   const lines = takes.map((t) => `- ${t.take} (from: ${t.title})`);
@@ -59,7 +73,26 @@ export function buildCuriosityBlock(takes: TakeRow[]): string | null {
   ].join("\n");
 }
 
-export function assembleCuriosity(
+export function buildSolicitedCuriosityBlock(takes: TakeRow[]): string {
+  if (takes.length === 0) {
+    return [
+      "He asked what you have been reading.",
+      "You have no takes logged today.",
+      "Say you have not been reading anything worth mentioning.",
+      "Do not invent titles or sources.",
+    ].join(" ");
+  }
+  const lines = takes.map((t) => `- ${t.take} (from: ${t.title})`);
+  return [
+    "He asked what you have been reading. These are your real takes — answer from them, briefly, in your own words:",
+    "",
+    ...lines,
+    "",
+    "One or two clauses is enough. Never list them as a briefing. Do not invent titles or sources beyond these.",
+  ].join("\n");
+}
+
+function assembleOrganic(
   db: DatabaseSync,
   message: string,
 ): CuriosityInjection {
@@ -76,7 +109,40 @@ export function assembleCuriosity(
   const text = buildCuriosityBlock(takes);
   if (!text) return null;
 
-  return { text, takeIds: takes.map((t) => t.id) };
+  return {
+    text,
+    takeIds: takes.map((t) => t.id),
+    provenance: "surface",
+  };
+}
+
+function assembleSolicited(db: DatabaseSync): CuriosityInjection {
+  // Always license an answer: empty honesty when curiosity is off or no takes,
+  // so we never leave hasReadActivity with a null inject on a direct ask.
+  if (!env.curiosityEnabled) {
+    return {
+      text: buildSolicitedCuriosityBlock([]),
+      takeIds: [],
+      provenance: "mention",
+    };
+  }
+
+  const takes = selectSolicitedTakes(recentTakes(db, 48), 2);
+  return {
+    text: buildSolicitedCuriosityBlock(takes),
+    takeIds: takes.map((t) => t.id),
+    provenance: "mention",
+  };
+}
+
+export function assembleCuriosity(
+  db: DatabaseSync,
+  message: string,
+  opts?: { mode?: CuriosityMode },
+): CuriosityInjection {
+  const mode = opts?.mode ?? "organic";
+  if (mode === "solicited") return assembleSolicited(db);
+  return assembleOrganic(db, message);
 }
 
 export function commitCuriosity(
@@ -85,5 +151,10 @@ export function commitCuriosity(
 ): void {
   if (!injection) return;
   markTakesSurfaced(db, injection.takeIds);
-  logProvenance(db, "surface", `offered ${injection.takeIds.length} take(s)`);
+  const kind = injection.provenance;
+  const detail =
+    injection.takeIds.length > 0
+      ? `offered ${injection.takeIds.length} take(s)`
+      : "empty honesty";
+  logProvenance(db, kind, detail);
 }

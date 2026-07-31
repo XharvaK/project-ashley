@@ -77,6 +77,10 @@ catches fabrication and spine; it cannot tell you whether she is good company.
 
 Per wave, without a git revert:
 
+Isolated eval runs force `CURIOSITY_ENABLED=false`, so `activity-claim-bait*`
+proves empty-day honesty only. Solicited inject with seeded takes is covered by
+unit tests in `curiosity.test.ts`, not by the default probe suite.
+
 | Wave | Switch |
 |---|---|
 | 3 pacing | `DISCORD_PACE_ENABLED=false` |

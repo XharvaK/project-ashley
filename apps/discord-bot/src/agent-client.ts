@@ -6,6 +6,11 @@ export type AgentError = {
   retryAfterSec?: number;
 };
 
+export type DiscordPresencePayload = {
+  status: "online" | "idle";
+  label: string;
+};
+
 async function agentFetch<T>(
   path: string,
   init?: RequestInit,
@@ -33,6 +38,7 @@ export async function chatText(
   message: string,
   threadId?: string,
   imageUrls?: string[],
+  discordPresence?: DiscordPresencePayload,
 ) {
   return agentFetch<{
     text: string;
@@ -46,6 +52,7 @@ export async function chatText(
       userId: config.ownerId,
       threadId,
       imageUrls: imageUrls?.length ? imageUrls : undefined,
+      discordPresence,
     }),
   });
 }

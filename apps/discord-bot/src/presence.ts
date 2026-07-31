@@ -3,7 +3,18 @@ import { checkHealth, curiosityStatus } from "./agent-client.js";
 
 const REFRESH_MS = 10 * 60 * 1000;
 
+export type DiscordPresence = {
+  status: "online" | "idle";
+  label: string;
+};
+
 let timer: ReturnType<typeof setInterval> | null = null;
+let last: DiscordPresence = { status: "online", label: "up" };
+
+/** Same string Discord is showing; chat uses this so she can own her status. */
+export function getDiscordPresence(): DiscordPresence {
+  return last;
+}
 
 /**
  * Only true things: whether her brain is actually reachable, and what her
@@ -13,9 +24,10 @@ let timer: ReturnType<typeof setInterval> | null = null;
 async function apply(client: Client): Promise<void> {
   const healthy = await checkHealth();
   if (!healthy) {
+    last = { status: "idle", label: "brain offline" };
     client.user?.setPresence({
       status: "idle",
-      activities: [{ name: "brain offline", type: ActivityType.Custom }],
+      activities: [{ name: last.label, type: ActivityType.Custom }],
     });
     return;
   }
@@ -30,6 +42,7 @@ async function apply(client: Client): Promise<void> {
     // Health is what matters here; a missing curiosity status is not worth a lie.
   }
 
+  last = { status: "online", label };
   client.user?.setPresence({
     status: "online",
     activities: [{ name: label, type: ActivityType.Custom }],

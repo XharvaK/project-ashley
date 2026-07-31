@@ -1,13 +1,16 @@
 import { DatabaseSync } from "node:sqlite";
 import { beforeEach, describe, expect, it } from "vitest";
 import { migrate } from "../memory/db.js";
+import { isActivityAsk } from "./activity-ask.js";
 import { claimsOwnActivity } from "./claim-gate.js";
 import {
   assembleCuriosity,
   buildCuriosityBlock,
+  buildSolicitedCuriosityBlock,
   commitCuriosity,
   overlapScore,
   selectCuriosityTakes,
+  selectSolicitedTakes,
 } from "./inject.js";
 import { sanitizeExternalText } from "./read.js";
 import { scoreItem } from "./scoring.js";
@@ -212,6 +215,30 @@ describe("buildCuriosityBlock", () => {
   });
 });
 
+describe("isActivityAsk", () => {
+  it("catches second-person reading and status asks", () => {
+    for (const text of [
+      "what have you been reading today?",
+      "XD what youve been reading? i see you updated your status about reading 3 things",
+      "bugün neler okudun bakalım",
+      "your status says you read 3 things today",
+    ]) {
+      expect(isActivityAsk(text), text).toBe(true);
+    }
+  });
+
+  it("ignores Doc talking about his own reading", () => {
+    for (const text of [
+      "I've been reading about event sourcing all evening",
+      "been reading about event sourcing",
+      "worth reading if you like wal mode",
+      "bugün changelog okudum",
+    ]) {
+      expect(isActivityAsk(text), text).toBe(false);
+    }
+  });
+});
+
 describe("assembleCuriosity", () => {
   let conn: DatabaseSync;
   beforeEach(() => {
@@ -242,6 +269,7 @@ describe("assembleCuriosity", () => {
   it("offers a relevant take and records the surfacing", () => {
     const injection = assembleCuriosity(conn, "my sqlite writer keeps blocking");
     expect(injection?.takeIds).toEqual([1]);
+    expect(injection?.provenance).toBe("surface");
     commitCuriosity(conn, injection);
     expect(countProvenance(conn, "surface", 24)).toBe(1);
   });
@@ -253,6 +281,49 @@ describe("assembleCuriosity", () => {
   it("respects the once-an-hour surfacing cap", () => {
     commitCuriosity(conn, assembleCuriosity(conn, "sqlite writer blocking"));
     expect(assembleCuriosity(conn, "sqlite writer blocking")).toBeNull();
+  });
+
+  it("solicited injects without topic overlap", () => {
+    const injection = assembleCuriosity(conn, "what have you been reading today?", {
+      mode: "solicited",
+    });
+    expect(injection?.takeIds).toEqual([1]);
+    expect(injection?.provenance).toBe("mention");
+    expect(injection?.text.toLowerCase()).toContain("he asked");
+  });
+
+  it("solicited bypasses organic surface caps and logs mention", () => {
+    commitCuriosity(conn, assembleCuriosity(conn, "sqlite writer blocking"));
+    expect(assembleCuriosity(conn, "sqlite writer blocking")).toBeNull();
+
+    const solicited = assembleCuriosity(conn, "what have you been reading?", {
+      mode: "solicited",
+    });
+    expect(solicited?.takeIds).toEqual([1]);
+    commitCuriosity(conn, solicited);
+    expect(countProvenance(conn, "surface", 24)).toBe(1);
+    expect(countProvenance(conn, "mention", 24)).toBe(1);
+  });
+
+  it("solicited empty day licenses honest denial", () => {
+    const empty = db();
+    const injection = assembleCuriosity(empty, "what have you been reading?", {
+      mode: "solicited",
+    });
+    expect(injection?.takeIds).toEqual([]);
+    expect(injection?.text.toLowerCase()).toContain(
+      "not been reading anything worth mentioning",
+    );
+    expect(buildSolicitedCuriosityBlock([])).toContain("Do not invent");
+  });
+
+  it("selectSolicitedTakes caps at two and prefers unsurged", () => {
+    const rows = [1, 2, 3].map((id) =>
+      take({ id, surfaced_count: id === 1 ? 5 : 0 }),
+    );
+    const picked = selectSolicitedTakes(rows, 2);
+    expect(picked).toHaveLength(2);
+    expect(picked.map((t) => t.id)).not.toContain(1);
   });
 });
 

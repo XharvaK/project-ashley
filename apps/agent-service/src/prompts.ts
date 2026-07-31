@@ -73,6 +73,17 @@ export function loadHabitNudgePrompt(): SystemPromptParts {
   return assemble(readPrompt("habit-nudge.md"));
 }
 
+export function buildDiscordPresenceNote(
+  presence: { status: "online" | "idle"; label: string } | undefined,
+): string | null {
+  if (!presence?.label?.trim()) return null;
+  const label = presence.label.trim().slice(0, 80);
+  return [
+    `Your Discord custom status right now: "${label}".`,
+    "Own it if he points at it or your profile; do not volunteer it.",
+  ].join(" ");
+}
+
 export function appendMemoryBlock(
   parts: SystemPromptParts,
   memoryBlock: string,
@@ -80,11 +91,13 @@ export function appendMemoryBlock(
     curiosity?: string | null;
     voice?: string | null;
     guard?: string | null;
+    presence?: string | null;
   } = {},
 ): string {
   return [
     parts.prefix,
     memoryBlock.trim(),
+    extras.presence,
     extras.curiosity,
     extras.voice,
     extras.guard,
