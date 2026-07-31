@@ -194,11 +194,22 @@ export async function runCuriosityTick(
       setItemStatus(db, item.id, take ? "read" : "skipped");
       if (!take) continue;
 
-      logProvenance(db, "read", `${item.title} (${item.url})`, item.id);
+      // Only a fetched body licenses provenance "read". Excerpt-only takes
+      // still form opinions but must not claim a sit-down read.
+      if (article) {
+        logProvenance(db, "read", `${item.title} (${item.url})`, item.id);
+        result.read++;
+      } else {
+        logProvenance(
+          db,
+          "take",
+          `excerpt:${item.title} (${item.url})`,
+          item.id,
+        );
+      }
       insertTake(db, { itemId: item.id, interest: item.interest, take });
       logProvenance(db, "take", take, item.id);
       readBudget--;
-      result.read++;
       result.takes++;
     }
 

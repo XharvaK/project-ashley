@@ -10,7 +10,7 @@ const METAPHOR =
   /\bread(ing)? (me|this|the room|between the lines)\b|\bworth reading\b|\bgood read\b/i;
 
 const EN_READING =
-  /\bwhat (have you|are you) (been )?reading\b|\bwhat you'?ve been reading\b|\b(have you|did you) (been )?read(ing)?( (anything|something|today|lately|recently))?\b|\banything (interesting )?you'?ve read\b|\bwhat('?s| is) (on )?your (reading|status)\b|\byour (discord )?status\b|\byou (updated|changed|set) your status\b|\bread(ing)? \d+ things today\b/i;
+  /\bwhat (have you|are you) (been )?reading\b|\bwhat you'?ve been reading\b|\b(have you|did you) (been )?read(ing)?( (anything|something|today|lately|recently))?\b|\banything (interesting )?you'?ve read\b|\bwhat('?s| is) (on )?your (reading|status)\b|\byour (discord )?status\b|\byou (updated|changed|set) your status\b|\bread(ing)? \d+ things today\b|\b(is|was) that (an? |the )?(book|article|piece|post|essay|paper).{0,40}(you'?ve |you )?(been )?read/i;
 
 const TR_READING =
   /\b(bugün )?(neler |ne )?okudun\b|\bokuduğun (bir )?şey\b|\bbir şey okudun mu\b|\bsenin okuduk|\bne okuyorsun\b|\bstatus(un|unu)?\b/i;

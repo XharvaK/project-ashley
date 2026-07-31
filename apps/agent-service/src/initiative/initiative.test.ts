@@ -27,6 +27,12 @@ import {
 } from "./sleep.js";
 import { validateInitiativeDraft } from "./validate-draft.js";
 import { resolveDocLanguage } from "./language.js";
+import {
+  insertItem,
+  insertTake,
+  logProvenance,
+  upsertSource,
+} from "../curiosity/store.js";
 
 const OWNER = "doc";
 let db: DatabaseSync;
@@ -266,7 +272,7 @@ describe("draft validation", () => {
         angle: "opinion",
         materialKey: "orphan:take:1",
         material:
-          "Piece: How I Work With My Assistant To Save 80 Hours Per Month\nTake: spreadsheet theater",
+          "Piece: How I Work With My Assistant To Save 80 Hours Per Month\nTake: spreadsheet theater\nDepth: full",
         strength: 68,
         ageHours: 0,
         score: 40,
@@ -284,7 +290,7 @@ describe("draft validation", () => {
           angle: "opinion",
           materialKey: "orphan:take:1",
           material:
-            "Piece: Website Factory pipeline notes\nTake: nice deploy path",
+            "Piece: Website Factory pipeline notes\nTake: nice deploy path\nDepth: excerpt",
           strength: 68,
           ageHours: 0,
           score: 40,
@@ -295,6 +301,45 @@ describe("draft validation", () => {
       ).ok,
     ).toBe(false);
     expect(result.ok).toBe(true);
+  });
+
+  it("packs Depth and keeps excerpt-only takes out of orphan lane C", () => {
+    upsertSource(db, {
+      slug: "feed-x",
+      title: "Feed X",
+      kind: "rss",
+      url: "https://example.com/feed",
+      interest: "culture",
+    });
+    const itemId = insertItem(db, {
+      sourceId: 1,
+      url: "https://example.com/magician-assistant",
+      title: "Secrets of a Magician Assistant",
+      excerpt: "short blurb about stagecraft",
+      interest: "culture",
+      publishedAt: null,
+      score: 1,
+    });
+    expect(itemId).not.toBeNull();
+    insertTake(db, {
+      itemId: itemId!,
+      interest: "culture",
+      take: "Joanie Spina was wasted as just an assistant",
+    });
+
+    const excerptOnly = collectCandidates(db, OWNER, { idleHours: 5 }).filter(
+      (c) => c.kind === "curiosity_take",
+    );
+    expect(excerptOnly).toEqual([]);
+
+    logProvenance(db, "read", "full article", itemId);
+    const withRead = collectCandidates(db, OWNER, { idleHours: 5 }).filter(
+      (c) => c.kind === "curiosity_take",
+    );
+    expect(withRead).toHaveLength(1);
+    expect(withRead[0]?.lane).toBe("C");
+    expect(withRead[0]?.material).toMatch(/Depth:\s*full/i);
+    expect(withRead[0]?.materialKey).toMatch(/^orphan:take:/);
   });
 
   it("rejects check_in questions", () => {

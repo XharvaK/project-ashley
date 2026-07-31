@@ -416,14 +416,17 @@ export class ChatService {
           ? env.mistralChatPresencePenalty
           : undefined;
 
-      // Banter stays fast; recall and soft_recall get the extra thinking budget.
+      // Banter stays fast; recall, soft_recall, and "did you read that?" challenges
+      // get thinking budget (short messages used to force none and clip to "No.").
       const reasoningEffort =
-        assembled.queryMode === "normal" && request.message.trim().length < 80
-          ? ("none" as const)
-          : assembled.queryMode === "recall" ||
-              assembled.queryMode === "soft_recall" ||
-              request.message.trim().length > 160
-            ? ("high" as const)
+        assembled.queryMode === "recall" ||
+        assembled.queryMode === "soft_recall" ||
+        activityAsk ||
+        request.message.trim().length > 160
+          ? ("high" as const)
+          : assembled.queryMode === "normal" &&
+              request.message.trim().length < 80
+            ? ("none" as const)
             : ("none" as const);
 
       const sampling = {

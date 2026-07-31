@@ -2,7 +2,11 @@ import type { DatabaseSync } from "node:sqlite";
 import { env } from "../env.js";
 import { words } from "../curiosity/inject.js";
 import { HYPE } from "../curiosity/scoring.js";
-import { recentTakes, type TakeRow } from "../curiosity/store.js";
+import {
+  recentTakes,
+  takeHasFullRead,
+  type TakeRow,
+} from "../curiosity/store.js";
 import { localParts } from "../local-time.js";
 import { listActiveFacts } from "../memory/facts.js";
 import { listStances } from "../memory/stances.js";
@@ -180,8 +184,12 @@ function coherentOrphan(take: TakeRow): boolean {
   return true;
 }
 
-function packTakeMaterial(take: TakeRow): string {
-  return `Piece: ${take.title}\nTake: ${take.take}`;
+function packTakeMaterial(
+  db: DatabaseSync,
+  take: TakeRow,
+): string {
+  const depth = takeHasFullRead(db, take.item_id) ? "full" : "excerpt";
+  return `Piece: ${take.title}\nTake: ${take.take}\nDepth: ${depth}`;
 }
 
 function presenceMaterial(
@@ -261,11 +269,12 @@ export function collectCandidates(
   }
 
   for (const take of recentTakes(db, 48, 12)) {
+    const material = packTakeMaterial(db, take);
     if (take.source_slug === "doc-world-watch") {
       const c = make(
         "watch_fired",
         `take:${take.id}`,
-        packTakeMaterial(take),
+        material,
         hoursSince(take.created_at),
         mult("watch_fired"),
         { lane: "A", title: take.title },
@@ -279,7 +288,7 @@ export function collectCandidates(
       const c = make(
         "curiosity_take",
         `take:${take.id}`,
-        packTakeMaterial(take),
+        material,
         hoursSince(take.created_at),
         mult("curiosity_take"),
         { lane: "B", title: take.title },
@@ -289,12 +298,14 @@ export function collectCandidates(
     }
 
     if (!coherentOrphan(take)) continue;
+    // Orphan cold outreach needs a real fetch — not a feed blurb take.
+    if (!takeHasFullRead(db, take.item_id)) continue;
     if (unanswered >= 1) continue;
     if (orphanToday >= env.proactiveOrphanMaxPerDay) continue;
     const c = make(
       "curiosity_take",
       `orphan:take:${take.id}`,
-      packTakeMaterial(take),
+      material,
       hoursSince(take.created_at),
       mult("curiosity_take"),
       { lane: "C", title: take.title, scoreScale: 0.55 },

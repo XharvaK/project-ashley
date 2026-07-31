@@ -238,6 +238,18 @@ export function recentTakes(
     .all(`-${withinHours} hours`, limit) as TakeRow[];
 }
 
+/** Full article fetch logged as provenance kind=read; excerpt-only takes have none. */
+export function takeHasFullRead(db: DatabaseSync, itemId: number): boolean {
+  const row = db
+    .prepare(
+      `SELECT 1 AS ok FROM cur_provenance
+       WHERE item_id = ? AND kind = 'read'
+       LIMIT 1`,
+    )
+    .get(itemId) as { ok: number } | undefined;
+  return row !== undefined;
+}
+
 export function markTakesSurfaced(db: DatabaseSync, ids: number[]): void {
   if (ids.length === 0) return;
   const stmt = db.prepare(

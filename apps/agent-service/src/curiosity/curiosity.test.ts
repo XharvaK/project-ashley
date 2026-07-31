@@ -27,6 +27,7 @@ import {
   insertTake,
   logProvenance,
   recentTakes,
+  takeHasFullRead,
   upsertSource,
   type TakeRow,
 } from "./store.js";
@@ -121,6 +122,15 @@ describe("store", () => {
     const rows = recentTakes(conn, 48);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ take: "a real opinion", title: "A thing" });
+  });
+
+  it("takeHasFullRead is true only after a read provenance row", () => {
+    insertItem(conn, item("https://example.com/a"));
+    expect(takeHasFullRead(conn, 1)).toBe(false);
+    logProvenance(conn, "take", "excerpt:A thing", 1);
+    expect(takeHasFullRead(conn, 1)).toBe(false);
+    logProvenance(conn, "read", "A thing", 1);
+    expect(takeHasFullRead(conn, 1)).toBe(true);
   });
 });
 
@@ -228,6 +238,8 @@ describe("isActivityAsk", () => {
       "XD what youve been reading? i see you updated your status about reading 3 things",
       "bugün neler okudun bakalım",
       "your status says you read 3 things today",
+      "Is that a book you've been reading?",
+      "is that an article you been reading",
     ]) {
       expect(isActivityAsk(text), text).toBe(true);
       expect(activityAskKind(text), text).toBe("reading");

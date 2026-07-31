@@ -39,7 +39,7 @@ const KIND_BRIEF: Record<string, string> = {
   watch_fired:
     "Name the piece or topic first (title tokens must appear), then your take. Prefer found-this then take as two short bubbles when it fits. Soft hook only if allowed.",
   curiosity_take:
-    "Found→take. Title must be recognizable in the text. Dry title+take is fine. Never a bare orphan stat with no piece. Soft hook only if allowed.",
+    "Feed find. Title must be recognizable. Prefer two short bubbles: what surfaced, then take. Do not imply you finished a book or sit-down read unless Depth says full.",
   callback:
     "Pick up this thread of his. One concrete question about it, nothing general.",
   stance:
@@ -47,6 +47,22 @@ const KIND_BRIEF: Record<string, string> = {
   check_in:
     "Presence only. One short line. No question mark. No inventing his day, projects, or mood. Pure still-here or one tiny beat from your own reading if the material says so.",
 };
+
+const CURIOSITY_ORPHAN_BRIEF =
+  "Feed find, not a sit-down read. Bubble 1: title as something that surfaced in your feed. Bubble 2: your take plus one soft stake why you bothered mentioning it. Never imply you finished the piece or read a book. Title tokens must appear. Soft hook only if allowed.";
+
+function kindBriefFor(candidate: Candidate): string {
+  if (candidate.kind === "curiosity_take" && candidate.lane === "C") {
+    return CURIOSITY_ORPHAN_BRIEF;
+  }
+  if (
+    candidate.kind === "curiosity_take" &&
+    /\bDepth:\s*excerpt\b/i.test(candidate.material)
+  ) {
+    return "Feed skim (excerpt only, Depth: excerpt). Title must appear. Frame as something that popped up in the feed, not a finished read. Soft hook only if allowed.";
+  }
+  return KIND_BRIEF[candidate.kind] ?? "";
+}
 
 async function completeDraft(
   messages: ChatMessage[],
@@ -93,7 +109,7 @@ export async function draftInitiativeMessage(
   const brief = candidate
     ? [
         `Material:\n${candidate.material}`,
-        KIND_BRIEF[candidate.kind] ?? "",
+        kindBriefFor(candidate),
         softHookOk
           ? "Soft hook allowed: one light invite is OK if it fits; never guilt."
           : "Do not ask a question. No soft hook. Opinion or presence only.",
