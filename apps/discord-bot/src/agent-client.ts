@@ -11,18 +11,35 @@ export type DiscordPresencePayload = {
   label: string;
 };
 
+function isTimeoutAbort(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  return err.name === "TimeoutError" || err.name === "AbortError";
+}
+
 async function agentFetch<T>(
   path: string,
   init?: RequestInit,
 ): Promise<T> {
-  const res = await fetch(`${config.agentUrl}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
-    signal: AbortSignal.timeout(120_000),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${config.agentUrl}${path}`, {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        ...(init?.headers ?? {}),
+      },
+      signal: AbortSignal.timeout(120_000),
+    });
+  } catch (err) {
+    if (isTimeoutAbort(err)) {
+      const e = new Error("agent request timed out") as Error & {
+        code?: string;
+      };
+      e.code = "agent_timeout";
+      throw e;
+    }
+    throw err;
+  }
   const body = (await res.json()) as T & AgentError;
   if (!res.ok) {
     const err = new Error(body.error ?? res.statusText);

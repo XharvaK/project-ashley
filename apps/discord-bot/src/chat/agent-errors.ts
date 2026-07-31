@@ -20,6 +20,10 @@ export function agentErrorMessage(
       return "Not authorized.";
     case "chat_in_progress":
       return "Still on the last one — give me a sec.";
+    case "agent_timeout":
+      return "That took too long — try again?";
+    case "internal_error":
+      return "I glitched on that one — try again?";
     default:
       return "Something went wrong on my end. Try again?";
   }

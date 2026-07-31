@@ -10,6 +10,7 @@ import { channelQueue } from "../chat/channel-queue.js";
 import { MAX_IMAGES, describeIntake, type Intake } from "../chat/attachments.js";
 import { config } from "../config.js";
 import { agentErrorMessage } from "../chat/agent-errors.js";
+import { emptyReplyAction } from "../chat/empty-reply.js";
 import { fumbleLine, lookingLine, sendFailedLine } from "../chat/fumble-lines.js";
 import { searchGif } from "../chat/gif-search.js";
 import { readKillSwitch } from "../chat/kill-switch.js";
@@ -62,11 +63,12 @@ async function drainTurn(channelId: string): Promise<void> {
       try {
         // Both start together so the interim bubble costs the answer nothing.
         const looking = lookupPreflight(turn.text);
+        const presence = getDiscordPresence();
         const reply = chatText(
           turn.text,
           undefined,
           turn.imageUrls,
-          getDiscordPresence(),
+          presence,
         );
         // The real handler is the await below; this only stops Node from calling
         // an early rejection unhandled while the preflight is still in flight.
@@ -76,9 +78,9 @@ async function drainTurn(channelId: string): Promise<void> {
           await channel.send(lookingLine(turn.text)).catch(() => {});
         }
 
-        const result = await reply;
+        let result = await reply;
 
-        const markers = parseMediaMarkers(result.text);
+        let markers = parseMediaMarkers(result.text);
         let chunks = splitMessage(markers.text);
         let react = markers.react;
 
@@ -88,14 +90,40 @@ async function drainTurn(channelId: string): Promise<void> {
         }
 
         // React/GIF markers are addons. React-only = typing then void (Doc sees ghost).
-        if (chunks.length === 0 && !gifUrl) {
+        // Empty sendable: one silent retry, then fumble bank.
+        let emptyAttempt = 0;
+        while (chunks.length === 0 && !gifUrl) {
           if (react) {
             console.warn(
               "[discord-bot] dropping react-only reply; forcing text bubble",
             );
             react = null;
           }
+          if (emptyReplyAction(emptyAttempt) === "retry") {
+            console.warn(
+              `[discord-bot] empty sendable reply (len=${result.text.length}, react=${Boolean(markers.react)}, gif=${Boolean(markers.gifQuery)}); retrying once`,
+            );
+            emptyAttempt += 1;
+            result = await chatText(
+              turn.text,
+              undefined,
+              turn.imageUrls,
+              presence,
+            );
+            markers = parseMediaMarkers(result.text);
+            chunks = splitMessage(markers.text);
+            react = markers.react;
+            gifUrl = null;
+            if (markers.gifQuery) {
+              gifUrl = await searchGif(markers.gifQuery, channelId);
+            }
+            continue;
+          }
+          console.warn(
+            `[discord-bot] empty sendable after retry (len=${result.text.length}, react=${Boolean(markers.react)}, gif=${Boolean(markers.gifQuery)}); fumbling`,
+          );
           chunks = [fumbleLine(turn.text)];
+          break;
         }
 
         if (config.reactPolicyEnabled) {

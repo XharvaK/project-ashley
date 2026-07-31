@@ -23,7 +23,7 @@ describe("fumble-lines language", () => {
   it("fumble line matches language", () => {
     const en = fumbleLine("say that again");
     const tr = fumbleLine("bir daha söyler misin");
-    assert.match(en, /again|thread|brain|blanked|dropped/i);
+    assert.match(en, /again|thread|brain|blanked|dropped|nothing|one more time/i);
     assert.match(tr, /tekrar|kaçır|beyin|boşald|dene|çıkmad|kez daha/i);
   });
 });

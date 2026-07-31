@@ -14,12 +14,29 @@ describe("agentErrorMessage", () => {
       "message_too_long",
       "forbidden",
       "chat_in_progress",
+      "agent_timeout",
+      "internal_error",
       "mystery",
     ];
     for (const code of codes) {
       const msg = agentErrorMessage(code, 12);
       assert.doesNotMatch(msg, /agent-service|Mistral|mistral/i);
     }
+  });
+
+  it("maps timeout and internal_error distinctly from the default", () => {
+    assert.equal(
+      agentErrorMessage("agent_timeout"),
+      "That took too long — try again?",
+    );
+    assert.equal(
+      agentErrorMessage("internal_error"),
+      "I glitched on that one — try again?",
+    );
+    assert.equal(
+      agentErrorMessage("mystery"),
+      "Something went wrong on my end. Try again?",
+    );
   });
 
   it("source file has no hardcoded Turkish-only user strings", () => {
