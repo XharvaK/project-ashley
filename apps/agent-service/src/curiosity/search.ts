@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { env } from "../env.js";
 import { logProvenance } from "./store.js";
 import { sanitizeExternalText } from "./read.js";
+import { reserveTavilyCredit, tavilyBudgetAvailable } from "./tavily-budget.js";
 
 export type SearchHit = {
   title: string;
@@ -61,6 +62,12 @@ export function parseTavily(payload: unknown): SearchHit[] {
     .slice(0, MAX_HITS);
 }
 
+/** True when a non-cached search would be allowed (preflight / watch gate). */
+export function canSpendTavily(db: DatabaseSync): boolean {
+  if (!env.tavilyApiKey) return false;
+  return tavilyBudgetAvailable(db);
+}
+
 export async function searchWeb(
   db: DatabaseSync,
   query: string,
@@ -68,6 +75,7 @@ export async function searchWeb(
   const cached = readCache(db, query);
   if (cached) return cached;
   if (!env.tavilyApiKey) return [];
+  if (!reserveTavilyCredit(db)) return [];
 
   try {
     const res = await fetch("https://api.tavily.com/search", {

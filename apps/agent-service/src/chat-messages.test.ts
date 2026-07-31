@@ -90,6 +90,27 @@ describe("buildChatMessages", () => {
     expect(messages.at(-1)?.content).toBe("latest bun version?");
   });
 
+  it("puts page context before search context, never in system", () => {
+    const messages = buildChatMessages({
+      system,
+      hot: [],
+      message: "thoughts?",
+      pageContext: "<<<page\nbody\npage>>>",
+      searchContext: "<<<web\nhits\nweb>>>",
+    });
+
+    expect(messages[0]?.content).toBe(system);
+    expect(messages[1]).toEqual({
+      role: "user",
+      content: "<<<page\nbody\npage>>>",
+    });
+    expect(messages[2]).toEqual({
+      role: "user",
+      content: "<<<web\nhits\nweb>>>",
+    });
+    expect(messages.at(-1)?.content).toBe("thoughts?");
+  });
+
   it("leaves imageUrls unset when there are none", () => {
     const messages = buildChatMessages({
       system,

@@ -49,3 +49,20 @@ export function shouldLookup(message: string): string | null {
     .trim();
   return query.length >= 3 ? query.slice(0, 160) : null;
 }
+
+/**
+ * Lookup query for a turn that may also carry a Doc-supplied URL. Prefer the
+ * text with the URL stripped so we never spend a credit searching the link.
+ */
+export function shouldLookupAsideUrl(
+  message: string,
+  url: string | null,
+): string | null {
+  if (!url) return shouldLookup(message);
+  const cleaned = message
+    .replace(url, " ")
+    .replace(/https:\/\/\S+/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return shouldLookup(cleaned);
+}

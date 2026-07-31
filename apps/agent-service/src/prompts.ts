@@ -92,12 +92,14 @@ export function appendMemoryBlock(
     voice?: string | null;
     guard?: string | null;
     presence?: string | null;
+    capability?: string | null;
   } = {},
 ): string {
   return [
     parts.prefix,
     memoryBlock.trim(),
     extras.presence,
+    extras.capability,
     extras.curiosity,
     extras.voice,
     extras.guard,

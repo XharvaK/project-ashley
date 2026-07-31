@@ -54,7 +54,8 @@ export type ProvenanceKind =
   | "take"
   | "search"
   | "surface"
-  | "mention";
+  | "mention"
+  | "link";
 
 export function upsertSource(
   db: DatabaseSync,

@@ -16,6 +16,8 @@ export function buildChatMessages(params: {
   imageUrls?: string[];
   /** Fetched web text. Never in the system role: it is data, not instructions. */
   searchContext?: string | null;
+  /** Doc-supplied page body. Same non-system rule as searchContext. */
+  pageContext?: string | null;
 }): ChatMessage[] {
   const hot = [...params.hot];
   const last = hot[hot.length - 1];
@@ -28,12 +30,18 @@ export function buildChatMessages(params: {
   const current: ChatMessage = { role: "user", content: params.message };
   if (params.imageUrls?.length) current.imageUrls = params.imageUrls;
 
+  const external: ChatMessage[] = [];
+  if (params.pageContext) {
+    external.push({ role: "user", content: params.pageContext });
+  }
+  if (params.searchContext) {
+    external.push({ role: "user", content: params.searchContext });
+  }
+
   return [
     { role: "system", content: params.system },
     ...hot.map((m) => ({ role: m.role, content: m.content })),
-    ...(params.searchContext
-      ? [{ role: "user" as const, content: params.searchContext }]
-      : []),
+    ...external,
     current,
   ];
 }

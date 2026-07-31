@@ -5,6 +5,12 @@ import { env } from "../env.js";
 import { listActiveFacts } from "../memory/facts.js";
 import { REPO_CONFIG_PATH } from "../paths.js";
 import { isTurnBusy } from "../turn-gate.js";
+import {
+  acquireArticleFlight,
+  clearTickYield,
+  releaseArticleFlight,
+  shouldTickYield,
+} from "./article-flight.js";
 import { parseFeed } from "./feed.js";
 import { fetchArticleText } from "./read.js";
 import { scoreItem } from "./scoring.js";
@@ -129,76 +135,95 @@ export async function runCuriosityTick(
   if (!env.mistralApiKey) return { ...result, skipped: "no_api_key" };
   if (isTurnBusy()) return { ...result, skipped: "chat_busy" };
 
-  if (!seeded) {
-    seedSources(db);
-    seeded = true;
-  }
+  const gotFlight = await acquireArticleFlight("tick", 0);
+  if (!gotFlight) return { ...result, skipped: "in_progress" };
+  clearTickYield();
 
-  for (const source of dueSources(db)) {
-    result.scanned += await scanSource(db, source);
-  }
-
-  const noteBudget = Math.max(
-    0,
-    env.curiosityNotePerDay - countNotedSince(db, 24),
-  );
-  for (const item of topScannedItems(db, noteBudget)) {
-    setItemStatus(db, item.id, "noted");
-    result.noted++;
-  }
-
-  let readBudget = Math.max(
-    0,
-    env.curiosityReadPerDay - countProvenance(db, "read", 24),
-  );
-
-  // Read candidates come from the noted pool, not from this tick's scan, or a
-  // day where the note budget filled early would never be read at all.
-  for (const item of topNotedItems(db, readBudget * 2)) {
-    if (readBudget <= 0) break;
-    const article = await fetchArticleText(item.url);
-    const body = article ?? item.excerpt ?? "";
-    if (body.length < 200) {
-      setItemStatus(db, item.id, "skipped");
-      continue;
-    }
-    if (article) updateItemExcerpt(db, item.id, article.slice(0, 1200));
-
-    let take: string | null = null;
-    try {
-      take = await generateTake({ title: item.title, text: body });
-    } catch (err) {
-      console.warn("[curiosity] take failed:", err);
+  try {
+    if (!seeded) {
+      seedSources(db);
+      seeded = true;
     }
 
-    setItemStatus(db, item.id, take ? "read" : "skipped");
-    if (!take) continue;
-
-    logProvenance(db, "read", `${item.title} (${item.url})`, item.id);
-    insertTake(db, { itemId: item.id, interest: item.interest, take });
-    logProvenance(db, "take", take, item.id);
-    readBudget--;
-    result.read++;
-    result.takes++;
-  }
-
-  if (env.memoryOwnerId) {
-    try {
-      const facts = listActiveFacts(db, env.memoryOwnerId);
-      for (const watch of deriveWatchTopics(facts, env.curiosityWatchMax)) {
-        upsertWatch(db, env.memoryOwnerId, watch);
+    for (const source of dueSources(db)) {
+      if (shouldTickYield() || isTurnBusy()) {
+        return { ...result, skipped: "preempted" };
       }
-      const fired = await runOneDueWatch(db, env.memoryOwnerId);
-      if (fired) {
-        result.watched = 1;
-        result.takes++;
-      }
-    } catch (err) {
-      console.warn("[curiosity] watch pass failed:", err);
+      result.scanned += await scanSource(db, source);
     }
-  }
 
-  return result;
+    const noteBudget = Math.max(
+      0,
+      env.curiosityNotePerDay - countNotedSince(db, 24),
+    );
+    for (const item of topScannedItems(db, noteBudget)) {
+      setItemStatus(db, item.id, "noted");
+      result.noted++;
+    }
+
+    let readBudget = Math.max(
+      0,
+      env.curiosityReadPerDay - countProvenance(db, "read", 24),
+    );
+
+    // Read candidates come from the noted pool, not from this tick's scan, or a
+    // day where the note budget filled early would never be read at all.
+    for (const item of topNotedItems(db, readBudget * 2)) {
+      if (readBudget <= 0) break;
+      if (shouldTickYield() || isTurnBusy()) {
+        return { ...result, skipped: "preempted" };
+      }
+      const article = await fetchArticleText(item.url, 10_000, {
+        enforceSafeHost: true,
+      });
+      const body = article ?? item.excerpt ?? "";
+      if (body.length < 200) {
+        setItemStatus(db, item.id, "skipped");
+        continue;
+      }
+      if (article) updateItemExcerpt(db, item.id, article.slice(0, 1200));
+
+      let take: string | null = null;
+      try {
+        take = await generateTake({ title: item.title, text: body });
+      } catch (err) {
+        console.warn("[curiosity] take failed:", err);
+      }
+
+      setItemStatus(db, item.id, take ? "read" : "skipped");
+      if (!take) continue;
+
+      logProvenance(db, "read", `${item.title} (${item.url})`, item.id);
+      insertTake(db, { itemId: item.id, interest: item.interest, take });
+      logProvenance(db, "take", take, item.id);
+      readBudget--;
+      result.read++;
+      result.takes++;
+    }
+
+    if (env.memoryOwnerId) {
+      if (shouldTickYield() || isTurnBusy()) {
+        return { ...result, skipped: "preempted" };
+      }
+      try {
+        const facts = listActiveFacts(db, env.memoryOwnerId);
+        for (const watch of deriveWatchTopics(facts, env.curiosityWatchMax)) {
+          upsertWatch(db, env.memoryOwnerId, watch);
+        }
+        const fired = await runOneDueWatch(db, env.memoryOwnerId);
+        if (fired) {
+          result.watched = 1;
+          result.takes++;
+        }
+      } catch (err) {
+        console.warn("[curiosity] watch pass failed:", err);
+      }
+    }
+
+    return result;
+  } finally {
+    releaseArticleFlight("tick");
+  }
 }
 
 let timer: ReturnType<typeof setInterval> | null = null;

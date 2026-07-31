@@ -24,10 +24,24 @@ import {
   type CuriosityInjection,
 } from "./curiosity/inject.js";
 import { isActivityAsk } from "./curiosity/activity-ask.js";
-import { NO_ACTIVITY_GUARD, claimsOwnActivity } from "./curiosity/claim-gate.js";
-import { NO_LOOKUP_GUARD, shouldLookup } from "./curiosity/lookup.js";
-import { buildSearchContext, searchWeb } from "./curiosity/search.js";
-import { countProvenance, hasReadActivity } from "./curiosity/store.js";
+import {
+  buildCapabilityBlock,
+  isBrowsePermission,
+} from "./curiosity/browse-permission.js";
+import {
+  CAPABILITY_GUARD,
+  NO_ACTIVITY_GUARD,
+  claimsOwnActivity,
+  deniesOwnCapability,
+} from "./curiosity/claim-gate.js";
+import {
+  extractImmediateHttpsUrl,
+  linkReadPreflight,
+  maybeReadLink,
+} from "./curiosity/link-read.js";
+import { NO_LOOKUP_GUARD, shouldLookupAsideUrl } from "./curiosity/lookup.js";
+import { buildSearchContext, canSpendTavily, searchWeb } from "./curiosity/search.js";
+import { hasReadActivity } from "./curiosity/store.js";
 import { MemoryAssembler } from "./memory/assembler.js";
 import { classifyQuery } from "./memory/recall.js";
 import { ConsolidationWorker } from "./memory/consolidator.js";
@@ -128,30 +142,43 @@ export class ChatService {
 
   /**
    * The bot asks this before the turn so it can say "hang on, looking" while the
-   * search and the generation are still running. Pure predicates plus one count,
-   * no network, so it stays well inside the interim-bubble window.
+   * search / page read and the generation are still running. Pure predicates
+   * plus budget counts, no network.
    */
   lookupPreflight(message: string): boolean {
-    return this.lookupAllowed(message, classifyQuery(message));
+    const queryMode = classifyQuery(message);
+    if (linkReadPreflight(message, queryMode)) return true;
+    const decision = extractImmediateHttpsUrl(message);
+    const stripUrl =
+      decision.kind === "immediate" || decision.kind === "mention"
+        ? decision.url
+        : null;
+    return this.lookupAllowed(message, queryMode, stripUrl);
   }
 
-  private lookupAllowed(message: string, queryMode: string): boolean {
+  private lookupAllowed(
+    message: string,
+    queryMode: string,
+    stripUrl: string | null = null,
+  ): boolean {
     if (!env.curiosityLookupEnabled || !env.tavilyApiKey) return false;
     if (queryMode !== "normal") return false;
-    if (!shouldLookup(message)) return false;
-    return countProvenance(this.db, "search", 24) < env.curiosityLookupPerDay;
+    if (!shouldLookupAsideUrl(message, stripUrl)) return false;
+    return canSpendTavily(this.db);
   }
 
   /**
    * A search credit is only spent when he asked her to look or the question is
    * about something current. Recall turns never search: those are about him.
+   * A supplied URL is stripped so we never spend a credit searching the link.
    */
   private async maybeLookUp(
     message: string,
     queryMode: string,
+    stripUrl: string | null = null,
   ): Promise<string | null> {
-    if (!this.lookupAllowed(message, queryMode)) return null;
-    const query = shouldLookup(message);
+    if (!this.lookupAllowed(message, queryMode, stripUrl)) return null;
+    const query = shouldLookupAsideUrl(message, stripUrl);
     if (!query) return null;
     const hits = await searchWeb(this.db, query);
     return buildSearchContext(query, hits);
@@ -259,22 +286,47 @@ export class ChatService {
               mode: curiosityMode,
             });
 
+      const capabilityNote =
+        request.channel !== "voice" && isBrowsePermission(request.message)
+          ? buildCapabilityBlock(env.curiosityEnabled)
+          : null;
+
+      // Text only for v1: voice latency / TTS budget stays unchanged.
+      const linkDecision = extractImmediateHttpsUrl(request.message);
+      const linkUrl =
+        linkDecision.kind === "immediate" || linkDecision.kind === "mention"
+          ? linkDecision.url
+          : null;
+      const linkResult =
+        request.channel === "voice"
+          ? { pageContext: null as string | null, guard: null as string | null, success: false }
+          : await maybeReadLink(this.db, request.message, assembled.queryMode);
+      const pageContext = linkResult.pageContext;
+      const linkFailed = Boolean(linkResult.guard) && !linkResult.success;
+
       const searchContext = await this.maybeLookUp(
         request.message,
         assembled.queryMode,
+        linkDecision.kind === "immediate" ? linkUrl : null,
       );
 
       // Wanted a lookup, did not get one: she has to say so instead of guessing.
       // Activity asks are not lookups; skip the offline-lookup guard for them.
+      const wantedLookup = Boolean(
+        shouldLookupAsideUrl(
+          request.message,
+          linkDecision.kind === "immediate" ? linkUrl : null,
+        ),
+      );
       const lookupGuard =
-        !activityAsk &&
-        !searchContext &&
-        shouldLookup(request.message)
-          ? NO_LOOKUP_GUARD
-          : null;
-      const guard = isPremiseCheck(request.message)
-        ? [PREMISE_GUARD, lookupGuard].filter(Boolean).join("\n\n")
-        : lookupGuard;
+        !activityAsk && !searchContext && wantedLookup ? NO_LOOKUP_GUARD : null;
+      const linkGuard = linkResult.guard;
+      const guardParts = [
+        isPremiseCheck(request.message) ? PREMISE_GUARD : null,
+        lookupGuard,
+        linkGuard,
+      ].filter(Boolean);
+      const guard = guardParts.length > 0 ? guardParts.join("\n\n") : null;
 
       const presenceNote =
         request.channel === "discord"
@@ -288,6 +340,7 @@ export class ChatService {
         buildChatMessages({
           system: appendMemoryBlock(promptParts, assembled.memoryBlock, {
             presence: presenceNote,
+            capability: capabilityNote,
             curiosity: withCuriosity?.text,
             voice: buildVoiceBlock(withExamples),
             guard,
@@ -296,6 +349,7 @@ export class ChatService {
           message: request.message,
           imageUrls: request.imageUrls,
           searchContext,
+          pageContext,
         });
 
       const messages = buildMessages(examples);
@@ -387,12 +441,24 @@ export class ChatService {
             }),
           };
         } else if (
-          !searchContext &&
+          capabilityNote &&
+          env.curiosityEnabled &&
+          deniesOwnCapability(full)
+        ) {
+          regen = {
+            reason: "capability",
+            messages: buildMessages(examples, CAPABILITY_GUARD),
+          };
+        } else if (
           claimsOwnActivity(full) &&
-          !hasReadActivity(this.db, 24) &&
-          !(curiosity && curiosity.takeIds.length > 0)
+          !searchContext &&
+          !pageContext &&
+          (linkFailed ||
+            (!hasReadActivity(this.db, 24) &&
+              !(curiosity && curiosity.takeIds.length > 0)))
         ) {
           // Empty solicited honesty still counts as no content license.
+          // A failed link-read must not be masked by an unrelated idle read.
           regen = {
             reason: "activity",
             messages: buildMessages(examples, NO_ACTIVITY_GUARD),

@@ -2,7 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { beforeEach, describe, expect, it } from "vitest";
 import { migrate } from "../memory/db.js";
 import { isActivityAsk } from "./activity-ask.js";
-import { claimsOwnActivity } from "./claim-gate.js";
+import { claimsOwnActivity, deniesOwnCapability } from "./claim-gate.js";
 import {
   assembleCuriosity,
   buildCuriosityBlock,
@@ -351,6 +351,29 @@ describe("claimsOwnActivity", () => {
       "i know the mechanism, it's nmda",
     ]) {
       expect(claimsOwnActivity(text), text).toBe(false);
+    }
+  });
+});
+
+describe("deniesOwnCapability", () => {
+  it("catches false blanket denials", () => {
+    for (const text of [
+      "I don't browse. I don't have a feed.",
+      "I only read what you send, and that's it.",
+      "I can't browse the web",
+    ]) {
+      expect(deniesOwnCapability(text), text).toBe(true);
+    }
+  });
+
+  it("allows truthful nuance and empty-day honesty", () => {
+    for (const text of [
+      "I don't do arbitrary live searches, but I have a quiet feed reader.",
+      "I haven't browsed this turn.",
+      "I have not been reading anything worth mentioning today.",
+      "Couldn't open that link.",
+    ]) {
+      expect(deniesOwnCapability(text), text).toBe(false);
     }
   });
 });

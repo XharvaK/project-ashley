@@ -461,6 +461,27 @@ CREATE INDEX IF NOT EXISTS idx_mem_mood_owner
   ON mem_mood (owner_id, id DESC);
 `);
     db.exec("PRAGMA user_version = 9");
+    version = 9;
+  }
+  if (version < 10) {
+    // SQLite cannot widen a CHECK constraint in place; rebuild provenance.
+    db.exec(`
+CREATE TABLE cur_provenance_v10 (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind        TEXT NOT NULL
+                CHECK (kind IN ('scan','read','take','search','surface','mention','link')),
+  item_id     INTEGER,
+  detail      TEXT NOT NULL,
+  created_at  TEXT NOT NULL
+);
+INSERT INTO cur_provenance_v10 (id, kind, item_id, detail, created_at)
+  SELECT id, kind, item_id, detail, created_at FROM cur_provenance;
+DROP TABLE cur_provenance;
+ALTER TABLE cur_provenance_v10 RENAME TO cur_provenance;
+CREATE INDEX IF NOT EXISTS idx_cur_provenance_kind
+  ON cur_provenance (kind, created_at);
+`);
+    db.exec("PRAGMA user_version = 10");
   }
 }
 

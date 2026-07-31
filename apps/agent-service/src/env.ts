@@ -133,9 +133,15 @@ export const env = {
   curiosityReadPerDay: Number(process.env.CURIOSITY_READ_PER_DAY ?? 3),
   curiositySurfacePerDay: Number(process.env.CURIOSITY_SURFACE_PER_DAY ?? 2),
   tavilyApiKey: process.env.TAVILY_API_KEY ?? "",
-  // Search credits: ~450/mo for mid-chat lookups, the rest for watches.
+  // Shared Tavily ledger: 1000/month across chat lookups + watches.
   curiosityLookupEnabled: process.env.CURIOSITY_LOOKUP_ENABLED !== "false",
-  curiosityLookupPerDay: Number(process.env.CURIOSITY_LOOKUP_PER_DAY ?? 15),
+  curiosityTavilyMonthlyCredits: Number(
+    process.env.CURIOSITY_TAVILY_MONTHLY_CREDITS ?? 1000,
+  ),
+  // Optional daily burst smoother; monthly ceiling stays authoritative.
+  curiosityLookupPerDay: Number(process.env.CURIOSITY_LOOKUP_PER_DAY ?? 40),
+  // Doc-supplied page reads (direct fetch, not Tavily).
+  curiosityLinkReadPerDay: Number(process.env.CURIOSITY_LINK_READ_PER_DAY ?? 8),
   curiosityWatchMax: Number(process.env.CURIOSITY_WATCH_MAX ?? 3),
   curiosityWatchCadenceHours: Number(
     process.env.CURIOSITY_WATCH_CADENCE_HOURS ?? 24,

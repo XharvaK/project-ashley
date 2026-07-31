@@ -1,7 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { env } from "../env.js";
 import { generateTake } from "./takes.js";
-import { searchWeb } from "./search.js";
+import { canSpendTavily, searchWeb } from "./search.js";
 import {
   insertItem,
   insertTake,
@@ -96,6 +96,7 @@ export async function runOneDueWatch(
   ownerId: string,
 ): Promise<{ topic: string; take: string } | null> {
   if (!env.tavilyApiKey) return null;
+  if (!canSpendTavily(db)) return null;
   const watch = dueWatches(db, ownerId)[0];
   if (!watch) return null;
 
