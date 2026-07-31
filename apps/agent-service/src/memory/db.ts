@@ -482,6 +482,84 @@ CREATE INDEX IF NOT EXISTS idx_cur_provenance_kind
   ON cur_provenance (kind, created_at);
 `);
     db.exec("PRAGMA user_version = 10");
+    version = 10;
+  }
+  if (version < 11) {
+    // Widen mem_facts category CHECK + access-decay columns; add reflections.
+    const hasFacts = db
+      .prepare(
+        `SELECT name FROM sqlite_master WHERE type='table' AND name='mem_facts'`,
+      )
+      .get() as { name: string } | undefined;
+    if (hasFacts) {
+      db.exec(`
+CREATE TABLE mem_facts_v11 (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_id          TEXT NOT NULL,
+  category          TEXT NOT NULL
+                      CHECK (category IN (
+                        'project','preference','person','ongoing','pinned',
+                        'identity','event','pattern'
+                      )),
+  key               TEXT NOT NULL,
+  value             TEXT NOT NULL,
+  confidence        REAL NOT NULL DEFAULT 0.8,
+  importance        INTEGER NOT NULL DEFAULT 50,
+  sensitivity       TEXT NOT NULL DEFAULT 'none'
+                      CHECK (sensitivity IN ('none','pharma','health','private')),
+  valid_until       TEXT,
+  source_message_id INTEGER,
+  last_confirmed_at TEXT NOT NULL,
+  superseded_by     INTEGER,
+  created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+  last_accessed     TEXT,
+  access_count      INTEGER NOT NULL DEFAULT 0
+);
+INSERT INTO mem_facts_v11 (
+  id, owner_id, category, key, value, confidence, importance, sensitivity,
+  valid_until, source_message_id, last_confirmed_at, superseded_by, created_at,
+  last_accessed, access_count
+)
+SELECT
+  id, owner_id, category, key, value, confidence, importance, sensitivity,
+  valid_until, source_message_id, last_confirmed_at, superseded_by, created_at,
+  last_confirmed_at, 0
+FROM mem_facts;
+DROP TABLE mem_facts;
+ALTER TABLE mem_facts_v11 RENAME TO mem_facts;
+CREATE INDEX IF NOT EXISTS idx_mem_facts_owner_active
+  ON mem_facts (owner_id, importance DESC) WHERE superseded_by IS NULL;
+`);
+    }
+    db.exec(`
+CREATE TABLE IF NOT EXISTS mem_reflections (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_id      TEXT NOT NULL,
+  period_start  TEXT NOT NULL,
+  period_end    TEXT NOT NULL,
+  body          TEXT NOT NULL,
+  model         TEXT NOT NULL,
+  created_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_mem_reflections_owner
+  ON mem_reflections (owner_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS mem_own_time_drafts (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_id      TEXT NOT NULL,
+  kind          TEXT NOT NULL DEFAULT 'share'
+                  CHECK (kind IN ('share','explore','note')),
+  body          TEXT NOT NULL,
+  material_key  TEXT,
+  status        TEXT NOT NULL DEFAULT 'pending'
+                  CHECK (status IN ('pending','used','dropped')),
+  created_at    TEXT NOT NULL,
+  used_at       TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_mem_own_time_drafts_owner
+  ON mem_own_time_drafts (owner_id, status, created_at);
+`);
+    db.exec("PRAGMA user_version = 11");
   }
 }
 

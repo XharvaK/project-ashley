@@ -34,7 +34,7 @@ describe("ReactPolicy", () => {
   it("holds the turn budget after a reaction", () => {
     const policy = new ReactPolicy();
     assert.equal(policy.decide(ctx()), "😂");
-    assert.equal(policy.decide(ctx({ emoji: "🔥" })), null);
+    // MIN_TURNS_BETWEEN = 2: next turn is still blocked.
     assert.equal(policy.decide(ctx({ emoji: "🔥" })), null);
     assert.equal(policy.decide(ctx({ emoji: "🔥" })), "🔥");
   });
@@ -43,14 +43,12 @@ describe("ReactPolicy", () => {
     const policy = new ReactPolicy();
     assert.equal(policy.decide(ctx()), "😂");
     policy.decide(ctx({ emoji: null }));
-    policy.decide(ctx({ emoji: null }));
     assert.equal(policy.decide(ctx({ emoji: "🔥" })), "🔥");
   });
 
   it("never repeats the same emoji back to back", () => {
     const policy = new ReactPolicy();
     assert.equal(policy.decide(ctx()), "😂");
-    policy.decide(ctx({ emoji: null }));
     policy.decide(ctx({ emoji: null }));
     assert.equal(policy.decide(ctx()), null);
   });

@@ -9,6 +9,7 @@ type GiphyItem = {
     downsized?: GiphyImage;
     original?: GiphyImage;
   };
+  _score?: number;
 };
 
 type TenorMedia = { url?: string };
@@ -20,12 +21,45 @@ type TenorResult = {
   };
 };
 
+function giphyUrl(item: GiphyItem | undefined): string | null {
+  const images = item?.images;
+  return (
+    images?.fixed_height?.url ||
+    images?.downsized?.url ||
+    images?.original?.url ||
+    null
+  );
+}
+
+function tenorUrl(item: TenorResult | undefined): string | null {
+  const formats = item?.media_formats;
+  return (
+    formats?.tinygif?.url ||
+    formats?.mediumgif?.url ||
+    formats?.gif?.url ||
+    null
+  );
+}
+
+/** Prefer higher Giphy relevance score among the top results. */
+function pickBestGiphy(items: GiphyItem[]): string | null {
+  if (!items.length) return null;
+  const ranked = [...items].sort(
+    (a, b) => (b._score ?? 0) - (a._score ?? 0),
+  );
+  for (const item of ranked) {
+    const url = giphyUrl(item);
+    if (url) return url;
+  }
+  return null;
+}
+
 async function searchGiphy(query: string): Promise<string | null> {
   if (!config.giphyApiKey) return null;
   const params = new URLSearchParams({
     api_key: config.giphyApiKey,
     q: query,
-    limit: "1",
+    limit: "5",
     rating: "pg-13",
     lang: "en",
   });
@@ -35,13 +69,7 @@ async function searchGiphy(query: string): Promise<string | null> {
   );
   if (!res.ok) return null;
   const data = (await res.json()) as { data?: GiphyItem[] };
-  const images = data.data?.[0]?.images;
-  return (
-    images?.fixed_height?.url ||
-    images?.downsized?.url ||
-    images?.original?.url ||
-    null
-  );
+  return pickBestGiphy(data.data ?? []);
 }
 
 async function searchTenor(query: string): Promise<string | null> {
@@ -49,7 +77,7 @@ async function searchTenor(query: string): Promise<string | null> {
   const params = new URLSearchParams({
     key: config.tenorApiKey,
     q: query,
-    limit: "1",
+    limit: "5",
     media_filter: "gif,tinygif,mediumgif",
     client_key: "ashley_discord",
   });
@@ -59,18 +87,18 @@ async function searchTenor(query: string): Promise<string | null> {
   );
   if (!res.ok) return null;
   const data = (await res.json()) as { results?: TenorResult[] };
-  const formats = data.results?.[0]?.media_formats;
-  return (
-    formats?.tinygif?.url ||
-    formats?.mediumgif?.url ||
-    formats?.gif?.url ||
-    null
-  );
+  const results = data.results ?? [];
+  // Tenor ranks by relevance; take the first with a usable URL among top 5.
+  for (const item of results) {
+    const url = tenorUrl(item);
+    if (url) return url;
+  }
+  return null;
 }
 
 /**
  * Search Giphy (preferred) then Tenor. Fail soft when disabled/missing keys/errors.
- * Rate-limited per channel (GIF_COOLDOWN_SEC).
+ * Rate-limited per channel (GIF_COOLDOWN_SEC). Fetches top 5, picks best.
  */
 export async function searchGif(
   query: string,

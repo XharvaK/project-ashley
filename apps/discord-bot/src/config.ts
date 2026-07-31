@@ -74,11 +74,11 @@ export const config = {
   giphyApiKey: process.env.GIPHY_API_KEY ?? "",
   tenorApiKey: process.env.TENOR_API_KEY ?? "",
   gifEnabled: process.env.GIF_ENABLED !== "false",
-  gifCooldownSec: Number(process.env.GIF_COOLDOWN_SEC ?? 120),
-  // Opt-in, not opt-out: pacing is the one change here that can only be judged
-  // live, so it stays off until Doc has watched it in a real conversation.
-  paceEnabled: process.env.DISCORD_PACE_ENABLED === "true",
-  reactPolicyEnabled: process.env.DISCORD_REACT_POLICY_ENABLED === "true",
+  // Slightly under the old 120s default — GIFs were too rare (Doc 2026-08-01).
+  gifCooldownSec: Number(process.env.GIF_COOLDOWN_SEC ?? 90),
+  // Default on for the 3–10s bubble pacing ship; set DISCORD_PACE_ENABLED=false to disable.
+  paceEnabled: process.env.DISCORD_PACE_ENABLED !== "false",
+  reactPolicyEnabled: process.env.DISCORD_REACT_POLICY_ENABLED !== "false",
 };
 
 export function validateConfig(): void {

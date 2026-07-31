@@ -2,29 +2,17 @@
  * Gaps between her bubbles only. Nothing is added before the first one, because
  * Mistral already spends 1 to 5 seconds there and a human would have been typing
  * through it.
+ *
+ * Target band: 3–10s by next-bubble length (Doc locked 2026-08-01).
  */
-const FAST_MS = 20_000;
-const SLOW_MS = 120_000;
+export const PACE_BUDGET_MS = 20_000;
 
-export const PACE_BUDGET_MS = 2500;
-
-type Band = { min: number; max: number };
-
-const FAST_BAND: Band = { min: 250, max: 650 };
-const MEDIUM_BAND: Band = { min: 600, max: 1100 };
-const SLOW_BAND: Band = { min: 1000, max: 1600 };
-
-function band(tempoGapMs: number | null): Band {
-  if (tempoGapMs === null) return MEDIUM_BAND;
-  if (tempoGapMs <= FAST_MS) return FAST_BAND;
-  if (tempoGapMs <= SLOW_MS) return MEDIUM_BAND;
-  return SLOW_BAND;
-}
+const MIN_MS = 3_000;
+const MAX_MS = 10_000;
 
 /**
  * `tempoGapMs` is how long Doc took to send this message after his previous one.
- * Rapid-fire from him means rapid-fire back; a message after an hour gets the
- * pace of someone who was doing something else.
+ * Char length dominates; rapid-fire from him slightly shortens the band.
  */
 export function bubbleDelayMs(params: {
   tempoGapMs: number | null;
@@ -34,11 +22,19 @@ export function bubbleDelayMs(params: {
 }): number {
   if (params.remainingBudgetMs <= 0) return 0;
   const rand = params.rand ?? Math.random;
-  const { min, max } = band(params.tempoGapMs);
-  const jittered = min + rand() * (max - min);
-  // A longer bubble would have taken longer to type.
-  const typing = Math.min(params.chars * 4, 500);
-  return Math.round(Math.min(jittered + typing, params.remainingBudgetMs));
+  const t = Math.min(1, Math.max(0, params.chars / 280));
+  const base = MIN_MS + t * (MAX_MS - MIN_MS);
+  const jitter = (rand() - 0.5) * 900;
+  let tempoScale = 1;
+  if (params.tempoGapMs !== null && params.tempoGapMs <= 20_000) {
+    tempoScale = 0.9;
+  } else if (params.tempoGapMs !== null && params.tempoGapMs > 120_000) {
+    tempoScale = 1.08;
+  }
+  const ms = Math.round(
+    Math.min(MAX_MS, Math.max(MIN_MS, (base + jitter) * tempoScale)),
+  );
+  return Math.min(ms, params.remainingBudgetMs);
 }
 
 export function sleepAbortable(ms: number, signal: AbortSignal): Promise<void> {

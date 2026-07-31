@@ -280,6 +280,42 @@ export function hasReadActivity(db: DatabaseSync, withinHours: number): boolean 
   return countProvenance(db, "read", withinHours) > 0;
 }
 
+const INTEREST_KEYWORDS: Array<{ interest: Interest; re: RegExp }> = [
+  { interest: "gaming", re: /\b(game|gaming|steam|elden|roguelike|sim city|cs2)\b/i },
+  { interest: "music", re: /\b(album|dub techno|bandcamp|vinyl|track|dj)\b/i },
+  { interest: "pharma", re: /\b(receptor|dose|pharmac|ketamine|ssri|neuro)\b/i },
+  { interest: "dev", re: /\b(refactor|typescript|sqlite|deploy|github|api)\b/i },
+  { interest: "philosophy", re: /\b(essay|rationalist|ethics|philosophy)\b/i },
+  { interest: "turkey", re: /\b(türkiy|izmir|ankara|istanbul|turkish)\b/i },
+];
+
+/** Silent interest discovery from recent facts / messages. Bumps feed weights. */
+export function discoverInterestsFromText(
+  db: DatabaseSync,
+  texts: string[],
+): string[] {
+  const found = new Set<string>();
+  const blob = texts.join("\n");
+  for (const { interest, re } of INTEREST_KEYWORDS) {
+    if (re.test(blob)) found.add(interest);
+  }
+  for (const interest of found) {
+    db.prepare(
+      `UPDATE cur_sources
+       SET weight = MIN(1.4, weight + 0.05)
+       WHERE interest = ? AND enabled = 1`,
+    ).run(interest);
+  }
+  if (found.size > 0) {
+    logProvenance(
+      db,
+      "mention",
+      `interest_bump:${[...found].sort().join(",")}`,
+    );
+  }
+  return [...found];
+}
+
 export function curiosityStats(db: DatabaseSync): {
   sources: number;
   itemsToday: number;

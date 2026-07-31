@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { DatabaseSync } from "node:sqlite";
 import { migrate } from "./db.js";
 
-const LATEST_VERSION = 10;
+const LATEST_VERSION = 11;
 
 describe("migrate", () => {
   it("reaches the latest schema with habits, facts_cutoff and stances", () => {
@@ -20,6 +20,12 @@ describe("migrate", () => {
     expect(names).toContain("mem_reminders");
     expect(names).toContain("mem_pending_actions");
     expect(names).toContain("mem_stances");
+    expect(names).toContain("mem_reflections");
+    expect(names).toContain("mem_own_time_drafts");
+    const factCols = db
+      .prepare(`PRAGMA table_info(mem_facts)`)
+      .all() as Array<{ name: string }>;
+    expect(factCols.some((c) => c.name === "access_count")).toBe(true);
     const version = db
       .prepare("PRAGMA user_version")
       .get() as { user_version: number };

@@ -252,7 +252,7 @@ describe("sleep sign-off", () => {
         { busy: false, enabled: true },
         new Date("2026-07-31T12:00:00.000Z"),
       ).reason,
-    ).toBe("sleep_suppress");
+    ).toBe("own_time");
     clearSleepSuppress(db, OWNER);
   });
 });
@@ -376,22 +376,22 @@ describe("gates", () => {
     expect(burstGate(db, OWNER).reason).toBe("burst_spent");
   });
 
-  it("stops talking into sustained silence at cap 2", () => {
+  it("backs off 6h after three unanswered proactive DMs", () => {
     userMessage("hey", 60 * 48);
     for (let i = 0; i < env.proactiveMaxUnanswered; i++) {
       logInitiative(60 * (i + 1));
     }
     expect(unansweredCount(db, OWNER)).toBe(env.proactiveMaxUnanswered);
-    expect(env.proactiveMaxUnanswered).toBe(2);
+    expect(env.proactiveMaxUnanswered).toBe(3);
     expect(initiativeGate(db, OWNER, options, day).reason).toBe(
-      "talking_into_silence",
+      "nudge_cap_backoff",
     );
   });
 
-  it("blocks during quiet hours by default", () => {
+  it("does not use clock quiet hours anymore", () => {
     userMessage("hey", 60 * 6);
     const night = new Date("2026-07-31T22:00:00.000Z"); // 01:00 Istanbul
-    expect(initiativeGate(db, OWNER, options, night).reason).toBe(
+    expect(initiativeGate(db, OWNER, options, night).reason).not.toBe(
       "quiet_hours",
     );
   });

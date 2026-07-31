@@ -111,16 +111,25 @@ export const env = {
   proactiveBurstRestMinutes: Number(
     process.env.PROACTIVE_BURST_REST_MINUTES ?? 150,
   ),
-  proactiveMaxUnanswered: Number(process.env.PROACTIVE_MAX_UNANSWERED ?? 2),
+  // Doc: 3 unanswered proactive DMs, then 6h wait (2026-08-01).
+  proactiveMaxUnanswered: Number(process.env.PROACTIVE_MAX_UNANSWERED ?? 3),
   proactiveSleepSuppressHours: Number(
-    process.env.PROACTIVE_SLEEP_SUPPRESS_HOURS ?? 6,
+    process.env.PROACTIVE_SLEEP_SUPPRESS_HOURS ?? 8,
   ),
   proactiveOrphanMaxPerDay: Number(process.env.PROACTIVE_ORPHAN_MAX_PER_DAY ?? 2),
   proactiveAffinityMinTokens: Number(
     process.env.PROACTIVE_AFFINITY_MIN_TOKENS ?? 3,
   ),
   proactiveBackoffStepHours: Number(
-    process.env.PROACTIVE_BACKOFF_STEP_HOURS ?? 1.5,
+    process.env.PROACTIVE_BACKOFF_STEP_HOURS ?? 1,
+  ),
+  /** Hours to wait after the 3rd unanswered proactive DM. */
+  proactiveNudgeCapBackoffHours: Number(
+    process.env.PROACTIVE_NUDGE_CAP_BACKOFF_HOURS ?? 6,
+  ),
+  /** Minutes an unanswered proactive DM must sit before the next nudge. */
+  proactiveNudgeTimeoutMinutes: Number(
+    process.env.PROACTIVE_NUDGE_TIMEOUT_MINUTES ?? 60,
   ),
   proactiveSessionWindowHours: Number(
     process.env.PROACTIVE_SESSION_WINDOW_HOURS ?? 3,

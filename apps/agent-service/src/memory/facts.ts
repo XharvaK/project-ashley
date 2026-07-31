@@ -9,14 +9,35 @@ import { FACT_MIN_CONFIDENCE } from "./consolidator-triggers.js";
 
 const CATEGORY_IMPORTANCE: Record<MemFact["category"], number> = {
   pinned: 100,
+  identity: 90,
   ongoing: 70,
   project: 60,
   person: 55,
+  event: 52,
   preference: 50,
+  pattern: 48,
 };
+
+const DAY_MS = 86_400_000;
 
 function escapeLike(value: string): string {
   return value.replace(/[%_\\]/g, "\\$&");
+}
+
+function normalizeValue(value: string): string {
+  return value.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+/** Read-time decay: older + rarely accessed facts sort lower without deleting. */
+function decayScore(f: MemFact, nowMs: number): number {
+  const anchor = f.last_accessed ?? f.last_confirmed_at;
+  const ageDays = Math.max(
+    0,
+    (nowMs - new Date(anchor).getTime()) / DAY_MS,
+  );
+  const accessBoost = Math.min(12, (f.access_count ?? 0) * 2);
+  const timePenalty = Math.min(35, ageDays * 0.35);
+  return f.importance + accessBoost - timePenalty;
 }
 
 export function listActiveFacts(
@@ -33,10 +54,34 @@ export function listActiveFacts(
        ORDER BY importance DESC, last_confirmed_at DESC
        LIMIT ?`,
     )
-    .all(ownerId, limit) as MemFact[];
+    .all(ownerId, Math.max(limit * 3, 60)) as MemFact[];
 
-  if (includePrivate) return rows;
-  return rows.filter((f) => f.sensitivity !== "private");
+  const nowMs = Date.now();
+  const scored = rows
+    .map((f) => ({ f, score: decayScore(f, nowMs) }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map((x) => x.f);
+
+  if (includePrivate) return scored;
+  return scored.filter((f) => f.sensitivity !== "private");
+}
+
+export function touchFactAccess(
+  db: DatabaseSync,
+  factIds: number[],
+): void {
+  if (factIds.length === 0) return;
+  const now = new Date().toISOString();
+  const stmt = db.prepare(
+    `UPDATE mem_facts
+     SET access_count = COALESCE(access_count, 0) + 1,
+         last_accessed = ?
+     WHERE id = ?`,
+  );
+  for (const id of factIds) {
+    stmt.run(now, id);
+  }
 }
 
 export function pinFact(
@@ -51,10 +96,41 @@ export function pinFact(
   const key = `pinned_${Date.now()}`;
   const now = new Date().toISOString();
   db.prepare(
-    `INSERT INTO mem_facts (owner_id, category, key, value, confidence, importance, sensitivity, last_confirmed_at, created_at)
-     VALUES (?, 'pinned', ?, ?, 1.0, 100, ?, ?, ?)`,
-  ).run(ownerId, key, text, sensitivity, now, now);
+    `INSERT INTO mem_facts (owner_id, category, key, value, confidence, importance, sensitivity, last_confirmed_at, created_at, last_accessed, access_count)
+     VALUES (?, 'pinned', ?, ?, 1.0, 100, ?, ?, ?, ?, 0)`,
+  ).run(ownerId, key, text, sensitivity, now, now, now);
   return { key, value: text };
+}
+
+function findNearDuplicate(
+  db: DatabaseSync,
+  ownerId: string,
+  category: MemFact["category"],
+  value: string,
+): { id: number; category: MemFact["category"] } | undefined {
+  const norm = normalizeValue(value);
+  if (norm.length < 12) return undefined;
+  const candidates = db
+    .prepare(
+      `SELECT id, category, value FROM mem_facts
+       WHERE owner_id = ? AND category = ? AND superseded_by IS NULL
+       LIMIT 40`,
+    )
+    .all(ownerId, category) as Array<{
+    id: number;
+    category: MemFact["category"];
+    value: string;
+  }>;
+  for (const c of candidates) {
+    const other = normalizeValue(c.value);
+    if (other === norm) return { id: c.id, category: c.category };
+    if (other.includes(norm) || norm.includes(other)) {
+      if (Math.min(other.length, norm.length) >= 12) {
+        return { id: c.id, category: c.category };
+      }
+    }
+  }
+  return undefined;
 }
 
 export function mergeFacts(
@@ -71,15 +147,17 @@ export function mergeFacts(
     if (f.category === "pinned") continue;
     if (f.confidence < FACT_MIN_CONFIDENCE) continue;
     if (isTextDenied(`${f.key} ${f.value}`, denylist)) continue;
+    if (!(f.category in CATEGORY_IMPORTANCE)) continue;
 
-    const existing = db
-      .prepare(
-        `SELECT id, category FROM mem_facts
+    const existing =
+      (db
+        .prepare(
+          `SELECT id, category FROM mem_facts
          WHERE owner_id = ? AND category = ? AND key = ? AND superseded_by IS NULL`,
-      )
-      .get(ownerId, f.category, f.key) as
-      | { id: number; category: MemFact["category"] }
-      | undefined;
+        )
+        .get(ownerId, f.category, f.key) as
+        | { id: number; category: MemFact["category"] }
+        | undefined) ?? findNearDuplicate(db, ownerId, f.category, f.value);
 
     const importance = Math.round(
       CATEGORY_IMPORTANCE[f.category] * f.confidence,
@@ -91,8 +169,8 @@ export function mergeFacts(
       if (existing.category === "pinned") continue;
       const result = db
         .prepare(
-          `INSERT INTO mem_facts (owner_id, category, key, value, confidence, importance, sensitivity, valid_until, source_message_id, last_confirmed_at, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO mem_facts (owner_id, category, key, value, confidence, importance, sensitivity, valid_until, source_message_id, last_confirmed_at, created_at, last_accessed, access_count)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
         )
         .run(
           ownerId,
@@ -104,6 +182,7 @@ export function mergeFacts(
           f.sensitivity ?? "none",
           f.valid_until ?? null,
           sourceMessageId ?? null,
+          now,
           now,
           now,
         );
@@ -115,8 +194,8 @@ export function mergeFacts(
     } else {
       const result = db
         .prepare(
-          `INSERT INTO mem_facts (owner_id, category, key, value, confidence, importance, sensitivity, valid_until, source_message_id, last_confirmed_at, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO mem_facts (owner_id, category, key, value, confidence, importance, sensitivity, valid_until, source_message_id, last_confirmed_at, created_at, last_accessed, access_count)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
         )
         .run(
           ownerId,
@@ -128,6 +207,7 @@ export function mergeFacts(
           f.sensitivity ?? "none",
           f.valid_until ?? null,
           sourceMessageId ?? null,
+          now,
           now,
           now,
         );

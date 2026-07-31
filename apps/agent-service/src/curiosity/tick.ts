@@ -27,6 +27,7 @@ import {
   topNotedItems,
   topScannedItems,
   updateItemExcerpt,
+  discoverInterestsFromText,
   upsertSource,
   type SourceRow,
 } from "./store.js";
@@ -207,6 +208,10 @@ export async function runCuriosityTick(
       }
       try {
         const facts = listActiveFacts(db, env.memoryOwnerId);
+        discoverInterestsFromText(
+          db,
+          facts.map((f) => `${f.key} ${f.value}`),
+        );
         syncWatchesFromFacts(
           db,
           env.memoryOwnerId,

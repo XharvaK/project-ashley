@@ -3,8 +3,8 @@
  * emoji echoing the one Doc just used reads as mirroring, not as a person
  * responding. The model is asked to be sparing; this enforces it.
  */
-const MIN_TURNS_BETWEEN = 3;
-const MAX_TURNS_BETWEEN = 4;
+const MIN_TURNS_BETWEEN = 2;
+const MAX_TURNS_BETWEEN = 3;
 
 /** Variation selectors and skin tones make the same emoji compare unequal. */
 function normalize(emoji: string): string {

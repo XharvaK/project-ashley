@@ -4,7 +4,9 @@ import { embedTexts } from "../mistral-client.js";
 import {
   getActiveSummary,
   listActiveFacts,
+  touchFactAccess,
 } from "./facts.js";
+import { buildReflectionBlock } from "./reflection.js";
 import { buildCorrectionGuard } from "./correction-guard.js";
 import { getOwnerDenylist } from "./memory-veto.js";
 import {
@@ -115,6 +117,7 @@ function buildMemoryBlock(
   stanceBlock: string | null,
   liveSignals: string[] = [],
   moodBlock: string | null = null,
+  reflectionBlock: string | null = null,
 ): string {
   const factLines = facts
     .filter((f) =>
@@ -145,9 +148,13 @@ function buildMemoryBlock(
     parts.push("(suppressed for a memory question)");
   }
 
+  if (reflectionBlock) {
+    parts.push("", reflectionBlock);
+  }
+
   parts.push(
     "",
-    "Trust order: standing facts, then where things left off, then this thread's messages. Echoes are hints, never facts. A blank section means you have nothing there, not that you should reconstruct it.",
+    "Trust order: standing facts, reflection notes, then where things left off, then this thread's messages. Echoes are hints, never facts. A blank section means you have nothing there, not that you should reconstruct it.",
   );
 
   const storeIsEmpty = factLines.length === 0 && narrativeParts.length === 0;
@@ -287,6 +294,11 @@ export class MemoryAssembler {
     const moodBlock =
       queryMode !== "recall" ? buildMoodBlock(this.db, ownerId) : null;
 
+    const reflectionBlock =
+      queryMode !== "recall"
+        ? buildReflectionBlock(this.db, ownerId)
+        : null;
+
     const liveSignals: string[] = [];
     const gapLine = reentryLine(this.db, ownerId, excludeMessageId, {
       allowActivityRecap: isActivityAsk(userMessage),
@@ -294,6 +306,11 @@ export class MemoryAssembler {
     if (gapLine) liveSignals.push(gapLine);
     const reactionLine = takeReactionLine(this.db);
     if (reactionLine) liveSignals.push(reactionLine);
+
+    touchFactAccess(
+      this.db,
+      visibleFacts.map((f) => f.id),
+    );
 
     const memoryBlock = buildMemoryBlock(
       facts,
@@ -307,6 +324,7 @@ export class MemoryAssembler {
       stanceBlock,
       liveSignals,
       moodBlock,
+      reflectionBlock,
     );
 
     const hot = getHotMessages(
@@ -372,6 +390,7 @@ export class MemoryAssembler {
         : null,
       [],
       buildMoodBlock(this.db, ownerId),
+      buildReflectionBlock(this.db, ownerId),
     );
 
     const hot = getHotMessages(

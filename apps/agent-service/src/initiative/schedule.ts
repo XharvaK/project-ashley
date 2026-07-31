@@ -1,12 +1,11 @@
 import type { DatabaseSync } from "node:sqlite";
 import { env } from "../env.js";
-import { inQuietHours } from "../local-time.js";
 import {
   countInitiativesLocalToday,
   getLastInitiativeAt,
   getLastUserMessageAt,
 } from "./cooldown.js";
-import { inSleepSuppress } from "./sleep.js";
+import { inOwnTime } from "./sleep.js";
 
 export type GateResult = {
   allowed: boolean;
@@ -81,10 +80,9 @@ export function burstGate(db: DatabaseSync, ownerId: string): GateResult {
 }
 
 /**
- * Deterministic gate. The old path asked a model for permission at temperature
- * 0.1 with "prefer false when uncertain", which is why almost nothing ever went
- * out. Permission is arithmetic; whether there is anything to say is the queue's
- * job, and that is a separate question.
+ * Deterministic gate. Quiet clock hours are gone: AFK/sleep is explicit own-time.
+ * Nudge rule: proactive DMs only; after each unanswered, wait 1h; after 3 unanswered,
+ * wait 6h before trying again.
  */
 export function initiativeGate(
   db: DatabaseSync,
@@ -94,24 +92,33 @@ export function initiativeGate(
 ): GateResult {
   if (!options.enabled) return deny("proactive_disabled");
   if (options.busy) return deny("chat_in_progress", 60);
-  if (inQuietHours(now)) return deny("quiet_hours");
-  if (inSleepSuppress(db, ownerId, now)) return deny("sleep_suppress");
+  if (inOwnTime(db, ownerId, now)) return deny("own_time");
 
   if (countInitiativesLocalToday(db, ownerId, now) >= env.proactiveMaxPerDay) {
     return deny("daily_cap_reached");
   }
 
   const unanswered = unansweredCount(db, ownerId);
+  const lastInit = getLastInitiativeAt(db, ownerId);
+  const sinceLastInitH = hoursSince(lastInit);
+  const nudgeTimeoutH = env.proactiveNudgeTimeoutMinutes / 60;
+  const capBackoffH = env.proactiveNudgeCapBackoffHours;
+
   if (unanswered >= env.proactiveMaxUnanswered) {
-    return deny("talking_into_silence");
-  }
-  // Escalating, not binary: each unanswered message buys the next one a longer
-  // wait, so a missed ping costs tempo instead of costing her voice.
-  const backoffH = unanswered * env.proactiveBackoffStepHours;
-  if (backoffH > 0 && hoursSince(getLastInitiativeAt(db, ownerId)) < backoffH) {
-    const remaining =
-      backoffH - hoursSince(getLastInitiativeAt(db, ownerId));
-    return deny("silence_backoff", Math.ceil(remaining * 3600));
+    if (sinceLastInitH < capBackoffH) {
+      return deny(
+        "nudge_cap_backoff",
+        Math.ceil((capBackoffH - sinceLastInitH) * 3600),
+      );
+    }
+    // 6h rest elapsed — allow one more attempt into silence.
+  } else if (unanswered >= 1) {
+    if (sinceLastInitH < nudgeTimeoutH) {
+      return deny(
+        "nudge_timeout",
+        Math.ceil((nudgeTimeoutH - sinceLastInitH) * 3600),
+      );
+    }
   }
 
   const idleH = hoursSince(getLastUserMessageAt(db, ownerId));

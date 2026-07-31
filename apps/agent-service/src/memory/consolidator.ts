@@ -523,11 +523,13 @@ export class ConsolidationWorker {
         {
           role: "system",
           content: `Extract durable facts Doc explicitly stated in USER messages. Output JSON only.
-Schema: { "facts": [{ "category": "project|preference|person|ongoing", "key": "snake_case", "value": "short phrase", "confidence": 0-1, "sensitivity": "none|pharma|health|private", "valid_until": null|string, "supersedes_key": null|string }], "no_change": false }
+Schema: { "facts": [{ "category": "project|preference|person|ongoing|identity|event|pattern", "key": "snake_case", "value": "short phrase", "confidence": 0-1, "sensitivity": "none|pharma|health|private", "valid_until": null|string, "supersedes_key": null|string }], "no_change": false }
 Rules:
 - USER statements only; never infer from assistant text
 - Do not use category "pinned" (reserved for manual pin)
+- Categories: identity (who he is), preference, project (with status when clear), person, event (dated happenings), pattern (behavioral), ongoing (temporary state)
 - max 5 facts; mood → ongoing with valid_until
+- Prefer supersedes_key / same key over near-duplicate new keys
 - confidence >= ${FACT_MIN_CONFIDENCE} for durable facts
 - if nothing new return { "facts": [], "no_change": true }
 ${denyBlock}

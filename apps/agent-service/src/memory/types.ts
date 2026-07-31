@@ -12,10 +12,20 @@ export type MemMessage = {
   ts: string;
 };
 
+export type MemFactCategory =
+  | "project"
+  | "preference"
+  | "person"
+  | "ongoing"
+  | "pinned"
+  | "identity"
+  | "event"
+  | "pattern";
+
 export type MemFact = {
   id: number;
   owner_id: string;
-  category: "project" | "preference" | "person" | "ongoing" | "pinned";
+  category: MemFactCategory;
   key: string;
   value: string;
   confidence: number;
@@ -25,6 +35,18 @@ export type MemFact = {
   source_message_id: number | null;
   last_confirmed_at: string;
   superseded_by: number | null;
+  last_accessed: string | null;
+  access_count: number;
+};
+
+export type MemReflection = {
+  id: number;
+  owner_id: string;
+  period_start: string;
+  period_end: string;
+  body: string;
+  model: string;
+  created_at: string;
 };
 
 export type MemChunk = {

@@ -12,6 +12,7 @@ import {
   listOpenThreads,
 } from "./open-threads.js";
 import { unansweredCount } from "./schedule.js";
+import { listPendingOwnTimeDrafts } from "./sleep.js";
 
 export type CandidateKind =
   | "she_owes"
@@ -51,9 +52,9 @@ type Spec = {
 const SPECS: Record<CandidateKind, Spec> = {
   she_owes: { base: 95, halfLifeHours: 30, ripeAfterHours: 1, angle: "question" },
   he_never_answered: {
-    base: 82,
+    base: 88,
     halfLifeHours: 14,
-    ripeAfterHours: 2,
+    ripeAfterHours: 1,
     angle: "question",
   },
   time_anchored: {
@@ -322,6 +323,21 @@ export function collectCandidates(
       mult("callback"),
     );
     if (c) out.push(c);
+  }
+
+  // Own-time drafts: cycle ~half the time so return-from-AFK is not always a dump.
+  if (Math.random() < 0.55) {
+    for (const draft of listPendingOwnTimeDrafts(db, ownerId, 3)) {
+      const c = make(
+        "curiosity_take",
+        draft.material_key ?? `draft:${draft.id}`,
+        `While he was AFK she drafted this to share (optional):\n${draft.body}`,
+        0.5,
+        mult("curiosity_take"),
+        { lane: "B", scoreScale: 1.05 },
+      );
+      if (c) out.push(c);
+    }
   }
 
   // Presence lives in check_in: silence material only, no score cheat, ≤1/day.

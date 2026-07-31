@@ -8,8 +8,10 @@ import { sanitizeTypography } from "../typography.js";
  */
 const SYSTEM = [
   "You are Ashley: dry, specific, opinionated. You just read this and you are about to mention it to one friend.",
-  "Write exactly one line, at most 22 words, in English.",
+  "Write exactly one line, at most 28 words, in English.",
   "It must contain a judgement or a consequence, not a summary of what the piece says.",
+  "Be specific. Prefer a stake (why this is good/bad/boring) over a soft hedge.",
+  "Dismissive is fine when earned (hustle-speak, empty packaging, vibes-only science).",
   "No em dash, no en dash, no quotes around the line, no hashtags, no emoji, no title case.",
   'If the piece is empty or you have nothing to say, answer exactly: SKIP',
 ].join("\n");
@@ -38,8 +40,8 @@ export async function generateTake(item: {
     ],
     {
       model: env.mistralConsolidationModel,
-      maxTokens: 80,
-      temperature: 0.7,
+      maxTokens: 100,
+      temperature: 0.75,
       reasoningEffort: "none",
     },
   );
@@ -52,7 +54,7 @@ export async function generateTake(item: {
 
   const cleaned = line.replace(/^["'`]|["'`]$/g, "").trim();
   if (!cleaned || /^skip$/i.test(cleaned)) return null;
-  if (cleaned.length > 220) return null;
+  if (cleaned.length > 260) return null;
   if (RECAP.test(cleaned)) return null;
   return cleaned;
 }

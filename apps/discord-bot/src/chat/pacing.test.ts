@@ -10,31 +10,22 @@ import {
 describe("bubbleDelayMs", () => {
   const mid = () => 0.5;
 
-  it("is sub-second when Doc is firing fast", () => {
-    const ms = bubbleDelayMs({
+  it("stays in the 3–10s band for normal bubbles", () => {
+    const short = bubbleDelayMs({
       tempoGapMs: 4000,
       chars: 40,
       remainingBudgetMs: PACE_BUDGET_MS,
       rand: mid,
     });
-    assert.ok(ms < 1000, `expected under 1s, got ${ms}`);
-  });
-
-  it("slows down when he took his time", () => {
-    const fast = bubbleDelayMs({
+    const long = bubbleDelayMs({
       tempoGapMs: 4000,
-      chars: 40,
+      chars: 400,
       remainingBudgetMs: PACE_BUDGET_MS,
       rand: mid,
     });
-    const slow = bubbleDelayMs({
-      tempoGapMs: 30 * 60 * 1000,
-      chars: 40,
-      remainingBudgetMs: PACE_BUDGET_MS,
-      rand: mid,
-    });
-    assert.ok(slow > fast);
-    assert.ok(slow <= 1700, `expected at most 1.7s, got ${slow}`);
+    assert.ok(short >= 3000 && short <= 10000, `short=${short}`);
+    assert.ok(long >= 3000 && long <= 10000, `long=${long}`);
+    assert.ok(long >= short, `long ${long} should be >= short ${short}`);
   });
 
   it("never exceeds the remaining budget", () => {
