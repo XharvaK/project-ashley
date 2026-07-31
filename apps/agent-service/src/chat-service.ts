@@ -41,7 +41,7 @@ import { forgetByTopic, getActiveSummary, listActiveFacts, pinFact } from "./mem
 import { archiveAndNewThread, insertMessage, resolveActiveThread } from "./memory/threads.js";
 import { stripMediaMarkers } from "./memory/strip-markers.js";
 import { estimateTokens } from "./memory/tokens.js";
-import { NO_REPEAT_GUARD, looksLikeRepeat } from "./repetition-guard.js";
+import { NO_REPEAT_GUARD, looksLikeRepeat, collapseWithinTurnRepeat } from "./repetition-guard.js";
 import { setTurnBusy } from "./turn-gate.js";
 import { detectMoodFromText, recordMood } from "./memory/mood.js";
 import { evaluateInitiative, type EvaluateResult } from "./initiative/evaluator.js";
@@ -413,6 +413,16 @@ export class ChatService {
           full = "";
           for await (const delta of streamChat(regen.messages, sampling)) {
             full += delta;
+          }
+        }
+
+        // After any regen rewrite: drop within-turn restating bubbles so Doc
+        // never sees the double (and memory matches what he saw).
+        if (full) {
+          const collapsed = collapseWithinTurnRepeat(full);
+          if (collapsed !== full) {
+            console.warn("[chat] within-turn restatement collapsed");
+            full = collapsed;
           }
         }
       }
