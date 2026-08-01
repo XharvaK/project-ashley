@@ -22,14 +22,14 @@ describe("classifyReasoningEffort", () => {
     ).toBe("high");
   });
 
-  it("returns low for banter", () => {
+  it("returns medium for banter", () => {
     expect(
       classifyReasoningEffort({
         queryMode: "normal",
         message: "lol",
         activityAsk: false,
       }),
-    ).toBe("low");
+    ).toBe("medium");
   });
 
   it("returns high for short substance questions", () => {
@@ -74,7 +74,7 @@ describe("selectTemperature", () => {
         ...base,
         queryMode: "normal",
         channel: "voice",
-        reasoningEffort: "low",
+        reasoningEffort: "medium",
       }),
     ).toBe(0.5);
   });
@@ -88,14 +88,6 @@ describe("selectTemperature", () => {
         reasoningEffort: "high",
       }),
     ).toBe(0.5);
-    expect(
-      selectTemperature({
-        ...base,
-        queryMode: "normal",
-        channel: "discord",
-        reasoningEffort: "low",
-      }),
-    ).toBe(0.7);
     expect(
       selectTemperature({
         ...base,

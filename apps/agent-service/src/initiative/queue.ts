@@ -18,6 +18,7 @@ import {
 } from "./open-threads.js";
 import { unansweredCount } from "./schedule.js";
 import { listPendingOwnTimeDrafts } from "./sleep.js";
+import { listPendingAssignments } from "./reading-assignment.js";
 
 export type CandidateKind =
   | "she_owes"
@@ -33,7 +34,8 @@ export type CandidateKind =
   | "continue"
   | "celebrate"
   | "ambient_presence"
-  | "provocation";
+  | "provocation"
+  | "reading_assignment";
 
 export type CuriosityLane = "A" | "B" | "C";
 
@@ -47,7 +49,8 @@ export type Angle =
   | "continue"
   | "celebrate"
   | "ambient_presence"
-  | "provocation";
+  | "provocation"
+  | "reading_assignment";
 
 export type Candidate = {
   kind: CandidateKind;
@@ -71,6 +74,12 @@ type Spec = {
 };
 
 const SPECS: Record<CandidateKind, Spec> = {
+  reading_assignment: {
+    base: 92,
+    halfLifeHours: 48,
+    ripeAfterHours: 0,
+    angle: "reading_assignment",
+  },
   she_owes: { base: 95, halfLifeHours: 30, ripeAfterHours: 1, angle: "question" },
   he_never_answered: {
     base: 88,
@@ -301,6 +310,19 @@ export function collectCandidates(
     cachedMultipliers.set(kind, value);
     return value;
   };
+
+  for (const assign of listPendingAssignments(db, ownerId)) {
+    const hours = (Date.now() - Date.parse(assign.requestedAt)) / 3600000;
+    const c = make(
+      "reading_assignment",
+      `assign:${assign.id}`,
+      `Topic requested by Doc: ${assign.topic}${assign.summary ? `\nSummary: ${assign.summary}` : ""}`,
+      hours,
+      mult("reading_assignment"),
+      { title: assign.topic },
+    );
+    if (c) out.push(c);
+  }
 
   for (const thread of listOpenThreads(db, ownerId, 20)) {
     if (thread.due_at) {

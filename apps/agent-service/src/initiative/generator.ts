@@ -1,4 +1,4 @@
-﻿import type { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
 import { env } from "../env.js";
 import { completeChat, type ChatMessage } from "../mistral-client.js";
 import { appendMemoryBlock, loadSystemPrompt } from "../prompts.js";
@@ -37,9 +37,13 @@ const KIND_BRIEF: Record<string, string> = {
   time_anchored:
     "He anchored this to a time that has now passed. Ask how it went, specifically.",
   watch_fired:
-    "Name the piece or topic first (title tokens must appear), then your take. Prefer found-this then take as two short bubbles when it fits. Soft hook only if allowed.",
+    "Name the piece, explain why it caught your attention, and connect it to something Doc cares about or has talked about. Include your actual opinion with a reason, not just a summary. 3-6 sentences across 1-2 bubbles.",
   curiosity_take:
-    "Feed find. Title must be recognizable. Prefer two short bubbles: what surfaced, then take. Do not imply you finished a book or sit-down read unless Depth says full.",
+    "Feed find. Name the piece, say what specifically was interesting about it, and give your real opinion. Connect it to something discussed when natural. 3-5 sentences across 1-2 bubbles.",
+  share_discovery:
+    "You found something that matches his interests. Name the piece, why it fits him, and what you think of it. 3-5 sentences.",
+  reading_assignment:
+    "Doc asked you to read about this topic. Lead with the most interesting thing you found, then your take on it, then ask one question that goes deeper. 4-8 sentences.",
   callback:
     "Pick up this thread of his. One concrete question about it, nothing general.",
   stance:
@@ -69,9 +73,9 @@ async function completeDraft(
 ): Promise<string> {
   const { text } = await completeChat(messages, {
     model: env.mistralModel,
-    maxTokens: 256,
+    maxTokens: 350,
     temperature: 0.6,
-    reasoningEffort: "low",
+    reasoningEffort: "medium",
   });
   return stripMediaMarkers(sanitizeTypography(text)).trim();
 }
@@ -115,6 +119,7 @@ export async function draftInitiativeMessage(
           : "Do not ask a question. No soft hook. Opinion or presence only.",
         `Reply in ${targetLang === "tr" ? "Turkish" : "English"} only.`,
         "Use only this material. Do not add a fact about Doc, a memory, or anything you did that is not stated here. One or two short bubbles separated by a blank line, no greeting ritual.",
+        "IMPORTANT: Never send just a title and one vague sentence. Every message must include your specific opinion and a reason for it. Generic summaries are failure.",
       ]
         .filter(Boolean)
         .join("\n")

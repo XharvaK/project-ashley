@@ -40,6 +40,11 @@ export function validateInitiativeDraft(
     return { ok: true };
   }
 
+  const FILLER = /^(same old|nothing much|neler yapıyorsun|ne haber|what's up)[.!?,\s]*$/i;
+  if (FILLER.test(text.split("\n")[0]!)) {
+    return { ok: false, reason: "generic_filler" };
+  }
+
   if (
     candidate.kind === "watch_fired" ||
     candidate.kind === "curiosity_take"
@@ -48,6 +53,12 @@ export function validateInitiativeDraft(
     if (title && !hasTitleToken(text, title)) {
       return { ok: false, reason: "title_tokens" };
     }
+
+    // Require minimum substance (reject <25 char title dumps)
+    if (text.length < 25) {
+      return { ok: false, reason: "too_short_for_proactive" };
+    }
+
     if (
       context.unanswered >= 1 &&
       /\?\s*$/.test(text) &&

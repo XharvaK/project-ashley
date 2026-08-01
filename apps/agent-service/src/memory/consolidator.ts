@@ -1,4 +1,4 @@
-﻿import type { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
 import { env } from "../env.js";
 import { completeChat, embedTexts } from "../mistral-client.js";
 import { isTurnBusy } from "../turn-gate.js";
@@ -534,10 +534,14 @@ export class ConsolidationWorker {
       [
         {
           role: "system",
-          content: `Extract durable facts Doc explicitly stated in USER messages. Output JSON only.
+          content: `Extract durable personal facts about Doc from USER messages. Output JSON only.
 Schema: { "facts": [{ "category": "project|preference|person|ongoing|identity|event|pattern", "key": "snake_case", "value": "short phrase", "confidence": 0-1, "sensitivity": "none|pharma|health|private", "valid_until": null|string, "supersedes_key": null|string }], "no_change": false }
 Rules:
 - USER statements only; never infer from assistant text
+- Extract WHO HE IS, WHAT HE LIKES, WHAT HE DOES, WHO HE KNOWS — not what he asked or denied in conversation
+- BAD examples (never extract these): "user_asked_about_feelings", "user_denied_having_said_that", "user_requested_elaboration", "user_asked_if_can_read_now"
+- GOOD examples: "drinks_mineral_water" -> "prefers mineral water over plain", "plays_fortnite_zero_build" -> "plays Fortnite in zero-building mode", "lives_in_izmir" -> "lives in Izmir, Turkey"
+- A fact is something you could tell a new person about Doc. "He asked me a question" is not a fact about him.
 - Do not use category "pinned" (reserved for manual pin)
 - Categories: identity (who he is), preference, project (with status when clear), person, event (dated happenings), pattern (behavioral), ongoing (temporary state)
 - max 5 facts; mood → ongoing with valid_until
@@ -553,7 +557,7 @@ ${existingBlock}`,
       {
         maxTokens: 800,
         temperature: 0.1,
-        reasoningEffort: "low",
+        reasoningEffort: "medium",
         signal: apiSignal(),
       },
     );
@@ -621,10 +625,13 @@ ${existingBlock}`,
       [
         {
           role: "system",
-          content: `Extract opinions the speaker asserted as their own. Output JSON only.
+          content: `Extract opinions ASHLEY (the assistant) asserted as her own in these messages. Output JSON only.
 Schema: { "stances": [{ "topic": "short slug", "stance": "one clause, first person, max 18 words", "confidence": 0-1 }] }
 Rules:
-- only positions the speaker took, not questions, not facts, not the other person's views
+- only positions ASHLEY took — not Doc's views, not facts about the world, not paraphrases of what Doc said
+- the stance must be something ASHLEY would defend if challenged
+- BAD: "I use a keyboard" (Ashley doesn't use a keyboard), "I run on Linux" (too literal about infrastructure)
+- GOOD: "I think SSDs fail more dangerously than HDDs because they're silent", "ORMs are inertia, not a real argument"
 - topic is a lowercase noun phrase, 1-3 words, stable across rephrasings
 - skip hedged or throwaway remarks; a stance is something worth defending later
 - max 4 stances; if none, return { "stances": [] }
@@ -636,7 +643,7 @@ ${existingBlock}`,
       {
         maxTokens: 500,
         temperature: 0.1,
-        reasoningEffort: "low",
+        reasoningEffort: "medium",
         signal: apiSignal(),
       },
     );

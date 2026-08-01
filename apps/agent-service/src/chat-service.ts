@@ -88,6 +88,7 @@ import { estimateTokens } from "./memory/tokens.js";
 import { NO_REPEAT_GUARD, looksLikeRepeat, collapseWithinTurnRepeat } from "./repetition-guard.js";
 import { setTurnBusy } from "./turn-gate.js";
 import { detectMoodFromText, recordMood } from "./memory/mood.js";
+import { detectReadingAssignment, queueReadingAssignment } from "./initiative/reading-assignment.js";
 import { evaluateInitiative, type EvaluateResult } from "./initiative/evaluator.js";
 import type { CandidateKind } from "./initiative/queue.js";
 import {
@@ -267,6 +268,11 @@ export class ChatService {
         text: request.message,
         messageId: userMsgId,
       });
+
+      const assignTopic = detectReadingAssignment(request.message);
+      if (assignTopic) {
+        queueReadingAssignment(this.db, request.ownerId, assignTopic);
+      }
 
       handleForgetRequest(this.db, request.ownerId, request.message);
       syncDenylistFromThread(this.db, request.ownerId, threadId);

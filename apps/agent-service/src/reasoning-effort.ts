@@ -1,4 +1,4 @@
-export type ReasoningEffort = "low" | "medium" | "high";
+export type ReasoningEffort = "medium" | "high";
 
 const SUBSTANCE_PATTERNS = [
   /\b(safe|danger|interact|contraindic|serotonin|dose|combin|mix|stack)\b/i,
@@ -7,11 +7,6 @@ const SUBSTANCE_PATTERNS = [
   /\b(how does|how do|explain|mechanism|works?)\b/i,
   /\b(code|function|class|module|import|export|async|await|promise)\b/i,
   /\b(premise|since|because|given that|now that|assuming)\b/i,
-];
-
-const LOW_CONTENT_PATTERNS = [
-  /^(lol|lmao|haha|hey|hi|yo|naber|selam|evet|hayır|ok|kk|brb|gn|night)[.!?~]*$/i,
-  /^.{1,12}$/,
 ];
 
 export function classifyReasoningEffort(params: {
@@ -24,10 +19,6 @@ export function classifyReasoningEffort(params: {
 
   if (queryMode === "recall" || queryMode === "soft_recall" || activityAsk) {
     return "high";
-  }
-
-  if (LOW_CONTENT_PATTERNS.some((p) => p.test(trimmed))) {
-    return "low";
   }
 
   if (SUBSTANCE_PATTERNS.some((p) => p.test(trimmed))) {
@@ -48,6 +39,5 @@ export function selectTemperature(params: {
   if (params.queryMode === "recall") return params.recallTemperature;
   if (params.channel === "voice") return params.voiceTemperature;
   if (params.reasoningEffort === "high") return 0.5;
-  if (params.reasoningEffort === "low") return 0.7;
   return params.chatTemperature;
 }
