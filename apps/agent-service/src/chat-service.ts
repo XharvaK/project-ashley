@@ -571,13 +571,10 @@ export class ChatService {
               provenance: "mention",
             }),
           };
-        } else if (env.curiosityEnabled && deniesOwnCapability(full)) {
+        } else if (env.curiosityEnabled && !linkFailed && deniesOwnCapability(full)) {
           regen = {
             reason: "capability",
-            messages: buildMessages(
-              examples,
-              linkFailed ? LINK_FAILED_CAPABILITY_GUARD : CAPABILITY_GUARD,
-            ),
+            messages: buildMessages(examples, CAPABILITY_GUARD),
           };
         } else if (
           claimsOwnActivity(full) &&
