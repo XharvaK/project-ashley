@@ -1,13 +1,13 @@
 import type { DatabaseSync } from "node:sqlite";
 import { env } from "../env.js";
 import { getLastUserMessageAt } from "./cooldown.js";
-import { pickCandidate, type Candidate } from "./queue.js";
+import { pickCandidate, type Angle, type Candidate } from "./queue.js";
 import { hoursSince, initiativeGate } from "./schedule.js";
 
 export type EvaluateResult = {
   shouldReachOut: boolean;
   reason: string;
-  angle?: "question" | "opinion" | "check_in";
+  angle?: Angle;
   candidate?: Candidate;
   cooldownRemainingSec: number;
 };

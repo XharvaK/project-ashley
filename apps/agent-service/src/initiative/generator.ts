@@ -1,4 +1,4 @@
-import type { DatabaseSync } from "node:sqlite";
+﻿import type { DatabaseSync } from "node:sqlite";
 import { env } from "../env.js";
 import { completeChat, type ChatMessage } from "../mistral-client.js";
 import { appendMemoryBlock, loadSystemPrompt } from "../prompts.js";
@@ -12,14 +12,14 @@ import {
   draftLanguageMatches,
   resolveDocLanguage,
 } from "./language.js";
-import type { Candidate } from "./queue.js";
+import type { Angle, Candidate } from "./queue.js";
 import { unansweredCount } from "./schedule.js";
 import { validateInitiativeDraft } from "./validate-draft.js";
 
 export type InitiativeDraft = {
   text: string;
   threadId: string;
-  angle: "question" | "opinion" | "check_in";
+  angle: Angle;
   reason: string;
   candidateKind?: string;
   materialKey?: string;
@@ -71,7 +71,7 @@ async function completeDraft(
     model: env.mistralModel,
     maxTokens: 256,
     temperature: 0.6,
-    reasoningEffort: "none",
+    reasoningEffort: "low",
   });
   return stripMediaMarkers(sanitizeTypography(text)).trim();
 }
@@ -83,7 +83,7 @@ async function completeDraft(
 export async function draftInitiativeMessage(
   assembler: MemoryAssembler,
   ownerId: string,
-  angle: "question" | "opinion" | "check_in",
+  angle: Angle,
   reason: string,
   candidate?: Candidate,
   db?: DatabaseSync,

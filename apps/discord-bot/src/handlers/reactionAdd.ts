@@ -5,6 +5,7 @@ import type {
   PartialUser,
 } from "discord.js";
 import { forgetTopic, reportReaction } from "../agent-client.js";
+import { noteGifReaction } from "../chat/gif-search.js";
 
 const pendingForget = new Map<
   string,
@@ -34,6 +35,7 @@ async function reportOwnMessageReaction(
       : reaction.message;
     if (!message.author?.bot) return;
     await reportReaction(message.id, emoji);
+    noteGifReaction(message.channelId, emoji);
   } catch (err) {
     console.warn("[discord-bot] reaction report failed:", err);
   }

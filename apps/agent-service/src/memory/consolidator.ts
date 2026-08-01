@@ -1,4 +1,4 @@
-import type { DatabaseSync } from "node:sqlite";
+﻿import type { DatabaseSync } from "node:sqlite";
 import { env } from "../env.js";
 import { completeChat, embedTexts } from "../mistral-client.js";
 import { isTurnBusy } from "../turn-gate.js";
@@ -15,6 +15,7 @@ import { parseJsonObject } from "./extract-json.js";
 import { filterHotForRecall } from "./hot-filter.js";
 import { getActiveSummary, listActiveFacts, mergeFacts } from "./facts.js";
 import { getKv, setKv } from "./kv.js";
+import { maybeEnqueueMicroReflection } from "./reflection.js";
 import { listStances, upsertStance } from "./stances.js";
 import { incrementMemoryMetric, pruneOldDoneJobs } from "./db.js";
 import type { FactInput } from "./types.js";
@@ -228,7 +229,13 @@ export class ConsolidationWorker {
     const count = countMessagesSinceCutoff(this.db, threadId, cutoff);
     const tokenSum = sumTokensSinceCutoff(this.db, threadId, cutoff);
 
-    if (shouldEnqueueFacts(assistantCount, env.memoryFactEveryN, role)) {
+    if (shouldEnqueueFacts(
+      assistantCount,
+      env.memoryFactEveryN,
+      role,
+      this.db,
+      ownerId,
+    )) {
       this.enqueueCoalesced(ownerId, "facts", threadId, messageId);
     }
 
@@ -238,6 +245,11 @@ export class ConsolidationWorker {
       assistantCount % env.stanceEveryN === 0
     ) {
       this.enqueueCoalesced(ownerId, "stances", threadId, messageId);
+    }
+
+    // Activity-based micro reflections (~every 20 assistant turns).
+    if (assistantCount > 0 && assistantCount % 20 === 0) {
+      maybeEnqueueMicroReflection(this.db, ownerId, assistantCount);
     }
 
     if (
@@ -541,7 +553,7 @@ ${existingBlock}`,
       {
         maxTokens: 800,
         temperature: 0.1,
-        reasoningEffort: "none",
+        reasoningEffort: "low",
         signal: apiSignal(),
       },
     );
@@ -624,7 +636,7 @@ ${existingBlock}`,
       {
         maxTokens: 500,
         temperature: 0.1,
-        reasoningEffort: "none",
+        reasoningEffort: "low",
         signal: apiSignal(),
       },
     );
@@ -709,7 +721,7 @@ ${existingBlock}`,
       {
         maxTokens: 300,
         temperature: 0.1,
-        reasoningEffort: "none",
+        reasoningEffort: "low",
         signal: apiSignal(),
       },
     );

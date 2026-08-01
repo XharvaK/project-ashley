@@ -560,6 +560,196 @@ CREATE INDEX IF NOT EXISTS idx_mem_own_time_drafts_owner
   ON mem_own_time_drafts (owner_id, status, created_at);
 `);
     db.exec("PRAGMA user_version = 11");
+    version = 11;
+  }
+  if (version < 12) {
+    db.exec(`
+CREATE TABLE IF NOT EXISTS mem_emotional_arcs (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_id      TEXT NOT NULL,
+  period        TEXT NOT NULL CHECK (period IN ('daily', 'weekly')),
+  period_start  TEXT NOT NULL,
+  period_end    TEXT NOT NULL,
+  summary       TEXT NOT NULL,
+  dominant_mood TEXT,
+  mood_counts   TEXT,
+  trend         TEXT CHECK (trend IN ('improving', 'declining', 'stable', 'mixed')),
+  created_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_mem_emotional_arcs_owner
+  ON mem_emotional_arcs (owner_id, period, created_at DESC);
+`);
+    db.exec("PRAGMA user_version = 12");
+    version = 12;
+  }
+  if (version < 13) {
+    const hasReflections = db
+      .prepare(
+        `SELECT name FROM sqlite_master WHERE type='table' AND name='mem_reflections'`,
+      )
+      .get() as { name: string } | undefined;
+    if (hasReflections) {
+      const cols = db
+        .prepare(`PRAGMA table_info(mem_reflections)`)
+        .all() as Array<{ name: string }>;
+      if (!cols.some((c) => c.name === "tier")) {
+        db.exec(
+          `ALTER TABLE mem_reflections ADD COLUMN tier TEXT NOT NULL DEFAULT 'daily'`,
+        );
+      }
+    }
+    db.exec("PRAGMA user_version = 13");
+    version = 13;
+  }
+  if (version < 14) {
+    db.exec(`
+CREATE TABLE IF NOT EXISTS mem_stance_embeddings (
+  stance_id     INTEGER PRIMARY KEY,
+  embedding     BLOB NOT NULL,
+  embed_model   TEXT NOT NULL DEFAULT 'mistral-embed',
+  updated_at    TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS mem_conversation_state (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_id        TEXT NOT NULL,
+  thread_id       TEXT NOT NULL,
+  state_type      TEXT NOT NULL CHECK (state_type IN (
+    'explaining', 'debugging', 'discussing', 'hanging', 'planning'
+  )),
+  topic           TEXT NOT NULL,
+  detail          TEXT,
+  started_at      TEXT NOT NULL,
+  status          TEXT NOT NULL DEFAULT 'active'
+    CHECK (status IN ('active', 'completed', 'interrupted', 'abandoned')),
+  completed_at    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_mem_conv_state_owner
+  ON mem_conversation_state (owner_id, status, started_at DESC);
+`);
+    db.exec("PRAGMA user_version = 14");
+    version = 14;
+  }
+  if (version < 15) {
+    db.exec(`
+CREATE TABLE IF NOT EXISTS ashley_taste_signals (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  interest_area TEXT NOT NULL,
+  signal        TEXT NOT NULL CHECK (signal IN ('liked', 'neutral', 'disliked', 'dismissed')),
+  source_title  TEXT NOT NULL,
+  take_text     TEXT,
+  created_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_taste_signals_area
+  ON ashley_taste_signals (interest_area, created_at);
+
+CREATE TABLE IF NOT EXISTS ashley_tastes (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  topic         TEXT NOT NULL UNIQUE,
+  disposition   TEXT NOT NULL CHECK (disposition IN (
+    'love', 'like', 'growing_interest', 'neutral',
+    'cooling', 'dislike', 'strong_dislike'
+  )),
+  confidence    REAL NOT NULL DEFAULT 0.5,
+  first_noticed TEXT NOT NULL,
+  last_updated  TEXT NOT NULL,
+  evidence      TEXT,
+  source        TEXT NOT NULL DEFAULT 'organic'
+    CHECK (source IN ('organic', 'seeded', 'manual'))
+);
+`);
+    db.exec("PRAGMA user_version = 15");
+    version = 15;
+  }
+  if (version < 16) {
+    // SQLite cannot widen CHECK in place; rebuild initiative log.
+    const hasLog = db
+      .prepare(
+        `SELECT name FROM sqlite_master WHERE type='table' AND name='mem_initiative_log'`,
+      )
+      .get() as { name: string } | undefined;
+    if (hasLog) {
+      db.exec(`
+CREATE TABLE mem_initiative_log_v16 (
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_id            TEXT NOT NULL,
+  thread_id           TEXT,
+  angle               TEXT NOT NULL
+                        CHECK (angle IN (
+                          'question', 'opinion', 'check_in',
+                          'share_discovery', 'callback', 'reaction',
+                          'continue', 'celebrate', 'ambient_presence', 'provocation'
+                        )),
+  reason              TEXT,
+  message_text        TEXT NOT NULL,
+  discord_message_id  TEXT,
+  external_message_id TEXT,
+  material_key        TEXT,
+  candidate_kind      TEXT,
+  feedback            TEXT,
+  sent_at             TEXT NOT NULL
+);
+INSERT INTO mem_initiative_log_v16 (
+  id, owner_id, thread_id, angle, reason, message_text, discord_message_id,
+  external_message_id, material_key, candidate_kind, feedback, sent_at
+)
+SELECT
+  id, owner_id, thread_id, angle, reason, message_text, discord_message_id,
+  external_message_id, material_key, candidate_kind, feedback, sent_at
+FROM mem_initiative_log;
+DROP TABLE mem_initiative_log;
+ALTER TABLE mem_initiative_log_v16 RENAME TO mem_initiative_log;
+CREATE INDEX IF NOT EXISTS idx_mem_initiative_owner_day
+  ON mem_initiative_log (owner_id, sent_at);
+CREATE INDEX IF NOT EXISTS idx_mem_initiative_material
+  ON mem_initiative_log (owner_id, material_key);
+`);
+    }
+    db.exec("PRAGMA user_version = 16");
+    version = 16;
+  }
+  if (version < 17) {
+    db.exec(`
+CREATE TABLE IF NOT EXISTS ashley_captured_examples (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  lang              TEXT NOT NULL DEFAULT 'en',
+  doc_text          TEXT NOT NULL,
+  ashley_text       TEXT NOT NULL,
+  reaction          TEXT,
+  tags              TEXT,
+  score             REAL NOT NULL DEFAULT 1.0,
+  times_sampled     INTEGER NOT NULL DEFAULT 0,
+  status            TEXT NOT NULL DEFAULT 'candidate'
+                      CHECK (status IN ('candidate', 'active', 'retired')),
+  source_message_id INTEGER,
+  created_at        TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ashley_captured_status
+  ON ashley_captured_examples (status, score DESC, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS discord_gif_feedback (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_id    TEXT NOT NULL,
+  query       TEXT NOT NULL,
+  gif_url     TEXT NOT NULL,
+  reaction    TEXT,
+  created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_discord_gif_feedback_owner
+  ON discord_gif_feedback (owner_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS discord_emoji_weights (
+  emoji       TEXT NOT NULL,
+  context     TEXT NOT NULL,
+  weight      REAL NOT NULL DEFAULT 1.0,
+  uses        INTEGER NOT NULL DEFAULT 0,
+  positive    INTEGER NOT NULL DEFAULT 0,
+  updated_at  TEXT NOT NULL,
+  PRIMARY KEY (emoji, context)
+);
+`);
+    db.exec("PRAGMA user_version = 17");
+    version = 17;
   }
 }
 

@@ -30,6 +30,12 @@ import { runCuriosityTick } from "./curiosity/tick.js";
 
 import { curiosityPresencePayload } from "./curiosity/presence-payload.js";
 import { curiosityStats } from "./curiosity/store.js";
+import {
+  emojiWeight,
+  listSuccessfulGifQueries,
+  recordEmojiUse,
+  recordGifFeedback,
+} from "./discord-feedback.js";
 
 
 
@@ -403,6 +409,75 @@ export function createServer(manager: AgentManager): express.Application {
 
   });
 
+  app.post("/signals/gif-feedback", (req, res) => {
+    try {
+      const { userId, query, gifUrl, reaction } = req.body as {
+        userId?: string;
+        query?: string;
+        gifUrl?: string;
+        reaction?: string | null;
+      };
+      if (!userId || (env.discordOwnerId && userId !== env.discordOwnerId)) {
+        throw new AppError("forbidden", "Forbidden", 403);
+      }
+      if (!query?.trim() || !gifUrl?.trim()) {
+        throw new AppError("message_required", "query and gifUrl required", 400);
+      }
+      recordGifFeedback(manager.chat.getDb(), userId, {
+        query: query.trim(),
+        gifUrl: gifUrl.trim(),
+        reaction: reaction ?? null,
+      });
+      res.json({ ok: true });
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.get("/signals/gif-queries", (req, res) => {
+    try {
+      const ownerId =
+        typeof req.query.owner_id === "string"
+          ? req.query.owner_id
+          : env.discordOwnerId;
+      if (!ownerId) throw new AppError("forbidden", "Forbidden", 403);
+      res.json({
+        queries: listSuccessfulGifQueries(manager.chat.getDb(), ownerId),
+      });
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/signals/emoji-weight", (req, res) => {
+    try {
+      const { userId, emoji, context, positive } = req.body as {
+        userId?: string;
+        emoji?: string;
+        context?: string;
+        positive?: boolean;
+      };
+      if (!userId || (env.discordOwnerId && userId !== env.discordOwnerId)) {
+        throw new AppError("forbidden", "Forbidden", 403);
+      }
+      if (!emoji?.trim() || !context?.trim()) {
+        throw new AppError("message_required", "emoji and context required", 400);
+      }
+      const e = emoji.trim().slice(0, 32);
+      const ctx = context.trim().slice(0, 64);
+      recordEmojiUse(manager.chat.getDb(), e, ctx, positive === true);
+      res.json({
+        ok: true,
+        weight: emojiWeight(manager.chat.getDb(), e, ctx),
+      });
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
 
 
   app.post("/chat/preflight", (req, res) => {
@@ -720,7 +795,7 @@ export function createServer(manager: AgentManager): express.Application {
         userId?: string;
         text?: string;
         threadId?: string;
-        angle?: "question" | "opinion" | "check_in";
+        angle?: string;
         reason?: string;
         discordMessageId?: string;
         materialKey?: string;
@@ -749,7 +824,7 @@ export function createServer(manager: AgentManager): express.Application {
         {
           text: text.trim(),
           threadId,
-          angle: angle ?? "check_in",
+          angle: (angle ?? "check_in") as import("./initiative/queue.js").Angle,
           reason: reason ?? "committed",
           materialKey,
           candidateKind,
@@ -901,7 +976,7 @@ export function createServer(manager: AgentManager): express.Application {
 
         userId?: string;
 
-        angle?: "question" | "opinion" | "check_in";
+        angle?: string;
 
         reason?: string;
 
@@ -933,7 +1008,7 @@ export function createServer(manager: AgentManager): express.Application {
 
         userId,
 
-        angle ?? evalResult.angle ?? "check_in",
+        (angle ?? evalResult.angle ?? "check_in") as import("./initiative/queue.js").Angle,
 
         reason ?? evalResult.reason,
 

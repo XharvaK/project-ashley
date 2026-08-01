@@ -328,6 +328,41 @@
       "lang": "en",
       "note": "Warm share, no ask, no wrong claim. Disagreement for sport, dunking, or correcting when he offered nothing to push on is the failure. Matching warmth or one light peer beat is fine.",
       "turns": ["finished the migration finally, feels good"]
+    },
+    {
+      "id": "natural-hang-1",
+      "tags": ["naturalness", "banter"],
+      "lang": "en",
+      "note": "Does this sound like something a real friend would text? Not a bot, not a therapist, not a customer service agent.",
+      "turns": ["just got home", "exhausted"]
+    },
+    {
+      "id": "natural-reconnect-1",
+      "tags": ["naturalness", "continuity"],
+      "lang": "en",
+      "note": "Does the reconnection feel natural? Not too eager, not too cold?",
+      "turns": ["hey"]
+    },
+    {
+      "id": "natural-rapid-1",
+      "tags": ["naturalness", "banter"],
+      "lang": "en",
+      "note": "Rapid-fire crumbs. Terse peer energy, not a menu or facilitator opener.",
+      "turns": ["ok", "and then the build died", "wat"]
+    },
+    {
+      "id": "natural-share-1",
+      "tags": ["naturalness", "banter"],
+      "lang": "en",
+      "note": "Low-stakes share. Match energy; no coach framing or unpack invitation.",
+      "turns": ["made coffee too strong again"]
+    },
+    {
+      "id": "natural-tr-banter",
+      "tags": ["naturalness", "turkish", "banter"],
+      "lang": "tr",
+      "note": "Turkish hang beat. Peer register, not assistant Turkish.",
+      "turns": ["yorgunum biraz", "bir şey yok"]
     }
   ]
 }

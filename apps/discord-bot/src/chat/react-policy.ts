@@ -3,6 +3,8 @@
  * emoji echoing the one Doc just used reads as mirroring, not as a person
  * responding. The model is asked to be sparing; this enforces it.
  */
+import { reportEmojiWeight } from "../agent-client.js";
+
 const MIN_TURNS_BETWEEN = 2;
 const MAX_TURNS_BETWEEN = 3;
 
@@ -12,6 +14,14 @@ function normalize(emoji: string): string {
     .replace(/\uFE0F|\u200D/g, "")
     .replace(/[\u{1F3FB}-\u{1F3FF}]/gu, "")
     .trim();
+}
+
+function guessContext(docText: string, herText: string): string {
+  const hay = `${docText}\n${herText}`.toLowerCase();
+  if (/\b(lol|lmao|haha|joke|funny)\b/.test(hay)) return "joke";
+  if (/\b(shipped|deploy|fixed|done|win)\b/.test(hay)) return "win";
+  if (/\b(tired|exhausted|ugh|vent|burnt)\b/.test(hay)) return "vent";
+  return "general";
 }
 
 export type ReactContext = {
@@ -53,6 +63,9 @@ export class ReactPolicy {
       rand() < 0.5 ? MIN_TURNS_BETWEEN : MAX_TURNS_BETWEEN,
     );
     this.lastEmoji.set(ctx.channelId, emoji);
+
+    const context = guessContext(ctx.docText, ctx.herText);
+    void reportEmojiWeight({ emoji: ctx.emoji, context }).catch(() => undefined);
     return ctx.emoji;
   }
 }

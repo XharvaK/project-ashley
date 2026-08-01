@@ -104,6 +104,57 @@ export async function reportReaction(messageId: string, emoji: string) {
   });
 }
 
+export async function reportGifFeedback(input: {
+  query: string;
+  gifUrl: string;
+  reaction?: string | null;
+}) {
+  return agentFetch<{ ok: boolean }>("/signals/gif-feedback", {
+    method: "POST",
+    body: JSON.stringify({
+      userId: config.ownerId,
+      query: input.query,
+      gifUrl: input.gifUrl,
+      reaction: input.reaction ?? null,
+    }),
+  });
+}
+
+export async function fetchSuccessfulGifQueries(): Promise<string[]> {
+  try {
+    const q = new URLSearchParams({ owner_id: config.ownerId });
+    const body = await agentFetch<{ queries: string[] }>(
+      `/signals/gif-queries?${q}`,
+    );
+    return body.queries ?? [];
+  } catch {
+    return [];
+  }
+}
+
+export async function reportEmojiWeight(input: {
+  emoji: string;
+  context: string;
+  positive?: boolean;
+}) {
+  try {
+    return await agentFetch<{ ok: boolean; weight: number }>(
+      "/signals/emoji-weight",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          userId: config.ownerId,
+          emoji: input.emoji,
+          context: input.context,
+          positive: input.positive === true,
+        }),
+      },
+    );
+  } catch {
+    return { ok: false, weight: 1 };
+  }
+}
+
 /** Cheap and best effort: a failure here just means no interim bubble. */
 export async function lookupPreflight(message: string): Promise<boolean> {
   try {
@@ -185,7 +236,7 @@ export async function tickInitiative() {
         shouldSend: true;
         text: string;
         threadId: string;
-        angle: "question" | "opinion" | "check_in";
+        angle: string;
         reason: string;
         candidateKind?: string;
         materialKey?: string;
@@ -200,7 +251,7 @@ export async function tickInitiative() {
 export async function commitInitiative(body: {
   text: string;
   threadId: string;
-  angle: "question" | "opinion" | "check_in";
+  angle: string;
   reason: string;
   discordMessageId: string;
   candidateKind?: string;
@@ -238,7 +289,7 @@ export async function evaluateInitiative() {
   return agentFetch<{
     shouldReachOut: boolean;
     reason: string;
-    angle?: "question" | "opinion" | "check_in";
+    angle?: string;
     cooldownRemainingSec: number;
   }>("/initiative/evaluate", {
     method: "POST",
@@ -247,7 +298,7 @@ export async function evaluateInitiative() {
 }
 
 export async function generateInitiative(
-  angle: "question" | "opinion" | "check_in",
+  angle: string,
   reason: string,
 ) {
   return agentFetch<{

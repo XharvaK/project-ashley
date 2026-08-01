@@ -20,6 +20,19 @@ const MOOD_PATTERNS: Array<{ re: RegExp; mood: string }> = [
   { re: /\b(flat|meh|low energy|havasız)\b/i, mood: "flat" },
   { re: /\b(curious|intrigued|merak)\b/i, mood: "curious" },
   { re: /\b(weird mood|garip bir havam)\b/i, mood: "weird" },
+  { re: /\b(amused|entertained|that's? (actually )?funny)\b/i, mood: "amused" },
+  { re: /\b(restless|antsy|can't sit still|huzursuz)\b/i, mood: "restless" },
+  { re: /\b(nostalgic|miss(ing)?|reminds? me)\b/i, mood: "nostalgic" },
+  { re: /\b(stubborn|not budging|diretiyorum)\b/i, mood: "stubborn" },
+  { re: /\b(fond|affection|I (actually )?(like|care))\b/i, mood: "fond" },
+  { re: /\b(skeptic|doubt|not (sure|buying))\b/i, mood: "skeptical" },
+  { re: /\b(melan|sad|down|somber|hüzün)\b/i, mood: "melancholy" },
+  { re: /\b(energi|fired up|hyped|excited|coşku)\b/i, mood: "energized" },
+  { re: /\b(conflicted|torn|both|ikilem)\b/i, mood: "conflicted" },
+  { re: /\b(smug|nailed it|told you)\b/i, mood: "smug" },
+  { re: /\b(bored|nothing|sıkıldım)\b/i, mood: "bored" },
+  { re: /\b(proud|impressed|not bad)\b/i, mood: "proud" },
+  { re: /\b(worried|concern|endişe)\b/i, mood: "worried" },
 ];
 
 export function detectMoodFromText(text: string): string | null {

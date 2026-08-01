@@ -34,8 +34,18 @@ export const env = {
   mistralApiKey: process.env.MISTRAL_API_KEY ?? "",
   mistralModel: process.env.MISTRAL_MODEL ?? "mistral-medium-latest",
   mistralReasoningEffort:
-    (process.env.MISTRAL_REASONING_EFFORT as "none" | "high" | undefined) ??
-    "none",
+    (process.env.MISTRAL_REASONING_EFFORT as
+      | "low"
+      | "medium"
+      | "high"
+      | undefined) ??
+    ((process.env.MISTRAL_REASONING_DEFAULT as
+      | "low"
+      | "medium"
+      | "high"
+      | undefined) ?? "medium"),
+  mistralReasoningDefault: (process.env.MISTRAL_REASONING_DEFAULT ??
+    "medium") as "low" | "medium" | "high",
   // Mistral documents 0.0-0.7; above that a bilingual bot starts switching
   // language mid-sentence, so the ceiling is enforced here rather than trusted.
   mistralChatTemperature: Math.min(

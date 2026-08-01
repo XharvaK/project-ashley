@@ -84,6 +84,39 @@ export function touchFactAccess(
   }
 }
 
+const TTL_BY_CATEGORY: Record<string, number> = {
+  ongoing: 30,
+  project: 45,
+  event: 14,
+  pattern: 60,
+  preference: 180,
+  identity: 365,
+  person: 120,
+  pinned: Number.POSITIVE_INFINITY,
+};
+
+/** Set valid_until on facts that exceeded category TTL without confirmation. */
+export function markStaleFacts(db: DatabaseSync, ownerId: string): number {
+  let marked = 0;
+  const facts = listActiveFacts(db, ownerId, 200, true);
+  const now = Date.now();
+  const stmt = db.prepare(
+    `UPDATE mem_facts SET valid_until = ? WHERE id = ? AND valid_until IS NULL`,
+  );
+  for (const fact of facts) {
+    const ttlDays = TTL_BY_CATEGORY[fact.category] ?? 90;
+    if (!Number.isFinite(ttlDays)) continue;
+    const lastTouch = new Date(fact.last_confirmed_at).getTime();
+    const ageDays = (now - lastTouch) / DAY_MS;
+    if (ageDays > ttlDays) {
+      // Expire immediately so listActiveFacts filters them out.
+      stmt.run(new Date().toISOString(), fact.id);
+      marked++;
+    }
+  }
+  return marked;
+}
+
 export function pinFact(
   db: DatabaseSync,
   ownerId: string,

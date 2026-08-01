@@ -39,6 +39,8 @@ export type MemFact = {
   access_count: number;
 };
 
+export type ReflectionTier = "micro" | "daily" | "weekly" | "monthly";
+
 export type MemReflection = {
   id: number;
   owner_id: string;
@@ -47,6 +49,7 @@ export type MemReflection = {
   body: string;
   model: string;
   created_at: string;
+  tier?: ReflectionTier;
 };
 
 export type MemChunk = {
@@ -68,6 +71,8 @@ export type AssembledContext = {
   threadId: string;
   queryMode: QueryMode;
   repeatRecall: boolean;
+  /** Reused by curiosity/stance matchers — avoid a second embed call. */
+  queryEmbedding?: Float32Array;
 };
 
 export type FactInput = {

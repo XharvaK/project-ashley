@@ -3,6 +3,10 @@ import { AppError } from "./errors.js";
 import { env } from "./env.js";
 import { buildChatMessages } from "./chat-messages.js";
 import { streamChat } from "./mistral-client.js";
+import {
+  classifyReasoningEffort,
+  selectTemperature,
+} from "./reasoning-effort.js";
 import { sanitizeTypography } from "./typography.js";
 import { recordReaction } from "./signals.js";
 import {
@@ -16,13 +20,24 @@ import {
   buildDiscordPresenceNote,
   loadSystemPrompt,
 } from "./prompts.js";
-import { PREMISE_GUARD, acceptedUncheckedPremise, isPremiseCheck } from "./premise-guard.js";
+import {
+  PREMISE_GUARD,
+  acceptedUncheckedPremise,
+  checkPremiseLLM,
+  isPremiseCheck,
+  premiseGuardWithCorrection,
+} from "./premise-guard.js";
 import { NO_ECHO_GUARD, isEchoOfUser } from "./echo-guard.js";
 import {
   assembleCuriosity,
   commitCuriosity,
   type CuriosityInjection,
 } from "./curiosity/inject.js";
+import {
+  detectConversationState,
+  recordConversationState,
+} from "./memory/conversation-state.js";
+import { maybeCaptureExample } from "./voice-bank-capture.js";
 import {
   activityAskKind,
   asksInterests,
@@ -62,6 +77,7 @@ import { ConsolidationWorker } from "./memory/consolidator.js";
 import { getMemoryDb, getMemoryHealth } from "./memory/db.js";
 import { applyAutoRemember } from "./memory/auto-remember.js";
 import {
+  extractCorrectedFact,
   handleForgetRequest,
   syncDenylistFromThread,
 } from "./memory/correction-denylist.js";
@@ -254,6 +270,14 @@ export class ChatService {
 
       handleForgetRequest(this.db, request.ownerId, request.message);
       syncDenylistFromThread(this.db, request.ownerId, threadId);
+      void extractCorrectedFact(
+        this.db,
+        request.ownerId,
+        request.message,
+        threadId,
+      ).catch((err) =>
+        console.warn("[memory] correction extract failed:", err),
+      );
 
       applyAutoRemember(
         this.db,
@@ -279,6 +303,20 @@ export class ChatService {
         userMsgId,
       );
 
+      // Positive laugh/reaction to her prior line → capture that exchange.
+      try {
+        const priorAshley = [...assembled.hotMessages]
+          .reverse()
+          .find((m) => m.role === "assistant")?.content;
+        if (priorAshley) {
+          maybeCaptureExample(this.db, request.message, priorAshley, {
+            sourceMessageId: userMsgId,
+          });
+        }
+      } catch (err) {
+        console.warn("[chat] voice capture failed:", err);
+      }
+
       const promptParts = loadSystemPrompt(request.channel);
 
       const askKind = activityAskKind(request.message);
@@ -290,10 +328,11 @@ export class ChatService {
       const curiosity =
         request.channel === "voice" && curiosityMode === "organic"
           ? null
-          : assembleCuriosity(this.db, request.message, {
+          : await assembleCuriosity(this.db, request.message, {
               mode: curiosityMode,
               askKind: askKind ?? undefined,
               alsoInterests: asksInterests(request.message),
+              messageEmbedding: assembled.queryEmbedding,
             });
 
       const capabilityNote =
@@ -326,6 +365,7 @@ export class ChatService {
               seed: assembled.threadId,
               max: env.personaFewshotCount,
               allowSharp: sharpArmed,
+              db: this.db,
               extraTags:
                 assembled.queryMode === "soft_recall"
                   ? ["fabrication_bait", "recall_empty"]
@@ -364,8 +404,21 @@ export class ChatService {
         env.curiosityEnabled && isBrowseCapabilityChallenge(request.message)
           ? CAPABILITY_GUARD.text
           : null;
+      let premiseGuard: string | null = isPremiseCheck(request.message)
+        ? PREMISE_GUARD
+        : null;
+      if (premiseGuard && request.message.trim().length > 20) {
+        try {
+          const llm = await checkPremiseLLM(request.message);
+          if (llm.hasFalsePremise) {
+            premiseGuard = premiseGuardWithCorrection(llm.correction);
+          }
+        } catch (err) {
+          console.warn("[chat] premise LLM check failed:", err);
+        }
+      }
       const guardParts = [
-        isPremiseCheck(request.message) ? PREMISE_GUARD : null,
+        premiseGuard,
         capabilityChallengeGuard,
         lookupGuard,
         linkGuard,
@@ -404,12 +457,6 @@ export class ChatService {
       const messages = buildMessages(examples);
 
       let full = "";
-      const temp =
-        assembled.queryMode === "recall"
-          ? env.mistralRecallTemperature
-          : request.channel === "voice"
-            ? env.mistralVoiceTemperature
-            : env.mistralChatTemperature;
       // soft_recall stays on the conversational budget: it is a question about a
       // past exchange, not a memory audit, and clamping it to 120 is what makes
       // her sound like she is reading off an index card.
@@ -427,18 +474,19 @@ export class ChatService {
           ? env.mistralChatPresencePenalty
           : undefined;
 
-      // Banter stays fast; recall, soft_recall, and "did you read that?" challenges
-      // get thinking budget (short messages used to force none and clip to "No.").
-      const reasoningEffort =
-        assembled.queryMode === "recall" ||
-        assembled.queryMode === "soft_recall" ||
-        activityAsk ||
-        request.message.trim().length > 160
-          ? ("high" as const)
-          : assembled.queryMode === "normal" &&
-              request.message.trim().length < 80
-            ? ("none" as const)
-            : ("none" as const);
+      const reasoningEffort = classifyReasoningEffort({
+        queryMode: assembled.queryMode,
+        message: request.message,
+        activityAsk,
+      });
+      const temp = selectTemperature({
+        queryMode: assembled.queryMode,
+        channel: request.channel,
+        reasoningEffort,
+        recallTemperature: env.mistralRecallTemperature,
+        voiceTemperature: env.mistralVoiceTemperature,
+        chatTemperature: env.mistralChatTemperature,
+      });
 
       const sampling = {
         maxTokens,
@@ -594,6 +642,16 @@ export class ChatService {
         text: persisted,
         messageId: assistantId,
       });
+
+      const detected = detectConversationState(persisted, request.message);
+      if (detected) {
+        recordConversationState(
+          this.db,
+          request.ownerId,
+          assembled.threadId,
+          detected,
+        );
+      }
 
       const mood = detectMoodFromText(persisted);
       if (mood) {
@@ -831,7 +889,7 @@ export class ChatService {
 
   async generateInitiativeMessage(
     ownerId: string,
-    angle: "question" | "opinion" | "check_in",
+    angle: import("./initiative/queue.js").Angle,
     reason: string,
   ) {
     if (this.isBusy(ownerId)) {

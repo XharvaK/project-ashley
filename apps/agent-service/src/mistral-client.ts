@@ -20,7 +20,7 @@ export type CompletionOptions = {
   maxTokens?: number;
   temperature?: number;
   presencePenalty?: number;
-  reasoningEffort?: "none" | "high";
+  reasoningEffort?: "low" | "medium" | "high";
   signal?: AbortSignal;
   /** Defaults: streamChat = interactive, completeChat/embed = background. */
   lane?: Lane;
@@ -250,7 +250,7 @@ export async function smokeTest(): Promise<boolean> {
       model: env.mistralModel,
       maxTokens: 16,
       temperature: 0,
-      reasoningEffort: "none",
+      reasoningEffort: "low",
       lane: "interactive",
     },
   );

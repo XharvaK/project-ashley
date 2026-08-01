@@ -1,5 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { env } from "../env.js";
+import { embedTexts } from "../mistral-client.js";
+import { cosineSimilarity } from "../memory/embeddings.js";
 import type { ActivityAskKind } from "./activity-ask.js";
 import {
   countProvenance,
@@ -13,6 +15,8 @@ import {
 
 const STOP =
   /^(the|a|an|and|or|but|for|with|that|this|what|when|why|how|you|your|i'?m|about|from|have|has|had|was|were|are|is|be|been|it|its|to|of|in|on|at|as|by|not|do|does|did|just|like|bir|bu|ne|ama|için|ile|çok|daha|gibi|var|yok|ben|sen)$/i;
+
+const EMBED_MIN_SCORE = 0.3;
 
 /** Content tokens shared by curiosity overlap and watch/affinity gates. */
 export function words(text: string): string[] {
@@ -55,6 +59,41 @@ export function selectCuriosityTakes(
     .sort((a, b) => b.score - a.score || a.take.surfaced_count - b.take.surfaced_count)
     .slice(0, max)
     .map((r) => r.take);
+}
+
+/**
+ * Embedding similarity selection. Falls back to keyword overlap when embed
+ * fails or nothing clears the threshold.
+ */
+export async function selectCuriosityTakesEmbedding(
+  takes: TakeRow[],
+  message: string,
+  messageEmbedding: Float32Array,
+  max = 3,
+): Promise<TakeRow[]> {
+  if (takes.length === 0) return [];
+  try {
+    const takeTexts = takes.map((t) => `${t.title} ${t.take}`);
+    const embeddings = await embedTexts(takeTexts, { lane: "interactive" });
+    const scored = takes
+      .map((take, i) => {
+        const emb = embeddings[i];
+        const score = emb
+          ? cosineSimilarity(messageEmbedding, emb)
+          : 0;
+        return { take, score };
+      })
+      .filter((r) => r.score > EMBED_MIN_SCORE)
+      .sort(
+        (a, b) =>
+          b.score - a.score ||
+          a.take.surfaced_count - b.take.surfaced_count,
+      );
+    if (scored.length > 0) return scored.slice(0, max).map((r) => r.take);
+  } catch (err) {
+    console.warn("[curiosity] embedding select failed, keyword fallback:", err);
+  }
+  return selectCuriosityTakes(takes, message, max);
 }
 
 /** Least-surfaced recent takes, no topic filter — for when he asked directly. */
@@ -138,10 +177,11 @@ export function buildSolicitedCuriosityBlock(
   ].join("\n");
 }
 
-function assembleOrganic(
+async function assembleOrganic(
   db: DatabaseSync,
   message: string,
-): CuriosityInjection {
+  messageEmbedding?: Float32Array,
+): Promise<CuriosityInjection> {
   if (!env.curiosityEnabled) return null;
   // Surfacing caps, checked against the append-only log rather than memory:
   // at most one per hour and a couple a day, so it stays a side of her rather
@@ -151,7 +191,10 @@ function assembleOrganic(
     return null;
   }
 
-  const takes = selectCuriosityTakes(recentTakes(db, 48), message);
+  const recent = recentTakes(db, 48);
+  const takes = messageEmbedding
+    ? await selectCuriosityTakesEmbedding(recent, message, messageEmbedding)
+    : selectCuriosityTakes(recent, message);
   const text = buildCuriosityBlock(takes);
   if (!text) return null;
 
@@ -192,22 +235,24 @@ function assembleSolicited(
   };
 }
 
-export function assembleCuriosity(
+export async function assembleCuriosity(
   db: DatabaseSync,
   message: string,
   opts?: {
     mode?: CuriosityMode;
     askKind?: ActivityAskKind;
     alsoInterests?: boolean;
+    /** Reuse the assembler's query embedding when available. */
+    messageEmbedding?: Float32Array;
   },
-): CuriosityInjection {
+): Promise<CuriosityInjection> {
   const mode = opts?.mode ?? "organic";
   if (mode === "solicited") {
     return assembleSolicited(db, opts?.askKind ?? "reading", {
       alsoInterests: opts?.alsoInterests,
     });
   }
-  return assembleOrganic(db, message);
+  return assembleOrganic(db, message, opts?.messageEmbedding);
 }
 
 export function commitCuriosity(

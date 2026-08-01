@@ -8,6 +8,7 @@ import {
   type TakeRow,
 } from "../curiosity/store.js";
 import { localParts } from "../local-time.js";
+import { listInterruptedStates } from "../memory/conversation-state.js";
 import { listActiveFacts } from "../memory/facts.js";
 import { listStances } from "../memory/stances.js";
 import { kindFeedbackMultiplier } from "../signals.js";
@@ -26,11 +27,27 @@ export type CandidateKind =
   | "curiosity_take"
   | "callback"
   | "stance"
-  | "check_in";
+  | "check_in"
+  | "share_discovery"
+  | "reaction"
+  | "continue"
+  | "celebrate"
+  | "ambient_presence"
+  | "provocation";
 
 export type CuriosityLane = "A" | "B" | "C";
 
-export type Angle = "question" | "opinion" | "check_in";
+export type Angle =
+  | "question"
+  | "opinion"
+  | "check_in"
+  | "share_discovery"
+  | "callback"
+  | "reaction"
+  | "continue"
+  | "celebrate"
+  | "ambient_presence"
+  | "provocation";
 
 export type Candidate = {
   kind: CandidateKind;
@@ -74,10 +91,51 @@ const SPECS: Record<CandidateKind, Spec> = {
     ripeAfterHours: 0,
     angle: "opinion",
   },
-  callback: { base: 48, halfLifeHours: 96, ripeAfterHours: 12, angle: "question" },
+  share_discovery: {
+    base: 72,
+    halfLifeHours: 14,
+    ripeAfterHours: 0,
+    angle: "share_discovery",
+  },
+  reaction: {
+    base: 64,
+    halfLifeHours: 10,
+    ripeAfterHours: 0,
+    angle: "reaction",
+  },
+  continue: {
+    base: 70,
+    halfLifeHours: 18,
+    ripeAfterHours: 0.5,
+    angle: "continue",
+  },
+  celebrate: {
+    base: 55,
+    halfLifeHours: 36,
+    ripeAfterHours: 2,
+    angle: "celebrate",
+  },
+  ambient_presence: {
+    base: 32,
+    halfLifeHours: 48,
+    ripeAfterHours: 0,
+    angle: "ambient_presence",
+  },
+  provocation: {
+    base: 60,
+    halfLifeHours: 72,
+    ripeAfterHours: 1,
+    angle: "provocation",
+  },
+  callback: { base: 48, halfLifeHours: 96, ripeAfterHours: 12, angle: "callback" },
   stance: { base: 58, halfLifeHours: 120, ripeAfterHours: 24, angle: "opinion" },
   check_in: { base: 38, halfLifeHours: 48, ripeAfterHours: 0, angle: "check_in" },
 };
+
+const NEGATIVE_TAKE =
+  /\b(terrible|awful|wrong|stupid|waste|boring|useless|dumb|garbage|slop|worst)\b/i;
+const POSITIVE_PROJECT =
+  /\b(shipped|deploy(ed)?|fixed|landed|done|working|green|clean)\b/i;
 
 function hoursSince(iso: string | null): number {
   if (!iso) return Infinity;
@@ -283,14 +341,30 @@ export function collectCandidates(
       continue;
     }
 
+    if (NEGATIVE_TAKE.test(take.take)) {
+      const c = make(
+        "reaction",
+        `reaction:take:${take.id}`,
+        material,
+        hoursSince(take.created_at),
+        mult("reaction"),
+        { lane: "B", title: take.title },
+      );
+      if (c) out.push(c);
+    }
+
     const affinity = docAffinity(db, ownerId, take.title, take.take);
     if (affinity >= env.proactiveAffinityMinTokens) {
+      const kind: CandidateKind =
+        affinity >= env.proactiveAffinityMinTokens + 1
+          ? "share_discovery"
+          : "curiosity_take";
       const c = make(
-        "curiosity_take",
+        kind,
         `take:${take.id}`,
         material,
         hoursSince(take.created_at),
-        mult("curiosity_take"),
+        mult(kind),
         { lane: "B", title: take.title },
       );
       if (c) out.push(c);
@@ -313,7 +387,28 @@ export function collectCandidates(
     if (c) out.push(c);
   }
 
+  for (const interrupted of listInterruptedStates(db, ownerId, 3)) {
+    const c = make(
+      "continue",
+      `continue:${interrupted.id}`,
+      `Interrupted ${interrupted.state_type} about: ${interrupted.topic}`,
+      hoursSince(interrupted.completed_at ?? interrupted.started_at),
+      mult("continue"),
+    );
+    if (c) out.push(c);
+  }
+
   for (const stance of listStances(db, ownerId).slice(0, 6)) {
+    if (stance.revised_at && hoursSince(stance.revised_at) < 72) {
+      const c = make(
+        "provocation",
+        `provocation:${stance.id}`,
+        `She revised her take on ${stance.topic}: ${stance.stance}`,
+        hoursSince(stance.revised_at),
+        mult("provocation"),
+      );
+      if (c) out.push(c);
+    }
     const c = make(
       "stance",
       `stance:${stance.id}`,
@@ -326,6 +421,16 @@ export function collectCandidates(
 
   for (const fact of listActiveFacts(db, ownerId, 12)) {
     if (fact.category !== "project" && fact.category !== "ongoing") continue;
+    if (POSITIVE_PROJECT.test(fact.value)) {
+      const c = make(
+        "celebrate",
+        `celebrate:${fact.id}`,
+        fact.value,
+        hoursSince(fact.last_confirmed_at),
+        mult("celebrate"),
+      );
+      if (c) out.push(c);
+    }
     const c = make(
       "callback",
       `callback:${fact.id}`,
@@ -368,6 +473,21 @@ export function collectCandidates(
     if (c) out.push(c);
   }
 
+  // Ambient presence: lighter than check_in, only on long idle with nothing else.
+  if (context.idleHours >= 12 && unanswered === 0) {
+    const dateKey = localParts().dateKey;
+    const hour = localParts().hour;
+    const c = make(
+      "ambient_presence",
+      `ambient:${dateKey}`,
+      `Idle ~${Math.round(context.idleHours)}h. Local hour ~${hour}. One ambient still-here line (morning/night-aware if natural). No question. No agenda.`,
+      0,
+      mult("ambient_presence"),
+      { scoreScale: 0.85 },
+    );
+    if (c) out.push(c);
+  }
+
   return out
     .filter((c) => !alreadySent(db, ownerId, c.materialKey))
     .sort((a, b) => b.score - a.score);
@@ -386,6 +506,7 @@ export function pickCandidate(
   const hasAgenda = ripe.some(
     (c) =>
       c.kind !== "check_in" &&
+      c.kind !== "ambient_presence" &&
       (c.lane === "A" ||
         c.lane === "B" ||
         c.kind === "she_owes" ||
@@ -393,6 +514,11 @@ export function pickCandidate(
         c.kind === "time_anchored" ||
         c.kind === "callback" ||
         c.kind === "stance" ||
+        c.kind === "share_discovery" ||
+        c.kind === "reaction" ||
+        c.kind === "continue" ||
+        c.kind === "celebrate" ||
+        c.kind === "provocation" ||
         (c.kind === "curiosity_take" && c.lane !== "C") ||
         c.kind === "watch_fired"),
   );
@@ -400,7 +526,9 @@ export function pickCandidate(
   // Presence only when nothing sharper is ripe.
   let pool = ripe;
   if (hasAgenda) {
-    pool = ripe.filter((c) => c.kind !== "check_in");
+    pool = ripe.filter(
+      (c) => c.kind !== "check_in" && c.kind !== "ambient_presence",
+    );
   }
 
   const hasAB = pool.some((c) => c.lane === "A" || c.lane === "B");

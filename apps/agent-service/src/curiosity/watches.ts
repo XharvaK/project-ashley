@@ -9,6 +9,7 @@ import {
   logProvenance,
   upsertSource,
 } from "./store.js";
+import { recordTasteSignal } from "../memory/taste-drift.js";
 
 export type WatchRow = {
   id: number;
@@ -205,6 +206,15 @@ export async function runOneDueWatch(
 
   logProvenance(db, "read", `watch ${watch.topic}: ${hit.url}`, itemId);
   insertTake(db, { itemId, interest: "dev", take });
+  try {
+    recordTasteSignal(db, {
+      interest: "dev",
+      take,
+      title: `${watch.topic}: ${hit.title}`,
+    });
+  } catch (err) {
+    console.warn("[curiosity] taste signal failed:", err);
+  }
   logProvenance(db, "take", take, itemId);
   return { topic: watch.topic, take };
 }

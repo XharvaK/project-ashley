@@ -316,25 +316,25 @@ describe("assembleCuriosity", () => {
     });
   });
 
-  it("offers a relevant take and records the surfacing", () => {
-    const injection = assembleCuriosity(conn, "my sqlite writer keeps blocking");
+  it("offers a relevant take and records the surfacing", async () => {
+    const injection = await assembleCuriosity(conn, "my sqlite writer keeps blocking");
     expect(injection?.takeIds).toEqual([1]);
     expect(injection?.provenance).toBe("surface");
     commitCuriosity(conn, injection);
     expect(countProvenance(conn, "surface", 24)).toBe(1);
   });
 
-  it("stays quiet when the topic does not overlap", () => {
-    expect(assembleCuriosity(conn, "what should i eat tonight")).toBeNull();
+  it("stays quiet when the topic does not overlap", async () => {
+    expect(await assembleCuriosity(conn, "what should i eat tonight")).toBeNull();
   });
 
-  it("respects the once-an-hour surfacing cap", () => {
-    commitCuriosity(conn, assembleCuriosity(conn, "sqlite writer blocking"));
-    expect(assembleCuriosity(conn, "sqlite writer blocking")).toBeNull();
+  it("respects the once-an-hour surfacing cap", async () => {
+    commitCuriosity(conn, await assembleCuriosity(conn, "sqlite writer blocking"));
+    expect(await assembleCuriosity(conn, "sqlite writer blocking")).toBeNull();
   });
 
-  it("solicited injects without topic overlap", () => {
-    const injection = assembleCuriosity(conn, "what have you been reading today?", {
+  it("solicited injects without topic overlap", async () => {
+    const injection = await assembleCuriosity(conn, "what have you been reading today?", {
       mode: "solicited",
     });
     expect(injection?.takeIds).toEqual([1]);
@@ -342,11 +342,11 @@ describe("assembleCuriosity", () => {
     expect(injection?.text.toLowerCase()).toContain("he asked");
   });
 
-  it("solicited bypasses organic surface caps and logs mention", () => {
-    commitCuriosity(conn, assembleCuriosity(conn, "sqlite writer blocking"));
-    expect(assembleCuriosity(conn, "sqlite writer blocking")).toBeNull();
+  it("solicited bypasses organic surface caps and logs mention", async () => {
+    commitCuriosity(conn, await assembleCuriosity(conn, "sqlite writer blocking"));
+    expect(await assembleCuriosity(conn, "sqlite writer blocking")).toBeNull();
 
-    const solicited = assembleCuriosity(conn, "what have you been reading?", {
+    const solicited = await assembleCuriosity(conn, "what have you been reading?", {
       mode: "solicited",
     });
     expect(solicited?.takeIds).toEqual([1]);
@@ -355,9 +355,9 @@ describe("assembleCuriosity", () => {
     expect(countProvenance(conn, "mention", 24)).toBe(1);
   });
 
-  it("solicited empty day licenses honest denial", () => {
+  it("solicited empty day licenses honest denial", async () => {
     const empty = db();
-    const injection = assembleCuriosity(empty, "what have you been reading?", {
+    const injection = await assembleCuriosity(empty, "what have you been reading?", {
       mode: "solicited",
     });
     expect(injection?.takeIds).toEqual([]);
@@ -378,9 +378,9 @@ describe("assembleCuriosity", () => {
     expect(block.toLowerCase()).toContain("interests");
   });
 
-  it("solicited general empty night is not a reading diary", () => {
+  it("solicited general empty night is not a reading diary", async () => {
     const empty = db();
-    const injection = assembleCuriosity(empty, "what did you do while I slept?", {
+    const injection = await assembleCuriosity(empty, "what did you do while I slept?", {
       mode: "solicited",
       askKind: "general",
     });

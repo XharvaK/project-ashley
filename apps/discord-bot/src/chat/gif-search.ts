@@ -1,6 +1,11 @@
 import { config } from "../config.js";
+import {
+  fetchSuccessfulGifQueries,
+  reportGifFeedback,
+} from "../agent-client.js";
 
 const lastGifAt = new Map<string, number>();
+const lastGifMeta = new Map<string, { query: string; url: string }>();
 
 type GiphyImage = { url?: string };
 type GiphyItem = {
@@ -96,9 +101,40 @@ async function searchTenor(query: string): Promise<string | null> {
   return null;
 }
 
+function biasQuery(query: string, successful: string[]): string {
+  if (successful.length === 0) return query;
+  const qTokens = new Set(
+    query
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((w) => w.length > 2),
+  );
+  let best: string | null = null;
+  let bestHits = 0;
+  for (const past of successful) {
+    const hits = past
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((w) => qTokens.has(w)).length;
+    if (hits > bestHits) {
+      bestHits = hits;
+      best = past;
+    }
+  }
+  // Soft bias: blend one proven token if overlap exists.
+  if (best && bestHits > 0) {
+    const extra = best.split(/\s+/).find((w) => w.length > 3);
+    if (extra && !qTokens.has(extra.toLowerCase())) {
+      return `${query} ${extra}`;
+    }
+  }
+  return query;
+}
+
 /**
  * Search Giphy (preferred) then Tenor. Fail soft when disabled/missing keys/errors.
  * Rate-limited per channel (GIF_COOLDOWN_SEC). Fetches top 5, picks best.
+ * Biases toward past queries that got positive reactions (via agent).
  */
 export async function searchGif(
   query: string,
@@ -114,12 +150,28 @@ export async function searchGif(
   if (Date.now() - last < cooldownMs) return null;
 
   try {
-    const url = (await searchGiphy(q)) ?? (await searchTenor(q));
+    const successful = await fetchSuccessfulGifQueries();
+    const biased = biasQuery(q, successful);
+    const url = (await searchGiphy(biased)) ?? (await searchTenor(biased));
     if (!url) return null;
     lastGifAt.set(channelId, Date.now());
+    lastGifMeta.set(channelId, { query: q, url });
+    // Log send without reaction yet — reaction path can fill it in.
+    void reportGifFeedback({ query: q, gifUrl: url }).catch(() => undefined);
     return url;
   } catch (err) {
     console.warn("[discord-bot] gif search failed:", err);
     return null;
   }
+}
+
+/** Best-effort: attach a reaction to the last GIF sent in this channel. */
+export function noteGifReaction(channelId: string, reaction: string): void {
+  const meta = lastGifMeta.get(channelId);
+  if (!meta) return;
+  void reportGifFeedback({
+    query: meta.query,
+    gifUrl: meta.url,
+    reaction,
+  }).catch(() => undefined);
 }

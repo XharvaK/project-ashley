@@ -7,6 +7,7 @@ import {
   touchFactAccess,
 } from "./facts.js";
 import { buildReflectionBlock } from "./reflection.js";
+import { buildEmotionalArcBlock } from "./emotional-arc.js";
 import { buildCorrectionGuard } from "./correction-guard.js";
 import { getOwnerDenylist } from "./memory-veto.js";
 import {
@@ -31,8 +32,16 @@ import {
   buildStanceBlock,
   listStances,
   selectRelevantStances,
+  selectRelevantStancesEmbedding,
 } from "./stances.js";
 import { buildMoodBlock } from "./mood.js";
+import { buildInterruptedNote } from "./conversation-state.js";
+import { buildTasteLedgerBlock } from "./taste-drift.js";
+import {
+  buildTimeSignal,
+  detectTempo,
+  tempoInstructions,
+} from "./tempo.js";
 import {
   getHotMessages,
   getThreadMeta,
@@ -118,6 +127,8 @@ function buildMemoryBlock(
   liveSignals: string[] = [],
   moodBlock: string | null = null,
   reflectionBlock: string | null = null,
+  emotionalArcBlock: string | null = null,
+  tasteLedger: string | null = null,
 ): string {
   const factLines = facts
     .filter((f) =>
@@ -152,6 +163,10 @@ function buildMemoryBlock(
     parts.push("", reflectionBlock);
   }
 
+  if (emotionalArcBlock) {
+    parts.push("", emotionalArcBlock);
+  }
+
   parts.push(
     "",
     "Trust order: standing facts, reflection notes, then where things left off, then this thread's messages. Echoes are hints, never facts. A blank section means you have nothing there, not that you should reconstruct it.",
@@ -182,6 +197,10 @@ function buildMemoryBlock(
     parts.push("", stanceBlock);
   }
 
+  if (tasteLedger) {
+    parts.push("", tasteLedger);
+  }
+
   if (moodBlock) {
     parts.push("", moodBlock);
   }
@@ -199,6 +218,10 @@ function applyHotTokenBudget(hot: HotTurn[], maxTokens: number): HotTurn[] {
   const trimmed = trimToTokenBudget(texts, maxTokens);
   const drop = hot.length - trimmed.length;
   return hot.slice(drop);
+}
+
+function assembledSeed(ownerId: string, threadId: string): string {
+  return `${ownerId}:${threadId}:${new Date().toISOString().slice(0, 13)}`;
 }
 
 export class MemoryAssembler {
@@ -235,12 +258,14 @@ export class MemoryAssembler {
     );
 
     let snippets: string[] = [];
+    let queryEmbedding: Float32Array | undefined;
     if (queryMode === "normal") {
       try {
         const [queryEmb] = await embedTexts([
           userMessage.slice(0, 2000),
         ]);
         if (queryEmb) {
+          queryEmbedding = queryEmb;
           const chunks = retrieveChunks(
             this.db,
             ownerId,
@@ -284,12 +309,19 @@ export class MemoryAssembler {
 
     // Not in a recall answer: a memory audit is about what he told her, and her
     // own opinions have no business in that list.
-    const stanceBlock =
-      env.stanceLedgerEnabled && queryMode !== "recall"
-        ? buildStanceBlock(
-            selectRelevantStances(listStances(this.db, ownerId), userMessage),
+    let stanceBlock: string | null = null;
+    if (env.stanceLedgerEnabled && queryMode !== "recall") {
+      const allStances = listStances(this.db, ownerId);
+      const relevant = queryEmbedding
+        ? await selectRelevantStancesEmbedding(
+            this.db,
+            allStances,
+            queryEmbedding,
+            userMessage,
           )
-        : null;
+        : selectRelevantStances(allStances, userMessage);
+      stanceBlock = buildStanceBlock(relevant, this.db, ownerId);
+    }
 
     const moodBlock =
       queryMode !== "recall" ? buildMoodBlock(this.db, ownerId) : null;
@@ -299,6 +331,14 @@ export class MemoryAssembler {
         ? buildReflectionBlock(this.db, ownerId)
         : null;
 
+    const emotionalArcBlock =
+      queryMode !== "recall"
+        ? buildEmotionalArcBlock(this.db, ownerId)
+        : null;
+
+    const tasteLedger =
+      queryMode !== "recall" ? buildTasteLedgerBlock(this.db) : null;
+
     const liveSignals: string[] = [];
     const gapLine = reentryLine(this.db, ownerId, excludeMessageId, {
       allowActivityRecap: isActivityAsk(userMessage),
@@ -306,6 +346,14 @@ export class MemoryAssembler {
     if (gapLine) liveSignals.push(gapLine);
     const reactionLine = takeReactionLine(this.db);
     if (reactionLine) liveSignals.push(reactionLine);
+    if (queryMode !== "recall") {
+      const interrupted = buildInterruptedNote(this.db, ownerId);
+      if (interrupted) liveSignals.push(interrupted);
+      const tempo = detectTempo(this.db, ownerId);
+      const tempoNote = tempoInstructions(tempo, assembledSeed(ownerId, tid));
+      if (tempoNote) liveSignals.push(tempoNote);
+      liveSignals.push(buildTimeSignal());
+    }
 
     touchFactAccess(
       this.db,
@@ -325,6 +373,8 @@ export class MemoryAssembler {
       liveSignals,
       moodBlock,
       reflectionBlock,
+      emotionalArcBlock,
+      tasteLedger,
     );
 
     const hot = getHotMessages(
@@ -355,6 +405,7 @@ export class MemoryAssembler {
       threadId: tid,
       queryMode,
       repeatRecall,
+      queryEmbedding,
     };
   }
 
@@ -386,11 +437,13 @@ export class MemoryAssembler {
       correctionGuard,
       false,
       env.stanceLedgerEnabled
-        ? buildStanceBlock(listStances(this.db, ownerId, 3))
+        ? buildStanceBlock(listStances(this.db, ownerId, 3), this.db, ownerId)
         : null,
       [],
       buildMoodBlock(this.db, ownerId),
       buildReflectionBlock(this.db, ownerId),
+      buildEmotionalArcBlock(this.db, ownerId),
+      buildTasteLedgerBlock(this.db),
     );
 
     const hot = getHotMessages(

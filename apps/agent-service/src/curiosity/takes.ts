@@ -1,4 +1,4 @@
-import { env } from "../env.js";
+﻿import { env } from "../env.js";
 import { completeChat } from "../mistral-client.js";
 import { sanitizeTypography } from "../typography.js";
 
@@ -42,7 +42,7 @@ export async function generateTake(item: {
       model: env.mistralConsolidationModel,
       maxTokens: 100,
       temperature: 0.75,
-      reasoningEffort: "none",
+      reasoningEffort: "low",
     },
   );
 

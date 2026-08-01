@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { DatabaseSync } from "node:sqlite";
 import { WORKSPACE_PATH } from "./paths.js";
+import { loadCapturedExamples } from "./voice-bank-capture.js";
 
 export type VoiceExample = {
   id: string;
@@ -92,6 +94,8 @@ export function selectVoiceExamples(params: {
   bank?: VoiceExample[];
   /** When false, drop sharp-tagged samples. When true, force-include one. */
   allowSharp?: boolean;
+  /** When set, mix in at most one organically captured example. */
+  db?: DatabaseSync;
 }): VoiceExample[] {
   const max = params.max ?? 4;
   const bank = params.bank ?? loadVoiceBank();
@@ -101,7 +105,7 @@ export function selectVoiceExamples(params: {
   if (!allowSharp) {
     pool = pool.filter((e) => !e.tags.includes("sharp"));
   }
-  if (pool.length === 0) return [];
+  if (pool.length === 0 && !params.db) return [];
 
   const wanted = new Set([
     ...messageTags(params.message),
@@ -116,14 +120,31 @@ export function selectVoiceExamples(params: {
     }))
     .sort((a, b) => b.score - a.score);
 
-  const picked = scored.slice(0, max).map((r) => r.e);
+  const staticBudget = params.db ? Math.max(1, max - 1) : max;
+  const picked = scored.slice(0, staticBudget).map((r) => r.e);
   if (allowSharp && !picked.some((e) => e.tags.includes("sharp"))) {
     const sharp = scored.find((r) => r.e.tags.includes("sharp"));
     if (sharp) {
       picked[picked.length - 1] = sharp.e;
     }
   }
-  return picked;
+
+  if (params.db) {
+    try {
+      const captured = loadCapturedExamples(params.db, {
+        max: 1,
+        lang,
+        tags: [...wanted],
+      });
+      if (captured[0]) {
+        picked.push(captured[0]);
+      }
+    } catch (err) {
+      console.warn("[voice-bank] captured load failed:", err);
+    }
+  }
+
+  return picked.slice(0, max);
 }
 
 export function buildVoiceBlock(examples: VoiceExample[]): string | null {

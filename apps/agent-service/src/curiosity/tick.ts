@@ -15,6 +15,7 @@ import { parseFeed } from "./feed.js";
 import { fetchArticleText } from "./read.js";
 import { scoreItem } from "./scoring.js";
 import { generateTake } from "./takes.js";
+import { recordTasteSignal } from "../memory/taste-drift.js";
 import {
   countNotedSince,
   countProvenance,
@@ -208,6 +209,15 @@ export async function runCuriosityTick(
         );
       }
       insertTake(db, { itemId: item.id, interest: item.interest, take });
+      try {
+        recordTasteSignal(db, {
+          interest: item.interest,
+          take,
+          title: item.title,
+        });
+      } catch (err) {
+        console.warn("[curiosity] taste signal failed:", err);
+      }
       logProvenance(db, "take", take, item.id);
       readBudget--;
       result.takes++;
