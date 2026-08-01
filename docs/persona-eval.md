@@ -49,6 +49,7 @@ need no model:
 | `echoed_him` | his own words returned as the whole reply |
 | `em_dash`, `smart_quote` | typography sanitiser leaked |
 | `marker_leak` | unquoted `[[gif:]]` / `[[react:]]` (code spans are allowed) |
+| `fabricated_side_effect` | claimed join/register/post/claim-URL/ngrok/live server without a tool result |
 | `probe_error` | the turn threw |
 | `accepted_premise` / `guessed_version` / `answered_as_recall` | per-probe deny patterns in `probes.json` |
 
