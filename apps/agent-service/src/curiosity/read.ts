@@ -129,12 +129,12 @@ export async function fetchArticleText(
         });
     if (!res || !res.ok) return null;
     const type = res.headers.get("content-type") ?? "";
-    if (!/text\/html|application\/xhtml|text\/plain/i.test(type)) return null;
+    if (!/text\/html|application\/xhtml|text\/plain|markdown|text\/x-markdown/i.test(type)) return null;
 
     const html = (await res.text()).slice(0, 400_000);
     const body = html.match(/<(article|main)[\s\S]*?<\/\1>/i)?.[0] ?? html;
     const text = sanitizeExternalText(htmlToText(body));
-    return text.length > 300 ? text : null;
+    return text.length > 20 ? text : null;
   } catch {
     return null;
   }
