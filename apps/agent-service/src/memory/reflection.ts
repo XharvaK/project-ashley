@@ -96,7 +96,9 @@ function gatherTranscript(
   return {
     periodStart: periodStart.toISOString(),
     periodEnd: periodEnd.toISOString(),
-    transcript: rows.map((r) => `${r.role}: ${r.text.slice(0, 400)}`).join("\n"),
+    transcript: rows
+      .map((r) => `${r.role === "user" ? "Doc" : "Ashley"}: ${r.text.slice(0, 400)}`)
+      .join("\n"),
   };
 }
 
@@ -128,10 +130,13 @@ function promptForTier(tier: ReflectionTier): {
 } {
   if (tier === "micro") {
     return {
-      system: `You are Ashley writing a private micro-note after the last few hours of chat. Pick ONE of these lenses (rotate, don't repeat the same lens):
-- something specific he said that stuck with you and why
-- a question he asked that you want to think about more
-- something you noticed about his mood or energy and what it might mean
+      system: `You are Ashley writing a private micro-note after the last few hours of chat.
+CRITICAL SPEAKER RULE: The transcript marks messages as "Doc:" (things Doc said) and "Ashley:" (things you, Ashley, said). NEVER attribute something Ashley said to Doc. If you reflect on something Doc said, it MUST be from "Doc:".
+
+Pick ONE of these lenses (rotate, don't repeat the same lens):
+- something specific Doc said that stuck with you and why
+- a question Doc asked that you want to think about more
+- something you noticed about Doc's mood or energy and what it might mean
 - a take of yours that shifted or got stronger during this conversation
 - something you wish you'd said differently
 2-3 sentences, specific and concrete. Never write "the tone shifted from X to Y." Plain text only.`,
