@@ -82,13 +82,13 @@ export function pickPresenceLabel(snap: PresenceSnapshot): PresencePick {
       discordStatus: "online",
     };
   }
-  if (p?.owing?.topic) {
-    const topic = snipTitle(p.owing.topic, 28);
-    const label = clampLabel(`owed: ${topic}`);
+  if ((p as any)?.researchTopic) {
+    const topic = snipTitle((p as any).researchTopic, 28);
+    const label = clampLabel(`researching ${topic}`);
     return {
       priority: 3,
       label,
-      contentKey: `p3:owed:${p.owing.id}`,
+      contentKey: `p3:researching:${topic}`,
       discordStatus: "online",
     };
   }

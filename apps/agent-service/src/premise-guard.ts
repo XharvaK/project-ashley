@@ -21,7 +21,7 @@ export function isPremiseCheck(message: string): boolean {
 }
 
 export const PREMISE_GUARD =
-  "He wants a check on a claim he already made. Lead with the actual behaviour: correct it in the first clause if it is wrong, or confirm it plainly if it is right.";
+  "He wants a check on a claim he made. If the premise is wrong, fully unpack why it is false in the first 1-2 clauses before offering advice or alternatives. Do not nod along.";
 
 /** Openers that mean she nodded along before checking. */
 const ACCEPTED =
