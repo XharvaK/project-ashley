@@ -117,7 +117,7 @@ function countPriorRecallAsks(
 function buildMemoryBlock(
   facts: ReturnType<typeof listActiveFacts>,
   narrative: string | null,
-  snippets: string[],
+  snippets: {text: string, role?: string | null}[],
   channelHint: string | null,
   userMessage: string,
   queryMode: QueryMode,
@@ -153,7 +153,7 @@ function buildMemoryBlock(
   if (snippets.length > 0 && queryMode === "normal") {
     parts.push(
       "(possible echoes — only if clearly relevant to what he just said)",
-      ...snippets.map((s) => paraphraseSnippet(s)),
+      ...snippets.map((s) => paraphraseSnippet(s.text, s.role)),
     );
   } else if (queryMode !== "normal") {
     parts.push("(suppressed for a memory question)");
@@ -257,7 +257,7 @@ export class MemoryAssembler {
       denylist,
     );
 
-    let snippets: string[] = [];
+    let snippets: {text: string, role?: string | null}[] = [];
     let queryEmbedding: Float32Array | undefined;
     if (queryMode === "normal") {
       try {
@@ -275,7 +275,7 @@ export class MemoryAssembler {
             env.memoryRetrievalMinScore,
             denylist,
           );
-          snippets = chunks.map((c) => c.text);
+          snippets = chunks.map((c) => ({ text: c.text, role: c.role }));
         }
       } catch (err) {
         console.warn("[memory] retrieval embed failed:", err);

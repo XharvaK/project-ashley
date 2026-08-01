@@ -9,6 +9,7 @@ export type ScoredChunk = {
   text: string;
   score: number;
   channel: ChatChannel;
+  role?: "user" | "assistant" | null;
 };
 
 function recencyDecay(isoDate: string): number {
@@ -28,8 +29,10 @@ export function retrieveChunks(
 ): ScoredChunk[] {
   const rows = db
     .prepare(
-      `SELECT text, channel, embedding, created_at, token_estimate FROM mem_chunks
-       WHERE owner_id = ? AND deleted_at IS NULL`,
+      `SELECT c.text, c.channel, c.embedding, c.created_at, c.token_estimate, m.role
+       FROM mem_chunks c
+       LEFT JOIN mem_messages m ON c.message_id = m.id
+       WHERE c.owner_id = ? AND c.deleted_at IS NULL`,
     )
     .all(ownerId) as Array<{
     text: string;
@@ -37,6 +40,7 @@ export function retrieveChunks(
     embedding: Buffer;
     created_at: string;
     token_estimate: number | null;
+    role: "user" | "assistant" | null;
   }>;
 
   const scored: ScoredChunk[] = [];
@@ -54,17 +58,21 @@ export function retrieveChunks(
       0.2 * recencyDecay(row.created_at) +
       0.1 * (row.channel === currentChannel ? 1 : 0);
 
-    scored.push({ text: row.text, score, channel: row.channel });
+    scored.push({ text: row.text, score, channel: row.channel, role: row.role });
   }
 
   scored.sort((a, b) => b.score - a.score);
   return scored.slice(0, topK);
 }
 
-export function paraphraseSnippet(text: string): string {
-  return text
-    .replace(/^(user|assistant|doc):\s*/gi, "")
+export function paraphraseSnippet(text: string, role?: string | null): string {
+  const cleaned = text
+    .replace(/^(user|assistant|doc|ashley):\s*/gi, "")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 280);
+    
+  if (role === "user") return `[Doc]: ${cleaned}`;
+  if (role === "assistant") return `[Ashley]: ${cleaned}`;
+  return cleaned;
 }
