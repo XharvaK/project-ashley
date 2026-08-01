@@ -73,7 +73,9 @@ export function detectTempo(
 
   if (!Number.isFinite(gapMin) || gapMin < 0) return "normal";
   if (gapMin > 120) return "returning";
-  if (gapMin < 1) return "rapid";
+  // Sub-minute gaps are the norm in a DM. Only genuine back-to-back firing
+  // counts, otherwise every ordinary exchange reads as rapid.
+  if (gapMin < 0.33) return "rapid";
   if (gapMin > 10) return "slow";
   return "normal";
 }
@@ -84,7 +86,7 @@ export function tempoInstructions(
 ): string | null {
   switch (tempo) {
     case "rapid":
-      return "Doc is rapid-firing. Be terse and action-oriented. Skip preamble. Match his pace.";
+      return "Doc is firing short messages back to back. Keep it short and match his pace. Still answer what he actually asked.";
     case "slow":
       return "Conversation is slow and reflective. You can be more expansive. Add texture.";
     case "returning": {

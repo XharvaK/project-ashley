@@ -575,9 +575,42 @@ export class ChatService {
 
         if (regen) {
           console.warn(`[chat] ${regen.reason}, regenerating once`);
+          // A repeat retried at the same temperature converges on the same
+          // sentence, which is how a verbatim double reaches Doc.
+          const regenSampling =
+            regen.reason === "repeat"
+              ? {
+                  ...sampling,
+                  temperature: Math.min(0.95, temp + 0.25),
+                  reasoningEffort: "low" as const,
+                }
+              : sampling;
           full = "";
-          for await (const delta of streamChat(regen.messages, sampling)) {
+          for await (const delta of streamChat(regen.messages, regenSampling)) {
             full += delta;
+          }
+
+          // Her own last line sent again is unshippable, so this one case gets
+          // a final attempt with no samples and a hotter draw.
+          if (
+            regen.reason === "repeat" &&
+            full &&
+            looksLikeRepeat(full, recentAssistant.slice(-1))
+          ) {
+            console.warn("[chat] still repeating after regen, last attempt");
+            full = "";
+            const lastMessages = buildMessages([], {
+              text: NO_REPEAT_GUARD,
+              takeIds: [],
+              provenance: "mention",
+            });
+            for await (const delta of streamChat(lastMessages, {
+              ...sampling,
+              temperature: 0.9,
+              reasoningEffort: "low" as const,
+            })) {
+              full += delta;
+            }
           }
           if (regen.reason === "capability") {
             const floored = applyCapabilityHardFloor(full);

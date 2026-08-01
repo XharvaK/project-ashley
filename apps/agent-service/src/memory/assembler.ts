@@ -352,7 +352,11 @@ export class MemoryAssembler {
       const tempo = detectTempo(this.db, ownerId);
       const tempoNote = tempoInstructions(tempo, assembledSeed(ownerId, tid));
       if (tempoNote) liveSignals.push(tempoNote);
-      liveSignals.push(buildTimeSignal());
+      // Clock only where it can matter. Every-turn injection is what primed
+      // hollow status echoes the last time a block was always on.
+      if (gapLine || tempo === "returning") {
+        liveSignals.push(buildTimeSignal());
+      }
     }
 
     touchFactAccess(

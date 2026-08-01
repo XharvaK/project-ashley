@@ -257,7 +257,7 @@ export function collapseWithinTurnRepeat(reply: string): string {
 }
 
 export const NO_REPEAT_GUARD =
-  "Your last few replies opened the same way. Start somewhere else and answer him freshly — do not reuse the same opener or template.";
+  "Your last few replies opened the same way. Start somewhere else and answer him freshly — do not reuse the same opener or template. If he asked you something, answer that question this time. Sending your previous line again is never a reply.";
 
 export function looksLikeRepeat(
   reply: string,
