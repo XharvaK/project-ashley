@@ -6,6 +6,7 @@ import {
   logProvenance,
   markTakesSurfaced,
   recentTakes,
+  takeHasFullRead,
   type ProvenanceKind,
   type TakeRow,
 } from "./store.js";
@@ -78,7 +79,16 @@ export function buildCuriosityBlock(takes: TakeRow[]): string | null {
 export function buildSolicitedCuriosityBlock(
   takes: TakeRow[],
   kind: ActivityAskKind = "reading",
+  opts?: {
+    alsoInterests?: boolean;
+    /** item_id → full article fetch logged */
+    fullReadByItemId?: Map<number, boolean>;
+  },
 ): string {
+  const interestLine = opts?.alsoInterests
+    ? " He also asked your interests — after the reading half, one short line from your own likes (core taste), not a list."
+    : "";
+
   if (kind === "general") {
     if (takes.length === 0) {
       return [
@@ -105,15 +115,26 @@ export function buildSolicitedCuriosityBlock(
       "Say you have not been reading anything worth mentioning.",
       "Do not invent titles or sources.",
       "Do not invent waiting-as-plot or that you don't feel.",
-    ].join(" ");
+      "A Discord status count or 'I read' alone is not an answer.",
+      interestLine.trim(),
+    ]
+      .filter(Boolean)
+      .join(" ");
   }
-  const lines = takes.map((t) => `- ${t.take} (from: ${t.title})`);
+  const lines = takes.map((t) => {
+    const full = opts?.fullReadByItemId?.get(t.item_id);
+    const depth =
+      full === false ? " [skim/excerpt — do not claim a full read]" : "";
+    return `- ${t.take} (from: ${t.title})${depth}`;
+  });
   return [
     "He asked what you have been reading. These are your real takes — answer from them, briefly, in your own words:",
     "",
     ...lines,
     "",
-    "One or two clauses is enough. Never list them as a briefing. Do not invent titles or sources beyond these.",
+    "Name one piece (title or clear paraphrase) and your take. A status string, a count, or 'I read' alone is not an answer. Do not recite Discord status. Do not pivot to him until you answered the reading ask." +
+      interestLine,
+    "Never list them as a briefing. Do not invent titles or sources beyond these.",
   ].join("\n");
 }
 
@@ -144,20 +165,28 @@ function assembleOrganic(
 function assembleSolicited(
   db: DatabaseSync,
   kind: ActivityAskKind,
+  opts?: { alsoInterests?: boolean },
 ): CuriosityInjection {
   // Always license an answer: empty honesty when curiosity is off or no takes,
   // so we never leave hasReadActivity with a null inject on a direct ask.
+  const alsoInterests = opts?.alsoInterests === true;
   if (!env.curiosityEnabled) {
     return {
-      text: buildSolicitedCuriosityBlock([], kind),
+      text: buildSolicitedCuriosityBlock([], kind, { alsoInterests }),
       takeIds: [],
       provenance: "mention",
     };
   }
 
   const takes = selectSolicitedTakes(recentTakes(db, 48), 2);
+  const fullReadByItemId = new Map(
+    takes.map((t) => [t.item_id, takeHasFullRead(db, t.item_id)] as const),
+  );
   return {
-    text: buildSolicitedCuriosityBlock(takes, kind),
+    text: buildSolicitedCuriosityBlock(takes, kind, {
+      alsoInterests,
+      fullReadByItemId,
+    }),
     takeIds: takes.map((t) => t.id),
     provenance: "mention",
   };
@@ -166,11 +195,17 @@ function assembleSolicited(
 export function assembleCuriosity(
   db: DatabaseSync,
   message: string,
-  opts?: { mode?: CuriosityMode; askKind?: ActivityAskKind },
+  opts?: {
+    mode?: CuriosityMode;
+    askKind?: ActivityAskKind;
+    alsoInterests?: boolean;
+  },
 ): CuriosityInjection {
   const mode = opts?.mode ?? "organic";
   if (mode === "solicited") {
-    return assembleSolicited(db, opts?.askKind ?? "reading");
+    return assembleSolicited(db, opts?.askKind ?? "reading", {
+      alsoInterests: opts?.alsoInterests,
+    });
   }
   return assembleOrganic(db, message);
 }

@@ -23,7 +23,12 @@ import {
   commitCuriosity,
   type CuriosityInjection,
 } from "./curiosity/inject.js";
-import { activityAskKind, isActivityAsk } from "./curiosity/activity-ask.js";
+import {
+  activityAskKind,
+  asksInterests,
+  isActivityAsk,
+  isPresenceAsk,
+} from "./curiosity/activity-ask.js";
 import {
   buildCapabilityBlock,
   isBrowsePermission,
@@ -278,6 +283,7 @@ export class ChatService {
 
       const askKind = activityAskKind(request.message);
       const activityAsk = askKind !== null;
+      const presenceAsk = isPresenceAsk(request.message);
       const curiosityMode = activityAsk ? "solicited" : "organic";
       // Voice skips unsolicited reading texture (TTS budget). Direct asks still
       // get a license so she cannot invent under hasReadActivity.
@@ -287,6 +293,7 @@ export class ChatService {
           : assembleCuriosity(this.db, request.message, {
               mode: curiosityMode,
               askKind: askKind ?? undefined,
+              alsoInterests: asksInterests(request.message),
             });
 
       const capabilityNote =
@@ -365,9 +372,13 @@ export class ChatService {
       ].filter(Boolean);
       const guard = guardParts.length > 0 ? guardParts.join("\n\n") : null;
 
+      // Status string is glanceable state — inject only when he points at it.
+      // Every-turn injection primed hollow count echoes.
       const presenceNote =
-        request.channel === "discord"
-          ? buildDiscordPresenceNote(request.discordPresence)
+        request.channel === "discord" && presenceAsk
+          ? buildDiscordPresenceNote(request.discordPresence, {
+              readingAsk: askKind === "reading",
+            })
           : null;
 
       const buildMessages = (

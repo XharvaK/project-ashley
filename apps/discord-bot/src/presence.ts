@@ -1,5 +1,10 @@
 import { ActivityType, type Client } from "discord.js";
 import { checkHealth, curiosityStatus } from "./agent-client.js";
+import {
+  pickPresenceLabel,
+  shouldApplyPresence,
+  type PresencePick,
+} from "./chat/presence-label.js";
 
 const REFRESH_MS = 10 * 60 * 1000;
 
@@ -9,44 +14,65 @@ export type DiscordPresence = {
 };
 
 let timer: ReturnType<typeof setInterval> | null = null;
-let last: DiscordPresence = { status: "online", label: "up" };
+let last: DiscordPresence = { status: "online", label: "around" };
+let sticky: {
+  priority: number;
+  contentKey: string;
+  appliedAt: number;
+} | null = null;
 
 /** Same string Discord is showing; chat uses this so she can own her status. */
 export function getDiscordPresence(): DiscordPresence {
   return last;
 }
 
+function applyPick(client: Client, pick: PresencePick, now: number): void {
+  last = { status: pick.discordStatus, label: pick.label };
+  sticky = {
+    priority: pick.priority,
+    contentKey: pick.contentKey,
+    appliedAt: now,
+  };
+  client.user?.setPresence({
+    status: pick.discordStatus,
+    activities: [{ name: pick.label, type: ActivityType.Custom }],
+  });
+}
+
 /**
- * Only true things: whether her brain is actually reachable, and what her
- * reading loop actually did today. A rotating list of cute activity strings is
- * the same lie as claiming she read something she did not.
+ * Informative glanceable state from real ops + curiosity facts.
+ * Never a KPI count. Cute rotating filler is the same lie as a fake read.
  */
 async function apply(client: Client): Promise<void> {
+  const now = Date.now();
   const healthy = await checkHealth();
   if (!healthy) {
-    last = { status: "idle", label: "brain offline" };
-    client.user?.setPresence({
-      status: "idle",
-      activities: [{ name: last.label, type: ActivityType.Custom }],
+    const pick = pickPresenceLabel({
+      healthy: false,
+      enabled: true,
+      takesToday: 0,
+      presence: null,
     });
+    if (shouldApplyPresence(sticky, pick, now)) {
+      applyPick(client, pick, now);
+    }
     return;
   }
 
-  let label = "up";
   try {
     const status = await curiosityStatus();
-    if (status.takesToday > 0) {
-      label = `read ${status.readToday || status.takesToday} things today`;
+    const pick = pickPresenceLabel({
+      healthy: true,
+      enabled: status.enabled,
+      takesToday: status.takesToday,
+      presence: status.presence ?? null,
+    });
+    if (shouldApplyPresence(sticky, pick, now)) {
+      applyPick(client, pick, now);
     }
   } catch {
-    // Health is what matters here; a missing curiosity status is not worth a lie.
+    // Keep last sticky label; a missing curiosity status is not worth a lie.
   }
-
-  last = { status: "online", label };
-  client.user?.setPresence({
-    status: "online",
-    activities: [{ name: label, type: ActivityType.Custom }],
-  });
 }
 
 export function startPresence(client: Client): void {

@@ -28,6 +28,7 @@ import {
 
 import { runCuriosityTick } from "./curiosity/tick.js";
 
+import { curiosityPresencePayload } from "./curiosity/presence-payload.js";
 import { curiosityStats } from "./curiosity/store.js";
 
 
@@ -657,25 +658,18 @@ export function createServer(manager: AgentManager): express.Application {
 
 
   app.get("/curiosity/status", (_req, res) => {
-
     try {
-
+      const db = manager.chat.database;
+      const ownerId = env.memoryOwnerId || env.discordOwnerId;
       res.json({
-
         enabled: env.curiosityEnabled,
-
-        ...curiosityStats(manager.chat.database),
-
+        ...curiosityStats(db),
+        presence: curiosityPresencePayload(db, ownerId, env.curiosityEnabled),
       });
-
     } catch (err) {
-
       const { status, body } = toErrorResponse(err);
-
       res.status(status).json(body);
-
     }
-
   });
 
 

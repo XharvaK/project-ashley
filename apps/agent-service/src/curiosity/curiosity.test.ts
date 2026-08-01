@@ -1,7 +1,12 @@
 import { DatabaseSync } from "node:sqlite";
 import { beforeEach, describe, expect, it } from "vitest";
 import { migrate } from "../memory/db.js";
-import { activityAskKind, isActivityAsk } from "./activity-ask.js";
+import {
+  activityAskKind,
+  asksInterests,
+  isActivityAsk,
+  isPresenceAsk,
+} from "./activity-ask.js";
 import {
   CAPABILITY_HARD_FLOOR,
   applyCapabilityHardFloor,
@@ -232,7 +237,7 @@ describe("buildCuriosityBlock", () => {
 });
 
 describe("isActivityAsk", () => {
-  it("catches second-person reading and status asks", () => {
+  it("catches second-person reading asks including natural paraphrases", () => {
     for (const text of [
       "what have you been reading today?",
       "XD what youve been reading? i see you updated your status about reading 3 things",
@@ -240,10 +245,23 @@ describe("isActivityAsk", () => {
       "your status says you read 3 things today",
       "Is that a book you've been reading?",
       "is that an article you been reading",
+      "Cool, any interesting reads you've stumbled upon? BTW what are your interest?",
+      "any interesting reads?",
     ]) {
       expect(isActivityAsk(text), text).toBe(true);
       expect(activityAskKind(text), text).toBe("reading");
     }
+    expect(
+      asksInterests(
+        "Cool, any interesting reads you've stumbled upon? BTW what are your interest?",
+      ),
+    ).toBe(true);
+  });
+
+  it("treats status-only asks as presence, not reading", () => {
+    expect(isPresenceAsk("what's your discord status?")).toBe(true);
+    expect(activityAskKind("what's your discord status?")).toBeNull();
+    expect(isActivityAsk("what's your discord status?")).toBe(false);
   });
 
   it("catches general overnight / up-to asks", () => {
@@ -347,6 +365,17 @@ describe("assembleCuriosity", () => {
       "not been reading anything worth mentioning",
     );
     expect(buildSolicitedCuriosityBlock([])).toContain("Do not invent");
+    expect(buildSolicitedCuriosityBlock([])).toMatch(/count|status/i);
+  });
+
+  it("solicited reading with takes forbids count-only answers", () => {
+    const block = buildSolicitedCuriosityBlock([take()], "reading", {
+      alsoInterests: true,
+      fullReadByItemId: new Map([[1, true]]),
+    });
+    expect(block.toLowerCase()).toContain("name one piece");
+    expect(block.toLowerCase()).toContain("not an answer");
+    expect(block.toLowerCase()).toContain("interests");
   });
 
   it("solicited general empty night is not a reading diary", () => {

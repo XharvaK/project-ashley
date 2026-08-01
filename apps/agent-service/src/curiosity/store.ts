@@ -357,3 +357,4 @@ export function curiosityStats(db: DatabaseSync): {
     lastTakeAt: lastTake?.created_at ?? null,
   };
 }
+

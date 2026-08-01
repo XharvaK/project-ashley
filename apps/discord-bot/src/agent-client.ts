@@ -82,6 +82,18 @@ export async function curiosityStatus() {
     readToday: number;
     takesToday: number;
     lastTakeAt: string | null;
+    presence?: {
+      ownTime: boolean;
+      proactivePaused: boolean;
+      curiosityEnabled: boolean;
+      owing: { topic: string; id: number } | null;
+      lastTake: {
+        title: string;
+        depth: "full" | "excerpt";
+        createdAt: string;
+        ageMin: number;
+      } | null;
+    };
   }>("/curiosity/status");
 }
 

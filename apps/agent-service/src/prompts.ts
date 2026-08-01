@@ -75,13 +75,20 @@ export function loadHabitNudgePrompt(): SystemPromptParts {
 
 export function buildDiscordPresenceNote(
   presence: { status: "online" | "idle"; label: string } | undefined,
+  opts?: { readingAsk?: boolean },
 ): string | null {
   if (!presence?.label?.trim()) return null;
   const label = presence.label.trim().slice(0, 80);
-  return [
+  const parts = [
     `Your Discord custom status right now: "${label}".`,
-    "Own it if he points at it or your profile; do not volunteer it.",
-  ].join(" ");
+    "Own that exact string casually. Do not volunteer it on other turns.",
+  ];
+  if (opts?.readingAsk) {
+    parts.push(
+      "Status is a thin profile label, not your reply. Answer what you read from the reading notes this turn — do not recite the status or any count.",
+    );
+  }
+  return parts.join(" ");
 }
 
 export function appendMemoryBlock(
