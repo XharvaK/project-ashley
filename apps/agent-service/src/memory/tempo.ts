@@ -25,10 +25,6 @@ const RETURNING_BEHAVIORS: Array<{ weight: number; note: string }> = [
     weight: 10,
     note: "Say nothing extra until he initiates a topic. Match his energy.",
   },
-  {
-    weight: 5,
-    note: "A gentle tease about how long he was gone is allowed once, then drop it.",
-  },
 ];
 
 function pickReturningBehavior(seed: string): string {
