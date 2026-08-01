@@ -279,9 +279,24 @@ export class ChatService {
         /moltbook\.com\/skill\.md/i.test(request.message) ||
         /\b(join|katıl)\s+moltbook\b/i.test(request.message)
       ) {
-        void executeMoltbookJoinWorkflow(this.db, request.ownerId).catch((err) =>
-          console.warn("[moltbook] join workflow error:", err),
-        );
+        const res = await executeMoltbookJoinWorkflow(this.db, request.ownerId);
+        if (res.success && res.message) {
+          const text = res.message;
+          const assistantMsgId = insertMessage(this.db, {
+            threadId,
+            ownerId: request.ownerId,
+            channel: request.channel,
+            role: "assistant",
+            text,
+            tokenEstimate: estimateTokens(text),
+          });
+          return {
+            reply: text,
+            threadId,
+            userMessageId: userMsgId,
+            assistantMessageId: assistantMsgId,
+          };
+        }
       }
 
       handleForgetRequest(this.db, request.ownerId, request.message);
