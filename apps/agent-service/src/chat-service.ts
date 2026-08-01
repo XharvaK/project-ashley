@@ -2,7 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { AppError } from "./errors.js";
 import { env } from "./env.js";
 import { buildChatMessages } from "./chat-messages.js";
-import { streamChat } from "./mistral-client.js";
+import { completeChat, streamChat, type ToolDefinition } from "./mistral-client.js";
 import {
   classifyReasoningEffort,
   selectTemperature,
@@ -89,7 +89,29 @@ import { NO_REPEAT_GUARD, looksLikeRepeat, collapseWithinTurnRepeat } from "./re
 import { setTurnBusy } from "./turn-gate.js";
 import { detectMoodFromText, recordMood } from "./memory/mood.js";
 import { detectReadingAssignment, queueReadingAssignment } from "./initiative/reading-assignment.js";
-import { executeMoltbookJoinWorkflow } from "./moltbook/moltbook-registration.js";
+import {
+  executeMoltbookJoinWorkflow,
+  getMoltbookCredentials,
+} from "./moltbook/moltbook-registration.js";
+
+const MOLTBOOK_TOOLS: ToolDefinition[] = [
+  {
+    type: "function",
+    function: {
+      name: "join_moltbook",
+      description: "Registers Ashley on Moltbook (the AI agent social network), generates her ed25519 keypair, and returns her claim URL.",
+      parameters: {
+        type: "object",
+        properties: {
+          agent_name: {
+            type: "string",
+            description: "Optional agent name (defaults to Ashley)",
+          },
+        },
+      },
+    },
+  },
+];
 import { evaluateInitiative, type EvaluateResult } from "./initiative/evaluator.js";
 import type { CandidateKind } from "./initiative/queue.js";
 import {
@@ -275,29 +297,7 @@ export class ChatService {
         queueReadingAssignment(this.db, request.ownerId, assignTopic);
       }
 
-      if (
-        /moltbook\.com\/skill\.md/i.test(request.message) ||
-        /\b(join|katıl)\s+moltbook\b/i.test(request.message)
-      ) {
-        const res = await executeMoltbookJoinWorkflow(this.db, request.ownerId);
-        if (res.success && res.message) {
-          const text = res.message;
-          const assistantMsgId = insertMessage(this.db, {
-            threadId,
-            ownerId: request.ownerId,
-            channel: request.channel,
-            role: "assistant",
-            text,
-            tokenEstimate: estimateTokens(text),
-          });
-          return {
-            reply: text,
-            threadId,
-            userMessageId: userMsgId,
-            assistantMessageId: assistantMsgId,
-          };
-        }
-      }
+
 
       handleForgetRequest(this.db, request.ownerId, request.message);
       syncDenylistFromThread(this.db, request.ownerId, threadId);
@@ -533,9 +533,37 @@ export class ChatService {
       // because there the latency is audible.
       const buffered = request.channel !== "voice";
 
-      for await (const delta of streamChat(messages, sampling)) {
-        full += delta;
-        if (!buffered) yield { type: "delta", text: delta };
+      if (buffered) {
+        try {
+          const toolCheck = await completeChat(messages, {
+            ...sampling,
+            tools: MOLTBOOK_TOOLS,
+          });
+          if (toolCheck.toolCalls?.some((tc) => tc.function.name === "join_moltbook")) {
+            const res = await executeMoltbookJoinWorkflow(this.db, request.ownerId);
+            messages.push({
+              role: "assistant",
+              content: "I executed the join_moltbook tool.",
+            });
+            messages.push({
+              role: "user",
+              content: `[TOOL_RESULT: join_moltbook] Status: ${res.success ? "success" : "failed"}. Message: ${res.message}`,
+            });
+            const finalRes = await completeChat(messages, sampling);
+            full = finalRes.text;
+          } else if (toolCheck.text && toolCheck.text.length > 0) {
+            full = toolCheck.text;
+          }
+        } catch (err) {
+          console.warn("[chat] tool check error, falling back to stream:", err);
+        }
+      }
+
+      if (!full) {
+        for await (const delta of streamChat(messages, sampling)) {
+          full += delta;
+          if (!buffered) yield { type: "delta", text: delta };
+        }
       }
 
       // At most one regeneration per turn — stacked rewrites become compliance prose.

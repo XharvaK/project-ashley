@@ -15,12 +15,31 @@ export type TokenUsage = {
   completionTokens: number;
 };
 
+export type ToolDefinition = {
+  type: "function";
+  function: {
+    name: string;
+    description: string;
+    parameters?: Record<string, unknown>;
+  };
+};
+
+export type ToolCallResult = {
+  id?: string;
+  function: {
+    name: string;
+    arguments: string;
+  };
+};
+
 export type CompletionOptions = {
   model?: string;
   maxTokens?: number;
   temperature?: number;
   presencePenalty?: number;
   reasoningEffort?: "low" | "medium" | "high";
+  tools?: ToolDefinition[];
+  toolChoice?: string | Record<string, unknown>;
   signal?: AbortSignal;
   /** Defaults: streamChat = interactive, completeChat/embed = background. */
   lane?: Lane;
@@ -77,9 +96,12 @@ function buildChatBody(
     temperature: options.temperature ?? env.mistralChatTemperature,
     stream,
   };
-  // Camel case on purpose: the SDK's outbound schema maps these to snake_case
-  // and drops keys it does not know, which is why reasoning_effort never lands.
-  // topP stays unset; Mistral advises tuning temperature or top_p, not both.
+  if (options.tools && options.tools.length > 0) {
+    body.tools = options.tools;
+  }
+  if (options.toolChoice) {
+    body.toolChoice = options.toolChoice;
+  }
   if (options.presencePenalty !== undefined) {
     body.presencePenalty = options.presencePenalty;
   }
@@ -186,7 +208,7 @@ export async function* streamChat(
 export async function completeChat(
   messages: ChatMessage[],
   options: CompletionOptions = {},
-): Promise<{ text: string; model: string }> {
+): Promise<{ text: string; model: string; toolCalls?: ToolCallResult[] }> {
   const release = await acquireLane(
     options.lane ?? "background",
     options.signal,
@@ -201,10 +223,30 @@ export async function completeChat(
       >[0],
       { fetchOptions: { signal: options.signal } },
     );
-    const raw = res.choices[0]?.message?.content ?? "";
+    const msg = res.choices[0]?.message;
+    const raw = msg?.content ?? "";
     const text =
       typeof raw === "string" ? raw : extractTextDelta(raw);
-    return { text, model };
+    const rawToolCalls = (msg as { toolCalls?: unknown[]; tool_calls?: unknown[] })?.toolCalls ??
+      (msg as { tool_calls?: unknown[] })?.tool_calls;
+    const toolCalls: ToolCallResult[] = [];
+    if (Array.isArray(rawToolCalls)) {
+      for (const tc of rawToolCalls) {
+        if (typeof tc === "object" && tc !== null && "function" in tc) {
+          const fn = (tc as { function: { name?: string; arguments?: string } }).function;
+          if (fn && typeof fn.name === "string") {
+            toolCalls.push({
+              id: (tc as { id?: string }).id,
+              function: {
+                name: fn.name,
+                arguments: typeof fn.arguments === "string" ? fn.arguments : JSON.stringify(fn.arguments ?? {}),
+              },
+            });
+          }
+        }
+      }
+    }
+    return { text, model, toolCalls: toolCalls.length > 0 ? toolCalls : undefined };
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") throw err;
     throw mapMistralError(err);
