@@ -89,6 +89,7 @@ import { NO_REPEAT_GUARD, looksLikeRepeat, collapseWithinTurnRepeat } from "./re
 import { setTurnBusy } from "./turn-gate.js";
 import { detectMoodFromText, recordMood } from "./memory/mood.js";
 import { detectReadingAssignment, queueReadingAssignment } from "./initiative/reading-assignment.js";
+import { executeMoltbookJoinWorkflow } from "./moltbook/moltbook-registration.js";
 import { evaluateInitiative, type EvaluateResult } from "./initiative/evaluator.js";
 import type { CandidateKind } from "./initiative/queue.js";
 import {
@@ -272,6 +273,15 @@ export class ChatService {
       const assignTopic = detectReadingAssignment(request.message);
       if (assignTopic) {
         queueReadingAssignment(this.db, request.ownerId, assignTopic);
+      }
+
+      if (
+        /moltbook\.com\/skill\.md/i.test(request.message) ||
+        /\b(join|katıl)\s+moltbook\b/i.test(request.message)
+      ) {
+        void executeMoltbookJoinWorkflow(this.db, request.ownerId).catch((err) =>
+          console.warn("[moltbook] join workflow error:", err),
+        );
       }
 
       handleForgetRequest(this.db, request.ownerId, request.message);

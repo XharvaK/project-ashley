@@ -7,6 +7,10 @@ import {
   startReflectionLoop,
   stopReflectionLoop,
 } from "./memory/reflection.js";
+import {
+  startMoltbookHeartbeat,
+  stopMoltbookHeartbeat,
+} from "./moltbook/moltbook-heartbeat.js";
 
 const manager = new AgentManager();
 
@@ -16,11 +20,13 @@ async function main(): Promise<void> {
   const server = listen(app);
   startCuriosityLoop(manager.chat.database);
   startReflectionLoop(manager.chat.database, env.memoryOwnerId);
+  startMoltbookHeartbeat(manager.chat.database, env.memoryOwnerId);
 
   const shutdown = async (signal: string) => {
     console.log(`[agent-service] ${signal}`);
     stopCuriosityLoop();
     stopReflectionLoop();
+    stopMoltbookHeartbeat();
     await manager.shutdown();
     server.close();
     process.exit(0);
