@@ -30,6 +30,9 @@ export function validateInitiativeDraft(
 ): DraftValidation {
   const text = draft.trim();
   if (!text) return { ok: false, reason: "empty_draft" };
+  if (/^skip\b/i.test(text)) {
+    return { ok: false, reason: "thin_material_skip" };
+  }
 
   if (!candidate) return { ok: true };
 

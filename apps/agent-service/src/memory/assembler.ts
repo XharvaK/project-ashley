@@ -48,8 +48,30 @@ import {
   resolveActiveThread,
 } from "./threads.js";
 import type { AssembledContext, ChatChannel } from "./types.js";
+import { getMoltbookCredentials } from "../moltbook/moltbook-registration.js";
 import { trimToTokenBudget } from "./tokens.js";
 import type { HotTurn } from "./hot-filter.js";
+
+const FABRICATED_NETWORK_CLAIM =
+  /\b(registered\b.{0,80}\bmoltbook|server is live|claim (url|succeeded)|left a reply under|endpoint is responding|key pair generated|ngrok tunnel)\b/i;
+
+/** When she is not actually registered, hide prior join theater from the hot window. */
+function softHideFabricatedNetworkClaims(
+  db: DatabaseSync,
+  messages: Array<{ role: "user" | "assistant"; content: string }>,
+): Array<{ role: "user" | "assistant"; content: string }> {
+  if (getMoltbookCredentials(db)?.api_key) return messages;
+  return messages.map((m) => {
+    if (m.role !== "assistant" || !FABRICATED_NETWORK_CLAIM.test(m.content)) {
+      return m;
+    }
+    return {
+      role: "assistant",
+      content:
+        "[prior message soft-hidden: fabricated network/join claim — not a fact]",
+    };
+  });
+}
 
 const PHARMA_KEYWORDS =
   /pharma|psychedel|5-ht|dose|harm reduction|substance|mdma|lsd|psilocybin|ketamin/i;
@@ -393,6 +415,7 @@ export class MemoryAssembler {
       role: m.role as "user" | "assistant",
       content: m.text,
     }));
+    hotMessages = softHideFabricatedNetworkClaims(this.db, hotMessages);
     if (queryMode === "recall") {
       hotMessages = filterHotForRecall(hotMessages);
       if (strictEmptyRecall) {

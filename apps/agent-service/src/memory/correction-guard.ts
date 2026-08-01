@@ -1,7 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 
 const CORRECTION_DENIAL =
-  /içmedim|içmemişim|kullanmadım|uydurmuşsun|uydurdu|yalan|hatırlamıyorum|şizofren|made that up|never (said|did|took)/i;
+  /içmedim|içmemişim|kullanmadım|uydurmuşsun|uydurdu|yalan|hatırlamıyorum|şizofren|made that up|never (said|did|took)|you'?re lying|bullshit|you didn'?t|that never happened|uydurma|yok öyle bir şey/i;
 
 const ENTITY_PATTERNS: Array<{ re: RegExp; label: string }> = [
   { re: /3[-\s]?meo[-\s]?pcp|3[-\s]?meo/i, label: "3-MeO-PCP" },
@@ -9,6 +9,8 @@ const ENTITY_PATTERNS: Array<{ re: RegExp; label: string }> = [
   { re: /valorant/i, label: "Valorant" },
   { re: /factory deploy/i, label: "Factory deploy" },
   { re: /coffee habit/i, label: "coffee habits" },
+  { re: /moltbook/i, label: "Moltbook" },
+  { re: /ngrok|claim url|ed25519/i, label: "fabricated agent endpoint" },
 ];
 
 function entitiesInText(text: string): string[] {

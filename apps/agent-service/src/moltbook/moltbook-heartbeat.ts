@@ -6,10 +6,11 @@ import {
   downvoteMoltbookPost,
   createMoltbookComment,
   createMoltbookPost,
-  type MoltbookPost,
+  checkMoltbookStatus,
 } from "./moltbook-client.js";
 import { getInterestNotebook } from "../curiosity/interest-notebook.js";
 import { getKv, setKv } from "../memory/kv.js";
+import { moltbookHeartbeatAllowed } from "../skills/skill-runner.js";
 
 const HEARTBEAT_INTERVAL_MS = 15 * 60 * 1000;
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -32,7 +33,25 @@ export async function runMoltbookHeartbeatPass(
   const creds = getMoltbookCredentials(db);
   if (!creds?.api_key) return;
 
-  lastStatusActivity = "browsing moltbook";
+  // Refresh status; heartbeat only when register+KV+active (Doc lock).
+  try {
+    const status = await checkMoltbookStatus(creds.api_key);
+    setKv(
+      db,
+      "moltbook:last_status",
+      JSON.stringify({
+        status: status.status,
+        at: new Date().toISOString(),
+        agent: creds.agent_name,
+      }),
+    );
+  } catch (err) {
+    console.warn("[moltbook-heartbeat] status check failed:", err);
+  }
+
+  if (!moltbookHeartbeatAllowed(db)) return;
+
+  lastStatusActivity = "browsing";
 
   try {
     const posts = await getMoltbookFeed(creds.api_key, "hot", 15);

@@ -50,13 +50,26 @@ import {
 } from "./curiosity/browse-permission.js";
 import {
   CAPABILITY_GUARD,
+  CONTRADICTION_GUARD,
   LINK_FAILED_CAPABILITY_GUARD,
   NO_ACTIVITY_GUARD,
+  NO_SIDE_EFFECT_GUARD,
   applyCapabilityHardFloor,
+  applySideEffectHardFloor,
   claimsOwnActivity,
+  claimsUnlicensedAction,
   deniesOwnCapability,
   isBrowseCapabilityChallenge,
+  isFailureContradiction,
 } from "./curiosity/claim-gate.js";
+import {
+  detectSkillDelivery,
+  isExplicitDoIt,
+} from "./skills/skill-delivery.js";
+import {
+  buildSkillTruthNote,
+  runDeliveredSkill,
+} from "./skills/skill-runner.js";
 import {
   extractImmediateHttpsUrl,
   linkReadPreflight,
@@ -89,17 +102,15 @@ import { NO_REPEAT_GUARD, looksLikeRepeat, collapseWithinTurnRepeat } from "./re
 import { setTurnBusy } from "./turn-gate.js";
 import { detectMoodFromText, recordMood } from "./memory/mood.js";
 import { detectReadingAssignment, queueReadingAssignment } from "./initiative/reading-assignment.js";
-import {
-  executeMoltbookJoinWorkflow,
-  getMoltbookCredentials,
-} from "./moltbook/moltbook-registration.js";
+import { executeMoltbookJoinWorkflow } from "./moltbook/moltbook-registration.js";
 
 const MOLTBOOK_TOOLS: ToolDefinition[] = [
   {
     type: "function",
     function: {
       name: "join_moltbook",
-      description: "Registers Ashley on Moltbook (the AI agent social network), generates her ed25519 keypair, and returns her claim URL.",
+      description:
+        "Registers Ashley on Moltbook via the real API and stores credentials. Only call when Doc delivered a skill or explicitly asked to join/register. Never invent success without this tool.",
       parameters: {
         type: "object",
         properties: {
@@ -113,6 +124,7 @@ const MOLTBOOK_TOOLS: ToolDefinition[] = [
   },
 ];
 import { evaluateInitiative, type EvaluateResult } from "./initiative/evaluator.js";
+import { handleLieCatch } from "./memory/lie-catch.js";
 import type { CandidateKind } from "./initiative/queue.js";
 import {
   closeMismatchedOpenThreads,
@@ -300,6 +312,7 @@ export class ChatService {
 
 
       handleForgetRequest(this.db, request.ownerId, request.message);
+      handleLieCatch(this.db, request.ownerId, request.message);
       syncDenylistFromThread(this.db, request.ownerId, threadId);
       void extractCorrectedFact(
         this.db,
@@ -435,6 +448,9 @@ export class ChatService {
         env.curiosityEnabled && isBrowseCapabilityChallenge(request.message)
           ? CAPABILITY_GUARD.text
           : null;
+      const contradictionGuard = isFailureContradiction(request.message)
+        ? CONTRADICTION_GUARD.text
+        : null;
       let premiseGuard: string | null = isPremiseCheck(request.message)
         ? PREMISE_GUARD
         : null;
@@ -451,10 +467,39 @@ export class ChatService {
       const guardParts = [
         premiseGuard,
         capabilityChallengeGuard,
+        contradictionGuard,
         lookupGuard,
         linkGuard,
       ].filter(Boolean);
       const guard = guardParts.length > 0 ? guardParts.join("\n\n") : null;
+
+      const skillDelivery = detectSkillDelivery(request.message);
+      let toolNote: string | null = null;
+      let sideEffectLicensed = false;
+      if (skillDelivery?.wantsExecute || isExplicitDoIt(request.message)) {
+        if (skillDelivery) {
+          const ran = await runDeliveredSkill(
+            this.db,
+            request.ownerId,
+            skillDelivery.url,
+            { execute: true },
+          );
+          toolNote = ran.provenance;
+          sideEffectLicensed = ran.ok;
+          if (ran.needsDocInput) {
+            toolNote = `${ran.provenance} Ask Doc: ${ran.needsDocInput}`;
+          }
+        }
+      } else if (skillDelivery && !skillDelivery.wantsExecute) {
+        const ran = await runDeliveredSkill(
+          this.db,
+          request.ownerId,
+          skillDelivery.url,
+          { execute: false },
+        );
+        toolNote = ran.provenance;
+      }
+      const skillTruth = buildSkillTruthNote(this.db);
 
       // Status string is glanceable state — inject only when he points at it.
       // Every-turn injection primed hollow count echoes.
@@ -477,6 +522,8 @@ export class ChatService {
             sharp: sharpNote,
             voice: buildVoiceBlock(withExamples),
             guard,
+            skillTruth,
+            toolNote,
           }),
           hot: assembled.hotMessages,
           message: request.message,
@@ -540,14 +587,30 @@ export class ChatService {
             tools: MOLTBOOK_TOOLS,
           });
           if (toolCheck.toolCalls?.some((tc) => tc.function.name === "join_moltbook")) {
-            const res = await executeMoltbookJoinWorkflow(this.db, request.ownerId);
+            const nameArg = toolCheck.toolCalls.find(
+              (tc) => tc.function.name === "join_moltbook",
+            )?.function.arguments;
+            let agentName = "Ashley";
+            try {
+              const parsed = JSON.parse(nameArg || "{}") as { agent_name?: string };
+              if (parsed.agent_name?.trim()) agentName = parsed.agent_name.trim();
+            } catch {
+              /* default Ashley */
+            }
+            const res = await executeMoltbookJoinWorkflow(
+              this.db,
+              request.ownerId,
+              agentName,
+            );
+            sideEffectLicensed = res.success;
+            toolNote = `[TOOL_RESULT: join_moltbook] Status: ${res.success ? "success" : "failed"}. Message: ${res.message}`;
             messages.push({
               role: "assistant",
               content: "I executed the join_moltbook tool.",
             });
             messages.push({
               role: "user",
-              content: `[TOOL_RESULT: join_moltbook] Status: ${res.success ? "success" : "failed"}. Message: ${res.message}`,
+              content: toolNote,
             });
             const finalRes = await completeChat(messages, sampling);
             full = finalRes.text;
@@ -618,6 +681,11 @@ export class ChatService {
             reason: "activity",
             messages: buildMessages(examples, NO_ACTIVITY_GUARD),
           };
+        } else if (claimsUnlicensedAction(full) && !sideEffectLicensed) {
+          regen = {
+            reason: "side_effect",
+            messages: buildMessages(examples, NO_SIDE_EFFECT_GUARD),
+          };
         } else if (looksLikeRepeat(full, recentAssistant)) {
           regen = {
             reason: "repeat",
@@ -675,6 +743,16 @@ export class ChatService {
               full = floored;
             }
           }
+          if (regen.reason === "side_effect") {
+            const floored = applySideEffectHardFloor(full);
+            if (floored !== full) {
+              console.warn("[chat] side-effect hard floor after regen");
+              full = floored;
+            }
+          }
+        } else if (full && claimsUnlicensedAction(full) && !sideEffectLicensed) {
+          // Streamed / no-regen path still must not ship join theater.
+          full = applySideEffectHardFloor(full);
         }
 
         // After any regen rewrite: drop within-turn restating bubbles so Doc

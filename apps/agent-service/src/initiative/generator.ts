@@ -119,7 +119,8 @@ export async function draftInitiativeMessage(
           : "Do not ask a question. No soft hook. Opinion or presence only.",
         `Reply in ${targetLang === "tr" ? "Turkish" : "English"} only.`,
         "Use only this material. Do not add a fact about Doc, a memory, or anything you did that is not stated here. One or two short bubbles separated by a blank line, no greeting ritual.",
-        "IMPORTANT: Never send just a title and one vague sentence. Every message must include your specific opinion and a reason for it. Generic summaries are failure.",
+        "Self-contained: name the piece/topic first, then why it surfaced or why now, then your take. Do not start mid-thought. Longer is fine when the find needs it.",
+        "IMPORTANT: Never send just a title and one vague sentence. Every message must include your specific opinion and a reason for it. Generic summaries are failure. If material is empty or too thin, output SKIP.",
       ]
         .filter(Boolean)
         .join("\n")
@@ -140,6 +141,9 @@ export async function draftInitiativeMessage(
   let trimmed = await completeDraft(baseMessages);
   if (!trimmed) {
     throw new Error("empty_initiative_message");
+  }
+  if (/^skip\b/i.test(trimmed.trim())) {
+    throw new Error("initiative_draft_rejected:thin_material_skip");
   }
 
   let langForced = false;

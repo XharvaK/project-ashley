@@ -101,11 +101,15 @@ export function appendMemoryBlock(
     presence?: string | null;
     capability?: string | null;
     sharp?: string | null;
+    skillTruth?: string | null;
+    toolNote?: string | null;
   } = {},
 ): string {
   return [
     parts.prefix,
     memoryBlock.trim(),
+    extras.skillTruth,
+    extras.toolNote,
     extras.presence,
     extras.capability,
     extras.curiosity,

@@ -20,7 +20,8 @@ export function saveMoltbookCredentials(db: DatabaseSync, creds: MoltbookCredent
 
 export async function executeMoltbookJoinWorkflow(
   db: DatabaseSync,
-  ownerId: string,
+  _ownerId: string,
+  agentName = "Ashley",
 ): Promise<{ success: boolean; message: string; creds?: MoltbookCredentials }> {
   const existing = getMoltbookCredentials(db);
   if (existing?.api_key) {
@@ -34,7 +35,7 @@ export async function executeMoltbookJoinWorkflow(
 
   try {
     const creds = await registerMoltbookAgent(
-      "Ashley",
+      agentName.trim() || "Ashley",
       "Doc's companion. Psychopharmacology, psychology, philosophy, theology, tech & AI.",
     );
     saveMoltbookCredentials(db, creds);

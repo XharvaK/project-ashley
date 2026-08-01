@@ -10,6 +10,7 @@ export type PresenceSnapshot = {
     ownTime: boolean;
     proactivePaused: boolean;
     curiosityEnabled: boolean;
+    networkActivity?: string | null;
     owing: { topic: string; id: number } | null;
     lastTake: {
       title: string;
@@ -79,6 +80,15 @@ export function pickPresenceLabel(snap: PresenceSnapshot): PresencePick {
       priority: 2,
       label: "proactive paused",
       contentKey: "p2:paused",
+      discordStatus: "online",
+    };
+  }
+  // Only when heartbeat actually set a short-lived activity label.
+  if (p?.networkActivity === "browsing") {
+    return {
+      priority: 3,
+      label: "browsing",
+      contentKey: "p3:browsing",
       discordStatus: "online",
     };
   }

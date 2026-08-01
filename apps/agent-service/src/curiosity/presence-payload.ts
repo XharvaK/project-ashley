@@ -2,12 +2,15 @@ import type { DatabaseSync } from "node:sqlite";
 import { isProactivePausedDb } from "../initiative/lease.js";
 import { listOpenThreads } from "../initiative/open-threads.js";
 import { inOwnTime } from "../initiative/sleep.js";
+import { getMoltbookActivityLabel } from "../moltbook/moltbook-heartbeat.js";
 import { takeHasFullRead } from "./store.js";
 
 export type CuriosityPresencePayload = {
   ownTime: boolean;
   proactivePaused: boolean;
   curiosityEnabled: boolean;
+  /** Only "browsing" when a heartbeat pass actually ran recently. */
+  networkActivity: string | null;
   owing: { topic: string; id: number } | null;
   lastTake: {
     title: string;
@@ -65,10 +68,13 @@ export function curiosityPresencePayload(
     };
   }
 
+  const networkActivity = getMoltbookActivityLabel();
+
   return {
     ownTime,
     proactivePaused,
     curiosityEnabled,
+    networkActivity,
     owing,
     lastTake,
   };

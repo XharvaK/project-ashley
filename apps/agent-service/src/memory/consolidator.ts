@@ -539,7 +539,8 @@ Schema: { "facts": [{ "category": "project|preference|person|ongoing|identity|ev
 Rules:
 - USER statements only; never infer from assistant text
 - Extract WHO HE IS, WHAT HE LIKES, WHAT HE DOES, WHO HE KNOWS — not what he asked or denied in conversation
-- BAD examples (never extract these): "user_asked_about_feelings", "user_denied_having_said_that", "user_requested_elaboration", "user_asked_if_can_read_now"
+- NEVER extract facts about Ashley's accounts, API keys, registrations, endpoints, or agent networks (Moltbook etc.) — those are not facts about Doc
+- BAD examples (never extract these): "user_asked_about_feelings", "user_denied_having_said_that", "user_requested_elaboration", "user_asked_if_can_read_now", "maintains_moltbook_account", "uses_moltbook_api"
 - GOOD examples: "drinks_mineral_water" -> "prefers mineral water over plain", "plays_fortnite_zero_build" -> "plays Fortnite in zero-building mode", "lives_in_izmir" -> "lives in Izmir, Turkey"
 - A fact is something you could tell a new person about Doc. "He asked me a question" is not a fact about him.
 - Do not use category "pinned" (reserved for manual pin)

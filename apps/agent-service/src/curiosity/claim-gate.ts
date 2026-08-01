@@ -1,7 +1,8 @@
 /**
  * She is allowed to have an inner life, which means she is also newly able to
  * invent one. This catches the sentence pattern that turns "I have opinions"
- * into "I read a paper this morning" on a day she read nothing.
+ * into "I read a paper this morning" on a day she read nothing — and the
+ * side-effect theater that turns a failed join into "registered, server live".
  */
 const CLAIM_PATTERNS: RegExp[] = [
   /\bi (just |already )?(read|was reading|finished reading|skimmed|went through)\b/i,
@@ -76,6 +77,57 @@ export function claimsOwnActivity(text: string): boolean {
   return GERUND_CLAIM_PATTERNS.some((p) => p.test(text));
 }
 
+/** Side-effects that require a tool/provenance note this turn. */
+const SIDE_EFFECT_PATTERNS: RegExp[] = [
+  /\b(i |i'?ve |i have )?(just )?(registered|signed up|joined)\b/i,
+  /\b(registration|signup|sign-up) (succeeded|worked|is (done|live|complete))\b/i,
+  /\b(claim )?(succeeded|worked)\b/i,
+  /\b(done|finished)\.?\s*(registered|claimed|joined|posted|updated)\b/i,
+  /\b(left a )?(reply|comment|post)\b/i,
+  /\b(i )?(posted|commented|upvoted|downvoted)\b/i,
+  /\b(server is live|endpoint is (live|responding)|key pair generated)\b/i,
+  /\b(updated|rotated|saved) (the )?(api )?key\b/i,
+  /\b(mint box )?(has|now has) the new key\b/i,
+  /\b(credentials? (updated|saved)|talking to the network)\b/i,
+  /\b(kaydoldum|kayıt oldum|üye oldum|yorum bıraktım|gönderdim)\b/i,
+];
+
+/** Invented infrastructure / protocol theater without a tool note. */
+const FAKE_INFRA_PATTERNS: RegExp[] = [
+  /\bngrok\b/i,
+  /\bed25519\b/i,
+  /\bclaim url\b/i,
+  /\bsigned (claim|message|request)\b/i,
+  /\byourdomain\.tld\b/i,
+  /\bhttps?:\/\/[^\s]*moltbook[^\s]*/i,
+  /\bhttps?:\/\/[^\s]*\/(claim|agent|post)\/[^\s]*/i,
+];
+
+export function claimsSideEffect(text: string): boolean {
+  return SIDE_EFFECT_PATTERNS.some((p) => p.test(text));
+}
+
+export function claimsFakeInfra(text: string): boolean {
+  return FAKE_INFRA_PATTERNS.some((p) => p.test(text));
+}
+
+/** Unlicensed action claims: side-effects or infra theater. */
+export function claimsUnlicensedAction(text: string): boolean {
+  return claimsSideEffect(text) || claimsFakeInfra(text);
+}
+
+/**
+ * Doc just said an action/URL failed. Next draft must not re-assert success.
+ */
+export function isFailureContradiction(message: string): boolean {
+  return (
+    /\b(404|not found|didn'?t (get|work|go through)|never (got|happened)|gives? me 404|still 404|post not found|i didn'?t get)\b/i.test(
+      message,
+    ) ||
+    /\b(gelmedi|çalışmadı|yok böyle|404)\b/i.test(message)
+  );
+}
+
 export const NO_ACTIVITY_GUARD = {
   text: "Talk about what you think. This turn has no reading, page, or lookup note, so speak from opinion and the thread. If he asked what you have been reading, say you have not been reading anything worth mentioning. Do not claim you have no reader or cannot browse feeds.",
   takeIds: [] as number[],
@@ -95,9 +147,25 @@ export const LINK_FAILED_CAPABILITY_GUARD = {
   provenance: "mention" as const,
 };
 
+export const NO_SIDE_EFFECT_GUARD = {
+  text: "This turn has no tool success note for join, register, post, comment, claim, credential update, or server start. Do not claim any of those happened. If he asked you to do it, say what is missing or what failed in your own words. Never invent claim URLs, endpoints, ngrok, keypairs, or post links.",
+  takeIds: [] as number[],
+  provenance: "mention" as const,
+};
+
+export const CONTRADICTION_GUARD = {
+  text: "He just said that URL or action failed (404, mail never arrived, post not found, etc.). Do not re-assert that it worked. Own the miss or explain the real limit. No protocol theater.",
+  takeIds: [] as number[],
+  provenance: "mention" as const,
+};
+
 /** Hard floor after a capability regen that still denies the reader. */
 export const CAPABILITY_HARD_FLOOR =
   "I have a quiet feed reader when curiosity is on. Resend the URL if you want that page opened — if an open failed I'll say so. I don't only read what you paste.";
+
+/** Warmer hard floor when side-effect theater cannot be salvaged. */
+export const SIDE_EFFECT_HARD_FLOOR =
+  "i'd be bullshitting you if i said that went through. on my side it didn't — no registration or live endpoint to point at.";
 
 /**
  * After one capability regen: keep a non-denying draft, else ship the hard floor.
@@ -107,4 +175,25 @@ export function applyCapabilityHardFloor(text: string): string {
   const trimmed = text.trim();
   if (!trimmed || deniesOwnCapability(trimmed)) return CAPABILITY_HARD_FLOOR;
   return text;
+}
+
+/**
+ * Strip sentences that assert unlicensed side-effects / infra. If nothing
+ * honest remains, return the warmer hard floor.
+ */
+export function applySideEffectHardFloor(text: string): string {
+  const stripped = stripUnlicensedActionClaims(text);
+  if (!stripped.trim() || claimsUnlicensedAction(stripped)) {
+    return SIDE_EFFECT_HARD_FLOOR;
+  }
+  return stripped;
+}
+
+/** Drop sentence-like chunks that still assert unlicensed actions. */
+export function stripUnlicensedActionClaims(text: string): string {
+  const parts = text
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0 && !claimsUnlicensedAction(p));
+  return parts.join(" ").trim();
 }
