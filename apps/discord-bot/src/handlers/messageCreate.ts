@@ -1,4 +1,4 @@
-import type { Message, SendableChannels } from "discord.js";
+import type { Message } from "discord.js";
 import {
   chatText,
   checkHealth,
@@ -11,18 +11,14 @@ import { MAX_IMAGES, describeIntake, type Intake } from "../chat/attachments.js"
 import { config } from "../config.js";
 import { agentErrorMessage } from "../chat/agent-errors.js";
 import { emptyReplyAction } from "../chat/empty-reply.js";
-import { fumbleLine, lookingLine, sendFailedLine } from "../chat/fumble-lines.js";
+import { fumbleLine, lookingLine } from "../chat/fumble-lines.js";
 import { searchGif } from "../chat/gif-search.js";
 import { readKillSwitch } from "../chat/kill-switch.js";
 import { parseMediaMarkers } from "../chat/media-markers.js";
 import { reactDelayMs, reactPolicy } from "../chat/react-policy.js";
-import {
-  PACE_BUDGET_MS,
-  bubbleDelayMs,
-  sleepAbortable,
-  tempoTracker,
-} from "../chat/pacing.js";
+import { sleepAbortable, tempoTracker } from "../chat/pacing.js";
 import { getDiscordPresence } from "../presence.js";
+import { sendBubbles } from "../chat/send-bubbles.js";
 import { splitMessage } from "../chat/split-message.js";
 import { TurnBuffer } from "../chat/turn-buffer.js";
 import { runTypingLoop } from "../chat/typing-loop.js";
@@ -57,7 +53,7 @@ async function drainTurn(channelId: string): Promise<void> {
       const channel = target.channel;
       if (!channel.isSendable()) return;
 
-      // Keep typing through GIF fetch until the first Discord send lands.
+      // Typing until the first Discord bubble/GIF lands — not through pace or react.
       stopTyping = await runTypingLoop(channel, () => done);
 
       try {
@@ -141,11 +137,16 @@ async function drainTurn(channelId: string): Promise<void> {
           chunks,
           gifUrl,
           config.paceEnabled ? { tempoGapMs, signal } : null,
+          () => {
+            done = true;
+            stopTyping?.();
+            stopTyping = undefined;
+          },
         );
 
         if (react) {
           // After the bubbles, so it lands like a second thought rather than a
-          // reflex fired before she answered.
+          // reflex fired before she answered. Typing already stopped at bubble 1.
           await sleepAbortable(reactDelayMs(), signal);
           try {
             await target.react(react);
@@ -167,66 +168,6 @@ async function drainTurn(channelId: string): Promise<void> {
       await target.reply(agentErrorMessage(code, retryAfterSec));
     }
   });
-}
-
-/**
- * One bubble at a time so a mid-sequence failure loses one bubble instead of the
- * rest of the turn. The fallback is a line in her voice, never an infra string:
- * Doc reads this in a chat window, not a log.
- */
-async function sendBubbles(
-  channel: SendableChannels,
-  chunks: string[],
-  gifUrl: string | null,
-  pacing: { tempoGapMs: number | null; signal: AbortSignal } | null,
-): Promise<void> {
-  let budget = PACE_BUDGET_MS;
-
-  for (let i = 0; i < chunks.length; i++) {
-    const text = chunks[i]!;
-    if (i > 0 && pacing && !pacing.signal.aborted) {
-      const delay = bubbleDelayMs({
-        tempoGapMs: pacing.tempoGapMs,
-        chars: text.length,
-        remainingBudgetMs: budget,
-      });
-      budget -= delay;
-      await sleepAbortable(delay, pacing.signal);
-    }
-
-    const withGif = i === 0 && gifUrl;
-    try {
-      await channel.send(
-        withGif
-          ? { content: text, files: [{ attachment: gifUrl, name: "ashley.gif" }] }
-          : text,
-      );
-    } catch (err) {
-      console.warn(`[discord-bot] bubble ${i} send failed:`, err);
-      if (withGif) {
-        try {
-          await channel.send(text);
-          continue;
-        } catch (retryErr) {
-          console.warn("[discord-bot] text-only retry failed:", retryErr);
-        }
-      }
-      if (i === 0) {
-        await channel.send(sendFailedLine()).catch(() => {});
-      }
-      return;
-    }
-  }
-
-  if (chunks.length === 0 && gifUrl) {
-    try {
-      await channel.send({
-        files: [{ attachment: gifUrl, name: "ashley.gif" }],
-      });
-    } catch (err) {
-      console.warn("[discord-bot] gif-only send failed:", err);
-    }
-  }
 }
 
 /**

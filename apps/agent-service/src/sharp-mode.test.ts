@@ -1,5 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { decideSharpMode, sharpShape } from "./sharp-mode.js";
+import {
+  decideSharpMode,
+  sharpLicenseNote,
+  sharpShape,
+} from "./sharp-mode.js";
+
+describe("sharpLicenseNote", () => {
+  it("does not hand the model canned sleep or 3am roast templates", () => {
+    const note = sharpLicenseNote().toLowerCase();
+    expect(note).not.toMatch(/3\s*am/);
+    expect(note).not.toMatch(/sleep habits/);
+    expect(note).toMatch(/memory block|standing facts|hot thread/);
+  });
+});
 
 describe("sharpShape", () => {
   it("peaks on sleep and wake", () => {

@@ -31,7 +31,8 @@ export function sharpLastAtKey(ownerId: string): string {
 
 export function sharpLicenseNote(): string {
   return [
-    "Sharp mode this turn: one cutting, specific competence-edge jab is allowed — fair-game patterns only (3am coding, ambition, takes, sleep habits).",
+    "Sharp mode this turn: one cutting, specific competence-edge jab is allowed.",
+    "The jab must use material already in this turn's memory block, standing facts, or the hot thread — invent nothing (no hour-counts, sleep myths, or 'you said' quotes).",
     "Still one move. Still yield-gate first. No softener after it. No apology.",
   ].join(" ");
 }
