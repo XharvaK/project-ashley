@@ -4,7 +4,7 @@
  */
 
 const DOC_SELF =
-  /\bi('ve| have) (been )?brows(e|ing)\b|\bi('ve| have) (been )?read(ing)?\b|\bi was (browsing|reading)\b|\bgeziniyorum\b|\bokudum\b|\bokuyorum\b/i;
+  /\bi('ve| have) (been )?brows(e|ing)\b|\bi('ve| have) (been )?read(ing)?\b|\bi was (browsing|reading)\b|\bbeen (browsing|reading)\b|\bgeziniyorum\b|\bokudum\b|\bokuyorum\b/i;
 
 const METAPHOR =
   /\bread(ing)? (me|this|the room|between the lines)\b|\bworth reading\b|\bgood read\b|\bbrowse (around|the room)\b/i;

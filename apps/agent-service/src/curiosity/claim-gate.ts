@@ -100,6 +100,10 @@ export function isBrowseCapabilityChallenge(message: string): boolean {
 const GERUND_CLAIM_PATTERNS: RegExp[] = [
   /\bi('?ve| have) been (reading|skimming|digging|poking|looking|browsing|checking)\b/i,
   /\bi'?m (reading|skimming|digging|browsing) (a|an|the|some|about|through)\b/i,
+  // Her texting voice drops the subject: "been reading about X" / "was reading
+  // about X" are the same unlicensed claim as "I've been reading about X".
+  /\bbeen (reading|skimming|browsing|digging|poking|looking|checking)\b/i,
+  /\bwas (reading|skimming|browsing|digging|poking|looking) (about|around|into|through)\b/i,
   /\b(okuyorum|okuyordum|inceliyorum|karıştırıyorum)\b/i,
 ];
 

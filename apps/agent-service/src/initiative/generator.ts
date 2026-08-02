@@ -5,6 +5,7 @@ import { appendMemoryBlock, loadSystemPrompt } from "../prompts.js";
 import type { MemoryAssembler } from "../memory/assembler.js";
 import type { ConsolidationWorker } from "../memory/consolidator.js";
 import { stripMediaMarkers } from "../memory/strip-markers.js";
+import { stripMetadataEcho } from "../chat/metadata-echo.js";
 import { sanitizeTypography } from "../typography.js";
 import { insertMessage } from "../memory/threads.js";
 import { estimateTokens } from "../memory/tokens.js";
@@ -81,7 +82,7 @@ async function completeDraft(
     temperature: 0.6,
     reasoningEffort: "medium",
   });
-  return stripMediaMarkers(sanitizeTypography(text)).trim();
+  return stripMetadataEcho(stripMediaMarkers(sanitizeTypography(text))).trim();
 }
 
 /**

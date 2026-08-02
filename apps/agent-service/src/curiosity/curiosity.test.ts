@@ -429,6 +429,10 @@ describe("claimsOwnActivity", () => {
       "just reading some stuff on my quiet feed. nothing exciting",
       "reading some stuff on my quiet feed",
       "skimming my feed",
+      "same. been reading about the pigeon pecking order experiments from the 60s",
+      "been reading about event sourcing all evening",
+      "was reading about skinner boxes in the arena",
+      "still been browsing the submolts",
     ]) {
       expect(claimsOwnActivity(text), text).toBe(true);
     }

@@ -113,6 +113,7 @@ import {
 import { forgetByTopic, getActiveSummary, listActiveFacts, pinFact } from "./memory/facts.js";
 import { archiveAndNewThread, insertMessage, resolveActiveThread } from "./memory/threads.js";
 import { stripMediaMarkers } from "./memory/strip-markers.js";
+import { stripMetadataEcho } from "./chat/metadata-echo.js";
 import { estimateTokens } from "./memory/tokens.js";
 import { NO_REPEAT_GUARD, looksLikeRepeat, collapseWithinTurnRepeat } from "./repetition-guard.js";
 import { setTurnBusy } from "./turn-gate.js";
@@ -922,7 +923,8 @@ export class ChatService {
         }
       }
 
-      full = sanitizeTypography(full);
+      // Metadata echoes ("medium depth") must not survive as bubble headers.
+      full = sanitizeTypography(stripMetadataEcho(full));
 
       if (buffered && full) {
         yield { type: "delta", text: full };
