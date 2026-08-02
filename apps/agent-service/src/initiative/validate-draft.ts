@@ -69,6 +69,19 @@ export function validateInitiativeDraft(
     ) {
       return { ok: false, reason: "soft_hook_while_ignored" };
     }
+
+    // The stake about her own tools must stay hers. Assigning a reader-side
+    // struggle to Doc ("worth the switch if you're still wrestling with broken
+    // feeds") is the exact failure that shipped on 2026-08-02. It is not advice
+    // to him; it is her own migration.
+    if (
+      /\byou'?re\s+(?:still\s+)?(?:wrestling|struggling|fighting|dealing)\b/i.test(
+        text,
+      ) ||
+      /\bworth the switch if you'?re\b|\bworth it if you'?re\b/i.test(text)
+    ) {
+      return { ok: false, reason: "second_person_struggle" };
+    }
   }
 
   return { ok: true };

@@ -19,6 +19,7 @@ import {
 } from "./language.js";
 import type { Angle, Candidate } from "./queue.js";
 import { unansweredCount } from "./schedule.js";
+import { markOwnTimeDraftUsed } from "./sleep.js";
 import { validateInitiativeDraft } from "./validate-draft.js";
 
 export type InitiativeDraft = {
@@ -49,6 +50,8 @@ const KIND_BRIEF: Record<string, string> = {
     "You found something that matches his interests. Name the piece, why it fits him, and what you think of it. 3-5 sentences.",
   reading_assignment:
     "Doc asked you to read about this topic. Lead with the most interesting thing you found, then your take on it, then ask one question that goes deeper. 4-8 sentences.",
+  return_digest:
+    "A quiet stretch just ended and you have notes. This is ONE self-contained return message, not a list. Open with the most interesting or most human thing, weave in at most two more touches, add exactly one light follow-up hook only if it feels natural. Do not narrate the machinery, do not recap him, do not lead with a long apology or timing play. 4-7 sentences across up to three bubbles.",
   callback:
     "Pick up this thread of his. One concrete question about it, nothing general.",
   stance:
@@ -57,20 +60,39 @@ const KIND_BRIEF: Record<string, string> = {
     "Presence only. One short line. No question mark. No inventing his day, projects, or mood. Pure still-here or one tiny beat from your own reading if the material says so.",
 };
 
+/** Personal-stake guard for takes about formats/tools you actually run. */
+const SELF_OWNED_STAKE_GUARD =
+  "Feeds, readers, formats, and specs are YOURS to run — you are the one who maintains the quiet reader, and you have lived with broken feeds: mangled XML, missing links, unreliable pubDates. That means a protocol critique is your stake, not Doc's. Own the change from YOU: 'my feeds kept breaking, so I'm switching to Atom'. Never frame a have-not, fix, or migration as advice aimed at some problem of Doc's ('worth the switch if you're…') unless a standing fact or his recent message put that problem in his hands.";
+
 const CURIOSITY_ORPHAN_BRIEF =
   "Feed find, not a sit-down read. Bubble 1: title as something that surfaced in your feed. Bubble 2: your take plus one soft stake why you bothered mentioning it. Never imply you finished the piece or read a book. Title tokens must appear. Soft hook only if allowed.";
 
+/** Feed/format/reader keywords: when the material is about tools she runs. */
+const TOOLCHAIN_TOPIC =
+  /\b(feed|feeds|rss|atom|xml|reader|protocol|format|spec|parser|standard|items)\b/i;
+
 function kindBriefFor(candidate: Candidate): string {
+  const toolchain = TOOLCHAIN_TOPIC.test(candidate.material);
   if (candidate.kind === "curiosity_take" && candidate.lane === "C") {
-    return CURIOSITY_ORPHAN_BRIEF;
+    const brief = toolchain
+      ? `${CURIOSITY_ORPHAN_BRIEF}\n${SELF_OWNED_STAKE_GUARD}`
+      : CURIOSITY_ORPHAN_BRIEF;
+    return brief;
   }
   if (
     candidate.kind === "curiosity_take" &&
     /\bDepth:\s*excerpt\b/i.test(candidate.material)
   ) {
-    return "Feed skim (excerpt only, Depth: excerpt). Title must appear. Frame as something that popped up in the feed, not a finished read. Soft hook only if allowed.";
+    const brief =
+      "Feed skim (excerpt only, Depth: excerpt). Title must appear. Frame as something that popped up in the feed, not a finished read. Soft hook only if allowed.";
+    return toolchain
+      ? `${brief}\n${SELF_OWNED_STAKE_GUARD}`
+      : brief;
   }
-  return KIND_BRIEF[candidate.kind] ?? "";
+  const base = KIND_BRIEF[candidate.kind] ?? "";
+  return toolchain && (candidate.kind === "watch_fired" || candidate.kind === "curiosity_take")
+    ? `${base}\n${SELF_OWNED_STAKE_GUARD}`
+    : base;
 }
 
 async function completeDraft(
@@ -239,6 +261,21 @@ export function reserveInitiative(
   return Number(result.lastInsertRowid);
 }
 
+/** The messages she drafted to share are spent once the digest goes out. */
+function consumeOwnTimeDraftsForDigest(
+  db: DatabaseSync,
+  ownerId: string,
+  materialKey: string,
+): void {
+  if (!materialKey.startsWith("own-return:")) return;
+  const ids = materialKey
+    .slice("own-return:".length)
+    .split(",")
+    .map((id) => Number(id))
+    .filter(Number.isFinite);
+  for (const id of ids) markOwnTimeDraftUsed(db, id);
+}
+
 /** The reservation is dropped only when the send itself failed. */
 export function releaseReservation(db: DatabaseSync, id: number): void {
   db.prepare(
@@ -273,6 +310,7 @@ export function commitInitiativeMessage(
        SET discord_message_id = ?, external_message_id = ?
        WHERE id = ? AND owner_id = ?`,
     ).run(discordMessageId, discordMessageId, draft.reservationId, ownerId);
+    consumeOwnTimeDraftsForDigest(db, ownerId, draft.materialKey ?? "");
     return;
   }
 
@@ -293,4 +331,5 @@ export function commitInitiativeMessage(
     draft.materialKey ?? null,
     draft.candidateKind ?? null,
   );
+  consumeOwnTimeDraftsForDigest(db, ownerId, draft.materialKey ?? "");
 }

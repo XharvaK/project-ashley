@@ -27,6 +27,8 @@ import {
 } from "./sleep.js";
 import { validateInitiativeDraft } from "./validate-draft.js";
 import { resolveDocLanguage } from "./language.js";
+import { queueReadingAssignment } from "./reading-assignment.js";
+import { localParts } from "../local-time.js";
 import {
   insertItem,
   insertTake,
@@ -224,6 +226,55 @@ describe("candidate scoring", () => {
     expect(pickCandidate(db, OWNER, { idleHours: 5 })).toBeNull();
   });
 
+  it("prefers a reading assignment over an orphan feed take", () => {
+    // Regression 2026-08-02: a weak orphan (Atom vs RSS) outranked a strong
+    // pending reading assignment because lane-C beat non-lane agenda items.
+    queueReadingAssignment(db, OWNER, "atom vs RSS piece");
+    upsertSource(db, {
+      slug: "feed-a",
+      title: "Feed A",
+      kind: "rss",
+      url: "https://example.com/feed",
+      interest: "dev",
+    });
+    const itemId = insertItem(db, {
+      sourceId: 1,
+      url: "https://example.com/atom-piece",
+      title: "Atom is better than RSS in ways that matter",
+      excerpt: "short blurb",
+      interest: "dev",
+      publishedAt: null,
+      score: 1,
+    })!;
+    insertTake(db, {
+      itemId,
+      interest: "dev",
+      take: "tighter dates, less ambiguity, worth the slot room",
+    });
+    logProvenance(db, "read", "full article", itemId);
+
+    const picked = pickCandidate(db, OWNER, { idleHours: 5 });
+    expect(picked?.kind).toBe("reading_assignment");
+    expect(picked?.materialKey).toMatch(/^assign:/);
+  });
+
+  it("knits multiple own-time drafts into a single return digest", () => {
+    const insertDraft = (body: string) =>
+      db
+        .prepare(
+          `INSERT INTO mem_own_time_drafts
+             (owner_id, kind, body, material_key, status, created_at)
+           VALUES (?, 'share', ?, NULL, 'pending', datetime('now', '-3 hours'))`,
+        )
+        .run(OWNER, body);
+    insertDraft("Atom is better than RSS: tighter dates, less ambiguity");
+    insertDraft("independent kernels catching nothing is a system failure");
+
+    const picked = pickCandidate(db, OWNER, { idleHours: 5 });
+    expect(picked?.kind).toBe("return_digest");
+    expect(picked?.materialKey).toMatch(/^own-return:\d+,\d+/);
+  });
+
   it("drops aged-out open threads from candidates", () => {
     openThread(db, OWNER, {
       kind: "he_never_answered",
@@ -239,6 +290,21 @@ describe("sleep sign-off", () => {
   it("matches I'm about to sleep", () => {
     expect(isSignOff("I'm about to sleep…")).toBe(true);
     expect(isSignOff("still awake or sleep again?")).toBe(false);
+  });
+
+  it("matches the sleeping-now forms Doc actually types", () => {
+    expect(isSignOff("ill be sleeping now, see you")).toBe(true);
+    expect(isSignOff("okay im sleeping now chef")).toBe(true);
+    expect(isSignOff("going to sleep, gn")).toBe(true);
+    expect(isSignOff("i'll be asleep for a bit")).toBe(true);
+    expect(isSignOff("taking a nap")).toBe(true);
+  });
+
+  it("does not fire on questions or about-her talk", () => {
+    expect(isSignOff("you sleeping?")).toBe(false);
+    expect(isSignOff("still awake or sleep again?")).toBe(false);
+    expect(isSignOff("sleeping beauty, huh?")).toBe(false);
+    expect(isSignOff("ok then, night shift. cya")).toBe(false);
   });
 
   it("suppresses for 6 hours and clears on awake chat", () => {
@@ -395,8 +461,14 @@ describe("gates", () => {
   });
 
   it("counts the day on Doc's clock", () => {
-    logInitiative(5);
-    expect(countInitiativesLocalToday(db, OWNER)).toBe(1);
+    const now = new Date();
+    const ts = `${localParts(now).dateKey}T12:00:00.000Z`; // same local day, midday
+    db.prepare(
+      `INSERT INTO mem_initiative_log
+         (owner_id, thread_id, angle, reason, message_text, sent_at, material_key)
+       VALUES (?, 't1', 'question', 'test', 'msg', ?, NULL)`,
+    ).run(OWNER, ts);
+    expect(countInitiativesLocalToday(db, OWNER, now)).toBe(1);
   });
 
   it("keeps a burst short and then rests", () => {
@@ -421,13 +493,12 @@ describe("gates", () => {
     expect(burstGate(db, OWNER).reason).toBe("burst_spent");
   });
 
-  it("backs off 6h after three unanswered proactive DMs", () => {
+  it("backs off after the unanswered ceiling is hit", () => {
     userMessage("hey", 60 * 48);
     for (let i = 0; i < env.proactiveMaxUnanswered; i++) {
-      logInitiative(60 * (i + 1));
+      logInitiative(1 + i);
     }
     expect(unansweredCount(db, OWNER)).toBe(env.proactiveMaxUnanswered);
-    expect(env.proactiveMaxUnanswered).toBe(3);
     expect(initiativeGate(db, OWNER, options, day).reason).toBe(
       "nudge_cap_backoff",
     );

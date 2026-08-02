@@ -29,6 +29,10 @@ Write-Host "=== Recall patterns ==="
 Run-Node "scripts\phase0\test-recall-patterns.mjs"
 
 Write-Host ""
+Write-Host "=== Feed-stack fixture sweep ==="
+Run-Node "scripts\phase0\test-feed-stack.mjs"
+
+Write-Host ""
 Write-Host "=== Orchid script seed guard ==="
 powershell -ExecutionPolicy Bypass -File (Join-Path $Root "scripts\phase0\check-orchid-no-seed-scripts.ps1")
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

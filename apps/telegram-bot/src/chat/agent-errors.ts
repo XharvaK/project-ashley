@@ -9,7 +9,9 @@ export function agentErrorMessage(
     case "agent_not_ready":
       return "I'm offline right now. Give me a minute and try again.";
     case "mistral_unavailable":
-      return "My brain's unreachable right now. Try again in a bit.";
+      return retryAfterSec
+        ? `My brain's unreachable right now — I'll be able to answer in about ${retryAfterSec}s.`
+        : "My brain's unreachable right now. Try again in a bit.";
     case "rate_limited":
       return retryAfterSec
         ? `I'm getting rate-limited — try again in about ${retryAfterSec}s.`

@@ -190,7 +190,7 @@ npm run phase0:mistral
 
 
 
-DM-only outreach when she has material (default: max 8/day in bursts, 2h min idle, quiet hours enforced). Tick is atomic (`/initiative/tick`); the log row is reserved before the send and committed after. Pause persists across bot restarts and a bare "stop" in chat pauses her. See `docs/proactive-initiative.md` and `docs/memory-and-recall.md`.
+DM-only outreach when she has material (default: max 10/day in bursts, 2h min idle, own-time during his sleep/AFK enforced). Tick is atomic (`/initiative/tick`); the log row is reserved before the send and committed after. Pause persists across bot restarts and a bare "stop" in chat pauses her. See `docs/proactive-initiative.md` and `docs/memory-and-recall.md`.
 
 
 

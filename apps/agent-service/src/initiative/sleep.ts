@@ -22,9 +22,36 @@ export function isSignOff(text: string): boolean {
   if (/^(gn|g'?night|night|good\s*night|iyi\s*geceler)[.!~]*$/i.test(t)) {
     return true;
   }
-  return /\b(?:i(?:'m| am)\s+)?about\s+to\s+(?:go\s+to\s+)?sleep\b|\bgoing\s+to\s+sleep\b|\bgo(?:ing)?\s+to\s+bed\b|\bgood\s*night\b|\bg'?night\b|\bi(?:'m| am)\s+out\b|\bheading\s+to\s+(?:bed|sleep)\b|\byatıyorum\b|\byata(?:ca)?ğım\b|\byatacam\b|\biyi\s*geceler\b|\bkaçtım\b|\bi(?:'m| am)\s+(?:going\s+)?afk\b|\bbrb\b|\bsteeping\s+away\b|\bstepping\s+away\b|\bi(?:'ll| will)\s+be\s+(?:afk|offline)\b/i.test(
-    t,
-  );
+  if (
+    /\b(?:i(?:'m| am)\s+)?about\s+to\s+(?:go\s+to\s+)?sleep\b|\bgoing\s+to\s+sleep\b|\bgo(?:ing)?\s+to\s+bed\b|\bgood\s*night\b|\bg'?night\b|\bi(?:'m| am)\s+out\b|\bheading\s+to\s+(?:bed|sleep)\b|\byatıyorum\b|\byata(?:ca)?ğım\b|\byatacam\b|\biyi\s*geceler\b|\bkaçtım\b|\bi(?:'m| am)\s+(?:going\s+)?afk\b|\bbrb\b|\bsteeping\s+away\b|\bstepping\s+away\b|\bi(?:'ll| will)\s+be\s+(?:afk|offline)\b/i.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+
+  // Explicit own-time verbs Doc actually types (2026-08-02: "ill be sleeping
+  // now, see you" failed to suppress and she pinged during his nap). These must
+  // not fire on questions directed at her sleep ("you sleeping?", "staying up?")
+  // or on bare gerunds used as nouns.
+  const OWN_SLEEP_VERBS = [
+    // "i'm sleeping", "ill be sleeping now", "going to be asleep"
+    /\bi(?:'?m| am|'?ll| will)\s+(?:be\s+)?(?:now\s+)?(?:going\s+to\s+)?(?:sleep|sleeping|asleep)\b/i,
+    // "sleeping now", "sleeping soon", "about to sleep"
+    /\bsleep(?:ing)?\s+(?:now|soon|in\s+a\s+bit)\b/i,
+    // "time for sleep", "bedtime", "hitting the hay/bed", "taking a nap"
+    /\b(?:time\s+for\s+sleep|bed(?:time)?\s+it\s+is|hitting?\s+(?:the\s+)?(?:hay|sack|bed)|(?:taking|take)\s+(?:a\s+)?(?:nap|power\s*nap))\b/i,
+    // Turkish casual: "uyuyorum", "uykuya daliyorum", "yatıyorum biraz"
+    /\b(?:uyuyorum|uykuya\s+dal(?:ı|i)yorum|uyumam|uyunuyorum)\b/i,
+  ];
+  if (OWN_SLEEP_VERBS.some((p) => p.test(t))) return true;
+
+  // "I'll go to bed" / "catching sleep" forms.
+  if (/\bi(?:'?ll| will)\s+(?:go\s+to|hit\s+the)\s+(?:bed|sack|hay)\b/i.test(t)) {
+    return true;
+  }
+
+  return false;
 }
 
 export function enterOwnTime(db: DatabaseSync, ownerId: string): void {

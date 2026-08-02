@@ -108,7 +108,7 @@ export const env = {
     process.env.MEMORY_RETRIEVAL_MIN_SCORE ?? 0.35,
   ),
   proactiveEnabled: process.env.PROACTIVE_ENABLED !== "false",
-  proactiveMaxPerDay: Number(process.env.PROACTIVE_MAX_PER_DAY ?? 8),
+  proactiveMaxPerDay: Number(process.env.PROACTIVE_MAX_PER_DAY ?? 10),
   proactiveMinIdleHours: Number(process.env.PROACTIVE_MIN_IDLE_HOURS ?? 2),
   // Material queue: nothing goes out under the floor, and there is no filler.
   proactiveMinScore: Number(process.env.PROACTIVE_MIN_SCORE ?? 20),
@@ -126,8 +126,9 @@ export const env = {
   proactiveBurstRestMinutes: Number(
     process.env.PROACTIVE_BURST_REST_MINUTES ?? 150,
   ),
-  // Doc: 3 unanswered proactive DMs, then 6h wait (2026-08-01).
-  proactiveMaxUnanswered: Number(process.env.PROACTIVE_MAX_UNANSWERED ?? 3),
+  // Doc: more angles before quiet (2026-08-02). 4 unanswered proactive DMs,
+  // then a 4h wait, then the queue tries fresh angles again.
+  proactiveMaxUnanswered: Number(process.env.PROACTIVE_MAX_UNANSWERED ?? 4),
   proactiveSleepSuppressHours: Number(
     process.env.PROACTIVE_SLEEP_SUPPRESS_HOURS ?? 8,
   ),
@@ -138,9 +139,9 @@ export const env = {
   proactiveBackoffStepHours: Number(
     process.env.PROACTIVE_BACKOFF_STEP_HOURS ?? 1,
   ),
-  /** Hours to wait after the 3rd unanswered proactive DM. */
+  /** Hours to wait after the unanswered proactive DM ceiling is hit. */
   proactiveNudgeCapBackoffHours: Number(
-    process.env.PROACTIVE_NUDGE_CAP_BACKOFF_HOURS ?? 6,
+    process.env.PROACTIVE_NUDGE_CAP_BACKOFF_HOURS ?? 4,
   ),
   /** Minutes an unanswered proactive DM must sit before the next nudge. */
   proactiveNudgeTimeoutMinutes: Number(
@@ -169,10 +170,11 @@ export const env = {
     process.env.CURIOSITY_SOURCE_INTERVAL_HOURS ?? 6,
   ),
   curiosityItemsPerSource: Number(process.env.CURIOSITY_ITEMS_PER_SOURCE ?? 12),
-  // She reads a few things well: scanned wide, noted narrow, read almost never.
-  curiosityNotePerDay: Number(process.env.CURIOSITY_NOTE_PER_DAY ?? 12),
-  curiosityReadPerDay: Number(process.env.CURIOSITY_READ_PER_DAY ?? 3),
-  curiositySurfacePerDay: Number(process.env.CURIOSITY_SURFACE_PER_DAY ?? 2),
+  // The reading is fuel for initiative. Budget was 3/day, she formed one take
+  // and Doc felt the gap. Now: note wider, read a handful well, surface 4.
+  curiosityNotePerDay: Number(process.env.CURIOSITY_NOTE_PER_DAY ?? 24),
+  curiosityReadPerDay: Number(process.env.CURIOSITY_READ_PER_DAY ?? 8),
+  curiositySurfacePerDay: Number(process.env.CURIOSITY_SURFACE_PER_DAY ?? 4),
   tavilyApiKey: process.env.TAVILY_API_KEY ?? "",
   // Shared Tavily ledger: 1000/month across chat lookups + watches.
   curiosityLookupEnabled: process.env.CURIOSITY_LOOKUP_ENABLED !== "false",

@@ -39,6 +39,18 @@ describe("agentErrorMessage", () => {
     );
   });
 
+  it("uses retryAfterSec for mistral_unavailable when provided", () => {
+    const msg = agentErrorMessage("mistral_unavailable", 17);
+    assert.match(msg, /17s/);
+  });
+
+  it("keeps the plain message when no retry time is known", () => {
+    assert.equal(
+      agentErrorMessage("mistral_unavailable"),
+      "My brain's unreachable right now. Try again in a bit.",
+    );
+  });
+
   it("source file has no hardcoded Turkish-only user strings", () => {
     const here = dirname(fileURLToPath(import.meta.url));
     const src = readFileSync(join(here, "agent-errors.ts"), "utf8");

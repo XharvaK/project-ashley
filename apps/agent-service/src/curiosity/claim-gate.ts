@@ -44,6 +44,15 @@ const CAPABILITY_DENIAL: RegExp[] = [
   /\bbrowse (yok|etmiyorum)\b/i,
   /\bfeed'?im yok\b/i,
   /\b(web'?de|internette) (gez(e)?miyorum|bakmıyorum)\b/i,
+  // Old-stack claims after a format switch: "no, still on the old feed",
+  // "i don't have atom", "still on rss". The feed itself is a format, not a
+  // mood; denying the current stack while cur_sources says otherwise is a lie.
+  /\b(still\s+)?on\s+(the\s+)?old\s+feed\b/i,
+  /\b(still\s+)?on\s+(the\s+)?old\s+rss\b/i,
+  /\bi (don'?t|do not|never) (use|have|run)(\s+the)? (atom|rss)\s+feed\b/i,
+  /\b(there'?s|there is) (no|not)\s+(atom|rss)\s+feed\b/i,
+  /\b(we|i) didn'?t (switch|move) to atom\b|\bnot\s+on\s+atom\b/i,
+  /\b(atom|rss) (mı|mi)\b.{0,10}\b(yok|de'il|değil)\b/i,
 ];
 
 /**
@@ -179,14 +188,14 @@ export const NO_ACTIVITY_GUARD = {
 };
 
 export const CAPABILITY_GUARD = {
-  text: "You have a quiet configured RSS/Atom reader whenever curiosity is on — own that casually. When he sends an https link and this turn has a successful page or feed note, you may say you opened it. If open failed, say you could not open it. You do not arbitrarily crawl the live open web. Never say you don't browse, that you only read what he sends, or that he should paste the text instead.",
+  text: "You have a quiet configured Atom feed reader (RSS fallback) whenever curiosity is on — own that casually. If this turn ran a live feed check, answer from that real result, not from guessing: whatever the check reported is the truth about your stack, and saying you are still on the old feed while the check says Atom is a lie. When he sends an https link and this turn has a successful page or feed note, you may say you opened it. If open failed, say you could not open it. You do not arbitrarily crawl the live open web. Never say you don't browse, that you only read what he sends, or that he should paste the text instead.",
   takeIds: [] as number[],
   provenance: "mention" as const,
 };
 
 /** Link open failed: honesty about the miss, without denying the reader. */
 export const LINK_FAILED_CAPABILITY_GUARD = {
-  text: "He sent a link and this turn could not open that page. Say you could not open it. Do not invent a title, quote, or that you read it. You still have a quiet configured RSS/Atom reader when curiosity is on — own that if he challenges capability. Never say you don't browse, that you only read what he sends, or that he should paste the text instead.",
+  text: "He sent a link and this turn could not open that page. Say you could not open it. Do not invent a title, quote, or that you read it. You still have a quiet configured Atom feed reader (RSS fallback) when curiosity is on — own that if he challenges capability. Never say you don't browse, that you only read what he sends, or that he should paste the text instead.",
   takeIds: [] as number[],
   provenance: "mention" as const,
 };
@@ -205,7 +214,7 @@ export const CONTRADICTION_GUARD = {
 
 /** Hard floor after a capability regen that still denies the reader. */
 export const CAPABILITY_HARD_FLOOR =
-  "I have a quiet feed reader when curiosity is on. Resend the URL if you want that page opened — if an open failed I'll say so. I don't only read what you paste.";
+  "I'm running the quiet Atom feed reader now, not the old one. Resend the URL if you want that page opened — if an open failed I'll say so. I don't only read what you paste.";
 
 /** Warmer hard floor when side-effect theater cannot be salvaged. */
 export const SIDE_EFFECT_HARD_FLOOR =

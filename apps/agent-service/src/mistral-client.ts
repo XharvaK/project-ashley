@@ -186,7 +186,14 @@ export function mapMistralError(err: unknown): AppError {
     (status !== undefined && status >= 500) ||
     /5\d{2}|unavailable|timeout|ECONNREFUSED|ECONNRESET|ETIMEDOUT/i.test(msg)
   ) {
-    return new AppError("mistral_unavailable", "Mistral unavailable", 503);
+    // 503 "request queue is full" is an RPM/queue limit on Mistral's side;
+    // relay any Retry-After so the client can wait instead of guessing.
+    return new AppError(
+      "mistral_unavailable",
+      "Mistral unavailable",
+      503,
+      parseRetryAfterSec(err),
+    );
   }
   // 400/422 stay internal_error for Doc, but logs above carry the real status.
   return new AppError("internal_error", "Mistral request failed", 500);

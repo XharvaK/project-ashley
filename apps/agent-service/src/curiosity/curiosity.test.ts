@@ -470,12 +470,26 @@ describe("deniesOwnCapability", () => {
     }
   });
 
+  it("catches old-stack claims when the current stack is Atom", () => {
+    for (const text of [
+      "no, still on the old feed",
+      "still on the old rss",
+      "i don't have the atom feed",
+      "we didn't switch to atom yet",
+      "not on atom",
+      "there's no atom feed",
+    ]) {
+      expect(deniesOwnCapability(text), text).toBe(true);
+    }
+  });
+
   it("allows truthful nuance and empty-day honesty", () => {
     for (const text of [
       "I don't do arbitrary live searches, but I have a quiet feed reader.",
       "I haven't browsed this turn.",
       "I have not been reading anything worth mentioning today.",
       "Couldn't open that link.",
+      "i have the quiet atom reader on",
     ]) {
       expect(deniesOwnCapability(text), text).toBe(false);
     }

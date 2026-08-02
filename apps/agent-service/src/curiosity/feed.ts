@@ -1,7 +1,7 @@
 /**
- * A deliberately small RSS and Atom reader. Feeds are hostile input: truncated
- * XML, HTML inside CDATA, missing dates. Nothing here throws on a bad entry, it
- * just returns fewer items.
+ * A deliberately small Atom-first reader with RSS compatibility. Feeds are
+ * hostile input: truncated XML, HTML inside CDATA, missing dates. Nothing here
+ * throws on a bad entry, it just returns fewer items.
  */
 export type FeedItem = {
   title: string;

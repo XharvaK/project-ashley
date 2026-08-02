@@ -19,7 +19,14 @@ export function extractRssLinks(html: string, baseUrl: string): Array<{ title: s
     if (!href) continue;
     try {
       const fullUrl = new URL(href, baseUrl).toString();
-      if (fullUrl.endsWith(".xml") || fullUrl.endsWith(".rss") || fullUrl.includes("feed") || fullUrl.includes("rss")) {
+      if (
+        fullUrl.endsWith(".atom") ||
+        fullUrl.endsWith(".xml") ||
+        fullUrl.endsWith(".rss") ||
+        fullUrl.includes("feed") ||
+        fullUrl.includes("rss") ||
+        fullUrl.includes("atom")
+      ) {
         const titleMatch = /title=["']([^"']+)["']/i.exec(match[0]);
         feeds.push({
           title: titleMatch?.[1] || new URL(baseUrl).hostname,

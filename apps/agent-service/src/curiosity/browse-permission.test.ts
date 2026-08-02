@@ -39,7 +39,7 @@ describe("isBrowsePermission", () => {
 describe("buildCapabilityBlock", () => {
   it("licenses the quiet reader when curiosity is enabled", () => {
     const block = buildCapabilityBlock(true);
-    expect(block).toContain("quiet configured RSS/Atom reader");
+    expect(block).toContain("quiet configured Atom feed reader (RSS fallback)");
     expect(block).toMatch(/do not arbitrarily/i);
     expect(block).not.toMatch(/sqlite\.org|hnrss|article title/i);
   });

@@ -37,7 +37,7 @@
     {"slug": "pitchfork", "title": "Pitchfork", "kind": "rss", "url": "https://pitchfork.com/feed/feed-news/rss", "interest": "music", "weight": 0.8},
     {"slug": "the-wire", "title": "The Wire", "kind": "rss", "url": "https://www.thewire.co.uk/feeds/rss", "interest": "music", "weight": 0.9},
     {"slug": "factmag", "title": "Fact Mag", "kind": "rss", "url": "https://www.factmag.com/feed/", "interest": "music", "weight": 0.8},
-    {"slug": "boomkat", "title": "Boomkat", "kind": "rss", "url": "https://boomkat.com/feeds/new_releases.atom", "interest": "music", "weight": 0.9},
+    {"slug": "boomkat", "title": "Boomkat", "kind": "atom", "url": "https://boomkat.com/feeds/new_releases.atom", "interest": "music", "weight": 0.9},
     {"slug": "aqnb", "title": "AQNB", "kind": "rss", "url": "https://www.aqnb.com/feed/", "interest": "music", "weight": 0.7},
     {"slug": "ghostly", "title": "Ghostly", "kind": "rss", "url": "https://ghostly.com/feed", "interest": "music", "weight": 0.6},
     {"slug": "rockpapershotgun", "title": "Rock Paper Shotgun", "kind": "rss", "url": "https://www.rockpapershotgun.com/feed", "interest": "gaming", "weight": 0.9},

@@ -36,7 +36,8 @@ export type CandidateKind =
   | "celebrate"
   | "ambient_presence"
   | "provocation"
-  | "reading_assignment";
+  | "reading_assignment"
+  | "return_digest";
 
 export type CuriosityLane = "A" | "B" | "C";
 
@@ -80,6 +81,12 @@ const SPECS: Record<CandidateKind, Spec> = {
     halfLifeHours: 48,
     ripeAfterHours: 0,
     angle: "reading_assignment",
+  },
+  return_digest: {
+    base: 80,
+    halfLifeHours: 24,
+    ripeAfterHours: 0.5,
+    angle: "opinion",
   },
   she_owes: { base: 95, halfLifeHours: 30, ripeAfterHours: 1, angle: "question" },
   he_never_answered: {
@@ -462,8 +469,30 @@ export function collectCandidates(
   // moltbook heartbeat's first claim; nothing dumps immediately on return).
   const draftMinAgeMs = 30 * 60 * 1000;
   const draftCutoff = Date.now() - draftMinAgeMs;
-  for (const draft of listPendingOwnTimeDrafts(db, ownerId, 3)) {
-    if (Date.parse(draft.created_at) > draftCutoff) continue;
+  const pendingDrafts = listPendingOwnTimeDrafts(db, ownerId, 5);
+  const agedDrafts = pendingDrafts.filter(
+    (d) => Date.parse(d.created_at) <= draftCutoff,
+  );
+
+  // Return digest: several notes she wrote while he was AFK become ONE
+  // self-contained message instead of a drip of separate feels. The material
+  // key carries the draft ids so the commit can mark them used together.
+  if (agedDrafts.length >= 2) {
+    const selected = agedDrafts.slice(0, 3);
+    const lines = selected.map((d, i) => `note ${i + 1}: ${d.body}`).join("\n");
+    const ids = selected.map((d) => d.id).join(",");
+    const c = make(
+      "return_digest",
+      `own-return:${ids}`,
+      `While he was AFK she drafted these notes (optional) — knit them into ONE message, not a list:\n${lines}`,
+      0.5,
+      mult("return_digest"),
+      { scoreScale: 1.1 },
+    );
+    if (c) out.push(c);
+  }
+
+  for (const draft of agedDrafts) {
     const c = make(
       "curiosity_take",
       draft.material_key ?? `draft:${draft.id}`,
@@ -532,6 +561,22 @@ export function collectCandidates(
     .sort((a, b) => b.score - a.score);
 }
 
+function isPresence(c: Candidate): boolean {
+  return c.kind === "check_in" || c.kind === "ambient_presence";
+}
+
+/**
+ * Real content: something she owes, promised, asked, watches, or reacts to.
+ * Presence-only modes are not agenda and never beat actual material.
+ */
+function isAgenda(c: Candidate): boolean {
+  if (isPresence(c)) return false;
+  if (c.kind === "curiosity_take" || c.kind === "watch_fired") {
+    return c.lane !== "C";
+  }
+  return true;
+}
+
 export function pickCandidate(
   db: DatabaseSync,
   ownerId: string,
@@ -542,48 +587,30 @@ export function pickCandidate(
   );
   if (ripe.length === 0) return null;
 
-  const hasAgenda = ripe.some(
-    (c) =>
-      c.kind !== "check_in" &&
-      c.kind !== "ambient_presence" &&
-      (c.lane === "A" ||
-        c.lane === "B" ||
-        c.kind === "she_owes" ||
-        c.kind === "he_never_answered" ||
-        c.kind === "time_anchored" ||
-        c.kind === "callback" ||
-        c.kind === "stance" ||
-        c.kind === "share_discovery" ||
-        c.kind === "reaction" ||
-        c.kind === "continue" ||
-        c.kind === "celebrate" ||
-        c.kind === "provocation" ||
-        (c.kind === "curiosity_take" && c.lane !== "C") ||
-        c.kind === "watch_fired"),
-  );
-
   // Presence only when nothing sharper is ripe.
   let pool = ripe;
-  if (hasAgenda) {
-    pool = ripe.filter(
-      (c) => c.kind !== "check_in" && c.kind !== "ambient_presence",
-    );
+  if (ripe.some(isAgenda)) {
+    pool = ripe.filter((c) => !isPresence(c));
   }
 
-  const hasAB = pool.some((c) => c.lane === "A" || c.lane === "B");
-  if (hasAB) {
+  // Material wins over cold orphan outages: any non-orphan candidate (a reading
+  // assignment, an opened thread, a lane A/B take) beats an orphan lane-C item
+  // that has no stronger claim, even when decayed scores happen to line up.
+  if (pool.some((c) => !isPresence(c) && c.lane !== "C")) {
     pool = pool.filter((c) => c.lane !== "C");
   }
 
-  // A > B > C among curiosity; otherwise best score.
-  const laneRank = (c: Candidate): number => {
-    if (c.lane === "A") return 3;
-    if (c.lane === "B") return 2;
+  // Strong agenda first, then lane A (watch) over lane B (share), then orphaned
+  // C, then presence.
+  const priority = (c: Candidate): number => {
+    if (isPresence(c)) return 0;
     if (c.lane === "C") return 1;
-    return 0;
+    if (c.lane === "B") return 2;
+    if (c.lane === "A") return 3;
+    return 4;
   };
   pool.sort(
-    (a, b) => laneRank(b) - laneRank(a) || b.score - a.score,
+    (a, b) => priority(b) - priority(a) || b.score - a.score,
   );
   return pool[0] ?? null;
 }

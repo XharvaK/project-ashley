@@ -91,6 +91,11 @@ import {
   linkReadPreflight,
   maybeReadLink,
 } from "./curiosity/link-read.js";
+import {
+  buildFeedStackNote,
+  decideCheckIntent,
+  verifyFeedStack,
+} from "./curiosity/feed-stack.js";
 import { NO_LOOKUP_GUARD, shouldLookupAsideUrl } from "./curiosity/lookup.js";
 import { buildSearchContext, canSpendTavily, searchWeb } from "./curiosity/search.js";
 import { takeTitlesByIds } from "./curiosity/store.js";
@@ -438,10 +443,30 @@ export class ChatService {
               messageEmbedding: assembled.queryEmbedding,
             });
 
+      const recentUserLines = assembled.hotMessages
+        .filter((m) => m.role === "user")
+        .map((m) => m.content);
+
       const capabilityNote =
         request.channel !== "voice" && isBrowsePermission(request.message)
           ? buildCapabilityBlock(env.curiosityEnabled)
           : null;
+
+      // "do you have the atom now / are you on the old feed / check again" is a
+      // real self-introspection class: sweep her live sources and hand her the
+      // verified truth so she answers from the run, not a guess.
+      let feedStackNote: string | null = null;
+      if (
+        request.channel !== "voice" &&
+        decideCheckIntent(request.message, recentUserLines) === "stack"
+      ) {
+        try {
+          const report = await verifyFeedStack(this.db);
+          if (report) feedStackNote = buildFeedStackNote(report);
+        } catch (err) {
+          console.warn("[chat] feed stack check failed:", err);
+        }
+      }
 
       // Text only for v1: voice latency / TTS budget stays unchanged.
       const linkDecision = extractImmediateHttpsUrl(request.message);
@@ -616,7 +641,7 @@ export class ChatService {
         buildChatMessages({
           system: appendMemoryBlock(promptParts, assembled.memoryBlock, {
             presence: presenceNote,
-            capability: capabilityNote,
+            capability: feedStackNote ?? capabilityNote,
             activityLicense: activityLicense.note,
             networkLicense: withNetwork.note,
             curiosity: withCuriosity?.text,
