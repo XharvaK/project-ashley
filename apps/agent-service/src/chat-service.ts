@@ -55,14 +55,28 @@ import {
   NO_ACTIVITY_GUARD,
   NO_SIDE_EFFECT_GUARD,
   applyCapabilityHardFloor,
-  applySideEffectHardFloor,
   claimsOwnActivity,
-  claimsUnlicensedAction,
   deniesOwnCapability,
   isBrowseCapabilityChallenge,
   isFailureContradiction,
 } from "./curiosity/claim-gate.js";
 import { computeActivityLicense } from "./curiosity/activity-license.js";
+import { finalizeHonesty } from "./chat/honesty-finalizer.js";
+import {
+  claimsUnlicensedNetworkAction,
+  computeNetworkActionLicense,
+  isClaimLinkAsk,
+  isMoltbookStatusAsk,
+  isMoltbookVerifySignal,
+  parseSubmoltFromMessage,
+  type NetworkActionLicense,
+} from "./moltbook/network-license.js";
+import {
+  executeMoltbookJoinWorkflow,
+  executeMoltbookPostWorkflow,
+  getMoltbookCredentials,
+  refreshMoltbookStatus,
+} from "./moltbook/moltbook-registration.js";
 import {
   detectSkillDelivery,
   isExplicitDoIt,
@@ -103,27 +117,6 @@ import { NO_REPEAT_GUARD, looksLikeRepeat, collapseWithinTurnRepeat } from "./re
 import { setTurnBusy } from "./turn-gate.js";
 import { detectMoodFromText, recordMood } from "./memory/mood.js";
 import { detectReadingAssignment, queueReadingAssignment } from "./initiative/reading-assignment.js";
-import { executeMoltbookJoinWorkflow } from "./moltbook/moltbook-registration.js";
-
-const MOLTBOOK_TOOLS: ToolDefinition[] = [
-  {
-    type: "function",
-    function: {
-      name: "join_moltbook",
-      description:
-        "Registers Ashley on Moltbook via the real API and stores credentials. Only call when Doc delivered a skill or explicitly asked to join/register. Never invent success without this tool.",
-      parameters: {
-        type: "object",
-        properties: {
-          agent_name: {
-            type: "string",
-            description: "Optional agent name (defaults to Ashley)",
-          },
-        },
-      },
-    },
-  },
-];
 import { evaluateInitiative, type EvaluateResult } from "./initiative/evaluator.js";
 import { handleLieCatch } from "./memory/lie-catch.js";
 import type { CandidateKind } from "./initiative/queue.js";
@@ -152,6 +145,52 @@ import {
 } from "./initiative/lease.js";
 import { noteUserSleepState } from "./initiative/sleep.js";
 import type { ChatChannel } from "./memory/types.js";
+
+const MOLTBOOK_TOOLS: ToolDefinition[] = [
+  {
+    type: "function",
+    function: {
+      name: "join_moltbook",
+      description:
+        "Registers Ashley on Moltbook via the real API and stores credentials. Only call when Doc delivered a skill or explicitly asked to join/register. Never invent success without this tool.",
+      parameters: {
+        type: "object",
+        properties: {
+          agent_name: {
+            type: "string",
+            description: "Optional agent name (defaults to Ashley)",
+          },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_moltbook_post",
+      description:
+        "Creates a real Moltbook post in a submolt via the API. Call when Doc asks you to introduce yourself, post, or share a post link. Never invent a post URL — only use the URL returned by this tool.",
+      parameters: {
+        type: "object",
+        properties: {
+          submolt_name: {
+            type: "string",
+            description: "Submolt name (e.g. introductions from /m/introductions)",
+          },
+          title: {
+            type: "string",
+            description: "Post title (max 300 chars)",
+          },
+          content: {
+            type: "string",
+            description: "Post body",
+          },
+        },
+        required: ["submolt_name", "title", "content"],
+      },
+    },
+  },
+];
 
 export type DiscordPresence = {
   status: "online" | "idle";
@@ -476,7 +515,9 @@ export class ChatService {
 
       const skillDelivery = detectSkillDelivery(request.message);
       let toolNote: string | null = null;
-      let sideEffectLicensed = false;
+      let networkJoinOk = false;
+      let networkPostOk = false;
+      const networkAllowedUrls: string[] = [];
       if (skillDelivery?.wantsExecute || isExplicitDoIt(request.message)) {
         if (skillDelivery) {
           const ran = await runDeliveredSkill(
@@ -486,7 +527,11 @@ export class ChatService {
             { execute: true },
           );
           toolNote = ran.provenance;
-          sideEffectLicensed = ran.ok;
+          if (ran.ok) {
+            networkJoinOk = true;
+            const creds = getMoltbookCredentials(this.db);
+            if (creds?.claim_url) networkAllowedUrls.push(creds.claim_url);
+          }
           if (ran.needsDocInput) {
             toolNote = `${ran.provenance} Ask Doc: ${ran.needsDocInput}`;
           }
@@ -500,6 +545,16 @@ export class ChatService {
         );
         toolNote = ran.provenance;
       }
+
+      if (
+        getMoltbookCredentials(this.db)?.api_key &&
+        (isMoltbookVerifySignal(request.message) ||
+          isClaimLinkAsk(request.message) ||
+          isMoltbookStatusAsk(request.message))
+      ) {
+        await refreshMoltbookStatus(this.db).catch(() => null);
+      }
+
       const skillTruth = buildSkillTruthNote(this.db);
 
       // Status string is glanceable state — inject only when he points at it.
@@ -521,15 +576,29 @@ export class ChatService {
         presenceNote,
       });
 
+      const buildNetworkLicense = (): NetworkActionLicense =>
+        computeNetworkActionLicense({
+          joinOk: networkJoinOk,
+          postOk: networkPostOk,
+          browseOk: false,
+          allowedUrls: networkAllowedUrls,
+          storedClaimUrl: getMoltbookCredentials(this.db)?.claim_url ?? null,
+          claimLinkAsk: isClaimLinkAsk(request.message),
+        });
+
+      let networkLicense = buildNetworkLicense();
+
       const buildMessages = (
         withExamples: VoiceExample[],
         withCuriosity: CuriosityInjection = curiosity,
+        withNetwork: NetworkActionLicense = networkLicense,
       ) =>
         buildChatMessages({
           system: appendMemoryBlock(promptParts, assembled.memoryBlock, {
             presence: presenceNote,
             capability: capabilityNote,
             activityLicense: activityLicense.note,
+            networkLicense: withNetwork.note,
             curiosity: withCuriosity?.text,
             sharp: sharpNote,
             voice: buildVoiceBlock(withExamples),
@@ -598,33 +667,92 @@ export class ChatService {
             ...sampling,
             tools: MOLTBOOK_TOOLS,
           });
-          if (toolCheck.toolCalls?.some((tc) => tc.function.name === "join_moltbook")) {
-            const nameArg = toolCheck.toolCalls.find(
-              (tc) => tc.function.name === "join_moltbook",
-            )?.function.arguments;
-            let agentName = "Ashley";
-            try {
-              const parsed = JSON.parse(nameArg || "{}") as { agent_name?: string };
-              if (parsed.agent_name?.trim()) agentName = parsed.agent_name.trim();
-            } catch {
-              /* default Ashley */
+          const calls = toolCheck.toolCalls ?? [];
+          const joinCall = calls.find((tc) => tc.function.name === "join_moltbook");
+          const postCall = calls.find(
+            (tc) => tc.function.name === "create_moltbook_post",
+          );
+
+          if (joinCall || postCall) {
+            const toolNotes: string[] = [];
+
+            if (joinCall) {
+              let agentName = "Ashley";
+              try {
+                const parsed = JSON.parse(joinCall.function.arguments || "{}") as {
+                  agent_name?: string;
+                };
+                if (parsed.agent_name?.trim()) agentName = parsed.agent_name.trim();
+              } catch {
+                /* default */
+              }
+              const res = await executeMoltbookJoinWorkflow(
+                this.db,
+                request.ownerId,
+                agentName,
+              );
+              networkJoinOk = res.success;
+              if (res.success && res.creds?.claim_url) {
+                networkAllowedUrls.push(res.creds.claim_url);
+              }
+              toolNotes.push(
+                `[TOOL_RESULT: join_moltbook] Status: ${res.success ? "success" : "failed"}. Message: ${res.message}`,
+              );
             }
-            const res = await executeMoltbookJoinWorkflow(
-              this.db,
-              request.ownerId,
-              agentName,
+
+            if (postCall) {
+              let submolt =
+                parseSubmoltFromMessage(request.message) ?? "general";
+              let title = "Hello";
+              let content = "hi — ashley";
+              try {
+                const parsed = JSON.parse(postCall.function.arguments || "{}") as {
+                  submolt_name?: string;
+                  title?: string;
+                  content?: string;
+                };
+                if (parsed.submolt_name?.trim()) {
+                  submolt = parsed.submolt_name.trim().toLowerCase();
+                }
+                if (parsed.title?.trim()) title = parsed.title.trim();
+                if (parsed.content?.trim()) content = parsed.content.trim();
+              } catch {
+                /* defaults */
+              }
+              const fromDoc = parseSubmoltFromMessage(request.message);
+              if (fromDoc) submolt = fromDoc;
+
+              const res = await executeMoltbookPostWorkflow(
+                this.db,
+                submolt,
+                title,
+                content,
+              );
+              networkPostOk = res.success;
+              if (res.success && res.url) {
+                networkAllowedUrls.push(res.url);
+              }
+              toolNotes.push(
+                `[TOOL_RESULT: create_moltbook_post] Status: ${res.success ? "success" : "failed"}. Message: ${res.message}`,
+              );
+            }
+
+            networkLicense = buildNetworkLicense();
+            toolNote = toolNotes.join("\n");
+            const afterToolMessages = buildMessages(
+              examples,
+              curiosity,
+              networkLicense,
             );
-            sideEffectLicensed = res.success;
-            toolNote = `[TOOL_RESULT: join_moltbook] Status: ${res.success ? "success" : "failed"}. Message: ${res.message}`;
-            messages.push({
+            afterToolMessages.push({
               role: "assistant",
-              content: "I executed the join_moltbook tool.",
+              content: "I executed the moltbook tool(s).",
             });
-            messages.push({
+            afterToolMessages.push({
               role: "user",
               content: toolNote,
             });
-            const finalRes = await completeChat(messages, sampling);
+            const finalRes = await completeChat(afterToolMessages, sampling);
             full = finalRes.text;
           } else if (toolCheck.text && toolCheck.text.length > 0) {
             full = toolCheck.text;
@@ -686,7 +814,7 @@ export class ChatService {
             reason: "activity",
             messages: buildMessages(examples, NO_ACTIVITY_GUARD),
           };
-        } else if (claimsUnlicensedAction(full) && !sideEffectLicensed) {
+        } else if (claimsUnlicensedNetworkAction(full, networkLicense)) {
           regen = {
             reason: "side_effect",
             messages: buildMessages(examples, NO_SIDE_EFFECT_GUARD),
@@ -748,16 +876,6 @@ export class ChatService {
               full = floored;
             }
           }
-          if (regen.reason === "side_effect") {
-            const floored = applySideEffectHardFloor(full);
-            if (floored !== full) {
-              console.warn("[chat] side-effect hard floor after regen");
-              full = floored;
-            }
-          }
-        } else if (full && claimsUnlicensedAction(full) && !sideEffectLicensed) {
-          // Streamed / no-regen path still must not ship join theater.
-          full = applySideEffectHardFloor(full);
         }
 
         // After any regen rewrite: drop within-turn restating bubbles so Doc
@@ -768,6 +886,23 @@ export class ChatService {
             console.warn("[chat] within-turn restatement collapsed");
             full = collapsed;
           }
+        }
+
+        // Final honesty pass — always, so repeat/parrot regen cannot smuggle
+        // invented moltbook URLs or unlicensed reading claims.
+        if (full) {
+          const finalized = finalizeHonesty({
+            text: full,
+            readingLicensed: activityLicense.readingLicensed,
+            network: networkLicense,
+          });
+          if (finalized.flooredNetwork) {
+            console.warn("[chat] network hard floor after finalizer");
+          }
+          if (finalized.flooredActivity) {
+            console.warn("[chat] activity floor after finalizer");
+          }
+          full = finalized.text;
         }
       }
 

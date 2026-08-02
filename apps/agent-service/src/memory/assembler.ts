@@ -27,6 +27,12 @@ import {
 import { isActivityAsk } from "../curiosity/activity-ask.js";
 import { claimsOwnActivity } from "../curiosity/claim-gate.js";
 import { recentTakes } from "../curiosity/store.js";
+import { getMoltbookCredentials } from "../moltbook/moltbook-registration.js";
+import {
+  extractUrls,
+  isMoltbookOrInfraUrl,
+  isUrlAllowed,
+} from "../moltbook/network-license.js";
 import { reentryLine } from "./reentry.js";
 import { takeReactionLine } from "../signals.js";
 import { paraphraseSnippet, retrieveChunks } from "./retrieval.js";
@@ -50,7 +56,6 @@ import {
   resolveActiveThread,
 } from "./threads.js";
 import type { AssembledContext, ChatChannel } from "./types.js";
-import { getMoltbookCredentials } from "../moltbook/moltbook-registration.js";
 import { trimToTokenBudget } from "./tokens.js";
 import type { HotTurn } from "./hot-filter.js";
 
@@ -71,6 +76,32 @@ function softHideFabricatedNetworkClaims(
       role: "assistant",
       content:
         "[prior message soft-hidden: fabricated network/join claim — not a fact]",
+    };
+  });
+}
+
+/**
+ * Hide invented moltbook post/profile URLs in hot context. Keep the stored
+ * claim_url if present so she can still re-send a real claim link.
+ */
+function softHideUngroundedMoltbookUrls(
+  db: DatabaseSync,
+  messages: Array<{ role: "user" | "assistant"; content: string }>,
+): Array<{ role: "user" | "assistant"; content: string }> {
+  const claimUrl = getMoltbookCredentials(db)?.claim_url ?? null;
+  const allowed = claimUrl ? [claimUrl] : [];
+
+  return messages.map((m) => {
+    if (m.role !== "assistant") return m;
+    const urls = extractUrls(m.content).filter(isMoltbookOrInfraUrl);
+    if (urls.length === 0) return m;
+    const hasPostPath = urls.some((u) => /\/p\//i.test(u) || /\/post\//i.test(u));
+    const allAllowed = urls.every((u) => isUrlAllowed(u, allowed));
+    if (!hasPostPath && allAllowed) return m;
+    return {
+      role: "assistant",
+      content:
+        "[prior message soft-hidden: ungrounded moltbook URL — not a fact]",
     };
   });
 }
@@ -455,6 +486,7 @@ export class MemoryAssembler {
       content: m.text,
     }));
     hotMessages = softHideFabricatedNetworkClaims(this.db, hotMessages);
+    hotMessages = softHideUngroundedMoltbookUrls(this.db, hotMessages);
     hotMessages = softHideUngroundedActivityClaims(this.db, hotMessages);
     if (queryMode === "recall") {
       hotMessages = filterHotForRecall(hotMessages);

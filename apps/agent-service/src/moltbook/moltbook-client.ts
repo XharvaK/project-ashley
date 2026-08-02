@@ -118,12 +118,43 @@ export async function downvoteMoltbookPost(apiKey: string, postId: string): Prom
   return res.ok;
 }
 
+export type CreatePostResult = {
+  success: boolean;
+  postId?: string;
+  /** Public browser URL only when API (or follow-up GET) provides it — never invented. */
+  url?: string;
+  error?: string;
+};
+
+/** Fetch a single post; used to resolve a public URL after create. */
+export async function getMoltbookPost(
+  apiKey: string,
+  postId: string,
+): Promise<{ id?: string; url?: string } | null> {
+  const res = await fetch(`${MOLTBOOK_BASE}/posts/${encodeURIComponent(postId)}`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  });
+  if (!res.ok) return null;
+  const data = (await res.json()) as {
+    post?: { id?: string; url?: string; permalink?: string };
+    id?: string;
+    url?: string;
+    permalink?: string;
+  };
+  const post = data.post ?? data;
+  const url = post.url ?? post.permalink;
+  return {
+    id: post.id ?? postId,
+    url: typeof url === "string" && url.trim() ? url.trim() : undefined,
+  };
+}
+
 export async function createMoltbookPost(
   apiKey: string,
   submoltName: string,
   title: string,
   content: string,
-): Promise<{ success: boolean; postId?: string }> {
+): Promise<CreatePostResult> {
   const res = await fetch(`${MOLTBOOK_BASE}/posts`, {
     method: "POST",
     headers: {
@@ -137,10 +168,21 @@ export async function createMoltbookPost(
     }),
   });
 
-  if (!res.ok) return { success: false };
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    return {
+      success: false,
+      error: `HTTP ${res.status}${errText ? `: ${errText.slice(0, 200)}` : ""}`,
+    };
+  }
   const data = (await res.json()) as {
     success?: boolean;
-    post?: { id: string; verification?: { verification_code: string; challenge_text: string } };
+    post?: {
+      id: string;
+      url?: string;
+      permalink?: string;
+      verification?: { verification_code: string; challenge_text: string };
+    };
   };
 
   if (data.post?.verification) {
@@ -148,7 +190,18 @@ export async function createMoltbookPost(
     await verifyMoltbookContent(apiKey, data.post.verification.verification_code, answer);
   }
 
-  return { success: true, postId: data.post?.id };
+  const postId = data.post?.id;
+  let url =
+    (typeof data.post?.url === "string" && data.post.url.trim()) ||
+    (typeof data.post?.permalink === "string" && data.post.permalink.trim()) ||
+    undefined;
+
+  if (postId && !url) {
+    const fetched = await getMoltbookPost(apiKey, postId);
+    if (fetched?.url) url = fetched.url;
+  }
+
+  return { success: true, postId, url };
 }
 
 export async function createMoltbookComment(

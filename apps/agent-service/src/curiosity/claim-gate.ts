@@ -159,7 +159,7 @@ export const LINK_FAILED_CAPABILITY_GUARD = {
 };
 
 export const NO_SIDE_EFFECT_GUARD = {
-  text: "This turn has no tool success note for join, register, post, comment, claim, credential update, or server start. Do not claim any of those happened. If he asked you to do it, say what is missing or what failed in your own words. Never invent claim URLs, endpoints, ngrok, keypairs, or post links.",
+  text: "This turn has no network license for join, register, post, browse, comment, claim, credential update, or server start. Do not claim any of those happened, and do not say you are already on it or browsing submolts. If he asked you to do it, say what is missing or what failed in your own words. Never invent claim URLs, endpoints, ngrok, keypairs, or /p/ post links.",
   takeIds: [] as number[],
   provenance: "mention" as const,
 };

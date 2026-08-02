@@ -102,6 +102,8 @@ export function appendMemoryBlock(
     capability?: string | null;
     /** This-turn ActivityLicense note — authoritative for reading claims. */
     activityLicense?: string | null;
+    /** This-turn NetworkActionLicense note — moltbook join/post/browse URLs. */
+    networkLicense?: string | null;
     sharp?: string | null;
     skillTruth?: string | null;
     toolNote?: string | null;
@@ -115,6 +117,7 @@ export function appendMemoryBlock(
     extras.presence,
     extras.capability,
     extras.activityLicense,
+    extras.networkLicense,
     extras.curiosity,
     extras.sharp,
     extras.voice,
