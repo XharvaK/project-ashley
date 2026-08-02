@@ -116,7 +116,13 @@ describe("buildPageContext", () => {
     expect(block).toContain("<<<page");
     expect(block).toContain("page>>>");
     expect(block).toContain("https://example.com/a");
-    expect(block).toContain("opened the link");
+  });
+
+  it("forbids narrating the open and treats his own work as authorship", () => {
+    const block = buildPageContext("https://example.com/a", "body");
+    expect(block).toMatch(/do not narrate the mechanics/i);
+    expect(block).toMatch(/no 'i opened the link'/i);
+    expect(block).toMatch(/he is the author/i);
   });
 });
 

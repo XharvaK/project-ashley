@@ -178,12 +178,12 @@ export async function runCuriosityTick(
       const article = await fetchArticleText(item.url, 10_000, {
         enforceSafeHost: true,
       });
-      const body = article ?? item.excerpt ?? "";
+      const body = article?.text ?? item.excerpt ?? "";
       if (body.length < 200) {
         setItemStatus(db, item.id, "skipped");
         continue;
       }
-      if (article) updateItemExcerpt(db, item.id, article.slice(0, 1200));
+      if (article) updateItemExcerpt(db, item.id, article.text.slice(0, 1200));
 
       let take: string | null = null;
       try {
@@ -198,7 +198,7 @@ export async function runCuriosityTick(
       // Only a fetched body licenses provenance "read". Excerpt-only takes
       // still form opinions but must not claim a sit-down read.
       if (article) {
-        logProvenance(db, "read", `${item.title} (${item.url})`, item.id);
+        logProvenance(db, "read", `${item.title} (${article.url})`, item.id);
         result.read++;
       } else {
         logProvenance(

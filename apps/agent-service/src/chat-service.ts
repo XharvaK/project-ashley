@@ -104,7 +104,10 @@ import { MemoryAssembler } from "./memory/assembler.js";
 import { classifyQuery } from "./memory/recall.js";
 import { ConsolidationWorker } from "./memory/consolidator.js";
 import { getMemoryDb, getMemoryHealth } from "./memory/db.js";
-import { applyAutoRemember } from "./memory/auto-remember.js";
+import {
+  applyAutoRemember,
+  isSelfDisclosedLink,
+} from "./memory/auto-remember.js";
 import {
   extractCorrectedFact,
   handleForgetRequest,
@@ -113,7 +116,10 @@ import {
 import { forgetByTopic, getActiveSummary, listActiveFacts, pinFact } from "./memory/facts.js";
 import { archiveAndNewThread, insertMessage, resolveActiveThread } from "./memory/threads.js";
 import { stripMediaMarkers } from "./memory/strip-markers.js";
-import { stripMetadataEcho } from "./chat/metadata-echo.js";
+import {
+  stripMetadataEcho,
+  stripPipelineNarration,
+} from "./chat/metadata-echo.js";
 import { estimateTokens } from "./memory/tokens.js";
 import { NO_REPEAT_GUARD, looksLikeRepeat, collapseWithinTurnRepeat } from "./repetition-guard.js";
 import { setTurnBusy } from "./turn-gate.js";
@@ -374,6 +380,16 @@ export class ChatService {
         request.message,
         this.consolidator,
       );
+
+      // Doc pointing at his own work with a link is high-signal: run the fact
+      // extractor on the next tick instead of waiting the N-turn cadence.
+      if (env.autoRememberEnabled && isSelfDisclosedLink(request.message)) {
+        this.consolidator.enqueuePriorityFacts(
+          request.ownerId,
+          threadId,
+          userMsgId,
+        );
+      }
 
       this.consolidator.afterMessage(
         request.ownerId,
@@ -923,8 +939,11 @@ export class ChatService {
         }
       }
 
-      // Metadata echoes ("medium depth") must not survive as bubble headers.
-      full = sanitizeTypography(stripMetadataEcho(full));
+      // Metadata echoes ("medium depth") and pipeline narration ("i opened the
+      // link he sent") must not survive as bubble headers.
+      full = sanitizeTypography(
+        stripPipelineNarration(stripMetadataEcho(full)),
+      );
 
       if (buffered && full) {
         yield { type: "delta", text: full };

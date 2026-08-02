@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { DatabaseSync } from "node:sqlite";
 import { migrate } from "./db.js";
-import { detectAutoRemember } from "./auto-remember.js";
+import {
+  detectAutoRemember,
+  isSelfDisclosedLink,
+} from "./auto-remember.js";
 import { ConsolidationWorker } from "./consolidator.js";
 import { insertMessage, resolveActiveThread } from "./threads.js";
 
@@ -70,5 +73,31 @@ describe("auto-remember", () => {
       .prepare(`SELECT COUNT(*) as c FROM mem_jobs WHERE job_type = 'facts'`)
       .get() as { c: number };
     expect(row2.c).toBe(1);
+  });
+});
+
+describe("isSelfDisclosedLink", () => {
+  it("fires when Doc points at his own work with a link", () => {
+    expect(
+      isSelfDisclosedLink(
+        "Well, funny you mentioned the substrate independence... You should read my blog post: https://substack.com/@spiralseekr/p-193177777",
+      ),
+    ).toBe(true);
+    expect(
+      isSelfDisclosedLink("check my article https://example.com/a"),
+    ).toBe(true);
+    expect(
+      isSelfDisclosedLink("benim blogumu oku: https://example.com/a"),
+    ).toBe(true);
+    expect(isSelfDisclosedLink("yazıma bak https://example.com/a")).toBe(true);
+  });
+
+  it("does not fire without a link or without self-attribution", () => {
+    expect(isSelfDisclosedLink("You should read my blog post")).toBe(false);
+    expect(isSelfDisclosedLink("check this out https://example.com/a")).toBe(
+      false,
+    );
+    expect(isSelfDisclosedLink("his blog https://example.com/a")).toBe(false);
+    expect(isSelfDisclosedLink("göz at https://example.com/a")).toBe(false);
   });
 });
