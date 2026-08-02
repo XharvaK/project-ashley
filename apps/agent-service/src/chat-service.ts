@@ -441,6 +441,7 @@ export class ChatService {
               askKind: askKind ?? undefined,
               alsoInterests: asksInterests(request.message),
               messageEmbedding: assembled.queryEmbedding,
+              allowRadar: request.channel !== "voice",
             });
 
       const recentUserLines = assembled.hotMessages

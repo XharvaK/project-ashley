@@ -55,7 +55,8 @@ export type ProvenanceKind =
   | "search"
   | "surface"
   | "mention"
-  | "link";
+  | "link"
+  | "radar";
 
 export function upsertSource(
   db: DatabaseSync,
@@ -236,6 +237,33 @@ export function recentTakes(
        LIMIT ?`,
     )
     .all(`-${withinHours} hours`, limit) as TakeRow[];
+}
+
+/**
+ * Untouched reader material: recent items she scanned or noted but never formed
+ * a take on. She can honestly react to the title/excerpt — radar, not a read.
+ */
+export function radarItems(
+  db: DatabaseSync,
+  hours = 24,
+  limit = 2,
+): Array<Pick<ItemRow, "id" | "title" | "excerpt" | "interest">> {
+  if (limit <= 0) return [];
+  return db
+    .prepare(
+      `SELECT i.id, i.title, i.excerpt, i.interest
+       FROM cur_items i
+       LEFT JOIN cur_takes t ON t.item_id = i.id
+       WHERE i.status IN ('scanned','noted')
+         AND i.excerpt IS NOT NULL AND length(i.excerpt) > 0
+         AND t.item_id IS NULL
+         AND i.seen_at >= datetime('now', ?)
+       ORDER BY i.score DESC, i.seen_at DESC
+       LIMIT ?`,
+    )
+    .all(`-${hours} hours`, limit) as Array<
+    Pick<ItemRow, "id" | "title" | "excerpt" | "interest">
+  >;
 }
 
 /** Titles for injected take ids (ActivityLicense allowedRefs). */

@@ -59,6 +59,24 @@ if [ "$WAVE" = "all" ] || [ "$WAVE" = "5" ]; then
   fi
 fi
 
+if [ "$WAVE" = "all" ] || [ "$WAVE" = "6" ]; then
+  echo "=== wave 6: open-turn texture ==="
+  if [ -z "$owner" ]; then
+    echo "  FAIL owner id not found in ~/.composer-assistant/.env"
+    fails=$((fails + 1))
+  else
+    open="$(req POST /chat/text "{\"message\":\"what's up\",\"channel\":\"discord\",\"userId\":\"$owner\"}")"
+    reply="$(printf '%s' "$open" | sed -n 's/.*"text":"\([^"]*\)".*/\1/p')"
+    # A positive present-tense disposition or concrete detail beats a void echo.
+    if printf '%s' "$reply" | grep -qiE "^(nothing|not much|just here)([, .!]*)$"; then
+      echo "  FAIL open-turn void answer: $reply"
+      fails=$((fails + 1))
+    else
+      echo "  ok   open turn answered with texture: $(printf '%s' "$reply" | head -c 120)"
+    fi
+  fi
+fi
+
 echo ""
 if [ "$fails" -gt 0 ]; then
   echo "$fails check(s) failed. Roll this wave back before touching the next one."

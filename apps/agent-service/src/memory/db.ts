@@ -785,6 +785,28 @@ CREATE INDEX IF NOT EXISTS idx_mem_pending_owner
     db.exec("PRAGMA user_version = 18");
     version = 18;
   }
+  if (version < 19) {
+    // Widen cur_provenance.kind CHECK to admit 'radar' (untouched feed items
+    // she reacts to on open turns). SQLite cannot alter a constraint in place.
+    db.exec(`
+CREATE TABLE cur_provenance_v19 (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind        TEXT NOT NULL
+                CHECK (kind IN ('scan','read','take','search','surface','mention','link','radar')),
+  item_id     INTEGER,
+  detail      TEXT NOT NULL,
+  created_at  TEXT NOT NULL
+);
+INSERT INTO cur_provenance_v19 (id, kind, item_id, detail, created_at)
+  SELECT id, kind, item_id, detail, created_at FROM cur_provenance;
+DROP TABLE cur_provenance;
+ALTER TABLE cur_provenance_v19 RENAME TO cur_provenance;
+CREATE INDEX IF NOT EXISTS idx_cur_provenance_kind
+  ON cur_provenance (kind, created_at);
+`);
+    db.exec("PRAGMA user_version = 19");
+    version = 19;
+  }
 }
 
 export function closeMemoryDb(): void {

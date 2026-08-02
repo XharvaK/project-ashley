@@ -7,6 +7,7 @@ import {
   countProvenance,
   logProvenance,
   markTakesSurfaced,
+  radarItems,
   recentTakes,
   takeHasFullRead,
   type ProvenanceKind,
@@ -115,6 +116,42 @@ export function buildCuriosityBlock(takes: TakeRow[]): string | null {
   ].join("\n");
 }
 
+type RadarRow = {
+  id: number;
+  title: string;
+  excerpt: string | null;
+  interest: string;
+};
+
+/**
+ * Untouched reader material for open turns ("what's up", "anything new"). Real
+ * titles from her own scan, reactable at face value — never a claim of a full
+ * read, never "I read" — and optional: sitting in the vibe is also real.
+ */
+export function buildRadarBlock(items: RadarRow[]): string | null {
+  if (items.length === 0) return null;
+  const lines = items.map((i) => {
+    const gist = (i.excerpt ?? "").trim().replace(/\s+/g, " ").slice(0, 140);
+    return `- ${i.title}${gist ? ` — "${gist}"` : ""}`;
+  });
+  return [
+    "Things from your own reader you noticed but never formed a take on. Real radar, not a read:",
+    "",
+    ...lines,
+    "",
+    "You may name ONE and react to what's actually there — its title or gist — as something that caught your eye. Never claim you read the whole piece, never present it as a formed take, never list more than one. Sitting in the vibe is also real: it is fine to mention none of them.",
+  ].join("\n");
+}
+
+/** Honest present-tense disposition when there is nothing concrete to offer. */
+export function buildEmptyDayBlock(): string {
+  return [
+    "He asked what you were doing / have been doing.",
+    "No takes, nothing on the radar worth a line.",
+    "Give one short honest present-tense disposition — flat, mellow, wired, half-here, whatever is actually true. Never void theater: no 'nothing', no 'i waited', no counting seconds, and never claim titles or activity you don't have.",
+  ].join(" ");
+}
+
 export function buildSolicitedCuriosityBlock(
   takes: TakeRow[],
   kind: ActivityAskKind = "reading",
@@ -129,14 +166,7 @@ export function buildSolicitedCuriosityBlock(
     : "";
 
   if (kind === "general") {
-    if (takes.length === 0) {
-      return [
-        "He asked what you were doing / what you have been up to.",
-        "You have no takes logged for this stretch.",
-        "Nothing logged worth mentioning. One honest disposition is fine (flat, meh, irritated, quiet).",
-        "Do not invent titles, waiting-as-plot, counting seconds, or that you don't feel.",
-      ].join(" ");
-    }
+    if (takes.length === 0) return buildEmptyDayBlock();
     const lines = takes.map((t) => `- ${t.take} (from: ${t.title})`);
     return [
       "He asked what you were doing. These are your real takes — answer from them, or say the stretch was quiet if none fit. Do not invent waiting-as-plot:",
@@ -208,7 +238,11 @@ async function assembleOrganic(
 function assembleSolicited(
   db: DatabaseSync,
   kind: ActivityAskKind,
-  opts?: { alsoInterests?: boolean },
+  opts?: {
+    alsoInterests?: boolean;
+    /** Voice (TTS budget) skips unsolicited radar material. */
+    allowRadar?: boolean;
+  },
 ): CuriosityInjection {
   // Always license an answer: empty honesty when curiosity is off or no takes,
   // so we never leave hasReadActivity with a null inject on a direct ask.
@@ -222,6 +256,42 @@ function assembleSolicited(
   }
 
   const takes = selectSolicitedTakes(recentTakes(db, 48), 2);
+  // General asks with no takes can still reach real radar: untouched feed items
+  // in her reader. Takes first; radar only when a take never formed; then the
+  // honest disposition baseline. Never a forced radar — caps keep it occasional,
+  // and voice keeps the short honest baseline (allowRadar=false).
+  if (kind === "general" && takes.length === 0 && opts?.allowRadar !== false) {
+    if (countProvenance(db, "radar", 1) >= 1) {
+      return {
+        text: buildSolicitedCuriosityBlock([], "general", { alsoInterests }),
+        takeIds: [],
+        provenance: "mention",
+      };
+    }
+    if (countProvenance(db, "radar", 24) >= env.curiosityRadarPerDay) {
+      return {
+        text: buildSolicitedCuriosityBlock([], "general", { alsoInterests }),
+        takeIds: [],
+        provenance: "mention",
+      };
+    }
+    const radar = buildRadarBlock(
+      radarItems(db, env.curiosityRadarWindowHours, 2),
+    );
+    if (radar) {
+      return {
+        text: radar,
+        takeIds: [],
+        provenance: "radar",
+      };
+    }
+    return {
+      text: buildSolicitedCuriosityBlock([], "general", { alsoInterests }),
+      takeIds: [],
+      provenance: "mention",
+    };
+  }
+
   const fullReadByItemId = new Map(
     takes.map((t) => [t.item_id, takeHasFullRead(db, t.item_id)] as const),
   );
@@ -244,12 +314,15 @@ export async function assembleCuriosity(
     alsoInterests?: boolean;
     /** Reuse the assembler's query embedding when available. */
     messageEmbedding?: Float32Array;
+    /** Voice (TTS budget) skips unsolicited radar material. */
+    allowRadar?: boolean;
   },
 ): Promise<CuriosityInjection> {
   const mode = opts?.mode ?? "organic";
   if (mode === "solicited") {
     return assembleSolicited(db, opts?.askKind ?? "reading", {
       alsoInterests: opts?.alsoInterests,
+      allowRadar: opts?.allowRadar,
     });
   }
   return assembleOrganic(db, message, opts?.messageEmbedding);
@@ -263,8 +336,10 @@ export function commitCuriosity(
   markTakesSurfaced(db, injection.takeIds);
   const kind = injection.provenance;
   const detail =
-    injection.takeIds.length > 0
-      ? `offered ${injection.takeIds.length} take(s)`
-      : "empty honesty";
+    kind === "radar"
+      ? "radar offered"
+      : injection.takeIds.length > 0
+        ? `offered ${injection.takeIds.length} take(s)`
+        : "empty honesty";
   logProvenance(db, kind, detail);
 }

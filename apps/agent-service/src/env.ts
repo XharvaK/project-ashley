@@ -175,6 +175,12 @@ export const env = {
   curiosityNotePerDay: Number(process.env.CURIOSITY_NOTE_PER_DAY ?? 24),
   curiosityReadPerDay: Number(process.env.CURIOSITY_READ_PER_DAY ?? 8),
   curiositySurfacePerDay: Number(process.env.CURIOSITY_SURFACE_PER_DAY ?? 4),
+  // Open-turn radar: untouched feed items she can react to, never a full read.
+  // A few a day, max one an hour, and sometimes nothing at all.
+  curiosityRadarPerDay: Number(process.env.CURIOSITY_RADAR_PER_DAY ?? 4),
+  curiosityRadarWindowHours: Number(
+    process.env.CURIOSITY_RADAR_WINDOW_HOURS ?? 24,
+  ),
   tavilyApiKey: process.env.TAVILY_API_KEY ?? "",
   // Shared Tavily ledger: 1000/month across chat lookups + watches.
   curiosityLookupEnabled: process.env.CURIOSITY_LOOKUP_ENABLED !== "false",
