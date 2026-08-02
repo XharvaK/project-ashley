@@ -264,25 +264,34 @@ describe("isActivityAsk", () => {
     expect(isActivityAsk("what's your discord status?")).toBe(false);
   });
 
-  it("catches general overnight / up-to asks", () => {
+  it("catches general overnight / up-to / present-tense doing asks", () => {
     for (const text of [
       "what did you do while I slept?",
       "what you been up to?",
       "what have you been doing",
+      "what are you doing",
+      "what're you up to",
+      "what's up",
+      "anything new",
       "ne yaptın ben uyurken",
+      "ne yapıyorsun",
+      "neler var",
     ]) {
       expect(isActivityAsk(text), text).toBe(true);
       expect(activityAskKind(text), text).toBe("general");
     }
   });
 
-  it("ignores Doc talking about his own reading and code what-did-you-do", () => {
+  it("ignores mood-only, Doc self-reading, and code what-did-you-do", () => {
     for (const text of [
       "I've been reading about event sourcing all evening",
       "been reading about event sourcing",
       "worth reading if you like wal mode",
       "bugün changelog okudum",
       "what did you do with the WAL setting?",
+      "how do you feel",
+      "how are you feeling?",
+      "nasılsın",
     ]) {
       expect(isActivityAsk(text), text).toBe(false);
     }
@@ -405,7 +414,7 @@ describe("assembleCuriosity", () => {
 });
 
 describe("claimsOwnActivity", () => {
-  it("catches English and Turkish activity claims", () => {
+  it("catches English and Turkish activity claims including bare gerunds", () => {
     for (const text of [
       "i read something about that this morning",
       "I looked it up, it's a receptor thing",
@@ -417,17 +426,23 @@ describe("claimsOwnActivity", () => {
       "o threade denk geldim",
       "I've been reading changelogs all night",
       "I'm reading about event sourcing",
+      "just reading some stuff on my quiet feed. nothing exciting",
+      "reading some stuff on my quiet feed",
+      "skimming my feed",
     ]) {
       expect(claimsOwnActivity(text), text).toBe(true);
     }
   });
 
-  it("leaves present-tense opinions alone", () => {
+  it("leaves opinions, capability ownership, and empty-day honesty alone", () => {
     for (const text of [
       "i think that's wrong",
       "i'd read that if it had numbers in it",
       "reading changelogs is a real hobby",
       "i know the mechanism, it's nmda",
+      "i have a quiet feed reader",
+      "I have not been reading anything worth mentioning today.",
+      "worth reading if you like wal mode",
     ]) {
       expect(claimsOwnActivity(text), text).toBe(false);
     }

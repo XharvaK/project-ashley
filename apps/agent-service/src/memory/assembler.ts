@@ -25,6 +25,8 @@ import {
   type QueryMode,
 } from "./recall.js";
 import { isActivityAsk } from "../curiosity/activity-ask.js";
+import { claimsOwnActivity } from "../curiosity/claim-gate.js";
+import { recentTakes } from "../curiosity/store.js";
 import { reentryLine } from "./reentry.js";
 import { takeReactionLine } from "../signals.js";
 import { paraphraseSnippet, retrieveChunks } from "./retrieval.js";
@@ -69,6 +71,43 @@ function softHideFabricatedNetworkClaims(
       role: "assistant",
       content:
         "[prior message soft-hidden: fabricated network/join claim — not a fact]",
+    };
+  });
+}
+
+/**
+ * Hide prior unlicensed reading theater so she cannot defend a lie next turn.
+ * Empty recent takes → hide all activity-class assistant claims.
+ * With takes → hide claims that assert feed engagement with no title overlap.
+ */
+function softHideUngroundedActivityClaims(
+  db: DatabaseSync,
+  messages: Array<{ role: "user" | "assistant"; content: string }>,
+): Array<{ role: "user" | "assistant"; content: string }> {
+  const takes = recentTakes(db, 48, 24);
+  const titles = takes.map((t) => t.title.toLowerCase()).filter(Boolean);
+
+  return messages.map((m) => {
+    if (m.role !== "assistant" || !claimsOwnActivity(m.content)) {
+      return m;
+    }
+    if (titles.length === 0) {
+      return {
+        role: "assistant",
+        content:
+          "[prior message soft-hidden: unlicensed reading claim — not a fact]",
+      };
+    }
+    const lower = m.content.toLowerCase();
+    const grounded = titles.some((title) => {
+      const token = title.slice(0, 24);
+      return token.length >= 4 && lower.includes(token);
+    });
+    if (grounded) return m;
+    return {
+      role: "assistant",
+      content:
+        "[prior message soft-hidden: ungrounded reading claim — not a fact]",
     };
   });
 }
@@ -416,6 +455,7 @@ export class MemoryAssembler {
       content: m.text,
     }));
     hotMessages = softHideFabricatedNetworkClaims(this.db, hotMessages);
+    hotMessages = softHideUngroundedActivityClaims(this.db, hotMessages);
     if (queryMode === "recall") {
       hotMessages = filterHotForRecall(hotMessages);
       if (strictEmptyRecall) {

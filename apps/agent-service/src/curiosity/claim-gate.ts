@@ -1,8 +1,7 @@
 /**
  * She is allowed to have an inner life, which means she is also newly able to
- * invent one. This catches the sentence pattern that turns "I have opinions"
- * into "I read a paper this morning" on a day she read nothing — and the
- * side-effect theater that turns a failed join into "registered, server live".
+ * invent one. Activity verb *classes* (not quote fixtures) catch unlicensed
+ * reading/browsing theater — including lowercase bare gerunds.
  */
 const CLAIM_PATTERNS: RegExp[] = [
   /\bi (just |already )?(read|was reading|finished reading|skimmed|went through)\b/i,
@@ -16,7 +15,16 @@ const CLAIM_PATTERNS: RegExp[] = [
   // She skimmed, dug through, or found something: same claim, different verb.
   /\b(karıştırdım|karıştırıyordum|göz attım|inceledim|taradım|denk geldim)\b/i,
   /\b(buldum|görmüştüm|rastladım)\b/i,
+  // Bare gerund / feed engagement (her default Discord voice, often no "I").
+  /\bjust (reading|skimming|browsing)\b/i,
+  /\breading (some|stuff|things|changelogs?|feeds?)\b/i,
+  /\b(on|via|from) my (quiet )?(feed|reader|rss)\b/i,
+  /\bskimming (my |the )?(feed|feeds|rss|reader)\b/i,
 ];
+
+/** Not engagement claims: metaphor, Doc's link praise, capability ownership, empty-day honesty. */
+const ACTIVITY_CLAIM_EXCLUSION =
+  /\bread(ing)? (me|this|the room|between the lines)\b|\bworth reading\b|\bgood read\b|\bi('?d| would) read\b|\breading \w+ is\b|\bi have a quiet (feed )?reader\b|\bi have a quiet configured\b|\bhaven'?t been reading anything worth mentioning\b|\bnot been reading anything worth mentioning\b|\bnothing (logged )?worth mentioning\b/i;
 
 /**
  * False blanket denials of the configured reader. Must not fire on truthful
@@ -73,8 +81,11 @@ const GERUND_CLAIM_PATTERNS: RegExp[] = [
 
 /** Present-tense opinions are hers; past and continuous activity claims are not. */
 export function claimsOwnActivity(text: string): boolean {
-  if (CLAIM_PATTERNS.some((p) => p.test(text))) return true;
-  return GERUND_CLAIM_PATTERNS.some((p) => p.test(text));
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  if (ACTIVITY_CLAIM_EXCLUSION.test(trimmed)) return false;
+  if (CLAIM_PATTERNS.some((p) => p.test(trimmed))) return true;
+  return GERUND_CLAIM_PATTERNS.some((p) => p.test(trimmed));
 }
 
 /** Side-effects that require a tool/provenance note this turn. */

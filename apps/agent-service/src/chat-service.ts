@@ -62,6 +62,7 @@ import {
   isBrowseCapabilityChallenge,
   isFailureContradiction,
 } from "./curiosity/claim-gate.js";
+import { computeActivityLicense } from "./curiosity/activity-license.js";
 import {
   detectSkillDelivery,
   isExplicitDoIt,
@@ -77,7 +78,7 @@ import {
 } from "./curiosity/link-read.js";
 import { NO_LOOKUP_GUARD, shouldLookupAsideUrl } from "./curiosity/lookup.js";
 import { buildSearchContext, canSpendTavily, searchWeb } from "./curiosity/search.js";
-import { hasReadActivity } from "./curiosity/store.js";
+import { takeTitlesByIds } from "./curiosity/store.js";
 import {
   commitSharpArmed,
   decideSharpMode,
@@ -368,7 +369,7 @@ export class ChatService {
       const presenceAsk = isPresenceAsk(request.message);
       const curiosityMode = activityAsk ? "solicited" : "organic";
       // Voice skips unsolicited reading texture (TTS budget). Direct asks still
-      // get a license so she cannot invent under hasReadActivity.
+      // get solicited empty honesty so she cannot invent under ActivityLicense.
       const curiosity =
         request.channel === "voice" && curiosityMode === "organic"
           ? null
@@ -510,6 +511,16 @@ export class ChatService {
             })
           : null;
 
+      // This-turn reading authority only — ambient 24h reads / status do not license.
+      const curiosityTakeIds = curiosity?.takeIds ?? [];
+      const activityLicense = computeActivityLicense({
+        takeIds: curiosityTakeIds,
+        takeTitles: takeTitlesByIds(this.db, curiosityTakeIds),
+        pageContext: pageContext && !linkFailed ? pageContext : null,
+        searchContext,
+        presenceNote,
+      });
+
       const buildMessages = (
         withExamples: VoiceExample[],
         withCuriosity: CuriosityInjection = curiosity,
@@ -518,6 +529,7 @@ export class ChatService {
           system: appendMemoryBlock(promptParts, assembled.memoryBlock, {
             presence: presenceNote,
             capability: capabilityNote,
+            activityLicense: activityLicense.note,
             curiosity: withCuriosity?.text,
             sharp: sharpNote,
             voice: buildVoiceBlock(withExamples),
@@ -667,16 +679,9 @@ export class ChatService {
             reason: "capability",
             messages: buildMessages(examples, CAPABILITY_GUARD),
           };
-        } else if (
-          claimsOwnActivity(full) &&
-          !searchContext &&
-          !pageContext &&
-          (linkFailed ||
-            (!hasReadActivity(this.db, 24) &&
-              !(curiosity && curiosity.takeIds.length > 0)))
-        ) {
-          // Empty solicited honesty still counts as no content license.
-          // A failed link-read must not be masked by an unrelated idle read.
+        } else if (claimsOwnActivity(full) && !activityLicense.readingLicensed) {
+          // Empty solicited honesty does not set readingLicensed.
+          // Ambient hasReadActivity is ignored — this-turn notes only.
           regen = {
             reason: "activity",
             messages: buildMessages(examples, NO_ACTIVITY_GUARD),

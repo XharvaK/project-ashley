@@ -9,6 +9,10 @@ import { sanitizeTypography } from "../typography.js";
 import { insertMessage } from "../memory/threads.js";
 import { estimateTokens } from "../memory/tokens.js";
 import {
+  emptyActivityLicenseNote,
+  materialHasReadingBeat,
+} from "../curiosity/activity-license.js";
+import {
   draftLanguageMatches,
   resolveDocLanguage,
 } from "./language.js";
@@ -97,9 +101,15 @@ export async function draftInitiativeMessage(
     env.proactiveChannel,
   );
 
+  const readingBeat =
+    candidate?.kind === "curiosity_take" ||
+    materialHasReadingBeat(candidate?.material);
   const system = appendMemoryBlock(
     loadSystemPrompt("proactive"),
     assembled.memoryBlock,
+    {
+      activityLicense: readingBeat ? null : emptyActivityLicenseNote(),
+    },
   );
 
   const hot = assembled.hotMessages.slice(-6);

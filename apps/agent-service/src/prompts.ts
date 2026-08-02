@@ -100,6 +100,8 @@ export function appendMemoryBlock(
     guard?: string | null;
     presence?: string | null;
     capability?: string | null;
+    /** This-turn ActivityLicense note — authoritative for reading claims. */
+    activityLicense?: string | null;
     sharp?: string | null;
     skillTruth?: string | null;
     toolNote?: string | null;
@@ -112,6 +114,7 @@ export function appendMemoryBlock(
     extras.toolNote,
     extras.presence,
     extras.capability,
+    extras.activityLicense,
     extras.curiosity,
     extras.sharp,
     extras.voice,

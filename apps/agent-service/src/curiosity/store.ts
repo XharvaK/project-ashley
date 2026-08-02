@@ -238,6 +238,21 @@ export function recentTakes(
     .all(`-${withinHours} hours`, limit) as TakeRow[];
 }
 
+/** Titles for injected take ids (ActivityLicense allowedRefs). */
+export function takeTitlesByIds(db: DatabaseSync, ids: number[]): string[] {
+  if (ids.length === 0) return [];
+  const placeholders = ids.map(() => "?").join(",");
+  const rows = db
+    .prepare(
+      `SELECT i.title AS title
+       FROM cur_takes t
+       JOIN cur_items i ON i.id = t.item_id
+       WHERE t.id IN (${placeholders})`,
+    )
+    .all(...ids) as Array<{ title: string }>;
+  return rows.map((r) => r.title.trim()).filter(Boolean);
+}
+
 /** Full article fetch logged as provenance kind=read; excerpt-only takes have none. */
 export function takeHasFullRead(db: DatabaseSync, itemId: number): boolean {
   const row = db
