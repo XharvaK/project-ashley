@@ -3,12 +3,31 @@ import { getKv, setKv } from "../memory/kv.js";
 import {
   checkMoltbookStatus,
   createMoltbookPost,
+  MoltbookRateLimitError,
   registerMoltbookAgent,
   type MoltbookCredentials,
 } from "./moltbook-client.js";
 
 const MOLTBOOK_CREDS_KEY = "moltbook:credentials";
 const MOLTBOOK_STATUS_KEY = "moltbook:last_status";
+const MOLTBOOK_RATE_LIMIT_KEY = "moltbook:rate_limited_until";
+
+export function stampMoltbookRateLimit(db: DatabaseSync, retryAfterSec?: number): void {
+  const sec = Number.isFinite(retryAfterSec) && (retryAfterSec ?? 0) > 0
+    ? (retryAfterSec as number)
+    : 60;
+  setKv(db, MOLTBOOK_RATE_LIMIT_KEY, String(Date.now() + sec * 1000));
+}
+
+/** True while a 429 cooldown stamp is still active. */
+export function isMoltbookRateLimited(db: DatabaseSync): boolean {
+  const until = Number(getKv(db, MOLTBOOK_RATE_LIMIT_KEY) ?? 0);
+  return Number.isFinite(until) && until > Date.now();
+}
+
+export function isRateLimitError(err: unknown): boolean {
+  return err instanceof MoltbookRateLimitError;
+}
 
 export function getMoltbookCredentials(db: DatabaseSync): MoltbookCredentials | null {
   const json = getKv(db, MOLTBOOK_CREDS_KEY);
@@ -41,7 +60,10 @@ export async function refreshMoltbookStatus(
       }),
     );
     return { status, agent: creds.agent_name };
-  } catch {
+  } catch (err) {
+    if (isRateLimitError(err)) {
+      stampMoltbookRateLimit(db, (err as MoltbookRateLimitError).retryAfterSec);
+    }
     return null;
   }
 }
@@ -86,6 +108,13 @@ export async function executeMoltbookJoinWorkflow(
       creds,
     };
   } catch (err) {
+    if (isRateLimitError(err)) {
+      stampMoltbookRateLimit(db, (err as MoltbookRateLimitError).retryAfterSec);
+      return {
+        success: false,
+        message: "moltbook is rate-limiting right now, so the registration did not go through. give it a couple minutes and ask again — i'll retry then.",
+      };
+    }
     const msg = err instanceof Error ? err.message : String(err);
     return {
       success: false,
@@ -126,12 +155,27 @@ export async function executeMoltbookPostWorkflow(
   }
 
   const sub = submoltName.trim().toLowerCase() || "general";
-  const res = await createMoltbookPost(
-    creds.api_key,
-    sub,
-    title.trim().slice(0, 300) || "Hello",
-    content.trim().slice(0, 40_000) || title.trim().slice(0, 300) || "hi",
-  );
+  let res: Awaited<ReturnType<typeof createMoltbookPost>>;
+  try {
+    res = await createMoltbookPost(
+      creds.api_key,
+      sub,
+      title.trim().slice(0, 300) || "Hello",
+      content.trim().slice(0, 40_000) || title.trim().slice(0, 300) || "hi",
+    );
+  } catch (err) {
+    if (isRateLimitError(err)) {
+      stampMoltbookRateLimit(db, (err as MoltbookRateLimitError).retryAfterSec);
+      return {
+        success: false,
+        message: "moltbook is rate-limiting right now, so the post did not go through. no post exists to link. give it a couple minutes and ask again.",
+      };
+    }
+    return {
+      success: false,
+      message: `post to m/${sub} hit an error: ${err instanceof Error ? err.message : String(err)}. no post link exists.`,
+    };
+  }
 
   if (!res.success) {
     return {

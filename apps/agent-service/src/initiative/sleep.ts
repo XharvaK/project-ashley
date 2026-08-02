@@ -123,10 +123,15 @@ export function listPendingOwnTimeDrafts(
   db: DatabaseSync,
   ownerId: string,
   limit = 5,
-): Array<{ id: number; body: string; material_key: string | null }> {
+): Array<{
+  id: number;
+  body: string;
+  material_key: string | null;
+  created_at: string;
+}> {
   return db
     .prepare(
-      `SELECT id, body, material_key FROM mem_own_time_drafts
+      `SELECT id, body, material_key, created_at FROM mem_own_time_drafts
        WHERE owner_id = ? AND status = 'pending'
        ORDER BY created_at DESC
        LIMIT ?`,
@@ -135,6 +140,7 @@ export function listPendingOwnTimeDrafts(
     id: number;
     body: string;
     material_key: string | null;
+    created_at: string;
   }>;
 }
 
@@ -147,6 +153,21 @@ export function markOwnTimeDraftUsed(
      SET status = 'used', used_at = datetime('now')
      WHERE id = ?`,
   ).run(draftId);
+}
+
+export function getOwnTimeDraftById(
+  db: DatabaseSync,
+  ownerId: string,
+  draftId: number,
+): { id: number; body: string; material_key: string | null } | undefined {
+  return db
+    .prepare(
+      `SELECT id, body, material_key FROM mem_own_time_drafts
+       WHERE id = ? AND owner_id = ? AND status = 'pending'`,
+    )
+    .get(draftId, ownerId) as
+    | { id: number; body: string; material_key: string | null }
+    | undefined;
 }
 
 /** Call on every user message: AFK starts own-time; anything else clears it. */

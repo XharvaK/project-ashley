@@ -79,6 +79,44 @@ describe("computeNetworkActionLicense", () => {
     });
     expect(claimsUnlicensedNetworkAction(`here: ${url}`, lic)).toBe(false);
   });
+
+  it("floors invented non-moltbook URLs without provenance", () => {
+    const lic = computeNetworkActionLicense({});
+    expect(
+      claimsUnlicensedNetworkAction(
+        "the study is at https://pubmed.ncbi.nlm.nih.gov/12345678/",
+        lic,
+      ),
+    ).toBe(true);
+  });
+
+  it("allows URLs Doc sent this turn and safe media hosts", () => {
+    const docUrl = "https://pubmed.ncbi.nlm.nih.gov/12345678/";
+    const lic = computeNetworkActionLicense({ docUrls: [docUrl] });
+    expect(claimsUnlicensedNetworkAction(`the study: ${docUrl}`, lic)).toBe(false);
+    expect(
+      claimsUnlicensedNetworkAction(
+        "look at this https://media.tenor.com/floppy.gif",
+        lic,
+      ),
+    ).toBe(false);
+  });
+
+  it("floors retry countdowns and precise retry timers", () => {
+    const lic = computeNetworkActionLicense({});
+    expect(claimsUnlicensedNetworkAction("retrying in 30 seconds", lic)).toBe(
+      true,
+    );
+    expect(claimsUnlicensedNetworkAction("i'll retry in 2 minutes", lic)).toBe(
+      true,
+    );
+    expect(
+      claimsUnlicensedNetworkAction(
+        "give it a couple minutes and ask again",
+        lic,
+      ),
+    ).toBe(false);
+  });
 });
 
 describe("parseSubmoltFromMessage / signals", () => {

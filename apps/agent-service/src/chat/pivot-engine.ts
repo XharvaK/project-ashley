@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { getInterestNotebook } from "../curiosity/interest-notebook.js";
 import { recentTakes } from "../curiosity/store.js";
+import { getKv, setKv } from "../memory/kv.js";
 
 const LOW_CONTENT_RE =
   /^(lol|lmao|haha|hey|hi|yo|naber|selam|evet|hayır|ok|kk|brb|gn|night|yeah|nice|cool|idk|hmm|sure|fair)[.!?~]*$/i;
@@ -62,4 +63,57 @@ export function selectPivotTopic(
   }
 
   return null;
+}
+
+export type DayIntention = {
+  topic: string;
+  material: string;
+  date: string;
+};
+
+/**
+ * One real focus per day: rotate through the interest notebook deterministically
+ * (day-of-year, no dice) and pin it in KV so the heartbeat visits that area
+ * first. Falls back to the freshest take when the notebook is empty.
+ */
+export function pickDayIntention(
+  db: DatabaseSync,
+  ownerId: string,
+  now = new Date(),
+): DayIntention | null {
+  const date = now.toISOString().slice(0, 10);
+  const key = `day_intention:${ownerId}`;
+  const existing = getKv(db, key);
+  if (existing) {
+    try {
+      const prev = JSON.parse(existing) as DayIntention;
+      if (prev.date === date && prev.topic) return prev;
+    } catch {
+      // stale/corrupt — re-pick below
+    }
+  }
+
+  const threads = getInterestNotebook(db, ownerId).filter(
+    (t) => t.notes.length > 0,
+  );
+  let pick: DayIntention | null = null;
+  if (threads.length > 0) {
+    const dayOfYear = Math.floor(
+      (now.getTime() - new Date(now.getFullYear(), 0, 0).getTime()) / 86_400_000,
+    );
+    const thread = threads[dayOfYear % threads.length]!;
+    pick = {
+      topic: thread.title,
+      material: thread.notes[0]!,
+      date,
+    };
+  } else {
+    const takes = recentTakes(db, 72, 5);
+    const t = takes[0];
+    if (t) {
+      pick = { topic: t.title, material: t.take, date };
+    }
+  }
+  if (pick) setKv(db, key, JSON.stringify(pick));
+  return pick;
 }

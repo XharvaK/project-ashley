@@ -389,7 +389,7 @@ CREATE TABLE IF NOT EXISTS mem_pending_actions (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
   owner_id        TEXT NOT NULL,
   action_type     TEXT NOT NULL
-                    CHECK (action_type IN ('pin_fact','create_reminder','create_habit')),
+                    CHECK (action_type IN ('pin_fact','create_reminder','create_habit','moltbook_fetch')),
   payload_json    TEXT NOT NULL,
   status          TEXT NOT NULL DEFAULT 'pending'
                     CHECK (status IN ('pending','approved','rejected','expired')),
@@ -750,6 +750,40 @@ CREATE TABLE IF NOT EXISTS discord_emoji_weights (
 `);
     db.exec("PRAGMA user_version = 17");
     version = 17;
+  }
+  if (version < 18) {
+    // Widen mem_pending_actions CHECK to admit moltbook_fetch (429 retries);
+    // SQLite cannot alter a constraint in place.
+    const hasPending = db
+      .prepare(
+        `SELECT name FROM sqlite_master WHERE type='table' AND name='mem_pending_actions'`,
+      )
+      .get() as { name: string } | undefined;
+    if (hasPending) {
+      db.exec(`
+CREATE TABLE mem_pending_actions_v18 (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_id        TEXT NOT NULL,
+  action_type     TEXT NOT NULL
+                    CHECK (action_type IN ('pin_fact','create_reminder','create_habit','moltbook_fetch')),
+  payload_json    TEXT NOT NULL,
+  status          TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending','approved','rejected','expired')),
+  channel         TEXT NOT NULL DEFAULT 'telegram',
+  created_at      TEXT NOT NULL,
+  resolved_at     TEXT
+);
+INSERT INTO mem_pending_actions_v18 (id, owner_id, action_type, payload_json, status, channel, created_at, resolved_at)
+  SELECT id, owner_id, action_type, payload_json, status, channel, created_at, resolved_at
+  FROM mem_pending_actions;
+DROP TABLE mem_pending_actions;
+ALTER TABLE mem_pending_actions_v18 RENAME TO mem_pending_actions;
+CREATE INDEX IF NOT EXISTS idx_mem_pending_owner
+  ON mem_pending_actions (owner_id, status);
+`);
+    }
+    db.exec("PRAGMA user_version = 18");
+    version = 18;
   }
 }
 

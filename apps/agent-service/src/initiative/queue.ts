@@ -12,6 +12,7 @@ import { listInterruptedStates } from "../memory/conversation-state.js";
 import { listActiveFacts } from "../memory/facts.js";
 import { listStances } from "../memory/stances.js";
 import { kindFeedbackMultiplier } from "../signals.js";
+import { recentNegativeMoodCount } from "../memory/mood.js";
 import {
   ageOutOpenThreads,
   listOpenThreads,
@@ -269,12 +270,6 @@ function presenceMaterial(
     days >= 1
       ? `Quiet ~${days} day${days === 1 ? "" : "s"}.`
       : `Quiet ~${Math.round(idleHours)}h.`;
-  if (Math.random() < 0.5) {
-    return {
-      materialKey: `checkin:${dateKey}`,
-      material: `${silence} One still-here line. No question. No agenda. Do not invent Doc's day or projects.`,
-    };
-  }
   const beat = recentTakes(db, 72, 8).find((t) => t.take.trim().length > 0);
   if (!beat) {
     return {
@@ -463,19 +458,41 @@ export function collectCandidates(
     if (c) out.push(c);
   }
 
-  // Own-time drafts: cycle ~half the time so return-from-AFK is not always a dump.
-  if (Math.random() < 0.55) {
-    for (const draft of listPendingOwnTimeDrafts(db, ownerId, 3)) {
-      const c = make(
-        "curiosity_take",
-        draft.material_key ?? `draft:${draft.id}`,
-        `While he was AFK she drafted this to share (optional):\n${draft.body}`,
-        0.5,
-        mult("curiosity_take"),
-        { lane: "B", scoreScale: 1.05 },
-      );
-      if (c) out.push(c);
-    }
+  // Own-time drafts: only once they've aged (fresh AFK drafts stay for the
+  // moltbook heartbeat's first claim; nothing dumps immediately on return).
+  const draftMinAgeMs = 30 * 60 * 1000;
+  const draftCutoff = Date.now() - draftMinAgeMs;
+  for (const draft of listPendingOwnTimeDrafts(db, ownerId, 3)) {
+    if (Date.parse(draft.created_at) > draftCutoff) continue;
+    const c = make(
+      "curiosity_take",
+      draft.material_key ?? `draft:${draft.id}`,
+      `While he was AFK she drafted this to share (optional):\n${draft.body}`,
+      0.5,
+      mult("curiosity_take"),
+      { lane: "B", scoreScale: 1.05 },
+    );
+    if (c) out.push(c);
+  }
+
+  // Strong-signal check-in: her own recorded states have read negative
+  // repeatedly (>=3 in the last 48h) and Doc has been quiet. One honest line
+  // about her own low stretch — no guilt, no question, no agenda.
+  if (
+    context.idleHours >= env.proactiveCheckInIdleHours &&
+    unanswered === 0 &&
+    recentNegativeMoodCount(db, ownerId, 48) >= 3
+  ) {
+    const dateKey = localParts().dateKey;
+    const c = make(
+      "check_in",
+      `strongcheckin:${dateKey}`,
+      `Her own recorded stretch reads low (negative state >=3 times in 48h). One honest still-here line about her own low stretch. No guilt, no question, no agenda. Do not invent Doc's day.`,
+      0,
+      mult("check_in"),
+      { scoreScale: 1.1 },
+    );
+    if (c) out.push(c);
   }
 
   // Presence lives in check_in: silence material only, no score cheat, ≤1/day.

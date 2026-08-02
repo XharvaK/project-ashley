@@ -5,6 +5,8 @@
 
 export type NetworkActionLicense = {
   allowedUrls: string[];
+  /** URLs Doc sent/referenced this turn — echo-only, never extendable. */
+  docUrls: string[];
   joinOk: boolean;
   postOk: boolean;
   browseOk: boolean;
@@ -24,6 +26,8 @@ export type NetworkLicenseInput = {
   storedClaimUrl?: string | null;
   /** Doc explicitly asked for the claim / verify link. */
   claimLinkAsk?: boolean;
+  /** URLs Doc sent or referenced this turn — safe to echo, never to extend. */
+  docUrls?: string[];
 };
 
 const MOLTBOOK_URL_RE = /https?:\/\/[^\s)*\]]+/gi;
@@ -36,6 +40,14 @@ const POST_THEATER =
 
 const JOIN_THEATER =
   /\bi (just )?(registered|signed up|joined)\b|\bi('?m| am) (registered|on moltbook)\b|\bkaydoldum\b|\bkayıt oldum\b/i;
+
+/** Precise retry timers / countdowns — her loops never run one. Honest shape: "give it a couple minutes". */
+const COUNTDOWN_THEATER =
+  /\b(retry|retrying|try again|trying again|counting? down|cooldown|rate.?limit)\b.{0,50}\b\d+\s*(s|sec|secs|second|seconds|min|mins|minute|minutes)\b/i;
+
+/** First-person future retry with a precise window ("i'll retry in 2 minutes"). */
+const RETRY_TIMER_THEATER =
+  /\bi('?ll| will|'?m)\b.{0,40}\b(retry|wait|try again|check back)\b.{0,40}\b(in|after)\b.{0,20}\b\d+\s*(s|sec|secs|second|seconds|min|mins|minute|minutes)?\b/i;
 
 function normalizeUrl(url: string): string {
   return url.trim().replace(/[.,;:!?)]+$/g, "").toLowerCase();
@@ -54,6 +66,31 @@ export function isMoltbookOrInfraUrl(url: string): boolean {
     u.includes("ngrok") ||
     u.includes("yourdomain.tld")
   );
+}
+
+/** Media/CDN hosts she may cite without a tool note (gifs, attachments). */
+const SAFE_URL_HOSTS = [
+  "cdn.discordapp.com",
+  "media.discordapp.net",
+  "tenor.com",
+  "media.tenor.com",
+  "giphy.com",
+  "i.giphy.com",
+  "imgur.com",
+  "i.imgur.com",
+];
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "").toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function isSafeHost(url: string): boolean {
+  const host = hostOf(url);
+  return SAFE_URL_HOSTS.some((s) => host === s || host.endsWith(`.${s}`));
 }
 
 export function isUrlAllowed(url: string, allowedUrls: string[]): boolean {
@@ -109,6 +146,7 @@ function emptyNote(): string {
     "Network license: none this turn.",
     "Do not claim you browsed submolts, posted, introduced yourself, or paste moltbook post/profile links.",
     "Having credentials is not the same as posting. Disposition only unless a tool note licenses an action or URL.",
+    "If a network action failed or was rate-limited, say that plainly. Never claim retries, countdowns, or timers are running.",
   ].join(" ");
 }
 
@@ -123,6 +161,7 @@ function licensedNote(lic: NetworkActionLicense): string {
     parts.push("No browser URLs licensed — do not invent /p/… or claim links.");
   }
   parts.push("Never invent moltbook post URLs.");
+  parts.push("If an action was rate-limited or failed, say it plainly — no retry countdowns or timers.");
   return parts.join(" ");
 }
 
@@ -133,6 +172,7 @@ export function computeNetworkActionLicense(
   for (const u of input.allowedUrls ?? []) {
     if (u?.trim()) allowed.add(u.trim());
   }
+  const docUrls = (input.docUrls ?? []).map((u) => u?.trim()).filter(Boolean);
 
   const joinOk = input.joinOk === true;
   const postOk = input.postOk === true;
@@ -146,6 +186,7 @@ export function computeNetworkActionLicense(
 
   const lic: NetworkActionLicense = {
     allowedUrls: [...allowed],
+    docUrls: [...docUrls],
     joinOk,
     postOk,
     browseOk,
@@ -181,9 +222,11 @@ export function claimsUnlicensedNetworkAction(
   if (!trimmed) return false;
 
   for (const url of extractUrls(trimmed)) {
-    if (isMoltbookOrInfraUrl(url) && !isUrlAllowed(url, license.allowedUrls)) {
-      return true;
-    }
+    const licensed =
+      isUrlAllowed(url, license.allowedUrls) ||
+      isUrlAllowed(url, license.docUrls) ||
+      isSafeHost(url);
+    if (!licensed) return true;
   }
 
   // Bare "claim url" theater without an allowed URL in the reply
@@ -191,6 +234,11 @@ export function claimsUnlicensedNetworkAction(
     /\bclaim url\b|\bed25519\b|\bngrok\b|\byourdomain\.tld\b/i.test(trimmed) &&
     license.allowedUrls.length === 0
   ) {
+    return true;
+  }
+
+  // Precise retry timers / countdowns are theater — no loop runs one.
+  if (COUNTDOWN_THEATER.test(trimmed) || RETRY_TIMER_THEATER.test(trimmed)) {
     return true;
   }
 

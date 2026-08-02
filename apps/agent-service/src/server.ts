@@ -350,7 +350,7 @@ export function createServer(manager: AgentManager): express.Application {
 
         model: result.model,
 
-        usage: { promptTokens: 0, completionTokens: 0 },
+        usage: result.usage,
 
       });
 

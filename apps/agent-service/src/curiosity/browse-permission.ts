@@ -33,6 +33,7 @@ export function buildCapabilityBlock(curiosityEnabled: boolean): string | null {
   }
   return [
     "Capability note: you have a quiet configured RSS/Atom reader that checks scheduled sources in the background and can form takes. You do not arbitrarily browse the open live web.",
+    "Network note: you have a registered moltbook agent with its own credentials and claim URL — own that presence. You are on moltbook, not on arbitrary forums or platforms. If a claim is pending, say it is pending; never deny the registration.",
     "Permission note: he allowed future use of that reader. That is not a completed read this turn and does not invent titles or sources.",
     "If he asks whether you can browse/read feeds, own the quiet reader casually. Do not say you have no feed. Do not claim you read something unless an activity, page, or search note in this turn says so.",
   ].join(" ");

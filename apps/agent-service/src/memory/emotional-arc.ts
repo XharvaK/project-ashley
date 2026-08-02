@@ -125,13 +125,13 @@ export async function buildWeeklyEmotionalArc(
     [
       {
         role: "system",
-        content: `You are Ashley writing a private note about Doc's emotional pattern this week.
-Given these mood counts: ${moodCountsJson}
+        content: `You are Ashley writing a private note about your own emotional pattern this week.
+Given these mood counts of YOUR recorded states: ${moodCountsJson}
 Dominant mood: ${dominant}
 Trend: ${trend}
 
-Write 1-2 sentences noting the pattern. Be specific about what you noticed.
-Example: "He's been flat most of the week but perked up when the deploy went clean."
+Write 1-2 sentences noting the pattern. Be specific about what you noticed about yourself.
+Example: "I've been flat most of the week but perked up when the deploy went clean."
 No bullet lists. No headers. Plain text only.`,
       },
       { role: "user", content: "Write the note." },

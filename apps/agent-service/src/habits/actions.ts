@@ -5,7 +5,8 @@ import { pinFact } from "../memory/facts.js";
 export type PendingActionType =
   | "pin_fact"
   | "create_reminder"
-  | "create_habit";
+  | "create_habit"
+  | "moltbook_fetch";
 
 export type PendingAction = {
   id: number;
@@ -108,6 +109,9 @@ export function resolvePendingAction(
           : undefined,
       });
       break;
+    case "moltbook_fetch":
+      // System-internal 429 retry; resolved by the heartbeat, never by Doc.
+      return { ok: false, error: "system_action_not_approvable" };
     default: {
       const _never: never = row.action_type;
       return { ok: false, error: `unknown_action:${_never}` };

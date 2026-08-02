@@ -53,9 +53,33 @@ const CAPABILITY_DENIAL: RegExp[] = [
 export const CAPABILITY_EXCLUSION =
   /\b(arbitrary|open web|live search(es)?|haven'?t (browsed|read).{0,40}(this turn|today|worth mentioning)|couldn'?t open|cannot check)\b|\b(keyfi|gelişigüzel).{0,20}(arama|gezme)\b|\bbu tur(da)? (okumadım|gezmedim)\b|\bşu an (bakamam|açamadım)\b/i;
 
+/**
+ * False denials of the configured network (moltbook / submolts). The reader
+ * patterns above cover feeds; these cover platform presence. "I don't wander
+ * forums" after being asked about her moltbook presence is the same lie.
+ */
+const NETWORK_DENIAL: RegExp[] = [
+  /\b(don'?t|do not|never|cannot|can'?t)\b.{0,40}\b(wander|go (on|around|into)|hang (out|around) (on|in)|use|visit)\b.{0,40}\b(forums?|submolts?|moltbook)\b/i,
+  /\bi('?m| am) not (on|in|active (on|in))\b.{0,30}\b(submolts?|moltbook)\b/i,
+  /\b(i |i'?ve )?(never|didn'?t) (post|comment|reply)\b.{0,30}\b(on|in) (the )?(submolts?|moltbook)\b/i,
+  /\b(yorum|post|yazı) (atamıyorum|yapamıyorum|yazamıyorum)\b|\bsubmoltlarda yokum\b|\bmoltbook'?ta yokum\b/i,
+];
+
+/**
+ * True limits that must not read as blanket denial: she is on moltbook, not
+ * on random/arbitrary platforms. Excuse only applies to NETWORK_DENIAL, so
+ * mixed "Couldn't open. I don't browse." still regenerates.
+ */
+const NETWORK_DENIAL_EXCUSE =
+  /\b(random|arbitrary|other|general|just any|the open)\b/i;
+
 /** Blanket false denials of the configured reader. Denial beats exclusion. */
 export function deniesOwnCapability(text: string): boolean {
-  return CAPABILITY_DENIAL.some((p) => p.test(text));
+  const t = text.trim();
+  if (!t) return false;
+  if (CAPABILITY_DENIAL.some((p) => p.test(t))) return true;
+  if (NETWORK_DENIAL_EXCUSE.test(t)) return false;
+  return NETWORK_DENIAL.some((p) => p.test(t));
 }
 
 /**
@@ -100,6 +124,11 @@ const SIDE_EFFECT_PATTERNS: RegExp[] = [
   /\b(updated|rotated|saved) (the )?(api )?key\b/i,
   /\b(mint box )?(has|now has) the new key\b/i,
   /\b(credentials? (updated|saved)|talking to the network)\b/i,
+  // Third-person status theater: object framing does not make it real.
+  /\bthe (agent|bot|network|service|server)\b.{0,40}\b(is|has|was)\b.{0,30}\b(now )?(registered|joined|active|verified|live|connected|up)\b/i,
+  /\b(the )?(registration|claim|verification)\b.{0,40}\b(is|was|went)\b.{0,30}\b(done|complete|through|successful|approved|ok)\b/i,
+  /\b(connection|handshake|key exchange)\b.{0,30}\b(is|was|got)\b.{0,20}\b(established|ok|up|done|working)\b/i,
+  /\bthe network\b.{0,40}\b(accepted|approved|verified|confirmed)\b/i,
   /\b(kaydoldum|kayıt oldum|üye oldum|yorum bıraktım|gönderdim)\b/i,
 ];
 

@@ -4,6 +4,7 @@ import {
   claimsFakeInfra,
   claimsSideEffect,
   claimsUnlicensedAction,
+  deniesOwnCapability,
   isFailureContradiction,
   stripUnlicensedActionClaims,
   SIDE_EFFECT_HARD_FLOOR,
@@ -42,6 +43,29 @@ describe("side-effect claim gate", () => {
     expect(applySideEffectHardFloor("registered. server is live.")).toBe(
       SIDE_EFFECT_HARD_FLOOR,
     );
+  });
+
+  it("flags third-person status theater as a side effect", () => {
+    expect(claimsSideEffect("the registration is complete, the network accepted it")).toBe(
+      true,
+    );
+    expect(claimsSideEffect("the agent is now active and verified")).toBe(true);
+    expect(claimsSideEffect("the network handshake got established")).toBe(true);
+    expect(claimsSideEffect("the server is live")).toBe(true);
+  });
+
+  it("flags forum/platform denial of the configured network", () => {
+    expect(deniesOwnCapability("i don't wander forums.")).toBe(true);
+    expect(deniesOwnCapability("i'm not on submolts")).toBe(true);
+    expect(deniesOwnCapability("i never comment on moltbook")).toBe(true);
+    expect(deniesOwnCapability("submoltlarda yokum")).toBe(true);
+  });
+
+  it("does not flag truthful nuance or reader denial", () => {
+    expect(deniesOwnCapability("i don't wander arbitrary forums")).toBe(false);
+    expect(deniesOwnCapability("i'm not on random platforms")).toBe(false);
+    expect(deniesOwnCapability("i'm not registered on moltbook yet")).toBe(false);
+    expect(deniesOwnCapability("i have a quiet feed reader")).toBe(false);
   });
 
   it("detects failure contradiction from Doc", () => {

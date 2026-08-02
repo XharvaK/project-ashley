@@ -100,6 +100,35 @@ export function recentMoods(
     .all(ownerId, limit) as MoodRow[];
 }
 
+const NEGATIVE_MOODS = new Set([
+  "tired",
+  "irritated",
+  "flat",
+  "melancholy",
+  "bored",
+  "worried",
+  "restless",
+  "conflicted",
+]);
+
+/** How many of her own recorded states in the last `hours` read negative. */
+export function recentNegativeMoodCount(
+  db: DatabaseSync,
+  ownerId: string,
+  hours: number,
+  now = new Date(),
+): number {
+  const since = new Date(now.getTime() - hours * 3_600_000).toISOString();
+  const rows = db
+    .prepare(
+      `SELECT mood FROM mem_mood
+       WHERE owner_id = ? AND created_at >= ?
+       ORDER BY id DESC LIMIT 40`,
+    )
+    .all(ownerId, since) as Array<{ mood: string }>;
+  return rows.filter((r) => NEGATIVE_MOODS.has(r.mood)).length;
+}
+
 export function buildMoodBlock(
   db: DatabaseSync,
   ownerId: string,

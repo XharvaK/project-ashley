@@ -64,14 +64,16 @@ export type DecideSharpParams = {
   /** Block when link-immediate, night ask, etc. */
   blocked?: boolean;
   now?: Date;
-  rand?: () => number;
   force?: "on" | "off" | "auto";
-  chanceBanter?: number;
-  chancePeak?: number;
   maxPer24hHours?: number;
   minGapHours?: number;
 };
 
+/**
+ * Context-aware arming only — no RNG roll. A turn either earns sharp (shape +
+ * budget) or it does not; a dice roll is how she lands a forced jab on a dry
+ * turn or misses the one moment that actually called for it.
+ */
 export function decideSharpMode(p: DecideSharpParams): {
   armed: boolean;
   reason: string;
@@ -106,23 +108,15 @@ export function decideSharpMode(p: DecideSharpParams): {
     const lastMs = new Date(p.lastAt).getTime();
     if (Number.isFinite(lastMs)) {
       const hours = (now.getTime() - lastMs) / 3_600_000;
-      if (hours < maxHours) {
-        return { armed: false, reason: "budget24h" };
-      }
       if (hours < minGap) {
         return { armed: false, reason: "minGap" };
+      }
+      if (hours < maxHours) {
+        return { armed: false, reason: "budget24h" };
       }
     }
   }
 
-  const chance =
-    shape === "peak"
-      ? (p.chancePeak ?? env.sharpChancePeak)
-      : (p.chanceBanter ?? env.sharpChanceBanter);
-  const rand = p.rand ?? Math.random;
-  if (rand() >= chance) {
-    return { armed: false, reason: "roll" };
-  }
   return { armed: true, reason: shape };
 }
 

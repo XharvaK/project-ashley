@@ -43,7 +43,25 @@ export type CompletionOptions = {
   signal?: AbortSignal;
   /** Defaults: streamChat = interactive, completeChat/embed = background. */
   lane?: Lane;
+  /** Filled with real usage from the stream's final chunk (Mistral reports it there). */
+  usageSink?: { usage?: TokenUsage };
 };
+
+function toTokenUsage(raw: unknown): TokenUsage | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const r = raw as {
+    promptTokens?: unknown;
+    completionTokens?: unknown;
+    prompt_tokens?: unknown;
+    completion_tokens?: unknown;
+  };
+  const promptTokens = Number(r.promptTokens ?? r.prompt_tokens);
+  const completionTokens = Number(r.completionTokens ?? r.completion_tokens);
+  if (!Number.isFinite(promptTokens) || !Number.isFinite(completionTokens)) {
+    return undefined;
+  }
+  return { promptTokens, completionTokens };
+}
 
 let client: Mistral | null = null;
 
@@ -193,6 +211,12 @@ export async function* streamChat(
     );
 
     for await (const event of stream) {
+      if (options.usageSink) {
+        const usage = toTokenUsage(
+          (event.data as { usage?: unknown }).usage,
+        );
+        if (usage) options.usageSink.usage = usage;
+      }
       const delta = event.data.choices[0]?.delta?.content;
       const text = extractTextDelta(delta);
       if (text) yield text;
@@ -208,7 +232,12 @@ export async function* streamChat(
 export async function completeChat(
   messages: ChatMessage[],
   options: CompletionOptions = {},
-): Promise<{ text: string; model: string; toolCalls?: ToolCallResult[] }> {
+): Promise<{
+  text: string;
+  model: string;
+  toolCalls?: ToolCallResult[];
+  usage?: TokenUsage;
+}> {
   const release = await acquireLane(
     options.lane ?? "background",
     options.signal,
@@ -246,7 +275,13 @@ export async function completeChat(
         }
       }
     }
-    return { text, model, toolCalls: toolCalls.length > 0 ? toolCalls : undefined };
+    const usage = toTokenUsage((res as { usage?: unknown }).usage);
+    return {
+      text,
+      model,
+      toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+      usage,
+    };
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") throw err;
     throw mapMistralError(err);

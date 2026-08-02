@@ -330,6 +330,7 @@ export class AgentManager {
     text: string;
     threadId: string;
     model: string;
+    usage: { promptTokens: number; completionTokens: number } | null;
   }> {
 
     if (this.state === "paused" || this.state === "booting") {

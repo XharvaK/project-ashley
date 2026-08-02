@@ -10,6 +10,9 @@ export type VoiceExample = {
   tags: string[];
   doc: string;
   ashley: string;
+  /** Peak-register reference lines: exempt from the parrot guard, because
+   *  landing them again is the goal, not sample contamination. */
+  signature?: boolean;
 };
 
 type Bank = { version: number; examples: VoiceExample[] };
@@ -46,6 +49,8 @@ const TAG_SIGNALS: Array<{ tag: string; re: RegExp }> = [
   { tag: "tease", re: /\b(again|3am|4am|still)\b|yine|hala|tekrar/i },
   { tag: "continuity", re: /\b(anyway|what were you saying|as i was)\b|neyse|ne diyordun/i },
   { tag: "gif_moment", re: /\b(gif|funny|meme)\b|komik|espri/i },
+  { tag: "philosophy", re: /\b(conscious|consciousness|meaning|soul|sentient|mirror|are you real|what are you|why do you exist|aware)\b|bilinç|varoluş|anlam|ruh/i },
+  { tag: "warm_sharp", re: /\b(be honest|honestly|straight answer|roast me|tell me straight)\b|dürüst ol|söyle düz/i },
 ];
 
 /** Cheap tag guesses from the raw message. No model call, no embeddings. */
@@ -180,6 +185,7 @@ export function looksLikeParrot(
   if (!normReply) return false;
 
   for (const example of examples) {
+    if (example.signature) continue;
     const line = normalize(example.ashley);
     const words = line.split(" ").filter(Boolean);
     if (words.length < 4) continue;

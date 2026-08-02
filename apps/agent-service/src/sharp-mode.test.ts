@@ -47,10 +47,10 @@ describe("decideSharpMode", () => {
 
   it("arms on force=on and respects force=off", () => {
     expect(
-      decideSharpMode({ ...base, force: "on", rand: () => 0.99 }).armed,
+      decideSharpMode({ ...base, force: "on" }).armed,
     ).toBe(true);
     expect(
-      decideSharpMode({ ...base, force: "off", rand: () => 0 }).armed,
+      decideSharpMode({ ...base, force: "off" }).armed,
     ).toBe(false);
   });
 
@@ -61,28 +61,18 @@ describe("decideSharpMode", () => {
         ...base,
         force: "auto",
         lastAt,
-        rand: () => 0,
+        minGapHours: 1,
       }).reason,
     ).toBe("budget24h");
   });
 
-  it("rolls with stubbed RNG on peak turns", () => {
+  it("arms on peak turns when the budget allows — no dice", () => {
     expect(
-      decideSharpMode({
-        ...base,
-        force: "auto",
-        chancePeak: 0.28,
-        rand: () => 0.1,
-      }).armed,
+      decideSharpMode({ ...base, force: "auto" }).armed,
     ).toBe(true);
     expect(
-      decideSharpMode({
-        ...base,
-        force: "auto",
-        chancePeak: 0.28,
-        rand: () => 0.5,
-      }).armed,
-    ).toBe(false);
+      decideSharpMode({ ...base, force: "auto" }).reason,
+    ).toBe("peak");
   });
 
   it("stays off when blocked (link / night ask)", () => {
@@ -91,7 +81,6 @@ describe("decideSharpMode", () => {
         ...base,
         force: "auto",
         blocked: true,
-        rand: () => 0,
       }).armed,
     ).toBe(false);
   });
@@ -102,7 +91,6 @@ describe("decideSharpMode", () => {
         ...base,
         channel: "voice",
         force: "auto",
-        rand: () => 0,
       }).armed,
     ).toBe(false);
     expect(
@@ -110,8 +98,20 @@ describe("decideSharpMode", () => {
         ...base,
         queryMode: "recall",
         force: "auto",
-        rand: () => 0,
       }).armed,
     ).toBe(false);
+  });
+
+  it("respects min gap between sharp turns", () => {
+    const lastAt = new Date(Date.now() - 1 * 3_600_000).toISOString();
+    expect(
+      decideSharpMode({
+        ...base,
+        force: "auto",
+        lastAt,
+        minGapHours: 6,
+        maxPer24hHours: 24,
+      }).reason,
+    ).toBe("minGap");
   });
 });

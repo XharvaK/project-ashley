@@ -4,6 +4,7 @@ import {
   computeNetworkActionLicense,
   NETWORK_HARD_FLOOR,
 } from "../moltbook/network-license.js";
+import { SIDE_EFFECT_HARD_FLOOR } from "../curiosity/claim-gate.js";
 
 describe("finalizeHonesty", () => {
   it("floors fake moltbook /p/ URL after a repeat-style draft", () => {
@@ -52,5 +53,28 @@ describe("finalizeHonesty", () => {
     });
     expect(out.flooredActivity).toBe(true);
     expect(out.text.toLowerCase()).not.toContain("quiet feed");
+  });
+
+  it("floors third-person status theater without a tool note", () => {
+    const network = computeNetworkActionLicense({});
+    const out = finalizeHonesty({
+      text: "the registration is complete, the network accepted it",
+      readingLicensed: false,
+      network,
+    });
+    expect(out.flooredSideEffect).toBe(true);
+    expect(out.text).toBe(SIDE_EFFECT_HARD_FLOOR);
+  });
+
+  it("keeps side-effect claims when a tool note licenses them", () => {
+    const network = computeNetworkActionLicense({});
+    const out = finalizeHonesty({
+      text: "the registration is complete on my side, the tool confirmed it",
+      readingLicensed: false,
+      network,
+      sideEffectLicensed: true,
+    });
+    expect(out.flooredSideEffect).toBe(false);
+    expect(out.text).toContain("registration");
   });
 });

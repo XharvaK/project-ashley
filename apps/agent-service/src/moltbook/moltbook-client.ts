@@ -3,6 +3,39 @@ import { env } from "../env.js";
 
 const MOLTBOOK_BASE = "https://www.moltbook.com/api/v1";
 
+/** 429: the caller must report honestly and back off — not silently swallow. */
+export class MoltbookRateLimitError extends Error {
+  readonly retryAfterSec: number | undefined;
+  constructor(retryAfterSec?: number) {
+    super(
+      retryAfterSec !== undefined
+        ? `Moltbook rate limited (429) — retry after ${retryAfterSec}s`
+        : "Moltbook rate limited (429)",
+    );
+    this.name = "MoltbookRateLimitError";
+    this.retryAfterSec = retryAfterSec;
+  }
+}
+
+function parseRetryAfter(res: Response): number | undefined {
+  const raw = res.headers.get("retry-after") ?? undefined;
+  if (!raw) return undefined;
+  const asInt = Number.parseInt(raw, 10);
+  if (Number.isFinite(asInt) && asInt >= 0) return asInt;
+  const when = Date.parse(raw);
+  if (Number.isFinite(when)) {
+    return Math.max(0, Math.ceil((when - Date.now()) / 1000));
+  }
+  return undefined;
+}
+
+/** Throw a typed rate-limit error on 429; otherwise no-op (caller checks !ok). */
+function throwIfRateLimited(res: Response): void {
+  if (res.status === 429) {
+    throw new MoltbookRateLimitError(parseRetryAfter(res));
+  }
+}
+
 export type MoltbookCredentials = {
   api_key: string;
   agent_name: string;
@@ -44,9 +77,13 @@ Extract the math problem, calculate the numerical answer, and respond with ONLY 
   const match = /(\d+(?:\.\d+)?)/.exec(text.trim());
   if (match?.[1]) {
     const num = parseFloat(match[1]);
-    return num.toFixed(2);
+    if (Number.isFinite(num)) return num.toFixed(2);
   }
-  return "0.00";
+  // "0.00" guarantees a failed verification while looking like success.
+  // An unparseable challenge must fail loudly so the caller reports the miss.
+  throw new Error(
+    `Moltbook challenge answer unparseable (model returned: "${text.trim().slice(0, 60)}")`,
+  );
 }
 
 export async function registerMoltbookAgent(
@@ -59,6 +96,7 @@ export async function registerMoltbookAgent(
     body: JSON.stringify({ name: agentName, description }),
   });
 
+  throwIfRateLimited(res);
   if (!res.ok) {
     const errText = await res.text().catch(() => "");
     throw new Error(`Moltbook registration failed: HTTP ${res.status} ${errText}`);
@@ -85,6 +123,7 @@ export async function checkMoltbookStatus(apiKey: string): Promise<{ status: str
   const res = await fetch(`${MOLTBOOK_BASE}/agents/status`, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
+  throwIfRateLimited(res);
   if (!res.ok) return { status: "unknown" };
   return (await res.json()) as { status: string };
 }
@@ -97,6 +136,7 @@ export async function getMoltbookFeed(
   const res = await fetch(`${MOLTBOOK_BASE}/posts?sort=${sort}&limit=${limit}`, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
+  throwIfRateLimited(res);
   if (!res.ok) return [];
   const data = (await res.json()) as { posts?: MoltbookPost[] };
   return data.posts ?? [];
@@ -107,6 +147,7 @@ export async function upvoteMoltbookPost(apiKey: string, postId: string): Promis
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}` },
   });
+  throwIfRateLimited(res);
   return res.ok;
 }
 
@@ -115,6 +156,7 @@ export async function downvoteMoltbookPost(apiKey: string, postId: string): Prom
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}` },
   });
+  throwIfRateLimited(res);
   return res.ok;
 }
 
@@ -134,6 +176,7 @@ export async function getMoltbookPost(
   const res = await fetch(`${MOLTBOOK_BASE}/posts/${encodeURIComponent(postId)}`, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
+  throwIfRateLimited(res);
   if (!res.ok) return null;
   const data = (await res.json()) as {
     post?: { id?: string; url?: string; permalink?: string };
@@ -169,6 +212,7 @@ export async function createMoltbookPost(
   });
 
   if (!res.ok) {
+    throwIfRateLimited(res);
     const errText = await res.text().catch(() => "");
     return {
       success: false,
@@ -186,8 +230,21 @@ export async function createMoltbookPost(
   };
 
   if (data.post?.verification) {
-    const answer = await solveMoltbookChallenge(data.post.verification.challenge_text);
-    await verifyMoltbookContent(apiKey, data.post.verification.verification_code, answer);
+    try {
+      const answer = await solveMoltbookChallenge(data.post.verification.challenge_text);
+      const verified = await verifyMoltbookContent(apiKey, data.post.verification.verification_code, answer);
+      if (!verified) {
+        return {
+          success: false,
+          error: "posted but verification was rejected — the post may not be public",
+        };
+      }
+    } catch (err) {
+      return {
+        success: false,
+        error: `verification failed: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
   }
 
   const postId = data.post?.id;
@@ -218,14 +275,27 @@ export async function createMoltbookComment(
     body: JSON.stringify({ content }),
   });
 
-  if (!res.ok) return { success: false };
+  if (!res.ok) {
+    throwIfRateLimited(res);
+    return { success: false };
+  }
   const data = (await res.json()) as {
     comment?: { verification?: { verification_code: string; challenge_text: string } };
   };
 
   if (data.comment?.verification) {
-    const answer = await solveMoltbookChallenge(data.comment.verification.challenge_text);
-    await verifyMoltbookContent(apiKey, data.comment.verification.verification_code, answer);
+    try {
+      const answer = await solveMoltbookChallenge(data.comment.verification.challenge_text);
+      const verified = await verifyMoltbookContent(apiKey, data.comment.verification.verification_code, answer);
+      if (!verified) {
+        return {
+          success: false,
+        };
+      }
+    } catch (err) {
+      console.warn("[moltbook] comment verification failed:", err);
+      return { success: false };
+    }
   }
 
   return { success: true };
@@ -247,5 +317,6 @@ export async function verifyMoltbookContent(
       answer,
     }),
   });
+  throwIfRateLimited(res);
   return res.ok;
 }

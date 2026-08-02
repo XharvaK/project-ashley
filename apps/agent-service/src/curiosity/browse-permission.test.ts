@@ -44,6 +44,12 @@ describe("buildCapabilityBlock", () => {
     expect(block).not.toMatch(/sqlite\.org|hnrss|article title/i);
   });
 
+  it("owns the registered moltbook presence, not arbitrary forums", () => {
+    const block = buildCapabilityBlock(true);
+    expect(block).toMatch(/registered moltbook agent/i);
+    expect(block).toMatch(/not on arbitrary forums/i);
+  });
+
   it("does not claim a reader when curiosity is disabled", () => {
     const block = buildCapabilityBlock(false);
     expect(block).toMatch(/unavailable|disabled/i);

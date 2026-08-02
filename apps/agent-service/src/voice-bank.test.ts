@@ -59,6 +59,33 @@ describe("messageTags", () => {
     );
     expect(messageTags("the async handler throws")).toContain("substance_code");
   });
+
+  it("tags philosophy and warm-sharp registers", () => {
+    expect(messageTags("are you conscious, what are you really")).toContain(
+      "philosophy",
+    );
+    expect(messageTags("be honest, was that dumb")).toContain("warm_sharp");
+  });
+});
+
+describe("signature peak-register samples", () => {
+  it("never flags signature peak-register lines as parrot", () => {
+    const bank = loadVoiceBank();
+    const sig = bank.filter((e) => e.signature);
+    expect(sig.length).toBeGreaterThanOrEqual(3);
+    for (const e of sig) {
+      expect(looksLikeParrot(e.ashley, [e])).toBe(false);
+    }
+  });
+
+  it("selects signature samples on philosophy turns", () => {
+    const picked = selectVoiceExamples({
+      message: "be honest, are you conscious",
+      seed: "t1",
+      max: 4,
+    });
+    expect(picked.some((e) => e.signature)).toBe(true);
+  });
 });
 
 describe("selectVoiceExamples", () => {

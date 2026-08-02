@@ -49,7 +49,7 @@ export const env = {
   // Mistral documents 0.0-0.7; above that a bilingual bot starts switching
   // language mid-sentence, so the ceiling is enforced here rather than trusted.
   mistralChatTemperature: Math.min(
-    Number(process.env.MISTRAL_CHAT_TEMPERATURE ?? 0.65),
+    Number(process.env.MISTRAL_CHAT_TEMPERATURE ?? 0.7),
     0.7,
   ),
   mistralChatPresencePenalty: Number(
@@ -85,8 +85,6 @@ export const env = {
     | "normal"
     | "high",
   sharpEnabled: process.env.ASHLEY_SHARP_ENABLED !== "false",
-  sharpChanceBanter: Number(process.env.ASHLEY_SHARP_CHANCE_BANTER ?? 0.07),
-  sharpChancePeak: Number(process.env.ASHLEY_SHARP_CHANCE_PEAK ?? 0.2),
   /** Rolling hours after a fire before another sharp turn may arm. */
   sharpMaxPer24hHours: Number(process.env.ASHLEY_SHARP_MAX_HOURS ?? 24),
   sharpMinGapHours: Number(process.env.ASHLEY_SHARP_MIN_GAP_HOURS ?? 6),
@@ -94,6 +92,13 @@ export const env = {
     | "on"
     | "off"
     | "auto",
+  /** Daily real-voice activity caps on moltbook (heartbeat, deterministic). */
+  moltbookMaxPostsPerDay: Number(
+    process.env.MOLTBOOK_MAX_POSTS_PER_DAY ?? 3,
+  ),
+  moltbookMaxCommentsPerDay: Number(
+    process.env.MOLTBOOK_MAX_COMMENTS_PER_DAY ?? 12,
+  ),
   autoRememberEnabled: process.env.AUTO_REMEMBER_ENABLED !== "false",
   memoryJobsPendingAlert: Number(
     process.env.MEMORY_JOBS_PENDING_ALERT ?? 50,

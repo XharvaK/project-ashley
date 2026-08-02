@@ -2,7 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { AppError } from "./errors.js";
 import { env } from "./env.js";
 import { buildChatMessages } from "./chat-messages.js";
-import { completeChat, streamChat, type ToolDefinition } from "./mistral-client.js";
+import { completeChat, streamChat, type TokenUsage, type ToolDefinition } from "./mistral-client.js";
 import {
   classifyReasoningEffort,
   selectTemperature,
@@ -65,6 +65,7 @@ import { finalizeHonesty } from "./chat/honesty-finalizer.js";
 import {
   claimsUnlicensedNetworkAction,
   computeNetworkActionLicense,
+  extractUrls,
   isClaimLinkAsk,
   isMoltbookStatusAsk,
   isMoltbookVerifySignal,
@@ -220,6 +221,7 @@ export type ChatStreamEvent =
       text: string;
       model: string;
       threadId: string;
+      usage: TokenUsage | null;
     }
   | { type: "error"; code: string; message: string };
 
@@ -584,6 +586,7 @@ export class ChatService {
           allowedUrls: networkAllowedUrls,
           storedClaimUrl: getMoltbookCredentials(this.db)?.claim_url ?? null,
           claimLinkAsk: isClaimLinkAsk(request.message),
+          docUrls: extractUrls(request.message),
         });
 
       let networkLicense = buildNetworkLicense();
@@ -647,6 +650,10 @@ export class ChatService {
         chatTemperature: env.mistralChatTemperature,
       });
 
+      // Real per-turn token usage (Mistral reports it on the stream's final
+      // chunk) — replaces the fabricated zeros in the HTTP response.
+      const turnUsage: { usage?: TokenUsage } = {};
+
       const sampling = {
         maxTokens,
         temperature: temp,
@@ -654,6 +661,7 @@ export class ChatService {
         reasoningEffort,
         signal: this.abortController.signal,
         lane: "interactive" as const,
+        usageSink: turnUsage,
       };
 
       // Text channels hold the deltas back so a copied sample or a fabricated
@@ -895,12 +903,20 @@ export class ChatService {
             text: full,
             readingLicensed: activityLicense.readingLicensed,
             network: networkLicense,
+            sideEffectLicensed:
+              Boolean(toolNote) ||
+              networkJoinOk ||
+              networkPostOk ||
+              isMoltbookVerifySignal(request.message),
           });
           if (finalized.flooredNetwork) {
             console.warn("[chat] network hard floor after finalizer");
           }
           if (finalized.flooredActivity) {
             console.warn("[chat] activity floor after finalizer");
+          }
+          if (finalized.flooredSideEffect) {
+            console.warn("[chat] side-effect floor after finalizer");
           }
           full = finalized.text;
         }
@@ -922,6 +938,7 @@ export class ChatService {
           text: full,
           model: env.mistralModel,
           threadId: assembled.threadId,
+          usage: turnUsage.usage ?? null,
         };
         return;
       }
@@ -979,6 +996,7 @@ export class ChatService {
         text: full,
         model: env.mistralModel,
         threadId: assembled.threadId,
+        usage: turnUsage.usage ?? null,
       };
     } catch (err) {
       if (err instanceof AppError) {
@@ -1003,10 +1021,12 @@ export class ChatService {
     text: string;
     threadId: string;
     model: string;
+    usage: TokenUsage | null;
   }> {
     let text = "";
     let threadId = request.threadId ?? "";
     let model = env.mistralModel;
+    let usage: TokenUsage | null = null;
 
     for await (const event of this.stream(request)) {
       if (event.type === "delta") text += event.text;
@@ -1014,6 +1034,7 @@ export class ChatService {
         text = event.text;
         model = event.model;
         threadId = event.threadId;
+        usage = event.usage;
       }
       if (event.type === "error") {
         throw new AppError(
@@ -1027,7 +1048,7 @@ export class ChatService {
     const tid =
       threadId ||
       resolveActiveThread(this.db, request.ownerId, request.channel);
-    return { text, threadId: tid, model };
+    return { text, threadId: tid, model, usage };
   }
 
   pinMemory(

@@ -44,6 +44,8 @@ const CONSOLIDATION_TIMEOUT_MS = 4 * 60 * 1000;
 /** Lease must outlive the job timeout so a queued limiter wait cannot double-run. */
 const LEASE_MINUTES = 6;
 const MAX_JOBS_PER_TICK = 5;
+/** Embed jobs merged into one embedding call per tick (RPM guard). */
+const EMBED_BATCH_MAX = 20;
 const FACTS_WINDOW_MAX_MESSAGES = 30;
 const STANCE_WINDOW_MAX_MESSAGES = 12;
 
@@ -337,10 +339,6 @@ export class ConsolidationWorker {
       messageId?: number;
     };
 
-    if (job.job_type === "embed" && payload.messageId && payload.threadId) {
-      await this.runEmbed(job.owner_id, payload.threadId, payload.messageId);
-      return null;
-    }
     if (job.job_type === "facts" && payload.threadId) {
       await this.runFacts(
         job.owner_id,
@@ -382,6 +380,31 @@ export class ConsolidationWorker {
       this.ticks += 1;
       if (this.ticks % 30 === 0) {
         pruneOldDoneJobs(this.db);
+      }
+
+      // Embed jobs are the high-volume lane (one per message, never coalesced).
+      // Merge a pending batch into a single embedding call instead of one call
+      // per job, so a long conversation cannot drive request rate.
+      const embedJobs = this.claimPending("embed", EMBED_BATCH_MAX);
+      if (embedJobs.length > 0) {
+        try {
+          await this.runEmbedBatch(
+            embedJobs.map((j) => ({
+              id: j.id,
+              ownerId: j.owner_id,
+              payload: JSON.parse(j.payload_json) as CoalescePayload & {
+                messageId?: number;
+                threadId?: string;
+              },
+            })),
+          );
+        } catch (err) {
+          console.warn(`[memory] embed batch failed: ${String(err)}`);
+        }
+        this.markDone(
+          embedJobs.map((j) => j.id),
+          null,
+        );
       }
 
       for (let i = 0; i < MAX_JOBS_PER_TICK; i++) {
@@ -435,44 +458,114 @@ export class ConsolidationWorker {
     }
   }
 
-  private async runEmbed(
-    ownerId: string,
-    threadId: string,
-    messageId: number,
-  ): Promise<void> {
-    const row = this.db
+  private claimPending(
+    jobType: JobType,
+    limit: number,
+  ): Array<{ id: number; owner_id: string; payload_json: string }> {
+    return this.db
       .prepare(
-        `SELECT text, channel, owner_id FROM mem_messages WHERE id = ? AND thread_id = ?`,
+        `SELECT id, owner_id, payload_json FROM mem_jobs
+         WHERE status = 'pending' AND job_type = ?
+         ORDER BY created_at
+         LIMIT ?`,
       )
-      .get(messageId, threadId) as
-      | { text: string; channel: string; owner_id: string }
-      | undefined;
-    if (!row || row.owner_id !== ownerId) return;
+      .all(jobType, limit) as Array<{
+      id: number;
+      owner_id: string;
+      payload_json: string;
+    }>;
+  }
 
-    const pieces = chunkText(row.text);
-    const embeddings = await embedTexts(pieces, { signal: apiSignal() });
+  private markDone(ids: number[], err: Error | null): void {
+    const stmt = this.db.prepare(
+      `UPDATE mem_jobs SET status = ?, last_error = ?, updated_at = datetime('now') WHERE id = ?`,
+    );
+    for (const id of ids) {
+      stmt.run(err ? "failed" : "done", err?.message ?? null, id);
+    }
+  }
+
+  private async runEmbedBatch(
+    jobs: Array<{
+      id: number;
+      ownerId: string;
+      payload: CoalescePayload & { messageId?: number; threadId?: string };
+    }>,
+  ): Promise<void> {
+    const groups: Array<{
+      id: number;
+      ownerId: string;
+      threadId: string;
+      messageId: number;
+      channel: string;
+      texts: string[];
+    }> = [];
+
+    for (const job of jobs) {
+      const { threadId, messageId } = job.payload;
+      if (!threadId || !messageId) continue;
+      const row = this.db
+        .prepare(
+          `SELECT text, channel, owner_id FROM mem_messages WHERE id = ? AND thread_id = ?`,
+        )
+        .get(messageId, threadId) as
+        | { text: string; channel: string; owner_id: string }
+        | undefined;
+      if (!row || row.owner_id !== job.ownerId) continue;
+      groups.push({
+        id: job.id,
+        ownerId: job.ownerId,
+        threadId,
+        messageId,
+        channel: row.channel,
+        texts: chunkText(row.text),
+      });
+    }
+
+    if (groups.length === 0) return;
+
+    const allPieces = groups.flatMap((g) => g.texts);
+    let embeddings: Float32Array[];
+    try {
+      embeddings = await embedTexts(allPieces, { signal: apiSignal() });
+    } catch (err) {
+      this.markDone(
+        groups.map((g) => g.id),
+        err instanceof Error ? err : new Error(String(err)),
+      );
+      throw err;
+    }
+
+    let offset = 0;
     const now = new Date().toISOString();
-
-    pieces.forEach((text, i) => {
-      const emb = embeddings[i];
-      if (!emb) return;
+    for (const g of groups) {
+      g.texts.forEach((text, i) => {
+        const emb = embeddings[offset + i];
+        if (!emb) return;
+        this.db
+          .prepare(
+            `INSERT OR IGNORE INTO mem_chunks (owner_id, thread_id, message_id, chunk_index, text, channel, embedding, created_at, token_estimate)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .run(
+            g.ownerId,
+            g.threadId,
+            g.messageId,
+            i,
+            text,
+            g.channel,
+            float32ToBuffer(emb),
+            now,
+            estimateTokens(text),
+          );
+      });
+      offset += g.texts.length;
       this.db
         .prepare(
-          `INSERT OR IGNORE INTO mem_chunks (owner_id, thread_id, message_id, chunk_index, text, channel, embedding, created_at, token_estimate)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `UPDATE mem_jobs SET status = 'done', updated_at = datetime('now') WHERE id = ?`,
         )
-        .run(
-          ownerId,
-          threadId,
-          messageId,
-          i,
-          text,
-          row.channel,
-          float32ToBuffer(emb),
-          now,
-          estimateTokens(text),
-        );
-    });
+        .run(g.id);
+    }
   }
 
   private async runFacts(

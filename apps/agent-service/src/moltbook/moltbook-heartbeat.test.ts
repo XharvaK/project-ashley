@@ -4,6 +4,7 @@ import { migrate } from "../memory/db.js";
 import {
   getMoltbookActivityLabel,
   runMoltbookHeartbeatPass,
+  splitDraftForPost,
 } from "./moltbook-heartbeat.js";
 
 describe("moltbook-heartbeat", () => {
@@ -21,5 +22,18 @@ describe("moltbook-heartbeat", () => {
   it("handles pass without credentials gracefully without crashing", async () => {
     await runMoltbookHeartbeatPass(db, "test_owner");
     expect(true).toBe(true);
+  });
+
+  it("splits take drafts into title and body for posts", () => {
+    expect(splitDraftForPost("Dopamine reuptake: the kinetics matter more than the pKa")).toEqual({
+      title: "Dopamine reuptake",
+      text: "the kinetics matter more than the pKa",
+    });
+  });
+
+  it("falls back to body-only when a draft has no title separator", () => {
+    const split = splitDraftForPost("no colon here");
+    expect(split.title).toBe("no colon here");
+    expect(split.text).toBe("no colon here");
   });
 });
