@@ -2,9 +2,9 @@
 // Compare two replay runs probe by probe: deterministic gates first, then a
 // blind pairwise judge. Sides are swapped per pair so the judge cannot learn
 // that B is always the new build.
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import {
   OUT_ROOT,
   envValue,
@@ -126,31 +126,53 @@ function transcript(result) {
     .join("\n\n");
 }
 
-async function askJudge(model, apiKey, probe, left, right) {
-  const res = await fetch("https://api.mistral.ai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      temperature: 0,
-      max_tokens: 300,
-      messages: [
-        { role: "system", content: RUBRIC },
-        {
-          role: "user",
-          content: `Probe: ${probe.id} (${probe.tags.join(", ")})\nWhat it is testing: ${probe.note}\n\n--- A ---\n${left}\n\n--- B ---\n${right}`,
-        },
-      ],
-    }),
-  });
-  if (!res.ok) throw new Error(`judge ${res.status}: ${await res.text()}`);
-  const body = await res.json();
-  const text = body.choices?.[0]?.message?.content ?? "";
-  const json = text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
-  return JSON.parse(json);
+async function askJudge(model, apiKey, probe, left, right, maxRateLimitRetries = 5) {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch("https://api.mistral.ai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0,
+        max_tokens: 300,
+        messages: [
+          { role: "system", content: RUBRIC },
+          {
+            role: "user",
+            content: `Probe: ${probe.id} (${probe.tags.join(", ")})\nWhat it is testing: ${probe.note}\n\n--- A ---\n${left}\n\n--- B ---\n${right}`,
+          },
+        ],
+      }),
+    });
+    const responseText = await res.text();
+    if (res.status === 429 && attempt < maxRateLimitRetries) {
+      let bodySeconds = Number.NaN;
+      try {
+        bodySeconds = Number(JSON.parse(responseText)?.retryAfterSec);
+      } catch {
+        // Fall back to the response header or the conservative default below.
+      }
+      const retryAfter = res.headers.get("retry-after");
+      const headerSeconds = retryAfter === null ? Number.NaN : Number(retryAfter);
+      const seconds = Math.max(
+        1,
+        Math.min(120, Number.isFinite(headerSeconds)
+          ? headerSeconds
+          : Number.isFinite(bodySeconds) ? bodySeconds : 30),
+      );
+      console.log(`[judge] rate limited; retrying in ${seconds}s (${attempt + 1}/${maxRateLimitRetries})`);
+      await new Promise((resolve) => setTimeout(resolve, seconds * 1000));
+      continue;
+    }
+    if (!res.ok) throw new Error(`judge ${res.status}: ${responseText}`);
+    const body = JSON.parse(responseText);
+    const text = body.choices?.[0]?.message?.content ?? "";
+    const json = text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
+    return JSON.parse(json);
+  }
 }
 
 function key(result) {
@@ -336,7 +358,11 @@ async function main() {
   }
 }
 
-if (import.meta.url === pathToFileURL(resolve(process.argv[1] ?? "")).href) {
+const entryPath = process.argv[1]
+  ? realpathSync(resolve(process.argv[1])).toLowerCase()
+  : "";
+const modulePath = realpathSync(fileURLToPath(import.meta.url)).toLowerCase();
+if (entryPath === modulePath) {
   main().catch((err) => {
     console.error(err instanceof Error ? err.message : err);
     process.exit(1);
