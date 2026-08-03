@@ -1,4 +1,4 @@
-const ACTIVITY_PATTERNS: RegExp[] = [
+const READING_ACTIVITY_PATTERNS: RegExp[] = [
   /\bi (?:just |already )?(?:read|skimmed|finished reading|went through)\b/i,
   /\bi (?:was|am|'m|have been) (?:reading|skimming|browsing|looking through)\b/i,
   /\bi (?:looked|searched) (?:it|that|this) up\b/i,
@@ -8,7 +8,7 @@ const ACTIVITY_PATTERNS: RegExp[] = [
   /\bon my (?:quiet )?(?:feed|reader|rss)\b/i,
 ];
 
-const ACTIVITY_EXCLUSIONS: RegExp[] = [
+const READING_ACTIVITY_EXCLUSIONS: RegExp[] = [
   /\bread(?:ing)? (?:me|this|the room|between the lines)\b/i,
   /\bworth reading\b/i,
   /\ba good read\b/i,
@@ -18,11 +18,27 @@ const ACTIVITY_EXCLUSIONS: RegExp[] = [
   /\bhaven't been reading anything worth mentioning\b/i,
 ];
 
-export function claimsOwnActivity(text: string): boolean {
+const GENERAL_ACTIVITY_PATTERNS: RegExp[] = [
+  /\bi(?:'m| am| have been|'ve been) (?:working|building|writing|fixing|debugging|testing|rewiring|poking|watching|listening|playing|cooking|making|researching|sitting|sleeping|thinking)\b/i,
+  /\bi (?:just |already )?(?:wrote|built|fixed|debugged|tested|rewired|made|finished|watched|listened|slept|researched)\b/i,
+  /^\s*(?:just )?(?:working|building|writing|fixing|debugging|testing|rewiring|poking|watching|listening|playing|cooking|making|researching|sitting|sleeping|thinking|slept|wrote|built|fixed)\b/i,
+];
+
+export function claimsOwnReadingActivity(text: string): boolean {
   const clean = text.trim();
   if (!clean) return false;
-  if (ACTIVITY_EXCLUSIONS.some((pattern) => pattern.test(clean))) {
+  if (READING_ACTIVITY_EXCLUSIONS.some((pattern) => pattern.test(clean))) {
     return false;
   }
-  return ACTIVITY_PATTERNS.some((pattern) => pattern.test(clean));
+  return READING_ACTIVITY_PATTERNS.some((pattern) => pattern.test(clean));
+}
+
+export function claimsOwnGeneralActivity(text: string): boolean {
+  const clean = text.trim();
+  if (!clean) return false;
+  return GENERAL_ACTIVITY_PATTERNS.some((pattern) => pattern.test(clean));
+}
+
+export function claimsOwnActivity(text: string): boolean {
+  return claimsOwnReadingActivity(text) || claimsOwnGeneralActivity(text);
 }

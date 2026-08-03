@@ -83,6 +83,7 @@ export const env = {
   agentPort: numericEnv("AGENT_PORT", 3710, 1, 65_535, true),
   agentBindHost: process.env.AGENT_BIND_HOST ?? "127.0.0.1",
   nodeEnv: process.env.NODE_ENV ?? "development",
+  personaEvalMode: process.env.PERSONA_EVAL_MODE === "true",
   proactiveEnabled: process.env.PROACTIVE_ENABLED !== "false",
   proactiveMaxPerDay: numericEnv("PROACTIVE_MAX_PER_DAY", 10, 0, 100, true),
   proactiveMinIdleHours: numericEnv("PROACTIVE_MIN_IDLE_HOURS", 2, 0, 168),

@@ -34,6 +34,7 @@ if ($LASTEXITCODE -ne 0) { throw "agent-service build failed" }
 $env:AGENT_PORT = "$Port"
 $env:COMPOSER_DATA_DIR = $EvalData
 $env:ASHLEY_NUCLEAR = "true"
+$env:PERSONA_EVAL_MODE = "true"
 $env:PROACTIVE_ENABLED = "false"
 # Her inner life is live infrastructure: in a probe run it would spend search
 # credits and make the same probe answer differently on Tuesday.
@@ -72,7 +73,8 @@ try {
         Write-Host "Stopped isolated agent (pid $($agent.Id))"
     }
     Remove-Item Env:\AGENT_PORT, Env:\COMPOSER_DATA_DIR, Env:\ASHLEY_NUCLEAR, `
-        Env:\PROACTIVE_ENABLED, Env:\MEMORY_RETRIEVAL_TOP_K, Env:\CURIOSITY_ENABLED `
+        Env:\PERSONA_EVAL_MODE, Env:\PROACTIVE_ENABLED, Env:\MEMORY_RETRIEVAL_TOP_K, `
+        Env:\CURIOSITY_ENABLED `
         -ErrorAction SilentlyContinue
 }
 

@@ -110,8 +110,11 @@ async function main() {
   const results = [];
   for (const probe of probes) {
     for (let seed = 1; seed <= args.seeds; seed++) {
+      const runOwnerId = process.env.PERSONA_EVAL_MODE === "true"
+        ? `${ownerId}:persona-eval:${label}:${probe.id}:${seed}`
+        : ownerId;
       // Fresh thread per run so probes cannot contaminate each other.
-      await post(`${args.url}/memory/newthread`, { userId: ownerId });
+      await post(`${args.url}/memory/newthread`, { userId: runOwnerId });
       const turns = [];
       let failed = null;
       for (const message of probe.turns) {
@@ -120,7 +123,7 @@ async function main() {
           const reply = await post(`${args.url}/chat/text`, {
             message,
             channel: "discord",
-            userId: ownerId,
+            userId: runOwnerId,
           });
           turns.push({
             user: message,

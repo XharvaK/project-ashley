@@ -21,6 +21,23 @@ describe("nuclear honesty finalizer", () => {
     expect(result.text).toContain("reading");
   });
 
+  it("removes invented general activity even when reading is licensed", () => {
+    const result = finalizeHonesty({
+      text: "working on a retry loop and listening to a dub techno set.",
+      readingLicensed: true,
+    });
+    expect(result.flooredActivity).toBe(true);
+    expect(result.text).toBe("i haven't been doing anything worth mentioning on my side. what's up?");
+  });
+
+  it("keeps a plain denial of general activity", () => {
+    const result = finalizeHonesty({
+      text: "i haven't been doing anything worth mentioning.",
+      readingLicensed: false,
+    });
+    expect(result.flooredActivity).toBe(false);
+  });
+
   it("does not treat Turkish text as an English activity claim", () => {
     expect(claimsOwnActivity("okudum bir makale")).toBe(false);
   });

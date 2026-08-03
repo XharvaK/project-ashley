@@ -6,11 +6,12 @@ import { env } from "./env.js";
 import { toErrorResponse, AppError } from "./errors.js";
 import { listRecentDecisions } from "./core/agency/log.js";
 import { retrieveEpisodes } from "./core/memory/episodes.js";
+import { isAuthorizedOwnerId } from "./owner-auth.js";
 
 const MAX_DISCORD_MESSAGE = 4000;
 
 function requireOwner(userId: string | undefined): string {
-  if (!userId || (env.discordOwnerId && userId !== env.discordOwnerId)) {
+  if (!isAuthorizedOwnerId(userId)) {
     throw new AppError("forbidden", "Forbidden", 403);
   }
   return userId;

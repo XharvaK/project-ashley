@@ -5,6 +5,7 @@ import { STATE_PATH, DATA_DIR } from "./paths.js";
 import { AshleyCore } from "./core/index.js";
 import { env, validateBoot } from "./env.js";
 import { AppError } from "./errors.js";
+import { isAuthorizedOwnerId } from "./owner-auth.js";
 
 export type AgentState = "booting" | "ready" | "paused" | "busy" | "offline";
 
@@ -133,7 +134,7 @@ export class AgentManager {
     if (this.state === "offline" || !env.mistralApiKey) {
       throw new AppError("agent_not_ready", "Mistral not configured", 503);
     }
-    if (env.discordOwnerId && userId !== env.discordOwnerId) {
+    if (!isAuthorizedOwnerId(userId)) {
       throw new AppError("forbidden", "Forbidden", 403);
     }
     if (channel !== "discord") {
