@@ -1,0 +1,11 @@
+{
+  "name": "project-ashley",
+  "install": "bash .cursor/install.sh",
+  "terminals": [],
+  "ports": [
+    {
+      "name": "agent-service",
+      "port": 3710
+    }
+  ]
+}
