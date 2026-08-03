@@ -718,6 +718,28 @@ CREATE INDEX IF NOT EXISTS idx_cur_source_candidates_status
   ON cur_source_candidates (status, successful_fetches, updated_at);
 `;
 
+const MIGRATION_9 = `
+CREATE TABLE IF NOT EXISTS identity_reviews (
+  id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_id             TEXT NOT NULL,
+  revision_id          INTEGER NOT NULL UNIQUE REFERENCES learning_revisions(id),
+  target_kind          TEXT NOT NULL CHECK (target_kind IN ('value', 'boundary')),
+  ashley_position      TEXT CHECK (ashley_position IN ('affirm', 'object', 'defer')),
+  ashley_rationale     TEXT,
+  ashley_evidence_type TEXT,
+  ashley_evidence_id   TEXT,
+  ashley_decided_at    TEXT,
+  doc_decision         TEXT CHECK (doc_decision IN ('approve', 'reject', 'defer')),
+  doc_rationale        TEXT,
+  doc_decided_at       TEXT,
+  applied_at           TEXT,
+  created_at           TEXT NOT NULL,
+  updated_at           TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_identity_reviews_owner
+  ON identity_reviews (owner_id, applied_at, updated_at DESC, id DESC);
+`;
+
 function userVersion(db: DatabaseSync): number {
   const row: unknown = db.prepare("PRAGMA user_version").get();
   if (typeof row !== "object" || row === null || !("user_version" in row)) {
@@ -811,6 +833,17 @@ export function migrate(db: DatabaseSync): void {
     try {
       db.exec(MIGRATION_8);
       db.exec("PRAGMA user_version = 8");
+      db.exec("COMMIT");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+  if (userVersion(db) < 9) {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.exec(MIGRATION_9);
+      db.exec("PRAGMA user_version = 9");
       db.exec("COMMIT");
     } catch (error) {
       db.exec("ROLLBACK");

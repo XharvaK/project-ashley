@@ -42,7 +42,14 @@ import {
   listActiveMindStateItems,
   retryUrgentWake,
 } from "./state/mind-items.js";
-import { listRevisions, revertRevision } from "./learning/revisions.js";
+import {
+  applyEligibleRevisions,
+  listIdentityReviews,
+  listRevisions,
+  recordAshleyReviewPosition,
+  recordDocReviewDecision,
+  revertRevision,
+} from "./learning/revisions.js";
 import { forgetOwnerTopic, type ForgetResult } from "./memory/forget.js";
 import {
   capabilityCanInfluence,
@@ -818,6 +825,37 @@ export class AshleyCore {
     };
   }
 
+  getIdentityReviews(ownerId: string, limit = 50) {
+    return {
+      mode: env.cognitionMode,
+      reviews: listIdentityReviews(this.db, ownerId, limit),
+    };
+  }
+
+  recordAshleyIdentityPosition(input: {
+    ownerId: string;
+    reviewId: number;
+    position: "affirm" | "object" | "defer";
+    rationale: string;
+    evidenceType: string;
+    evidenceId: string | number;
+  }) {
+    const recorded = recordAshleyReviewPosition(this.db, input);
+    if (recorded) applyEligibleRevisions(this.db, input.ownerId, env.cognitionMode);
+    return { recorded, reviews: listIdentityReviews(this.db, input.ownerId) };
+  }
+
+  recordDocIdentityDecision(input: {
+    ownerId: string;
+    reviewId: number;
+    decision: "approve" | "reject" | "defer";
+    rationale?: string;
+  }) {
+    const recorded = recordDocReviewDecision(this.db, input);
+    if (recorded) applyEligibleRevisions(this.db, input.ownerId, env.cognitionMode);
+    return { recorded, reviews: listIdentityReviews(this.db, input.ownerId) };
+  }
+
   getCapabilities() {
     return {
       masterMode: env.cognitionMode,
@@ -1023,7 +1061,7 @@ export class AshleyCore {
         .prepare("SELECT COUNT(*) AS count FROM decision_log")
         .get();
       return {
-        ok: version >= 8,
+        ok: version >= 9,
         nuclearEnabled: true,
         dbPath: NUCLEAR_DB_PATH,
         schemaVersion: version,

@@ -351,3 +351,40 @@ export async function urgentInitiativeStatus() {
   const q = new URLSearchParams({ owner_id: config.ownerId });
   return agentFetch<{ urgent: boolean }>(`/initiative/urgent?${q.toString()}`);
 }
+
+export type IdentityReview = {
+  id: number;
+  revisionId: number;
+  targetKind: "value" | "boundary";
+  targetKey: string;
+  proposedValue: string;
+  ashleyPosition: "affirm" | "object" | "defer" | null;
+  docDecision: "approve" | "reject" | "defer" | null;
+  appliedAt: string | null;
+};
+
+export async function identityReviews() {
+  const query = new URLSearchParams({ owner_id: config.ownerId });
+  return agentFetch<{ reviews: IdentityReview[] }>(
+    `/nuclear/identity/reviews?${query.toString()}`,
+  );
+}
+
+export async function decideIdentityReview(
+  reviewId: number,
+  decision: "approve" | "reject" | "defer",
+  rationale?: string,
+) {
+  return agentFetch<{ recorded: boolean; reviews: IdentityReview[] }>(
+    "/nuclear/identity/reviews/doc",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        userId: config.ownerId,
+        reviewId,
+        decision,
+        rationale,
+      }),
+    },
+  );
+}

@@ -13,7 +13,7 @@ describe("nuclear database migrations", () => {
   it("creates the cognition and Reflection schemas for a fresh database", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
 
-    expect(schemaVersion(db)).toBe(8);
+    expect(schemaVersion(db)).toBe(9);
     const tables = db
       .prepare(
         `SELECT name FROM sqlite_master
@@ -21,7 +21,8 @@ describe("nuclear database migrations", () => {
            'reflection_events', 'initiative_learning', 'episodes',
            'mind_state_items', 'affective_state', 'cognitive_jobs',
            'learning_revisions', 'cur_reads', 'forget_receipts',
-           'capability_releases', 'capability_events', 'cur_source_candidates'
+           'capability_releases', 'capability_events', 'cur_source_candidates',
+           'identity_reviews'
          )
          ORDER BY name`,
       )
@@ -35,6 +36,7 @@ describe("nuclear database migrations", () => {
       "cur_source_candidates",
       "episodes",
       "forget_receipts",
+      "identity_reviews",
       "initiative_learning",
       "learning_revisions",
       "mind_state_items",
@@ -106,7 +108,7 @@ describe("nuclear database migrations", () => {
 
     openNuclearDb(db);
 
-    expect(schemaVersion(db)).toBe(8);
+    expect(schemaVersion(db)).toBe(9);
     const decision = db
       .prepare(
         `SELECT reason, outcome_text, learning_subject_kind,
@@ -192,7 +194,7 @@ describe("nuclear database migrations", () => {
 
     openNuclearDb(db);
 
-    expect(schemaVersion(db)).toBe(8);
+    expect(schemaVersion(db)).toBe(9);
     expect(db.prepare(
       "SELECT wake_state FROM mind_state_items WHERE id = 1",
     ).get()).toMatchObject({ wake_state: "pending" });
@@ -234,7 +236,7 @@ describe("nuclear database migrations", () => {
 
     openNuclearDb(db);
 
-    expect(schemaVersion(db)).toBe(8);
+    expect(schemaVersion(db)).toBe(9);
     expect(db.prepare(
       "SELECT evidence_kind, read_id FROM cur_takes WHERE id = 1",
     ).get()).toMatchObject({ evidence_kind: "scan_excerpt", read_id: null });
@@ -267,7 +269,7 @@ describe("nuclear database migrations", () => {
 
     openNuclearDb(db);
 
-    expect(schemaVersion(db)).toBe(8);
+    expect(schemaVersion(db)).toBe(9);
     expect(db.prepare("SELECT kind FROM motivations WHERE id = 1").get())
       .toMatchObject({ kind: "opinion" });
     expect(db.prepare("SELECT decision_kind FROM decision_log WHERE id = ?").get(decisionId))

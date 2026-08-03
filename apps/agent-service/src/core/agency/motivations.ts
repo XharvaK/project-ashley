@@ -219,7 +219,9 @@ export function collectMotivations(
       ),
     );
     for (const boundary of listIdentity(db, ownerId)
-      .filter((entry) => entry.layer === "stable" && entry.kind === "boundary")
+      .filter((entry) =>
+        entry.layer === "stable" &&
+        (entry.kind === "boundary" || entry.kind.startsWith("boundary.")))
       .slice(0, 6)) {
       motivations.push(
         persistMotivation(

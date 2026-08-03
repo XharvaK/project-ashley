@@ -173,6 +173,70 @@ export function createServer(manager: AgentManager): express.Express {
     }
   });
 
+  app.get("/nuclear/identity/reviews", (req, res) => {
+    try {
+      const ownerId = String(req.query.owner_id ?? "");
+      requireOwner(ownerId || undefined);
+      const limit = Math.min(100, Number(req.query.limit ?? 50) || 50);
+      res.json(manager.core.getIdentityReviews(ownerId, limit));
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/nuclear/identity/reviews/ashley", (req, res) => {
+    try {
+      const { userId, reviewId, position, rationale, evidenceType, evidenceId } = req.body as {
+        userId?: string;
+        reviewId?: number;
+        position?: "affirm" | "object" | "defer";
+        rationale?: string;
+        evidenceType?: string;
+        evidenceId?: string | number;
+      };
+      const ownerId = requireOwner(userId);
+      if (
+        typeof reviewId !== "number" ||
+        !position || !["affirm", "object", "defer"].includes(position) ||
+        typeof rationale !== "string" || !rationale.trim() ||
+        typeof evidenceType !== "string" || evidenceId == null
+      ) {
+        throw new AppError("message_required", "grounded Ashley review fields required", 400);
+      }
+      res.json(manager.core.recordAshleyIdentityPosition({
+        ownerId, reviewId, position, rationale, evidenceType, evidenceId,
+      }));
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/nuclear/identity/reviews/doc", (req, res) => {
+    try {
+      const { userId, reviewId, decision, rationale } = req.body as {
+        userId?: string;
+        reviewId?: number;
+        decision?: "approve" | "reject" | "defer";
+        rationale?: string;
+      };
+      const ownerId = requireOwner(userId);
+      if (
+        typeof reviewId !== "number" ||
+        !decision || !["approve", "reject", "defer"].includes(decision)
+      ) {
+        throw new AppError("message_required", "Doc review fields required", 400);
+      }
+      res.json(manager.core.recordDocIdentityDecision({
+        ownerId, reviewId, decision, rationale,
+      }));
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
   app.get("/sessions", (_req, res) => {
     res.json({ activeSessionId: null });
   });

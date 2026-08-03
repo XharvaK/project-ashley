@@ -21,6 +21,23 @@ export type LearningRevision = {
   evidenceSpanDays?: number;
 };
 
+export type IdentityReview = {
+  id: number;
+  ownerId: string;
+  revisionId: number;
+  targetKind: "value" | "boundary";
+  targetKey: string;
+  proposedValue: string;
+  ashleyPosition: "affirm" | "object" | "defer" | null;
+  ashleyRationale: string | null;
+  ashleyEvidenceType: string | null;
+  ashleyEvidenceId: string | null;
+  docDecision: "approve" | "reject" | "defer" | null;
+  docRationale: string | null;
+  appliedAt: string | null;
+  updatedAt: string;
+};
+
 type Row = Record<string, unknown>;
 
 function mapRevision(value: unknown): LearningRevision | null {
@@ -97,6 +114,16 @@ function appendIdentityRevision(
   return Number(result.lastInsertRowid);
 }
 
+function foundationalKind(
+  layer: RevisionLayer,
+  key: string,
+): "value" | "boundary" | null {
+  if (layer !== "stable_identity") return null;
+  if (key.startsWith("value.")) return "value";
+  if (key.startsWith("boundary.")) return "boundary";
+  return null;
+}
+
 export function proposeRevision(
   db: DatabaseSync,
   input: {
@@ -112,6 +139,7 @@ export function proposeRevision(
   const key = input.targetKey.trim().slice(0, 120);
   const value = input.proposedValue.trim().slice(0, 1000);
   if (!key || !value) return 0;
+  if (/^(?:vision|core_principle)\./.test(key)) return 0;
   if (
     input.targetLayer !== "opinion" &&
     !/^[a-z][a-z0-9_]*\.[a-z0-9_.-]+$/.test(key)
@@ -160,6 +188,27 @@ export function proposeRevision(
     String(input.evidenceId),
     now.toISOString(),
   );
+  const foundation = foundationalKind(input.targetLayer, key);
+  if (foundation) {
+    db.prepare(
+      `INSERT OR IGNORE INTO identity_reviews
+         (owner_id, revision_id, target_kind, ashley_position,
+          ashley_rationale, ashley_evidence_type, ashley_evidence_id,
+          ashley_decided_at, doc_decision, doc_rationale, doc_decided_at,
+          applied_at, created_at, updated_at)
+       VALUES (?, ?, ?, 'defer', ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?)`,
+    ).run(
+      input.ownerId,
+      id,
+      foundation,
+      "Defer until Ashley and Doc can review this foundational change together.",
+      input.evidenceType,
+      String(input.evidenceId),
+      now.toISOString(),
+      now.toISOString(),
+      now.toISOString(),
+    );
+  }
   return id;
 }
 
@@ -198,13 +247,29 @@ export function applyEligibleRevisions(
             proposed_value, rationale, status, apply_after, created_at, updated_at,
             applied_target_id
      FROM learning_revisions
-     WHERE owner_id = ? AND status = 'proposed' AND apply_after <= ?
+     WHERE owner_id = ? AND status = 'proposed'
+       AND (apply_after <= ? OR (
+         target_layer = 'stable_identity' AND
+         (target_key LIKE 'value.%' OR target_key LIKE 'boundary.%')
+       ))
      ORDER BY id ASC`,
   ).all(ownerId, now).map(mapRevision).filter((item): item is LearningRevision => item !== null);
   const applied: number[] = [];
   for (const revision of revisions) {
     const evidence = evidenceStats(db, ownerId, revision.id);
-    const eligible = revision.targetLayer === "stable_identity"
+    const foundation = foundationalKind(revision.targetLayer, revision.targetKey);
+    const review = foundation
+      ? db.prepare(
+          `SELECT ashley_position, doc_decision FROM identity_reviews
+           WHERE owner_id = ? AND revision_id = ?`,
+        ).get(ownerId, revision.id) as {
+          ashley_position?: string;
+          doc_decision?: string;
+        } | undefined
+      : undefined;
+    const eligible = foundation
+      ? review?.ashley_position === "affirm" && review?.doc_decision === "approve"
+      : revision.targetLayer === "stable_identity"
       ? evidence.count >= 3 && evidence.spanDays >= 14
       : evidence.count >= 2;
     if (!eligible) continue;
@@ -234,9 +299,133 @@ export function applyEligibleRevisions(
        SET status = 'applied', applied_at = ?, applied_target_id = ?, updated_at = ?
        WHERE id = ?`,
     ).run(now, appliedTargetId, now, revision.id);
+    if (foundation) {
+      db.prepare(
+        `UPDATE identity_reviews SET applied_at = ?, updated_at = ?
+         WHERE owner_id = ? AND revision_id = ?`,
+      ).run(now, now, ownerId, revision.id);
+    }
     applied.push(revision.id);
   }
   return applied;
+}
+
+function mapIdentityReview(value: unknown): IdentityReview | null {
+  if (typeof value !== "object" || value === null) return null;
+  const row = value as Row;
+  const targetKind = String(row.target_kind);
+  if (targetKind !== "value" && targetKind !== "boundary") return null;
+  const ashley = row.ashley_position;
+  const doc = row.doc_decision;
+  return {
+    id: Number(row.id),
+    ownerId: String(row.owner_id),
+    revisionId: Number(row.revision_id),
+    targetKind,
+    targetKey: String(row.target_key),
+    proposedValue: String(row.proposed_value),
+    ashleyPosition: ashley === "affirm" || ashley === "object" || ashley === "defer" ? ashley : null,
+    ashleyRationale: typeof row.ashley_rationale === "string" ? row.ashley_rationale : null,
+    ashleyEvidenceType: typeof row.ashley_evidence_type === "string" ? row.ashley_evidence_type : null,
+    ashleyEvidenceId: typeof row.ashley_evidence_id === "string" ? row.ashley_evidence_id : null,
+    docDecision: doc === "approve" || doc === "reject" || doc === "defer" ? doc : null,
+    docRationale: typeof row.doc_rationale === "string" ? row.doc_rationale : null,
+    appliedAt: typeof row.applied_at === "string" ? row.applied_at : null,
+    updatedAt: String(row.updated_at),
+  };
+}
+
+export function listIdentityReviews(
+  db: DatabaseSync,
+  ownerId: string,
+  limit = 50,
+): IdentityReview[] {
+  return db.prepare(
+    `SELECT r.id, r.owner_id, r.revision_id, r.target_kind,
+            r.ashley_position, r.ashley_rationale, r.ashley_evidence_type,
+            r.ashley_evidence_id, r.doc_decision, r.doc_rationale,
+            r.applied_at, r.updated_at, l.target_key, l.proposed_value
+     FROM identity_reviews r
+     JOIN learning_revisions l ON l.id = r.revision_id
+     WHERE r.owner_id = ? ORDER BY r.id DESC LIMIT ?`,
+  ).all(ownerId, Math.max(1, Math.min(100, limit)))
+    .map(mapIdentityReview)
+    .filter((review): review is IdentityReview => review !== null);
+}
+
+export function recordAshleyReviewPosition(
+  db: DatabaseSync,
+  input: {
+    ownerId: string;
+    reviewId: number;
+    position: "affirm" | "object" | "defer";
+    rationale: string;
+    evidenceType: string;
+    evidenceId: string | number;
+  },
+): boolean {
+  const review = db.prepare(
+    `SELECT revision_id FROM identity_reviews WHERE id = ? AND owner_id = ?`,
+  ).get(input.reviewId, input.ownerId) as { revision_id?: number } | undefined;
+  if (!review?.revision_id) return false;
+  const grounded = db.prepare(
+    `SELECT 1 AS grounded FROM evidence_links
+     WHERE owner_id = ? AND target_type = 'revision' AND target_id = ?
+       AND source_type = ? AND source_id = ? LIMIT 1`,
+  ).get(
+    input.ownerId,
+    String(review.revision_id),
+    input.evidenceType,
+    String(input.evidenceId),
+  );
+  if (!grounded) return false;
+  const now = new Date().toISOString();
+  db.prepare(
+    `UPDATE identity_reviews
+     SET ashley_position = ?, ashley_rationale = ?, ashley_evidence_type = ?,
+         ashley_evidence_id = ?, ashley_decided_at = ?, updated_at = ?
+     WHERE id = ? AND owner_id = ?`,
+  ).run(
+    input.position,
+    input.rationale.trim().slice(0, 1000),
+    input.evidenceType,
+    String(input.evidenceId),
+    now,
+    now,
+    input.reviewId,
+    input.ownerId,
+  );
+  return true;
+}
+
+export function recordDocReviewDecision(
+  db: DatabaseSync,
+  input: {
+    ownerId: string;
+    reviewId: number;
+    decision: "approve" | "reject" | "defer";
+    rationale?: string;
+  },
+): boolean {
+  const now = new Date().toISOString();
+  const result = db.prepare(
+    `UPDATE identity_reviews
+     SET doc_decision = ?, doc_rationale = ?, doc_decided_at = ?, updated_at = ?
+     WHERE id = ? AND owner_id = ? AND applied_at IS NULL`,
+  ).run(
+    input.decision,
+    input.rationale?.trim().slice(0, 1000) || null,
+    now,
+    now,
+    input.reviewId,
+    input.ownerId,
+  );
+  if (result.changes === 0) return false;
+  db.prepare(
+    `UPDATE learning_revisions SET status = ?, updated_at = ?
+     WHERE id = (SELECT revision_id FROM identity_reviews WHERE id = ? AND owner_id = ?)`,
+  ).run(input.decision === "reject" ? "rejected" : "proposed", now, input.reviewId, input.ownerId);
+  return true;
 }
 
 export function listRevisions(

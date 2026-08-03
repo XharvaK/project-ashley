@@ -73,6 +73,25 @@ const commands: RESTPostAPIChatInputApplicationCommandsJSONBody[] = [
         ),
     )
     .toJSON(),
+  new SlashCommandBuilder()
+    .setName("identity")
+    .setDescription("Review foundational identity proposals")
+    .addStringOption((o) =>
+      o.setName("action").setDescription("What to do").setRequired(true)
+        .addChoices(
+          { name: "review", value: "review" },
+          { name: "approve", value: "approve" },
+          { name: "reject", value: "reject" },
+          { name: "defer", value: "defer" },
+        ),
+    )
+    .addIntegerOption((o) =>
+      o.setName("review-id").setDescription("Review ID (required for a decision)").setMinValue(1),
+    )
+    .addStringOption((o) =>
+      o.setName("rationale").setDescription("Optional reason for the decision").setMaxLength(1000),
+    )
+    .toJSON(),
 ];
 
 async function main(): Promise<void> {

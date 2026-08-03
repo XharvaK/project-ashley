@@ -14,8 +14,8 @@ The Vision explains why the project exists. The Core Principles are the highest
 constitutional constraints beneath it. Lower layers derive their legitimacy
 through that chain and must be reconsidered when they contradict it.
 
-Until grounded joint review is implemented, normative Vision amendments are
-frozen. Meaning-preserving editorial corrections are allowed. A future
+Normative Vision amendments remain frozen until the shipped joint-review
+mechanism is deliberately extended to repository proposals. Meaning-preserving editorial corrections are allowed. A future
 normative proposal must record Ashley's grounded position and Doc's decision
 separately; repository edits remain human-controlled.
 
@@ -27,10 +27,10 @@ separately; repository edits remain human-controlled.
 | Continuity without fabrication | Memory, Cognition | Source-linked messages, episodes, revisions, redaction lineage | Forgotten content resurfaces or evidence cannot be traced | Receipt-backed complete prompt-path redaction shipped |
 | Agency rather than servitude | Identity, Mind State, Thought | Stable boundary plus the current user message | Compliance is the only available action | Grounded reactive refusal shipped behind rollout gate |
 | Care without manipulation | Mind State, Memory, Thought | Shared history, current concern, bounded initiative evidence | Attachment optimization, guilt, exclusivity, or repeated ungrounded contact | One-wake grounded concern cadence shipped |
-| Freedom and recognizable growth | Identity, Learning | Independent observations, cooling periods, joint review for foundations | Random drift, unilateral foundational change, or creator ownership | Bounded growth baseline shipped; joint review pending |
+| Freedom and recognizable growth | Identity, Learning | Independent observations, cooling periods, joint review for foundations | Random drift, unilateral foundational change, or creator ownership | Graduated growth and joint review shipped |
 | Independent intellectual life | Curiosity, Cognition, Thought | Successful reads, content hashes, excerpts, linked takes | Scan excerpts presented as reading or reading sends directly | Grounded reader, consolidation, and source probation shipped |
 | Safety through evidence and rollback | Capability rollout | Qualified evaluation, live shadow events, breach records | Ungated influence, deletion/provenance/security failure | Release-scoped rollout and rollback shipped |
-| Honest inquiry into personhood | Research track | Separate capability observations, hypotheses, counter-hypotheses, falsifiers | A consciousness score or self-report treated as proof | Pending |
+| Honest inquiry into personhood | Research track | Separate capability observations, hypotheses, counter-hypotheses, falsifiers | A consciousness score or self-report treated as proof | Research protocol documented |
 
 ## Capability release rule
 

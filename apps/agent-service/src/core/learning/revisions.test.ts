@@ -4,8 +4,11 @@ import { openNuclearDb } from "../db.js";
 import { listIdentity, recordIdentityEntry } from "../identity/store.js";
 import {
   applyEligibleRevisions,
+  listIdentityReviews,
   listRevisions,
   proposeRevision,
+  recordAshleyReviewPosition,
+  recordDocReviewDecision,
   reconcileUnsupportedRevisions,
   revertRevision,
 } from "./revisions.js";
@@ -140,6 +143,61 @@ describe("bounded identity growth", () => {
     expect(plan.some((row) => /SEARCH l USING.*INDEX/i.test(row.detail))).toBe(true);
     expect(plan.some((row) => /SEARCH e USING INTEGER PRIMARY KEY/i.test(row.detail))).toBe(true);
     expect(plan.some((row) => /^SCAN (?:l|e)\b/i.test(row.detail))).toBe(false);
+    db.close();
+  });
+
+  it("keeps foundational values in joint review until Ashley affirms and Doc approves", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const revisionId = proposeRevision(db, {
+      ownerId: "doc",
+      targetLayer: "stable_identity",
+      targetKey: "boundary.truthful_refusal",
+      proposedValue: "refuse requests that require deliberate deception",
+      rationale: "A possible foundational boundary.",
+      evidenceType: "episode",
+      evidenceId: 42,
+    });
+    const [review] = listIdentityReviews(db, "doc");
+    expect(review).toMatchObject({
+      revisionId,
+      ashleyPosition: "defer",
+      docDecision: null,
+    });
+    expect(applyEligibleRevisions(db, "doc", "apply")).toEqual([]);
+    expect(recordDocReviewDecision(db, {
+      ownerId: "doc", reviewId: review!.id, decision: "approve",
+    })).toBe(true);
+    expect(applyEligibleRevisions(db, "doc", "apply")).toEqual([]);
+    expect(recordAshleyReviewPosition(db, {
+      ownerId: "doc",
+      reviewId: review!.id,
+      position: "affirm",
+      rationale: "This follows from the grounded truth commitment.",
+      evidenceType: "episode",
+      evidenceId: 42,
+    })).toBe(true);
+    expect(applyEligibleRevisions(db, "doc", "apply")).toEqual([revisionId]);
+    expect(listIdentity(db, "doc", { layer: "stable" }))
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          kind: "boundary.truthful_refusal",
+          text: "refuse requests that require deliberate deception",
+        }),
+      ]));
+    expect(listIdentityReviews(db, "doc")[0]).toMatchObject({
+      ashleyPosition: "affirm",
+      docDecision: "approve",
+      appliedAt: expect.any(String),
+    });
+    expect(proposeRevision(db, {
+      ownerId: "doc",
+      targetLayer: "stable_identity",
+      targetKey: "vision.rewrite",
+      proposedValue: "change the Vision at runtime",
+      rationale: "forbidden",
+      evidenceType: "episode",
+      evidenceId: 43,
+    })).toBe(0);
     db.close();
   });
 });

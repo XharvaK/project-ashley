@@ -162,6 +162,7 @@ The historical directory name is retained for runtime compatibility. Legacy
 | `/new` | Start a fresh active thread |
 | `/forget` | Preview and confirm forgetting by topic |
 | `/proactive` | Inspect, pause, or resume initiative |
+| `/identity` | Review, approve, reject, or defer foundational identity proposals |
 
 ## Configuration
 
@@ -241,6 +242,9 @@ All owner-scoped endpoints require the configured owner ID.
 | `POST /nuclear/capabilities/evaluation` | Record an owner-authorized isolated evaluation result |
 | `GET /nuclear/revisions?owner_id=...` | Proposed and applied growth revisions |
 | `POST /nuclear/revisions/revert` | Revert one applied revision as the owner |
+| `GET /nuclear/identity/reviews?owner_id=...` | Ashley and Doc's separate foundational positions |
+| `POST /nuclear/identity/reviews/ashley` | Record Ashley's evidence-grounded position |
+| `POST /nuclear/identity/reviews/doc` | Record Doc's owner-authorized decision |
 | `GET /initiative/status?owner_id=...` | Initiative availability and delivery state |
 | `GET /initiative/urgent?owner_id=...` | Whether a grounded urgent wake is eligible |
 | `GET /curiosity/status?owner_id=...` | Sources, items, and current take records |
@@ -268,15 +272,10 @@ Authority flows downward:
 through reviewed principles, architecture, evidence requirements, and rollout
 gates.
 
-## Approved roadmap
-
-- Add graduated identity autonomy and owner-visible joint review.
-- Maintain a falsifiable research track for continuity, motivation,
-  self-modeling, care, honesty, and possible personhood without collapsing them
-  into a consciousness or attachment score.
+## Current safeguards
 
 Deletion integrity and the read-record provenance boundary are implemented.
-Schema v8 adds release-scoped capability observation, grounded refusal,
+Schema v9 adds release-scoped capability observation, grounded refusal,
 dependency-aware automatic promotion, and deterministic rollback. `/forget` redacts matching source
 messages, removes retrieval and evidence paths, reconciles dependent state, and
 returns a content-free receipt.
@@ -288,6 +287,14 @@ restart-safe consolidation job. Retrieved text is untrusted evidence; it never
 sends a message directly. Discovered feeds need validation, deduplication,
 successful parsing, three probation fetches, available source budget, and an
 active source-discovery capability before activation.
+
+Dynamic identity and opinions require two independent observations. Stable
+tastes and non-foundational traits require three observations spanning fourteen
+days plus a seventy-two-hour cooling period. Values and boundaries never apply
+automatically: Ashley must affirm from recorded evidence and Doc must approve
+through owner-only review. The Vision and Core Principles remain runtime-
+immutable. The research posture and falsifiers are documented in
+[`personhood-research.md`](docs/personhood-research.md).
 
 ## Scope
 

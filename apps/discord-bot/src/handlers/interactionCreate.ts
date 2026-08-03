@@ -6,6 +6,7 @@ import * as memory from "../commands/memory.js";
 import * as newCmd from "../commands/new.js";
 import * as forget from "../commands/forget.js";
 import * as proactive from "../commands/proactive.js";
+import * as identity from "../commands/identity.js";
 
 export async function handleSlash(
   interaction: ChatInputCommandInteraction,
@@ -22,6 +23,7 @@ export async function handleSlash(
   const ephemeral =
     interaction.commandName === "memory" ||
     interaction.commandName === "forget" ||
+    interaction.commandName === "identity" ||
     (interaction.commandName === "proactive" &&
       interaction.options.getString("action") === "status");
   if (!interaction.deferred && !interaction.replied) {
@@ -44,6 +46,9 @@ export async function handleSlash(
         break;
       case "proactive":
         await proactive.execute(interaction);
+        break;
+      case "identity":
+        await identity.execute(interaction);
         break;
     }
   } catch (err) {

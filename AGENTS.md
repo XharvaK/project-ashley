@@ -84,7 +84,7 @@ Avoid solving problems in higher layers that naturally belong lower in the stack
 
 Continuous cognition is event-driven and defaults to `ASHLEY_COGNITION_MODE=observe`.
 `apply` is only a master ceiling; per-capability release gates still control
-influence. Schema v8 integrates each cognition job atomically, requires exact user-message
+influence. Schema v9 integrates each cognition job atomically, requires exact user-message
 provenance for automatic facts, uses leased edge-triggered urgent wakes, adds
 grounded refusal, and adds read-record provenance plus receipt-backed message
 redaction.
@@ -98,6 +98,7 @@ Observability: `GET /health`, `GET /nuclear/decisions?owner_id=`,
 `GET /nuclear/reflections?owner_id=`, `GET /nuclear/episodes?owner_id=`,
 `GET /nuclear/cognition?owner_id=`, `GET /nuclear/revisions?owner_id=`.
 Capability rollout: `GET /nuclear/capabilities?owner_id=`.
+Foundational identity review: `GET /nuclear/identity/reviews?owner_id=`.
 
 Voice, Telegram, habits, Moltbook, and skills were retired — Discord only.
 
@@ -110,6 +111,7 @@ Voice, Telegram, habits, Moltbook, and skills were retired — Discord only.
 | `/new` | Fresh thread |
 | `/forget` | Forget by topic |
 | `/proactive` | Initiative status / pause / resume |
+| `/identity` | Owner-only foundational review / approve / reject / defer |
 
 ## Tests
 
