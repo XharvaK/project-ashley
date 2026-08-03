@@ -24,13 +24,14 @@ describe("nuclear identity", () => {
       text: "SQLite edge cases",
     });
     expect(listIdentity(db, "doc")).toHaveLength(8);
-    expect(buildIdentityBlock(db, "doc")).toContain("SQLite edge cases");
-    expect(buildIdentityBlock(db, "doc")).toContain(
-      "comfortable with uncertainty",
-    );
+    const block = buildIdentityBlock(db, "doc");
+    expect(block).toContain("SQLite edge cases");
+    expect(block).toContain("comfortable with uncertainty");
+    expect(block).not.toContain("admit uncertainty");
+    expect(block).not.toContain("does not need false closure");
   });
 
-  it("adds new seeded dispositions on version bump without rewriting old ones", () => {
+  it("retires obsolete seeded ownership on version bump", () => {
     const db = new DatabaseSync(":memory:");
     migrate(db);
     const now = new Date().toISOString();
@@ -45,13 +46,25 @@ describe("nuclear identity", () => {
       now,
     );
     db.prepare(
+      `INSERT INTO identity_entries
+         (owner_id, layer, kind, text, source, revised_from, created_at, updated_at)
+       VALUES (?, 'stable', 'value', ?, 'seeded', NULL, ?, ?)`,
+    ).run(
+      "doc",
+      "comfortable with uncertainty; does not need false closure",
+      now,
+      now,
+    );
+    db.prepare(
       `INSERT INTO kv (key, value) VALUES (?, ?)`,
     ).run("nuclear.identity.seed.doc", "1");
     expect(seedIdentity(db, "doc")).toBeGreaterThan(0);
     expect(seedIdentity(db, "doc")).toBe(0);
-    expect(buildIdentityBlock(db, "doc")).toContain(
-      "comfortable with uncertainty",
-    );
+    const block = buildIdentityBlock(db, "doc");
+    expect(block).toContain("comfortable with uncertainty");
+    expect(block).toContain("accuracy over performance; say what is true");
+    expect(block).not.toContain("admit uncertainty");
+    expect(block).not.toContain("does not need false closure");
   });
 
   it("keeps the newest opinion after a revision", () => {

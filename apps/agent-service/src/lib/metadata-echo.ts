@@ -41,6 +41,8 @@ export function stripMetadataEcho(text: string): string {
  * pipeline instead of saying something. Content-bearing openers survive the
  * length/word floor; unlicensed reading claims are already floored upstream by
  * the claim gate.
+ *
+ * Ownership: Expression (language cleanup), not Rendering transport.
  */
 const WAIT_INTJ =
   /^(gimme|lemme|one sec|one second|hang on|hold on|just a sec|sec)\b/i;

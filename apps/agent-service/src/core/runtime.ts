@@ -5,7 +5,7 @@ import { decide, attachAuthorizedClaims } from "./agency/decide.js";
 import { collectMotivations } from "./agency/motivations.js";
 import { logDecision, setDecisionOutcome } from "./agency/log.js";
 import { composeTurnContext } from "./context-composer.js";
-import { renderSpeak } from "./conversation/render.js";
+import { expressSpeak } from "./conversation/expression.js";
 import { seedIdentity } from "./identity/seed.js";
 import { forgetByTopic, listActiveFacts, upsertFact } from "./memory/facts.js";
 import {
@@ -184,7 +184,6 @@ export class AshleyCore {
 
       if (!decision.cognitiveAllocation.shouldSpeak) {
         patchState(this.db, input.ownerId, {
-          focus: decision.kind,
           availability: decision.kind === "silence" ? "quiet" : "available",
         });
         setDecisionOutcome(this.db, decisionId, "");
@@ -198,7 +197,7 @@ export class AshleyCore {
         };
       }
 
-      const rendered = await renderSpeak(turn, decision, message, "discord");
+      const rendered = await expressSpeak(turn, decision, message, "discord");
       const text = rendered.text.trim();
       if (text) {
         insertMessage(this.db, {
@@ -211,7 +210,6 @@ export class AshleyCore {
         writeFromAssistantTurn(this.db, input.ownerId, text);
       }
       patchState(this.db, input.ownerId, {
-        focus: decision.kind,
         availability: "available",
       });
       setDecisionOutcome(this.db, decisionId, text);
@@ -296,7 +294,7 @@ export class AshleyCore {
     });
     this.activeOwners.add(ownerId);
     try {
-      const rendered = await renderSpeak(
+      const rendered = await expressSpeak(
         turn,
         decision,
         userMessage,
@@ -430,7 +428,6 @@ export class AshleyCore {
       const decisionId = numberValue(row.decision_id);
       if (decisionId !== null) setDecisionOutcome(this.db, decisionId, text);
       patchState(this.db, ownerId, {
-        focus: input?.angle ?? "proactive",
         availability: "available",
       });
       return;

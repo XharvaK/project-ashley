@@ -1,8 +1,5 @@
 import { sanitizeTypography } from "../../lib/typography.js";
-import {
-  stripMetadataEcho,
-  stripPipelineNarration,
-} from "../../lib/metadata-echo.js";
+import { stripMetadataEcho } from "../../lib/metadata-echo.js";
 import { stripMediaMarkers } from "../../lib/strip-markers.js";
 
 /**
@@ -12,6 +9,6 @@ import { stripMediaMarkers } from "../../lib/strip-markers.js";
  */
 export function renderForTransport(text: string): string {
   return stripMediaMarkers(
-    stripPipelineNarration(stripMetadataEcho(sanitizeTypography(text))),
+    stripMetadataEcho(sanitizeTypography(text)),
   ).trim();
 }

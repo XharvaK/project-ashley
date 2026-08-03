@@ -9,11 +9,20 @@ import {
   computeActivityLicense,
   emptyActivityLicenseNote,
 } from "../honesty/activity-license.js";
+import { stripPipelineNarration } from "../../lib/metadata-echo.js";
 import type { Decision } from "../types.js";
 import type { NuclearPromptChannel } from "./prompts.js";
 import { renderForTransport } from "./rendering.js";
 
-export type RenderedReply = {
+/** Complete wording from Expression (before transport). */
+export type ExpressionOutput = {
+  text: string;
+  model: string;
+  readingLicensed: boolean;
+};
+
+/** Expression output after Rendering transport transforms. */
+export type RenderedOutput = {
   text: string;
   model: string;
   readingLicensed: boolean;
@@ -21,15 +30,16 @@ export type RenderedReply = {
 
 /**
  * Expression: TurnContext + Decision → wording.
+ * Owns language generation; does not perform Discord transport formatting.
  * Authorization comes from Decision.authorizedClaims (Thought), not Rendering.
  * finalizeHonesty may reject unlicensed claims but never authorizes.
  */
-export async function renderSpeak(
+export async function expressSpeak(
   turn: TurnContext,
   decision: Decision,
   userMessage: string,
   channel: NuclearPromptChannel,
-): Promise<RenderedReply> {
+): Promise<RenderedOutput> {
   const claims = decision.authorizedClaims;
   const readingLicensed = claims.readingTakeIds.length > 0;
   const licenseNote = readingLicensed
@@ -71,19 +81,34 @@ export async function renderSpeak(
     });
   } catch (error) {
     if (env.mistralApiKey) throw error;
-    return {
+    const offline: ExpressionOutput = {
       text: "i'm offline at the moment, so i can't give this a proper answer.",
       model: "offline",
       readingLicensed: false,
     };
+    return applyRendering(offline);
   }
-  const finalized = finalizeHonesty({
-    text: renderForTransport(response.text),
-    readingLicensed,
-  });
-  return {
-    text: renderForTransport(finalized.text),
+
+  const wording: ExpressionOutput = {
+    text: stripPipelineNarration(response.text),
     model: response.model,
     readingLicensed,
+  };
+  const finalized = finalizeHonesty({
+    text: wording.text,
+    readingLicensed: wording.readingLicensed,
+  });
+  return applyRendering({
+    text: finalized.text,
+    model: wording.model,
+    readingLicensed: wording.readingLicensed,
+  });
+}
+
+function applyRendering(output: ExpressionOutput): RenderedOutput {
+  return {
+    text: renderForTransport(output.text),
+    model: output.model,
+    readingLicensed: output.readingLicensed,
   };
 }

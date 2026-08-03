@@ -26,3 +26,7 @@ Retired: voice, Telegram, habits, Moltbook, skills, legacy ChatService / `index.
 
 - `GET /health` → `nuclear` block
 - `GET /nuclear/decisions?owner_id=` → recent `decision_log` rows
+
+## Review
+
+- [Architecture Review Protocol](Architecture_Review_Protocol.md) — informational mirror; binding audit plan is normative

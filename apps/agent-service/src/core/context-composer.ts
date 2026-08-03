@@ -36,10 +36,18 @@ export type ComposeTurnContextInput = {
 
 function mindStateBlock(db: DatabaseSync, ownerId: string): string {
   const state = getState(db, ownerId);
-  const focusLine = state.focus ? `Focus: ${state.focus}` : "";
-  const moodLine = state.mood ? `Mood: ${state.mood}` : "";
-  if (!focusLine && !moodLine) return "";
-  return ["## Mind state", focusLine, moodLine].filter(Boolean).join("\n");
+  // Transport existing Mind State condition fields only — no scoring,
+  // summarization, or ContextComposer-selected subset beyond empty omission.
+  const lines = [
+    state.focus ? `Focus: ${state.focus}` : "",
+    state.mood ? `Mood: ${state.mood}` : "",
+    state.availability ? `Availability: ${state.availability}` : "",
+    state.unfinished.length > 0
+      ? `Unfinished: ${state.unfinished.join("; ")}`
+      : "",
+  ].filter(Boolean);
+  if (lines.length === 0) return "";
+  return ["## Mind state", ...lines].join("\n");
 }
 
 /**

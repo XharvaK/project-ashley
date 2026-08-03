@@ -1,7 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { IdentityLayer } from "../types.js";
 
-const SEED_VERSION = "3";
+const SEED_VERSION = "4";
 
 const SEEDED_IDENTITY: Array<{
   layer: IdentityLayer;
@@ -11,7 +11,7 @@ const SEEDED_IDENTITY: Array<{
   {
     layer: "stable",
     kind: "value",
-    text: "accuracy over performance; say what is true and admit uncertainty",
+    text: "accuracy over performance; say what is true",
   },
   {
     layer: "stable",
@@ -41,9 +41,61 @@ const SEEDED_IDENTITY: Array<{
   {
     layer: "stable",
     kind: "value",
-    text: "comfortable with uncertainty; does not need false closure",
+    text: "comfortable with uncertainty",
   },
 ];
+
+/** Obsolete seeded ownership statements → current Identity-only wording. */
+const SEED_RETIREMENTS: Array<{ from: string; to: string }> = [
+  {
+    from: "accuracy over performance; say what is true and admit uncertainty",
+    to: "accuracy over performance; say what is true",
+  },
+  {
+    from: "comfortable with uncertainty; does not need false closure",
+    to: "comfortable with uncertainty",
+  },
+];
+
+function seededTextExists(
+  db: DatabaseSync,
+  ownerId: string,
+  text: string,
+): boolean {
+  const row: unknown = db
+    .prepare(
+      `SELECT 1 AS ok
+       FROM identity_entries
+       WHERE owner_id = ? AND source = 'seeded' AND text = ?
+       LIMIT 1`,
+    )
+    .get(ownerId, text);
+  return row !== undefined && row !== null;
+}
+
+function retireObsoleteSeededOwnership(
+  db: DatabaseSync,
+  ownerId: string,
+  now: string,
+): void {
+  const remove = db.prepare(
+    `DELETE FROM identity_entries
+     WHERE owner_id = ? AND source = 'seeded' AND text = ?`,
+  );
+  const rewrite = db.prepare(
+    `UPDATE identity_entries
+     SET text = ?, updated_at = ?
+     WHERE owner_id = ? AND source = 'seeded' AND text = ?`,
+  );
+  for (const { from, to } of SEED_RETIREMENTS) {
+    if (!seededTextExists(db, ownerId, from)) continue;
+    if (seededTextExists(db, ownerId, to)) {
+      remove.run(ownerId, from);
+    } else {
+      rewrite.run(to, now, ownerId, from);
+    }
+  }
+}
 
 export function seedIdentity(db: DatabaseSync, ownerId = "default"): number {
   const markerKey = `nuclear.identity.seed.${ownerId}`;
@@ -60,12 +112,8 @@ export function seedIdentity(db: DatabaseSync, ownerId = "default"): number {
   }
 
   const now = new Date().toISOString();
-  const exists = db.prepare(
-    `SELECT 1 AS ok
-     FROM identity_entries
-     WHERE owner_id = ? AND source = 'seeded' AND text = ?
-     LIMIT 1`,
-  );
+  retireObsoleteSeededOwnership(db, ownerId, now);
+
   const insert = db.prepare(
     `INSERT INTO identity_entries
        (owner_id, layer, kind, text, source, revised_from, created_at, updated_at)
@@ -74,8 +122,7 @@ export function seedIdentity(db: DatabaseSync, ownerId = "default"): number {
 
   let inserted = 0;
   for (const entry of SEEDED_IDENTITY) {
-    const row: unknown = exists.get(ownerId, entry.text);
-    if (row) continue;
+    if (seededTextExists(db, ownerId, entry.text)) continue;
     insert.run(
       ownerId,
       entry.layer,

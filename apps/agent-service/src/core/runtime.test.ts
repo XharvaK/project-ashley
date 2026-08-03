@@ -5,8 +5,8 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("./conversation/render.js", () => ({
-  renderSpeak: async () => ({
+vi.mock("./conversation/expression.js", () => ({
+  expressSpeak: async () => ({
     text: "i can answer that from the live thread.",
     model: "test-model",
   }),
