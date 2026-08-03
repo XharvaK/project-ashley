@@ -18,24 +18,38 @@ function parseArgs(argv) {
   return args;
 }
 
-async function post(url, body) {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const text = await res.text();
-  let json;
-  try {
-    json = JSON.parse(text);
-  } catch {
-    json = { raw: text };
-  }
-  if (!res.ok) {
+async function post(url, body, maxRateLimitRetries = 5) {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const text = await res.text();
+    let json;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      json = { raw: text };
+    }
+    if (res.ok) return json;
+    if (res.status === 429 && attempt < maxRateLimitRetries) {
+      const retryAfter = res.headers.get("retry-after");
+      const headerSeconds = retryAfter === null ? Number.NaN : Number(retryAfter);
+      const bodySeconds = Number(json?.retryAfterSec);
+      const seconds = Math.max(
+        1,
+        Math.min(120, Number.isFinite(headerSeconds)
+          ? headerSeconds
+          : Number.isFinite(bodySeconds) ? bodySeconds : 30),
+      );
+      console.log(`[replay] rate limited; retrying in ${seconds}s (${attempt + 1}/${maxRateLimitRetries})`);
+      await new Promise((resolve) => setTimeout(resolve, seconds * 1000));
+      continue;
+    }
     const detail = json?.error?.message ?? json?.message ?? text.slice(0, 200);
     throw new Error(`${res.status} ${url}: ${detail}`);
   }
-  return json;
 }
 
 async function waitForAgent(url, timeoutMs = 60000) {
