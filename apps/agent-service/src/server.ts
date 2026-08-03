@@ -102,6 +102,48 @@ export function createServer(manager: AgentManager): express.Express {
     }
   });
 
+  app.get("/nuclear/capabilities", (req, res) => {
+    try {
+      const ownerId = String(req.query.owner_id ?? "");
+      requireOwner(ownerId || undefined);
+      res.json(manager.core.getCapabilities());
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/nuclear/capabilities/evaluation", (req, res) => {
+    try {
+      const { userId, capability, seeds, passed, sourceKey } = req.body as {
+        userId?: string;
+        capability?: string;
+        seeds?: number;
+        passed?: boolean;
+        sourceKey?: string;
+      };
+      requireOwner(userId);
+      if (
+        typeof capability !== "string" ||
+        typeof seeds !== "number" ||
+        typeof passed !== "boolean" ||
+        typeof sourceKey !== "string" ||
+        !sourceKey.trim()
+      ) {
+        throw new AppError("message_required", "evaluation fields required", 400);
+      }
+      res.json(manager.core.recordCapabilityEvaluation({
+        capability,
+        seeds,
+        passed,
+        sourceKey,
+      }));
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
   app.get("/nuclear/revisions", (req, res) => {
     try {
       const ownerId = String(req.query.owner_id ?? "");

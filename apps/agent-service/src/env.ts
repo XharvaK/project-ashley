@@ -55,6 +55,7 @@ function numericEnv(
 }
 
 export const env = {
+  ashleyReleaseId: process.env.ASHLEY_RELEASE_ID ?? "",
   mistralApiKey: process.env.MISTRAL_API_KEY ?? "",
   mistralModel: process.env.MISTRAL_MODEL ?? "mistral-medium-latest",
   mistralReasoningEffort:

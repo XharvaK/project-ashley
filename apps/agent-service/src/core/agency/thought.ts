@@ -1,8 +1,11 @@
 import { env } from "../../env.js";
 import { completeChat } from "../../mistral-client.js";
+import type { DatabaseSync } from "node:sqlite";
+import { capabilityCanInfluence } from "../rollout/capabilities.js";
 import type { Decision, DecisionKind, Motivation, Trigger } from "../types.js";
 
 type Complete = typeof completeChat;
+type CapabilityGate = (db: DatabaseSync) => boolean;
 
 const kinds = new Set<DecisionKind>([
   "speak",
@@ -51,13 +54,16 @@ function sanitizedErrorCode(error: unknown): string {
  * sole fallback; Expression never sees an unvalidated proposal.
  */
 export async function deliberateDecision(
+  db: DatabaseSync,
   base: Decision,
   motivations: Motivation[],
   trigger: Trigger,
   complete: Complete = completeChat,
+  canInfluence: CapabilityGate = (database) =>
+    capabilityCanInfluence(database, "thought"),
 ): Promise<Decision> {
   if (
-    env.cognitionMode !== "apply" ||
+    !canInfluence(db) ||
     !env.mistralApiKey ||
     base.kind === "silence" ||
     base.kind === "delay"

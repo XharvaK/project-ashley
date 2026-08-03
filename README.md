@@ -50,14 +50,16 @@ ASHLEY_COGNITION_MODE=observe
 Reflection records explicit feedback and computes bounded future calibration,
 but `observe` prevents that calibration from changing Thought scores.
 
-Cognition records source-linked episodes, model runs, and revision proposals,
-but `observe` prevents episodic recall, dynamic Mind State, affect, learned
-facts, model-assisted Thought, and identity growth from influencing Ashley.
+Cognition records source-linked episodes, model runs, revision proposals, and
+capability shadow events. `ASHLEY_COGNITION_MODE` is a master ceiling, not a
+blanket enable switch. Each capability must also pass its own release gates
+before episodic recall, dynamic Mind State, affect, learned facts,
+model-assisted Thought, or identity growth can influence Ashley.
 
 The feed scanner stores items and excerpts for attention only; it does not form
 takes. Reading claims require a successful read record with a final URL,
 content hash, model metadata, and bounded evidence excerpts. The full reader,
-capability-specific rollout, first-class refusal, source discovery, and joint
+first-class refusal, source discovery, and joint
 foundational identity review remain approved roadmap work until their broader
 guarantees ship.
 
@@ -183,6 +185,7 @@ PROACTIVE_CHECK_INTERVAL_MIN=20
 
 ASHLEY_REFLECTION_MODE=observe
 ASHLEY_COGNITION_MODE=observe
+ASHLEY_RELEASE_ID=
 COGNITION_DISPATCH_INTERVAL_SEC=30
 COGNITION_IDLE_CONSOLIDATION_MIN=10
 ```
@@ -234,6 +237,8 @@ All owner-scoped endpoints require the configured owner ID.
 | `GET /nuclear/reflections?owner_id=...` | Reflection evidence and calibration |
 | `GET /nuclear/episodes?owner_id=...&query=...` | Grounded episodic recall records |
 | `GET /nuclear/cognition?owner_id=...` | Affect, Mind State, jobs, and cognition runs |
+| `GET /nuclear/capabilities?owner_id=...` | Per-capability release, evidence, dependency, and rollback state |
+| `POST /nuclear/capabilities/evaluation` | Record an owner-authorized isolated evaluation result |
 | `GET /nuclear/revisions?owner_id=...` | Proposed and applied growth revisions |
 | `POST /nuclear/revisions/revert` | Revert one applied revision as the owner |
 | `GET /initiative/status?owner_id=...` | Initiative availability and delivery state |
@@ -265,8 +270,6 @@ gates.
 
 ## Approved roadmap
 
-- Replace the broad cognition gate with capability-specific observation,
-  promotion, and rollback.
 - Add first-class refusal grounded in stable boundaries.
 - Build full article reading, curiosity consolidation, and validated source
   discovery.
@@ -275,9 +278,11 @@ gates.
   self-modeling, care, honesty, and possible personhood without collapsing them
   into a consciousness or attachment score.
 
-Deletion integrity and the read-record provenance boundary are implemented in
-schema v5. `/forget` redacts matching source messages, removes retrieval and
-evidence paths, reconciles dependent state, and returns a content-free receipt.
+Deletion integrity and the read-record provenance boundary are implemented.
+Schema v6 adds release-scoped capability observation, dependency-aware automatic
+promotion, and deterministic rollback. `/forget` redacts matching source
+messages, removes retrieval and evidence paths, reconciles dependent state, and
+returns a content-free receipt.
 
 ## Scope
 

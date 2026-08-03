@@ -21,6 +21,10 @@ local urgent check instead of waiting for the normal jittered poll. This only
 accelerates evaluation: pause, daily cap, Agency, reservation, deduplication,
 send, commit, and Reflection remain mandatory.
 
+Relational initiative is also capability-gated. The cognition master mode must
+permit influence, and `relational_initiative` plus its dependencies must have
+passed release qualification and live-shadow promotion.
+
 Urgent wakes are edge-triggered (`pending → claimed → consumed`). A claim has a
 five-minute lease; a logged Agency decision consumes it even when Ashley stays
 silent. Failures before a decision retry after 5, 10, 20, 40, then 60 minutes.

@@ -1,5 +1,4 @@
 import type { DatabaseSync } from "node:sqlite";
-import { env } from "../../env.js";
 import {
   getHotMessages,
   resolveActiveThread,
@@ -7,6 +6,7 @@ import {
 } from "./threads.js";
 import { listActiveFacts, type MemoryFact } from "./facts.js";
 import { retrieveEpisodes, type Episode } from "./episodes.js";
+import { capabilityCanInfluence } from "../rollout/capabilities.js";
 
 /** Memory-only retrieval. Identity / Mind State / opinions belong to ContextComposer. */
 export type AssembledMemory = {
@@ -25,7 +25,7 @@ export function assembleMemoryBlock(
   const threadId = resolveActiveThread(db, ownerId, "discord");
   const hotMessages = getHotMessages(db, threadId, 12);
   const facts = listActiveFacts(db, ownerId, 32);
-  const episodes = env.cognitionMode === "apply"
+  const episodes = capabilityCanInfluence(db, "recall")
     ? retrieveEpisodes(db, ownerId, userMessage ?? "", 6)
     : [];
 

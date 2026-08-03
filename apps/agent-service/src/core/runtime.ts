@@ -43,6 +43,14 @@ import {
 } from "./state/mind-items.js";
 import { listRevisions, revertRevision } from "./learning/revisions.js";
 import { forgetOwnerTopic, type ForgetResult } from "./memory/forget.js";
+import {
+  capabilityCanInfluence,
+  capabilityNames,
+  listCapabilityStatuses,
+  recordIsolatedEvaluation,
+  recordLiveShadowEvent,
+  type CapabilityName,
+} from "./rollout/capabilities.js";
 
 export type ReactiveChatInput = {
   message: string;
@@ -138,6 +146,7 @@ function logProactiveDecision(
       decision,
       ...(outcomeText !== undefined ? { outcomeText } : {}),
     });
+    recordLiveShadowEvent(db, "thought", `decision:${decisionId}`);
     if (urgentItemId !== null) consumeUrgentWake(db, urgentItemId);
     setLastDecision(db, ownerId, decisionId);
     db.exec("COMMIT");
@@ -218,13 +227,17 @@ export class AshleyCore {
         message,
       );
       let decision = decide(motivations, "reactive");
-      decision = await deliberateDecision(decision, motivations, "reactive");
-      decision = attachAffectLicense(
-        decision,
-        getAffectiveState(this.db, input.ownerId),
-      );
+      decision = await deliberateDecision(this.db, decision, motivations, "reactive");
+      if (capabilityCanInfluence(this.db, "affect")) {
+        decision = attachAffectLicense(
+          decision,
+          getAffectiveState(this.db, input.ownerId),
+        );
+      }
       const recentTakes = listRecentTakes(this.db, 6);
-      decision = attachAuthorizedClaims(decision, recentTakes);
+      if (capabilityCanInfluence(this.db, "reading")) {
+        decision = attachAuthorizedClaims(decision, recentTakes);
+      }
       const decisionId = logDecision(this.db, {
         ownerId: input.ownerId,
         channel: input.channel,
@@ -313,7 +326,7 @@ export class AshleyCore {
     if (getState(this.db, ownerId).availability !== "available") {
       return { shouldSend: false, reason: "unavailable" };
     }
-    const urgentItem = env.cognitionMode === "apply"
+    const urgentItem = capabilityCanInfluence(this.db, "relational_initiative")
       ? claimUrgentMindState(this.db, ownerId)
       : null;
     let decisionLogged = false;
@@ -325,14 +338,18 @@ export class AshleyCore {
         this.reflectionMode,
       );
       let decision = decide(motivations, "proactive");
-      decision = await deliberateDecision(decision, motivations, "proactive");
-      decision = attachAffectLicense(
-        decision,
-        getAffectiveState(this.db, ownerId),
-      );
+      decision = await deliberateDecision(this.db, decision, motivations, "proactive");
+      if (capabilityCanInfluence(this.db, "affect")) {
+        decision = attachAffectLicense(
+          decision,
+          getAffectiveState(this.db, ownerId),
+        );
+      }
       decision = attachLearningSnapshot(decision, motivations);
       const recentTakes = listRecentTakes(this.db, 6);
-      decision = attachAuthorizedClaims(decision, recentTakes);
+      if (capabilityCanInfluence(this.db, "reading")) {
+        decision = attachAuthorizedClaims(decision, recentTakes);
+      }
       if (!decision.cognitiveAllocation.shouldSpeak || decision.score < 25) {
         const decisionId = logProactiveDecision(
           this.db,
@@ -381,6 +398,7 @@ export class AshleyCore {
         userMessage,
         decision,
       });
+      recordLiveShadowEvent(this.db, "thought", `decision:${decisionId}`);
       this.activeOwners.add(ownerId);
       try {
         const rendered = await expressSpeak(
@@ -757,7 +775,7 @@ export class AshleyCore {
 
   hasUrgentCognition(ownerId: string): boolean {
     if (
-      env.cognitionMode !== "apply" ||
+      !capabilityCanInfluence(this.db, "relational_initiative") ||
       !env.proactiveEnabled ||
       this.isProactivePaused(ownerId) ||
       this.activeOwners.has(ownerId) ||
@@ -773,6 +791,7 @@ export class AshleyCore {
   getCognitionOverview(ownerId: string) {
     return {
       mode: env.cognitionMode,
+      capabilities: listCapabilityStatuses(this.db),
       affect: getAffectiveState(this.db, ownerId),
       mindState: listActiveMindStateItems(this.db, ownerId),
       urgent: this.hasUrgentCognition(ownerId),
@@ -791,8 +810,37 @@ export class AshleyCore {
   getRevisions(ownerId: string, limit = 50) {
     return {
       mode: env.cognitionMode,
+      capabilities: listCapabilityStatuses(this.db),
       revisions: listRevisions(this.db, ownerId, limit),
     };
+  }
+
+  getCapabilities() {
+    return {
+      masterMode: env.cognitionMode,
+      capabilities: listCapabilityStatuses(this.db),
+    };
+  }
+
+  recordCapabilityEvaluation(input: {
+    capability: string;
+    seeds: number;
+    passed: boolean;
+    sourceKey: string;
+  }) {
+    if (!capabilityNames.includes(input.capability as CapabilityName)) {
+      throw new Error("invalid_capability");
+    }
+    recordIsolatedEvaluation(
+      this.db,
+      input.capability as CapabilityName,
+      {
+        seeds: input.seeds,
+        passed: input.passed,
+        sourceKey: input.sourceKey,
+      },
+    );
+    return this.getCapabilities();
   }
 
   revertRevision(ownerId: string, revisionId: number): boolean {
@@ -945,6 +993,7 @@ export class AshleyCore {
     schemaVersion: number;
     reflectionMode: ReflectionMode;
     cognitionMode: "observe" | "apply";
+    capabilities: ReturnType<typeof listCapabilityStatuses>;
     identityEntries: number;
     decisions: number;
   } {
@@ -964,12 +1013,13 @@ export class AshleyCore {
         .prepare("SELECT COUNT(*) AS count FROM decision_log")
         .get();
       return {
-        ok: version >= 5,
+        ok: version >= 6,
         nuclearEnabled: true,
         dbPath: NUCLEAR_DB_PATH,
         schemaVersion: version,
         reflectionMode: this.reflectionMode,
         cognitionMode: env.cognitionMode,
+        capabilities: listCapabilityStatuses(this.db),
         identityEntries:
           isRow(identityRow) && typeof identityRow.count === "number"
             ? identityRow.count
@@ -987,6 +1037,7 @@ export class AshleyCore {
         schemaVersion: 0,
         reflectionMode: this.reflectionMode,
         cognitionMode: env.cognitionMode,
+        capabilities: [],
         identityEntries: 0,
         decisions: 0,
       };

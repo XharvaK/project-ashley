@@ -478,6 +478,43 @@ ALTER TABLE cur_takes ADD COLUMN read_id INTEGER REFERENCES cur_reads(id);
 CREATE INDEX idx_cur_takes_evidence ON cur_takes (evidence_kind, read_id, created_at DESC);
 `;
 
+const MIGRATION_6 = `
+CREATE TABLE capability_releases (
+  capability       TEXT NOT NULL,
+  release_id       TEXT NOT NULL,
+  state            TEXT NOT NULL DEFAULT 'observe'
+                     CHECK (state IN ('observe', 'active', 'rolled_back', 'disabled')),
+  eval_seed_count  INTEGER NOT NULL DEFAULT 0,
+  qualified_at     TEXT,
+  promoted_at      TEXT,
+  rolled_back_at   TEXT,
+  failure_kind     TEXT,
+  failure_reason   TEXT,
+  updated_at       TEXT NOT NULL,
+  PRIMARY KEY (capability, release_id)
+);
+CREATE INDEX idx_capability_releases_state
+  ON capability_releases (release_id, state, capability);
+
+CREATE TABLE capability_events (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  capability  TEXT NOT NULL,
+  release_id  TEXT NOT NULL,
+  kind        TEXT NOT NULL CHECK (kind IN (
+                'isolated_eval', 'live_shadow', 'behavioral_breach',
+                'critical_failure'
+              )),
+  source_key  TEXT NOT NULL,
+  detail_json TEXT NOT NULL DEFAULT '{}',
+  occurred_at TEXT NOT NULL,
+  UNIQUE(capability, release_id, kind, source_key),
+  FOREIGN KEY (capability, release_id)
+    REFERENCES capability_releases(capability, release_id)
+);
+CREATE INDEX idx_capability_events_window
+  ON capability_events (capability, release_id, kind, occurred_at DESC);
+`;
+
 function userVersion(db: DatabaseSync): number {
   const row: unknown = db.prepare("PRAGMA user_version").get();
   if (typeof row !== "object" || row === null || !("user_version" in row)) {
@@ -538,6 +575,17 @@ export function migrate(db: DatabaseSync): void {
     try {
       db.exec(MIGRATION_5);
       db.exec("PRAGMA user_version = 5");
+      db.exec("COMMIT");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+  if (userVersion(db) < 6) {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.exec(MIGRATION_6);
+      db.exec("PRAGMA user_version = 6");
       db.exec("COMMIT");
     } catch (error) {
       db.exec("ROLLBACK");

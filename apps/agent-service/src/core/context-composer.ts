@@ -1,5 +1,4 @@
 import type { DatabaseSync } from "node:sqlite";
-import { env } from "../env.js";
 import { buildQuestionsBlock } from "./state/questions.js";
 import {
   loadNuclearSystemPrompt,
@@ -17,6 +16,7 @@ import { getState } from "./state/store.js";
 import { getAffectiveState } from "./state/affect.js";
 import { listActiveMindStateItems } from "./state/mind-items.js";
 import type { Decision } from "./types.js";
+import { capabilityCanInfluence } from "./rollout/capabilities.js";
 
 /** Product: composed turn context Expression consumes. */
 export type TurnContext = {
@@ -40,7 +40,9 @@ export type ComposeTurnContextInput = {
 function mindStateBlock(db: DatabaseSync, ownerId: string): string {
   const state = getState(db, ownerId);
   const affect = getAffectiveState(db, ownerId);
-  const items = env.cognitionMode === "apply"
+  const mindStateActive = capabilityCanInfluence(db, "mind_state");
+  const affectActive = capabilityCanInfluence(db, "affect");
+  const items = mindStateActive
     ? listActiveMindStateItems(db, ownerId, 12)
     : [];
   // Transport existing Mind State condition fields only — no scoring,
@@ -56,7 +58,7 @@ function mindStateBlock(db: DatabaseSync, ownerId: string): string {
       (item) =>
         `${item.kind}: ${item.text} (activation ${item.activation.toFixed(2)}, urgency ${item.urgency.toFixed(2)}, source ${item.sourceType}:${item.sourceId})`,
     ),
-    env.cognitionMode === "apply"
+    affectActive
       ? `Affect: valence ${affect.valence.toFixed(2)}, activation ${affect.activation.toFixed(2)}, openness ${affect.openness.toFixed(2)}, tension ${affect.tension.toFixed(2)}. Cause: ${affect.reason}.`
       : "",
   ].filter(Boolean);

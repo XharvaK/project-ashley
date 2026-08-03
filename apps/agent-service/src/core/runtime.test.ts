@@ -19,6 +19,18 @@ import { createQuestion } from "./state/questions.js";
 import { listActiveMindStateItems, upsertMindStateItem } from "./state/mind-items.js";
 import { patchState } from "./state/store.js";
 import { AshleyCore } from "./runtime.js";
+import { currentReleaseId } from "./rollout/capabilities.js";
+
+function activateCapabilities(db: DatabaseSync, names: string[]): void {
+  const releaseId = currentReleaseId();
+  const now = new Date().toISOString();
+  const insert = db.prepare(
+    `INSERT INTO capability_releases
+       (capability, release_id, state, promoted_at, updated_at)
+     VALUES (?, ?, 'active', ?, ?)`,
+  );
+  for (const name of names) insert.run(name, releaseId, now, now);
+}
 
 function addCommittedQuestionInitiative(
   db: DatabaseSync,
@@ -194,6 +206,9 @@ describe("AshleyCore", () => {
       env.cognitionMode = "apply";
       env.proactiveEnabled = true;
       env.proactiveMaxPerDay = 10;
+      activateCapabilities(db, [
+        "recall", "mind_state", "thought", "relational_initiative",
+      ]);
       upsertMindStateItem(db, {
         ownerId: "doc",
         kind: "concern",
@@ -231,6 +246,9 @@ describe("AshleyCore", () => {
       env.cognitionMode = "apply";
       env.mistralApiKey = "";
       env.proactiveEnabled = true;
+      activateCapabilities(db, [
+        "recall", "mind_state", "thought", "relational_initiative",
+      ]);
       upsertMindStateItem(db, {
         ownerId: "doc",
         kind: "commitment",

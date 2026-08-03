@@ -1,5 +1,4 @@
 import type { DatabaseSync } from "node:sqlite";
-import { env } from "../../env.js";
 import { listOpenQuestions } from "../state/questions.js";
 import { listRecentTakes } from "../curiosity/feed.js";
 import { listActiveFacts } from "../memory/facts.js";
@@ -12,6 +11,7 @@ import type {
   Opinion,
   Trigger,
 } from "../types.js";
+import { capabilityCanInfluence } from "../rollout/capabilities.js";
 
 function ageHours(iso: string): number {
   const parsed = Date.parse(iso);
@@ -160,7 +160,7 @@ export function collectMotivations(
     );
   }
 
-  for (const item of env.cognitionMode === "apply"
+  for (const item of capabilityCanInfluence(db, "mind_state")
     ? listActiveMindStateItems(db, ownerId, 12)
     : []) {
     const kind: MotivationKind =

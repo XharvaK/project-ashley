@@ -83,14 +83,15 @@ Implement it at the first layer that answers yes.
 Avoid solving problems in higher layers that naturally belong lower in the stack. Do not solve cognitive problems in Rendering. Do not solve rendering problems in Identity.
 
 Continuous cognition is event-driven and defaults to `ASHLEY_COGNITION_MODE=observe`.
-Only `apply` allows episodes, Mind State, affect, or learning to influence behavior.
-Schema v5 integrates each cognition job atomically, requires exact user-message
+`apply` is only a master ceiling; per-capability release gates still control
+influence. Schema v6 integrates each cognition job atomically, requires exact user-message
 provenance for automatic facts, uses leased edge-triggered urgent wakes, and
 adds read-record provenance plus receipt-backed message redaction.
 
 Observability: `GET /health`, `GET /nuclear/decisions?owner_id=`,
 `GET /nuclear/reflections?owner_id=`, `GET /nuclear/episodes?owner_id=`,
 `GET /nuclear/cognition?owner_id=`, `GET /nuclear/revisions?owner_id=`.
+Capability rollout: `GET /nuclear/capabilities?owner_id=`.
 
 Voice, Telegram, habits, Moltbook, and skills were retired — Discord only.
 

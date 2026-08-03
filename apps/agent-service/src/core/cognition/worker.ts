@@ -8,6 +8,11 @@ import { upsertMindStateItem } from "../state/mind-items.js";
 import { applyEligibleRevisions, proposeRevision, type RevisionLayer } from "../learning/revisions.js";
 import type { CognitionMode, MindStateItemKind } from "../types.js";
 import {
+  capabilityCanInfluence,
+  recordLiveShadowEvent,
+  type CapabilityName,
+} from "../rollout/capabilities.js";
+import {
   claimNextJob,
   completeJob,
   failJob,
@@ -54,6 +59,7 @@ export type CognitionAnalysis = {
 };
 
 type Analyze = (transcript: string) => Promise<{ analysis: CognitionAnalysis; model: string; raw: string }>;
+type CapabilityGate = (capability: CapabilityName) => boolean;
 
 function number(value: unknown, fallback = 0): number {
   const parsed = Number(value);
@@ -244,6 +250,8 @@ export async function processNextCognitiveJob(
   db: DatabaseSync,
   mode: CognitionMode,
   analyze: Analyze = analyzeWithMistral,
+  canInfluence: CapabilityGate = (capability) =>
+    capabilityCanInfluence(db, capability, mode),
 ): Promise<boolean> {
   const job = claimNextJob(db);
   if (!job) return false;
@@ -270,6 +278,26 @@ export async function processNextCognitiveJob(
         unresolved: result.analysis.unresolved,
       });
       if (!episode) throw new Error("episode_creation_failed");
+      recordLiveShadowEvent(db, "recall", `episode:${episode.id}`);
+      if (result.analysis.stateItems.length > 0) {
+        recordLiveShadowEvent(db, "mind_state", `episode:${episode.id}`);
+      }
+      if ([
+        result.analysis.affect.valenceDelta,
+        result.analysis.affect.activationDelta,
+        result.analysis.affect.opennessDelta,
+        result.analysis.affect.tensionDelta,
+      ].some((value) => Math.abs(value) >= 0.01)) {
+        recordLiveShadowEvent(db, "affect", `episode:${episode.id}`);
+      }
+      if (result.analysis.revisions.length > 0 || result.analysis.facts.length > 0) {
+        recordLiveShadowEvent(db, "learning", `episode:${episode.id}`);
+      }
+      if (result.analysis.stateItems.some((item) =>
+        (item.kind === "concern" || item.kind === "commitment") &&
+        item.urgency >= 0.85)) {
+        recordLiveShadowEvent(db, "relational_initiative", `episode:${episode.id}`);
+      }
       for (const revision of result.analysis.revisions) {
         proposeRevision(db, {
           ownerId: job.ownerId,
@@ -283,7 +311,7 @@ export async function processNextCognitiveJob(
       }
       if (mode === "apply") {
         const messagesById = new Map(messages.map((message) => [message.id, message]));
-        for (const fact of result.analysis.facts) {
+        for (const fact of canInfluence("learning") ? result.analysis.facts : []) {
           if (!fact.explicit || fact.confidence < 0.8) continue;
           const source = messagesById.get(fact.sourceMessageId);
           const quote = normalizedEvidenceText(fact.sourceQuote);
@@ -317,7 +345,7 @@ export async function processNextCognitiveJob(
             link.run(job.ownerId, String(factId), "message", String(source.id), now);
           }
         }
-        for (const item of result.analysis.stateItems) {
+        for (const item of canInfluence("mind_state") ? result.analysis.stateItems : []) {
           upsertMindStateItem(db, {
             ownerId: job.ownerId,
             ...item,
@@ -325,13 +353,17 @@ export async function processNextCognitiveJob(
             sourceId: episode.id,
           });
         }
-        applyAffectiveEvent(db, {
-          ownerId: job.ownerId,
-          sourceType: "episode",
-          sourceId: episode.id,
-          ...result.analysis.affect,
-        });
-        applyEligibleRevisions(db, job.ownerId, mode);
+        if (canInfluence("affect")) {
+          applyAffectiveEvent(db, {
+            ownerId: job.ownerId,
+            sourceType: "episode",
+            sourceId: episode.id,
+            ...result.analysis.affect,
+          });
+        }
+        if (canInfluence("learning")) {
+          applyEligibleRevisions(db, job.ownerId, mode);
+        }
       }
       logRun(
         db,

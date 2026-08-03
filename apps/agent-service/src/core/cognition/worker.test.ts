@@ -46,6 +46,8 @@ const analysis: CognitionAnalysis = {
   }],
 };
 
+const allCapabilitiesActive = () => true;
+
 function setup() {
   const db = openNuclearDb(new DatabaseSync(":memory:"));
   const threadId = resolveActiveThread(db, "doc");
@@ -64,7 +66,7 @@ describe("continuous cognition worker", () => {
   it("applies grounded state only in apply mode", async () => {
     const { db } = setup();
     const analyze = async () => ({ analysis, model: "test", raw: "{}" });
-    expect(await processNextCognitiveJob(db, "apply", analyze)).toBe(true);
+    expect(await processNextCognitiveJob(db, "apply", analyze, allCapabilitiesActive)).toBe(true);
     expect(retrieveEpisodes(db, "doc", "synth")).toHaveLength(1);
     expect(listActiveMindStateItems(db, "doc")[0]).toMatchObject({
       kind: "commitment",
@@ -76,14 +78,14 @@ describe("continuous cognition worker", () => {
       key: "synth_performance",
       confidence: 0.95,
     });
-    expect(await processNextCognitiveJob(db, "apply", analyze)).toBe(false);
+    expect(await processNextCognitiveJob(db, "apply", analyze, allCapabilitiesActive)).toBe(false);
     db.close();
   });
 
   it("records episodes and proposals without changing state in observe mode", async () => {
     const { db } = setup();
     const analyze = async () => ({ analysis, model: "test", raw: "{}" });
-    await processNextCognitiveJob(db, "observe", analyze);
+    await processNextCognitiveJob(db, "observe", analyze, allCapabilitiesActive);
     expect(retrieveEpisodes(db, "doc", "synth")).toHaveLength(1);
     expect(listActiveMindStateItems(db, "doc")).toHaveLength(0);
     expect(getAffectiveState(db, "doc").reason).toBe("neutral baseline");
@@ -133,7 +135,7 @@ describe("continuous cognition worker", () => {
       analysis: invalid,
       model: "test",
       raw: "{}",
-    }));
+    }), allCapabilitiesActive);
     expect(listActiveFacts(db, "doc")).toHaveLength(0);
     db.close();
   });
@@ -147,7 +149,7 @@ describe("continuous cognition worker", () => {
       BEGIN SELECT RAISE(ABORT, 'forced integration failure'); END;
     `);
 
-    await processNextCognitiveJob(db, "apply", analyze);
+    await processNextCognitiveJob(db, "apply", analyze, allCapabilitiesActive);
     expect(retrieveEpisodes(db, "doc", "")).toHaveLength(0);
     expect(listActiveFacts(db, "doc")).toHaveLength(0);
     expect(listActiveMindStateItems(db, "doc")).toHaveLength(0);
@@ -162,7 +164,7 @@ describe("continuous cognition worker", () => {
     db.prepare("UPDATE cognitive_jobs SET available_at = ?").run(
       new Date(0).toISOString(),
     );
-    await processNextCognitiveJob(db, "apply", analyze);
+    await processNextCognitiveJob(db, "apply", analyze, allCapabilitiesActive);
     expect(retrieveEpisodes(db, "doc", "")).toHaveLength(1);
     expect(listActiveFacts(db, "doc")).toHaveLength(1);
     expect(listActiveMindStateItems(db, "doc")).toHaveLength(1);

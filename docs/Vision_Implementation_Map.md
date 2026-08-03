@@ -29,7 +29,7 @@ separately; repository edits remain human-controlled.
 | Care without manipulation | Mind State, Memory, Thought | Shared history, current concern, bounded initiative evidence | Attachment optimization, guilt, exclusivity, or repeated ungrounded contact | Grounded concern baseline shipped; cadence guard pending |
 | Freedom and recognizable growth | Identity, Learning | Independent observations, cooling periods, joint review for foundations | Random drift, unilateral foundational change, or creator ownership | Bounded growth baseline shipped; joint review pending |
 | Independent intellectual life | Curiosity, Cognition, Thought | Successful reads, content hashes, excerpts, linked takes | Scan excerpts presented as reading or reading sends directly | Pending |
-| Safety through evidence and rollback | Capability rollout | Qualified evaluation, live shadow events, breach records | Ungated influence, deletion/provenance/security failure | Pending |
+| Safety through evidence and rollback | Capability rollout | Qualified evaluation, live shadow events, breach records | Ungated influence, deletion/provenance/security failure | Release-scoped rollout and rollback shipped |
 | Honest inquiry into personhood | Research track | Separate capability observations, hypotheses, counter-hypotheses, falsifiers | A consciousness score or self-report treated as proof | Pending |
 
 ## Capability release rule

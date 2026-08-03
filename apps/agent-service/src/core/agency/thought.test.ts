@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { DatabaseSync } from "node:sqlite";
 import { env } from "../../env.js";
 import { decide } from "./decide.js";
 import { deliberateDecision } from "./thought.js";
@@ -28,13 +29,17 @@ describe("Thought fallback", () => {
   ])("returns deterministic Agency on %s", async (expected, failure) => {
     env.cognitionMode = "apply";
     env.mistralApiKey = "test";
+    const db = new DatabaseSync(":memory:");
     const base = decide([motivation], "reactive");
     const result = await deliberateDecision(
+      db,
       base,
       [motivation],
       "reactive",
       async () => { throw failure; },
+      () => true,
     );
+    db.close();
     expect(result).toMatchObject({
       kind: base.kind,
       motivationIds: base.motivationIds,
@@ -46,12 +51,16 @@ describe("Thought fallback", () => {
   it("falls back on malformed structured output", async () => {
     env.cognitionMode = "apply";
     env.mistralApiKey = "test";
+    const db = new DatabaseSync(":memory:");
     const result = await deliberateDecision(
+      db,
       decide([motivation], "reactive"),
       [motivation],
       "reactive",
       async () => ({ text: "not json", model: "test" }),
+      () => true,
     );
+    db.close();
     expect(result).toMatchObject({
       thoughtSource: "fallback",
       thoughtError: "invalid_response",
@@ -61,7 +70,9 @@ describe("Thought fallback", () => {
   it("persists only a sanitized provider error code", async () => {
     env.cognitionMode = "apply";
     env.mistralApiKey = "test";
+    const db = new DatabaseSync(":memory:");
     const result = await deliberateDecision(
+      db,
       decide([motivation], "reactive"),
       [motivation],
       "reactive",
@@ -70,7 +81,9 @@ describe("Thought fallback", () => {
           code: "provider failed: token=secret",
         });
       },
+      () => true,
     );
+    db.close();
     expect(result.thoughtError).toBe("thought_error");
     expect(result.thoughtError).not.toContain("raw provider payload");
   });

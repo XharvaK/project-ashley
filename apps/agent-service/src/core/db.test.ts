@@ -13,20 +13,23 @@ describe("nuclear database migrations", () => {
   it("creates the cognition and Reflection schemas for a fresh database", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
 
-    expect(schemaVersion(db)).toBe(5);
+    expect(schemaVersion(db)).toBe(6);
     const tables = db
       .prepare(
         `SELECT name FROM sqlite_master
          WHERE type = 'table' AND name IN (
            'reflection_events', 'initiative_learning', 'episodes',
            'mind_state_items', 'affective_state', 'cognitive_jobs',
-           'learning_revisions', 'cur_reads', 'forget_receipts'
+           'learning_revisions', 'cur_reads', 'forget_receipts',
+           'capability_releases', 'capability_events'
          )
          ORDER BY name`,
       )
       .all() as Array<{ name: string }>;
     expect(tables.map((row) => row.name)).toEqual([
       "affective_state",
+      "capability_events",
+      "capability_releases",
       "cognitive_jobs",
       "cur_reads",
       "episodes",
@@ -102,7 +105,7 @@ describe("nuclear database migrations", () => {
 
     openNuclearDb(db);
 
-    expect(schemaVersion(db)).toBe(5);
+    expect(schemaVersion(db)).toBe(6);
     const decision = db
       .prepare(
         `SELECT reason, outcome_text, learning_subject_kind,
@@ -188,7 +191,7 @@ describe("nuclear database migrations", () => {
 
     openNuclearDb(db);
 
-    expect(schemaVersion(db)).toBe(5);
+    expect(schemaVersion(db)).toBe(6);
     expect(db.prepare(
       "SELECT wake_state FROM mind_state_items WHERE id = 1",
     ).get()).toMatchObject({ wake_state: "pending" });
@@ -230,7 +233,7 @@ describe("nuclear database migrations", () => {
 
     openNuclearDb(db);
 
-    expect(schemaVersion(db)).toBe(5);
+    expect(schemaVersion(db)).toBe(6);
     expect(db.prepare(
       "SELECT evidence_kind, read_id FROM cur_takes WHERE id = 1",
     ).get()).toMatchObject({ evidence_kind: "scan_excerpt", read_id: null });

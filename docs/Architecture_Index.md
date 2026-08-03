@@ -22,13 +22,15 @@ SQLite: `~/.composer-assistant/conversations/nuclear.db`.
 `apps/agent-service/src/core/` — identity, state, memory, cognition, learning,
 curiosity, agency, reflection, honesty, conversation, writers, runtime.
 
-Schema v5 adds grounded episodes with FTS5 retrieval, referenced Mind State
+Schema v6 adds grounded episodes with FTS5 retrieval, referenced Mind State
 items, bounded affect, durable cognition jobs/runs, verified fact provenance,
 edge-triggered urgent wake leases, Thought fallback auditing, and exact organic
 revision lineage. Cognition integration is atomic: a completed job produces one
 complete episode and all of its derived state, or none of them.
 `ASHLEY_COGNITION_MODE=observe` records evidence and proposals without allowing
-behavioral influence; `apply` enables the full loop.
+behavioral influence. `apply` is the master ceiling; release-scoped capability
+states, dependencies, evaluation qualification, live-shadow thresholds, and
+rollback still govern the full loop.
 
 Feed scans store attention candidates only. `cur_reads` is the sole evidence
 source for claims that Ashley read an article. Owner-confirmed forgetting
@@ -46,6 +48,7 @@ Retired: voice, Telegram, habits, Moltbook, skills, legacy ChatService / `index.
 - `GET /nuclear/reflections?owner_id=` → immutable evidence + current proactive calibration
 - `GET /nuclear/episodes?owner_id=&query=` → grounded episodic recall
 - `GET /nuclear/cognition?owner_id=` → affect, urgency, jobs, and runs
+- `GET /nuclear/capabilities?owner_id=` → release gates, evidence, and rollback
 - `GET /nuclear/revisions?owner_id=` → proposed/applied identity and opinion growth
 - `POST /nuclear/revisions/revert` → restore the prior value for one applied revision
 
