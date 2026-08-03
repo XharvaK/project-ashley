@@ -1,5 +1,10 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { Decision, DecisionKind, Trigger } from "../types.js";
+import type {
+  Decision,
+  DecisionKind,
+  MotivationKind,
+  Trigger,
+} from "../types.js";
 
 export type LoggedDecision = {
   id: number;
@@ -9,6 +14,9 @@ export type LoggedDecision = {
   decisionKind: DecisionKind;
   motivationIds: number[];
   reason: string;
+  learningSubjectKind: MotivationKind | null;
+  learningAdjustment: number;
+  learningThroughEventId: number | null;
   outcomeText: string | null;
   createdAt: string;
 };
@@ -58,6 +66,26 @@ function trigger(value: unknown): Trigger | null {
     : null;
 }
 
+function motivationKind(value: unknown): MotivationKind | null {
+  const kind = stringValue(value);
+  switch (kind) {
+    case "user_message":
+    case "question":
+    case "fact":
+    case "callback":
+    case "opinion":
+    case "take":
+    case "unfinished":
+    case "identity":
+    case "availability":
+    case "silence_signal":
+    case "silence_ok":
+      return kind;
+    default:
+      return null;
+  }
+}
+
 function parseIds(value: unknown): number[] {
   if (typeof value !== "string") return [];
   try {
@@ -83,6 +111,13 @@ function mapDecision(row: unknown): LoggedDecision | null {
     decisionKind: kind,
     motivationIds: parseIds(row.motivation_ids_json),
     reason: stringValue(row.reason),
+    learningSubjectKind: motivationKind(row.learning_subject_kind),
+    learningAdjustment: numberValue(row.learning_adjustment),
+    learningThroughEventId:
+      row.learning_through_event_id === null ||
+      row.learning_through_event_id === undefined
+        ? null
+        : numberValue(row.learning_through_event_id),
     outcomeText:
       typeof row.outcome_text === "string" ? row.outcome_text : null,
     createdAt: stringValue(row.created_at),
@@ -131,8 +166,9 @@ export function logDecision(
     .prepare(
       `INSERT INTO decision_log
          (owner_id, channel, trigger, decision_kind, motivation_ids_json,
-          reason, outcome_text, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          reason, learning_subject_kind, learning_adjustment,
+          learning_through_event_id, outcome_text, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.ownerId,
@@ -141,6 +177,9 @@ export function logDecision(
       input.decision.kind,
       JSON.stringify(input.decision.motivationIds),
       input.decision.reason,
+      input.decision.learning?.subjectKind ?? null,
+      input.decision.learning?.adjustment ?? 0,
+      input.decision.learning?.throughEventId ?? null,
       input.outcomeText ?? null,
       new Date().toISOString(),
     );
@@ -174,7 +213,9 @@ export function getDecision(
   const row = db
     .prepare(
       `SELECT id, owner_id, channel, trigger, decision_kind,
-              motivation_ids_json, reason, outcome_text, created_at
+              motivation_ids_json, reason, learning_subject_kind,
+              learning_adjustment, learning_through_event_id,
+              outcome_text, created_at
        FROM decision_log
        WHERE id = ?`,
     )
@@ -190,7 +231,9 @@ export function listRecentDecisions(
   const rows = db
     .prepare(
       `SELECT id, owner_id, channel, trigger, decision_kind,
-              motivation_ids_json, reason, outcome_text, created_at
+              motivation_ids_json, reason, learning_subject_kind,
+              learning_adjustment, learning_through_event_id,
+              outcome_text, created_at
        FROM decision_log
        WHERE owner_id = ?
        ORDER BY id DESC

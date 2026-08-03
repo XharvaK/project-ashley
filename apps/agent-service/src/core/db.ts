@@ -209,6 +209,52 @@ CREATE INDEX IF NOT EXISTS idx_nuclear_reservations_owner
   ON initiative_reservations (owner_id, created_at DESC);
 `;
 
+const MIGRATION_2 = `
+ALTER TABLE decision_log
+  ADD COLUMN learning_subject_kind TEXT;
+ALTER TABLE decision_log
+  ADD COLUMN learning_adjustment REAL NOT NULL DEFAULT 0;
+ALTER TABLE decision_log
+  ADD COLUMN learning_through_event_id INTEGER;
+
+CREATE TABLE reflection_events (
+  id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_id              TEXT NOT NULL,
+  kind                  TEXT NOT NULL CHECK (kind IN ('initiative_reaction')),
+  source_key            TEXT NOT NULL UNIQUE,
+  decision_id           INTEGER,
+  reservation_id        INTEGER,
+  discord_message_id    TEXT NOT NULL,
+  subject_kind          TEXT,
+  raw_signal            TEXT NOT NULL,
+  classified_signal     TEXT NOT NULL
+                            CHECK (classified_signal IN ('positive', 'negative', 'neutral')),
+  classifier_version    INTEGER NOT NULL,
+  status                TEXT NOT NULL
+                            CHECK (status IN ('pending', 'applied', 'ignored')),
+  reason                TEXT NOT NULL,
+  detail_json           TEXT NOT NULL DEFAULT '{}',
+  created_at            TEXT NOT NULL,
+  processed_at          TEXT
+);
+CREATE INDEX idx_reflection_events_owner
+  ON reflection_events (owner_id, id DESC);
+CREATE INDEX idx_reflection_events_pending
+  ON reflection_events (status, owner_id, subject_kind, id);
+
+CREATE TABLE initiative_learning (
+  owner_id        TEXT NOT NULL,
+  motivation_kind TEXT NOT NULL,
+  positive_count INTEGER NOT NULL DEFAULT 0,
+  negative_count INTEGER NOT NULL DEFAULT 0,
+  adjustment     REAL NOT NULL DEFAULT 0,
+  window_size    INTEGER NOT NULL DEFAULT 0,
+  last_event_id  INTEGER,
+  updated_at     TEXT NOT NULL,
+  PRIMARY KEY (owner_id, motivation_kind)
+);
+`;
+
 function userVersion(db: DatabaseSync): number {
   const row: unknown = db.prepare("PRAGMA user_version").get();
   if (typeof row !== "object" || row === null || !("user_version" in row)) {
@@ -219,9 +265,29 @@ function userVersion(db: DatabaseSync): number {
 }
 
 export function migrate(db: DatabaseSync): void {
-  if (userVersion(db) >= 1) return;
-  db.exec(SCHEMA);
-  db.exec("PRAGMA user_version = 1");
+  db.exec("PRAGMA foreign_keys = ON");
+  if (userVersion(db) < 1) {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.exec(SCHEMA);
+      db.exec("PRAGMA user_version = 1");
+      db.exec("COMMIT");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+  if (userVersion(db) < 2) {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.exec(MIGRATION_2);
+      db.exec("PRAGMA user_version = 2");
+      db.exec("COMMIT");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+  }
 }
 
 export function openNuclearDb(existing?: DatabaseSync): DatabaseSync {

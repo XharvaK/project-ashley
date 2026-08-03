@@ -21,7 +21,14 @@ import {
 import { listRecentTakes, listSources } from "./curiosity/feed.js";
 import { runNuclearCuriosityTick } from "./curiosity/tick.js";
 import { openNuclearDb } from "./db.js";
-import type { DecisionKind } from "./types.js";
+import {
+  applyInitiativeLearning,
+  attachLearningSnapshot,
+  getReflectionOverview,
+  processPendingReflectionEvents,
+  recordInitiativeReaction,
+} from "./reflection/initiative.js";
+import type { DecisionKind, ReflectionMode } from "./types.js";
 
 export type ReactiveChatInput = {
   message: string;
@@ -119,10 +126,16 @@ function setKv(db: DatabaseSync, key: string, value: string): void {
 
 export class AshleyCore {
   private readonly db: DatabaseSync;
+  private readonly reflectionMode: ReflectionMode;
   private readonly activeOwners = new Set<string>();
 
-  constructor(db?: DatabaseSync) {
+  constructor(
+    db?: DatabaseSync,
+    options?: { reflectionMode?: ReflectionMode },
+  ) {
     this.db = openNuclearDb(db);
+    this.reflectionMode = options?.reflectionMode ?? env.reflectionMode;
+    processPendingReflectionEvents(this.db);
   }
 
   async handleReactiveChat(
@@ -244,15 +257,25 @@ export class AshleyCore {
     if (getState(this.db, ownerId).availability !== "available") {
       return { shouldSend: false, reason: "unavailable" };
     }
-    const motivations = collectMotivations(
+    const motivations = applyInitiativeLearning(
       this.db,
       ownerId,
-      "proactive",
+      collectMotivations(this.db, ownerId, "proactive"),
+      this.reflectionMode,
     );
     let decision = decide(motivations, "proactive");
+    decision = attachLearningSnapshot(decision, motivations);
     const recentTakes = listRecentTakes(this.db, 6);
     decision = attachAuthorizedClaims(decision, recentTakes);
     if (!decision.cognitiveAllocation.shouldSpeak || decision.score < 25) {
+      const decisionId = logDecision(this.db, {
+        ownerId,
+        channel: "proactive",
+        trigger: "proactive",
+        decision,
+        outcomeText: "",
+      });
+      setLastDecision(this.db, ownerId, decisionId);
       return { shouldSend: false, reason: decision.reason };
     }
 
@@ -360,7 +383,12 @@ export class AshleyCore {
       };
     }
     seedIdentity(this.db, ownerId);
-    const motivations = collectMotivations(this.db, ownerId, "proactive");
+    const motivations = applyInitiativeLearning(
+      this.db,
+      ownerId,
+      collectMotivations(this.db, ownerId, "proactive"),
+      this.reflectionMode,
+    );
     const decision = decide(motivations, "proactive");
     if (!decision.cognitiveAllocation.shouldSpeak || decision.score < 25) {
       return {
@@ -595,7 +623,12 @@ export class AshleyCore {
   recordReaction(
     ownerId: string,
     input: { messageId: string; emoji: string },
-  ): { feedback: "positive" | "negative" | "neutral"; matchedInitiative: boolean } {
+  ): {
+    feedback: "positive" | "negative" | "neutral";
+    matchedInitiative: boolean;
+    reflectionEventId: number | null;
+    reflectionStatus: "applied" | "ignored" | null;
+  } {
     const bare = input.emoji.replace(/\uFE0F/g, "");
     const positive = new Set(["😂", "🤣", "😭", "❤️", "🔥", "💯", "👍", "😍", "🙌", "😅"]);
     const negative = new Set(["👎", "🙄", "😐", "💀", "🤨", "😬"]);
@@ -615,14 +648,26 @@ export class AshleyCore {
         at: new Date().toISOString(),
       }),
     );
-    const matched = this.db
-      .prepare(
-        `UPDATE initiative_reservations
-         SET reason = reason
-         WHERE owner_id = ? AND discord_message_id = ?`,
-      )
-      .run(ownerId, input.messageId);
-    return { feedback, matchedInitiative: Number(matched.changes) > 0 };
+    const reflection = recordInitiativeReaction(this.db, ownerId, input);
+    return {
+      feedback,
+      matchedInitiative: reflection.matchedInitiative,
+      reflectionEventId: reflection.event?.id ?? null,
+      reflectionStatus:
+        reflection.event?.status === "applied" ||
+        reflection.event?.status === "ignored"
+          ? reflection.event.status
+          : null,
+    };
+  }
+
+  getReflections(ownerId: string, limit = 20) {
+    return getReflectionOverview(
+      this.db,
+      ownerId,
+      this.reflectionMode,
+      limit,
+    );
   }
 
   recordGifFeedback(
@@ -769,6 +814,7 @@ export class AshleyCore {
     nuclearEnabled: boolean;
     dbPath: string;
     schemaVersion: number;
+    reflectionMode: ReflectionMode;
     identityEntries: number;
     decisions: number;
   } {
@@ -792,6 +838,7 @@ export class AshleyCore {
         nuclearEnabled: true,
         dbPath: NUCLEAR_DB_PATH,
         schemaVersion: version,
+        reflectionMode: this.reflectionMode,
         identityEntries:
           isRow(identityRow) && typeof identityRow.count === "number"
             ? identityRow.count
@@ -807,6 +854,7 @@ export class AshleyCore {
         nuclearEnabled: true,
         dbPath: NUCLEAR_DB_PATH,
         schemaVersion: 0,
+        reflectionMode: this.reflectionMode,
         identityEntries: 0,
         decisions: 0,
       };

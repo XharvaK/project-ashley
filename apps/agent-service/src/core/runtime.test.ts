@@ -13,8 +13,45 @@ vi.mock("./conversation/expression.js", () => ({
 }));
 
 import { openNuclearDb } from "./db.js";
+import { logDecision } from "./agency/log.js";
 import { createQuestion } from "./state/questions.js";
 import { AshleyCore } from "./runtime.js";
+
+function addCommittedQuestionInitiative(
+  db: DatabaseSync,
+  messageId: string,
+): void {
+  const now = new Date().toISOString();
+  const motivation = db
+    .prepare(
+      `INSERT INTO motivations
+         (owner_id, kind, score, ref_type, ref_id, summary, created_at, consumed_at)
+       VALUES ('doc', 'question', 50, 'test', ?, 'historical question', ?, NULL)`,
+    )
+    .run(messageId, now);
+  const motivationId = Number(motivation.lastInsertRowid);
+  const decisionId = logDecision(db, {
+    ownerId: "doc",
+    channel: "proactive",
+    trigger: "proactive",
+    decision: {
+      trigger: "proactive",
+      kind: "ask",
+      motivationIds: [motivationId],
+      score: 50,
+      reason: "historical question",
+      cognitiveAllocation: { shouldSpeak: true },
+      authorizedClaims: { readingTakeIds: [], readingTakeTitles: [] },
+    },
+  });
+  db.prepare(
+    `INSERT INTO initiative_reservations
+       (owner_id, decision_id, text, thread_id, angle, reason,
+        material_key, discord_message_id, created_at, committed_at)
+     VALUES ('doc', ?, 'historical question', 'thread', 'question', 'test',
+             ?, ?, ?, ?)`,
+  ).run(decisionId, `historical:${messageId}`, messageId, now, now);
+}
 
 describe("AshleyCore", () => {
   it("persists a reactive turn and allows explicit silence", async () => {
@@ -79,6 +116,48 @@ describe("AshleyCore", () => {
       discordMessageId: "discord-message-1",
     });
     expect(core.getProactiveStatus("doc").sentToday).toBe(1);
+
+    db.close();
+    rmSync(path, { force: true });
+  });
+
+  it("snapshots applied Reflection calibration on a future proactive decision", async () => {
+    const path = join(tmpdir(), `ashley-nuclear-${randomUUID()}.db`);
+    const db = openNuclearDb(new DatabaseSync(path));
+    const core = new AshleyCore(db, { reflectionMode: "apply" });
+    addCommittedQuestionInitiative(db, "historical-1");
+    addCommittedQuestionInitiative(db, "historical-2");
+    core.recordReaction("doc", {
+      messageId: "historical-1",
+      emoji: "\u{1F44D}",
+    });
+    core.recordReaction("doc", {
+      messageId: "historical-2",
+      emoji: "\u{1F44D}",
+    });
+    createQuestion(db, {
+      ownerId: "doc",
+      subject: "about_doc",
+      text: "what should we inspect next?",
+      priority: 50,
+    });
+
+    const draft = await core.tickProactive("doc");
+    expect(draft.shouldSend).toBe(true);
+    const latestDecision = db
+      .prepare(
+        `SELECT learning_subject_kind, learning_adjustment,
+                learning_through_event_id
+         FROM decision_log
+         WHERE owner_id = 'doc'
+         ORDER BY id DESC LIMIT 1`,
+      )
+      .get() as Record<string, unknown>;
+    expect(latestDecision).toMatchObject({
+      learning_subject_kind: "question",
+      learning_adjustment: 2,
+    });
+    expect(Number(latestDecision.learning_through_event_id)).toBeGreaterThan(0);
 
     db.close();
     rmSync(path, { force: true });

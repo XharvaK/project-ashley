@@ -37,6 +37,7 @@ Legacy `index.db` is archival for chat memory (nuclear does not read it). Conver
 Discord DM → POST /chat/text → AshleyCore (Identity → State → Agency → Conversation)
 Proactive tick → Agency.decide → draft → reserve / send / commit
 Curiosity feed → nuclear.db takes → Agency motivations
+Committed proactive reaction → Reflection → bounded future Thought calibration
 ```
 
 Conceptual stack (Identity and Mind State are joint inputs to Thought — neither produces the other):
@@ -52,6 +53,7 @@ Mind State (dynamic)┘
 | Identity | Stable who she is (values, boundaries, tastes, opinions) |
 | Mind State | Dynamic condition (energy, focus, goals, unresolved questions, recency) — embryonic in nuclear State fragments today |
 | Thought | Effort allocation, prioritization, reasoning (Agency `decide` + turn reasoning) |
+| Reflection | Post-outcome interpretation and bounded future Thought calibration; no current-turn authority |
 | Expression | Intentional language (`workspace/prompts/nuclear/`) |
 | Rendering | Platform mechanics only (typography, bubbles, pacing) |
 
@@ -73,7 +75,7 @@ Avoid solving problems in higher layers that naturally belong lower in the stack
 
 A full Mind State / Cognition doc is deferred until feature pressure forces clearer boundaries.
 
-Observability: `GET /health`, `GET /nuclear/decisions?owner_id=`.
+Observability: `GET /health`, `GET /nuclear/decisions?owner_id=`, `GET /nuclear/reflections?owner_id=`.
 
 Voice, Telegram, habits, Moltbook, and skills were retired — Discord only.
 

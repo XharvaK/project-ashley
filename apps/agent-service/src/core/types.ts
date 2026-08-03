@@ -22,6 +22,14 @@ export type MotivationKind =
 
 export type Trigger = "reactive" | "proactive";
 
+export type ReflectionMode = "observe" | "apply";
+
+export type LearningSnapshot = {
+  subjectKind: MotivationKind;
+  adjustment: number;
+  throughEventId: number;
+};
+
 /** v1 payload: transient decisions already implied by Decision.kind. Not the definition of Thought. */
 export type CognitiveAllocation = {
   shouldSpeak: boolean;
@@ -40,6 +48,7 @@ export type Decision = {
   motivationIds: number[];
   score: number;
   reason: string;
+  learning?: LearningSnapshot;
   cognitiveAllocation: CognitiveAllocation;
   authorizedClaims: AuthorizedClaims;
 };
@@ -49,6 +58,9 @@ export type Motivation = {
   ownerId?: string;
   kind: MotivationKind;
   score: number;
+  baseScore?: number;
+  learningAdjustment?: number;
+  learningThroughEventId?: number;
   refType?: string | null;
   refId?: string | number | null;
   summary: string;

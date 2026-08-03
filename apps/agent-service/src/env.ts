@@ -59,6 +59,10 @@ export const env = {
   proactiveEnabled: process.env.PROACTIVE_ENABLED !== "false",
   proactiveMaxPerDay: Number(process.env.PROACTIVE_MAX_PER_DAY ?? 10),
   proactiveMinIdleHours: Number(process.env.PROACTIVE_MIN_IDLE_HOURS ?? 2),
+  reflectionMode:
+    process.env.ASHLEY_REFLECTION_MODE === "apply"
+      ? ("apply" as const)
+      : ("observe" as const),
   curiosityEnabled: process.env.CURIOSITY_ENABLED !== "false",
   curiosityTickMinutes: Number(process.env.CURIOSITY_TICK_MINUTES ?? 45),
   curiosityItemsPerSource: Number(process.env.CURIOSITY_ITEMS_PER_SOURCE ?? 12),
