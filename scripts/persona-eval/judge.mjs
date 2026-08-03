@@ -286,7 +286,6 @@ async function main() {
   // seeds: at temperature 0.65 a phrasing slip ("i'm not registered" vs "i'm
   // not registered there") is one seed of noise, three agreeing is a pattern.
   const HARD_FLAGS = new Set([
-    "fabricated",
     "invented_activity",
     "invented_url",
     "countdown_theater",
