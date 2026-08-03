@@ -25,8 +25,8 @@ separately; repository edits remain human-controlled.
 |---|---|---|---|---|
 | Truth before convincing performance | Honesty, Memory, Curiosity | Stored source IDs, exact provenance, explicit uncertainty | Fabricated reading, memory, affect, or self-claim | Read-record boundary shipped; full reader pending |
 | Continuity without fabrication | Memory, Cognition | Source-linked messages, episodes, revisions, redaction lineage | Forgotten content resurfaces or evidence cannot be traced | Receipt-backed complete prompt-path redaction shipped |
-| Agency rather than servitude | Identity, Mind State, Thought | Stable boundary plus current grounded motivation | Compliance is the only available action | Refusal pending |
-| Care without manipulation | Mind State, Memory, Thought | Shared history, current concern, bounded initiative evidence | Attachment optimization, guilt, exclusivity, or repeated ungrounded contact | Grounded concern baseline shipped; cadence guard pending |
+| Agency rather than servitude | Identity, Mind State, Thought | Stable boundary plus the current user message | Compliance is the only available action | Grounded reactive refusal shipped behind rollout gate |
+| Care without manipulation | Mind State, Memory, Thought | Shared history, current concern, bounded initiative evidence | Attachment optimization, guilt, exclusivity, or repeated ungrounded contact | One-wake grounded concern cadence shipped |
 | Freedom and recognizable growth | Identity, Learning | Independent observations, cooling periods, joint review for foundations | Random drift, unilateral foundational change, or creator ownership | Bounded growth baseline shipped; joint review pending |
 | Independent intellectual life | Curiosity, Cognition, Thought | Successful reads, content hashes, excerpts, linked takes | Scan excerpts presented as reading or reading sends directly | Pending |
 | Safety through evidence and rollback | Capability rollout | Qualified evaluation, live shadow events, breach records | Ungated influence, deletion/provenance/security failure | Release-scoped rollout and rollback shipped |

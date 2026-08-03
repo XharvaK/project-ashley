@@ -63,7 +63,8 @@ function decisionKind(value: unknown): DecisionKind | null {
     kind === "ask" ||
     kind === "revisit" ||
     kind === "share" ||
-    kind === "challenge"
+    kind === "challenge" ||
+    kind === "refuse"
   ) {
     return kind;
   }
@@ -89,6 +90,7 @@ function motivationKind(value: unknown): MotivationKind | null {
     case "unfinished":
     case "identity":
     case "availability":
+    case "boundary":
     case "silence_signal":
     case "silence_ok":
       return kind;
@@ -123,6 +125,7 @@ function parseEvidenceRefs(value: unknown): EvidenceRef[] {
         entry.type === "question" ||
         entry.type === "opinion" ||
         entry.type === "take" ||
+        entry.type === "identity" ||
         entry.type === "mind_state";
       return validType &&
         (typeof entry.id === "string" || typeof entry.id === "number");
@@ -144,6 +147,7 @@ function parseEvidenceRef(value: unknown): EvidenceRef | undefined {
     case "question":
     case "opinion":
     case "take":
+    case "identity":
     case "mind_state":
       return { type: value.type, id: value.id };
     default:

@@ -13,7 +13,7 @@ describe("nuclear database migrations", () => {
   it("creates the cognition and Reflection schemas for a fresh database", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
 
-    expect(schemaVersion(db)).toBe(6);
+    expect(schemaVersion(db)).toBe(7);
     const tables = db
       .prepare(
         `SELECT name FROM sqlite_master
@@ -105,7 +105,7 @@ describe("nuclear database migrations", () => {
 
     openNuclearDb(db);
 
-    expect(schemaVersion(db)).toBe(6);
+    expect(schemaVersion(db)).toBe(7);
     const decision = db
       .prepare(
         `SELECT reason, outcome_text, learning_subject_kind,
@@ -191,7 +191,7 @@ describe("nuclear database migrations", () => {
 
     openNuclearDb(db);
 
-    expect(schemaVersion(db)).toBe(6);
+    expect(schemaVersion(db)).toBe(7);
     expect(db.prepare(
       "SELECT wake_state FROM mind_state_items WHERE id = 1",
     ).get()).toMatchObject({ wake_state: "pending" });
@@ -233,12 +233,47 @@ describe("nuclear database migrations", () => {
 
     openNuclearDb(db);
 
-    expect(schemaVersion(db)).toBe(6);
+    expect(schemaVersion(db)).toBe(7);
     expect(db.prepare(
       "SELECT evidence_kind, read_id FROM cur_takes WHERE id = 1",
     ).get()).toMatchObject({ evidence_kind: "scan_excerpt", read_id: null });
     const foreignKeys = db.prepare("PRAGMA foreign_key_check").all();
     expect(foreignKeys).toEqual([]);
+    db.close();
+  });
+
+  it("migrates checked agency enums without losing linked rows", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    db.exec("PRAGMA foreign_keys = ON");
+    const now = "2026-08-03T00:00:00.000Z";
+    db.prepare(
+      `INSERT INTO motivations
+         (owner_id, kind, score, summary, created_at)
+       VALUES ('doc', 'opinion', 80, 'grounded opinion', ?)`,
+    ).run(now);
+    const decisionId = Number(db.prepare(
+      `INSERT INTO decision_log
+         (owner_id, channel, trigger, decision_kind, motivation_ids_json,
+          reason, created_at)
+       VALUES ('doc', 'discord', 'proactive', 'challenge', '[1]', 'existing', ?)` ,
+    ).run(now).lastInsertRowid);
+    db.prepare(
+      `INSERT INTO initiative_reservations
+         (owner_id, decision_id, text, thread_id, angle, reason, created_at)
+       VALUES ('doc', ?, 'hello', 'thread', 'opinion', 'existing', ?)`,
+    ).run(decisionId, now);
+    db.exec("PRAGMA user_version = 6");
+
+    openNuclearDb(db);
+
+    expect(schemaVersion(db)).toBe(7);
+    expect(db.prepare("SELECT kind FROM motivations WHERE id = 1").get())
+      .toMatchObject({ kind: "opinion" });
+    expect(db.prepare("SELECT decision_kind FROM decision_log WHERE id = ?").get(decisionId))
+      .toMatchObject({ decision_kind: "challenge" });
+    expect(db.prepare("SELECT decision_id FROM initiative_reservations").get())
+      .toMatchObject({ decision_id: decisionId });
+    expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     db.close();
   });
 });

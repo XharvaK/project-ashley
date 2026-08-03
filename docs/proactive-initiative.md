@@ -28,8 +28,10 @@ passed release qualification and live-shadow promotion.
 Urgent wakes are edge-triggered (`pending → claimed → consumed`). A claim has a
 five-minute lease; a logged Agency decision consumes it even when Ashley stays
 silent. Failures before a decision retry after 5, 10, 20, 40, then 60 minutes.
-An active item only re-arms when its text changes, it crosses the urgency
-threshold, or urgency rises materially. The urgent endpoint is read-only and
+An active item only re-arms when new source-grounded text arrives, it crosses
+the urgency threshold, or urgency rises materially. This permits one wake for
+a concern; further contact needs new evidence or increased urgency. Explicit
+pause and space requests remain authoritative. The urgent endpoint is read-only and
 returns false whenever proactive safeguards or another live claim block work.
 
 Reflection is deterministic and defaults to `ASHLEY_REFLECTION_MODE=observe`.

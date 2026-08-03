@@ -515,6 +515,123 @@ CREATE INDEX idx_capability_events_window
   ON capability_events (capability, release_id, kind, occurred_at DESC);
 `;
 
+const MIGRATION_7 = `
+CREATE TABLE IF NOT EXISTS motivations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, owner_id TEXT NOT NULL,
+  kind TEXT NOT NULL, score REAL NOT NULL, ref_type TEXT, ref_id TEXT,
+  summary TEXT NOT NULL, created_at TEXT NOT NULL, consumed_at TEXT
+);
+CREATE TABLE IF NOT EXISTS decision_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, owner_id TEXT NOT NULL,
+  channel TEXT NOT NULL, trigger TEXT NOT NULL, decision_kind TEXT NOT NULL,
+  motivation_ids_json TEXT NOT NULL, reason TEXT NOT NULL, outcome_text TEXT,
+  created_at TEXT NOT NULL, learning_subject_kind TEXT,
+  learning_adjustment REAL NOT NULL DEFAULT 0,
+  learning_through_event_id INTEGER, objective TEXT,
+  evidence_refs_json TEXT NOT NULL DEFAULT '[]', effort TEXT NOT NULL DEFAULT 'low',
+  completion TEXT NOT NULL DEFAULT 'complete', uncertainty REAL NOT NULL DEFAULT 0,
+  urgency REAL NOT NULL DEFAULT 0, affect_license_json TEXT NOT NULL DEFAULT '{}',
+  thought_source TEXT NOT NULL DEFAULT 'deterministic', thought_error TEXT
+);
+CREATE TABLE IF NOT EXISTS initiative_reservations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, owner_id TEXT NOT NULL,
+  decision_id INTEGER NOT NULL REFERENCES decision_log(id), text TEXT NOT NULL,
+  thread_id TEXT NOT NULL, angle TEXT NOT NULL, reason TEXT NOT NULL,
+  material_key TEXT, discord_message_id TEXT, created_at TEXT NOT NULL,
+  committed_at TEXT
+);
+
+ALTER TABLE motivations RENAME TO motivations_v6;
+CREATE TABLE motivations (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_id     TEXT NOT NULL,
+  kind         TEXT NOT NULL CHECK (kind IN (
+                 'user_message', 'question', 'fact', 'callback', 'opinion',
+                 'take', 'unfinished', 'identity', 'availability', 'boundary',
+                 'silence_signal', 'silence_ok'
+               )),
+  score        REAL NOT NULL,
+  ref_type     TEXT,
+  ref_id       TEXT,
+  summary      TEXT NOT NULL,
+  created_at   TEXT NOT NULL,
+  consumed_at  TEXT
+);
+INSERT INTO motivations
+  (id, owner_id, kind, score, ref_type, ref_id, summary, created_at, consumed_at)
+SELECT id, owner_id, kind, score, ref_type, ref_id, summary, created_at, consumed_at
+FROM motivations_v6;
+DROP TABLE motivations_v6;
+CREATE INDEX idx_nuclear_motivations_owner
+  ON motivations (owner_id, created_at DESC, score DESC);
+
+ALTER TABLE decision_log RENAME TO decision_log_v6;
+CREATE TABLE decision_log (
+  id                         INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_id                   TEXT NOT NULL,
+  channel                    TEXT NOT NULL,
+  trigger                    TEXT NOT NULL CHECK (trigger IN ('reactive', 'proactive')),
+  decision_kind              TEXT NOT NULL CHECK (decision_kind IN (
+                                'speak', 'silence', 'delay', 'ask', 'revisit',
+                                'share', 'challenge', 'refuse'
+                              )),
+  motivation_ids_json        TEXT NOT NULL,
+  reason                     TEXT NOT NULL,
+  outcome_text               TEXT,
+  created_at                 TEXT NOT NULL,
+  learning_subject_kind      TEXT,
+  learning_adjustment        REAL NOT NULL DEFAULT 0,
+  learning_through_event_id  INTEGER,
+  objective                  TEXT,
+  evidence_refs_json         TEXT NOT NULL DEFAULT '[]',
+  effort                     TEXT NOT NULL DEFAULT 'low',
+  completion                 TEXT NOT NULL DEFAULT 'complete',
+  uncertainty                REAL NOT NULL DEFAULT 0,
+  urgency                    REAL NOT NULL DEFAULT 0,
+  affect_license_json        TEXT NOT NULL DEFAULT '{}',
+  thought_source             TEXT NOT NULL DEFAULT 'deterministic'
+                               CHECK (thought_source IN ('deterministic', 'model', 'fallback')),
+  thought_error              TEXT
+);
+INSERT INTO decision_log
+  (id, owner_id, channel, trigger, decision_kind, motivation_ids_json,
+   reason, outcome_text, created_at, learning_subject_kind, learning_adjustment,
+   learning_through_event_id, objective, evidence_refs_json, effort, completion,
+   uncertainty, urgency, affect_license_json, thought_source, thought_error)
+SELECT id, owner_id, channel, trigger, decision_kind, motivation_ids_json,
+       reason, outcome_text, created_at, learning_subject_kind, learning_adjustment,
+       learning_through_event_id, objective, evidence_refs_json, effort, completion,
+       uncertainty, urgency, affect_license_json, thought_source, thought_error
+FROM decision_log_v6;
+
+ALTER TABLE initiative_reservations RENAME TO initiative_reservations_v6;
+CREATE TABLE initiative_reservations (
+  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_id           TEXT NOT NULL,
+  decision_id        INTEGER NOT NULL REFERENCES decision_log(id),
+  text               TEXT NOT NULL,
+  thread_id          TEXT NOT NULL,
+  angle              TEXT NOT NULL,
+  reason             TEXT NOT NULL,
+  material_key       TEXT,
+  discord_message_id TEXT,
+  created_at         TEXT NOT NULL,
+  committed_at       TEXT
+);
+INSERT INTO initiative_reservations
+  (id, owner_id, decision_id, text, thread_id, angle, reason, material_key,
+   discord_message_id, created_at, committed_at)
+SELECT id, owner_id, decision_id, text, thread_id, angle, reason, material_key,
+       discord_message_id, created_at, committed_at
+FROM initiative_reservations_v6;
+DROP TABLE initiative_reservations_v6;
+DROP TABLE decision_log_v6;
+CREATE INDEX idx_nuclear_decisions_owner
+  ON decision_log (owner_id, created_at DESC, id DESC);
+CREATE INDEX idx_nuclear_reservations_owner
+  ON initiative_reservations (owner_id, created_at DESC);
+`;
+
 function userVersion(db: DatabaseSync): number {
   const row: unknown = db.prepare("PRAGMA user_version").get();
   if (typeof row !== "object" || row === null || !("user_version" in row)) {
@@ -586,6 +703,17 @@ export function migrate(db: DatabaseSync): void {
     try {
       db.exec(MIGRATION_6);
       db.exec("PRAGMA user_version = 6");
+      db.exec("COMMIT");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+  if (userVersion(db) < 7) {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.exec(MIGRATION_7);
+      db.exec("PRAGMA user_version = 7");
       db.exec("COMMIT");
     } catch (error) {
       db.exec("ROLLBACK");

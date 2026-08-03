@@ -46,6 +46,8 @@ function mapMotivationKind(kind: MotivationKind): DecisionKind {
       return "share";
     case "availability":
       return "speak";
+    case "boundary":
+      return "refuse";
     case "user_message":
       return "speak";
     case "silence_signal":
@@ -73,6 +75,7 @@ function makeDecision(
     "question",
     "opinion",
     "take",
+    "identity",
     "mind_state",
   ]);
   const evidenceRefs = motivations
@@ -83,7 +86,7 @@ function makeDecision(
         motivation.refId != null,
     )
     .map((motivation) => ({
-      type: motivation.refType as "message" | "episode" | "fact" | "question" | "opinion" | "take" | "mind_state",
+      type: motivation.refType as "message" | "episode" | "fact" | "question" | "opinion" | "take" | "identity" | "mind_state",
       id: motivation.refId!,
     }));
   return {

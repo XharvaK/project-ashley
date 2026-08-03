@@ -66,6 +66,7 @@ function motivationKind(value: unknown): MotivationKind | null {
     case "unfinished":
     case "identity":
     case "availability":
+    case "boundary":
     case "silence_signal":
     case "silence_ok":
       return kind;

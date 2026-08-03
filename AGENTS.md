@@ -84,9 +84,10 @@ Avoid solving problems in higher layers that naturally belong lower in the stack
 
 Continuous cognition is event-driven and defaults to `ASHLEY_COGNITION_MODE=observe`.
 `apply` is only a master ceiling; per-capability release gates still control
-influence. Schema v6 integrates each cognition job atomically, requires exact user-message
-provenance for automatic facts, uses leased edge-triggered urgent wakes, and
-adds read-record provenance plus receipt-backed message redaction.
+influence. Schema v7 integrates each cognition job atomically, requires exact user-message
+provenance for automatic facts, uses leased edge-triggered urgent wakes, adds
+grounded refusal, and adds read-record provenance plus receipt-backed message
+redaction.
 
 Observability: `GET /health`, `GET /nuclear/decisions?owner_id=`,
 `GET /nuclear/reflections?owner_id=`, `GET /nuclear/episodes?owner_id=`,

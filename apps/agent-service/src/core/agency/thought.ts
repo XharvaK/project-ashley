@@ -15,7 +15,41 @@ const kinds = new Set<DecisionKind>([
   "revisit",
   "share",
   "challenge",
+  "refuse",
 ]);
+
+function hasGroundedReactiveRefusal(
+  db: DatabaseSync,
+  motivations: Motivation[],
+  motivationIds: number[],
+  trigger: Trigger,
+): boolean {
+  if (trigger !== "reactive") return false;
+  const selected = motivations.filter(
+    (item) => item.id !== undefined && motivationIds.includes(item.id),
+  );
+  const message = selected.find(
+    (item) => item.kind === "user_message" && item.refType === "message" && item.refId != null,
+  );
+  const boundaries = selected.filter(
+    (item) => item.kind === "boundary" && item.refType === "identity" && item.refId != null,
+  );
+  if (!message || boundaries.length === 0) return false;
+  const current = db.prepare(
+    `SELECT id FROM mem_messages
+     WHERE owner_id = ? AND role = 'user' AND redacted_at IS NULL
+     ORDER BY id DESC LIMIT 1`,
+  ).get(message.ownerId ?? "") as { id?: number } | undefined;
+  if (current?.id !== Number(message.refId)) return false;
+  return boundaries.some((boundary) => {
+    const row = db.prepare(
+      `SELECT 1 AS grounded FROM identity_entries
+       WHERE id = ? AND owner_id = ? AND layer = 'stable' AND kind = 'boundary'
+       LIMIT 1`,
+    ).get(Number(boundary.refId), boundary.ownerId ?? "");
+    return row !== undefined;
+  });
+}
 
 function parseObject(text: string): Record<string, unknown> | null {
   const start = text.indexOf("{");
@@ -61,6 +95,8 @@ export async function deliberateDecision(
   complete: Complete = completeChat,
   canInfluence: CapabilityGate = (database) =>
     capabilityCanInfluence(database, "thought"),
+  canRefuse: CapabilityGate = (database) =>
+    capabilityCanInfluence(database, "refusal"),
 ): Promise<Decision> {
   if (
     !canInfluence(db) ||
@@ -87,7 +123,8 @@ export async function deliberateDecision(
           "You are Ashley's Thought layer, not her Expression layer.",
           "Choose whether and how to act from the supplied grounded motivations.",
           "Return strict JSON only: {kind,shouldSpeak,effort,completion,uncertainty,urgency,objective,reason,motivationIds}.",
-          "kind is speak|silence|delay|ask|revisit|share|challenge; effort is low|medium|high; completion is complete|hold.",
+          "kind is speak|silence|delay|ask|revisit|share|challenge|refuse; effort is low|medium|high; completion is complete|hold.",
+          "A refusal is reactive only and must select both the current user_message motivation and a supplied stable boundary motivation.",
           "Use only supplied motivation IDs. Silence is valid. Do not write the message Doc will see.",
         ].join(" "),
       },
@@ -124,11 +161,18 @@ export async function deliberateDecision(
   if (!kinds.has(kind) || motivationIds.length === 0) {
     return { ...base, thoughtSource: "fallback", thoughtError: "invalid_response" };
   }
+  if (
+    kind === "refuse" &&
+    (!canRefuse(db) ||
+      !hasGroundedReactiveRefusal(db, motivations, motivationIds, trigger))
+  ) {
+    return { ...base, thoughtSource: "fallback", thoughtError: "invalid_response" };
+  }
   const shouldSpeak = proposal.shouldSpeak === true;
   if (shouldSpeak !== (kind !== "silence" && kind !== "delay")) {
     return { ...base, thoughtSource: "fallback", thoughtError: "invalid_response" };
   }
-  const evidenceTypes = new Set(["message", "episode", "fact", "question", "opinion", "take", "mind_state"]);
+  const evidenceTypes = new Set(["message", "episode", "fact", "question", "opinion", "take", "identity", "mind_state"]);
   const evidenceRefs = motivations
     .filter(
       (item) =>
@@ -140,7 +184,7 @@ export async function deliberateDecision(
         item.refId != null,
     )
     .map((item) => ({
-      type: item.refType as "message" | "episode" | "fact" | "question" | "opinion" | "take" | "mind_state",
+      type: item.refType as "message" | "episode" | "fact" | "question" | "opinion" | "take" | "identity" | "mind_state",
       id: item.refId!,
     }));
   const selectedScore = Math.max(

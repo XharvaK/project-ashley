@@ -23,10 +23,11 @@ describe("nuclear identity", () => {
       kind: "interest",
       text: "SQLite edge cases",
     });
-    expect(listIdentity(db, "doc")).toHaveLength(8);
+    expect(listIdentity(db, "doc")).toHaveLength(9);
     const block = buildIdentityBlock(db, "doc");
     expect(block).toContain("SQLite edge cases");
     expect(block).toContain("comfortable with uncertainty");
+    expect(block).toContain("not an obedient servant");
     expect(block).not.toContain("admit uncertainty");
     expect(block).not.toContain("does not need false closure");
   });

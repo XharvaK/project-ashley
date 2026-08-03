@@ -22,7 +22,7 @@ SQLite: `~/.composer-assistant/conversations/nuclear.db`.
 `apps/agent-service/src/core/` — identity, state, memory, cognition, learning,
 curiosity, agency, reflection, honesty, conversation, writers, runtime.
 
-Schema v6 adds grounded episodes with FTS5 retrieval, referenced Mind State
+Schema v7 adds grounded episodes with FTS5 retrieval, referenced Mind State
 items, bounded affect, durable cognition jobs/runs, verified fact provenance,
 edge-triggered urgent wake leases, Thought fallback auditing, and exact organic
 revision lineage. Cognition integration is atomic: a completed job produces one
@@ -31,6 +31,11 @@ complete episode and all of its derived state, or none of them.
 behavioral influence. `apply` is the master ceiling; release-scoped capability
 states, dependencies, evaluation qualification, live-shadow thresholds, and
 rollback still govern the full loop.
+
+Reactive refusal is a distinct Thought decision. It is valid only when the
+selected evidence contains the current user message and a persisted stable
+boundary, and only while the `refusal` capability may influence behavior.
+Silence, delay, challenge, and refusal remain separate decisions.
 
 Feed scans store attention candidates only. `cur_reads` is the sole evidence
 source for claims that Ashley read an article. Owner-confirmed forgetting

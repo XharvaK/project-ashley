@@ -5,7 +5,8 @@ export type DecisionKind =
   | "ask"
   | "revisit"
   | "share"
-  | "challenge";
+  | "challenge"
+  | "refuse";
 
 export type MotivationKind =
   | "user_message"
@@ -17,6 +18,7 @@ export type MotivationKind =
   | "unfinished"
   | "identity"
   | "availability"
+  | "boundary"
   | "silence_signal"
   | "silence_ok";
 
@@ -33,6 +35,7 @@ export type EvidenceRef = {
     | "question"
     | "opinion"
     | "take"
+    | "identity"
     | "mind_state";
   id: string | number;
 };

@@ -270,7 +270,6 @@ gates.
 
 ## Approved roadmap
 
-- Add first-class refusal grounded in stable boundaries.
 - Build full article reading, curiosity consolidation, and validated source
   discovery.
 - Add graduated identity autonomy and owner-visible joint review.
@@ -279,8 +278,8 @@ gates.
   into a consciousness or attachment score.
 
 Deletion integrity and the read-record provenance boundary are implemented.
-Schema v6 adds release-scoped capability observation, dependency-aware automatic
-promotion, and deterministic rollback. `/forget` redacts matching source
+Schema v7 adds release-scoped capability observation, grounded refusal,
+dependency-aware automatic promotion, and deterministic rollback. `/forget` redacts matching source
 messages, removes retrieval and evidence paths, reconciles dependent state, and
 returns a content-free receipt.
 

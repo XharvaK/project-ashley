@@ -118,6 +118,7 @@ function decisionAngle(kind: DecisionKind): ProactiveDraft["angle"] {
       return "question";
     case "share":
     case "challenge":
+    case "refuse":
       return "opinion";
     case "speak":
     case "silence":
@@ -203,7 +204,7 @@ export class AshleyCore {
         input.ownerId,
         input.channel,
       );
-      insertMessage(this.db, {
+      const userMessageId = insertMessage(this.db, {
         threadId,
         ownerId: input.ownerId,
         role: "user",
@@ -225,6 +226,7 @@ export class AshleyCore {
         input.ownerId,
         "reactive",
         message,
+        userMessageId,
       );
       let decision = decide(motivations, "reactive");
       decision = await deliberateDecision(this.db, decision, motivations, "reactive");
@@ -1013,7 +1015,7 @@ export class AshleyCore {
         .prepare("SELECT COUNT(*) AS count FROM decision_log")
         .get();
       return {
-        ok: version >= 6,
+        ok: version >= 7,
         nuclearEnabled: true,
         dbPath: NUCLEAR_DB_PATH,
         schemaVersion: version,

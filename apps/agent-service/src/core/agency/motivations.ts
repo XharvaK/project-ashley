@@ -3,7 +3,7 @@ import { listOpenQuestions } from "../state/questions.js";
 import { listRecentTakes } from "../curiosity/feed.js";
 import { listActiveFacts } from "../memory/facts.js";
 import { getState } from "../state/store.js";
-import { listOpinions } from "../identity/store.js";
+import { listIdentity, listOpinions } from "../identity/store.js";
 import { listActiveMindStateItems } from "../state/mind-items.js";
 import type {
   Motivation,
@@ -97,6 +97,7 @@ export function collectMotivations(
   ownerId: string,
   trigger: Trigger,
   userMessage?: string,
+  userMessageId?: number,
 ): Motivation[] {
   const motivations: Motivation[] = [];
   const state = getState(db, ownerId);
@@ -208,10 +209,25 @@ export function collectMotivations(
         isSilenceRequest(message) ? "silence_signal" : "user_message",
         isSilenceRequest(message) ? 100 : userMessageScore(message),
         message,
-        "user_message",
-        null,
+        "message",
+        userMessageId ?? null,
       ),
     );
+    for (const boundary of listIdentity(db, ownerId)
+      .filter((entry) => entry.layer === "stable" && entry.kind === "boundary")
+      .slice(0, 6)) {
+      motivations.push(
+        persistMotivation(
+          db,
+          ownerId,
+          "boundary",
+          55,
+          boundary.text,
+          "identity",
+          boundary.id,
+        ),
+      );
+    }
   }
 
   motivations.push(
