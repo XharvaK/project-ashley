@@ -8,8 +8,8 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-REPO_SLUG="${ASHLEY_REPO:-XharvaK/composer-assistant}"
-CLONE_DIR="${ASHLEY_HOME:-$HOME/composer-assistant}"
+REPO_SLUG="${ASHLEY_REPO:-XharvaK/project-ashley}"
+CLONE_DIR="${ASHLEY_HOME:-$HOME/project-ashley}"
 HOME_DATA="${HOME}/.composer-assistant"
 ENV_SRC="${HERE}/.env"
 ENV_DST="${HOME_DATA}/.env"
@@ -120,6 +120,7 @@ else
   echo "--- pull ---"
   git -C "$CLONE_DIR" pull --ff-only || true
 fi
+ln -sfn "$CLONE_DIR" "${HOME}/project-ashley"
 ln -sfn "$CLONE_DIR" "${HOME}/composer-assistant"
 
 INSTALL="${CLONE_DIR}/deploy/linux-mint/install.sh"
@@ -140,7 +141,7 @@ bash "$INSTALL"
 
 echo ""
 echo "=== DONE ==="
-echo "  bash ~/composer-assistant/deploy/linux-mint/status.sh"
+echo "  bash ~/project-ashley/deploy/linux-mint/status.sh"
 echo "  curl -s http://127.0.0.1:3710/health"
 echo "Stop Windows Ashley if it is still running (one Discord token)."
 echo ""

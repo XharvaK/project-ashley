@@ -1,8 +1,8 @@
 {
-  "name": "composer-assistant",
+  "name": "project-ashley",
   "private": true,
   "version": "0.2.0",
-  "description": "Discord + Telegram + voice companion (Mistral + Ashley)",
+  "description": "Project Ashley — Discord + Telegram + voice companion (Mistral + local memory)",
   "scripts": {
     "dev": "powershell -ExecutionPolicy Bypass -File scripts/dev.ps1",
     "dev:discord": "powershell -ExecutionPolicy Bypass -File scripts/dev.ps1 -Discord",

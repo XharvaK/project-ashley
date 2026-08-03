@@ -4,16 +4,18 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# Prefer real repo root (has apps/agent-service). Fallback: ~/composer-assistant.
+# Prefer real repo root (has apps/agent-service). Fallback: ~/project-ashley, then legacy path.
 if [[ -d "${SCRIPT_DIR}/../../apps/agent-service" ]]; then
   ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+elif [[ -d "${HOME}/project-ashley/apps/agent-service" ]]; then
+  ROOT="${HOME}/project-ashley"
 elif [[ -d "${HOME}/composer-assistant/apps/agent-service" ]]; then
   ROOT="${HOME}/composer-assistant"
 elif [[ -n "${ASHLEY_ROOT:-}" && -d "${ASHLEY_ROOT}/apps/agent-service" ]]; then
   ROOT="$ASHLEY_ROOT"
 else
-  echo "Cannot find composer-assistant repo (apps/agent-service)." >&2
-  echo "Clone first: gh repo clone XharvaK/composer-assistant ~/composer-assistant" >&2
+  echo "Cannot find Project Ashley repo (apps/agent-service)." >&2
+  echo "Clone first: gh repo clone XharvaK/project-ashley ~/project-ashley" >&2
   exit 1
 fi
 
@@ -53,11 +55,15 @@ echo "=== npm ci + build discord ==="
 npm ci --prefix "${ROOT}/apps/discord-bot"
 npm run build --prefix "${ROOT}/apps/discord-bot"
 
-if [[ "$ROOT" != "${HOME}/composer-assistant" ]]; then
-  if [[ ! -e "${HOME}/composer-assistant" ]]; then
-    ln -s "$ROOT" "${HOME}/composer-assistant"
-    echo "Created symlink ${HOME}/composer-assistant -> $ROOT"
+if [[ "$ROOT" != "${HOME}/project-ashley" ]]; then
+  if [[ ! -e "${HOME}/project-ashley" ]]; then
+    ln -s "$ROOT" "${HOME}/project-ashley"
+    echo "Created symlink ${HOME}/project-ashley -> $ROOT"
   fi
+fi
+if [[ ! -e "${HOME}/composer-assistant" ]]; then
+  ln -s "$ROOT" "${HOME}/composer-assistant"
+  echo "Created symlink ${HOME}/composer-assistant -> $ROOT (legacy)"
 fi
 
 install -m 644 "${UNIT_SRC}/ashley-agent.service" "${UNIT_DIR}/"

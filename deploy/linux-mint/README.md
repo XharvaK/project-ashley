@@ -1,15 +1,15 @@
-# Ashley on Linux Mint (4GB spare laptop)
+# Project Ashley on Linux Mint (4GB spare laptop)
 
 24/7 **agent-service + discord-bot** only (~400–500 MB). Orpheus / voice / Telegram off by default.
 
-Private repo: `https://github.com/XharvaK/composer-assistant`
+Private repo: `https://github.com/XharvaK/project-ashley`
 
 ## Fastest path (recommended)
 
 ### On Windows (once)
 
 ```powershell
-cd C:\Users\Xharv\Projects\composer-assistant
+cd C:\Users\Xharv\Projects\project-ashley
 # Commit + push deploy/linux-mint (ask agent if not pushed yet)
 powershell -File scripts\mint\prepare-mint-transfer.ps1 -StopAshley
 ```
@@ -30,13 +30,23 @@ That installs Node 22 + `gh`, clones the private repo, installs `.env`, enables 
 3. Check:
 
 ```bash
-bash ~/composer-assistant/deploy/linux-mint/status.sh
+bash ~/project-ashley/deploy/linux-mint/status.sh
 ```
 
 ## Already cloned?
 
+If the folder is still `~/composer-assistant`, rename once then pull:
+
 ```bash
-bash ~/composer-assistant/deploy/linux-mint/bootstrap.sh --env-file /path/to/ashley-mint-transfer/.env
+mv ~/composer-assistant ~/project-ashley
+cd ~/project-ashley && git remote set-url origin https://github.com/XharvaK/project-ashley.git
+bash ~/project-ashley/deploy/linux-mint/bootstrap.sh --env-file /path/to/ashley-mint-transfer/.env
+```
+
+Fresh clone:
+
+```bash
+bash ~/project-ashley/deploy/linux-mint/bootstrap.sh --env-file /path/to/ashley-mint-transfer/.env
 ```
 
 ## Updates later
@@ -44,7 +54,7 @@ bash ~/composer-assistant/deploy/linux-mint/bootstrap.sh --env-file /path/to/ash
 After you push from Windows:
 
 ```bash
-bash ~/composer-assistant/deploy/linux-mint/update.sh
+bash ~/project-ashley/deploy/linux-mint/update.sh
 ```
 
 ### Without opening the laptop (SSH)
@@ -52,13 +62,13 @@ bash ~/composer-assistant/deploy/linux-mint/update.sh
 On Mint once:
 
 ```bash
-bash ~/composer-assistant/deploy/linux-mint/enable-ssh.sh
+bash ~/project-ashley/deploy/linux-mint/enable-ssh.sh
 ```
 
 From Windows (after you know Mint’s LAN IP / hostname):
 
 ```powershell
-cd C:\Users\Xharv\Projects\composer-assistant
+cd C:\Users\Xharv\Projects\project-ashley
 # optional: commit first, then:
 powershell -File scripts\mint\remote-update.ps1 -HostName 192.168.x.x -User YOUR_MINT_USER -PushFirst
 ```
@@ -79,6 +89,7 @@ systemctl --user stop ashley-discord ashley-agent
 - **One Discord token** — production is Mint only. From Windows, `npm run start:ashley` SSHs here (never starts a local Discord bot). Windows local start requires `-AllowWindows` and Mint must be stopped first.
 - Never commit `.env`.
 - Delete the USB transfer folder after install.
+- Runtime data stays at `~/.composer-assistant/` (historical path; do not rename casually).
 
 ## Optional SSH from Windows
 

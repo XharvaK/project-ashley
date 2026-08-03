@@ -8,8 +8,8 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-REPO_SLUG="${ASHLEY_REPO:-XharvaK/composer-assistant}"
-CLONE_DIR="${ASHLEY_HOME:-$HOME/composer-assistant}"
+REPO_SLUG="${ASHLEY_REPO:-XharvaK/project-ashley}"
+CLONE_DIR="${ASHLEY_HOME:-$HOME/project-ashley}"
 HOME_DATA="${HOME}/.composer-assistant"
 
 echo "=== Ashley Mint first-boot (USB) ==="
@@ -97,6 +97,10 @@ else
   git -C "$CLONE_DIR" pull --ff-only || true
 fi
 
+if [[ ! -e "${HOME}/project-ashley" && "$CLONE_DIR" != "${HOME}/project-ashley" ]]; then
+  ln -sfn "$CLONE_DIR" "${HOME}/project-ashley"
+fi
+# Legacy alias for older docs / muscle memory
 if [[ ! -e "${HOME}/composer-assistant" ]]; then
   ln -sfn "$CLONE_DIR" "${HOME}/composer-assistant"
 fi

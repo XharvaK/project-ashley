@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/composer-assistant/apps/agent-service
+WorkingDirectory=%h/project-ashley/apps/agent-service
 EnvironmentFile=%h/.composer-assistant/.env
 ExecStart=/usr/bin/node dist/index.js
 Restart=on-failure

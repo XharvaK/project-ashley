@@ -45,7 +45,7 @@ Env: `AUTO_REMEMBER_ENABLED` (default true). Conversational "working on X" / pre
 ### Offline (no API cost)
 
 ```powershell
-cd C:\Users\Xharv\Projects\composer-assistant
+cd C:\Users\Xharv\Projects\project-ashley
 npm test
 # or
 powershell -File scripts/phase0/run-all.ps1 -Tier offline

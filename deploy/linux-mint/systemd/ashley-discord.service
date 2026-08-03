@@ -6,7 +6,7 @@ Requires=ashley-agent.service
 
 [Service]
 Type=simple
-WorkingDirectory=%h/composer-assistant/apps/discord-bot
+WorkingDirectory=%h/project-ashley/apps/discord-bot
 EnvironmentFile=%h/.composer-assistant/.env
 ExecStart=/usr/bin/node dist/index.js
 Restart=on-failure

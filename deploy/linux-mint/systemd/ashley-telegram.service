@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/composer-assistant/apps/telegram-bot
+WorkingDirectory=%h/project-ashley/apps/telegram-bot
 EnvironmentFile=%h/.composer-assistant/.env
 ExecStart=/usr/bin/node dist/index.js
 Restart=on-failure

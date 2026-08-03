@@ -53,7 +53,7 @@ Copy-Item (Join-Path $mintSrc "systemd\*") (Join-Path $UsbDeploy "systemd") -For
 $setup = @"
 Ashley Mint transfer pack
 Generated: $(Get-Date -Format o)
-Repo (private): https://github.com/XharvaK/composer-assistant
+Repo (private): https://github.com/XharvaK/project-ashley
 
 ON MINT
 =======
@@ -64,7 +64,7 @@ ON MINT
      bash first-boot-from-usb.sh
 
 3) Verify:
-     bash ~/composer-assistant/deploy/linux-mint/status.sh
+     bash ~/project-ashley/deploy/linux-mint/status.sh
      curl -s http://127.0.0.1:3710/health
 
 4) Only ONE Discord bot. Windows should already be stopped if you used -StopAshley.
@@ -72,7 +72,7 @@ ON MINT
 UPDATES LATER
 =============
 Windows: commit + push
-Mint:    bash ~/composer-assistant/deploy/linux-mint/update.sh
+Mint:    bash ~/project-ashley/deploy/linux-mint/update.sh
 
 Delete this folder after a successful install. NEVER commit .env.
 "@

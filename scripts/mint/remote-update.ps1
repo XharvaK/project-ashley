@@ -1,5 +1,5 @@
 # Push Ashley updates to the Mint laptop over SSH (no lid open needed after SSH works).
-# Prereq on Mint (once): bash ~/composer-assistant/deploy/linux-mint/enable-ssh.sh
+# Prereq on Mint (once): bash ~/project-ashley/deploy/linux-mint/enable-ssh.sh
 #
 # Usage:
 #   powershell -File scripts\mint\remote-update.ps1
@@ -18,7 +18,7 @@ param(
   # Run the per-wave live check after the units restart ("4", "5", or "all").
   [string]$LiveCheck = "",
 
-  [string]$RepoDir = "~/composer-assistant"
+  [string]$RepoDir = "~/project-ashley"
 )
 
 $ErrorActionPreference = "Stop"

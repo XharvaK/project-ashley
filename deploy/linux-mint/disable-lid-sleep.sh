@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Lid close: blank/ignore only — no sleep/hibernate/shutdown.
-# Run on Mint:  bash ~/composer-assistant/deploy/linux-mint/disable-lid-sleep.sh
+# Run on Mint:  bash ~/project-ashley/deploy/linux-mint/disable-lid-sleep.sh
 set -euo pipefail
 
 need_sudo() {
@@ -31,4 +31,4 @@ echo "Laptop panel usually goes dark when the lid is shut;"
 echo "the machine stays awake for Ashley."
 echo ""
 echo "Verify Ashley still up:"
-echo "  bash ~/composer-assistant/deploy/linux-mint/status.sh"
+echo "  bash ~/project-ashley/deploy/linux-mint/status.sh"

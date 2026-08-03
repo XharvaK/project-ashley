@@ -4,8 +4,8 @@
 # Optional: copy ~/.composer-assistant/.env from Windows first (or pass --env-file).
 set -euo pipefail
 
-REPO_SLUG="${ASHLEY_REPO:-XharvaK/composer-assistant}"
-CLONE_DIR="${ASHLEY_HOME:-$HOME/composer-assistant}"
+REPO_SLUG="${ASHLEY_REPO:-XharvaK/project-ashley}"
+CLONE_DIR="${ASHLEY_HOME:-$HOME/project-ashley}"
 HOME_DATA="${HOME}/.composer-assistant"
 ENV_FILE="${HOME_DATA}/.env"
 ENV_SRC=""
@@ -21,7 +21,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     -h|--help)
-      echo "Usage: bash bootstrap.sh [--env-file /path/to/.env] [--dir ~/composer-assistant]"
+      echo "Usage: bash bootstrap.sh [--env-file /path/to/.env] [--dir ~/project-ashley]"
       exit 0
       ;;
     *)
@@ -106,9 +106,13 @@ else
   git -C "$CLONE_DIR" pull --ff-only || true
 fi
 
-if [[ "$CLONE_DIR" != "${HOME}/composer-assistant" && ! -e "${HOME}/composer-assistant" ]]; then
+if [[ "$CLONE_DIR" != "${HOME}/project-ashley" && ! -e "${HOME}/project-ashley" ]]; then
+  ln -s "$CLONE_DIR" "${HOME}/project-ashley"
+  echo "Symlink ~/project-ashley → $CLONE_DIR"
+fi
+if [[ ! -e "${HOME}/composer-assistant" ]]; then
   ln -s "$CLONE_DIR" "${HOME}/composer-assistant"
-  echo "Symlink ~/composer-assistant → $CLONE_DIR"
+  echo "Symlink ~/composer-assistant → $CLONE_DIR (legacy)"
 fi
 
 bash "${CLONE_DIR}/deploy/linux-mint/install.sh"
