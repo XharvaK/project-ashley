@@ -108,6 +108,7 @@ export const env = {
     process.env.MEMORY_RETRIEVAL_MIN_SCORE ?? 0.35,
   ),
   proactiveEnabled: process.env.PROACTIVE_ENABLED !== "false",
+  nuclearEnabled: process.env.ASHLEY_NUCLEAR !== "false",
   proactiveMaxPerDay: Number(process.env.PROACTIVE_MAX_PER_DAY ?? 10),
   proactiveMinIdleHours: Number(process.env.PROACTIVE_MIN_IDLE_HOURS ?? 2),
   // Material queue: nothing goes out under the floor, and there is no filler.

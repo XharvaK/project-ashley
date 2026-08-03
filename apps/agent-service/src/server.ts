@@ -36,8 +36,8 @@ import {
   recordEmojiUse,
   recordGifFeedback,
 } from "./discord-feedback.js";
-
-
+import { getDocsStatus, runDocsTick } from "./docs-agenda.js";
+import { listRecentDecisions } from "./core/agency/log.js";
 
 const MAX_DISCORD_MESSAGE = 4000;
 
@@ -108,14 +108,34 @@ export function createServer(manager: AgentManager): express.Application {
         pendingAlertThreshold: mem.pendingAlertThreshold,
       },
 
+      nuclear: manager.core.getHealth(),
+
       proactive: {
         enabled: env.proactiveEnabled,
+        nuclear: env.nuclearEnabled,
       },
 
       uptimeSec: manager.getUptimeSec(),
 
     });
 
+  });
+
+  app.get("/nuclear/decisions", (req, res) => {
+    try {
+      const ownerId = String(req.query.owner_id ?? env.memoryOwnerId ?? "");
+      if (!ownerId || (env.discordOwnerId && ownerId !== env.discordOwnerId)) {
+        throw new AppError("forbidden", "Forbidden", 403);
+      }
+      const limit = Number(req.query.limit ?? 20);
+      res.json({
+        nuclear: env.nuclearEnabled,
+        decisions: listRecentDecisions(manager.core.getDatabase(), ownerId, limit),
+      });
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
   });
 
 
@@ -749,6 +769,25 @@ export function createServer(manager: AgentManager): express.Application {
 
 
 
+  app.get("/docs/status", (_req, res) => {
+    try {
+      res.json(getDocsStatus(manager.chat.database));
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/docs/tick", async (_req, res) => {
+    try {
+      const result = await runDocsTick(manager.chat.database);
+      res.json(result);
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
   app.post("/initiative/tick", async (req, res) => {
 
     try {
@@ -761,7 +800,9 @@ export function createServer(manager: AgentManager): express.Application {
 
       }
 
-      const result = await manager.chat.tickInitiative(userId);
+      const result = env.nuclearEnabled
+        ? await manager.core.tickProactive(userId)
+        : await manager.chat.tickInitiative(userId);
 
       res.json(result);
 
@@ -819,19 +860,32 @@ export function createServer(manager: AgentManager): express.Application {
 
       }
 
-      manager.chat.commitInitiative(
-        userId,
-        {
+      if (env.nuclearEnabled) {
+        manager.core.commitProactive(userId, {
           text: text.trim(),
           threadId,
-          angle: (angle ?? "check_in") as import("./initiative/queue.js").Angle,
+          angle: angle ?? "check_in",
           reason: reason ?? "committed",
           materialKey,
           candidateKind,
           reservationId,
-        },
-        discordMessageId.trim(),
-      );
+          discordMessageId: discordMessageId.trim(),
+        });
+      } else {
+        manager.chat.commitInitiative(
+          userId,
+          {
+            text: text.trim(),
+            threadId,
+            angle: (angle ?? "check_in") as import("./initiative/queue.js").Angle,
+            reason: reason ?? "committed",
+            materialKey,
+            candidateKind,
+            reservationId,
+          },
+          discordMessageId.trim(),
+        );
+      }
 
       res.json({ ok: true });
 
@@ -868,7 +922,11 @@ export function createServer(manager: AgentManager): express.Application {
 
       }
 
-      manager.chat.abortInitiative(userId, reservationId);
+      if (env.nuclearEnabled) {
+        manager.core.abortProactive(userId, reservationId);
+      } else {
+        manager.chat.abortInitiative(userId, reservationId);
+      }
 
       res.json({ ok: true });
 
@@ -896,7 +954,11 @@ export function createServer(manager: AgentManager): express.Application {
 
       }
 
-      manager.chat.setProactivePaused(userId, true);
+      if (env.nuclearEnabled) {
+        manager.core.pauseProactive(userId);
+      } else {
+        manager.chat.setProactivePaused(userId, true);
+      }
 
       res.json({ ok: true, paused: true });
 
@@ -924,7 +986,11 @@ export function createServer(manager: AgentManager): express.Application {
 
       }
 
-      manager.chat.setProactivePaused(userId, false);
+      if (env.nuclearEnabled) {
+        manager.core.resumeProactive(userId);
+      } else {
+        manager.chat.setProactivePaused(userId, false);
+      }
 
       res.json({ ok: true, paused: false });
 
@@ -952,9 +1018,12 @@ export function createServer(manager: AgentManager): express.Application {
 
       }
 
-      const result = await manager.chat.evaluateInitiative(userId);
-
-      res.json(result);
+      if (env.nuclearEnabled) {
+        res.json(manager.core.evaluateProactive(userId));
+      } else {
+        const result = await manager.chat.evaluateInitiative(userId);
+        res.json(result);
+      }
 
     } catch (err) {
 
@@ -1040,7 +1109,11 @@ export function createServer(manager: AgentManager): express.Application {
 
       }
 
-      res.json(manager.chat.getInitiativeStatus(ownerId));
+      res.json(
+        env.nuclearEnabled
+          ? manager.core.getProactiveStatus(ownerId)
+          : manager.chat.getInitiativeStatus(ownerId),
+      );
 
     } catch (err) {
 

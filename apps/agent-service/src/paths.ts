@@ -11,6 +11,7 @@ export const CONFIG_PATH = join(DATA_DIR, "config.json");
 export const CONVERSATIONS_DIR = join(DATA_DIR, "conversations");
 export const SESSIONS_DIR = join(CONVERSATIONS_DIR, "sessions");
 export const DB_PATH = join(CONVERSATIONS_DIR, "index.db");
+export const NUCLEAR_DB_PATH = join(CONVERSATIONS_DIR, "nuclear.db");
 export const LOGS_DIR = join(DATA_DIR, "logs");
 
 export const WORKSPACE_PATH =

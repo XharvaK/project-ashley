@@ -61,6 +61,9 @@ export async function chatText(
     text: string;
     threadId: string;
     model: string;
+    silenced?: boolean;
+    decisionKind?: string;
+    decisionId?: number;
   }>("/chat/text", {
     method: "POST",
     body: JSON.stringify({

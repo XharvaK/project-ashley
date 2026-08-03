@@ -15,6 +15,7 @@ import { fumbleLine, lookingLine } from "../chat/fumble-lines.js";
 import { searchGif } from "../chat/gif-search.js";
 import { readKillSwitch } from "../chat/kill-switch.js";
 import { parseMediaMarkers } from "../chat/media-markers.js";
+import { mediaCadence } from "../chat/media-cadence.js";
 import { reactDelayMs, reactPolicy } from "../chat/react-policy.js";
 import { sleepAbortable, tempoTracker } from "../chat/pacing.js";
 import { getDiscordPresence } from "../presence.js";
@@ -76,6 +77,14 @@ async function drainTurn(channelId: string): Promise<void> {
 
         let result = await reply;
 
+        // Agency chose silence — do not fumble or invent a bubble.
+        if (result.silenced || result.decisionKind === "silence") {
+          console.log(
+            `[discord-bot] agency silence decisionId=${result.decisionId ?? "?"} kind=${result.decisionKind ?? "silence"}`,
+          );
+          return;
+        }
+
         let markers = parseMediaMarkers(result.text);
         let chunks = splitMessage(markers.text);
         let react = markers.react;
@@ -87,8 +96,15 @@ async function drainTurn(channelId: string): Promise<void> {
 
         // React/GIF markers are addons. React-only = typing then void (Doc sees ghost).
         // Empty sendable: one silent retry, then fumble bank.
+        // Delay with empty text: treat like empty (retry once) unless silenced above.
         let emptyAttempt = 0;
         while (chunks.length === 0 && !gifUrl) {
+          if (result.decisionKind === "delay") {
+            console.log(
+              `[discord-bot] agency delay decisionId=${result.decisionId ?? "?"}; no bubble`,
+            );
+            return;
+          }
           if (react) {
             console.warn(
               "[discord-bot] dropping react-only reply; forcing text bubble",
@@ -106,6 +122,12 @@ async function drainTurn(channelId: string): Promise<void> {
               turn.imageUrls,
               presence,
             );
+            if (result.silenced || result.decisionKind === "silence") {
+              console.log(
+                `[discord-bot] agency silence on retry decisionId=${result.decisionId ?? "?"}`,
+              );
+              return;
+            }
             markers = parseMediaMarkers(result.text);
             chunks = splitMessage(markers.text);
             react = markers.react;
@@ -130,6 +152,17 @@ async function drainTurn(channelId: string): Promise<void> {
             herText: markers.text,
           });
         }
+
+        // One loud addon per turn, shared between react and GIF: whichever the
+        // model wanted, the budget picks at most one and spaces it from any
+        // other media on the same channel.
+        const media = mediaCadence.decide({
+          channelId,
+          wantReact: react,
+          wantGif: Boolean(gifUrl),
+        });
+        react = media.react;
+        if (!media.gif) gifUrl = null;
 
         // Orchid-style: no reply-quote theater for normal chat
         await sendBubbles(

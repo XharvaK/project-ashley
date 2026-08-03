@@ -108,9 +108,13 @@ Then on Mint (in the USB folder, after `gh auth login`): `bash first-boot-from-u
 
 | `~/.composer-assistant/.env` | Secrets and config |
 
-| `~/.composer-assistant/conversations/index.db` | Memory + audit SQLite |
+| `~/.composer-assistant/conversations/nuclear.db` | Nuclear Identity/State/Agency SQLite (default) |
 
-| `workspace/prompts/` | System prompts (core, discord, voice, proactive) |
+| `~/.composer-assistant/conversations/index.db` | Legacy memory + audit SQLite |
+
+| `workspace/prompts/nuclear/` | Thin nuclear identity prompts |
+
+| `workspace/prompts/` | Legacy channel prompts (quarantined when nuclear on) |
 
 
 
@@ -118,13 +122,11 @@ Then on Mint (in the USB folder, after `gh auth login`): `bash first-boot-from-u
 
 
 
-- `core-ashley.md` — shared identity and memory rules
+- `nuclear/core.md` — thin identity + honesty pointer (nuclear path)
 
-- `discord-companion.md` — Discord delivery + recall rules
+- `nuclear/discord.md` / `nuclear/proactive.md` — channel deltas
 
-- `voice-companion.md` — TTS delivery + recall rules
-
-- `proactive-companion.md` — unprompted DM outreach
+- Legacy: `core-ashley.md`, `discord-companion.md`, `voice-companion.md`, `proactive-companion.md` (quarantined when `ASHLEY_NUCLEAR=true`)
 
 
 

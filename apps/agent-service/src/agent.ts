@@ -10,6 +10,8 @@ import { STATE_PATH, DATA_DIR } from "./paths.js";
 
 import { ChatService } from "./chat-service.js";
 
+import { AshleyCore } from "./core/index.js";
+
 import { env, validateBoot } from "./env.js";
 
 import { getMemoryDb } from "./memory/db.js";
@@ -48,6 +50,9 @@ export class AgentManager {
 
   readonly chat: ChatService;
 
+  /** Nuclear Identity→State→Agency runtime (Discord English path). */
+  readonly core: AshleyCore;
+
   private sseClients = new Set<SseClient>();
 
   private readonly bootedAt = Date.now();
@@ -63,6 +68,8 @@ export class AgentManager {
     getMemoryDb(db);
 
     this.chat = new ChatService(db);
+
+    this.core = new AshleyCore();
 
   }
 
@@ -331,6 +338,9 @@ export class AgentManager {
     threadId: string;
     model: string;
     usage: { promptTokens: number; completionTokens: number } | null;
+    silenced?: boolean;
+    decisionKind?: string;
+    decisionId?: number;
   }> {
 
     if (this.state === "paused" || this.state === "booting") {
@@ -363,6 +373,44 @@ export class AgentManager {
 
     try {
 
+      // Nuclear path: Discord English DMs through Agency.
+      if (env.nuclearEnabled && channel === "discord") {
+        const result = await this.core.handleReactiveChat({
+          message,
+          ownerId: userId,
+          channel: "discord",
+        });
+        if (auditSessionId) {
+          this.logger.append({
+            ts: new Date().toISOString(),
+            role: "user",
+            text: message,
+            source: channel,
+            session_id: auditSessionId,
+          });
+          if (result.text) {
+            this.logger.append({
+              ts: new Date().toISOString(),
+              role: "assistant",
+              text: result.text,
+              source: "nuclear",
+              session_id: auditSessionId,
+              model: result.model,
+            });
+          }
+        }
+        return {
+          text: result.text,
+          threadId: result.threadId,
+          model: result.model,
+          usage: null,
+          silenced: result.silenced === true || result.decisionKind === "silence",
+          decisionKind: result.decisionKind,
+          decisionId: result.decisionId,
+        };
+      }
+
+      // Quarantined legacy path (telegram / ASHLEY_NUCLEAR=false).
       const result = await this.chat.complete({
 
         message,
