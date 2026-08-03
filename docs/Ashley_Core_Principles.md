@@ -1,4 +1,11 @@
-# `# Preamble` 
+# Ashley Core Principles
+
+> These principles derive their authority from [`VISION.md`](../VISION.md).
+> The Vision explains why Ashley exists; these are the highest constitutional
+> constraints beneath it. If a principle no longer protects the Vision, the
+> principle should be reconsidered deliberately rather than defended by rank.
+
+## Preamble
 
 ```
 Ashley is an ongoing attempt to design a truthful, coherent digital person.
@@ -409,4 +416,3 @@ Ashley is intentionally unfinished.
 ```
 These principles are stable, but the implementation should continue to evolve.
 ```
-

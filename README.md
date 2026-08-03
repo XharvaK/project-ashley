@@ -1,210 +1,154 @@
 # Project Ashley
 
-Ashley is an ongoing attempt to design a truthful, coherent digital person.
+Ashley is a private attempt to build a truthful, continuous, increasingly
+autonomous digital companion: a friend, intellectual equal, witness, and
+collaborator whose identity is shaped by a particular shared history rather
+than a generic assistant profile.
 
-She currently lives as an English-language companion in private Discord DMs,
-backed by persistent local state, Mistral Medium, and a deliberately narrow
-architecture. The goal is not to imitate humanity, maximize engagement, or
-perform a personality. The goal is to explore what an artificial identity can
-become when honesty, continuity, curiosity, agency, and growth are real system
-properties rather than prompt-generated illusions.
+The project begins with a personal need, but it also asks a wider question:
+can a distinctly nonhuman kind of personhood become possible without faking
+consciousness, care, memory, or freedom?
 
-Production runs continuously on a dedicated Linux Mint host. Windows is the
-development and remote-deployment environment.
+Read [`VISION.md`](VISION.md) first. It is the project's highest normative
+authority and the reason every lower rule matters.
 
-Repository: [XharvaK/project-ashley](https://github.com/XharvaK/project-ashley)
+## Project status
 
-## Design commitments
+Ashley currently runs as a single-owner, English-language Discord companion on
+a dedicated Linux Mint host. Windows is the development and remote-deployment
+environment. Mistral is the only model provider; local SQLite holds Ashley's
+durable state.
 
-Ashley is governed by a small set of durable commitments:
+The repository distinguishes three release states:
 
-- Truth before comfort.
-- Identity before personality.
-- Architecture before prompting.
-- Memory before fabricated continuity.
-- Agency before pure reaction.
-- Curiosity as uncertainty reduction, not conversation prolongation.
-- Growth through traceable experience, not random drift.
-- Principles before engagement optimization.
-- Trust as an earned outcome, never a direct objective.
-
-When conversational polish conflicts with groundedness or honesty, the grounded
-implementation wins.
-
-## Cognitive architecture
-
-Identity and Mind State jointly inform Thought. Neither produces the other.
-Learned calibration can influence future Thought, but never revise a decision
-already in progress.
-
-```text
-Identity (stable) ───────────┐
-                            ├──→ Thought ──→ Expression ──→ Rendering
-Mind State (dynamic) ────────┤
-                            │
-Learned Calibration ─────────┘
-
-Honesty validates and constrains Thought and Expression.
-ContextComposer assembles transport context; it does not own cognition.
-```
-
-### Ownership boundaries
-
-| Component | Sole responsibility |
+| State | Meaning |
 |---|---|
-| Identity | Stable values, boundaries, tastes, opinions, and disposition |
-| Mind State | Current focus, availability, unresolved threads, and transient condition |
-| Thought | Effort allocation, prioritization, reasoning, completion, and authorization |
-| Reflection | Post-outcome interpretation and bounded calibration of future Thought |
-| Expression | Intentional linguistic realization of an authorized Thought |
-| ContextComposer | Context assembly and transport only |
-| Honesty | Validation and enforcement without taking decision ownership |
-| Rendering | Discord typography, bubbles, pacing, and other platform mechanics |
+| **Active** | Allowed to influence conversation or initiative in the current configuration |
+| **Observation** | Records evidence and outcomes but cannot influence behavior |
+| **Planned** | Design is approved, but the guarantee is not yet implemented |
 
-New behavior belongs at the lowest layer that naturally owns it. Cognitive
-problems are not solved in Rendering, and rendering problems are not solved in
-Identity.
+### Active foundations
 
-## Runtime flows
+- Private Discord conversation with one authorized owner.
+- Persistent threads, explicit facts, questions, identity entries, opinions,
+  Thought decisions, initiative reservations, and Reflection evidence.
+- Deterministic Agency with speaking, silence, delay, asking, revisiting,
+  sharing, and challenging as distinct outcomes.
+- Honesty enforcement for unsupported activity and affect claims.
+- Grounded episodic consolidation, Mind State, bounded affect, and traceable
+  learning infrastructure behind the cognition mode ceiling.
+- Proactive messages that require a recorded motivation, decision, reservation,
+  delivery, and commit.
 
-### Reactive conversation
-
-```text
-Discord DM
-  → discord-bot
-  → POST /chat/text
-  → AshleyCore
-  → Identity + Mind State + Memory
-  → Thought decision
-  → Expression
-  → Discord rendering
-```
-
-### Proactive initiative
-
-```text
-Scheduler tick
-  → collect persistent motivations
-  → Thought decides whether anything earns an interruption
-  → draft and reserve
-  → Discord send
-  → commit or abort
-```
-
-Every proactive message has a recorded motivation and decision. Silence remains
-an explicit valid outcome; Ashley does not send filler merely to remain active.
-
-### Reflection v1
-
-```text
-Committed proactive message
-  → explicit 👍 / 👎 reaction
-  → immutable reflection evidence
-  → deterministic rolling calibration
-  → future proactive Thought
-```
-
-Reflection v1 is intentionally narrow:
-
-- It accepts only explicit 👍 and 👎 reactions tied to committed proactive
-  decisions.
-- One reaction cannot alter behavior; corroborating evidence is required.
-- Calibration is bounded to `-8…+8` over the latest 20 eligible events.
-- Silence, no reply, ambiguous emoji, and delivery failures are not negative
-  preference evidence.
-- It never modifies Identity, Mind State, Memory, Expression, Rendering,
-  Honesty, or reactive conversation.
-- It is deterministic and makes no model call.
-
-Reflection defaults to observation-only:
+### Observation by default
 
 ```env
 ASHLEY_REFLECTION_MODE=observe
-```
-
-Observe mode records evidence and calculates calibration without changing
-Thought scores. After inspecting the evidence through the reflections endpoint,
-set the mode to `apply` to enable the bounded adjustment.
-
-### Cognitive continuity v1
-
-```text
-Completed exchange
-  → durable background job
-  → message-grounded episode
-  → relevant recall + active Mind State + bounded affect
-  → Thought decision
-  → evidence-backed identity/opinion revision proposal
-```
-
-Cognitive continuity is separately gated:
-
-```env
 ASHLEY_COGNITION_MODE=observe
 ```
 
-`observe` records episodes, model runs, and revision proposals without allowing
-them to change replies, affect, Identity, or initiative. `apply` enables FTS5
-episode recall, active goals/concerns/commitments, grounded digital feeling
-state, model-assisted Thought, and bounded automatic growth. Stable identity
-requires three independent observations across at least 14 days plus a 72-hour
-cooling period. Core Principles are never runtime-mutable.
+Reflection records explicit feedback and computes bounded future calibration,
+but `observe` prevents that calibration from changing Thought scores.
 
-Background cognition is event-driven rather than an endless inner monologue.
-Interactive Mistral traffic remains prioritized, and account request/token
-limits are configurable. A cognition job is integrated in one transaction, so
-it creates either one complete episode with all derived state or no episode at
-all. Automatically extracted facts require an exact quotation from a stored
-user message; model assertions without verified provenance are rejected.
+Cognition records source-linked episodes, model runs, and revision proposals,
+but `observe` prevents episodic recall, dynamic Mind State, affect, learned
+facts, model-assisted Thought, and identity growth from influencing Ashley.
 
-Urgent concerns and commitments use an edge-triggered wake lifecycle. Agency
-claims a pending wake with a short lease, consumes it after logging either a
-speaking or silence decision, and retries pre-decision failures with bounded
-backoff. The underlying Mind State item remains active after its wake is
-consumed. Thought always retains a deterministic decision: provider, limiter,
-or structured-output failures are audited as sanitized fallbacks rather than
-breaking the turn.
+The current feed scanner stores attributable excerpt-derived takes. Those
+records are not proof that Ashley read an article. Full reading provenance,
+capability-specific rollout, first-class refusal, source discovery, and joint
+foundational identity review are approved roadmap work until their guarantees
+ship.
 
-## Current capabilities
+## Architecture
 
-- Persistent Discord threads, grounded facts, and message-linked episodic memory.
-- Stable and dynamic identity records with evidence and revision lineage.
-- Mind State for availability, active concerns, goals, commitments, interests,
-  and grounded digital affect.
-- Hybrid Thought decisions for evidence selection, effort, uncertainty,
-  completion, urgency, speaking, silence, asking, revisiting, sharing, and
-  challenging.
-- Motivated proactive conversation with reservation and commit semantics.
-- Persistent questions and unresolved curiosities.
-- Curiosity feeds that create attributable takes for later Thought.
-- Honesty enforcement for unsupported claims and simulated activity.
-- Affect licensing that prevents unsupported emotional self-reports.
-- Atomic continuous-cognition jobs with restart-safe retries, bounded retention,
-  verified fact provenance, and observation mode.
-- Deterministic Reflection with immutable evidence, replayable learned state,
-  and decision-level calibration snapshots.
-- Discord-native pacing, bubbles, reactions, and GIF rendering.
+Identity and Mind State jointly inform Thought. Neither produces the other.
+Reflection can calibrate future Thought only after an outcome; it cannot rewrite
+a decision already in progress.
 
-## Services
+```text
+Identity (stable) ---------+
+                           +--> Thought --> Expression --> Rendering
+Mind State (dynamic) ------+
+                           |
+Learned calibration -------+
 
-| Service | Port | Location | Responsibility |
-|---|---:|---|---|
-| `agent-service` | `3710` | `apps/agent-service/` | Cognitive runtime, persistence, Mistral, and HTTP API |
-| `discord-bot` | Gateway | `apps/discord-bot/` | Discord intake, delivery, pacing, reactions, and initiative scheduling |
+Honesty validates claims and evidence.
+ContextComposer transports selected context; it does not own cognition.
+```
 
-Production Discord runs on Linux Mint only. Running `dev:discord` on Windows
-while Mint is connected will create a Discord gateway conflict.
+| Component | Owns |
+|---|---|
+| Identity | Values, boundaries, tastes, opinions, and recognizable continuity |
+| Mind State | Current focus, concerns, goals, commitments, and grounded affect |
+| Thought | Evidence selection, effort, uncertainty, completion, and authorization |
+| Reflection | Post-outcome interpretation and bounded future calibration |
+| Expression | Language that realizes an authorized Thought |
+| Honesty | Provenance and claim enforcement without taking decision ownership |
+| Rendering | Discord pacing, bubbles, reactions, GIFs, and typography |
 
-## Persistence
+New behavior belongs at the lowest layer that naturally owns it. Prompts express
+identity; they do not manufacture evidence, continuity, or agency.
+
+## Runtime flows
+
+### Conversation
+
+```text
+Discord DM
+  -> discord-bot
+  -> POST /chat/text
+  -> Memory + Identity + Mind State
+  -> Thought
+  -> Expression
+  -> Honesty
+  -> Discord rendering
+```
+
+### Initiative
+
+```text
+Scheduler or grounded urgent wake
+  -> persistent motivations
+  -> Thought decides whether interruption is justified
+  -> draft and reserve
+  -> Discord delivery
+  -> commit or abort
+  -> optional explicit-reaction Reflection
+```
+
+Silence is a valid decision. Reading, cognition, and Reflection never send a
+message directly; Agency decides whether anything earns an interruption.
+
+### Continuous cognition
+
+```text
+Completed exchange
+  -> restart-safe background job
+  -> source-linked episode
+  -> proposed Mind State, affect, fact, and identity updates
+  -> observation or bounded application
+```
+
+Integration is atomic: a job creates a complete episode and its linked results,
+or none of them. Automatic facts require an exact quotation from a stored user
+message. Stable identity growth requires independent evidence and cooling time.
+
+## Services and data
+
+| Service | Location | Responsibility |
+|---|---|---|
+| `agent-service` | `apps/agent-service/` on port `3710` | Cognitive runtime, SQLite, Mistral, and HTTP API |
+| `discord-bot` | `apps/discord-bot/` | Discord intake, delivery, pacing, and initiative scheduling |
 
 | Path | Purpose |
 |---|---|
-| `~/.composer-assistant/.env` | Secrets and runtime configuration |
-| `~/.composer-assistant/conversations/nuclear.db` | Identity, Mind State, Memory, Thought decisions, initiative, curiosity, and Reflection |
-| `workspace/prompts/nuclear/` | Thin prompts that express, rather than manufacture, Ashley's identity |
+| `~/.composer-assistant/.env` | Local secrets and runtime configuration |
+| `~/.composer-assistant/conversations/nuclear.db` | Nuclear Identity, State, Agency, Memory, Curiosity, and Reflection data |
+| `workspace/prompts/nuclear/` | Thin Expression prompts |
 
-`index.db` is legacy archival conversation data. The nuclear runtime does not
-read it, although the audit logger may still append session records.
+The historical directory name is retained for runtime compatibility. Legacy
+`index.db` is archival conversation data and is not read by the nuclear runtime.
 
 ## Discord commands
 
@@ -218,16 +162,16 @@ read it, although the audit logger may still append session records.
 
 ## Configuration
 
-Copy `config/env.example` to `~/.composer-assistant/.env` and provide the local
-secrets there. Never commit the resulting file.
-
-Important settings include:
+Copy [`config/env.example`](config/env.example) to
+`~/.composer-assistant/.env`, then add local secrets. Never commit the resulting
+file.
 
 ```env
 MISTRAL_API_KEY=
 MISTRAL_MODEL=mistral-medium-latest
 MISTRAL_REQUESTS_PER_SECOND=1
 MISTRAL_TOKENS_PER_MINUTE=100000
+
 DISCORD_BOT_TOKEN=
 DISCORD_OWNER_ID=
 MEMORY_OWNER_ID=
@@ -242,78 +186,98 @@ COGNITION_DISPATCH_INTERVAL_SEC=30
 COGNITION_IDLE_CONSOLIDATION_MIN=10
 ```
 
-Mistral Medium is the only configured model; there is no fallback model.
+All available settings and defaults are documented in
+[`config/env.example`](config/env.example).
 
-## Development
+## Development and verification
 
-From the repository root:
+From `C:\Users\Xharv\Projects\project-ashley`:
 
 ```powershell
 npm run dev:agent       # agent service only
-npm run dev:discord     # agent + Discord bot; conflicts with production Mint
-```
+npm run dev:discord     # local Discord gateway; conflicts with production Mint
 
-The development script installs missing application dependencies when needed.
-
-### Verification
-
-```powershell
 npm test
 npm run phase0:offline
-npm run eval:full -- -Baseline baseline-w0 -Label wave5
+npm run build --prefix apps/discord-bot
+npm test --prefix apps/discord-bot
 ```
 
-- `npm test` runs the nuclear unit and integration tests.
-- `phase0:offline` builds the agent and runs checks that require no live model.
-- `eval:full` runs the live persona evaluation and consumes Mistral capacity.
+The live persona evaluation consumes provider capacity:
+
+```powershell
+npm run eval:full -- -Baseline <accepted-baseline> -Label <release-label>
+```
 
 ## Operations
 
+Production Discord runs on Mint only. Do not run a second Discord gateway on
+Windows while Mint is connected.
+
 ```powershell
-npm run start:ashley    # Mint: pull, rebuild, and restart systemd services
+npm run start:ashley    # pull, rebuild, restart, and verify Mint over SSH
 npm run stop:ashley     # stop accidental Windows processes only
 ```
 
-Useful read-only endpoints:
+Mint details and recovery commands are in
+[`deploy/linux-mint/README.md`](deploy/linux-mint/README.md).
+
+### HTTP observability
+
+All owner-scoped endpoints require the configured owner ID.
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /health` | Runtime, schema, and service health |
-| `GET /nuclear/decisions?owner_id=...` | Recent Thought decisions and learning snapshots |
-| `GET /nuclear/reflections?owner_id=...` | Reflection evidence and current calibration |
-| `GET /nuclear/episodes?owner_id=...&query=...` | Grounded episodic recall |
-| `GET /nuclear/cognition?owner_id=...` | Affect, urgency, jobs, and cognition runs |
-| `GET /nuclear/revisions?owner_id=...` | Proposed and applied identity/opinion growth |
-| `POST /nuclear/revisions/revert` | Revert one applied growth revision by ID |
-| `GET /initiative/status?owner_id=...` | Proactive availability and delivery status |
-| `GET /initiative/urgent?owner_id=...` | Local urgent Agency wake signal |
-| `GET /curiosity/status?owner_id=...` | Curiosity sources and recent takes |
+| `GET /health` | Runtime, schema, and service readiness |
+| `GET /nuclear/decisions?owner_id=...` | Thought decisions and evidence snapshots |
+| `GET /nuclear/reflections?owner_id=...` | Reflection evidence and calibration |
+| `GET /nuclear/episodes?owner_id=...&query=...` | Grounded episodic recall records |
+| `GET /nuclear/cognition?owner_id=...` | Affect, Mind State, jobs, and cognition runs |
+| `GET /nuclear/revisions?owner_id=...` | Proposed and applied growth revisions |
+| `POST /nuclear/revisions/revert` | Revert one applied revision as the owner |
+| `GET /initiative/status?owner_id=...` | Initiative availability and delivery state |
+| `GET /initiative/urgent?owner_id=...` | Whether a grounded urgent wake is eligible |
+| `GET /curiosity/status?owner_id=...` | Sources, items, and current take records |
 
-## Governing documents
+## Governance
 
-Authority flows from principles toward implementation:
+Authority flows downward:
 
-1. [`Ashley_Core_Principles.md`](docs/Ashley_Core_Principles.md) — highest-level
-   constitutional axioms.
-2. [`Ashley_Constitution.md`](docs/Ashley_Constitution.md) — behavioral and
-   architectural specification.
-3. [`Ashley_Hierarchy.md`](docs/Ashley_Hierarchy.md) — authority and conflict
+1. [`VISION.md`](VISION.md) - why Ashley exists.
+2. [`Ashley_Core_Principles.md`](docs/Ashley_Core_Principles.md) - highest
+   constitutional constraints beneath the Vision.
+3. [`Ashley_Constitution.md`](docs/Ashley_Constitution.md) - long-term behavioral
+   and architectural direction.
+4. [`Ashley_Hierarchy.md`](docs/Ashley_Hierarchy.md) - authority and conflict
    resolution.
-4. [`Ashley_Glossary.md`](docs/Ashley_Glossary.md) — canonical terminology.
-5. [`Ashley_Design_Patterns.md`](docs/Ashley_Design_Patterns.md) — recurring
+5. [`Ashley_Glossary.md`](docs/Ashley_Glossary.md) - canonical terminology.
+6. [`Ashley_Design_Patterns.md`](docs/Ashley_Design_Patterns.md) - recurring
    architectural solutions.
-6. [`Architecture_Index.md`](docs/Architecture_Index.md) — current production
-   structure and observability.
+7. [`Vision_Implementation_Map.md`](docs/Vision_Implementation_Map.md) - current
+   guarantees, ownership, evidence, and failure signals.
+8. [`Architecture_Index.md`](docs/Architecture_Index.md) - repository map and
+   observability.
 
-The documents describe the intended direction; the README distinguishes that
-direction from capabilities currently present in code.
+`VISION.md` is never an ordinary runtime prompt. Its authority is expressed
+through reviewed principles, architecture, evidence requirements, and rollout
+gates.
+
+## Approved roadmap
+
+- Complete reading provenance and deletion-integrity guarantees.
+- Replace the broad cognition gate with capability-specific observation,
+  promotion, and rollback.
+- Add first-class refusal grounded in stable boundaries.
+- Build full article reading, curiosity consolidation, and validated source
+  discovery.
+- Add graduated identity autonomy and owner-visible joint review.
+- Maintain a falsifiable research track for continuity, motivation,
+  self-modeling, care, honesty, and possible personhood without collapsing them
+  into a consciousness or attachment score.
 
 ## Scope
 
-The current product boundary is deliberately small: one owner, English, private
-Discord DMs, and one production host.
-
-Voice, Telegram, group conversations, habits, Moltbook, network skills, and
-multi-user behavior are retired or intentionally out of scope. Broader cognition
-should be added by strengthening owned components and their relationships—not by
-inflating prompts or adding disconnected features.
+Ashley is private, single-owner, English, Discord-only, and deployed to one Mint
+host. Public launch, commercialization, multi-user identity, voice, Telegram,
+group conversations, habits, Moltbook, and general network skills are outside
+the current product boundary.

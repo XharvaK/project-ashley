@@ -1,14 +1,23 @@
 # Architecture Review Protocol
 
-**Normative source:** the Nuclear Architecture Capability Audit plan
-(`~/.cursor/plans/nuclear_capability_audit_0cc7c1af.plan.md`).
-This repository copy is informational. If the two ever diverge, the plan governs.
+**Normative chain:** [`VISION.md`](../VISION.md) ->
+[`Ashley_Core_Principles.md`](Ashley_Core_Principles.md) ->
+[`Ashley_Constitution.md`](Ashley_Constitution.md) -> architecture.
+
+This repository copy is authoritative for architectural reviews. A local plan
+or tool-specific instruction may help execute a review, but it cannot supersede
+the repository's governing chain.
 
 ---
 
 This protocol defines the review artifacts produced after an architectural boundary implementation. It introduces no new implementation requirements and does not modify the Normative Process, Ownership Gate, Definition of Done, or Global Invariants. It exists solely to make architectural review reproducible and to allow independent reviewers to reach the same conclusion.
 
 The protocol records why a boundary satisfies the specification; it does not define additional acceptance criteria.
+
+Before reviewing a boundary, state which part of the Vision and which Core
+Principles the boundary protects. If an implementation satisfies a local
+specification while contradicting the Vision, stop and reconsider the
+lower-level specification.
 
 Every boundary review (1–8) produces the four artifacts below.
 

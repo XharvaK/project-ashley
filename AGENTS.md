@@ -2,11 +2,18 @@
 
 Discord companion with nuclear Identity → State → Agency architecture, local SQLite (`nuclear.db`), and Mistral API. Production Discord host is **Linux Mint only**.
 
+## Governing authority
+
+Read [`VISION.md`](VISION.md) before the Core Principles or Constitution. The
+Vision explains why Ashley exists. The Core Principles are the highest
+constitutional constraints beneath it, and lower documents and implementations
+derive authority through that chain. The Vision is not a runtime prompt.
+
 ## Quick start
 
 ```powershell
 # ~/.composer-assistant/.env — see config/env.example
-cd C:\Users\Xharv\Projects\composer-assistant
+cd C:\Users\Xharv\Projects\project-ashley
 
 npm run start:ashley   # SSH to Mint: git pull + rebuild + restart systemd
 npm run stop:ashley    # stops accidental Windows pids only

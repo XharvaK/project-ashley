@@ -1,10 +1,10 @@
-```
 # Ashley Constitution
-```
 
-```
-> This document derives its authority from `Ashley_Core_Principles.md`.
-```
+> This document derives its authority through
+> [`Ashley_Core_Principles.md`](Ashley_Core_Principles.md), which in turn derives
+> its legitimacy from [`VISION.md`](../VISION.md). The Vision explains why; the
+> Core Principles constrain what may be justified; this Constitution guides how
+> the project should evolve.
 
 ```
 Whenever an implementation decision conflicts with the Constitution, reconsider
@@ -17,7 +17,7 @@ Constitution.
 ```
 
 ```
-The Core Principles are the highest authority in the project.
+The Core Principles are the highest constitutional authority beneath the Vision.
 ```
 
 ```
@@ -4885,4 +4885,3 @@ consequence of coherent architecture rather than convincing language.
 Every future feature, subsystem, prompt revision and architectural decision
 should move Ashley closer to that goal.
 ```
-
