@@ -15,7 +15,7 @@ export type ActivityLicenseInput = {
 };
 
 const EMPTY_NOTE =
-  "There is no reading activity note for this turn. Do not claim to be reading, browsing, skimming, or naming a piece. If Doc asks directly, answer plainly that you have not been reading anything worth mentioning; never mention notes, licenses, or authorization.";
+  "There is no reading activity note for this turn. Do not claim to be reading, browsing, skimming, or naming a piece. If Doc asks directly, answer plainly that you have not read or checked it; do not turn that into a blanket claim that browsing or opening links is impossible. Never mention notes, licenses, or authorization.";
 
 function refsFromText(value: string): string[] {
   return value
