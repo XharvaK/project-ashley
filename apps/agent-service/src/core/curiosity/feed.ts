@@ -320,6 +320,37 @@ export function listRecentTakes(
   return rows;
 }
 
+export function readingProvenanceFailure(db: DatabaseSync): string | null {
+  const take = db.prepare(
+    `SELECT t.id
+     FROM cur_takes t
+     LEFT JOIN cur_reads r ON r.id = t.read_id
+     WHERE t.evidence_kind = 'read_record'
+       AND (t.read_id IS NULL OR r.id IS NULL OR r.item_id <> t.item_id)
+     ORDER BY t.id LIMIT 1`,
+  ).get();
+  if (isRow(take)) return `take:${numberValue(take.id)}`;
+  const evidence = db.prepare(
+    `SELECT l.target_type, l.target_id
+     FROM evidence_links l
+     LEFT JOIN cur_reads r ON r.id = CAST(l.source_id AS INTEGER)
+     WHERE l.source_type = 'read' AND r.id IS NULL
+     ORDER BY l.id LIMIT 1`,
+  ).get();
+  if (isRow(evidence)) {
+    return `evidence:${stringValue(evidence.target_type)}:${stringValue(evidence.target_id)}`;
+  }
+  const read = db.prepare(
+    `SELECT id FROM cur_reads
+     WHERE final_url = '' OR length(content_hash) <> 64 OR model = ''
+        OR CASE WHEN json_valid(evidence_excerpts_json)
+                THEN json_array_length(evidence_excerpts_json) = 0
+                ELSE 1 END
+     ORDER BY id LIMIT 1`,
+  ).get();
+  return isRow(read) ? `read:${numberValue(read.id)}` : null;
+}
+
 export function logProvenance(
   db: DatabaseSync,
   kind: NuclearProvenanceKind,

@@ -160,7 +160,7 @@ describe("bounded identity growth", () => {
     const [review] = listIdentityReviews(db, "doc");
     expect(review).toMatchObject({
       revisionId,
-      ashleyPosition: "defer",
+      ashleyPosition: null,
       docDecision: null,
     });
     expect(applyEligibleRevisions(db, "doc", "apply")).toEqual([]);

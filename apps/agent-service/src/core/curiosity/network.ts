@@ -25,22 +25,71 @@ function publicIpv4(address: string): boolean {
   return true;
 }
 
+function ipv6Words(address: string): number[] | null {
+  const normalized = address.toLowerCase().split("%")[0]!;
+  const halves = normalized.split("::");
+  if (halves.length > 2) return null;
+  const parse = (part: string): number[] | null => {
+    if (!part) return [];
+    const words: number[] = [];
+    for (const token of part.split(":")) {
+      if (token.includes(".")) {
+        const octets = token.split(".").map(Number);
+        if (octets.length !== 4 || octets.some((value) =>
+          !Number.isInteger(value) || value < 0 || value > 255
+        )) return null;
+        words.push((octets[0]! << 8) | octets[1]!, (octets[2]! << 8) | octets[3]!);
+      } else if (!/^[0-9a-f]{1,4}$/.test(token)) {
+        return null;
+      } else {
+        words.push(Number.parseInt(token, 16));
+      }
+    }
+    return words;
+  };
+  const left = parse(halves[0] ?? "");
+  const right = parse(halves[1] ?? "");
+  if (!left || !right) return null;
+  if (halves.length === 1) return left.length === 8 ? left : null;
+  const omitted = 8 - left.length - right.length;
+  return omitted >= 1 ? [...left, ...Array<number>(omitted).fill(0), ...right] : null;
+}
+
+function embeddedIpv4(words: number[], offset: number): string {
+  return [
+    words[offset]! >> 8,
+    words[offset]! & 0xff,
+    words[offset + 1]! >> 8,
+    words[offset + 1]! & 0xff,
+  ].join(".");
+}
+
 export function isPublicAddress(address: string): boolean {
   const family = isIP(address);
   if (family === 4) return publicIpv4(address);
   if (family !== 6) return false;
-  const normalized = address.toLowerCase().split("%")[0]!;
+  const words = ipv6Words(address);
+  if (!words) return false;
+  const [a, b, c, d, e, f, g, h] = words as [number, number, number, number, number, number, number, number];
+  if (words.every((word) => word === 0) || (words.slice(0, 7).every((word) => word === 0) && h === 1)) return false;
+  if ((a & 0xfe00) === 0xfc00 || (a & 0xffc0) === 0xfe80 || (a & 0xff00) === 0xff00) return false;
+  if (a === 0 && b === 0 && c === 0 && d === 0 && e === 0) {
+    if (f === 0xffff) return publicIpv4(embeddedIpv4(words, 6));
+    return false;
+  }
+  if (a === 0x64 && b === 0xff9b && c === 0 && d === 0 && e === 0 && f === 0) {
+    return publicIpv4(embeddedIpv4(words, 6));
+  }
   if (
-    normalized === "::" ||
-    normalized === "::1" ||
-    normalized.startsWith("fc") ||
-    normalized.startsWith("fd") ||
-    /^fe[89ab]/.test(normalized) ||
-    normalized.startsWith("ff") ||
-    normalized.startsWith("2001:db8:")
+    (a === 0x64 && b === 0xff9b && c === 1) ||
+    (a === 0x100 && b === 0 && c === 0 && d === 0) ||
+    (a === 0x2001 && b === 0) ||
+    (a === 0x2001 && b === 2 && c === 0) ||
+    (a === 0x2001 && (b & 0xfff0) === 0x10) ||
+    (a === 0x2001 && b === 0x0db8) ||
+    a === 0x2002
   ) return false;
-  const mapped = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-  return mapped ? publicIpv4(mapped[1]!) : true;
+  return true;
 }
 
 const defaultResolve: ResolveHost = async (hostname) => {
@@ -98,6 +147,17 @@ async function boundedBody(response: Response): Promise<Uint8Array> {
   return body;
 }
 
+function withAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(new Error("fetch_timeout"));
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(new Error("fetch_timeout"));
+    signal.addEventListener("abort", abort, { once: true });
+    promise.then(resolve, reject).finally(() => {
+      signal.removeEventListener("abort", abort);
+    });
+  });
+}
+
 export async function fetchValidatedResource(
   input: string,
   options: {
@@ -112,7 +172,10 @@ export async function fetchValidatedResource(
   let current = input;
   try {
     for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects++) {
-      const url = await validatePublicUrl(current, options.resolve ?? defaultResolve);
+      const url = await withAbort(
+        validatePublicUrl(current, options.resolve ?? defaultResolve),
+        controller.signal,
+      );
       const response = await fetcher(url, {
         redirect: "manual",
         headers: { accept: options.accept, "user-agent": "AshleyCuriosity/1.0" },
@@ -122,6 +185,7 @@ export async function fetchValidatedResource(
         if (redirects === MAX_REDIRECTS) throw new Error("too_many_redirects");
         const location = response.headers.get("location");
         if (!location) throw new Error("redirect_without_location");
+        await response.body?.cancel();
         current = new URL(location, url).toString();
         continue;
       }
@@ -133,6 +197,9 @@ export async function fetchValidatedResource(
       };
     }
     throw new Error("too_many_redirects");
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error("fetch_timeout");
+    throw error;
   } finally {
     clearTimeout(timeout);
   }

@@ -65,10 +65,27 @@ function isRow(value: unknown): value is Row {
 
 function readGitRelease(): string {
   try {
-    const gitDir = resolve(REPO_CONFIG_PATH, "..", ".git");
+    const repoRoot = resolve(REPO_CONFIG_PATH, "..");
+    const dotGit = join(repoRoot, ".git");
+    let gitDir = dotGit;
+    try {
+      const marker = readFileSync(dotGit, "utf8").trim();
+      const match = marker.match(/^gitdir:\s*(.+)$/i);
+      if (match?.[1]) gitDir = resolve(repoRoot, match[1]);
+    } catch {
+      // A normal checkout stores .git as a directory.
+    }
     const head = readFileSync(join(gitDir, "HEAD"), "utf8").trim();
     if (!head.startsWith("ref: ")) return head.slice(0, 40);
-    return readFileSync(join(gitDir, head.slice(5)), "utf8").trim().slice(0, 40);
+    const ref = head.slice(5);
+    try {
+      return readFileSync(join(gitDir, ref), "utf8").trim().slice(0, 40);
+    } catch {
+      const packed = readFileSync(join(gitDir, "packed-refs"), "utf8")
+        .split(/\r?\n/)
+        .find((line) => !line.startsWith("#") && !line.startsWith("^") && line.endsWith(` ${ref}`));
+      return packed?.split(" ")[0]?.slice(0, 40) || "unversioned";
+    }
   } catch {
     return "unversioned";
   }

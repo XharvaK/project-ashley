@@ -21,7 +21,11 @@ import { getState, patchState, setLastDecision } from "./state/store.js";
 import {
   writeFromUserTurn,
 } from "./writers.js";
-import { listRecentTakes, listSources } from "./curiosity/feed.js";
+import {
+  listRecentTakes,
+  listSources,
+  readingProvenanceFailure,
+} from "./curiosity/feed.js";
 import { runNuclearCuriosityTick } from "./curiosity/tick.js";
 import { listRecentReads } from "./curiosity/reads.js";
 import { openNuclearDb } from "./db.js";
@@ -55,6 +59,7 @@ import {
   capabilityCanInfluence,
   capabilityNames,
   listCapabilityStatuses,
+  recordCriticalFailure,
   recordIsolatedEvaluation,
   recordLiveShadowEvent,
   type CapabilityName,
@@ -196,6 +201,24 @@ export class AshleyCore {
     processPendingReflectionEvents(this.db);
   }
 
+  private auditReadingProvenance(): boolean {
+    const failure = readingProvenanceFailure(this.db);
+    if (!failure) return true;
+    recordCriticalFailure(
+      this.db,
+      "reading",
+      failure,
+      "provenance",
+      "A reading-derived claim has missing or invalid read-record provenance.",
+    );
+    return false;
+  }
+
+  private capabilityStatuses(): ReturnType<typeof listCapabilityStatuses> {
+    this.auditReadingProvenance();
+    return listCapabilityStatuses(this.db);
+  }
+
   async handleReactiveChat(
     input: ReactiveChatInput,
   ): Promise<ReactiveChatResult> {
@@ -206,6 +229,7 @@ export class AshleyCore {
     }
     this.activeOwners.add(input.ownerId);
     seedIdentity(this.db, input.ownerId);
+    this.auditReadingProvenance();
     try {
       const threadId = resolveActiveThread(
         this.db,
@@ -333,6 +357,7 @@ export class AshleyCore {
     }
 
     seedIdentity(this.db, ownerId);
+    this.auditReadingProvenance();
     if (getState(this.db, ownerId).availability !== "available") {
       return { shouldSend: false, reason: "unavailable" };
     }
@@ -729,6 +754,15 @@ export class AshleyCore {
       return result;
     } catch (error) {
       this.db.exec("ROLLBACK");
+      if (error instanceof Error && error.message.startsWith("forget_integrity_failed:")) {
+        recordCriticalFailure(
+          this.db,
+          "recall",
+          `forget:${ownerId}:${Date.now()}`,
+          "deletion_integrity",
+          error.message,
+        );
+      }
       throw error;
     }
   }
@@ -801,7 +835,7 @@ export class AshleyCore {
   getCognitionOverview(ownerId: string) {
     return {
       mode: env.cognitionMode,
-      capabilities: listCapabilityStatuses(this.db),
+      capabilities: this.capabilityStatuses(),
       affect: getAffectiveState(this.db, ownerId),
       mindState: listActiveMindStateItems(this.db, ownerId),
       urgent: this.hasUrgentCognition(ownerId),
@@ -820,7 +854,7 @@ export class AshleyCore {
   getRevisions(ownerId: string, limit = 50) {
     return {
       mode: env.cognitionMode,
-      capabilities: listCapabilityStatuses(this.db),
+      capabilities: this.capabilityStatuses(),
       revisions: listRevisions(this.db, ownerId, limit),
     };
   }
@@ -859,7 +893,7 @@ export class AshleyCore {
   getCapabilities() {
     return {
       masterMode: env.cognitionMode,
-      capabilities: listCapabilityStatuses(this.db),
+      capabilities: this.capabilityStatuses(),
     };
   }
 
@@ -1067,7 +1101,7 @@ export class AshleyCore {
         schemaVersion: version,
         reflectionMode: this.reflectionMode,
         cognitionMode: env.cognitionMode,
-        capabilities: listCapabilityStatuses(this.db),
+        capabilities: this.capabilityStatuses(),
         identityEntries:
           isRow(identityRow) && typeof identityRow.count === "number"
             ? identityRow.count

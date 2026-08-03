@@ -196,15 +196,12 @@ export function proposeRevision(
           ashley_rationale, ashley_evidence_type, ashley_evidence_id,
           ashley_decided_at, doc_decision, doc_rationale, doc_decided_at,
           applied_at, created_at, updated_at)
-       VALUES (?, ?, ?, 'defer', ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?)`,
+       VALUES (?, ?, ?, NULL, NULL, NULL, NULL, NULL,
+               NULL, NULL, NULL, NULL, ?, ?)`,
     ).run(
       input.ownerId,
       id,
       foundation,
-      "Defer until Ashley and Doc can review this foundational change together.",
-      input.evidenceType,
-      String(input.evidenceId),
-      now.toISOString(),
       now.toISOString(),
       now.toISOString(),
     );

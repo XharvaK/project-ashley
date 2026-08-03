@@ -157,6 +157,102 @@ function reconcileFacts(
   return changed;
 }
 
+function assertForgetIntegrity(
+  db: DatabaseSync,
+  ownerId: string,
+  receiptId: string,
+  messageIds: number[],
+  episodeIds: number[],
+  matchedFactIds: number[],
+): void {
+  if (messageIds.length > 0) {
+    const marks = placeholders(messageIds);
+    const visibleMessages = countRows(
+      db,
+      `SELECT COUNT(*) AS count FROM mem_messages
+       WHERE owner_id = ? AND id IN (${marks})
+         AND (redacted_at IS NULL OR redaction_receipt_id IS NULL
+              OR redaction_receipt_id <> ? OR text <> '')`,
+      ownerId,
+      ...messageIds,
+      receiptId,
+    );
+    const messageEvidence = countRows(
+      db,
+      `SELECT COUNT(*) AS count FROM evidence_links
+       WHERE owner_id = ? AND source_type = 'message'
+         AND CAST(source_id AS INTEGER) IN (${marks})`,
+      ownerId,
+      ...messageIds,
+    );
+    if (visibleMessages > 0 || messageEvidence > 0) {
+      throw new Error("forget_integrity_failed:message");
+    }
+  }
+  if (episodeIds.length > 0) {
+    const marks = placeholders(episodeIds);
+    const visibleEpisodes = countRows(
+      db,
+      `SELECT COUNT(*) AS count FROM episodes
+       WHERE owner_id = ? AND id IN (${marks})
+         AND (status <> 'forgotten' OR summary <> '' OR entities <> '')`,
+      ownerId,
+      ...episodeIds,
+    );
+    const episodeEvidence = countRows(
+      db,
+      `SELECT COUNT(*) AS count FROM evidence_links
+       WHERE owner_id = ? AND source_type = 'episode'
+         AND CAST(source_id AS INTEGER) IN (${marks})`,
+      ownerId,
+      ...episodeIds,
+    );
+    const activeState = countRows(
+      db,
+      `SELECT COUNT(*) AS count FROM mind_state_items
+       WHERE owner_id = ? AND status = 'active' AND source_type = 'episode'
+         AND CAST(source_id AS INTEGER) IN (${marks})`,
+      ownerId,
+      ...episodeIds,
+    ) + countRows(
+      db,
+      `SELECT COUNT(*) AS count FROM affective_events
+       WHERE owner_id = ? AND source_type = 'episode'
+         AND CAST(source_id AS INTEGER) IN (${marks})`,
+      ownerId,
+      ...episodeIds,
+    ) + countRows(
+      db,
+      `SELECT COUNT(*) AS count FROM affective_state
+       WHERE owner_id = ? AND source_type = 'episode'
+         AND CAST(source_id AS INTEGER) IN (${marks})`,
+      ownerId,
+      ...episodeIds,
+    );
+    const visibleRuns = countRows(
+      db,
+      `SELECT COUNT(*) AS count FROM cognitive_runs
+       WHERE owner_id = ? AND episode_id IN (${marks}) AND output_json <> '{}'`,
+      ownerId,
+      ...episodeIds,
+    );
+    if (visibleEpisodes + episodeEvidence + activeState + visibleRuns > 0) {
+      throw new Error("forget_integrity_failed:episode");
+    }
+  }
+  if (matchedFactIds.length > 0) {
+    const visibleFacts = countRows(
+      db,
+      `SELECT COUNT(*) AS count FROM mem_facts
+       WHERE owner_id = ? AND id IN (${placeholders(matchedFactIds)})
+         AND (superseded_by IS NULL OR key <> '' OR value <> '')`,
+      ownerId,
+      ...matchedFactIds,
+    );
+    if (visibleFacts > 0) throw new Error("forget_integrity_failed:fact");
+  }
+}
+
 export function forgetOwnerTopic(
   db: DatabaseSync,
   ownerId: string,
@@ -289,6 +385,14 @@ export function forgetOwnerTopic(
     counts.runsRedacted,
     receiptId,
     ownerId,
+  );
+  assertForgetIntegrity(
+    db,
+    ownerId,
+    receiptId,
+    messageIds,
+    episodeIds,
+    matchedFacts.map((fact) => fact.id),
   );
   return {
     preview: [],

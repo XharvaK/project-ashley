@@ -313,4 +313,36 @@ describe("episodic memory", () => {
     expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     db.close();
   });
+
+  it("immediately disables recall when deletion integrity cannot be proven", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const core = new AshleyCore(db);
+    const threadId = resolveActiveThread(db, "doc");
+    insertMessage(db, {
+      threadId,
+      ownerId: "doc",
+      role: "user",
+      text: "The codename is Orchid.",
+    });
+    db.exec(`
+      CREATE TRIGGER defeat_redaction
+      AFTER UPDATE OF redacted_at ON mem_messages
+      WHEN NEW.redacted_at IS NOT NULL
+      BEGIN
+        UPDATE mem_messages
+        SET text = OLD.text, redacted_at = NULL, redaction_receipt_id = NULL
+        WHERE id = NEW.id;
+      END;
+    `);
+
+    expect(() => core.forget("doc", "Orchid", true))
+      .toThrow("forget_integrity_failed:message");
+    expect(core.getCapabilities().capabilities.find(
+      (capability) => capability.capability === "recall",
+    )).toMatchObject({
+      state: "disabled",
+      failureKind: "deletion_integrity",
+    });
+    db.close();
+  });
 });

@@ -86,6 +86,34 @@ function addCommittedQuestionInitiative(
 }
 
 describe("AshleyCore", () => {
+  it("immediately disables reading when read-record provenance is missing", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const source = db.prepare(
+      `INSERT INTO cur_sources (slug, title, kind, url, interest, weight, enabled)
+       VALUES ('audit', 'Audit', 'rss', 'https://example.com/feed', 'systems', 1, 1)`,
+    ).run();
+    const item = db.prepare(
+      `INSERT INTO cur_items
+         (source_id, url, url_key, title, excerpt, interest, seen_at, score, status)
+       VALUES (?, 'https://example.com/article', 'https://example.com/article', 'Article',
+               'Excerpt', 'systems', ?, 80, 'read')`,
+    ).run(Number(source.lastInsertRowid), new Date().toISOString());
+    db.prepare(
+      `INSERT INTO cur_takes
+         (item_id, interest, take, evidence_kind, read_id, created_at)
+       VALUES (?, 'systems', 'An unsupported take.', 'read_record', NULL, ?)`,
+    ).run(Number(item.lastInsertRowid), new Date().toISOString());
+    const core = new AshleyCore(db);
+
+    expect(core.getCapabilities().capabilities.find(
+      (capability) => capability.capability === "reading",
+    )).toMatchObject({
+      state: "disabled",
+      failureKind: "provenance",
+    });
+    db.close();
+  });
+
   it("persists a reactive turn and allows explicit silence", async () => {
     const path = join(tmpdir(), `ashley-nuclear-${randomUUID()}.db`);
     const db = openNuclearDb(new DatabaseSync(path));
