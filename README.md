@@ -270,18 +270,24 @@ gates.
 
 ## Approved roadmap
 
-- Build full article reading, curiosity consolidation, and validated source
-  discovery.
 - Add graduated identity autonomy and owner-visible joint review.
 - Maintain a falsifiable research track for continuity, motivation,
   self-modeling, care, honesty, and possible personhood without collapsing them
   into a consciousness or attachment score.
 
 Deletion integrity and the read-record provenance boundary are implemented.
-Schema v7 adds release-scoped capability observation, grounded refusal,
+Schema v8 adds release-scoped capability observation, grounded refusal,
 dependency-aware automatic promotion, and deterministic rollback. `/forget` redacts matching source
 messages, removes retrieval and evidence paths, reconciles dependent state, and
 returns a content-free receipt.
+
+The curiosity loop permits up to twelve validated full reads per UTC day: ten
+from established interests and open questions, plus two unfamiliar-topic
+explorations. Successful reads produce hashed, excerpt-bounded provenance and a
+restart-safe consolidation job. Retrieved text is untrusted evidence; it never
+sends a message directly. Discovered feeds need validation, deduplication,
+successful parsing, three probation fetches, available source budget, and an
+active source-discovery capability before activation.
 
 ## Scope
 

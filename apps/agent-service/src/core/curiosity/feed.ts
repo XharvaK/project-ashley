@@ -247,9 +247,25 @@ export function insertTake(
   },
 ): number | null {
   const existing: unknown = db
-    .prepare("SELECT id FROM cur_takes WHERE item_id = ?")
+    .prepare("SELECT id, evidence_kind FROM cur_takes WHERE item_id = ?")
     .get(input.itemId);
-  if (isRow(existing) && typeof existing.id === "number") return null;
+  if (isRow(existing) && typeof existing.id === "number") {
+    if (existing.evidence_kind === "scan_excerpt" && input.evidenceKind === "read_record") {
+      db.prepare(
+        `UPDATE cur_takes SET interest = ?, take = ?, created_at = ?,
+                              evidence_kind = 'read_record', read_id = ?
+         WHERE id = ?`,
+      ).run(
+        input.interest,
+        input.take.trim().slice(0, 1000),
+        new Date().toISOString(),
+        input.readId ?? null,
+        existing.id,
+      );
+      return existing.id;
+    }
+    return null;
+  }
   const result = db
     .prepare(
       `INSERT INTO cur_takes

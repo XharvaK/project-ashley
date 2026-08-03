@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-export type CognitiveJobKind = "consolidate_thread";
+export type CognitiveJobKind = "consolidate_thread" | "consolidate_curiosity";
 
 export type CognitiveJob = {
   id: number;

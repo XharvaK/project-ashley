@@ -132,7 +132,12 @@ export function collectMotivations(
 
   motivations.push(...addOpinions(db, ownerId, listOpinions(db, ownerId)));
 
-  for (const take of listRecentTakes(db, 6)) {
+  for (const take of capabilityCanInfluence(db, "reading") &&
+    capabilityCanInfluence(db, "curiosity_consolidation")
+    ? listRecentTakes(db, 12)
+        .filter((candidate) => candidate.evidenceKind === "read_record")
+        .slice(0, 6)
+    : []) {
     const score = Math.max(20, 55 - ageHours(take.createdAt) * 3);
     motivations.push(
       persistMotivation(

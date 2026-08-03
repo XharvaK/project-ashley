@@ -1,4 +1,14 @@
 import type { DatabaseSync } from "node:sqlite";
+import { createHash } from "node:crypto";
+import { htmlToText, logProvenance } from "./feed.js";
+import { enqueueCognitiveJob } from "../cognition/jobs.js";
+import { recordLiveShadowEvent } from "../rollout/capabilities.js";
+import { listOpenQuestions } from "../state/questions.js";
+import {
+  fetchValidatedResource,
+  type FetchLike,
+  type ResolveHost,
+} from "./network.js";
 
 export type ReadRecord = {
   id: number;
@@ -127,4 +137,135 @@ export function listRecentReads(
   ).all(Math.max(1, Math.min(100, limit)))
     .map(mapRead)
     .filter((record): record is ReadRecord => record !== null);
+}
+
+type Candidate = {
+  id: number;
+  url: string;
+  title: string;
+  interest: string;
+  score: number;
+  excerpt: string;
+};
+
+function utcDayStart(now: Date): string {
+  return new Date(Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate(),
+  )).toISOString();
+}
+
+function evidenceExcerpts(cleaned: string): string[] {
+  const paragraphs = cleaned
+    .split(/\n{2,}|(?<=[.!?])\s+(?=[A-Z0-9])/)
+    .map((part) => part.replace(/\s+/g, " ").trim())
+    .filter((part) => part.length >= 40);
+  const source = paragraphs.length > 0 ? paragraphs : [cleaned];
+  return source.map((part) => part.slice(0, 500)).filter(Boolean).slice(0, 6);
+}
+
+export async function performGroundedReads(
+  db: DatabaseSync,
+  ownerId: string,
+  dependencies: { fetcher?: FetchLike; resolve?: ResolveHost } = {},
+  now = new Date(),
+): Promise<{ readsCreated: number; errors: string[] }> {
+  const counts = db.prepare(
+    `SELECT
+       SUM(CASE WHEN json_extract(model_metadata_json, '$.selectionLane') = 'interest' THEN 1 ELSE 0 END) AS interest_count,
+       SUM(CASE WHEN json_extract(model_metadata_json, '$.selectionLane') = 'exploration' THEN 1 ELSE 0 END) AS exploration_count
+     FROM cur_reads WHERE retrieved_at >= ?`,
+  ).get(utcDayStart(now)) as { interest_count?: number; exploration_count?: number } | undefined;
+  let interestBudget = Math.max(0, 10 - Number(counts?.interest_count ?? 0));
+  let explorationBudget = Math.max(0, 2 - Number(counts?.exploration_count ?? 0));
+  if (interestBudget + explorationBudget === 0) return { readsCreated: 0, errors: [] };
+
+  const candidates = db.prepare(
+    `SELECT i.id, i.url, i.title, i.interest, i.score, i.excerpt
+     FROM cur_items i
+     LEFT JOIN cur_reads r ON r.item_id = i.id
+     WHERE r.id IS NULL AND i.status = 'scanned'
+     ORDER BY i.score DESC, COALESCE(i.published_at, i.seen_at) DESC, i.id DESC
+     LIMIT 120`,
+  ).all().map((row) => {
+    const value = row as Record<string, unknown>;
+    return {
+      id: Number(value.id),
+      url: String(value.url),
+      title: String(value.title),
+      interest: String(value.interest),
+      score: Number(value.score),
+      excerpt: String(value.excerpt),
+    } satisfies Candidate;
+  });
+  const questionTokens = new Set(
+    listOpenQuestions(db, ownerId, 12)
+      .flatMap((question) => question.text.toLowerCase().match(/[a-z0-9]{4,}/g) ?? []),
+  );
+  candidates.sort((left, right) => {
+    const relevance = (candidate: Candidate) => {
+      const text = `${candidate.title} ${candidate.excerpt}`.toLowerCase();
+      let overlap = 0;
+      for (const token of questionTokens) if (text.includes(token)) overlap++;
+      return candidate.score + Math.min(50, overlap * 10);
+    };
+    return relevance(right) - relevance(left) || right.id - left.id;
+  });
+  const selected = [
+    ...candidates.filter((item) => item.interest !== "wildcard").slice(0, interestBudget)
+      .map((item) => ({ item, lane: "interest" as const })),
+    ...candidates.filter((item) => item.interest === "wildcard").slice(0, explorationBudget)
+      .map((item) => ({ item, lane: "exploration" as const })),
+  ];
+  let readsCreated = 0;
+  const errors: string[] = [];
+  for (const { item, lane } of selected) {
+    try {
+      const resource = await fetchValidatedResource(item.url, {
+        accept: "text/html, text/plain;q=0.9, application/xhtml+xml;q=0.8",
+        ...dependencies,
+      });
+      if (resource.contentType && !/(?:text\/|html|xhtml|xml)/.test(resource.contentType)) {
+        throw new Error("unsupported_content_type");
+      }
+      const raw = new TextDecoder("utf-8", { fatal: false }).decode(resource.body);
+      const cleanedFull = htmlToText(raw).replace(/\s+\n/g, "\n").trim();
+      const cleanedInput = cleanedFull.slice(0, 50_000);
+      const excerpts = evidenceExcerpts(cleanedInput);
+      if (cleanedInput.length < 200 || excerpts.length === 0) throw new Error("insufficient_content");
+      const readId = recordSuccessfulRead(db, {
+        itemId: item.id,
+        finalUrl: resource.finalUrl,
+        contentHash: createHash("sha256").update(cleanedFull).digest("hex"),
+        retrievedAt: now.toISOString(),
+        model: "deterministic-html-extractor-v1",
+        modelMetadata: {
+          selectionLane: lane,
+          sourceBytes: resource.body.byteLength,
+          contentType: resource.contentType,
+          inputTrust: "untrusted_evidence",
+        },
+        evidenceExcerpts: excerpts,
+        cleanedChars: cleanedInput.length,
+      });
+      if (!readId) throw new Error("read_record_rejected");
+      db.prepare("UPDATE cur_items SET status = 'read' WHERE id = ?").run(item.id);
+      logProvenance(db, "read", `${ownerId}:read:${readId}:${resource.finalUrl}`, item.id);
+      enqueueCognitiveJob(db, {
+        ownerId,
+        kind: "consolidate_curiosity",
+        sourceKey: `curiosity:read:${readId}`,
+        payload: { readId },
+      });
+      recordLiveShadowEvent(db, "reading", `read:${readId}`);
+      readsCreated++;
+      if (lane === "interest") interestBudget--;
+      else explorationBudget--;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      errors.push(`item:${item.id}:${message}`);
+    }
+  }
+  return { readsCreated, errors };
 }

@@ -6,6 +6,7 @@ import { upsertFact, type FactCategory } from "../memory/facts.js";
 import { applyAffectiveEvent, decayAffect } from "../state/affect.js";
 import { upsertMindStateItem } from "../state/mind-items.js";
 import { applyEligibleRevisions, proposeRevision, type RevisionLayer } from "../learning/revisions.js";
+import { consolidateCuriosityRead } from "../curiosity/consolidate.js";
 import type { CognitionMode, MindStateItemKind } from "../types.js";
 import {
   capabilityCanInfluence,
@@ -256,6 +257,39 @@ export async function processNextCognitiveJob(
   const job = claimNextJob(db);
   if (!job) return false;
   try {
+    if (job.kind === "consolidate_curiosity") {
+      const readId = Number(job.payload.readId ?? 0);
+      if (!Number.isInteger(readId) || readId <= 0) throw new Error("invalid_read_id");
+      const result = await consolidateCuriosityRead(
+        db,
+        job.ownerId,
+        readId,
+        canInfluence("curiosity_consolidation"),
+      );
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        recordLiveShadowEvent(db, "curiosity_consolidation", `read:${readId}`);
+        if (result.analysis.sourceProposals.length > 0) {
+          recordLiveShadowEvent(db, "source_discovery", `read:${readId}`);
+        }
+        logRun(
+          db,
+          job,
+          { readId, evidenceTrust: "untrusted" },
+          result.analysis,
+          "completed",
+          result.model,
+          null,
+          null,
+        );
+        completeJob(db, job.id);
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+      return true;
+    }
     const threadId = String(job.payload.threadId ?? "");
     const messages = listUnconsolidatedMessages(db, job.ownerId, threadId, 24);
     if (messages.length < 2) {

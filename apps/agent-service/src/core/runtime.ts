@@ -23,6 +23,7 @@ import {
 } from "./writers.js";
 import { listRecentTakes, listSources } from "./curiosity/feed.js";
 import { runNuclearCuriosityTick } from "./curiosity/tick.js";
+import { listRecentReads } from "./curiosity/reads.js";
 import { openNuclearDb } from "./db.js";
 import {
   applyInitiativeLearning,
@@ -914,7 +915,7 @@ export class AshleyCore {
       owing: null;
       lastTake: {
         title: string;
-        depth: "excerpt";
+        depth: "full" | "excerpt";
         createdAt: string;
         ageMin: number;
       } | null;
@@ -922,8 +923,13 @@ export class AshleyCore {
   } {
     const sources = listSources(this.db, 100).filter((s) => s.enabled);
     const takes = listRecentTakes(this.db, 12);
+    const reads = listRecentReads(this.db, 100);
     const today = new Date().toISOString().slice(0, 10);
     const takesToday = takes.filter((t) => t.createdAt.startsWith(today)).length;
+    const readsToday = reads.filter((read) => read.retrievedAt.startsWith(today)).length;
+    const itemsTodayRow = this.db.prepare(
+      "SELECT COUNT(*) AS count FROM cur_items WHERE seen_at >= ?",
+    ).get(`${today}T00:00:00.000Z`) as { count?: number } | undefined;
     const last = takes[0] ?? null;
     const ageMin = last
       ? Math.max(0, (Date.now() - Date.parse(last.createdAt)) / 60_000)
@@ -933,8 +939,8 @@ export class AshleyCore {
       enabled: env.curiosityEnabled,
       sources: sources.length,
       sourcesEnabled: sources.length,
-      itemsToday: takesToday,
-      readToday: takesToday,
+      itemsToday: Number(itemsTodayRow?.count ?? 0),
+      readToday: readsToday,
       takesToday,
       takesRecent: takes.length,
       lastTakeAt: last?.createdAt ?? null,
@@ -946,7 +952,7 @@ export class AshleyCore {
         lastTake: last
           ? {
               title: last.title,
-              depth: "excerpt",
+              depth: last.evidenceKind === "read_record" ? "full" : "excerpt",
               createdAt: last.createdAt,
               ageMin,
             }
@@ -959,6 +965,8 @@ export class AshleyCore {
     sourcesScanned: number;
     itemsInserted: number;
     takesCreated: number;
+    readsCreated: number;
+    sourcesActivated: number;
     errors: string[];
   }> {
     return runNuclearCuriosityTick(this.db, ownerId);
@@ -1015,7 +1023,7 @@ export class AshleyCore {
         .prepare("SELECT COUNT(*) AS count FROM decision_log")
         .get();
       return {
-        ok: version >= 7,
+        ok: version >= 8,
         nuclearEnabled: true,
         dbPath: NUCLEAR_DB_PATH,
         schemaVersion: version,

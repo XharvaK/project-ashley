@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 import { env } from "../../env.js";
 import { REPO_CONFIG_PATH } from "../../paths.js";
+import { capabilityCanInfluence } from "../rollout/capabilities.js";
 import {
   insertItem,
   listSources,
@@ -11,6 +12,9 @@ import {
   upsertSource,
   type NuclearSourceKind,
 } from "./feed.js";
+import { performGroundedReads } from "./reads.js";
+import { fetchValidatedResource, type FetchLike, type ResolveHost } from "./network.js";
+import { processSourceProbation } from "./sources.js";
 
 type SourceConfig = {
   slug: string;
@@ -25,6 +29,8 @@ type TickResult = {
   sourcesScanned: number;
   itemsInserted: number;
   takesCreated: number;
+  readsCreated: number;
+  sourcesActivated: number;
   errors: string[];
 };
 
@@ -78,15 +84,13 @@ async function scanSource(
   source: ReturnType<typeof listSources>[number],
   ownerId: string,
   itemLimit: number,
+  dependencies: { fetcher?: FetchLike; resolve?: ResolveHost },
 ): Promise<{ itemsInserted: number; takesCreated: number }> {
-  const response = await fetch(source.url, {
-    headers: { accept: "application/rss+xml, application/atom+xml, text/xml" },
-    signal: AbortSignal.timeout(8_000),
+  const resource = await fetchValidatedResource(source.url, {
+    accept: "application/rss+xml, application/atom+xml, application/json, text/xml",
+    ...dependencies,
   });
-  if (!response.ok) {
-    throw new Error(`http_${response.status}`);
-  }
-  const body = await response.text();
+  const body = new TextDecoder().decode(resource.body);
   const items = parseFeed(body, itemLimit);
   let itemsInserted = 0;
   for (const item of items) {
@@ -114,11 +118,14 @@ async function scanSource(
 export async function runNuclearCuriosityTick(
   db: DatabaseSync,
   ownerId: string,
+  dependencies: { fetcher?: FetchLike; resolve?: ResolveHost } = {},
 ): Promise<TickResult> {
   const result: TickResult = {
     sourcesScanned: 0,
     itemsInserted: 0,
     takesCreated: 0,
+    readsCreated: 0,
+    sourcesActivated: 0,
     errors: [],
   };
   if (!env.curiosityEnabled) {
@@ -134,7 +141,7 @@ export async function runNuclearCuriosityTick(
   );
   for (const source of sources) {
     try {
-      const scanned = await scanSource(db, source, ownerId, itemLimit);
+      const scanned = await scanSource(db, source, ownerId, itemLimit, dependencies);
       result.sourcesScanned++;
       result.itemsInserted += scanned.itemsInserted;
       result.takesCreated += scanned.takesCreated;
@@ -144,6 +151,14 @@ export async function runNuclearCuriosityTick(
       result.errors.push(`${source.slug}:${message}`);
       markSourceFetched(db, source.id, message);
     }
+  }
+  const reads = await performGroundedReads(db, ownerId, dependencies);
+  result.readsCreated = reads.readsCreated;
+  result.errors.push(...reads.errors);
+  if (capabilityCanInfluence(db, "source_discovery")) {
+    const probation = await processSourceProbation(db, dependencies);
+    result.sourcesActivated = probation.activated;
+    result.errors.push(...probation.errors);
   }
   return result;
 }

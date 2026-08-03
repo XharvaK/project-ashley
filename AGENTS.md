@@ -84,10 +84,15 @@ Avoid solving problems in higher layers that naturally belong lower in the stack
 
 Continuous cognition is event-driven and defaults to `ASHLEY_COGNITION_MODE=observe`.
 `apply` is only a master ceiling; per-capability release gates still control
-influence. Schema v7 integrates each cognition job atomically, requires exact user-message
+influence. Schema v8 integrates each cognition job atomically, requires exact user-message
 provenance for automatic facts, uses leased edge-triggered urgent wakes, adds
 grounded refusal, and adds read-record provenance plus receipt-backed message
 redaction.
+
+Curiosity follows `scan -> rank -> choose -> fetch -> extract -> record -> form
+take -> consolidate -> motivate -> Thought`. Network retrieval is public
+HTTP(S) only, redirect- and DNS-revalidated, bounded to five redirects, twenty
+seconds, and two megabytes. Reading never sends directly.
 
 Observability: `GET /health`, `GET /nuclear/decisions?owner_id=`,
 `GET /nuclear/reflections?owner_id=`, `GET /nuclear/episodes?owner_id=`,

@@ -632,6 +632,92 @@ CREATE INDEX idx_nuclear_reservations_owner
   ON initiative_reservations (owner_id, created_at DESC);
 `;
 
+const MIGRATION_8 = `
+CREATE TABLE IF NOT EXISTS episodes (id INTEGER PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS cognitive_jobs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, owner_id TEXT NOT NULL,
+  kind TEXT NOT NULL, source_key TEXT NOT NULL UNIQUE,
+  payload_json TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'pending',
+  attempts INTEGER NOT NULL DEFAULT 0, available_at TEXT NOT NULL,
+  last_error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS cognitive_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_id INTEGER NOT NULL REFERENCES cognitive_jobs(id), owner_id TEXT NOT NULL,
+  kind TEXT NOT NULL, model TEXT, input_json TEXT NOT NULL DEFAULT '{}',
+  output_json TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL, error TEXT,
+  created_at TEXT NOT NULL, episode_id INTEGER REFERENCES episodes(id)
+);
+
+ALTER TABLE cognitive_jobs RENAME TO cognitive_jobs_v7;
+CREATE TABLE cognitive_jobs (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_id      TEXT NOT NULL,
+  kind          TEXT NOT NULL CHECK (kind IN ('consolidate_thread', 'consolidate_curiosity')),
+  source_key    TEXT NOT NULL UNIQUE,
+  payload_json  TEXT NOT NULL DEFAULT '{}',
+  status        TEXT NOT NULL DEFAULT 'pending'
+                  CHECK (status IN ('pending', 'running', 'completed', 'failed')),
+  attempts      INTEGER NOT NULL DEFAULT 0,
+  available_at  TEXT NOT NULL,
+  last_error    TEXT,
+  created_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL
+);
+INSERT INTO cognitive_jobs
+  (id, owner_id, kind, source_key, payload_json, status, attempts,
+   available_at, last_error, created_at, updated_at)
+SELECT id, owner_id, kind, source_key, payload_json, status, attempts,
+       available_at, last_error, created_at, updated_at
+FROM cognitive_jobs_v7;
+
+ALTER TABLE cognitive_runs RENAME TO cognitive_runs_v7;
+CREATE TABLE cognitive_runs (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_id      INTEGER NOT NULL REFERENCES cognitive_jobs(id),
+  owner_id    TEXT NOT NULL,
+  kind        TEXT NOT NULL,
+  model       TEXT,
+  input_json  TEXT NOT NULL DEFAULT '{}',
+  output_json TEXT NOT NULL DEFAULT '{}',
+  status      TEXT NOT NULL CHECK (status IN ('completed', 'failed')),
+  error       TEXT,
+  created_at  TEXT NOT NULL,
+  episode_id  INTEGER REFERENCES episodes(id)
+);
+INSERT INTO cognitive_runs
+  (id, job_id, owner_id, kind, model, input_json, output_json, status,
+   error, created_at, episode_id)
+SELECT id, job_id, owner_id, kind, model, input_json, output_json, status,
+       error, created_at, episode_id
+FROM cognitive_runs_v7;
+DROP TABLE cognitive_runs_v7;
+DROP TABLE cognitive_jobs_v7;
+CREATE INDEX idx_cognitive_jobs_due
+  ON cognitive_jobs (status, available_at, id);
+CREATE INDEX idx_cognitive_runs_owner
+  ON cognitive_runs (owner_id, created_at DESC);
+CREATE INDEX idx_cognitive_runs_episode ON cognitive_runs (episode_id);
+
+CREATE TABLE IF NOT EXISTS cur_source_candidates (
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  url                 TEXT NOT NULL,
+  url_key             TEXT NOT NULL UNIQUE,
+  title               TEXT NOT NULL,
+  kind                TEXT NOT NULL CHECK (kind IN ('rss', 'atom', 'json')),
+  interest            TEXT NOT NULL,
+  status              TEXT NOT NULL DEFAULT 'proposed'
+                        CHECK (status IN ('proposed', 'probation', 'active', 'rejected')),
+  successful_fetches  INTEGER NOT NULL DEFAULT 0,
+  originating_read_id INTEGER NOT NULL REFERENCES cur_reads(id),
+  last_error          TEXT,
+  created_at          TEXT NOT NULL,
+  updated_at          TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cur_source_candidates_status
+  ON cur_source_candidates (status, successful_fetches, updated_at);
+`;
+
 function userVersion(db: DatabaseSync): number {
   const row: unknown = db.prepare("PRAGMA user_version").get();
   if (typeof row !== "object" || row === null || !("user_version" in row)) {
@@ -714,6 +800,17 @@ export function migrate(db: DatabaseSync): void {
     try {
       db.exec(MIGRATION_7);
       db.exec("PRAGMA user_version = 7");
+      db.exec("COMMIT");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+  if (userVersion(db) < 8) {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.exec(MIGRATION_8);
+      db.exec("PRAGMA user_version = 8");
       db.exec("COMMIT");
     } catch (error) {
       db.exec("ROLLBACK");
