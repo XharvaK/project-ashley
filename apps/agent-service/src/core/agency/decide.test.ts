@@ -48,7 +48,18 @@ describe("nuclear agency decisions", () => {
 
   it("attaches reading claims for share from existing takes", () => {
     const base = decide(
-      [motivation("take", 80, "a feed take worth sharing")],
+      [
+        {
+          ...motivation("take", 80, "a feed take worth sharing"),
+          refType: "take",
+          refId: 1,
+        },
+        {
+          ...motivation("take", 70, "another grounded take"),
+          refType: "take",
+          refId: 2,
+        },
+      ],
       "proactive",
     );
     expect(base.kind).toBe("share");
@@ -57,10 +68,9 @@ describe("nuclear agency decisions", () => {
       { id: 2, title: "Two" },
       { id: 3, title: "Three" },
     ]);
-    expect(withClaims.authorizedClaims.readingTakeIds).toEqual([1, 2]);
+    expect(withClaims.authorizedClaims.readingTakeIds).toEqual([1]);
     expect(withClaims.authorizedClaims.readingTakeTitles).toEqual([
       "One",
-      "Two",
     ]);
   });
 });

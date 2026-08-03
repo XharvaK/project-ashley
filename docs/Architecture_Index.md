@@ -11,13 +11,24 @@ Discord DM → /chat/text → AshleyCore (Identity → State → Agency → Conv
 Proactive tick → Agency.decide → draft → commit
 Curiosity feed → nuclear.db takes → Agency motivations
 Committed proactive reaction → Reflection → bounded future Thought calibration
+Completed exchange → durable cognition job → episode → Mind State / affect / learning proposal
+Urgent concern or commitment → Discord wake poll → normal Agency send pipeline
 ```
 
 SQLite: `~/.composer-assistant/conversations/nuclear.db`.
 
 ## Module tree
 
-`apps/agent-service/src/core/` — identity, state, memory, curiosity, agency, reflection, honesty, conversation, writers, runtime.
+`apps/agent-service/src/core/` — identity, state, memory, cognition, learning,
+curiosity, agency, reflection, honesty, conversation, writers, runtime.
+
+Schema v4 adds grounded episodes with FTS5 retrieval, referenced Mind State
+items, bounded affect, durable cognition jobs/runs, verified fact provenance,
+edge-triggered urgent wake leases, Thought fallback auditing, and exact organic
+revision lineage. Cognition integration is atomic: a completed job produces one
+complete episode and all of its derived state, or none of them.
+`ASHLEY_COGNITION_MODE=observe` records evidence and proposals without allowing
+behavioral influence; `apply` enables the full loop.
 
 Shared utils: `apps/agent-service/src/lib/` (feed-parse, typography, metadata-echo, strip-markers).
 
@@ -28,6 +39,10 @@ Retired: voice, Telegram, habits, Moltbook, skills, legacy ChatService / `index.
 - `GET /health` → `nuclear` block
 - `GET /nuclear/decisions?owner_id=` → recent `decision_log` rows
 - `GET /nuclear/reflections?owner_id=` → immutable evidence + current proactive calibration
+- `GET /nuclear/episodes?owner_id=&query=` → grounded episodic recall
+- `GET /nuclear/cognition?owner_id=` → affect, urgency, jobs, and runs
+- `GET /nuclear/revisions?owner_id=` → proposed/applied identity and opinion growth
+- `POST /nuclear/revisions/revert` → restore the prior value for one applied revision
 
 ## Review
 

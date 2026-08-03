@@ -18,5 +18,3 @@ export const WORKSPACE_PATH =
   process.env.COMPOSER_WORKSPACE ?? join(__dirname, "..", "..", "..", "workspace");
 
 export const REPO_CONFIG_PATH = join(__dirname, "..", "..", "..", "config");
-
-export const AGENT_PORT = Number(process.env.AGENT_PORT ?? 3710);

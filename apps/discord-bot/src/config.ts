@@ -58,6 +58,24 @@ function loadWindowsUserEnvFallback(): void {
 
 loadWindowsUserEnvFallback();
 
+const numericWarnings: string[] = [];
+
+function numericEnv(
+  name: string,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return fallback;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < min || parsed > max) {
+    numericWarnings.push(`${name} invalid; using ${fallback}`);
+    return fallback;
+  }
+  return parsed;
+}
+
 export const config = {
   token: process.env.DISCORD_BOT_TOKEN ?? "",
   ownerId: process.env.DISCORD_OWNER_ID ?? "",
@@ -68,14 +86,17 @@ export const config = {
   guildId: process.env.DISCORD_GUILD_ID ?? "",
   agentUrl: process.env.AGENT_SERVICE_URL ?? "http://127.0.0.1:3710",
   proactiveEnabled: process.env.PROACTIVE_ENABLED !== "false",
-  proactiveCheckIntervalMin: Number(
-    process.env.PROACTIVE_CHECK_INTERVAL_MIN ?? 20,
+  proactiveCheckIntervalMin: numericEnv(
+    "PROACTIVE_CHECK_INTERVAL_MIN",
+    20,
+    1,
+    1440,
   ),
   giphyApiKey: process.env.GIPHY_API_KEY ?? "",
   tenorApiKey: process.env.TENOR_API_KEY ?? "",
   gifEnabled: process.env.GIF_ENABLED !== "false",
   // Slightly under the old 120s default — GIFs were too rare (Doc 2026-08-01).
-  gifCooldownSec: Number(process.env.GIF_COOLDOWN_SEC ?? 90),
+  gifCooldownSec: numericEnv("GIF_COOLDOWN_SEC", 90, 0, 86_400),
   // Default on for the 3–10s bubble pacing ship; set DISCORD_PACE_ENABLED=false to disable.
   paceEnabled: process.env.DISCORD_PACE_ENABLED !== "false",
   reactPolicyEnabled: process.env.DISCORD_REACT_POLICY_ENABLED !== "false",
@@ -87,5 +108,8 @@ export function validateConfig(): void {
   if (!config.ownerId) missing.push("DISCORD_OWNER_ID");
   if (missing.length) {
     throw new Error(`Missing env: ${missing.join(", ")}`);
+  }
+  for (const warning of numericWarnings) {
+    console.warn(`[discord-bot] ${warning}`);
   }
 }

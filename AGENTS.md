@@ -38,6 +38,8 @@ Discord DM → POST /chat/text → AshleyCore (Identity → State → Agency →
 Proactive tick → Agency.decide → draft → reserve / send / commit
 Curiosity feed → nuclear.db takes → Agency motivations
 Committed proactive reaction → Reflection → bounded future Thought calibration
+Completed exchange → cognitive job → grounded episode → Mind State / affect / bounded growth
+Urgent grounded concern → immediate Agency evaluation → reserve / send / commit
 ```
 
 Conceptual stack (Identity and Mind State are joint inputs to Thought — neither produces the other):
@@ -51,8 +53,8 @@ Mind State (dynamic)┘
 | Layer | Owns |
 |-------|------|
 | Identity | Stable who she is (values, boundaries, tastes, opinions) |
-| Mind State | Dynamic condition (energy, focus, goals, unresolved questions, recency) — embryonic in nuclear State fragments today |
-| Thought | Effort allocation, prioritization, reasoning (Agency `decide` + turn reasoning) |
+| Mind State | Dynamic condition, active goals/concerns/commitments, and grounded digital affect |
+| Thought | Effort allocation, evidence selection, prioritization, reasoning, completion, and authorization |
 | Reflection | Post-outcome interpretation and bounded future Thought calibration; no current-turn authority |
 | Expression | Intentional language (`workspace/prompts/nuclear/`) |
 | Rendering | Platform mechanics only (typography, bubbles, pacing) |
@@ -73,9 +75,14 @@ Implement it at the first layer that answers yes.
 
 Avoid solving problems in higher layers that naturally belong lower in the stack. Do not solve cognitive problems in Rendering. Do not solve rendering problems in Identity.
 
-A full Mind State / Cognition doc is deferred until feature pressure forces clearer boundaries.
+Continuous cognition is event-driven and defaults to `ASHLEY_COGNITION_MODE=observe`.
+Only `apply` allows episodes, Mind State, affect, or learning to influence behavior.
+Schema v4 integrates each cognition job atomically, requires exact user-message
+provenance for automatic facts, and uses leased edge-triggered urgent wakes.
 
-Observability: `GET /health`, `GET /nuclear/decisions?owner_id=`, `GET /nuclear/reflections?owner_id=`.
+Observability: `GET /health`, `GET /nuclear/decisions?owner_id=`,
+`GET /nuclear/reflections?owner_id=`, `GET /nuclear/episodes?owner_id=`,
+`GET /nuclear/cognition?owner_id=`, `GET /nuclear/revisions?owner_id=`.
 
 Voice, Telegram, habits, Moltbook, and skills were retired — Discord only.
 

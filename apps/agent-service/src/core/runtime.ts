@@ -3,11 +3,17 @@ import { env } from "../env.js";
 import { NUCLEAR_DB_PATH } from "../paths.js";
 import { decide, attachAuthorizedClaims } from "./agency/decide.js";
 import { collectMotivations } from "./agency/motivations.js";
+import { deliberateDecision } from "./agency/thought.js";
 import { logDecision, setDecisionOutcome } from "./agency/log.js";
 import { composeTurnContext } from "./context-composer.js";
 import { expressSpeak } from "./conversation/expression.js";
 import { seedIdentity } from "./identity/seed.js";
-import { forgetByTopic, listActiveFacts, upsertFact } from "./memory/facts.js";
+import {
+  forgetByTopic,
+  listActiveFacts,
+  listFactsMatchingTopic,
+  upsertFact,
+} from "./memory/facts.js";
 import {
   archiveActiveThread,
   insertMessage,
@@ -15,7 +21,6 @@ import {
 } from "./memory/threads.js";
 import { getState, patchState, setLastDecision } from "./state/store.js";
 import {
-  writeFromAssistantTurn,
   writeFromUserTurn,
 } from "./writers.js";
 import { listRecentTakes, listSources } from "./curiosity/feed.js";
@@ -28,7 +33,21 @@ import {
   processPendingReflectionEvents,
   recordInitiativeReaction,
 } from "./reflection/initiative.js";
-import type { DecisionKind, ReflectionMode } from "./types.js";
+import type { Decision, DecisionKind, ReflectionMode } from "./types.js";
+import { attachAffectLicense, getAffectiveState } from "./state/affect.js";
+import { enqueueCognitiveJob } from "./cognition/jobs.js";
+import {
+  claimUrgentMindState,
+  consumeUrgentWake,
+  hasUrgentMindState,
+  listActiveMindStateItems,
+  retryUrgentWake,
+} from "./state/mind-items.js";
+import { listRevisions, revertRevision } from "./learning/revisions.js";
+import {
+  forgetEpisodesByTopic,
+  previewEpisodeForget,
+} from "./memory/episodes.js";
 
 export type ReactiveChatInput = {
   message: string;
@@ -108,6 +127,32 @@ function decisionAngle(kind: DecisionKind): ProactiveDraft["angle"] {
   }
 }
 
+function logProactiveDecision(
+  db: DatabaseSync,
+  ownerId: string,
+  decision: Decision,
+  urgentItemId: number | null,
+  outcomeText?: string,
+): number {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const decisionId = logDecision(db, {
+      ownerId,
+      channel: "proactive",
+      trigger: "proactive",
+      decision,
+      ...(outcomeText !== undefined ? { outcomeText } : {}),
+    });
+    if (urgentItemId !== null) consumeUrgentWake(db, urgentItemId);
+    setLastDecision(db, ownerId, decisionId);
+    db.exec("COMMIT");
+    return decisionId;
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
 function kvKey(ownerId: string): string {
   return `nuclear.proactive.paused.${ownerId}`;
 }
@@ -163,7 +208,7 @@ export class AshleyCore {
       });
       const written = writeFromUserTurn(this.db, input.ownerId, message);
       if (written.forgotTopic) {
-        forgetByTopic(this.db, input.ownerId, written.forgotTopic);
+        this.forget(input.ownerId, written.forgotTopic, true);
       }
       if (written.sleepSignal) {
         patchState(this.db, input.ownerId, {
@@ -178,6 +223,11 @@ export class AshleyCore {
         message,
       );
       let decision = decide(motivations, "reactive");
+      decision = await deliberateDecision(decision, motivations, "reactive");
+      decision = attachAffectLicense(
+        decision,
+        getAffectiveState(this.db, input.ownerId),
+      );
       const recentTakes = listRecentTakes(this.db, 6);
       decision = attachAuthorizedClaims(decision, recentTakes);
       const decisionId = logDecision(this.db, {
@@ -213,14 +263,25 @@ export class AshleyCore {
       const rendered = await expressSpeak(turn, decision, message, "discord");
       const text = rendered.text.trim();
       if (text) {
-        insertMessage(this.db, {
+        const assistantMessageId = insertMessage(this.db, {
           threadId: turn.threadId,
           ownerId: input.ownerId,
           role: "assistant",
           text,
           channel: input.channel,
         });
-        writeFromAssistantTurn(this.db, input.ownerId, text);
+        enqueueCognitiveJob(this.db, {
+          ownerId: input.ownerId,
+          kind: "consolidate_thread",
+          sourceKey: `thread:${turn.threadId}:message:${assistantMessageId}`,
+          payload: {
+            threadId: turn.threadId,
+            throughMessageId: assistantMessageId,
+          },
+          availableAt: new Date(
+            Date.now() + env.cognitionIdleConsolidationMin * 60_000,
+          ).toISOString(),
+        });
       }
       patchState(this.db, input.ownerId, {
         availability: "available",
@@ -257,107 +318,123 @@ export class AshleyCore {
     if (getState(this.db, ownerId).availability !== "available") {
       return { shouldSend: false, reason: "unavailable" };
     }
-    const motivations = applyInitiativeLearning(
-      this.db,
-      ownerId,
-      collectMotivations(this.db, ownerId, "proactive"),
-      this.reflectionMode,
-    );
-    let decision = decide(motivations, "proactive");
-    decision = attachLearningSnapshot(decision, motivations);
-    const recentTakes = listRecentTakes(this.db, 6);
-    decision = attachAuthorizedClaims(decision, recentTakes);
-    if (!decision.cognitiveAllocation.shouldSpeak || decision.score < 25) {
-      const decisionId = logDecision(this.db, {
-        ownerId,
-        channel: "proactive",
-        trigger: "proactive",
-        decision,
-        outcomeText: "",
-      });
-      setLastDecision(this.db, ownerId, decisionId);
-      return { shouldSend: false, reason: decision.reason };
-    }
-
-    const decisionId = logDecision(this.db, {
-      ownerId,
-      channel: "proactive",
-      trigger: "proactive",
-      decision,
-    });
-    decision.id = decisionId;
-    setLastDecision(this.db, ownerId, decisionId);
-
-    const candidate =
-      motivations.find((motivation) =>
-        decision.motivationIds.includes(motivation.id ?? -1),
-      ) ?? motivations[0];
-    if (!candidate) {
-      setDecisionOutcome(this.db, decisionId, "");
-      return { shouldSend: false, reason: "no_material" };
-    }
-    const materialKey = `${candidate.kind}:${candidate.refId ?? candidate.id ?? Date.now()}`;
-    const priorReservation: unknown = this.db
-      .prepare(
-        `SELECT id
-         FROM initiative_reservations
-         WHERE owner_id = ? AND material_key = ?
-         LIMIT 1`,
-      )
-      .get(ownerId, materialKey);
-    if (isRow(priorReservation)) {
-      setDecisionOutcome(this.db, decisionId, "");
-      return { shouldSend: false, reason: "material_already_reserved" };
-    }
-    const userMessage = `Proactive material:\n${candidate.summary}`;
-    const turn = composeTurnContext(this.db, ownerId, {
-      channel: "proactive",
-      userMessage,
-      decision,
-    });
-    this.activeOwners.add(ownerId);
+    const urgentItem = env.cognitionMode === "apply"
+      ? claimUrgentMindState(this.db, ownerId)
+      : null;
+    let decisionLogged = false;
     try {
-      const rendered = await expressSpeak(
-        turn,
-        decision,
-        userMessage,
-        "proactive",
+      const motivations = applyInitiativeLearning(
+        this.db,
+        ownerId,
+        collectMotivations(this.db, ownerId, "proactive"),
+        this.reflectionMode,
       );
-      if (rendered.model === "offline" || !rendered.text.trim()) {
-        setDecisionOutcome(this.db, decisionId, "");
-        return { shouldSend: false, reason: "mistral_unavailable" };
-      }
-      const angle = decisionAngle(decision.kind);
-      const result = this.db
-        .prepare(
-          `INSERT INTO initiative_reservations
-             (owner_id, decision_id, text, thread_id, angle, reason,
-              material_key, discord_message_id, created_at, committed_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL)`,
-        )
-        .run(
+      let decision = decide(motivations, "proactive");
+      decision = await deliberateDecision(decision, motivations, "proactive");
+      decision = attachAffectLicense(
+        decision,
+        getAffectiveState(this.db, ownerId),
+      );
+      decision = attachLearningSnapshot(decision, motivations);
+      const recentTakes = listRecentTakes(this.db, 6);
+      decision = attachAuthorizedClaims(decision, recentTakes);
+      if (!decision.cognitiveAllocation.shouldSpeak || decision.score < 25) {
+        const decisionId = logProactiveDecision(
+          this.db,
           ownerId,
-          decisionId,
-          rendered.text.trim(),
-          turn.threadId,
-          angle,
-          decision.reason,
-          materialKey,
-          new Date().toISOString(),
+          decision,
+          urgentItem?.id ?? null,
+          "",
         );
-      const reservationId = Number(result.lastInsertRowid);
-      return {
-        shouldSend: true,
-        text: rendered.text.trim(),
-        threadId: turn.threadId,
-        angle,
-        reason: decision.reason,
-        candidateKind: candidate.kind,
-        materialKey,
-        reservationId,
-      };
-    } finally {
-      this.activeOwners.delete(ownerId);
+        decisionLogged = true;
+        return { shouldSend: false, reason: decision.reason };
+      }
+
+      const decisionId = logProactiveDecision(
+        this.db,
+        ownerId,
+        decision,
+        urgentItem?.id ?? null,
+      );
+      decisionLogged = true;
+      decision.id = decisionId;
+
+      const candidate =
+        motivations.find((motivation) =>
+          decision.motivationIds.includes(motivation.id ?? -1),
+        ) ?? motivations[0];
+      if (!candidate) {
+        setDecisionOutcome(this.db, decisionId, "");
+        return { shouldSend: false, reason: "no_material" };
+      }
+      const materialKey = `${candidate.kind}:${candidate.refId ?? candidate.id ?? Date.now()}`;
+      const priorReservation: unknown = this.db
+        .prepare(
+          `SELECT id
+           FROM initiative_reservations
+           WHERE owner_id = ? AND material_key = ?
+           LIMIT 1`,
+        )
+        .get(ownerId, materialKey);
+      if (isRow(priorReservation)) {
+        setDecisionOutcome(this.db, decisionId, "");
+        return { shouldSend: false, reason: "material_already_reserved" };
+      }
+      const userMessage = `Proactive material:\n${candidate.summary}`;
+      const turn = composeTurnContext(this.db, ownerId, {
+        channel: "proactive",
+        userMessage,
+        decision,
+      });
+      this.activeOwners.add(ownerId);
+      try {
+        const rendered = await expressSpeak(
+          turn,
+          decision,
+          userMessage,
+          "proactive",
+        );
+        if (rendered.model === "offline" || !rendered.text.trim()) {
+          setDecisionOutcome(this.db, decisionId, "");
+          return { shouldSend: false, reason: "mistral_unavailable" };
+        }
+        const angle = decisionAngle(decision.kind);
+        const result = this.db
+          .prepare(
+            `INSERT INTO initiative_reservations
+               (owner_id, decision_id, text, thread_id, angle, reason,
+                material_key, discord_message_id, created_at, committed_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL)`,
+          )
+          .run(
+            ownerId,
+            decisionId,
+            rendered.text.trim(),
+            turn.threadId,
+            angle,
+            decision.reason,
+            materialKey,
+            new Date().toISOString(),
+          );
+        const reservationId = Number(result.lastInsertRowid);
+        return {
+          shouldSend: true,
+          text: rendered.text.trim(),
+          threadId: turn.threadId,
+          angle,
+          reason: decision.reason,
+          candidateKind: candidate.kind,
+          materialKey,
+          reservationId,
+        };
+      } finally {
+        this.activeOwners.delete(ownerId);
+      }
+    } catch (error) {
+      if (urgentItem && !decisionLogged) {
+        retryUrgentWake(this.db, urgentItem.id);
+      }
+      throw error;
     }
   }
 
@@ -441,12 +518,21 @@ export class AshleyCore {
       const threadId = stringValue(row.thread_id, input?.threadId ?? "");
       const messageId = input?.discordMessageId ?? discordMessageId ?? "";
       if (!text || !threadId || !messageId) return;
-      insertMessage(this.db, {
+      const assistantMessageId = insertMessage(this.db, {
         threadId,
         ownerId,
         role: "assistant",
         text,
         channel: "discord",
+      });
+      enqueueCognitiveJob(this.db, {
+        ownerId,
+        kind: "consolidate_thread",
+        sourceKey: `thread:${threadId}:message:${assistantMessageId}`,
+        payload: { threadId, throughMessageId: assistantMessageId },
+        availableAt: new Date(
+          Date.now() + env.cognitionIdleConsolidationMin * 60_000,
+        ).toISOString(),
       });
       this.db.prepare(
         `UPDATE initiative_reservations
@@ -584,6 +670,7 @@ export class AshleyCore {
       value,
       confidence: 1,
       importance: 95,
+      origin: "manual",
     });
     return { id, key, value, category: "pinned" };
   }
@@ -611,13 +698,20 @@ export class AshleyCore {
     topic: string,
     confirmed: boolean,
   ): { preview: string[]; deleted: number } {
-    const facts = listActiveFacts(this.db, ownerId, 100).filter((fact) => {
-      const hay = `${fact.key} ${fact.value} ${fact.category}`.toLowerCase();
-      return hay.includes(topic.trim().toLowerCase());
-    });
+    const facts = listFactsMatchingTopic(this.db, ownerId, topic);
     const preview = facts.map((fact) => `${fact.key}: ${fact.value}`);
+    preview.push(...previewEpisodeForget(this.db, ownerId, topic));
     if (!confirmed) return { preview, deleted: 0 };
-    return { preview, deleted: forgetByTopic(this.db, ownerId, topic) };
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const factsDeleted = forgetByTopic(this.db, ownerId, topic);
+      const episodesDeleted = forgetEpisodesByTopic(this.db, ownerId, topic);
+      this.db.exec("COMMIT");
+      return { preview, deleted: factsDeleted + episodesDeleted };
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   recordReaction(
@@ -668,6 +762,50 @@ export class AshleyCore {
       this.reflectionMode,
       limit,
     );
+  }
+
+  hasUrgentCognition(ownerId: string): boolean {
+    if (
+      env.cognitionMode !== "apply" ||
+      !env.proactiveEnabled ||
+      this.isProactivePaused(ownerId) ||
+      this.activeOwners.has(ownerId) ||
+      getState(this.db, ownerId).availability !== "available"
+    ) {
+      return false;
+    }
+    const status = this.getProactiveStatus(ownerId);
+    return status.sentToday < status.maxPerDay &&
+      hasUrgentMindState(this.db, ownerId);
+  }
+
+  getCognitionOverview(ownerId: string) {
+    return {
+      mode: env.cognitionMode,
+      affect: getAffectiveState(this.db, ownerId),
+      mindState: listActiveMindStateItems(this.db, ownerId),
+      urgent: this.hasUrgentCognition(ownerId),
+      jobs: this.db.prepare(
+        `SELECT id, kind, source_key, status, attempts, available_at,
+                last_error, created_at, updated_at
+         FROM cognitive_jobs WHERE owner_id = ? ORDER BY id DESC LIMIT 30`,
+      ).all(ownerId),
+      runs: this.db.prepare(
+          `SELECT id, job_id, kind, model, status, error, episode_id, created_at
+         FROM cognitive_runs WHERE owner_id = ? ORDER BY id DESC LIMIT 30`,
+      ).all(ownerId),
+    };
+  }
+
+  getRevisions(ownerId: string, limit = 50) {
+    return {
+      mode: env.cognitionMode,
+      revisions: listRevisions(this.db, ownerId, limit),
+    };
+  }
+
+  revertRevision(ownerId: string, revisionId: number): boolean {
+    return revertRevision(this.db, ownerId, revisionId);
   }
 
   recordGifFeedback(
@@ -815,6 +953,7 @@ export class AshleyCore {
     dbPath: string;
     schemaVersion: number;
     reflectionMode: ReflectionMode;
+    cognitionMode: "observe" | "apply";
     identityEntries: number;
     decisions: number;
   } {
@@ -834,11 +973,12 @@ export class AshleyCore {
         .prepare("SELECT COUNT(*) AS count FROM decision_log")
         .get();
       return {
-        ok: version >= 1,
+        ok: version >= 4,
         nuclearEnabled: true,
         dbPath: NUCLEAR_DB_PATH,
         schemaVersion: version,
         reflectionMode: this.reflectionMode,
+        cognitionMode: env.cognitionMode,
         identityEntries:
           isRow(identityRow) && typeof identityRow.count === "number"
             ? identityRow.count
@@ -855,6 +995,7 @@ export class AshleyCore {
         dbPath: NUCLEAR_DB_PATH,
         schemaVersion: 0,
         reflectionMode: this.reflectionMode,
+        cognitionMode: env.cognitionMode,
         identityEntries: 0,
         decisions: 0,
       };

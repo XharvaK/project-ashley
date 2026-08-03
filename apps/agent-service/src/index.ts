@@ -6,6 +6,10 @@ import {
   startNuclearCuriosityLoop,
   stopNuclearCuriosityLoop,
 } from "./core/curiosity/tick.js";
+import {
+  startCognitionLoop,
+  stopCognitionLoop,
+} from "./core/cognition/worker.js";
 
 const manager = new AgentManager();
 
@@ -18,6 +22,10 @@ async function main(): Promise<void> {
     manager.core.getDatabase(),
     env.memoryOwnerId || env.discordOwnerId || "default",
   );
+  startCognitionLoop(
+    manager.core.getDatabase(),
+    env.memoryOwnerId || env.discordOwnerId || "default",
+  );
   console.log(
     `[agent-service] nuclear core enabled db=${manager.core.getHealth().dbPath}`,
   );
@@ -25,6 +33,7 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string) => {
     console.log(`[agent-service] ${signal}`);
     stopNuclearCuriosityLoop();
+    stopCognitionLoop();
     await manager.shutdown();
     server.close();
     process.exit(0);

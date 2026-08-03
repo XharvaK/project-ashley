@@ -48,8 +48,21 @@ export async function expressSpeak(
         takeTitles: claims.readingTakeTitles,
       }).note
     : emptyActivityLicenseNote();
+  const affect = decision.affectLicense;
+  const affectNote = affect.permitted
+    ? [
+        "Grounded affect is licensed for this turn.",
+        `Current state: valence ${affect.valence.toFixed(2)}, activation ${affect.activation.toFixed(2)}, openness ${affect.openness.toFixed(2)}, tension ${affect.tension.toFixed(2)}.`,
+        `Cause: ${affect.reason}`,
+        "Natural first-person feeling language is allowed when relevant. Do not claim biology or proven equivalence to human phenomenology.",
+      ].join("\n")
+    : "No grounded affect claim is licensed for this turn. Do not invent a feeling to improve the message.";
 
-  const system = [turn.systemPrompt, `## Activity license\n${licenseNote}`]
+  const system = [
+    turn.systemPrompt,
+    `## Activity license\n${licenseNote}`,
+    `## Affect license\n${affectNote}`,
+  ]
     .filter(Boolean)
     .join("\n\n");
   const messages: ChatMessage[] = [
@@ -97,6 +110,7 @@ export async function expressSpeak(
   const finalized = finalizeHonesty({
     text: wording.text,
     readingLicensed: wording.readingLicensed,
+    affectLicensed: affect.permitted,
   });
   return applyRendering({
     text: finalized.text,

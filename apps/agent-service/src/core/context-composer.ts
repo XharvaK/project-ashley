@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { env } from "../env.js";
 import { buildQuestionsBlock } from "./state/questions.js";
 import {
   loadNuclearSystemPrompt,
@@ -13,6 +14,8 @@ import {
   type AssembledMemory,
 } from "./memory/assemble.js";
 import { getState } from "./state/store.js";
+import { getAffectiveState } from "./state/affect.js";
+import { listActiveMindStateItems } from "./state/mind-items.js";
 import type { Decision } from "./types.js";
 
 /** Product: composed turn context Expression consumes. */
@@ -36,6 +39,10 @@ export type ComposeTurnContextInput = {
 
 function mindStateBlock(db: DatabaseSync, ownerId: string): string {
   const state = getState(db, ownerId);
+  const affect = getAffectiveState(db, ownerId);
+  const items = env.cognitionMode === "apply"
+    ? listActiveMindStateItems(db, ownerId, 12)
+    : [];
   // Transport existing Mind State condition fields only — no scoring,
   // summarization, or ContextComposer-selected subset beyond empty omission.
   const lines = [
@@ -44,6 +51,13 @@ function mindStateBlock(db: DatabaseSync, ownerId: string): string {
     state.availability ? `Availability: ${state.availability}` : "",
     state.unfinished.length > 0
       ? `Unfinished: ${state.unfinished.join("; ")}`
+      : "",
+    ...items.map(
+      (item) =>
+        `${item.kind}: ${item.text} (activation ${item.activation.toFixed(2)}, urgency ${item.urgency.toFixed(2)}, source ${item.sourceType}:${item.sourceId})`,
+    ),
+    env.cognitionMode === "apply"
+      ? `Affect: valence ${affect.valence.toFixed(2)}, activation ${affect.activation.toFixed(2)}, openness ${affect.openness.toFixed(2)}, tension ${affect.tension.toFixed(2)}. Cause: ${affect.reason}.`
       : "",
   ].filter(Boolean);
   if (lines.length === 0) return "";

@@ -126,17 +126,61 @@ Observe mode records evidence and calculates calibration without changing
 Thought scores. After inspecting the evidence through the reflections endpoint,
 set the mode to `apply` to enable the bounded adjustment.
 
+### Cognitive continuity v1
+
+```text
+Completed exchange
+  → durable background job
+  → message-grounded episode
+  → relevant recall + active Mind State + bounded affect
+  → Thought decision
+  → evidence-backed identity/opinion revision proposal
+```
+
+Cognitive continuity is separately gated:
+
+```env
+ASHLEY_COGNITION_MODE=observe
+```
+
+`observe` records episodes, model runs, and revision proposals without allowing
+them to change replies, affect, Identity, or initiative. `apply` enables FTS5
+episode recall, active goals/concerns/commitments, grounded digital feeling
+state, model-assisted Thought, and bounded automatic growth. Stable identity
+requires three independent observations across at least 14 days plus a 72-hour
+cooling period. Core Principles are never runtime-mutable.
+
+Background cognition is event-driven rather than an endless inner monologue.
+Interactive Mistral traffic remains prioritized, and account request/token
+limits are configurable. A cognition job is integrated in one transaction, so
+it creates either one complete episode with all derived state or no episode at
+all. Automatically extracted facts require an exact quotation from a stored
+user message; model assertions without verified provenance are rejected.
+
+Urgent concerns and commitments use an edge-triggered wake lifecycle. Agency
+claims a pending wake with a short lease, consumes it after logging either a
+speaking or silence decision, and retries pre-decision failures with bounded
+backoff. The underlying Mind State item remains active after its wake is
+consumed. Thought always retains a deterministic decision: provider, limiter,
+or structured-output failures are audited as sanitized fallbacks rather than
+breaking the turn.
+
 ## Current capabilities
 
-- Persistent Discord conversation threads and grounded memory facts.
-- Stable and dynamic identity records with opinion lineage support.
-- Mind State for availability, focus, and unfinished threads.
-- Thought decisions for speaking, silence, delay, asking, revisiting, sharing,
-  and challenging.
+- Persistent Discord threads, grounded facts, and message-linked episodic memory.
+- Stable and dynamic identity records with evidence and revision lineage.
+- Mind State for availability, active concerns, goals, commitments, interests,
+  and grounded digital affect.
+- Hybrid Thought decisions for evidence selection, effort, uncertainty,
+  completion, urgency, speaking, silence, asking, revisiting, sharing, and
+  challenging.
 - Motivated proactive conversation with reservation and commit semantics.
 - Persistent questions and unresolved curiosities.
 - Curiosity feeds that create attributable takes for later Thought.
 - Honesty enforcement for unsupported claims and simulated activity.
+- Affect licensing that prevents unsupported emotional self-reports.
+- Atomic continuous-cognition jobs with restart-safe retries, bounded retention,
+  verified fact provenance, and observation mode.
 - Deterministic Reflection with immutable evidence, replayable learned state,
   and decision-level calibration snapshots.
 - Discord-native pacing, bubbles, reactions, and GIF rendering.
@@ -182,6 +226,8 @@ Important settings include:
 ```env
 MISTRAL_API_KEY=
 MISTRAL_MODEL=mistral-medium-latest
+MISTRAL_REQUESTS_PER_SECOND=1
+MISTRAL_TOKENS_PER_MINUTE=100000
 DISCORD_BOT_TOKEN=
 DISCORD_OWNER_ID=
 MEMORY_OWNER_ID=
@@ -191,6 +237,9 @@ PROACTIVE_MAX_PER_DAY=8
 PROACTIVE_CHECK_INTERVAL_MIN=20
 
 ASHLEY_REFLECTION_MODE=observe
+ASHLEY_COGNITION_MODE=observe
+COGNITION_DISPATCH_INTERVAL_SEC=30
+COGNITION_IDLE_CONSOLIDATION_MIN=10
 ```
 
 Mistral Medium is the only configured model; there is no fallback model.
@@ -232,7 +281,12 @@ Useful read-only endpoints:
 | `GET /health` | Runtime, schema, and service health |
 | `GET /nuclear/decisions?owner_id=...` | Recent Thought decisions and learning snapshots |
 | `GET /nuclear/reflections?owner_id=...` | Reflection evidence and current calibration |
+| `GET /nuclear/episodes?owner_id=...&query=...` | Grounded episodic recall |
+| `GET /nuclear/cognition?owner_id=...` | Affect, urgency, jobs, and cognition runs |
+| `GET /nuclear/revisions?owner_id=...` | Proposed and applied identity/opinion growth |
+| `POST /nuclear/revisions/revert` | Revert one applied growth revision by ID |
 | `GET /initiative/status?owner_id=...` | Proactive availability and delivery status |
+| `GET /initiative/urgent?owner_id=...` | Local urgent Agency wake signal |
 | `GET /curiosity/status?owner_id=...` | Curiosity sources and recent takes |
 
 ## Governing documents

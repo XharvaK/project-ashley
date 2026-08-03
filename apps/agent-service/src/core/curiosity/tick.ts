@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 import { env } from "../../env.js";
 import { REPO_CONFIG_PATH } from "../../paths.js";
-import { writeOpinionFromTake } from "../writers.js";
 import {
   insertItem,
   insertTake,
@@ -127,13 +126,6 @@ async function scanSource(
     if (takeId !== null) {
       takesCreated++;
       logProvenance(db, "take", `${ownerId}:${source.slug}`, itemId);
-      writeOpinionFromTake(
-        db,
-        ownerId,
-        source.interest,
-        takeText,
-        item.title,
-      );
     }
   }
   return { itemsInserted, takesCreated };

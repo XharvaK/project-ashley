@@ -14,6 +14,7 @@ function fakeMessage(params: {
   content?: string;
   attachments?: FakeAttachment[];
   stickers?: string[];
+  embeds?: Array<{ url?: string | null }>;
 }): Message {
   return {
     content: params.content ?? "",
@@ -26,6 +27,7 @@ function fakeMessage(params: {
     stickers: new Map(
       (params.stickers ?? []).map((name, i) => [String(i), { name }]),
     ),
+    embeds: params.embeds ?? [],
   } as unknown as Message;
 }
 
@@ -127,5 +129,13 @@ describe("describeIntake", () => {
 
   it("stays empty when there is genuinely nothing", () => {
     assert.equal(describeIntake(fakeMessage({})).text, "");
+  });
+
+  it("uses the first secure URL from an embed-only paste", () => {
+    const intake = describeIntake(fakeMessage({
+      embeds: [{ url: "https://example.com/article" }],
+    }));
+    assert.equal(intake.text, "https://example.com/article");
+    assert.equal(intake.hasMedia, false);
   });
 });

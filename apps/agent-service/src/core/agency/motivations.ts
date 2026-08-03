@@ -1,9 +1,11 @@
 import type { DatabaseSync } from "node:sqlite";
+import { env } from "../../env.js";
 import { listOpenQuestions } from "../state/questions.js";
 import { listRecentTakes } from "../curiosity/feed.js";
 import { listActiveFacts } from "../memory/facts.js";
 import { getState } from "../state/store.js";
 import { listOpinions } from "../identity/store.js";
+import { listActiveMindStateItems } from "../state/mind-items.js";
 import type {
   Motivation,
   MotivationKind,
@@ -154,6 +156,31 @@ export function collectMotivations(
         unfinished,
         "state",
         ownerId,
+      ),
+    );
+  }
+
+  for (const item of env.cognitionMode === "apply"
+    ? listActiveMindStateItems(db, ownerId, 12)
+    : []) {
+    const kind: MotivationKind =
+      item.kind === "unfinished" || item.kind === "commitment"
+        ? "unfinished"
+        : item.kind === "interest"
+          ? "identity"
+          : "callback";
+    motivations.push(
+      persistMotivation(
+        db,
+        ownerId,
+        kind,
+        Math.max(
+          20,
+          Math.min(100, item.activation * 55 + item.urgency * 45),
+        ),
+        item.text,
+        "mind_state",
+        item.id,
       ),
     );
   }

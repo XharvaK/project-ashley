@@ -24,4 +24,24 @@ describe("nuclear honesty finalizer", () => {
   it("does not treat Turkish text as an English activity claim", () => {
     expect(claimsOwnActivity("okudum bir makale")).toBe(false);
   });
+
+  it("removes an emotional self-report without grounded affect", () => {
+    const result = finalizeHonesty({
+      text: "i'm excited about this. the design is finally coherent.",
+      readingLicensed: false,
+      affectLicensed: false,
+    });
+    expect(result.flooredAffect).toBe(true);
+    expect(result.text).toBe("the design is finally coherent.");
+  });
+
+  it("keeps a grounded emotional self-report", () => {
+    const result = finalizeHonesty({
+      text: "i feel hopeful about this direction.",
+      readingLicensed: false,
+      affectLicensed: true,
+    });
+    expect(result.flooredAffect).toBe(false);
+    expect(result.text).toContain("hopeful");
+  });
 });

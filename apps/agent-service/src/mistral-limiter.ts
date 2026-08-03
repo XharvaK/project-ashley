@@ -4,6 +4,8 @@
  * cannot starve a reply.
  */
 
+import { env } from "./env.js";
+
 export type Lane = "interactive" | "background";
 
 type Waiter = {
@@ -20,8 +22,28 @@ const INTERACTIVE_RESERVED = 1;
 let inFlight = 0;
 let interactiveInFlight = 0;
 const queue: Waiter[] = [];
+const requestStarts: number[] = [];
+const tokenUsage: Array<{ at: number; tokens: number }> = [];
+let rateTimer: ReturnType<typeof setTimeout> | null = null;
+
+function pruneUsage(now = Date.now()): void {
+  while (requestStarts.length > 0 && requestStarts[0]! <= now - 1_000) {
+    requestStarts.shift();
+  }
+  while (tokenUsage.length > 0 && tokenUsage[0]!.at <= now - 60_000) {
+    tokenUsage.shift();
+  }
+}
+
+function withinRateBudget(): boolean {
+  pruneUsage();
+  const usedTokens = tokenUsage.reduce((sum, item) => sum + item.tokens, 0);
+  return requestStarts.length < env.mistralRequestsPerSecond &&
+    usedTokens < env.mistralTokensPerMinute;
+}
 
 function canStart(lane: Lane): boolean {
+  if (!withinRateBudget()) return false;
   if (inFlight >= MAX_CONCURRENCY) return false;
   if (lane === "interactive") return true;
   // Keep one slot free for interactive when possible.
@@ -39,7 +61,10 @@ function pump(): void {
         : canStart(queue[0]!.lane)
           ? 0
           : -1;
-    if (idx < 0) return;
+    if (idx < 0) {
+      schedulePump();
+      return;
+    }
     const [waiter] = queue.splice(idx, 1);
     if (!waiter) return;
     if (waiter.signal?.aborted) {
@@ -47,12 +72,30 @@ function pump(): void {
       continue;
     }
     inFlight += 1;
+    requestStarts.push(Date.now());
     if (waiter.lane === "interactive") interactiveInFlight += 1;
     if (waiter.onAbort && waiter.signal) {
       waiter.signal.removeEventListener("abort", waiter.onAbort);
     }
     waiter.resolve();
   }
+}
+
+function schedulePump(): void {
+  if (rateTimer || queue.length === 0) return;
+  pruneUsage();
+  const now = Date.now();
+  const requestWait = requestStarts.length >= env.mistralRequestsPerSecond
+    ? Math.max(25, requestStarts[0]! + 1_000 - now)
+    : 25;
+  const usedTokens = tokenUsage.reduce((sum, item) => sum + item.tokens, 0);
+  const tokenWait = usedTokens >= env.mistralTokensPerMinute && tokenUsage[0]
+    ? Math.max(25, tokenUsage[0].at + 60_000 - now)
+    : 25;
+  rateTimer = setTimeout(() => {
+    rateTimer = null;
+    pump();
+  }, Math.max(requestWait, tokenWait));
 }
 
 export async function acquireLane(
@@ -67,6 +110,7 @@ export async function acquireLane(
 
   if (canStart(lane)) {
     inFlight += 1;
+    requestStarts.push(Date.now());
     if (lane === "interactive") interactiveInFlight += 1;
   } else {
     await new Promise<void>((resolve, reject) => {
@@ -81,6 +125,7 @@ export async function acquireLane(
       waiter.onAbort = onAbort;
       if (signal) signal.addEventListener("abort", onAbort, { once: true });
       queue.push(waiter);
+      schedulePump();
     });
   }
 
@@ -96,6 +141,12 @@ export async function acquireLane(
   };
 }
 
+export function recordTokenUsage(tokens: number): void {
+  if (!Number.isFinite(tokens) || tokens <= 0) return;
+  tokenUsage.push({ at: Date.now(), tokens });
+  pruneUsage();
+}
+
 /** Test helpers */
 export function limiterStats(): {
   inFlight: number;
@@ -109,4 +160,8 @@ export function resetLimiterForTests(): void {
   inFlight = 0;
   interactiveInFlight = 0;
   queue.length = 0;
+  requestStarts.length = 0;
+  tokenUsage.length = 0;
+  if (rateTimer) clearTimeout(rateTimer);
+  rateTimer = null;
 }

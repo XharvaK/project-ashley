@@ -1,10 +1,12 @@
 import type { DatabaseSync } from "node:sqlite";
+import { env } from "../../env.js";
 import {
   getHotMessages,
   resolveActiveThread,
   type MemoryMessage,
 } from "./threads.js";
 import { listActiveFacts, type MemoryFact } from "./facts.js";
+import { retrieveEpisodes, type Episode } from "./episodes.js";
 
 /** Memory-only retrieval. Identity / Mind State / opinions belong to ContextComposer. */
 export type AssembledMemory = {
@@ -12,6 +14,7 @@ export type AssembledMemory = {
   threadId: string;
   hotMessages: MemoryMessage[];
   facts: MemoryFact[];
+  episodes: Episode[];
 };
 
 export function assembleMemoryBlock(
@@ -22,6 +25,9 @@ export function assembleMemoryBlock(
   const threadId = resolveActiveThread(db, ownerId, "discord");
   const hotMessages = getHotMessages(db, threadId, 12);
   const facts = listActiveFacts(db, ownerId, 32);
+  const episodes = env.cognitionMode === "apply"
+    ? retrieveEpisodes(db, ownerId, userMessage ?? "", 6)
+    : [];
 
   const factLines = facts.map(
     (fact) =>
@@ -35,6 +41,15 @@ export function assembleMemoryBlock(
     : "";
 
   const sections = [
+    episodes.length > 0
+      ? [
+          "## Relevant remembered episodes",
+          ...episodes.map(
+            (episode) =>
+              `- [episode:${episode.id}] ${episode.summary}${episode.unresolved ? " [unresolved]" : ""}`,
+          ),
+        ].join("\n")
+      : "",
     factLines.length > 0
       ? ["## Durable memory", ...factLines].join("\n")
       : "",
@@ -49,5 +64,6 @@ export function assembleMemoryBlock(
     threadId,
     hotMessages,
     facts,
+    episodes,
   };
 }

@@ -16,6 +16,18 @@ Ashley messages first when Agency decides she has something to say. Empty materi
 4. **Send** — bot DMs bubbles, then `/initiative/commit` (or abort on failure)
 5. **Reflect** — explicit 👍/👎 on a committed message updates bounded motivation-kind calibration for future proactive decisions
 
+Grounded commitments or concerns with urgency at least `0.85` can wake the bot's
+local urgent check instead of waiting for the normal jittered poll. This only
+accelerates evaluation: pause, daily cap, Agency, reservation, deduplication,
+send, commit, and Reflection remain mandatory.
+
+Urgent wakes are edge-triggered (`pending → claimed → consumed`). A claim has a
+five-minute lease; a logged Agency decision consumes it even when Ashley stays
+silent. Failures before a decision retry after 5, 10, 20, 40, then 60 minutes.
+An active item only re-arms when its text changes, it crosses the urgency
+threshold, or urgency rises materially. The urgent endpoint is read-only and
+returns false whenever proactive safeguards or another live claim block work.
+
 Reflection is deterministic and defaults to `ASHLEY_REFLECTION_MODE=observe`.
 Observe mode records and calculates without changing Thought scores; `apply`
 enables the bounded adjustment.
@@ -26,5 +38,6 @@ enables the bounded adjustment.
 - `GET /nuclear/decisions?owner_id=`
 - `GET /nuclear/reflections?owner_id=`
 - `GET /health` → `proactive` block
+- `GET /initiative/urgent?owner_id=` → local wake signal; never sends directly
 
 See [Architecture_Index.md](Architecture_Index.md).

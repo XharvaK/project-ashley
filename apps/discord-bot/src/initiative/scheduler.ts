@@ -10,6 +10,7 @@ import {
   commitInitiative,
   initiativeStatus,
   tickInitiative,
+  urgentInitiativeStatus,
 } from "../agent-client.js";
 import {
   pauseProactiveRemote,
@@ -17,6 +18,8 @@ import {
 } from "../agent-client.js";
 
 let timer: ReturnType<typeof setTimeout> | null = null;
+let urgentTimer: ReturnType<typeof setInterval> | null = null;
+let tickRunning = false;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -45,6 +48,8 @@ export function startProactiveScheduler(client: Client): void {
   };
 
   const tick = async () => {
+    if (tickRunning) return;
+    tickRunning = true;
     try {
       const healthy = await checkHealth();
       if (!healthy) {
@@ -129,10 +134,19 @@ export function startProactiveScheduler(client: Client): void {
         return;
       }
       console.warn("[discord-bot] proactive tick error:", err);
+    } finally {
+      tickRunning = false;
     }
   };
 
   void tick().finally(scheduleNext);
+  urgentTimer = setInterval(() => {
+    void urgentInitiativeStatus()
+      .then((status) => {
+        if (status.urgent) return tick();
+      })
+      .catch(() => undefined);
+  }, 15_000);
 }
 
 export function stopProactiveScheduler(): void {
@@ -140,6 +154,9 @@ export function stopProactiveScheduler(): void {
     clearTimeout(timer);
     timer = null;
   }
+  if (urgentTimer) clearInterval(urgentTimer);
+  urgentTimer = null;
+  tickRunning = false;
 }
 
 export async function pauseProactive(): Promise<void> {

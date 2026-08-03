@@ -1,7 +1,11 @@
 import { Mistral } from "@mistralai/mistralai";
 import { env } from "./env.js";
 import { AppError } from "./errors.js";
-import { acquireLane, type Lane } from "./mistral-limiter.js";
+import {
+  acquireLane,
+  recordTokenUsage,
+  type Lane,
+} from "./mistral-limiter.js";
 
 export type ChatMessage = {
   role: "system" | "user" | "assistant";
@@ -206,11 +210,11 @@ export async function completeChat(
   toolCalls?: ToolCallResult[];
   usage?: TokenUsage;
 }> {
+  const mistral = getClient();
   const release = await acquireLane(
     options.lane ?? "background",
     options.signal,
   );
-  const mistral = getClient();
   const model = options.model ?? env.mistralModel;
 
   try {
@@ -244,6 +248,9 @@ export async function completeChat(
       }
     }
     const usage = toTokenUsage((res as { usage?: unknown }).usage);
+    if (usage) {
+      recordTokenUsage(usage.promptTokens + usage.completionTokens);
+    }
     return {
       text,
       model,

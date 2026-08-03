@@ -75,22 +75,30 @@ export function listIdentity(
     options.layer === undefined
       ? db
           .prepare(
-            `SELECT id, owner_id, layer, kind, text, source, revised_from,
-                    created_at, updated_at
-             FROM identity_entries
-             WHERE owner_id = ?
-             ORDER BY CASE layer WHEN 'stable' THEN 0 ELSE 1 END,
-                      updated_at ASC, id ASC
+            `SELECT e.id, e.owner_id, e.layer, e.kind, e.text, e.source,
+                    e.revised_from, e.created_at, e.updated_at
+             FROM identity_entries e
+             WHERE e.owner_id = ?
+               AND NOT EXISTS (
+                 SELECT 1 FROM identity_entries newer
+                 WHERE newer.revised_from = e.id
+               )
+             ORDER BY CASE e.layer WHEN 'stable' THEN 0 ELSE 1 END,
+                      e.updated_at ASC, e.id ASC
              LIMIT ?`,
           )
           .all(ownerId, limit)
       : db
           .prepare(
-            `SELECT id, owner_id, layer, kind, text, source, revised_from,
-                    created_at, updated_at
-             FROM identity_entries
-             WHERE owner_id = ? AND layer = ?
-             ORDER BY updated_at ASC, id ASC
+            `SELECT e.id, e.owner_id, e.layer, e.kind, e.text, e.source,
+                    e.revised_from, e.created_at, e.updated_at
+             FROM identity_entries e
+             WHERE e.owner_id = ? AND e.layer = ?
+               AND NOT EXISTS (
+                 SELECT 1 FROM identity_entries newer
+                 WHERE newer.revised_from = e.id
+               )
+             ORDER BY e.updated_at ASC, e.id ASC
              LIMIT ?`,
           )
           .all(ownerId, options.layer, limit);

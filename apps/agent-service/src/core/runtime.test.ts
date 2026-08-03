@@ -13,8 +13,11 @@ vi.mock("./conversation/expression.js", () => ({
 }));
 
 import { openNuclearDb } from "./db.js";
+import { env } from "../env.js";
 import { logDecision } from "./agency/log.js";
 import { createQuestion } from "./state/questions.js";
+import { listActiveMindStateItems, upsertMindStateItem } from "./state/mind-items.js";
+import { patchState } from "./state/store.js";
 import { AshleyCore } from "./runtime.js";
 
 function addCommittedQuestionInitiative(
@@ -40,7 +43,24 @@ function addCommittedQuestionInitiative(
       motivationIds: [motivationId],
       score: 50,
       reason: "historical question",
-      cognitiveAllocation: { shouldSpeak: true },
+      evidenceRefs: [],
+      uncertainty: 0,
+      urgency: 0.5,
+      thoughtSource: "deterministic",
+      thoughtError: null,
+      affectLicense: {
+        permitted: false,
+        valence: 0,
+        activation: 0.5,
+        openness: 0.5,
+        tension: 0,
+        reason: "neutral baseline",
+      },
+      cognitiveAllocation: {
+        shouldSpeak: true,
+        effort: "medium",
+        completion: "complete",
+      },
       authorizedClaims: { readingTakeIds: [], readingTakeTitles: [] },
     },
   });
@@ -161,5 +181,77 @@ describe("AshleyCore", () => {
 
     db.close();
     rmSync(path, { force: true });
+  });
+
+  it("keeps urgent wake-ups behind proactive hard gates", () => {
+    const path = join(tmpdir(), `ashley-nuclear-${randomUUID()}.db`);
+    const db = openNuclearDb(new DatabaseSync(path));
+    const core = new AshleyCore(db);
+    const originalMode = env.cognitionMode;
+    const originalEnabled = env.proactiveEnabled;
+    const originalCap = env.proactiveMaxPerDay;
+    try {
+      env.cognitionMode = "apply";
+      env.proactiveEnabled = true;
+      env.proactiveMaxPerDay = 10;
+      upsertMindStateItem(db, {
+        ownerId: "doc",
+        kind: "concern",
+        text: "An urgent concern.",
+        sourceType: "episode",
+        sourceId: 1,
+        urgency: 1,
+      });
+      expect(core.hasUrgentCognition("doc")).toBe(true);
+      core.pauseProactive("doc");
+      expect(core.hasUrgentCognition("doc")).toBe(false);
+      core.resumeProactive("doc");
+      env.proactiveMaxPerDay = 0;
+      expect(core.hasUrgentCognition("doc")).toBe(false);
+      env.proactiveMaxPerDay = 10;
+      patchState(db, "doc", { availability: "quiet" });
+      expect(core.hasUrgentCognition("doc")).toBe(false);
+    } finally {
+      env.cognitionMode = originalMode;
+      env.proactiveEnabled = originalEnabled;
+      env.proactiveMaxPerDay = originalCap;
+      db.close();
+      rmSync(path, { force: true });
+    }
+  });
+
+  it("consumes an urgent edge after Agency records its decision", async () => {
+    const path = join(tmpdir(), `ashley-nuclear-${randomUUID()}.db`);
+    const db = openNuclearDb(new DatabaseSync(path));
+    const core = new AshleyCore(db);
+    const originalMode = env.cognitionMode;
+    const originalKey = env.mistralApiKey;
+    const originalEnabled = env.proactiveEnabled;
+    try {
+      env.cognitionMode = "apply";
+      env.mistralApiKey = "";
+      env.proactiveEnabled = true;
+      upsertMindStateItem(db, {
+        ownerId: "doc",
+        kind: "commitment",
+        text: "Follow up on the release.",
+        sourceType: "episode",
+        sourceId: 1,
+        urgency: 1,
+      });
+      await core.tickProactive("doc");
+      expect(listActiveMindStateItems(db, "doc")[0]).toMatchObject({
+        status: "active",
+        wakeState: "consumed",
+        wakeAttempts: 1,
+      });
+      expect(core.hasUrgentCognition("doc")).toBe(false);
+    } finally {
+      env.cognitionMode = originalMode;
+      env.mistralApiKey = originalKey;
+      env.proactiveEnabled = originalEnabled;
+      db.close();
+      rmSync(path, { force: true });
+    }
   });
 });

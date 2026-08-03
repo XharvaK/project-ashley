@@ -5,6 +5,7 @@ import { AgentManager } from "./agent.js";
 import { env } from "./env.js";
 import { toErrorResponse, AppError } from "./errors.js";
 import { listRecentDecisions } from "./core/agency/log.js";
+import { retrieveEpisodes } from "./core/memory/episodes.js";
 
 const MAX_DISCORD_MESSAGE = 4000;
 
@@ -64,6 +65,66 @@ export function createServer(manager: AgentManager): express.Express {
       requireOwner(ownerId || undefined);
       const limit = Math.min(100, Number(req.query.limit ?? 20) || 20);
       res.json(manager.core.getReflections(ownerId, limit));
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.get("/nuclear/episodes", (req, res) => {
+    try {
+      const ownerId = String(req.query.owner_id ?? "");
+      requireOwner(ownerId || undefined);
+      const limit = Math.min(20, Number(req.query.limit ?? 10) || 10);
+      res.json({
+        mode: env.cognitionMode,
+        episodes: retrieveEpisodes(
+          manager.core.getDatabase(),
+          ownerId,
+          String(req.query.query ?? ""),
+          limit,
+        ),
+      });
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.get("/nuclear/cognition", (req, res) => {
+    try {
+      const ownerId = String(req.query.owner_id ?? "");
+      requireOwner(ownerId || undefined);
+      res.json(manager.core.getCognitionOverview(ownerId));
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.get("/nuclear/revisions", (req, res) => {
+    try {
+      const ownerId = String(req.query.owner_id ?? "");
+      requireOwner(ownerId || undefined);
+      const limit = Math.min(100, Number(req.query.limit ?? 50) || 50);
+      res.json(manager.core.getRevisions(ownerId, limit));
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/nuclear/revisions/revert", (req, res) => {
+    try {
+      const { userId, revisionId } = req.body as {
+        userId?: string;
+        revisionId?: number;
+      };
+      const ownerId = requireOwner(userId);
+      if (typeof revisionId !== "number") {
+        throw new AppError("message_required", "revisionId required", 400);
+      }
+      res.json({ reverted: manager.core.revertRevision(ownerId, revisionId) });
     } catch (err) {
       const { status, body } = toErrorResponse(err);
       res.status(status).json(body);
@@ -466,6 +527,17 @@ export function createServer(manager: AgentManager): express.Express {
         }
       }
       res.json(manager.core.getProactiveStatus(ownerId));
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.get("/initiative/urgent", (req, res) => {
+    try {
+      const ownerId = String(req.query.owner_id ?? "");
+      requireOwner(ownerId || undefined);
+      res.json({ urgent: manager.core.hasUrgentCognition(ownerId) });
     } catch (err) {
       const { status, body } = toErrorResponse(err);
       res.status(status).json(body);

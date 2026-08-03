@@ -1,6 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
 import { createQuestion } from "./state/questions.js";
-import { upsertOpinion, recordIdentityEntry } from "./identity/store.js";
 import { upsertFact } from "./memory/facts.js";
 
 const PIN_RE =
@@ -31,6 +30,7 @@ export function writeFromUserTurn(
       value,
       confidence: 1,
       importance: 90,
+      origin: "manual",
     });
     return { pinned: true, forgotTopic: null, sleepSignal: false };
   }
@@ -61,46 +61,4 @@ export function writeFromUserTurn(
     forgotTopic: null,
     sleepSignal: SLEEP_RE.test(trimmed),
   };
-}
-
-/** After Ashley speaks, capture organic identity/interest crumbs. */
-export function writeFromAssistantTurn(
-  db: DatabaseSync,
-  ownerId: string,
-  text: string,
-): void {
-  const trimmed = text.trim();
-  if (!trimmed || trimmed.length < 40) return;
-
-  const interest = trimmed.match(
-    /\bi(?:'ve| have)? (?:been )?(?:into|reading about|thinking about)\s+([^,.!?\n]{3,60})/i,
-  );
-  if (interest?.[1]) {
-    recordIdentityEntry(db, {
-      ownerId,
-      layer: "dynamic",
-      kind: "interest",
-      text: interest[1].trim(),
-      source: "organic",
-    });
-  }
-}
-
-/** Curiosity takes become opinions she actually holds. */
-export function writeOpinionFromTake(
-  db: DatabaseSync,
-  ownerId: string,
-  interest: string,
-  take: string,
-  title?: string,
-): number {
-  const topic = (interest || title || "feed").trim().slice(0, 120);
-  const stance = take.trim().slice(0, 500);
-  if (!topic || !stance) return 0;
-  return upsertOpinion(db, {
-    ownerId,
-    topic,
-    stance,
-    confidence: 0.6,
-  });
 }

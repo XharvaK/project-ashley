@@ -23,6 +23,29 @@ export type MotivationKind =
 export type Trigger = "reactive" | "proactive";
 
 export type ReflectionMode = "observe" | "apply";
+export type CognitionMode = "observe" | "apply";
+
+export type EvidenceRef = {
+  type:
+    | "message"
+    | "episode"
+    | "fact"
+    | "question"
+    | "opinion"
+    | "take"
+    | "mind_state";
+  id: string | number;
+};
+
+export type AffectLicense = {
+  permitted: boolean;
+  valence: number;
+  activation: number;
+  openness: number;
+  tension: number;
+  reason: string;
+  source?: EvidenceRef;
+};
 
 export type LearningSnapshot = {
   subjectKind: MotivationKind;
@@ -33,6 +56,8 @@ export type LearningSnapshot = {
 /** v1 payload: transient decisions already implied by Decision.kind. Not the definition of Thought. */
 export type CognitiveAllocation = {
   shouldSpeak: boolean;
+  effort: "low" | "medium" | "high";
+  completion: "complete" | "hold";
 };
 
 /** Refs Conversation previously reconstructed from kind + feed takes. */
@@ -48,6 +73,13 @@ export type Decision = {
   motivationIds: number[];
   score: number;
   reason: string;
+  objective?: string;
+  evidenceRefs: EvidenceRef[];
+  uncertainty: number;
+  urgency: number;
+  thoughtSource: "deterministic" | "model" | "fallback";
+  thoughtError: string | null;
+  affectLicense: AffectLicense;
   learning?: LearningSnapshot;
   cognitiveAllocation: CognitiveAllocation;
   authorizedClaims: AuthorizedClaims;
@@ -124,6 +156,45 @@ export type MindState = {
   unfinishedJson: string;
   availability: string;
   lastDecisionId: number | null;
+  updatedAt: string;
+};
+
+export type MindStateItemKind =
+  | "goal"
+  | "concern"
+  | "commitment"
+  | "interest"
+  | "unfinished";
+
+export type MindStateItem = {
+  id: number;
+  ownerId: string;
+  kind: MindStateItemKind;
+  text: string;
+  sourceType: string;
+  sourceId: string;
+  activation: number;
+  urgency: number;
+  status: "active" | "resolved" | "forgotten";
+  dueAt: string | null;
+  wakeState: "pending" | "claimed" | "consumed";
+  wakeAttempts: number;
+  nextWakeAt: string | null;
+  claimedAt: string | null;
+  surfacedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AffectiveState = {
+  ownerId: string;
+  valence: number;
+  activation: number;
+  openness: number;
+  tension: number;
+  reason: string;
+  sourceType: string | null;
+  sourceId: string | null;
   updatedAt: string;
 };
 

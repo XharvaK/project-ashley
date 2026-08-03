@@ -66,14 +66,50 @@ function makeDecision(
   reason: string,
   score: number,
 ): Decision {
+  const evidenceTypes = new Set([
+    "message",
+    "episode",
+    "fact",
+    "question",
+    "opinion",
+    "take",
+    "mind_state",
+  ]);
+  const evidenceRefs = motivations
+    .filter(
+      (motivation) =>
+        motivation.refType &&
+        evidenceTypes.has(motivation.refType) &&
+        motivation.refId != null,
+    )
+    .map((motivation) => ({
+      type: motivation.refType as "message" | "episode" | "fact" | "question" | "opinion" | "take" | "mind_state",
+      id: motivation.refId!,
+    }));
   return {
     trigger,
     kind,
     motivationIds: motivationIds(motivations),
     score,
     reason,
+    objective: motivations[0]?.summary,
+    evidenceRefs,
+    uncertainty: 0,
+    urgency: Math.max(0, Math.min(1, score / 100)),
+    thoughtSource: "deterministic",
+    thoughtError: null,
+    affectLicense: {
+      permitted: false,
+      valence: 0,
+      activation: 0.5,
+      openness: 0.5,
+      tension: 0,
+      reason: "neutral baseline",
+    },
     cognitiveAllocation: {
       shouldSpeak: kind !== "silence" && kind !== "delay",
+      effort: score >= 75 ? "high" : score >= 40 ? "medium" : "low",
+      completion: kind === "delay" ? "hold" : "complete",
     },
     authorizedClaims: {
       readingTakeIds: [],
@@ -93,7 +129,14 @@ export function attachAuthorizedClaims(
   if (decision.kind !== "share" && decision.kind !== "ask") {
     return decision;
   }
-  const slice = takes.slice(0, 2);
+  const licensedTakeIds = new Set(
+    decision.evidenceRefs
+      .filter((ref) => ref.type === "take")
+      .map((ref) => Number(ref.id)),
+  );
+  const slice = takes
+    .filter((take) => licensedTakeIds.has(take.id))
+    .slice(0, 2);
   return {
     ...decision,
     authorizedClaims: {

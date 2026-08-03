@@ -30,6 +30,30 @@ function loadDotEnv(): void {
 
 loadDotEnv();
 
+const numericWarnings: string[] = [];
+
+function numericEnv(
+  name: string,
+  fallback: number,
+  min: number,
+  max: number,
+  integer = false,
+): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return fallback;
+  const parsed = Number(raw);
+  if (
+    !Number.isFinite(parsed) ||
+    parsed < min ||
+    parsed > max ||
+    (integer && !Number.isInteger(parsed))
+  ) {
+    numericWarnings.push(`${name} invalid; using ${fallback}`);
+    return fallback;
+  }
+  return parsed;
+}
+
 export const env = {
   mistralApiKey: process.env.MISTRAL_API_KEY ?? "",
   mistralModel: process.env.MISTRAL_MODEL ?? "mistral-medium-latest",
@@ -46,30 +70,69 @@ export const env = {
       | undefined) ?? "medium"),
   // Mistral documents 0.0-0.7; above that a bilingual bot starts switching
   // language mid-sentence, so the ceiling is enforced here rather than trusted.
-  mistralChatTemperature: Math.min(
-    Number(process.env.MISTRAL_CHAT_TEMPERATURE ?? 0.7),
+  mistralChatTemperature: numericEnv(
+    "MISTRAL_CHAT_TEMPERATURE",
+    0.7,
+    0,
     0.7,
   ),
   discordOwnerId: process.env.DISCORD_OWNER_ID ?? "",
   memoryOwnerId:
     process.env.MEMORY_OWNER_ID ?? process.env.DISCORD_OWNER_ID ?? "",
-  agentPort: Number(process.env.AGENT_PORT ?? 3710),
+  agentPort: numericEnv("AGENT_PORT", 3710, 1, 65_535, true),
   agentBindHost: process.env.AGENT_BIND_HOST ?? "127.0.0.1",
   nodeEnv: process.env.NODE_ENV ?? "development",
   proactiveEnabled: process.env.PROACTIVE_ENABLED !== "false",
-  proactiveMaxPerDay: Number(process.env.PROACTIVE_MAX_PER_DAY ?? 10),
-  proactiveMinIdleHours: Number(process.env.PROACTIVE_MIN_IDLE_HOURS ?? 2),
+  proactiveMaxPerDay: numericEnv("PROACTIVE_MAX_PER_DAY", 10, 0, 100, true),
+  proactiveMinIdleHours: numericEnv("PROACTIVE_MIN_IDLE_HOURS", 2, 0, 168),
   reflectionMode:
     process.env.ASHLEY_REFLECTION_MODE === "apply"
       ? ("apply" as const)
       : ("observe" as const),
+  cognitionMode:
+    process.env.ASHLEY_COGNITION_MODE === "apply"
+      ? ("apply" as const)
+      : ("observe" as const),
+  cognitionDispatchIntervalSec: numericEnv(
+    "COGNITION_DISPATCH_INTERVAL_SEC",
+    30,
+    5,
+    3600,
+  ),
+  mistralRequestsPerSecond: numericEnv(
+    "MISTRAL_REQUESTS_PER_SECOND",
+    1,
+    1,
+    100,
+    true,
+  ),
+  mistralTokensPerMinute: numericEnv(
+    "MISTRAL_TOKENS_PER_MINUTE",
+    100_000,
+    1_000,
+    10_000_000,
+    true,
+  ),
+  cognitionIdleConsolidationMin: numericEnv(
+    "COGNITION_IDLE_CONSOLIDATION_MIN",
+    10,
+    0,
+    1440,
+  ),
   curiosityEnabled: process.env.CURIOSITY_ENABLED !== "false",
-  curiosityTickMinutes: Number(process.env.CURIOSITY_TICK_MINUTES ?? 45),
-  curiosityItemsPerSource: Number(process.env.CURIOSITY_ITEMS_PER_SOURCE ?? 12),
+  curiosityTickMinutes: numericEnv("CURIOSITY_TICK_MINUTES", 45, 1, 1440),
+  curiosityItemsPerSource: numericEnv(
+    "CURIOSITY_ITEMS_PER_SOURCE",
+    12,
+    1,
+    100,
+    true,
+  ),
 };
 
 export function validateBoot(): { ok: boolean; warnings: string[] } {
   const warnings: string[] = [];
+  warnings.push(...numericWarnings);
   if (!env.mistralApiKey) {
     warnings.push("MISTRAL_API_KEY missing — agent will run offline");
   }

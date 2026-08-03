@@ -333,3 +333,8 @@ export async function initiativeStatus() {
     minIdleHours: number;
   }>(`/initiative/status?${q}`);
 }
+
+export async function urgentInitiativeStatus() {
+  const q = new URLSearchParams({ owner_id: config.ownerId });
+  return agentFetch<{ urgent: boolean }>(`/initiative/urgent?${q.toString()}`);
+}

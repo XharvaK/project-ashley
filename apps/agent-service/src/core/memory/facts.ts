@@ -16,6 +16,8 @@ export type MemoryFact = {
   confidence: number;
   importance: number;
   sourceMessageId: number | null;
+  origin: "legacy" | "manual" | "explicit_user";
+  sourceQuote: string | null;
   supersededBy: number | null;
   createdAt: string;
 };
@@ -28,6 +30,8 @@ type FactInput = {
   confidence?: number;
   importance?: number;
   sourceMessageId?: number | null;
+  origin?: "legacy" | "manual" | "explicit_user";
+  sourceQuote?: string | null;
 };
 
 type DbRow = Record<string, unknown>;
@@ -46,6 +50,10 @@ function numberValue(value: unknown): number {
 
 function nullableNumber(value: unknown): number | null {
   return value == null ? null : numberValue(value);
+}
+
+export function literalLikePattern(value: string): string {
+  return `%${value.trim().replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
 }
 
 function mapFact(row: unknown): MemoryFact | null {
@@ -69,6 +77,11 @@ function mapFact(row: unknown): MemoryFact | null {
     confidence: numberValue(row.confidence),
     importance: numberValue(row.importance),
     sourceMessageId: nullableNumber(row.source_message_id),
+    origin:
+      row.origin === "manual" || row.origin === "explicit_user"
+        ? row.origin
+        : "legacy",
+    sourceQuote: typeof row.source_quote === "string" ? row.source_quote : null,
     supersededBy: nullableNumber(row.superseded_by),
     createdAt: stringValue(row.created_at),
   };
@@ -83,7 +96,7 @@ export function listActiveFacts(
   const rows = db
     .prepare(
       `SELECT id, owner_id, category, key, value, confidence, importance,
-              source_message_id, superseded_by, created_at
+              source_message_id, origin, source_quote, superseded_by, created_at
        FROM mem_facts
        WHERE owner_id = ? AND superseded_by IS NULL
        ORDER BY importance DESC, id DESC
@@ -93,6 +106,27 @@ export function listActiveFacts(
     .map(mapFact)
     .filter((fact): fact is MemoryFact => fact !== null);
   return rows;
+}
+
+export function listFactsMatchingTopic(
+  db: DatabaseSync,
+  ownerId: string,
+  topic: string,
+): MemoryFact[] {
+  const cleanTopic = topic.trim();
+  if (!cleanTopic) return [];
+  const pattern = literalLikePattern(cleanTopic);
+  return db.prepare(
+    `SELECT id, owner_id, category, key, value, confidence, importance,
+            source_message_id, origin, source_quote, superseded_by, created_at
+     FROM mem_facts
+     WHERE owner_id = ? AND superseded_by IS NULL
+       AND (key LIKE ? ESCAPE '\\' OR value LIKE ? ESCAPE '\\'
+            OR category LIKE ? ESCAPE '\\')
+     ORDER BY id DESC`,
+  ).all(ownerId, pattern, pattern, pattern)
+    .map(mapFact)
+    .filter((fact): fact is MemoryFact => fact !== null);
 }
 
 export function upsertFact(db: DatabaseSync, input: FactInput): number;
@@ -133,7 +167,7 @@ export function upsertFact(
   if (!cleanKey || !cleanValue) return 0;
   const existing: unknown = db
     .prepare(
-      `SELECT id
+      `SELECT id, value
        FROM mem_facts
        WHERE owner_id = ? AND category = ? AND key = ? AND superseded_by IS NULL
        ORDER BY id DESC
@@ -145,16 +179,31 @@ export function upsertFact(
     0,
     Math.min(100, Math.round(input.importance ?? 50)),
   );
-  if (isRow(existing) && typeof existing.id === "number") {
+  if (
+    isRow(existing) &&
+    typeof existing.id === "number" &&
+    input.origin === "explicit_user" &&
+    stringValue(existing.value).toLocaleLowerCase() === cleanValue.toLocaleLowerCase()
+  ) {
+    return existing.id;
+  }
+  if (
+    isRow(existing) &&
+    typeof existing.id === "number" &&
+    input.origin !== "explicit_user"
+  ) {
     db.prepare(
       `UPDATE mem_facts
-       SET value = ?, confidence = ?, importance = ?, source_message_id = ?
+       SET value = ?, confidence = ?, importance = ?, source_message_id = ?,
+           origin = ?, source_quote = ?
        WHERE id = ?`,
     ).run(
       cleanValue,
       boundedConfidence,
       boundedImportance,
       input.sourceMessageId ?? null,
+      input.origin ?? "legacy",
+      input.sourceQuote ?? null,
       existing.id,
     );
     return existing.id;
@@ -163,8 +212,8 @@ export function upsertFact(
     .prepare(
       `INSERT INTO mem_facts
          (owner_id, category, key, value, confidence, importance,
-          source_message_id, superseded_by, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+          source_message_id, origin, source_quote, superseded_by, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
     )
     .run(
       input.ownerId,
@@ -174,9 +223,17 @@ export function upsertFact(
       boundedConfidence,
       boundedImportance,
       input.sourceMessageId ?? null,
+      input.origin ?? "legacy",
+      input.sourceQuote ?? null,
       new Date().toISOString(),
     );
-  return Number(result.lastInsertRowid);
+  const insertedId = Number(result.lastInsertRowid);
+  if (isRow(existing) && typeof existing.id === "number") {
+    db.prepare(
+      "UPDATE mem_facts SET superseded_by = ? WHERE id = ? AND superseded_by IS NULL",
+    ).run(insertedId, existing.id);
+  }
+  return insertedId;
 }
 
 export function forgetByTopic(
@@ -186,24 +243,8 @@ export function forgetByTopic(
 ): number {
   const cleanTopic = topic.trim();
   if (!cleanTopic) return 0;
-  const rows = db
-    .prepare(
-      `SELECT id
-       FROM mem_facts
-       WHERE owner_id = ?
-         AND superseded_by IS NULL
-         AND (key LIKE ? OR value LIKE ? OR category LIKE ?)`,
-    )
-    .all(
-      ownerId,
-      `%${cleanTopic}%`,
-      `%${cleanTopic}%`,
-      `%${cleanTopic}%`,
-    );
-  const ids = rows
-    .filter(isRow)
-    .map((row) => row.id)
-    .filter((id): id is number => typeof id === "number");
+  const ids = listFactsMatchingTopic(db, ownerId, cleanTopic)
+    .map((fact) => fact.id);
   const update = db.prepare(
     `UPDATE mem_facts SET superseded_by = ? WHERE id = ? AND owner_id = ?`,
   );

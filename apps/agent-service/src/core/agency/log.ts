@@ -1,7 +1,9 @@
 import type { DatabaseSync } from "node:sqlite";
 import type {
+  AffectLicense,
   Decision,
   DecisionKind,
+  EvidenceRef,
   MotivationKind,
   Trigger,
 } from "../types.js";
@@ -14,6 +16,15 @@ export type LoggedDecision = {
   decisionKind: DecisionKind;
   motivationIds: number[];
   reason: string;
+  objective: string | null;
+  evidenceRefs: EvidenceRef[];
+  effort: "low" | "medium" | "high";
+  completion: "complete" | "hold";
+  uncertainty: number;
+  urgency: number;
+  affectLicense: AffectLicense;
+  thoughtSource: "deterministic" | "model" | "fallback";
+  thoughtError: string | null;
   learningSubjectKind: MotivationKind | null;
   learningAdjustment: number;
   learningThroughEventId: number | null;
@@ -98,6 +109,76 @@ function parseIds(value: unknown): number[] {
   }
 }
 
+function parseEvidenceRefs(value: unknown): EvidenceRef[] {
+  if (typeof value !== "string") return [];
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((entry): entry is EvidenceRef => {
+      if (!isRow(entry)) return false;
+      const validType =
+        entry.type === "message" ||
+        entry.type === "episode" ||
+        entry.type === "fact" ||
+        entry.type === "question" ||
+        entry.type === "opinion" ||
+        entry.type === "take" ||
+        entry.type === "mind_state";
+      return validType &&
+        (typeof entry.id === "string" || typeof entry.id === "number");
+    });
+  } catch {
+    return [];
+  }
+}
+
+function parseEvidenceRef(value: unknown): EvidenceRef | undefined {
+  if (!isRow(value)) return undefined;
+  if (typeof value.id !== "string" && typeof value.id !== "number") {
+    return undefined;
+  }
+  switch (value.type) {
+    case "message":
+    case "episode":
+    case "fact":
+    case "question":
+    case "opinion":
+    case "take":
+    case "mind_state":
+      return { type: value.type, id: value.id };
+    default:
+      return undefined;
+  }
+}
+
+function parseAffectLicense(value: unknown): AffectLicense {
+  const fallback: AffectLicense = {
+    permitted: false,
+    valence: 0,
+    activation: 0.5,
+    openness: 0.5,
+    tension: 0,
+    reason: "No persisted affect license.",
+  };
+  if (typeof value !== "string") return fallback;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!isRow(parsed)) return fallback;
+    const source = parseEvidenceRef(parsed.source);
+    return {
+      permitted: parsed.permitted === true,
+      valence: numberValue(parsed.valence),
+      activation: numberValue(parsed.activation),
+      openness: numberValue(parsed.openness),
+      tension: numberValue(parsed.tension),
+      reason: stringValue(parsed.reason),
+      ...(source ? { source } : {}),
+    };
+  } catch {
+    return fallback;
+  }
+}
+
 function mapDecision(row: unknown): LoggedDecision | null {
   if (!isRow(row)) return null;
   const kind = decisionKind(row.decision_kind);
@@ -111,6 +192,19 @@ function mapDecision(row: unknown): LoggedDecision | null {
     decisionKind: kind,
     motivationIds: parseIds(row.motivation_ids_json),
     reason: stringValue(row.reason),
+    objective: typeof row.objective === "string" ? row.objective : null,
+    evidenceRefs: parseEvidenceRefs(row.evidence_refs_json),
+    effort:
+      row.effort === "medium" || row.effort === "high" ? row.effort : "low",
+    completion: row.completion === "hold" ? "hold" : "complete",
+    uncertainty: numberValue(row.uncertainty),
+    urgency: numberValue(row.urgency),
+    affectLicense: parseAffectLicense(row.affect_license_json),
+    thoughtSource:
+      row.thought_source === "model" || row.thought_source === "fallback"
+        ? row.thought_source
+        : "deterministic",
+    thoughtError: typeof row.thought_error === "string" ? row.thought_error : null,
     learningSubjectKind: motivationKind(row.learning_subject_kind),
     learningAdjustment: numberValue(row.learning_adjustment),
     learningThroughEventId:
@@ -153,7 +247,24 @@ export function logDecision(
             motivationIds: [],
             score: 0,
             reason: "missing decision",
-            cognitiveAllocation: { shouldSpeak: false },
+            evidenceRefs: [],
+            uncertainty: 1,
+            urgency: 0,
+            thoughtSource: "deterministic",
+            thoughtError: null,
+            affectLicense: {
+              permitted: false,
+              valence: 0,
+              activation: 0.5,
+              openness: 0.5,
+              tension: 0,
+              reason: "missing decision",
+            },
+            cognitiveAllocation: {
+              shouldSpeak: false,
+              effort: "low",
+              completion: "complete",
+            },
             authorizedClaims: {
               readingTakeIds: [],
               readingTakeTitles: [],
@@ -167,8 +278,10 @@ export function logDecision(
       `INSERT INTO decision_log
          (owner_id, channel, trigger, decision_kind, motivation_ids_json,
           reason, learning_subject_kind, learning_adjustment,
-          learning_through_event_id, outcome_text, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          learning_through_event_id, objective, evidence_refs_json, effort,
+          completion, uncertainty, urgency, affect_license_json,
+          thought_source, thought_error, outcome_text, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.ownerId,
@@ -180,6 +293,15 @@ export function logDecision(
       input.decision.learning?.subjectKind ?? null,
       input.decision.learning?.adjustment ?? 0,
       input.decision.learning?.throughEventId ?? null,
+      input.decision.objective ?? null,
+      JSON.stringify(input.decision.evidenceRefs),
+      input.decision.cognitiveAllocation.effort,
+      input.decision.cognitiveAllocation.completion,
+      input.decision.uncertainty,
+      input.decision.urgency,
+      JSON.stringify(input.decision.affectLicense),
+      input.decision.thoughtSource,
+      input.decision.thoughtError,
       input.outcomeText ?? null,
       new Date().toISOString(),
     );
@@ -215,6 +337,9 @@ export function getDecision(
       `SELECT id, owner_id, channel, trigger, decision_kind,
               motivation_ids_json, reason, learning_subject_kind,
               learning_adjustment, learning_through_event_id,
+              objective, evidence_refs_json, effort, completion,
+              uncertainty, urgency, affect_license_json,
+              thought_source, thought_error,
               outcome_text, created_at
        FROM decision_log
        WHERE id = ?`,
@@ -233,6 +358,9 @@ export function listRecentDecisions(
       `SELECT id, owner_id, channel, trigger, decision_kind,
               motivation_ids_json, reason, learning_subject_kind,
               learning_adjustment, learning_through_event_id,
+              objective, evidence_refs_json, effort, completion,
+              uncertainty, urgency, affect_license_json,
+              thought_source, thought_error,
               outcome_text, created_at
        FROM decision_log
        WHERE owner_id = ?
