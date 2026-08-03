@@ -15,7 +15,6 @@ import {
   startMoltbookHeartbeat,
   stopMoltbookHeartbeat,
 } from "./moltbook/moltbook-heartbeat.js";
-import { startDocsLoop, stopDocsLoop } from "./docs-agenda.js";
 
 const manager = new AgentManager();
 
@@ -25,7 +24,6 @@ async function main(): Promise<void> {
   const server = listen(app);
 
   if (env.nuclearEnabled) {
-    // Nuclear: feed curiosity on clean DB; quarantine legacy loops.
     startNuclearCuriosityLoop(
       manager.core.getDatabase(),
       env.memoryOwnerId || env.discordOwnerId,
@@ -37,7 +35,6 @@ async function main(): Promise<void> {
     startCuriosityLoop(manager.chat.database);
     startReflectionLoop(manager.chat.database, env.memoryOwnerId);
     startMoltbookHeartbeat(manager.chat.database, env.memoryOwnerId);
-    startDocsLoop(manager.chat.database);
   }
 
   const shutdown = async (signal: string) => {
@@ -46,7 +43,6 @@ async function main(): Promise<void> {
     stopCuriosityLoop();
     stopReflectionLoop();
     stopMoltbookHeartbeat();
-    stopDocsLoop();
     await manager.shutdown();
     server.close();
     process.exit(0);

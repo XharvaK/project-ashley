@@ -36,7 +36,6 @@ import {
   recordEmojiUse,
   recordGifFeedback,
 } from "./discord-feedback.js";
-import { getDocsStatus, runDocsTick } from "./docs-agenda.js";
 import { listRecentDecisions } from "./core/agency/log.js";
 
 const MAX_DISCORD_MESSAGE = 4000;
@@ -768,25 +767,6 @@ export function createServer(manager: AgentManager): express.Application {
   });
 
 
-
-  app.get("/docs/status", (_req, res) => {
-    try {
-      res.json(getDocsStatus(manager.chat.database));
-    } catch (err) {
-      const { status, body } = toErrorResponse(err);
-      res.status(status).json(body);
-    }
-  });
-
-  app.post("/docs/tick", async (_req, res) => {
-    try {
-      const result = await runDocsTick(manager.chat.database);
-      res.json(result);
-    } catch (err) {
-      const { status, body } = toErrorResponse(err);
-      res.status(status).json(body);
-    }
-  });
 
   app.post("/initiative/tick", async (req, res) => {
 
