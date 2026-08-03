@@ -22,6 +22,17 @@ export type MotivationKind =
 
 export type Trigger = "reactive" | "proactive";
 
+/** v1 payload: transient decisions already implied by Decision.kind. Not the definition of Thought. */
+export type CognitiveAllocation = {
+  shouldSpeak: boolean;
+};
+
+/** Refs Conversation previously reconstructed from kind + feed takes. */
+export type AuthorizedClaims = {
+  readingTakeIds: number[];
+  readingTakeTitles: string[];
+};
+
 export type Decision = {
   id?: number;
   trigger: Trigger;
@@ -29,6 +40,8 @@ export type Decision = {
   motivationIds: number[];
   score: number;
   reason: string;
+  cognitiveAllocation: CognitiveAllocation;
+  authorizedClaims: AuthorizedClaims;
 };
 
 export type Motivation = {
@@ -91,7 +104,7 @@ export type Question = {
   resolvedAt: string | null;
 };
 
-export type InternalState = {
+export type MindState = {
   ownerId: string;
   focus: string | null;
   mood: string | null;
@@ -101,3 +114,6 @@ export type InternalState = {
   lastDecisionId: number | null;
   updatedAt: string;
 };
+
+/** @deprecated Use MindState — same type, retained name for gradual call-site clarity. */
+export type InternalState = MindState;

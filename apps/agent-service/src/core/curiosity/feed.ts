@@ -5,7 +5,7 @@ import {
   parseFeed,
   urlKey,
   type FeedItem,
-} from "../../curiosity/feed.js";
+} from "../../lib/feed-parse.js";
 
 export { decodeEntities, htmlToText, parseFeed, urlKey };
 export type { FeedItem };

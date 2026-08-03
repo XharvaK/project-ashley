@@ -1,6 +1,6 @@
 /**
  * Shared concurrency gate for all Mistral traffic. Interactive (live chat)
- * always prefers a free slot over background work so consolidator/curiosity
+ * always prefers a free slot over background work so curiosity ticks
  * cannot starve a reply.
  */
 

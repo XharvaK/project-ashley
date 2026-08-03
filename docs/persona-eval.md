@@ -7,10 +7,8 @@ judge compares them pair by pair.
 ## Never point this at 3710
 
 Every probe archives the active thread. `replay.mjs` refuses port 3710 outright;
-the isolated runner uses 3712 with its own `COMPOSER_DATA_DIR`, auto-remember
-off, proactive off, and retrieval off, because `mem_chunks` are written per
-message regardless of auto-remember and probe 3 would otherwise answer using
-probe 2's content.
+the isolated runner uses 3712 with its own `COMPOSER_DATA_DIR`, proactive off,
+and curiosity off so probes do not spend search credits or DM anyone.
 
 ## Run it
 

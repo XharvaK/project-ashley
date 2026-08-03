@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { InternalState } from "../types.js";
+import type { MindState } from "../types.js";
 
 type StatePatch = {
   focus?: string | null;
@@ -47,7 +47,7 @@ function ensureState(db: DatabaseSync, ownerId: string): void {
   ).run(ownerId, new Date().toISOString());
 }
 
-export function getState(db: DatabaseSync, ownerId: string): InternalState {
+export function getState(db: DatabaseSync, ownerId: string): MindState {
   ensureState(db, ownerId);
   const row: unknown = db
     .prepare(
@@ -77,7 +77,7 @@ export function patchState(
   db: DatabaseSync,
   ownerId: string,
   patch: StatePatch,
-): InternalState {
+): MindState {
   const current = getState(db, ownerId);
   const unfinishedJson =
     patch.unfinishedJson ??

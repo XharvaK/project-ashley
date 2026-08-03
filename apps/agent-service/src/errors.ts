@@ -10,6 +10,9 @@ export type ErrorCode =
   | "mistral_unavailable"
   | "agent_not_ready"
   | "initiative_skipped"
+  | "channel_retired"
+  | "endpoint_retired"
+  | "not_found"
   | "internal_error";
 
 export class AppError extends Error {

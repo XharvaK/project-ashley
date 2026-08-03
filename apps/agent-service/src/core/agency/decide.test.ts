@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decide } from "./decide.js";
+import { attachAuthorizedClaims, decide } from "./decide.js";
 import type { Motivation } from "../types.js";
 
 function motivation(
@@ -17,6 +17,8 @@ describe("nuclear agency decisions", () => {
       "reactive",
     );
     expect(result.kind).toBe("speak");
+    expect(result.cognitiveAllocation.shouldSpeak).toBe(true);
+    expect(result.authorizedClaims.readingTakeIds).toEqual([]);
   });
 
   it("honors a direct request for space", () => {
@@ -25,6 +27,7 @@ describe("nuclear agency decisions", () => {
       "reactive",
     );
     expect(result.kind).toBe("silence");
+    expect(result.cognitiveAllocation.shouldSpeak).toBe(false);
   });
 
   it("delays an empty fluff ping without other material", () => {
@@ -41,5 +44,23 @@ describe("nuclear agency decisions", () => {
       "proactive",
     );
     expect(result.kind).toBe("silence");
+  });
+
+  it("attaches reading claims for share from existing takes", () => {
+    const base = decide(
+      [motivation("take", 80, "a feed take worth sharing")],
+      "proactive",
+    );
+    expect(base.kind).toBe("share");
+    const withClaims = attachAuthorizedClaims(base, [
+      { id: 1, title: "One" },
+      { id: 2, title: "Two" },
+      { id: 3, title: "Three" },
+    ]);
+    expect(withClaims.authorizedClaims.readingTakeIds).toEqual([1, 2]);
+    expect(withClaims.authorizedClaims.readingTakeTitles).toEqual([
+      "One",
+      "Two",
+    ]);
   });
 });

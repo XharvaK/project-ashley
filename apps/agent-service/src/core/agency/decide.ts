@@ -6,6 +6,10 @@ import type {
   Trigger,
 } from "../types.js";
 
+/**
+ * Thought implementation (Agency location).
+ * Owns transient cognitive decisions; Expression consumes Decision, does not re-infer them.
+ */
 function motivationIds(motivations: Motivation[]): number[] {
   return motivations
     .map((motivation) => motivation.id)
@@ -68,6 +72,34 @@ function makeDecision(
     motivationIds: motivationIds(motivations),
     score,
     reason,
+    cognitiveAllocation: {
+      shouldSpeak: kind !== "silence" && kind !== "delay",
+    },
+    authorizedClaims: {
+      readingTakeIds: [],
+      readingTakeTitles: [],
+    },
+  };
+}
+
+/**
+ * Relocate Conversation's kind→take license reconstruction onto Decision.
+ * Takes must already be loaded before Expression; no new inference.
+ */
+export function attachAuthorizedClaims(
+  decision: Decision,
+  takes: Array<{ id: number; title: string }>,
+): Decision {
+  if (decision.kind !== "share" && decision.kind !== "ask") {
+    return decision;
+  }
+  const slice = takes.slice(0, 2);
+  return {
+    ...decision,
+    authorizedClaims: {
+      readingTakeIds: slice.map((take) => take.id),
+      readingTakeTitles: slice.map((take) => take.title),
+    },
   };
 }
 

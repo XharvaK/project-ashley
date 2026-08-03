@@ -1,6 +1,6 @@
 # Project Ashley on Linux Mint (4GB spare laptop)
 
-24/7 **agent-service + discord-bot** only (~400–500 MB). Orpheus / voice / Telegram off by default.
+24/7 **agent-service + discord-bot** only (~400–500 MB). Nuclear Discord companion — no voice, Orpheus, or Telegram.
 
 Private repo: `https://github.com/XharvaK/project-ashley`
 
@@ -105,7 +105,3 @@ hostname -I
 ssh USER@MINT_IP
 scp -r $env:USERPROFILE\Desktop\ashley-mint-transfer USER@MINT_IP:~/
 ```
-
-## Telegram later
-
-`ashley-telegram.service` is disabled. Enable only after Discord is accepted and `TELEGRAM_BOT_TOKEN` is set.

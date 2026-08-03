@@ -22,6 +22,11 @@ function stripUnlicensedActivity(text: string): string {
     .trim();
 }
 
+/**
+ * Last-resort Honesty safety after Expression.
+ * May strip/floor unlicensed activity claims; must never authorize claims.
+ * Authorization originates on Decision.authorizedClaims (Thought).
+ */
 export function finalizeHonesty(
   input: HonestyFinalizeInput,
 ): HonestyFinalizeResult {

@@ -118,6 +118,11 @@ export function logDecision(
             motivationIds: [],
             score: 0,
             reason: "missing decision",
+            cognitiveAllocation: { shouldSpeak: false },
+            authorizedClaims: {
+              readingTakeIds: [],
+              readingTakeTitles: [],
+            },
           },
           outcomeText,
         }

@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import { listOpenQuestions } from "../curiosity/questions.js";
+import { listOpenQuestions } from "../state/questions.js";
 import { listRecentTakes } from "../curiosity/feed.js";
 import { listActiveFacts } from "../memory/facts.js";
 import { getState } from "../state/store.js";

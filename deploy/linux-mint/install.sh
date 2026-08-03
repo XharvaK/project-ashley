@@ -68,7 +68,6 @@ fi
 
 install -m 644 "${UNIT_SRC}/ashley-agent.service" "${UNIT_DIR}/"
 install -m 644 "${UNIT_SRC}/ashley-discord.service" "${UNIT_DIR}/"
-install -m 644 "${UNIT_SRC}/ashley-telegram.service" "${UNIT_DIR}/"
 
 loginctl enable-linger "$USER" 2>/dev/null || true
 systemctl --user daemon-reload

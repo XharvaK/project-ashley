@@ -13,7 +13,7 @@ vi.mock("./conversation/render.js", () => ({
 }));
 
 import { openNuclearDb } from "./db.js";
-import { createQuestion } from "./curiosity/questions.js";
+import { createQuestion } from "./state/questions.js";
 import { AshleyCore } from "./runtime.js";
 
 describe("AshleyCore", () => {

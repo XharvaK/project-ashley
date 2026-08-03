@@ -1,7 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { IdentityLayer } from "../types.js";
 
-const SEED_VERSION = "1";
+const SEED_VERSION = "3";
 
 const SEEDED_IDENTITY: Array<{
   layer: IdentityLayer;
@@ -38,6 +38,11 @@ const SEEDED_IDENTITY: Array<{
     kind: "boundary",
     text: "no fake agreement, fabricated activity, or corporate assistant voice",
   },
+  {
+    layer: "stable",
+    kind: "value",
+    text: "comfortable with uncertainty; does not need false closure",
+  },
 ];
 
 export function seedIdentity(db: DatabaseSync, ownerId = "default"): number {
@@ -55,39 +60,31 @@ export function seedIdentity(db: DatabaseSync, ownerId = "default"): number {
   }
 
   const now = new Date().toISOString();
-  const countRow: unknown = db
-    .prepare(
-      `SELECT COUNT(*) AS count
-       FROM identity_entries
-       WHERE owner_id = ? AND source = 'seeded'`,
-    )
-    .get(ownerId);
-  const count =
-    typeof countRow === "object" &&
-    countRow !== null &&
-    "count" in countRow &&
-    typeof countRow.count === "number"
-      ? countRow.count
-      : 0;
+  const exists = db.prepare(
+    `SELECT 1 AS ok
+     FROM identity_entries
+     WHERE owner_id = ? AND source = 'seeded' AND text = ?
+     LIMIT 1`,
+  );
+  const insert = db.prepare(
+    `INSERT INTO identity_entries
+       (owner_id, layer, kind, text, source, revised_from, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'seeded', NULL, ?, ?)`,
+  );
 
   let inserted = 0;
-  if (count === 0) {
-    const insert = db.prepare(
-      `INSERT INTO identity_entries
-         (owner_id, layer, kind, text, source, revised_from, created_at, updated_at)
-       VALUES (?, ?, ?, ?, 'seeded', NULL, ?, ?)`,
+  for (const entry of SEEDED_IDENTITY) {
+    const row: unknown = exists.get(ownerId, entry.text);
+    if (row) continue;
+    insert.run(
+      ownerId,
+      entry.layer,
+      entry.kind,
+      entry.text,
+      now,
+      now,
     );
-    for (const entry of SEEDED_IDENTITY) {
-      insert.run(
-        ownerId,
-        entry.layer,
-        entry.kind,
-        entry.text,
-        now,
-        now,
-      );
-      inserted++;
-    }
+    inserted++;
   }
 
   db.prepare(

@@ -1,12 +1,10 @@
 # Ashley Architecture Index
 
-Authority: `Ashley_Core_Principles.md` → `Ashley_Constitution.md` → `Ashley_Glossary.md` → `Ashley_Design_Patterns.md`.
+Nuclear-only Discord runtime.
 
 ## Production (Mint)
 
 Two processes: `agent-service` (:3710) + `discord-bot` (gateway).
-
-Nuclear path (default `ASHLEY_NUCLEAR=true`):
 
 ```
 Discord DM → /chat/text → AshleyCore (Identity → State → Agency → Conversation)
@@ -14,13 +12,15 @@ Proactive tick → Agency.decide → draft → commit
 Curiosity feed → nuclear.db takes → Agency motivations
 ```
 
-Clean SQLite: `~/.composer-assistant/conversations/nuclear.db` (no migration from `index.db`).
+SQLite: `~/.composer-assistant/conversations/nuclear.db`.
 
 ## Module tree
 
-`apps/agent-service/src/core/` — identity, state, memory, curiosity, agency, honesty, conversation, runtime.
+`apps/agent-service/src/core/` — identity, state, memory, curiosity, agency, honesty, conversation, writers, runtime.
 
-Legacy `chat-service` + Moltbook/Telegram/voice loops are quarantined when nuclear is on.
+Shared utils: `apps/agent-service/src/lib/` (feed-parse, typography, metadata-echo, strip-markers).
+
+Retired: voice, Telegram, habits, Moltbook, skills, legacy ChatService / `index.db` writers.
 
 ## Observability
 

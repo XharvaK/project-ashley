@@ -20,5 +20,3 @@ export const WORKSPACE_PATH =
 export const REPO_CONFIG_PATH = join(__dirname, "..", "..", "..", "config");
 
 export const AGENT_PORT = Number(process.env.AGENT_PORT ?? 3710);
-export const ORPHEUS_URL = process.env.ORPHEUS_URL ?? "http://127.0.0.1:8881";
-export const VOICE_URL = process.env.VOICE_URL ?? "http://127.0.0.1:3711";

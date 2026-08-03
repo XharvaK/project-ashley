@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 import { env } from "../../env.js";
 import { REPO_CONFIG_PATH } from "../../paths.js";
+import { writeOpinionFromTake } from "../writers.js";
 import {
   insertItem,
   insertTake,
@@ -117,14 +118,22 @@ async function scanSource(
       `${ownerId}:${source.slug}:${item.title}`,
       itemId,
     );
+    const takeText = simpleTake(item.title, item.excerpt);
     const takeId = insertTake(db, {
       itemId,
       interest: source.interest,
-      take: simpleTake(item.title, item.excerpt),
+      take: takeText,
     });
     if (takeId !== null) {
       takesCreated++;
       logProvenance(db, "take", `${ownerId}:${source.slug}`, itemId);
+      writeOpinionFromTake(
+        db,
+        ownerId,
+        source.interest,
+        takeText,
+        item.title,
+      );
     }
   }
   return { itemsInserted, takesCreated };
@@ -140,6 +149,9 @@ export async function runNuclearCuriosityTick(
     takesCreated: 0,
     errors: [],
   };
+  if (!env.curiosityEnabled) {
+    return result;
+  }
   const configured = readConfiguredSources();
   for (const source of configured) upsertSource(db, source);
 

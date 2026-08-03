@@ -41,10 +41,8 @@ export type CompletionOptions = {
   tools?: ToolDefinition[];
   toolChoice?: string | Record<string, unknown>;
   signal?: AbortSignal;
-  /** Defaults: streamChat = interactive, completeChat/embed = background. */
+  /** Defaults: completeChat = background. */
   lane?: Lane;
-  /** Filled with real usage from the stream's final chunk (Mistral reports it there). */
-  usageSink?: { usage?: TokenUsage };
 };
 
 function toTokenUsage(raw: unknown): TokenUsage | undefined {
@@ -199,43 +197,6 @@ export function mapMistralError(err: unknown): AppError {
   return new AppError("internal_error", "Mistral request failed", 500);
 }
 
-export async function* streamChat(
-  messages: ChatMessage[],
-  options: CompletionOptions = {},
-): AsyncGenerator<string> {
-  const release = await acquireLane(
-    options.lane ?? "interactive",
-    options.signal,
-  );
-  const mistral = getClient();
-
-  try {
-    const stream = await mistral.chat.stream(
-      buildChatBody(messages, options, true) as Parameters<
-        typeof mistral.chat.stream
-      >[0],
-      { fetchOptions: { signal: options.signal } },
-    );
-
-    for await (const event of stream) {
-      if (options.usageSink) {
-        const usage = toTokenUsage(
-          (event.data as { usage?: unknown }).usage,
-        );
-        if (usage) options.usageSink.usage = usage;
-      }
-      const delta = event.data.choices[0]?.delta?.content;
-      const text = extractTextDelta(delta);
-      if (text) yield text;
-    }
-  } catch (err) {
-    if (err instanceof Error && err.name === "AbortError") throw err;
-    throw mapMistralError(err);
-  } finally {
-    release();
-  }
-}
-
 export async function completeChat(
   messages: ChatMessage[],
   options: CompletionOptions = {},
@@ -250,7 +211,7 @@ export async function completeChat(
     options.signal,
   );
   const mistral = getClient();
-  const model = options.model ?? env.mistralConsolidationModel;
+  const model = options.model ?? env.mistralModel;
 
   try {
     const res = await mistral.chat.complete(
@@ -289,36 +250,6 @@ export async function completeChat(
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
       usage,
     };
-  } catch (err) {
-    if (err instanceof Error && err.name === "AbortError") throw err;
-    throw mapMistralError(err);
-  } finally {
-    release();
-  }
-}
-
-export async function embedTexts(
-  inputs: string[],
-  options: Pick<CompletionOptions, "signal" | "lane"> = {},
-): Promise<Float32Array[]> {
-  if (inputs.length === 0) return [];
-  const release = await acquireLane(
-    options.lane ?? "background",
-    options.signal,
-  );
-  const mistral = getClient();
-  try {
-    const res = await mistral.embeddings.create(
-      {
-        model: env.mistralEmbedModel,
-        inputs,
-      },
-      { fetchOptions: { signal: options.signal } },
-    );
-    return (res.data ?? []).map((row) => {
-      const arr = row.embedding ?? [];
-      return Float32Array.from(arr);
-    });
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") throw err;
     throw mapMistralError(err);

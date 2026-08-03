@@ -1,96 +1,28 @@
-# Memory and recall — ops playbook
+# Memory and recall (nuclear)
 
-Ashley memory lives in `~/.composer-assistant/conversations/index.db` (SQLite). The agent assembles context per turn: standing facts → thread summary → retrieval snippets (normal chat only).
+Ashley memory lives in `~/.composer-assistant/conversations/nuclear.db` (SQLite).
 
-## Debug
+Per turn, nuclear assembles: standing facts → recent thread messages → identity/opinions as Agency motivations decide.
 
-With agent-service running (dev, localhost only):
+## Facts and threads
 
-```powershell
-curl "http://127.0.0.1:3710/debug/memory-context?owner_id=YOUR_DISCORD_ID&message=neler%20hatırlıyorsun"
-```
+- Pins: Discord `/remember`, or chat `remember:` / `bunu hatırla:`
+- List: `/memory`
+- Forget: `/forget`
+- Fresh thread: `/new`
 
-Returns `queryMode`, `memoryBlockPreview`, `hotMessageCount`.
+Facts categories: `project`, `preference`, `person`, `ongoing`, `pinned`.
 
-## Health
-
-```powershell
-curl http://127.0.0.1:3710/health
-```
-
-Check `memory.jobsPending`, `memory.jobsPendingByType`, `memory.jobsStuck`, `memory.jobsFailed`, `proactive.enabled`.
-
-`memory.ok` is false when jobs are stuck, any failed jobs, or pending queue exceeds threshold (default 50, env `MEMORY_JOBS_PENDING_ALERT`).
-
-## Auto-remember (consolidator)
-
-Facts are extracted automatically — `/remember` is optional:
-
-| Path | When |
-|------|------|
-| **Fast-path** | Explicit pins only: `bunu hatırla: …` / `remember this: …` (and private variants) |
-| **Consolidator** | Every N assistant turns (default `MEMORY_FACT_EVERY_N=4`) — infers project/identity/preference facts |
-| **Manual** | `/remember` for instant pin or private facts |
-
-Consolidator jobs: `summary` > `facts` > `embed` priority; one coalesced facts job per thread.
-
-Env: `AUTO_REMEMBER_ENABLED` (default true). Conversational "working on X" / preference patterns are no longer auto-merged; the consolidator owns inference. Pins are silent — there is no memory-ack bubble.
-
-- Inline forget requires explicit `unut: topic` or `forget: topic` (no substring auto-delete)
-- Sensitive pins: `/remember private:true` or `bunu hatırla özel: …`
-- Suspect-fact audit (read-only, opt-in purge): `node scripts/memory/audit-facts.mjs`
-
-## Tests
-
-### Offline (no API cost)
+## Backup
 
 ```powershell
-cd C:\Users\Xharv\Projects\project-ashley
-npm test
-# or
-powershell -File scripts/phase0/run-all.ps1 -Tier offline
+powershell -File scripts/backup-memory.ps1
 ```
 
-Includes Vitest unit tests + recall pattern script.
+Copies `nuclear.db` (+ WAL/SHM) to `~/.composer-assistant/backups/{timestamp}/`.
 
-### Agent integration (Mistral + running agent)
+Restore: stop agent-service, replace `nuclear.db`, restart.
 
-```powershell
-npm run dev:agent
-powershell -File scripts/phase0/run-all.ps1 -Tier agent
-```
+## Architecture
 
-Scripts: `test-memory-recall.mjs`, `test-recall-diversity.mjs`, `verify-dm-recall.mjs`, `test-correction-guard.mjs`, `test-voice-recall.mjs`, `test-initiative.mjs`, `test-auto-remember.mjs`.
-
-### Full stack (GPU / Orpheus)
-
-```powershell
-powershell -File scripts/phase0/run-all.ps1 -Tier full
-```
-
-## Manual Discord verification
-
-1. `/new` for a fresh thread
-2. `neler hatırlıyorsun` twice — short, different wording, no bullets
-3. `hafızanda neler var` — recall mode, no confabulation
-4. After denying a fabricated fact (`uydurmuşsun`, `içmedim`) — blocked topics should not return
-5. Say `Website Factory'de çalışıyorum` — should NOT instant-pin; consolidator may pick it up later
-6. `bunu hatırla: test fact` — silent pin (no ack bubble); visible in `/memory`
-
-## Backup and restore
-
-```powershell
-.\scripts\backup-memory.ps1
-```
-
-Copies `index.db` (+ WAL/SHM) to `~/.composer-assistant/backups/{timestamp}/`.
-
-Restore: stop agent-service, replace `index.db`, restart.
-
-## Proactive initiative
-
-- Atomic tick: `POST /initiative/tick` (evaluate + lease + draft)
-- Commit after DM send: `POST /initiative/commit`
-- Pause persists in DB: `POST /initiative/pause` / `resume`
-
-See also `docs/proactive-initiative.md`.
+See [Architecture_Index.md](Architecture_Index.md). Legacy `index.db` is archival (audit logger may still append session rows there; nuclear does not read it for chat).

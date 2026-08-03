@@ -129,3 +129,23 @@ export function getHotMessages(
     .filter((message): message is MemoryMessage => message !== null);
   return rows.reverse();
 }
+
+export function archiveActiveThread(
+  db: DatabaseSync,
+  ownerId: string,
+): string | null {
+  const active: unknown = db
+    .prepare(
+      `SELECT id
+       FROM mem_threads
+       WHERE owner_id = ? AND status = 'active'
+       ORDER BY updated_at DESC
+       LIMIT 1`,
+    )
+    .get(ownerId);
+  if (!isRow(active) || typeof active.id !== "string") return null;
+  db.prepare(
+    `UPDATE mem_threads SET status = 'archived', updated_at = ? WHERE id = ?`,
+  ).run(new Date().toISOString(), active.id);
+  return active.id;
+}

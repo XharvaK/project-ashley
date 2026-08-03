@@ -1,6 +1,5 @@
 # Run persona probes against a throwaway agent on port 3712.
-# Isolated on purpose: its own COMPOSER_DATA_DIR, auto-remember off so probe text
-# cannot pin itself as a fact, proactive off so it never DMs anyone.
+# Isolated on purpose: its own COMPOSER_DATA_DIR, proactive off so it never DMs anyone.
 param(
     [string]$Label = "",
     [string]$Tags = "",
@@ -34,15 +33,13 @@ if ($LASTEXITCODE -ne 0) { throw "agent-service build failed" }
 
 $env:AGENT_PORT = "$Port"
 $env:COMPOSER_DATA_DIR = $EvalData
-$env:AUTO_REMEMBER_ENABLED = "false"
+$env:ASHLEY_NUCLEAR = "true"
 $env:PROACTIVE_ENABLED = "false"
 # Her inner life is live infrastructure: in a probe run it would spend search
 # credits and make the same probe answer differently on Tuesday.
 $env:CURIOSITY_ENABLED = "false"
-$env:CURIOSITY_LOOKUP_ENABLED = "false"
-# A new thread is not isolation: mem_chunks are written per message regardless of
-# auto-remember, and retrieval scores them per owner across threads. Without this,
-# probe 3 answers using probe 2's content.
+# Fresh COMPOSER_DATA_DIR already isolates memory; -WithRetrieval is reserved
+# for future retrieval harnesses (no-op under nuclear today).
 if (-not $WithRetrieval) { $env:MEMORY_RETRIEVAL_TOP_K = "0" }
 
 $logDir = Join-Path $EvalData "logs"
@@ -74,9 +71,9 @@ try {
         Stop-Process -Id $agent.Id -Force
         Write-Host "Stopped isolated agent (pid $($agent.Id))"
     }
-    Remove-Item Env:\AGENT_PORT, Env:\COMPOSER_DATA_DIR, Env:\AUTO_REMEMBER_ENABLED, `
-        Env:\PROACTIVE_ENABLED, Env:\MEMORY_RETRIEVAL_TOP_K, Env:\CURIOSITY_ENABLED, `
-        Env:\CURIOSITY_LOOKUP_ENABLED -ErrorAction SilentlyContinue
+    Remove-Item Env:\AGENT_PORT, Env:\COMPOSER_DATA_DIR, Env:\ASHLEY_NUCLEAR, `
+        Env:\PROACTIVE_ENABLED, Env:\MEMORY_RETRIEVAL_TOP_K, Env:\CURIOSITY_ENABLED `
+        -ErrorAction SilentlyContinue
 }
 
 if ($replayExit -ne 0) {

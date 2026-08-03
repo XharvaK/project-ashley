@@ -1,6 +1,6 @@
-# Persist API keys for Composer Assistant (user scope + ~/.composer-assistant/.env)
+# Persist API keys for Project Ashley (user scope + ~/.composer-assistant/.env)
 param(
-    [ValidateSet("mistral", "cursor", "discord")]
+    [ValidateSet("mistral", "discord")]
     [string]$Provider = "mistral",
     [Parameter(Mandatory = $true)]
     [string]$ApiKey
@@ -42,16 +42,6 @@ switch ($Provider) {
         $env:DISCORD_BOT_TOKEN = $ApiKey
         Merge-EnvLine -Path $envFile -Key "DISCORD_BOT_TOKEN" -Value $ApiKey
         Write-Host "DISCORD_BOT_TOKEN saved to user environment and $envFile"
-    }
-    "cursor" {
-        Write-Warning "CURSOR_API_KEY is deprecated - use -Provider mistral for the Discord companion."
-        if (-not ($ApiKey.StartsWith("cursor_") -or $ApiKey.StartsWith("crsr_"))) {
-            Write-Warning "Key usually starts with cursor_ or crsr_ - double-check."
-        }
-        [Environment]::SetEnvironmentVariable("CURSOR_API_KEY", $ApiKey, "User")
-        $env:CURSOR_API_KEY = $ApiKey
-        Merge-EnvLine -Path $envFile -Key "CURSOR_API_KEY" -Value $ApiKey
-        Write-Host "CURSOR_API_KEY saved (legacy)."
     }
 }
 
