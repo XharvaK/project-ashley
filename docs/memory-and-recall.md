@@ -31,12 +31,14 @@ literal quote from it. Manual pins are preserved separately from automatic and
 legacy facts.
 
 Forgetting uses literal topic matching, so `%` and `_` are ordinary characters.
-It forgets matching episodes and FTS entries, removes episode-sourced Mind State
-and affect, supersedes automatic facts only after their last evidence vanishes,
-rolls back unsupported organic identity/opinion leaves, and redacts linked model
-output while keeping minimal job metadata. Seeded and manual identity remains
-immutable. Completed cognition history is retained for 90 days and failed
-history for 180 days; pending or running work is never pruned.
+Confirmation runs as one transaction: matching source messages are emptied and
+marked with a content-free receipt; matching episodes and FTS entries are
+forgotten; evidence links, episode-sourced Mind State, affect, unsupported facts
+and growth leaves are reconciled; and linked model output is redacted. Redacted
+messages are excluded from hot context, consolidation, and cadence queries.
+Seeded and unrelated manual identity remain immutable. Completed cognition
+history is retained for 90 days and failed history for 180 days; pending or
+running work is never pruned.
 
 ## Backup
 

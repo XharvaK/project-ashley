@@ -45,19 +45,29 @@ function mapEpisode(value: unknown): Episode | null {
   };
 }
 
-function matchingEpisodes(
+export function matchingEpisodes(
   db: DatabaseSync,
   ownerId: string,
   topic: string,
+  messageIds: number[] = [],
 ): Array<{ id: number; summary: string }> {
   if (!topic.trim()) return [];
   const needle = literalLikePattern(topic);
+  const ids = [...new Set(messageIds)].filter(Number.isFinite);
+  const messageClause = ids.length > 0
+    ? ` OR EXISTS (
+         SELECT 1 FROM episode_messages em
+         WHERE em.episode_id = episodes.id
+           AND em.message_id IN (${ids.map(() => "?").join(", ")})
+       )`
+    : "";
   return db.prepare(
     `SELECT id, summary FROM episodes
      WHERE owner_id = ? AND status = 'active'
-       AND (summary LIKE ? ESCAPE '\\' OR entities LIKE ? ESCAPE '\\')
+       AND (summary LIKE ? ESCAPE '\\' OR entities LIKE ? ESCAPE '\\'
+            ${messageClause})
      ORDER BY id DESC`,
-  ).all(ownerId, needle, needle).flatMap((value) => {
+  ).all(ownerId, needle, needle, ...ids).flatMap((value) => {
     const item = row(value);
     return item ? [{ id: Number(item.id), summary: String(item.summary) }] : [];
   });
@@ -197,6 +207,7 @@ export function listUnconsolidatedMessages(
     `SELECT id, thread_id, owner_id, role, text, channel, created_at
      FROM mem_messages
      WHERE owner_id = ? AND thread_id = ? AND id > ?
+       AND redacted_at IS NULL
      ORDER BY id ASC LIMIT ?`,
   ).all(ownerId, threadId, lastId, Math.max(1, Math.min(100, limit)))
     .map((value) => {
@@ -221,8 +232,14 @@ export function forgetEpisodesByTopic(
   db: DatabaseSync,
   ownerId: string,
   topic: string,
+  matchingMessageIds: number[] = [],
 ): number {
-  const matches = matchingEpisodes(db, ownerId, topic).map((episode) => episode.id);
+  const matches = matchingEpisodes(
+    db,
+    ownerId,
+    topic,
+    matchingMessageIds,
+  ).map((episode) => episode.id);
   if (matches.length === 0) return 0;
   const placeholders = matches.map(() => "?").join(", ");
   const evidence = db.prepare(
@@ -247,13 +264,15 @@ export function forgetEpisodesByTopic(
      WHERE episode_id IN (${placeholders})`,
   ).all(...matches).map((value) => Number(row(value)?.message_id ?? 0)).filter(Boolean);
   const update = db.prepare(
-    "UPDATE episodes SET status = 'forgotten', updated_at = ? WHERE id = ?",
+    `UPDATE episodes
+     SET status = 'forgotten', summary = '', entities = '', updated_at = ?
+     WHERE id = ?`,
   );
   for (const id of matches) {
     update.run(new Date().toISOString(), id);
     db.prepare("DELETE FROM episodes_fts WHERE rowid = ?").run(id);
     db.prepare(
-      `UPDATE mind_state_items SET status = 'forgotten', updated_at = ?
+      `UPDATE mind_state_items SET status = 'forgotten', text = '', updated_at = ?
        , wake_state = 'consumed', next_wake_at = NULL, claimed_at = NULL
        WHERE owner_id = ? AND source_type = 'episode' AND source_id = ?`,
     ).run(new Date().toISOString(), ownerId, String(id));
@@ -322,6 +341,7 @@ export function forgetEpisodesByTopic(
          JOIN mem_messages m ON m.id = CAST(l.source_id AS INTEGER)
          WHERE l.owner_id = ? AND l.target_type = 'fact' AND l.target_id = ?
            AND l.source_type = 'message' AND m.role = 'user'
+           AND m.redacted_at IS NULL
          ORDER BY m.id DESC`,
       ).all(ownerId, String(factId)).flatMap((value) => {
         const item = row(value);

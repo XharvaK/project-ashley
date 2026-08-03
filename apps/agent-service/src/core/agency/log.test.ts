@@ -36,7 +36,7 @@ describe("decision log", () => {
           effort: "high",
           completion: "hold",
         },
-        authorizedClaims: { readingTakeIds: [], readingTakeTitles: [] },
+        authorizedClaims: { readingRecordIds: [], readingTitles: [] },
       },
     });
 

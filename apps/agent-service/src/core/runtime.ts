@@ -9,9 +9,7 @@ import { composeTurnContext } from "./context-composer.js";
 import { expressSpeak } from "./conversation/expression.js";
 import { seedIdentity } from "./identity/seed.js";
 import {
-  forgetByTopic,
   listActiveFacts,
-  listFactsMatchingTopic,
   upsertFact,
 } from "./memory/facts.js";
 import {
@@ -44,10 +42,7 @@ import {
   retryUrgentWake,
 } from "./state/mind-items.js";
 import { listRevisions, revertRevision } from "./learning/revisions.js";
-import {
-  forgetEpisodesByTopic,
-  previewEpisodeForget,
-} from "./memory/episodes.js";
+import { forgetOwnerTopic, type ForgetResult } from "./memory/forget.js";
 
 export type ReactiveChatInput = {
   message: string;
@@ -622,7 +617,7 @@ export class AshleyCore {
       .prepare(
         `SELECT created_at
          FROM mem_messages
-         WHERE owner_id = ? AND role = 'user'
+         WHERE owner_id = ? AND role = 'user' AND redacted_at IS NULL
          ORDER BY id DESC
          LIMIT 1`,
       )
@@ -697,17 +692,13 @@ export class AshleyCore {
     ownerId: string,
     topic: string,
     confirmed: boolean,
-  ): { preview: string[]; deleted: number } {
-    const facts = listFactsMatchingTopic(this.db, ownerId, topic);
-    const preview = facts.map((fact) => `${fact.key}: ${fact.value}`);
-    preview.push(...previewEpisodeForget(this.db, ownerId, topic));
-    if (!confirmed) return { preview, deleted: 0 };
+  ): ForgetResult {
+    if (!confirmed) return forgetOwnerTopic(this.db, ownerId, topic, false);
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      const factsDeleted = forgetByTopic(this.db, ownerId, topic);
-      const episodesDeleted = forgetEpisodesByTopic(this.db, ownerId, topic);
+      const result = forgetOwnerTopic(this.db, ownerId, topic, true);
       this.db.exec("COMMIT");
-      return { preview, deleted: factsDeleted + episodesDeleted };
+      return result;
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
@@ -973,7 +964,7 @@ export class AshleyCore {
         .prepare("SELECT COUNT(*) AS count FROM decision_log")
         .get();
       return {
-        ok: version >= 4,
+        ok: version >= 5,
         nuclearEnabled: true,
         dbPath: NUCLEAR_DB_PATH,
         schemaVersion: version,

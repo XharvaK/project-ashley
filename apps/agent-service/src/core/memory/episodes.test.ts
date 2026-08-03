@@ -7,8 +7,13 @@ import { applyEligibleRevisions, proposeRevision } from "../learning/revisions.j
 import { applyAffectiveEvent, getAffectiveState } from "../state/affect.js";
 import { listActiveMindStateItems, upsertMindStateItem } from "../state/mind-items.js";
 import { listActiveFacts, upsertFact } from "./facts.js";
-import { insertMessage, resolveActiveThread } from "./threads.js";
-import { createEpisode, forgetEpisodesByTopic, retrieveEpisodes } from "./episodes.js";
+import { getHotMessages, insertMessage, resolveActiveThread } from "./threads.js";
+import {
+  createEpisode,
+  forgetEpisodesByTopic,
+  listUnconsolidatedMessages,
+  retrieveEpisodes,
+} from "./episodes.js";
 
 describe("episodic memory", () => {
   it("retrieves grounded episodes and removes forgotten callbacks", () => {
@@ -250,6 +255,62 @@ describe("episodic memory", () => {
     expect(db.prepare(
       "SELECT output_json FROM cognitive_runs WHERE episode_id = ?",
     ).get(first.id)).toMatchObject({ output_json: "{}" });
+    db.close();
+  });
+
+  it("redacts matching messages and returns a content-free receipt", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const core = new AshleyCore(db);
+    const threadId = resolveActiveThread(db, "doc");
+    const userId = insertMessage(db, {
+      threadId,
+      ownerId: "doc",
+      role: "user",
+      text: "The codename is Orchid.",
+    });
+    const assistantId = insertMessage(db, {
+      threadId,
+      ownerId: "doc",
+      role: "assistant",
+      text: "I will remember the project detail.",
+    });
+    createEpisode(db, {
+      ownerId: "doc",
+      threadId,
+      summary: "A project detail should remain available.",
+      messageIds: [userId, assistantId],
+    });
+
+    const result = core.forget("doc", "Orchid", true);
+
+    expect(result).toMatchObject({
+      preview: [],
+      receiptId: expect.any(String),
+      counts: {
+        messagesRedacted: 1,
+        episodesForgotten: 1,
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain("Orchid");
+    expect(getHotMessages(db, threadId).map((message) => message.id))
+      .toEqual([assistantId]);
+    expect(listUnconsolidatedMessages(db, "doc", threadId).map((message) => message.id))
+      .toEqual([]);
+    expect(db.prepare(
+      `SELECT text, redacted_at, redaction_receipt_id
+       FROM mem_messages WHERE id = ?`,
+    ).get(userId)).toMatchObject({
+      text: "",
+      redacted_at: expect.any(String),
+      redaction_receipt_id: result.receiptId,
+    });
+    expect(db.prepare(
+      "SELECT owner_id, messages_redacted FROM forget_receipts WHERE id = ?",
+    ).get(result.receiptId)).toMatchObject({
+      owner_id: "doc",
+      messages_redacted: 1,
+    });
+    expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     db.close();
   });
 });

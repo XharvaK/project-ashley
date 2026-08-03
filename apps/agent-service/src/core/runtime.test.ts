@@ -61,7 +61,7 @@ function addCommittedQuestionInitiative(
         effort: "medium",
         completion: "complete",
       },
-      authorizedClaims: { readingTakeIds: [], readingTakeTitles: [] },
+      authorizedClaims: { readingRecordIds: [], readingTitles: [] },
     },
   });
   db.prepare(

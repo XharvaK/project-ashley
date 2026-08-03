@@ -4,7 +4,6 @@ import { env } from "../../env.js";
 import { REPO_CONFIG_PATH } from "../../paths.js";
 import {
   insertItem,
-  insertTake,
   listSources,
   logProvenance,
   markSourceFetched,
@@ -74,14 +73,6 @@ function readConfiguredSources(): SourceConfig[] {
   }
 }
 
-function simpleTake(title: string, excerpt: string): string {
-  const cleanExcerpt = excerpt.replace(/\s+/g, " ").trim().slice(0, 240);
-  if (!cleanExcerpt) {
-    return `${title} caught my eye, but the feed gave me too little to form a serious take.`;
-  }
-  return `${title} caught my eye because ${cleanExcerpt}`;
-}
-
 async function scanSource(
   db: DatabaseSync,
   source: ReturnType<typeof listSources>[number],
@@ -98,7 +89,6 @@ async function scanSource(
   const body = await response.text();
   const items = parseFeed(body, itemLimit);
   let itemsInserted = 0;
-  let takesCreated = 0;
   for (const item of items) {
     const itemId = insertItem(db, {
       sourceId: source.id,
@@ -117,18 +107,8 @@ async function scanSource(
       `${ownerId}:${source.slug}:${item.title}`,
       itemId,
     );
-    const takeText = simpleTake(item.title, item.excerpt);
-    const takeId = insertTake(db, {
-      itemId,
-      interest: source.interest,
-      take: takeText,
-    });
-    if (takeId !== null) {
-      takesCreated++;
-      logProvenance(db, "take", `${ownerId}:${source.slug}`, itemId);
-    }
   }
-  return { itemsInserted, takesCreated };
+  return { itemsInserted, takesCreated: 0 };
 }
 
 export async function runNuclearCuriosityTick(

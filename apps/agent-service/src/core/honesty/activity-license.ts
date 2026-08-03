@@ -1,4 +1,4 @@
-export type ActivityLicenseSource = "takes" | "page" | "lookup";
+export type ActivityLicenseSource = "read_records" | "page" | "lookup";
 
 export type ActivityLicense = {
   readingLicensed: boolean;
@@ -8,8 +8,8 @@ export type ActivityLicense = {
 };
 
 export type ActivityLicenseInput = {
-  takeIds?: number[];
-  takeTitles?: string[];
+  readRecordIds?: number[];
+  readTitles?: string[];
   pageContext?: string | null;
   searchContext?: string | null;
 };
@@ -34,11 +34,11 @@ export function computeActivityLicense(
 ): ActivityLicense {
   const sources: ActivityLicenseSource[] = [];
   const refs: string[] = [];
-  const takeIds = input.takeIds ?? [];
-  if (takeIds.length > 0) {
-    sources.push("takes");
+  const readRecordIds = input.readRecordIds ?? [];
+  if (readRecordIds.length > 0) {
+    sources.push("read_records");
     refs.push(
-      ...(input.takeTitles ?? []).map((title) => title.trim()).filter(Boolean),
+      ...(input.readTitles ?? []).map((title) => title.trim()).filter(Boolean),
     );
   }
   if (input.pageContext?.trim()) {

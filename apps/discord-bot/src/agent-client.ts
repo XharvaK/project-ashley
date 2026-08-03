@@ -209,7 +209,20 @@ export async function newThread() {
 }
 
 export async function forgetTopic(topic: string, confirmed: boolean) {
-  return agentFetch<{ preview: string[]; deleted: number }>("/memory/forget", {
+  return agentFetch<{
+    preview: string[];
+    deleted: number;
+    receiptId: string | null;
+    counts: {
+      messagesRedacted: number;
+      episodesForgotten: number;
+      factsReconciled: number;
+      revisionsReconciled: number;
+      stateReconciled: number;
+      evidenceRemoved: number;
+      runsRedacted: number;
+    };
+  }>("/memory/forget", {
     method: "POST",
     body: JSON.stringify({
       userId: config.ownerId,

@@ -120,7 +120,7 @@ export function getHotMessages(
     .prepare(
       `SELECT id, thread_id, owner_id, role, text, channel, created_at
        FROM mem_messages
-       WHERE thread_id = ?
+       WHERE thread_id = ? AND redacted_at IS NULL
        ORDER BY id DESC
        LIMIT ?`,
     )
@@ -128,6 +128,44 @@ export function getHotMessages(
     .map(mapMessage)
     .filter((message): message is MemoryMessage => message !== null);
   return rows.reverse();
+}
+
+export function listMessageIdsMatchingTopic(
+  db: DatabaseSync,
+  ownerId: string,
+  topic: string,
+): number[] {
+  const clean = topic.trim();
+  if (!clean) return [];
+  const pattern = `%${clean
+    .replaceAll("\\", "\\\\")
+    .replaceAll("%", "\\%")
+    .replaceAll("_", "\\_")}%`;
+  return db.prepare(
+    `SELECT id FROM mem_messages
+     WHERE owner_id = ? AND redacted_at IS NULL
+       AND text LIKE ? ESCAPE '\\'
+     ORDER BY id`,
+  ).all(ownerId, pattern).flatMap((value) =>
+    isRow(value) && typeof value.id === "number" ? [value.id] : []);
+}
+
+export function redactMessages(
+  db: DatabaseSync,
+  ownerId: string,
+  messageIds: number[],
+  receiptId: string,
+): number {
+  const ids = [...new Set(messageIds)].filter(Number.isFinite);
+  if (ids.length === 0) return 0;
+  const placeholders = ids.map(() => "?").join(", ");
+  const result = db.prepare(
+    `UPDATE mem_messages
+     SET text = '', redacted_at = ?, redaction_receipt_id = ?
+     WHERE owner_id = ? AND redacted_at IS NULL
+       AND id IN (${placeholders})`,
+  ).run(new Date().toISOString(), receiptId, ownerId, ...ids);
+  return Number(result.changes);
 }
 
 export function archiveActiveThread(

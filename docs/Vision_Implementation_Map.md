@@ -23,8 +23,8 @@ separately; repository edits remain human-controlled.
 
 | Vision commitment | Architectural owner | Required evidence | Failure signal | Status |
 |---|---|---|---|---|
-| Truth before convincing performance | Honesty, Memory, Curiosity | Stored source IDs, exact provenance, explicit uncertainty | Fabricated reading, memory, affect, or self-claim | Baseline shipped; reading provenance pending |
-| Continuity without fabrication | Memory, Cognition | Source-linked messages, episodes, revisions, redaction lineage | Forgotten content resurfaces or evidence cannot be traced | Episodic baseline shipped; complete redaction pending |
+| Truth before convincing performance | Honesty, Memory, Curiosity | Stored source IDs, exact provenance, explicit uncertainty | Fabricated reading, memory, affect, or self-claim | Read-record boundary shipped; full reader pending |
+| Continuity without fabrication | Memory, Cognition | Source-linked messages, episodes, revisions, redaction lineage | Forgotten content resurfaces or evidence cannot be traced | Receipt-backed complete prompt-path redaction shipped |
 | Agency rather than servitude | Identity, Mind State, Thought | Stable boundary plus current grounded motivation | Compliance is the only available action | Refusal pending |
 | Care without manipulation | Mind State, Memory, Thought | Shared history, current concern, bounded initiative evidence | Attachment optimization, guilt, exclusivity, or repeated ungrounded contact | Grounded concern baseline shipped; cadence guard pending |
 | Freedom and recognizable growth | Identity, Learning | Independent observations, cooling periods, joint review for foundations | Random drift, unilateral foundational change, or creator ownership | Bounded growth baseline shipped; joint review pending |

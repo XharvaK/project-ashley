@@ -18,7 +18,7 @@ describe("nuclear agency decisions", () => {
     );
     expect(result.kind).toBe("speak");
     expect(result.cognitiveAllocation.shouldSpeak).toBe(true);
-    expect(result.authorizedClaims.readingTakeIds).toEqual([]);
+    expect(result.authorizedClaims.readingRecordIds).toEqual([]);
   });
 
   it("honors a direct request for space", () => {
@@ -46,7 +46,7 @@ describe("nuclear agency decisions", () => {
     expect(result.kind).toBe("silence");
   });
 
-  it("attaches reading claims for share from existing takes", () => {
+  it("licenses reading only from a selected successful read record", () => {
     const base = decide(
       [
         {
@@ -64,12 +64,12 @@ describe("nuclear agency decisions", () => {
     );
     expect(base.kind).toBe("share");
     const withClaims = attachAuthorizedClaims(base, [
-      { id: 1, title: "One" },
-      { id: 2, title: "Two" },
-      { id: 3, title: "Three" },
+      { id: 1, title: "One", evidenceKind: "read_record", readId: 101 },
+      { id: 2, title: "Two", evidenceKind: "scan_excerpt", readId: null },
+      { id: 3, title: "Three", evidenceKind: "read_record", readId: 303 },
     ]);
-    expect(withClaims.authorizedClaims.readingTakeIds).toEqual([1]);
-    expect(withClaims.authorizedClaims.readingTakeTitles).toEqual([
+    expect(withClaims.authorizedClaims.readingRecordIds).toEqual([101]);
+    expect(withClaims.authorizedClaims.readingTitles).toEqual([
       "One",
     ]);
   });

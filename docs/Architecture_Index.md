@@ -22,13 +22,18 @@ SQLite: `~/.composer-assistant/conversations/nuclear.db`.
 `apps/agent-service/src/core/` — identity, state, memory, cognition, learning,
 curiosity, agency, reflection, honesty, conversation, writers, runtime.
 
-Schema v4 adds grounded episodes with FTS5 retrieval, referenced Mind State
+Schema v5 adds grounded episodes with FTS5 retrieval, referenced Mind State
 items, bounded affect, durable cognition jobs/runs, verified fact provenance,
 edge-triggered urgent wake leases, Thought fallback auditing, and exact organic
 revision lineage. Cognition integration is atomic: a completed job produces one
 complete episode and all of its derived state, or none of them.
 `ASHLEY_COGNITION_MODE=observe` records evidence and proposals without allowing
 behavioral influence; `apply` enables the full loop.
+
+Feed scans store attention candidates only. `cur_reads` is the sole evidence
+source for claims that Ashley read an article. Owner-confirmed forgetting
+redacts matching source messages, removes FTS and evidence paths, reconciles
+derived state, and records content-free receipts.
 
 Shared utils: `apps/agent-service/src/lib/` (feed-parse, typography, metadata-echo, strip-markers).
 

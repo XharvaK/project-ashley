@@ -112,8 +112,8 @@ function makeDecision(
       completion: kind === "delay" ? "hold" : "complete",
     },
     authorizedClaims: {
-      readingTakeIds: [],
-      readingTakeTitles: [],
+      readingRecordIds: [],
+      readingTitles: [],
     },
   };
 }
@@ -124,7 +124,12 @@ function makeDecision(
  */
 export function attachAuthorizedClaims(
   decision: Decision,
-  takes: Array<{ id: number; title: string }>,
+  takes: Array<{
+    id: number;
+    title: string;
+    evidenceKind: "scan_excerpt" | "read_record";
+    readId: number | null;
+  }>,
 ): Decision {
   if (decision.kind !== "share" && decision.kind !== "ask") {
     return decision;
@@ -135,13 +140,19 @@ export function attachAuthorizedClaims(
       .map((ref) => Number(ref.id)),
   );
   const slice = takes
-    .filter((take) => licensedTakeIds.has(take.id))
+    .filter(
+      (take) =>
+        licensedTakeIds.has(take.id) &&
+        take.evidenceKind === "read_record" &&
+        take.readId !== null,
+    )
     .slice(0, 2);
   return {
     ...decision,
     authorizedClaims: {
-      readingTakeIds: slice.map((take) => take.id),
-      readingTakeTitles: slice.map((take) => take.title),
+      readingRecordIds: slice.flatMap((take) =>
+        take.readId === null ? [] : [take.readId]),
+      readingTitles: slice.map((take) => take.title),
     },
   };
 }

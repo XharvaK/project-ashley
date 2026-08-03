@@ -45,6 +45,8 @@ export type NuclearTake = {
   createdAt: string;
   title: string;
   url: string;
+  evidenceKind: "scan_excerpt" | "read_record";
+  readId: number | null;
 };
 
 export type NuclearProvenanceKind =
@@ -136,6 +138,10 @@ function mapTake(row: unknown): NuclearTake | null {
     createdAt: stringValue(row.created_at),
     title: stringValue(row.title),
     url: stringValue(row.url),
+    evidenceKind: row.evidence_kind === "read_record"
+      ? "read_record"
+      : "scan_excerpt",
+    readId: row.read_id == null ? null : numberValue(row.read_id),
   };
 }
 
@@ -232,7 +238,13 @@ export function insertItem(
 
 export function insertTake(
   db: DatabaseSync,
-  input: { itemId: number; interest: string; take: string },
+  input: {
+    itemId: number;
+    interest: string;
+    take: string;
+    evidenceKind: "scan_excerpt" | "read_record";
+    readId?: number | null;
+  },
 ): number | null {
   const existing: unknown = db
     .prepare("SELECT id FROM cur_takes WHERE item_id = ?")
@@ -240,14 +252,17 @@ export function insertTake(
   if (isRow(existing) && typeof existing.id === "number") return null;
   const result = db
     .prepare(
-      `INSERT INTO cur_takes (item_id, interest, take, created_at)
-       VALUES (?, ?, ?, ?)`,
+      `INSERT INTO cur_takes
+         (item_id, interest, take, created_at, evidence_kind, read_id)
+       VALUES (?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.itemId,
       input.interest,
       input.take.trim().slice(0, 1000),
       new Date().toISOString(),
+      input.evidenceKind,
+      input.readId ?? null,
     );
   return Number(result.lastInsertRowid);
 }
@@ -277,7 +292,7 @@ export function listRecentTakes(
   const rows = db
     .prepare(
       `SELECT t.id, t.item_id, t.interest, t.take, t.created_at,
-              i.title, i.url
+              i.title, i.url, t.evidence_kind, t.read_id
        FROM cur_takes t
        JOIN cur_items i ON i.id = t.item_id
        ORDER BY t.created_at DESC

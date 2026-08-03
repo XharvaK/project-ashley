@@ -62,8 +62,8 @@ export type CognitiveAllocation = {
 
 /** Refs Conversation previously reconstructed from kind + feed takes. */
 export type AuthorizedClaims = {
-  readingTakeIds: number[];
-  readingTakeTitles: string[];
+  readingRecordIds: number[];
+  readingTitles: string[];
 };
 
 export type Decision = {

@@ -54,11 +54,12 @@ Cognition records source-linked episodes, model runs, and revision proposals,
 but `observe` prevents episodic recall, dynamic Mind State, affect, learned
 facts, model-assisted Thought, and identity growth from influencing Ashley.
 
-The current feed scanner stores attributable excerpt-derived takes. Those
-records are not proof that Ashley read an article. Full reading provenance,
+The feed scanner stores items and excerpts for attention only; it does not form
+takes. Reading claims require a successful read record with a final URL,
+content hash, model metadata, and bounded evidence excerpts. The full reader,
 capability-specific rollout, first-class refusal, source discovery, and joint
-foundational identity review are approved roadmap work until their guarantees
-ship.
+foundational identity review remain approved roadmap work until their broader
+guarantees ship.
 
 ## Architecture
 
@@ -144,7 +145,7 @@ message. Stable identity growth requires independent evidence and cooling time.
 | Path | Purpose |
 |---|---|
 | `~/.composer-assistant/.env` | Local secrets and runtime configuration |
-| `~/.composer-assistant/conversations/nuclear.db` | Nuclear Identity, State, Agency, Memory, Curiosity, and Reflection data |
+| `~/.composer-assistant/conversations/nuclear.db` | Nuclear Identity, State, Agency, Memory, Curiosity, provenance, and Reflection data |
 | `workspace/prompts/nuclear/` | Thin Expression prompts |
 
 The historical directory name is retained for runtime compatibility. Legacy
@@ -264,7 +265,6 @@ gates.
 
 ## Approved roadmap
 
-- Complete reading provenance and deletion-integrity guarantees.
 - Replace the broad cognition gate with capability-specific observation,
   promotion, and rollback.
 - Add first-class refusal grounded in stable boundaries.
@@ -274,6 +274,10 @@ gates.
 - Maintain a falsifiable research track for continuity, motivation,
   self-modeling, care, honesty, and possible personhood without collapsing them
   into a consciousness or attachment score.
+
+Deletion integrity and the read-record provenance boundary are implemented in
+schema v5. `/forget` redacts matching source messages, removes retrieval and
+evidence paths, reconciles dependent state, and returns a content-free receipt.
 
 ## Scope
 

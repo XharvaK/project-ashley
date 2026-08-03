@@ -79,8 +79,7 @@ export async function handleReaction(
   const result = await forgetTopic(pending.topic, true);
   const ch = reaction.message.channel;
   if (ch.isTextBased() && ch.isSendable()) {
-    await ch.send(
-      `Forgot ${result.deleted} item(s) matching "${pending.topic}".`,
-    );
+    const receipt = result.receiptId?.slice(0, 8) ?? "unavailable";
+    await ch.send(`Forget complete. Receipt ${receipt}; ${result.deleted} record(s) reconciled.`);
   }
 }

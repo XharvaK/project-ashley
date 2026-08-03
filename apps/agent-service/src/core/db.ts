@@ -436,6 +436,48 @@ CREATE INDEX idx_episodes_thread_end
   ON episodes (owner_id, thread_id, source_end_message_id DESC);
 `;
 
+const MIGRATION_5 = `
+CREATE TABLE forget_receipts (
+  id                    TEXT PRIMARY KEY,
+  owner_id              TEXT NOT NULL,
+  messages_redacted     INTEGER NOT NULL DEFAULT 0,
+  episodes_forgotten    INTEGER NOT NULL DEFAULT 0,
+  facts_reconciled      INTEGER NOT NULL DEFAULT 0,
+  revisions_reconciled  INTEGER NOT NULL DEFAULT 0,
+  state_reconciled      INTEGER NOT NULL DEFAULT 0,
+  evidence_removed      INTEGER NOT NULL DEFAULT 0,
+  runs_redacted         INTEGER NOT NULL DEFAULT 0,
+  created_at            TEXT NOT NULL
+);
+CREATE INDEX idx_forget_receipts_owner
+  ON forget_receipts (owner_id, created_at DESC);
+
+ALTER TABLE mem_messages ADD COLUMN redacted_at TEXT;
+ALTER TABLE mem_messages ADD COLUMN redaction_receipt_id TEXT
+  REFERENCES forget_receipts(id);
+CREATE INDEX idx_nuclear_messages_visible
+  ON mem_messages (thread_id, redacted_at, id DESC);
+
+CREATE TABLE cur_reads (
+  id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+  item_id                INTEGER NOT NULL UNIQUE REFERENCES cur_items(id),
+  final_url              TEXT NOT NULL,
+  content_hash           TEXT NOT NULL,
+  retrieved_at           TEXT NOT NULL,
+  model                  TEXT NOT NULL,
+  model_metadata_json    TEXT NOT NULL DEFAULT '{}',
+  evidence_excerpts_json TEXT NOT NULL DEFAULT '[]',
+  cleaned_chars          INTEGER NOT NULL DEFAULT 0,
+  created_at             TEXT NOT NULL
+);
+CREATE INDEX idx_cur_reads_recent ON cur_reads (retrieved_at DESC, id DESC);
+
+ALTER TABLE cur_takes ADD COLUMN evidence_kind TEXT NOT NULL DEFAULT 'scan_excerpt'
+  CHECK (evidence_kind IN ('scan_excerpt', 'read_record'));
+ALTER TABLE cur_takes ADD COLUMN read_id INTEGER REFERENCES cur_reads(id);
+CREATE INDEX idx_cur_takes_evidence ON cur_takes (evidence_kind, read_id, created_at DESC);
+`;
+
 function userVersion(db: DatabaseSync): number {
   const row: unknown = db.prepare("PRAGMA user_version").get();
   if (typeof row !== "object" || row === null || !("user_version" in row)) {
@@ -485,6 +527,17 @@ export function migrate(db: DatabaseSync): void {
     try {
       db.exec(MIGRATION_4);
       db.exec("PRAGMA user_version = 4");
+      db.exec("COMMIT");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+  if (userVersion(db) < 5) {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.exec(MIGRATION_5);
+      db.exec("PRAGMA user_version = 5");
       db.exec("COMMIT");
     } catch (error) {
       db.exec("ROLLBACK");

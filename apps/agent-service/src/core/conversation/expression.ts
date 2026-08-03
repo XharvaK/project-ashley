@@ -41,11 +41,11 @@ export async function expressSpeak(
   channel: NuclearPromptChannel,
 ): Promise<RenderedOutput> {
   const claims = decision.authorizedClaims;
-  const readingLicensed = claims.readingTakeIds.length > 0;
+  const readingLicensed = claims.readingRecordIds.length > 0;
   const licenseNote = readingLicensed
     ? computeActivityLicense({
-        takeIds: claims.readingTakeIds,
-        takeTitles: claims.readingTakeTitles,
+        readRecordIds: claims.readingRecordIds,
+        readTitles: claims.readingTitles,
       }).note
     : emptyActivityLicenseNote();
   const affect = decision.affectLicense;

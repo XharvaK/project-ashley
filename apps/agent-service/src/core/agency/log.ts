@@ -266,8 +266,8 @@ export function logDecision(
               completion: "complete",
             },
             authorizedClaims: {
-              readingTakeIds: [],
-              readingTakeTitles: [],
+              readingRecordIds: [],
+              readingTitles: [],
             },
           },
           outcomeText,

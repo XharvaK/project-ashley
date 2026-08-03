@@ -13,14 +13,14 @@ describe("nuclear database migrations", () => {
   it("creates the cognition and Reflection schemas for a fresh database", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
 
-    expect(schemaVersion(db)).toBe(4);
+    expect(schemaVersion(db)).toBe(5);
     const tables = db
       .prepare(
         `SELECT name FROM sqlite_master
          WHERE type = 'table' AND name IN (
            'reflection_events', 'initiative_learning', 'episodes',
            'mind_state_items', 'affective_state', 'cognitive_jobs',
-           'learning_revisions'
+           'learning_revisions', 'cur_reads', 'forget_receipts'
          )
          ORDER BY name`,
       )
@@ -28,7 +28,9 @@ describe("nuclear database migrations", () => {
     expect(tables.map((row) => row.name)).toEqual([
       "affective_state",
       "cognitive_jobs",
+      "cur_reads",
       "episodes",
+      "forget_receipts",
       "initiative_learning",
       "learning_revisions",
       "mind_state_items",
@@ -81,6 +83,14 @@ describe("nuclear database migrations", () => {
         superseded_by INTEGER,
         created_at TEXT NOT NULL
       );
+      CREATE TABLE cur_sources (id INTEGER PRIMARY KEY);
+      CREATE TABLE cur_items (
+        id INTEGER PRIMARY KEY, source_id INTEGER REFERENCES cur_sources(id)
+      );
+      CREATE TABLE cur_takes (
+        id INTEGER PRIMARY KEY, item_id INTEGER REFERENCES cur_items(id),
+        interest TEXT, take TEXT, created_at TEXT, surfaced_at TEXT
+      );
       INSERT INTO decision_log
         (owner_id, channel, trigger, decision_kind, motivation_ids_json,
          reason, outcome_text, created_at)
@@ -92,7 +102,7 @@ describe("nuclear database migrations", () => {
 
     openNuclearDb(db);
 
-    expect(schemaVersion(db)).toBe(4);
+    expect(schemaVersion(db)).toBe(5);
     const decision = db
       .prepare(
         `SELECT reason, outcome_text, learning_subject_kind,
@@ -111,7 +121,7 @@ describe("nuclear database migrations", () => {
     db.close();
   });
 
-  it("upgrades v3 cognition rows with safe v4 lifecycle defaults", () => {
+  it("upgrades v3 cognition rows through the current schema", () => {
     const db = new DatabaseSync(":memory:");
     db.exec(`
       CREATE TABLE decision_log (
@@ -132,6 +142,22 @@ describe("nuclear database migrations", () => {
         id INTEGER PRIMARY KEY, owner_id TEXT, category TEXT, key TEXT,
         value TEXT, confidence REAL, importance INTEGER,
         source_message_id INTEGER, superseded_by INTEGER, created_at TEXT
+      );
+      CREATE TABLE mem_threads (
+        id TEXT PRIMARY KEY, owner_id TEXT, status TEXT, channel TEXT,
+        created_at TEXT, updated_at TEXT
+      );
+      CREATE TABLE mem_messages (
+        id INTEGER PRIMARY KEY, thread_id TEXT REFERENCES mem_threads(id),
+        owner_id TEXT, role TEXT, text TEXT, channel TEXT, created_at TEXT
+      );
+      CREATE TABLE cur_sources (id INTEGER PRIMARY KEY);
+      CREATE TABLE cur_items (
+        id INTEGER PRIMARY KEY, source_id INTEGER REFERENCES cur_sources(id)
+      );
+      CREATE TABLE cur_takes (
+        id INTEGER PRIMARY KEY, item_id INTEGER REFERENCES cur_items(id),
+        interest TEXT, take TEXT, created_at TEXT, surfaced_at TEXT
       );
       CREATE TABLE episodes (id INTEGER PRIMARY KEY, owner_id TEXT,
         thread_id TEXT, summary TEXT, entities TEXT,
@@ -162,7 +188,7 @@ describe("nuclear database migrations", () => {
 
     openNuclearDb(db);
 
-    expect(schemaVersion(db)).toBe(4);
+    expect(schemaVersion(db)).toBe(5);
     expect(db.prepare(
       "SELECT wake_state FROM mind_state_items WHERE id = 1",
     ).get()).toMatchObject({ wake_state: "pending" });
@@ -172,6 +198,44 @@ describe("nuclear database migrations", () => {
     expect(db.prepare(
       "SELECT origin FROM mem_facts WHERE id = 1",
     ).get()).toMatchObject({ origin: "legacy" });
+    db.close();
+  });
+
+  it("upgrades schema v4 with redaction and read provenance", () => {
+    const db = new DatabaseSync(":memory:");
+    db.exec(`
+      PRAGMA foreign_keys = ON;
+      CREATE TABLE mem_threads (
+        id TEXT PRIMARY KEY, owner_id TEXT, status TEXT, channel TEXT,
+        created_at TEXT, updated_at TEXT
+      );
+      CREATE TABLE mem_messages (
+        id INTEGER PRIMARY KEY, thread_id TEXT REFERENCES mem_threads(id),
+        owner_id TEXT, role TEXT, text TEXT, channel TEXT, created_at TEXT
+      );
+      CREATE TABLE cur_sources (id INTEGER PRIMARY KEY);
+      CREATE TABLE cur_items (
+        id INTEGER PRIMARY KEY, source_id INTEGER REFERENCES cur_sources(id)
+      );
+      CREATE TABLE cur_takes (
+        id INTEGER PRIMARY KEY, item_id INTEGER REFERENCES cur_items(id),
+        interest TEXT, take TEXT, created_at TEXT, surfaced_at TEXT
+      );
+      INSERT INTO cur_sources(id) VALUES (1);
+      INSERT INTO cur_items(id, source_id) VALUES (1, 1);
+      INSERT INTO cur_takes(id, item_id, interest, take, created_at)
+      VALUES (1, 1, 'systems', 'feed excerpt', '2026-01-01T00:00:00.000Z');
+      PRAGMA user_version = 4;
+    `);
+
+    openNuclearDb(db);
+
+    expect(schemaVersion(db)).toBe(5);
+    expect(db.prepare(
+      "SELECT evidence_kind, read_id FROM cur_takes WHERE id = 1",
+    ).get()).toMatchObject({ evidence_kind: "scan_excerpt", read_id: null });
+    const foreignKeys = db.prepare("PRAGMA foreign_key_check").all();
+    expect(foreignKeys).toEqual([]);
     db.close();
   });
 });
