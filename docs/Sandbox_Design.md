@@ -1,7 +1,8 @@
 # Sandbox Design — Threat Model and OS Boundary
 
 **Status:** Design/specification. Wave 07b fake broker is accepted and the Wave
-07c daemon/transport is locally verified; neither is deployed to Mint.
+07c daemon/transport is Wave_accepted but not release-qualified; neither is
+deployed to Mint.
 
 This document specifies the threat model, trust boundaries, and OS-boundary topology
 for Ashley's dedicated execution broker on Linux Mint. It operationalizes
@@ -37,8 +38,9 @@ workspace governance, residual risks, deferrals.
 
 **Gate status:** Wave 06, Wave 07b, and Wave 08b are **Wave_accepted** (not
 release-qualified); Wave 07 is **Design_accepted** (2026-08-04); Wave 07c is
-**Locally_verified** and awaits **Accept Wave 07c**. No Mint user/service install,
-agent opt-in, or restart is authorized by local verification alone. Design must
+**Wave_accepted** (2026-08-04), not release-qualified. No Mint user/service install,
+agent opt-in, or restart is authorized by local verification or wave acceptance
+alone. Design must
 not bypass Wave 06 guarantees. Perception outputs remain untrusted data until a
 separate signed owner approval.
 

@@ -30,6 +30,8 @@
     { "method": "POST", "path": "/nuclear/external/actions/:entityUuid/reconcile", "ownerScope": "owner_required", "lifecycle": "active" },
     { "method": "POST", "path": "/nuclear/external/credentials/:credentialRef/revoke", "ownerScope": "owner_required", "lifecycle": "active" },
     { "method": "POST", "path": "/nuclear/external/emergency-stop", "ownerScope": "owner_required", "lifecycle": "active" },
+    { "method": "POST", "path": "/sandbox/approve", "ownerScope": "owner_required", "lifecycle": "active" },
+    { "method": "POST", "path": "/sandbox/tombstone/sign", "ownerScope": "owner_required", "lifecycle": "active" },
     { "method": "GET", "path": "/sessions", "ownerScope": "internal", "lifecycle": "active" },
     { "method": "GET", "path": "/events", "ownerScope": "internal", "lifecycle": "active" },
     { "method": "POST", "path": "/session/start", "ownerScope": "internal", "lifecycle": "active" },

@@ -161,6 +161,21 @@ export const env = {
     30_000,
     true,
   ),
+  sandboxKeysDir:
+    process.env.ASHLEY_SANDBOX_KEYS_DIR ??
+    join(homedir(), ".composer-assistant", "keys"),
+  sandboxKeyPassphrasePath:
+    process.env.ASHLEY_SANDBOX_KEY_PASSPHRASE_PATH ??
+    join(homedir(), ".composer-assistant", "keys", "master.pass"),
+  sandboxOwnerApprovalKeyEncPath:
+    process.env.ASHLEY_SANDBOX_OWNER_KEY_ENC_PATH ??
+    join(homedir(), ".composer-assistant", "keys", "owner-approval.key.enc"),
+  sandboxContinuityKeyEncPath:
+    process.env.ASHLEY_SANDBOX_CONTINUITY_KEY_ENC_PATH ??
+    join(homedir(), ".composer-assistant", "keys", "continuity-tombstone.key.enc"),
+  sandboxOwnerKeyId: process.env.ASHLEY_SANDBOX_OWNER_KEY_ID ?? "owner-ed25519-v1",
+  sandboxContinuityKeyId:
+    process.env.ASHLEY_SANDBOX_CONTINUITY_KEY_ID ?? "continuity-tombstone-ed25519-v1",
 };
 
 export function validateBoot(): { ok: boolean; warnings: string[] } {

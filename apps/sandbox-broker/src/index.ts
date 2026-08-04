@@ -33,6 +33,7 @@ export class MemoryTransport {
 export * from "./broker.js";
 export * from "./constants/limits.js";
 export * from "./crypto/approval.js";
+export * from "./crypto/key-custody.js";
 export * from "./crypto/tombstone.js";
 export * from "./crypto/types.js";
 export * from "./handlers/source-prepare.js";

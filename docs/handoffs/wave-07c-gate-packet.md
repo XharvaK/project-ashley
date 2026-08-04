@@ -2,7 +2,7 @@
 
 **Wave:** 07c — Mint sandbox daemon and agent transport
 **Type:** Production-boundary implementation verification
-**Status:** **Locally_verified** — awaiting explicit **Accept Wave 07c**
+**Status:** **Wave_accepted** — not release-qualified or deployed
 **Base SHA:** `3b82c8a0afd01f731879231e8e0ad36eae87222d`
 
 This packet covers the implementation that was missing behind the accepted
@@ -88,12 +88,11 @@ Mint has been changed or that the boundary is release-qualified.
 - Mint sandbox installer, preflight, status, systemd service, recipe manifest,
   and operator documentation
 
-## Required next decision
+## Sign-off
 
-Review the packet and the Linux-specific non-guarantees. If satisfied, say:
-
-**Accept Wave 07c**
-
-That acceptance would advance only this implementation gate. It would not by
-itself authorize Mint installation, release qualification, agent opt-in,
-service restart, or production execution.
+- Doc phrase: **“Accept Wave 07c”**
+- Date: **2026-08-04**
+- Accepted implementation: `84123d1`
+- This acceptance advances the implementation gate only. It does not authorize
+  Mint installation, release qualification, agent opt-in, service restart, or
+  production execution.

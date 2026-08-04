@@ -6,7 +6,7 @@ This wrapper never copies private keys; the key paths are remote paths to public
 key files already staged on Mint.
 #>
 param(
-  [ValidateSet("Preflight", "Status", "Install", "Remove")]
+  [ValidateSet("Preflight", "Status", "Install", "Remove", "StagePublicKeys")]
   [string]$Action = "Preflight",
   [switch]$Apply,
   [switch]$PushFirst,
@@ -18,10 +18,12 @@ param(
   [string]$RepoDir = "~/project-ashley",
   [string]$AgentUser = "",
   [string]$OwnerId = "",
-  [string]$OwnerPublicKeyRemotePath = "",
-  [string]$ContinuityPublicKeyRemotePath = "",
+  [string]$OwnerPublicKeyRemotePath = "/tmp/owner-ed25519-v1.pub",
+  [string]$ContinuityPublicKeyRemotePath = "/tmp/continuity-tombstone-ed25519-v1.pub",
   [string]$OwnerKeyId = "",
-  [string]$ContinuityKeyId = ""
+  [string]$ContinuityKeyId = "",
+  [string]$OwnerPublicKeyLocalPath = "",
+  [string]$ContinuityPublicKeyLocalPath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -30,7 +32,7 @@ $RepoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 if (($Action -eq "Install" -or $Action -eq "Remove") -and -not $Apply) {
   throw "$Action changes the Mint host; pass -Apply explicitly. Preflight and Status are read-only."
 }
-foreach ($value in @($HostName, $User, $RepoDir, $AgentUser, $OwnerId, $OwnerPublicKeyRemotePath, $ContinuityPublicKeyRemotePath, $OwnerKeyId, $ContinuityKeyId)) {
+foreach ($value in @($HostName, $User, $RepoDir, $AgentUser, $OwnerId, $OwnerPublicKeyRemotePath, $ContinuityPublicKeyRemotePath, $OwnerKeyId, $ContinuityKeyId, $OwnerPublicKeyLocalPath, $ContinuityPublicKeyLocalPath)) {
   if ($value -and $value -notmatch '^[A-Za-z0-9_./~:@+-]+$') {
     throw "Unsafe shell characters in argument: $value"
   }
@@ -45,6 +47,37 @@ if ($PushFirst) {
   } finally {
     Pop-Location
   }
+}
+
+if ($Action -eq "StagePublicKeys") {
+  $keysDir = Join-Path $env:USERPROFILE ".composer-assistant\keys"
+  if (-not $OwnerPublicKeyLocalPath) {
+    $ownerKeyId = if ($OwnerKeyId) { $OwnerKeyId } else { "owner-ed25519-v1" }
+    $OwnerPublicKeyLocalPath = Join-Path $keysDir "$ownerKeyId.pub"
+  }
+  if (-not $ContinuityPublicKeyLocalPath) {
+    $continuityKeyId = if ($ContinuityKeyId) { $ContinuityKeyId } else { "continuity-tombstone-ed25519-v1" }
+    $ContinuityPublicKeyLocalPath = Join-Path $keysDir "$continuityKeyId.pub"
+  }
+  foreach ($path in @($OwnerPublicKeyLocalPath, $ContinuityPublicKeyLocalPath)) {
+    if (-not (Test-Path -LiteralPath $path)) {
+      throw "Public key file not found: $path. Run bootstrap-sandbox-keys.ps1 first."
+    }
+  }
+  $target = "${User}@${HostName}"
+  Write-Host "=== StagePublicKeys to $target ==="
+  & scp -P $Port -o BatchMode=yes -o StrictHostKeyChecking=accept-new `
+    $OwnerPublicKeyLocalPath `
+    "${target}:${OwnerPublicKeyRemotePath}"
+  if ($LASTEXITCODE -ne 0) { throw "scp owner public key failed (exit $LASTEXITCODE)." }
+  & scp -P $Port -o BatchMode=yes -o StrictHostKeyChecking=accept-new `
+    $ContinuityPublicKeyLocalPath `
+    "${target}:${ContinuityPublicKeyRemotePath}"
+  if ($LASTEXITCODE -ne 0) { throw "scp continuity public key failed (exit $LASTEXITCODE)." }
+  Write-Host "Staged public keys to Mint:"
+  Write-Host "  $OwnerPublicKeyRemotePath"
+  Write-Host "  $ContinuityPublicKeyRemotePath"
+  return
 }
 
 $target = "${User}@${HostName}"

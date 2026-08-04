@@ -60,7 +60,7 @@ if [[ "$APPLY" -eq 1 ]]; then
   npm run build --prefix "$ROOT/apps/agent-service"
 fi
 
-ASHLEY_ROOT="$ROOT" "$SCRIPT_DIR/preflight.sh" --require-daemon
+ASHLEY_ROOT="$ROOT" bash "$SCRIPT_DIR/preflight.sh" --require-daemon
 
 if [[ "$APPLY" -ne 1 ]]; then
   printf '%s\n' 'Dry run only. Re-run with --apply after reviewing the daemon, transport, and Mint boundary.'

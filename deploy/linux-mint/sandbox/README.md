@@ -3,12 +3,54 @@
 This directory is the scripted operator path for the **real** Linux Mint
 execution boundary described in [`docs/Sandbox_Design.md`](../../../docs/Sandbox_Design.md).
 
-The repository now contains the real Unix-socket daemon and agent-side
-transport. Installation remains an explicit operator action and fails closed
-unless the daemon, agent build, C compiler, public keys, and broker-owned recipe
-manifest are present. The default manifest enables only a harmless broker
-smoke recipe; source verification remains `unsupported` until you provision the
-separate toolchain under `/var/lib/ashley-sandbox`.
+The repository now contains the real Unix-socket daemon, agent-side transport,
+and local production key bootstrap/signers. Installation remains an explicit
+operator action and fails closed unless the daemon, agent build, C compiler,
+public keys, and broker-owned recipe manifest are present. The default manifest
+enables only a harmless broker smoke recipe; source verification remains
+`unsupported` until you provision the separate toolchain under
+`/var/lib/ashley-sandbox`.
+
+## Operator order (Windows)
+
+1. **Bootstrap signing keys locally** (creates encrypted private keys + public PEMs):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\mint\bootstrap-sandbox-keys.ps1
+```
+
+Private keys stay under `~/.composer-assistant/keys/` as `*.key.enc` with a
+`master.pass` passphrase file. Never put private keys in `.env` or copy them to
+Mint.
+
+2. **Stage public keys to Mint** (public PEM files only):
+
+```powershell
+powershell -File scripts\mint\sandbox.ps1 -Action StagePublicKeys
+```
+
+3. **Read-only preflight and status**:
+
+```powershell
+powershell -File scripts\mint\sandbox.ps1 -Action Preflight -PushFirst
+powershell -File scripts\mint\sandbox.ps1 -Action Status
+```
+
+4. **Install the broker daemon** (explicit `-Apply`, after review):
+
+```powershell
+powershell -File scripts\mint\sandbox.ps1 -Action Install -Apply -PushFirst `
+  -AgentUser xarvak `
+  -OwnerId <discord-owner-id> `
+  -OwnerPublicKeyRemotePath /tmp/owner-ed25519-v1.pub `
+  -ContinuityPublicKeyRemotePath /tmp/continuity-tombstone-ed25519-v1.pub `
+  -OwnerKeyId owner-ed25519-v1 `
+  -ContinuityKeyId continuity-tombstone-ed25519-v1
+```
+
+5. **Release qualification and agent opt-in** remain separate gates. Installing
+the daemon does not enable `ASHLEY_SANDBOX_BROKER_ENABLED` or grant Ashley a
+usable sandbox until qualification passes.
 
 ## What the eventual install does
 
@@ -30,32 +72,15 @@ execution authority.
 Private keys are never accepted by this installer and are never copied to the
 broker. State is preserved by removal unless `--remove-data --yes` is supplied.
 
-## Easy process from Windows
+## Agent signing endpoints (local)
 
-From the repository checkout:
+After bootstrap, the agent-service exposes owner-gated signing routes:
 
-```powershell
-# Read-only check on Mint; this is safe to run now.
-powershell -File scripts\mint\sandbox.ps1 -Action Preflight -PushFirst
+- `POST /sandbox/approve` — signs owner approval envelopes
+- `POST /sandbox/tombstone/sign` — signs continuity tombstone envelopes
 
-# Read-only service/status view.
-powershell -File scripts\mint\sandbox.ps1 -Action Status
-
-# After reviewing the local gate and explicitly choosing to install the daemon:
-powershell -File scripts\mint\sandbox.ps1 -Action Install -Apply -PushFirst `
-  -AgentUser xarvak `
-  -OwnerId <discord-owner-id> `
-  -OwnerPublicKeyRemotePath /tmp/owner-approval.pub `
-  -ContinuityPublicKeyRemotePath /tmp/continuity-tombstone.pub `
-  -OwnerKeyId owner-ed25519-v1 `
-  -ContinuityKeyId continuity-tombstone-ed25519-v1
-```
-
-The two key files in the install example are **public** keys only. The key IDs
-must match the IDs used by signed envelopes; passing them explicitly avoids
-depending on filenames. Do not copy private approval or continuity keys to Mint
-through this path. The installer prints the exact next check and tells you when
-a login/reboot is needed for the agent user's new group membership.
+These require configured key files under `~/.composer-assistant/keys/` and do not
+by themselves enable broker IPC.
 
 To remove code and units while preserving state:
 

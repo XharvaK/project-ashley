@@ -8,6 +8,7 @@ import { listRecentDecisions } from "./core/agency/log.js";
 import { retrieveEpisodes } from "./core/memory/episodes.js";
 import { isAuthorizedOwnerId } from "./owner-auth.js";
 import { assertRegisteredRoutes } from "./route-surface.js";
+import { signSandboxApproval, signSandboxTombstone } from "./core/sandbox/handlers.js";
 
 const MAX_DISCORD_MESSAGE = 4000;
 
@@ -492,6 +493,30 @@ export function createServer(manager: AgentManager): express.Express {
         throw new AppError("message_required", "active boolean required", 400);
       }
       res.json(manager.core.setExternalEmergencyStop(ownerId, active));
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/sandbox/approve", (req, res) => {
+    try {
+      const body = req.body as Record<string, unknown>;
+      const userId = typeof body.userId === "string" ? body.userId : undefined;
+      const ownerId = requireOwner(userId);
+      res.json({ envelope: signSandboxApproval(ownerId, body) });
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/sandbox/tombstone/sign", (req, res) => {
+    try {
+      const body = req.body as Record<string, unknown>;
+      const userId = typeof body.userId === "string" ? body.userId : undefined;
+      const ownerId = requireOwner(userId);
+      res.json({ envelope: signSandboxTombstone(ownerId, body) });
     } catch (err) {
       const { status, body } = toErrorResponse(err);
       res.status(status).json(body);
