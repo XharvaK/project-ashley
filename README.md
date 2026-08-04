@@ -212,7 +212,6 @@ connected.
 
 | Path | Purpose |
 |---|---|
-| `~/.composer-assistant/.env` | Secrets and runtime configuration; never commit |
 | `~/.composer-assistant/conversations/nuclear.db` | Nuclear Identity, Mind State, Agency, memory, provenance, delivery, attention, proposals, and external-agency records |
 | `~/.composer-assistant/continuity.db` | Authoritative continuity sidecar: lineage, sessions, forget previews/tombstones, bindings, and continuity events |
 | `workspace/prompts/nuclear/` | Thin Expression and runtime prompt material |
