@@ -86,6 +86,31 @@ describe("capability rollout", () => {
     db.close();
   });
 
+  it("requires thought and curiosity_consolidation before own_time_report promotes", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    qualify(db, "own_time_report");
+    expect(listCapabilityStatuses(db, "apply", releaseId)
+      .find((status) => status.capability === "own_time_report")).toMatchObject({
+        state: "observe",
+        dependencies: ["thought", "curiosity_consolidation"],
+        dependenciesReady: false,
+      });
+
+    qualify(db, "recall");
+    qualify(db, "mind_state");
+    qualify(db, "thought");
+    qualify(db, "reading");
+    qualify(db, "curiosity_consolidation");
+
+    expect(listCapabilityStatuses(db, "apply", releaseId)
+      .find((status) => status.capability === "own_time_report")).toMatchObject({
+        state: "active",
+        dependenciesReady: true,
+        effective: true,
+      });
+    db.close();
+  });
+
   it("rolls back after two breaches and disables immediately on a critical failure", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     qualify(db, "reading");

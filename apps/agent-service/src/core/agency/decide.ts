@@ -117,6 +117,7 @@ function makeDecision(
     authorizedClaims: {
       readingRecordIds: [],
       readingTitles: [],
+      readingClaims: [],
     },
   };
 }
@@ -124,6 +125,7 @@ function makeDecision(
 /**
  * Relocate Conversation's kind→take license reconstruction onto Decision.
  * Takes must already be loaded before Expression; no new inference.
+ * Preserves report-finalizer structured claims when already present.
  */
 export function attachAuthorizedClaims(
   decision: Decision,
@@ -134,6 +136,9 @@ export function attachAuthorizedClaims(
     readId: number | null;
   }>,
 ): Decision {
+  if (decision.authorizedClaims.readingClaims.length > 0) {
+    return decision;
+  }
   if (decision.kind !== "share" && decision.kind !== "ask") {
     return decision;
   }
@@ -156,6 +161,7 @@ export function attachAuthorizedClaims(
       readingRecordIds: slice.flatMap((take) =>
         take.readId === null ? [] : [take.readId]),
       readingTitles: slice.map((take) => take.title),
+      readingClaims: [],
     },
   };
 }

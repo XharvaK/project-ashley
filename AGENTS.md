@@ -87,7 +87,9 @@ Continuous cognition is event-driven and defaults to `ASHLEY_COGNITION_MODE=obse
 influence. Schema v9 integrates each cognition job atomically, requires exact user-message
 provenance for automatic facts, uses leased edge-triggered urgent wakes, adds
 grounded refusal, and adds read-record provenance plus receipt-backed message
-redaction.
+redaction. Schema v10 adds `own_time_sessions` for owner absence/return Mind State.
+Gated `own_time_report` (deps: thought, curiosity_consolidation) can share ≤3
+grounded own-time takes on ask when active under master `apply`.
 
 Curiosity follows `scan -> rank -> choose -> fetch -> extract -> record -> form
 take -> consolidate -> motivate -> Thought`. Network retrieval is public

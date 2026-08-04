@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { env } from "../env.js";
 import { NUCLEAR_DB_PATH } from "../paths.js";
 import { decide, attachAuthorizedClaims } from "./agency/decide.js";
+import { applyOwnTimeReportAfterThought } from "./agency/own-time-report.js";
 import { collectMotivations } from "./agency/motivations.js";
 import { deliberateDecision } from "./agency/thought.js";
 import { logDecision, setDecisionOutcome } from "./agency/log.js";
@@ -21,6 +22,14 @@ import { getState, patchState, setLastDecision } from "./state/store.js";
 import {
   writeFromUserTurn,
 } from "./writers.js";
+import {
+  applyOwnTimeTransitionForReactiveTurn,
+  hasOpenOwnTimeSession,
+} from "./state/own-time.js";
+import {
+  classifyInitiativeClass,
+  evaluateProactiveEligibility,
+} from "./agency/proactive-eligibility.js";
 import {
   listRecentTakes,
   listSources,
@@ -42,7 +51,6 @@ import { enqueueCognitiveJob } from "./cognition/jobs.js";
 import {
   claimUrgentMindState,
   consumeUrgentWake,
-  hasUrgentMindState,
   listActiveMindStateItems,
   retryUrgentWake,
 } from "./state/mind-items.js";
@@ -247,12 +255,13 @@ export class AshleyCore {
       if (written.forgotTopic) {
         this.forget(input.ownerId, written.forgotTopic, true);
       }
-      if (written.sleepSignal) {
-        patchState(this.db, input.ownerId, {
-          availability: "quiet",
-          focus: "own_time",
-        });
-      }
+      // Own-time open/close before motivations/Thought. Legacy sticky focus
+      // reconciled only here — never from status/eligibility reads.
+      applyOwnTimeTransitionForReactiveTurn(this.db, input.ownerId, {
+        departureSignal: written.departureSignal,
+        userMessageId,
+      });
+      const ownTimeOpen = hasOpenOwnTimeSession(this.db, input.ownerId);
       const motivations = collectMotivations(
         this.db,
         input.ownerId,
@@ -262,6 +271,11 @@ export class AshleyCore {
       );
       let decision = decide(motivations, "reactive");
       decision = await deliberateDecision(this.db, decision, motivations, "reactive");
+      decision = applyOwnTimeReportAfterThought(this.db, decision, {
+        ownerId: input.ownerId,
+        userMessage: message,
+        userMessageId,
+      });
       if (capabilityCanInfluence(this.db, "affect")) {
         decision = attachAffectLicense(
           decision,
@@ -288,9 +302,12 @@ export class AshleyCore {
       });
 
       if (!decision.cognitiveAllocation.shouldSpeak) {
-        patchState(this.db, input.ownerId, {
-          availability: decision.kind === "silence" ? "quiet" : "available",
-        });
+        // Do not restore available while an own-time session is open.
+        if (!ownTimeOpen) {
+          patchState(this.db, input.ownerId, {
+            availability: decision.kind === "silence" ? "quiet" : "available",
+          });
+        }
         setDecisionOutcome(this.db, decisionId, "");
         return {
           text: "",
@@ -325,9 +342,12 @@ export class AshleyCore {
           ).toISOString(),
         });
       }
-      patchState(this.db, input.ownerId, {
-        availability: "available",
-      });
+      // Departure acknowledgement must leave quiet/own_time while session open.
+      if (!ownTimeOpen) {
+        patchState(this.db, input.ownerId, {
+          availability: "available",
+        });
+      }
       setDecisionOutcome(this.db, decisionId, text);
       return {
         text,
@@ -342,28 +362,57 @@ export class AshleyCore {
   }
 
   async tickProactive(ownerId: string): Promise<ProactiveResult> {
-    if (!env.proactiveEnabled) {
-      return { shouldSend: false, reason: "proactive_disabled" };
-    }
-    if (this.isProactivePaused(ownerId)) {
-      return { shouldSend: false, reason: "proactive_paused" };
-    }
-    const proactiveStatus = this.getProactiveStatus(ownerId);
-    if (proactiveStatus.sentToday >= proactiveStatus.maxPerDay) {
-      return { shouldSend: false, reason: "daily_cap" };
-    }
-    if (this.activeOwners.has(ownerId)) {
-      return { shouldSend: false, reason: "chat_in_progress" };
+    // Classify with read-only hasUrgentMindState — never claim before eligibility.
+    const initiativeClass = classifyInitiativeClass(this.db, ownerId);
+    const status = this.getProactiveStatus(ownerId);
+    const eligibilityInput = {
+      ownerId,
+      chatInProgress: this.activeOwners.has(ownerId),
+      paused: this.isProactivePaused(ownerId),
+      enabled: env.proactiveEnabled,
+      sentToday: status.sentToday,
+      maxPerDay: status.maxPerDay,
+      lastUserMessageAt: status.lastUserMessageAt,
+      minIdleHours: status.minIdleHours,
+      hasUrgent: initiativeClass === "urgent_grounded",
+    };
+    let eligibility = evaluateProactiveEligibility(this.db, eligibilityInput);
+    if (!eligibility.ok) {
+      return {
+        shouldSend: false,
+        reason: eligibility.reason,
+        ...(eligibility.cooldownRemainingSec !== undefined
+          ? { cooldownRemainingSec: eligibility.cooldownRemainingSec }
+          : {}),
+      };
     }
 
+    // Side-effectful setup only after shared gates pass.
     seedIdentity(this.db, ownerId);
     this.auditReadingProvenance();
-    if (getState(this.db, ownerId).availability !== "available") {
-      return { shouldSend: false, reason: "unavailable" };
+
+    // Claim only after eligibility passes, and only for urgent_grounded.
+    let urgentItem =
+      eligibility.initiativeClass === "urgent_grounded"
+        ? claimUrgentMindState(this.db, ownerId)
+        : null;
+    if (eligibility.initiativeClass === "urgent_grounded" && !urgentItem) {
+      // Claim race: do not keep urgent idle bypass. Re-check as ordinary.
+      eligibility = evaluateProactiveEligibility(this.db, {
+        ...eligibilityInput,
+        hasUrgent: false,
+      });
+      if (!eligibility.ok) {
+        return {
+          shouldSend: false,
+          reason: eligibility.reason,
+          ...(eligibility.cooldownRemainingSec !== undefined
+            ? { cooldownRemainingSec: eligibility.cooldownRemainingSec }
+            : {}),
+        };
+      }
     }
-    const urgentItem = capabilityCanInfluence(this.db, "relational_initiative")
-      ? claimUrgentMindState(this.db, ownerId)
-      : null;
+
     let decisionLogged = false;
     try {
       const motivations = applyInitiativeLearning(
@@ -486,28 +535,38 @@ export class AshleyCore {
     }
   }
 
-  /** Decide without drafting — used by /initiative/evaluate. */
+  /** Decide without drafting — used by /initiative/evaluate. Never claims urgent wakes. */
   evaluateProactive(ownerId: string): {
     shouldReachOut: boolean;
     reason: string;
     angle?: ProactiveDraft["angle"];
     cooldownRemainingSec: number;
+    initiativeClass?: "ordinary" | "urgent_grounded";
   } {
-    if (!env.proactiveEnabled) {
+    const initiativeClass = classifyInitiativeClass(this.db, ownerId);
+    const status = this.getProactiveStatus(ownerId);
+    const eligibility = evaluateProactiveEligibility(this.db, {
+      ownerId,
+      chatInProgress: this.activeOwners.has(ownerId),
+      paused: this.isProactivePaused(ownerId),
+      enabled: env.proactiveEnabled,
+      sentToday: status.sentToday,
+      maxPerDay: status.maxPerDay,
+      lastUserMessageAt: status.lastUserMessageAt,
+      minIdleHours: status.minIdleHours,
+      hasUrgent: initiativeClass === "urgent_grounded",
+    });
+    if (!eligibility.ok) {
       return {
         shouldReachOut: false,
-        reason: "proactive_disabled",
-        cooldownRemainingSec: 0,
+        reason: eligibility.reason,
+        cooldownRemainingSec: eligibility.cooldownRemainingSec ?? 0,
+        initiativeClass: eligibility.initiativeClass,
       };
     }
-    if (this.isProactivePaused(ownerId)) {
-      return {
-        shouldReachOut: false,
-        reason: "proactive_paused",
-        cooldownRemainingSec: 0,
-      };
-    }
+
     seedIdentity(this.db, ownerId);
+
     const motivations = applyInitiativeLearning(
       this.db,
       ownerId,
@@ -520,6 +579,7 @@ export class AshleyCore {
         shouldReachOut: false,
         reason: decision.reason,
         cooldownRemainingSec: 0,
+        initiativeClass: eligibility.initiativeClass,
       };
     }
     return {
@@ -527,6 +587,7 @@ export class AshleyCore {
       reason: decision.reason,
       angle: decisionAngle(decision.kind),
       cooldownRemainingSec: 0,
+      initiativeClass: eligibility.initiativeClass,
     };
   }
 
@@ -818,18 +879,21 @@ export class AshleyCore {
   }
 
   hasUrgentCognition(ownerId: string): boolean {
-    if (
-      !capabilityCanInfluence(this.db, "relational_initiative") ||
-      !env.proactiveEnabled ||
-      this.isProactivePaused(ownerId) ||
-      this.activeOwners.has(ownerId) ||
-      getState(this.db, ownerId).availability !== "available"
-    ) {
-      return false;
-    }
+    const initiativeClass = classifyInitiativeClass(this.db, ownerId);
+    if (initiativeClass !== "urgent_grounded") return false;
     const status = this.getProactiveStatus(ownerId);
-    return status.sentToday < status.maxPerDay &&
-      hasUrgentMindState(this.db, ownerId);
+    const eligibility = evaluateProactiveEligibility(this.db, {
+      ownerId,
+      chatInProgress: this.activeOwners.has(ownerId),
+      paused: this.isProactivePaused(ownerId),
+      enabled: env.proactiveEnabled,
+      sentToday: status.sentToday,
+      maxPerDay: status.maxPerDay,
+      lastUserMessageAt: status.lastUserMessageAt,
+      minIdleHours: status.minIdleHours,
+      hasUrgent: true,
+    });
+    return eligibility.ok;
   }
 
   getCognitionOverview(ownerId: string) {
@@ -1006,7 +1070,6 @@ export class AshleyCore {
     const ageMin = last
       ? Math.max(0, (Date.now() - Date.parse(last.createdAt)) / 60_000)
       : 0;
-    const state = getState(this.db, ownerId);
     return {
       enabled: env.curiosityEnabled,
       sources: sources.length,
@@ -1017,7 +1080,7 @@ export class AshleyCore {
       takesRecent: takes.length,
       lastTakeAt: last?.createdAt ?? null,
       presence: {
-        ownTime: state.availability === "quiet",
+        ownTime: hasOpenOwnTimeSession(this.db, ownerId),
         proactivePaused: this.isProactivePaused(ownerId),
         curiosityEnabled: env.curiosityEnabled,
         owing: null,
@@ -1095,7 +1158,7 @@ export class AshleyCore {
         .prepare("SELECT COUNT(*) AS count FROM decision_log")
         .get();
       return {
-        ok: version >= 9,
+        ok: version >= 10,
         nuclearEnabled: true,
         dbPath: NUCLEAR_DB_PATH,
         schemaVersion: version,

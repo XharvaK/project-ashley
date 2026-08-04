@@ -16,6 +16,7 @@ export const capabilityNames = [
   "reading",
   "curiosity_consolidation",
   "source_discovery",
+  "own_time_report",
 ] as const;
 
 export type CapabilityName = typeof capabilityNames[number];
@@ -37,6 +38,7 @@ const dependencies: Record<CapabilityName, CapabilityName[]> = {
   reading: [],
   curiosity_consolidation: ["reading"],
   source_discovery: ["reading"],
+  own_time_report: ["thought", "curiosity_consolidation"],
 };
 
 export type CapabilityStatus = {

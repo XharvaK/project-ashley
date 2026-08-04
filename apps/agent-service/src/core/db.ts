@@ -740,6 +740,23 @@ CREATE INDEX IF NOT EXISTS idx_identity_reviews_owner
   ON identity_reviews (owner_id, applied_at, updated_at DESC, id DESC);
 `;
 
+const MIGRATION_10 = `
+CREATE TABLE IF NOT EXISTS own_time_sessions (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_id          TEXT NOT NULL,
+  started_at        TEXT NOT NULL,
+  ended_at          TEXT,
+  start_message_id  INTEGER,
+  end_message_id    INTEGER,
+  created_at        TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_own_time_sessions_one_open
+  ON own_time_sessions (owner_id)
+  WHERE ended_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_own_time_sessions_owner_ended
+  ON own_time_sessions (owner_id, ended_at DESC, id DESC);
+`;
+
 function userVersion(db: DatabaseSync): number {
   const row: unknown = db.prepare("PRAGMA user_version").get();
   if (typeof row !== "object" || row === null || !("user_version" in row)) {
@@ -844,6 +861,17 @@ export function migrate(db: DatabaseSync): void {
     try {
       db.exec(MIGRATION_9);
       db.exec("PRAGMA user_version = 9");
+      db.exec("COMMIT");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+  if (userVersion(db) < 10) {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.exec(MIGRATION_10);
+      db.exec("PRAGMA user_version = 10");
       db.exec("COMMIT");
     } catch (error) {
       db.exec("ROLLBACK");

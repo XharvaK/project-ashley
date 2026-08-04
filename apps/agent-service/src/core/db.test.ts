@@ -13,7 +13,7 @@ describe("nuclear database migrations", () => {
   it("creates the cognition and Reflection schemas for a fresh database", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
 
-    expect(schemaVersion(db)).toBe(9);
+    expect(schemaVersion(db)).toBe(10);
     const tables = db
       .prepare(
         `SELECT name FROM sqlite_master
@@ -22,7 +22,7 @@ describe("nuclear database migrations", () => {
            'mind_state_items', 'affective_state', 'cognitive_jobs',
            'learning_revisions', 'cur_reads', 'forget_receipts',
            'capability_releases', 'capability_events', 'cur_source_candidates',
-           'identity_reviews'
+           'identity_reviews', 'own_time_sessions'
          )
          ORDER BY name`,
       )
@@ -40,6 +40,7 @@ describe("nuclear database migrations", () => {
       "initiative_learning",
       "learning_revisions",
       "mind_state_items",
+      "own_time_sessions",
       "reflection_events",
     ]);
 
@@ -108,7 +109,7 @@ describe("nuclear database migrations", () => {
 
     openNuclearDb(db);
 
-    expect(schemaVersion(db)).toBe(9);
+    expect(schemaVersion(db)).toBe(10);
     const decision = db
       .prepare(
         `SELECT reason, outcome_text, learning_subject_kind,
@@ -194,7 +195,7 @@ describe("nuclear database migrations", () => {
 
     openNuclearDb(db);
 
-    expect(schemaVersion(db)).toBe(9);
+    expect(schemaVersion(db)).toBe(10);
     expect(db.prepare(
       "SELECT wake_state FROM mind_state_items WHERE id = 1",
     ).get()).toMatchObject({ wake_state: "pending" });
@@ -236,7 +237,7 @@ describe("nuclear database migrations", () => {
 
     openNuclearDb(db);
 
-    expect(schemaVersion(db)).toBe(9);
+    expect(schemaVersion(db)).toBe(10);
     expect(db.prepare(
       "SELECT evidence_kind, read_id FROM cur_takes WHERE id = 1",
     ).get()).toMatchObject({ evidence_kind: "scan_excerpt", read_id: null });
@@ -269,7 +270,7 @@ describe("nuclear database migrations", () => {
 
     openNuclearDb(db);
 
-    expect(schemaVersion(db)).toBe(9);
+    expect(schemaVersion(db)).toBe(10);
     expect(db.prepare("SELECT kind FROM motivations WHERE id = 1").get())
       .toMatchObject({ kind: "opinion" });
     expect(db.prepare("SELECT decision_kind FROM decision_log WHERE id = ?").get(decisionId))
@@ -277,6 +278,39 @@ describe("nuclear database migrations", () => {
     expect(db.prepare("SELECT decision_id FROM initiative_reservations").get())
       .toMatchObject({ decision_id: decisionId });
     expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    db.close();
+  });
+
+  it("upgrades schema v9 with legacy sticky own_time and additive sessions table", () => {
+    const db = new DatabaseSync(":memory:");
+    // Minimal v9-shaped state: sticky focus without own_time_sessions.
+    openNuclearDb(db);
+    expect(schemaVersion(db)).toBe(10);
+    db.exec("PRAGMA user_version = 9");
+    db.exec("DROP TABLE IF EXISTS own_time_sessions");
+    db.prepare(
+      `INSERT INTO internal_state
+         (owner_id, focus, mood, unfinished_json, availability, last_decision_id, updated_at)
+       VALUES ('doc', 'own_time', NULL, '[]', 'available', NULL, ?)
+       ON CONFLICT(owner_id) DO UPDATE SET
+         focus = excluded.focus, availability = excluded.availability`,
+    ).run(new Date().toISOString());
+
+    openNuclearDb(db);
+
+    expect(schemaVersion(db)).toBe(10);
+    expect(
+      db.prepare(
+        `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'own_time_sessions'`,
+      ).get(),
+    ).toMatchObject({ name: "own_time_sessions" });
+    // Migration does not invent a session from sticky focus.
+    expect(
+      db.prepare("SELECT COUNT(*) AS c FROM own_time_sessions").get(),
+    ).toEqual({ c: 0 });
+    expect(
+      db.prepare("SELECT focus, availability FROM internal_state WHERE owner_id = 'doc'").get(),
+    ).toMatchObject({ focus: "own_time", availability: "available" });
     db.close();
   });
 });

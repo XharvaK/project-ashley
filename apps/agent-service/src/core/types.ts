@@ -63,10 +63,41 @@ export type CognitiveAllocation = {
   completion: "complete" | "hold";
 };
 
+/** Exact licensed reading claim material for Expression (untrusted data). */
+export type AuthorizedReadingClaim = {
+  takeId: number;
+  readRecordId: number;
+  title: string;
+  /** Exact stored take text; do not summarize before Expression. */
+  claim: string;
+};
+
 /** Refs Conversation previously reconstructed from kind + feed takes. */
 export type AuthorizedClaims = {
   readingRecordIds: number[];
   readingTitles: string[];
+  readingClaims: AuthorizedReadingClaim[];
+};
+
+export type OwnTimeReportStatus =
+  | "no_session"
+  | "no_activity"
+  | "no_reportable_take"
+  | "reportable_takes";
+
+export type OwnTimeReportReason =
+  | "no_session"
+  | "no_owner_reading_activity"
+  | "no_grounded_take"
+  | "already_reported"
+  | "reportable_takes";
+
+/** Transient Agency marker for gated own-time return reports. */
+export type OwnTimeReportMarker = {
+  status: OwnTimeReportStatus;
+  reason: OwnTimeReportReason;
+  sessionId: number | null;
+  selectedTakeIds: number[];
 };
 
 export type Decision = {
@@ -86,6 +117,7 @@ export type Decision = {
   learning?: LearningSnapshot;
   cognitiveAllocation: CognitiveAllocation;
   authorizedClaims: AuthorizedClaims;
+  ownTimeReport?: OwnTimeReportMarker;
 };
 
 export type Motivation = {

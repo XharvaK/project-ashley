@@ -9,6 +9,10 @@ import {
   computeActivityLicense,
   emptyActivityLicenseNote,
 } from "../honesty/activity-license.js";
+import {
+  ownTimeReportClaimsNote,
+  ownTimeReportEmptyNote,
+} from "./own-time-report-expression.js";
 import { stripPipelineNarration } from "../../lib/metadata-echo.js";
 import type { Decision } from "../types.js";
 import type { NuclearPromptChannel } from "./prompts.js";
@@ -42,12 +46,23 @@ export async function expressSpeak(
 ): Promise<RenderedOutput> {
   const claims = decision.authorizedClaims;
   const readingLicensed = claims.readingRecordIds.length > 0;
-  const licenseNote = readingLicensed
-    ? computeActivityLicense({
-        readRecordIds: claims.readingRecordIds,
-        readTitles: claims.readingTitles,
-      }).note
-    : emptyActivityLicenseNote();
+  const report = decision.ownTimeReport;
+  let licenseNote: string;
+  if (report && claims.readingClaims.length > 0) {
+    licenseNote = ownTimeReportClaimsNote(claims.readingClaims);
+  } else if (report && report.status !== "reportable_takes") {
+    licenseNote = [
+      emptyActivityLicenseNote(),
+      ownTimeReportEmptyNote(report.reason),
+    ].join("\n");
+  } else if (readingLicensed) {
+    licenseNote = computeActivityLicense({
+      readRecordIds: claims.readingRecordIds,
+      readTitles: claims.readingTitles,
+    }).note;
+  } else {
+    licenseNote = emptyActivityLicenseNote();
+  }
   const affect = decision.affectLicense;
   const affectNote = affect.permitted
     ? [

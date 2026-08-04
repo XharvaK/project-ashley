@@ -25,12 +25,15 @@ curiosity, agency, reflection, honesty, conversation, writers, runtime.
 Schema v9 adds grounded episodes with FTS5 retrieval, referenced Mind State
 items, bounded affect, durable cognition jobs/runs, verified fact provenance,
 edge-triggered urgent wake leases, Thought fallback auditing, and exact organic
-revision lineage. Cognition integration is atomic: a completed job produces one
+revision lineage. Schema v10 adds `own_time_sessions` for atomic owner
+absence/return presence (open = `ended_at IS NULL`). Cognition integration is atomic: a completed job produces one
 complete episode and all of its derived state, or none of them.
 `ASHLEY_COGNITION_MODE=observe` records evidence and proposals without allowing
 behavioral influence. `apply` is the master ceiling; release-scoped capability
 states, dependencies, evaluation qualification, live-shadow thresholds, and
-rollback still govern the full loop.
+rollback still govern the full loop. Gated `own_time_report` (deps: `thought`,
+`curiosity_consolidation`) can share ≤3 owner-scoped grounded takes from a
+completed own-time window when Doc asks and the capability may influence.
 
 Reactive refusal is a distinct Thought decision. It is valid only when the
 selected evidence contains the current user message and a persisted stable

@@ -59,7 +59,7 @@ function addCommittedInitiative(
         effort: "medium",
         completion: "complete",
       },
-      authorizedClaims: { readingRecordIds: [], readingTitles: [] },
+      authorizedClaims: { readingRecordIds: [], readingTitles: [], readingClaims: [] },
     },
   });
   db.prepare(

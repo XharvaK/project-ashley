@@ -17,9 +17,17 @@ import { env } from "../env.js";
 import { logDecision } from "./agency/log.js";
 import { createQuestion } from "./state/questions.js";
 import { listActiveMindStateItems, upsertMindStateItem } from "./state/mind-items.js";
-import { patchState } from "./state/store.js";
+import * as mindItems from "./state/mind-items.js";
+import { getState, patchState } from "./state/store.js";
+import {
+  getLatestCompletedOwnTimeSession,
+  getOpenOwnTimeSession,
+  hasOpenOwnTimeSession,
+} from "./state/own-time.js";
 import { AshleyCore } from "./runtime.js";
 import { currentReleaseId } from "./rollout/capabilities.js";
+import * as expression from "./conversation/expression.js";
+import { insertMessage, resolveActiveThread } from "./memory/threads.js";
 
 function activateCapabilities(db: DatabaseSync, names: string[]): void {
   const releaseId = currentReleaseId();
@@ -73,7 +81,7 @@ function addCommittedQuestionInitiative(
         effort: "medium",
         completion: "complete",
       },
-      authorizedClaims: { readingRecordIds: [], readingTitles: [] },
+      authorizedClaims: { readingRecordIds: [], readingTitles: [], readingClaims: [] },
     },
   });
   db.prepare(
@@ -299,5 +307,266 @@ describe("AshleyCore", () => {
       db.close();
       rmSync(path, { force: true });
     }
+  });
+
+  it("keeps departure quiet across acknowledgement and closes before Thought on return", async () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const core = new AshleyCore(db);
+    const originalKey = env.mistralApiKey;
+    try {
+      env.mistralApiKey = "";
+      await core.handleReactiveChat({
+        ownerId: "doc",
+        channel: "discord",
+        message: "goodnight",
+      });
+      expect(hasOpenOwnTimeSession(db, "doc")).toBe(true);
+      expect(getState(db, "doc")).toMatchObject({
+        availability: "quiet",
+        focus: "own_time",
+      });
+      const tickWhileAway = await core.tickProactive("doc");
+      const evalWhileAway = core.evaluateProactive("doc");
+      expect(tickWhileAway).toMatchObject({
+        shouldSend: false,
+        reason: "unavailable",
+      });
+      expect(evalWhileAway).toMatchObject({
+        shouldReachOut: false,
+        reason: "unavailable",
+      });
+
+      await core.handleReactiveChat({
+        ownerId: "doc",
+        channel: "discord",
+        message: "hey, I'm back",
+      });
+      expect(hasOpenOwnTimeSession(db, "doc")).toBe(false);
+      expect(getState(db, "doc").focus).not.toBe("own_time");
+      expect(getState(db, "doc").availability).toBe("available");
+      const closed = db
+        .prepare(
+          `SELECT ended_at FROM own_time_sessions WHERE owner_id = ? ORDER BY id DESC LIMIT 1`,
+        )
+        .get("doc") as { ended_at?: string };
+      expect(closed.ended_at).toBeTruthy();
+    } finally {
+      env.mistralApiKey = originalKey;
+      db.close();
+    }
+  });
+
+  it("closes on return shorthand and shadows own_time_report in observe order", async () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const core = new AshleyCore(db);
+    const originalKey = env.mistralApiKey;
+    const latestUserMessageId = (): number => {
+      const row = db
+        .prepare(
+          `SELECT id FROM mem_messages
+           WHERE owner_id = 'doc' AND role = 'user'
+           ORDER BY id DESC LIMIT 1`,
+        )
+        .get() as { id: number };
+      return Number(row.id);
+    };
+    const reportShadows = (): string[] =>
+      (
+        db
+          .prepare(
+            `SELECT source_key FROM capability_events
+             WHERE capability = 'own_time_report' AND kind = 'live_shadow'
+             ORDER BY id ASC`,
+          )
+          .all() as Array<{ source_key: string }>
+      ).map((row) => row.source_key);
+
+    try {
+      env.mistralApiKey = "";
+      await core.handleReactiveChat({
+        ownerId: "doc",
+        channel: "discord",
+        message: "goodnight",
+      });
+      expect(hasOpenOwnTimeSession(db, "doc")).toBe(true);
+
+      await core.handleReactiveChat({
+        ownerId: "doc",
+        channel: "discord",
+        message: "anything to report?",
+      });
+      const returnMessageId = latestUserMessageId();
+      const closed = getLatestCompletedOwnTimeSession(db, "doc");
+      expect(closed?.endMessageId).toBe(returnMessageId);
+      expect(hasOpenOwnTimeSession(db, "doc")).toBe(false);
+      expect(reportShadows()).toEqual([
+        `own-time-report:message:${returnMessageId}`,
+      ]);
+
+      await core.handleReactiveChat({
+        ownerId: "doc",
+        channel: "discord",
+        message: "anything to report?",
+      });
+      expect(reportShadows()).toEqual([
+        `own-time-report:message:${returnMessageId}`,
+      ]);
+
+      await core.handleReactiveChat({
+        ownerId: "doc",
+        channel: "discord",
+        message: "what did you discover while I was away?",
+      });
+      const cueMessageId = latestUserMessageId();
+      expect(cueMessageId).not.toBe(returnMessageId);
+      expect(reportShadows()).toEqual([
+        `own-time-report:message:${returnMessageId}`,
+        `own-time-report:message:${cueMessageId}`,
+      ]);
+    } finally {
+      env.mistralApiKey = originalKey;
+      db.close();
+    }
+  });
+
+  it("preserves completed own-time window when return Expression fails", async () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const core = new AshleyCore(db);
+    const originalKey = env.mistralApiKey;
+    try {
+      env.mistralApiKey = "test-key";
+      await core.handleReactiveChat({
+        ownerId: "doc",
+        channel: "discord",
+        message: "I'm going to sleep",
+      });
+      expect(hasOpenOwnTimeSession(db, "doc")).toBe(true);
+
+      const spy = vi.spyOn(expression, "expressSpeak").mockRejectedValueOnce(
+        new Error("expression_failed"),
+      );
+      await expect(
+        core.handleReactiveChat({
+          ownerId: "doc",
+          channel: "discord",
+          message: "morning",
+        }),
+      ).rejects.toThrow("expression_failed");
+      spy.mockRestore();
+
+      expect(getOpenOwnTimeSession(db, "doc")).toBeNull();
+      const row = db
+        .prepare(
+          `SELECT started_at, ended_at FROM own_time_sessions WHERE owner_id = ?`,
+        )
+        .get("doc") as { started_at?: string; ended_at?: string };
+      expect(row.started_at).toBeTruthy();
+      expect(row.ended_at).toBeTruthy();
+      expect(getState(db, "doc")).toMatchObject({
+        availability: "available",
+        focus: null,
+      });
+    } finally {
+      env.mistralApiKey = originalKey;
+      db.close();
+    }
+  });
+
+  it("does not mutate urgent wake fields when evaluateProactive is repeated", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const core = new AshleyCore(db);
+    const originalMode = env.cognitionMode;
+    const originalEnabled = env.proactiveEnabled;
+    try {
+      env.cognitionMode = "apply";
+      env.proactiveEnabled = true;
+      activateCapabilities(db, [
+        "recall", "mind_state", "thought", "relational_initiative",
+      ]);
+      upsertMindStateItem(db, {
+        ownerId: "doc",
+        kind: "concern",
+        text: "An urgent concern.",
+        sourceType: "episode",
+        sourceId: 7,
+        urgency: 1,
+      });
+      const before = listActiveMindStateItems(db, "doc")[0]!;
+      core.evaluateProactive("doc");
+      core.evaluateProactive("doc");
+      const after = listActiveMindStateItems(db, "doc")[0]!;
+      expect(after.wakeState).toBe(before.wakeState);
+      expect(after.wakeAttempts).toBe(before.wakeAttempts);
+      expect(after.claimedAt).toBe(before.claimedAt);
+      expect(after.nextWakeAt).toBe(before.nextWakeAt);
+    } finally {
+      env.cognitionMode = originalMode;
+      env.proactiveEnabled = originalEnabled;
+      db.close();
+    }
+  });
+
+  it("falls back to ordinary idle floor when urgent claim returns null", async () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const core = new AshleyCore(db);
+    const originalMode = env.cognitionMode;
+    const originalEnabled = env.proactiveEnabled;
+    const originalIdle = env.proactiveMinIdleHours;
+    try {
+      env.cognitionMode = "apply";
+      env.proactiveEnabled = true;
+      env.proactiveMinIdleHours = 2;
+      activateCapabilities(db, [
+        "recall", "mind_state", "thought", "relational_initiative",
+      ]);
+      patchState(db, "doc", { availability: "available", focus: null });
+      const threadId = resolveActiveThread(db, "doc", "discord");
+      insertMessage(db, {
+        threadId,
+        ownerId: "doc",
+        role: "user",
+        text: "still here",
+        channel: "discord",
+      });
+      upsertMindStateItem(db, {
+        ownerId: "doc",
+        kind: "concern",
+        text: "Urgent concern.",
+        sourceType: "episode",
+        sourceId: 99,
+        urgency: 1,
+      });
+      const claimSpy = vi
+        .spyOn(mindItems, "claimUrgentMindState")
+        .mockReturnValue(null);
+      const result = await core.tickProactive("doc");
+      claimSpy.mockRestore();
+      expect(result).toMatchObject({
+        shouldSend: false,
+        reason: "idle_floor",
+      });
+    } finally {
+      env.cognitionMode = originalMode;
+      env.proactiveEnabled = originalEnabled;
+      env.proactiveMinIdleHours = originalIdle;
+      db.close();
+    }
+  });
+
+  it("does not write state from curiosity status or evaluate eligibility paths", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const core = new AshleyCore(db);
+    patchState(db, "doc", { availability: "available", focus: "own_time" });
+    const before = db
+      .prepare("SELECT focus, availability, updated_at FROM internal_state WHERE owner_id = ?")
+      .get("doc");
+    core.getCuriosityStatus("doc");
+    core.evaluateProactive("doc");
+    const after = db
+      .prepare("SELECT focus, availability, updated_at FROM internal_state WHERE owner_id = ?")
+      .get("doc");
+    expect(after).toEqual(before);
+    expect(getOpenOwnTimeSession(db, "doc")).toBeNull();
+    db.close();
   });
 });

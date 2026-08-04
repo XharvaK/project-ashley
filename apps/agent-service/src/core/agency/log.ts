@@ -272,6 +272,7 @@ export function logDecision(
             authorizedClaims: {
               readingRecordIds: [],
               readingTitles: [],
+              readingClaims: [],
             },
           },
           outcomeText,
