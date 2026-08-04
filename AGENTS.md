@@ -151,10 +151,18 @@ On Linux, drive each app directly with its own npm scripts.
 - **Offline mode is expected without a Mistral key.** With `MISTRAL_API_KEY`
   blank the agent boots in `state: offline`: `POST /chat/text` returns 503, but
   the SQLite nuclear core still works end to end — `GET /health`, `POST
-  /memory/pin`, `GET /memory/summary`, and the `GET /nuclear/*` observability
+  /memory/pin`, `GET /memory/summary`, and   the `GET /nuclear/*` observability
   endpoints. Owner-scoped endpoints require the `owner_id`/`userId` to equal
   `DISCORD_OWNER_ID` (or `MEMORY_OWNER_ID`). To exercise real LLM responses or
   the live Discord gateway, supply `MISTRAL_API_KEY` and (for discord-bot)
   `DISCORD_BOT_TOKEN` + `DISCORD_OWNER_ID` as secrets.
+- **Secrets inject into new VMs only.** Cloud secrets arrive as real env vars at
+  process spawn on the *next* agent run, not the run they were added on. The env
+  loader only fills variables that are currently `undefined`, so injected
+  secrets win over `~/.composer-assistant/.env`. Do **not** hardcode a secret's
+  value in that file, and do **not** set `MEMORY_OWNER_ID=` there — agent-service
+  resolves it as `MEMORY_OWNER_ID ?? DISCORD_OWNER_ID`, and an empty string is
+  not nullish, so a blank entry would break the fallback to the injected owner
+  ID. Leave `MEMORY_OWNER_ID` unset to inherit `DISCORD_OWNER_ID`.
 - **`apps/desktop`** (Tauri 2 + Vite) is peripheral to the Discord product and
   needs a Rust/Tauri toolchain; it is not required for core setup.
