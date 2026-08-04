@@ -1,0 +1,14 @@
+[Unit]
+Description=Ashley execution broker socket
+
+[Socket]
+ListenStream=/run/ashley/broker.sock
+SocketUser=ashley-sandbox
+SocketGroup=ashley-broker
+SocketMode=0660
+RuntimeDirectory=ashley
+RuntimeDirectoryMode=0750
+RemoveOnStop=true
+
+[Install]
+WantedBy=sockets.target

@@ -370,6 +370,8 @@ surfaces, gateway login, service count, and journal errors on the actual host.
   designs and explicitly deferred production boundaries
 - [`docs/Stabilization_Design.md`](docs/Stabilization_Design.md) — Wave 10
   traceability, health, resource, and dual-database assurance
+- [`deploy/linux-mint/sandbox/README.md`](deploy/linux-mint/sandbox/README.md) —
+  scripted Mint sandbox preflight and future install/rollback path
 - [`docs/handoffs/waves-00-05-implementation-record.md`](docs/handoffs/waves-00-05-implementation-record.md)
   — historical local implementation record for the first five waves
 

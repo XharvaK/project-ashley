@@ -1,0 +1,36 @@
+[Unit]
+Description=Ashley execution broker
+Requires=ashley-exec-broker.socket
+After=ashley-exec-broker.socket
+ConditionPathExists=/opt/ashley-sandbox/dist/server.js
+
+[Service]
+Type=simple
+User=ashley-sandbox
+Group=ashley-sandbox
+WorkingDirectory=/var/lib/ashley-sandbox
+EnvironmentFile=-/etc/ashley-sandbox/broker.env
+ExecStart=@NODE@ /opt/ashley-sandbox/dist/server.js --socket-activated
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX
+MemoryMax=384M
+TasksMax=64
+CPUQuota=100%
+ReadWritePaths=/var/lib/ashley-sandbox
+
+[Install]
+WantedBy=multi-user.target
