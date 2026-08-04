@@ -158,6 +158,11 @@ import {
   createConfiguredUnixBrokerTransport,
 } from "./change-proposal/unix-broker-transport.js";
 import type { BrokerClientTransport } from "./change-proposal/broker-client.js";
+import {
+  probeSandboxBrokerReachability,
+  refreshSandboxQualificationBaseline,
+  sandboxAvailabilitySnapshot,
+} from "./sandbox/availability.js";
 
 export type ReactiveChatInput = {
   message: string;
@@ -344,6 +349,13 @@ export class AshleyCore {
       options && "sandboxBrokerTransport" in options
         ? options.sandboxBrokerTransport ?? null
         : createConfiguredUnixBrokerTransport();
+    refreshSandboxQualificationBaseline();
+    if (this.sandboxBrokerTransport && env.memoryOwnerId) {
+      void probeSandboxBrokerReachability(
+        env.memoryOwnerId,
+        this.sandboxBrokerTransport,
+      );
+    }
     if (this.continuity) {
       try {
         const lineageId = getAuthoritativeLineageId(this.continuity);
@@ -366,6 +378,21 @@ export class AshleyCore {
   /** The source-proposal layer can use this only when the operator enables it. */
   getSandboxBrokerTransport(): BrokerClientTransport | null {
     return this.sandboxBrokerTransport;
+  }
+
+  getSandboxAvailability() {
+    return sandboxAvailabilitySnapshot();
+  }
+
+  async refreshSandboxAvailability(): Promise<ReturnType<typeof sandboxAvailabilitySnapshot>> {
+    if (!this.sandboxBrokerTransport || !env.memoryOwnerId) {
+      refreshSandboxQualificationBaseline();
+      return sandboxAvailabilitySnapshot();
+    }
+    return probeSandboxBrokerReachability(
+      env.memoryOwnerId,
+      this.sandboxBrokerTransport,
+    );
   }
 
   private auditReadingProvenance(): boolean {
@@ -1666,6 +1693,7 @@ export class AshleyCore {
     initiative: ReturnType<AshleyCore["getProactiveStatus"]>;
     continuity: ReturnType<AshleyCore["continuitySnapshot"]>;
     relationshipState: ReturnType<typeof listCapabilityStatuses>[number] | undefined;
+    sandbox: ReturnType<AshleyCore["getSandboxAvailability"]>;
   } {
     return {
       health: this.getHealth(),
@@ -1674,6 +1702,7 @@ export class AshleyCore {
       relationshipState: listCapabilityStatuses(this.db, env.cognitionMode).find(
         (row) => row.capability === "relationship_state",
       ),
+      sandbox: this.getSandboxAvailability(),
     };
   }
 
@@ -1950,6 +1979,9 @@ export class AshleyCore {
     return {
       masterMode: env.cognitionMode,
       capabilities: this.capabilityStatuses(),
+      infrastructure: {
+        sandbox: this.getSandboxAvailability(),
+      },
     };
   }
 
