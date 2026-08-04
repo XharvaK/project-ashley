@@ -5,29 +5,27 @@ import {
   type NuclearPromptChannel,
 } from "./conversation/prompts.js";
 import {
-  buildIdentityBlock,
-  buildOpinionsBlock,
+  listIdentity,
 } from "./identity/store.js";
 import {
   assembleMemoryBlock,
-  type AssembledMemory,
 } from "./memory/assemble.js";
 import { getState } from "./state/store.js";
 import { getAffectiveState } from "./state/affect.js";
 import { listActiveMindStateItems } from "./state/mind-items.js";
-import type { Decision } from "./types.js";
+import type { Decision, EvidenceRef } from "./types.js";
 import { capabilityCanInfluence } from "./rollout/capabilities.js";
 
 /** Product: composed turn context Expression consumes. */
 export type TurnContext = {
   threadId: string;
-  hotMessages: AssembledMemory["hotMessages"];
-  facts: AssembledMemory["facts"];
+  hotMessages: ReturnType<typeof assembleMemoryBlock>["hotMessages"];
+  facts: ReturnType<typeof assembleMemoryBlock>["facts"];
   /** Memory-only block (no identity/state). */
   memoryBlock: string;
   /** Full system prompt: static nuclear prompts + peer blocks. */
   systemPrompt: string;
-  /** Decision lines for the Expression user turn, when Decision was provided. */
+  /** Bounded structured Decision metadata for Expression (untrusted). */
   decisionPrompt: string;
 };
 
@@ -35,7 +33,30 @@ export type ComposeTurnContextInput = {
   channel: NuclearPromptChannel;
   userMessage?: string;
   decision?: Decision;
+  /** Current user message id — excluded from hot window / evidence text. */
+  excludeMessageId?: number | null;
+  /** Extra Thought-selected refs beyond Decision.evidenceRefs. */
+  evidenceRefs?: EvidenceRef[];
 };
+
+function stableIdentityBlock(db: DatabaseSync, ownerId: string): string {
+  const entries = listIdentity(db, ownerId, { layer: "stable", limit: 40 })
+    .filter((entry) =>
+      entry.kind === "value" ||
+      entry.kind === "principle" ||
+      entry.kind === "constitution" ||
+      entry.kind.startsWith("value.") ||
+      entry.kind.startsWith("principle."),
+    );
+  // Applicable stable boundaries arrive via Thought-selected evidence, not here.
+  if (entries.length === 0) return "";
+  const lines = entries.map((entry) => `- ${entry.kind}: ${entry.text}`);
+  return [
+    "## Ashley's stable identity",
+    ...lines,
+    "These are stable constitutional identity constraints.",
+  ].join("\n");
+}
 
 function mindStateBlock(db: DatabaseSync, ownerId: string): string {
   const state = getState(db, ownerId);
@@ -45,8 +66,6 @@ function mindStateBlock(db: DatabaseSync, ownerId: string): string {
   const items = mindStateActive
     ? listActiveMindStateItems(db, ownerId, 12)
     : [];
-  // Transport existing Mind State condition fields only — no scoring,
-  // summarization, or ContextComposer-selected subset beyond empty omission.
   const lines = [
     state.focus ? `Focus: ${state.focus}` : "",
     state.mood ? `Mood: ${state.mood}` : "",
@@ -66,6 +85,22 @@ function mindStateBlock(db: DatabaseSync, ownerId: string): string {
   return ["## Mind state", ...lines].join("\n");
 }
 
+function structuredDecisionPrompt(decision: Decision): string {
+  return [
+    "## Decision metadata (intent only; do not echo)",
+    JSON.stringify({
+      kind: decision.kind,
+      shouldSpeak: decision.cognitiveAllocation.shouldSpeak,
+      effort: decision.cognitiveAllocation.effort,
+      completion: decision.cognitiveAllocation.completion,
+      objective: decision.objective ?? null,
+      reason: decision.reason,
+      uncertainty: decision.uncertainty,
+      urgency: decision.urgency,
+    }),
+  ].join("\n");
+}
+
 /**
  * ContextComposer — sole owner of turn context assembly.
  * Assembles existing peer outputs; does not reinterpret, score, or rewrite them.
@@ -76,16 +111,26 @@ export function composeTurnContext(
   ownerId: string,
   input: ComposeTurnContextInput,
 ): TurnContext {
-  const memory = assembleMemoryBlock(db, ownerId, input.userMessage);
-  const identity = buildIdentityBlock(db, ownerId);
-  const opinions = buildOpinionsBlock(db, ownerId);
+  const decision = input.decision;
+  const evidenceRefs = [
+    ...(decision?.evidenceRefs ?? []),
+    ...(input.evidenceRefs ?? []),
+  ];
+  const memory = assembleMemoryBlock(db, ownerId, {
+    userMessage: input.userMessage,
+    excludeMessageId: input.excludeMessageId ?? null,
+    evidenceRefs,
+  });
+  const identity = stableIdentityBlock(db, ownerId);
   const mindState = mindStateBlock(db, ownerId);
-  const questions = buildQuestionsBlock(db, ownerId);
+  // Questions only when Thought selected question evidence or none selected yet
+  // would dump — skip global question dump; selected questions arrive via evidence.
+  const questions = "";
+  void buildQuestionsBlock;
   const staticPrompt = loadNuclearSystemPrompt(input.channel);
 
   const peerSections = [
     identity,
-    opinions,
     memory.memoryBlock
       ? `## Memory context\n${memory.memoryBlock}`
       : "",
@@ -94,15 +139,7 @@ export function composeTurnContext(
   ].filter(Boolean);
 
   const systemPrompt = [staticPrompt, ...peerSections].join("\n\n");
-
-  const decision = input.decision;
-  const decisionPrompt = decision
-    ? [
-        `Decision: ${decision.kind}.`,
-        `Reason: ${decision.reason}`,
-        `Should speak: ${decision.cognitiveAllocation.shouldSpeak}.`,
-      ].join("\n")
-    : "";
+  const decisionPrompt = decision ? structuredDecisionPrompt(decision) : "";
 
   return {
     threadId: memory.threadId,

@@ -9,6 +9,8 @@ import { isAuthorizedOwnerId } from "./owner-auth.js";
 
 export type AgentState = "booting" | "ready" | "paused" | "busy" | "offline";
 
+export type ProviderState = "configured" | "degraded" | "unavailable";
+
 export type SseClient = {
   write: (data: object) => void;
 };
@@ -43,6 +45,16 @@ export class AgentManager {
 
   isMistralConfigured(): boolean {
     return Boolean(env.mistralApiKey);
+  }
+
+  getProviderState(): ProviderState {
+    if (!this.isMistralConfigured() || this.state === "offline") {
+      return "unavailable";
+    }
+    if (this.state === "ready" || this.state === "busy") {
+      return "configured";
+    }
+    return "degraded";
   }
 
   addSseClient(client: SseClient): void {
@@ -100,8 +112,29 @@ export class AgentManager {
     this.broadcast({ type: "status", status: "offline" });
   }
 
-  cancel(): void {
-    /* nuclear path has no mid-stream cancel yet */
+  cancel(reservationId?: number, ownerId?: string): {
+    ok: boolean;
+    state?: string;
+    finalizationReason?: string;
+  } {
+    if (reservationId == null || !ownerId) {
+      return { ok: false };
+    }
+    if (!isAuthorizedOwnerId(ownerId)) {
+      return { ok: false };
+    }
+    return this.core.cancelDelivery(ownerId, reservationId, (text) => {
+      const session = this.loadState().activeSessionId;
+      if (!session) return;
+      this.logger.append({
+        ts: new Date().toISOString(),
+        role: "assistant",
+        text,
+        source: "nuclear",
+        session_id: session,
+        model: "partial",
+      });
+    });
   }
 
   startSession(): string {
@@ -118,6 +151,18 @@ export class AgentManager {
     auditSessionId?: string,
     _imageUrls?: string[],
     _discordPresence?: string,
+    delivery?: {
+      inboundDiscordMessageIds: string[];
+      finalFragmentReceivedAtMs: number;
+      firstBubbleDeadlineAtMs?: number;
+    },
+    attachments?: Array<{
+      discordAttachmentId: string;
+      declaredMime: string;
+      fileName: string;
+      declaredByteSize?: number;
+      sourceUrl: string;
+    }>,
   ): Promise<{
     text: string;
     threadId: string;
@@ -126,6 +171,13 @@ export class AgentManager {
     silenced?: boolean;
     decisionKind?: string;
     decisionId?: number;
+    reservationId?: number;
+    deliveryState?: string;
+    plannedBubbles?: Array<{ ordinal: number; text: string }>;
+    media?: { react: string | null; gifQuery: string | null };
+    firstBubbleDeadlineAt?: string | null;
+    statusUrl?: string;
+    duplicate?: boolean;
   }> {
     void threadId;
     if (this.state === "paused" || this.state === "booting") {
@@ -148,10 +200,17 @@ export class AgentManager {
     this.state = "busy";
     this.broadcast({ type: "status", status: "thinking" });
     try {
+      const hasInbound =
+        Boolean(delivery?.inboundDiscordMessageIds?.length) &&
+        delivery!.finalFragmentReceivedAtMs != null;
       const result = await this.core.handleReactiveChat({
         message,
         ownerId: userId,
         channel: "discord",
+        inboundDiscordMessageIds: delivery?.inboundDiscordMessageIds,
+        finalFragmentReceivedAtMs: delivery?.finalFragmentReceivedAtMs,
+        simulateDelivery: !hasInbound,
+        attachments,
       });
       if (auditSessionId) {
         this.logger.append({
@@ -161,7 +220,8 @@ export class AgentManager {
           source: channel,
           session_id: auditSessionId,
         });
-        if (result.text) {
+        // Assistant archival only after receipt-backed finalize (ledger path).
+        if (result.text && !hasInbound) {
           this.logger.append({
             ts: new Date().toISOString(),
             role: "assistant",
@@ -180,6 +240,13 @@ export class AgentManager {
         silenced: result.silenced === true || result.decisionKind === "silence",
         decisionKind: result.decisionKind,
         decisionId: result.decisionId,
+        reservationId: result.reservationId,
+        deliveryState: result.deliveryState,
+        plannedBubbles: result.plannedBubbles,
+        media: result.media,
+        firstBubbleDeadlineAt: result.firstBubbleDeadlineAt,
+        statusUrl: result.statusUrl,
+        duplicate: result.duplicate,
       };
     } finally {
       this.state = env.mistralApiKey ? "ready" : "offline";

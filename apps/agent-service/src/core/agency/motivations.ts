@@ -12,6 +12,10 @@ import type {
   Trigger,
 } from "../types.js";
 import { capabilityCanInfluence } from "../rollout/capabilities.js";
+import { isBoundaryRelevant } from "./boundary-relevance.js";
+import { relationshipCanInfluence } from "../relationship/influence.js";
+import { listDueDocReminders } from "../relationship/store.js";
+import { tryClaimRelationshipMotivation } from "../relationship/claims.js";
 
 function ageHours(iso: string): number {
   const parsed = Date.parse(iso);
@@ -71,13 +75,44 @@ function isSilenceRequest(message: string): boolean {
   );
 }
 
+function tokenize(text: string): Set<string> {
+  return new Set(
+    text
+      .toLowerCase()
+      .split(/[^a-z0-9à-ÿ]+/i)
+      .map((token) => token.trim())
+      .filter((token) => token.length >= 4),
+  );
+}
+
+/** Bounded relevance: shared tokens or explicit mind-state text match. */
+function isTextRelevant(message: string, candidate: string): boolean {
+  const msg = message.trim();
+  if (!msg) return false;
+  const messageTokens = tokenize(msg);
+  if (messageTokens.size === 0) return false;
+  const candidateTokens = tokenize(candidate);
+  let hits = 0;
+  for (const token of candidateTokens) {
+    if (messageTokens.has(token)) hits += 1;
+    if (hits >= 2) return true;
+  }
+  return false;
+}
+
 function addOpinions(
   db: DatabaseSync,
   ownerId: string,
   opinions: Opinion[],
+  message: string,
+  requireRelevance: boolean,
 ): Motivation[] {
   return opinions
     .filter((opinion) => ageHours(opinion.updatedAt) <= 168)
+    .filter((opinion) =>
+      !requireRelevance ||
+      isTextRelevant(message, `${opinion.topic} ${opinion.stance}`),
+    )
     .slice(0, 4)
     .map((opinion) =>
       persistMotivation(
@@ -101,8 +136,17 @@ export function collectMotivations(
 ): Motivation[] {
   const motivations: Motivation[] = [];
   const state = getState(db, ownerId);
+  const message = userMessage?.trim() ?? "";
+  const reactiveRelevant = trigger === "reactive";
 
   for (const question of listOpenQuestions(db, ownerId, 8)) {
+    if (
+      reactiveRelevant &&
+      message &&
+      !isTextRelevant(message, question.text)
+    ) {
+      continue;
+    }
     motivations.push(
       persistMotivation(
         db,
@@ -116,7 +160,14 @@ export function collectMotivations(
     );
   }
 
-  for (const fact of listActiveFacts(db, ownerId, 10)) {
+  for (const fact of listActiveFacts(db, ownerId, reactiveRelevant ? 24 : 10)) {
+    if (
+      reactiveRelevant &&
+      message &&
+      !isTextRelevant(message, `${fact.key} ${fact.value}`)
+    ) {
+      continue;
+    }
     motivations.push(
       persistMotivation(
         db,
@@ -130,7 +181,15 @@ export function collectMotivations(
     );
   }
 
-  motivations.push(...addOpinions(db, ownerId, listOpinions(db, ownerId)));
+  motivations.push(
+    ...addOpinions(
+      db,
+      ownerId,
+      listOpinions(db, ownerId),
+      message,
+      reactiveRelevant && Boolean(message),
+    ),
+  );
 
   for (const take of capabilityCanInfluence(db, "reading") &&
     capabilityCanInfluence(db, "curiosity_consolidation")
@@ -138,6 +197,13 @@ export function collectMotivations(
         .filter((candidate) => candidate.evidenceKind === "read_record")
         .slice(0, 6)
     : []) {
+    if (
+      reactiveRelevant &&
+      message &&
+      !isTextRelevant(message, `${take.title} ${take.take}`)
+    ) {
+      continue;
+    }
     const score = Math.max(20, 55 - ageHours(take.createdAt) * 3);
     motivations.push(
       persistMotivation(
@@ -153,6 +219,13 @@ export function collectMotivations(
   }
 
   for (const unfinished of state.unfinished.slice(0, 4)) {
+    if (
+      reactiveRelevant &&
+      message &&
+      !isTextRelevant(message, unfinished)
+    ) {
+      continue;
+    }
     motivations.push(
       persistMotivation(
         db,
@@ -169,6 +242,15 @@ export function collectMotivations(
   for (const item of capabilityCanInfluence(db, "mind_state")
     ? listActiveMindStateItems(db, ownerId, 12)
     : []) {
+    // Active Mind State may always candidate; relevance still preferred on reactive.
+    if (
+      reactiveRelevant &&
+      message &&
+      item.urgency < 0.75 &&
+      !isTextRelevant(message, item.text)
+    ) {
+      continue;
+    }
     const kind: MotivationKind =
       item.kind === "unfinished" || item.kind === "commitment"
         ? "unfinished"
@@ -205,7 +287,6 @@ export function collectMotivations(
     );
   }
 
-  const message = userMessage?.trim() ?? "";
   if (trigger === "reactive" && message) {
     motivations.push(
       persistMotivation(
@@ -218,11 +299,13 @@ export function collectMotivations(
         userMessageId ?? null,
       ),
     );
+    // Boundaries enter the pool only when relevance-licensed.
     for (const boundary of listIdentity(db, ownerId)
       .filter((entry) =>
         entry.layer === "stable" &&
         (entry.kind === "boundary" || entry.kind.startsWith("boundary.")))
       .slice(0, 6)) {
+      if (!isBoundaryRelevant(message, boundary.text)) continue;
       motivations.push(
         persistMotivation(
           db,
@@ -234,6 +317,55 @@ export function collectMotivations(
           boundary.id,
         ),
       );
+    }
+  }
+
+  if (trigger === "proactive") {
+    // Proactive may still see stable boundaries to suppress initiative, not refuse.
+    for (const boundary of listIdentity(db, ownerId)
+      .filter((entry) =>
+        entry.layer === "stable" &&
+        (entry.kind === "boundary" || entry.kind.startsWith("boundary.")))
+      .slice(0, 6)) {
+      motivations.push(
+        persistMotivation(
+          db,
+          ownerId,
+          "boundary",
+          40,
+          boundary.text,
+          "identity",
+          boundary.id,
+        ),
+      );
+    }
+  }
+
+  if (
+    trigger === "proactive" &&
+    relationshipCanInfluence(db, "apply", "relational_initiative")
+  ) {
+    const nowIso = new Date().toISOString();
+    for (const reminder of listDueDocReminders(db, ownerId, nowIso)) {
+      const motivation = persistMotivation(
+        db,
+        ownerId,
+        "reminder",
+        72,
+        reminder.text,
+        "doc_reminder",
+        reminder.entityUuid,
+      );
+      if (
+        tryClaimRelationshipMotivation(db, {
+          ownerId,
+          relationshipEntityType: "doc_reminder",
+          relationshipEntityUuid: reminder.entityUuid,
+          motivationId: motivation.id!,
+        })
+      ) {
+        motivations.push(motivation);
+      }
     }
   }
 

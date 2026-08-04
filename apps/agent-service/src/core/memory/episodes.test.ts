@@ -234,8 +234,10 @@ describe("episodic memory", () => {
                'completed', ?, ?)`,
     ).run(Number(job.lastInsertRowid), new Date().toISOString(), first.id);
 
-    expect(core.forget("doc", "secret", false).preview.length).toBeGreaterThan(1);
-    core.forget("doc", "secret", true);
+    const preview = core.forget("doc", "secret", false);
+    expect(preview.preview.length).toBeGreaterThan(1);
+    expect(preview.previewId).toBeTruthy();
+    core.forget("doc", "", true, { previewId: preview.previewId });
 
     expect(listActiveFacts(db, "doc").map((fact) => fact.key)).toEqual([
       "manual_safeguard",
@@ -281,7 +283,9 @@ describe("episodic memory", () => {
       messageIds: [userId, assistantId],
     });
 
-    const result = core.forget("doc", "Orchid", true);
+    const preview = core.forget("doc", "Orchid", false);
+    expect(preview.previewId).toBeTruthy();
+    const result = core.forget("doc", "", true, { previewId: preview.previewId });
 
     expect(result).toMatchObject({
       preview: [],
@@ -335,8 +339,10 @@ describe("episodic memory", () => {
       END;
     `);
 
-    expect(() => core.forget("doc", "Orchid", true))
-      .toThrow("forget_integrity_failed:message");
+    const preview = core.forget("doc", "Orchid", false);
+    expect(() =>
+      core.forget("doc", "", true, { previewId: preview.previewId }),
+    ).toThrow("forget_integrity_failed:message");
     expect(core.getCapabilities().capabilities.find(
       (capability) => capability.capability === "recall",
     )).toMatchObject({

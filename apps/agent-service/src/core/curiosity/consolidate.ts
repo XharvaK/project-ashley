@@ -137,7 +137,8 @@ export async function consolidateCuriosityRead(
     maxTokens: 900,
     temperature: 0.35,
     reasoningEffort: "medium",
-    lane: "background",
+    purpose: "curiosity_consolidation",
+    lane: "curiosity_maintenance",
   });
   const analysis = normalize(parseObject(response.text));
   db.exec("BEGIN IMMEDIATE");

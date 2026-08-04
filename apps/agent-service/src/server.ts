@@ -7,6 +7,7 @@ import { toErrorResponse, AppError } from "./errors.js";
 import { listRecentDecisions } from "./core/agency/log.js";
 import { retrieveEpisodes } from "./core/memory/episodes.js";
 import { isAuthorizedOwnerId } from "./owner-auth.js";
+import { assertRegisteredRoutes } from "./route-surface.js";
 
 const MAX_DISCORD_MESSAGE = 4000;
 
@@ -36,13 +37,22 @@ export function createServer(manager: AgentManager): express.Express {
       ready: manager.getState() === "ready" || manager.getState() === "busy",
       state: manager.getState(),
       uptimeSec: manager.getUptimeSec(),
-      mistralConfigured: manager.isMistralConfigured(),
-      nuclear: manager.core.getHealth(),
-      proactive: {
-        enabled: env.proactiveEnabled,
-        nuclear: true,
-      },
+      providerState: manager.getProviderState(),
     });
+  });
+
+  app.get("/nuclear/health", (req, res) => {
+    try {
+      const ownerId = String(req.query.owner_id ?? "");
+      requireOwner(ownerId || undefined);
+      res.json(manager.core.getHealthSnapshot({
+        ready: manager.getState() === "ready" || manager.getState() === "busy",
+        providerState: manager.getProviderState(),
+      }));
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
   });
 
   app.get("/nuclear/decisions", (req, res) => {
@@ -108,6 +118,52 @@ export function createServer(manager: AgentManager): express.Express {
       const ownerId = String(req.query.owner_id ?? "");
       requireOwner(ownerId || undefined);
       res.json(manager.core.getCapabilities());
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.get("/nuclear/attention", (req, res) => {
+    try {
+      const ownerId = String(req.query.owner_id ?? "");
+      requireOwner(ownerId || undefined);
+      res.json(manager.core.getAttentionObservability());
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.get("/nuclear/continuity", (req, res) => {
+    try {
+      const ownerId = String(req.query.owner_id ?? "");
+      requireOwner(ownerId || undefined);
+      res.json(manager.core.continuitySnapshot());
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.get("/nuclear/relationship", (req, res) => {
+    try {
+      const ownerId = String(req.query.owner_id ?? "");
+      requireOwner(ownerId || undefined);
+      const limit = Math.min(25, Number(req.query.limit ?? 25) || 25);
+      const offset = Math.max(0, Number(req.query.offset ?? 0) || 0);
+      res.json(manager.core.relationshipSummary(ownerId, limit, offset));
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.get("/nuclear/status", (req, res) => {
+    try {
+      const ownerId = String(req.query.owner_id ?? "");
+      requireOwner(ownerId || undefined);
+      res.json(manager.core.nuclearStatusSnapshot(ownerId));
     } catch (err) {
       const { status, body } = toErrorResponse(err);
       res.status(status).json(body);
@@ -238,6 +294,210 @@ export function createServer(manager: AgentManager): express.Express {
     }
   });
 
+  app.get("/nuclear/change-proposals", (req, res) => {
+    try {
+      const ownerId = String(req.query.owner_id ?? "");
+      requireOwner(ownerId || undefined);
+      const limit = Math.min(100, Number(req.query.limit ?? 50) || 50);
+      res.json(manager.core.getChangeProposals(ownerId, limit));
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.get("/nuclear/change-proposals/:entityUuid", (req, res) => {
+    try {
+      const ownerId = String(req.query.owner_id ?? "");
+      requireOwner(ownerId || undefined);
+      const entityUuid = String(req.params.entityUuid ?? "");
+      const detail = manager.core.getChangeProposal(ownerId, entityUuid);
+      if (!detail) {
+        throw new AppError("not_found", "change proposal not found", 404);
+      }
+      res.json(detail);
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/nuclear/change-proposals/ashley-position", (req, res) => {
+    try {
+      const { userId, entityUuid, position } = req.body as {
+        userId?: string;
+        entityUuid?: string;
+        position?: "affirm" | "object" | "defer";
+      };
+      const ownerId = requireOwner(userId);
+      if (
+        typeof entityUuid !== "string" ||
+        !position ||
+        !["affirm", "object", "defer"].includes(position)
+      ) {
+        throw new AppError("message_required", "Ashley position fields required", 400);
+      }
+      res.json(
+        manager.core.recordChangeProposalAshleyPosition({ ownerId, entityUuid, position }),
+      );
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/nuclear/change-proposals/doc-decision", (req, res) => {
+    try {
+      const { userId, entityUuid, decision } = req.body as {
+        userId?: string;
+        entityUuid?: string;
+        decision?: "approve" | "reject" | "defer";
+      };
+      const ownerId = requireOwner(userId);
+      if (
+        typeof entityUuid !== "string" ||
+        !decision ||
+        !["approve", "reject", "defer"].includes(decision)
+      ) {
+        throw new AppError("message_required", "Doc decision fields required", 400);
+      }
+      res.json(
+        manager.core.recordChangeProposalDocDecision({ ownerId, entityUuid, decision }),
+      );
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/nuclear/change-proposals/external-outcome", (req, res) => {
+    try {
+      const { userId, entityUuid, outcome, note } = req.body as {
+        userId?: string;
+        entityUuid?: string;
+        outcome?: "committed" | "deployed" | "abandoned";
+        note?: string;
+      };
+      const ownerId = requireOwner(userId);
+      if (
+        typeof entityUuid !== "string" ||
+        !outcome ||
+        !["committed", "deployed", "abandoned"].includes(outcome)
+      ) {
+        throw new AppError("message_required", "External outcome fields required", 400);
+      }
+      res.json(
+        manager.core.recordChangeProposalExternalOutcome({
+          ownerId,
+          entityUuid,
+          outcome,
+          note,
+        }),
+      );
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.get("/nuclear/external/actions", (req, res) => {
+    try {
+      const ownerId = String(req.query.owner_id ?? "");
+      requireOwner(ownerId || undefined);
+      const limit = Math.min(100, Number(req.query.limit ?? 50) || 50);
+      res.json(manager.core.getExternalActions(ownerId, limit));
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.get("/nuclear/external/actions/:entityUuid", (req, res) => {
+    try {
+      const ownerId = String(req.query.owner_id ?? "");
+      requireOwner(ownerId || undefined);
+      const entityUuid = String(req.params.entityUuid ?? "");
+      const detail = manager.core.getExternalAction(ownerId, entityUuid);
+      if (!detail) {
+        throw new AppError("not_found", "external action not found", 404);
+      }
+      res.json(detail);
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.get("/nuclear/external/accounts", (req, res) => {
+    try {
+      const ownerId = String(req.query.owner_id ?? "");
+      requireOwner(ownerId || undefined);
+      res.json(manager.core.getExternalAccounts(ownerId));
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/nuclear/external/actions/:entityUuid/cancel", (req, res) => {
+    try {
+      const { userId } = req.body as { userId?: string };
+      const ownerId = requireOwner(userId);
+      const entityUuid = String(req.params.entityUuid ?? "");
+      res.json(manager.core.cancelExternalAction(ownerId, entityUuid));
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/nuclear/external/actions/:entityUuid/reconcile", (req, res) => {
+    try {
+      const { userId, outcome } = req.body as {
+        userId?: string;
+        outcome?: "committed" | "partially_delivered" | "aborted" | "outcome_unknown";
+      };
+      const ownerId = requireOwner(userId);
+      const entityUuid = String(req.params.entityUuid ?? "");
+      if (
+        !outcome ||
+        !["committed", "partially_delivered", "aborted", "outcome_unknown"].includes(outcome)
+      ) {
+        throw new AppError("message_required", "reconcile outcome required", 400);
+      }
+      res.json(manager.core.reconcileExternalAction(ownerId, entityUuid, outcome));
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/nuclear/external/credentials/:credentialRef/revoke", (req, res) => {
+    try {
+      const { userId } = req.body as { userId?: string };
+      const ownerId = requireOwner(userId);
+      const credentialRef = String(req.params.credentialRef ?? "");
+      res.json(manager.core.revokeExternalCredential(ownerId, credentialRef));
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/nuclear/external/emergency-stop", (req, res) => {
+    try {
+      const { userId, active } = req.body as { userId?: string; active?: boolean };
+      const ownerId = requireOwner(userId);
+      if (typeof active !== "boolean") {
+        throw new AppError("message_required", "active boolean required", 400);
+      }
+      res.json(manager.core.setExternalEmergencyStop(ownerId, active));
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
   app.get("/sessions", (_req, res) => {
     res.json({ activeSessionId: null });
   });
@@ -271,6 +531,10 @@ export function createServer(manager: AgentManager): express.Express {
         threadId,
         auditSessionId,
         discordPresence,
+        inboundDiscordMessageIds,
+        finalFragmentReceivedAtMs,
+        firstBubbleDeadlineAtMs,
+        attachments,
       } = req.body as {
         message?: string;
         userId?: string;
@@ -278,6 +542,16 @@ export function createServer(manager: AgentManager): express.Express {
         threadId?: string;
         auditSessionId?: string;
         discordPresence?: string;
+        inboundDiscordMessageIds?: string[];
+        finalFragmentReceivedAtMs?: number;
+        firstBubbleDeadlineAtMs?: number;
+        attachments?: Array<{
+          discordAttachmentId: string;
+          declaredMime: string;
+          fileName: string;
+          declaredByteSize?: number;
+          sourceUrl: string;
+        }>;
       };
       const owner = requireOwner(userId);
       if (!message?.trim()) {
@@ -286,6 +560,16 @@ export function createServer(manager: AgentManager): express.Express {
       if (message.length > MAX_DISCORD_MESSAGE) {
         throw new AppError("message_too_long", "message too long", 400);
       }
+      const delivery =
+        Array.isArray(inboundDiscordMessageIds) &&
+        inboundDiscordMessageIds.length > 0 &&
+        typeof finalFragmentReceivedAtMs === "number"
+          ? {
+              inboundDiscordMessageIds,
+              finalFragmentReceivedAtMs,
+              firstBubbleDeadlineAtMs,
+            }
+          : undefined;
       const result = await manager.handleTextChat(
         message.trim(),
         owner,
@@ -294,6 +578,136 @@ export function createServer(manager: AgentManager): express.Express {
         auditSessionId,
         undefined,
         discordPresence,
+        delivery,
+        attachments,
+      );
+      if (result.duplicate) {
+        res.status(202).json({
+          ...result,
+          statusUrl: result.statusUrl ?? `/delivery/${result.reservationId}`,
+        });
+        return;
+      }
+      res.json(result);
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.get("/delivery/:id", (req, res) => {
+    try {
+      const ownerId = String(req.query.owner_id ?? "");
+      const owner = requireOwner(ownerId || undefined);
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) {
+        throw new AppError("not_found", "reservation not found", 404);
+      }
+      const status = manager.core.getDeliveryStatus(owner, id);
+      if (!status) {
+        throw new AppError("not_found", "reservation not found", 404);
+      }
+      res.json(status);
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/delivery/:id/receipt", (req, res) => {
+    try {
+      const owner = requireOwner(
+        (req.body as { userId?: string }).userId,
+      );
+      const id = Number(req.params.id);
+      const { ordinal, discordMessageId } = req.body as {
+        ordinal?: number;
+        discordMessageId?: string;
+      };
+      if (
+        !Number.isFinite(id) ||
+        typeof ordinal !== "number" ||
+        !discordMessageId?.trim()
+      ) {
+        throw new AppError("message_required", "ordinal and discordMessageId required", 400);
+      }
+      manager.core.receiptDeliveryBubble(
+        owner,
+        id,
+        ordinal,
+        discordMessageId.trim(),
+      );
+      res.json({ ok: true });
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/delivery/:id/auxiliary", (req, res) => {
+    try {
+      const owner = requireOwner(
+        (req.body as { userId?: string }).userId,
+      );
+      const id = Number(req.params.id);
+      const { kind, text, discordMessageId } = req.body as {
+        kind?: "progress" | "delivery_error";
+        text?: string;
+        discordMessageId?: string;
+      };
+      if (
+        !Number.isFinite(id) ||
+        (kind !== "progress" && kind !== "delivery_error") ||
+        !text?.trim() ||
+        !discordMessageId?.trim()
+      ) {
+        throw new AppError("message_required", "kind, text, discordMessageId required", 400);
+      }
+      manager.core.receiptDeliveryAuxiliary(owner, id, {
+        kind,
+        text: text.trim(),
+        discordMessageId: discordMessageId.trim(),
+      });
+      res.json({ ok: true });
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/delivery/:id/finalize", (req, res) => {
+    try {
+      const owner = requireOwner(
+        (req.body as { userId?: string }).userId,
+      );
+      const id = Number(req.params.id);
+      const { cause, auditSessionId } = req.body as {
+        cause?:
+          | "complete"
+          | "cancel"
+          | "send_failure"
+          | "first_bubble_deadline"
+          | "delivery_lease";
+        auditSessionId?: string;
+      };
+      if (!Number.isFinite(id)) {
+        throw new AppError("not_found", "reservation not found", 404);
+      }
+      const result = manager.core.finalizeDeliveryReservation(
+        owner,
+        id,
+        cause ?? "complete",
+        (text) => {
+          if (!auditSessionId) return;
+          manager.logger.append({
+            ts: new Date().toISOString(),
+            role: "assistant",
+            text,
+            source: "nuclear",
+            session_id: auditSessionId,
+            model: "delivery",
+          });
+        },
       );
       res.json(result);
     } catch (err) {
@@ -449,16 +863,111 @@ export function createServer(manager: AgentManager): express.Express {
 
   app.post("/memory/forget", (req, res) => {
     try {
-      const { userId, topic, confirmed } = req.body as {
+      const {
+        userId,
+        topic,
+        confirmed,
+        previewId,
+        confirmationDiscordMessageId,
+        cancel,
+      } = req.body as {
         userId?: string;
         topic?: string;
         confirmed?: boolean;
+        previewId?: string;
+        confirmationDiscordMessageId?: string;
+        cancel?: boolean;
       };
       const owner = requireOwner(userId);
-      if (!topic?.trim()) {
+      if (cancel === true) {
+        if (!previewId?.trim()) {
+          throw new AppError("message_required", "previewId required", 400);
+        }
+        res.json(
+          manager.core.forget(owner, topic?.trim() ?? "", false, {
+            previewId: previewId.trim(),
+            cancel: true,
+          }),
+        );
+        return;
+      }
+      if (confirmed === true && previewId?.trim()) {
+        res.json(
+          manager.core.forget(owner, topic?.trim() ?? "", true, {
+            previewId: previewId.trim(),
+          }),
+        );
+        return;
+      }
+      if (confirmed === true) {
+        throw new AppError(
+          "message_required",
+          "previewId required for confirmation",
+          400,
+        );
+      }
+      if (!topic?.trim() && !previewId?.trim()) {
         throw new AppError("message_required", "topic required", 400);
       }
-      res.json(manager.core.forget(owner, topic.trim(), confirmed === true));
+      res.json(
+        manager.core.forget(owner, topic?.trim() ?? "", false, {
+          previewId: previewId?.trim(),
+          confirmationDiscordMessageId:
+            confirmationDiscordMessageId?.trim() ?? null,
+        }),
+      );
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/memory/forget/bind", (req, res) => {
+    try {
+      const { userId, previewId, confirmationDiscordMessageId } = req.body as {
+        userId?: string;
+        previewId?: string;
+        confirmationDiscordMessageId?: string;
+      };
+      const owner = requireOwner(userId);
+      if (!previewId?.trim() || !confirmationDiscordMessageId?.trim()) {
+        throw new AppError(
+          "message_required",
+          "previewId and confirmationDiscordMessageId required",
+          400,
+        );
+      }
+      manager.core.bindForgetConfirmation(
+        owner,
+        previewId.trim(),
+        confirmationDiscordMessageId.trim(),
+      );
+      res.json({ ok: true });
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/memory/forget/resolve", (req, res) => {
+    try {
+      const { userId, confirmationDiscordMessageId } = req.body as {
+        userId?: string;
+        confirmationDiscordMessageId?: string;
+      };
+      const owner = requireOwner(userId);
+      if (!confirmationDiscordMessageId?.trim()) {
+        throw new AppError(
+          "message_required",
+          "confirmationDiscordMessageId required",
+          400,
+        );
+      }
+      const previewId = manager.core.resolveForgetPreviewByDiscordMessage(
+        owner,
+        confirmationDiscordMessageId.trim(),
+      );
+      res.json({ previewId });
     } catch (err) {
       const { status, body } = toErrorResponse(err);
       res.status(status).json(body);
@@ -481,9 +990,26 @@ export function createServer(manager: AgentManager): express.Express {
     }
   });
 
-  app.post("/cancel", (_req, res) => {
-    manager.cancel();
-    res.json({ ok: true });
+  app.post("/cancel", (req, res) => {
+    try {
+      const { userId, reservationId } = req.body as {
+        userId?: string;
+        reservationId?: number;
+      };
+      const owner = requireOwner(userId);
+      if (typeof reservationId !== "number") {
+        throw new AppError(
+          "message_required",
+          "reservationId required",
+          400,
+        );
+      }
+      const result = manager.cancel(reservationId, owner);
+      res.json(result);
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
   });
 
   app.post("/curiosity/tick", async (_req, res) => {
@@ -526,20 +1052,26 @@ export function createServer(manager: AgentManager): express.Express {
       const body = req.body as {
         userId?: string;
         reservationId?: number;
+        deliveryReservationId?: number;
         text?: string;
         threadId?: string;
         angle?: string;
         discordMessageId?: string;
+        bubbleReceipts?: Array<{ ordinal: number; discordMessageId: string }>;
+        partial?: boolean;
       };
       const owner = requireOwner(body.userId);
-      if (body.reservationId !== undefined) {
+      if (body.reservationId !== undefined || body.deliveryReservationId !== undefined) {
         manager.core.commitProactive(owner, {
           reservationId: body.reservationId,
+          deliveryReservationId: body.deliveryReservationId,
           text: body.text ?? "",
           threadId: body.threadId ?? "",
           angle: body.angle ?? "check_in",
           reason: "commit",
           discordMessageId: body.discordMessageId ?? "",
+          bubbleReceipts: body.bubbleReceipts,
+          partial: body.partial === true,
         });
       } else if (body.text && body.threadId && body.discordMessageId) {
         manager.core.commitProactive(owner, {
@@ -675,6 +1207,7 @@ export function createServer(manager: AgentManager): express.Express {
     res.json({ ok: true });
   });
 
+  assertRegisteredRoutes(app);
   return app;
 }
 

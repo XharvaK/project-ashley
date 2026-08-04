@@ -1,0 +1,13 @@
+export const FRAME_VERSION = 1;
+export const MAX_FRAME_BYTES = 1_024 * 1_024;
+export const MAX_CHUNK_BYTES = 256 * 1_024;
+export const MAX_ARTIFACT_BYTES = 10 * 1_024 * 1_024;
+export const MAX_TASK_ARTIFACT_BYTES = 50 * 1_024 * 1_024;
+export const MAX_WORKSPACE_BYTES = 2 * 1_024 * 1_024 * 1_024;
+export const MAX_WALL_MS = 120_000;
+export const MAX_CHILD_PROCESSES = 16;
+export const MAX_OUTPUT_BYTES = 4 * 1_024 * 1_024;
+export const MAX_CONCURRENT_TASKS = 1;
+export const UPLOAD_SESSION_TTL_MS = 60 * 60 * 1000;
+export const ARTIFACT_REF_ENTROPY_BYTES = 16;
+export const REQUIRED_NETWORK_MODE = "none" as const;

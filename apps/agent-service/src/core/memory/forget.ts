@@ -1,19 +1,39 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
+import { getAuthoritativeLineageId } from "../continuity/db.js";
+import {
+  cancelForgetPreview,
+  confirmPreviewToTombstone,
+  createForgetPreview,
+  listPendingOrAppliedTombstones,
+  listTombstoneTargets,
+  markTombstoneApplied,
+  type CategoryCounts,
+  type ForgetTarget,
+} from "../continuity/forget-preview.js";
 import { reconcileUnsupportedRevisions } from "../learning/revisions.js";
 import {
-  forgetEpisodesByTopic,
+  detachRelationshipMotivations,
+  listRelationshipForgetTargets,
+  redactRelationshipTargets,
+} from "../relationship/forget.js";
+import {
+  listPerceptionForgetTargets,
+  redactPerceptionTargets,
+} from "../perception/forget.js";
+import {
+  forgetEpisodesByIds,
   matchingEpisodes,
   previewEpisodeForget,
 } from "./episodes.js";
 import {
-  forgetByTopic,
   listFactsMatchingTopic,
 } from "./facts.js";
 import {
   listMessageIdsMatchingTopic,
   redactMessages,
 } from "./threads.js";
+import { newEntityUuid } from "../continuity/entity-uuid.js";
 
 export type ForgetCounts = {
   messagesRedacted: number;
@@ -25,11 +45,24 @@ export type ForgetCounts = {
   runsRedacted: number;
 };
 
+export type ForgetHonesty = {
+  local: string;
+  discord: string;
+  mistral: string;
+  oldBackups: string;
+  providerSubmitted?: string;
+};
+
 export type ForgetResult = {
   preview: string[];
   deleted: number;
   receiptId: string | null;
   counts: ForgetCounts;
+  previewId?: string | null;
+  expiresAt?: string | null;
+  categoryCounts?: CategoryCounts;
+  honesty?: ForgetHonesty;
+  tombstoneId?: string | null;
 };
 
 const emptyCounts = (): ForgetCounts => ({
@@ -42,6 +75,17 @@ const emptyCounts = (): ForgetCounts => ({
   runsRedacted: 0,
 });
 
+const DEFAULT_HONESTY: ForgetHonesty = {
+  local:
+    "Matching local nuclear records were redacted or reconciled, including perception artifacts where present.",
+  discord:
+    "Original Discord messages remain under Discord retention and control.",
+  mistral: "Provider retention cannot be retroactively erased.",
+  providerSubmitted:
+    "Inline content previously submitted to the model provider cannot be retroactively erased from provider logs.",
+  oldBackups: "Older backup packages may still contain forgotten material.",
+};
+
 type Row = Record<string, unknown>;
 
 function isRow(value: unknown): value is Row {
@@ -52,6 +96,84 @@ function placeholders(values: unknown[]): string {
   return values.map(() => "?").join(", ");
 }
 
+function tableExists(db: DatabaseSync, name: string): boolean {
+  return (
+    db
+      .prepare(
+        `SELECT 1 AS ok FROM sqlite_master WHERE type = 'table' AND name = ?`,
+      )
+      .get(name) !== undefined
+  );
+}
+
+function tableHasColumn(
+  db: DatabaseSync,
+  table: string,
+  column: string,
+): boolean {
+  return (
+    db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
+  ).some((row) => row.name === column);
+}
+
+function entityUuidOf(
+  db: DatabaseSync,
+  table: string,
+  id: number,
+): string | null {
+  if (!tableHasColumn(db, table, "entity_uuid")) return null;
+  const row = db
+    .prepare(`SELECT entity_uuid AS u FROM ${table} WHERE id = ?`)
+    .get(id) as { u?: string } | undefined;
+  return row?.u ?? null;
+}
+
+/** Heal missing UUIDs on targetable rows (insert-path gaps) with a random UUID. */
+function requireEntityUuid(
+  db: DatabaseSync,
+  table: string,
+  id: number,
+): string | null {
+  if (!tableHasColumn(db, table, "entity_uuid")) return null;
+  const existing = entityUuidOf(db, table, id);
+  if (existing) return existing;
+  const uuid = newEntityUuid();
+  db.prepare(
+    `UPDATE ${table} SET entity_uuid = ? WHERE id = ? AND (entity_uuid IS NULL OR entity_uuid = '')`,
+  ).run(uuid, id);
+  return uuid;
+}
+
+function idOfEntityUuid(
+  db: DatabaseSync,
+  table: string,
+  entityUuid: string,
+  ownerId: string | null,
+): number | null {
+  if (!tableHasColumn(db, table, "entity_uuid")) return null;
+  const withOwner =
+    ownerId != null && tableHasColumn(db, table, "owner_id");
+  const row = (
+    withOwner
+      ? db
+          .prepare(
+            `SELECT id FROM ${table} WHERE entity_uuid = ? AND owner_id = ?`,
+          )
+          .get(entityUuid, ownerId)
+      : db
+          .prepare(`SELECT id FROM ${table} WHERE entity_uuid = ?`)
+          .get(entityUuid)
+  ) as { id?: number } | undefined;
+  return row?.id != null ? Number(row.id) : null;
+}
+
+function topicFingerprint(ownerId: string, topic: string): string {
+  return createHash("sha256")
+    .update(`forget-topic\0${ownerId}\0${topic.trim().toLowerCase()}`)
+    .digest("hex")
+    .slice(0, 32);
+}
+
 function evidenceTargets(
   db: DatabaseSync,
   ownerId: string,
@@ -59,18 +181,21 @@ function evidenceTargets(
   sourceIds: number[],
 ): Array<{ type: string; id: number }> {
   if (sourceIds.length === 0) return [];
-  return db.prepare(
-    `SELECT DISTINCT target_type, target_id
+  return db
+    .prepare(
+      `SELECT DISTINCT target_type, target_id
      FROM evidence_links
      WHERE owner_id = ? AND source_type = ?
        AND CAST(source_id AS INTEGER) IN (${placeholders(sourceIds)})`,
-  ).all(ownerId, sourceType, ...sourceIds).flatMap((value) => {
-    if (!isRow(value)) return [];
-    const id = Number(value.target_id);
-    return Number.isFinite(id)
-      ? [{ type: String(value.target_type ?? ""), id }]
-      : [];
-  });
+    )
+    .all(ownerId, sourceType, ...sourceIds)
+    .flatMap((value) => {
+      if (!isRow(value)) return [];
+      const id = Number(value.target_id);
+      return Number.isFinite(id)
+        ? [{ type: String(value.target_type ?? ""), id }]
+        : [];
+    });
 }
 
 function countRows(
@@ -82,6 +207,97 @@ function countRows(
   return isRow(value) ? Number(value.count ?? 0) : 0;
 }
 
+function categoryCountsFromTargets(targets: ForgetTarget[]): CategoryCounts {
+  const counts: CategoryCounts = {};
+  for (const target of targets) {
+    counts[target.entityType] = (counts[target.entityType] ?? 0) + 1;
+  }
+  return counts;
+}
+
+function buildTargetsForTopic(
+  db: DatabaseSync,
+  ownerId: string,
+  topic: string,
+): {
+  targets: ForgetTarget[];
+  messageIds: number[];
+  episodeIds: number[];
+  matchedFacts: Array<{ id: number; key: string; value: string }>;
+  preview: string[];
+} {
+  const messageIds = listMessageIdsMatchingTopic(db, ownerId, topic);
+  const episodeMatches = matchingEpisodes(db, ownerId, topic, messageIds);
+  const episodeIds = episodeMatches.map((episode) => episode.id);
+  const matchedFacts = listFactsMatchingTopic(db, ownerId, topic);
+  const relationshipMatches = listRelationshipForgetTargets(db, ownerId, topic);
+  const perceptionMatches = listPerceptionForgetTargets(db, ownerId, topic);
+  const preview = [
+    ...matchedFacts.map((fact) => `fact: ${fact.key}: ${fact.value}`),
+    ...previewEpisodeForget(db, ownerId, topic),
+    ...messageIds.map((id) => `message: ${id}`),
+    ...relationshipMatches.preview,
+    ...perceptionMatches.preview,
+  ];
+  const targets: ForgetTarget[] = [];
+  const push = (
+    entityType: string,
+    id: number,
+    action: ForgetTarget["action"],
+  ) => {
+    const entityUuid = requireEntityUuid(db, entityType, id);
+    if (!entityUuid) return;
+    if (
+      targets.some(
+        (t) => t.entityType === entityType && t.entityUuid === entityUuid,
+      )
+    ) {
+      return;
+    }
+    targets.push({ entityType, entityUuid, action });
+  };
+  for (const id of messageIds) push("mem_messages", id, "redact");
+  for (const id of episodeIds) push("episodes", id, "redact");
+  for (const fact of matchedFacts) push("mem_facts", fact.id, "redact");
+  for (const target of relationshipMatches.targets) targets.push(target);
+  for (const target of perceptionMatches.targets) targets.push(target);
+
+  const linked = [
+    ...evidenceTargets(db, ownerId, "message", messageIds),
+    ...evidenceTargets(db, ownerId, "episode", episodeIds),
+  ];
+  for (const link of linked) {
+    if (link.type === "fact") push("mem_facts", link.id, "redact");
+    if (link.type === "revision") push("learning_revisions", link.id, "redact");
+  }
+
+  if (tableHasColumn(db, "delivery_reservations", "entity_uuid")) {
+    for (const messageId of messageIds) {
+      const rows = db
+        .prepare(
+          `SELECT id FROM delivery_reservations
+           WHERE owner_id = ? AND user_message_id = ?`,
+        )
+        .all(ownerId, messageId) as Array<{ id: number }>;
+      for (const row of rows) {
+        push("delivery_reservations", row.id, "redact");
+        if (tableExists(db, "delivery_bubbles")) {
+          const bubbles = db
+            .prepare(
+              `SELECT id FROM delivery_bubbles WHERE reservation_id = ?`,
+            )
+            .all(row.id) as Array<{ id: number }>;
+          for (const bubble of bubbles) {
+            push("delivery_bubbles", bubble.id, "redact");
+          }
+        }
+      }
+    }
+  }
+
+  return { targets, messageIds, episodeIds, matchedFacts, preview };
+}
+
 function reconcileFacts(
   db: DatabaseSync,
   ownerId: string,
@@ -89,10 +305,12 @@ function reconcileFacts(
 ): number {
   let changed = 0;
   for (const factId of [...new Set(factIds)]) {
-    const fact = db.prepare(
-      `SELECT source_message_id, source_quote, origin, superseded_by
+    const fact = db
+      .prepare(
+        `SELECT source_message_id, source_quote, origin, superseded_by
        FROM mem_facts WHERE id = ? AND owner_id = ?`,
-    ).get(factId, ownerId) as {
+      )
+      .get(factId, ownerId) as {
       source_message_id?: number | null;
       source_quote?: string | null;
       origin?: string;
@@ -107,35 +325,44 @@ function reconcileFacts(
       String(factId),
     );
     if (fact.origin === "explicit_user" && remaining === 0) {
-      changed += Number(db.prepare(
-        `UPDATE mem_facts SET superseded_by = id
+      changed += Number(
+        db
+          .prepare(
+            `UPDATE mem_facts SET superseded_by = id
          WHERE id = ? AND owner_id = ? AND superseded_by IS NULL`,
-      ).run(factId, ownerId).changes);
+          )
+          .run(factId, ownerId).changes,
+      );
     } else if (
       fact.origin === "explicit_user" &&
       fact.superseded_by == null &&
       fact.source_message_id != null
     ) {
-      const visible = db.prepare(
-        `SELECT m.id, m.text
+      const visible = db
+        .prepare(
+          `SELECT m.id, m.text
          FROM evidence_links l
          JOIN mem_messages m ON m.id = CAST(l.source_id AS INTEGER)
          WHERE l.owner_id = ? AND l.target_type = 'fact' AND l.target_id = ?
            AND l.source_type = 'message' AND m.role = 'user'
            AND m.redacted_at IS NULL
          ORDER BY m.id DESC`,
-      ).all(ownerId, String(factId)).flatMap((value) => {
-        if (!isRow(value)) return [];
-        return [{ id: Number(value.id), text: String(value.text ?? "") }];
-      });
+        )
+        .all(ownerId, String(factId))
+        .flatMap((value) => {
+          if (!isRow(value)) return [];
+          return [{ id: Number(value.id), text: String(value.text ?? "") }];
+        });
       const quote = String(fact.source_quote ?? "")
         .normalize("NFC")
         .replace(/\r\n?/g, "\n");
       const replacement = quote
-        ? visible.find((candidate) => candidate.text
-            .normalize("NFC")
-            .replace(/\r\n?/g, "\n")
-            .includes(quote))
+        ? visible.find((candidate) =>
+            candidate.text
+              .normalize("NFC")
+              .replace(/\r\n?/g, "\n")
+              .includes(quote),
+          )
         : undefined;
       if (replacement && replacement.id !== fact.source_message_id) {
         db.prepare(
@@ -143,9 +370,13 @@ function reconcileFacts(
         ).run(replacement.id, factId);
         changed += 1;
       } else if (!replacement && remaining === 0) {
-        changed += Number(db.prepare(
-          "UPDATE mem_facts SET superseded_by = id WHERE id = ? AND superseded_by IS NULL",
-        ).run(factId).changes);
+        changed += Number(
+          db
+            .prepare(
+              "UPDATE mem_facts SET superseded_by = id WHERE id = ? AND superseded_by IS NULL",
+            )
+            .run(factId).changes,
+        );
       }
     }
     db.prepare(
@@ -207,28 +438,31 @@ function assertForgetIntegrity(
       ownerId,
       ...episodeIds,
     );
-    const activeState = countRows(
-      db,
-      `SELECT COUNT(*) AS count FROM mind_state_items
+    const activeState =
+      countRows(
+        db,
+        `SELECT COUNT(*) AS count FROM mind_state_items
        WHERE owner_id = ? AND status = 'active' AND source_type = 'episode'
          AND CAST(source_id AS INTEGER) IN (${marks})`,
-      ownerId,
-      ...episodeIds,
-    ) + countRows(
-      db,
-      `SELECT COUNT(*) AS count FROM affective_events
+        ownerId,
+        ...episodeIds,
+      ) +
+      countRows(
+        db,
+        `SELECT COUNT(*) AS count FROM affective_events
        WHERE owner_id = ? AND source_type = 'episode'
          AND CAST(source_id AS INTEGER) IN (${marks})`,
-      ownerId,
-      ...episodeIds,
-    ) + countRows(
-      db,
-      `SELECT COUNT(*) AS count FROM affective_state
+        ownerId,
+        ...episodeIds,
+      ) +
+      countRows(
+        db,
+        `SELECT COUNT(*) AS count FROM affective_state
        WHERE owner_id = ? AND source_type = 'episode'
          AND CAST(source_id AS INTEGER) IN (${marks})`,
-      ownerId,
-      ...episodeIds,
-    );
+        ownerId,
+        ...episodeIds,
+      );
     const visibleRuns = countRows(
       db,
       `SELECT COUNT(*) AS count FROM cognitive_runs
@@ -253,92 +487,193 @@ function assertForgetIntegrity(
   }
 }
 
-export function forgetOwnerTopic(
+function resolveIdsFromTargets(
   db: DatabaseSync,
   ownerId: string,
-  topic: string,
-  confirmed: boolean,
-): ForgetResult {
-  const cleanTopic = topic.trim();
-  if (!cleanTopic) {
-    return { preview: [], deleted: 0, receiptId: null, counts: emptyCounts() };
-  }
-  const messageIds = listMessageIdsMatchingTopic(db, ownerId, cleanTopic);
-  const episodeMatches = matchingEpisodes(db, ownerId, cleanTopic, messageIds);
-  const episodeIds = episodeMatches.map((episode) => episode.id);
-  const matchedFacts = listFactsMatchingTopic(db, ownerId, cleanTopic);
-  const preview = [
-    ...matchedFacts.map((fact) => `fact: ${fact.key}: ${fact.value}`),
-    ...previewEpisodeForget(db, ownerId, cleanTopic),
-    ...messageIds.map((id) => `message: ${id}`),
-  ];
-  if (!confirmed) {
-    return { preview, deleted: 0, receiptId: null, counts: emptyCounts() };
-  }
-
-  const targets = [
-    ...evidenceTargets(db, ownerId, "message", messageIds),
-    ...evidenceTargets(db, ownerId, "episode", episodeIds),
-  ];
-  const factIds = [...new Set([
-    ...matchedFacts.map((fact) => fact.id),
-    ...targets.filter((target) => target.type === "fact").map((target) => target.id),
-  ])];
-  const revisionIds = [...new Set(
-    targets.filter((target) => target.type === "revision").map((target) => target.id),
-  )];
-  const episodeMarks = placeholders(episodeIds);
-  const stateReconciled = episodeIds.length === 0 ? 0 :
-    countRows(
+  targets: ForgetTarget[],
+): {
+  messageIds: number[];
+  episodeIds: number[];
+  factIds: number[];
+  revisionIds: number[];
+} {
+  const messageIds: number[] = [];
+  const episodeIds: number[] = [];
+  const factIds: number[] = [];
+  const revisionIds: number[] = [];
+  for (const target of targets) {
+    const id = idOfEntityUuid(
       db,
-      `SELECT COUNT(*) AS count FROM mind_state_items
+      target.entityType,
+      target.entityUuid,
+      ownerId,
+    );
+    if (id == null) continue;
+    switch (target.entityType) {
+      case "mem_messages":
+        messageIds.push(id);
+        break;
+      case "episodes":
+        episodeIds.push(id);
+        break;
+      case "mem_facts":
+        factIds.push(id);
+        break;
+      case "learning_revisions":
+        revisionIds.push(id);
+        break;
+      case "delivery_reservations":
+      case "delivery_bubbles":
+        break;
+      default:
+        break;
+    }
+  }
+  return {
+    messageIds: [...new Set(messageIds)],
+    episodeIds: [...new Set(episodeIds)],
+    factIds: [...new Set(factIds)],
+    revisionIds: [...new Set(revisionIds)],
+  };
+}
+
+function redactDeliveryTargets(
+  db: DatabaseSync,
+  ownerId: string,
+  targets: ForgetTarget[],
+): void {
+  for (const target of targets) {
+    if (target.entityType === "delivery_reservations") {
+      const id = idOfEntityUuid(
+        db,
+        "delivery_reservations",
+        target.entityUuid,
+        ownerId,
+      );
+      if (id == null) continue;
+      db.prepare(
+        `UPDATE delivery_reservations SET draft_text = '' WHERE id = ? AND owner_id = ?`,
+      ).run(id, ownerId);
+    }
+    if (target.entityType === "delivery_bubbles") {
+      const id = idOfEntityUuid(
+        db,
+        "delivery_bubbles",
+        target.entityUuid,
+        null,
+      );
+      if (id == null) continue;
+      db.prepare(`UPDATE delivery_bubbles SET text = '' WHERE id = ?`).run(id);
+    }
+  }
+}
+
+/**
+ * Nuclear cascade keyed by entity_uuid targets (idempotent when rows already gone).
+ */
+export function applyForgetTargets(
+  db: DatabaseSync,
+  ownerId: string,
+  targets: ForgetTarget[],
+  options: { tombstoneId?: string | null } = {},
+): ForgetResult {
+  const { messageIds, episodeIds, factIds, revisionIds } = resolveIdsFromTargets(
+    db,
+    ownerId,
+    targets,
+  );
+  const episodeMarks = placeholders(episodeIds);
+  const stateReconciled =
+    episodeIds.length === 0
+      ? 0
+      : countRows(
+          db,
+          `SELECT COUNT(*) AS count FROM mind_state_items
        WHERE owner_id = ? AND status = 'active' AND source_type = 'episode'
          AND CAST(source_id AS INTEGER) IN (${episodeMarks})`,
-      ownerId,
-      ...episodeIds,
-    ) +
-    countRows(
-      db,
-      `SELECT COUNT(*) AS count FROM affective_events
+          ownerId,
+          ...episodeIds,
+        ) +
+        countRows(
+          db,
+          `SELECT COUNT(*) AS count FROM affective_events
        WHERE owner_id = ? AND source_type = 'episode'
          AND CAST(source_id AS INTEGER) IN (${episodeMarks})`,
-      ownerId,
-      ...episodeIds,
-    );
-  const runsRedacted = episodeIds.length === 0 ? 0 : countRows(
-    db,
-    `SELECT COUNT(*) AS count FROM cognitive_runs
+          ownerId,
+          ...episodeIds,
+        );
+  const runsRedacted =
+    episodeIds.length === 0
+      ? 0
+      : countRows(
+          db,
+          `SELECT COUNT(*) AS count FROM cognitive_runs
      WHERE owner_id = ? AND episode_id IN (${episodeMarks})
        AND output_json <> '{}'`,
-    ownerId,
-    ...episodeIds,
-  );
-  const evidenceBefore = targets.length;
+          ownerId,
+          ...episodeIds,
+        );
+  const evidenceBefore =
+    evidenceTargets(db, ownerId, "message", messageIds).length +
+    evidenceTargets(db, ownerId, "episode", episodeIds).length;
   const receiptId = randomUUID();
-  db.prepare(
-    `INSERT INTO forget_receipts (id, owner_id, created_at)
-     VALUES (?, ?, ?)`,
-  ).run(receiptId, ownerId, new Date().toISOString());
-  const factsForgotten = forgetByTopic(db, ownerId, cleanTopic);
-  const episodesForgotten = forgetEpisodesByTopic(
-    db,
-    ownerId,
-    cleanTopic,
-    messageIds,
-  );
+  if (tableHasColumn(db, "forget_receipts", "tombstone_id")) {
+    db.prepare(
+      `INSERT INTO forget_receipts
+         (id, owner_id, created_at, tombstone_id, category_counts_json, external_non_erasure_json)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(
+      receiptId,
+      ownerId,
+      new Date().toISOString(),
+      options.tombstoneId ?? null,
+      JSON.stringify(categoryCountsFromTargets(targets)),
+      JSON.stringify(DEFAULT_HONESTY),
+    );
+  } else {
+    db.prepare(
+      `INSERT INTO forget_receipts (id, owner_id, created_at)
+       VALUES (?, ?, ?)`,
+    ).run(receiptId, ownerId, new Date().toISOString());
+  }
+
+  let factsForgotten = 0;
+  for (const factId of factIds) {
+    factsForgotten += Number(
+      db
+        .prepare(
+          `UPDATE mem_facts SET superseded_by = id
+             WHERE id = ? AND owner_id = ? AND superseded_by IS NULL`,
+        )
+        .run(factId, ownerId).changes,
+    );
+  }
+  let episodesForgotten = 0;
+  if (episodeIds.length > 0) {
+    episodesForgotten = forgetEpisodesByIds(db, ownerId, episodeIds);
+  }
   let messageEvidenceRemoved = 0;
   if (messageIds.length > 0) {
-    messageEvidenceRemoved = Number(db.prepare(
-      `DELETE FROM evidence_links
+    messageEvidenceRemoved = Number(
+      db
+        .prepare(
+          `DELETE FROM evidence_links
        WHERE owner_id = ? AND source_type = 'message'
          AND CAST(source_id AS INTEGER) IN (${placeholders(messageIds)})`,
-    ).run(ownerId, ...messageIds).changes);
+        )
+        .run(ownerId, ...messageIds).changes,
+    );
   }
-  const messagesRedacted = redactMessages(
+  const messagesRedacted = redactMessages(db, ownerId, messageIds, receiptId);
+  redactDeliveryTargets(db, ownerId, targets);
+  redactRelationshipTargets(db, ownerId, targets);
+  redactPerceptionTargets(db, ownerId, targets);
+  detachRelationshipMotivations(
     db,
     ownerId,
-    messageIds,
-    receiptId,
+    targets
+      .filter((target) => target.entityType !== "relationship_motivation_claim")
+      .map((target) => target.entityUuid),
   );
   const factChanges = reconcileFacts(db, ownerId, factIds);
   const revisionChanges = reconcileUnsupportedRevisions(
@@ -392,12 +727,150 @@ export function forgetOwnerTopic(
     receiptId,
     messageIds,
     episodeIds,
-    matchedFacts.map((fact) => fact.id),
+    factIds,
   );
   return {
     preview: [],
     deleted: messagesRedacted + episodesForgotten + factsForgotten,
     receiptId,
     counts,
+    honesty: DEFAULT_HONESTY,
+    tombstoneId: options.tombstoneId ?? null,
+    categoryCounts: categoryCountsFromTargets(targets),
   };
+}
+
+export function replayPendingTombstones(
+  continuity: DatabaseSync,
+  nuclear: DatabaseSync,
+): void {
+  const lineageId = getAuthoritativeLineageId(continuity);
+  const stones = listPendingOrAppliedTombstones(continuity, lineageId);
+  for (const stone of stones) {
+    const targets = listTombstoneTargets(continuity, stone.tombstoneId);
+    if (targets.length === 0) {
+      if (stone.status === "pending") {
+        markTombstoneApplied(continuity, stone.tombstoneId, null);
+      }
+      continue;
+    }
+    const result = applyForgetTargets(nuclear, stone.ownerId, targets, {
+      tombstoneId: stone.tombstoneId,
+    });
+    if (stone.status === "pending") {
+      markTombstoneApplied(continuity, stone.tombstoneId, result.receiptId);
+    }
+  }
+}
+
+export type ForgetOwnerOptions = {
+  continuity?: DatabaseSync | null;
+  previewId?: string | null;
+  confirmationDiscordMessageId?: string | null;
+  cancel?: boolean;
+};
+
+export function forgetOwnerTopic(
+  db: DatabaseSync,
+  ownerId: string,
+  topic: string,
+  confirmed: boolean,
+  options: ForgetOwnerOptions = {},
+): ForgetResult {
+  const continuity = options.continuity ?? null;
+  if (options.cancel && options.previewId && continuity) {
+    cancelForgetPreview(continuity, options.previewId, ownerId);
+    return {
+      preview: [],
+      deleted: 0,
+      receiptId: null,
+      counts: emptyCounts(),
+      previewId: options.previewId,
+      honesty: DEFAULT_HONESTY,
+    };
+  }
+
+  // Hard invariant: destructive confirmation requires preview_id only.
+  if (confirmed) {
+    if (!options.previewId?.trim()) {
+      throw new Error("forget_preview_id_required");
+    }
+    if (!continuity) {
+      throw new Error("continuity_unavailable");
+    }
+    const { tombstoneId, targets, categoryCounts } = confirmPreviewToTombstone(
+      continuity,
+      { previewId: options.previewId.trim(), ownerId },
+    );
+    if (targets.length === 0) {
+      throw new Error("forget_preview_targets_missing");
+    }
+    // Exact stored targets only — never recompute from topic / topicHint.
+    const result = applyForgetTargets(db, ownerId, targets, { tombstoneId });
+    markTombstoneApplied(continuity, tombstoneId, result.receiptId);
+    return {
+      ...result,
+      previewId: options.previewId.trim(),
+      categoryCounts,
+      tombstoneId,
+      honesty: DEFAULT_HONESTY,
+    };
+  }
+
+  const cleanTopic = topic.trim();
+  if (!cleanTopic) {
+    return { preview: [], deleted: 0, receiptId: null, counts: emptyCounts() };
+  }
+
+  if (!continuity) {
+    throw new Error("continuity_unavailable");
+  }
+
+  const built = buildTargetsForTopic(db, ownerId, cleanTopic);
+  if (built.targets.length === 0) {
+    return {
+      preview: built.preview,
+      deleted: 0,
+      receiptId: null,
+      counts: emptyCounts(),
+    };
+  }
+  const categoryCounts = categoryCountsFromTargets(built.targets);
+  const created = createForgetPreview(continuity, {
+    ownerId,
+    targets: built.targets,
+    categoryCounts,
+    confirmationDiscordMessageId: options.confirmationDiscordMessageId,
+    topicDiagnosticFingerprint: topicFingerprint(ownerId, cleanTopic),
+  });
+  return {
+    preview: built.preview,
+    deleted: 0,
+    receiptId: null,
+    counts: emptyCounts(),
+    previewId: created.previewId,
+    expiresAt: created.expiresAt,
+    categoryCounts: created.categoryCounts,
+    honesty: DEFAULT_HONESTY,
+  };
+}
+
+/**
+ * Auto-forget helper: build a durable preview then confirm by preview_id.
+ * Never confirms by raw topic.
+ */
+export function forgetOwnerTopicImmediate(
+  db: DatabaseSync,
+  ownerId: string,
+  topic: string,
+  continuity: DatabaseSync,
+): ForgetResult {
+  const preview = forgetOwnerTopic(db, ownerId, topic, false, { continuity });
+  if (!preview.previewId) {
+    return preview;
+  }
+  return forgetOwnerTopic(db, ownerId, "", true, {
+    continuity,
+    previewId: preview.previewId,
+  });
 }

@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
+import type { DataClassification } from "../privacy/classification.js";
+import { newEntityUuid } from "../continuity/entity-uuid.js";
 
 export type MessageRole = "user" | "assistant" | "system";
 
@@ -11,6 +13,8 @@ export type MemoryMessage = {
   text: string;
   channel: string;
   createdAt: string;
+  entityUuid?: string;
+  dataClassification?: DataClassification;
 };
 
 type InsertMessageInput = {
@@ -19,6 +23,8 @@ type InsertMessageInput = {
   role: MessageRole;
   text: string;
   channel?: string;
+  dataClassification?: DataClassification;
+  entityUuid?: string;
 };
 
 type DbRow = Record<string, unknown>;
@@ -89,25 +95,52 @@ export function insertMessage(
 ): number {
   const text = input.text.trim();
   if (!text) return 0;
-  const result = db
-    .prepare(
-      `INSERT INTO mem_messages
-         (thread_id, owner_id, role, text, channel, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
-      input.threadId,
-      input.ownerId,
-      input.role,
-      text,
-      input.channel ?? "discord",
-      new Date().toISOString(),
-    );
+  const entityUuid = input.entityUuid ?? newEntityUuid();
+  const classification = input.dataClassification ?? "never_public";
+  const hasUuid = columnExists(db, "mem_messages", "entity_uuid");
+  const result = hasUuid
+    ? db
+        .prepare(
+          `INSERT INTO mem_messages
+             (thread_id, owner_id, role, text, channel, created_at,
+              entity_uuid, data_classification)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          input.threadId,
+          input.ownerId,
+          input.role,
+          text,
+          input.channel ?? "discord",
+          new Date().toISOString(),
+          entityUuid,
+          classification,
+        )
+    : db
+        .prepare(
+          `INSERT INTO mem_messages
+             (thread_id, owner_id, role, text, channel, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          input.threadId,
+          input.ownerId,
+          input.role,
+          text,
+          input.channel ?? "discord",
+          new Date().toISOString(),
+        );
   db.prepare("UPDATE mem_threads SET updated_at = ? WHERE id = ?").run(
     new Date().toISOString(),
     input.threadId,
   );
   return Number(result.lastInsertRowid);
+}
+
+function columnExists(db: DatabaseSync, table: string, column: string): boolean {
+  return (
+    db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
+  ).some((row) => row.name === column);
 }
 
 export function getHotMessages(

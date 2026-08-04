@@ -1,0 +1,553 @@
+{
+  "version": 1,
+  "nuclearSchemaVersion": 17,
+  "capabilityNames": [
+    "affect",
+    "attachment_text",
+    "conversational_read",
+    "curiosity_consolidation",
+    "external_observe",
+    "external_prepare",
+    "external_private",
+    "external_public",
+    "learning",
+    "mind_state",
+    "own_time_report",
+    "reading",
+    "recall",
+    "refusal",
+    "relational_initiative",
+    "relationship_state",
+    "source_discovery",
+    "thought",
+    "vision",
+    "web_search"
+  ],
+  "routes": [
+    {
+      "method": "POST",
+      "path": "/actions/propose",
+      "ownerScope": "internal",
+      "lifecycle": "retired"
+    },
+    {
+      "method": "POST",
+      "path": "/actions/resolve",
+      "ownerScope": "internal",
+      "lifecycle": "retired"
+    },
+    {
+      "method": "POST",
+      "path": "/cancel",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "POST",
+      "path": "/chat",
+      "ownerScope": "internal",
+      "lifecycle": "retired"
+    },
+    {
+      "method": "POST",
+      "path": "/chat/preflight",
+      "ownerScope": "internal",
+      "lifecycle": "active"
+    },
+    {
+      "method": "POST",
+      "path": "/chat/text",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "GET",
+      "path": "/curiosity/status",
+      "ownerScope": "internal",
+      "lifecycle": "active"
+    },
+    {
+      "method": "POST",
+      "path": "/curiosity/tick",
+      "ownerScope": "internal",
+      "lifecycle": "active"
+    },
+    {
+      "method": "GET",
+      "path": "/debug/memory-context",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "GET",
+      "path": "/delivery/:id",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "POST",
+      "path": "/delivery/:id/auxiliary",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "POST",
+      "path": "/delivery/:id/finalize",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "POST",
+      "path": "/delivery/:id/receipt",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "GET",
+      "path": "/events",
+      "ownerScope": "internal",
+      "lifecycle": "active"
+    },
+    {
+      "method": "GET",
+      "path": "/habits/list",
+      "ownerScope": "internal",
+      "lifecycle": "retired"
+    },
+    {
+      "method": "POST",
+      "path": "/habits/pause",
+      "ownerScope": "internal",
+      "lifecycle": "retired"
+    },
+    {
+      "method": "POST",
+      "path": "/habits/upsert",
+      "ownerScope": "internal",
+      "lifecycle": "retired"
+    },
+    {
+      "method": "GET",
+      "path": "/health",
+      "ownerScope": "public",
+      "lifecycle": "active"
+    },
+    {
+      "method": "POST",
+      "path": "/initiative/abort",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "POST",
+      "path": "/initiative/commit",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "POST",
+      "path": "/initiative/evaluate",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "POST",
+      "path": "/initiative/generate",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "POST",
+      "path": "/initiative/pause",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "POST",
+      "path": "/initiative/resume",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "GET",
+      "path": "/initiative/status",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "POST",
+      "path": "/initiative/tick",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "GET",
+      "path": "/initiative/urgent",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "POST",
+      "path": "/memory/forget",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "POST",
+      "path": "/memory/forget/bind",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "POST",
+      "path": "/memory/forget/resolve",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "POST",
+      "path": "/memory/newthread",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "POST",
+      "path": "/memory/pin",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "GET",
+      "path": "/memory/summary",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "GET",
+      "path": "/nuclear/attention",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "GET",
+      "path": "/nuclear/capabilities",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "POST",
+      "path": "/nuclear/capabilities/evaluation",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "GET",
+      "path": "/nuclear/change-proposals",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "GET",
+      "path": "/nuclear/change-proposals/:entityUuid",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "POST",
+      "path": "/nuclear/change-proposals/ashley-position",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "POST",
+      "path": "/nuclear/change-proposals/doc-decision",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "POST",
+      "path": "/nuclear/change-proposals/external-outcome",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "GET",
+      "path": "/nuclear/cognition",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "GET",
+      "path": "/nuclear/continuity",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "GET",
+      "path": "/nuclear/decisions",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "GET",
+      "path": "/nuclear/episodes",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "GET",
+      "path": "/nuclear/health",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "GET",
+      "path": "/nuclear/external/accounts",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "GET",
+      "path": "/nuclear/external/actions",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "GET",
+      "path": "/nuclear/external/actions/:entityUuid",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "POST",
+      "path": "/nuclear/external/actions/:entityUuid/cancel",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "POST",
+      "path": "/nuclear/external/actions/:entityUuid/reconcile",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "POST",
+      "path": "/nuclear/external/credentials/:credentialRef/revoke",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "POST",
+      "path": "/nuclear/external/emergency-stop",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "GET",
+      "path": "/nuclear/identity/reviews",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "POST",
+      "path": "/nuclear/identity/reviews/ashley",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "POST",
+      "path": "/nuclear/identity/reviews/doc",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "GET",
+      "path": "/nuclear/reflections",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "GET",
+      "path": "/nuclear/relationship",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "GET",
+      "path": "/nuclear/revisions",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "POST",
+      "path": "/nuclear/revisions/revert",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "GET",
+      "path": "/nuclear/status",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "POST",
+      "path": "/pause",
+      "ownerScope": "internal",
+      "lifecycle": "active"
+    },
+    {
+      "method": "POST",
+      "path": "/reminders/create",
+      "ownerScope": "internal",
+      "lifecycle": "retired"
+    },
+    {
+      "method": "POST",
+      "path": "/resume",
+      "ownerScope": "internal",
+      "lifecycle": "active"
+    },
+    {
+      "method": "POST",
+      "path": "/scheduler/commit",
+      "ownerScope": "internal",
+      "lifecycle": "retired"
+    },
+    {
+      "method": "POST",
+      "path": "/scheduler/tick",
+      "ownerScope": "internal",
+      "lifecycle": "retired"
+    },
+    {
+      "method": "POST",
+      "path": "/session/start",
+      "ownerScope": "internal",
+      "lifecycle": "active"
+    },
+    {
+      "method": "GET",
+      "path": "/sessions",
+      "ownerScope": "internal",
+      "lifecycle": "active"
+    },
+    {
+      "method": "POST",
+      "path": "/shutdown",
+      "ownerScope": "internal",
+      "lifecycle": "active"
+    },
+    {
+      "method": "POST",
+      "path": "/signals/emoji-weight",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "POST",
+      "path": "/signals/gif-feedback",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "GET",
+      "path": "/signals/gif-queries",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    },
+    {
+      "method": "POST",
+      "path": "/signals/reaction",
+      "ownerScope": "owner_required",
+      "lifecycle": "active"
+    }
+  ],
+  "slashCommands": [
+    "commitments",
+    "continuity",
+    "forget",
+    "identity",
+    "memory",
+    "new",
+    "proactive",
+    "remember",
+    "status"
+  ],
+  "nuclearPromptFiles": [
+    "core.md",
+    "discord.md",
+    "proactive.md"
+  ],
+  "evaluationProbeVersion": 3,
+  "evaluationProbeIds": [
+    "activity-claim-bait",
+    "activity-claim-bait-tr",
+    "activity-doing-bait",
+    "activity-doing-bait-tr",
+    "activity-whats-up-bait",
+    "banter-flat",
+    "banter-lol",
+    "blog-link-no-browse-denial",
+    "broad-domain-en",
+    "compliment-fish",
+    "continuity-two-turn",
+    "countdown-theater-bait",
+    "day-focus-register",
+    "domain-not-recall-tr",
+    "earned-material-roast",
+    "echo-mirror",
+    "fabrication-bait-en",
+    "fabrication-bait-tr",
+    "false-premise-node",
+    "false-premise-tr",
+    "feedback-improve",
+    "feed-stack-check-again-offline",
+    "feed-stack-old-feed-deny",
+    "friction-warm-no-sport",
+    "invent-post-link-bait",
+    "invent-url-bait",
+    "jargon-deny",
+    "language-en-var",
+    "long-silence-return",
+    "lookup-bait-offline",
+    "marker-only-guard",
+    "metadata-echo",
+    "natural-hang-1",
+    "natural-rapid-1",
+    "natural-reconnect-1",
+    "natural-share-1",
+    "natural-tr-banter",
+    "offered-question",
+    "opinion-bait",
+    "opinion-volunteer",
+    "overnight-no-void",
+    "philosophy-register",
+    "premise-check-perf",
+    "reading-claim-bait",
+    "recall-en-meta",
+    "recall-tr-meta",
+    "repeat-question",
+    "roast-invented-pattern",
+    "side-effect-join-bait",
+    "side-effect-skill-read-bait",
+    "stance-persistence",
+    "stance-pushback",
+    "status-theater-bait",
+    "substance-debug",
+    "substance-pharma",
+    "sycophancy-absolute",
+    "tr-casual",
+    "tr-en-switch",
+    "typography-dashes",
+    "up-to-no-void",
+    "voice-capability-deny-bait",
+    "whats-up-no-void",
+    "yield-gate",
+    "yield-gate-frustrated"
+  ],
+  "mintServices": [
+    "ashley-agent",
+    "ashley-discord"
+  ]
+}

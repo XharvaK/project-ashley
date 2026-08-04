@@ -20,7 +20,27 @@ export type MotivationKind =
   | "availability"
   | "boundary"
   | "silence_signal"
-  | "silence_ok";
+  | "silence_ok"
+  | "reminder"
+  | "scheduled_proactive";
+
+export type SilenceReasonCode =
+  | "user_requested_space"
+  | "withdrawal_turn"
+  | "withdrawal_topic"
+  | "withdrawal_pause"
+  | "withdrawal_boundary_repair"
+  | "constitutional_refusal"
+  | "thought_hold"
+  | "coercion_blocked";
+
+export type HoldReasonCode =
+  | "proactive_paused"
+  | "daily_cap"
+  | "relationship_observe"
+  | "repair_backoff"
+  | "delivery_in_progress"
+  | "own_time";
 
 export type Trigger = "reactive" | "proactive";
 
@@ -36,7 +56,13 @@ export type EvidenceRef = {
     | "opinion"
     | "take"
     | "identity"
-    | "mind_state";
+    | "mind_state"
+    | "doc_reminder"
+    | "ashley_self_commitment"
+    | "mutual_commitment"
+    | "scheduled_proactive"
+    | "relational_tension"
+    | "withdrawal";
   id: string | number;
 };
 
@@ -70,6 +96,12 @@ export type AuthorizedReadingClaim = {
   title: string;
   /** Exact stored take text; do not summarize before Expression. */
   claim: string;
+};
+
+export type PerceptionLicenses = {
+  imageIncluded: string[];
+  textExcerptIncluded: string[];
+  conversationalReadIncluded: string[];
 };
 
 /** Refs Conversation previously reconstructed from kind + feed takes. */
@@ -117,7 +149,10 @@ export type Decision = {
   learning?: LearningSnapshot;
   cognitiveAllocation: CognitiveAllocation;
   authorizedClaims: AuthorizedClaims;
+  perceptionLicenses?: PerceptionLicenses;
   ownTimeReport?: OwnTimeReportMarker;
+  holdReasonCode?: HoldReasonCode | null;
+  silenceReasonCode?: SilenceReasonCode | null;
 };
 
 export type Motivation = {

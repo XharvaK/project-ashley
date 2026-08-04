@@ -7,11 +7,10 @@ import { getLatestCompletedOwnTimeSession } from "../state/own-time.js";
 import type {
   AuthorizedReadingClaim,
   Decision,
-  EvidenceRef,
-  OwnTimeReportMarker,
   OwnTimeReportReason,
   OwnTimeReportStatus,
 } from "../types.js";
+import type { OwnTimeReportConstraint } from "./own-time-constraint.js";
 
 const TITLE_BOUND = 300;
 const MAX_REPORT_TAKES = 3;
@@ -323,14 +322,6 @@ export function assessOwnTimeReport(
   };
 }
 
-function emptyClaims(): Decision["authorizedClaims"] {
-  return {
-    readingRecordIds: [],
-    readingTitles: [],
-    readingClaims: [],
-  };
-}
-
 function buildStructuredClaims(
   selected: EligibleReportTake[],
 ): Decision["authorizedClaims"] {
@@ -356,90 +347,16 @@ function buildStructuredClaims(
   return { readingRecordIds, readingTitles, readingClaims };
 }
 
-function mergeEvidenceRefs(
-  existing: EvidenceRef[],
-  selectedTakeIds: number[],
-): EvidenceRef[] {
-  const nonTake = existing.filter((ref) => ref.type !== "take");
-  const takeRefs: EvidenceRef[] = selectedTakeIds.map((id) => ({
-    type: "take" as const,
-    id,
-  }));
-  return [...nonTake, ...takeRefs];
-}
-
-function markerFromAssessment(
-  assessment: OwnTimeReportAssessment,
-): OwnTimeReportMarker {
-  return {
-    status: assessment.status,
-    reason: assessment.reason,
-    sessionId: assessment.sessionId,
-    selectedTakeIds: assessment.selected.map((take) => take.takeId),
-  };
-}
-
-/** Non-operational Decision.reason — no machinery vocabulary. */
-function decisionReasonText(reason: OwnTimeReportReason): string {
-  switch (reason) {
-    case "no_session":
-    case "no_owner_reading_activity":
-    case "no_grounded_take":
-    case "already_reported":
-      return "Answer Doc's ask about what happened while they were away.";
-    case "reportable_takes":
-      return "Share what stood out while Doc was away.";
-    default: {
-      const _exhaustive: never = reason;
-      return _exhaustive;
-    }
-  }
-}
-
 /**
  * Deterministic Agency report floor after ordinary Thought.
- * Does not invent motivation IDs. Preserves non-take evidence refs.
+ * Wave 01: semantic mutation after Thought is forbidden. Kept as a no-op
+ * identity for legacy tests that still import the name.
  */
 export function applyOwnTimeReportFinalizer(
   decision: Decision,
-  assessment: OwnTimeReportAssessment,
+  _assessment: OwnTimeReportAssessment,
 ): Decision {
-  const ownTimeReport = markerFromAssessment(assessment);
-
-  if (assessment.status !== "reportable_takes") {
-    return {
-      ...decision,
-      kind: "speak",
-      reason: decisionReasonText(assessment.reason),
-      evidenceRefs: mergeEvidenceRefs(decision.evidenceRefs, []),
-      authorizedClaims: emptyClaims(),
-      ownTimeReport,
-      cognitiveAllocation: {
-        ...decision.cognitiveAllocation,
-        shouldSpeak: true,
-        completion: "complete",
-      },
-    };
-  }
-
-  const claims = buildStructuredClaims(assessment.selected);
-  const selectedTakeIds = claims.readingClaims.map((claim) => claim.takeId);
-  return {
-    ...decision,
-    kind: "share",
-    reason: decisionReasonText("reportable_takes"),
-    evidenceRefs: mergeEvidenceRefs(decision.evidenceRefs, selectedTakeIds),
-    authorizedClaims: claims,
-    ownTimeReport: {
-      ...ownTimeReport,
-      selectedTakeIds,
-    },
-    cognitiveAllocation: {
-      ...decision.cognitiveAllocation,
-      shouldSpeak: true,
-      completion: "complete",
-    },
-  };
+  return decision;
 }
 
 function shadowDetail(assessment: OwnTimeReportAssessment): Record<string, unknown> {
@@ -456,8 +373,56 @@ function shadowDetail(assessment: OwnTimeReportAssessment): Record<string, unkno
 }
 
 /**
- * After ordinary Thought: shadow when inert, else apply report floor.
- * Returns the (possibly unchanged) Decision. Never invents motivations.
+ * Build a typed pre-Thought own-time constraint.
+ * When the capability cannot influence, records own_time_report shadow only
+ * and returns a non-influencing constraint (or null when not an ask).
+ */
+export function buildOwnTimeReportConstraint(
+  db: DatabaseSync,
+  input: {
+    ownerId: string;
+    userMessage: string;
+    userMessageId: number;
+  },
+): OwnTimeReportConstraint | null {
+  if (!isEffectiveOwnTimeReportAsk(db, input)) {
+    return null;
+  }
+
+  const assessment = assessOwnTimeReport(db, input.ownerId);
+  const sourceKey = shadowSourceKey(input.userMessageId);
+  const canInfluence = capabilityCanInfluence(db, "own_time_report");
+
+  if (!canInfluence) {
+    recordLiveShadowEvent(db, "own_time_report", sourceKey, {
+      detail: shadowDetail(assessment),
+    });
+    return {
+      canInfluence: false,
+      status: assessment.status,
+      reason: assessment.reason,
+      sessionId: assessment.sessionId,
+      selectedTakeIds: assessment.selected.map((take) => take.takeId),
+      readingClaims: buildStructuredClaims(assessment.selected).readingClaims,
+    };
+  }
+
+  const claims = buildStructuredClaims(assessment.selected);
+  return {
+    canInfluence: true,
+    status: assessment.status,
+    reason: assessment.reason,
+    sessionId: assessment.sessionId,
+    selectedTakeIds: claims.readingClaims.map((claim) => claim.takeId),
+    readingClaims: claims.readingClaims,
+  };
+}
+
+/**
+ * @deprecated Wave 01 — post-Thought semantic rewrite removed.
+ * Prefer buildOwnTimeReportConstraint before decide().
+ * Returns the Decision unchanged. May still record own_time_report shadow
+ * when the ask is effective and the capability cannot influence.
  */
 export function applyOwnTimeReportAfterThought(
   db: DatabaseSync,
@@ -471,16 +436,13 @@ export function applyOwnTimeReportAfterThought(
   if (!isEffectiveOwnTimeReportAsk(db, input)) {
     return decision;
   }
-
-  const assessment = assessOwnTimeReport(db, input.ownerId);
-  const sourceKey = shadowSourceKey(input.userMessageId);
-
-  if (!capabilityCanInfluence(db, "own_time_report")) {
-    recordLiveShadowEvent(db, "own_time_report", sourceKey, {
-      detail: shadowDetail(assessment),
-    });
+  if (capabilityCanInfluence(db, "own_time_report")) {
+    // Authorization must already be on the Decision via pre-Thought constraint.
     return decision;
   }
-
-  return applyOwnTimeReportFinalizer(decision, assessment);
+  const assessment = assessOwnTimeReport(db, input.ownerId);
+  recordLiveShadowEvent(db, "own_time_report", shadowSourceKey(input.userMessageId), {
+    detail: shadowDetail(assessment),
+  });
+  return decision;
 }

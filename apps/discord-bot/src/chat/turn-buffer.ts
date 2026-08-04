@@ -7,16 +7,23 @@
  *
  * Quiet window: wait ~1500ms after the last fragment before draining, with a
  * 5s hard cap from the first fragment so a never-ending drip still drains.
+ *
+ * Latency budget starts at finalFragmentReceivedAt (last fragment arrival),
+ * not at quiet-window close.
  */
 
 const DEFAULT_QUIET_MS = 1500;
 const DEFAULT_HARD_CAP_MS = 5000;
 
+type BufferEntry<F, T> = {
+  fragments: F[];
+  target: T;
+  openedAt: number;
+  finalFragmentReceivedAt: number;
+};
+
 export class TurnBuffer<F, T> {
-  private readonly buffers = new Map<
-    string,
-    { fragments: F[]; target: T; openedAt: number }
-  >();
+  private readonly buffers = new Map<string, BufferEntry<F, T>>();
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(
@@ -27,28 +34,39 @@ export class TurnBuffer<F, T> {
 
   /** True when nothing was waiting yet (first fragment of a new turn). */
   push(channelId: string, fragment: F, target: T): boolean {
+    const now = Date.now();
     const existing = this.buffers.get(channelId);
     if (existing) {
       existing.fragments.push(fragment);
       existing.target = target;
+      existing.finalFragmentReceivedAt = now;
       this.schedule(channelId);
       return false;
     }
     this.buffers.set(channelId, {
       fragments: [fragment],
       target,
-      openedAt: Date.now(),
+      openedAt: now,
+      finalFragmentReceivedAt: now,
     });
     this.schedule(channelId);
     return true;
   }
 
-  take(channelId: string): { fragments: F[]; target: T } | null {
+  take(channelId: string): {
+    fragments: F[];
+    target: T;
+    finalFragmentReceivedAt: number;
+  } | null {
     this.clearTimer(channelId);
     const buffered = this.buffers.get(channelId);
     if (!buffered) return null;
     this.buffers.delete(channelId);
-    return { fragments: buffered.fragments, target: buffered.target };
+    return {
+      fragments: buffered.fragments,
+      target: buffered.target,
+      finalFragmentReceivedAt: buffered.finalFragmentReceivedAt,
+    };
   }
 
   /** Test helper: force the quiet timer to fire now. */

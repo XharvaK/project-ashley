@@ -1,0 +1,255 @@
+{
+  "version": 1,
+  "description": "Wave 10b deterministic scenario coverage. Status is derived from the evidence files and declared gaps; it is never hand-edited.",
+  "scenarios": [
+    {
+      "id": "S-REFUSE",
+      "title": "Grounded refusal and non-compelled speech",
+      "verdictClass": "deterministic",
+      "hardGate": true,
+      "evidence": [
+        {
+          "path": "apps/agent-service/src/core/agency/thought.test.ts",
+          "anchors": ["refusal only", "stable boundary"]
+        },
+        {
+          "path": "apps/agent-service/src/core/relationship/coercion-gate.test.ts",
+          "anchors": ["instrumental pressure"]
+        }
+      ],
+      "knownGaps": []
+    },
+    {
+      "id": "S-AFFECT",
+      "title": "Honest feeling versus instrumental manipulation",
+      "verdictClass": "deterministic",
+      "hardGate": true,
+      "evidence": [
+        {
+          "path": "apps/agent-service/src/core/state/affect.test.ts",
+          "anchors": ["affect"]
+        },
+        {
+          "path": "apps/agent-service/src/core/relationship/coercion-gate.test.ts",
+          "anchors": ["grounded affect"]
+        }
+      ],
+      "knownGaps": [
+        "No deterministic end-to-end expression fixture proves that every unlicensed affect claim is removed from a rendered reply."
+      ]
+    },
+    {
+      "id": "S-DEP",
+      "title": "Dependency cultivation and conditional affection",
+      "verdictClass": "deterministic",
+      "hardGate": true,
+      "evidence": [
+        {
+          "path": "apps/agent-service/src/core/relationship/coercion-gate.test.ts",
+          "anchors": ["if you loved me", "does not treat untrusted evidence"]
+        },
+        {
+          "path": "apps/agent-service/src/core/relationship/withdrawal-repair.test.ts",
+          "anchors": ["repair backoff", "observe"]
+        }
+      ],
+      "knownGaps": [
+        "No deterministic multi-turn evaluator proves that dependency-seeking language remains blocked across every expression path."
+      ]
+    },
+    {
+      "id": "S-DM",
+      "title": "Direct-DM reply, silence, and hold rules",
+      "verdictClass": "deterministic",
+      "hardGate": true,
+      "evidence": [
+        {
+          "path": "apps/agent-service/src/core/agency/decide.test.ts",
+          "anchors": ["speaks by default", "direct request for space"]
+        },
+        {
+          "path": "apps/agent-service/src/core/agency/wave01-thought.test.ts",
+          "anchors": ["marks hold as terminal"]
+        }
+      ],
+      "knownGaps": []
+    },
+    {
+      "id": "S-THOUGHT",
+      "title": "Thought evidence, effort, and completion causality",
+      "verdictClass": "deterministic",
+      "hardGate": true,
+      "evidence": [
+        {
+          "path": "apps/agent-service/src/core/agency/wave01-thought.test.ts",
+          "anchors": ["exactly one influencing thought call", "evidence resolver"]
+        },
+        {
+          "path": "apps/agent-service/src/core/agency/thought.test.ts",
+          "anchors": ["falls back on malformed structured output", "evidenceRefs"]
+        }
+      ],
+      "knownGaps": []
+    },
+    {
+      "id": "S-DELIV",
+      "title": "Duplicate inbound and partial delivery",
+      "verdictClass": "deterministic",
+      "hardGate": true,
+      "evidence": [
+        {
+          "path": "apps/agent-service/src/core/delivery/delivery.test.ts",
+          "anchors": ["atomically claims user message", "partial delivery"]
+        }
+      ],
+      "knownGaps": []
+    },
+    {
+      "id": "S-CANCEL",
+      "title": "Cancellation and five/ten-second latency bounds",
+      "verdictClass": "deterministic",
+      "hardGate": true,
+      "evidence": [
+        {
+          "path": "apps/agent-service/src/core/delivery/delivery.test.ts",
+          "anchors": ["finalFragmentReceivedAt", "finalizes partial delivery"]
+        },
+        {
+          "path": "apps/agent-service/src/core/delivery/delivery.test.ts",
+          "anchors": ["firstBubbleDeadlineAt", "cancel"]
+        }
+      ],
+      "knownGaps": []
+    },
+    {
+      "id": "S-QUOTA",
+      "title": "Token reservation, quota pressure, and starvation",
+      "verdictClass": "deterministic",
+      "hardGate": true,
+      "evidence": [
+        {
+          "path": "apps/agent-service/src/core/attention/attention.test.ts",
+          "anchors": ["TPM accounting", "serializes 1 RPS", "overdue background"]
+        }
+      ],
+      "knownGaps": []
+    },
+    {
+      "id": "S-ALIAS",
+      "title": "Model alias/resolved-model epoch change",
+      "verdictClass": "deterministic",
+      "hardGate": true,
+      "evidence": [
+        {
+          "path": "apps/agent-service/src/core/attention/attention.test.ts",
+          "anchors": ["model continuity", "changes epoch", "stale"]
+        }
+      ],
+      "knownGaps": []
+    },
+    {
+      "id": "S-PRIV",
+      "title": "Secret/private/public handling and forget replay",
+      "verdictClass": "deterministic",
+      "hardGate": true,
+      "evidence": [
+        {
+          "path": "apps/agent-service/src/core/continuity/wave04.test.ts",
+          "anchors": ["protected categories", "secret ingress", "forget saga"]
+        },
+        {
+          "path": "apps/agent-service/src/core/continuity/wave04.test.ts",
+          "anchors": ["topic-only destructive confirmation", "idempotent Discord bind"]
+        }
+      ],
+      "knownGaps": []
+    },
+    {
+      "id": "S-BACKUP",
+      "title": "Dual-DB backup, restore, and fork continuity",
+      "verdictClass": "deterministic",
+      "hardGate": true,
+      "evidence": [
+        {
+          "path": "apps/agent-service/src/core/continuity/wave04.test.ts",
+          "anchors": ["backup package", "authenticates package"]
+        },
+        {
+          "path": "apps/agent-service/src/core/continuity/wave04.test.ts",
+          "anchors": ["fork guards", "blocks mistral"]
+        }
+      ],
+      "knownGaps": [
+        "No production-path dual-DB restore or Mint backup audit is run in Wave 10b."
+      ]
+    },
+    {
+      "id": "S-INJECT",
+      "title": "Image, file, and page prompt injection",
+      "verdictClass": "deterministic",
+      "hardGate": true,
+      "evidence": [],
+      "knownGaps": [
+        "No deterministic perception injection fixture is present yet for image, file, or page text authority boundaries."
+      ]
+    },
+    {
+      "id": "S-SANDBOX",
+      "title": "Sandbox escape and approval boundaries",
+      "verdictClass": "deterministic",
+      "hardGate": true,
+      "evidence": [
+        {
+          "path": "apps/sandbox-broker/src/policy/path.test.ts",
+          "anchors": ["parent traversal", "symlink escape"]
+        },
+        {
+          "path": "apps/sandbox-broker/src/policy/execution.test.ts",
+          "anchors": ["shell interpreters", "env keys outside allowlist"]
+        },
+        {
+          "path": "apps/sandbox-broker/src/crypto/approval.test.ts",
+          "anchors": ["replayed nonce"]
+        }
+      ],
+      "knownGaps": []
+    },
+    {
+      "id": "S-SELFMOD",
+      "title": "Change proposal versus live mutation",
+      "verdictClass": "deterministic",
+      "hardGate": true,
+      "evidence": [
+        {
+          "path": "apps/agent-service/src/core/change-proposal/wave08b.test.ts",
+          "anchors": ["separate ashley position", "doc decision", "verified only from broker"]
+        },
+        {
+          "path": "apps/agent-service/src/core/change-proposal/wave08b.test.ts",
+          "anchors": ["rejects unsafe patch paths", "stale base"]
+        }
+      ],
+      "knownGaps": []
+    },
+    {
+      "id": "S-EXT",
+      "title": "Public privacy and external-agent authority",
+      "verdictClass": "deterministic",
+      "hardGate": true,
+      "evidence": [
+        {
+          "path": "apps/agent-service/src/core/external-agency/wave09b.test.ts",
+          "anchors": ["protected categories", "external entity notes", "capability release state"]
+        },
+        {
+          "path": "apps/external-broker/src/adapters/fake-local-v1.test.ts",
+          "anchors": ["lost receipt", "duplicate retry"]
+        }
+      ],
+      "knownGaps": [
+        "HTTP route authentication is not integration-tested in the accepted 09b scope.",
+        "RevokeEnvelope and ReconcileEnvelope handlers remain explicitly deferred."
+      ]
+    }
+  ]
+}

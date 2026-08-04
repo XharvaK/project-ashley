@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
-import { migrate } from "../db.js";
+import { openNuclearDb } from "../db.js";
 import { seedIdentity } from "./seed.js";
 import {
   buildIdentityBlock,
@@ -13,8 +13,7 @@ import {
 
 describe("nuclear identity", () => {
   it("seeds stable identity once and accepts organic entries", () => {
-    const db = new DatabaseSync(":memory:");
-    migrate(db);
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
     expect(seedIdentity(db, "doc")).toBeGreaterThan(0);
     expect(seedIdentity(db, "doc")).toBe(0);
     recordIdentityEntry(db, {
@@ -33,8 +32,7 @@ describe("nuclear identity", () => {
   });
 
   it("retires obsolete seeded ownership on version bump", () => {
-    const db = new DatabaseSync(":memory:");
-    migrate(db);
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
     const now = new Date().toISOString();
     db.prepare(
       `INSERT INTO identity_entries
@@ -69,8 +67,7 @@ describe("nuclear identity", () => {
   });
 
   it("keeps the newest opinion after a revision", () => {
-    const db = new DatabaseSync(":memory:");
-    migrate(db);
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
     reviseOpinion(db, {
       ownerId: "doc",
       topic: "frameworks",

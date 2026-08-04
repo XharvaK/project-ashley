@@ -2,9 +2,15 @@ import type { DatabaseSync } from "node:sqlite";
 import { env } from "../env.js";
 import { NUCLEAR_DB_PATH } from "../paths.js";
 import { decide, attachAuthorizedClaims } from "./agency/decide.js";
-import { applyOwnTimeReportAfterThought } from "./agency/own-time-report.js";
+import { buildOwnTimeReportConstraint } from "./agency/own-time-report.js";
 import { collectMotivations } from "./agency/motivations.js";
 import { deliberateDecision } from "./agency/thought.js";
+import { enqueueThoughtObservation } from "./agency/thought-observation.js";
+import {
+  classifyTurnComplexity,
+  isTerminalDecision,
+} from "./agency/turn-complexity.js";
+import { relevantBoundaryIdSet } from "./agency/boundary-relevance.js";
 import { logDecision, setDecisionOutcome } from "./agency/log.js";
 import { composeTurnContext } from "./context-composer.js";
 import { expressSpeak } from "./conversation/expression.js";
@@ -38,6 +44,25 @@ import {
 import { runNuclearCuriosityTick } from "./curiosity/tick.js";
 import { listRecentReads } from "./curiosity/reads.js";
 import { openNuclearDb } from "./db.js";
+import { getContinuityFor } from "./continuity/registry.js";
+import {
+  bindForgetPreviewDiscordMessage,
+  resolvePreviewByDiscordMessage,
+} from "./continuity/forget-preview.js";
+import { getAuthoritativeLineageId } from "./continuity/db.js";
+import {
+  cleanShutdownSession,
+  heartbeatSession,
+  startRuntimeSession,
+} from "./continuity/sessions.js";
+import {
+  forgetOwnerTopic,
+  forgetOwnerTopicImmediate,
+  replayPendingTombstones,
+  type ForgetResult,
+} from "./memory/forget.js";
+import { recoverStaleRequests } from "./attention/ledger.js";
+import { attentionObservability } from "./attention/governor.js";
 import {
   applyInitiativeLearning,
   attachLearningSnapshot,
@@ -62,21 +87,90 @@ import {
   recordDocReviewDecision,
   revertRevision,
 } from "./learning/revisions.js";
-import { forgetOwnerTopic, type ForgetResult } from "./memory/forget.js";
+import {
+  createChangeProposal,
+  getChangeProposalByEntityUuid,
+  listChangeProposalEvents,
+  listChangeProposals,
+} from "./change-proposal/store.js";
+import {
+  proposeChange,
+  recordAshleyPosition,
+  recordDocDecision,
+  recordExternalOutcome,
+} from "./change-proposal/lifecycle.js";
+import {
+  cancelAction,
+  reconcileAction,
+} from "./external-agency/lifecycle.js";
+import {
+  getEmergencyStop,
+  setEmergencyStop,
+} from "./external-agency/emergency-stop.js";
+import {
+  getExternalActionByEntityUuid,
+  listExternalActionEvents,
+  listExternalActions,
+  listVaultCredentials,
+  revokeVaultCredential,
+} from "./external-agency/store.js";
 import {
   capabilityCanInfluence,
   capabilityNames,
   listCapabilityStatuses,
   recordCriticalFailure,
   recordIsolatedEvaluation,
-  recordLiveShadowEvent,
   type CapabilityName,
 } from "./rollout/capabilities.js";
+import { listRelationshipSummary } from "./relationship/store.js";
+import { observeReactiveRelationshipSignals } from "./relationship/authority.js";
+import { assignNewEntityUuid } from "./continuity/nuclear-targetable.js";
+import {
+  consumeActiveTurnWithdrawal,
+} from "./relationship/repair.js";
+import { markMissedDueReminders } from "./relationship/delivery-outcomes.js";
+import { planContentBubbles } from "./delivery/bubble-plan.js";
+import { extractMediaMarkers } from "./delivery/media.js";
+import {
+  attachDraftAndBubbles,
+  claimProactiveDelivery,
+  claimReactiveDelivery,
+  getDeliveryReservation,
+  listDeliveryBubbles,
+  recordAuxiliaryMessage,
+  recordBubbleReceipt,
+} from "./delivery/store.js";
+import {
+  expireStaleDraftedReservations,
+  finalizeDelivery,
+} from "./delivery/finalize.js";
+import {
+  cancelDeliveryReservation,
+  clearDeliveryAbort,
+  registerDeliveryAbort,
+} from "./delivery/abort-registry.js";
+import { DELIVERY_LEASE_MS } from "./delivery/types.js";
+import type { AttachmentIntakeRef } from "./perception/types.js";
+import { runPerceptionTurn } from "./perception/index.js";
+import { thoughtDeadlineAtMs } from "./perception/turn-budget.js";
+import { randomUUID } from "node:crypto";
 
 export type ReactiveChatInput = {
   message: string;
   ownerId: string;
   channel: "discord";
+  /** Ordered Discord fragment message IDs for the closed turn. */
+  inboundDiscordMessageIds?: string[];
+  /** Epoch ms when the final TurnBuffer fragment arrived. */
+  finalFragmentReceivedAtMs?: number;
+  /**
+   * When true (default if inbound IDs omitted), receipt every planned bubble
+   * locally and finalize — used by unit tests without Discord.
+   * Discord bot always passes inbound IDs and leaves this false.
+   */
+  simulateDelivery?: boolean;
+  abortSignal?: AbortSignal;
+  attachments?: AttachmentIntakeRef[];
 };
 
 export type ReactiveChatResult = {
@@ -86,6 +180,14 @@ export type ReactiveChatResult = {
   decisionId: number;
   decisionKind: DecisionKind;
   silenced?: boolean;
+  reservationId?: number;
+  deliveryState?: string;
+  plannedBubbles?: Array<{ ordinal: number; text: string }>;
+  media?: { react: string | null; gifQuery: string | null };
+  firstBubbleDeadlineAt?: string | null;
+  statusUrl?: string;
+  duplicate?: boolean;
+  secretOmitted?: boolean;
 };
 
 export type ProactiveSkip = {
@@ -103,17 +205,30 @@ export type ProactiveDraft = {
   candidateKind?: string;
   materialKey?: string;
   reservationId?: number;
+  deliveryReservationId?: number;
+  plannedBubbles?: Array<{ ordinal: number; text: string }>;
 };
 
 export type ProactiveResult = ProactiveSkip | ProactiveDraft;
 
+export type CoreProviderState = "configured" | "degraded" | "unavailable";
+
+export type HealthSnapshotInput = {
+  ready: boolean;
+  providerState: CoreProviderState;
+};
+
 export type ProactiveCommitInput = {
   reservationId?: number;
+  deliveryReservationId?: number;
   text: string;
   threadId: string;
   angle: string;
   reason: string;
   discordMessageId: string;
+  /** Ordered receipts for multi-bubble proactive delivery. */
+  bubbleReceipts?: Array<{ ordinal: number; discordMessageId: string }>;
+  partial?: boolean;
   candidateKind?: string;
   materialKey?: string;
 };
@@ -168,7 +283,7 @@ function logProactiveDecision(
       decision,
       ...(outcomeText !== undefined ? { outcomeText } : {}),
     });
-    recordLiveShadowEvent(db, "thought", `decision:${decisionId}`);
+    // Wave 01: do not record Thought live-shadow for deterministic Decisions.
     if (urgentItemId !== null) consumeUrgentWake(db, urgentItemId);
     setLastDecision(db, ownerId, decisionId);
     db.exec("COMMIT");
@@ -197,15 +312,42 @@ function setKv(db: DatabaseSync, key: string, value: string): void {
 
 export class AshleyCore {
   private readonly db: DatabaseSync;
+  private readonly continuity: DatabaseSync | null;
   private readonly reflectionMode: ReflectionMode;
   private readonly activeOwners = new Set<string>();
+  private readonly sessionId: string | null;
 
   constructor(
     db?: DatabaseSync,
     options?: { reflectionMode?: ReflectionMode },
   ) {
-    this.db = openNuclearDb(db);
+    const priorContinuity = db ? getContinuityFor(db) : undefined;
+    this.db = openNuclearDb(
+      db,
+      priorContinuity
+        ? { continuity: priorContinuity }
+        : db
+          ? {}
+          : {},
+    );
+    this.continuity = getContinuityFor(this.db) ?? priorContinuity ?? null;
     this.reflectionMode = options?.reflectionMode ?? env.reflectionMode;
+    if (this.continuity) {
+      try {
+        const lineageId = getAuthoritativeLineageId(this.continuity);
+        this.sessionId = startRuntimeSession(this.continuity, {
+          lineageId,
+          buildIdentity: null,
+          nuclearSchemaVersion: 15,
+        });
+        replayPendingTombstones(this.continuity, this.db);
+      } catch {
+        this.sessionId = null;
+      }
+    } else {
+      this.sessionId = null;
+    }
+    recoverStaleRequests(this.db);
     processPendingReflectionEvents(this.db);
   }
 
@@ -238,25 +380,165 @@ export class AshleyCore {
     this.activeOwners.add(input.ownerId);
     seedIdentity(this.db, input.ownerId);
     this.auditReadingProvenance();
-    try {
-      const threadId = resolveActiveThread(
-        this.db,
-        input.ownerId,
-        input.channel,
+    expireStaleDraftedReservations(this.db);
+
+    const inboundIds =
+      input.inboundDiscordMessageIds &&
+      input.inboundDiscordMessageIds.length > 0
+        ? input.inboundDiscordMessageIds
+        : [`local:${randomUUID()}`];
+    const simulateDelivery =
+      input.simulateDelivery ??
+      !(
+        input.inboundDiscordMessageIds &&
+        input.inboundDiscordMessageIds.length > 0
       );
-      const userMessageId = insertMessage(this.db, {
-        threadId,
+    const finalFragmentReceivedAtMs =
+      input.finalFragmentReceivedAtMs ?? Date.now();
+
+    let reservationId: number | null = null;
+    try {
+      const claim = claimReactiveDelivery(this.db, {
         ownerId: input.ownerId,
-        role: "user",
-        text: message,
         channel: input.channel,
+        mergedUserText: message,
+        inboundDiscordMessageIds: inboundIds,
+        finalFragmentReceivedAtMs,
       });
+
+      if (claim.kind === "duplicate") {
+        const bubbles = listDeliveryBubbles(this.db, claim.reservation.id);
+        return {
+          text: claim.reservation.draftText ?? "",
+          threadId: claim.reservation.threadId,
+          model: "none",
+          decisionId: claim.reservation.decisionId ?? 0,
+          decisionKind: "speak",
+          reservationId: claim.reservation.id,
+          deliveryState: claim.reservation.state,
+          plannedBubbles: bubbles.map((b) => ({
+            ordinal: b.ordinal,
+            text: b.text,
+          })),
+          firstBubbleDeadlineAt: claim.reservation.firstBubbleDeadlineAt,
+          statusUrl: `/delivery/${claim.reservation.id}`,
+          duplicate: true,
+        };
+      }
+
+      if (claim.secretOmitted) {
+        const notice =
+          "I did not store or send that credential-shaped value to the model. " +
+          "The original Discord message remains under Discord's retention and control.";
+        const bubbles = [{ ordinal: 0, text: notice }];
+        const reserved = attachDraftAndBubbles(
+          this.db,
+          claim.reservation.id,
+          notice,
+          bubbles,
+          {
+            deliveryLeaseExpiresAt: new Date(
+              Date.now() + DELIVERY_LEASE_MS,
+            ).toISOString(),
+          },
+        );
+        if (simulateDelivery) {
+          for (const bubble of bubbles) {
+            recordBubbleReceipt(
+              this.db,
+              claim.reservation.id,
+              bubble.ordinal,
+              `sim:${claim.reservation.id}:${bubble.ordinal}`,
+            );
+          }
+          const finalized = finalizeDelivery(this.db, {
+            reservationId: claim.reservation.id,
+            ownerId: input.ownerId,
+            cause: "complete",
+          });
+          clearDeliveryAbort(claim.reservation.id);
+          return {
+            text: finalized.deliveredText || notice,
+            threadId: claim.reservation.threadId,
+            model: "none",
+            decisionId: 0,
+            decisionKind: "speak",
+            reservationId: claim.reservation.id,
+            deliveryState: finalized.state,
+            plannedBubbles: bubbles,
+            firstBubbleDeadlineAt: reserved.firstBubbleDeadlineAt,
+            secretOmitted: true,
+          };
+        }
+        clearDeliveryAbort(claim.reservation.id);
+        return {
+          text: notice,
+          threadId: claim.reservation.threadId,
+          model: "none",
+          decisionId: 0,
+          decisionKind: "speak",
+          reservationId: claim.reservation.id,
+          deliveryState: reserved.state,
+          plannedBubbles: bubbles,
+          firstBubbleDeadlineAt: reserved.firstBubbleDeadlineAt,
+          statusUrl: `/delivery/${claim.reservation.id}`,
+          secretOmitted: true,
+        };
+      }
+
+      const reservation = claim.reservation;
+      reservationId = reservation.id;
+      const userMessageId = reservation.userMessageId;
+      if (userMessageId == null) throw new Error("delivery_user_message_missing");
+
+      const messageUuidRow = this.db
+        .prepare(`SELECT entity_uuid FROM mem_messages WHERE id = ?`)
+        .get(userMessageId) as { entity_uuid?: string } | undefined;
+      let messageEntityUuid = messageUuidRow?.entity_uuid ?? null;
+      if (!messageEntityUuid) {
+        messageEntityUuid = assignNewEntityUuid();
+        this.db
+          .prepare(`UPDATE mem_messages SET entity_uuid = ? WHERE id = ?`)
+          .run(messageEntityUuid, userMessageId);
+      }
+      observeReactiveRelationshipSignals(this.db, {
+        ownerId: input.ownerId,
+        message,
+        messageEntityUuid,
+      });
+
+      const signal =
+        input.abortSignal ??
+        registerDeliveryAbort(reservation.id, input.ownerId);
+      if (signal.aborted) {
+        const finalized = finalizeDelivery(this.db, {
+          reservationId: reservation.id,
+          ownerId: input.ownerId,
+          cause: "cancel",
+        });
+        return {
+          text: "",
+          threadId: reservation.threadId,
+          model: "none",
+          decisionId: 0,
+          decisionKind: "silence",
+          silenced: true,
+          reservationId: reservation.id,
+          deliveryState: finalized.state,
+        };
+      }
+
       const written = writeFromUserTurn(this.db, input.ownerId, message);
       if (written.forgotTopic) {
-        this.forget(input.ownerId, written.forgotTopic, true);
+        if (this.continuity) {
+          forgetOwnerTopicImmediate(
+            this.db,
+            input.ownerId,
+            written.forgotTopic,
+            this.continuity,
+          );
+        }
       }
-      // Own-time open/close before motivations/Thought. Legacy sticky focus
-      // reconciled only here — never from status/eligibility reads.
       applyOwnTimeTransitionForReactiveTurn(this.db, input.ownerId, {
         departureSignal: written.departureSignal,
         userMessageId,
@@ -269,13 +551,73 @@ export class AshleyCore {
         message,
         userMessageId,
       );
-      let decision = decide(motivations, "reactive");
-      decision = await deliberateDecision(this.db, decision, motivations, "reactive");
-      decision = applyOwnTimeReportAfterThought(this.db, decision, {
+      const ownTimeConstraint = buildOwnTimeReportConstraint(this.db, {
         ownerId: input.ownerId,
         userMessage: message,
         userMessageId,
       });
+      let decision = decide(motivations, "reactive", {
+        ownTime: ownTimeConstraint,
+        userMessage: message,
+        db: this.db,
+        ownerId: input.ownerId,
+      });
+      if (decision.silenceReasonCode === "withdrawal_turn") {
+        consumeActiveTurnWithdrawal(this.db, input.ownerId);
+      }
+      const relevantBoundaries = relevantBoundaryIdSet(message, motivations);
+      const complexity = classifyTurnComplexity({
+        decision,
+        motivations,
+        trigger: "reactive",
+        userMessage: message,
+        ownTimeReportActive: ownTimeConstraint?.canInfluence === true,
+        relevantBoundaryIds: relevantBoundaries,
+      });
+      if (complexity.mode === "hard") {
+        if (signal.aborted) {
+          const finalized = finalizeDelivery(this.db, {
+            reservationId: reservation.id,
+            ownerId: input.ownerId,
+            cause: "cancel",
+            ownTimeOpen,
+          });
+          return {
+            text: "",
+            threadId: reservation.threadId,
+            model: "none",
+            decisionId: reservation.decisionId ?? 0,
+            decisionKind: "silence",
+            silenced: true,
+            reservationId: reservation.id,
+            deliveryState: finalized.state,
+          };
+        }
+        const firstBubbleDeadlineAtMs = reservation.firstBubbleDeadlineAt
+          ? Date.parse(reservation.firstBubbleDeadlineAt)
+          : null;
+        const thoughtDeadlineAtMs =
+          firstBubbleDeadlineAtMs != null
+            ? firstBubbleDeadlineAtMs - env.thoughtExpressionGuardMs
+            : null;
+        const thoughtCanInfluence = capabilityCanInfluence(this.db, "thought");
+        decision = await deliberateDecision(
+          this.db,
+          decision,
+          motivations,
+          "reactive",
+          undefined,
+          undefined,
+          undefined,
+          {
+            allowModelThought: thoughtCanInfluence,
+            firstBubbleDeadlineAtMs,
+            thoughtDeadlineAtMs,
+            deliveryReservationId: reservation.id,
+            ownerId: input.ownerId,
+          },
+        );
+      }
       if (capabilityCanInfluence(this.db, "affect")) {
         decision = attachAffectLicense(
           decision,
@@ -286,29 +628,82 @@ export class AshleyCore {
       if (capabilityCanInfluence(this.db, "reading")) {
         decision = attachAuthorizedClaims(decision, recentTakes);
       }
-      const decisionId = logDecision(this.db, {
-        ownerId: input.ownerId,
-        channel: input.channel,
-        trigger: "reactive",
-        decision,
-      });
+
+      this.db.exec("BEGIN IMMEDIATE");
+      let decisionId: number;
+      try {
+        decisionId = logDecision(this.db, {
+          ownerId: input.ownerId,
+          channel: input.channel,
+          trigger: "reactive",
+          decision,
+        });
+        this.db
+          .prepare(
+            `UPDATE delivery_reservations SET decision_id = ? WHERE id = ? AND decision_id IS NULL`,
+          )
+          .run(decisionId, reservation.id);
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
       decision.id = decisionId;
       setLastDecision(this.db, input.ownerId, decisionId);
+
+      const reservationUuidRow = this.db
+        .prepare(`SELECT entity_uuid FROM delivery_reservations WHERE id = ?`)
+        .get(reservation.id) as { entity_uuid?: string } | undefined;
+      let deliveryReservationEntityUuid =
+        reservationUuidRow?.entity_uuid ?? null;
+      if (!deliveryReservationEntityUuid) {
+        deliveryReservationEntityUuid = assignNewEntityUuid();
+        this.db
+          .prepare(
+            `UPDATE delivery_reservations SET entity_uuid = ? WHERE id = ?`,
+          )
+          .run(deliveryReservationEntityUuid, reservation.id);
+      }
+
+      const firstBubbleDeadlineAtMs = reservation.firstBubbleDeadlineAt
+        ? Date.parse(reservation.firstBubbleDeadlineAt)
+        : Date.now() + 10_000;
+      const thoughtDeadline =
+        thoughtDeadlineAtMs(firstBubbleDeadlineAtMs);
+
+      const perception = await runPerceptionTurn(this.db, {
+        ownerId: input.ownerId,
+        message,
+        attachments: input.attachments ?? [],
+        sourceMessageEntityUuid: messageEntityUuid,
+        deliveryReservationEntityUuid,
+        deliveryReservationId: reservation.id,
+        thoughtDeadlineAtMs: thoughtDeadline,
+        firstBubbleDeadlineAtMs,
+        decision,
+      });
+      decision.perceptionLicenses = perception.licenses;
 
       const turn = composeTurnContext(this.db, input.ownerId, {
         channel: "discord",
         userMessage: message,
         decision,
+        excludeMessageId: userMessageId,
       });
 
-      if (!decision.cognitiveAllocation.shouldSpeak) {
-        // Do not restore available while an own-time session is open.
+      if (isTerminalDecision(decision) || complexity.mode === "terminal") {
         if (!ownTimeOpen) {
           patchState(this.db, input.ownerId, {
             availability: decision.kind === "silence" ? "quiet" : "available",
           });
         }
-        setDecisionOutcome(this.db, decisionId, "");
+        const finalized = finalizeDelivery(this.db, {
+          reservationId: reservation.id,
+          ownerId: input.ownerId,
+          cause: "empty_draft",
+          ownTimeOpen,
+        });
+        clearDeliveryAbort(reservation.id);
         return {
           text: "",
           threadId: turn.threadId,
@@ -316,52 +711,280 @@ export class AshleyCore {
           decisionId,
           decisionKind: decision.kind,
           ...(decision.kind === "silence" ? { silenced: true } : {}),
+          reservationId: reservation.id,
+          deliveryState: finalized.state,
         };
       }
 
-      const rendered = await expressSpeak(turn, decision, message, "discord");
-      const text = rendered.text.trim();
-      if (text) {
-        const assistantMessageId = insertMessage(this.db, {
+      if (signal.aborted) {
+        const finalized = finalizeDelivery(this.db, {
+          reservationId: reservation.id,
+          ownerId: input.ownerId,
+          cause: "cancel",
+          ownTimeOpen,
+        });
+        clearDeliveryAbort(reservation.id);
+        return {
+          text: "",
           threadId: turn.threadId,
+          model: "none",
+          decisionId,
+          decisionKind: decision.kind,
+          silenced: true,
+          reservationId: reservation.id,
+          deliveryState: finalized.state,
+        };
+      }
+
+      const deadlineIso = reservation.firstBubbleDeadlineAt;
+      if (deadlineIso && deadlineIso <= new Date().toISOString()) {
+        const finalized = finalizeDelivery(this.db, {
+          reservationId: reservation.id,
           ownerId: input.ownerId,
-          role: "assistant",
-          text,
-          channel: input.channel,
+          cause: "first_bubble_deadline",
+          ownTimeOpen,
         });
-        enqueueCognitiveJob(this.db, {
+        clearDeliveryAbort(reservation.id);
+        return {
+          text: "",
+          threadId: turn.threadId,
+          model: "none",
+          decisionId,
+          decisionKind: decision.kind,
+          reservationId: reservation.id,
+          deliveryState: finalized.state,
+        };
+      }
+
+      let rendered;
+      try {
+        const firstBubbleDeadlineAtMs = reservation.firstBubbleDeadlineAt
+          ? Date.parse(reservation.firstBubbleDeadlineAt)
+          : null;
+        rendered = await expressSpeak(turn, decision, message, "discord", {
+          deadlineAtMs: firstBubbleDeadlineAtMs,
+          decisionId,
+          deliveryReservationId: reservation.id,
           ownerId: input.ownerId,
-          kind: "consolidate_thread",
-          sourceKey: `thread:${turn.threadId}:message:${assistantMessageId}`,
-          payload: {
-            threadId: turn.threadId,
-            throughMessageId: assistantMessageId,
-          },
-          availableAt: new Date(
-            Date.now() + env.cognitionIdleConsolidationMin * 60_000,
+          perceptionExpressionParts: perception.expressionParts,
+          perceptionThoughtParts: perception.thoughtParts,
+          attentionDb: this.db,
+        });
+        if (
+          complexity.mode === "hard" &&
+          !capabilityCanInfluence(this.db, "thought")
+        ) {
+          enqueueThoughtObservation({
+            db: this.db,
+            decision,
+            motivations,
+            trigger: "reactive",
+            decisionId,
+          });
+        }
+      } catch (error) {
+        const finalized = finalizeDelivery(this.db, {
+          reservationId: reservation.id,
+          ownerId: input.ownerId,
+          cause: signal.aborted ? "cancel" : "generation_error",
+          ownTimeOpen,
+          errorCategory: error instanceof Error ? error.message : "express_error",
+        });
+        clearDeliveryAbort(reservation.id);
+        throw Object.assign(error instanceof Error ? error : new Error(String(error)), {
+          deliveryState: finalized.state,
+          reservationId: reservation.id,
+        });
+      }
+
+      const media = extractMediaMarkers(rendered.text);
+      const bubbles = planContentBubbles(media.text);
+      if (bubbles.length === 0) {
+        const finalized = finalizeDelivery(this.db, {
+          reservationId: reservation.id,
+          ownerId: input.ownerId,
+          cause: "empty_draft",
+          ownTimeOpen,
+        });
+        clearDeliveryAbort(reservation.id);
+        return {
+          text: "",
+          threadId: turn.threadId,
+          model: rendered.model,
+          decisionId,
+          decisionKind: decision.kind,
+          reservationId: reservation.id,
+          deliveryState: finalized.state,
+          media: { react: media.react, gifQuery: media.gifQuery },
+        };
+      }
+
+      const reserved = attachDraftAndBubbles(
+        this.db,
+        reservation.id,
+        media.text,
+        bubbles,
+        {
+          deliveryLeaseExpiresAt: new Date(
+            Date.now() + DELIVERY_LEASE_MS,
           ).toISOString(),
-        });
-      }
-      // Departure acknowledgement must leave quiet/own_time while session open.
+        },
+      );
+
       if (!ownTimeOpen) {
-        patchState(this.db, input.ownerId, {
-          availability: "available",
-        });
+        patchState(this.db, input.ownerId, { availability: "available" });
       }
-      setDecisionOutcome(this.db, decisionId, text);
+
+      if (simulateDelivery) {
+        for (const bubble of bubbles) {
+          recordBubbleReceipt(
+            this.db,
+            reservation.id,
+            bubble.ordinal,
+            `sim:${reservation.id}:${bubble.ordinal}`,
+          );
+        }
+        const finalized = finalizeDelivery(this.db, {
+          reservationId: reservation.id,
+          ownerId: input.ownerId,
+          cause: "complete",
+          ownTimeOpen,
+        });
+        clearDeliveryAbort(reservation.id);
+        return {
+          text: finalized.deliveredText,
+          threadId: turn.threadId,
+          model: rendered.model,
+          decisionId,
+          decisionKind: decision.kind,
+          reservationId: reservation.id,
+          deliveryState: finalized.state,
+          plannedBubbles: bubbles,
+          media: { react: media.react, gifQuery: media.gifQuery },
+          firstBubbleDeadlineAt: reserved.firstBubbleDeadlineAt,
+        };
+      }
+
+      clearDeliveryAbort(reservation.id);
       return {
-        text,
+        text: media.text,
         threadId: turn.threadId,
         model: rendered.model,
         decisionId,
         decisionKind: decision.kind,
+        reservationId: reservation.id,
+        deliveryState: reserved.state,
+        plannedBubbles: bubbles,
+        media: { react: media.react, gifQuery: media.gifQuery },
+        firstBubbleDeadlineAt: reserved.firstBubbleDeadlineAt,
+        statusUrl: `/delivery/${reservation.id}`,
       };
+    } catch (error) {
+      if (reservationId != null) {
+        try {
+          finalizeDelivery(this.db, {
+            reservationId,
+            ownerId: input.ownerId,
+            cause: "generation_error",
+            errorCategory:
+              error instanceof Error ? error.message : "unknown_error",
+          });
+        } catch {
+          /* best effort */
+        }
+        clearDeliveryAbort(reservationId);
+      }
+      throw error;
     } finally {
       this.activeOwners.delete(input.ownerId);
     }
   }
 
+  getDeliveryStatus(ownerId: string, reservationId: number) {
+    expireStaleDraftedReservations(this.db);
+    const reservation = getDeliveryReservation(this.db, reservationId);
+    if (!reservation || reservation.ownerId !== ownerId) return null;
+    const bubbles = listDeliveryBubbles(this.db, reservationId);
+    return {
+      reservation,
+      bubbles,
+      statusUrl: `/delivery/${reservationId}`,
+    };
+  }
+
+  receiptDeliveryBubble(
+    ownerId: string,
+    reservationId: number,
+    ordinal: number,
+    discordMessageId: string,
+  ): void {
+    const reservation = getDeliveryReservation(this.db, reservationId);
+    if (!reservation || reservation.ownerId !== ownerId) {
+      throw new Error("delivery_reservation_missing");
+    }
+    recordBubbleReceipt(this.db, reservationId, ordinal, discordMessageId);
+  }
+
+  receiptDeliveryAuxiliary(
+    ownerId: string,
+    reservationId: number,
+    input: {
+      kind: "progress" | "delivery_error";
+      text: string;
+      discordMessageId: string;
+    },
+  ): void {
+    const reservation = getDeliveryReservation(this.db, reservationId);
+    if (!reservation || reservation.ownerId !== ownerId) {
+      throw new Error("delivery_reservation_missing");
+    }
+    recordAuxiliaryMessage(this.db, {
+      reservationId,
+      kind: input.kind,
+      text: input.text,
+      discordMessageId: input.discordMessageId,
+    });
+  }
+
+  finalizeDeliveryReservation(
+    ownerId: string,
+    reservationId: number,
+    cause:
+      | "complete"
+      | "cancel"
+      | "send_failure"
+      | "first_bubble_deadline"
+      | "delivery_lease" = "complete",
+    onArchivalAssistant?: (text: string) => void,
+  ) {
+    return finalizeDelivery(this.db, {
+      reservationId,
+      ownerId,
+      cause,
+      ownTimeOpen: hasOpenOwnTimeSession(this.db, ownerId),
+      onArchivalAssistant,
+    });
+  }
+
+  cancelDelivery(
+    ownerId: string,
+    reservationId: number,
+    onArchivalAssistant?: (text: string) => void,
+  ) {
+    return cancelDeliveryReservation(this.db, {
+      reservationId,
+      ownerId,
+      onArchivalAssistant,
+    });
+  }
+
   async tickProactive(ownerId: string): Promise<ProactiveResult> {
+    markMissedDueReminders(
+      this.db,
+      ownerId,
+      new Date().toISOString(),
+      env.reminderMissedGraceHours,
+    );
     // Classify with read-only hasUrgentMindState — never claim before eligibility.
     const initiativeClass = classifyInitiativeClass(this.db, ownerId);
     const status = this.getProactiveStatus(ownerId);
@@ -422,7 +1045,23 @@ export class AshleyCore {
         this.reflectionMode,
       );
       let decision = decide(motivations, "proactive");
-      decision = await deliberateDecision(this.db, decision, motivations, "proactive");
+      const complexity = classifyTurnComplexity({
+        decision,
+        motivations,
+        trigger: "proactive",
+      });
+      if (complexity.mode === "hard") {
+        decision = await deliberateDecision(
+          this.db,
+          decision,
+          motivations,
+          "proactive",
+          undefined,
+          undefined,
+          undefined,
+          { allowModelThought: true },
+        );
+      }
       if (capabilityCanInfluence(this.db, "affect")) {
         decision = attachAffectLicense(
           decision,
@@ -434,7 +1073,11 @@ export class AshleyCore {
       if (capabilityCanInfluence(this.db, "reading")) {
         decision = attachAuthorizedClaims(decision, recentTakes);
       }
-      if (!decision.cognitiveAllocation.shouldSpeak || decision.score < 25) {
+      if (
+        isTerminalDecision(decision) ||
+        complexity.mode === "terminal" ||
+        decision.score < 25
+      ) {
         const decisionId = logProactiveDecision(
           this.db,
           ownerId,
@@ -482,7 +1125,6 @@ export class AshleyCore {
         userMessage,
         decision,
       });
-      recordLiveShadowEvent(this.db, "thought", `decision:${decisionId}`);
       this.activeOwners.add(ownerId);
       try {
         const rendered = await expressSpeak(
@@ -490,10 +1132,22 @@ export class AshleyCore {
           decision,
           userMessage,
           "proactive",
+          {
+            lane:
+              initiativeClass === "urgent_grounded"
+                ? "urgent_grounded"
+                : "interactive",
+          },
         );
         if (rendered.model === "offline" || !rendered.text.trim()) {
           setDecisionOutcome(this.db, decisionId, "");
           return { shouldSend: false, reason: "mistral_unavailable" };
+        }
+        const media = extractMediaMarkers(rendered.text);
+        const bubbles = planContentBubbles(media.text);
+        if (bubbles.length === 0) {
+          setDecisionOutcome(this.db, decisionId, "");
+          return { shouldSend: false, reason: "empty_draft" };
         }
         const angle = decisionAngle(decision.kind);
         const result = this.db
@@ -506,7 +1160,7 @@ export class AshleyCore {
           .run(
             ownerId,
             decisionId,
-            rendered.text.trim(),
+            media.text,
             turn.threadId,
             angle,
             decision.reason,
@@ -514,15 +1168,25 @@ export class AshleyCore {
             new Date().toISOString(),
           );
         const reservationId = Number(result.lastInsertRowid);
+        const delivery = claimProactiveDelivery(this.db, {
+          ownerId,
+          channel: "discord",
+          threadId: turn.threadId,
+          initiativeReservationId: reservationId,
+          draftText: media.text,
+          bubbles,
+        });
         return {
           shouldSend: true,
-          text: rendered.text.trim(),
+          text: media.text,
           threadId: turn.threadId,
           angle,
           reason: decision.reason,
           candidateKind: candidate.kind,
           materialKey,
           reservationId,
+          deliveryReservationId: delivery.id,
+          plannedBubbles: bubbles,
         };
       } finally {
         this.activeOwners.delete(ownerId);
@@ -613,6 +1277,38 @@ export class AshleyCore {
       typeof inputOrReservation === "number"
         ? inputOrReservation
         : input?.reservationId;
+    const deliveryReservationId = input?.deliveryReservationId;
+
+    if (deliveryReservationId != null) {
+      const receipts =
+        input?.bubbleReceipts && input.bubbleReceipts.length > 0
+          ? input.bubbleReceipts
+          : input?.discordMessageId || discordMessageId
+            ? [
+                {
+                  ordinal: 0,
+                  discordMessageId:
+                    input?.discordMessageId ?? discordMessageId ?? "",
+                },
+              ]
+            : [];
+      for (const receipt of receipts) {
+        if (!receipt.discordMessageId) continue;
+        recordBubbleReceipt(
+          this.db,
+          deliveryReservationId,
+          receipt.ordinal,
+          receipt.discordMessageId,
+        );
+      }
+      finalizeDelivery(this.db, {
+        reservationId: deliveryReservationId,
+        ownerId,
+        cause: input?.partial ? "send_failure" : "complete",
+      });
+      return;
+    }
+
     if (reservationId !== undefined) {
       const row: unknown = this.db
         .prepare(
@@ -627,6 +1323,29 @@ export class AshleyCore {
       const threadId = stringValue(row.thread_id, input?.threadId ?? "");
       const messageId = input?.discordMessageId ?? discordMessageId ?? "";
       if (!text || !threadId || !messageId) return;
+
+      const linkedDelivery = this.db
+        .prepare(
+          `SELECT id FROM delivery_reservations
+           WHERE initiative_reservation_id = ? AND owner_id = ?
+           ORDER BY id DESC LIMIT 1`,
+        )
+        .get(reservationId, ownerId);
+      if (isRow(linkedDelivery)) {
+        recordBubbleReceipt(
+          this.db,
+          Number(linkedDelivery.id),
+          0,
+          messageId,
+        );
+        finalizeDelivery(this.db, {
+          reservationId: Number(linkedDelivery.id),
+          ownerId,
+          cause: "complete",
+        });
+        return;
+      }
+
       const assistantMessageId = insertMessage(this.db, {
         threadId,
         ownerId,
@@ -675,6 +1394,21 @@ export class AshleyCore {
     const ownerClause = ownerId === null ? "" : " AND owner_id = ?";
     const params: Array<number | string> =
       ownerId === null ? [reservationId] : [reservationId, ownerId];
+    const delivery = this.db
+      .prepare(
+        `SELECT id, owner_id FROM delivery_reservations
+         WHERE initiative_reservation_id = ?${ownerId === null ? "" : " AND owner_id = ?"}
+         ORDER BY id DESC LIMIT 1`,
+      )
+      .get(...params);
+    if (isRow(delivery)) {
+      finalizeDelivery(this.db, {
+        reservationId: Number(delivery.id),
+        ownerId: String(delivery.owner_id),
+        cause: "send_failure",
+      });
+      return;
+    }
     this.db
       .prepare(
         `DELETE FROM initiative_reservations
@@ -806,11 +1540,29 @@ export class AshleyCore {
     ownerId: string,
     topic: string,
     confirmed: boolean,
+    options: {
+      previewId?: string | null;
+      confirmationDiscordMessageId?: string | null;
+      cancel?: boolean;
+    } = {},
   ): ForgetResult {
-    if (!confirmed) return forgetOwnerTopic(this.db, ownerId, topic, false);
+    if (confirmed && !options.previewId?.trim() && !options.cancel) {
+      throw new Error("forget_preview_id_required");
+    }
+    if (!confirmed && !options.cancel) {
+      return forgetOwnerTopic(this.db, ownerId, topic, false, {
+        continuity: this.continuity,
+        confirmationDiscordMessageId: options.confirmationDiscordMessageId,
+        previewId: options.previewId,
+      });
+    }
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      const result = forgetOwnerTopic(this.db, ownerId, topic, true);
+      const result = forgetOwnerTopic(this.db, ownerId, topic, confirmed, {
+        continuity: this.continuity,
+        previewId: options.previewId,
+        cancel: options.cancel,
+      });
       this.db.exec("COMMIT");
       return result;
     } catch (error) {
@@ -825,6 +1577,101 @@ export class AshleyCore {
         );
       }
       throw error;
+    }
+  }
+
+  bindForgetConfirmation(
+    ownerId: string,
+    previewId: string,
+    confirmationDiscordMessageId: string,
+  ): void {
+    if (!this.continuity) throw new Error("continuity_unavailable");
+    bindForgetPreviewDiscordMessage(this.continuity, {
+      previewId,
+      ownerId,
+      confirmationDiscordMessageId,
+    });
+  }
+
+  resolveForgetPreviewByDiscordMessage(
+    ownerId: string,
+    confirmationDiscordMessageId: string,
+  ): string | null {
+    if (!this.continuity) return null;
+    return resolvePreviewByDiscordMessage(
+      this.continuity,
+      ownerId,
+      confirmationDiscordMessageId,
+    );
+  }
+
+  continuitySnapshot(): {
+    available: boolean;
+    lineageId: string | null;
+    recentEvents: Array<{ kind: string; occurredAt: string; detail: unknown }>;
+  } {
+    if (!this.continuity) {
+      return { available: false, lineageId: null, recentEvents: [] };
+    }
+    const lineageId = getAuthoritativeLineageId(this.continuity);
+    const rows = this.continuity
+      .prepare(
+        `SELECT kind, occurred_at, detail_json FROM continuity_events
+         WHERE lineage_id = ?
+         ORDER BY id DESC LIMIT 40`,
+      )
+      .all(lineageId) as Array<{
+      kind: string;
+      occurred_at: string;
+      detail_json: string;
+    }>;
+    return {
+      available: true,
+      lineageId,
+      recentEvents: rows.map((row) => ({
+        kind: row.kind,
+        occurredAt: row.occurred_at,
+        detail: JSON.parse(row.detail_json) as unknown,
+      })),
+    };
+  }
+
+  relationshipSummary(
+    ownerId: string,
+    limit = 25,
+    offset = 0,
+  ): ReturnType<typeof listRelationshipSummary> {
+    return listRelationshipSummary(this.db, ownerId, limit, offset);
+  }
+
+  nuclearStatusSnapshot(ownerId: string): {
+    health: ReturnType<AshleyCore["getHealth"]>;
+    initiative: ReturnType<AshleyCore["getProactiveStatus"]>;
+    continuity: ReturnType<AshleyCore["continuitySnapshot"]>;
+    relationshipState: ReturnType<typeof listCapabilityStatuses>[number] | undefined;
+  } {
+    return {
+      health: this.getHealth(),
+      initiative: this.getProactiveStatus(ownerId),
+      continuity: this.continuitySnapshot(),
+      relationshipState: listCapabilityStatuses(this.db, env.cognitionMode).find(
+        (row) => row.capability === "relationship_state",
+      ),
+    };
+  }
+
+  heartbeatContinuity(): void {
+    if (this.continuity && this.sessionId) {
+      heartbeatSession(this.continuity, this.sessionId);
+    }
+  }
+
+  shutdownContinuityClean(): void {
+    if (this.continuity && this.sessionId) {
+      cleanShutdownSession(this.continuity, {
+        sessionId: this.sessionId,
+        lineageId: getAuthoritativeLineageId(this.continuity),
+      });
     }
   }
 
@@ -954,11 +1801,143 @@ export class AshleyCore {
     return { recorded, reviews: listIdentityReviews(this.db, input.ownerId) };
   }
 
+  getChangeProposals(ownerId: string, limit = 50) {
+    return {
+      proposals: listChangeProposals(this.db, ownerId, limit),
+    };
+  }
+
+  getChangeProposal(ownerId: string, entityUuid: string) {
+    const proposal = getChangeProposalByEntityUuid(this.db, ownerId, entityUuid);
+    if (!proposal) return null;
+    return {
+      proposal,
+      events: listChangeProposalEvents(this.db, ownerId, entityUuid),
+    };
+  }
+
+  createChangeProposalRecord(input: {
+    ownerId: string;
+    proposer: "ashley" | "operator";
+    targetCategory: Parameters<typeof createChangeProposal>[1]["targetCategory"];
+    objective: string;
+    rationale: string;
+    riskClass: "low" | "medium" | "high" | "consultation";
+    expiresAt: string;
+    baseCommit?: string;
+    baseTreeHash?: string;
+    linkedRevisionEntityUuid?: string;
+    linkedIdentityReviewEntityUuid?: string;
+    consultationRequired?: boolean;
+  }) {
+    return createChangeProposal(this.db, input);
+  }
+
+  submitChangeProposal(ownerId: string, entityUuid: string) {
+    return proposeChange(this.db, ownerId, entityUuid, "ashley");
+  }
+
+  recordChangeProposalAshleyPosition(input: {
+    ownerId: string;
+    entityUuid: string;
+    position: "affirm" | "object" | "defer";
+  }) {
+    return recordAshleyPosition(
+      this.db,
+      input.ownerId,
+      input.entityUuid,
+      input.position,
+      "ashley",
+    );
+  }
+
+  recordChangeProposalDocDecision(input: {
+    ownerId: string;
+    entityUuid: string;
+    decision: "approve" | "reject" | "defer";
+  }) {
+    return recordDocDecision(
+      this.db,
+      input.ownerId,
+      input.entityUuid,
+      input.decision,
+      "doc",
+    );
+  }
+
+  recordChangeProposalExternalOutcome(input: {
+    ownerId: string;
+    entityUuid: string;
+    outcome: "committed" | "deployed" | "abandoned";
+    note?: string;
+  }) {
+    return recordExternalOutcome(
+      this.db,
+      input.ownerId,
+      input.entityUuid,
+      input.outcome,
+      "doc",
+      input.note,
+    );
+  }
+
+  getExternalActions(ownerId: string, limit = 50) {
+    return {
+      actions: listExternalActions(this.db, ownerId, limit),
+      emergencyStop: getEmergencyStop(this.db, ownerId),
+    };
+  }
+
+  getExternalAction(ownerId: string, entityUuid: string) {
+    const action = getExternalActionByEntityUuid(this.db, ownerId, entityUuid);
+    if (!action) return null;
+    return {
+      action,
+      events: listExternalActionEvents(this.db, ownerId, entityUuid),
+    };
+  }
+
+  getExternalAccounts(ownerId: string) {
+    return {
+      accounts: listVaultCredentials(this.db, ownerId).map((row) => ({
+        credentialRef: row.credentialRef,
+        entityUuid: row.entityUuid,
+        destinationId: row.destinationId,
+        state: row.state,
+        credentialLineageRef: row.credentialLineageRef,
+      })),
+    };
+  }
+
+  cancelExternalAction(ownerId: string, entityUuid: string) {
+    return cancelAction(this.db, ownerId, entityUuid, "doc");
+  }
+
+  reconcileExternalAction(
+    ownerId: string,
+    entityUuid: string,
+    outcome: "committed" | "partially_delivered" | "aborted" | "outcome_unknown",
+  ) {
+    return reconcileAction(this.db, ownerId, entityUuid, "doc", outcome);
+  }
+
+  revokeExternalCredential(ownerId: string, credentialRef: string) {
+    return revokeVaultCredential(this.db, ownerId, credentialRef);
+  }
+
+  setExternalEmergencyStop(ownerId: string, active: boolean) {
+    return setEmergencyStop(this.db, ownerId, active);
+  }
+
   getCapabilities() {
     return {
       masterMode: env.cognitionMode,
       capabilities: this.capabilityStatuses(),
     };
+  }
+
+  getAttentionObservability() {
+    return attentionObservability(this.db);
   }
 
   recordCapabilityEvaluation(input: {
@@ -1187,5 +2166,195 @@ export class AshleyCore {
         decisions: 0,
       };
     }
+  }
+
+  getHealthSnapshot(input: HealthSnapshotInput): {
+    liveness: boolean;
+    ready: boolean;
+    provider: CoreProviderState;
+    db: {
+      schemaVersion: number;
+      integrity: "ok" | "failed";
+      foreignKeys: "enabled" | "disabled" | "unknown";
+      continuity: {
+        available: boolean;
+        schemaVersion: number | null;
+        lineagePresent: boolean;
+      };
+    };
+    deliveryPressure: {
+      byState: Array<{ state: string; count: number }>;
+      activeReservations: number;
+      inboundMessages: number;
+    };
+    backgroundStarvation: {
+      attentionQueued: number;
+      attentionOldestAgeSec: number | null;
+      cognitivePending: number;
+      cognitiveOldestAgeSec: number | null;
+    };
+    backup: {
+      available: boolean;
+      lastVerifiedAt: string | null;
+      lastCreatedAt: string | null;
+      ageSec: number | null;
+      lineageId: string | null;
+    };
+    capabilities: {
+      masterMode: "observe" | "apply";
+      effectiveCount: number;
+      byState: Record<string, number>;
+      contractMismatch: boolean;
+    };
+    identity: {
+      buildIdentity: string;
+      contractId: string;
+      modelEpoch: number;
+      resolvedModels: Array<{ alias: string; resolvedModelId: string | null; epoch: number }>;
+    };
+  } {
+    const now = Date.now();
+    const coreHealth = this.getHealth();
+    const attention = this.getAttentionObservability();
+    const rowNumber = (value: unknown): number =>
+      typeof value === "number" && Number.isFinite(value) ? value : Number(value ?? 0);
+    const ageSec = (value: unknown): number | null => {
+      if (typeof value !== "string") return null;
+      const timestamp = Date.parse(value);
+      return Number.isFinite(timestamp)
+        ? Math.max(0, Math.floor((now - timestamp) / 1000))
+        : null;
+    };
+
+    let integrity: "ok" | "failed" = "failed";
+    let foreignKeys: "enabled" | "disabled" | "unknown" = "unknown";
+    try {
+      const quick = this.db.prepare("PRAGMA quick_check(1)").get() as Record<string, unknown> | undefined;
+      integrity = quick?.quick_check === "ok" ? "ok" : "failed";
+      const fk = this.db.prepare("PRAGMA foreign_keys").get() as Record<string, unknown> | undefined;
+      foreignKeys = rowNumber(fk?.foreign_keys) === 1 ? "enabled" : "disabled";
+    } catch {
+      integrity = "failed";
+    }
+
+    const deliveryRows = this.db.prepare(
+      `SELECT state, COUNT(*) AS count
+       FROM delivery_reservations
+       GROUP BY state ORDER BY state`,
+    ).all() as Array<Record<string, unknown>>;
+    const inboundRow = this.db.prepare(
+      "SELECT COUNT(*) AS count FROM delivery_inbound_messages",
+    ).get() as Record<string, unknown> | undefined;
+    const activeRow = this.db.prepare(
+      `SELECT COUNT(*) AS count FROM delivery_reservations
+       WHERE state IN ('drafted', 'reserved', 'sending')`,
+    ).get() as Record<string, unknown> | undefined;
+
+    const queuedAttention = (attention.queuedByLane as Array<Record<string, unknown>>)
+      .reduce((sum, row) => sum + rowNumber(row.c), 0);
+    const oldestAttention = (attention.queuedByLane as Array<Record<string, unknown>>)
+      .map((row) => ageSec(row.oldest))
+      .filter((value): value is number => value != null)
+      .sort((a, b) => b - a)[0] ?? null;
+    const cognitiveRows = this.db.prepare(
+      `SELECT COUNT(*) AS count, MIN(available_at) AS oldest
+       FROM cognitive_jobs WHERE status IN ('pending', 'running')`,
+    ).get() as Record<string, unknown> | undefined;
+
+    let continuityAvailable = false;
+    let continuitySchemaVersion: number | null = null;
+    let lineagePresent = false;
+    let backup: {
+      available: boolean;
+      lastVerifiedAt: string | null;
+      lastCreatedAt: string | null;
+      ageSec: number | null;
+      lineageId: string | null;
+    } = {
+      available: false,
+      lastVerifiedAt: null,
+      lastCreatedAt: null,
+      ageSec: null,
+      lineageId: null,
+    };
+    if (this.continuity) {
+      continuityAvailable = true;
+      try {
+        const version = this.continuity.prepare("PRAGMA user_version").get() as Record<string, unknown> | undefined;
+        continuitySchemaVersion = rowNumber(version?.user_version);
+        const lineage = getAuthoritativeLineageId(this.continuity);
+        lineagePresent = Boolean(lineage);
+        const last = this.continuity.prepare(
+          `SELECT occurred_at, lineage_id FROM backup_watermarks
+           WHERE kind = 'backup' ORDER BY id DESC LIMIT 1`,
+        ).get() as Record<string, unknown> | undefined;
+        if (typeof last?.occurred_at === "string" && typeof last.lineage_id === "string") {
+          backup = {
+            available: true,
+            // A watermark proves package creation, not a later restore verify.
+            lastVerifiedAt: null,
+            lastCreatedAt: last.occurred_at,
+            ageSec: ageSec(last.occurred_at),
+            lineageId: last.lineage_id,
+          };
+        }
+      } catch {
+        continuityAvailable = false;
+      }
+    }
+
+    const capabilityStatuses = coreHealth.capabilities;
+    const byState: Record<string, number> = {};
+    for (const status of capabilityStatuses) {
+      byState[status.state] = (byState[status.state] ?? 0) + 1;
+    }
+    const resolvedModels = (attention.continuity as Array<Record<string, unknown>>).map((row) => ({
+      alias: String(row.alias ?? ""),
+      resolvedModelId: typeof row.resolved_model_id === "string" ? row.resolved_model_id : null,
+      epoch: rowNumber(row.model_epoch),
+    }));
+
+    return {
+      liveness: true,
+      ready: input.ready,
+      provider: input.providerState,
+      db: {
+        schemaVersion: coreHealth.schemaVersion,
+        integrity,
+        foreignKeys,
+        continuity: {
+          available: continuityAvailable,
+          schemaVersion: continuitySchemaVersion,
+          lineagePresent,
+        },
+      },
+      deliveryPressure: {
+        byState: deliveryRows.map((row) => ({
+          state: String(row.state ?? ""),
+          count: rowNumber(row.count),
+        })),
+        activeReservations: rowNumber(activeRow?.count),
+        inboundMessages: rowNumber(inboundRow?.count),
+      },
+      backgroundStarvation: {
+        attentionQueued: queuedAttention,
+        attentionOldestAgeSec: oldestAttention,
+        cognitivePending: rowNumber(cognitiveRows?.count),
+        cognitiveOldestAgeSec: ageSec(cognitiveRows?.oldest),
+      },
+      backup,
+      capabilities: {
+        masterMode: env.cognitionMode,
+        effectiveCount: capabilityStatuses.filter((status) => status.effective).length,
+        byState,
+        contractMismatch: capabilityStatuses.some((status) => status.contractMismatch),
+      },
+      identity: {
+        buildIdentity: attention.buildIdentity,
+        contractId: attention.contractId,
+        modelEpoch: attention.modelEpoch,
+        resolvedModels,
+      },
+    };
   }
 }

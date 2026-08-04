@@ -17,6 +17,10 @@ import { stripPipelineNarration } from "../../lib/metadata-echo.js";
 import type { Decision } from "../types.js";
 import type { NuclearPromptChannel } from "./prompts.js";
 import { renderForTransport } from "./rendering.js";
+import { composeSelfCapabilityContext } from "../perception/capability-self-model.js";
+import type { PerceptionInlinePart } from "../perception/types.js";
+import type { DatabaseSync } from "node:sqlite";
+import { openNuclearDb } from "../db.js";
 
 /** Complete wording from Expression (before transport). */
 export type ExpressionOutput = {
@@ -37,12 +41,24 @@ export type RenderedOutput = {
  * Owns language generation; does not perform Discord transport formatting.
  * Authorization comes from Decision.authorizedClaims (Thought), not Rendering.
  * finalizeHonesty may reject unlicensed claims but never authorizes.
+ *
+ * Current user message appears exactly once: in the final user turn content.
  */
 export async function expressSpeak(
   turn: TurnContext,
   decision: Decision,
   userMessage: string,
   channel: NuclearPromptChannel,
+  options: {
+    deadlineAtMs?: number | null;
+    decisionId?: number | null;
+    deliveryReservationId?: number | null;
+    ownerId?: string | null;
+    lane?: "interactive" | "urgent_grounded";
+    perceptionExpressionParts?: PerceptionInlinePart[];
+    perceptionThoughtParts?: PerceptionInlinePart[];
+    attentionDb?: DatabaseSync;
+  } = {},
 ): Promise<RenderedOutput> {
   const claims = decision.authorizedClaims;
   const readingLicensed = claims.readingRecordIds.length > 0;
@@ -73,29 +89,55 @@ export async function expressSpeak(
       ].join("\n")
     : "No grounded affect claim is licensed for this turn. Do not invent a feeling to improve the message.";
 
+  const attentionDb = options.attentionDb ?? openNuclearDb();
+  const selfCapability = composeSelfCapabilityContext(attentionDb);
+
   const system = [
     turn.systemPrompt,
+    `## Capability self-model\n${selfCapability}`,
     `## Activity license\n${licenseNote}`,
     `## Affect license\n${affectNote}`,
   ]
     .filter(Boolean)
     .join("\n\n");
+
+  const current = userMessage.trim();
+  // Hot messages must not re-include the current user text.
+  const history = turn.hotMessages
+    .filter((message) => message.text.trim() !== current)
+    .map((message) => ({
+      role: message.role as "user" | "assistant" | "system",
+      content: message.text,
+    }));
+
+  const expressionImages =
+    options.perceptionExpressionParts
+      ?.filter((part) => part.kind === "image" && part.audience === "expression")
+      .map((part) => part.content) ?? [];
+
+  const userContentParts = [
+    turn.decisionPrompt,
+    "Write only the message Doc will see.",
+    "Use Decision metadata as intent, not as text to repeat.",
+    "Current user message follows once:",
+    current,
+  ];
+  for (const part of options.perceptionExpressionParts ?? []) {
+    if (part.kind === "text_excerpt") {
+      userContentParts.push(`Licensed attachment excerpt:\n${part.content}`);
+    }
+    if (part.kind === "conversational_read") {
+      userContentParts.push(`Licensed page read:\n${part.content}`);
+    }
+  }
+
   const messages: ChatMessage[] = [
     { role: "system", content: system },
-    ...turn.hotMessages.map((message) => ({
-      role: message.role,
-      content: message.text,
-    })),
+    ...history,
     {
       role: "user",
-      content: [
-        turn.decisionPrompt,
-        "Write only the message Doc will see.",
-        "Use the current user message and memory as context, not as text to echo.",
-        userMessage.trim(),
-      ]
-        .filter(Boolean)
-        .join("\n"),
+      content: userContentParts.filter(Boolean).join("\n"),
+      imageUrls: expressionImages.length > 0 ? expressionImages : undefined,
     },
   ];
   let response: Awaited<ReturnType<typeof completeChat>>;
@@ -104,8 +146,13 @@ export async function expressSpeak(
       model: env.mistralModel,
       maxTokens: channel === "proactive" ? 500 : 900,
       temperature: env.mistralChatTemperature,
-      reasoningEffort: "low",
-      lane: "interactive",
+      reasoningEffort: decision.cognitiveAllocation.effort,
+      lane: options.lane ?? "interactive",
+      purpose: "expression",
+      deadlineAtMs: options.deadlineAtMs,
+      decisionId: options.decisionId,
+      deliveryReservationId: options.deliveryReservationId,
+      ownerId: options.ownerId,
     });
   } catch (error) {
     if (env.mistralApiKey) throw error;
@@ -126,6 +173,9 @@ export async function expressSpeak(
     text: wording.text,
     readingLicensed: wording.readingLicensed,
     affectLicensed: affect.permitted,
+    visionLicensed: (decision.perceptionLicenses?.imageIncluded.length ?? 0) > 0,
+    conversationalReadLicensed:
+      (decision.perceptionLicenses?.conversationalReadIncluded.length ?? 0) > 0,
   });
   return applyRendering({
     text: finalized.text,

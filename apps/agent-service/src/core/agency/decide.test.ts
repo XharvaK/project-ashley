@@ -30,12 +30,37 @@ describe("nuclear agency decisions", () => {
     expect(result.cognitiveAllocation.shouldSpeak).toBe(false);
   });
 
-  it("delays an empty fluff ping without other material", () => {
+  it("speaks on an empty fluff ping with low effort", () => {
     const result = decide(
       [motivation("user_message", 32, "hey")],
       "reactive",
     );
-    expect(result.kind).toBe("delay");
+    expect(result.kind).toBe("speak");
+    expect(result.cognitiveAllocation.shouldSpeak).toBe(true);
+    expect(result.cognitiveAllocation.effort).toBe("low");
+    expect(result.urgency).toBe(0);
+    expect(result.objective).toBe("acknowledge the greeting");
+  });
+
+  it("keeps ordinary substantive turns medium effort and non-urgent", () => {
+    const result = decide(
+      [motivation("user_message", 100, "can you explain the retry loop?")],
+      "reactive",
+    );
+    expect(result.kind).toBe("speak");
+    expect(result.cognitiveAllocation.effort).toBe("medium");
+    expect(result.urgency).toBe(0);
+    expect(result.objective).toBe("respond to the direct message");
+  });
+
+  it("does not raise urgency from high score alone", () => {
+    const result = decide(
+      [motivation("user_message", 100, "tell me about typescript generics")],
+      "reactive",
+    );
+    expect(result.score).toBe(100);
+    expect(result.urgency).toBe(0);
+    expect(result.cognitiveAllocation.effort).not.toBe("high");
   });
 
   it("silences proactive turns below the material floor", () => {

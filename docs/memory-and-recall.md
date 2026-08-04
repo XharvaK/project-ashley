@@ -46,9 +46,11 @@ running work is never pruned.
 powershell -File scripts/backup-memory.ps1
 ```
 
-Copies `nuclear.db` (+ WAL/SHM) to `~/.composer-assistant/backups/{timestamp}/`.
-
-Restore: stop agent-service, replace `nuclear.db`, restart.
+Creates consistent VACUUM snapshots of both `nuclear.db` and the authoritative
+`continuity.db` sidecar under `~/.composer-assistant/backups/{timestamp}/`.
+Naive WAL/SHM copying is not supported. Encrypted package creation and restore
+verification must preserve nuclear-then-continuity order and fail closed on a
+sidecar lineage mismatch; do not replace live databases from this document.
 
 ## Architecture
 

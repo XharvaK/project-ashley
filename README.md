@@ -233,7 +233,8 @@ All owner-scoped endpoints require the configured owner ID.
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /health` | Runtime, schema, and service readiness |
+| `GET /health` | Minimal public liveness/readiness and provider state |
+| `GET /nuclear/health?owner_id=...` | Owner-only bounded health diagnostics (metadata only) |
 | `GET /nuclear/decisions?owner_id=...` | Thought decisions and evidence snapshots |
 | `GET /nuclear/reflections?owner_id=...` | Reflection evidence and calibration |
 | `GET /nuclear/episodes?owner_id=...&query=...` | Grounded episodic recall records |

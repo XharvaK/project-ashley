@@ -9,6 +9,19 @@ Vision explains why Ashley exists. The Core Principles are the highest
 constitutional constraints beneath it, and lower documents and implementations
 derive authority through that chain. The Vision is not a runtime prompt.
 
+After the Constitution, read the peer specialized governance documents
+[`docs/Ashley_Stewardship_Compact.md`](docs/Ashley_Stewardship_Compact.md) and
+[`docs/Ashley_Ethics.md`](docs/Ashley_Ethics.md), then
+[`docs/Ashley_Hierarchy.md`](docs/Ashley_Hierarchy.md). They clarify
+operational and ethical constraints; they do not override higher authority.
+
+OS-boundary execution design (design only, not deployed): [`docs/Sandbox_Design.md`](docs/Sandbox_Design.md).
+Self-inspection and change-proposal design (design only): [`docs/Self_Modification_Design.md`](docs/Self_Modification_Design.md).
+External account and action-broker design (design only): [`docs/External_Agency_Design.md`](docs/External_Agency_Design.md).
+Wave 10 stabilization and assurance design plus accepted local 10c assurance:
+[`docs/Stabilization_Design.md`](docs/Stabilization_Design.md).
+Wave acceptance ladder and gate packets: [`docs/Wave_Acceptance_Protocol.md`](docs/Wave_Acceptance_Protocol.md).
+
 ## Quick start
 
 ```powershell
@@ -34,6 +47,7 @@ npm run dev:discord    # agent + discord bot (conflicts with Mint)
 |------|---------|
 | `~/.composer-assistant/.env` | Secrets and config |
 | `~/.composer-assistant/conversations/nuclear.db` | Nuclear Identity/State/Agency SQLite |
+| `~/.composer-assistant/continuity.db` | Authoritative continuity sidecar (lineage, forget, sessions) |
 | `workspace/prompts/nuclear/` | Thin nuclear identity prompts |
 
 Legacy `index.db` is archival for chat memory (nuclear does not read it). ConversationLogger may still append audit session rows there.
@@ -88,6 +102,22 @@ influence. Schema v9 integrates each cognition job atomically, requires exact us
 provenance for automatic facts, uses leased edge-triggered urgent wakes, adds
 grounded refusal, and adds read-record provenance plus receipt-backed message
 redaction. Schema v10 adds `own_time_sessions` for owner absence/return Mind State.
+Schema v11 adds ledgered Discord delivery. Schema v12 adds durable attention
+admission, model-continuity epochs, and capability contract lineage.
+Schema v13 adds classification + immutable `entity_uuid` on targetable tables;
+authoritative continuity lives in `~/.composer-assistant/continuity.db` (sidecar v1)
+for forget previews/tombstones, lineage, sessions, and backup watermarks.
+Schema v14 adds six relationship tables (`doc_reminders`, `ashley_self_commitments`,
+`mutual_commitments`, `scheduled_proactive_messages`, `relational_tensions`,
+`withdrawal_records`), `relationship_motivation_claims`, capability contract v2
+(`relationship_state` defaults to `observe`), and typed hold/silence decision codes.
+Schema v15 adds `perception_artifacts` and `conversational_reads`, capability
+contract v3 (`vision`, `attachment_text`, `conversational_read`, `web_search` —
+all default `observe`), Thought-deadline attachment fetch with inline base64
+Mistral payloads only, and quote-aware perception honesty.
+Relationship influence requires `relationship_state` apply plus relevant gates;
+recording/query works in observe. Reminders surface as Agency motivations only
+(never auto-sent).
 Gated `own_time_report` (deps: thought, curiosity_consolidation) can share ≤3
 grounded own-time takes on ask when active under master `apply`.
 
@@ -96,9 +126,13 @@ take -> consolidate -> motivate -> Thought`. Network retrieval is public
 HTTP(S) only, redirect- and DNS-revalidated, bounded to five redirects, twenty
 seconds, and two megabytes. Reading never sends directly.
 
-Observability: `GET /health`, `GET /nuclear/decisions?owner_id=`,
+Observability: `GET /health` (minimal public readiness),
+`GET /nuclear/health?owner_id=` (owner-only metadata diagnostics),
+`GET /nuclear/decisions?owner_id=`,
 `GET /nuclear/reflections?owner_id=`, `GET /nuclear/episodes?owner_id=`,
-`GET /nuclear/cognition?owner_id=`, `GET /nuclear/revisions?owner_id=`.
+`GET /nuclear/cognition?owner_id=`, `GET /nuclear/revisions?owner_id=`,
+`GET /nuclear/continuity?owner_id=` (sidecar lineage/events),
+`GET /nuclear/relationship?owner_id=`, `GET /nuclear/status?owner_id=`.
 Capability rollout: `GET /nuclear/capabilities?owner_id=`.
 Foundational identity review: `GET /nuclear/identity/reviews?owner_id=`.
 
@@ -114,6 +148,9 @@ Voice, Telegram, habits, Moltbook, and skills were retired — Discord only.
 | `/forget` | Forget by topic |
 | `/proactive` | Initiative status / pause / resume |
 | `/identity` | Owner-only foundational review / approve / reject / defer |
+| `/commitments` | Relationship summary (owner-only, ephemeral) |
+| `/continuity` | Continuity lineage snapshot |
+| `/status` | Nuclear health + initiative + relationship_state |
 
 ## Tests
 

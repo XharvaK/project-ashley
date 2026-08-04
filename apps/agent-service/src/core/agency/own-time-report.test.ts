@@ -11,12 +11,14 @@ import {
   applyOwnTimeReportAfterThought,
   applyOwnTimeReportFinalizer,
   assessOwnTimeReport,
+  buildOwnTimeReportConstraint,
   isEffectiveOwnTimeReportAsk,
   isExactReturnReportShorthand,
   isOwnTimeReportAsk,
   listOwnerLinkedReadIdsInWindow,
   shadowSourceKey,
 } from "./own-time-report.js";
+import { decide } from "./decide.js";
 import { ownTimeReportClaimsNote } from "../conversation/own-time-report-expression.js";
 import { currentReleaseId } from "../rollout/capabilities.js";
 import {
@@ -525,23 +527,40 @@ describe("own-time report assessment and finalizer", () => {
       jobStatus: "completed",
     });
     const assessment = assessOwnTimeReport(db, ownerA);
-    const finalized = applyOwnTimeReportFinalizer(
-      baseDecision({
-        kind: "share",
-        evidenceRefs: [
-          { type: "message", id: 9001 },
-          { type: "take", id: 99999 },
-          { type: "episode", id: 7 },
-        ],
-        motivationIds: [42],
-      }),
-      assessment,
+    const constraint = {
+      canInfluence: true as const,
+      status: assessment.status,
+      reason: assessment.reason,
+      sessionId: assessment.sessionId,
+      selectedTakeIds: assessment.selected.map((take) => take.takeId),
+      readingClaims: assessment.selected.map((take) => ({
+        takeId: take.takeId,
+        readRecordId: take.readId,
+        title: take.title,
+        claim: take.claim,
+      })),
+    };
+    const finalized = decide(
+      [
+        {
+          id: 42,
+          kind: "user_message",
+          score: 100,
+          summary: "what did you discover while I was away?",
+          refType: "message",
+          refId: 9001,
+        },
+      ],
+      "reactive",
+      {
+        ownTime: constraint,
+        userMessage: "what did you discover while I was away?",
+      },
     );
     expect(finalized.kind).toBe("share");
     expect(finalized.motivationIds).toEqual([42]);
     expect(finalized.evidenceRefs).toEqual([
       { type: "message", id: 9001 },
-      { type: "episode", id: 7 },
       { type: "take", id: seeded.takeId },
     ]);
     expect(
@@ -550,6 +569,8 @@ describe("own-time report assessment and finalizer", () => {
         .map((ref) => Number(ref.id)),
     ).toEqual(finalized.authorizedClaims.readingClaims.map((c) => c.takeId));
     expect(finalized.reason).not.toMatch(/owner-linked|eligible|successfully reported/i);
+    // Post-Thought finalizer is a no-op.
+    expect(applyOwnTimeReportFinalizer(finalized, assessment)).toEqual(finalized);
     db.close();
   });
 
@@ -565,15 +586,29 @@ describe("own-time report assessment and finalizer", () => {
       alreadyReportedCount: 0,
       selected: [],
     };
-    const finalized = applyOwnTimeReportFinalizer(
-      baseDecision({
-        kind: "share",
-        evidenceRefs: [
-          { type: "message", id: 1 },
-          { type: "take", id: 55 },
-        ],
-      }),
-      assessment,
+    const finalized = decide(
+      [
+        {
+          id: 1,
+          kind: "user_message",
+          score: 100,
+          summary: "what did you discover while I was away?",
+          refType: "message",
+          refId: 1,
+        },
+      ],
+      "reactive",
+      {
+        ownTime: {
+          canInfluence: true,
+          status: assessment.status,
+          reason: assessment.reason,
+          sessionId: assessment.sessionId,
+          selectedTakeIds: [],
+          readingClaims: [],
+        },
+        userMessage: "what did you discover while I was away?",
+      },
     );
     expect(finalized.kind).toBe("speak");
     expect(finalized.evidenceRefs).toEqual([{ type: "message", id: 1 }]);
@@ -722,7 +757,7 @@ describe("own-time report assessment and finalizer", () => {
     db.close();
   });
 
-  it("applies finalizer when capability can influence", () => {
+  it("applies pre-Thought constraint when capability can influence", () => {
     env.cognitionMode = "apply";
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     activate(db, [
@@ -749,11 +784,36 @@ describe("own-time report assessment and finalizer", () => {
       retrievedAt: "2026-08-04T02:00:00.000Z",
       jobStatus: "completed",
     });
-    const finalized = applyOwnTimeReportAfterThought(db, baseDecision(), {
+    const constraint = buildOwnTimeReportConstraint(db, {
       ownerId: ownerA,
       userMessage: "what did you discover while I was away?",
       userMessageId: 55,
     });
+    expect(constraint?.canInfluence).toBe(true);
+    const finalized = decide(
+      [
+        {
+          id: 1,
+          kind: "user_message",
+          score: 100,
+          summary: "what did you discover while I was away?",
+          refType: "message",
+          refId: 9001,
+        },
+      ],
+      "reactive",
+      {
+        ownTime: constraint,
+        userMessage: "what did you discover while I was away?",
+      },
+    );
+    // Post-Thought path must not mutate further.
+    const after = applyOwnTimeReportAfterThought(db, finalized, {
+      ownerId: ownerA,
+      userMessage: "what did you discover while I was away?",
+      userMessageId: 55,
+    });
+    expect(after).toEqual(finalized);
     expect(finalized.kind).toBe("share");
     expect(finalized.ownTimeReport?.status).toBe("reportable_takes");
     expect(finalized.evidenceRefs).toEqual([

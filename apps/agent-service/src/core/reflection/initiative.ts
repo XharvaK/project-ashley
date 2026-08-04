@@ -29,6 +29,8 @@ const PROACTIVE_KINDS = new Set<MotivationKind>([
   "unfinished",
   "identity",
   "availability",
+  "reminder",
+  "scheduled_proactive",
 ]);
 
 type DbRow = Record<string, unknown>;
@@ -128,7 +130,7 @@ export function recordInitiativeReaction(
   ownerId: string,
   input: { messageId: string; emoji: string },
 ): { matchedInitiative: boolean; event: ReflectionEvent | null } {
-  const reservation = db
+  let reservation = db
     .prepare(
       `SELECT r.id AS reservation_id, r.decision_id,
               d.trigger, d.motivation_ids_json
@@ -139,6 +141,25 @@ export function recordInitiativeReaction(
        LIMIT 1`,
     )
     .get(ownerId, input.messageId);
+
+  if (!isRow(reservation)) {
+    reservation = db
+      .prepare(
+        `SELECT ir.id AS reservation_id, ir.decision_id,
+                d.trigger, d.motivation_ids_json
+         FROM delivery_bubbles b
+         JOIN delivery_reservations dr ON dr.id = b.reservation_id
+         JOIN initiative_reservations ir
+           ON ir.id = dr.initiative_reservation_id
+         JOIN decision_log d ON d.id = ir.decision_id
+         WHERE dr.owner_id = ?
+           AND b.discord_message_id = ?
+           AND ir.committed_at IS NOT NULL
+         LIMIT 1`,
+      )
+      .get(ownerId, input.messageId);
+  }
+
   if (!isRow(reservation)) {
     return { matchedInitiative: false, event: null };
   }

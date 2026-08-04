@@ -43,7 +43,7 @@ enables the bounded adjustment.
 - `GET /initiative/status?owner_id=`
 - `GET /nuclear/decisions?owner_id=`
 - `GET /nuclear/reflections?owner_id=`
-- `GET /health` → `proactive` block
+- `GET /health` → minimal public liveness/readiness and provider state
 - `GET /initiative/urgent?owner_id=` → local wake signal; never sends directly
 
 See [Architecture_Index.md](Architecture_Index.md).

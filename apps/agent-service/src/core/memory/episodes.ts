@@ -1,4 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
+import { newEntityUuid } from "../continuity/entity-uuid.js";
+import { defaultUnclassifiedConversational } from "../privacy/classification.js";
 import { reconcileUnsupportedRevisions } from "../learning/revisions.js";
 import { literalLikePattern } from "./facts.js";
 import type { MemoryMessage } from "./threads.js";
@@ -94,23 +96,52 @@ export function createEpisode(
     .filter(Boolean)
     .slice(0, 24)
     .join(" ");
-  const result = db.prepare(
-    `INSERT OR IGNORE INTO episodes
+  const hasUuid = db
+    .prepare(`PRAGMA table_info(episodes)`)
+    .all()
+    .some((row) => (row as { name?: string }).name === "entity_uuid");
+  const result = hasUuid
+    ? db
+        .prepare(
+          `INSERT OR IGNORE INTO episodes
+       (owner_id, thread_id, summary, entities, source_start_message_id,
+        source_end_message_id, salience, unresolved, status, created_at, updated_at,
+        entity_uuid, data_classification)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)`,
+        )
+        .run(
+          input.ownerId,
+          input.threadId,
+          summary,
+          entities,
+          ids[0],
+          ids[ids.length - 1],
+          Math.max(0, Math.min(1, input.salience ?? 0.5)),
+          input.unresolved ? 1 : 0,
+          now,
+          now,
+          newEntityUuid(),
+          defaultUnclassifiedConversational(),
+        )
+    : db
+        .prepare(
+          `INSERT OR IGNORE INTO episodes
        (owner_id, thread_id, summary, entities, source_start_message_id,
         source_end_message_id, salience, unresolved, status, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
-  ).run(
-    input.ownerId,
-    input.threadId,
-    summary,
-    entities,
-    ids[0],
-    ids[ids.length - 1],
-    Math.max(0, Math.min(1, input.salience ?? 0.5)),
-    input.unresolved ? 1 : 0,
-    now,
-    now,
-  );
+        )
+        .run(
+          input.ownerId,
+          input.threadId,
+          summary,
+          entities,
+          ids[0],
+          ids[ids.length - 1],
+          Math.max(0, Math.min(1, input.salience ?? 0.5)),
+          input.unresolved ? 1 : 0,
+          now,
+          now,
+        );
   let id = Number(result.lastInsertRowid);
   if (result.changes === 0) {
     const existing = row(db.prepare(
@@ -228,18 +259,12 @@ export function listUnconsolidatedMessages(
     .filter((item): item is MemoryMessage => item !== null);
 }
 
-export function forgetEpisodesByTopic(
+export function forgetEpisodesByIds(
   db: DatabaseSync,
   ownerId: string,
-  topic: string,
-  matchingMessageIds: number[] = [],
+  episodeIds: number[],
 ): number {
-  const matches = matchingEpisodes(
-    db,
-    ownerId,
-    topic,
-    matchingMessageIds,
-  ).map((episode) => episode.id);
+  const matches = [...new Set(episodeIds)].filter((id) => Number.isFinite(id) && id > 0);
   if (matches.length === 0) return 0;
   const placeholders = matches.map(() => "?").join(", ");
   const evidence = db.prepare(
@@ -270,7 +295,11 @@ export function forgetEpisodesByTopic(
   );
   for (const id of matches) {
     update.run(new Date().toISOString(), id);
-    db.prepare("DELETE FROM episodes_fts WHERE rowid = ?").run(id);
+    try {
+      db.prepare("DELETE FROM episodes_fts WHERE rowid = ?").run(id);
+    } catch {
+      /* FTS optional */
+    }
     db.prepare(
       `UPDATE mind_state_items SET status = 'forgotten', text = '', updated_at = ?
        , wake_state = 'consumed', next_wake_at = NULL, claimed_at = NULL
@@ -320,11 +349,13 @@ export function forgetEpisodesByTopic(
              AND l.target_id = CAST(mem_facts.id AS TEXT)
          )`,
     ).run(factId, ownerId);
-    const fact = db.prepare(
-      `SELECT source_message_id, source_quote, superseded_by
-       FROM mem_facts
-       WHERE id = ? AND owner_id = ? AND origin = 'explicit_user'`,
-    ).get(factId, ownerId) as {
+    const fact = db
+      .prepare(
+        `SELECT source_message_id, source_quote, superseded_by
+         FROM mem_facts
+         WHERE id = ? AND owner_id = ? AND origin = 'explicit_user'`,
+      )
+      .get(factId, ownerId) as {
       source_message_id?: number | null;
       source_quote?: string | null;
       superseded_by?: number | null;
@@ -335,22 +366,31 @@ export function forgetEpisodesByTopic(
       fact.source_message_id != null &&
       messageIds.includes(fact.source_message_id)
     ) {
-      const candidates = db.prepare(
-        `SELECT m.id, m.text
-         FROM evidence_links l
-         JOIN mem_messages m ON m.id = CAST(l.source_id AS INTEGER)
-         WHERE l.owner_id = ? AND l.target_type = 'fact' AND l.target_id = ?
-           AND l.source_type = 'message' AND m.role = 'user'
-           AND m.redacted_at IS NULL
-         ORDER BY m.id DESC`,
-      ).all(ownerId, String(factId)).flatMap((value) => {
-        const item = row(value);
-        return item ? [{ id: Number(item.id), text: String(item.text) }] : [];
-      });
-      const quote = String(fact.source_quote ?? "").normalize("NFC").replace(/\r\n?/g, "\n");
+      const candidates = db
+        .prepare(
+          `SELECT m.id, m.text
+           FROM evidence_links l
+           JOIN mem_messages m ON m.id = CAST(l.source_id AS INTEGER)
+           WHERE l.owner_id = ? AND l.target_type = 'fact' AND l.target_id = ?
+             AND l.source_type = 'message' AND m.role = 'user'
+             AND m.redacted_at IS NULL
+           ORDER BY m.id DESC`,
+        )
+        .all(ownerId, String(factId))
+        .flatMap((value) => {
+          const item = row(value);
+          return item ? [{ id: Number(item.id), text: String(item.text) }] : [];
+        });
+      const quote = String(fact.source_quote ?? "")
+        .normalize("NFC")
+        .replace(/\r\n?/g, "\n");
       const replacement = quote
         ? candidates.find((candidate) =>
-            candidate.text.normalize("NFC").replace(/\r\n?/g, "\n").includes(quote))
+            candidate.text
+              .normalize("NFC")
+              .replace(/\r\n?/g, "\n")
+              .includes(quote),
+          )
         : undefined;
       if (replacement) {
         db.prepare(
@@ -365,6 +405,21 @@ export function forgetEpisodesByTopic(
   }
   reconcileUnsupportedRevisions(db, ownerId, revisionIds);
   return matches.length;
+}
+
+export function forgetEpisodesByTopic(
+  db: DatabaseSync,
+  ownerId: string,
+  topic: string,
+  matchingMessageIds: number[] = [],
+): number {
+  return forgetEpisodesByIds(
+    db,
+    ownerId,
+    matchingEpisodes(db, ownerId, topic, matchingMessageIds).map(
+      (episode) => episode.id,
+    ),
+  );
 }
 
 export function previewEpisodeForget(

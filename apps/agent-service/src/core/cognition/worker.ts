@@ -21,6 +21,10 @@ import {
   recoverCognitiveJobs,
   type CognitiveJob,
 } from "./jobs.js";
+import { isMutualCoPlanningText } from "../relationship/authority.js";
+import { proposeMutualCommitment } from "../relationship/transitions.js";
+import { relationshipCanRecord } from "../relationship/influence.js";
+import { defaultUnclassifiedConversational } from "../privacy/classification.js";
 
 export type CognitionAnalysis = {
   summary: string;
@@ -184,7 +188,8 @@ async function analyzeWithMistral(transcript: string): ReturnType<Analyze> {
     maxTokens: 1100,
     temperature: 0.2,
     reasoningEffort: "medium",
-    lane: "background",
+    purpose: "exchange_cognition",
+    lane: "exchange_cognition",
   });
   return {
     analysis: analysisFrom(parseJson(response.text), transcript.slice(0, 700)),
@@ -380,6 +385,21 @@ export async function processNextCognitiveJob(
           }
         }
         for (const item of canInfluence("mind_state") ? result.analysis.stateItems : []) {
+          if (
+            item.kind === "commitment" &&
+            item.urgency < 0.85 &&
+            isMutualCoPlanningText(item.text) &&
+            relationshipCanRecord(db, mode)
+          ) {
+            proposeMutualCommitment(db, {
+              ownerId: job.ownerId,
+              text: item.text,
+              sourceEntityType: "episode",
+              sourceEntityUuid: String(episode.id),
+              classification: defaultUnclassifiedConversational(),
+            });
+            continue;
+          }
           upsertMindStateItem(db, {
             ownerId: job.ownerId,
             ...item,

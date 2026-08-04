@@ -285,8 +285,9 @@ export function logDecision(
           reason, learning_subject_kind, learning_adjustment,
           learning_through_event_id, objective, evidence_refs_json, effort,
           completion, uncertainty, urgency, affect_license_json,
-          thought_source, thought_error, outcome_text, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          thought_source, thought_error, outcome_text, hold_reason_code,
+          silence_reason_code, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.ownerId,
@@ -308,6 +309,8 @@ export function logDecision(
       input.decision.thoughtSource,
       input.decision.thoughtError,
       input.outcomeText ?? null,
+      input.decision.holdReasonCode ?? null,
+      input.decision.silenceReasonCode ?? null,
       new Date().toISOString(),
     );
   const ids = input.decision.motivationIds;

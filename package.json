@@ -20,6 +20,11 @@
     "test:recall": "powershell -ExecutionPolicy Bypass -File scripts/phase0/run-all.ps1 -Tier agent",
     "config": "powershell -ExecutionPolicy Bypass -File scripts/install-config.ps1",
     "eval:replay": "powershell -ExecutionPolicy Bypass -File scripts/persona-eval/run-isolated.ps1",
-    "eval:full": "powershell -ExecutionPolicy Bypass -File scripts/persona-eval/run-full.ps1"
+    "eval:full": "powershell -ExecutionPolicy Bypass -File scripts/persona-eval/run-full.ps1",
+    "verify:status": "node scripts/stabilization/verify-status.mjs --check",
+    "eval:deterministic": "node scripts/stabilization/eval-deterministic.mjs",
+    "test:stabilization": "node --test scripts/stabilization/*.test.mjs",
+    "assurance:10c": "node scripts/stabilization/audit-10c.mjs --check-only",
+    "audit:mint-docs": "node scripts/stabilization/audit-mint-docs.mjs --check-only"
   }
 }

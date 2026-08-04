@@ -13,7 +13,7 @@ describe("nuclear database migrations", () => {
   it("creates the cognition and Reflection schemas for a fresh database", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
 
-    expect(schemaVersion(db)).toBe(10);
+    expect(schemaVersion(db)).toBe(17);
     const tables = db
       .prepare(
         `SELECT name FROM sqlite_master
@@ -22,26 +22,51 @@ describe("nuclear database migrations", () => {
            'mind_state_items', 'affective_state', 'cognitive_jobs',
            'learning_revisions', 'cur_reads', 'forget_receipts',
            'capability_releases', 'capability_events', 'cur_source_candidates',
-           'identity_reviews', 'own_time_sessions'
+           'identity_reviews', 'own_time_sessions',
+           'delivery_reservations', 'delivery_inbound_messages',
+           'delivery_bubbles', 'delivery_auxiliary_messages',
+           'attention_requests', 'attention_daily_usage',
+           'model_continuity_state', 'model_continuity_events',
+           'capability_contracts', 'attention_dispatch_counter',
+           'change_proposals', 'change_proposal_events',
+           'external_actions', 'external_action_events', 'external_entity_notes',
+           'vault_credential_index', 'external_agency_state'
          )
          ORDER BY name`,
       )
       .all() as Array<{ name: string }>;
     expect(tables.map((row) => row.name)).toEqual([
       "affective_state",
+      "attention_daily_usage",
+      "attention_dispatch_counter",
+      "attention_requests",
+      "capability_contracts",
       "capability_events",
       "capability_releases",
+      "change_proposal_events",
+      "change_proposals",
       "cognitive_jobs",
       "cur_reads",
       "cur_source_candidates",
+      "delivery_auxiliary_messages",
+      "delivery_bubbles",
+      "delivery_inbound_messages",
+      "delivery_reservations",
       "episodes",
+      "external_action_events",
+      "external_actions",
+      "external_agency_state",
+      "external_entity_notes",
       "forget_receipts",
       "identity_reviews",
       "initiative_learning",
       "learning_revisions",
       "mind_state_items",
+      "model_continuity_events",
+      "model_continuity_state",
       "own_time_sessions",
       "reflection_events",
+      "vault_credential_index",
     ]);
 
     db.close();
@@ -109,7 +134,7 @@ describe("nuclear database migrations", () => {
 
     openNuclearDb(db);
 
-    expect(schemaVersion(db)).toBe(10);
+    expect(schemaVersion(db)).toBe(17);
     const decision = db
       .prepare(
         `SELECT reason, outcome_text, learning_subject_kind,
@@ -195,7 +220,7 @@ describe("nuclear database migrations", () => {
 
     openNuclearDb(db);
 
-    expect(schemaVersion(db)).toBe(10);
+    expect(schemaVersion(db)).toBe(17);
     expect(db.prepare(
       "SELECT wake_state FROM mind_state_items WHERE id = 1",
     ).get()).toMatchObject({ wake_state: "pending" });
@@ -237,7 +262,7 @@ describe("nuclear database migrations", () => {
 
     openNuclearDb(db);
 
-    expect(schemaVersion(db)).toBe(10);
+    expect(schemaVersion(db)).toBe(17);
     expect(db.prepare(
       "SELECT evidence_kind, read_id FROM cur_takes WHERE id = 1",
     ).get()).toMatchObject({ evidence_kind: "scan_excerpt", read_id: null });
@@ -270,7 +295,7 @@ describe("nuclear database migrations", () => {
 
     openNuclearDb(db);
 
-    expect(schemaVersion(db)).toBe(10);
+    expect(schemaVersion(db)).toBe(17);
     expect(db.prepare("SELECT kind FROM motivations WHERE id = 1").get())
       .toMatchObject({ kind: "opinion" });
     expect(db.prepare("SELECT decision_kind FROM decision_log WHERE id = ?").get(decisionId))
@@ -285,7 +310,7 @@ describe("nuclear database migrations", () => {
     const db = new DatabaseSync(":memory:");
     // Minimal v9-shaped state: sticky focus without own_time_sessions.
     openNuclearDb(db);
-    expect(schemaVersion(db)).toBe(10);
+    expect(schemaVersion(db)).toBe(17);
     db.exec("PRAGMA user_version = 9");
     db.exec("DROP TABLE IF EXISTS own_time_sessions");
     db.prepare(
@@ -298,7 +323,7 @@ describe("nuclear database migrations", () => {
 
     openNuclearDb(db);
 
-    expect(schemaVersion(db)).toBe(10);
+    expect(schemaVersion(db)).toBe(17);
     expect(
       db.prepare(
         `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'own_time_sessions'`,

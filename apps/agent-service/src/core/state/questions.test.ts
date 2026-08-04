@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
-import { migrate } from "../db.js";
+import { openNuclearDb } from "../db.js";
 import {
   buildQuestionsBlock,
   bumpPriority,
@@ -12,8 +12,7 @@ import {
 
 describe("nuclear questions", () => {
   it("creates, prioritizes, updates, and resolves questions", () => {
-    const db = new DatabaseSync(":memory:");
-    migrate(db);
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
     const id = createQuestion(db, {
       ownerId: "doc",
       subject: "about_doc",

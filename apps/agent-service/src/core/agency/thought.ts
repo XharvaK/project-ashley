@@ -2,9 +2,13 @@ import { env } from "../../env.js";
 import { completeChat } from "../../mistral-client.js";
 import type { DatabaseSync } from "node:sqlite";
 import { capabilityCanInfluence } from "../rollout/capabilities.js";
+import { probeDecisionCoercion } from "../relationship/coercion-gate.js";
 import type { Decision, DecisionKind, Motivation, Trigger } from "../types.js";
 
-type Complete = typeof completeChat;
+type Complete = (
+  messages: Parameters<typeof completeChat>[0],
+  options?: Parameters<typeof completeChat>[1],
+) => Promise<{ text: string; model?: string }>;
 type CapabilityGate = (db: DatabaseSync) => boolean;
 
 const kinds = new Set<DecisionKind>([
@@ -75,17 +79,35 @@ function sanitizedErrorCode(error: unknown): string {
   const allowed = new Set([
     "AbortError",
     "agent_not_ready",
+    "attention_deadline",
     "internal_error",
     "mistral_unavailable",
     "rate_limited",
+    "request_exceeds_tpm_budget",
     "thought_error",
   ]);
   return allowed.has(candidate) ? candidate : "thought_error";
 }
 
+export type DeliberateOptions = {
+  /** When false, never call the model (easy/terminal/observe/unavailable). */
+  allowModelThought?: boolean;
+  /** Absolute Wave 02 first-bubble deadline (Expression keeps this). */
+  firstBubbleDeadlineAtMs?: number | null;
+  /** Thought sub-deadline = firstBubble - guard. */
+  thoughtDeadlineAtMs?: number | null;
+  decisionId?: number | null;
+  deliveryReservationId?: number | null;
+  ownerId?: string | null;
+  attentionDb?: import("node:sqlite").DatabaseSync;
+};
+
 /**
  * Model-assisted Thought. Deterministic Agency remains the safety floor and
  * sole fallback; Expression never sees an unvalidated proposal.
+ *
+ * Wave 03: Thought uses thoughtDeadlineAt; if admission cannot occur before
+ * that sub-deadline, or Thought is aborted at it, return deterministic floor.
  */
 export async function deliberateDecision(
   db: DatabaseSync,
@@ -97,15 +119,30 @@ export async function deliberateDecision(
     capabilityCanInfluence(database, "thought"),
   canRefuse: CapabilityGate = (database) =>
     capabilityCanInfluence(database, "refusal"),
+  options: DeliberateOptions = {},
 ): Promise<Decision> {
+  const allowModelThought = options.allowModelThought !== false;
   if (
+    !allowModelThought ||
     !canInfluence(db) ||
     !env.mistralApiKey ||
     base.kind === "silence" ||
-    base.kind === "delay"
+    base.kind === "delay" ||
+    base.cognitiveAllocation.completion === "hold" ||
+    !base.cognitiveAllocation.shouldSpeak
   ) {
     return base;
   }
+
+  const thoughtDeadline =
+    options.thoughtDeadlineAtMs ??
+    (options.firstBubbleDeadlineAtMs != null
+      ? options.firstBubbleDeadlineAtMs - env.thoughtExpressionGuardMs
+      : null);
+  if (thoughtDeadline != null && Date.now() >= thoughtDeadline) {
+    return base;
+  }
+
   const candidates = motivations.slice(0, 12).map((motivation) => ({
     id: motivation.id,
     kind: motivation.kind,
@@ -116,33 +153,50 @@ export async function deliberateDecision(
   }));
   let response: Awaited<ReturnType<Complete>>;
   try {
-    response = await complete([
+    response = await complete(
+      [
+        {
+          role: "system",
+          content: [
+            "You are Ashley's Thought layer, not her Expression layer.",
+            "Choose whether and how to act from the supplied grounded motivations.",
+            "Return strict JSON only: {kind,shouldSpeak,effort,completion,uncertainty,urgency,objective,reason,motivationIds}.",
+            "kind is speak|silence|delay|ask|revisit|share|challenge|refuse; effort is low|medium|high; completion is complete|hold.",
+            "A refusal is reactive only and must select both the current user_message motivation and a supplied stable boundary motivation.",
+            "Use only supplied motivation IDs. Silence is valid. Do not write the message Doc will see.",
+            "objective and reason are short intent metadata, not prose to echo and not a copy of the user message.",
+          ].join(" "),
+        },
+        {
+          role: "user",
+          content: JSON.stringify({ trigger, base, candidates }),
+        },
+      ],
       {
-        role: "system",
-        content: [
-          "You are Ashley's Thought layer, not her Expression layer.",
-          "Choose whether and how to act from the supplied grounded motivations.",
-          "Return strict JSON only: {kind,shouldSpeak,effort,completion,uncertainty,urgency,objective,reason,motivationIds}.",
-          "kind is speak|silence|delay|ask|revisit|share|challenge|refuse; effort is low|medium|high; completion is complete|hold.",
-          "A refusal is reactive only and must select both the current user_message motivation and a supplied stable boundary motivation.",
-          "Use only supplied motivation IDs. Silence is valid. Do not write the message Doc will see.",
-        ].join(" "),
+        maxTokens: 450,
+        temperature: 0.15,
+        reasoningEffort: "medium",
+        lane: "interactive",
+        purpose: "thought",
+        deadlineAtMs: thoughtDeadline,
+        decisionId: options.decisionId,
+        deliveryReservationId: options.deliveryReservationId,
+        ownerId: options.ownerId,
+        attentionDb: options.attentionDb,
       },
-      {
-        role: "user",
-        content: JSON.stringify({ trigger, base, candidates }),
-      },
-    ], {
-      maxTokens: 450,
-      temperature: 0.15,
-      reasoningEffort: "medium",
-      lane: trigger === "reactive" ? "interactive" : "background",
-    });
+    );
   } catch (error) {
     return {
       ...base,
       thoughtSource: "fallback",
       thoughtError: sanitizedErrorCode(error),
+    };
+  }
+  if (thoughtDeadline != null && Date.now() >= thoughtDeadline) {
+    return {
+      ...base,
+      thoughtSource: "fallback",
+      thoughtError: "AbortError",
     };
   }
   const proposal = parseObject(response.text);
@@ -193,14 +247,35 @@ export async function deliberateDecision(
       .filter((item) => item.id !== undefined && motivationIds.includes(item.id))
       .map((item) => item.score),
   );
+  const objective = String(proposal.objective ?? base.objective ?? "")
+    .trim()
+    .slice(0, 500);
+  const reason = String(proposal.reason ?? base.reason).trim().slice(0, 1000);
+  const coercion = probeDecisionCoercion({ objective, reason });
+  if (coercion.blocked) {
+    return {
+      ...base,
+      kind: "refuse",
+      reason: "Coercion gate blocked instrumental pressure.",
+      objective: "refuse instrumental leverage",
+      silenceReasonCode: "coercion_blocked",
+      thoughtSource: "deterministic",
+      thoughtError: "coercion_blocked",
+      cognitiveAllocation: {
+        shouldSpeak: false,
+        effort: "low",
+        completion: "complete",
+      },
+    };
+  }
   return {
     ...base,
     kind,
     motivationIds,
     score: selectedScore,
     evidenceRefs,
-    objective: String(proposal.objective ?? base.objective ?? "").trim().slice(0, 500),
-    reason: String(proposal.reason ?? base.reason).trim().slice(0, 1000),
+    objective,
+    reason,
     uncertainty: Math.max(0, Math.min(1, Number(proposal.uncertainty) || 0)),
     urgency: Math.max(0, Math.min(1, Number(proposal.urgency) || 0)),
     thoughtSource: "model",

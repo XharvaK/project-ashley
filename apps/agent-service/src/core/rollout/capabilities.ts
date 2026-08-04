@@ -4,6 +4,15 @@ import type { DatabaseSync } from "node:sqlite";
 import { env } from "../../env.js";
 import { REPO_CONFIG_PATH } from "../../paths.js";
 import type { CognitionMode } from "../types.js";
+import {
+  DECLARED_CONTRACT_ID,
+  MODEL_SENSITIVE_SET_FOR_CONTRACT,
+} from "../attention/contract-material.js";
+import {
+  contractMismatch,
+  ensureBootstrapContract,
+} from "../attention/ledger.js";
+import { currentModelEpoch } from "../attention/continuity.js";
 
 export const capabilityNames = [
   "recall",
@@ -13,10 +22,19 @@ export const capabilityNames = [
   "learning",
   "refusal",
   "relational_initiative",
+  "relationship_state",
   "reading",
   "curiosity_consolidation",
   "source_discovery",
   "own_time_report",
+  "vision",
+  "attachment_text",
+  "conversational_read",
+  "web_search",
+  "external_observe",
+  "external_prepare",
+  "external_private",
+  "external_public",
 ] as const;
 
 export type CapabilityName = typeof capabilityNames[number];
@@ -35,15 +53,29 @@ const dependencies: Record<CapabilityName, CapabilityName[]> = {
   learning: ["recall"],
   refusal: ["thought"],
   relational_initiative: ["mind_state", "thought"],
+  relationship_state: ["mind_state", "thought"],
   reading: [],
   curiosity_consolidation: ["reading"],
   source_discovery: ["reading"],
   own_time_report: ["thought", "curiosity_consolidation"],
+  vision: ["thought"],
+  attachment_text: ["thought"],
+  conversational_read: ["reading", "thought"],
+  web_search: ["thought"],
+  external_observe: ["thought"],
+  external_prepare: ["external_observe"],
+  external_private: ["external_prepare", "thought"],
+  external_public: ["external_prepare", "thought"],
 };
+
+const modelSensitive = new Set<string>(MODEL_SENSITIVE_SET_FOR_CONTRACT);
 
 export type CapabilityStatus = {
   capability: CapabilityName;
   releaseId: string;
+  contractId: string;
+  buildIdentity: string;
+  modelEpoch: number;
   state: CapabilityState;
   effective: boolean;
   dependencies: CapabilityName[];
@@ -57,6 +89,7 @@ export type CapabilityStatus = {
   rolledBackAt: string | null;
   failureKind: string | null;
   failureReason: string | null;
+  contractMismatch: boolean;
 };
 
 type Row = Record<string, unknown>;
@@ -93,8 +126,18 @@ function readGitRelease(): string {
   }
 }
 
-export function currentReleaseId(): string {
+/** Observability only — never keys capability evidence. */
+export function currentBuildIdentity(): string {
   return env.ashleyReleaseId.trim() || readGitRelease();
+}
+
+/** @deprecated Prefer currentContractId — kept for call-site compatibility. */
+export function currentReleaseId(): string {
+  return currentContractId();
+}
+
+export function currentContractId(): string {
+  return DECLARED_CONTRACT_ID;
 }
 
 function ensureRelease(
@@ -102,11 +145,19 @@ function ensureRelease(
   capability: CapabilityName,
   releaseId: string,
 ): void {
+  ensureBootstrapContract(db);
+  const build = currentBuildIdentity();
   db.prepare(
     `INSERT OR IGNORE INTO capability_releases
-       (capability, release_id, state, updated_at)
-     VALUES (?, ?, 'observe', ?)`,
-  ).run(capability, releaseId, new Date().toISOString());
+       (capability, release_id, state, updated_at, contract_id, build_identity, model_epoch)
+     VALUES (?, ?, 'observe', ?, ?, ?, 0)`,
+  ).run(
+    capability,
+    releaseId,
+    new Date().toISOString(),
+    currentContractId(),
+    build,
+  );
 }
 
 function releaseState(
@@ -146,14 +197,24 @@ function eventWindow(
   releaseId: string,
   kind: CapabilityEventKind,
   cutoff?: string,
+  modelEpoch?: number | null,
 ): { count: number; first: string | null; last: string | null } {
   const value = db.prepare(
     `SELECT COUNT(*) AS count, MIN(occurred_at) AS first,
             MAX(occurred_at) AS last
      FROM capability_events
      WHERE capability = ? AND release_id = ? AND kind = ?
-       AND (? IS NULL OR occurred_at >= ?)`,
-  ).get(capability, releaseId, kind, cutoff ?? null, cutoff ?? null);
+       AND (? IS NULL OR occurred_at >= ?)
+       AND (? IS NULL OR model_epoch = ?)`,
+  ).get(
+    capability,
+    releaseId,
+    kind,
+    cutoff ?? null,
+    cutoff ?? null,
+    modelEpoch ?? null,
+    modelEpoch ?? null,
+  );
   return isRow(value)
     ? {
         count: Number(value.count ?? 0),
@@ -175,7 +236,9 @@ export function refreshCapabilityPromotions(
   db: DatabaseSync,
   releaseId = currentReleaseId(),
 ): number {
+  if (contractMismatch(db)) return 0;
   for (const capability of capabilityNames) ensureRelease(db, capability, releaseId);
+  const epoch = currentModelEpoch(db, env.mistralModel);
   let promoted = 0;
   let changed = true;
   while (changed) {
@@ -183,7 +246,7 @@ export function refreshCapabilityPromotions(
     for (const capability of capabilityNames) {
       if (releaseState(db, capability, releaseId) !== "observe") continue;
       const release = db.prepare(
-        `SELECT eval_seed_count, qualified_at FROM capability_releases
+        `SELECT eval_seed_count, qualified_at, model_epoch FROM capability_releases
          WHERE capability = ? AND release_id = ?`,
       ).get(capability, releaseId);
       if (
@@ -193,7 +256,22 @@ export function refreshCapabilityPromotions(
       ) {
         continue;
       }
-      const live = eventWindow(db, capability, releaseId, "live_shadow");
+      const epochFilter = modelSensitive.has(capability) ? epoch : null;
+      if (
+        modelSensitive.has(capability) &&
+        epoch > 0 &&
+        Number(release.model_epoch ?? 0) !== epoch
+      ) {
+        continue;
+      }
+      const live = eventWindow(
+        db,
+        capability,
+        releaseId,
+        "live_shadow",
+        undefined,
+        epochFilter,
+      );
       if (
         live.count < 25 ||
         liveSpanDays(live) < 7 ||
@@ -205,9 +283,15 @@ export function refreshCapabilityPromotions(
       const result = db.prepare(
         `UPDATE capability_releases
          SET state = 'active', promoted_at = ?, failure_kind = NULL,
-             failure_reason = NULL, updated_at = ?
+             failure_reason = NULL, updated_at = ?, model_epoch = ?
          WHERE capability = ? AND release_id = ? AND state = 'observe'`,
-      ).run(now, now, capability, releaseId);
+      ).run(
+        now,
+        now,
+        modelSensitive.has(capability) ? epoch : 0,
+        capability,
+        releaseId,
+      );
       if (result.changes > 0) {
         promoted += 1;
         changed = true;
@@ -232,8 +316,9 @@ function recordEvent(
   const detail = JSON.stringify(input.detail ?? {}).slice(0, 4000);
   const result = db.prepare(
     `INSERT OR IGNORE INTO capability_events
-       (capability, release_id, kind, source_key, detail_json, occurred_at)
-     VALUES (?, ?, ?, ?, ?, ?)`,
+       (capability, release_id, kind, source_key, detail_json, occurred_at,
+        contract_id, build_identity, model_epoch)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     input.capability,
     input.releaseId,
@@ -241,6 +326,11 @@ function recordEvent(
     input.sourceKey.slice(0, 300),
     detail,
     input.occurredAt ?? new Date().toISOString(),
+    currentContractId(),
+    currentBuildIdentity(),
+    modelSensitive.has(input.capability)
+      ? currentModelEpoch(db, env.mistralModel)
+      : 0,
   );
   return result.changes > 0;
 }
@@ -268,12 +358,15 @@ export function recordIsolatedEvaluation(
   });
   if (input.passed && seeds >= 3) {
     const now = input.occurredAt ?? new Date().toISOString();
+    const epoch = modelSensitive.has(capability)
+      ? currentModelEpoch(db, env.mistralModel)
+      : 0;
     db.prepare(
       `UPDATE capability_releases
        SET eval_seed_count = MAX(eval_seed_count, ?), qualified_at = ?,
-           updated_at = ?
+           model_epoch = ?, updated_at = ?
        WHERE capability = ? AND release_id = ? AND state = 'observe'`,
-    ).run(seeds, now, now, capability, releaseId);
+    ).run(seeds, now, epoch, now, capability, releaseId);
   }
   refreshCapabilityPromotions(db, releaseId);
 }
@@ -374,18 +467,29 @@ export function listCapabilityStatuses(
   releaseId = currentReleaseId(),
   now = new Date(),
 ): CapabilityStatus[] {
-  refreshCapabilityPromotions(db, releaseId);
+  const mismatch = contractMismatch(db);
+  if (!mismatch) refreshCapabilityPromotions(db, releaseId);
   const cutoff = new Date(now.getTime() - 7 * 86_400_000).toISOString();
+  const epoch = currentModelEpoch(db, env.mistralModel);
+  const build = currentBuildIdentity();
   return capabilityNames.map((capability) => {
     ensureRelease(db, capability, releaseId);
     const release = db.prepare(
       `SELECT state, eval_seed_count, qualified_at, promoted_at,
-              rolled_back_at, failure_kind, failure_reason
+              rolled_back_at, failure_kind, failure_reason, model_epoch
        FROM capability_releases
        WHERE capability = ? AND release_id = ?`,
     ).get(capability, releaseId);
     const state = releaseState(db, capability, releaseId);
-    const live = eventWindow(db, capability, releaseId, "live_shadow");
+    const epochFilter = modelSensitive.has(capability) ? epoch : null;
+    const live = eventWindow(
+      db,
+      capability,
+      releaseId,
+      "live_shadow",
+      undefined,
+      epochFilter,
+    );
     const breaches = eventWindow(
       db,
       capability,
@@ -397,8 +501,15 @@ export function listCapabilityStatuses(
     return {
       capability,
       releaseId,
+      contractId: currentContractId(),
+      buildIdentity: build,
+      modelEpoch: isRow(release) ? Number(release.model_epoch ?? 0) : 0,
       state,
-      effective: masterMode === "apply" && state === "active" && ready,
+      effective:
+        !mismatch &&
+        masterMode === "apply" &&
+        state === "active" &&
+        ready,
       dependencies: dependencies[capability],
       dependenciesReady: ready,
       evalSeedCount: isRow(release) ? Number(release.eval_seed_count ?? 0) : 0,
@@ -420,6 +531,7 @@ export function listCapabilityStatuses(
       failureReason: isRow(release) && typeof release.failure_reason === "string"
         ? release.failure_reason
         : null,
+      contractMismatch: mismatch,
     };
   });
 }
@@ -430,6 +542,7 @@ export function capabilityCanInfluence(
   masterMode: CognitionMode = env.cognitionMode,
   releaseId = currentReleaseId(),
 ): boolean {
+  if (contractMismatch(db)) return false;
   if (masterMode !== "apply") return false;
   refreshCapabilityPromotions(db, releaseId);
   return releaseState(db, capability, releaseId) === "active" &&

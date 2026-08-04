@@ -1,12 +1,8 @@
-import {
-  SlashCommandBuilder,
-  REST,
-  Routes,
-  type RESTPostAPIChatInputApplicationCommandsJSONBody,
-} from "discord.js";
+import { REST, Routes } from "discord.js";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { buildCommandDefinitions } from "../src/commands/definitions.js";
 
 const ENV_PATH = join(homedir(), ".composer-assistant", ".env");
 if (existsSync(ENV_PATH)) {
@@ -29,70 +25,7 @@ if (!token) {
   process.exit(1);
 }
 
-const commands: RESTPostAPIChatInputApplicationCommandsJSONBody[] = [
-  new SlashCommandBuilder()
-    .setName("remember")
-    .setDescription("Pin something to long-term memory")
-    .addStringOption((o) =>
-      o.setName("text").setDescription("What to remember").setRequired(true),
-    )
-    .addBooleanOption((o) =>
-      o.setName("private").setDescription("Store privately"),
-    )
-    .toJSON(),
-  new SlashCommandBuilder()
-    .setName("memory")
-    .setDescription("Show what I remember")
-    .addBooleanOption((o) =>
-      o.setName("private").setDescription("Include private facts"),
-    )
-    .toJSON(),
-  new SlashCommandBuilder()
-    .setName("new")
-    .setDescription("Start a fresh conversation thread")
-    .toJSON(),
-  new SlashCommandBuilder()
-    .setName("forget")
-    .setDescription("Forget memories matching a topic")
-    .addStringOption((o) =>
-      o.setName("topic").setDescription("Topic to forget").setRequired(true),
-    )
-    .toJSON(),
-  new SlashCommandBuilder()
-    .setName("proactive")
-    .setDescription("Proactive outreach status and controls")
-    .addStringOption((o) =>
-      o
-        .setName("action")
-        .setDescription("What to do")
-        .setRequired(true)
-        .addChoices(
-          { name: "status", value: "status" },
-          { name: "pause", value: "pause" },
-          { name: "resume", value: "resume" },
-        ),
-    )
-    .toJSON(),
-  new SlashCommandBuilder()
-    .setName("identity")
-    .setDescription("Review foundational identity proposals")
-    .addStringOption((o) =>
-      o.setName("action").setDescription("What to do").setRequired(true)
-        .addChoices(
-          { name: "review", value: "review" },
-          { name: "approve", value: "approve" },
-          { name: "reject", value: "reject" },
-          { name: "defer", value: "defer" },
-        ),
-    )
-    .addIntegerOption((o) =>
-      o.setName("review-id").setDescription("Review ID (required for a decision)").setMinValue(1),
-    )
-    .addStringOption((o) =>
-      o.setName("rationale").setDescription("Optional reason for the decision").setMaxLength(1000),
-    )
-    .toJSON(),
-];
+const commands = buildCommandDefinitions();
 
 async function main(): Promise<void> {
   const rest = new REST({ version: "10" }).setToken(token);

@@ -2,27 +2,35 @@ import type { Message } from "discord.js";
 import {
   chatText,
   checkHealth,
+  finalizeDelivery,
   lookupPreflight,
   pauseProactiveRemote,
+  pollDeliveryUntilReady,
+  receiptDeliveryAuxiliary,
+  receiptDeliveryBubble,
   resumeProactiveRemote,
+  type ChatTextResult,
 } from "../agent-client.js";
 import { channelQueue } from "../chat/channel-queue.js";
 import { MAX_IMAGES, describeIntake, type Intake } from "../chat/attachments.js";
 import { config } from "../config.js";
 import { agentErrorMessage } from "../chat/agent-errors.js";
-import { emptyReplyAction } from "../chat/empty-reply.js";
 import { fumbleLine, lookingLine } from "../chat/fumble-lines.js";
 import { searchGif } from "../chat/gif-search.js";
 import { readKillSwitch } from "../chat/kill-switch.js";
-import { parseMediaMarkers } from "../chat/media-markers.js";
 import { mediaCadence } from "../chat/media-cadence.js";
 import { reactDelayMs, reactPolicy } from "../chat/react-policy.js";
 import { sleepAbortable, tempoTracker } from "../chat/pacing.js";
 import { getDiscordPresence } from "../presence.js";
-import { sendBubbles } from "../chat/send-bubbles.js";
-import { splitMessage } from "../chat/split-message.js";
+import {
+  DeliverySendError,
+  sendBubbles,
+  sendDeliveryErrorNotice,
+} from "../chat/send-bubbles.js";
 import { TurnBuffer } from "../chat/turn-buffer.js";
 import { runTypingLoop } from "../chat/typing-loop.js";
+
+const HARD_FIRST_BUBBLE_MS = 10_000;
 
 const turns = new TurnBuffer<Intake, Message>((channelId) => {
   void drainTurn(channelId);
@@ -34,11 +42,15 @@ async function drainTurn(channelId: string): Promise<void> {
     if (!buffered) return;
     const target = buffered.target;
     const tempoGapMs = tempoTracker.lastGapMs(channelId);
+    const finalFragmentReceivedAtMs = buffered.finalFragmentReceivedAt;
+    const firstBubbleDeadlineAtMs =
+      finalFragmentReceivedAtMs + HARD_FIRST_BUBBLE_MS;
     const turn = {
       text: buffered.fragments.map((f) => f.text).join("\n"),
-      imageUrls: buffered.fragments
-        .flatMap((f) => f.imageUrls)
+      attachments: buffered.fragments
+        .flatMap((f) => f.attachments)
         .slice(0, MAX_IMAGES),
+      inboundDiscordMessageIds: buffered.fragments.map((f) => f.messageId),
     };
 
     let stopTyping: (() => void) | undefined;
@@ -54,30 +66,37 @@ async function drainTurn(channelId: string): Promise<void> {
       const channel = target.channel;
       if (!channel.isSendable()) return;
 
-      // Typing until the first Discord bubble/GIF lands — not through pace or react.
       stopTyping = await runTypingLoop(channel, () => done);
 
       try {
-        // Both start together so the interim bubble costs the answer nothing.
         const looking = lookupPreflight(turn.text);
         const presence = getDiscordPresence();
-        const reply = chatText(
-          turn.text,
-          undefined,
-          turn.imageUrls,
-          presence,
-        );
-        // The real handler is the await below; this only stops Node from calling
-        // an early rejection unhandled while the preflight is still in flight.
-        void reply.catch(() => {});
+        const replyPromise = chatText(turn.text, {
+          attachments: turn.attachments,
+          discordPresence: presence,
+          inboundDiscordMessageIds: turn.inboundDiscordMessageIds,
+          finalFragmentReceivedAtMs,
+          firstBubbleDeadlineAtMs,
+        });
+        void replyPromise.catch(() => {});
 
         if ((await looking) && !signal.aborted) {
-          await channel.send(lookingLine(turn.text)).catch(() => {});
+          const progress = await channel.send(lookingLine(turn.text)).catch(() => null);
+          // Progress is ledgered after we have a reservation id.
+          void progress;
         }
 
-        let result = await reply;
+        let result: ChatTextResult = await replyPromise;
+        if (result.__httpStatus === 202 || result.duplicate) {
+          if (!result.reservationId) {
+            throw new Error("duplicate_without_reservation");
+          }
+          result = await pollDeliveryUntilReady(
+            result.reservationId,
+            firstBubbleDeadlineAtMs,
+          );
+        }
 
-        // Agency chose silence — do not fumble or invent a bubble.
         if (result.silenced || result.decisionKind === "silence") {
           console.log(
             `[discord-bot] agency silence decisionId=${result.decisionId ?? "?"} kind=${result.decisionKind ?? "silence"}`,
@@ -85,63 +104,45 @@ async function drainTurn(channelId: string): Promise<void> {
           return;
         }
 
-        let markers = parseMediaMarkers(result.text);
-        let chunks = splitMessage(markers.text);
-        let react = markers.react;
-
-        let gifUrl: string | null = null;
-        if (markers.gifQuery) {
-          gifUrl = await searchGif(markers.gifQuery, channelId);
+        if (result.decisionKind === "delay" && !(result.plannedBubbles?.length)) {
+          console.log(
+            `[discord-bot] agency delay decisionId=${result.decisionId ?? "?"}; no bubble`,
+          );
+          return;
         }
 
-        // React/GIF markers are addons. React-only = typing then void (Doc sees ghost).
-        // Empty sendable: one silent retry, then fumble bank.
-        // Delay with empty text: treat like empty (retry once) unless silenced above.
-        let emptyAttempt = 0;
-        while (chunks.length === 0 && !gifUrl) {
-          if (result.decisionKind === "delay") {
-            console.log(
-              `[discord-bot] agency delay decisionId=${result.decisionId ?? "?"}; no bubble`,
-            );
-            return;
-          }
+        const reservationId = result.reservationId ?? null;
+        let react = result.media?.react ?? null;
+        let gifUrl: string | null = null;
+        if (result.media?.gifQuery) {
+          gifUrl = await searchGif(result.media.gifQuery, channelId);
+        }
+
+        let bubbles =
+          result.plannedBubbles && result.plannedBubbles.length > 0
+            ? result.plannedBubbles
+            : [];
+
+        if (bubbles.length === 0 && !gifUrl) {
           if (react) {
             console.warn(
-              "[discord-bot] dropping react-only reply; forcing text bubble",
+              "[discord-bot] dropping react-only reply; forcing delivery error notice",
             );
             react = null;
           }
-          if (emptyReplyAction(emptyAttempt) === "retry") {
-            console.warn(
-              `[discord-bot] empty sendable reply (len=${result.text.length}, react=${Boolean(markers.react)}, gif=${Boolean(markers.gifQuery)}); retrying once`,
-            );
-            emptyAttempt += 1;
-            result = await chatText(
-              turn.text,
-              undefined,
-              turn.imageUrls,
-              presence,
-            );
-            if (result.silenced || result.decisionKind === "silence") {
-              console.log(
-                `[discord-bot] agency silence on retry decisionId=${result.decisionId ?? "?"}`,
-              );
-              return;
-            }
-            markers = parseMediaMarkers(result.text);
-            chunks = splitMessage(markers.text);
-            react = markers.react;
-            gifUrl = null;
-            if (markers.gifQuery) {
-              gifUrl = await searchGif(markers.gifQuery, channelId);
-            }
-            continue;
-          }
           console.warn(
-            `[discord-bot] empty sendable after retry (len=${result.text.length}, react=${Boolean(markers.react)}, gif=${Boolean(markers.gifQuery)}); fumbling`,
+            `[discord-bot] empty sendable reply (len=${result.text.length}); delivery error notice (no regen)`,
           );
-          chunks = [fumbleLine(turn.text)];
-          break;
+          const notice = await sendDeliveryErrorNotice(channel);
+          if (reservationId != null) {
+            await receiptDeliveryAuxiliary(reservationId, {
+              kind: "delivery_error",
+              text: notice.content ?? fumbleLine(turn.text),
+              discordMessageId: notice.id,
+            }).catch(() => {});
+            await finalizeDelivery(reservationId, "send_failure").catch(() => {});
+          }
+          return;
         }
 
         if (config.reactPolicyEnabled) {
@@ -149,13 +150,10 @@ async function drainTurn(channelId: string): Promise<void> {
             channelId,
             emoji: react,
             docText: turn.text,
-            herText: markers.text,
+            herText: bubbles.map((b) => b.text).join("\n\n"),
           });
         }
 
-        // One loud addon per turn, shared between react and GIF: whichever the
-        // model wanted, the budget picks at most one and spaces it from any
-        // other media on the same channel.
         const media = mediaCadence.decide({
           channelId,
           wantReact: react,
@@ -164,22 +162,65 @@ async function drainTurn(channelId: string): Promise<void> {
         react = media.react;
         if (!media.gif) gifUrl = null;
 
-        // Orchid-style: no reply-quote theater for normal chat
-        await sendBubbles(
-          channel,
-          chunks,
-          gifUrl,
-          config.paceEnabled ? { tempoGapMs, signal } : null,
-          () => {
-            done = true;
-            stopTyping?.();
-            stopTyping = undefined;
-          },
-        );
+        try {
+          const sendResult = await sendBubbles(
+            channel,
+            bubbles,
+            gifUrl,
+            config.paceEnabled ? { tempoGapMs, signal } : null,
+            () => {
+              done = true;
+              stopTyping?.();
+              stopTyping = undefined;
+            },
+            { reservationId, skipFirstDelay: true },
+          );
+
+          if (reservationId != null) {
+            for (let i = 0; i < sendResult.receiptedOrdinals.length; i++) {
+              const ordinal = sendResult.receiptedOrdinals[i]!;
+              const msg = sendResult.messages[i];
+              if (!msg) continue;
+              await receiptDeliveryBubble(reservationId, ordinal, msg.id);
+            }
+            await finalizeDelivery(reservationId, "complete");
+          }
+        } catch (err) {
+          if (err instanceof DeliverySendError) {
+            if (reservationId != null) {
+              for (let i = 0; i < err.result.receiptedOrdinals.length; i++) {
+                const ordinal = err.result.receiptedOrdinals[i]!;
+                const msg = err.result.messages[i];
+                if (!msg) continue;
+                await receiptDeliveryBubble(reservationId, ordinal, msg.id).catch(
+                  () => {},
+                );
+              }
+              if (!err.result.anySubstantiveContentVisible) {
+                try {
+                  const notice = await sendDeliveryErrorNotice(channel);
+                  await receiptDeliveryAuxiliary(reservationId, {
+                    kind: "delivery_error",
+                    text: notice.content ?? "send failed",
+                    discordMessageId: notice.id,
+                  });
+                } catch {
+                  /* best effort */
+                }
+              }
+              await finalizeDelivery(
+                reservationId,
+                err.result.anySubstantiveContentVisible
+                  ? "send_failure"
+                  : "send_failure",
+              ).catch(() => {});
+            }
+            throw err;
+          }
+          throw err;
+        }
 
         if (react) {
-          // After the bubbles, so it lands like a second thought rather than a
-          // reflex fired before she answered. Typing already stopped at bubble 1.
           await sleepAbortable(reactDelayMs(), signal);
           try {
             await target.react(react);
@@ -194,6 +235,11 @@ async function drainTurn(channelId: string): Promise<void> {
     } catch (err) {
       done = true;
       stopTyping?.();
+      if (err instanceof DeliverySendError && err.result.anySubstantiveContentVisible) {
+        // Partial content already visible — do not add a second agent-error reply.
+        console.error("[discord-bot] partial delivery:", err);
+        return;
+      }
       const code = (err as Error & { code?: string }).code;
       const retryAfterSec = (err as Error & { retryAfterSec?: number })
         .retryAfterSec;
@@ -203,10 +249,6 @@ async function drainTurn(channelId: string): Promise<void> {
   });
 }
 
-/**
- * A one-word brake that survives restarts, because at this volume the moment he
- * wants her to stop is not the moment to look up a slash command.
- */
 async function handleKillSwitch(message: Message): Promise<boolean> {
   const switched = readKillSwitch(message.content);
   if (!switched) return false;
@@ -241,8 +283,6 @@ export async function handleMessage(message: Message): Promise<void> {
   const isFirst = turns.push(channelId, intake, message);
   if (isFirst) {
     tempoTracker.mark(channelId);
-    // Flush prior turn pacing only — never cancel an in-flight generation that
-    // already sent bubbles.
     channelQueue.abort(channelId);
   }
 }

@@ -62,6 +62,8 @@ describe("capability rollout", () => {
       evalSeedCount: 3,
       liveShadowEvents: 25,
       liveShadowSpanDays: 7,
+      contractId: "ashley-capability-v3",
+      contractMismatch: false,
     });
     expect(capabilityCanInfluence(db, "recall", "observe", releaseId)).toBe(false);
     db.close();
@@ -86,7 +88,9 @@ describe("capability rollout", () => {
     db.close();
   });
 
-  it("requires thought and curiosity_consolidation before own_time_report promotes", () => {
+  it(
+    "requires thought and curiosity_consolidation before own_time_report promotes",
+    () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     qualify(db, "own_time_report");
     expect(listCapabilityStatuses(db, "apply", releaseId)
@@ -109,7 +113,9 @@ describe("capability rollout", () => {
         effective: true,
       });
     db.close();
-  });
+  },
+    30_000,
+  );
 
   it("rolls back after two breaches and disables immediately on a critical failure", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));

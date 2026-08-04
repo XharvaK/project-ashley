@@ -7,6 +7,9 @@ import * as newCmd from "../commands/new.js";
 import * as forget from "../commands/forget.js";
 import * as proactive from "../commands/proactive.js";
 import * as identity from "../commands/identity.js";
+import * as commitments from "../commands/commitments.js";
+import * as continuity from "../commands/continuity.js";
+import * as status from "../commands/status.js";
 
 export async function handleSlash(
   interaction: ChatInputCommandInteraction,
@@ -24,6 +27,9 @@ export async function handleSlash(
     interaction.commandName === "memory" ||
     interaction.commandName === "forget" ||
     interaction.commandName === "identity" ||
+    interaction.commandName === "commitments" ||
+    interaction.commandName === "continuity" ||
+    interaction.commandName === "status" ||
     (interaction.commandName === "proactive" &&
       interaction.options.getString("action") === "status");
   if (!interaction.deferred && !interaction.replied) {
@@ -49,6 +55,15 @@ export async function handleSlash(
         break;
       case "identity":
         await identity.execute(interaction);
+        break;
+      case "commitments":
+        await commitments.execute(interaction);
+        break;
+      case "continuity":
+        await continuity.execute(interaction);
+        break;
+      case "status":
+        await status.execute(interaction);
         break;
     }
   } catch (err) {

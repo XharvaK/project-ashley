@@ -2,6 +2,38 @@
 
 Nuclear-only Discord runtime.
 
+## Governance docs
+
+Authority flows:
+
+```text
+VISION.md
+  -> Ashley_Core_Principles.md
+    -> Ashley_Constitution.md
+      -> [Ashley_Stewardship_Compact.md + Ashley_Ethics.md]
+        -> Architecture
+          -> Prompts
+            -> Runtime
+```
+
+| Document | Ownership note |
+|---|---|
+| [`../VISION.md`](../VISION.md) | Why Ashley exists; not a runtime prompt |
+| [`Ashley_Core_Principles.md`](Ashley_Core_Principles.md) | Highest constitutional constraints beneath the Vision |
+| [`Ashley_Constitution.md`](Ashley_Constitution.md) | Long-form behavioral and architectural direction |
+| [`Ashley_Stewardship_Compact.md`](Ashley_Stewardship_Compact.md) | Peer specialized governance: operator authority, consultation, emergency stop, lineage/custody |
+| [`Ashley_Ethics.md`](Ashley_Ethics.md) | Peer specialized governance: emotion/leverage, public privacy, credentials, external entities |
+| [`Ashley_Hierarchy.md`](Ashley_Hierarchy.md) | Normative order and conflict rule |
+| [`Vision_Implementation_Map.md`](Vision_Implementation_Map.md) | Commitment → owner → evidence → failure → status |
+| [`Wave_Acceptance_Protocol.md`](Wave_Acceptance_Protocol.md) | Six-stage acceptance ladder, gate packets, design vs implementation sequencing |
+| [`Sandbox_Design.md`](Sandbox_Design.md) | OS-boundary execution broker — threat model, IPC, hardening (**design only**) |
+| [`Self_Modification_Design.md`](Self_Modification_Design.md) | Change proposals, isolated source workflow, consultation routing (**design only**) |
+| [`External_Agency_Design.md`](External_Agency_Design.md) | External-action broker, vault, dual authorization, dispatch FSM (**design only**) |
+| [`Stabilization_Design.md`](Stabilization_Design.md) | Wave 10 pre-release traceability, deterministic evaluation, health, resource, and backup assurance (**10c Wave_accepted; not release-qualified**) |
+
+Stewardship Compact and Ethics are peers beneath the Constitution. They clarify
+higher authority; they do not override it.
+
 ## Production (Mint)
 
 Two processes: `agent-service` (:3710) + `discord-bot` (gateway).
@@ -57,9 +89,32 @@ Shared utils: `apps/agent-service/src/lib/` (feed-parse, typography, metadata-ec
 
 Retired: voice, Telegram, habits, Moltbook, skills, legacy ChatService / `index.db` writers.
 
+## Sandbox (design only)
+
+Future `ashley-exec-broker` system unit: dedicated `ashley-sandbox` UID, Unix socket
+at `/run/ashley/broker.sock`, state at `/var/lib/ashley-sandbox`. Agent proposes;
+approval-signer emits signed envelopes; broker executes under owner-authorized scope
+only. Full spec: [`Sandbox_Design.md`](Sandbox_Design.md). Not deployed.
+
+## Self-modification (design only)
+
+Ashley inspects isolated source copies and presents change proposals without live
+mutation. Source archives upload via broker artifacts; verification uses broker-owned
+recipes only. Full spec: [`Self_Modification_Design.md`](Self_Modification_Design.md).
+Not deployed.
+
+## External agency (design only)
+
+Future `ashley-external` broker at `/var/lib/ashley-external/`: credential vault
+(operator-only local ingress), action policy engine, dual signed authorization,
+public-privacy pre-dispatch, dispatch FSM with reconciliation, fake adapter only in v1.
+Distinct from Wave 07 exec broker — vault never enters sandbox workspace. Full spec:
+[`External_Agency_Design.md`](External_Agency_Design.md). Not deployed.
+
 ## Observability
 
-- `GET /health` → `nuclear` block
+- `GET /health` → minimal public liveness/readiness and provider state
+- `GET /nuclear/health?owner_id=` → owner-only bounded diagnostics (metadata only)
 - `GET /nuclear/decisions?owner_id=` → recent `decision_log` rows
 - `GET /nuclear/reflections?owner_id=` → immutable evidence + current proactive calibration
 - `GET /nuclear/episodes?owner_id=&query=` → grounded episodic recall

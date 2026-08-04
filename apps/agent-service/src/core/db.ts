@@ -1,8 +1,45 @@
 import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { DATA_DIR, CONVERSATIONS_DIR, NUCLEAR_DB_PATH } from "../paths.js";
+import {
+  CONVERSATIONS_DIR,
+  DATA_DIR,
+  MIGRATION_BACKUPS_DIR,
+  NUCLEAR_DB_PATH,
+} from "../paths.js";
+import {
+  ensureAuthoritativeLineage,
+  openContinuityDb,
+  recordContinuityEvent,
+  requireLineageMatch,
+  requireSidecarLineageForNuclearMirror,
+} from "./continuity/db.js";
+import { ensureEntityUuidAndClassification } from "./continuity/nuclear-targetable.js";
+import { registerContinuityFor, getContinuityFor, getContinuityForNuclearPath } from "./continuity/registry.js";
+import {
+  MIGRATION_14_DECISION_LOG_COLUMNS,
+  MIGRATION_14_MOTIVATIONS_KIND,
+  MIGRATION_14_RELATIONSHIP_DDL,
+} from "./relationship/migration-14.js";
+import {
+  MIGRATION_15_ATTENTION_PURPOSE,
+  MIGRATION_15_PERCEPTION_DDL,
+} from "./perception/migration-15.js";
+import {
+  migrateCapabilityContractV1ToV2,
+  migrateCapabilityContractV2ToV3,
+} from "./rollout/contract-migrate.js";
+import {
+  MIGRATION_16_CHANGE_PROPOSAL_DDL,
+} from "./change-proposal/migration-16.js";
+import {
+  MIGRATION_17_EXTERNAL_AGENCY_DDL,
+} from "./external-agency/migration-17.js";
+import { currentBuildIdentity } from "./rollout/capabilities.js";
 
 export { NUCLEAR_DB_PATH };
+
+export const NUCLEAR_SUPPORTED_VERSION = 17;
 
 const SCHEMA = `
 PRAGMA foreign_keys = ON;
@@ -757,6 +794,234 @@ CREATE INDEX IF NOT EXISTS idx_own_time_sessions_owner_ended
   ON own_time_sessions (owner_id, ended_at DESC, id DESC);
 `;
 
+const MIGRATION_11 = `
+CREATE TABLE IF NOT EXISTS delivery_reservations (
+  id                         INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_id                   TEXT NOT NULL,
+  channel                    TEXT NOT NULL,
+  thread_id                  TEXT NOT NULL,
+  user_message_id            INTEGER,
+  decision_id                INTEGER,
+  trigger                    TEXT NOT NULL
+                               CHECK (trigger IN ('reactive', 'proactive')),
+  initiative_reservation_id  INTEGER,
+  state                      TEXT NOT NULL
+                               CHECK (state IN (
+                                 'drafted', 'reserved', 'sending', 'committed',
+                                 'partially_delivered', 'aborted', 'cancelled', 'expired'
+                               )),
+  error_category             TEXT,
+  finalization_reason        TEXT,
+  draft_text                 TEXT,
+  first_bubble_deadline_at   TEXT,
+  first_sent_at              TEXT,
+  generation_lease_expires_at TEXT,
+  delivery_lease_expires_at  TEXT,
+  created_at                 TEXT NOT NULL,
+  finalized_at               TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_delivery_reservations_owner_state
+  ON delivery_reservations (owner_id, state, id DESC);
+CREATE INDEX IF NOT EXISTS idx_delivery_reservations_decision
+  ON delivery_reservations (decision_id);
+CREATE INDEX IF NOT EXISTS idx_delivery_reservations_initiative
+  ON delivery_reservations (initiative_reservation_id);
+
+CREATE TABLE IF NOT EXISTS delivery_inbound_messages (
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  reservation_id      INTEGER NOT NULL REFERENCES delivery_reservations(id) ON DELETE CASCADE,
+  ordinal             INTEGER NOT NULL,
+  owner_id            TEXT NOT NULL,
+  channel             TEXT NOT NULL,
+  discord_message_id  TEXT NOT NULL,
+  UNIQUE (reservation_id, ordinal),
+  UNIQUE (owner_id, channel, discord_message_id)
+);
+CREATE INDEX IF NOT EXISTS idx_delivery_inbound_reservation
+  ON delivery_inbound_messages (reservation_id, ordinal);
+
+CREATE TABLE IF NOT EXISTS delivery_bubbles (
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  reservation_id      INTEGER NOT NULL REFERENCES delivery_reservations(id) ON DELETE CASCADE,
+  ordinal             INTEGER NOT NULL,
+  text                TEXT NOT NULL,
+  discord_message_id  TEXT,
+  sent_at             TEXT,
+  UNIQUE (reservation_id, ordinal)
+);
+CREATE INDEX IF NOT EXISTS idx_delivery_bubbles_reservation
+  ON delivery_bubbles (reservation_id, ordinal);
+
+CREATE TABLE IF NOT EXISTS delivery_auxiliary_messages (
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  reservation_id      INTEGER NOT NULL REFERENCES delivery_reservations(id) ON DELETE CASCADE,
+  kind                TEXT NOT NULL CHECK (kind IN ('progress', 'delivery_error')),
+  text                TEXT NOT NULL,
+  discord_message_id  TEXT,
+  sent_at             TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_delivery_aux_reservation
+  ON delivery_auxiliary_messages (reservation_id, id);
+`;
+
+const MIGRATION_12 = `
+CREATE TABLE IF NOT EXISTS attention_dispatch_counter (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  next_seq INTEGER NOT NULL DEFAULT 1
+);
+INSERT OR IGNORE INTO attention_dispatch_counter (id, next_seq) VALUES (1, 1);
+
+CREATE TABLE IF NOT EXISTS attention_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  lane TEXT NOT NULL CHECK (lane IN (
+    'interactive', 'urgent_grounded', 'exchange_cognition', 'curiosity_maintenance'
+  )),
+  purpose TEXT NOT NULL CHECK (purpose IN (
+    'expression', 'thought', 'thought_observation', 'exchange_cognition',
+    'curiosity_consolidation', 'maintenance'
+  )),
+  model_alias TEXT NOT NULL,
+  resolved_model_id TEXT,
+  model_epoch INTEGER,
+  state TEXT NOT NULL CHECK (state IN ('queued', 'reserved', 'running', 'terminal')),
+  outcome TEXT CHECK (
+    outcome IS NULL OR outcome IN (
+      'completed', 'cancelled', 'timeout', 'rate_limited', 'error', 'aborted'
+    )
+  ),
+  error_class TEXT,
+  queued_at TEXT NOT NULL,
+  eligible_at TEXT NOT NULL,
+  age_origin_at TEXT NOT NULL,
+  deadline_at TEXT,
+  reserved_at TEXT,
+  dispatch_started_at TEXT,
+  ended_at TEXT,
+  dispatch_sequence INTEGER,
+  lease_expires_at TEXT,
+  recovery_class TEXT,
+  folded_at TEXT,
+  estimated_input_tokens INTEGER NOT NULL DEFAULT 0,
+  estimated_output_tokens INTEGER NOT NULL DEFAULT 0,
+  reserved_input_tokens INTEGER NOT NULL DEFAULT 0,
+  reserved_output_tokens INTEGER NOT NULL DEFAULT 0,
+  actual_input_tokens INTEGER,
+  actual_output_tokens INTEGER,
+  budget_retain_until TEXT,
+  delivery_reservation_id INTEGER,
+  decision_id INTEGER,
+  cognitive_job_id INTEGER,
+  owner_id TEXT,
+  created_at TEXT NOT NULL,
+  CHECK (
+    (state IN ('queued', 'reserved', 'running') AND outcome IS NULL)
+    OR (state = 'terminal' AND outcome IS NOT NULL)
+  )
+);
+CREATE INDEX IF NOT EXISTS idx_attention_requests_state_lane
+  ON attention_requests (state, lane, eligible_at);
+CREATE INDEX IF NOT EXISTS idx_attention_requests_dispatch_seq
+  ON attention_requests (dispatch_sequence);
+CREATE INDEX IF NOT EXISTS idx_attention_requests_folded
+  ON attention_requests (folded_at, ended_at);
+CREATE INDEX IF NOT EXISTS idx_attention_requests_budget
+  ON attention_requests (state, reserved_at, budget_retain_until);
+
+CREATE TABLE IF NOT EXISTS attention_daily_usage (
+  day_utc TEXT NOT NULL,
+  model_alias TEXT NOT NULL,
+  resolved_model_id TEXT NOT NULL DEFAULT '',
+  model_epoch INTEGER NOT NULL DEFAULT 0,
+  requests_completed INTEGER NOT NULL DEFAULT 0,
+  requests_cancelled INTEGER NOT NULL DEFAULT 0,
+  requests_timeout INTEGER NOT NULL DEFAULT 0,
+  requests_rate_limited INTEGER NOT NULL DEFAULT 0,
+  requests_error INTEGER NOT NULL DEFAULT 0,
+  requests_aborted INTEGER NOT NULL DEFAULT 0,
+  lane_interactive INTEGER NOT NULL DEFAULT 0,
+  lane_urgent_grounded INTEGER NOT NULL DEFAULT 0,
+  lane_exchange_cognition INTEGER NOT NULL DEFAULT 0,
+  lane_curiosity_maintenance INTEGER NOT NULL DEFAULT 0,
+  actual_input_tokens INTEGER NOT NULL DEFAULT 0,
+  actual_output_tokens INTEGER NOT NULL DEFAULT 0,
+  unknown_reserved_tokens INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (day_utc, model_alias, resolved_model_id, model_epoch)
+);
+
+CREATE TABLE IF NOT EXISTS model_continuity_state (
+  alias TEXT PRIMARY KEY,
+  resolved_model_id TEXT,
+  model_epoch INTEGER NOT NULL DEFAULT 0,
+  last_accepted_dispatch_sequence INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS model_continuity_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  alias TEXT NOT NULL,
+  previous_resolved_id TEXT,
+  new_resolved_id TEXT,
+  previous_epoch INTEGER,
+  new_epoch INTEGER,
+  detected_at TEXT NOT NULL,
+  dispatch_sequence INTEGER NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('baseline', 'resolved_change', 'unresolved_alias')),
+  action TEXT NOT NULL CHECK (action IN ('none', 'demote_model_sensitive_to_observe'))
+);
+CREATE INDEX IF NOT EXISTS idx_model_continuity_events_alias
+  ON model_continuity_events (alias, detected_at DESC);
+
+CREATE TABLE IF NOT EXISTS capability_contracts (
+  contract_id TEXT PRIMARY KEY,
+  version TEXT NOT NULL,
+  spec_hash TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 0 CHECK (active IN (0, 1))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_capability_contracts_one_active
+  ON capability_contracts (active) WHERE active = 1;
+`;
+
+function ensureCapabilityLineageColumns(db: DatabaseSync): void {
+  const releaseCols = new Set(
+    (
+      db.prepare(`PRAGMA table_info(capability_releases)`).all() as Array<{
+        name: string;
+      }>
+    ).map((row) => row.name),
+  );
+  if (!releaseCols.has("contract_id")) {
+    db.exec(`ALTER TABLE capability_releases ADD COLUMN contract_id TEXT`);
+  }
+  if (!releaseCols.has("build_identity")) {
+    db.exec(`ALTER TABLE capability_releases ADD COLUMN build_identity TEXT`);
+  }
+  if (!releaseCols.has("model_epoch")) {
+    db.exec(
+      `ALTER TABLE capability_releases ADD COLUMN model_epoch INTEGER NOT NULL DEFAULT 0`,
+    );
+  }
+  const eventCols = new Set(
+    (
+      db.prepare(`PRAGMA table_info(capability_events)`).all() as Array<{
+        name: string;
+      }>
+    ).map((row) => row.name),
+  );
+  if (!eventCols.has("contract_id")) {
+    db.exec(`ALTER TABLE capability_events ADD COLUMN contract_id TEXT`);
+  }
+  if (!eventCols.has("build_identity")) {
+    db.exec(`ALTER TABLE capability_events ADD COLUMN build_identity TEXT`);
+  }
+  if (!eventCols.has("model_epoch")) {
+    db.exec(
+      `ALTER TABLE capability_events ADD COLUMN model_epoch INTEGER NOT NULL DEFAULT 0`,
+    );
+  }
+}
+
 function userVersion(db: DatabaseSync): number {
   const row: unknown = db.prepare("PRAGMA user_version").get();
   if (typeof row !== "object" || row === null || !("user_version" in row)) {
@@ -766,8 +1031,20 @@ function userVersion(db: DatabaseSync): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
-export function migrate(db: DatabaseSync): void {
+export function migrate(
+  db: DatabaseSync,
+  options: {
+    continuity?: DatabaseSync;
+    skipContinuityRequirement?: boolean;
+  } = {},
+): void {
   db.exec("PRAGMA foreign_keys = ON");
+  const version = userVersion(db);
+  if (version > NUCLEAR_SUPPORTED_VERSION) {
+    throw new Error(
+      `unsupported_nuclear_schema:${version}>${NUCLEAR_SUPPORTED_VERSION}`,
+    );
+  }
   if (userVersion(db) < 1) {
     db.exec("BEGIN IMMEDIATE");
     try {
@@ -878,17 +1155,693 @@ export function migrate(db: DatabaseSync): void {
       throw error;
     }
   }
+  if (userVersion(db) < 11) {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.exec(MIGRATION_11);
+      db.exec("PRAGMA user_version = 11");
+      db.exec("COMMIT");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+  if (userVersion(db) < 12) {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.exec(MIGRATION_12);
+      ensureCapabilityLineageColumns(db);
+      // Remap historical release-keyed rows onto the bootstrap contract without
+      // merging active state upward unsafely or colliding source keys.
+      const now = new Date().toISOString();
+      const contractId = "ashley-capability-v1";
+      const specHash = "pending-bootstrap";
+      db.prepare(
+        `INSERT OR IGNORE INTO capability_contracts
+           (contract_id, version, spec_hash, created_at, active)
+         VALUES (?, '1', ?, ?, 1)`,
+      ).run(contractId, specHash, now);
+
+      const releases = db
+        .prepare(`SELECT capability, release_id, state, eval_seed_count,
+                         qualified_at, promoted_at, rolled_back_at,
+                         failure_kind, failure_reason, updated_at
+                  FROM capability_releases`)
+        .all() as Array<Record<string, unknown>>;
+      for (const row of releases) {
+        const buildId = String(row.release_id);
+        if (buildId === contractId) {
+          db.prepare(
+            `UPDATE capability_releases
+             SET contract_id = ?, build_identity = COALESCE(build_identity, ?)
+             WHERE capability = ? AND release_id = ?`,
+          ).run(contractId, buildId, String(row.capability), buildId);
+          continue;
+        }
+        db.prepare(
+          `INSERT OR IGNORE INTO capability_releases
+             (capability, release_id, state, eval_seed_count, qualified_at,
+              promoted_at, rolled_back_at, failure_kind, failure_reason,
+              updated_at, contract_id, build_identity, model_epoch)
+           VALUES (?, ?, 'observe', 0, NULL, NULL, NULL, NULL, NULL, ?, ?, ?, 0)`,
+        ).run(String(row.capability), contractId, now, contractId, buildId);
+        db.prepare(
+          `UPDATE capability_releases
+           SET contract_id = ?, build_identity = ?
+           WHERE capability = ? AND release_id = ?`,
+        ).run(contractId, buildId, String(row.capability), buildId);
+      }
+
+      const events = db
+        .prepare(
+          `SELECT capability, release_id, kind, source_key, detail_json, occurred_at
+           FROM capability_events`,
+        )
+        .all() as Array<Record<string, unknown>>;
+      for (const event of events) {
+        const buildId = String(event.release_id);
+        const remappedKey =
+          buildId === contractId
+            ? String(event.source_key)
+            : `${buildId}:${String(event.source_key)}`;
+        db.prepare(
+          `INSERT OR IGNORE INTO capability_events
+             (capability, release_id, kind, source_key, detail_json, occurred_at,
+              contract_id, build_identity, model_epoch)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+        ).run(
+          String(event.capability),
+          contractId,
+          String(event.kind),
+          remappedKey,
+          event.detail_json == null ? null : String(event.detail_json),
+          String(event.occurred_at),
+          contractId,
+          buildId,
+        );
+        db.prepare(
+          `UPDATE capability_events
+           SET contract_id = ?, build_identity = ?
+           WHERE capability = ? AND release_id = ? AND kind = ? AND source_key = ?`,
+        ).run(
+          contractId,
+          buildId,
+          String(event.capability),
+          String(event.release_id),
+          String(event.kind),
+          String(event.source_key),
+        );
+      }
+
+      db.exec("PRAGMA user_version = 12");
+      db.exec("COMMIT");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+  if (userVersion(db) < 13) {
+    // Exact order: sidecar bootstrap (caller) → lineage validate/adopt →
+    // snapshot → pending event → nuclear migrate/backfill.
+    const continuity = options.continuity;
+    if (!continuity) {
+      throw new Error("continuity_unavailable");
+    }
+    const priorVersion = userVersion(db);
+    const mirrorTable = db
+      .prepare(
+        `SELECT name FROM sqlite_master WHERE type='table' AND name='lineage_mirror'`,
+      )
+      .get();
+    const mirrorRow = mirrorTable
+      ? (db
+          .prepare(`SELECT lineage_id FROM lineage_mirror WHERE id = 1`)
+          .get() as { lineage_id?: string } | undefined)
+      : undefined;
+    let lineageId: string;
+    if (mirrorRow?.lineage_id) {
+      // Prior attempt left a mirror — never replace; sidecar must match.
+      lineageId = requireSidecarLineageForNuclearMirror(
+        continuity,
+        mirrorRow.lineage_id,
+        {
+          nuclearSchemaVersion: priorVersion,
+          buildIdentity: currentBuildIdentity(),
+        },
+      );
+    } else {
+      // First migration: adopt exactly once (idempotent on retry).
+      lineageId = ensureAuthoritativeLineage(continuity, {
+        nuclearSchemaVersion: priorVersion,
+        buildIdentity: currentBuildIdentity(),
+        adoptIfMissing: true,
+      }).lineageId;
+    }
+    // One consistent pre-migration snapshot per upgrade run — production nuclear path only.
+    const mainFile = nuclearMainFile(db);
+    if (mainFile) {
+      const normalizedMain = mainFile.replace(/\\/g, "/").toLowerCase();
+      const normalizedProd = NUCLEAR_DB_PATH.replace(/\\/g, "/").toLowerCase();
+      if (normalizedMain === normalizedProd) {
+        mkdirSync(MIGRATION_BACKUPS_DIR, { recursive: true });
+        const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+        const snapshotPath = join(
+          MIGRATION_BACKUPS_DIR,
+          `nuclear-v${priorVersion}-pre13-${stamp}.db`,
+        );
+        try {
+          const escaped = snapshotPath.replace(/'/g, "''");
+          db.exec(`VACUUM INTO '${escaped}'`);
+        } catch (error) {
+          throw new Error(
+            `pre_migration_snapshot_failed:${
+              error instanceof Error ? error.message : "vacuum_failed"
+            }`,
+          );
+        }
+        recordContinuityEvent(continuity, {
+          kind: "migration",
+          lineageId,
+          detail: {
+            phase: "snapshot",
+            from: priorVersion,
+            to: 13,
+            path: snapshotPath,
+          },
+        });
+      }
+    }
+    recordContinuityEvent(continuity, {
+      kind: "migration",
+      lineageId,
+      detail: {
+        phase: "pending",
+        from: priorVersion,
+        to: 13,
+      },
+    });
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      ensureEntityUuidAndClassification(db, lineageId);
+      db.exec("PRAGMA user_version = 13");
+      const fk = db.prepare("PRAGMA foreign_key_check").all();
+      if (fk.length > 0) {
+        throw new Error("nuclear_fk_check_failed");
+      }
+      const integrity = db.prepare("PRAGMA quick_check").get() as
+        | { quick_check?: string }
+        | undefined;
+      if (
+        integrity &&
+        typeof integrity.quick_check === "string" &&
+        integrity.quick_check !== "ok"
+      ) {
+        throw new Error(`nuclear_integrity_failed:${integrity.quick_check}`);
+      }
+      db.exec("COMMIT");
+      continuity
+        .prepare(
+          `UPDATE lineage_state SET nuclear_schema_version = 13, updated_at = ? WHERE id = 1`,
+        )
+        .run(new Date().toISOString());
+      recordContinuityEvent(continuity, {
+        kind: "migration",
+        lineageId,
+        detail: { phase: "success", from: priorVersion, to: 13 },
+      });
+    } catch (error) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        /* ignore */
+      }
+      recordContinuityEvent(continuity, {
+        kind: "migration",
+        lineageId,
+        detail: {
+          phase: "failure",
+          from: priorVersion,
+          to: 13,
+          error: error instanceof Error ? error.message : "migration_failed",
+        },
+      });
+      throw error;
+    }
+  }
+  if (userVersion(db) < 14) {
+    const continuity = options.continuity;
+    if (!continuity) {
+      throw new Error("continuity_unavailable");
+    }
+    const priorVersion = userVersion(db);
+    const mirrorRow = db
+      .prepare(`SELECT lineage_id FROM lineage_mirror WHERE id = 1`)
+      .get() as { lineage_id?: string } | undefined;
+    if (!mirrorRow?.lineage_id) {
+      throw new Error("nuclear_lineage_mirror_missing");
+    }
+    const lineageId = requireSidecarLineageForNuclearMirror(
+      continuity,
+      mirrorRow.lineage_id,
+      {
+        nuclearSchemaVersion: priorVersion,
+        buildIdentity: currentBuildIdentity(),
+      },
+    );
+    const mainFile = nuclearMainFile(db);
+    if (mainFile) {
+      const normalizedMain = mainFile.replace(/\\/g, "/").toLowerCase();
+      const normalizedProd = NUCLEAR_DB_PATH.replace(/\\/g, "/").toLowerCase();
+      if (normalizedMain === normalizedProd) {
+        mkdirSync(MIGRATION_BACKUPS_DIR, { recursive: true });
+        const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+        const snapshotPath = join(
+          MIGRATION_BACKUPS_DIR,
+          `nuclear-v${priorVersion}-pre14-${stamp}.db`,
+        );
+        try {
+          const escaped = snapshotPath.replace(/'/g, "''");
+          db.exec(`VACUUM INTO '${escaped}'`);
+        } catch (error) {
+          throw new Error(
+            `pre_migration_snapshot_failed:${
+              error instanceof Error ? error.message : "vacuum_failed"
+            }`,
+          );
+        }
+        recordContinuityEvent(continuity, {
+          kind: "migration",
+          lineageId,
+          detail: {
+            phase: "snapshot",
+            from: priorVersion,
+            to: 14,
+            path: snapshotPath,
+          },
+        });
+      }
+    }
+    recordContinuityEvent(continuity, {
+      kind: "migration",
+      lineageId,
+      detail: { phase: "pending", from: priorVersion, to: 14 },
+    });
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.exec(MIGRATION_14_RELATIONSHIP_DDL);
+      const decisionCols = new Set(
+        (
+          db.prepare(`PRAGMA table_info(decision_log)`).all() as Array<{
+            name: string;
+          }>
+        ).map((row) => row.name),
+      );
+      if (!decisionCols.has("hold_reason_code")) {
+        db.exec(MIGRATION_14_DECISION_LOG_COLUMNS);
+      }
+      db.exec(MIGRATION_14_MOTIVATIONS_KIND);
+      ensureEntityUuidAndClassification(db, lineageId);
+      migrateCapabilityContractV1ToV2(db);
+      db.exec("PRAGMA user_version = 14");
+      const fk = db.prepare("PRAGMA foreign_key_check").all();
+      if (fk.length > 0) throw new Error("nuclear_fk_check_failed");
+      const integrity = db.prepare("PRAGMA quick_check").get() as
+        | { quick_check?: string }
+        | undefined;
+      if (
+        integrity &&
+        typeof integrity.quick_check === "string" &&
+        integrity.quick_check !== "ok"
+      ) {
+        throw new Error(`nuclear_integrity_failed:${integrity.quick_check}`);
+      }
+      db.exec("COMMIT");
+      continuity
+        .prepare(
+          `UPDATE lineage_state SET nuclear_schema_version = 14, updated_at = ? WHERE id = 1`,
+        )
+        .run(new Date().toISOString());
+      recordContinuityEvent(continuity, {
+        kind: "migration",
+        lineageId,
+        detail: { phase: "success", from: priorVersion, to: 14 },
+      });
+    } catch (error) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        /* ignore */
+      }
+      recordContinuityEvent(continuity, {
+        kind: "migration",
+        lineageId,
+        detail: {
+          phase: "failure",
+          from: priorVersion,
+          to: 14,
+          error: error instanceof Error ? error.message : "migration_failed",
+        },
+      });
+      throw error;
+    }
+  }
+  if (userVersion(db) < 15) {
+    const continuity = options.continuity;
+    if (!continuity) {
+      throw new Error("continuity_unavailable");
+    }
+    const priorVersion = userVersion(db);
+    const mirrorRow = db
+      .prepare(`SELECT lineage_id FROM lineage_mirror WHERE id = 1`)
+      .get() as { lineage_id?: string } | undefined;
+    if (!mirrorRow?.lineage_id) {
+      throw new Error("nuclear_lineage_mirror_missing");
+    }
+    const lineageId = requireSidecarLineageForNuclearMirror(
+      continuity,
+      mirrorRow.lineage_id,
+      {
+        nuclearSchemaVersion: priorVersion,
+        buildIdentity: currentBuildIdentity(),
+      },
+    );
+    const mainFile = nuclearMainFile(db);
+    if (mainFile) {
+      const normalizedMain = mainFile.replace(/\\/g, "/").toLowerCase();
+      const normalizedProd = NUCLEAR_DB_PATH.replace(/\\/g, "/").toLowerCase();
+      if (normalizedMain === normalizedProd) {
+        mkdirSync(MIGRATION_BACKUPS_DIR, { recursive: true });
+        const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+        const snapshotPath = join(
+          MIGRATION_BACKUPS_DIR,
+          `nuclear-v${priorVersion}-pre15-${stamp}.db`,
+        );
+        try {
+          const escaped = snapshotPath.replace(/'/g, "''");
+          db.exec(`VACUUM INTO '${escaped}'`);
+        } catch (error) {
+          throw new Error(
+            `pre_migration_snapshot_failed:${
+              error instanceof Error ? error.message : "vacuum_failed"
+            }`,
+          );
+        }
+        recordContinuityEvent(continuity, {
+          kind: "migration",
+          lineageId,
+          detail: {
+            phase: "snapshot",
+            from: priorVersion,
+            to: 15,
+            path: snapshotPath,
+          },
+        });
+      }
+    }
+    recordContinuityEvent(continuity, {
+      kind: "migration",
+      lineageId,
+      detail: { phase: "pending", from: priorVersion, to: 15 },
+    });
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.exec(MIGRATION_15_PERCEPTION_DDL);
+      const attentionCols = db
+        .prepare(`PRAGMA table_info(attention_requests)`)
+        .all() as Array<{ name: string }>;
+      const purposeCol = attentionCols.find((c) => c.name === "purpose");
+      const purposeCheck = purposeCol
+        ? db
+            .prepare(
+              `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'attention_requests'`,
+            )
+            .get() as { sql?: string } | undefined
+        : undefined;
+      if (
+        !purposeCheck?.sql?.includes("attachment_fetch") ||
+        !purposeCheck?.sql?.includes("conversational_read")
+      ) {
+        db.exec(MIGRATION_15_ATTENTION_PURPOSE);
+      }
+      migrateCapabilityContractV2ToV3(db);
+      ensureEntityUuidAndClassification(db, lineageId);
+      db.exec("PRAGMA user_version = 15");
+      const fk = db.prepare("PRAGMA foreign_key_check").all();
+      if (fk.length > 0) throw new Error("nuclear_fk_check_failed");
+      const integrity = db.prepare("PRAGMA quick_check").get() as
+        | { quick_check?: string }
+        | undefined;
+      if (
+        integrity &&
+        typeof integrity.quick_check === "string" &&
+        integrity.quick_check !== "ok"
+      ) {
+        throw new Error(`nuclear_integrity_failed:${integrity.quick_check}`);
+      }
+      db.exec("COMMIT");
+      continuity
+        .prepare(
+          `UPDATE lineage_state SET nuclear_schema_version = 15, updated_at = ? WHERE id = 1`,
+        )
+        .run(new Date().toISOString());
+      recordContinuityEvent(continuity, {
+        kind: "migration",
+        lineageId,
+        detail: { phase: "success", from: priorVersion, to: 15 },
+      });
+    } catch (error) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        /* ignore */
+      }
+      recordContinuityEvent(continuity, {
+        kind: "migration",
+        lineageId,
+        detail: {
+          phase: "failure",
+          from: priorVersion,
+          to: 15,
+          error: error instanceof Error ? error.message : "migration_failed",
+        },
+      });
+      throw error;
+    }
+  }
+  if (userVersion(db) < 16) {
+    const continuity = options.continuity;
+    if (!continuity && !options.skipContinuityRequirement) {
+      throw new Error("continuity_unavailable");
+    }
+    const priorVersion = userVersion(db);
+    const mirrorRow = db
+      .prepare(`SELECT lineage_id FROM lineage_mirror WHERE id = 1`)
+      .get() as { lineage_id?: string } | undefined;
+    const lineageId =
+      mirrorRow?.lineage_id ??
+      (options.skipContinuityRequirement ? "test-lineage" : undefined);
+    if (!lineageId) {
+      throw new Error("nuclear_lineage_mirror_missing");
+    }
+    if (continuity && mirrorRow?.lineage_id) {
+      requireSidecarLineageForNuclearMirror(continuity, mirrorRow.lineage_id, {
+        nuclearSchemaVersion: priorVersion,
+        buildIdentity: currentBuildIdentity(),
+      });
+      recordContinuityEvent(continuity, {
+        kind: "migration",
+        lineageId: mirrorRow.lineage_id,
+        detail: { phase: "pending", from: priorVersion, to: 16 },
+      });
+    }
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.exec(MIGRATION_16_CHANGE_PROPOSAL_DDL);
+      ensureEntityUuidAndClassification(db, lineageId);
+      db.exec("PRAGMA user_version = 16");
+      const fk = db.prepare("PRAGMA foreign_key_check").all();
+      if (fk.length > 0) throw new Error("nuclear_fk_check_failed");
+      db.exec("COMMIT");
+      if (continuity && mirrorRow?.lineage_id) {
+        continuity
+          .prepare(
+            `UPDATE lineage_state SET nuclear_schema_version = 16, updated_at = ? WHERE id = 1`,
+          )
+          .run(new Date().toISOString());
+        recordContinuityEvent(continuity, {
+          kind: "migration",
+          lineageId: mirrorRow.lineage_id,
+          detail: { phase: "success", from: priorVersion, to: 16 },
+        });
+      }
+    } catch (error) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        /* ignore */
+      }
+      if (continuity && mirrorRow?.lineage_id) {
+        recordContinuityEvent(continuity, {
+          kind: "migration",
+          lineageId: mirrorRow.lineage_id,
+          detail: {
+            phase: "failure",
+            from: priorVersion,
+            to: 16,
+            error: error instanceof Error ? error.message : "migration_failed",
+          },
+        });
+      }
+      throw error;
+    }
+  }
+  if (userVersion(db) < 17) {
+    const continuity = options.continuity;
+    if (!continuity && !options.skipContinuityRequirement) {
+      throw new Error("continuity_unavailable");
+    }
+    const priorVersion = userVersion(db);
+    const mirrorRow = db
+      .prepare(`SELECT lineage_id FROM lineage_mirror WHERE id = 1`)
+      .get() as { lineage_id?: string } | undefined;
+    const lineageId =
+      mirrorRow?.lineage_id ??
+      (options.skipContinuityRequirement ? "test-lineage" : undefined);
+    if (!lineageId) {
+      throw new Error("nuclear_lineage_mirror_missing");
+    }
+    if (continuity && mirrorRow?.lineage_id) {
+      requireSidecarLineageForNuclearMirror(continuity, mirrorRow.lineage_id, {
+        nuclearSchemaVersion: priorVersion,
+        buildIdentity: currentBuildIdentity(),
+      });
+      recordContinuityEvent(continuity, {
+        kind: "migration",
+        lineageId: mirrorRow.lineage_id,
+        detail: { phase: "pending", from: priorVersion, to: 17 },
+      });
+    }
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.exec(MIGRATION_17_EXTERNAL_AGENCY_DDL);
+      ensureEntityUuidAndClassification(db, lineageId);
+      const now = new Date().toISOString();
+      const build = currentBuildIdentity();
+      const externalCaps = [
+        "external_observe",
+        "external_prepare",
+        "external_private",
+        "external_public",
+      ];
+      for (const capability of externalCaps) {
+        db.prepare(
+          `INSERT OR IGNORE INTO capability_releases
+             (capability, release_id, state, eval_seed_count, qualified_at,
+              promoted_at, rolled_back_at, failure_kind, failure_reason,
+              updated_at, contract_id, build_identity, model_epoch)
+           VALUES (?, ?, 'observe', 0, NULL, NULL, NULL, NULL, NULL, ?, ?, ?, 0)`,
+        ).run(capability, "ashley-capability-v3", now, "ashley-capability-v3", build);
+      }
+      db.exec("PRAGMA user_version = 17");
+      const fk = db.prepare("PRAGMA foreign_key_check").all();
+      if (fk.length > 0) throw new Error("nuclear_fk_check_failed");
+      db.exec("COMMIT");
+      if (continuity && mirrorRow?.lineage_id) {
+        continuity
+          .prepare(
+            `UPDATE lineage_state SET nuclear_schema_version = 17, updated_at = ? WHERE id = 1`,
+          )
+          .run(new Date().toISOString());
+        recordContinuityEvent(continuity, {
+          kind: "migration",
+          lineageId: mirrorRow.lineage_id,
+          detail: { phase: "success", from: priorVersion, to: 17 },
+        });
+      }
+    } catch (error) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        /* ignore */
+      }
+      if (continuity && mirrorRow?.lineage_id) {
+        recordContinuityEvent(continuity, {
+          kind: "migration",
+          lineageId: mirrorRow.lineage_id,
+          detail: {
+            phase: "failure",
+            from: priorVersion,
+            to: 17,
+            error: error instanceof Error ? error.message : "migration_failed",
+          },
+        });
+      }
+      throw error;
+    }
+  }
+  if (!options.skipContinuityRequirement && userVersion(db) >= 15) {
+    const continuity = options.continuity;
+    if (!continuity) {
+      throw new Error("continuity_unavailable");
+    }
+    const mirrorRow = db
+      .prepare(`SELECT lineage_id FROM lineage_mirror WHERE id = 1`)
+      .get() as { lineage_id?: string } | undefined;
+    if (!mirrorRow?.lineage_id) {
+      throw new Error("nuclear_lineage_mirror_missing");
+    }
+    requireSidecarLineageForNuclearMirror(continuity, mirrorRow.lineage_id, {
+      nuclearSchemaVersion: userVersion(db),
+      buildIdentity: currentBuildIdentity(),
+    });
+  }
 }
 
-export function openNuclearDb(existing?: DatabaseSync): DatabaseSync {
+export type OpenNuclearOptions = {
+  continuity?: DatabaseSync;
+  /** When true, migrate without opening default continuity path (tests). */
+  continuityOptional?: boolean;
+};
+
+function nuclearMainFile(db: DatabaseSync): string | null {
+  const rows = db.prepare("PRAGMA database_list").all() as Array<{
+    name?: string;
+    file?: string;
+  }>;
+  const main = rows.find((row) => row.name === "main");
+  const file = main?.file?.trim() ?? "";
+  return file.length > 0 ? file : null;
+}
+
+export function openNuclearDb(
+  existing?: DatabaseSync,
+  options: OpenNuclearOptions = {},
+): DatabaseSync {
   if (existing) {
-    migrate(existing);
+    const mainFile = nuclearMainFile(existing);
+    const continuity =
+      options.continuity ??
+      getContinuityFor(existing) ??
+      (mainFile ? getContinuityForNuclearPath(mainFile) : undefined) ??
+      (options.continuityOptional
+        ? undefined
+        : openContinuityDb(new DatabaseSync(":memory:")));
+    migrate(existing, {
+      continuity,
+      skipContinuityRequirement: options.continuityOptional && !continuity,
+    });
+    if (continuity) registerContinuityFor(existing, continuity, mainFile);
     return existing;
   }
 
   mkdirSync(DATA_DIR, { recursive: true });
   mkdirSync(CONVERSATIONS_DIR, { recursive: true });
+  const continuity =
+    options.continuity ??
+    getContinuityForNuclearPath(NUCLEAR_DB_PATH) ??
+    (options.continuityOptional ? undefined : openContinuityDb());
   const db = new DatabaseSync(NUCLEAR_DB_PATH);
-  migrate(db);
+  migrate(db, { continuity });
+  if (continuity) registerContinuityFor(db, continuity, NUCLEAR_DB_PATH);
   return db;
 }

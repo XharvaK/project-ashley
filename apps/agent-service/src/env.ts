@@ -110,10 +110,31 @@ export const env = {
   ),
   mistralTokensPerMinute: numericEnv(
     "MISTRAL_TOKENS_PER_MINUTE",
-    100_000,
+    25_000,
     1_000,
     10_000_000,
     true,
+  ),
+  thoughtExpressionGuardMs: numericEnv(
+    "THOUGHT_EXPRESSION_GUARD_MS",
+    4_000,
+    1,
+    9_999,
+    true,
+  ),
+  perceptionDispatchSafetyMs: numericEnv(
+    "PERCEPTION_DISPATCH_SAFETY_MS",
+    300,
+    0,
+    9_999,
+    true,
+  ),
+  repairCoolingHours: numericEnv("ASHLEY_REPAIR_COOLING_HOURS", 24, 1, 168),
+  reminderMissedGraceHours: numericEnv(
+    "ASHLEY_REMINDER_MISSED_GRACE_HOURS",
+    1,
+    0,
+    72,
   ),
   cognitionIdleConsolidationMin: numericEnv(
     "COGNITION_IDLE_CONSOLIDATION_MIN",

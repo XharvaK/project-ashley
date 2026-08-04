@@ -16,7 +16,7 @@
 
     "dev": "tsx watch src/index.ts",
 
-    "test": "vitest run",
+    "test": "vitest run --maxWorkers=1 --minWorkers=1",
 
     "test:watch": "vitest"
 

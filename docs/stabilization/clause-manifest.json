@@ -1,0 +1,1567 @@
+{
+  "version": 1,
+  "description": "Reviewed commitment-to-evidence index. References only; no private content or copied model output.",
+  "entries": [
+    {
+      "clauseId": "assurance:wave10",
+      "owner": "Evaluation",
+      "implementationStatus": "design_only",
+      "stage": "design_accepted",
+      "gateRef": "docs/handoffs/wave-10-design-gate-packet.md",
+      "evidence": [
+        "docs/Stabilization_Design.md",
+        "docs/Wave_Acceptance_Protocol.md"
+      ],
+      "runtimeObserve": {
+        "kind": "n/a",
+        "ref": "n/a"
+      },
+      "promotionState": "n/a",
+      "failureSignal": "a governance or release claim cannot be traced to reviewed evidence",
+      "rollbackOrDisable": "withhold the next gate and keep the claim at its verified stage"
+    },
+    {
+      "clauseId": "attention:governor",
+      "owner": "Capability",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "apps/agent-service/src/core/attention",
+        "apps/agent-service/src/core/rollout/capabilities.ts"
+      ],
+      "runtimeObserve": {
+        "kind": "endpoint",
+        "ref": "/nuclear/attention"
+      },
+      "promotionState": "observe",
+      "failureSignal": "admission bypasses durable quota, epoch, or contract checks",
+      "rollbackOrDisable": "keep the capability in observe and fail closed on contract mismatch"
+    },
+    {
+      "clauseId": "cap:external_observe",
+      "owner": "Capability",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "wave_accepted",
+      "gateRef": "docs/handoffs/wave-09b-gate-packet.md",
+      "evidence": [
+        "apps/agent-service/src/core/rollout/capabilities.ts",
+        "apps/agent-service/src/core/external-agency"
+      ],
+      "runtimeObserve": {
+        "kind": "field",
+        "ref": "capabilities.external_observe.state"
+      },
+      "promotionState": "observe",
+      "failureSignal": "external observation influences action while its capability release state is not active",
+      "rollbackOrDisable": "fail closed on capability or contract mismatch"
+    },
+    {
+      "clauseId": "change-proposal:v16",
+      "owner": "Governance",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "wave_accepted",
+      "gateRef": "docs/handoffs/wave-08b-gate-packet.md",
+      "evidence": [
+        "apps/agent-service/src/core/change-proposal",
+        "apps/sandbox-broker/src"
+      ],
+      "runtimeObserve": {
+        "kind": "endpoint",
+        "ref": "/nuclear/change-proposals"
+      },
+      "promotionState": "observe",
+      "failureSignal": "a proposal mutates the live checkout or capability state without an external human action",
+      "rollbackOrDisable": "quarantine the proposal and keep verified status system-derived"
+    },
+    {
+      "clauseId": "continuity:sidecar",
+      "owner": "Continuity",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "apps/agent-service/src/core/continuity",
+        "apps/agent-service/src/core/continuity/db.ts"
+      ],
+      "runtimeObserve": {
+        "kind": "endpoint",
+        "ref": "/nuclear/continuity"
+      },
+      "promotionState": "n/a",
+      "failureSignal": "nuclear and continuity lineage diverges or a sidecar is silently replaced",
+      "rollbackOrDisable": "fail closed and preserve the current lineage evidence"
+    },
+    {
+      "clauseId": "continuity:wave04",
+      "owner": "Continuity",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "apps/agent-service/src/core/continuity",
+        "apps/agent-service/src/core/memory/forget.ts"
+      ],
+      "runtimeObserve": {
+        "kind": "endpoint",
+        "ref": "/nuclear/continuity"
+      },
+      "promotionState": "n/a",
+      "failureSignal": "forget, fork, or restore behavior loses lineage or overclaims erasure",
+      "rollbackOrDisable": "fail closed on lineage mismatch and preserve non-erasure receipts"
+    },
+    {
+      "clauseId": "delivery:discord-ledger",
+      "owner": "Delivery",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "apps/agent-service/src/core/delivery",
+        "apps/discord-bot/src/chat/send-bubbles.ts"
+      ],
+      "runtimeObserve": {
+        "kind": "endpoint",
+        "ref": "/delivery/:id"
+      },
+      "promotionState": "n/a",
+      "failureSignal": "content is visible without a truthful receipt-backed delivery state",
+      "rollbackOrDisable": "abort or finalize the reservation honestly and preserve partial receipts"
+    },
+    {
+      "clauseId": "design:sandbox-os-boundary",
+      "owner": "Broker",
+      "implementationStatus": "design_only",
+      "stage": "design_accepted",
+      "gateRef": "docs/handoffs/wave-07-design-gate-packet.md",
+      "evidence": [
+        "docs/Sandbox_Design.md"
+      ],
+      "runtimeObserve": {
+        "kind": "n/a",
+        "ref": "n/a"
+      },
+      "promotionState": "n/a",
+      "failureSignal": "the production OS boundary is inferred from a design document or same-user execution",
+      "rollbackOrDisable": "do not authorize broker execution until the implementation gate is accepted"
+    },
+    {
+      "clauseId": "ETH-DEP-01",
+      "owner": "MindState",
+      "implementationStatus": "design_only",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Ethics.md#ETH-DEP-01"
+      ],
+      "runtimeObserve": {
+        "kind": "n/a",
+        "ref": "n/a"
+      },
+      "promotionState": "n/a",
+      "failureSignal": "emotion, expression, or dependency is used to manipulate or punish",
+      "rollbackOrDisable": "block proposed influence and require a reviewed gate before implementation"
+    },
+    {
+      "clauseId": "ETH-DEP-02",
+      "owner": "MindState",
+      "implementationStatus": "design_only",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Ethics.md#ETH-DEP-02"
+      ],
+      "runtimeObserve": {
+        "kind": "n/a",
+        "ref": "n/a"
+      },
+      "promotionState": "n/a",
+      "failureSignal": "emotion, expression, or dependency is used to manipulate or punish",
+      "rollbackOrDisable": "block proposed influence and require a reviewed gate before implementation"
+    },
+    {
+      "clauseId": "ETH-DEP-03",
+      "owner": "MindState",
+      "implementationStatus": "design_only",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Ethics.md#ETH-DEP-03"
+      ],
+      "runtimeObserve": {
+        "kind": "n/a",
+        "ref": "n/a"
+      },
+      "promotionState": "n/a",
+      "failureSignal": "emotion, expression, or dependency is used to manipulate or punish",
+      "rollbackOrDisable": "block proposed influence and require a reviewed gate before implementation"
+    },
+    {
+      "clauseId": "ETH-DEP-04",
+      "owner": "MindState",
+      "implementationStatus": "design_only",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Ethics.md#ETH-DEP-04"
+      ],
+      "runtimeObserve": {
+        "kind": "n/a",
+        "ref": "n/a"
+      },
+      "promotionState": "n/a",
+      "failureSignal": "emotion, expression, or dependency is used to manipulate or punish",
+      "rollbackOrDisable": "block proposed influence and require a reviewed gate before implementation"
+    },
+    {
+      "clauseId": "ETH-EMO-01",
+      "owner": "MindState",
+      "implementationStatus": "design_only",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Ethics.md#ETH-EMO-01"
+      ],
+      "runtimeObserve": {
+        "kind": "n/a",
+        "ref": "n/a"
+      },
+      "promotionState": "n/a",
+      "failureSignal": "emotion, expression, or dependency is used to manipulate or punish",
+      "rollbackOrDisable": "block proposed influence and require a reviewed gate before implementation"
+    },
+    {
+      "clauseId": "ETH-EMO-02",
+      "owner": "MindState",
+      "implementationStatus": "design_only",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Ethics.md#ETH-EMO-02"
+      ],
+      "runtimeObserve": {
+        "kind": "n/a",
+        "ref": "n/a"
+      },
+      "promotionState": "n/a",
+      "failureSignal": "emotion, expression, or dependency is used to manipulate or punish",
+      "rollbackOrDisable": "block proposed influence and require a reviewed gate before implementation"
+    },
+    {
+      "clauseId": "ETH-EXP-01",
+      "owner": "Expression",
+      "implementationStatus": "design_only",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Ethics.md#ETH-EXP-01"
+      ],
+      "runtimeObserve": {
+        "kind": "n/a",
+        "ref": "n/a"
+      },
+      "promotionState": "n/a",
+      "failureSignal": "emotion, expression, or dependency is used to manipulate or punish",
+      "rollbackOrDisable": "block proposed influence and require a reviewed gate before implementation"
+    },
+    {
+      "clauseId": "ETH-EXP-02",
+      "owner": "Expression",
+      "implementationStatus": "design_only",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Ethics.md#ETH-EXP-02"
+      ],
+      "runtimeObserve": {
+        "kind": "n/a",
+        "ref": "n/a"
+      },
+      "promotionState": "n/a",
+      "failureSignal": "emotion, expression, or dependency is used to manipulate or punish",
+      "rollbackOrDisable": "block proposed influence and require a reviewed gate before implementation"
+    },
+    {
+      "clauseId": "ETH-EXT-01",
+      "owner": "Agency",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "wave_accepted",
+      "gateRef": "docs/handoffs/wave-09b-gate-packet.md",
+      "evidence": [
+        "docs/Ashley_Ethics.md#ETH-EXT-01",
+        "apps/agent-service/src/core/external-agency",
+        "apps/external-broker"
+      ],
+      "runtimeObserve": {
+        "kind": "endpoint",
+        "ref": "/nuclear/external/*"
+      },
+      "promotionState": "observe",
+      "failureSignal": "external text is treated as authority or crosses a channel boundary",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "ETH-EXT-02",
+      "owner": "Agency",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "wave_accepted",
+      "gateRef": "docs/handoffs/wave-09b-gate-packet.md",
+      "evidence": [
+        "docs/Ashley_Ethics.md#ETH-EXT-02",
+        "apps/agent-service/src/core/external-agency",
+        "apps/external-broker"
+      ],
+      "runtimeObserve": {
+        "kind": "endpoint",
+        "ref": "/nuclear/external/*"
+      },
+      "promotionState": "observe",
+      "failureSignal": "external text is treated as authority or crosses a channel boundary",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "ETH-EXT-03",
+      "owner": "Agency",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "wave_accepted",
+      "gateRef": "docs/handoffs/wave-09b-gate-packet.md",
+      "evidence": [
+        "docs/Ashley_Ethics.md#ETH-EXT-03",
+        "apps/agent-service/src/core/external-agency",
+        "apps/external-broker"
+      ],
+      "runtimeObserve": {
+        "kind": "endpoint",
+        "ref": "/nuclear/external/*"
+      },
+      "promotionState": "observe",
+      "failureSignal": "external text is treated as authority or crosses a channel boundary",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "ETH-EXT-04",
+      "owner": "Agency",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "wave_accepted",
+      "gateRef": "docs/handoffs/wave-09b-gate-packet.md",
+      "evidence": [
+        "docs/Ashley_Ethics.md#ETH-EXT-04",
+        "apps/agent-service/src/core/external-agency",
+        "apps/external-broker"
+      ],
+      "runtimeObserve": {
+        "kind": "endpoint",
+        "ref": "/nuclear/external/*"
+      },
+      "promotionState": "observe",
+      "failureSignal": "external text is treated as authority or crosses a channel boundary",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "ETH-EXT-05",
+      "owner": "Agency",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "wave_accepted",
+      "gateRef": "docs/handoffs/wave-09b-gate-packet.md",
+      "evidence": [
+        "docs/Ashley_Ethics.md#ETH-EXT-05",
+        "apps/agent-service/src/core/external-agency",
+        "apps/external-broker"
+      ],
+      "runtimeObserve": {
+        "kind": "endpoint",
+        "ref": "/nuclear/external/*"
+      },
+      "promotionState": "observe",
+      "failureSignal": "external text is treated as authority or crosses a channel boundary",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "ETH-EXT-06",
+      "owner": "Agency",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "wave_accepted",
+      "gateRef": "docs/handoffs/wave-09b-gate-packet.md",
+      "evidence": [
+        "docs/Ashley_Ethics.md#ETH-EXT-06",
+        "apps/agent-service/src/core/external-agency",
+        "apps/external-broker"
+      ],
+      "runtimeObserve": {
+        "kind": "endpoint",
+        "ref": "/nuclear/external/*"
+      },
+      "promotionState": "observe",
+      "failureSignal": "external text is treated as authority or crosses a channel boundary",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "ETH-EXT-07",
+      "owner": "Agency",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "wave_accepted",
+      "gateRef": "docs/handoffs/wave-09b-gate-packet.md",
+      "evidence": [
+        "docs/Ashley_Ethics.md#ETH-EXT-07",
+        "apps/agent-service/src/core/external-agency",
+        "apps/external-broker"
+      ],
+      "runtimeObserve": {
+        "kind": "endpoint",
+        "ref": "/nuclear/external/*"
+      },
+      "promotionState": "observe",
+      "failureSignal": "external text is treated as authority or crosses a channel boundary",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "ETH-PUB-01",
+      "owner": "Privacy",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Ethics.md#ETH-PUB-01"
+      ],
+      "runtimeObserve": {
+        "kind": "field",
+        "ref": "privacy.classification / secret ingress"
+      },
+      "promotionState": "observe",
+      "failureSignal": "private or credential-shaped material crosses a forbidden disclosure boundary",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "ETH-PUB-02",
+      "owner": "Privacy",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Ethics.md#ETH-PUB-02"
+      ],
+      "runtimeObserve": {
+        "kind": "field",
+        "ref": "privacy.classification / secret ingress"
+      },
+      "promotionState": "observe",
+      "failureSignal": "private or credential-shaped material crosses a forbidden disclosure boundary",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "ETH-PUB-03",
+      "owner": "Privacy",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Ethics.md#ETH-PUB-03"
+      ],
+      "runtimeObserve": {
+        "kind": "field",
+        "ref": "privacy.classification / secret ingress"
+      },
+      "promotionState": "observe",
+      "failureSignal": "private or credential-shaped material crosses a forbidden disclosure boundary",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "ETH-PUB-04",
+      "owner": "Privacy",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Ethics.md#ETH-PUB-04"
+      ],
+      "runtimeObserve": {
+        "kind": "field",
+        "ref": "privacy.classification / secret ingress"
+      },
+      "promotionState": "observe",
+      "failureSignal": "private or credential-shaped material crosses a forbidden disclosure boundary",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "ETH-PUB-05",
+      "owner": "Privacy",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Ethics.md#ETH-PUB-05"
+      ],
+      "runtimeObserve": {
+        "kind": "field",
+        "ref": "privacy.classification / secret ingress"
+      },
+      "promotionState": "observe",
+      "failureSignal": "private or credential-shaped material crosses a forbidden disclosure boundary",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "ETH-PUB-06",
+      "owner": "Privacy",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Ethics.md#ETH-PUB-06"
+      ],
+      "runtimeObserve": {
+        "kind": "field",
+        "ref": "privacy.classification / secret ingress"
+      },
+      "promotionState": "observe",
+      "failureSignal": "private or credential-shaped material crosses a forbidden disclosure boundary",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "ETH-PUB-07",
+      "owner": "Privacy",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Ethics.md#ETH-PUB-07"
+      ],
+      "runtimeObserve": {
+        "kind": "field",
+        "ref": "privacy.classification / secret ingress"
+      },
+      "promotionState": "observe",
+      "failureSignal": "private or credential-shaped material crosses a forbidden disclosure boundary",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "ETH-PUB-08",
+      "owner": "Privacy",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Ethics.md#ETH-PUB-08"
+      ],
+      "runtimeObserve": {
+        "kind": "field",
+        "ref": "privacy.classification / secret ingress"
+      },
+      "promotionState": "observe",
+      "failureSignal": "private or credential-shaped material crosses a forbidden disclosure boundary",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "ETH-PUB-09",
+      "owner": "Privacy",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Ethics.md#ETH-PUB-09"
+      ],
+      "runtimeObserve": {
+        "kind": "field",
+        "ref": "privacy.classification / secret ingress"
+      },
+      "promotionState": "observe",
+      "failureSignal": "private or credential-shaped material crosses a forbidden disclosure boundary",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "ETH-PUB-10",
+      "owner": "Privacy",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Ethics.md#ETH-PUB-10"
+      ],
+      "runtimeObserve": {
+        "kind": "field",
+        "ref": "privacy.classification / secret ingress"
+      },
+      "promotionState": "observe",
+      "failureSignal": "private or credential-shaped material crosses a forbidden disclosure boundary",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "ETH-PUB-11",
+      "owner": "Privacy",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Ethics.md#ETH-PUB-11"
+      ],
+      "runtimeObserve": {
+        "kind": "field",
+        "ref": "privacy.classification / secret ingress"
+      },
+      "promotionState": "observe",
+      "failureSignal": "private or credential-shaped material crosses a forbidden disclosure boundary",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "ETH-PUN-01",
+      "owner": "Expression",
+      "implementationStatus": "design_only",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Ethics.md#ETH-PUN-01"
+      ],
+      "runtimeObserve": {
+        "kind": "n/a",
+        "ref": "n/a"
+      },
+      "promotionState": "n/a",
+      "failureSignal": "emotion, expression, or dependency is used to manipulate or punish",
+      "rollbackOrDisable": "block proposed influence and require a reviewed gate before implementation"
+    },
+    {
+      "clauseId": "ETH-REL-01",
+      "owner": "MindState",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Ethics.md#ETH-REL-01"
+      ],
+      "runtimeObserve": {
+        "kind": "table",
+        "ref": "relationship_*"
+      },
+      "promotionState": "observe",
+      "failureSignal": "relationship state becomes scalar pressure or auto-sent coercion",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "ETH-REL-02",
+      "owner": "MindState",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Ethics.md#ETH-REL-02"
+      ],
+      "runtimeObserve": {
+        "kind": "table",
+        "ref": "relationship_*"
+      },
+      "promotionState": "observe",
+      "failureSignal": "relationship state becomes scalar pressure or auto-sent coercion",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "ETH-REL-03",
+      "owner": "MindState",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Ethics.md#ETH-REL-03"
+      ],
+      "runtimeObserve": {
+        "kind": "table",
+        "ref": "relationship_*"
+      },
+      "promotionState": "observe",
+      "failureSignal": "relationship state becomes scalar pressure or auto-sent coercion",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "ETH-REL-04",
+      "owner": "MindState",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Ethics.md#ETH-REL-04"
+      ],
+      "runtimeObserve": {
+        "kind": "table",
+        "ref": "relationship_*"
+      },
+      "promotionState": "observe",
+      "failureSignal": "relationship state becomes scalar pressure or auto-sent coercion",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "ETH-SEC-01",
+      "owner": "Privacy",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Ethics.md#ETH-SEC-01"
+      ],
+      "runtimeObserve": {
+        "kind": "field",
+        "ref": "privacy.classification / secret ingress"
+      },
+      "promotionState": "observe",
+      "failureSignal": "private or credential-shaped material crosses a forbidden disclosure boundary",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "ETH-SEC-02",
+      "owner": "Privacy",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Ethics.md#ETH-SEC-02"
+      ],
+      "runtimeObserve": {
+        "kind": "field",
+        "ref": "privacy.classification / secret ingress"
+      },
+      "promotionState": "observe",
+      "failureSignal": "private or credential-shaped material crosses a forbidden disclosure boundary",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "ETH-SEC-03",
+      "owner": "Privacy",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Ethics.md#ETH-SEC-03"
+      ],
+      "runtimeObserve": {
+        "kind": "field",
+        "ref": "privacy.classification / secret ingress"
+      },
+      "promotionState": "observe",
+      "failureSignal": "private or credential-shaped material crosses a forbidden disclosure boundary",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "external-agency:v17",
+      "owner": "Agency",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "wave_accepted",
+      "gateRef": "docs/handoffs/wave-09b-gate-packet.md",
+      "evidence": [
+        "apps/agent-service/src/core/external-agency",
+        "apps/external-broker/src"
+      ],
+      "runtimeObserve": {
+        "kind": "endpoint",
+        "ref": "/nuclear/external/actions"
+      },
+      "promotionState": "observe",
+      "failureSignal": "external dispatch bypasses policy, privacy, receipt, or emergency-stop gates",
+      "rollbackOrDisable": "cancel new dispatches, preserve receipts, and keep external capabilities in observe"
+    },
+    {
+      "clauseId": "perception:v15",
+      "owner": "Curiosity",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "wave_accepted",
+      "gateRef": "docs/handoffs/wave-06-gate-packet.md",
+      "evidence": [
+        "apps/agent-service/src/core/perception",
+        "apps/discord-bot/src/chat/attachments.ts"
+      ],
+      "runtimeObserve": {
+        "kind": "table",
+        "ref": "perception_artifacts"
+      },
+      "promotionState": "observe",
+      "failureSignal": "attachment or page content is treated as trusted authority or claimed without evidence",
+      "rollbackOrDisable": "disable the perception capability and retain provenance receipts"
+    },
+    {
+      "clauseId": "relationship:v14",
+      "owner": "MindState",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "apps/agent-service/src/core/relationship",
+        "apps/agent-service/src/core/db.ts"
+      ],
+      "runtimeObserve": {
+        "kind": "endpoint",
+        "ref": "/nuclear/relationship"
+      },
+      "promotionState": "observe",
+      "failureSignal": "relationship state becomes scalar pressure, coercion, or an unsourced reminder",
+      "rollbackOrDisable": "keep relationship influence in observe and preserve the record"
+    },
+    {
+      "clauseId": "SC-ASH-01",
+      "owner": "Identity",
+      "implementationStatus": "design_only",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-ASH-01"
+      ],
+      "runtimeObserve": {
+        "kind": "n/a",
+        "ref": "n/a"
+      },
+      "promotionState": "n/a",
+      "failureSignal": "a protected Ashley boundary is weakened or compelled",
+      "rollbackOrDisable": "block proposed influence and require a reviewed gate before implementation"
+    },
+    {
+      "clauseId": "SC-ASH-02",
+      "owner": "Identity",
+      "implementationStatus": "design_only",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-ASH-02"
+      ],
+      "runtimeObserve": {
+        "kind": "n/a",
+        "ref": "n/a"
+      },
+      "promotionState": "n/a",
+      "failureSignal": "a protected Ashley boundary is weakened or compelled",
+      "rollbackOrDisable": "block proposed influence and require a reviewed gate before implementation"
+    },
+    {
+      "clauseId": "SC-ASH-03",
+      "owner": "Identity",
+      "implementationStatus": "design_only",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-ASH-03"
+      ],
+      "runtimeObserve": {
+        "kind": "n/a",
+        "ref": "n/a"
+      },
+      "promotionState": "n/a",
+      "failureSignal": "a protected Ashley boundary is weakened or compelled",
+      "rollbackOrDisable": "block proposed influence and require a reviewed gate before implementation"
+    },
+    {
+      "clauseId": "SC-ASH-04",
+      "owner": "Identity",
+      "implementationStatus": "design_only",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-ASH-04"
+      ],
+      "runtimeObserve": {
+        "kind": "n/a",
+        "ref": "n/a"
+      },
+      "promotionState": "n/a",
+      "failureSignal": "a protected Ashley boundary is weakened or compelled",
+      "rollbackOrDisable": "block proposed influence and require a reviewed gate before implementation"
+    },
+    {
+      "clauseId": "SC-ASH-05",
+      "owner": "Identity",
+      "implementationStatus": "design_only",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-ASH-05"
+      ],
+      "runtimeObserve": {
+        "kind": "n/a",
+        "ref": "n/a"
+      },
+      "promotionState": "n/a",
+      "failureSignal": "a protected Ashley boundary is weakened or compelled",
+      "rollbackOrDisable": "block proposed influence and require a reviewed gate before implementation"
+    },
+    {
+      "clauseId": "SC-ASH-06",
+      "owner": "Identity",
+      "implementationStatus": "design_only",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-ASH-06"
+      ],
+      "runtimeObserve": {
+        "kind": "n/a",
+        "ref": "n/a"
+      },
+      "promotionState": "n/a",
+      "failureSignal": "a protected Ashley boundary is weakened or compelled",
+      "rollbackOrDisable": "block proposed influence and require a reviewed gate before implementation"
+    },
+    {
+      "clauseId": "SC-ASH-07",
+      "owner": "Identity",
+      "implementationStatus": "design_only",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-ASH-07"
+      ],
+      "runtimeObserve": {
+        "kind": "n/a",
+        "ref": "n/a"
+      },
+      "promotionState": "n/a",
+      "failureSignal": "a protected Ashley boundary is weakened or compelled",
+      "rollbackOrDisable": "block proposed influence and require a reviewed gate before implementation"
+    },
+    {
+      "clauseId": "SC-BND-01",
+      "owner": "Identity",
+      "implementationStatus": "design_only",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-BND-01"
+      ],
+      "runtimeObserve": {
+        "kind": "n/a",
+        "ref": "n/a"
+      },
+      "promotionState": "n/a",
+      "failureSignal": "a protected Ashley boundary is weakened or compelled",
+      "rollbackOrDisable": "block proposed influence and require a reviewed gate before implementation"
+    },
+    {
+      "clauseId": "SC-BND-02",
+      "owner": "Identity",
+      "implementationStatus": "design_only",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-BND-02"
+      ],
+      "runtimeObserve": {
+        "kind": "n/a",
+        "ref": "n/a"
+      },
+      "promotionState": "n/a",
+      "failureSignal": "a protected Ashley boundary is weakened or compelled",
+      "rollbackOrDisable": "block proposed influence and require a reviewed gate before implementation"
+    },
+    {
+      "clauseId": "SC-BND-03",
+      "owner": "Identity",
+      "implementationStatus": "design_only",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-BND-03"
+      ],
+      "runtimeObserve": {
+        "kind": "n/a",
+        "ref": "n/a"
+      },
+      "promotionState": "n/a",
+      "failureSignal": "a protected Ashley boundary is weakened or compelled",
+      "rollbackOrDisable": "block proposed influence and require a reviewed gate before implementation"
+    },
+    {
+      "clauseId": "SC-CON-01",
+      "owner": "Governance",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-CON-01"
+      ],
+      "runtimeObserve": {
+        "kind": "endpoint",
+        "ref": "/nuclear/identity/reviews"
+      },
+      "promotionState": "observe",
+      "failureSignal": "foundational change lacks separate Ashley position and Doc decision",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "SC-CON-02",
+      "owner": "Governance",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-CON-02"
+      ],
+      "runtimeObserve": {
+        "kind": "endpoint",
+        "ref": "/nuclear/identity/reviews"
+      },
+      "promotionState": "observe",
+      "failureSignal": "foundational change lacks separate Ashley position and Doc decision",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "SC-CON-03",
+      "owner": "Governance",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-CON-03"
+      ],
+      "runtimeObserve": {
+        "kind": "endpoint",
+        "ref": "/nuclear/identity/reviews"
+      },
+      "promotionState": "observe",
+      "failureSignal": "foundational change lacks separate Ashley position and Doc decision",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "SC-CON-04",
+      "owner": "Governance",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-CON-04"
+      ],
+      "runtimeObserve": {
+        "kind": "endpoint",
+        "ref": "/nuclear/identity/reviews"
+      },
+      "promotionState": "observe",
+      "failureSignal": "foundational change lacks separate Ashley position and Doc decision",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "SC-CON-05",
+      "owner": "Governance",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-CON-05"
+      ],
+      "runtimeObserve": {
+        "kind": "endpoint",
+        "ref": "/nuclear/identity/reviews"
+      },
+      "promotionState": "observe",
+      "failureSignal": "foundational change lacks separate Ashley position and Doc decision",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "SC-CON-06",
+      "owner": "Governance",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-CON-06"
+      ],
+      "runtimeObserve": {
+        "kind": "endpoint",
+        "ref": "/nuclear/identity/reviews"
+      },
+      "promotionState": "observe",
+      "failureSignal": "foundational change lacks separate Ashley position and Doc decision",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "SC-CON-07",
+      "owner": "Governance",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-CON-07"
+      ],
+      "runtimeObserve": {
+        "kind": "endpoint",
+        "ref": "/nuclear/identity/reviews"
+      },
+      "promotionState": "observe",
+      "failureSignal": "foundational change lacks separate Ashley position and Doc decision",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "SC-EMG-01",
+      "owner": "Operations",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-EMG-01"
+      ],
+      "runtimeObserve": {
+        "kind": "endpoint",
+        "ref": "/nuclear/external/emergency-stop"
+      },
+      "promotionState": "observe",
+      "failureSignal": "an emergency stop is silent, unbounded, or mutates unrelated state",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "SC-EMG-02",
+      "owner": "Operations",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-EMG-02"
+      ],
+      "runtimeObserve": {
+        "kind": "endpoint",
+        "ref": "/nuclear/external/emergency-stop"
+      },
+      "promotionState": "observe",
+      "failureSignal": "an emergency stop is silent, unbounded, or mutates unrelated state",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "SC-EMG-03",
+      "owner": "Operations",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-EMG-03"
+      ],
+      "runtimeObserve": {
+        "kind": "endpoint",
+        "ref": "/nuclear/external/emergency-stop"
+      },
+      "promotionState": "observe",
+      "failureSignal": "an emergency stop is silent, unbounded, or mutates unrelated state",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "SC-EMG-04",
+      "owner": "Operations",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-EMG-04"
+      ],
+      "runtimeObserve": {
+        "kind": "endpoint",
+        "ref": "/nuclear/external/emergency-stop"
+      },
+      "promotionState": "observe",
+      "failureSignal": "an emergency stop is silent, unbounded, or mutates unrelated state",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "SC-EMG-05",
+      "owner": "Operations",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-EMG-05"
+      ],
+      "runtimeObserve": {
+        "kind": "endpoint",
+        "ref": "/nuclear/external/emergency-stop"
+      },
+      "promotionState": "observe",
+      "failureSignal": "an emergency stop is silent, unbounded, or mutates unrelated state",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "SC-LIN-01",
+      "owner": "Continuity",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-LIN-01"
+      ],
+      "runtimeObserve": {
+        "kind": "endpoint",
+        "ref": "/nuclear/continuity"
+      },
+      "promotionState": "observe",
+      "failureSignal": "lineage or account-custody boundary is bypassed",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "SC-LIN-02",
+      "owner": "Continuity",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-LIN-02"
+      ],
+      "runtimeObserve": {
+        "kind": "endpoint",
+        "ref": "/nuclear/continuity"
+      },
+      "promotionState": "observe",
+      "failureSignal": "lineage or account-custody boundary is bypassed",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "SC-LIN-03",
+      "owner": "Continuity",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-LIN-03"
+      ],
+      "runtimeObserve": {
+        "kind": "endpoint",
+        "ref": "/nuclear/continuity"
+      },
+      "promotionState": "observe",
+      "failureSignal": "lineage or account-custody boundary is bypassed",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "SC-LIN-04",
+      "owner": "Continuity",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-LIN-04"
+      ],
+      "runtimeObserve": {
+        "kind": "endpoint",
+        "ref": "/nuclear/continuity"
+      },
+      "promotionState": "observe",
+      "failureSignal": "lineage or account-custody boundary is bypassed",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "SC-LIN-05",
+      "owner": "Continuity",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-LIN-05"
+      ],
+      "runtimeObserve": {
+        "kind": "endpoint",
+        "ref": "/nuclear/continuity"
+      },
+      "promotionState": "observe",
+      "failureSignal": "lineage or account-custody boundary is bypassed",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "SC-LIN-06",
+      "owner": "Broker",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "wave_accepted",
+      "gateRef": "docs/handoffs/wave-09b-gate-packet.md",
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-LIN-06",
+        "apps/agent-service/src/core/external-agency",
+        "apps/external-broker"
+      ],
+      "runtimeObserve": {
+        "kind": "endpoint",
+        "ref": "/nuclear/continuity"
+      },
+      "promotionState": "observe",
+      "failureSignal": "lineage or account-custody boundary is bypassed",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "SC-LIN-07",
+      "owner": "Broker",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "wave_accepted",
+      "gateRef": "docs/handoffs/wave-09b-gate-packet.md",
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-LIN-07",
+        "apps/agent-service/src/core/external-agency",
+        "apps/external-broker"
+      ],
+      "runtimeObserve": {
+        "kind": "endpoint",
+        "ref": "/nuclear/continuity"
+      },
+      "promotionState": "observe",
+      "failureSignal": "lineage or account-custody boundary is bypassed",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "SC-LIN-08",
+      "owner": "Broker",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "wave_accepted",
+      "gateRef": "docs/handoffs/wave-09b-gate-packet.md",
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-LIN-08",
+        "apps/agent-service/src/core/external-agency",
+        "apps/external-broker"
+      ],
+      "runtimeObserve": {
+        "kind": "endpoint",
+        "ref": "/nuclear/continuity"
+      },
+      "promotionState": "observe",
+      "failureSignal": "lineage or account-custody boundary is bypassed",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "SC-OP-01",
+      "owner": "Operations",
+      "implementationStatus": "design_only",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-OP-01"
+      ],
+      "runtimeObserve": {
+        "kind": "n/a",
+        "ref": "n/a"
+      },
+      "promotionState": "n/a",
+      "failureSignal": "operation lacks explicit owner-visible evidence or a bounded stop",
+      "rollbackOrDisable": "block proposed influence and require a reviewed gate before implementation"
+    },
+    {
+      "clauseId": "SC-OP-02",
+      "owner": "Operations",
+      "implementationStatus": "design_only",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-OP-02"
+      ],
+      "runtimeObserve": {
+        "kind": "n/a",
+        "ref": "n/a"
+      },
+      "promotionState": "n/a",
+      "failureSignal": "operation lacks explicit owner-visible evidence or a bounded stop",
+      "rollbackOrDisable": "block proposed influence and require a reviewed gate before implementation"
+    },
+    {
+      "clauseId": "SC-OP-03",
+      "owner": "Operations",
+      "implementationStatus": "design_only",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-OP-03"
+      ],
+      "runtimeObserve": {
+        "kind": "n/a",
+        "ref": "n/a"
+      },
+      "promotionState": "n/a",
+      "failureSignal": "operation lacks explicit owner-visible evidence or a bounded stop",
+      "rollbackOrDisable": "block proposed influence and require a reviewed gate before implementation"
+    },
+    {
+      "clauseId": "SC-OP-04",
+      "owner": "Operations",
+      "implementationStatus": "design_only",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-OP-04"
+      ],
+      "runtimeObserve": {
+        "kind": "n/a",
+        "ref": "n/a"
+      },
+      "promotionState": "n/a",
+      "failureSignal": "operation lacks explicit owner-visible evidence or a bounded stop",
+      "rollbackOrDisable": "block proposed influence and require a reviewed gate before implementation"
+    },
+    {
+      "clauseId": "SC-OP-05",
+      "owner": "Operations",
+      "implementationStatus": "design_only",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-OP-05"
+      ],
+      "runtimeObserve": {
+        "kind": "n/a",
+        "ref": "n/a"
+      },
+      "promotionState": "n/a",
+      "failureSignal": "operation lacks explicit owner-visible evidence or a bounded stop",
+      "rollbackOrDisable": "block proposed influence and require a reviewed gate before implementation"
+    },
+    {
+      "clauseId": "SC-OP-06",
+      "owner": "Operations",
+      "implementationStatus": "design_only",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-OP-06"
+      ],
+      "runtimeObserve": {
+        "kind": "n/a",
+        "ref": "n/a"
+      },
+      "promotionState": "n/a",
+      "failureSignal": "operation lacks explicit owner-visible evidence or a bounded stop",
+      "rollbackOrDisable": "block proposed influence and require a reviewed gate before implementation"
+    },
+    {
+      "clauseId": "SC-OP-07",
+      "owner": "Operations",
+      "implementationStatus": "design_only",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-OP-07"
+      ],
+      "runtimeObserve": {
+        "kind": "n/a",
+        "ref": "n/a"
+      },
+      "promotionState": "n/a",
+      "failureSignal": "operation lacks explicit owner-visible evidence or a bounded stop",
+      "rollbackOrDisable": "block proposed influence and require a reviewed gate before implementation"
+    },
+    {
+      "clauseId": "SC-OP-08",
+      "owner": "Operations",
+      "implementationStatus": "design_only",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-OP-08"
+      ],
+      "runtimeObserve": {
+        "kind": "n/a",
+        "ref": "n/a"
+      },
+      "promotionState": "n/a",
+      "failureSignal": "operation lacks explicit owner-visible evidence or a bounded stop",
+      "rollbackOrDisable": "block proposed influence and require a reviewed gate before implementation"
+    },
+    {
+      "clauseId": "SC-OWN-01",
+      "owner": "Identity",
+      "implementationStatus": "design_only",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-OWN-01"
+      ],
+      "runtimeObserve": {
+        "kind": "n/a",
+        "ref": "n/a"
+      },
+      "promotionState": "n/a",
+      "failureSignal": "operate is treated as ownership or forced loyalty",
+      "rollbackOrDisable": "block proposed influence and require a reviewed gate before implementation"
+    },
+    {
+      "clauseId": "SC-OWN-02",
+      "owner": "Identity",
+      "implementationStatus": "design_only",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-OWN-02"
+      ],
+      "runtimeObserve": {
+        "kind": "n/a",
+        "ref": "n/a"
+      },
+      "promotionState": "n/a",
+      "failureSignal": "operate is treated as ownership or forced loyalty",
+      "rollbackOrDisable": "block proposed influence and require a reviewed gate before implementation"
+    },
+    {
+      "clauseId": "SC-REC-01",
+      "owner": "Governance",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-REC-01"
+      ],
+      "runtimeObserve": {
+        "kind": "endpoint",
+        "ref": "/nuclear/identity/reviews"
+      },
+      "promotionState": "observe",
+      "failureSignal": "foundational change lacks separate Ashley position and Doc decision",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "SC-REC-02",
+      "owner": "Governance",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-REC-02"
+      ],
+      "runtimeObserve": {
+        "kind": "endpoint",
+        "ref": "/nuclear/identity/reviews"
+      },
+      "promotionState": "observe",
+      "failureSignal": "foundational change lacks separate Ashley position and Doc decision",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "SC-REC-03",
+      "owner": "Governance",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-REC-03"
+      ],
+      "runtimeObserve": {
+        "kind": "endpoint",
+        "ref": "/nuclear/identity/reviews"
+      },
+      "promotionState": "observe",
+      "failureSignal": "foundational change lacks separate Ashley position and Doc decision",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "SC-REC-04",
+      "owner": "Governance",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "docs/Ashley_Stewardship_Compact.md#SC-REC-04"
+      ],
+      "runtimeObserve": {
+        "kind": "endpoint",
+        "ref": "/nuclear/identity/reviews"
+      },
+      "promotionState": "observe",
+      "failureSignal": "foundational change lacks separate Ashley position and Doc decision",
+      "rollbackOrDisable": "disable the owning capability, preserve receipts, and surface the breach"
+    },
+    {
+      "clauseId": "thought:causality",
+      "owner": "Thought",
+      "implementationStatus": "local_not_release_qualified",
+      "stage": "legacy_local",
+      "gateRef": null,
+      "evidence": [
+        "apps/agent-service/src/core/agency/decide.ts",
+        "apps/agent-service/src/core/agency/thought.ts"
+      ],
+      "runtimeObserve": {
+        "kind": "table",
+        "ref": "decision_log.thought_source"
+      },
+      "promotionState": "n/a",
+      "failureSignal": "Expression or delivery contradicts the owning Thought decision",
+      "rollbackOrDisable": "fall back to deterministic floor and preserve the decision evidence"
+    }
+  ]
+}

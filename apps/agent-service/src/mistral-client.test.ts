@@ -1,13 +1,13 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
+import { DatabaseSync } from "node:sqlite";
 import { env } from "./env.js";
 import { completeChat, mapMistralError } from "./mistral-client.js";
-import { limiterStats, resetLimiterForTests } from "./mistral-limiter.js";
+import { openNuclearDb } from "./core/db.js";
 
 const originalApiKey = env.mistralApiKey;
 
 afterEach(() => {
   env.mistralApiKey = originalApiKey;
-  resetLimiterForTests();
   vi.restoreAllMocks();
 });
 
@@ -71,15 +71,15 @@ describe("mapMistralError", () => {
     expect(() => mapMistralError(err)).toThrow(err);
   });
 
-  it("does not acquire a limiter lane when client initialization fails", async () => {
+  it("creates no attention reservation when API key is missing", async () => {
     env.mistralApiKey = "";
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
     await expect(
-      completeChat([{ role: "user", content: "hello" }]),
+      completeChat([{ role: "user", content: "hello" }], { attentionDb: db }),
     ).rejects.toMatchObject({ code: "agent_not_ready" });
-    expect(limiterStats()).toEqual({
-      inFlight: 0,
-      interactiveInFlight: 0,
-      queued: 0,
-    });
+    expect(
+      db.prepare(`SELECT COUNT(*) AS c FROM attention_requests`).get(),
+    ).toEqual({ c: 0 });
+    db.close();
   });
 });

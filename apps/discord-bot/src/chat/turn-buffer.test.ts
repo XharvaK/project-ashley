@@ -18,10 +18,10 @@ describe("TurnBuffer", () => {
     buffer.push("c1", "you around", "m2");
     buffer.flushForTest("c1");
     assert.equal(channel, "c1");
-    assert.deepEqual(buffer.take("c1"), {
-      fragments: ["hey", "you around"],
-      target: "m2",
-    });
+    const taken = buffer.take("c1");
+    assert.deepEqual(taken?.fragments, ["hey", "you around"]);
+    assert.equal(taken?.target, "m2");
+    assert.equal(typeof taken?.finalFragmentReceivedAt, "number");
   });
 
   it("empties on take so the next fragment queues again", () => {

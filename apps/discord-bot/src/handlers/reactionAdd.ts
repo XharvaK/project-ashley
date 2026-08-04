@@ -1,23 +1,29 @@
 import type {
   MessageReaction,
-  User,
   PartialMessageReaction,
-  PartialUser,
 } from "discord.js";
-import { forgetTopic, reportReaction } from "../agent-client.js";
+import {
+  cancelForgetPreview,
+  confirmForgetPreview,
+  resolveForgetPreview,
+  reportReaction,
+} from "../agent-client.js";
 import { noteGifReaction } from "../chat/gif-search.js";
 
+/** In-memory cache only — durable resolve uses sidecar binding. */
 const pendingForget = new Map<
   string,
-  { topic: string; messageId: string }
+  { messageId: string; previewId: string }
 >();
 
 export function registerForgetPending(
   userId: string,
-  topic: string,
+  _topic: string,
   messageId: string,
+  previewId: string | null,
 ): void {
-  pendingForget.set(userId, { topic, messageId });
+  if (!previewId) return;
+  pendingForget.set(userId, { messageId, previewId });
 }
 
 /**
@@ -53,13 +59,20 @@ export async function handleReaction(
     }
   }
 
-  const pending = pendingForget.get(userId);
-  if (!pending) {
-    await reportOwnMessageReaction(reaction);
-    return;
+  let pending = pendingForget.get(userId);
+  // Restart-safe: always prefer durable sidecar resolve by Discord message id.
+  const resolved = await resolveForgetPreview(reaction.message.id);
+  if (resolved.previewId) {
+    pending = {
+      messageId: reaction.message.id,
+      previewId: resolved.previewId,
+    };
+    pendingForget.set(userId, pending);
+  } else if (pending && reaction.message.id !== pending.messageId) {
+    pending = undefined;
   }
 
-  if (reaction.message.id !== pending.messageId) {
+  if (!pending || reaction.message.id !== pending.messageId || !pending.previewId) {
     await reportOwnMessageReaction(reaction);
     return;
   }
@@ -69,6 +82,11 @@ export async function handleReaction(
   pendingForget.delete(userId);
 
   if (emoji === "❌") {
+    try {
+      await cancelForgetPreview(pending.previewId);
+    } catch (err) {
+      console.warn("[discord-bot] forget cancel failed:", err);
+    }
     const ch = reaction.message.channel;
     if (ch.isTextBased() && ch.isSendable()) {
       await ch.send("Forget cancelled.");
@@ -76,10 +94,16 @@ export async function handleReaction(
     return;
   }
 
-  const result = await forgetTopic(pending.topic, true);
+  // Hard invariant: never confirm by topic — preview_id only.
+  const result = await confirmForgetPreview(pending.previewId);
   const ch = reaction.message.channel;
   if (ch.isTextBased() && ch.isSendable()) {
     const receipt = result.receiptId?.slice(0, 8) ?? "unavailable";
-    await ch.send(`Forget complete. Receipt ${receipt}; ${result.deleted} record(s) reconciled.`);
+    const honesty = result.honesty
+      ? ` ${result.honesty.discord} ${result.honesty.mistral} ${result.honesty.oldBackups}`
+      : "";
+    await ch.send(
+      `Forget complete. Receipt ${receipt}; ${result.deleted} record(s) reconciled.${honesty}`,
+    );
   }
 }

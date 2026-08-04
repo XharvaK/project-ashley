@@ -1,5 +1,6 @@
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
+import { assertOutboundAllowed } from "../continuity/process-guards.js";
 
 export const MAX_REDIRECTS = 5;
 export const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
@@ -121,9 +122,12 @@ export async function validatePublicUrl(
   return url;
 }
 
-async function boundedBody(response: Response): Promise<Uint8Array> {
+async function boundedBody(
+  response: Response,
+  maxBytes = MAX_RESPONSE_BYTES,
+): Promise<Uint8Array> {
   const length = Number(response.headers.get("content-length") ?? 0);
-  if (Number.isFinite(length) && length > MAX_RESPONSE_BYTES) throw new Error("response_too_large");
+  if (Number.isFinite(length) && length > maxBytes) throw new Error("response_too_large");
   if (!response.body) return new Uint8Array();
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -132,7 +136,7 @@ async function boundedBody(response: Response): Promise<Uint8Array> {
     const part = await reader.read();
     if (part.done) break;
     total += part.value.byteLength;
-    if (total > MAX_RESPONSE_BYTES) {
+    if (total > maxBytes) {
       await reader.cancel();
       throw new Error("response_too_large");
     }
@@ -158,17 +162,29 @@ function withAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   });
 }
 
-export async function fetchValidatedResource(
+export async function fetchWithLimits(
   input: string,
   options: {
     accept: string;
+    timeoutMs: number;
+    maxBytes: number;
+    signal?: AbortSignal;
     fetcher?: FetchLike;
     resolve?: ResolveHost;
+    outboundPurpose?: string;
+    userAgent?: string;
   },
 ): Promise<{ finalUrl: string; contentType: string; body: Uint8Array }> {
+  assertOutboundAllowed(options.outboundPurpose ?? "curiosity_http");
   const fetcher = options.fetcher ?? fetch;
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), options.timeoutMs);
+  const externalSignal = options.signal;
+  const abortFromExternal = () => controller.abort();
+  if (externalSignal) {
+    if (externalSignal.aborted) controller.abort();
+    else externalSignal.addEventListener("abort", abortFromExternal, { once: true });
+  }
   let current = input;
   try {
     for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects++) {
@@ -178,7 +194,10 @@ export async function fetchValidatedResource(
       );
       const response = await fetcher(url, {
         redirect: "manual",
-        headers: { accept: options.accept, "user-agent": "AshleyCuriosity/1.0" },
+        headers: {
+          accept: options.accept,
+          "user-agent": options.userAgent ?? "AshleyCuriosity/1.0",
+        },
         signal: controller.signal,
       });
       if ([301, 302, 303, 307, 308].includes(response.status)) {
@@ -193,7 +212,7 @@ export async function fetchValidatedResource(
       return {
         finalUrl: url.toString(),
         contentType: response.headers.get("content-type")?.toLowerCase() ?? "",
-        body: await boundedBody(response),
+        body: await boundedBody(response, options.maxBytes),
       };
     }
     throw new Error("too_many_redirects");
@@ -202,5 +221,26 @@ export async function fetchValidatedResource(
     throw error;
   } finally {
     clearTimeout(timeout);
+    if (externalSignal) {
+      externalSignal.removeEventListener("abort", abortFromExternal);
+    }
   }
+}
+
+export async function fetchValidatedResource(
+  input: string,
+  options: {
+    accept: string;
+    fetcher?: FetchLike;
+    resolve?: ResolveHost;
+  },
+): Promise<{ finalUrl: string; contentType: string; body: Uint8Array }> {
+  return fetchWithLimits(input, {
+    accept: options.accept,
+    timeoutMs: FETCH_TIMEOUT_MS,
+    maxBytes: MAX_RESPONSE_BYTES,
+    fetcher: options.fetcher,
+    resolve: options.resolve,
+    outboundPurpose: "curiosity_http",
+  });
 }

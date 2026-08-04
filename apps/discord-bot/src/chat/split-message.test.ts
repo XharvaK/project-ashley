@@ -12,12 +12,8 @@ describe("splitMessage", () => {
     assert.deepEqual(splitMessage("a\n\nb"), ["a", "b"]);
   });
 
-  it("caps at three bubbles", () => {
-    assert.deepEqual(splitMessage("a\n\nb\n\nc\n\nd"), [
-      "a",
-      "b",
-      "c\n\nd",
-    ]);
+  it("does not drop overflow bubbles", () => {
+    assert.deepEqual(splitMessage("a\n\nb\n\nc\n\nd"), ["a", "b", "c", "d"]);
   });
 });
 

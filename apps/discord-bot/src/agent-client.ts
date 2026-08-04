@@ -19,6 +19,7 @@ function isTimeoutAbort(err: unknown): boolean {
 async function agentFetch<T>(
   path: string,
   init?: RequestInit,
+  timeoutMs = 120_000,
 ): Promise<T> {
   let res: Response;
   try {
@@ -28,7 +29,7 @@ async function agentFetch<T>(
         "Content-Type": "application/json",
         ...(init?.headers ?? {}),
       },
-      signal: AbortSignal.timeout(120_000),
+      signal: AbortSignal.timeout(Math.max(1_000, timeoutMs)),
     });
   } catch (err) {
     if (isTimeoutAbort(err)) {
@@ -41,38 +42,191 @@ async function agentFetch<T>(
     throw err;
   }
   const body = (await res.json()) as T & AgentError;
-  if (!res.ok) {
+  if (!res.ok && res.status !== 202) {
     const err = new Error(body.error ?? res.statusText);
-    const e = err as Error & { code?: string; retryAfterSec?: number };
+    const e = err as Error & { code?: string; retryAfterSec?: number; status?: number };
     e.code = body.code;
+    e.status = res.status;
     if (body.retryAfterSec != null) e.retryAfterSec = body.retryAfterSec;
     throw err;
   }
-  return body;
+  return { ...body, __httpStatus: res.status } as T;
 }
+
+export type ChatTextResult = {
+  text: string;
+  threadId: string;
+  model: string;
+  silenced?: boolean;
+  decisionKind?: string;
+  decisionId?: number;
+  reservationId?: number;
+  deliveryState?: string;
+  plannedBubbles?: Array<{ ordinal: number; text: string }>;
+  media?: { react: string | null; gifQuery: string | null };
+  firstBubbleDeadlineAt?: string | null;
+  statusUrl?: string;
+  duplicate?: boolean;
+  __httpStatus?: number;
+};
 
 export async function chatText(
   message: string,
-  threadId?: string,
-  imageUrls?: string[],
-  discordPresence?: DiscordPresencePayload,
+  options?: {
+    threadId?: string;
+    attachments?: Array<{
+      discordAttachmentId: string;
+      declaredMime: string;
+      fileName: string;
+      declaredByteSize?: number;
+      sourceUrl: string;
+    }>;
+    discordPresence?: DiscordPresencePayload;
+    inboundDiscordMessageIds?: string[];
+    finalFragmentReceivedAtMs?: number;
+    firstBubbleDeadlineAtMs?: number;
+  },
 ) {
+  const deadlineMs = options?.firstBubbleDeadlineAtMs;
+  const timeoutMs =
+    deadlineMs != null
+      ? Math.max(1_000, deadlineMs - Date.now() + 500)
+      : 120_000;
+  return agentFetch<ChatTextResult>(
+    "/chat/text",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        message,
+        channel: "discord",
+        userId: config.ownerId,
+        threadId: options?.threadId,
+        attachments: options?.attachments?.length ? options.attachments : undefined,
+        discordPresence: options?.discordPresence,
+        inboundDiscordMessageIds: options?.inboundDiscordMessageIds,
+        finalFragmentReceivedAtMs: options?.finalFragmentReceivedAtMs,
+        firstBubbleDeadlineAtMs: options?.firstBubbleDeadlineAtMs,
+      }),
+    },
+    timeoutMs,
+  );
+}
+
+export async function getDeliveryStatus(reservationId: number) {
+  const q = new URLSearchParams({ owner_id: config.ownerId });
   return agentFetch<{
-    text: string;
-    threadId: string;
-    model: string;
-    silenced?: boolean;
-    decisionKind?: string;
-    decisionId?: number;
-  }>("/chat/text", {
+    reservation: {
+      id: number;
+      state: string;
+      draftText: string | null;
+      firstBubbleDeadlineAt: string | null;
+    };
+    bubbles: Array<{
+      ordinal: number;
+      text: string;
+      discordMessageId: string | null;
+    }>;
+    statusUrl: string;
+  }>(`/delivery/${reservationId}?${q}`);
+}
+
+export async function pollDeliveryUntilReady(
+  reservationId: number,
+  deadlineMs: number,
+): Promise<ChatTextResult> {
+  while (Date.now() < deadlineMs) {
+    const status = await getDeliveryStatus(reservationId);
+    const state = status.reservation.state;
+    if (state === "reserved" || state === "sending" || state === "committed") {
+      return {
+        text: status.reservation.draftText ?? "",
+        threadId: "",
+        model: "none",
+        reservationId,
+        deliveryState: state,
+        plannedBubbles: status.bubbles.map((b) => ({
+          ordinal: b.ordinal,
+          text: b.text,
+        })),
+        firstBubbleDeadlineAt: status.reservation.firstBubbleDeadlineAt,
+        statusUrl: status.statusUrl,
+      };
+    }
+    if (
+      state === "aborted" ||
+      state === "cancelled" ||
+      state === "expired" ||
+      state === "partially_delivered"
+    ) {
+      return {
+        text: "",
+        threadId: "",
+        model: "none",
+        reservationId,
+        deliveryState: state,
+        plannedBubbles: [],
+        statusUrl: status.statusUrl,
+      };
+    }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  const e = new Error("delivery status poll timed out") as Error & {
+    code?: string;
+  };
+  e.code = "agent_timeout";
+  throw e;
+}
+
+export async function receiptDeliveryBubble(
+  reservationId: number,
+  ordinal: number,
+  discordMessageId: string,
+) {
+  return agentFetch<{ ok: boolean }>(`/delivery/${reservationId}/receipt`, {
     method: "POST",
     body: JSON.stringify({
-      message,
-      channel: "discord",
       userId: config.ownerId,
-      threadId,
-      imageUrls: imageUrls?.length ? imageUrls : undefined,
-      discordPresence,
+      ordinal,
+      discordMessageId,
+    }),
+  });
+}
+
+export async function receiptDeliveryAuxiliary(
+  reservationId: number,
+  input: {
+    kind: "progress" | "delivery_error";
+    text: string;
+    discordMessageId: string;
+  },
+) {
+  return agentFetch<{ ok: boolean }>(`/delivery/${reservationId}/auxiliary`, {
+    method: "POST",
+    body: JSON.stringify({
+      userId: config.ownerId,
+      ...input,
+    }),
+  });
+}
+
+export async function finalizeDelivery(
+  reservationId: number,
+  cause:
+    | "complete"
+    | "cancel"
+    | "send_failure"
+    | "first_bubble_deadline"
+    | "delivery_lease" = "complete",
+) {
+  return agentFetch<{
+    state: string;
+    finalizationReason: string;
+    deliveredText: string;
+  }>(`/delivery/${reservationId}/finalize`, {
+    method: "POST",
+    body: JSON.stringify({
+      userId: config.ownerId,
+      cause,
     }),
   });
 }
@@ -213,6 +367,15 @@ export async function forgetTopic(topic: string, confirmed: boolean) {
     preview: string[];
     deleted: number;
     receiptId: string | null;
+    previewId?: string | null;
+    expiresAt?: string | null;
+    categoryCounts?: Record<string, number>;
+    honesty?: {
+      local: string;
+      discord: string;
+      mistral: string;
+      oldBackups: string;
+    };
     counts: {
       messagesRedacted: number;
       episodesForgotten: number;
@@ -228,6 +391,64 @@ export async function forgetTopic(topic: string, confirmed: boolean) {
       userId: config.ownerId,
       topic,
       confirmed,
+    }),
+  });
+}
+
+export async function bindForgetConfirmation(
+  previewId: string,
+  confirmationDiscordMessageId: string,
+) {
+  return agentFetch<{ ok: boolean }>("/memory/forget/bind", {
+    method: "POST",
+    body: JSON.stringify({
+      userId: config.ownerId,
+      previewId,
+      confirmationDiscordMessageId,
+    }),
+  });
+}
+
+export async function resolveForgetPreview(
+  confirmationDiscordMessageId: string,
+) {
+  return agentFetch<{ previewId: string | null }>("/memory/forget/resolve", {
+    method: "POST",
+    body: JSON.stringify({
+      userId: config.ownerId,
+      confirmationDiscordMessageId,
+    }),
+  });
+}
+
+export async function confirmForgetPreview(previewId: string) {
+  return agentFetch<{
+    preview: string[];
+    deleted: number;
+    receiptId: string | null;
+    honesty?: {
+      local: string;
+      discord: string;
+      mistral: string;
+      oldBackups: string;
+    };
+  }>("/memory/forget", {
+    method: "POST",
+    body: JSON.stringify({
+      userId: config.ownerId,
+      previewId,
+      confirmed: true,
+    }),
+  });
+}
+
+export async function cancelForgetPreview(previewId: string) {
+  return agentFetch<{ previewId?: string | null }>("/memory/forget", {
+    method: "POST",
+    body: JSON.stringify({
+      userId: config.ownerId,
+      previewId,
+      cancel: true,
     }),
   });
 }
@@ -257,6 +478,8 @@ export async function tickInitiative() {
         candidateKind?: string;
         materialKey?: string;
         reservationId?: number;
+        deliveryReservationId?: number;
+        plannedBubbles?: Array<{ ordinal: number; text: string }>;
       }
   >("/initiative/tick", {
     method: "POST",
@@ -273,6 +496,9 @@ export async function commitInitiative(body: {
   candidateKind?: string;
   materialKey?: string;
   reservationId?: number;
+  deliveryReservationId?: number;
+  bubbleReceipts?: Array<{ ordinal: number; discordMessageId: string }>;
+  partial?: boolean;
 }) {
   return agentFetch<{ ok: boolean }>("/initiative/commit", {
     method: "POST",
@@ -387,4 +613,48 @@ export async function decideIdentityReview(
       }),
     },
   );
+}
+
+export async function getRelationshipSummary(offset = 0) {
+  return agentFetch<{
+    docReminders: number;
+    selfCommitments: number;
+    mutualActive: number;
+    mutualProposed: number;
+    tensions: number;
+    withdrawals: number;
+    items: Array<{ kind: string; status: string; text: string }>;
+  }>(
+    `/nuclear/relationship?owner_id=${encodeURIComponent(config.ownerId)}&limit=25&offset=${offset}`,
+  );
+}
+
+export async function getContinuitySnapshot() {
+  return agentFetch<{
+    available: boolean;
+    lineageId: string | null;
+    recentEvents: Array<{ kind: string; occurredAt: string; detail: unknown }>;
+  }>(`/nuclear/continuity?owner_id=${encodeURIComponent(config.ownerId)}`);
+}
+
+export async function getNuclearStatus() {
+  return agentFetch<{
+    health: {
+      ok: boolean;
+      schemaVersion: number;
+      cognitionMode: string;
+      reflectionMode: string;
+    };
+    initiative: {
+      enabled: boolean;
+      paused: boolean;
+      sentToday: number;
+      maxPerDay: number;
+    };
+    continuity: {
+      available: boolean;
+      lineageId: string | null;
+    };
+    relationshipState?: { state: string };
+  }>(`/nuclear/status?owner_id=${encodeURIComponent(config.ownerId)}`);
 }

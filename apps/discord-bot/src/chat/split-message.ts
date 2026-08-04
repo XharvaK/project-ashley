@@ -1,5 +1,4 @@
 const DISCORD_LIMIT = 1990;
-const MAX_BUBBLES = 3;
 
 function hardSlice(text: string, limit: number): string[] {
   const out: string[] = [];
@@ -11,17 +10,18 @@ function hardSlice(text: string, limit: number): string[] {
   return out;
 }
 
-/** Split Discord replies on blank lines into up to MAX_BUBBLES messages (no page prefixes). */
+/**
+ * Split Discord replies on blank lines. Never drops overflow — long tails are
+ * hard-sliced to Discord's content limit instead of truncated to a bubble cap.
+ */
 export function splitMessage(text: string): string[] {
   const trimmed = text.trim();
   if (!trimmed) return [];
 
   const paragraphs = trimmed
     .split(/\n\n+/)
-    .map((p) => p.trim())
+    .map((part) => part.trim())
     .filter(Boolean);
-
-  if (paragraphs.length === 0) return [];
 
   const raw: string[] = [];
   for (const para of paragraphs) {
@@ -31,14 +31,5 @@ export function splitMessage(text: string): string[] {
     }
     raw.push(...hardSlice(para, DISCORD_LIMIT));
   }
-
-  if (raw.length <= MAX_BUBBLES) return raw;
-
-  const head = raw.slice(0, MAX_BUBBLES - 1);
-  const rest = raw.slice(MAX_BUBBLES - 1).join("\n\n");
-  if (rest.length <= DISCORD_LIMIT) {
-    return [...head, rest];
-  }
-  const sliced = hardSlice(rest, DISCORD_LIMIT);
-  return [...head, ...sliced].slice(0, MAX_BUBBLES);
+  return raw;
 }

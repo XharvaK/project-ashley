@@ -1,4 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
+import { newEntityUuid } from "../continuity/entity-uuid.js";
+import { defaultUnclassifiedConversational } from "../privacy/classification.js";
 
 export type FactCategory =
   | "project"
@@ -208,25 +210,52 @@ export function upsertFact(
     );
     return existing.id;
   }
-  const result = db
-    .prepare(
-      `INSERT INTO mem_facts
+  const hasUuid = db
+    .prepare(`PRAGMA table_info(mem_facts)`)
+    .all()
+    .some((row) => (row as { name?: string }).name === "entity_uuid");
+  const result = hasUuid
+    ? db
+        .prepare(
+          `INSERT INTO mem_facts
+         (owner_id, category, key, value, confidence, importance,
+          source_message_id, origin, source_quote, superseded_by, created_at,
+          entity_uuid, data_classification)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`,
+        )
+        .run(
+          input.ownerId,
+          input.category,
+          cleanKey,
+          cleanValue,
+          boundedConfidence,
+          boundedImportance,
+          input.sourceMessageId ?? null,
+          input.origin ?? "legacy",
+          input.sourceQuote ?? null,
+          new Date().toISOString(),
+          newEntityUuid(),
+          defaultUnclassifiedConversational(),
+        )
+    : db
+        .prepare(
+          `INSERT INTO mem_facts
          (owner_id, category, key, value, confidence, importance,
           source_message_id, origin, source_quote, superseded_by, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
-    )
-    .run(
-      input.ownerId,
-      input.category,
-      cleanKey,
-      cleanValue,
-      boundedConfidence,
-      boundedImportance,
-      input.sourceMessageId ?? null,
-      input.origin ?? "legacy",
-      input.sourceQuote ?? null,
-      new Date().toISOString(),
-    );
+        )
+        .run(
+          input.ownerId,
+          input.category,
+          cleanKey,
+          cleanValue,
+          boundedConfidence,
+          boundedImportance,
+          input.sourceMessageId ?? null,
+          input.origin ?? "legacy",
+          input.sourceQuote ?? null,
+          new Date().toISOString(),
+        );
   const insertedId = Number(result.lastInsertRowid);
   if (isRow(existing) && typeof existing.id === "number") {
     db.prepare(
