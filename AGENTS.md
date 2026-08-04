@@ -120,3 +120,41 @@ npm test
 npm run phase0:offline
 npm run eval:full -- -Baseline baseline-w0 -Label wave5
 ```
+
+## Cursor Cloud specific instructions
+
+The Cursor Cloud VM is Linux, so the root `package.json` scripts (`npm run dev`,
+`dev:agent`, `dev:discord`, `test`, `phase0:*`, `eval:*`, `start:ashley`) do
+**not** run here — they all shell out to Windows PowerShell (`scripts/*.ps1`).
+On Linux, drive each app directly with its own npm scripts.
+
+- **Node with SQLite FTS5 is mandatory.** The nuclear core (`nuclear.db`, schema
+  v9) creates FTS5 virtual tables during migration, so agent-service tests and
+  the running service need a Node build compiled with SQLite FTS5. The VM's
+  default `node` (`/exec-daemon/node`) is **missing FTS5** — symptom is
+  `Error: no such module: fts5` on ~half the vitest suite or at service boot.
+  Use the nvm-managed Node 22 instead, which has FTS5. Login/interactive shells
+  already prefer it (a line in `~/.bashrc` prepends it). For a non-login shell,
+  run `export PATH="$HOME/.nvm/versions/node/v22.22.2/bin:$PATH"` (or
+  `nvm use 22`) before building/testing/running agent-service. `node --version`
+  should read `v22.22.2`, not `v22.14.0`. discord-bot tests do not touch SQLite
+  and pass under either Node.
+- **Per-app commands** (run from repo root):
+  `apps/agent-service` — build `npm run build --prefix apps/agent-service`,
+  test `npm test --prefix apps/agent-service` (vitest), run
+  `npm run dev --prefix apps/agent-service` (tsx watch, listens on
+  `http://127.0.0.1:3710`). `apps/discord-bot` — build/test/`dev` mirror the
+  same, test is the Node built-in runner. There is no lint tooling in the repo.
+- **Config lives outside the repo.** Both apps read `~/.composer-assistant/.env`
+  (template: `config/env.example`); override the path with `COMPOSER_ENV_FILE`.
+  SQLite DBs auto-create under `~/.composer-assistant/conversations/`.
+- **Offline mode is expected without a Mistral key.** With `MISTRAL_API_KEY`
+  blank the agent boots in `state: offline`: `POST /chat/text` returns 503, but
+  the SQLite nuclear core still works end to end — `GET /health`, `POST
+  /memory/pin`, `GET /memory/summary`, and the `GET /nuclear/*` observability
+  endpoints. Owner-scoped endpoints require the `owner_id`/`userId` to equal
+  `DISCORD_OWNER_ID` (or `MEMORY_OWNER_ID`). To exercise real LLM responses or
+  the live Discord gateway, supply `MISTRAL_API_KEY` and (for discord-bot)
+  `DISCORD_BOT_TOKEN` + `DISCORD_OWNER_ID` as secrets.
+- **`apps/desktop`** (Tauri 2 + Vite) is peripheral to the Discord product and
+  needs a Rust/Tauri toolchain; it is not required for core setup.
