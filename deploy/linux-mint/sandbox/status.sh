@@ -24,3 +24,13 @@ if [[ -d /var/lib/ashley-sandbox ]]; then
 else
   printf '%s\n' '/var/lib/ashley-sandbox: absent'
 fi
+if [[ -f /var/lib/ashley-sandbox/broker.db ]]; then
+  stat -c '%A %U:%G %n' /var/lib/ashley-sandbox/broker.db
+else
+  printf '%s\n' '/var/lib/ashley-sandbox/broker.db: absent'
+fi
+if [[ -f /var/lib/ashley-sandbox/meta/recipes.json ]]; then
+  printf '%s\n' 'recipe manifest: installed'
+else
+  printf '%s\n' 'recipe manifest: absent'
+fi

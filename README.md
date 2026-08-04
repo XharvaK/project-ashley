@@ -122,10 +122,11 @@ receipts, risk classification, Ashley's position, and Doc's decision remain
 separate from the live checkout. No proposal commits, pushes, deploys, or
 changes foundational identity by itself.
 
-The accepted 07b/08b/09b packages are fake/local boundaries for verification.
-They do not install production sandbox or external-broker services, hold live
-credentials, or dispatch to real network destinations. External capabilities
-are seeded at `observe` until separately qualified.
+The accepted 07b/08b/09b packages remain fake/local boundaries for verification.
+Wave 07c adds the real sandbox daemon and agent transport locally, but it is not
+yet accepted or deployed. None of these waves installs production external
+services, holds live credentials, or dispatches to real network destinations.
+External capabilities are seeded at `observe` until separately qualified.
 
 ## Governance and authority
 
@@ -202,7 +203,7 @@ reference is [`docs/Ashley_Glossary.md`](docs/Ashley_Glossary.md).
 |---|---|---|
 | `agent-service` | `apps/agent-service/` (`:3710`) | Identity, Mind State, Thought, Agency, memory, cognition, Mistral access, and owner HTTP surfaces |
 | `discord-bot` | `apps/discord-bot/` | Discord gateway, intake, pacing, reactions, proactive scheduling, and delivery calls |
-| `sandbox-broker` | `apps/sandbox-broker/` | Fake/local execution boundary for 07b/08b verification; not installed as a Mint unit |
+| `sandbox-broker` | `apps/sandbox-broker/` | Wave 07b fake broker plus Wave 07c real daemon/transport; not installed as a Mint unit |
 | `external-broker` | `apps/external-broker/` | Fake/local vault/action boundary for 09b verification; no real adapters or credentials |
 
 Production Discord uses one `agent-service` process and one `discord-bot`
@@ -339,7 +340,7 @@ surfaces, gateway login, service count, and journal errors on the actual host.
 - [`docs/Stabilization_Design.md`](docs/Stabilization_Design.md) — Wave 10
   traceability, health, resource, and dual-database assurance
 - [`deploy/linux-mint/sandbox/README.md`](deploy/linux-mint/sandbox/README.md) —
-  scripted Mint sandbox preflight and future install/rollback path
+  scripted Mint sandbox preflight and explicit install/rollback path
 - [`docs/handoffs/waves-00-05-implementation-record.md`](docs/handoffs/waves-00-05-implementation-record.md)
   — historical local implementation record for the first five waves
 

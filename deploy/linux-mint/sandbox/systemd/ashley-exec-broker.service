@@ -2,7 +2,7 @@
 Description=Ashley execution broker
 Requires=ashley-exec-broker.socket
 After=ashley-exec-broker.socket
-ConditionPathExists=/opt/ashley-sandbox/dist/server.js
+ConditionPathExists=/opt/ashley-sandbox/dist/main.js
 
 [Service]
 Type=simple
@@ -10,13 +10,14 @@ User=ashley-sandbox
 Group=ashley-sandbox
 WorkingDirectory=/var/lib/ashley-sandbox
 EnvironmentFile=-/etc/ashley-sandbox/broker.env
-ExecStart=@NODE@ /opt/ashley-sandbox/dist/server.js --socket-activated
+ExecStart=@NODE@ /opt/ashley-sandbox/dist/main.js --socket-activated
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
 PrivateTmp=true
 PrivateDevices=true
 ProtectHome=true
+ProtectProc=invisible
 ProtectSystem=strict
 ProtectKernelTunables=true
 ProtectKernelModules=true

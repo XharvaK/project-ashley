@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "recipes": [
+    {
+      "recipeId": "verify:broker-smoke",
+      "toolchainId": "mint-system",
+      "executable": "/usr/bin/true",
+      "argv": [],
+      "cwdPolicy": ".",
+      "supported": true,
+      "envAllowlist": ["PATH"],
+      "networkMode": "none",
+      "limits": {
+        "wallMs": 5000,
+        "maxProcesses": 1,
+        "maxOutputBytes": 65536
+      }
+    },
+    {
+      "recipeId": "verify:agent-tsc",
+      "toolchainId": "node22-ts5",
+      "executable": "/var/lib/ashley-sandbox/toolchain/node22-ts5/bin/tsc",
+      "argv": [
+        "--noEmit",
+        "-p",
+        "/var/lib/ashley-sandbox/recipes/agent-service-tsconfig.json"
+      ],
+      "cwdPolicy": ".",
+      "supported": false,
+      "envAllowlist": ["PATH", "NODE_OPTIONS"],
+      "networkMode": "none",
+      "limits": {
+        "wallMs": 120000,
+        "maxProcesses": 4,
+        "maxOutputBytes": 4194304
+      }
+    }
+  ]
+}

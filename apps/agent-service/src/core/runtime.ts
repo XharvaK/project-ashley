@@ -154,6 +154,10 @@ import type { AttachmentIntakeRef } from "./perception/types.js";
 import { runPerceptionTurn } from "./perception/index.js";
 import { thoughtDeadlineAtMs } from "./perception/turn-budget.js";
 import { randomUUID } from "node:crypto";
+import {
+  createConfiguredUnixBrokerTransport,
+} from "./change-proposal/unix-broker-transport.js";
+import type { BrokerClientTransport } from "./change-proposal/broker-client.js";
 
 export type ReactiveChatInput = {
   message: string;
@@ -316,10 +320,14 @@ export class AshleyCore {
   private readonly reflectionMode: ReflectionMode;
   private readonly activeOwners = new Set<string>();
   private readonly sessionId: string | null;
+  private readonly sandboxBrokerTransport: BrokerClientTransport | null;
 
   constructor(
     db?: DatabaseSync,
-    options?: { reflectionMode?: ReflectionMode },
+    options?: {
+      reflectionMode?: ReflectionMode;
+      sandboxBrokerTransport?: BrokerClientTransport | null;
+    },
   ) {
     const priorContinuity = db ? getContinuityFor(db) : undefined;
     this.db = openNuclearDb(
@@ -332,6 +340,10 @@ export class AshleyCore {
     );
     this.continuity = getContinuityFor(this.db) ?? priorContinuity ?? null;
     this.reflectionMode = options?.reflectionMode ?? env.reflectionMode;
+    this.sandboxBrokerTransport =
+      options && "sandboxBrokerTransport" in options
+        ? options.sandboxBrokerTransport ?? null
+        : createConfiguredUnixBrokerTransport();
     if (this.continuity) {
       try {
         const lineageId = getAuthoritativeLineageId(this.continuity);
@@ -349,6 +361,11 @@ export class AshleyCore {
     }
     recoverStaleRequests(this.db);
     processPendingReflectionEvents(this.db);
+  }
+
+  /** The source-proposal layer can use this only when the operator enables it. */
+  getSandboxBrokerTransport(): BrokerClientTransport | null {
+    return this.sandboxBrokerTransport;
   }
 
   private auditReadingProvenance(): boolean {

@@ -3,6 +3,7 @@ import {
   assertAllowlistedInterpreter,
   assertArgvPolicy,
   assertEnvAllowlist,
+  assertExecutionLimits,
 } from "./execution.js";
 
 describe("execution policy", () => {
@@ -40,5 +41,20 @@ describe("execution policy", () => {
 
   it("allows empty env for fake runner", () => {
     expect(assertEnvAllowlist({}, new Set(["PATH"])).ok).toBe(true);
+  });
+
+  it("bounds execution limits before spawning", () => {
+    expect(
+      assertExecutionLimits({ wallMs: 1000, maxProcesses: 1, maxOutputBytes: 1024 }),
+    ).toEqual({ ok: true });
+    expect(
+      assertExecutionLimits({ wallMs: 121_000, maxProcesses: 1, maxOutputBytes: 1024 }),
+    ).toMatchObject({ ok: false, reason: "wall_limit_invalid" });
+    expect(
+      assertExecutionLimits({ wallMs: 1000, maxProcesses: 17, maxOutputBytes: 1024 }),
+    ).toMatchObject({ ok: false, reason: "process_limit_invalid" });
+    expect(
+      assertExecutionLimits({ wallMs: 1000, maxProcesses: 1, maxOutputBytes: 4_194_305 }),
+    ).toMatchObject({ ok: false, reason: "output_limit_invalid" });
   });
 });

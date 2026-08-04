@@ -16,9 +16,15 @@ export function normalizeWorkspacePath(
     return { ok: false, reason: "path_escape" };
   }
   const absolute = path.resolve(workspaceRoot, normalized);
-  const root = realpathSync(workspaceRoot);
-  const resolved = realpathSync(absolute);
-  if (!resolved.startsWith(root)) {
+  let root: string;
+  let resolved: string;
+  try {
+    root = realpathSync(workspaceRoot);
+    resolved = realpathSync(absolute);
+  } catch {
+    return { ok: false, reason: "path_not_found" };
+  }
+  if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`)) {
     return { ok: false, reason: "path_escape" };
   }
   return { ok: true, value: resolved };

@@ -57,11 +57,13 @@ After you push from Windows:
 bash ~/project-ashley/deploy/linux-mint/update.sh
 ```
 
-## Sandbox boundary (prepared, not deployed)
+## Sandbox boundary (implemented locally, not deployed)
 
-The Wave 07b package is a fake/local broker. The real `ashley-sandbox` user,
-socket, systemd unit, and agent IPC transport are not installed yet. The safe
-operator path is scripted and read-only by default:
+The repository now contains the real Unix-socket broker daemon, durable broker
+state, SO_PEERCRED helper, and agent IPC transport. Mint still has none of the
+`ashley-sandbox` user, socket, systemd unit, or broker state until the explicit
+install action is run. The safe operator path is scripted and read-only by
+default:
 
 ```powershell
 # from Windows; pushes the current branch, then performs a read-only Mint check
@@ -71,9 +73,10 @@ powershell -File scripts\mint\sandbox.ps1 -Action Preflight -PushFirst
 powershell -File scripts\mint\sandbox.ps1 -Action Status
 ```
 
-Do not run installation until a separate production daemon/transport review has
-passed. When that gate exists, the same wrapper will use `-Action Install -Apply`
-and require explicit public-key paths. See
+Do not run installation until the local broker gate has been reviewed. The same
+wrapper then uses `-Action Install -Apply` and requires explicit public-key
+paths. The default broker recipe enables only a harmless smoke check; source
+verification remains unsupported until its toolchain is provisioned. See
 [`sandbox/README.md`](sandbox/README.md) for the complete process and rollback.
 
 ### Without opening the laptop (SSH)

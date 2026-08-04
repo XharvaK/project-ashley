@@ -12,7 +12,8 @@ usage() {
 Usage: preflight.sh [--require-daemon]
 
 Read-only checks for the production Mint sandbox installation.
---require-daemon also requires apps/sandbox-broker/dist/server.js.
+--require-daemon also requires the real daemon, agent transport, and peer
+credential helper source.
 EOF
 }
 
@@ -63,13 +64,35 @@ else
   fail "sandbox-broker package or lockfile is missing under $ROOT"
 fi
 
-if [[ -f "$ROOT/apps/sandbox-broker/dist/server.js" ]]; then
+if [[ -f "$ROOT/apps/sandbox-broker/dist/main.js" ]]; then
   pass "production broker daemon artifact"
 else
   if [[ "$REQUIRE_DAEMON" -eq 1 ]]; then
-    fail "apps/sandbox-broker/dist/server.js is missing; the current 07b package is fake/local and has no production daemon"
+    fail "apps/sandbox-broker/dist/main.js is missing; build the production broker daemon first"
   else
     warn "production daemon artifact is not present yet; installation would stop before changing the host"
+  fi
+fi
+
+if [[ -f "$ROOT/apps/sandbox-broker/src/peer-credentials-helper.c" ]]; then
+  pass "SO_PEERCRED helper source"
+else
+  fail "SO_PEERCRED helper source is missing"
+fi
+
+if [[ -f "$ROOT/deploy/linux-mint/sandbox/recipes.json" ]]; then
+  pass "broker-owned recipe manifest"
+else
+  fail "deploy/linux-mint/sandbox/recipes.json is missing"
+fi
+
+if command -v cc >/dev/null 2>&1; then
+  pass "C compiler available for the peer credential helper"
+else
+  if [[ "$REQUIRE_DAEMON" -eq 1 ]]; then
+    fail "a C compiler is required to build the SO_PEERCRED helper"
+  else
+    warn "no C compiler found; install would stop before changing the host"
   fi
 fi
 

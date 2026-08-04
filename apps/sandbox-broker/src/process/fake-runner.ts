@@ -7,6 +7,8 @@ export type TaskTerminalReason =
   | "process_limit"
   | "truncated"
   | "policy_rejected"
+  | "process_exit"
+  | "spawn_error"
   | "broker_restart"
   | "concurrency_limit";
 
@@ -30,6 +32,7 @@ export interface FakeRunResult {
 
 export interface ProcessRunner {
   run(request: FakeRunRequest): Promise<FakeRunResult>;
+  cancel?(taskId: string): boolean;
 }
 
 export class ScriptedProcessRunner implements ProcessRunner {

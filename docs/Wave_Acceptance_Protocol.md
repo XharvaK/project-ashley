@@ -109,6 +109,7 @@ Never mark **Wave_accepted** until Doc explicitly signs off.
 | 06 | **Wave_accepted** (not release-qualified) | [`handoffs/wave-06-gate-packet.md`](handoffs/wave-06-gate-packet.md) |
 | 07 | **Design_accepted** | [`handoffs/wave-07-design-gate-packet.md`](handoffs/wave-07-design-gate-packet.md) |
 | 07b | **Wave_accepted** (not release-qualified) | [`handoffs/wave-07b-gate-packet.md`](handoffs/wave-07b-gate-packet.md) |
+| 07c | **Locally_verified** — Mint daemon/transport; awaiting sign-off | [`handoffs/wave-07c-gate-packet.md`](handoffs/wave-07c-gate-packet.md) |
 | 08 | **Design_accepted** | [`handoffs/wave-08-design-gate-packet.md`](handoffs/wave-08-design-gate-packet.md) |
 | 08b | **Wave_accepted** (not release-qualified) | [`handoffs/wave-08b-gate-packet.md`](handoffs/wave-08b-gate-packet.md) |
 | 09 | **Design_accepted** | [`handoffs/wave-09-design-gate-packet.md`](handoffs/wave-09-design-gate-packet.md) |
@@ -125,9 +126,10 @@ Doc acknowledged the existing local implementation on 2026-08-04. They remain
 outside the formal **Wave_accepted** ladder until separately verified and
 accepted.
 
-**Next authorized gate:** Wave 10 has no remaining implementation subwave. The
-next gate is a separate release-qualification review. No release
-qualification, live services, Mint, credentials, network adapters, production
+**Next authorized gate:** Review and, if satisfied, accept Wave 07c. That is a
+local implementation gate only; the next step after acceptance is a separate
+release-qualification review for Mint. No release qualification, live services,
+Mint, credentials, network adapters, production
 dispatch, `apply`, commit, push, or deploy is authorized by wave acceptance
 alone.
 

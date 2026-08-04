@@ -167,7 +167,7 @@ export async function runBrokerVerificationBatch(input: {
     return baseCheck;
   }
 
-  const prepare = submitSourcePrepare(input.transport, input.prepareApproval);
+  const prepare = await submitSourcePrepare(input.transport, input.prepareApproval);
   if (!prepare.ok) {
     return { ok: false, errorCode: prepare.errorCode };
   }
@@ -183,11 +183,11 @@ export async function runBrokerVerificationBatch(input: {
     },
   });
 
-  const verify = submitSourceVerify(input.transport, input.verifyApproval);
+  const verify = await submitSourceVerify(input.transport, input.verifyApproval);
   if (!verify.ok) {
     return { ok: false, errorCode: verify.errorCode };
   }
-  const verifyReceipt = fetchTaskReceipt(input.transport, verify.data.taskId);
+  const verifyReceipt = await fetchTaskReceipt(input.transport, verify.data.taskId);
   if (!verifyReceipt.ok) {
     return { ok: false, errorCode: verifyReceipt.errorCode };
   }
@@ -220,13 +220,13 @@ export async function runBrokerVerificationBatch(input: {
   receipts.push(verifyRef);
 
   if (input.diffApproval) {
-    const diff = submitSourceDiff(input.transport, input.diffApproval);
+    const diff = await submitSourceDiff(input.transport, input.diffApproval);
     if (diff.ok) {
-      const diffReceipt = fetchTaskReceipt(input.transport, diff.data.taskId);
+      const diffReceipt = await fetchTaskReceipt(input.transport, diff.data.taskId);
       if (diffReceipt.ok && diffReceipt.data.state === "succeeded") {
-        const diffResult = fetchTaskResult(input.transport, diff.data.taskId);
+        const diffResult = await fetchTaskResult(input.transport, diff.data.taskId);
         if (diffResult.ok && diffResult.data.stdout) {
-          const patchRead = readArtifact(
+          const patchRead = await readArtifact(
             input.transport,
             input.ownerId,
             diffResult.data.stdout,

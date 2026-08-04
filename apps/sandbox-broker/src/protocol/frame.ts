@@ -67,6 +67,19 @@ export function decodeFrame(buffer: Buffer): BrokerFrame {
   if (header.frameVersion !== FRAME_VERSION) {
     throw new Error("invalid_frame_version");
   }
+  if (typeof header.requestId !== "string" || header.requestId.length === 0) {
+    throw new Error("invalid_request_id");
+  }
+  if (typeof header.messageType !== "string" || header.messageType.length === 0) {
+    throw new Error("invalid_message_type");
+  }
+  if (
+    typeof header.payloadLength !== "number" ||
+    !Number.isInteger(header.payloadLength) ||
+    header.payloadLength < 0
+  ) {
+    throw new Error("invalid_payload_length");
+  }
   const body = buffer.subarray(newline + 1);
   if (body.length !== header.payloadLength) {
     throw new Error("payload_length_mismatch");

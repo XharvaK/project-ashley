@@ -19,7 +19,9 @@ param(
   [string]$AgentUser = "",
   [string]$OwnerId = "",
   [string]$OwnerPublicKeyRemotePath = "",
-  [string]$ContinuityPublicKeyRemotePath = ""
+  [string]$ContinuityPublicKeyRemotePath = "",
+  [string]$OwnerKeyId = "",
+  [string]$ContinuityKeyId = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -28,7 +30,7 @@ $RepoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 if (($Action -eq "Install" -or $Action -eq "Remove") -and -not $Apply) {
   throw "$Action changes the Mint host; pass -Apply explicitly. Preflight and Status are read-only."
 }
-foreach ($value in @($HostName, $User, $RepoDir, $AgentUser, $OwnerId, $OwnerPublicKeyRemotePath, $ContinuityPublicKeyRemotePath)) {
+foreach ($value in @($HostName, $User, $RepoDir, $AgentUser, $OwnerId, $OwnerPublicKeyRemotePath, $ContinuityPublicKeyRemotePath, $OwnerKeyId, $ContinuityKeyId)) {
   if ($value -and $value -notmatch '^[A-Za-z0-9_./~:@+-]+$') {
     throw "Unsafe shell characters in argument: $value"
   }
@@ -67,6 +69,8 @@ switch ($Action) {
     if ($OwnerId) { $installArgs += @("--owner-id", $OwnerId) }
     if ($OwnerPublicKeyRemotePath) { $installArgs += @("--owner-public-key", $OwnerPublicKeyRemotePath) }
     if ($ContinuityPublicKeyRemotePath) { $installArgs += @("--continuity-public-key", $ContinuityPublicKeyRemotePath) }
+    if ($OwnerKeyId) { $installArgs += @("--owner-key-id", $OwnerKeyId) }
+    if ($ContinuityKeyId) { $installArgs += @("--continuity-key-id", $ContinuityKeyId) }
     $lines += ($installArgs -join ' ')
   }
   "Remove" {

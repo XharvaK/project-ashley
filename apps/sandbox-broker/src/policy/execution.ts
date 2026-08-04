@@ -41,3 +41,37 @@ export function assertEnvAllowlist(
   }
   return { ok: true };
 }
+
+export function assertExecutionLimits(limits: {
+  wallMs: number;
+  maxProcesses: number;
+  maxOutputBytes: number;
+}): { ok: true } | { ok: false; reason: string } {
+  if (
+    !Number.isInteger(limits.wallMs) ||
+    limits.wallMs < 1 ||
+    limits.wallMs > MAX_WALL_MS
+  ) {
+    return { ok: false, reason: "wall_limit_invalid" };
+  }
+  if (
+    !Number.isInteger(limits.maxProcesses) ||
+    limits.maxProcesses < 1 ||
+    limits.maxProcesses > MAX_CHILD_PROCESSES
+  ) {
+    return { ok: false, reason: "process_limit_invalid" };
+  }
+  if (
+    !Number.isInteger(limits.maxOutputBytes) ||
+    limits.maxOutputBytes < 0 ||
+    limits.maxOutputBytes > MAX_OUTPUT_BYTES
+  ) {
+    return { ok: false, reason: "output_limit_invalid" };
+  }
+  return { ok: true };
+}
+import {
+  MAX_CHILD_PROCESSES,
+  MAX_OUTPUT_BYTES,
+  MAX_WALL_MS,
+} from "../constants/limits.js";

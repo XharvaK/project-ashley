@@ -121,6 +121,7 @@ export function composeSelfCapabilityContext(db: DatabaseSync): string {
     "- Attachment fetch requires sufficient thought deadline and capability release.",
     "- Conversational page reads require explicit user URL-read intent plus authorization.",
     "- Web search has no configured provider in this deployment.",
+    "- Sandboxed source execution is unavailable to this turn unless the separately qualified broker socket is configured and reachable.",
   ];
   return lines.join("\n");
 }

@@ -1,6 +1,7 @@
 # Sandbox Design — Threat Model and OS Boundary
 
-**Status:** Design only. Not deployed.
+**Status:** Design/specification. Wave 07b fake broker is accepted and the Wave
+07c daemon/transport is locally verified; neither is deployed to Mint.
 
 This document specifies the threat model, trust boundaries, and OS-boundary topology
 for Ashley's dedicated execution broker on Linux Mint. It operationalizes
@@ -26,7 +27,7 @@ continuity-tombstone key governance, IPC authority matrix, broker execution poli
 versioned chunked IPC, forget/tombstone protocol, OS hardening, resource enforcement,
 workspace governance, residual risks, deferrals.
 
-**Out of scope until Wave 07b implementation (design prerequisites met):**
+**Outside this design document's implementation scope (tracked by Wave 07b/07c):**
 
 - Broker implementation, action schema, fake-broker tests, Mint systemd units, user
   creation, service install
@@ -34,11 +35,12 @@ workspace governance, residual risks, deferrals.
 - Wave 08 self-modification, vault/credential injection, any code beyond this design
 - Per-task cgroup delegation (`Delegate=yes`) — deferred to a later hardening wave
 
-**Gate status:** Wave 06 is **Wave_accepted** (not release-qualified); Wave 07 is
-**Design_accepted** (2026-08-04). Wave 07b implementation/testing is the next gate
-(fake broker / temp roots only; no Mint user/service install without separate
-authorization). Design must not bypass Wave 06 guarantees. Perception outputs remain
-untrusted data until a separate signed owner approval.
+**Gate status:** Wave 06, Wave 07b, and Wave 08b are **Wave_accepted** (not
+release-qualified); Wave 07 is **Design_accepted** (2026-08-04); Wave 07c is
+**Locally_verified** and awaits **Accept Wave 07c**. No Mint user/service install,
+agent opt-in, or restart is authorized by local verification alone. Design must
+not bypass Wave 06 guarantees. Perception outputs remain untrusted data until a
+separate signed owner approval.
 
 ---
 

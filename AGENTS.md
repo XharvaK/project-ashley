@@ -15,7 +15,7 @@ After the Constitution, read the peer specialized governance documents
 [`docs/Ashley_Hierarchy.md`](docs/Ashley_Hierarchy.md). They clarify
 operational and ethical constraints; they do not override higher authority.
 
-OS-boundary execution design (design only, not deployed): [`docs/Sandbox_Design.md`](docs/Sandbox_Design.md).
+OS-boundary execution design and local Wave 07c implementation (not deployed): [`docs/Sandbox_Design.md`](docs/Sandbox_Design.md), [`docs/handoffs/wave-07c-gate-packet.md`](docs/handoffs/wave-07c-gate-packet.md).
 Self-inspection and change-proposal design (design only): [`docs/Self_Modification_Design.md`](docs/Self_Modification_Design.md).
 External account and action-broker design (design only): [`docs/External_Agency_Design.md`](docs/External_Agency_Design.md).
 Wave 10 stabilization and assurance design plus accepted local 10c assurance:

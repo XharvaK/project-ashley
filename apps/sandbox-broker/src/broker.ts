@@ -14,6 +14,7 @@ import {
   assertArgvPolicy,
   assertAllowlistedInterpreter,
   assertEnvAllowlist,
+  assertExecutionLimits,
 } from "./policy/execution.js";
 import { normalizeWorkspacePath } from "./policy/path.js";
 import {
@@ -267,6 +268,7 @@ export class SandboxBroker {
     ctx: RequestContext,
   ): BrokerResponse<{ taskId: string; state: string }> {
     const envelope = payload.approval;
+    let executionEnvelope = envelope;
     let approvalVerified = false;
     if (envelope.scope === "source_prepare") {
       const validated = validateSourcePrepareEnvelope(envelope);
@@ -319,8 +321,21 @@ export class SandboxBroker {
             data: { taskId: envelope.taskId, state: "unsupported" },
           };
         }
-        envelope.argv = [recipe.executable, ...recipe.argv];
-        envelope.cwd = recipe.cwdPolicy;
+        if (
+          recipe.limits &&
+          (!envelope.limits ||
+            envelope.limits.wallMs !== recipe.limits.wallMs ||
+            envelope.limits.maxProcesses !== recipe.limits.maxProcesses ||
+            envelope.limits.maxOutputBytes !== recipe.limits.maxOutputBytes)
+        ) {
+          return this.error("recipe_limits_mismatch", "recipe limits do not match approval");
+        }
+        executionEnvelope = {
+          ...envelope,
+          argv: [recipe.executable, ...recipe.argv],
+          cwd: recipe.cwdPolicy,
+          ...(recipe.limits ? { limits: { ...recipe.limits } } : {}),
+        };
       }
       if (envelope.scope === "source_diff") {
         const patch = Buffer.from("--- /dev/null\n+++ b/file.txt\n@@\n+ok\n", "utf8");
@@ -359,16 +374,22 @@ export class SandboxBroker {
     if (running.length >= MAX_CONCURRENT_TASKS) {
       return this.error("concurrency_limit", "concurrency limit");
     }
-    const cwdResult = normalizeWorkspacePath(this.config.workspaceRoot, envelope.cwd!);
+    const cwdResult = normalizeWorkspacePath(
+      this.config.workspaceRoot,
+      executionEnvelope.cwd!,
+    );
     if (!cwdResult.ok) {
       return this.error(cwdResult.reason, "invalid cwd");
     }
-    const argvCheck = assertArgvPolicy(envelope.argv ?? []);
+    // Execute only at the canonical realpath checked above; never pass the
+    // caller's relative path to child_process.spawn.
+    executionEnvelope = { ...executionEnvelope, cwd: cwdResult.value };
+    const argvCheck = assertArgvPolicy(executionEnvelope.argv ?? []);
     if (!argvCheck.ok) {
       return this.error(argvCheck.reason, "argv policy violation");
     }
     const interpreterCheck = assertAllowlistedInterpreter(
-      envelope.argv![0]!,
+      executionEnvelope.argv![0]!,
       this.config.interpreterAllowlist,
     );
     if (!interpreterCheck.ok) {
@@ -378,7 +399,18 @@ export class SandboxBroker {
     if (!envCheck.ok) {
       return this.error(envCheck.reason, "env policy violation");
     }
-    const runReq = envelopeToRunRequest(envelope, envelope.taskId, this.config.envAllowlist);
+    if (!executionEnvelope.limits) {
+      return this.error("missing_limits", "execution limits required");
+    }
+    const limitsCheck = assertExecutionLimits(executionEnvelope.limits);
+    if (!limitsCheck.ok) {
+      return this.error(limitsCheck.reason, "execution limits violation");
+    }
+    const runReq = envelopeToRunRequest(
+      executionEnvelope,
+      executionEnvelope.taskId,
+      this.config.envAllowlist,
+    );
     if ("error" in runReq) {
       return this.error(runReq.error, "invalid run request");
     }
@@ -389,29 +421,58 @@ export class SandboxBroker {
       stdout: "",
       stderr: "",
       truncated: false,
-      envelope,
+      envelope: executionEnvelope,
       uploadAuthorized: true,
     };
     this.store.tasks.set(task.taskId, task);
-    void this.config.processRunner.run(runReq).then((result) => {
-      const stored = this.store.tasks.get(task.taskId);
-      if (!stored || stored.state !== "running") {
-        return;
-      }
-      stored.exitCode = result.exitCode;
-      stored.stdout = result.stdout;
-      stored.stderr = result.stderr;
-      stored.truncated = result.truncated;
-      stored.terminalReason = result.terminalReason;
-      stored.state =
-        result.terminalReason === "success"
-          ? "succeeded"
-          : result.terminalReason === "cancelled"
-            ? "cancelled"
-            : result.terminalReason === "timeout"
-              ? "timeout"
-              : "failed";
-    });
+    try {
+      // A durable store must record the running state before execution starts;
+      // otherwise a crash could lose the receipt and replay an approval.
+      this.store.flush();
+    } catch {
+      this.store.tasks.delete(task.taskId);
+      return this.error("persistence_failed", "broker state could not be persisted");
+    }
+    void this.config.processRunner
+      .run(runReq)
+      .then((result) => {
+        const stored = this.store.tasks.get(task.taskId);
+        if (!stored || stored.state !== "running") {
+          return;
+        }
+        stored.exitCode = result.exitCode;
+        stored.stdout = result.stdout;
+        stored.stderr = result.stderr;
+        stored.truncated = result.truncated;
+        stored.terminalReason = result.terminalReason;
+        stored.state =
+          result.terminalReason === "success"
+            ? "succeeded"
+            : result.terminalReason === "cancelled"
+              ? "cancelled"
+              : result.terminalReason === "timeout"
+                ? "timeout"
+                : "failed";
+        try {
+          this.store.flush();
+        } catch {
+          // The in-memory terminal result remains truthful; the next daemon
+          // health check will surface a persistence failure.
+        }
+      })
+      .catch((error: unknown) => {
+        const stored = this.store.tasks.get(task.taskId);
+        if (!stored || stored.state !== "running") return;
+        stored.exitCode = 1;
+        stored.stderr = error instanceof Error ? error.message : "process runner failed";
+        stored.terminalReason = "spawn_error";
+        stored.state = "failed";
+        try {
+          this.store.flush();
+        } catch {
+          // Preserve the truthful in-memory failure if persistence is down.
+        }
+      });
     return { ok: true, data: { taskId: task.taskId, state: task.state } };
   }
 
@@ -428,8 +489,14 @@ export class SandboxBroker {
       return this.error("not_found", "task not found");
     }
     if (task.state === "running") {
+      this.config.processRunner.cancel?.(payload.taskId);
       task.state = "cancelled";
       task.terminalReason = "cancelled";
+      try {
+        this.store.flush();
+      } catch {
+        return this.error("persistence_failed", "broker state could not be persisted");
+      }
     }
     return { ok: true, data: { cancelled: true } };
   }
@@ -495,6 +562,9 @@ export class SandboxBroker {
     if (this.store.appliedTombstones.has(tombstone.tombstoneId)) {
       return { ok: true, data: { applied: [], alreadyApplied: true } };
     }
+    if (!this.store.recordAppliedTombstone(tombstone.tombstoneId)) {
+      return { ok: true, data: { applied: [], alreadyApplied: true } };
+    }
     const applied: string[] = [];
     for (const target of tombstone.targets) {
       const artifact = this.store.artifacts.get(target.artifactRef);
@@ -508,7 +578,6 @@ export class SandboxBroker {
         applied.push(target.artifactRef);
       }
     }
-    this.store.appliedTombstones.add(tombstone.tombstoneId);
     return { ok: true, data: { applied } };
   }
 

@@ -151,6 +151,16 @@ export const env = {
     100,
     true,
   ),
+  sandboxBrokerEnabled: process.env.ASHLEY_SANDBOX_BROKER_ENABLED === "true",
+  sandboxBrokerSocket:
+    process.env.ASHLEY_SANDBOX_BROKER_SOCKET ?? "/run/ashley/broker.sock",
+  sandboxBrokerTimeoutMs: numericEnv(
+    "ASHLEY_SANDBOX_BROKER_TIMEOUT_MS",
+    5_000,
+    100,
+    30_000,
+    true,
+  ),
 };
 
 export function validateBoot(): { ok: boolean; warnings: string[] } {

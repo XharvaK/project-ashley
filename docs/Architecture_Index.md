@@ -26,7 +26,7 @@ VISION.md
 | [`Ashley_Hierarchy.md`](Ashley_Hierarchy.md) | Normative order and conflict rule |
 | [`Vision_Implementation_Map.md`](Vision_Implementation_Map.md) | Commitment → owner → evidence → failure → status |
 | [`Wave_Acceptance_Protocol.md`](Wave_Acceptance_Protocol.md) | Six-stage acceptance ladder, gate packets, design vs implementation sequencing |
-| [`Sandbox_Design.md`](Sandbox_Design.md) | OS-boundary execution broker — threat model, IPC, hardening (**design only**) |
+| [`Sandbox_Design.md`](Sandbox_Design.md) | OS-boundary execution broker — threat model, IPC, hardening (**design/spec; Wave 07c local implementation**) |
 | [`Self_Modification_Design.md`](Self_Modification_Design.md) | Change proposals, isolated source workflow, consultation routing (**design only**) |
 | [`External_Agency_Design.md`](External_Agency_Design.md) | External-action broker, vault, dual authorization, dispatch FSM (**design only**) |
 | [`Stabilization_Design.md`](Stabilization_Design.md) | Wave 10 pre-release traceability, deterministic evaluation, health, resource, and backup assurance (**10c Wave_accepted; not release-qualified**) |
@@ -89,12 +89,16 @@ Shared utils: `apps/agent-service/src/lib/` (feed-parse, typography, metadata-ec
 
 Retired: voice, Telegram, habits, Moltbook, skills, legacy ChatService / `index.db` writers.
 
-## Sandbox (design only)
+## Sandbox (implemented locally; not deployed)
 
-Future `ashley-exec-broker` system unit: dedicated `ashley-sandbox` UID, Unix socket
+Target `ashley-exec-broker` system unit: dedicated `ashley-sandbox` UID, Unix socket
 at `/run/ashley/broker.sock`, state at `/var/lib/ashley-sandbox`. Agent proposes;
 approval-signer emits signed envelopes; broker executes under owner-authorized scope
-only. Full spec: [`Sandbox_Design.md`](Sandbox_Design.md). Not deployed.
+only. The local implementation adds a socket daemon, durable broker state,
+SO_PEERCRED helper, real bounded runner, and agent transport; the broker remains
+disabled until separately accepted and release-qualified. Full spec:
+[`Sandbox_Design.md`](Sandbox_Design.md). Gate packet:
+[`handoffs/wave-07c-gate-packet.md`](handoffs/wave-07c-gate-packet.md). Not deployed.
 
 ## Self-modification (design only)
 

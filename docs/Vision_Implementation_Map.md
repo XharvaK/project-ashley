@@ -59,7 +59,7 @@ remain human-controlled.
 | Forgetting + same-lineage tombstone replay | Continuity sidecar + nuclear v13 (Wave 04 local) | `preview_id` targets; pending tombstone before cascade; entity_uuid; honesty about Discord/provider/old backups | Integer-PK tombstone after restore; silent non-local erasure claims | **local implementation present; not release-qualified** |
 | Dual-DB backup verification | Continuity backup package (Wave 04 local) | VACUUM snapshots; nuclear-then-continuity order; AES-GCM package; current sidecar precedence | Naive WAL/SHM copy as supported path; silent sidecar replacement | **local implementation present; not release-qualified** |
 | Untrusted external entities (`ETH-EXT-*`) | Curiosity, Thought, Agency (planned) | Provenance-bearing notes; no permission/tool/identity mutation from external text | External text grants permission, commands tools, or alters policy | documented; enforcement planned |
-| OS-boundary sandbox broker (`ETH-EXT-06`, Private Mint agency) | Sandbox Design (Wave 07) | Dedicated `ashley-sandbox` UID; signed owner envelopes; continuity tombstones; Unix socket IPC | Same-user execution; inferred approval; broker topic-based forget | **design only** — see [`Sandbox_Design.md`](Sandbox_Design.md) |
+| OS-boundary sandbox broker (`ETH-EXT-06`, Private Mint agency) | Sandbox Design (Wave 07) + Wave 07c | Dedicated `ashley-sandbox` UID; signed owner envelopes; continuity tombstones; Unix socket IPC; durable broker state; SO_PEERCRED gate | Same-user execution; inferred approval; broker topic-based forget; unprovisioned toolchain | **design accepted; local implementation verified; not deployed** — see [`Sandbox_Design.md`](Sandbox_Design.md) and [`handoffs/wave-07c-gate-packet.md`](handoffs/wave-07c-gate-packet.md) |
 | Self-inspection and change proposals (Wave 08) | Self-Modification Design | Isolated source archive; broker-owned recipes; change-proposal records; consultation routing; no auto-commit/deploy | Proposal → live mutation; repo script execution; inferred approval | **Wave_accepted** (not release-qualified) — see [`handoffs/wave-08b-gate-packet.md`](handoffs/wave-08b-gate-packet.md) |
 | No relationship scalars (`ETH-REL-*`) | Mind State v14 relationship tables (Wave 05 local) | Six explicit record types; observe/apply gates; coercion gate always on; no auto-sent reminders | Relationship reduced to scalar scores | **local implementation present; not release-qualified** |
 | Evaluation-fork isolation (`SC-LIN-01`–`SC-LIN-05`) | Continuity + process guards (Wave 04 local) | Fork create/destroy in sidecar; process-level outbound/writeback blocks | Fork writes live lineage or opens parent DB / Mistral / delivery | **local implementation present; not release-qualified** |
@@ -137,6 +137,20 @@ not accept a wave; gate packets and Doc sign-off do.
 - `source_prepare` is validation-only; archive extraction explicitly deferred
 - In-memory restart durability **not** guaranteed (nonces/tombstones/tasks)
 - Unlocks Wave 08b implementation; no production wiring or Mint install authorized by 07b acceptance alone
+
+### Wave 07c (sandbox production boundary — local verification)
+
+**Acceptance stage:** **Locally_verified** — awaiting **Accept Wave 07c**
+
+- Real Unix-socket daemon, durable broker SQLite state, bounded child runner,
+  broker-owned recipe manifest, Linux SO_PEERCRED helper, and agent-side
+  transport are implemented locally.
+- The default manifest enables only `verify:broker-smoke`; source TypeScript
+  verification remains explicit `unsupported` until its toolchain is
+  operator-provisioned.
+- Windows verification skipped Linux SO_PEERCRED, systemd activation, and
+  process-group checks. No Mint user/unit/socket, agent opt-in, or restart was
+  performed. Gate packet: [`handoffs/wave-07c-gate-packet.md`](handoffs/wave-07c-gate-packet.md)
 
 ### Wave 08 (self-modification — design)
 

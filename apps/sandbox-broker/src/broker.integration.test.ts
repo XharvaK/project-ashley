@@ -8,11 +8,31 @@ import {
   signedApproval,
   tombstoneVerifier,
 } from "./test/fixtures/keys.js";
-import { mkdtempSync, mkdirSync } from "node:fs";
+import { mkdtempSync, mkdirSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-function createIntegrationBroker() {
+function createIntegrationBroker(
+  processRunner: {
+    run(request: { cwd: string }): Promise<{
+      exitCode: number;
+      stdout: string;
+      stderr: string;
+      truncated: boolean;
+      terminalReason: "success";
+    }>;
+  } = {
+    async run() {
+      return {
+        exitCode: 0,
+        stdout: "ok",
+        stderr: "",
+        truncated: false,
+        terminalReason: "success",
+      };
+    },
+  },
+) {
   const keys = createTestKeys();
   const workspaceRoot = mkdtempSync(path.join(tmpdir(), "ashley-broker-int-"));
   mkdirSync(path.join(workspaceRoot, "workspace"), { recursive: true });
@@ -23,17 +43,7 @@ function createIntegrationBroker() {
     tombstone: tombstoneVerifier(keys),
     interpreterAllowlist: new Set(["/bin/echo"]),
     envAllowlist: new Set(["PATH"]),
-    processRunner: {
-      async run() {
-        return {
-          exitCode: 0,
-          stdout: "ok",
-          stderr: "",
-          truncated: false,
-          terminalReason: "success",
-        };
-      },
-    },
+    processRunner,
   });
   return { broker, keys, transport: new MemoryTransport(broker) };
 }
@@ -63,6 +73,30 @@ describe("broker integration", () => {
       expect(response.data?.taskId).toBe("int-task-1");
       expect(response.data?.state).toBe("running");
     }
+  });
+
+  it("passes the canonical workspace path to the runner", () => {
+    let cwd = "";
+    const { broker, keys } = createIntegrationBroker({
+      async run(request) {
+        cwd = request.cwd;
+        return {
+          exitCode: 0,
+          stdout: "ok",
+          stderr: "",
+          truncated: false,
+          terminalReason: "success",
+        };
+      },
+    });
+    const approval = signedApproval(keys, {
+      taskId: "canonical-cwd",
+      nonce: "canonical-cwd-nonce",
+      cwd: "workspace",
+    });
+    const result = broker.taskSubmit({ approval }, ownerCtx);
+    expect(result.ok).toBe(true);
+    expect(cwd).toBe(realpathSync(path.join(broker.config.workspaceRoot, "workspace")));
   });
 
   it("rejects non-owner peer on mutating paths", () => {
