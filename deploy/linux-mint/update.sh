@@ -8,6 +8,9 @@ echo "=== Ashley Mint update ==="
 cd "$ROOT"
 git pull --ff-only
 
+npm ci --prefix "${ROOT}/apps/sandbox-broker"
+npm run build --prefix "${ROOT}/apps/sandbox-broker"
+
 npm ci --prefix "${ROOT}/apps/agent-service"
 npm run build --prefix "${ROOT}/apps/agent-service"
 
