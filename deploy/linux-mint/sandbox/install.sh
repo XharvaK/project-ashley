@@ -134,6 +134,13 @@ root_run install -d -o root -g root -m 0755 /opt/ashley-sandbox
 root_run install -d -o root -g root -m 0755 /opt/ashley-sandbox/dist
 root_run install -d -o root -g root -m 0755 /opt/ashley-sandbox/bin
 
+node_binary="$(readlink -f "$(command -v node)")"
+if [[ ! -x "$node_binary" ]]; then
+  echo "Node binary is missing or not executable: $node_binary" >&2
+  exit 2
+fi
+root_run install -o root -g root -m 0755 "$node_binary" /opt/ashley-sandbox/bin/node
+
 root_run cp -a "$ROOT/apps/sandbox-broker/dist/." /opt/ashley-sandbox/dist/
 root_run install -o root -g root -m 0644 "$ROOT/apps/sandbox-broker/package.json" \
   /opt/ashley-sandbox/package.json
@@ -171,7 +178,7 @@ root_run install -o root -g ashley-sandbox -m 0640 "$env_tmp" /etc/ashley-sandbo
 
 for unit in ashley-exec-broker.socket ashley-exec-broker.service; do
   rendered="$(mktemp)"
-  sed -e 's|@NODE@|/usr/bin/node|g' "$SCRIPT_DIR/systemd/$unit" >"$rendered"
+  sed -e 's|@NODE@|/opt/ashley-sandbox/bin/node|g' "$SCRIPT_DIR/systemd/$unit" >"$rendered"
   root_run install -o root -g root -m 0644 "$rendered" "/etc/systemd/system/$unit"
   rm -f "$rendered"
 done
