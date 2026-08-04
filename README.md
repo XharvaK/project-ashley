@@ -11,42 +11,10 @@ architecture and runtime are accountable to that Vision through the reviewed
 governance documents below; the Vision itself is **not** copied into ordinary
 runtime prompts.
 
-## Current state
+## Architecture
 
-The defined local wave program through Wave 10c is complete within its stated
-scope. The acceptance ladder is intentionally more precise than “the tests
-passed”:
-
-| Wave | Recorded stage | What that means |
-|---|---|---|
-| 00–05 | `Implementation_present` (`legacy_local`) | Existing local implementation recorded and acknowledged; not formally `Wave_accepted` |
-| 06 | `Wave_accepted` | Accepted locally; not `Release_qualified` |
-| 07 | `Design_accepted` | OS-boundary broker design accepted; production broker not installed |
-| 07b | `Wave_accepted` | Fake/local sandbox broker accepted; no Mint service |
-| 08 | `Design_accepted` | Self-modification proposal design accepted |
-| 08b | `Wave_accepted` | Local change-proposal and isolated-source workflow accepted |
-| 09 | `Design_accepted` | External-agency design accepted |
-| 09b | `Wave_accepted` | Fake/local external broker accepted; real adapters and credentials deferred |
-| 10 | `Design_accepted` | Stabilization design accepted |
-| 10a–10c | `Wave_accepted` | Manifest, deterministic evaluation, health, resource, and backup assurance accepted locally |
-
-The governing definitions and gate packets are in
-[`docs/Wave_Acceptance_Protocol.md`](docs/Wave_Acceptance_Protocol.md) and
-[`docs/handoffs/`](docs/handoffs/). A wave acceptance is not an automatic
-authorization to enable `apply`, qualify a release, install services, or
-change production.
-
-At the time of this rewrite, the current runtime commit (`6bebfdd`) has been
-deployed to the configured Linux Mint host and both Ashley services were
-restarted successfully. That operational fact does not retroactively mark the
-waves `Release_qualified`; the online live-check still needs contract-aligned
-follow-up before it is treated as release evidence. This README change is
-documentation-only and does not redeploy Mint.
-
-## Architecture in one view
-
-Ashley is a nuclear Identity → Mind State → Agency system. The conceptual
-causal path is deliberately narrow:
+Ashley is an Identity → Mind State → Agency system.
+The conceptual causal path is deliberately narrow:
 
 ```text
 Identity (stable) ──┐
