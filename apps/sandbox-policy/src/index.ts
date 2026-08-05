@@ -10,6 +10,8 @@
 
 export * from "./types.js";
 export * from "./canonical-paths.js";
+export * from "./canonical-payload.js";
+export * from "./delegated-policy.js";
 export * from "./protected-roots.js";
 export * from "./classify.js";
 export * from "./policy-schema.js";
