@@ -160,6 +160,17 @@ export function createServer(manager: AgentManager): express.Express {
     }
   });
 
+  app.get("/nuclear/routing", (req, res) => {
+    try {
+      const ownerId = String(req.query.owner_id ?? "");
+      requireOwner(ownerId || undefined);
+      res.json({ nuclear: true, routes: manager.core.getRoutingStatus() });
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
   app.get("/nuclear/status", (req, res) => {
     try {
       const ownerId = String(req.query.owner_id ?? "");

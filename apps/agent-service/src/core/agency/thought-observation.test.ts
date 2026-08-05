@@ -12,9 +12,11 @@ import {
 } from "../rollout/capabilities.js";
 
 const originalKey = env.mistralApiKey;
+const originalGroqKey = env.groqApiKey;
 
 afterEach(() => {
   env.mistralApiKey = originalKey;
+  env.groqApiKey = originalGroqKey;
   vi.restoreAllMocks();
 });
 
@@ -54,7 +56,7 @@ function baseDecision(overrides: Partial<Decision> = {}): Decision {
 
 describe("Thought sub-deadline and observation", () => {
   it("skips model Thought when sub-deadline has already passed", async () => {
-    env.mistralApiKey = "test-key";
+    env.groqApiKey = "test";
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     const complete = vi.fn();
     const decision = await deliberateDecision(
@@ -77,7 +79,7 @@ describe("Thought sub-deadline and observation", () => {
   });
 
   it("does not record live-shadow when observation fails", async () => {
-    env.mistralApiKey = "test-key";
+    env.groqApiKey = "test";
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     vi.spyOn(mistral, "completeChat").mockRejectedValue(new Error("boom"));
     enqueueThoughtObservation({
@@ -98,7 +100,7 @@ describe("Thought sub-deadline and observation", () => {
   });
 
   it("records live-shadow only after successful observation parse", async () => {
-    env.mistralApiKey = "test-key";
+    env.groqApiKey = "test";
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     vi.spyOn(mistral, "completeChat").mockResolvedValue({
       text: JSON.stringify({

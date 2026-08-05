@@ -40,7 +40,7 @@ function schemaVersion(db: DatabaseSync): number {
 describe("wave09b external agency", () => {
   it("migrates fresh database to v17 with external agency tables", () => {
     const db = openTestDb();
-    expect(schemaVersion(db)).toBe(17);
+    expect(schemaVersion(db)).toBe(18);
     const tables = db
       .prepare(
         `SELECT name FROM sqlite_master

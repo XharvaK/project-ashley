@@ -125,7 +125,7 @@ export async function deliberateDecision(
   if (
     !allowModelThought ||
     !canInfluence(db) ||
-    !env.mistralApiKey ||
+    !env.groqApiKey ||
     base.kind === "silence" ||
     base.kind === "delay" ||
     base.cognitiveAllocation.completion === "hold" ||
@@ -178,6 +178,7 @@ export async function deliberateDecision(
         reasoningEffort: "medium",
         lane: "interactive",
         purpose: "thought",
+        route: "thought",
         deadlineAtMs: thoughtDeadline,
         decisionId: options.decisionId,
         deliveryReservationId: options.deliveryReservationId,

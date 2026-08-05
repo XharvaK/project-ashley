@@ -19,6 +19,7 @@ import {
   tryAdmitRequest,
 } from "./ledger.js";
 import { monthlyUsageSummary } from "./daily.js";
+import { quotaContractFor } from "../model-routing/router.js";
 import type { AttentionClock, AttentionLane, AttentionPurpose } from "./types.js";
 import { mapPurposeToLane, realClock } from "./types.js";
 import {
@@ -33,6 +34,10 @@ export type AttentionDispatchInput = {
   purpose: AttentionPurpose;
   lane?: AttentionLane;
   modelAlias?: string;
+  /** @deprecated Prefer quotaBucket. */
+  providerId?: string;
+  routeAlias?: string | null;
+  quotaBucket?: string;
   maxTokens?: number;
   toolsJson?: string;
   signal?: AbortSignal;
@@ -100,20 +105,32 @@ export async function runAttentiveDispatch<T>(
   input: AttentionDispatchInput,
   clock: AttentionClock = realClock,
 ): Promise<AttentionDispatchResult<T>> {
-  if (!env.mistralApiKey) {
-    throw new AppError("agent_not_ready", "Mistral API key not configured", 503);
-  }
   ensureBootstrapContract(db);
   // Crash recovery runs once at process/core start — never here (would kill peers).
 
-  const modelAlias = input.modelAlias ?? env.mistralModel;
+  const providerId = input.providerId ?? "mistral";
+  const modelAlias =
+    input.modelAlias ??
+    (providerId === "mistral" ? env.mistralModel : env.groqDefaultModel);
+  const quotaBucket = input.quotaBucket ?? `${providerId}:${modelAlias}`;
+  // Provider-specific key gate — no attention reservation / no limiter consumption.
+  if (providerId === "mistral" && !env.mistralApiKey) {
+    throw new AppError(
+      "agent_not_ready",
+      "Mistral API key not configured",
+      503,
+    );
+  }
+  if (providerId === "groq" && !env.groqApiKey) {
+    throw new AppError("agent_not_ready", "Groq API key not configured", 503);
+  }
   const estimate = estimateRequestTokens(input.messages, {
     maxTokens: input.maxTokens,
     toolsJson: input.toolsJson,
   });
   const totalDemand =
     estimate.estimatedInputTokens + estimate.estimatedOutputTokens;
-  if (totalDemand > env.mistralTokensPerMinute) {
+  if (totalDemand > quotaContractFor(quotaBucket).tpm) {
     throw Object.assign(new Error("request_exceeds_tpm_budget"), {
       code: "request_exceeds_tpm_budget",
     });
@@ -126,6 +143,9 @@ export async function runAttentiveDispatch<T>(
       lane,
       purpose: input.purpose,
       modelAlias,
+      providerId,
+      quotaBucket,
+      routeAlias: input.routeAlias ?? null,
       estimatedInputTokens: estimate.estimatedInputTokens,
       estimatedOutputTokens: estimate.estimatedOutputTokens,
       deadlineAtMs: input.deadlineAtMs,
@@ -303,7 +323,12 @@ export async function runAttentiveDispatch<T>(
 
     let waitMs = 50;
     try {
-      const earliest = earliestLegalDispatchMs(db, totalDemand, clock);
+      const earliest = earliestLegalDispatchMs(
+        db,
+        totalDemand,
+        clock,
+        quotaBucket,
+      );
       waitMs = Math.max(25, Math.min(250, earliest - clock.nowMs()));
     } catch {
       waitMs = 50;

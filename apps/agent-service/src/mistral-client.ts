@@ -1,5 +1,4 @@
 import { Mistral } from "@mistralai/mistralai";
-import type { DatabaseSync } from "node:sqlite";
 import { env } from "./env.js";
 import { AppError } from "./errors.js";
 import { openNuclearDb } from "./core/db.js";
@@ -10,76 +9,37 @@ import {
   type AttentionPurpose,
 } from "./core/attention/index.js";
 import { assertOutboundAllowed } from "./core/continuity/process-guards.js";
+import {
+  createMistralAdapter,
+  mapMistralError,
+} from "./core/model-routing/adapters/mistral-adapter.js";
+import {
+  createGroqAdapter,
+  mapGroqError,
+} from "./core/model-routing/adapters/groq-adapter.js";
+import { resolveRoute, requireRouteEnabled } from "./core/model-routing/router.js";
+import { quotaBucketFor } from "./core/model-routing/types.js";
 
-export type ChatMessage = {
-  role: "system" | "user" | "assistant";
-  content: string;
-  /** Inline data:image/...;base64,... URIs only — never Discord HTTPS URLs. */
-  imageUrls?: string[];
-};
-
-export type TokenUsage = {
-  promptTokens: number;
-  completionTokens: number;
-};
-
-export type ToolDefinition = {
-  type: "function";
-  function: {
-    name: string;
-    description: string;
-    parameters?: Record<string, unknown>;
-  };
-};
-
-export type ToolCallResult = {
-  id?: string;
-  function: {
-    name: string;
-    arguments: string;
-  };
-};
-
-/** @deprecated Use AttentionLane via purpose/lane options. */
-export type Lane = "interactive" | "background";
-
-export type CompletionOptions = {
-  model?: string;
-  maxTokens?: number;
-  temperature?: number;
-  presencePenalty?: number;
-  reasoningEffort?: "low" | "medium" | "high";
-  tools?: ToolDefinition[];
-  toolChoice?: string | Record<string, unknown>;
-  signal?: AbortSignal;
-  /** Legacy two-lane hint; mapped to attention lanes. */
-  lane?: Lane | AttentionLane;
-  purpose?: AttentionPurpose;
-  deadlineAtMs?: number | null;
-  decisionId?: number | null;
-  deliveryReservationId?: number | null;
-  cognitiveJobId?: number | null;
-  ownerId?: string | null;
-  ageOriginAtMs?: number;
-  /** Test injection: use this DB instead of opening nuclear.db. */
-  attentionDb?: DatabaseSync;
-};
-
-function toTokenUsage(raw: unknown): TokenUsage | undefined {
-  if (!raw || typeof raw !== "object") return undefined;
-  const r = raw as {
-    promptTokens?: unknown;
-    completionTokens?: unknown;
-    prompt_tokens?: unknown;
-    completion_tokens?: unknown;
-  };
-  const promptTokens = Number(r.promptTokens ?? r.prompt_tokens);
-  const completionTokens = Number(r.completionTokens ?? r.completion_tokens);
-  if (!Number.isFinite(promptTokens) || !Number.isFinite(completionTokens)) {
-    return undefined;
-  }
-  return { promptTokens, completionTokens };
-}
+import type {
+  ChatMessage,
+  TokenUsage,
+  ToolDefinition,
+  ToolCallResult,
+  Lane,
+  CompletionOptions,
+  ProviderId,
+  ModelProviderAdapter,
+  RouteId,
+} from "./core/model-routing/types.js";
+export type {
+  ChatMessage,
+  TokenUsage,
+  ToolDefinition,
+  ToolCallResult,
+  Lane,
+  CompletionOptions,
+  RouteId,
+} from "./core/model-routing/types.js";
 
 let client: Mistral | null = null;
 
@@ -97,122 +57,28 @@ function getClient(): Mistral {
   return client;
 }
 
-export function extractTextDelta(delta: unknown): string {
-  if (typeof delta === "string") return delta;
-  if (Array.isArray(delta)) {
-    return delta
-      .filter(
-        (c): c is { type?: string; text?: string } =>
-          typeof c === "object" && c !== null,
-      )
-      .filter((c) => c.type === "text" || !c.type)
-      .map((c) => (typeof c.text === "string" ? c.text : ""))
-      .join("");
-  }
-  return "";
-}
+const adapterCache = new Map<ProviderId, ModelProviderAdapter>();
 
-function buildChatBody(
-  messages: ChatMessage[],
-  options: CompletionOptions,
-  stream: boolean,
-): Record<string, unknown> {
-  const body: Record<string, unknown> = {
-    model: options.model ?? env.mistralModel,
-    messages: messages.map((m) => ({
-      role: m.role,
-      content: m.imageUrls?.length
-        ? [
-            ...(m.content ? [{ type: "text", text: m.content }] : []),
-            ...m.imageUrls.map((url) => ({ type: "image_url", imageUrl: url })),
-          ]
-        : m.content,
-    })),
-    maxTokens: options.maxTokens ?? 2048,
-    temperature: options.temperature ?? env.mistralChatTemperature,
-    stream,
-  };
-  if (options.tools && options.tools.length > 0) {
-    body.tools = options.tools;
-  }
-  if (options.toolChoice) {
-    body.toolChoice = options.toolChoice;
-  }
-  if (options.presencePenalty !== undefined) {
-    body.presencePenalty = options.presencePenalty;
-  }
-  const effort = options.reasoningEffort ?? env.mistralReasoningEffort;
-  if (effort) {
-    body.reasoning_effort = effort;
-  }
-  return body;
-}
-
-function parseRetryAfterSec(err: unknown): number | undefined {
-  if (!err || typeof err !== "object") return undefined;
-  const e = err as {
-    headers?: Headers | Record<string, string>;
-    response?: { headers?: Headers | Record<string, string> };
-    statusCode?: number;
-    status?: number;
-  };
-  const headers = e.headers ?? e.response?.headers;
-  if (!headers) return undefined;
-  const raw =
-    typeof (headers as Headers).get === "function"
-      ? (headers as Headers).get("retry-after")
-      : (headers as Record<string, string>)["retry-after"] ??
-        (headers as Record<string, string>)["Retry-After"];
-  if (!raw) return undefined;
-  const asInt = Number.parseInt(raw, 10);
-  if (Number.isFinite(asInt) && asInt >= 0) return asInt;
-  const when = Date.parse(raw);
-  if (Number.isFinite(when)) {
-    return Math.max(0, Math.ceil((when - Date.now()) / 1000));
-  }
-  return undefined;
-}
-
-function mistralStatusCode(err: unknown): number | undefined {
-  if (!err || typeof err !== "object") return undefined;
-  const e = err as { statusCode?: number; status?: number };
-  const code = e.statusCode ?? e.status;
-  return typeof code === "number" && Number.isFinite(code) ? code : undefined;
-}
-
-export function mapMistralError(err: unknown): AppError {
-  if (err instanceof Error && err.name === "AbortError") {
-    throw err;
-  }
-  const msg = err instanceof Error ? err.message : String(err);
-  const status = mistralStatusCode(err);
-  console.error(
-    "[mistral]",
-    status ?? "no-status",
-    msg.slice(0, 500),
-  );
-
-  if (status === 429 || /429|rate.?limit/i.test(msg)) {
-    return new AppError(
-      "rate_limited",
-      "Mistral rate limited",
-      429,
-      parseRetryAfterSec(err) ?? 30,
-    );
-  }
-  if (
-    (status !== undefined && status >= 500) ||
-    /5\d{2}|unavailable|timeout|ECONNREFUSED|ECONNRESET|ETIMEDOUT/i.test(msg)
-  ) {
-    return new AppError(
-      "mistral_unavailable",
-      "Mistral unavailable",
+function adapterFor(provider: ProviderId): ModelProviderAdapter {
+  let adapter = adapterCache.get(provider);
+  if (adapter) return adapter;
+  if (provider === "mistral") {
+    adapter = createMistralAdapter(getClient);
+  } else if (provider === "groq") {
+    adapter = createGroqAdapter();
+  } else {
+    // Unknown / not-yet-implemented providers (e.g. NIM) fail closed.
+    throw new AppError(
+      "operator_disabled",
+      `unsupported_provider:${provider}`,
       503,
-      parseRetryAfterSec(err),
     );
   }
-  return new AppError("internal_error", "Mistral request failed", 500);
+  adapterCache.set(provider, adapter);
+  return adapter;
 }
+
+export { mapMistralError, mapGroqError, adapterFor };
 
 function mapLegacyLane(
   lane: CompletionOptions["lane"],
@@ -276,17 +142,15 @@ export async function completeChat(
   attentionRequestId?: number;
 }> {
   // Missing key: no attention reservation / no limiter consumption.
-  if (!env.mistralApiKey) {
-    throw new AppError(
-      "agent_not_ready",
-      "Mistral API key not configured",
-      503,
-    );
-  }
-  assertOutboundAllowed("mistral");
-
   const mapped = mapLegacyLane(options.lane, options.purpose);
-  const modelAlias = options.model ?? env.mistralModel;
+  const purpose = mapped.purpose;
+  const routeId: RouteId | undefined = options.route;
+  const binding = routeId ? requireRouteEnabled(routeId) : resolveRoute(purpose);
+  const provider: ProviderId = binding.provider;
+  const modelAlias = options.model ?? binding.configuredModelId;
+  const quotaBucket = quotaBucketFor(provider, modelAlias);
+
+  assertOutboundAllowed(provider);
   const db = options.attentionDb ?? openNuclearDb();
   const toolsJson = options.tools ? JSON.stringify(options.tools) : undefined;
 
@@ -299,6 +163,9 @@ export async function completeChat(
     messages,
     purpose: mapped.purpose,
     lane: mapped.lane,
+    providerId: provider,
+    quotaBucket,
+    routeAlias: routeId ?? null,
     modelAlias,
     maxTokens: options.maxTokens,
     toolsJson,
@@ -310,65 +177,28 @@ export async function completeChat(
     ownerId: options.ownerId,
     ageOriginAtMs: options.ageOriginAtMs,
     dispatch: async ({ modelAlias: alias, signal }) => {
-      const mistral = getClient();
       const merged = combineSignals(signal, options.deadlineAtMs);
+      const adapter = adapterFor(provider);
       try {
-        const res = await mistral.chat.complete(
-          buildChatBody(
-            messages,
-            { ...options, model: alias },
-            false,
-          ) as Parameters<typeof mistral.chat.complete>[0],
-          { fetchOptions: { signal: merged } },
-        );
-        const msg = res.choices[0]?.message;
-        const raw = msg?.content ?? "";
-        const text =
-          typeof raw === "string" ? raw : extractTextDelta(raw);
-        const rawToolCalls =
-          (msg as { toolCalls?: unknown[]; tool_calls?: unknown[] })
-            ?.toolCalls ??
-          (msg as { tool_calls?: unknown[] })?.tool_calls;
-        const toolCalls: ToolCallResult[] = [];
-        if (Array.isArray(rawToolCalls)) {
-          for (const tc of rawToolCalls) {
-            if (typeof tc === "object" && tc !== null && "function" in tc) {
-              const fn = (
-                tc as { function: { name?: string; arguments?: string } }
-              ).function;
-              if (fn && typeof fn.name === "string") {
-                toolCalls.push({
-                  id: (tc as { id?: string }).id,
-                  function: {
-                    name: fn.name,
-                    arguments:
-                      typeof fn.arguments === "string"
-                        ? fn.arguments
-                        : JSON.stringify(fn.arguments ?? {}),
-                  },
-                });
-              }
-            }
-          }
-        }
-        const usage = toTokenUsage((res as { usage?: unknown }).usage);
-        const providerModel =
-          typeof (res as { model?: unknown }).model === "string"
-            ? String((res as { model: string }).model)
-            : null;
+        const completion = await adapter.dispatch({
+          messages,
+          modelId: alias,
+          options: { ...options, model: alias },
+          signal: merged,
+        });
         return {
-          providerModel,
-          usage,
+          providerModel: completion.providerModel,
+          usage: completion.usage,
           result: {
-            text,
-            toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-            usage,
-            providerModel,
+            text: completion.text,
+            toolCalls: completion.toolCalls,
+            usage: completion.usage,
+            providerModel: completion.providerModel,
           },
         };
       } catch (err) {
         if (err instanceof Error && err.name === "AbortError") throw err;
-        throw mapMistralError(err);
+        throw provider === "mistral" ? mapMistralError(err) : mapGroqError(err);
       }
     },
   });
@@ -390,11 +220,12 @@ export async function smokeTest(): Promise<boolean> {
     [{ role: "user", content: "Reply with exactly: pong" }],
     {
       model: env.mistralModel,
+      route: "ashley_expression",
       maxTokens: 16,
       temperature: 0,
       reasoningEffort: "low",
-      purpose: "maintenance",
-      lane: "curiosity_maintenance",
+      purpose: "expression",
+      lane: "interactive",
     },
   );
   return text.toLowerCase().includes("pong");

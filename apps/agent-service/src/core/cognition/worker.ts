@@ -160,7 +160,7 @@ function parseJson(text: string): unknown {
 }
 
 async function analyzeWithMistral(transcript: string): ReturnType<Analyze> {
-  if (!env.mistralApiKey) {
+  if (!env.groqApiKey) {
     return {
       analysis: analysisFrom({}, transcript.replace(/\s+/g, " ").slice(0, 700)),
       model: "offline",
@@ -189,6 +189,7 @@ async function analyzeWithMistral(transcript: string): ReturnType<Analyze> {
     temperature: 0.2,
     reasoningEffort: "medium",
     purpose: "exchange_cognition",
+    route: "utility_bulk",
     lane: "exchange_cognition",
   });
   return {

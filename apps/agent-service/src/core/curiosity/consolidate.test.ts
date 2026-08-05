@@ -8,9 +8,11 @@ import { consolidateCuriosityRead } from "./consolidate.js";
 import { processSourceProbation } from "./sources.js";
 
 const originalKey = env.mistralApiKey;
+const originalGroqKey = env.groqApiKey;
 
 afterEach(() => {
   env.mistralApiKey = originalKey;
+  env.groqApiKey = originalGroqKey;
 });
 
 function seededRead(db: DatabaseSync): number {
@@ -34,7 +36,7 @@ function seededRead(db: DatabaseSync): number {
 
 describe("curiosity consolidation", () => {
   it("treats article text as untrusted and links every derived claim to the read", async () => {
-    env.mistralApiKey = "test";
+    env.groqApiKey = "test";
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     const readId = seededRead(db);
     const item = db.prepare("SELECT item_id FROM cur_reads WHERE id = ?").get(readId) as { item_id: number };

@@ -43,7 +43,7 @@ describe("wave10c backup and restore assurance", () => {
         continuity,
         outDir: join(dir, "backups"),
         transferKeyHex: key,
-        nuclearSchemaVersion: 17,
+        nuclearSchemaVersion: 18,
         continuitySchemaVersion: 1,
         buildIdentity: "wave10c-test",
       });
@@ -53,7 +53,7 @@ describe("wave10c backup and restore assurance", () => {
         transferKeyHex: key,
         expectedLineageId: lineageId,
       });
-      expect(manifest.nuclearSchemaVersion).toBe(17);
+      expect(manifest.nuclearSchemaVersion).toBe(18);
       expect(manifest.continuitySchemaVersion).toBe(1);
       expect(restoreVerifyPackage({
         packagePath: result.packagePath,

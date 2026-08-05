@@ -144,6 +144,7 @@ export async function expressSpeak(
   try {
     response = await completeChat(messages, {
       model: env.mistralModel,
+      route: "ashley_expression",
       maxTokens: channel === "proactive" ? 500 : 900,
       temperature: env.mistralChatTemperature,
       reasoningEffort: decision.cognitiveAllocation.effort,

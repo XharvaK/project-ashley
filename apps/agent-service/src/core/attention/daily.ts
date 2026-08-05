@@ -35,6 +35,7 @@ export function foldAttentionDailyUsage(
       AggKey,
       {
         day: string;
+        bucket: string;
         alias: string;
         resolved: string;
         epoch: number;
@@ -57,15 +58,17 @@ export function foldAttentionDailyUsage(
     for (const row of rows) {
       const ended = String(row.ended_at);
       const day = ended.slice(0, 10);
+      const bucket = String(row.quota_bucket);
       const alias = String(row.model_alias);
       const resolved =
         row.resolved_model_id == null ? "" : String(row.resolved_model_id);
       const epoch = Number(row.model_epoch ?? 0);
-      const key = `${day}|${alias}|${resolved}|${epoch}`;
+      const key = `${day}|${bucket}`;
       let agg = aggs.get(key);
       if (!agg) {
         agg = {
           day,
+          bucket,
           alias,
           resolved,
           epoch,
@@ -157,16 +160,12 @@ export function foldAttentionDailyUsage(
            FROM attention_requests
            WHERE state = 'terminal'
              AND substr(ended_at, 1, 10) = ?
-             AND model_alias = ?
-             AND COALESCE(resolved_model_id, '') = ?
-             AND COALESCE(model_epoch, 0) = ?
+             AND quota_bucket = ?
              AND (folded_at IS NOT NULL OR id IN (${rows.map(() => "?").join(",")}))`,
         )
         .get(
           agg.day,
-          agg.alias,
-          agg.resolved,
-          agg.epoch,
+          agg.bucket,
           ...rows.map((r) => Number(r.id)),
         );
 
@@ -190,14 +189,14 @@ export function foldAttentionDailyUsage(
 
       db.prepare(
         `INSERT INTO attention_daily_usage (
-           day_utc, model_alias, resolved_model_id, model_epoch,
+           day_utc, quota_bucket, model_alias, resolved_model_id, model_epoch,
            requests_completed, requests_cancelled, requests_timeout,
            requests_rate_limited, requests_error, requests_aborted,
            lane_interactive, lane_urgent_grounded, lane_exchange_cognition,
            lane_curiosity_maintenance, actual_input_tokens, actual_output_tokens,
            unknown_reserved_tokens, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(day_utc, model_alias, resolved_model_id, model_epoch) DO UPDATE SET
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(day_utc, quota_bucket) DO UPDATE SET
            requests_completed = excluded.requests_completed,
            requests_cancelled = excluded.requests_cancelled,
            requests_timeout = excluded.requests_timeout,
@@ -214,6 +213,7 @@ export function foldAttentionDailyUsage(
            updated_at = excluded.updated_at`,
       ).run(
         agg.day,
+        agg.bucket,
         agg.alias,
         agg.resolved,
         agg.epoch,

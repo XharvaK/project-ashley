@@ -15,6 +15,8 @@ import { logDecision, setDecisionOutcome } from "./agency/log.js";
 import { composeTurnContext } from "./context-composer.js";
 import { expressSpeak } from "./conversation/expression.js";
 import { seedIdentity } from "./identity/seed.js";
+import { routingStatus } from "./model-routing/status.js";
+import type { RoutingRouteStatus } from "./model-routing/status.js";
 import {
   listActiveFacts,
   upsertFact,
@@ -1983,6 +1985,10 @@ export class AshleyCore {
         sandbox: this.getSandboxAvailability(),
       },
     };
+  }
+
+  getRoutingStatus(): RoutingRouteStatus[] {
+    return routingStatus(this.db);
   }
 
   getAttentionObservability() {

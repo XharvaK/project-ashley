@@ -20,6 +20,7 @@ import type {
   AttentionPurpose,
   AttentionState,
 } from "./types.js";
+import { quotaContractFor } from "../model-routing/router.js";
 
 type Row = Record<string, unknown>;
 
@@ -31,6 +32,11 @@ export type EnqueueInput = {
   lane: AttentionLane;
   purpose: AttentionPurpose;
   modelAlias: string;
+  /** Defaults to "mistral". */
+  providerId?: string;
+  /** Defaults to the legacy mistral:<env model> bucket. */
+  quotaBucket?: string;
+  routeAlias?: string | null;
   estimatedInputTokens: number;
   estimatedOutputTokens: number;
   deadlineAtMs?: number | null;
@@ -41,6 +47,11 @@ export type EnqueueInput = {
   cognitiveJobId?: number | null;
   ownerId?: string | null;
 };
+
+/** Default bucket for legacy callers until the router supplies routes. */
+export function defaultQuotaBucket(): string {
+  return `mistral:${env.mistralModel}`;
+}
 
 export function ensureBootstrapContract(db: DatabaseSync): void {
   const hash = declaredContractHash();
@@ -91,20 +102,26 @@ export function insertQueuedRequest(
     input.deadlineAtMs != null
       ? new Date(input.deadlineAtMs).toISOString()
       : null;
+  const providerId = input.providerId ?? "mistral";
+  const quotaBucket = input.quotaBucket ?? defaultQuotaBucket();
   const result = db
     .prepare(
       `INSERT INTO attention_requests
-         (lane, purpose, model_alias, state, outcome, error_class,
+         (lane, purpose, model_alias, provider_id, route_alias, quota_bucket,
+          state, outcome, error_class,
           queued_at, eligible_at, age_origin_at, deadline_at,
           estimated_input_tokens, estimated_output_tokens,
           delivery_reservation_id, decision_id, cognitive_job_id, owner_id,
           created_at)
-       VALUES (?, ?, ?, 'queued', NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, 'queued', NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.lane,
       input.purpose,
       input.modelAlias,
+      providerId,
+      input.routeAlias ?? null,
+      quotaBucket,
       nowIso,
       eligibleAt,
       ageOriginAt,
@@ -145,6 +162,7 @@ function tokensInWindow(
   db: DatabaseSync,
   windowStartIso: string,
   nowIso: string,
+  quotaBucket: string,
 ): number {
   const row = db
     .prepare(
@@ -165,25 +183,39 @@ function tokensInWindow(
          END
        ), 0) AS tokens
        FROM attention_requests
-       WHERE
-         (state IN ('reserved', 'running') AND reserved_at >= ?)
-         OR (state = 'terminal' AND (
-              (dispatch_started_at IS NOT NULL AND dispatch_started_at >= ?)
-              OR (budget_retain_until IS NOT NULL AND budget_retain_until > ?)
-            ))`,
+       WHERE quota_bucket = ?
+         AND (
+          (state IN ('reserved', 'running') AND reserved_at >= ?)
+          OR (state = 'terminal' AND (
+               (dispatch_started_at IS NOT NULL AND dispatch_started_at >= ?)
+               OR (budget_retain_until IS NOT NULL AND budget_retain_until > ?)
+             ))
+         )`,
     )
-    .get(windowStartIso, nowIso, windowStartIso, windowStartIso, nowIso);
+    .get(
+      windowStartIso,
+      nowIso,
+      quotaBucket,
+      windowStartIso,
+      windowStartIso,
+      nowIso,
+    );
   return isRow(row) ? Number(row.tokens ?? 0) : 0;
 }
 
-function rpsStartsInWindow(db: DatabaseSync, windowStartIso: string): number {
+function rpsStartsInWindow(
+  db: DatabaseSync,
+  windowStartIso: string,
+  quotaBucket: string,
+): number {
   const row = db
     .prepare(
       `SELECT COUNT(*) AS c FROM attention_requests
        WHERE dispatch_started_at IS NOT NULL AND dispatch_started_at >= ?
+         AND quota_bucket = ?
          AND state IN ('reserved', 'running', 'terminal')`,
     )
-    .get(windowStartIso);
+    .get(windowStartIso, quotaBucket);
   return isRow(row) ? Number(row.c ?? 0) : 0;
 }
 
@@ -191,23 +223,26 @@ export function earliestLegalDispatchMs(
   db: DatabaseSync,
   demandTokens: number,
   clock: AttentionClock = realClock,
+  quotaBucket: string = defaultQuotaBucket(),
 ): number {
   const now = clock.nowMs();
   let candidate = now;
-  const rpsLimit = env.mistralRequestsPerSecond;
-  const tpmLimit = env.mistralTokensPerMinute;
+  const contract = quotaContractFor(quotaBucket);
+  const rpsLimit = contract.rps;
+  const tpmLimit = contract.tpm;
 
   // RPS: if at capacity, wait until oldest dispatch leaves the 1s window.
   for (let i = 0; i < 8; i++) {
     const windowStart = new Date(candidate - RPS_WINDOW_MS + 1).toISOString();
-    if (rpsStartsInWindow(db, windowStart) < rpsLimit) break;
+    if (rpsStartsInWindow(db, windowStart, quotaBucket) < rpsLimit) break;
     const oldest = db
       .prepare(
         `SELECT dispatch_started_at FROM attention_requests
          WHERE dispatch_started_at IS NOT NULL AND dispatch_started_at >= ?
+           AND quota_bucket = ?
          ORDER BY dispatch_started_at ASC LIMIT 1`,
       )
-      .get(windowStart);
+      .get(windowStart, quotaBucket);
     if (!isRow(oldest) || typeof oldest.dispatch_started_at !== "string") break;
     candidate = Date.parse(oldest.dispatch_started_at) + RPS_WINDOW_MS;
   }
@@ -221,7 +256,7 @@ export function earliestLegalDispatchMs(
   for (let i = 0; i < 8; i++) {
     const windowStart = new Date(candidate - TPM_WINDOW_MS + 1).toISOString();
     const nowIso = new Date(candidate).toISOString();
-    const used = tokensInWindow(db, windowStart, nowIso);
+    const used = tokensInWindow(db, windowStart, nowIso, quotaBucket);
     if (used + demandTokens <= tpmLimit) break;
     candidate += 1_000;
   }
@@ -371,9 +406,11 @@ export function tryAdmitRequest(
     const demand =
       Number(row.estimated_input_tokens ?? 0) +
       Number(row.estimated_output_tokens ?? 0);
+    const bucket =
+      typeof row.quota_bucket === "string" ? row.quota_bucket : defaultQuotaBucket();
     const deadline =
       typeof row.deadline_at === "string" ? Date.parse(row.deadline_at) : null;
-    const earliest = earliestLegalDispatchMs(db, demand, clock);
+    const earliest = earliestLegalDispatchMs(db, demand, clock, bucket);
     if (deadline != null && earliest >= deadline) {
       const ended = new Date(now).toISOString();
       db.prepare(
@@ -516,11 +553,12 @@ export function completeRequest(
 export function currentTpmUsage(
   db: DatabaseSync,
   clock: AttentionClock = realClock,
+  quotaBucket: string = defaultQuotaBucket(),
 ): number {
   const now = clock.nowMs();
   const windowStart = new Date(now - TPM_WINDOW_MS + 1).toISOString();
   const nowIso = new Date(now).toISOString();
-  return tokensInWindow(db, windowStart, nowIso);
+  return tokensInWindow(db, windowStart, nowIso, quotaBucket);
 }
 
 export function pruneFoldedAttentionRequests(

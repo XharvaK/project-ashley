@@ -15,7 +15,7 @@ export function enqueueThoughtObservation(input: {
   trigger: Trigger;
   decisionId: number;
 }): void {
-  if (!env.mistralApiKey) return;
+  if (!env.groqApiKey) return;
   const sourceKey = `thought-observe:decision:${input.decisionId}`;
   const candidates = input.motivations.slice(0, 12).map((motivation) => ({
     id: motivation.id,
@@ -44,6 +44,7 @@ export function enqueueThoughtObservation(input: {
     ],
     {
       purpose: "thought_observation",
+      route: "utility_bulk",
       lane: "exchange_cognition",
       maxTokens: 450,
       temperature: 0.15,

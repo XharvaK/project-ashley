@@ -9,6 +9,7 @@ import type { Motivation } from "../types.js";
 
 const originalMode = env.cognitionMode;
 const originalKey = env.mistralApiKey;
+const originalGroqKey = env.groqApiKey;
 const motivation: Motivation = {
   id: 1,
   kind: "user_message",
@@ -21,6 +22,7 @@ const motivation: Motivation = {
 afterEach(() => {
   env.cognitionMode = originalMode;
   env.mistralApiKey = originalKey;
+  env.groqApiKey = originalGroqKey;
 });
 
 describe("Thought fallback", () => {
@@ -30,7 +32,7 @@ describe("Thought fallback", () => {
     ["AbortError", Object.assign(new Error("aborted"), { name: "AbortError" })],
   ])("returns deterministic Agency on %s", async (expected, failure) => {
     env.cognitionMode = "apply";
-    env.mistralApiKey = "test";
+    env.groqApiKey = "test";
     const db = new DatabaseSync(":memory:");
     const base = decide([motivation], "reactive");
     const result = await deliberateDecision(
@@ -52,7 +54,7 @@ describe("Thought fallback", () => {
 
   it("falls back on malformed structured output", async () => {
     env.cognitionMode = "apply";
-    env.mistralApiKey = "test";
+    env.groqApiKey = "test";
     const db = new DatabaseSync(":memory:");
     const result = await deliberateDecision(
       db,
@@ -71,7 +73,7 @@ describe("Thought fallback", () => {
 
   it("persists only a sanitized provider error code", async () => {
     env.cognitionMode = "apply";
-    env.mistralApiKey = "test";
+    env.groqApiKey = "test";
     const db = new DatabaseSync(":memory:");
     const result = await deliberateDecision(
       db,
@@ -92,7 +94,7 @@ describe("Thought fallback", () => {
 
   it("accepts refusal only when it selects the current message and a stable boundary", async () => {
     env.cognitionMode = "apply";
-    env.mistralApiKey = "test";
+    env.groqApiKey = "test";
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     seedIdentity(db, "doc");
     db.prepare(

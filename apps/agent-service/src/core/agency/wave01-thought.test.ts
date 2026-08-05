@@ -17,10 +17,12 @@ import { insertMessage, resolveActiveThread } from "../memory/threads.js";
 
 const originalMode = env.cognitionMode;
 const originalKey = env.mistralApiKey;
+const originalGroqKey = env.groqApiKey;
 
 afterEach(() => {
   env.cognitionMode = originalMode;
   env.mistralApiKey = originalKey;
+  env.groqApiKey = originalGroqKey;
 });
 
 function mot(
@@ -160,7 +162,7 @@ describe("Wave 01 Thought call gating", () => {
 
   it("hard+effective makes exactly one influencing Thought call", async () => {
     env.cognitionMode = "apply";
-    env.mistralApiKey = "test-key";
+    env.groqApiKey = "test-key";
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     const motivations = [
       mot("user_message", 100, "urgent crisis debug the deadlock now", {

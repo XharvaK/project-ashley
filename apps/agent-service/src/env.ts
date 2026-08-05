@@ -115,6 +115,10 @@ export const env = {
     10_000_000,
     true,
   ),
+  groqApiKey: process.env.GROQ_API_KEY ?? "",
+  groqBaseUrl:
+    process.env.GROQ_BASE_URL ?? "https://api.groq.com/openai/v1",
+  groqDefaultModel: process.env.GROQ_DEFAULT_MODEL ?? "openai/gpt-oss-20b",
   thoughtExpressionGuardMs: numericEnv(
     "THOUGHT_EXPRESSION_GUARD_MS",
     4_000,
