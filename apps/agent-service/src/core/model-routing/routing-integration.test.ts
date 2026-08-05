@@ -214,4 +214,57 @@ describe("shared 20B quota bucket at the dispatch layer", () => {
     expect(fake).toHaveBeenCalledTimes(2);
     db.close();
   });
+
+  describe("Wave 2: Thought failure isolates the Mistral lane", () => {
+    it("Thought failure leaves Expression independently dispatchable in its own bucket", async () => {
+      env.mistralApiKey = "test";
+      env.groqApiKey = "";
+      const db = freshDb();
+      // Groq gate closed -> Thought fails before any reservation/dispatch.
+      await expect(
+        completeChat(
+          [{ role: "user", content: "x" }],
+          { route: "thought", attentionDb: db },
+        ),
+      ).rejects.toMatchObject({ code: "agent_not_ready" });
+      const groqRows = Number(
+        (
+          db.prepare(
+            `SELECT COUNT(*) AS c FROM attention_requests WHERE quota_bucket LIKE 'groq:%'`,
+          ).get() as { c: number }
+        ).c,
+      );
+      expect(groqRows).toBe(0);
+
+      // Expression (Mistral lane) is untouched and still dispatches.
+      const b = resolveRoute("expression");
+      let called = false;
+      const res = await runAttentiveDispatch<{ echo: string }>(db, {
+        messages: [] as EstimateMessage[],
+        purpose: "expression" as never,
+        providerId: b.provider,
+        quotaBucket: quotaBucketFor(b.provider, b.configuredModelId),
+        modelAlias: b.configuredModelId,
+        dispatch: async () => {
+          called = true;
+          return {
+            providerModel: b.configuredModelId,
+            usage: { promptTokens: 1, completionTokens: 1 },
+            result: { echo: "ok" },
+          };
+        },
+      });
+      expect(called).toBe(true);
+      const mistralRows = Number(
+        (
+          db.prepare(
+            `SELECT COUNT(*) AS c FROM attention_requests WHERE quota_bucket = 'mistral:mistral-medium-latest'`,
+          ).get() as { c: number }
+        ).c,
+      );
+      expect(mistralRows).toBe(1);
+      expect(res.result.echo).toBe("ok");
+      db.close();
+    });
+  });
 });
