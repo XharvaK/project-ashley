@@ -21,6 +21,14 @@ import { composeSelfCapabilityContext } from "../perception/capability-self-mode
 import type { PerceptionInlinePart } from "../perception/types.js";
 import type { DatabaseSync } from "node:sqlite";
 import { openNuclearDb } from "../db.js";
+import {
+  buildExpressionFallbackPolicy,
+  minimalExpressionContext,
+  fallbackCompletionOptions,
+  isEligibleMistralFailure,
+  type ExpressionComplete,
+  type ExpressionFallbackLane,
+} from "./expression-fallback.js";
 
 /** Complete wording from Expression (before transport). */
 export type ExpressionOutput = {
@@ -59,6 +67,7 @@ export async function expressSpeak(
     perceptionThoughtParts?: PerceptionInlinePart[];
     attentionDb?: DatabaseSync;
   } = {},
+  complete: ExpressionComplete = completeChat,
 ): Promise<RenderedOutput> {
   const claims = decision.authorizedClaims;
   const readingLicensed = claims.readingRecordIds.length > 0;
@@ -100,7 +109,6 @@ export async function expressSpeak(
   ]
     .filter(Boolean)
     .join("\n\n");
-
   const current = userMessage.trim();
   // Hot messages must not re-include the current user text.
   const history = turn.hotMessages
@@ -140,9 +148,13 @@ export async function expressSpeak(
       imageUrls: expressionImages.length > 0 ? expressionImages : undefined,
     },
   ];
-  let response: Awaited<ReturnType<typeof completeChat>>;
+  const lane = (options.lane ?? "interactive") as ExpressionFallbackLane;
+
+  // Expression fallback context is assembled below; the primary (Mistral)
+  // dispatch uses the full turn messages.
+  let response: { text: string; model: string };
   try {
-    response = await completeChat(messages, {
+    response = await complete(messages, {
       model: env.mistralModel,
       route: "ashley_expression",
       maxTokens: channel === "proactive" ? 500 : 900,
@@ -155,14 +167,46 @@ export async function expressSpeak(
       deliveryReservationId: options.deliveryReservationId,
       ownerId: options.ownerId,
     });
-  } catch (error) {
-    if (env.mistralApiKey) throw error;
-    const offline: ExpressionOutput = {
-      text: "i'm offline at the moment, so i can't give this a proper answer.",
-      model: "offline",
-      readingLicensed: false,
-    };
-    return applyRendering(offline);
+  } catch (primaryError) {
+    // Fallback eligibility is decided entirely from local state BEFORE any
+    // data leaves for the fallback provider (single hop, no recursion).
+    const policy = buildExpressionFallbackPolicy(turn, decision, current);
+    const deadlineOk =
+      options.deadlineAtMs == null || Date.now() < options.deadlineAtMs;
+    const fallbackAllowed =
+      env.expressionFallbackEnabled &&
+      (lane === "interactive" || lane === "urgent_grounded");
+    const canFallback =
+      isEligibleMistralFailure(primaryError) &&
+      fallbackAllowed &&
+      policy === "minimal_identity_allowed" &&
+      deadlineOk;
+    if (!canFallback) {
+      return applyRendering(offlineOutput());
+    }
+    const minimal = minimalExpressionContext(
+      attentionDb,
+      options.ownerId ?? "",
+      turn,
+      decision,
+      current,
+    );
+    try {
+      response = await complete(
+        minimal,
+        fallbackCompletionOptions({
+          decisionId: options.decisionId,
+          deliveryReservationId: options.deliveryReservationId,
+          ownerId: options.ownerId,
+          deadlineAtMs: options.deadlineAtMs,
+          lane,
+        }),
+      );
+    } catch {
+      // Fallback failure (or route disabled) → existing offline behavior.
+      // No third attempt.
+      return applyRendering(offlineOutput());
+    }
   }
 
   const wording: ExpressionOutput = {
@@ -190,5 +234,13 @@ function applyRendering(output: ExpressionOutput): RenderedOutput {
     text: renderForTransport(output.text),
     model: output.model,
     readingLicensed: output.readingLicensed,
+  };
+}
+
+function offlineOutput(): ExpressionOutput {
+  return {
+    text: "i'm offline at the moment, so i can't give this a proper answer.",
+    model: "offline",
+    readingLicensed: false,
   };
 }

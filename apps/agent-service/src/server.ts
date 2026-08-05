@@ -305,6 +305,104 @@ export function createServer(manager: AgentManager): express.Express {
       res.status(status).json(body);
     }
   });
+  
+  // Identity proposals (owner approval for foundational changes)
+  app.get("/nuclear/identity/proposals", (req, res) => {
+    try {
+      const ownerId = String(req.query.owner_id ?? "");
+      requireOwner(ownerId || undefined);
+      const limit = Math.min(100, Number(req.query.limit ?? 50) || 50);
+      res.json(manager.core.getIdentityProposals(ownerId, limit));
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.get("/nuclear/identity/proposals/:entityUuid", (req, res) => {
+    try {
+      const ownerId = String(req.query.owner_id ?? "");
+      requireOwner(ownerId || undefined);
+      const entityUuid = String(req.params.entityUuid ?? "");
+      const detail = manager.core.getIdentityProposal(ownerId, entityUuid);
+      if (!detail) {
+        throw new AppError("not_found", "identity proposal not found", 404);
+      }
+      res.json(detail);
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/nuclear/identity/proposals", (req, res) => {
+    try {
+      const { userId, layer, kind, currentText, proposedText, rationale, evidenceRefs } = req.body as {
+        userId?: string;
+        layer: "stable" | "dynamic";
+        kind: string;
+        currentText?: string | null;
+        proposedText: string;
+        rationale: string;
+        evidenceRefs?: string[];
+      };
+      const ownerId = requireOwner(userId);
+      if (!layer || !kind || !proposedText || !rationale) {
+        throw new AppError("message_required", "identity proposal fields required", 400);
+      }
+      res.json(manager.core.createIdentityProposal({
+        ownerId,
+        layer,
+        kind,
+        currentText: currentText ?? null,
+        proposedText,
+        rationale,
+        evidenceRefs: evidenceRefs ?? [],
+      }));
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/nuclear/identity/proposals/:entityUuid/approve", (req, res) => {
+    try {
+      const { userId } = req.body as { userId?: string };
+      const ownerId = requireOwner(userId);
+      const entityUuid = String(req.params.entityUuid ?? "");
+      res.json(manager.core.approveIdentityProposal(ownerId, entityUuid));
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/nuclear/identity/proposals/:entityUuid/reject", (req, res) => {
+    try {
+      const { userId, rationale } = req.body as { userId?: string; rationale?: string };
+      const ownerId = requireOwner(userId);
+      const entityUuid = String(req.params.entityUuid ?? "");
+      if (!rationale || !rationale.trim()) {
+        throw new AppError("message_required", "rejection rationale required", 400);
+      }
+      res.json(manager.core.rejectIdentityProposal(ownerId, entityUuid, rationale));
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/nuclear/identity/proposals/:entityUuid/withdraw", (req, res) => {
+    try {
+      const { userId } = req.body as { userId?: string };
+      const ownerId = requireOwner(userId);
+      const entityUuid = String(req.params.entityUuid ?? "");
+      res.json(manager.core.withdrawIdentityProposal(ownerId, entityUuid));
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
 
   app.get("/nuclear/change-proposals", (req, res) => {
     try {
