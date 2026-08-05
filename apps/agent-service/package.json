@@ -26,6 +26,8 @@
 
     "@composer-assistant/sandbox-broker": "file:../sandbox-broker",
 
+    "@composer-assistant/sandbox-policy": "file:../sandbox-policy",
+
     "@mistralai/mistralai": "^1.7.0",
 
     "cors": "^2.8.5",
