@@ -42,9 +42,10 @@
  * later.
  *
  * No execution happens here: no process, no file writes, no providers, no
- * routes, no sessions. The path-fact resolver is an injection seam; the
- * default resolver fails closed until production realpath wiring is
- * introduced in a later commit.
+ * routes, no sessions. The path-fact resolver is an injection seam; when a
+ * canonical `rootConfig` is provided the broker's own realpath resolver is
+ * used, otherwise the default resolver fails closed until production
+ * realpath wiring is introduced in a later commit.
  */
 
 import type { KeyObject } from "node:crypto";
@@ -61,6 +62,8 @@ import {
   MAX_WALL_MS,
   MAX_WORKSPACE_BYTES,
 } from "../constants/limits.js";
+import { createBrokerPathFactResolver } from "./path.js";
+import type { BrokerRootConfig } from "./root-config.js";
 import {
   authorizeSandboxOperation,
   canonicalizeSandboxPolicyPayload,
@@ -203,6 +206,12 @@ export type BrokerDelegatedAuthorizationInput = {
   reserveNonce: (nonce: string) => boolean;
   nowMs: number;
   pathFactResolver?: BrokerDelegatedPathFactResolver;
+  /**
+   * Broker canonical root configuration. When set (and no explicit
+   * `pathFactResolver` is injected), facts are derived by the broker's own
+   * realpath resolver instead of the envelope's path claims.
+   */
+  rootConfig?: BrokerRootConfig;
   auditSink?: (record: BrokerDelegatedAuthorizationAudit) => void;
 };
 
@@ -697,7 +706,11 @@ export function authorizeDelegatedSandboxRequest(
     return fail("denied", "persistence_not_temporary", "delegated_persistence_must_be_temporary");
   }
 
-  const resolver = input.pathFactResolver ?? DEFAULT_PATH_FACT_RESOLVER;
+  const resolver =
+    input.pathFactResolver ??
+    (input.rootConfig !== undefined
+      ? createBrokerPathFactResolver(input.rootConfig)
+      : DEFAULT_PATH_FACT_RESOLVER);
   const facts: BrokerCanonicalPathFacts[] = [];
   const mismatches: SandboxMetadataMismatch[] = [];
   for (const target of envelope.canonicalTargetPaths) {

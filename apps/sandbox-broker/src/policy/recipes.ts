@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import type { TaskLimits } from "../crypto/types.js";
+import { FIXED_RECIPE_REGISTRY } from "./recipe-registry.js";
 
 export interface BrokerRecipe {
   recipeId: string;
@@ -13,22 +14,25 @@ export interface BrokerRecipe {
   limits?: TaskLimits;
 }
 
-export const DEFAULT_TEST_RECIPES: BrokerRecipe[] = [
-  {
-    recipeId: "verify:agent-tsc",
-    executable: "/bin/echo",
-    argv: ["ok"],
-    cwdPolicy: "workspace",
-    supported: true,
-  },
-  {
-    recipeId: "verify:repo-tsc",
-    executable: "/bin/echo",
-    argv: ["ok"],
-    cwdPolicy: "workspace",
-    supported: false,
-  },
-];
+/**
+ * Default broker recipe set: the fixed autonomous-safe registry, projected
+ * onto the generic recipe shape. Repository package scripts and lifecycle
+ * hooks are never consulted.
+ */
+export const DEFAULT_TEST_RECIPES: BrokerRecipe[] = FIXED_RECIPE_REGISTRY.map(
+  (recipe) => ({
+    recipeId: recipe.recipeId,
+    executable: recipe.executable,
+    argv: [...recipe.argv],
+    cwdPolicy: recipe.cwdPolicy,
+    supported: recipe.supported,
+    ...(recipe.envAllowlist
+      ? { envAllowlist: [...recipe.envAllowlist] }
+      : {}),
+    ...(recipe.networkMode ? { networkMode: recipe.networkMode } : {}),
+    ...(recipe.limits ? { limits: { ...recipe.limits } } : {}),
+  }),
+);
 
 export function resolveRecipe(
   recipes: Map<string, BrokerRecipe>,

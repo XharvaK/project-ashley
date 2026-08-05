@@ -47,4 +47,8 @@ export * from "./store/broker-store.js";
 export * from "./process/fake-runner.js";
 export * from "./process/real-runner.js";
 export * from "./policy/delegated-authorization.js";
+export * from "./policy/path.js";
+export * from "./policy/recipe-registry.js";
+export * from "./policy/recipe-resolver.js";
 export * from "./policy/recipes.js";
+export * from "./policy/root-config.js";

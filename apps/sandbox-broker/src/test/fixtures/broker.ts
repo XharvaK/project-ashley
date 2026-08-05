@@ -19,7 +19,12 @@ export function createTestBroker(
     ownerId: "owner-1",
     approval: approvalVerifier(keys),
     tombstone: tombstoneVerifier(keys),
-    interpreterAllowlist: new Set(["/bin/echo", "/usr/bin/node"]),
+    interpreterAllowlist: new Set([
+      "/bin/echo",
+      "/usr/bin/node",
+      "/usr/bin/npm",
+      "/usr/bin/git",
+    ]),
     envAllowlist: new Set(["PATH"]),
     processRunner: {
       async run() {
