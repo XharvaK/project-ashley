@@ -107,6 +107,38 @@ describe("validateSandboxPolicyDocument", () => {
       expect(result.reasons.join(",")).toContain("expires_at_must_exceed");
     }
   });
+
+  it("accepts an explicit session role list", () => {
+    const result = validateSandboxPolicyDocument(
+      validPolicy({ sessionRoles: ["sandbox_operator_light"] }),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.policy.sessionRoles).toEqual(["sandbox_operator_light"]);
+    }
+  });
+
+  it("rejects duplicate session roles", () => {
+    const result = validateSandboxPolicyDocument(
+      validPolicy({
+        sessionRoles: ["sandbox_operator_light", "sandbox_operator_light"],
+      }),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reasons.join(",")).toContain("session_roles");
+    }
+  });
+
+  it("rejects oversized session role names", () => {
+    const result = validateSandboxPolicyDocument(
+      validPolicy({ sessionRoles: ["x".repeat(65)] }),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reasons.join(",")).toContain("session_role_out_of_bounds");
+    }
+  });
 });
 
 describe("parseSandboxPolicyJson", () => {

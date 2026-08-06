@@ -35,6 +35,8 @@ export type SandboxPolicyDocument = {
   expiresAt?: string;
   allowedDelegatedSignerKeyIds: string[];
   allowedCapabilities: SandboxCapabilityId[];
+  /** Broker session roles the owner explicitly permits under this policy. */
+  sessionRoles?: string[];
   readOnlyRoots: string[];
   writableDisposableRoots: string[];
   protectedRoots: SandboxPolicyProtectedRoot[];
@@ -125,6 +127,17 @@ export function validateSandboxPolicyDocument(
   }
   if (!uniqueStrings(value.allowedRecipeIds)) {
     reasons.push("recipe_ids_must_be_unique_nonempty");
+  }
+  if (value.sessionRoles !== undefined) {
+    if (!uniqueStrings(value.sessionRoles)) {
+      reasons.push("session_roles_must_be_unique_nonempty");
+    } else if (
+      (value.sessionRoles as string[]).some(
+        (role) => role.length === 0 || role.length > 64,
+      )
+    ) {
+      reasons.push("session_role_out_of_bounds");
+    }
   }
   if (!uniqueStrings(value.allowedExecutableIds)) {
     reasons.push("executable_ids_must_be_unique_nonempty");

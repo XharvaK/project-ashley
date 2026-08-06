@@ -11,6 +11,7 @@ import {
   UPLOAD_SESSION_TTL_MS,
 } from "../constants/limits.js";
 import { randomRef } from "../crypto/types.js";
+import { BrokerSessionLedger } from "../sessions/session-ledger.js";
 
 export interface StoredArtifact {
   ownerId: string;
@@ -66,6 +67,7 @@ export class BrokerStore {
   readonly spentNonces = new Set<string>();
   readonly appliedTombstones = new Set<string>();
   readonly auditEvents: AuditEvent[] = [];
+  sessionLedger: BrokerSessionLedger = new BrokerSessionLedger();
   workspaceBytesUsed = 0;
 
   /** Persistence hooks are no-ops for the local in-memory Wave 07b store. */
@@ -212,6 +214,7 @@ export class DurableBrokerStore extends BrokerStore {
         metadata_json TEXT NOT NULL
       );
     `);
+    this.sessionLedger = new BrokerSessionLedger({ database: this.database });
     this.load();
   }
 
