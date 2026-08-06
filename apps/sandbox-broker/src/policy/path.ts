@@ -127,7 +127,11 @@ function nearestExistingParent(candidate: string): string | null {
   }
 }
 
-function classifyZone(
+/**
+ * Classifies a canonical path into broker root zones. Protected roots win;
+ * within the remaining roots the most specific configured root wins.
+ */
+export function classifyBrokerZone(
   canonicalPath: string,
   roots: BrokerRootConfig,
 ): { zone: BrokerRootZone; root: string; pathClass: ProtectedPathClass } | null {
@@ -182,7 +186,7 @@ export function resolveBrokerPath(
     return { ok: false, reason: canonical.reason };
   }
   const native = toNativeBrokerPath(canonicalPath);
-  const lexicalZone = classifyZone(canonicalPath, roots) !== null;
+  const lexicalZone = classifyBrokerZone(canonicalPath, roots) !== null;
 
   let exists: boolean;
   let resolvedNative: string;
@@ -225,7 +229,7 @@ export function resolveBrokerPath(
     resolvedCanonical = joined.value;
   }
 
-  const zone = classifyZone(resolvedCanonical, roots);
+  const zone = classifyBrokerZone(resolvedCanonical, roots);
   if (zone === null) {
     return {
       ok: false,
