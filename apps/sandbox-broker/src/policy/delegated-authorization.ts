@@ -55,6 +55,14 @@ import {
   type DelegatedApprovalEnvelope,
   type DelegatedSandboxTarget,
 } from "../crypto/delegated-approval.js";
+import {
+  computeOwnerApprovalPayloadHash,
+  OWNER_APPROVAL_SIGNER_CLASS,
+  verifyOwnerApprovalEnvelope,
+  type OwnerApprovalVerifierConfig,
+  type SandboxOwnerApprovalEnvelope,
+} from "../crypto/owner-approval.js";
+import { CAPABILITY_SIGNING_KEY_ID } from "../sessions/session-limits.js";
 import { sha256Hex } from "../crypto/types.js";
 import {
   MAX_CHILD_PROCESSES,
@@ -168,7 +176,7 @@ export type EffectiveSandboxLimits = {
 export type BrokerDelegatedAuthorizationAudit = {
   kind: "broker_delegated_authorization";
   outcome: "authorized" | "refused";
-  decision: "autonomous_safe" | "owner_approval_required" | "denied";
+  decision: "autonomous_safe" | "owner_approved" | "owner_approval_required" | "denied";
   errorCode: string | null;
   proposalId: string;
   ownerId: string;
@@ -188,6 +196,8 @@ export type BrokerDelegatedAuthorizationAudit = {
   canonicalPathClasses: string[];
   effectiveLimits: EffectiveSandboxLimits | null;
   metadataMismatches: SandboxMetadataMismatch[];
+  ownerApprovalProposalId: string | null;
+  ownerApprovalKeyId: string | null;
   nonceHash: string;
   createdAtIso: string;
 };
@@ -213,12 +223,24 @@ export type BrokerDelegatedAuthorizationInput = {
    */
   rootConfig?: BrokerRootConfig;
   auditSink?: (record: BrokerDelegatedAuthorizationAudit) => void;
+  /**
+   * Owner-signed sandbox approval (Commit 11). When present and the shared
+   * policy decides `owner_approval_required`, the broker verifies this
+   * envelope against the trusted owner key config and binds it exactly to the
+   * request's structured authority fields before authorizing.
+   */
+  ownerApproval?: SandboxOwnerApprovalEnvelope | null;
+  /**
+   * Trusted owner approval keys. Null means owner approval verification is
+   * not configured; an `owner_approval_required` decision then fails closed.
+   */
+  trustedOwnerApprovalKeys?: OwnerApprovalVerifierConfig | null;
 };
 
 export type BrokerDelegatedAuthorizationResult =
   | {
       ok: true;
-      decision: "autonomous_safe";
+      decision: "autonomous_safe" | "owner_approved";
       signerClass: "delegated_runtime";
       signerKeyId: string;
       publicKeyFingerprint: string;
@@ -231,6 +253,7 @@ export type BrokerDelegatedAuthorizationResult =
       canonicalPaths: BrokerCanonicalPathFacts[];
       effectiveLimits: EffectiveSandboxLimits;
       metadataMismatches: SandboxMetadataMismatch[];
+      ownerApprovalProposalId?: string;
       audit: BrokerDelegatedAuthorizationAudit;
     }
   | {
@@ -322,12 +345,34 @@ export function combineEffectiveLimits(
   };
 }
 
+/**
+ * Exact structured binding between an owner approval and the delegated
+ * request: same canonical target paths, same order, same intents. Any
+ * difference means the owner approved a different action than the one the
+ * runtime is requesting.
+ */
+function targetsMatchOwnerApproval(
+  requestTargets: DelegatedSandboxTarget[],
+  ownerApproval: SandboxOwnerApprovalEnvelope,
+): boolean {
+  if (requestTargets.length !== ownerApproval.canonicalTargetPaths.length) {
+    return false;
+  }
+  for (let index = 0; index < requestTargets.length; index += 1) {
+    const left = requestTargets[index];
+    const right = ownerApproval.canonicalTargetPaths[index];
+    if (left.path !== right.path || left.intent !== right.intent) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function compareMetadata(
   envelope: DelegatedApprovalEnvelope,
   decision: SandboxAuthorizationDecision,
   brokerCapability: string,
-): SandboxMetadataMismatch[] {
-  const mismatches: SandboxMetadataMismatch[] = [];
+): SandboxMetadataMismatch[] {  const mismatches: SandboxMetadataMismatch[] = [];
   if (
     SANDBOX_RISK_ORDER[envelope.authoritativeRiskClass] <
     SANDBOX_RISK_ORDER[decision.authoritativeRiskClass]
@@ -513,7 +558,7 @@ export function authorizeDelegatedSandboxRequest(
 
   const emitAudit = (
     outcome: "authorized" | "refused",
-    decision: "autonomous_safe" | "owner_approval_required" | "denied",
+    decision: "autonomous_safe" | "owner_approved" | "owner_approval_required" | "denied",
     errorCode: string | null,
   ): BrokerDelegatedAuthorizationAudit => {
     const record: BrokerDelegatedAuthorizationAudit = {
@@ -533,6 +578,8 @@ export function authorizeDelegatedSandboxRequest(
       canonicalPathClasses: [],
       effectiveLimits: null,
       metadataMismatches: [],
+      ownerApprovalProposalId: input.ownerApproval?.proposalId ?? null,
+      ownerApprovalKeyId: input.ownerApproval?.keyId ?? null,
       createdAtIso: nowIso,
       ...auditCtx,
     };
@@ -836,12 +883,185 @@ export function authorizeDelegatedSandboxRequest(
         ...mismatches,
         ...compareMetadata(envelope, decision, brokerCapability),
       ];
+      const ownerApproval = input.ownerApproval;
+      const ownerKeys = input.trustedOwnerApprovalKeys;
+      if (!ownerApproval) {
+        auditCtx.metadataMismatches = approvalMismatches;
+        return fail("owner_approval_required", ruleErrorCode(decision), decision.reason, {
+          authoritativeRiskClass: decision.authoritativeRiskClass,
+          policyRuleId: decision.policyRuleId,
+          metadataMismatches: approvalMismatches,
+        });
+      }
+      if (!ownerKeys || ownerKeys.keys.length === 0) {
+        auditCtx.metadataMismatches = approvalMismatches;
+        return fail(
+          "owner_approval_required",
+          "owner_approval_unverifiable",
+          "no_trusted_owner_approval_keys_configured",
+          {
+            authoritativeRiskClass: decision.authoritativeRiskClass,
+            policyRuleId: decision.policyRuleId,
+            metadataMismatches: approvalMismatches,
+          },
+        );
+      }
+      if (ownerApproval.signerClass !== OWNER_APPROVAL_SIGNER_CLASS) {
+        auditCtx.metadataMismatches = approvalMismatches;
+        return fail(
+          "owner_approval_required",
+          "owner_approval_wrong_signer",
+          "owner_approval_not_owner_signed",
+          {
+            authoritativeRiskClass: decision.authoritativeRiskClass,
+            policyRuleId: decision.policyRuleId,
+            metadataMismatches: approvalMismatches,
+          },
+        );
+      }
+      if (
+        ownerApproval.keyId === DELEGATED_RUNTIME_KEY_ID ||
+        ownerApproval.keyId === CAPABILITY_SIGNING_KEY_ID
+      ) {
+        auditCtx.metadataMismatches = approvalMismatches;
+        return fail(
+          "owner_approval_required",
+          "owner_approval_wrong_signer",
+          "owner_approval_key_not_owner",
+          {
+            authoritativeRiskClass: decision.authoritativeRiskClass,
+            policyRuleId: decision.policyRuleId,
+            metadataMismatches: approvalMismatches,
+          },
+        );
+      }
+      const verifiedOwner = verifyOwnerApprovalEnvelope(ownerApproval, ownerKeys, input.nowMs);
+      if (!verifiedOwner.ok) {
+        auditCtx.metadataMismatches = approvalMismatches;
+        return fail(
+          "owner_approval_required",
+          "owner_approval_invalid",
+          `owner_approval_verification_failed:${verifiedOwner.reason}`,
+          {
+            authoritativeRiskClass: decision.authoritativeRiskClass,
+            policyRuleId: decision.policyRuleId,
+            metadataMismatches: approvalMismatches,
+          },
+        );
+      }
+      if (!input.reserveNonce(ownerApproval.nonce)) {
+        auditCtx.metadataMismatches = approvalMismatches;
+        return fail(
+          "owner_approval_required",
+          "replay",
+          "owner_approval_nonce_replay",
+          {
+            authoritativeRiskClass: decision.authoritativeRiskClass,
+            policyRuleId: decision.policyRuleId,
+            metadataMismatches: approvalMismatches,
+          },
+        );
+      }
+      if (
+        ownerApproval.ownerId !== envelope.ownerId ||
+        ownerApproval.ownerId !== input.trustedOwnerId
+      ) {
+        auditCtx.metadataMismatches = approvalMismatches;
+        return fail(
+          "owner_approval_required",
+          "owner_approval_binding_mismatch",
+          "owner_approval_owner_mismatch",
+          {
+            authoritativeRiskClass: decision.authoritativeRiskClass,
+            policyRuleId: decision.policyRuleId,
+            metadataMismatches: approvalMismatches,
+          },
+        );
+      }
+      if (ownerApproval.sessionUuid !== envelope.sessionUuid) {
+        auditCtx.metadataMismatches = approvalMismatches;
+        return fail(
+          "owner_approval_required",
+          "owner_approval_binding_mismatch",
+          "owner_approval_session_mismatch",
+          {
+            authoritativeRiskClass: decision.authoritativeRiskClass,
+            policyRuleId: decision.policyRuleId,
+            metadataMismatches: approvalMismatches,
+          },
+        );
+      }
+      if (
+        ownerApproval.capabilityId !== envelope.capabilityId ||
+        ownerApproval.policyId !== envelope.policyId ||
+        ownerApproval.policyVersion !== envelope.policyVersion ||
+        ownerApproval.policyHash !== envelope.policyHash ||
+        ownerApproval.authoritativeRiskClass !== envelope.authoritativeRiskClass ||
+        ownerApproval.policyRuleId !== envelope.policyRuleId ||
+        (ownerApproval.recipeId ?? null) !== (envelope.recipeId ?? null) ||
+        (ownerApproval.executableId ?? null) !== (envelope.executableId ?? null) ||
+        ownerApproval.persistence !== envelope.persistence ||
+        ownerApproval.externalSideEffect !== envelope.externalSideEffect ||
+        ownerApproval.requiresNetwork !== false
+      ) {
+        auditCtx.metadataMismatches = approvalMismatches;
+        return fail(
+          "owner_approval_required",
+          "owner_approval_binding_mismatch",
+          "owner_approval_authority_fields_mismatch",
+          {
+            authoritativeRiskClass: decision.authoritativeRiskClass,
+            policyRuleId: decision.policyRuleId,
+            metadataMismatches: approvalMismatches,
+          },
+        );
+      }
+      if (!targetsMatchOwnerApproval(envelope.canonicalTargetPaths, ownerApproval)) {
+        auditCtx.metadataMismatches = approvalMismatches;
+        return fail(
+          "owner_approval_required",
+          "owner_approval_binding_mismatch",
+          "owner_approval_target_paths_mismatch",
+          {
+            authoritativeRiskClass: decision.authoritativeRiskClass,
+            policyRuleId: decision.policyRuleId,
+            metadataMismatches: approvalMismatches,
+          },
+        );
+      }
+      if (approvalMismatches.length > 0) {
+        auditCtx.metadataMismatches = approvalMismatches;
+        return fail(
+          "owner_approval_required",
+          "owner_approval_scope_mismatch",
+          "owner_approval_does_not_cover_broker_decision",
+          {
+            authoritativeRiskClass: decision.authoritativeRiskClass,
+            policyRuleId: decision.policyRuleId,
+            metadataMismatches: approvalMismatches,
+          },
+        );
+      }
       auditCtx.metadataMismatches = approvalMismatches;
-      return fail("owner_approval_required", ruleErrorCode(decision), decision.reason, {
-        authoritativeRiskClass: decision.authoritativeRiskClass,
-        policyRuleId: decision.policyRuleId,
+      const ownerAudit = emitAudit("authorized", "owner_approved", null);
+      return {
+        ok: true,
+        decision: "owner_approved",
+        signerClass: "delegated_runtime",
+        signerKeyId: envelope.keyId,
+        publicKeyFingerprint: fingerprint,
+        capability: envelope.capabilityId as SandboxCapabilityId,
+        authoritativeRiskClass: brokerRisk,
+        policyRuleId: brokerRuleId,
+        policyId: activePolicy.policyId,
+        policyVersion: activePolicy.policyVersion,
+        policyHash: activePolicy.policyHash,
+        canonicalPaths: facts,
+        effectiveLimits: combineEffectiveLimits(policy.resourceCeilings),
         metadataMismatches: approvalMismatches,
-      });
+        ownerApprovalProposalId: ownerApproval.proposalId,
+        audit: ownerAudit,
+      };
     }
   }
 

@@ -176,6 +176,7 @@ describe("authorization -> workspace creation pipeline", () => {
     expect(auth.ok).toBe(true);
     if (!auth.ok) return;
     expect(auth.decision).toBe("autonomous_safe");
+    if (auth.decision !== "autonomous_safe") return;
     expect(auth.capability).toBe("candidate_workspace_create");
 
     const created = await createDisposableWorkspace({
@@ -224,6 +225,7 @@ describe("authorization -> workspace creation pipeline", () => {
     const auth = authorizeDelegatedSandboxRequest(forgedInput);
     expect(auth.ok).toBe(true);
     if (!auth.ok) return;
+    if (auth.decision !== "autonomous_safe") return;
     expect(auth.capability).toBe("approved_project_read");
     const created = await createDisposableWorkspace({
       authorization: {
@@ -278,6 +280,7 @@ describe("authorization -> workspace creation pipeline", () => {
     const auth = authorizeDelegatedSandboxRequest(input);
     expect(auth.ok).toBe(true);
     if (!auth.ok) return;
+    if (auth.decision !== "autonomous_safe") return;
     const created = await createDisposableWorkspace({
       authorization: {
         decision: auth.decision,

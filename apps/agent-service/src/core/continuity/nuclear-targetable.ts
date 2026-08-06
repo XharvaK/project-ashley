@@ -43,6 +43,8 @@ export const TARGETABLE_TABLES: Array<{
   { table: "external_action_events", idColumn: "id", ownerColumn: "owner_id", needsClassification: true },
   { table: "external_entity_notes", idColumn: "id", ownerColumn: "owner_id", needsClassification: true },
   { table: "vault_credential_index", idColumn: "id", ownerColumn: "owner_id", needsClassification: true },
+  { table: "sandbox_approval_proposals", idColumn: "id", ownerColumn: "owner_id", needsClassification: true },
+  { table: "sandbox_approval_events", idColumn: "id", ownerColumn: "owner_id", needsClassification: true },
 ];
 
 export const RELATIONSHIP_ENTITY_TYPES = [

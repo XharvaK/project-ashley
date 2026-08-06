@@ -494,6 +494,14 @@ export class BrokerSessionService {
     return this.ledger.getSession(sessionUuid);
   }
 
+  getOwnerAuthorization(authorizationId: string) {
+    return this.ledger.getOwnerAuthorization(authorizationId);
+  }
+
+  listOwnerAuthorizations(sessionUuid: string) {
+    return this.ledger.listOwnerAuthorizations(sessionUuid);
+  }
+
   listEvents(sessionUuid: string) {
     return this.ledger.listEvents(sessionUuid);
   }

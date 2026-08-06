@@ -19,6 +19,10 @@ import {
   signDelegatedApprovalEnvelope,
   type DelegatedApprovalEnvelope,
 } from "../../crypto/delegated-approval.js";
+import {
+  signOwnerApprovalEnvelope,
+  type SandboxOwnerApprovalEnvelope,
+} from "../../crypto/owner-approval.js";
 import { randomNonce, sha256Hex } from "../../crypto/types.js";
 import type { BrokerAuditRecord } from "../../execution/fixed-recipe-execution-service.js";
 import { FixedRecipeExecutionService } from "../../execution/fixed-recipe-execution-service.js";
@@ -87,6 +91,9 @@ export type ExecutionHarness = {
   usedNonces: Set<string>;
   audits: BrokerAuditRecord[];
   nowMs: () => number;
+  ownerPrivateKeyPem: string;
+  ownerPublicKeyPem: string;
+  ownerApprovalKeyId: string;
   close: () => void;
 };
 
@@ -97,6 +104,7 @@ export function makeExecutionHarness(options: {
 } = {}): ExecutionHarness {
   const nowMs = options.nowMs ?? Date.now();
   const keys = delegatedKeyPair();
+  const ownerKeys = delegatedKeyPair();
   const roots = makeWorkspaceTestRoots();
   const liveFileNative = path.join(roots.base, "source", "README.md");
   writeFileSync(liveFileNative, "hello\n", "utf8");
@@ -132,6 +140,14 @@ export function makeExecutionHarness(options: {
     activePolicy,
     trustedOwnerId: "owner-1",
     trustedOwnerPolicyKeyIds: new Set(["owner-ed25519-v1"]),
+    trustedOwnerApprovalKeys: {
+      keys: [
+        {
+          keyId: "owner-approval-test-1",
+          publicKey: keyObjectFromPem(ownerKeys.publicKeyPem),
+        },
+      ],
+    },
     reserveNonce: (nonce) => {
       if (usedNonces.has(nonce)) return false;
       usedNonces.add(nonce);
@@ -168,6 +184,9 @@ export function makeExecutionHarness(options: {
     usedNonces,
     audits,
     nowMs: () => nowMs,
+    ownerPrivateKeyPem: ownerKeys.privateKeyPem,
+    ownerPublicKeyPem: ownerKeys.publicKeyPem,
+    ownerApprovalKeyId: "owner-approval-test-1",
     close: () => {
       // in-memory ledger; nothing to close
     },
@@ -309,6 +328,82 @@ export function makeExecutionRequest(
     nowMs,
     ...requestOverrides,
   };
+}
+
+/**
+ * Signs an owner approval envelope bound to the harness session, policy and
+ * capability — the exact authority payload the owner key must cover.
+ */
+export function signOwnerApprovalForHarness(
+  harness: ExecutionHarness,
+  partial: Partial<SandboxOwnerApprovalEnvelope> = {},
+  nowMs = harness.nowMs(),
+): SandboxOwnerApprovalEnvelope {
+  return signOwnerApprovalEnvelope(
+    {
+      protocolVersion: 1,
+      keyId: harness.ownerApprovalKeyId,
+      signerClass: "owner",
+      proposalId: "owner-proposal-1",
+      ownerId: "owner-1",
+      sessionUuid: "unset",
+      capabilityId: "write_live_repository",
+      authoritativeRiskClass: "consultation",
+      canonicalTargetPaths: [{ path: harness.liveFile, intent: "write" }],
+      policyRuleId: "sandbox-policy/rule/owner-approval-required",
+      policyId: harness.activePolicy.policyId,
+      policyVersion: harness.activePolicy.policyVersion,
+      policyHash: harness.activePolicy.policyHash,
+      recipeId: "git:status",
+      executableId: null,
+      persistence: "temporary",
+      requiresNetwork: false,
+      externalSideEffect: false,
+      networkMode: "none",
+      issuedAt: nowMs,
+      expiresAt: nowMs + 60_000,
+      nonce: randomNonce(),
+      ...partial,
+    },
+    harness.ownerPrivateKeyPem,
+  );
+}
+
+/**
+ * Records an owner authorization by pausing the session and resuming it with
+ * the broker-authorization transition (the same path the owner approval
+ * service uses). Returns the resumed session.
+ */
+export function recordOwnerAuthorizationForSession(
+  harness: ExecutionHarness,
+  sessionUuid: string,
+  input: {
+    authorizationId: string;
+    ownerId?: string;
+    policyHash?: string;
+    authorizedAtMs?: number;
+  },
+  nowMs = harness.nowMs(),
+): { ok: true; session: BrokerSandboxSession } | { ok: false; errorCode: string; reason: string } {
+  const session = harness.sessionService.getSession(sessionUuid);
+  if (session === null) return { ok: false, errorCode: "unknown_session", reason: "session not found" };
+  const paused = harness.sessionService.transitionSession(sessionUuid, "awaiting_owner", {
+    expectedRevision: session.revision,
+    nowMs,
+  });
+  if (!paused.ok) return paused;
+  const resumed = harness.sessionService.resumeSession(sessionUuid, {
+    expectedRevision: paused.value.revision,
+    ownerAuthorization: {
+      authorizationId: input.authorizationId,
+      ownerId: input.ownerId ?? "owner-1",
+      policyHash: input.policyHash ?? harness.activePolicy.policyHash,
+      authorizedAtMs: input.authorizedAtMs ?? nowMs,
+    },
+    nowMs,
+  });
+  if (!resumed.ok) return resumed;
+  return { ok: true, session: resumed.value };
 }
 
 /** Creates a real disposable workspace under the harness destination root. */

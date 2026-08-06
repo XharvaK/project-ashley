@@ -18,6 +18,7 @@
 
 import type { TaskLimits } from "../crypto/types.js";
 import type { DelegatedApprovalEnvelope } from "../crypto/delegated-approval.js";
+import type { SandboxOwnerApprovalEnvelope } from "../crypto/owner-approval.js";
 import type { SignedSandboxSessionCapability } from "../sessions/session-capability.js";
 import type { FixedRecipeCategory } from "../policy/recipe-registry.js";
 
@@ -74,6 +75,12 @@ export type FixedRecipeExecutionRequest = {
   capabilityUseId: string;
   expectedSessionRevision: number;
   limits?: Partial<TaskLimits>;
+  /**
+   * Owner-signed sandbox approval (Commit 11). Required when the shared
+   * policy demands `owner_approval_required`; the broker verifies it and
+   * binds it to the request before executing.
+   */
+  ownerApproval?: SandboxOwnerApprovalEnvelope;
   nowMs: number;
 };
 

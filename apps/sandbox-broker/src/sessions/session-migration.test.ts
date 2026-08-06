@@ -6,6 +6,7 @@ import path from "node:path";
 import {
   BROKER_SESSION_SCHEMA_VERSION,
   MIGRATION_1_SESSION_LEDGER_DDL,
+  MIGRATION_2_SESSION_LEDGER_DDL,
   migrateBrokerSessionSchema,
 } from "./session-migration.js";
 
@@ -42,6 +43,7 @@ describe("session-migration", () => {
       .all() as Array<{ name: string }>).map((r) => r.name).sort();
     expect(tables).toEqual([
       "sandbox_capability_uses",
+      "sandbox_session_authorizations",
       "sandbox_session_events",
       "sandbox_sessions",
     ]);
@@ -116,9 +118,10 @@ describe("session-migration", () => {
 
   it("exports the DDL constant with all statements", () => {
     expect(MIGRATION_1_SESSION_LEDGER_DDL.length).toBeGreaterThan(0);
-    const all = MIGRATION_1_SESSION_LEDGER_DDL.join(" ");
+    const all = [...MIGRATION_1_SESSION_LEDGER_DDL, ...MIGRATION_2_SESSION_LEDGER_DDL].join(" ");
     expect(all).toContain("CREATE TABLE IF NOT EXISTS sandbox_sessions");
     expect(all).toContain("CREATE TABLE IF NOT EXISTS sandbox_session_events");
+    expect(all).toContain("CREATE TABLE IF NOT EXISTS sandbox_session_authorizations");
     expect(all).toContain("CREATE TABLE IF NOT EXISTS sandbox_capability_uses");
   });
 });

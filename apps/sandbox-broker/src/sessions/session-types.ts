@@ -84,6 +84,7 @@ export type SandboxSessionEventType =
   | "capability_verified"
   | "tool_use_reserved"
   | "session_awaiting_owner"
+  | "owner_authorization_recorded"
   | "session_completed"
   | "session_aborted"
   | "session_expired";
@@ -127,4 +128,19 @@ export type OwnerAuthorizedTransition = {
   ownerId: string;
   policyHash: string;
   authorizedAtMs: number;
+};
+
+/**
+ * Durable broker record of an owner authorization (Sandbox Wave 4,
+ * Commit 11). Recorded atomically with the `awaiting_owner -> active`
+ * transition; execution-time owner approvals must reference a recorded
+ * authorization for the session.
+ */
+export type OwnerAuthorizationRecord = {
+  authorizationId: string;
+  sessionUuid: string;
+  ownerId: string;
+  policyHash: string;
+  authorizedAtMs: number;
+  createdAtIso: string;
 };

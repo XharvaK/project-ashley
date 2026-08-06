@@ -16,7 +16,30 @@ export type ErrorCode =
   | "channel_retired"
   | "endpoint_retired"
   | "not_found"
-  | "internal_error";
+  | "internal_error"
+  | "unknown_approval_proposal"
+  | "approval_owner_mismatch"
+  | "approval_capability_missing"
+  | "approval_invalid_risk_class"
+  | "approval_no_target_paths"
+  | "approval_too_many_target_paths"
+  | "approval_invalid_path_intent"
+  | "approval_invalid_persistence"
+  | "approval_network_mode_unsupported"
+  | "approval_policy_unbound"
+  | "approval_not_approvable"
+  | "approval_not_rejectable"
+  | "approval_not_withdrawable"
+  | "approval_not_staleable"
+  | "approval_not_resumable"
+  | "approval_update_failed"
+  | "approval_session_unbound"
+  | "approval_stale_policy"
+  | "owner_approval_key_unavailable"
+  | "broker_client_unavailable"
+  | "policy_unavailable"
+  | "unknown_session"
+  | "session_not_awaiting_owner";
 
 export class AppError extends Error {
   readonly code: ErrorCode;

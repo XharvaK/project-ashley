@@ -40,6 +40,7 @@ import {
   type BrokerDelegatedAuthorizationAudit,
   type DelegatedTrustedKeyConfig,
 } from "../policy/delegated-authorization.js";
+import type { OwnerApprovalVerifierConfig } from "../crypto/owner-approval.js";
 import { fixedRecipeRegistry, type FixedRecipe } from "../policy/recipe-registry.js";
 import { resolveSandboxRecipe } from "../policy/recipe-resolver.js";
 import type { BrokerRootConfig } from "../policy/root-config.js";
@@ -78,6 +79,11 @@ export type FixedRecipeExecutionServiceOptions = {
   executableMappings: ExecutableMappings;
   registry?: ReadonlyMap<string, FixedRecipe>;
   environmentSource?: () => Record<string, string | undefined>;
+  /**
+   * Trusted owner approval keys (Commit 11). Null disables owner approval
+   * verification: an `owner_approval_required` decision fails closed.
+   */
+  trustedOwnerApprovalKeys?: OwnerApprovalVerifierConfig | null;
   auditSink?: (record: BrokerAuditRecord) => void;
   nowMs?: () => number;
 };
@@ -168,6 +174,8 @@ export class FixedRecipeExecutionService {
       reserveNonce: this.options.reserveNonce,
       nowMs: request.nowMs,
       rootConfig: this.options.rootConfig,
+      ownerApproval: request.ownerApproval ?? null,
+      trustedOwnerApprovalKeys: this.options.trustedOwnerApprovalKeys ?? null,
       auditSink: this.options.auditSink,
     });
     if (!authorization.ok) {
@@ -177,6 +185,9 @@ export class FixedRecipeExecutionService {
         authorization.reason,
       );
     }
+    const ownerApproved =
+      authorization.decision === "owner_approved" &&
+      request.ownerApproval !== undefined;
 
     // ---- stage: session ----
     const session = this.options.sessionService.getSession(request.sessionUuid);
@@ -201,6 +212,23 @@ export class FixedRecipeExecutionService {
       session.policyHash !== request.envelope.policyHash
     ) {
       return refuse("session", "session_binding_mismatch", "session_binding_mismatch");
+    }
+    if (ownerApproved) {
+      const recorded = this.options.sessionService.getOwnerAuthorization(
+        request.ownerApproval!.proposalId,
+      );
+      if (
+        recorded === null ||
+        recorded.sessionUuid !== request.sessionUuid ||
+        recorded.ownerId !== request.envelope.ownerId ||
+        recorded.policyHash !== request.envelope.policyHash
+      ) {
+        return refuse(
+          "session",
+          "owner_approval_not_recorded",
+          "owner_approval_authorization_not_recorded_for_session",
+        );
+      }
     }
 
     // ---- stage: capability ----

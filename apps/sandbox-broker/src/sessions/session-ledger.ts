@@ -32,6 +32,7 @@ import { MAX_CAPABILITY_USE_RECORDS_PER_SESSION } from "./session-limits.js";
 import {
   type BrokerSandboxSession,
   type CapabilityUseOutcome,
+  type OwnerAuthorizationRecord,
   type OwnerAuthorizedTransition,
   type SandboxCapabilityUse,
   type SandboxSessionEvent,
@@ -94,6 +95,7 @@ const RECORDABLE_EVENT_TYPES: ReadonlySet<string> = new Set<string>([
   "capability_verified",
   "tool_use_reserved",
   "session_awaiting_owner",
+  "owner_authorization_recorded",
   "session_completed",
   "session_aborted",
   "session_expired",
@@ -165,6 +167,7 @@ export class BrokerSessionLedger {
   private readonly memSessions = new Map<string, BrokerSandboxSession>();
   private readonly memEvents: SandboxSessionEvent[] = [];
   private readonly memUses = new Map<string, SandboxCapabilityUse>();
+  private readonly memAuthorizations = new Map<string, OwnerAuthorizationRecord>();
 
   constructor(options: BrokerSessionLedgerOptions = {}) {
     this.db = options.database ?? null;
@@ -242,8 +245,9 @@ export class BrokerSessionLedger {
 
   /**
    * Validates and applies a state transition with an optimistic revision
-   * guard, records the audit event, and (durable) commits both in one
-   * transaction.
+   * guard, records the audit event, and (durable) commits all in one
+   * transaction. An `awaiting_owner -> active` transition also durably
+   * records the owner authorization in the same transaction.
    */
   applyTransition(input: ApplyTransitionInput): LedgerResult<BrokerSandboxSession> {
     const run = (): LedgerResult<BrokerSandboxSession> => {
@@ -277,9 +281,134 @@ export class BrokerSessionLedger {
         atMs: input.atMs,
         metadata: input.metadata ?? {},
       });
+      if (input.ownerAuthorization !== undefined) {
+        const recorded = this.recordOwnerAuthorization({
+          authorizationId: input.ownerAuthorization.authorizationId,
+          sessionUuid: input.sessionUuid,
+          ownerId: input.ownerAuthorization.ownerId,
+          policyHash: input.ownerAuthorization.policyHash,
+          authorizedAtMs: input.ownerAuthorization.authorizedAtMs,
+          nowMs: input.atMs,
+        });
+        if (!recorded.ok) {
+          return { ok: false, errorCode: recorded.errorCode, reason: recorded.reason };
+        }
+      }
       return { ok: true, value: next };
     };
     return this.inTransaction(run);
+  }
+
+  /**
+   * Durably records an owner authorization (idempotent: re-recording the same
+   * authorization id is a no-op success). Never called directly except by
+   * tests and by `applyTransition` for `awaiting_owner -> active`.
+   */
+  recordOwnerAuthorization(input: {
+    authorizationId: string;
+    sessionUuid: string;
+    ownerId: string;
+    policyHash: string;
+    authorizedAtMs: number;
+    nowMs: number;
+  }): LedgerResult<{ authorizationId: string }> {
+    const session = this.getSession(input.sessionUuid);
+    if (!session) {
+      return { ok: false, errorCode: "unknown_session", reason: "session not found" };
+    }
+    const record: OwnerAuthorizationRecord = {
+      authorizationId: input.authorizationId,
+      sessionUuid: input.sessionUuid,
+      ownerId: input.ownerId,
+      policyHash: input.policyHash,
+      authorizedAtMs: input.authorizedAtMs,
+      createdAtIso: new Date(input.nowMs).toISOString(),
+    };
+    if (this.db) {
+      this.db
+        .prepare(
+          `INSERT INTO sandbox_session_authorizations (
+             authorization_id, session_uuid, owner_id, policy_hash,
+             authorized_at_ms, created_at
+           ) VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT (authorization_id) DO NOTHING`,
+        )
+        .run(
+          record.authorizationId,
+          record.sessionUuid,
+          record.ownerId,
+          record.policyHash,
+          record.authorizedAtMs,
+          record.createdAtIso,
+        );
+      return { ok: true, value: { authorizationId: record.authorizationId } };
+    }
+    if (!this.memAuthorizations.has(record.authorizationId)) {
+      this.memAuthorizations.set(record.authorizationId, record);
+    }
+    return { ok: true, value: { authorizationId: record.authorizationId } };
+  }
+
+  getOwnerAuthorization(authorizationId: string): OwnerAuthorizationRecord | null {
+    if (this.db) {
+      const row = this.db
+        .prepare(
+          `SELECT authorization_id, session_uuid, owner_id, policy_hash,
+                  authorized_at_ms, created_at
+           FROM sandbox_session_authorizations WHERE authorization_id = ?`,
+        )
+        .get(authorizationId) as
+        | {
+            authorization_id: string;
+            session_uuid: string;
+            owner_id: string;
+            policy_hash: string;
+            authorized_at_ms: number;
+            created_at: string;
+          }
+        | undefined;
+      if (!row) return null;
+      return {
+        authorizationId: row.authorization_id,
+        sessionUuid: row.session_uuid,
+        ownerId: row.owner_id,
+        policyHash: row.policy_hash,
+        authorizedAtMs: row.authorized_at_ms,
+        createdAtIso: row.created_at,
+      };
+    }
+    return this.memAuthorizations.get(authorizationId) ?? null;
+  }
+
+  listOwnerAuthorizations(sessionUuid: string): OwnerAuthorizationRecord[] {
+    if (this.db) {
+      const rows = this.db
+        .prepare(
+          `SELECT authorization_id, session_uuid, owner_id, policy_hash,
+                  authorized_at_ms, created_at
+           FROM sandbox_session_authorizations
+           WHERE session_uuid = ? ORDER BY authorized_at_ms`,
+        )
+        .all(sessionUuid) as Array<{
+        authorization_id: string;
+        session_uuid: string;
+        owner_id: string;
+        policy_hash: string;
+        authorized_at_ms: number;
+        created_at: string;
+      }>;
+      return rows.map((row) => ({
+        authorizationId: row.authorization_id,
+        sessionUuid: row.session_uuid,
+        ownerId: row.owner_id,
+        policyHash: row.policy_hash,
+        authorizedAtMs: row.authorized_at_ms,
+        createdAtIso: row.created_at,
+      }));
+    }
+    return [...this.memAuthorizations.values()].filter(
+      (record) => record.sessionUuid === sessionUuid,
+    );
   }
 
   /**

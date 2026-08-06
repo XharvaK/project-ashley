@@ -13,7 +13,31 @@
 
 import { type DatabaseSync } from "node:sqlite";
 
-export const BROKER_SESSION_SCHEMA_VERSION = 1;
+export const BROKER_SESSION_SCHEMA_VERSION = 2;
+
+/**
+ * Broker session ledger migrations. Each version's DDL is applied in order
+ * when upgrading; every statement is idempotent (CREATE TABLE IF NOT EXISTS).
+ * `MIGRATION_2` adds the owner-authorization ledger that Commit 11 requires
+ * for broker-recorded owner resumes.
+ */
+export const MIGRATION_2_SESSION_LEDGER_DDL: readonly string[] = [
+  `
+  CREATE TABLE IF NOT EXISTS sandbox_session_authorizations (
+    authorization_id TEXT PRIMARY KEY,
+    session_uuid TEXT NOT NULL,
+    owner_id TEXT NOT NULL,
+    policy_hash TEXT NOT NULL,
+    authorized_at_ms INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (session_uuid) REFERENCES sandbox_sessions(session_uuid)
+  );
+  `,
+  `
+  CREATE INDEX IF NOT EXISTS idx_sandbox_session_authorizations_session
+    ON sandbox_session_authorizations (session_uuid, authorized_at_ms);
+  `,
+];
 
 export const MIGRATION_1_SESSION_LEDGER_DDL: readonly string[] = [
   `
@@ -113,6 +137,9 @@ export function migrateBrokerSessionSchema(
     db.exec("BEGIN IMMEDIATE");
     try {
       for (const ddl of MIGRATION_1_SESSION_LEDGER_DDL) {
+        db.exec(ddl);
+      }
+      for (const ddl of MIGRATION_2_SESSION_LEDGER_DDL) {
         db.exec(ddl);
       }
       db.exec(`PRAGMA user_version = ${BROKER_SESSION_SCHEMA_VERSION}`);

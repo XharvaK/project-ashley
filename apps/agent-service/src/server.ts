@@ -9,6 +9,11 @@ import { retrieveEpisodes } from "./core/memory/episodes.js";
 import { isAuthorizedOwnerId } from "./owner-auth.js";
 import { assertRegisteredRoutes } from "./route-surface.js";
 import { signSandboxApproval, signSandboxTombstone } from "./core/sandbox/handlers.js";
+import { SandboxApprovalService } from "./core/sandbox/approval-service.js";
+import type { SandboxBrokerClient } from "./core/sandbox/broker-client.js";
+import type { SandboxApprovalPathTarget, SandboxApprovalProposalSource, SandboxApprovalProposalStatus } from "./core/sandbox/approval-proposal.js";
+import type { SandboxCapabilityId, SandboxRiskClass } from "@composer-assistant/sandbox-policy";
+import type { ErrorCode } from "./errors.js";
 
 const MAX_DISCORD_MESSAGE = 4000;
 
@@ -27,10 +32,21 @@ function gone(_req: express.Request, res: express.Response): void {
   });
 }
 
-export function createServer(manager: AgentManager): express.Express {
+export function createServer(
+  manager: AgentManager,
+  options: { sandboxBrokerClient?: SandboxBrokerClient | null } = {},
+): express.Express {
   const app = express();
   app.use(cors());
   app.use(express.json({ limit: "2mb" }));
+
+  function approvalService(ownerId: string): SandboxApprovalService {
+    return new SandboxApprovalService({
+      db: manager.core.getDatabase(),
+      ownerId,
+      brokerClient: options.sandboxBrokerClient ?? null,
+    });
+  }
 
   app.get("/health", (_req, res) => {
     res.json({
@@ -626,6 +642,178 @@ export function createServer(manager: AgentManager): express.Express {
       const userId = typeof body.userId === "string" ? body.userId : undefined;
       const ownerId = requireOwner(userId);
       res.json({ envelope: signSandboxTombstone(ownerId, body) });
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  function approvalFailure(
+    result: { ok: false; errorCode: string; reason: string },
+  ): never {
+    if (result.errorCode === "unknown_approval_proposal") {
+      throw new AppError("unknown_approval_proposal", result.reason, 404);
+    }
+    throw new AppError(approvalErrorCode(result.errorCode), result.reason, 400);
+  }
+
+  function approvalErrorCode(errorCode: string): ErrorCode {
+    const known: readonly ErrorCode[] = [
+      "approval_owner_mismatch",
+      "approval_capability_missing",
+      "approval_invalid_risk_class",
+      "approval_no_target_paths",
+      "approval_too_many_target_paths",
+      "approval_invalid_path_intent",
+      "approval_invalid_persistence",
+      "approval_network_mode_unsupported",
+      "approval_policy_unbound",
+      "approval_not_approvable",
+      "approval_not_rejectable",
+      "approval_not_withdrawable",
+      "approval_not_staleable",
+      "approval_not_resumable",
+      "approval_update_failed",
+      "approval_session_unbound",
+      "approval_stale_policy",
+      "owner_approval_key_unavailable",
+      "broker_client_unavailable",
+      "policy_unavailable",
+      "unknown_session",
+      "session_not_awaiting_owner",
+    ];
+    return known.includes(errorCode as ErrorCode) ? (errorCode as ErrorCode) : "internal_error";
+  }
+
+  app.get("/sandbox/approvals", (req, res) => {
+    try {
+      const ownerId = requireOwner(String(req.query.owner_id ?? ""));
+      const status =
+        typeof req.query.status === "string" && req.query.status.length > 0
+          ? (req.query.status as SandboxApprovalProposalStatus)
+          : null;
+      res.json({
+        proposals: approvalService(ownerId).listProposals({ status }),
+      });
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.get("/sandbox/approvals/:proposalId", (req, res) => {
+    try {
+      const ownerId = requireOwner(String(req.query.owner_id ?? ""));
+      const proposal = approvalService(ownerId).getProposal(req.params.proposalId);
+      if (proposal === null) {
+        throw new AppError("unknown_approval_proposal", "proposal not found", 404);
+      }
+      res.json({ proposal });
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/sandbox/approvals", (req, res) => {
+    try {
+      const body = req.body as Record<string, unknown>;
+      const ownerId = requireOwner(
+        typeof body.userId === "string" ? body.userId : undefined,
+      );
+      const created = approvalService(ownerId).createProposal({
+        ownerId,
+        taskId: typeof body.taskId === "string" ? body.taskId : null,
+        sessionUuid: typeof body.sessionUuid === "string" ? body.sessionUuid : null,
+        capabilityId: String(body.capabilityId ?? "") as SandboxCapabilityId,
+        authoritativeRiskClass: String(body.authoritativeRiskClass ?? "") as SandboxRiskClass,
+        affectedCanonicalPaths: Array.isArray(body.affectedCanonicalPaths)
+          ? (body.affectedCanonicalPaths as SandboxApprovalPathTarget[])
+          : [],
+        policyRuleId: String(body.policyRuleId ?? ""),
+        policyId: String(body.policyId ?? ""),
+        policyVersion: Number(body.policyVersion ?? NaN),
+        policyHash: String(body.policyHash ?? ""),
+        recipeId: typeof body.recipeId === "string" ? body.recipeId : null,
+        executableId: typeof body.executableId === "string" ? body.executableId : null,
+        persistence: String(body.persistence ?? "temporary") as "temporary" | "persistent",
+        requiresNetwork: body.requiresNetwork === true,
+        externalSideEffect: body.externalSideEffect === true,
+        modelSummary: typeof body.modelSummary === "string" ? body.modelSummary : null,
+        source: String(body.source ?? "policy_precheck") as SandboxApprovalProposalSource,
+      });
+      if (!created.ok) {
+        throw new AppError(approvalErrorCode(created.errorCode), created.reason, 400);
+      }
+      res.status(201).json({ proposal: created.value });
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/sandbox/approvals/:proposalId/approve", (req, res) => {
+    try {
+      const body = req.body as Record<string, unknown>;
+      const ownerId = requireOwner(
+        typeof body.userId === "string" ? body.userId : undefined,
+      );
+      const result = approvalService(ownerId).approveProposal(req.params.proposalId, {
+        reason: typeof body.reason === "string" ? body.reason : null,
+      });
+      if (!result.ok) approvalFailure(result);
+      res.json({ proposal: result.value });
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/sandbox/approvals/:proposalId/reject", (req, res) => {
+    try {
+      const body = req.body as Record<string, unknown>;
+      const ownerId = requireOwner(
+        typeof body.userId === "string" ? body.userId : undefined,
+      );
+      const result = approvalService(ownerId).rejectProposal(
+        req.params.proposalId,
+        typeof body.reason === "string" ? body.reason : null,
+      );
+      if (!result.ok) approvalFailure(result);
+      res.json({ proposal: result.value });
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/sandbox/approvals/:proposalId/withdraw", (req, res) => {
+    try {
+      const body = req.body as Record<string, unknown>;
+      const ownerId = requireOwner(
+        typeof body.userId === "string" ? body.userId : undefined,
+      );
+      const result = approvalService(ownerId).withdrawProposal(
+        req.params.proposalId,
+        typeof body.reason === "string" ? body.reason : null,
+      );
+      if (!result.ok) approvalFailure(result);
+      res.json({ proposal: result.value });
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/sandbox/approvals/:proposalId/resume", async (req, res) => {
+    try {
+      const body = req.body as Record<string, unknown>;
+      const ownerId = requireOwner(
+        typeof body.userId === "string" ? body.userId : undefined,
+      );
+      const result = await approvalService(ownerId).resumeSession(req.params.proposalId);
+      if (!result.ok) approvalFailure(result);
+      res.json({ proposal: result.value.proposal, session: result.value.session });
     } catch (err) {
       const { status, body } = toErrorResponse(err);
       res.status(status).json(body);

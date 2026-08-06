@@ -36,11 +36,12 @@ import {
 import {
   MIGRATION_17_EXTERNAL_AGENCY_DDL,
 } from "./external-agency/migration-17.js";
+import { MIGRATION_19_SANDBOX_APPROVAL_DDL } from "./sandbox/migration-19.js";
 import { currentBuildIdentity } from "./rollout/capabilities.js";
 
 export { NUCLEAR_DB_PATH };
 
-export const NUCLEAR_SUPPORTED_VERSION = 18;
+export const NUCLEAR_SUPPORTED_VERSION = 19;
 
 const SCHEMA = `
 PRAGMA foreign_keys = ON;
@@ -1852,6 +1853,73 @@ export function migrate(
             phase: "failure",
             from: priorVersion,
             to: 18,
+            error: error instanceof Error ? error.message : "migration_failed",
+          },
+        });
+      }
+      throw error;
+    }
+  }
+  if (userVersion(db) < 19) {
+    const continuity = options.continuity;
+    if (!continuity && !options.skipContinuityRequirement) {
+      throw new Error("continuity_unavailable");
+    }
+    const priorVersion = userVersion(db);
+    const mirrorRow = db
+      .prepare(`SELECT lineage_id FROM lineage_mirror WHERE id = 1`)
+      .get() as { lineage_id?: string } | undefined;
+    const lineageId =
+      mirrorRow?.lineage_id ??
+      (options.skipContinuityRequirement ? "test-lineage" : undefined);
+    if (!lineageId) {
+      throw new Error("nuclear_lineage_mirror_missing");
+    }
+    if (continuity && mirrorRow?.lineage_id) {
+      requireSidecarLineageForNuclearMirror(continuity, mirrorRow.lineage_id, {
+        nuclearSchemaVersion: priorVersion,
+        buildIdentity: currentBuildIdentity(),
+      });
+      recordContinuityEvent(continuity, {
+        kind: "migration",
+        lineageId: mirrorRow.lineage_id,
+        detail: { phase: "pending", from: priorVersion, to: 19 },
+      });
+    }
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.exec(MIGRATION_19_SANDBOX_APPROVAL_DDL);
+      ensureEntityUuidAndClassification(db, lineageId);
+      db.exec("PRAGMA user_version = 19");
+      const fk = db.prepare("PRAGMA foreign_key_check").all();
+      if (fk.length > 0) throw new Error("nuclear_fk_check_failed");
+      db.exec("COMMIT");
+      if (continuity && mirrorRow?.lineage_id) {
+        continuity
+          .prepare(
+            `UPDATE lineage_state SET nuclear_schema_version = 19, updated_at = ? WHERE id = 1`,
+          )
+          .run(new Date().toISOString());
+        recordContinuityEvent(continuity, {
+          kind: "migration",
+          lineageId: mirrorRow.lineage_id,
+          detail: { phase: "success", from: priorVersion, to: 19 },
+        });
+      }
+    } catch (error) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        /* ignore */
+      }
+      if (continuity && mirrorRow?.lineage_id) {
+        recordContinuityEvent(continuity, {
+          kind: "migration",
+          lineageId: mirrorRow.lineage_id,
+          detail: {
+            phase: "failure",
+            from: priorVersion,
+            to: 19,
             error: error instanceof Error ? error.message : "migration_failed",
           },
         });
