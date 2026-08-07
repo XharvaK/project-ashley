@@ -73,9 +73,9 @@ function loadDelegatedRuntimeConfig(
     join(homedir(), ".composer-assistant", "keys", "master.pass");
   const passphrase = readFileSync(passphrasePath, "utf8").trim();
 
-  const delegatedEncPath =
-    process.env.ASHLEY_SANDBOX_DELEGATED_KEY_ENC_PATH?.trim() ??
-    join(keysDir, "delegated-runtime.key.enc");
+  const delegatedPublicPath =
+    process.env.ASHLEY_SANDBOX_DELEGATED_PUBLIC_KEY?.trim() ??
+    join(keysDir, "delegated-runtime-ed25519-v1.pub");
   const capabilityEncPath =
     process.env.ASHLEY_SANDBOX_CAPABILITY_KEY_ENC_PATH?.trim() ??
     join(keysDir, "broker-session-capability.key.enc");
@@ -98,14 +98,7 @@ function loadDelegatedRuntimeConfig(
   }
   const networkIsolation = createUnavailableNetworkIsolation();
 
-  const delegatedPrivatePem = decryptPrivateKeyPem(
-    parseEncryptedKeyEnvelope(readFileSync(delegatedEncPath, "utf8")),
-    passphrase,
-  );
-  const delegatedPublicPem = createPrivateKey(delegatedPrivatePem).export({
-    type: "spki",
-    format: "pem",
-  }).toString();
+  const delegatedPublicPem = readPublicKeyPem(delegatedPublicPath);
 
   const capabilityPrivatePem = decryptPrivateKeyPem(
     parseEncryptedKeyEnvelope(readFileSync(capabilityEncPath, "utf8")),

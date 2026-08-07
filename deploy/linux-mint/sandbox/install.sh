@@ -28,9 +28,16 @@ Options:
   --owner-id ID                    Ashley owner ID for broker policy
   --owner-public-key PATH          Public Ed25519 approval key (never private)
   --continuity-public-key PATH     Public Ed25519 tombstone key (never private)
+  --delegated-public-key PATH      Public Ed25519 delegated key (never private)
+  --capability-key PATH            Broker capability private key (.key.enc)
+  --master-passphrase PATH         Master passphrase for broker (master.pass)
+  --policy-artifact PATH           Policy artifact JSON
+  --policy-signature PATH          Policy artifact signature (.sig)
   --recipe-manifest PATH           Broker-owned recipe manifest (optional)
   --owner-key-id ID                Signed approval key id (default: public-key stem)
   --continuity-key-id ID           Tombstone key id (default: public-key stem)
+  --delegated-key-id ID            Delegated runtime key id
+  --capability-key-id ID           Broker capability key id
 EOF
 }
 
@@ -42,9 +49,16 @@ while [[ $# -gt 0 ]]; do
     --owner-id) OWNER_ID="$2"; shift 2 ;;
     --owner-public-key) OWNER_PUBLIC_KEY="$2"; shift 2 ;;
     --continuity-public-key) CONTINUITY_PUBLIC_KEY="$2"; shift 2 ;;
+    --delegated-public-key) DELEGATED_PUBLIC_KEY="$2"; shift 2 ;;
+    --capability-key) CAPABILITY_KEY="$2"; shift 2 ;;
+    --master-passphrase) MASTER_PASSPHRASE="$2"; shift 2 ;;
+    --policy-artifact) POLICY_ARTIFACT="$2"; shift 2 ;;
+    --policy-signature) POLICY_SIGNATURE="$2"; shift 2 ;;
     --recipe-manifest) RECIPE_MANIFEST="$2"; shift 2 ;;
     --owner-key-id) OWNER_KEY_ID="$2"; shift 2 ;;
     --continuity-key-id) CONTINUITY_KEY_ID="$2"; shift 2 ;;
+    --delegated-key-id) DELEGATED_KEY_ID="$2"; shift 2 ;;
+    --capability-key-id) CAPABILITY_KEY_ID="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -92,9 +106,9 @@ if [[ -z "$OWNER_ID" || ! "$OWNER_ID" =~ ^[A-Za-z0-9._:-]+$ ]]; then
   echo 'Set --owner-id to the configured Ashley owner ID.' >&2
   exit 2
 fi
-for key in "$OWNER_PUBLIC_KEY" "$CONTINUITY_PUBLIC_KEY"; do
+for key in "$OWNER_PUBLIC_KEY" "$CONTINUITY_PUBLIC_KEY" "$DELEGATED_PUBLIC_KEY" "$CAPABILITY_KEY" "$MASTER_PASSPHRASE" "$POLICY_ARTIFACT" "$POLICY_SIGNATURE"; do
   if [[ -z "$key" || ! -f "$key" ]]; then
-    echo "Public key file is missing: ${key:-<empty>}" >&2
+    echo "Required file is missing: ${key:-<empty>}" >&2
     exit 2
   fi
 done
@@ -107,9 +121,11 @@ if [[ ! -f "$RECIPE_MANIFEST" ]]; then
 fi
 owner_key_name="$(basename -- "$OWNER_PUBLIC_KEY")"
 continuity_key_name="$(basename -- "$CONTINUITY_PUBLIC_KEY")"
+delegated_key_name="$(basename -- "$DELEGATED_PUBLIC_KEY")"
 OWNER_KEY_ID="${OWNER_KEY_ID:-${owner_key_name%.*}}"
 CONTINUITY_KEY_ID="${CONTINUITY_KEY_ID:-${continuity_key_name%.*}}"
-if [[ ! "$OWNER_KEY_ID" =~ ^[A-Za-z0-9._:-]+$ || ! "$CONTINUITY_KEY_ID" =~ ^[A-Za-z0-9._:-]+$ ]]; then
+DELEGATED_KEY_ID="${DELEGATED_KEY_ID:-${delegated_key_name%.*}}"
+if [[ ! "$OWNER_KEY_ID" =~ ^[A-Za-z0-9._:-]+$ || ! "$CONTINUITY_KEY_ID" =~ ^[A-Za-z0-9._:-]+$ || ! "$DELEGATED_KEY_ID" =~ ^[A-Za-z0-9._:-]+$ ]]; then
   echo 'Key ids may contain only letters, digits, dot, underscore, colon, and hyphen.' >&2
   exit 2
 fi
@@ -128,7 +144,10 @@ root_run install -d -o ashley-sandbox -g ashley-sandbox -m 0750 \
   /var/lib/ashley-sandbox/meta \
   /var/lib/ashley-sandbox/meta/keys \
   /var/lib/ashley-sandbox/meta/keys/owner \
-  /var/lib/ashley-sandbox/meta/keys/continuity
+  /var/lib/ashley-sandbox/meta/keys/continuity \
+  /var/lib/ashley-sandbox/meta/keys/delegated \
+  /var/lib/ashley-sandbox/meta/keys/broker \
+  /var/lib/ashley-sandbox/meta/policy
 root_run install -d -o root -g ashley-sandbox -m 0750 /etc/ashley-sandbox
 root_run install -d -o root -g root -m 0755 /opt/ashley-sandbox
 root_run install -d -o root -g root -m 0755 /opt/ashley-sandbox/dist
@@ -159,6 +178,16 @@ root_run install -o root -g ashley-sandbox -m 0644 "$OWNER_PUBLIC_KEY" \
   "/var/lib/ashley-sandbox/meta/keys/owner/$owner_key_name"
 root_run install -o root -g ashley-sandbox -m 0644 "$CONTINUITY_PUBLIC_KEY" \
   "/var/lib/ashley-sandbox/meta/keys/continuity/$continuity_key_name"
+root_run install -o root -g ashley-sandbox -m 0644 "$DELEGATED_PUBLIC_KEY" \
+  "/var/lib/ashley-sandbox/meta/keys/delegated/$delegated_key_name"
+root_run install -o root -g ashley-sandbox -m 0640 "$CAPABILITY_KEY" \
+  "/var/lib/ashley-sandbox/meta/keys/broker/broker-session-capability.key.enc"
+root_run install -o root -g ashley-sandbox -m 0640 "$MASTER_PASSPHRASE" \
+  "/var/lib/ashley-sandbox/meta/keys/broker/master.pass"
+root_run install -o root -g ashley-sandbox -m 0644 "$POLICY_ARTIFACT" \
+  "/var/lib/ashley-sandbox/meta/policy/policy.json"
+root_run install -o root -g ashley-sandbox -m 0644 "$POLICY_SIGNATURE" \
+  "/var/lib/ashley-sandbox/meta/policy/policy.json.sig"
 
 env_tmp="$(mktemp)"
 cat >"$env_tmp" <<EOF
@@ -170,6 +199,13 @@ ASHLEY_SANDBOX_OWNER_PUBLIC_KEY=/var/lib/ashley-sandbox/meta/keys/owner/$owner_k
 ASHLEY_SANDBOX_CONTINUITY_PUBLIC_KEY=/var/lib/ashley-sandbox/meta/keys/continuity/$continuity_key_name
 ASHLEY_SANDBOX_OWNER_KEY_ID=$OWNER_KEY_ID
 ASHLEY_SANDBOX_CONTINUITY_KEY_ID=$CONTINUITY_KEY_ID
+ASHLEY_SANDBOX_DELEGATED_PUBLIC_KEY=/var/lib/ashley-sandbox/meta/keys/delegated/$delegated_key_name
+ASHLEY_SANDBOX_DELEGATED_KEY_ID=$DELEGATED_KEY_ID
+ASHLEY_SANDBOX_CAPABILITY_KEY_ENC_PATH=/var/lib/ashley-sandbox/meta/keys/broker/broker-session-capability.key.enc
+ASHLEY_SANDBOX_CAPABILITY_KEY_ID=$CAPABILITY_KEY_ID
+ASHLEY_SANDBOX_KEY_PASSPHRASE_PATH=/var/lib/ashley-sandbox/meta/keys/broker/master.pass
+ASHLEY_SANDBOX_POLICY_ARTIFACT=/var/lib/ashley-sandbox/meta/policy/policy.json
+ASHLEY_SANDBOX_POLICY_SIGNATURE=/var/lib/ashley-sandbox/meta/policy/policy.json.sig
 ASHLEY_SANDBOX_AGENT_UID=$(id -u "$AGENT_USER")
 ASHLEY_SANDBOX_PEER_CREDENTIAL_HELPER=/opt/ashley-sandbox/bin/peer-credentials
 ASHLEY_SANDBOX_RECIPE_MANIFEST=/var/lib/ashley-sandbox/meta/recipes.json

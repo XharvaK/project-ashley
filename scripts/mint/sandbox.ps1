@@ -21,12 +21,21 @@ param(
   [string]$OwnerPublicKeyRemotePath = "/tmp/owner-ed25519-v1.pub",
   [string]$ContinuityPublicKeyRemotePath = "/tmp/continuity-tombstone-ed25519-v1.pub",
   [string]$DelegatedPublicKeyRemotePath = "/tmp/delegated-runtime-ed25519-v1.pub",
+  [string]$CapabilityKeyRemotePath = "/tmp/broker-session-capability.key.enc",
+  [string]$MasterPassphraseRemotePath = "/tmp/master.pass",
+  [string]$PolicyArtifactRemotePath = "/tmp/policy.json",
+  [string]$PolicySignatureRemotePath = "/tmp/policy.json.sig",
   [string]$OwnerKeyId = "",
   [string]$ContinuityKeyId = "",
   [string]$DelegatedKeyId = "",
+  [string]$CapabilityKeyId = "",
   [string]$OwnerPublicKeyLocalPath = "",
   [string]$ContinuityPublicKeyLocalPath = "",
-  [string]$DelegatedPublicKeyLocalPath = ""
+  [string]$DelegatedPublicKeyLocalPath = "",
+  [string]$CapabilityKeyLocalPath = "",
+  [string]$MasterPassphraseLocalPath = "",
+  [string]$PolicyArtifactLocalPath = "",
+  [string]$PolicySignatureLocalPath = ""
  )
 
 $ErrorActionPreference = "Stop"
@@ -35,7 +44,7 @@ $RepoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 if (($Action -eq "Install" -or $Action -eq "Remove") -and -not $Apply) {
   throw "$Action changes the Mint host; pass -Apply explicitly. Preflight and Status are read-only."
 }
-foreach ($value in @($HostName, $User, $RepoDir, $AgentUser, $OwnerId, $OwnerPublicKeyRemotePath, $ContinuityPublicKeyRemotePath, $OwnerKeyId, $ContinuityKeyId, $OwnerPublicKeyLocalPath, $ContinuityPublicKeyLocalPath)) {
+foreach ($value in @($HostName, $User, $RepoDir, $AgentUser, $OwnerId, $OwnerPublicKeyRemotePath, $ContinuityPublicKeyRemotePath, $DelegatedPublicKeyRemotePath, $CapabilityKeyRemotePath, $MasterPassphraseRemotePath, $PolicyArtifactRemotePath, $PolicySignatureRemotePath, $OwnerKeyId, $ContinuityKeyId, $DelegatedKeyId, $CapabilityKeyId, $OwnerPublicKeyLocalPath, $ContinuityPublicKeyLocalPath, $DelegatedPublicKeyLocalPath, $CapabilityKeyLocalPath, $MasterPassphraseLocalPath, $PolicyArtifactLocalPath, $PolicySignatureLocalPath)) {
   if ($value -and $value -notmatch '^[A-Za-z0-9_./~:@+-]+$') {
     throw "Unsafe shell characters in argument: $value"
   }
@@ -66,9 +75,21 @@ if ($Action -eq "StagePublicKeys") {
     $delegatedKeyId = if ($DelegatedKeyId) { $DelegatedKeyId } else { "delegated-runtime-ed25519-v1" }
     $DelegatedPublicKeyLocalPath = Join-Path $keysDir "$delegatedKeyId.pub"
   }
-  foreach ($path in @($OwnerPublicKeyLocalPath, $ContinuityPublicKeyLocalPath, $DelegatedPublicKeyLocalPath)) {
+  if (-not $CapabilityKeyLocalPath) {
+    $CapabilityKeyLocalPath = Join-Path $keysDir "broker-session-capability.key.enc"
+  }
+  if (-not $MasterPassphraseLocalPath) {
+    $MasterPassphraseLocalPath = Join-Path $keysDir "master.pass"
+  }
+  if (-not $PolicyArtifactLocalPath) {
+    $PolicyArtifactLocalPath = Join-Path $RepoRoot "apps\sandbox-broker\docs\policy.json"
+  }
+  if (-not $PolicySignatureLocalPath) {
+    $PolicySignatureLocalPath = Join-Path $RepoRoot "apps\sandbox-broker\docs\policy.json.sig"
+  }
+  foreach ($path in @($OwnerPublicKeyLocalPath, $ContinuityPublicKeyLocalPath, $DelegatedPublicKeyLocalPath, $CapabilityKeyLocalPath, $MasterPassphraseLocalPath, $PolicyArtifactLocalPath, $PolicySignatureLocalPath)) {
     if (-not (Test-Path -LiteralPath $path)) {
-      throw "Public key file not found: $path. Run bootstrap-sandbox-keys.ps1 first."
+      throw "Required provisioning file not found: $path"
     }
   }
   $target = "${User}@${HostName}"
@@ -85,10 +106,30 @@ if ($Action -eq "StagePublicKeys") {
     $DelegatedPublicKeyLocalPath `
     "${target}:${DelegatedPublicKeyRemotePath}"
   if ($LASTEXITCODE -ne 0) { throw "scp delegated-runtime public key failed (exit $LASTEXITCODE)." }
-  Write-Host "Staged public keys to Mint:"
+  & scp -P $Port -o BatchMode=yes -o StrictHostKeyChecking=accept-new `
+    $CapabilityKeyLocalPath `
+    "${target}:${CapabilityKeyRemotePath}"
+  if ($LASTEXITCODE -ne 0) { throw "scp capability key failed (exit $LASTEXITCODE)." }
+  & scp -P $Port -o BatchMode=yes -o StrictHostKeyChecking=accept-new `
+    $MasterPassphraseLocalPath `
+    "${target}:${MasterPassphraseRemotePath}"
+  if ($LASTEXITCODE -ne 0) { throw "scp master passphrase failed (exit $LASTEXITCODE)." }
+  & scp -P $Port -o BatchMode=yes -o StrictHostKeyChecking=accept-new `
+    $PolicyArtifactLocalPath `
+    "${target}:${PolicyArtifactRemotePath}"
+  if ($LASTEXITCODE -ne 0) { throw "scp policy artifact failed (exit $LASTEXITCODE)." }
+  & scp -P $Port -o BatchMode=yes -o StrictHostKeyChecking=accept-new `
+    $PolicySignatureLocalPath `
+    "${target}:${PolicySignatureRemotePath}"
+  if ($LASTEXITCODE -ne 0) { throw "scp policy signature failed (exit $LASTEXITCODE)." }
+  Write-Host "Staged keys, policy, and passphrase to Mint:"
   Write-Host "  $OwnerPublicKeyRemotePath"
   Write-Host "  $ContinuityPublicKeyRemotePath"
   Write-Host "  $DelegatedPublicKeyRemotePath"
+  Write-Host "  $CapabilityKeyRemotePath"
+  Write-Host "  $MasterPassphraseRemotePath"
+  Write-Host "  $PolicyArtifactRemotePath"
+  Write-Host "  $PolicySignatureRemotePath"
   return
 }
 
@@ -114,8 +155,15 @@ switch ($Action) {
     if ($OwnerId) { $installArgs += @("--owner-id", $OwnerId) }
     if ($OwnerPublicKeyRemotePath) { $installArgs += @("--owner-public-key", $OwnerPublicKeyRemotePath) }
     if ($ContinuityPublicKeyRemotePath) { $installArgs += @("--continuity-public-key", $ContinuityPublicKeyRemotePath) }
+    if ($DelegatedPublicKeyRemotePath) { $installArgs += @("--delegated-public-key", $DelegatedPublicKeyRemotePath) }
+    if ($CapabilityKeyRemotePath) { $installArgs += @("--capability-key", $CapabilityKeyRemotePath) }
+    if ($MasterPassphraseRemotePath) { $installArgs += @("--master-passphrase", $MasterPassphraseRemotePath) }
+    if ($PolicyArtifactRemotePath) { $installArgs += @("--policy-artifact", $PolicyArtifactRemotePath) }
+    if ($PolicySignatureRemotePath) { $installArgs += @("--policy-signature", $PolicySignatureRemotePath) }
     if ($OwnerKeyId) { $installArgs += @("--owner-key-id", $OwnerKeyId) }
     if ($ContinuityKeyId) { $installArgs += @("--continuity-key-id", $ContinuityKeyId) }
+    if ($DelegatedKeyId) { $installArgs += @("--delegated-key-id", $DelegatedKeyId) }
+    if ($CapabilityKeyId) { $installArgs += @("--capability-key-id", $CapabilityKeyId) }
     $lines += ($installArgs -join ' ')
   }
   "Remove" {
