@@ -212,6 +212,34 @@ if [[ ! -x "$node_binary" ]]; then
 fi
 root_run install -o root -g root -m 0755 "$node_binary" /opt/ashley-sandbox/bin/node
 
+# R5B toolchain seam: pin a broker-controlled npm launcher as a regular
+# file (the resolver rejects symlinks). The whole npm package is copied
+# under /opt/ashley-sandbox so the broker never depends on nvm paths or
+# the agent's home for toolchain resolution.
+npm_cli="$(readlink -f "$(command -v npm)")"
+npm_pkg_dir="$(dirname -- "$(dirname -- "$npm_cli")")"
+if [[ ! -f "$npm_cli" || ! -d "$npm_pkg_dir" ]]; then
+  echo "Unable to resolve the npm package layout: $npm_cli" >&2
+  exit 2
+fi
+root_run install -d -o root -g root -m 0755 /opt/ashley-sandbox/lib
+root_run install -d -o root -g root -m 0755 /opt/ashley-sandbox/lib/node_modules
+root_run cp -RL "$npm_pkg_dir" /opt/ashley-sandbox/lib/node_modules/npm
+root_run chown -R root:root /opt/ashley-sandbox/lib/node_modules/npm
+root_run find /opt/ashley-sandbox/lib/node_modules/npm -type d -exec chmod 0755 {} +
+root_run find /opt/ashley-sandbox/lib/node_modules/npm -type f -exec chmod 0644 {} +
+npm_wrapper_tmp="$(mktemp)"
+cat >"$npm_wrapper_tmp" <<'EOF'
+#!/bin/sh
+# Ashley broker-owned npm launcher (R5B). Regular file, root-owned.
+# Prepends the broker-owned bin dir so children (tsc, vitest) resolve
+# /usr/bin/env node against the pinned broker node binary only.
+export PATH="/opt/ashley-sandbox/bin:$PATH"
+exec /opt/ashley-sandbox/bin/node /opt/ashley-sandbox/lib/node_modules/npm/bin/npm-cli.js "$@"
+EOF
+root_run install -o root -g root -m 0755 "$npm_wrapper_tmp" /opt/ashley-sandbox/bin/npm
+rm -f "$npm_wrapper_tmp"
+
 root_run cp -R "$ROOT/apps/sandbox-broker/dist/." /opt/ashley-sandbox/dist/
 root_run chown -R root:root /opt/ashley-sandbox/dist
 root_run find /opt/ashley-sandbox/dist -type d -exec chmod 0755 {} +
@@ -229,6 +257,18 @@ root_run find /opt/ashley-sandbox/node_modules/@composer-assistant/sandbox-polic
 root_run find /opt/ashley-sandbox/node_modules/@composer-assistant/sandbox-policy/dist -type f -exec chmod 0644 {} +
 root_run install -o root -g root -m 0644 "$ROOT/apps/sandbox-policy/package.json" \
   /opt/ashley-sandbox/node_modules/@composer-assistant/sandbox-policy/package.json
+
+# R5B workspace provisioning: the fixed `verify:agent-tsc` recipe anchors at
+# the broker workspace root (`cwdPolicy: workspace`), so the workspace must
+# contain a real `apps/agent-service` tree with its dependencies. The copy
+# dereferences symlinks so workspace-link entries (e.g. the
+# @composer-assistant/sandbox-policy package link) become real trees, and
+# the broker process owns the result.
+root_run install -d -o ashley-sandbox -g ashley-sandbox -m 0750 \
+  /var/lib/ashley-sandbox/workspace/apps
+root_run cp -RL "$ROOT/apps/agent-service" /var/lib/ashley-sandbox/workspace/apps/
+root_run chown -R ashley-sandbox:ashley-sandbox \
+  /var/lib/ashley-sandbox/workspace/apps/agent-service
 
 peer_helper_tmp="$(mktemp)"
 env_tmp=""
@@ -255,6 +295,25 @@ root_run install -o root -g ashley-sandbox -m 0644 "$POLICY_ARTIFACT" \
 root_run install -o root -g ashley-sandbox -m 0644 "$POLICY_SIGNATURE" \
   "/var/lib/ashley-sandbox/meta/policy/policy.json.sig"
 
+# Public trust artifacts for the agent user: the signed policy pair and the
+# delegated runtime public key are copied into the agent's key directory so
+# the operator-side one-shot recipe driver can verify the broker's active
+# policy and the delegated signing keypair without touching broker-owned
+# state. Private key material is never installed by this script.
+agent_home="$(getent passwd "$AGENT_USER" | cut -d: -f6)"
+if [[ -z "$agent_home" || ! -d "$agent_home" ]]; then
+  echo "Unable to resolve agent home directory: $AGENT_USER" >&2
+  exit 2
+fi
+agent_keys_dir="$agent_home/.composer-assistant/keys"
+root_run install -d -o "$AGENT_USER" -g "$AGENT_USER" -m 0700 "$agent_keys_dir"
+root_run install -o "$AGENT_USER" -g "$AGENT_USER" -m 0640 "$POLICY_ARTIFACT" \
+  "$agent_keys_dir/policy.json"
+root_run install -o "$AGENT_USER" -g "$AGENT_USER" -m 0640 "$POLICY_SIGNATURE" \
+  "$agent_keys_dir/policy.json.sig"
+root_run install -o "$AGENT_USER" -g "$AGENT_USER" -m 0640 "$DELEGATED_PUBLIC_KEY" \
+  "$agent_keys_dir/delegated-runtime-ed25519-v1.pub"
+
 env_tmp="$(mktemp)"
 cat >"$env_tmp" <<EOF
 ASHLEY_SANDBOX_OWNER_ID=$OWNER_ID
@@ -279,6 +338,7 @@ ASHLEY_SANDBOX_DELEGATED_ENABLED=$DELEGATED_ENABLED
 ASHLEY_SANDBOX_NETWORK_PROVIDER=$NETWORK_PROVIDER
 ASHLEY_SANDBOX_NETWORK_ISOLATION_QUALIFIED=$NETWORK_ISOLATION_QUALIFIED
 ASHLEY_SANDBOX_UNSHARE_PATH=$UNSHARE_PATH
+ASHLEY_SANDBOX_EXECUTABLE_NPM=/opt/ashley-sandbox/bin/npm
 EOF
 root_run install -o root -g ashley-sandbox -m 0640 "$env_tmp" /etc/ashley-sandbox/broker.env
 

@@ -18,6 +18,7 @@ import { UnixBrokerServer } from "./server.js";
 import { toCanonicalBrokerPath } from "./policy/path.js";
 import { fixedRecipeRegistry } from "./policy/recipe-registry.js";
 import { selectProductionNetworkIsolation, assertNetworkIsolationProbeOperational } from "./execution/linux-network-isolation.js";
+import { executableMappingsFromEnv } from "./execution/executable-mappings.js";
 import type { NetworkIsolationProvider } from "./execution/network-isolation.js";
 import type { DelegatedRuntimeConfig } from "./delegated/runtime.js";
 
@@ -132,6 +133,20 @@ async function loadDelegatedRuntimeConfig(
   }
 
   const envAllowlist = new Set<string>(["PATH", "NODE_OPTIONS"]);
+
+  // R5B production executable seam: the installer pins broker-controlled
+  // regular files (e.g. /opt/ashley-sandbox/bin/npm) via
+  // ASHLEY_SANDBOX_EXECUTABLE_<ID>. Unmapped ids stay unmapped and every
+  // fixed-recipe run for them is refused at the executable stage. The
+  // mapping is validated here so a malformed seam fails the boot instead of
+  // silently running with an empty mapping.
+  const mappingsResult = executableMappingsFromEnv(process.env);
+  if (!mappingsResult.ok) {
+    throw new Error(
+      `sandbox_delegated_runtime: executable_mapping_${mappingsResult.errorCode}:${mappingsResult.reason}`,
+    );
+  }
+
   return {
     config: {
       ownerId: requiredEnv("ASHLEY_SANDBOX_OWNER_ID"),
@@ -152,7 +167,7 @@ async function loadDelegatedRuntimeConfig(
       workspaceRoot: workspaceRootCanonical.value,
       recipes: fixedRecipeRegistry(),
       envAllowlist,
-      executableMappings: {},
+      executableMappings: mappingsResult.mappings,
       networkProvider: selection.label,
     },
     networkIsolation,

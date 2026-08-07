@@ -104,3 +104,68 @@ powershell -File scripts\mint\sandbox.ps1 -Action Remove -Apply
 ```
 
 State deletion requires a separate explicit `-RemoveData -Yes` request.
+
+## R5B host-qualified single run (delegated)
+
+The broker refuses to start in the `none` network provider unless the host
+passes the R5B qualification run (read-only, xarvak) **and** the installer is
+invoked with `--network-provider none --network-isolation-qualified`. Once
+qualified, the production path executes exactly one delegated recipe via a
+broker-finalized chain: policy artifact verification, delegated key
+validation, session `create -> activate -> capability issue -> envelope sign
+(real-clock window safe) -> executeRecipe -> transition`.
+
+Install flags for the delegated run (never touches private keys):
+
+```bash
+sudo deploy/linux-mint/sandbox/install.sh --apply \
+  --agent-user xarvak \
+  --owner-id <discord-owner-id> \
+  --owner-public-key ~/.ashley-sandbox-r4-stage/owner-ed25519-v1.pub \
+  --continuity-public-key ~/.ashley-sandbox-r4-stage/continuity-tombstone-ed25519-v1.pub \
+  --delegated-public-key ~/.ashley-sandbox-r4-stage/delegated-runtime-ed25519-v1.pub \
+  --capability-key ~/.ashley-sandbox-r4-stage/broker-session-capability.key.enc \
+  --master-passphrase ~/.ashley-sandbox-r4-stage/master.pass \
+  --policy-artifact ~/.ashley-r4-stage-local/policy-r4-004.json \
+  --policy-signature ~/.ashley-r4-stage-local/policy-r4-004.json.sig \
+  --network-provider none --network-isolation-qualified \
+  --unshare-path /usr/bin/unshare --delegated-enabled
+```
+
+The installer additionally:
+
+1. Provisions the broker-owned npm package + regular-file launcher under
+   `/opt/ashley-sandbox` (the executable resolver rejects symlinks; systemd
+   `ProtectHome=true` hides the nvm paths under `/home/xarvak`).
+2. Copies the signed policy pair + delegated public key into
+   `~/.composer-assistant/keys/` (agent-readable, for driver-side verification).
+3. Provisions the workspace `apps/agent-service` tree for the pinned
+   `verify:agent-tsc` recipe (dereferenced copy, broker-owned).
+4. Pins the executable seam in `/etc/ashley-sandbox/broker.env` as
+   `ASHLEY_SANDBOX_EXECUTABLE_NPM=/opt/ashley-sandbox/bin/npm`. Any unmapped
+   executable id fails closed at the resolver without spawning.
+
+The policy artifact must be issued by the Mint sign scripts
+(`policy-r4-004.json` + `.sig`, expiry **2026-08-08T13:27Z**) and deployed
+before expiry; after expiry a new policy (R4-005) must be issued.
+
+The delegated private key is never installed by the installer. Before the
+single run, copy it into the agent key store:
+
+```bash
+cp ~/.ashley-r4-stage-local/delegated-runtime.key.enc ~/.composer-assistant/keys/
+```
+
+Then run the one-shot driver (single `verify:agent-tsc` execution, prints the
+broker receipt):
+
+```bash
+cd ~/project-ashley && node scripts/mint/verify-agent-tsc.mjs
+```
+
+The driver verifies the signed policy against the owner public key, matches
+the policy hash against the broker's active readiness, validates the
+delegated keypair, issues the capability **before** signing the envelope
+(clamped inside the capability window), and transitions the session to
+`completed`/`aborted`. Session `sandbox_operator_light`, one capability, one
+tool execution — no autonomy path is enabled by this run.

@@ -83,7 +83,15 @@ export type RunSandboxLoopInput = {
   capabilityTtlMs?: number;
 };
 
-const DEFAULT_CAPABILITY_TTL_MS = 60_000;
+const DEFAULT_CAPABILITY_TTL_MS = 120_000;
+
+/**
+ * Envelope lifetime is deliberately shorter than the capability window so a
+ * real (advancing) clock can never push the signed envelope outside the
+ * broker-issued capability window. The envelope is signed AFTER the
+ * capability is issued and its expiry is clamped inside the window.
+ */
+const ENVELOPE_TTL_MS = 30_000;
 
 function receiptSummaryOf(
   recipeId: string,
@@ -427,20 +435,6 @@ export async function runSandboxLoop(
       return stop("awaiting_owner", "awaiting_owner");
     }
 
-    const nonce = input.nonceFactory ? input.nonceFactory() : randomNonce();
-    const signed = signDelegatedSandboxEnvelope({
-      proposal,
-      precheck,
-      context: trustedContext(),
-      key: input.delegatedKey,
-      nowMs: input.nowMs(),
-      nonce,
-      auditSink: undefined,
-    });
-    if (!signed.ok) {
-      return stop("policy_refused", "stopped", `signing:${signed.error}:${signed.reason}`);
-    }
-
     const capabilityIssued = await input.client.issueSessionCapability(
       session.sessionUuid,
       capability,
@@ -451,6 +445,28 @@ export async function runSandboxLoop(
     );
     if (!capabilityIssued.ok) {
       return stop("broker_refusal", "stopped", `capability:${capabilityIssued.errorCode}`);
+    }
+
+    // The envelope is signed only after the capability exists so its
+    // issuedAt is never earlier than the capability window start, and its
+    // expiry is clamped strictly inside the capability window end.
+    const capabilityWindowEndMs = Date.parse(capabilityIssued.value.payload.expiresAt);
+    const signNowMs = input.nowMs();
+    const nonce = input.nonceFactory ? input.nonceFactory() : randomNonce();
+    const signed = signDelegatedSandboxEnvelope({
+      proposal,
+      precheck,
+      context: trustedContext(),
+      key: input.delegatedKey,
+      nowMs: signNowMs,
+      expiresAt: Number.isFinite(capabilityWindowEndMs)
+        ? Math.min(signNowMs + ENVELOPE_TTL_MS, capabilityWindowEndMs - 1_000)
+        : signNowMs + ENVELOPE_TTL_MS,
+      nonce,
+      auditSink: undefined,
+    });
+    if (!signed.ok) {
+      return stop("policy_refused", "stopped", `signing:${signed.error}:${signed.reason}`);
     }
 
     const execution = await input.client.executeRecipe({

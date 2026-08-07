@@ -1009,6 +1009,47 @@ describe("recipe flow", () => {
     expect(session!.toolExecutionsUsed).toBe(1);
   });
 
+  it("63b. a recipe succeeds under a real advancing clock (envelope inside capability window)", async () => {
+    // Regression: the envelope must be signed after the capability is
+    // issued and its expiry must stay strictly inside the capability
+    // window. A fixed test clock masks the ordering bug; this test uses a
+    // shared clock that advances on every read.
+    const clock = { now: 1_800_000_000_000 };
+    const key = makeKey();
+    const client = new FakeSandboxBrokerClient({
+      ownerId: OWNER_ID,
+      delegatedPublicKeyPem: key.publicKeyPem,
+      nowMs: () => clock.now,
+    });
+    const audits: SandboxOrchestrationAudit[] = [];
+    const counter = { n: 0 };
+    const adapter = new FakeSandboxOperatorAdapter([
+      { action: gitStatusAction() },
+      { action: completeAction() },
+    ]);
+    currentClient = client;
+    const result = await runSandboxLoop({
+      task: makeTask({ nowMs: clock.now }),
+      lifecycle: "fixture_only",
+      adapter,
+      client,
+      delegatedKey: key,
+      nowMs: () => {
+        clock.now += 2;
+        return clock.now;
+      },
+      auditSink: (record) => audits.push(record),
+      nonceFactory: () => `n-${++counter.n}`,
+    });
+    expect(result.stopReason).toBe("operator_completed");
+    expect(result.toolExecutionsUsed).toBe(1);
+    const receipt = audits.find((a) => a.kind === "broker_receipt_received");
+    expect(receipt).toBeDefined();
+    if (receipt && receipt.kind === "broker_receipt_received") {
+      expect(receipt.outcome).toBe("succeeded");
+    }
+  });
+
   it("64. exactly one model call per iteration across turns", async () => {
     const h = makeHarness();
     const adapter = new FakeSandboxOperatorAdapter([
