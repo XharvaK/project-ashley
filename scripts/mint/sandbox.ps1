@@ -18,13 +18,13 @@ param(
   [string]$RepoDir = "~/project-ashley",
   [string]$AgentUser = "",
   [string]$OwnerId = "",
-  [string]$OwnerPublicKeyRemotePath = "/tmp/owner-ed25519-v1.pub",
-  [string]$ContinuityPublicKeyRemotePath = "/tmp/continuity-tombstone-ed25519-v1.pub",
-  [string]$DelegatedPublicKeyRemotePath = "/tmp/delegated-runtime-ed25519-v1.pub",
-  [string]$CapabilityKeyRemotePath = "/tmp/broker-session-capability.key.enc",
-  [string]$MasterPassphraseRemotePath = "/tmp/master.pass",
-  [string]$PolicyArtifactRemotePath = "/tmp/policy.json",
-  [string]$PolicySignatureRemotePath = "/tmp/policy.json.sig",
+  [string]$OwnerPublicKeyRemotePath = "~/.ashley-sandbox-r4-stage/owner-ed25519-v1.pub",
+  [string]$ContinuityPublicKeyRemotePath = "~/.ashley-sandbox-r4-stage/continuity-tombstone-ed25519-v1.pub",
+  [string]$DelegatedPublicKeyRemotePath = "~/.ashley-sandbox-r4-stage/delegated-runtime-ed25519-v1.pub",
+  [string]$CapabilityKeyRemotePath = "~/.ashley-sandbox-r4-stage/broker-session-capability.key.enc",
+  [string]$MasterPassphraseRemotePath = "~/.ashley-sandbox-r4-stage/master.pass",
+  [string]$PolicyArtifactRemotePath = "~/.ashley-sandbox-r4-stage/policy.json",
+  [string]$PolicySignatureRemotePath = "~/.ashley-sandbox-r4-stage/policy.json.sig",
   [string]$OwnerKeyId = "",
   [string]$ContinuityKeyId = "",
   [string]$DelegatedKeyId = "",
@@ -94,6 +94,10 @@ if ($Action -eq "StagePublicKeys") {
   }
   $target = "${User}@${HostName}"
   Write-Host "=== StagePublicKeys to $target ==="
+  
+  & ssh -p $Port -o BatchMode=yes -o StrictHostKeyChecking=accept-new $target "mkdir -p ~/.ashley-sandbox-r4-stage && chmod 0700 ~/.ashley-sandbox-r4-stage"
+  if ($LASTEXITCODE -ne 0) { throw "Failed to create secure remote staging directory (exit $LASTEXITCODE)." }
+
   & scp -P $Port -o BatchMode=yes -o StrictHostKeyChecking=accept-new `
     $OwnerPublicKeyLocalPath `
     "${target}:${OwnerPublicKeyRemotePath}"
@@ -122,6 +126,10 @@ if ($Action -eq "StagePublicKeys") {
     $PolicySignatureLocalPath `
     "${target}:${PolicySignatureRemotePath}"
   if ($LASTEXITCODE -ne 0) { throw "scp policy signature failed (exit $LASTEXITCODE)." }
+
+  & ssh -p $Port -o BatchMode=yes -o StrictHostKeyChecking=accept-new $target "chmod 0600 ~/.ashley-sandbox-r4-stage/broker-session-capability.key.enc ~/.ashley-sandbox-r4-stage/master.pass"
+  if ($LASTEXITCODE -ne 0) { throw "Failed to secure remote secret files (exit $LASTEXITCODE)." }
+
   Write-Host "Staged keys, policy, and passphrase to Mint:"
   Write-Host "  $OwnerPublicKeyRemotePath"
   Write-Host "  $ContinuityPublicKeyRemotePath"
