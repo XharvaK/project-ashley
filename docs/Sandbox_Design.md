@@ -433,6 +433,17 @@ for `/run/ashley/`. Service unit does **not** duplicate socket ACL.
 narrowed to `user net` for the R5B-qualified isolation runtime — no further
 namespace exceptions are planned.
 
+**R5B network evidence:** the authoritative proof that the recipe child lives
+in its own network namespace is the **namespace-scoped `/proc/net/dev`**,
+which in the R5B qualification run contained only `lo`. `/sys/class/net` is
+not authoritative: it can expose host-mounted interface metadata even when the
+child runs in a separate network namespace. **R5B workspace provisioning:** the
+qualification workspace copy must preserve package-manager executable-link
+semantics (`node_modules/.bin/*` symlinks such as `.bin/tsc`); only the known
+`@composer-assistant/*` workspace package links are materialized as real
+self-contained package trees so the staged workspace never resolves back into
+the live checkout.
+
 ### Residual risks
 
 Doc-UID processes in `ashley-broker` group can connect to the socket. Mitigation:

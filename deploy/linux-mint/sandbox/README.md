@@ -115,6 +115,19 @@ broker-finalized chain: policy artifact verification, delegated key
 validation, session `create -> activate -> capability issue -> envelope sign
 (real-clock window safe) -> executeRecipe -> transition`.
 
+**R5B network-isolation evidence:** the authoritative evidence that the child
+is in its own network namespace is the **namespace-scoped `/proc/net/dev`**,
+which in the R5B qualification run contains only `lo`. `/sys/class/net` is
+**not** authoritative: it may expose host-mounted interface metadata even
+when the child runs in a separate network namespace.
+
+**R5B workspace provisioning:** the workspace copy must not destroy
+package-manager executable-link semantics. npm installs `node_modules/.bin/*`
+as symlinks (e.g. `.bin/tsc -> ../typescript/bin/tsc`); dereferencing them
+with `cp -RL` produces `Cannot find module '../lib/tsc.js'`. The installer
+preserves those links and materializes only the `@composer-assistant/*`
+workspace package links as real self-contained package trees.
+
 Install flags for the delegated run (never touches private keys):
 
 ```bash
@@ -140,7 +153,9 @@ The installer additionally:
 2. Copies the signed policy pair + delegated public key into
    `~/.composer-assistant/keys/` (agent-readable, for driver-side verification).
 3. Provisions the workspace `apps/agent-service` tree for the pinned
-   `verify:agent-tsc` recipe (dereferenced copy, broker-owned).
+   `verify:agent-tsc` recipe (symlink-preserving copy that materializes the
+   `@composer-assistant/*` workspace links as self-contained package trees;
+   broker-owned).
 4. Pins the executable seam in `/etc/ashley-sandbox/broker.env` as
    `ASHLEY_SANDBOX_EXECUTABLE_NPM=/opt/ashley-sandbox/bin/npm`. Any unmapped
    executable id fails closed at the resolver without spawning.

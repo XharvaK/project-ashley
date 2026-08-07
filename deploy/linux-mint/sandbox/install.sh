@@ -260,13 +260,20 @@ root_run install -o root -g root -m 0644 "$ROOT/apps/sandbox-policy/package.json
 
 # R5B workspace provisioning: the fixed `verify:agent-tsc` recipe anchors at
 # the broker workspace root (`cwdPolicy: workspace`), so the workspace must
-# contain a real `apps/agent-service` tree with its dependencies. The copy
-# dereferences symlinks so workspace-link entries (e.g. the
-# @composer-assistant/sandbox-policy package link) become real trees, and
-# the broker process owns the result.
+# contain a real `apps/agent-service` tree with its dependencies. The
+# packaging helper preserves package-manager executable-link semantics
+# (`node_modules/.bin/*` stays symlinked, e.g. `.bin/tsc -> ../typescript/bin/tsc`)
+# while materializing only the known `@composer-assistant/*` workspace package
+# links as real self-contained package trees, so the staged workspace can never
+# reproduce `Cannot find module '../lib/tsc.js'` and never resolves back into
+# the live checkout. The broker process owns the result.
 root_run install -d -o ashley-sandbox -g ashley-sandbox -m 0750 \
   /var/lib/ashley-sandbox/workspace/apps
-root_run cp -RL "$ROOT/apps/agent-service" /var/lib/ashley-sandbox/workspace/apps/
+root_run /opt/ashley-sandbox/bin/node "$SCRIPT_DIR/provision-workspace.mjs" \
+  --source "$ROOT/apps/agent-service" \
+  --dest /var/lib/ashley-sandbox/workspace/apps/agent-service \
+  --workspace "@composer-assistant/sandbox-policy=$ROOT/apps/sandbox-policy" \
+  --workspace "@composer-assistant/sandbox-broker=$ROOT/apps/sandbox-broker"
 root_run chown -R ashley-sandbox:ashley-sandbox \
   /var/lib/ashley-sandbox/workspace/apps/agent-service
 
