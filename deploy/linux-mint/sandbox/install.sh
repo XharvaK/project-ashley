@@ -241,7 +241,7 @@ for unit in ashley-exec-broker.socket ashley-exec-broker.service; do
   rm -f "$rendered"
 done
 
-if ! (cd /opt/ashley-sandbox && root_run /opt/ashley-sandbox/bin/node -e "require('@composer-assistant/sandbox-policy')"); then
+if ! (cd /opt/ashley-sandbox && root_run /opt/ashley-sandbox/bin/node --input-type=module -e "await import('@composer-assistant/sandbox-policy')"); then
   echo 'Production module-resolution smoke check failed.' >&2
   exit 2
 fi
