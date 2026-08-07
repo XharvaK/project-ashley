@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { basename, join } from "node:path";
 import { homedir } from "node:os";
-import { createPrivateKey } from "node:crypto";
+import { createPrivateKey, createPublicKey } from "node:crypto";
 import {
   createBroker,
   DurableBrokerStore,
@@ -104,7 +104,7 @@ function loadDelegatedRuntimeConfig(
     parseEncryptedKeyEnvelope(readFileSync(capabilityEncPath, "utf8")),
     passphrase,
   );
-  const capabilityPublicPem = createPrivateKey(capabilityPrivatePem).export({
+  const capabilityPublicPem = createPublicKey(createPrivateKey(capabilityPrivatePem)).export({
     type: "spki",
     format: "pem",
   }).toString();
