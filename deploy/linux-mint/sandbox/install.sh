@@ -258,13 +258,6 @@ if ! (cd /opt/ashley-sandbox && root_run /opt/ashley-sandbox/bin/node --check /o
   exit 2
 fi
 
-root_run systemctl daemon-reload
-root_run systemctl enable --now ashley-exec-broker.socket
-
-printf '%s\n' 'Sandbox broker installation completed.'
-printf '%s\n' 'The agent user was added to ashley-broker; log out/in or reboot before testing IPC.'
-printf '%s\n' 'Check with: bash deploy/linux-mint/sandbox/status.sh'
-
 if ! root_run find /opt/ashley-sandbox -not -user root -print -quit | grep -q .; then
   # Assertion passed: no files found that are not owned by root
   :
@@ -272,3 +265,10 @@ else
   echo 'FATAL: Found files in /opt/ashley-sandbox not owned by root!' >&2
   exit 2
 fi
+
+root_run systemctl daemon-reload
+root_run systemctl enable --now ashley-exec-broker.socket
+
+printf '%s\n' 'Sandbox broker installation completed.'
+printf '%s\n' 'The agent user was added to ashley-broker; log out/in or reboot before testing IPC.'
+printf '%s\n' 'Check with: bash deploy/linux-mint/sandbox/status.sh'
