@@ -284,7 +284,7 @@ export class SandboxApprovalService {
         return { ok: false, errorCode: "approval_stale_policy", reason: "policy changed since approval" };
       }
     }
-    const session = this.brokerClient.getSession(proposal.sessionUuid);
+    const session = await this.brokerClient.getSession(proposal.sessionUuid);
     if (session === null) {
       return { ok: false, errorCode: "unknown_session", reason: "bound session not found" };
     }

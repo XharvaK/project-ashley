@@ -96,11 +96,7 @@ export type SandboxWorkspaceResult =
   | { ok: false; errorCode: string; reason: string };
 
 export interface SandboxBrokerClient {
-  readonly kind: "in_process_fake";
-  readonly policy: ActiveVerifiedSandboxPolicy;
-  readonly pathFacts: readonly CanonicalPathFact[];
-  readonly liveFileCanonical: string;
-  readonly audits: readonly BrokerAuditRecord[];
+  readonly kind: "in_process_fake" | "unix_socket";
 
   authorizeRequest(
     envelope: DelegatedApprovalEnvelope,
@@ -166,9 +162,24 @@ export interface SandboxBrokerClient {
     request: FixedRecipeExecutionRequest,
   ): Promise<FixedRecipeExecutionResult>;
 
-  getSession(sessionUuid: string): SandboxBrokerSessionSnapshot | null;
+  getSession(sessionUuid: string): Promise<SandboxBrokerSessionSnapshot | null>;
 
   close(): void;
+}
+
+/**
+ * Test-only diagnostics exposed by in-process fake clients. The production
+ * operational interface (`SandboxBrokerClient`) does not carry local policy
+ * documents, canonical path facts, or audit arrays — those are broker-owned
+ * facts that must not be derived from a local copy. Orchestration modules that
+ * require diagnostics accept `SandboxBrokerClient & SandboxBrokerClientTestDiagnostics`,
+ * which only the in-process fake satisfies; the Unix socket client never does.
+ */
+export interface SandboxBrokerClientTestDiagnostics {
+  readonly policy: ActiveVerifiedSandboxPolicy;
+  readonly pathFacts: readonly CanonicalPathFact[];
+  readonly liveFileCanonical: string;
+  readonly audits: readonly BrokerAuditRecord[];
 }
 
 class FixtureNetworkIsolationProvider implements NetworkIsolationProvider {
@@ -241,7 +252,7 @@ export type FakeSandboxBrokerClientOptions = {
   nowMs?: () => number;
 };
 
-export class FakeSandboxBrokerClient implements SandboxBrokerClient {
+export class FakeSandboxBrokerClient implements SandboxBrokerClient, SandboxBrokerClientTestDiagnostics {
   readonly kind = "in_process_fake" as const;
   readonly policy: ActiveVerifiedSandboxPolicy;
   readonly pathFacts: readonly CanonicalPathFact[];
@@ -561,7 +572,7 @@ export class FakeSandboxBrokerClient implements SandboxBrokerClient {
     return this.executionService.executeFixedRecipe(request);
   }
 
-  getSession(sessionUuid: string): SandboxBrokerSessionSnapshot | null {
+  async getSession(sessionUuid: string): Promise<SandboxBrokerSessionSnapshot | null> {
     const session = this.sessionService.getSession(sessionUuid);
     return session === null ? null : toSessionSnapshot(session);
   }

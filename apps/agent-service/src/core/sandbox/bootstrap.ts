@@ -22,6 +22,7 @@ import { CANDIDATE_WORKSPACE_CREATE_CAPABILITY } from "./task.js";
 import type { SandboxOperatorAdapter } from "./operator-adapter.js";
 import type {
   SandboxBrokerClient,
+  SandboxBrokerClientTestDiagnostics,
   SandboxBrokerSessionSnapshot,
 } from "./broker-client.js";
 import type {
@@ -51,7 +52,7 @@ export type BootstrapSandboxSessionInput = {
   task: SandboxTask;
   lifecycle: SandboxAutonomyLifecycle;
   adapter: SandboxOperatorAdapter;
-  client: SandboxBrokerClient;
+  client: SandboxBrokerClient & SandboxBrokerClientTestDiagnostics;
   delegatedKey: DelegatedRuntimeKeyMaterial;
   nowMs: () => number;
   nonceFactory?: () => string;
@@ -98,7 +99,7 @@ function precheckReason(precheck: unknown): string {
  */
 export function buildTrustedPolicyContext(input: {
   task: SandboxTask;
-  client: SandboxBrokerClient;
+  client: SandboxBrokerClient & SandboxBrokerClientTestDiagnostics;
   nowMs: number;
   facts?: readonly CanonicalPathFact[];
 }): SandboxPolicyTrustedContext {

@@ -10,12 +10,14 @@ import {
   startCognitionLoop,
   stopCognitionLoop,
 } from "./core/cognition/worker.js";
+import { createConfiguredUnixSandboxClient } from "./core/sandbox/unix-broker-client.js";
 
 const manager = new AgentManager();
 
 async function main(): Promise<void> {
   await manager.init();
-  const app = createServer(manager);
+  const sandboxBrokerClient = createConfiguredUnixSandboxClient();
+  const app = createServer(manager, { sandboxBrokerClient });
   const server = listen(app);
 
   startNuclearCuriosityLoop(
@@ -34,6 +36,7 @@ async function main(): Promise<void> {
     console.log(`[agent-service] ${signal}`);
     stopNuclearCuriosityLoop();
     stopCognitionLoop();
+    sandboxBrokerClient?.close();
     await manager.shutdown();
     server.close();
     process.exit(0);

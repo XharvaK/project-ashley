@@ -1,6 +1,6 @@
 import { existsSync, lstatSync } from "node:fs";
 import net from "node:net";
-import { encodeFrame, type BrokerFrame } from "./protocol/frame.js";
+import { encodeFrame, type BrokerFrame, type BrokerResponse } from "./protocol/frame.js";
 import { FrameStreamDecoder } from "./protocol/stream.js";
 import type { SandboxBroker } from "./broker.js";
 
@@ -130,16 +130,7 @@ export class UnixBrokerServer {
 
     const decoder = new FrameStreamDecoder();
     socket.on("data", (chunk: Buffer) => {
-      try {
-        for (const frame of decoder.push(chunk)) {
-          this.dispatchFrame(socket, frame);
-        }
-      } catch (error) {
-        this.options.logger?.warn?.(
-          `sandbox broker protocol error: ${error instanceof Error ? error.message : "unknown"}`,
-        );
-        socket.destroy();
-      }
+      void this.dispatchBatches(socket, chunk, decoder);
     });
     socket.on("error", (error) => {
       this.options.logger?.warn?.(`sandbox broker socket error: ${error.message}`);
@@ -161,20 +152,40 @@ export class UnixBrokerServer {
     return peer;
   }
 
-  private dispatchFrame(socket: net.Socket, frame: BrokerFrame): void {
-    const response = (() => {
-      try {
-        const data = this.options.broker.dispatch(frame.messageType, frame.payload, {
-          peerOwnerId: this.options.ownerId,
-          ownerId: this.options.ownerId,
-          nowMs: Date.now(),
-        });
-        this.options.broker.store.flush();
-        return data;
-      } catch {
-        return INTERNAL_ERROR;
-      }
-    })();
+  private async dispatchBatches(
+    socket: net.Socket,
+    chunk: Buffer,
+    decoder: FrameStreamDecoder,
+  ): Promise<void> {
+    let frames: BrokerFrame[];
+    try {
+      frames = decoder.push(chunk);
+    } catch (error) {
+      this.options.logger?.warn?.(
+        `sandbox broker protocol error: ${error instanceof Error ? error.message : "unknown"}`,
+      );
+      socket.destroy();
+      return;
+    }
+    for (const frame of frames) {
+      await this.dispatchFrame(socket, frame);
+      if (socket.destroyed) return;
+    }
+  }
+
+  private async dispatchFrame(socket: net.Socket, frame: BrokerFrame): Promise<void> {
+    let response: BrokerResponse<unknown>;
+    try {
+      const data = await this.options.broker.dispatchAsync(frame.messageType, frame.payload, {
+        peerOwnerId: this.options.ownerId,
+        ownerId: this.options.ownerId,
+        nowMs: Date.now(),
+      });
+      this.options.broker.store.flush();
+      response = data;
+    } catch {
+      response = INTERNAL_ERROR;
+    }
     try {
       socket.write(
         encodeFrame({

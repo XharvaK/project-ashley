@@ -12,7 +12,20 @@ export type MessageType =
   | "task.cancel"
   | "task.receipt"
   | "task.result.fetch"
-  | "forget.apply";
+  | "forget.apply"
+  | "sandbox.readiness"
+  | "sandbox.authorizeDelegated"
+  | "sandbox.session.create"
+  | "sandbox.session.get"
+  | "sandbox.session.activate"
+  | "sandbox.session.transition"
+  | "sandbox.session.resume"
+  | "sandbox.session.issueCapability"
+  | "sandbox.workspace.create"
+  | "sandbox.workspace.revalidate"
+  | "sandbox.workspace.cleanup"
+  | "sandbox.recipe.execute"
+  | "sandbox.ownerApproval.resume";
 
 export interface BrokerFrame {
   frameVersion: number;

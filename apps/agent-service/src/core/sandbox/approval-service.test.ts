@@ -753,7 +753,7 @@ describe("SandboxApprovalService: resumeSession success", () => {
     expect(approved.ok).toBe(true);
     if (!approved.ok) throw new Error("unreachable");
 
-    const before = h.client.getSession(session.sessionUuid);
+    const before = await h.client.getSession(session.sessionUuid);
     expect(before?.state).toBe("awaiting_owner");
     expect(before?.revision).toBe(3);
 
@@ -763,7 +763,7 @@ describe("SandboxApprovalService: resumeSession success", () => {
     expect(result.value.session.state).toBe("active");
     expect(result.value.session.revision).toBe(4);
 
-    const after = h.client.getSession(session.sessionUuid);
+    const after = await h.client.getSession(session.sessionUuid);
     expect(after?.state).toBe("active");
 
     const resumed = h.audits.find(

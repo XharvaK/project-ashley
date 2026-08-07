@@ -80,3 +80,4 @@ export * from "./workspace/workspace-limits.js";
 export * from "./workspace/workspace-manifest.js";
 export * from "./workspace/workspace-revalidate.js";
 export * from "./workspace/workspace-sweep.js";
+export * from "./delegated/runtime.js";

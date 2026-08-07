@@ -1,5 +1,7 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { basename, join } from "node:path";
+import { homedir } from "node:os";
+import { createPrivateKey } from "node:crypto";
 import {
   createBroker,
   DurableBrokerStore,
@@ -7,10 +9,18 @@ import {
 } from "./index.js";
 import { publicKeyFromPem } from "./crypto/approval.js";
 import { tombstonePublicKeyFromPem } from "./crypto/tombstone.js";
+import { parseEncryptedKeyEnvelope, decryptPrivateKeyPem } from "./crypto/key-custody.js";
 import { ChildProcessRunner } from "./process/real-runner.js";
 import { loadRecipeManifest } from "./policy/recipes.js";
 import { createLinuxPeerCredentialResolver } from "./peer-credentials.js";
 import { UnixBrokerServer } from "./server.js";
+import { toCanonicalBrokerPath } from "./policy/path.js";
+import { fixedRecipeRegistry } from "./policy/recipe-registry.js";
+import {
+  createUnavailableNetworkIsolation,
+  type NetworkIsolationProvider,
+} from "./execution/network-isolation.js";
+import type { DelegatedRuntimeConfig } from "./delegated/runtime.js";
 
 function requiredEnv(name: string): string {
   const value = process.env[name]?.trim();
@@ -25,6 +35,124 @@ function keyIdFromPath(path: string): string {
 function readPublicKey(path: string, kind: "owner" | "continuity") {
   const pem = readFileSync(path, "utf8");
   return kind === "owner" ? publicKeyFromPem(pem) : tombstonePublicKeyFromPem(pem);
+}
+
+function readPublicKeyPem(path: string): string {
+  return readFileSync(path, "utf8");
+}
+
+function boolEnv(name: string): boolean {
+  const raw = process.env[name]?.trim();
+  if (raw === undefined || raw === "") return false;
+  if (raw === "true") return true;
+  if (raw === "false") return false;
+  throw new Error(`${name} must be "true" or "false"`);
+}
+
+/**
+ * Loads host-side delegated runtime material behind
+ * `ASHLEY_SANDBOX_DELEGATED_ENABLED`. All private-key material is decrypted
+ * here (host-only) and handed to the broker as PEM; only the delegated public
+ * key is derived and retained; the delegated private key is discarded after
+ * derivation. Returns null when the surface is disabled. Fail-closed on any
+ * missing dependency so the delegated surface can never run half-provisioned.
+ *
+ * NOTE: `ASHLEY_SANDBOX_NETWORK_PROVIDER=none` (the Mint network-namespace
+ * seam) is not release-qualified; selecting it refuses boot.
+ */
+function loadDelegatedRuntimeConfig(
+  keysDir: string,
+): {
+  config: DelegatedRuntimeConfig;
+  networkIsolation: NetworkIsolationProvider;
+} | null {
+  if (!boolEnv("ASHLEY_SANDBOX_DELEGATED_ENABLED")) return null;
+
+  const passphrasePath =
+    process.env.ASHLEY_SANDBOX_KEY_PASSPHRASE_PATH?.trim() ??
+    join(homedir(), ".composer-assistant", "keys", "master.pass");
+  const passphrase = readFileSync(passphrasePath, "utf8").trim();
+
+  const delegatedEncPath =
+    process.env.ASHLEY_SANDBOX_DELEGATED_KEY_ENC_PATH?.trim() ??
+    join(keysDir, "delegated-runtime.key.enc");
+  const capabilityEncPath =
+    process.env.ASHLEY_SANDBOX_CAPABILITY_KEY_ENC_PATH?.trim() ??
+    join(keysDir, "broker-session-capability.key.enc");
+  const ownerKeyPath = requiredEnv("ASHLEY_SANDBOX_OWNER_PUBLIC_KEY");
+  const continuityKeyPath = requiredEnv("ASHLEY_SANDBOX_CONTINUITY_PUBLIC_KEY");
+  const policyArtifactPath = requiredEnv("ASHLEY_SANDBOX_POLICY_ARTIFACT");
+  const policySignaturePath = requiredEnv("ASHLEY_SANDBOX_POLICY_SIGNATURE");
+  const workspaceRoot = requiredEnv("ASHLEY_SANDBOX_WORKSPACE_ROOT");
+  const delegatedKeyId =
+    process.env.ASHLEY_SANDBOX_DELEGATED_KEY_ID?.trim() ?? "delegated-runtime-ed25519-v1";
+  const capabilityKeyId =
+    process.env.ASHLEY_SANDBOX_CAPABILITY_KEY_ID?.trim() ??
+    "broker-session-capability-ed25519-v1";
+
+  const networkProvider = process.env.ASHLEY_SANDBOX_NETWORK_PROVIDER?.trim() ?? "unavailable";
+  if (networkProvider !== "unavailable") {
+    throw new Error(
+      `ASHLEY_SANDBOX_NETWORK_PROVIDER=${networkProvider} is not release-qualified; only "unavailable" is supported`,
+    );
+  }
+  const networkIsolation = createUnavailableNetworkIsolation();
+
+  const delegatedPrivatePem = decryptPrivateKeyPem(
+    parseEncryptedKeyEnvelope(readFileSync(delegatedEncPath, "utf8")),
+    passphrase,
+  );
+  const delegatedPublicPem = createPrivateKey(delegatedPrivatePem).export({
+    type: "spki",
+    format: "pem",
+  }).toString();
+
+  const capabilityPrivatePem = decryptPrivateKeyPem(
+    parseEncryptedKeyEnvelope(readFileSync(capabilityEncPath, "utf8")),
+    passphrase,
+  );
+  const capabilityPublicPem = createPrivateKey(capabilityPrivatePem).export({
+    type: "spki",
+    format: "pem",
+  }).toString();
+
+  const workspaceRootCanonical = toCanonicalBrokerPath(realpathSync(workspaceRoot));
+  if (!workspaceRootCanonical.ok) {
+    throw new Error("sandbox_delegated_runtime: workspace_root_not_canonical");
+  }
+
+  const policyArtifactCanonical = toCanonicalBrokerPath(policyArtifactPath);
+  const policySignatureCanonical = toCanonicalBrokerPath(policySignaturePath);
+  if (!policyArtifactCanonical.ok || !policySignatureCanonical.ok) {
+    throw new Error("sandbox_delegated_runtime: policy_path_not_canonical");
+  }
+
+  const envAllowlist = new Set<string>(["PATH", "NODE_OPTIONS"]);
+  return {
+    config: {
+      ownerId: requiredEnv("ASHLEY_SANDBOX_OWNER_ID"),
+      ownerKeyId: process.env.ASHLEY_SANDBOX_OWNER_KEY_ID?.trim() || keyIdFromPath(ownerKeyPath),
+      ownerPublicKeyPem: readPublicKeyPem(ownerKeyPath),
+      continuityKeyId:
+        process.env.ASHLEY_SANDBOX_CONTINUITY_KEY_ID?.trim() || keyIdFromPath(continuityKeyPath),
+      continuityPublicKeyPem: readPublicKeyPem(continuityKeyPath),
+      delegatedKeyId,
+      delegatedPublicKeyPem: delegatedPublicPem,
+      capabilitySigning: {
+        keyId: capabilityKeyId,
+        privateKeyPem: capabilityPrivatePem,
+        publicKeyPem: capabilityPublicPem,
+      },
+      policyArtifactPath: policyArtifactCanonical.value,
+      policySignaturePath: policySignatureCanonical.value,
+      workspaceRoot: workspaceRootCanonical.value,
+      recipes: fixedRecipeRegistry(),
+      envAllowlist,
+      executableMappings: {},
+      networkProvider: "unavailable",
+    },
+    networkIsolation,
+  };
 }
 
 function parseUid(): number {
@@ -56,6 +184,10 @@ function createProductionBroker() {
     if (recipe.supported) executables.add(recipe.executable);
     for (const name of recipe.envAllowlist ?? []) envAllowlist.add(name);
   }
+  const keysDir =
+    process.env.ASHLEY_SANDBOX_KEYS_DIR?.trim() ??
+    join(homedir(), ".composer-assistant", "keys");
+  const delegated = loadDelegatedRuntimeConfig(keysDir);
   const broker = createBroker({
     workspaceRoot,
     ownerId,
@@ -75,6 +207,9 @@ function createProductionBroker() {
     processRunner: new ChildProcessRunner(),
     store,
     recipes: recipes as Map<string, BrokerRecipe>,
+    ...(delegated
+      ? { delegatedRuntimeConfig: delegated.config, networkIsolation: delegated.networkIsolation }
+      : {}),
   });
   broker.restart();
   return { broker, store, helperPath, ownerId };

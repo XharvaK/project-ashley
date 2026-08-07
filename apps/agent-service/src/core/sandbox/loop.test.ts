@@ -416,7 +416,7 @@ describe("bootstrap", () => {
     const task = makeTask({ workspaceRequired: true, sourceRootId: "src-1" });
     const result = await run(h, task, completeAdapter());
     expect(result.stopReason).toBe("operator_completed");
-    const session = h.client.getSession(result.sessionUuid!);
+    const session = await h.client.getSession(result.sessionUuid!);
     expect(session).not.toBeNull();
     expect(session!.workspaceId).not.toBeNull();
   });
@@ -1004,7 +1004,7 @@ describe("recipe flow", () => {
       { action: completeAction() },
     ]);
     const result = await run(h, makeTask(), adapter);
-    const session = h.client.getSession(result.sessionUuid!);
+    const session = await h.client.getSession(result.sessionUuid!);
     expect(session!.revision).toBeGreaterThan(1);
     expect(session!.toolExecutionsUsed).toBe(1);
   });
@@ -1135,7 +1135,7 @@ describe("owner approval", () => {
       },
     ]);
     const result = await run(h, makeTask(), adapter);
-    const session = h.client.getSession(result.sessionUuid!);
+    const session = await h.client.getSession(result.sessionUuid!);
     expect(session!.state).toBe("awaiting_owner");
   });
 
@@ -1237,7 +1237,7 @@ describe("completion and abort", () => {
   it("80. the broker session transitions to completed", async () => {
     const h = makeHarness();
     const result = await run(h, makeTask(), completeAdapter());
-    const session = h.client.getSession(result.sessionUuid!);
+    const session = await h.client.getSession(result.sessionUuid!);
     expect(session!.state).toBe("completed");
   });
 
@@ -1272,7 +1272,7 @@ describe("completion and abort", () => {
       { action: { type: "abort", reason: "cannot continue" } },
     ]);
     const result = await run(h, makeTask(), adapter);
-    const session = h.client.getSession(result.sessionUuid!);
+    const session = await h.client.getSession(result.sessionUuid!);
     expect(session!.state).toBe("aborted");
   });
 
@@ -1627,7 +1627,7 @@ describe("isolation and fail-closed guarantees", () => {
       lifecycle: "disabled",
     });
     expect(result.sessionUuid).toBeNull();
-    expect(h.client.getSession("anything")).toBeNull();
+    expect(await h.client.getSession("anything")).toBeNull();
   });
 
   it("107. a denied lifecycle records no broker audits", async () => {

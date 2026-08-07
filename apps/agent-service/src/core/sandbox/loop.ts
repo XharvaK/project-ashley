@@ -24,7 +24,11 @@
 import { randomNonce } from "@composer-assistant/sandbox-broker";
 import type { SandboxAutonomyLifecycle } from "./lifecycle.js";
 import { bootstrapSandboxSession } from "./bootstrap.js";
-import type { SandboxBrokerClient, SandboxBrokerSessionSnapshot } from "./broker-client.js";
+import type {
+  SandboxBrokerClient,
+  SandboxBrokerClientTestDiagnostics,
+  SandboxBrokerSessionSnapshot,
+} from "./broker-client.js";
 import type { SandboxOperatorAdapter, SandboxReceiptSummary } from "./operator-adapter.js";
 import {
   validateSandboxOperatorAction,
@@ -70,7 +74,7 @@ export type RunSandboxLoopInput = {
   task: SandboxTask;
   lifecycle: SandboxAutonomyLifecycle;
   adapter: SandboxOperatorAdapter;
-  client: SandboxBrokerClient;
+  client: SandboxBrokerClient & SandboxBrokerClientTestDiagnostics;
   delegatedKey: DelegatedRuntimeKeyMaterial;
   nowMs: () => number;
   signal?: AbortSignal;
@@ -199,9 +203,9 @@ export async function runSandboxLoop(
       : {}),
   });
 
-  const refreshSession = (): void => {
+  const refreshSession = async (): Promise<void> => {
     const latest =
-      session === null ? null : input.client.getSession(session.sessionUuid);
+      session === null ? null : await input.client.getSession(session.sessionUuid);
     if (latest !== null) session = latest;
   };
 
@@ -378,7 +382,7 @@ export async function runSandboxLoop(
     if (!task.allowedCapabilities.includes(capability)) {
       return stop("action_not_permitted", "stopped", `capability_not_allowed_for_task:${capability}`);
     }
-    refreshSession();
+    await refreshSession();
     if (session === null) {
       return stop("internal_error", "stopped", "session_unavailable");
     }
@@ -506,7 +510,7 @@ export async function runSandboxLoop(
       exitCode: execution.receipt.terminalState.exitCode,
       truncated: execution.receipt.truncated,
     });
-    refreshSession();
+    await refreshSession();
   }
 }
 

@@ -53,6 +53,10 @@ import {
 import { BROKER_SESSION_SCHEMA_VERSION } from "./sessions/session-migration.js";
 import type { BrokerRootConfig } from "./policy/root-config.js";
 import type { BrokerResponse, RequestContext } from "./protocol/frame.js";
+import type { BrokerAuditRecord } from "./execution/fixed-recipe-execution-service.js";
+import type { NetworkIsolationProvider } from "./execution/network-isolation.js";
+import { DelegatedRuntime, createRuntimeNonceStore } from "./delegated/runtime.js";
+import type { DelegatedRuntimeConfig, DelegatedRuntimeDependencies } from "./delegated/runtime.js";
 
 export interface BrokerConfig {
   workspaceRoot: string;
@@ -70,6 +74,18 @@ export interface BrokerConfig {
   globalLimits?: SandboxGlobalLimits;
   /** Injectable disk probe used by workspace creation gates. */
   diskProbe?: DiskProbe;
+  /**
+   * Optional delegated runtime material. When present, `createBroker`
+   * constructs the `sandbox.*` dispatch surface sharing this broker's durable
+   * ledger, audit sink and nonce store; construction failure fails closed.
+   */
+  delegatedRuntimeConfig?: DelegatedRuntimeConfig;
+  /**
+   * Host-instantiated network isolation provider injected to the delegated
+   * runtime. Required together with `delegatedRuntimeConfig` when the delegated
+   * surface is enabled.
+   */
+  networkIsolation?: NetworkIsolationProvider;
 }
 
 /**
@@ -99,6 +115,12 @@ export class SandboxBroker {
   readonly config: BrokerConfig;
   readonly recipes: Map<string, BrokerRecipe>;
   readonly globalLimits: SandboxGlobalLimits;
+  /**
+   * Delegated runtime for the `sandbox.*` IPC surface. Null when the host has
+   * not opted in to `ASHLEY_SANDBOX_DELEGATED_ENABLED`; every `sandbox.*`
+   * message is fail-closed to `sandbox_surface_disabled` in that case.
+   */
+  readonly delegatedRuntime: DelegatedRuntime | null;
   private readonly diskProbe: DiskProbe;
 
   constructor(config: BrokerConfig) {
@@ -111,6 +133,37 @@ export class SandboxBroker {
     }
     this.globalLimits = validated.value;
     this.diskProbe = config.diskProbe ?? (() => defaultDiskProbe(config.workspaceRoot));
+    this.delegatedRuntime = this.buildDelegatedRuntime(config);
+  }
+
+  private buildDelegatedRuntime(config: BrokerConfig): DelegatedRuntime | null {
+    if (!config.delegatedRuntimeConfig) return null;
+    const networkIsolation = config.networkIsolation;
+    if (!networkIsolation) {
+      throw new Error("delegated_runtime_requires_network_isolation");
+    }
+    const deps: DelegatedRuntimeDependencies = {
+      ledger: this.store.sessionLedger,
+      nowMs: () => Date.now(),
+      auditSink: (record) => this.auditRuntimeRecord(record),
+      nonceStore: createRuntimeNonceStore(),
+      processRunner: config.processRunner,
+      networkIsolation,
+    };
+    return DelegatedRuntime.create(config.delegatedRuntimeConfig, deps);
+  }
+
+  private auditRuntimeRecord(record: BrokerAuditRecord): void {
+    const metadata: Record<string, string | number | boolean> = { kind: record.kind };
+    for (const [key, value] of Object.entries(record)) {
+      if (key === "kind") continue;
+      if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+        metadata[key] = value;
+      } else if (value === null || value === undefined) {
+        metadata[key] = "null";
+      }
+    }
+    this.audit(`runtime:${record.kind}`, metadata);
   }
 
   restart(): void {
@@ -875,6 +928,12 @@ export class SandboxBroker {
     payload: unknown,
     ctx: RequestContext,
   ): BrokerResponse<unknown> {
+    if (messageType.startsWith("sandbox.")) {
+      if (!this.delegatedRuntime) {
+        return this.error("sandbox_surface_disabled", "delegated sandbox runtime is not enabled");
+      }
+      return this.error("sandbox_not_synchronous", "sandbox messages require the async dispatch path");
+    }
     switch (messageType) {
       case "artifact.read":
         return this.artifactRead(payload as { ownerId: string; artifactRef: string }, ctx);
@@ -954,6 +1013,30 @@ export class SandboxBroker {
       default:
         return this.error("unknown_message", "unknown message type");
     }
+  }
+
+  /**
+   * Async dispatch path required by the `sandbox.*` surface: delegated runtime
+   * methods may perform I/O (workspace materialization, fixed-recipe execution)
+   * and therefore resolve asynchronously. Legacy (non-sandbox) message types
+   * remain synchronous and are delegated to `dispatch`.
+   */
+  async dispatchAsync(
+    messageType: string,
+    payload: unknown,
+    ctx: RequestContext,
+  ): Promise<BrokerResponse<unknown>> {
+    if (messageType.startsWith("sandbox.")) {
+      if (!this.delegatedRuntime) {
+        return {
+          ok: false,
+          errorCode: "sandbox_surface_disabled",
+          message: "delegated sandbox runtime is not enabled",
+        };
+      }
+      return this.delegatedRuntime.handle(messageType, payload, ctx);
+    }
+    return this.dispatch(messageType, payload, ctx);
   }
 }
 

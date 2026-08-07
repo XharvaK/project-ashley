@@ -240,6 +240,14 @@ export const env = {
     "ASHLEY_SANDBOX_BROKER_ENABLED",
     false,
   ),
+  // Opt-in flag for the delegated `sandbox.*` IPC surface. The agent wires a
+  // production Unix-socket broker client only when this is true AND the broker
+  // host has started the delegated runtime; otherwise it stays on the in-process
+  // fake. Not release-qualified (Wave 07c, see Sandbox_Design.md).
+  sandboxDelegatedEnabled: strictBoolean(
+    "ASHLEY_SANDBOX_DELEGATED_ENABLED",
+    false,
+  ),
   sandboxBrokerSocket: strictTrimmed(
     "ASHLEY_SANDBOX_BROKER_SOCKET",
     "/run/ashley/broker.sock",
@@ -399,6 +407,11 @@ export function validateBoot(): {
   const warnings = [...numericWarnings];
   if (sandboxIsActive()) {
     errors.push(...sandboxReadinessErrors());
+  }
+  if (env.sandboxDelegatedEnabled && env.sandboxBrokerSocket.trim().length === 0) {
+    errors.push(
+      "ASHLEY_SANDBOX_BROKER_SOCKET must be set when ASHLEY_SANDBOX_DELEGATED_ENABLED is true",
+    );
   }
   if (
     env.sandboxLifecycle !== "disabled" &&
