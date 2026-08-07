@@ -43,6 +43,7 @@ export * from "./crypto/types.js";
 export * from "./execution/execution-limits.js";
 export * from "./execution/execution-types.js";
 export * from "./execution/network-isolation.js";
+export * from "./execution/linux-network-isolation.js";
 export * from "./execution/executable-resolver.js";
 export * from "./execution/bounded-output.js";
 export * from "./execution/receipt.js";

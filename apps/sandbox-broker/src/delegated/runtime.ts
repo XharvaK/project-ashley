@@ -115,6 +115,13 @@ export type DelegatedRuntimeReadiness = {
   policyHash: string | null;
   signerClass: "delegated_runtime";
   networkMode: "unavailable" | "none";
+  /**
+   * Truthful isolation readiness (R5A). True only when the configured
+   * provider's host prerequisites are verified — never merely because
+   * isolation code exists. `networkMode` labels the configured seam;
+   * this field reports whether that seam is actually operational.
+   */
+  networkIsolationOperational: boolean;
   maxConcurrentTasks: number;
 };
 
@@ -259,6 +266,8 @@ export class DelegatedRuntime {
       policyHash: this.activePolicy.policyHash ?? null,
       signerClass: "delegated_runtime",
       networkMode: this.config.networkProvider,
+      networkIsolationOperational:
+        this.networkIsolation.status() === "operational",
       maxConcurrentTasks: this.config.recipes.size > 0 ? 1 : 0,
     };
   }

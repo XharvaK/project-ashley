@@ -26,7 +26,12 @@ import {
 import { randomNonce, sha256Hex } from "../../crypto/types.js";
 import type { BrokerAuditRecord } from "../../execution/fixed-recipe-execution-service.js";
 import { FixedRecipeExecutionService } from "../../execution/fixed-recipe-execution-service.js";
-import type { NetworkIsolationEnforcement, NetworkIsolationProvider } from "../../execution/network-isolation.js";
+import type { FakeRunRequest } from "../../process/fake-runner.js";
+import type {
+  NetworkIsolationEnforcement,
+  NetworkIsolationProvider,
+  NetworkIsolationStatus,
+} from "../../execution/network-isolation.js";
 import { NETWORK_ISOLATION_UNAVAILABLE } from "../../execution/network-isolation.js";
 import type { ActiveVerifiedSandboxPolicy } from "../../policy/delegated-authorization.js";
 import type { DelegatedTrustedKeyConfig } from "../../policy/delegated-authorization.js";
@@ -48,12 +53,16 @@ import type { FixedRecipeExecutionEnvelope, FixedRecipeExecutionRequest } from "
 
 export class FakeNetworkIsolationProvider implements NetworkIsolationProvider {
   mode: "enforced" | "unavailable" = "enforced";
-  enforceCalls = 0;
+  prepareCalls = 0;
 
-  async enforce(): Promise<NetworkIsolationEnforcement> {
-    this.enforceCalls += 1;
+  async prepare(request: FakeRunRequest): Promise<NetworkIsolationEnforcement> {
+    this.prepareCalls += 1;
     if (this.mode === "unavailable") return NETWORK_ISOLATION_UNAVAILABLE;
-    return { ok: true };
+    return { ok: true, request };
+  }
+
+  status(): NetworkIsolationStatus {
+    return this.mode === "enforced" ? "operational" : "unavailable";
   }
 }
 

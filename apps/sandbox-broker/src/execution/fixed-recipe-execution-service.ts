@@ -12,12 +12,16 @@
  *   5. recipe                  — readiness (execution_ready), policy listing,
  *                                fixed plan from the broker-owned registry
  *   6. limits                  — strictest-of broker/policy/recipe/request
- *   7. network isolation       — enforced before spawn, fail closed
- *   8. executable              — resolved via mappings, real regular file
- *   9. cwd + workspace         — existing directory, disposable revalidation,
+ *   7. executable              — resolved via mappings, real regular file
+ *   8. cwd + workspace         — existing directory, disposable revalidation,
  *                                write/delete containment inside the tree
+ *   9. network isolation       — spawn-coupled: the provider returns the
+ *                                complete isolated spawn specification, or a
+ *                                typed refusal. Refusal → no spawn, no budget.
  *  10. reservation             — atomic, single-use, budgeted
- *  11. spawn                   — shell-free, bounded, isolated
+ *  11. spawn                   — shell-free, bounded; executes EXACTLY the
+ *                                specification prepared by the isolation
+ *                                provider (R5A: NO ISOLATION → NO SPAWN)
  *  12. finalize                — succeeded/failed, never refunded
  *  13. receipt                 — bounded, hashed, deterministic
  *
@@ -308,17 +312,6 @@ export class FixedRecipeExecutionService {
     }
     const effectiveLimits = combined.value;
 
-    // ---- stage: network ----
-    const isolation = await this.networkIsolation.enforce();
-    if (!isolation.ok) {
-      return refuse(
-        "network",
-        isolation.errorCode,
-        isolation.reason,
-        { networkIsolation: "unavailable_refused" },
-      );
-    }
-
     // ---- stage: executable ----
     const resolvedExecutable = resolveFixedRecipeExecutable({
       recipe,
@@ -372,6 +365,31 @@ export class FixedRecipeExecutionService {
       }
     }
 
+    // ---- stage: network isolation (spawn-coupled, R5A) ----
+    // The isolation provider returns the complete immutable spawn
+    // specification. The runner below executes exactly this specification
+    // and nothing else: the exact child that executes the fixed recipe is
+    // the child created inside the verified isolation mechanism. A refusal
+    // here never spawns and never consumes a reservation.
+    const runRequest = {
+      taskId: request.capabilityUseId,
+      argv: [resolvedExecutable.executable, ...plan.plan.argv.slice(1)],
+      cwd: nativeCwd,
+      env: this.buildEnvironment(plan.plan.envAllowlist),
+      wallMs: effectiveLimits.wallMs,
+      maxProcesses: effectiveLimits.maxProcesses,
+      maxOutputBytes: effectiveLimits.maxOutputBytes,
+    };
+    const isolation = await this.networkIsolation.prepare(runRequest);
+    if (!isolation.ok) {
+      return refuse(
+        "network",
+        isolation.errorCode,
+        isolation.reason,
+        { networkIsolation: "unavailable_refused" },
+      );
+    }
+
     // ---- stage: reservation ----
     const capabilityId = request.envelope.capabilityId as SandboxCapabilityId;
     const reserved = this.options.sessionService.reserveToolExecution(
@@ -396,15 +414,7 @@ export class FixedRecipeExecutionService {
     let truncated: boolean;
     let terminalReason: string;
     try {
-      const runResult = await this.options.processRunner.run({
-        taskId: request.capabilityUseId,
-        argv: [resolvedExecutable.executable, ...plan.plan.argv.slice(1)],
-        cwd: nativeCwd,
-        env: this.buildEnvironment(plan.plan.envAllowlist),
-        wallMs: effectiveLimits.wallMs,
-        maxProcesses: effectiveLimits.maxProcesses,
-        maxOutputBytes: effectiveLimits.maxOutputBytes,
-      });
+      const runResult = await this.options.processRunner.run(isolation.request);
       exitCode = runResult.exitCode;
       stdout = runResult.stdout;
       stderr = runResult.stderr;

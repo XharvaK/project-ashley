@@ -11,15 +11,14 @@ import { publicKeyFromPem } from "./crypto/approval.js";
 import { tombstonePublicKeyFromPem } from "./crypto/tombstone.js";
 import { parseEncryptedKeyEnvelope, decryptPrivateKeyPem } from "./crypto/key-custody.js";
 import { ChildProcessRunner } from "./process/real-runner.js";
+import type { ProcessRunner } from "./process/fake-runner.js";
 import { loadRecipeManifest } from "./policy/recipes.js";
 import { createLinuxPeerCredentialResolver } from "./peer-credentials.js";
 import { UnixBrokerServer } from "./server.js";
 import { toCanonicalBrokerPath } from "./policy/path.js";
 import { fixedRecipeRegistry } from "./policy/recipe-registry.js";
-import {
-  createUnavailableNetworkIsolation,
-  type NetworkIsolationProvider,
-} from "./execution/network-isolation.js";
+import { selectProductionNetworkIsolation } from "./execution/linux-network-isolation.js";
+import type { NetworkIsolationProvider } from "./execution/network-isolation.js";
 import type { DelegatedRuntimeConfig } from "./delegated/runtime.js";
 
 function requiredEnv(name: string): string {
@@ -57,11 +56,15 @@ function boolEnv(name: string): boolean {
  * derivation. Returns null when the surface is disabled. Fail-closed on any
  * missing dependency so the delegated surface can never run half-provisioned.
  *
- * NOTE: `ASHLEY_SANDBOX_NETWORK_PROVIDER=none` (the Mint network-namespace
- * seam) is not release-qualified; selecting it refuses boot.
+ * NOTE: the network provider seam defaults to `unavailable` (R4 behavior).
+ * `ASHLEY_SANDBOX_NETWORK_PROVIDER=none` selects the R5A spawn-coupled Linux
+ * namespace isolation, but only when the R5B host qualification flag
+ * `ASHLEY_SANDBOX_NETWORK_ISOLATION_QUALIFIED=true` is also set; production
+ * configuration does not set either, so the Mint host stays fail-closed.
  */
 function loadDelegatedRuntimeConfig(
   keysDir: string,
+  processRunner: ProcessRunner,
 ): {
   config: DelegatedRuntimeConfig;
   networkIsolation: NetworkIsolationProvider;
@@ -90,13 +93,14 @@ function loadDelegatedRuntimeConfig(
     process.env.ASHLEY_SANDBOX_CAPABILITY_KEY_ID?.trim() ??
     "broker-session-capability-ed25519-v1";
 
-  const networkProvider = process.env.ASHLEY_SANDBOX_NETWORK_PROVIDER?.trim() ?? "unavailable";
-  if (networkProvider !== "unavailable") {
-    throw new Error(
-      `ASHLEY_SANDBOX_NETWORK_PROVIDER=${networkProvider} is not release-qualified; only "unavailable" is supported`,
-    );
-  }
-  const networkIsolation = createUnavailableNetworkIsolation();
+  const selection = selectProductionNetworkIsolation({
+    providerName: process.env.ASHLEY_SANDBOX_NETWORK_PROVIDER,
+    qualified: boolEnv("ASHLEY_SANDBOX_NETWORK_ISOLATION_QUALIFIED"),
+    platform: process.platform,
+    processRunner,
+    unsharePath: process.env.ASHLEY_SANDBOX_UNSHARE_PATH?.trim() || undefined,
+  });
+  const networkIsolation = selection.provider;
 
   const delegatedPublicPem = readPublicKeyPem(delegatedPublicPath);
 
@@ -142,7 +146,7 @@ function loadDelegatedRuntimeConfig(
       recipes: fixedRecipeRegistry(),
       envAllowlist,
       executableMappings: {},
-      networkProvider: "unavailable",
+      networkProvider: selection.label,
     },
     networkIsolation,
   };
@@ -180,7 +184,8 @@ function createProductionBroker() {
   const keysDir =
     process.env.ASHLEY_SANDBOX_KEYS_DIR?.trim() ??
     join(homedir(), ".composer-assistant", "keys");
-  const delegated = loadDelegatedRuntimeConfig(keysDir);
+  const processRunner = new ChildProcessRunner();
+  const delegated = loadDelegatedRuntimeConfig(keysDir, processRunner);
   const broker = createBroker({
     workspaceRoot,
     ownerId,
@@ -197,7 +202,7 @@ function createProductionBroker() {
     },
     interpreterAllowlist: executables,
     envAllowlist,
-    processRunner: new ChildProcessRunner(),
+    processRunner,
     store,
     recipes: recipes as Map<string, BrokerRecipe>,
     ...(delegated

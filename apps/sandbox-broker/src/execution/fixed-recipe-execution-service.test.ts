@@ -16,6 +16,7 @@ import { sha256Hex } from "../index.js";
 import {
   ChildProcessRunner,
   FixedRecipeExecutionService,
+  LinuxUnshareNetworkIsolation,
   ScriptedProcessRunner,
 } from "../index.js";
 import type { BrokerExecutionAudit, FakeRunRequest, FakeRunResult } from "../index.js";
@@ -779,7 +780,7 @@ describe("fixed-recipe execution service", () => {
         expect(result.errorCode).toBe("network_isolation_unavailable");
         expect(result.audit.networkIsolation).toBe("unavailable_refused");
       }
-      expect(harness.network.enforceCalls).toBe(1);
+      expect(harness.network.prepareCalls).toBe(1);
       const session = harness.sessionService.getSession(active.session.session.sessionUuid);
       expect(session?.toolExecutionsUsed).toBe(0);
     });
@@ -817,6 +818,120 @@ describe("fixed-recipe execution service", () => {
       expect(result.ok).toBe(false);
       const session = harness.sessionService.getSession(active.session.session.sessionUuid);
       expect(session?.toolExecutionsUsed).toBe(0);
+    });
+
+    it("35. an isolation refusal never reaches the runner (zero spawn)", async () => {
+      const harness = makeExecutionHarness();
+      const active = createActiveSession(harness);
+      if (!active.ok) return;
+      const counting = new CountingProcessRunner();
+      harness.network.mode = "unavailable";
+      const service = buildServiceWith(harness, { processRunner: counting });
+      const result = await service.executeFixedRecipe(makeExecutionRequest(harness, active.session));
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.stage).toBe("network");
+        expect(result.errorCode).toBe("network_isolation_unavailable");
+      }
+      expect(counting.calls).toHaveLength(0);
+    });
+
+    it("36. the runner executes exactly the isolation-prepared specification", async () => {
+      const harness = makeExecutionHarness();
+      const active = createActiveSession(harness);
+      if (!active.ok) return;
+      const counting = new CountingProcessRunner();
+      const useId = "use-coupled-1";
+      counting.setScript(useId, {
+        exitCode: 0,
+        stdout: "ok",
+        stderr: "",
+        truncated: false,
+        terminalReason: "success",
+      });
+      const service = buildServiceWith(harness, {
+        processRunner: counting,
+        networkIsolation: new LinuxUnshareNetworkIsolation({
+          processRunner: counting,
+          platform: "linux",
+          probeExecutable: () => ({ kind: "ok", resolvedPath: "/usr/bin/unshare" }),
+          readSysctl: () => "1",
+        }),
+      });
+      const result = await service.executeFixedRecipe(
+        makeExecutionRequest(harness, active.session, {}, { capabilityUseId: useId }),
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.outcome).toBe("succeeded");
+      expect(result.receipt.networkIsolation).toBe("enforced");
+      expect(counting.calls).toHaveLength(1);
+      const argv = counting.calls[0]!.argv;
+      expect(argv[0]).toBe("/usr/bin/unshare");
+      expect(argv[1]).toBe("--user");
+      expect(argv[2]).toBe("--map-root-user");
+      expect(argv[3]).toBe("--net");
+      expect(argv[4]).toBe("--");
+      const recipeArgv = argv.slice(5);
+      expect(recipeArgv[0]!).toBe(harness.gitFixture.replace(/\\/g, "/"));
+      expect(recipeArgv.slice(1)).toEqual([
+        "--no-pager",
+        "-c",
+        "color.ui=false",
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all",
+      ]);
+      expect(counting.calls[0]!.cwd).toBeDefined();
+      expect(counting.calls[0]!.env.HOME).toBeDefined();
+      expect(counting.calls[0]!.env.PATH).toBe(process.env.PATH);
+    });
+
+    it("37. non-linux production selection fails closed before any spawn", async () => {
+      const harness = makeExecutionHarness();
+      const active = createActiveSession(harness);
+      if (!active.ok) return;
+      const counting = new CountingProcessRunner();
+      const service = buildServiceWith(harness, {
+        processRunner: counting,
+        networkIsolation: new LinuxUnshareNetworkIsolation({
+          processRunner: counting,
+          platform: "win32",
+          probeExecutable: () => ({ kind: "ok", resolvedPath: "/usr/bin/unshare" }),
+          readSysctl: () => "1",
+        }),
+      });
+      const result = await service.executeFixedRecipe(makeExecutionRequest(harness, active.session));
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.stage).toBe("network");
+        expect(result.errorCode).toBe("network_isolation_non_linux");
+      }
+      expect(counting.calls).toHaveLength(0);
+    });
+
+    it("38. malformed isolation configuration fails closed before any spawn", async () => {
+      const harness = makeExecutionHarness();
+      const active = createActiveSession(harness);
+      if (!active.ok) return;
+      const counting = new CountingProcessRunner();
+      const service = buildServiceWith(harness, {
+        processRunner: counting,
+        networkIsolation: new LinuxUnshareNetworkIsolation({
+          processRunner: counting,
+          platform: "linux",
+          unsharePath: "relative-unshare",
+          probeExecutable: () => ({ kind: "ok", resolvedPath: "relative-unshare" }),
+          readSysctl: () => "1",
+        }),
+      });
+      const result = await service.executeFixedRecipe(makeExecutionRequest(harness, active.session));
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.stage).toBe("network");
+        expect(result.errorCode).toBe("network_isolation_unshare_path_absolute");
+      }
+      expect(counting.calls).toHaveLength(0);
     });
   });
 
