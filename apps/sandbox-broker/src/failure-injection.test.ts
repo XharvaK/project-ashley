@@ -108,6 +108,22 @@ describe("failure injection: crash and reopen on durable state", () => {
   it("recovers sessions, uses and tasks after a process crash", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "ashley-crash-"));
     const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
+    // The crash-task runner stays pending until the crash has been simulated,
+    // so the task is still running at the moment the durable handle closes.
+    let releaseCrashTask: (() => void) | undefined;
+    const crashTaskGate = new Promise<void>((resolve) => {
+      releaseCrashTask = resolve;
+    });
+    const stubRun = async () => {
+      await crashTaskGate;
+      return {
+        exitCode: 0,
+        stdout: "ok",
+        stderr: "",
+        truncated: false,
+        terminalReason: "success" as const,
+      };
+    };
     try {
       mkdirSync(path.join(dir, "workspace"), { recursive: true });
       const stateRoot = path.join(dir, "state");
@@ -120,17 +136,7 @@ describe("failure injection: crash and reopen on durable state", () => {
         tombstone: tombstoneVerifier(keys),
         interpreterAllowlist: new Set(["/bin/echo"]),
         envAllowlist: new Set(["PATH"]),
-        processRunner: {
-          async run() {
-            return {
-              exitCode: 0,
-              stdout: "ok",
-              stderr: "",
-              truncated: false,
-              terminalReason: "success",
-            };
-          },
-        },
+        processRunner: { run: stubRun },
         store: storeA,
       });
 
@@ -139,8 +145,6 @@ describe("failure injection: crash and reopen on durable state", () => {
       const approval = signedApproval(keys, { taskId: "crash-task" });
       const submitA = brokerA.dispatch("task.submit", { approval }, ownerCtx);
       expect(submitA.ok).toBe(true);
-      // Drain the async runner's settle callback while the handle is open so a
-      // crash close never races a later flush on a closed database.
       await settle();
       brokerA.store.sessionLedger.createSession(sampleSession());
       const reserve = brokerA.store.sessionLedger.reserveCapabilityUse({
@@ -161,8 +165,12 @@ describe("failure injection: crash and reopen on durable state", () => {
         }),
       );
 
-      // Crash: drop the in-memory broker and release the SQLite handle.
+      // Crash: drop the in-memory broker and release the SQLite handle. The
+      // crash task is still running here; release its gate afterwards so the
+      // dangling completion handler has nothing left to persist.
       storeA.close();
+      releaseCrashTask?.();
+      await settle();
 
       // Next process opens the same durable state.
       const storeB = new DurableBrokerStore(stateRoot);

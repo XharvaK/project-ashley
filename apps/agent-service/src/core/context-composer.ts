@@ -39,7 +39,7 @@ export type ComposeTurnContextInput = {
   evidenceRefs?: EvidenceRef[];
 };
 
-function stableIdentityBlock(db: DatabaseSync, ownerId: string): string {
+export function stableIdentityBlock(db: DatabaseSync, ownerId: string): string {
   const entries = listIdentity(db, ownerId, { layer: "stable", limit: 40 })
     .filter((entry) =>
       entry.kind === "value" ||
@@ -83,6 +83,20 @@ function mindStateBlock(db: DatabaseSync, ownerId: string): string {
   ].filter(Boolean);
   if (lines.length === 0) return "";
   return ["## Mind state", ...lines].join("\n");
+}
+
+/** Minimal mind-state headline (for the visible-fallback minimal profile). */
+export function mindStateHeadline(
+  db: DatabaseSync,
+  ownerId: string,
+): string {
+  const state = getState(db, ownerId);
+  const parts = [
+    state.focus ? `Focus: ${state.focus}` : "",
+    state.mood ? `Mood: ${state.mood}` : "",
+    state.availability ? `Availability: ${state.availability}` : "",
+  ].filter(Boolean);
+  return parts.length ? parts.join(" | ") : "";
 }
 
 function structuredDecisionPrompt(decision: Decision): string {

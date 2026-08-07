@@ -34,7 +34,7 @@ review surfaces, provenance/retention/forget, explicit deferrals.
 | Gate | Status |
 |------|--------|
 | Wave 06 (perception v15 / contract v3) | Implementation-present; **not accepted** until remaining verification passes |
-| Wave 07 (sandbox broker) | **Design_accepted**; Wave 07b fake broker **Wave_accepted**; Wave 07c daemon/transport **Locally_verified** — see [`Sandbox_Design.md`](Sandbox_Design.md) and [`handoffs/wave-07c-gate-packet.md`](handoffs/wave-07c-gate-packet.md) |
+| Wave 07 (sandbox broker) | **Design_accepted**; Wave 07b fake broker **Wave_accepted**; Wave 07c daemon/transport **Wave_accepted** — see [`Sandbox_Design.md`](Sandbox_Design.md) and [`handoffs/wave-07c-gate-packet.md`](handoffs/wave-07c-gate-packet.md) |
 | Wave 08b implementation | After Wave 06 accepted **and** Wave 07b broker tested |
 
 **Not this wave:** MIGRATION_16, runtime code, capabilities, broker tasks, self-editing,

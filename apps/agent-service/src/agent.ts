@@ -86,8 +86,14 @@ export class AgentManager {
   }
 
   async init(): Promise<void> {
-    const { warnings } = validateBoot();
+    const { ok, errors, warnings } = validateBoot();
     for (const w of warnings) console.warn(`[agent-service] ${w}`);
+    if (!ok) {
+      for (const e of errors) console.error(`[agent-service] FATAL ${e}`);
+      this.state = "offline";
+      this.broadcast({ type: "offline", reason: "invalid_configuration" });
+      return;
+    }
     if (!env.mistralApiKey) {
       this.state = "offline";
       this.broadcast({ type: "offline", reason: "missing_api_key" });
