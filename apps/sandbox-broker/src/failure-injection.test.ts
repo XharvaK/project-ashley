@@ -1,4 +1,4 @@
-﻿import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { join } from "node:path";
@@ -14,7 +14,7 @@ import {
 } from "./test/fixtures/keys.js";
 import type { BrokerSandboxSession } from "./sessions/session-types.js";
 
-const NOW = Date.parse("2026-08-06T10:00:00.000Z");
+const NOW = Date.now();
 const ownerCtx = { peerOwnerId: "owner-1", ownerId: "owner-1", nowMs: NOW };
 
 /** A store whose persistence backend is down: any flush fails. */
