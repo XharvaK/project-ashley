@@ -73,6 +73,11 @@ export class BrokerStore {
   /** Persistence hooks are no-ops for the local in-memory Wave 07b store. */
   flush(): void {}
 
+  /** Fail-closed readiness: an in-memory flush cannot fail, so it is healthy. */
+  persistenceHealthy(): boolean {
+    return true;
+  }
+
   close(): void {}
 
   recordNonce(nonce: string): boolean {
@@ -310,6 +315,11 @@ export class DurableBrokerStore extends BrokerStore {
   override close(): void {
     this.flush();
     this.database.close();
+  }
+
+  /** Fail-closed readiness: the durable ledger is only healthy while its SQLite handle is open. */
+  override persistenceHealthy(): boolean {
+    return this.database.isOpen;
   }
 
   private load(): void {

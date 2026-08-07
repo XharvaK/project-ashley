@@ -32,6 +32,26 @@ import {
   envelopeToRunRequest,
   type ProcessRunner,
 } from "./process/fake-runner.js";
+import { sweepDisposableWorkspaces, type SweepWorkspacesResult } from "./workspace/workspace-sweep.js";
+import { MAX_SWEEP_CANDIDATES, MAX_SWEEP_REMOVALS } from "./constants/limits.js";
+import {
+  assessSessionCreation,
+  assessWorkspaceCreation,
+  countDisposableWorkspaces,
+  defaultDiskProbe,
+  validateSandboxGlobalLimits,
+  DEFAULT_SANDBOX_GLOBAL_LIMITS,
+  type DiskProbe,
+  type DiskSnapshot,
+  type GlobalLimitAssessment,
+  type SandboxGlobalLimits,
+} from "./constants/global-limits.js";
+import {
+  reconcileBrokerState,
+  type ReconcileBrokerStateResult,
+} from "./sessions/session-reconcile.js";
+import { BROKER_SESSION_SCHEMA_VERSION } from "./sessions/session-migration.js";
+import type { BrokerRootConfig } from "./policy/root-config.js";
 import type { BrokerResponse, RequestContext } from "./protocol/frame.js";
 
 export interface BrokerConfig {
@@ -44,21 +64,63 @@ export interface BrokerConfig {
   processRunner: ProcessRunner;
   store?: BrokerStore;
   recipes?: Map<string, BrokerRecipe>;
+  /** Canonical root configuration for disposable workspace operations. */
+  rootConfig?: BrokerRootConfig;
+  /** Master resource ceilings for sessions and workspaces. */
+  globalLimits?: SandboxGlobalLimits;
+  /** Injectable disk probe used by workspace creation gates. */
+  diskProbe?: DiskProbe;
 }
+
+/**
+ * Bounded, owner-safe readiness snapshot. Exposes aggregate counts and the
+ * active master ceilings only; never internal state, secrets, or payloads.
+ * `ready` is fail-closed: it requires a healthy persistence backend.
+ */
+export type BrokerStatusSnapshot = {
+  ready: boolean;
+  persistence: "ok" | "degraded";
+  schemaVersion: number;
+  ownerId: string;
+  sessions: { active: number; total: number };
+  audits: number;
+  workspaceBytesUsed: number;
+  globalLimits: {
+    maxActiveSessions: number;
+    maxSessionsPerHour: number;
+    maxWorkspacesOnDisk: number;
+    maxWorkspaceCreationsPerHour: number;
+    minFreeDiskBytes: number;
+  };
+};
 
 export class SandboxBroker {
   readonly store: BrokerStore;
   readonly config: BrokerConfig;
   readonly recipes: Map<string, BrokerRecipe>;
+  readonly globalLimits: SandboxGlobalLimits;
+  private readonly diskProbe: DiskProbe;
 
   constructor(config: BrokerConfig) {
     this.config = config;
     this.store = config.store ?? new BrokerStore();
     this.recipes = config.recipes ?? new Map(DEFAULT_TEST_RECIPES.map((r) => [r.recipeId, r]));
+    const validated = validateSandboxGlobalLimits(config.globalLimits);
+    if (!validated.ok) {
+      throw new Error(`global_limits_invalid:${validated.reasons.join(",")}`);
+    }
+    this.globalLimits = validated.value;
+    this.diskProbe = config.diskProbe ?? (() => defaultDiskProbe(config.workspaceRoot));
   }
 
   restart(): void {
     this.store.markTasksFailedOnRestart();
+    const recovery = this.store.sessionLedger.recoverFromRestart(Date.now());
+    this.audit("broker_recovery", {
+      sessionsMaterialized: recovery.sessionsMaterialized.length,
+      interruptedUses: recovery.interruptedUses,
+      sessionsInterrupted: recovery.sessionsInterrupted.length,
+    });
   }
 
   private error(errorCode: string, message: string): BrokerError {
@@ -581,6 +643,233 @@ export class SandboxBroker {
     return { ok: true, data: { applied } };
   }
 
+  workspaceSweep(
+    payload: {
+      ownerId: string;
+      candidates?: string[];
+      maxWorkspaces?: number;
+      nowMs?: number;
+      createdBeforeMs?: number;
+    },
+    ctx: RequestContext,
+  ): BrokerResponse<SweepWorkspacesResult> {
+    if (payload.ownerId !== ctx.ownerId) {
+      return this.error("owner_mismatch", "owner mismatch");
+    }
+    const peer = assertOwnerPeer(ctx.peerOwnerId, this.config.ownerId);
+    if (!peer.ok) {
+      return this.error(peer.reason, "peer authorization failed");
+    }
+    if (!this.config.rootConfig) {
+      return this.error("root_config_missing", "broker root config not configured");
+    }
+    const candidates = payload.candidates ?? [];
+    if (!Array.isArray(candidates) || candidates.length > MAX_SWEEP_CANDIDATES) {
+      return this.error("invalid_candidates", "candidate list out of bounds");
+    }
+    const maxWorkspaces = payload.maxWorkspaces ?? MAX_SWEEP_REMOVALS;
+    if (
+      !Number.isInteger(maxWorkspaces) ||
+      maxWorkspaces < 1 ||
+      maxWorkspaces > MAX_SWEEP_REMOVALS
+    ) {
+      return this.error("invalid_max_workspaces", "maxWorkspaces out of bounds");
+    }
+    const nowMs = payload.nowMs ?? ctx.nowMs;
+    if (!Number.isFinite(nowMs)) {
+      return this.error("invalid_clock", "invalid nowMs");
+    }
+    const createdBeforeMs = payload.createdBeforeMs;
+    if (createdBeforeMs !== undefined && !Number.isFinite(createdBeforeMs)) {
+      return this.error("invalid_clock", "invalid createdBeforeMs");
+    }
+    // Fail-closed eligibility: a workspace is only ever swept when the broker
+    // ledger proves its binding session is terminal (expired/completed/aborted).
+    // Workspaces referenced by live sessions are never sweep targets, even if
+    // a caller offers them as candidates.
+    const terminalWorkspaceIds = new Set<string>();
+    for (const session of this.store.sessionLedger.listSessions()) {
+      if (
+        session.workspaceId &&
+        (session.state === "expired" ||
+          session.state === "completed" ||
+          session.state === "aborted")
+      ) {
+        terminalWorkspaceIds.add(session.workspaceId);
+      }
+    }
+    const offered = candidates.length > 0 ? candidates : [...terminalWorkspaceIds];
+    const effective = offered
+      .filter((id) => terminalWorkspaceIds.has(id))
+      .slice(0, MAX_SWEEP_CANDIDATES);
+    const sweep = sweepDisposableWorkspaces({
+      candidates: effective,
+      rootConfig: this.config.rootConfig,
+      maxWorkspaces,
+      nowMs,
+      createdBeforeMs,
+    });
+    this.audit("workspace_sweep", {
+      candidates: effective.length,
+      removed: sweep.removed.length,
+      skipped: sweep.skipped.length,
+      reachedCap: sweep.removed.length >= maxWorkspaces,
+    });
+    return { ok: true, data: sweep };
+  }
+
+  /**
+   * Master-ceiling gate for session creation. Pure assessment against the
+   * broker ledger; the caller (session service / daemon) refuses to create
+   * when this returns not-allowed. Denials are audited.
+   */
+  sessionCreateGate(nowMs: number): GlobalLimitAssessment {
+    const assessment = assessSessionCreation({
+      ledger: this.store.sessionLedger,
+      limits: this.globalLimits,
+      nowMs,
+    });
+    if (!assessment.allowed) {
+      this.audit("global_limit_denied", {
+        dimension: assessment.errorCode,
+        at: "session_create",
+      });
+    }
+    return assessment;
+  }
+
+  /**
+   * Master-ceiling gate for workspace creation: on-disk occupancy, the
+   * caller-tracked rolling hourly creation count, and the disk floor. A
+   * failed disk probe is a denial, never a pass. Denials are audited.
+   */
+  workspaceCreateGate(input: {
+    nowMs: number;
+    workspaceCreationsLastHour: number;
+  }): GlobalLimitAssessment {
+    let snapshot: DiskSnapshot;
+    try {
+      snapshot = this.diskProbe(this.config.workspaceRoot);
+    } catch {
+      this.audit("global_limit_denied", {
+        dimension: "global_limit_disk_probe_unavailable",
+        at: "workspace_create",
+      });
+      return {
+        allowed: false,
+        errorCode: "global_limit_disk_probe_unavailable",
+        reason: "disk_probe_failed",
+      };
+    }
+    const workspaceCount = this.config.rootConfig
+      ? countDisposableWorkspaces(this.config.rootConfig)
+      : 0;
+    const assessment = assessWorkspaceCreation({
+      workspaceCount,
+      workspaceCreationsLastHour: input.workspaceCreationsLastHour,
+      diskSnapshot: snapshot,
+      limits: this.globalLimits,
+    });
+    if (!assessment.allowed) {
+      this.audit("global_limit_denied", {
+        dimension: assessment.errorCode,
+        at: "workspace_create",
+      });
+    }
+    return assessment;
+  }
+
+  /**
+   * Agent-driven state reconciliation. The agent declares its active policy
+   * identity; the broker surfaces superseded sessions and missing-workspace
+   * bindings, recording idempotent per-session events. Never force-decides.
+   */
+  reconcileState(
+    payload: {
+      ownerId: string;
+      activePolicy: { policyId: string; policyVersion: number; policyHash: string };
+      nowMs?: number;
+    },
+    ctx: RequestContext,
+  ): BrokerResponse<ReconcileBrokerStateResult> {
+    if (payload.ownerId !== ctx.ownerId) {
+      return this.error("owner_mismatch", "owner mismatch");
+    }
+    const peer = assertOwnerPeer(ctx.peerOwnerId, this.config.ownerId);
+    if (!peer.ok) {
+      return this.error(peer.reason, "peer authorization failed");
+    }
+    const policy = payload.activePolicy;
+    if (
+      typeof policy?.policyId !== "string" ||
+      policy.policyId.length === 0 ||
+      policy.policyId.length > 256 ||
+      !Number.isInteger(policy.policyVersion) ||
+      policy.policyVersion < 1 ||
+      !/^[0-9a-f]{64}$/.test(String(policy.policyHash ?? ""))
+    ) {
+      return this.error("active_policy_invalid", "active policy identity invalid");
+    }
+    const nowMs = payload.nowMs ?? ctx.nowMs;
+    if (!Number.isFinite(nowMs)) {
+      return this.error("invalid_clock", "invalid nowMs");
+    }
+    const report = reconcileBrokerState({
+      ledger: this.store.sessionLedger,
+      activePolicy: {
+        policyId: policy.policyId,
+        policyVersion: policy.policyVersion,
+        policyHash: policy.policyHash,
+      },
+      nowMs,
+      workspaceRootConfig: this.config.rootConfig,
+    });
+    this.audit("broker_reconcile", {
+      activeSessions: report.activeSessions,
+      policySuperseded: report.policySuperseded.length,
+      missingWorkspace: report.missingWorkspace.length,
+    });
+    return { ok: true, data: report };
+  }
+
+  /**
+   * Owner-verified readiness snapshot. Fail-closed: `ready` is false whenever
+   * the persistence backend reports unhealthy, even if in-memory state looks
+   * intact. Read-only; emits no audit row and never flushes.
+   */
+  status(ctx: RequestContext): BrokerResponse<BrokerStatusSnapshot> {
+    const peer = assertOwnerPeer(ctx.peerOwnerId, this.config.ownerId);
+    if (!peer.ok) {
+      return this.error(peer.reason, "peer authorization failed");
+    }
+    const persistenceOk = this.store.persistenceHealthy();
+    const sessions = persistenceOk ? this.store.sessionLedger.listSessions() : [];
+    const audits = persistenceOk ? this.store.auditEvents.length : 0;
+    const workspaceBytesUsed = persistenceOk ? this.store.workspaceBytesUsed : 0;
+    return {
+      ok: true,
+      data: {
+        ready: persistenceOk,
+        persistence: persistenceOk ? "ok" : "degraded",
+        schemaVersion: BROKER_SESSION_SCHEMA_VERSION,
+        ownerId: this.config.ownerId,
+        sessions: {
+          active: sessions.filter((s) => s.state === "active").length,
+          total: sessions.length,
+        },
+        audits,
+        workspaceBytesUsed,
+        globalLimits: {
+          maxActiveSessions: this.globalLimits.maxActiveSessions,
+          maxSessionsPerHour: this.globalLimits.maxSessionsPerHour,
+          maxWorkspacesOnDisk: this.globalLimits.maxWorkspacesOnDisk,
+          maxWorkspaceCreationsPerHour: this.globalLimits.maxWorkspaceCreationsPerHour,
+          minFreeDiskBytes: this.globalLimits.minFreeDiskBytes,
+        },
+      },
+    };
+  }
+
   dispatch(
     messageType: string,
     payload: unknown,
@@ -640,6 +929,28 @@ export class SandboxBroker {
         return this.taskResultFetch(payload as { taskId: string });
       case "forget.apply":
         return this.forgetApply(payload as { tombstone: TombstoneEnvelope }, ctx);
+      case "workspace.sweep":
+        return this.workspaceSweep(
+          payload as {
+            ownerId: string;
+            candidates?: string[];
+            maxWorkspaces?: number;
+            nowMs?: number;
+            createdBeforeMs?: number;
+          },
+          ctx,
+        );
+      case "broker.reconcile":
+        return this.reconcileState(
+          payload as {
+            ownerId: string;
+            activePolicy: { policyId: string; policyVersion: number; policyHash: string };
+            nowMs?: number;
+          },
+          ctx,
+        );
+      case "broker.status":
+        return this.status(ctx);
       default:
         return this.error("unknown_message", "unknown message type");
     }

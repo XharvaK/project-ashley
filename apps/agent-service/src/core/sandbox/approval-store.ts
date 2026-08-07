@@ -8,6 +8,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { assignNewEntityUuid } from "../continuity/nuclear-targetable.js";
 import { redactSecretShapes } from "../privacy/redact-logs.js";
+import { isSandboxApprovalExpired } from "./approval-proposal.js";
 import type {
   SandboxApprovalProposal,
   SandboxApprovalProposalStatus,
@@ -245,4 +246,41 @@ export function listSandboxApprovalEvents(
     payload: JSON.parse(String(row.payload_json ?? "{}")),
     createdAtIso: String(row.created_at),
   }));
+}
+
+/**
+ * Agent-side approval reconcile, run when nuclear.db is opened after an
+ * outage or restart. Pending/approved proposals whose approval window lapsed
+ * while the agent was down are durably marked `expired` (event recorded).
+ * Bindings are never mutated and decisions are never auto-made in the other
+ * direction: nothing is approved, rejected, or resumed here.
+ */
+export function reconcileSandboxApprovals(
+  db: DatabaseSync,
+  input: { nowMs?: number } = {},
+): { expired: number } {
+  const nowMs = input.nowMs ?? Date.now();
+  let expired = 0;
+  const rows = db
+    .prepare(
+      `SELECT * FROM sandbox_approval_proposals WHERE status IN ('pending', 'approved')`,
+    )
+    .all() as Array<Record<string, unknown>>;
+  for (const row of rows) {
+    const proposal = mapProposal(row);
+    if (!isSandboxApprovalExpired(proposal, nowMs)) continue;
+    updateSandboxApprovalProposalDecision(db, proposal.proposalId, {
+      status: "expired",
+      reason: "approval_window_elapsed",
+      decidedAtMs: nowMs,
+    });
+    recordSandboxApprovalEvent(db, {
+      proposalEntityUuid: proposal.entityUuid,
+      ownerId: proposal.ownerId,
+      eventType: "expired",
+      payload: { reconcileOnOpen: true, expiresAtIso: proposal.expiresAtIso },
+    });
+    expired += 1;
+  }
+  return { expired };
 }

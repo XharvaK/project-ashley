@@ -56,6 +56,11 @@ export type SessionServiceOptions = {
   /** Injected broker capability-signing material; null means unprovisioned. */
   capabilitySigningMaterial?: CapabilitySigningKeyMaterial | null;
   nowMs?: () => number;
+  /**
+   * Optional master-ceiling gate run before a session is persisted. When
+   * set and it returns not-ok, `createSession` fails closed with that error.
+   */
+  createGate?: (nowMs: number) => ServiceResult<unknown>;
 };
 
 export type ServiceResult<T> =
@@ -80,10 +85,12 @@ export class BrokerSessionService {
   private readonly ledger: BrokerSessionLedger;
   private readonly signer: BrokerCapabilitySigner | null;
   private readonly nowMs: () => number;
+  private readonly createGate: ((nowMs: number) => ServiceResult<unknown>) | null;
 
   constructor(options: SessionServiceOptions) {
     this.ledger = options.ledger;
     this.nowMs = options.nowMs ?? (() => Date.now());
+    this.createGate = options.createGate ?? null;
     if (options.capabilitySigningMaterial) {
       const created = createBrokerCapabilitySigner(options.capabilitySigningMaterial);
       if (!created.ok) {
@@ -186,6 +193,12 @@ export class BrokerSessionService {
         "expires_at_invalid",
         `expires at must be within (now, now + ${SESSION_MAX_TTL_MS}ms]`,
       );
+    }
+    if (this.createGate) {
+      const gate = this.createGate(input.nowMs);
+      if (!gate.ok) {
+        return gate as ServiceResult<BrokerSandboxSession>;
+      }
     }
 
     const session: BrokerSandboxSession = {

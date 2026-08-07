@@ -1,6 +1,10 @@
 import { existsSync, statSync } from "node:fs";
 import { env } from "../../env.js";
-import type { BrokerClientTransport } from "../change-proposal/broker-client.js";
+import {
+  fetchBrokerStatus,
+  type BrokerClientTransport,
+  type BrokerStatusSnapshot,
+} from "../change-proposal/broker-client.js";
 import { createConfiguredUnixBrokerTransport } from "../change-proposal/unix-broker-transport.js";
 import { sandboxKeysConfigured } from "./key-store.js";
 
@@ -24,12 +28,15 @@ export type SandboxAvailabilitySnapshot = {
   qualification: SandboxQualificationState;
   reachabilityCheckedAtMs: number | null;
   reachabilityErrorCode?: string;
+  /** Latest broker `broker.status` snapshot; null when the broker did not answer. */
+  brokerStatus?: BrokerStatusSnapshot | null;
 };
 
 type ReachabilityCache = {
   state: SandboxQualificationState;
   checkedAtMs: number | null;
   errorCode?: string;
+  brokerStatus?: BrokerStatusSnapshot | null;
 };
 
 let reachabilityCache: ReachabilityCache = {
@@ -99,6 +106,9 @@ export function sandboxAvailabilitySnapshot(): SandboxAvailabilitySnapshot {
     ...(reachabilityCache.errorCode
       ? { reachabilityErrorCode: reachabilityCache.errorCode }
       : {}),
+    ...(reachabilityCache.brokerStatus !== undefined
+      ? { brokerStatus: reachabilityCache.brokerStatus }
+      : {}),
   };
 }
 
@@ -133,7 +143,12 @@ export async function probeSandboxBrokerReachability(
   }
   const result = await transport.dispatch("artifact.list", { ownerId });
   if (result.ok) {
-    reachabilityCache = { state: "qualified", checkedAtMs: Date.now() };
+    const status = await fetchBrokerStatus(transport);
+    reachabilityCache = {
+      state: "qualified",
+      checkedAtMs: Date.now(),
+      brokerStatus: status.ok ? status.data : null,
+    };
   } else {
     reachabilityCache = {
       state: "unreachable",

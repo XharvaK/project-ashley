@@ -18,6 +18,11 @@
  *
  * The ledger stores session policy identity (id/version/hash), never policy
  * artifacts, never keys, never raw secrets, never argv or output.
+ *
+ * Broker restart recovery is explicit (`recoverFromRestart`): the ledger is
+ * authoritative, reserved capability uses are finalized as `interrupted`
+ * without refund or auto-retry, and lapsed sessions are materialized to
+ * `expired`. Nothing is silently resumed in memory.
  */
 
 import { type DatabaseSync } from "node:sqlite";
@@ -73,6 +78,18 @@ export type LedgerResult<T> =
   | { ok: true; value: T }
   | { ok: false; errorCode: string; reason: string };
 
+/**
+ * Outcome of a broker restart recovery pass. `sessionsMaterialized` lists
+ * sessions moved to `expired`; `interruptedUses` is the count of reservations
+ * finalized as `interrupted`; `sessionsInterrupted` lists sessions that had
+ * at least one interrupted reservation.
+ */
+export type RestartRecoveryResult = {
+  sessionsMaterialized: string[];
+  interruptedUses: number;
+  sessionsInterrupted: string[];
+};
+
 export type ApplyTransitionInput = {
   sessionUuid: string;
   expectedRevision: number;
@@ -99,6 +116,9 @@ const RECORDABLE_EVENT_TYPES: ReadonlySet<string> = new Set<string>([
   "session_completed",
   "session_aborted",
   "session_expired",
+  "session_interrupted",
+  "session_policy_superseded",
+  "session_workspace_missing",
 ]);
 
 export type ReserveCapabilityUseInput = {
@@ -619,6 +639,92 @@ export class BrokerSessionLedger {
       }));
     }
     return this.memEvents.filter((event) => event.sessionUuid === sessionUuid);
+  }
+
+  listCapabilityUses(sessionUuid: string): SandboxCapabilityUse[] {
+    if (this.db) {
+      const rows = this.db
+        .prepare(
+          `SELECT capability_use_id, session_uuid, capability, policy_hash,
+                  outcome, issued_at, consumed_at
+           FROM sandbox_capability_uses WHERE session_uuid = ? ORDER BY issued_at`,
+        )
+        .all(sessionUuid) as Array<{
+        capability_use_id: string;
+        session_uuid: string;
+        capability: SandboxCapabilityId;
+        policy_hash: string;
+        outcome: CapabilityUseOutcome;
+        issued_at: string;
+        consumed_at: string | null;
+      }>;
+      return rows.map((row) => ({
+        capabilityUseId: row.capability_use_id,
+        sessionUuid: row.session_uuid,
+        capability: row.capability,
+        policyHash: row.policy_hash,
+        outcome: row.outcome,
+        issuedAt: row.issued_at,
+        ...(row.consumed_at ? { consumedAt: row.consumed_at } : {}),
+      }));
+    }
+    return [...this.memUses.values()].filter(
+      (use) => use.sessionUuid === sessionUuid,
+    );
+  }
+
+  /**
+   * Broker restart recovery. The ledger is authoritative: reservations whose
+   * execution may have been lost in a crash are durably finalized as
+   * `interrupted` (never auto-retried, never refunded, single-use ids never
+   * reused), and sessions that lapsed while the broker was down are
+   * materialized to `expired`. A `session_interrupted` event is recorded per
+   * affected session. Idempotent in the sense that a second run finds nothing
+   * left to do.
+   */
+  recoverFromRestart(nowMs: number): RestartRecoveryResult {
+    const result: RestartRecoveryResult = {
+      sessionsMaterialized: [],
+      interruptedUses: 0,
+      sessionsInterrupted: [],
+    };
+    for (const session of this.listSessions()) {
+      if (session.state === "completed" || session.state === "aborted" || session.state === "expired") {
+        continue;
+      }
+      const reserved = this.listCapabilityUses(session.sessionUuid).filter(
+        (use) => use.outcome === "reserved",
+      );
+      if (reserved.length > 0) {
+        for (const use of reserved) {
+          this.finalizeCapabilityUse(use.capabilityUseId, "interrupted", nowMs);
+        }
+        result.interruptedUses += reserved.length;
+        result.sessionsInterrupted.push(session.sessionUuid);
+        this.recordEvent({
+          sessionUuid: session.sessionUuid,
+          eventType: "session_interrupted",
+          atMs: nowMs,
+          metadata: { interruptedUses: reserved.length },
+        });
+      }
+      if (nowMs >= Date.parse(session.expiresAt)) {
+        const current = this.getSession(session.sessionUuid);
+        if (!current) continue;
+        const expired = this.applyTransition({
+          sessionUuid: session.sessionUuid,
+          expectedRevision: current.revision,
+          to: "expired",
+          eventType: "session_expired",
+          atMs: nowMs,
+          metadata: { recovery: true },
+        });
+        if (expired.ok) {
+          result.sessionsMaterialized.push(session.sessionUuid);
+        }
+      }
+    }
+    return result;
   }
 
   private countUses(sessionUuid: string): number {

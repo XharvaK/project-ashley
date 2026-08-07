@@ -37,6 +37,7 @@ import {
   MIGRATION_17_EXTERNAL_AGENCY_DDL,
 } from "./external-agency/migration-17.js";
 import { MIGRATION_19_SANDBOX_APPROVAL_DDL } from "./sandbox/migration-19.js";
+import { reconcileSandboxApprovals } from "./sandbox/approval-store.js";
 import { currentBuildIdentity } from "./rollout/capabilities.js";
 
 export { NUCLEAR_DB_PATH };
@@ -1978,6 +1979,7 @@ export function openNuclearDb(
       continuity,
       skipContinuityRequirement: options.continuityOptional && !continuity,
     });
+    reconcileSandboxApprovals(existing);
     if (continuity) registerContinuityFor(existing, continuity, mainFile);
     return existing;
   }
@@ -1990,6 +1992,7 @@ export function openNuclearDb(
     (options.continuityOptional ? undefined : openContinuityDb());
   const db = new DatabaseSync(NUCLEAR_DB_PATH);
   migrate(db, { continuity });
+  reconcileSandboxApprovals(db);
   if (continuity) registerContinuityFor(db, continuity, NUCLEAR_DB_PATH);
   return db;
 }

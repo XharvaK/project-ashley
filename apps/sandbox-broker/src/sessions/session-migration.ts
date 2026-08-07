@@ -13,13 +13,15 @@
 
 import { type DatabaseSync } from "node:sqlite";
 
-export const BROKER_SESSION_SCHEMA_VERSION = 2;
+export const BROKER_SESSION_SCHEMA_VERSION = 3;
 
 /**
  * Broker session ledger migrations. Each version's DDL is applied in order
  * when upgrading; every statement is idempotent (CREATE TABLE IF NOT EXISTS).
  * `MIGRATION_2` adds the owner-authorization ledger that Commit 11 requires
- * for broker-recorded owner resumes.
+ * for broker-recorded owner resumes. `MIGRATION_3` adds the `interrupted`
+ * capability-use outcome (broker restart recovery) by rebuilding the
+ * capability-uses table.
  */
 export const MIGRATION_2_SESSION_LEDGER_DDL: readonly string[] = [
   `
@@ -36,6 +38,48 @@ export const MIGRATION_2_SESSION_LEDGER_DDL: readonly string[] = [
   `
   CREATE INDEX IF NOT EXISTS idx_sandbox_session_authorizations_session
     ON sandbox_session_authorizations (session_uuid, authorized_at_ms);
+  `,
+];
+
+/**
+ * `MIGRATION_3` extends capability-use outcomes with `interrupted` so a broker
+ * restart can durably mark reservations that were consumed but never
+ * finalized. SQLite cannot alter a CHECK constraint in place, so the
+ * `sandbox_capability_uses` table is rebuilt (data preserved, indexes
+ * recreated) inside the same transaction as the version bump.
+ */
+export const MIGRATION_3_SESSION_LEDGER_DDL: readonly string[] = [
+  `
+  DROP INDEX IF EXISTS idx_sandbox_capability_uses_session;
+  `,
+  `
+  ALTER TABLE sandbox_capability_uses RENAME TO sandbox_capability_uses_old;
+  `,
+  `
+  CREATE TABLE sandbox_capability_uses (
+    capability_use_id TEXT PRIMARY KEY,
+    session_uuid TEXT NOT NULL,
+    capability TEXT NOT NULL,
+    policy_hash TEXT NOT NULL,
+    outcome TEXT NOT NULL DEFAULT 'reserved'
+      CHECK (outcome IN ('reserved','succeeded','failed','cancelled','interrupted')),
+    issued_at TEXT NOT NULL,
+    consumed_at TEXT,
+    FOREIGN KEY (session_uuid) REFERENCES sandbox_sessions(session_uuid)
+  );
+  `,
+  `
+  INSERT INTO sandbox_capability_uses
+    (capability_use_id, session_uuid, capability, policy_hash, outcome, issued_at, consumed_at)
+  SELECT capability_use_id, session_uuid, capability, policy_hash, outcome, issued_at, consumed_at
+  FROM sandbox_capability_uses_old;
+  `,
+  `
+  DROP TABLE sandbox_capability_uses_old;
+  `,
+  `
+  CREATE INDEX idx_sandbox_capability_uses_session
+    ON sandbox_capability_uses (session_uuid);
   `,
 ];
 
@@ -140,6 +184,9 @@ export function migrateBrokerSessionSchema(
         db.exec(ddl);
       }
       for (const ddl of MIGRATION_2_SESSION_LEDGER_DDL) {
+        db.exec(ddl);
+      }
+      for (const ddl of MIGRATION_3_SESSION_LEDGER_DDL) {
         db.exec(ddl);
       }
       db.exec(`PRAGMA user_version = ${BROKER_SESSION_SCHEMA_VERSION}`);

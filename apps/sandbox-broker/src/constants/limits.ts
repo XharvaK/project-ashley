@@ -11,3 +11,5 @@ export const MAX_CONCURRENT_TASKS = 1;
 export const UPLOAD_SESSION_TTL_MS = 60 * 60 * 1000;
 export const ARTIFACT_REF_ENTROPY_BYTES = 16;
 export const REQUIRED_NETWORK_MODE = "none" as const;
+export const MAX_SWEEP_CANDIDATES = 1_000;
+export const MAX_SWEEP_REMOVALS = 100;

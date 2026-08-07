@@ -87,7 +87,10 @@ export type SandboxSessionEventType =
   | "owner_authorization_recorded"
   | "session_completed"
   | "session_aborted"
-  | "session_expired";
+  | "session_expired"
+  | "session_interrupted"
+  | "session_policy_superseded"
+  | "session_workspace_missing";
 
 /** Bounded non-secret event metadata. Never contains keys, PEM, or secrets. */
 export type SandboxSessionEventMetadata = Record<string, string | number | boolean>;
@@ -100,7 +103,17 @@ export type SandboxSessionEvent = {
   metadata: SandboxSessionEventMetadata;
 };
 
-export type CapabilityUseOutcome = "reserved" | "succeeded" | "failed" | "cancelled";
+export type CapabilityUseOutcome =
+  | "reserved"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "interrupted";
+
+/**
+ * `interrupted` marks a reservation whose execution was cut short by a broker
+ * restart. It is a terminal outcome: never auto-retried, never refunded.
+ */
 
 /**
  * Capability-use record. Every accepted reservation consumes one execution

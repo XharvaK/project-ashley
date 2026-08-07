@@ -32,6 +32,7 @@ export class MemoryTransport {
 
 export * from "./broker.js";
 export * from "./constants/limits.js";
+export * from "./constants/global-limits.js";
 export * from "./crypto/approval.js";
 export * from "./crypto/delegated-approval.js";
 export * from "./crypto/delegated-policy.js";
@@ -59,6 +60,7 @@ export * from "./sessions/session-migration.js";
 export * from "./sessions/capability-custody.js";
 export * from "./sessions/session-capability.js";
 export * from "./sessions/session-ledger.js";
+export * from "./sessions/session-reconcile.js";
 export * from "./sessions/session-service.js";
 export * from "./process/fake-runner.js";
 export * from "./process/real-runner.js";
@@ -77,3 +79,4 @@ export * from "./workspace/workspace-id.js";
 export * from "./workspace/workspace-limits.js";
 export * from "./workspace/workspace-manifest.js";
 export * from "./workspace/workspace-revalidate.js";
+export * from "./workspace/workspace-sweep.js";

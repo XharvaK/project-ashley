@@ -24,6 +24,26 @@ export type ApprovalEnvelopeLike = {
   signature?: string;
 };
 
+/**
+ * Bounded broker readiness snapshot mirrored from the sandbox broker's
+ * `broker.status` message. Read-only aggregate facts only.
+ */
+export type BrokerStatusSnapshot = {
+  ready: boolean;
+  persistence: "ok" | "degraded";
+  schemaVersion: number;
+  ownerId: string;
+  sessions: { active: number; total: number };
+  audits: number;
+  workspaceBytesUsed: number;
+};
+
+export async function fetchBrokerStatus(
+  transport: BrokerClientTransport,
+): Promise<BrokerDispatchResult<BrokerStatusSnapshot>> {
+  return (await transport.dispatch("broker.status", {})) as BrokerDispatchResult<BrokerStatusSnapshot>;
+}
+
 export async function readArtifact(
   transport: BrokerClientTransport,
   ownerId: string,
