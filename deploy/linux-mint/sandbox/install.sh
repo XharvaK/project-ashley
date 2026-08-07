@@ -69,6 +69,8 @@ if [[ "$APPLY" -eq 1 ]]; then
     echo 'npm is required to build the reviewed broker before installation.' >&2
     exit 2
   fi
+  npm ci --prefix "$ROOT/apps/sandbox-policy"
+  npm run build --prefix "$ROOT/apps/sandbox-policy"
   npm ci --prefix "$ROOT/apps/sandbox-broker"
   npm run build --prefix "$ROOT/apps/sandbox-broker"
   npm run build --prefix "$ROOT/apps/agent-service"
