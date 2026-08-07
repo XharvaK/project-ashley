@@ -29,6 +29,7 @@ function parseArgs(argv) {
     keysDir: join(homedir(), ".composer-assistant", "keys"),
     ownerKeyId: "owner-ed25519-v1",
     continuityKeyId: "continuity-tombstone-ed25519-v1",
+    delegatedKeyId: "delegated-runtime-ed25519-v1",
   };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -40,6 +41,8 @@ function parseArgs(argv) {
       options.ownerKeyId = argv[++i];
     } else if (arg === "--continuity-key-id" && argv[i + 1]) {
       options.continuityKeyId = argv[++i];
+    } else if (arg === "--delegated-key-id" && argv[i + 1]) {
+      options.delegatedKeyId = argv[++i];
     } else if (arg === "--help" || arg === "-h") {
       printHelp();
       process.exit(0);
@@ -53,7 +56,15 @@ function parseArgs(argv) {
 function printHelp() {
   console.log(`Usage: node scripts/mint/bootstrap-sandbox-keys.mjs [--force]
 
-Generates owner-approval and continuity-tombstone Ed25519 keypairs.
+Generates the three operator-side Ed25519 signing keypairs required by the
+sandbox trust model:
+  1. owner policy signing key        (owner-ed25519-v1)
+  2. continuity tombstone signing key (continuity-tombstone-ed25519-v1)
+  3. delegated runtime signing key   (delegated-runtime-ed25519-v1)
+
+The broker session-capability key is NOT generated here: it is broker-owned
+and produced on the Mint host per capability-custody.ts.
+
 Private keys are encrypted to ~/.composer-assistant/keys/*.key.enc.
 Public keys are written as PEM *.pub files. A master.pass file is created
 when missing. Never prints private key material.`);
@@ -85,15 +96,19 @@ async function main() {
 
   const ownerPrivatePath = join(options.keysDir, "owner-approval.key.enc");
   const continuityPrivatePath = join(options.keysDir, "continuity-tombstone.key.enc");
+  const delegatedPrivatePath = join(options.keysDir, "delegated-runtime.key.enc");
   const ownerPublicPath = join(options.keysDir, `${options.ownerKeyId}.pub`);
   const continuityPublicPath = join(options.keysDir, `${options.continuityKeyId}.pub`);
+  const delegatedPublicPath = join(options.keysDir, `${options.delegatedKeyId}.pub`);
   const passphrasePath = join(options.keysDir, "master.pass");
 
   for (const path of [
     ownerPrivatePath,
     continuityPrivatePath,
+    delegatedPrivatePath,
     ownerPublicPath,
     continuityPublicPath,
+    delegatedPublicPath,
   ]) {
     assertWritable(path, options.force);
   }
@@ -112,6 +127,7 @@ async function main() {
 
   const ownerPair = generateEd25519KeyPairPem();
   const continuityPair = generateEd25519KeyPairPem();
+  const delegatedPair = generateEd25519KeyPairPem();
 
   writeRestricted(
     ownerPrivatePath,
@@ -133,14 +149,29 @@ async function main() {
       2,
     )}\n`,
   );
+  writeRestricted(
+    delegatedPrivatePath,
+    `${JSON.stringify(
+      encryptPrivateKeyPem(
+        delegatedPair.privateKeyPem,
+        passphrase,
+        options.delegatedKeyId,
+      ),
+      null,
+      2,
+    )}\n`,
+  );
   writeRestricted(ownerPublicPath, ownerPair.publicKeyPem);
   writeRestricted(continuityPublicPath, continuityPair.publicKeyPem);
+  writeRestricted(delegatedPublicPath, delegatedPair.publicKeyPem);
 
   console.log("Sandbox signing keys bootstrapped.");
   console.log(`  Owner private (encrypted): ${ownerPrivatePath}`);
   console.log(`  Continuity private (encrypted): ${continuityPrivatePath}`);
+  console.log(`  Delegated runtime private (encrypted): ${delegatedPrivatePath}`);
   console.log(`  Owner public: ${ownerPublicPath}`);
   console.log(`  Continuity public: ${continuityPublicPath}`);
+  console.log(`  Delegated runtime public: ${delegatedPublicPath}`);
   console.log(`  Passphrase file: ${passphrasePath}`);
   console.log("Next: stage public keys to Mint with sandbox.ps1 -Action StagePublicKeys");
 }

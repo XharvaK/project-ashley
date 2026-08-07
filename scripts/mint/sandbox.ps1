@@ -20,11 +20,14 @@ param(
   [string]$OwnerId = "",
   [string]$OwnerPublicKeyRemotePath = "/tmp/owner-ed25519-v1.pub",
   [string]$ContinuityPublicKeyRemotePath = "/tmp/continuity-tombstone-ed25519-v1.pub",
+  [string]$DelegatedPublicKeyRemotePath = "/tmp/delegated-runtime-ed25519-v1.pub",
   [string]$OwnerKeyId = "",
   [string]$ContinuityKeyId = "",
+  [string]$DelegatedKeyId = "",
   [string]$OwnerPublicKeyLocalPath = "",
-  [string]$ContinuityPublicKeyLocalPath = ""
-)
+  [string]$ContinuityPublicKeyLocalPath = "",
+  [string]$DelegatedPublicKeyLocalPath = ""
+ )
 
 $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
@@ -59,7 +62,11 @@ if ($Action -eq "StagePublicKeys") {
     $continuityKeyId = if ($ContinuityKeyId) { $ContinuityKeyId } else { "continuity-tombstone-ed25519-v1" }
     $ContinuityPublicKeyLocalPath = Join-Path $keysDir "$continuityKeyId.pub"
   }
-  foreach ($path in @($OwnerPublicKeyLocalPath, $ContinuityPublicKeyLocalPath)) {
+  if (-not $DelegatedPublicKeyLocalPath) {
+    $delegatedKeyId = if ($DelegatedKeyId) { $DelegatedKeyId } else { "delegated-runtime-ed25519-v1" }
+    $DelegatedPublicKeyLocalPath = Join-Path $keysDir "$delegatedKeyId.pub"
+  }
+  foreach ($path in @($OwnerPublicKeyLocalPath, $ContinuityPublicKeyLocalPath, $DelegatedPublicKeyLocalPath)) {
     if (-not (Test-Path -LiteralPath $path)) {
       throw "Public key file not found: $path. Run bootstrap-sandbox-keys.ps1 first."
     }
@@ -74,9 +81,14 @@ if ($Action -eq "StagePublicKeys") {
     $ContinuityPublicKeyLocalPath `
     "${target}:${ContinuityPublicKeyRemotePath}"
   if ($LASTEXITCODE -ne 0) { throw "scp continuity public key failed (exit $LASTEXITCODE)." }
+  & scp -P $Port -o BatchMode=yes -o StrictHostKeyChecking=accept-new `
+    $DelegatedPublicKeyLocalPath `
+    "${target}:${DelegatedPublicKeyRemotePath}"
+  if ($LASTEXITCODE -ne 0) { throw "scp delegated-runtime public key failed (exit $LASTEXITCODE)." }
   Write-Host "Staged public keys to Mint:"
   Write-Host "  $OwnerPublicKeyRemotePath"
   Write-Host "  $ContinuityPublicKeyRemotePath"
+  Write-Host "  $DelegatedPublicKeyRemotePath"
   return
 }
 
