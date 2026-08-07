@@ -48,6 +48,21 @@ powershell -File scripts\mint\sandbox.ps1 -Action Install -Apply -PushFirst `
   -ContinuityKeyId continuity-tombstone-ed25519-v1
 ```
 
+Network isolation stays `unavailable` unless the host passed the R5B
+qualification run. Only then install with the `none` provider:
+
+```powershell
+powershell -File scripts\mint\sandbox.ps1 -Action Install -Apply -PushFirst `
+  ... `
+  -NetworkProvider none `
+  -NetworkIsolationQualified `
+  -UnsharePath /usr/bin/unshare
+```
+
+The broker refuses to start when `none` is selected unless its boot-time
+active probe proves the isolation mechanism works under the installed
+systemd hardening (`RestrictNamespaces=user net`).
+
 5. **Release qualification and agent opt-in** remain separate gates. Installing
 the daemon does not enable `ASHLEY_SANDBOX_BROKER_ENABLED` or grant Ashley a
 usable sandbox until qualification passes.

@@ -29,6 +29,9 @@ param(
   [string]$ContinuityKeyId = "",
   [string]$DelegatedKeyId = "",
   [string]$CapabilityKeyId = "",
+  [string]$NetworkProvider = "",
+  [switch]$NetworkIsolationQualified,
+  [string]$UnsharePath = "",
   [string]$OwnerPublicKeyLocalPath = "",
   [string]$ContinuityPublicKeyLocalPath = "",
   [string]$DelegatedPublicKeyLocalPath = "",
@@ -44,7 +47,7 @@ $RepoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 if (($Action -eq "Install" -or $Action -eq "Remove") -and -not $Apply) {
   throw "$Action changes the Mint host; pass -Apply explicitly. Preflight and Status are read-only."
 }
-foreach ($value in @($HostName, $User, $RepoDir, $AgentUser, $OwnerId, $OwnerPublicKeyRemotePath, $ContinuityPublicKeyRemotePath, $DelegatedPublicKeyRemotePath, $CapabilityKeyRemotePath, $MasterPassphraseRemotePath, $PolicyArtifactRemotePath, $PolicySignatureRemotePath, $OwnerKeyId, $ContinuityKeyId, $DelegatedKeyId, $CapabilityKeyId, $OwnerPublicKeyLocalPath, $ContinuityPublicKeyLocalPath, $DelegatedPublicKeyLocalPath, $CapabilityKeyLocalPath, $MasterPassphraseLocalPath, $PolicyArtifactLocalPath, $PolicySignatureLocalPath)) {
+foreach ($value in @($HostName, $User, $RepoDir, $AgentUser, $OwnerId, $OwnerPublicKeyRemotePath, $ContinuityPublicKeyRemotePath, $DelegatedPublicKeyRemotePath, $CapabilityKeyRemotePath, $MasterPassphraseRemotePath, $PolicyArtifactRemotePath, $PolicySignatureRemotePath, $OwnerKeyId, $ContinuityKeyId, $DelegatedKeyId, $CapabilityKeyId, $NetworkProvider, $UnsharePath, $OwnerPublicKeyLocalPath, $ContinuityPublicKeyLocalPath, $DelegatedPublicKeyLocalPath, $CapabilityKeyLocalPath, $MasterPassphraseLocalPath, $PolicyArtifactLocalPath, $PolicySignatureLocalPath)) {
   if ($value -and $value -notmatch '^[A-Za-z0-9_./~:@+-]+$') {
     throw "Unsafe shell characters in argument: $value"
   }
@@ -172,6 +175,9 @@ switch ($Action) {
     if ($ContinuityKeyId) { $installArgs += @("--continuity-key-id", $ContinuityKeyId) }
     if ($DelegatedKeyId) { $installArgs += @("--delegated-key-id", $DelegatedKeyId) }
     if ($CapabilityKeyId) { $installArgs += @("--capability-key-id", $CapabilityKeyId) }
+    if ($NetworkProvider) { $installArgs += @("--network-provider", $NetworkProvider) }
+    if ($NetworkIsolationQualified) { $installArgs += "--network-isolation-qualified" }
+    if ($UnsharePath) { $installArgs += @("--unshare-path", $UnsharePath) }
     $lines += ($installArgs -join ' ')
   }
   "Remove" {

@@ -17,7 +17,7 @@ import { createLinuxPeerCredentialResolver } from "./peer-credentials.js";
 import { UnixBrokerServer } from "./server.js";
 import { toCanonicalBrokerPath } from "./policy/path.js";
 import { fixedRecipeRegistry } from "./policy/recipe-registry.js";
-import { selectProductionNetworkIsolation } from "./execution/linux-network-isolation.js";
+import { selectProductionNetworkIsolation, assertNetworkIsolationProbeOperational } from "./execution/linux-network-isolation.js";
 import type { NetworkIsolationProvider } from "./execution/network-isolation.js";
 import type { DelegatedRuntimeConfig } from "./delegated/runtime.js";
 
@@ -59,16 +59,20 @@ function boolEnv(name: string): boolean {
  * NOTE: the network provider seam defaults to `unavailable` (R4 behavior).
  * `ASHLEY_SANDBOX_NETWORK_PROVIDER=none` selects the R5A spawn-coupled Linux
  * namespace isolation, but only when the R5B host qualification flag
- * `ASHLEY_SANDBOX_NETWORK_ISOLATION_QUALIFIED=true` is also set; production
- * configuration does not set either, so the Mint host stays fail-closed.
+ * `ASHLEY_SANDBOX_NETWORK_ISOLATION_QUALIFIED=true` is also set; the
+ * installer writes both, and default configuration stays fail-closed. When
+ * `none` is selected the broker runs the R5B boot-time active isolation
+ * probe and refuses to start unless the mechanism is actually usable.
  */
-function loadDelegatedRuntimeConfig(
+async function loadDelegatedRuntimeConfig(
   keysDir: string,
   processRunner: ProcessRunner,
-): {
-  config: DelegatedRuntimeConfig;
-  networkIsolation: NetworkIsolationProvider;
-} | null {
+): Promise<
+  {
+    config: DelegatedRuntimeConfig;
+    networkIsolation: NetworkIsolationProvider;
+  } | null
+> {
   if (!boolEnv("ASHLEY_SANDBOX_DELEGATED_ENABLED")) return null;
 
   const passphrasePath =
@@ -100,6 +104,9 @@ function loadDelegatedRuntimeConfig(
     processRunner,
     unsharePath: process.env.ASHLEY_SANDBOX_UNSHARE_PATH?.trim() || undefined,
   });
+  if (selection.kind === "none") {
+    await assertNetworkIsolationProbeOperational(selection.provider);
+  }
   const networkIsolation = selection.provider;
 
   const delegatedPublicPem = readPublicKeyPem(delegatedPublicPath);
@@ -159,7 +166,12 @@ function parseUid(): number {
   return uid;
 }
 
-function createProductionBroker() {
+async function createProductionBroker(): Promise<{
+  broker: ReturnType<typeof createBroker>;
+  store: DurableBrokerStore;
+  helperPath: string;
+  ownerId: string;
+}> {
   const stateRoot = requiredEnv("ASHLEY_SANDBOX_STATE_ROOT");
   const workspaceRoot = requiredEnv("ASHLEY_SANDBOX_WORKSPACE_ROOT");
   const ownerId = requiredEnv("ASHLEY_SANDBOX_OWNER_ID");
@@ -185,7 +197,7 @@ function createProductionBroker() {
     process.env.ASHLEY_SANDBOX_KEYS_DIR?.trim() ??
     join(homedir(), ".composer-assistant", "keys");
   const processRunner = new ChildProcessRunner();
-  const delegated = loadDelegatedRuntimeConfig(keysDir, processRunner);
+  const delegated = await loadDelegatedRuntimeConfig(keysDir, processRunner);
   const broker = createBroker({
     workspaceRoot,
     ownerId,
@@ -218,7 +230,7 @@ async function main(): Promise<void> {
   const activated = process.argv.includes("--socket-activated");
   const socketPath = process.env.ASHLEY_SANDBOX_SOCKET?.trim();
   if (!activated && !socketPath) throw new Error("socket_activation_or_path_required");
-  const production = createProductionBroker();
+  const production = await createProductionBroker();
   const server = new UnixBrokerServer({
     broker: production.broker,
     ownerId: production.ownerId,

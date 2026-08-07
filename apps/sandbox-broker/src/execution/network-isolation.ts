@@ -47,13 +47,30 @@ export type NetworkIsolationEnforcement =
 /**
  * Truthful readiness label for the network isolation seam.
  *
- * - `operational`: the provider is configured AND its host prerequisites are
- *   verified (Linux platform, isolation executable present and regular).
- * - `unavailable`: no provider, or host prerequisites cannot be satisfied.
+ * - `operational`: the provider is configured AND an active boot-time probe
+ *   actually exercised the isolation mechanism through the process runner
+ *   and succeeded. Static prerequisites alone never qualify (R5B).
+ * - `unavailable`: no provider, static prerequisites cannot be satisfied,
+ *   or no successful active probe is cached.
  *
  * Readiness must never report usable isolation merely because code exists.
  */
 export type NetworkIsolationStatus = "operational" | "unavailable";
+
+/**
+ * Result of an active isolation probe (R5B). The probe spawns a bounded,
+ * trusted no-op process through the provider's own prepared specification so
+ * the real mechanism (e.g. `unshare --user --map-root-user --net`) is
+ * exercised under the exact host security context the broker runs in.
+ *
+ * - `operational`: the prepared probe process ran to completion with exit
+ *   code 0 — the isolation mechanism is usable right now.
+ * - `not_operational`: the mechanism could not be exercised; `reason` is a
+ *   short diagnostic string (error code, terminal reason, exit code).
+ */
+export type NetworkIsolationActiveProbeResult =
+  | { kind: "operational" }
+  | { kind: "not_operational"; reason: string };
 
 export interface NetworkIsolationProvider {
   /**
@@ -63,8 +80,20 @@ export interface NetworkIsolationProvider {
    */
   prepare(request: FakeRunRequest): Promise<NetworkIsolationEnforcement> | NetworkIsolationEnforcement;
 
-  /** Truthful readiness label for `sandbox.readiness`. */
+  /**
+   * Truthful readiness label for `sandbox.readiness`. Operational may be
+   * reported only after a successful active probe (see `probeActive`).
+   */
   status(): NetworkIsolationStatus;
+
+  /**
+   * Optional active isolation probe (R5B). Runs a bounded no-op process
+   * through the provider's own prepared specification and caches the
+   * result; `status()` reflects the cached probe. Providers without a probe
+   * can never report operational and must be treated as fail-closed by the
+   * boot path.
+   */
+  probeActive?(): Promise<NetworkIsolationActiveProbeResult>;
 
   /** Optional cancellation passthrough for in-flight isolated runs. */
   cancel?(taskId: string): boolean;

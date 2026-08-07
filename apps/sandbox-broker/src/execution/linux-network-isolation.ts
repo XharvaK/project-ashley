@@ -29,9 +29,11 @@
  * The broker user is unprivileged on Mint; this works because the kernel
  * allows an unprivileged process to create a network namespace in the same
  * syscall that creates its user namespace (verified on Mint 22.3 / kernel
- * 6.17 with util-linux 2.39.3). The production systemd unit currently sets
- * `RestrictNamespaces=yes`, which blocks the unshare syscall; relaxing that
- * hardening for the `none` provider is a separate deploy-time step (R5B).
+ * 6.17 with util-linux 2.39.3). The production systemd unit allows only
+ * `RestrictNamespaces=user net` (R5B) so the unshare syscall works while
+ * every other namespace class stays blocked; the boot-time active probe
+ * (`probeActive`) proves the mechanism under that exact context before the
+ * broker serves anything.
  *
  * `createUnavailableNetworkIsolation()` remains the fail-closed default.
  */
@@ -40,6 +42,7 @@ import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import type { FakeRunRequest, ProcessRunner } from "../process/fake-runner.js";
 import {
   createUnavailableNetworkIsolation,
+  type NetworkIsolationActiveProbeResult,
   type NetworkIsolationEnforcement,
   type NetworkIsolationProvider,
   type NetworkIsolationStatus,
@@ -47,6 +50,19 @@ import {
 
 /** Trusted absolute isolation executable (never PATH-resolved). */
 export const DEFAULT_UNSHARE_PATH = "/usr/bin/unshare";
+
+/**
+ * Trusted absolute no-op executable for the active isolation probe. The
+ * probe runs through the same prepared specification as a recipe, so the
+ * unshare mechanism is genuinely exercised under the broker's host security
+ * context; the no-op must be an absolute broker-resolved path.
+ */
+export const DEFAULT_PROBE_EXECUTABLE_PATH = "/usr/bin/true";
+
+/** Bounds for the boot-time active probe (tight; the probe must be instant). */
+export const NETWORK_ISOLATION_PROBE_WALL_MS = 5_000;
+export const NETWORK_ISOLATION_PROBE_MAX_OUTPUT_BYTES = 4_096;
+export const NETWORK_ISOLATION_PROBE_TASK_ID = "network-isolation-active-probe";
 
 /**
  * Builds the immutable argv for one isolated run: the trusted unshare
@@ -74,6 +90,8 @@ export interface LinuxUnshareIsolationOptions {
   processRunner: ProcessRunner;
   /** Trusted absolute path to the util-linux unshare binary. */
   unsharePath?: string;
+  /** Trusted absolute no-op executable used by the active probe. */
+  probeExecutablePath?: string;
   /** Injectable platform (defaults to process.platform). */
   platform?: NodeJS.Platform;
   /** Injectable executable probe (defaults to realpath+lstat). */
@@ -125,14 +143,22 @@ export function probeUsernsAvailability(readSysctl: (name: string) => string | n
 export class LinuxUnshareNetworkIsolation implements NetworkIsolationProvider {
   private readonly processRunner: ProcessRunner;
   private readonly unsharePath: string;
+  private readonly probeExecutablePath: string;
   private readonly platform: NodeJS.Platform;
   private readonly probeExecutable: (path: string) => IsolationExecutableProbe;
   private readonly readSysctl: (name: string) => string | null;
   private readonly cancelRunner: ((taskId: string) => boolean) | undefined;
+  /**
+   * Cached result of the most recent active probe. `null` means "never
+   * probed" — never operational. `status()` reports operational only after
+   * a successful probe, so static prerequisites alone cannot overclaim.
+   */
+  private activeProbe: NetworkIsolationActiveProbeResult | null = null;
 
   constructor(options: LinuxUnshareIsolationOptions) {
     this.processRunner = options.processRunner;
     this.unsharePath = options.unsharePath ?? DEFAULT_UNSHARE_PATH;
+    this.probeExecutablePath = options.probeExecutablePath ?? DEFAULT_PROBE_EXECUTABLE_PATH;
     this.platform = options.platform ?? process.platform;
     this.probeExecutable = options.probeExecutable ?? probeExecutableDefault;
     this.readSysctl = options.readSysctl ?? readSysctlDefault;
@@ -149,7 +175,45 @@ export class LinuxUnshareNetworkIsolation implements NetworkIsolationProvider {
   }
 
   status(): NetworkIsolationStatus {
-    return this.hostUsable() ? "operational" : "unavailable";
+    if (!this.hostUsable()) return "unavailable";
+    if (this.activeProbe?.kind !== "operational") return "unavailable";
+    return "operational";
+  }
+
+  /**
+   * Bounded active isolation probe (R5B). Runs the trusted no-op through
+   * the exact prepared isolation specification, so the unshare mechanism is
+   * exercised under the current host security context (including systemd
+   * namespace restrictions) before the broker serves anything. The result
+   * is cached and drives `status()`.
+   */
+  async probeActive(): Promise<NetworkIsolationActiveProbeResult> {
+    const prepared = await this.prepare({
+      taskId: NETWORK_ISOLATION_PROBE_TASK_ID,
+      argv: [this.probeExecutablePath],
+      cwd: "/",
+      env: { PATH: "/usr/bin:/bin" },
+      wallMs: NETWORK_ISOLATION_PROBE_WALL_MS,
+      maxProcesses: 1,
+      maxOutputBytes: NETWORK_ISOLATION_PROBE_MAX_OUTPUT_BYTES,
+    });
+    if (!prepared.ok) {
+      this.activeProbe = {
+        kind: "not_operational",
+        reason: `${prepared.errorCode}: ${prepared.reason}`,
+      };
+      return this.activeProbe;
+    }
+    const result = await this.processRunner.run(prepared.request);
+    if (result.terminalReason !== "success" || result.truncated || result.exitCode !== 0) {
+      this.activeProbe = {
+        kind: "not_operational",
+        reason: `probe run failed: terminal=${result.terminalReason} exit=${result.exitCode} truncated=${result.truncated}`,
+      };
+      return this.activeProbe;
+    }
+    this.activeProbe = { kind: "operational" };
+    return this.activeProbe;
   }
 
   prepare(request: FakeRunRequest): NetworkIsolationEnforcement {
@@ -226,10 +290,31 @@ export function probeLinuxUnshareHost(
 }
 
 /**
+ * Boot-time fail-closed gate (R5B): the broker refuses to serve the `none`
+ * provider until an active probe proves the isolation mechanism works under
+ * the current host security context. Providers that cannot be probed
+ * (including the unavailable fail-closed default) never pass.
+ */
+export async function assertNetworkIsolationProbeOperational(
+  provider: NetworkIsolationProvider,
+): Promise<void> {
+  if (typeof provider.probeActive !== "function") {
+    throw new Error(
+      "network_isolation_probe_unsupported: selected network provider cannot be actively probed",
+    );
+  }
+  const result = await provider.probeActive();
+  if (result.kind !== "operational") {
+    throw new Error(`network_isolation_probe_failed: ${result.reason}`);
+  }
+}
+
+/**
  * Production configuration seam. `unavailable` is the only silent default;
  * real isolation is selected only when the host explicitly sets the provider
  * name AND the R5B qualification flag, otherwise boot fails closed. The
- * qualification flag is never set by production configuration in R5A.
+ * qualification flag is set by the installer (`install.sh`) only for hosts
+ * that passed the R5B qualification run, never by default.
  */
 export type ProductionNetworkIsolationSelection =
   | {

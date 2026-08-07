@@ -21,6 +21,12 @@ POLICY_SIGNATURE="${ASHLEY_SANDBOX_POLICY_SIGNATURE:-}"
 DELEGATED_KEY_ID="${ASHLEY_SANDBOX_DELEGATED_KEY_ID:-delegated-runtime-ed25519-v1}"
 CAPABILITY_KEY_ID="${ASHLEY_SANDBOX_CAPABILITY_KEY_ID:-broker-session-capability-ed25519-v1}"
 DELEGATED_ENABLED=false
+# R5B network isolation seam. `unavailable` is the only default; `none`
+# requires the qualification flag (set only for hosts that passed the R5B
+# qualification run) and a trusted absolute unshare binary.
+NETWORK_PROVIDER="${ASHLEY_SANDBOX_NETWORK_PROVIDER:-unavailable}"
+NETWORK_ISOLATION_QUALIFIED="${ASHLEY_SANDBOX_NETWORK_ISOLATION_QUALIFIED:-false}"
+UNSHARE_PATH="${ASHLEY_SANDBOX_UNSHARE_PATH:-/usr/bin/unshare}"
 
 usage() {
   cat <<'EOF'
@@ -47,6 +53,9 @@ Options:
   --delegated-key-id ID            Delegated runtime key id
   --capability-key-id ID           Broker capability key id
   --delegated-enabled              Enable the delegated broker runtime (default: false)
+  --network-provider NAME          Network isolation provider (unavailable|none; default: unavailable)
+  --network-isolation-qualified    Declare the host network isolation qualified (required for none)
+  --unshare-path PATH              Trusted absolute unshare binary (default: /usr/bin/unshare)
 EOF
 }
 
@@ -69,6 +78,9 @@ while [[ $# -gt 0 ]]; do
     --delegated-key-id) DELEGATED_KEY_ID="$2"; shift 2 ;;
     --capability-key-id) CAPABILITY_KEY_ID="$2"; shift 2 ;;
     --delegated-enabled) DELEGATED_ENABLED=true; shift ;;
+    --network-provider) NETWORK_PROVIDER="$2"; shift 2 ;;
+    --network-isolation-qualified) NETWORK_ISOLATION_QUALIFIED=true; shift ;;
+    --unshare-path) UNSHARE_PATH="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -140,6 +152,33 @@ CONTINUITY_KEY_ID="${CONTINUITY_KEY_ID:-${continuity_key_name%.*}}"
 DELEGATED_KEY_ID="${DELEGATED_KEY_ID:-${delegated_key_name%.*}}"
 if [[ ! "$OWNER_KEY_ID" =~ ^[A-Za-z0-9._:-]+$ || ! "$CONTINUITY_KEY_ID" =~ ^[A-Za-z0-9._:-]+$ || ! "$DELEGATED_KEY_ID" =~ ^[A-Za-z0-9._:-]+$ ]]; then
   echo 'Key ids may contain only letters, digits, dot, underscore, colon, and hyphen.' >&2
+  exit 2
+fi
+
+case "$NETWORK_PROVIDER" in
+  unavailable)
+    ;;
+  none)
+    if [[ "$NETWORK_ISOLATION_QUALIFIED" != "true" ]]; then
+      echo '--network-isolation-qualified is required when --network-provider none (R5B qualification run must pass first).' >&2
+      exit 2
+    fi
+    if [[ "$UNSHARE_PATH" != /* ]]; then
+      echo "--unshare-path must be absolute: $UNSHARE_PATH" >&2
+      exit 2
+    fi
+    if [[ -L "$UNSHARE_PATH" || ! -f "$UNSHARE_PATH" ]]; then
+      echo "unshare path must be a regular file, not a symlink: $UNSHARE_PATH" >&2
+      exit 2
+    fi
+    ;;
+  *)
+    echo "Unknown --network-provider: $NETWORK_PROVIDER (expected unavailable or none)" >&2
+    exit 2
+    ;;
+esac
+if [[ "$NETWORK_ISOLATION_QUALIFIED" == "true" && "$NETWORK_PROVIDER" != "none" ]]; then
+  echo '--network-isolation-qualified is only meaningful with --network-provider none.' >&2
   exit 2
 fi
 
@@ -237,6 +276,9 @@ ASHLEY_SANDBOX_AGENT_UID=$(id -u "$AGENT_USER")
 ASHLEY_SANDBOX_PEER_CREDENTIAL_HELPER=/opt/ashley-sandbox/bin/peer-credentials
 ASHLEY_SANDBOX_RECIPE_MANIFEST=/var/lib/ashley-sandbox/meta/recipes.json
 ASHLEY_SANDBOX_DELEGATED_ENABLED=$DELEGATED_ENABLED
+ASHLEY_SANDBOX_NETWORK_PROVIDER=$NETWORK_PROVIDER
+ASHLEY_SANDBOX_NETWORK_ISOLATION_QUALIFIED=$NETWORK_ISOLATION_QUALIFIED
+ASHLEY_SANDBOX_UNSHARE_PATH=$UNSHARE_PATH
 EOF
 root_run install -o root -g ashley-sandbox -m 0640 "$env_tmp" /etc/ashley-sandbox/broker.env
 

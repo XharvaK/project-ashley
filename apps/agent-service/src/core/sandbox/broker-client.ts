@@ -42,6 +42,7 @@ import {
   type FixedRecipeExecutionResult,
   type NetworkIsolationEnforcement,
   type NetworkIsolationProvider,
+  type NetworkIsolationStatus,
   type ProcessRunner,
   type SandboxSessionState,
   type ServiceResult,
@@ -186,10 +187,14 @@ class FixtureNetworkIsolationProvider implements NetworkIsolationProvider {
   mode: "enforced" | "unavailable" = "enforced";
   enforceCalls = 0;
 
-  async enforce(): Promise<NetworkIsolationEnforcement> {
+  async prepare(request: FakeRunRequest): Promise<NetworkIsolationEnforcement> {
     this.enforceCalls += 1;
     if (this.mode === "unavailable") return NETWORK_ISOLATION_UNAVAILABLE;
-    return { ok: true };
+    return { ok: true, request };
+  }
+
+  status(): NetworkIsolationStatus {
+    return this.mode === "enforced" ? "operational" : "unavailable";
   }
 }
 

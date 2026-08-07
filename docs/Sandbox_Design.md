@@ -414,7 +414,7 @@ auto-reexecute.
 | `ProtectKernelTunables=true` | Block sysctl writes |
 | `ProtectKernelModules=true` | Block module load |
 | `ProtectControlGroups=true` | **Keep true**; no child cgroup delegation in v1 |
-| `RestrictNamespaces=yes` | Block all namespace creation in v1; **no** network-namespace exception until later hardening wave |
+| `RestrictNamespaces=user net` | Allow user + network namespace creation only (R5B): the unshare isolation mechanism needs `CLONE_NEWUSER\|CLONE_NEWNET`; mount/pid/uts/ipc/cgroup/time stay blocked. Broker refuses to start unless its boot-time active probe succeeds under this exact context |
 | `RestrictSUIDSGID=true` | No setuid execution |
 | `LockPersonality=true` | Block personality abuse |
 | `DevicePolicy=closed` | Deny devices |
@@ -429,8 +429,9 @@ auto-reexecute.
 `SocketUser`, `SocketGroup`, `SocketMode`, `RuntimeDirectory`, `RuntimeDirectoryMode`
 for `/run/ashley/`. Service unit does **not** duplicate socket ACL.
 
-**Deferred:** `Delegate=yes` per-task cgroups; `RestrictNamespaces` network exceptions —
-future hardening waves only.
+**Deferred:** `Delegate=yes` per-task cgroups; `RestrictNamespaces` is already
+narrowed to `user net` for the R5B-qualified isolation runtime — no further
+namespace exceptions are planned.
 
 ### Residual risks
 
