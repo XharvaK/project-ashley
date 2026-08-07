@@ -27,8 +27,53 @@ describe("fixed build and test recipes", () => {
       "--",
       "tsc",
       "--noEmit",
+      "--project",
+      "apps/agent-service/tsconfig.json",
     ]);
     expect(recipe.supported).toBe(true);
+  });
+
+  it("1b. verify:agent-tsc deterministically names its TypeScript project", () => {
+    const recipe = fixedRecipeRegistry().get("verify:agent-tsc")!;
+    const projectIndex = recipe.argv.indexOf("--project");
+    expect(projectIndex).toBeGreaterThan(0);
+    expect(recipe.argv[projectIndex + 1]).toBe("apps/agent-service/tsconfig.json");
+    // The recipe must never silently regress to cwd-based tsconfig discovery:
+    // under cwdPolicy: workspace the compiler starts at the broker workspace
+    // root, so a bare `tsc --noEmit` would print help and exit 1 instead of
+    // compiling apps/agent-service.
+    expect(recipe.argv).not.toEqual([
+      "exec",
+      "--prefix",
+      "apps/agent-service",
+      "--",
+      "tsc",
+      "--noEmit",
+    ]);
+  });
+
+  it("1c. verify:agent-tsc stays fixed, workspace-scoped, offline, and shell-free", () => {
+    const recipe = fixedRecipeRegistry().get("verify:agent-tsc")!;
+    expect(recipe.category).toBe("build");
+    expect(recipe.supported).toBe(true);
+    // cwd semantics are kept: the recipe anchors at the broker workspace root
+    // and names its project explicitly instead of discovering it from cwd.
+    expect(recipe.cwdPolicy).toBe("workspace");
+    expect(recipe.networkMode).toBe("none");
+    expect(recipe.executable).toBe("/usr/bin/npm");
+    // Fixed argv with no placeholders or user-supplied arguments, and no shell.
+    expect(recipe.argv).toEqual([
+      "exec",
+      "--prefix",
+      "apps/agent-service",
+      "--",
+      "tsc",
+      "--noEmit",
+      "--project",
+      "apps/agent-service/tsconfig.json",
+    ]);
+    expect(assertArgvPolicy(recipe.argv).ok).toBe(true);
+    expect(recipe.argv).not.toContain("");
   });
 
   it("2. verify:sandbox-broker-tsc pins the broker TypeScript build", () => {
