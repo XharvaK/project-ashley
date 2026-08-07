@@ -1,0 +1,44 @@
+{
+  "policyId": "pol-production-001",
+  "policyVersion": 1,
+  "issuedAt": "2026-08-01T00:00:00.000Z",
+  "expiresAt": "2027-08-01T00:00:00.000Z",
+  "allowedDelegatedSignerKeyIds": [
+    "delegated-runtime-ed25519-v1"
+  ],
+  "allowedCapabilities": [
+    "approved_project_read",
+    "candidate_workspace_read_write_delete",
+    "fixed_test_recipe",
+    "bounded_diagnostic_execution",
+    "apply_candidate_patch_live"
+  ],
+  "readOnlyRoots": [
+    "/var/lib/ashley-sandbox/workspace"
+  ],
+  "writableDisposableRoots": [
+    "/var/lib/ashley-sandbox/disposable"
+  ],
+  "protectedRoots": [
+    {
+      "path": "/var/lib/ashley-sandbox/meta",
+      "class": "absolute_denial"
+    }
+  ],
+  "allowedRecipeIds": [
+    "sandbox.recipe.execute",
+    "test-run-recipes/mocha-run"
+  ],
+  "allowedExecutableIds": [
+    "diagnostics/node-memory-check"
+  ],
+  "resourceCeilings": {
+    "wallMsMax": 60000,
+    "maxProcesses": 10,
+    "maxOutputBytes": 10485760,
+    "workspaceBytesMax": 671088640
+  },
+  "networkMode": "none",
+  "maxActiveSessions": 1,
+  "payloadVersion": 1
+}

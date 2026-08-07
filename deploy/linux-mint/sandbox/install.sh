@@ -173,7 +173,10 @@ if [[ ! -x "$node_binary" ]]; then
 fi
 root_run install -o root -g root -m 0755 "$node_binary" /opt/ashley-sandbox/bin/node
 
-root_run cp -a "$ROOT/apps/sandbox-broker/dist/." /opt/ashley-sandbox/dist/
+root_run cp -R "$ROOT/apps/sandbox-broker/dist/." /opt/ashley-sandbox/dist/
+root_run chown -R root:root /opt/ashley-sandbox/dist
+root_run find /opt/ashley-sandbox/dist -type d -exec chmod 0755 {} +
+root_run find /opt/ashley-sandbox/dist -type f -exec chmod 0644 {} +
 root_run install -o root -g root -m 0644 "$ROOT/apps/sandbox-broker/package.json" \
   /opt/ashley-sandbox/package.json
 
@@ -181,7 +184,10 @@ root_run install -d -o root -g root -m 0755 /opt/ashley-sandbox/node_modules
 root_run install -d -o root -g root -m 0755 /opt/ashley-sandbox/node_modules/@composer-assistant
 root_run install -d -o root -g root -m 0755 /opt/ashley-sandbox/node_modules/@composer-assistant/sandbox-policy
 root_run install -d -o root -g root -m 0755 /opt/ashley-sandbox/node_modules/@composer-assistant/sandbox-policy/dist
-root_run cp -a "$ROOT/apps/sandbox-policy/dist/." /opt/ashley-sandbox/node_modules/@composer-assistant/sandbox-policy/dist/
+root_run cp -R "$ROOT/apps/sandbox-policy/dist/." /opt/ashley-sandbox/node_modules/@composer-assistant/sandbox-policy/dist/
+root_run chown -R root:root /opt/ashley-sandbox/node_modules/@composer-assistant/sandbox-policy/dist
+root_run find /opt/ashley-sandbox/node_modules/@composer-assistant/sandbox-policy/dist -type d -exec chmod 0755 {} +
+root_run find /opt/ashley-sandbox/node_modules/@composer-assistant/sandbox-policy/dist -type f -exec chmod 0644 {} +
 root_run install -o root -g root -m 0644 "$ROOT/apps/sandbox-policy/package.json" \
   /opt/ashley-sandbox/node_modules/@composer-assistant/sandbox-policy/package.json
 
@@ -258,3 +264,11 @@ root_run systemctl enable --now ashley-exec-broker.socket
 printf '%s\n' 'Sandbox broker installation completed.'
 printf '%s\n' 'The agent user was added to ashley-broker; log out/in or reboot before testing IPC.'
 printf '%s\n' 'Check with: bash deploy/linux-mint/sandbox/status.sh'
+
+if ! root_run find /opt/ashley-sandbox -not -user root -print -quit | grep -q .; then
+  # Assertion passed: no files found that are not owned by root
+  :
+else
+  echo 'FATAL: Found files in /opt/ashley-sandbox not owned by root!' >&2
+  exit 2
+fi

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createPrivateKey, createPublicKey } from "node:crypto";
 import {
   decryptPrivateKeyPem,
   encryptPrivateKeyPem,
@@ -38,5 +39,22 @@ describe("key-custody", () => {
     const parsed = parseEncryptedKeyEnvelope(JSON.stringify(envelope));
     expect(parsed.keyId).toBe("continuity-tombstone-ed25519-v1");
     expect(decryptPrivateKeyPem(parsed, "pass")).toBe(pair.privateKeyPem);
+  });
+
+  it("exports public spki PEM from decrypted private key (regression)", () => {
+    const pair = generateEd25519KeyPairPem();
+    const envelope = encryptPrivateKeyPem(
+      pair.privateKeyPem,
+      "test-pass",
+      "capability",
+    );
+    
+    const decryptedPrivatePem = decryptPrivateKeyPem(envelope, "test-pass");
+    const derivedPublicPem = createPublicKey(createPrivateKey(decryptedPrivatePem)).export({
+      type: "spki",
+      format: "pem",
+    }).toString();
+    
+    expect(derivedPublicPem).toBe(pair.publicKeyPem);
   });
 });
