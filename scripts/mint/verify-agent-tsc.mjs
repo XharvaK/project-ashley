@@ -33,7 +33,7 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname } from "node:path";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -42,32 +42,32 @@ const HOME = homedir();
 const KEYS = join(HOME, ".composer-assistant", "keys");
 
 const { UnixBrokerClientTransport } = await import(
-  join(REPO, "apps/agent-service/dist/core/change-proposal/unix-broker-transport.js")
+  pathToFileURL(join(REPO, "apps/agent-service/dist/core/change-proposal/unix-broker-transport.js")).href
 );
 const { UnixSandboxBrokerClient } = await import(
-  join(REPO, "apps/agent-service/dist/core/sandbox/unix-broker-client.js")
+  pathToFileURL(join(REPO, "apps/agent-service/dist/core/sandbox/unix-broker-client.js")).href
 );
 const { validateDelegatedRuntimeKeyMaterial } = await import(
-  join(REPO, "apps/agent-service/dist/core/sandbox/delegated-key-custody.js")
+  pathToFileURL(join(REPO, "apps/agent-service/dist/core/sandbox/delegated-key-custody.js")).href
 );
 const { signDelegatedSandboxEnvelope } = await import(
-  join(REPO, "apps/agent-service/dist/core/sandbox/delegated-signer.js")
+  pathToFileURL(join(REPO, "apps/agent-service/dist/core/sandbox/delegated-signer.js")).href
 );
 const { runSandboxPrecheck } = await import(
-  join(REPO, "apps/agent-service/dist/core/sandbox/precheck.js")
+  pathToFileURL(join(REPO, "apps/agent-service/dist/core/sandbox/precheck.js")).href
 );
 const {
   verifyDelegatedPolicyArtifact,
   ownerPolicyKeyFromPem,
 } = await import(
-  join(REPO, "apps/sandbox-broker/dist/crypto/delegated-policy.js")
+  pathToFileURL(join(REPO, "apps/sandbox-broker/dist/crypto/delegated-policy.js")).href
 );
 const {
   decryptPrivateKeyPem,
   parseEncryptedKeyEnvelope,
-} = await import(join(REPO, "apps/sandbox-broker/dist/crypto/key-custody.js"));
+} = await import(pathToFileURL(join(REPO, "apps/sandbox-broker/dist/crypto/key-custody.js")).href);
 const { DELEGATED_RUNTIME_KEY_ID, randomNonce } = await import(
-  join(REPO, "apps/sandbox-broker/dist/index.js")
+  pathToFileURL(join(REPO, "apps/sandbox-broker/dist/index.js")).href
 );
 
 const RECIPE_ID = "verify:agent-tsc";
@@ -274,11 +274,20 @@ const execution = await client.executeRecipe({
 });
 
 // ---- finalize ---------------------------------------------------------------
+const finalSession = await client.getSession(session.sessionUuid);
+if (!finalSession) {
+  fail("finalize", "failed_to_fetch_final_session_state");
+}
+
 const finishState = execution.ok ? "completed" : "aborted";
-await client.transitionSession(session.sessionUuid, finishState, {
-  expectedRevision: session.revision,
+const transition = await client.transitionSession(session.sessionUuid, finishState, {
+  expectedRevision: finalSession.revision,
   nowMs: now(),
 });
+
+if (!transition.ok) {
+  fail("finalize", `transition_to_${finishState}_failed:${transition.errorCode}`);
+}
 
 if (!execution.ok) {
   fail("executeRecipe", `${execution.stage}:${execution.errorCode}`);
