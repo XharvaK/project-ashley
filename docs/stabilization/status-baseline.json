@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "nuclearSchemaVersion": 17,
+  "nuclearSchemaVersion": 19,
   "capabilityNames": [
     "affect",
     "attachment_text",
