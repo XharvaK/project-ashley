@@ -73,6 +73,7 @@ if [[ "$APPLY" -eq 1 ]]; then
   npm run build --prefix "$ROOT/apps/sandbox-policy"
   npm ci --prefix "$ROOT/apps/sandbox-broker"
   npm run build --prefix "$ROOT/apps/sandbox-broker"
+  npm ci --prefix "$ROOT/apps/agent-service"
   npm run build --prefix "$ROOT/apps/agent-service"
 fi
 
