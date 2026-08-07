@@ -20,6 +20,7 @@ POLICY_ARTIFACT="${ASHLEY_SANDBOX_POLICY_ARTIFACT:-}"
 POLICY_SIGNATURE="${ASHLEY_SANDBOX_POLICY_SIGNATURE:-}"
 DELEGATED_KEY_ID="${ASHLEY_SANDBOX_DELEGATED_KEY_ID:-delegated-runtime-ed25519-v1}"
 CAPABILITY_KEY_ID="${ASHLEY_SANDBOX_CAPABILITY_KEY_ID:-broker-session-capability-ed25519-v1}"
+DELEGATED_ENABLED=false
 
 usage() {
   cat <<'EOF'
@@ -45,6 +46,7 @@ Options:
   --continuity-key-id ID           Tombstone key id (default: public-key stem)
   --delegated-key-id ID            Delegated runtime key id
   --capability-key-id ID           Broker capability key id
+  --delegated-enabled              Enable the delegated broker runtime (default: false)
 EOF
 }
 
@@ -66,6 +68,7 @@ while [[ $# -gt 0 ]]; do
     --continuity-key-id) CONTINUITY_KEY_ID="$2"; shift 2 ;;
     --delegated-key-id) DELEGATED_KEY_ID="$2"; shift 2 ;;
     --capability-key-id) CAPABILITY_KEY_ID="$2"; shift 2 ;;
+    --delegated-enabled) DELEGATED_ENABLED=true; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -174,6 +177,14 @@ root_run cp -a "$ROOT/apps/sandbox-broker/dist/." /opt/ashley-sandbox/dist/
 root_run install -o root -g root -m 0644 "$ROOT/apps/sandbox-broker/package.json" \
   /opt/ashley-sandbox/package.json
 
+root_run install -d -o root -g root -m 0755 /opt/ashley-sandbox/node_modules
+root_run install -d -o root -g root -m 0755 /opt/ashley-sandbox/node_modules/@composer-assistant
+root_run install -d -o root -g root -m 0755 /opt/ashley-sandbox/node_modules/@composer-assistant/sandbox-policy
+root_run install -d -o root -g root -m 0755 /opt/ashley-sandbox/node_modules/@composer-assistant/sandbox-policy/dist
+root_run cp -a "$ROOT/apps/sandbox-policy/dist/." /opt/ashley-sandbox/node_modules/@composer-assistant/sandbox-policy/dist/
+root_run install -o root -g root -m 0644 "$ROOT/apps/sandbox-policy/package.json" \
+  /opt/ashley-sandbox/node_modules/@composer-assistant/sandbox-policy/package.json
+
 peer_helper_tmp="$(mktemp)"
 env_tmp=""
 trap 'rm -f "${env_tmp:-}" "${peer_helper_tmp:-}"' EXIT
@@ -219,6 +230,7 @@ ASHLEY_SANDBOX_POLICY_SIGNATURE=/var/lib/ashley-sandbox/meta/policy/policy.json.
 ASHLEY_SANDBOX_AGENT_UID=$(id -u "$AGENT_USER")
 ASHLEY_SANDBOX_PEER_CREDENTIAL_HELPER=/opt/ashley-sandbox/bin/peer-credentials
 ASHLEY_SANDBOX_RECIPE_MANIFEST=/var/lib/ashley-sandbox/meta/recipes.json
+ASHLEY_SANDBOX_DELEGATED_ENABLED=$DELEGATED_ENABLED
 EOF
 root_run install -o root -g ashley-sandbox -m 0640 "$env_tmp" /etc/ashley-sandbox/broker.env
 
@@ -228,6 +240,17 @@ for unit in ashley-exec-broker.socket ashley-exec-broker.service; do
   root_run install -o root -g root -m 0644 "$rendered" "/etc/systemd/system/$unit"
   rm -f "$rendered"
 done
+
+if ! (cd /opt/ashley-sandbox && root_run /opt/ashley-sandbox/bin/node -e "require('@composer-assistant/sandbox-policy')"); then
+  echo 'Production module-resolution smoke check failed.' >&2
+  exit 2
+fi
+
+# main.js requires a socket argument or socket activation. We verify it compiles cleanly.
+if ! (cd /opt/ashley-sandbox && root_run /opt/ashley-sandbox/bin/node --check /opt/ashley-sandbox/dist/main.js); then
+  echo 'Broker entrypoint syntax/compilation check failed.' >&2
+  exit 2
+fi
 
 root_run systemctl daemon-reload
 root_run systemctl enable --now ashley-exec-broker.socket
