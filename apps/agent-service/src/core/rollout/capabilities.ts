@@ -43,7 +43,8 @@ export type CapabilityEventKind =
   | "isolated_eval"
   | "live_shadow"
   | "behavioral_breach"
-  | "critical_failure";
+  | "critical_failure"
+  | "operator_promote";
 
 const dependencies: Record<CapabilityName, CapabilityName[]> = {
   recall: [],
@@ -82,6 +83,7 @@ export type CapabilityStatus = {
   dependenciesReady: boolean;
   evalSeedCount: number;
   qualifiedAt: string | null;
+  promotionEligible: boolean;
   liveShadowEvents: number;
   liveShadowSpanDays: number;
   behavioralBreachesSevenDays: number;
@@ -232,73 +234,108 @@ function liveSpanDays(window: { first: string | null; last: string | null }): nu
   );
 }
 
-export function refreshCapabilityPromotions(
+/**
+ * Pure eligibility evaluation for an observe release. Never mutates state:
+ * qualification evidence and live-shadow evidence are only consulted, and
+ * activation happens exclusively through `promoteCapability`.
+ */
+export function promotionEligible(
   db: DatabaseSync,
+  capability: CapabilityName,
   releaseId = currentReleaseId(),
-): number {
-  if (contractMismatch(db)) return 0;
-  for (const capability of capabilityNames) ensureRelease(db, capability, releaseId);
-  const epoch = currentModelEpoch(db, env.mistralModel);
-  let promoted = 0;
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const capability of capabilityNames) {
-      if (releaseState(db, capability, releaseId) !== "observe") continue;
-      const release = db.prepare(
-        `SELECT eval_seed_count, qualified_at, model_epoch FROM capability_releases
-         WHERE capability = ? AND release_id = ?`,
-      ).get(capability, releaseId);
-      if (
-        !isRow(release) ||
-        Number(release.eval_seed_count ?? 0) < 3 ||
-        typeof release.qualified_at !== "string"
-      ) {
-        continue;
-      }
-      const epochFilter = modelSensitive.has(capability) ? epoch : null;
-      if (
-        modelSensitive.has(capability) &&
-        epoch > 0 &&
-        Number(release.model_epoch ?? 0) !== epoch
-      ) {
-        continue;
-      }
-      const live = eventWindow(
-        db,
-        capability,
-        releaseId,
-        "live_shadow",
-        undefined,
-        epochFilter,
-      );
-      if (
-        live.count < 25 ||
-        liveSpanDays(live) < 7 ||
-        !dependenciesReady(db, capability, releaseId)
-      ) {
-        continue;
-      }
-      const now = new Date().toISOString();
-      const result = db.prepare(
-        `UPDATE capability_releases
-         SET state = 'active', promoted_at = ?, failure_kind = NULL,
-             failure_reason = NULL, updated_at = ?, model_epoch = ?
-         WHERE capability = ? AND release_id = ? AND state = 'observe'`,
-      ).run(
-        now,
-        now,
-        modelSensitive.has(capability) ? epoch : 0,
-        capability,
-        releaseId,
-      );
-      if (result.changes > 0) {
-        promoted += 1;
-        changed = true;
-      }
-    }
+): boolean {
+  if (contractMismatch(db)) return false;
+  ensureRelease(db, capability, releaseId);
+  if (releaseState(db, capability, releaseId) !== "observe") return false;
+  const release = db.prepare(
+    `SELECT eval_seed_count, qualified_at, model_epoch FROM capability_releases
+     WHERE capability = ? AND release_id = ?`,
+  ).get(capability, releaseId);
+  if (
+    !isRow(release) ||
+    Number(release.eval_seed_count ?? 0) < 3 ||
+    typeof release.qualified_at !== "string"
+  ) {
+    return false;
   }
-  return promoted;
+  const epoch = currentModelEpoch(db, env.mistralModel);
+  if (
+    modelSensitive.has(capability) &&
+    epoch > 0 &&
+    Number(release.model_epoch ?? 0) !== epoch
+  ) {
+    return false;
+  }
+  const live = eventWindow(
+    db,
+    capability,
+    releaseId,
+    "live_shadow",
+    undefined,
+    modelSensitive.has(capability) ? epoch : null,
+  );
+  return live.count >= 25 &&
+    liveSpanDays(live) >= 7 &&
+    dependenciesReady(db, capability, releaseId);
+}
+
+export type PromoteCapabilityResult =
+  | { ok: true; alreadyActive?: boolean; state: "active" }
+  | {
+      ok: false;
+      reason: "contract_mismatch" | "authorization_required" | "not_eligible" | "rolled_back" | "disabled";
+    };
+
+/**
+ * Explicit observe → active promotion. Authorized callers only; the
+ * authorized-by identity is recorded in the `operator_promote` audit event.
+ * Re-evaluates eligibility at invocation time and fails closed on
+ * ineligible, rolled-back, or disabled releases without any state change or
+ * event. Idempotent for releases already active.
+ */
+export function promoteCapability(
+  db: DatabaseSync,
+  capability: CapabilityName,
+  input: { authorizedBy: string; releaseId?: string },
+): PromoteCapabilityResult {
+  const releaseId = input.releaseId ?? currentReleaseId();
+  const authorizedBy = input.authorizedBy.trim();
+  if (!authorizedBy) {
+    return { ok: false, reason: "authorization_required" };
+  }
+  ensureRelease(db, capability, releaseId);
+  if (contractMismatch(db)) {
+    return { ok: false, reason: "contract_mismatch" };
+  }
+  const state = releaseState(db, capability, releaseId);
+  if (state === "active") {
+    return { ok: true, alreadyActive: true, state };
+  }
+  if (state === "rolled_back" || state === "disabled") {
+    return { ok: false, reason: state };
+  }
+  if (!promotionEligible(db, capability, releaseId)) {
+    return { ok: false, reason: "not_eligible" };
+  }
+  const now = new Date().toISOString();
+  const epoch = modelSensitive.has(capability)
+    ? currentModelEpoch(db, env.mistralModel)
+    : 0;
+  db.prepare(
+    `UPDATE capability_releases
+     SET state = 'active', promoted_at = ?, failure_kind = NULL,
+         failure_reason = NULL, updated_at = ?, model_epoch = ?
+     WHERE capability = ? AND release_id = ? AND state = 'observe'`,
+  ).run(now, now, epoch, capability, releaseId);
+  recordEvent(db, {
+    capability,
+    releaseId,
+    kind: "operator_promote",
+    sourceKey: `promote:${now}`,
+    detail: { authorizedBy: authorizedBy.slice(0, 200) },
+    occurredAt: now,
+  });
+  return { ok: true, state: "active" };
 }
 
 function recordEvent(
@@ -368,7 +405,6 @@ export function recordIsolatedEvaluation(
        WHERE capability = ? AND release_id = ? AND state = 'observe'`,
     ).run(seeds, now, epoch, now, capability, releaseId);
   }
-  refreshCapabilityPromotions(db, releaseId);
 }
 
 export function recordLiveShadowEvent(
@@ -390,7 +426,6 @@ export function recordLiveShadowEvent(
     detail: input.detail,
     occurredAt: input.occurredAt,
   });
-  refreshCapabilityPromotions(db, releaseId);
 }
 
 export function recordBehavioralBreach(
@@ -468,7 +503,6 @@ export function listCapabilityStatuses(
   now = new Date(),
 ): CapabilityStatus[] {
   const mismatch = contractMismatch(db);
-  if (!mismatch) refreshCapabilityPromotions(db, releaseId);
   const cutoff = new Date(now.getTime() - 7 * 86_400_000).toISOString();
   const epoch = currentModelEpoch(db, env.mistralModel);
   const build = currentBuildIdentity();
@@ -516,6 +550,7 @@ export function listCapabilityStatuses(
       qualifiedAt: isRow(release) && typeof release.qualified_at === "string"
         ? release.qualified_at
         : null,
+      promotionEligible: promotionEligible(db, capability, releaseId),
       liveShadowEvents: live.count,
       liveShadowSpanDays: liveSpanDays(live),
       behavioralBreachesSevenDays: breaches.count,
@@ -544,7 +579,6 @@ export function capabilityCanInfluence(
 ): boolean {
   if (contractMismatch(db)) return false;
   if (masterMode !== "apply") return false;
-  refreshCapabilityPromotions(db, releaseId);
   return releaseState(db, capability, releaseId) === "active" &&
     dependenciesReady(db, capability, releaseId);
 }

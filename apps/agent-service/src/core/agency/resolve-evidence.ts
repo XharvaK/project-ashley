@@ -175,6 +175,9 @@ export function resolveEvidenceRefs(
              FROM cur_takes t
              JOIN cur_items i ON i.id = t.item_id
              WHERE t.id = ?
+               AND t.evidence_kind = 'read_record'
+               AND t.read_id IS NOT NULL
+               AND t.provenance = 'live'
              LIMIT 1`,
           )
           .get(id);

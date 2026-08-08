@@ -132,6 +132,7 @@ export function listOwnerLinkedReadIdsInWindow(
         AND json_extract(j.payload_json, '$.readId') = r.id
        WHERE r.retrieved_at >= ?
          AND r.retrieved_at <= ?
+         AND r.provenance = 'live'
        ORDER BY r.retrieved_at ASC, r.id ASC`,
     )
     .all(ownerId, startedAt, endedAt);
@@ -212,6 +213,7 @@ export function listEligibleReportTakes(
         AND el.source_id = CAST(t.read_id AS TEXT)
        WHERE t.evidence_kind = 'read_record'
          AND t.read_id IS NOT NULL
+         AND t.provenance = 'live'
          AND t.read_id IN (${placeholders})
        ORDER BY i.score DESC, t.created_at DESC, t.id DESC`,
     )

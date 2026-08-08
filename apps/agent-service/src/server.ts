@@ -229,6 +229,26 @@ export function createServer(
     }
   });
 
+  app.post("/nuclear/capabilities/promote", (req, res) => {
+    try {
+      const { userId, capability } = req.body as {
+        userId?: string;
+        capability?: string;
+      };
+      const ownerId = requireOwner(userId);
+      if (typeof capability !== "string" || !capability.trim()) {
+        throw new AppError("message_required", "capability required", 400);
+      }
+      res.json(manager.core.promoteCapability({
+        capability,
+        authorizedBy: ownerId,
+      }));
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
   app.get("/nuclear/revisions", (req, res) => {
     try {
       const ownerId = String(req.query.owner_id ?? "");

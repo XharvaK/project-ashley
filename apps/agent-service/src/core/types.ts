@@ -47,6 +47,15 @@ export type Trigger = "reactive" | "proactive";
 export type ReflectionMode = "observe" | "apply";
 export type CognitionMode = "observe" | "apply";
 
+/**
+ * Write-time behavioral authority label on evidence artifacts.
+ * `live` = written while the governing capability held influence authority;
+ * `shadow` = recorded in observe without authority. Shadow artifacts are never
+ * eligible for influence, even after the master mode later flips to apply
+ * (time-shift isolation).
+ */
+export type EvidenceProvenance = "shadow" | "live";
+
 export type EvidenceRef = {
   type:
     | "message"

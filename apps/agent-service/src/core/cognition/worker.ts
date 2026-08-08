@@ -316,6 +316,7 @@ export async function processNextCognitiveJob(
         messageIds: messages.map((message) => message.id),
         salience: result.analysis.salience,
         unresolved: result.analysis.unresolved,
+        provenance: canInfluence("recall") ? "live" : "shadow",
       });
       if (!episode) throw new Error("episode_creation_failed");
       recordLiveShadowEvent(db, "recall", `episode:${episode.id}`);
@@ -347,6 +348,7 @@ export async function processNextCognitiveJob(
           rationale: revision.rationale,
           evidenceType: "episode",
           evidenceId: episode.id,
+          provenance: canInfluence("learning") ? "live" : "shadow",
         });
       }
       if (mode === "apply") {

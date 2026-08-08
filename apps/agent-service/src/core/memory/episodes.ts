@@ -4,6 +4,7 @@ import { defaultUnclassifiedConversational } from "../privacy/classification.js"
 import { reconcileUnsupportedRevisions } from "../learning/revisions.js";
 import { literalLikePattern } from "./facts.js";
 import type { MemoryMessage } from "./threads.js";
+import type { EvidenceProvenance } from "../types.js";
 
 export type Episode = {
   id: number;
@@ -16,6 +17,7 @@ export type Episode = {
   salience: number;
   unresolved: boolean;
   status: "active" | "forgotten";
+  provenance: EvidenceProvenance;
   createdAt: string;
   updatedAt: string;
 };
@@ -42,6 +44,7 @@ function mapEpisode(value: unknown): Episode | null {
     salience: Number(item.salience),
     unresolved: Number(item.unresolved) === 1,
     status,
+    provenance: item.provenance === "live" ? "live" : "shadow",
     createdAt: String(item.created_at),
     updatedAt: String(item.updated_at),
   };
@@ -85,12 +88,14 @@ export function createEpisode(
     messageIds: number[];
     salience?: number;
     unresolved?: boolean;
+    provenance?: EvidenceProvenance;
   },
 ): Episode | null {
   const summary = input.summary.trim().slice(0, 1600);
   const ids = [...new Set(input.messageIds)].sort((a, b) => a - b);
   if (!summary || ids.length === 0) return null;
   const now = new Date().toISOString();
+  const provenance = input.provenance ?? "shadow";
   const entities = (input.entities ?? [])
     .map((item) => item.trim())
     .filter(Boolean)
@@ -106,8 +111,8 @@ export function createEpisode(
           `INSERT OR IGNORE INTO episodes
        (owner_id, thread_id, summary, entities, source_start_message_id,
         source_end_message_id, salience, unresolved, status, created_at, updated_at,
-        entity_uuid, data_classification)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)`,
+        entity_uuid, data_classification, provenance)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)`,
         )
         .run(
           input.ownerId,
@@ -122,13 +127,15 @@ export function createEpisode(
           now,
           newEntityUuid(),
           defaultUnclassifiedConversational(),
+          provenance,
         )
     : db
         .prepare(
           `INSERT OR IGNORE INTO episodes
        (owner_id, thread_id, summary, entities, source_start_message_id,
-        source_end_message_id, salience, unresolved, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
+        source_end_message_id, salience, unresolved, status, created_at, updated_at,
+        provenance)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)`,
         )
         .run(
           input.ownerId,
@@ -141,6 +148,7 @@ export function createEpisode(
           input.unresolved ? 1 : 0,
           now,
           now,
+          provenance,
         );
   let id = Number(result.lastInsertRowid);
   if (result.changes === 0) {
@@ -168,7 +176,7 @@ export function getEpisode(db: DatabaseSync, id: number): Episode | null {
   return mapEpisode(db.prepare(
     `SELECT id, owner_id, thread_id, summary, entities,
             source_start_message_id, source_end_message_id, salience,
-            unresolved, status, created_at, updated_at
+            unresolved, status, provenance, created_at, updated_at
      FROM episodes WHERE id = ?`,
   ).get(id));
 }
@@ -196,7 +204,8 @@ export function retrieveEpisodes(
       values = db.prepare(
         `SELECT e.id, e.owner_id, e.thread_id, e.summary, e.entities,
                 e.source_start_message_id, e.source_end_message_id,
-                e.salience, e.unresolved, e.status, e.created_at, e.updated_at
+                e.salience, e.unresolved, e.status, e.provenance,
+                e.created_at, e.updated_at
          FROM episodes_fts f
          JOIN episodes e ON e.id = f.rowid
          WHERE episodes_fts MATCH ? AND e.owner_id = ? AND e.status = 'active'
@@ -212,7 +221,7 @@ export function retrieveEpisodes(
     values = db.prepare(
       `SELECT id, owner_id, thread_id, summary, entities,
               source_start_message_id, source_end_message_id, salience,
-              unresolved, status, created_at, updated_at
+              unresolved, status, provenance, created_at, updated_at
        FROM episodes
        WHERE owner_id = ? AND status = 'active'
          AND (? = 0 OR unresolved = 1 OR salience >= 0.8)

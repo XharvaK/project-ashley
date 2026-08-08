@@ -3,7 +3,9 @@ import { createHash } from "node:crypto";
 import { htmlToText, logProvenance } from "./feed.js";
 import { enqueueCognitiveJob } from "../cognition/jobs.js";
 import { recordLiveShadowEvent } from "../rollout/capabilities.js";
+import { capabilityCanInfluence } from "../rollout/capabilities.js";
 import { listOpenQuestions } from "../state/questions.js";
+import type { EvidenceProvenance } from "../types.js";
 import {
   fetchValidatedResource,
   type FetchLike,
@@ -22,6 +24,7 @@ export type ReadRecord = {
   cleanedChars: number;
   title: string;
   interest: string;
+  provenance: EvidenceProvenance;
 };
 
 type Row = Record<string, unknown>;
@@ -66,6 +69,7 @@ function mapRead(value: unknown): ReadRecord | null {
     cleanedChars: Number(value.cleaned_chars ?? 0),
     title: String(value.title ?? ""),
     interest: String(value.interest ?? ""),
+    provenance: value.provenance === "live" ? "live" : "shadow",
   };
 }
 
@@ -80,6 +84,7 @@ export function recordSuccessfulRead(
     modelMetadata?: Record<string, unknown>;
     evidenceExcerpts: string[];
     cleanedChars: number;
+    provenance?: EvidenceProvenance;
   },
 ): number {
   const finalUrl = input.finalUrl.trim().slice(0, 2000);
@@ -92,11 +97,13 @@ export function recordSuccessfulRead(
     .slice(0, 6);
   if (excerpts.length === 0) return 0;
   const now = new Date().toISOString();
+  const provenance = input.provenance ?? "shadow";
   db.prepare(
     `INSERT INTO cur_reads
        (item_id, final_url, content_hash, retrieved_at, model,
-        model_metadata_json, evidence_excerpts_json, cleaned_chars, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        model_metadata_json, evidence_excerpts_json, cleaned_chars, created_at,
+        provenance)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(item_id) DO UPDATE SET
        final_url = excluded.final_url,
        content_hash = excluded.content_hash,
@@ -104,7 +111,8 @@ export function recordSuccessfulRead(
        model = excluded.model,
        model_metadata_json = excluded.model_metadata_json,
        evidence_excerpts_json = excluded.evidence_excerpts_json,
-       cleaned_chars = excluded.cleaned_chars`,
+       cleaned_chars = excluded.cleaned_chars,
+       provenance = excluded.provenance`,
   ).run(
     input.itemId,
     finalUrl,
@@ -115,6 +123,7 @@ export function recordSuccessfulRead(
     JSON.stringify(excerpts),
     Math.max(0, Math.min(50_000, Math.trunc(input.cleanedChars))),
     now,
+    provenance,
   );
   const existing = db.prepare(
     "SELECT id FROM cur_reads WHERE item_id = ?",
@@ -129,7 +138,7 @@ export function listRecentReads(
   return db.prepare(
     `SELECT r.id, r.item_id, r.final_url, r.content_hash, r.retrieved_at,
             r.model, r.model_metadata_json, r.evidence_excerpts_json,
-            r.cleaned_chars, i.title, i.interest
+            r.cleaned_chars, i.title, i.interest, r.provenance
      FROM cur_reads r
      JOIN cur_items i ON i.id = r.item_id
      ORDER BY r.retrieved_at DESC, r.id DESC
@@ -220,6 +229,7 @@ export async function performGroundedReads(
   ];
   let readsCreated = 0;
   const errors: string[] = [];
+  const liveAuthority = capabilityCanInfluence(db, "reading");
   for (const { item, lane } of selected) {
     try {
       const resource = await fetchValidatedResource(item.url, {
@@ -248,6 +258,7 @@ export async function performGroundedReads(
         },
         evidenceExcerpts: excerpts,
         cleanedChars: cleanedInput.length,
+        provenance: liveAuthority ? "live" : "shadow",
       });
       if (!readId) throw new Error("read_record_rejected");
       db.prepare("UPDATE cur_items SET status = 'read' WHERE id = ?").run(item.id);

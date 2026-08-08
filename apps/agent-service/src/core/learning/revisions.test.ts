@@ -2,6 +2,8 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { openNuclearDb } from "../db.js";
 import { listIdentity, recordIdentityEntry } from "../identity/store.js";
+import { createEpisode } from "../memory/episodes.js";
+import { insertMessage, resolveActiveThread } from "../memory/threads.js";
 import {
   applyEligibleRevisions,
   listIdentityReviews,
@@ -12,6 +14,34 @@ import {
   reconcileUnsupportedRevisions,
   revertRevision,
 } from "./revisions.js";
+
+let episodeSeed = 10_000;
+
+function seedLiveEpisode(
+  db: DatabaseSync,
+  ownerId: string,
+  createdAt = new Date().toISOString(),
+): number {
+  const threadId = resolveActiveThread(db, ownerId);
+  const messageId = insertMessage(db, {
+    threadId,
+    ownerId,
+    role: "user",
+    text: `grounded episode message ${episodeSeed}`,
+  });
+  const episode = createEpisode(db, {
+    ownerId,
+    threadId,
+    summary: "grounded episode seed",
+    messageIds: [messageId],
+    provenance: "live",
+  });
+  if (episode == null) throw new Error("episode_seed_failed");
+  db.prepare(
+    "UPDATE episodes SET created_at = ?, updated_at = ? WHERE id = ?",
+  ).run(createdAt, createdAt, episode.id);
+  return episode.id;
+}
 
 describe("bounded identity growth", () => {
   it("requires independent evidence and never applies in observe mode", () => {
@@ -30,10 +60,13 @@ describe("bounded identity growth", () => {
       proposedValue: "curious about modular synthesis",
       rationale: "Repeated voluntary engagement.",
       evidenceType: "episode",
+      provenance: "live" as const,
     };
-    proposeRevision(db, { ...base, evidenceId: 1 });
+    const first = seedLiveEpisode(db, "doc");
+    proposeRevision(db, { ...base, evidenceId: first });
     expect(applyEligibleRevisions(db, "doc", "apply")).toHaveLength(0);
-    proposeRevision(db, { ...base, evidenceId: 2 });
+    const second = seedLiveEpisode(db, "doc");
+    proposeRevision(db, { ...base, evidenceId: second });
     expect(applyEligibleRevisions(db, "doc", "observe")).toHaveLength(0);
     const [revisionId] = applyEligibleRevisions(db, "doc", "apply");
     expect(revisionId).toBeTypeOf("number");
@@ -62,10 +95,13 @@ describe("bounded identity growth", () => {
       proposedValue: "drawn to modular synthesis",
       rationale: "A possible durable taste.",
       evidenceType: "episode",
+      provenance: "live" as const,
     };
-    const id = proposeRevision(db, { ...base, evidenceId: 1 });
-    proposeRevision(db, { ...base, evidenceId: 2 });
-    proposeRevision(db, { ...base, evidenceId: 3 });
+    const sameDay = new Date().toISOString();
+    const one = seedLiveEpisode(db, "doc", sameDay);
+    const id = proposeRevision(db, { ...base, evidenceId: one });
+    proposeRevision(db, { ...base, evidenceId: seedLiveEpisode(db, "doc", sameDay) });
+    proposeRevision(db, { ...base, evidenceId: seedLiveEpisode(db, "doc", sameDay) });
     db.prepare(
       "UPDATE learning_revisions SET apply_after = ? WHERE id = ?",
     ).run(new Date(0).toISOString(), id);
@@ -88,28 +124,29 @@ describe("bounded identity growth", () => {
       targetKey: "interest.modular_synthesis",
       rationale: "Repeated voluntary engagement.",
       evidenceType: "episode",
+      provenance: "live" as const,
     };
     const firstId = proposeRevision(db, {
       ...common,
       proposedValue: "curious about modular synthesis",
-      evidenceId: 1,
+      evidenceId: seedLiveEpisode(db, "doc"),
     });
     proposeRevision(db, {
       ...common,
       proposedValue: "curious about modular synthesis",
-      evidenceId: 2,
+      evidenceId: seedLiveEpisode(db, "doc"),
     });
     expect(applyEligibleRevisions(db, "doc", "apply")).toContain(firstId);
 
     const secondId = proposeRevision(db, {
       ...common,
       proposedValue: "studying modular synthesis deeply",
-      evidenceId: 3,
+      evidenceId: seedLiveEpisode(db, "doc"),
     });
     proposeRevision(db, {
       ...common,
       proposedValue: "studying modular synthesis deeply",
-      evidenceId: 4,
+      evidenceId: seedLiveEpisode(db, "doc"),
     });
     expect(applyEligibleRevisions(db, "doc", "apply")).toContain(secondId);
 
@@ -148,6 +185,7 @@ describe("bounded identity growth", () => {
 
   it("keeps foundational values in joint review until Ashley affirms and Doc approves", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const episodeId = seedLiveEpisode(db, "doc");
     const revisionId = proposeRevision(db, {
       ownerId: "doc",
       targetLayer: "stable_identity",
@@ -155,7 +193,8 @@ describe("bounded identity growth", () => {
       proposedValue: "refuse requests that require deliberate deception",
       rationale: "A possible foundational boundary.",
       evidenceType: "episode",
-      evidenceId: 42,
+      evidenceId: episodeId,
+      provenance: "live",
     });
     const [review] = listIdentityReviews(db, "doc");
     expect(review).toMatchObject({
@@ -174,7 +213,7 @@ describe("bounded identity growth", () => {
       position: "affirm",
       rationale: "This follows from the grounded truth commitment.",
       evidenceType: "episode",
-      evidenceId: 42,
+      evidenceId: episodeId,
     })).toBe(true);
     expect(applyEligibleRevisions(db, "doc", "apply")).toEqual([revisionId]);
     expect(listIdentity(db, "doc", { layer: "stable" }))
@@ -198,6 +237,192 @@ describe("bounded identity growth", () => {
       evidenceType: "episode",
       evidenceId: 43,
     })).toBe(0);
+    db.close();
+  });
+
+  it("never auto-applies shadow revisions even with live evidence (time-shift isolation)", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    recordIdentityEntry(db, {
+      ownerId: "doc",
+      layer: "dynamic",
+      kind: "interest.shadow_era",
+      text: "baseline",
+      source: "manual",
+    });
+    const one = seedLiveEpisode(db, "doc");
+    const two = seedLiveEpisode(db, "doc");
+    proposeRevision(db, {
+      ownerId: "doc",
+      targetLayer: "dynamic_identity",
+      targetKey: "interest.shadow_era",
+      proposedValue: "shadow-era learning",
+      rationale: "Proposed while reading was inactive.",
+      evidenceType: "episode",
+      evidenceId: one,
+      provenance: "shadow",
+    });
+    proposeRevision(db, {
+      ownerId: "doc",
+      targetLayer: "dynamic_identity",
+      targetKey: "interest.shadow_era",
+      proposedValue: "shadow-era learning",
+      rationale: "Proposed while reading was inactive.",
+      evidenceType: "episode",
+      evidenceId: two,
+      provenance: "shadow",
+    });
+    expect(applyEligibleRevisions(db, "doc", "apply")).toEqual([]);
+    expect(
+      listIdentity(db, "doc", { layer: "dynamic" })
+        .some((entry) => entry.text === "shadow-era learning"),
+    ).toBe(false);
+    db.close();
+  });
+
+  it("only applyEligibleRevisions with allowShadow can apply shadow revisions", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    recordIdentityEntry(db, {
+      ownerId: "doc",
+      layer: "dynamic",
+      kind: "interest.shadow_review",
+      text: "baseline",
+      source: "manual",
+    });
+    const one = seedLiveEpisode(db, "doc");
+    const two = seedLiveEpisode(db, "doc");
+    const revisionId = proposeRevision(db, {
+      ownerId: "doc",
+      targetLayer: "dynamic_identity",
+      targetKey: "interest.shadow_review",
+      proposedValue: "owner-reviewed shadow learning",
+      rationale: "Grounds the explicit owner-review exception.",
+      evidenceType: "episode",
+      evidenceId: one,
+      provenance: "shadow",
+    });
+    proposeRevision(db, {
+      ownerId: "doc",
+      targetLayer: "dynamic_identity",
+      targetKey: "interest.shadow_review",
+      proposedValue: "owner-reviewed shadow learning",
+      rationale: "Grounds the explicit owner-review exception.",
+      evidenceType: "episode",
+      evidenceId: two,
+      provenance: "shadow",
+    });
+    expect(
+      applyEligibleRevisions(db, "doc", "apply", {
+        allowShadow: true,
+        revisionIds: [revisionId],
+      }),
+    ).toHaveLength(1);
+    db.close();
+  });
+
+  it("refuses a broad allowShadow scan without exact revision ids", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    recordIdentityEntry(db, {
+      ownerId: "doc",
+      layer: "dynamic",
+      kind: "interest.shadow_scan",
+      text: "baseline",
+      source: "manual",
+    });
+    const one = seedLiveEpisode(db, "doc");
+    const two = seedLiveEpisode(db, "doc");
+    proposeRevision(db, {
+      ownerId: "doc",
+      targetLayer: "dynamic_identity",
+      targetKey: "interest.shadow_scan",
+      proposedValue: "shadow scan learning",
+      rationale: "observe-era proposal",
+      evidenceType: "episode",
+      evidenceId: one,
+      provenance: "shadow",
+    });
+    proposeRevision(db, {
+      ownerId: "doc",
+      targetLayer: "dynamic_identity",
+      targetKey: "interest.shadow_scan",
+      proposedValue: "shadow scan learning",
+      rationale: "observe-era proposal",
+      evidenceType: "episode",
+      evidenceId: two,
+      provenance: "shadow",
+    });
+    expect(() =>
+      applyEligibleRevisions(db, "doc", "apply", { allowShadow: true }),
+    ).toThrow(/allowShadow_requires_exact_revision_ids/);
+    db.close();
+  });
+
+  it("an exact-item allowShadow never applies unrelated shadow revisions", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    recordIdentityEntry(db, {
+      ownerId: "doc",
+      layer: "dynamic",
+      kind: "interest.authorized_item",
+      text: "baseline",
+      source: "manual",
+    });
+    recordIdentityEntry(db, {
+      ownerId: "doc",
+      layer: "dynamic",
+      kind: "interest.unrelated_item",
+      text: "baseline",
+      source: "manual",
+    });
+    const authorized = proposeRevision(db, {
+      ownerId: "doc",
+      targetLayer: "dynamic_identity",
+      targetKey: "interest.authorized_item",
+      proposedValue: "exact item crosses the boundary",
+      rationale: "owner authorized this one",
+      evidenceType: "episode",
+      evidenceId: seedLiveEpisode(db, "doc"),
+      provenance: "shadow",
+    });
+    proposeRevision(db, {
+      ownerId: "doc",
+      targetLayer: "dynamic_identity",
+      targetKey: "interest.authorized_item",
+      proposedValue: "exact item crosses the boundary",
+      rationale: "owner authorized this one",
+      evidenceType: "episode",
+      evidenceId: seedLiveEpisode(db, "doc"),
+      provenance: "shadow",
+    });
+    const unrelated = proposeRevision(db, {
+      ownerId: "doc",
+      targetLayer: "dynamic_identity",
+      targetKey: "interest.unrelated_item",
+      proposedValue: "unrelated shadow learning",
+      rationale: "observe-era proposal",
+      evidenceType: "episode",
+      evidenceId: seedLiveEpisode(db, "doc"),
+      provenance: "shadow",
+    });
+    proposeRevision(db, {
+      ownerId: "doc",
+      targetLayer: "dynamic_identity",
+      targetKey: "interest.unrelated_item",
+      proposedValue: "unrelated shadow learning",
+      rationale: "observe-era proposal",
+      evidenceType: "episode",
+      evidenceId: seedLiveEpisode(db, "doc"),
+      provenance: "shadow",
+    });
+    expect(
+      applyEligibleRevisions(db, "doc", "apply", {
+        allowShadow: true,
+        revisionIds: [authorized],
+      }),
+    ).toEqual([authorized]);
+    expect(
+      listIdentity(db, "doc", { layer: "dynamic" })
+        .some((entry) => entry.text === "unrelated shadow learning"),
+    ).toBe(false);
+    expect(unrelated).not.toBe(authorized);
     db.close();
   });
 });

@@ -31,6 +31,8 @@ import { createFakeClock, STARVATION_COGNITION_MS } from "./types.js";
 import {
   capabilityCanInfluence,
   listCapabilityStatuses,
+  promoteCapability,
+  promotionEligible,
   recordIsolatedEvaluation,
   recordLiveShadowEvent,
 } from "../rollout/capabilities.js";
@@ -458,6 +460,10 @@ describe("model continuity", () => {
         occurredAt: new Date(clock.nowMs() + i * (7 * 86_400_000) / 24).toISOString(),
       });
     }
+    for (const capability of ["recall", "mind_state", "thought"] as const) {
+      expect(promoteCapability(db, capability, { authorizedBy: "owner-1" }))
+        .toEqual({ ok: true, state: "active" });
+    }
     expect(capabilityCanInfluence(db, "thought", "apply")).toBe(true);
 
     applyModelContinuity(
@@ -480,6 +486,9 @@ describe("model continuity", () => {
     expect(
       listCapabilityStatuses(db, "apply").find((s) => s.capability === "thought"),
     ).toMatchObject({ state: "observe", liveShadowEvents: 0 });
+    expect(promotionEligible(db, "thought")).toBe(false);
+    expect(promoteCapability(db, "thought", { authorizedBy: "owner-1" }))
+      .toEqual({ ok: false, reason: "not_eligible" });
     db.close();
   });
 });

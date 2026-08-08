@@ -298,6 +298,7 @@ export function attachAuthorizedClaims(
     title: string;
     evidenceKind: "scan_excerpt" | "read_record";
     readId: number | null;
+    provenance: "shadow" | "live";
   }>,
 ): Decision {
   if (decision.authorizedClaims.readingClaims.length > 0) {
@@ -316,7 +317,8 @@ export function attachAuthorizedClaims(
       (take) =>
         licensedTakeIds.has(take.id) &&
         take.evidenceKind === "read_record" &&
-        take.readId !== null,
+        take.readId !== null &&
+        take.provenance === "live",
     )
     .slice(0, 2);
   return {

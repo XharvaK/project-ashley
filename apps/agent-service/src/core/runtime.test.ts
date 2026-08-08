@@ -28,6 +28,12 @@ import { AshleyCore } from "./runtime.js";
 import { currentReleaseId } from "./rollout/capabilities.js";
 import * as expression from "./conversation/expression.js";
 import { insertMessage, resolveActiveThread } from "./memory/threads.js";
+import { createEpisode } from "./memory/episodes.js";
+import {
+  listIdentityReviews,
+  proposeRevision,
+} from "./learning/revisions.js";
+import { listIdentity } from "./identity/store.js";
 
 function activateCapabilities(db: DatabaseSync, names: string[]): void {
   const releaseId = currentReleaseId();
@@ -568,5 +574,69 @@ describe("AshleyCore", () => {
     expect(after).toEqual(before);
     expect(getOpenOwnTimeSession(db, "doc")).toBeNull();
     db.close();
+  });
+
+  it("applies exactly the reviewed shadow revision, only after the joint review completes", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const core = new AshleyCore(db);
+    const originalMode = env.cognitionMode;
+    try {
+      env.cognitionMode = "apply";
+      const threadId = resolveActiveThread(db, "doc");
+      const messageId = insertMessage(db, {
+        threadId,
+        ownerId: "doc",
+        role: "user",
+        text: "Grounded episode message.",
+      });
+      const episode = createEpisode(db, {
+        ownerId: "doc",
+        threadId,
+        summary: "grounded episode",
+        messageIds: [messageId],
+        provenance: "live",
+      })!;
+      const revisionId = proposeRevision(db, {
+        ownerId: "doc",
+        targetLayer: "stable_identity",
+        targetKey: "boundary.shadow_reviewed",
+        proposedValue: "refuse shadow-era demands",
+        rationale: "A possible foundational boundary.",
+        evidenceType: "episode",
+        evidenceId: episode.id,
+        provenance: "shadow",
+      });
+      const review = listIdentityReviews(db, "doc")[0]!;
+
+      expect(core.recordAshleyIdentityPosition({
+        ownerId: "doc",
+        reviewId: review.id,
+        position: "affirm",
+        rationale: "Grounded.",
+        evidenceType: "episode",
+        evidenceId: episode.id,
+      }).recorded).toBe(true);
+      expect(
+        listIdentity(db, "doc", { layer: "stable" })
+          .some((entry: { text: string }) => entry.text === "refuse shadow-era demands"),
+      ).toBe(false);
+
+      expect(core.recordDocIdentityDecision({
+        ownerId: "doc",
+        reviewId: review.id,
+        decision: "approve",
+        rationale: "Approved.",
+      }).recorded).toBe(true);
+      expect(
+        listIdentity(db, "doc", { layer: "stable" })
+          .some((entry: { text: string }) => entry.text === "refuse shadow-era demands"),
+      ).toBe(true);
+      expect(
+        listIdentityReviews(db, "doc")[0],
+      ).toMatchObject({ revisionId, ashleyPosition: "affirm", docDecision: "approve" });
+    } finally {
+      env.cognitionMode = originalMode;
+      db.close();
+    }
   });
 });

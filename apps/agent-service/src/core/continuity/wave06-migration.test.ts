@@ -16,15 +16,15 @@ describe("wave06 migration", () => {
   it("migrates fresh db to v16 with v3 contract and perception tables", () => {
     const continuity = openContinuityDb(new DatabaseSync(":memory:"));
     const nuclear = openNuclearDb(new DatabaseSync(":memory:"), { continuity });
-    expect(NUCLEAR_SUPPORTED_VERSION).toBe(19);
+    expect(NUCLEAR_SUPPORTED_VERSION).toBe(21);
     const version = (
       nuclear.prepare("PRAGMA user_version").get() as { user_version: number }
     ).user_version;
-    expect(version).toBe(19);
+    expect(version).toBe(21);
     const sidecarVersion = continuity
       .prepare(`SELECT nuclear_schema_version FROM lineage_state WHERE id = 1`)
       .get() as { nuclear_schema_version?: number };
-    expect(sidecarVersion.nuclear_schema_version).toBe(19);
+    expect(sidecarVersion.nuclear_schema_version).toBe(21);
     for (const table of ["perception_artifacts", "conversational_reads"]) {
       expect(
         nuclear

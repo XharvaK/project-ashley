@@ -122,6 +122,7 @@ import {
   capabilityCanInfluence,
   capabilityNames,
   listCapabilityStatuses,
+  promoteCapability as promoteCapabilityRelease,
   recordCriticalFailure,
   recordIsolatedEvaluation,
   type CapabilityName,
@@ -1827,6 +1828,23 @@ export class AshleyCore {
     };
   }
 
+  /**
+   * Exact-item shadow authorization: the owner just acted on one review, so
+   * only that review's revision may cross the shadow -> behavioral boundary,
+   * and only if the joint review state (Ashley affirm + Doc approve) is
+   * complete. No other shadow revision is ever eligible.
+   */
+  private applyReviewedRevisionIfComplete(ownerId: string, reviewId: number): void {
+    const row = this.db.prepare(
+      `SELECT revision_id FROM identity_reviews WHERE id = ? AND owner_id = ?`,
+    ).get(reviewId, ownerId) as { revision_id?: number } | undefined;
+    if (!row?.revision_id) return;
+    applyEligibleRevisions(this.db, ownerId, env.cognitionMode, {
+      allowShadow: true,
+      revisionIds: [Number(row.revision_id)],
+    });
+  }
+
   recordAshleyIdentityPosition(input: {
     ownerId: string;
     reviewId: number;
@@ -1836,7 +1854,7 @@ export class AshleyCore {
     evidenceId: string | number;
   }) {
     const recorded = recordAshleyReviewPosition(this.db, input);
-    if (recorded) applyEligibleRevisions(this.db, input.ownerId, env.cognitionMode);
+    if (recorded) this.applyReviewedRevisionIfComplete(input.ownerId, input.reviewId);
     return { recorded, reviews: listIdentityReviews(this.db, input.ownerId) };
   }
 
@@ -1847,7 +1865,7 @@ export class AshleyCore {
     rationale?: string;
   }) {
     const recorded = recordDocReviewDecision(this.db, input);
-    if (recorded) applyEligibleRevisions(this.db, input.ownerId, env.cognitionMode);
+    if (recorded) this.applyReviewedRevisionIfComplete(input.ownerId, input.reviewId);
     return { recorded, reviews: listIdentityReviews(this.db, input.ownerId) };
   }
 
@@ -2170,6 +2188,18 @@ export class AshleyCore {
       },
     );
     return this.getCapabilities();
+  }
+
+  promoteCapability(input: { capability: string; authorizedBy: string }) {
+    if (!capabilityNames.includes(input.capability as CapabilityName)) {
+      throw new Error("invalid_capability");
+    }
+    const result = promoteCapabilityRelease(
+      this.db,
+      input.capability as CapabilityName,
+      { authorizedBy: input.authorizedBy },
+    );
+    return { ...result, capabilities: this.getCapabilities() };
   }
 
   revertRevision(ownerId: string, revisionId: number): boolean {

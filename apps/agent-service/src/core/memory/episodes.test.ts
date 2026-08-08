@@ -155,12 +155,14 @@ describe("episodic memory", () => {
       threadId,
       summary: "A secret launch uses the codename Orchid.",
       messageIds: ids.slice(0, 2),
+      provenance: "live",
     })!;
     const second = createEpisode(db, {
       ownerId: "doc",
       threadId,
       summary: "The secret launch remains important.",
       messageIds: ids.slice(2),
+      provenance: "live",
     })!;
     const factId = upsertFact(db, {
       ownerId: "doc",
@@ -216,6 +218,7 @@ describe("episodic memory", () => {
       proposedValue: "careful with private launches",
       rationale: "Repeated evidence.",
       evidenceType: "episode",
+      provenance: "live" as const,
     };
     const revisionId = proposeRevision(db, { ...revisionBase, evidenceId: first.id });
     proposeRevision(db, { ...revisionBase, evidenceId: second.id });

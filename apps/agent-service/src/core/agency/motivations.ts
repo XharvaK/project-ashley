@@ -194,7 +194,11 @@ export function collectMotivations(
   for (const take of capabilityCanInfluence(db, "reading") &&
     capabilityCanInfluence(db, "curiosity_consolidation")
     ? listRecentTakes(db, 12)
-        .filter((candidate) => candidate.evidenceKind === "read_record")
+        .filter(
+          (candidate) =>
+            candidate.evidenceKind === "read_record" &&
+            candidate.provenance === "live",
+        )
         .slice(0, 6)
     : []) {
     if (

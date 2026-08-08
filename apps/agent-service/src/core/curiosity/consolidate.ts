@@ -1,10 +1,11 @@
-import type { DatabaseSync } from "node:sqlite";
+﻿import type { DatabaseSync } from "node:sqlite";
 import { env } from "../../env.js";
 import { completeChat } from "../../mistral-client.js";
 import { proposeRevision } from "../learning/revisions.js";
 import { createQuestion } from "../state/questions.js";
 import { insertTake, urlKey } from "./feed.js";
 import { listRecentReads } from "./reads.js";
+import { capabilityCanInfluence } from "../rollout/capabilities.js";
 
 type Complete = typeof completeChat;
 
@@ -142,6 +143,21 @@ export async function consolidateCuriosityRead(
     lane: "curiosity_maintenance",
   });
   const analysis = normalize(parseObject(response.text));
+  // Takes enter the pool ungated, but carry write-time authority: live only
+  // when both curiosity_consolidation (allowInfluence) and reading hold
+  // influence authority at write time — mirroring the motivations reader gate.
+  const takeProvenance =
+    allowInfluence && capabilityCanInfluence(db, "reading") ? "live" : "shadow";
+  const revisionProvenance =
+    allowInfluence && capabilityCanInfluence(db, "learning") ? "live" : "shadow";
+  // Source candidates feed the source_discovery probation machinery; they are
+  // live only when the whole channel held behavioral authority at write time.
+  const sourceProposalProvenance =
+    allowInfluence &&
+    capabilityCanInfluence(db, "reading") &&
+    capabilityCanInfluence(db, "source_discovery")
+      ? "live"
+      : "shadow";
   db.exec("BEGIN IMMEDIATE");
   try {
     if (analysis.take) {
@@ -151,6 +167,7 @@ export async function consolidateCuriosityRead(
         take: analysis.take,
         evidenceKind: "read_record",
         readId,
+        provenance: takeProvenance,
       });
       if (takeId) evidenceLink(db, ownerId, "take", takeId, readId);
     }
@@ -164,6 +181,7 @@ export async function consolidateCuriosityRead(
           rationale: `Grounded in read ${readId}.`,
           evidenceType: "read",
           evidenceId: readId,
+          provenance: revisionProvenance,
         });
       }
       for (const opinion of analysis.opinions) {
@@ -175,6 +193,7 @@ export async function consolidateCuriosityRead(
           rationale: `Grounded in read ${readId}; model confidence ${opinion.confidence.toFixed(2)}.`,
           evidenceType: "read",
           evidenceId: readId,
+          provenance: revisionProvenance,
         });
       }
       for (const question of analysis.questions) {
@@ -195,8 +214,8 @@ export async function consolidateCuriosityRead(
       db.prepare(
         `INSERT OR IGNORE INTO cur_source_candidates
            (url, url_key, title, kind, interest, status, successful_fetches,
-            originating_read_id, last_error, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, 'proposed', 0, ?, NULL, ?, ?)`,
+            originating_read_id, last_error, created_at, updated_at, provenance)
+         VALUES (?, ?, ?, ?, ?, 'proposed', 0, ?, NULL, ?, ?, ?)`,
       ).run(
         proposal.url,
         urlKey(proposal.url),
@@ -206,6 +225,7 @@ export async function consolidateCuriosityRead(
         readId,
         new Date().toISOString(),
         new Date().toISOString(),
+        sourceProposalProvenance,
       );
     }
     db.exec("COMMIT");

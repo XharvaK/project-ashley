@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { listIdentity, reviseOpinion } from "../identity/store.js";
-import type { CognitionMode } from "../types.js";
+import type { CognitionMode, EvidenceProvenance } from "../types.js";
 
 export type RevisionLayer = "dynamic_identity" | "stable_identity" | "opinion";
 
@@ -14,6 +14,7 @@ export type LearningRevision = {
   rationale: string;
   status: "proposed" | "applied" | "reverted" | "rejected";
   applyAfter: string;
+  provenance: EvidenceProvenance;
   createdAt: string;
   updatedAt: string;
   appliedTargetId: number | null;
@@ -57,6 +58,7 @@ function mapRevision(value: unknown): LearningRevision | null {
     rationale: String(row.rationale),
     status: status as LearningRevision["status"],
     applyAfter: String(row.apply_after),
+    provenance: row.provenance === "live" ? "live" : "shadow",
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
     appliedTargetId:
@@ -134,10 +136,12 @@ export function proposeRevision(
     rationale: string;
     evidenceType: string;
     evidenceId: string | number;
+    provenance?: EvidenceProvenance;
   },
 ): number {
   const key = input.targetKey.trim().slice(0, 120);
   const value = input.proposedValue.trim().slice(0, 1000);
+  const provenance = input.provenance ?? "shadow";
   if (!key || !value) return 0;
   if (/^(?:vision|core_principle)\./.test(key)) return 0;
   if (
@@ -162,8 +166,8 @@ export function proposeRevision(
       `INSERT INTO learning_revisions
          (owner_id, target_layer, target_key, previous_value, proposed_value,
           rationale, status, apply_after, applied_at, reverted_at,
-          created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'proposed', ?, NULL, NULL, ?, ?)`,
+          created_at, updated_at, provenance)
+       VALUES (?, ?, ?, ?, ?, ?, 'proposed', ?, NULL, NULL, ?, ?, ?)`,
     ).run(
       input.ownerId,
       input.targetLayer,
@@ -174,6 +178,7 @@ export function proposeRevision(
       applyAfter,
       now.toISOString(),
       now.toISOString(),
+      provenance,
     );
     id = Number(result.lastInsertRowid);
   }
@@ -214,6 +219,9 @@ function evidenceStats(
   ownerId: string,
   revisionId: number,
 ): { count: number; spanDays: number } {
+  // Time-shift isolation: only evidence created with behavioral authority
+  // (provenance = 'live') counts toward eligibility. Non-table source types
+  // (message, question, opinion) are user-flow artifacts and count as-is.
   const row = db.prepare(
     `SELECT COUNT(*) AS count,
             MIN(COALESCE(e.created_at, l.created_at)) AS first_at,
@@ -221,7 +229,17 @@ function evidenceStats(
      FROM evidence_links l
      LEFT JOIN episodes e
        ON l.source_type = 'episode' AND e.id = CAST(l.source_id AS INTEGER)
-     WHERE l.owner_id = ? AND l.target_type = 'revision' AND l.target_id = ?`,
+     LEFT JOIN cur_reads rd
+       ON l.source_type = 'read' AND rd.id = CAST(l.source_id AS INTEGER)
+     LEFT JOIN cur_takes tk
+       ON l.source_type = 'take' AND tk.id = CAST(l.source_id AS INTEGER)
+     WHERE l.owner_id = ? AND l.target_type = 'revision' AND l.target_id = ?
+       AND (
+         (l.source_type = 'episode' AND e.id IS NOT NULL AND e.provenance = 'live')
+         OR (l.source_type = 'read' AND rd.id IS NOT NULL AND rd.provenance = 'live')
+         OR (l.source_type = 'take' AND tk.id IS NOT NULL AND tk.provenance = 'live')
+         OR (l.source_type NOT IN ('episode', 'read', 'take'))
+       )`,
   ).get(ownerId, String(revisionId)) as
     { count?: number; first_at?: string; last_at?: string } | undefined;
   const first = Date.parse(row?.first_at ?? "");
@@ -232,25 +250,54 @@ function evidenceStats(
   };
 }
 
+export type ApplyRevisionsOptions = {
+  /**
+   * When true, allow shadow-provenance revisions to apply. This crosses the
+   * shadow -> behavioral boundary and MUST be paired with `revisionIds`
+   * naming exactly the revision(s) an explicit owner action authorized;
+   * a broad allowShadow scan is refused. Only the owner-authorized
+   * identity-review flows pass this; the worker auto-apply path never does.
+   */
+  allowShadow?: boolean;
+  /** Exact revision ids to evaluate (narrows the scan). */
+  revisionIds?: number[];
+};
+
 export function applyEligibleRevisions(
   db: DatabaseSync,
   ownerId: string,
   mode: CognitionMode,
+  options: ApplyRevisionsOptions = {},
 ): number[] {
   if (mode !== "apply") return [];
+  if (
+    options.allowShadow === true &&
+    (!options.revisionIds || options.revisionIds.length === 0)
+  ) {
+    throw new Error("allowShadow_requires_exact_revision_ids");
+  }
   const now = new Date().toISOString();
+  const idFilter =
+    options.revisionIds && options.revisionIds.length > 0
+      ? `AND id IN (${options.revisionIds.map(() => "?").join(", ")})`
+      : "";
+  const provenanceFilter =
+    options.allowShadow === true ? "" : "AND provenance = 'live'";
+  const params: Array<string | number> = [ownerId, now, ...(options.revisionIds ?? [])];
   const revisions = db.prepare(
     `SELECT id, owner_id, target_layer, target_key, previous_value,
             proposed_value, rationale, status, apply_after, created_at, updated_at,
-            applied_target_id
+            applied_target_id, provenance
      FROM learning_revisions
      WHERE owner_id = ? AND status = 'proposed'
        AND (apply_after <= ? OR (
          target_layer = 'stable_identity' AND
          (target_key LIKE 'value.%' OR target_key LIKE 'boundary.%')
        ))
+       ${provenanceFilter}
+       ${idFilter}
      ORDER BY id ASC`,
-  ).all(ownerId, now).map(mapRevision).filter((item): item is LearningRevision => item !== null);
+  ).all(...params).map(mapRevision).filter((item): item is LearningRevision => item !== null);
   const applied: number[] = [];
   for (const revision of revisions) {
     const evidence = evidenceStats(db, ownerId, revision.id);
@@ -433,7 +480,7 @@ export function listRevisions(
   return db.prepare(
     `SELECT r.id, r.owner_id, r.target_layer, r.target_key, r.previous_value,
             r.proposed_value, r.rationale, r.status, r.apply_after,
-            r.created_at, r.updated_at, r.applied_target_id,
+            r.created_at, r.updated_at, r.applied_target_id, r.provenance,
             COUNT(l.id) AS evidence_count,
             CASE
               WHEN COUNT(l.id) = 0 THEN 0
@@ -466,7 +513,7 @@ export function revertRevision(
   const revision = mapRevision(db.prepare(
     `SELECT id, owner_id, target_layer, target_key, previous_value,
             proposed_value, rationale, status, apply_after, created_at, updated_at,
-            applied_target_id
+            applied_target_id, provenance
      FROM learning_revisions
      WHERE id = ? AND owner_id = ?`,
   ).get(revisionId, ownerId));
@@ -559,7 +606,7 @@ export function reconcileUnsupportedRevisions(
     const revision = mapRevision(db.prepare(
       `SELECT id, owner_id, target_layer, target_key, previous_value,
               proposed_value, rationale, status, apply_after, created_at,
-              updated_at, applied_target_id
+              updated_at, applied_target_id, provenance
        FROM learning_revisions WHERE id = ? AND owner_id = ?`,
     ).get(revisionId, ownerId));
     if (!revision || evidenceStats(db, ownerId, revision.id).count > 0) continue;

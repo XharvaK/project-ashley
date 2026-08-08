@@ -89,9 +89,9 @@ describe("nuclear agency decisions", () => {
     );
     expect(base.kind).toBe("share");
     const withClaims = attachAuthorizedClaims(base, [
-      { id: 1, title: "One", evidenceKind: "read_record", readId: 101 },
-      { id: 2, title: "Two", evidenceKind: "scan_excerpt", readId: null },
-      { id: 3, title: "Three", evidenceKind: "read_record", readId: 303 },
+      { id: 1, title: "One", evidenceKind: "read_record", readId: 101, provenance: "live" },
+      { id: 2, title: "Two", evidenceKind: "scan_excerpt", readId: null, provenance: "live" },
+      { id: 3, title: "Three", evidenceKind: "read_record", readId: 303, provenance: "live" },
     ]);
     expect(withClaims.authorizedClaims.readingRecordIds).toEqual([101]);
     expect(withClaims.authorizedClaims.readingTitles).toEqual([

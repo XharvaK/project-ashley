@@ -24,6 +24,7 @@ export async function processSourceProbation(
     `SELECT id, url, title, kind, interest, status, successful_fetches
      FROM cur_source_candidates
      WHERE status IN ('proposed', 'probation')
+       AND provenance = 'live'
      ORDER BY successful_fetches DESC, id ASC LIMIT 6`,
   ).all() as Array<Record<string, unknown>>;
   const candidates: Candidate[] = rows.map((row) => ({

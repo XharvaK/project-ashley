@@ -116,9 +116,11 @@ function seedReadTake(input: {
   score?: number;
   jobStatus?: "pending" | "running" | "completed" | "failed";
   evidenceKind?: "read_record" | "scan_excerpt";
+  provenance?: "shadow" | "live";
   linkOwnerId?: string;
   skipJob?: boolean;
 }): { readId: number; takeId: number; itemId: number } {
+  const provenance = input.provenance ?? "live";
   const sourceId = upsertSource(input.db, {
     slug: input.slug,
     title: input.title,
@@ -142,6 +144,7 @@ function seedReadTake(input: {
     model: "extractor",
     evidenceExcerpts: ["Grounded excerpt for provenance."],
     cleanedChars: 400,
+    provenance,
   });
   if (!input.skipJob) {
     const jobId = enqueueCognitiveJob(input.db, {
@@ -163,6 +166,7 @@ function seedReadTake(input: {
     take: input.take,
     evidenceKind,
     readId: evidenceKind === "read_record" ? readId : null,
+    provenance,
   });
   if (takeId == null) throw new Error("take_insert_failed");
   if (input.takeCreatedAt) {
@@ -347,6 +351,7 @@ describe("own-time report assessment and finalizer", () => {
       model: "extractor",
       evidenceExcerpts: ["Pending excerpt."],
       cleanedChars: 300,
+      provenance: "live",
     });
     enqueueCognitiveJob(db, {
       ownerId: ownerA,
@@ -367,6 +372,7 @@ describe("own-time report assessment and finalizer", () => {
       take: "Later grounded take from the in-window read.",
       evidenceKind: "read_record",
       readId,
+      provenance: "live",
     });
     db.prepare(
       `INSERT INTO evidence_links

@@ -6,6 +6,7 @@ import {
   urlKey,
   type FeedItem,
 } from "../../lib/feed-parse.js";
+import type { EvidenceProvenance } from "../types.js";
 
 export { decodeEntities, htmlToText, parseFeed, urlKey };
 export type { FeedItem };
@@ -47,6 +48,7 @@ export type NuclearTake = {
   url: string;
   evidenceKind: "scan_excerpt" | "read_record";
   readId: number | null;
+  provenance: EvidenceProvenance;
 };
 
 export type NuclearProvenanceKind =
@@ -142,6 +144,7 @@ function mapTake(row: unknown): NuclearTake | null {
       ? "read_record"
       : "scan_excerpt",
     readId: row.read_id == null ? null : numberValue(row.read_id),
+    provenance: row.provenance === "live" ? "live" : "shadow",
   };
 }
 
@@ -244,8 +247,10 @@ export function insertTake(
     take: string;
     evidenceKind: "scan_excerpt" | "read_record";
     readId?: number | null;
+    provenance?: EvidenceProvenance;
   },
 ): number | null {
+  const provenance = input.provenance ?? "shadow";
   const existing: unknown = db
     .prepare("SELECT id, evidence_kind FROM cur_takes WHERE item_id = ?")
     .get(input.itemId);
@@ -253,13 +258,14 @@ export function insertTake(
     if (existing.evidence_kind === "scan_excerpt" && input.evidenceKind === "read_record") {
       db.prepare(
         `UPDATE cur_takes SET interest = ?, take = ?, created_at = ?,
-                              evidence_kind = 'read_record', read_id = ?
+                              evidence_kind = 'read_record', read_id = ?, provenance = ?
          WHERE id = ?`,
       ).run(
         input.interest,
         input.take.trim().slice(0, 1000),
         new Date().toISOString(),
         input.readId ?? null,
+        provenance,
         existing.id,
       );
       return existing.id;
@@ -269,8 +275,8 @@ export function insertTake(
   const result = db
     .prepare(
       `INSERT INTO cur_takes
-         (item_id, interest, take, created_at, evidence_kind, read_id)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+         (item_id, interest, take, created_at, evidence_kind, read_id, provenance)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.itemId,
@@ -279,6 +285,7 @@ export function insertTake(
       new Date().toISOString(),
       input.evidenceKind,
       input.readId ?? null,
+      provenance,
     );
   return Number(result.lastInsertRowid);
 }
@@ -308,7 +315,7 @@ export function listRecentTakes(
   const rows = db
     .prepare(
       `SELECT t.id, t.item_id, t.interest, t.take, t.created_at,
-              i.title, i.url, t.evidence_kind, t.read_id
+              i.title, i.url, t.evidence_kind, t.read_id, t.provenance
        FROM cur_takes t
        JOIN cur_items i ON i.id = t.item_id
        ORDER BY t.created_at DESC

@@ -14,6 +14,7 @@
     { "method": "GET", "path": "/nuclear/status", "ownerScope": "owner_required", "lifecycle": "active" },
     { "method": "GET", "path": "/nuclear/routing", "ownerScope": "owner_required", "lifecycle": "active" },
     { "method": "POST", "path": "/nuclear/capabilities/evaluation", "ownerScope": "owner_required", "lifecycle": "active" },
+    { "method": "POST", "path": "/nuclear/capabilities/promote", "ownerScope": "owner_required", "lifecycle": "active" },
     { "method": "GET", "path": "/nuclear/revisions", "ownerScope": "owner_required", "lifecycle": "active" },
     { "method": "POST", "path": "/nuclear/revisions/revert", "ownerScope": "owner_required", "lifecycle": "active" },
     { "method": "GET", "path": "/nuclear/identity/reviews", "ownerScope": "owner_required", "lifecycle": "active" },

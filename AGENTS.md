@@ -120,6 +120,18 @@ recording/query works in observe. Reminders surface as Agency motivations only
 (never auto-sent).
 Gated `own_time_report` (deps: thought, curiosity_consolidation) can share ≤3
 grounded own-time takes on ask when active under master `apply`.
+Schema v21 adds write-time `provenance` labels (`shadow`/`live`) to
+`cur_takes`, `cur_reads`, `episodes`, `learning_revisions`, and
+`cur_source_candidates`: `live` is written only while the governing capability
+holds behavioral influence authority, and every influence materializer
+(motivations takes reader, own-time report, evidence resolution,
+`attachAuthorizedClaims`, revision auto-apply, evidence eligibility counts,
+`processSourceProbation`) requires `live`. Pre-v21 rows backfill to `shadow`;
+that backfill is a conservative authority classification, not proof of
+historical observe generation. Observe-era evidence can never time-shift into
+influence. Only owner-authorized identity-review flows may pass `allowShadow`
+to `applyEligibleRevisions`, and only with exact `revisionIds` from the
+reviewed identity_revisions row — a broad `allowShadow` scan is refused.
 
 Curiosity follows `scan -> rank -> choose -> fetch -> extract -> record -> form
 take -> consolidate -> motivate -> Thought`. Network retrieval is public

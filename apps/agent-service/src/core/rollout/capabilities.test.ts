@@ -4,6 +4,8 @@ import { openNuclearDb } from "../db.js";
 import {
   capabilityCanInfluence,
   listCapabilityStatuses,
+  promoteCapability,
+  promotionEligible,
   recordBehavioralBreach,
   recordCriticalFailure,
   recordIsolatedEvaluation,
@@ -12,6 +14,7 @@ import {
 
 const releaseId = "release-test";
 const start = new Date("2026-07-01T00:00:00.000Z");
+const operator = "owner-1";
 
 function qualify(
   db: DatabaseSync,
@@ -33,8 +36,25 @@ function qualify(
   }
 }
 
+function statusOf(
+  db: DatabaseSync,
+  capability: Parameters<typeof recordIsolatedEvaluation>[1],
+  mode: "apply" | "observe",
+) {
+  return listCapabilityStatuses(db, mode, releaseId)
+    .find((status) => status.capability === capability);
+}
+
+function operatorPromoteEvents(db: DatabaseSync, capability: string): number {
+  const row = db.prepare(
+    `SELECT COUNT(*) AS c FROM capability_events
+     WHERE capability = ? AND release_id = ? AND kind = 'operator_promote'`,
+  ).get(capability, releaseId) as { c?: number };
+  return Number(row.c ?? 0);
+}
+
 describe("capability rollout", () => {
-  it("promotes only after three-seed qualification and 25 live events over seven days", () => {
+  it("qualification never activates: observe stays observe with evidence recorded", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     recordIsolatedEvaluation(db, "recall", {
       seeds: 3,
@@ -43,83 +63,146 @@ describe("capability rollout", () => {
       releaseId,
       occurredAt: start.toISOString(),
     });
-    expect(listCapabilityStatuses(db, "apply", releaseId, start)
-      .find((status) => status.capability === "recall")).toMatchObject({
-        state: "observe",
-        liveShadowEvents: 0,
-      });
+    expect(statusOf(db, "recall", "apply")).toMatchObject({
+      state: "observe",
+      promotionEligible: false,
+      liveShadowEvents: 0,
+    });
 
     qualify(db, "recall");
 
-    expect(listCapabilityStatuses(
-      db,
-      "apply",
-      releaseId,
-      new Date(start.getTime() + 8 * 86_400_000),
-    ).find((status) => status.capability === "recall")).toMatchObject({
-      state: "active",
-      effective: true,
+    expect(statusOf(db, "recall", "apply")).toMatchObject({
+      state: "observe",
+      promotionEligible: true,
+      effective: false,
       evalSeedCount: 3,
       liveShadowEvents: 25,
       liveShadowSpanDays: 7,
       contractId: "ashley-capability-v3",
       contractMismatch: false,
     });
+    expect(capabilityCanInfluence(db, "recall", "apply", releaseId)).toBe(false);
     expect(capabilityCanInfluence(db, "recall", "observe", releaseId)).toBe(false);
+    expect(promotionEligible(db, "recall", releaseId)).toBe(true);
+    db.close();
+  });
+
+  it("activates only through explicit authorized promotion", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    qualify(db, "recall");
+
+    const refused = promoteCapability(db, "recall", {
+      releaseId,
+      authorizedBy: "",
+    });
+    expect(refused).toEqual({ ok: false, reason: "authorization_required" });
+    expect(statusOf(db, "recall", "apply")?.state).toBe("observe");
+    expect(operatorPromoteEvents(db, "recall")).toBe(0);
+
+    expect(promoteCapability(db, "recall", { releaseId, authorizedBy: operator }))
+      .toEqual({ ok: true, state: "active" });
+    expect(statusOf(db, "recall", "apply")).toMatchObject({
+      state: "active",
+      promotionEligible: false,
+      effective: true,
+    });
+    expect(capabilityCanInfluence(db, "recall", "apply", releaseId)).toBe(true);
+
+    const again = promoteCapability(db, "recall", { releaseId, authorizedBy: operator });
+    expect(again).toEqual({ ok: true, alreadyActive: true, state: "active" });
+    expect(operatorPromoteEvents(db, "recall")).toBe(1);
+
+    const events = db.prepare(
+      `SELECT detail_json FROM capability_events
+       WHERE capability = 'recall' AND release_id = ? AND kind = 'operator_promote'`,
+    ).all(releaseId) as Array<{ detail_json?: unknown }>;
+    expect(JSON.parse(String(events[0]?.detail_json ?? "{}"))).toMatchObject({
+      authorizedBy: operator,
+    });
     db.close();
   });
 
   it("waits for dependencies before promotion", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     qualify(db, "mind_state");
-    expect(listCapabilityStatuses(db, "apply", releaseId)
-      .find((status) => status.capability === "mind_state")).toMatchObject({
-        state: "observe",
-        dependenciesReady: false,
-      });
+    expect(statusOf(db, "mind_state", "apply")).toMatchObject({
+      state: "observe",
+      dependenciesReady: false,
+    });
+    expect(promotionEligible(db, "mind_state", releaseId)).toBe(false);
+    expect(promoteCapability(db, "mind_state", { releaseId, authorizedBy: operator }))
+      .toEqual({ ok: false, reason: "not_eligible" });
+    expect(operatorPromoteEvents(db, "mind_state")).toBe(0);
 
     qualify(db, "recall");
-
-    expect(listCapabilityStatuses(db, "apply", releaseId)
-      .find((status) => status.capability === "mind_state")).toMatchObject({
-        state: "active",
-        dependenciesReady: true,
-      });
+    expect(promoteCapability(db, "recall", { releaseId, authorizedBy: operator }))
+      .toEqual({ ok: true, state: "active" });
+    expect(promotionEligible(db, "mind_state", releaseId)).toBe(true);
+    expect(promoteCapability(db, "mind_state", { releaseId, authorizedBy: operator }))
+      .toEqual({ ok: true, state: "active" });
+    expect(statusOf(db, "mind_state", "apply")).toMatchObject({
+      state: "active",
+      dependenciesReady: true,
+      effective: true,
+    });
     db.close();
   });
 
   it(
     "requires thought and curiosity_consolidation before own_time_report promotes",
     () => {
-    const db = openNuclearDb(new DatabaseSync(":memory:"));
-    qualify(db, "own_time_report");
-    expect(listCapabilityStatuses(db, "apply", releaseId)
-      .find((status) => status.capability === "own_time_report")).toMatchObject({
+      const db = openNuclearDb(new DatabaseSync(":memory:"));
+      qualify(db, "own_time_report");
+      expect(statusOf(db, "own_time_report", "apply")).toMatchObject({
         state: "observe",
         dependencies: ["thought", "curiosity_consolidation"],
         dependenciesReady: false,
       });
+      expect(promotionEligible(db, "own_time_report", releaseId)).toBe(false);
 
-    qualify(db, "recall");
-    qualify(db, "mind_state");
-    qualify(db, "thought");
-    qualify(db, "reading");
-    qualify(db, "curiosity_consolidation");
+      qualify(db, "recall");
+      qualify(db, "mind_state");
+      qualify(db, "thought");
+      qualify(db, "reading");
+      qualify(db, "curiosity_consolidation");
+      for (const capability of ["recall", "mind_state", "thought", "reading", "curiosity_consolidation"]) {
+        expect(promoteCapability(db, capability as Parameters<typeof recordIsolatedEvaluation>[1], {
+          releaseId,
+          authorizedBy: operator,
+        }).ok).toBe(true);
+      }
 
-    expect(listCapabilityStatuses(db, "apply", releaseId)
-      .find((status) => status.capability === "own_time_report")).toMatchObject({
+      expect(promoteCapability(db, "own_time_report", { releaseId, authorizedBy: operator }))
+        .toEqual({ ok: true, state: "active" });
+      expect(statusOf(db, "own_time_report", "apply")).toMatchObject({
         state: "active",
         dependenciesReady: true,
         effective: true,
       });
-    db.close();
-  },
+      db.close();
+    },
     30_000,
   );
 
-  it("rolls back after two breaches and disables immediately on a critical failure", () => {
+  it("promotion is state-only: master observe never lets an active release influence", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    qualify(db, "recall");
+    expect(promoteCapability(db, "recall", { releaseId, authorizedBy: operator }))
+      .toEqual({ ok: true, state: "active" });
+    expect(statusOf(db, "recall", "observe")).toMatchObject({
+      state: "active",
+      effective: false,
+    });
+    expect(capabilityCanInfluence(db, "recall", "observe", releaseId)).toBe(false);
+    expect(capabilityCanInfluence(db, "recall", "apply", releaseId)).toBe(true);
+    db.close();
+  });
+
+  it("rolls back after two breaches, disables on critical failure, and neither re-promotes", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     qualify(db, "reading");
+    expect(promoteCapability(db, "reading", { releaseId, authorizedBy: operator }))
+      .toEqual({ ok: true, state: "active" });
     recordBehavioralBreach(db, "reading", "breach-1", "unsupported claim", {
       releaseId,
       occurredAt: "2026-07-09T00:00:00.000Z",
@@ -129,11 +212,12 @@ describe("capability rollout", () => {
       releaseId,
       occurredAt: "2026-07-10T00:00:00.000Z",
     });
-    expect(listCapabilityStatuses(db, "apply", releaseId)
-      .find((status) => status.capability === "reading")).toMatchObject({
-        state: "rolled_back",
-        effective: false,
-      });
+    expect(statusOf(db, "reading", "apply")).toMatchObject({
+      state: "rolled_back",
+      effective: false,
+    });
+    expect(promoteCapability(db, "reading", { releaseId, authorizedBy: operator }))
+      .toEqual({ ok: false, reason: "rolled_back" });
 
     qualify(db, "recall");
     recordCriticalFailure(
@@ -144,12 +228,13 @@ describe("capability rollout", () => {
       "forgotten content resurfaced",
       { releaseId },
     );
-    expect(listCapabilityStatuses(db, "apply", releaseId)
-      .find((status) => status.capability === "recall")).toMatchObject({
-        state: "disabled",
-        effective: false,
-        failureKind: "deletion_integrity",
-      });
+    expect(statusOf(db, "recall", "apply")).toMatchObject({
+      state: "disabled",
+      effective: false,
+      failureKind: "deletion_integrity",
+    });
+    expect(promoteCapability(db, "recall", { releaseId, authorizedBy: operator }))
+      .toEqual({ ok: false, reason: "disabled" });
     db.close();
   });
 });

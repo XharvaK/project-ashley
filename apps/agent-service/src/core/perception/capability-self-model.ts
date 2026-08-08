@@ -5,7 +5,6 @@ import { contractMismatch } from "../attention/ledger.js";
 import {
   currentContractId,
   currentReleaseId,
-  refreshCapabilityPromotions,
 } from "../rollout/capabilities.js";
 import type { CognitionMode } from "../types.js";
 
@@ -74,7 +73,6 @@ export function perceptionCapabilityCanInfluence(
 ): boolean {
   if (contractMismatch(db)) return false;
   if (masterMode !== "apply") return false;
-  refreshCapabilityPromotions(db, releaseId);
   return (
     releaseState(db, capability, releaseId) === "active" &&
     dependenciesReady(db, capability, releaseId)
