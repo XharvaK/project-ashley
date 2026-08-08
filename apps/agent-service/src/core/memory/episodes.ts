@@ -237,11 +237,12 @@ export function listUnconsolidatedMessages(
   ownerId: string,
   threadId: string,
   limit = 24,
+  targetProvenance?: EvidenceProvenance,
 ): MemoryMessage[] {
-  const last = row(db.prepare(
-    `SELECT MAX(source_end_message_id) AS last_id
-     FROM episodes WHERE owner_id = ? AND thread_id = ?`,
-  ).get(ownerId, threadId));
+  const query = targetProvenance === "live"
+    ? `SELECT MAX(source_end_message_id) AS last_id FROM episodes WHERE owner_id = ? AND thread_id = ? AND provenance = 'live'`
+    : `SELECT MAX(source_end_message_id) AS last_id FROM episodes WHERE owner_id = ? AND thread_id = ?`;
+  const last = row(db.prepare(query).get(ownerId, threadId));
   const lastId = Number(last?.last_id ?? 0);
   return db.prepare(
     `SELECT id, thread_id, owner_id, role, text, channel, created_at

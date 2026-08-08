@@ -38,6 +38,14 @@ describe("wave4 Phase 5 — explicit promotion boundary", () => {
       recordIsolatedEvaluation(on.db, "recall", { seeds: 96, passed: true, sourceKey: "qualify2" });
       recordIsolatedEvaluation(on.db, "recall", { seeds: 97, passed: true, sourceKey: "qualify3" });
       
+      // Also qualify a capability that writes to the LIVE projection (since episodes is SHADOW_ARTIFACT)
+      recordIsolatedEvaluation(on.db, "mind_state", { seeds: 95, passed: true, sourceKey: "qualify1" });
+      recordIsolatedEvaluation(on.db, "mind_state", { seeds: 96, passed: true, sourceKey: "qualify2" });
+      recordIsolatedEvaluation(on.db, "mind_state", { seeds: 97, passed: true, sourceKey: "qualify3" });
+
+      // Promote them
+      promoteCapability(on.db, "recall", { authorizedBy: "doc" });
+      promoteCapability(on.db, "mind_state", { authorizedBy: "doc" });
       const dayMs = 24 * 60 * 60 * 1000;
       for (let i = 0; i < 26; i++) {
         recordLiveShadowEvent(on.db, "recall", `qualify-event-${i}`, {
@@ -84,16 +92,12 @@ describe("wave4 Phase 5 — explicit promotion boundary", () => {
       let diverged = false;
       try {
         expectLiveEquivalent(on.live(), off.live());
+        expect(onEpisodes).toEqual(offEpisodes);
       } catch {
         diverged = true;
       }
       
-      // If C/P directly prevent a clean demonstration, report that result explicitly:
-      if (!diverged) {
-        console.warn("Track C defect prevented clean demonstration of promotion boundary divergence");
-      } else {
-        expect(diverged).toBe(true);
-      }
+      expect(diverged).toBe(true);
     } finally {
       on.close();
       off.close();

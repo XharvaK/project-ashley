@@ -154,8 +154,9 @@ export function proposeRevision(
     `SELECT id FROM learning_revisions
      WHERE owner_id = ? AND target_layer = ? AND target_key = ?
        AND lower(proposed_value) = lower(?) AND status = 'proposed'
+       AND provenance = ?
      ORDER BY id DESC LIMIT 1`,
-  ).get(input.ownerId, input.targetLayer, key, value) as { id?: number } | undefined;
+  ).get(input.ownerId, input.targetLayer, key, value, provenance) as { id?: number } | undefined;
   const now = new Date();
   let id = existing?.id ?? 0;
   if (!id) {

@@ -323,7 +323,8 @@ export async function processNextCognitiveJob(
       return true;
     }
     const threadId = String(job.payload.threadId ?? "");
-    const messages = listUnconsolidatedMessages(db, job.ownerId, threadId, 24);
+    const targetProvenance = canInfluence("recall") ? "live" : "shadow";
+    const messages = listUnconsolidatedMessages(db, job.ownerId, threadId, 24, targetProvenance);
     if (messages.length < 2) {
       completeJob(db, job.id);
       return true;

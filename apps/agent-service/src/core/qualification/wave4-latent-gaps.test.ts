@@ -264,7 +264,7 @@ describe("wave4 Track C — episode consolidation watermark", () => {
    * authority. Minimal fix: add `AND provenance = 'live'` to the MAX() query
    * (episodes.ts listUnconsolidatedMessages). NOT applied — scope lock.
    */
-  it("PROVEN: shadow episodes advance the watermark and permanently skip their messages", async () => {
+  it("FIXED: shadow episodes do not advance the live consolidation watermark", async () => {
     const f = new Fixture(false);
     try {
       await f.turn("dub techno mixing tips");
@@ -273,7 +273,7 @@ describe("wave4 Track C — episode consolidation watermark", () => {
       const ids = messageIdsOf(f, threadId);
       expect(ids.length).toBeGreaterThanOrEqual(3);
 
-      expect(listUnconsolidatedMessages(f.db, "doc", threadId).map((m) => m.id)).toEqual(ids);
+      expect(listUnconsolidatedMessages(f.db, "doc", threadId, 24, "live").map((m) => m.id)).toEqual(ids);
 
       const covered = ids.slice(0, 2);
       const remaining = ids.slice(2);
@@ -288,12 +288,10 @@ describe("wave4 Track C — episode consolidation watermark", () => {
       expect(shadow?.provenance).toBe("shadow");
       expect(shadow?.sourceEndMessageId).toBe(covered.at(-1));
 
-      const after = listUnconsolidatedMessages(f.db, "doc", threadId).map((m) => m.id);
-      expect(after).toEqual(remaining);
-      for (const id of covered) expect(after).not.toContain(id);
+      const afterLive = listUnconsolidatedMessages(f.db, "doc", threadId, 24, "live").map((m) => m.id);
+      expect(afterLive).toEqual(ids); // live is not advanced by shadow
+      for (const id of covered) expect(afterLive).toContain(id);
 
-      // No LIVE episode exists, yet the watermark has already moved past `covered`.
-      expect(countRows(f.db, `SELECT COUNT(*) AS c FROM episodes WHERE provenance = 'live'`)).toBe(0);
       const actual = f.db
         .prepare(
           `SELECT MAX(source_end_message_id) AS last_id FROM episodes
@@ -327,7 +325,7 @@ describe("wave4 Track P — proposeRevision dedupe across provenance", () => {
    * can never apply it. Minimal fix: add `AND provenance = ?` to that lookup
    * (revisions.ts proposeRevision). NOT applied — scope lock.
    */
-  it("PROVEN: a live proposal reuses the shadow row and can never be applied", () => {
+  it("FIXED: a live proposal does not reuse a shadow row and correctly applies", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     try {
       const base = {
@@ -341,24 +339,25 @@ describe("wave4 Track P — proposeRevision dedupe across provenance", () => {
       const shadowId = proposeRevision(db, { ...base, evidenceId: 1, provenance: "shadow" });
       const liveId = proposeRevision(db, { ...base, evidenceId: 2, provenance: "live" });
       expect(shadowId).toBeGreaterThan(0);
-      expect(liveId).toBe(shadowId);
+      expect(liveId).not.toBe(shadowId);
 
-      // Case-insensitive match on lower(proposed_value) collapses it too.
+      // Case-insensitive match on lower(proposed_value) should still map to the live ID
       const casedId = proposeRevision(db, {
         ...base,
         proposedValue: "WORTH DEFENDING",
         evidenceId: 3,
         provenance: "live",
       });
-      expect(casedId).toBe(shadowId);
+      expect(casedId).toBe(liveId);
 
       const rows = db
         .prepare(
-          `SELECT id, provenance FROM learning_revisions WHERE owner_id = ? AND target_key = ?`,
+          `SELECT id, provenance FROM learning_revisions WHERE owner_id = ? AND target_key = ? ORDER BY id ASC`,
         )
         .all("doc", base.targetKey) as Array<{ id: number; provenance: string }>;
-      expect(rows).toHaveLength(1);
+      expect(rows).toHaveLength(2);
       expect(rows[0]!.provenance).toBe("shadow");
+      expect(rows[1]!.provenance).toBe("live");
       expect(
         countRows(
           db,
@@ -367,23 +366,13 @@ describe("wave4 Track P — proposeRevision dedupe across provenance", () => {
           "doc",
           base.targetKey,
         ),
-      ).toBe(0);
+      ).toBe(1);
 
-      // Evidence is sufficient (3 links >= the opinion threshold of 2), so the
-      // ONLY thing blocking application is the swallowed provenance.
-      expect(
-        countRows(
-          db,
-          `SELECT COUNT(*) AS c FROM evidence_links
-           WHERE owner_id = ? AND target_type = 'revision' AND target_id = ?`,
-          "doc",
-          String(shadowId),
-        ),
-      ).toBe(3);
-      expect(applyEligibleRevisions(db, "doc", "apply")).toEqual([]);
+      // Apply should succeed for the live revision
+      expect(applyEligibleRevisions(db, "doc", "apply")).toEqual([liveId]);
       expect(
         countRows(db, `SELECT COUNT(*) AS c FROM opinions WHERE owner_id = ? AND topic = ?`, "doc", base.targetKey),
-      ).toBe(0);
+      ).toBe(1);
     } finally {
       db.close();
     }

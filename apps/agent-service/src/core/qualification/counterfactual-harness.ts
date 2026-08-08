@@ -105,7 +105,7 @@ export class Fixture {
     let guard = 0;
     // eslint-disable-next-line no-constant-condition
     while (true) {
-      const more = await processNextCognitiveJob(this.db, "observe", fakeAnalyze);
+      const more = await processNextCognitiveJob(this.db, env.cognitionMode, fakeAnalyze);
       if (!more) break;
       guard += 1;
       if (guard > 100) throw new Error("pump: too many cognition jobs (loop?)");
