@@ -81,6 +81,9 @@ export type CapabilityStatus = {
   effective: boolean;
   dependencies: CapabilityName[];
   dependenciesReady: boolean;
+  shadowExecutable: boolean;
+  shadowDependenciesReady: boolean;
+  influenceDependenciesReady: boolean;
   evalSeedCount: number;
   qualifiedAt: string | null;
   promotionEligible: boolean;
@@ -183,10 +186,67 @@ function releaseState(
   }
 }
 
-function dependenciesReady(
+/**
+ * Wave 3 — shadow vs. live influence dependency readiness.
+ *
+ * Previously a single `dependenciesReady` conflated two concerns:
+ *   - "can dependencies participate in shadow execution?"
+ *   - "do dependencies have behavioral influence authority?"
+ *
+ * `influenceDependenciesReady` preserves the existing active-state check
+ * used by promotionEligible / capabilityCanInfluence (live influence).
+ *
+ * `canExecuteShadowInternal` + `shadowDependenciesReady` answer whether a
+ * capability / dependency chain is permitted to run in observe shadow mode.
+ */
+
+/** Private: does this release's own state permit shadow execution? */
+function canExecuteShadowInternal(
   db: DatabaseSync,
   capability: CapabilityName,
   releaseId: string,
+): boolean {
+  if (contractMismatch(db)) return false;
+  return releaseState(db, capability, releaseId) !== "rolled_back" &&
+    releaseState(db, capability, releaseId) !== "disabled";
+}
+
+/** Exported Wave 3 predicate: pure / read-only. */
+export function capabilityCanExecuteShadow(
+  db: DatabaseSync,
+  capability: CapabilityName,
+  releaseId = currentReleaseId(),
+): boolean {
+  return canExecuteShadowInternal(db, capability, releaseId);
+}
+
+/**
+ * Exported Wave 3 predicate: pure / read-only.
+ * True when every dependency in the transitive closure can participate
+ * in shadow execution (observe or active, not rolled_back/disabled).
+ */
+export function capabilityShadowDependenciesReady(
+  db: DatabaseSync,
+  capability: CapabilityName,
+  releaseId = currentReleaseId(),
+): boolean {
+  return dependencies[capability].every(
+    (dependency) =>
+      canExecuteShadowInternal(db, dependency, releaseId) &&
+      capabilityShadowDependenciesReady(db, dependency, releaseId),
+  );
+}
+
+/**
+ * Exported Wave 3 predicate: pure / read-only.
+ * True when every direct dependency is `active` — the LIVE influence
+ * dependency chain. Preserves Wave 1/2 semantics used by
+ * `capabilityCanInfluence` and `promotionEligible`.
+ */
+export function capabilityInfluenceDependenciesReady(
+  db: DatabaseSync,
+  capability: CapabilityName,
+  releaseId = currentReleaseId(),
 ): boolean {
   return dependencies[capability].every(
     (dependency) => releaseState(db, dependency, releaseId) === "active",
@@ -276,7 +336,7 @@ export function promotionEligible(
   );
   return live.count >= 25 &&
     liveSpanDays(live) >= 7 &&
-    dependenciesReady(db, capability, releaseId);
+    capabilityInfluenceDependenciesReady(db, capability, releaseId);
 }
 
 export type PromoteCapabilityResult =
@@ -531,7 +591,8 @@ export function listCapabilityStatuses(
       "behavioral_breach",
       cutoff,
     );
-    const ready = dependenciesReady(db, capability, releaseId);
+    const ready = capabilityInfluenceDependenciesReady(db, capability, releaseId);
+    const shadowDepsReady = capabilityShadowDependenciesReady(db, capability, releaseId);
     return {
       capability,
       releaseId,
@@ -546,6 +607,9 @@ export function listCapabilityStatuses(
         ready,
       dependencies: dependencies[capability],
       dependenciesReady: ready,
+      shadowExecutable: canExecuteShadowInternal(db, capability, releaseId),
+      shadowDependenciesReady: shadowDepsReady,
+      influenceDependenciesReady: ready,
       evalSeedCount: isRow(release) ? Number(release.eval_seed_count ?? 0) : 0,
       qualifiedAt: isRow(release) && typeof release.qualified_at === "string"
         ? release.qualified_at
@@ -580,5 +644,5 @@ export function capabilityCanInfluence(
   if (contractMismatch(db)) return false;
   if (masterMode !== "apply") return false;
   return releaseState(db, capability, releaseId) === "active" &&
-    dependenciesReady(db, capability, releaseId);
+    capabilityInfluenceDependenciesReady(db, capability, releaseId);
 }

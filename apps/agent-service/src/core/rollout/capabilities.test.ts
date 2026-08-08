@@ -2,7 +2,10 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { openNuclearDb } from "../db.js";
 import {
+  capabilityCanExecuteShadow,
   capabilityCanInfluence,
+  capabilityInfluenceDependenciesReady,
+  capabilityShadowDependenciesReady,
   listCapabilityStatuses,
   promoteCapability,
   promotionEligible,
@@ -235,6 +238,87 @@ describe("capability rollout", () => {
     });
     expect(promoteCapability(db, "recall", { releaseId, authorizedBy: operator }))
       .toEqual({ ok: false, reason: "disabled" });
+    db.close();
+  });
+});
+
+describe("shadow execution predicates", () => {
+  it("canExecuteShadow is true for observe, active, and rolled-back-disabled states", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    recordIsolatedEvaluation(db, "recall", {
+      seeds: 3, passed: true, sourceKey: "eval",
+      releaseId, occurredAt: start.toISOString(),
+    });
+    qualify(db, "recall");
+
+    expect(capabilityCanExecuteShadow(db, "recall", releaseId)).toBe(true);
+
+    promoteCapability(db, "recall", { releaseId, authorizedBy: operator });
+    expect(capabilityCanExecuteShadow(db, "recall", releaseId)).toBe(true);
+
+    recordBehavioralBreach(db, "recall", "b1", "x", { releaseId, occurredAt: "2026-07-09T00:00:00.000Z" });
+    recordBehavioralBreach(db, "recall", "b2", "x", { releaseId, occurredAt: "2026-07-10T00:00:00.000Z" });
+    expect(statusOf(db, "recall", "apply")?.state).toBe("rolled_back");
+    expect(capabilityCanExecuteShadow(db, "recall", releaseId)).toBe(false);
+
+    db.close();
+  });
+
+  it("shadow readiness is satisfied by observe dependencies without activation", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    qualify(db, "mind_state");
+
+    expect(capabilityShadowDependenciesReady(db, "mind_state", releaseId)).toBe(true);
+    expect(capabilityInfluenceDependenciesReady(db, "mind_state", releaseId)).toBe(false);
+    expect(promotionEligible(db, "mind_state", releaseId)).toBe(false);
+    expect(capabilityCanInfluence(db, "mind_state", "apply", releaseId)).toBe(false);
+
+    db.close();
+  });
+
+  it("promotionEligible is not equivalent to shadowExecutable (influence vs shadow)", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    qualify(db, "mind_state");
+    qualify(db, "recall");
+
+    expect(capabilityCanExecuteShadow(db, "mind_state", releaseId)).toBe(true);
+    expect(capabilityShadowDependenciesReady(db, "mind_state", releaseId)).toBe(true);
+    expect(promotionEligible(db, "mind_state", releaseId)).toBe(false);
+    promoteCapability(db, "recall", { releaseId, authorizedBy: operator });
+    expect(promotionEligible(db, "mind_state", releaseId)).toBe(true);
+    expect(capabilityCanExecuteShadow(db, "mind_state", releaseId)).toBe(true);
+    promoteCapability(db, "mind_state", { releaseId, authorizedBy: operator });
+    expect(capabilityInfluenceDependenciesReady(db, "mind_state", releaseId)).toBe(true);
+
+    db.close();
+  });
+
+  it("status can expose shadow readiness without state transition", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    qualify(db, "mind_state");
+    const status = statusOf(db, "mind_state", "apply");
+    expect(status).toMatchObject({
+      state: "observe",
+      shadowExecutable: true,
+      shadowDependenciesReady: true,
+      influenceDependenciesReady: false,
+      promotionEligible: false,
+      effective: false,
+    });
+    db.close();
+  });
+
+  it("disabled dependency blocks shadow execution too", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    qualify(db, "thought");
+    qualify(db, "recall");
+    qualify(db, "mind_state");
+
+    recordCriticalFailure(db, "recall", "cf-1", "deletion_integrity", "x", { releaseId });
+    expect(capabilityCanExecuteShadow(db, "recall", releaseId)).toBe(false);
+    expect(capabilityShadowDependenciesReady(db, "thought", releaseId)).toBe(false);
+    expect(capabilityCanExecuteShadow(db, "thought", releaseId)).toBe(true);
+
     db.close();
   });
 });

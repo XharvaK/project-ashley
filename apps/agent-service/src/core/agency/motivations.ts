@@ -6,6 +6,8 @@ import { getState } from "../state/store.js";
 import { listIdentity, listOpinions } from "../identity/store.js";
 import { listActiveMindStateItems } from "../state/mind-items.js";
 import type {
+  MindStateItem,
+  MindStateItemKind,
   Motivation,
   MotivationKind,
   Opinion,
@@ -16,6 +18,33 @@ import { isBoundaryRelevant } from "./boundary-relevance.js";
 import { relationshipCanInfluence } from "../relationship/influence.js";
 import { listDueDocReminders } from "../relationship/store.js";
 import { tryClaimRelationshipMotivation } from "../relationship/claims.js";
+
+export type MindStateMotivationInput = {
+  kind: MindStateItemKind;
+  text: string;
+  activation: number;
+  urgency: number;
+  id: number;
+};
+
+export function mindStateItemToMotivation(
+  item: MindStateMotivationInput,
+): { kind: MotivationKind; score: number; summary: string; refType: "mind_state"; refId: number } {
+  const kind: MotivationKind =
+    item.kind === "unfinished" || item.kind === "commitment"
+      ? "unfinished"
+      : item.kind === "interest"
+        ? "identity"
+        : "callback";
+  const score = Math.max(20, Math.min(100, item.activation * 55 + item.urgency * 45));
+  return {
+    kind,
+    score,
+    summary: item.text.trim().slice(0, 1000),
+    refType: "mind_state",
+    refId: item.id,
+  };
+}
 
 function ageHours(iso: string): number {
   const parsed = Date.parse(iso);
@@ -255,25 +284,15 @@ export function collectMotivations(
     ) {
       continue;
     }
-    const kind: MotivationKind =
-      item.kind === "unfinished" || item.kind === "commitment"
-        ? "unfinished"
-        : item.kind === "interest"
-          ? "identity"
-          : "callback";
+    const m = mindStateItemToMotivation({
+      kind: item.kind,
+      text: item.text,
+      activation: item.activation,
+      urgency: item.urgency,
+      id: item.id,
+    });
     motivations.push(
-      persistMotivation(
-        db,
-        ownerId,
-        kind,
-        Math.max(
-          20,
-          Math.min(100, item.activation * 55 + item.urgency * 45),
-        ),
-        item.text,
-        "mind_state",
-        item.id,
-      ),
+      persistMotivation(db, ownerId, m.kind, m.score, m.summary, m.refType, m.refId),
     );
   }
 

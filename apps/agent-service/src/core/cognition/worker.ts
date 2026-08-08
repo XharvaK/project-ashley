@@ -10,6 +10,8 @@ import { consolidateCuriosityRead } from "../curiosity/consolidate.js";
 import type { CognitionMode, MindStateItemKind } from "../types.js";
 import {
   capabilityCanInfluence,
+  capabilityCanExecuteShadow,
+  capabilityShadowDependenciesReady,
   recordLiveShadowEvent,
   type CapabilityName,
 } from "../rollout/capabilities.js";
@@ -65,6 +67,26 @@ export type CognitionAnalysis = {
 
 type Analyze = (transcript: string) => Promise<{ analysis: CognitionAnalysis; model: string; raw: string }>;
 type CapabilityGate = (capability: CapabilityName) => boolean;
+
+type ShadowContext = {
+  recall?: { episodeId: number; summary: string; entities: string[]; salience: number };
+  mindState?: {
+    hasStateItems: boolean;
+    hasAffect: boolean;
+    stateItemCount: number;
+    affectReason: string;
+  };
+};
+
+function canShadowExecute(
+  db: DatabaseSync,
+  capability: CapabilityName,
+): boolean {
+  return (
+    capabilityCanExecuteShadow(db, capability) &&
+    capabilityShadowDependenciesReady(db, capability)
+  );
+}
 
 function number(value: unknown, fallback = 0): number {
   const parsed = Number(value);
@@ -272,11 +294,15 @@ export async function processNextCognitiveJob(
         readId,
         canInfluence("curiosity_consolidation"),
       );
-      db.exec("BEGIN IMMEDIATE");
+       db.exec("BEGIN IMMEDIATE");
       try {
-        recordLiveShadowEvent(db, "curiosity_consolidation", `read:${readId}`);
+        if (canShadowExecute(db, "curiosity_consolidation")) {
+          recordLiveShadowEvent(db, "curiosity_consolidation", `read:${readId}`);
+        }
         if (result.analysis.sourceProposals.length > 0) {
-          recordLiveShadowEvent(db, "source_discovery", `read:${readId}`);
+          if (canShadowExecute(db, "source_discovery")) {
+            recordLiveShadowEvent(db, "source_discovery", `read:${readId}`);
+          }
         }
         logRun(
           db,
@@ -308,6 +334,23 @@ export async function processNextCognitiveJob(
     const result = await analyze(transcript);
     db.exec("BEGIN IMMEDIATE");
     try {
+      const recallCanInfluence = canInfluence("recall");
+      const recallShadowReady = canShadowExecute(db, "recall");
+      if (!recallCanInfluence && !recallShadowReady) {
+        logRun(
+          db,
+          job,
+          { threadId, messageIds: messages.map((message) => message.id) },
+          {},
+          "completed",
+          result.model,
+          null,
+          null,
+        );
+        completeJob(db, job.id);
+        db.exec("COMMIT");
+        return true;
+      }
       const episode = createEpisode(db, {
         ownerId: job.ownerId,
         threadId,
@@ -316,29 +359,56 @@ export async function processNextCognitiveJob(
         messageIds: messages.map((message) => message.id),
         salience: result.analysis.salience,
         unresolved: result.analysis.unresolved,
-        provenance: canInfluence("recall") ? "live" : "shadow",
+        provenance: recallCanInfluence ? "live" : "shadow",
       });
       if (!episode) throw new Error("episode_creation_failed");
-      recordLiveShadowEvent(db, "recall", `episode:${episode.id}`);
-      if (result.analysis.stateItems.length > 0) {
-        recordLiveShadowEvent(db, "mind_state", `episode:${episode.id}`);
+      const shadow: ShadowContext = {
+        recall: {
+          episodeId: episode.id,
+          summary: result.analysis.summary,
+          entities: result.analysis.entities,
+          salience: result.analysis.salience,
+        },
+      };
+      if (recallShadowReady) {
+        recordLiveShadowEvent(db, "recall", `episode:${episode.id}`);
       }
-      if ([
-        result.analysis.affect.valenceDelta,
-        result.analysis.affect.activationDelta,
-        result.analysis.affect.opennessDelta,
-        result.analysis.affect.tensionDelta,
-      ].some((value) => Math.abs(value) >= 0.01)) {
-        recordLiveShadowEvent(db, "affect", `episode:${episode.id}`);
-      }
-      if (result.analysis.revisions.length > 0 || result.analysis.facts.length > 0) {
-        recordLiveShadowEvent(db, "learning", `episode:${episode.id}`);
-      }
-      if (result.analysis.stateItems.some((item) =>
-        (item.kind === "concern" || item.kind === "commitment") &&
-        item.urgency >= 0.85)) {
-        recordLiveShadowEvent(db, "relational_initiative", `episode:${episode.id}`);
-      }
+       const hasStateItems = result.analysis.stateItems.length > 0;
+        const hasAffect = [
+          result.analysis.affect.valenceDelta,
+          result.analysis.affect.activationDelta,
+          result.analysis.affect.opennessDelta,
+          result.analysis.affect.tensionDelta,
+        ].some((value) => Math.abs(value) >= 0.01);
+        if (hasStateItems || hasAffect) {
+          shadow.mindState = {
+            hasStateItems,
+            hasAffect,
+            stateItemCount: result.analysis.stateItems.length,
+            affectReason: result.analysis.affect.reason,
+          };
+        }
+        if (hasStateItems && canShadowExecute(db, "mind_state")) {
+          recordLiveShadowEvent(db, "mind_state", `episode:${episode.id}`);
+        }
+        if (hasAffect && canShadowExecute(db, "affect")) {
+          recordLiveShadowEvent(db, "affect", `episode:${episode.id}`);
+        }
+        if (
+          result.analysis.revisions.length > 0 ||
+          result.analysis.facts.length > 0
+        ) {
+          if (canShadowExecute(db, "learning")) {
+            recordLiveShadowEvent(db, "learning", `episode:${episode.id}`);
+          }
+        }
+        if (result.analysis.stateItems.some((item) =>
+          (item.kind === "concern" || item.kind === "commitment") &&
+          item.urgency >= 0.85)) {
+          if (canShadowExecute(db, "relational_initiative")) {
+            recordLiveShadowEvent(db, "relational_initiative", `episode:${episode.id}`);
+          }
+        }
       for (const revision of result.analysis.revisions) {
         proposeRevision(db, {
           ownerId: job.ownerId,
@@ -483,4 +553,79 @@ export function stopCognitionLoop(): void {
   if (timer) clearInterval(timer);
   timer = null;
   running = false;
+}
+
+export type ShadowCognitionAnalysis = {
+  stateItems: Array<{
+    kind: MindStateItemKind;
+    text: string;
+    activation: number;
+    urgency: number;
+    dueAt?: string | null;
+  }>;
+  affect: {
+    valenceDelta: number;
+    activationDelta: number;
+    opennessDelta: number;
+    tensionDelta: number;
+    reason: string;
+  };
+  episodeId: number;
+  summary: string;
+  entities: string[];
+  salience: number;
+};
+
+export function getLatestShadowAnalysis(
+  db: DatabaseSync,
+  ownerId: string,
+  threadId: string,
+  beforeMessageId: number,
+): ShadowCognitionAnalysis | null {
+  const run = db.prepare(
+    `SELECT cr.output_json, cr.episode_id, e.summary, e.entities, e.salience
+     FROM cognitive_runs cr
+     JOIN episodes e ON e.id = cr.episode_id
+     WHERE cr.owner_id = ?
+       AND cr.status = 'completed'
+       AND cr.kind = 'consolidate_thread'
+       AND e.provenance = 'shadow'
+       AND e.thread_id = ?
+       AND e.source_end_message_id < ?
+     ORDER BY e.source_end_message_id DESC LIMIT 1`,
+  ).get(ownerId, threadId, beforeMessageId) as
+    | { output_json: string; episode_id: number; summary: string; entities: string; salience: number }
+    | undefined;
+  if (!run) return null;
+  const output = parseJson(run.output_json) as {
+    stateItems?: Array<{
+      kind: MindStateItemKind;
+      text: string;
+      activation: number;
+      urgency: number;
+      dueAt?: string | null;
+    }>;
+    affect?: {
+      valenceDelta: number;
+      activationDelta: number;
+      opennessDelta: number;
+      tensionDelta: number;
+      reason: string;
+    };
+  };
+  const entitiesStr = run.entities?.trim() ?? "";
+  return {
+    stateItems: output.stateItems ?? [],
+    affect: output.affect ?? {
+      valenceDelta: 0,
+      activationDelta: 0,
+      opennessDelta: 0,
+      tensionDelta: 0,
+      reason: "No material affect change.",
+    },
+    episodeId: run.episode_id,
+    summary: run.summary,
+    entities: entitiesStr ? entitiesStr.split(" ").filter(Boolean) : [],
+    salience: run.salience,
+  };
 }

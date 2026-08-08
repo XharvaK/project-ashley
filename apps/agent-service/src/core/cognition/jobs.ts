@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { getLatestShadowAnalysis, type ShadowCognitionAnalysis } from "./worker.js";
 
 export type CognitiveJobKind = "consolidate_thread" | "consolidate_curiosity";
 
@@ -10,6 +11,8 @@ export type CognitiveJob = {
   payload: Record<string, unknown>;
   attempts: number;
 };
+
+export { getLatestShadowAnalysis, type ShadowCognitionAnalysis };
 
 export function enqueueCognitiveJob(
   db: DatabaseSync,

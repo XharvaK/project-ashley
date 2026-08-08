@@ -3,9 +3,9 @@ import { env } from "../env.js";
 import { NUCLEAR_DB_PATH } from "../paths.js";
 import { decide, attachAuthorizedClaims } from "./agency/decide.js";
 import { buildOwnTimeReportConstraint } from "./agency/own-time-report.js";
-import { collectMotivations } from "./agency/motivations.js";
+import { collectMotivations, mindStateItemToMotivation } from "./agency/motivations.js";
 import { deliberateDecision } from "./agency/thought.js";
-import { enqueueThoughtObservation } from "./agency/thought-observation.js";
+import { enqueueThoughtObservation, type ShadowCognitionContext } from "./agency/thought-observation.js";
 import {
   classifyTurnComplexity,
   isTerminalDecision,
@@ -72,9 +72,9 @@ import {
   processPendingReflectionEvents,
   recordInitiativeReaction,
 } from "./reflection/initiative.js";
-import type { Decision, DecisionKind, ReflectionMode } from "./types.js";
+import type { Decision, DecisionKind, Motivation, ReflectionMode } from "./types.js";
 import { attachAffectLicense, getAffectiveState } from "./state/affect.js";
-import { enqueueCognitiveJob } from "./cognition/jobs.js";
+import { enqueueCognitiveJob, getLatestShadowAnalysis } from "./cognition/jobs.js";
 import {
   claimUrgentMindState,
   consumeUrgentWake,
@@ -823,13 +823,60 @@ export class AshleyCore {
           complexity.mode === "hard" &&
           !capabilityCanInfluence(this.db, "thought")
         ) {
-          enqueueThoughtObservation({
-            db: this.db,
-            decision,
-            motivations,
-            trigger: "reactive",
-            decisionId,
-          });
+          const shadowAnalysis = getLatestShadowAnalysis(
+            this.db,
+            input.ownerId,
+            reservation.threadId,
+            userMessageId,
+          );
+          let shadowContext: ShadowCognitionContext | undefined;
+          let shadowMotivations: Motivation[] = [];
+          if (shadowAnalysis) {
+            const hasStateItems = shadowAnalysis.stateItems.length > 0;
+            const hasAffect = [
+              shadowAnalysis.affect.valenceDelta,
+              shadowAnalysis.affect.activationDelta,
+              shadowAnalysis.affect.opennessDelta,
+              shadowAnalysis.affect.tensionDelta,
+            ].some((value) => Math.abs(value) >= 0.01);
+            if (hasStateItems || hasAffect) {
+              shadowContext = {
+                recall: {
+                  episodeId: shadowAnalysis.episodeId,
+                  summary: shadowAnalysis.summary,
+                  entities: shadowAnalysis.entities,
+                  salience: shadowAnalysis.salience,
+                },
+                mindState: {
+                  hasStateItems,
+                  hasAffect,
+                  stateItemCount: shadowAnalysis.stateItems.length,
+                  affectReason: shadowAnalysis.affect.reason,
+                },
+              };
+              if (hasStateItems) {
+                shadowMotivations = shadowAnalysis.stateItems.map((item, idx) =>
+                  mindStateItemToMotivation({
+                    kind: item.kind,
+                    text: item.text,
+                    activation: item.activation,
+                    urgency: item.urgency,
+                    id: -(idx + 1), // negative ephemeral IDs for shadow
+                  }),
+                );
+              }
+            }
+          }
+          if (shadowContext) {
+            enqueueThoughtObservation({
+              db: this.db,
+              decision,
+              motivations: [...motivations, ...shadowMotivations],
+              trigger: "reactive",
+              decisionId,
+              shadowContext,
+            });
+          }
         }
       } catch (error) {
         const finalized = finalizeDelivery(this.db, {

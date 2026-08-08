@@ -99,6 +99,63 @@ describe("Thought sub-deadline and observation", () => {
     db.close();
   });
 
+  it("clears in-flight guard on failure so retry with same decisionId may execute", async () => {
+    env.groqApiKey = "test";
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    let shouldFail = true;
+    vi.spyOn(mistral, "completeChat").mockImplementation(async () => {
+      if (shouldFail) throw new Error("boom");
+      return {
+        text: JSON.stringify({
+          kind: "speak",
+          shouldSpeak: true,
+          effort: "medium",
+          completion: "answer",
+          uncertainty: 0.2,
+          urgency: 0.1,
+          objective: "reply",
+          reason: "ok",
+          motivationIds: [1],
+        }),
+        model: env.mistralModel,
+        modelAlias: env.mistralModel,
+        resolvedModelId: "mistral-medium-2505",
+      };
+    });
+    const sharedDecisionId = 77;
+    enqueueThoughtObservation({
+      db,
+      decision: baseDecision(),
+      motivations: [
+        { id: 1, kind: "user_message", score: 40, summary: "hi" } as Motivation,
+      ],
+      trigger: "reactive",
+      decisionId: sharedDecisionId,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(
+      listCapabilityStatuses(db, "observe").find((s) => s.capability === "thought")
+        ?.liveShadowEvents,
+    ).toBe(0);
+
+    shouldFail = false;
+    enqueueThoughtObservation({
+      db,
+      decision: baseDecision(),
+      motivations: [
+        { id: 1, kind: "user_message", score: 40, summary: "hi" } as Motivation,
+      ],
+      trigger: "reactive",
+      decisionId: sharedDecisionId,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(
+      listCapabilityStatuses(db, "observe").find((s) => s.capability === "thought")
+        ?.liveShadowEvents,
+    ).toBe(1);
+    db.close();
+  });
+
   it("records live-shadow only after successful observation parse", async () => {
     env.groqApiKey = "test";
     const db = openNuclearDb(new DatabaseSync(":memory:"));

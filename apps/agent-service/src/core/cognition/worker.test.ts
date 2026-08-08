@@ -7,6 +7,7 @@ import { getAffectiveState } from "../state/affect.js";
 import { listActiveMindStateItems } from "../state/mind-items.js";
 import { listRevisions } from "../learning/revisions.js";
 import { listActiveFacts } from "../memory/facts.js";
+import { recordCriticalFailure } from "../rollout/capabilities.js";
 import { enqueueCognitiveJob, recoverCognitiveJobs } from "./jobs.js";
 import { processNextCognitiveJob, type CognitionAnalysis } from "./worker.js";
 
@@ -174,6 +175,54 @@ describe("continuous cognition worker", () => {
     expect((db.prepare(
       "SELECT COUNT(*) AS count FROM cognitive_runs WHERE status = 'completed'",
     ).get() as { count: number }).count).toBe(1);
+    db.close();
+  });
+
+  it("shadow chain records live_shadow events even when observe-only", async () => {
+    const { db } = setup();
+    const analyze = async () => ({ analysis, model: "test", raw: "{}" });
+    expect(await processNextCognitiveJob(db, "observe", analyze)).toBe(true);
+
+    const shadowCounts = (cap: string) => {
+      const row = db.prepare(
+        `SELECT COUNT(*) AS c FROM capability_events
+         WHERE capability = ? AND kind = 'live_shadow'`,
+      ).get(cap) as { c?: number };
+      return Number(row.c ?? 0);
+    };
+    expect(shadowCounts("recall")).toBeGreaterThan(0);
+    expect(shadowCounts("mind_state")).toBeGreaterThan(0);
+    expect(shadowCounts("affect")).toBeGreaterThan(0);
+    expect(shadowCounts("learning")).toBeGreaterThan(0);
+
+    const episode = retrieveEpisodes(db, "doc", "")[0];
+    expect(episode?.provenance).toBe("shadow");
+    expect(listActiveMindStateItems(db, "doc")).toHaveLength(0);
+    expect(listActiveFacts(db, "doc")).toHaveLength(0);
+    expect(getAffectiveState(db, "doc").reason).toBe("neutral baseline");
+    db.close();
+  });
+
+  it("disabled root dependency blocks the entire shadow chain", async () => {
+    const { db } = setup();
+    recordCriticalFailure(db, "recall", "cf-1", "deletion_integrity", "x", {});
+
+    const analyze = async () => ({ analysis, model: "test", raw: "{}" });
+    expect(await processNextCognitiveJob(db, "observe", analyze)).toBe(true);
+
+    const shadowCounts = (cap: string) => {
+      const row = db.prepare(
+        `SELECT COUNT(*) AS c FROM capability_events
+         WHERE capability = ? AND kind = 'live_shadow'`,
+      ).get(cap) as { c?: number };
+      return Number(row.c ?? 0);
+    };
+    expect(shadowCounts("recall")).toBe(0);
+    expect(shadowCounts("mind_state")).toBe(0);
+    expect(shadowCounts("affect")).toBe(0);
+    expect(shadowCounts("learning")).toBe(0);
+
+    expect(retrieveEpisodes(db, "doc", "")).toHaveLength(0);
     db.close();
   });
 });
