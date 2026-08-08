@@ -121,10 +121,14 @@ export function resolveEvidenceRefs(
         break;
       }
       case "episode": {
+        // Wave 2 consistency hardening (owner-approved, Wave 4 correction #5):
+        // behavioral materializers must reject shadow provenance. Only a LIVE
+        // episode may be materialized as Thought-selected evidence.
         const row = db
           .prepare(
             `SELECT id, summary FROM episodes
              WHERE id = ? AND owner_id = ? AND status = 'active'
+               AND provenance = 'live'
              LIMIT 1`,
           )
           .get(id, ownerId);

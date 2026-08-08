@@ -56,6 +56,8 @@ export function enqueueThoughtObservation(input: {
     input.complete,
     {
       decisionId: input.decisionId,
+      purpose: "thought_observation",
+      lane: "exchange_cognition",
       ...input.options,
     },
   ).then((result) => {

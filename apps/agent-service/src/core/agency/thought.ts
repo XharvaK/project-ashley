@@ -104,6 +104,8 @@ export type ThoughtModelOptions = {
   deliveryReservationId?: number | null;
   ownerId?: string | null;
   attentionDb?: DatabaseSync;
+  purpose?: string;
+  lane?: string;
 };
 
 export type ThoughtProposal = {
@@ -170,8 +172,8 @@ export async function runThoughtModel(
         maxTokens: 450,
         temperature: 0.15,
         reasoningEffort: "medium",
-        lane: "interactive",
-        purpose: "thought",
+        lane: (options.lane as any) ?? "interactive",
+        purpose: (options.purpose as any) ?? "thought",
         route: "thought",
         deadlineAtMs: thoughtDeadline,
         decisionId: options.decisionId,
