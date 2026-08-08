@@ -13,6 +13,9 @@ import {
   recordCriticalFailure,
   recordIsolatedEvaluation,
   recordLiveShadowEvent,
+  operatorRollbackCapability,
+  currentBuildIdentity,
+  currentContractId,
 } from "./capabilities.js";
 
 const releaseId = "release-test";
@@ -320,5 +323,106 @@ describe("shadow execution predicates", () => {
     expect(capabilityCanExecuteShadow(db, "thought", releaseId)).toBe(true);
 
     db.close();
+  });
+
+  it("rolls back operatorRollbackCapability state transition if audit event insertion fails", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    qualify(db, "recall");
+    promoteCapability(db, "recall", { releaseId, authorizedBy: operator });
+
+    expect(statusOf(db, "recall", "apply")?.state).toBe("active");
+
+    db.exec("DROP TABLE capability_events");
+
+    expect(() => operatorRollbackCapability(db, "recall", { releaseId, authorizedBy: operator })).toThrow();
+
+    const row = db.prepare("SELECT state FROM capability_releases WHERE capability = ? AND release_id = ?").get("recall", releaseId) as { state: string };
+    expect(row.state).toBe("active");
+
+    db.close();
+  });
+
+  it("fails closed for observe and disabled releases", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    try {
+      const observed = operatorRollbackCapability(db, "recall", {
+        releaseId,
+        authorizedBy: operator,
+      });
+      expect(observed).toMatchObject({ success: false, status: "not_active" });
+      expect(statusOf(db, "recall", "apply")?.state).toBe("observe");
+
+      qualify(db, "recall");
+      expect(promoteCapability(db, "recall", { releaseId, authorizedBy: operator }).ok).toBe(true);
+      recordCriticalFailure(db, "recall", "critical-before-rollback", "provenance", "test", { releaseId });
+
+      const disabled = operatorRollbackCapability(db, "recall", {
+        releaseId,
+        authorizedBy: operator,
+      });
+      expect(disabled).toMatchObject({ success: false, status: "not_active" });
+      expect(statusOf(db, "recall", "apply")?.state).toBe("disabled");
+      expect(
+        db.prepare(
+          `SELECT COUNT(*) AS c FROM capability_events
+           WHERE capability = ? AND release_id = ? AND kind = 'operator_rollback'`,
+        ).get("recall", releaseId),
+      ).toEqual({ c: 0 });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("requires authorization and fails closed on a contract mismatch", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    try {
+      expect(operatorRollbackCapability(db, "recall", { releaseId, authorizedBy: " " }))
+        .toMatchObject({ success: false, status: "authorization_required" });
+
+      qualify(db, "recall");
+      expect(promoteCapability(db, "recall", { releaseId, authorizedBy: operator }).ok).toBe(true);
+      db.prepare("UPDATE capability_contracts SET spec_hash = ? WHERE active = 1").run("mismatch");
+
+      expect(operatorRollbackCapability(db, "recall", { releaseId, authorizedBy: operator }))
+        .toMatchObject({ success: false, status: "contract_mismatch" });
+      expect(statusOf(db, "recall", "apply")?.state).toBe("active");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("does not commit a rollback when the audit insert is ignored", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    try {
+      qualify(db, "recall");
+      expect(promoteCapability(db, "recall", { releaseId, authorizedBy: operator }).ok).toBe(true);
+      db.prepare(
+        `INSERT INTO capability_events
+           (capability, release_id, kind, source_key, detail_json, occurred_at,
+            contract_id, build_identity, model_epoch)
+         VALUES (?, ?, 'operator_rollback', ?, '{}', ?, ?, ?, 0)`,
+      ).run(
+        "recall",
+        releaseId,
+        `operator_rollback:recall:${releaseId}`,
+        new Date().toISOString(),
+        currentContractId(),
+        currentBuildIdentity(),
+      );
+
+      expect(() => operatorRollbackCapability(db, "recall", {
+        releaseId,
+        authorizedBy: operator,
+      })).toThrow(/audit/i);
+      expect(statusOf(db, "recall", "apply")?.state).toBe("active");
+      expect(
+        db.prepare(
+          `SELECT COUNT(*) AS c FROM capability_events
+           WHERE capability = ? AND release_id = ? AND kind = 'operator_rollback'`,
+        ).get("recall", releaseId),
+      ).toEqual({ c: 1 });
+    } finally {
+      db.close();
+    }
   });
 });

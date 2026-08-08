@@ -122,11 +122,13 @@ import {
   capabilityCanInfluence,
   capabilityNames,
   listCapabilityStatuses,
+  operatorRollbackCapability as operatorRollbackCapabilityRelease,
   promoteCapability as promoteCapabilityRelease,
   recordCriticalFailure,
   recordIsolatedEvaluation,
   type CapabilityName,
 } from "./rollout/capabilities.js";
+import { recordRecallLiveCutover } from "./memory/cutover.js";
 import { listRelationshipSummary } from "./relationship/store.js";
 import { observeReactiveRelationshipSignals } from "./relationship/authority.js";
 import { assignNewEntityUuid } from "./continuity/nuclear-targetable.js";
@@ -2247,6 +2249,23 @@ export class AshleyCore {
       { authorizedBy: input.authorizedBy },
     );
     return { ...result, capabilities: this.getCapabilities() };
+  }
+
+  operatorRollbackCapability(input: { capability: string; authorizedBy: string }) {
+    if (!capabilityNames.includes(input.capability as CapabilityName)) {
+      throw new Error("invalid_capability");
+    }
+    const result = operatorRollbackCapabilityRelease(
+      this.db,
+      input.capability as CapabilityName,
+      { authorizedBy: input.authorizedBy },
+    );
+    return { ...result, capabilities: this.getCapabilities() };
+  }
+
+  recordRecallCutover(ownerId: string, input: { authorizedBy: string }) {
+    const result = recordRecallLiveCutover(this.db, ownerId, { authorizedBy: input.authorizedBy });
+    return result;
   }
 
   revertRevision(ownerId: string, revisionId: number): boolean {

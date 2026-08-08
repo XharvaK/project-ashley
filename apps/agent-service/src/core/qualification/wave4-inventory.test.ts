@@ -9,7 +9,7 @@ import { classifyTable, listTables, type Rule } from "./state-inventory.js";
 
 /**
  * Phase 1 guard: every table that actually exists in a freshly opened nuclear
- * DB at schema v21 MUST be explicitly classified. This is the "enumerate every
+ * DB at schema v22 MUST be explicitly classified. This is the "enumerate every
  * table" requirement — a new table fails the harness by default instead of
  * being silently ignored.
  */
@@ -48,11 +48,18 @@ describe("wave4 state inventory enumeration", () => {
       "episodes",
       "cognitive_jobs",
       "capability_events",
+      "recall_live_cutovers",
       "forget_receipts",
     ];
     for (const name of sample) {
       const rule: Rule = classifyTable(name);
       expect(rule.cls).toBeDefined();
     }
+  });
+
+  it("keeps unknown tables unclassified by default", () => {
+    expect(() => classifyTable("future_unclassified_table")).toThrow(
+      /UNCLASSIFIED_TABLE/,
+    );
   });
 });

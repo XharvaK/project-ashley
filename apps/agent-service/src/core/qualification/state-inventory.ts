@@ -165,6 +165,10 @@ const NON_LIVE: Record<string, NonLiveRule> = {
     cls: "OBSERVABILITY_EXCEPTION",
     reason: "correction #4: explicit /forget receipt may truthfully include shadow artifact counts; documented, not a behavioral divergence",
   },
+  recall_live_cutovers: {
+    cls: "CONTROL_PLANE",
+    reason: "Track C explicit live watermark configuration",
+  },
 };
 
 const FTS_RE = /_fts(_data|_idx|_docsize|_config|_content)?$/;

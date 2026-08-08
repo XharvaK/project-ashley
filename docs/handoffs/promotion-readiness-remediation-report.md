@@ -41,14 +41,17 @@ Pre-promotion counterfactual non-interference remains PASS.
 Correlated shadow Recall → Mind State → Thought remains PASS.
 
 ## TESTS
-- `npx tsc --noEmit`: PASS
-- `npx vitest run`: PASS (93 files, 728 tests passed)
-- `npm run phase0:offline`: PASS
+- `npm run build:agent`: PASS
+- focused v22 qualification: PASS (11 test files, 68 tests passed, 0 skipped, 0 failed)
+- `npm test`: PASS (96 test files, 743 tests passed, 1 skipped, 0 failed)
+- `npm run phase0:offline`: PASS (96 test files, 743 tests passed, 1 skipped, 0 failed)
+- Evaluation seed semantics: UNSPECIFIED
+- Test counts are not evaluation-seed counts.
 
 ## SCHEMA
-v21 unchanged
+Schema v22 implemented/qualified locally.
 
-## FILES CHANGED
+## HISTORICAL TRACK C/P FILES
 - `apps/agent-service/src/core/memory/episodes.ts`
 - `apps/agent-service/src/core/learning/revisions.ts`
 - `apps/agent-service/src/core/cognition/worker.ts`
@@ -67,7 +70,68 @@ v21 unchanged
 - no R5B
 - no secrets accessed
 
-## FIRST REAL CAPABILITY PROMOTION
-FIRST REAL CAPABILITY PROMOTION: GO
+## V22 FORENSIC QUALIFICATION
 
-Recommend `recall` as the first candidate.
+### CHANGED FILE INVENTORY
+
+INTENDED_V22
+- v22 migration, database transaction/backup handling, episode watermarking, recall cutover, cognition stale-job guard, capability authority, runtime/server routes, route surface, and state inventory.
+- directly relevant regression and qualification tests, including the file-backed migration test.
+
+TEST_ONLY
+- current-schema assertion updates and v22 regression coverage only; historical v21 fixture assertions remain v21 where they intentionally exercise the v21 migration boundary.
+
+DOCUMENTATION
+- this report.
+
+SUSPICIOUS_REMOVED
+- `remote-status.json`
+- `remote-status-after.json`
+- `temp-status.mjs`
+
+No temporary/generated artifact remains from the audit. The known unrelated production-host file `0` was not touched.
+
+### ACCIDENTAL CHANGES
+
+`apps/agent-service/src/core/attention/governor.ts` has no semantic diff from the baseline. No governor change was needed: Track M passes in isolation, in the full root suite, and in the final focused run.
+
+The mass `toBe(21)` -> `toBe(22)` concern affected 11 test files. The changed assertions are current-schema/open-migrated database assertions and legitimately remain 22. Historical migration assertions and the direct v21 fixture in `migration-21.test.ts` remain 21; they were not blindly rewritten.
+
+### MIGRATION V22
+
+PASS. A configured-database-only `VACUUM INTO` snapshot is taken before mutation. Foreign keys are disabled before `BEGIN IMMEDIATE`; the episode/capability-event rebuilds and cutover-table creation run in one transaction; `foreign_key_check` and `quick_check` run before commit; foreign keys are restored and verified; the continuity mirror advances only after the database commit. Failure rolls back, restores foreign keys, and does not mirror v22.
+
+### EPISODE AUTHORITY IDENTITY
+
+PASS. Shadow/live episodes can coexist for the same range, same-provenance duplicates remain deduplicated, and the file-backed test preserves FTS, `episode_messages`, `cognitive_runs`, UUIDs, IDs, and AUTOINCREMENT behavior across close/reopen.
+
+### RECALL CUTOVER
+
+PASS. Cutover records an owner-scoped `MAX(mem_messages.id)` cursor for the current release, is release-isolated and idempotent, admits future same-thread messages and new-thread messages correctly, and blocks stale live jobs after cutover. The cutover is auditable and cannot be supplied a caller-controlled cursor, release, contract, or build.
+
+### OPERATOR ROLLBACK
+
+PASS. Rollback is active -> rolled_back, idempotent, audited, fail-closed for blank authorization/contract mismatch/non-active releases, and remains callable while `masterMode=apply` without granting influence.
+
+### TRANSACTIONAL AUDIT
+
+PASS. Forced cutover audit failure leaves no cutover row/cursor or event. Forced rollback audit failure leaves capability state unchanged. An ignored deterministic audit insert is treated as an error and rolls back the state change.
+
+### TRACK M NON-REGRESSION
+
+PASS. Track M dispatch: 12/12. Track M route precedence: 2/2. `governor.ts` semantic diff versus baseline: none.
+
+### FILE-BACKED MIGRATION
+
+PASS. The file-backed migration qualification closes and reopens the database, verifies schema v22, foreign keys, `foreign_key_check`, `quick_check`, FTS, UUIDs, IDs, child/evidence/run preservation, release isolation, rollback/cutover audit rows, and two pre-v22 snapshots.
+
+## PRODUCTION
+UNCHANGED
+
+## SOURCE VERDICT
+V22 RECALL AUTHORITY HARDENING: PASS
+
+## PROMOTION VERDICT
+FIRST REAL CAPABILITY PROMOTION: NO-GO
+
+This local source qualification does not authorize production installation, deployment, promotion, or a master-mode change. ChatGPT must explicitly accept source finalization before any real capability promotion.

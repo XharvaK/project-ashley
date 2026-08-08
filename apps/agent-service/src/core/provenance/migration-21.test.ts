@@ -28,9 +28,9 @@ function columnsOf(db: DatabaseSync, table: string): Array<{ name?: string }> {
 }
 
 describe("migration-21 provenance (Wave 2 time-shift isolation)", () => {
-  it("migrates a fresh database to nuclear schema v21 and adds provenance columns", () => {
+  it("opens the current schema with the v21 provenance columns", () => {
     const db = openMigratedDb();
-    expect(NUCLEAR_SUPPORTED_VERSION).toBe(21);
+    expect(NUCLEAR_SUPPORTED_VERSION).toBe(22);
     for (const table of PROVENANCE_TABLES) {
       const names = new Set(columnsOf(db, table).map((column) => column.name));
       expect(names.has("provenance")).toBe(true);
@@ -70,17 +70,17 @@ describe("migration-21 provenance (Wave 2 time-shift isolation)", () => {
   });
 
   it("backfills pre-existing evidence rows to shadow", () => {
-    const db = openMigratedDb();
+    const db = new DatabaseSync(":memory:");
     db.exec(`
-      DROP INDEX idx_cur_takes_provenance;
-      DROP INDEX idx_cur_reads_provenance;
-      DROP INDEX idx_episodes_provenance;
-      DROP INDEX idx_learning_revisions_provenance;
-      DROP INDEX idx_cur_source_candidates_provenance;
+      CREATE TABLE cur_sources (id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT, title TEXT, kind TEXT, url TEXT, interest TEXT, weight REAL, enabled INTEGER);
+      CREATE TABLE cur_items (id INTEGER PRIMARY KEY AUTOINCREMENT, source_id INTEGER, url TEXT, url_key TEXT, title TEXT, excerpt TEXT, interest TEXT, seen_at TEXT, score REAL, status TEXT);
+      CREATE TABLE cur_takes (id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER, interest TEXT, take TEXT, evidence_kind TEXT, created_at TEXT);
+      CREATE TABLE cur_reads (id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER, interest TEXT, text_content TEXT, retrieved_at TEXT, created_at TEXT);
+      CREATE TABLE episodes (id INTEGER PRIMARY KEY AUTOINCREMENT, owner_id TEXT, thread_id TEXT, summary TEXT, entities TEXT, source_start_message_id INTEGER, source_end_message_id INTEGER, salience REAL, unresolved INTEGER, status TEXT, created_at TEXT, updated_at TEXT);
+      CREATE TABLE learning_revisions (id INTEGER PRIMARY KEY AUTOINCREMENT, owner_id TEXT, target_layer TEXT, target_key TEXT, previous_value TEXT, proposed_value TEXT, rationale TEXT, status TEXT, apply_after TEXT, created_at TEXT, updated_at TEXT);
+      CREATE TABLE cur_source_candidates (id INTEGER PRIMARY KEY AUTOINCREMENT, owner_id TEXT, url TEXT, text_content TEXT, interest TEXT, successful_fetches INTEGER, created_at TEXT, updated_at TEXT, status TEXT);
     `);
-    for (const table of PROVENANCE_TABLES) {
-      db.exec(`ALTER TABLE ${table} DROP COLUMN provenance`);
-    }
+
     db.prepare(
       `INSERT INTO cur_sources (slug, title, kind, url, interest, weight, enabled)
        VALUES ('audit', 'Audit', 'rss', 'https://example.com/feed', 'systems', 1, 1)`,

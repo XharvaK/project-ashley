@@ -39,12 +39,13 @@ import {
 import { MIGRATION_19_SANDBOX_APPROVAL_DDL } from "./sandbox/migration-19.js";
 import { MIGRATION_20_CAPABILITY_EVENT_KINDS_DDL } from "./rollout/migration-20.js";
 import { MIGRATION_21_PROVENANCE_DDL } from "./provenance/migration-21.js";
+import { MIGRATION_22_RECALL_AUTHORITY_DDL } from "./provenance/migration-22.js";
 import { reconcileSandboxApprovals } from "./sandbox/approval-store.js";
 import { currentBuildIdentity } from "./rollout/capabilities.js";
 
 export { NUCLEAR_DB_PATH };
 
-export const NUCLEAR_SUPPORTED_VERSION = 21;
+export const NUCLEAR_SUPPORTED_VERSION = 22;
 
 const SCHEMA = `
 PRAGMA foreign_keys = ON;
@@ -2058,6 +2059,161 @@ export function migrate(
             error: error instanceof Error ? error.message : "migration_failed",
           },
         });
+      }
+      throw error;
+    }
+  }
+  if (userVersion(db) < 22) {
+    const continuity = options.continuity;
+    if (!continuity && !options.skipContinuityRequirement) {
+      throw new Error("continuity_unavailable");
+    }
+    const priorVersion = userVersion(db);
+    const mirrorRow = db
+      .prepare(`SELECT lineage_id FROM lineage_mirror WHERE id = 1`)
+      .get() as { lineage_id?: string } | undefined;
+    const lineageId =
+      mirrorRow?.lineage_id ??
+      (options.skipContinuityRequirement ? "test-lineage" : undefined);
+    if (!lineageId) {
+      throw new Error("nuclear_lineage_mirror_missing");
+    }
+    if (continuity && mirrorRow?.lineage_id) {
+      requireSidecarLineageForNuclearMirror(continuity, mirrorRow.lineage_id, {
+        nuclearSchemaVersion: priorVersion,
+        buildIdentity: currentBuildIdentity(),
+      });
+    }
+
+    let transactionOpened = false;
+    try {
+      // 1. Create VACUUM INTO pre-v22 snapshot for the real file-backed DB.
+      const normalizedMain = nuclearMainFile(db)?.toLowerCase()?.replace(/\\/g, "/");
+      const normalizedProd = NUCLEAR_DB_PATH.toLowerCase().replace(/\\/g, "/");
+      if (normalizedMain === normalizedProd) {
+        mkdirSync(MIGRATION_BACKUPS_DIR, { recursive: true });
+        const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+        const snapshotPath = join(
+          MIGRATION_BACKUPS_DIR,
+          `nuclear-v${priorVersion}-pre22-${stamp}.db`,
+        );
+        try {
+          const escaped = snapshotPath.replace(/'/g, "''");
+          db.exec(`VACUUM INTO '${escaped}'`);
+        } catch (error) {
+          throw new Error(
+            `pre_migration_snapshot_failed:${
+              error instanceof Error ? error.message : "vacuum_failed"
+            }`,
+          );
+        }
+        if (continuity && mirrorRow?.lineage_id) {
+          recordContinuityEvent(continuity, {
+            kind: "migration",
+            lineageId: mirrorRow.lineage_id,
+            detail: {
+              phase: "snapshot",
+              from: priorVersion,
+              to: 22,
+              path: snapshotPath,
+            },
+          });
+        }
+      }
+
+      if (continuity && mirrorRow?.lineage_id) {
+        recordContinuityEvent(continuity, {
+          kind: "migration",
+          lineageId: mirrorRow.lineage_id,
+          detail: { phase: "pending", from: priorVersion, to: 22 },
+        });
+      }
+
+      // 2. Disable foreign keys before the migration transaction and verify it.
+      db.exec("PRAGMA foreign_keys = OFF");
+      const fkStatusOff = db.prepare("PRAGMA foreign_keys").get() as { foreign_keys: number };
+      if (fkStatusOff.foreign_keys !== 0) {
+        throw new Error("nuclear_fk_disable_failed");
+      }
+
+      // 5. BEGIN IMMEDIATE
+      db.exec("BEGIN IMMEDIATE");
+      transactionOpened = true;
+      // 6. Execute v22 structural migration
+      db.exec(MIGRATION_22_RECALL_AUTHORITY_DDL);
+      // 7. PRAGMA user_version = 22
+      db.exec("PRAGMA user_version = 22");
+      // 8. PRAGMA foreign_key_check
+      const fk = db.prepare("PRAGMA foreign_key_check").all();
+      if (fk.length > 0) throw new Error("nuclear_fk_check_failed");
+      // 9. PRAGMA quick_check
+      const qc = db.prepare("PRAGMA quick_check").get() as { quick_check: string };
+      if (qc.quick_check !== "ok") throw new Error("nuclear_quick_check_failed");
+      // 10. COMMIT
+      db.exec("COMMIT");
+      transactionOpened = false;
+
+      // 11. PRAGMA foreign_keys = ON
+      db.exec("PRAGMA foreign_keys = ON");
+      // 12. Verify PRAGMA foreign_keys returns 1
+      const fkStatusOn = db.prepare("PRAGMA foreign_keys").get() as { foreign_keys: number };
+      if (fkStatusOn.foreign_keys !== 1) {
+        throw new Error("nuclear_fk_enable_failed");
+      }
+
+      if (continuity && mirrorRow?.lineage_id) {
+        continuity
+          .prepare(
+            `UPDATE lineage_state SET nuclear_schema_version = 22, updated_at = ? WHERE id = 1`,
+          )
+          .run(new Date().toISOString());
+        recordContinuityEvent(continuity, {
+          kind: "migration",
+          lineageId: mirrorRow.lineage_id,
+          detail: { phase: "success", from: priorVersion, to: 22 },
+        });
+      }
+    } catch (error) {
+      if (transactionOpened) {
+        try {
+          db.exec("ROLLBACK");
+        } catch {
+          /* ignore */
+        }
+      }
+      let foreignKeyRestoreError: Error | null = null;
+      try {
+        db.exec("PRAGMA foreign_keys = ON");
+        const fkStatusOn = db.prepare("PRAGMA foreign_keys").get() as { foreign_keys: number };
+        if (fkStatusOn.foreign_keys !== 1) {
+          throw new Error("nuclear_fk_enable_failed");
+        }
+      } catch (restoreError) {
+        foreignKeyRestoreError = restoreError instanceof Error
+          ? restoreError
+          : new Error("nuclear_fk_enable_failed");
+      }
+      if (continuity && mirrorRow?.lineage_id) {
+        try {
+          recordContinuityEvent(continuity, {
+            kind: "migration",
+            lineageId: mirrorRow.lineage_id,
+            detail: {
+              phase: "failure",
+              from: priorVersion,
+              to: 22,
+              error: error instanceof Error ? error.message : "migration_failed",
+            },
+          });
+        } catch {
+          /* preserve the migration failure if continuity recording also fails */
+        }
+      }
+      if (foreignKeyRestoreError) {
+        throw new Error(
+          `${error instanceof Error ? error.message : "migration_failed"};${foreignKeyRestoreError.message}`,
+          { cause: error },
+        );
       }
       throw error;
     }

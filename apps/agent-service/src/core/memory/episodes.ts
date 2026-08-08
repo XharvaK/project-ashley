@@ -5,6 +5,7 @@ import { reconcileUnsupportedRevisions } from "../learning/revisions.js";
 import { literalLikePattern } from "./facts.js";
 import type { MemoryMessage } from "./threads.js";
 import type { EvidenceProvenance } from "../types.js";
+import { currentReleaseId } from "../rollout/capabilities.js";
 
 export type Episode = {
   id: number;
@@ -155,8 +156,9 @@ export function createEpisode(
     const existing = row(db.prepare(
       `SELECT id FROM episodes
        WHERE owner_id = ? AND thread_id = ?
-         AND source_start_message_id = ? AND source_end_message_id = ?`,
-    ).get(input.ownerId, input.threadId, ids[0], ids[ids.length - 1]));
+         AND source_start_message_id = ? AND source_end_message_id = ?
+         AND provenance = ?`,
+    ).get(input.ownerId, input.threadId, ids[0], ids[ids.length - 1], provenance));
     id = Number(existing?.id ?? 0);
   }
   if (!id) return null;
@@ -238,12 +240,17 @@ export function listUnconsolidatedMessages(
   threadId: string,
   limit = 24,
   targetProvenance?: EvidenceProvenance,
+  releaseId?: string,
 ): MemoryMessage[] {
-  const query = targetProvenance === "live"
-    ? `SELECT MAX(source_end_message_id) AS last_id FROM episodes WHERE owner_id = ? AND thread_id = ? AND provenance = 'live'`
-    : `SELECT MAX(source_end_message_id) AS last_id FROM episodes WHERE owner_id = ? AND thread_id = ?`;
-  const last = row(db.prepare(query).get(ownerId, threadId));
-  const lastId = Number(last?.last_id ?? 0);
+  let lastId = 0;
+  if (targetProvenance === "live") {
+    lastId = liveWatermark(db, ownerId, threadId, releaseId ?? currentReleaseId());
+  } else {
+    const last = row(db.prepare(
+      `SELECT MAX(source_end_message_id) AS last_id FROM episodes WHERE owner_id = ? AND thread_id = ?`
+    ).get(ownerId, threadId));
+    lastId = Number(last?.last_id ?? 0);
+  }
   return db.prepare(
     `SELECT id, thread_id, owner_id, role, text, channel, created_at
      FROM mem_messages
@@ -267,6 +274,40 @@ export function listUnconsolidatedMessages(
       } satisfies MemoryMessage;
     })
     .filter((item): item is MemoryMessage => item !== null);
+}
+
+function liveWatermark(
+  db: DatabaseSync,
+  ownerId: string,
+  threadId: string,
+  releaseId: string,
+): number {
+  const lastEp = row(db.prepare(
+    `SELECT MAX(source_end_message_id) AS last_id
+     FROM episodes
+     WHERE owner_id = ? AND thread_id = ? AND provenance = 'live'`,
+  ).get(ownerId, threadId));
+  const episodeMax = Number(lastEp?.last_id ?? 0);
+  const lastCutover = row(db.prepare(
+    `SELECT COALESCE(MAX(cutoff_message_id), 0) AS cutoff
+     FROM recall_live_cutovers
+     WHERE owner_id = ? AND capability = 'recall' AND release_id = ?`,
+  ).get(ownerId, releaseId));
+  const cutoverMax = Number(lastCutover?.cutoff ?? 0);
+  return Math.max(episodeMax, cutoverMax);
+}
+
+export function liveMessagesRemainEligible(
+  db: DatabaseSync,
+  ownerId: string,
+  threadId: string,
+  messageIds: number[],
+  releaseId = currentReleaseId(),
+): boolean {
+  const ids = [...new Set(messageIds)].filter((id) => Number.isInteger(id) && id > 0);
+  if (ids.length === 0) return true;
+  const watermark = liveWatermark(db, ownerId, threadId, releaseId);
+  return ids.every((id) => id > watermark);
 }
 
 export function forgetEpisodesByIds(

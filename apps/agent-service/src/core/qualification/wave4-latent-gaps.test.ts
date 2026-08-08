@@ -91,6 +91,86 @@ function countRows(db: DatabaseSync, sql: string, ...params: Array<string | numb
   return Number((db.prepare(sql).get(...params) as { c: number }).c);
 }
 
+describe("wave4 Track A — episode cross-provenance identity", () => {
+  beforeEach(() => installFakeClock());
+  afterEach(() => uninstallFakeClock());
+
+  it("GREEN: a live episode and shadow episode covering the same range coexist with distinct IDs", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    try {
+      db.exec(`
+        INSERT INTO mem_threads (id, owner_id, status, channel, created_at, updated_at)
+        VALUES ('thread1', 'doc', 'active', 'discord', '2026', '2026');
+        INSERT INTO mem_messages (id, thread_id, owner_id, role, text, channel, created_at)
+        VALUES (1, 'thread1', 'doc', 'user', 'msg1', 'discord', '2026'),
+               (2, 'thread1', 'doc', 'user', 'msg2', 'discord', '2026');
+      `);
+
+      const shadow = createEpisode(db, {
+        ownerId: "doc",
+        threadId: "thread1",
+        summary: "shadow eps",
+        messageIds: [1, 2],
+        provenance: "shadow"
+      });
+
+      expect(shadow).toBeDefined();
+      expect(shadow!.provenance).toBe("shadow");
+
+      // Shadow+Shadow deduplicates
+      const shadow2 = createEpisode(db, {
+        ownerId: "doc",
+        threadId: "thread1",
+        summary: "shadow eps",
+        messageIds: [1, 2],
+        provenance: "shadow"
+      });
+      expect(shadow2!.id).toBe(shadow!.id);
+
+      const listBefore = listUnconsolidatedMessages(db, "doc", "thread1", 24, "live");
+      expect(listBefore.map(m => m.id)).toEqual([1, 2]);
+
+      const live = createEpisode(db, {
+        ownerId: "doc",
+        threadId: "thread1",
+        summary: "live eps",
+        messageIds: [1, 2],
+        provenance: "live"
+      });
+
+      // Live+Live deduplicates
+      const live2 = createEpisode(db, {
+        ownerId: "doc",
+        threadId: "thread1",
+        summary: "live eps",
+        messageIds: [1, 2],
+        provenance: "live"
+      });
+      expect(live2!.id).toBe(live!.id);
+
+      expect(live).toBeDefined();
+      expect(live!.id).not.toBe(shadow!.id);
+      expect(live!.provenance).toBe("live");
+
+      const shadowReloaded = db.prepare("SELECT provenance FROM episodes WHERE id = ?").get(shadow!.id) as {provenance: string};
+      expect(shadowReloaded.provenance).toBe("shadow");
+
+      // Verify FTS and episode_messages
+      const ftsShadow = db.prepare("SELECT rowid FROM episodes_fts WHERE rowid = ?").get(shadow!.id) as {rowid: number};
+      const ftsLive = db.prepare("SELECT rowid FROM episodes_fts WHERE rowid = ?").get(live!.id) as {rowid: number};
+      expect(ftsShadow.rowid).toBe(shadow!.id);
+      expect(ftsLive.rowid).toBe(live!.id);
+
+      const msgLinks = db.prepare("SELECT episode_id FROM episode_messages WHERE message_id = 1").all() as {episode_id: number}[];
+      const linkedIds = msgLinks.map(l => l.episode_id);
+      expect(linkedIds).toContain(shadow!.id);
+      expect(linkedIds).toContain(live!.id);
+    } finally {
+      db.close();
+    }
+  });
+});
+
 describe("wave4 Track R — identity_reviews authority (CONTROL_PLANE, no defect)", () => {
   beforeEach(() => {
     installFakeClock();

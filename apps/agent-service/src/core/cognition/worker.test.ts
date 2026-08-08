@@ -7,7 +7,8 @@ import { getAffectiveState } from "../state/affect.js";
 import { listActiveMindStateItems } from "../state/mind-items.js";
 import { listRevisions } from "../learning/revisions.js";
 import { listActiveFacts } from "../memory/facts.js";
-import { recordCriticalFailure } from "../rollout/capabilities.js";
+import { currentContractId, recordCriticalFailure } from "../rollout/capabilities.js";
+import { recordRecallLiveCutover } from "../memory/cutover.js";
 import { enqueueCognitiveJob, recoverCognitiveJobs } from "./jobs.js";
 import { processNextCognitiveJob, type CognitionAnalysis } from "./worker.js";
 
@@ -92,6 +93,31 @@ describe("continuous cognition worker", () => {
     expect(getAffectiveState(db, "doc").reason).toBe("neutral baseline");
     expect(listRevisions(db, "doc")).toHaveLength(1);
     db.close();
+  });
+
+  it("does not create a live episode from messages cut over while the job was analyzing", async () => {
+    const { db } = setup();
+    try {
+      const analyze = async () => {
+        db.exec(
+          `INSERT INTO capability_releases
+             (capability, release_id, state, updated_at)
+           VALUES ('recall', '${currentContractId()}', 'active', 'now')`,
+        );
+        expect(recordRecallLiveCutover(db, "doc", {
+          authorizedBy: "doc",
+          masterMode: "observe",
+        }).success).toBe(true);
+        return { analysis, model: "test", raw: "{}" };
+      };
+
+      expect(await processNextCognitiveJob(db, "apply", analyze, allCapabilitiesActive)).toBe(true);
+      expect(
+        db.prepare("SELECT COUNT(*) AS c FROM episodes WHERE provenance = 'live'").get(),
+      ).toEqual({ c: 0 });
+    } finally {
+      db.close();
+    }
   });
 
   it("recovers a job that was running when the process stopped", () => {

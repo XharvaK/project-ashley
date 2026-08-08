@@ -13,7 +13,7 @@ describe("nuclear database migrations", () => {
   it("creates the cognition and Reflection schemas for a fresh database", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
 
-    expect(schemaVersion(db)).toBe(21);
+    expect(schemaVersion(db)).toBe(22);
     const tables = db
       .prepare(
         `SELECT name FROM sqlite_master
@@ -134,7 +134,7 @@ describe("nuclear database migrations", () => {
 
     openNuclearDb(db);
 
-    expect(schemaVersion(db)).toBe(21);
+    expect(schemaVersion(db)).toBe(22);
     const decision = db
       .prepare(
         `SELECT reason, outcome_text, learning_subject_kind,
@@ -220,7 +220,7 @@ describe("nuclear database migrations", () => {
 
     openNuclearDb(db);
 
-    expect(schemaVersion(db)).toBe(21);
+    expect(schemaVersion(db)).toBe(22);
     expect(db.prepare(
       "SELECT wake_state FROM mind_state_items WHERE id = 1",
     ).get()).toMatchObject({ wake_state: "pending" });
@@ -273,7 +273,7 @@ describe("nuclear database migrations", () => {
 
     openNuclearDb(db);
 
-    expect(schemaVersion(db)).toBe(21);
+    expect(schemaVersion(db)).toBe(22);
     expect(db.prepare(
       "SELECT evidence_kind, read_id FROM cur_takes WHERE id = 1",
     ).get()).toMatchObject({ evidence_kind: "scan_excerpt", read_id: null });
@@ -310,13 +310,18 @@ describe("nuclear database migrations", () => {
       DROP INDEX IF EXISTS idx_learning_revisions_provenance;
       DROP INDEX IF EXISTS idx_cur_source_candidates_provenance;
     `);
-    for (const table of ["cur_takes", "cur_reads", "episodes", "learning_revisions", "cur_source_candidates"]) {
+    for (const table of ["cur_takes", "cur_reads", "learning_revisions", "cur_source_candidates"]) {
       db.exec(`ALTER TABLE ${table} DROP COLUMN provenance`);
     }
+    db.exec(`
+      DROP TABLE IF EXISTS recall_live_cutovers;
+      DROP TABLE episodes;
+      CREATE TABLE episodes (id INTEGER PRIMARY KEY AUTOINCREMENT, owner_id TEXT NOT NULL, thread_id TEXT NOT NULL REFERENCES mem_threads(id), summary TEXT NOT NULL, entities TEXT NOT NULL DEFAULT '', source_start_message_id INTEGER NOT NULL REFERENCES mem_messages(id), source_end_message_id INTEGER NOT NULL REFERENCES mem_messages(id), salience REAL NOT NULL DEFAULT 0.5, unresolved INTEGER NOT NULL DEFAULT 0 CHECK (unresolved IN (0, 1)), status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'forgotten')), created_at TEXT NOT NULL, updated_at TEXT NOT NULL, entity_uuid TEXT, data_classification TEXT, UNIQUE(owner_id, thread_id, source_start_message_id, source_end_message_id));
+    `);
 
     openNuclearDb(db);
 
-    expect(schemaVersion(db)).toBe(21);
+    expect(schemaVersion(db)).toBe(22);
     expect(db.prepare("SELECT kind FROM motivations WHERE id = 1").get())
       .toMatchObject({ kind: "opinion" });
     expect(db.prepare("SELECT decision_kind FROM decision_log WHERE id = ?").get(decisionId))
@@ -331,9 +336,10 @@ describe("nuclear database migrations", () => {
     const db = new DatabaseSync(":memory:");
     // Minimal v9-shaped state: sticky focus without own_time_sessions.
     openNuclearDb(db);
-    expect(schemaVersion(db)).toBe(21);
+    expect(schemaVersion(db)).toBe(22);
     db.exec("PRAGMA user_version = 9");
     db.exec("DROP TABLE IF EXISTS own_time_sessions");
+    db.exec("DROP TABLE IF EXISTS recall_live_cutovers");
     db.exec(`
       DROP INDEX IF EXISTS idx_cur_takes_provenance;
       DROP INDEX IF EXISTS idx_cur_reads_provenance;
@@ -341,9 +347,13 @@ describe("nuclear database migrations", () => {
       DROP INDEX IF EXISTS idx_learning_revisions_provenance;
       DROP INDEX IF EXISTS idx_cur_source_candidates_provenance;
     `);
-    for (const table of ["cur_takes", "cur_reads", "episodes", "learning_revisions", "cur_source_candidates"]) {
+    for (const table of ["cur_takes", "cur_reads", "learning_revisions", "cur_source_candidates"]) {
       db.exec(`ALTER TABLE ${table} DROP COLUMN provenance`);
     }
+    db.exec(`
+      DROP TABLE episodes;
+      CREATE TABLE episodes (id INTEGER PRIMARY KEY AUTOINCREMENT, owner_id TEXT NOT NULL, thread_id TEXT NOT NULL REFERENCES mem_threads(id), summary TEXT NOT NULL, entities TEXT NOT NULL DEFAULT '', source_start_message_id INTEGER NOT NULL REFERENCES mem_messages(id), source_end_message_id INTEGER NOT NULL REFERENCES mem_messages(id), salience REAL NOT NULL DEFAULT 0.5, unresolved INTEGER NOT NULL DEFAULT 0 CHECK (unresolved IN (0, 1)), status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'forgotten')), created_at TEXT NOT NULL, updated_at TEXT NOT NULL, entity_uuid TEXT, data_classification TEXT, UNIQUE(owner_id, thread_id, source_start_message_id, source_end_message_id));
+    `);
     db.prepare(
       `INSERT INTO internal_state
          (owner_id, focus, mood, unfinished_json, availability, last_decision_id, updated_at)
@@ -354,7 +364,7 @@ describe("nuclear database migrations", () => {
 
     openNuclearDb(db);
 
-    expect(schemaVersion(db)).toBe(21);
+    expect(schemaVersion(db)).toBe(22);
     expect(
       db.prepare(
         `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'own_time_sessions'`,

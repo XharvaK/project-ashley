@@ -44,7 +44,9 @@ export type CapabilityEventKind =
   | "live_shadow"
   | "behavioral_breach"
   | "critical_failure"
-  | "operator_promote";
+  | "operator_promote"
+  | "operator_rollback"
+  | "operator_cutover";
 
 const dependencies: Record<CapabilityName, CapabilityName[]> = {
   recall: [],
@@ -645,4 +647,177 @@ export function capabilityCanInfluence(
   if (masterMode !== "apply") return false;
   return releaseState(db, capability, releaseId) === "active" &&
     capabilityInfluenceDependenciesReady(db, capability, releaseId);
+}
+
+export function operatorRollbackCapability(
+  db: DatabaseSync,
+  capability: CapabilityName,
+  input: { authorizedBy: string; releaseId?: string },
+): { success: boolean; status: string; message: string } {
+  const releaseId = input.releaseId ?? currentReleaseId();
+  const authorizedBy = input.authorizedBy.trim();
+  if (!authorizedBy) {
+    return {
+      success: false,
+      status: "authorization_required",
+      message: "authorization required",
+    };
+  }
+  if (contractMismatch(db)) {
+    return {
+      success: false,
+      status: "contract_mismatch",
+      message: "contract mismatch",
+    };
+  }
+  const current = releaseState(db, capability, releaseId);
+  if (current === "rolled_back") {
+    return { success: true, status: "already_rolled_back", message: "capability already rolled back" };
+  }
+  if (current !== "active") {
+    return {
+      success: false,
+      status: "not_active",
+      message: "capability must be active to roll back",
+    };
+  }
+
+  db.exec("BEGIN IMMEDIATE");
+  let transactionOpen = true;
+  try {
+    const updated = db.prepare(
+      `UPDATE capability_releases SET state = 'rolled_back', rolled_back_at = ?, updated_at = ?
+       WHERE capability = ? AND release_id = ? AND state = 'active'`,
+    ).run(new Date().toISOString(), new Date().toISOString(), capability, releaseId);
+    if (updated.changes !== 1) {
+      throw new Error("rollback_state_changed");
+    }
+
+    const recorded = recordEvent(db, {
+      capability,
+      releaseId,
+      kind: "operator_rollback",
+      sourceKey: `operator_rollback:${capability}:${releaseId}`,
+      detail: { authorizedBy },
+    });
+    if (!recorded) {
+      throw new Error("operator_rollback_audit_not_recorded");
+    }
+    db.exec("COMMIT");
+    transactionOpen = false;
+  } catch (error) {
+    if (transactionOpen) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        /* preserve the original failure */
+      }
+    }
+    throw error;
+  }
+
+  return { success: true, status: "rolled_back", message: "capability successfully rolled back" };
+}
+
+export type CutoverResult = {
+  success: boolean;
+  status: "cutover_recorded" | "already_cutover" | "not_active" | "not_observe" | "contract_mismatch";
+  cutoffMessageId?: number;
+  message: string;
+};
+
+/**
+ * Freeze the current owner's historical Recall boundary and its audit event
+ * in one control-plane transaction.
+ */
+export function recordRecallLiveCutover(
+  db: DatabaseSync,
+  ownerId: string,
+  input: { authorizedBy: string; masterMode?: string },
+): CutoverResult {
+  const normalizedOwnerId = ownerId.trim();
+  if (!normalizedOwnerId) {
+    throw new Error("cutover_requires_owner");
+  }
+  const authorizedBy = input.authorizedBy.trim();
+  if (!authorizedBy) {
+    throw new Error("cutover_requires_authorization");
+  }
+
+  const masterMode = input.masterMode ?? env.cognitionMode;
+  const releaseId = currentContractId();
+
+  db.exec("BEGIN IMMEDIATE");
+  let transactionOpen = true;
+  try {
+    if (contractMismatch(db)) {
+      db.exec("COMMIT");
+      transactionOpen = false;
+      return { success: false, status: "contract_mismatch", message: "contract mismatch" };
+    }
+
+    const state = releaseState(db, "recall", releaseId);
+    if (state !== "active") {
+      db.exec("COMMIT");
+      transactionOpen = false;
+      return { success: false, status: "not_active", message: "recall must be active to record a cutover" };
+    }
+
+    if (masterMode !== "observe") {
+      db.exec("COMMIT");
+      transactionOpen = false;
+      return { success: false, status: "not_observe", message: "masterMode must be observe to record a cutover" };
+    }
+
+    const existing = db.prepare(
+      `SELECT cutoff_message_id
+       FROM recall_live_cutovers
+       WHERE owner_id = ? AND capability = 'recall' AND release_id = ?`,
+    ).get(normalizedOwnerId, releaseId) as { cutoff_message_id: number } | undefined;
+
+    if (existing !== undefined) {
+      db.exec("COMMIT");
+      transactionOpen = false;
+      return {
+        success: true,
+        status: "already_cutover",
+        cutoffMessageId: existing.cutoff_message_id,
+        message: "cutover already recorded for this release",
+      };
+    }
+
+    const maxRow = db.prepare(
+      "SELECT COALESCE(MAX(id), 0) AS max_id FROM mem_messages WHERE owner_id = ?",
+    ).get(normalizedOwnerId) as { max_id: number };
+    const cutoff = Number(maxRow.max_id ?? 0);
+    const buildIdentity = currentBuildIdentity();
+    db.prepare(
+      `INSERT INTO recall_live_cutovers
+         (owner_id, capability, release_id, cutoff_message_id, authorized_by, contract_id, build_identity, created_at)
+       VALUES (?, 'recall', ?, ?, ?, ?, ?, ?)`,
+    ).run(normalizedOwnerId, releaseId, cutoff, authorizedBy, releaseId, buildIdentity, new Date().toISOString());
+
+    const recorded = recordEvent(db, {
+      capability: "recall",
+      releaseId,
+      kind: "operator_cutover",
+      sourceKey: `operator_cutover:${normalizedOwnerId}:${releaseId}`,
+      detail: { authorizedBy, cutoffMessageId: cutoff, ownerId: normalizedOwnerId },
+    });
+    if (!recorded) {
+      throw new Error("operator_cutover_audit_not_recorded");
+    }
+    db.exec("COMMIT");
+    transactionOpen = false;
+    return { success: true, status: "cutover_recorded", cutoffMessageId: cutoff, message: "cutover recorded" };
+  } catch (error) {
+    if (transactionOpen) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        /* preserve the original failure */
+      }
+    }
+    throw error;
+  }
 }

@@ -1,7 +1,11 @@
 import type { DatabaseSync } from "node:sqlite";
 import { env } from "../../env.js";
 import { completeChat } from "../../mistral-client.js";
-import { createEpisode, listUnconsolidatedMessages } from "../memory/episodes.js";
+import {
+  createEpisode,
+  listUnconsolidatedMessages,
+  liveMessagesRemainEligible,
+} from "../memory/episodes.js";
 import { upsertFact, type FactCategory } from "../memory/facts.js";
 import { applyAffectiveEvent, decayAffect } from "../state/affect.js";
 import { upsertMindStateItem } from "../state/mind-items.js";
@@ -13,6 +17,7 @@ import {
   capabilityCanExecuteShadow,
   capabilityShadowDependenciesReady,
   recordLiveShadowEvent,
+  currentContractId,
   type CapabilityName,
 } from "../rollout/capabilities.js";
 import {
@@ -324,7 +329,7 @@ export async function processNextCognitiveJob(
     }
     const threadId = String(job.payload.threadId ?? "");
     const targetProvenance = canInfluence("recall") ? "live" : "shadow";
-    const messages = listUnconsolidatedMessages(db, job.ownerId, threadId, 24, targetProvenance);
+    const messages = listUnconsolidatedMessages(db, job.ownerId, threadId, 24, targetProvenance, currentContractId());
     if (messages.length < 2) {
       completeJob(db, job.id);
       return true;
@@ -343,6 +348,30 @@ export async function processNextCognitiveJob(
           job,
           { threadId, messageIds: messages.map((message) => message.id) },
           {},
+          "completed",
+          result.model,
+          null,
+          null,
+        );
+        completeJob(db, job.id);
+        db.exec("COMMIT");
+        return true;
+      }
+      if (
+        recallCanInfluence &&
+        !liveMessagesRemainEligible(
+          db,
+          job.ownerId,
+          threadId,
+          messages.map((message) => message.id),
+          currentContractId(),
+        )
+      ) {
+        logRun(
+          db,
+          job,
+          { threadId, messageIds: messages.map((message) => message.id) },
+          { skipped: "stale_live_watermark" },
           "completed",
           result.model,
           null,
