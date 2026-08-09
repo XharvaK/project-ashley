@@ -50,7 +50,7 @@ The initiative MUST NOT:
 - turn shadow evidence into live evidence by time passing;
 - introduce a production capability, production migration, sandbox/MCP path, provider path, routing path, or Recall promotion path.
 
-## Current repository evidence
+## Baseline repository evidence before INIT-03
 
 The verified local baseline is:
 
@@ -70,6 +70,28 @@ The current agency motivation reader already reads questions, curiosity takes, f
 The current runtime has atomic proactive reservation and delivery. INIT-03 MUST preserve that transaction boundary and MUST NOT treat delivery success as semantic resolution.
 
 The current Reflection initiative seam learns from proactive outcomes. INIT-03 MAY add bounded unresolved-item review requests to that seam, but MUST NOT replace or weaken existing outcome learning.
+
+## As-built local evidence after Wave 12
+
+The verified local implementation state is:
+
+- checkout: C:/Users/Xharv/Projects/composer-assistant;
+- branch: master;
+- source implementation HEAD before Wave 12 documentation: 9bf88d6d4bca6226d77a134d018f981a476af84b;
+- origin/master: 7d686f4d384da97b1d4d00fb26dedf95b82bbdce;
+- pre-existing dirty path preserved: AGENTS.md only;
+- nuclear schema version: 23;
+- OCI tables: `open_cognitive_items`, `open_cognitive_item_attention`, and `open_cognitive_item_transitions`;
+- OCI kinds: `question`, `revisit`, `concern`;
+- OCI statuses: `OPEN`, `RESOLVED`, `WITHDRAWN`, `SUPERSEDED`;
+- proactive score/material floor: 25, unchanged;
+- proactive OCI projection: at most 8 owner-scoped rows per wake; reactive motivation selection remains capped at 12 candidates;
+- wake review check: indexed review-due count; full OCI status is read only for owner diagnostics or no-material diagnostic selection;
+- full guarded offline qualification: 112 test files, 797 passed, 1 skipped;
+- agent-service and discord-bot builds: passed;
+- production, Mint, Recall promotion, deployment, provider calls, Discord traffic, and push: none.
+
+The schema-23 migration was introduced by the OCI foundation before the final qualification waves. Four stale v22 test assertions were aligned with that current schema in a separate qualification commit.
 
 ## Four-layer model
 

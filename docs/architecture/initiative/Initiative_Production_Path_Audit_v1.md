@@ -6,6 +6,12 @@ Scope: local source and disposable-test qualification for
 AUTONOMY-PLUMBING-01. No Mint host, production database, live key, provider,
 Discord gateway, deployment, or sandbox activation was used.
 
+Historical scope note: this document is an AUTONOMY-PLUMBING-01 audit snapshot.
+INIT-03 later added local Open Cognitive Item source projections and diagnostics.
+Use INIT03_Persistent_Cognitive_Continuity_Contract_v1.md and
+INIT03_Implementation_and_Qualification_Report_v1.md for current INIT-03
+evidence. The producer statements below are not a current INIT-03 inventory.
+
 ## Decision
 
 - INITIATIVE PATH: PASS for bounded local diagnosis and source correction.
