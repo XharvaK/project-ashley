@@ -1,0 +1,17 @@
+{
+  "name": "@ashley-spike/p01b-mastra",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "test": "node src/test-runner.mjs"
+  },
+  "dependencies": {
+    "@mastra/core": "1.57.0",
+    "@mastra/libsql": "1.19.0",
+    "zod": "4.4.3"
+  }
+}
