@@ -8,11 +8,17 @@ import {
   NUCLEAR_DB_PATH,
 } from "../paths.js";
 import {
+  beginNuclearMigration,
   ensureAuthoritativeLineage,
+  finalizeNuclearMigration,
+  getPendingNuclearMigration,
+  markNuclearMigrationCommitted,
   openContinuityDb,
   recordContinuityEvent,
+  rollbackNuclearMigration,
   requireLineageMatch,
   requireSidecarLineageForNuclearMirror,
+  type NuclearMigrationDescriptor,
 } from "./continuity/db.js";
 import { ensureEntityUuidAndClassification } from "./continuity/nuclear-targetable.js";
 import { registerContinuityFor, getContinuityFor, getContinuityForNuclearPath } from "./continuity/registry.js";
@@ -1042,15 +1048,158 @@ function userVersion(db: DatabaseSync): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
+function nuclearLineageMirrorId(db: DatabaseSync): string | null {
+  const row = db
+    .prepare(`SELECT lineage_id FROM lineage_mirror WHERE id = 1`)
+    .get() as { lineage_id?: string } | undefined;
+  const lineageId = row?.lineage_id?.trim() ?? "";
+  return lineageId.length > 0 ? lineageId : null;
+}
+
+function reconcilePendingNuclearMigration(
+  db: DatabaseSync,
+  continuity: DatabaseSync,
+): void {
+  const pending = getPendingNuclearMigration(continuity);
+  if (!pending) return;
+  if (
+    pending.to !== 23 &&
+    pending.to !== 24
+  ) {
+    throw new Error("continuity_pending_migration_unsupported");
+  }
+  const mirrorLineageId = nuclearLineageMirrorId(db);
+  if (!mirrorLineageId) {
+    throw new Error("nuclear_lineage_mirror_missing");
+  }
+  if (mirrorLineageId !== pending.lineageId) {
+    throw new Error("continuity_lineage_mismatch");
+  }
+  const actualVersion = userVersion(db);
+  const descriptor: NuclearMigrationDescriptor = {
+    from: pending.from,
+    to: pending.to,
+    lineageId: pending.lineageId,
+    buildIdentity: pending.buildIdentity,
+  };
+  if (actualVersion === pending.from) {
+    rollbackNuclearMigration(continuity, descriptor);
+    return;
+  }
+  if (actualVersion === pending.to) {
+    finalizeNuclearMigration(continuity, descriptor, "recovered");
+    return;
+  }
+  throw new Error(
+    `continuity_pending_migration_version_mismatch:${actualVersion}`,
+  );
+}
+
+function migrateNuclearSchemaWithProtocol(input: {
+  db: DatabaseSync;
+  continuity?: DatabaseSync;
+  descriptor?: NuclearMigrationDescriptor;
+  targetVersion: number;
+  ddl: string;
+  testFailAfterNuclearCommitBeforeContinuityFinalization?: boolean;
+}): void {
+  const {
+    db,
+    continuity,
+    descriptor,
+    targetVersion,
+    ddl,
+    testFailAfterNuclearCommitBeforeContinuityFinalization,
+  } = input;
+  const sidecarEnabled = continuity !== undefined && descriptor !== undefined;
+  if (sidecarEnabled) {
+    beginNuclearMigration(continuity, descriptor);
+  }
+  let transactionOpened = false;
+  try {
+    db.exec("BEGIN IMMEDIATE");
+    transactionOpened = true;
+    if (targetVersion === 24) {
+      const columns = new Set(
+        (
+          db.prepare("PRAGMA table_info(open_cognitive_items)").all() as Array<{
+            name?: string;
+          }>
+        ).map((column) => column.name),
+      );
+      if (!columns.has("model_identity")) {
+        db.exec(ddl);
+      }
+    } else {
+      db.exec(ddl);
+    }
+    db.exec(`PRAGMA user_version = ${targetVersion}`);
+    const fk = db.prepare("PRAGMA foreign_key_check").all();
+    if (fk.length > 0) throw new Error("nuclear_fk_check_failed");
+    const integrity = db.prepare("PRAGMA quick_check").get() as
+      | { quick_check?: string }
+      | undefined;
+    if (
+      integrity &&
+      typeof integrity.quick_check === "string" &&
+      integrity.quick_check !== "ok"
+    ) {
+      throw new Error("nuclear_integrity_failed:" + integrity.quick_check);
+    }
+    db.exec("COMMIT");
+    transactionOpened = false;
+
+    if (sidecarEnabled) {
+      markNuclearMigrationCommitted(continuity, descriptor);
+      if (testFailAfterNuclearCommitBeforeContinuityFinalization) {
+        throw new Error(
+          "test_fault_after_nuclear_commit_before_continuity_finalization",
+        );
+      }
+      finalizeNuclearMigration(continuity, descriptor);
+    }
+  } catch (error) {
+    if (transactionOpened) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        /* preserve the original migration failure */
+      }
+    }
+    if (sidecarEnabled) {
+      try {
+        recordContinuityEvent(continuity, {
+          kind: "migration",
+          lineageId: descriptor.lineageId,
+          detail: {
+            phase: "failure",
+            from: descriptor.from,
+            to: descriptor.to,
+            error: error instanceof Error ? error.message : "migration_failed",
+          },
+        });
+      } catch {
+        /* preserve the migration failure if continuity recording also fails */
+      }
+    }
+    throw error;
+  }
+}
+
 export function migrate(
   db: DatabaseSync,
   options: {
     continuity?: DatabaseSync;
     skipContinuityRequirement?: boolean;
+    /** Test-only fault injection after nuclear commit and before sidecar finalization. */
+    testFailAfterNuclearCommitBeforeContinuityFinalization?: boolean;
   } = {},
 ): void {
   db.exec("PRAGMA foreign_keys = ON");
   const version = userVersion(db);
+  if (options.continuity) {
+    reconcilePendingNuclearMigration(db, options.continuity);
+  }
   if (version > NUCLEAR_SUPPORTED_VERSION) {
     throw new Error(
       `unsupported_nuclear_schema:${version}>${NUCLEAR_SUPPORTED_VERSION}`,
@@ -2229,102 +2378,54 @@ export function migrate(
       throw new Error("continuity_unavailable");
     }
     const priorVersion = userVersion(db);
-    const mirrorRow = db
-      .prepare("SELECT lineage_id FROM lineage_mirror WHERE id = 1")
-      .get() as { lineage_id?: string } | undefined;
     const lineageId =
-      mirrorRow?.lineage_id ??
+      nuclearLineageMirrorId(db) ??
       (options.skipContinuityRequirement ? "test-lineage" : undefined);
     if (!lineageId) {
       throw new Error("nuclear_lineage_mirror_missing");
     }
-    if (continuity && mirrorRow?.lineage_id) {
-      requireSidecarLineageForNuclearMirror(continuity, mirrorRow.lineage_id, {
-        nuclearSchemaVersion: priorVersion,
-        buildIdentity: currentBuildIdentity(),
-      });
-      recordContinuityEvent(continuity, {
-        kind: "migration",
-        lineageId: mirrorRow.lineage_id,
-        detail: { phase: "pending", from: priorVersion, to: 23 },
-      });
-    }
-    db.exec("BEGIN IMMEDIATE");
-    try {
-      db.exec(MIGRATION_23_OPEN_COGNITIVE_ITEMS_DDL);
-      db.exec("PRAGMA user_version = 23");
-      const fk = db.prepare("PRAGMA foreign_key_check").all();
-      if (fk.length > 0) throw new Error("nuclear_fk_check_failed");
-      const integrity = db.prepare("PRAGMA quick_check").get() as
-        | { quick_check?: string }
-        | undefined;
-      if (
-        integrity &&
-        typeof integrity.quick_check === "string" &&
-        integrity.quick_check !== "ok"
-      ) {
-        throw new Error("nuclear_integrity_failed:" + integrity.quick_check);
-      }
-      db.exec("COMMIT");
-      if (continuity && mirrorRow?.lineage_id) {
-        continuity
-          .prepare(
-            "UPDATE lineage_state SET nuclear_schema_version = 23, updated_at = ? WHERE id = 1",
-          )
-          .run(new Date().toISOString());
-        recordContinuityEvent(continuity, {
-          kind: "migration",
-          lineageId: mirrorRow.lineage_id,
-          detail: { phase: "success", from: priorVersion, to: 23 },
-        });
-      }
-    } catch (error) {
-      try {
-        db.exec("ROLLBACK");
-      } catch {
-        /* ignore */
-      }
-      if (continuity && mirrorRow?.lineage_id) {
-        recordContinuityEvent(continuity, {
-          kind: "migration",
-          lineageId: mirrorRow.lineage_id,
-          detail: {
-            phase: "failure",
-            from: priorVersion,
-            to: 23,
-            error: error instanceof Error ? error.message : "migration_failed",
-          },
-        });
-      }
-      throw error;
-    }
+    migrateNuclearSchemaWithProtocol({
+      db,
+      continuity: continuity && nuclearLineageMirrorId(db) ? continuity : undefined,
+      targetVersion: 23,
+      descriptor:
+        continuity && nuclearLineageMirrorId(db)
+          ? {
+              from: priorVersion,
+              to: 23,
+              lineageId,
+              buildIdentity: currentBuildIdentity(),
+            }
+          : undefined,
+      ddl: MIGRATION_23_OPEN_COGNITIVE_ITEMS_DDL,
+      testFailAfterNuclearCommitBeforeContinuityFinalization:
+        options.testFailAfterNuclearCommitBeforeContinuityFinalization,
+    });
   }
   if (userVersion(db) < 24) {
-    db.exec("BEGIN IMMEDIATE");
-    try {
-      db.exec(MIGRATION_24_OPEN_COGNITIVE_ITEMS_DDL);
-      db.exec("PRAGMA user_version = 24");
-      const fk = db.prepare("PRAGMA foreign_key_check").all();
-      if (fk.length > 0) throw new Error("nuclear_fk_check_failed");
-      const integrity = db.prepare("PRAGMA quick_check").get() as
-        | { quick_check?: string }
-        | undefined;
-      if (
-        integrity &&
-        typeof integrity.quick_check === "string" &&
-        integrity.quick_check !== "ok"
-      ) {
-        throw new Error("nuclear_integrity_failed:" + integrity.quick_check);
-      }
-      db.exec("COMMIT");
-    } catch (error) {
-      try {
-        db.exec("ROLLBACK");
-      } catch {
-        /* preserve the original migration failure */
-      }
-      throw error;
+    const continuity = options.continuity;
+    const priorVersion = userVersion(db);
+    const lineageId = nuclearLineageMirrorId(db);
+    if (!continuity && !options.skipContinuityRequirement) {
+      throw new Error("continuity_unavailable");
     }
+    migrateNuclearSchemaWithProtocol({
+      db,
+      continuity: continuity && lineageId ? continuity : undefined,
+      targetVersion: 24,
+      descriptor:
+        continuity && lineageId
+          ? {
+              from: priorVersion,
+              to: 24,
+              lineageId,
+              buildIdentity: currentBuildIdentity(),
+            }
+          : undefined,
+      ddl: MIGRATION_24_OPEN_COGNITIVE_ITEMS_DDL,
+      testFailAfterNuclearCommitBeforeContinuityFinalization:
+        options.testFailAfterNuclearCommitBeforeContinuityFinalization,
+    });
   }
   db.exec(MIGRATION_24_OPEN_COGNITIVE_WAKE_CURSOR_DDL);
   if (!options.skipContinuityRequirement && userVersion(db) >= 15) {
@@ -2349,6 +2450,8 @@ export type OpenNuclearOptions = {
   continuity?: DatabaseSync;
   /** When true, migrate without opening default continuity path (tests). */
   continuityOptional?: boolean;
+  /** Test-only fault injection after nuclear commit and before sidecar finalization. */
+  testFailAfterNuclearCommitBeforeContinuityFinalization?: boolean;
 };
 
 function nuclearMainFile(db: DatabaseSync): string | null {
@@ -2377,6 +2480,8 @@ export function openNuclearDb(
     migrate(existing, {
       continuity,
       skipContinuityRequirement: options.continuityOptional && !continuity,
+      testFailAfterNuclearCommitBeforeContinuityFinalization:
+        options.testFailAfterNuclearCommitBeforeContinuityFinalization,
     });
     reconcileSandboxApprovals(existing);
     if (continuity) registerContinuityFor(existing, continuity, mainFile);
@@ -2390,7 +2495,11 @@ export function openNuclearDb(
     getContinuityForNuclearPath(NUCLEAR_DB_PATH) ??
     (options.continuityOptional ? undefined : openContinuityDb());
   const db = new DatabaseSync(NUCLEAR_DB_PATH);
-  migrate(db, { continuity });
+  migrate(db, {
+    continuity,
+    testFailAfterNuclearCommitBeforeContinuityFinalization:
+      options.testFailAfterNuclearCommitBeforeContinuityFinalization,
+  });
   reconcileSandboxApprovals(db);
   if (continuity) registerContinuityFor(db, continuity, NUCLEAR_DB_PATH);
   return db;

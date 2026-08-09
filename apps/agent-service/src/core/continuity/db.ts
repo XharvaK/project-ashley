@@ -6,6 +6,27 @@ import { CONTINUITY_DB_PATH, DATA_DIR } from "../../paths.js";
 
 export const CONTINUITY_SCHEMA_VERSION = 1;
 
+export type NuclearMigrationPhase =
+  | "pending"
+  | "nuclear_committed"
+  | "recovered"
+  | "rolled_back";
+
+export type PendingNuclearMigration = {
+  from: number;
+  to: number;
+  lineageId: string;
+  buildIdentity: string;
+  phase: NuclearMigrationPhase;
+};
+
+export type NuclearMigrationDescriptor = Omit<
+  PendingNuclearMigration,
+  "phase"
+>;
+
+const PENDING_NUCLEAR_MIGRATION_KEY = "pending_nuclear_migration";
+
 const CONTINUITY_SCHEMA = `
 PRAGMA foreign_keys = ON;
 
@@ -125,6 +146,296 @@ function userVersion(db: DatabaseSync): number {
   }
   const value = (row as { user_version: unknown }).user_version;
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function withContinuityTransaction<T>(
+  db: DatabaseSync,
+  operation: () => T,
+): T {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const result = operation();
+    db.exec("COMMIT");
+    return result;
+  } catch (error) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      /* preserve the original sidecar failure */
+    }
+    throw error;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function parsePendingNuclearMigration(value: string): PendingNuclearMigration {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value) as unknown;
+  } catch {
+    throw new Error("continuity_pending_migration_invalid");
+  }
+  if (
+    !isRecord(parsed) ||
+    !Number.isSafeInteger(parsed.from) ||
+    !Number.isSafeInteger(parsed.to) ||
+    typeof parsed.lineageId !== "string" ||
+    parsed.lineageId.trim() === "" ||
+    typeof parsed.buildIdentity !== "string" ||
+    parsed.buildIdentity.trim() === "" ||
+    !["pending", "nuclear_committed", "recovered", "rolled_back"].includes(
+      parsed.phase as string,
+    )
+  ) {
+    throw new Error("continuity_pending_migration_invalid");
+  }
+  return {
+    from: parsed.from as number,
+    to: parsed.to as number,
+    lineageId: parsed.lineageId as string,
+    buildIdentity: parsed.buildIdentity as string,
+    phase: parsed.phase as NuclearMigrationPhase,
+  };
+}
+
+function readPendingNuclearMigration(
+  continuity: DatabaseSync,
+): PendingNuclearMigration | null {
+  const row = continuity
+    .prepare(`SELECT value FROM continuity_meta WHERE key = ?`)
+    .get(PENDING_NUCLEAR_MIGRATION_KEY) as { value?: string } | undefined;
+  if (!row?.value) return null;
+  return parsePendingNuclearMigration(row.value);
+}
+
+function validateNuclearMigrationDescriptor(
+  input: NuclearMigrationDescriptor,
+): void {
+  if (
+    !Number.isSafeInteger(input.from) ||
+    input.from < 0 ||
+    !Number.isSafeInteger(input.to) ||
+    input.to !== input.from + 1 ||
+    input.lineageId.trim() === "" ||
+    input.buildIdentity.trim() === ""
+  ) {
+    throw new Error("continuity_migration_descriptor_invalid");
+  }
+}
+
+function sameNuclearMigration(
+  a: PendingNuclearMigration,
+  b: NuclearMigrationDescriptor,
+): boolean {
+  return (
+    a.from === b.from &&
+    a.to === b.to &&
+    a.lineageId === b.lineageId &&
+    a.buildIdentity === b.buildIdentity
+  );
+}
+
+function migrationMetaValue(
+  input: NuclearMigrationDescriptor,
+  phase: NuclearMigrationPhase,
+): string {
+  return JSON.stringify({ ...input, phase });
+}
+
+function lineageState(
+  continuity: DatabaseSync,
+): { lineageId: string; nuclearSchemaVersion: number } {
+  const row = continuity
+    .prepare(
+      `SELECT lineage_id, nuclear_schema_version
+       FROM lineage_state WHERE id = 1`,
+    )
+    .get() as
+    | { lineage_id?: string; nuclear_schema_version?: number }
+    | undefined;
+  if (
+    !row?.lineage_id ||
+    typeof row.nuclear_schema_version !== "number" ||
+    !Number.isSafeInteger(row.nuclear_schema_version)
+  ) {
+    throw new Error("continuity_lineage_missing");
+  }
+  return {
+    lineageId: row.lineage_id,
+    nuclearSchemaVersion: row.nuclear_schema_version,
+  };
+}
+
+/** Read the durable sidecar migration record, if one exists. */
+export function getPendingNuclearMigration(
+  continuity: DatabaseSync,
+): PendingNuclearMigration | null {
+  return readPendingNuclearMigration(continuity);
+}
+
+/**
+ * Commit a migration intent before changing nuclear schema state.
+ * The sidecar version must still identify the source schema.
+ */
+export function beginNuclearMigration(
+  continuity: DatabaseSync,
+  input: NuclearMigrationDescriptor,
+): void {
+  validateNuclearMigrationDescriptor(input);
+  withContinuityTransaction(continuity, () => {
+    const existing = readPendingNuclearMigration(continuity);
+    if (existing) {
+      throw new Error("continuity_migration_pending");
+    }
+    const state = lineageState(continuity);
+    if (state.lineageId !== input.lineageId) {
+      throw new Error("continuity_lineage_mismatch");
+    }
+    if (state.nuclearSchemaVersion !== input.from) {
+      throw new Error(
+        `continuity_schema_version_mismatch:${state.nuclearSchemaVersion}!=${input.from}`,
+      );
+    }
+    const now = new Date().toISOString();
+    continuity
+      .prepare(
+        `INSERT INTO continuity_meta (key, value)
+         VALUES (?, ?)`,
+      )
+      .run(PENDING_NUCLEAR_MIGRATION_KEY, migrationMetaValue(input, "pending"));
+    recordContinuityEvent(continuity, {
+      kind: "migration",
+      lineageId: input.lineageId,
+      occurredAt: now,
+      detail: {
+        phase: "pending",
+        from: input.from,
+        to: input.to,
+        buildIdentity: input.buildIdentity,
+      },
+    });
+  });
+}
+
+/** Mark the nuclear transaction durable while keeping the record recoverable. */
+export function markNuclearMigrationCommitted(
+  continuity: DatabaseSync,
+  input: NuclearMigrationDescriptor,
+): void {
+  validateNuclearMigrationDescriptor(input);
+  withContinuityTransaction(continuity, () => {
+    const existing = readPendingNuclearMigration(continuity);
+    if (!existing || !sameNuclearMigration(existing, input)) {
+      throw new Error("continuity_migration_pending_mismatch");
+    }
+    if (existing.phase !== "pending") {
+      throw new Error("continuity_migration_phase_invalid");
+    }
+    continuity
+      .prepare(`UPDATE continuity_meta SET value = ? WHERE key = ?`)
+      .run(
+        migrationMetaValue(input, "nuclear_committed"),
+        PENDING_NUCLEAR_MIGRATION_KEY,
+      );
+    recordContinuityEvent(continuity, {
+      kind: "migration",
+      lineageId: input.lineageId,
+      detail: {
+        phase: "nuclear_committed",
+        from: input.from,
+        to: input.to,
+        buildIdentity: input.buildIdentity,
+      },
+    });
+  });
+}
+
+/** Finalize the sidecar after the nuclear schema has reached the target. */
+export function finalizeNuclearMigration(
+  continuity: DatabaseSync,
+  input: NuclearMigrationDescriptor,
+  phase: "success" | "recovered" = "success",
+): void {
+  validateNuclearMigrationDescriptor(input);
+  withContinuityTransaction(continuity, () => {
+    const existing = readPendingNuclearMigration(continuity);
+    if (!existing || !sameNuclearMigration(existing, input)) {
+      throw new Error("continuity_migration_pending_mismatch");
+    }
+    if (existing.phase !== "pending" && existing.phase !== "nuclear_committed") {
+      throw new Error("continuity_migration_phase_invalid");
+    }
+    const state = lineageState(continuity);
+    if (state.lineageId !== input.lineageId) {
+      throw new Error("continuity_lineage_mismatch");
+    }
+    const now = new Date().toISOString();
+    continuity
+      .prepare(
+        `UPDATE lineage_state
+         SET nuclear_schema_version = ?, build_identity = ?, updated_at = ?
+         WHERE id = 1`,
+      )
+      .run(input.to, input.buildIdentity, now);
+    recordContinuityEvent(continuity, {
+      kind: "migration",
+      lineageId: input.lineageId,
+      occurredAt: now,
+      detail: {
+        phase,
+        from: input.from,
+        to: input.to,
+        buildIdentity: input.buildIdentity,
+      },
+    });
+    continuity
+      .prepare(`DELETE FROM continuity_meta WHERE key = ?`)
+      .run(PENDING_NUCLEAR_MIGRATION_KEY);
+  });
+}
+
+/** Roll back only the recognized intent when nuclear remains at the source. */
+export function rollbackNuclearMigration(
+  continuity: DatabaseSync,
+  input: NuclearMigrationDescriptor,
+): void {
+  validateNuclearMigrationDescriptor(input);
+  withContinuityTransaction(continuity, () => {
+    const existing = readPendingNuclearMigration(continuity);
+    if (!existing || !sameNuclearMigration(existing, input)) {
+      throw new Error("continuity_migration_pending_mismatch");
+    }
+    if (existing.phase !== "pending" && existing.phase !== "nuclear_committed") {
+      throw new Error("continuity_migration_phase_invalid");
+    }
+    const state = lineageState(continuity);
+    if (state.lineageId !== input.lineageId) {
+      throw new Error("continuity_lineage_mismatch");
+    }
+    if (state.nuclearSchemaVersion !== input.from) {
+      throw new Error(
+        `continuity_schema_version_mismatch:${state.nuclearSchemaVersion}!=${input.from}`,
+      );
+    }
+    const now = new Date().toISOString();
+    recordContinuityEvent(continuity, {
+      kind: "migration",
+      lineageId: input.lineageId,
+      occurredAt: now,
+      detail: {
+        phase: "rolled_back",
+        from: input.from,
+        to: input.to,
+        buildIdentity: input.buildIdentity,
+      },
+    });
+    continuity
+      .prepare(`DELETE FROM continuity_meta WHERE key = ?`)
+      .run(PENDING_NUCLEAR_MIGRATION_KEY);
+  });
 }
 
 export function migrateContinuity(db: DatabaseSync): void {

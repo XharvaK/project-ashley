@@ -1,7 +1,11 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { openNuclearDb, NUCLEAR_SUPPORTED_VERSION } from "../db.js";
-import { openContinuityDb } from "./db.js";
+import {
+  beginNuclearMigration,
+  getPendingNuclearMigration,
+  openContinuityDb,
+} from "./db.js";
 import {
   DECLARED_CONTRACT_ID,
   LEGACY_V2_CONTRACT_ID,
@@ -16,15 +20,15 @@ describe("wave06 migration", () => {
   it("migrates fresh db to v16 with v3 contract and perception tables", () => {
     const continuity = openContinuityDb(new DatabaseSync(":memory:"));
     const nuclear = openNuclearDb(new DatabaseSync(":memory:"), { continuity });
-    expect(NUCLEAR_SUPPORTED_VERSION).toBe(23);
+    expect(NUCLEAR_SUPPORTED_VERSION).toBe(24);
     const version = (
       nuclear.prepare("PRAGMA user_version").get() as { user_version: number }
     ).user_version;
-    expect(version).toBe(23);
+    expect(version).toBe(24);
     const sidecarVersion = continuity
       .prepare(`SELECT nuclear_schema_version FROM lineage_state WHERE id = 1`)
       .get() as { nuclear_schema_version?: number };
-    expect(sidecarVersion.nuclear_schema_version).toBe(23);
+    expect(sidecarVersion.nuclear_schema_version).toBe(24);
     for (const table of ["perception_artifacts", "conversational_reads"]) {
       expect(
         nuclear
@@ -40,6 +44,143 @@ describe("wave06 migration", () => {
       )
       .get() as { contract_id?: string };
     expect(active.contract_id).toBe(DECLARED_CONTRACT_ID);
+    nuclear.close();
+    continuity.close();
+  });
+
+  it("recovers a post-nuclear-commit failure without losing sidecar lineage or data", () => {
+    const continuity = openContinuityDb(new DatabaseSync(":memory:"));
+    const nuclear = openNuclearDb(new DatabaseSync(":memory:"), { continuity });
+    nuclear.prepare(
+      `INSERT INTO questions
+         (owner_id, subject, text, status, priority, created_at, updated_at,
+          entity_uuid, data_classification)
+       VALUES ('doc', 'about_self', 'migration preservation', 'open', 0.5,
+               '2026-08-10T00:00:00.000Z', '2026-08-10T00:00:00.000Z',
+               'migration-preserved-question', 'never_public')`,
+    ).run();
+    nuclear.exec("DROP TABLE open_cognitive_item_wake_cursor");
+    nuclear.exec("ALTER TABLE open_cognitive_items DROP COLUMN model_identity");
+    nuclear.exec("PRAGMA user_version = 22");
+    continuity
+      .prepare(
+        `UPDATE lineage_state SET nuclear_schema_version = 22 WHERE id = 1`,
+      )
+      .run();
+
+    expect(() =>
+      openNuclearDb(nuclear, {
+        continuity,
+        testFailAfterNuclearCommitBeforeContinuityFinalization: true,
+      }),
+    ).toThrow("test_fault_after_nuclear_commit_before_continuity_finalization");
+    expect(
+      (nuclear.prepare("PRAGMA user_version").get() as { user_version: number })
+        .user_version,
+    ).toBe(23);
+    expect(getPendingNuclearMigration(continuity)).toMatchObject({
+      from: 22,
+      to: 23,
+      phase: "nuclear_committed",
+    });
+    expect(
+      (
+        continuity
+          .prepare(
+            `SELECT nuclear_schema_version FROM lineage_state WHERE id = 1`,
+          )
+          .get() as { nuclear_schema_version?: number }
+      ).nuclear_schema_version,
+    ).toBe(22);
+
+    openNuclearDb(nuclear, { continuity });
+
+    expect(
+      (nuclear.prepare("PRAGMA user_version").get() as { user_version: number })
+        .user_version,
+    ).toBe(24);
+    expect(
+      (
+        continuity
+          .prepare(
+            `SELECT nuclear_schema_version FROM lineage_state WHERE id = 1`,
+          )
+          .get() as { nuclear_schema_version?: number }
+      ).nuclear_schema_version,
+    ).toBe(24);
+    expect(getPendingNuclearMigration(continuity)).toBeNull();
+    expect(
+      nuclear
+        .prepare(
+          `SELECT text FROM questions WHERE entity_uuid = ?`,
+        )
+        .get("migration-preserved-question"),
+    ).toEqual({ text: "migration preservation" });
+    expect(
+      continuity
+        .prepare(
+          `SELECT detail_json FROM continuity_events
+           WHERE kind = 'migration' ORDER BY id DESC LIMIT 4`,
+        )
+        .all()
+        .map((row) => JSON.parse(String((row as { detail_json: string }).detail_json)).phase),
+    ).toEqual(expect.arrayContaining(["recovered", "nuclear_committed"]));
+
+    openNuclearDb(nuclear, { continuity });
+    expect(getPendingNuclearMigration(continuity)).toBeNull();
+    nuclear.close();
+    continuity.close();
+  });
+
+  it("rolls back a recognized pending intent when nuclear remains at from", () => {
+    const continuity = openContinuityDb(new DatabaseSync(":memory:"));
+    const nuclear = openNuclearDb(new DatabaseSync(":memory:"), { continuity });
+    const lineage = (
+      nuclear
+        .prepare("SELECT lineage_id FROM lineage_mirror WHERE id = 1")
+        .get() as { lineage_id: string }
+    ).lineage_id;
+    nuclear.exec("DROP TABLE open_cognitive_item_wake_cursor");
+    nuclear.exec("ALTER TABLE open_cognitive_items DROP COLUMN model_identity");
+    nuclear.exec("PRAGMA user_version = 22");
+    continuity
+      .prepare(
+        `UPDATE lineage_state SET nuclear_schema_version = 22 WHERE id = 1`,
+      )
+      .run();
+    beginNuclearMigration(continuity, {
+      from: 22,
+      to: 23,
+      lineageId: lineage,
+      buildIdentity: "test-build",
+    });
+    expect(getPendingNuclearMigration(continuity)).toMatchObject({
+      phase: "pending",
+    });
+    nuclear.exec("PRAGMA user_version = 21");
+    expect(() => openNuclearDb(nuclear, { continuity })).toThrow(
+      "continuity_pending_migration_version_mismatch:21",
+    );
+    expect(getPendingNuclearMigration(continuity)).toMatchObject({
+      phase: "pending",
+    });
+    nuclear.exec("PRAGMA user_version = 22");
+
+    openNuclearDb(nuclear, { continuity });
+
+    expect(getPendingNuclearMigration(continuity)).toBeNull();
+    const phases = continuity
+      .prepare(
+        `SELECT detail_json FROM continuity_events
+         WHERE kind = 'migration' ORDER BY id ASC`,
+      )
+      .all()
+      .map((row) => JSON.parse(String((row as { detail_json: string }).detail_json)).phase);
+    expect(phases).toContain("rolled_back");
+    expect(
+      (nuclear.prepare("PRAGMA user_version").get() as { user_version: number })
+        .user_version,
+    ).toBe(24);
     nuclear.close();
     continuity.close();
   });
