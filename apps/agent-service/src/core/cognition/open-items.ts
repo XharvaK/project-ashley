@@ -641,23 +641,18 @@ export function materializeOpenCognitiveItem(
 }
 
 /**
- * Revalidate an OPEN live item before projecting it into behavioral candidates.
+ * Revalidate an OPEN live item's source and capability authority.
  * The source remains authoritative; this row is never sufficient by itself.
+ * This deliberately excludes attention deferral so validated resolution and
+ * Reflection review can inspect a deferred item without making it a candidate.
  */
-export function openCognitiveItemEligibleForInfluence(
+export function openCognitiveItemSourceEligibleForInfluence(
   db: DatabaseSync,
   item: OpenCognitiveItemRecord,
-  now = Date.now(),
 ): boolean {
   if (item.status !== "OPEN" || item.provenance !== "live") return false;
   if (item.contractId !== currentContractId()) return false;
   if (item.buildIdentity !== currentBuildIdentity()) return false;
-
-  const deferUntil = item.attention?.deferUntil;
-  if (deferUntil != null) {
-    const deferUntilMs = Date.parse(deferUntil);
-    if (!Number.isFinite(deferUntilMs) || deferUntilMs > now) return false;
-  }
 
   if (!(capabilityNames as readonly string[]).includes(item.sourceCapability)) {
     return false;
@@ -681,4 +676,20 @@ export function openCognitiveItemEligibleForInfluence(
   }
 
   return capabilityCanInfluence(db, capability, "apply");
+}
+
+/**
+ * Revalidate an OPEN live item before projecting it into behavioral candidates.
+ * Deferral is attention metadata and is checked after source authority.
+ */
+export function openCognitiveItemEligibleForInfluence(
+  db: DatabaseSync,
+  item: OpenCognitiveItemRecord,
+  now = Date.now(),
+): boolean {
+  if (!openCognitiveItemSourceEligibleForInfluence(db, item)) return false;
+  const deferUntil = item.attention?.deferUntil;
+  if (deferUntil == null) return true;
+  const deferUntilMs = Date.parse(deferUntil);
+  return Number.isFinite(deferUntilMs) && deferUntilMs <= now;
 }

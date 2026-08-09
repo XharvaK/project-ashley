@@ -3,7 +3,13 @@ import { completeChat } from "../../mistral-client.js";
 import type { DatabaseSync } from "node:sqlite";
 import { capabilityCanInfluence } from "../rollout/capabilities.js";
 import { probeDecisionCoercion } from "../relationship/coercion-gate.js";
-import type { Decision, DecisionKind, Motivation, Trigger } from "../types.js";
+import type {
+  Decision,
+  DecisionDelayClass,
+  DecisionKind,
+  Motivation,
+  Trigger,
+} from "../types.js";
 
 export type ThoughtModelResult = {
   text: string;
@@ -110,6 +116,7 @@ export type ThoughtModelOptions = {
 
 export type ThoughtProposal = {
   kind: DecisionKind;
+  delayClass: DecisionDelayClass | null;
   shouldSpeak: boolean;
   effort: string;
   completion: string;
@@ -121,6 +128,15 @@ export type ThoughtProposal = {
   modelAlias: string;
   resolvedModelId: string | null;
 };
+
+function isDecisionDelayClass(value: unknown): value is DecisionDelayClass {
+  return (
+    value === "brief" ||
+    value === "standard" ||
+    value === "long" ||
+    value === "reflection_review"
+  );
+}
 
 export type ThoughtResult =
   | { ok: true; proposal: ThoughtProposal }
@@ -159,8 +175,9 @@ export async function runThoughtModel(
           content: [
             "You are Ashley's Thought layer, not her Expression layer.",
             "Choose whether and how to act from the supplied grounded motivations.",
-            "Return strict JSON only: {kind,shouldSpeak,effort,completion,uncertainty,urgency,objective,reason,motivationIds}.",
-            "kind is speak|silence|delay|ask|revisit|share|challenge|refuse; effort is low|medium|high; completion is complete|hold.",
+            "Return strict JSON only: {kind,delayClass,shouldSpeak,effort,completion,uncertainty,urgency,objective,reason,motivationIds}.",
+            "kind is speak|silence|delay|ask|revisit|share|challenge|refuse; delayClass is brief|standard|long|reflection_review only when kind is delay and otherwise null; effort is low|medium|high; completion is complete|hold.",
+            "Never return a timestamp or duration. The host maps delayClass to a fixed duration.",
             "A refusal is reactive only and must select both the current user_message motivation and a supplied stable boundary motivation.",
             "Use only supplied motivation IDs. Silence is valid. Do not write the message Doc will see.",
             "objective and reason are short intent metadata, not prose to echo and not a copy of the user message.",
@@ -191,6 +208,9 @@ export async function runThoughtModel(
   const proposal = parseObject(response.text);
   if (!proposal) return { ok: false, error: "invalid_response" };
   const kind = String(proposal.kind) as DecisionKind;
+  const delayClass = isDecisionDelayClass(proposal.delayClass)
+    ? proposal.delayClass
+    : null;
   const effort = String(proposal.effort);
   const completion = String(proposal.completion);
   const allowedIds = new Set(
@@ -199,7 +219,12 @@ export async function runThoughtModel(
   const motivationIds = Array.isArray(proposal.motivationIds)
     ? proposal.motivationIds.map(Number).filter((id) => allowedIds.has(id))
     : base.motivationIds;
-  if (!kinds.has(kind) || motivationIds.length === 0) {
+  if (
+    !kinds.has(kind) ||
+    motivationIds.length === 0 ||
+    (kind === "delay" && delayClass === null) ||
+    (kind !== "delay" && proposal.delayClass != null)
+  ) {
     return { ok: false, error: "invalid_response" };
   }
   const shouldSpeak = proposal.shouldSpeak === true;
@@ -210,6 +235,7 @@ export async function runThoughtModel(
     ok: true,
     proposal: {
       kind,
+      delayClass,
       shouldSpeak,
       effort,
       completion,
@@ -357,6 +383,7 @@ export async function deliberateDecision(
   return {
     ...base,
     kind,
+    ...(proposal.delayClass ? { delayClass: proposal.delayClass } : {}),
     motivationIds,
     score: selectedScore,
     evidenceRefs,

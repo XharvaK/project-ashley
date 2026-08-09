@@ -8,6 +8,12 @@ export type DecisionKind =
   | "challenge"
   | "refuse";
 
+export type DecisionDelayClass =
+  | "brief"
+  | "standard"
+  | "long"
+  | "reflection_review";
+
 export type MotivationKind =
   | "user_message"
   | "question"
@@ -146,6 +152,8 @@ export type Decision = {
   id?: number;
   trigger: Trigger;
   kind: DecisionKind;
+  /** Host-mapped semantic delay. Never an arbitrary model timestamp. */
+  delayClass?: DecisionDelayClass;
   motivationIds: number[];
   score: number;
   reason: string;

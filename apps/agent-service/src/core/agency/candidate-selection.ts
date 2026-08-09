@@ -69,7 +69,11 @@ function sourceIsCurrentlyEligible(
       const cognitiveItem = getOpenCognitiveItem(db, ownerId, refId);
       return (
         cognitiveItem !== null &&
-        openCognitiveItemEligibleForInfluence(db, cognitiveItem)
+        openCognitiveItemEligibleForInfluence(
+          db,
+          cognitiveItem,
+          Date.parse(nowIso),
+        )
       );
     }
     case "question":

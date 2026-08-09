@@ -126,7 +126,14 @@ function parseEvidenceRefs(value: unknown): EvidenceRef[] {
         entry.type === "opinion" ||
         entry.type === "take" ||
         entry.type === "identity" ||
-        entry.type === "mind_state";
+        entry.type === "mind_state" ||
+        entry.type === "doc_reminder" ||
+        entry.type === "ashley_self_commitment" ||
+        entry.type === "mutual_commitment" ||
+        entry.type === "scheduled_proactive" ||
+        entry.type === "relational_tension" ||
+        entry.type === "withdrawal" ||
+        entry.type === "open_cognitive_item";
       return validType &&
         (typeof entry.id === "string" || typeof entry.id === "number");
     });
@@ -149,6 +156,13 @@ function parseEvidenceRef(value: unknown): EvidenceRef | undefined {
     case "take":
     case "identity":
     case "mind_state":
+    case "doc_reminder":
+    case "ashley_self_commitment":
+    case "mutual_commitment":
+    case "scheduled_proactive":
+    case "relational_tension":
+    case "withdrawal":
+    case "open_cognitive_item":
       return { type: value.type, id: value.id };
     default:
       return undefined;

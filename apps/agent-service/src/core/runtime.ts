@@ -76,6 +76,7 @@ import {
 import type { Decision, DecisionKind, Motivation, ReflectionMode } from "./types.js";
 import { attachAffectLicense, getAffectiveState } from "./state/affect.js";
 import { enqueueCognitiveJob, getLatestShadowAnalysis } from "./cognition/jobs.js";
+import { recordOpenCognitiveDecision } from "./cognition/reconsideration.js";
 import {
   claimUrgentMindState,
   consumeUrgentWake,
@@ -304,6 +305,7 @@ function logProactiveDecision(
   decision: Decision,
   urgentItemId: number | null,
   outcomeText?: string,
+  afterLogged?: (decisionId: number) => void,
 ): number {
   db.exec("BEGIN IMMEDIATE");
   try {
@@ -314,6 +316,7 @@ function logProactiveDecision(
       decision,
       ...(outcomeText !== undefined ? { outcomeText } : {}),
     });
+    afterLogged?.(decisionId);
     // Wave 01: do not record Thought live-shadow for deterministic Decisions.
     if (urgentItemId !== null) consumeUrgentWake(db, urgentItemId);
     setLastDecision(db, ownerId, decisionId);
@@ -1276,6 +1279,13 @@ export class AshleyCore {
           decision,
           urgentItem?.id ?? null,
           "",
+          () => {
+            recordOpenCognitiveDecision(this.db, {
+              ownerId,
+              decision,
+              inTransaction: true,
+            });
+          },
         );
         decisionLogged = true;
         return { shouldSend: false, reason: decision.reason };
@@ -1286,6 +1296,14 @@ export class AshleyCore {
         ownerId,
         decision,
         urgentItem?.id ?? null,
+        undefined,
+        () => {
+          recordOpenCognitiveDecision(this.db, {
+            ownerId,
+            decision,
+            inTransaction: true,
+          });
+        },
       );
       decisionLogged = true;
       decision.id = decisionId;
