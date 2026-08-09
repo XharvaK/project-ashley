@@ -1,0 +1,6 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "valid-skills-only",
+  "version": "1.0.0",
+  "description": "A local inert skills fixture"
+}

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "local-validator": {
+      "type": "stdio",
+      "command": "./bin/validator",
+      "args": ["--config", "${PLUGIN_ROOT}/config.json", "${API_KEY}"],
+      "env": {
+        "CONFIG": "${PLUGIN_ROOT}/config.json",
+        "API_TOKEN": "${API_KEY}"
+      },
+      "cwd": "${PLUGIN_ROOT}"
+    },
+    "remote-catalog": {
+      "type": "streamable-http",
+      "url": "https://example.invalid/mcp",
+      "headers": {
+        "X-Fixture": "literal"
+      }
+    }
+  }
+}

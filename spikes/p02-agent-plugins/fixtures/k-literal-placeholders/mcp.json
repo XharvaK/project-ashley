@@ -1,0 +1,14 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "literal": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${API_KEY}", "${HOME}", "${USERPROFILE}", "${PLUGIN_ROOT}", "${PLUGIN_DATA}"],
+      "env": {
+        "TOKEN": "${TOKEN}"
+      },
+      "cwd": "${PLUGIN_DATA}/cache"
+    }
+  }
+}
