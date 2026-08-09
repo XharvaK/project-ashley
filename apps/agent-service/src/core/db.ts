@@ -41,7 +41,10 @@ import { MIGRATION_20_CAPABILITY_EVENT_KINDS_DDL } from "./rollout/migration-20.
 import { MIGRATION_21_PROVENANCE_DDL } from "./provenance/migration-21.js";
 import { MIGRATION_22_RECALL_AUTHORITY_DDL } from "./provenance/migration-22.js";
 import { MIGRATION_23_OPEN_COGNITIVE_ITEMS_DDL } from "./cognition/migration-23.js";
-import { MIGRATION_24_OPEN_COGNITIVE_ITEMS_DDL } from "./cognition/migration-24.js";
+import {
+  MIGRATION_24_OPEN_COGNITIVE_ITEMS_DDL,
+  MIGRATION_24_OPEN_COGNITIVE_WAKE_CURSOR_DDL,
+} from "./cognition/migration-24.js";
 import { reconcileSandboxApprovals } from "./sandbox/approval-store.js";
 import { currentBuildIdentity } from "./rollout/capabilities.js";
 
@@ -2323,6 +2326,7 @@ export function migrate(
       throw error;
     }
   }
+  db.exec(MIGRATION_24_OPEN_COGNITIVE_WAKE_CURSOR_DDL);
   if (!options.skipContinuityRequirement && userVersion(db) >= 15) {
     const continuity = options.continuity;
     if (!continuity) {

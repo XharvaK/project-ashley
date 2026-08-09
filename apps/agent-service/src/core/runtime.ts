@@ -1164,7 +1164,7 @@ export class AshleyCore {
     );
     // Classify with read-only hasUrgentMindState — never claim before eligibility.
     const initiativeClass = classifyInitiativeClass(this.db, ownerId);
-    const status = this.getProactiveStatus(ownerId);
+    const status = this.getProactiveOperationalStatus(ownerId);
     const eligibilityInput = {
       ownerId,
       chatInProgress: this.activeOwners.has(ownerId),
@@ -1252,25 +1252,9 @@ export class AshleyCore {
         (motivation) => motivation.kind !== "silence_ok",
       );
       if (!hasMaterialCandidate) {
-        const continuityStatus = getOpenCognitiveContinuityStatus(
-          this.db,
-          ownerId,
-        );
-        const sourceCount = Object.values(
-          continuityStatus.availableBySourceClass,
-        ).reduce((sum, count) => sum + count, 0);
-        const code =
-          continuityStatus.openCount === 0
-            ? continuityStatus.totalCount > 0 &&
-                continuityStatus.redactedCount === continuityStatus.totalCount
-              ? "all_redacted"
-              : "no_open_material"
-            : continuityStatus.deferredCount === continuityStatus.openCount
-              ? "all_deferred"
-              : sourceCount === 0
-                ? "all_capability_blocked"
-                : "no_open_material";
-        recordProactiveDiagnostic(this.db, ownerId, "agency", code);
+        // Rich OCI enumeration belongs to explicit owner status. Ordinary wake
+        // only records a bounded operational outcome.
+        recordProactiveDiagnostic(this.db, ownerId, "agency", "no_open_material");
       }
       let decision = decide(motivations, "proactive");
       const complexity = classifyTurnComplexity({
@@ -1774,7 +1758,7 @@ export class AshleyCore {
     return getKv(this.db, kvKey(ownerId)) === "true";
   }
 
-  getProactiveStatus(ownerId: string): {
+  getProactiveOperationalStatus(ownerId: string): {
     enabled: boolean;
     paused: boolean;
     sentToday: number;
@@ -1783,9 +1767,6 @@ export class AshleyCore {
     lastUserMessageAt: string | null;
     minIdleHours: number;
     lastDiagnostic: ProactiveDiagnostic | null;
-    cognitiveContinuity: ReturnType<typeof getOpenCognitiveContinuityStatus> & {
-      lastClosedStageCode: string | null;
-    };
   } {
     const today = new Date().toISOString().slice(0, 10);
     const sentRows = this.db
@@ -1819,11 +1800,6 @@ export class AshleyCore {
          LIMIT 1`,
       )
       .get(ownerId);
-    const lastDiagnostic = readProactiveDiagnostic(this.db, ownerId);
-    const cognitiveContinuity = getOpenCognitiveContinuityStatus(
-      this.db,
-      ownerId,
-    );
     return {
       enabled: env.proactiveEnabled,
       paused: this.isProactivePaused(ownerId),
@@ -1838,10 +1814,33 @@ export class AshleyCore {
           ? lastUser.created_at
           : null,
       minIdleHours: env.proactiveMinIdleHours,
-      lastDiagnostic,
+      lastDiagnostic: readProactiveDiagnostic(this.db, ownerId),
+    };
+  }
+
+  getProactiveStatus(ownerId: string): {
+    enabled: boolean;
+    paused: boolean;
+    sentToday: number;
+    maxPerDay: number;
+    lastSentAt: string | null;
+    lastUserMessageAt: string | null;
+    minIdleHours: number;
+    lastDiagnostic: ProactiveDiagnostic | null;
+    cognitiveContinuity: ReturnType<typeof getOpenCognitiveContinuityStatus> & {
+      lastClosedStageCode: string | null;
+    };
+  } {
+    const operational = this.getProactiveOperationalStatus(ownerId);
+    const cognitiveContinuity = getOpenCognitiveContinuityStatus(
+      this.db,
+      ownerId,
+    );
+    return {
+      ...operational,
       cognitiveContinuity: {
         ...cognitiveContinuity,
-        lastClosedStageCode: lastDiagnostic?.code ?? null,
+        lastClosedStageCode: operational.lastDiagnostic?.code ?? null,
       },
     };
   }

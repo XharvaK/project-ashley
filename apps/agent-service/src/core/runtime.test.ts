@@ -242,7 +242,7 @@ describe("AshleyCore", () => {
           id: String(messageId),
           entityUuid: source.entity_uuid,
         },
-        origin: "cognition",
+        origin: "manual",
         semanticKeyMaterial: "runtime-redaction-race",
         provenance: "live",
         sourceCapability: "recall",
@@ -405,6 +405,33 @@ describe("AshleyCore", () => {
     } finally {
       env.proactiveEnabled = originalEnabled;
       env.proactiveMaxPerDay = originalCap;
+      db.close();
+    }
+  });
+
+  it("keeps ordinary proactive wake on the bounded operational status path", async () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const core = new AshleyCore(db);
+    const originalEnabled = env.proactiveEnabled;
+    const originalCap = env.proactiveMaxPerDay;
+    const originalIdle = env.proactiveMinIdleHours;
+    try {
+      env.proactiveEnabled = true;
+      env.proactiveMaxPerDay = 10;
+      env.proactiveMinIdleHours = 0;
+      (core as unknown as {
+        getProactiveStatus: () => never;
+      }).getProactiveStatus = () => {
+        throw new Error("rich_status_called_during_wake");
+      };
+
+      await expect(core.tickProactive("doc")).resolves.toMatchObject({
+        shouldSend: false,
+      });
+    } finally {
+      env.proactiveEnabled = originalEnabled;
+      env.proactiveMaxPerDay = originalCap;
+      env.proactiveMinIdleHours = originalIdle;
       db.close();
     }
   });

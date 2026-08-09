@@ -172,6 +172,9 @@ export function listOpenCognitiveItems(
     status?: OpenCognitiveItemStatus;
     entityUuid?: string;
     limit?: number;
+    afterId?: number;
+    availableAt?: string;
+    order?: "updated_desc" | "id_asc";
   } = {},
 ): OpenCognitiveItemRecord[] {
   const clauses = ["o.owner_id = ?"];
@@ -184,11 +187,22 @@ export function listOpenCognitiveItems(
     clauses.push("o.entity_uuid = ?");
     params.push(options.entityUuid);
   }
+  if (options.afterId != null && Number.isSafeInteger(options.afterId)) {
+    clauses.push("o.id > ?");
+    params.push(Math.max(0, options.afterId));
+  }
+  if (options.availableAt != null) {
+    clauses.push("(a.defer_until IS NULL OR a.defer_until <= ?)");
+    params.push(options.availableAt);
+  }
   const limit = options.limit == null || !Number.isFinite(options.limit)
     ? null
     : Math.max(1, Math.min(256, Math.floor(options.limit)));
   const limitClause = limit == null ? "" : " LIMIT ?";
   if (limit != null) params.push(limit);
+  const orderClause = options.order === "id_asc"
+    ? "ORDER BY o.id ASC"
+    : "ORDER BY o.updated_at DESC, o.id DESC";
   const rows = db
     .prepare(
       `SELECT
@@ -206,7 +220,7 @@ export function listOpenCognitiveItems(
        FROM open_cognitive_items o
        LEFT JOIN open_cognitive_item_attention a ON a.item_id = o.id
        WHERE ${clauses.join(" AND ")}
-       ORDER BY o.updated_at DESC, o.id DESC${limitClause}`,
+       ${orderClause}${limitClause}`,
     )
     .all(...params) as unknown as ItemRow[];
   return rows.map(mapItem);

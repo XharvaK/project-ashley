@@ -20,10 +20,10 @@ import { listDueDocReminders } from "../relationship/store.js";
 import { tryClaimRelationshipMotivation } from "../relationship/claims.js";
 import { listRelationshipMotivationProjections } from "../relationship/projections.js";
 import {
-  listOpenCognitiveItems,
   openCognitiveItemEligibleForInfluence,
   type OpenCognitiveItemRecord,
 } from "../cognition/open-items.js";
+import { selectOpenCognitiveItemsForWake } from "../cognition/wake-selection.js";
 
 export type MindStateMotivationInput = {
   kind: MindStateItemKind;
@@ -189,9 +189,10 @@ function addOpenCognitiveItems(
   message: string,
 ): Motivation[] {
   const reactiveRelevant = trigger === "reactive";
-  const now = Date.now();
-  return listOpenCognitiveItems(db, ownerId, { status: "OPEN", limit: 8 })
-    .filter((item) => openCognitiveItemEligibleForInfluence(db, item, now))
+  const now = new Date();
+  return selectOpenCognitiveItemsForWake(db, ownerId, now)
+    .items
+    .filter((item) => openCognitiveItemEligibleForInfluence(db, item, now.getTime()))
     .filter(
       (item) =>
         !reactiveRelevant ||

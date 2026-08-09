@@ -1,0 +1,100 @@
+import type { DatabaseSync } from "node:sqlite";
+import {
+  listOpenCognitiveItems,
+  openCognitiveItemEligibleForInfluence,
+  type OpenCognitiveItemRecord,
+} from "./open-items.js";
+
+export const OPEN_COGNITIVE_WAKE_PAGE_SIZE = 32;
+export const OPEN_COGNITIVE_WAKE_MAX_PAGES = 4;
+export const OPEN_COGNITIVE_WAKE_MAX_SCAN =
+  OPEN_COGNITIVE_WAKE_PAGE_SIZE * OPEN_COGNITIVE_WAKE_MAX_PAGES;
+export const OPEN_COGNITIVE_WAKE_MAX_ITEMS = 8;
+
+export type OpenCognitiveWakeSelection = {
+  items: OpenCognitiveItemRecord[];
+  scanned: number;
+  nextAfterId: number;
+  wrapped: boolean;
+};
+
+export function selectOpenCognitiveItemsForWake(
+  db: DatabaseSync,
+  ownerId: string,
+  now = new Date(),
+  options: {
+    maxItems?: number;
+    pageSize?: number;
+    maxPages?: number;
+  } = {},
+): OpenCognitiveWakeSelection {
+  const pageSize = Math.max(
+    1,
+    Math.min(OPEN_COGNITIVE_WAKE_PAGE_SIZE, Math.floor(options.pageSize ?? OPEN_COGNITIVE_WAKE_PAGE_SIZE)),
+  );
+  const maxPages = Math.max(
+    1,
+    Math.min(OPEN_COGNITIVE_WAKE_MAX_PAGES, Math.floor(options.maxPages ?? OPEN_COGNITIVE_WAKE_MAX_PAGES)),
+  );
+  const maxItems = Math.max(
+    1,
+    Math.min(OPEN_COGNITIVE_WAKE_MAX_ITEMS, Math.floor(options.maxItems ?? OPEN_COGNITIVE_WAKE_MAX_ITEMS)),
+  );
+  const nowIso = now.toISOString();
+  const nowMs = now.getTime();
+  const cursorRow = db
+    .prepare(
+      `SELECT after_item_id
+       FROM open_cognitive_item_wake_cursor WHERE owner_id = ?`,
+    )
+    .get(ownerId) as { after_item_id?: number } | undefined;
+  let scanAfterId = Math.max(0, Number(cursorRow?.after_item_id ?? 0));
+  let nextAfterId = scanAfterId;
+  let scanned = 0;
+  let wrapped = false;
+  const eligibleById = new Map<number, OpenCognitiveItemRecord>();
+
+  for (let page = 0; page < maxPages; page += 1) {
+    const rows = listOpenCognitiveItems(db, ownerId, {
+      status: "OPEN",
+      afterId: scanAfterId,
+      availableAt: nowIso,
+      limit: pageSize,
+      order: "id_asc",
+    });
+    if (rows.length === 0) {
+      if (wrapped) break;
+      wrapped = true;
+      scanAfterId = 0;
+      nextAfterId = 0;
+      continue;
+    }
+
+    scanned += rows.length;
+    nextAfterId = rows[rows.length - 1]!.id;
+    for (const item of rows) {
+      if (openCognitiveItemEligibleForInfluence(db, item, nowMs)) {
+        eligibleById.set(item.id, item);
+      }
+    }
+    if (rows.length < pageSize) break;
+    scanAfterId = nextAfterId;
+  }
+
+  const items = [...eligibleById.values()]
+    .sort((left, right) =>
+      right.updatedAt.localeCompare(left.updatedAt) || right.id - left.id,
+    )
+    .slice(0, maxItems);
+
+  db.prepare(
+    `INSERT INTO open_cognitive_item_wake_cursor
+       (owner_id, after_item_id, updated_at)
+     VALUES (?, ?, ?)
+     ON CONFLICT(owner_id) DO UPDATE SET
+       after_item_id = excluded.after_item_id,
+       updated_at = excluded.updated_at`,
+  ).run(ownerId, nextAfterId, nowIso);
+
+  return { items, scanned, nextAfterId, wrapped };
+}
