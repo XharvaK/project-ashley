@@ -18,6 +18,7 @@ import { isBoundaryRelevant } from "./boundary-relevance.js";
 import { relationshipCanInfluence } from "../relationship/influence.js";
 import { listDueDocReminders } from "../relationship/store.js";
 import { tryClaimRelationshipMotivation } from "../relationship/claims.js";
+import { listRelationshipMotivationProjections } from "../relationship/projections.js";
 import {
   listOpenCognitiveItems,
   openCognitiveItemEligibleForInfluence,
@@ -348,6 +349,25 @@ export function collectMotivations(
   }
 
   motivations.push(...addOpenCognitiveItems(db, ownerId, trigger, message));
+
+  for (const projection of listRelationshipMotivationProjections(
+    db,
+    ownerId,
+    trigger,
+    message,
+  )) {
+    motivations.push(
+      persistMotivation(
+        db,
+        ownerId,
+        projection.kind,
+        projection.score,
+        projection.summary,
+        projection.refType,
+        projection.refId,
+      ),
+    );
+  }
 
   if (state.availability !== "available") {
     motivations.push(

@@ -289,7 +289,20 @@ export async function deliberateDecision(
   ) {
     return { ...base, thoughtSource: "fallback", thoughtError: "invalid_response" };
   }
-  const evidenceTypes = new Set(["message", "episode", "fact", "question", "opinion", "take", "identity", "mind_state"]);
+  const evidenceTypes = new Set([
+    "message",
+    "episode",
+    "fact",
+    "question",
+    "opinion",
+    "take",
+    "identity",
+    "mind_state",
+    "doc_reminder",
+    "ashley_self_commitment",
+    "mutual_commitment",
+    "relational_tension",
+  ]);
   const evidenceRefs = motivations
     .filter(
       (item) =>
@@ -301,7 +314,19 @@ export async function deliberateDecision(
         item.refId != null,
     )
     .map((item) => ({
-      type: item.refType as "message" | "episode" | "fact" | "question" | "opinion" | "take" | "identity" | "mind_state",
+      type: item.refType as
+        | "message"
+        | "episode"
+        | "fact"
+        | "question"
+        | "opinion"
+        | "take"
+        | "identity"
+        | "mind_state"
+        | "doc_reminder"
+        | "ashley_self_commitment"
+        | "mutual_commitment"
+        | "relational_tension",
       id: item.refId!,
     }));
   const selectedScore = Math.max(

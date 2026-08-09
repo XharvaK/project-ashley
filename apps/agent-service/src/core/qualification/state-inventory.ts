@@ -96,6 +96,18 @@ const LIVE: Record<string, LiveRule> = {
   relational_tensions: { cls: "LIVE", reason: "live relational tension" },
   withdrawal_records: { cls: "LIVE", reason: "live withdrawal record" },
   relationship_motivation_claims: { cls: "LIVE", reason: "live relationship motivation claim" },
+  open_cognitive_items: {
+    cls: "LIVE",
+    reason: "live durable Open Cognitive Item semantic state",
+  },
+  open_cognitive_item_attention: {
+    cls: "LIVE",
+    reason: "live durable Open Cognitive Item attention state",
+  },
+  open_cognitive_item_transitions: {
+    cls: "LIVE",
+    reason: "live Open Cognitive Item transition audit",
+  },
   perception_artifacts: {
     cls: "LIVE",
     excludeColumns: ["created_at", "updated_at", "entity_uuid"],

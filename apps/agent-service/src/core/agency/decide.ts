@@ -1,6 +1,7 @@
 import type {
   Decision,
   DecisionKind,
+  EvidenceRef,
   Motivation,
   MotivationKind,
   Trigger,
@@ -180,6 +181,10 @@ function makeDecision(
     "take",
     "identity",
     "mind_state",
+    "doc_reminder",
+    "ashley_self_commitment",
+    "mutual_commitment",
+    "relational_tension",
   ]);
   const evidenceRefs = selected
     .filter(
@@ -191,15 +196,7 @@ function makeDecision(
         !(motivation.kind === "user_message" && motivation.refType === "message"),
     )
     .map((motivation) => ({
-      type: motivation.refType as
-        | "message"
-        | "episode"
-        | "fact"
-        | "question"
-        | "opinion"
-        | "take"
-        | "identity"
-        | "mind_state",
+      type: motivation.refType as EvidenceRef["type"],
       id: motivation.refId!,
     }));
 
