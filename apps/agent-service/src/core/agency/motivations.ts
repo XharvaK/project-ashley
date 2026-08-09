@@ -18,6 +18,11 @@ import { isBoundaryRelevant } from "./boundary-relevance.js";
 import { relationshipCanInfluence } from "../relationship/influence.js";
 import { listDueDocReminders } from "../relationship/store.js";
 import { tryClaimRelationshipMotivation } from "../relationship/claims.js";
+import {
+  listOpenCognitiveItems,
+  openCognitiveItemEligibleForInfluence,
+  type OpenCognitiveItemRecord,
+} from "../cognition/open-items.js";
 
 export type MindStateMotivationInput = {
   kind: MindStateItemKind;
@@ -154,6 +159,52 @@ function addOpinions(
         opinion.id,
       ),
     );
+}
+
+function openCognitiveItemMotivation(
+  item: OpenCognitiveItemRecord,
+): { kind: MotivationKind; score: number } {
+  // These are mechanical candidate compatibility values, not care,
+  // attachment, relationship, or emotional importance scores.
+  switch (item.kind) {
+    case "question":
+      return { kind: "question", score: 58 };
+    case "revisit":
+      return { kind: "unfinished", score: 52 };
+    case "concern":
+      return { kind: "unfinished", score: 44 };
+  }
+}
+
+function addOpenCognitiveItems(
+  db: DatabaseSync,
+  ownerId: string,
+  trigger: Trigger,
+  message: string,
+): Motivation[] {
+  const reactiveRelevant = trigger === "reactive";
+  const now = Date.now();
+  return listOpenCognitiveItems(db, ownerId, { status: "OPEN" })
+    .filter((item) => openCognitiveItemEligibleForInfluence(db, item, now))
+    .filter(
+      (item) =>
+        !reactiveRelevant ||
+        !message ||
+        isTextRelevant(message, item.semanticSummary),
+    )
+    .slice(0, 8)
+    .map((item) => {
+      const projection = openCognitiveItemMotivation(item);
+      return persistMotivation(
+        db,
+        ownerId,
+        projection.kind,
+        projection.score,
+        item.semanticSummary,
+        "open_cognitive_item",
+        item.entityUuid,
+      );
+    });
 }
 
 export function collectMotivations(
@@ -295,6 +346,8 @@ export function collectMotivations(
       persistMotivation(db, ownerId, m.kind, m.score, m.summary, m.refType, m.refId),
     );
   }
+
+  motivations.push(...addOpenCognitiveItems(db, ownerId, trigger, message));
 
   if (state.availability !== "available") {
     motivations.push(

@@ -639,3 +639,46 @@ export function materializeOpenCognitiveItem(
     throw error;
   }
 }
+
+/**
+ * Revalidate an OPEN live item before projecting it into behavioral candidates.
+ * The source remains authoritative; this row is never sufficient by itself.
+ */
+export function openCognitiveItemEligibleForInfluence(
+  db: DatabaseSync,
+  item: OpenCognitiveItemRecord,
+  now = Date.now(),
+): boolean {
+  if (item.status !== "OPEN" || item.provenance !== "live") return false;
+  if (item.contractId !== currentContractId()) return false;
+  if (item.buildIdentity !== currentBuildIdentity()) return false;
+
+  const deferUntil = item.attention?.deferUntil;
+  if (deferUntil != null) {
+    const deferUntilMs = Date.parse(deferUntil);
+    if (!Number.isFinite(deferUntilMs) || deferUntilMs > now) return false;
+  }
+
+  if (!(capabilityNames as readonly string[]).includes(item.sourceCapability)) {
+    return false;
+  }
+  const capability = item.sourceCapability as CapabilityName;
+  const expectedEpoch = MODEL_SENSITIVE_CAPABILITIES.has(capability)
+    ? currentModelEpoch(db, env.mistralModel)
+    : 0;
+  if (item.modelEpoch !== expectedEpoch) return false;
+
+  try {
+    const sourceRow = sourceRowFor(
+      db,
+      item.ownerId,
+      item.sourceType,
+      item.sourceId,
+    );
+    validateSourceState(sourceRow, item.sourceEntityUuid, "live");
+  } catch {
+    return false;
+  }
+
+  return capabilityCanInfluence(db, capability, "apply");
+}
