@@ -17,6 +17,7 @@ import {
 } from "../attention/contract-material.js";
 import { currentModelEpoch } from "../attention/continuity.js";
 import { env } from "../../env.js";
+import { activeWithdrawal } from "../relationship/repair.js";
 import {
   maxClassification,
   type DataClassification,
@@ -712,10 +713,30 @@ export function openCognitiveItemEligibleForInfluence(
   now = Date.now(),
 ): boolean {
   if (!openCognitiveItemSourceEligibleForInfluence(db, item)) return false;
+  if (!relationshipSourceGateOpen(db, item)) return false;
   const deferUntil = item.attention?.deferUntil;
   if (deferUntil == null) return true;
   const deferUntilMs = Date.parse(deferUntil);
   return Number.isFinite(deferUntilMs) && deferUntilMs <= now;
+}
+
+function relationshipSourceGateOpen(
+  db: DatabaseSync,
+  item: OpenCognitiveItemRecord,
+): boolean {
+  if (
+    item.sourceType !== "ashley_self_commitment" &&
+    item.sourceType !== "mutual_commitment" &&
+    item.sourceType !== "relational_tension"
+  ) {
+    return true;
+  }
+  const withdrawal = activeWithdrawal(db, item.ownerId);
+  if (!withdrawal) return true;
+  return (
+    item.sourceType === "relational_tension" &&
+    String(withdrawal.repair_status ?? "") === "eligible"
+  );
 }
 
 export type OpenCognitiveContinuityStatus = {
@@ -769,6 +790,7 @@ export function getOpenCognitiveContinuityStatus(
   for (const item of openItems) {
     if (itemDeferred(item, nowMs)) continue;
     if (!openCognitiveItemSourceCurrent(db, item)) continue;
+    if (!relationshipSourceGateOpen(db, item)) continue;
     const key = sourceClass(item.sourceType);
     availableBySourceClass[key] = (availableBySourceClass[key] ?? 0) + 1;
   }

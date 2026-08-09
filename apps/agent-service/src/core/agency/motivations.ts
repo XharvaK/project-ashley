@@ -33,6 +33,11 @@ export type MindStateMotivationInput = {
   id: number;
 };
 
+export type MotivationCollectionOptions = {
+  /** Qualification-only ablation; the production default keeps OCI enabled. */
+  includeOpenCognitiveItems?: boolean;
+};
+
 export function mindStateItemToMotivation(
   item: MindStateMotivationInput,
 ): { kind: MotivationKind; score: number; summary: string; refType: "mind_state"; refId: number } {
@@ -214,6 +219,7 @@ export function collectMotivations(
   trigger: Trigger,
   userMessage?: string,
   userMessageId?: number,
+  options: MotivationCollectionOptions = {},
 ): Motivation[] {
   const motivations: Motivation[] = [];
   const state = getState(db, ownerId);
@@ -348,7 +354,9 @@ export function collectMotivations(
     );
   }
 
-  motivations.push(...addOpenCognitiveItems(db, ownerId, trigger, message));
+  if (options.includeOpenCognitiveItems !== false) {
+    motivations.push(...addOpenCognitiveItems(db, ownerId, trigger, message));
+  }
 
   for (const projection of listRelationshipMotivationProjections(
     db,
