@@ -1,188 +1,243 @@
-# ASHLEY INIT-03 — PERSISTENT COGNITIVE CONTINUITY
+# INIT-03 REMEDIATION REPORT
 
-PASS
+VERDICT: PASS for repository-local remediation qualification.
 
-This is a repository-local implementation and deterministic offline qualification result. It is not production, Mint, Recall-promotion, Discord, provider, or human-behavior evidence.
+This report records the initial local qualification, the independent Sol High
+blocking audit, the repair-only response, and the current local evidence. The
+four-layer INIT-03 architecture was preserved:
+
+```text
+authoritative source -> persistent Open Cognitive Item
+    -> transient motivation projection -> Thought -> Agency / Expression
+```
+
+The result is not production, Mint, Recall-promotion, deployment, provider,
+Discord, or human-behavior evidence.
 
 ## BASELINE
 
-starting HEAD: 7d686f4d384da97b1d4d00fb26dedf95b82bbdce
-starting origin/master: 7d686f4d384da97b1d4d00fb26dedf95b82bbdce
-branch: master
-pre-existing dirty paths: `AGENTS.md` only
+starting HEAD: `c044d4420e18e92bb90c94901f0f92f5e111f5d1`
 
-## WAVE RESULTS
+origin/master: `7d686f4d384da97b1d4d00fb26dedf95b82bbdce`
 
-Wave 0 — PASS — contract and implementation plan: `cf3bcf0`; lifecycle status alignment: `f198f6e`.
+branch: `master`
 
-Wave 1 — PASS — schema v23, OCI tables, indexes, targetable registration, and migration tests: `7db389d`.
+worktree: only pre-existing `AGENTS.md` was modified and unstaged.
 
-Wave 2 — PASS — owner-scoped OCI store, deterministic identity, and bounded materializer foundation: `99a650c`; grounded materialization validation: `e3b1bf6`.
+Initial qualification history:
 
-Wave 3 — PASS — cognition worker proposals and safe source projections into transient motivations: `0295417`; `c72546a`.
+- Luna local qualification: PASS was reported for the original INIT-03 Wave 0-12 implementation.
+- Sol High independent audit: BLOCKED; remediation was required for F01-F09.
 
-Wave 4 — PASS — bounded relationship source producers: `441c2c1`.
+The remediation started from the verified `c044d44` local baseline. `AGENTS.md`
+was not edited, staged, reverted, or included in a commit.
 
-Wave 5 — PASS — bounded candidate selection and Thought influence: `56e05bf`.
+## SOL FINDINGS F01-F09
 
-Wave 6 — PASS — fixed host delay mapping, reconsideration, Reflection review requests, restart persistence, and resolution: `2be2926`.
+| Finding | Original reproduction | Regression test | Fix | Current result |
+| --- | --- | --- | --- | --- |
+| F01 | Same conclusion with different proposed key material duplicated an OCI; different conclusions with the same proposed key collapsed. | `qualification/init03-adversarial.test.ts`; `cognition/open-items.test.ts` exercise the real materializer. | Host derives canonical identity from authoritative owner, source, entity, kind, summary, and source revision. | FIXED |
+| F02 | Normal model-derived cognition used `modelEpoch=0`, so a model continuity change did not invalidate it. | `cognition/worker.test.ts`; `qualification/init03-adversarial.test.ts`; `cognition/migration-24.test.ts`. | Cognition binds to the actual resolved model identity and current model epoch. | FIXED |
+| F03 | `LIMIT 8` was applied before eligibility checks, so blocked rows starved a valid later row. | `cognition/wake-selection.test.ts`; `qualification/init03-evaluation.test.ts`. | Bounded paged scan with indexed cursor, eligibility filtering, stable ordering, and wrap-around fairness. | FIXED |
+| F04 | Ordinary proactive wake enumerated the full owner OCI inventory. | Runtime structural test plus bounded wake and evaluation tests. | Ordinary wake uses bounded candidate and review paths; rich status remains explicit diagnostics only. | FIXED |
+| F05 | Review requests were persisted but no normal Reflection consumer processed them. | `cognition/reconsideration.test.ts`; `runtime.test.ts`; `qualification/init03-evaluation.test.ts`. | Bounded `processPendingOpenCognitiveReviews` intake is wired to the existing Reflection owner. | FIXED |
+| F06 | Nuclear schema and continuity sidecar could commit different versions after a v23 migration failure. | `continuity/wave06-migration.test.ts`; `cognition/migration-24.test.ts`. | Recognized pending migration protocol with startup recovery, explicit rollback, and fail-closed version mismatch. | FIXED |
+| F07 | Source revision was absent from identity and stale OCI rows could dead-end revised source continuity. | `qualification/init03-adversarial.test.ts`; `cognition/open-items.test.ts`. | Authoritative current source revision participates in identity; stale open rows are atomically superseded. | FIXED |
+| F08 | Capability-demoted OCI rows were rejected behaviorally but reported as available. | `cognition/continuity-diagnostics.test.ts`. | Read-only capability, contract, provenance, and relationship eligibility predicates feed unavailable reason codes. | FIXED |
+| F09 | Qualification assertions did not prove the critical paths strongly enough. | Strengthened adversarial/evaluation tests and full rerun. | Tests now execute host identity, real model epoch, bounded scale, Reflection consumption, migration recovery, and diagnostic demotion paths. | FIXED |
 
-Wave 7 — PASS — provenance, stale-source, redaction, forget, and model/build continuity boundaries: `e80aec2`.
+All nine original reproductions were replayed after repair and did not recur.
 
-Wave 8 — PASS — owner-only bounded diagnostics and closed reason codes: `d73f086`.
+## SEMANTIC IDENTITY
 
-Wave 9 — PASS — deterministic offline behavioral and counterfactual qualification: `f9f7b7f`.
+host-derived: YES.
 
-Wave 10 — PASS — adversarial, retry, concurrency, restart, withdrawal, and fail-closed qualification: `e0f60df`.
+model-provided key authoritative: NO. `semanticKeyMaterial` is compatibility
+input only and is ignored for durable identity.
 
-Wave 11 — PASS — regression, focused domains, agent/Discord builds, and guarded offline qualification; stale v22 assertions were aligned to actual schema v23: `c7cbab6`.
+same meaning retry: one owner-scoped OCI under retry and concurrent creation.
 
-Wave 12 — PASS — bounded wake reads, performance qualification, as-built contract, and this report: source hardening `9bf88d6`; documentation commit created after that source commit.
+different meaning same source: distinct OCI rows when the normalized semantic
+conclusions differ.
 
-## FINAL ARCHITECTURE
+source revision: the authoritative current source revision is included in the
+canonical identity. A stale open OCI for the same source identity is
+atomically superseded with `source_revision_superseded`; it cannot block the
+current revision.
 
-OCI kinds: exactly `question`, `revisit`, `concern`.
+The persisted identity is a non-sensitive digest. Raw semantic summary text is
+not used as the durable/indexed key material.
 
-OCI statuses: exactly `OPEN`, `RESOLVED`, `WITHDRAWN`, `SUPERSEDED`.
+## MODEL CONTINUITY
 
-Delay is attention metadata. `DEFERRED` is not an OCI status.
+model-derived OCI carries actual identity: YES. The cognition worker derives
+the host continuity identity from the resolved model alias, resolved model id,
+and model continuity epoch.
 
-Schema: nuclear schema v23 with `open_cognitive_items`, `open_cognitive_item_attention`, and `open_cognitive_item_transitions`.
+epoch change: the old model-derived OCI becomes non-influential until it is
+recreated under the current continuity identity.
 
-Authority: source records remain authoritative for source truth. The deterministic SQLite materializer owns persisted OCI rows. Attention Governor state owns operational scheduling. Motivation rows are transient projections. Thought and model output are advisory and cannot write semantic state directly.
+source capability independence: preserved. Recall/source eligibility remains a
+separate requirement. Human/database-owned source records are not made
+model-bound merely because they are source-backed.
 
-Identity: the materializer validates owner, exact kind, bounded summary, source existence and ownership, entity correspondence, capability, contract, provenance, source revision, build/model continuity, and deterministic owner-scoped semantic identity. The summary limit is 512 characters. Raw source text, prompt fragments, chain-of-thought, raw model reasoning, and sensitive key material are not stored in OCI.
+## BOUNDED WAKE
 
-Selection: proactive OCI projection is capped at 8 rows; reactive candidate selection remains capped at 12 candidates, with at most 3 candidates per source. One proactive candidate is selected per wake. The score floor/material floor remains 25.
+candidate algorithm: indexed owner-scoped pages of 32 rows, ascending id cursor,
+up to 4 pages, eligibility validation before final selection, at most 8
+returned items, deterministic `updated_at DESC, id DESC` ordering, and a
+persistent cursor that wraps at the end. Deferred rows are excluded before
+candidate output.
 
-Relationship: self commitments, mutual commitments, and relational tensions are read-only bounded projections. A mutual OCI does not assert fulfillment. Withdrawal suppresses relationship initiative. Only explicit repair eligibility permits a bounded tension candidate.
+maximum candidate-search work per wake: 128 scanned rows and 8 returned OCI
+items. The configured bounds are clamped to these maxima.
 
-## SOURCE PRODUCER MATRIX
+valid ninth row: found when eight newer rows are blocked. A larger fixture with
+100 blocked rows and a valid 101st row also remains within the 128-row bound.
 
-| source | authority | status before | status after | behavioral influence | capability gate | resolution owner |
-| --- | --- | --- | --- | --- | --- | --- |
-| questions | question store | open questions already read by motivations | existing question path remains; grounded OCI linkage is allowed | existing question motivation plus deduplicated OCI candidate | question/source validation and existing material gate | question state owner; OCI transition validates current source |
-| curiosity takes | curiosity feed | recent/decaying takes already read | unchanged source path; no duplicate OCI authority | existing curiosity motivation | curiosity capability and source freshness | curiosity source owner |
-| facts and opinions | memory and identity stores | active facts/opinions already read | unchanged; not copied into OCI as authority | existing fact/opinion motivation | existing source and classification gates | fact/opinion owners |
-| ordinary unfinished | Mind State store | active unfinished/commitment items already read | unchanged source path | existing unfinished motivation | Mind State activation/urgency and existing gates | Mind State owner |
-| Mind State items | Mind State store | active state rows | unchanged; worker can ground cognition through existing episode seam | existing activation/urgency-based motivation | `mind_state` capability and source checks | Mind State owner |
-| Identity boundaries | Identity and boundary relevance | boundary source exists as a gate | gate only; no invented OCI producer | refusal/boundary behavior | identity/boundary authority | Identity/boundary owner |
-| Identity curiosity | Identity source | no complete proactive OCI reader | gate/partial only; no unsupported producer | no new influence without a verified owning source | identity capability and source contract | Identity owner |
-| document reminders | relationship reminder store | pending/due reader exists | unchanged due reader; no duplicate OCI authority | existing due reminder motivation | relationship capability and due gate | reminder source owner |
-| callbacks | grounded callback/runtime seams | partial existing grounded seam | partial; only verified grounded callbacks may influence | bounded callback behavior | callback/source capability | callback source owner |
-| own-time grounded report | own-time/reactive runtime seam | reactive and grounded only | unchanged; no manufactured unattended continuity | reactive report only | own-time and provenance gates | own-time source owner |
-| Ashley self-commitments | relationship store | active rows existed without proactive reader | bounded read-only proactive projection | low bounded unfinished candidate | relationship apply capability and withdrawal gate | self-commitment source; OCI transition validates source |
-| mutual commitments | relationship store | active rows existed without proactive reader | bounded bilateral projection, never fulfillment | bounded unfinished candidate | relationship apply capability and withdrawal gate | mutual commitment source; OCI cannot fulfill it |
-| relational tensions | relationship store | open rows lacked proactive reader | at most one bounded concern projection | low-band bounded concern only | relationship capability, repair status, classification, withdrawal gate | relationship repair owner |
-| withdrawal records | relationship repair/withdrawal store | existing gate | unchanged and applied to OCI influence | suppresses relationship initiative; not fuel | withdrawal authority | relationship repair owner |
-| reconnection | relationship source | no verified dedicated producer | gate-only/partial; no invented producer | no automatic contact or pressure | relationship and consent/withdrawal gates | relationship source owner |
-| scheduled_proactive_messages | scheduler schema | schema-only source | remains schema-only; never OCI or motivation storage | no INIT-03 semantic influence | scheduler authority only | scheduler owner |
-| Attention Governor | attention subsystem | operational scheduler | remains operational; not OCI semantic authority | controls wake/resource scheduling only | existing governor gates | Attention Governor owner |
-| existing motivations | motivations table and agency projection | transient/projection and learning behavior | remains transient; OCI inventory is separate | candidate surface only | Thought/Agency material and capability gates | Agency/Thought owners |
+full owner enumeration ordinary wake: NO. Ordinary proactive wake does not
+call rich `getOpenCognitiveContinuityStatus`; that status is reserved for
+owner diagnostics or a rare bounded no-material diagnostic path.
 
-## DELAY / RECONSIDERATION
+scale qualification: the runtime structural test rejects reintroduction of
+rich full-inventory status into ordinary wake. Wake tests cover blocked-row
+floods, cursor fairness, wrap-around, and the maximum scan bound.
 
-Host-owned fixed durations are `brief=15 minutes`, `standard=24 hours`, `long=7 days`, and `reflection_review=24 hours`. Thought returns only a delay class; it cannot supply a timestamp or duration. The host persists `defer_until`, delay class, last outcome, and consideration count.
+## REFLECTION LOOP
 
-After three considerations, or an explicit `reflection_review`, the item requests bounded Reflection review. Restart preserves the attention row. Repeated delay does not expire, delete, demote, or reinterpret the unresolved OCI. Resolution is limited to validated local transitions and revalidates source ownership, source identity, withdrawal, redaction, provenance, and current source state.
+review threshold: three genuine considerations request bounded Reflection
+review. Candidate scans alone do not increment consideration count.
 
-## PROVENANCE / FORGET
+normal consumer: the existing runtime consumes pending OCI review requests
+after pending Reflection events and on the proactive path. Each run processes
+at most 8 review requests.
 
-Shadow evidence remains `shadow`. Time, delivery, or local processing does not promote it to `live`. Model-derived continuity carries model epoch and build identity and is rejected when the source continuity contract is stale.
+KEEP: leaves the OCI `OPEN` and clears/rearms the review request through a
+validated bounded policy.
 
-Forget discovers linked OCI rows through owner-scoped source/entity mappings, atomically changes open forgotten-source rows to `WITHDRAWN`, writes a transition reason, clears attention scheduling, replaces the semantic summary with `[redacted]`, and records `redacted_at` and `source_forgotten`. Cross-owner and source-mismatched operations fail closed. OCI resolution cannot rewrite source truth, relationship truth, Identity, Recall, provenance, capability state, or external truth.
+WITHDRAW: produces `WITHDRAWN` only through deterministic source, capability,
+provenance, relationship, owner, and current-source validation.
 
-## BEHAVIORAL EVALUATION
+SUPERSEDE: produces a validated OCI-owned supersession transition.
 
-The deterministic offline harness matched capability ON/OFF behavior across the A–M scenario matrix and exercised source-only and OCI-only ablations. It covered callback/question/self/mutual/forgotten/shadow/withdrawal/flood/own-time/defer/restart/wrong-owner cases. No provider call was needed.
+external truth authority: UNCHANGED. Reflection cannot resolve mutual
+commitment truth, relationship truth, Identity, Recall, capability state, or
+shadow evidence, and it cannot send a message.
 
-The adversarial harness covered malformed kinds, oversize summaries, unsupported identity sources, injected status/redaction/defer fields, proposed mutual commitments, concurrent duplicate retries, distinct semantic conclusions, cross-owner hashes, stale source mutation, demotion/shadow transitions, fixed delay duration, relationship source immutability, and diagnostic non-leakage.
+## MIGRATION
 
-Do NOT claim production-human success from fixtures.
+normal v22 -> v23: the nuclear v23 DDL and continuity sidecar update run through
+an explicit pending-migration protocol. A pending record identifies source,
+target, lineage, build identity, and phase. Nuclear commit is followed by a
+continuity commit and finalization.
 
-## TESTS
+current schema: v24. The v24 migration adds model continuity storage and the
+bounded wake cursor. The same failure-safe protocol covers v23 and v24.
 
-Focused: 6 INIT-03/runtime files, 30 tests passed after Wave 12 bounded-read hardening; the Wave 11 focused domain run passed 43 files and 192 tests.
+injected failure: a test fault after nuclear commit and before continuity
+finalization leaves a recognized `pending_nuclear_migration` record. The
+sidecar remains at the source version until recovery.
 
-Migration: schema v23 migration tests passed within the guarded offline tier; four stale v22 assertions were aligned to the current schema in `c7cbab6`.
+restart recovery: startup compares the actual nuclear version with the pending
+record and deterministically rolls back the recognized source state or
+finalizes the recognized target state. An unexpected version fails closed.
 
-Concurrency/restart: concurrent duplicate creation, retry idempotency, cross-connection convergence, stale restart checks, and deferred OCI restart persistence passed in `init03-adversarial.test.ts` and `init03-evaluation.test.ts`.
+split unrecognized state possible: NO.
 
-Forget/provenance: redaction, forgotten-source withdrawal, shadow/live separation, source revision, build identity, model epoch, owner, and capability checks passed in the cognition/memory qualification suites.
+## DIAGNOSTICS
 
-Behavioral/counterfactual: capability ON/OFF, OCI-only, source-only, withdrawal, own-time, delay, restart, and no-raw-text metrics passed in `init03-evaluation.test.ts`.
+capability-demotion accuracy: a demoted or contract-ineligible OCI is counted
+under `capability_blocked`, not `availableBySourceClass`. Deferred, shadow,
+source-unavailable, and withdrawn-relationship cases have separate bounded
+reason classifications.
 
-Builds: `npm run build:agent` and `npm run build:discord` passed after Wave 12.
+owner privacy: status is owner-scoped and does not expose raw semantic text,
+source plaintext, prompt fragments, raw reasoning, or key material.
 
-Full `npm test`: 112 test files, 797 passed, 1 skipped.
+read-only: YES. Diagnostic status uses read-only capability and contract
+predicates and does not bootstrap capability rows or mutate release/KV state.
 
-phase0:offline: 112 test files, 797 passed, 1 skipped; `OK offline tier`. The full guarded run passed after the bounded-read source commit.
+## TEST QUALITY REPAIRS
 
-external network attempts: 0
+- Proposed semantic-key values were replaced with tests that vary the key while
+  holding semantic meaning constant, then vary meaning while holding the key
+  constant.
+- Source-revision coverage now mutates the real authoritative source revision
+  and proves stale supersession plus current successor materialization.
+- Model continuity coverage now follows the normal cognition worker dispatch
+  and asserts actual resolved identity and epoch, not a helper-only default.
+- Concurrency coverage uses competing database writers and checks one durable
+  result rather than serial calls to the same connection.
+- Wake coverage proves the valid ninth row, the 100-plus blocked-row case, the
+  cursor fairness path, and the 128-row maximum.
+- Reflection coverage invokes the normal runtime consumer and verifies review
+  mutation rather than only inspecting a persisted request.
+- Migration coverage injects failure after the nuclear stage, restarts, and
+  verifies recovery and data preservation.
+- Diagnostic coverage demotes a capability and verifies truthful
+  `capability_blocked` output without state mutation.
 
-## PERFORMANCE
+## FULL QUALIFICATION
 
-additional queries: one indexed owner/status OCI read capped with `LIMIT 8` for motivation projection; one indexed review-due count on the wake path; entity-targeted OCI lookup for selected-candidate revalidation; full owner status enumeration is deferred to owner diagnostics or the no-material diagnostic path.
+focused: 12 remediation/runtime/continuity files, 68 tests passed.
 
-candidate max: 8 proactive OCI rows, 12 total reactive candidates, 3 per source, and 8 model-proposed open items per cognition pass.
+`npm test`: PASS, exit code 0; 114 test files, 817 passed, 1 skipped (818
+tests total).
 
-expected OCI steady state: source-driven materialization converges repeated semantic proposals to one owner-scoped row per semantic key. No scheduler-generated OCI rows and no automatic expiration are used. Per-wake work is bounded, but total retained OCI storage still requires source resolution, forget, and future governance.
+`phase0:offline`: PASS, exit code 0; the script completed with `OK offline
+tier`.
 
-prompt growth bound: OCI adds at most 8 bounded summaries to the proactive motivation projection. Each summary is at most 512 characters. Thought receives the existing bounded candidate surface. Raw source text, raw reasoning, and prompt fragments are not persisted.
+external network attempts: 0.
 
-## ROLLOUT OPTIONS
+agent build: `npm run build:agent` PASS.
 
-A — WAIT FOR RECALL: retain the implementation as local, observe-only qualified source until Recall evidence and any promotion decision are separately reviewed.
+discord build: `npm run build:discord` PASS.
 
-B — DEPLOY + EXPLICIT REBASE: only after a new baseline check, production migration plan, capability/Recall evidence, explicit authorization, and a separate release qualification.
-
-C — OBSERVE-ONLY DEPLOY: only after a separate production-safe observation contract authorizes the required instrumentation and rollout boundary.
-
-Recommended option based on implemented source: A — WAIT FOR RECALL.
-
-NO ACTION TAKEN.
+`git diff --check`: PASS after the documentation changes.
 
 ## PRODUCTION
 
 Mint: UNTOUCHED
+
 Recall: UNTOUCHED
+
 sandbox: UNTOUCHED
+
 providers: NO LIVE CALLS
+
 Discord: NO LIVE TRAFFIC
-deploy: NO
+
 push: NO
+
+deploy: NO
 
 ## LOCAL COMMITS
 
-List in order:
+Remediation source and qualification commits, in order:
 
-1. `cf3bcf0` — `docs(initiative): define INIT-03 cognitive continuity contract`
-2. `f198f6e` — `docs(initiative): align OCI lifecycle status contract`
-3. `7db389d` — `feat(cognition): add open cognitive item foundation`
-4. `99a650c` — `feat(cognition): add open cognitive item store`
-5. `e3b1bf6` — `feat(cognition): materialize grounded open cognitive items`
-6. `0295417` — `feat(cognition): connect grounded continuity proposals`
-7. `c72546a` — `feat(initiative): project cognitive continuity into motivations`
-8. `441c2c1` — `feat(initiative): connect bounded relationship motivations`
-9. `56e05bf` — `feat(initiative): bound persistent motivation selection`
-10. `2be2926` — `feat(cognition): add durable reconsideration lifecycle`
-11. `e80aec2` — `fix(cognition): harden cognitive continuity provenance`
-12. `d73f086` — `feat(initiative): expose cognitive continuity diagnostics`
-13. `f9f7b7f` — `test(initiative): qualify persistent cognitive continuity`
-14. `e0f60df` — `test(cognition): harden INIT-03 continuity boundaries`
-15. `c7cbab6` — `test(qualification): align migration assertions with schema v23`
-16. `9bf88d6` — `perf(cognition): bound continuity wake reads`
-17. `980ba9c` — `docs(initiative): publish INIT-03 qualification report`
-18. Wave 12 documentation correction — this commit.
+1. `72c09dc` `fix(cognition): derive OCI semantic identity deterministically`
+2. `c39f3a1` `fix(cognition): bind OCI to model continuity`
+3. `4ddcebd` `fix(initiative): bound and fairly select OCI wake work`
+4. `b887b59` `feat(cognition): complete OCI Reflection review loop`
+5. `3984ab4` `fix(db): make schema 23 migration failure-safe`
+6. `c460b7d` `fix(initiative): make OCI diagnostics truthful`
+7. `63d91aa` `test(qualification): align health schema assertion with v24`
 
-## PRESERVED UNRELATED WORK
+The documentation commit contains this report and the corrected contract.
 
-AGENTS.md staged: NO
-AGENTS.md modified/reverted: NO
-final worktree: `AGENTS.md` remains the only modified path; no staged or untracked initiative files.
+## WORKTREE
+
+AGENTS.md: UNCHANGED / UNSTAGED relative to its pre-existing state.
+
+other dirty paths: none after the remediation plan artifact is removed.
+
+No remediation commit contains `AGENTS.md`.
 
 ## HUMAN NEXT GATE
 
-Review this local evidence package and separately decide whether INIT-03 should remain local until Recall evidence is reviewed; no production authorization is implied.
+INDEPENDENT SOL HIGH RE-AUDIT REQUIRED BEFORE INIT-03 ACCEPTANCE.
+
+The local evidence does not authorize production, Mint, Recall mutation,
+deployment, sandbox activation, provider use, Discord traffic, or push.
 
 STOP.

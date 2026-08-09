@@ -2,13 +2,14 @@
 
 ## Contract status
 
-Status: approved for local implementation through Wave 12.
+Status: approved for local implementation through Wave 12; remediation for the
+Sol High F01-F09 audit is locally verified.
 
 Scope: repository-local implementation, deterministic offline qualification, and documentation.
 
 This contract does not authorize production writes, production migrations, Mint changes, deployment, promotion, Recall mutation, sandbox execution, MCP execution, provider changes, routing changes, or external publication.
 
-The contract is derived from the supplied INIT-03 implementation text and current repository evidence inspected on 2026-08-09.
+The contract is derived from the supplied INIT-03 implementation text and current repository evidence inspected on 2026-08-10.
 
 ## Purpose
 
@@ -71,27 +72,31 @@ The current runtime has atomic proactive reservation and delivery. INIT-03 MUST 
 
 The current Reflection initiative seam learns from proactive outcomes. INIT-03 MAY add bounded unresolved-item review requests to that seam, but MUST NOT replace or weaken existing outcome learning.
 
-## As-built local evidence after Wave 12
+## As-built local evidence after Wave 12 and remediation
 
 The verified local implementation state is:
 
 - checkout: C:/Users/Xharv/Projects/composer-assistant;
 - branch: master;
-- source implementation HEAD before Wave 12 documentation: 9bf88d6d4bca6226d77a134d018f981a476af84b;
+- source implementation HEAD before remediation documentation: 63d91aa;
 - origin/master: 7d686f4d384da97b1d4d00fb26dedf95b82bbdce;
 - pre-existing dirty path preserved: AGENTS.md only;
-- nuclear schema version: 23;
+- nuclear schema version: 24;
 - OCI tables: `open_cognitive_items`, `open_cognitive_item_attention`, and `open_cognitive_item_transitions`;
+- OCI wake cursor table: `open_cognitive_item_wake_cursor`;
 - OCI kinds: `question`, `revisit`, `concern`;
 - OCI statuses: `OPEN`, `RESOLVED`, `WITHDRAWN`, `SUPERSEDED`;
 - proactive score/material floor: 25, unchanged;
-- proactive OCI projection: at most 8 owner-scoped rows per wake; reactive motivation selection remains capped at 12 candidates;
+- proactive OCI projection: at most 8 owner-scoped rows per wake; the bounded selector scans at most 128 rows across at most 4 pages of 32; reactive motivation selection remains capped at 12 candidates;
 - wake review check: indexed review-due count; full OCI status is read only for owner diagnostics or no-material diagnostic selection;
-- full guarded offline qualification: 112 test files, 797 passed, 1 skipped;
+- model-derived OCI identity: host-derived resolved model identity plus model continuity epoch;
+- full guarded offline qualification: `npm test` passed with 114 test files, 817 passed, and 1 skipped;
 - agent-service and discord-bot builds: passed;
 - production, Mint, Recall promotion, deployment, provider calls, Discord traffic, and push: none.
 
-The schema-23 migration was introduced by the OCI foundation before the final qualification waves. Four stale v22 test assertions were aligned with that current schema in a separate qualification commit.
+The schema-23 migration was introduced by the OCI foundation before the final qualification waves. The v23 and v24 nuclear migrations now use a recognized pending-migration protocol with startup recovery and fail-closed version mismatch handling. The health schema assertion was aligned to the current v24 schema in a separate qualification commit.
+
+The remediation repaired host-owned semantic identity, source-revision supersession, model continuity, bounded/fair wake selection, ordinary-wake status cost, Reflection review consumption, migration recovery, and diagnostic capability classification. These repairs preserve source authority, the existing Thought/material floor, the four-layer model, and the local-only scope.
 
 ## Four-layer model
 
@@ -241,6 +246,13 @@ The persisted/indexed key MUST be a stable digest or otherwise non-sensitive rep
 
 Two distinct questions from one source are allowed when their normalized semantic conclusions differ. Repeated creation of the same owner/source/entity/kind/conclusion MUST converge on one OCI under concurrent writers.
 
+The current materializer also requires the authoritative current source revision
+where the source contract provides one. A stale open OCI for the same source
+identity is atomically superseded rather than returned as a permanently
+ineligible row. Model-derived cognition carries a host-derived model identity
+and model epoch; human/database-owned source state is not made model-sensitive
+without an applicable continuity contract.
+
 ## Status transitions and agency
 
 Allowed normal transitions are:
@@ -329,6 +341,13 @@ It MUST:
 
 Candidate bands MUST NOT be interpreted as care, attachment, relationship health, or engagement scores.
 
+The current proactive OCI selector uses indexed owner-scoped pages of 32 rows,
+at most 4 pages and 128 scanned rows per wake, a persistent id cursor, and a
+maximum of 8 returned items. Eligibility is checked before final selection, and
+the cursor wraps to preserve deterministic fairness. This bound is separate
+from the Attention Governor, which remains the runtime/model/resource
+scheduler.
+
 ## Delay and reconsideration
 
 Delay is a semantic decision with bounded operational classes.
@@ -338,6 +357,12 @@ The host MUST map each class to a fixed duration. The mapped defer_until MUST be
 Restart MUST preserve defer_until and reconsideration count.
 
 Repeated delay MUST remain bounded. Prolonged unresolved material MUST eventually request bounded Reflection review. The implementation MUST NOT silently expire, delete, demote, or reinterpret an unresolved OCI.
+
+The existing Reflection owner consumes pending review requests through a
+bounded intake of at most 8 requests per run. KEEP OPEN, WITHDRAW, and
+SUPERSEDE remain validated OCI-owned lifecycle actions; the consumer cannot
+mutate relationship truth, Identity, Recall, capability state, or external
+truth.
 
 ## Forget, redaction, and provenance
 
@@ -360,6 +385,11 @@ Model identity, model epoch, build identity, and source revision MUST be checked
 Diagnostics are owner-only.
 
 They MAY report bounded counts, source classes, OCI status, delay/reconsideration state, provenance class, model/build continuity, and transition reasons.
+
+Current owner diagnostics include bounded `unavailableByReason` counts for
+deferred, shadow, capability-blocked, source-unavailable, and withdrawn
+relationship cases. The diagnostic path uses read-only capability and contract
+predicates and does not bootstrap or mutate capability state.
 
 They MUST NOT report raw source plaintext, raw reasoning, prompt fragments, or sensitive key material.
 
@@ -398,6 +428,16 @@ Waves are executed in order:
 10. adversarial hardening;
 11. regression/build verification;
 12. qualification report.
+
+The completed remediation record is separate from the original Wave 0-12
+architecture sequence:
+
+- R-Wave 1: host-owned semantic identity and source revision;
+- R-Wave 2: actual model continuity;
+- R-Wave 3: bounded and fair wake work;
+- R-Wave 4: complete Reflection review loop;
+- R-Wave 5: failure-safe v23/v24 migration protocol;
+- R-Wave 6: truthful diagnostics and stronger qualification tests.
 
 After each wave:
 
