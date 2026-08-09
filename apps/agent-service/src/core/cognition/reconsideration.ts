@@ -223,9 +223,11 @@ export function listOpenCognitiveItemReviewRequests(
   ownerId: string,
   limit = MAX_REVIEW_REQUESTS,
 ): OpenCognitiveItemRecord[] {
-  return listOpenCognitiveItems(db, ownerId, { status: "OPEN" })
-    .filter((item) => item.attention?.reviewRequestedAt != null)
-    .slice(0, Math.max(1, Math.min(MAX_REVIEW_REQUESTS, limit)));
+  return listOpenCognitiveItems(db, ownerId, {
+    status: "OPEN",
+    reviewRequested: true,
+    limit: Math.max(1, Math.min(MAX_REVIEW_REQUESTS, limit)),
+  });
 }
 
 function currentEvidenceRef(
@@ -361,6 +363,10 @@ export function transitionOpenCognitiveItem(
       const item = itemForTransition(db, input.ownerId, input.entityUuid);
       if (item.status !== "OPEN") throw new Error("oci_transition_not_allowed");
 
+      if (!openCognitiveItemSourceEligibleForInfluence(db, item)) {
+        throw new Error("oci_source_unavailable");
+      }
+
       if (input.action === "keep_open") {
         if (item.attention?.reviewRequestedAt == null) {
           throw new Error("oci_review_not_requested");
@@ -387,12 +393,6 @@ export function transitionOpenCognitiveItem(
            VALUES (?, ?, 'OPEN', 'OPEN', ?, ?)`,
         ).run(item.id, input.ownerId, reason, nowIso);
         return itemForTransition(db, input.ownerId, input.entityUuid);
-      }
-
-      if (input.action === "resolve" || input.action === "supersede") {
-        if (!openCognitiveItemSourceEligibleForInfluence(db, item)) {
-          throw new Error("oci_source_unavailable");
-        }
       }
 
       if (input.action === "resolve" && item.kind !== "concern") {

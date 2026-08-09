@@ -1,10 +1,20 @@
 import type { DatabaseSync } from "node:sqlite";
 import type {
   Decision,
+  EvidenceRef,
   Motivation,
   MotivationKind,
   ReflectionMode,
 } from "../types.js";
+import {
+  listOpenCognitiveItemReviewRequests,
+  transitionOpenCognitiveItem,
+  type OpenCognitiveItemTransitionAction,
+} from "../cognition/reconsideration.js";
+import {
+  openCognitiveItemSourceEligibleForInfluence,
+  type OpenCognitiveItemRecord,
+} from "../cognition/open-items.js";
 import {
   getReflectionEvent,
   insertReflectionEvent,
@@ -20,6 +30,7 @@ import {
 
 const CLASSIFIER_VERSION = 1;
 const EVIDENCE_WINDOW = 20;
+const MAX_OPEN_COGNITIVE_REVIEW_REQUESTS = 8;
 const PROACTIVE_KINDS = new Set<MotivationKind>([
   "question",
   "fact",
@@ -123,6 +134,85 @@ export function processPendingReflectionEvents(
       throw error;
     }
   }
+}
+
+export type OpenCognitiveReviewProposal = {
+  action: OpenCognitiveItemTransitionAction;
+  reason: string;
+  evidenceRefs?: EvidenceRef[];
+  replacementEntityUuid?: string;
+  now?: Date;
+};
+
+export type OpenCognitiveReviewProposalFactory = (
+  item: OpenCognitiveItemRecord,
+) => OpenCognitiveReviewProposal | null;
+
+/**
+ * Consume a bounded set of OCI review requests under Reflection ownership.
+ * Every lifecycle mutation is delegated to the OCI transition owner after a
+ * fresh source, capability, provenance, relationship, and owner check.
+ */
+export function processPendingOpenCognitiveReviews(
+  db: DatabaseSync,
+  ownerId?: string,
+  proposal:
+    | OpenCognitiveReviewProposal
+    | OpenCognitiveReviewProposalFactory = {
+    action: "keep_open",
+    reason: "reflection_keep_open",
+  },
+): { processed: number; skipped: number } {
+  const owners = ownerId
+    ? [ownerId]
+    : (
+        db
+          .prepare(
+            `SELECT DISTINCT o.owner_id
+             FROM open_cognitive_items o
+             JOIN open_cognitive_item_attention a ON a.item_id = o.id
+             WHERE o.status = 'OPEN' AND a.review_requested_at IS NOT NULL
+             ORDER BY o.owner_id ASC`,
+          )
+          .all() as Array<{ owner_id?: string }>
+      )
+        .map((row) => row.owner_id)
+        .filter((value): value is string => typeof value === "string" && value.length > 0);
+  let processed = 0;
+  let skipped = 0;
+  for (const owner of owners) {
+    if (processed + skipped >= MAX_OPEN_COGNITIVE_REVIEW_REQUESTS) break;
+    const remaining = MAX_OPEN_COGNITIVE_REVIEW_REQUESTS - processed - skipped;
+    const requests = listOpenCognitiveItemReviewRequests(db, owner, remaining);
+    for (const item of requests) {
+      if (processed + skipped >= MAX_OPEN_COGNITIVE_REVIEW_REQUESTS) break;
+      if (!openCognitiveItemSourceEligibleForInfluence(db, item)) {
+        skipped += 1;
+        continue;
+      }
+      let requested: OpenCognitiveReviewProposal | null;
+      try {
+        requested = typeof proposal === "function" ? proposal(item) : proposal;
+      } catch {
+        requested = null;
+      }
+      if (!requested) {
+        skipped += 1;
+        continue;
+      }
+      try {
+        transitionOpenCognitiveItem(db, {
+          ...requested,
+          ownerId: item.ownerId,
+          entityUuid: item.entityUuid,
+        });
+        processed += 1;
+      } catch {
+        skipped += 1;
+      }
+    }
+  }
+  return { processed, skipped };
 }
 
 export function recordInitiativeReaction(

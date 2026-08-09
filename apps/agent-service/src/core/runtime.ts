@@ -73,6 +73,7 @@ import {
   applyInitiativeLearning,
   attachLearningSnapshot,
   getReflectionOverview,
+  processPendingOpenCognitiveReviews,
   processPendingReflectionEvents,
   recordInitiativeReaction,
 } from "./reflection/initiative.js";
@@ -457,6 +458,7 @@ export class AshleyCore {
     }
     recoverStaleRequests(this.db);
     processPendingReflectionEvents(this.db);
+    processPendingOpenCognitiveReviews(this.db);
   }
 
   /** The source-proposal layer can use this only when the operator enables it. */
@@ -1225,6 +1227,7 @@ export class AshleyCore {
       }
     }
 
+    processPendingOpenCognitiveReviews(this.db, ownerId);
     const reviewDueCount = countOpenCognitiveItemReviewDue(this.db, ownerId);
     if (reviewDueCount > 0) {
       recordProactiveDiagnostic(

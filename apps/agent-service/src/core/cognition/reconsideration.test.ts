@@ -24,6 +24,7 @@ import {
   transitionOpenCognitiveItem,
 } from "./reconsideration.js";
 import { selectMotivationCandidates } from "../agency/candidate-selection.js";
+import { processPendingOpenCognitiveReviews } from "../reflection/initiative.js";
 import type { Decision, Motivation } from "../types.js";
 
 const OWNER_ID = "doc";
@@ -290,6 +291,105 @@ describe("durable OCI reconsideration", () => {
           reason: "reverse_transition",
         }),
       ).toThrow("oci_transition_not_allowed");
+    } finally {
+      env.cognitionMode = originalMode;
+      db.close();
+    }
+  });
+
+  it("lets Reflection consume a valid review through the OCI transition owner", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const originalMode = env.cognitionMode;
+    try {
+      env.cognitionMode = "apply";
+      activateReading(db);
+      const item = seedItem(db);
+      for (let count = 0; count < OPEN_COGNITIVE_ITEM_CONSIDERATION_REVIEW_THRESHOLD; count += 1) {
+        recordOpenCognitiveDecision(db, {
+          ownerId: OWNER_ID,
+          decision: decision("delay", item.entityUuid, "standard"),
+          now: new Date(10_000 + count * 86_400_001),
+        });
+      }
+
+      const result = processPendingOpenCognitiveReviews(db, OWNER_ID);
+
+      expect(result).toEqual({ processed: 1, skipped: 0 });
+      expect(getOpenCognitiveItem(db, OWNER_ID, item.entityUuid)).toMatchObject({
+        status: "OPEN",
+        attention: {
+          delayClass: "long",
+          reviewRequestedAt: null,
+          lastOutcomeCode: "reflection_keep_open",
+        },
+      });
+      expect(listOpenCognitiveItemReviewRequests(db, OWNER_ID)).toEqual([]);
+    } finally {
+      env.cognitionMode = originalMode;
+      db.close();
+    }
+  });
+
+  it("keeps invalid external resolution and withdrawn-source review requests fail closed", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const originalMode = env.cognitionMode;
+    try {
+      env.cognitionMode = "apply";
+      activateReading(db);
+      const item = seedItem(db);
+      for (let count = 0; count < OPEN_COGNITIVE_ITEM_CONSIDERATION_REVIEW_THRESHOLD; count += 1) {
+        recordOpenCognitiveDecision(db, {
+          ownerId: OWNER_ID,
+          decision: decision("delay", item.entityUuid, "standard"),
+          now: new Date(20_000 + count * 86_400_001),
+        });
+      }
+      const invalid = processPendingOpenCognitiveReviews(
+        db,
+        OWNER_ID,
+        () => ({
+          action: "resolve",
+          reason: "invalid_external_resolution",
+          evidenceRefs: [],
+        }),
+      );
+      expect(invalid).toEqual({ processed: 0, skipped: 1 });
+      expect(getOpenCognitiveItem(db, OWNER_ID, item.entityUuid)?.status).toBe("OPEN");
+      expect(listOpenCognitiveItemReviewRequests(db, OWNER_ID)).toHaveLength(1);
+
+      db.prepare("UPDATE questions SET status = 'forgotten' WHERE id = ?").run(
+        Number(item.sourceId),
+      );
+      const withdrawnSource = processPendingOpenCognitiveReviews(db, OWNER_ID);
+      expect(withdrawnSource).toEqual({ processed: 0, skipped: 1 });
+      expect(getOpenCognitiveItem(db, OWNER_ID, item.entityUuid)?.status).toBe("OPEN");
+    } finally {
+      env.cognitionMode = originalMode;
+      db.close();
+    }
+  });
+
+  it("processes at most eight review requests per bounded Reflection invocation", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const originalMode = env.cognitionMode;
+    try {
+      env.cognitionMode = "apply";
+      activateReading(db);
+      for (let index = 0; index < 12; index += 1) {
+        const item = seedItem(db);
+        for (let count = 0; count < OPEN_COGNITIVE_ITEM_CONSIDERATION_REVIEW_THRESHOLD; count += 1) {
+          recordOpenCognitiveDecision(db, {
+            ownerId: OWNER_ID,
+            decision: decision("delay", item.entityUuid, "standard"),
+            now: new Date(30_000 + count * 86_400_001 + index),
+          });
+        }
+      }
+
+      const result = processPendingOpenCognitiveReviews(db, OWNER_ID);
+
+      expect(result).toEqual({ processed: 8, skipped: 0 });
+      expect(listOpenCognitiveItemReviewRequests(db, OWNER_ID)).toHaveLength(4);
     } finally {
       env.cognitionMode = originalMode;
       db.close();

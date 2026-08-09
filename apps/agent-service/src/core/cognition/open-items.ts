@@ -174,6 +174,7 @@ export function listOpenCognitiveItems(
     limit?: number;
     afterId?: number;
     availableAt?: string;
+    reviewRequested?: boolean;
     order?: "updated_desc" | "id_asc";
   } = {},
 ): OpenCognitiveItemRecord[] {
@@ -194,6 +195,9 @@ export function listOpenCognitiveItems(
   if (options.availableAt != null) {
     clauses.push("(a.defer_until IS NULL OR a.defer_until <= ?)");
     params.push(options.availableAt);
+  }
+  if (options.reviewRequested === true) {
+    clauses.push("a.review_requested_at IS NOT NULL");
   }
   const limit = options.limit == null || !Number.isFinite(options.limit)
     ? null
@@ -884,7 +888,8 @@ export function openCognitiveItemSourceEligibleForInfluence(
 ): boolean {
   if (!openCognitiveItemSourceCurrent(db, item)) return false;
   const capability = item.sourceCapability as CapabilityName;
-  return capabilityCanInfluence(db, capability, "apply");
+  return capabilityCanInfluence(db, capability, "apply") &&
+    relationshipSourceGateOpen(db, item);
 }
 
 /**

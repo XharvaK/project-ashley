@@ -48,6 +48,7 @@ import {
 import {
   materializeOpenCognitiveItem,
 } from "./cognition/open-items.js";
+import { listOpenCognitiveItemReviewRequests } from "./cognition/reconsideration.js";
 import { applyForgetTargets } from "./memory/forget.js";
 
 function activateCapabilities(db: DatabaseSync, names: string[]): void {
@@ -432,6 +433,63 @@ describe("AshleyCore", () => {
       env.proactiveEnabled = originalEnabled;
       env.proactiveMaxPerDay = originalCap;
       env.proactiveMinIdleHours = originalIdle;
+      db.close();
+    }
+  });
+
+  it("consumes one pending OCI review during normal AshleyCore construction", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const originalMode = env.cognitionMode;
+    try {
+      env.cognitionMode = "apply";
+      activateCapabilities(db, ["reading"]);
+      const now = new Date().toISOString();
+      db.prepare(
+        `INSERT INTO questions
+           (owner_id, subject, text, status, priority, created_at, updated_at,
+            entity_uuid, data_classification)
+         VALUES ('doc', 'about_self', 'Pending review source', 'open', 0.8,
+                 ?, ?, 'runtime-review-source', 'never_public')`,
+      ).run(now, now);
+      const source = db
+        .prepare("SELECT id, entity_uuid FROM questions WHERE entity_uuid = ?")
+        .get("runtime-review-source") as { id: number; entity_uuid: string };
+      const item = materializeOpenCognitiveItem(db, {
+        ownerId: "doc",
+        kind: "question",
+        semanticSummary: "A pending runtime review",
+        source: {
+          type: "question",
+          id: String(source.id),
+          entityUuid: source.entity_uuid,
+        },
+        origin: "manual",
+        provenance: "live",
+        sourceCapability: "reading",
+        contractId: currentContractId(),
+        buildIdentity: currentBuildIdentity(),
+        modelEpoch: 0,
+      }).item;
+      db.prepare(
+        `UPDATE open_cognitive_item_attention
+         SET review_requested_at = ?, consideration_count = 3
+         WHERE item_id = ?`,
+      ).run(now, item.id);
+      expect(listOpenCognitiveItemReviewRequests(db, "doc")).toHaveLength(1);
+
+      new AshleyCore(db);
+
+      expect(listOpenCognitiveItemReviewRequests(db, "doc")).toEqual([]);
+      expect(db.prepare(
+        `SELECT delay_class, last_outcome_code, review_requested_at
+         FROM open_cognitive_item_attention WHERE item_id = ?`,
+      ).get(item.id)).toEqual({
+        delay_class: "long",
+        last_outcome_code: "reflection_keep_open",
+        review_requested_at: null,
+      });
+    } finally {
+      env.cognitionMode = originalMode;
       db.close();
     }
   });
