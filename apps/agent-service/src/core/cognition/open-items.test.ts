@@ -186,7 +186,10 @@ describe("open cognitive item store", () => {
 
     const first = materializeOpenCognitiveItem(db, proposal("same meaning"));
     const retry = materializeOpenCognitiveItem(db, proposal("same meaning"));
-    const distinct = materializeOpenCognitiveItem(db, proposal("different meaning"));
+    const distinct = materializeOpenCognitiveItem(db, {
+      ...proposal("same meaning"),
+      semanticSummary: "A different bounded unresolved question",
+    });
 
     expect(first.created).toBe(true);
     expect(retry.created).toBe(false);
@@ -195,6 +198,132 @@ describe("open cognitive item store", () => {
     expect(
       listOpenCognitiveItems(db, "owner-1", { status: "OPEN" }),
     ).toHaveLength(2);
+    db.close();
+  });
+
+  it("derives semantic identity from the bounded conclusion, not proposed key material", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const now = "2026-08-09T00:00:00.000Z";
+    db.prepare(
+      `INSERT INTO questions
+         (owner_id, subject, text, status, priority, created_at, updated_at,
+          entity_uuid, data_classification)
+       VALUES (?, 'about_self', ?, 'open', 0.8, ?, ?, ?, 'never_public')`,
+    ).run(
+      "owner-1",
+      "What remains unresolved?",
+      now,
+      now,
+      "question-source-identity",
+    );
+    const source = db
+      .prepare("SELECT id, entity_uuid FROM questions WHERE entity_uuid = ?")
+      .get("question-source-identity") as { id: number; entity_uuid: string };
+    const makeProposal = (
+      semanticSummary: string,
+      semanticKeyMaterial: string,
+    ): OpenCognitiveItemProposal => ({
+      ownerId: "owner-1",
+      kind: "question",
+      semanticSummary,
+      source: {
+        type: "question",
+        id: String(source.id),
+        entityUuid: source.entity_uuid,
+      },
+      origin: "cognition",
+      semanticKeyMaterial,
+      provenance: "shadow",
+      sourceCapability: "reading",
+      contractId: currentContractId(),
+      buildIdentity: currentBuildIdentity(),
+      modelEpoch: 0,
+      sourceRevision: "caller-controlled-revision-must-be-ignored",
+      dataClassification: "never_public",
+    });
+
+    const first = materializeOpenCognitiveItem(
+      db,
+      makeProposal("Same bounded conclusion", "model-key-a"),
+    );
+    const retry = materializeOpenCognitiveItem(
+      db,
+      makeProposal("Same bounded conclusion", "model-key-b"),
+    );
+    const distinct = materializeOpenCognitiveItem(
+      db,
+      makeProposal("A different bounded conclusion", "model-key-a"),
+    );
+
+    expect(retry.created).toBe(false);
+    expect(retry.item.entityUuid).toBe(first.item.entityUuid);
+    expect(distinct.created).toBe(true);
+    expect(distinct.item.entityUuid).not.toBe(first.item.entityUuid);
+    db.close();
+  });
+
+  it("binds identity to the authoritative source revision and supersedes stale open rows", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const firstRevision = "2026-08-09T00:00:00.000Z";
+    const secondRevision = "2026-08-10T00:00:00.000Z";
+    db.prepare(
+      `INSERT INTO questions
+         (owner_id, subject, text, status, priority, created_at, updated_at,
+          entity_uuid, data_classification)
+       VALUES (?, 'about_self', 'Revision-bound question', 'open', 0.8, ?, ?, ?, 'never_public')`,
+    ).run(
+      "owner-1",
+      firstRevision,
+      firstRevision,
+      "question-source-revision",
+    );
+    const source = db
+      .prepare("SELECT id, entity_uuid FROM questions WHERE entity_uuid = ?")
+      .get("question-source-revision") as { id: number; entity_uuid: string };
+    const makeProposal = (): OpenCognitiveItemProposal => ({
+      ownerId: "owner-1",
+      kind: "question",
+      semanticSummary: "A revision-bound conclusion",
+      source: {
+        type: "question",
+        id: String(source.id),
+        entityUuid: source.entity_uuid,
+      },
+      origin: "cognition",
+      semanticKeyMaterial: "reused-model-key",
+      provenance: "shadow",
+      sourceCapability: "reading",
+      contractId: currentContractId(),
+      buildIdentity: currentBuildIdentity(),
+      modelEpoch: 0,
+      sourceRevision: "stale-caller-value",
+      dataClassification: "never_public",
+    });
+
+    const old = materializeOpenCognitiveItem(db, makeProposal());
+    expect(old.item.sourceRevision).toBe(firstRevision);
+    db.prepare("UPDATE questions SET updated_at = ? WHERE id = ?").run(
+      secondRevision,
+      source.id,
+    );
+
+    const current = materializeOpenCognitiveItem(db, makeProposal());
+    expect(current.created).toBe(true);
+    expect(current.item.sourceRevision).toBe(secondRevision);
+    expect(
+      getOpenCognitiveItem(db, "owner-1", old.item.entityUuid),
+    ).toMatchObject({ status: "SUPERSEDED" });
+    expect(
+      db
+        .prepare(
+          `SELECT to_status, reason FROM open_cognitive_item_transitions
+           WHERE item_id = ? ORDER BY id DESC LIMIT 1`,
+        )
+        .get(old.item.id),
+    ).toEqual({
+      to_status: "SUPERSEDED",
+      reason: "source_revision_superseded",
+    });
     db.close();
   });
 

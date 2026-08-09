@@ -334,7 +334,9 @@ describe("INIT-03 adversarial self-audit", () => {
 
       const distinct = materializeOpenCognitiveItem(
         second,
-        proposal(question, "second-meaning-same-source"),
+        proposal(question, "same-host-key", {
+          semanticSummary: "A different bounded adversarial evaluation item",
+        }),
       );
       expect(distinct.created).toBe(true);
       expect(distinct.item.entityUuid).not.toBe(firstResult.item.entityUuid);

@@ -229,7 +229,11 @@ export type OpenCognitiveItemProposal = {
     entityUuid: string;
   };
   origin: OpenCognitiveItemRecord["origin"];
-  semanticKeyMaterial: string;
+  /**
+   * Compatibility-only input. Host code deliberately ignores this value when
+   * deriving durable identity.
+   */
+  semanticKeyMaterial?: string;
   provenance: OpenCognitiveItemProvenance;
   sourceCapability: string;
   contractId: string;
@@ -423,9 +427,15 @@ function sourceLifecycleAllows(sourceType: string, status: string): boolean {
 function currentSourceRevision(row: Record<string, unknown>): string {
   for (const key of ["source_revision", "revision", "updated_at", "created_at"]) {
     const value = row[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "string" && value.trim()) {
+      return value.trim().replace(/\s+/g, " ");
+    }
   }
   return "";
+}
+
+function authoritativeSourceRevision(row: Record<string, unknown>): string {
+  return optionalBoundedText(currentSourceRevision(row), 128);
 }
 
 function validateCapability(
@@ -522,11 +532,6 @@ function validateProposal(
     128,
     "oci_source_entity_invalid",
   );
-  const semanticKeyMaterial = boundedText(
-    proposal.semanticKeyMaterial,
-    512,
-    "oci_semantic_key_invalid",
-  );
   const sourceRow = sourceRowFor(
     db,
     ownerId,
@@ -551,18 +556,16 @@ function validateProposal(
     rejectMaterialization("oci_classification_secret");
   }
   const sourceCapability = validateCapability(db, proposal);
-  const sourceRevision = optionalBoundedText(
-    proposal.sourceRevision,
-    128,
-  );
+  const sourceRevision = authoritativeSourceRevision(sourceRow);
   const canonicalKey = [
-    "open-cognitive-item-v1",
+    "open-cognitive-item-v2",
     ownerId,
     sourceType,
     sourceIdValue,
     sourceEntityUuid,
     kind,
-    semanticKeyMaterial,
+    semanticSummary,
+    sourceRevision,
   ].join("\u0000");
   const semanticKeyHash = createHash("sha256")
     .update(canonicalKey, "utf8")
@@ -586,6 +589,77 @@ function validateProposal(
   };
 }
 
+type ExistingIdentityRow = {
+  id: number;
+  semantic_summary: string;
+  source_type: string;
+  source_id: string;
+  source_entity_uuid: string;
+  kind: string;
+  source_revision: string;
+  source_capability: string;
+  contract_id: string;
+  provenance: string;
+  origin: string;
+  build_identity: string;
+  model_epoch: number;
+  data_classification: string;
+};
+
+function supersedeStaleSourceRevisions(
+  db: DatabaseSync,
+  validated: ReturnType<typeof validateProposal>,
+  nowIso: string,
+): void {
+  const staleRows = db
+    .prepare(
+      `SELECT id
+       FROM open_cognitive_items
+       WHERE owner_id = ? AND source_type = ? AND source_id = ?
+         AND source_entity_uuid = ? AND kind = ? AND status = 'OPEN'
+         AND source_revision <> ?
+       ORDER BY id ASC`,
+    )
+    .all(
+      validated.ownerId,
+      validated.sourceType,
+      validated.sourceId,
+      validated.sourceEntityUuid,
+      validated.kind,
+      validated.sourceRevision,
+    ) as Array<{ id: number }>;
+
+  for (const row of staleRows) {
+    const update = db
+      .prepare(
+        `UPDATE open_cognitive_items
+         SET status = 'SUPERSEDED', status_reason = 'source_revision_superseded',
+             updated_at = ?
+         WHERE id = ? AND owner_id = ? AND status = 'OPEN'`,
+      )
+      .run(nowIso, row.id, validated.ownerId);
+    if (Number(update.changes) !== 1) continue;
+    db.prepare(
+      `INSERT OR IGNORE INTO open_cognitive_item_attention
+         (item_id, delay_class, defer_until, last_considered_at,
+          consideration_count, last_outcome_code, review_requested_at, updated_at)
+       VALUES (?, 'none', NULL, NULL, 0, NULL, NULL, ?)`,
+    ).run(row.id, nowIso);
+    db.prepare(
+      `UPDATE open_cognitive_item_attention
+       SET delay_class = 'none', defer_until = NULL,
+           last_outcome_code = 'transition:supersede',
+           review_requested_at = NULL, updated_at = ?
+       WHERE item_id = ?`,
+    ).run(nowIso, row.id);
+    db.prepare(
+      `INSERT INTO open_cognitive_item_transitions
+         (item_id, owner_id, from_status, to_status, reason, created_at)
+       VALUES (?, ?, 'OPEN', 'SUPERSEDED', 'source_revision_superseded', ?)`,
+    ).run(row.id, validated.ownerId, nowIso);
+  }
+}
+
 export function materializeOpenCognitiveItem(
   db: DatabaseSync,
   proposal: OpenCognitiveItemProposal,
@@ -596,6 +670,7 @@ export function materializeOpenCognitiveItem(
   try {
     const validated = validateProposal(db, proposal);
     const createdAt = new Date().toISOString();
+    supersedeStaleSourceRevisions(db, validated, createdAt);
     const insert = db.prepare(
       `INSERT INTO open_cognitive_items
          (owner_id, entity_uuid, kind, status, semantic_summary,
@@ -631,19 +706,33 @@ export function materializeOpenCognitiveItem(
     const existing = db
       .prepare(
         `SELECT id, source_entity_uuid, kind
+                , semantic_summary, source_type, source_id, source_revision,
+           source_capability, contract_id, provenance, origin, build_identity,
+           model_epoch, data_classification
          FROM open_cognitive_items
          WHERE owner_id = ? AND semantic_key_hash = ?`,
       )
       .get(validated.ownerId, validated.semanticKeyHash) as
-      | { id?: number; source_entity_uuid?: string; kind?: string }
+      | (Partial<ExistingIdentityRow> & { id?: number })
       | undefined;
     if (!existing?.id) {
       rejectMaterialization("oci_materialization_missing_after_insert");
     }
-    if (
-      existing.source_entity_uuid !== validated.sourceEntityUuid ||
-      existing.kind !== validated.kind
-    ) {
+    const identityMatches =
+      existing.semantic_summary === validated.semanticSummary &&
+      existing.source_type === validated.sourceType &&
+      existing.source_id === validated.sourceId &&
+      existing.source_entity_uuid === validated.sourceEntityUuid &&
+      existing.kind === validated.kind &&
+      existing.source_revision === validated.sourceRevision &&
+      existing.source_capability === validated.sourceCapability &&
+      existing.contract_id === validated.contractId &&
+      existing.provenance === validated.provenance &&
+      existing.origin === validated.origin &&
+      existing.build_identity === validated.buildIdentity &&
+      Number(existing.model_epoch) === validated.modelEpoch &&
+      existing.data_classification === validated.dataClassification;
+    if (!identityMatches) {
       rejectMaterialization("oci_idempotency_conflict");
     }
     db.prepare(
@@ -720,7 +809,13 @@ export function openCognitiveItemSourceCurrent(
     );
     if (
       item.sourceRevision !== "" &&
-      currentSourceRevision(sourceRow) !== item.sourceRevision
+      authoritativeSourceRevision(sourceRow) !== item.sourceRevision
+    ) {
+      return false;
+    }
+    if (
+      item.sourceRevision === "" &&
+      authoritativeSourceRevision(sourceRow) !== ""
     ) {
       return false;
     }
