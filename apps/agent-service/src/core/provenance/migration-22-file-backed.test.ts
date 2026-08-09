@@ -142,7 +142,7 @@ describe("migration-22 file-backed qualification", () => {
 
     const migrated = openNuclearDb(new DatabaseSync(NUCLEAR_DB_PATH), { continuity });
     try {
-      expect(migrated.prepare("PRAGMA user_version").get()).toEqual({ user_version: 22 });
+      expect(migrated.prepare("PRAGMA user_version").get()).toEqual({ user_version: 23 });
       expect(migrated.prepare("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 });
       expect(migrated.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
       expect(migrated.prepare("PRAGMA quick_check").get()).toEqual({ quick_check: "ok" });
@@ -244,7 +244,7 @@ describe("migration-22 file-backed qualification", () => {
     const reopened = openNuclearDb(new DatabaseSync(NUCLEAR_DB_PATH), { continuity: reopenedContinuity });
     connections.push(reopened);
     try {
-      expect(reopened.prepare("PRAGMA user_version").get()).toEqual({ user_version: 22 });
+      expect(reopened.prepare("PRAGMA user_version").get()).toEqual({ user_version: 23 });
       expect(reopened.prepare("SELECT id, entity_uuid FROM episodes WHERE id = ?").get(historicalEpisodeId))
         .toEqual({ id: historicalEpisodeId, entity_uuid: historicalUuid });
       expect(reopened.prepare("SELECT cutoff_message_id FROM recall_live_cutovers WHERE owner_id = 'doc' AND release_id = ?").get(releaseId))
