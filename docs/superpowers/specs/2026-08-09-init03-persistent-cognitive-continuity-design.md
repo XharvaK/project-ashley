@@ -76,13 +76,13 @@ Initial semantic kinds are exactly:
 
 Semantic lifecycle states are exactly:
 
-- `open`
-- `resolved`
-- `withdrawn`
-- `superseded`
+- `OPEN`
+- `RESOLVED`
+- `WITHDRAWN`
+- `SUPERSEDED`
 
-`defer_until` is attention metadata. `deferred` is not an OCI semantic state.
-An open item with a future `defer_until` remains unresolved and is excluded
+`defer_until` is attention metadata. `DEFERRED` is not an OCI semantic state.
+An `OPEN` item with a future `defer_until` remains unresolved and is excluded
 from ordinary candidate projection until the time passes.
 
 The durable row contains:
@@ -181,7 +181,7 @@ Thought may return a bounded semantic delay class. Host code maps that class to
 a fixed duration. Model output cannot persist an arbitrary timestamp.
 
 Delay atomically updates `defer_until`, `last_considered_at`,
-`consideration_count`, and `last_outcome`; status remains `open`. Restart
+`consideration_count`, and `last_outcome`; status remains `OPEN`. Restart
 preserves the deferral. Expired deferrals become eligible again.
 
 Repeated non-resolution does not expire, delete, forget, or permanently demote
