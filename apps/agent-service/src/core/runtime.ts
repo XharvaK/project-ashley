@@ -5,7 +5,10 @@ import { decide, attachAuthorizedClaims } from "./agency/decide.js";
 import { buildOwnTimeReportConstraint } from "./agency/own-time-report.js";
 import { collectMotivations, mindStateItemToMotivation } from "./agency/motivations.js";
 import { deliberateDecision } from "./agency/thought.js";
-import { selectMotivationCandidates } from "./agency/candidate-selection.js";
+import {
+  motivationCurrentlyEligible,
+  selectMotivationCandidates,
+} from "./agency/candidate-selection.js";
 import { enqueueThoughtObservation, type ShadowCognitionContext } from "./agency/thought-observation.js";
 import {
   classifyTurnComplexity,
@@ -1399,6 +1402,17 @@ export class AshleyCore {
         let reservationId: number;
         let delivery: ReturnType<typeof claimProactiveDeliveryInTransaction>;
         try {
+          if (!motivationCurrentlyEligible(this.db, ownerId, candidate)) {
+            this.db.exec("ROLLBACK");
+            recordProactiveDiagnostic(
+              this.db,
+              ownerId,
+              "delivery",
+              "source_unavailable_before_delivery",
+            );
+            setDecisionOutcome(this.db, decisionId, "");
+            return { shouldSend: false, reason: "source_unavailable" };
+          }
           const result = this.db
             .prepare(
               `INSERT INTO initiative_reservations

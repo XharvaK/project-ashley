@@ -382,6 +382,14 @@ function validateSourceState(
   return classification;
 }
 
+function currentSourceRevision(row: Record<string, unknown>): string {
+  for (const key of ["source_revision", "revision", "updated_at", "created_at"]) {
+    const value = row[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
 function validateCapability(
   db: DatabaseSync,
   proposal: OpenCognitiveItemProposal,
@@ -671,6 +679,12 @@ export function openCognitiveItemSourceEligibleForInfluence(
       item.sourceId,
     );
     validateSourceState(sourceRow, item.sourceEntityUuid, "live");
+    if (
+      item.sourceRevision !== "" &&
+      currentSourceRevision(sourceRow) !== item.sourceRevision
+    ) {
+      return false;
+    }
   } catch {
     return false;
   }

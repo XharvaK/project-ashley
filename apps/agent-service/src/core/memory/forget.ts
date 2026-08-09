@@ -92,7 +92,20 @@ function isRow(value: unknown): value is Row {
   return typeof value === "object" && value !== null;
 }
 
-function placeholders(values: unknown[]): string {
+const OCI_SOURCE_TYPES_BY_FORGET_ENTITY: Record<string, readonly string[]> = {
+  mem_messages: ["message", "mem_message"],
+  episodes: ["episode"],
+  mem_facts: ["fact"],
+  questions: ["question", "questions"],
+  opinions: ["opinion"],
+  mind_state_items: ["mind_state"],
+  doc_reminder: ["doc_reminder"],
+  ashley_self_commitment: ["ashley_self_commitment"],
+  mutual_commitment: ["mutual_commitment"],
+  relational_tension: ["relational_tension"],
+};
+
+function placeholders(values: readonly unknown[]): string {
   return values.map(() => "?").join(", ");
 }
 
@@ -215,6 +228,110 @@ function categoryCountsFromTargets(targets: ForgetTarget[]): CategoryCounts {
   return counts;
 }
 
+/** Forgetting an authoritative source also tombstones its bounded OCI rows. */
+function addOpenCognitiveItemForgetTargets(
+  db: DatabaseSync,
+  ownerId: string,
+  targets: ForgetTarget[],
+): ForgetTarget[] {
+  const result = [...targets];
+  const seen = new Set(
+    result
+      .filter((target) => target.entityType === "open_cognitive_items")
+      .map((target) => target.entityUuid),
+  );
+  const add = (entityUuid: unknown) => {
+    const uuid = String(entityUuid ?? "");
+    if (!uuid || seen.has(uuid)) return;
+    seen.add(uuid);
+    result.push({
+      entityType: "open_cognitive_items",
+      entityUuid: uuid,
+      action: "redact",
+    });
+  };
+
+  for (const target of targets) {
+    if (target.entityType === "open_cognitive_items") continue;
+    const sourceTypes = OCI_SOURCE_TYPES_BY_FORGET_ENTITY[target.entityType];
+    if (!sourceTypes) continue;
+    const rows = db
+      .prepare(
+        `SELECT entity_uuid
+         FROM open_cognitive_items
+         WHERE owner_id = ? AND source_type IN (${placeholders(sourceTypes)})
+           AND source_entity_uuid = ?`,
+      )
+      .all(ownerId, ...sourceTypes, target.entityUuid) as Array<{
+      entity_uuid?: string;
+    }>;
+    for (const row of rows) add(row.entity_uuid);
+  }
+  return result;
+}
+
+function redactOpenCognitiveItems(
+  db: DatabaseSync,
+  ownerId: string,
+  targets: ForgetTarget[],
+): number {
+  const entityUuids = [
+    ...new Set(
+      targets
+        .filter((target) => target.entityType === "open_cognitive_items")
+        .map((target) => target.entityUuid),
+    ),
+  ];
+  if (entityUuids.length === 0) return 0;
+
+  const marks = placeholders(entityUuids);
+  const rows = db
+    .prepare(
+      `SELECT id, status
+       FROM open_cognitive_items
+       WHERE owner_id = ? AND entity_uuid IN (${marks})`,
+    )
+    .all(ownerId, ...entityUuids) as Array<{
+    id?: number;
+    status?: string;
+  }>;
+  const now = new Date().toISOString();
+  for (const row of rows) {
+    if (Number(row.id) > 0 && row.status === "OPEN") {
+      db.prepare(
+        `INSERT INTO open_cognitive_item_transitions
+           (item_id, owner_id, from_status, to_status, reason, created_at)
+         VALUES (?, ?, 'OPEN', 'WITHDRAWN', 'source_forgotten', ?)`,
+      ).run(Number(row.id), ownerId, now);
+    }
+  }
+
+  const changed = Number(
+    db
+      .prepare(
+        `UPDATE open_cognitive_items
+         SET semantic_summary = '[redacted]', source_revision = '',
+             status_reason = 'source_forgotten',
+             redacted_at = COALESCE(redacted_at, ?),
+             redaction_code = 'source_forgotten', updated_at = ?,
+             status = CASE WHEN status = 'OPEN' THEN 'WITHDRAWN' ELSE status END
+         WHERE owner_id = ? AND entity_uuid IN (${marks})`,
+      )
+      .run(now, now, ownerId, ...entityUuids).changes,
+  );
+  db.prepare(
+    `UPDATE open_cognitive_item_attention
+     SET delay_class = 'none', defer_until = NULL,
+         last_outcome_code = 'source_forgotten', review_requested_at = NULL,
+         updated_at = ?
+     WHERE item_id IN (
+       SELECT id FROM open_cognitive_items
+       WHERE owner_id = ? AND entity_uuid IN (${marks})
+     )`,
+  ).run(now, ownerId, ...entityUuids);
+  return changed;
+}
+
 function buildTargetsForTopic(
   db: DatabaseSync,
   ownerId: string,
@@ -223,12 +340,26 @@ function buildTargetsForTopic(
   targets: ForgetTarget[];
   messageIds: number[];
   episodeIds: number[];
+  questionIds: number[];
   matchedFacts: Array<{ id: number; key: string; value: string }>;
   preview: string[];
 } {
   const messageIds = listMessageIdsMatchingTopic(db, ownerId, topic);
   const episodeMatches = matchingEpisodes(db, ownerId, topic, messageIds);
   const episodeIds = episodeMatches.map((episode) => episode.id);
+  const questionMatches = db
+    .prepare(
+      `SELECT id, text
+       FROM questions
+       WHERE owner_id = ? AND status IN ('open', 'pursuing')
+         AND LOWER(text) LIKE ?
+       ORDER BY updated_at DESC, id DESC`,
+    )
+    .all(ownerId, `%${topic.trim().toLowerCase()}%`) as Array<{
+    id: number;
+    text: string;
+  }>;
+  const questionIds = questionMatches.map((question) => Number(question.id));
   const matchedFacts = listFactsMatchingTopic(db, ownerId, topic);
   const relationshipMatches = listRelationshipForgetTargets(db, ownerId, topic);
   const perceptionMatches = listPerceptionForgetTargets(db, ownerId, topic);
@@ -236,6 +367,9 @@ function buildTargetsForTopic(
     ...matchedFacts.map((fact) => `fact: ${fact.key}: ${fact.value}`),
     ...previewEpisodeForget(db, ownerId, topic),
     ...messageIds.map((id) => `message: ${id}`),
+    ...questionMatches.map((question) =>
+      `question: ${String(question.text ?? "").slice(0, 120)}`,
+    ),
     ...relationshipMatches.preview,
     ...perceptionMatches.preview,
   ];
@@ -258,6 +392,7 @@ function buildTargetsForTopic(
   };
   for (const id of messageIds) push("mem_messages", id, "redact");
   for (const id of episodeIds) push("episodes", id, "redact");
+  for (const id of questionIds) push("questions", id, "redact");
   for (const fact of matchedFacts) push("mem_facts", fact.id, "redact");
   for (const target of relationshipMatches.targets) targets.push(target);
   for (const target of perceptionMatches.targets) targets.push(target);
@@ -295,7 +430,33 @@ function buildTargetsForTopic(
     }
   }
 
-  return { targets, messageIds, episodeIds, matchedFacts, preview };
+  return {
+    targets: addOpenCognitiveItemForgetTargets(db, ownerId, targets),
+    messageIds,
+    episodeIds,
+    questionIds,
+    matchedFacts,
+    preview,
+  };
+}
+
+function redactQuestions(
+  db: DatabaseSync,
+  ownerId: string,
+  questionIds: number[],
+): number {
+  if (questionIds.length === 0) return 0;
+  const now = new Date().toISOString();
+  return Number(
+    db
+      .prepare(
+        `UPDATE questions
+         SET text = '[redacted]', status = 'forgotten',
+             resolved_at = COALESCE(resolved_at, ?), updated_at = ?
+         WHERE owner_id = ? AND id IN (${placeholders(questionIds)})`,
+      )
+      .run(now, now, ownerId, ...questionIds).changes,
+  );
 }
 
 function reconcileFacts(
@@ -395,6 +556,8 @@ function assertForgetIntegrity(
   messageIds: number[],
   episodeIds: number[],
   matchedFactIds: number[],
+  questionIds: number[],
+  openCognitiveItemUuids: string[],
 ): void {
   if (messageIds.length > 0) {
     const marks = placeholders(messageIds);
@@ -485,6 +648,32 @@ function assertForgetIntegrity(
     );
     if (visibleFacts > 0) throw new Error("forget_integrity_failed:fact");
   }
+  if (questionIds.length > 0) {
+    const visibleQuestions = countRows(
+      db,
+      `SELECT COUNT(*) AS count FROM questions
+       WHERE owner_id = ? AND id IN (${placeholders(questionIds)})
+         AND (status <> 'forgotten' OR text <> '[redacted]')`,
+      ownerId,
+      ...questionIds,
+    );
+    if (visibleQuestions > 0) {
+      throw new Error("forget_integrity_failed:question");
+    }
+  }
+  if (openCognitiveItemUuids.length > 0) {
+    const visibleItems = countRows(
+      db,
+      `SELECT COUNT(*) AS count FROM open_cognitive_items
+       WHERE owner_id = ? AND entity_uuid IN (${placeholders(openCognitiveItemUuids)})
+         AND (redacted_at IS NULL OR semantic_summary <> '[redacted]')`,
+      ownerId,
+      ...openCognitiveItemUuids,
+    );
+    if (visibleItems > 0) {
+      throw new Error("forget_integrity_failed:open_cognitive_item");
+    }
+  }
 }
 
 function resolveIdsFromTargets(
@@ -496,11 +685,13 @@ function resolveIdsFromTargets(
   episodeIds: number[];
   factIds: number[];
   revisionIds: number[];
+  questionIds: number[];
 } {
   const messageIds: number[] = [];
   const episodeIds: number[] = [];
   const factIds: number[] = [];
   const revisionIds: number[] = [];
+  const questionIds: number[] = [];
   for (const target of targets) {
     const id = idOfEntityUuid(
       db,
@@ -519,6 +710,9 @@ function resolveIdsFromTargets(
       case "mem_facts":
         factIds.push(id);
         break;
+      case "questions":
+        questionIds.push(id);
+        break;
       case "learning_revisions":
         revisionIds.push(id);
         break;
@@ -534,6 +728,7 @@ function resolveIdsFromTargets(
     episodeIds: [...new Set(episodeIds)],
     factIds: [...new Set(factIds)],
     revisionIds: [...new Set(revisionIds)],
+    questionIds: [...new Set(questionIds)],
   };
 }
 
@@ -577,11 +772,20 @@ export function applyForgetTargets(
   targets: ForgetTarget[],
   options: { tombstoneId?: string | null } = {},
 ): ForgetResult {
-  const { messageIds, episodeIds, factIds, revisionIds } = resolveIdsFromTargets(
+  const effectiveTargets = addOpenCognitiveItemForgetTargets(
     db,
     ownerId,
     targets,
   );
+  const { messageIds, episodeIds, factIds, revisionIds, questionIds } =
+    resolveIdsFromTargets(db, ownerId, effectiveTargets);
+  const openCognitiveItemUuids = [
+    ...new Set(
+      effectiveTargets
+        .filter((target) => target.entityType === "open_cognitive_items")
+        .map((target) => target.entityUuid),
+    ),
+  ];
   const episodeMarks = placeholders(episodeIds);
   const stateReconciled =
     episodeIds.length === 0
@@ -627,7 +831,7 @@ export function applyForgetTargets(
       ownerId,
       new Date().toISOString(),
       options.tombstoneId ?? null,
-      JSON.stringify(categoryCountsFromTargets(targets)),
+      JSON.stringify(categoryCountsFromTargets(effectiveTargets)),
       JSON.stringify(DEFAULT_HONESTY),
     );
   } else {
@@ -652,6 +856,7 @@ export function applyForgetTargets(
   if (episodeIds.length > 0) {
     episodesForgotten = forgetEpisodesByIds(db, ownerId, episodeIds);
   }
+  redactQuestions(db, ownerId, questionIds);
   let messageEvidenceRemoved = 0;
   if (messageIds.length > 0) {
     messageEvidenceRemoved = Number(
@@ -668,6 +873,7 @@ export function applyForgetTargets(
   redactDeliveryTargets(db, ownerId, targets);
   redactRelationshipTargets(db, ownerId, targets);
   redactPerceptionTargets(db, ownerId, targets);
+  redactOpenCognitiveItems(db, ownerId, effectiveTargets);
   detachRelationshipMotivations(
     db,
     ownerId,
@@ -728,6 +934,8 @@ export function applyForgetTargets(
     messageIds,
     episodeIds,
     factIds,
+    questionIds,
+    openCognitiveItemUuids,
   );
   return {
     preview: [],
@@ -736,7 +944,7 @@ export function applyForgetTargets(
     counts,
     honesty: DEFAULT_HONESTY,
     tombstoneId: options.tombstoneId ?? null,
-    categoryCounts: categoryCountsFromTargets(targets),
+    categoryCounts: categoryCountsFromTargets(effectiveTargets),
   };
 }
 

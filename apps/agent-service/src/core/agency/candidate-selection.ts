@@ -202,6 +202,29 @@ function sourceIsCurrentlyEligible(
   }
 }
 
+/** Final source revalidation for a selected candidate before delivery claim. */
+export function motivationCurrentlyEligible(
+  db: DatabaseSync,
+  ownerId: string,
+  item: Motivation,
+  now = new Date(),
+): boolean {
+  const needsRelationshipRefs =
+    item.refType === "ashley_self_commitment" ||
+    item.refType === "mutual_commitment" ||
+    item.refType === "relational_tension";
+  const relationshipRefs = needsRelationshipRefs
+    ? currentRelationshipRefs(db, ownerId)
+    : new Set<string>();
+  return sourceIsCurrentlyEligible(
+    db,
+    ownerId,
+    item,
+    now.toISOString(),
+    relationshipRefs,
+  );
+}
+
 function summaryKey(summary: string): string {
   return summary.trim().replace(/\s+/g, " ").toLowerCase();
 }

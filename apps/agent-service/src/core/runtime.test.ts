@@ -5,11 +5,18 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
 
+const proactiveExpressionHook = vi.hoisted(() => ({
+  beforeReturn: null as (() => void) | null,
+}));
+
 vi.mock("./conversation/expression.js", () => ({
-  expressSpeak: async () => ({
-    text: "i can answer that from the live thread.",
-    model: "test-model",
-  }),
+  expressSpeak: async () => {
+    proactiveExpressionHook.beforeReturn?.();
+    return {
+      text: "i can answer that from the live thread.",
+      model: "test-model",
+    };
+  },
 }));
 
 import { openNuclearDb } from "./db.js";
@@ -34,6 +41,14 @@ import {
   proposeRevision,
 } from "./learning/revisions.js";
 import { listIdentity } from "./identity/store.js";
+import {
+  currentBuildIdentity,
+  currentContractId,
+} from "./rollout/capabilities.js";
+import {
+  materializeOpenCognitiveItem,
+} from "./cognition/open-items.js";
+import { applyForgetTargets } from "./memory/forget.js";
 
 function activateCapabilities(db: DatabaseSync, names: string[]): void {
   const releaseId = currentReleaseId();
@@ -193,6 +208,87 @@ describe("AshleyCore", () => {
 
     db.close();
     rmSync(path, { force: true });
+  });
+
+  it("aborts OCI delivery when its source is forgotten before the reservation claim", async () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const core = new AshleyCore(db);
+    const originalMode = env.cognitionMode;
+    const originalEnabled = env.proactiveEnabled;
+    const originalIdle = env.proactiveMinIdleHours;
+    const originalCap = env.proactiveMaxPerDay;
+    try {
+      env.cognitionMode = "apply";
+      env.proactiveEnabled = true;
+      env.proactiveMinIdleHours = 0;
+      env.proactiveMaxPerDay = 10;
+      activateCapabilities(db, ["recall"]);
+      const threadId = resolveActiveThread(db, "doc");
+      const messageId = insertMessage(db, {
+        threadId,
+        ownerId: "doc",
+        role: "user",
+        text: "The interview outcome remains unresolved.",
+      });
+      const source = db
+        .prepare("SELECT entity_uuid FROM mem_messages WHERE id = ?")
+        .get(messageId) as { entity_uuid: string };
+      const item = materializeOpenCognitiveItem(db, {
+        ownerId: "doc",
+        kind: "question",
+        semanticSummary: "Revisit the interview outcome",
+        source: {
+          type: "message",
+          id: String(messageId),
+          entityUuid: source.entity_uuid,
+        },
+        origin: "cognition",
+        semanticKeyMaterial: "runtime-redaction-race",
+        provenance: "live",
+        sourceCapability: "recall",
+        contractId: currentContractId(),
+        buildIdentity: currentBuildIdentity(),
+        modelEpoch: 0,
+      }).item;
+      proactiveExpressionHook.beforeReturn = () => {
+        applyForgetTargets(db, "doc", [
+          {
+            entityType: "mem_messages",
+            entityUuid: source.entity_uuid,
+            action: "redact",
+          },
+        ]);
+      };
+      try {
+        const result = await core.tickProactive("doc");
+        expect(db.prepare(
+          "SELECT semantic_summary FROM open_cognitive_items WHERE entity_uuid = ?",
+        ).get(item.entityUuid)).toMatchObject({
+          semantic_summary: "[redacted]",
+        });
+        expect(result).toMatchObject({
+          shouldSend: false,
+          reason: "source_unavailable",
+        });
+      } finally {
+        proactiveExpressionHook.beforeReturn = null;
+      }
+      expect(db.prepare(
+        "SELECT state FROM delivery_reservations WHERE owner_id = 'doc'",
+      ).all()).toEqual([]);
+      expect(db.prepare(
+        "SELECT semantic_summary, redacted_at FROM open_cognitive_items WHERE entity_uuid = ?",
+      ).get(item.entityUuid)).toMatchObject({
+        semantic_summary: "[redacted]",
+        redacted_at: expect.any(String),
+      });
+    } finally {
+      env.cognitionMode = originalMode;
+      env.proactiveEnabled = originalEnabled;
+      env.proactiveMinIdleHours = originalIdle;
+      env.proactiveMaxPerDay = originalCap;
+      db.close();
+    }
   });
 
   it("rolls back the initiative reservation when the delivery claim fails", async () => {
