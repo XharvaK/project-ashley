@@ -1,5 +1,6 @@
 import { vi } from "vitest";
 import { dispatchCalls } from "./attention-dispatch-calls.js";
+import { withOfflineAppGateDisabled } from "./offline-test-helpers.js";
 
 // Mock the attention dispatcher (re-exported via core/attention/index.js) so we
 // can assert which route alias is dispatched WITHOUT any network.
@@ -74,12 +75,12 @@ describe("wave4 Track M — route precedence for thought_observation", () => {
   });
 
   it("explicit route='thought' wins over purpose='thought_observation' (M-FIX safe)", async () => {
-    await completeChat([{ role: "user", content: "t" }], {
+    await withOfflineAppGateDisabled(() => completeChat([{ role: "user", content: "t" }], {
       route: "thought",
       purpose: "thought_observation",
       lane: "exchange_cognition",
       attentionDb: db,
-    } as never);
+    } as never));
     expect(dispatchCalls.length).toBe(1);
     expect(dispatchCalls[0]!.routeAlias).toBe("thought");
     expect(dispatchCalls[0]!.purpose).toBe("thought_observation");
@@ -87,12 +88,12 @@ describe("wave4 Track M — route precedence for thought_observation", () => {
   });
 
   it("control: purpose='thought' with route='thought' -> thought (current Wave 3 behavior)", async () => {
-    await completeChat([{ role: "user", content: "t" }], {
+    await withOfflineAppGateDisabled(() => completeChat([{ role: "user", content: "t" }], {
       route: "thought",
       purpose: "thought",
       lane: "interactive",
       attentionDb: db,
-    } as never);
+    } as never));
     expect(dispatchCalls[0]!.routeAlias).toBe("thought");
   });
 });

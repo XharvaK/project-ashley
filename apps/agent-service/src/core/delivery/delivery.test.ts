@@ -1,5 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
+import "../qualification/mistral-client-mock.js";
 import { openNuclearDb } from "../db.js";
 import { planContentBubbles } from "./bubble-plan.js";
 import {

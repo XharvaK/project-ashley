@@ -30,6 +30,9 @@ export function assertOutboundAllowed(purpose: string): void {
   if (!outboundEnabled || forkMode) {
     throw new Error(`outbound_blocked:${purpose}`);
   }
+  if (process.env.ASHLEY_PHASE0_OFFLINE === "true") {
+    throw new Error(`offline_network_blocked:${purpose}`);
+  }
 }
 
 export function assertWritebackAllowed(purpose: string): void {

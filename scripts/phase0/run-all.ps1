@@ -21,7 +21,15 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host ""
 Write-Host "=== Vitest (nuclear unit) ==="
-npm test --prefix (Join-Path $Root "apps/agent-service")
+if ($Tier -eq "offline") {
+  # Qualification-only context. Normal Ashley startup keeps its existing
+  # environment precedence and does not receive these variables.
+  $env:ASHLEY_PHASE0_OFFLINE = "true"
+  $env:COMPOSER_ENV_FILE = Join-Path $Root "config\env.example"
+  npm run test:offline --prefix (Join-Path $Root "apps/agent-service")
+} else {
+  npm test --prefix (Join-Path $Root "apps/agent-service")
+}
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 if ($Tier -eq "offline") {

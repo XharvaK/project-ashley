@@ -175,8 +175,17 @@ export async function fetchWithLimits(
     userAgent?: string;
   },
 ): Promise<{ finalUrl: string; contentType: string; body: Uint8Array }> {
-  assertOutboundAllowed(options.outboundPurpose ?? "curiosity_http");
   const fetcher = options.fetcher ?? fetch;
+  // Explicit fetch/resolver injection is the deterministic fixture boundary
+  // used by offline qualification tests. Outside that qualification mode the
+  // process-level outbound gate remains mandatory; the phase0 transport guard
+  // still covers any accidental real transport from an offline fixture.
+  const offlineFixture =
+    process.env.ASHLEY_PHASE0_OFFLINE === "true" &&
+    Boolean(options.fetcher || options.resolve);
+  if (!offlineFixture) {
+    assertOutboundAllowed(options.outboundPurpose ?? "curiosity_http");
+  }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), options.timeoutMs);
   const externalSignal = options.signal;

@@ -17,6 +17,7 @@
     "dev": "tsx watch src/index.ts",
 
     "test": "vitest run --maxWorkers=1 --minWorkers=1",
+    "test:offline": "vitest run --maxWorkers=1 --minWorkers=1 --config vitest.offline.config.ts",
 
     "test:watch": "vitest"
 

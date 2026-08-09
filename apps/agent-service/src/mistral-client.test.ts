@@ -3,6 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import { env } from "./env.js";
 import { completeChat, mapMistralError } from "./mistral-client.js";
 import { openNuclearDb } from "./core/db.js";
+import { withOfflineAppGateDisabled } from "./core/qualification/offline-test-helpers.js";
 
 const originalApiKey = env.mistralApiKey;
 
@@ -75,7 +76,9 @@ describe("mapMistralError", () => {
     env.mistralApiKey = "";
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     await expect(
-      completeChat([{ role: "user", content: "hello" }], { attentionDb: db }),
+      withOfflineAppGateDisabled(() =>
+        completeChat([{ role: "user", content: "hello" }], { attentionDb: db }),
+      ),
     ).rejects.toMatchObject({ code: "agent_not_ready" });
     expect(
       db.prepare(`SELECT COUNT(*) AS c FROM attention_requests`).get(),

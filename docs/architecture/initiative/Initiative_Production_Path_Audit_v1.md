@@ -10,8 +10,9 @@ Discord gateway, deployment, or sandbox activation was used.
 
 - INITIATIVE PATH: PASS for bounded local diagnosis and source correction.
 - INIT-02 THOUGHT SILENCE: PASS for deterministic diagnosis; no source fix.
-- OFFLINE QUALIFICATION: BLOCKED by the non-isolated wrapper and one
-  accidental provider call during investigation.
+- OFFLINE QUALIFICATION: PASS after the qualification-only network boundary
+  and deterministic fixture repair; no external request occurred in the final
+  phase0 run.
 - SANDBOX NONCE: PASS for the local durable-ledger correction and regression
   proof.
 - SANDBOX READINESS: PASS for truthful local readiness aggregation and client
@@ -135,15 +136,18 @@ generic task schema, promote a capability, or weaken the broker boundary.
 
 The exact command was `npm run phase0:offline` at the repository root. It
 invokes `scripts/phase0/run-all.ps1 -Tier offline`, which builds
-`apps/agent-service` and then runs `npm test --prefix apps/agent-service`.
-The offline branch is therefore the entire agent Vitest suite, not a
-provider-isolated suite.
+`apps/agent-service` and then runs the full agent Vitest suite through the
+offline-only `vitest.offline.config.ts` setup. The child process pins
+`COMPOSER_ENV_FILE` to `config/env.example` and sets
+`ASHLEY_PHASE0_OFFLINE=true`; normal startup precedence is unchanged.
 
 Two pre-existing tests in
 `apps/agent-service/src/core/delivery/delivery.test.ts` call the real
-`AshleyCore.handleReactiveChat` path without an Expression mock. The path is
+`AshleyCore.handleReactiveChat` path without an Expression mock. Before the
+repair, the exact path was
 
-    handleReactiveChat -> expressSpeak -> completeChat -> Mistral SDK
+    handleReactiveChat -> expressSpeak -> completeChat -> runAttentiveDispatch
+    -> Mistral adapter -> Mistral SDK -> global fetch
     -> https://api.mistral.ai/v1/chat/completions
 
 The first bounded `phase0:offline` run printed the real Mistral response
@@ -154,15 +158,16 @@ was the outer command ending while the full suite continued, not evidence of
 a new single-test deadlock. The phase0 script, delivery tests, and this
 initiative source change did not introduce that route.
 
-Strict offline qualification is BLOCKED. A no-key attempt accidentally used
-the default dotenv path because `COMPOSER_ENV_FILE` was not safely pinned;
-that inherited the existing local provider configuration and caused the one
-real 402 call. No further provider call was made. The bounded provider-safe
-delivery reproduction passed 9/9 with `config/env.example` and empty provider
-keys. The directly affected sandbox readiness/driver tests passed 7/7 after
-the test-only `networkIsolationOperational: true` fixture correction. This is
-enough to identify the pre-existing isolation defect and qualify the directly
-affected suites, but it is not a clean no-network PASS for the wrapper.
+The repair adds the existing process outbound gate as the authoritative
+offline boundary, the route-aware deterministic qualification fixture for the
+two delivery tests, and a Vitest defense-in-depth guard for global fetch plus
+Node HTTP/HTTPS. Loopback hosts and Unix sockets remain allowed only for
+legitimate local fixtures; external targets fail loudly with a stable marker.
+
+Final `phase0:offline` qualification passed with 100 test files, 765 passed,
+and 1 skipped in 187.95 seconds. The offline output and error logs contained
+zero external-network guard markers and zero provider URL markers. No further
+provider request was made.
 
 ## Thought Silence Root-Cause Audit
 
@@ -348,13 +353,13 @@ readiness. Final focused verification passed:
 - sandbox-broker: 5 files, 72 tests;
 - INIT-02 matrix: 1 file, 2 tests;
 - final Agency/Thought/runtime focus: 7 files, 59 tests;
+- final current targeted Agency/Thought/runtime rerun: 7 files, 42 tests;
 - directly affected sandbox readiness focus: 2 files, 8 tests;
 - delegated sandbox-broker wiring focus: 1 file, 4 tests;
 - provider-safe delivery focus: 1 file, 9 tests;
 - agent-service, sandbox-broker, and discord-bot TypeScript builds;
 - git diff --check, with only the repository's existing LF/CRLF warnings.
 
-The root phase0:offline wrapper was attempted but timed out because its
-offline branch invokes the full agent Vitest suite, which reached existing
-Mistral-backed delivery tests and emitted 402 responses. No live-Mistral
-evaluation was retried. No commit or push was performed.
+The root phase0:offline wrapper now completes through the isolated full agent
+suite without reaching a provider. No live-Mistral evaluation was run. No
+commit or push was performed.

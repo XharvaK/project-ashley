@@ -16,6 +16,7 @@ import { runAttentiveDispatch } from "../attention/governor.js";
 import type { EstimateMessage } from "../attention/estimate.js";
 import type { ProviderId } from "./types.js";
 import { AppError } from "../../errors.js";
+import { withOfflineAppGateDisabled } from "../qualification/offline-test-helpers.js";
 
 const ORIGINAL_MISTRAL_KEY = env.mistralApiKey;
 const ORIGINAL_GROQ_KEY = env.groqApiKey;
@@ -148,10 +149,10 @@ describe("provider-aware missing key gating", () => {
     env.groqApiKey = "present";
     const db = freshDb();
     await expect(
-      completeChat(
+      withOfflineAppGateDisabled(() => completeChat(
         [{ role: "user", content: "hi" }],
         { route: "ashley_expression", attentionDb: db },
-      ),
+      )),
     ).rejects.toMatchObject({ code: "agent_not_ready" });
     expect(rowCount(db, "attention_requests")).toBe(0);
     db.close();
@@ -162,10 +163,10 @@ describe("provider-aware missing key gating", () => {
     env.groqApiKey = "";
     const db = freshDb();
     await expect(
-      completeChat(
+      withOfflineAppGateDisabled(() => completeChat(
         [{ role: "user", content: "hi" }],
         { route: "thought", attentionDb: db },
-      ),
+      )),
     ).rejects.toMatchObject({ code: "agent_not_ready" });
     expect(rowCount(db, "attention_requests")).toBe(0);
     db.close();
@@ -222,10 +223,10 @@ describe("shared 20B quota bucket at the dispatch layer", () => {
       const db = freshDb();
       // Groq gate closed -> Thought fails before any reservation/dispatch.
       await expect(
-        completeChat(
+        withOfflineAppGateDisabled(() => completeChat(
           [{ role: "user", content: "x" }],
           { route: "thought", attentionDb: db },
-        ),
+        )),
       ).rejects.toMatchObject({ code: "agent_not_ready" });
       const groqRows = Number(
         (
