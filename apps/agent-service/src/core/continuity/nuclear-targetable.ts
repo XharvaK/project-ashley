@@ -22,6 +22,7 @@ export const TARGETABLE_TABLES: Array<{
   { table: "initiative_reservations", idColumn: "id", ownerColumn: "owner_id", needsClassification: true },
   { table: "cognitive_jobs", idColumn: "id", ownerColumn: "owner_id", needsClassification: true },
   { table: "cognitive_runs", idColumn: "id", ownerColumn: "owner_id", needsClassification: true },
+  { table: "open_cognitive_items", idColumn: "id", ownerColumn: "owner_id", needsClassification: true },
   { table: "cur_reads", idColumn: "id", ownerColumn: null, needsClassification: true },
   { table: "cur_takes", idColumn: "id", ownerColumn: null, needsClassification: true },
   { table: "delivery_reservations", idColumn: "id", ownerColumn: "owner_id", needsClassification: true },
