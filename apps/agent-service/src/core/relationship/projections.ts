@@ -91,6 +91,7 @@ export function listRelationshipMotivationProjections(
   message = "",
 ): RelationshipMotivationProjection[] {
   const projections: RelationshipMotivationProjection[] = [];
+  if (trigger !== "proactive") return projections;
   if (!relationshipCanInfluence(db, "apply", "relational_initiative")) {
     return projections;
   }

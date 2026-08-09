@@ -185,6 +185,7 @@ function makeDecision(
     "ashley_self_commitment",
     "mutual_commitment",
     "relational_tension",
+    "open_cognitive_item",
   ]);
   const evidenceRefs = selected
     .filter(

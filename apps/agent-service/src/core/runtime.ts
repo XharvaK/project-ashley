@@ -5,6 +5,7 @@ import { decide, attachAuthorizedClaims } from "./agency/decide.js";
 import { buildOwnTimeReportConstraint } from "./agency/own-time-report.js";
 import { collectMotivations, mindStateItemToMotivation } from "./agency/motivations.js";
 import { deliberateDecision } from "./agency/thought.js";
+import { selectMotivationCandidates } from "./agency/candidate-selection.js";
 import { enqueueThoughtObservation, type ShadowCognitionContext } from "./agency/thought-observation.js";
 import {
   classifyTurnComplexity,
@@ -661,6 +662,8 @@ export class AshleyCore {
         userMessageId,
       });
       const ownTimeOpen = hasOpenOwnTimeSession(this.db, input.ownerId);
+      // Reactive turns retain the direct-message and refusal selection path.
+      // Model Thought already receives its bounded 12-item candidate view.
       const motivations = collectMotivations(
         this.db,
         input.ownerId,
@@ -1214,11 +1217,16 @@ export class AshleyCore {
 
     let decisionLogged = false;
     try {
-      const motivations = applyInitiativeLearning(
+      const motivations = selectMotivationCandidates(
         this.db,
         ownerId,
-        collectMotivations(this.db, ownerId, "proactive"),
-        this.reflectionMode,
+        "proactive",
+        applyInitiativeLearning(
+          this.db,
+          ownerId,
+          collectMotivations(this.db, ownerId, "proactive"),
+          this.reflectionMode,
+        ),
       );
       let decision = decide(motivations, "proactive");
       const complexity = classifyTurnComplexity({
@@ -1467,11 +1475,16 @@ export class AshleyCore {
 
     seedIdentity(this.db, ownerId);
 
-    const motivations = applyInitiativeLearning(
+    const motivations = selectMotivationCandidates(
       this.db,
       ownerId,
-      collectMotivations(this.db, ownerId, "proactive"),
-      this.reflectionMode,
+      "proactive",
+      applyInitiativeLearning(
+        this.db,
+        ownerId,
+        collectMotivations(this.db, ownerId, "proactive"),
+        this.reflectionMode,
+      ),
     );
     const decision = decide(motivations, "proactive");
     if (!decision.cognitiveAllocation.shouldSpeak || decision.score < 25) {

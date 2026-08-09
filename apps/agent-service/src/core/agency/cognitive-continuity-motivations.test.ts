@@ -9,6 +9,8 @@ import {
 import {
   collectMotivations,
 } from "./motivations.js";
+import { decide } from "./decide.js";
+import { resolveEvidenceRefs } from "./resolve-evidence.js";
 import {
   materializeOpenCognitiveItem,
   type OpenCognitiveItemProposal,
@@ -100,6 +102,20 @@ describe("cognitive continuity motivation projection", () => {
           }),
         ]),
       );
+      const decision = decide(motivations, "proactive");
+      expect(decision.evidenceRefs).toContainEqual({
+        type: "open_cognitive_item",
+        id: item.entityUuid,
+      });
+      expect(
+        resolveEvidenceRefs(db, "doc", [
+          { type: "open_cognitive_item", id: item.entityUuid },
+        ]),
+      ).toEqual([
+        expect.objectContaining({
+          text: expect.stringContaining("A bounded persistent question"),
+        }),
+      ]);
     } finally {
       env.cognitionMode = originalMode;
       db.close();

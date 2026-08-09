@@ -302,6 +302,7 @@ export async function deliberateDecision(
     "ashley_self_commitment",
     "mutual_commitment",
     "relational_tension",
+    "open_cognitive_item",
   ]);
   const evidenceRefs = motivations
     .filter(
@@ -326,7 +327,8 @@ export async function deliberateDecision(
         | "doc_reminder"
         | "ashley_self_commitment"
         | "mutual_commitment"
-        | "relational_tension",
+        | "relational_tension"
+        | "open_cognitive_item",
       id: item.refId!,
     }));
   const selectedScore = Math.max(

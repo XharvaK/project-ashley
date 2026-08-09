@@ -71,7 +71,8 @@ export type EvidenceRef = {
     | "mutual_commitment"
     | "scheduled_proactive"
     | "relational_tension"
-    | "withdrawal";
+    | "withdrawal"
+    | "open_cognitive_item";
   id: string | number;
 };
 

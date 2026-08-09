@@ -1,5 +1,9 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { EvidenceRef } from "../types.js";
+import {
+  getOpenCognitiveItem,
+  openCognitiveItemEligibleForInfluence,
+} from "../cognition/open-items.js";
 
 export type ResolvedEvidenceLine = {
   ref: EvidenceRef;
@@ -76,6 +80,18 @@ export function resolveEvidenceRefs(
         ref,
         label: `${ref.type}:${entityUuid.slice(0, 8)}`,
         text: `${text(row.status)}: ${text(row.text).trim()}`.slice(0, 800),
+      });
+      continue;
+    }
+
+    if (ref.type === "open_cognitive_item") {
+      const entityUuid = String(ref.id);
+      const item = getOpenCognitiveItem(db, ownerId, entityUuid);
+      if (!item || !openCognitiveItemEligibleForInfluence(db, item)) continue;
+      lines.push({
+        ref,
+        label: "open_cognitive_item:" + entityUuid.slice(0, 8),
+        text: (item.status + ": " + item.semanticSummary).slice(0, 800),
       });
       continue;
     }
