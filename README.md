@@ -60,7 +60,7 @@ authority.
 | Identity | Stable values, boundaries, tastes, opinions, and recognizable continuity |
 | Mind State | Current concerns, goals, commitments, focus, and grounded affect |
 | Recall | Source-linked memory, evidence selection, redaction, and continuity boundaries |
-| Thought | Effort allocation, prioritization, uncertainty, completion, and authorization |
+| Thought | Effort allocation, prioritization, uncertainty, completion, and intended outcomes |
 | Agency | Initiative, interruption, silence, delay, and delivery decisions |
 | Expression | Language that realizes an authorized intent |
 | Reflection | Post-outcome interpretation and bounded future calibration |
