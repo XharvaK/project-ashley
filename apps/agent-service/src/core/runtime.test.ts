@@ -395,6 +395,10 @@ describe("AshleyCore", () => {
         stage: "thought",
         code: "thought_silence",
       });
+      expect(core.getProactiveStatus("doc").cognitiveContinuity).toMatchObject({
+        openCount: 0,
+        lastClosedStageCode: "thought_silence",
+      });
       expect(JSON.stringify(core.getProactiveStatus("doc").lastDiagnostic)).not.toMatch(
         /Nothing currently earns|model|reasoning/i,
       );

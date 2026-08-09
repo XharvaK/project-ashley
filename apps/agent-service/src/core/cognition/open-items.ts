@@ -648,13 +648,8 @@ export function materializeOpenCognitiveItem(
   }
 }
 
-/**
- * Revalidate an OPEN live item's source and capability authority.
- * The source remains authoritative; this row is never sufficient by itself.
- * This deliberately excludes attention deferral so validated resolution and
- * Reflection review can inspect a deferred item without making it a candidate.
- */
-export function openCognitiveItemSourceEligibleForInfluence(
+/** Read-only source authority check used by behavior and owner diagnostics. */
+export function openCognitiveItemSourceCurrent(
   db: DatabaseSync,
   item: OpenCognitiveItemRecord,
 ): boolean {
@@ -689,6 +684,21 @@ export function openCognitiveItemSourceEligibleForInfluence(
     return false;
   }
 
+  return true;
+}
+
+/**
+ * Revalidate an OPEN live item's source and capability authority.
+ * The source remains authoritative; this row is never sufficient by itself.
+ * This deliberately excludes attention deferral so validated resolution and
+ * Reflection review can inspect a deferred item without making it a candidate.
+ */
+export function openCognitiveItemSourceEligibleForInfluence(
+  db: DatabaseSync,
+  item: OpenCognitiveItemRecord,
+): boolean {
+  if (!openCognitiveItemSourceCurrent(db, item)) return false;
+  const capability = item.sourceCapability as CapabilityName;
   return capabilityCanInfluence(db, capability, "apply");
 }
 
@@ -706,4 +716,70 @@ export function openCognitiveItemEligibleForInfluence(
   if (deferUntil == null) return true;
   const deferUntilMs = Date.parse(deferUntil);
   return Number.isFinite(deferUntilMs) && deferUntilMs <= now;
+}
+
+export type OpenCognitiveContinuityStatus = {
+  totalCount: number;
+  openCount: number;
+  deferredCount: number;
+  redactedCount: number;
+  reviewDueCount: number;
+  availableBySourceClass: Record<string, number>;
+};
+
+function sourceClass(sourceType: string): string {
+  if (sourceType === "message" || sourceType === "mem_message") return "message";
+  if (sourceType === "episode") return "episode";
+  if (sourceType === "question" || sourceType === "questions") return "question";
+  if (sourceType === "fact") return "fact";
+  if (sourceType === "opinion") return "opinion";
+  if (
+    sourceType === "doc_reminder" ||
+    sourceType === "ashley_self_commitment" ||
+    sourceType === "mutual_commitment" ||
+    sourceType === "relational_tension"
+  ) {
+    return "relationship";
+  }
+  if (sourceType === "mind_state") return "mind_state";
+  return "other";
+}
+
+function itemDeferred(item: OpenCognitiveItemRecord, nowMs: number): boolean {
+  const deferUntil = item.attention?.deferUntil;
+  if (deferUntil == null) return false;
+  const deferUntilMs = Date.parse(deferUntil);
+  return !Number.isFinite(deferUntilMs) || deferUntilMs > nowMs;
+}
+
+/**
+ * Read-only, owner-scoped observability for the existing initiative status.
+ * It returns counts and broad source classes only. It does not expose OCI
+ * summaries and does not call capability helpers that bootstrap release rows.
+ */
+export function getOpenCognitiveContinuityStatus(
+  db: DatabaseSync,
+  ownerId: string,
+  now = new Date(),
+): OpenCognitiveContinuityStatus {
+  const items = listOpenCognitiveItems(db, ownerId);
+  const nowMs = now.getTime();
+  const openItems = items.filter((item) => item.status === "OPEN");
+  const availableBySourceClass: Record<string, number> = {};
+  for (const item of openItems) {
+    if (itemDeferred(item, nowMs)) continue;
+    if (!openCognitiveItemSourceCurrent(db, item)) continue;
+    const key = sourceClass(item.sourceType);
+    availableBySourceClass[key] = (availableBySourceClass[key] ?? 0) + 1;
+  }
+  return {
+    totalCount: items.length,
+    openCount: openItems.length,
+    deferredCount: openItems.filter((item) => itemDeferred(item, nowMs)).length,
+    redactedCount: items.filter((item) => item.redactedAt !== null).length,
+    reviewDueCount: openItems.filter(
+      (item) => item.attention?.reviewRequestedAt != null,
+    ).length,
+    availableBySourceClass,
+  };
 }

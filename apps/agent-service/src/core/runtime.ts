@@ -80,6 +80,7 @@ import type { Decision, DecisionKind, Motivation, ReflectionMode } from "./types
 import { attachAffectLicense, getAffectiveState } from "./state/affect.js";
 import { enqueueCognitiveJob, getLatestShadowAnalysis } from "./cognition/jobs.js";
 import { recordOpenCognitiveDecision } from "./cognition/reconsideration.js";
+import { getOpenCognitiveContinuityStatus } from "./cognition/open-items.js";
 import {
   claimUrgentMindState,
   consumeUrgentWake,
@@ -1221,6 +1222,19 @@ export class AshleyCore {
       }
     }
 
+    const continuityStatus = getOpenCognitiveContinuityStatus(
+      this.db,
+      ownerId,
+    );
+    if (continuityStatus.reviewDueCount > 0) {
+      recordProactiveDiagnostic(
+        this.db,
+        ownerId,
+        "agency",
+        "reflection_review_due",
+      );
+    }
+
     let decisionLogged = false;
     try {
       const motivations = selectMotivationCandidates(
@@ -1234,6 +1248,26 @@ export class AshleyCore {
           this.reflectionMode,
         ),
       );
+      const hasMaterialCandidate = motivations.some(
+        (motivation) => motivation.kind !== "silence_ok",
+      );
+      if (!hasMaterialCandidate) {
+        const sourceCount = Object.values(
+          continuityStatus.availableBySourceClass,
+        ).reduce((sum, count) => sum + count, 0);
+        const code =
+          continuityStatus.openCount === 0
+            ? continuityStatus.totalCount > 0 &&
+                continuityStatus.redactedCount === continuityStatus.totalCount
+              ? "all_redacted"
+              : "no_open_material"
+            : continuityStatus.deferredCount === continuityStatus.openCount
+              ? "all_deferred"
+              : sourceCount === 0
+                ? "all_capability_blocked"
+                : "no_open_material";
+        recordProactiveDiagnostic(this.db, ownerId, "agency", code);
+      }
       let decision = decide(motivations, "proactive");
       const complexity = classifyTurnComplexity({
         decision,
@@ -1268,13 +1302,20 @@ export class AshleyCore {
         complexity.mode === "terminal" ||
         decision.score < 25
       ) {
+        const thoughtCode =
+          decision.kind === "delay"
+            ? "thought_delay"
+            : decision.kind === "refuse"
+              ? "agency_refusal"
+              : decision.kind === "silence" ||
+                  !decision.cognitiveAllocation.shouldSpeak
+                ? "thought_silence"
+                : "thought_hold";
         recordProactiveDiagnostic(
           this.db,
           ownerId,
           "thought",
-          decision.kind === "silence" || !decision.cognitiveAllocation.shouldSpeak
-            ? "thought_silence"
-            : "thought_hold",
+          thoughtCode,
         );
         const decisionId = logProactiveDecision(
           this.db,
@@ -1316,10 +1357,16 @@ export class AshleyCore {
           decision.motivationIds.includes(motivation.id ?? -1),
         ) ?? motivations[0];
       if (!candidate) {
-        recordProactiveDiagnostic(this.db, ownerId, "agency", "agency_no_material");
+        recordProactiveDiagnostic(this.db, ownerId, "agency", "no_open_material");
         setDecisionOutcome(this.db, decisionId, "");
         return { shouldSend: false, reason: "no_material" };
       }
+      recordProactiveDiagnostic(
+        this.db,
+        ownerId,
+        "agency",
+        "candidate_selected",
+      );
       const materialKey = `${candidate.kind}:${candidate.refId ?? candidate.id ?? Date.now()}`;
       const priorReservation: unknown = this.db
         .prepare(
@@ -1732,6 +1779,9 @@ export class AshleyCore {
     lastUserMessageAt: string | null;
     minIdleHours: number;
     lastDiagnostic: ProactiveDiagnostic | null;
+    cognitiveContinuity: ReturnType<typeof getOpenCognitiveContinuityStatus> & {
+      lastClosedStageCode: string | null;
+    };
   } {
     const today = new Date().toISOString().slice(0, 10);
     const sentRows = this.db
@@ -1765,6 +1815,11 @@ export class AshleyCore {
          LIMIT 1`,
       )
       .get(ownerId);
+    const lastDiagnostic = readProactiveDiagnostic(this.db, ownerId);
+    const cognitiveContinuity = getOpenCognitiveContinuityStatus(
+      this.db,
+      ownerId,
+    );
     return {
       enabled: env.proactiveEnabled,
       paused: this.isProactivePaused(ownerId),
@@ -1779,7 +1834,11 @@ export class AshleyCore {
           ? lastUser.created_at
           : null,
       minIdleHours: env.proactiveMinIdleHours,
-      lastDiagnostic: readProactiveDiagnostic(this.db, ownerId),
+      lastDiagnostic,
+      cognitiveContinuity: {
+        ...cognitiveContinuity,
+        lastClosedStageCode: lastDiagnostic?.code ?? null,
+      },
     };
   }
 
