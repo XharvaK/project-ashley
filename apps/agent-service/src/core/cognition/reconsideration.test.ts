@@ -73,7 +73,7 @@ function seedItem(db: DatabaseSync, ownerId = OWNER_ID) {
       id: String(sourceId),
       entityUuid: sourceEntityUuid,
     },
-    origin: "cognition",
+    origin: "manual",
     semanticKeyMaterial: `interview:${sourceEntityUuid}`,
     provenance: "live",
     sourceCapability: "reading",

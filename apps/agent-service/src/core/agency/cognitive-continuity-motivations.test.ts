@@ -54,7 +54,7 @@ function proposal(
       id: sourceId,
       entityUuid: sourceEntityUuid,
     },
-    origin: "cognition",
+    origin: "manual",
     semanticKeyMaterial,
     provenance,
     sourceCapability: "reading",

@@ -21,12 +21,12 @@ function columns(db: DatabaseSync, table: string): string[] {
   ).map((row) => row.name);
 }
 
-describe("nuclear schema v23 open cognitive items", () => {
+describe("nuclear schema v23/v24 open cognitive items", () => {
   it("creates bounded OCI, attention, and transition tables", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
 
-    expect(NUCLEAR_SUPPORTED_VERSION).toBe(23);
-    expect(schemaVersion(db)).toBe(23);
+    expect(NUCLEAR_SUPPORTED_VERSION).toBe(24);
+    expect(schemaVersion(db)).toBe(24);
 
     const tables = (
       db
@@ -65,6 +65,7 @@ describe("nuclear schema v23 open cognitive items", () => {
         "source_revision",
         "build_identity",
         "model_epoch",
+        "model_identity",
         "status_reason",
         "created_at",
         "updated_at",

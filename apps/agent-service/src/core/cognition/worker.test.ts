@@ -1,6 +1,8 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
+import { env } from "../../env.js";
 import { openNuclearDb } from "../db.js";
+import { applyModelContinuity, currentModelContinuityIdentity } from "../attention/continuity.js";
 import { insertMessage, resolveActiveThread } from "../memory/threads.js";
 import { retrieveEpisodes } from "../memory/episodes.js";
 import { getAffectiveState } from "../state/affect.js";
@@ -99,6 +101,16 @@ describe("continuous cognition worker", () => {
 
   it("materializes structured cognition items from grounded source messages", async () => {
     const { db, userMessageId } = setup();
+    applyModelContinuity(
+      db,
+      {
+        alias: env.mistralModel,
+        resolvedModelId: "test-model-a",
+        unresolvedAlias: false,
+        dispatchSequence: 1,
+      },
+      () => undefined,
+    );
     const source = db
       .prepare("SELECT entity_uuid FROM mem_messages WHERE id = ?")
       .get(userMessageId) as { entity_uuid?: string };
@@ -114,7 +126,13 @@ describe("continuous cognition worker", () => {
     await processNextCognitiveJob(
       db,
       "observe",
-      async () => ({ analysis: analysisWithOpenItem, model: "test", raw: "{}" }),
+      async () => ({
+        analysis: analysisWithOpenItem,
+        model: "test",
+        modelAlias: env.mistralModel,
+        resolvedModelId: "test-model-a",
+        raw: "{}",
+      }),
     );
     expect(source.entity_uuid).toBeTruthy();
     expect(listOpenCognitiveItems(db, "doc")).toEqual([
@@ -130,10 +148,14 @@ describe("continuous cognition worker", () => {
     expect(
       db
         .prepare(
-          "SELECT build_identity FROM open_cognitive_items WHERE owner_id = ?",
+          "SELECT build_identity, model_epoch, model_identity FROM open_cognitive_items WHERE owner_id = ?",
         )
         .get("doc"),
-    ).toEqual({ build_identity: currentBuildIdentity() });
+    ).toEqual({
+      build_identity: currentBuildIdentity(),
+      model_epoch: 1,
+      model_identity: currentModelContinuityIdentity(db, env.mistralModel).identity,
+    });
     db.close();
   });
 

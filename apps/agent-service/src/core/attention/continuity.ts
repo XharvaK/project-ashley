@@ -146,4 +146,42 @@ export function currentModelEpoch(db: DatabaseSync, alias: string): number {
   return isRow(row) ? Number(row.model_epoch ?? 0) : 0;
 }
 
+export type CurrentModelContinuityIdentity = {
+  alias: string;
+  resolvedModelId: string | null;
+  modelEpoch: number;
+  identity: string | null;
+};
+
+/** Read-only host-owned model identity for model-derived cognition. */
+export function currentModelContinuityIdentity(
+  db: DatabaseSync,
+  alias: string,
+): CurrentModelContinuityIdentity {
+  const normalizedAlias = alias.trim();
+  const row = db
+    .prepare(
+      `SELECT resolved_model_id, model_epoch
+       FROM model_continuity_state WHERE alias = ?`,
+    )
+    .get(normalizedAlias);
+  const resolvedModelId =
+    isRow(row) && typeof row.resolved_model_id === "string" && row.resolved_model_id.trim()
+      ? row.resolved_model_id.trim()
+      : null;
+  const modelEpoch =
+    isRow(row) && Number.isInteger(Number(row.model_epoch))
+      ? Math.max(0, Number(row.model_epoch))
+      : 0;
+  return {
+    alias: normalizedAlias,
+    resolvedModelId,
+    modelEpoch,
+      identity:
+      resolvedModelId == null
+        ? null
+        : `model-continuity-v1:${normalizedAlias}|${resolvedModelId}`,
+  };
+}
+
 export { MODEL_SENSITIVE_SET_FOR_CONTRACT };

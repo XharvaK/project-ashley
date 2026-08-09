@@ -41,12 +41,13 @@ import { MIGRATION_20_CAPABILITY_EVENT_KINDS_DDL } from "./rollout/migration-20.
 import { MIGRATION_21_PROVENANCE_DDL } from "./provenance/migration-21.js";
 import { MIGRATION_22_RECALL_AUTHORITY_DDL } from "./provenance/migration-22.js";
 import { MIGRATION_23_OPEN_COGNITIVE_ITEMS_DDL } from "./cognition/migration-23.js";
+import { MIGRATION_24_OPEN_COGNITIVE_ITEMS_DDL } from "./cognition/migration-24.js";
 import { reconcileSandboxApprovals } from "./sandbox/approval-store.js";
 import { currentBuildIdentity } from "./rollout/capabilities.js";
 
 export { NUCLEAR_DB_PATH };
 
-export const NUCLEAR_SUPPORTED_VERSION = 23;
+export const NUCLEAR_SUPPORTED_VERSION = 24;
 
 const SCHEMA = `
 PRAGMA foreign_keys = ON;
@@ -2291,6 +2292,33 @@ export function migrate(
             error: error instanceof Error ? error.message : "migration_failed",
           },
         });
+      }
+      throw error;
+    }
+  }
+  if (userVersion(db) < 24) {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.exec(MIGRATION_24_OPEN_COGNITIVE_ITEMS_DDL);
+      db.exec("PRAGMA user_version = 24");
+      const fk = db.prepare("PRAGMA foreign_key_check").all();
+      if (fk.length > 0) throw new Error("nuclear_fk_check_failed");
+      const integrity = db.prepare("PRAGMA quick_check").get() as
+        | { quick_check?: string }
+        | undefined;
+      if (
+        integrity &&
+        typeof integrity.quick_check === "string" &&
+        integrity.quick_check !== "ok"
+      ) {
+        throw new Error("nuclear_integrity_failed:" + integrity.quick_check);
+      }
+      db.exec("COMMIT");
+    } catch (error) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        /* preserve the original migration failure */
       }
       throw error;
     }

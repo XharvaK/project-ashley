@@ -210,7 +210,7 @@ function materialize(
     kind,
     semanticSummary: `bounded evaluation ${source.type} ${source.id}`,
     source,
-    origin: "cognition",
+    origin: "manual",
     semanticKeyMaterial: `eval:${source.type}:${source.id}:${kind}:${provenance}`,
     provenance,
     sourceCapability,

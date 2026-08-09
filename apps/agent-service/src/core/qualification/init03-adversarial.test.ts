@@ -153,7 +153,7 @@ function proposal(
     kind: "question",
     semanticSummary: "A bounded adversarial evaluation item",
     source,
-    origin: "cognition",
+    origin: "manual",
     semanticKeyMaterial,
     provenance: "live",
     sourceCapability: "reading",

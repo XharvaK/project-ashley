@@ -1,10 +1,16 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
+import { env } from "../../env.js";
 import { openNuclearDb } from "../db.js";
+import {
+  applyModelContinuity,
+  currentModelContinuityIdentity,
+} from "../attention/continuity.js";
 import {
   getOpenCognitiveItem,
   listOpenCognitiveItems,
   materializeOpenCognitiveItem,
+  openCognitiveItemSourceCurrent,
   type OpenCognitiveItemProposal,
 } from "./open-items.js";
 import {
@@ -173,7 +179,7 @@ describe("open cognitive item store", () => {
         id: "1",
         entityUuid: "question-source-1",
       },
-      origin: "cognition",
+      origin: "manual",
       semanticKeyMaterial,
       provenance: "shadow",
       sourceCapability: "reading",
@@ -231,7 +237,7 @@ describe("open cognitive item store", () => {
         id: String(source.id),
         entityUuid: source.entity_uuid,
       },
-      origin: "cognition",
+      origin: "manual",
       semanticKeyMaterial,
       provenance: "shadow",
       sourceCapability: "reading",
@@ -289,7 +295,7 @@ describe("open cognitive item store", () => {
         id: String(source.id),
         entityUuid: source.entity_uuid,
       },
-      origin: "cognition",
+      origin: "manual",
       semanticKeyMaterial: "reused-model-key",
       provenance: "shadow",
       sourceCapability: "reading",
@@ -327,6 +333,136 @@ describe("open cognitive item store", () => {
     db.close();
   });
 
+  it("invalidates cognition-derived Recall OCI when the resolved model changes", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const now = "2026-08-09T00:00:00.000Z";
+    db.prepare(
+      `INSERT INTO questions
+         (owner_id, subject, text, status, priority, created_at, updated_at,
+          entity_uuid, data_classification)
+       VALUES (?, 'about_self', 'Model-bound question', 'open', 0.8, ?, ?, ?, 'never_public')`,
+    ).run("owner-1", now, now, "question-source-model");
+    const source = db
+      .prepare("SELECT id, entity_uuid FROM questions WHERE entity_uuid = ?")
+      .get("question-source-model") as { id: number; entity_uuid: string };
+    applyModelContinuity(
+      db,
+      {
+        alias: env.mistralModel,
+        resolvedModelId: "model-a",
+        unresolvedAlias: false,
+        dispatchSequence: 1,
+      },
+      () => undefined,
+    );
+    const current = currentModelContinuityIdentity(db, env.mistralModel);
+    const item = materializeOpenCognitiveItem(db, {
+      ownerId: "owner-1",
+      kind: "question",
+      semanticSummary: "A model-bound conclusion",
+      source: {
+        type: "question",
+        id: String(source.id),
+        entityUuid: source.entity_uuid,
+      },
+      origin: "cognition",
+      semanticKeyMaterial: "ignored-model-key",
+      provenance: "shadow",
+      sourceCapability: "recall",
+      contractId: currentContractId(),
+      buildIdentity: currentBuildIdentity(),
+      modelEpoch: current.modelEpoch,
+      modelIdentity: current.identity ?? "",
+      dataClassification: "never_public",
+    }).item;
+
+    expect(item.modelEpoch).toBe(1);
+    expect(item.modelIdentity).toBe(current.identity);
+    applyModelContinuity(
+      db,
+      {
+        alias: env.mistralModel,
+        resolvedModelId: "model-b",
+        unresolvedAlias: false,
+        dispatchSequence: 2,
+      },
+      () => undefined,
+    );
+    expect(
+      db.prepare("SELECT model_epoch FROM model_continuity_state WHERE alias = ?")
+        .get(env.mistralModel),
+    ).toEqual({ model_epoch: 2 });
+    expect(openCognitiveItemSourceCurrent(db, item)).toBe(false);
+    db.close();
+  });
+
+  it("keeps manual source OCI independent of model continuity", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const now = "2026-08-09T00:00:00.000Z";
+    db.prepare(
+      `INSERT INTO capability_releases
+         (capability, release_id, state, promoted_at, updated_at,
+          contract_id, build_identity, model_epoch)
+       VALUES ('reading', ?, 'active', ?, ?, ?, ?, 0)`,
+    ).run(
+      currentContractId(),
+      now,
+      now,
+      currentContractId(),
+      currentBuildIdentity(),
+    );
+    db.prepare(
+      `INSERT INTO questions
+         (owner_id, subject, text, status, priority, created_at, updated_at,
+          entity_uuid, data_classification)
+       VALUES (?, 'about_self', 'Manual source question', 'open', 0.8, ?, ?, ?, 'never_public')`,
+    ).run("owner-1", now, now, "question-source-manual-model");
+    const source = db
+      .prepare("SELECT id, entity_uuid FROM questions WHERE entity_uuid = ?")
+      .get("question-source-manual-model") as { id: number; entity_uuid: string };
+    applyModelContinuity(
+      db,
+      {
+        alias: env.mistralModel,
+        resolvedModelId: "model-a",
+        unresolvedAlias: false,
+        dispatchSequence: 1,
+      },
+      () => undefined,
+    );
+    const item = materializeOpenCognitiveItem(db, {
+      ownerId: "owner-1",
+      kind: "question",
+      semanticSummary: "A manual conclusion",
+      source: {
+        type: "question",
+        id: String(source.id),
+        entityUuid: source.entity_uuid,
+      },
+      origin: "manual",
+      provenance: "live",
+      sourceCapability: "reading",
+      contractId: currentContractId(),
+      buildIdentity: currentBuildIdentity(),
+      modelEpoch: 0,
+      dataClassification: "never_public",
+    }).item;
+    expect(item.modelIdentity).toBe("");
+    expect(openCognitiveItemSourceCurrent(db, item)).toBe(true);
+    applyModelContinuity(
+      db,
+      {
+        alias: env.mistralModel,
+        resolvedModelId: "model-b",
+        unresolvedAlias: false,
+        dispatchSequence: 2,
+      },
+      () => undefined,
+    );
+    expect(openCognitiveItemSourceCurrent(db, item)).toBe(true);
+    db.close();
+  });
+
   it("fails closed for source, provenance, and capability mismatches", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     const now = "2026-08-09T00:00:00.000Z";
@@ -354,7 +490,7 @@ describe("open cognitive item store", () => {
         id: "1",
         entityUuid: "question-source-1",
       },
-      origin: "cognition",
+      origin: "manual",
       semanticKeyMaterial: "mismatch-check",
       provenance: "shadow",
       sourceCapability: "reading",

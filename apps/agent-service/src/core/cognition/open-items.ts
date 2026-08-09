@@ -12,10 +12,7 @@ import {
   currentContractId,
   type CapabilityName,
 } from "../rollout/capabilities.js";
-import {
-  MODEL_SENSITIVE_SET_FOR_CONTRACT,
-} from "../attention/contract-material.js";
-import { currentModelEpoch } from "../attention/continuity.js";
+import { currentModelContinuityIdentity } from "../attention/continuity.js";
 import { env } from "../../env.js";
 import { activeWithdrawal } from "../relationship/repair.js";
 import {
@@ -79,6 +76,7 @@ export type OpenCognitiveItemRecord = {
   origin: "cognition" | "reflection" | "runtime" | "manual";
   buildIdentity: string;
   modelEpoch: number;
+  modelIdentity: string;
   dataClassification: "ordinary" | "sensitive" | "never_public" | "secret";
   statusReason: string;
   redactedAt: string | null;
@@ -107,6 +105,7 @@ type ItemRow = {
   origin: OpenCognitiveItemRecord["origin"];
   build_identity: string;
   model_epoch: number;
+  model_identity: string;
   data_classification: OpenCognitiveItemRecord["dataClassification"];
   status_reason: string;
   redacted_at: string | null;
@@ -143,6 +142,7 @@ function mapItem(row: ItemRow): OpenCognitiveItemRecord {
     origin: row.origin,
     buildIdentity: row.build_identity,
     modelEpoch: Number(row.model_epoch),
+    modelIdentity: row.model_identity ?? "",
     dataClassification: row.data_classification,
     statusReason: row.status_reason,
     redactedAt: row.redacted_at ?? null,
@@ -196,7 +196,8 @@ export function listOpenCognitiveItems(
          o.semantic_summary, o.source_type, o.source_id,
          o.source_entity_uuid, o.semantic_key_hash, o.source_capability,
          o.contract_id, o.provenance, o.source_revision, o.origin,
-         o.build_identity, o.model_epoch, o.data_classification,
+         o.build_identity, o.model_epoch, o.model_identity,
+         o.data_classification,
          o.status_reason, o.redacted_at, o.redaction_code,
          o.created_at, o.updated_at, o.resolved_at,
          a.item_id AS attention_item_id, a.delay_class, a.defer_until,
@@ -239,6 +240,7 @@ export type OpenCognitiveItemProposal = {
   contractId: string;
   buildIdentity: string;
   modelEpoch: number;
+  modelIdentity?: string;
   sourceRevision?: string;
   dataClassification?: DataClassification;
 };
@@ -276,10 +278,6 @@ const TERMINAL_SOURCE_STATUSES = new Set([
   "fulfilled",
   "superseded",
 ]);
-
-const MODEL_SENSITIVE_CAPABILITIES = new Set<string>(
-  MODEL_SENSITIVE_SET_FOR_CONTRACT as readonly string[],
-);
 
 function rejectMaterialization(code: string): never {
   throw new Error(code);
@@ -465,12 +463,6 @@ function validateCapability(
   ) {
     rejectMaterialization("oci_model_epoch_invalid");
   }
-  const expectedEpoch = MODEL_SENSITIVE_CAPABILITIES.has(capability)
-    ? currentModelEpoch(db, env.mistralModel)
-    : 0;
-  if (proposal.modelEpoch !== expectedEpoch) {
-    rejectMaterialization("oci_model_epoch_mismatch");
-  }
   if (proposal.provenance === "shadow") {
     if (
       !capabilityCanExecuteShadow(db, capability) ||
@@ -502,6 +494,7 @@ function validateProposal(
   origin: OpenCognitiveItemRecord["origin"];
   buildIdentity: string;
   modelEpoch: number;
+  modelIdentity: string;
   dataClassification: DataClassification;
 } {
   const ownerId = boundedText(proposal.ownerId, 128, "oci_owner_invalid");
@@ -513,6 +506,7 @@ function validateProposal(
   if (!isOrigin(proposal.origin)) {
     rejectMaterialization("oci_origin_invalid");
   }
+  const origin = proposal.origin;
   const semanticSummary = boundedText(
     proposal.semanticSummary,
     512,
@@ -557,8 +551,33 @@ function validateProposal(
   }
   const sourceCapability = validateCapability(db, proposal);
   const sourceRevision = authoritativeSourceRevision(sourceRow);
+  const modelIdentity =
+    proposal.modelIdentity == null || proposal.modelIdentity === ""
+      ? ""
+      : boundedText(
+          proposal.modelIdentity,
+          256,
+          "oci_model_identity_invalid",
+        );
+  if (!Number.isInteger(proposal.modelEpoch) || proposal.modelEpoch < 0) {
+    rejectMaterialization("oci_model_epoch_invalid");
+  }
+  const currentModel = currentModelContinuityIdentity(db, env.mistralModel);
+  if (origin === "cognition") {
+    if (currentModel.identity == null || currentModel.modelEpoch <= 0) {
+      rejectMaterialization("oci_model_continuity_unavailable");
+    }
+    if (modelIdentity !== currentModel.identity) {
+      rejectMaterialization("oci_model_identity_mismatch");
+    }
+    if (proposal.modelEpoch !== currentModel.modelEpoch) {
+      rejectMaterialization("oci_model_epoch_mismatch");
+    }
+  } else if (modelIdentity !== "" || proposal.modelEpoch !== 0) {
+    rejectMaterialization("oci_model_continuity_unexpected");
+  }
   const canonicalKey = [
-    "open-cognitive-item-v2",
+    "open-cognitive-item-v3",
     ownerId,
     sourceType,
     sourceIdValue,
@@ -566,6 +585,7 @@ function validateProposal(
     kind,
     semanticSummary,
     sourceRevision,
+    modelIdentity,
   ].join("\u0000");
   const semanticKeyHash = createHash("sha256")
     .update(canonicalKey, "utf8")
@@ -582,9 +602,10 @@ function validateProposal(
     contractId: proposal.contractId.trim(),
     provenance: proposal.provenance,
     sourceRevision,
-    origin: proposal.origin,
+    origin,
     buildIdentity: proposal.buildIdentity.trim(),
     modelEpoch: proposal.modelEpoch,
+    modelIdentity,
     dataClassification,
   };
 }
@@ -603,6 +624,7 @@ type ExistingIdentityRow = {
   origin: string;
   build_identity: string;
   model_epoch: number;
+  model_identity: string;
   data_classification: string;
 };
 
@@ -676,9 +698,9 @@ export function materializeOpenCognitiveItem(
          (owner_id, entity_uuid, kind, status, semantic_summary,
           source_type, source_id, source_entity_uuid, semantic_key_hash,
           source_capability, contract_id, provenance, source_revision, origin,
-          build_identity, model_epoch, data_classification, status_reason,
+          build_identity, model_epoch, model_identity, data_classification, status_reason,
           created_at, updated_at)
-       VALUES (?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       VALUES (?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(owner_id, semantic_key_hash) DO NOTHING`,
     );
     const result = insert.run(
@@ -697,6 +719,7 @@ export function materializeOpenCognitiveItem(
       validated.origin,
       validated.buildIdentity,
       validated.modelEpoch,
+      validated.modelIdentity,
       validated.dataClassification,
       "created",
       createdAt,
@@ -705,10 +728,10 @@ export function materializeOpenCognitiveItem(
     const created = Number(result.changes) === 1;
     const existing = db
       .prepare(
-        `SELECT id, source_entity_uuid, kind
+         `SELECT id, source_entity_uuid, kind
                 , semantic_summary, source_type, source_id, source_revision,
            source_capability, contract_id, provenance, origin, build_identity,
-           model_epoch, data_classification
+           model_epoch, model_identity, data_classification
          FROM open_cognitive_items
          WHERE owner_id = ? AND semantic_key_hash = ?`,
       )
@@ -731,6 +754,7 @@ export function materializeOpenCognitiveItem(
       existing.origin === validated.origin &&
       existing.build_identity === validated.buildIdentity &&
       Number(existing.model_epoch) === validated.modelEpoch &&
+      existing.model_identity === validated.modelIdentity &&
       existing.data_classification === validated.dataClassification;
     if (!identityMatches) {
       rejectMaterialization("oci_idempotency_conflict");
@@ -789,10 +813,18 @@ export function openCognitiveItemSourceCurrent(
     return false;
   }
   const capability = item.sourceCapability as CapabilityName;
-  const expectedEpoch = MODEL_SENSITIVE_CAPABILITIES.has(capability)
-    ? currentModelEpoch(db, env.mistralModel)
-    : 0;
-  if (item.modelEpoch !== expectedEpoch) return false;
+  const currentModel = currentModelContinuityIdentity(db, env.mistralModel);
+  if (item.origin === "cognition") {
+    if (
+      currentModel.identity == null ||
+      item.modelIdentity !== currentModel.identity ||
+      item.modelEpoch !== currentModel.modelEpoch
+    ) {
+      return false;
+    }
+  } else if (item.modelIdentity !== "" || item.modelEpoch !== 0) {
+    return false;
+  }
 
   try {
     const sourceRow = sourceRowFor(

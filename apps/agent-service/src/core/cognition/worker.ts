@@ -34,6 +34,7 @@ import { proposeMutualCommitment } from "../relationship/transitions.js";
 import { relationshipCanRecord } from "../relationship/influence.js";
 import { defaultUnclassifiedConversational } from "../privacy/classification.js";
 import { materializeOpenCognitiveItem } from "./open-items.js";
+import { currentModelContinuityIdentity } from "../attention/continuity.js";
 
 export type CognitionAnalysis = {
   summary: string;
@@ -74,11 +75,17 @@ export type CognitionAnalysis = {
     kind: "question" | "revisit" | "concern";
     semanticSummary: string;
     sourceMessageId: number;
-    semanticKeyMaterial: string;
+    semanticKeyMaterial?: string;
   }>;
 };
 
-type Analyze = (transcript: string) => Promise<{ analysis: CognitionAnalysis; model: string; raw: string }>;
+type Analyze = (transcript: string) => Promise<{
+  analysis: CognitionAnalysis;
+  model: string;
+  modelAlias?: string;
+  resolvedModelId?: string | null;
+  raw: string;
+}>;
 type CapabilityGate = (capability: CapabilityName) => boolean;
 
 type ShadowContext = {
@@ -187,12 +194,10 @@ function analysisFrom(value: unknown, fallback: string): CognitionAnalysis {
           const item = raw as Record<string, unknown>;
           const kind = String(item.kind);
           const semanticSummary = String(item.semanticSummary ?? "").trim();
-          const semanticKeyMaterial = String(item.semanticKeyMaterial ?? "").trim();
           const sourceMessageId = number(item.sourceMessageId, 0);
           if (
             !openItemKinds.has(kind) ||
             !semanticSummary ||
-            !semanticKeyMaterial ||
             !Number.isInteger(sourceMessageId) ||
             sourceMessageId <= 0
           ) {
@@ -202,7 +207,10 @@ function analysisFrom(value: unknown, fallback: string): CognitionAnalysis {
             kind: kind as "question" | "revisit" | "concern",
             semanticSummary: semanticSummary.slice(0, 512),
             sourceMessageId,
-            semanticKeyMaterial: semanticKeyMaterial.slice(0, 512),
+            semanticKeyMaterial:
+              typeof item.semanticKeyMaterial === "string"
+                ? item.semanticKeyMaterial.trim().slice(0, 512)
+                : undefined,
           }];
         }).slice(0, 8)
       : [],
@@ -225,6 +233,8 @@ async function analyzeWithMistral(transcript: string): ReturnType<Analyze> {
     return {
       analysis: analysisFrom({}, transcript.replace(/\s+/g, " ").slice(0, 700)),
       model: "offline",
+      modelAlias: env.mistralModel,
+      resolvedModelId: null,
       raw: "{}",
     };
   }
@@ -238,7 +248,7 @@ async function analyzeWithMistral(transcript: string): ReturnType<Analyze> {
         "affect{valenceDelta,activationDelta,opennessDelta,tensionDelta,reason},",
         "revisions[{layer:dynamic_identity|stable_identity|opinion,key,value,rationale}],",
         "facts[{category:project|preference|person|ongoing,key,value,confidence,importance,explicit,sourceMessageId,sourceQuote}].",
-        "openItems[{kind:question|revisit|concern,semanticSummary,sourceMessageId,semanticKeyMaterial}].",
+        "openItems[{kind:question|revisit|concise semanticSummary,sourceMessageId}].",
         "Mark explicit true only when Doc directly stated or corrected the fact in this transcript.",
         "Every explicit fact must cite a user message ID and an exact supporting quote copied from that message.",
         "Identity revision keys must be specific semantic slugs such as interest.modular_synthesis or taste.music, never generic words like interest or taste.",
@@ -257,6 +267,8 @@ async function analyzeWithMistral(transcript: string): ReturnType<Analyze> {
   return {
     analysis: analysisFrom(parseJson(response.text), transcript.slice(0, 700)),
     model: response.model,
+    modelAlias: response.modelAlias,
+    resolvedModelId: response.resolvedModelId,
     raw: response.text,
   };
 }
@@ -441,6 +453,10 @@ export async function processNextCognitiveJob(
           | undefined;
         if (!source?.entity_uuid) continue;
         try {
+          const modelContinuity = currentModelContinuityIdentity(
+            db,
+            env.mistralModel,
+          );
           materializeOpenCognitiveItem(
             db,
             {
@@ -458,7 +474,8 @@ export async function processNextCognitiveJob(
               sourceCapability: "recall",
               contractId: currentContractId(),
               buildIdentity: currentBuildIdentity(),
-              modelEpoch: 0,
+              modelEpoch: modelContinuity.modelEpoch,
+              modelIdentity: modelContinuity.identity ?? "",
             },
             { inTransaction: true },
           );

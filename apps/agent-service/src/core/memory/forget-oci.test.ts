@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { env } from "../../env.js";
 import { openNuclearDb } from "../db.js";
 import { openContinuityDb } from "../continuity/db.js";
+import { applyModelContinuity, currentModelContinuityIdentity } from "../attention/continuity.js";
 import { resolveActiveThread, insertMessage } from "./threads.js";
 import { applyForgetTargets, forgetOwnerTopicImmediate } from "./forget.js";
 import { upsertDocReminder } from "../relationship/store.js";
@@ -66,7 +67,7 @@ describe("OCI forget and provenance boundaries", () => {
           id: String(messageId),
           entityUuid: source.entity_uuid,
         },
-        origin: "cognition",
+        origin: "manual",
         semanticKeyMaterial: "forget-source-test",
         provenance: "live",
         sourceCapability: "recall",
@@ -115,7 +116,7 @@ describe("OCI forget and provenance boundaries", () => {
           id: String(messageId),
           entityUuid: source.entity_uuid,
         },
-        origin: "cognition",
+        origin: "manual",
         semanticKeyMaterial: "shadow-time-shift",
         provenance: "shadow",
         sourceCapability: "recall",
@@ -139,6 +140,17 @@ describe("OCI forget and provenance boundaries", () => {
     try {
       env.cognitionMode = "apply";
       activate(db, "reading");
+      applyModelContinuity(
+        db,
+        {
+          alias: env.mistralModel,
+          resolvedModelId: "model-v1",
+          unresolvedAlias: false,
+          dispatchSequence: 1,
+        },
+        () => undefined,
+      );
+      const modelContinuity = currentModelContinuityIdentity(db, env.mistralModel);
       const now = "2026-08-09T00:00:00.000Z";
       db.prepare(
         `INSERT INTO questions
@@ -169,7 +181,8 @@ describe("OCI forget and provenance boundaries", () => {
         sourceCapability: "reading",
         contractId: currentContractId(),
         buildIdentity: currentBuildIdentity(),
-        modelEpoch: 0,
+        modelEpoch: modelContinuity.modelEpoch,
+        modelIdentity: modelContinuity.identity ?? "",
         sourceRevision: source.updated_at,
       }).item;
       expect(openCognitiveItemEligibleForInfluence(db, item)).toBe(true);
@@ -184,7 +197,9 @@ describe("OCI forget and provenance boundaries", () => {
         `INSERT INTO model_continuity_state
            (alias, resolved_model_id, model_epoch, last_accepted_dispatch_sequence, updated_at)
          VALUES (?, 'model-v2', 1, 1, ?)
-         ON CONFLICT(alias) DO UPDATE SET model_epoch = 1, updated_at = excluded.updated_at`,
+         ON CONFLICT(alias) DO UPDATE SET
+           resolved_model_id = 'model-v2', model_epoch = 2,
+           updated_at = excluded.updated_at`,
       ).run(env.mistralModel, now);
       expect(openCognitiveItemEligibleForInfluence(db, item)).toBe(false);
 
@@ -231,7 +246,7 @@ describe("OCI forget and provenance boundaries", () => {
           id: String(reminder.id),
           entityUuid: reminderUuid,
         },
-        origin: "cognition",
+        origin: "manual",
         semanticKeyMaterial: "relationship-forget",
         provenance: "live",
         sourceCapability: "reading",
