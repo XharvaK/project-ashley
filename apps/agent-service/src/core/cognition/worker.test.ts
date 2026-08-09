@@ -9,6 +9,8 @@ import { listRevisions } from "../learning/revisions.js";
 import { listActiveFacts } from "../memory/facts.js";
 import { currentContractId, recordCriticalFailure } from "../rollout/capabilities.js";
 import { recordRecallLiveCutover } from "../memory/cutover.js";
+import { currentBuildIdentity } from "../rollout/capabilities.js";
+import { listOpenCognitiveItems } from "./open-items.js";
 import { enqueueCognitiveJob, recoverCognitiveJobs } from "./jobs.js";
 import { processNextCognitiveJob, type CognitionAnalysis } from "./worker.js";
 
@@ -61,7 +63,7 @@ function setup() {
     sourceKey: `test:${through}`,
     payload: { threadId, throughMessageId: through },
   });
-  return { db, threadId };
+  return { db, threadId, userMessageId: 1 };
 }
 
 describe("continuous cognition worker", () => {
@@ -92,6 +94,46 @@ describe("continuous cognition worker", () => {
     expect(listActiveMindStateItems(db, "doc")).toHaveLength(0);
     expect(getAffectiveState(db, "doc").reason).toBe("neutral baseline");
     expect(listRevisions(db, "doc")).toHaveLength(1);
+    db.close();
+  });
+
+  it("materializes structured cognition items from grounded source messages", async () => {
+    const { db, userMessageId } = setup();
+    const source = db
+      .prepare("SELECT entity_uuid FROM mem_messages WHERE id = ?")
+      .get(userMessageId) as { entity_uuid?: string };
+    const analysisWithOpenItem: CognitionAnalysis = {
+      ...analysis,
+      openItems: [{
+        kind: "question",
+        semanticSummary: "Whether the performance follow-up remains unresolved.",
+        sourceMessageId: userMessageId,
+        semanticKeyMaterial: "performance-follow-up",
+      }],
+    };
+    await processNextCognitiveJob(
+      db,
+      "observe",
+      async () => ({ analysis: analysisWithOpenItem, model: "test", raw: "{}" }),
+    );
+    expect(source.entity_uuid).toBeTruthy();
+    expect(listOpenCognitiveItems(db, "doc")).toEqual([
+      expect.objectContaining({
+        kind: "question",
+        status: "OPEN",
+        sourceType: "message",
+        sourceId: String(userMessageId),
+        sourceEntityUuid: source.entity_uuid,
+        provenance: "shadow",
+      }),
+    ]);
+    expect(
+      db
+        .prepare(
+          "SELECT build_identity FROM open_cognitive_items WHERE owner_id = ?",
+        )
+        .get("doc"),
+    ).toEqual({ build_identity: currentBuildIdentity() });
     db.close();
   });
 

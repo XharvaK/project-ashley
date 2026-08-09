@@ -16,6 +16,7 @@ import {
   capabilityCanInfluence,
   capabilityCanExecuteShadow,
   capabilityShadowDependenciesReady,
+  currentBuildIdentity,
   recordLiveShadowEvent,
   currentContractId,
   type CapabilityName,
@@ -32,6 +33,7 @@ import { isMutualCoPlanningText } from "../relationship/authority.js";
 import { proposeMutualCommitment } from "../relationship/transitions.js";
 import { relationshipCanRecord } from "../relationship/influence.js";
 import { defaultUnclassifiedConversational } from "../privacy/classification.js";
+import { materializeOpenCognitiveItem } from "./open-items.js";
 
 export type CognitionAnalysis = {
   summary: string;
@@ -68,6 +70,12 @@ export type CognitionAnalysis = {
     sourceMessageId: number;
     sourceQuote: string;
   }>;
+  openItems?: Array<{
+    kind: "question" | "revisit" | "concern";
+    semanticSummary: string;
+    sourceMessageId: number;
+    semanticKeyMaterial: string;
+  }>;
 };
 
 type Analyze = (transcript: string) => Promise<{ analysis: CognitionAnalysis; model: string; raw: string }>;
@@ -101,6 +109,7 @@ function number(value: unknown, fallback = 0): number {
 function analysisFrom(value: unknown, fallback: string): CognitionAnalysis {
   const root = typeof value === "object" && value !== null ? value as Record<string, unknown> : {};
   const stateKinds = new Set(["goal", "concern", "commitment", "interest", "unfinished"]);
+  const openItemKinds = new Set(["question", "revisit", "concern"]);
   const revisionLayers = new Set(["dynamic_identity", "stable_identity", "opinion"]);
   const factCategories = new Set(["project", "preference", "person", "ongoing"]);
   const affect = typeof root.affect === "object" && root.affect !== null
@@ -172,6 +181,31 @@ function analysisFrom(value: unknown, fallback: string): CognitionAnalysis {
           }];
         })
       : [],
+    openItems: Array.isArray(root.openItems)
+      ? root.openItems.flatMap((raw) => {
+          if (typeof raw !== "object" || raw === null) return [];
+          const item = raw as Record<string, unknown>;
+          const kind = String(item.kind);
+          const semanticSummary = String(item.semanticSummary ?? "").trim();
+          const semanticKeyMaterial = String(item.semanticKeyMaterial ?? "").trim();
+          const sourceMessageId = number(item.sourceMessageId, 0);
+          if (
+            !openItemKinds.has(kind) ||
+            !semanticSummary ||
+            !semanticKeyMaterial ||
+            !Number.isInteger(sourceMessageId) ||
+            sourceMessageId <= 0
+          ) {
+            return [];
+          }
+          return [{
+            kind: kind as "question" | "revisit" | "concern",
+            semanticSummary: semanticSummary.slice(0, 512),
+            sourceMessageId,
+            semanticKeyMaterial: semanticKeyMaterial.slice(0, 512),
+          }];
+        }).slice(0, 8)
+      : [],
   };
 }
 
@@ -204,6 +238,7 @@ async function analyzeWithMistral(transcript: string): ReturnType<Analyze> {
         "affect{valenceDelta,activationDelta,opennessDelta,tensionDelta,reason},",
         "revisions[{layer:dynamic_identity|stable_identity|opinion,key,value,rationale}],",
         "facts[{category:project|preference|person|ongoing,key,value,confidence,importance,explicit,sourceMessageId,sourceQuote}].",
+        "openItems[{kind:question|revisit|concern,semanticSummary,sourceMessageId,semanticKeyMaterial}].",
         "Mark explicit true only when Doc directly stated or corrected the fact in this transcript.",
         "Every explicit fact must cite a user message ID and an exact supporting quote copied from that message.",
         "Identity revision keys must be specific semantic slugs such as interest.modular_synthesis or taste.music, never generic words like interest or taste.",
@@ -392,6 +427,45 @@ export async function processNextCognitiveJob(
         provenance: recallCanInfluence ? "live" : "shadow",
       });
       if (!episode) throw new Error("episode_creation_failed");
+      for (const openItem of (result.analysis.openItems ?? []).slice(0, 8)) {
+        if (!messages.some((message) => message.id === openItem.sourceMessageId)) {
+          continue;
+        }
+        const source = db
+          .prepare(
+            "SELECT entity_uuid FROM mem_messages " +
+              "WHERE id = ? AND owner_id = ? AND redacted_at IS NULL",
+          )
+          .get(openItem.sourceMessageId, job.ownerId) as
+          | { entity_uuid?: string }
+          | undefined;
+        if (!source?.entity_uuid) continue;
+        try {
+          materializeOpenCognitiveItem(
+            db,
+            {
+              ownerId: job.ownerId,
+              kind: openItem.kind,
+              semanticSummary: openItem.semanticSummary,
+              source: {
+                type: "message",
+                id: String(openItem.sourceMessageId),
+                entityUuid: source.entity_uuid,
+              },
+              origin: "cognition",
+              semanticKeyMaterial: openItem.semanticKeyMaterial,
+              provenance: recallCanInfluence ? "live" : "shadow",
+              sourceCapability: "recall",
+              contractId: currentContractId(),
+              buildIdentity: currentBuildIdentity(),
+              modelEpoch: 0,
+            },
+            { inTransaction: true },
+          );
+        } catch {
+          // Invalid structured proposals do not gain persistence authority.
+        }
+      }
       const shadow: ShadowContext = {
         recall: {
           episodeId: episode.id,
