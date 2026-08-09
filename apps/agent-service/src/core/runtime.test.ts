@@ -195,6 +195,120 @@ describe("AshleyCore", () => {
     rmSync(path, { force: true });
   });
 
+  it("rolls back the initiative reservation when the delivery claim fails", async () => {
+    const path = join(tmpdir(), `ashley-nuclear-${randomUUID()}.db`);
+    const db = openNuclearDb(new DatabaseSync(path));
+    const core = new AshleyCore(db);
+    createQuestion(db, {
+      ownerId: "doc",
+      subject: "about_doc",
+      text: "how did the migration land?",
+      priority: 50,
+    });
+
+    db.exec(`
+      CREATE TRIGGER test_proactive_delivery_claim_failure
+      BEFORE INSERT ON delivery_reservations
+      WHEN NEW.trigger = 'proactive'
+      BEGIN
+        SELECT RAISE(ABORT, 'test_proactive_delivery_claim');
+      END;
+    `);
+    try {
+      await expect(core.tickProactive("doc")).rejects.toThrow(
+        "test_proactive_delivery_claim",
+      );
+      expect(core.getProactiveStatus("doc").lastDiagnostic).toMatchObject({
+        stage: "delivery",
+        code: "delivery_claim_failed",
+      });
+    } finally {
+      db.exec("DROP TRIGGER test_proactive_delivery_claim_failure");
+    }
+
+    const reservations = db
+      .prepare(
+        `SELECT COUNT(*) AS count
+         FROM initiative_reservations
+         WHERE owner_id = 'doc' AND committed_at IS NULL`,
+      )
+      .get() as { count: number };
+    expect(reservations.count).toBe(0);
+
+    const retry = await core.tickProactive("doc");
+    expect(retry.shouldSend).toBe(true);
+    expect(core.getProactiveStatus("doc").lastDiagnostic).toMatchObject({
+      stage: "delivery",
+      code: "delivery_reserved",
+    });
+    const linked = db
+      .prepare(
+        `SELECT i.decision_id AS initiative_decision_id,
+                d.decision_id AS delivery_decision_id
+         FROM initiative_reservations i
+         JOIN delivery_reservations d
+           ON d.initiative_reservation_id = i.id
+         WHERE i.owner_id = 'doc' AND i.committed_at IS NULL
+         ORDER BY i.id DESC LIMIT 1`,
+      )
+      .get() as {
+      initiative_decision_id: number;
+      delivery_decision_id: number;
+    };
+    expect(linked.delivery_decision_id).toBe(linked.initiative_decision_id);
+
+    db.close();
+    rmSync(path, { force: true });
+  });
+
+  it("records deterministic owner-only diagnostics for proactive silence gates", async () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const core = new AshleyCore(db);
+    const originalEnabled = env.proactiveEnabled;
+    const originalCap = env.proactiveMaxPerDay;
+    try {
+      env.proactiveEnabled = true;
+      env.proactiveMaxPerDay = 10;
+
+      core.pauseProactive("doc");
+      await expect(core.tickProactive("doc")).resolves.toMatchObject({
+        shouldSend: false,
+        reason: "proactive_paused",
+      });
+      expect(core.getProactiveStatus("doc").lastDiagnostic).toMatchObject({
+        stage: "eligibility",
+        code: "proactive_paused",
+      });
+
+      core.resumeProactive("doc");
+      env.proactiveMaxPerDay = 0;
+      await expect(core.tickProactive("doc")).resolves.toMatchObject({
+        shouldSend: false,
+        reason: "daily_cap",
+      });
+      expect(core.getProactiveStatus("doc").lastDiagnostic).toMatchObject({
+        stage: "eligibility",
+        code: "daily_cap",
+      });
+
+      env.proactiveMaxPerDay = 10;
+      await expect(core.tickProactive("doc")).resolves.toMatchObject({
+        shouldSend: false,
+      });
+      expect(core.getProactiveStatus("doc").lastDiagnostic).toMatchObject({
+        stage: "thought",
+        code: "thought_silence",
+      });
+      expect(JSON.stringify(core.getProactiveStatus("doc").lastDiagnostic)).not.toMatch(
+        /Nothing currently earns|model|reasoning/i,
+      );
+    } finally {
+      env.proactiveEnabled = originalEnabled;
+      env.proactiveMaxPerDay = originalCap;
+      db.close();
+    }
+  });
+
   it("snapshots applied Reflection calibration on a future proactive decision", async () => {
     const path = join(tmpdir(), `ashley-nuclear-${randomUUID()}.db`);
     const db = openNuclearDb(new DatabaseSync(path));

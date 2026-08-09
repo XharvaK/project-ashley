@@ -395,18 +395,25 @@ export function recordAuxiliaryMessage(
   );
 }
 
-export function claimProactiveDelivery(
+export type ClaimProactiveDeliveryInput = {
+  ownerId: string;
+  channel: string;
+  threadId: string;
+  initiativeReservationId: number;
+  decisionId: number;
+  draftText: string;
+  bubbles: Array<{ ordinal: number; text: string }>;
+  deliveryLeaseMs?: number;
+  nowMs?: number;
+};
+
+/**
+ * Inserts a proactive delivery reservation inside the caller's transaction.
+ * The caller must already own the transaction and must roll it back on error.
+ */
+export function claimProactiveDeliveryInTransaction(
   db: DatabaseSync,
-  input: {
-    ownerId: string;
-    channel: string;
-    threadId: string;
-    initiativeReservationId: number;
-    draftText: string;
-    bubbles: Array<{ ordinal: number; text: string }>;
-    deliveryLeaseMs?: number;
-    nowMs?: number;
-  },
+  input: ClaimProactiveDeliveryInput,
 ): DeliveryReservationRow {
   assertWritebackAllowed("delivery_claim_proactive");
   const nowMs = input.nowMs ?? Date.now();
@@ -414,40 +421,49 @@ export function claimProactiveDelivery(
   const leaseIso = new Date(
     nowMs + (input.deliveryLeaseMs ?? 120_000),
   ).toISOString();
+  const insert = db
+    .prepare(
+      `INSERT INTO delivery_reservations
+         (owner_id, channel, thread_id, user_message_id, decision_id, trigger,
+          initiative_reservation_id, state, error_category, finalization_reason,
+          draft_text, first_bubble_deadline_at, first_sent_at,
+          generation_lease_expires_at, delivery_lease_expires_at,
+          created_at, finalized_at)
+       VALUES (?, ?, ?, NULL, ?, 'proactive', ?, 'reserved', NULL, NULL,
+               ?, NULL, NULL, NULL, ?, ?, NULL)`,
+    )
+    .run(
+      input.ownerId,
+      input.channel,
+      input.threadId,
+      input.decisionId,
+      input.initiativeReservationId,
+      input.draftText,
+      leaseIso,
+      nowIso,
+    );
+  const reservationId = Number(insert.lastInsertRowid);
+  const insertBubble = db.prepare(
+    `INSERT INTO delivery_bubbles
+       (reservation_id, ordinal, text, discord_message_id, sent_at)
+     VALUES (?, ?, ?, NULL, NULL)`,
+  );
+  for (const bubble of input.bubbles) {
+    insertBubble.run(reservationId, bubble.ordinal, bubble.text);
+  }
+  const reservation = getDeliveryReservation(db, reservationId);
+  if (!reservation) throw new Error("proactive_delivery_claim_lost");
+  return reservation;
+}
+
+export function claimProactiveDelivery(
+  db: DatabaseSync,
+  input: ClaimProactiveDeliveryInput,
+): DeliveryReservationRow {
   db.exec("BEGIN IMMEDIATE");
   try {
-    const insert = db
-      .prepare(
-        `INSERT INTO delivery_reservations
-           (owner_id, channel, thread_id, user_message_id, decision_id, trigger,
-            initiative_reservation_id, state, error_category, finalization_reason,
-            draft_text, first_bubble_deadline_at, first_sent_at,
-            generation_lease_expires_at, delivery_lease_expires_at,
-            created_at, finalized_at)
-         VALUES (?, ?, ?, NULL, NULL, 'proactive', ?, 'reserved', NULL, NULL,
-                 ?, NULL, NULL, NULL, ?, ?, NULL)`,
-      )
-      .run(
-        input.ownerId,
-        input.channel,
-        input.threadId,
-        input.initiativeReservationId,
-        input.draftText,
-        leaseIso,
-        nowIso,
-      );
-    const reservationId = Number(insert.lastInsertRowid);
-    const insertBubble = db.prepare(
-      `INSERT INTO delivery_bubbles
-         (reservation_id, ordinal, text, discord_message_id, sent_at)
-       VALUES (?, ?, ?, NULL, NULL)`,
-    );
-    for (const bubble of input.bubbles) {
-      insertBubble.run(reservationId, bubble.ordinal, bubble.text);
-    }
+    const reservation = claimProactiveDeliveryInTransaction(db, input);
     db.exec("COMMIT");
-    const reservation = getDeliveryReservation(db, reservationId);
-    if (!reservation) throw new Error("proactive_delivery_claim_lost");
     return reservation;
   } catch (error) {
     db.exec("ROLLBACK");

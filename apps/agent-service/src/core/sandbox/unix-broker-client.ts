@@ -193,6 +193,7 @@ function isDelegatedReadiness(data: unknown): boolean {
   if (data.policyVersion !== null && (typeof data.policyVersion !== "number" || !Number.isInteger(data.policyVersion) || data.policyVersion < 1)) return false;
   if (data.policyHash !== null && !HASH64_RE.test(data.policyHash as string)) return false;
   if (data.networkMode !== null && !READINESS_STATE_RE.test(data.networkMode as string)) return false;
+  if (typeof data.networkIsolationOperational !== "boolean") return false;
   if (typeof data.maxConcurrentTasks !== "number" || !Number.isInteger(data.maxConcurrentTasks) || data.maxConcurrentTasks < 0) return false;
   return true;
 }
@@ -202,6 +203,7 @@ export interface DelegatedReadinessSnapshot {
   /** The broker-reported readiness flag, or null when the broker could not be reached. */
   brokerReady: boolean | null;
   networkMode: "unavailable" | "none" | null;
+  networkIsolationOperational: boolean | null;
   policyId: string | null;
   policyVersion: number | null;
   policyHash: string | null;
@@ -531,19 +533,36 @@ export class UnixSandboxBrokerClient implements SandboxBrokerClient {
   async readiness(): Promise<DelegatedReadinessSnapshot> {
     const result = await this.dispatch("sandbox.readiness", {});
     if (!result.ok) {
-      return { ready: false, brokerReady: null, networkMode: null, policyId: null, policyVersion: null, policyHash: null };
+      return { ready: false, brokerReady: null, networkMode: null, networkIsolationOperational: null, policyId: null, policyVersion: null, policyHash: null };
     }
     if (oversized(result.data, this.maxResponseBytes)) {
-      return { ready: false, brokerReady: null, networkMode: null, policyId: null, policyVersion: null, policyHash: null };
+      return { ready: false, brokerReady: null, networkMode: null, networkIsolationOperational: null, policyId: null, policyVersion: null, policyHash: null };
     }
     if (!isDelegatedReadiness(result.data)) {
-      return { ready: false, brokerReady: null, networkMode: null, policyId: null, policyVersion: null, policyHash: null };
+      return { ready: false, brokerReady: null, networkMode: null, networkIsolationOperational: null, policyId: null, policyVersion: null, policyHash: null };
     }
     const data = result.data as Record<string, unknown>;
+    const policyReady =
+      data.policyId !== null &&
+      typeof data.policyId === "string" &&
+      data.policyId.length > 0 &&
+      typeof data.policyVersion === "number" &&
+      Number.isInteger(data.policyVersion) &&
+      data.policyVersion > 0 &&
+      typeof data.policyHash === "string" &&
+      HASH64_RE.test(data.policyHash);
     return {
-      ready: data.enabled === true && data.ready === true,
+      ready:
+        data.enabled === true &&
+        data.ready === true &&
+        data.networkMode === "none" &&
+        data.networkIsolationOperational === true &&
+        typeof data.maxConcurrentTasks === "number" &&
+        data.maxConcurrentTasks > 0 &&
+        policyReady,
       brokerReady: data.ready === true,
       networkMode: (data.networkMode as "unavailable" | "none" | null) ?? null,
+      networkIsolationOperational: data.networkIsolationOperational === true,
       policyId: data.policyId ? (data.policyId as string) : null,
       policyVersion: typeof data.policyVersion === "number" && Number.isInteger(data.policyVersion) ? data.policyVersion : null,
       policyHash: data.policyHash ? (data.policyHash as string) : null,

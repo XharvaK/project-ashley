@@ -55,7 +55,7 @@ import type { BrokerRootConfig } from "./policy/root-config.js";
 import type { BrokerResponse, RequestContext } from "./protocol/frame.js";
 import type { BrokerAuditRecord } from "./execution/fixed-recipe-execution-service.js";
 import type { NetworkIsolationProvider } from "./execution/network-isolation.js";
-import { DelegatedRuntime, createRuntimeNonceStore } from "./delegated/runtime.js";
+import { DelegatedRuntime } from "./delegated/runtime.js";
 import type { DelegatedRuntimeConfig, DelegatedRuntimeDependencies } from "./delegated/runtime.js";
 
 export interface BrokerConfig {
@@ -146,7 +146,9 @@ export class SandboxBroker {
       ledger: this.store.sessionLedger,
       nowMs: () => Date.now(),
       auditSink: (record) => this.auditRuntimeRecord(record),
-      nonceStore: createRuntimeNonceStore(),
+      nonceStore: {
+        reserve: (nonce) => this.store.recordNonce(nonce),
+      },
       processRunner: config.processRunner,
       networkIsolation,
     };

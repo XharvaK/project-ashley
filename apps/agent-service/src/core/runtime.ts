@@ -140,7 +140,7 @@ import { planContentBubbles } from "./delivery/bubble-plan.js";
 import { extractMediaMarkers } from "./delivery/media.js";
 import {
   attachDraftAndBubbles,
-  claimProactiveDelivery,
+  claimProactiveDeliveryInTransaction,
   claimReactiveDelivery,
   getDeliveryReservation,
   listDeliveryBubbles,
@@ -226,6 +226,20 @@ export type ProactiveDraft = {
 };
 
 export type ProactiveResult = ProactiveSkip | ProactiveDraft;
+
+export type ProactiveDiagnosticStage =
+  | "eligibility"
+  | "thought"
+  | "agency"
+  | "expression"
+  | "reservation"
+  | "delivery";
+
+export type ProactiveDiagnostic = {
+  at: string;
+  stage: ProactiveDiagnosticStage;
+  code: string;
+};
 
 export type CoreProviderState = "configured" | "degraded" | "unavailable";
 
@@ -314,6 +328,10 @@ function kvKey(ownerId: string): string {
   return `nuclear.proactive.paused.${ownerId}`;
 }
 
+function proactiveDiagnosticKey(ownerId: string): string {
+  return `nuclear.proactive.diagnostic.${ownerId}`;
+}
+
 function getKv(db: DatabaseSync, key: string): string | null {
   const row: unknown = db.prepare("SELECT value FROM kv WHERE key = ?").get(key);
   return isRow(row) && typeof row.value === "string" ? row.value : null;
@@ -324,6 +342,54 @@ function setKv(db: DatabaseSync, key: string, value: string): void {
     `INSERT INTO kv (key, value) VALUES (?, ?)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
   ).run(key, value);
+}
+
+function recordProactiveDiagnostic(
+  db: DatabaseSync,
+  ownerId: string,
+  stage: ProactiveDiagnosticStage,
+  code: string,
+): void {
+  setKv(
+    db,
+    proactiveDiagnosticKey(ownerId),
+    JSON.stringify({ at: new Date().toISOString(), stage, code }),
+  );
+}
+
+function readProactiveDiagnostic(
+  db: DatabaseSync,
+  ownerId: string,
+): ProactiveDiagnostic | null {
+  const raw = getKv(db, proactiveDiagnosticKey(ownerId));
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!isRow(parsed)) return null;
+    const stage = parsed.stage;
+    if (
+      stage !== "eligibility" &&
+      stage !== "thought" &&
+      stage !== "agency" &&
+      stage !== "expression" &&
+      stage !== "reservation" &&
+      stage !== "delivery"
+    ) {
+      return null;
+    }
+    if (
+      typeof parsed.at !== "string" ||
+      !Number.isFinite(Date.parse(parsed.at)) ||
+      typeof parsed.code !== "string" ||
+      parsed.code.length === 0 ||
+      parsed.code.length > 128
+    ) {
+      return null;
+    }
+    return { at: parsed.at, stage, code: parsed.code };
+  } catch {
+    return null;
+  }
 }
 
 export class AshleyCore {
@@ -1099,6 +1165,12 @@ export class AshleyCore {
     };
     let eligibility = evaluateProactiveEligibility(this.db, eligibilityInput);
     if (!eligibility.ok) {
+      recordProactiveDiagnostic(
+        this.db,
+        ownerId,
+        "eligibility",
+        eligibility.reason,
+      );
       return {
         shouldSend: false,
         reason: eligibility.reason,
@@ -1124,6 +1196,12 @@ export class AshleyCore {
         hasUrgent: false,
       });
       if (!eligibility.ok) {
+        recordProactiveDiagnostic(
+          this.db,
+          ownerId,
+          "eligibility",
+          eligibility.reason,
+        );
         return {
           shouldSend: false,
           reason: eligibility.reason,
@@ -1176,6 +1254,14 @@ export class AshleyCore {
         complexity.mode === "terminal" ||
         decision.score < 25
       ) {
+        recordProactiveDiagnostic(
+          this.db,
+          ownerId,
+          "thought",
+          decision.kind === "silence" || !decision.cognitiveAllocation.shouldSpeak
+            ? "thought_silence"
+            : "thought_hold",
+        );
         const decisionId = logProactiveDecision(
           this.db,
           ownerId,
@@ -1201,6 +1287,7 @@ export class AshleyCore {
           decision.motivationIds.includes(motivation.id ?? -1),
         ) ?? motivations[0];
       if (!candidate) {
+        recordProactiveDiagnostic(this.db, ownerId, "agency", "agency_no_material");
         setDecisionOutcome(this.db, decisionId, "");
         return { shouldSend: false, reason: "no_material" };
       }
@@ -1214,6 +1301,12 @@ export class AshleyCore {
         )
         .get(ownerId, materialKey);
       if (isRow(priorReservation)) {
+        recordProactiveDiagnostic(
+          this.db,
+          ownerId,
+          "reservation",
+          "reservation_material_already_reserved",
+        );
         setDecisionOutcome(this.db, decisionId, "");
         return { shouldSend: false, reason: "material_already_reserved" };
       }
@@ -1225,55 +1318,100 @@ export class AshleyCore {
       });
       this.activeOwners.add(ownerId);
       try {
-        const rendered = await expressSpeak(
-          turn,
-          decision,
-          userMessage,
-          "proactive",
-          {
-            lane:
-              initiativeClass === "urgent_grounded"
-                ? "urgent_grounded"
-                : "interactive",
-          },
-        );
-        if (rendered.model === "offline" || !rendered.text.trim()) {
+        let rendered: Awaited<ReturnType<typeof expressSpeak>>;
+        try {
+          rendered = await expressSpeak(
+            turn,
+            decision,
+            userMessage,
+            "proactive",
+            {
+              lane:
+                initiativeClass === "urgent_grounded"
+                  ? "urgent_grounded"
+                  : "interactive",
+            },
+          );
+        } catch (error) {
+          recordProactiveDiagnostic(this.db, ownerId, "expression", "expression_failed");
+          throw error;
+        }
+        if (rendered.model === "offline") {
+          recordProactiveDiagnostic(
+            this.db,
+            ownerId,
+            "expression",
+            "expression_mistral_unavailable",
+          );
           setDecisionOutcome(this.db, decisionId, "");
           return { shouldSend: false, reason: "mistral_unavailable" };
+        }
+        if (!rendered.text.trim()) {
+          recordProactiveDiagnostic(
+            this.db,
+            ownerId,
+            "expression",
+            "expression_empty_draft",
+          );
+          setDecisionOutcome(this.db, decisionId, "");
+          return { shouldSend: false, reason: "empty_draft" };
         }
         const media = extractMediaMarkers(rendered.text);
         const bubbles = planContentBubbles(media.text);
         if (bubbles.length === 0) {
+          recordProactiveDiagnostic(
+            this.db,
+            ownerId,
+            "expression",
+            "expression_empty_draft",
+          );
           setDecisionOutcome(this.db, decisionId, "");
           return { shouldSend: false, reason: "empty_draft" };
         }
         const angle = decisionAngle(decision.kind);
-        const result = this.db
-          .prepare(
-            `INSERT INTO initiative_reservations
-               (owner_id, decision_id, text, thread_id, angle, reason,
-                material_key, discord_message_id, created_at, committed_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL)`,
-          )
-          .run(
+        this.db.exec("BEGIN IMMEDIATE");
+        let reservationId: number;
+        let delivery: ReturnType<typeof claimProactiveDeliveryInTransaction>;
+        try {
+          const result = this.db
+            .prepare(
+              `INSERT INTO initiative_reservations
+                 (owner_id, decision_id, text, thread_id, angle, reason,
+                  material_key, discord_message_id, created_at, committed_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL)`,
+            )
+            .run(
+              ownerId,
+              decisionId,
+              media.text,
+              turn.threadId,
+              angle,
+              decision.reason,
+              materialKey,
+              new Date().toISOString(),
+            );
+          reservationId = Number(result.lastInsertRowid);
+          delivery = claimProactiveDeliveryInTransaction(this.db, {
             ownerId,
+            channel: "discord",
+            threadId: turn.threadId,
+            initiativeReservationId: reservationId,
             decisionId,
-            media.text,
-            turn.threadId,
-            angle,
-            decision.reason,
-            materialKey,
-            new Date().toISOString(),
+            draftText: media.text,
+            bubbles,
+          });
+          this.db.exec("COMMIT");
+        } catch (error) {
+          this.db.exec("ROLLBACK");
+          recordProactiveDiagnostic(
+            this.db,
+            ownerId,
+            "delivery",
+            "delivery_claim_failed",
           );
-        const reservationId = Number(result.lastInsertRowid);
-        const delivery = claimProactiveDelivery(this.db, {
-          ownerId,
-          channel: "discord",
-          threadId: turn.threadId,
-          initiativeReservationId: reservationId,
-          draftText: media.text,
-          bubbles,
-        });
+          throw error;
+        }
+        recordProactiveDiagnostic(this.db, ownerId, "delivery", "delivery_reserved");
         return {
           shouldSend: true,
           text: media.text,
@@ -1404,6 +1542,12 @@ export class AshleyCore {
         ownerId,
         cause: input?.partial ? "send_failure" : "complete",
       });
+      recordProactiveDiagnostic(
+        this.db,
+        ownerId,
+        "delivery",
+        input?.partial ? "delivery_partial" : "delivery_committed",
+      );
       return;
     }
 
@@ -1441,6 +1585,7 @@ export class AshleyCore {
           ownerId,
           cause: "complete",
         });
+        recordProactiveDiagnostic(this.db, ownerId, "delivery", "delivery_committed");
         return;
       }
 
@@ -1505,6 +1650,9 @@ export class AshleyCore {
         ownerId: String(delivery.owner_id),
         cause: "send_failure",
       });
+      if (ownerId !== null) {
+        recordProactiveDiagnostic(this.db, ownerId, "delivery", "delivery_aborted");
+      }
       return;
     }
     this.db
@@ -1513,6 +1661,9 @@ export class AshleyCore {
          WHERE id = ? AND committed_at IS NULL${ownerClause}`,
       )
       .run(...params);
+    if (ownerId !== null) {
+      recordProactiveDiagnostic(this.db, ownerId, "delivery", "delivery_aborted");
+    }
   }
 
   pauseProactive(ownerId: string): void {
@@ -1535,6 +1686,7 @@ export class AshleyCore {
     lastSentAt: string | null;
     lastUserMessageAt: string | null;
     minIdleHours: number;
+    lastDiagnostic: ProactiveDiagnostic | null;
   } {
     const today = new Date().toISOString().slice(0, 10);
     const sentRows = this.db
@@ -1582,6 +1734,7 @@ export class AshleyCore {
           ? lastUser.created_at
           : null,
       minIdleHours: env.proactiveMinIdleHours,
+      lastDiagnostic: readProactiveDiagnostic(this.db, ownerId),
     };
   }
 

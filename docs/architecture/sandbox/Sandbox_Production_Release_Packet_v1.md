@@ -25,9 +25,38 @@ Current state:
 - Ashley autonomy through the sandbox: NO. The production operator adapter and
   normal runtime loop are not wired; lifecycle defaults to disabled.
 
-This packet is the only artifact authorized by SBX-REL-01. No existing
-document, source file, test, dependency, schema, environment, service, key,
-database, or configuration was changed.
+## AUTONOMY-PLUMBING-01 local source addendum
+
+This addendum records a separately authorized local source/test pass on
+2026-08-09. It does not alter the SBX-REL-01 release gate or qualify,
+activate, install, restart, or deploy the sandbox.
+
+The current revalidated checkout is
+18c7cf88e17671929c5bec5d22d5d209719036ef on master, equal to origin/master.
+The historical source snapshot and release blockers below remain evidence
+that must be reconciled against one exact future release SHA.
+
+- Delegated nonce construction is now durable locally:
+  apps/sandbox-broker/src/broker.ts injects the existing
+  BrokerStore.recordNonce into DelegatedRuntime. Reopen, duplicate-winner,
+  and persistence-failure tests pass in a disposable broker store.
+- Delegated readiness is now truthful locally:
+  apps/sandbox-broker/src/delegated/runtime.ts requires valid material,
+  supported recipe capacity, networkProvider=none, and operational isolation;
+  the Unix client rejects missing or malformed isolation/readiness material.
+- The normal Ashley sandbox runtime remains unwired. Phase F is BLOCKED:
+  runSandboxLoop still requires injected test diagnostics and an operator
+  adapter, only the fixture adapter is concrete, and lifecycle evaluation and
+  enabled remain refused.
+- Release result remains BLOCKED and current decision remains HOLD. No live
+  broker, key, policy, Mint host, receipt, namespace probe, or canary was
+  inspected or executed.
+
+This packet remains the only artifact authorized by SBX-REL-01. Its original
+read-only scope changed no existing document, source file, test, dependency,
+schema, environment, service, key, database, or configuration. The separate
+AUTONOMY-PLUMBING-01 addendum and local changes do not grant SBX-REL-01
+activation or release authority.
 
 ## Release gate
 
@@ -253,12 +282,12 @@ LIMITATION, and NON-BLOCKING.
 | Mint qualification | No live Mint inspection, preflight, service, socket, peer, namespace, or receipt evidence exists here. | RELEASE BLOCKER | Perform the separately authorized future Mint phases below. |
 | Peer authentication | Production source requires SO_PEERCRED and the expected agent UID; Windows only has injected test stand-ins. | ACCEPTED CURRENT LIMITATION | Reconfirm on Mint with accepted and rejected peer evidence. |
 | Owner and policy binding | Broker checks trusted owner ID, owner-signed active policy identity/hash/expiry, signer class, capability, risk, and rule. | ACCEPTED CURRENT LIMITATION | Verify current public-key fingerprints and policy hash/expiry on Mint. |
-| Delegated nonce durability | SandboxBroker.buildDelegatedRuntime passes createRuntimeNonceStore(), an in-memory Set, at broker.ts:139-153. DurableBrokerStore persists owner approval nonces at store/broker-store.ts:175-235, but the delegated runtime is not passed that store. The delegated authorization comment claims a shared durable store, which is not the current construction. | RELEASE BLOCKER | Repair or explicitly redesign the delegated replay ledger, then add restart/replay proof before delegated activation. No source change is made here. |
+| Delegated nonce durability | The local source closure injects BrokerStore.recordNonce into the delegated runtime, and disposable tests prove reopen replay refusal, one duplicate winner, and persistence-failure refusal. | RELEASE BLOCKER until release evidence | Freeze the exact candidate SHA and prove the deployed broker uses the same durable ledger with restart/replay evidence on Mint. |
 | Policy expiry evidence | The checked-in Mint README names policy-r4-004 with expiry 2026-08-08T13:27Z. As of this packet date that reference is stale and is not live policy evidence. | RELEASE BLOCKER | Obtain a fresh owner-signed policy pair, verify expiry covers the complete canary window, and match its hash to broker readiness. |
 | Canonical paths and symlinks | Broker-owned realpath facts, protected roots, workspace containment, special-file denial, and sanitized-copy rules are implemented and locally tested. | ACCEPTED CURRENT LIMITATION | Reconfirm live roots, symlink-preserving staging, and workspace containment on Mint. |
 | Recipe and executable authority | Broker-owned manifests, fixed argv, absolute executable mapping, unsupported/planning-only refusal, and no shell/inherited environment are implemented. The checked-in deployment manifest enables only verify:broker-smoke; verify:agent-tsc is marked unsupported. | ACCEPTED CURRENT LIMITATION | Qualify the exact manifest/toolchain selected for the canary; do not silently promote the unsupported entry. |
 | Network isolation | unavailable refuses; none requires qualification and active probe; prepare returns the exact isolated spawn request, and refusal occurs before reservation/spawn. | RELEASE BLOCKER | Pass the active R5B probe under the installed unit and record namespace-scoped /proc/net/dev evidence containing only lo. If isolation is unavailable, do not spawn. |
-| Readiness truthfulness | DelegatedRuntime.readiness() returns ready: true unconditionally at runtime.ts:256-272, while networkIsolationOperational is reported separately. The Unix client computes readiness from enabled and ready and does not require the operational field at unix-broker-client.ts:531-550. | RELEASE BLOCKER | Make release readiness require operational isolation, or keep the delegated surface disabled until an equivalent truthful gate is verified. |
+| Readiness truthfulness | The local source closure derives broker readiness from valid material, supported recipe capacity, networkProvider=none, and operational isolation. The Unix client requires and validates the isolation field and recomputes ready fail-closed. | RELEASE BLOCKER until release evidence | Freeze the exact candidate SHA and verify live readiness plus the active isolation probe; keep the delegated surface disabled otherwise. |
 | Process limits | Service limits and PGID cancellation exist. Per-task cgroup delegation and hard per-task RSS enforcement are explicitly deferred. | HARDEN BEFORE RELEASE | Decide and document whether the bounded canary accepts the service-level boundary; otherwise complete the separately designed cgroup hardening before broad execution. |
 | Deadline, output, and receipts | Direct runner, bounded wall/output, redaction, hashes, receipt hash, and terminal finalization are implemented. | ACCEPTED CURRENT LIMITATION | Inspect one live receipt and audit row for absence of raw output, env values, keys, and secrets. |
 | Restart and abort | Durable task/session recovery marks interrupted work terminal, does not auto-resume, and does not refund consumed uses. | ACCEPTED CURRENT LIMITATION | Reconfirm after a separately authorized recovery qualification; preserve all audit evidence. |
@@ -281,8 +310,10 @@ remain open:
 3. Mint has not supplied authorized live evidence for the peer boundary,
    systemd hardening, broker state, active policy, key fingerprints, manifest,
    namespace probe, and bounded receipt.
-4. The delegated nonce store remains restart-ephemeral in the current source.
-5. Delegated readiness can report ready while isolation is not operational.
+4. Mint has not supplied restart/replay evidence for the locally corrected
+   delegated nonce ledger on the exact release source.
+5. Mint has not supplied truthful delegated readiness and active isolation
+   probe evidence on the exact release source.
 6. The current policy reference is stale and no fresh live policy is verified.
 7. The current deployment manifest does not support the proposed
    verify:agent-tsc canary.
@@ -773,7 +804,9 @@ delegated access, and no normal autonomy path.
   call, network canary, namespace canary, or one-shot driver execution.
 - No Recall changes, production database access, capability promotion,
   production agent opt-in, Discord gateway, or external destination.
-- No source, test, dependency, schema, config, or environment changes.
+- SBX-REL-01 grants no source, test, dependency, schema, config, or environment
+  changes; the separately authorized AUTONOMY-PLUMBING-01 local changes do not
+  activate or qualify the sandbox.
 - No sandbox activation, new sandbox design, new recipe, new driver, or
   replacement execution substrate.
 - No commit, push, deploy, branch change, or deletion.

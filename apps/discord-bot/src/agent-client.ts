@@ -570,6 +570,11 @@ export async function initiativeStatus() {
     lastSentAt: string | null;
     lastUserMessageAt: string | null;
     minIdleHours: number;
+    lastDiagnostic: {
+      at: string;
+      stage: string;
+      code: string;
+    } | null;
   }>(`/initiative/status?${q}`);
 }
 

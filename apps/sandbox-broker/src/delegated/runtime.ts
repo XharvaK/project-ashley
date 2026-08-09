@@ -254,9 +254,31 @@ export class DelegatedRuntime {
   }
 
   readiness(): DelegatedRuntimeReadiness {
+    const networkIsolationOperational =
+      this.networkIsolation.status() === "operational";
+    const maxConcurrentTasks = Array.from(this.config.recipes.values()).some(
+      (recipe) => recipe.supported,
+    )
+      ? 1
+      : 0;
+    const materialReady =
+      this.ownerKeyId.trim().length > 0 &&
+      this.config.delegatedKeyId.trim().length > 0 &&
+      this.config.continuityKeyId.trim().length > 0 &&
+      this.capabilitySigner.keyId.trim().length > 0 &&
+      typeof this.activePolicy.policyId === "string" &&
+      this.activePolicy.policyId.length > 0 &&
+      Number.isInteger(this.activePolicy.policyVersion) &&
+      this.activePolicy.policyVersion > 0 &&
+      /^[0-9a-f]{64}$/.test(this.activePolicy.policyHash);
+    const ready =
+      materialReady &&
+      this.config.networkProvider === "none" &&
+      networkIsolationOperational &&
+      maxConcurrentTasks > 0;
     return {
       enabled: true,
-      ready: true,
+      ready,
       ownerKeyId: this.ownerKeyId,
       delegatedKeyId: this.config.delegatedKeyId,
       capabilityKeyId: this.capabilitySigner.keyId,
@@ -266,9 +288,8 @@ export class DelegatedRuntime {
       policyHash: this.activePolicy.policyHash ?? null,
       signerClass: "delegated_runtime",
       networkMode: this.config.networkProvider,
-      networkIsolationOperational:
-        this.networkIsolation.status() === "operational",
-      maxConcurrentTasks: this.config.recipes.size > 0 ? 1 : 0,
+      networkIsolationOperational,
+      maxConcurrentTasks,
     };
   }
 

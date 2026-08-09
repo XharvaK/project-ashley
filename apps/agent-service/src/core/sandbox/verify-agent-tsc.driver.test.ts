@@ -153,6 +153,7 @@ describe("verify-agent-tsc driver", () => {
                 policyId: artifact.payload.policyId,
                 policyVersion: artifact.payload.policyVersion,
                 policyHash,
+                networkIsolationOperational: true,
                 ownerKeyId: OWNER_KEY_ID,
                 delegatedKeyId: DELEGATED_KEY_ID,
                 capabilityKeyId: "capability-ed25519-v1",
