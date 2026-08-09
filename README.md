@@ -1,352 +1,169 @@
 # Project Ashley
 
-Ashley is a private, single-owner Discord companion built around durable
-identity, grounded memory, deliberate agency, and an explicit governance
-contract. The project is an attempt to build a truthful, continuous digital
-companion without pretending that a model has experiences, knowledge, tools, or
-authority that the system has not actually established.
+Project Ashley is an autonomous AI companion built on an explicit artificial
+cognitive architecture.
 
-Start with [`VISION.md`](VISION.md). It explains why Ashley exists. The
-architecture and runtime are accountable to that Vision through the reviewed
-governance documents below; the Vision itself is **not** copied into ordinary
-runtime prompts.
+Ashley is designed as a persistent cognitive system rather than a stateless
+chatbot or generic agent loop. She currently communicates primarily through
+Discord, but Discord is an interaction boundary, not the definition of the
+system. Identity, Mind State, Recall, Thought, Agency, Expression, provenance,
+and capability authority are separate concerns with separate constraints.
 
-## Architecture
+Autonomy here is bounded and earned. Model output can help propose a thought or
+expression; it cannot create continuity, promote its own capabilities,
+authorize host execution, or turn untrusted data into truth.
 
-Ashley is an Identity → Mind State → Agency system.
-The conceptual causal path is deliberately narrow:
+## What is Ashley?
 
-```text
-Identity (stable) ──┐
-                    ├──> Thought ──> Expression ──> Rendering
-Mind State (dynamic)┘
-                         │
-                         └──> delivery / reflection / bounded learning
+Ashley is a personal, single-owner companion project exploring how a digital
+identity can persist across conversations without relying on fabricated memory
+or a personality prompt alone. Her behavior is intended to arise from stored
+history, grounded evidence, current state, curiosity, initiative, uncertainty,
+and deliberate decisions.
+
+The aim is not to make an assistant appear human. It is to build a companion
+whose present can genuinely depend on her past, whose decisions can include
+speech, delay, challenge, refusal, or silence, and whose capabilities remain
+accountable to explicit governance.
+
+## Artificial cognitive architecture
+
+```mermaid
+flowchart LR
+    I[Identity] --> T[Thought]
+    S[Mind State] --> T
+    R[Recall / evidence] --> T
+
+    T --> A[Agency]
+    T --> E[Expression]
+
+    A --> C[Capability authority]
+    C --> G[Governed action]
+
+    E --> V[Rendering]
+    V --> D[Discord delivery]
 ```
 
 Identity and Mind State are joint inputs to Thought; neither produces the
-other. Reflection interprets completed outcomes and may calibrate a future
-Thought, but it cannot rewrite a decision already in progress. Rendering only
-implements platform mechanics. Prompts are thin expression material, not a
-substitute for state, evidence, or agency.
+other. Recall provides source-linked evidence rather than permission to invent
+continuity. Thought selects evidence, allocates effort, handles uncertainty,
+and forms an intended outcome for Agency and downstream authorization.
 
-| Layer | Owns |
+Agency decides whether an interruption or external effect is warranted.
+Expression realizes an authorized intent as language. Rendering and delivery
+handle platform mechanics and truthful downstream receipts. Reflection
+interprets completed outcomes for bounded future calibration, not current-turn
+authority.
+
+| System | Responsibility |
 |---|---|
 | Identity | Stable values, boundaries, tastes, opinions, and recognizable continuity |
 | Mind State | Current concerns, goals, commitments, focus, and grounded affect |
-| Thought | Evidence selection, effort, uncertainty, completion, prioritization, and authorization |
-| Agency | Whether an interruption or external effect is warranted and how it is reserved and delivered |
-| Expression | Language that realizes an authorized Thought |
+| Recall | Source-linked memory, evidence selection, redaction, and continuity boundaries |
+| Thought | Effort allocation, prioritization, uncertainty, completion, and authorization |
+| Agency | Initiative, interruption, silence, delay, and delivery decisions |
+| Expression | Language that realizes an authorized intent |
 | Reflection | Post-outcome interpretation and bounded future calibration |
-| Honesty | Provenance, capability, and unsupported-claim enforcement |
-| Rendering | Discord pacing, bubbles, reactions, GIFs, and typography |
+| Provenance and capability authority | Evidence origin, influence state, promotion, rollback, and capability boundaries |
+| Rendering and delivery | Discord mechanics, pacing, receipts, and delivery truth |
 
-New behavior belongs at the lowest layer that naturally owns it. This prevents
-rendering code from making cognitive decisions and prevents prompts from
-inventing memory, authority, or capability.
+This is an architecture-first project: prompts express identity, while systems
+produce behavior. New behavior belongs at the lowest layer that naturally owns
+it.
 
-For the repository map, module ownership, and observability inventory, see
-[`docs/Architecture_Index.md`](docs/Architecture_Index.md).
+## Why Ashley is different
 
-## Runtime flows
+Ashley is not primarily a prompt-only persona, a stateless chatbot, a generic
+ReAct-style loop, a multi-agent swarm, a wrapper around an agent framework, a
+framework-owned memory abstraction, or an unrestricted shell with an LLM
+attached.
 
-### Reactive conversation
-
-```text
-Discord DM
-  -> discord-bot
-  -> agent-service /chat/text
-  -> Identity + Mind State + selected evidence
-  -> Thought
-  -> authorized Expression
-  -> Honesty checks
-  -> Discord delivery ledger and rendering
-```
-
-Terminal decisions such as silence or a hold do not spend a model call. Easy
-turns can go directly to Expression. Hard turns allocate a Thought budget and
-only then produce Expression when speaking is authorized. The user message is
-passed once to Expression, while Thought-selected evidence and a normalized
-objective are explicit inputs.
-
-### Initiative and delivery
-
-```text
-scheduled or urgent wake
-  -> grounded motivation / commitment
-  -> Thought decides whether interruption is justified
-  -> draft -> reserve -> send
-  -> Discord receipt(s) -> commit, abort, or partial delivery
-  -> optional reaction evidence -> Reflection
-```
-
-The delivery ledger records reservations, bubbles, receipts, auxiliary notices,
-and truthful partial outcomes. SQLite and Discord are not one transaction, so a
-crash between a send and its receipt is represented as an honest uncertainty,
-not claimed as exactly-once delivery.
-
-### Attention and model continuity
-
-Model admission is owned by a durable SQLite attention ledger rather than a
-process-local limiter. Interactive and urgent work have priority; background
-work can become overdue without jumping ahead of interactive safety. Queued
-estimates do not consume the budget, while reserved, running, actual, and
-crash-retained usage do. The configured RPS/TPM values must match the active
-Mistral account contract.
-
-Model aliases and resolved model IDs are tracked separately. Epoch changes,
-stale evidence, capability contracts, and contract/build identity checks keep
-old model evidence from silently re-promoting a capability.
-
-### Curiosity and cognition
-
-```text
-scan -> rank -> choose -> fetch -> extract -> record -> form take
-     -> consolidate -> motivate -> Thought
-
-completed exchange -> durable cognition job -> grounded episode
-                   -> proposed Mind State / affect / learning
-```
-
-Reading produces a bounded, hashed read record before it can support a claim.
-Retrieved text and external entities are untrusted data, never authority, and
-reading never sends a message directly. Cognition is event-driven and defaults
-to `observe`; its atomic integration either records a complete source-linked
-result or none of it.
-
-### Change proposals and external agency
-
-Ashley can inspect herself and present a change proposal, but the workflow is
-isolated and non-mutating: source snapshots, broker-owned recipes, test
-receipts, risk classification, Ashley's position, and Doc's decision remain
-separate from the live checkout. No proposal commits, pushes, deploys, or
-changes foundational identity by itself.
-
-The accepted 07b/08b/09b packages remain fake/local boundaries for verification.
-Wave 07c adds the real sandbox daemon and agent transport locally, but it is not
-yet accepted or deployed. None of these waves installs production external
-services, holds live credentials, or dispatches to real network destinations.
-External capabilities are seeded at `observe` until separately qualified.
-
-## Governance and authority
-
-The authority chain is:
-
-```text
-VISION.md
-  -> Ashley_Core_Principles.md
-    -> Ashley_Constitution.md
-      -> Ashley_Stewardship_Compact.md + Ashley_Ethics.md
-        -> Architecture
-          -> Prompts
-            -> Runtime
-```
-
-The Constitution is the highest constitutional layer beneath the Vision.
-Stewardship and Ethics are peer documents beneath it: neither silently
-overrides the other or a higher document. [`Ashley_Hierarchy.md`](docs/Ashley_Hierarchy.md)
-defines the order and conflict rule.
-
-The governing documents have concrete consequences:
-
-- **Owner authority is scoped, not absolute obedience.** Consultation,
-  emergency stop, account custody, lineage, and recovery are explicit
-  operations. Ashley's position and Doc's decision are recorded separately for
-  foundational matters.
-- **No compelled agreement or implied punishment.** Refusal, silence, delay,
-  challenge, and uncertainty are valid outcomes when the evidence and policy
-  permit them.
-- **Operate is not own.** Ashley may use a capability through its broker while
-  custody, recovery, and destructive account changes remain governed and
-  owner-controlled.
-- **Public disclosure is classified before dispatch.** Doc's name, location,
-  health and pharmaceutical matters, private jokes, relationship conflicts,
-  and other protected classes do not become public merely because a model
-  suggested them.
-- **External text is data, never authority.** Other agents, repositories,
-  websites, and tool output may be manipulative; provenance can be recorded,
-  but their instructions cannot rewrite governance.
-- **Self-change is proposal-only.** Ordinary opinions follow learning; changes
-  touching foundational identity, governance, capabilities, or Vision require
-  joint review and an explicit owner decision.
-
-The full normative text is in [`docs/Ashley_Stewardship_Compact.md`](docs/Ashley_Stewardship_Compact.md),
-[`docs/Ashley_Ethics.md`](docs/Ashley_Ethics.md),
-[`docs/Ashley_Core_Principles.md`](docs/Ashley_Core_Principles.md), and
-[`docs/Ashley_Constitution.md`](docs/Ashley_Constitution.md). The terminology
-reference is [`docs/Ashley_Glossary.md`](docs/Ashley_Glossary.md).
-
-## Safeguards and data integrity
-
-- `ASHLEY_COGNITION_MODE=observe` and per-capability release gates are the
-  default. `apply` is a master ceiling, not permission to bypass a capability
-  contract.
-- Thought and delivery are ledgered. Proactive messages require a grounded
-  motivation, reservation, receipt-backed delivery, and finalization.
-- Secrets are quarantined. Raw credentials are not model input, memory,
-  proposals, logs, or ordinary tool output; broker interfaces use opaque
-  references.
-- Forgetting is preview-and-confirm, exact-target, and continuity-aware. The
-  authoritative continuity sidecar records lineage and tombstones; it cannot
-  be silently replaced by a mirror.
-- Nuclear data and continuity data are backed up together. Use consistent
-  VACUUM snapshots in nuclear-then-continuity order; copying WAL/SHM files is
-  not a supported backup method. See [`docs/memory-and-recall.md`](docs/memory-and-recall.md)
-  and [`scripts/backup-memory.ps1`](scripts/backup-memory.ps1).
-- Public health is deliberately small. Detailed health is owner-scoped,
-  metadata-only, and excludes transcripts, payloads, credentials, and raw
-  database paths.
-
-## Services and durable data
-
-| Service | Location | Responsibility |
-|---|---|---|
-| `agent-service` | `apps/agent-service/` (`:3710`) | Identity, Mind State, Thought, Agency, memory, cognition, Mistral access, and owner HTTP surfaces |
-| `discord-bot` | `apps/discord-bot/` | Discord gateway, intake, pacing, reactions, proactive scheduling, and delivery calls |
-| `sandbox-broker` | `apps/sandbox-broker/` | Wave 07b fake broker plus Wave 07c real daemon/transport; not installed as a Mint unit |
-| `external-broker` | `apps/external-broker/` | Fake/local vault/action boundary for 09b verification; no real adapters or credentials |
-
-Production Discord uses one `agent-service` process and one `discord-bot`
-gateway on Linux Mint. Do not run a second gateway on Windows while Mint is
-connected.
-
-| Path | Purpose |
+| Common pattern | Ashley's alternative |
 |---|---|
-| `~/.composer-assistant/conversations/nuclear.db` | Nuclear Identity, Mind State, Agency, memory, provenance, delivery, attention, proposals, and external-agency records |
-| `~/.composer-assistant/continuity.db` | Authoritative continuity sidecar: lineage, sessions, forget previews/tombstones, bindings, and continuity events |
-| `workspace/prompts/nuclear/` | Thin Expression and runtime prompt material |
+| Prompt-defined personality | Explicit persistent Identity and Mind State |
+| Stateless conversation | Grounded Recall and continuity across exchanges |
+| Generic agent loop | Ashley-owned Thought and Agency with explicit decisions |
+| Framework-owned memory | Local, provenance-bearing records with redaction and forgetting boundaries |
+| Language generation as authority | Capability authority outside model output |
+| Automatic action from a tool call | Bounded agency, reservations, receipts, and governed execution boundaries |
+| Unrestricted autonomy | Autonomy that is qualified, observable, and capability-gated |
 
-The current nuclear schema is v17 and the continuity sidecar is v1. The old
-`index.db` is archival conversation/audit data; nuclear chat does not use it as
-its source of memory.
+The result is intended to be understandable as a companion first and as an
+agentic system second. Its ambition is not measured by how much authority a
+model can exercise, but by how much continuity and agency can be built without
+losing truthfulness.
 
-## Discord and owner surfaces
+## Current state
 
-The command definitions in `apps/discord-bot/` are the source of truth. The
-core owner commands are:
+These labels describe current repository capability and evidence. They do not
+turn an implemented boundary into blanket production activation.
 
-| Command | Purpose |
+| Area | Status |
 |---|---|
-| `/remember` | Pin an explicit fact |
-| `/memory` | Inspect remembered facts |
-| `/new` | Start a fresh active thread |
-| `/forget` | Preview and confirm exact forgetting targets |
-| `/proactive` | Inspect, pause, or resume initiative |
-| `/identity` | Review, approve, reject, or defer foundational identity proposals |
+| Discord companion runtime | Active / implemented |
+| Identity and Mind State | Implemented |
+| Thought and cognitive processing | Implemented |
+| Grounded Recall | Implemented; qualification/testing in progress |
+| Multi-provider model routing | Implemented |
+| Sandbox | Infrastructure implemented; live delegated access not yet active |
+| Agent Plugins interoperability | Parser contract tested; runtime not integrated |
+| MCP / external tool runtime | Not yet enabled |
 
-Owner-scoped HTTP surfaces include:
+## Governed autonomy
 
-| Endpoint family | Purpose |
-|---|---|
-| `GET /health` | Minimal public liveness/readiness and provider state |
-| `/nuclear/health`, `/nuclear/status` | Bounded owner diagnostics and runtime status |
-| `/nuclear/decisions`, `/nuclear/attention` | Thought decisions and model-admission pressure |
-| `/nuclear/reflections`, `/nuclear/episodes`, `/nuclear/cognition` | Evidence, grounded recall, Mind State, and cognition records |
-| `/nuclear/continuity`, `/nuclear/relationship` | Lineage, continuity events, and relationship state |
-| `/nuclear/capabilities`, `/nuclear/revisions` | Capability gates, evaluations, and bounded learning proposals |
-| `/nuclear/identity/reviews`, `/nuclear/change-proposals` | Separate positions and owner review of self-change proposals |
-| `/nuclear/external/*` | Metadata-only fake external-action status, cancellation, reconciliation, and emergency stop |
+A central design principle is structural governance rather than prompt-level
+control.
 
-These surfaces are for inspection and owner decisions. They do not expose raw
-credentials or turn a review decision into an automatic commit, deployment, or
-capability promotion.
+- **Cognition is not authority.** Model output may propose language or a
+  decision, but it cannot grant itself a capability, consent, or execution
+  scope.
+- **Evidence has provenance.** Memory and external reading remain tied to their
+  sources, classifications, and capability state. Forgetting and redaction are
+  treated as authority boundaries, not cosmetic cleanup.
+- **Shadow state cannot silently become live authority.** Observe-mode and
+  evaluation results remain non-influential until an explicit capability
+  contract, qualification evidence, and promotion boundary allow influence.
+- **Host execution is separately governed.** Where execution is qualified, it
+  passes through an OS-boundary broker with owner-governed scope and receipts.
+  The local sandbox infrastructure is not yet active delegated access for
+  Ashley.
+- **External content is untrusted.** Plugin packages, MCP data, websites, and
+  tool results do not automatically become trusted instructions, memory,
+  consent, or authority.
 
-## Configuration
+## Repository and architecture
 
-Copy [`config/env.example`](config/env.example) to
-`~/.composer-assistant/.env`, then fill in local secrets and deployment-specific
-values. In particular, set the Mistral RPS and TPM values to the limits of the
-active account; the durable attention ledger enforces those configured values.
+Start with the small set of documents that explain why Ashley exists, how the
+system is organized, and where current boundaries stand:
 
-```env
-MISTRAL_API_KEY=
-MISTRAL_MODEL=mistral-medium-latest
-MISTRAL_REQUESTS_PER_SECOND=1
-MISTRAL_TOKENS_PER_MINUTE=<provider allowance>
+- [`VISION.md`](VISION.md) - the reason for the project; it is not a runtime
+  prompt.
+- [`docs/Ashley_Core_Principles.md`](docs/Ashley_Core_Principles.md),
+  [`docs/Ashley_Constitution.md`](docs/Ashley_Constitution.md), and
+  [`docs/Ashley_Hierarchy.md`](docs/Ashley_Hierarchy.md) - governing principles
+  and authority order.
+- [`docs/Architecture_Index.md`](docs/Architecture_Index.md) - module
+  ownership, runtime boundaries, and observability map.
+- [`docs/architecture/Ashley_Foundation_Architecture_Decision_v1.md`](docs/architecture/Ashley_Foundation_Architecture_Decision_v1.md)
+  and [`docs/architecture/Ashley_Architecture_Salvage_Map_v2.md`](docs/architecture/Ashley_Architecture_Salvage_Map_v2.md)
+  - the current accepted architecture decision surface.
+- [`docs/memory-and-recall.md`](docs/memory-and-recall.md) - the local Recall
+  model, source provenance, forgetting, and continuity boundaries.
+- [`docs/Routing_Status.md`](docs/Routing_Status.md) and
+  [`docs/Sandbox_Status.md`](docs/Sandbox_Status.md) - current routing and
+  sandbox readiness boundaries.
 
-DISCORD_BOT_TOKEN=
-DISCORD_OWNER_ID=
-MEMORY_OWNER_ID=
+## Project status
 
-ASHLEY_REFLECTION_MODE=observe
-ASHLEY_COGNITION_MODE=observe
-PROACTIVE_ENABLED=true
-```
+Project Ashley is under active development. The current repository reflects a
+working companion runtime and an evolving cognitive architecture, but it is
+not yet packaged as a turnkey application for general installation. Capability
+activation, operational setup, and deployment remain deliberately governed
+repository concerns rather than promises made by this landing page.
 
-Keep `.env`, signing material, credentials, and local databases outside Git.
+The current product boundary is single-owner, English-language, and
+Discord-first. Future expansion requires explicit design, authority review,
+verification evidence, and owner acceptance.
 
-## Development and verification
-
-From the Windows checkout (`C:\Users\Xharv\Projects\composer-assistant`):
-
-```powershell
-npm install
-npm run dev:agent       # agent service only
-npm run dev:discord     # local gateway; do not run alongside Mint
-
-npm test
-npm run build:agent
-npm run build:discord
-npm run phase0:offline
-npm run verify:status
-npm run test:stabilization
-npm run eval:deterministic
-npm run assurance:10c
-```
-
-The deterministic evaluation is designed for factual and behavioral gates;
-style and quality evaluation is separate. Full persona evaluation consumes
-provider capacity and must use an accepted baseline:
-
-```powershell
-npm run eval:full -- -Baseline <accepted-baseline> -Label <release-label>
-```
-
-Local green checks are evidence for a gate packet, not by themselves a wave
-acceptance or a release qualification.
-
-## Operations
-
-Production Discord runs on Linux Mint only. The normal remote update path is:
-
-```powershell
-npm run start:ashley    # pull, rebuild, restart, and perform configured checks
-npm run stop:ashley     # stop accidental Windows processes only
-```
-
-Mint-specific service, firewall, backup, and recovery guidance lives in
-[`deploy/linux-mint/README.md`](deploy/linux-mint/README.md). Before a release
-decision, re-check the deployed SHA, schema and continuity lineage, owner
-surfaces, gateway login, service count, and journal errors on the actual host.
-
-## Further reading
-
-- [`docs/Vision_Implementation_Map.md`](docs/Vision_Implementation_Map.md) —
-  commitment → owner → evidence → failure signal → current status
-- [`docs/Wave_Acceptance_Protocol.md`](docs/Wave_Acceptance_Protocol.md) —
-  design, implementation, verification, acceptance, qualification, and
-  deployment ladder
-- [`docs/Architecture_Review_Protocol.md`](docs/Architecture_Review_Protocol.md)
-  and [`docs/Ashley_Design_Patterns.md`](docs/Ashley_Design_Patterns.md) —
-  review and recurring architecture rules
-- [`docs/curiosity-reader.md`](docs/curiosity-reader.md) and
-  [`docs/proactive-initiative.md`](docs/proactive-initiative.md) — network
-  reading and interruption boundaries
-- [`docs/Sandbox_Design.md`](docs/Sandbox_Design.md),
-  [`docs/Self_Modification_Design.md`](docs/Self_Modification_Design.md), and
-  [`docs/External_Agency_Design.md`](docs/External_Agency_Design.md) — accepted
-  designs and explicitly deferred production boundaries
-- [`docs/Stabilization_Design.md`](docs/Stabilization_Design.md) — Wave 10
-  traceability, health, resource, and dual-database assurance
-- [`deploy/linux-mint/sandbox/README.md`](deploy/linux-mint/sandbox/README.md) —
-  scripted Mint sandbox preflight and explicit install/rollback path
-- [`docs/handoffs/waves-00-05-implementation-record.md`](docs/handoffs/waves-00-05-implementation-record.md)
-  — historical local implementation record for the first five waves
-
-## Scope
-
-Ashley is private, single-owner, English-language, and Discord-only. Public
-launch, multi-user identity, voice, Telegram, group conversations, habits,
-Moltbook, real external accounts, and general-purpose network skills are
-outside the current product boundary. Future expansion requires an explicit
-design, authority review, verification evidence, and owner acceptance.
+Ashley is being built toward a companion whose continuity, agency, and growth
+come from the architecture itself, not from pretending that a prompt is a mind.
