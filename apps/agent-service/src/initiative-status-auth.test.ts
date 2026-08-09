@@ -30,6 +30,7 @@ describe("initiative status authorization", () => {
             reviewDueCount: 0,
             availableBySourceClass: {},
             lastClosedStageCode: null,
+            unavailableByReason: {},
           },
         }),
       },

@@ -6,6 +6,7 @@ import {
 import {
   capabilityCanExecuteShadow,
   capabilityCanInfluence,
+  capabilityCanInfluenceReadOnly,
   capabilityNames,
   capabilityShadowDependenciesReady,
   currentBuildIdentity,
@@ -935,6 +936,7 @@ export type OpenCognitiveContinuityStatus = {
   redactedCount: number;
   reviewDueCount: number;
   availableBySourceClass: Record<string, number>;
+  unavailableByReason: Record<string, number>;
 };
 
 /** Indexed wake-path check for the existing Reflection review signal. */
@@ -979,6 +981,27 @@ function itemDeferred(item: OpenCognitiveItemRecord, nowMs: number): boolean {
   return !Number.isFinite(deferUntilMs) || deferUntilMs > nowMs;
 }
 
+function itemUnavailableReason(
+  db: DatabaseSync,
+  item: OpenCognitiveItemRecord,
+  nowMs: number,
+): string | null {
+  if (itemDeferred(item, nowMs)) return "deferred";
+  if (item.provenance !== "live") return "shadow";
+  if (
+    !capabilityCanInfluenceReadOnly(
+      db,
+      item.sourceCapability as CapabilityName,
+      "apply",
+    )
+  ) {
+    return "capability_blocked";
+  }
+  if (!openCognitiveItemSourceCurrent(db, item)) return "source_unavailable";
+  if (!relationshipSourceGateOpen(db, item)) return "relationship_withdrawn";
+  return null;
+}
+
 /**
  * Read-only, owner-scoped observability for the existing initiative status.
  * It returns counts and broad source classes only. It does not expose OCI
@@ -993,12 +1016,15 @@ export function getOpenCognitiveContinuityStatus(
   const nowMs = now.getTime();
   const openItems = items.filter((item) => item.status === "OPEN");
   const availableBySourceClass: Record<string, number> = {};
+  const unavailableByReason: Record<string, number> = {};
   for (const item of openItems) {
-    if (itemDeferred(item, nowMs)) continue;
-    if (!openCognitiveItemSourceCurrent(db, item)) continue;
-    if (!relationshipSourceGateOpen(db, item)) continue;
-    const key = sourceClass(item.sourceType);
-    availableBySourceClass[key] = (availableBySourceClass[key] ?? 0) + 1;
+    const reason = itemUnavailableReason(db, item, nowMs);
+    if (reason != null) {
+      unavailableByReason[reason] = (unavailableByReason[reason] ?? 0) + 1;
+    } else {
+      const key = sourceClass(item.sourceType);
+      availableBySourceClass[key] = (availableBySourceClass[key] ?? 0) + 1;
+    }
   }
   return {
     totalCount: items.length,
@@ -1009,5 +1035,6 @@ export function getOpenCognitiveContinuityStatus(
       (item) => item.attention?.reviewRequestedAt != null,
     ).length,
     availableBySourceClass,
+    unavailableByReason,
   };
 }

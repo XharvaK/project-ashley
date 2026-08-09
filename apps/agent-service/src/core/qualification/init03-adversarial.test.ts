@@ -11,6 +11,10 @@ import {
   currentContractId,
 } from "../rollout/capabilities.js";
 import {
+  applyModelContinuity,
+  currentModelContinuityIdentity,
+} from "../attention/continuity.js";
+import {
   collectMotivations,
 } from "../agency/motivations.js";
 import { selectMotivationCandidates } from "../agency/candidate-selection.js";
@@ -19,6 +23,7 @@ import {
   getOpenCognitiveItem,
   materializeOpenCognitiveItem,
   openCognitiveItemEligibleForInfluence,
+  openCognitiveItemSourceEligibleForInfluence,
   type OpenCognitiveItemProposal,
 } from "../cognition/open-items.js";
 import {
@@ -556,6 +561,90 @@ describe("INIT-03 adversarial self-audit", () => {
         /private self commitment|private tension|reasoning|prompt/i,
       );
       expect(diagnostics).toMatchObject({ totalCount: 0, openCount: 0 });
+    } finally {
+      closeDb(db);
+    }
+  });
+
+  it("qualifies host identity, authoritative source revisions, and model epochs", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    try {
+      activate(db, ["reading"]);
+      const question = seedQuestion(db, OWNER_ID, "identity-revision-question");
+      const sameA = materializeOpenCognitiveItem(
+        db,
+        proposal(question, "model-key-a"),
+      );
+      const sameB = materializeOpenCognitiveItem(
+        db,
+        proposal(question, "model-key-b"),
+      );
+      expect(sameA.created).toBe(true);
+      expect(sameB.created).toBe(false);
+      expect(sameB.item.entityUuid).toBe(sameA.item.entityUuid);
+
+      const distinct = materializeOpenCognitiveItem(
+        db,
+        proposal(question, "model-key-a", {
+          semanticSummary: "A different bounded adversarial conclusion",
+        }),
+      );
+      expect(distinct.created).toBe(true);
+      expect(distinct.item.entityUuid).not.toBe(sameA.item.entityUuid);
+
+      db.prepare(
+        "UPDATE questions SET text = ?, updated_at = ? WHERE entity_uuid = ?",
+      ).run(
+        "The authoritative outcome changed",
+        "2026-08-10T00:01:00.000Z",
+        question.entityUuid,
+      );
+      const revision = materializeOpenCognitiveItem(
+        db,
+        proposal(question, "retry-with-old-proposal-key"),
+      );
+      expect(revision.created).toBe(true);
+      expect(revision.item.sourceRevision).toBe("2026-08-10T00:01:00.000Z");
+      expect(getOpenCognitiveItem(db, OWNER_ID, sameA.item.entityUuid)?.status).toBe(
+        "SUPERSEDED",
+      );
+
+      const alias = env.mistralModel;
+      applyModelContinuity(
+        db,
+        {
+          alias,
+          resolvedModelId: "qualification-model-a",
+          unresolvedAlias: false,
+          dispatchSequence: 1,
+        },
+        () => undefined,
+      );
+      const modelA = currentModelContinuityIdentity(db, alias);
+      const cognition = materializeOpenCognitiveItem(db, {
+        ...proposal(question, "cognition-key"),
+        origin: "cognition",
+        modelIdentity: modelA.identity ?? undefined,
+        modelEpoch: modelA.modelEpoch,
+      }).item;
+      expect(cognition.modelIdentity).toBe(modelA.identity);
+      expect(cognition.modelEpoch).toBe(modelA.modelEpoch);
+      expect(openCognitiveItemSourceEligibleForInfluence(db, cognition)).toBe(true);
+
+      applyModelContinuity(
+        db,
+        {
+          alias,
+          resolvedModelId: "qualification-model-b",
+          unresolvedAlias: false,
+          dispatchSequence: 2,
+        },
+        () => undefined,
+      );
+      expect(currentModelContinuityIdentity(db, alias).modelEpoch).toBe(
+        modelA.modelEpoch + 1,
+      );
+      expect(openCognitiveItemSourceEligibleForInfluence(db, cognition)).toBe(false);
     } finally {
       closeDb(db);
     }

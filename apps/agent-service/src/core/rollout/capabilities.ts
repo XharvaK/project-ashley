@@ -10,6 +10,7 @@ import {
 } from "../attention/contract-material.js";
 import {
   contractMismatch,
+  contractMismatchReadOnly,
   ensureBootstrapContract,
 } from "../attention/ledger.js";
 import { currentModelEpoch } from "../attention/continuity.js";
@@ -647,6 +648,41 @@ export function capabilityCanInfluence(
   if (masterMode !== "apply") return false;
   return releaseState(db, capability, releaseId) === "active" &&
     capabilityInfluenceDependenciesReady(db, capability, releaseId);
+}
+
+function releaseIsActiveReadOnly(
+  db: DatabaseSync,
+  capability: CapabilityName,
+  releaseId: string,
+): boolean {
+  const row = db
+    .prepare(
+      `SELECT state FROM capability_releases
+       WHERE capability = ? AND release_id = ?`,
+    )
+    .get(capability, releaseId) as { state?: string } | undefined;
+  return row?.state === "active";
+}
+
+/**
+ * Read-only live-influence check for owner diagnostics. It never bootstraps
+ * capability or contract rows, unlike the legacy runtime predicate.
+ */
+export function capabilityCanInfluenceReadOnly(
+  db: DatabaseSync,
+  capability: CapabilityName,
+  masterMode: CognitionMode = env.cognitionMode,
+  releaseId = currentReleaseId(),
+): boolean {
+  if (!(capabilityNames as readonly string[]).includes(capability)) {
+    return false;
+  }
+  if (contractMismatchReadOnly(db)) return false;
+  if (masterMode !== "apply") return false;
+  return releaseIsActiveReadOnly(db, capability, releaseId) &&
+    dependencies[capability].every((dependency) =>
+      releaseIsActiveReadOnly(db, dependency, releaseId),
+    );
 }
 
 export function operatorRollbackCapability(

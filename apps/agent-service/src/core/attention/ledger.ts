@@ -89,6 +89,21 @@ export function contractMismatch(db: DatabaseSync): boolean {
   );
 }
 
+/** Read-only contract check for diagnostics and other non-mutating surfaces. */
+export function contractMismatchReadOnly(db: DatabaseSync): boolean {
+  const active = db
+    .prepare(
+      `SELECT contract_id, version, spec_hash FROM capability_contracts WHERE active = 1`,
+    )
+    .get();
+  if (!isRow(active)) return true;
+  return (
+    String(active.contract_id) !== DECLARED_CONTRACT_ID ||
+    String(active.version) !== DECLARED_CONTRACT_VERSION ||
+    String(active.spec_hash) !== declaredContractHash()
+  );
+}
+
 export function insertQueuedRequest(
   db: DatabaseSync,
   input: EnqueueInput,

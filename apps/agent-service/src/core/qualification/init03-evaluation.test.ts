@@ -7,6 +7,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { env } from "../../env.js";
 import { openNuclearDb } from "../db.js";
 import {
+  getPendingNuclearMigration,
+  openContinuityDb,
+} from "../continuity/db.js";
+import {
   currentBuildIdentity,
   currentContractId,
 } from "../rollout/capabilities.js";
@@ -24,8 +28,12 @@ import {
 } from "../cognition/open-items.js";
 import {
   OPEN_COGNITIVE_ITEM_DELAY_DURATIONS_MS,
+  OPEN_COGNITIVE_ITEM_CONSIDERATION_REVIEW_THRESHOLD,
+  listOpenCognitiveItemReviewRequests,
   recordOpenCognitiveDecision,
 } from "../cognition/reconsideration.js";
+import { processPendingOpenCognitiveReviews } from "../reflection/initiative.js";
+import { selectOpenCognitiveItemsForWake } from "../cognition/wake-selection.js";
 import { recordWithdrawal } from "../relationship/authority.js";
 import type {
   Decision,
@@ -728,6 +736,100 @@ describe("INIT-03 evaluation input isolation", () => {
           (item) => item.refType === "open_cognitive_item" && item.refId === ociUuid,
         ),
       ).toBe(false);
+    } finally {
+      closeDb(db);
+    }
+  });
+
+  it("qualifies bounded wake scale and Reflection review consumption", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    try {
+      activateCapabilities(db, ["reading"]);
+      const items = [] as Array<{ entityUuid: string }>;
+      for (let index = 0; index < 101; index += 1) {
+        const source = questionSource(
+          db,
+          `Bounded wake source ${index}`,
+          0.8,
+          `qualification-wake-${index}`,
+        );
+        items.push({ entityUuid: materialize(db, source, "question", "reading") });
+      }
+      db.prepare(
+        `UPDATE questions SET status = 'forgotten'
+         WHERE entity_uuid IN (${items.slice(0, 100).map(() => "?").join(",")})`,
+      ).run(
+        ...items.slice(0, 100).map((_, index) => `qualification-wake-${index}`),
+      );
+      const wake = selectOpenCognitiveItemsForWake(db, OWNER_ID, FIXTURE_NOW);
+      expect(wake.items.map((item) => item.entityUuid)).toEqual([
+        items[100]!.entityUuid,
+      ]);
+      expect(wake.scanned).toBe(101);
+      expect(wake.scanned).toBeLessThanOrEqual(128);
+
+      const reviewSource = questionSource(
+        db,
+        "Reflection review source",
+        0.9,
+        "qualification-reflection-review",
+      );
+      const reviewUuid = materialize(db, reviewSource, "question", "reading");
+      const selected = decide(
+        selectMotivationCandidates(
+          db,
+          OWNER_ID,
+          "proactive",
+          collectMotivations(db, OWNER_ID, "proactive"),
+          FIXTURE_NOW,
+        ),
+        "proactive",
+        { db, ownerId: OWNER_ID },
+      );
+      const repeatedDelay = {
+        ...selected,
+        kind: "delay" as const,
+        delayClass: "standard" as const,
+        cognitiveAllocation: {
+          ...selected.cognitiveAllocation,
+          shouldSpeak: false,
+          completion: "hold" as const,
+        },
+      };
+      expect(repeatedDelay.evidenceRefs).toContainEqual({
+        type: "open_cognitive_item",
+        id: reviewUuid,
+      });
+      for (
+        let count = 0;
+        count < OPEN_COGNITIVE_ITEM_CONSIDERATION_REVIEW_THRESHOLD;
+        count += 1
+      ) {
+        recordOpenCognitiveDecision(db, {
+          ownerId: OWNER_ID,
+          decision: repeatedDelay,
+          now: new Date(FIXTURE_NOW.getTime() + count * 86_400_001),
+        });
+      }
+      expect(listOpenCognitiveItemReviewRequests(db, OWNER_ID)).toHaveLength(1);
+      expect(processPendingOpenCognitiveReviews(db, OWNER_ID)).toEqual({
+        processed: 1,
+        skipped: 0,
+      });
+      expect(listOpenCognitiveItemReviewRequests(db, OWNER_ID)).toEqual([]);
+      expect(
+        db
+          .prepare(
+            `SELECT delay_class, last_outcome_code
+             FROM open_cognitive_item_attention a
+             JOIN open_cognitive_items o ON o.id = a.item_id
+             WHERE o.entity_uuid = ?`,
+          )
+          .get(reviewUuid),
+      ).toEqual({
+        delay_class: "long",
+        last_outcome_code: "reflection_keep_open",
+      });
     } finally {
       closeDb(db);
     }
