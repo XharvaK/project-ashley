@@ -1,4 +1,26 @@
+import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
+import {
+  assignNewEntityUuid,
+} from "../continuity/nuclear-targetable.js";
+import {
+  capabilityCanExecuteShadow,
+  capabilityCanInfluence,
+  capabilityNames,
+  capabilityShadowDependenciesReady,
+  currentBuildIdentity,
+  currentContractId,
+  type CapabilityName,
+} from "../rollout/capabilities.js";
+import {
+  MODEL_SENSITIVE_SET_FOR_CONTRACT,
+} from "../attention/contract-material.js";
+import { currentModelEpoch } from "../attention/continuity.js";
+import { env } from "../../env.js";
+import {
+  maxClassification,
+  type DataClassification,
+} from "../privacy/classification.js";
 
 export const OPEN_COGNITIVE_ITEM_KINDS = [
   "question",
@@ -181,4 +203,439 @@ export function getOpenCognitiveItem(
       (item) => item.entityUuid === entityUuid,
     ) ?? null
   );
+}
+
+export type OpenCognitiveItemProposal = {
+  ownerId: string;
+  kind: OpenCognitiveItemKind;
+  semanticSummary: string;
+  source: {
+    type: string;
+    id: string;
+    entityUuid: string;
+  };
+  origin: OpenCognitiveItemRecord["origin"];
+  semanticKeyMaterial: string;
+  provenance: OpenCognitiveItemProvenance;
+  sourceCapability: string;
+  contractId: string;
+  buildIdentity: string;
+  modelEpoch: number;
+  sourceRevision?: string;
+  dataClassification?: DataClassification;
+};
+
+export type MaterializeOpenCognitiveItemResult = {
+  item: OpenCognitiveItemRecord;
+  created: boolean;
+};
+
+type SourceSpec = {
+  table: string;
+};
+
+const SOURCE_SPECS: Record<string, SourceSpec> = {
+  message: { table: "mem_messages" },
+  mem_message: { table: "mem_messages" },
+  question: { table: "questions" },
+  questions: { table: "questions" },
+  fact: { table: "mem_facts" },
+  opinion: { table: "opinions" },
+  episode: { table: "episodes" },
+  mind_state: { table: "mind_state_items" },
+  doc_reminder: { table: "doc_reminders" },
+  ashley_self_commitment: { table: "ashley_self_commitments" },
+  mutual_commitment: { table: "mutual_commitments" },
+  relational_tension: { table: "relational_tensions" },
+};
+
+const TERMINAL_SOURCE_STATUSES = new Set([
+  "forgotten",
+  "redacted",
+  "released",
+  "cancelled",
+  "resolved",
+  "fulfilled",
+  "superseded",
+]);
+
+const MODEL_SENSITIVE_CAPABILITIES = new Set<string>(
+  MODEL_SENSITIVE_SET_FOR_CONTRACT as readonly string[],
+);
+
+function rejectMaterialization(code: string): never {
+  throw new Error(code);
+}
+
+function boundedText(
+  value: unknown,
+  maxLength: number,
+  errorCode: string,
+): string {
+  if (typeof value !== "string") rejectMaterialization(errorCode);
+  const normalized = value.trim().replace(/\s+/g, " ");
+  if (!normalized || normalized.length > maxLength) {
+    rejectMaterialization(errorCode);
+  }
+  return normalized;
+}
+
+function optionalBoundedText(value: unknown, maxLength: number): string {
+  if (value == null || value === "") return "";
+  if (typeof value !== "string") rejectMaterialization("oci_source_revision_invalid");
+  const normalized = value.trim().replace(/\s+/g, " ");
+  if (normalized.length > maxLength) {
+    rejectMaterialization("oci_source_revision_invalid");
+  }
+  return normalized;
+}
+
+function sourceId(value: unknown): string {
+  const normalized = boundedText(value, 32, "oci_source_id_invalid");
+  if (!/^\d+$/.test(normalized)) {
+    rejectMaterialization("oci_source_id_invalid");
+  }
+  const numeric = Number(normalized);
+  if (!Number.isSafeInteger(numeric) || numeric < 1) {
+    rejectMaterialization("oci_source_id_invalid");
+  }
+  return String(numeric);
+}
+
+function isClassification(value: unknown): value is DataClassification {
+  return (
+    value === "ordinary" ||
+    value === "sensitive" ||
+    value === "never_public" ||
+    value === "secret"
+  );
+}
+
+function isKind(value: unknown): value is OpenCognitiveItemKind {
+  return (OPEN_COGNITIVE_ITEM_KINDS as readonly string[]).includes(
+    String(value),
+  );
+}
+
+function isProvenance(value: unknown): value is OpenCognitiveItemProvenance {
+  return value === "shadow" || value === "live";
+}
+
+function isOrigin(value: unknown): value is OpenCognitiveItemRecord["origin"] {
+  return (
+    value === "cognition" ||
+    value === "reflection" ||
+    value === "runtime" ||
+    value === "manual"
+  );
+}
+
+function sourceRowFor(
+  db: DatabaseSync,
+  ownerId: string,
+  sourceType: string,
+  id: string,
+): Record<string, unknown> {
+  const spec = SOURCE_SPECS[sourceType];
+  if (!spec) rejectMaterialization("oci_source_type_unsupported");
+  const row = db
+    .prepare(
+      "SELECT * FROM " +
+        spec.table +
+        " WHERE id = ? AND owner_id = ?",
+    )
+    .get(Number(id), ownerId) as Record<string, unknown> | undefined;
+  if (!row) rejectMaterialization("oci_source_missing_or_owner_mismatch");
+  return row;
+}
+
+function validateSourceState(
+  row: Record<string, unknown>,
+  sourceEntityUuid: string,
+  provenance: OpenCognitiveItemProvenance,
+): DataClassification {
+  if (String(row.entity_uuid ?? "") !== sourceEntityUuid) {
+    rejectMaterialization("oci_source_entity_mismatch");
+  }
+  const status = typeof row.status === "string" ? row.status.toLowerCase() : "";
+  if (TERMINAL_SOURCE_STATUSES.has(status)) {
+    rejectMaterialization("oci_source_unavailable");
+  }
+  if (row.superseded_by != null) {
+    rejectMaterialization("oci_source_unavailable");
+  }
+  if (row.redacted_at != null) {
+    rejectMaterialization("oci_source_unavailable");
+  }
+  if (
+    (row.provenance === "shadow" || row.provenance === "live") &&
+    row.provenance !== provenance
+  ) {
+    rejectMaterialization("oci_provenance_mismatch");
+  }
+  const classification = isClassification(row.data_classification)
+    ? row.data_classification
+    : "never_public";
+  if (classification === "secret") {
+    rejectMaterialization("oci_source_secret");
+  }
+  return classification;
+}
+
+function validateCapability(
+  db: DatabaseSync,
+  proposal: OpenCognitiveItemProposal,
+): CapabilityName {
+  const sourceCapability = boundedText(
+    proposal.sourceCapability,
+    128,
+    "oci_source_capability_invalid",
+  );
+  if (
+    !(capabilityNames as readonly string[]).includes(sourceCapability)
+  ) {
+    rejectMaterialization("oci_source_capability_unknown");
+  }
+  const capability = sourceCapability as CapabilityName;
+  if (proposal.contractId.trim() !== currentContractId()) {
+    rejectMaterialization("oci_contract_mismatch");
+  }
+  if (proposal.buildIdentity.trim() !== currentBuildIdentity()) {
+    rejectMaterialization("oci_build_mismatch");
+  }
+  if (
+    !Number.isInteger(proposal.modelEpoch) ||
+    proposal.modelEpoch < 0
+  ) {
+    rejectMaterialization("oci_model_epoch_invalid");
+  }
+  const expectedEpoch = MODEL_SENSITIVE_CAPABILITIES.has(capability)
+    ? currentModelEpoch(db, env.mistralModel)
+    : 0;
+  if (proposal.modelEpoch !== expectedEpoch) {
+    rejectMaterialization("oci_model_epoch_mismatch");
+  }
+  if (proposal.provenance === "shadow") {
+    if (
+      !capabilityCanExecuteShadow(db, capability) ||
+      !capabilityShadowDependenciesReady(db, capability)
+    ) {
+      rejectMaterialization("oci_source_capability_shadow_unavailable");
+    }
+  } else if (!capabilityCanInfluence(db, capability, "apply")) {
+    rejectMaterialization("oci_source_capability_not_live");
+  }
+  return capability;
+}
+
+function validateProposal(
+  db: DatabaseSync,
+  proposal: OpenCognitiveItemProposal,
+): {
+  ownerId: string;
+  kind: OpenCognitiveItemKind;
+  semanticSummary: string;
+  sourceType: string;
+  sourceId: string;
+  sourceEntityUuid: string;
+  semanticKeyHash: string;
+  sourceCapability: CapabilityName;
+  contractId: string;
+  provenance: OpenCognitiveItemProvenance;
+  sourceRevision: string;
+  origin: OpenCognitiveItemRecord["origin"];
+  buildIdentity: string;
+  modelEpoch: number;
+  dataClassification: DataClassification;
+} {
+  const ownerId = boundedText(proposal.ownerId, 128, "oci_owner_invalid");
+  if (!isKind(proposal.kind)) rejectMaterialization("oci_kind_invalid");
+  const kind = proposal.kind;
+  if (!isProvenance(proposal.provenance)) {
+    rejectMaterialization("oci_provenance_invalid");
+  }
+  if (!isOrigin(proposal.origin)) {
+    rejectMaterialization("oci_origin_invalid");
+  }
+  const semanticSummary = boundedText(
+    proposal.semanticSummary,
+    512,
+    "oci_summary_invalid",
+  );
+  const sourceType = boundedText(
+    proposal.source.type,
+    64,
+    "oci_source_type_invalid",
+  ).toLowerCase();
+  if (!SOURCE_SPECS[sourceType]) {
+    rejectMaterialization("oci_source_type_unsupported");
+  }
+  const sourceIdValue = sourceId(proposal.source.id);
+  const sourceEntityUuid = boundedText(
+    proposal.source.entityUuid,
+    128,
+    "oci_source_entity_invalid",
+  );
+  const semanticKeyMaterial = boundedText(
+    proposal.semanticKeyMaterial,
+    512,
+    "oci_semantic_key_invalid",
+  );
+  const sourceRow = sourceRowFor(
+    db,
+    ownerId,
+    sourceType,
+    sourceIdValue,
+  );
+  const sourceClassification = validateSourceState(
+    sourceRow,
+    sourceEntityUuid,
+    proposal.provenance,
+  );
+  const proposalClassification = proposal.dataClassification ?? sourceClassification;
+  if (!isClassification(proposalClassification)) {
+    rejectMaterialization("oci_classification_invalid");
+  }
+  const dataClassification = maxClassification(
+    sourceClassification,
+    proposalClassification,
+  );
+  if (dataClassification === "secret") {
+    rejectMaterialization("oci_classification_secret");
+  }
+  const sourceCapability = validateCapability(db, proposal);
+  const sourceRevision = optionalBoundedText(
+    proposal.sourceRevision,
+    128,
+  );
+  const canonicalKey = [
+    "open-cognitive-item-v1",
+    ownerId,
+    sourceType,
+    sourceIdValue,
+    sourceEntityUuid,
+    kind,
+    semanticKeyMaterial,
+  ].join("\u0000");
+  const semanticKeyHash = createHash("sha256")
+    .update(canonicalKey, "utf8")
+    .digest("hex");
+  return {
+    ownerId,
+    kind,
+    semanticSummary,
+    sourceType,
+    sourceId: sourceIdValue,
+    sourceEntityUuid,
+    semanticKeyHash,
+    sourceCapability,
+    contractId: proposal.contractId.trim(),
+    provenance: proposal.provenance,
+    sourceRevision,
+    origin: proposal.origin,
+    buildIdentity: proposal.buildIdentity.trim(),
+    modelEpoch: proposal.modelEpoch,
+    dataClassification,
+  };
+}
+
+export function materializeOpenCognitiveItem(
+  db: DatabaseSync,
+  proposal: OpenCognitiveItemProposal,
+  options: { inTransaction?: boolean } = {},
+): MaterializeOpenCognitiveItemResult {
+  const ownsTransaction = options.inTransaction !== true;
+  if (ownsTransaction) db.exec("BEGIN IMMEDIATE");
+  try {
+    const validated = validateProposal(db, proposal);
+    const createdAt = new Date().toISOString();
+    const insert = db.prepare(
+      `INSERT INTO open_cognitive_items
+         (owner_id, entity_uuid, kind, status, semantic_summary,
+          source_type, source_id, source_entity_uuid, semantic_key_hash,
+          source_capability, contract_id, provenance, source_revision, origin,
+          build_identity, model_epoch, data_classification, status_reason,
+          created_at, updated_at)
+       VALUES (?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(owner_id, semantic_key_hash) DO NOTHING`,
+    );
+    const result = insert.run(
+      validated.ownerId,
+      assignNewEntityUuid(),
+      validated.kind,
+      validated.semanticSummary,
+      validated.sourceType,
+      validated.sourceId,
+      validated.sourceEntityUuid,
+      validated.semanticKeyHash,
+      validated.sourceCapability,
+      validated.contractId,
+      validated.provenance,
+      validated.sourceRevision,
+      validated.origin,
+      validated.buildIdentity,
+      validated.modelEpoch,
+      validated.dataClassification,
+      "created",
+      createdAt,
+      createdAt,
+    );
+    const created = Number(result.changes) === 1;
+    const existing = db
+      .prepare(
+        `SELECT id, source_entity_uuid, kind
+         FROM open_cognitive_items
+         WHERE owner_id = ? AND semantic_key_hash = ?`,
+      )
+      .get(validated.ownerId, validated.semanticKeyHash) as
+      | { id?: number; source_entity_uuid?: string; kind?: string }
+      | undefined;
+    if (!existing?.id) {
+      rejectMaterialization("oci_materialization_missing_after_insert");
+    }
+    if (
+      existing.source_entity_uuid !== validated.sourceEntityUuid ||
+      existing.kind !== validated.kind
+    ) {
+      rejectMaterialization("oci_idempotency_conflict");
+    }
+    db.prepare(
+      `INSERT OR IGNORE INTO open_cognitive_item_attention
+         (item_id, delay_class, defer_until, last_considered_at,
+          consideration_count, last_outcome_code, review_requested_at, updated_at)
+       VALUES (?, 'none', NULL, NULL, 0, NULL, NULL, ?)`,
+    ).run(existing.id, createdAt);
+    if (created) {
+      db.prepare(
+        `INSERT INTO open_cognitive_item_transitions
+           (item_id, owner_id, from_status, to_status, reason, created_at)
+         VALUES (?, ?, NULL, 'OPEN', 'created', ?)`,
+    ).run(existing.id, validated.ownerId, createdAt);
+    }
+    if (ownsTransaction) db.exec("COMMIT");
+    const entityRow = db
+      .prepare(
+        `SELECT entity_uuid FROM open_cognitive_items WHERE id = ?`,
+      )
+      .get(existing.id) as { entity_uuid?: string } | undefined;
+    if (!entityRow?.entity_uuid) {
+      rejectMaterialization("oci_materialization_readback_failed");
+    }
+    const item = getOpenCognitiveItem(
+      db,
+      validated.ownerId,
+      entityRow.entity_uuid,
+    );
+    if (!item) rejectMaterialization("oci_materialization_readback_failed");
+    return { item, created };
+  } catch (error) {
+    if (ownsTransaction) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        /* preserve the original materialization failure */
+      }
+    }
+    throw error;
+  }
 }
