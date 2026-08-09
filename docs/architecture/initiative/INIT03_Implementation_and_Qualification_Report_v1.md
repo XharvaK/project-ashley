@@ -19,11 +19,11 @@ Wave 1 — PASS — schema v23, OCI tables, indexes, targetable registration, an
 
 Wave 2 — PASS — owner-scoped OCI store, deterministic identity, and bounded materializer foundation: `99a650c`; grounded materialization validation: `e3b1bf6`.
 
-Wave 3 — PASS — cognition worker proposals from grounded message evidence: `0295417`.
+Wave 3 — PASS — cognition worker proposals and safe source projections into transient motivations: `0295417`; `c72546a`.
 
-Wave 4 — PASS — safe source projections into transient motivations: `c72546a`.
+Wave 4 — PASS — bounded relationship source producers: `441c2c1`.
 
-Wave 5 — PASS — bounded relationship projections and candidate selection: `441c2c1`; `56e05bf`.
+Wave 5 — PASS — bounded candidate selection and Thought influence: `56e05bf`.
 
 Wave 6 — PASS — fixed host delay mapping, reconsideration, Reflection review requests, restart persistence, and resolution: `2be2926`.
 
@@ -172,7 +172,8 @@ List in order:
 14. `e0f60df` — `test(cognition): harden INIT-03 continuity boundaries`
 15. `c7cbab6` — `test(qualification): align migration assertions with schema v23`
 16. `9bf88d6` — `perf(cognition): bound continuity wake reads`
-17. Wave 12 documentation commit — this report, the as-built contract evidence, and the historical audit scope note.
+17. `980ba9c` — `docs(initiative): publish INIT-03 qualification report`
+18. Wave 12 documentation correction — this commit.
 
 ## PRESERVED UNRELATED WORK
 
