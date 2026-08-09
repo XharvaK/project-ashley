@@ -80,7 +80,10 @@ import type { Decision, DecisionKind, Motivation, ReflectionMode } from "./types
 import { attachAffectLicense, getAffectiveState } from "./state/affect.js";
 import { enqueueCognitiveJob, getLatestShadowAnalysis } from "./cognition/jobs.js";
 import { recordOpenCognitiveDecision } from "./cognition/reconsideration.js";
-import { getOpenCognitiveContinuityStatus } from "./cognition/open-items.js";
+import {
+  countOpenCognitiveItemReviewDue,
+  getOpenCognitiveContinuityStatus,
+} from "./cognition/open-items.js";
 import {
   claimUrgentMindState,
   consumeUrgentWake,
@@ -1222,11 +1225,8 @@ export class AshleyCore {
       }
     }
 
-    const continuityStatus = getOpenCognitiveContinuityStatus(
-      this.db,
-      ownerId,
-    );
-    if (continuityStatus.reviewDueCount > 0) {
+    const reviewDueCount = countOpenCognitiveItemReviewDue(this.db, ownerId);
+    if (reviewDueCount > 0) {
       recordProactiveDiagnostic(
         this.db,
         ownerId,
@@ -1252,6 +1252,10 @@ export class AshleyCore {
         (motivation) => motivation.kind !== "silence_ok",
       );
       if (!hasMaterialCandidate) {
+        const continuityStatus = getOpenCognitiveContinuityStatus(
+          this.db,
+          ownerId,
+        );
         const sourceCount = Object.values(
           continuityStatus.availableBySourceClass,
         ).reduce((sum, count) => sum + count, 0);

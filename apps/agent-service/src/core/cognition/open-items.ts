@@ -168,10 +168,27 @@ function mapItem(row: ItemRow): OpenCognitiveItemRecord {
 export function listOpenCognitiveItems(
   db: DatabaseSync,
   ownerId: string,
-  options: { status?: OpenCognitiveItemStatus } = {},
+  options: {
+    status?: OpenCognitiveItemStatus;
+    entityUuid?: string;
+    limit?: number;
+  } = {},
 ): OpenCognitiveItemRecord[] {
-  const statusClause = options.status == null ? "" : " AND o.status = ?";
-  const params = options.status == null ? [ownerId] : [ownerId, options.status];
+  const clauses = ["o.owner_id = ?"];
+  const params: Array<string | number> = [ownerId];
+  if (options.status != null) {
+    clauses.push("o.status = ?");
+    params.push(options.status);
+  }
+  if (options.entityUuid != null) {
+    clauses.push("o.entity_uuid = ?");
+    params.push(options.entityUuid);
+  }
+  const limit = options.limit == null || !Number.isFinite(options.limit)
+    ? null
+    : Math.max(1, Math.min(256, Math.floor(options.limit)));
+  const limitClause = limit == null ? "" : " LIMIT ?";
+  if (limit != null) params.push(limit);
   const rows = db
     .prepare(
       `SELECT
@@ -187,8 +204,8 @@ export function listOpenCognitiveItems(
          a.review_requested_at, a.updated_at AS attention_updated_at
        FROM open_cognitive_items o
        LEFT JOIN open_cognitive_item_attention a ON a.item_id = o.id
-       WHERE o.owner_id = ?${statusClause}
-       ORDER BY o.updated_at DESC, o.id DESC`,
+       WHERE ${clauses.join(" AND ")}
+       ORDER BY o.updated_at DESC, o.id DESC${limitClause}`,
     )
     .all(...params) as unknown as ItemRow[];
   return rows.map(mapItem);
@@ -199,11 +216,7 @@ export function getOpenCognitiveItem(
   ownerId: string,
   entityUuid: string,
 ): OpenCognitiveItemRecord | null {
-  return (
-    listOpenCognitiveItems(db, ownerId).find(
-      (item) => item.entityUuid === entityUuid,
-    ) ?? null
-  );
+  return listOpenCognitiveItems(db, ownerId, { entityUuid })[0] ?? null;
 }
 
 export type OpenCognitiveItemProposal = {
@@ -777,6 +790,23 @@ export type OpenCognitiveContinuityStatus = {
   reviewDueCount: number;
   availableBySourceClass: Record<string, number>;
 };
+
+/** Indexed wake-path check for the existing Reflection review signal. */
+export function countOpenCognitiveItemReviewDue(
+  db: DatabaseSync,
+  ownerId: string,
+): number {
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS count
+       FROM open_cognitive_items o
+       JOIN open_cognitive_item_attention a ON a.item_id = o.id
+       WHERE o.owner_id = ? AND o.status = 'OPEN'
+         AND a.review_requested_at IS NOT NULL`,
+    )
+    .get(ownerId) as { count?: number } | undefined;
+  return Number(row?.count ?? 0);
+}
 
 function sourceClass(sourceType: string): string {
   if (sourceType === "message" || sourceType === "mem_message") return "message";

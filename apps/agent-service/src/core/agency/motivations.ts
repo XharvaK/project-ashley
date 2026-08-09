@@ -190,7 +190,7 @@ function addOpenCognitiveItems(
 ): Motivation[] {
   const reactiveRelevant = trigger === "reactive";
   const now = Date.now();
-  return listOpenCognitiveItems(db, ownerId, { status: "OPEN" })
+  return listOpenCognitiveItems(db, ownerId, { status: "OPEN", limit: 8 })
     .filter((item) => openCognitiveItemEligibleForInfluence(db, item, now))
     .filter(
       (item) =>

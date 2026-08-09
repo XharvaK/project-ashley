@@ -2,6 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { openNuclearDb } from "../db.js";
 import {
+  getOpenCognitiveItem,
   listOpenCognitiveItems,
   materializeOpenCognitiveItem,
   type OpenCognitiveItemProposal,
@@ -77,8 +78,43 @@ describe("open cognitive item store", () => {
       now,
       now,
     );
+    db.prepare(
+      `INSERT INTO open_cognitive_items
+         (owner_id, entity_uuid, kind, status, semantic_summary,
+          source_type, source_id, source_entity_uuid, semantic_key_hash,
+          source_capability, contract_id, provenance, source_revision, origin,
+          build_identity, model_epoch, data_classification, status_reason,
+          created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "owner-1",
+      "oci-3",
+      "revisit",
+      "OPEN",
+      "A newer bounded revisit",
+      "episode",
+      "14",
+      "episode-source-3",
+      "c".repeat(64),
+      "episode_revisit",
+      "contract-1",
+      "live",
+      "episode-rev-3",
+      "reflection",
+      "build-1",
+      0,
+      "never_public",
+      "created",
+      "2026-08-10T00:00:00.000Z",
+      "2026-08-10T00:00:00.000Z",
+    );
 
     expect(listOpenCognitiveItems(db, "owner-1")).toEqual([
+      expect.objectContaining({
+        ownerId: "owner-1",
+        entityUuid: "oci-3",
+        kind: "revisit",
+      }),
       expect.objectContaining({
         ownerId: "owner-1",
         entityUuid: "oci-1",
@@ -93,6 +129,12 @@ describe("open cognitive item store", () => {
         attention: null,
       }),
     ]);
+    expect(listOpenCognitiveItems(db, "owner-1", { limit: 1 })).toEqual([
+      expect.objectContaining({ entityUuid: "oci-3" }),
+    ]);
+    expect(getOpenCognitiveItem(db, "owner-1", "oci-1")).toEqual(
+      expect.objectContaining({ entityUuid: "oci-1" }),
+    );
     expect(listOpenCognitiveItems(db, "owner-2")).toEqual([
       expect.objectContaining({
         ownerId: "owner-2",
