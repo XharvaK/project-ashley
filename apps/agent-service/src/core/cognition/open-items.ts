@@ -354,12 +354,16 @@ function validateSourceState(
   row: Record<string, unknown>,
   sourceEntityUuid: string,
   provenance: OpenCognitiveItemProvenance,
+  sourceType?: string,
 ): DataClassification {
   if (String(row.entity_uuid ?? "") !== sourceEntityUuid) {
     rejectMaterialization("oci_source_entity_mismatch");
   }
   const status = typeof row.status === "string" ? row.status.toLowerCase() : "";
   if (TERMINAL_SOURCE_STATUSES.has(status)) {
+    rejectMaterialization("oci_source_unavailable");
+  }
+  if (sourceType && !sourceLifecycleAllows(sourceType, status)) {
     rejectMaterialization("oci_source_unavailable");
   }
   if (row.superseded_by != null) {
@@ -381,6 +385,26 @@ function validateSourceState(
     rejectMaterialization("oci_source_secret");
   }
   return classification;
+}
+
+function sourceLifecycleAllows(sourceType: string, status: string): boolean {
+  switch (sourceType) {
+    case "question":
+    case "questions":
+      return status === "open" || status === "pursuing";
+    case "episode":
+    case "mind_state":
+      return status === "active";
+    case "doc_reminder":
+      return status === "pending" || status === "due";
+    case "ashley_self_commitment":
+    case "mutual_commitment":
+      return status === "active";
+    case "relational_tension":
+      return status === "open";
+    default:
+      return true;
+  }
 }
 
 function currentSourceRevision(row: Record<string, unknown>): string {
@@ -500,6 +524,7 @@ function validateProposal(
     sourceRow,
     sourceEntityUuid,
     proposal.provenance,
+    sourceType,
   );
   const proposalClassification = proposal.dataClassification ?? sourceClassification;
   if (!isClassification(proposalClassification)) {
@@ -674,7 +699,12 @@ export function openCognitiveItemSourceCurrent(
       item.sourceType,
       item.sourceId,
     );
-    validateSourceState(sourceRow, item.sourceEntityUuid, "live");
+    validateSourceState(
+      sourceRow,
+      item.sourceEntityUuid,
+      "live",
+      item.sourceType,
+    );
     if (
       item.sourceRevision !== "" &&
       currentSourceRevision(sourceRow) !== item.sourceRevision
