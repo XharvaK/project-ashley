@@ -14,6 +14,7 @@ import {
   applyModelContinuity,
   currentModelContinuityIdentity,
 } from "../attention/continuity.js";
+import { runAttentiveDispatch } from "../attention/governor.js";
 import {
   collectMotivations,
 } from "../agency/motivations.js";
@@ -35,6 +36,7 @@ import {
   listRelationshipMotivationProjections,
 } from "../relationship/projections.js";
 import type { Decision, Motivation } from "../types.js";
+import { enqueueCognitiveJob } from "../cognition/jobs.js";
 
 const OWNER_ID = "doc";
 const OTHER_OWNER_ID = "other-owner";
@@ -566,8 +568,9 @@ describe("INIT-03 adversarial self-audit", () => {
     }
   });
 
-  it("qualifies host identity, authoritative source revisions, and model epochs", () => {
+  it("qualifies host identity, authoritative source revisions, and model epochs", async () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const originalGroqKey = env.groqApiKey;
     try {
       activate(db, ["reading"]);
       const question = seedQuestion(db, OWNER_ID, "identity-revision-question");
@@ -610,22 +613,34 @@ describe("INIT-03 adversarial self-audit", () => {
       );
 
       const alias = env.mistralModel;
-      applyModelContinuity(
-        db,
-        {
-          alias,
-          resolvedModelId: "qualification-model-a",
-          unresolvedAlias: false,
-          dispatchSequence: 1,
-        },
-        () => undefined,
-      );
+      env.groqApiKey = "test-key";
+      const jobId = enqueueCognitiveJob(db, {
+        ownerId: OWNER_ID,
+        kind: "consolidate_thread",
+        sourceKey: "qualification-model-continuity-test",
+      });
+      const dispatch = await runAttentiveDispatch<{ text: string }>(db, {
+        messages: [{ role: "user", content: "qualification model fixture" }],
+        purpose: "maintenance",
+        lane: "curiosity_maintenance",
+        modelAlias: alias,
+        providerId: "groq",
+        quotaBucket: "groq:qualification-model-continuity-test",
+        ownerId: OWNER_ID,
+        cognitiveJobId: jobId,
+        dispatch: async () => ({
+          providerModel: "qualification-model-a",
+          usage: { promptTokens: 2, completionTokens: 2 },
+          result: { text: "accepted" },
+        }),
+      });
       const modelA = currentModelContinuityIdentity(db, alias);
       const cognition = materializeOpenCognitiveItem(db, {
         ...proposal(question, "cognition-key"),
         origin: "cognition",
         modelIdentity: modelA.identity ?? undefined,
         modelEpoch: modelA.modelEpoch,
+        dispatchIdentity: dispatch.acceptedDispatchIdentity,
       }).item;
       expect(cognition.modelIdentity).toBe(modelA.identity);
       expect(cognition.modelEpoch).toBe(modelA.modelEpoch);
@@ -637,7 +652,7 @@ describe("INIT-03 adversarial self-audit", () => {
           alias,
           resolvedModelId: "qualification-model-b",
           unresolvedAlias: false,
-          dispatchSequence: 2,
+          dispatchSequence: dispatch.acceptedDispatchIdentity.dispatchSequence + 1,
         },
         () => undefined,
       );
@@ -646,6 +661,7 @@ describe("INIT-03 adversarial self-audit", () => {
       );
       expect(openCognitiveItemSourceEligibleForInfluence(db, cognition)).toBe(false);
     } finally {
+      env.groqApiKey = originalGroqKey;
       closeDb(db);
     }
   });

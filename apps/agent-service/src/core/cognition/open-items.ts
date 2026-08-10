@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import {
   assignNewEntityUuid,
@@ -18,6 +17,11 @@ import {
   modelContinuityIdentity,
 } from "../attention/continuity.js";
 import type { AcceptedDispatchIdentity } from "../attention/types.js";
+import {
+  continuityGeneration as buildContinuityGeneration,
+  durableSemanticKeyHash,
+  semanticIdentityHash,
+} from "./identity.js";
 import { env } from "../../env.js";
 import { activeWithdrawal } from "../relationship/repair.js";
 import {
@@ -74,6 +78,8 @@ export type OpenCognitiveItemRecord = {
   sourceId: string;
   sourceEntityUuid: string;
   semanticKeyHash: string;
+  semanticIdentityHash: string;
+  continuityGeneration: string;
   sourceCapability: string;
   contractId: string;
   provenance: OpenCognitiveItemProvenance;
@@ -103,6 +109,8 @@ type ItemRow = {
   source_id: string;
   source_entity_uuid: string;
   semantic_key_hash: string;
+  semantic_identity_hash: string;
+  continuity_generation: string;
   source_capability: string;
   contract_id: string;
   provenance: OpenCognitiveItemProvenance;
@@ -140,6 +148,8 @@ function mapItem(row: ItemRow): OpenCognitiveItemRecord {
     sourceId: row.source_id,
     sourceEntityUuid: row.source_entity_uuid,
     semanticKeyHash: row.semantic_key_hash,
+    semanticIdentityHash: row.semantic_identity_hash ?? "",
+    continuityGeneration: row.continuity_generation ?? "",
     sourceCapability: row.source_capability,
     contractId: row.contract_id,
     provenance: row.provenance,
@@ -217,7 +227,9 @@ export function listOpenCognitiveItems(
       `SELECT
          o.id, o.owner_id, o.entity_uuid, o.kind, o.status,
          o.semantic_summary, o.source_type, o.source_id,
-         o.source_entity_uuid, o.semantic_key_hash, o.source_capability,
+         o.source_entity_uuid, o.semantic_key_hash,
+         o.semantic_identity_hash, o.continuity_generation,
+         o.source_capability,
          o.contract_id, o.provenance, o.source_revision, o.origin,
          o.build_identity, o.model_epoch, o.model_identity,
          o.data_classification,
@@ -582,6 +594,8 @@ function validateProposal(
   sourceId: string;
   sourceEntityUuid: string;
   semanticKeyHash: string;
+  semanticIdentityHash: string;
+  continuityGeneration: string;
   sourceCapability: CapabilityName;
   contractId: string;
   provenance: OpenCognitiveItemProvenance;
@@ -602,6 +616,13 @@ function validateProposal(
     rejectMaterialization("oci_origin_invalid");
   }
   const origin = proposal.origin;
+  if (
+    origin === "cognition" &&
+    proposal.dispatchIdentity != null &&
+    proposal.dispatchIdentity.ownerId !== ownerId
+  ) {
+    rejectMaterialization("oci_dispatch_owner_mismatch");
+  }
   const semanticSummary = boundedText(
     proposal.semanticSummary,
     512,
@@ -672,20 +693,25 @@ function validateProposal(
   } else if (modelIdentity !== "" || proposal.modelEpoch !== 0) {
     rejectMaterialization("oci_model_continuity_unexpected");
   }
-  const canonicalKey = [
-    "open-cognitive-item-v3",
+  const semanticIdentity = semanticIdentityHash({
     ownerId,
     sourceType,
-    sourceIdValue,
+    sourceId: sourceIdValue,
     sourceEntityUuid,
     kind,
     semanticSummary,
     sourceRevision,
+  });
+  const continuity = buildContinuityGeneration({
+    contractId: proposal.contractId.trim(),
+    buildIdentity: proposal.buildIdentity.trim(),
     modelIdentity,
-  ].join("\u0000");
-  const semanticKeyHash = createHash("sha256")
-    .update(canonicalKey, "utf8")
-    .digest("hex");
+    modelEpoch: proposal.modelEpoch,
+  });
+  const semanticKeyHash = durableSemanticKeyHash({
+    semanticIdentityHash: semanticIdentity,
+    continuityGeneration: continuity,
+  });
   return {
     ownerId,
     kind,
@@ -694,6 +720,8 @@ function validateProposal(
     sourceId: sourceIdValue,
     sourceEntityUuid,
     semanticKeyHash,
+    semanticIdentityHash: semanticIdentity,
+    continuityGeneration: continuity,
     sourceCapability,
     contractId: proposal.contractId.trim(),
     provenance: proposal.provenance,
@@ -714,6 +742,8 @@ type ExistingIdentityRow = {
   source_entity_uuid: string;
   kind: string;
   source_revision: string;
+  semantic_identity_hash: string;
+  continuity_generation: string;
   source_capability: string;
   contract_id: string;
   provenance: string;
@@ -778,6 +808,56 @@ function supersedeStaleSourceRevisions(
   }
 }
 
+function supersedeStaleContinuityGenerations(
+  db: DatabaseSync,
+  validated: ReturnType<typeof validateProposal>,
+  nowIso: string,
+): void {
+  const staleRows = db
+    .prepare(
+      `SELECT id
+       FROM open_cognitive_items
+       WHERE owner_id = ? AND semantic_identity_hash = ?
+         AND continuity_generation <> ? AND status = 'OPEN'
+       ORDER BY id ASC`,
+    )
+    .all(
+      validated.ownerId,
+      validated.semanticIdentityHash,
+      validated.continuityGeneration,
+    ) as Array<{ id: number }>;
+
+  for (const row of staleRows) {
+    const update = db
+      .prepare(
+        `UPDATE open_cognitive_items
+         SET status = 'SUPERSEDED', status_reason = 'continuity_generation_superseded',
+             updated_at = ?
+         WHERE id = ? AND owner_id = ? AND status = 'OPEN'`,
+      )
+      .run(nowIso, row.id, validated.ownerId);
+    if (Number(update.changes) !== 1) continue;
+    db.prepare(
+      `INSERT OR IGNORE INTO open_cognitive_item_attention
+         (item_id, delay_class, defer_until, last_considered_at,
+          consideration_count, last_outcome_code, review_requested_at, updated_at)
+       VALUES (?, 'none', NULL, NULL, 0, NULL, NULL, ?)`,
+    ).run(row.id, nowIso);
+    db.prepare(
+      `UPDATE open_cognitive_item_attention
+       SET delay_class = 'none', defer_until = NULL,
+           last_outcome_code = 'transition:supersede',
+           review_requested_at = NULL, updated_at = ?
+       WHERE item_id = ?`,
+    ).run(nowIso, row.id);
+    db.prepare(
+      `INSERT INTO open_cognitive_item_transitions
+         (item_id, owner_id, from_status, to_status, reason, created_at)
+       VALUES (?, ?, 'OPEN', 'SUPERSEDED', 'continuity_generation_superseded', ?)`,
+    ).run(row.id, validated.ownerId, nowIso);
+  }
+}
+
 export function materializeOpenCognitiveItem(
   db: DatabaseSync,
   proposal: OpenCognitiveItemProposal,
@@ -789,15 +869,17 @@ export function materializeOpenCognitiveItem(
     const validated = validateProposal(db, proposal);
     const createdAt = new Date().toISOString();
     supersedeStaleSourceRevisions(db, validated, createdAt);
+    supersedeStaleContinuityGenerations(db, validated, createdAt);
     const insert = db.prepare(
       `INSERT INTO open_cognitive_items
          (owner_id, entity_uuid, kind, status, semantic_summary,
           source_type, source_id, source_entity_uuid, semantic_key_hash,
+          semantic_identity_hash, continuity_generation,
           source_capability, contract_id, provenance, source_revision, origin,
           build_identity, model_epoch, model_identity, data_classification, status_reason,
           created_at, updated_at)
-       VALUES (?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(owner_id, semantic_key_hash) DO NOTHING`,
+       VALUES (?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(owner_id, semantic_key_hash) DO NOTHING`,
     );
     const result = insert.run(
       validated.ownerId,
@@ -808,6 +890,8 @@ export function materializeOpenCognitiveItem(
       validated.sourceId,
       validated.sourceEntityUuid,
       validated.semanticKeyHash,
+      validated.semanticIdentityHash,
+      validated.continuityGeneration,
       validated.sourceCapability,
       validated.contractId,
       validated.provenance,
@@ -826,6 +910,7 @@ export function materializeOpenCognitiveItem(
       .prepare(
          `SELECT id, source_entity_uuid, kind
                 , semantic_summary, source_type, source_id, source_revision,
+           semantic_identity_hash, continuity_generation,
            source_capability, contract_id, provenance, origin, build_identity,
            model_epoch, model_identity, data_classification
          FROM open_cognitive_items
@@ -844,6 +929,8 @@ export function materializeOpenCognitiveItem(
       existing.source_entity_uuid === validated.sourceEntityUuid &&
       existing.kind === validated.kind &&
       existing.source_revision === validated.sourceRevision &&
+      existing.semantic_identity_hash === validated.semanticIdentityHash &&
+      existing.continuity_generation === validated.continuityGeneration &&
       existing.source_capability === validated.sourceCapability &&
       existing.contract_id === validated.contractId &&
       existing.provenance === validated.provenance &&

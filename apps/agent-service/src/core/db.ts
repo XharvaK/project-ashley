@@ -51,6 +51,11 @@ import {
   MIGRATION_24_OPEN_COGNITIVE_ITEMS_DDL,
   MIGRATION_24_OPEN_COGNITIVE_WAKE_CURSOR_DDL,
 } from "./cognition/migration-24.js";
+import {
+  continuityGeneration,
+  durableSemanticKeyHash,
+  semanticIdentityHash,
+} from "./cognition/identity.js";
 import { reconcileSandboxApprovals } from "./sandbox/approval-store.js";
 import { currentBuildIdentity } from "./rollout/capabilities.js";
 
@@ -1095,6 +1100,52 @@ function reconcilePendingNuclearMigration(
   );
 }
 
+function backfillOpenCognitiveIdentityGenerations(db: DatabaseSync): void {
+  const rows = db.prepare(
+    `SELECT id, owner_id, source_type, source_id, source_entity_uuid, kind,
+            semantic_summary, source_revision, contract_id, build_identity,
+            model_epoch, model_identity
+     FROM open_cognitive_items`,
+  ).all() as Array<Record<string, unknown>>;
+  const update = db.prepare(
+    `UPDATE open_cognitive_items
+     SET semantic_key_hash = ?, semantic_identity_hash = ?,
+         continuity_generation = ?
+     WHERE id = ?`,
+  );
+  for (const row of rows) {
+    const semantic = semanticIdentityHash({
+      ownerId: String(row.owner_id ?? ""),
+      sourceType: String(row.source_type ?? ""),
+      sourceId: String(row.source_id ?? ""),
+      sourceEntityUuid: String(row.source_entity_uuid ?? ""),
+      kind: String(row.kind ?? ""),
+      semanticSummary: String(row.semantic_summary ?? ""),
+      sourceRevision: String(row.source_revision ?? ""),
+    });
+    const generation = continuityGeneration({
+      contractId: String(row.contract_id ?? ""),
+      buildIdentity: String(row.build_identity ?? ""),
+      modelIdentity: String(row.model_identity ?? ""),
+      modelEpoch: Number(row.model_epoch ?? 0),
+    });
+    update.run(
+      durableSemanticKeyHash({
+        semanticIdentityHash: semantic,
+        continuityGeneration: generation,
+      }),
+      semantic,
+      generation,
+      Number(row.id),
+    );
+  }
+  db.exec(
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_open_cognitive_items_owner_semantic_generation
+       ON open_cognitive_items (owner_id, semantic_identity_hash, continuity_generation)
+       WHERE semantic_identity_hash <> '' AND continuity_generation <> ''`,
+  );
+}
+
 function migrateNuclearSchemaWithProtocol(input: {
   db: DatabaseSync;
   continuity?: DatabaseSync;
@@ -1130,6 +1181,7 @@ function migrateNuclearSchemaWithProtocol(input: {
       if (!columns.has("model_identity")) {
         db.exec(ddl);
       }
+      backfillOpenCognitiveIdentityGenerations(db);
     } else {
       db.exec(ddl);
     }

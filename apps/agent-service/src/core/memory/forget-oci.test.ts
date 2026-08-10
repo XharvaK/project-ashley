@@ -3,7 +3,8 @@ import { describe, expect, it } from "vitest";
 import { env } from "../../env.js";
 import { openNuclearDb } from "../db.js";
 import { openContinuityDb } from "../continuity/db.js";
-import { applyModelContinuity, currentModelContinuityIdentity } from "../attention/continuity.js";
+import { currentModelContinuityIdentity } from "../attention/continuity.js";
+import { runAttentiveDispatch } from "../attention/governor.js";
 import { resolveActiveThread, insertMessage } from "./threads.js";
 import { applyForgetTargets, forgetOwnerTopicImmediate } from "./forget.js";
 import { upsertDocReminder } from "../relationship/store.js";
@@ -17,6 +18,7 @@ import {
   currentBuildIdentity,
   currentContractId,
 } from "../rollout/capabilities.js";
+import { enqueueCognitiveJob } from "../cognition/jobs.js";
 
 const OWNER_ID = "doc";
 
@@ -134,23 +136,19 @@ describe("OCI forget and provenance boundaries", () => {
     }
   });
 
-  it("fails closed after capability demotion, model epoch change, source revision, and deletion", () => {
+  it("fails closed after capability demotion, model epoch change, source revision, and deletion", async () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     const originalMode = env.cognitionMode;
+    const originalGroqKey = env.groqApiKey;
     try {
       env.cognitionMode = "apply";
+      env.groqApiKey = "test-key";
       activate(db, "reading");
-      applyModelContinuity(
-        db,
-        {
-          alias: env.mistralModel,
-          resolvedModelId: "model-v1",
-          unresolvedAlias: false,
-          dispatchSequence: 1,
-        },
-        () => undefined,
-      );
-      const modelContinuity = currentModelContinuityIdentity(db, env.mistralModel);
+      const jobId = enqueueCognitiveJob(db, {
+        ownerId: OWNER_ID,
+        kind: "consolidate_thread",
+        sourceKey: "forget-model-continuity-test",
+      });
       const now = "2026-08-09T00:00:00.000Z";
       db.prepare(
         `INSERT INTO questions
@@ -166,6 +164,22 @@ describe("OCI forget and provenance boundaries", () => {
         entity_uuid: string;
         updated_at: string;
       };
+      const dispatch = await runAttentiveDispatch<{ text: string }>(db, {
+        messages: [{ role: "user", content: "forget model continuity fixture" }],
+        purpose: "maintenance",
+        lane: "curiosity_maintenance",
+        modelAlias: env.mistralModel,
+        providerId: "groq",
+        quotaBucket: "groq:forget-model-continuity-test",
+        ownerId: OWNER_ID,
+        cognitiveJobId: jobId,
+        dispatch: async () => ({
+          providerModel: "model-v1",
+          usage: { promptTokens: 2, completionTokens: 2 },
+          result: { text: "accepted" },
+        }),
+      });
+      const modelContinuity = currentModelContinuityIdentity(db, env.mistralModel);
       const item = materializeOpenCognitiveItem(db, {
         ownerId: OWNER_ID,
         kind: "question",
@@ -183,6 +197,7 @@ describe("OCI forget and provenance boundaries", () => {
         buildIdentity: currentBuildIdentity(),
         modelEpoch: modelContinuity.modelEpoch,
         modelIdentity: modelContinuity.identity ?? "",
+        dispatchIdentity: dispatch.acceptedDispatchIdentity,
         sourceRevision: source.updated_at,
       }).item;
       expect(openCognitiveItemEligibleForInfluence(db, item)).toBe(true);
@@ -215,6 +230,7 @@ describe("OCI forget and provenance boundaries", () => {
       expect(openCognitiveItemEligibleForInfluence(db, item)).toBe(false);
     } finally {
       env.cognitionMode = originalMode;
+      env.groqApiKey = originalGroqKey;
       db.close();
     }
   });

@@ -6,6 +6,7 @@ import {
   applyModelContinuity,
   currentModelContinuityIdentity,
 } from "../attention/continuity.js";
+import { runAttentiveDispatch } from "../attention/governor.js";
 import {
   getOpenCognitiveItem,
   listOpenCognitiveItems,
@@ -17,6 +18,7 @@ import {
   currentBuildIdentity,
   currentContractId,
 } from "../rollout/capabilities.js";
+import { enqueueCognitiveJob } from "./jobs.js";
 
 const HASH = "a".repeat(64);
 
@@ -333,8 +335,10 @@ describe("open cognitive item store", () => {
     db.close();
   });
 
-  it("invalidates cognition-derived Recall OCI when the resolved model changes", () => {
+  it("invalidates cognition-derived Recall OCI when the resolved model changes", async () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const originalGroqKey = env.groqApiKey;
+    env.groqApiKey = "test-key";
     const now = "2026-08-09T00:00:00.000Z";
     db.prepare(
       `INSERT INTO questions
@@ -345,18 +349,29 @@ describe("open cognitive item store", () => {
     const source = db
       .prepare("SELECT id, entity_uuid FROM questions WHERE entity_uuid = ?")
       .get("question-source-model") as { id: number; entity_uuid: string };
-    applyModelContinuity(
-      db,
-      {
-        alias: env.mistralModel,
-        resolvedModelId: "model-a",
-        unresolvedAlias: false,
-        dispatchSequence: 1,
-      },
-      () => undefined,
-    );
-    const current = currentModelContinuityIdentity(db, env.mistralModel);
-    const item = materializeOpenCognitiveItem(db, {
+    const jobId = enqueueCognitiveJob(db, {
+      ownerId: "owner-1",
+      kind: "consolidate_thread",
+      sourceKey: "open-items-model-continuity-test",
+    });
+    try {
+      const dispatch = await runAttentiveDispatch<{ text: string }>(db, {
+        messages: [{ role: "user", content: "model continuity fixture" }],
+        purpose: "maintenance",
+        lane: "curiosity_maintenance",
+        modelAlias: env.mistralModel,
+        providerId: "groq",
+        quotaBucket: "groq:open-items-model-continuity-test",
+        ownerId: "owner-1",
+        cognitiveJobId: jobId,
+        dispatch: async () => ({
+          providerModel: "model-a",
+          usage: { promptTokens: 2, completionTokens: 2 },
+          result: { text: "accepted" },
+        }),
+      });
+      const current = currentModelContinuityIdentity(db, env.mistralModel);
+      const item = materializeOpenCognitiveItem(db, {
       ownerId: "owner-1",
       kind: "question",
       semanticSummary: "A model-bound conclusion",
@@ -373,27 +388,31 @@ describe("open cognitive item store", () => {
       buildIdentity: currentBuildIdentity(),
       modelEpoch: current.modelEpoch,
       modelIdentity: current.identity ?? "",
+      dispatchIdentity: dispatch.acceptedDispatchIdentity,
       dataClassification: "never_public",
-    }).item;
+      }).item;
 
-    expect(item.modelEpoch).toBe(1);
-    expect(item.modelIdentity).toBe(current.identity);
-    applyModelContinuity(
-      db,
-      {
-        alias: env.mistralModel,
-        resolvedModelId: "model-b",
-        unresolvedAlias: false,
-        dispatchSequence: 2,
-      },
-      () => undefined,
-    );
-    expect(
-      db.prepare("SELECT model_epoch FROM model_continuity_state WHERE alias = ?")
-        .get(env.mistralModel),
-    ).toEqual({ model_epoch: 2 });
-    expect(openCognitiveItemSourceCurrent(db, item)).toBe(false);
-    db.close();
+      expect(item.modelEpoch).toBe(1);
+      expect(item.modelIdentity).toBe(current.identity);
+      applyModelContinuity(
+        db,
+        {
+          alias: env.mistralModel,
+          resolvedModelId: "model-b",
+          unresolvedAlias: false,
+          dispatchSequence: dispatch.acceptedDispatchIdentity.dispatchSequence + 1,
+        },
+        () => undefined,
+      );
+      expect(
+        db.prepare("SELECT model_epoch FROM model_continuity_state WHERE alias = ?")
+          .get(env.mistralModel),
+      ).toEqual({ model_epoch: 2 });
+      expect(openCognitiveItemSourceCurrent(db, item)).toBe(false);
+    } finally {
+      env.groqApiKey = originalGroqKey;
+      db.close();
+    }
   });
 
   it("keeps manual source OCI independent of model continuity", () => {
