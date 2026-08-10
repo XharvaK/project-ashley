@@ -262,7 +262,7 @@ describe("wave4 Track M2 — ledger A/B: shadow Thought vs live Expression admis
   });
 
   it("real runAttentiveDispatch A/B: shadow Thought shifts the live dispatch_sequence 1 -> 2", async () => {
-    const runLive = (db: DatabaseSync) =>
+    const runLive = (db: DatabaseSync, clock: AttentionClock) =>
       runAttentiveDispatch<{ text: string }>(db, {
         messages: [{ role: "user", content: "live expression turn" }],
         purpose: "expression",
@@ -277,16 +277,22 @@ describe("wave4 Track M2 — ledger A/B: shadow Thought vs live Expression admis
           usage: { promptTokens: 20, completionTokens: 10 },
           result: { text: "ok" },
         }),
-      });
+      }, clock);
 
     const control = tempDb();
-    const controlResult = await runLive(control);
+    const controlClock = createFakeClock(Date.parse("2026-02-01T00:00:00.000Z"));
+    const controlResult = await runLive(control, controlClock);
     expect(seq(control, controlResult.requestId)).toBe(1);
     expect(getRequest(control, controlResult.requestId)?.outcome).toBe("completed");
 
     const variant = tempDb();
-    const shadow = enqueueShadowThought(variant, createFakeClock(Date.now()), Date.now() - 5_000);
-    const pending = runLive(variant);
+    const variantClock = createFakeClock(Date.parse("2026-02-01T00:00:00.000Z"));
+    const shadow = enqueueShadowThought(
+      variant,
+      variantClock,
+      variantClock.nowMs() - 5_000,
+    );
+    const pending = runLive(variant, variantClock);
     const variantLive = Number(
       (
         variant
@@ -301,17 +307,17 @@ describe("wave4 Track M2 — ledger A/B: shadow Thought vs live Expression admis
 
     const variantResult = await pending;
 
-    expect(tryAdmitRequest(variant, shadow)).toEqual({
+    expect(tryAdmitRequest(variant, shadow, variantClock)).toEqual({
       admitted: true,
       dispatchSequence: 2,
     });
-    markRunning(variant, shadow);
+    markRunning(variant, shadow, variantClock);
     completeRequest(variant, shadow, {
       outcome: "completed",
       resolvedModelId: "gpt-oss-120b-2026-01",
       actualInput: 40,
       actualOutput: 20,
-    });
+    }, variantClock);
 
     expect(variantResult.requestId).toBe(variantLive);
     expect(seq(variant, variantLive)).toBe(1);
