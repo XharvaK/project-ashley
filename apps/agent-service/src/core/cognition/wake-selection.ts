@@ -58,8 +58,9 @@ export function explainOpenCognitiveReviewDueQuery(
      ) raw
      JOIN open_cognitive_item_attention a ON a.item_id = raw.id
      WHERE a.review_requested_at IS NOT NULL
+       AND (julianday(a.review_requested_at) IS NULL OR a.review_requested_at <= ?)
      LIMIT ?`,
-  ).all(ownerId, Math.max(1, limit)) as SQLiteQueryPlanRow[];
+  ).all(ownerId, new Date().toISOString(), Math.max(1, limit)) as SQLiteQueryPlanRow[];
 }
 
 export function selectOpenCognitiveItemsForWake(

@@ -355,14 +355,32 @@ describe("durable OCI reconsideration", () => {
       );
       expect(invalid).toEqual({ processed: 0, skipped: 1 });
       expect(getOpenCognitiveItem(db, OWNER_ID, item.entityUuid)?.status).toBe("OPEN");
-      expect(listOpenCognitiveItemReviewRequests(db, OWNER_ID)).toHaveLength(1);
+      expect(listOpenCognitiveItemReviewRequests(db, OWNER_ID)).toEqual([]);
+      expect(getOpenCognitiveItem(db, OWNER_ID, item.entityUuid)?.attention).toMatchObject({
+        reviewAttemptCount: 1,
+        reviewLastDisposition: "invalid_transition",
+        lastOutcomeCode: "reflection_quarantined:invalid_transition",
+      });
 
-      db.prepare("UPDATE questions SET status = 'forgotten' WHERE id = ?").run(
-        Number(item.sourceId),
-      );
+      const unavailable = seedItem(db);
+      for (let count = 0; count < OPEN_COGNITIVE_ITEM_CONSIDERATION_REVIEW_THRESHOLD; count += 1) {
+        recordOpenCognitiveDecision(db, {
+          ownerId: OWNER_ID,
+          decision: decision("delay", unavailable.entityUuid, "standard"),
+          now: new Date(30_000 + count * 86_400_001),
+        });
+      }
+      db.prepare("UPDATE questions SET status = 'forgotten' WHERE id = ?").run(Number(unavailable.sourceId));
       const withdrawnSource = processPendingOpenCognitiveReviews(db, OWNER_ID);
       expect(withdrawnSource).toEqual({ processed: 0, skipped: 1 });
-      expect(getOpenCognitiveItem(db, OWNER_ID, item.entityUuid)?.status).toBe("OPEN");
+      expect(getOpenCognitiveItem(db, OWNER_ID, unavailable.entityUuid)).toMatchObject({
+        status: "OPEN",
+        attention: {
+          reviewRequestedAt: null,
+          reviewLastDisposition: "source_unavailable",
+          lastOutcomeCode: "reflection_quarantined:source_unavailable",
+        },
+      });
     } finally {
       env.cognitionMode = originalMode;
       db.close();

@@ -159,7 +159,7 @@ function instrumentReviewDueCount(db: DatabaseSync, ownerId: string): number {
     "/* REVIEW_VISIT */",
     "record_review_due_visit(a.item_id) IS NOT NULL AND",
   );
-  db.prepare(instrumented).get(ownerId);
+  db.prepare(instrumented).get(ownerId, NOW.toISOString());
   return visits;
 }
 

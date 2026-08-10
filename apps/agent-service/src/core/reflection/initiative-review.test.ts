@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { openNuclearDb } from "../db.js";
 import {
   currentBuildIdentity,
@@ -131,7 +131,9 @@ describe("Reflection OCI adjudication", () => {
     const invalid = Array.from({ length: 8 }, (_, index) => seedReviewItem(db, `invalid-${index}`));
     try {
       const invalidIds = new Set(invalid.map((item) => item.id));
+      const attemptedIds: number[] = [];
       const adjudicator = async (_db: DatabaseSync, item: typeof valid) => {
+        attemptedIds.push(item.id);
         return invalidIds.has(item.id)
           ? {
             action: "resolve" as const,
@@ -146,16 +148,25 @@ describe("Reflection OCI adjudication", () => {
       expect(getOpenCognitiveItem(db, OWNER_ID, valid.entityUuid)?.status).toBe("OPEN");
       expect(
         db.prepare(
-          `SELECT review_attempt_count, review_last_disposition
+          `SELECT review_attempt_count, review_last_disposition,
+                  review_requested_at, last_outcome_code
            FROM open_cognitive_item_attention WHERE item_id = ?`,
         ).get(invalid[7]!.id),
-      ).toEqual({ review_attempt_count: 1, review_last_disposition: "invalid_transition" });
+      ).toEqual({
+        review_attempt_count: 1,
+        review_last_disposition: "invalid_transition",
+        review_requested_at: null,
+        last_outcome_code: "reflection_quarantined:invalid_transition",
+      });
+      const firstAttemptIds = [...attemptedIds];
 
       db.close();
       db = openNuclearDb(new DatabaseSync(path));
 
       const second = await processPendingOpenCognitiveReviewsAsync(db, OWNER_ID, adjudicator);
       expect(second).toEqual({ processed: 1, skipped: 0 });
+      expect(attemptedIds.slice(firstAttemptIds.length)).toEqual([valid.id]);
+      expect(firstAttemptIds).not.toContain(valid.id);
       expect(getOpenCognitiveItem(db, OWNER_ID, valid.entityUuid)?.status).toBe("WITHDRAWN");
     } finally {
       try {
@@ -167,7 +178,10 @@ describe("Reflection OCI adjudication", () => {
     }
   });
 
-  it("uses safe KEEP fallback on adjudicator failure and does not hot-loop", async () => {
+  it("backs off an adjudicator failure and does not hot-loop", async () => {
+    const now = new Date("2026-08-10T12:00:00.000Z");
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     activateReading(db);
     const item = seedReviewItem(db, "failure");
@@ -179,16 +193,59 @@ describe("Reflection OCI adjudication", () => {
           throw new Error("reflection_fixture_failure");
         },
       );
-      expect(result).toEqual({ processed: 1, skipped: 0 });
+      expect(result).toEqual({ processed: 0, skipped: 1 });
       expect(getOpenCognitiveItem(db, OWNER_ID, item.entityUuid)).toMatchObject({
         status: "OPEN",
-        attention: { reviewRequestedAt: null, delayClass: "long" },
+        attention: {
+          reviewRequestedAt: "2026-08-10T12:15:00.000Z",
+          reviewAttemptCount: 1,
+          reviewLastDisposition: "adjudicator_failure",
+          lastOutcomeCode: "reflection_retry:adjudicator_failure",
+        },
       });
       expect(processPendingOpenCognitiveReviews(db, OWNER_ID)).toEqual({
         processed: 0,
         skipped: 0,
       });
+
+      vi.setSystemTime(new Date("2026-08-10T12:15:00.000Z"));
+      expect(await processPendingOpenCognitiveReviewsAsync(
+        db,
+        OWNER_ID,
+        async () => {
+          throw new Error("reflection_fixture_failure");
+        },
+      )).toEqual({ processed: 0, skipped: 1 });
+      expect(getOpenCognitiveItem(db, OWNER_ID, item.entityUuid)?.attention).toMatchObject({
+        reviewRequestedAt: "2026-08-10T13:15:00.000Z",
+        reviewAttemptCount: 2,
+        lastOutcomeCode: "reflection_retry:adjudicator_failure",
+      });
+
+      vi.setSystemTime(new Date("2026-08-10T13:15:00.000Z"));
+      expect(await processPendingOpenCognitiveReviewsAsync(
+        db,
+        OWNER_ID,
+        async () => {
+          throw new Error("reflection_fixture_failure");
+        },
+      )).toEqual({ processed: 0, skipped: 1 });
+      expect(getOpenCognitiveItem(db, OWNER_ID, item.entityUuid)?.attention).toMatchObject({
+        reviewRequestedAt: null,
+        reviewAttemptCount: 3,
+        reviewLastDisposition: "adjudicator_failure",
+        lastOutcomeCode: "reflection_quarantined:adjudicator_failure",
+      });
+      vi.setSystemTime(new Date("2026-08-11T13:15:00.000Z"));
+      expect(await processPendingOpenCognitiveReviewsAsync(
+        db,
+        OWNER_ID,
+        async () => {
+          throw new Error("must_not_retry_quarantined_review");
+        },
+      )).toEqual({ processed: 0, skipped: 0 });
     } finally {
+      vi.useRealTimers();
       db.close();
     }
   });

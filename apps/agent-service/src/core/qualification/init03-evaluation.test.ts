@@ -812,6 +812,12 @@ describe("INIT-03 evaluation input isolation", () => {
         });
       }
       expect(listOpenCognitiveItemReviewRequests(db, OWNER_ID)).toHaveLength(1);
+      vi.setSystemTime(
+        new Date(
+          FIXTURE_NOW.getTime() +
+            (OPEN_COGNITIVE_ITEM_CONSIDERATION_REVIEW_THRESHOLD - 1) * 86_400_001,
+        ),
+      );
       expect(processPendingOpenCognitiveReviews(db, OWNER_ID)).toEqual({
         processed: 1,
         skipped: 0,

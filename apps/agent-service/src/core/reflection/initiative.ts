@@ -210,10 +210,9 @@ function safeReflectionFallback(): OpenCognitiveReviewProposal {
 async function modelReflectionAdjudicator(
   db: DatabaseSync,
   item: OpenCognitiveItemRecord,
-): Promise<OpenCognitiveReviewProposal> {
+): Promise<OpenCognitiveReviewProposal | null> {
   if (!env.mistralApiKey) return safeReflectionFallback();
-  try {
-    const response = await completeChat(
+  const response = await completeChat(
       [
         {
           role: "system",
@@ -253,11 +252,8 @@ async function modelReflectionAdjudicator(
         ownerId: item.ownerId,
         attentionDb: db,
       },
-    );
-    return parseReflectionReviewResponse(response.text) ?? safeReflectionFallback();
-  } catch {
-    return safeReflectionFallback();
-  }
+  );
+  return parseReflectionReviewResponse(response.text);
 }
 
 /**
@@ -365,19 +361,17 @@ export async function processPendingOpenCognitiveReviewsAsync(
         continue;
       }
       let requested: OpenCognitiveReviewProposal | null;
-      let adjudicatorFailed = false;
       try {
         requested = await adjudicator(db, item);
       } catch {
-        requested = safeReflectionFallback();
-        adjudicatorFailed = true;
+        recordOpenCognitiveReviewDisposition(db, item.id, "adjudicator_failure");
+        skipped += 1;
+        continue;
       }
       if (!requested) {
-        requested = safeReflectionFallback();
-        adjudicatorFailed = true;
-      }
-      if (adjudicatorFailed) {
-        recordOpenCognitiveReviewDisposition(db, item.id, "adjudicator_failure");
+        recordOpenCognitiveReviewDisposition(db, item.id, "adjudicator_unprocessable");
+        skipped += 1;
+        continue;
       }
       try {
         transitionOpenCognitiveItem(db, {

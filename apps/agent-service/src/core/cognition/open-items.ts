@@ -838,9 +838,16 @@ function decideContinuityGenerationOrder(
       generation_order?: number;
     } | undefined;
   const maximumOrder = Math.max(0, Number(maximum?.generation_order ?? 0));
+  const dispatchCounter = db
+    .prepare(`SELECT next_seq FROM attention_dispatch_counter WHERE id = 1`)
+    .get() as { next_seq?: number } | undefined;
+  const maximumAcceptedDispatchOrder = Math.max(
+    0,
+    Number(dispatchCounter?.next_seq ?? 1) - 1,
+  );
   const generationOrder = validated.origin === "cognition"
     ? validated.generationOrder
-    : maximumOrder + 1;
+    : Math.max(maximumOrder, maximumAcceptedDispatchOrder) + 1;
   if (!Number.isSafeInteger(generationOrder) || generationOrder <= 0) {
     rejectMaterialization("oci_generation_order_invalid");
   }
@@ -1241,6 +1248,7 @@ export const OPEN_COGNITIVE_REVIEW_DUE_COUNT_SQL = `
     ) raw
     JOIN open_cognitive_item_attention a ON a.item_id = raw.id
     WHERE /* REVIEW_VISIT */ a.review_requested_at IS NOT NULL
+      AND (julianday(a.review_requested_at) IS NULL OR a.review_requested_at <= ?)
     LIMIT 9
   )`;
 
@@ -1248,10 +1256,11 @@ export const OPEN_COGNITIVE_REVIEW_DUE_COUNT_SQL = `
 export function countOpenCognitiveItemReviewDue(
   db: DatabaseSync,
   ownerId: string,
+  now = new Date(),
 ): number {
   const row = db
     .prepare(OPEN_COGNITIVE_REVIEW_DUE_COUNT_SQL)
-    .get(ownerId) as { count?: number } | undefined;
+    .get(ownerId, now.toISOString()) as { count?: number } | undefined;
   return Number(row?.count ?? 0);
 }
 

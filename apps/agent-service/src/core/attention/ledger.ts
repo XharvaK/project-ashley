@@ -445,7 +445,17 @@ export function tryAdmitRequest(
     const seqRow = db
       .prepare(`SELECT next_seq FROM attention_dispatch_counter WHERE id = 1`)
       .get();
-    const seq = isRow(seqRow) ? Number(seqRow.next_seq) : 1;
+    const counterSequence = isRow(seqRow) ? Number(seqRow.next_seq) : 1;
+    const ociSequenceRow = db
+      .prepare(
+        `SELECT COALESCE(MAX(generation_order), 0) AS generation_order
+         FROM open_cognitive_items`,
+      )
+      .get();
+    const maximumOciSequence = isRow(ociSequenceRow)
+      ? Number(ociSequenceRow.generation_order ?? 0)
+      : 0;
+    const seq = Math.max(counterSequence, maximumOciSequence + 1);
     db.prepare(
       `UPDATE attention_dispatch_counter SET next_seq = ? WHERE id = 1`,
     ).run(seq + 1);

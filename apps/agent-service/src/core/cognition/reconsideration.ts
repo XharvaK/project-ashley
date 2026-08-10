@@ -24,6 +24,11 @@ export const OPEN_COGNITIVE_ITEM_CONSIDERATION_REVIEW_THRESHOLD = 3;
 const MAX_REVIEW_REQUESTS = 8;
 const REVIEW_RAW_PAGE_SIZE = 32;
 const REVIEW_MAX_RAW_PAGES = 4;
+export const OPEN_COGNITIVE_REVIEW_MAX_ATTEMPTS = 3;
+export const OPEN_COGNITIVE_REVIEW_RETRY_DELAYS_MS = [
+  15 * 60_000,
+  60 * 60_000,
+] as const;
 const MAX_RESOLUTION_EVIDENCE_REFS = 4;
 
 export type OpenCognitiveItemDecisionResult = {
@@ -241,6 +246,7 @@ export function claimOpenCognitiveItemReviewRequests(
   db: DatabaseSync,
   ownerId: string,
   limit = MAX_REVIEW_REQUESTS,
+  now = new Date(),
 ): OpenCognitiveItemRecord[] {
   const boundedLimit = Math.max(1, Math.min(MAX_REVIEW_REQUESTS, limit));
   const row = db
@@ -254,6 +260,7 @@ export function claimOpenCognitiveItemReviewRequests(
   let nextBeforeItemId = beforeItemId;
   let wrapped = false;
   let pages = 0;
+  const nowMs = now.getTime();
   const requests: OpenCognitiveItemRecord[] = [];
   while (pages < REVIEW_MAX_RAW_PAGES && requests.length < boundedLimit) {
     const raw = listOpenCognitiveItems(db, ownerId, {
@@ -276,7 +283,9 @@ export function claimOpenCognitiveItemReviewRequests(
     for (const item of raw) {
       scanBeforeItemId = item.id;
       nextBeforeItemId = item.id;
-      if (item.attention?.reviewRequestedAt != null) {
+      const requestedAt = item.attention?.reviewRequestedAt;
+      const requestedAtMs = requestedAt == null ? Number.POSITIVE_INFINITY : Date.parse(requestedAt);
+      if (requestedAt != null && (!Number.isFinite(requestedAtMs) || requestedAtMs <= nowMs)) {
         requests.push(item);
         if (requests.length >= boundedLimit) break;
       }
@@ -300,6 +309,11 @@ export type OpenCognitiveReviewDisposition =
   | "adjudicator_failure"
   | "adjudicator_unprocessable";
 
+/**
+ * Permanent/currently-invalid work is quarantined immediately. Transient
+ * adjudicator work receives two host-owned retry delays, then is quarantined.
+ * This changes only Attention review state; the OCI remains semantically OPEN.
+ */
 export function recordOpenCognitiveReviewDisposition(
   db: DatabaseSync,
   itemId: number,
@@ -307,14 +321,33 @@ export function recordOpenCognitiveReviewDisposition(
   now = new Date(),
 ): void {
   const nowIso = now.toISOString();
+  const current = db.prepare(
+    `SELECT review_attempt_count
+     FROM open_cognitive_item_attention WHERE item_id = ?`,
+  ).get(itemId) as { review_attempt_count?: number } | undefined;
+  if (!current) return;
+  const nextAttempt = Math.max(0, Number(current.review_attempt_count ?? 0)) + 1;
+  const transient =
+    disposition === "adjudicator_failure" ||
+    disposition === "adjudicator_unprocessable";
+  const retryDelay = transient && nextAttempt < OPEN_COGNITIVE_REVIEW_MAX_ATTEMPTS
+    ? OPEN_COGNITIVE_REVIEW_RETRY_DELAYS_MS[nextAttempt - 1]
+    : undefined;
+  const nextEligibleAt = retryDelay == null
+    ? null
+    : new Date(now.getTime() + retryDelay).toISOString();
+  const outcome = retryDelay == null
+    ? `reflection_quarantined:${disposition}`
+    : `reflection_retry:${disposition}`;
   db.prepare(
     `UPDATE open_cognitive_item_attention
-     SET review_attempt_count = review_attempt_count + 1,
+     SET review_attempt_count = ?,
          review_last_disposition = ?,
          last_outcome_code = ?,
+         review_requested_at = ?,
          updated_at = ?
      WHERE item_id = ?`,
-  ).run(disposition, `reflection_skipped:${disposition}`, nowIso, itemId);
+  ).run(nextAttempt, disposition, outcome, nextEligibleAt, nowIso, itemId);
 }
 
 function currentEvidenceRef(
