@@ -1110,11 +1110,14 @@ export function countOpenCognitiveItemReviewDue(
 ): number {
   const row = db
     .prepare(
-      `SELECT COUNT(*) AS count
-       FROM open_cognitive_items o
-       JOIN open_cognitive_item_attention a ON a.item_id = o.id
-       WHERE o.owner_id = ? AND o.status = 'OPEN'
-         AND a.review_requested_at IS NOT NULL`,
+      `SELECT COUNT(*) AS count FROM (
+         SELECT a.item_id
+         FROM open_cognitive_item_attention a INDEXED BY idx_open_cognitive_item_attention_review_due
+         JOIN open_cognitive_items o ON o.id = a.item_id
+         WHERE a.review_requested_at IS NOT NULL
+           AND o.owner_id = ? AND o.status = 'OPEN'
+         LIMIT 9
+       )`,
     )
     .get(ownerId) as { count?: number } | undefined;
   return Number(row?.count ?? 0);

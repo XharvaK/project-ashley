@@ -1545,6 +1545,17 @@ export function createServer(
     }
   });
 
+  app.get("/initiative/operational-status", (req, res) => {
+    try {
+      const ownerId = String(req.query.owner_id ?? "");
+      requireOwner(ownerId || undefined);
+      res.json(manager.core.getProactiveOperationalStatus(ownerId));
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
   app.get("/initiative/urgent", (req, res) => {
     try {
       const ownerId = String(req.query.owner_id ?? "");

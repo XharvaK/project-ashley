@@ -33,6 +33,16 @@ describe("initiative status authorization", () => {
             unavailableByReason: {},
           },
         }),
+        getProactiveOperationalStatus: () => ({
+          enabled: true,
+          paused: false,
+          sentToday: 0,
+          maxPerDay: 10,
+          lastSentAt: null,
+          lastUserMessageAt: null,
+          minIdleHours: 2,
+          lastDiagnostic: null,
+        }),
       },
     } as unknown as AgentManager;
 
@@ -50,6 +60,14 @@ describe("initiative status authorization", () => {
       expect(await ownerResponse.json()).toMatchObject({
         cognitiveContinuity: { openCount: 0 },
       });
+
+      const operationalResponse = await fetch(
+        `http://127.0.0.1:${address.port}/initiative/operational-status?owner_id=doc`,
+      );
+      expect(operationalResponse.status).toBe(200);
+      const operational = await operationalResponse.json();
+      expect(operational).toMatchObject({ paused: false });
+      expect(operational.cognitiveContinuity).toBeUndefined();
 
       const nonOwnerResponse = await fetch(
         `http://127.0.0.1:${address.port}/initiative/status?owner_id=other`,

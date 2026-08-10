@@ -8,6 +8,7 @@ import {
   checkHealth,
   commitInitiative,
   initiativeStatus,
+  initiativeOperationalStatus,
   tickInitiative,
   urgentInitiativeStatus,
 } from "../agent-client.js";
@@ -23,6 +24,28 @@ import {
 let timer: ReturnType<typeof setTimeout> | null = null;
 let urgentTimer: ReturnType<typeof setInterval> | null = null;
 let tickRunning = false;
+
+export type ProactiveSchedulerPreflightDependencies = {
+  checkHealth: typeof checkHealth;
+  initiativeOperationalStatus: typeof initiativeOperationalStatus;
+};
+
+export type ProactiveSchedulerPreflightResult =
+  | { ok: false; reason: "agent_unhealthy" | "paused" }
+  | { ok: true; status: Awaited<ReturnType<typeof initiativeOperationalStatus>> };
+
+export async function runProactiveSchedulerPreflight(
+  dependencies: ProactiveSchedulerPreflightDependencies = {
+    checkHealth,
+    initiativeOperationalStatus,
+  },
+): Promise<ProactiveSchedulerPreflightResult> {
+  const healthy = await dependencies.checkHealth();
+  if (!healthy) return { ok: false, reason: "agent_unhealthy" };
+  const status = await dependencies.initiativeOperationalStatus();
+  if (status.paused) return { ok: false, reason: "paused" };
+  return { ok: true, status };
+}
 
 export function startProactiveScheduler(client: Client): void {
   if (!config.proactiveEnabled) {
@@ -49,15 +72,9 @@ export function startProactiveScheduler(client: Client): void {
     if (tickRunning) return;
     tickRunning = true;
     try {
-      const healthy = await checkHealth();
-      if (!healthy) {
-        console.log("[discord-bot] proactive skip: agent_unhealthy");
-        return;
-      }
-
-      const status = await initiativeStatus();
-      if (status.paused) {
-        console.log("[discord-bot] proactive skip: paused");
+      const preflight = await runProactiveSchedulerPreflight();
+      if (!preflight.ok) {
+        console.log(`[discord-bot] proactive skip: ${preflight.reason}`);
         return;
       }
 

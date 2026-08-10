@@ -578,6 +578,29 @@ export async function initiativeStatus() {
   }>(`/initiative/status?${q}`);
 }
 
+export type InitiativeOperationalStatus = {
+  enabled: boolean;
+  paused: boolean;
+  sentToday: number;
+  maxPerDay: number;
+  lastSentAt: string | null;
+  lastUserMessageAt: string | null;
+  minIdleHours: number;
+  lastDiagnostic: {
+    at: string;
+    stage: string;
+    code: string;
+  } | null;
+};
+
+/** Bounded scheduler preflight. Rich OCI diagnostics stay on initiativeStatus. */
+export async function initiativeOperationalStatus() {
+  const q = new URLSearchParams({ owner_id: config.ownerId });
+  return agentFetch<InitiativeOperationalStatus>(
+    `/initiative/operational-status?${q}`,
+  );
+}
+
 export async function urgentInitiativeStatus() {
   const q = new URLSearchParams({ owner_id: config.ownerId });
   return agentFetch<{ urgent: boolean }>(`/initiative/urgent?${q.toString()}`);

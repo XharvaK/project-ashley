@@ -18,6 +18,47 @@ export type OpenCognitiveWakeSelection = {
   wrapped: boolean;
 };
 
+export type SQLiteQueryPlanRow = {
+  id: number;
+  parent: number;
+  notused: number;
+  detail: string;
+};
+
+export function explainOpenCognitiveWakeQuery(
+  db: DatabaseSync,
+  ownerId: string,
+  afterId: number,
+  availableAt: string,
+  limit = OPEN_COGNITIVE_WAKE_PAGE_SIZE,
+): SQLiteQueryPlanRow[] {
+  return db.prepare(
+    `EXPLAIN QUERY PLAN
+     SELECT o.id
+     FROM open_cognitive_items o
+     LEFT JOIN open_cognitive_item_attention a ON a.item_id = o.id
+     WHERE o.owner_id = ? AND o.status = 'OPEN' AND o.id > ?
+       AND (a.defer_until IS NULL OR a.defer_until <= ?)
+     ORDER BY o.id ASC LIMIT ?`,
+  ).all(ownerId, Math.max(0, afterId), availableAt, Math.max(1, limit)) as SQLiteQueryPlanRow[];
+}
+
+export function explainOpenCognitiveReviewDueQuery(
+  db: DatabaseSync,
+  ownerId: string,
+  limit = 9,
+): SQLiteQueryPlanRow[] {
+  return db.prepare(
+    `EXPLAIN QUERY PLAN
+     SELECT a.item_id
+     FROM open_cognitive_item_attention a INDEXED BY idx_open_cognitive_item_attention_review_due
+     JOIN open_cognitive_items o ON o.id = a.item_id
+     WHERE a.review_requested_at IS NOT NULL
+       AND o.owner_id = ? AND o.status = 'OPEN'
+     LIMIT ?`,
+  ).all(ownerId, Math.max(1, limit)) as SQLiteQueryPlanRow[];
+}
+
 export function selectOpenCognitiveItemsForWake(
   db: DatabaseSync,
   ownerId: string,

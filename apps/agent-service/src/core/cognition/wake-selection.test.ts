@@ -7,9 +7,14 @@ import {
 } from "../rollout/capabilities.js";
 import {
   materializeOpenCognitiveItem,
+  countOpenCognitiveItemReviewDue,
   type OpenCognitiveItemRecord,
 } from "./open-items.js";
-import { selectOpenCognitiveItemsForWake } from "./wake-selection.js";
+import {
+  explainOpenCognitiveReviewDueQuery,
+  explainOpenCognitiveWakeQuery,
+  selectOpenCognitiveItemsForWake,
+} from "./wake-selection.js";
 
 const OWNER_ID = "doc";
 const NOW = new Date("2026-08-10T00:00:00.000Z");
@@ -148,5 +153,60 @@ describe("bounded OCI wake selection", () => {
     ]);
     expect(result.scanned).toBeLessThanOrEqual(128);
     db.close();
+  });
+
+  it("uses the owner/status/id wake index without a whole-population sort", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    activateReading(db);
+    Array.from({ length: 1000 }, (_, index) => seedItem(db, index));
+
+    const wakePlan = explainOpenCognitiveWakeQuery(
+      db,
+      OWNER_ID,
+      0,
+      NOW.toISOString(),
+      32,
+    );
+    expect(wakePlan.some((row) => row.detail.includes("idx_open_cognitive_items_owner_status_id"))).toBe(true);
+    expect(wakePlan.some((row) => row.detail.includes("TEMP B-TREE"))).toBe(false);
+
+    db.prepare(
+      "UPDATE open_cognitive_item_attention SET review_requested_at = ?",
+    ).run(NOW.toISOString());
+    const reviewPlan = explainOpenCognitiveReviewDueQuery(db, OWNER_ID, 9);
+    expect(reviewPlan.some((row) => row.detail.includes("idx_open_cognitive_item_attention_review_due"))).toBe(true);
+    expect(countOpenCognitiveItemReviewDue(db, OWNER_ID)).toBe(9);
+    db.close();
+  });
+
+  it("keeps bounded no-material, blocked, and deferred wakes independent of inventory size", () => {
+    for (const size of [10, 100, 1000]) {
+      const db = openNuclearDb(new DatabaseSync(":memory:"));
+      activateReading(db);
+      const items = Array.from({ length: size }, (_, index) => seedItem(db, index));
+      const plan = explainOpenCognitiveWakeQuery(
+        db,
+        OWNER_ID,
+        0,
+        NOW.toISOString(),
+        32,
+      );
+      expect(plan.some((row) => row.detail.includes("idx_open_cognitive_items_owner_status_id"))).toBe(true);
+      expect(plan.some((row) => row.detail.includes("TEMP B-TREE"))).toBe(false);
+
+      forgetSources(db, items);
+      const blocked = selectOpenCognitiveItemsForWake(db, OWNER_ID, NOW);
+      expect(blocked.items).toHaveLength(0);
+      expect(blocked.scanned).toBeLessThanOrEqual(128);
+
+      db.prepare(
+        `UPDATE open_cognitive_item_attention
+         SET defer_until = ?`,
+      ).run(new Date(NOW.getTime() + 86_400_000).toISOString());
+      const deferred = selectOpenCognitiveItemsForWake(db, OWNER_ID, NOW);
+      expect(deferred.items).toHaveLength(0);
+      expect(deferred.scanned).toBeLessThanOrEqual(128);
+      db.close();
+    }
   });
 });
