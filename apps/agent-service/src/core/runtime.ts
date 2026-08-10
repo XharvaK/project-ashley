@@ -73,10 +73,11 @@ import {
   applyInitiativeLearning,
   attachLearningSnapshot,
   getReflectionOverview,
-  processPendingOpenCognitiveReviews,
+  processPendingOpenCognitiveReviewsAsync,
   processPendingReflectionEvents,
   recordInitiativeReaction,
 } from "./reflection/initiative.js";
+import type { OpenCognitiveReviewAdjudicator } from "./reflection/initiative.js";
 import type { Decision, DecisionKind, Motivation, ReflectionMode } from "./types.js";
 import { attachAffectLicense, getAffectiveState } from "./state/affect.js";
 import { enqueueCognitiveJob, getLatestShadowAnalysis } from "./cognition/jobs.js";
@@ -411,12 +412,14 @@ export class AshleyCore {
   private readonly activeOwners = new Set<string>();
   private readonly sessionId: string | null;
   private readonly sandboxBrokerTransport: BrokerClientTransport | null;
+  private readonly reflectionReviewAdjudicator: OpenCognitiveReviewAdjudicator | undefined;
 
   constructor(
     db?: DatabaseSync,
     options?: {
       reflectionMode?: ReflectionMode;
       sandboxBrokerTransport?: BrokerClientTransport | null;
+      reflectionReviewAdjudicator?: OpenCognitiveReviewAdjudicator;
     },
   ) {
     const priorContinuity = db ? getContinuityFor(db) : undefined;
@@ -430,6 +433,7 @@ export class AshleyCore {
     );
     this.continuity = getContinuityFor(this.db) ?? priorContinuity ?? null;
     this.reflectionMode = options?.reflectionMode ?? env.reflectionMode;
+    this.reflectionReviewAdjudicator = options?.reflectionReviewAdjudicator;
     this.sandboxBrokerTransport =
       options && "sandboxBrokerTransport" in options
         ? options.sandboxBrokerTransport ?? null
@@ -458,7 +462,6 @@ export class AshleyCore {
     }
     recoverStaleRequests(this.db);
     processPendingReflectionEvents(this.db);
-    processPendingOpenCognitiveReviews(this.db);
   }
 
   /** The source-proposal layer can use this only when the operator enables it. */
@@ -1227,7 +1230,11 @@ export class AshleyCore {
       }
     }
 
-    processPendingOpenCognitiveReviews(this.db, ownerId);
+    await processPendingOpenCognitiveReviewsAsync(
+      this.db,
+      ownerId,
+      this.reflectionReviewAdjudicator,
+    );
     const reviewDueCount = countOpenCognitiveItemReviewDue(this.db, ownerId);
     if (reviewDueCount > 0) {
       recordProactiveDiagnostic(

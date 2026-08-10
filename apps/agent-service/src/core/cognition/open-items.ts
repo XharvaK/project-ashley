@@ -64,6 +64,8 @@ export type OpenCognitiveItemAttention = {
   considerationCount: number;
   lastOutcomeCode: string | null;
   reviewRequestedAt: string | null;
+  reviewAttemptCount: number;
+  reviewLastDisposition: string | null;
   updatedAt: string;
 };
 
@@ -133,6 +135,8 @@ type ItemRow = {
   consideration_count: number | null;
   last_outcome_code: string | null;
   review_requested_at: string | null;
+  review_attempt_count: number | null;
+  review_last_disposition: string | null;
   attention_updated_at: string | null;
 };
 
@@ -175,6 +179,8 @@ function mapItem(row: ItemRow): OpenCognitiveItemRecord {
             considerationCount: Number(row.consideration_count ?? 0),
             lastOutcomeCode: row.last_outcome_code ?? null,
             reviewRequestedAt: row.review_requested_at ?? null,
+            reviewAttemptCount: Number(row.review_attempt_count ?? 0),
+            reviewLastDisposition: row.review_last_disposition ?? null,
             updatedAt: row.attention_updated_at ?? row.updated_at,
           },
   };
@@ -188,9 +194,10 @@ export function listOpenCognitiveItems(
     entityUuid?: string;
     limit?: number;
     afterId?: number;
+    beforeId?: number;
     availableAt?: string;
     reviewRequested?: boolean;
-    order?: "updated_desc" | "id_asc";
+    order?: "updated_desc" | "id_asc" | "id_desc";
   } = {},
 ): OpenCognitiveItemRecord[] {
   const clauses = ["o.owner_id = ?"];
@@ -207,6 +214,10 @@ export function listOpenCognitiveItems(
     clauses.push("o.id > ?");
     params.push(Math.max(0, options.afterId));
   }
+  if (options.beforeId != null && Number.isSafeInteger(options.beforeId)) {
+    clauses.push("o.id < ?");
+    params.push(Math.max(0, options.beforeId));
+  }
   if (options.availableAt != null) {
     clauses.push("(a.defer_until IS NULL OR a.defer_until <= ?)");
     params.push(options.availableAt);
@@ -221,6 +232,8 @@ export function listOpenCognitiveItems(
   if (limit != null) params.push(limit);
   const orderClause = options.order === "id_asc"
     ? "ORDER BY o.id ASC"
+    : options.order === "id_desc"
+      ? "ORDER BY o.id DESC"
     : "ORDER BY o.updated_at DESC, o.id DESC";
   const rows = db
     .prepare(
@@ -237,7 +250,8 @@ export function listOpenCognitiveItems(
          o.created_at, o.updated_at, o.resolved_at,
          a.item_id AS attention_item_id, a.delay_class, a.defer_until,
          a.last_considered_at, a.consideration_count, a.last_outcome_code,
-         a.review_requested_at, a.updated_at AS attention_updated_at
+         a.review_requested_at, a.review_attempt_count,
+         a.review_last_disposition, a.updated_at AS attention_updated_at
        FROM open_cognitive_items o
        LEFT JOIN open_cognitive_item_attention a ON a.item_id = o.id
        WHERE ${clauses.join(" AND ")}

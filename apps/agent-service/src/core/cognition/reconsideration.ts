@@ -230,6 +230,74 @@ export function listOpenCognitiveItemReviewRequests(
   });
 }
 
+/**
+ * Claim one bounded review page in durable newest-to-oldest order. The cursor
+ * moves past skipped rows, wraps only after the lower inventory is exhausted,
+ * and survives process restart.
+ */
+export function claimOpenCognitiveItemReviewRequests(
+  db: DatabaseSync,
+  ownerId: string,
+  limit = MAX_REVIEW_REQUESTS,
+): OpenCognitiveItemRecord[] {
+  const boundedLimit = Math.max(1, Math.min(MAX_REVIEW_REQUESTS, limit));
+  const row = db
+    .prepare(
+      `SELECT before_item_id
+       FROM open_cognitive_item_review_cursor WHERE owner_id = ?`,
+    )
+    .get(ownerId) as { before_item_id?: number } | undefined;
+  const beforeItemId = Math.max(0, Number(row?.before_item_id ?? 0));
+  let requests = listOpenCognitiveItems(db, ownerId, {
+    status: "OPEN",
+    reviewRequested: true,
+    beforeId: beforeItemId > 0 ? beforeItemId : undefined,
+    limit: boundedLimit,
+    order: "id_desc",
+  });
+  if (requests.length === 0 && beforeItemId > 0) {
+    requests = listOpenCognitiveItems(db, ownerId, {
+      status: "OPEN",
+      reviewRequested: true,
+      limit: boundedLimit,
+      order: "id_desc",
+    });
+  }
+  const nextBeforeItemId = requests.at(-1)?.id ?? 0;
+  db.prepare(
+    `INSERT INTO open_cognitive_item_review_cursor
+       (owner_id, before_item_id, updated_at)
+     VALUES (?, ?, ?)
+     ON CONFLICT(owner_id) DO UPDATE SET
+       before_item_id = excluded.before_item_id,
+       updated_at = excluded.updated_at`,
+  ).run(ownerId, nextBeforeItemId, new Date().toISOString());
+  return requests;
+}
+
+export type OpenCognitiveReviewDisposition =
+  | "invalid_transition"
+  | "source_unavailable"
+  | "adjudicator_failure"
+  | "adjudicator_unprocessable";
+
+export function recordOpenCognitiveReviewDisposition(
+  db: DatabaseSync,
+  itemId: number,
+  disposition: OpenCognitiveReviewDisposition,
+  now = new Date(),
+): void {
+  const nowIso = now.toISOString();
+  db.prepare(
+    `UPDATE open_cognitive_item_attention
+     SET review_attempt_count = review_attempt_count + 1,
+         review_last_disposition = ?,
+         last_outcome_code = ?,
+         updated_at = ?
+     WHERE item_id = ?`,
+  ).run(disposition, `reflection_skipped:${disposition}`, nowIso, itemId);
+}
+
 function currentEvidenceRef(
   db: DatabaseSync,
   ownerId: string,

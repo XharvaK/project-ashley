@@ -46,6 +46,7 @@ import {
   currentContractId,
 } from "./rollout/capabilities.js";
 import {
+  getOpenCognitiveItem,
   materializeOpenCognitiveItem,
 } from "./cognition/open-items.js";
 import { listOpenCognitiveItemReviewRequests } from "./cognition/reconsideration.js";
@@ -437,11 +438,17 @@ describe("AshleyCore", () => {
     }
   });
 
-  it("consumes one pending OCI review during normal AshleyCore construction", () => {
+  it("consumes one pending OCI review during a normal AshleyCore wake", async () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     const originalMode = env.cognitionMode;
+    const originalEnabled = env.proactiveEnabled;
+    const originalCap = env.proactiveMaxPerDay;
+    const originalIdle = env.proactiveMinIdleHours;
     try {
       env.cognitionMode = "apply";
+      env.proactiveEnabled = true;
+      env.proactiveMaxPerDay = 10;
+      env.proactiveMinIdleHours = 0;
       activateCapabilities(db, ["reading"]);
       const now = new Date().toISOString();
       db.prepare(
@@ -477,19 +484,21 @@ describe("AshleyCore", () => {
       ).run(now, item.id);
       expect(listOpenCognitiveItemReviewRequests(db, "doc")).toHaveLength(1);
 
-      new AshleyCore(db);
+      const core = new AshleyCore(db, {
+        reflectionReviewAdjudicator: async () => ({
+          action: "withdraw",
+          reason: "reflection_runtime_fixture_withdraw",
+        }),
+      });
+      await core.tickProactive("doc");
 
       expect(listOpenCognitiveItemReviewRequests(db, "doc")).toEqual([]);
-      expect(db.prepare(
-        `SELECT delay_class, last_outcome_code, review_requested_at
-         FROM open_cognitive_item_attention WHERE item_id = ?`,
-      ).get(item.id)).toEqual({
-        delay_class: "long",
-        last_outcome_code: "reflection_keep_open",
-        review_requested_at: null,
-      });
+      expect(getOpenCognitiveItem(db, "doc", item.entityUuid)?.status).toBe("WITHDRAWN");
     } finally {
       env.cognitionMode = originalMode;
+      env.proactiveEnabled = originalEnabled;
+      env.proactiveMaxPerDay = originalCap;
+      env.proactiveMinIdleHours = originalIdle;
       db.close();
     }
   });
