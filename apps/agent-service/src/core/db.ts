@@ -66,6 +66,15 @@ export { NUCLEAR_DB_PATH };
 
 export const NUCLEAR_SUPPORTED_VERSION = 24;
 
+export type NuclearMigrationTestFault =
+  | "before_pending"
+  | "after_pending"
+  | "during_ddl"
+  | "after_nuclear_commit"
+  | "during_sidecar_update"
+  | "after_sidecar_update"
+  | "before_finalization";
+
 const SCHEMA = `
 PRAGMA foreign_keys = ON;
 
@@ -1161,6 +1170,7 @@ function migrateNuclearSchemaWithProtocol(input: {
   descriptor?: NuclearMigrationDescriptor;
   targetVersion: number;
   ddl: string;
+  testMigrationFault?: NuclearMigrationTestFault;
   testFailAfterNuclearCommitBeforeContinuityFinalization?: boolean;
 }): void {
   const {
@@ -1169,16 +1179,27 @@ function migrateNuclearSchemaWithProtocol(input: {
     descriptor,
     targetVersion,
     ddl,
+    testMigrationFault,
     testFailAfterNuclearCommitBeforeContinuityFinalization,
   } = input;
   const sidecarEnabled = continuity !== undefined && descriptor !== undefined;
+  if (testMigrationFault === "before_pending") {
+    throw new Error("test_fault_before_pending");
+  }
   if (sidecarEnabled) {
     beginNuclearMigration(continuity, descriptor);
+  }
+  if (testMigrationFault === "after_pending") {
+    throw new Error("test_fault_after_pending");
   }
   let transactionOpened = false;
   try {
     db.exec("BEGIN IMMEDIATE");
     transactionOpened = true;
+    if (testMigrationFault === "during_ddl") {
+      db.exec("CREATE TABLE migration_fault_probe (id INTEGER PRIMARY KEY)");
+      throw new Error("test_fault_during_ddl");
+    }
     if (targetVersion === 24) {
       ensureOpenCognitiveV24Schema(db);
       backfillOpenCognitiveIdentityGenerations(db);
@@ -1203,11 +1224,20 @@ function migrateNuclearSchemaWithProtocol(input: {
     transactionOpened = false;
 
     if (sidecarEnabled) {
+      if (testMigrationFault === "after_nuclear_commit") {
+        throw new Error("test_fault_after_nuclear_commit");
+      }
       markNuclearMigrationCommitted(continuity, descriptor);
       if (testFailAfterNuclearCommitBeforeContinuityFinalization) {
         throw new Error(
           "test_fault_after_nuclear_commit_before_continuity_finalization",
         );
+      }
+      if (testMigrationFault === "after_sidecar_update") {
+        throw new Error("test_fault_after_sidecar_update");
+      }
+      if (testMigrationFault === "before_finalization") {
+        throw new Error("test_fault_before_finalization");
       }
       finalizeNuclearMigration(continuity, descriptor);
     }
@@ -1244,6 +1274,7 @@ export function migrate(
   options: {
     continuity?: DatabaseSync;
     skipContinuityRequirement?: boolean;
+    testMigrationFault?: NuclearMigrationTestFault;
     /** Test-only fault injection after nuclear commit and before sidecar finalization. */
     testFailAfterNuclearCommitBeforeContinuityFinalization?: boolean;
   } = {},
@@ -2451,6 +2482,7 @@ export function migrate(
             }
           : undefined,
       ddl: MIGRATION_23_OPEN_COGNITIVE_ITEMS_DDL,
+      testMigrationFault: options.testMigrationFault,
       testFailAfterNuclearCommitBeforeContinuityFinalization:
         options.testFailAfterNuclearCommitBeforeContinuityFinalization,
     });
@@ -2476,6 +2508,7 @@ export function migrate(
             }
           : undefined,
       ddl: MIGRATION_24_OPEN_COGNITIVE_ITEMS_DDL,
+      testMigrationFault: options.testMigrationFault,
       testFailAfterNuclearCommitBeforeContinuityFinalization:
         options.testFailAfterNuclearCommitBeforeContinuityFinalization,
     });
@@ -2505,6 +2538,8 @@ export type OpenNuclearOptions = {
   continuity?: DatabaseSync;
   /** When true, migrate without opening default continuity path (tests). */
   continuityOptional?: boolean;
+  /** Test-only protocol fault injection. */
+  testMigrationFault?: NuclearMigrationTestFault;
   /** Test-only fault injection after nuclear commit and before sidecar finalization. */
   testFailAfterNuclearCommitBeforeContinuityFinalization?: boolean;
 };
@@ -2535,6 +2570,7 @@ export function openNuclearDb(
     migrate(existing, {
       continuity,
       skipContinuityRequirement: options.continuityOptional && !continuity,
+      testMigrationFault: options.testMigrationFault,
       testFailAfterNuclearCommitBeforeContinuityFinalization:
         options.testFailAfterNuclearCommitBeforeContinuityFinalization,
     });
@@ -2552,6 +2588,7 @@ export function openNuclearDb(
   const db = new DatabaseSync(NUCLEAR_DB_PATH);
   migrate(db, {
     continuity,
+    testMigrationFault: options.testMigrationFault,
     testFailAfterNuclearCommitBeforeContinuityFinalization:
       options.testFailAfterNuclearCommitBeforeContinuityFinalization,
   });
