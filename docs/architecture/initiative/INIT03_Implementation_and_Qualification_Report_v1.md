@@ -1,240 +1,295 @@
-# INIT-03 REMEDIATION ROUND 2 REPORT
+# INIT-03 SOL REMEDIATION ROUND 3 REPORT
 
-VERDICT: PASS for local Round-2 source qualification. Targeted Sol High closure audit is required before acceptance.
-
-This round repaired INIT03-R01 through INIT03-R07 and corrected the non-blocking R08 documentation. The accepted INIT-03 four-layer architecture and the independently closed F01 and F08 boundaries were preserved.
+VERDICT:
+PASS for local source qualification. This is not independent INIT-03 acceptance.
 
 ## BASELINE
 
-starting HEAD: `3f105ace68f14bc0e63d94806964b0800f28f8c4`
+starting HEAD:
+`40892200159c4536cb73379562d4f9d32d80560e`
 
-origin/master: `7d686f4d384da97b1d4d00fb26dedf95b82bbdce`
+origin/master:
+`7d686f4d384da97b1d4d00fb26dedf95b82bbdce`
 
-branch: `master`
+branch:
+`master`
 
-worktree: `AGENTS.md` only, modified and unstaged at start. It was not edited, staged, reverted, or committed.
+worktree:
+`AGENTS.md` only, modified and unstaged. It was not edited, staged, reverted, or committed.
 
-qualification history: initial Luna PASS; first Sol BLOCKED; first remediation PASS; second Sol BLOCKED; second remediation locally source-qualified with the evidence below.
+Audit history: initial Luna PASS; first Sol BLOCKED; first remediation PASS; second Sol BLOCKED; second remediation local PASS; third Sol BLOCKED (Round-2 Sol High); Round-3 remediation local PASS with the evidence below.
 
-Scope remained local only. No Mint, production, Recall mutation, capability-state change, promotion, sandbox activation, provider call, routing change, Discord traffic, deployment, or push occurred.
+Scope remained local. No Mint, production, Recall mutation, capability-state change, promotion, sandbox activation, provider call, routing change, live Discord traffic, deployment, push, rebase, amend, or history rewrite occurred.
 
-## R01 — DISPATCH PROVENANCE
+## R2-01 — DISPATCH PROVENANCE
 
-status: FIXED
+status:
+FIXED
 
-completed dispatch identity: the accepted dispatch carries request id, dispatch sequence, route alias, model alias, resolved model identity, model epoch, host identity, contract id, build identity, owner id, cognitive job id, and the attention ledger identity into worker materialization.
+accepted dispatch provenance:
+Contract id and build identity are captured in `attention_requests` at the accepted running transition, before the provider callback. The durable accepted identity also carries request id, dispatch sequence, route alias, model alias, resolved model identity, model epoch, owner id, and cognitive job id into worker materialization.
 
-global current substitution possible: NO. The worker uses the accepted dispatch identity and does not reread current global model state as historical provenance.
+global build/contract substitution:
+NO
 
-regression: the real worker path dispatches model A at epoch E1, changes global continuity to model B/E2 before materialization, and persists A/E1 provenance. Unchanged A/E1 persistence, stale accepted-result handling, restart, source-capability enforcement, and model-independent database-owned source behavior are covered.
+A/E1/build-A -> global B/E2/build-B probe:
+The real worker accepted build A, changed current global build/contract/model state to B/E2 before materialization, and persisted the accepted A/E1/build-A provenance. Restart reopened the durable accepted ledger identity unchanged.
 
-## R02 — CONTINUITY GENERATIONS
+## R2-02 — GENERATION ORDER
 
-status: FIXED
+status:
+FIXED
 
-semantic identity: host-derived identity for owner, source type, source id, source entity, OCI kind, normalized bounded semantic conclusion, and authoritative source revision. `semanticKeyMaterial` is ignored for durable identity.
+ordering authority:
+A DB-global monotonic order shared by accepted attention dispatches and non-cognition OCI materialization. Dispatch admission advances after the greatest persisted OCI generation. Non-cognition materialization advances after the greatest accepted dispatch or persisted OCI generation.
 
-generation identity: a separate valid continuity generation for contract, build identity, host-derived model identity, and model epoch. The durable uniqueness key combines semantic identity and continuity generation. Successors supersede older generations explicitly.
+established before completion:
+YES. Cognition uses the accepted `dispatch_sequence`, assigned before the provider callback completes.
 
-A/E1 -> B/E2 -> A/E3: PASS. Each valid generation creates one current lineage generation; the old generation cannot regain influence.
+A/E1 -> B/E2 -> A/E3:
+The three accepted generations receive increasing order. A/E3 is the sole current OPEN generation.
 
-build A -> B: PASS. A valid build successor is materialized without redefining semantic meaning.
+late A/E1:
+A late A/E1 result persists as `SUPERSEDED` with `stale_continuity_generation`. It cannot supersede A/E3.
 
-concurrency: PASS. Competing child writers use overlapping SQLite connections and synchronized contention. One current successor is durable; retries of the same generation converge.
+old A/E1 retry:
+The retry converges on the stored A/E1 row and leaves A/E3 as the sole current OPEN generation.
 
-source-revision + model-generation interaction: PASS. Source revision and continuity generation remain separate inputs to successor and stale-influence rules.
+concurrent older/newer:
+PASS. Deterministically synchronized SQLite child writers overlap. The newer writer holds the transaction while the older writer waits, then the older writer commits later without displacing the newer generation.
 
-## R03 — BOUNDED SQL
+zero-current-generation possible:
+NO under the replayed late-arrival, retry, and overlapping-writer cases.
 
-status: FIXED
+## R2-03 — RAW WAKE BOUND
 
-query: wake selection uses owner/status/id cursor-compatible ordering and seeks through the owner-scoped status range. Review-due existence/count uses an indexed bounded query.
+status:
+FIXED
 
-index: `idx_open_cognitive_items_owner_status_id` supports wake selection. `idx_open_cognitive_item_attention_review_due` supports review-due selection. `idx_open_cognitive_items_semantic_generation` supports continuity-generation uniqueness.
+query shape:
+Select owner-scoped `OPEN` OCI ids first. Limit each raw page to 32. Apply Attention, source, capability, and defer eligibility only after the raw bound. Scan at most four pages and project at most eight OCI.
 
-EXPLAIN: PASS. `EXPLAIN QUERY PLAN` uses the owner/status/id index for wake selection and does not report a whole-population `USE TEMP B-TREE FOR ORDER BY`. The review-due plan uses the review index.
+index:
+`idx_open_cognitive_items_owner_status_id`
 
-10 rows visits: bounded at the configured 128-row maximum.
+10 deferred visits:
+10 actual SQLite Attention visits for one raw page.
 
-100 rows visits: bounded at the configured 128-row maximum.
+100 deferred visits:
+32 actual SQLite Attention visits for one raw page.
 
-1000 rows visits: bounded at the configured 128-row maximum. The large fixture is independent of total retained inventory.
+1000 deferred visits:
+32 actual SQLite Attention visits for one raw page.
 
-bounded independent of inventory: YES
+inventory-independent:
+YES
 
-eventual fairness: PASS. Eight blocked newer rows do not prevent the valid ninth row. A valid item after 100 blocked rows is reached with 101 scanned rows. Persistent cursor advancement, wrap, blocked/deferred handling, and more than 128 blocked rows across multiple wakes preserve eventual reachability.
+eventual fairness:
+The durable cursor reaches a valid ninth row after eight blocked rows and reaches a valid row after 100 blocked rows within the 128-row wake bound. Cursor wrap and insertion/deletion cases retain bounded progression.
 
-review-due path: indexed and capped. The scheduler does not enumerate all pending OCI merely to determine whether review work exists.
+## R2-04 — REVIEW QUERY
 
-## R04 — REAL SCHEDULER
+status:
+FIXED
 
-status: FIXED
+owner-scoped access path:
+Select at most 32 owner-scoped `OPEN` OCI ids first. Check Attention review metadata by item primary key only for that bounded raw set. No semantic OCI status is duplicated into Attention.
 
-preflight endpoint: owner-authenticated `GET /initiative/operational-status`.
+index:
+`idx_open_cognitive_items_owner_status_id`, followed by the Attention item primary key.
 
-rich status ordinary wake: NO. Rich `/initiative/status` remains an explicit owner-diagnostics surface. The ordinary Discord scheduler does not call it as preflight.
+10-row cross-owner work:
+10 actual review-row visits.
 
-no-material bounded: PASS across inventory sizes 10, 100, and 1000+.
+100-row cross-owner work:
+32 actual review-row visits.
 
-all-blocked bounded: PASS through the indexed wake selector and bounded review check.
+1000-row cross-owner work:
+32 actual review-row visits.
 
-all-deferred bounded: PASS through the indexed wake selector and bounded review check.
+quadratic behavior:
+NO
 
-review-due bounded: PASS through the indexed review-due path.
+No-due, few-due, many-due, invalid-timestamp, other-owner flood, and OPEN/terminal mixtures are covered. `EXPLAIN QUERY PLAN` uses the owner/status/id index and reports no temporary order sort.
 
-real scheduler regression: the scheduler-facing flow is exercised through the Discord client and operational status endpoint. Direct `tickProactive()` optimization alone is not the proof.
+## R2-05 — REVIEW RETRIES
 
-## R05 — REFLECTION
+status:
+FIXED
 
-status: FIXED
+invalid disposition:
+`invalid_transition` and `source_unavailable` are quarantined immediately. `review_requested_at` is cleared. Attempt count and exact disposition remain durable. The OCI semantic status remains authoritative and is not resolved or withdrawn by processing failure.
 
-normal decision producer: the production async review consumer calls the existing Reflection cognitive owner through the model-backed `modelReflectionAdjudicator`, with bounded grounded state and a deterministic test seam. Reflection output remains advisory. The deterministic OCI transition validator remains final mutation authority.
+retry policy:
+`adjudicator_failure` and `adjudicator_unprocessable` retry after 15 minutes and 60 minutes. Attempt 3 quarantines the request. Retry times are host-owned and persisted in Attention.
 
-KEEP: PASS. A successful KEEP clears/rearms review with bounded delay and cannot hot-loop in the same scheduling cycle. Safe KEEP is also the bounded failure fallback.
+same-eight immediate retry:
+NO
 
-WITHDRAW: PASS. The deterministic validator permits the authorized OCI withdrawal only after source, owner, capability, provenance, relationship, and current-source checks.
+valid ninth:
+Processed on bounded progression after the first eight invalid rows. The second invocation does not reprocess the same invalid eight.
 
-SUPERSEDE: PASS. The deterministic validator permits the authorized OCI supersession transition.
+restart:
+PASS. The review cursor, disposition, attempt count, next-eligible time, and quarantine state survive close/reopen.
 
-invalid external resolution: PASS. Unsupported or ungrounded resolution remains rejected.
+hot-loop:
+NO
 
-default unconditional KEEP: NO. KEEP is not the effective unconditional production adjudication. It is a valid Reflection outcome and a safe model-failure fallback.
+Queues containing more than 8 rows and 100 invalid rows converge. Mixed transient, permanent, terminal, forgotten/unavailable, and cross-owner requests remain isolated. Successful KEEP, WITHDRAW, and SUPERSEDE retain their validated behavior.
 
-invalid-first-eight fairness: PASS. Eight newest invalid/unprocessable requests record dispositions and cannot permanently monopolize intake; the valid ninth request is eventually processed. Intake fairness survives restart and queues larger than the intake cap.
+## R2-06 — QUALIFICATION
 
-hot-loop resistance: PASS. Review cursor, attempt/disposition state, and bounded KEEP rearm prevent immediate repeated processing.
+status:
+FIXED
 
-Reflection cannot speak, send messages, mutate mutual commitment truth, rewrite Identity or Recall, promote capability, turn shadow live, or invent evidence.
+dispatch mismatch test:
+STRONG. Real attention admission, provider callback seam, worker materialization, global continuity change, durable ledger, and SQLite reopen.
 
-## R06 — MIGRATION CONTENT
+late stale generation test:
+STRONG. Real accepted dispatch identities and real OCI materialization.
 
-status: FIXED
+old retry test:
+STRONG. Real durable generation lookup and idempotent retry.
 
-version-only trust: NO. `PRAGMA user_version` is not sufficient for recovery or finalization.
+true ordered concurrency test:
+STRONG. Overlapping child processes and competing SQLite writers with deterministic synchronization.
 
-schema validator: `validateNuclearSchemaContent` checks the full v23/v24 contract: required tables, columns, nullability/defaults, primary keys, inspectable constraint fragments, exact required index columns/uniqueness/partial definitions, and migration-specific cursor/performance objects.
+deferred row-visit test:
+STRONG. Production SQL shape with real SQLite UDF row-visit instrumentation at 10, 100, and 1000 rows.
 
-missing-column probe: refused with the pending record retained.
+cross-owner review test:
+STRONG. Production count SQL with real SQLite row-visit instrumentation and paired cross-owner inventories at 10, 100, and 1000 rows.
 
-missing-table probe: refused with the pending record retained.
+real scheduler/database test:
+STRONG. Discord scheduler cycle -> local HTTP health and operational preflight -> real `/initiative/tick` -> `AshleyCore.tickProactive` -> real SQLite wake and review queries. Actual 1000-row database fixtures cover no material, all deferred, review due, and large blocked inventory. The observed bounds are at most 32 review raw rows, 128 wake raw rows, four wake pages, and one review-count query. No live Discord or provider call occurs.
 
-missing-index probe: refused with the pending record retained.
+invalid review retry test:
+STRONG. Eight invalid rows, valid ninth, restart, exact attempt/disposition assertions, delayed transient retries, attempt-3 quarantine, 100 invalid rows, and mixed isolation.
 
-incorrect-index probe: refused with the pending record retained.
+test quality:
+All critical Round-3 reproduction tests are STRONG. No critical test is WEAK or VACUOUS.
 
-restart: repeated restart against incomplete target content remains fail-closed. Valid source content rolls back the recognized pending intent. Valid target content finalizes it.
+## CLOSED REGRESSIONS
 
-failure injection: deterministic tests cover before pending, after pending, during DDL, after nuclear commit, during sidecar update through a real SQLite trigger, after sidecar update, and before finalization. Each interrupted state is inspected and recovered without version-only trust.
+R06 migration content recovery:
+PASS. Schema v25 extends the recognized pending-migration protocol. The 57-test closed-regression bundle includes v25 failure phases, v23/v24 compatibility, schema-content recovery, sidecar failures, restart, and hostile migration checks.
 
-## R07 — QUALIFICATION TRUTH
+F01 semantic identity:
+PASS. Model-supplied `semanticKeyMaterial` has zero durable identity authority.
 
-status: FIXED
+F08 diagnostic truth:
+PASS. Capability-blocked OCI is not reported as diagnostic-available.
 
-true concurrent writer test: PASS. Overlapping competing SQLite child writers contend on the same semantic generation.
+## NON-INTERFERENCE
 
-real worker mismatch test: PASS. The worker path preserves the producing dispatch identity when global continuity changes before persistence.
+Source authority:
+PASS. Source records and deterministic OCI transitions retain semantic authority.
 
-real scheduler test: PASS. Discord scheduler preflight uses bounded operational status.
+OCI ontology:
+PASS. Kinds remain `question`, `revisit`, `concern`. Statuses remain `OPEN`, `RESOLVED`, `WITHDRAWN`, `SUPERSEDED`. Delay and review disposition remain Attention metadata.
 
-query-plan/row-visit test: PASS. EXPLAIN and deterministic scan instrumentation assert indexed bounded work at small and large inventory sizes.
+Thought floor:
+PASS. The proactive material floor remains 25.
 
-Reflection fairness test: PASS. The real runtime caller processes non-KEEP decisions and cannot starve the valid ninth request behind invalid intake.
+Relationship:
+PASS. No commitment, tension, consent, withdrawal, or relationship truth authority changed.
 
-migration incomplete-schema test: PASS. Correct target version with missing or incorrect schema content is refused and remains recoverable.
+Forget:
+PASS. Forgotten/unavailable source review is quarantined operationally and cannot regain semantic influence.
 
-## REGRESSION
+Shadow/live:
+PASS. No shadow evidence becomes live through time, retry, or local processing.
 
-F01 remains closed: PASS. Model-provided `semanticKeyMaterial` is non-authoritative; the host derives durable semantic identity.
+Attention:
+PASS. Attention remains operational scheduling and review metadata, not OCI semantic authority.
 
-F08 remains closed: PASS. Capability diagnostics remain truthful and distinguish unavailable capability state from available source classes.
+Reservation/delivery:
+PASS. Existing proactive reservation and delivery boundaries remain intact.
 
-source authority: PASS
-
-OCI kinds exactly: `question`, `revisit`, `concern`
-
-OCI statuses exactly: `OPEN`, `RESOLVED`, `WITHDRAWN`, `SUPERSEDED`
-
-Thought floor: 25; PASS
-
-relationship: PASS
-
-withdrawal precedence: PASS
-
-tension conservative: PASS
-
-forget/redaction: PASS
-
-shadow/live: PASS
-
-Attention separation: PASS
-
-reservation/delivery: PASS
-
-privacy: PASS
-
-The qualification inventory classifies OCI review and wake cursors as control-plane scheduling state, not semantic or live state.
+Privacy:
+PASS. No raw source text, raw chain-of-thought, provider reasoning, prompts, tokens, secrets, or sensitive key material were added to OCI persistence or diagnostics.
 
 ## FULL QUALIFICATION
 
-focused: PASS. 18 agent test files, 122 tests passed. Real Discord scheduler tests: 2 passed.
+focused:
+PASS. Exact blocker suite: 7 agent files and 64 tests. Discord suite: 74 tests, including the real scheduler/database integration. Closed-regression bundle: 10 files and 57 tests.
 
-`npm test`: PASS, exit code 0; 117 test files, 843 passed, 1 skipped (844 tests total).
+npm test:
+PASS. 118 test files passed. 864 tests passed. 1 platform-specific test skipped. Exit code 0.
 
-`npm run phase0:offline`: PASS, exit code 0; agent build passed, offline Vitest reported 117 files, 843 passed, 1 skipped (844 tests total), and the script ended with `OK offline tier`.
+phase0:offline:
+PASS. Agent build passed. Offline Vitest passed 118 files and 864 tests, with 1 skip. The script ended with `OK offline tier`.
 
-external network: 0 attempts in the offline tier; no live provider calls.
+external network:
+0. The offline guard emitted no `offline_external_network_blocked` event and the guarded command exited 0.
 
-agent build: PASS, `npm run build:agent`.
+agent build:
+PASS. `npm run build:agent`.
 
-discord build: PASS, `npm run build:discord`.
+discord build:
+PASS. `npm run build:discord`.
 
-`git diff --check`: PASS after the documentation changes.
+git diff --check:
+PASS after the documentation changes.
 
 ## DOCUMENTATION
 
-contract corrected: YES. The contract removes normative authority from `semanticKeyMaterial`, distinguishes rich owner status from ordinary scheduler operational status, records dispatch-bound provenance, separates semantic identity from continuity generation, records indexed SQL bounds, records Reflection adjudication/fairness, and records schema-content recovery.
+contract:
+Corrected to schema v25, accepted dispatch contract/build provenance, pre-completion monotonic generation order, raw-first wake bounds, owner-scoped review work, retry/quarantine semantics, exact row-work evidence, and real scheduler/database integration.
 
-historical audit trail preserved: YES. The report states initial Luna PASS, first Sol BLOCKED, first remediation PASS, second Sol BLOCKED, and this second remediation's new evidence. The original baseline remains documented as historical evidence.
+report:
+Corrected to Sol Remediation Round 3 evidence. It does not claim independent final acceptance.
 
-R08 documentation-only correction: YES, after source qualification.
+audit history preserved:
+YES
 
 ## LOCAL COMMITS
 
-Round-2 remediation commits only:
+Round-3 commits only:
 
-1. `7be85d7` — `fix(cognition): bind OCI provenance to accepted dispatch`
-2. `a0b705a` — `fix(cognition): version OCI continuity generations`
-3. `3843364` — `fix(initiative): enforce bounded indexed wake queries`
-4. `3dfdcf9` — `fix(cognition): adjudicate OCI reviews through Reflection`
-5. `2530322` — `fix(db): validate schema content during migration recovery`
-6. `697b73c` — `test(qualification): cover INIT-03 remediation round 2`
-7. `372967d` — `test(db): cover migration fault recovery phases`
-8. Documentation publication commit: this corrected contract and report.
+1. `a1fb760` — `fix(db): add INIT-03 round 3 ordering metadata`
+2. `5099ede` — `fix(cognition): preserve accepted dispatch provenance`
+3. `8abdcf9` — `fix(cognition): order OCI continuity generations monotonically`
+4. `45541fb` — `fix(cognition): bound raw OCI wake retrieval`
+5. `a5dd91a` — `fix(cognition): index OCI review work by owner`
+6. `b93c064` — `fix(cognition): bound failed OCI review retries`
+7. `ea6a491` — `test(qualification): cover final INIT-03 blockers`
+8. `1f6bb21` — `test(qualification): align schema and clock fixtures`
+9. Documentation publication commit: this contract/report commit.
 
 ## PRODUCTION
 
-Mint: UNTOUCHED
+Mint:
+UNTOUCHED
 
-Recall: UNTOUCHED
+Recall:
+UNTOUCHED
 
-sandbox: UNTOUCHED
+sandbox:
+UNTOUCHED
 
-providers: NO LIVE CALLS
+providers:
+NO LIVE CALLS
 
-Discord: NO LIVE TRAFFIC
+Discord:
+NO LIVE TRAFFIC
 
-push: NO
+push:
+NO
 
-deploy: NO
+deploy:
+NO
 
 ## WORKTREE
 
-AGENTS.md: UNCHANGED / UNSTAGED relative to the starting state.
+AGENTS.md:
+UNCHANGED / UNSTAGED relative to the starting state.
 
-other: final state must contain only the corrected contract/report commit and no internal plan artifact. Final status inspection is required before shutdown.
+other:
+After the documentation commit, no Round-3 path remains modified or untracked. Final status inspection is required before shutdown.
 
 ## HUMAN NEXT GATE
 
-TARGETED SOL HIGH CLOSURE AUDIT REQUIRED BEFORE ACCEPTANCE.
+FRESH INDEPENDENT SOL HIGH CLOSURE AUDIT REQUIRED BEFORE INIT-03 ACCEPTANCE.
 
 STOP.
