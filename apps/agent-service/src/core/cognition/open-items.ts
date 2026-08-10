@@ -501,11 +501,13 @@ function validateCapability(
     rejectMaterialization("oci_source_capability_unknown");
   }
   const capability = sourceCapability as CapabilityName;
-  if (proposal.contractId.trim() !== currentContractId()) {
-    rejectMaterialization("oci_contract_mismatch");
-  }
-  if (proposal.buildIdentity.trim() !== currentBuildIdentity()) {
-    rejectMaterialization("oci_build_mismatch");
+  if (proposal.origin !== "cognition") {
+    if (proposal.contractId.trim() !== currentContractId()) {
+      rejectMaterialization("oci_contract_mismatch");
+    }
+    if (proposal.buildIdentity.trim() !== currentBuildIdentity()) {
+      rejectMaterialization("oci_build_mismatch");
+    }
   }
   if (
     !Number.isInteger(proposal.modelEpoch) ||
@@ -532,6 +534,8 @@ function validateAcceptedDispatchIdentity(
   identity: AcceptedDispatchIdentity | undefined,
   modelIdentity: string,
   modelEpoch: number,
+  contractId: string,
+  buildIdentity: string,
 ): void {
   if (!identity) rejectMaterialization("oci_dispatch_identity_missing");
   if (
@@ -550,7 +554,8 @@ function validateAcceptedDispatchIdentity(
   const row = db
     .prepare(
       `SELECT owner_id, cognitive_job_id, route_alias, model_alias,
-              resolved_model_id, model_epoch, dispatch_sequence, state, outcome
+              resolved_model_id, model_epoch, dispatch_sequence, state, outcome,
+              accepted_contract_id, accepted_build_identity
        FROM attention_requests WHERE id = ?`,
     )
     .get(identity.requestId) as
@@ -564,6 +569,8 @@ function validateAcceptedDispatchIdentity(
         dispatch_sequence?: number | null;
         state?: string;
         outcome?: string | null;
+        accepted_contract_id?: string | null;
+        accepted_build_identity?: string | null;
       }
     | undefined;
   if (!row || row.owner_id !== ownerId) {
@@ -586,6 +593,16 @@ function validateAcceptedDispatchIdentity(
     Number(row.cognitive_job_id ?? 0) !== identity.cognitiveJobId
   ) {
     rejectMaterialization("oci_dispatch_job_mismatch");
+  }
+  if (
+    identity.contractId.trim() === "" ||
+    identity.buildIdentity.trim() === "" ||
+    identity.contractId !== contractId ||
+    identity.buildIdentity !== buildIdentity ||
+    row.accepted_contract_id !== identity.contractId ||
+    row.accepted_build_identity !== identity.buildIdentity
+  ) {
+    rejectMaterialization("oci_dispatch_provenance_mismatch");
   }
   if (
     modelContinuityIdentity(identity.modelAlias, identity.resolvedModelId) !==
@@ -703,6 +720,8 @@ function validateProposal(
       proposal.dispatchIdentity,
       modelIdentity,
       proposal.modelEpoch,
+      proposal.contractId.trim(),
+      proposal.buildIdentity.trim(),
     );
   } else if (modelIdentity !== "" || proposal.modelEpoch !== 0) {
     rejectMaterialization("oci_model_continuity_unexpected");

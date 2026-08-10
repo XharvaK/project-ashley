@@ -481,13 +481,23 @@ export function markRunning(
   db: DatabaseSync,
   requestId: number,
   clock: AttentionClock = realClock,
+  acceptedProvenance?: {
+    contractId: string;
+    buildIdentity: string;
+  },
 ): void {
   const started = new Date(clock.nowMs()).toISOString();
   db.prepare(
     `UPDATE attention_requests
-     SET state = 'running', dispatch_started_at = ?
+     SET state = 'running', dispatch_started_at = ?,
+         accepted_contract_id = ?, accepted_build_identity = ?
      WHERE id = ? AND state = 'reserved'`,
-  ).run(started, requestId);
+  ).run(
+    started,
+    acceptedProvenance?.contractId ?? null,
+    acceptedProvenance?.buildIdentity ?? null,
+    requestId,
+  );
 }
 
 export function completeRequest(

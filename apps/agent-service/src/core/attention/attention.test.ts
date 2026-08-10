@@ -37,14 +37,87 @@ import {
   recordLiveShadowEvent,
 } from "../rollout/capabilities.js";
 import { DECLARED_CONTRACT_ID } from "./contract-material.js";
+import { currentContractId } from "../rollout/capabilities.js";
 
 const originalKey = env.mistralApiKey;
 const originalTpm = env.mistralTokensPerMinute;
+const originalGroqKey = env.groqApiKey;
+const originalBuild = env.ashleyReleaseId;
 
 afterEach(() => {
   env.mistralApiKey = originalKey;
   env.mistralTokensPerMinute = originalTpm;
+  env.groqApiKey = originalGroqKey;
+  env.ashleyReleaseId = originalBuild;
   vi.restoreAllMocks();
+});
+
+describe("accepted dispatch provenance", () => {
+  it("binds contract and build before completion and preserves them across restart", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ashley-attn-provenance-"));
+    const path = join(dir, "nuclear.db");
+    env.groqApiKey = "test-key";
+    env.ashleyReleaseId = "accepted-build-a";
+    let db: DatabaseSync | null = null;
+    let reopened: DatabaseSync | null = null;
+    try {
+      db = openNuclearDb(new DatabaseSync(path));
+      const dispatch = await runAttentiveDispatch<{ text: string }>(db, {
+        messages: [{ role: "user", content: "accepted provenance fixture" }],
+        purpose: "maintenance",
+        lane: "curiosity_maintenance",
+        modelAlias: env.mistralModel,
+        providerId: "groq",
+        quotaBucket: "groq:accepted-provenance-test",
+        ownerId: "doc",
+        cognitiveJobId: 17,
+        dispatch: async () => {
+          env.ashleyReleaseId = "current-build-b";
+          return {
+            providerModel: "accepted-model-a",
+            usage: { promptTokens: 2, completionTokens: 2 },
+            result: { text: "accepted" },
+          };
+        },
+      });
+      expect(dispatch.acceptedDispatchIdentity).toMatchObject({
+        contractId: currentContractId(),
+        buildIdentity: "accepted-build-a",
+      });
+      const requestId = dispatch.requestId;
+      db.close();
+      db = null;
+
+      reopened = openNuclearDb(new DatabaseSync(path), {
+        continuityOptional: true,
+      });
+      expect(
+        reopened
+          .prepare(
+            `SELECT accepted_contract_id, accepted_build_identity
+             FROM attention_requests WHERE id = ?`,
+          )
+          .get(requestId),
+      ).toEqual({
+        accepted_contract_id: currentContractId(),
+        accepted_build_identity: "accepted-build-a",
+      });
+      reopened.close();
+      reopened = null;
+    } finally {
+      try {
+        db?.close();
+        reopened?.close();
+      } catch {
+        // Preserve the assertion failure if a connection already closed.
+      }
+      try {
+        rmSync(dir, { recursive: true, force: true });
+      } catch {
+        // Windows may retain SQLite locks briefly.
+      }
+    }
+  });
 });
 
 function openDb(): DatabaseSync {

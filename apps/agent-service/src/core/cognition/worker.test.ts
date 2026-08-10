@@ -73,7 +73,9 @@ describe("continuous cognition worker", () => {
   it("persists the exact accepted dispatch provenance when continuity changes before materialization", async () => {
     const { db, userMessageId } = setup();
     const originalGroqKey = env.groqApiKey;
+    const originalBuild = env.ashleyReleaseId;
     env.groqApiKey = "test-key";
+    env.ashleyReleaseId = "accepted-build-a";
     try {
       const job = db
         .prepare("SELECT id FROM cognitive_jobs WHERE owner_id = 'doc' LIMIT 1")
@@ -115,6 +117,7 @@ describe("continuous cognition worker", () => {
           },
           () => undefined,
         );
+        env.ashleyReleaseId = "current-build-b";
         return {
           analysis: analysisWithOpenItem,
           model: dispatch.modelAlias,
@@ -130,18 +133,22 @@ describe("continuous cognition worker", () => {
       expect(
         db
           .prepare(
-            `SELECT provenance, model_epoch, model_identity
+            `SELECT provenance, contract_id, build_identity,
+                    model_epoch, model_identity
              FROM open_cognitive_items
              WHERE owner_id = 'doc' AND source_entity_uuid = ?`,
           )
           .get(source.entity_uuid),
       ).toMatchObject({
         provenance: "shadow",
+        contract_id: currentContractId(),
+        build_identity: "accepted-build-a",
         model_epoch: 1,
         model_identity: `model-continuity-v1:${env.mistralModel}|test-model-a`,
       });
     } finally {
       env.groqApiKey = originalGroqKey;
+      env.ashleyReleaseId = originalBuild;
       db.close();
     }
   });

@@ -120,8 +120,6 @@ export async function runAttentiveDispatch<T>(
     input.modelAlias ??
     (providerId === "mistral" ? env.mistralModel : env.groqDefaultModel);
   const quotaBucket = input.quotaBucket ?? `${providerId}:${modelAlias}`;
-  const dispatchContractId = currentContractId();
-  const dispatchBuildIdentity = currentBuildIdentity();
   // Provider-specific key gate — no attention reservation / no limiter consumption.
   if (providerId === "mistral" && !env.mistralApiKey) {
     throw new AppError(
@@ -196,7 +194,12 @@ export async function runAttentiveDispatch<T>(
     try {
       const admit = tryAdmitRequest(db, requestId, clock);
       if (admit.admitted) {
-        markRunning(db, requestId, clock);
+        const dispatchContractId = currentContractId();
+        const dispatchBuildIdentity = currentBuildIdentity();
+        markRunning(db, requestId, clock, {
+          contractId: dispatchContractId,
+          buildIdentity: dispatchBuildIdentity,
+        });
         const row = getRequest(db, requestId);
         const dispatchSequence = Number(row?.dispatch_sequence ?? 0);
         const deadlineSignal =
