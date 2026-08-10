@@ -79,6 +79,24 @@ function forgetSources(db: DatabaseSync, items: OpenCognitiveItemRecord[]): void
   for (const item of items) update.run(item.sourceEntityUuid);
 }
 
+function instrumentAttentionVisits(db: DatabaseSync): () => number {
+  let visits = 0;
+  db.function("record_wake_attention_visit", (value: string | null) => {
+    visits += 1;
+    return value;
+  });
+  db.exec(`
+    CREATE TEMP VIEW open_cognitive_item_attention AS
+    SELECT item_id, delay_class,
+           record_wake_attention_visit(defer_until) AS defer_until,
+           last_considered_at, consideration_count, last_outcome_code,
+           review_requested_at, updated_at, review_attempt_count,
+           review_last_disposition
+    FROM main.open_cognitive_item_attention;
+  `);
+  return () => visits;
+}
+
 describe("bounded OCI wake selection", () => {
   it("overfetches blocked rows so a valid ninth row is selected", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
@@ -209,4 +227,26 @@ describe("bounded OCI wake selection", () => {
       db.close();
     }
   });
+
+  it.each([10, 100, 1000])(
+    "bounds one raw page to 32 actual SQLite attention visits with %i deferred rows",
+    (size) => {
+      const db = openNuclearDb(new DatabaseSync(":memory:"));
+      activateReading(db);
+      Array.from({ length: size }, (_, index) => seedItem(db, index));
+      db.prepare(
+        `UPDATE open_cognitive_item_attention SET defer_until = ?`,
+      ).run(new Date(NOW.getTime() + 86_400_000).toISOString());
+      const visits = instrumentAttentionVisits(db);
+
+      const result = selectOpenCognitiveItemsForWake(db, OWNER_ID, NOW, {
+        maxPages: 1,
+      });
+
+      expect(result.items).toHaveLength(0);
+      expect(result.scanned).toBeLessThanOrEqual(32);
+      expect(visits()).toBe(Math.min(size, 32));
+      db.close();
+    },
+  );
 });
