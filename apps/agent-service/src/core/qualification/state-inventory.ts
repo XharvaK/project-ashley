@@ -165,6 +165,10 @@ const NON_LIVE: Record<string, NonLiveRule> = {
     cls: "CONTROL_PLANE",
     reason: "bounded OCI wake scheduling cursor; no semantic authority",
   },
+  open_cognitive_item_review_cursor: {
+    cls: "CONTROL_PLANE",
+    reason: "bounded OCI Reflection review scheduling cursor; no semantic authority",
+  },
   attention_requests: { cls: "CONTROL_PLANE", reason: "Track M — attention dispatch side effects" },
   attention_daily_usage: { cls: "CONTROL_PLANE", reason: "Track M — attention dispatch side effects" },
   attention_dispatch_counter: { cls: "CONTROL_PLANE", reason: "Track M — attention dispatch side effects" },
