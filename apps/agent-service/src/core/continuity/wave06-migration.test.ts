@@ -30,15 +30,15 @@ describe("wave06 migration", () => {
   it("migrates fresh db to v16 with v3 contract and perception tables", () => {
     const continuity = openContinuityDb(new DatabaseSync(":memory:"));
     const nuclear = openNuclearDb(new DatabaseSync(":memory:"), { continuity });
-    expect(NUCLEAR_SUPPORTED_VERSION).toBe(24);
+    expect(NUCLEAR_SUPPORTED_VERSION).toBe(25);
     const version = (
       nuclear.prepare("PRAGMA user_version").get() as { user_version: number }
     ).user_version;
-    expect(version).toBe(24);
+    expect(version).toBe(25);
     const sidecarVersion = continuity
       .prepare(`SELECT nuclear_schema_version FROM lineage_state WHERE id = 1`)
       .get() as { nuclear_schema_version?: number };
-    expect(sidecarVersion.nuclear_schema_version).toBe(24);
+    expect(sidecarVersion.nuclear_schema_version).toBe(25);
     for (const table of ["perception_artifacts", "conversational_reads"]) {
       expect(
         nuclear
@@ -107,7 +107,7 @@ describe("wave06 migration", () => {
     expect(
       (nuclear.prepare("PRAGMA user_version").get() as { user_version: number })
         .user_version,
-    ).toBe(24);
+    ).toBe(25);
     expect(
       (
         continuity
@@ -116,7 +116,7 @@ describe("wave06 migration", () => {
           )
           .get() as { nuclear_schema_version?: number }
       ).nuclear_schema_version,
-    ).toBe(24);
+    ).toBe(25);
     expect(getPendingNuclearMigration(continuity)).toBeNull();
     expect(
       nuclear
@@ -129,7 +129,7 @@ describe("wave06 migration", () => {
       continuity
         .prepare(
           `SELECT detail_json FROM continuity_events
-           WHERE kind = 'migration' ORDER BY id DESC LIMIT 4`,
+           WHERE kind = 'migration' ORDER BY id DESC LIMIT 8`,
         )
         .all()
         .map((row) => JSON.parse(String((row as { detail_json: string }).detail_json)).phase),
@@ -188,7 +188,7 @@ describe("wave06 migration", () => {
     expect(
       (nuclear.prepare("PRAGMA user_version").get() as { user_version: number })
         .user_version,
-    ).toBe(24);
+    ).toBe(25);
     nuclear.close();
     continuity.close();
   });

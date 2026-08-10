@@ -123,6 +123,16 @@ const V24_COLUMNS: Record<string, ColumnSpec[]> = {
   ],
 };
 
+const V25_COLUMNS: Record<string, ColumnSpec[]> = {
+  attention_requests: [
+    { name: "accepted_contract_id" },
+    { name: "accepted_build_identity" },
+  ],
+  open_cognitive_items: [
+    { name: "generation_order", notNull: true, defaultValue: "0" },
+  ],
+};
+
 const V23_INDEXES: IndexSpec[] = [
   {
     table: "open_cognitive_items",
@@ -336,6 +346,18 @@ function requireNoV24Objects(db: DatabaseSync, version: number): void {
   }
 }
 
+function requireNoV25Columns(db: DatabaseSync, version: number): void {
+  for (const [table, columns] of Object.entries(V25_COLUMNS)) {
+    if (!masterRow(db, "table", table)) continue;
+    const names = new Set(tableInfo(db, table).map((row) => row.name));
+    for (const column of columns) {
+      if (names.has(column.name)) {
+        fail(version, `unexpected_v25_column:${table}.${column.name}`);
+      }
+    }
+  }
+}
+
 function validateV22Source(db: DatabaseSync): void {
   const version = 22;
   requireTable(db, version, "episodes");
@@ -367,7 +389,7 @@ function validateV22Source(db: DatabaseSync): void {
 
 export function validateNuclearSchemaContent(
   db: DatabaseSync,
-  version: 22 | 23 | 24,
+  version: 22 | 23 | 24 | 25,
   options: { rejectNewerContent?: boolean } = {},
 ): void {
   if (version === 22) {
@@ -391,6 +413,14 @@ export function validateNuclearSchemaContent(
     requireFragments(db, version, table, V24_TABLE_FRAGMENTS[table] ?? []);
   }
   for (const index of V24_INDEXES) requireIndex(db, version, index);
+  if (version === 24 && options.rejectNewerContent === true) {
+    requireNoV25Columns(db, version);
+    return;
+  }
+  if (version === 24) return;
+  for (const [table, columns] of Object.entries(V25_COLUMNS)) {
+    requireColumns(db, version, table, columns);
+  }
 }
 
 function addColumnIfMissing(
@@ -443,4 +473,26 @@ export function ensureOpenCognitiveV24Schema(db: DatabaseSync): void {
       ON open_cognitive_items (owner_id, semantic_identity_hash, continuity_generation)
       WHERE semantic_identity_hash <> '' AND continuity_generation <> '';
   `);
+}
+
+/** Apply the complete additive v25 contract before the version is advanced. */
+export function ensureOpenCognitiveV25Schema(db: DatabaseSync): void {
+  addColumnIfMissing(
+    db,
+    "attention_requests",
+    "accepted_contract_id",
+    "TEXT",
+  );
+  addColumnIfMissing(
+    db,
+    "attention_requests",
+    "accepted_build_identity",
+    "TEXT",
+  );
+  addColumnIfMissing(
+    db,
+    "open_cognitive_items",
+    "generation_order",
+    "INTEGER NOT NULL DEFAULT 0 CHECK (generation_order >= 0)",
+  );
 }

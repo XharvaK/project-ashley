@@ -20,8 +20,8 @@ describe("nuclear schema v24 cognition continuity", () => {
   it("adds host-owned model identity to OCI rows", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
 
-    expect(NUCLEAR_SUPPORTED_VERSION).toBe(24);
-    expect(schemaVersion(db)).toBe(24);
+    expect(NUCLEAR_SUPPORTED_VERSION).toBe(25);
+    expect(schemaVersion(db)).toBe(25);
     expect(
       (
         db.prepare("PRAGMA table_info(open_cognitive_items)").all() as Array<{
@@ -38,8 +38,13 @@ describe("nuclear schema v24 cognition continuity", () => {
   it("recovers v24 after a post-nuclear-commit sidecar fault", () => {
     const continuity = openContinuityDb(new DatabaseSync(":memory:"));
     const db = openNuclearDb(new DatabaseSync(":memory:"), { continuity });
-    db.exec("ALTER TABLE open_cognitive_items DROP COLUMN model_identity");
-    db.exec("PRAGMA user_version = 23");
+    db.exec(`
+      ALTER TABLE attention_requests DROP COLUMN accepted_contract_id;
+      ALTER TABLE attention_requests DROP COLUMN accepted_build_identity;
+      ALTER TABLE open_cognitive_items DROP COLUMN generation_order;
+      ALTER TABLE open_cognitive_items DROP COLUMN model_identity;
+      PRAGMA user_version = 23;
+    `);
     continuity
       .prepare(
         `UPDATE lineage_state SET nuclear_schema_version = 23 WHERE id = 1`,
@@ -71,7 +76,7 @@ describe("nuclear schema v24 cognition continuity", () => {
     openNuclearDb(db, { continuity });
 
     expect(getPendingNuclearMigration(continuity)).toBeNull();
-    expect(schemaVersion(db)).toBe(24);
+    expect(schemaVersion(db)).toBe(25);
     expect(
       (
         continuity
@@ -80,7 +85,7 @@ describe("nuclear schema v24 cognition continuity", () => {
           )
           .get() as { nuclear_schema_version?: number }
       ).nuclear_schema_version,
-    ).toBe(24);
+    ).toBe(25);
     db.close();
     continuity.close();
   });

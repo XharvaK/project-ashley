@@ -21,13 +21,13 @@ describe("migration-20 capability event kinds", () => {
     const row = db.prepare("PRAGMA user_version").get() as {
       user_version: number;
     };
-    expect(row.user_version).toBe(24);
-    expect(NUCLEAR_SUPPORTED_VERSION).toBe(24);
+    expect(row.user_version).toBe(25);
+    expect(NUCLEAR_SUPPORTED_VERSION).toBe(25);
     expect(
       (
         db.prepare("PRAGMA user_version").get() as { user_version: number }
       ).user_version,
-    ).toBe(24);
+    ).toBe(25);
     db.close();
   });
 

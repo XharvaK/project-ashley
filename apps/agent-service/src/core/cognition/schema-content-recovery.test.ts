@@ -24,6 +24,12 @@ function pendingV24Fixture(): Fixture {
       .prepare("SELECT lineage_id FROM lineage_mirror WHERE id = 1")
       .get() as { lineage_id: string }
   ).lineage_id;
+  nuclear.exec(`
+    ALTER TABLE attention_requests DROP COLUMN accepted_contract_id;
+    ALTER TABLE attention_requests DROP COLUMN accepted_build_identity;
+    ALTER TABLE open_cognitive_items DROP COLUMN generation_order;
+    PRAGMA user_version = 24;
+  `);
   continuity
     .prepare(
       `UPDATE lineage_state SET nuclear_schema_version = 23 WHERE id = 1`,
@@ -42,6 +48,9 @@ function sourceV23Fixture(): Fixture {
   const continuity = openContinuityDb(new DatabaseSync(":memory:"));
   const nuclear = openNuclearDb(new DatabaseSync(":memory:"), { continuity });
   nuclear.exec(`
+    ALTER TABLE attention_requests DROP COLUMN accepted_contract_id;
+    ALTER TABLE attention_requests DROP COLUMN accepted_build_identity;
+    ALTER TABLE open_cognitive_items DROP COLUMN generation_order;
     DROP INDEX idx_open_cognitive_items_semantic_generation;
     DROP INDEX idx_open_cognitive_items_owner_semantic_generation;
     DROP INDEX idx_open_cognitive_items_owner_status_id;
@@ -174,7 +183,7 @@ describe("migration recovery schema content", () => {
             .prepare("SELECT nuclear_schema_version FROM lineage_state WHERE id = 1")
             .get() as { nuclear_schema_version: number }
         ).nuclear_schema_version,
-      ).toBe(24);
+      ).toBe(25);
     } finally {
       closeFixture(fixture);
     }
@@ -249,7 +258,7 @@ describe("migration recovery schema content", () => {
               user_version: number;
             }
           ).user_version,
-        ).toBe(24);
+        ).toBe(25);
         expect(getPendingNuclearMigration(fixture.continuity)).toBeNull();
         expect(
           (
@@ -259,7 +268,7 @@ describe("migration recovery schema content", () => {
               )
               .get() as { nuclear_schema_version: number }
           ).nuclear_schema_version,
-        ).toBe(24);
+        ).toBe(25);
       } finally {
         closeFixture(fixture);
       }
