@@ -159,6 +159,14 @@ const NON_LIVE: Record<string, NonLiveRule> = {
     cls: "CONTROL_PLANE",
     reason: "qualification ledger; row SET legitimately differs when shadow execution records live_shadow events for more capabilities (Fixture A) — not live behavioral state. Influence is governed by state='active' + dependency chain, unchanged pre-promotion.",
   },
+  recall_qualification_epochs: {
+    cls: "CONTROL_PLANE",
+    reason: "recall qualification epoch registry; mirrored from the authoritative capability_events ledger; no live-behavior reader",
+  },
+  recall_qualification_events: {
+    cls: "CONTROL_PLANE",
+    reason: "recall qualification epoch evidence mirror; duplicated from capability_events; no live-behavior reader",
+  },
   model_continuity_state: { cls: "CONTROL_PLANE", reason: "Track M — attention dispatch side effects" },
   model_continuity_events: { cls: "CONTROL_PLANE", reason: "Track M — attention dispatch side effects" },
   open_cognitive_item_wake_cursor: {

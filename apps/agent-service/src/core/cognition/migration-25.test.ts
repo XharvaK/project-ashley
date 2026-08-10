@@ -51,6 +51,8 @@ function sourceV24Fixture(): Fixture {
   dropColumnIfPresent(nuclear, "attention_requests", "accepted_contract_id");
   dropColumnIfPresent(nuclear, "attention_requests", "accepted_build_identity");
   dropColumnIfPresent(nuclear, "open_cognitive_items", "generation_order");
+  nuclear.exec("DROP TABLE IF EXISTS recall_qualification_events");
+  nuclear.exec("DROP TABLE IF EXISTS recall_qualification_epochs");
   nuclear.exec("PRAGMA user_version = 24");
   continuity
     .prepare("UPDATE lineage_state SET nuclear_schema_version = 24 WHERE id = 1")
@@ -92,8 +94,8 @@ describe("nuclear schema v25 INIT-03 ordering metadata", () => {
   it("adds durable accepted-dispatch provenance and OCI generation order", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     try {
-      expect(NUCLEAR_SUPPORTED_VERSION).toBe(25);
-      expect(schemaVersion(db)).toBe(25);
+      expect(NUCLEAR_SUPPORTED_VERSION).toBe(26);
+      expect(schemaVersion(db)).toBe(26);
       const attentionColumns = columnNames(db, "attention_requests");
       expect(attentionColumns.has("accepted_contract_id")).toBe(true);
       expect(attentionColumns.has("accepted_build_identity")).toBe(true);
@@ -184,7 +186,7 @@ describe("nuclear schema v25 INIT-03 ordering metadata", () => {
       }
 
       openNuclearDb(fixture.nuclear, { continuity: fixture.continuity });
-      expect(schemaVersion(fixture.nuclear)).toBe(25);
+      expect(schemaVersion(fixture.nuclear)).toBe(26);
       expect(getPendingNuclearMigration(fixture.continuity)).toBeNull();
       expect(
         (
@@ -192,7 +194,7 @@ describe("nuclear schema v25 INIT-03 ordering metadata", () => {
             .prepare("SELECT nuclear_schema_version FROM lineage_state WHERE id = 1")
             .get() as { nuclear_schema_version: number }
         ).nuclear_schema_version,
-      ).toBe(25);
+      ).toBe(26);
     } finally {
       closeFixture(fixture);
     }

@@ -26,6 +26,7 @@ import {
   recordIsolatedEvaluation,
   recordLiveShadowEvent,
 } from "../rollout/capabilities.js";
+import { startDeterministicRecallEpoch } from "../rollout/recall-epoch-test-util.js";
 
 /**
  * Provenance time-shift — shadow artifacts written BEFORE the master switch is
@@ -133,6 +134,7 @@ function seedShadowArtifacts(db: DatabaseSync): Seeded {
 }
 
 function seedQualification(db: DatabaseSync): void {
+  startDeterministicRecallEpoch(db);
   recordIsolatedEvaluation(db, "recall", {
     seeds: 3,
     passed: true,

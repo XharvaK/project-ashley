@@ -145,6 +145,63 @@ describe("AshleyCore", () => {
     db.close();
   });
 
+  it("records recall evaluation provenance on the owner endpoint with no epoch and never implies qualification", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const core = new AshleyCore(db);
+
+    // Operator-facing surface: POST /nuclear/capabilities/evaluation maps to
+    // this method. With no current qualification epoch, an evaluation must be
+    // provenance-only and must NOT imply "qualified/counted" to any operator
+    // consumer reading the capability status projection.
+    const beforeEpochs = db.prepare(
+      `SELECT COUNT(*) AS c FROM recall_qualification_epochs`,
+    ).get() as { c: number };
+    expect(beforeEpochs.c).toBe(0);
+
+    const status = core.getCapabilities().capabilities.find(
+      (capability) => capability.capability === "recall",
+    );
+    expect(status).toMatchObject({
+      promotionEligible: false,
+      evalSeedCount: 0,
+      qualifiedAt: null,
+      liveShadowEvents: 0,
+      liveShadowSpanDays: 0,
+      qualificationEpochId: null,
+    });
+
+    core.recordCapabilityEvaluation({
+      capability: "recall",
+      seeds: 3,
+      passed: true,
+      sourceKey: "operator:no-epoch",
+    });
+
+    // Provenance ledger recorded (capability_events); epoch registry untouched.
+    const afterEpochs = db.prepare(
+      `SELECT COUNT(*) AS c FROM recall_qualification_epochs`,
+    ).get() as { c: number };
+    expect(afterEpochs.c).toBe(0);
+    const provenanceCount = db.prepare(
+      `SELECT COUNT(*) AS c FROM capability_events
+       WHERE capability = 'recall' AND kind = 'isolated_eval' AND source_key = 'operator:no-epoch'`,
+    ).get() as { c: number };
+    expect(provenanceCount.c).toBe(1);
+
+    const after = core.getCapabilities().capabilities.find(
+      (capability) => capability.capability === "recall",
+    );
+    expect(after).toMatchObject({
+      promotionEligible: false,
+      evalSeedCount: 0,
+      qualifiedAt: null,
+      liveShadowEvents: 0,
+      liveShadowSpanDays: 0,
+      qualificationEpochId: null,
+    });
+    db.close();
+  });
+
   it("persists a reactive turn and allows explicit silence", async () => {
     const path = join(tmpdir(), `ashley-nuclear-${randomUUID()}.db`);
     const db = openNuclearDb(new DatabaseSync(path));

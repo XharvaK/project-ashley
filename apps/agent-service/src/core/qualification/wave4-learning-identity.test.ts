@@ -20,6 +20,7 @@ import {
   recordIsolatedEvaluation,
   recordLiveShadowEvent,
 } from "../rollout/capabilities.js";
+import { startDeterministicRecallEpoch } from "../rollout/recall-epoch-test-util.js";
 import { env } from "../../env.js";
 
 /**
@@ -67,6 +68,7 @@ async function pumpWith(fixture: Fixture): Promise<void> {
 }
 
 function qualify(fixture: Fixture, capability: "recall" | "learning"): void {
+  if (capability === "recall") startDeterministicRecallEpoch(fixture.db);
   recordIsolatedEvaluation(fixture.db, capability, {
     seeds: 5,
     passed: true,

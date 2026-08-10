@@ -18,6 +18,7 @@ import {
   recordIsolatedEvaluation,
   recordLiveShadowEvent,
 } from "../rollout/capabilities.js";
+import { startDeterministicRecallEpoch } from "../rollout/recall-epoch-test-util.js";
 
 /**
  * Phase 3-E — qualification evidence accumulates to promotionEligible=true and
@@ -31,6 +32,7 @@ const LIVE_SHADOW_EVENTS = 25;
 const STEP_MS = (7 * 86_400_000) / (LIVE_SHADOW_EVENTS - 1);
 
 function seedQualification(db: DatabaseSync): void {
+  startDeterministicRecallEpoch(db);
   recordIsolatedEvaluation(db, "recall", {
     seeds: 3,
     passed: true,

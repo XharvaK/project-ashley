@@ -11,6 +11,7 @@ import { Fixture, armGroqKey, restoreGroqKey } from "./counterfactual-harness.js
 import { expectLiveEquivalent, snapshotTable } from "./state-inventory.js";
 import { thoughtCapture, clearCaptures } from "./mistral-client-mock-state.js";
 import { promoteCapability, recordIsolatedEvaluation, recordLiveShadowEvent, currentReleaseId } from "../rollout/capabilities.js";
+import { startDeterministicRecallEpoch } from "../rollout/recall-epoch-test-util.js";
 import { installFakeClock, uninstallFakeClock } from "./fake-clock.js";
 import { env } from "../../env.js";
 
@@ -34,6 +35,7 @@ describe("wave4 Phase 5 — explicit promotion boundary", () => {
     try {
       // 1. Qualify the capability
       const releaseId = currentReleaseId();
+      startDeterministicRecallEpoch(on.db);
       recordIsolatedEvaluation(on.db, "recall", { seeds: 95, passed: true, sourceKey: "qualify1" });
       recordIsolatedEvaluation(on.db, "recall", { seeds: 96, passed: true, sourceKey: "qualify2" });
       recordIsolatedEvaluation(on.db, "recall", { seeds: 97, passed: true, sourceKey: "qualify3" });

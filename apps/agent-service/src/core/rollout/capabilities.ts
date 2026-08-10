@@ -14,6 +14,12 @@ import {
   ensureBootstrapContract,
 } from "../attention/ledger.js";
 import { currentModelEpoch } from "../attention/continuity.js";
+import {
+  beginImmediateIfNeeded,
+  recallPromotionQualification,
+  recordRecallIsolatedEvaluation,
+  recordRecallLiveShadowEvent,
+} from "./recall-qualification-epoch.js";
 
 export const capabilityNames = [
   "recall",
@@ -92,6 +98,8 @@ export type CapabilityStatus = {
   promotionEligible: boolean;
   liveShadowEvents: number;
   liveShadowSpanDays: number;
+  /** Recall only: the current qualification epoch (null for non-Recall and when none exists). */
+  qualificationEpochId: string | null;
   behavioralBreachesSevenDays: number;
   promotedAt: string | null;
   rolledBackAt: string | null;
@@ -310,6 +318,9 @@ export function promotionEligible(
   if (contractMismatch(db)) return false;
   ensureRelease(db, capability, releaseId);
   if (releaseState(db, capability, releaseId) !== "observe") return false;
+  if (capability === "recall") {
+    return recallPromotionQualified(db, releaseId);
+  }
   const release = db.prepare(
     `SELECT eval_seed_count, qualified_at, model_epoch FROM capability_releases
      WHERE capability = ? AND release_id = ?`,
@@ -340,6 +351,30 @@ export function promotionEligible(
   return live.count >= 25 &&
     liveSpanDays(live) >= 7 &&
     capabilityInfluenceDependenciesReady(db, capability, releaseId);
+}
+
+/**
+ * Recall promotion qualification: authority preconditions are checked by
+ * `promotionEligible`; this applies the CURRENT qualification epoch
+ * thresholds (seeds >= 3, qualified_at, live_shadow >= 25, span >= 7 days)
+ * against the epoch registry.
+ *
+ * Fail closed: no current epoch means FALSE, and historical v3 authority-row
+ * metadata (`capability_releases.eval_seed_count` / `qualified_at`) and old
+ * `capability_events` campaign evidence are never consulted. That v3 metadata
+ * is intentionally left untouched as legacy rollout history.
+ */
+function recallPromotionQualified(
+  db: DatabaseSync,
+  releaseId: string,
+): boolean {
+  const qualification = recallPromotionQualification(db);
+  if (!qualification) return false;
+  if (qualification.evalSeedCount < 3) return false;
+  if (typeof qualification.qualifiedAt !== "string") return false;
+  if (qualification.liveShadowEvents < 25) return false;
+  if (qualification.liveShadowSpanDays < 7) return false;
+  return capabilityInfluenceDependenciesReady(db, "recall", releaseId);
 }
 
 export type PromoteCapabilityResult =
@@ -448,6 +483,42 @@ export function recordIsolatedEvaluation(
 ): void {
   const releaseId = input.releaseId ?? currentReleaseId();
   const seeds = Math.max(0, Math.trunc(input.seeds));
+  if (capability === "recall") {
+    // Recall dual-write: the provenance-bearing capability_events row and the
+    // epoch-registry mirror converge in ONE transaction, so no failure can
+    // split them. capability_events keeps its historical/provenance role
+    // (it is written even when no epoch exists and never qualifies anything);
+    // the epoch registry is the qualification authority and the v3
+    // authority-row metadata is never mutated by new evidence.
+    const ownsTransaction = beginImmediateIfNeeded(db);
+    try {
+      recordEvent(db, {
+        capability,
+        releaseId,
+        kind: "isolated_eval",
+        sourceKey: input.sourceKey,
+        detail: { seeds, passed: input.passed },
+        occurredAt: input.occurredAt,
+      });
+      recordRecallIsolatedEvaluation(db, {
+        seeds,
+        passed: input.passed,
+        sourceKey: input.sourceKey,
+        occurredAt: input.occurredAt,
+      });
+      if (ownsTransaction) db.exec("COMMIT");
+    } catch (error) {
+      if (ownsTransaction) {
+        try {
+          db.exec("ROLLBACK");
+        } catch {
+          /* preserve the original failure */
+        }
+      }
+      throw error;
+    }
+    return;
+  }
   recordEvent(db, {
     capability,
     releaseId,
@@ -479,9 +550,41 @@ export function recordLiveShadowEvent(
     occurredAt?: string;
     detail?: Record<string, unknown>;
   } = {},
-): void {
+): { recorded: boolean; reason?: "recall_qualification_epoch_unavailable" } {
   const releaseId = input.releaseId ?? currentReleaseId();
-  recordEvent(db, {
+  if (capability === "recall") {
+    // Recall dual-write: provenance ledger row and epoch-registry mirror
+    // converge in ONE transaction. The returned result reflects the
+    // epoch-scoped idempotency: the same source_key is idempotent within one
+    // epoch, independent across epochs, and `recorded: false` with
+    // `recall_qualification_epoch_unavailable` when no campaign exists (the
+    // provenance row is still the historical record and never qualifies).
+    const ownsTransaction = beginImmediateIfNeeded(db);
+    try {
+      recordEvent(db, {
+        capability,
+        releaseId,
+        kind: "live_shadow",
+        sourceKey,
+        detail: input.detail,
+        occurredAt: input.occurredAt,
+      });
+      const mirrored = recordRecallLiveShadowEvent(db, sourceKey, input);
+      if (ownsTransaction) db.exec("COMMIT");
+      if (mirrored.reason) return { recorded: mirrored.recorded, reason: mirrored.reason };
+      return { recorded: mirrored.recorded };
+    } catch (error) {
+      if (ownsTransaction) {
+        try {
+          db.exec("ROLLBACK");
+        } catch {
+          /* preserve the original failure */
+        }
+      }
+      throw error;
+    }
+  }
+  const recorded = recordEvent(db, {
     capability,
     releaseId,
     kind: "live_shadow",
@@ -489,6 +592,7 @@ export function recordLiveShadowEvent(
     detail: input.detail,
     occurredAt: input.occurredAt,
   });
+  return { recorded };
 }
 
 export function recordBehavioralBreach(
@@ -596,6 +700,12 @@ export function listCapabilityStatuses(
     );
     const ready = capabilityInfluenceDependenciesReady(db, capability, releaseId);
     const shadowDepsReady = capabilityShadowDependenciesReady(db, capability, releaseId);
+      // Recall status truth comes from the current qualification epoch only.
+      // With no current epoch every Recall qualification field is zero/null:
+      // historical v3 authority-row metadata is legacy and is never displayed
+      // as current campaign evidence.
+      const recallQualification =
+        capability === "recall" ? recallPromotionQualification(db) : null;
     return {
       capability,
       releaseId,
@@ -613,13 +723,26 @@ export function listCapabilityStatuses(
       shadowExecutable: canExecuteShadowInternal(db, capability, releaseId),
       shadowDependenciesReady: shadowDepsReady,
       influenceDependenciesReady: ready,
-      evalSeedCount: isRow(release) ? Number(release.eval_seed_count ?? 0) : 0,
-      qualifiedAt: isRow(release) && typeof release.qualified_at === "string"
-        ? release.qualified_at
-        : null,
+      evalSeedCount: capability === "recall"
+        ? recallQualification?.evalSeedCount ?? 0
+        : isRow(release)
+          ? Number(release.eval_seed_count ?? 0)
+          : 0,
+      qualifiedAt: capability === "recall"
+        ? recallQualification?.qualifiedAt ?? null
+        : isRow(release) && typeof release.qualified_at === "string"
+          ? release.qualified_at
+          : null,
       promotionEligible: promotionEligible(db, capability, releaseId),
-      liveShadowEvents: live.count,
-      liveShadowSpanDays: liveSpanDays(live),
+      liveShadowEvents: capability === "recall"
+        ? recallQualification?.liveShadowEvents ?? 0
+        : live.count,
+      liveShadowSpanDays: capability === "recall"
+        ? recallQualification?.liveShadowSpanDays ?? 0
+        : liveSpanDays(live),
+      qualificationEpochId: capability === "recall"
+        ? recallQualification?.epochId ?? null
+        : null,
       behavioralBreachesSevenDays: breaches.count,
       promotedAt: isRow(release) && typeof release.promoted_at === "string"
         ? release.promoted_at

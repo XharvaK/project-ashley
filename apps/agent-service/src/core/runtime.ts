@@ -140,6 +140,11 @@ import {
   type CapabilityName,
 } from "./rollout/capabilities.js";
 import { recordRecallLiveCutover } from "./memory/cutover.js";
+import {
+  getCurrentRecallQualificationEpoch,
+  listRecallQualificationEpochs,
+  startRecallQualificationEpoch as startRecallQualificationEpochRelease,
+} from "./rollout/recall-qualification-epoch.js";
 import { listRelationshipSummary } from "./relationship/store.js";
 import { observeReactiveRelationshipSignals } from "./relationship/authority.js";
 import { assignNewEntityUuid } from "./continuity/nuclear-targetable.js";
@@ -2536,6 +2541,26 @@ export class AshleyCore {
   recordRecallCutover(ownerId: string, input: { authorizedBy: string }) {
     const result = recordRecallLiveCutover(this.db, ownerId, { authorizedBy: input.authorizedBy });
     return result;
+  }
+
+  startRecallQualificationEpoch(input: {
+    authorizedBy: string;
+    startRequestKey: string;
+    expectedCurrentEpochId: string | null;
+  }) {
+    const result = startRecallQualificationEpochRelease(this.db, input);
+    return {
+      ...result,
+      qualificationEpochs: listRecallQualificationEpochs(this.db),
+      currentQualificationEpoch: getCurrentRecallQualificationEpoch(this.db),
+    };
+  }
+
+  listRecallQualificationEpochs() {
+    return {
+      current: getCurrentRecallQualificationEpoch(this.db),
+      epochs: listRecallQualificationEpochs(this.db),
+    };
   }
 
   revertRevision(ownerId: string, revisionId: number): boolean {

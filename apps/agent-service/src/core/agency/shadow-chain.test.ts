@@ -9,6 +9,7 @@ import { listActiveMindStateItems } from "../state/mind-items.js";
 import { listActiveFacts } from "../memory/facts.js";
 import { listRevisions } from "../learning/revisions.js";
 import { recordCriticalFailure, recordIsolatedEvaluation, recordLiveShadowEvent, currentReleaseId } from "../rollout/capabilities.js";
+import { startDeterministicRecallEpoch } from "../rollout/recall-epoch-test-util.js";
 import { enqueueCognitiveJob } from "../cognition/jobs.js";
 import { processNextCognitiveJob, type CognitionAnalysis, getLatestShadowAnalysis } from "../cognition/worker.js";
 import { enqueueThoughtObservation, type ShadowCognitionContext } from "../agency/thought-observation.js";
@@ -20,6 +21,7 @@ const releaseId = currentReleaseId();
 const start = new Date("2026-07-01T00:00:00.000Z");
 
 function qualify(db: DatabaseSync, capability: Parameters<typeof recordIsolatedEvaluation>[1]): void {
+  if (capability === "recall") startDeterministicRecallEpoch(db);
   recordIsolatedEvaluation(db, capability, {
     seeds: 3, passed: true, sourceKey: `${capability}:eval`,
     releaseId, occurredAt: start.toISOString(),

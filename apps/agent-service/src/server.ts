@@ -280,6 +280,36 @@ export function createServer(
     }
   });
 
+  app.post("/nuclear/capabilities/recall/qualification-epoch/start", (req, res) => {
+    try {
+      const { userId, startRequestKey, expectedCurrentEpochId } = req.body as {
+        userId?: string;
+        startRequestKey?: string;
+        expectedCurrentEpochId?: string | null;
+      };
+      const ownerId = requireOwner(userId);
+      res.json(manager.core.startRecallQualificationEpoch({
+        authorizedBy: ownerId,
+        startRequestKey: startRequestKey ?? "",
+        expectedCurrentEpochId: expectedCurrentEpochId ?? null,
+      }));
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.get("/nuclear/capabilities/recall/qualification-epochs", (req, res) => {
+    try {
+      const { userId } = req.query as { userId?: string };
+      requireOwner(userId);
+      res.json(manager.core.listRecallQualificationEpochs());
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
   app.get("/nuclear/revisions", (req, res) => {
     try {
       const ownerId = String(req.query.owner_id ?? "");

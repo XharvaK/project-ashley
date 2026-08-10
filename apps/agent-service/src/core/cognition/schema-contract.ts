@@ -133,6 +133,65 @@ const V25_COLUMNS: Record<string, ColumnSpec[]> = {
   ],
 };
 
+const V26_TABLES = [
+  "recall_qualification_epochs",
+  "recall_qualification_events",
+] as const;
+
+const V26_COLUMNS: Record<string, ColumnSpec[]> = {
+  recall_qualification_epochs: [
+    { name: "epoch_id", notNull: true, primaryKey: true },
+    { name: "status", notNull: true },
+    { name: "start_request_key", notNull: true },
+    { name: "predecessor_epoch_id" },
+    { name: "contract_id", notNull: true },
+    { name: "started_build_identity", notNull: true },
+    { name: "created_by", notNull: true },
+    { name: "started_at", notNull: true },
+    { name: "retired_at" },
+    { name: "eval_seed_count", notNull: true, defaultValue: "0" },
+    { name: "qualified_at" },
+    { name: "model_epoch", notNull: true, defaultValue: "0" },
+  ],
+  recall_qualification_events: [
+    { name: "id", primaryKey: true },
+    { name: "epoch_id", notNull: true },
+    { name: "kind", notNull: true },
+    { name: "source_key", notNull: true },
+    { name: "detail_json", notNull: true, defaultValue: "'{}'" },
+    { name: "occurred_at", notNull: true },
+    { name: "build_identity", notNull: true },
+    { name: "model_epoch", notNull: true, defaultValue: "0" },
+  ],
+};
+
+const V26_INDEXES: IndexSpec[] = [
+  {
+    table: "recall_qualification_epochs",
+    name: "idx_recall_qualification_epochs_single_current",
+    columns: ["status"],
+    unique: true,
+    partial: true,
+    sqlFragment: "where status='current'",
+  },
+  {
+    table: "recall_qualification_events",
+    name: "idx_recall_qualification_events_epoch",
+    columns: ["epoch_id", "kind", "occurred_at"],
+  },
+];
+
+const V26_TABLE_FRAGMENTS: Record<string, string[]> = {
+  recall_qualification_epochs: [
+    "check(status in('current','retired'))",
+    "check(eval_seed_count>=0)",
+  ],
+  recall_qualification_events: [
+    "references recall_qualification_epochs(epoch_id)",
+    "check(kind in('isolated_eval','live_shadow'))",
+  ],
+};
+
 const V23_INDEXES: IndexSpec[] = [
   {
     table: "open_cognitive_items",
@@ -214,6 +273,12 @@ const V24_ONLY_OBJECTS = [
   "idx_open_cognitive_items_semantic_generation",
   "idx_open_cognitive_items_owner_status_id",
   "idx_open_cognitive_item_attention_review_due",
+] as const;
+
+const V26_ONLY_OBJECTS = [
+  ...V26_TABLES,
+  "idx_recall_qualification_epochs_single_current",
+  "idx_recall_qualification_events_epoch",
 ] as const;
 
 function normalizeSql(value: string): string {
@@ -358,6 +423,15 @@ function requireNoV25Columns(db: DatabaseSync, version: number): void {
   }
 }
 
+function requireNoV26Objects(db: DatabaseSync, version: number): void {
+  for (const name of V26_ONLY_OBJECTS) {
+    const type = V26_TABLES.includes(name as (typeof V26_TABLES)[number])
+      ? "table"
+      : "index";
+    if (masterRow(db, type, name)) fail(version, `unexpected_v26_object:${name}`);
+  }
+}
+
 function validateV22Source(db: DatabaseSync): void {
   const version = 22;
   requireTable(db, version, "episodes");
@@ -389,7 +463,7 @@ function validateV22Source(db: DatabaseSync): void {
 
 export function validateNuclearSchemaContent(
   db: DatabaseSync,
-  version: 22 | 23 | 24 | 25,
+  version: 22 | 23 | 24 | 25 | 26,
   options: { rejectNewerContent?: boolean } = {},
 ): void {
   if (version === 22) {
@@ -421,6 +495,17 @@ export function validateNuclearSchemaContent(
   for (const [table, columns] of Object.entries(V25_COLUMNS)) {
     requireColumns(db, version, table, columns);
   }
+  if (version === 25 && options.rejectNewerContent === true) {
+    requireNoV26Objects(db, version);
+    return;
+  }
+  if (version === 25) return;
+  for (const table of V26_TABLES) requireTable(db, version, table);
+  for (const [table, columns] of Object.entries(V26_COLUMNS)) {
+    requireColumns(db, version, table, columns);
+    requireFragments(db, version, table, V26_TABLE_FRAGMENTS[table] ?? []);
+  }
+  for (const index of V26_INDEXES) requireIndex(db, version, index);
 }
 
 function addColumnIfMissing(

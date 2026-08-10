@@ -17,6 +17,7 @@ import {
   currentBuildIdentity,
   currentContractId,
 } from "./capabilities.js";
+import { startDeterministicRecallEpoch } from "./recall-epoch-test-util.js";
 
 const releaseId = "release-test";
 const start = new Date("2026-07-01T00:00:00.000Z");
@@ -26,6 +27,7 @@ function qualify(
   db: DatabaseSync,
   capability: Parameters<typeof recordIsolatedEvaluation>[1],
 ): void {
+  if (capability === "recall") startDeterministicRecallEpoch(db);
   recordIsolatedEvaluation(db, capability, {
     seeds: 3,
     passed: true,

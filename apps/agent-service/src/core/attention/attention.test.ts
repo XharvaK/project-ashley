@@ -38,6 +38,7 @@ import {
 } from "../rollout/capabilities.js";
 import { DECLARED_CONTRACT_ID } from "./contract-material.js";
 import { currentContractId } from "../rollout/capabilities.js";
+import { startDeterministicRecallEpoch } from "../rollout/recall-epoch-test-util.js";
 
 const originalKey = env.mistralApiKey;
 const originalTpm = env.mistralTokensPerMinute;
@@ -500,6 +501,7 @@ describe("model continuity", () => {
       () => undefined,
       clock,
     );
+    startDeterministicRecallEpoch(db);
     recordIsolatedEvaluation(db, "recall", {
       seeds: 3,
       passed: true,
