@@ -22,6 +22,21 @@ export type AttentionOutcome =
   | "error"
   | "aborted";
 
+/** Host-owned provenance for one completed, admitted model dispatch. */
+export type AcceptedDispatchIdentity = {
+  requestId: number;
+  dispatchSequence: number;
+  routeAlias: string | null;
+  modelAlias: string;
+  resolvedModelId: string | null;
+  modelEpoch: number;
+  modelIdentity: string | null;
+  contractId: string;
+  buildIdentity: string;
+  ownerId: string | null;
+  cognitiveJobId: number | null;
+};
+
 export type AttentionClock = {
   nowMs: () => number;
 };

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { env } from "../../env.js";
 import { openNuclearDb } from "../db.js";
 import { applyModelContinuity, currentModelContinuityIdentity } from "../attention/continuity.js";
+import { runAttentiveDispatch } from "../attention/governor.js";
 import { insertMessage, resolveActiveThread } from "../memory/threads.js";
 import { retrieveEpisodes } from "../memory/episodes.js";
 import { getAffectiveState } from "../state/affect.js";
@@ -69,6 +70,82 @@ function setup() {
 }
 
 describe("continuous cognition worker", () => {
+  it("persists the exact accepted dispatch provenance when continuity changes before materialization", async () => {
+    const { db, userMessageId } = setup();
+    const originalGroqKey = env.groqApiKey;
+    env.groqApiKey = "test-key";
+    try {
+      const job = db
+        .prepare("SELECT id FROM cognitive_jobs WHERE owner_id = 'doc' LIMIT 1")
+        .get() as { id: number };
+      const source = db
+        .prepare("SELECT entity_uuid FROM mem_messages WHERE id = ?")
+        .get(userMessageId) as { entity_uuid: string };
+      const analysisWithOpenItem: CognitionAnalysis = {
+        ...analysis,
+        openItems: [{
+          kind: "question",
+          semanticSummary: "Whether the performance follow-up remains unresolved.",
+          sourceMessageId: userMessageId,
+        }],
+      };
+      const analyze = async () => {
+        const dispatch = await runAttentiveDispatch<{ text: string }>(db, {
+          messages: [{ role: "user", content: "bounded cognition dispatch" }],
+          purpose: "maintenance",
+          lane: "curiosity_maintenance",
+          modelAlias: env.mistralModel,
+          providerId: "groq",
+          quotaBucket: "groq:test-model",
+          ownerId: "doc",
+          cognitiveJobId: job.id,
+          dispatch: async () => ({
+            providerModel: "test-model-a",
+            usage: { promptTokens: 2, completionTokens: 2 },
+            result: { text: "accepted" },
+          }),
+        });
+        applyModelContinuity(
+          db,
+          {
+            alias: env.mistralModel,
+            resolvedModelId: "test-model-b",
+            unresolvedAlias: false,
+            dispatchSequence: dispatch.acceptedDispatchIdentity.dispatchSequence + 1,
+          },
+          () => undefined,
+        );
+        return {
+          analysis: analysisWithOpenItem,
+          model: dispatch.modelAlias,
+          modelAlias: dispatch.modelAlias,
+          resolvedModelId: dispatch.resolvedModelId,
+          dispatchIdentity: dispatch.acceptedDispatchIdentity,
+          raw: "{}",
+        };
+      };
+
+      await processNextCognitiveJob(db, "observe", analyze, allCapabilitiesActive);
+
+      expect(
+        db
+          .prepare(
+            `SELECT provenance, model_epoch, model_identity
+             FROM open_cognitive_items
+             WHERE owner_id = 'doc' AND source_entity_uuid = ?`,
+          )
+          .get(source.entity_uuid),
+      ).toMatchObject({
+        provenance: "shadow",
+        model_epoch: 1,
+        model_identity: `model-continuity-v1:${env.mistralModel}|test-model-a`,
+      });
+    } finally {
+      env.groqApiKey = originalGroqKey;
+      db.close();
+    }
+  });
+
   it("applies grounded state only in apply mode", async () => {
     const { db } = setup();
     const analyze = async () => ({ analysis, model: "test", raw: "{}" });
@@ -101,16 +178,11 @@ describe("continuous cognition worker", () => {
 
   it("materializes structured cognition items from grounded source messages", async () => {
     const { db, userMessageId } = setup();
-    applyModelContinuity(
-      db,
-      {
-        alias: env.mistralModel,
-        resolvedModelId: "test-model-a",
-        unresolvedAlias: false,
-        dispatchSequence: 1,
-      },
-      () => undefined,
-    );
+    const originalGroqKey = env.groqApiKey;
+    env.groqApiKey = "test-key";
+    const job = db
+      .prepare("SELECT id FROM cognitive_jobs WHERE owner_id = 'doc' LIMIT 1")
+      .get() as { id: number };
     const source = db
       .prepare("SELECT entity_uuid FROM mem_messages WHERE id = ?")
       .get(userMessageId) as { entity_uuid?: string };
@@ -123,40 +195,62 @@ describe("continuous cognition worker", () => {
         semanticKeyMaterial: "performance-follow-up",
       }],
     };
-    await processNextCognitiveJob(
-      db,
-      "observe",
-      async () => ({
-        analysis: analysisWithOpenItem,
-        model: "test",
-        modelAlias: env.mistralModel,
-        resolvedModelId: "test-model-a",
-        raw: "{}",
-      }),
-    );
-    expect(source.entity_uuid).toBeTruthy();
-    expect(listOpenCognitiveItems(db, "doc")).toEqual([
-      expect.objectContaining({
-        kind: "question",
-        status: "OPEN",
-        sourceType: "message",
-        sourceId: String(userMessageId),
-        sourceEntityUuid: source.entity_uuid,
-        provenance: "shadow",
-      }),
-    ]);
-    expect(
-      db
-        .prepare(
-          "SELECT build_identity, model_epoch, model_identity FROM open_cognitive_items WHERE owner_id = ?",
-        )
-        .get("doc"),
-    ).toEqual({
-      build_identity: currentBuildIdentity(),
-      model_epoch: 1,
-      model_identity: currentModelContinuityIdentity(db, env.mistralModel).identity,
-    });
-    db.close();
+    try {
+      await processNextCognitiveJob(
+        db,
+        "observe",
+        async () => {
+          const dispatch = await runAttentiveDispatch<{ text: string }>(db, {
+            messages: [{ role: "user", content: "bounded cognition dispatch" }],
+            purpose: "maintenance",
+            lane: "curiosity_maintenance",
+            modelAlias: env.mistralModel,
+            providerId: "groq",
+            quotaBucket: "groq:test-model",
+            ownerId: "doc",
+            cognitiveJobId: job.id,
+            dispatch: async () => ({
+              providerModel: "test-model-a",
+              usage: { promptTokens: 2, completionTokens: 2 },
+              result: { text: "accepted" },
+            }),
+          });
+          return {
+            analysis: analysisWithOpenItem,
+            model: dispatch.modelAlias,
+            modelAlias: dispatch.modelAlias,
+            resolvedModelId: dispatch.resolvedModelId,
+            dispatchIdentity: dispatch.acceptedDispatchIdentity,
+            raw: "{}",
+          };
+        },
+      );
+      expect(source.entity_uuid).toBeTruthy();
+      expect(listOpenCognitiveItems(db, "doc")).toEqual([
+        expect.objectContaining({
+          kind: "question",
+          status: "OPEN",
+          sourceType: "message",
+          sourceId: String(userMessageId),
+          sourceEntityUuid: source.entity_uuid,
+          provenance: "shadow",
+        }),
+      ]);
+      expect(
+        db
+          .prepare(
+            "SELECT build_identity, model_epoch, model_identity FROM open_cognitive_items WHERE owner_id = ?",
+          )
+          .get("doc"),
+      ).toEqual({
+        build_identity: currentBuildIdentity(),
+        model_epoch: 1,
+        model_identity: currentModelContinuityIdentity(db, env.mistralModel).identity,
+      });
+    } finally {
+      env.groqApiKey = originalGroqKey;
+      db.close();
+    }
   });
 
   it("does not create a live episode from messages cut over while the job was analyzing", async () => {

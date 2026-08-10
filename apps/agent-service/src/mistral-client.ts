@@ -8,6 +8,7 @@ import {
   type AttentionLane,
   type AttentionPurpose,
 } from "./core/attention/index.js";
+import type { AcceptedDispatchIdentity } from "./core/attention/types.js";
 import { assertOutboundAllowed } from "./core/continuity/process-guards.js";
 import {
   createMistralAdapter,
@@ -140,6 +141,7 @@ export async function completeChat(
   toolCalls?: ToolCallResult[];
   usage?: TokenUsage;
   attentionRequestId?: number;
+  acceptedDispatchIdentity?: AcceptedDispatchIdentity;
 }> {
   // Missing key: no attention reservation / no limiter consumption.
   const mapped = mapLegacyLane(options.lane, options.purpose);
@@ -212,6 +214,7 @@ export async function completeChat(
     toolCalls: inner.toolCalls,
     usage: attentive.usage ?? inner.usage,
     attentionRequestId: attentive.requestId,
+    acceptedDispatchIdentity: attentive.acceptedDispatchIdentity,
   };
 }
 

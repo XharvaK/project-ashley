@@ -564,6 +564,18 @@ export function completeRequest(
   );
 }
 
+export function setRequestModelEpoch(
+  db: DatabaseSync,
+  requestId: number,
+  modelEpoch: number,
+): void {
+  db.prepare(
+    `UPDATE attention_requests
+     SET model_epoch = ?
+     WHERE id = ? AND state = 'terminal' AND outcome = 'completed'`,
+  ).run(modelEpoch, requestId);
+}
+
 /** Rolling TPM currently counted (reserved/running + actual + crash-retained). */
 export function currentTpmUsage(
   db: DatabaseSync,

@@ -35,6 +35,7 @@ import { relationshipCanRecord } from "../relationship/influence.js";
 import { defaultUnclassifiedConversational } from "../privacy/classification.js";
 import { materializeOpenCognitiveItem } from "./open-items.js";
 import { currentModelContinuityIdentity } from "../attention/continuity.js";
+import type { AcceptedDispatchIdentity } from "../attention/types.js";
 
 export type CognitionAnalysis = {
   summary: string;
@@ -79,11 +80,18 @@ export type CognitionAnalysis = {
   }>;
 };
 
-type Analyze = (transcript: string) => Promise<{
+type AnalyzeContext = {
+  db: DatabaseSync;
+  ownerId: string;
+  cognitiveJobId: number;
+};
+
+type Analyze = (transcript: string, context?: AnalyzeContext) => Promise<{
   analysis: CognitionAnalysis;
   model: string;
   modelAlias?: string;
   resolvedModelId?: string | null;
+  dispatchIdentity?: AcceptedDispatchIdentity;
   raw: string;
 }>;
 type CapabilityGate = (capability: CapabilityName) => boolean;
@@ -228,7 +236,10 @@ function parseJson(text: string): unknown {
   }
 }
 
-async function analyzeWithMistral(transcript: string): ReturnType<Analyze> {
+async function analyzeWithMistral(
+  transcript: string,
+  context?: AnalyzeContext,
+): ReturnType<Analyze> {
   if (!env.groqApiKey) {
     return {
       analysis: analysisFrom({}, transcript.replace(/\s+/g, " ").slice(0, 700)),
@@ -263,12 +274,16 @@ async function analyzeWithMistral(transcript: string): ReturnType<Analyze> {
     purpose: "exchange_cognition",
     route: "utility_bulk",
     lane: "exchange_cognition",
+    ownerId: context?.ownerId,
+    cognitiveJobId: context?.cognitiveJobId,
+    attentionDb: context?.db,
   });
   return {
     analysis: analysisFrom(parseJson(response.text), transcript.slice(0, 700)),
     model: response.model,
     modelAlias: response.modelAlias,
     resolvedModelId: response.resolvedModelId,
+    dispatchIdentity: response.acceptedDispatchIdentity,
     raw: response.text,
   };
 }
@@ -384,7 +399,11 @@ export async function processNextCognitiveJob(
     const transcript = messages
       .map((message) => `[message:${message.id} role:${message.role}] ${message.text}`)
       .join("\n");
-    const result = await analyze(transcript);
+    const result = await analyze(transcript, {
+      db,
+      ownerId: job.ownerId,
+      cognitiveJobId: job.id,
+    });
     db.exec("BEGIN IMMEDIATE");
     try {
       const recallCanInfluence = canInfluence("recall");
@@ -453,10 +472,18 @@ export async function processNextCognitiveJob(
           | undefined;
         if (!source?.entity_uuid) continue;
         try {
-          const modelContinuity = currentModelContinuityIdentity(
-            db,
-            env.mistralModel,
-          );
+          const modelContinuity = currentModelContinuityIdentity(db, env.mistralModel);
+          const dispatchIdentity = result.dispatchIdentity;
+          const dispatchIsCurrent =
+            dispatchIdentity != null &&
+            dispatchIdentity.modelAlias === modelContinuity.alias &&
+            dispatchIdentity.modelIdentity === modelContinuity.identity &&
+            dispatchIdentity.modelEpoch === modelContinuity.modelEpoch &&
+            dispatchIdentity.contractId === currentContractId() &&
+            dispatchIdentity.buildIdentity === currentBuildIdentity();
+          const itemProvenance = recallCanInfluence && dispatchIsCurrent
+            ? "live"
+            : "shadow";
           materializeOpenCognitiveItem(
             db,
             {
@@ -470,12 +497,13 @@ export async function processNextCognitiveJob(
               },
               origin: "cognition",
               semanticKeyMaterial: openItem.semanticKeyMaterial,
-              provenance: recallCanInfluence ? "live" : "shadow",
+              provenance: itemProvenance,
               sourceCapability: "recall",
               contractId: currentContractId(),
               buildIdentity: currentBuildIdentity(),
-              modelEpoch: modelContinuity.modelEpoch,
-              modelIdentity: modelContinuity.identity ?? "",
+              modelEpoch: dispatchIdentity?.modelEpoch ?? 0,
+              modelIdentity: dispatchIdentity?.modelIdentity ?? "",
+              dispatchIdentity,
             },
             { inTransaction: true },
           );

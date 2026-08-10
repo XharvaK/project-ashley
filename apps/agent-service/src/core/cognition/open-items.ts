@@ -13,7 +13,11 @@ import {
   currentContractId,
   type CapabilityName,
 } from "../rollout/capabilities.js";
-import { currentModelContinuityIdentity } from "../attention/continuity.js";
+import {
+  currentModelContinuityIdentity,
+  modelContinuityIdentity,
+} from "../attention/continuity.js";
+import type { AcceptedDispatchIdentity } from "../attention/types.js";
 import { env } from "../../env.js";
 import { activeWithdrawal } from "../relationship/repair.js";
 import {
@@ -260,6 +264,7 @@ export type OpenCognitiveItemProposal = {
   buildIdentity: string;
   modelEpoch: number;
   modelIdentity?: string;
+  dispatchIdentity?: AcceptedDispatchIdentity;
   sourceRevision?: string;
   dataClassification?: DataClassification;
 };
@@ -495,6 +500,77 @@ function validateCapability(
   return capability;
 }
 
+function validateAcceptedDispatchIdentity(
+  db: DatabaseSync,
+  ownerId: string,
+  identity: AcceptedDispatchIdentity | undefined,
+  modelIdentity: string,
+  modelEpoch: number,
+): void {
+  if (!identity) rejectMaterialization("oci_dispatch_identity_missing");
+  if (
+    !Number.isSafeInteger(identity.requestId) ||
+    identity.requestId <= 0 ||
+    !Number.isSafeInteger(identity.dispatchSequence) ||
+    identity.dispatchSequence <= 0 ||
+    !Number.isInteger(identity.modelEpoch) ||
+    identity.modelEpoch <= 0
+  ) {
+    rejectMaterialization("oci_dispatch_identity_invalid");
+  }
+  if (identity.ownerId !== ownerId) {
+    rejectMaterialization("oci_dispatch_owner_mismatch");
+  }
+  const row = db
+    .prepare(
+      `SELECT owner_id, cognitive_job_id, route_alias, model_alias,
+              resolved_model_id, model_epoch, dispatch_sequence, state, outcome
+       FROM attention_requests WHERE id = ?`,
+    )
+    .get(identity.requestId) as
+    | {
+        owner_id?: string;
+        cognitive_job_id?: number | null;
+        route_alias?: string | null;
+        model_alias?: string;
+        resolved_model_id?: string | null;
+        model_epoch?: number | null;
+        dispatch_sequence?: number | null;
+        state?: string;
+        outcome?: string | null;
+      }
+    | undefined;
+  if (!row || row.owner_id !== ownerId) {
+    rejectMaterialization("oci_dispatch_owner_mismatch");
+  }
+  if (row.state !== "terminal" || row.outcome !== "completed") {
+    rejectMaterialization("oci_dispatch_not_completed");
+  }
+  if (
+    row.model_alias !== identity.modelAlias ||
+    (row.route_alias ?? null) !== identity.routeAlias ||
+    Number(row.dispatch_sequence ?? 0) !== identity.dispatchSequence ||
+    Number(row.model_epoch ?? 0) !== identity.modelEpoch ||
+    (row.resolved_model_id ?? null) !== identity.resolvedModelId
+  ) {
+    rejectMaterialization("oci_dispatch_identity_mismatch");
+  }
+  if (
+    identity.cognitiveJobId == null ||
+    Number(row.cognitive_job_id ?? 0) !== identity.cognitiveJobId
+  ) {
+    rejectMaterialization("oci_dispatch_job_mismatch");
+  }
+  if (
+    modelContinuityIdentity(identity.modelAlias, identity.resolvedModelId) !==
+      identity.modelIdentity ||
+    identity.modelIdentity !== modelIdentity ||
+    identity.modelEpoch !== modelEpoch
+  ) {
+    rejectMaterialization("oci_dispatch_provenance_mismatch");
+  }
+}
+
 function validateProposal(
   db: DatabaseSync,
   proposal: OpenCognitiveItemProposal,
@@ -583,15 +659,16 @@ function validateProposal(
   }
   const currentModel = currentModelContinuityIdentity(db, env.mistralModel);
   if (origin === "cognition") {
-    if (currentModel.identity == null || currentModel.modelEpoch <= 0) {
+    if (currentModel.alias.trim() === "") {
       rejectMaterialization("oci_model_continuity_unavailable");
     }
-    if (modelIdentity !== currentModel.identity) {
-      rejectMaterialization("oci_model_identity_mismatch");
-    }
-    if (proposal.modelEpoch !== currentModel.modelEpoch) {
-      rejectMaterialization("oci_model_epoch_mismatch");
-    }
+    validateAcceptedDispatchIdentity(
+      db,
+      ownerId,
+      proposal.dispatchIdentity,
+      modelIdentity,
+      proposal.modelEpoch,
+    );
   } else if (modelIdentity !== "" || proposal.modelEpoch !== 0) {
     rejectMaterialization("oci_model_continuity_unexpected");
   }

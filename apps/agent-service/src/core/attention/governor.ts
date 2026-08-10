@@ -16,17 +16,23 @@ import {
   getRequest,
   insertQueuedRequest,
   markRunning,
+  setRequestModelEpoch,
   tryAdmitRequest,
 } from "./ledger.js";
 import { monthlyUsageSummary } from "./daily.js";
 import { quotaContractFor } from "../model-routing/router.js";
-import type { AttentionClock, AttentionLane, AttentionPurpose } from "./types.js";
+import type {
+  AcceptedDispatchIdentity,
+  AttentionClock,
+  AttentionLane,
+  AttentionPurpose,
+} from "./types.js";
 import { mapPurposeToLane, realClock } from "./types.js";
 import {
   DECLARED_CONTRACT_ID,
   MODEL_SENSITIVE_SET_FOR_CONTRACT,
 } from "./contract-material.js";
-import { currentBuildIdentity } from "../rollout/capabilities.js";
+import { currentBuildIdentity, currentContractId } from "../rollout/capabilities.js";
 import { currentModelEpoch } from "./continuity.js";
 
 export type AttentionDispatchInput = {
@@ -63,6 +69,7 @@ export type AttentionDispatchResult<T> = {
   requestId: number;
   modelAlias: string;
   resolvedModelId: string | null;
+  acceptedDispatchIdentity: AcceptedDispatchIdentity;
   result: T;
   usage?: { promptTokens: number; completionTokens: number };
 };
@@ -113,6 +120,8 @@ export async function runAttentiveDispatch<T>(
     input.modelAlias ??
     (providerId === "mistral" ? env.mistralModel : env.groqDefaultModel);
   const quotaBucket = input.quotaBucket ?? `${providerId}:${modelAlias}`;
+  const dispatchContractId = currentContractId();
+  const dispatchBuildIdentity = currentBuildIdentity();
   // Provider-specific key gate — no attention reservation / no limiter consumption.
   if (providerId === "mistral" && !env.mistralApiKey) {
     throw new AppError(
@@ -231,6 +240,38 @@ export async function runAttentiveDispatch<T>(
               code: "attention_deadline",
             });
           }
+          const continuity = applyModelContinuity(
+            db,
+            {
+              alias: modelAlias,
+              resolvedModelId: resolved.resolvedModelId,
+              unresolvedAlias: resolved.unresolvedAlias,
+              dispatchSequence,
+            },
+            input.demoteActiveSensitive ?? defaultDemote,
+            clock,
+          );
+          if (continuity.kind === "stale") {
+            completeRequest(
+              db,
+              requestId,
+              {
+                outcome: "error",
+                errorClass: "stale_model_continuity",
+                resolvedModelId: resolved.resolvedModelId,
+                actualInput: dispatched.usage?.promptTokens ?? null,
+                actualOutput: dispatched.usage?.completionTokens ?? null,
+                retainUnknownBudget: !dispatched.usage,
+              },
+              clock,
+            );
+            throw Object.assign(new Error("stale_model_continuity"), {
+              code: "stale_model_continuity",
+            });
+          }
+          const modelEpoch = resolved.resolvedModelId == null
+            ? 0
+            : continuity.epoch;
           completeRequest(
             db,
             requestId,
@@ -243,21 +284,27 @@ export async function runAttentiveDispatch<T>(
             },
             clock,
           );
-          applyModelContinuity(
-            db,
-            {
-              alias: modelAlias,
-              resolvedModelId: resolved.resolvedModelId,
-              unresolvedAlias: resolved.unresolvedAlias,
-              dispatchSequence,
-            },
-            input.demoteActiveSensitive ?? defaultDemote,
-            clock,
-          );
+          setRequestModelEpoch(db, requestId, modelEpoch);
+          const acceptedDispatchIdentity: AcceptedDispatchIdentity = {
+            requestId,
+            dispatchSequence,
+            routeAlias: input.routeAlias ?? null,
+            modelAlias,
+            resolvedModelId: resolved.resolvedModelId,
+            modelEpoch,
+            modelIdentity: resolved.resolvedModelId == null
+              ? null
+              : `model-continuity-v1:${modelAlias}|${resolved.resolvedModelId}`,
+            contractId: dispatchContractId,
+            buildIdentity: dispatchBuildIdentity,
+            ownerId: input.ownerId ?? null,
+            cognitiveJobId: input.cognitiveJobId ?? null,
+          };
           return {
             requestId,
             modelAlias,
             resolvedModelId: resolved.resolvedModelId,
+            acceptedDispatchIdentity,
             result: dispatched.result as T,
             usage: dispatched.usage,
           };

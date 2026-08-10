@@ -25,6 +25,17 @@ export function resolveProviderModelId(
   return { resolvedModelId: returned, unresolvedAlias: false };
 }
 
+export function modelContinuityIdentity(
+  alias: string,
+  resolvedModelId: string | null,
+): string | null {
+  const normalizedAlias = alias.trim();
+  const normalizedResolvedModelId = resolvedModelId?.trim() ?? "";
+  return normalizedResolvedModelId.length === 0
+    ? null
+    : `model-continuity-v1:${normalizedAlias}|${normalizedResolvedModelId}`;
+}
+
 /**
  * Apply continuity using DB-global dispatch_sequence ordering.
  * Older responses cannot advance baseline/epoch/demotion.
@@ -177,10 +188,7 @@ export function currentModelContinuityIdentity(
     alias: normalizedAlias,
     resolvedModelId,
     modelEpoch,
-      identity:
-      resolvedModelId == null
-        ? null
-        : `model-continuity-v1:${normalizedAlias}|${resolvedModelId}`,
+    identity: modelContinuityIdentity(normalizedAlias, resolvedModelId),
   };
 }
 
