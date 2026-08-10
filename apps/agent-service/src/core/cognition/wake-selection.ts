@@ -48,11 +48,16 @@ export function explainOpenCognitiveReviewDueQuery(
 ): SQLiteQueryPlanRow[] {
   return db.prepare(
     `EXPLAIN QUERY PLAN
-     SELECT a.item_id
-     FROM open_cognitive_item_attention a INDEXED BY idx_open_cognitive_item_attention_review_due
-     JOIN open_cognitive_items o ON o.id = a.item_id
+     SELECT raw.id
+     FROM (
+       SELECT o.id
+       FROM open_cognitive_items o INDEXED BY idx_open_cognitive_items_owner_status_id
+       WHERE o.owner_id = ? AND o.status = 'OPEN'
+       ORDER BY o.id ASC
+       LIMIT 32
+     ) raw
+     JOIN open_cognitive_item_attention a ON a.item_id = raw.id
      WHERE a.review_requested_at IS NOT NULL
-       AND o.owner_id = ? AND o.status = 'OPEN'
      LIMIT ?`,
   ).all(ownerId, Math.max(1, limit)) as SQLiteQueryPlanRow[];
 }

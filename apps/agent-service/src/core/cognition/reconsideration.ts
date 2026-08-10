@@ -22,6 +22,8 @@ export const OPEN_COGNITIVE_ITEM_DELAY_DURATIONS_MS = {
 /** Typed policy constant, not an environment variable or semantic score. */
 export const OPEN_COGNITIVE_ITEM_CONSIDERATION_REVIEW_THRESHOLD = 3;
 const MAX_REVIEW_REQUESTS = 8;
+const REVIEW_RAW_PAGE_SIZE = 32;
+const REVIEW_MAX_RAW_PAGES = 4;
 const MAX_RESOLUTION_EVIDENCE_REFS = 4;
 
 export type OpenCognitiveItemDecisionResult = {
@@ -248,22 +250,39 @@ export function claimOpenCognitiveItemReviewRequests(
     )
     .get(ownerId) as { before_item_id?: number } | undefined;
   const beforeItemId = Math.max(0, Number(row?.before_item_id ?? 0));
-  let requests = listOpenCognitiveItems(db, ownerId, {
-    status: "OPEN",
-    reviewRequested: true,
-    beforeId: beforeItemId > 0 ? beforeItemId : undefined,
-    limit: boundedLimit,
-    order: "id_desc",
-  });
-  if (requests.length === 0 && beforeItemId > 0) {
-    requests = listOpenCognitiveItems(db, ownerId, {
+  let scanBeforeItemId = beforeItemId;
+  let nextBeforeItemId = beforeItemId;
+  let wrapped = false;
+  let pages = 0;
+  const requests: OpenCognitiveItemRecord[] = [];
+  while (pages < REVIEW_MAX_RAW_PAGES && requests.length < boundedLimit) {
+    const raw = listOpenCognitiveItems(db, ownerId, {
       status: "OPEN",
-      reviewRequested: true,
-      limit: boundedLimit,
+      beforeId: scanBeforeItemId > 0 ? scanBeforeItemId : undefined,
+      limit: REVIEW_RAW_PAGE_SIZE,
       order: "id_desc",
     });
+    if (raw.length === 0) {
+      if (scanBeforeItemId > 0 && !wrapped) {
+        scanBeforeItemId = 0;
+        nextBeforeItemId = 0;
+        wrapped = true;
+        continue;
+      }
+      nextBeforeItemId = 0;
+      break;
+    }
+    pages += 1;
+    for (const item of raw) {
+      scanBeforeItemId = item.id;
+      nextBeforeItemId = item.id;
+      if (item.attention?.reviewRequestedAt != null) {
+        requests.push(item);
+        if (requests.length >= boundedLimit) break;
+      }
+    }
+    if (raw.length < REVIEW_RAW_PAGE_SIZE) break;
   }
-  const nextBeforeItemId = requests.at(-1)?.id ?? 0;
   db.prepare(
     `INSERT INTO open_cognitive_item_review_cursor
        (owner_id, before_item_id, updated_at)

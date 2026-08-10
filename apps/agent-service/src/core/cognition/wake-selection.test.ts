@@ -8,6 +8,7 @@ import {
 import {
   materializeOpenCognitiveItem,
   countOpenCognitiveItemReviewDue,
+  OPEN_COGNITIVE_REVIEW_DUE_COUNT_SQL,
   type OpenCognitiveItemRecord,
 } from "./open-items.js";
 import {
@@ -81,7 +82,7 @@ function forgetSources(db: DatabaseSync, items: OpenCognitiveItemRecord[]): void
 
 function instrumentAttentionVisits(db: DatabaseSync): () => number {
   let visits = 0;
-  db.function("record_wake_attention_visit", (value: string | null) => {
+  db.function("record_wake_attention_visit", (value) => {
     visits += 1;
     return value;
   });
@@ -95,6 +96,71 @@ function instrumentAttentionVisits(db: DatabaseSync): () => number {
     FROM main.open_cognitive_item_attention;
   `);
   return () => visits;
+}
+
+function seedCrossOwnerReviewFixture(db: DatabaseSync, size: number): void {
+  const insertItem = db.prepare(
+    `INSERT INTO open_cognitive_items
+       (owner_id, entity_uuid, kind, status, semantic_summary,
+        source_type, source_id, source_entity_uuid, semantic_key_hash,
+        source_capability, contract_id, provenance, source_revision, origin,
+        build_identity, model_epoch, data_classification, status_reason,
+        created_at, updated_at)
+     VALUES (?, ?, 'question', 'OPEN', ?, 'question', ?, ?, ?,
+             'reading', ?, 'shadow', '', 'manual', ?, 0, 'never_public',
+             'created', ?, ?)`,
+  );
+  const insertAttention = db.prepare(
+    `INSERT INTO open_cognitive_item_attention
+       (item_id, delay_class, defer_until, last_considered_at,
+        consideration_count, last_outcome_code, review_requested_at,
+        updated_at)
+     VALUES (?, 'none', NULL, NULL, 0, NULL, ?, ?)`,
+  );
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    for (const owner of [OWNER_ID, "other-owner"]) {
+      for (let index = 0; index < size; index += 1) {
+        const key = `${owner}:${index}`;
+        const hash = Buffer.from(key).toString("hex").padEnd(64, "0").slice(0, 64);
+        const result = insertItem.run(
+          owner,
+          `review-item:${key}`,
+          `Review item ${key}`,
+          String(index + 1),
+          `review-source:${key}`,
+          hash,
+          currentContractId(),
+          currentBuildIdentity(),
+          NOW.toISOString(),
+          NOW.toISOString(),
+        );
+        insertAttention.run(
+          Number(result.lastInsertRowid),
+          owner === "other-owner" ? NOW.toISOString() : null,
+          NOW.toISOString(),
+        );
+      }
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+function instrumentReviewDueCount(db: DatabaseSync, ownerId: string): number {
+  let visits = 0;
+  db.function("record_review_due_visit", (itemId) => {
+    visits += 1;
+    return itemId;
+  });
+  const instrumented = OPEN_COGNITIVE_REVIEW_DUE_COUNT_SQL.replace(
+    "/* REVIEW_VISIT */",
+    "record_review_due_visit(a.item_id) IS NOT NULL AND",
+  );
+  db.prepare(instrumented).get(ownerId);
+  return visits;
 }
 
 describe("bounded OCI wake selection", () => {
@@ -192,7 +258,8 @@ describe("bounded OCI wake selection", () => {
       "UPDATE open_cognitive_item_attention SET review_requested_at = ?",
     ).run(NOW.toISOString());
     const reviewPlan = explainOpenCognitiveReviewDueQuery(db, OWNER_ID, 9);
-    expect(reviewPlan.some((row) => row.detail.includes("idx_open_cognitive_item_attention_review_due"))).toBe(true);
+    expect(reviewPlan.some((row) => row.detail.includes("idx_open_cognitive_items_owner_status_id"))).toBe(true);
+    expect(reviewPlan.some((row) => row.detail.includes("TEMP B-TREE"))).toBe(false);
     expect(countOpenCognitiveItemReviewDue(db, OWNER_ID)).toBe(9);
     db.close();
   });
@@ -246,6 +313,18 @@ describe("bounded OCI wake selection", () => {
       expect(result.items).toHaveLength(0);
       expect(result.scanned).toBeLessThanOrEqual(32);
       expect(visits()).toBe(Math.min(size, 32));
+      db.close();
+    },
+  );
+
+  it.each([10, 100, 1000])(
+    "bounds owner review work with a %i-row cross-owner due flood",
+    (size) => {
+      const db = openNuclearDb(new DatabaseSync(":memory:"));
+      seedCrossOwnerReviewFixture(db, size);
+
+      expect(countOpenCognitiveItemReviewDue(db, OWNER_ID)).toBe(0);
+      expect(instrumentReviewDueCount(db, OWNER_ID)).toBe(Math.min(size, 32));
       db.close();
     },
   );

@@ -1229,22 +1229,28 @@ export type OpenCognitiveContinuityStatus = {
   unavailableByReason: Record<string, number>;
 };
 
+export const OPEN_COGNITIVE_REVIEW_DUE_COUNT_SQL = `
+  SELECT COUNT(*) AS count FROM (
+    SELECT a.item_id
+    FROM (
+      SELECT o.id
+      FROM open_cognitive_items o INDEXED BY idx_open_cognitive_items_owner_status_id
+      WHERE o.owner_id = ? AND o.status = 'OPEN'
+      ORDER BY o.id ASC
+      LIMIT 32
+    ) raw
+    JOIN open_cognitive_item_attention a ON a.item_id = raw.id
+    WHERE /* REVIEW_VISIT */ a.review_requested_at IS NOT NULL
+    LIMIT 9
+  )`;
+
 /** Indexed wake-path check for the existing Reflection review signal. */
 export function countOpenCognitiveItemReviewDue(
   db: DatabaseSync,
   ownerId: string,
 ): number {
   const row = db
-    .prepare(
-      `SELECT COUNT(*) AS count FROM (
-         SELECT a.item_id
-         FROM open_cognitive_item_attention a INDEXED BY idx_open_cognitive_item_attention_review_due
-         JOIN open_cognitive_items o ON o.id = a.item_id
-         WHERE a.review_requested_at IS NOT NULL
-           AND o.owner_id = ? AND o.status = 'OPEN'
-         LIMIT 9
-       )`,
-    )
+    .prepare(OPEN_COGNITIVE_REVIEW_DUE_COUNT_SQL)
     .get(ownerId) as { count?: number } | undefined;
   return Number(row?.count ?? 0);
 }
