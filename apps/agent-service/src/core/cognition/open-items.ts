@@ -82,6 +82,7 @@ export type OpenCognitiveItemRecord = {
   semanticKeyHash: string;
   semanticIdentityHash: string;
   continuityGeneration: string;
+  generationOrder: number;
   sourceCapability: string;
   contractId: string;
   provenance: OpenCognitiveItemProvenance;
@@ -113,6 +114,7 @@ type ItemRow = {
   semantic_key_hash: string;
   semantic_identity_hash: string;
   continuity_generation: string;
+  generation_order: number;
   source_capability: string;
   contract_id: string;
   provenance: OpenCognitiveItemProvenance;
@@ -154,6 +156,7 @@ function mapItem(row: ItemRow): OpenCognitiveItemRecord {
     semanticKeyHash: row.semantic_key_hash,
     semanticIdentityHash: row.semantic_identity_hash ?? "",
     continuityGeneration: row.continuity_generation ?? "",
+    generationOrder: Number(row.generation_order ?? 0),
     sourceCapability: row.source_capability,
     contractId: row.contract_id,
     provenance: row.provenance,
@@ -242,6 +245,7 @@ export function listOpenCognitiveItems(
          o.semantic_summary, o.source_type, o.source_id,
          o.source_entity_uuid, o.semantic_key_hash,
          o.semantic_identity_hash, o.continuity_generation,
+         o.generation_order,
          o.source_capability,
          o.contract_id, o.provenance, o.source_revision, o.origin,
          o.build_identity, o.model_epoch, o.model_identity,
@@ -627,6 +631,7 @@ function validateProposal(
   semanticKeyHash: string;
   semanticIdentityHash: string;
   continuityGeneration: string;
+  generationOrder: number;
   sourceCapability: CapabilityName;
   contractId: string;
   provenance: OpenCognitiveItemProvenance;
@@ -755,6 +760,10 @@ function validateProposal(
     semanticKeyHash,
     semanticIdentityHash: semanticIdentity,
     continuityGeneration: continuity,
+    generationOrder:
+      origin === "cognition"
+        ? proposal.dispatchIdentity!.dispatchSequence
+        : 0,
     sourceCapability,
     contractId: proposal.contractId.trim(),
     provenance: proposal.provenance,
@@ -777,6 +786,7 @@ type ExistingIdentityRow = {
   source_revision: string;
   semantic_identity_hash: string;
   continuity_generation: string;
+  generation_order: number;
   source_capability: string;
   contract_id: string;
   provenance: string;
@@ -786,6 +796,63 @@ type ExistingIdentityRow = {
   model_identity: string;
   data_classification: string;
 };
+
+type ContinuityGenerationDecision = {
+  generationOrder: number;
+  knownGeneration: boolean;
+  staleArrival: boolean;
+};
+
+function decideContinuityGenerationOrder(
+  db: DatabaseSync,
+  validated: ReturnType<typeof validateProposal>,
+): ContinuityGenerationDecision {
+  const known = db
+    .prepare(
+      `SELECT generation_order
+       FROM open_cognitive_items
+       WHERE owner_id = ? AND semantic_identity_hash = ?
+         AND continuity_generation = ?
+       LIMIT 1`,
+    )
+    .get(
+      validated.ownerId,
+      validated.semanticIdentityHash,
+      validated.continuityGeneration,
+    ) as { generation_order?: number } | undefined;
+  if (known) {
+    return {
+      generationOrder: Math.max(0, Number(known.generation_order ?? 0)),
+      knownGeneration: true,
+      staleArrival: false,
+    };
+  }
+
+  const maximum = db
+    .prepare(
+      `SELECT COALESCE(MAX(generation_order), 0) AS generation_order
+       FROM open_cognitive_items
+       WHERE owner_id = ? AND semantic_identity_hash = ?`,
+    )
+    .get(validated.ownerId, validated.semanticIdentityHash) as {
+      generation_order?: number;
+    } | undefined;
+  const maximumOrder = Math.max(0, Number(maximum?.generation_order ?? 0));
+  const generationOrder = validated.origin === "cognition"
+    ? validated.generationOrder
+    : maximumOrder + 1;
+  if (!Number.isSafeInteger(generationOrder) || generationOrder <= 0) {
+    rejectMaterialization("oci_generation_order_invalid");
+  }
+  if (generationOrder === maximumOrder && maximumOrder > 0) {
+    rejectMaterialization("oci_generation_order_conflict");
+  }
+  return {
+    generationOrder,
+    knownGeneration: false,
+    staleArrival: generationOrder < maximumOrder,
+  };
+}
 
 function supersedeStaleSourceRevisions(
   db: DatabaseSync,
@@ -844,6 +911,7 @@ function supersedeStaleSourceRevisions(
 function supersedeStaleContinuityGenerations(
   db: DatabaseSync,
   validated: ReturnType<typeof validateProposal>,
+  generationOrder: number,
   nowIso: string,
 ): void {
   const staleRows = db
@@ -851,13 +919,15 @@ function supersedeStaleContinuityGenerations(
       `SELECT id
        FROM open_cognitive_items
        WHERE owner_id = ? AND semantic_identity_hash = ?
-         AND continuity_generation <> ? AND status = 'OPEN'
+          AND continuity_generation <> ? AND status = 'OPEN'
+          AND generation_order < ?
        ORDER BY id ASC`,
     )
     .all(
       validated.ownerId,
       validated.semanticIdentityHash,
       validated.continuityGeneration,
+      generationOrder,
     ) as Array<{ id: number }>;
 
   for (const row of staleRows) {
@@ -902,22 +972,37 @@ export function materializeOpenCognitiveItem(
     const validated = validateProposal(db, proposal);
     const createdAt = new Date().toISOString();
     supersedeStaleSourceRevisions(db, validated, createdAt);
-    supersedeStaleContinuityGenerations(db, validated, createdAt);
+    const generation = decideContinuityGenerationOrder(db, validated);
+    if (!generation.knownGeneration && !generation.staleArrival) {
+      supersedeStaleContinuityGenerations(
+        db,
+        validated,
+        generation.generationOrder,
+        createdAt,
+      );
+    }
+    const initialStatus: OpenCognitiveItemStatus = generation.staleArrival
+      ? "SUPERSEDED"
+      : "OPEN";
+    const initialReason = generation.staleArrival
+      ? "stale_continuity_generation"
+      : "created";
     const insert = db.prepare(
       `INSERT INTO open_cognitive_items
          (owner_id, entity_uuid, kind, status, semantic_summary,
           source_type, source_id, source_entity_uuid, semantic_key_hash,
-          semantic_identity_hash, continuity_generation,
+          semantic_identity_hash, continuity_generation, generation_order,
           source_capability, contract_id, provenance, source_revision, origin,
           build_identity, model_epoch, model_identity, data_classification, status_reason,
           created_at, updated_at)
-       VALUES (?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(owner_id, semantic_key_hash) DO NOTHING`,
     );
     const result = insert.run(
       validated.ownerId,
       assignNewEntityUuid(),
       validated.kind,
+      initialStatus,
       validated.semanticSummary,
       validated.sourceType,
       validated.sourceId,
@@ -925,6 +1010,7 @@ export function materializeOpenCognitiveItem(
       validated.semanticKeyHash,
       validated.semanticIdentityHash,
       validated.continuityGeneration,
+      generation.generationOrder,
       validated.sourceCapability,
       validated.contractId,
       validated.provenance,
@@ -934,7 +1020,7 @@ export function materializeOpenCognitiveItem(
       validated.modelEpoch,
       validated.modelIdentity,
       validated.dataClassification,
-      "created",
+      initialReason,
       createdAt,
       createdAt,
     );
@@ -943,7 +1029,7 @@ export function materializeOpenCognitiveItem(
       .prepare(
          `SELECT id, source_entity_uuid, kind
                 , semantic_summary, source_type, source_id, source_revision,
-           semantic_identity_hash, continuity_generation,
+            semantic_identity_hash, continuity_generation, generation_order,
            source_capability, contract_id, provenance, origin, build_identity,
            model_epoch, model_identity, data_classification
          FROM open_cognitive_items
@@ -964,6 +1050,7 @@ export function materializeOpenCognitiveItem(
       existing.source_revision === validated.sourceRevision &&
       existing.semantic_identity_hash === validated.semanticIdentityHash &&
       existing.continuity_generation === validated.continuityGeneration &&
+      Number(existing.generation_order) === generation.generationOrder &&
       existing.source_capability === validated.sourceCapability &&
       existing.contract_id === validated.contractId &&
       existing.provenance === validated.provenance &&
@@ -985,8 +1072,14 @@ export function materializeOpenCognitiveItem(
       db.prepare(
         `INSERT INTO open_cognitive_item_transitions
            (item_id, owner_id, from_status, to_status, reason, created_at)
-         VALUES (?, ?, NULL, 'OPEN', 'created', ?)`,
-    ).run(existing.id, validated.ownerId, createdAt);
+         VALUES (?, ?, NULL, ?, ?, ?)`,
+      ).run(
+        existing.id,
+        validated.ownerId,
+        initialStatus,
+        initialReason,
+        createdAt,
+      );
     }
     if (ownsTransaction) db.exec("COMMIT");
     const entityRow = db

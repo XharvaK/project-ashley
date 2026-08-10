@@ -104,11 +104,32 @@ function startCompetingChild(
   readyPath: string,
   gatePath: string,
   resultPath: string,
+  controlledTransaction?: {
+    attemptPath: string;
+    transactionReadyPath: string;
+    commitGatePath: string;
+  },
 ): { ready: Promise<void>; done: Promise<{ code: number | null; stderr: string }> } {
   const childPath = fileURLToPath(new URL("./continuity-generation-child.ts", import.meta.url));
   const child = spawn(
     process.execPath,
-    ["--import", "tsx", childPath, dbPath, proposalPath, readyPath, gatePath, resultPath],
+    [
+      "--import",
+      "tsx",
+      childPath,
+      dbPath,
+      proposalPath,
+      readyPath,
+      gatePath,
+      resultPath,
+      ...(controlledTransaction
+        ? [
+            controlledTransaction.attemptPath,
+            controlledTransaction.transactionReadyPath,
+            controlledTransaction.commitGatePath,
+          ]
+        : []),
+    ],
     { cwd: dirname(dirname(dirname(childPath))), stdio: ["ignore", "ignore", "pipe"] },
   );
   let stderr = "";
@@ -122,6 +143,36 @@ function startCompetingChild(
 }
 
 describe("OCI continuity generations", () => {
+  it("keeps A/E3 current when an earlier accepted A/E1 materializes late", async () => {
+    const originalGroqKey = env.groqApiKey;
+    env.groqApiKey = "test-key";
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const jobId = enqueueCognitiveJob(db, {
+      ownerId: "doc",
+      kind: "consolidate_thread",
+      sourceKey: "late-continuity-generation-test",
+    });
+    const source = makeQuestion(db, "late-continuity-question");
+    try {
+      const aE1 = await acceptedDispatch(db, jobId, "model-a");
+      const bE2 = await acceptedDispatch(db, jobId, "model-b");
+      materializeOpenCognitiveItem(db, proposal(source, bE2));
+      const aE3 = await acceptedDispatch(db, jobId, "model-a");
+      const newest = materializeOpenCognitiveItem(db, proposal(source, aE3));
+
+      const late = materializeOpenCognitiveItem(db, proposal(source, aE1));
+
+      expect(late.created).toBe(true);
+      expect(late.item.status).toBe("SUPERSEDED");
+      expect(listOpenCognitiveItems(db, "doc", { status: "OPEN" })).toEqual([
+        expect.objectContaining({ id: newest.item.id }),
+      ]);
+    } finally {
+      env.groqApiKey = originalGroqKey;
+      db.close();
+    }
+  });
+
   it("creates one current successor for A/E1 -> B/E2 -> A/E3 and converges retries", async () => {
     const originalGroqKey = env.groqApiKey;
     env.groqApiKey = "test-key";
@@ -162,6 +213,9 @@ describe("OCI continuity generations", () => {
       expect(getOpenCognitiveItem(db, "doc", first.item.entityUuid)).toMatchObject({
         status: "SUPERSEDED",
       });
+      expect(listOpenCognitiveItems(db, "doc", { status: "OPEN" })).toEqual([
+        expect.objectContaining({ id: third.item.id }),
+      ]);
 
       const distinct = materializeOpenCognitiveItem(
         db,
@@ -227,6 +281,117 @@ describe("OCI continuity generations", () => {
       env.groqApiKey = originalGroqKey;
       env.ashleyReleaseId = originalBuild;
       db.close();
+    }
+  });
+
+  it("keeps the authoritative newest generation when an older writer commits later", async () => {
+    const originalGroqKey = env.groqApiKey;
+    env.groqApiKey = "test-key";
+    const directory = mkdtempSync(join(tmpdir(), "ashley-ordered-continuity-"));
+    const dbPath = join(directory, "nuclear.db");
+    const db = openNuclearDb(new DatabaseSync(dbPath));
+    const jobId = enqueueCognitiveJob(db, {
+      ownerId: "doc",
+      kind: "consolidate_thread",
+      sourceKey: "ordered-concurrent-generation-test",
+    });
+    const source = makeQuestion(db, "ordered-concurrent-question");
+    try {
+      const olderDispatch = await acceptedDispatch(db, jobId, "model-older");
+      const newerDispatch = await acceptedDispatch(db, jobId, "model-newer");
+      const olderProposalPath = join(directory, "older-proposal.json");
+      const newerProposalPath = join(directory, "newer-proposal.json");
+      writeFileSync(
+        olderProposalPath,
+        JSON.stringify(proposal(source, olderDispatch)),
+        "utf8",
+      );
+      writeFileSync(
+        newerProposalPath,
+        JSON.stringify(proposal(source, newerDispatch)),
+        "utf8",
+      );
+      db.close();
+
+      const newerPaths = {
+        ready: join(directory, "newer-ready"),
+        gate: join(directory, "newer-gate"),
+        result: join(directory, "newer-result"),
+        attempt: join(directory, "newer-attempt"),
+        transactionReady: join(directory, "newer-transaction-ready"),
+        commit: join(directory, "newer-commit"),
+      };
+      const olderPaths = {
+        ready: join(directory, "older-ready"),
+        gate: join(directory, "older-gate"),
+        result: join(directory, "older-result"),
+        attempt: join(directory, "older-attempt"),
+        transactionReady: join(directory, "older-transaction-ready"),
+        commit: join(directory, "older-commit"),
+      };
+      const newer = startCompetingChild(
+        dbPath,
+        newerProposalPath,
+        newerPaths.ready,
+        newerPaths.gate,
+        newerPaths.result,
+        {
+          attemptPath: newerPaths.attempt,
+          transactionReadyPath: newerPaths.transactionReady,
+          commitGatePath: newerPaths.commit,
+        },
+      );
+      const older = startCompetingChild(
+        dbPath,
+        olderProposalPath,
+        olderPaths.ready,
+        olderPaths.gate,
+        olderPaths.result,
+        {
+          attemptPath: olderPaths.attempt,
+          transactionReadyPath: olderPaths.transactionReady,
+          commitGatePath: olderPaths.commit,
+        },
+      );
+      await Promise.all([newer.ready, older.ready]);
+
+      writeFileSync(newerPaths.gate, "go", "utf8");
+      await waitForFile(newerPaths.transactionReady);
+      writeFileSync(olderPaths.gate, "go", "utf8");
+      await waitForFile(olderPaths.attempt);
+      writeFileSync(newerPaths.commit, "commit", "utf8");
+      const newerExit = await newer.done;
+      await waitForFile(olderPaths.transactionReady);
+      writeFileSync(olderPaths.commit, "commit", "utf8");
+      const olderExit = await older.done;
+
+      expect([newerExit, olderExit].every((exit) => exit.code === 0)).toBe(true);
+      const check = openNuclearDb(new DatabaseSync(dbPath), {
+        continuityOptional: true,
+      });
+      const current = listOpenCognitiveItems(check, "doc", { status: "OPEN" });
+      expect(current).toEqual([
+        expect.objectContaining({
+          modelIdentity: newerDispatch.acceptedDispatchIdentity.modelIdentity,
+          generationOrder:
+            newerDispatch.acceptedDispatchIdentity.dispatchSequence,
+        }),
+      ]);
+      expect(
+        listOpenCognitiveItems(check, "doc").find(
+          (item) =>
+            item.modelIdentity === olderDispatch.acceptedDispatchIdentity.modelIdentity,
+        ),
+      ).toMatchObject({ status: "SUPERSEDED" });
+      check.close();
+    } finally {
+      env.groqApiKey = originalGroqKey;
+      try {
+        db.close();
+      } catch {
+        // The parent connection is already closed before child contention.
+      }
+      rmSync(directory, { recursive: true, force: true });
     }
   });
 

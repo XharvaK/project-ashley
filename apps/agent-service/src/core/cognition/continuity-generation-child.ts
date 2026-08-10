@@ -3,7 +3,16 @@ import { DatabaseSync } from "node:sqlite";
 import { openNuclearDb } from "../db.js";
 import { materializeOpenCognitiveItem } from "./open-items.js";
 
-const [dbPath, proposalPath, readyPath, gatePath, resultPath] = process.argv.slice(2);
+const [
+  dbPath,
+  proposalPath,
+  readyPath,
+  gatePath,
+  resultPath,
+  attemptPath,
+  transactionReadyPath,
+  commitGatePath,
+] = process.argv.slice(2);
 
 if (!dbPath || !proposalPath || !readyPath || !gatePath || !resultPath) {
   throw new Error("continuity_generation_child_arguments_missing");
@@ -20,7 +29,22 @@ try {
   const proposal = JSON.parse(readFileSync(proposalPath, "utf8")) as Parameters<
     typeof materializeOpenCognitiveItem
   >[1];
-  const result = materializeOpenCognitiveItem(db, proposal);
+  const useControlledTransaction =
+    attemptPath != null &&
+    transactionReadyPath != null &&
+    commitGatePath != null;
+  if (useControlledTransaction) {
+    writeFileSync(attemptPath, "attempting", "utf8");
+    db.exec("BEGIN IMMEDIATE");
+    writeFileSync(transactionReadyPath, "transaction-ready", "utf8");
+    while (!existsSync(commitGatePath)) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+  }
+  const result = materializeOpenCognitiveItem(db, proposal, {
+    inTransaction: useControlledTransaction,
+  });
+  if (useControlledTransaction) db.exec("COMMIT");
   writeFileSync(resultPath, JSON.stringify({ ok: true, created: result.created }), "utf8");
 } catch (error) {
   writeFileSync(
