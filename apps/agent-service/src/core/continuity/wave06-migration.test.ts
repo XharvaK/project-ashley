@@ -16,6 +16,16 @@ import { usableFetchMs } from "../perception/turn-budget.js";
 import { classifyResearchIntent } from "../perception/research-intent.js";
 import { buildInlineDataUri } from "../perception/ingest.js";
 
+function resetCognitionTablesToV22(nuclear: DatabaseSync): void {
+  nuclear.exec(`
+    DROP TABLE open_cognitive_item_transitions;
+    DROP TABLE open_cognitive_item_attention;
+    DROP TABLE open_cognitive_items;
+    DROP TABLE open_cognitive_item_review_cursor;
+    DROP TABLE open_cognitive_item_wake_cursor;
+  `);
+}
+
 describe("wave06 migration", () => {
   it("migrates fresh db to v16 with v3 contract and perception tables", () => {
     const continuity = openContinuityDb(new DatabaseSync(":memory:"));
@@ -59,8 +69,7 @@ describe("wave06 migration", () => {
                '2026-08-10T00:00:00.000Z', '2026-08-10T00:00:00.000Z',
                'migration-preserved-question', 'never_public')`,
     ).run();
-    nuclear.exec("DROP TABLE open_cognitive_item_wake_cursor");
-    nuclear.exec("ALTER TABLE open_cognitive_items DROP COLUMN model_identity");
+    resetCognitionTablesToV22(nuclear);
     nuclear.exec("PRAGMA user_version = 22");
     continuity
       .prepare(
@@ -140,8 +149,7 @@ describe("wave06 migration", () => {
         .prepare("SELECT lineage_id FROM lineage_mirror WHERE id = 1")
         .get() as { lineage_id: string }
     ).lineage_id;
-    nuclear.exec("DROP TABLE open_cognitive_item_wake_cursor");
-    nuclear.exec("ALTER TABLE open_cognitive_items DROP COLUMN model_identity");
+    resetCognitionTablesToV22(nuclear);
     nuclear.exec("PRAGMA user_version = 22");
     continuity
       .prepare(
