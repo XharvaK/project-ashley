@@ -47,6 +47,29 @@ export async function runProactiveSchedulerPreflight(
   return { ok: true, status };
 }
 
+export type ProactiveSchedulerCycleDependencies = {
+  preflight: () => Promise<ProactiveSchedulerPreflightResult>;
+  tickInitiative: typeof tickInitiative;
+};
+
+export type ProactiveSchedulerCycleResult =
+  | { outcome: "preflight_skip"; reason: "agent_unhealthy" | "paused" }
+  | { outcome: "tick"; result: Awaited<ReturnType<typeof tickInitiative>> };
+
+/** One scheduler cycle before Discord delivery. Exported for local integration qualification. */
+export async function runProactiveSchedulerCycle(
+  dependencies: ProactiveSchedulerCycleDependencies = {
+    preflight: runProactiveSchedulerPreflight,
+    tickInitiative,
+  },
+): Promise<ProactiveSchedulerCycleResult> {
+  const preflight = await dependencies.preflight();
+  if (!preflight.ok) {
+    return { outcome: "preflight_skip", reason: preflight.reason };
+  }
+  return { outcome: "tick", result: await dependencies.tickInitiative() };
+}
+
 export function startProactiveScheduler(client: Client): void {
   if (!config.proactiveEnabled) {
     console.log(
@@ -72,13 +95,13 @@ export function startProactiveScheduler(client: Client): void {
     if (tickRunning) return;
     tickRunning = true;
     try {
-      const preflight = await runProactiveSchedulerPreflight();
-      if (!preflight.ok) {
-        console.log(`[discord-bot] proactive skip: ${preflight.reason}`);
+      const cycle = await runProactiveSchedulerCycle();
+      if (cycle.outcome === "preflight_skip") {
+        console.log(`[discord-bot] proactive skip: ${cycle.reason}`);
         return;
       }
 
-      const result = await tickInitiative();
+      const result = cycle.result;
       if (!result.shouldSend) {
         console.log(`[discord-bot] proactive skip: ${result.reason}`);
         return;

@@ -328,4 +328,60 @@ describe("bounded OCI wake selection", () => {
       db.close();
     },
   );
+
+  it("bounds no, few, many, invalid, and terminal-mixed owner review work", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    seedCrossOwnerReviewFixture(db, 1000);
+    const setFirst = db.prepare(
+      `UPDATE open_cognitive_item_attention
+       SET review_requested_at = ?
+       WHERE item_id IN (
+         SELECT id FROM open_cognitive_items
+         WHERE owner_id = ? ORDER BY id ASC LIMIT ?
+       )`,
+    );
+
+    expect(countOpenCognitiveItemReviewDue(db, OWNER_ID, NOW)).toBe(0);
+    expect(instrumentReviewDueCount(db, OWNER_ID)).toBe(32);
+
+    setFirst.run(NOW.toISOString(), OWNER_ID, 3);
+    expect(countOpenCognitiveItemReviewDue(db, OWNER_ID, NOW)).toBe(3);
+    expect(instrumentReviewDueCount(db, OWNER_ID)).toBe(32);
+
+    db.prepare(
+      `UPDATE open_cognitive_item_attention SET review_requested_at = ?
+       WHERE item_id IN (
+         SELECT id FROM open_cognitive_items WHERE owner_id = ?
+       )`,
+    ).run(NOW.toISOString(), OWNER_ID);
+    expect(countOpenCognitiveItemReviewDue(db, OWNER_ID, NOW)).toBe(9);
+    expect(instrumentReviewDueCount(db, OWNER_ID)).toBe(9);
+
+    db.prepare(
+      `UPDATE open_cognitive_item_attention SET review_requested_at = NULL
+       WHERE item_id IN (
+         SELECT id FROM open_cognitive_items WHERE owner_id = ?
+       )`,
+    ).run(OWNER_ID);
+    setFirst.run("not-a-date", OWNER_ID, 1);
+    expect(countOpenCognitiveItemReviewDue(db, OWNER_ID, NOW)).toBe(1);
+    expect(instrumentReviewDueCount(db, OWNER_ID)).toBe(32);
+
+    db.prepare(
+      `UPDATE open_cognitive_items SET status = 'WITHDRAWN'
+       WHERE id IN (
+         SELECT id FROM open_cognitive_items
+         WHERE owner_id = ? ORDER BY id ASC LIMIT 16
+       )`,
+    ).run(OWNER_ID);
+    db.prepare(
+      `UPDATE open_cognitive_item_attention SET review_requested_at = ?
+       WHERE item_id IN (
+         SELECT id FROM open_cognitive_items WHERE owner_id = ?
+       )`,
+    ).run(NOW.toISOString(), OWNER_ID);
+    expect(countOpenCognitiveItemReviewDue(db, OWNER_ID, NOW)).toBe(9);
+    expect(instrumentReviewDueCount(db, OWNER_ID)).toBe(9);
+    db.close();
+  });
 });

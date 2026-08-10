@@ -37,7 +37,7 @@ function activateReading(db: DatabaseSync): void {
   );
 }
 
-function seedReviewItem(db: DatabaseSync, suffix: string) {
+function seedReviewItem(db: DatabaseSync, suffix: string, ownerId = OWNER_ID) {
   const entityUuid = `reflection-source-${suffix}-${randomUUID()}`;
   const now = new Date().toISOString();
   db.prepare(
@@ -45,12 +45,12 @@ function seedReviewItem(db: DatabaseSync, suffix: string) {
        (owner_id, subject, text, status, priority, created_at, updated_at,
         entity_uuid, data_classification)
      VALUES (?, 'about_self', ?, 'open', 0.8, ?, ?, ?, 'never_public')`,
-  ).run(OWNER_ID, `Reflection source ${suffix}`, now, now, entityUuid);
+  ).run(ownerId, `Reflection source ${suffix}`, now, now, entityUuid);
   const source = db
     .prepare("SELECT id, entity_uuid FROM questions WHERE entity_uuid = ?")
     .get(entityUuid) as { id: number; entity_uuid: string };
   const item = materializeOpenCognitiveItem(db, {
-    ownerId: OWNER_ID,
+    ownerId,
     kind: "question",
     semanticSummary: `Reflection item ${suffix}`,
     source: {
@@ -281,6 +281,98 @@ describe("Reflection OCI adjudication", () => {
         ).get(OWNER_ID),
       ).toMatchObject({ count: 17 });
     } finally {
+      db.close();
+    }
+  });
+
+  it("quarantines 100 invalid requests within bounded queue progression", async () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    activateReading(db);
+    Array.from({ length: 100 }, (_, index) => seedReviewItem(db, `hundred-${index}`));
+    let skipped = 0;
+    try {
+      for (let invocation = 0; invocation < 13; invocation += 1) {
+        const result = await processPendingOpenCognitiveReviewsAsync(
+          db,
+          OWNER_ID,
+          async () => ({
+            action: "resolve",
+            reason: "reflection_fixture_invalid_hundred",
+            evidenceRefs: [],
+          }),
+        );
+        expect(result.processed).toBe(0);
+        expect(result.skipped).toBeLessThanOrEqual(8);
+        skipped += result.skipped;
+      }
+      expect(skipped).toBe(100);
+      expect(await processPendingOpenCognitiveReviewsAsync(
+        db,
+        OWNER_ID,
+        async () => {
+          throw new Error("quarantined_rows_must_not_recur");
+        },
+      )).toEqual({ processed: 0, skipped: 0 });
+      expect(
+        db.prepare(
+          `SELECT COUNT(*) AS count
+           FROM open_cognitive_item_attention a
+           JOIN open_cognitive_items o ON o.id = a.item_id
+           WHERE o.owner_id = ?
+             AND a.review_attempt_count = 1
+             AND a.review_requested_at IS NULL
+             AND a.last_outcome_code = 'reflection_quarantined:invalid_transition'`,
+        ).get(OWNER_ID),
+      ).toEqual({ count: 100 });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("isolates mixed transient, permanent, terminal, and cross-owner requests", async () => {
+    const now = new Date("2026-08-10T14:00:00.000Z");
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    activateReading(db);
+    const permanent = seedReviewItem(db, "mixed-permanent");
+    const transient = seedReviewItem(db, "mixed-transient");
+    const terminal = seedReviewItem(db, "mixed-terminal");
+    const other = seedReviewItem(db, "mixed-other", "other-owner");
+    db.prepare(
+      `UPDATE open_cognitive_items SET status = 'WITHDRAWN'
+       WHERE id = ?`,
+    ).run(terminal.id);
+    try {
+      expect(await processPendingOpenCognitiveReviewsAsync(
+        db,
+        OWNER_ID,
+        async (_db, item) => item.id === transient.id
+          ? null
+          : {
+              action: "resolve",
+              reason: "reflection_fixture_invalid_mixed",
+              evidenceRefs: [],
+            },
+      )).toEqual({ processed: 0, skipped: 2 });
+      expect(getOpenCognitiveItem(db, OWNER_ID, permanent.entityUuid)?.attention).toMatchObject({
+        reviewRequestedAt: null,
+        reviewLastDisposition: "invalid_transition",
+      });
+      expect(getOpenCognitiveItem(db, OWNER_ID, transient.entityUuid)?.attention).toMatchObject({
+        reviewRequestedAt: "2026-08-10T14:15:00.000Z",
+        reviewLastDisposition: "adjudicator_unprocessable",
+      });
+      expect(getOpenCognitiveItem(db, OWNER_ID, terminal.entityUuid)).toMatchObject({
+        status: "WITHDRAWN",
+        attention: { reviewAttemptCount: 0 },
+      });
+      expect(getOpenCognitiveItem(db, "other-owner", other.entityUuid)?.attention).toMatchObject({
+        reviewRequestedAt: now.toISOString(),
+        reviewAttemptCount: 0,
+      });
+    } finally {
+      vi.useRealTimers();
       db.close();
     }
   });
