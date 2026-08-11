@@ -51,6 +51,7 @@ import {
 } from "./cognition/open-items.js";
 import { listOpenCognitiveItemReviewRequests } from "./cognition/reconsideration.js";
 import { applyForgetTargets } from "./memory/forget.js";
+import { listSandboxTaskAdmissions } from "./sandbox/task-admission.js";
 
 function activateCapabilities(db: DatabaseSync, names: string[]): void {
   const releaseId = currentReleaseId();
@@ -341,6 +342,99 @@ describe("AshleyCore", () => {
         semantic_summary: "[redacted]",
         redacted_at: expect.any(String),
       });
+    } finally {
+      env.cognitionMode = originalMode;
+      env.proactiveEnabled = originalEnabled;
+      env.proactiveMinIdleHours = originalIdle;
+      env.proactiveMaxPerDay = originalCap;
+      db.close();
+    }
+  });
+
+  it("observes a recorded sandbox task admission from a proactive decision", async () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const core = new AshleyCore(db);
+    const originalMode = env.cognitionMode;
+    const originalEnabled = env.proactiveEnabled;
+    const originalIdle = env.proactiveMinIdleHours;
+    const originalCap = env.proactiveMaxPerDay;
+    try {
+      env.cognitionMode = "apply";
+      env.proactiveEnabled = true;
+      env.proactiveMinIdleHours = 0;
+      env.proactiveMaxPerDay = 10;
+      activateCapabilities(db, ["recall"]);
+      const threadId = resolveActiveThread(db, "doc");
+      const messageId = insertMessage(db, {
+        threadId,
+        ownerId: "doc",
+        role: "user",
+        text: "Is the migration verification still pending?",
+      });
+      const source = db
+        .prepare("SELECT entity_uuid FROM mem_messages WHERE id = ?")
+        .get(messageId) as { entity_uuid: string };
+      materializeOpenCognitiveItem(db, {
+        ownerId: "doc",
+        kind: "question",
+        semanticSummary: "Verify the build health",
+        source: {
+          type: "message",
+          id: String(messageId),
+          entityUuid: source.entity_uuid,
+        },
+        origin: "manual",
+        semanticKeyMaterial: "runtime-admission-observe",
+        provenance: "live",
+        sourceCapability: "recall",
+        contractId: currentContractId(),
+        buildIdentity: currentBuildIdentity(),
+        modelEpoch: 0,
+      });
+      const draft = await core.tickProactive("doc");
+      expect(draft.shouldSend).toBe(true);
+      const rows = listSandboxTaskAdmissions(db, "doc");
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        status: "recorded",
+        derivedFrom: "proactive",
+        profileKey: "verify-build-health",
+        profileRecipeIds: ["verify:agent-tsc"],
+        purposes: ["sandbox_verify_build_health"],
+        refusalCode: null,
+      });
+      expect(rows[0].evidenceRefs).toHaveLength(1);
+    } finally {
+      env.cognitionMode = originalMode;
+      env.proactiveEnabled = originalEnabled;
+      env.proactiveMinIdleHours = originalIdle;
+      env.proactiveMaxPerDay = originalCap;
+      db.close();
+    }
+  });
+
+  it("records a refused admission (never recorded) when no grounded evidence survives", async () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const core = new AshleyCore(db);
+    const originalMode = env.cognitionMode;
+    const originalEnabled = env.proactiveEnabled;
+    const originalIdle = env.proactiveMinIdleHours;
+    const originalCap = env.proactiveMaxPerDay;
+    try {
+      env.cognitionMode = "apply";
+      env.proactiveEnabled = true;
+      env.proactiveMinIdleHours = 0;
+      env.proactiveMaxPerDay = 10;
+      activateCapabilities(db, ["recall"]);
+      const draft = await core.tickProactive("doc");
+      void draft;
+      const rows = listSandboxTaskAdmissions(db, "doc");
+      expect(rows.length).toBeGreaterThan(0);
+      for (const row of rows) {
+        expect(row.status).toBe("refused");
+        expect(row.refusalCode).toBe("no_grounded_evidence");
+        expect(row.profileKey).toBe("");
+      }
     } finally {
       env.cognitionMode = originalMode;
       env.proactiveEnabled = originalEnabled;

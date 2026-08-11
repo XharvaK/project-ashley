@@ -85,6 +85,7 @@ type TaskOverrides = {
   objective?: string;
   role?: string;
   allowedCapabilities?: readonly string[];
+  allowedRecipeIds?: readonly string[];
   maxModelCalls?: number;
   maxToolExecutions?: number;
   deadlineAtMs?: number;
@@ -101,6 +102,7 @@ function makeTask(overrides: TaskOverrides = {}): SandboxTask {
     objective: "inspect the fixture repository and report",
     role: "sandbox_operator_light",
     allowedCapabilities: BASE_CAPABILITIES,
+    allowedRecipeIds: ["git:status", "git:diff"],
     maxModelCalls: 10,
     maxToolExecutions: 10,
     deadlineAtMs: nowMs + 120_000,
@@ -334,8 +336,79 @@ describe("sandbox lifecycle and task admission", () => {
     expect(result.task.workspaceRequired).toBe(false);
     expect(result.task.sourceRootId).toBeNull();
     expect(result.task.originatingConversationId).toBeNull();
+    expect(result.task.allowedRecipeIds).toEqual([]);
     expect(isSandboxTaskStatus(result.task.status)).toBe(true);
     expect(SANDBOX_TASK_STATUSES).toContain(result.task.status);
+  });
+
+  it("9b. createSandboxTask rejects an unbounded recipe in the allowlist", () => {
+    const result = createSandboxTask({
+      taskId: "t",
+      ownerId: OWNER_ID,
+      objective: "x",
+      role: "sandbox_operator_light",
+      allowedCapabilities: ["fixed_lint_verification_recipe"],
+      allowedRecipeIds: ["verify:agent-tsc", "custom:anything"],
+      maxModelCalls: 2,
+      maxToolExecutions: 2,
+      deadlineAtMs: 2_000_000_000_000,
+      nowMs: 1_800_000_000_000,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBe("recipe_not_bounded");
+  });
+
+  it("9c. createSandboxTask rejects a duplicate recipe in the allowlist", () => {
+    const result = createSandboxTask({
+      taskId: "t",
+      ownerId: OWNER_ID,
+      objective: "x",
+      role: "sandbox_operator_light",
+      allowedCapabilities: ["fixed_lint_verification_recipe"],
+      allowedRecipeIds: ["verify:agent-tsc", "verify:agent-tsc"],
+      maxModelCalls: 2,
+      maxToolExecutions: 2,
+      deadlineAtMs: 2_000_000_000_000,
+      nowMs: 1_800_000_000_000,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBe("recipe_id_duplicate");
+  });
+
+  it("9d. createSandboxTask admits a 0-model-call bounded task", () => {
+    const result = createSandboxTask({
+      taskId: "t",
+      ownerId: OWNER_ID,
+      objective: "x",
+      role: "sandbox_operator_light",
+      allowedCapabilities: ["fixed_lint_verification_recipe"],
+      allowedRecipeIds: ["verify:agent-tsc"],
+      maxModelCalls: 0,
+      maxToolExecutions: 2,
+      deadlineAtMs: 2_000_000_000_000,
+      nowMs: 1_800_000_000_000,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.task.maxModelCalls).toBe(0);
+    expect(result.task.allowedRecipeIds).toEqual(["verify:agent-tsc"]);
+  });
+
+  it("9e. createSandboxTask rejects negative model budget", () => {
+    const result = createSandboxTask({
+      taskId: "t",
+      ownerId: OWNER_ID,
+      objective: "x",
+      role: "sandbox_operator_light",
+      allowedCapabilities: ["approved_project_read"],
+      allowedRecipeIds: [],
+      maxModelCalls: -1,
+      maxToolExecutions: 2,
+      deadlineAtMs: 2_000_000_000_000,
+      nowMs: 1_800_000_000_000,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBe("max_model_calls_invalid");
   });
 
   it("10. the lifecycle default is disabled and the gate is closed", () => {
@@ -434,6 +507,30 @@ describe("bootstrap", () => {
     expect(turn!.session!.state).toBe("active");
     expect(turn!.session!.role).toBe("sandbox_operator_light");
     expect(turn!.session!.maxToolExecutions).toBe(5);
+  });
+
+  it("18b. refuses a recipe that is not on the task's exact allowlist", async () => {
+    const h = makeHarness();
+    const task = makeTask({ allowedRecipeIds: [] });
+    const adapter = new FakeSandboxOperatorAdapter([
+      { action: { type: "execute_recipe", recipeId: "git:status", parameters: {} } },
+    ]);
+    const result = await run(h, task, adapter);
+    expect(result.stopReason).toBe("action_not_permitted");
+    expect(result.error).toContain("recipe_not_allowed_for_task:git:status");
+    expect(kinds(h.audits)).not.toContain("broker_action_requested");
+  });
+
+  it("18c. refuses a recipe outside the allowlist even when its capability is allowed", async () => {
+    const h = makeHarness();
+    const task = makeTask({ allowedRecipeIds: ["git:status"] });
+    const adapter = new FakeSandboxOperatorAdapter([
+      { action: { type: "execute_recipe", recipeId: "git:diff", parameters: {} } },
+    ]);
+    const result = await run(h, task, adapter);
+    expect(result.stopReason).toBe("action_not_permitted");
+    expect(result.error).toContain("recipe_not_allowed_for_task:git:diff");
+    expect(kinds(h.audits)).not.toContain("broker_action_requested");
   });
 
   it("19. bootstrap emits session_bound and workspace_bound audits conditionally", async () => {

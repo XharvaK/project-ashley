@@ -16,6 +16,7 @@ import {
 } from "./agency/turn-complexity.js";
 import { relevantBoundaryIdSet } from "./agency/boundary-relevance.js";
 import { logDecision, setDecisionOutcome } from "./agency/log.js";
+import { observeSandboxEffectIntentAdmission } from "./sandbox/task-admission.js";
 import { composeTurnContext } from "./context-composer.js";
 import { expressSpeak } from "./conversation/expression.js";
 import { seedIdentity } from "./identity/seed.js";
@@ -790,6 +791,15 @@ export class AshleyCore {
       }
       decision.id = decisionId;
       setLastDecision(this.db, input.ownerId, decisionId);
+      // Observe-only: record a deterministic sandbox effect admission intent
+      // if the decision's OCI evidence grounds one. Zero authority — nothing
+      // is scheduled or executed from an admission.
+      observeSandboxEffectIntentAdmission(
+        this.db,
+        input.ownerId,
+        decision,
+        "reactive",
+      );
 
       const reservationUuidRow = this.db
         .prepare(`SELECT entity_uuid FROM delivery_reservations WHERE id = ?`)
@@ -1335,6 +1345,8 @@ export class AshleyCore {
           },
         );
         decisionLogged = true;
+        decision.id = decisionId;
+        observeSandboxEffectIntentAdmission(this.db, ownerId, decision, "proactive");
         return { shouldSend: false, reason: decision.reason };
       }
 
@@ -1354,6 +1366,7 @@ export class AshleyCore {
       );
       decisionLogged = true;
       decision.id = decisionId;
+      observeSandboxEffectIntentAdmission(this.db, ownerId, decision, "proactive");
 
       const candidate =
         motivations.find((motivation) =>

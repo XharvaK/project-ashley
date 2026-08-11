@@ -173,6 +173,37 @@ export type Decision = {
   silenceReasonCode?: SilenceReasonCode | null;
 };
 
+/**
+ * Agency effect-purpose: the durable classification of why an effect is
+ * intended, bounded to a fixed vocabulary. A purpose is only ever asserted
+ * after it has been deterministically verified against a current, live,
+ * owner-bound open cognitive item (OCI) recorded as decision evidence.
+ * Zero-authority: purpose derivation alone never admits, schedules, or
+ * executes anything.
+ */
+export type AgencyEffectPurpose =
+  | "sandbox_verify_build_health"
+  | "sandbox_test_quality"
+  | "sandbox_lint_verification"
+  | "sandbox_codebase_patch_verification"
+  | "unsupported";
+
+/**
+ * Agency effect-intent: the deterministic, evidence-grounded expression of
+ * what Ashley internally intends to do, derived only from the verified
+ * purposes of an Agency decision's open-cognitive-item evidence. This is a
+ * pure derivation output — it carries no execution authority. Broker
+ * readiness, runtime state, sandbox state, and capability gates are all
+ * checked separately (observe-only integration: nothing is admitted,
+ * scheduled, or executed from an intent alone).
+ */
+export type AgencyEffectIntent = {
+  purposes: AgencyEffectPurpose[];
+  groundedRefs: EvidenceRef[];
+  intentId: string;
+  deterministic: true;
+};
+
 export type Motivation = {
   id?: number;
   ownerId?: string;

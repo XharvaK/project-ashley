@@ -57,6 +57,7 @@ import {
 } from "./cognition/migration-24.js";
 import { MIGRATION_25_OPEN_COGNITIVE_ORDERING_DDL } from "./cognition/migration-25.js";
 import { MIGRATION_26_RECALL_QUALIFICATION_EPOCHS_DDL } from "./rollout/migration-26.js";
+import { MIGRATION_27_SANDBOX_TASK_ADMISSIONS_DDL } from "./sandbox/migration-27.js";
 import {
   continuityGeneration,
   durableSemanticKeyHash,
@@ -67,7 +68,7 @@ import { currentBuildIdentity } from "./rollout/capabilities.js";
 
 export { NUCLEAR_DB_PATH };
 
-export const NUCLEAR_SUPPORTED_VERSION = 26;
+export const NUCLEAR_SUPPORTED_VERSION = 27;
 
 export type NuclearMigrationTestFault =
   | "before_pending"
@@ -1086,7 +1087,8 @@ function reconcilePendingNuclearMigration(
     (pending.from !== 22 || pending.to !== 23) &&
     (pending.from !== 23 || pending.to !== 24) &&
     (pending.from !== 24 || pending.to !== 25) &&
-    (pending.from !== 25 || pending.to !== 26)
+    (pending.from !== 25 || pending.to !== 26) &&
+    (pending.from !== 26 || pending.to !== 27)
   ) {
     throw new Error("continuity_pending_migration_unsupported");
   }
@@ -1105,14 +1107,14 @@ function reconcilePendingNuclearMigration(
     buildIdentity: pending.buildIdentity,
   };
   if (actualVersion === pending.from) {
-    validateNuclearSchemaContent(db, pending.from as 22 | 23 | 24 | 25 | 26, {
+    validateNuclearSchemaContent(db, pending.from as 22 | 23 | 24 | 25 | 26 | 27, {
       rejectNewerContent: true,
     });
     rollbackNuclearMigration(continuity, descriptor);
     return;
   }
   if (actualVersion === pending.to) {
-    validateNuclearSchemaContent(db, pending.to as 22 | 23 | 24 | 25 | 26, {
+    validateNuclearSchemaContent(db, pending.to as 22 | 23 | 24 | 25 | 26 | 27, {
       rejectNewerContent: true,
     });
     finalizeNuclearMigration(continuity, descriptor, "recovered");
@@ -1214,7 +1216,7 @@ function migrateNuclearSchemaWithProtocol(input: {
       db.exec(ddl);
     }
     db.exec(`PRAGMA user_version = ${targetVersion}`);
-    validateNuclearSchemaContent(db, targetVersion as 23 | 24 | 25 | 26);
+    validateNuclearSchemaContent(db, targetVersion as 23 | 24 | 25 | 26 | 27);
     const fk = db.prepare("PRAGMA foreign_key_check").all();
     if (fk.length > 0) throw new Error("nuclear_fk_check_failed");
     const integrity = db.prepare("PRAGMA quick_check").get() as
@@ -2572,8 +2574,34 @@ export function migrate(
         options.testFailAfterNuclearCommitBeforeContinuityFinalization,
     });
   }
+  if (userVersion(db) < 27) {
+    const continuity = options.continuity;
+    const priorVersion = userVersion(db);
+    const lineageId = nuclearLineageMirrorId(db);
+    if (!continuity && !options.skipContinuityRequirement) {
+      throw new Error("continuity_unavailable");
+    }
+    migrateNuclearSchemaWithProtocol({
+      db,
+      continuity: continuity && lineageId ? continuity : undefined,
+      targetVersion: 27,
+      descriptor:
+        continuity && lineageId
+          ? {
+              from: priorVersion,
+              to: 27,
+              lineageId,
+              buildIdentity: currentBuildIdentity(),
+            }
+          : undefined,
+      ddl: MIGRATION_27_SANDBOX_TASK_ADMISSIONS_DDL,
+      testMigrationFault: options.testMigrationFault,
+      testFailAfterNuclearCommitBeforeContinuityFinalization:
+        options.testFailAfterNuclearCommitBeforeContinuityFinalization,
+    });
+  }
   if (userVersion(db) >= 25) {
-    validateNuclearSchemaContent(db, userVersion(db) as 25 | 26);
+    validateNuclearSchemaContent(db, userVersion(db) as 25 | 26 | 27);
   }
   if (!options.skipContinuityRequirement && userVersion(db) >= 15) {
     const continuity = options.continuity;

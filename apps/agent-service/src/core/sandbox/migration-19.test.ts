@@ -54,8 +54,8 @@ describe("migration-19 approval DDL risk vocabulary", () => {
     const row = db.prepare("PRAGMA user_version").get() as {
       user_version: number;
     };
-    expect(row.user_version).toBe(26);
-    expect(NUCLEAR_SUPPORTED_VERSION).toBe(26);
+    expect(row.user_version).toBe(27);
+    expect(NUCLEAR_SUPPORTED_VERSION).toBe(27);
     expect(
       db
         .prepare(

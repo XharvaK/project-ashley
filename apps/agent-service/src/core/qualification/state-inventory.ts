@@ -189,6 +189,10 @@ const NON_LIVE: Record<string, NonLiveRule> = {
   lineage_mirror: { cls: "CONTROL_PLANE", reason: "continuity lineage ledger; not written by shadow; in-memory sidecar in tests" },
   sandbox_approval_events: { cls: "CONTROL_PLANE", reason: "sandbox broker ledger; not written by shadow" },
   sandbox_approval_proposals: { cls: "CONTROL_PLANE", reason: "sandbox broker ledger; not written by shadow" },
+  sandbox_task_admissions: {
+    cls: "CONTROL_PLANE",
+    reason: "observe-only sandbox effect admission ledger; never influences live behavior; shadow turn decisions may differ (deliberation) so the ledger is not part of the live projection",
+  },
   forget_receipts: {
     cls: "OBSERVABILITY_EXCEPTION",
     reason: "correction #4: explicit /forget receipt may truthfully include shadow artifact counts; documented, not a behavioral divergence",

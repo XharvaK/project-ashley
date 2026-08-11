@@ -281,6 +281,55 @@ const V26_ONLY_OBJECTS = [
   "idx_recall_qualification_events_epoch",
 ] as const;
 
+const V27_TABLES = ["sandbox_task_admissions"] as const;
+
+const V27_COLUMNS: Record<string, ColumnSpec[]> = {
+  sandbox_task_admissions: [
+    { name: "id", primaryKey: true },
+    { name: "owner_id", notNull: true },
+    { name: "intent_id", notNull: true },
+    { name: "status", notNull: true },
+    { name: "derived_from", notNull: true },
+    { name: "decision_id", notNull: true },
+    { name: "purposes_json", notNull: true },
+    { name: "profile_key", notNull: true },
+    { name: "profile_recipe_ids_json", notNull: true },
+    { name: "evidence_refs_json", notNull: true },
+    { name: "refusal_code" },
+    { name: "refusal_reason" },
+    { name: "build_identity", notNull: true },
+    { name: "model_epoch", notNull: true, defaultValue: "0" },
+    { name: "recorded_at", notNull: true },
+  ],
+};
+
+const V27_INDEXES: IndexSpec[] = [
+  {
+    table: "sandbox_task_admissions",
+    name: "idx_sandbox_task_admissions_owner_status",
+    columns: ["owner_id", "status", "recorded_at"],
+  },
+  {
+    table: "sandbox_task_admissions",
+    name: "idx_sandbox_task_admissions_decision",
+    columns: ["decision_id"],
+  },
+];
+
+const V27_TABLE_FRAGMENTS: Record<string, string[]> = {
+  sandbox_task_admissions: [
+    "check(status in('recorded','refused'))",
+    "check(derived_from in('reactive','proactive'))",
+    "unique(owner_id,intent_id)",
+  ],
+};
+
+const V27_ONLY_OBJECTS = [
+  ...V27_TABLES,
+  "idx_sandbox_task_admissions_owner_status",
+  "idx_sandbox_task_admissions_decision",
+] as const;
+
 function normalizeSql(value: string): string {
   return value
     .toLowerCase()
@@ -432,6 +481,15 @@ function requireNoV26Objects(db: DatabaseSync, version: number): void {
   }
 }
 
+function requireNoV27Objects(db: DatabaseSync, version: number): void {
+  for (const name of V27_ONLY_OBJECTS) {
+    const type = V27_TABLES.includes(name as (typeof V27_TABLES)[number])
+      ? "table"
+      : "index";
+    if (masterRow(db, type, name)) fail(version, `unexpected_v27_object:${name}`);
+  }
+}
+
 function validateV22Source(db: DatabaseSync): void {
   const version = 22;
   requireTable(db, version, "episodes");
@@ -463,7 +521,7 @@ function validateV22Source(db: DatabaseSync): void {
 
 export function validateNuclearSchemaContent(
   db: DatabaseSync,
-  version: 22 | 23 | 24 | 25 | 26,
+  version: 22 | 23 | 24 | 25 | 26 | 27,
   options: { rejectNewerContent?: boolean } = {},
 ): void {
   if (version === 22) {
@@ -506,6 +564,17 @@ export function validateNuclearSchemaContent(
     requireFragments(db, version, table, V26_TABLE_FRAGMENTS[table] ?? []);
   }
   for (const index of V26_INDEXES) requireIndex(db, version, index);
+  if (version === 26 && options.rejectNewerContent === true) {
+    requireNoV27Objects(db, version);
+    return;
+  }
+  if (version === 26) return;
+  for (const table of V27_TABLES) requireTable(db, version, table);
+  for (const [table, columns] of Object.entries(V27_COLUMNS)) {
+    requireColumns(db, version, table, columns);
+    requireFragments(db, version, table, V27_TABLE_FRAGMENTS[table] ?? []);
+  }
+  for (const index of V27_INDEXES) requireIndex(db, version, index);
 }
 
 function addColumnIfMissing(

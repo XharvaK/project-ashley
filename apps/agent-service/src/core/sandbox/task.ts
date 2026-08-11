@@ -29,8 +29,10 @@ export const MAX_CONVERSATION_ID_LENGTH = 256;
 export const MAX_SOURCE_ROOT_ID_LENGTH = 128;
 export const MAX_TASK_CAPABILITIES = 16;
 export const MAX_MODEL_CALLS_PER_TASK = 64;
-export const MIN_MODEL_CALLS_PER_TASK = 1;
+export const MIN_MODEL_CALLS_PER_TASK = 0;
 export const MIN_TOOL_EXECUTIONS_PER_TASK = 1;
+export const MAX_ALLOWED_RECIPE_IDS = 16;
+export const MAX_RECIPE_ID_LENGTH = 128;
 
 export const SANDBOX_TASK_STATUSES = [
   "admitted",
@@ -57,6 +59,7 @@ export type SandboxTask = {
   objective: string;
   role: BrokerSandboxRole;
   allowedCapabilities: readonly SandboxCapabilityId[];
+  allowedRecipeIds: readonly string[];
   maxModelCalls: number;
   maxToolExecutions: number;
   deadlineAtMs: number;
@@ -81,7 +84,12 @@ export type CreateSandboxTaskErrorCode =
   | "max_tool_executions_invalid"
   | "deadline_invalid"
   | "deadline_in_past"
-  | "source_root_id_invalid";
+  | "source_root_id_invalid"
+  | "recipe_ids_invalid"
+  | "recipe_id_too_many"
+  | "recipe_id_invalid"
+  | "recipe_id_duplicate"
+  | "recipe_not_bounded";
 
 export type CreateSandboxTaskResult =
   | { ok: true; task: SandboxTask }
@@ -126,6 +134,7 @@ export type CreateSandboxTaskInput = {
   objective: string;
   role: string;
   allowedCapabilities: readonly string[];
+  allowedRecipeIds?: readonly string[];
   maxModelCalls: number;
   maxToolExecutions: number;
   deadlineAtMs: number;
@@ -251,6 +260,58 @@ export function createSandboxTask(
       reason: `max_model_calls_out_of_bounds_${input.maxModelCalls}`,
     };
   }
+  const allowedRecipeIds = input.allowedRecipeIds ?? [];
+  if (!Array.isArray(allowedRecipeIds)) {
+    return {
+      ok: false,
+      error: "recipe_ids_invalid",
+      reason: "allowed_recipe_ids_must_be_an_array",
+    };
+  }
+  if (allowedRecipeIds.length > MAX_ALLOWED_RECIPE_IDS) {
+    return {
+      ok: false,
+      error: "recipe_id_too_many",
+      reason: `at_most_${MAX_ALLOWED_RECIPE_IDS}_recipe_ids`,
+    };
+  }
+  const seenRecipeIds = new Set<string>();
+  const recipeIds: string[] = [];
+  for (const recipeId of allowedRecipeIds) {
+    if (typeof recipeId !== "string") {
+      return {
+        ok: false,
+        error: "recipe_id_invalid",
+        reason: "recipe_id_must_be_a_string",
+      };
+    }
+    if (!isBoundedString(recipeId, 1, MAX_RECIPE_ID_LENGTH)) {
+      return {
+        ok: false,
+        error: "recipe_id_invalid",
+        reason: "recipe_id_out_of_bounds",
+      };
+    }
+    if (seenRecipeIds.has(recipeId)) {
+      return {
+        ok: false,
+        error: "recipe_id_duplicate",
+        reason: `duplicate_recipe_id_${recipeId}`,
+      };
+    }
+    seenRecipeIds.add(recipeId);
+    // Fail closed at creation: every allowlisted recipe must resolve to a
+    // bounded recipe-capability namespace, so the loop can never be asked to
+    // execute an arbitrary recipe merely by listing it.
+    if (capabilityForRecipeExecution(recipeId) === null) {
+      return {
+        ok: false,
+        error: "recipe_not_bounded",
+        reason: `recipe_not_bounded_${recipeId}`,
+      };
+    }
+    recipeIds.push(recipeId);
+  }
   if (
     !Number.isInteger(input.maxToolExecutions) ||
     input.maxToolExecutions < MIN_TOOL_EXECUTIONS_PER_TASK ||
@@ -306,6 +367,7 @@ export function createSandboxTask(
       objective: input.objective,
       role: input.role as BrokerSandboxRole,
       allowedCapabilities: capabilities,
+      allowedRecipeIds: recipeIds,
       maxModelCalls: input.maxModelCalls,
       maxToolExecutions: input.maxToolExecutions,
       deadlineAtMs: input.deadlineAtMs,

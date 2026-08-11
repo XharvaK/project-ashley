@@ -32,6 +32,9 @@ function sourceV25Fixture(): Fixture {
   const continuity = openContinuityDb(new DatabaseSync(":memory:"));
   const nuclear = openNuclearDb(new DatabaseSync(":memory:"), { continuity });
   nuclear.exec(`
+    DROP INDEX idx_sandbox_task_admissions_owner_status;
+    DROP INDEX idx_sandbox_task_admissions_decision;
+    DROP TABLE sandbox_task_admissions;
     DROP INDEX idx_recall_qualification_epochs_single_current;
     DROP INDEX idx_recall_qualification_events_epoch;
     DROP TABLE recall_qualification_events;
@@ -71,8 +74,8 @@ describe("nuclear schema v26 Recall qualification epochs", () => {
   it("installs the epoch registry with zero current epochs and no auto campaign", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     try {
-      expect(NUCLEAR_SUPPORTED_VERSION).toBe(26);
-      expect(schemaVersion(db)).toBe(26);
+      expect(NUCLEAR_SUPPORTED_VERSION).toBe(27);
+      expect(schemaVersion(db)).toBe(27);
       expect(
         (
           db.prepare(
@@ -126,7 +129,7 @@ describe("nuclear schema v26 Recall qualification epochs", () => {
         .get();
 
       openNuclearDb(fixture.nuclear, { continuity: fixture.continuity });
-      expect(schemaVersion(fixture.nuclear)).toBe(26);
+      expect(schemaVersion(fixture.nuclear)).toBe(27);
       expect(
         fixture.nuclear.prepare("SELECT * FROM capability_events ORDER BY source_key").all(),
       ).toEqual(beforeEvents);
@@ -268,7 +271,7 @@ describe("nuclear schema v26 Recall qualification epochs", () => {
       }
 
       openNuclearDb(fixture.nuclear, { continuity: fixture.continuity });
-      expect(schemaVersion(fixture.nuclear)).toBe(26);
+      expect(schemaVersion(fixture.nuclear)).toBe(27);
       expect(getPendingNuclearMigration(fixture.continuity)).toBeNull();
       expect(
         (
@@ -276,7 +279,7 @@ describe("nuclear schema v26 Recall qualification epochs", () => {
             .prepare("SELECT nuclear_schema_version FROM lineage_state WHERE id = 1")
             .get() as { nuclear_schema_version: number }
         ).nuclear_schema_version,
-      ).toBe(26);
+      ).toBe(27);
     } finally {
       closeFixture(fixture);
     }

@@ -390,6 +390,11 @@ export async function runSandboxLoop(
     if (!task.allowedCapabilities.includes(capability)) {
       return stop("action_not_permitted", "stopped", `capability_not_allowed_for_task:${capability}`);
     }
+    // Fail-closed exact recipe allowlist: a task may only execute recipes
+    // explicitly listed on the task at admission, regardless of capability.
+    if (!task.allowedRecipeIds.includes(action.recipeId)) {
+      return stop("action_not_permitted", "stopped", `recipe_not_allowed_for_task:${action.recipeId}`);
+    }
     await refreshSession();
     if (session === null) {
       return stop("internal_error", "stopped", "session_unavailable");
