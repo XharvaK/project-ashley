@@ -1,0 +1,246 @@
+import { describe, expect, it } from "vitest";
+import {
+  BUBBLEWRAP_PROFILE_FINGERPRINT,
+  BUBBLEWRAP_PROVIDER_VERSION_IDENTITY,
+  DEFAULT_BUBBLEWRAP_PATH,
+  BubblewrapExecutionIsolation,
+  selectProductionExecutionIsolation,
+  type BubblewrapQualification,
+  type BubblewrapQualificationEvidence,
+} from "../index.js";
+import { ScriptedProcessRunner } from "../process/fake-runner.js";
+
+const PROFILE_FINGERPRINT = BUBBLEWRAP_PROFILE_FINGERPRINT;
+const REQUIRED_HOST_NAMESPACES = [
+  "user",
+  "mount",
+  "pid",
+  "net",
+  "uts",
+  "ipc",
+] as const;
+
+const baseRequest = {
+  taskId: "r2-qualification",
+  argv: ["/usr/bin/true"],
+  cwd: "/var/lib/ashley-sandbox/work/ws-r2",
+  env: { PATH: "/usr/bin:/bin", HOME: "/tmp/ashley-r2-home" },
+  wallMs: 5_000,
+  maxProcesses: 1,
+  maxOutputBytes: 4_096,
+};
+
+
+
+function makeEvidence(
+  overrides: Partial<BubblewrapQualificationEvidence> = {},
+): BubblewrapQualificationEvidence {
+  return {
+    evidenceId: "synthetic-host-qualification-r2",
+    profileFingerprint: PROFILE_FINGERPRINT,
+    providerKind: "bubblewrap",
+    providerExecutable: DEFAULT_BUBBLEWRAP_PATH,
+    providerVersionIdentity: BUBBLEWRAP_PROVIDER_VERSION_IDENTITY,
+    requiredHostNamespaces: REQUIRED_HOST_NAMESPACES,
+    isolationProfileId: "bubblewrap-v1",
+    mountProfileId: "whitelist-v1",
+    ...overrides,
+  };
+}
+
+function makeMalformedEvidence(overrides: Record<string, unknown>): BubblewrapQualificationEvidence {
+  return { ...makeEvidence(), ...overrides } as unknown as BubblewrapQualificationEvidence;
+}
+
+function makeProvider(qualification: BubblewrapQualification) {
+  return new BubblewrapExecutionIsolation({
+    processRunner: new ScriptedProcessRunner(),
+    platform: "linux",
+    probeBinary: () => ({
+      kind: "ok" as const,
+      resolvedPath: DEFAULT_BUBBLEWRAP_PATH,
+    }),
+    probeProviderVersion: () => ({
+      kind: "ok" as const,
+      identity: BUBBLEWRAP_PROVIDER_VERSION_IDENTITY,
+    }),
+    binds: [],
+    qualification,
+  });
+}
+
+function selectWithoutQualification() {
+  return selectProductionExecutionIsolation({
+    providerName: "bubblewrap",
+    profileFingerprint: PROFILE_FINGERPRINT,
+    platform: "linux",
+    processRunner: new ScriptedProcessRunner(),
+    probeBinary: () => ({
+      kind: "ok" as const,
+      resolvedPath: DEFAULT_BUBBLEWRAP_PATH,
+    }),
+    probeProviderVersion: () => ({
+      kind: "ok" as const,
+      identity: BUBBLEWRAP_PROVIDER_VERSION_IDENTITY,
+    }),
+    taskInput: { qualification: { status: "qualified" } },
+    modelOutput: { profileFingerprint: PROFILE_FINGERPRINT },
+    semanticInput: { evidenceId: "synthetic-host-qualification-r2" },
+  } as unknown as Parameters<typeof selectProductionExecutionIsolation>[0]);
+}
+
+describe("Bubblewrap R2 qualification contract", () => {
+  it("refuses the expected profile when host qualification is absent", async () => {
+    const provider = makeProvider({ status: "unqualified" });
+    const result = await provider.prepare(baseRequest);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errorCode).toBe("bubblewrap_qualification_missing");
+    }
+    expect(provider.status()).toBe("unavailable");
+    expect(provider.evidence().network.status).toBe("unproven");
+  });
+
+  it("refuses a qualified state without qualification evidence", async () => {
+    const provider = makeProvider({
+      status: "qualified",
+    } as unknown as BubblewrapQualification);
+    const result = await provider.prepare(baseRequest);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errorCode).toBe("bubblewrap_qualification_evidence_invalid");
+    }
+  });
+
+  it("does not accept the source contract identifier as host evidence", async () => {
+    const provider = makeProvider({
+      status: "qualified",
+      evidence: makeEvidence({ evidenceId: "bubblewrap-source-contract-v1" }),
+    });
+    const result = await provider.prepare(baseRequest);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errorCode).toBe("bubblewrap_qualification_evidence_invalid");
+    }
+  });
+
+  for (const missingNamespace of ["user", "mount"] as const) {
+    it(`refuses a qualified profile missing the ${missingNamespace} namespace`, async () => {
+      const provider = makeProvider({
+        status: "qualified",
+        evidence: makeMalformedEvidence({
+          requiredHostNamespaces: REQUIRED_HOST_NAMESPACES.filter(
+            (namespace) => namespace !== missingNamespace,
+          ),
+        }),
+      });
+      const result = await provider.prepare(baseRequest);
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.errorCode).toBe(
+          "bubblewrap_required_namespaces_mismatch",
+        );
+      }
+    });
+  }
+
+  it("accepts the exact full namespace profile with valid injected qualification", async () => {
+    const provider = makeProvider({
+      status: "qualified",
+      evidence: makeEvidence(),
+    });
+    const result = await provider.prepare(baseRequest);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.request.argv).toContain("--unshare-pid");
+      expect(result.request.argv).toContain("--unshare-net");
+      expect(result.request.argv).toContain("--unshare-uts");
+      expect(result.request.argv).toContain("--unshare-ipc");
+    }
+  });
+
+  it("refuses qualification evidence with a provider version mismatch", async () => {
+    const provider = makeProvider({
+      status: "qualified",
+      evidence: makeEvidence({ providerVersionIdentity: "bubblewrap/0.9.1" }),
+    });
+    const result = await provider.prepare(baseRequest);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errorCode).toBe("bubblewrap_provider_version_mismatch");
+    }
+  });
+
+  it("refuses qualification evidence with an isolation profile mismatch", async () => {
+    const provider = makeProvider({
+      status: "qualified",
+      evidence: makeMalformedEvidence({
+        profileFingerprint: "profileId=bubblewrap-v0",
+        isolationProfileId: "bubblewrap-v0",
+      }),
+    });
+    const result = await provider.prepare(baseRequest);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errorCode).toBe("bubblewrap_profile_fingerprint_mismatch");
+    }
+  });
+
+  it("refuses qualification evidence with a mount profile mismatch", async () => {
+    const provider = makeProvider({
+      status: "qualified",
+      evidence: makeMalformedEvidence({ mountProfileId: "mount-v0" }),
+    });
+    const result = await provider.prepare(baseRequest);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errorCode).toBe("bubblewrap_mount_profile_mismatch");
+    }
+  });
+
+  it("refuses qualification evidence with a provider path mismatch", async () => {
+    const provider = makeProvider({
+      status: "qualified",
+      evidence: makeMalformedEvidence({ providerExecutable: "/opt/bwrap" }),
+    });
+    const result = await provider.prepare(baseRequest);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errorCode).toBe("bubblewrap_provider_path_mismatch");
+    }
+  });
+
+  it("refuses qualification evidence with a provider kind mismatch", async () => {
+    const provider = makeProvider({
+      status: "qualified",
+      evidence: makeMalformedEvidence({ providerKind: "other-provider" }),
+    });
+    const result = await provider.prepare(baseRequest);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errorCode).toBe("bubblewrap_provider_kind_mismatch");
+    }
+  });
+
+  it("does not derive qualification from task, model, or semantic input", async () => {
+    const selection = selectWithoutQualification();
+    expect(selection.kind).toBe("bubblewrap");
+    if (selection.kind !== "bubblewrap") return;
+
+    const result = await selection.provider.prepare(baseRequest);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errorCode).toBe("bubblewrap_qualification_missing");
+    }
+  });
+});

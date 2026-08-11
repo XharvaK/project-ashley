@@ -71,6 +71,7 @@ import {
   type FixedRecipeExecutionResult,
 } from "../execution/execution-types.js";
 import type { NetworkIsolationProvider } from "../execution/network-isolation.js";
+import type { ExecutionIsolationProvider } from "../execution/execution-isolation.js";
 import type { ProcessRunner } from "../process/fake-runner.js";
 import type { ExecutableMappings } from "../execution/executable-resolver.js";
 import type { BrokerResponse, RequestContext } from "../protocol/frame.js";
@@ -171,6 +172,8 @@ export interface DelegatedRuntimeDependencies {
   processRunner: ProcessRunner;
   /** Host-instantiated, fail-closed network isolation provider. */
   networkIsolation: NetworkIsolationProvider;
+  /** Optional host-selected execution isolation provider. */
+  executionIsolation?: ExecutionIsolationProvider;
 }
 
 function isBoundedString(value: unknown, max: number, min = 1): value is string {
@@ -735,6 +738,7 @@ export class DelegatedRuntime {
       rootConfig,
       processRunner: deps.processRunner,
       networkIsolation: deps.networkIsolation,
+      executionIsolation: deps.executionIsolation,
       executableMappings: config.executableMappings,
       registry: config.recipes,
       environmentSource: () => envForAllowlist(config.envAllowlist),

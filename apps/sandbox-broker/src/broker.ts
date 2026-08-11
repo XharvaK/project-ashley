@@ -55,6 +55,7 @@ import type { BrokerRootConfig } from "./policy/root-config.js";
 import type { BrokerResponse, RequestContext } from "./protocol/frame.js";
 import type { BrokerAuditRecord } from "./execution/fixed-recipe-execution-service.js";
 import type { NetworkIsolationProvider } from "./execution/network-isolation.js";
+import type { ExecutionIsolationProvider } from "./execution/execution-isolation.js";
 import { DelegatedRuntime } from "./delegated/runtime.js";
 import type { DelegatedRuntimeConfig, DelegatedRuntimeDependencies } from "./delegated/runtime.js";
 
@@ -86,6 +87,8 @@ export interface BrokerConfig {
    * surface is enabled.
    */
   networkIsolation?: NetworkIsolationProvider;
+  /** Host-selected execution isolation provider; absent preserves legacy behavior. */
+  executionIsolation?: ExecutionIsolationProvider;
 }
 
 /**
@@ -151,6 +154,7 @@ export class SandboxBroker {
       },
       processRunner: config.processRunner,
       networkIsolation,
+      executionIsolation: config.executionIsolation,
     };
     return DelegatedRuntime.create(config.delegatedRuntimeConfig, deps);
   }

@@ -18,6 +18,8 @@ import path from "node:path";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import {
+  BubblewrapExecutionIsolation,
+  DEFAULT_BUBBLEWRAP_PATH,
   augmentBrokerOwnedEvidence,
   formatIsolationEvidenceSummary,
   unavailableIsolationEvidence,
@@ -311,6 +313,37 @@ describe("canary isolation gate", () => {
       expect(result.audit.isolationEvidenceSummary).toContain("network=provided");
       expect(result.audit.isolationEvidenceSummary).toContain("source_binding=absent");
     }
+  });
+
+  it("does not fall back to the network provider when selected Bubblewrap is unqualified", async () => {
+    const harness = makeExecutionHarness();
+    const runner = new RecordingRunner();
+    const executionIsolation = new BubblewrapExecutionIsolation({
+      processRunner: runner,
+      platform: "linux",
+      probeBinary: () => ({
+        kind: "ok",
+        resolvedPath: DEFAULT_BUBBLEWRAP_PATH,
+      }),
+      qualification: { status: "unqualified" },
+    });
+    const service = buildCanaryService(harness, {
+      executionIsolation,
+      runner,
+    });
+    const active = createActiveSession(harness);
+    if (!active.ok) return;
+
+    const result = await service.executeFixedRecipe(
+      makeExecutionRequest(harness, active.session),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.stage).toBe("network");
+      expect(result.errorCode).toBe("bubblewrap_qualification_missing");
+    }
+    expect(runner.calls).toHaveLength(0);
+    expect(harness.network.prepareCalls).toBe(0);
   });
 
   it("6. the legacy network provider is untouched by the gate when no recipe requires isolation", async () => {

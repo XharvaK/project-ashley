@@ -47,6 +47,7 @@ export * from "./execution/execution-isolation.js";
 export * from "./execution/environment.js";
 export * from "./execution/linux-execution-isolation.js";
 export * from "./execution/bubblewrap-execution-isolation.js";
+export * from "./execution/execution-provider-selection.js";
 export * from "./execution/linux-network-isolation.js";
 export * from "./execution/executable-resolver.js";
 export * from "./execution/bounded-output.js";

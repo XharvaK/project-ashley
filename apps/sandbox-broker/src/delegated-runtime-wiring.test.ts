@@ -9,6 +9,10 @@ import {
   type DelegatedRuntimeDependencies,
 } from "./delegated/runtime.js";
 import {
+  unavailableIsolationEvidence,
+  type ExecutionIsolationProvider,
+} from "./execution/execution-isolation.js";
+import {
   DurableBrokerStore,
   type BrokerStore,
 } from "./store/broker-store.js";
@@ -163,5 +167,47 @@ describe("delegated runtime broker wiring", () => {
       networkIsolationOperational: true,
       maxConcurrentTasks: 1,
     });
+  });
+  it("passes the host-selected execution provider into delegated runtime", () => {
+    const stateRoot = mkdtempSync(path.join(tmpdir(), "ashley-broker-execution-provider-"));
+    const workspaceRoot = mkdtempSync(path.join(tmpdir(), "ashley-broker-execution-work-"));
+    const executionIsolation: ExecutionIsolationProvider = {
+      prepare() {
+        return {
+          ok: false,
+          errorCode: "test_execution_provider",
+          reason: "test",
+        };
+      },
+      status() {
+        return "unavailable";
+      },
+      evidence() {
+        return unavailableIsolationEvidence("test");
+      },
+      supportedLevel() {
+        return 0;
+      },
+    };
+    const createSpy = vi
+      .spyOn(DelegatedRuntime, "create")
+      .mockImplementation((_config, deps) => {
+        expect(deps.executionIsolation).toBe(executionIsolation);
+        return {} as DelegatedRuntime;
+      });
+
+    try {
+      const store = new DurableBrokerStore(stateRoot);
+      const config = brokerConfig(store, workspaceRoot) as ReturnType<
+        typeof brokerConfig
+      > & { executionIsolation: ExecutionIsolationProvider };
+      config.executionIsolation = executionIsolation;
+      new SandboxBroker(config);
+      store.close();
+    } finally {
+      createSpy.mockRestore();
+      rmSync(stateRoot, { recursive: true, force: true });
+      rmSync(workspaceRoot, { recursive: true, force: true });
+    }
   });
 });

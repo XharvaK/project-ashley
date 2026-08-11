@@ -12,6 +12,12 @@ export type TaskTerminalReason =
   | "broker_restart"
   | "concurrency_limit";
 
+export type IsolationBind = {
+  src: string;
+  dest: string;
+  writable: boolean;
+};
+
 export interface FakeRunRequest {
   taskId: string;
   argv: string[];
@@ -20,6 +26,8 @@ export interface FakeRunRequest {
   wallMs: number;
   maxProcesses: number;
   maxOutputBytes: number;
+  isolationBinds?: readonly IsolationBind[];
+  isolationWorkspaceRoots?: readonly string[];
 }
 
 export interface FakeRunResult {

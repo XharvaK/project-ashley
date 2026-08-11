@@ -1,7 +1,7 @@
 /**
  * Bubblewrap execution isolation provider tests (SANDBOX-ISOLATION-01).
  *
- * Pins the design-only contract: the pure argv plan builder, the
+ * Pins the source contract: the pure argv plan builder, the
  * control-plane bind denial, fail-closed behavior without a real regular
  * binary, and honest evidence that stays unproven (level 0) until host
  * qualification.
@@ -12,6 +12,10 @@ import {
   BubblewrapExecutionIsolation,
   CONTROL_PLANE_BIND_PATHS,
   DEFAULT_BUBBLEWRAP_PATH,
+  BUBBLEWRAP_PROVIDER_VERSION_IDENTITY,
+  BUBBLEWRAP_PROFILE_FINGERPRINT,
+  type BubblewrapQualification,
+  type BubblewrapQualificationEvidence,
   buildBubblewrapArgv,
 } from "../index.js";
 import { ScriptedProcessRunner } from "../process/fake-runner.js";
@@ -36,10 +40,26 @@ const baseBinds = [
   { src: WORK_ROOT, dest: WORK_ROOT, writable: true },
 ] as const;
 
+const QUALIFICATION_EVIDENCE: BubblewrapQualificationEvidence = {
+  evidenceId: "bubblewrap-test-host-qualification-r2",
+  profileFingerprint: BUBBLEWRAP_PROFILE_FINGERPRINT,
+  providerKind: "bubblewrap",
+  providerExecutable: DEFAULT_BUBBLEWRAP_PATH,
+  providerVersionIdentity: BUBBLEWRAP_PROVIDER_VERSION_IDENTITY,
+  requiredHostNamespaces: ["user", "mount", "pid", "net", "uts", "ipc"],
+  isolationProfileId: "bubblewrap-v1",
+  mountProfileId: "whitelist-v1",
+};
+
+function qualifiedQualification(): BubblewrapQualification {
+  return { status: "qualified", evidence: QUALIFICATION_EVIDENCE };
+}
+
 function makeProvider(options: {
   platform?: NodeJS.Platform;
   binary?: "ok" | "missing" | "symlink" | "error";
-  qualified?: boolean;
+  qualification?: BubblewrapQualification;
+  providerVersion?: string;
 } = {}) {
   const runner = new ScriptedProcessRunner();
   const kind = options.binary ?? "ok";
@@ -54,9 +74,13 @@ function makeProvider(options: {
           : kind === "error"
             ? { kind: "error" }
             : { kind: "missing" },
+    probeProviderVersion: () => ({
+      kind: "ok",
+      identity: options.providerVersion ?? BUBBLEWRAP_PROVIDER_VERSION_IDENTITY,
+    }),
     binds: baseBinds,
     workspaceRoots: [WORK_ROOT],
-    qualified: options.qualified ?? false,
+    qualification: options.qualification ?? { status: "unqualified" },
   });
   return { runner, provider };
 }
@@ -91,6 +115,17 @@ describe("bubblewrap execution isolation", () => {
   });
 
   it("2. never binds control-plane paths, except exact workspace roots", () => {
+    const rootBind = buildBubblewrapArgv({
+      bubblewrapPath: DEFAULT_BUBBLEWRAP_PATH,
+      argv: ["/usr/bin/true"],
+      cwd: "/",
+      env: {},
+      binds: [{ src: "/", dest: "/", writable: false }],
+    });
+    expect(rootBind.ok).toBe(false);
+    if (!rootBind.ok) {
+      expect(rootBind.errorCode).toBe("bubblewrap_root_bind_denied");
+    }
     for (const forbidden of CONTROL_PLANE_BIND_PATHS) {
       const plan = buildBubblewrapArgv({
         bubblewrapPath: DEFAULT_BUBBLEWRAP_PATH,
@@ -152,28 +187,60 @@ describe("bubblewrap execution isolation", () => {
   });
 
   it("5. refuses execution until the host is qualified", async () => {
-    const { provider } = makeProvider({ binary: "ok", qualified: false });
+    const { provider } = makeProvider({ binary: "ok", qualification: { status: "unqualified" } });
     const result = await provider.prepare(baseRequest);
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.errorCode).toBe("bubblewrap_not_qualified");
+      expect(result.errorCode).toBe("bubblewrap_qualification_missing");
     }
     expect(provider.evidence().network.status).toBe("unproven");
     expect(provider.supportedLevel()).toBe(0);
   });
 
   it("6. qualified host claims honest mechanism properties and passes the request through", async () => {
-    const { provider } = makeProvider({ binary: "ok", qualified: true });
+    const { provider } = makeProvider({ binary: "ok", qualification: qualifiedQualification() });
     const result = await provider.prepare(baseRequest);
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.request.argv[0]).toBe(DEFAULT_BUBBLEWRAP_PATH);
       expect(result.request.cwd).toBe(baseRequest.cwd);
+      expect(result.request.argv).toContain("--tmpfs");
+      expect(result.request.argv).toContain("/tmp");
+      expect(result.request.argv).toContain("--dir");
+      expect(result.request.argv).toContain(baseRequest.env.HOME);
       const evidence = result.isolation;
       expect(evidence.network.status).toBe("provided");
       expect(evidence.process_tree.status).toBe("partial");
       expect(evidence.control_plane_invisible.status).toBe("unproven");
       expect(evidence.broker_socket_invisible.status).toBe("unproven");
+    }
+  });
+  it("refuses a provider replacement with a mismatched version identity", async () => {
+    const { provider } = makeProvider({
+      qualification: qualifiedQualification(),
+      providerVersion: "bubblewrap/0.9.1",
+    });
+    const result = await provider.prepare(baseRequest);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errorCode).toBe("bubblewrap_provider_version_mismatch");
+    }
+    expect(provider.status()).toBe("unavailable");
+    expect(provider.evidence().network.status).toBe("unproven");
+  });
+  it("uses broker-supplied exact workspace binds", async () => {
+    const workspace = `${WORK_ROOT}/ws-xyz`;
+    const { provider } = makeProvider({ qualification: qualifiedQualification() });
+    const result = await provider.prepare({
+      ...baseRequest,
+      isolationBinds: [{ src: workspace, dest: workspace, writable: true }],
+      isolationWorkspaceRoots: [workspace],
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.request.argv).toContain("--bind");
+      expect(result.request.argv).toContain(workspace);
     }
   });
 });

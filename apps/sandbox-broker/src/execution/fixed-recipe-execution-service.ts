@@ -511,6 +511,17 @@ export class FixedRecipeExecutionService {
         wallMs: effectiveLimits.wallMs,
         maxProcesses: effectiveLimits.maxProcesses,
         maxOutputBytes: effectiveLimits.maxOutputBytes,
+        isolationBinds: [
+          ...this.options.rootConfig.readOnlyRoots.map((src) => ({
+            src,
+            dest: src,
+            writable: false,
+          })),
+          ...(treeRoot === null
+            ? []
+            : [{ src: treeRoot, dest: treeRoot, writable: true }]),
+        ],
+        isolationWorkspaceRoots: treeRoot === null ? [] : [treeRoot],
       };
       const prepareProvider =
         this.executionIsolation ?? this.networkIsolation;

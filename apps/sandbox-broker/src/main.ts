@@ -20,6 +20,8 @@ import { fixedRecipeRegistry } from "./policy/recipe-registry.js";
 import { selectProductionNetworkIsolation, assertNetworkIsolationProbeOperational } from "./execution/linux-network-isolation.js";
 import { executableMappingsFromEnv } from "./execution/executable-mappings.js";
 import type { NetworkIsolationProvider } from "./execution/network-isolation.js";
+import { selectProductionExecutionIsolation } from "./execution/execution-provider-selection.js";
+import type { ExecutionIsolationProvider } from "./execution/execution-isolation.js";
 import type { DelegatedRuntimeConfig } from "./delegated/runtime.js";
 
 function requiredEnv(name: string): string {
@@ -97,6 +99,7 @@ async function loadDelegatedRuntimeConfig(
   {
     config: DelegatedRuntimeConfig;
     networkIsolation: NetworkIsolationProvider;
+    executionIsolation?: ExecutionIsolationProvider;
   } | null
 > {
   if (!boolEnv("ASHLEY_SANDBOX_DELEGATED_ENABLED")) return null;
@@ -134,6 +137,18 @@ async function loadDelegatedRuntimeConfig(
     await assertNetworkIsolationProbeOperational(selection.provider);
   }
   const networkIsolation = selection.provider;
+  const executionSelection = selectProductionExecutionIsolation({
+    providerName: process.env.ASHLEY_SANDBOX_EXECUTION_PROVIDER,
+    profileFingerprint:
+      process.env.ASHLEY_SANDBOX_EXECUTION_PROFILE_FINGERPRINT ??
+      process.env.ASHLEY_SANDBOX_EXECUTION_QUALIFICATION_ID,
+    platform: process.platform,
+    processRunner,
+  });
+  const executionIsolation =
+    executionSelection.kind === "bubblewrap"
+      ? executionSelection.provider
+      : undefined;
 
   const delegatedPublicPem = readPublicKeyPem(delegatedPublicPath);
 
@@ -203,6 +218,7 @@ async function loadDelegatedRuntimeConfig(
       networkProvider: selection.label,
     },
     networkIsolation,
+    executionIsolation,
   };
 }
 
@@ -265,7 +281,11 @@ async function createProductionBroker(): Promise<{
     store,
     recipes: recipes as Map<string, BrokerRecipe>,
     ...(delegated
-      ? { delegatedRuntimeConfig: delegated.config, networkIsolation: delegated.networkIsolation }
+      ? {
+          delegatedRuntimeConfig: delegated.config,
+          networkIsolation: delegated.networkIsolation,
+          executionIsolation: delegated.executionIsolation,
+        }
       : {}),
   });
   broker.restart();
