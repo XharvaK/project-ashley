@@ -21,6 +21,13 @@ export type BrokerRootConfig = {
   readOnlyRoots: readonly string[];
   writableDisposableRoots: readonly string[];
   protectedRoots: ProtectedRootsConfig;
+  /**
+   * Broker-resolved source identities (SANDBOX-ISOLATION-01): a bounded id
+   * to one of the read-only roots. A workspace created with a source
+   * identity is bound to exactly that root — `readOnlyRoots[0]` is never
+   * substituted for a bound identity.
+   */
+  sourceIdentities?: ReadonlyMap<string, string>;
 };
 
 export type BrokerRootConfigResult =
@@ -89,6 +96,36 @@ function overlap(a: string, b: string): boolean {
   return isWithin(a, b) || isWithin(b, a);
 }
 
+const SOURCE_IDENTITY_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
+
+function validateSourceIdentities(
+  identities: ReadonlyMap<string, string> | undefined,
+  readOnlyRoots: readonly string[],
+  reasons: string[],
+): boolean {
+  if (identities === undefined) return true;
+  if (!(identities instanceof Map)) {
+    reasons.push("source_identities_not_a_map");
+    return false;
+  }
+  let valid = true;
+  const readSet = new Set(readOnlyRoots);
+  for (const [id, root] of identities) {
+    if (typeof id !== "string" || !SOURCE_IDENTITY_ID_PATTERN.test(id)) {
+      reasons.push(`source_identity_id_invalid:${String(id)}`);
+      valid = false;
+    }
+    if (typeof root !== "string" || !isCanonicalForm(root)) {
+      reasons.push(`source_identity_root_not_canonical:${String(id)}`);
+      valid = false;
+    } else if (!readSet.has(root)) {
+      reasons.push(`source_identity_root_not_read_only:${String(id)}`);
+      valid = false;
+    }
+  }
+  return valid;
+}
+
 /**
  * Validates an injected canonical root configuration. Rejects non-canonical
  * or duplicated roots and any cross-class overlap: a path may never sit
@@ -99,6 +136,7 @@ export function validateBrokerRootConfig(input: {
   readOnlyRoots: readonly string[];
   writableDisposableRoots: readonly string[];
   protectedRoots: ProtectedRootsConfig;
+  sourceIdentities?: ReadonlyMap<string, string>;
 }): BrokerRootConfigResult {
   const reasons: string[] = [];
   if (!isCanonicalForm(input.workspaceRoot)) {
@@ -119,6 +157,8 @@ export function validateBrokerRootConfig(input: {
     seenWrite,
   );
   const protectedValid = canonicalProtectedConfig(input.protectedRoots, reasons);
+  const identitiesValid =
+    readValid && validateSourceIdentities(input.sourceIdentities, input.readOnlyRoots, reasons);
 
   if (readValid && writeValid) {
     for (const read of input.readOnlyRoots) {
@@ -163,6 +203,10 @@ export function validateBrokerRootConfig(input: {
         ],
         absoluteDenial: [...input.protectedRoots.absoluteDenial],
       },
+      sourceIdentities:
+        input.sourceIdentities === undefined
+          ? undefined
+          : new Map(input.sourceIdentities),
     },
   };
 }

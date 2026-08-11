@@ -1,7 +1,11 @@
 import net from "node:net";
 import { randomUUID } from "node:crypto";
 import { env } from "../../env.js";
-import type { BrokerClientTransport, BrokerDispatchResult } from "./broker-client.js";
+import type {
+  BrokerClientTransport,
+  BrokerDispatchResult,
+  BrokerRequestDelivery,
+} from "./broker-client.js";
 
 const FRAME_VERSION = 1;
 const MAX_FRAME_BYTES = 1_024 * 1_024;
@@ -75,7 +79,10 @@ function decodeOne(buffer: Buffer): { frame: TransportFrame; consumed: number } 
   };
 }
 
-function protocolResult(payload: unknown): BrokerDispatchResult {
+function protocolResult(
+  payload: unknown,
+  requestDelivery: BrokerRequestDelivery,
+): BrokerDispatchResult {
   if (
     payload &&
     typeof payload === "object" &&
@@ -91,12 +98,19 @@ function protocolResult(payload: unknown): BrokerDispatchResult {
     typeof (payload as { errorCode?: unknown }).errorCode === "string" &&
     typeof (payload as { message?: unknown }).message === "string"
   ) {
-    return payload as BrokerDispatchResult;
+    const error = payload as { errorCode: string; message: string };
+    return {
+      ok: false,
+      errorCode: error.errorCode,
+      message: error.message,
+      requestDelivery,
+    };
   }
   return {
     ok: false,
     errorCode: "broker_protocol_error",
     message: "broker returned an invalid response",
+    requestDelivery,
   };
 }
 
@@ -118,7 +132,10 @@ export class UnixBrokerClientTransport implements BrokerClientTransport {
     return new Promise((resolve) => {
       let settled = false;
       let pending = Buffer.alloc(0);
+      let requestWriteStarted = false;
       const socket = net.createConnection({ path: this.options.socketPath });
+      const deliveryStatus = (): BrokerRequestDelivery =>
+        requestWriteStarted ? "sent_or_unknown" : "not_sent";
       const finish = (result: BrokerDispatchResult): void => {
         if (settled) return;
         settled = true;
@@ -131,23 +148,25 @@ export class UnixBrokerClientTransport implements BrokerClientTransport {
           ok: false,
           errorCode: "broker_timeout",
           message: "sandbox broker did not respond before the deadline",
+          requestDelivery: deliveryStatus(),
         });
       }, this.timeoutMs);
       socket.once("connect", () => {
         try {
-          socket.write(
-            encodeFrame({
-              frameVersion: FRAME_VERSION,
-              requestId,
-              messageType,
-              payload,
-            }),
-          );
+          const frame = encodeFrame({
+            frameVersion: FRAME_VERSION,
+            requestId,
+            messageType,
+            payload,
+          });
+          requestWriteStarted = true;
+          socket.write(frame);
         } catch (error) {
           finish({
             ok: false,
             errorCode: "broker_protocol_error",
             message: error instanceof Error ? error.message : "frame encoding failed",
+            requestDelivery: deliveryStatus(),
           });
         }
       });
@@ -163,10 +182,11 @@ export class UnixBrokerClientTransport implements BrokerClientTransport {
                 ok: false,
                 errorCode: "broker_protocol_error",
                 message: "response request id mismatch",
+                requestDelivery: "sent_or_unknown",
               });
               return;
             }
-            finish(protocolResult(decoded.frame.payload));
+            finish(protocolResult(decoded.frame.payload, "sent_or_unknown"));
             return;
           }
         } catch (error) {
@@ -174,6 +194,7 @@ export class UnixBrokerClientTransport implements BrokerClientTransport {
             ok: false,
             errorCode: "broker_protocol_error",
             message: error instanceof Error ? error.message : "invalid broker frame",
+            requestDelivery: "sent_or_unknown",
           });
         }
       });
@@ -182,6 +203,7 @@ export class UnixBrokerClientTransport implements BrokerClientTransport {
           ok: false,
           errorCode: "broker_unavailable",
           message: error.message,
+          requestDelivery: deliveryStatus(),
         });
       });
       socket.once("close", () => {
@@ -189,6 +211,7 @@ export class UnixBrokerClientTransport implements BrokerClientTransport {
           ok: false,
           errorCode: "broker_unavailable",
           message: "sandbox broker connection closed before a response",
+          requestDelivery: deliveryStatus(),
         });
       });
     });

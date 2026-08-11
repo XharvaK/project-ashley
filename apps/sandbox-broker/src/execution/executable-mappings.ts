@@ -54,5 +54,13 @@ export function executableMappingsFromEnv(
   return { ok: true, mappings };
 }
 
-/** Executable ids the fixed recipe registry may request in production. */
-export const KNOWN_EXECUTABLE_IDS: ReadonlySet<string> = new Set(["npm", "git"]);
+/**
+ * Executable ids the fixed recipe registry may request in production.
+ * `true` backs the verify:broker-smoke isolation canary
+ * (SANDBOX-ISOLATION-01).
+ */
+export const KNOWN_EXECUTABLE_IDS: ReadonlySet<string> = new Set([
+  "npm",
+  "git",
+  "true",
+]);

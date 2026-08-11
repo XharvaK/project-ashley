@@ -321,6 +321,35 @@ describe("fixed-recipe execution service", () => {
       expect(harness.ledger.getCapabilityUse(useId)?.outcome).toBe("failed");
     });
 
+    it("9b. a post-reservation failure is outcome_unknown, not refused", async () => {
+      const harness = makeExecutionHarness();
+      const active = createActiveSession(harness);
+      if (!active.ok) return;
+      const useId = "use-outcome-unknown-1";
+      const failingSessionService = harness.sessionService as unknown as {
+        finalizeToolExecution: () => never;
+      };
+      failingSessionService.finalizeToolExecution = () => {
+        throw new Error("finalization response lost");
+      };
+
+      const result = await harness.service.executeFixedRecipe(
+        makeExecutionRequest(harness, active.session, {}, { capabilityUseId: useId }),
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.outcome).toBe("outcome_unknown");
+        expect(result.errorCode).toBe("outcome_unknown");
+        expect(result.stage).toBe("execution");
+      }
+      const executionAudits = harness.audits.filter(
+        (record) => record.kind === "broker_fixed_recipe_execution",
+      );
+      const audit = executionAudits[executionAudits.length - 1]!;
+      expect(audit.outcome).toBe("outcome_unknown");
+      expect(audit.errorCode).toBe("outcome_unknown");
+    });
+
     it("10. a failed run still consumes the budget and a fresh use still works", async () => {
       const harness = makeExecutionHarness();
       const active = createActiveSession(harness, { maxToolExecutions: 2 });
@@ -884,7 +913,7 @@ describe("fixed-recipe execution service", () => {
       ]);
       expect(counting.calls[0]!.cwd).toBeDefined();
       expect(counting.calls[0]!.env.HOME).toBeDefined();
-      expect(counting.calls[0]!.env.PATH).toBe(process.env.PATH);
+      expect(counting.calls[0]!.env.PATH).toBe("/usr/bin:/bin");
     });
 
     it("37. non-linux production selection fails closed before any spawn", async () => {
@@ -1239,7 +1268,7 @@ describe("fixed-recipe execution service", () => {
       expect(env.HOME).not.toBe(process.env.HOME);
       expect(env.GIT_TERMINAL_PROMPT).toBe("0");
       expect(env.GIT_PAGER).toBe("cat");
-      expect(env.PATH).toBe(process.env.PATH);
+      expect(env.PATH).toBe("/usr/bin:/bin");
     });
 
     it("46. never passes secrets or non-allowlisted names", async () => {
@@ -1270,7 +1299,7 @@ describe("fixed-recipe execution service", () => {
       const env = counting.calls[0]!.env;
       expect(env.MISTRAL_API_KEY).toBeUndefined();
       expect(env.AWS_ACCESS_KEY_ID).toBeUndefined();
-      expect(env.PATH).toBe("/broker/bin");
+      expect(env.PATH).toBe("/usr/bin:/bin");
       expect(Object.keys(env).every((key) => !key.includes("KEY"))).toBe(true);
     });
 

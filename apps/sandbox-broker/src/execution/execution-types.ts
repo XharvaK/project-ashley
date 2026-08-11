@@ -12,8 +12,9 @@
  * overflows its output budget is a documented typed outcome, not a security
  * failure. Refusals (authorization, session, capability, recipe, limits,
  * network isolation, reservation) never spawn a process and never consume a
- * reservation. The moment a reservation is accepted, the run is finalized
- * as succeeded or failed and the budget is never refunded.
+ * reservation. A post-reservation broker failure is reported separately as
+ * `outcome_unknown`; it is not a known refusal and does not add a durable
+ * execution-state redesign to this surface.
  */
 
 import type { TaskLimits } from "../crypto/types.js";
@@ -121,7 +122,7 @@ export type BrokerExecutionReceipt = {
 /** Bounded audit record for one fixed-recipe execution attempt. */
 export type BrokerExecutionAudit = {
   kind: "broker_fixed_recipe_execution";
-  outcome: "completed" | "refused";
+  outcome: "completed" | "refused" | "outcome_unknown";
   errorCode: string | null;
   stage: string;
   proposalId: string;
@@ -143,6 +144,8 @@ export type BrokerExecutionAudit = {
   receiptHash: string | null;
   nonceHash: string;
   createdAtIso: string;
+  /** Merged execution isolation evidence, one line per attempt (SANDBOX-ISOLATION-01). */
+  isolationEvidenceSummary: string | null;
 };
 
 export type FixedRecipeExecutionResult =
@@ -154,9 +157,19 @@ export type FixedRecipeExecutionResult =
     }
   | {
       ok: false;
+      outcome: "refused";
       errorCode: string;
       reason: string;
       stage: string;
       audit: BrokerExecutionAudit;
       receipt: BrokerExecutionReceipt | null;
+    }
+  | {
+      ok: false;
+      outcome: "outcome_unknown";
+      errorCode: "outcome_unknown";
+      reason: string;
+      stage: string;
+      audit: BrokerExecutionAudit;
+      receipt: null;
     };

@@ -49,6 +49,31 @@ function boolEnv(name: string): boolean {
   throw new Error(`${name} must be "true" or "false"`);
 }
 
+const SOURCE_IDENTITY_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
+
+/**
+ * Reads broker-resolved source identities from the
+ * `ASHLEY_SANDBOX_SOURCE_IDENTITY_<ID>` seam (SANDBOX-ISOLATION-01). Values
+ * are canonical read-only roots; shape is validated here and root membership
+ * is validated at runtime config build. A malformed seam fails the boot —
+ * never a silent downgrade to root substitution.
+ */
+function sourceIdentitiesFromEnv(
+  env: Readonly<Record<string, string | undefined>>,
+): Map<string, string> {
+  const identities = new Map<string, string>();
+  for (const [name, value] of Object.entries(env)) {
+    if (!name.startsWith("ASHLEY_SANDBOX_SOURCE_IDENTITY_")) continue;
+    const id = name.slice("ASHLEY_SANDBOX_SOURCE_IDENTITY_".length);
+    if (id.length === 0 || !SOURCE_IDENTITY_ID_PATTERN.test(id)) continue;
+    if (value === undefined || value.trim().length === 0) {
+      throw new Error(`sandbox_delegated_runtime: source_identity_empty:${id}`);
+    }
+    identities.set(id, value.trim());
+  }
+  return identities;
+}
+
 /**
  * Loads host-side delegated runtime material behind
  * `ASHLEY_SANDBOX_DELEGATED_ENABLED`. All private-key material is decrypted
@@ -134,6 +159,12 @@ async function loadDelegatedRuntimeConfig(
 
   const envAllowlist = new Set<string>(["PATH", "NODE_OPTIONS"]);
 
+  // SANDBOX-ISOLATION-01: broker-resolved source identities bind workspace
+  // creations to exact read-only roots; the default identity preserves
+  // single-root semantics. Validated again (root membership) at runtime
+  // config build — a malformed seam fails the boot.
+  const sourceIdentities = sourceIdentitiesFromEnv(process.env);
+
   // R5B production executable seam: the installer pins broker-controlled
   // regular files (e.g. /opt/ashley-sandbox/bin/npm) via
   // ASHLEY_SANDBOX_EXECUTABLE_<ID>. Unmapped ids stay unmapped and every
@@ -168,6 +199,7 @@ async function loadDelegatedRuntimeConfig(
       recipes: fixedRecipeRegistry(),
       envAllowlist,
       executableMappings: mappingsResult.mappings,
+      sourceIdentities,
       networkProvider: selection.label,
     },
     networkIsolation,

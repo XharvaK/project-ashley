@@ -13,7 +13,12 @@ import { FIXED_RECIPE_REGISTRY, fixedRecipeRegistry } from "../index.js";
 import { assertArgvPolicy } from "../policy/execution.js";
 
 const toolchainRecipes = FIXED_RECIPE_REGISTRY.filter(
-  (recipe) => recipe.category === "build" || recipe.category === "test",
+  (recipe) =>
+    (recipe.category === "build" || recipe.category === "test") &&
+    // The isolation canary (verify:broker-smoke, SANDBOX-ISOLATION-01) is a
+    // build-category recipe that deliberately runs /usr/bin/true and
+    // declares requiredIsolation; it is not part of the npm toolchain.
+    recipe.requiredIsolation === undefined,
 );
 
 describe("fixed build and test recipes", () => {

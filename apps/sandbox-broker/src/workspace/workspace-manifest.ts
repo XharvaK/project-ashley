@@ -24,6 +24,13 @@ export type DisposableWorkspaceManifest = {
   workspaceId: string;
   sourceRoot: string;
   sourceRootId: string;
+  /**
+   * Broker-resolved source identity the tree was created from
+   * (SANDBOX-ISOLATION-01). Null on legacy single-root creations and
+   * pre-v1 manifests; a non-null value is the exact identity id the
+   * task bound (never `readOnlyRoots[0]` substitution).
+   */
+  sourceIdentity: string | null;
   treeRoot: string;
   metadataPath: string;
   ownerId: string;
@@ -84,6 +91,7 @@ function isPositiveInteger(value: unknown): value is number {
 
 const ISO_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
 const HASH_PATTERN = /^[0-9a-f]{64}$/;
+const SOURCE_IDENTITY_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 
 export type WorkspaceManifestParseResult =
   | { ok: true; manifest: DisposableWorkspaceManifest }
@@ -103,6 +111,7 @@ export function parseDisposableWorkspaceManifest(value: unknown): WorkspaceManif
     "workspaceId",
     "sourceRoot",
     "sourceRootId",
+    "sourceIdentity",
     "treeRoot",
     "metadataPath",
     "ownerId",
@@ -132,6 +141,13 @@ export function parseDisposableWorkspaceManifest(value: unknown): WorkspaceManif
   if (!isBoundedString(value.sourceRoot, 4096)) reasons.push("source_root_invalid");
   if (!HASH_PATTERN.test(String(value.sourceRootId ?? ""))) {
     reasons.push("source_root_id_invalid");
+  }
+  if (
+    value.sourceIdentity !== undefined &&
+    value.sourceIdentity !== null &&
+    !SOURCE_IDENTITY_PATTERN.test(String(value.sourceIdentity))
+  ) {
+    reasons.push("source_identity_invalid");
   }
   if (!isBoundedString(value.treeRoot, 4096)) reasons.push("tree_root_invalid");
   if (!isBoundedString(value.metadataPath, 4096)) reasons.push("metadata_path_invalid");
@@ -213,7 +229,13 @@ export function parseDisposableWorkspaceManifest(value: unknown): WorkspaceManif
     }
   }
   if (reasons.length > 0) return { ok: false, reasons };
-  return { ok: true, manifest: value as unknown as DisposableWorkspaceManifest };
+  return {
+    ok: true,
+    manifest: {
+      ...(value as unknown as DisposableWorkspaceManifest),
+      sourceIdentity: (value.sourceIdentity as string | null | undefined) ?? null,
+    },
+  };
 }
 
 export function serializeDisposableWorkspaceManifest(

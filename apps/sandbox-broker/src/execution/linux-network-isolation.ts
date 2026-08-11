@@ -102,7 +102,7 @@ export interface LinuxUnshareIsolationOptions {
   cancelRunner?: (taskId: string) => boolean;
 }
 
-function probeExecutableDefault(path: string): IsolationExecutableProbe {
+export function probeExecutableDefault(path: string): IsolationExecutableProbe {
   try {
     const info = lstatSync(path);
     if (info.isSymbolicLink()) return { kind: "symlink" };

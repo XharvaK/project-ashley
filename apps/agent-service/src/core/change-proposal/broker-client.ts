@@ -1,6 +1,14 @@
+export type BrokerRequestDelivery = "not_sent" | "sent_or_unknown";
+
 export type BrokerDispatchResult<T = unknown> =
   | { ok: true; data: T }
-  | { ok: false; errorCode: string; message: string };
+  | {
+      ok: false;
+      errorCode: string;
+      message: string;
+      /** Required for execution epistemics when the transport can report it. */
+      requestDelivery?: BrokerRequestDelivery;
+    };
 
 export interface BrokerClientTransport {
   dispatch(messageType: string, payload: unknown):

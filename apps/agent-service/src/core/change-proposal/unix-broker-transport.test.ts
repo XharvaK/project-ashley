@@ -17,8 +17,40 @@ describe("UnixBrokerClientTransport", () => {
       timeoutMs: 500,
     }).dispatch("artifact.list", { ownerId: "owner-1" });
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.errorCode).toBe("broker_unavailable");
+    if (!result.ok) {
+      expect(result.errorCode).toBe("broker_unavailable");
+      expect(result.requestDelivery).toBe("not_sent");
+    }
   });
+
+  it.skipIf(process.platform === "win32")(
+    "marks a timeout after request write as sent_or_unknown",
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), "ashley-agent-broker-timeout-"));
+      const socketPath = join(root, "broker.sock");
+      const server = createServer((socket) => {
+        socket.on("data", () => {
+          // Accept the request, but do not send a response.
+        });
+      });
+      await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+      cleanup.push(() => {
+        server.close();
+        rmSync(root, { recursive: true, force: true });
+      });
+
+      const result = await new UnixBrokerClientTransport({
+        socketPath,
+        timeoutMs: 100,
+      }).dispatch("artifact.list", { ownerId: "owner-1" });
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.errorCode).toBe("broker_timeout");
+        expect(result.requestDelivery).toBe("sent_or_unknown");
+      }
+    },
+  );
 
   it.skipIf(process.platform === "win32")(
     "round-trips a framed response over a Unix socket",

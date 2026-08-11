@@ -171,6 +171,7 @@ function isExecutionResult(data: unknown): data is FixedRecipeExecutionResult {
   }
   if (data.ok === false) {
     return (
+      (data.outcome === "refused" || data.outcome === "outcome_unknown") &&
       typeof data.errorCode === "string" &&
       typeof data.reason === "string" &&
       typeof data.stage === "string"
@@ -260,6 +261,7 @@ function executionRefusal(
   const now = new Date().toISOString();
   return {
     ok: false,
+    outcome: "refused",
     errorCode,
     reason,
     stage: "transport",
@@ -288,6 +290,48 @@ function executionRefusal(
       receiptHash: null,
       nonceHash: "",
       createdAtIso: now,
+      isolationEvidenceSummary: null,
+    },
+  };
+}
+
+function executionUnknown(
+  errorCode: string,
+  reason: string,
+): FixedRecipeExecutionResult {
+  const now = new Date().toISOString();
+  return {
+    ok: false,
+    outcome: "outcome_unknown",
+    errorCode: "outcome_unknown",
+    reason: `transport error ${errorCode}: ${reason}`,
+    stage: "transport",
+    receipt: null,
+    audit: {
+      kind: "broker_fixed_recipe_execution",
+      outcome: "outcome_unknown",
+      errorCode: "outcome_unknown",
+      stage: "transport",
+      proposalId: "",
+      ownerId: "",
+      sessionUuid: "",
+      capabilityUseId: null,
+      recipeId: "",
+      readiness: "disabled",
+      category: null,
+      exitCode: null,
+      terminalReason: null,
+      stdoutHash: null,
+      stderrHash: null,
+      truncated: false,
+      stdoutBytes: null,
+      stderrBytes: null,
+      wallMs: null,
+      networkIsolation: "not_attempted",
+      receiptHash: null,
+      nonceHash: "",
+      createdAtIso: now,
+      isolationEvidenceSummary: null,
     },
   };
 }
@@ -317,6 +361,7 @@ export class UnixSandboxBrokerClient implements SandboxBrokerClient {
         ok: false,
         errorCode: "broker_closed",
         message: "sandbox broker client is closed",
+        requestDelivery: "not_sent",
       };
     }
     try {
@@ -332,12 +377,14 @@ export class UnixSandboxBrokerClient implements SandboxBrokerClient {
         ok: false,
         errorCode: "broker_timeout",
         message: "sandbox broker timed out",
+        requestDelivery: "sent_or_unknown",
       };
     }
     return {
       ok: false,
       errorCode: "broker_unavailable",
       message: "sandbox broker request failed",
+      requestDelivery: "sent_or_unknown",
     };
   }
 
@@ -504,15 +551,17 @@ export class UnixSandboxBrokerClient implements SandboxBrokerClient {
   async executeRecipe(request: FixedRecipeExecutionRequest): Promise<FixedRecipeExecutionResult> {
     const result = await this.dispatch("sandbox.recipe.execute", { request });
     if (!result.ok) {
-      return executionRefusal(result.errorCode, result.message);
+      return result.requestDelivery === "not_sent"
+        ? executionRefusal(result.errorCode, result.message)
+        : executionUnknown(result.errorCode, result.message);
     }
     if (oversized(result.data, this.maxResponseBytes)) {
-      return executionRefusal("broker_response_oversized", "broker response oversized");
+      return executionUnknown("broker_response_oversized", "broker response oversized");
     }
     if (isExecutionResult(result.data)) {
       return result.data as FixedRecipeExecutionResult;
     }
-    return executionRefusal("broker_response_invalid", "malformed executeRecipe response");
+    return executionUnknown("broker_response_invalid", "malformed executeRecipe response");
   }
 
   async getSession(sessionUuid: string): Promise<SandboxBrokerSessionSnapshot | null> {

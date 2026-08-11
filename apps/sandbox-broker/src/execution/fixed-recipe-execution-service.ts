@@ -13,17 +13,27 @@
  *                                fixed plan from the broker-owned registry
  *   6. limits                  — strictest-of broker/policy/recipe/request
  *   7. executable              — resolved via mappings, real regular file
- *   8. cwd + workspace         — existing directory, disposable revalidation,
+ *   8. workspace + cwd         — revalidation first; workspace-anchored
+ *                                recipes run at the disposable tree root,
  *                                write/delete containment inside the tree
- *   9. network isolation       — spawn-coupled: the provider returns the
+ *   9. execution isolation     — merged provider + broker-owned evidence;
+ *                                a recipe-declared `requiredIsolation` is
+ *                                gated before reservation (isolation
+ *                                activation level 1+), never spawned
+ *                                otherwise (SANDBOX-ISOLATION-01)
+ *  10. network isolation       — spawn-coupled: the provider returns the
  *                                complete isolated spawn specification, or a
  *                                typed refusal. Refusal → no spawn, no budget.
- *  10. reservation             — atomic, single-use, budgeted
- *  11. spawn                   — shell-free, bounded; executes EXACTLY the
+ *  11. reservation             — atomic, single-use, budgeted
+ *  12. spawn                   — shell-free, bounded; executes EXACTLY the
  *                                specification prepared by the isolation
- *                                provider (R5A: NO ISOLATION → NO SPAWN)
- *  12. finalize                — succeeded/failed, never refunded
- *  13. receipt                 — bounded, hashed, deterministic
+ *                                provider (R5A: NO ISOLATION → NO SPAWN);
+ *                                synthetic per-run HOME is always removed
+ *  13. finalize                — succeeded/failed, never refunded; any
+ *                                post-reservation failure finalizes and
+ *                                yields explicit `outcome_unknown` status,
+ *                                never a known refusal or a throw
+ *  14. receipt                 — bounded, hashed, deterministic
  *
  * Refusals before the reservation never spawn and never consume budget.
  * After the reservation is accepted the run is always finalized and a
@@ -33,7 +43,7 @@
  * only executes broker-owned fixed recipes.
  */
 
-import { lstatSync, mkdtempSync, realpathSync } from "node:fs";
+import { lstatSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { SandboxCapabilityId } from "@composer-assistant/sandbox-policy";
@@ -57,6 +67,15 @@ import {
   createUnavailableNetworkIsolation,
   type NetworkIsolationProvider,
 } from "./network-isolation.js";
+import {
+  augmentBrokerOwnedEvidence,
+  formatIsolationEvidenceSummary,
+  meetsIsolationRequirement,
+  type BrokerOwnedIsolationFacts,
+  type ExecutionIsolationProvider,
+  type IsolationEvidence,
+} from "./execution-isolation.js";
+import { buildExecutionEnvironment } from "./environment.js";
 import { resolveFixedRecipeExecutable, type ExecutableMappings } from "./executable-resolver.js";
 import { buildBoundedCapture } from "./bounded-output.js";
 import { buildExecutionReceipt } from "./receipt.js";
@@ -80,6 +99,19 @@ export type FixedRecipeExecutionServiceOptions = {
   rootConfig: BrokerRootConfig;
   processRunner: ProcessRunner;
   networkIsolation?: NetworkIsolationProvider;
+  /**
+   * Execution isolation provider (SANDBOX-ISOLATION-01). Extends the
+   * network provider with per-property evidence; when absent the service
+   * fails closed for any recipe that declares `requiredIsolation`.
+   */
+  executionIsolation?: ExecutionIsolationProvider;
+  /**
+   * Operator activation ceiling for the isolation gate (0 = legacy
+   * behavior: recipes declaring `requiredIsolation` are refused before
+   * reservation). A recipe's requirement is only enforced when the
+   * activation level is at least 1.
+   */
+  isolationActivationLevel?: number;
   executableMappings: ExecutableMappings;
   registry?: ReadonlyMap<string, FixedRecipe>;
   environmentSource?: () => Record<string, string | undefined>;
@@ -102,12 +134,16 @@ export class FixedRecipeExecutionService {
   private readonly options: FixedRecipeExecutionServiceOptions;
   private readonly registry: ReadonlyMap<string, FixedRecipe>;
   private readonly networkIsolation: NetworkIsolationProvider;
+  private readonly executionIsolation: ExecutionIsolationProvider | null;
+  private readonly isolationActivationLevel: number;
   private readonly nowMs: () => number;
 
   constructor(options: FixedRecipeExecutionServiceOptions) {
     this.options = options;
     this.registry = options.registry ?? fixedRecipeRegistry();
     this.networkIsolation = options.networkIsolation ?? createUnavailableNetworkIsolation();
+    this.executionIsolation = options.executionIsolation ?? null;
+    this.isolationActivationLevel = options.isolationActivationLevel ?? 0;
     this.nowMs = options.nowMs ?? (() => Date.now());
   }
 
@@ -133,7 +169,32 @@ export class FixedRecipeExecutionService {
       this.options.auditSink?.(audit);
       return {
         ok: false,
+        outcome: "refused",
         errorCode,
+        reason,
+        stage,
+        audit,
+        receipt: null,
+      };
+    };
+
+    const outcomeUnknown = (
+      stage: string,
+      reason: string,
+      partial: Partial<Omit<BrokerExecutionAudit, "kind" | "outcome" | "errorCode" | "stage">> = {},
+    ): FixedRecipeExecutionResult => {
+      const audit = this.buildAudit(request, {
+        outcome: "outcome_unknown",
+        errorCode: "outcome_unknown",
+        stage,
+        createdAtIso: new Date(this.nowMs()).toISOString(),
+        ...partial,
+      });
+      this.options.auditSink?.(audit);
+      return {
+        ok: false,
+        outcome: "outcome_unknown",
+        errorCode: "outcome_unknown",
         reason,
         stage,
         audit,
@@ -322,19 +383,7 @@ export class FixedRecipeExecutionService {
       return refuse("executable", resolvedExecutable.errorCode, resolvedExecutable.reason);
     }
 
-    // ---- stage: cwd + workspace ----
-    let nativeCwd: string;
-    try {
-      const cwdNative = toNativeBrokerPath(plan.plan.cwd);
-      const stats = lstatSync(cwdNative);
-      if (!stats.isDirectory()) {
-        return refuse("cwd", "cwd_not_directory", plan.plan.cwd);
-      }
-      nativeCwd = realpathSync(cwdNative);
-    } catch {
-      return refuse("cwd", "cwd_missing", plan.plan.cwd);
-    }
-
+    // ---- stage: workspace (revalidated before cwd resolution) ----
     const hasWriteDelete = authorization.canonicalPaths.some(
       (fact) => fact.intent !== "read",
     );
@@ -342,6 +391,8 @@ export class FixedRecipeExecutionService {
       return refuse("workspace", "workspace_bound_execution_required", "write_or_delete_target_without_workspace");
     }
     let treeRoot: string | null = null;
+    let manifestSourceRoot: string | null = null;
+    let manifestSourceIdentity: string | null = null;
     if (session.workspaceId !== undefined) {
       const revalidated = revalidateDisposableWorkspace({
         workspaceId: session.workspaceId,
@@ -352,16 +403,95 @@ export class FixedRecipeExecutionService {
         return refuse("workspace", "workspace_revalidation_failed", revalidated.errorCode);
       }
       treeRoot = revalidated.locations.treeRoot;
+      manifestSourceRoot = revalidated.locations.manifest.sourceRoot;
+      manifestSourceIdentity = revalidated.locations.manifest.sourceIdentity ?? null;
     }
+
+    // ---- stage: cwd ----
+    // A workspace-anchored recipe runs at the revalidated disposable tree
+    // root, never at the shared workspace root; unbound executions keep the
+    // resolved plan cwd.
+    const planCwd =
+      recipe.cwdPolicy === "workspace" && treeRoot !== null ? treeRoot : plan.plan.cwd;
+    let nativeCwd: string;
+    try {
+      const cwdNative = toNativeBrokerPath(planCwd);
+      const stats = lstatSync(cwdNative);
+      if (!stats.isDirectory()) {
+        return refuse("cwd", "cwd_not_directory", planCwd);
+      }
+      nativeCwd = realpathSync(cwdNative);
+    } catch {
+      return refuse("cwd", "cwd_missing", planCwd);
+    }
+
     for (const fact of authorization.canonicalPaths) {
       if (fact.intent === "read") {
         const live = this.options.rootConfig.readOnlyRoots[0];
         if (live !== undefined && fact.canonicalPath.startsWith(`${live}/`)) continue;
         if (treeRoot !== null && fact.canonicalPath.startsWith(`${treeRoot}/`)) continue;
+        if (
+          manifestSourceRoot !== null &&
+          fact.canonicalPath.startsWith(`${manifestSourceRoot}/`)
+        ) {
+          continue;
+        }
         return refuse("workspace", "read_outside_configured_roots", fact.canonicalPath);
       }
       if (treeRoot === null || !fact.canonicalPath.startsWith(`${treeRoot}/`)) {
         return refuse("workspace", "write_outside_disposable_workspace", fact.canonicalPath);
+      }
+    }
+
+    // ---- stage: execution isolation gate (spawn-coupled, SANDBOX-ISOLATION-01) ----
+    // The merged evidence is the provider's honest mechanism claim plus the
+    // broker-owned facts of THIS execution. A recipe that declares
+    // `requiredIsolation` never runs unless the merged evidence satisfies
+    // it; refusals here never spawn and never consume a reservation.
+    const isolationFacts: BrokerOwnedIsolationFacts = {
+      workspaceBound: session.workspaceId !== undefined,
+      sourceIdentityBound: manifestSourceIdentity !== null,
+      environmentHardened: true,
+      resourceLimitsEnforced: true,
+    };
+    const isolationEvidence: IsolationEvidence | null =
+      this.executionIsolation === null
+        ? null
+        : augmentBrokerOwnedEvidence(
+            this.executionIsolation.evidence(),
+            isolationFacts,
+          );
+    const isolationEvidenceSummary =
+      isolationEvidence === null
+        ? null
+        : formatIsolationEvidenceSummary(isolationEvidence);
+    if (recipe.requiredIsolation !== undefined) {
+      if (this.isolationActivationLevel < 1) {
+        return refuse(
+          "isolation",
+          "isolation_not_activated",
+          `recipe_${recipe.recipeId}_requires_isolation`,
+          { isolationEvidenceSummary },
+        );
+      }
+      if (isolationEvidence === null) {
+        return refuse(
+          "isolation",
+          "isolation_evidence_unavailable",
+          "provider reports no isolation evidence",
+        );
+      }
+      const check = meetsIsolationRequirement(
+        isolationEvidence,
+        recipe.requiredIsolation,
+      );
+      if (!check.ok) {
+        return refuse(
+          "isolation",
+          `isolation_requirement_unmet:${check.unmet[0] ?? "unknown"}`,
+          check.unmet.join(","),
+          { isolationEvidenceSummary },
+        );
       }
     }
 
@@ -371,158 +501,189 @@ export class FixedRecipeExecutionService {
     // and nothing else: the exact child that executes the fixed recipe is
     // the child created inside the verified isolation mechanism. A refusal
     // here never spawns and never consumes a reservation.
-    const runRequest = {
-      taskId: request.capabilityUseId,
-      argv: [resolvedExecutable.executable, ...plan.plan.argv.slice(1)],
-      cwd: nativeCwd,
-      env: this.buildEnvironment(plan.plan.envAllowlist),
-      wallMs: effectiveLimits.wallMs,
-      maxProcesses: effectiveLimits.maxProcesses,
-      maxOutputBytes: effectiveLimits.maxOutputBytes,
-    };
-    const isolation = await this.networkIsolation.prepare(runRequest);
-    if (!isolation.ok) {
-      return refuse(
-        "network",
-        isolation.errorCode,
-        isolation.reason,
-        { networkIsolation: "unavailable_refused" },
-      );
-    }
-
-    // ---- stage: reservation ----
-    const capabilityId = request.envelope.capabilityId as SandboxCapabilityId;
-    const reserved = this.options.sessionService.reserveToolExecution(
-      request.sessionUuid,
-      capabilityId,
-      request.capabilityUseId,
-      {
-        policyHash: request.envelope.policyHash,
-        expectedRevision: request.expectedSessionRevision,
-        nowMs: request.nowMs,
-      },
-    );
-    if (!reserved.ok) {
-      return refuse("reservation", reserved.errorCode, reserved.reason);
-    }
-
-    // ---- stage: spawn ----
-    const startedWall = process.hrtime.bigint();
-    let exitCode: number;
-    let stdout: string;
-    let stderr: string;
-    let truncated: boolean;
-    let terminalReason: string;
+    const homeDir = mkdtempSync(path.join(tmpdir(), "ashley-recipe-home-"));
     try {
-      const runResult = await this.options.processRunner.run(isolation.request);
-      exitCode = runResult.exitCode;
-      stdout = runResult.stdout;
-      stderr = runResult.stderr;
-      truncated = runResult.truncated;
-      terminalReason = runResult.terminalReason;
-    } catch (error) {
-      exitCode = 1;
-      stdout = "";
-      stderr = "";
-      truncated = false;
-      terminalReason = `runner_error:${String((error as Error).message ?? "unknown")}`;
+      const runRequest = {
+        taskId: request.capabilityUseId,
+        argv: [resolvedExecutable.executable, ...plan.plan.argv.slice(1)],
+        cwd: nativeCwd,
+        env: this.buildEnvironment(plan.plan.envAllowlist, homeDir),
+        wallMs: effectiveLimits.wallMs,
+        maxProcesses: effectiveLimits.maxProcesses,
+        maxOutputBytes: effectiveLimits.maxOutputBytes,
+      };
+      const prepareProvider =
+        this.executionIsolation ?? this.networkIsolation;
+      const isolation = await prepareProvider.prepare(runRequest);
+      if (!isolation.ok) {
+        return refuse(
+          "network",
+          isolation.errorCode,
+          isolation.reason,
+          {
+            networkIsolation: "unavailable_refused",
+            isolationEvidenceSummary,
+          },
+        );
+      }
+
+      // ---- stage: reservation ----
+      const capabilityId = request.envelope.capabilityId as SandboxCapabilityId;
+      const reserved = this.options.sessionService.reserveToolExecution(
+        request.sessionUuid,
+        capabilityId,
+        request.capabilityUseId,
+        {
+          policyHash: request.envelope.policyHash,
+          expectedRevision: request.expectedSessionRevision,
+          nowMs: request.nowMs,
+        },
+      );
+      if (!reserved.ok) {
+        return refuse("reservation", reserved.errorCode, reserved.reason);
+      }
+
+      // ---- stage: spawn, finalize, receipt ----
+      // Once the reservation is accepted the run must always be finalized
+      // and never throw: the broker has no request timeout that drops
+      // responses, so the catch-all below converts any unexpected failure
+      // into an explicit `outcome_unknown` result after best-effort finalization.
+      try {
+        const startedWall = process.hrtime.bigint();
+        let exitCode: number;
+        let stdout: string;
+        let stderr: string;
+        let truncated: boolean;
+        let terminalReason: string;
+        try {
+          const runResult = await this.options.processRunner.run(isolation.request);
+          exitCode = runResult.exitCode;
+          stdout = runResult.stdout;
+          stderr = runResult.stderr;
+          truncated = runResult.truncated;
+          terminalReason = runResult.terminalReason;
+        } catch (error) {
+          exitCode = 1;
+          stdout = "";
+          stderr = "";
+          truncated = false;
+          terminalReason = `runner_error:${String((error as Error).message ?? "unknown")}`;
+        }
+        const wallMs = Number(process.hrtime.bigint() - startedWall) / 1_000_000;
+        const outcome =
+          exitCode === 0 && !truncated && terminalReason === "success"
+            ? ("succeeded" as const)
+            : ("failed" as const);
+
+        // ---- stage: finalize ----
+        this.options.sessionService.finalizeToolExecution(
+          request.capabilityUseId,
+          outcome,
+          this.nowMs(),
+        );
+
+        // ---- stage: receipt ----
+        const capture = buildBoundedCapture(stdout, stderr, effectiveLimits.maxOutputBytes);
+        const receiptTruncated = truncated || capture.truncated;
+        const completedAtMs = this.nowMs();
+        const receipt = buildExecutionReceipt({
+          receiptId: `receipt-${request.capabilityUseId}`,
+          sessionUuid: request.sessionUuid,
+          capabilityUseId: request.capabilityUseId,
+          proposalId: request.envelope.proposalId,
+          ownerId: request.envelope.ownerId,
+          recipeId: request.envelope.recipeId,
+          readiness,
+          category: recipe.category,
+          terminalState:
+            outcome === "succeeded"
+              ? { state: "succeeded", exitCode: 0 }
+              : { state: "failed", exitCode, terminalReason },
+          stdoutHash: capture.stdoutHash,
+          stderrHash: capture.stderrHash,
+          stdoutBytes: capture.stdoutBytes,
+          stderrBytes: capture.stderrBytes,
+          truncated: receiptTruncated,
+          wallMs: Math.round(wallMs),
+          startedAtIso,
+          completedAtIso: new Date(completedAtMs).toISOString(),
+          effectiveLimits,
+          networkIsolation: "enforced",
+        });
+        const audit = this.buildAudit(request, {
+          outcome: "completed",
+          errorCode: null,
+          stage: "receipt",
+          createdAtIso: new Date(completedAtMs).toISOString(),
+          sessionUuid: request.sessionUuid,
+          capabilityUseId: request.capabilityUseId,
+          recipeId: request.envelope.recipeId,
+          readiness,
+          category: recipe.category,
+          exitCode,
+          terminalReason,
+          stdoutHash: capture.stdoutHash,
+          stderrHash: capture.stderrHash,
+          truncated: receiptTruncated,
+          stdoutBytes: capture.stdoutBytes,
+          stderrBytes: capture.stderrBytes,
+          wallMs: Math.round(wallMs),
+          networkIsolation: "enforced",
+          receiptHash: receipt.receiptHash,
+          isolationEvidenceSummary,
+        });
+        this.options.auditSink?.(audit);
+        return {
+          ok: true,
+          outcome,
+          receipt,
+          audit,
+        };
+      } catch (error) {
+        try {
+          this.options.sessionService.finalizeToolExecution(
+            request.capabilityUseId,
+            "failed",
+            this.nowMs(),
+          );
+        } catch {
+          // best effort: the reservation must never be left dangling
+        }
+        return outcomeUnknown(
+          "execution",
+          `post_reservation_failure:${String((error as Error).message ?? "unknown")}`,
+          { isolationEvidenceSummary },
+        );
+      }
+    } finally {
+      try {
+        rmSync(homeDir, { recursive: true, force: true });
+      } catch {
+        // best effort cleanup of the synthetic per-run home
+      }
     }
-    const wallMs = Number(process.hrtime.bigint() - startedWall) / 1_000_000;
-    const outcome =
-      exitCode === 0 && !truncated && terminalReason === "success"
-        ? ("succeeded" as const)
-        : ("failed" as const);
-
-    // ---- stage: finalize ----
-    this.options.sessionService.finalizeToolExecution(
-      request.capabilityUseId,
-      outcome,
-      this.nowMs(),
-    );
-
-    // ---- stage: receipt ----
-    const capture = buildBoundedCapture(stdout, stderr, effectiveLimits.maxOutputBytes);
-    const receiptTruncated = truncated || capture.truncated;
-    const completedAtMs = this.nowMs();
-    const receipt = buildExecutionReceipt({
-      receiptId: `receipt-${request.capabilityUseId}`,
-      sessionUuid: request.sessionUuid,
-      capabilityUseId: request.capabilityUseId,
-      proposalId: request.envelope.proposalId,
-      ownerId: request.envelope.ownerId,
-      recipeId: request.envelope.recipeId,
-      readiness,
-      category: recipe.category,
-      terminalState:
-        outcome === "succeeded"
-          ? { state: "succeeded", exitCode: 0 }
-          : { state: "failed", exitCode, terminalReason },
-      stdoutHash: capture.stdoutHash,
-      stderrHash: capture.stderrHash,
-      stdoutBytes: capture.stdoutBytes,
-      stderrBytes: capture.stderrBytes,
-      truncated: receiptTruncated,
-      wallMs: Math.round(wallMs),
-      startedAtIso,
-      completedAtIso: new Date(completedAtMs).toISOString(),
-      effectiveLimits,
-      networkIsolation: "enforced",
-    });
-    const audit = this.buildAudit(request, {
-      outcome: "completed",
-      errorCode: null,
-      stage: "receipt",
-      createdAtIso: new Date(completedAtMs).toISOString(),
-      sessionUuid: request.sessionUuid,
-      capabilityUseId: request.capabilityUseId,
-      recipeId: request.envelope.recipeId,
-      readiness,
-      category: recipe.category,
-      exitCode,
-      terminalReason,
-      stdoutHash: capture.stdoutHash,
-      stderrHash: capture.stderrHash,
-      truncated: receiptTruncated,
-      stdoutBytes: capture.stdoutBytes,
-      stderrBytes: capture.stderrBytes,
-      wallMs: Math.round(wallMs),
-      networkIsolation: "enforced",
-      receiptHash: receipt.receiptHash,
-    });
-    this.options.auditSink?.(audit);
-    return {
-      ok: true,
-      outcome,
-      receipt,
-      audit,
-    };
   }
 
   /**
    * Builds the execution environment from the recipe's allowlist plus the
-   * broker-owned environment source. Only allowlisted names may pass;
-   * `HOME` is always a synthetic per-run directory so provider keys and
-   * credential helpers in the real home are unreachable; the git recipes'
-   * interactivity guards default to safe values when the source omits them.
+   * broker-owned environment source through the strict builder
+   * (SANDBOX-ISOLATION-01): only allowlisted names may pass, the denylist
+   * overrides the allowlist, `HOME` is always the synthetic per-run
+   * directory supplied by the caller, `PATH` is always broker-fixed, and
+   * `NODE_OPTIONS` is denied. The git recipes' interactivity
+   * guards default to safe values when the source omits them. The caller
+   * owns cleanup of `homeDir`.
    */
-  buildEnvironment(envAllowlist: readonly string[]): Record<string, string> {
-    const source = this.options.environmentSource?.() ?? {};
-    const home = mkdtempSync(path.join(tmpdir(), "ashley-recipe-home-"));
-    const env: Record<string, string> = {};
-    for (const name of envAllowlist) {
-      if (name === "HOME") {
-        env.HOME = home;
-        continue;
-      }
-      const value = source[name];
-      if (value === undefined || value.length === 0) {
-        if (name === "GIT_TERMINAL_PROMPT") env[name] = "0";
-        else if (name === "GIT_PAGER") env[name] = "cat";
-        continue;
-      }
-      env[name] = value;
-    }
-    return env;
+  buildEnvironment(
+    envAllowlist: readonly string[],
+    homeDir: string,
+  ): Record<string, string> {
+    return buildExecutionEnvironment({
+      allowlist: envAllowlist,
+      source: this.options.environmentSource?.() ?? {},
+      homeDir,
+      defaults: { GIT_TERMINAL_PROMPT: "0", GIT_PAGER: "cat" },
+    });
   }
 
   /**
@@ -563,6 +724,7 @@ export class FixedRecipeExecutionService {
       networkIsolation: "not_attempted",
       receiptHash: null,
       nonceHash: sha256Hex(request.envelope.nonce),
+      isolationEvidenceSummary: null,
       ...fields,
     };
   }

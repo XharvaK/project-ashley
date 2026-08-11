@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { BrokerClientTransport } from "../change-proposal/broker-client.js";
+import type {
+  BrokerClientTransport,
+  BrokerDispatchResult,
+} from "../change-proposal/broker-client.js";
+import type { FixedRecipeExecutionRequest } from "@composer-assistant/sandbox-broker";
 import { UnixSandboxBrokerClient } from "./unix-broker-client.js";
 
 function readinessPayload(
@@ -24,11 +28,19 @@ function readinessPayload(
 }
 
 function clientFor(data: unknown): UnixSandboxBrokerClient {
+  return clientForDispatch({ ok: true, data });
+}
+
+function clientForDispatch(
+  result: BrokerDispatchResult,
+): UnixSandboxBrokerClient {
   const transport: BrokerClientTransport = {
-    dispatch: async () => ({ ok: true, data }),
+    dispatch: async () => result,
   };
   return new UnixSandboxBrokerClient({ transport });
 }
+
+const executionRequest = {} as FixedRecipeExecutionRequest;
 
 describe("UnixSandboxBrokerClient readiness", () => {
   it("fails closed when isolation is unavailable", async () => {
@@ -70,6 +82,89 @@ describe("UnixSandboxBrokerClient readiness", () => {
       policyId: "policy-1",
       policyVersion: 1,
       policyHash: "a".repeat(64),
+    });
+  });
+});
+
+describe("UnixSandboxBrokerClient execution outcomes", () => {
+  it("returns refused when transport proves the request was not sent", async () => {
+    const result = await clientForDispatch({
+      ok: false,
+      errorCode: "broker_unavailable",
+      message: "connection failed before connect",
+      requestDelivery: "not_sent",
+    }).executeRecipe(executionRequest);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.outcome).toBe("refused");
+  });
+
+  it("returns outcome_unknown for an ambiguous transport failure", async () => {
+    const result = await clientForDispatch({
+      ok: false,
+      errorCode: "broker_timeout",
+      message: "deadline expired after request write",
+      requestDelivery: "sent_or_unknown",
+    }).executeRecipe(executionRequest);
+
+    expect(result).toMatchObject({
+      ok: false,
+      outcome: "outcome_unknown",
+      errorCode: "outcome_unknown",
+    });
+  });
+
+  it("fails closed as outcome_unknown when a transport gives no delivery proof", async () => {
+    const result = await clientForDispatch({
+      ok: false,
+      errorCode: "broker_unavailable",
+      message: "transport rejected the request without delivery metadata",
+    }).executeRecipe(executionRequest);
+
+    expect(result).toMatchObject({
+      ok: false,
+      outcome: "outcome_unknown",
+      errorCode: "outcome_unknown",
+    });
+  });
+
+  it("preserves an explicit broker refusal unchanged", async () => {
+    const refused = {
+      ok: false,
+      outcome: "refused",
+      errorCode: "policy_refused",
+      reason: "recipe refused",
+      stage: "authorization",
+      audit: {},
+      receipt: null,
+    } as const;
+    const result = await clientFor(refused).executeRecipe(executionRequest);
+    expect(result).toEqual(refused);
+  });
+
+  it("preserves an explicit broker outcome_unknown unchanged", async () => {
+    const unknown = {
+      ok: false,
+      outcome: "outcome_unknown",
+      errorCode: "outcome_unknown",
+      reason: "finalization status unavailable",
+      stage: "finalize",
+      audit: {},
+      receipt: null,
+    } as const;
+    const result = await clientFor(unknown).executeRecipe(executionRequest);
+    expect(result).toEqual(unknown);
+  });
+
+  it("treats a malformed execution response as outcome_unknown", async () => {
+    const result = await clientFor({ ok: false, reason: "not an execution result" }).executeRecipe(
+      executionRequest,
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      outcome: "outcome_unknown",
+      errorCode: "outcome_unknown",
     });
   });
 });

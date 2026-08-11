@@ -112,6 +112,10 @@ describe("fixed recipe registry", () => {
 
   it("11. pins git and patch recipes to git and build/test recipes to the local npm toolchain", () => {
     for (const recipe of FIXED_RECIPE_REGISTRY) {
+      // The isolation canary (verify:broker-smoke, SANDBOX-ISOLATION-01) is
+      // a build-category recipe that deliberately runs /usr/bin/true and
+      // declares requiredIsolation; it is not part of the npm toolchain.
+      if (recipe.requiredIsolation !== undefined) continue;
       if (recipe.category === "git" || recipe.category === "patch") {
         expect(recipe.executable).toBe("/usr/bin/git");
       }

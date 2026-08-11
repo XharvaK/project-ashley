@@ -99,6 +99,14 @@ export interface DelegatedRuntimeConfig {
   recipes: ReadonlyMap<string, FixedRecipe>;
   envAllowlist: Set<string>;
   executableMappings: ExecutableMappings;
+  /**
+   * Broker-resolved source identities (SANDBOX-ISOLATION-01): bounded ids
+   * to read-only roots, read from the host `ASHLEY_SANDBOX_SOURCE_IDENTITY_<ID>`
+   * seam. A `default` identity is always derived for the first read-only
+   * root when absent, preserving single-root semantics for tasks that do
+   * not bind an identity.
+   */
+  sourceIdentities?: ReadonlyMap<string, string>;
   /** Readiness-only label of the host-selected network provider. */
   networkProvider: "unavailable" | "none";
 }
@@ -206,7 +214,7 @@ function mapSessionResult(
 
 function envForAllowlist(allowlist: Set<string>): Record<string, string | undefined> {
   const out: Record<string, string | undefined> = {
-    PATH: process.env.PATH ?? "/usr/bin:/bin",
+    PATH: process.env.ASHLEY_SANDBOX_RECIPE_PATH ?? "/usr/bin:/bin",
   };
   for (const key of allowlist) {
     if (key === "PATH") continue;
@@ -547,10 +555,10 @@ export class DelegatedRuntime {
       };
     }
     const ttlMs = Number(input.ttlMs);
-    const sourceRoot = this.rootConfig.readOnlyRoots[0];
-    if (sourceRoot === undefined) {
-      return { ok: false, errorCode: "root_config_invalid", message: "no_read_only_root_configured" };
-    }
+    const sourceRootId =
+      typeof input.sourceRootId === "string" && input.sourceRootId.length > 0
+        ? input.sourceRootId
+        : "default";
     const created = await createDisposableWorkspace({
       authorization: {
         decision: "autonomous_safe",
@@ -564,7 +572,7 @@ export class DelegatedRuntime {
         workspaceBytesMax: authorization.effectiveLimits.workspaceBytesMax,
       },
       rootConfig: this.rootConfig,
-      sourceRoot,
+      sourceRootId,
       limits: { ttlMs: Number.isFinite(ttlMs) ? ttlMs : undefined },
       symlinkPolicy: "skip",
       nowMs,
@@ -679,11 +687,17 @@ export class DelegatedRuntime {
       signerKeyId: loaded.signerKeyId,
     };
 
+    const readOnlyRoots = loaded.policy.readOnlyRoots;
+    const sourceIdentities = new Map<string, string>(config.sourceIdentities ?? []);
+    if (!sourceIdentities.has("default") && readOnlyRoots.length > 0) {
+      sourceIdentities.set("default", readOnlyRoots[0]);
+    }
     const rootConfigValidation = validateBrokerRootConfig({
       workspaceRoot: config.workspaceRoot,
-      readOnlyRoots: loaded.policy.readOnlyRoots,
+      readOnlyRoots,
       writableDisposableRoots: loaded.policy.writableDisposableRoots,
       protectedRoots: toProtectedRootsConfig(loaded.policy.protectedRoots),
+      sourceIdentities,
     });
     if (!rootConfigValidation.ok) {
       throw new Error(`sandbox_delegated_runtime: root_config_invalid:${rootConfigValidation.reasons.join(",")}`);

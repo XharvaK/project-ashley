@@ -18,6 +18,8 @@
 
 import { isAbsolute } from "node:path";
 import type { TaskLimits } from "../crypto/types.js";
+import type { IsolationRequirement } from "../execution/execution-isolation.js";
+import { isolationLevelRequirement } from "../execution/execution-isolation.js";
 import { assertArgvPolicy, assertExecutionLimits } from "./execution.js";
 import type { BrokerRecipe } from "./recipes.js";
 
@@ -26,6 +28,12 @@ export type FixedRecipeCategory = "git" | "build" | "test" | "patch";
 export type FixedRecipe = BrokerRecipe & {
   category: FixedRecipeCategory;
   description: string;
+  /**
+   * Isolation requirement (SANDBOX-ISOLATION-01). When present, the
+   * execution must run under evidence that satisfies it or the execution is
+   * refused before reservation. Only the canary declares one in this spike.
+   */
+  requiredIsolation?: IsolationRequirement;
 };
 
 export const FIXED_RECIPE_DEFAULT_LIMITS: TaskLimits = {
@@ -212,6 +220,20 @@ export const FIXED_RECIPE_REGISTRY: readonly FixedRecipe[] = [
     networkMode: "none",
     description: "generate a binary-safe candidate patch from the live checkout",
   },
+  {
+    recipeId: "verify:broker-smoke",
+    category: "build",
+    executable: "/usr/bin/true",
+    argv: ["--smoke"],
+    cwdPolicy: "live_checkout",
+    supported: true,
+    envAllowlist: ["PATH"],
+    limits: { wallMs: 5_000, maxProcesses: 1, maxOutputBytes: 65_536 },
+    networkMode: "none",
+    requiredIsolation: isolationLevelRequirement(1),
+    description:
+       "execution isolation canary: trusted no-op smoke run under the isolation gate (SANDBOX-ISOLATION-01)",
+  },
 ];
 
 export type RecipeRegistryValidation =
@@ -219,6 +241,18 @@ export type RecipeRegistryValidation =
   | { ok: false; reasons: string[] };
 
 const CATEGORIES: ReadonlySet<string> = new Set(["git", "build", "test", "patch"]);
+
+const ISOLATION_PROPERTY_NAMES: ReadonlySet<string> = new Set([
+  "process_tree",
+  "network",
+  "filesystem_view",
+  "control_plane_invisible",
+  "broker_socket_invisible",
+  "environment",
+  "resource",
+  "source_binding",
+  "workspace_binding",
+]);
 
 function isWellFormedGitConfigPair(args: string[], index: number): boolean {
   if (index + 1 >= args.length) return false;
@@ -279,6 +313,23 @@ function validateRecipeEntry(
     const limitsCheck = assertExecutionLimits(recipe.limits);
     if (!limitsCheck.ok) {
       reasons.push(`recipe_limits_invalid:${recipe.recipeId}`);
+    }
+  }
+  if (recipe.requiredIsolation !== undefined) {
+    const requirementStatuses = new Set(["provided", "partial", "unproven"]);
+    if (
+      typeof recipe.requiredIsolation !== "object" ||
+      recipe.requiredIsolation === null ||
+      Array.isArray(recipe.requiredIsolation) ||
+      Object.keys(recipe.requiredIsolation).length === 0
+    ) {
+      reasons.push(`invalid_required_isolation:${recipe.recipeId}`);
+    } else {
+      for (const [property, status] of Object.entries(recipe.requiredIsolation)) {
+        if (!ISOLATION_PROPERTY_NAMES.has(property) || !requirementStatuses.has(String(status))) {
+          reasons.push(`invalid_required_isolation:${recipe.recipeId}:${property}`);
+        }
+      }
     }
   }
   const isGitLike = recipe.category === "git" || recipe.category === "patch";

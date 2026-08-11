@@ -11,6 +11,7 @@ function validManifest(): DisposableWorkspaceManifest {
     workspaceId: "abc-123",
     sourceRoot: "/var/lib/ashley-sandbox/live-checkout",
     sourceRootId: "a".repeat(64),
+    sourceIdentity: null,
     treeRoot: "/var/lib/ashley-sandbox/work/abc-123",
     metadataPath: "/var/lib/ashley-sandbox/work/.ashley-meta/abc-123.json",
     ownerId: "owner-1",

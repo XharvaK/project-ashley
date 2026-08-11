@@ -71,8 +71,15 @@ export type DisposableWorkspaceAuthorization = {
 export type CreateDisposableWorkspaceInput = {
   authorization: DisposableWorkspaceAuthorization;
   rootConfig: BrokerRootConfig;
+  /**
+   * Broker-resolved source identity id (SANDBOX-ISOLATION-01). When
+   * present, selects the source root from `rootConfig.sourceIdentities`
+   * and wins over `sourceRoot`; the identity root is never substituted
+   * with `readOnlyRoots[0]`. Unknown ids fail closed.
+   */
+  sourceRootId?: string;
   /** Canonical source root; must classify as a read-only broker zone. */
-  sourceRoot: string;
+  sourceRoot?: string;
   /** Canonical destination base; defaults to the sole writable disposable root. */
   destinationRoot?: string;
   /** Request ceilings; may only tighten the broker hard ceilings. */
@@ -186,9 +193,48 @@ function resolveCanonicalRoot(
 }
 
 /**
+ * Resolves the creation source from a bound source identity, an explicit
+ * source root, or the single-root fallback (SANDBOX-ISOLATION-01). A bound
+ * identity always wins; an unknown id fails closed; without identity or
+ * explicit root, exactly one read-only root may exist.
+ */
+function resolveCreationSource(
+  input: CreateDisposableWorkspaceInput,
+): {
+  ok: true;
+  canonical: string;
+  sourceIdentity: string | null;
+} | { ok: false; errorCode: string; reason: string } {
+  if (input.sourceRootId !== undefined) {
+    const identityRoot = input.rootConfig.sourceIdentities?.get(input.sourceRootId);
+    if (identityRoot === undefined) {
+      return {
+        ok: false,
+        errorCode: "source_root_id_unknown",
+        reason: input.sourceRootId,
+      };
+    }
+    return { ok: true, canonical: identityRoot, sourceIdentity: input.sourceRootId };
+  }
+  if (input.sourceRoot !== undefined) {
+    return { ok: true, canonical: input.sourceRoot, sourceIdentity: null };
+  }
+  const live = input.rootConfig.readOnlyRoots;
+  if (live.length !== 1) {
+    return {
+      ok: false,
+      errorCode: "ambiguous_source_root",
+      reason: `read_only_roots_${live.length}`,
+    };
+  }
+  return { ok: true, canonical: live[0]!, sourceIdentity: null };
+}
+
+/**
  * Creates a sanitized disposable workspace. Requires an autonomous
- * authorization for `candidate_workspace_create`, a read-only source root,
- * and a writable disposable destination root.
+ * authorization for `candidate_workspace_create`, a read-only source root
+ * (identity-bound, explicit, or single-root), and a writable disposable
+ * destination root.
  */
 export function createDisposableWorkspace(
   input: CreateDisposableWorkspaceInput,
@@ -214,13 +260,23 @@ export function createDisposableWorkspace(
     }
     const limits = combineWorkspaceLimits(requestedLimits.value, auth.value.workspaceBytesMax);
 
-    const source = resolveCanonicalRoot(input.sourceRoot, input.rootConfig, "read_only");
+    const resolvedSource = resolveCreationSource(input);
+    if (!resolvedSource.ok) {
+      return {
+        ok: false,
+        errorCode: resolvedSource.errorCode,
+        reason: resolvedSource.reason,
+        cleanupPerformed: false,
+      };
+    }
+    const source = resolveCanonicalRoot(resolvedSource.canonical, input.rootConfig, "read_only");
     if (!source.ok) {
       const errorCode =
         source.errorCode === "root_missing" ? "source_root_missing" : source.errorCode;
       return { ok: false, errorCode, reason: source.reason, cleanupPerformed: false };
     }
     const effectiveSourceRoot = source.canonical;
+    const manifestSourceIdentity = resolvedSource.sourceIdentity;
 
     let destinationBase: string;
     if (input.destinationRoot !== undefined) {
@@ -329,6 +385,7 @@ export function createDisposableWorkspace(
       workspaceId,
       sourceRoot: effectiveSourceRoot,
       sourceRootId: sha256Hex(effectiveSourceRoot),
+      sourceIdentity: manifestSourceIdentity,
       treeRoot: treeRootCanonical,
       metadataPath: manifestCanonical,
       ownerId: auth.value.ownerId,
