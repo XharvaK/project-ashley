@@ -53,6 +53,7 @@ export * from "./execution/executable-resolver.js";
 export * from "./execution/bounded-output.js";
 export * from "./execution/receipt.js";
 export * from "./execution/fixed-recipe-execution-service.js";
+export * from "./execution/qualification-toolchain.js";
 export * from "./handlers/source-prepare.js";
 export * from "./protocol/frame.js";
 export * from "./protocol/stream.js";
