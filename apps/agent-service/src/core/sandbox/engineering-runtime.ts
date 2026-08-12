@@ -24,6 +24,11 @@ import {
   resetEngineeringSupervisor,
 } from "./engineering-supervisor.js";
 import { verifyEngineeringReadiness } from "./engineering-envelope.js";
+import {
+  expectedActivationOutput,
+  initActivationState,
+  setMarkers,
+} from "./activation.js";
 import { createEngineeringThinkingModel } from "./engineering-model-adapter.js";
 import {
   ensureEngineeringTables,
@@ -97,6 +102,17 @@ export function startEngineeringAutonomyLoops(wiring: EngineeringRuntimeWiring):
     );
     return;
   }
+  // Record the activation markers this process would assert once the owner
+  // completes the host-side activation sequence (qualification, canary, epoch).
+  const activationState = initActivationState(nowMs());
+  setMarkers(activationState, {
+    brokerExecutionIsolation: "ready",
+    engineeringWorker: "ready",
+    sandboxAutonomy: "ENABLED",
+  });
+  console.log(
+    `[engineering] activation markers: ${JSON.stringify(expectedActivationOutput(activationState))}`,
+  );
   stopEngineeringAutonomyLoops();
 
   const db = wiring.db;

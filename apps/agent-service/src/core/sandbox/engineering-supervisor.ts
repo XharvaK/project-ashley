@@ -27,6 +27,7 @@ import {
   type CoordinatorResult,
 } from "./coordinator.js";
 import type { OperatorEnvelopeProvider } from "./engineering-operator.js";
+import { AGENT_AVAILABLE_DIAGNOSTICS } from "./diagnostics.js";
 import {
   createEngineeringEnvelopeProvider,
   loadEngineeringTrustAnchors,
@@ -85,7 +86,7 @@ function getCoordinator(deps: EngineeringSupervisorDeps): SandboxEngineeringCoor
   const coordinator = new SandboxEngineeringCoordinator(model, port, {
     owner: deps.ownerId,
     budgets: { ...DEFAULT_ENGINEERING_BUDGETS },
-    availableDiagnostics: [],
+    availableDiagnostics: [...AGENT_AVAILABLE_DIAGNOSTICS],
     nowMs: deps.nowMs,
     persist: (tasks) => persistCoordinatorTasks(deps.db, tasks),
   });
