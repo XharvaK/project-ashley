@@ -41,10 +41,6 @@ const nativeFilesystem: QualificationToolchainFilesystem = {
   realpathSync,
 };
 
-function isAbsoluteUnixPath(path: string): boolean {
-  return path.startsWith("/") && path.split("/").every((segment) => segment !== "." && segment !== "..");
-}
-
 function isWithinVisibleRoot(path: string, root: string): boolean {
   return path === root || path.startsWith(`${root}/`);
 }
@@ -56,29 +52,38 @@ function invalid(id: string): QualificationToolchainValidation {
   };
 }
 
+function matchesContractEntry(
+  supplied: QualificationToolContractEntry | undefined,
+  expected: QualificationToolContractEntry | undefined,
+): boolean {
+  return (
+    supplied !== undefined &&
+    expected !== undefined &&
+    supplied.id === expected.id &&
+    supplied.path === expected.path &&
+    supplied.visibleRoots.length === expected.visibleRoots.length &&
+    supplied.visibleRoots.every((root, index) => root === expected.visibleRoots[index])
+  );
+}
+
+function contractMismatchId(tools: readonly QualificationToolContractEntry[]): string | null {
+  const length = Math.max(tools.length, BUBBLEWRAP_QUALIFICATION_TOOL_CONTRACT.length);
+  for (let index = 0; index < length; index += 1) {
+    const expected = BUBBLEWRAP_QUALIFICATION_TOOL_CONTRACT[index];
+    const supplied = tools[index];
+    if (!matchesContractEntry(supplied, expected)) return expected?.id ?? supplied?.id ?? "contract";
+  }
+  return null;
+}
+
 export function validateQualificationToolchain(
   tools: readonly QualificationToolContractEntry[] = BUBBLEWRAP_QUALIFICATION_TOOL_CONTRACT,
   filesystem: QualificationToolchainFilesystem = nativeFilesystem,
 ): QualificationToolchainValidation {
-  const ids = new Set<string>();
-  const paths = new Set<string>();
+  const mismatch = contractMismatchId(tools);
+  if (mismatch !== null) return invalid(mismatch);
 
   for (const tool of tools) {
-    if (
-      tool.id.length === 0 ||
-      !isAbsoluteUnixPath(tool.path) ||
-      ids.has(tool.id) ||
-      paths.has(tool.path) ||
-      tool.visibleRoots.length === 0 ||
-      tool.visibleRoots.some((root) =>
-        !VISIBLE_ROOTS.includes(root as (typeof VISIBLE_ROOTS)[number]) || !isAbsoluteUnixPath(root),
-      )
-    ) {
-      return invalid(tool.id);
-    }
-    ids.add(tool.id);
-    paths.add(tool.path);
-
     try {
       filesystem.lstatSync(tool.path);
       filesystem.accessSync(tool.path, constants.X_OK);

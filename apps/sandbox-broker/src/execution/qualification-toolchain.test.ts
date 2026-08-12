@@ -70,6 +70,37 @@ describe("validateQualificationToolchain", () => {
     });
   });
 
+  it("rejects missing, reordered, substituted, and altered-root contract lists before probes", () => {
+    const tools = BUBBLEWRAP_QUALIFICATION_TOOL_CONTRACT;
+    const filesystem = syntheticFilesystem(probesFor(tools));
+
+    expect(validateQualificationToolchain(tools.slice(0, -1), filesystem)).toEqual({
+      status: "invalid",
+      reason: "qualification_probe_toolchain_invalid:yes",
+    });
+
+    const reordered = [...tools];
+    [reordered[0], reordered[1]] = [reordered[1], reordered[0]];
+    expect(validateQualificationToolchain(reordered, filesystem)).toEqual({
+      status: "invalid",
+      reason: "qualification_probe_toolchain_invalid:dash",
+    });
+
+    const substituted = [...tools];
+    substituted[1] = { ...substituted[1], path: "/usr/bin/sh" };
+    expect(validateQualificationToolchain(substituted, filesystem)).toEqual({
+      status: "invalid",
+      reason: "qualification_probe_toolchain_invalid:bash",
+    });
+
+    const alteredRoots = [...tools];
+    alteredRoots[0] = { ...alteredRoots[0], visibleRoots: ["/usr"] };
+    expect(validateQualificationToolchain(alteredRoots, filesystem)).toEqual({
+      status: "invalid",
+      reason: "qualification_probe_toolchain_invalid:dash",
+    });
+  });
+
   it("fails closed for missing and non-executable exact paths", () => {
     const tools = BUBBLEWRAP_QUALIFICATION_TOOL_CONTRACT;
     const missing = probesFor(tools);
