@@ -138,4 +138,54 @@ describe("02C qualification helper source contract", () => {
     expect(serviceUnit).not.toContain("MemoryMax=384M");
     expect(qualificationHelper).not.toContain("402653184");
   });
+  it("preflights delegated policy before mutation and waits for stable service state", () => {
+    expect(qualificationHelper).toContain(
+      'POLICY_PREFLIGHT_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/execution/qualification-policy-preflight-cli.js"',
+    );
+    expect(qualificationHelper).toContain(
+      'SERVICE_STABILITY_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/execution/qualification-service-state-cli.js"',
+    );
+    expect(qualificationHelper).toContain("run_policy_preflight");
+    expect(qualificationHelper).toContain("run_stable_service_check");
+    expect(qualificationHelper).toContain(
+      "BLOCKED delegated_policy_(expired|missing|invalid|configuration_invalid)",
+    );
+    expect(qualificationHelper).toContain(
+      "BLOCKED service_(restart_loop|start_failed|process_died|cgroup_changed|state_unreadable|stability_timeout)",
+    );
+    expect(qualificationHelper).toContain(
+      'sudo -n "$NODE_BIN" "$POLICY_PREFLIGHT_SOURCE"',
+    );
+    expect(qualificationHelper).toContain(
+      'sudo -n "$NODE_BIN" "$SERVICE_STABILITY_SOURCE"',
+    );
+    expect(qualificationHelper).toContain(
+      '--expected-cgroup "/system.slice/$SERVICE"',
+    );
+    expect(qualificationHelper.indexOf("run_policy_preflight")).toBeLessThan(
+      qualificationHelper.indexOf(
+        'sudo -n install -o root -g root -m 0644 "$RENDERED_SERVICE"',
+      ),
+    );
+    expect(
+      qualificationHelper.indexOf("run_stable_service_check"),
+    ).toBeLessThan(
+      qualificationHelper.indexOf(
+        'CGROUP="$(systemctl show "$SERVICE" -p ControlGroup --value)"',
+      ),
+    );
+    expect(qualificationHelper).toContain(
+      'die service_cgroup_unavailable_after_stability',
+    );
+  });
+  it("raises the persistent and transient task ceilings without changing other limits", () => {
+    expect(serviceUnit).toContain("TasksMax=256");
+    expect(qualificationHelper).toContain("EXPECTED_TASKS_MAX=256");
+    expect(qualificationHelper).toContain("EXPECTED_PIDS_MAX=256");
+    expect(qualificationHelper).toContain(
+      'require_equal pids_cgroup_max "$(cat "$CGROUP_ROOT/pids.max")" "$EXPECTED_PIDS_MAX"',
+    );
+    expect(serviceUnit).toContain("CPUQuota=100%");
+    expect(qualificationHelper).toContain('EXPECTED_CPU_QUOTA="100%"');
+  });
 });

@@ -376,7 +376,7 @@ not consume the broker's survival budget. Per-task cgroups are not implemented b
 |-------|-------|---------|-----------|
 | **Service** `MemoryHigh` | Broker + all children (single running task) | 1536 MB | cgroup pressure/throttling threshold |
 | **Service** `MemoryMax` | Broker + all children (single running task) | 2048 MB | systemd OOM kill; task → `failed`/`oom_service`; broker restart |
-| **Service** `TasksMax` | Total processes in broker tree | 64 | Refuse spawn; `failed`/`service_task_limit` |
+| **Service** `TasksMax` | Total processes in broker tree | 256 | Refuse spawn; `failed`/`service_task_limit` |
 | **Service** `CPUQuota` | 100% = one full CPU per period | 100% | Throttle broker tree |
 | **Concurrent tasks** | Broker-enforced | **1** | Reject/queue `task.submit` with `concurrency_limit` |
 | **Per-task** `wallMs` | Envelope limit | 120 s | SIGTERM → SIGKILL **PGID**; `failed`/`timeout` |
@@ -390,6 +390,29 @@ not consume the broker's survival budget. Per-task cgroups are not implemented b
 **Why max 1 concurrent task:** A 2048 MB service `MemoryMax` still cannot safely
 host two memory-heavy tasks on the target host. Serial execution is the
 conservative v1 choice.
+
+### 02E policy lifecycle and stable host qualification
+
+The delegated policy lifecycle remains fail-closed. R4-004 expired at its
+documented `expiresAt` and MUST remain rejected; source qualification MUST NOT
+revive it or weaken the expiry decision. The qualification helper performs a
+canonical policy preflight before installing or reloading the service unit.
+An expired policy is reported as `delegated_policy_expired` before service
+startup is attempted.
+
+R4-005 is a separate physical policy artifact, not a profile identifier or a
+source contract. The owner-controlled issuance path derives it from the
+accepted R4-004 authority surface, reuses the existing bounded policy lifetime
+when present, and requires an explicit owner lifetime decision when no source
+expiry convention exists. It rejects authority changes and lifetime widening.
+Preparation does not activate or deploy the policy.
+
+After a qualification-only service start, the helper waits for consecutive
+active/running observations with a nonzero `MainPID`, unchanged `NRestarts`,
+and the exact service cgroup `/system.slice/ashley-exec-broker.service`.
+Startup gaps and restart loops are lifecycle failures. They are not accepted
+as `cgroup_changed` evidence. Physical Mint qualification remains a separate
+gate and is not established by this source contract.
 
 **Per-task accounting (v1):** One Linux process group (PGID) per `taskId`; track wall
 clock, child count, advisory RSS from `/proc`. **No** delegated child cgroups
@@ -437,7 +460,7 @@ The corresponding cgroup v2 values are `memory.high=1610612736` and
 | `DevicePolicy=closed` | Deny devices |
 | `ReadWritePaths=/var/lib/ashley-sandbox` | Persistent writes only |
 | `InaccessiblePaths=` | Doc secrets, live repo, SSH — hard deny |
-| `MemoryHigh=1536M` `MemoryMax=2048M` `TasksMax=64` `CPUQuota=100%` | Service hard caps; cgroup v2 values are `1610612736` and `2147483648` |
+| `MemoryHigh=1536M` `MemoryMax=2048M` `TasksMax=256` `CPUQuota=100%` | Service hard caps; cgroup v2 values are `1610612736`, `2147483648`, and `pids.max=256` |
 | `RestrictAddressFamilies=AF_UNIX` | Default no network |
 | `Environment=` allowlist | No inherited secrets |
 | `UMask=0077` | Restrictive creates |

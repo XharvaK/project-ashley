@@ -9,6 +9,29 @@ wave.
 This document is operational, not constitutional. It does not override
 [`Sandbox_Design.md`](Sandbox_Design.md).
 
+## 0. SANDBOX-ISOLATION-02E source status
+
+02E adds source-level policy lifecycle and host-qualification hardening. It
+does not establish physical Mint qualification, sandbox activation, delegated
+runtime enablement, Ashley-side activation, or Sandbox Autonomy completion.
+
+- Expired R4-004 remains fail-closed. The qualification helper performs
+  canonical policy preflight before any service installation or systemd
+  mutation and reports `delegated_policy_expired` before startup.
+- Stable-service qualification requires consecutive active/running samples,
+  a nonzero main PID, unchanged restart count, and the exact cgroup
+  `/system.slice/ashley-exec-broker.service`. Restart gaps and loops remain
+  lifecycle failures, not cgroup evidence.
+- The service resource contract is `TasksMax=256` and `pids.max=256`.
+  `MemoryHigh=1536M`, `MemoryMax=2048M`, and `CPUQuota=100%` are unchanged.
+- R4-005 is not issued by this change. The owner-controlled staging script
+  requires explicit owner confirmation, preserves the accepted R4-004
+  authority surface, reuses its bounded lifetime convention, and requires an
+  explicit lifetime decision if that convention is absent. It does not
+  install, activate, deploy, or enable the delegated runtime.
+- `RESOURCE-ISOLATION-FOLLOWUP` remains frozen. 02E does not add per-task
+  cgroups.
+
 ---
 
 ## 1. Execution isolation (SANDBOX-ISOLATION-01)
@@ -122,12 +145,14 @@ namespaces through `--unshare-pid`, `--unshare-net`, `--unshare-uts`, and
 mount-namespace boundary. Unprivileged operation also requires user-namespace
 support. The plan does not bind `/` or the broker control plane.
 
-The 02D source contract requires `RestrictNamespaces=user mnt pid net uts ipc`;
-`mnt` is systemd's mount-namespace identifier. The qualification helper verifies
-the effective systemd property after installation and reload. No 02D physical
-qualification has passed, so this source contract is not evidence that the
-current host service is ready. The provider remains fail-closed until the fresh
-physical run produces bound evidence.
+The 02E source contract requires `RestrictNamespaces=user mnt pid net uts ipc`;
+`mnt` is systemd's mount-namespace identifier. The qualification helper first
+preflights the configured delegated policy, then verifies the effective
+systemd property after installation and reload, and only reads cgroup evidence
+after stable-service qualification. No 02E physical qualification has passed,
+so this source contract is not evidence that the current host service is ready.
+The provider remains fail-closed until the fresh physical run produces bound
+evidence.
 
 ## 2. Broker status surface
 

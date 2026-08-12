@@ -140,8 +140,8 @@ sudo deploy/linux-mint/sandbox/install.sh --apply \
   --delegated-public-key ~/.ashley-sandbox-r4-stage/delegated-runtime-ed25519-v1.pub \
   --capability-key ~/.ashley-sandbox-r4-stage/broker-session-capability.key.enc \
   --master-passphrase ~/.ashley-sandbox-r4-stage/master.pass \
-  --policy-artifact ~/.ashley-r4-stage-local/policy-r4-004.json \
-  --policy-signature ~/.ashley-r4-stage-local/policy-r4-004.json.sig \
+  --policy-artifact <R4-005 staging directory>/policy.json \
+  --policy-signature <R4-005 staging directory>/policy.json.sig \
   --network-provider none --network-isolation-qualified \
   --unshare-path /usr/bin/unshare --delegated-enabled
 ```
@@ -161,9 +161,41 @@ The installer additionally:
    `ASHLEY_SANDBOX_EXECUTABLE_NPM=/opt/ashley-sandbox/bin/npm`. Any unmapped
    executable id fails closed at the resolver without spawning.
 
-The policy artifact must be issued by the Mint sign scripts
-(`policy-r4-004.json` + `.sig`, expiry **2026-08-08T13:27Z**) and deployed
-before expiry; after expiry a new policy (R4-005) must be issued.
+R4-004 (`pol-production-r4-004`, expiry **2026-08-08T13:27Z**) is historical
+and expired. Its fail-closed rejection is intentional. It MUST NOT be revived
+or treated as qualification evidence. The broker qualification helper now
+performs canonical policy preflight before any service file installation,
+daemon reload, stop, restart, or start. An expired policy reports
+`delegated_policy_expired` and leaves the host service state untouched.
+
+R4-005 is not issued by this source publication. The owner-controlled action
+to prepare it is explicit and non-activating:
+
+```bash
+cd ~/project-ashley-isolation-dev
+npm --prefix apps/sandbox-broker run build
+node scripts/mint/issue-sandbox-policy.mjs \
+  --source-policy <R4-004 policy.json> \
+  --owner-private-key-enc <encrypted owner private key> \
+  --passphrase-file <owner passphrase file> \
+  --owner-public-key <owner public key> \
+  --output-dir <new parent directory>/r4-005 \
+  --confirm-owner-issuance
+```
+
+The script reuses the existing R4-004 policy lifetime convention. If the
+source policy has no expiry convention, the owner MUST supply an explicit
+`--expires-at`; no long-lived expiry is invented. The script writes a new
+staging pair only after owner confirmation and local signature verification.
+It does not install, activate, deploy, or enable the delegated runtime. The
+owner must separately review the pair and authorize any later qualification.
+
+The stable-service qualification gate requires consecutive active/running
+samples with a nonzero main PID, unchanged restart count, and the exact
+cgroup `/system.slice/ashley-exec-broker.service`. A startup gap or restart
+loop is reported as a service lifecycle failure, not as cgroup evidence.
+The service contract is `TasksMax=256` / `pids.max=256`, while
+`MemoryHigh=1536M`, `MemoryMax=2048M`, and `CPUQuota=100%` remain unchanged.
 
 The delegated private key is never installed by the installer. Before the
 single run, copy it into the agent key store:

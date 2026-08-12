@@ -38,6 +38,13 @@ export interface DelegatedPolicyVerifierConfig {
   keys: OwnerPolicyKeyConfig[];
 }
 
+export type DelegatedPolicyDiagnosticMetadata = {
+  policyId: string;
+  policyVersion: number;
+  issuedAt: string;
+  expiresAt?: string;
+};
+
 export interface DelegatedPolicyLoaderConfig {
   artifactPath: string;
   signaturePath?: string;
@@ -55,7 +62,23 @@ export type DelegatedPolicyLoadResult =
       signerKeyId: string;
       signatureSource: "embedded" | "detached";
     }
-  | { ok: false; error: "artifact_missing" | "signature_missing" | "artifact_unreadable" | "signature_unreadable" | "artifact_json_invalid" | "signature_json_invalid" | SandboxPolicyVerificationError; reason: string };
+  | {
+      ok: false;
+      error:
+        | "artifact_missing"
+        | "signature_missing"
+        | "artifact_unreadable"
+        | "signature_unreadable"
+        | "artifact_json_invalid"
+        | "signature_json_invalid"
+        | SandboxPolicyVerificationError;
+      reason: string;
+      metadata?: DelegatedPolicyDiagnosticMetadata;
+    };
+
+type DelegatedPolicyVerificationResult = SandboxPolicyVerificationResult & {
+  metadata?: DelegatedPolicyDiagnosticMetadata;
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -64,8 +87,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function fail(
   error: SandboxPolicyVerificationError,
   reason: string,
-): SandboxPolicyVerificationResult {
-  return { ok: false, error, reason };
+  metadata?: DelegatedPolicyDiagnosticMetadata,
+): DelegatedPolicyVerificationResult {
+  return {
+    ok: false,
+    error,
+    reason,
+    ...(metadata === undefined ? {} : { metadata }),
+  };
 }
 
 export function ownerPolicyKeyFromPem(pem: string): KeyObject {
@@ -102,7 +131,7 @@ export function verifyDelegatedPolicyArtifact(
   artifact: unknown,
   config: DelegatedPolicyVerifierConfig,
   nowMs: number,
-): SandboxPolicyVerificationResult {
+): DelegatedPolicyVerificationResult {
   if (!isRecord(artifact) || !("payload" in artifact)) {
     return fail("policy_schema_invalid", "artifact_payload_missing");
   }
@@ -140,12 +169,32 @@ export function verifyDelegatedPolicyArtifact(
 
   const issuedMs = Date.parse(validated.policy.issuedAt);
   if (issuedMs > nowMs) {
-    return fail("policy_not_yet_valid", `issued_at_in_future:${issuedMs}:now:${nowMs}`);
+    return fail(
+      "policy_not_yet_valid",
+      `issued_at_in_future:${issuedMs}:now:${nowMs}`,
+      {
+        policyId: validated.policy.policyId,
+        policyVersion: validated.policy.policyVersion,
+        issuedAt: validated.policy.issuedAt,
+        ...(validated.policy.expiresAt === undefined
+          ? {}
+          : { expiresAt: validated.policy.expiresAt }),
+      },
+    );
   }
   if (validated.policy.expiresAt !== undefined) {
     const expiresMs = Date.parse(validated.policy.expiresAt);
     if (expiresMs <= nowMs) {
-      return fail("policy_expired", `expires_at:${expiresMs}:now:${nowMs}`);
+      return fail(
+        "policy_expired",
+        `expires_at:${expiresMs}:now:${nowMs}`,
+        {
+          policyId: validated.policy.policyId,
+          policyVersion: validated.policy.policyVersion,
+          issuedAt: validated.policy.issuedAt,
+          expiresAt: validated.policy.expiresAt,
+        },
+      );
     }
   }
 
@@ -234,7 +283,12 @@ export function loadVerifiedDelegatedPolicy(
 
   const verified = verifyDelegatedPolicyArtifact(artifact, { keys: config.keys }, config.nowMs);
   if (!verified.ok) {
-    return { ok: false, error: verified.error, reason: verified.reason };
+    return {
+      ok: false,
+      error: verified.error,
+      reason: verified.reason,
+      ...(verified.metadata === undefined ? {} : { metadata: verified.metadata }),
+    };
   }
   return {
     ok: true,

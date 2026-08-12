@@ -25,6 +25,21 @@ Current state:
 - Ashley autonomy through the sandbox: NO. The production operator adapter and
   normal runtime loop are not wired; lifecycle defaults to disabled.
 
+## SANDBOX-ISOLATION-02E source addendum
+
+The 02E source change does not change this packet's release decision. It adds
+canonical delegated-policy preflight before qualification-side service
+mutation, stable-service qualification before cgroup evidence, and the
+service-level `TasksMax=256` / `pids.max=256` contract. `MemoryHigh=1536M`,
+`MemoryMax=2048M`, and `CPUQuota=100%` remain unchanged. The required cgroup is
+`/system.slice/ashley-exec-broker.service`.
+
+R4-004 is expired and remains fail-closed. R4-005 is not issued by 02E. The
+owner-controlled preparation path reuses the existing bounded policy lifetime
+or requires an explicit owner decision when no source convention exists. No
+physical host qualification, service activation, delegated runtime enablement,
+Ashley-side activation, or deployment is established by this source change.
+
 ## AUTONOMY-PLUMBING-01 local source addendum
 
 This addendum records a separately authorized local source/test pass on
@@ -283,12 +298,12 @@ LIMITATION, and NON-BLOCKING.
 | Peer authentication | Production source requires SO_PEERCRED and the expected agent UID; Windows only has injected test stand-ins. | ACCEPTED CURRENT LIMITATION | Reconfirm on Mint with accepted and rejected peer evidence. |
 | Owner and policy binding | Broker checks trusted owner ID, owner-signed active policy identity/hash/expiry, signer class, capability, risk, and rule. | ACCEPTED CURRENT LIMITATION | Verify current public-key fingerprints and policy hash/expiry on Mint. |
 | Delegated nonce durability | The local source closure injects BrokerStore.recordNonce into the delegated runtime, and disposable tests prove reopen replay refusal, one duplicate winner, and persistence-failure refusal. | RELEASE BLOCKER until release evidence | Freeze the exact candidate SHA and prove the deployed broker uses the same durable ledger with restart/replay evidence on Mint. |
-| Policy expiry evidence | The checked-in Mint README names policy-r4-004 with expiry 2026-08-08T13:27Z. As of this packet date that reference is stale and is not live policy evidence. | RELEASE BLOCKER | Obtain a fresh owner-signed policy pair, verify expiry covers the complete canary window, and match its hash to broker readiness. |
+| Policy expiry evidence | R4-004 (`pol-production-r4-004`) expired at 2026-08-08T13:27Z and remains fail-closed. 02E adds preflight that reports `delegated_policy_expired` before service mutation; no R4-005 artifact is issued by this change. | RELEASE BLOCKER | Owner explicitly prepares a fresh R4-005 pair through the controlled signing path, reusing the existing bounded lifetime or making an explicit lifetime decision, then verifies its expiry covers the complete canary window and matches its hash to broker readiness. |
 | Canonical paths and symlinks | Broker-owned realpath facts, protected roots, workspace containment, special-file denial, and sanitized-copy rules are implemented and locally tested. | ACCEPTED CURRENT LIMITATION | Reconfirm live roots, symlink-preserving staging, and workspace containment on Mint. |
 | Recipe and executable authority | Broker-owned manifests, fixed argv, absolute executable mapping, unsupported/planning-only refusal, and no shell/inherited environment are implemented. The checked-in deployment manifest enables only verify:broker-smoke; verify:agent-tsc is marked unsupported. | ACCEPTED CURRENT LIMITATION | Qualify the exact manifest/toolchain selected for the canary; do not silently promote the unsupported entry. |
 | Network isolation | unavailable refuses; none requires qualification and active probe; prepare returns the exact isolated spawn request, and refusal occurs before reservation/spawn. | RELEASE BLOCKER | Pass the active R5B probe under the installed unit and record namespace-scoped /proc/net/dev evidence containing only lo. If isolation is unavailable, do not spawn. |
 | Readiness truthfulness | The local source closure derives broker readiness from valid material, supported recipe capacity, networkProvider=none, and operational isolation. The Unix client requires and validates the isolation field and recomputes ready fail-closed. | RELEASE BLOCKER until release evidence | Freeze the exact candidate SHA and verify live readiness plus the active isolation probe; keep the delegated surface disabled otherwise. |
-| Process limits | Service limits and PGID cancellation exist. Per-task cgroup delegation and hard per-task RSS enforcement are explicitly deferred. | HARDEN BEFORE RELEASE | Decide and document whether the bounded canary accepts the service-level boundary; otherwise complete the separately designed cgroup hardening before broad execution. |
+| Process limits | Service limits and PGID cancellation exist. The 02E service contract raises `TasksMax` / `pids.max` to 256 while preserving the other service ceilings. Per-task cgroup delegation and hard per-task RSS enforcement remain explicitly deferred. | HARDEN BEFORE RELEASE | Decide and document whether the bounded canary accepts the service-level boundary; otherwise complete the separately designed cgroup hardening before broad execution. |
 | Deadline, output, and receipts | Direct runner, bounded wall/output, redaction, hashes, receipt hash, and terminal finalization are implemented. | ACCEPTED CURRENT LIMITATION | Inspect one live receipt and audit row for absence of raw output, env values, keys, and secrets. |
 | Restart and abort | Durable task/session recovery marks interrupted work terminal, does not auto-resume, and does not refund consumed uses. | ACCEPTED CURRENT LIMITATION | Reconfirm after a separately authorized recovery qualification; preserve all audit evidence. |
 | Production autonomy wiring | The normal loop requires an operator adapter and lifecycle gate; production adapter/wiring is absent. | RELEASE BLOCKER for general autonomous sandbox access; NON-BLOCKING for the explicitly bounded standalone one-shot driver | Keep general autonomy disabled. Treat the existing driver as a separate, one-shot qualification surface only. |

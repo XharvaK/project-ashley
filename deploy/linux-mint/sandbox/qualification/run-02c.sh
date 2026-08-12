@@ -21,6 +21,10 @@ CANARY_RECEIPT_PATH="$EVIDENCE_DIR/canary-receipt.json"
 TRANSIENT_LOG="$WORKSPACE_ROOT/transient.log"
 TRANSIENT_UNIT="ashley-sandbox-isolation-02c.service"
 PROBE_SOURCE="$SOURCE_ROOT/deploy/linux-mint/sandbox/qualification/bubblewrap-probe.sh"
+BROKER_ENV="/etc/ashley-sandbox/broker.env"
+NODE_BIN="/opt/ashley-sandbox/bin/node"
+POLICY_PREFLIGHT_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/execution/qualification-policy-preflight-cli.js"
+SERVICE_STABILITY_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/execution/qualification-service-state-cli.js"
 PROBE_RUNTIME="$RUNTIME_ROOT/bubblewrap-probe.sh"
 SERVICE_SOURCE="$SOURCE_ROOT/deploy/linux-mint/sandbox/systemd/ashley-exec-broker.service"
 SOCKET_SOURCE="$SOURCE_ROOT/deploy/linux-mint/sandbox/systemd/ashley-exec-broker.socket"
@@ -50,6 +54,87 @@ require_privileged_path() {
   local path="$1"
   sudo -n test -e "$path" || die "missing_path:$path"
 }
+broker_env_value() {
+  local key="$1"
+  local value
+  value="$(sudo -n awk -F= -v key="$key" '$1 == key { print substr($0, index($0, "=") + 1); exit }' "$BROKER_ENV")" \
+    || die "broker_env_unreadable:$key"
+  value="${value#\"}"
+  value="${value%\"}"
+  printf '%s\n' "$value"
+}
+run_policy_preflight() {
+  local delegated_enabled
+  local artifact_path
+  local signature_path
+  local owner_public_key
+  local owner_key_id
+  local output
+  local status
+  delegated_enabled="$(broker_env_value ASHLEY_SANDBOX_DELEGATED_ENABLED)"
+  [[ -n "$delegated_enabled" ]] || delegated_enabled=false
+  case "$delegated_enabled" in
+    true)
+      artifact_path="$(broker_env_value ASHLEY_SANDBOX_POLICY_ARTIFACT)"
+      signature_path="$(broker_env_value ASHLEY_SANDBOX_POLICY_SIGNATURE)"
+      owner_public_key="$(broker_env_value ASHLEY_SANDBOX_OWNER_PUBLIC_KEY)"
+      owner_key_id="$(broker_env_value ASHLEY_SANDBOX_OWNER_KEY_ID)"
+      [[ -n "$artifact_path" && -n "$signature_path" && -n "$owner_public_key" ]] \
+        || die delegated_policy_configuration_invalid
+      if [[ -z "$owner_key_id" ]]; then
+        owner_key_id="${owner_public_key##*/}"
+        owner_key_id="${owner_key_id%.pem}"
+        owner_key_id="${owner_key_id%.pub}"
+      fi
+      ;;
+    false)
+      artifact_path="/disabled/ashley-sandbox-policy.json"
+      signature_path="/disabled/ashley-sandbox-policy.json.sig"
+      owner_public_key="/disabled/ashley-sandbox-owner.pub"
+      owner_key_id="disabled"
+      ;;
+    *)
+      die delegated_policy_configuration_invalid
+      ;;
+  esac
+  set +e
+  output="$(sudo -n "$NODE_BIN" "$POLICY_PREFLIGHT_SOURCE" \
+    --delegated-enabled "$delegated_enabled" \
+    --artifact-path "$artifact_path" \
+    --signature-path "$signature_path" \
+    --owner-public-key "$owner_public_key" \
+    --owner-key-id "$owner_key_id" 2>&1)"
+  status=$?
+  set -e
+  printf '%s\n' "$output"
+  if [[ "$status" -ne 0 ]]; then
+    if grep -Eq 'BLOCKED delegated_policy_(expired|missing|invalid|configuration_invalid)' <<<"$output"; then
+      exit 77
+    fi
+    die delegated_policy_preflight_failed
+  fi
+  grep -Eq '"status": "(disabled|valid)"' <<<"$output" \
+    || die delegated_policy_preflight_result_invalid
+}
+run_stable_service_check() {
+  local output
+  local status
+  set +e
+  output="$(sudo -n "$NODE_BIN" "$SERVICE_STABILITY_SOURCE" \
+    --unit "$SERVICE" \
+    --expected-cgroup "/system.slice/$SERVICE" 2>&1)"
+  status=$?
+  set -e
+  printf '%s\n' "$output"
+  if [[ "$status" -ne 0 ]]; then
+    if grep -Eq 'BLOCKED service_(restart_loop|start_failed|process_died|cgroup_changed|state_unreadable|stability_timeout)' <<<"$output"; then
+      exit 77
+    fi
+    die service_stability_check_failed
+  fi
+  grep -q '"status": "stable"' <<<"$output" \
+    || die service_stability_result_invalid
+}
 [[ "$QUALIFICATION_ROOT" == /opt/ashley-sandbox/qualification/sandbox-isolation-02c ]] || die qualification_root_changed
 [[ "$FIXTURE_ROOT" == /var/lib/ashley-sandbox/qualification/sandbox-isolation-02c/fixture ]] || die fixture_root_changed
 [[ "$WORKSPACE_ROOT" == /var/lib/ashley-sandbox/qualification/sandbox-isolation-02c/workspace ]] || die workspace_root_changed
@@ -67,6 +152,8 @@ npm --prefix "$SOURCE_ROOT/apps/sandbox-broker" run build >/dev/null || die sour
 require_path "$SOCKET_SOURCE"
 require_path "$PROBE_SOURCE"
 require_path "$CLI_SOURCE"
+require_path "$POLICY_PREFLIGHT_SOURCE"
+require_path "$SERVICE_STABILITY_SOURCE"
 require_path "$PRODUCTION_ROOT/.git"
 require_path "$FROZEN_ROOT/.git"
 require_path "$PRODUCTION_ROOT/0"
@@ -101,6 +188,9 @@ systemd --version | grep -q '255\.4' || die host_systemd_patch_mismatch
 EXPECTED_RESTRICT_NAMESPACES="user mnt pid net uts ipc"
 EXPECTED_MEMORY_HIGH="1536M"
 EXPECTED_MEMORY_MAX="2048M"
+EXPECTED_TASKS_MAX=256
+EXPECTED_PIDS_MAX=256
+EXPECTED_CPU_QUOTA="100%"
 EXPECTED_MEMORY_HIGH_BYTES=1610612736
 EXPECTED_MEMORY_MAX_BYTES=2147483648
 normalize_namespace_set() {
@@ -155,6 +245,8 @@ boundary_payload() {
     "memory.max=$(cat "$cgroup_root/memory.max")" \
     "pids.max=$(cat "$cgroup_root/pids.max")"
 }
+require_privileged_path "$BROKER_ENV"
+run_policy_preflight
 RENDERED_SERVICE="$(mktemp)"
 trap 'rm -f "$RENDERED_SERVICE"' EXIT
 sed -e 's|@NODE@|/opt/ashley-sandbox/bin/node|g' "$SERVICE_SOURCE" >"$RENDERED_SERVICE"
@@ -164,7 +256,12 @@ rm -f "$RENDERED_SERVICE"
 sudo -n systemctl daemon-reload
 sudo -n systemctl stop "$SERVICE"
 sudo -n systemctl restart "$SOCKET"
+set +e
 sudo -n systemctl start "$SERVICE"
+SERVICE_START_STATUS=$?
+set -e
+run_stable_service_check
+[[ "$SERVICE_START_STATUS" -eq 0 ]] || die service_start_command_failed
 sudo -n chmod 0750 /run/ashley
 require_equal service_active "$(systemctl is-active "$SERVICE")" active
 require_equal socket_active "$(systemctl is-active "$SOCKET")" active
@@ -176,7 +273,7 @@ require_namespace_set restrict_namespaces \
 require_equal cpu_quota "$(systemctl show "$SERVICE" -p CPUQuotaPerSecUSec --value)" 1s
 require_equal memory_high "$(systemctl show "$SERVICE" -p MemoryHigh --value)" "$EXPECTED_MEMORY_HIGH_BYTES"
 require_equal memory_max "$(systemctl show "$SERVICE" -p MemoryMax --value)" "$EXPECTED_MEMORY_MAX_BYTES"
-require_equal tasks_max "$(systemctl show "$SERVICE" -p TasksMax --value)" 64
+require_equal tasks_max "$(systemctl show "$SERVICE" -p TasksMax --value)" "$EXPECTED_TASKS_MAX"
 require_equal address_families "$(systemctl show "$SERVICE" -p RestrictAddressFamilies --value)" AF_UNIX
 require_equal delegate "$(systemctl show "$SERVICE" -p Delegate --value)" no
 require_equal private_tmp "$(systemctl show "$SERVICE" -p PrivateTmp --value)" yes
@@ -201,12 +298,19 @@ require_equal service_user "$(systemctl show "$SERVICE" -p User --value)" ashley
 require_equal service_group "$(systemctl show "$SERVICE" -p Group --value)" ashley-sandbox
 require_equal working_directory "$(systemctl show "$SERVICE" -p WorkingDirectory --value)" /var/lib/ashley-sandbox
 CGROUP="$(systemctl show "$SERVICE" -p ControlGroup --value)"
+if [[ -z "$CGROUP" ]]; then
+  run_stable_service_check
+  CGROUP="$(systemctl show "$SERVICE" -p ControlGroup --value)"
+fi
+[[ -n "$CGROUP" ]] || die service_cgroup_unavailable_after_stability
 [[ "$CGROUP" == /system.slice/ashley-exec-broker.service ]] || die cgroup_changed
 CGROUP_ROOT="/sys/fs/cgroup$CGROUP"
 require_equal cpu_max "$(cat "$CGROUP_ROOT/cpu.max")" "100000 100000"
 require_equal memory_cgroup_high "$(cat "$CGROUP_ROOT/memory.high")" "$EXPECTED_MEMORY_HIGH_BYTES"
 require_equal memory_cgroup_max "$(cat "$CGROUP_ROOT/memory.max")" "$EXPECTED_MEMORY_MAX_BYTES"
-require_equal pids_cgroup_max "$(cat "$CGROUP_ROOT/pids.max")" 64
+require_equal pids_cgroup_max "$(cat "$CGROUP_ROOT/pids.max")" "$EXPECTED_PIDS_MAX"
+PIDS_CURRENT="$(cat "$CGROUP_ROOT/pids.current")"
+[[ "$PIDS_CURRENT" =~ ^[0-9]+$ ]] || die pids_current_unreadable
 require_path /run/ashley
 require_equal runtime_directory_mode "$(stat -c '%a' /run/ashley)" 750
 require_equal runtime_directory_owner "$(stat -c '%U:%G' /run/ashley)" root:root
@@ -368,10 +472,10 @@ sudo -n /usr/bin/systemd-run \
   --property=WorkingDirectory=/var/lib/ashley-sandbox \
   --property=RestrictNamespaces="$EXPECTED_RESTRICT_NAMESPACES" \
   --property=RestrictAddressFamilies=AF_UNIX \
-  --property=CPUQuota=100% \
+  --property=CPUQuota="$EXPECTED_CPU_QUOTA" \
   --property=MemoryHigh="$EXPECTED_MEMORY_HIGH" \
   --property=MemoryMax="$EXPECTED_MEMORY_MAX" \
-  --property=TasksMax=64 \
+  --property=TasksMax="$EXPECTED_TASKS_MAX" \
   --property=Delegate=no \
   --property=PrivateTmp=yes \
   --property=PrivateDevices=yes \
@@ -488,5 +592,7 @@ printf 'provider_path=/usr/bin/bwrap\n'
 printf 'provider_version=bubblewrap/0.9.0\n'
 printf 'provider_binary_digest=%s\n' "$BWRAP_DIGEST"
 printf 'boundary_fingerprint=%s\n' "$BROKER_BOUNDARY"
+printf 'pids_max=%s\n' "$EXPECTED_PIDS_MAX"
+printf 'pids_current=%s\n' "$PIDS_CURRENT"
 printf 'evidence_path=%s\n' "$EVIDENCE_PATH"
 printf 'qualification=PASS\n'
