@@ -218,6 +218,25 @@ describe("Bubblewrap R2 qualification contract", () => {
     }
   });
 
+  it("refuses an extra or reordered physical probe result", async () => {
+    const evidence = makeEvidence();
+    const provider = makeProvider({
+      status: "qualified",
+      evidence: makeEvidence({
+        requiredProbeResults: [
+          evidence.requiredProbeResults[1]!,
+          evidence.requiredProbeResults[0]!,
+          ...evidence.requiredProbeResults.slice(2),
+        ],
+      }),
+    });
+    const result = await provider.prepare(baseRequest);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errorCode).toBe("bubblewrap_required_probe_set_mismatch");
+    }
+  });
+
   for (const missingNamespace of ["user", "mount"] as const) {
     it(`refuses a qualified profile missing the ${missingNamespace} namespace`, async () => {
       const provider = makeProvider({

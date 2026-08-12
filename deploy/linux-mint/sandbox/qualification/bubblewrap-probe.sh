@@ -22,6 +22,18 @@ case "$mode" in
       /run/ashley \
       /run/ashley/broker.sock \
       /var/lib/ashley-sandbox \
+      /var/lib/ashley-sandbox/meta \
+      /var/lib/ashley-sandbox/meta/keys \
+      /var/lib/ashley-sandbox/meta/keys/owner \
+      /var/lib/ashley-sandbox/meta/keys/continuity \
+      /var/lib/ashley-sandbox/meta/keys/delegated \
+      /var/lib/ashley-sandbox/meta/keys/broker \
+      /var/lib/ashley-sandbox/meta/keys/broker/broker-session-capability.key.enc \
+      /var/lib/ashley-sandbox/meta/keys/broker/master.pass \
+      /var/lib/ashley-sandbox/meta/policy \
+      /var/lib/ashley-sandbox/meta/policy/policy.json \
+      /var/lib/ashley-sandbox/meta/policy/policy.json.sig \
+      /var/lib/ashley-sandbox/meta/recipes.json \
       /var/lib/ashley-sandbox/broker.db \
       /var/lib/ashley-sandbox/broker.db-wal \
       /var/lib/ashley-sandbox/broker.db-shm \

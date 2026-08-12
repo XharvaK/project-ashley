@@ -436,6 +436,25 @@ function hasPassingProbe(
       result.resultDigest.trim().length > 0,
   );
 }
+function hasExactProbeSet(
+  evidence: BubblewrapQualificationEvidence,
+): boolean {
+  if (
+    !Array.isArray(evidence.requiredProbeResults) ||
+    evidence.requiredProbeResults.length !== BUBBLEWRAP_REQUIRED_PROBE_IDS.length
+  ) {
+    return false;
+  }
+  return evidence.requiredProbeResults.every(
+    (result, index) =>
+      result !== null &&
+      typeof result === "object" &&
+      result.probeId === BUBBLEWRAP_REQUIRED_PROBE_IDS[index] &&
+      result.status === "pass" &&
+      typeof result.resultDigest === "string" &&
+      result.resultDigest.trim().length > 0,
+  );
+}
 export function parseBubblewrapQualification(
   value: unknown,
 ): BubblewrapQualification {
@@ -770,6 +789,13 @@ export class BubblewrapExecutionIsolation implements ExecutionIsolationProvider 
           reason: `required qualification probe did not pass: ${probeId}`,
         };
       }
+    }
+    if (!hasExactProbeSet(evidence)) {
+      return {
+        ok: false,
+        errorCode: "bubblewrap_required_probe_set_mismatch",
+        reason: "qualification evidence probe result set does not match the reviewed manifest",
+      };
     }
     return null;
   }

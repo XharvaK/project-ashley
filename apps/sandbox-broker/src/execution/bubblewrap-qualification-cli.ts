@@ -1,8 +1,11 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
+import { ChildProcessRunner } from "../process/real-runner.js";
 import {
   createDefaultQualificationManifest,
   runBubblewrapQualification,
+  runBubblewrapQualificationCanary,
 } from "./bubblewrap-qualification-runner.js";
 import type { BubblewrapHostIdentity } from "./bubblewrap-execution-isolation.js";
 function argument(name: string): string | undefined {
@@ -40,9 +43,14 @@ function hostIdentity(): BubblewrapHostIdentity {
     systemdVersion: commandOutput("systemd", ["--version"]).split(/\r?\n/)[0] || "unknown",
     cgroupMode: existsSync("/sys/fs/cgroup/cgroup.controllers")
       ? "cgroup2fs"
+
       : "unknown",
   };
 }
+function sha256File(path: string): string {
+  return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
+
 function requireAbsolute(name: string): string {
   const value = requiredArgument(name);
   if (!value.startsWith("/")) {
@@ -55,7 +63,13 @@ async function main(): Promise<void> {
   const fixtureRoot = requireAbsolute("--fixture-root");
   const workspaceRoot = requireAbsolute("--workspace-root");
   const probeScript = requireAbsolute("--probe-script");
+  const canaryReceiptPathArgument = argument("--canary-receipt-out");
+  const canaryReceiptPath =
+    canaryReceiptPathArgument === undefined
+      ? undefined
+      : requireAbsolute("--canary-receipt-out");
   const evidencePath = requireAbsolute("--evidence-out");
+  const fixtureProbeManifestPath = requireAbsolute("--fixture-probe-manifest");
   const boundary = requiredArgument("--boundary-fingerprint");
   const evidenceId =
     argument("--evidence-id") || "bubblewrap-mint-02c-physical";
@@ -65,13 +79,16 @@ async function main(): Promise<void> {
     workspaceRoot,
     probeScript,
   });
+  const identity = hostIdentity();
+  const fixtureProbeManifestDigest = sha256File(fixtureProbeManifestPath);
   const result = await runBubblewrapQualification({
     manifest,
     sourceCommit,
     evidenceId,
-    hostIdentity: hostIdentity(),
+    hostIdentity: identity,
     effectiveSecurityBoundaryFingerprint: boundary,
     evidencePath,
+    fixtureProbeManifestDigest,
   });
   if (result.status !== "qualified") {
     console.error(
@@ -88,6 +105,38 @@ async function main(): Promise<void> {
     process.exitCode = 1;
     return;
   }
+  let materializedCanaryReceiptPath: string | undefined;
+  if (canaryReceiptPath !== undefined) {
+    const canary = await runBubblewrapQualificationCanary({
+      manifest,
+      sourceCommit,
+      qualification: { status: "qualified", evidence: result.evidence },
+      qualificationContext: {
+        sourceCommit,
+        hostIdentity: identity,
+        effectiveSecurityBoundaryFingerprint: boundary,
+        fixtureProbeManifestDigest,
+      },
+      workspaceRoot,
+      processRunner: new ChildProcessRunner(),
+      receiptPath: canaryReceiptPath,
+    });
+    if (canary.status !== "qualified") {
+      console.error(
+        JSON.stringify(
+          {
+            status: canary.status,
+            reason: canary.reason,
+          },
+          null,
+          2,
+        ),
+      );
+      process.exitCode = 1;
+      return;
+    }
+    materializedCanaryReceiptPath = canary.receiptPath;
+  }
   console.log(
     JSON.stringify(
       {
@@ -98,6 +147,7 @@ async function main(): Promise<void> {
         providerBinaryDigest: result.evidence.providerBinaryDigest,
         fixtureProbeManifestDigest: result.evidence.fixtureProbeManifestDigest,
         evidencePath: result.evidencePath,
+        canaryReceiptPath: materializedCanaryReceiptPath,
       },
       null,
       2,

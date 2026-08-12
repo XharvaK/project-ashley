@@ -21,6 +21,7 @@ function killProcessGroup(child: ChildProcess, signal: NodeJS.Signals): void {
 
 export class ChildProcessRunner implements ProcessRunner {
   private readonly children = new Map<string, ChildProcess>();
+  private readonly cancellationRequests = new Set<string>();
 
   async run(request: FakeRunRequest): Promise<FakeRunResult> {
     if (request.maxProcesses < 1) {
@@ -92,6 +93,7 @@ export class ChildProcessRunner implements ProcessRunner {
         });
       });
       child.once("close", (exitCode) => {
+        const cancellationRequested = this.cancellationRequests.delete(request.taskId);
         finish({
           exitCode: exitCode ?? 1,
           stdout: stdout.toString("utf8"),
@@ -101,7 +103,9 @@ export class ChildProcessRunner implements ProcessRunner {
             ? "timeout"
             : outputTruncated
               ? "truncated"
-              : exitCode === 0
+              : cancellationRequested
+                ? "cancelled"
+                : exitCode === 0
                 ? "success"
                 : "process_exit",
         });
@@ -112,6 +116,7 @@ export class ChildProcessRunner implements ProcessRunner {
   cancel(taskId: string): boolean {
     const child = this.children.get(taskId);
     if (!child) return false;
+    this.cancellationRequests.add(taskId);
     killProcessGroup(child, "SIGTERM");
     return true;
   }

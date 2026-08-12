@@ -33,4 +33,21 @@ describe("ChildProcessRunner", () => {
     });
     expect(result.terminalReason).toBe("timeout");
   });
+
+  it("reports cancellation distinctly from an ordinary process exit", async () => {
+    const runner = new ChildProcessRunner();
+    const pending = runner.run({
+      taskId: "real-runner-cancel",
+      argv: [process.execPath, "-e", "setTimeout(() => {}, 10_000)"],
+      cwd: process.cwd(),
+      env: {},
+      wallMs: 5_000,
+      maxProcesses: 1,
+      maxOutputBytes: 1024,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(runner.cancel("real-runner-cancel")).toBe(true);
+    const result = await pending;
+    expect(result.terminalReason).toBe("cancelled");
+  });
 });
