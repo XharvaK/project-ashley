@@ -21,6 +21,10 @@ import { selectProductionNetworkIsolation, assertNetworkIsolationProbeOperationa
 import { executableMappingsFromEnv } from "./execution/executable-mappings.js";
 import type { NetworkIsolationProvider } from "./execution/network-isolation.js";
 import { selectProductionExecutionIsolation } from "./execution/execution-provider-selection.js";
+import {
+  loadBubblewrapQualificationFile,
+  type BubblewrapQualificationContext,
+} from "./execution/bubblewrap-execution-isolation.js";
 import type { ExecutionIsolationProvider } from "./execution/execution-isolation.js";
 import type { DelegatedRuntimeConfig } from "./delegated/runtime.js";
 
@@ -51,6 +55,42 @@ function boolEnv(name: string): boolean {
   throw new Error(`${name} must be "true" or "false"`);
 }
 
+function loadHostBubblewrapQualification(): {
+  qualification: ReturnType<typeof loadBubblewrapQualificationFile>;
+  context?: BubblewrapQualificationContext;
+} {
+  const value = (name: string): string | undefined =>
+    process.env[name]?.trim() || undefined;
+  const qualificationPath = value("ASHLEY_SANDBOX_EXECUTION_QUALIFICATION_PATH");
+  const sourceCommit = value("ASHLEY_SANDBOX_EXECUTION_SOURCE_COMMIT");
+  const hostIdentity = {
+    osRelease: value("ASHLEY_SANDBOX_EXECUTION_HOST_OS"),
+    kernelRelease: value("ASHLEY_SANDBOX_EXECUTION_HOST_KERNEL"),
+    architecture: value("ASHLEY_SANDBOX_EXECUTION_HOST_ARCH"),
+    systemdVersion: value("ASHLEY_SANDBOX_EXECUTION_HOST_SYSTEMD"),
+    cgroupMode: value("ASHLEY_SANDBOX_EXECUTION_HOST_CGROUP"),
+  };
+  const boundary = value("ASHLEY_SANDBOX_EXECUTION_BOUNDARY_FINGERPRINT");
+  const manifest = value("ASHLEY_SANDBOX_EXECUTION_PROBE_MANIFEST_DIGEST");
+  if (
+    qualificationPath === undefined ||
+    sourceCommit === undefined ||
+    Object.values(hostIdentity).some((candidate) => candidate === undefined) ||
+    boundary === undefined ||
+    manifest === undefined
+  ) {
+    return { qualification: { status: "unqualified" } };
+  }
+  return {
+    qualification: loadBubblewrapQualificationFile(qualificationPath),
+    context: {
+      sourceCommit,
+      hostIdentity: hostIdentity as BubblewrapQualificationContext["hostIdentity"],
+      effectiveSecurityBoundaryFingerprint: boundary,
+      fixtureProbeManifestDigest: manifest,
+    },
+  };
+}
 const SOURCE_IDENTITY_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 
 /**
@@ -126,6 +166,7 @@ async function loadDelegatedRuntimeConfig(
     process.env.ASHLEY_SANDBOX_CAPABILITY_KEY_ID?.trim() ??
     "broker-session-capability-ed25519-v1";
 
+  const hostBubblewrapQualification = loadHostBubblewrapQualification();
   const selection = selectProductionNetworkIsolation({
     providerName: process.env.ASHLEY_SANDBOX_NETWORK_PROVIDER,
     qualified: boolEnv("ASHLEY_SANDBOX_NETWORK_ISOLATION_QUALIFIED"),
@@ -142,6 +183,8 @@ async function loadDelegatedRuntimeConfig(
     profileFingerprint:
       process.env.ASHLEY_SANDBOX_EXECUTION_PROFILE_FINGERPRINT ??
       process.env.ASHLEY_SANDBOX_EXECUTION_QUALIFICATION_ID,
+    qualification: hostBubblewrapQualification.qualification,
+    qualificationContext: hostBubblewrapQualification.context,
     platform: process.platform,
     processRunner,
   });

@@ -14,6 +14,7 @@ import {
   type BubblewrapBind,
   type BubblewrapExecutionIsolationOptions,
   type BubblewrapQualification,
+  type BubblewrapQualificationContext,
 } from "./bubblewrap-execution-isolation.js";
 import type { ExecutionIsolationProvider } from "./execution-isolation.js";
 
@@ -47,6 +48,8 @@ export type ProductionExecutionIsolationSelectionInput = {
   processRunner: ProcessRunner;
   probeBinary?: BubblewrapExecutionIsolationOptions["probeBinary"];
   probeProviderVersion?: BubblewrapExecutionIsolationOptions["probeProviderVersion"];
+  probeProviderBinaryDigest?: BubblewrapExecutionIsolationOptions["probeProviderBinaryDigest"];
+  qualificationContext?: BubblewrapQualificationContext;
   binds?: readonly BubblewrapBind[];
   workspaceRoots?: readonly string[];
 };
@@ -80,6 +83,8 @@ export function selectProductionExecutionIsolation(
     probeBinary: input.probeBinary,
     probeProviderVersion: input.probeProviderVersion,
     binds: input.binds,
+    probeProviderBinaryDigest: input.probeProviderBinaryDigest,
+    qualificationContext: input.qualificationContext,
     workspaceRoots: input.workspaceRoots,
     qualification,
   });

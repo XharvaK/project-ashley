@@ -111,6 +111,13 @@ describe("session workspace cwd binding", () => {
     expect(request.cwd.replace(/\\/g, "/")).toBe(
       toNativeBrokerPath(live.treeRoot).replace(/\\/g, "/"),
     );
+    expect(request.isolationCwd).toBe("/workspace");
+    expect(request.isolationBinds).toContainEqual({
+      src: live.treeRoot,
+      dest: "/workspace",
+      writable: true,
+    });
+    expect(request.isolationWorkspaceRoots).toEqual([live.treeRoot]);
     expect(request.cwd.replace(/\\/g, "/")).not.toBe(
       toNativeBrokerPath(harness.roots.rootConfig.workspaceRoot).replace(
         /\\/g,

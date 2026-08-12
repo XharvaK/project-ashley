@@ -11,10 +11,13 @@ import { describe, expect, it } from "vitest";
 import {
   BubblewrapExecutionIsolation,
   CONTROL_PLANE_BIND_PATHS,
+  BUBBLEWRAP_CHILD_HOME_PATH,
   DEFAULT_BUBBLEWRAP_PATH,
   BUBBLEWRAP_PROVIDER_VERSION_IDENTITY,
   BUBBLEWRAP_PROFILE_FINGERPRINT,
+  BUBBLEWRAP_REQUIRED_PROBE_IDS,
   type BubblewrapQualification,
+  type BubblewrapQualificationContext,
   type BubblewrapQualificationEvidence,
   buildBubblewrapArgv,
 } from "../index.js";
@@ -36,19 +39,46 @@ const baseBinds = [
   { src: "/usr", dest: "/usr", writable: false },
   { src: "/lib", dest: "/lib", writable: false },
   { src: "/lib64", dest: "/lib64", writable: false },
-  { src: "/opt", dest: "/opt", writable: false },
+  { src: "/opt/ashley-sandbox", dest: "/opt/ashley-sandbox", writable: false },
   { src: WORK_ROOT, dest: WORK_ROOT, writable: true },
 ] as const;
+
+const TEST_PROVIDER_DIGEST = "a".repeat(64);
+const QUALIFICATION_CONTEXT: BubblewrapQualificationContext = {
+  sourceCommit: "02c-test-source",
+  hostIdentity: {
+    osRelease: "linuxmint 22.3",
+    kernelRelease: "6.17.0-29-generic",
+    architecture: "x86_64",
+    systemdVersion: "systemd 255.4",
+    cgroupMode: "cgroup2fs",
+  },
+  effectiveSecurityBoundaryFingerprint: "boundary-test",
+  fixtureProbeManifestDigest: "manifest-test",
+};
 
 const QUALIFICATION_EVIDENCE: BubblewrapQualificationEvidence = {
   evidenceId: "bubblewrap-test-host-qualification-r2",
   profileFingerprint: BUBBLEWRAP_PROFILE_FINGERPRINT,
+  sourceCommit: QUALIFICATION_CONTEXT.sourceCommit,
   providerKind: "bubblewrap",
   providerExecutable: DEFAULT_BUBBLEWRAP_PATH,
   providerVersionIdentity: BUBBLEWRAP_PROVIDER_VERSION_IDENTITY,
   requiredHostNamespaces: ["user", "mount", "pid", "net", "uts", "ipc"],
   isolationProfileId: "bubblewrap-v1",
+  explicitUnshareNamespaces: ["pid", "net", "uts", "ipc"],
+  lifecycleProfileId: "die-with-parent,new-session",
   mountProfileId: "whitelist-v1",
+  providerBinaryDigest: TEST_PROVIDER_DIGEST,
+  hostIdentity: QUALIFICATION_CONTEXT.hostIdentity,
+  effectiveSecurityBoundaryFingerprint:
+    QUALIFICATION_CONTEXT.effectiveSecurityBoundaryFingerprint,
+  fixtureProbeManifestDigest: QUALIFICATION_CONTEXT.fixtureProbeManifestDigest,
+  requiredProbeResults: BUBBLEWRAP_REQUIRED_PROBE_IDS.map((probeId) => ({
+    probeId,
+    status: "pass" as const,
+    resultDigest: `probe-${probeId}`,
+  })),
 };
 
 function qualifiedQualification(): BubblewrapQualification {
@@ -78,6 +108,8 @@ function makeProvider(options: {
       kind: "ok",
       identity: options.providerVersion ?? BUBBLEWRAP_PROVIDER_VERSION_IDENTITY,
     }),
+    probeProviderBinaryDigest: () => ({ kind: "ok", digest: TEST_PROVIDER_DIGEST }),
+    qualificationContext: QUALIFICATION_CONTEXT,
     binds: baseBinds,
     workspaceRoots: [WORK_ROOT],
     qualification: options.qualification ?? { status: "unqualified" },
@@ -159,6 +191,35 @@ describe("bubblewrap execution isolation", () => {
     });
     expect(exact.ok).toBe(true);
   });
+  it("rejects arbitrary runtime roots under /opt", () => {
+    for (const path of ["/opt", "/opt/other-runtime", "/opt/ashley-sandbox/../other-runtime"]) {
+      const result = buildBubblewrapArgv({
+        bubblewrapPath: DEFAULT_BUBBLEWRAP_PATH,
+        argv: ["/usr/bin/true"],
+        cwd: "/",
+        env: {},
+        binds: [{ src: path, dest: path, writable: false }],
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.errorCode).toBe("bubblewrap_unreviewed_runtime_bind_denied");
+      }
+    }
+    const reviewed = buildBubblewrapArgv({
+      bubblewrapPath: DEFAULT_BUBBLEWRAP_PATH,
+      argv: ["/usr/bin/true"],
+      cwd: "/",
+      env: {},
+      binds: [
+        {
+          src: "/opt/ashley-sandbox",
+          dest: "/opt/ashley-sandbox",
+          writable: false,
+        },
+      ],
+    });
+    expect(reviewed.ok).toBe(true);
+  });
 
   it("3. drops env values that would parse as options", () => {
     const plan = buildBubblewrapArgv({
@@ -207,12 +268,12 @@ describe("bubblewrap execution isolation", () => {
       expect(result.request.argv).toContain("--tmpfs");
       expect(result.request.argv).toContain("/tmp");
       expect(result.request.argv).toContain("--dir");
-      expect(result.request.argv).toContain(baseRequest.env.HOME);
+      expect(result.request.argv).toContain(BUBBLEWRAP_CHILD_HOME_PATH);
       const evidence = result.isolation;
       expect(evidence.network.status).toBe("provided");
       expect(evidence.process_tree.status).toBe("partial");
-      expect(evidence.control_plane_invisible.status).toBe("unproven");
-      expect(evidence.broker_socket_invisible.status).toBe("unproven");
+      expect(evidence.control_plane_invisible.status).toBe("provided");
+      expect(evidence.broker_socket_invisible.status).toBe("provided");
     }
   });
   it("refuses a provider replacement with a mismatched version identity", async () => {

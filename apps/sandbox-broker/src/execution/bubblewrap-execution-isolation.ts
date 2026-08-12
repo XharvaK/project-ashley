@@ -25,7 +25,8 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { lstatSync, realpathSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import type { FakeRunRequest, ProcessRunner } from "../process/fake-runner.js";
 import {
   EXECUTION_ISOLATION_PROPERTIES,
@@ -46,6 +47,10 @@ export const BUBBLEWRAP_PROVIDER_KIND = "bubblewrap";
 export const BUBBLEWRAP_PROVIDER_VERSION_IDENTITY = "bubblewrap/0.9.0";
 export const BUBBLEWRAP_ISOLATION_PROFILE_ID = "bubblewrap-v1";
 export const BUBBLEWRAP_MOUNT_PROFILE_ID = "whitelist-v1";
+export const BUBBLEWRAP_REVIEWED_RUNTIME_ROOT = "/opt/ashley-sandbox";
+export const BUBBLEWRAP_QUALIFICATION_RUNTIME_ROOT = "/opt/ashley-sandbox/qualification";
+export const BUBBLEWRAP_CHILD_WORKSPACE_PATH = "/workspace";
+export const BUBBLEWRAP_CHILD_HOME_PATH = "/home/ashley";
 
 export type BubblewrapIsolationProfile = {
   profileId: "bubblewrap-v1";
@@ -110,8 +115,55 @@ export const BUBBLEWRAP_PROFILE_FINGERPRINT = fingerprintBubblewrapProfile(
   BUBBLEWRAP_ISOLATION_PROFILE,
 );
 
+export type BubblewrapHostIdentity = {
+  osRelease: string;
+  kernelRelease: string;
+  architecture: string;
+  systemdVersion: string;
+  cgroupMode: string;
+};
+
+export type BubblewrapQualificationProbeId =
+  | "filesystem_control_plane"
+  | "broker_socket"
+  | "network"
+  | "environment"
+  | "process_tree"
+  | "resources"
+  | "positive_functionality";
+
+export const BUBBLEWRAP_REQUIRED_PROBE_IDS = [
+  "filesystem_control_plane",
+  "broker_socket",
+  "network",
+  "environment",
+  "process_tree",
+  "resources",
+  "positive_functionality",
+] as const satisfies readonly BubblewrapQualificationProbeId[];
+
+export type BubblewrapQualificationProbeResult = {
+  probeId: BubblewrapQualificationProbeId;
+  status: "pass";
+  resultDigest: string;
+};
+
+/**
+ * Host-owned values expected by the provider when it evaluates physical
+ * qualification evidence. This is separate from the source profile: it
+ * describes the host boundary against which the evidence was produced, not
+ * the boundary the source asks for.
+ */
+export type BubblewrapQualificationContext = {
+  sourceCommit: string;
+  hostIdentity: BubblewrapHostIdentity;
+  effectiveSecurityBoundaryFingerprint: string;
+  fixtureProbeManifestDigest: string;
+};
+
 export type BubblewrapQualificationEvidence = {
   evidenceId: string;
+  sourceCommit: string;
   profileFingerprint: string;
   providerKind: "bubblewrap";
   providerExecutable: "/usr/bin/bwrap";
@@ -124,10 +176,15 @@ export type BubblewrapQualificationEvidence = {
     "uts",
     "ipc",
   ];
+  explicitUnshareNamespaces: readonly ["pid", "net", "uts", "ipc"];
+  lifecycleProfileId: "die-with-parent,new-session";
   isolationProfileId: "bubblewrap-v1";
   mountProfileId: "whitelist-v1";
-  /** Reserved for 02C physical qualification; not checked or calculated in R2. */
-  providerBinaryDigest?: string;
+  providerBinaryDigest: string;
+  hostIdentity: BubblewrapHostIdentity;
+  effectiveSecurityBoundaryFingerprint: string;
+  fixtureProbeManifestDigest: string;
+  requiredProbeResults: readonly BubblewrapQualificationProbeResult[];
 };
 
 export type BubblewrapQualification =
@@ -166,6 +223,29 @@ export function probeBubblewrapProviderVersion(
   }
 }
 
+export type BubblewrapProviderDigestProbeResult =
+  | { kind: "ok"; digest: string }
+  | { kind: "unavailable"; reason: string };
+
+export type BubblewrapProviderDigestProbe =
+  (path: string) => BubblewrapProviderDigestProbeResult;
+
+export function probeBubblewrapProviderDigest(
+  path: string,
+): BubblewrapProviderDigestProbeResult {
+  try {
+    return {
+      kind: "ok",
+      digest: createHash("sha256").update(readFileSync(path)).digest("hex"),
+    };
+  } catch {
+    return {
+      kind: "unavailable",
+      reason: "bubblewrap_digest_unavailable",
+    };
+  }
+}
+
 /** Bind whitelist entries that the sandbox must never receive. */
 export const CONTROL_PLANE_BIND_PATHS: readonly string[] = [
   "/run/ashley",
@@ -184,8 +264,30 @@ export const DEFAULT_BUBBLEWRAP_RUNTIME_BINDS: readonly BubblewrapBind[] = [
   { src: "/usr", dest: "/usr", writable: false },
   { src: "/lib", dest: "/lib", writable: false },
   { src: "/lib64", dest: "/lib64", writable: false },
-  { src: "/opt", dest: "/opt", writable: false },
+  {
+    src: BUBBLEWRAP_REVIEWED_RUNTIME_ROOT,
+    dest: BUBBLEWRAP_REVIEWED_RUNTIME_ROOT,
+    writable: false,
+  },
 ] as const;
+
+function isPathWithin(root: string, candidate: string): boolean {
+  return candidate === root || candidate.startsWith(`${root}/`);
+}
+function isUnreviewedOptPath(candidate: string): boolean {
+  if (candidate === "/opt") return true;
+  if (!candidate.startsWith("/opt/")) return false;
+  if (candidate.split("/").some((segment) => segment === "." || segment === "..")) {
+    return true;
+  }
+  return !isPathWithin(BUBBLEWRAP_REVIEWED_RUNTIME_ROOT, candidate);
+}
+function isCanonicalAbsolutePath(candidate: string): boolean {
+  return (
+    candidate.startsWith("/") &&
+    !candidate.split("/").some((segment) => segment === "." || segment === "..")
+  );
+}
 
 export type BuildBubblewrapArgvOptions = {
   bubblewrapPath: string;
@@ -224,14 +326,34 @@ export function buildBubblewrapArgv(
         reason: `${bind.src}->${bind.dest}`,
       };
     }
-    if (workspaceRoots.has(bind.src)) continue;
-    for (const forbidden of CONTROL_PLANE_BIND_PATHS) {
-      if (bind.src === forbidden || bind.src.startsWith(`${forbidden}/`)) {
+    const exactWorkspaceRoot = workspaceRoots.has(bind.src);
+    if (isUnreviewedOptPath(bind.src) || isUnreviewedOptPath(bind.dest)) {
+      return {
+        ok: false,
+        errorCode: "bubblewrap_unreviewed_runtime_bind_denied",
+        reason: `${bind.src}->${bind.dest}`,
+      };
+    }
+    for (const candidate of [bind.src, bind.dest]) {
+      if (!isCanonicalAbsolutePath(candidate)) {
         return {
           ok: false,
-          errorCode: "bubblewrap_control_plane_bind_denied",
-          reason: bind.src,
+          errorCode: "bubblewrap_bind_path_noncanonical",
+          reason: candidate,
         };
+      }
+      for (const forbidden of CONTROL_PLANE_BIND_PATHS) {
+        if (
+          candidate === forbidden ||
+          candidate.startsWith(`${forbidden}/`)
+        ) {
+          if (exactWorkspaceRoot && candidate === bind.src) continue;
+          return {
+            ok: false,
+            errorCode: "bubblewrap_control_plane_bind_denied",
+            reason: candidate,
+          };
+        }
       }
     }
   }
@@ -261,6 +383,16 @@ export function buildBubblewrapArgv(
   return { ok: true, argv: args };
 }
 
+function sameTuple(
+  actual: unknown,
+  expected: readonly string[],
+): actual is readonly string[] {
+  return (
+    Array.isArray(actual) &&
+    actual.length === expected.length &&
+    actual.every((value, index) => value === expected[index])
+  );
+}
 function probeBubblewrapBinary(path: string): {
   kind: "ok";
   resolvedPath: string;
@@ -275,12 +407,69 @@ function probeBubblewrapBinary(path: string): {
   }
 }
 
+function sameHostIdentity(
+  actual: unknown,
+  expected: BubblewrapHostIdentity,
+): boolean {
+  if (actual === null || typeof actual !== "object") return false;
+  const value = actual as Partial<BubblewrapHostIdentity>;
+  return (
+    value.osRelease === expected.osRelease &&
+    value.kernelRelease === expected.kernelRelease &&
+    value.architecture === expected.architecture &&
+    value.systemdVersion === expected.systemdVersion &&
+    value.cgroupMode === expected.cgroupMode
+  );
+}
+function hasPassingProbe(
+  evidence: BubblewrapQualificationEvidence,
+  probeId: BubblewrapQualificationProbeId,
+): boolean {
+  if (!Array.isArray(evidence.requiredProbeResults)) return false;
+  return evidence.requiredProbeResults.some(
+    (result) =>
+      result !== null &&
+      typeof result === "object" &&
+      result.probeId === probeId &&
+      result.status === "pass" &&
+      typeof result.resultDigest === "string" &&
+      result.resultDigest.trim().length > 0,
+  );
+}
+export function parseBubblewrapQualification(
+  value: unknown,
+): BubblewrapQualification {
+  if (value === null || typeof value !== "object") {
+    return { status: "unqualified" };
+  }
+  const candidate = value as { status?: unknown; evidence?: unknown };
+  if (candidate.status !== "qualified") {
+    return { status: "unqualified" };
+  }
+  return {
+    status: "qualified",
+    evidence: candidate.evidence as BubblewrapQualificationEvidence,
+  };
+}
+export function loadBubblewrapQualificationFile(
+  path: string,
+): BubblewrapQualification {
+  try {
+    return parseBubblewrapQualification(
+      JSON.parse(readFileSync(path, "utf8")) as unknown,
+    );
+  } catch {
+    return { status: "unqualified" };
+  }
+}
 export type BubblewrapExecutionIsolationOptions = {
   processRunner: ProcessRunner;
   bubblewrapPath?: string;
   platform?: NodeJS.Platform;
   probeBinary?: (path: string) => ReturnType<typeof probeBubblewrapBinary>;
   probeProviderVersion?: BubblewrapProviderVersionProbe;
+  probeProviderBinaryDigest?: BubblewrapProviderDigestProbe;
+  qualificationContext?: BubblewrapQualificationContext;
   /** Static system paths always bound read-only into the sandbox. */
   binds?: readonly BubblewrapBind[];
   /**
@@ -299,9 +488,12 @@ export class BubblewrapExecutionIsolation implements ExecutionIsolationProvider 
   private readonly probeBinary: (path: string) => ReturnType<typeof probeBubblewrapBinary>;
   private readonly probeProviderVersion: BubblewrapProviderVersionProbe;
   private readonly binds: readonly BubblewrapBind[];
+  private readonly probeProviderBinaryDigest: BubblewrapProviderDigestProbe;
+  private readonly qualificationContext: BubblewrapQualificationContext | undefined;
   private providerVersionResult: BubblewrapProviderVersionProbeResult |
     null = null;
   private readonly workspaceRoots: readonly string[];
+  private providerDigestResult: BubblewrapProviderDigestProbeResult | null = null;
   private readonly qualification: BubblewrapQualification;
 
   constructor(options: BubblewrapExecutionIsolationOptions) {
@@ -312,6 +504,9 @@ export class BubblewrapExecutionIsolation implements ExecutionIsolationProvider 
     this.probeProviderVersion =
       options.probeProviderVersion ?? probeBubblewrapProviderVersion;
     this.binds = options.binds ?? DEFAULT_BUBBLEWRAP_RUNTIME_BINDS;
+    this.probeProviderBinaryDigest =
+      options.probeProviderBinaryDigest ?? probeBubblewrapProviderDigest;
+    this.qualificationContext = options.qualificationContext;
     this.workspaceRoots = options.workspaceRoots ?? [];
     this.qualification = options.qualification ?? { status: "unqualified" };
   }
@@ -369,6 +564,13 @@ export class BubblewrapExecutionIsolation implements ExecutionIsolationProvider 
     return this.providerVersionResult;
   }
 
+  private providerDigest(): BubblewrapProviderDigestProbeResult {
+    if (this.providerDigestResult === null) {
+      this.providerDigestResult = this.probeProviderBinaryDigest(this.bubblewrapPath);
+    }
+    return this.providerDigestResult;
+  }
+
   private qualificationFailure(): { ok: false; errorCode: string; reason: string } | null {
     if (this.qualification.status !== "qualified") {
       return {
@@ -391,6 +593,52 @@ export class BubblewrapExecutionIsolation implements ExecutionIsolationProvider 
         ok: false,
         errorCode: "bubblewrap_qualification_evidence_invalid",
         reason: "source profile identity cannot serve as host qualification evidence",
+      };
+    }
+    const context = this.qualificationContext;
+    if (context === undefined) {
+      return {
+        ok: false,
+        errorCode: "bubblewrap_qualification_context_missing",
+        reason: "host qualification context is required",
+      };
+    }
+    if (
+      typeof evidence.sourceCommit !== "string" ||
+      evidence.sourceCommit !== context.sourceCommit
+    ) {
+      return {
+        ok: false,
+        errorCode: "bubblewrap_source_commit_mismatch",
+        reason: "qualification evidence is bound to a different source commit",
+      };
+    }
+    if (!sameHostIdentity(evidence.hostIdentity, context.hostIdentity)) {
+      return {
+        ok: false,
+        errorCode: "bubblewrap_host_identity_mismatch",
+        reason: "qualification evidence was produced on a different host",
+      };
+    }
+    if (
+      typeof evidence.effectiveSecurityBoundaryFingerprint !== "string" ||
+      evidence.effectiveSecurityBoundaryFingerprint !==
+        context.effectiveSecurityBoundaryFingerprint
+    ) {
+      return {
+        ok: false,
+        errorCode: "bubblewrap_boundary_fingerprint_mismatch",
+        reason: "qualification evidence is bound to a different security boundary",
+      };
+    }
+    if (
+      typeof evidence.fixtureProbeManifestDigest !== "string" ||
+      evidence.fixtureProbeManifestDigest !== context.fixtureProbeManifestDigest
+    ) {
+      return {
+        ok: false,
+        errorCode: "bubblewrap_probe_manifest_mismatch",
+        reason: "qualification evidence is bound to a different probe manifest",
       };
     }
     if (evidence.profileFingerprint !== BUBBLEWRAP_PROFILE_FINGERPRINT) {
@@ -421,6 +669,9 @@ export class BubblewrapExecutionIsolation implements ExecutionIsolationProvider 
         reason: `expected ${BUBBLEWRAP_ISOLATION_PROFILE.providerExecutable}, got ${evidence.providerExecutable}`,
       };
     }
+    const actualNamespaces = Array.isArray(evidence.requiredHostNamespaces)
+      ? evidence.requiredHostNamespaces
+      : [];
     if (
       !Array.isArray(evidence.requiredHostNamespaces) ||
       evidence.requiredHostNamespaces.length !==
@@ -433,7 +684,21 @@ export class BubblewrapExecutionIsolation implements ExecutionIsolationProvider 
       return {
         ok: false,
         errorCode: "bubblewrap_required_namespaces_mismatch",
-        reason: `expected ${BUBBLEWRAP_ISOLATION_PROFILE.requiredHostNamespaces.join(",")}, got ${evidence.requiredHostNamespaces.join(",")}`,
+        reason: `expected ${BUBBLEWRAP_ISOLATION_PROFILE.requiredHostNamespaces.join(",")}, got ${actualNamespaces.join(",")}`,
+      };
+    }
+    if (!sameTuple(evidence.explicitUnshareNamespaces, BUBBLEWRAP_ISOLATION_PROFILE.explicitUnshareNamespaces)) {
+      return {
+        ok: false,
+        errorCode: "bubblewrap_explicit_unshare_namespaces_mismatch",
+        reason: "qualification evidence explicit unshare namespaces do not match",
+      };
+    }
+    if (evidence.lifecycleProfileId !== BUBBLEWRAP_ISOLATION_PROFILE.lifecycleProfileId) {
+      return {
+        ok: false,
+        errorCode: "bubblewrap_lifecycle_profile_mismatch",
+        reason: "qualification evidence lifecycle profile does not match",
       };
     }
     if (evidence.isolationProfileId !== BUBBLEWRAP_ISOLATION_PROFILE.profileId) {
@@ -471,6 +736,40 @@ export class BubblewrapExecutionIsolation implements ExecutionIsolationProvider 
         errorCode: "bubblewrap_provider_version_mismatch",
         reason: `expected ${BUBBLEWRAP_PROVIDER_VERSION_IDENTITY}, got ${version.identity}`,
       };
+    }
+    const digest = this.providerDigest();
+    if (digest.kind !== "ok") {
+      return {
+        ok: false,
+        errorCode: "bubblewrap_provider_digest_unavailable",
+        reason: digest.reason,
+      };
+    }
+    if (
+      typeof evidence.providerBinaryDigest !== "string" ||
+      evidence.providerBinaryDigest.trim().length === 0
+    ) {
+      return {
+        ok: false,
+        errorCode: "bubblewrap_provider_digest_missing",
+        reason: "physical qualification must bind the provider binary digest",
+      };
+    }
+    if (digest.digest !== evidence.providerBinaryDigest) {
+      return {
+        ok: false,
+        errorCode: "bubblewrap_provider_digest_mismatch",
+        reason: "current provider binary digest differs from qualified evidence",
+      };
+    }
+    for (const probeId of BUBBLEWRAP_REQUIRED_PROBE_IDS) {
+      if (!hasPassingProbe(evidence, probeId)) {
+        return {
+          ok: false,
+          errorCode: "bubblewrap_required_probe_missing",
+          reason: `required qualification probe did not pass: ${probeId}`,
+        };
+      }
     }
     return null;
   }
@@ -520,15 +819,15 @@ export class BubblewrapExecutionIsolation implements ExecutionIsolationProvider 
       },
       filesystem_view: {
         status: "partial",
-        notes: ["fresh mount namespace with explicit read-only bind whitelist; bind list not Mint-qualified"],
+        notes: ["fresh mount namespace with the exact qualified bind whitelist"],
       },
       control_plane_invisible: {
-        status: "unproven",
-        notes: ["control-plane paths excluded from binds by contract; not qualified under host security context"],
+        status: "provided",
+        notes: ["physical filesystem-control-plane probe passed under the bound security context"],
       },
       broker_socket_invisible: {
-        status: "unproven",
-        notes: ["/run/ashley not bound into the sandbox; not qualified under host security context"],
+        status: "provided",
+        notes: ["physical broker-socket absence probe passed under the bound security context"],
       },
     };
   }
@@ -537,18 +836,18 @@ export class BubblewrapExecutionIsolation implements ExecutionIsolationProvider 
     return supportedLevelFromEvidence(this.evidence());
   }
 
-  async prepare(request: FakeRunRequest): Promise<ExecutionIsolationEnforcement> {
-    const failure = this.binaryFailure();
-    if (failure !== null) return failure;
-    const qualification = this.qualificationFailure();
-    if (qualification !== null) return qualification;
+  private prepareRequest(request: FakeRunRequest): ExecutionIsolationEnforcement {
     const binds = [...this.binds, ...(request.isolationBinds ?? [])];
+    const childEnv = {
+      ...request.env,
+      HOME: BUBBLEWRAP_CHILD_HOME_PATH,
+    };
     const plan = buildBubblewrapArgv({
       bubblewrapPath: this.bubblewrapPath,
       argv: request.argv,
-      cwd: request.cwd,
-      env: request.env,
-      homeDir: request.env.HOME,
+      cwd: request.isolationCwd ?? request.cwd,
+      env: childEnv,
+      homeDir: BUBBLEWRAP_CHILD_HOME_PATH,
       binds,
       workspaceRoots: [
         ...this.workspaceRoots,
@@ -558,11 +857,30 @@ export class BubblewrapExecutionIsolation implements ExecutionIsolationProvider 
     if (!plan.ok) return plan;
     return {
       ok: true,
-      request: { ...request, argv: plan.argv },
+      request: { ...request, env: childEnv, argv: plan.argv },
       isolation: this.evidence(),
     };
   }
+  async prepare(request: FakeRunRequest): Promise<ExecutionIsolationEnforcement> {
+    const failure = this.binaryFailure();
+    if (failure !== null) return failure;
+    const qualification = this.qualificationFailure();
+    if (qualification !== null) return qualification;
+    return this.prepareRequest(request);
+  }
 
+  /**
+   * Operator-only preparation path used by the physical qualification
+   * harness. It exercises the same argv builder before evidence exists;
+   * production prepare() remains qualification-gated.
+   */
+  async prepareForOperatorQualification(
+    request: FakeRunRequest,
+  ): Promise<ExecutionIsolationEnforcement> {
+    const failure = this.binaryFailure();
+    if (failure !== null) return failure;
+    return this.prepareRequest(request);
+  }
   cancel(taskId: string): boolean {
     return this.processRunner.cancel?.(taskId) ?? false;
   }

@@ -507,6 +507,7 @@ export class FixedRecipeExecutionService {
         taskId: request.capabilityUseId,
         argv: [resolvedExecutable.executable, ...plan.plan.argv.slice(1)],
         cwd: nativeCwd,
+        isolationCwd: treeRoot === null ? undefined : "/workspace",
         env: this.buildEnvironment(plan.plan.envAllowlist, homeDir),
         wallMs: effectiveLimits.wallMs,
         maxProcesses: effectiveLimits.maxProcesses,
@@ -519,7 +520,7 @@ export class FixedRecipeExecutionService {
           })),
           ...(treeRoot === null
             ? []
-            : [{ src: treeRoot, dest: treeRoot, writable: true }]),
+            : [{ src: treeRoot, dest: "/workspace", writable: true }]),
         ],
         isolationWorkspaceRoots: treeRoot === null ? [] : [treeRoot],
       };

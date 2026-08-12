@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   BUBBLEWRAP_PROFILE_FINGERPRINT,
   BUBBLEWRAP_PROVIDER_VERSION_IDENTITY,
+  BUBBLEWRAP_REQUIRED_PROBE_IDS,
   DEFAULT_BUBBLEWRAP_PATH,
   BubblewrapExecutionIsolation,
   selectProductionExecutionIsolation,
   type BubblewrapQualification,
+  type BubblewrapQualificationContext,
   type BubblewrapQualificationEvidence,
 } from "../index.js";
 import { ScriptedProcessRunner } from "../process/fake-runner.js";
@@ -32,27 +34,59 @@ const baseRequest = {
 
 
 
+const TEST_PROVIDER_DIGEST = "b".repeat(64);
+const QUALIFICATION_CONTEXT: BubblewrapQualificationContext = {
+  sourceCommit: "02c-test-source",
+  hostIdentity: {
+    osRelease: "linuxmint 22.3",
+    kernelRelease: "6.17.0-29-generic",
+    architecture: "x86_64",
+    systemdVersion: "systemd 255.4",
+    cgroupMode: "cgroup2fs",
+  },
+  effectiveSecurityBoundaryFingerprint: "boundary-test",
+  fixtureProbeManifestDigest: "manifest-test",
+};
+
 function makeEvidence(
   overrides: Partial<BubblewrapQualificationEvidence> = {},
 ): BubblewrapQualificationEvidence {
   return {
     evidenceId: "synthetic-host-qualification-r2",
+    sourceCommit: QUALIFICATION_CONTEXT.sourceCommit,
     profileFingerprint: PROFILE_FINGERPRINT,
     providerKind: "bubblewrap",
     providerExecutable: DEFAULT_BUBBLEWRAP_PATH,
     providerVersionIdentity: BUBBLEWRAP_PROVIDER_VERSION_IDENTITY,
     requiredHostNamespaces: REQUIRED_HOST_NAMESPACES,
+    explicitUnshareNamespaces: ["pid", "net", "uts", "ipc"],
+    lifecycleProfileId: "die-with-parent,new-session",
     isolationProfileId: "bubblewrap-v1",
     mountProfileId: "whitelist-v1",
+    providerBinaryDigest: TEST_PROVIDER_DIGEST,
+    hostIdentity: QUALIFICATION_CONTEXT.hostIdentity,
+    effectiveSecurityBoundaryFingerprint:
+      QUALIFICATION_CONTEXT.effectiveSecurityBoundaryFingerprint,
+    fixtureProbeManifestDigest: QUALIFICATION_CONTEXT.fixtureProbeManifestDigest,
+    requiredProbeResults: BUBBLEWRAP_REQUIRED_PROBE_IDS.map((probeId) => ({
+      probeId,
+      status: "pass" as const,
+      resultDigest: "probe-result",
+    })),
     ...overrides,
-  };
+  } as BubblewrapQualificationEvidence;
 }
 
 function makeMalformedEvidence(overrides: Record<string, unknown>): BubblewrapQualificationEvidence {
   return { ...makeEvidence(), ...overrides } as unknown as BubblewrapQualificationEvidence;
 }
 
-function makeProvider(qualification: BubblewrapQualification) {
+function makeProvider(
+  qualification: BubblewrapQualification,
+  qualificationContext: BubblewrapQualificationContext | undefined =
+    QUALIFICATION_CONTEXT,
+  omitContext = false,
+) {
   return new BubblewrapExecutionIsolation({
     processRunner: new ScriptedProcessRunner(),
     platform: "linux",
@@ -64,6 +98,8 @@ function makeProvider(qualification: BubblewrapQualification) {
       kind: "ok" as const,
       identity: BUBBLEWRAP_PROVIDER_VERSION_IDENTITY,
     }),
+    probeProviderBinaryDigest: () => ({ kind: "ok", digest: TEST_PROVIDER_DIGEST }),
+    qualificationContext: omitContext ? undefined : qualificationContext,
     binds: [],
     qualification,
   });
@@ -83,6 +119,8 @@ function selectWithoutQualification() {
       kind: "ok" as const,
       identity: BUBBLEWRAP_PROVIDER_VERSION_IDENTITY,
     }),
+    probeProviderBinaryDigest: () => ({ kind: "ok", digest: TEST_PROVIDER_DIGEST }),
+    qualificationContext: QUALIFICATION_CONTEXT,
     taskInput: { qualification: { status: "qualified" } },
     modelOutput: { profileFingerprint: PROFILE_FINGERPRINT },
     semanticInput: { evidenceId: "synthetic-host-qualification-r2" },
@@ -124,6 +162,59 @@ describe("Bubblewrap R2 qualification contract", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.errorCode).toBe("bubblewrap_qualification_evidence_invalid");
+    }
+  });
+  it("refuses qualified evidence when the host qualification context is missing", async () => {
+    const provider = makeProvider(
+      { status: "qualified", evidence: makeEvidence() },
+      undefined,
+      true,
+    );
+    const result = await provider.prepare(baseRequest);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errorCode).toBe("bubblewrap_qualification_context_missing");
+    }
+  });
+  it("refuses evidence bound to a different security boundary", async () => {
+    const provider = makeProvider({
+      status: "qualified",
+      evidence: makeEvidence({
+        effectiveSecurityBoundaryFingerprint: "other-boundary",
+      }),
+    });
+    const result = await provider.prepare(baseRequest);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errorCode).toBe(
+        "bubblewrap_boundary_fingerprint_mismatch",
+      );
+    }
+  });
+  it("refuses a provider binary digest that does not match the current binary", async () => {
+    const provider = makeProvider({
+      status: "qualified",
+      evidence: makeEvidence({ providerBinaryDigest: "e".repeat(64) }),
+    });
+    const result = await provider.prepare(baseRequest);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errorCode).toBe("bubblewrap_provider_digest_mismatch");
+    }
+  });
+  it("refuses evidence missing a required physical probe", async () => {
+    const provider = makeProvider({
+      status: "qualified",
+      evidence: makeEvidence({
+        requiredProbeResults: makeEvidence().requiredProbeResults.filter(
+          (probe) => probe.probeId !== "network",
+        ),
+      }),
+    });
+    const result = await provider.prepare(baseRequest);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errorCode).toBe("bubblewrap_required_probe_missing");
     }
   });
 

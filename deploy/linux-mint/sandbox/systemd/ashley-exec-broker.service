@@ -22,12 +22,10 @@ ProtectSystem=strict
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
-# R5B: allow user + network namespace creation only. The unshare
-# isolation mechanism (networkMode=none) needs CLONE_NEWUSER|CLONE_NEWNET;
-# every other namespace class (mount, pid, uts, ipc, cgroup, time) stays
-# blocked. The broker refuses to start unless its boot-time active probe
-# proves the mechanism works under this exact context.
-RestrictNamespaces=user net
+# 02C: the physical Bubblewrap profile requires the full host namespace
+# prerequisite set. Bubblewrap explicitly unshares pid, net, uts, and ipc;
+# user and mount remain host prerequisites for the provider boundary.
+RestrictNamespaces=user mount pid net uts ipc
 RestrictSUIDSGID=true
 LockPersonality=true
 CapabilityBoundingSet=

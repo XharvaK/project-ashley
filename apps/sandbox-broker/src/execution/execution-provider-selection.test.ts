@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   BUBBLEWRAP_PROFILE_FINGERPRINT,
   BUBBLEWRAP_PROVIDER_VERSION_IDENTITY,
+  BUBBLEWRAP_REQUIRED_PROBE_IDS,
   DEFAULT_BUBBLEWRAP_PATH,
   selectProductionExecutionIsolation,
   type BubblewrapQualification,
+  type BubblewrapQualificationContext,
 } from "../index.js";
 import type { FakeRunRequest } from "../process/fake-runner.js";
 import { ScriptedProcessRunner } from "../process/fake-runner.js";
@@ -24,18 +26,45 @@ const probeBinary = () => ({
   resolvedPath: DEFAULT_BUBBLEWRAP_PATH,
 });
 
+const TEST_PROVIDER_DIGEST = "c".repeat(64);
+const QUALIFICATION_CONTEXT: BubblewrapQualificationContext = {
+  sourceCommit: "02c-selection-source",
+  hostIdentity: {
+    osRelease: "linuxmint 22.3",
+    kernelRelease: "6.17.0-29-generic",
+    architecture: "x86_64",
+    systemdVersion: "systemd 255.4",
+    cgroupMode: "cgroup2fs",
+  },
+  effectiveSecurityBoundaryFingerprint: "selection-boundary",
+  fixtureProbeManifestDigest: "selection-manifest",
+};
+
 function validQualification(): BubblewrapQualification {
   return {
     status: "qualified",
     evidence: {
       evidenceId: "bubblewrap-test-host-qualification-r2",
+      sourceCommit: QUALIFICATION_CONTEXT.sourceCommit,
       profileFingerprint: BUBBLEWRAP_PROFILE_FINGERPRINT,
       providerKind: "bubblewrap",
       providerExecutable: DEFAULT_BUBBLEWRAP_PATH,
+      explicitUnshareNamespaces: ["pid", "net", "uts", "ipc"],
+      lifecycleProfileId: "die-with-parent,new-session",
       providerVersionIdentity: BUBBLEWRAP_PROVIDER_VERSION_IDENTITY,
       requiredHostNamespaces: ["user", "mount", "pid", "net", "uts", "ipc"],
       isolationProfileId: "bubblewrap-v1",
       mountProfileId: "whitelist-v1",
+      providerBinaryDigest: TEST_PROVIDER_DIGEST,
+      hostIdentity: QUALIFICATION_CONTEXT.hostIdentity,
+      effectiveSecurityBoundaryFingerprint:
+        QUALIFICATION_CONTEXT.effectiveSecurityBoundaryFingerprint,
+      fixtureProbeManifestDigest: QUALIFICATION_CONTEXT.fixtureProbeManifestDigest,
+      requiredProbeResults: BUBBLEWRAP_REQUIRED_PROBE_IDS.map((probeId) => ({
+        probeId,
+        status: "pass" as const,
+        resultDigest: "selection-probe",
+      })),
     },
   };
 }
@@ -51,6 +80,8 @@ function select(options: {
     qualification: options.qualification,
     platform: "linux",
     processRunner: new ScriptedProcessRunner(),
+    probeProviderBinaryDigest: () => ({ kind: "ok", digest: TEST_PROVIDER_DIGEST }),
+    qualificationContext: QUALIFICATION_CONTEXT,
     probeBinary,
     probeProviderVersion: () => ({
       kind: "ok" as const,

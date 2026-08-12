@@ -22,6 +22,7 @@ export interface FakeRunRequest {
   taskId: string;
   argv: string[];
   cwd: string;
+  isolationCwd?: string;
   env: Record<string, string>;
   wallMs: number;
   maxProcesses: number;
