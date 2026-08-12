@@ -45,6 +45,8 @@ ISOLATION_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/execution/bubblewrap-exe
 EXECUTION_ISOLATION_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/execution/execution-isolation.js"
 REAL_RUNNER_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/process/real-runner.js"
 CLI_RUNTIME="$RUNTIME_ROOT/execution/bubblewrap-qualification-cli.js"
+TOOLCHAIN_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/execution/qualification-toolchain.js"
+TOOLCHAIN_RUNTIME="$RUNTIME_ROOT/execution/qualification-toolchain.js"
 BOUNDED_OUTPUT_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/execution/bounded-output.js"
 CRYPTO_TYPES_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/crypto/types.js"
 BOUNDED_OUTPUT_RUNTIME="$RUNTIME_ROOT/execution/bounded-output.js"
@@ -179,6 +181,7 @@ npm --prefix "$SOURCE_ROOT/apps/sandbox-broker" run build >/dev/null || die sour
 require_path "$SOCKET_SOURCE"
 require_path "$PROBE_SOURCE"
 require_path "$CLI_SOURCE"
+require_path "$TOOLCHAIN_SOURCE"
 require_path "$POLICY_PREFLIGHT_SOURCE"
 require_path "$SERVICE_STABILITY_SOURCE"
 require_path "$BOUNDED_OUTPUT_SOURCE"
@@ -484,6 +487,7 @@ sudo -n install -d -o ashley-sandbox -g ashley-sandbox -m 0750 \
   "$RUNTIME_ROOT/process" "$RUNTIME_ROOT/crypto" "$EVIDENCE_DIR" "$FIXTURE_ROOT" "$WORKSPACE_ROOT"
 sudo -n install -o root -g ashley-sandbox -m 0550 "$PROBE_SOURCE" "$PROBE_RUNTIME"
 sudo -n install -o root -g ashley-sandbox -m 0550 "$CLI_SOURCE" "$RUNTIME_ROOT/execution/bubblewrap-qualification-cli.js"
+sudo -n install -o root -g ashley-sandbox -m 0550 "$TOOLCHAIN_SOURCE" "$RUNTIME_ROOT/execution/qualification-toolchain.js"
 sudo -n install -o root -g ashley-sandbox -m 0550 "$RUNNER_SOURCE" "$RUNTIME_ROOT/execution/bubblewrap-qualification-runner.js"
 sudo -n install -o root -g ashley-sandbox -m 0550 "$ISOLATION_SOURCE" "$RUNTIME_ROOT/execution/bubblewrap-execution-isolation.js"
 sudo -n install -o root -g ashley-sandbox -m 0550 "$EXECUTION_ISOLATION_SOURCE" "$RUNTIME_ROOT/execution/execution-isolation.js"
@@ -505,6 +509,7 @@ verify_runtime_import_closure() {
     "$NODE_BIN" \
     --input-type=module \
     --eval 'for (const modulePath of process.argv.slice(1)) await import(modulePath)' \
+    "$RUNTIME_ROOT/execution/qualification-toolchain.js" \
     "$RUNTIME_ROOT/execution/bubblewrap-qualification-runner.js" \
     "$RUNTIME_ROOT/execution/bubblewrap-execution-isolation.js" \
     "$RUNTIME_ROOT/execution/execution-isolation.js" \
@@ -512,6 +517,25 @@ verify_runtime_import_closure() {
     "$RUNTIME_ROOT/execution/bounded-output.js" \
     "$RUNTIME_ROOT/crypto/types.js" >/dev/null 2>&1 \
     || die qualification_runtime_import_closure_invalid
+}
+validate_qualification_toolchain() {
+  local output
+  local status
+  set +e
+  output="$(sudo -n -u ashley-sandbox -- /usr/bin/env -i \
+    HOME=/home/ashley \
+    PATH=/usr/bin \
+    "$NODE_BIN" "$CLI_RUNTIME" --validate-toolchain 2>&1)"
+  status=$?
+  set -e
+  if [[ "$status" -ne 0 ]]; then
+    if [[ "$output" =~ (qualification_probe_toolchain_invalid:[a-z0-9_-]+) ]]; then
+      die "${BASH_REMATCH[1]}"
+    fi
+    die qualification_probe_toolchain_preflight_failed
+  fi
+  [[ "$output" == *'"status": "valid"'* ]] \
+    || die qualification_probe_toolchain_preflight_result_invalid
 }
 INVENTORY_JSON="$(
   for inventory_path in \
@@ -589,6 +613,9 @@ FIXTURE_SHA="$(sha256_path "$FIXTURE_ROOT/fixture.txt")"
   --arg cli_source "$CLI_SOURCE" \
   --arg cli_runtime "$RUNTIME_ROOT/execution/bubblewrap-qualification-cli.js" \
   --arg cli_sha "$(sha256_path "$CLI_SOURCE")" \
+  --arg toolchain_source "$TOOLCHAIN_SOURCE" \
+  --arg toolchain_runtime "$TOOLCHAIN_RUNTIME" \
+  --arg toolchain_sha "$(sha256_path "$TOOLCHAIN_SOURCE")" \
   --arg runner_source "$RUNNER_SOURCE" \
   --arg runner_runtime "$RUNTIME_ROOT/execution/bubblewrap-qualification-runner.js" \
   --arg runner_sha "$(sha256_path "$RUNNER_SOURCE")" \
@@ -626,6 +653,7 @@ FIXTURE_SHA="$(sha256_path "$FIXTURE_ROOT/fixture.txt")"
     artifacts: [
       {name: "probe", sourcePath: $probe_source, runtimePath: $probe_runtime, sha256: $probe_sha, owner: "root:ashley-sandbox", mode: "0550"},
       {name: "qualification-cli", sourcePath: $cli_source, runtimePath: $cli_runtime, sha256: $cli_sha, owner: "root:ashley-sandbox", mode: "0550"},
+      {name: "qualification-toolchain", sourcePath: $toolchain_source, runtimePath: $toolchain_runtime, sha256: $toolchain_sha, owner: "root:ashley-sandbox", mode: "0550"},
       {name: "qualification-runner", sourcePath: $runner_source, runtimePath: $runner_runtime, sha256: $runner_sha, owner: "root:ashley-sandbox", mode: "0550"},
       {name: "bubblewrap-isolation", sourcePath: $isolation_source, runtimePath: $isolation_runtime, sha256: $isolation_sha, owner: "root:ashley-sandbox", mode: "0550"},
       {name: "execution-isolation", sourcePath: $execution_isolation_source, runtimePath: $execution_isolation_runtime, sha256: $execution_isolation_sha, owner: "root:ashley-sandbox", mode: "0550"},
@@ -638,6 +666,7 @@ sudo -n chown root:ashley-sandbox "$FIXTURE_MANIFEST_PATH"
 sudo -n chmod 0440 "$FIXTURE_MANIFEST_PATH"
 FIXTURE_MANIFEST_DIGEST="$(sha256_path "$FIXTURE_MANIFEST_PATH")"
 verify_runtime_import_closure
+validate_qualification_toolchain
 sudo -n chown -R ashley-sandbox:ashley-sandbox "$WORKSPACE_ROOT"
 sudo -n chmod 0750 "$WORKSPACE_ROOT"
 sudo -n /usr/bin/systemd-run \

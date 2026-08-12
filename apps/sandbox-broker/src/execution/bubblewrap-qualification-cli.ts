@@ -7,6 +7,10 @@ import {
   runBubblewrapQualification,
   runBubblewrapQualificationCanary,
 } from "./bubblewrap-qualification-runner.js";
+import {
+  BUBBLEWRAP_QUALIFICATION_TOOL_CONTRACT,
+  validateQualificationToolchain,
+} from "./qualification-toolchain.js";
 import type { BubblewrapHostIdentity } from "./bubblewrap-execution-isolation.js";
 function argument(name: string): string | undefined {
   const index = process.argv.indexOf(name);
@@ -59,6 +63,16 @@ function requireAbsolute(name: string): string {
   return value;
 }
 async function main(): Promise<void> {
+  if (process.argv.includes("--validate-toolchain")) {
+    const validation = validateQualificationToolchain(
+      BUBBLEWRAP_QUALIFICATION_TOOL_CONTRACT,
+    );
+    console.log(JSON.stringify(validation, null, 2));
+    if (validation.status !== "valid") {
+      process.exitCode = 1;
+    }
+    return;
+  }
   const sourceCommit = requiredArgument("--source-commit");
   const fixtureRoot = requireAbsolute("--fixture-root");
   const workspaceRoot = requireAbsolute("--workspace-root");

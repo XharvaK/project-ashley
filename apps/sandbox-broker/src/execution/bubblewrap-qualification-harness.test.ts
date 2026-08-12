@@ -327,6 +327,72 @@ describe("02C qualification helper source contract", () => {
     );
     expect(qualificationHelper).not.toContain("command -v node");
   });
+  it("gates the staged qualification CLI with pinned Node before transient launch", () => {
+    expect(qualificationHelper).toContain(
+      'sudo -n -u ashley-sandbox -- /usr/bin/env -i',
+    );
+    expect(qualificationHelper).toContain('"$NODE_BIN" "$CLI_RUNTIME" --validate-toolchain');
+    const toolchainStart = qualificationHelper.indexOf(
+      "validate_qualification_toolchain() {",
+    );
+    const toolchainSource = qualificationHelper.slice(
+      toolchainStart,
+      qualificationHelper.indexOf("\nINVENTORY_JSON=", toolchainStart),
+    );
+    expect(toolchainStart).toBeGreaterThanOrEqual(0);
+    expect(toolchainSource).not.toContain("command -v");
+    expect(toolchainSource).not.toContain("$PATH");
+    expect(toolchainSource).not.toContain('"/usr/bin/node"');
+    expect(toolchainSource).toContain(
+      "qualification_probe_toolchain_invalid:[a-z0-9_-]+",
+    );
+    expect(qualificationHelper).toContain(
+      'die "${BASH_REMATCH[1]}"',
+    );
+    expect(qualificationHelper).toContain(
+      "die qualification_probe_toolchain_preflight_failed",
+    );
+    const invocationIndex = qualificationHelper.lastIndexOf(
+      "\nvalidate_qualification_toolchain\n",
+    );
+    expect(invocationIndex).toBeGreaterThan(
+      qualificationHelper.lastIndexOf("\nverify_runtime_import_closure\n"),
+    );
+    expect(invocationIndex).toBeLessThan(
+      qualificationHelper.indexOf("sudo -n /usr/bin/systemd-run"),
+    );
+    expect(qualificationHelper).toContain(
+      '"$NODE_BIN" "$CLI_RUNTIME" \\',
+    );
+    expect(qualificationHelper).toContain(
+      '--source-commit "$EXPECTED_SOURCE_COMMIT"',
+    );
+    expect(qualificationHelper).toContain(
+      'TOOLCHAIN_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/execution/qualification-toolchain.js"',
+    );
+    expect(qualificationHelper).toContain(
+      'sudo -n install -o root -g ashley-sandbox -m 0550 "$TOOLCHAIN_SOURCE" "$RUNTIME_ROOT/execution/qualification-toolchain.js"',
+    );
+    expect(qualificationHelper).toContain(
+      '"$RUNTIME_ROOT/execution/bubblewrap-qualification-cli.js"',
+    );
+    expect(qualificationHelper).toContain(
+      '"$RUNTIME_ROOT/execution/qualification-toolchain.js"',
+    );
+  });
+  it("branches to deterministic toolchain validation before normal CLI arguments", () => {
+    expect(qualificationCli).toContain("BUBBLEWRAP_QUALIFICATION_TOOL_CONTRACT,");
+    expect(qualificationCli).toContain("validateQualificationToolchain,");
+    expect(qualificationCli).toContain(
+      'if (process.argv.includes("--validate-toolchain")) {',
+    );
+    expect(qualificationCli).toContain("validateQualificationToolchain(");
+    expect(qualificationCli).toContain("console.log(JSON.stringify(validation, null, 2));");
+    expect(qualificationCli).toContain("process.exitCode = 1;");
+    expect(qualificationCli.indexOf('if (process.argv.includes("--validate-toolchain")) {')).toBeLessThan(
+      qualificationCli.indexOf('const sourceCommit = requiredArgument("--source-commit");'),
+    );
+  });
   it("classifies transient startup failures and rejects incomplete cgroup payloads", () => {
     for (const property of ["Result", "ExecMainCode", "ExecMainStatus"]) {
       expect(qualificationHelper).toContain(
@@ -944,6 +1010,12 @@ describe("02K complete qualification runtime import closure", () => {
     expect(importClosureSource).toContain('"$NODE_BIN"');
     expect(importClosureSource).toContain("--input-type=module");
     expect(importClosureSource).toContain("--eval");
+    expect(importClosureSource).not.toContain(
+      '"$RUNTIME_ROOT/execution/bubblewrap-qualification-cli.js"',
+    );
+    expect(importClosureSource).toContain(
+      '"$RUNTIME_ROOT/execution/qualification-toolchain.js"',
+    );
     for (const runtimeModule of [
       '"$RUNTIME_ROOT/execution/bubblewrap-qualification-runner.js"',
       '"$RUNTIME_ROOT/execution/bubblewrap-execution-isolation.js"',
