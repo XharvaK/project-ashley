@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,7 +21,7 @@ import {
 } from "./bubblewrap-execution-isolation.js";
 import {
   createDefaultQualificationManifest,
-  digestQualificationManifest,
+  digestQualificationManifestBinding,
   digestProbeOutput,
   runBubblewrapQualificationCanary,
   runBubblewrapQualification,
@@ -75,7 +76,106 @@ function options(
     processRunner: new ScriptedProcessRunner(),
   };
 }
+
+function expectedExternalBinding(
+  manifest: BubblewrapQualificationManifest,
+  fixtureProbeManifestDigest: string,
+): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify({ fixtureProbeManifestDigest, manifest }),
+      "utf8",
+    )
+    .digest("hex");
+}
+
+function completeQualificationRunner(): ProcessRunner {
+  let cancellationResolve: (() => void) | undefined;
+  return {
+    async run(request: FakeRunRequest): Promise<FakeRunResult> {
+      if (request.taskId.endsWith("lifecycle-timeout")) {
+        return {
+          exitCode: 143,
+          stdout: "",
+          stderr: "",
+          truncated: false,
+          terminalReason: "timeout",
+        };
+      }
+      if (request.taskId.endsWith("lifecycle-cancellation")) {
+        return new Promise((resolve) => {
+          cancellationResolve = () =>
+            resolve({
+              exitCode: 143,
+              stdout: "",
+              stderr: "",
+              truncated: false,
+              terminalReason: "cancelled",
+            });
+        });
+      }
+      if (request.taskId.endsWith("lifecycle-output_overflow")) {
+        return {
+          exitCode: 143,
+          stdout: "",
+          stderr: "",
+          truncated: true,
+          terminalReason: "truncated",
+        };
+      }
+      return {
+        exitCode: 0,
+        stdout: "ok",
+        stderr: "",
+        truncated: false,
+        terminalReason: "success",
+      };
+    },
+    cancel(taskId: string) {
+      if (!taskId.endsWith("lifecycle-cancellation")) return false;
+      cancellationResolve?.();
+      return true;
+    },
+  };
+}
 describe("Bubblewrap physical qualification runner", () => {
+  it("binds the external fixture hash to the exact manifest, including reviewed tools", async () => {
+    const fixtureProbeManifestDigest = "f".repeat(64);
+    const qualificationManifest = manifest();
+    const result = await runBubblewrapQualification({
+      ...options(qualificationManifest),
+      fixtureProbeManifestDigest,
+      processRunner: completeQualificationRunner(),
+    });
+    expect(result.status).toBe("qualified");
+    if (result.status !== "qualified") return;
+    expect(result.evidence.fixtureProbeManifestDigest).toBe(
+      expectedExternalBinding(qualificationManifest, fixtureProbeManifestDigest),
+    );
+    expect(
+      digestQualificationManifestBinding(
+        qualificationManifest,
+        fixtureProbeManifestDigest,
+      ),
+    ).toBe(expectedExternalBinding(qualificationManifest, fixtureProbeManifestDigest));
+    expect(result.evidence.fixtureProbeManifestDigest).not.toBe(
+      fixtureProbeManifestDigest,
+    );
+    const changedManifest = {
+      ...qualificationManifest,
+      tools: qualificationManifest.tools.slice(0, -1),
+    } as BubblewrapQualificationManifest;
+    expect(
+      expectedExternalBinding(changedManifest, fixtureProbeManifestDigest),
+    ).not.toBe(result.evidence.fixtureProbeManifestDigest);
+    expect(
+      digestQualificationManifestBinding(
+        changedManifest,
+        fixtureProbeManifestDigest,
+      ),
+    ).not.toBe(result.evidence.fixtureProbeManifestDigest);
+  });
+
   it.each([
     ["missing", [] as const, "dash"],
     [
@@ -214,8 +314,10 @@ describe("Bubblewrap physical qualification runner", () => {
     };
     try {
       const qualificationManifest = manifest();
+      const fixtureProbeManifestDigest = "f".repeat(64);
       const qualification = await runBubblewrapQualification({
         ...options(qualificationManifest),
+        fixtureProbeManifestDigest,
         processRunner,
         evidencePath,
       });
@@ -224,7 +326,7 @@ describe("Bubblewrap physical qualification runner", () => {
       stages.push("evidence");
       expect(qualification.evidence.sourceCommit).toBe(SOURCE_COMMIT);
       expect(qualification.evidence.fixtureProbeManifestDigest).toBe(
-        digestQualificationManifest(qualificationManifest),
+        expectedExternalBinding(qualificationManifest, fixtureProbeManifestDigest),
       );
       expect(JSON.parse(readFileSync(evidencePath, "utf8")).evidence.sourceCommit).toBe(SOURCE_COMMIT);
 
@@ -236,7 +338,7 @@ describe("Bubblewrap physical qualification runner", () => {
           sourceCommit: SOURCE_COMMIT,
           hostIdentity: HOST_IDENTITY,
           effectiveSecurityBoundaryFingerprint: "runner-boundary",
-          fixtureProbeManifestDigest: digestQualificationManifest(qualificationManifest),
+          fixtureProbeManifestDigest,
         },
         workspaceRoot: "/var/lib/ashley-sandbox/qualification/workspace",
         processRunner,
@@ -249,7 +351,9 @@ describe("Bubblewrap physical qualification runner", () => {
       if (canary.status !== "qualified") return;
       stages.push("canary");
       expect(canary.receipt.sourceCommit).toBe(SOURCE_COMMIT);
-      expect(canary.receipt.fixtureProbeManifestDigest).toBe(digestQualificationManifest(qualificationManifest));
+      expect(canary.receipt.fixtureProbeManifestDigest).toBe(
+        expectedExternalBinding(qualificationManifest, fixtureProbeManifestDigest),
+      );
       expect(canary.receipt.cleanup.runnerReportsNoActiveChild).toBe(true);
       expect(JSON.parse(readFileSync(receiptPath, "utf8")).sourceCommit).toBe(SOURCE_COMMIT);
       expect(stages).toEqual([
@@ -290,9 +394,11 @@ describe("Bubblewrap physical qualification runner", () => {
   it("runs every hostile probe before the positive probe and binds complete evidence", async () => {
     const seen: string[] = [];
     let cancellationResolve: (() => void) | undefined;
+    const qualificationManifest = manifest();
+    const fixtureProbeManifestDigest = "f".repeat(64);
     const result = await runBubblewrapQualification({
-      ...options(),
-      fixtureProbeManifestDigest: "f".repeat(64),
+      ...options(qualificationManifest),
+      fixtureProbeManifestDigest,
       processRunner: {
         async run(request) {
           seen.push(request.taskId);
@@ -355,7 +461,9 @@ describe("Bubblewrap physical qualification runner", () => {
     );
     expect(result.evidence.profileFingerprint).toBe(BUBBLEWRAP_PROFILE_FINGERPRINT);
     expect(result.evidence.providerBinaryDigest).toBe(PROVIDER_DIGEST);
-    expect(result.evidence.fixtureProbeManifestDigest).toBe("f".repeat(64));
+    expect(result.evidence.fixtureProbeManifestDigest).toBe(
+      expectedExternalBinding(qualificationManifest, fixtureProbeManifestDigest),
+    );
     expect(result.evidence.requiredProbeResults.map((probe) => probe.probeId)).toEqual(
       BUBBLEWRAP_REQUIRED_PROBE_IDS,
     );
@@ -473,6 +581,8 @@ describe("Bubblewrap physical qualification runner", () => {
     });
   });
   it("runs the trusted Level-1 canary only after evidence matcher acceptance", async () => {
+    const canaryManifest = manifest();
+    const fixtureProbeManifestDigest = "f".repeat(64);
     const qualificationEvidence: BubblewrapQualificationEvidence = {
       evidenceId: "canary-qualified-evidence",
       sourceCommit: SOURCE_COMMIT,
@@ -488,7 +598,10 @@ describe("Bubblewrap physical qualification runner", () => {
       providerBinaryDigest: PROVIDER_DIGEST,
       hostIdentity: HOST_IDENTITY,
       effectiveSecurityBoundaryFingerprint: "runner-boundary",
-      fixtureProbeManifestDigest: "f".repeat(64),
+      fixtureProbeManifestDigest: expectedExternalBinding(
+        canaryManifest,
+        fixtureProbeManifestDigest,
+      ),
       requiredProbeResults: BUBBLEWRAP_REQUIRED_PROBE_IDS.map((probeId) => ({
         probeId,
         status: "pass" as const,
@@ -497,14 +610,14 @@ describe("Bubblewrap physical qualification runner", () => {
     };
     const seen: Array<{ argv: string[] }> = [];
     const result = await runBubblewrapQualificationCanary({
-      manifest: manifest(),
+      manifest: canaryManifest,
       sourceCommit: SOURCE_COMMIT,
       qualification: { status: "qualified", evidence: qualificationEvidence },
       qualificationContext: {
         sourceCommit: SOURCE_COMMIT,
         hostIdentity: HOST_IDENTITY,
         effectiveSecurityBoundaryFingerprint: "runner-boundary",
-        fixtureProbeManifestDigest: "f".repeat(64),
+        fixtureProbeManifestDigest,
       },
       workspaceRoot: "/var/lib/ashley-sandbox/qualification/workspace",
       processRunner: {

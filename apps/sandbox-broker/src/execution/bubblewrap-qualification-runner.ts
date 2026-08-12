@@ -145,6 +145,18 @@ export function digestQualificationManifest(
   return digestText(JSON.stringify(manifest));
 }
 
+export function digestQualificationManifestBinding(
+  manifest: BubblewrapQualificationManifest,
+  fixtureProbeManifestDigest?: string,
+): string {
+  if (fixtureProbeManifestDigest === undefined) {
+    return digestQualificationManifest(manifest);
+  }
+  return digestText(
+    JSON.stringify({ fixtureProbeManifestDigest, manifest }),
+  );
+}
+
 function notQualified(
   reason: string,
   failedProbeId?: BubblewrapQualificationProbeId,
@@ -439,8 +451,10 @@ export async function runBubblewrapQualification(
   if (digest.kind !== "ok") {
     return notQualified("qualification_provider_digest_unavailable");
   }
-  const manifestDigest =
-    options.fixtureProbeManifestDigest ?? digestQualificationManifest(options.manifest);
+  const manifestDigest = digestQualificationManifestBinding(
+    options.manifest,
+    options.fixtureProbeManifestDigest,
+  );
   if (!/^[a-f0-9]{64}$/.test(manifestDigest)) {
     return notQualified("qualification_probe_manifest_digest_invalid");
   }
@@ -663,6 +677,13 @@ export async function runBubblewrapQualificationCanary(
       reason: "canary_cleanup_unavailable",
     };
   }
+  const qualificationContext = {
+    ...options.qualificationContext,
+    fixtureProbeManifestDigest: digestQualificationManifestBinding(
+      options.manifest,
+      options.qualificationContext.fixtureProbeManifestDigest,
+    ),
+  };
   const provider = new BubblewrapExecutionIsolation({
     processRunner,
     platform: "linux",
@@ -672,7 +693,7 @@ export async function runBubblewrapQualificationCanary(
       options.probeProviderVersion ?? probeBubblewrapProviderVersion,
     probeProviderBinaryDigest:
       options.probeProviderBinaryDigest ?? probeBubblewrapProviderDigest,
-    qualificationContext: options.qualificationContext,
+    qualificationContext,
     binds: [],
     workspaceRoots: [],
     qualification: options.qualification,
