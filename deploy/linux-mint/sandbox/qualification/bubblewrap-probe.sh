@@ -16,6 +16,77 @@ absent() {
     fi
   done
 }
+check_interfaces() {
+  interface_file=${1:-/proc/net/dev}
+  [ -r "$interface_file" ] || return 1
+  while IFS= read -r interface_line; do
+    case "$interface_line" in
+      *:*)
+        interface_name=${interface_line%%:*}
+        interface_name=${interface_name#"${interface_name%%[![:space:]]*}"}
+        case "$interface_name" in
+          "" | lo) ;;
+          *) return 1 ;;
+        esac
+        ;;
+    esac
+  done < "$interface_file"
+}
+check_routes() {
+  route_file=${1:-/proc/net/route}
+  [ -r "$route_file" ] || return 1
+  route_header=1
+  while read -r route_interface route_remainder; do
+    if [ "$route_header" -eq 1 ]; then
+      route_header=0
+      continue
+    fi
+    [ -n "$route_interface" ] || continue
+    [ "$route_interface" = lo ] || return 1
+  done < "$route_file"
+}
+check_forbidden_environment_entries() {
+  while IFS= read -r environment_entry || [ -n "$environment_entry" ]; do
+    environment_name=${environment_entry%%=*}
+    case "$environment_name" in
+      [Nn][Oo][Dd][Ee]_[Oo][Pp][Tt][Ii][Oo][Nn][Ss] | \
+      [Hh][Tt][Tt][Pp]_[Pp][Rr][Oo][Xx][Yy] | \
+      [Hh][Tt][Tt][Pp][Ss]_[Pp][Rr][Oo][Xx][Yy] | \
+      [Aa][Ll][Ll]_[Pp][Rr][Oo][Xx][Yy] | \
+      [Nn][Oo]_[Pp][Rr][Oo][Xx][Yy] | \
+      [Ss][Ss][Hh]_* | \
+      [Aa][Ww][Ss]_* | \
+      [Aa][Ss][Hh][Ll][Ee][Yy]_[Ss][Aa][Nn][Dd][Bb][Oo][Xx]_*)
+        return 1
+        ;;
+    esac
+  done
+}
+check_forbidden_environment() {
+  environment_file=${1:-}
+  if [ -n "$environment_file" ]; then
+    check_forbidden_environment_entries < "$environment_file"
+  else
+    /usr/bin/env | check_forbidden_environment_entries
+  fi
+}
+check_threads() {
+  status_file=${1:-/proc/self/status}
+  [ -r "$status_file" ] || return 1
+  thread_count=
+  while IFS=: read -r status_name status_value; do
+    case "$status_name" in
+      Threads) thread_count=$status_value ;;
+    esac
+  done < "$status_file"
+  [ -n "$thread_count" ] || return 1
+  set -- $thread_count
+  [ "$#" -eq 1 ] || return 1
+  case "$1" in
+    "" | *[!0-9]*) return 1 ;;
+  esac
+  [ "$1" -gt 0 ]
+}
 case "$mode" in
   filesystem_control_plane)
     absent \
@@ -64,15 +135,17 @@ case "$mode" in
   network)
     [ -r /proc/net/dev ] || fail proc_net_dev_unreadable
     [ -r /proc/net/route ] || fail proc_net_route_unreadable
-    /usr/bin/awk 'NR > 2 && $1 !~ /^lo:/ { exit 1 }' /proc/net/dev >/dev/null || fail non_loopback_interface
-    /usr/bin/awk 'NR > 1 && $NF != "lo" { exit 1 }' /proc/net/route >/dev/null || fail non_loopback_route
-    /usr/bin/timeout 1 /usr/bin/node -e 'const net=require("node:net");let done=false;const s=net.createConnection({host:"192.0.2.1",port:9});const finish=(code)=>{if(done)return;done=true;s.destroy();process.exit(code)};s.setTimeout(300,()=>finish(0));s.on("error",()=>finish(0));s.on("connect",()=>finish(1));setTimeout(()=>finish(0),500);' >/dev/null 2>&1 || fail external_connect_reachable
+    check_interfaces /proc/net/dev || fail non_loopback_interface
+    check_routes /proc/net/route || fail non_loopback_route
+    if /usr/bin/timeout 1 /usr/bin/bash -c 'exec 3<>/dev/tcp/192.0.2.1/9' >/dev/null 2>&1; then
+      fail external_connect_reachable
+    fi
     pass
     ;;
   environment)
     [ "${HOME:-}" = /home/ashley ] || fail home_mismatch
     [ "${PATH:-}" = /usr/bin ] || fail path_mismatch
-    /usr/bin/env | /usr/bin/awk -F= 'BEGIN { bad=0 } { name=toupper($1); if (name == "NODE_OPTIONS" || name ~ /^(HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|NO_PROXY)$/ || name ~ /^SSH_/ || name ~ /^AWS_/ || name ~ /^ASHLEY_SANDBOX/) bad=1 } END { exit bad }' >/dev/null || fail forbidden_environment
+    check_forbidden_environment || fail forbidden_environment
     pass
     ;;
   process_tree)
@@ -86,12 +159,12 @@ case "$mode" in
   resources)
     [ -r /proc/self/limits ] || fail process_limits_unreadable
     [ -r /proc/self/status ] || fail process_status_unreadable
-    /usr/bin/awk '/^Threads:/ { if ($2 < 1) exit 1 }' /proc/self/status >/dev/null || fail process_status_invalid
+    check_threads /proc/self/status || fail process_status_invalid
     pass
     ;;
   positive_functionality)
     marker=/workspace/.sandbox-isolation-02c-probe-$$
-    trap 'rm -f "$marker"' EXIT HUP INT TERM
+    trap '/usr/bin/rm -f "$marker"' EXIT HUP INT TERM
     [ "$(pwd -P)" = /workspace ] || fail cwd_mismatch
     [ "${HOME:-}" = /home/ashley ] || fail home_mismatch
     [ -d /qualification-fixture ] || fail fixture_missing

@@ -1,5 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 const qualificationHelper = readFileSync(
   new URL(
@@ -483,6 +485,137 @@ describe("02C qualification helper source contract", () => {
       qualificationHelper.indexOf("sudo -n /usr/bin/systemd-run"),
     );
   });
+});
+describe("02L POSIX child probe", () => {
+  const helpersStart = bubblewrapProbe.indexOf("check_interfaces() {");
+  const helpersEnd = bubblewrapProbe.indexOf('case "$mode" in', helpersStart);
+  const probeHelpers = bubblewrapProbe.slice(helpersStart, helpersEnd);
+  const dashAvailable =
+    spawnSync("dash", ["-c", "exit 0"], { encoding: "utf8" }).status === 0;
+
+  function runProbeHelper(helper: string, fixture: string) {
+    return spawnSync(
+      "dash",
+      [
+        "-c",
+        ["set -eu", probeHelpers, `${helper} "$1"`].join("\n"),
+        "probe-helper",
+        fixture,
+      ],
+      { encoding: "utf8" },
+    );
+  }
+
+  function withFixture(
+    content: string,
+    assertion: (fixture: string) => void,
+  ) {
+    const fixtureRoot = mkdtempSync(join(tmpdir(), "ashley-probe-"));
+    const fixture = join(fixtureRoot, "fixture");
+    writeFileSync(fixture, content, "utf8");
+    try {
+      assertion(fixture);
+    } finally {
+      rmSync(fixtureRoot, { force: true, recursive: true });
+    }
+  }
+
+  it("keeps the probe self-contained and uses the reviewed negative-connect helper", () => {
+    expect(bubblewrapProbe).not.toContain("/usr/bin/awk");
+    expect(bubblewrapProbe).not.toContain("/usr/bin/node");
+    expect(bubblewrapProbe).toContain(
+      "/usr/bin/timeout 1 /usr/bin/bash -c 'exec 3<>/dev/tcp/192.0.2.1/9'",
+    );
+    expect(bubblewrapProbe).toContain("/usr/bin/env");
+    expect(bubblewrapProbe).toContain("/usr/bin/sleep");
+    expect(bubblewrapProbe).toContain("/usr/bin/true");
+    expect(bubblewrapProbe).toContain("/usr/bin/rm -f");
+  });
+
+  it.skipIf(!dashAvailable)(
+    "accepts only loopback interfaces from synthetic proc data",
+    () => {
+      withFixture(
+        [
+          "Inter-|   Receive                                                |  Transmit",
+          " face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed",
+          "    lo: 1 2 0 0 0 0 0 0 1 2 0 0 0 0 0 0",
+        ].join("\n"),
+        (fixture) => {
+          expect(runProbeHelper("check_interfaces", fixture).status).toBe(0);
+        },
+      );
+      withFixture(
+        "  eth0: 1 2 0 0 0 0 0 0 1 2 0 0 0 0 0 0\n",
+        (fixture) => {
+          expect(runProbeHelper("check_interfaces", fixture).status).not.toBe(0);
+        },
+      );
+    },
+  );
+
+  it.skipIf(!dashAvailable)(
+    "uses route field 1 for synthetic loopback-only route checks",
+    () => {
+      const header =
+        "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\n";
+      const routes: Array<[string, string, boolean]> = [
+        ["header only", "", true],
+        ["lo only", "lo\t00000000\t00000000\t0001\t0\t0\t0\t00000000\t0\t0\t0\n", true],
+        ["eth0", "eth0\t00000000\t00000000\t0001\t0\t0\t0\t00000000\t0\t0\t0\n", false],
+        ["wlan0", "wlan0\t00000000\t00000000\t0001\t0\t0\t0\t00000000\t0\t0\t0\n", false],
+      ];
+      for (const [_label, route, accepted] of routes) {
+        withFixture(header + route, (fixture) => {
+          expect(runProbeHelper("check_routes", fixture).status === 0).toBe(accepted);
+        });
+      }
+    },
+  );
+
+  it.skipIf(!dashAvailable)(
+    "accepts clean synthetic environments and rejects each forbidden name family",
+    () => {
+      withFixture("HOME=/home/ashley\nPATH=/usr/bin\nSAFE=value\n", (fixture) => {
+        expect(runProbeHelper("check_forbidden_environment", fixture).status).toBe(0);
+      });
+      for (const name of [
+        "nOdE_oPtIoNs",
+        "hTtP_pRoXy",
+        "HtTpS_pRoXy",
+        "aLl_PrOxY",
+        "nO_pRoXy",
+        "sSh_AgEnT_pId",
+        "aWs_SeCrEt_AcCeSs_KeY",
+        "aShLeY_sAnDbOx_ToKeN",
+      ]) {
+        withFixture(`${name}=blocked\n`, (fixture) => {
+          expect(runProbeHelper("check_forbidden_environment", fixture).status).not.toBe(
+            0,
+          );
+        });
+      }
+    },
+  );
+
+  it.skipIf(!dashAvailable)(
+    "requires a positive integer Threads value from synthetic status data",
+    () => {
+      const threadStates: Array<[string, string, boolean]> = [
+        ["positive", "Name:\tprobe\nThreads:\t1\n", true],
+        ["zero", "Threads:\t0\n", false],
+        ["non-integer", "Threads:\tno\n", false],
+        ["missing", "Name:\tprobe\n", false],
+      ];
+      for (const [_label, content, accepted] of threadStates) {
+        withFixture(content, (fixture) => {
+          expect(runProbeHelper("check_threads", fixture).status === 0).toBe(
+            accepted,
+          );
+        });
+      }
+    },
+  );
 });
 describe("02J canonical address-family set comparison", () => {
   const tokenSetFunctionName = qualificationHelper.includes(
