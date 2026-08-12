@@ -225,6 +225,7 @@ SocketGroup=ashley-broker
 SocketMode=0660
 RuntimeDirectory=ashley
 RuntimeDirectoryMode=0711
+DirectoryMode=0711
 
 [Install]
 WantedBy=sockets.target
@@ -466,7 +467,7 @@ The corresponding cgroup v2 values are `memory.high=1610612736` and
 | `UMask=0077` | Restrictive creates |
 
 **Socket unit** (separate `ashley-exec-broker.socket` — see §3.0): owns `ListenStream`,
-`SocketUser`, `SocketGroup`, `SocketMode`, `RuntimeDirectory`, `RuntimeDirectoryMode`
+`SocketUser`, `SocketGroup`, `SocketMode`, `RuntimeDirectory`, `RuntimeDirectoryMode`, `DirectoryMode`
 for `/run/ashley/`. Service unit does **not** duplicate socket ACL.
 
 **Deferred:** `Delegate=yes` per-task cgroups and the separate task execution

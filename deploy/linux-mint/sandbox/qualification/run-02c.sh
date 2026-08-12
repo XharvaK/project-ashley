@@ -269,6 +269,7 @@ run_stable_service_check
 require_equal service_active "$(systemctl is-active "$SERVICE")" active
 require_equal socket_active "$(systemctl is-active "$SOCKET")" active
 require_equal runtime_directory_declared_mode "$(systemctl show "$SOCKET" -p RuntimeDirectoryMode --value)" 0711
+require_equal socket_directory_declared_mode "$(systemctl show "$SOCKET" -p DirectoryMode --value)" 0711
 require_equal service_environment_files "$(systemctl show "$SERVICE" -p EnvironmentFiles --value)" "/etc/ashley-sandbox/broker.env (ignore_errors=yes)"
 require_namespace_set restrict_namespaces \
   "$(systemctl show "$SERVICE" -p RestrictNamespaces --value)" \

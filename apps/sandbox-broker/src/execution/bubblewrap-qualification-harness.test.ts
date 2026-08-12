@@ -65,6 +65,12 @@ describe("02C qualification helper source contract", () => {
       '.isolation.network.status == "provided"',
     );
     expect(qualificationHelper).toContain('systemctl show "$SOCKET" -p RuntimeDirectoryMode --value');
+    expect(qualificationHelper).toContain(
+      'require_equal runtime_directory_declared_mode "$(systemctl show "$SOCKET" -p RuntimeDirectoryMode --value)" 0711',
+    );
+    expect(qualificationHelper).toContain(
+      'require_equal socket_directory_declared_mode "$(systemctl show "$SOCKET" -p DirectoryMode --value)" 0711',
+    );
     expect(qualificationHelper).not.toContain('chown root:root "$CLI_RUNTIME"');
   });
   it("binds qualification to transferable broker hardening, not a transient unit path", () => {
@@ -206,6 +212,8 @@ describe("02C qualification helper source contract", () => {
       expect(socketUnit).toContain(property);
     }
     expect(socketUnit).not.toContain("RuntimeDirectoryMode=0750");
+    expect(socketUnit).toMatch(/^DirectoryMode=0711$/m);
+    expect(socketUnit).not.toMatch(/^DirectoryMode=0755$/m);
     expect(qualificationHelper).not.toContain(
       "sudo -n chmod 0750 /run/ashley",
     );
@@ -234,6 +242,13 @@ describe("02C qualification helper source contract", () => {
       "sudo -n -u nobody test -w /run/ashley/broker.sock",
     );
     expect(qualificationHelper).toContain("die socket_world_accessible");
+    expect(
+      qualificationHelper.indexOf('sudo -n systemctl restart "$SOCKET"'),
+    ).toBeLessThan(
+      qualificationHelper.indexOf(
+        'require_equal runtime_directory_mode "$(stat -c \'%a\' /run/ashley)" 711',
+      ),
+    );
     expect(
       qualificationHelper.indexOf("authorized_agent_socket_unreachable"),
     ).toBeLessThan(qualificationHelper.indexOf("require_equal socket_mode"));

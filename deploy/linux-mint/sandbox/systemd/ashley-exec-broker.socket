@@ -8,6 +8,7 @@ SocketGroup=ashley-broker
 SocketMode=0660
 RuntimeDirectory=ashley
 RuntimeDirectoryMode=0711
+DirectoryMode=0711
 RemoveOnStop=true
 
 [Install]
