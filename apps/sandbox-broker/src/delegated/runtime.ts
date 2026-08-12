@@ -77,6 +77,16 @@ import type { ExecutableMappings } from "../execution/executable-resolver.js";
 import type { BrokerResponse, RequestContext } from "../protocol/frame.js";
 import type { FixedRecipe } from "../policy/recipe-registry.js";
 import { fixedRecipeRegistry } from "../policy/recipe-registry.js";
+import {
+  validateProjectRootRegistry,
+  type ProjectRootRegistry,
+  type ProjectRootEntry,
+} from "@composer-assistant/sandbox-policy";
+import {
+  handleEngineeringAction,
+  handleAgentRestart,
+  type EngineeringHandlerContext,
+} from "./../engineering/handlers.js";
 
 /**
  * Host-provided, already-decrypted material for the delegated runtime. All
@@ -110,6 +120,12 @@ export interface DelegatedRuntimeConfig {
   sourceIdentities?: ReadonlyMap<string, string>;
   /** Readiness-only label of the host-selected network provider. */
   networkProvider: "unavailable" | "none";
+  /** Durable allowlisted project roots (host/operator config). */
+  projectRegistry: ReadonlyArray<ProjectRootEntry>;
+  /** Sandbox-owned root for candidate (self-improvement) repositories. */
+  candidateRepoRoot: string;
+  /** Sandbox-owned persistent artifact area (reports/patches). */
+  artifactRoot: string;
 }
 
 export type DelegatedRuntimeReadiness = {
@@ -238,6 +254,9 @@ export class DelegatedRuntime {
   private readonly trustedOwnerApprovalKeys: OwnerApprovalVerifierConfig;
   private readonly rootConfig: BrokerRootConfig;
   private readonly ownerKeyId: string;
+  private readonly projectRegistry: ProjectRootRegistry;
+  private readonly artifactRoot: string;
+  private readonly candidateRepoRoot: string;
 
   private constructor(init: {
     config: DelegatedRuntimeConfig;
@@ -250,6 +269,9 @@ export class DelegatedRuntime {
     executionService: FixedRecipeExecutionService;
     networkIsolation: NetworkIsolationProvider;
     rootConfig: BrokerRootConfig;
+    projectRegistry: ProjectRootRegistry;
+    artifactRoot: string;
+    candidateRepoRoot: string;
   }) {
     this.config = init.config;
     this.deps = init.deps;
@@ -262,6 +284,9 @@ export class DelegatedRuntime {
     this.networkIsolation = init.networkIsolation;
     this.rootConfig = init.rootConfig;
     this.ownerKeyId = init.config.ownerKeyId;
+    this.projectRegistry = init.projectRegistry;
+    this.artifactRoot = init.artifactRoot;
+    this.candidateRepoRoot = init.candidateRepoRoot;
   }
 
   readiness(): DelegatedRuntimeReadiness {
@@ -331,6 +356,10 @@ export class DelegatedRuntime {
         return this.workspaceCleanup(payload);
       case "sandbox.recipe.execute":
         return this.recipeExecute(payload, ctx);
+      case "sandbox.engineering.action":
+        return handleEngineeringAction(this.buildEngineeringContext(), messageType, payload);
+      case "sandbox.agent.restart":
+        return handleAgentRestart(this.buildEngineeringContext(), payload);
       default:
         return {
           ok: false,
@@ -641,8 +670,27 @@ export class DelegatedRuntime {
     return { ok: true, data: { workspaceId, nowMs } };
   }
 
-  private async recipeExecute(payload: unknown, ctx: RequestContext): Promise<BrokerResponse<FixedRecipeExecutionResult>> {
-    if (!isPlainRecord(payload) || !isPlainRecord(payload.request)) {
+  private buildEngineeringContext(): EngineeringHandlerContext {
+    return {
+      ownerId: this.config.ownerId,
+      activePolicy: this.activePolicy,
+      trustedDelegatedKey: this.trustedDelegatedKey,
+      ownerKeyId: this.ownerKeyId,
+      trustedOwnerApprovalKeys: this.trustedOwnerApprovalKeys,
+      rootConfig: this.rootConfig,
+      projectRegistry: this.projectRegistry,
+      candidateRepoRoot: this.candidateRepoRoot,
+      artifactRoot: this.artifactRoot,
+      workspaceRoot: this.config.workspaceRoot,
+      processRunner: this.deps.processRunner,
+      networkIsolation: this.deps.networkIsolation,
+      executableMappings: this.config.executableMappings,
+      envAllowlist: this.config.envAllowlist,
+      auditSink: this.deps.auditSink,
+    };
+  }
+
+  private async recipeExecute(payload: unknown, ctx: RequestContext): Promise<BrokerResponse<FixedRecipeExecutionResult>> {    if (!isPlainRecord(payload) || !isPlainRecord(payload.request)) {
       return { ok: false, errorCode: "request_invalid", message: "request required" };
     }
     if (ctx.peerOwnerId !== ctx.ownerId) {
@@ -707,6 +755,14 @@ export class DelegatedRuntime {
     }
     const rootConfig = rootConfigValidation.value;
 
+    const projectRegistryValidation = validateProjectRootRegistry(config.projectRegistry);
+    if (!projectRegistryValidation.ok) {
+      throw new Error(
+        `sandbox_delegated_runtime: project_registry_invalid:${projectRegistryValidation.reasons.join(",")}`,
+      );
+    }
+    const projectRegistry = projectRegistryValidation.registry;
+
     const capabilitySignerResult = createBrokerCapabilitySigner(config.capabilitySigning);
     if (!capabilitySignerResult.ok) {
       throw new Error(`sandbox_delegated_runtime: capability_signer_unavailable:${capabilitySignerResult.errorCode}`);
@@ -757,6 +813,9 @@ export class DelegatedRuntime {
       executionService,
       networkIsolation: deps.networkIsolation,
       rootConfig,
+      projectRegistry,
+      artifactRoot: config.artifactRoot,
+      candidateRepoRoot: config.candidateRepoRoot,
     });
   }
 }

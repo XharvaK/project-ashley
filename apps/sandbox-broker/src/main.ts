@@ -259,6 +259,9 @@ async function loadDelegatedRuntimeConfig(
       executableMappings: mappingsResult.mappings,
       sourceIdentities,
       networkProvider: selection.label,
+      projectRegistry: loadProjectRegistry(),
+      candidateRepoRoot: process.env.ASHLEY_SANDBOX_CANDIDATE_REPO_ROOT?.trim() || "/var/lib/ashley-sandbox/self-improvement",
+      artifactRoot: process.env.ASHLEY_SANDBOX_ARTIFACT_ROOT?.trim() || "/var/lib/ashley-sandbox/artifacts",
     },
     networkIsolation,
     executionIsolation,
@@ -270,6 +273,31 @@ function parseUid(): number {
   const uid = Number(raw);
   if (!Number.isInteger(uid) || uid < 0) throw new Error("ASHLEY_SANDBOX_AGENT_UID_invalid");
   return uid;
+}
+
+/**
+ * Load the durable allowlisted project-root registry (host/operator config).
+ * The model can never create or widen these. Defaults to an empty registry;
+ * the production host supplies a JSON file via ASHLEY_SANDBOX_PROJECT_REGISTRY.
+ */
+function loadProjectRegistry(): Array<{
+  projectId: string;
+  canonicalRoot: string;
+  displayName: string;
+  enabled: boolean;
+  readAllowed: boolean;
+  candidateWorkspaceAllowed: boolean;
+  engineeringAllowed: boolean;
+}> {
+  const path = process.env.ASHLEY_SANDBOX_PROJECT_REGISTRY?.trim();
+  if (!path) return [];
+  try {
+    const raw = JSON.parse(require("node:fs").readFileSync(path, "utf8"));
+    if (Array.isArray(raw)) return raw;
+    return [];
+  } catch {
+    return [];
+  }
 }
 
 async function createProductionBroker(): Promise<{

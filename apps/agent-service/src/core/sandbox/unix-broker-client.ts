@@ -23,7 +23,11 @@ import {
   type ServiceResult,
   type SignedSandboxSessionCapability,
 } from "@composer-assistant/sandbox-broker";
-import type { SandboxCapabilityId } from "@composer-assistant/sandbox-policy";
+import {
+  type EngineeringAction,
+  type SandboxCapabilityId,
+} from "@composer-assistant/sandbox-policy";
+import type { EngineeringToolResult } from "./engineering-types.js";
 import { env } from "../../env.js";
 import type {
   SandboxBrokerClient,
@@ -176,6 +180,17 @@ function isExecutionResult(data: unknown): data is FixedRecipeExecutionResult {
       typeof data.reason === "string" &&
       typeof data.stage === "string"
     );
+  }
+  return false;
+}
+
+function isEngineeringToolResult(data: unknown): data is EngineeringToolResult {
+  if (!isPlainRecord(data)) return false;
+  if (data.ok === true) {
+    return "data" in data && (data.artifactRef === null || typeof data.artifactRef === "string");
+  }
+  if (data.ok === false) {
+    return typeof data.errorCode === "string" && typeof data.reason === "string";
   }
   return false;
 }
@@ -562,6 +577,61 @@ export class UnixSandboxBrokerClient implements SandboxBrokerClient {
       return result.data as FixedRecipeExecutionResult;
     }
     return executionUnknown("broker_response_invalid", "malformed executeRecipe response");
+  }
+
+  async engineeringAction(input: {
+    envelope: DelegatedApprovalEnvelope;
+    nowMs: number;
+    action: EngineeringAction;
+  }): Promise<EngineeringToolResult> {
+    const result = await this.dispatch("sandbox.engineering.action", {
+      envelope: input.envelope,
+      nowMs: input.nowMs,
+      action: input.action,
+    });
+    if (!result.ok) {
+      return { ok: false, errorCode: result.errorCode, reason: result.message };
+    }
+    if (oversized(result.data, this.maxResponseBytes)) {
+      return { ok: false, errorCode: "broker_response_oversized", reason: "broker response oversized" };
+    }
+    if (isEngineeringToolResult(result.data)) {
+      return result.data as EngineeringToolResult;
+    }
+    return { ok: false, errorCode: "broker_response_invalid", reason: "malformed engineeringAction response" };
+  }
+
+  async agentRestart(input: {
+    envelope: DelegatedApprovalEnvelope;
+    nowMs: number;
+    unit: string;
+    incidentId: string;
+    health: { healthy: boolean; deterministic: boolean };
+    restartState: {
+      incidentId: string;
+      lastAttemptAtMs: number | null;
+      attemptsForIncident: number;
+      cooldownMs: number;
+    };
+  }): Promise<EngineeringToolResult> {
+    const result = await this.dispatch("sandbox.agent.restart", {
+      envelope: input.envelope,
+      nowMs: input.nowMs,
+      unit: input.unit,
+      incidentId: input.incidentId,
+      health: input.health,
+      restartState: input.restartState,
+    });
+    if (!result.ok) {
+      return { ok: false, errorCode: result.errorCode, reason: result.message };
+    }
+    if (oversized(result.data, this.maxResponseBytes)) {
+      return { ok: false, errorCode: "broker_response_oversized", reason: "broker response oversized" };
+    }
+    if (isEngineeringToolResult(result.data)) {
+      return result.data as EngineeringToolResult;
+    }
+    return { ok: false, errorCode: "broker_response_invalid", reason: "malformed agentRestart response" };
   }
 
   async getSession(sessionUuid: string): Promise<SandboxBrokerSessionSnapshot | null> {

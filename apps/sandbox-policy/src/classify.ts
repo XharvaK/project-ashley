@@ -172,6 +172,32 @@ const DELEGATED_SAFE_CAPABILITIES: readonly CapabilitySpec[] = [
     executableBound: true,
     description: "run a bounded, policy-listed diagnostic executable",
   },
+  {
+    id: "engineering_project_read",
+    class: "delegated_safe",
+    allowedIntents: ["read"],
+    intrinsicRisk: "low",
+    networkRequired: false,
+    externalSideEffects: false,
+    secretExposure: false,
+    recipeBound: false,
+    executableBound: false,
+    description:
+      "bounded read/list/search of an allowlisted project source tree, including read-only git inspection",
+  },
+  {
+    id: "candidate_repository_git_write",
+    class: "delegated_safe",
+    allowedIntents: ["read", "write", "delete"],
+    intrinsicRisk: "medium",
+    networkRequired: false,
+    externalSideEffects: false,
+    secretExposure: false,
+    recipeBound: false,
+    executableBound: false,
+    description:
+      "local git metadata operations inside a sandbox-owned candidate clone only (status/diff/log/add/commit); push/fetch/remote-rewrite prohibited",
+  },
 ];
 
 const OWNER_APPROVABLE_CAPABILITIES: readonly CapabilitySpec[] = [
@@ -246,6 +272,19 @@ const OWNER_APPROVABLE_CAPABILITIES: readonly CapabilitySpec[] = [
     recipeBound: false,
     executableBound: false,
     description: "restart or manage services",
+  },
+  {
+    id: "ashley_agent_service_restart",
+    class: "delegated_safe",
+    allowedIntents: [],
+    intrinsicRisk: "medium",
+    networkRequired: false,
+    externalSideEffects: false,
+    secretExposure: false,
+    recipeBound: false,
+    executableBound: false,
+    description:
+      "narrowly restart exactly the Ashley agent unit after deterministic health failure; broker restart remains owner approval",
   },
   {
     id: "package_install_remove_upgrade",

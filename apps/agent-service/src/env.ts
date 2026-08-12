@@ -287,6 +287,28 @@ export const env = {
     ["unavailable", "none"],
     "unavailable",
   ),
+  // Engineering autonomy lifecycle master switch. Fail-closed: the supervisor
+  // loops only start when this is explicitly true (owner action). Mirrors the
+  // broader sandbox lifecycle but is the precise gate for the engineering
+  // workstation supervisor + weekly self-improvement trigger.
+  sandboxEngineeringLifecycleEnabled: strictBoolean(
+    "ASHLEY_SANDBOX_ENGINEERING_LIFECYCLE_ENABLED",
+    false,
+  ),
+  // Host-provided allowlisted project-root registry (operator config, never
+  // model-writable). Empty/unset => no roots => envelope precheck refuses writes.
+  sandboxProjectRegistryPath: strictTrimmed(
+    "ASHLEY_SANDBOX_PROJECT_REGISTRY",
+    join(sandboxKeysDir, "project-roots.json"),
+  ),
+  // Engineering supervisor polling interval (minutes).
+  sandboxEngineeringSupervisorMinutes: numericEnv(
+    "ASHLEY_SANDBOX_ENGINEERING_SUPERVISOR_MINUTES",
+    5,
+    1,
+    120,
+    true,
+  ),
   // Broker trust anchors and policy artifacts (paths only; never keys).
   sandboxPolicyArtifactPath: strictTrimmed(
     "ASHLEY_SANDBOX_POLICY_ARTIFACT",

@@ -11,6 +11,10 @@ import {
   stopCognitionLoop,
 } from "./core/cognition/worker.js";
 import { createConfiguredUnixSandboxClient } from "./core/sandbox/unix-broker-client.js";
+import {
+  startEngineeringAutonomyLoops,
+  stopEngineeringAutonomyLoops,
+} from "./core/sandbox/engineering-runtime.js";
 
 const manager = new AgentManager();
 
@@ -28,6 +32,20 @@ async function main(): Promise<void> {
     manager.core.getDatabase(),
     env.memoryOwnerId || env.discordOwnerId || "default",
   );
+  // Engineering autonomy loops — fail-closed unless the owner enabled the
+  // lifecycle. Grabs the same broker client the server uses.
+  startEngineeringAutonomyLoops({
+    db: manager.core.getDatabase(),
+    ownerId: env.memoryOwnerId || env.discordOwnerId || "default",
+    brokerClient: sandboxBrokerClient,
+    onCompleted: (info) =>
+      console.log(
+        `[engineering] completed task=${info.taskId} admission=${info.admissionId} summary=${info.summary ?? ""}`,
+      ),
+    onWeeklyReviewDue: (summary) =>
+      console.log(`[engineering-self-improvement] weekly review due: ${summary}`),
+    onRefused: (reason) => console.log(`[engineering] refused: ${reason}`),
+  });
   console.log(
     `[agent-service] nuclear core enabled db=${manager.core.getHealth().dbPath}`,
   );
@@ -36,6 +54,7 @@ async function main(): Promise<void> {
     console.log(`[agent-service] ${signal}`);
     stopNuclearCuriosityLoop();
     stopCognitionLoop();
+    stopEngineeringAutonomyLoops();
     sandboxBrokerClient?.close();
     await manager.shutdown();
     server.close();

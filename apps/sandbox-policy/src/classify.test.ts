@@ -184,12 +184,12 @@ describe("classifySandboxOperation", () => {
     expect(facts.pathClass.class).toBe("none");
   });
 
-  it("exposes exactly 37 registered capability specs", () => {
-    expect(SANDBOX_CAPABILITIES).toHaveLength(37);
+  it("exposes exactly 40 registered capability specs", () => {
+    expect(SANDBOX_CAPABILITIES).toHaveLength(40);
     expect(capabilitySpec("deployment")).toBeDefined();
     expect(capabilitySpec("deployment")?.class).toBe("owner_approvable");
     expect(capabilitySpec("nope")).toBeUndefined();
     const ids = new Set(SANDBOX_CAPABILITIES.map((spec) => spec.id));
-    expect(ids.size).toBe(37);
+    expect(ids.size).toBe(40);
   });
 });

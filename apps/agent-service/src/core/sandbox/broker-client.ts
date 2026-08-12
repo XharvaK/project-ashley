@@ -12,7 +12,7 @@
  */
 
 import { createPublicKey, generateKeyPairSync } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -50,10 +50,12 @@ import {
 } from "@composer-assistant/sandbox-broker";
 import {
   canonicalizeSandboxPolicyPayload,
+  type EngineeringAction,
   type SandboxCapabilityId,
   type SandboxPolicyDocument,
 } from "@composer-assistant/sandbox-policy";
 import { DELEGATED_RUNTIME_KEY_ID } from "@composer-assistant/sandbox-broker";
+import type { EngineeringToolResult } from "./engineering-types.js";
 import type { CanonicalPathFact } from "./policy-context.js";
 
 export type SandboxBrokerSessionSnapshot = {
@@ -163,6 +165,35 @@ export interface SandboxBrokerClient {
     request: FixedRecipeExecutionRequest,
   ): Promise<FixedRecipeExecutionResult>;
 
+  /**
+   * Dispatch a bounded engineering action to the broker (Autonomous
+   * Engineering Workstation wave). The broker re-validates and authorizes the
+   * structured action; the client only transports it.
+   */
+  engineeringAction(input: {
+    envelope: DelegatedApprovalEnvelope;
+    nowMs: number;
+    action: EngineeringAction;
+  }): Promise<EngineeringToolResult>;
+
+  /**
+   * Dispatch a bounded ashley-agent restart request (max one per incident,
+   * cooldown-enforced). The broker decides and performs the restart.
+   */
+  agentRestart(input: {
+    envelope: DelegatedApprovalEnvelope;
+    nowMs: number;
+    unit: string;
+    incidentId: string;
+    health: { healthy: boolean; deterministic: boolean };
+    restartState: {
+      incidentId: string;
+      lastAttemptAtMs: number | null;
+      attemptsForIncident: number;
+      cooldownMs: number;
+    };
+  }): Promise<EngineeringToolResult>;
+
   getSession(sessionUuid: string): Promise<SandboxBrokerSessionSnapshot | null>;
 
   close(): void;
@@ -231,6 +262,23 @@ function canonicalPathOf(native: string): string {
   const result = toCanonicalBrokerPath(native);
   if (!result.ok) throw new Error(`path_not_canonical:${native}`);
   return result.value;
+}
+
+function isDir(native: string): boolean {
+  try {
+    return statSync(native).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function isDescendant(target: string, ancestor: string): boolean {
+  const rel = path.relative(ancestor, target);
+  return !rel.startsWith("..") && !path.isAbsolute(rel);
+}
+
+function refuse(reason: string): EngineeringToolResult {
+  return { ok: false, errorCode: "fake_refused", reason };
 }
 
 function capabilityKeyMaterial(): CapabilitySigningKeyMaterial {
@@ -580,6 +628,91 @@ export class FakeSandboxBrokerClient implements SandboxBrokerClient, SandboxBrok
   async getSession(sessionUuid: string): Promise<SandboxBrokerSessionSnapshot | null> {
     const session = this.sessionService.getSession(sessionUuid);
     return session === null ? null : toSessionSnapshot(session);
+  }
+
+  async engineeringAction(input: {
+    envelope: DelegatedApprovalEnvelope;
+    nowMs: number;
+    action: EngineeringAction;
+  }): Promise<EngineeringToolResult> {
+    // In-process fake: bounded local operations against the ephemeral roots.
+    // Candidate repository writes, patch apply, and agent restart are rejected
+    // here because the fake has no real broker runtime / systemd surface.
+    const { action } = input;
+    const f = action.fields as Record<string, unknown>;
+    const rel = (v: unknown) => String(v ?? "");
+    try {
+      switch (action.type) {
+        case "inspect_project_file":
+        case "read_workspace_file": {
+          const root = action.type === "inspect_project_file" ? this.sourceRoot : this.destinationRoot;
+          const p = path.join(root, rel(f.relativePath));
+          if (!isDescendant(p, root)) return refuse("path_escape");
+          const buf = readFileSync(p, "utf8");
+          return { ok: true, data: { content: buf, truncated: false, bytes: buf.length }, artifactRef: null };
+        }
+        case "list_project_directory":
+        case "list_workspace_directory": {
+          const root = action.type === "list_project_directory" ? this.sourceRoot : this.destinationRoot;
+          const dir = path.join(root, rel(f.relativePath));
+          if (!isDescendant(dir, root)) return refuse("path_escape");
+          const entries = existsSync(dir) ? readdirSync(dir) : [];
+          return { ok: true, data: { entries }, artifactRef: null };
+        }
+        case "search_project_text":
+        case "search_workspace_text": {
+          const root = action.type === "search_project_text" ? this.sourceRoot : this.destinationRoot;
+          const needle = rel(f.pattern);
+          const found: string[] = [];
+          for (const name of readdirSync(root)) {
+            if (found.length >= 100) break;
+            const p = path.join(root, name);
+            if (existsSync(p) && !isDir(p)) {
+              const content = readFileSync(p, "utf8");
+              if (content.includes(needle)) found.push(name);
+            }
+          }
+          return { ok: true, data: { matches: found, truncated: false }, artifactRef: null };
+        }
+        case "write_workspace_file": {
+          const p = path.join(this.destinationRoot, rel(f.relativePath));
+          if (!isDescendant(p, this.destinationRoot)) return refuse("path_escape");
+          mkdirSync(path.dirname(p), { recursive: true });
+          const b64 = typeof f.contentBase64 === "string" ? f.contentBase64 : "";
+          writeFileSync(p, Buffer.from(b64, "base64"), "binary");
+          return { ok: true, data: { bytes: Buffer.from(b64, "base64").length }, artifactRef: null };
+        }
+        case "delete_workspace_file": {
+          const p = path.join(this.destinationRoot, rel(f.relativePath));
+          if (!isDescendant(p, this.destinationRoot)) return refuse("path_escape");
+          if (existsSync(p)) rmSync(p, { force: true });
+          return { ok: true, data: { deleted: true }, artifactRef: null };
+        }
+        case "run_diagnostic":
+          return { ok: true, data: { stdout: "fake-diagnostic-ok", stderr: "", exitCode: 0 }, artifactRef: null };
+        default:
+          return refuse("not_supported_in_fake");
+      }
+    } catch (err) {
+      return refuse(`fake_engineer_error:${err instanceof Error ? err.message : "unknown"}`);
+    }
+  }
+
+  async agentRestart(input: {
+    envelope: DelegatedApprovalEnvelope;
+    nowMs: number;
+    unit: string;
+    incidentId: string;
+    health: { healthy: boolean; deterministic: boolean };
+    restartState: {
+      incidentId: string;
+      lastAttemptAtMs: number | null;
+      attemptsForIncident: number;
+      cooldownMs: number;
+    };
+  }): Promise<EngineeringToolResult> {
+    // The fake has no systemd surface; reject rather than fabricate a restart.
+    return refuse("not_supported_in_fake");
   }
 
   close(): void {

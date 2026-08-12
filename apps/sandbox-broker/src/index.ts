@@ -36,6 +36,7 @@ export * from "./constants/global-limits.js";
 export * from "./crypto/approval.js";
 export * from "./crypto/delegated-approval.js";
 export * from "./crypto/delegated-policy.js";
+export * from "./crypto/delegated-policy-issuance.js";
 export * from "./crypto/key-custody.js";
 export * from "./crypto/owner-approval.js";
 export * from "./crypto/tombstone.js";

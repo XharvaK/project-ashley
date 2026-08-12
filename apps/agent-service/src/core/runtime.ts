@@ -49,6 +49,7 @@ import {
   readingProvenanceFailure,
 } from "./curiosity/feed.js";
 import { runNuclearCuriosityTick } from "./curiosity/tick.js";
+import { recordPendingEngineeringAdmission } from "./sandbox/engineering-runs.js";
 import { listRecentReads } from "./curiosity/reads.js";
 import { openNuclearDb } from "./db.js";
 import { getContinuityFor } from "./continuity/registry.js";
@@ -1243,6 +1244,24 @@ export class AshleyCore {
             : {}),
         };
       }
+    }
+
+    // Engineering autonomy anchor: a grounded, urgent mind-state item is a
+    // legitimate grounded source for a SAFE candidate-workspace investigation.
+    // This only records a pending admission; execution still requires the owner
+    // to have enabled the lifecycle AND recorded the activation cutover, and the
+    // policy/precheck to pass. A model merely "thinking about coding" never
+    // reaches here.
+    if (urgentItem && env.sandboxEngineeringLifecycleEnabled) {
+      recordPendingEngineeringAdmission(this.db, {
+        ownerId,
+        objective: `Investigate urgent grounded mind-state item ${urgentItem.id}`,
+        projectId: null,
+        profile: "project_investigation",
+        groundingRefs: [`mind-state:${urgentItem.id}`],
+        source: { kind: "open_cognitive_item", ref: String(urgentItem.id) },
+        autonomous: true,
+      });
     }
 
     await processPendingOpenCognitiveReviewsAsync(

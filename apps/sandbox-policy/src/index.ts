@@ -16,3 +16,5 @@ export * from "./protected-roots.js";
 export * from "./classify.js";
 export * from "./policy-schema.js";
 export * from "./authorize.js";
+export * from "./engineering.js";
+export * from "./project-roots.js";

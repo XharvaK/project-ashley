@@ -1,0 +1,14 @@
+{
+  "_comment": "Host/operator-owned allowlist for the Autonomous Engineering Workstation. Ashley may READ this to decide where she may engineer; she can NEVER create or widen a project root. canonicalRoot must be a canonical absolute POSIX path and must NOT be a broad system root (/, /home, /Users, /root, or the live production checkout). Copy to ~/.composer-assistant/engineering-projects.json and set ASHLEY_ENGINEERING_PROJECT_REGISTRY to its path.",
+  "projects": [
+    {
+      "projectId": "project-ashley",
+      "canonicalRoot": "/home/xarvak/project-ashley",
+      "displayName": "Project Ashley (live)",
+      "enabled": true,
+      "readAllowed": true,
+      "candidateWorkspaceAllowed": true,
+      "engineeringAllowed": true
+    }
+  ]
+}
