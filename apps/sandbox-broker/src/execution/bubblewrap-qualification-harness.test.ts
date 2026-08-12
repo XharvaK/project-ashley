@@ -96,6 +96,20 @@ describe("02C qualification helper source contract", () => {
     );
     expect(qualificationHelper).not.toContain('chown root:root "$CLI_RUNTIME"');
   });
+  it("requires the canary receipt to match the qualified evidence binding", () => {
+    expect(qualificationHelper).toContain(
+      'EVIDENCE_MANIFEST_BINDING="$(sudo -n "$JQ_BIN" -r \'.evidence.fixtureProbeManifestDigest\' "$EVIDENCE_PATH")"',
+    );
+    expect(qualificationHelper).toContain(
+      '[[ "$EVIDENCE_MANIFEST_BINDING" =~ ^[a-f0-9]{64}$ ]] || die evidence_manifest_binding_invalid',
+    );
+    expect(qualificationHelper).toContain(
+      '--arg manifest "$EVIDENCE_MANIFEST_BINDING"',
+    );
+    expect(qualificationHelper).toContain(
+      '.fixtureProbeManifestDigest == $manifest',
+    );
+  });
   it("binds qualification to transferable broker hardening, not a transient unit path", () => {
     expect(qualificationHelper).toContain('EXPECTED_PRODUCTION_HEAD="873ab34b48859d459f4394d990bcd48f502455c3"');
     expect(qualificationHelper).toContain('EXPECTED_FROZEN_HEAD="565bf6e113366ebf093b77f56a9ba45d69ba7d80"');

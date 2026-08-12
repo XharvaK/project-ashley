@@ -775,11 +775,14 @@ sudo -n "$JQ_BIN" -e --arg source "$EXPECTED_SOURCE_COMMIT" --arg boundary "$BRO
   .evidence.providerVersionIdentity == "bubblewrap/0.9.0" and
   .evidence.providerBinaryDigest == $digest and
   .evidence.effectiveSecurityBoundaryFingerprint == $boundary and
+  (.evidence.fixtureProbeManifestDigest | test("^[a-f0-9]{64}$")) and
   (.evidence.requiredProbeResults | length) == 7
 ' "$EVIDENCE_PATH" >/dev/null || die evidence_contract_invalid
+EVIDENCE_MANIFEST_BINDING="$(sudo -n "$JQ_BIN" -r '.evidence.fixtureProbeManifestDigest' "$EVIDENCE_PATH")"
+[[ "$EVIDENCE_MANIFEST_BINDING" =~ ^[a-f0-9]{64}$ ]] || die evidence_manifest_binding_invalid
 sudo -n chown root:ashley-sandbox "$EVIDENCE_PATH"
 require_privileged_path "$CANARY_RECEIPT_PATH"
-sudo -n "$JQ_BIN" -e --arg source "$EXPECTED_SOURCE_COMMIT" --arg digest "$BWRAP_DIGEST" --arg manifest "$FIXTURE_MANIFEST_DIGEST" '
+sudo -n "$JQ_BIN" -e --arg source "$EXPECTED_SOURCE_COMMIT" --arg digest "$BWRAP_DIGEST" --arg manifest "$EVIDENCE_MANIFEST_BINDING" '
   .schema == "bubblewrap-qualification-canary-v1" and
   .status == "pass" and
   .canaryId == "bubblewrap-mint-level-1" and
