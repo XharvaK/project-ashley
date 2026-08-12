@@ -22,16 +22,18 @@ ProtectSystem=strict
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
-# 02C: the physical Bubblewrap profile requires the full host namespace
+# 02D: the physical Bubblewrap profile requires the full host namespace
 # prerequisite set. Bubblewrap explicitly unshares pid, net, uts, and ipc;
-# user and mount remain host prerequisites for the provider boundary.
-RestrictNamespaces=user mount pid net uts ipc
+# user and the systemd `mnt` token (mount namespace) remain host prerequisites
+# for the provider boundary.
+RestrictNamespaces=user mnt pid net uts ipc
 RestrictSUIDSGID=true
 LockPersonality=true
 CapabilityBoundingSet=
 AmbientCapabilities=
 RestrictAddressFamilies=AF_UNIX
-MemoryMax=384M
+MemoryHigh=1536M
+MemoryMax=2048M
 TasksMax=64
 CPUQuota=100%
 ReadOnlyPaths=/opt/ashley-sandbox

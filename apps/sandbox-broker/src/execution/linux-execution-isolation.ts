@@ -14,7 +14,7 @@
  *                                     `prepare()` until qualified on the
  *                                     target host, and the systemd unit's
  *                                     `RestrictNamespaces=user net` must
- *                                     become `user net mount pid` first
+ *                                     become `user net mnt pid` first
  *                                     (inactive source change; qualifying
  *                                     that combination invalidates the
  *                                     current R5A/R5B evidence)
@@ -54,7 +54,7 @@ import {
 /**
  * Candidate A process/mount containment argv builder. Design and tests
  * only — deliberately NOT used by `prepare()`: wiring it in requires the
- * inactive systemd `RestrictNamespaces=user net mount pid` change and a
+ * inactive systemd `RestrictNamespaces=user net mnt pid` change and a
  * Mint qualification run first (see module header).
  */
 export function buildUnshareProcessIsolationArgv(

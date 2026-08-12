@@ -7,6 +7,13 @@ const qualificationHelper = readFileSync(
   ),
   "utf8",
 );
+const serviceUnit = readFileSync(
+  new URL(
+    "../../../../deploy/linux-mint/sandbox/systemd/ashley-exec-broker.service",
+    import.meta.url,
+  ),
+  "utf8",
+);
 describe("02C qualification helper source contract", () => {
   it("validates an EnvironmentFile-backed gate without printing environment contents", () => {
     expect(qualificationHelper).toContain(
@@ -108,5 +115,27 @@ describe("02C qualification helper source contract", () => {
     expect(qualificationHelper).toContain('BLOCKED sudo_noninteractive_unavailable');
     expect(qualificationHelper).toContain('die transient_descendant_remains');
     expect(qualificationHelper).toContain('production_zero_digest_post');
+  });
+  it("pins the corrected systemd namespace and memory contract", () => {
+    expect(serviceUnit).toContain(
+      "RestrictNamespaces=user mnt pid net uts ipc",
+    );
+    expect(qualificationHelper).toContain(
+      'EXPECTED_RESTRICT_NAMESPACES="user mnt pid net uts ipc"',
+    );
+    expect(serviceUnit).toContain("MemoryHigh=1536M");
+    expect(serviceUnit).toContain("MemoryMax=2048M");
+    expect(qualificationHelper).toContain('EXPECTED_MEMORY_HIGH="1536M"');
+    expect(qualificationHelper).toContain('EXPECTED_MEMORY_MAX="2048M"');
+    expect(qualificationHelper).toContain("1610612736");
+    expect(qualificationHelper).toContain("2147483648");
+    expect(serviceUnit).not.toContain(
+      "RestrictNamespaces=user mount pid net uts ipc",
+    );
+    expect(qualificationHelper).not.toContain(
+      'RestrictNamespaces="user mount pid net uts ipc"',
+    );
+    expect(serviceUnit).not.toContain("MemoryMax=384M");
+    expect(qualificationHelper).not.toContain("402653184");
   });
 });

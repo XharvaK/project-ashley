@@ -61,7 +61,8 @@ powershell -File scripts\mint\sandbox.ps1 -Action Install -Apply -PushFirst `
 
 The broker refuses to start when `none` is selected unless its boot-time
 active probe proves the isolation mechanism works under the installed
-systemd hardening (`RestrictNamespaces=user net`).
+systemd hardening (`RestrictNamespaces=user mnt pid net uts ipc`; `mnt` is
+systemd's mount-namespace token).
 
 5. **Release qualification and agent opt-in** remain separate gates. Installing
 the daemon does not enable `ASHLEY_SANDBOX_BROKER_ENABLED` or grant Ashley a

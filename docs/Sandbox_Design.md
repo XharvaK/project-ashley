@@ -358,14 +358,24 @@ documented; stale nonce/tombstone stores require operator acknowledgment.
 ## 6. Resource enforcement (4 GB / dual-core — conservative first broker)
 
 **Design principle:** `ProtectControlGroups=true` on the broker unit — **no per-task
-cgroup delegation** in v1. Service-level `MemoryMax`/`TasksMax` are the hard boundary.
+cgroup delegation** in v1. Service-level `MemoryHigh`/`MemoryMax`/`TasksMax` are
+the hard boundary.
 PGID tracking + timeout cleanup are the per-task isolation mechanism. Per-task RSS
 figures are **advisory logging only** until a future design explicitly enables
 `Delegate=yes` with compatible cgroup hardening.
 
+**RESOURCE-ISOLATION-FOLLOWUP (frozen, not implemented):** The broker control-plane
+resource budget is distinct from the sandbox workload resource budget. The current
+02D contract intentionally keeps one combined service cgroup. A future execution
+unit, scope, or container cgroup should carry the task budget for memory, CPU,
+process count, deadline, and other task limits, so browser/build/test workers do
+not consume the broker's survival budget. Per-task cgroups are not implemented by
+02D.
+
 | Layer | Limit | Default | On exceed |
 |-------|-------|---------|-----------|
-| **Service** `MemoryMax` | Broker + all children (single running task) | 384 MB | systemd OOM kill; task → `failed`/`oom_service`; broker restart |
+| **Service** `MemoryHigh` | Broker + all children (single running task) | 1536 MB | cgroup pressure/throttling threshold |
+| **Service** `MemoryMax` | Broker + all children (single running task) | 2048 MB | systemd OOM kill; task → `failed`/`oom_service`; broker restart |
 | **Service** `TasksMax` | Total processes in broker tree | 64 | Refuse spawn; `failed`/`service_task_limit` |
 | **Service** `CPUQuota` | 100% = one full CPU per period | 100% | Throttle broker tree |
 | **Concurrent tasks** | Broker-enforced | **1** | Reject/queue `task.submit` with `concurrency_limit` |
@@ -377,8 +387,9 @@ figures are **advisory logging only** until a future design explicitly enables
 | **Per-artifact** | Max declared size | 10 MB | Reject at `begin` |
 | **Per-task artifacts** | Aggregate | 50 MB | Reject |
 
-**Why max 1 concurrent task:** A 384 MB service `MemoryMax` cannot safely host two
-memory-heavy tasks. Serial execution is the conservative v1 choice.
+**Why max 1 concurrent task:** A 2048 MB service `MemoryMax` still cannot safely
+host two memory-heavy tasks on the target host. Serial execution is the
+conservative v1 choice.
 
 **Per-task accounting (v1):** One Linux process group (PGID) per `taskId`; track wall
 clock, child count, advisory RSS from `/proc`. **No** delegated child cgroups
@@ -392,7 +403,13 @@ clock, child count, advisory RSS from `/proc`. **No** delegated child cgroups
 **Broker restart:** Kill/reap PGID; mark `running` → `failed`/`broker_restart`; never
 auto-reexecute.
 
-**Host budget:** agent 512M + discord 256M + broker 384M + OS ~1.5G on 4 GB Mint.
+**Host budget:** agent 512M + discord 256M + broker 2048M + OS headroom. The
+selected broker ceiling is a cgroup limit, not a RAM reservation. Qualification
+records host memory, swap, observed cgroup usage, and OOM evidence before any
+future workload expansion.
+
+The corresponding cgroup v2 values are `memory.high=1610612736` and
+`memory.max=2147483648`.
 
 ---
 
@@ -414,13 +431,13 @@ auto-reexecute.
 | `ProtectKernelTunables=true` | Block sysctl writes |
 | `ProtectKernelModules=true` | Block module load |
 | `ProtectControlGroups=true` | **Keep true**; no child cgroup delegation in v1 |
-| `RestrictNamespaces=user net` | Allow user + network namespace creation only (R5B): the unshare isolation mechanism needs `CLONE_NEWUSER\|CLONE_NEWNET`; mount/pid/uts/ipc/cgroup/time stay blocked. Broker refuses to start unless its boot-time active probe succeeds under this exact context |
+| `RestrictNamespaces=user mnt pid net uts ipc` | Full host namespace prerequisite set for the qualified Bubblewrap boundary. `mnt` is systemd's mount-namespace token; Bubblewrap explicitly unshares pid/net/uts/ipc. Broker refuses to start unless qualification verifies this effective property |
 | `RestrictSUIDSGID=true` | No setuid execution |
 | `LockPersonality=true` | Block personality abuse |
 | `DevicePolicy=closed` | Deny devices |
 | `ReadWritePaths=/var/lib/ashley-sandbox` | Persistent writes only |
 | `InaccessiblePaths=` | Doc secrets, live repo, SSH — hard deny |
-| `MemoryMax=384M` `TasksMax=64` `CPUQuota=100%` | Service hard caps |
+| `MemoryHigh=1536M` `MemoryMax=2048M` `TasksMax=64` `CPUQuota=100%` | Service hard caps; cgroup v2 values are `1610612736` and `2147483648` |
 | `RestrictAddressFamilies=AF_UNIX` | Default no network |
 | `Environment=` allowlist | No inherited secrets |
 | `UMask=0077` | Restrictive creates |
@@ -429,9 +446,10 @@ auto-reexecute.
 `SocketUser`, `SocketGroup`, `SocketMode`, `RuntimeDirectory`, `RuntimeDirectoryMode`
 for `/run/ashley/`. Service unit does **not** duplicate socket ACL.
 
-**Deferred:** `Delegate=yes` per-task cgroups; `RestrictNamespaces` is already
-narrowed to `user net` for the R5B-qualified isolation runtime — no further
-namespace exceptions are planned.
+**Deferred:** `Delegate=yes` per-task cgroups and the separate task execution
+budget described in `RESOURCE-ISOLATION-FOLLOWUP`; the current combined service
+cgroup remains the only resource boundary. No namespace exceptions are planned
+for the qualified Bubblewrap profile.
 
 **R5B network evidence:** the authoritative proof that the recipe child lives
 in its own network namespace is the **namespace-scoped `/proc/net/dev`**,

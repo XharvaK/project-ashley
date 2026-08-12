@@ -98,6 +98,11 @@ require_equal host_kernel "$(uname -r)" 6.17.0-29-generic
 require_equal host_systemd_major "$(systemd --version | awk 'NR == 1 { print $2 }')" 255
 systemd --version | grep -q '255\.4' || die host_systemd_patch_mismatch
 [[ -e /sys/fs/cgroup/cgroup.controllers ]] || die cgroup_v2_missing
+EXPECTED_RESTRICT_NAMESPACES="user mnt pid net uts ipc"
+EXPECTED_MEMORY_HIGH="1536M"
+EXPECTED_MEMORY_MAX="2048M"
+EXPECTED_MEMORY_HIGH_BYTES=1610612736
+EXPECTED_MEMORY_MAX_BYTES=2147483648
 normalize_namespace_set() {
   printf '%s\n' "$1" | tr ' ' '\n' | sed '/^$/d' | LC_ALL=C sort | paste -sd' ' -
 }
@@ -120,6 +125,7 @@ boundary_payload() {
     "RestrictNamespaces=$(normalize_namespace_set "$(systemctl show "$unit" -p RestrictNamespaces --value)")" \
     "RestrictAddressFamilies=$(systemctl show "$unit" -p RestrictAddressFamilies --value)" \
     "CPUQuotaPerSecUSec=$(systemctl show "$unit" -p CPUQuotaPerSecUSec --value)" \
+    "MemoryHigh=$(systemctl show "$unit" -p MemoryHigh --value)" \
     "MemoryMax=$(systemctl show "$unit" -p MemoryMax --value)" \
     "TasksMax=$(systemctl show "$unit" -p TasksMax --value)" \
     "Delegate=$(systemctl show "$unit" -p Delegate --value)" \
@@ -145,6 +151,7 @@ boundary_payload() {
     "Group=$(systemctl show "$unit" -p Group --value)" \
     "WorkingDirectory=$(systemctl show "$unit" -p WorkingDirectory --value)" \
     "cpu.max=$(cat "$cgroup_root/cpu.max")" \
+    "memory.high=$(cat "$cgroup_root/memory.high")" \
     "memory.max=$(cat "$cgroup_root/memory.max")" \
     "pids.max=$(cat "$cgroup_root/pids.max")"
 }
@@ -165,9 +172,10 @@ require_equal runtime_directory_declared_mode "$(systemctl show "$SOCKET" -p Run
 require_equal service_environment_files "$(systemctl show "$SERVICE" -p EnvironmentFiles --value)" "/etc/ashley-sandbox/broker.env (ignore_errors=yes)"
 require_namespace_set restrict_namespaces \
   "$(systemctl show "$SERVICE" -p RestrictNamespaces --value)" \
-  "user mount pid net uts ipc"
+  "$EXPECTED_RESTRICT_NAMESPACES"
 require_equal cpu_quota "$(systemctl show "$SERVICE" -p CPUQuotaPerSecUSec --value)" 1s
-require_equal memory_max "$(systemctl show "$SERVICE" -p MemoryMax --value)" 402653184
+require_equal memory_high "$(systemctl show "$SERVICE" -p MemoryHigh --value)" "$EXPECTED_MEMORY_HIGH_BYTES"
+require_equal memory_max "$(systemctl show "$SERVICE" -p MemoryMax --value)" "$EXPECTED_MEMORY_MAX_BYTES"
 require_equal tasks_max "$(systemctl show "$SERVICE" -p TasksMax --value)" 64
 require_equal address_families "$(systemctl show "$SERVICE" -p RestrictAddressFamilies --value)" AF_UNIX
 require_equal delegate "$(systemctl show "$SERVICE" -p Delegate --value)" no
@@ -196,7 +204,8 @@ CGROUP="$(systemctl show "$SERVICE" -p ControlGroup --value)"
 [[ "$CGROUP" == /system.slice/ashley-exec-broker.service ]] || die cgroup_changed
 CGROUP_ROOT="/sys/fs/cgroup$CGROUP"
 require_equal cpu_max "$(cat "$CGROUP_ROOT/cpu.max")" "100000 100000"
-require_equal memory_cgroup_max "$(cat "$CGROUP_ROOT/memory.max")" 402653184
+require_equal memory_cgroup_high "$(cat "$CGROUP_ROOT/memory.high")" "$EXPECTED_MEMORY_HIGH_BYTES"
+require_equal memory_cgroup_max "$(cat "$CGROUP_ROOT/memory.max")" "$EXPECTED_MEMORY_MAX_BYTES"
 require_equal pids_cgroup_max "$(cat "$CGROUP_ROOT/pids.max")" 64
 require_path /run/ashley
 require_equal runtime_directory_mode "$(stat -c '%a' /run/ashley)" 750
@@ -357,10 +366,11 @@ sudo -n /usr/bin/systemd-run \
   --property=User=ashley-sandbox \
   --property=Group=ashley-sandbox \
   --property=WorkingDirectory=/var/lib/ashley-sandbox \
-  --property=RestrictNamespaces="user mount pid net uts ipc" \
+  --property=RestrictNamespaces="$EXPECTED_RESTRICT_NAMESPACES" \
   --property=RestrictAddressFamilies=AF_UNIX \
   --property=CPUQuota=100% \
-  --property=MemoryMax=402653184 \
+  --property=MemoryHigh="$EXPECTED_MEMORY_HIGH" \
+  --property=MemoryMax="$EXPECTED_MEMORY_MAX" \
   --property=TasksMax=64 \
   --property=Delegate=no \
   --property=PrivateTmp=yes \

@@ -122,10 +122,12 @@ namespaces through `--unshare-pid`, `--unshare-net`, `--unshare-uts`, and
 mount-namespace boundary. Unprivileged operation also requires user-namespace
 support. The plan does not bind `/` or the broker control plane.
 
-The inactive systemd source remains `RestrictNamespaces=user net`; no live
-unit was changed. The future Mint allowance must cover the union
-`user net mount pid uts ipc` before this provider can be qualified. This is a
-qualification requirement, not evidence that the current service is ready.
+The 02D source contract requires `RestrictNamespaces=user mnt pid net uts ipc`;
+`mnt` is systemd's mount-namespace identifier. The qualification helper verifies
+the effective systemd property after installation and reload. No 02D physical
+qualification has passed, so this source contract is not evidence that the
+current host service is ready. The provider remains fail-closed until the fresh
+physical run produces bound evidence.
 
 ## 2. Broker status surface
 
