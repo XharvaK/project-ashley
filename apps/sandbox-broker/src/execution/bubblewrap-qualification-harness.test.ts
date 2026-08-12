@@ -652,3 +652,192 @@ describe("02J canonical address-family set comparison", () => {
     expect(canonical.stdout.trim()).not.toBe(changed.stdout.trim());
   });
 });
+describe("02K complete qualification runtime import closure", () => {
+  const importClosureStart = qualificationHelper.indexOf(
+    "verify_runtime_import_closure() {",
+  );
+  const importClosureEnd = qualificationHelper.indexOf(
+    "\n}",
+    importClosureStart,
+  );
+  const importClosureSource = qualificationHelper.slice(
+    importClosureStart,
+    importClosureEnd + 2,
+  );
+
+  function runRuntimeImportClosureCheck(
+    omitted: "none" | "bounded-output" | "crypto-types" = "none",
+  ) {
+    return spawnSync(
+      "bash",
+      [
+        "-c",
+        [
+          "set -u",
+          importClosureSource,
+          'RUNTIME_ROOT="$(mktemp -d)/runtime"',
+          'mkdir -p "$RUNTIME_ROOT/execution" "$RUNTIME_ROOT/process" "$RUNTIME_ROOT/crypto"',
+          'printf \'%s\\n\' \'import "./bounded-output.js";\' > "$RUNTIME_ROOT/execution/bubblewrap-qualification-runner.js"',
+          'printf \'%s\\n\' \'import "../crypto/types.js";\' > "$RUNTIME_ROOT/execution/bounded-output.js"',
+          'printf \'%s\\n\' \'export const ready = true;\' > "$RUNTIME_ROOT/crypto/types.js"',
+          'printf \'%s\\n\' \'export const ready = true;\' > "$RUNTIME_ROOT/execution/bubblewrap-execution-isolation.js"',
+          'printf \'%s\\n\' \'export const ready = true;\' > "$RUNTIME_ROOT/execution/execution-isolation.js"',
+          'printf \'%s\\n\' \'export const ready = true;\' > "$RUNTIME_ROOT/process/real-runner.js"',
+          'if [[ "$2" == "bounded-output" ]]; then rm "$RUNTIME_ROOT/execution/bounded-output.js"; fi',
+          'if [[ "$2" == "crypto-types" ]]; then rm "$RUNTIME_ROOT/crypto/types.js"; fi',
+          'sudo() {',
+          '  while (($# > 0)); do',
+          '    case "$1" in',
+          '      -n) shift ;;',
+          '      -u) shift 2 ;;',
+          '      --) shift; break ;;',
+          '      *) break ;;',
+          '    esac',
+          '  done',
+          '  "$@"',
+          '}',
+          'die() { printf \'BLOCKED %s\\n\' "$1" >&2; return 1; }',
+          'NODE_BIN="$1"',
+          'set +e',
+          'verify_runtime_import_closure',
+          'status=$?',
+          'rm -rf "$RUNTIME_ROOT"',
+          'exit "$status"',
+        ].join("\n"),
+        "runtime-import-closure",
+        process.execPath,
+        omitted,
+      ],
+      { encoding: "utf8" },
+    );
+  }
+
+  it("requires and stages the two missing compiled runtime dependencies", () => {
+    for (const [source, runtime] of [
+      [
+        'BOUNDED_OUTPUT_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/execution/bounded-output.js"',
+        'BOUNDED_OUTPUT_RUNTIME="$RUNTIME_ROOT/execution/bounded-output.js"',
+      ],
+      [
+        'CRYPTO_TYPES_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/crypto/types.js"',
+        'CRYPTO_TYPES_RUNTIME="$RUNTIME_ROOT/crypto/types.js"',
+      ],
+    ]) {
+      expect(qualificationHelper).toContain(source);
+      expect(qualificationHelper).toContain(runtime);
+    }
+    for (const artifact of [
+      'sudo -n install -o root -g ashley-sandbox -m 0550 "$BOUNDED_OUTPUT_SOURCE" "$BOUNDED_OUTPUT_RUNTIME"',
+      'sudo -n install -o root -g ashley-sandbox -m 0550 "$CRYPTO_TYPES_SOURCE" "$CRYPTO_TYPES_RUNTIME"',
+    ]) {
+      expect(qualificationHelper).toContain(artifact);
+    }
+    expect(qualificationHelper).toContain('"$RUNTIME_ROOT/crypto"');
+    expect(qualificationHelper).toContain(
+      'require_path "$BOUNDED_OUTPUT_SOURCE"',
+    );
+    expect(qualificationHelper).toContain(
+      'require_path "$CRYPTO_TYPES_SOURCE"',
+    );
+    const buildIndex = qualificationHelper.indexOf(
+      'npm --prefix "$SOURCE_ROOT/apps/sandbox-broker" run build',
+    );
+    for (const sourceCheck of [
+      'require_path "$BOUNDED_OUTPUT_SOURCE"',
+      'require_path "$CRYPTO_TYPES_SOURCE"',
+    ]) {
+      expect(qualificationHelper.indexOf(sourceCheck)).toBeGreaterThan(
+        buildIndex,
+      );
+      expect(qualificationHelper.indexOf(sourceCheck)).toBeLessThan(
+        qualificationHelper.indexOf(
+          'sudo -n rm -rf -- "$QUALIFICATION_ROOT"',
+        ),
+      );
+    }
+  });
+
+  it("binds both runtime dependencies into the physical artifact manifest", () => {
+    for (const manifestArgument of [
+      '--arg bounded_output_source "$BOUNDED_OUTPUT_SOURCE"',
+      '--arg bounded_output_runtime "$BOUNDED_OUTPUT_RUNTIME"',
+      '--arg bounded_output_sha "$(sha256_path "$BOUNDED_OUTPUT_SOURCE")"',
+      '--arg crypto_types_source "$CRYPTO_TYPES_SOURCE"',
+      '--arg crypto_types_runtime "$CRYPTO_TYPES_RUNTIME"',
+      '--arg crypto_types_sha "$(sha256_path "$CRYPTO_TYPES_SOURCE")"',
+    ]) {
+      expect(qualificationHelper).toContain(manifestArgument);
+    }
+    for (const manifestArtifact of [
+      '{name: "bounded-output", sourcePath: $bounded_output_source, runtimePath: $bounded_output_runtime, sha256: $bounded_output_sha, owner: "root:ashley-sandbox", mode: "0550"}',
+      '{name: "crypto-types", sourcePath: $crypto_types_source, runtimePath: $crypto_types_runtime, sha256: $crypto_types_sha, owner: "root:ashley-sandbox", mode: "0550"}',
+    ]) {
+      expect(qualificationHelper).toContain(manifestArtifact);
+    }
+  });
+
+  it("validates the staged ESM closure as ashley-sandbox with pinned Node before launch", () => {
+    expect(importClosureStart).toBeGreaterThanOrEqual(0);
+    expect(importClosureSource).toContain(
+      "sudo -n -u ashley-sandbox -- /usr/bin/env -i",
+    );
+    expect(importClosureSource).toContain('HOME=/home/ashley');
+    expect(importClosureSource).toContain('PATH=/usr/bin');
+    expect(importClosureSource).toContain('"$NODE_BIN"');
+    expect(importClosureSource).toContain("--input-type=module");
+    expect(importClosureSource).toContain("--eval");
+    for (const runtimeModule of [
+      '"$RUNTIME_ROOT/execution/bubblewrap-qualification-runner.js"',
+      '"$RUNTIME_ROOT/execution/bubblewrap-execution-isolation.js"',
+      '"$RUNTIME_ROOT/execution/execution-isolation.js"',
+      '"$RUNTIME_ROOT/process/real-runner.js"',
+      '"$RUNTIME_ROOT/execution/bounded-output.js"',
+      '"$RUNTIME_ROOT/crypto/types.js"',
+    ]) {
+      expect(importClosureSource).toContain(runtimeModule);
+    }
+    expect(importClosureSource).not.toContain("SOURCE_ROOT");
+    expect(importClosureSource).not.toContain("NODE_PATH");
+    expect(importClosureSource).toContain(
+      "die qualification_runtime_import_closure_invalid",
+    );
+    const invocationIndex = qualificationHelper.lastIndexOf(
+      "\nverify_runtime_import_closure\n",
+    );
+    expect(invocationIndex).toBeGreaterThan(
+      qualificationHelper.indexOf("FIXTURE_MANIFEST_DIGEST="),
+    );
+    expect(invocationIndex).toBeLessThan(
+      qualificationHelper.indexOf("sudo -n /usr/bin/systemd-run"),
+    );
+  });
+
+  it("accepts a complete staged ESM closure", () => {
+    const result = runRuntimeImportClosureCheck();
+    expect(result.status).toBe(0);
+  });
+
+  it.each(["bounded-output", "crypto-types"] as const)(
+    "blocks an omitted %s dependency with the typed pre-launch reason",
+    (omitted) => {
+      const result = runRuntimeImportClosureCheck(omitted);
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        "BLOCKED qualification_runtime_import_closure_invalid",
+      );
+      const output = result.stdout + result.stderr;
+      expect(output).not.toContain("systemd-run");
+    },
+  );
+
+  it("routes missing physical probe evidence through bounded transient diagnostics", () => {
+    expect(qualificationHelper).toContain(
+      'sudo -n grep -q \'"status": "qualified"\' "$TRANSIENT_LOG" || die_transient_with_diagnostics physical_probe_result_missing',
+    );
+    expect(qualificationHelper).not.toContain(
+      'sudo -n grep -q \'"status": "qualified"\' "$TRANSIENT_LOG" || die physical_probe_result_missing',
+    );
+    expect(qualificationHelper).toContain("die transient_log_missing");
+    expect(qualificationHelper).toContain("/usr/bin/tail -c 4096");
+  });
+});

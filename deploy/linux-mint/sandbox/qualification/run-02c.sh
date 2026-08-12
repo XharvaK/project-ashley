@@ -45,6 +45,10 @@ ISOLATION_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/execution/bubblewrap-exe
 EXECUTION_ISOLATION_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/execution/execution-isolation.js"
 REAL_RUNNER_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/process/real-runner.js"
 CLI_RUNTIME="$RUNTIME_ROOT/execution/bubblewrap-qualification-cli.js"
+BOUNDED_OUTPUT_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/execution/bounded-output.js"
+CRYPTO_TYPES_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/crypto/types.js"
+BOUNDED_OUTPUT_RUNTIME="$RUNTIME_ROOT/execution/bounded-output.js"
+CRYPTO_TYPES_RUNTIME="$RUNTIME_ROOT/crypto/types.js"
 die() {
   printf 'BLOCKED %s\n' "${1:-qualification_failed}" >&2
   exit 1
@@ -177,6 +181,8 @@ require_path "$PROBE_SOURCE"
 require_path "$CLI_SOURCE"
 require_path "$POLICY_PREFLIGHT_SOURCE"
 require_path "$SERVICE_STABILITY_SOURCE"
+require_path "$BOUNDED_OUTPUT_SOURCE"
+require_path "$CRYPTO_TYPES_SOURCE"
 require_path "$PRODUCTION_ROOT/.git"
 require_path "$FROZEN_ROOT/.git"
 require_path "$PRODUCTION_ROOT/0"
@@ -475,13 +481,15 @@ prepare_transient_unit
 sudo -n rm -rf -- "$QUALIFICATION_ROOT" "$FIXTURE_ROOT" "$WORKSPACE_ROOT" "$EVIDENCE_PATH" "$FIXTURE_MANIFEST_PATH" "$INVENTORY_PATH" "$CANARY_RECEIPT_PATH"
 sudo -n install -d -o ashley-sandbox -g ashley-sandbox -m 0750 \
   "$QUALIFICATION_ROOT" "$RUNTIME_ROOT" "$RUNTIME_ROOT/execution" \
-  "$RUNTIME_ROOT/process" "$EVIDENCE_DIR" "$FIXTURE_ROOT" "$WORKSPACE_ROOT"
+  "$RUNTIME_ROOT/process" "$RUNTIME_ROOT/crypto" "$EVIDENCE_DIR" "$FIXTURE_ROOT" "$WORKSPACE_ROOT"
 sudo -n install -o root -g ashley-sandbox -m 0550 "$PROBE_SOURCE" "$PROBE_RUNTIME"
 sudo -n install -o root -g ashley-sandbox -m 0550 "$CLI_SOURCE" "$RUNTIME_ROOT/execution/bubblewrap-qualification-cli.js"
 sudo -n install -o root -g ashley-sandbox -m 0550 "$RUNNER_SOURCE" "$RUNTIME_ROOT/execution/bubblewrap-qualification-runner.js"
 sudo -n install -o root -g ashley-sandbox -m 0550 "$ISOLATION_SOURCE" "$RUNTIME_ROOT/execution/bubblewrap-execution-isolation.js"
 sudo -n install -o root -g ashley-sandbox -m 0550 "$EXECUTION_ISOLATION_SOURCE" "$RUNTIME_ROOT/execution/execution-isolation.js"
 sudo -n install -o root -g ashley-sandbox -m 0550 "$REAL_RUNNER_SOURCE" "$RUNTIME_ROOT/process/real-runner.js"
+sudo -n install -o root -g ashley-sandbox -m 0550 "$BOUNDED_OUTPUT_SOURCE" "$BOUNDED_OUTPUT_RUNTIME"
+sudo -n install -o root -g ashley-sandbox -m 0550 "$CRYPTO_TYPES_SOURCE" "$CRYPTO_TYPES_RUNTIME"
 sudo -n chown root:ashley-sandbox "$CLI_RUNTIME"
 sudo -n chmod 0550 "$CLI_RUNTIME"
 printf 'SANDBOX-ISOLATION-02C synthetic fixture\n' | sudo -n tee "$FIXTURE_ROOT/fixture.txt" >/dev/null
@@ -489,6 +497,21 @@ sudo -n chown ashley-sandbox:ashley-sandbox "$FIXTURE_ROOT/fixture.txt"
 sudo -n chmod 0440 "$FIXTURE_ROOT/fixture.txt"
 sha256_path() {
   sudo -n sha256sum "$1" | awk '{print $1}'
+}
+verify_runtime_import_closure() {
+  sudo -n -u ashley-sandbox -- /usr/bin/env -i \
+    HOME=/home/ashley \
+    PATH=/usr/bin \
+    "$NODE_BIN" \
+    --input-type=module \
+    --eval 'for (const modulePath of process.argv.slice(1)) await import(modulePath)' \
+    "$RUNTIME_ROOT/execution/bubblewrap-qualification-runner.js" \
+    "$RUNTIME_ROOT/execution/bubblewrap-execution-isolation.js" \
+    "$RUNTIME_ROOT/execution/execution-isolation.js" \
+    "$RUNTIME_ROOT/process/real-runner.js" \
+    "$RUNTIME_ROOT/execution/bounded-output.js" \
+    "$RUNTIME_ROOT/crypto/types.js" >/dev/null 2>&1 \
+    || die qualification_runtime_import_closure_invalid
 }
 INVENTORY_JSON="$(
   for inventory_path in \
@@ -578,6 +601,12 @@ FIXTURE_SHA="$(sha256_path "$FIXTURE_ROOT/fixture.txt")"
   --arg real_runner_source "$REAL_RUNNER_SOURCE" \
   --arg real_runner_runtime "$RUNTIME_ROOT/process/real-runner.js" \
   --arg real_runner_sha "$(sha256_path "$REAL_RUNNER_SOURCE")" \
+  --arg bounded_output_source "$BOUNDED_OUTPUT_SOURCE" \
+  --arg bounded_output_runtime "$BOUNDED_OUTPUT_RUNTIME" \
+  --arg bounded_output_sha "$(sha256_path "$BOUNDED_OUTPUT_SOURCE")" \
+  --arg crypto_types_source "$CRYPTO_TYPES_SOURCE" \
+  --arg crypto_types_runtime "$CRYPTO_TYPES_RUNTIME" \
+  --arg crypto_types_sha "$(sha256_path "$CRYPTO_TYPES_SOURCE")" \
   '{
     schema: $schema,
     sourceCommit: $source,
@@ -600,12 +629,15 @@ FIXTURE_SHA="$(sha256_path "$FIXTURE_ROOT/fixture.txt")"
       {name: "qualification-runner", sourcePath: $runner_source, runtimePath: $runner_runtime, sha256: $runner_sha, owner: "root:ashley-sandbox", mode: "0550"},
       {name: "bubblewrap-isolation", sourcePath: $isolation_source, runtimePath: $isolation_runtime, sha256: $isolation_sha, owner: "root:ashley-sandbox", mode: "0550"},
       {name: "execution-isolation", sourcePath: $execution_isolation_source, runtimePath: $execution_isolation_runtime, sha256: $execution_isolation_sha, owner: "root:ashley-sandbox", mode: "0550"},
-      {name: "real-runner", sourcePath: $real_runner_source, runtimePath: $real_runner_runtime, sha256: $real_runner_sha, owner: "root:ashley-sandbox", mode: "0550"}
+      {name: "real-runner", sourcePath: $real_runner_source, runtimePath: $real_runner_runtime, sha256: $real_runner_sha, owner: "root:ashley-sandbox", mode: "0550"},
+      {name: "bounded-output", sourcePath: $bounded_output_source, runtimePath: $bounded_output_runtime, sha256: $bounded_output_sha, owner: "root:ashley-sandbox", mode: "0550"},
+      {name: "crypto-types", sourcePath: $crypto_types_source, runtimePath: $crypto_types_runtime, sha256: $crypto_types_sha, owner: "root:ashley-sandbox", mode: "0550"}
     ]
   }' | sudo -n tee "$FIXTURE_MANIFEST_PATH" >/dev/null
 sudo -n chown root:ashley-sandbox "$FIXTURE_MANIFEST_PATH"
 sudo -n chmod 0440 "$FIXTURE_MANIFEST_PATH"
 FIXTURE_MANIFEST_DIGEST="$(sha256_path "$FIXTURE_MANIFEST_PATH")"
+verify_runtime_import_closure
 sudo -n chown -R ashley-sandbox:ashley-sandbox "$WORKSPACE_ROOT"
 sudo -n chmod 0750 "$WORKSPACE_ROOT"
 sudo -n /usr/bin/systemd-run \
@@ -700,7 +732,7 @@ if [[ -n "$TRANSIENT_CGROUP" && -e "/sys/fs/cgroup$TRANSIENT_CGROUP/cgroup.procs
   [[ ! -s "/sys/fs/cgroup$TRANSIENT_CGROUP/cgroup.procs" ]] || die transient_descendant_remains
 fi
 if sudo -n test -e "$TRANSIENT_LOG"; then
-  sudo -n grep -q '"status": "qualified"' "$TRANSIENT_LOG" || die physical_probe_result_missing
+  sudo -n grep -q '"status": "qualified"' "$TRANSIENT_LOG" || die_transient_with_diagnostics physical_probe_result_missing
 else
   die transient_log_missing
 fi
