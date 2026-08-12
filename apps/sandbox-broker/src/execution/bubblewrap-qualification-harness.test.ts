@@ -3,6 +3,8 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { BUBBLEWRAP_QUALIFICATION_TOOL_CONTRACT } from "./qualification-toolchain.js";
+import { createDefaultQualificationManifest } from "./bubblewrap-qualification-runner.js";
 const qualificationHelper = readFileSync(
   new URL(
     "../../../../deploy/linux-mint/sandbox/qualification/run-02c.sh",
@@ -38,6 +40,9 @@ const bubblewrapProbe = readFileSync(
     import.meta.url,
   ),
   "utf8",
+);
+const childExecutableReferences = new Set(
+  [...bubblewrapProbe.matchAll(/\/usr\/bin\/[A-Za-z0-9._-]+/g)].map((match) => match[0]),
 );
 describe("02C qualification helper source contract", () => {
   it("validates an EnvironmentFile-backed gate without printing environment contents", () => {
@@ -616,6 +621,26 @@ describe("02L POSIX child probe", () => {
       }
     },
   );
+});
+
+describe("02L reviewed child-tool inventory", () => {
+  it("covers every probe, lifecycle, and canary executable with the reviewed contract", () => {
+    const manifest = createDefaultQualificationManifest({
+      sourceCommit: "02l-tool-inventory",
+      fixtureRoot: "/var/lib/ashley-sandbox/qualification/fixture",
+      workspaceRoot: "/var/lib/ashley-sandbox/qualification/workspace",
+      probeScript: "/opt/ashley-sandbox/qualification/probe.sh",
+    });
+    for (const entry of [...manifest.probes, ...manifest.lifecycleChecks]) {
+      childExecutableReferences.add(entry.argv[0]!);
+    }
+    childExecutableReferences.add("/usr/bin/true");
+    expect([...childExecutableReferences].sort()).toEqual(
+      BUBBLEWRAP_QUALIFICATION_TOOL_CONTRACT.map((tool) => tool.path).sort(),
+    );
+    expect(childExecutableReferences).not.toContain("/usr/bin/awk");
+    expect(childExecutableReferences).not.toContain("/usr/bin/node");
+  });
 });
 describe("02J canonical address-family set comparison", () => {
   const tokenSetFunctionName = qualificationHelper.includes(

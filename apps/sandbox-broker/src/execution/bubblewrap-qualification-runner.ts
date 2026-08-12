@@ -34,6 +34,10 @@ import {
 } from "./bubblewrap-execution-isolation.js";
 import { buildBoundedCapture } from "./bounded-output.js";
 import type { IsolationEvidence } from "./execution-isolation.js";
+import {
+  BUBBLEWRAP_QUALIFICATION_TOOL_CONTRACT,
+  type QualificationToolContractEntry,
+} from "./qualification-toolchain.js";
 export type BubblewrapQualificationProbeSpec = {
   probeId: BubblewrapQualificationProbeId;
   phase: "negative" | "positive";
@@ -70,6 +74,7 @@ export type BubblewrapQualificationLifecycleCheck = {
 export type BubblewrapQualificationManifest = {
   manifestId: "bubblewrap-qualification-v1";
   sourceCommit: string;
+  tools: readonly QualificationToolContractEntry[];
   probes: readonly BubblewrapQualificationProbeSpec[];
   lifecycleChecks: readonly BubblewrapQualificationLifecycleCheck[];
 };
@@ -166,6 +171,93 @@ function failureDiagnostics(
   };
 }
 
+function toolchainFailure(tool: string): string {
+  return "qualification_probe_toolchain_invalid:" + tool;
+}
+
+function executableToolId(executable: unknown): string {
+  if (typeof executable !== "string" || executable.length === 0) {
+    return "executable";
+  }
+  const lastSlash = executable.lastIndexOf("/");
+  return lastSlash >= 0 ? executable.slice(lastSlash + 1) || executable : executable;
+}
+
+function validatedManifestToolchain(
+  tools: readonly QualificationToolContractEntry[] | undefined,
+): string | null {
+  if (!Array.isArray(tools)) return toolchainFailure("dash");
+
+  const seenIds = new Set<string>();
+  const seenPaths = new Set<string>();
+  for (const supplied of tools) {
+    if (
+      supplied === undefined ||
+      typeof supplied.id !== "string" ||
+      typeof supplied.path !== "string" ||
+      !Array.isArray(supplied.visibleRoots)
+    ) {
+      return toolchainFailure("contract");
+    }
+    if (seenIds.has(supplied.id) || seenPaths.has(supplied.path)) {
+      return toolchainFailure(supplied.id);
+    }
+    seenIds.add(supplied.id);
+    seenPaths.add(supplied.path);
+  }
+
+  const length = Math.max(tools.length, BUBBLEWRAP_QUALIFICATION_TOOL_CONTRACT.length);
+  for (let index = 0; index < length; index += 1) {
+    const supplied = tools[index];
+    const expected = BUBBLEWRAP_QUALIFICATION_TOOL_CONTRACT[index];
+    if (
+      supplied === undefined ||
+      expected === undefined ||
+      supplied.id !== expected.id ||
+      supplied.path !== expected.path ||
+      supplied.visibleRoots.length !== expected.visibleRoots.length ||
+      supplied.visibleRoots.some(
+        (root: string, rootIndex: number) => root !== expected.visibleRoots[rootIndex],
+      )
+    ) {
+      return toolchainFailure(expected?.id ?? supplied?.id ?? "contract");
+    }
+  }
+  return null;
+}
+
+function validatedChildExecutable(
+  argv: readonly string[],
+  tools: readonly QualificationToolContractEntry[],
+): string | null {
+  const executable = argv[0];
+  if (typeof executable !== "string" || !executable.startsWith("/")) {
+    return toolchainFailure(executableToolId(executable));
+  }
+  const matchedTool = tools.find((tool) => tool.path === executable);
+  if (matchedTool === undefined) return toolchainFailure(executableToolId(executable));
+  for (const argument of argv.slice(1)) {
+    if (
+      argument.startsWith("/usr/bin/") &&
+      !tools.some((tool) => tool.path === argument)
+    ) {
+      return toolchainFailure(executableToolId(argument));
+    }
+  }
+  return null;
+}
+
+function validatedChildExecutableCoverage(
+  manifest: BubblewrapQualificationManifest,
+): string | null {
+  const entries = [...manifest.probes, ...manifest.lifecycleChecks];
+  for (const entry of entries) {
+    const failure = validatedChildExecutable(entry.argv, manifest.tools);
+    if (failure !== null) return failure;
+  }
+  return validatedChildExecutable(["/usr/bin/true", "--smoke"], manifest.tools);
+}
+
 function validateManifest(
   manifest: BubblewrapQualificationManifest,
   sourceCommit: string,
@@ -176,6 +268,8 @@ function validateManifest(
   if (manifest.sourceCommit !== sourceCommit) {
     return "qualification_manifest_source_commit_mismatch";
   }
+  const toolchainFailureReason = validatedManifestToolchain(manifest.tools);
+  if (toolchainFailureReason !== null) return toolchainFailureReason;
   if (!Array.isArray(manifest.probes)) {
     return "qualification_manifest_probes_missing";
   }
@@ -255,6 +349,8 @@ function validateManifest(
   )) {
     return "qualification_manifest_lifecycle_check_order_mismatch";
   }
+  const executableCoverageFailure = validatedChildExecutableCoverage(manifest);
+  if (executableCoverageFailure !== null) return executableCoverageFailure;
   return null;
 }
 
@@ -532,6 +628,13 @@ export type BubblewrapQualificationCanaryRunResult =
 export async function runBubblewrapQualificationCanary(
   options: BubblewrapQualificationCanaryRunOptions,
 ): Promise<BubblewrapQualificationCanaryRunResult> {
+  const manifestFailure = validateManifest(options.manifest, options.sourceCommit);
+  if (manifestFailure !== null) {
+    return {
+      status: "not_qualified",
+      reason: manifestFailure,
+    };
+  }
   if (options.qualification.status !== "qualified") {
     return {
       status: "not_qualified",
@@ -757,6 +860,7 @@ export function createDefaultQualificationManifest(
   return {
     manifestId: "bubblewrap-qualification-v1",
     sourceCommit: options.sourceCommit,
+    tools: BUBBLEWRAP_QUALIFICATION_TOOL_CONTRACT,
     probes,
     lifecycleChecks,
   };

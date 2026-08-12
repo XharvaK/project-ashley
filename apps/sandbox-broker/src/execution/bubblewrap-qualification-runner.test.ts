@@ -1,5 +1,14 @@
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ScriptedProcessRunner } from "../process/fake-runner.js";
+import {
+  ScriptedProcessRunner,
+  type FakeRunRequest,
+  type FakeRunResult,
+  type ProcessRunner,
+} from "../process/fake-runner.js";
+import { BUBBLEWRAP_QUALIFICATION_TOOL_CONTRACT } from "./qualification-toolchain.js";
 import {
   BUBBLEWRAP_PROFILE_FINGERPRINT,
   BUBBLEWRAP_PROVIDER_VERSION_IDENTITY,
@@ -11,6 +20,7 @@ import {
 } from "./bubblewrap-execution-isolation.js";
 import {
   createDefaultQualificationManifest,
+  digestQualificationManifest,
   digestProbeOutput,
   runBubblewrapQualificationCanary,
   runBubblewrapQualification,
@@ -66,6 +76,217 @@ function options(
   };
 }
 describe("Bubblewrap physical qualification runner", () => {
+  it.each([
+    ["missing", [] as const, "dash"],
+    [
+      "changed",
+      [
+        { ...BUBBLEWRAP_QUALIFICATION_TOOL_CONTRACT[0]!, path: "/usr/bin/sh" },
+        ...BUBBLEWRAP_QUALIFICATION_TOOL_CONTRACT.slice(1),
+      ],
+      "dash",
+    ],
+    [
+      "reordered",
+      [
+        BUBBLEWRAP_QUALIFICATION_TOOL_CONTRACT[1]!,
+        BUBBLEWRAP_QUALIFICATION_TOOL_CONTRACT[0]!,
+        ...BUBBLEWRAP_QUALIFICATION_TOOL_CONTRACT.slice(2),
+      ],
+      "dash",
+    ],
+    [
+      "duplicate",
+      [
+        BUBBLEWRAP_QUALIFICATION_TOOL_CONTRACT[0]!,
+        BUBBLEWRAP_QUALIFICATION_TOOL_CONTRACT[0]!,
+        ...BUBBLEWRAP_QUALIFICATION_TOOL_CONTRACT.slice(2),
+      ],
+      "dash",
+    ],
+    [
+      "relative",
+      [
+        { ...BUBBLEWRAP_QUALIFICATION_TOOL_CONTRACT[0]!, path: "dash" },
+        ...BUBBLEWRAP_QUALIFICATION_TOOL_CONTRACT.slice(1),
+      ],
+      "dash",
+    ],
+    [
+      "undeclared",
+      [
+        ...BUBBLEWRAP_QUALIFICATION_TOOL_CONTRACT,
+        { id: "rogue", path: "/usr/bin/rogue", visibleRoots: ["/usr"] },
+      ],
+      "rogue",
+    ],
+  ] as const)(
+    "fails closed before launching when the tool list is %s",
+    async (_caseName, tools, tool) => {
+      let invocations = 0;
+      const base = manifest();
+      const changed = { ...base, tools } as BubblewrapQualificationManifest;
+      const result = await runBubblewrapQualification({
+        ...options(changed),
+        processRunner: {
+          async run() {
+            invocations += 1;
+            return {
+              exitCode: 0,
+              stdout: "ok",
+              stderr: "",
+              truncated: false,
+              terminalReason: "success" as const,
+            };
+          },
+        },
+      });
+      expect(result).toMatchObject({
+        status: "not_qualified",
+        reason: "qualification_probe_toolchain_invalid:" + tool,
+      });
+      expect(invocations).toBe(0);
+    },
+  );
+
+  it("fails closed before launching an undeclared child executable", async () => {
+    let invocations = 0;
+    const base = manifest();
+    const changed: BubblewrapQualificationManifest = {
+      ...base,
+      probes: [
+        { ...base.probes[0]!, argv: ["/usr/bin/rogue", "probe"] },
+        ...base.probes.slice(1),
+      ],
+    };
+    const result = await runBubblewrapQualification({
+      ...options(changed),
+      processRunner: {
+        async run() {
+          invocations += 1;
+          throw new Error("toolchain failure must not launch a child");
+        },
+      },
+    });
+    expect(result).toMatchObject({
+      status: "not_qualified",
+      reason: "qualification_probe_toolchain_invalid:rogue",
+    });
+    expect(invocations).toBe(0);
+  });
+
+  it("runs the synthetic complete path with manifest-bound evidence and a canary receipt", async () => {
+    const path = mkdtempSync(join(tmpdir(), "ashley-qualification-"));
+    const evidencePath = join(path, "evidence.json");
+    const receiptPath = join(path, "canary.json");
+    const stages: string[] = [];
+    let cancellationResolve: (() => void) | undefined;
+    const processRunner: ProcessRunner = {
+      async run(request: FakeRunRequest): Promise<FakeRunResult> {
+        const stage = request.taskId.replace("sandbox-isolation-02c-", "").replace("lifecycle-", "");
+        if (stage === "cancellation") {
+          stages.push(stage);
+          return new Promise((resolve) => {
+            cancellationResolve = () => resolve({ exitCode: 143, stdout: "", stderr: "", truncated: false, terminalReason: "cancelled" as const });
+          });
+        }
+        if (stage === "timeout") {
+          stages.push(stage);
+          return { exitCode: 143, stdout: "", stderr: "", truncated: false, terminalReason: "timeout" as const };
+        }
+        if (stage === "output_overflow") {
+          stages.push(stage);
+          return { exitCode: 143, stdout: "", stderr: "", truncated: true, terminalReason: "truncated" as const };
+        }
+        if (stage === "level-1-canary") {
+          return { exitCode: 0, stdout: "", stderr: "", truncated: false, terminalReason: "success" as const };
+        }
+        stages.push(stage);
+        return { exitCode: 0, stdout: "ok", stderr: "", truncated: false, terminalReason: "success" as const };
+      },
+      cancel(taskId: string) {
+        if (taskId.endsWith("lifecycle-cancellation")) {
+          cancellationResolve?.();
+          return true;
+        }
+        return false;
+      },
+    };
+    try {
+      const qualificationManifest = manifest();
+      const qualification = await runBubblewrapQualification({
+        ...options(qualificationManifest),
+        processRunner,
+        evidencePath,
+      });
+      expect(qualification.status).toBe("qualified");
+      if (qualification.status !== "qualified") return;
+      stages.push("evidence");
+      expect(qualification.evidence.sourceCommit).toBe(SOURCE_COMMIT);
+      expect(qualification.evidence.fixtureProbeManifestDigest).toBe(
+        digestQualificationManifest(qualificationManifest),
+      );
+      expect(JSON.parse(readFileSync(evidencePath, "utf8")).evidence.sourceCommit).toBe(SOURCE_COMMIT);
+
+      const canary = await runBubblewrapQualificationCanary({
+        manifest: qualificationManifest,
+        sourceCommit: SOURCE_COMMIT,
+        qualification: { status: "qualified", evidence: qualification.evidence },
+        qualificationContext: {
+          sourceCommit: SOURCE_COMMIT,
+          hostIdentity: HOST_IDENTITY,
+          effectiveSecurityBoundaryFingerprint: "runner-boundary",
+          fixtureProbeManifestDigest: digestQualificationManifest(qualificationManifest),
+        },
+        workspaceRoot: "/var/lib/ashley-sandbox/qualification/workspace",
+        processRunner,
+        receiptPath,
+        probeBinary: () => ({ kind: "ok" as const, resolvedPath: DEFAULT_BUBBLEWRAP_PATH }),
+        probeProviderVersion: () => ({ kind: "ok" as const, identity: BUBBLEWRAP_PROVIDER_VERSION_IDENTITY }),
+        probeProviderBinaryDigest: () => ({ kind: "ok" as const, digest: PROVIDER_DIGEST }),
+      });
+      expect(canary.status).toBe("qualified");
+      if (canary.status !== "qualified") return;
+      stages.push("canary");
+      expect(canary.receipt.sourceCommit).toBe(SOURCE_COMMIT);
+      expect(canary.receipt.fixtureProbeManifestDigest).toBe(digestQualificationManifest(qualificationManifest));
+      expect(canary.receipt.cleanup.runnerReportsNoActiveChild).toBe(true);
+      expect(JSON.parse(readFileSync(receiptPath, "utf8")).sourceCommit).toBe(SOURCE_COMMIT);
+      expect(stages).toEqual([
+        "filesystem_control_plane",
+        "broker_socket",
+        "network",
+        "environment",
+        "process_tree",
+        "resources",
+        "timeout",
+        "cancellation",
+        "output_overflow",
+        "positive_functionality",
+        "evidence",
+        "canary",
+      ]);
+
+      let rejectedInvocations = 0;
+      const rejected = await runBubblewrapQualification({
+        ...options({ ...qualificationManifest, tools: [] }),
+        processRunner: {
+          async run() {
+            rejectedInvocations += 1;
+            throw new Error("invalid toolchain must not launch a child");
+          },
+        },
+      });
+      expect(rejected).toMatchObject({
+        status: "not_qualified",
+        reason: "qualification_probe_toolchain_invalid:dash",
+      });
+      expect(rejectedInvocations).toBe(0);
+    } finally {
+      rmSync(path, { force: true, recursive: true });
+    }
+  });
+
   it("runs every hostile probe before the positive probe and binds complete evidence", async () => {
     const seen: string[] = [];
     let cancellationResolve: (() => void) | undefined;
