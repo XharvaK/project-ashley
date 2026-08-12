@@ -25,7 +25,7 @@ SANDBOX_ROOT="${SANDBOX_ROOT:-/var/lib/ashley-sandbox}"
 SELF_IMPROVE_CLONE="${SELF_IMPROVE_CLONE:-$SANDBOX_ROOT/self-improvement/project-ashley}"
 ACTIVATION_MARKER="${ACTIVATION_MARKER:-$CONF/engineering-activation.json}"
 QUALIFICATION_DIR="${QUALIFICATION_DIR:-$SANDBOX_ROOT/qualification}"
-SOURCE_PIN="${SOURCE_PIN:-6a1c63c8238003974ac9b3f0032771c45f75bffb}"
+SOURCE_PIN="${SOURCE_PIN:-9506ec92dd8e576aef9b964acde76f18bca16669}"
 BROKER_SOCKET="${BROKER_SOCKET:-/run/ashley/broker.sock}"
 
 log() { printf '[activate-engineering] %s\n' "$*"; }
