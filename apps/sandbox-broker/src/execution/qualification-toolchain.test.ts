@@ -8,6 +8,7 @@ import {
 type SyntheticProbe = {
   readonly executable?: boolean;
   readonly resolved?: string;
+  readonly regularFile?: boolean;
 };
 
 function syntheticFilesystem(probes: Readonly<Record<string, SyntheticProbe>>) {
@@ -23,6 +24,11 @@ function syntheticFilesystem(probes: Readonly<Record<string, SyntheticProbe>>) {
       const resolved = probes[path]?.resolved;
       if (resolved === undefined) throw new Error(`unresolved:${path}`);
       return resolved;
+    },
+    statSync(path: string) {
+      const probe = Object.values(probes).find((candidate) => candidate.resolved === path);
+      if (probe?.regularFile === false) return { isFile: () => false };
+      return { isFile: () => true };
     },
   };
 }
@@ -115,6 +121,21 @@ describe("validateQualificationToolchain", () => {
     expect(validateQualificationToolchain(tools, syntheticFilesystem(nonExecutable))).toEqual({
       status: "invalid",
       reason: "qualification_probe_toolchain_invalid:bash",
+    });
+  });
+
+  it("rejects an executable path whose resolved target is a directory", () => {
+    const tools = BUBBLEWRAP_QUALIFICATION_TOOL_CONTRACT;
+    const probes = probesFor(tools);
+    probes["/usr/bin/dash"] = {
+      executable: true,
+      resolved: "/usr/bin/dash-directory",
+      regularFile: false,
+    };
+
+    expect(validateQualificationToolchain(tools, syntheticFilesystem(probes))).toEqual({
+      status: "invalid",
+      reason: "qualification_probe_toolchain_invalid:dash",
     });
   });
 

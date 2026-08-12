@@ -41,9 +41,25 @@ const bubblewrapProbe = readFileSync(
   ),
   "utf8",
 );
-const childExecutableReferences = new Set(
-  [...bubblewrapProbe.matchAll(/\/usr\/bin\/[A-Za-z0-9._-]+/g)].map((match) => match[0]),
-);
+function childExecutableInventory(
+  probeSource: string,
+  manifest: ReturnType<typeof createDefaultQualificationManifest>,
+): Set<string> {
+  const references = new Set(
+    [...probeSource.matchAll(/\/(?:[A-Za-z0-9._-]+\/)*(?:s?bin)\/[A-Za-z0-9._-]+/g)]
+      .map((match) => match[0]),
+  );
+  for (const entry of [...manifest.probes, ...manifest.lifecycleChecks]) {
+    references.add(entry.argv[0]!);
+  }
+  references.add("/usr/bin/true");
+  return references;
+}
+
+function hasOnlyReviewedChildExecutables(references: ReadonlySet<string>): boolean {
+  const reviewed = new Set(BUBBLEWRAP_QUALIFICATION_TOOL_CONTRACT.map((tool) => tool.path));
+  return [...references].every((reference) => reviewed.has(reference));
+}
 describe("02C qualification helper source contract", () => {
   it("validates an EnvironmentFile-backed gate without printing environment contents", () => {
     expect(qualificationHelper).toContain(
@@ -711,15 +727,28 @@ describe("02L reviewed child-tool inventory", () => {
       workspaceRoot: "/var/lib/ashley-sandbox/qualification/workspace",
       probeScript: "/opt/ashley-sandbox/qualification/probe.sh",
     });
-    for (const entry of [...manifest.probes, ...manifest.lifecycleChecks]) {
-      childExecutableReferences.add(entry.argv[0]!);
-    }
-    childExecutableReferences.add("/usr/bin/true");
+    const childExecutableReferences = childExecutableInventory(bubblewrapProbe, manifest);
     expect([...childExecutableReferences].sort()).toEqual(
       BUBBLEWRAP_QUALIFICATION_TOOL_CONTRACT.map((tool) => tool.path).sort(),
     );
     expect(childExecutableReferences).not.toContain("/usr/bin/awk");
     expect(childExecutableReferences).not.toContain("/usr/bin/node");
+  });
+
+  it("rejects an undeclared absolute executable outside /usr/bin", () => {
+    const manifest = createDefaultQualificationManifest({
+      sourceCommit: "02l-tool-inventory-mutation",
+      fixtureRoot: "/var/lib/ashley-sandbox/qualification/fixture",
+      workspaceRoot: "/var/lib/ashley-sandbox/qualification/workspace",
+      probeScript: "/opt/ashley-sandbox/qualification/probe.sh",
+    });
+    const mutatedInventory = childExecutableInventory(
+      `${bubblewrapProbe}\n/bin/rogue --must-be-rejected`,
+      manifest,
+    );
+
+    expect(mutatedInventory).toContain("/bin/rogue");
+    expect(hasOnlyReviewedChildExecutables(mutatedInventory)).toBe(false);
   });
 });
 describe("02J canonical address-family set comparison", () => {

@@ -1,4 +1,4 @@
-import { accessSync, constants, lstatSync, realpathSync } from "node:fs";
+import { accessSync, constants, lstatSync, realpathSync, statSync } from "node:fs";
 
 const VISIBLE_ROOTS = ["/usr", "/lib", "/lib64"] as const;
 
@@ -33,12 +33,14 @@ type QualificationToolchainFilesystem = {
   lstatSync(path: string): unknown;
   accessSync(path: string, mode: number): void;
   realpathSync(path: string): string;
+  statSync(path: string): { isFile(): boolean };
 };
 
 const nativeFilesystem: QualificationToolchainFilesystem = {
   lstatSync,
   accessSync,
   realpathSync,
+  statSync,
 };
 
 function isWithinVisibleRoot(path: string, root: string): boolean {
@@ -88,6 +90,7 @@ export function validateQualificationToolchain(
       filesystem.lstatSync(tool.path);
       filesystem.accessSync(tool.path, constants.X_OK);
       const resolved = filesystem.realpathSync(tool.path);
+      if (!filesystem.statSync(resolved).isFile()) return invalid(tool.id);
       if (!tool.visibleRoots.some((root) => isWithinVisibleRoot(resolved, root))) {
         return invalid(tool.id);
       }

@@ -270,6 +270,25 @@ function validatedChildExecutableCoverage(
   return validatedChildExecutable(["/usr/bin/true", "--smoke"], manifest.tools);
 }
 
+function validatedVisibleRootBinds(
+  entries: readonly Pick<BubblewrapQualificationProbeSpec, "binds">[],
+  tools: readonly QualificationToolContractEntry[],
+): string | null {
+  const reviewedRoots = tools[0]?.visibleRoots;
+  if (reviewedRoots === undefined) return "qualification_manifest_visible_root_bind_missing";
+  for (const entry of entries) {
+    if (!Array.isArray(entry.binds)) return "qualification_manifest_visible_root_bind_missing";
+    for (const root of reviewedRoots) {
+      const selfBinds = entry.binds.filter((bind) => bind.src === root && bind.dest === root);
+      if (selfBinds.length === 0) return "qualification_manifest_visible_root_bind_missing";
+      if (selfBinds.some((bind) => bind.writable !== false)) {
+        return "qualification_manifest_visible_root_bind_writable";
+      }
+    }
+  }
+  return null;
+}
+
 function validateManifest(
   manifest: BubblewrapQualificationManifest,
   sourceCommit: string,
@@ -361,6 +380,11 @@ function validateManifest(
   )) {
     return "qualification_manifest_lifecycle_check_order_mismatch";
   }
+  const visibleRootBindFailure = validatedVisibleRootBinds(
+    [...manifest.probes, ...lifecycleChecks],
+    manifest.tools,
+  );
+  if (visibleRootBindFailure !== null) return visibleRootBindFailure;
   const executableCoverageFailure = validatedChildExecutableCoverage(manifest);
   if (executableCoverageFailure !== null) return executableCoverageFailure;
   return null;

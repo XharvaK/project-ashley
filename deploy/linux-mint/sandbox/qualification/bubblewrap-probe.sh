@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/dash
 set -eu
 mode=${1:-}
 fail() {

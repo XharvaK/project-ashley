@@ -275,6 +275,69 @@ describe("Bubblewrap physical qualification runner", () => {
     expect(invocations).toBe(0);
   });
 
+  it("fails closed before launching when a probe omits a reviewed visible-root self-bind", async () => {
+    let invocations = 0;
+    const base = manifest();
+    const changed: BubblewrapQualificationManifest = {
+      ...base,
+      probes: [
+        {
+          ...base.probes[0]!,
+          binds: base.probes[0]!.binds.filter((bind) => bind.src !== "/lib64"),
+        },
+        ...base.probes.slice(1),
+      ],
+    };
+
+    const result = await runBubblewrapQualification({
+      ...options(changed),
+      processRunner: {
+        async run() {
+          invocations += 1;
+          throw new Error("invalid manifests must not launch a child");
+        },
+      },
+    });
+
+    expect(result).toMatchObject({
+      status: "not_qualified",
+      reason: "qualification_manifest_visible_root_bind_missing",
+    });
+    expect(invocations).toBe(0);
+  });
+
+  it("fails closed before launching when a lifecycle root self-bind is writable", async () => {
+    let invocations = 0;
+    const base = manifest();
+    const changed: BubblewrapQualificationManifest = {
+      ...base,
+      lifecycleChecks: base.lifecycleChecks.map((check, index) => index === 0
+        ? {
+            ...check,
+            binds: check.binds.map((bind) => bind.src === "/usr"
+              ? { ...bind, writable: true }
+              : bind),
+          }
+        : check),
+    };
+
+    const result = await runBubblewrapQualification({
+      ...options(changed),
+      processRunner: {
+        async run() {
+          invocations += 1;
+          throw new Error("invalid manifests must not launch a child");
+        },
+      },
+    });
+
+    expect(result).toMatchObject({
+      status: "not_qualified",
+      reason: "qualification_manifest_visible_root_bind_writable",
+    });
+    expect(invocations).toBe(0);
+  });
+
   it("runs the synthetic complete path with manifest-bound evidence and a canary receipt", async () => {
     const path = mkdtempSync(join(tmpdir(), "ashley-qualification-"));
     const evidencePath = join(path, "evidence.json");
