@@ -207,7 +207,7 @@ Apply **before** signing (approval-signer) and **re-verify** at broker:
 ### 3.0 Socket activation and runtime directory (future systemd units — spec only)
 
 **Runtime directory:** `/run/ashley/` — created before bind, owned by
-`ashley-sandbox:ashley-broker`, mode `0750`. Socket path: `/run/ashley/broker.sock`.
+`root:root`, mode `0711`. Socket path: `/run/ashley/broker.sock`.
 
 Do **not** rely on post-bind `chgrp`/`chmod`. The **socket unit** owns all listen-path
 ACL:
@@ -224,7 +224,7 @@ SocketUser=ashley-sandbox
 SocketGroup=ashley-broker
 SocketMode=0660
 RuntimeDirectory=ashley
-RuntimeDirectoryMode=0750
+RuntimeDirectoryMode=0711
 
 [Install]
 WantedBy=sockets.target
@@ -250,7 +250,7 @@ units — verify with `systemd --version` before install):
 
 ```ini
 # /etc/tmpfiles.d/ashley-broker.conf
-d /run/ashley 0750 ashley-sandbox ashley-broker -
+d /run/ashley 0711 root root -
 ```
 
 Install tmpfiles **only** when socket-unit `RuntimeDirectory=` is unsupported; never

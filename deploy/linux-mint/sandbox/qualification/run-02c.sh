@@ -247,6 +247,10 @@ boundary_payload() {
 }
 require_privileged_path "$BROKER_ENV"
 run_policy_preflight
+AGENT_UID="$(broker_env_value ASHLEY_SANDBOX_AGENT_UID)"
+[[ "$AGENT_UID" =~ ^[0-9]+$ ]] || die broker_agent_uid_invalid
+AGENT_USER="$(getent passwd "$AGENT_UID" | awk -F: 'NR == 1 { print $1 }')"
+[[ -n "$AGENT_USER" ]] || die broker_agent_user_unavailable
 RENDERED_SERVICE="$(mktemp)"
 trap 'rm -f "$RENDERED_SERVICE"' EXIT
 sed -e 's|@NODE@|/opt/ashley-sandbox/bin/node|g' "$SERVICE_SOURCE" >"$RENDERED_SERVICE"
@@ -262,10 +266,9 @@ SERVICE_START_STATUS=$?
 set -e
 run_stable_service_check
 [[ "$SERVICE_START_STATUS" -eq 0 ]] || die service_start_command_failed
-sudo -n chmod 0750 /run/ashley
 require_equal service_active "$(systemctl is-active "$SERVICE")" active
 require_equal socket_active "$(systemctl is-active "$SOCKET")" active
-require_equal runtime_directory_declared_mode "$(systemctl show "$SOCKET" -p RuntimeDirectoryMode --value)" 0750
+require_equal runtime_directory_declared_mode "$(systemctl show "$SOCKET" -p RuntimeDirectoryMode --value)" 0711
 require_equal service_environment_files "$(systemctl show "$SERVICE" -p EnvironmentFiles --value)" "/etc/ashley-sandbox/broker.env (ignore_errors=yes)"
 require_namespace_set restrict_namespaces \
   "$(systemctl show "$SERVICE" -p RestrictNamespaces --value)" \
@@ -312,10 +315,18 @@ require_equal pids_cgroup_max "$(cat "$CGROUP_ROOT/pids.max")" "$EXPECTED_PIDS_M
 PIDS_CURRENT="$(cat "$CGROUP_ROOT/pids.current")"
 [[ "$PIDS_CURRENT" =~ ^[0-9]+$ ]] || die pids_current_unreadable
 require_path /run/ashley
-require_equal runtime_directory_mode "$(stat -c '%a' /run/ashley)" 750
+require_equal runtime_directory_mode "$(stat -c '%a' /run/ashley)" 711
 require_equal runtime_directory_owner "$(stat -c '%U:%G' /run/ashley)" root:root
+AGENT_SOCKET_TYPE="$(sudo -n -u "$AGENT_USER" stat -c '%F' /run/ashley/broker.sock)" \
+  || die authorized_agent_socket_unreachable
+require_equal authorized_agent_socket_type "$AGENT_SOCKET_TYPE" socket
 require_equal socket_mode "$(stat -c '%a' /run/ashley/broker.sock)" 660
 require_equal socket_owner "$(stat -c '%U:%G' /run/ashley/broker.sock)" ashley-sandbox:ashley-broker
+sudo -n -u nobody id >/dev/null 2>&1 || die socket_negative_probe_unavailable
+if sudo -n -u nobody test -r /run/ashley/broker.sock || \
+  sudo -n -u nobody test -w /run/ashley/broker.sock; then
+  die socket_world_accessible
+fi
 BROKER_BOUNDARY="$(boundary_payload "$SERVICE" | sha256sum | awk '{print $1}')"
 MAIN_PID="$(systemctl show "$SERVICE" -p MainPID --value)"
 [[ "$MAIN_PID" =~ ^[1-9][0-9]*$ ]] || die service_pid_missing

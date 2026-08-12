@@ -14,6 +14,13 @@ const serviceUnit = readFileSync(
   ),
   "utf8",
 );
+const socketUnit = readFileSync(
+  new URL(
+    "../../../../deploy/linux-mint/sandbox/systemd/ashley-exec-broker.socket",
+    import.meta.url,
+  ),
+  "utf8",
+);
 describe("02C qualification helper source contract", () => {
   it("validates an EnvironmentFile-backed gate without printing environment contents", () => {
     expect(qualificationHelper).toContain(
@@ -111,7 +118,7 @@ describe("02C qualification helper source contract", () => {
     );
     expect(qualificationHelper).toContain('sudo -n systemctl daemon-reload');
     expect(qualificationHelper).toContain('sudo -n systemctl restart "$SOCKET"');
-    expect(qualificationHelper).toContain('sudo -n chmod 0750 /run/ashley');
+    expect(qualificationHelper).not.toContain('sudo -n chmod 0750 /run/ashley');
     expect(qualificationHelper).toContain('BLOCKED sudo_noninteractive_unavailable');
     expect(qualificationHelper).toContain('die transient_descendant_remains');
     expect(qualificationHelper).toContain('production_zero_digest_post');
@@ -187,5 +194,48 @@ describe("02C qualification helper source contract", () => {
     );
     expect(serviceUnit).toContain("CPUQuota=100%");
     expect(qualificationHelper).toContain('EXPECTED_CPU_QUOTA="100%"');
+  });
+  it("keeps the runtime directory traversable but the socket group-gated", () => {
+    for (const property of [
+      "RuntimeDirectory=ashley",
+      "RuntimeDirectoryMode=0711",
+      "SocketUser=ashley-sandbox",
+      "SocketGroup=ashley-broker",
+      "SocketMode=0660",
+    ]) {
+      expect(socketUnit).toContain(property);
+    }
+    expect(socketUnit).not.toContain("RuntimeDirectoryMode=0750");
+    expect(qualificationHelper).not.toContain(
+      "sudo -n chmod 0750 /run/ashley",
+    );
+    expect(qualificationHelper).toContain(
+      'require_equal runtime_directory_mode "$(stat -c \'%a\' /run/ashley)" 711',
+    );
+    expect(qualificationHelper).toContain(
+      'require_equal runtime_directory_owner "$(stat -c \'%U:%G\' /run/ashley)" root:root',
+    );
+    expect(qualificationHelper).toContain(
+      'AGENT_UID="$(broker_env_value ASHLEY_SANDBOX_AGENT_UID)"',
+    );
+    expect(qualificationHelper).toContain(
+      `AGENT_USER="$(getent passwd "$AGENT_UID" | awk -F: 'NR == 1 { print $1 }')"`,
+    );
+    expect(qualificationHelper).toContain(
+      `sudo -n -u "$AGENT_USER" stat -c '%F' /run/ashley/broker.sock`,
+    );
+    expect(qualificationHelper).toContain(
+      "die authorized_agent_socket_unreachable",
+    );
+    expect(qualificationHelper).toContain(
+      "sudo -n -u nobody test -r /run/ashley/broker.sock",
+    );
+    expect(qualificationHelper).toContain(
+      "sudo -n -u nobody test -w /run/ashley/broker.sock",
+    );
+    expect(qualificationHelper).toContain("die socket_world_accessible");
+    expect(
+      qualificationHelper.indexOf("authorized_agent_socket_unreachable"),
+    ).toBeLessThan(qualificationHelper.indexOf("require_equal socket_mode"));
   });
 });
