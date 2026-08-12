@@ -23,6 +23,7 @@ TRANSIENT_UNIT="ashley-sandbox-isolation-02c.service"
 PROBE_SOURCE="$SOURCE_ROOT/deploy/linux-mint/sandbox/qualification/bubblewrap-probe.sh"
 BROKER_ENV="/etc/ashley-sandbox/broker.env"
 NODE_BIN="/opt/ashley-sandbox/bin/node"
+JQ_BIN="/usr/bin/jq"
 POLICY_PREFLIGHT_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/execution/qualification-policy-preflight-cli.js"
 SERVICE_STABILITY_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/execution/qualification-service-state-cli.js"
 PROBE_RUNTIME="$RUNTIME_ROOT/bubblewrap-probe.sh"
@@ -53,6 +54,18 @@ require_path() {
 require_privileged_path() {
   local path="$1"
   sudo -n test -e "$path" || die "missing_path:$path"
+}
+check_pinned_node() {
+  [[ "$NODE_BIN" == /opt/ashley-sandbox/bin/node ]] || die node_path_changed
+  [[ -e "$NODE_BIN" ]] || die node_missing
+  [[ -f "$NODE_BIN" ]] || die node_not_regular
+  [[ -x "$NODE_BIN" ]] || die node_not_executable
+  sudo -n -u ashley-sandbox -- "$NODE_BIN" --version >/dev/null 2>&1 || die node_service_user_unable_to_execute
+}
+check_jq() {
+  [[ "$JQ_BIN" == /usr/bin/jq ]] || die jq_path_changed
+  [[ -f "$JQ_BIN" && -x "$JQ_BIN" ]] || die jq_unavailable
+  "$JQ_BIN" --version >/dev/null 2>&1 || die jq_unavailable
 }
 broker_env_value() {
   local key="$1"
@@ -204,13 +217,43 @@ require_namespace_set() {
     "$(normalize_namespace_set "$actual")" \
     "$(normalize_namespace_set "$expected")"
 }
+read_cgroup_value() {
+  local label="$1"
+  local path="$2"
+  local value
+  [[ -e "$path" ]] || {
+    printf 'BLOCKED cgroup_%s_missing\n' "$label" >&2
+    return 1
+  }
+  [[ -r "$path" ]] || {
+    printf 'BLOCKED cgroup_%s_unreadable\n' "$label" >&2
+    return 1
+  }
+  value="$(cat -- "$path" 2>/dev/null)" || {
+    printf 'BLOCKED cgroup_%s_unreadable\n' "$label" >&2
+    return 1
+  }
+  [[ -n "$value" ]] || {
+    printf 'BLOCKED cgroup_%s_empty\n' "$label" >&2
+    return 1
+  }
+  printf '%s\n' "$value"
+}
 boundary_payload() {
   local unit="$1"
   local control_group
   local cgroup_root
+  local cpu_max
+  local memory_high
+  local memory_max
+  local pids_max
   control_group="$(systemctl show "$unit" -p ControlGroup --value)"
   [[ "$control_group" == /* ]] || die "${unit}_cgroup_missing"
   cgroup_root="/sys/fs/cgroup$control_group"
+  cpu_max="$(read_cgroup_value cpu_max "$cgroup_root/cpu.max")" || return 1
+  memory_high="$(read_cgroup_value memory_high "$cgroup_root/memory.high")" || return 1
+  memory_max="$(read_cgroup_value memory_max "$cgroup_root/memory.max")" || return 1
+  pids_max="$(read_cgroup_value pids_max "$cgroup_root/pids.max")" || return 1
   printf '%s\n' \
     "RestrictNamespaces=$(normalize_namespace_set "$(systemctl show "$unit" -p RestrictNamespaces --value)")" \
     "RestrictAddressFamilies=$(systemctl show "$unit" -p RestrictAddressFamilies --value)" \
@@ -240,11 +283,19 @@ boundary_payload() {
     "User=$(systemctl show "$unit" -p User --value)" \
     "Group=$(systemctl show "$unit" -p Group --value)" \
     "WorkingDirectory=$(systemctl show "$unit" -p WorkingDirectory --value)" \
-    "cpu.max=$(cat "$cgroup_root/cpu.max")" \
-    "memory.high=$(cat "$cgroup_root/memory.high")" \
-    "memory.max=$(cat "$cgroup_root/memory.max")" \
-    "pids.max=$(cat "$cgroup_root/pids.max")"
+    "cpu.max=$cpu_max" \
+    "memory.high=$memory_high" \
+    "memory.max=$memory_max" \
+    "pids.max=$pids_max"
 }
+boundary_fingerprint() {
+  local unit="$1"
+  local payload
+  payload="$(boundary_payload "$unit")" || return 1
+  printf '%s\n' "$payload" | sha256sum | awk '{print $1}'
+}
+check_pinned_node
+check_jq
 require_privileged_path "$BROKER_ENV"
 run_policy_preflight
 AGENT_UID="$(broker_env_value ASHLEY_SANDBOX_AGENT_UID)"
@@ -328,7 +379,7 @@ if sudo -n -u nobody test -r /run/ashley/broker.sock || \
   sudo -n -u nobody test -w /run/ashley/broker.sock; then
   die socket_world_accessible
 fi
-BROKER_BOUNDARY="$(boundary_payload "$SERVICE" | sha256sum | awk '{print $1}')"
+BROKER_BOUNDARY="$(boundary_fingerprint "$SERVICE")" || die broker_boundary_unavailable
 MAIN_PID="$(systemctl show "$SERVICE" -p MainPID --value)"
 [[ "$MAIN_PID" =~ ^[1-9][0-9]*$ ]] || die service_pid_missing
 if sudo -n grep -zq 'ASHLEY_SANDBOX_BROKER_ENABLED=true' "/proc/$MAIN_PID/environ"; then
@@ -398,7 +449,7 @@ INVENTORY_JSON="$(
     else
       printf '%s\tfalse\t\t\t\n' "$inventory_path"
     fi
-  done | jq -R -s '
+  done | "$JQ_BIN" -R -s '
     split("\n")
     | map(select(length > 0) | split("\t") | {
         path: .[0],
@@ -413,7 +464,7 @@ printf '%s\n' "$INVENTORY_JSON" | sudo -n tee "$INVENTORY_PATH" >/dev/null
 sudo -n chown root:ashley-sandbox "$INVENTORY_PATH"
 sudo -n chmod 0440 "$INVENTORY_PATH"
 FIXTURE_SHA="$(sha256_path "$FIXTURE_ROOT/fixture.txt")"
-jq -n \
+"$JQ_BIN" -n \
   --arg schema "sandbox-isolation-02c-fixture-probe-manifest-v1" \
   --arg source "$EXPECTED_SOURCE_COMMIT" \
   --arg runtime_root "$RUNTIME_ROOT" \
@@ -509,7 +560,7 @@ sudo -n /usr/bin/systemd-run \
   --property=ReadWritePaths=/var/lib/ashley-sandbox \
   --property=StandardOutput=append:"$TRANSIENT_LOG" \
   --property=StandardError=append:"$TRANSIENT_LOG" \
-  /usr/bin/node "$CLI_RUNTIME" \
+  "$NODE_BIN" "$CLI_RUNTIME" \
     --source-commit "$EXPECTED_SOURCE_COMMIT" \
     --fixture-root "$FIXTURE_ROOT" \
     --workspace-root "$WORKSPACE_ROOT" \
@@ -519,14 +570,36 @@ sudo -n /usr/bin/systemd-run \
     --canary-receipt-out "$CANARY_RECEIPT_PATH" \
     --boundary-fingerprint "$BROKER_BOUNDARY"
 TRANSIENT_BOUNDARY=""
+TRANSIENT_BOUNDARY_FAILURE=false
 for _ in $(seq 1 50); do
-  if [[ "$(systemctl show "$TRANSIENT_UNIT" -p ActiveState --value 2>/dev/null || true)" == active ]]; then
-    TRANSIENT_BOUNDARY="$(boundary_payload "$TRANSIENT_UNIT" | sha256sum | awk '{print $1}')"
+  TRANSIENT_STATE="$(systemctl show "$TRANSIENT_UNIT" -p ActiveState --value 2>/dev/null || true)"
+  if [[ "$TRANSIENT_STATE" == active ]]; then
+    if TRANSIENT_BOUNDARY="$(boundary_fingerprint "$TRANSIENT_UNIT")"; then
+      break
+    fi
+    TRANSIENT_BOUNDARY_FAILURE=true
+    break
+  fi
+  if [[ "$TRANSIENT_STATE" == failed || "$TRANSIENT_STATE" == inactive || -z "$TRANSIENT_STATE" ]]; then
     break
   fi
   sleep 0.1
 done
-[[ -n "$TRANSIENT_BOUNDARY" ]] || die transient_boundary_unobservable
+TRANSIENT_STATE="$(systemctl show "$TRANSIENT_UNIT" -p ActiveState --value 2>/dev/null || true)"
+TRANSIENT_RESULT="$(systemctl show "$TRANSIENT_UNIT" -p Result --value 2>/dev/null || true)"
+TRANSIENT_EXEC_MAIN_CODE="$(systemctl show "$TRANSIENT_UNIT" -p ExecMainCode --value 2>/dev/null || true)"
+TRANSIENT_EXEC_MAIN_STATUS="$(systemctl show "$TRANSIENT_UNIT" -p ExecMainStatus --value 2>/dev/null || true)"
+if [[ -n "$TRANSIENT_BOUNDARY" ]]; then
+  :
+elif [[ "$TRANSIENT_EXEC_MAIN_STATUS" == 203 ]]; then
+  die transient_exec_failed
+elif [[ "$TRANSIENT_BOUNDARY_FAILURE" == true ]]; then
+  die transient_cgroup_unavailable
+elif [[ "$TRANSIENT_STATE" == failed || "$TRANSIENT_STATE" == inactive || -z "$TRANSIENT_STATE" ]]; then
+  die transient_process_exited_before_observation
+else
+  die transient_boundary_unobservable
+fi
 if [[ "$TRANSIENT_BOUNDARY" != "$BROKER_BOUNDARY" ]]; then
   sudo -n systemctl stop "$TRANSIENT_UNIT" >/dev/null 2>&1 || true
   die transient_boundary_mismatch
@@ -548,7 +621,7 @@ else
   die transient_log_missing
 fi
 require_privileged_path "$EVIDENCE_PATH"
-sudo -n jq -e --arg source "$EXPECTED_SOURCE_COMMIT" --arg boundary "$BROKER_BOUNDARY" --arg digest "$BWRAP_DIGEST" '
+sudo -n "$JQ_BIN" -e --arg source "$EXPECTED_SOURCE_COMMIT" --arg boundary "$BROKER_BOUNDARY" --arg digest "$BWRAP_DIGEST" '
   .status == "qualified" and
   .evidence.sourceCommit == $source and
   .evidence.profileFingerprint != null and
@@ -561,7 +634,7 @@ sudo -n jq -e --arg source "$EXPECTED_SOURCE_COMMIT" --arg boundary "$BROKER_BOU
 ' "$EVIDENCE_PATH" >/dev/null || die evidence_contract_invalid
 sudo -n chown root:ashley-sandbox "$EVIDENCE_PATH"
 require_privileged_path "$CANARY_RECEIPT_PATH"
-sudo -n jq -e --arg source "$EXPECTED_SOURCE_COMMIT" --arg digest "$BWRAP_DIGEST" --arg manifest "$FIXTURE_MANIFEST_DIGEST" '
+sudo -n "$JQ_BIN" -e --arg source "$EXPECTED_SOURCE_COMMIT" --arg digest "$BWRAP_DIGEST" --arg manifest "$FIXTURE_MANIFEST_DIGEST" '
   .schema == "bubblewrap-qualification-canary-v1" and
   .status == "pass" and
   .canaryId == "bubblewrap-mint-level-1" and

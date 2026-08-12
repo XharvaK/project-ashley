@@ -253,4 +253,109 @@ describe("02C qualification helper source contract", () => {
       qualificationHelper.indexOf("authorized_agent_socket_unreachable"),
     ).toBeLessThan(qualificationHelper.indexOf("require_equal socket_mode"));
   });
+  it("pins transient qualification to the broker-controlled Node and preflights host tools", () => {
+    expect(qualificationHelper).toContain(
+      'NODE_BIN="/opt/ashley-sandbox/bin/node"',
+    );
+    expect(qualificationHelper).toContain(
+      '[[ "$NODE_BIN" == /opt/ashley-sandbox/bin/node ]] || die node_path_changed',
+    );
+    expect(qualificationHelper).toContain(
+      '[[ -e "$NODE_BIN" ]] || die node_missing',
+    );
+    expect(qualificationHelper).toContain(
+      '[[ -f "$NODE_BIN" ]] || die node_not_regular',
+    );
+    expect(qualificationHelper).toContain(
+      '[[ -x "$NODE_BIN" ]] || die node_not_executable',
+    );
+    expect(qualificationHelper).toContain(
+      'sudo -n -u ashley-sandbox -- "$NODE_BIN" --version',
+    );
+    expect(qualificationHelper).toContain(
+      'JQ_BIN="/usr/bin/jq"',
+    );
+    expect(qualificationHelper).toContain(
+      '[[ "$JQ_BIN" == /usr/bin/jq ]] || die jq_path_changed',
+    );
+    expect(qualificationHelper).toContain(
+      '[[ -f "$JQ_BIN" && -x "$JQ_BIN" ]] || die jq_unavailable',
+    );
+    expect(qualificationHelper).toContain(
+      '"$JQ_BIN" --version >/dev/null 2>&1 || die jq_unavailable',
+    );
+    expect(qualificationHelper).toContain(
+      "check_pinned_node\ncheck_jq\nrequire_privileged_path \"$BROKER_ENV\"\nrun_policy_preflight",
+    );
+    expect(
+      qualificationHelper.indexOf(
+        "check_pinned_node\ncheck_jq\nrequire_privileged_path \"$BROKER_ENV\"\nrun_policy_preflight",
+      ),
+    ).toBeLessThan(
+      qualificationHelper.indexOf(
+        'sudo -n install -o root -g root -m 0644 "$RENDERED_SERVICE"',
+      ),
+    );
+    expect(qualificationHelper).toContain(
+      '"$NODE_BIN" "$CLI_RUNTIME"',
+    );
+    expect(qualificationHelper).not.toContain(
+      '\n  /usr/bin/node "$CLI_RUNTIME"',
+    );
+    expect(qualificationHelper).not.toContain("command -v node");
+  });
+  it("classifies transient startup failures and rejects incomplete cgroup payloads", () => {
+    for (const property of ["Result", "ExecMainCode", "ExecMainStatus"]) {
+      expect(qualificationHelper).toContain(
+        "-p " + property + " --value",
+      );
+    }
+    expect(qualificationHelper).toContain(
+      'if [[ "$TRANSIENT_EXEC_MAIN_STATUS" == 203 ]]; then',
+    );
+    expect(qualificationHelper).toContain("die transient_exec_failed");
+    expect(qualificationHelper).toContain(
+      "die transient_process_exited_before_observation",
+    );
+    expect(qualificationHelper).toContain("die transient_cgroup_unavailable");
+    expect(qualificationHelper).toContain("read_cgroup_value()");
+    for (const label of ["cpu_max", "memory_high", "memory_max", "pids_max"]) {
+      expect(qualificationHelper).toContain(
+        "read_cgroup_value " + label + " ",
+      );
+    }
+    expect(qualificationHelper).toContain(
+      'BROKER_BOUNDARY="$(boundary_fingerprint "$SERVICE")"',
+    );
+    expect(qualificationHelper).toContain(
+      'TRANSIENT_BOUNDARY="$(boundary_fingerprint "$TRANSIENT_UNIT")"',
+    );
+    expect(qualificationHelper).toContain(
+      '[[ -e "$path" ]] || {',
+    );
+    expect(qualificationHelper).toContain(
+      'printf \'BLOCKED cgroup_%s_missing\\n\' "$label" >&2',
+    );
+    expect(qualificationHelper).toContain(
+      '[[ -r "$path" ]] || {',
+    );
+    expect(qualificationHelper).toContain(
+      'printf \'BLOCKED cgroup_%s_unreadable\\n\' "$label" >&2',
+    );
+    expect(qualificationHelper).toContain(
+      'value="$(cat -- "$path" 2>/dev/null)" || {',
+    );
+    expect(qualificationHelper).toContain(
+      'payload="$(boundary_payload "$unit")" || return 1',
+    );
+    expect(qualificationHelper).toContain(
+      'die transient_boundary_mismatch',
+    );
+    expect(qualificationHelper.indexOf("die transient_exec_failed")).toBeLessThan(
+      qualificationHelper.indexOf("die transient_boundary_mismatch"),
+    );
+    expect(qualificationHelper).not.toContain(
+      'boundary_payload "$TRANSIENT_UNIT" | sha256sum',
+    );
+  });
 });
