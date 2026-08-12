@@ -145,9 +145,9 @@ describe("Bubblewrap physical qualification runner", () => {
       processRunner: {
         async run() {
           return {
-            exitCode: 0,
+            exitCode: 1,
             stdout: "ok",
-            stderr: "",
+            stderr: "bwrap: Can't mount proc: Operation not permitted",
             truncated: false,
             terminalReason: "process_exit",
           };
@@ -158,7 +158,44 @@ describe("Bubblewrap physical qualification runner", () => {
       status: "not_qualified",
       reason: "qualification_probe_failed:process_exit",
       failedProbeId: "filesystem_control_plane",
+      diagnostics: {
+        terminalReason: "process_exit",
+        exitCode: 1,
+        stderr: "bwrap: Can't mount proc: Operation not permitted",
+        stderrTruncated: false,
+      },
     });
+  });
+  it("bounds and redacts failed-probe stderr diagnostics", async () => {
+    const result = await runBubblewrapQualification({
+      ...options(),
+      processRunner: {
+        async run() {
+          return {
+            exitCode: 1,
+            stdout: "",
+            stderr: "ghp_" + "A".repeat(40) + " " + "bwrap: " + "x".repeat(5_000),
+            truncated: true,
+            terminalReason: "process_exit" as const,
+          };
+        },
+      },
+    });
+    expect(result.status).toBe("not_qualified");
+    if (result.status !== "not_qualified") return;
+    expect(result.diagnostics).toBeDefined();
+    if (result.diagnostics === undefined) return;
+    const diagnostics = result.diagnostics;
+    expect(diagnostics).toMatchObject({
+      terminalReason: "process_exit",
+      exitCode: 1,
+      stderrTruncated: true,
+    });
+    expect(diagnostics.stderr).toContain("[redacted-credential]");
+    expect(diagnostics.stderr).not.toContain("ghp_");
+    expect(Buffer.byteLength(diagnostics.stderr, "utf8")).toBeLessThanOrEqual(
+      2_048,
+    );
   });
   it("refuses a manifest that changes the hostile-first probe order", async () => {
     const base = manifest();

@@ -32,6 +32,7 @@ import {
   type BubblewrapQualificationProbeId,
   type BubblewrapQualificationProbeResult,
 } from "./bubblewrap-execution-isolation.js";
+import { buildBoundedCapture } from "./bounded-output.js";
 import type { IsolationEvidence } from "./execution-isolation.js";
 export type BubblewrapQualificationProbeSpec = {
   probeId: BubblewrapQualificationProbeId;
@@ -86,6 +87,12 @@ export type BubblewrapQualificationRunOptions = {
   evidencePath?: string;
   processRunner?: ProcessRunner;
 };
+export type BubblewrapQualificationFailureDiagnostics = {
+  terminalReason: FakeRunResult["terminalReason"];
+  exitCode: number;
+  stderr: string;
+  stderrTruncated: boolean;
+};
 export type BubblewrapQualificationRunResult =
   | {
       status: "qualified";
@@ -96,6 +103,7 @@ export type BubblewrapQualificationRunResult =
       status: "not_qualified";
       reason: string;
       failedProbeId?: BubblewrapQualificationProbeId;
+      diagnostics?: BubblewrapQualificationFailureDiagnostics;
     };
 const REQUIRED_PROBE_ORDER: readonly BubblewrapQualificationProbeId[] = [
   "filesystem_control_plane",
@@ -135,11 +143,26 @@ export function digestQualificationManifest(
 function notQualified(
   reason: string,
   failedProbeId?: BubblewrapQualificationProbeId,
+  diagnostics?: BubblewrapQualificationFailureDiagnostics,
 ): BubblewrapQualificationRunResult {
   return {
     status: "not_qualified",
     reason,
     ...(failedProbeId === undefined ? {} : { failedProbeId }),
+    ...(diagnostics === undefined ? {} : { diagnostics }),
+  };
+}
+
+function failureDiagnostics(
+  result: FakeRunResult,
+  maxOutputBytes: number,
+): BubblewrapQualificationFailureDiagnostics {
+  const bounded = buildBoundedCapture("", result.stderr, maxOutputBytes);
+  return {
+    terminalReason: result.terminalReason,
+    exitCode: result.exitCode,
+    stderr: bounded.stderr,
+    stderrTruncated: bounded.truncated || result.truncated,
   };
 }
 
@@ -382,6 +405,7 @@ export async function runBubblewrapQualification(
           return notQualified(
             "qualification_lifecycle_check_failed:" + check.checkId,
             probe.probeId,
+            failureDiagnostics(checkResult, check.maxOutputBytes),
           );
         }
       }
@@ -415,6 +439,7 @@ export async function runBubblewrapQualification(
       return notQualified(
         "qualification_probe_failed:" + result.terminalReason,
         probe.probeId,
+        failureDiagnostics(result, probe.maxOutputBytes),
       );
     }
     const resultDigest = digestProbeOutput(result.stdout, result.stderr);

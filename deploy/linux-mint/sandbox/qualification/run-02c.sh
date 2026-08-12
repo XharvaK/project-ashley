@@ -29,6 +29,16 @@ SERVICE_STABILITY_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/execution/qualif
 PROBE_RUNTIME="$RUNTIME_ROOT/bubblewrap-probe.sh"
 SERVICE_SOURCE="$SOURCE_ROOT/deploy/linux-mint/sandbox/systemd/ashley-exec-broker.service"
 SOCKET_SOURCE="$SOURCE_ROOT/deploy/linux-mint/sandbox/systemd/ashley-exec-broker.socket"
+die_transient_with_diagnostics() {
+  local reason="$1"
+  printf 'BLOCKED %s\n' "$reason" >&2
+  if sudo -n test -r "$TRANSIENT_LOG" >/dev/null 2>&1; then
+    printf 'DIAGNOSTICS_BEGIN\n' >&2
+    sudo -n /usr/bin/tail -c 4096 "$TRANSIENT_LOG" >&2 || true
+    printf '\nDIAGNOSTICS_END\n' >&2
+  fi
+  exit 1
+}
 CLI_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/execution/bubblewrap-qualification-cli.js"
 RUNNER_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/execution/bubblewrap-qualification-runner.js"
 ISOLATION_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/execution/bubblewrap-execution-isolation.js"
@@ -199,6 +209,7 @@ require_equal host_systemd_major "$(systemd --version | awk 'NR == 1 { print $2 
 systemd --version | grep -q '255\.4' || die host_systemd_patch_mismatch
 [[ -e /sys/fs/cgroup/cgroup.controllers ]] || die cgroup_v2_missing
 EXPECTED_RESTRICT_NAMESPACES="user mnt pid net uts ipc"
+EXPECTED_RESTRICT_ADDRESS_FAMILIES="AF_UNIX AF_NETLINK"
 EXPECTED_MEMORY_HIGH="1536M"
 EXPECTED_MEMORY_MAX="2048M"
 EXPECTED_TASKS_MAX=256
@@ -294,6 +305,76 @@ boundary_fingerprint() {
   payload="$(boundary_payload "$unit")" || return 1
   printf '%s\n' "$payload" | sha256sum | awk '{print $1}'
 }
+prepare_transient_unit() {
+  local load_state
+  local active_state
+  local main_pid
+  local control_group
+  if ! load_state="$(systemctl show "$TRANSIENT_UNIT" -p LoadState --value 2>/dev/null)"; then
+    die transient_unit_state_unreadable
+  fi
+  [[ "$load_state" == not-found || -z "$load_state" ]] && return 0
+  [[ "$load_state" == loaded ]] || die transient_unit_state_unexpected
+  if ! active_state="$(systemctl show "$TRANSIENT_UNIT" -p ActiveState --value 2>/dev/null)"; then
+    die transient_unit_state_unreadable
+  fi
+  case "$active_state" in
+    active|activating|deactivating|reloading)
+      sudo -n systemctl stop "$TRANSIENT_UNIT" >/dev/null 2>&1 \
+        || die transient_unit_stop_failed
+      ;;
+    failed|inactive|dead)
+      ;;
+    *)
+      die transient_unit_state_unexpected
+      ;;
+  esac
+  for _ in $(seq 1 50); do
+    if ! load_state="$(systemctl show "$TRANSIENT_UNIT" -p LoadState --value 2>/dev/null)"; then
+      die transient_unit_state_unreadable
+    fi
+    [[ "$load_state" == not-found || -z "$load_state" ]] && return 0
+    if ! active_state="$(systemctl show "$TRANSIENT_UNIT" -p ActiveState --value 2>/dev/null)"; then
+      die transient_unit_state_unreadable
+    fi
+    if ! main_pid="$(systemctl show "$TRANSIENT_UNIT" -p MainPID --value 2>/dev/null)"; then
+      die transient_unit_state_unreadable
+    fi
+    if ! control_group="$(systemctl show "$TRANSIENT_UNIT" -p ControlGroup --value 2>/dev/null)"; then
+      die transient_unit_state_unreadable
+    fi
+    if [[ "$active_state" != active &&
+      "$active_state" != activating &&
+      "$active_state" != deactivating &&
+      "$active_state" != reloading ]] &&
+      [[ "$main_pid" == 0 || -z "$main_pid" ]] &&
+      { [[ -z "$control_group" ]] ||
+        [[ ! -e "/sys/fs/cgroup$control_group/cgroup.procs" ]] ||
+        { [[ -r "/sys/fs/cgroup$control_group/cgroup.procs" ]] &&
+          [[ ! -s "/sys/fs/cgroup$control_group/cgroup.procs" ]]; }; }; then
+      break
+    fi
+    sleep 0.1
+  done
+  [[ "$main_pid" == 0 || -z "$main_pid" ]] || die transient_descendant_remains
+  if [[ -n "$control_group" &&
+    -e "/sys/fs/cgroup$control_group/cgroup.procs" ]]; then
+    [[ -r "/sys/fs/cgroup$control_group/cgroup.procs" ]] \
+      || die transient_cgroup_unavailable
+    [[ ! -s "/sys/fs/cgroup$control_group/cgroup.procs" ]] \
+      || die transient_descendant_remains
+  fi
+  sudo -n systemctl reset-failed "$TRANSIENT_UNIT" >/dev/null 2>&1 \
+    || die transient_unit_reset_failed
+  for _ in $(seq 1 50); do
+    if ! load_state="$(systemctl show "$TRANSIENT_UNIT" -p LoadState --value 2>/dev/null)"; then
+      die transient_unit_state_unreadable
+    fi
+    [[ "$load_state" == not-found || -z "$load_state" ]] && return 0
+    sleep 0.1
+  done
+  die transient_unit_cleanup_incomplete
+}
 check_pinned_node
 check_jq
 require_privileged_path "$BROKER_ENV"
@@ -329,14 +410,14 @@ require_equal cpu_quota "$(systemctl show "$SERVICE" -p CPUQuotaPerSecUSec --val
 require_equal memory_high "$(systemctl show "$SERVICE" -p MemoryHigh --value)" "$EXPECTED_MEMORY_HIGH_BYTES"
 require_equal memory_max "$(systemctl show "$SERVICE" -p MemoryMax --value)" "$EXPECTED_MEMORY_MAX_BYTES"
 require_equal tasks_max "$(systemctl show "$SERVICE" -p TasksMax --value)" "$EXPECTED_TASKS_MAX"
-require_equal address_families "$(systemctl show "$SERVICE" -p RestrictAddressFamilies --value)" AF_UNIX
+require_equal address_families "$(systemctl show "$SERVICE" -p RestrictAddressFamilies --value)" "$EXPECTED_RESTRICT_ADDRESS_FAMILIES"
 require_equal delegate "$(systemctl show "$SERVICE" -p Delegate --value)" no
 require_equal private_tmp "$(systemctl show "$SERVICE" -p PrivateTmp --value)" yes
 require_equal private_devices "$(systemctl show "$SERVICE" -p PrivateDevices --value)" yes
 require_equal private_users "$(systemctl show "$SERVICE" -p PrivateUsers --value)" no
 require_equal protect_home "$(systemctl show "$SERVICE" -p ProtectHome --value)" yes
 require_equal protect_system "$(systemctl show "$SERVICE" -p ProtectSystem --value)" strict
-require_equal protect_kernel_tunables "$(systemctl show "$SERVICE" -p ProtectKernelTunables --value)" yes
+require_equal protect_kernel_tunables "$(systemctl show "$SERVICE" -p ProtectKernelTunables --value)" no
 require_equal protect_kernel_modules "$(systemctl show "$SERVICE" -p ProtectKernelModules --value)" yes
 require_equal protect_control_groups "$(systemctl show "$SERVICE" -p ProtectControlGroups --value)" yes
 require_equal restrict_suid_sgid "$(systemctl show "$SERVICE" -p RestrictSUIDSGID --value)" yes
@@ -388,6 +469,7 @@ else
   gate_status=$?
   [[ "$gate_status" -eq 1 ]] || die service_gate_unverifiable
 fi
+prepare_transient_unit
 sudo -n rm -rf -- "$QUALIFICATION_ROOT" "$FIXTURE_ROOT" "$WORKSPACE_ROOT" "$EVIDENCE_PATH" "$FIXTURE_MANIFEST_PATH" "$INVENTORY_PATH" "$CANARY_RECEIPT_PATH"
 sudo -n install -d -o ashley-sandbox -g ashley-sandbox -m 0750 \
   "$QUALIFICATION_ROOT" "$RUNTIME_ROOT" "$RUNTIME_ROOT/execution" \
@@ -534,7 +616,7 @@ sudo -n /usr/bin/systemd-run \
   --property=Group=ashley-sandbox \
   --property=WorkingDirectory=/var/lib/ashley-sandbox \
   --property=RestrictNamespaces="$EXPECTED_RESTRICT_NAMESPACES" \
-  --property=RestrictAddressFamilies=AF_UNIX \
+  --property=RestrictAddressFamilies="$EXPECTED_RESTRICT_ADDRESS_FAMILIES" \
   --property=CPUQuota="$EXPECTED_CPU_QUOTA" \
   --property=MemoryHigh="$EXPECTED_MEMORY_HIGH" \
   --property=MemoryMax="$EXPECTED_MEMORY_MAX" \
@@ -545,7 +627,7 @@ sudo -n /usr/bin/systemd-run \
   --property=PrivateUsers=no \
   --property=ProtectHome=yes \
   --property=ProtectSystem=strict \
-  --property=ProtectKernelTunables=yes \
+  --property=ProtectKernelTunables=no \
   --property=ProtectKernelModules=yes \
   --property=ProtectControlGroups=yes \
   --property=RestrictSUIDSGID=yes \
@@ -592,13 +674,13 @@ TRANSIENT_EXEC_MAIN_STATUS="$(systemctl show "$TRANSIENT_UNIT" -p ExecMainStatus
 if [[ -n "$TRANSIENT_BOUNDARY" ]]; then
   :
 elif [[ "$TRANSIENT_EXEC_MAIN_STATUS" == 203 ]]; then
-  die transient_exec_failed
+  die_transient_with_diagnostics transient_exec_failed
 elif [[ "$TRANSIENT_BOUNDARY_FAILURE" == true ]]; then
-  die transient_cgroup_unavailable
+  die_transient_with_diagnostics transient_cgroup_unavailable
 elif [[ "$TRANSIENT_STATE" == failed || "$TRANSIENT_STATE" == inactive || -z "$TRANSIENT_STATE" ]]; then
-  die transient_process_exited_before_observation
+  die_transient_with_diagnostics transient_process_exited_before_observation
 else
-  die transient_boundary_unobservable
+  die_transient_with_diagnostics transient_boundary_unobservable
 fi
 if [[ "$TRANSIENT_BOUNDARY" != "$BROKER_BOUNDARY" ]]; then
   sudo -n systemctl stop "$TRANSIENT_UNIT" >/dev/null 2>&1 || true

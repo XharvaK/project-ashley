@@ -19,7 +19,7 @@ PrivateDevices=true
 ProtectHome=true
 ProtectProc=invisible
 ProtectSystem=strict
-ProtectKernelTunables=true
+ProtectKernelTunables=false
 ProtectKernelModules=true
 ProtectControlGroups=true
 # 02D: the physical Bubblewrap profile requires the full host namespace
@@ -31,7 +31,7 @@ RestrictSUIDSGID=true
 LockPersonality=true
 CapabilityBoundingSet=
 AmbientCapabilities=
-RestrictAddressFamilies=AF_UNIX
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
 MemoryHigh=1536M
 MemoryMax=2048M
 TasksMax=256

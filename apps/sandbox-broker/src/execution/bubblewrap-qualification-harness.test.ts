@@ -21,6 +21,21 @@ const socketUnit = readFileSync(
   ),
   "utf8",
 );
+const qualificationCli = readFileSync(
+  new URL("./bubblewrap-qualification-cli.ts", import.meta.url),
+  "utf8",
+);
+const bubblewrapIsolation = readFileSync(
+  new URL("./bubblewrap-execution-isolation.ts", import.meta.url),
+  "utf8",
+);
+const bubblewrapProbe = readFileSync(
+  new URL(
+    "../../../../deploy/linux-mint/sandbox/qualification/bubblewrap-probe.sh",
+    import.meta.url,
+  ),
+  "utf8",
+);
 describe("02C qualification helper source contract", () => {
   it("validates an EnvironmentFile-backed gate without printing environment contents", () => {
     expect(qualificationHelper).toContain(
@@ -107,7 +122,7 @@ describe("02C qualification helper source contract", () => {
       "--property=ReadOnlyPaths=/opt/ashley-sandbox",
     );
     expect(qualificationHelper).toContain(
-      "--property=ProtectKernelTunables=yes",
+      "--property=ProtectKernelTunables=no",
     );
     expect(qualificationHelper).toContain(
       "--property=ProtectKernelModules=yes",
@@ -313,11 +328,15 @@ describe("02C qualification helper source contract", () => {
     expect(qualificationHelper).toContain(
       'if [[ "$TRANSIENT_EXEC_MAIN_STATUS" == 203 ]]; then',
     );
-    expect(qualificationHelper).toContain("die transient_exec_failed");
     expect(qualificationHelper).toContain(
-      "die transient_process_exited_before_observation",
+      "die_transient_with_diagnostics transient_exec_failed",
     );
-    expect(qualificationHelper).toContain("die transient_cgroup_unavailable");
+    expect(qualificationHelper).toContain(
+      "die_transient_with_diagnostics transient_process_exited_before_observation",
+    );
+    expect(qualificationHelper).toContain(
+      "die_transient_with_diagnostics transient_cgroup_unavailable",
+    );
     expect(qualificationHelper).toContain("read_cgroup_value()");
     for (const label of ["cpu_max", "memory_high", "memory_max", "pids_max"]) {
       expect(qualificationHelper).toContain(
@@ -356,6 +375,111 @@ describe("02C qualification helper source contract", () => {
     );
     expect(qualificationHelper).not.toContain(
       'boundary_payload "$TRANSIENT_UNIT" | sha256sum',
+    );
+  });
+  it("matches the Bubblewrap-compatible outer systemd boundary exactly", () => {
+    expect(serviceUnit).toContain(
+      "RestrictAddressFamilies=AF_UNIX AF_NETLINK",
+    );
+    expect(serviceUnit).not.toContain("RestrictAddressFamilies=AF_UNIX\\n");
+    for (const family of ["AF_INET", "AF_INET6", "AF_PACKET"]) {
+      expect(serviceUnit).not.toContain(family);
+      expect(qualificationHelper).not.toContain(family);
+    }
+    expect(serviceUnit).toContain("ProtectKernelTunables=false");
+    expect(serviceUnit).toContain("ProtectProc=invisible");
+    expect(qualificationHelper).toContain(
+      'EXPECTED_RESTRICT_ADDRESS_FAMILIES="AF_UNIX AF_NETLINK"',
+    );
+    expect(qualificationHelper).toContain(
+      '--property=RestrictAddressFamilies="$EXPECTED_RESTRICT_ADDRESS_FAMILIES"',
+    );
+    expect(qualificationHelper).toContain(
+      "--property=ProtectKernelTunables=no",
+    );
+    expect(qualificationHelper).toContain(
+      'require_equal address_families "$(systemctl show "$SERVICE" -p RestrictAddressFamilies --value)" "$EXPECTED_RESTRICT_ADDRESS_FAMILIES"',
+    );
+    expect(qualificationHelper).toContain(
+      'require_equal protect_kernel_tunables "$(systemctl show "$SERVICE" -p ProtectKernelTunables --value)" no',
+    );
+    expect(qualificationHelper).toContain(
+      '"RestrictAddressFamilies=$(systemctl show "$unit" -p RestrictAddressFamilies --value)"',
+    );
+    expect(qualificationHelper).toContain(
+      '"ProtectKernelTunables=$(systemctl show "$unit" -p ProtectKernelTunables --value)"',
+    );
+    expect(qualificationHelper).toContain(
+      'if [[ "$TRANSIENT_BOUNDARY" != "$BROKER_BOUNDARY" ]]',
+    );
+  });
+  it("keeps the inner Bubblewrap and network-negative qualification contract", () => {
+    for (const argument of [
+      '"--die-with-parent"',
+      '"--new-session"',
+      '"--unshare-pid"',
+      '"--unshare-net"',
+      '"--unshare-uts"',
+      '"--unshare-ipc"',
+      '"--clearenv"',
+    ]) {
+      expect(bubblewrapIsolation).toContain(argument);
+    }
+    expect(bubblewrapIsolation).toContain(
+      'args.push("--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp")',
+    );
+    for (const marker of [
+      "filesystem_control_plane",
+      "broker_socket",
+      "non_loopback_interface",
+      "non_loopback_route",
+      "external_connect_reachable",
+    ]) {
+      expect(bubblewrapProbe).toContain(marker);
+    }
+  });
+  it("reports bounded failed-probe diagnostics without widening qualification", () => {
+    expect(qualificationCli).toContain("diagnostics: result.diagnostics");
+    expect(qualificationHelper).toContain(
+      "die_transient_with_diagnostics()",
+    );
+    expect(qualificationHelper).toContain(
+      "/usr/bin/tail -c 4096",
+    );
+    expect(qualificationHelper).toContain("DIAGNOSTICS_BEGIN");
+    expect(qualificationHelper).toContain("DIAGNOSTICS_END");
+  });
+  it("cleans only the fixed qualification unit and refuses active descendants", () => {
+    const cleanupStart = qualificationHelper.indexOf(
+      "prepare_transient_unit()",
+    );
+    const cleanupEnd = qualificationHelper.indexOf(
+      "check_pinned_node",
+      cleanupStart,
+    );
+    expect(cleanupStart).toBeGreaterThanOrEqual(0);
+    expect(cleanupEnd).toBeGreaterThan(cleanupStart);
+    const cleanup = qualificationHelper.slice(cleanupStart, cleanupEnd);
+    expect(cleanup).toContain(
+      'systemctl show "$TRANSIENT_UNIT" -p LoadState --value',
+    );
+    expect(cleanup).toContain(
+      'sudo -n systemctl stop "$TRANSIENT_UNIT"',
+    );
+    expect(cleanup).toContain(
+      'sudo -n systemctl reset-failed "$TRANSIENT_UNIT"',
+    );
+    expect(cleanup).toContain("die transient_descendant_remains");
+    expect(cleanup).toContain("die transient_unit_cleanup_incomplete");
+    expect(cleanup).not.toContain("systemctl kill");
+    expect(cleanup).not.toContain("pkill");
+    expect(
+      qualificationHelper.indexOf("prepare_transient_unit\nsudo -n rm -rf"),
+    ).toBeGreaterThanOrEqual(0);
+    expect(
+      qualificationHelper.lastIndexOf("\nprepare_transient_unit\n"),
+    ).toBeLessThan(
+      qualificationHelper.indexOf("sudo -n /usr/bin/systemd-run"),
     );
   });
 });

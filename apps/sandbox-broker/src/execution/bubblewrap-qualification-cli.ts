@@ -97,6 +97,7 @@ async function main(): Promise<void> {
           status: result.status,
           reason: result.reason,
           failedProbeId: result.failedProbeId,
+          diagnostics: result.diagnostics,
         },
         null,
         2,
