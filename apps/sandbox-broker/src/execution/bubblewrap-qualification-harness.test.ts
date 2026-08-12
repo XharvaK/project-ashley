@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 const qualificationHelper = readFileSync(
@@ -398,13 +399,13 @@ describe("02C qualification helper source contract", () => {
       "--property=ProtectKernelTunables=no",
     );
     expect(qualificationHelper).toContain(
-      'require_equal address_families "$(systemctl show "$SERVICE" -p RestrictAddressFamilies --value)" "$EXPECTED_RESTRICT_ADDRESS_FAMILIES"',
+      "require_token_set address_families",
     );
     expect(qualificationHelper).toContain(
       'require_equal protect_kernel_tunables "$(systemctl show "$SERVICE" -p ProtectKernelTunables --value)" no',
     );
     expect(qualificationHelper).toContain(
-      '"RestrictAddressFamilies=$(systemctl show "$unit" -p RestrictAddressFamilies --value)"',
+      '"RestrictAddressFamilies=$(normalize_token_set "$(systemctl show "$unit" -p RestrictAddressFamilies --value)")"',
     );
     expect(qualificationHelper).toContain(
       '"ProtectKernelTunables=$(systemctl show "$unit" -p ProtectKernelTunables --value)"',
@@ -481,5 +482,173 @@ describe("02C qualification helper source contract", () => {
     ).toBeLessThan(
       qualificationHelper.indexOf("sudo -n /usr/bin/systemd-run"),
     );
+  });
+});
+describe("02J canonical address-family set comparison", () => {
+  const tokenSetFunctionName = qualificationHelper.includes(
+    "normalize_token_set()",
+  )
+    ? "normalize_token_set"
+    : "normalize_namespace_set";
+  const tokenSetStart = qualificationHelper.indexOf(
+    tokenSetFunctionName + "()",
+  );
+  const tokenSetEnd = qualificationHelper.indexOf(
+    "read_cgroup_value()",
+    tokenSetStart,
+  );
+  const tokenSetSource = qualificationHelper.slice(tokenSetStart, tokenSetEnd);
+  const boundaryStart = qualificationHelper.indexOf("boundary_payload() {");
+  const boundaryEnd = qualificationHelper.indexOf(
+    "boundary_fingerprint() {",
+    boundaryStart,
+  );
+  const boundarySource = qualificationHelper.slice(boundaryStart, boundaryEnd);
+
+  function runNormalization(input: string) {
+    return spawnSync(
+      "bash",
+      [
+        "-c",
+        [
+          "set -u",
+          tokenSetSource,
+          "normalize_token_set \"$1\"",
+        ].join("\n"),
+        "normalize-token-set",
+        input,
+      ],
+      { encoding: "utf8" },
+    );
+  }
+
+  function runTokenSetCheck(actual: string, expected: string) {
+    return spawnSync(
+      "bash",
+      [
+        "-c",
+        [
+          "set -u",
+          tokenSetSource,
+          'require_equal() { [[ "$2" == "$3" ]]; }',
+          'require_token_set address_families "$1" "$2"',
+        ].join("\n"),
+        "token-set-check",
+        actual,
+        expected,
+      ],
+      { encoding: "utf8" },
+    );
+  }
+
+  function normalized(input: string): string {
+    const result = runNormalization(input);
+    expect(result.status).toBe(0);
+    return result.stdout.trim();
+  }
+
+  function runBoundaryFingerprint(
+    addressFamilies: string,
+    namespaces = "user mnt pid net uts ipc",
+  ) {
+    return spawnSync(
+      "bash",
+      [
+        "-c",
+        [
+          "set -u",
+          tokenSetSource,
+          boundarySource,
+          "die() { return 1; }",
+          [
+            "read_cgroup_value() {",
+            '  case "$1" in',
+            '    cpu_max) printf \'1000000 100000\\n\' ;;',
+            '    memory_high) printf \'1610612736\\n\' ;;',
+            '    memory_max) printf \'2147483648\\n\' ;;',
+            '    pids_max) printf \'256\\n\' ;;',
+            "    *) return 1 ;;",
+            "  esac",
+            "}",
+          ].join("\n"),
+          [
+            "systemctl() {",
+            '  [[ "$1" == show ]] || return 1',
+            '  case "$4" in',
+            "    ControlGroup) printf '/synthetic\\n' ;;",
+            '    RestrictNamespaces) printf \'%s\\n\' "$NAMESPACE_VALUE" ;;',
+            '    RestrictAddressFamilies) printf \'%s\\n\' "$ADDRESS_FAMILIES_VALUE" ;;',
+            "    *) printf '\\n' ;;",
+            "  esac",
+            "}",
+          ].join("\n"),
+          'ADDRESS_FAMILIES_VALUE="$1"',
+          'NAMESPACE_VALUE="$2"',
+          "boundary_payload synthetic | sha256sum | cut -d' ' -f1",
+        ].join("\n"),
+        "boundary-fingerprint",
+        addressFamilies,
+        namespaces,
+      ],
+      { encoding: "utf8" },
+    );
+  }
+
+  it("uses a generic token-set normalizer for both boundary properties", () => {
+    expect(qualificationHelper).toContain("normalize_token_set()");
+    expect(qualificationHelper).not.toContain("normalize_namespace_set()");
+    expect(qualificationHelper).toContain("require_token_set");
+  });
+
+  it.each([
+    ["accepted canonical order", "AF_UNIX AF_NETLINK", true],
+    ["accepted reverse order", "AF_NETLINK AF_UNIX", true],
+    [
+      "accepted duplicate and whitespace serialization",
+      "  AF_NETLINK\tAF_UNIX AF_NETLINK  ",
+      true,
+    ],
+    ["missing AF_UNIX", "AF_NETLINK", false],
+    ["missing AF_NETLINK", "AF_UNIX", false],
+    ["added AF_INET", "AF_UNIX AF_NETLINK AF_INET", false],
+    ["added AF_INET6", "AF_UNIX AF_NETLINK AF_INET6", false],
+    ["added AF_PACKET", "AF_UNIX AF_NETLINK AF_PACKET", false],
+    ["added unknown family", "AF_UNIX AF_NETLINK AF_UNKNOWN", false],
+  ])("compares address families as an exact set: %s", (_label, actual, accepted) => {
+    const expected = "AF_UNIX AF_NETLINK";
+    const actualNormalized = normalized(actual);
+    const expectedNormalized = normalized(expected);
+    expect(actualNormalized === expectedNormalized).toBe(accepted);
+    const result = runTokenSetCheck(actual, expected);
+    expect(result.status === 0).toBe(accepted);
+  });
+
+  it("keeps RestrictNamespaces normalization as an exact unordered set", () => {
+    const expected = "user mnt pid net uts ipc";
+    const actual = "ipc\tuts net pid mnt user user";
+    expect(normalized(actual)).toBe(normalized(expected));
+    expect(runTokenSetCheck(actual, expected).status).toBe(0);
+    const changed = "user mnt pid net uts";
+    expect(normalized(changed)).not.toBe(normalized(expected));
+    expect(runTokenSetCheck(changed, expected).status).not.toBe(0);
+  });
+
+  it("canonicalizes boundary fingerprints for order-only token differences", () => {
+    const canonical = runBoundaryFingerprint("AF_UNIX AF_NETLINK");
+    const reordered = runBoundaryFingerprint(
+      "AF_NETLINK AF_UNIX AF_NETLINK",
+      "ipc uts net pid mnt user user",
+    );
+    expect(canonical.status).toBe(0);
+    expect(reordered.status).toBe(0);
+    expect(canonical.stdout.trim()).toBe(reordered.stdout.trim());
+  });
+
+  it("changes the boundary fingerprint for semantic family changes", () => {
+    const canonical = runBoundaryFingerprint("AF_UNIX AF_NETLINK");
+    const changed = runBoundaryFingerprint("AF_UNIX AF_INET");
+    expect(canonical.status).toBe(0);
+    expect(changed.status).toBe(0);
+    expect(canonical.stdout.trim()).not.toBe(changed.stdout.trim());
   });
 });

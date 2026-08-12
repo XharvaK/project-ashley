@@ -217,16 +217,16 @@ EXPECTED_PIDS_MAX=256
 EXPECTED_CPU_QUOTA="100%"
 EXPECTED_MEMORY_HIGH_BYTES=1610612736
 EXPECTED_MEMORY_MAX_BYTES=2147483648
-normalize_namespace_set() {
-  printf '%s\n' "$1" | tr ' ' '\n' | sed '/^$/d' | LC_ALL=C sort | paste -sd' ' -
+normalize_token_set() {
+  printf '%s\n' "$1" | tr '[:space:]' '\n' | sed '/^$/d' | LC_ALL=C sort -u | paste -sd' ' -
 }
-require_namespace_set() {
+require_token_set() {
   local label="$1"
   local actual="$2"
   local expected="$3"
   require_equal "$label" \
-    "$(normalize_namespace_set "$actual")" \
-    "$(normalize_namespace_set "$expected")"
+    "$(normalize_token_set "$actual")" \
+    "$(normalize_token_set "$expected")"
 }
 read_cgroup_value() {
   local label="$1"
@@ -266,8 +266,8 @@ boundary_payload() {
   memory_max="$(read_cgroup_value memory_max "$cgroup_root/memory.max")" || return 1
   pids_max="$(read_cgroup_value pids_max "$cgroup_root/pids.max")" || return 1
   printf '%s\n' \
-    "RestrictNamespaces=$(normalize_namespace_set "$(systemctl show "$unit" -p RestrictNamespaces --value)")" \
-    "RestrictAddressFamilies=$(systemctl show "$unit" -p RestrictAddressFamilies --value)" \
+    "RestrictNamespaces=$(normalize_token_set "$(systemctl show "$unit" -p RestrictNamespaces --value)")" \
+    "RestrictAddressFamilies=$(normalize_token_set "$(systemctl show "$unit" -p RestrictAddressFamilies --value)")" \
     "CPUQuotaPerSecUSec=$(systemctl show "$unit" -p CPUQuotaPerSecUSec --value)" \
     "MemoryHigh=$(systemctl show "$unit" -p MemoryHigh --value)" \
     "MemoryMax=$(systemctl show "$unit" -p MemoryMax --value)" \
@@ -403,14 +403,16 @@ require_equal socket_active "$(systemctl is-active "$SOCKET")" active
 require_equal runtime_directory_declared_mode "$(systemctl show "$SOCKET" -p RuntimeDirectoryMode --value)" 0711
 require_equal socket_directory_declared_mode "$(systemctl show "$SOCKET" -p DirectoryMode --value)" 0711
 require_equal service_environment_files "$(systemctl show "$SERVICE" -p EnvironmentFiles --value)" "/etc/ashley-sandbox/broker.env (ignore_errors=yes)"
-require_namespace_set restrict_namespaces \
+require_token_set restrict_namespaces \
   "$(systemctl show "$SERVICE" -p RestrictNamespaces --value)" \
   "$EXPECTED_RESTRICT_NAMESPACES"
 require_equal cpu_quota "$(systemctl show "$SERVICE" -p CPUQuotaPerSecUSec --value)" 1s
 require_equal memory_high "$(systemctl show "$SERVICE" -p MemoryHigh --value)" "$EXPECTED_MEMORY_HIGH_BYTES"
 require_equal memory_max "$(systemctl show "$SERVICE" -p MemoryMax --value)" "$EXPECTED_MEMORY_MAX_BYTES"
 require_equal tasks_max "$(systemctl show "$SERVICE" -p TasksMax --value)" "$EXPECTED_TASKS_MAX"
-require_equal address_families "$(systemctl show "$SERVICE" -p RestrictAddressFamilies --value)" "$EXPECTED_RESTRICT_ADDRESS_FAMILIES"
+require_token_set address_families \
+  "$(systemctl show "$SERVICE" -p RestrictAddressFamilies --value)" \
+  "$EXPECTED_RESTRICT_ADDRESS_FAMILIES"
 require_equal delegate "$(systemctl show "$SERVICE" -p Delegate --value)" no
 require_equal private_tmp "$(systemctl show "$SERVICE" -p PrivateTmp --value)" yes
 require_equal private_devices "$(systemctl show "$SERVICE" -p PrivateDevices --value)" yes
