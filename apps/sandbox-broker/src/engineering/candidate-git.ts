@@ -68,33 +68,46 @@ function rejectNetworkArgs(args: string[]): string | null {
   return null;
 }
 
+/**
+ * Hardening `-c` flags applied to every candidate git invocation. They disable
+ * external diff/textconv/filters, fsmonitor, hooks, signing, credential
+ * helpers, and file-protocol remotes — neutralizing malicious repository-local
+ * or inherited git configuration (see audit finding on candidate git).
+ */
+const GIT_HARDENING_FLAGS = [
+  "-c",
+  "core.hooksPath=/dev/null",
+  "-c",
+  "commit.gpgsign=false",
+  "-c",
+  "protocol.file.allow=never",
+  "-c",
+  "core.fsmonitor=",
+  "-c",
+  "diff.external=",
+  "-c",
+  "diff.textconv=",
+  "-c",
+  "filter..*=",
+  "-c",
+  "core.pager=cat",
+  "-c",
+  "credential.helper=",
+  "-c",
+  "core.askPass=/dev/null",
+];
+
 function safetyPrefixes(subcommand: string): string[] {
   if (subcommand === "commit") {
     return [
-      "-c",
-      "core.hooksPath=/dev/null",
-      "-c",
-      "commit.gpgsign=false",
+      ...GIT_HARDENING_FLAGS,
       "-c",
       "user.name=AshleyCandidate",
       "-c",
       "user.email=candidate@ashley.local",
-      "-c",
-      "core.askPass=/dev/null",
-      "-c",
-      "credential.helper=",
-      "-c",
-      "protocol.file.allow=never",
     ];
   }
-  return [
-    "-c",
-    "core.hooksPath=/dev/null",
-    "-c",
-    "commit.gpgsign=false",
-    "-c",
-    "protocol.file.allow=never",
-  ];
+  return GIT_HARDENING_FLAGS;
 }
 
 export type CandidateGitResult = BoundedCommandResult & { executed: boolean };
@@ -126,6 +139,17 @@ export async function runCandidateGit(
     argv,
     cwd: repoRoot,
     limits: { wallMs: 30_000, maxProcesses: 1, maxOutputBytes: 1_000_000 },
+    // Never inherit host/operator git configuration from system or global
+    // files; only repo-local (broker-created) config and the above -c flags
+    // may apply.
+    extraEnv: {
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_CONFIG_GLOBAL: "/dev/null",
+      GIT_CONFIG_SYSTEM: "/dev/null",
+      GIT_TERMINAL_PROMPT: "0",
+      GIT_SSH_COMMAND: "false",
+      GIT_ASKPASS: "/dev/null",
+    },
   });
   if (!result.ok) return result;
   return { ok: true, result: result.result as CandidateGitResult };

@@ -76,6 +76,8 @@ export type BoundedCommandRequest = {
   argv: string[];
   cwd: string;
   limits: { wallMs: number; maxProcesses: number; maxOutputBytes: number };
+  /** Additional env pairs merged after the allowlist (broker-controlled only). */
+  extraEnv?: Record<string, string>;
 };
 
 export type BoundedCommandResult = FakeRunResult & {
@@ -90,12 +92,13 @@ export type BoundedCommandDeps = {
   envAllowlist: Set<string>;
 };
 
-function buildEnv(allowlist: Set<string>): Record<string, string> {
+function buildEnv(allowlist: Set<string>, extra?: Record<string, string>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const key of allowlist) {
     const value = process.env[key];
     if (value !== undefined) out[key] = value;
   }
+  if (extra) Object.assign(out, extra);
   return out;
 }
 
@@ -124,7 +127,7 @@ export async function runBoundedCommand(
     taskId: "engineering-bounded",
     argv,
     cwd: request.cwd,
-    env: buildEnv(deps.envAllowlist),
+    env: buildEnv(deps.envAllowlist, request.extraEnv),
     wallMs: request.limits.wallMs,
     maxProcesses: request.limits.maxProcesses,
     maxOutputBytes: request.limits.maxOutputBytes,

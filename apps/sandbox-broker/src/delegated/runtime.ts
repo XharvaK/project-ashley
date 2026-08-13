@@ -682,10 +682,12 @@ export class DelegatedRuntime {
       candidateRepoRoot: this.candidateRepoRoot,
       artifactRoot: this.artifactRoot,
       workspaceRoot: this.config.workspaceRoot,
+      recipes: this.config.recipes,
       processRunner: this.deps.processRunner,
       networkIsolation: this.deps.networkIsolation,
       executableMappings: this.config.executableMappings,
       envAllowlist: this.config.envAllowlist,
+      nonceStore: this.deps.nonceStore,
       auditSink: this.deps.auditSink,
     };
   }

@@ -48,6 +48,8 @@ export class SandboxEngineeringCoordinator {
   private readonly model: ThinkingModel;
   private tasks = new Map<string, SandboxTask>();
   private activeTaskId: string | null = null;
+  /** Tasks whose operator loop must stop at the next safe point. */
+  private cancelRequested = new Set<string>();
 
   constructor(model: ThinkingModel, port: EngineeringExecutionPort, config: CoordinatorConfig) {
     this.model = model;
@@ -137,11 +139,19 @@ export class SandboxEngineeringCoordinator {
         availableDiagnostics: this.config.availableDiagnostics,
         nowMs: this.config.nowMs,
         budgets: this.config.budgets,
+        isCancelled: () => this.cancelRequested.has(taskId),
       });
       task.modelCallsUsed = outcome.modelCallsUsed;
       task.toolCallsUsed = outcome.toolCallsUsed;
       task.completedAtMs = this.config.nowMs();
-      if (outcome.status === "completed") {
+      // A cancellation that arrived after the model finished but before we
+      // finalize must win: never report a cancelled task as completed. The
+      // operator also reports outcome.status === "aborted" when isCancelled()
+      // became true mid-run.
+      const wasCancelled = this.cancelRequested.has(taskId) || outcome.status === "aborted";
+      if (wasCancelled) {
+        task.status = "aborted";
+      } else if (outcome.status === "completed") {
         task.status = "completed";
         task.candidatePatchRef = extractPatchRef(outcome);
         task.artifactRefs = extractArtifactRefs(outcome);
@@ -157,6 +167,7 @@ export class SandboxEngineeringCoordinator {
         const lastFailed = [...outcome.results].reverse().find((r) => !r.ok);
         task.error = lastFailed && !lastFailed.ok ? lastFailed.errorCode : "operator_failed";
       }
+      this.cancelRequested.delete(taskId);
       this.activeTaskId = null;
       this.persist();
       return this.result(task, task.status, task.error);
@@ -170,14 +181,20 @@ export class SandboxEngineeringCoordinator {
     }
   }
 
-  /** Cancellation: a running task becomes aborted; never duplicated side effects. */
+  /**
+   * Cancellation: marks the task aborted and requests the running operator loop
+   * to stop cooperatively. It does NOT clear `activeTaskId` — the concurrency
+   * slot stays occupied until the loop actually terminates, so a second task
+   * cannot be dispatched concurrently (concurrency stays 1). The operator's
+   * `run()` finalizes to `aborted` and never overwrites it with `completed`.
+   */
   cancel(taskId: string): SandboxTask | null {
     const task = this.tasks.get(taskId);
     if (!task) return null;
-    if (task.status === "running") {
+    if (task.status === "running" || task.status === "admitted") {
       task.status = "aborted";
       task.completedAtMs = this.config.nowMs();
-      if (this.activeTaskId === taskId) this.activeTaskId = null;
+      this.cancelRequested.add(taskId);
       this.persist();
     }
     return task;

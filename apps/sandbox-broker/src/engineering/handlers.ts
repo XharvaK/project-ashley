@@ -12,6 +12,7 @@
 
 import * as path from "node:path";
 import { promises as fs } from "node:fs";
+import { randomBytes } from "node:crypto";
 import type { SandboxCapabilityId } from "@composer-assistant/sandbox-policy";
 import {
   validateEngineeringAction,
@@ -33,8 +34,10 @@ import type { OwnerApprovalVerifierConfig } from "../crypto/owner-approval.js";
 import type { BrokerRootConfig } from "../policy/root-config.js";
 import type { BrokerAuditRecord } from "../execution/fixed-recipe-execution-service.js";
 import type { NetworkIsolationProvider } from "../execution/network-isolation.js";
+import { runBoundedCommand } from "../execution/bounded-process.js";
 import type { ProcessRunner } from "../process/fake-runner.js";
 import type { ExecutableMappings } from "./../execution/executable-resolver.js";
+import type { FixedRecipe } from "../policy/recipe-registry.js";
 import type { BrokerResponse, RequestContext } from "../protocol/frame.js";
 import {
   boundedListDir,
@@ -52,8 +55,14 @@ import { runDiagnostic } from "./diagnostics.js";
 import {
   decideAgentRestart,
   executeAgentRestart,
+  getAgentRestartIncidentStore,
   type AgentRestartState,
 } from "./agent-restart.js";
+
+/** Broker-owned minimum cooldown between restart attempts for the same incident. */
+const DEFAULT_RESTART_COOLDOWN_MS = 5 * 60_000;
+
+export type EngineeringNonceStore = { reserve: (nonce: string) => boolean };
 
 export type EngineeringHandlerContext = {
   ownerId: string;
@@ -66,10 +75,14 @@ export type EngineeringHandlerContext = {
   candidateRepoRoot: string;
   artifactRoot: string;
   workspaceRoot: string;
+  /** Broker-owned fixed recipe registry (qualified, Bubblewrap-backed contracts). */
+  recipes: ReadonlyMap<string, FixedRecipe>;
   processRunner: ProcessRunner;
   networkIsolation: NetworkIsolationProvider;
   executableMappings: ExecutableMappings;
   envAllowlist: Set<string>;
+  /** Durable single-use nonce store (shared with the rest of the broker). */
+  nonceStore: EngineeringNonceStore;
   auditSink: (record: BrokerAuditRecord) => void;
 };
 
@@ -85,10 +98,10 @@ function err(errorCode: string, message: string): BrokerResponse<unknown> {
   return { ok: false, errorCode, message };
 }
 
-function workspaceTreeRoot(rootConfig: BrokerRootConfig, workspaceId: string): string | null {
+export function workspaceTreeRoot(rootConfig: BrokerRootConfig, workspaceId: string): string | null {
   if (!/^[A-Za-z0-9._:-]{1,64}$/.test(workspaceId)) return null;
   const abs = path.resolve(rootConfig.workspaceRoot, workspaceId);
-  if (!isWithin(abs, rootConfig.workspaceRoot)) return null;
+  if (!isWithin(rootConfig.workspaceRoot, abs)) return null;
   return abs;
 }
 
@@ -107,7 +120,7 @@ async function authorizeEngineering(
     activePolicy: ctx.activePolicy,
     trustedOwnerId: ctx.ownerId,
     trustedOwnerPolicyKeyIds: new Set([ctx.ownerKeyId]),
-    reserveNonce: () => true,
+    reserveNonce: (nonce) => ctx.nonceStore.reserve(nonce),
     nowMs,
     rootConfig: ctx.rootConfig,
     trustedOwnerApprovalKeys: ctx.trustedOwnerApprovalKeys,
@@ -142,10 +155,9 @@ export async function handleEngineeringAction(
   if (!isPlainRecord(eng.action) || !isPlainRecord(eng.envelope)) {
     return err("request_invalid", "action and envelope required");
   }
-  const nowMs = Number(eng.nowMs);
-  if (!Number.isFinite(nowMs)) {
-    return err("invalid_clock", "invalid now_ms");
-  }
+  // Authorization time is broker-owned. The agent may attach an observational
+  // `nowMs`, but it must never govern policy validity or envelope expiry.
+  const nowMs = Date.now();
   const action = eng.action as EngineeringAction;
   const validated = validateEngineeringAction(action);
   if (!validated.ok) {
@@ -298,11 +310,33 @@ export async function handleEngineeringAction(
       }
       return { ok: true, data: { artifactRef: artifactId, title } };
     }
+    case "request_workspace": {
+      // The broker owns workspace creation. The id is generated (never
+      // caller-selected) and the directory is created under the host-owned
+      // workspace root, so the model cannot choose an absolute path. An
+      // isolated git repository is initialized so patch/diff operations work
+      // without ever touching the live project source.
+      const workspaceId = `ws-${Date.now().toString(36)}-${randomBytes(8).toString("hex")}`;
+      const abs = path.resolve(ctx.workspaceRoot, workspaceId);
+      if (!isWithin(ctx.workspaceRoot, abs)) {
+        return err("workspace_invalid", "workspace path escaped root");
+      }
+      try {
+        await fs.mkdir(abs, { recursive: true });
+      } catch {
+        return err("workspace_create_failed", "could not create workspace");
+      }
+      const init = await runCandidateGit(bounded, abs, "init", ["-q"], { write: true });
+      if (!init.ok) {
+        return err("workspace_create_failed", init.reason);
+      }
+      return { ok: true, data: { workspaceId, treeRoot: abs, created: true } };
+    }
     case "commit_candidate": {
       const repoRef = boundedString(f.repoRef, 256);
       if (!repoRef) return err("repo_ref_invalid", "repoRef required");
       const repoRoot = path.resolve(ctx.candidateRepoRoot, repoRef);
-      if (!isCanonicalForm(repoRoot) || !isWithin(repoRoot, ctx.candidateRepoRoot)) {
+      if (!isCanonicalForm(repoRoot) || !isWithin(ctx.candidateRepoRoot, repoRoot)) {
         return err("repo_escape", "repoRef escapes candidate repo root");
       }
       const message = boundedString(f.message, 2048);
@@ -316,8 +350,55 @@ export async function handleEngineeringAction(
       if (!git.ok) return err(git.errorCode, git.reason);
       return { ok: true, data: { exitCode: git.result.exitCode, stdout: git.result.stdout } };
     }
-    case "execute_recipe":
-      return err("use_sandbox_recipe_execute", "fixed recipes route through sandbox.recipe.execute");
+    case "execute_recipe": {
+      const recipeId = boundedString(f.recipeId, 256);
+      if (!recipeId) return err("recipe_id_invalid", "recipeId required");
+      const recipe = ctx.recipes.get(recipeId);
+      if (!recipe || !recipe.supported) {
+        return err("recipe_unavailable", `recipe not available: ${recipeId}`);
+      }
+      // Resolve the working directory from the recipe's cwd policy and the
+      // action's explicit workspace/project binding (fail closed otherwise).
+      let cwd: string | null = null;
+      if (typeof f.workspaceId === "string" && f.workspaceId.length > 0) {
+        cwd = workspaceTreeRoot(ctx.rootConfig, f.workspaceId);
+      } else if (typeof f.projectId === "string" && f.projectId.length > 0) {
+        const entry = ctx.projectRegistry.entries.get(f.projectId);
+        cwd = entry && entry.enabled && entry.engineeringAllowed ? entry.canonicalRoot : null;
+      } else if (recipe.cwdPolicy === "workspace") {
+        cwd = ctx.workspaceRoot;
+      } else {
+        const allowed = [...ctx.projectRegistry.entries.values()].filter(
+          (e) => e.enabled && e.engineeringAllowed,
+        );
+        cwd = allowed.length === 1 ? allowed[0]!.canonicalRoot : null;
+      }
+      if (!cwd) {
+        return err("recipe_cwd_unresolved", "could not resolve recipe working directory");
+      }
+      const executableId = path.basename(recipe.executable);
+      const limits = recipe.limits ?? {
+        wallMs: 120_000,
+        maxProcesses: 2,
+        maxOutputBytes: 4_194_304,
+      };
+      const result = await runBoundedCommand(bounded, {
+        executableId,
+        argv: [...recipe.argv],
+        cwd,
+        limits,
+      });
+      if (!result.ok) return err(result.errorCode, result.reason);
+      return {
+        ok: true,
+        data: {
+          exitCode: result.result.exitCode,
+          stdout: result.result.stdout,
+          stderr: result.result.stderr,
+          truncated: result.result.truncated,
+        },
+      };
+    }
     case "run_diagnostic": {
       const diagnosticId = boundedString(f.diagnosticId, 128);
       if (!diagnosticId) return err("diagnostic_id_invalid", "diagnosticId required");
@@ -349,8 +430,7 @@ export async function handleAgentRestart(
   if (!isPlainRecord(payload) || !isPlainRecord(payload.envelope)) {
     return err("request_invalid", "payload and envelope required");
   }
-  const nowMs = Number(payload.nowMs);
-  if (!Number.isFinite(nowMs)) return err("invalid_clock", "invalid now_ms");
+  const nowMs = Date.now();
   const auth = await authorizeEngineering(ctx, payload.envelope, "ashley_agent_service_restart", nowMs);
   if (!auth.ok) return err(auth.errorCode, auth.message);
   const f = payload as Record<string, unknown>;
@@ -358,9 +438,12 @@ export async function handleAgentRestart(
   const incidentId = boundedString(f.incidentId, 256);
   if (!unit || !incidentId) return err("request_invalid", "unit and incidentId required");
   const health = f.health as { healthy: boolean; deterministic: boolean } | undefined;
-  const restartState = f.restartState as AgentRestartState | undefined;
-  if (!health || !restartState) return err("request_invalid", "health and restartState required");
-  const decision = decideAgentRestart({ unit, incidentId, nowMs, health, state: restartState });
+  if (!health) return err("request_invalid", "health required");
+  // Incident identity and attempt/cooldown state are broker-owned; the agent's
+  // claimed `restartState` is ignored (it must never govern the control loop).
+  const restartStore = getAgentRestartIncidentStore();
+  const state = restartStore.get(incidentId);
+  const decision = decideAgentRestart({ unit, incidentId, nowMs, health, state });
   if (!decision.ok || !decision.allowed) {
     return err("restart_denied", decision.ok ? decision.reason : decision.errorCode);
   }
@@ -374,6 +457,9 @@ export async function handleAgentRestart(
     unit,
   );
   if (!result.ok) return err(result.errorCode, result.reason);
+  // Record the attempt under the broker clock so the once-per-incident + cooldown
+  // guarantee holds across requests and cannot be reset by the agent.
+  restartStore.recordAttempt(incidentId, nowMs, DEFAULT_RESTART_COOLDOWN_MS);
   ctx.auditSink({ kind: "ashley_agent_restart", exitCode: result.exitCode } as unknown as BrokerAuditRecord);
   return { ok: true, data: { restarted: true, exitCode: result.exitCode } };
 }

@@ -29,6 +29,53 @@ export type AgentRestartState = {
 
 export const MAX_AGENT_RESTART_ATTEMPTS = 1;
 
+/**
+ * Broker-owned restart incident state. The agent may never assert attempt
+ * counts, cooldowns, or incident identity: those are maintained by the broker
+ * and are the sole input to `decideAgentRestart`. A compromised or mistaken
+ * agent therefore cannot forge "attemptsForIncident: 0" to bypass the
+ * once-per-incident limit or fabricate the clock.
+ */
+export class AgentRestartIncidentStore {
+  private readonly incidents = new Map<
+    string,
+    { lastAttemptAtMs: number | null; attemptsForIncident: number; cooldownMs: number }
+  >();
+
+  get(incidentId: string): AgentRestartState | null {
+    const entry = this.incidents.get(incidentId);
+    if (!entry) return null;
+    return {
+      incidentId,
+      lastAttemptAtMs: entry.lastAttemptAtMs,
+      attemptsForIncident: entry.attemptsForIncident,
+      cooldownMs: entry.cooldownMs,
+    };
+  }
+
+  /** Record a single restart attempt for the incident under the broker clock. */
+  recordAttempt(incidentId: string, nowMs: number, cooldownMs: number): void {
+    const entry = this.incidents.get(incidentId);
+    if (entry) {
+      entry.lastAttemptAtMs = nowMs;
+      entry.attemptsForIncident += 1;
+      entry.cooldownMs = cooldownMs;
+    } else {
+      this.incidents.set(incidentId, {
+        lastAttemptAtMs: nowMs,
+        attemptsForIncident: 1,
+        cooldownMs,
+      });
+    }
+  }
+}
+
+let singleton: AgentRestartIncidentStore | null = null;
+export function getAgentRestartIncidentStore(): AgentRestartIncidentStore {
+  if (singleton === null) singleton = new AgentRestartIncidentStore();
+  return singleton;
+}
+
 export type AgentRestartDecision =
   | { ok: true; allowed: true; reason: "prerequisites_met" }
   | { ok: true; allowed: false; reason: AgentRestartDenialReason }

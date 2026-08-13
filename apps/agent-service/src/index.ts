@@ -2,6 +2,9 @@ import "./env.js";
 import { env } from "./env.js";
 import { AgentManager } from "./agent.js";
 import { createServer, listen } from "./server.js";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
 import {
   startNuclearCuriosityLoop,
   stopNuclearCuriosityLoop,
@@ -42,8 +45,27 @@ async function main(): Promise<void> {
       console.log(
         `[engineering] completed task=${info.taskId} admission=${info.admissionId} summary=${info.summary ?? ""}`,
       ),
-    onWeeklyReviewDue: (summary) =>
-      console.log(`[engineering-self-improvement] weekly review due: ${summary}`),
+    onWeeklyReviewDue: (review) => {
+      // Deliver the candidate to Doc as a durable, retrievable artifact (audit
+      // #2: the clone must actually surface its candidate, not discard it). The
+      // owner-channel transport (e.g. Discord DM) is the final hop once an
+      // owner-messaging channel exists; the artifact is always persisted first
+      // so the review is never lost.
+      const outDir = join(homedir(), ".composer-assistant", "engineering-weekly-reviews");
+      try {
+        mkdirSync(outDir, { recursive: true });
+        writeFileSync(
+          join(outDir, `${review.reportRef}.json`),
+          JSON.stringify(review, null, 2),
+          "utf8",
+        );
+      } catch (err) {
+        console.error("[engineering-self-improvement] failed to persist review", err);
+      }
+      console.log(
+        `[engineering-self-improvement] weekly review due: ${review.reportRef} :: ${review.candidate.title}`,
+      );
+    },
     onRefused: (reason) => console.log(`[engineering] refused: ${reason}`),
   });
   console.log(

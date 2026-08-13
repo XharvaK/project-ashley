@@ -13,7 +13,36 @@
  * expected final markers.
  */
 
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
+
 export const ENGINEERING_ACTIVATION_ENV = "ASHLEY_SANDBOX_LIFECYCLE";
+
+/**
+ * Default host-owned activation marker path. The owner's activation runbook
+ * writes this file (with a broker-verifiable `epochMs`) as the final cutover
+ * step; the agent ingests it into the durable epoch on startup. Tampering or
+ * absence fails closed: no epoch => the supervisor never dispatches.
+ */
+export const DEFAULT_ACTIVATION_MARKER_PATH = join(
+  homedir(),
+  ".composer-assistant",
+  "engineering-activation.json",
+);
+
+/** Read the activation epoch from the host marker; null means not activated. */
+export function readActivationMarkerEpoch(markerPath: string): number | null {
+  try {
+    if (!existsSync(markerPath)) return null;
+    const raw = JSON.parse(readFileSync(markerPath, "utf8")) as unknown;
+    if (typeof raw !== "object" || raw === null) return null;
+    const epochMs = Number((raw as { epochMs?: unknown }).epochMs);
+    return Number.isFinite(epochMs) && epochMs > 0 ? epochMs : null;
+  } catch {
+    return null;
+  }
+}
 
 export type ActivationStep =
   | "verify_source"

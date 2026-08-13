@@ -48,6 +48,8 @@ export type OperatorRunInput = {
   availableDiagnostics: string[];
   nowMs: () => number;
   budgets: { maxModelCalls: number; maxToolExecutions: number; maxWallMs: number };
+  /** Cooperative cancellation check; when true the operator stops at the next safe point. */
+  isCancelled?: () => boolean;
 };
 
 export type OperatorOutcome = {
@@ -75,6 +77,9 @@ export class EngineeringOperatorAdapter {
     let started = false;
 
     for (let step = 0; step < ENGINEERING_MAX_STEPS; step++) {
+      if (input.isCancelled?.()) {
+        return { status: "aborted", modelCallsUsed, toolCallsUsed, results, candidatePatchRef: extractPatchRef(results) };
+      }
       const nowMs = input.nowMs();
       const lastResults = results.map((r) => ({
         ok: r.ok,

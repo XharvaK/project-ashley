@@ -309,6 +309,13 @@ export const env = {
     120,
     true,
   ),
+  // Host-owned activation marker written by the owner's activation runbook
+  // (scripts/mint/activate-engineering.sh). The agent ingests its epoch into
+  // the durable activation epoch on startup; absence => no dispatch (fail-closed).
+  sandboxActivationMarkerPath: strictTrimmed(
+    "ASHLEY_SANDBOX_ACTIVATION_MARKER",
+    join(homedir(), ".composer-assistant", "engineering-activation.json"),
+  ),
   // Broker trust anchors and policy artifacts (paths only; never keys).
   sandboxPolicyArtifactPath: strictTrimmed(
     "ASHLEY_SANDBOX_POLICY_ARTIFACT",

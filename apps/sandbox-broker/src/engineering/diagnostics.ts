@@ -75,7 +75,7 @@ export const DIAGNOSTIC_DEFINITIONS: ReadonlyMap<string, DiagnosticDefinition> =
     {
       diagnosticId: "workspace_usage",
       executableId: "du",
-      argv: ["-sh", "/var/lib/ashley-sandbox/workspaces"],
+      argv: ["-sh", "/var/lib/ashley-sandbox/workspace"],
       description: "report workspace disk usage",
       limits: { wallMs: 20_000, maxProcesses: 1, maxOutputBytes: 32_768 },
     },
