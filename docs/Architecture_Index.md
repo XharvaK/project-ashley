@@ -2,6 +2,12 @@
 
 Nuclear-only Discord runtime.
 
+Current architectural direction and roadmap status are canonicalized in
+[`architecture/Ashley_Architecture_Roadmap.md`](architecture/Ashley_Architecture_Roadmap.md).
+Document authority and historical status are indexed in
+[`architecture/Ashley_Architecture_Document_Index.md`](architecture/Ashley_Architecture_Document_Index.md).
+This file remains the implementation-oriented module and observability map.
+
 ## Governance docs
 
 Authority flows:
@@ -33,6 +39,30 @@ VISION.md
 
 Stewardship Compact and Ethics are peers beneath the Constitution. They clarify
 higher authority; they do not override it.
+
+## Planned model policy
+
+Current production routing remains documented in
+[`Routing_Status.md`](Routing_Status.md). The target MODEL-FABRIC-01 policy is:
+
+- main Thought primary: Groq `openai/gpt-oss-120b`;
+- specialist and utility primary candidate: NVIDIA
+  `nvidia/nemotron-3.5-lightning-30b-a3b`;
+- later route-qualified Lightning fallback: Groq `openai/gpt-oss-120b`;
+- former Groq 20B utility candidate: retired from planned architecture;
+- Expression primary: Mistral Medium, unchanged.
+
+The first Thought-observation shadow slice uses Lightning with
+`reliabilityClass = single_attempt`, `fallbackRouteIds = []`, and at most one
+provider request. The later GPT-OSS-120B fallback is not part of that slice.
+Contracts and bounded implementation planning are in
+[`architecture/Model_Fabric_01_Contract_Draft.md`](architecture/Model_Fabric_01_Contract_Draft.md)
+and
+[`architecture/Model_Fabric_01_Implementation_Spike.md`](architecture/Model_Fabric_01_Implementation_Spike.md).
+Qualification meaning remains owned by
+[`architecture/Ashley_Evaluation_Qualification_Plane.md`](architecture/Ashley_Evaluation_Qualification_Plane.md).
+No Model Fabric implementation, provider activation, or deployment is authorized
+by these documents.
 
 ## Production (Mint)
 

@@ -15,6 +15,16 @@ Authoritative route table: `config/models.json`. Fallback static table:
 | `thought_observation` | `utility_bulk` | Groq | `openai/gpt-oss-20b` | `groq:openai/gpt-oss-20b` |
 | `maintenance` | `utility_bulk` | Groq | `openai/gpt-oss-20b` | `groq:openai/gpt-oss-20b` |
 
+This table is current-source truth. It is not the future Model Fabric target.
+The planned policy retires the former Groq 20B utility candidate from all future
+roles, keeps Groq
+`openai/gpt-oss-120b` as main Thought primary, and selects NVIDIA
+`nvidia/nemotron-3.5-lightning-30b-a3b` as the specialist/utility primary
+candidate. GPT-OSS-120B is only a later, route-qualified fallback candidate for
+Lightning-backed routes. The first Thought-observation Model Fabric slice has no
+fallback. See the
+[canonical architecture roadmap](architecture/Ashley_Architecture_Roadmap.md#target-model-policy).
+
 Call sites pass the semantic route explicitly (see C6 hardening) rather than
 inferring it only from the purpose string.
 
