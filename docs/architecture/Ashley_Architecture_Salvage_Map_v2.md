@@ -1,5 +1,11 @@
 # Ashley Architecture Salvage Map v2
 
+> **STATUS: HISTORICAL DECISION SURFACE**
+>
+> This document preserves the 2026-08-09 subsystem adjudication. The current
+> roadmap and later substrate dispositions are governed by the
+> [Canonical Architecture Roadmap](Ashley_Architecture_Roadmap.md).
+
 **Status:** Accepted decision surface
 
 **Date:** 2026-08-09

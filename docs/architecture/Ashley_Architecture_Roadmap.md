@@ -118,6 +118,17 @@ SKILL AVAILABLE/INSTALLED ≠ PERMISSION TO INVOKE
 TOOL PRESENT ≠ AUTHORITY TO USE IT
 ```
 
+Mechanism capability is not authority to create an external commitment or to
+represent the owner. Browser, calendar, email, connector, credential, and
+other mechanism access does not by itself authorize a purchase, reservation,
+agreement, scheduling commitment, or communication on the owner's behalf.
+Future Ashley-owned external-action and effect contracts must keep
+commitment-bearing effects and representation scope distinct from generic
+capability and provider authentication. Owner approval may authorize a bounded
+commitment or representation scope where required, but approval does not itself
+define that semantic scope. Candidate names for these distinctions remain
+unfrozen.
+
 The Sandbox law is:
 
 > BROAD FREEDOM INSIDE THE SANDBOX. CONSERVATIVE AUTHORITY AT THE BORDERS.
@@ -324,6 +335,28 @@ because success was not observed. Any possible delivery or execution remains
 `OUTCOME_UNKNOWN` until reconciled. An executor receipt may inform that
 reconciliation, but it does not independently establish post-effect reality.
 
+Operational Continuity should include an explicit fan-out/fan-in qualification
+workload. It must exercise bounded concurrency, parent-budget ceilings,
+child-budget attenuation, cancellation propagation, sibling-failure
+containment, child result provenance, partial aggregation, child-first drain,
+dead-child cleanup, restart, and `OUTCOME_UNKNOWN`. This is one Ashley with
+bounded workers, not a multi-agent cognition architecture. Aggregation may
+retain successful and definitive-failure children as a partial result, but an
+unresolved child remains unresolved and cannot be blindly retried or hidden.
+
+Remote persistent objects must remain distinct from local `ExecutionWorkspace`
+artifacts. A future remote-object seam may extend the Artifact Registry or
+connector boundary with provider/namespace, stable object identity, observed
+revision, mutation base, allowed operation scope, and post-write observation.
+The interaction remains `PREPARE -> REVALIDATE -> COMMIT`, followed by
+reconciliation when necessary. A URL or tool result is not remote-object
+identity, and a remote-object reference is not Recall or memory authority.
+
+Some long-running effects may culminate in an external commitment or represent
+the owner to another party. Those meanings belong in the existing
+Ashley-owned effect, authorization, and External Agency seams; they do not
+follow from worker participation, connector access, or a generic receipt.
+
 Durable operational state and durable cognitive state are distinct.
 
 > DURABLE WORK STATE ≠ DURABLE COGNITIVE STATE.
@@ -365,6 +398,11 @@ Representation, availability, installation, qualification, and invocation
 authority remain separate. An available or installed skill is not permission
 to invoke it.
 
+A qualified procedure describes how an operation may be performed. It does not
+by itself grant external-commitment authority, representation authority, owner
+consent, capability admission, or permission to invoke. Invocation remains
+subject to Ashley-owned capability and operation-specific authorization.
+
 ### 7.4 COMPUTER-USE-01
 
 For a particular effect, prefer the narrowest, highest-semantic, most
@@ -390,6 +428,11 @@ Broker, Device Bridge, `ApprovalProjection`, Effect Witness, and
 candidates. Credentials must not enter model-visible context merely because a
 browser needs them. A connected account or authenticated browser session does
 not itself admit a capability or authorize an effect.
+
+Computer or browser access also does not imply purchase authority,
+representation authority, or commitment authority. Consequential external
+effects remain subject to Ashley-owned authorization, `PREPARE -> REVALIDATE ->
+COMMIT`, and claim-appropriate witness and reconciliation semantics.
 
 - `PREPARE` constructs the bounded intended effect and gathers required
   authority and context.
@@ -423,6 +466,15 @@ resume from pre-handoff assumptions.
 Experience may later inform initiative, salience, and persistent
 `OpenConcern` objects. Changes must be evidence-backed, reversible,
 inspectable, and qualified before autonomy expands.
+
+Future choice evaluation should distinguish hard constraints, situational
+constraints, explicit owner preferences, inferred or learned preferences,
+situational preferences, and optimization objectives. Hard and situational
+constraints determine the feasible set; explicit owner preferences outrank
+inferred preferences when they conflict. Inferred preference is not authority
+and must not silently become a hard constraint or permission. Agency and
+Thought remain the decision owners; do not freeze a `ChoicePolicy` or turn
+Identity or Recall into an optimization store here.
 
 Accumulated trust is not sandbox authorization. Long good behavior never
 grants root privileges or weakens capability policy.

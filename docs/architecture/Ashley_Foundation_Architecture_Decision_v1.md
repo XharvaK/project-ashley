@@ -1,5 +1,11 @@
 # Ashley Foundation Architecture Decision v1
 
+> **STATUS: HISTORICAL FOUNDATION DECISION**
+>
+> The semantic-ownership decision remains supporting evidence. The current
+> roadmap, completed P-01 status, and later substrate dispositions are governed
+> by the [Canonical Architecture Roadmap](Ashley_Architecture_Roadmap.md).
+
 **Status:** Accepted architecture decision; implementation not started
 
 **Decision date:** 2026-08-09

@@ -98,6 +98,7 @@ upgrade one into another.
 | Porting Spike Backlog | [`docs/architecture/salvage/Porting_Spike_Backlog.md`](salvage/Porting_Spike_Backlog.md) | Proposed framework and porting spikes | 2026-08-09 | `SUPERSEDED` | Research-only backlog explicitly did not authorize work. Canonical roadmap now governs phase order. |
 | Research Gaps and Contradictions | [`docs/architecture/salvage/Research_Gaps_and_Contradictions.md`](salvage/Research_Gaps_and_Contradictions.md) | Candidate conflicts and research gaps | 2026-08-09 | `HISTORICAL` | Preserves why Mastra, AgentFS, OpenHands, and Letta roles were narrowed. Some gaps were later resolved by P-01/P-02. |
 | Semantica Salvage Audit v1 | [`docs/architecture/salvage/Semantica_Salvage_Audit_v1.md`](salvage/Semantica_Salvage_Audit_v1.md) | Semantic-framework source audit | 2026-08-09 | `REFERENCE` | Supports no-wholesale-adoption and a possible read-only PROV-O export adapter. Semantica is not Ashley authority. |
+| Autonomous Work Semantics Salvage | [`docs/architecture/research/Autonomous_Work_Semantics_Salvage.md`](research/Autonomous_Work_Semantics_Salvage.md) | Autonomous-work semantic distinctions and candidate reconciliation | 2026-08-13 | `REFERENCE` | Records architectural pressure and future direction without freezing candidate names, selecting a substrate, or authorizing implementation. |
 
 ## 5. P-01 and P-02 evidence
 

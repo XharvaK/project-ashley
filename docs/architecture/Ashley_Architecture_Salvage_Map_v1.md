@@ -1,5 +1,11 @@
 # ASHLEY ARCHITECTURE SALVAGE MAP v1
 
+> **STATUS: SUPERSEDED ARCHITECTURE RESEARCH**
+>
+> This document preserves Pass 1 research and does not describe the current
+> Ashley roadmap. See the
+> [Canonical Architecture Roadmap](Ashley_Architecture_Roadmap.md).
+
 **Research date:** 2026-08-09  
 **Mode:** architecture research, forensic mapping, implementation preparation  
 **Implementation status:** none; only the authorized salvage documents were written  
