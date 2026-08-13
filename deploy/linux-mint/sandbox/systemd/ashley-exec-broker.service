@@ -13,6 +13,7 @@ EnvironmentFile=-/etc/ashley-sandbox/broker.env
 ExecStart=@NODE@ /opt/ashley-sandbox/dist/main.js --socket-activated
 Restart=on-failure
 RestartSec=5
+KillMode=control-group
 NoNewPrivileges=true
 PrivateTmp=true
 PrivateDevices=true

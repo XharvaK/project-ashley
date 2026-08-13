@@ -51,6 +51,11 @@ qualified dist, the 02C isolation evidence + canary receipt at
 `~/.composer-assistant/keys/`, and the project registry at
 `~/.composer-assistant/project-roots.json`.
 
+**Important:** The production checkout at `/home/xarvak/project-ashley` may have
+owner-controlled untracked files (`0` and `query.js`). These MUST NOT be
+automatically deleted, moved, or normalized. Their disposition is determined by
+the owner (see below).
+
 1. Pull the corrections commit (strict fast-forward only):
 
    ```bash
@@ -61,7 +66,24 @@ qualified dist, the 02C isolation evidence + canary receipt at
    git rev-parse HEAD                     # this becomes SOURCE_PIN
    ```
 
-2. Run the full verification entry point (may take several minutes):
+2. Inspect owner-controlled files in the production checkout:
+
+   ```bash
+   cd /home/xarvak/project-ashley
+   git status --short --untracked-files=all
+   ```
+
+   You will see untracked files `0` and/or `query.js`. These are owner-controlled
+   artifacts. Determine their disposition:
+
+   - **Disposable build artifacts**: If they are temporary build outputs no longer
+     needed, the owner may delete them.
+   - **Retained owner data**: If they contain owner-specific configuration or
+     data, the owner must preserve them.
+
+   The owner decides; this task does NOT automatically delete or move any files.
+
+3. Run the full verification entry point (may take several minutes):
 
    ```bash
    deploy/linux-mint/sandbox/test-all.sh
@@ -70,26 +92,26 @@ qualified dist, the 02C isolation evidence + canary receipt at
    Expected: all four suites PASS. (Skip `--with-canary` here; the canary is
    run by the activation script itself.)
 
-3. Read the activation script first, then run it with the HEAD commit:
+4. Read the activation script first, then run it with the HEAD commit:
 
    ```bash
    SOURCE_PIN="$(git rev-parse HEAD)" bash scripts/mint/activate-engineering.sh
    ```
 
    It verifies (in order, fail-closed): source pin → 02C isolation evidence
-   (status/sourceCommit/providerKind) + canary receipt → policy pair presence
-   → clean protected live checkout → installed broker dist → broker gate envs
-   + socket/unit restart → framed-protocol readiness (`sandbox.readiness`,
-   `ready && networkIsolationOperational && networkMode=="none"`) → R5B
-   canary (`verify-agent-tsc.mjs`, `"ok":true` + `"outcome":"succeeded"`) →
-   project registry validity → no-remote self-improvement clone → activation
-   epoch marker → `ASHLEY_SANDBOX_LIFECYCLE=ENABLED` in `~/.composer-assistant/.env`
-   → agent (user unit) restart → agent health (`/health`) → worker health
-   (non-fatal) → historical admissions untouched.
+   (status/sourceCommit/providerKind) + canary receipt → policy artifact + freshness
+   → clean protected live checkout → installed broker dist + source-bound provenance
+   → broker gate envs + socket/unit restart → framed-protocol
+   readiness (`sandbox.readiness`, `ready && networkIsolationOperational &&
+   networkMode=="none"`) → R5B canary (`verify-agent-tsc.mjs`, `"ok":true` +
+   `"outcome":"succeeded"`) → project registry validity → no-remote
+   self-improvement clone → activation epoch marker → `ASHLEY_SANDBOX_LIFECYCLE=ENABLED`
+   in `~/.composer-assistant/.env` → agent (user unit) restart → agent health
+   (`/health`) → worker health (non-fatal) → historical admissions untouched.
 
    Success prints `{"ok":true,"activationEpochMs":…,"canary":"PASS",…}`.
 
-4. Post-activation join-proof:
+5. Post-activation join-proof:
 
    ```bash
    curl -fsS "http://127.0.0.1:3710/nuclear/engineering?owner_id=<owner-id>"
@@ -113,9 +135,12 @@ qualified dist, the 02C isolation evidence + canary receipt at
    bash scripts/mint/rollback-engineering.sh
    ```
 
-   Removes the lifecycle flag from the owner `.env`, flips the activation
-   marker to `sandboxAutonomy:"DISABLED"`, restarts the agent user unit, and
-   preserves qualification evidence.
+   Removes the lifecycle flag from the owner `.env`, writes both persistent
+   broker gates to `false`, flips the activation marker to
+   `sandboxAutonomy:"DISABLED"`, stops the broker socket and service, verifies
+   `KillMode=control-group`, inactive systemd state, `MainPID=0`, and an empty
+   surviving broker cgroup, restarts the agent user unit in non-autonomous
+   mode, and preserves qualification evidence.
 
 ## Final report
 
@@ -127,3 +152,34 @@ READY FOR DEEPSEEK CORRECTION-DIFF AUDIT: YES/NO
 READY FOR MINT PHYSICAL QUALIFICATION: YES/NO
 Corrections commit: <sha>
 ```
+
+## Installation provenance ownership
+
+The installer publishes two source-bound subjects after installation:
+
+- `broker-runtime`: broker `dist/**`, sandbox-policy `dist/**` and package
+  metadata, broker package metadata, `bin/peer-credentials`, the generated
+  `bin/npm` wrapper, `meta/recipes.json`, and the installed broker systemd
+  service/socket units. Host `bin/node` and the copied npm package are
+  toolchain substrate and are not represented as Ashley source artifacts.
+- `engineering-workspace`: the complete provisioned
+  `workspace/apps/agent-service` tree, including safe bounded symlinks, under
+  its own manifest. It is not part of broker runtime identity.
+
+Activation independently derives the required runtime artifact set. It then
+requires exact manifest-set equality, verifies final installed digests, and
+verifies the separate workspace manifest before any authority mutation.
+
+`broker.env`, policy/key material, and qualification evidence remain separate
+mutable configuration, authorization, and physical-qualification subjects.
+They are not source identity.
+
+## 02C evidence semantics
+
+- **02C PASS**: `7963d2d235b66f34f4dedfb47fa6bd1b0c1f5edf`
+- **After source correction**: fresh qualification REQUIRED.
+- If a new correction SHA is created, the final report must state:
+  - **PHYSICAL QUALIFICATION FOR NEW SHA**: NOT RUN
+  - The canonical 02C canary path is
+    `/var/lib/ashley-sandbox/qualification/sandbox-isolation-02c/canary-receipt.json`
+  - Activation uses the canonical 02C receipt (not any copied duplicate)

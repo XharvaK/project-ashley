@@ -1,240 +1,348 @@
 #!/usr/bin/env bash
 #
-# activate-engineering.sh — Autonomous Engineering Workstation activation.
-#
-# Host-gated. Run ONLY on the production Linux Mint host, AS THE OWNER
-# (never `sudo -u`). It performs the verified, ordered activation sequence
-# and refuses to enable autonomy unless every gate passes. It NEVER:
-#   - pushes any git repository,
-#   - mutates the production live checkout,
-#   - signs or widens sandbox policy,
-#   - spawns more than strictly required.
-#
-# The SOURCE_PIN is a REQUIRED argument (or SOURCE_PIN=... env override):
-# the live checkout must sit exactly on the commit that produced the
-# qualified broker artifacts, or activation stops before anything starts.
-#
-# On success it writes the durable activation epoch marker and enables the
-# agent lifecycle flag in the owner .env (the systemd EnvironmentFile, which
-# takes precedence over any drop-in). On any gate failure it stops BEFORE
-# enabling autonomy (fail closed) and prints a JSON status with the failed
-# step.
-#
-# Usage: SOURCE_PIN=<commit> scripts/mint/activate-engineering.sh
+# Host-gated activation of the Autonomous Engineering Workstation.
+# Run only on the Linux Mint production host as the owner. This script never
+# pushes, mutates the protected live checkout, or changes policy.
 set -euo pipefail
 
 SOURCE_PIN="${SOURCE_PIN:-${1:-}}"
-if [ -z "$SOURCE_PIN" ]; then
-  printf '{"ok":false,"stage":"usage","reason":"source_pin_required"}\n' >&2
-  exit 1
-fi
-
 REPO="${REPO:-/home/xarvak/project-ashley}"
 CONF="${CONF:-$HOME/.composer-assistant}"
 SANDBOX_ROOT="${SANDBOX_ROOT:-/var/lib/ashley-sandbox}"
+BROKER_INSTALL_ROOT="${BROKER_INSTALL_ROOT:-/opt/ashley-sandbox}"
+ENGINEERING_WORKSPACE="${ENGINEERING_WORKSPACE:-$SANDBOX_ROOT/workspace/apps/agent-service}"
 SELF_IMPROVE_CLONE="${SELF_IMPROVE_CLONE:-$SANDBOX_ROOT/self-improvement/project-ashley}"
 ACTIVATION_MARKER="${ACTIVATION_MARKER:-$CONF/engineering-activation.json}"
 QUALIFICATION_DIR="${QUALIFICATION_DIR:-$SANDBOX_ROOT/qualification}"
 ISOLATION_EVIDENCE="${ISOLATION_EVIDENCE:-$QUALIFICATION_DIR/sandbox-isolation-02c/evidence.json}"
-CANARY_RECEIPT="${CANARY_RECEIPT:-$QUALIFICATION_DIR/canary-receipt.json}"
+CANARY_RECEIPT="${CANARY_RECEIPT:-$QUALIFICATION_DIR/sandbox-isolation-02c/canary-receipt.json}"
 BROKER_ENV_FILE="${BROKER_ENV_FILE:-/etc/ashley-sandbox/broker.env}"
 BROKER_SOCKET="${BROKER_SOCKET:-/run/ashley/broker.sock}"
 PROJECT_REGISTRY="${PROJECT_REGISTRY:-$CONF/project-roots.json}"
-BROKER_DIST="${BROKER_DIST:-/opt/ashley-sandbox/dist/main.js}"
+BROKER_DIST="${BROKER_DIST:-$BROKER_INSTALL_ROOT/dist/main.js}"
+PROVENANCE_MANIFEST="${PROVENANCE_MANIFEST:-$BROKER_INSTALL_ROOT/install-manifest.json}"
+WORKSPACE_PROVENANCE_MANIFEST="${WORKSPACE_PROVENANCE_MANIFEST:-$SANDBOX_ROOT/meta/engineering-workspace-manifest.json}"
+PROVENANCE_HELPER="${PROVENANCE_HELPER:-$REPO/deploy/linux-mint/sandbox/install-provenance.py}"
+FAILED_ACTIVATION_CLEANUP="${FAILED_ACTIVATION_CLEANUP:-$REPO/scripts/mint/rollback-engineering.sh}"
+ACTIVATION_FAIL_AT="${ASHLEY_ACTIVATION_FAIL_AT:-}"
+BROKER_SERVICE="${BROKER_SERVICE:-ashley-exec-broker.service}"
+BROKER_SOCKET_UNIT="${BROKER_SOCKET_UNIT:-ashley-exec-broker.socket}"
+SYSTEMD_UNIT_ROOT="${SYSTEMD_UNIT_ROOT:-/etc/systemd/system}"
+CURL_BIN="${CURL_BIN:-curl}"
+
+ACTIVATION_AUTHORITY_MUTATED=0
+ACTIVATION_SUCCEEDED=0
 
 log() { printf '[activate-engineering] %s\n' "$*"; }
 fail() { printf '{"ok":false,"stage":"%s","reason":"%s"}\n' "$1" "$2" >&2; exit 1; }
+maybe_fail() {
+  if [ "$ACTIVATION_FAIL_AT" = "$1" ]; then
+    fail "$1" "injected_failure:$1"
+  fi
+}
 
-# 1. verify source pin
+run_failed_activation_cleanup() {
+  BROKER_ENV_FILE="$BROKER_ENV_FILE" \
+  CONF="$CONF" \
+  SANDBOX_ROOT="$SANDBOX_ROOT" \
+  ACTIVATION_MARKER="$ACTIVATION_MARKER" \
+  BROKER_SOCKET="$BROKER_SOCKET" \
+  BROKER_SERVICE="$BROKER_SERVICE" \
+  BROKER_SOCKET_UNIT="$BROKER_SOCKET_UNIT" \
+  bash "$FAILED_ACTIVATION_CLEANUP"
+}
+
+cleanup_on_exit() {
+  local original_status=$?
+  local cleanup_status=0
+  trap - EXIT
+  if [ "$original_status" -ne 0 ] && \
+     [ "$ACTIVATION_AUTHORITY_MUTATED" = "1" ] && \
+     [ "$ACTIVATION_SUCCEEDED" != "1" ]; then
+    set +e
+    run_failed_activation_cleanup
+    cleanup_status=$?
+    set -e
+    if [ "$cleanup_status" -ne 0 ]; then
+      printf '{"ok":false,"stage":"failed_activation_cleanup","reason":"failed_activation_cleanup_failed","cleanupStatus":%s}\n' \
+        "$cleanup_status" >&2
+    fi
+  fi
+  exit "$original_status"
+}
+trap cleanup_on_exit EXIT
+
+set_privileged_env_value() {
+  local target="$1" key="$2" value="$3"
+  sudo python3 - "$target" "$key" "$value" <<'PY'
+import os
+import sys
+import tempfile
+
+path, key, value = sys.argv[1:]
+try:
+    with open(path, encoding="utf-8") as handle:
+        lines = handle.read().splitlines()
+except FileNotFoundError:
+    lines = []
+updated = []
+replaced = False
+for line in lines:
+    if line.strip().startswith(key + "="):
+        if not replaced:
+            updated.append(f"{key}={value}")
+            replaced = True
+    else:
+        updated.append(line)
+if not replaced:
+    updated.append(f"{key}={value}")
+directory = os.path.dirname(path) or "."
+os.makedirs(directory, exist_ok=True)
+fd, temporary = tempfile.mkstemp(prefix=".activation-env-", dir=directory)
+try:
+    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write("\n".join(updated) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.chmod(temporary, 0o640)
+    os.replace(temporary, path)
+finally:
+    if os.path.exists(temporary):
+        os.unlink(temporary)
+PY
+}
+
+[ -n "$SOURCE_PIN" ] || fail "usage" "source_pin_required"
+
 log "verify_source"
-CURRENT="$(cd "$REPO" && git rev-parse HEAD)" || fail "verify_source" "repo_unavailable"
+CURRENT="$(git -C "$REPO" rev-parse HEAD)" || fail "verify_source" "repo_unavailable"
 [ "$CURRENT" = "$SOURCE_PIN" ] || fail "verify_source" "source_commit_mismatch:$CURRENT"
 
-# 2. verify qualification evidence — the 02C isolation qualification must
-#    exist, pass, and bind THIS source pin and provider
 log "verify_qualification_evidence"
-[ -f "$ISOLATION_EVIDENCE" ] || fail "verify_qualification_evidence" "missing_isolation_evidence"
-python3 - "$ISOLATION_EVIDENCE" "$SOURCE_PIN" <<'PY' || fail "verify_qualification_evidence" "isolation_not_qualified"
-import json,sys
-d=json.load(open(sys.argv[1]))
-if d.get("status")!="qualified": sys.exit(1)
-if str(d.get("sourceCommit",""))!=sys.argv[2]: sys.exit(1)
-if d.get("providerKind")!="bubblewrap": sys.exit(1)
-PY
-[ -f "$CANARY_RECEIPT" ] || fail "verify_qualification_evidence" "missing_canary_receipt"
-python3 - "$CANARY_RECEIPT" "$SOURCE_PIN" <<'PY' || fail "verify_qualification_evidence" "canary_not_passed"
-import json,sys
-d=json.load(open(sys.argv[1]))
-if d.get("status")!="pass": sys.exit(1)
-if str(d.get("sourcePin", d.get("sourceCommit","")))!=sys.argv[2]: sys.exit(1)
+sudo python3 - "$ISOLATION_EVIDENCE" "$CANARY_RECEIPT" "$SOURCE_PIN" <<'PY' || \
+  fail "verify_qualification_evidence" "qualification_evidence_invalid"
+import json
+import sys
+
+evidence_path, canary_path, source_pin = sys.argv[1:]
+with open(evidence_path, encoding="utf-8") as handle:
+    document = json.load(handle)
+with open(canary_path, encoding="utf-8") as handle:
+    canary = json.load(handle)
+if document.get("status") != "qualified":
+    raise SystemExit(1)
+evidence = document.get("evidence")
+if not isinstance(evidence, dict):
+    raise SystemExit(1)
+if evidence.get("sourceCommit") != source_pin or evidence.get("providerKind") != "bubblewrap":
+    raise SystemExit(1)
+if canary.get("schema") != "bubblewrap-qualification-canary-v1":
+    raise SystemExit(1)
+if canary.get("status") != "pass" or canary.get("sourceCommit") != source_pin:
+    raise SystemExit(1)
+for field in (
+    "evidenceId",
+    "profileFingerprint",
+    "providerBinaryDigest",
+    "fixtureProbeManifestDigest",
+):
+    value = evidence.get(field)
+    if not isinstance(value, str) or not value or canary.get(field) != value:
+        raise SystemExit(1)
 PY
 
-# 3. verify policy artifact + hash (owner-signed; presence only here)
 log "verify_policy"
 [ -f "$CONF/keys/policy.json" ] || fail "verify_policy" "policy_artifact_missing"
 [ -f "$CONF/keys/policy.json.sha256" ] || fail "verify_policy" "policy_hash_missing"
+python3 - "$CONF/keys/policy.json" <<'PY' || fail "verify_policy" "policy_expired_or_expiring"
+import json
+import sys
+from datetime import datetime, timezone
 
-# 4. verify protected live checkout untouched
+with open(sys.argv[1], encoding="utf-8") as handle:
+    policy = json.load(handle)
+if policy.get("expiresAt"):
+    expiry = datetime.fromisoformat(policy["expiresAt"].replace("Z", "+00:00"))
+    if (expiry - datetime.now(timezone.utc)).total_seconds() < 30:
+        raise SystemExit(1)
+PY
+
 log "verify_protected_live_checkout"
-UNTRACKED="$(cd "$REPO" && git status --porcelain | wc -l)"
-[ "$UNTRACKED" = "0" ] || fail "verify_protected_live_checkout" "live_checkout_dirty"
+[ -z "$(git -C "$REPO" status --porcelain)" ] || \
+  fail "verify_protected_live_checkout" "live_checkout_dirty"
 
-# 5. verify installed broker artifacts — the qualified dist must already be
-#    installed at the broker's ExecStart path (never copied from the
-#    checkout during activation)
+log "verify_source_bound_runtime"
+sudo python3 "$PROVENANCE_HELPER" verify \
+  --repo-root "$REPO" \
+  --broker-root "$BROKER_INSTALL_ROOT" \
+  --state-root "$SANDBOX_ROOT" \
+  --systemd-root "$SYSTEMD_UNIT_ROOT" \
+  --workspace-root "$ENGINEERING_WORKSPACE" \
+  --manifest "$PROVENANCE_MANIFEST" \
+  --workspace-manifest "$WORKSPACE_PROVENANCE_MANIFEST" \
+  --source-commit "$SOURCE_PIN" \
+  --require-root-owned || fail "verify_source_bound_runtime" "provenance_mismatch"
+
 log "verify_installed_artifacts"
-[ -f "$BROKER_DIST" ] || fail "verify_installed_artifacts" "broker_dist_missing"
-[ -s "$BROKER_DIST" ] || fail "verify_installed_artifacts" "broker_dist_empty"
+[ -s "$BROKER_DIST" ] || fail "verify_installed_artifacts" "broker_dist_missing_or_empty"
+KILL_MODE="$(sudo systemctl show "$BROKER_SERVICE" -p KillMode --value)" || \
+  fail "verify_installed_artifacts" "kill_mode_unavailable"
+[ "$KILL_MODE" = "control-group" ] || fail "verify_installed_artifacts" "kill_mode_not_control_group"
 
-# 6. enable the broker gate (broker.env only; the agent lifecycle flag lives
-#    in the owner .env, see step 13) and restart the broker + socket
+# Cleanup is armed before the first persistent authority mutation.
+maybe_fail "before_first_gate_mutation"
+ACTIVATION_AUTHORITY_MUTATED=1
+
+log "enable_broker_gate"
+set_privileged_env_value "$BROKER_ENV_FILE" ASHLEY_SANDBOX_BROKER_ENABLED true || \
+  fail "enable_broker_gate" "broker_enable_failed"
+maybe_fail "after_broker_gate_mutation"
+
+log "enable_delegated_gate"
+set_privileged_env_value "$BROKER_ENV_FILE" ASHLEY_SANDBOX_DELEGATED_ENABLED true || \
+  fail "enable_delegated_gate" "delegated_enable_failed"
+maybe_fail "after_delegated_gate_mutation"
+
 log "restart_broker_if_required"
-if [ -f "$BROKER_ENV_FILE" ]; then
-  for KEY in ASHLEY_SANDBOX_BROKER_ENABLED ASHLEY_SANDBOX_DELEGATED_ENABLED; do
-    grep -q "^$KEY=" "$BROKER_ENV_FILE" || printf '%s=true\n' "$KEY" >> "$BROKER_ENV_FILE"
-  done
-else
-  mkdir -p "$(dirname "$BROKER_ENV_FILE")"
-  printf 'ASHLEY_SANDBOX_BROKER_ENABLED=true\nASHLEY_SANDBOX_DELEGATED_ENABLED=true\n' > "$BROKER_ENV_FILE"
-fi
-grep -q "^ASHLEY_SANDBOX_BROKER_ENABLED=true$" "$BROKER_ENV_FILE" || fail "restart_broker_if_required" "broker_enable_failed"
-grep -q "^ASHLEY_SANDBOX_DELEGATED_ENABLED=true$" "$BROKER_ENV_FILE" || fail "restart_broker_if_required" "delegated_enable_failed"
-sudo systemctl daemon-reload
-sudo systemctl restart ashley-exec-broker.socket ashley-exec-broker.service
-for i in $(seq 1 20); do
-  [ -S "$BROKER_SOCKET" ] && break
-  sleep 1
-done
-[ -S "$BROKER_SOCKET" ] || fail "restart_broker_if_required" "broker_socket_absent"
+maybe_fail "before_broker_restart"
+sudo systemctl daemon-reload || fail "restart_broker_if_required" "daemon_reload_failed"
+sudo systemctl restart "$BROKER_SOCKET_UNIT" "$BROKER_SERVICE" || \
+  fail "restart_broker_if_required" "broker_restart_failed"
+maybe_fail "during_broker_restart"
+sudo systemctl is-active --quiet "$BROKER_SERVICE" || \
+  fail "restart_broker_if_required" "broker_service_inactive"
+sudo systemctl is-active --quiet "$BROKER_SOCKET_UNIT" || \
+  fail "restart_broker_if_required" "broker_socket_unit_inactive"
 
-# 7. verify broker readiness — framed protocol query: ready + network
-#    isolation operational + network mode none (peer credentials are the
-#    owner's, which the broker's SO_PEERCRED resolver accepts)
 log "verify_broker_readiness"
 node - "$BROKER_SOCKET" <<'JS' || fail "verify_broker_readiness" "broker_not_ready"
 const net = require("node:net");
-const socketPath = process.argv[2];
-const socket = net.connect(socketPath);
-const request = {
-  frameVersion: 1,
-  requestId: "activation-readiness",
-  messageType: "sandbox.readiness",
-  payloadLength: 2,
-};
-const frame = Buffer.concat([
-  Buffer.from(JSON.stringify(request), "utf8"),
-  Buffer.from("\n"),
-  Buffer.from("{}", "utf8"),
-]);
-const timer = setTimeout(() => { console.error("timeout"); process.exit(1); }, 5000);
-socket.on("connect", () => socket.write(frame));
-let buf = Buffer.alloc(0);
+const socket = net.connect(process.argv[2]);
+const request = { frameVersion: 1, requestId: "activation-readiness", messageType: "sandbox.readiness", payloadLength: 2 };
+const timer = setTimeout(() => process.exit(1), 5000);
+socket.on("connect", () => socket.write(Buffer.concat([Buffer.from(JSON.stringify(request)), Buffer.from("\n{}")])));
+let buffer = Buffer.alloc(0);
 socket.on("data", (chunk) => {
-  buf = Buffer.concat([buf, chunk]);
-  const nl = buf.indexOf(10);
-  if (nl < 0) return;
-  const header = JSON.parse(buf.subarray(0, nl).toString("utf8"));
-  const body = buf.subarray(nl + 1, nl + 1 + header.payloadLength);
-  const response = JSON.parse(body.toString("utf8"));
-  if (!response.ok || response.data.ready !== true) {
-    console.error(JSON.stringify(response));
-    process.exit(1);
-  }
-  if (response.data.networkIsolationOperational !== true || response.data.networkMode !== "none") {
-    console.error(JSON.stringify(response));
-    process.exit(1);
-  }
+  buffer = Buffer.concat([buffer, chunk]);
+  const newline = buffer.indexOf(10);
+  if (newline < 0) return;
+  const header = JSON.parse(buffer.subarray(0, newline).toString("utf8"));
+  const response = JSON.parse(buffer.subarray(newline + 1, newline + 1 + header.payloadLength).toString("utf8"));
+  if (!response.ok || response.data.ready !== true || response.data.networkIsolationOperational !== true || response.data.networkMode !== "none") process.exit(1);
   clearTimeout(timer);
   socket.end();
   process.exit(0);
 });
-socket.on("error", () => { clearTimeout(timer); process.exit(1); });
+socket.on("error", () => process.exit(1));
 JS
+maybe_fail "after_broker_readiness"
 
-# 8. run the R5B canary (exactly one delegated recipe under the broker)
 log "run_canary"
 CANARY_OUT="$(node "$REPO/scripts/mint/verify-agent-tsc.mjs")" || fail "run_canary" "canary_failed"
+maybe_fail "during_r5b"
+python3 -c 'import json,sys; value=json.load(sys.stdin); assert value.get("ok") is True and value.get("outcome")=="succeeded"' \
+  <<<"$CANARY_OUT" || fail "run_canary" "canary_result_invalid"
 
-# 9. verify canary receipt
-log "verify_canary_receipt"
-echo "$CANARY_OUT" | grep -q '"ok":true' || fail "verify_canary_receipt" "canary_receipt_not_ok"
-echo "$CANARY_OUT" | grep -q '"outcome":"succeeded"' || fail "verify_canary_receipt" "canary_outcome_not_succeeded"
-
-# 10. init project registry (host-provided allowlist only; top-level array)
 log "init_project_registry"
-[ -f "$PROJECT_REGISTRY" ] || fail "init_project_registry" "project_registry_missing"
 python3 - "$PROJECT_REGISTRY" <<'PY' || fail "init_project_registry" "project_registry_invalid"
-import json,sys
-d=json.load(open(sys.argv[1]))
-assert isinstance(d,list) and len(d)>0, "registry must be a non-empty top-level array"
-for e in d:
-    assert isinstance(e.get("projectId"),str) and e["projectId"], "projectId required"
-    assert isinstance(e.get("canonicalRoot"),str) and e["canonicalRoot"].startswith("/"), "canonicalRoot required"
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    registry = json.load(handle)
+assert isinstance(registry, list) and registry
+for entry in registry:
+    assert isinstance(entry.get("projectId"), str) and entry["projectId"]
+    assert isinstance(entry.get("canonicalRoot"), str) and entry["canonicalRoot"].startswith("/")
 PY
 
-# 11. init self-improvement clone (local, no remote, no push ever)
 log "init_self_improvement_clone"
 if [ ! -d "$SELF_IMPROVE_CLONE/.git" ]; then
   TMP_CLONE="$(mktemp -d)"
-  git clone --local "$REPO" "$TMP_CLONE/repo" >/dev/null 2>&1 || fail "init_self_improvement_clone" "clone_failed"
+  git clone --local "$REPO" "$TMP_CLONE/repo" >/dev/null 2>&1 || \
+    fail "init_self_improvement_clone" "clone_failed"
   git -C "$TMP_CLONE/repo" remote remove origin 2>/dev/null || true
-  git -C "$TMP_CLONE/repo" config --local --unset remote.origin.url 2>/dev/null || true
-  # disable hooks so nothing executes from checkout contents
   git -C "$TMP_CLONE/repo" config --local core.hooksPath /dev/null
-  # prove push is impossible: no remote + no url
-  git -C "$TMP_CLONE/repo" remote -v | grep -q . && fail "init_self_improvement_clone" "clone_has_remote"
+  git -C "$TMP_CLONE/repo" remote -v | grep -q . && \
+    fail "init_self_improvement_clone" "clone_has_remote"
   sudo install -d -o ashley-sandbox -g ashley-sandbox "$(dirname "$SELF_IMPROVE_CLONE")"
   sudo rm -rf "$SELF_IMPROVE_CLONE"
   sudo mv "$TMP_CLONE/repo" "$SELF_IMPROVE_CLONE"
   sudo chown -R ashley-sandbox:ashley-sandbox "$SELF_IMPROVE_CLONE"
   rm -rf "$TMP_CLONE"
 fi
-git -C "$SELF_IMPROVE_CLONE" remote -v | grep -q . && fail "init_self_improvement_clone" "clone_has_remote"
+git -C "$SELF_IMPROVE_CLONE" remote -v | grep -q . && \
+  fail "init_self_improvement_clone" "clone_has_remote"
 
-# 12. init activation epoch
 log "init_activation_epoch"
 EPOCH="$(date +%s000)"
-cat > "$ACTIVATION_MARKER" <<JSON
-{"activated":true,"epochMs":$EPOCH,"sourcePin":"$SOURCE_PIN","canary":"PASS","sandboxAutonomy":"ENABLED"}
-JSON
+python3 - "$ACTIVATION_MARKER" "$EPOCH" "$SOURCE_PIN" <<'PY' || \
+  fail "init_activation_epoch" "marker_update_failed"
+import json
+import os
+import sys
+import tempfile
 
-# 13. enable agent lifecycle — in the owner .env (the systemd
-#     EnvironmentFile), which is where the agent's environment gate reads it
+path, epoch, source_pin = sys.argv[1:]
+payload = {"activated": True, "epochMs": int(epoch), "sourcePin": source_pin,
+           "canary": "PASS", "sandboxAutonomy": "ENABLED"}
+directory = os.path.dirname(path) or "."
+fd, temporary = tempfile.mkstemp(prefix=".activation-marker-", dir=directory)
+try:
+    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+        json.dump(payload, handle, separators=(",", ":"))
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary, path)
+finally:
+    if os.path.exists(temporary):
+        os.unlink(temporary)
+PY
+maybe_fail "after_autonomy_marker_mutation"
+
 log "enable_agent_lifecycle"
 [ -f "$CONF/.env" ] || fail "enable_agent_lifecycle" "owner_env_missing"
-grep -q '^ASHLEY_SANDBOX_LIFECYCLE=ENABLED$' "$CONF/.env" || printf 'ASHLEY_SANDBOX_LIFECYCLE=ENABLED\n' >> "$CONF/.env"
+python3 - "$CONF/.env" <<'PY' || fail "enable_agent_lifecycle" "owner_env_update_failed"
+import os
+import sys
+import tempfile
 
-# 14. restart the agent (user unit)
+path = sys.argv[1]
+with open(path, encoding="utf-8") as handle:
+    lines = [line for line in handle.read().splitlines()
+             if not line.strip().startswith("ASHLEY_SANDBOX_LIFECYCLE=")]
+lines.append("ASHLEY_SANDBOX_LIFECYCLE=ENABLED")
+directory = os.path.dirname(path) or "."
+fd, temporary = tempfile.mkstemp(prefix=".activation-owner-env-", dir=directory)
+try:
+    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write("\n".join(lines) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary, path)
+finally:
+    if os.path.exists(temporary):
+        os.unlink(temporary)
+PY
+maybe_fail "during_lifecycle_enable"
+
 log "restart_reload_agent"
 export XDG_RUNTIME_DIR="/run/user/$(id -u)"
-systemctl --user daemon-reload
-systemctl --user restart ashley-agent.service
+systemctl --user daemon-reload || fail "restart_reload_agent" "agent_daemon_reload_failed"
+systemctl --user restart ashley-agent.service || fail "restart_reload_agent" "agent_restart_failed"
+maybe_fail "during_agent_restart"
 
-# 15. verify agent health
 log "verify_agent_health"
-for i in $(seq 1 15); do
-  systemctl --user is-active --quiet ashley-agent.service && break
-  sleep 1
-done
+maybe_fail "during_agent_health_verification"
 systemctl --user is-active --quiet ashley-agent.service || fail "verify_agent_health" "agent_not_active"
-curl -fsS "http://127.0.0.1:3710/health" >/dev/null 2>&1 || fail "verify_agent_health" "agent_health_endpoint_unreachable"
+"$CURL_BIN" -fsS "http://127.0.0.1:3710/health" >/dev/null 2>&1 || \
+  fail "verify_agent_health" "agent_health_endpoint_unreachable"
 
-# 16. verify worker health (broker readiness again, non-fatal)
-log "verify_worker_health"
-node - "$BROKER_SOCKET" <<'JS' || true
-const net = require("node:net");
-const socket = net.connect(process.argv[2]);
-const request = { frameVersion: 1, requestId: "activation-worker-health", messageType: "sandbox.readiness", payloadLength: 2 };
-socket.on("connect", () => socket.write(Buffer.concat([Buffer.from(JSON.stringify(request), "utf8"), Buffer.from("\n"), Buffer.from("{}", "utf8")])));
-socket.on("data", () => { socket.end(); process.exit(0); });
-socket.on("error", () => process.exit(1));
-setTimeout(() => process.exit(1), 4000);
-JS
-
-# 17. verify historical admissions untouched
 log "verify_historical_admissions_untouched"
-UNTRACKED2="$(cd "$REPO" && git status --porcelain | wc -l)"
-[ "$UNTRACKED2" = "0" ] || fail "verify_historical_admissions_untouched" "live_checkout_modified_during_activation"
+[ -z "$(git -C "$REPO" status --porcelain)" ] || \
+  fail "verify_historical_admissions_untouched" "live_checkout_modified_during_activation"
 
-printf '{"ok":true,"activationEpochMs":%s,"sourcePin":"%s","canary":"PASS","sandboxAutonomy":"ENABLED"}\n' "$EPOCH" "$SOURCE_PIN"
+ACTIVATION_SUCCEEDED=1
+printf '{"ok":true,"activationEpochMs":%s,"sourcePin":"%s","canary":"PASS","sandboxAutonomy":"ENABLED"}\n' \
+  "$EPOCH" "$SOURCE_PIN"
 log "activation complete"
