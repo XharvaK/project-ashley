@@ -251,7 +251,7 @@ export function resolveBrokerPath(
       return { ok: false, reason: "path_not_found" };
     }
     symlink = stats.isSymbolicLink();
-    if (!stats.isFile() && !stats.isDirectory()) {
+    if (!symlink && !stats.isFile() && !stats.isDirectory()) {
       return { ok: false, reason: "special_file_forbidden" };
     }
     if (intent !== "read") {

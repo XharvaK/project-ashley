@@ -374,9 +374,9 @@ export class FixedRecipeExecutionService {
           prepared.refusal.stage,
           prepared.refusal.errorCode,
           prepared.refusal.reason,
-          {
-            isolationEvidenceSummary:
-              prepared.refusal.isolationEvidenceSummary ?? undefined,
+{
+        isolationEvidenceSummary:
+          prepared.refusal.isolationEvidenceSummary,
             ...(prepared.refusal.stage === "network"
               ? { networkIsolation: "unavailable_refused" as const }
               : {}),
