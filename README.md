@@ -144,14 +144,17 @@ system is organized, and where current boundaries stand:
   and authority order.
 - [`docs/Architecture_Index.md`](docs/Architecture_Index.md) - module
   ownership, runtime boundaries, and observability map.
-- [`docs/architecture/Ashley_Foundation_Architecture_Decision_v1.md`](docs/architecture/Ashley_Foundation_Architecture_Decision_v1.md)
-  and [`docs/architecture/Ashley_Architecture_Salvage_Map_v2.md`](docs/architecture/Ashley_Architecture_Salvage_Map_v2.md)
-  - the current accepted architecture decision surface.
+- [`docs/architecture/Ashley_Architecture_Roadmap.md`](docs/architecture/Ashley_Architecture_Roadmap.md)
+  - the current canonical roadmap, frozen direction, and framework disposition.
+- [`docs/architecture/Ashley_Architecture_Document_Index.md`](docs/architecture/Ashley_Architecture_Document_Index.md)
+  - the authority and status of current, supporting, historical, and
+  superseded architecture documents.
 - [`docs/memory-and-recall.md`](docs/memory-and-recall.md) - the local Recall
   model, source provenance, forgetting, and continuity boundaries.
-- [`docs/Routing_Status.md`](docs/Routing_Status.md) and
-  [`docs/Sandbox_Status.md`](docs/Sandbox_Status.md) - current routing and
-  sandbox readiness boundaries.
+- [`docs/Routing_Status.md`](docs/Routing_Status.md) - current routing
+  assignments and fail-closed route behavior.
+- [`docs/Sandbox_Status.md`](docs/Sandbox_Status.md) - a dated local readiness
+  snapshot; use the canonical roadmap for current Sandbox Autonomy status.
 
 ## Project status
 
