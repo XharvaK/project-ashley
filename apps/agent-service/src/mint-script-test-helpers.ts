@@ -12,8 +12,8 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 
 export const PROJECT_ROOT = path.resolve(__dirname, "../../..");
-export const BASH = "C:\\Program Files\\Git\\bin\\bash.exe";
-export const PYTHON = process.env.PYTHON ?? "python";
+export const BASH = process.platform === "win32" ? "C:\\Program Files\\Git\\bin\\bash.exe" : "/usr/bin/bash";
+export const PYTHON = process.platform === "win32" ? (process.env.PYTHON ?? "python") : "python3";
 export const ACTIVATE = path.join(PROJECT_ROOT, "scripts", "mint", "activate-engineering.sh");
 export const ROLLBACK = path.join(PROJECT_ROOT, "scripts", "mint", "rollback-engineering.sh");
 export const PROVENANCE = path.join(
@@ -308,7 +308,8 @@ export function makeMintFixture(): MintFixture {
     ],
     { encoding: "utf8" },
   );
-  if (publish.status !== 0) throw new Error(publish.stderr);
+  if (publish.error) throw publish.error;
+  if (publish.status !== 0) throw new Error(publish.stderr || publish.stdout || "provenance publication failed");
 
   git(root, "clone", "--quiet", "--local", repo, fixture.clone);
   git(fixture.clone, "remote", "remove", "origin");
@@ -359,7 +360,7 @@ export function runActivation(
   failAt?: string,
   overrides: NodeJS.ProcessEnv = {},
 ) {
-  return spawnSync(BASH, [posix(ACTIVATE), fixture.sourcePin], {
+  const result = spawnSync(BASH, [posix(ACTIVATE), fixture.sourcePin], {
     encoding: "utf8",
     env: {
       ...baseEnvironment(fixture),
@@ -367,13 +368,17 @@ export function runActivation(
       ...overrides,
     },
   });
+  if (result.error) throw result.error;
+  return result;
 }
 
 export function runRollback(fixture: MintFixture, overrides: NodeJS.ProcessEnv = {}) {
-  return spawnSync(BASH, [posix(ROLLBACK)], {
+  const result = spawnSync(BASH, [posix(ROLLBACK)], {
     encoding: "utf8",
     env: { ...baseEnvironment(fixture), ...overrides },
   });
+  if (result.error) throw result.error;
+  return result;
 }
 
 export function readState(fixture: MintFixture, name: "service" | "socket" | "agent"): string {

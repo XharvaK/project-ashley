@@ -23,7 +23,7 @@ const HELPER = path.join(
   "sandbox",
   "install-provenance.py",
 );
-const PYTHON = process.env.PYTHON ?? "python";
+const PYTHON = process.platform === "win32" ? (process.env.PYTHON ?? "python") : "python3";
 const HASH = "a".repeat(40);
 const roots: string[] = [];
 
@@ -130,7 +130,7 @@ function makeFixture(): Fixture {
 }
 
 function helper(fixture: Fixture, mode: "publish" | "verify", extra: string[] = []) {
-  return spawnSync(
+  const result = spawnSync(
     PYTHON,
     [
       HELPER,
@@ -155,6 +155,8 @@ function helper(fixture: Fixture, mode: "publish" | "verify", extra: string[] = 
     ],
     { encoding: "utf8" },
   );
+  if (result.error) throw result.error;
+  return result;
 }
 
 function publish(fixture: Fixture) {

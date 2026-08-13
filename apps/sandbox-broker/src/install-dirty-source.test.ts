@@ -12,8 +12,8 @@ const HELPER = path.join(
   "sandbox",
   "install-provenance.py",
 );
-const PYTHON = process.env.PYTHON ?? "python";
-const BASH = "C:\\Program Files\\Git\\bin\\bash.exe";
+const PYTHON = process.platform === "win32" ? (process.env.PYTHON ?? "python") : "python3";
+const BASH = process.platform === "win32" ? "C:\\Program Files\\Git\\bin\\bash.exe" : "/usr/bin/bash";
 const INSTALL = path.join(
   REPO_ROOT,
   "deploy",
@@ -61,9 +61,11 @@ function fixtureRepo(): string {
 }
 
 function preflight(repo: string) {
-  return spawnSync(PYTHON, [HELPER, "source-preflight", "--repo-root", repo], {
+  const result = spawnSync(PYTHON, [HELPER, "source-preflight", "--repo-root", repo], {
     encoding: "utf8",
   });
+  if (result.error) throw result.error;
+  return result;
 }
 
 function posix(value: string): string {
@@ -135,6 +137,7 @@ describe("installer source preflight", () => {
         },
       },
     );
+    if (result.error) throw result.error;
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("tracked_source_dirty");
     expect(() => rmSync(buildMarker)).toThrow();
@@ -290,6 +293,7 @@ fi
       encoding: "utf8",
       env,
     });
+    if (result.error) throw result.error;
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
     expect(result.stdout).toContain("Sandbox broker installation completed.");
     const manifest = path.join(broker, "install-manifest.json");
@@ -320,7 +324,9 @@ fi
       "--source-commit",
       sourcePin,
     ];
-    expect(spawnSync(PYTHON, provenanceArgs, { encoding: "utf8" }).status).toBe(0);
+    const initialVerification = spawnSync(PYTHON, provenanceArgs, { encoding: "utf8" });
+    if (initialVerification.error) throw initialVerification.error;
+    expect(initialVerification.status, initialVerification.stderr).toBe(0);
 
     for (const stage of [
       "before_invalidation",
@@ -342,9 +348,11 @@ fi
         encoding: "utf8",
         env: { ...env, ASHLEY_INSTALL_FAIL_AT: stage },
       });
+      if (attempt.error) throw attempt.error;
       expect(attempt.status, `${stage}\n${attempt.stdout}\n${attempt.stderr}`).not.toBe(0);
       expect(attempt.stderr).toContain(`injected_failure:${stage}`);
       const verification = spawnSync(PYTHON, provenanceArgs, { encoding: "utf8" });
+      if (verification.error) throw verification.error;
       if (stage === "before_invalidation" || stage === "after_workspace_rename") {
         expect(verification.status, `${stage}: ${verification.stderr}`).toBe(0);
       } else {
@@ -361,6 +369,7 @@ fi
           ],
           { encoding: "utf8" },
         );
+        if (restore.error) throw restore.error;
         expect(restore.status, `${stage}: ${restore.stderr}`).toBe(0);
       }
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
