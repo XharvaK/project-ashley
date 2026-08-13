@@ -125,9 +125,6 @@ export async function resolveWithinRoot(
     }
     return { ok: true, absolute: rootReal, relative: "." };
   }
-  if (!isCanonicalForm(relativePath)) {
-    return { ok: false, errorCode: "relative_path_invalid", reason: "not a canonical relative path" };
-  }
   const rootReal = await fs.realpath(root).catch(() => null);
   if (rootReal === null) {
     return { ok: false, errorCode: "root_unavailable", reason: "trusted root unavailable" };

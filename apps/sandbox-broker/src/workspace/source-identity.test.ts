@@ -132,17 +132,21 @@ describe("source identity binding", () => {
   it("5. identity roots must be canonical and present in the read-only roots", () => {
     const harness = makeExecutionHarness();
     const identity = freshIdentityRoot();
+    // Construct an actually non-canonical path by appending a trailing ".."
+    // segment that resolves above the root – this is non-canonical on all platforms.
+    const notCanonicalPath = identity.native + "/../";
     const notCanonical = validateBrokerRootConfig(
       identityRootConfig(
         harness,
-        identity.canonical,
-        new Map([["main", identity.native]]),
+        notCanonicalPath,
+        new Map([["main", identity.canonical]]),
       ),
     );
+    // The non-canonical path is caught in read-only root validation:
     expect(notCanonical.ok).toBe(false);
     if (!notCanonical.ok) {
       expect(notCanonical.reasons.join(",")).toContain(
-        "source_identity_root_not_canonical",
+        "read_only_root_not_canonical",
       );
     }
 

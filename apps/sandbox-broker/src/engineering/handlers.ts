@@ -102,7 +102,7 @@ function err(errorCode: string, message: string): BrokerResponse<unknown> {
 }
 
 export function workspaceTreeRoot(rootConfig: BrokerRootConfig, workspaceId: string): string | null {
-  if (!/^[A-Za-z0-9._:-]{1,64}$/.test(workspaceId)) return null;
+  if (!/^[A-Za-z0-9._-]{1,64}$/.test(workspaceId)) return null;
   const nativeRoot = toNativeBrokerPath(rootConfig.workspaceRoot);
   const native = path.resolve(nativeRoot, workspaceId);
   const canonicalResult = toCanonicalBrokerPath(native);

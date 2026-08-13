@@ -62,6 +62,9 @@ export function resolveFixedRecipeExecutable(input: {
     return { ok: false, errorCode: "executable_missing", reason: native };
   }
   if (!stats.isFile()) {
+    if (stats.isSymbolicLink()) {
+      return { ok: false, errorCode: "executable_symlink", reason: native };
+    }
     return { ok: false, errorCode: "executable_not_regular_file", reason: native };
   }
   let realNative: string;

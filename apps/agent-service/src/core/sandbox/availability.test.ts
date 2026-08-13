@@ -48,7 +48,7 @@ describe("sandbox availability", () => {
 
   it("reports socket missing when opt-in is on but socket is absent", async () => {
     process.env.ASHLEY_SANDBOX_BROKER_ENABLED = "true";
-    process.env.ASHLEY_SANDBOX_BROKER_SOCKET = "/run/ashley/broker.sock";
+    process.env.ASHLEY_SANDBOX_BROKER_SOCKET = "/run/ashley/broker-sock-nonexistent";
     const mod = await import("./availability.js");
     const snapshot = mod.sandboxAvailabilitySnapshot();
     expect(snapshot.qualification).toBe("socket_missing");

@@ -252,7 +252,7 @@ describe("Wave 01 Thought call gating", () => {
 
   it("unavailable/no-key stays on deterministic floor with zero calls", async () => {
     env.cognitionMode = "apply";
-    env.mistralApiKey = "";
+    env.groqApiKey = "";
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     const motivations = [
       mot("user_message", 100, "delete my identity foundational change", { id: 1 }),

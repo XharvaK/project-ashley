@@ -104,6 +104,7 @@ describe("strict sandbox configuration parsing", () => {
   });
 
   it("defaults NVIDIA configuration to disabled and unused", async () => {
+    process.env.NIM_API_KEY = "";
     const { env, validateBoot } = await loadEnv();
     expect(env.nimApiKey).toBe("");
     expect(env.nimBaseUrl).toBe("https://integrate.api.nvidia.com/v1");

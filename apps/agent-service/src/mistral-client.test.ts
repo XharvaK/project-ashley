@@ -6,9 +6,11 @@ import { openNuclearDb } from "./core/db.js";
 import { withOfflineAppGateDisabled } from "./core/qualification/offline-test-helpers.js";
 
 const originalApiKey = env.mistralApiKey;
+const originalGroqKey = env.groqApiKey;
 
 afterEach(() => {
   env.mistralApiKey = originalApiKey;
+  env.groqApiKey = originalGroqKey;
   vi.restoreAllMocks();
 });
 
@@ -72,8 +74,9 @@ describe("mapMistralError", () => {
     expect(() => mapMistralError(err)).toThrow(err);
   });
 
-  it("creates no attention reservation when API key is missing", async () => {
+it("creates no attention reservation when API key is missing", async () => {
     env.mistralApiKey = "";
+    env.groqApiKey = "";
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     await expect(
       withOfflineAppGateDisabled(() =>
