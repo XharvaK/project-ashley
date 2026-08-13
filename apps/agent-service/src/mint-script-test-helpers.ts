@@ -14,6 +14,7 @@ import { spawnSync } from "node:child_process";
 export const PROJECT_ROOT = path.resolve(__dirname, "../../..");
 export const BASH = process.platform === "win32" ? "C:\\Program Files\\Git\\bin\\bash.exe" : "/usr/bin/bash";
 export const PYTHON = process.platform === "win32" ? (process.env.PYTHON ?? "python") : "python3";
+const USER_NAMESPACE = "/usr/bin/unshare";
 export const ACTIVATE = path.join(PROJECT_ROOT, "scripts", "mint", "activate-engineering.sh");
 export const ROLLBACK = path.join(PROJECT_ROOT, "scripts", "mint", "rollback-engineering.sh");
 export const PROVENANCE = path.join(
@@ -360,7 +361,12 @@ export function runActivation(
   failAt?: string,
   overrides: NodeJS.ProcessEnv = {},
 ) {
-  const result = spawnSync(BASH, [posix(ACTIVATE), fixture.sourcePin], {
+  const useUserNamespace = process.platform === "linux" && process.getuid?.() !== 0;
+  const command = useUserNamespace ? USER_NAMESPACE : BASH;
+  const args = useUserNamespace
+    ? ["-Ur", BASH, posix(ACTIVATE), fixture.sourcePin]
+    : [posix(ACTIVATE), fixture.sourcePin];
+  const result = spawnSync(command, args, {
     encoding: "utf8",
     env: {
       ...baseEnvironment(fixture),
