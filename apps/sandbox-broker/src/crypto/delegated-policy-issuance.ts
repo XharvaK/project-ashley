@@ -28,7 +28,6 @@ export const R4006_MAX_LIFETIME_MS = 366 * 24 * 60 * 60 * 1000;
 export const R4006_ENGINEERING_CAPABILITIES: readonly string[] = [
   "engineering_project_read",
   "candidate_repository_git_write",
-  "ashley_agent_service_restart",
   "candidate_workspace_create",
   "candidate_workspace_read_write_delete",
   "candidate_patch_generate",

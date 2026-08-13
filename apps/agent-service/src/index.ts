@@ -18,6 +18,9 @@ import {
   startEngineeringAutonomyLoops,
   stopEngineeringAutonomyLoops,
 } from "./core/sandbox/engineering-runtime.js";
+import {
+  claimWeeklyReviewDelivery,
+} from "./core/sandbox/weekly-review-delivery.js";
 
 const manager = new AgentManager();
 
@@ -46,11 +49,13 @@ async function main(): Promise<void> {
         `[engineering] completed task=${info.taskId} admission=${info.admissionId} summary=${info.summary ?? ""}`,
       ),
     onWeeklyReviewDue: (review) => {
-      // Deliver the candidate to Doc as a durable, retrievable artifact (audit
-      // #2: the clone must actually surface its candidate, not discard it). The
-      // owner-channel transport (e.g. Discord DM) is the final hop once an
-      // owner-messaging channel exists; the artifact is always persisted first
-      // so the review is never lost.
+      // Deliver the candidate to Doc through the REAL ledgered delivery path
+      // (decision_log -> initiative_reservations -> delivery_reservations ->
+      // delivery_bubbles). The discord-bot's scheduler drains these with the
+      // same sendBubbles + receipt + finalize flow as any proactive reach-out
+      // (see listPendingWeeklyReviewDeliveries). The filesystem artifact is
+      // still persisted first so the review is never lost, and the claim is
+      // idempotent per reportRef.
       const outDir = join(homedir(), ".composer-assistant", "engineering-weekly-reviews");
       try {
         mkdirSync(outDir, { recursive: true });
@@ -62,9 +67,24 @@ async function main(): Promise<void> {
       } catch (err) {
         console.error("[engineering-self-improvement] failed to persist review", err);
       }
-      console.log(
-        `[engineering-self-improvement] weekly review due: ${review.reportRef} :: ${review.candidate.title}`,
-      );
+      const ownerId = env.memoryOwnerId || env.discordOwnerId || "default";
+      try {
+        const claim = claimWeeklyReviewDelivery(
+          manager.core.getDatabase(),
+          { ownerId, reportRef: review.reportRef, candidate: review.candidate },
+        );
+        if (claim) {
+          console.log(
+            `[engineering-self-improvement] weekly review queued for delivery ref=${review.reportRef} deliveryReservation=${claim.deliveryReservationId}`,
+          );
+        } else {
+          console.log(
+            `[engineering-self-improvement] weekly review already claimed: ${review.reportRef}`,
+          );
+        }
+      } catch (err) {
+        console.error("[engineering-self-improvement] failed to claim weekly review delivery", err);
+      }
     },
     onRefused: (reason) => console.log(`[engineering] refused: ${reason}`),
   });

@@ -57,9 +57,6 @@ function okPort(): EngineeringExecutionPort {
     async executeAction(): Promise<EngineeringToolResult> {
       return { ok: true, data: { ok: true }, artifactRef: null };
     },
-    async agentRestart(): Promise<EngineeringToolResult> {
-      return { ok: true, data: { restarted: true }, artifactRef: null };
-    },
   };
 }
 

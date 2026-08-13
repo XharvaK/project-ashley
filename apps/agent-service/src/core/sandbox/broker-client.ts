@@ -176,24 +176,6 @@ export interface SandboxBrokerClient {
     action: EngineeringAction;
   }): Promise<EngineeringToolResult>;
 
-  /**
-   * Dispatch a bounded ashley-agent restart request (max one per incident,
-   * cooldown-enforced). The broker decides and performs the restart.
-   */
-  agentRestart(input: {
-    envelope: DelegatedApprovalEnvelope;
-    nowMs: number;
-    unit: string;
-    incidentId: string;
-    health: { healthy: boolean; deterministic: boolean };
-    restartState: {
-      incidentId: string;
-      lastAttemptAtMs: number | null;
-      attemptsForIncident: number;
-      cooldownMs: number;
-    };
-  }): Promise<EngineeringToolResult>;
-
   getSession(sessionUuid: string): Promise<SandboxBrokerSessionSnapshot | null>;
 
   close(): void;
@@ -696,23 +678,6 @@ export class FakeSandboxBrokerClient implements SandboxBrokerClient, SandboxBrok
     } catch (err) {
       return refuse(`fake_engineer_error:${err instanceof Error ? err.message : "unknown"}`);
     }
-  }
-
-  async agentRestart(input: {
-    envelope: DelegatedApprovalEnvelope;
-    nowMs: number;
-    unit: string;
-    incidentId: string;
-    health: { healthy: boolean; deterministic: boolean };
-    restartState: {
-      incidentId: string;
-      lastAttemptAtMs: number | null;
-      attemptsForIncident: number;
-      cooldownMs: number;
-    };
-  }): Promise<EngineeringToolResult> {
-    // The fake has no systemd surface; reject rather than fabricate a restart.
-    return refuse("not_supported_in_fake");
   }
 
   close(): void {

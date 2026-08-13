@@ -82,9 +82,6 @@ function makePort(): EngineeringExecutionPort {
       }
       return { ok: true, data: { ok: true }, artifactRef: null };
     },
-    async agentRestart(): Promise<EngineeringToolResult> {
-      return { ok: true, data: { restarted: true }, artifactRef: null };
-    },
   };
 }
 
@@ -350,7 +347,7 @@ describe("Activation orchestration", () => {
       "verify_source",
       "verify_qualification_evidence",
       "verify_policy",
-      "promote_qualification",
+      "verify_installed_artifacts",
       "run_canary",
       "verify_canary_receipt",
       "init_activation_epoch",

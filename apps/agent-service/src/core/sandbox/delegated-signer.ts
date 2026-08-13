@@ -88,6 +88,12 @@ export type DelegatedSigningInput = {
   expiresAt?: number;
   nonce?: string;
   networkMode?: string;
+  /**
+   * SHA-256 over the canonical `{ type, fields }` form of the structured
+   * engineering action. Binds the signature to the exact action the broker
+   * will execute; required for engineering actions (HY3-2).
+   */
+  effectHash?: string;
   auditSink?: (record: DelegatedSigningAudit) => void;
 };
 
@@ -282,6 +288,10 @@ export function signDelegatedSandboxEnvelope(
   if (networkMode !== REQUIRED_NETWORK_MODE) {
     return fail("unsupported_network_mode", "network_mode_not_none");
   }
+  const effectHash = input.effectHash;
+  if (effectHash !== undefined && !/^[0-9a-f]{64}$/.test(effectHash)) {
+    return fail("precheck_invalid", "effect_hash_malformed");
+  }
 
   const resolvedTargets: DelegatedSandboxTarget[] = [];
   for (const target of proposal.targetPaths ?? []) {
@@ -356,6 +366,7 @@ export function signDelegatedSandboxEnvelope(
     policyId: input.precheck.policyId,
     policyVersion: input.precheck.policyVersion,
     policyHash: input.precheck.policyHash,
+    ...(effectHash !== undefined ? { effectHash } : {}),
     ...(proposal.recipeId !== undefined ? { recipeId: proposal.recipeId } : {}),
     ...(proposal.executableId !== undefined ? { executableId: proposal.executableId } : {}),
     ...(proposal.argv !== undefined ? { argv: [...proposal.argv] } : {}),

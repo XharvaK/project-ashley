@@ -88,6 +88,19 @@ execution authority.
 Private keys are never accepted by this installer and are never copied to the
 broker. State is preserved by removal unless `--remove-data --yes` is supplied.
 
+## Full verification before activation
+
+Owner-run, on the Mint host:
+
+```bash
+cd ~/project-ashley && deploy/linux-mint/sandbox/test-all.sh
+```
+
+Builds all four workspace packages and runs the policy, broker, agent
+(offline), and discord-bot suites. Add `--with-canary` on a live host (broker
+socket up, keys staged, activation epoch set) to also execute the single
+delegated `verify:agent-tsc` canary.
+
 ## Agent signing endpoints (local)
 
 After bootstrap, the agent-service exposes owner-gated signing routes:

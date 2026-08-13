@@ -7,8 +7,11 @@ import {
   abortInitiative,
   checkHealth,
   commitInitiative,
+  finalizeDelivery,
   initiativeStatus,
   initiativeOperationalStatus,
+  listPendingWeeklyReviewDeliveries,
+  receiptDeliveryBubble,
   tickInitiative,
   urgentInitiativeStatus,
 } from "../agent-client.js";
@@ -70,6 +73,102 @@ export async function runProactiveSchedulerCycle(
   return { outcome: "tick", result: await dependencies.tickInitiative() };
 }
 
+export type WeeklyReviewDrainDependencies = {
+  list: typeof listPendingWeeklyReviewDeliveries;
+  send: typeof sendBubbles;
+  receipt: typeof receiptDeliveryBubble;
+  finalize: typeof finalizeDelivery;
+};
+
+/**
+ * Drain ledgered weekly self-improvement review deliveries using the SAME
+ * send -> receipt -> finalize flow as any proactive reach-out. Only
+ * weekly-review reservations are touched (agent-side scoped), so this can
+ * never race the normal proactive tick. Returns the number of reviews sent.
+ */
+export async function drainPendingWeeklyReviewDeliveries(
+  client: Client,
+  dependencies: WeeklyReviewDrainDependencies = {
+    list: listPendingWeeklyReviewDeliveries,
+    send: sendBubbles,
+    receipt: receiptDeliveryBubble,
+    finalize: finalizeDelivery,
+  },
+): Promise<number> {
+  const { deliveries } = await dependencies.list();
+  if (deliveries.length === 0) return 0;
+
+  const user = await client.users.fetch(config.ownerId);
+  const dm = await user.createDM();
+
+  let drained = 0;
+  for (const delivery of deliveries) {
+    try {
+      const bubbles: Array<{ ordinal: number; text: string }> =
+        delivery.bubbles.length > 0
+          ? delivery.bubbles.map((b) => ({ ordinal: b.ordinal, text: b.text }))
+          : splitMessage(delivery.draftText).map((text, ordinal) => ({
+              ordinal,
+              text,
+            }));
+      if (bubbles.length === 0) {
+        await dependencies
+          .finalize(delivery.reservationId, "send_failure")
+          .catch(() => {});
+        continue;
+      }
+      const sendHolder: {
+        result: Awaited<ReturnType<typeof sendBubbles>> | null;
+      } = { result: null };
+      await channelQueue.enqueue(dm.id, async ({ signal }) => {
+        sendHolder.result = await dependencies.send(
+          dm,
+          bubbles,
+          null,
+          {
+            tempoGapMs: null,
+            signal,
+          },
+          undefined,
+          { reservationId: delivery.reservationId },
+        );
+      });
+      const sendResult = sendHolder.result;
+      if (!sendResult || !sendResult.anySubstantiveContentVisible) {
+        await dependencies
+          .finalize(delivery.reservationId, "send_failure")
+          .catch(() => {});
+        continue;
+      }
+      const receipts = sendResult.receiptedOrdinals
+        .map((ordinal, i) => ({
+          ordinal,
+          discordMessageId: sendResult.messages[i]?.id ?? "",
+        }))
+        .filter((r) => r.discordMessageId);
+      for (const receipt of receipts) {
+        await dependencies
+          .receipt(delivery.reservationId, receipt.ordinal, receipt.discordMessageId)
+          .catch(() => {});
+      }
+      await dependencies.finalize(delivery.reservationId, "complete").catch(() => {});
+      drained += 1;
+      console.log(
+        `[discord-bot] weekly review delivered reservation=${delivery.reservationId} bubbles=${receipts.length}/${bubbles.length}`,
+      );
+    } catch (err) {
+      console.warn(
+        `[discord-bot] weekly review drain failed reservation=${delivery.reservationId}:`,
+        err,
+      );
+      await dependencies
+        .finalize(delivery.reservationId, "send_failure")
+        .catch(() => {});
+    }
+  }
+  return drained;
+}
+
 export function startProactiveScheduler(client: Client): void {
   if (!config.proactiveEnabled) {
     console.log(
@@ -99,6 +198,15 @@ export function startProactiveScheduler(client: Client): void {
       if (cycle.outcome === "preflight_skip") {
         console.log(`[discord-bot] proactive skip: ${cycle.reason}`);
         return;
+      }
+
+      try {
+        const drained = await drainPendingWeeklyReviewDeliveries(client);
+        if (drained > 0) {
+          console.log(`[discord-bot] weekly review deliveries drained=${drained}`);
+        }
+      } catch (err) {
+        console.warn("[discord-bot] weekly review drain error:", err);
       }
 
       const result = cycle.result;

@@ -51,6 +51,14 @@ export interface DelegatedApprovalEnvelope {
   policyId: string;
   policyVersion: number;
   policyHash: string;
+  /**
+   * SHA-256 over the canonical `{ type, fields }` form of the structured
+   * engineering action this envelope authorizes. Required for engineering
+   * actions; the broker recomputes it from the received action and refuses
+   * `effect_hash_mismatch` before authorization (see
+   * `engineering/engineering-effect.ts`).
+   */
+  effectHash?: string;
   recipeId?: string;
   executableId?: string;
   argv?: string[];

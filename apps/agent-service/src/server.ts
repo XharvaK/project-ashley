@@ -198,6 +198,17 @@ export function createServer(
     }
   });
 
+  app.get("/nuclear/engineering", (req, res) => {
+    try {
+      const ownerId = String(req.query.owner_id ?? "");
+      requireOwner(ownerId || undefined);
+      res.json(manager.core.getEngineeringStatus(ownerId));
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
   app.post("/nuclear/capabilities/evaluation", (req, res) => {
     try {
       const { userId, capability, seeds, passed, sourceKey } = req.body as {
@@ -992,6 +1003,19 @@ export function createServer(
         return;
       }
       res.json(result);
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.get("/delivery/pending", (req, res) => {
+    try {
+      const ownerId = String(req.query.owner_id ?? "");
+      const owner = requireOwner(ownerId || undefined);
+      res.json({
+        deliveries: manager.core.getPendingWeeklyReviewDeliveries(owner),
+      });
     } catch (err) {
       const { status, body } = toErrorResponse(err);
       res.status(status).json(body);

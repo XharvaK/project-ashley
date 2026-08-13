@@ -49,7 +49,7 @@ export type ActivationStep =
   | "verify_qualification_evidence"
   | "verify_policy"
   | "verify_protected_live_checkout"
-  | "promote_qualification"
+  | "verify_installed_artifacts"
   | "restart_broker_if_required"
   | "verify_broker_readiness"
   | "run_canary"
@@ -107,7 +107,7 @@ export function isActivationComplete(state: ActivationState): boolean {
     "verify_source",
     "verify_qualification_evidence",
     "verify_policy",
-    "promote_qualification",
+    "verify_installed_artifacts",
     "run_canary",
     "verify_canary_receipt",
     "init_activation_epoch",

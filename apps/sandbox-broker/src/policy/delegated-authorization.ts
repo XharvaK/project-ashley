@@ -302,6 +302,7 @@ const ENVELOPE_ALLOWED_KEYS: ReadonlySet<string> = new Set([
   "issuedAt",
   "expiresAt",
   "nonce",
+  "effectHash",
   "signature",
 ]);
 
@@ -513,6 +514,9 @@ export function validateDelegatedEnvelopeShape(
     reasons.push("expires_at_invalid");
   }
   if (!isBoundedString(value.nonce, 128)) reasons.push("nonce_invalid");
+  if (value.effectHash !== undefined && !/^[0-9a-f]{64}$/.test(String(value.effectHash))) {
+    reasons.push("effect_hash_invalid");
+  }
   if (value.signature !== undefined && typeof value.signature !== "string") {
     reasons.push("signature_invalid");
   }

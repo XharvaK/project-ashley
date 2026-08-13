@@ -10,11 +10,6 @@ import {
   boundedDeleteFile,
   resolveWithinRoot,
 } from "./fs-ops.js";
-import {
-  decideAgentRestart,
-  ASHLEY_AGENT_UNIT,
-  MAX_AGENT_RESTART_ATTEMPTS,
-} from "./agent-restart.js";
 import { DIAGNOSTIC_DEFINITIONS } from "./diagnostics.js";
 
 // fs-ops relies on POSIX canonical paths and realpath containment; the broker
@@ -63,74 +58,6 @@ describe.skipIf(!onLinux)("engineering fs-ops", () => {
   afterAll(() => rmSync(root, { recursive: true, force: true }));
 });
 
-describe("agent-restart decision (pure)", () => {
-  const health = { healthy: false, deterministic: true };
-  const baseIncident = {
-    incidentId: "inc-1",
-    lastAttemptAtMs: null,
-    attemptsForIncident: 0,
-    cooldownMs: 60_000,
-  };
-
-  it("allows a first restart of the ashley-agent unit under unhealthy deterministic health", () => {
-    const d = decideAgentRestart({
-      unit: ASHLEY_AGENT_UNIT,
-      incidentId: "inc-1",
-      nowMs: 1000,
-      health,
-      state: baseIncident,
-    });
-    expect(d.ok && d.allowed).toBe(true);
-  });
-
-  it("forbids restarting the broker unit", () => {
-    const d = decideAgentRestart({
-      unit: "ashley-exec-broker.service",
-      incidentId: "inc-1",
-      nowMs: 1000,
-      health,
-      state: baseIncident,
-    });
-    expect(d.ok && d.allowed).toBe(false);
-    expect(d.ok && "reason" in d && d.reason).toBe("unit_not_ashley_agent");
-  });
-
-  it("forbids restart when health is not deterministically unhealthy", () => {
-    const d = decideAgentRestart({
-      unit: ASHLEY_AGENT_UNIT,
-      incidentId: "inc-1",
-      nowMs: 1000,
-      health: { healthy: true, deterministic: false },
-      state: baseIncident,
-    });
-    expect(d.ok && d.allowed).toBe(false);
-  });
-
-  it("forbids a second attempt for the same incident (max one)", () => {
-    const d = decideAgentRestart({
-      unit: ASHLEY_AGENT_UNIT,
-      incidentId: "inc-1",
-      nowMs: 1000,
-      health,
-      state: { ...baseIncident, attemptsForIncident: MAX_AGENT_RESTART_ATTEMPTS },
-    });
-    expect(d.ok && d.allowed).toBe(false);
-    expect(d.ok && "reason" in d && d.reason).toBe("already_attempted_this_incident");
-  });
-
-  it("forbids restart when the incident is unknown", () => {
-    const d = decideAgentRestart({
-      unit: ASHLEY_AGENT_UNIT,
-      incidentId: "inc-2",
-      nowMs: 1000,
-      health,
-      state: baseIncident,
-    });
-    expect(d.ok && d.allowed).toBe(false);
-    expect(d.ok && "reason" in d && d.reason).toBe("unknown_incident");
-  });
-});
-
 describe("diagnostics catalog is host-defined and fixed", () => {
   it("contains only host-defined read-only diagnostics with fixed argv", () => {
     expect(DIAGNOSTIC_DEFINITIONS.size).toBeGreaterThan(0);
@@ -139,6 +66,9 @@ describe("diagnostics catalog is host-defined and fixed", () => {
       expect(def.diagnosticId).toBe(def.diagnosticId);
     }
     expect(DIAGNOSTIC_DEFINITIONS.has("disk_free")).toBe(true);
-    expect(DIAGNOSTIC_DEFINITIONS.has("ashley_agent_status")).toBe(true);
+    // The agent lifecycle is out of engineering scope: no diagnostic may
+    // inspect or affect the running Ashley agent unit.
+    expect(DIAGNOSTIC_DEFINITIONS.has("ashley_agent_status")).toBe(false);
+    expect(DIAGNOSTIC_DEFINITIONS.has("broker_status")).toBe(true);
   });
 });

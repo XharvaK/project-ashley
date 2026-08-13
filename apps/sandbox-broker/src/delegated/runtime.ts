@@ -84,7 +84,6 @@ import {
 } from "@composer-assistant/sandbox-policy";
 import {
   handleEngineeringAction,
-  handleAgentRestart,
   type EngineeringHandlerContext,
 } from "./../engineering/handlers.js";
 
@@ -358,8 +357,6 @@ export class DelegatedRuntime {
         return this.recipeExecute(payload, ctx);
       case "sandbox.engineering.action":
         return handleEngineeringAction(this.buildEngineeringContext(), messageType, payload);
-      case "sandbox.agent.restart":
-        return handleAgentRestart(this.buildEngineeringContext(), payload);
       default:
         return {
           ok: false,
@@ -685,8 +682,11 @@ export class DelegatedRuntime {
       recipes: this.config.recipes,
       processRunner: this.deps.processRunner,
       networkIsolation: this.deps.networkIsolation,
+      executionIsolation: this.deps.executionIsolation ?? null,
+      isolationActivationLevel: this.deps.executionIsolation === undefined ? 0 : 1,
       executableMappings: this.config.executableMappings,
       envAllowlist: this.config.envAllowlist,
+      environmentSource: () => envForAllowlist(this.config.envAllowlist),
       nonceStore: this.deps.nonceStore,
       auditSink: this.deps.auditSink,
     };

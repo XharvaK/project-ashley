@@ -112,8 +112,25 @@ export async function chatText(
   );
 }
 
-export async function getDeliveryStatus(reservationId: number) {
+export type PendingWeeklyReviewDelivery = {
+  reservationId: number;
+  draftText: string;
+  bubbles: Array<{
+    ordinal: number;
+    text: string;
+    discordMessageId: string | null;
+  }>;
+  statusUrl: string;
+};
+
+export async function listPendingWeeklyReviewDeliveries() {
   const q = new URLSearchParams({ owner_id: config.ownerId });
+  return agentFetch<{ deliveries: PendingWeeklyReviewDelivery[] }>(
+    `/delivery/pending?${q}`,
+  );
+}
+
+export async function getDeliveryStatus(reservationId: number) {  const q = new URLSearchParams({ owner_id: config.ownerId });
   return agentFetch<{
     reservation: {
       id: number;

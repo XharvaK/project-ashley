@@ -21,7 +21,7 @@ const SYSTEM_PROMPT = [
   "candidate_workspace_read_write_delete, candidate_patch_generate,",
   "candidate_report_artifact_generate, fixed_test_recipe, fixed_build_recipe,",
   "fixed_lint_verification_recipe, bounded_diagnostic_execution,",
-  "local_health_status_inspection, ashley_agent_service_restart,",
+  "local_health_status_inspection,",
   "request_owner_approval, complete, abort. When the objective is met, emit",
   '{ "type": "complete", "capability": "complete", "fields": { "summary": "..." } }.',
   "Never emit shell commands, absolute host paths, or signing material.",

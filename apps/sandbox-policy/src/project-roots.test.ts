@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
 import {
   validateProjectRootRegistry,
@@ -53,5 +54,21 @@ describe("project root registry", () => {
     expect(classifyProjectRootAccess(reg, "projB", "/var/lib/ashley-sandbox/projects/projB/src/x", "read").ok).toBe(true);
     expect(classifyProjectRootAccess(reg, "projA", "/elsewhere/x", "read").ok).toBe(false);
     expect(classifyProjectRootAccess(reg, "missing", "/x", "read").ok).toBe(false);
+  });
+
+  it("contract: the shipped example registry (ASHLEY_SANDBOX_PROJECT_REGISTRY) validates", () => {
+    const example = readFileSync(
+      new URL("../../../config/project-roots.example.json", import.meta.url),
+      "utf8",
+    );
+    const parsed = JSON.parse(example) as unknown;
+    expect(Array.isArray(parsed)).toBe(true);
+    const r = validateProjectRootRegistry(parsed as ProjectRootEntry[]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const entry = r.registry.entries.get("project-ashley");
+    expect(entry).toBeDefined();
+    expect(entry?.canonicalRoot).toBe("/home/xarvak/project-ashley");
+    expect(entry?.engineeringAllowed).toBe(true);
   });
 });

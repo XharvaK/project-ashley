@@ -601,39 +601,6 @@ export class UnixSandboxBrokerClient implements SandboxBrokerClient {
     return { ok: false, errorCode: "broker_response_invalid", reason: "malformed engineeringAction response" };
   }
 
-  async agentRestart(input: {
-    envelope: DelegatedApprovalEnvelope;
-    nowMs: number;
-    unit: string;
-    incidentId: string;
-    health: { healthy: boolean; deterministic: boolean };
-    restartState: {
-      incidentId: string;
-      lastAttemptAtMs: number | null;
-      attemptsForIncident: number;
-      cooldownMs: number;
-    };
-  }): Promise<EngineeringToolResult> {
-    const result = await this.dispatch("sandbox.agent.restart", {
-      envelope: input.envelope,
-      nowMs: input.nowMs,
-      unit: input.unit,
-      incidentId: input.incidentId,
-      health: input.health,
-      restartState: input.restartState,
-    });
-    if (!result.ok) {
-      return { ok: false, errorCode: result.errorCode, reason: result.message };
-    }
-    if (oversized(result.data, this.maxResponseBytes)) {
-      return { ok: false, errorCode: "broker_response_oversized", reason: "broker response oversized" };
-    }
-    if (isEngineeringToolResult(result.data)) {
-      return result.data as EngineeringToolResult;
-    }
-    return { ok: false, errorCode: "broker_response_invalid", reason: "malformed agentRestart response" };
-  }
-
   async getSession(sessionUuid: string): Promise<SandboxBrokerSessionSnapshot | null> {
     const result = await this.dispatch("sandbox.session.get", { sessionUuid });
     if (!result.ok) {

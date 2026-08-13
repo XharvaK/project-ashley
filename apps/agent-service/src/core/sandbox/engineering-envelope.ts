@@ -24,6 +24,7 @@ import {
   decryptPrivateKeyPem,
   randomNonce,
   verifyDelegatedPolicyArtifact,
+  engineeringActionEffectHash,
   R4006_POLICY_ID,
   R4006_POLICY_VERSION,
   type DelegatedApprovalEnvelope,
@@ -49,7 +50,6 @@ const DIAGNOSTIC_EXECUTABLE: Readonly<Record<string, string>> = {
   disk_free: "df",
   memory_usage: "free",
   load_average: "uptime",
-  ashley_agent_status: "systemctl",
   broker_status: "systemctl",
   workspace_usage: "du",
   repo_status: "git",
@@ -183,7 +183,6 @@ function resolveActionTarget(
       const executableId = DIAGNOSTIC_EXECUTABLE[diagnosticId];
       return { path: null, intent: "read", executableId };
     }
-    case "ashley_agent_service_restart":
     case "local_health_status_inspection":
     default:
       return { path: null, intent: "read" };
@@ -252,6 +251,9 @@ export function createEngineeringEnvelopeProvider(
       context,
       key: config.delegatedKey,
       nowMs,
+      // Bind the signature to the exact action the broker will execute; the
+      // broker recomputes this hash from the received action (HY3-2).
+      effectHash: engineeringActionEffectHash(action),
     });
     if (!signed.ok) {
       throw new Error(`engineering_envelope_signing_failed:${signed.error}`);

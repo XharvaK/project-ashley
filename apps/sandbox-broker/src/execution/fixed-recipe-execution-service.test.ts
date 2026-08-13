@@ -533,7 +533,7 @@ describe("fixed-recipe execution service", () => {
       }
     });
 
-    it("18. refuses request limits above the broker ceiling before anything else", async () => {
+    it("18. refuses request limits above the broker ceiling before any execution", async () => {
       const harness = makeExecutionHarness();
       const active = createActiveSession(harness);
       if (!active.ok) return;
@@ -542,7 +542,9 @@ describe("fixed-recipe execution service", () => {
       );
       expect(result.ok).toBe(false);
       if (!result.ok) {
-        expect(result.stage).toBe("request");
+        // The strictest-of combine now lives in the shared qualified spawn
+        // tail (HY3-1); the refusal still happens before any execution.
+        expect(result.stage).toBe("limits");
         expect(result.errorCode).toBe("limits_invalid");
       }
     });

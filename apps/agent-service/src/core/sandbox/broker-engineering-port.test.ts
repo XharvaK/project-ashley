@@ -31,7 +31,6 @@ function envelope(id: string): DelegatedApprovalEnvelope {
 
 function fakeClient() {
   const engineeringCalls: { envelope: DelegatedApprovalEnvelope; action: EngineeringAction }[] = [];
-  const restartCalls: { envelope: DelegatedApprovalEnvelope }[] = [];
   const client = {
     kind: "in_process_fake",
     async authorizeRequest() {
@@ -50,12 +49,8 @@ function fakeClient() {
       engineeringCalls.push({ envelope: input.envelope, action: input.action });
       return { ok: true, data: { ok: true }, artifactRef: null } as EngineeringToolResult;
     },
-    async agentRestart(input: { envelope: DelegatedApprovalEnvelope }) {
-      restartCalls.push({ envelope: input.envelope });
-      return { ok: true, data: { restarted: true }, artifactRef: null } as EngineeringToolResult;
-    },
   } as unknown as SandboxBrokerClient;
-  return { client, engineeringCalls, restartCalls };
+  return { client, engineeringCalls };
 }
 
 describe("createBrokerEngineeringPort envelope forwarding", () => {
@@ -71,40 +66,5 @@ describe("createBrokerEngineeringPort envelope forwarding", () => {
 
     expect(engineeringCalls).toHaveLength(1);
     expect(engineeringCalls[0]!.envelope).toBe(callEnvelope);
-  });
-
-  it("uses the configured restart envelope provider for agentRestart", async () => {
-    const { client, restartCalls } = fakeClient();
-    const restartEnvelope = envelope("restart");
-    const port = createBrokerEngineeringPort({
-      client,
-      nowMs: () => 1234,
-      restartEnvelopeProvider: () => restartEnvelope,
-    });
-
-    await port.agentRestart({
-      unit: "agent",
-      incidentId: "inc-1",
-      health: { healthy: false, deterministic: true },
-      restartState: { incidentId: "inc-1", lastAttemptAtMs: null, attemptsForIncident: 0, cooldownMs: 0 },
-    });
-
-    expect(restartCalls).toHaveLength(1);
-    expect(restartCalls[0]!.envelope).toBe(restartEnvelope);
-  });
-
-  it("fails closed on agentRestart when no restart envelope provider is configured", async () => {
-    const { client, restartCalls } = fakeClient();
-    const port = createBrokerEngineeringPort({ client, nowMs: () => 1234 });
-
-    const result = await port.agentRestart({
-      unit: "agent",
-      incidentId: "inc-1",
-      health: { healthy: false, deterministic: true },
-      restartState: { incidentId: "inc-1", lastAttemptAtMs: null, attemptsForIncident: 0, cooldownMs: 0 },
-    });
-
-    expect(restartCalls).toHaveLength(0);
-    expect(result.ok).toBe(false);
   });
 });

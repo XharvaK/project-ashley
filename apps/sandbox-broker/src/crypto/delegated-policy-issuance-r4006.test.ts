@@ -24,7 +24,6 @@ function r4005Policy(overrides: Partial<SandboxPolicyDocument> = {}) {
     allowedCapabilities: [
       "approved_project_read",
       "local_health_status_inspection",
-      "ashley_agent_service_restart",
     ],
     allowedRecipeIds: ["verify:agent-tsc"],
     allowedExecutableIds: ["df"],

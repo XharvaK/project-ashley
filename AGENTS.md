@@ -21,6 +21,7 @@ External account and action-broker design (design only): [`docs/External_Agency_
 Wave 10 stabilization and assurance design plus accepted local 10c assurance:
 [`docs/Stabilization_Design.md`](docs/Stabilization_Design.md).
 Wave acceptance ladder and gate packets: [`docs/Wave_Acceptance_Protocol.md`](docs/Wave_Acceptance_Protocol.md).
+Pre-activation correction pass runbook: [`docs/handoffs/mint-corrections-2.md`](docs/handoffs/mint-corrections-2.md).
 
 ## Quick start
 
@@ -144,7 +145,10 @@ Observability: `GET /health` (minimal public readiness),
 `GET /nuclear/reflections?owner_id=`, `GET /nuclear/episodes?owner_id=`,
 `GET /nuclear/cognition?owner_id=`, `GET /nuclear/revisions?owner_id=`,
 `GET /nuclear/continuity?owner_id=` (sidecar lineage/events),
-`GET /nuclear/relationship?owner_id=`, `GET /nuclear/status?owner_id=`.
+`GET /nuclear/relationship?owner_id=`, `GET /nuclear/status?owner_id=`,
+`GET /nuclear/engineering?owner_id=` (activation epoch, admission backlog,
+weekly review deliveries pending), `GET /delivery/pending?owner_id=`
+(ledgered weekly-review deliveries awaiting the bot drain).
 Capability rollout: `GET /nuclear/capabilities?owner_id=`.
 Foundational identity review: `GET /nuclear/identity/reviews?owner_id=`.
 

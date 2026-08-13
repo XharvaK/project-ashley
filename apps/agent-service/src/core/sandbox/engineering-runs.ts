@@ -20,6 +20,7 @@ import {
   evaluateProactiveAdmission,
   type EngineeringAdmissionSource,
 } from "./proactive-admission.js";
+import { listPendingWeeklyReviewDeliveries } from "./weekly-review-delivery.js";
 
 export const ENGINEERING_MAX_CONCURRENCY = 1;
 
@@ -50,6 +51,12 @@ CREATE TABLE IF NOT EXISTS engineering_signals (
   cancel INTEGER NOT NULL DEFAULT 0
 );`;
 
+const RUNTIME_FLAGS_DDL = `
+CREATE TABLE IF NOT EXISTS runtime_flags (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);`;
+
 export type PendingEngineeringAdmission = {
   id: string;
   ownerId: string;
@@ -67,6 +74,7 @@ export function ensureEngineeringTables(db: DatabaseSync): void {
   db.exec(RUNS_DDL);
   db.exec(ADMISSIONS_DDL);
   db.exec(SIGNALS_DDL);
+  db.exec(RUNTIME_FLAGS_DDL);
 }
 
 /* ---------------------------------------------------------------- runs */
@@ -246,4 +254,50 @@ export function setEngineeringActivationEpochMs(db: DatabaseSync, epochMs: numbe
   db.prepare(
     `INSERT OR REPLACE INTO runtime_flags (key, value) VALUES ('engineering_activation_epoch_ms', ?)`,
   ).run(String(epochMs));
+}
+
+/* ----------------------------------------------------------- status */
+
+export type EngineeringStatusSnapshot = {
+  activationEpochMs: number | null;
+  pendingAdmissions: number;
+  eligiblePendingAdmissions: number;
+  activeCoordinatorRuns: number;
+  weeklyReviewDeliveriesPending: number;
+};
+
+/**
+ * Durable join-proof status surface for the engineering stack. Derived from
+ * the same tables the supervisor reads, so an operator can verify the epoch
+ * gate, admission backlog, and pending weekly review deliveries at a glance.
+ */
+export function engineeringStatusSnapshot(
+  db: DatabaseSync,
+  ownerId: string,
+): EngineeringStatusSnapshot {
+  ensureEngineeringTables(db);
+  const epoch = getEngineeringActivationEpochMs(db);
+  const rows = db
+    .prepare(
+      `SELECT created_at_ms, status FROM engineering_admissions
+        WHERE owner_id = ?`,
+    )
+    .all(ownerId) as Array<{ created_at_ms: number; status: string }>;
+  const pendingAdmissions = rows.filter((r) => r.status === "pending").length;
+  const eligiblePendingAdmissions =
+    epoch === null
+      ? 0
+      : rows.filter(
+          (r) => r.status === "pending" && r.created_at_ms >= epoch,
+        ).length;
+  return {
+    activationEpochMs: epoch,
+    pendingAdmissions,
+    eligiblePendingAdmissions,
+    activeCoordinatorRuns: countActiveCoordinatorRuns(db),
+    weeklyReviewDeliveriesPending: listPendingWeeklyReviewDeliveries(
+      db,
+      ownerId,
+    ).length,
+  };
 }

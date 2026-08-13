@@ -175,6 +175,12 @@ import {
   registerDeliveryAbort,
 } from "./delivery/abort-registry.js";
 import { DELIVERY_LEASE_MS } from "./delivery/types.js";
+import {
+  listPendingWeeklyReviewDeliveries,
+} from "./sandbox/weekly-review-delivery.js";
+import {
+  engineeringStatusSnapshot,
+} from "./sandbox/engineering-runs.js";
 import type { AttachmentIntakeRef } from "./perception/types.js";
 import { runPerceptionTurn } from "./perception/index.js";
 import { thoughtDeadlineAtMs } from "./perception/turn-budget.js";
@@ -1108,6 +1114,14 @@ export class AshleyCore {
       bubbles,
       statusUrl: `/delivery/${reservationId}`,
     };
+  }
+
+  getPendingWeeklyReviewDeliveries(ownerId: string) {
+    return listPendingWeeklyReviewDeliveries(this.db, ownerId);
+  }
+
+  getEngineeringStatus(ownerId: string) {
+    return engineeringStatusSnapshot(this.db, ownerId);
   }
 
   receiptDeliveryBubble(

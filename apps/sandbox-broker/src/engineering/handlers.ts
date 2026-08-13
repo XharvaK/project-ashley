@@ -11,8 +11,9 @@
  */
 
 import * as path from "node:path";
-import { promises as fs } from "node:fs";
+import { promises as fs, mkdtempSync, rmSync } from "node:fs";
 import { randomBytes } from "node:crypto";
+import { tmpdir } from "node:os";
 import type { SandboxCapabilityId } from "@composer-assistant/sandbox-policy";
 import {
   validateEngineeringAction,
@@ -23,6 +24,7 @@ import {
   type ProjectRootRegistry,
 } from "@composer-assistant/sandbox-policy";
 import { isCanonicalForm, isWithin } from "@composer-assistant/sandbox-policy";
+import { toCanonicalBrokerPath, toNativeBrokerPath } from "../policy/path.js";
 import type { DelegatedApprovalEnvelope } from "../crypto/delegated-approval.js";
 import {
   authorizeDelegatedSandboxRequest,
@@ -34,7 +36,7 @@ import type { OwnerApprovalVerifierConfig } from "../crypto/owner-approval.js";
 import type { BrokerRootConfig } from "../policy/root-config.js";
 import type { BrokerAuditRecord } from "../execution/fixed-recipe-execution-service.js";
 import type { NetworkIsolationProvider } from "../execution/network-isolation.js";
-import { runBoundedCommand } from "../execution/bounded-process.js";
+import type { ExecutionIsolationProvider } from "../execution/execution-isolation.js";
 import type { ProcessRunner } from "../process/fake-runner.js";
 import type { ExecutableMappings } from "./../execution/executable-resolver.js";
 import type { FixedRecipe } from "../policy/recipe-registry.js";
@@ -52,15 +54,10 @@ import {
   collectPatchTargets,
 } from "./candidate-git.js";
 import { runDiagnostic } from "./diagnostics.js";
-import {
-  decideAgentRestart,
-  executeAgentRestart,
-  getAgentRestartIncidentStore,
-  type AgentRestartState,
-} from "./agent-restart.js";
-
-/** Broker-owned minimum cooldown between restart attempts for the same incident. */
-const DEFAULT_RESTART_COOLDOWN_MS = 5 * 60_000;
+import { verifyEngineeringEffectBinding } from "./engineering-effect.js";
+import { prepareQualifiedSpawn } from "../execution/qualified-recipe-execution.js";
+import { buildBoundedCapture } from "../execution/bounded-output.js";
+import { sha256Hex } from "../crypto/types.js";
 
 export type EngineeringNonceStore = { reserve: (nonce: string) => boolean };
 
@@ -79,8 +76,14 @@ export type EngineeringHandlerContext = {
   recipes: ReadonlyMap<string, FixedRecipe>;
   processRunner: ProcessRunner;
   networkIsolation: NetworkIsolationProvider;
+  /** Optional execution isolation provider (SANDBOX-ISOLATION-01). */
+  executionIsolation?: ExecutionIsolationProvider | null;
+  /** Operator activation ceiling for the isolation gate (0 = legacy). */
+  isolationActivationLevel?: number;
   executableMappings: ExecutableMappings;
   envAllowlist: Set<string>;
+  /** Broker-owned environment source for qualified recipe executions. */
+  environmentSource?: () => Record<string, string | undefined>;
   /** Durable single-use nonce store (shared with the rest of the broker). */
   nonceStore: EngineeringNonceStore;
   auditSink: (record: BrokerAuditRecord) => void;
@@ -100,9 +103,19 @@ function err(errorCode: string, message: string): BrokerResponse<unknown> {
 
 export function workspaceTreeRoot(rootConfig: BrokerRootConfig, workspaceId: string): string | null {
   if (!/^[A-Za-z0-9._:-]{1,64}$/.test(workspaceId)) return null;
-  const abs = path.resolve(rootConfig.workspaceRoot, workspaceId);
-  if (!isWithin(rootConfig.workspaceRoot, abs)) return null;
-  return abs;
+  const nativeRoot = toNativeBrokerPath(rootConfig.workspaceRoot);
+  const native = path.resolve(nativeRoot, workspaceId);
+  const canonicalResult = toCanonicalBrokerPath(native);
+  if (!canonicalResult.ok) return null;
+  if (!isWithin(rootConfig.workspaceRoot, canonicalResult.value)) return null;
+  return native;
+}
+
+function envelopeField(envelope: unknown, field: "proposalId" | "nonce"): string {
+  if (isPlainRecord(envelope) && typeof envelope[field] === "string" && envelope[field].length > 0) {
+    return envelope[field] as string;
+  }
+  return "";
 }
 
 async function authorizeEngineering(
@@ -166,6 +179,13 @@ export async function handleEngineeringAction(
   const capability = validated.capability;
   if (capability === null) {
     return err("meta_action_not_executable", "meta actions carry no tool execution");
+  }
+  // The signed envelope must bind the exact action being executed. This is
+  // checked broker-side, before authorization, so a valid envelope can never
+  // be replayed against different action fields (HY3-2).
+  const effectBinding = verifyEngineeringEffectBinding(action, eng.envelope);
+  if (!effectBinding.ok) {
+    return err(effectBinding.errorCode, effectBinding.reason);
   }
   const auth = await authorizeEngineering(ctx, eng.envelope, capability, nowMs);
   if (!auth.ok) {
@@ -317,20 +337,20 @@ export async function handleEngineeringAction(
       // isolated git repository is initialized so patch/diff operations work
       // without ever touching the live project source.
       const workspaceId = `ws-${Date.now().toString(36)}-${randomBytes(8).toString("hex")}`;
-      const abs = path.resolve(ctx.workspaceRoot, workspaceId);
-      if (!isWithin(ctx.workspaceRoot, abs)) {
+      const treeRoot = workspaceTreeRoot(ctx.rootConfig, workspaceId);
+      if (!treeRoot) {
         return err("workspace_invalid", "workspace path escaped root");
       }
       try {
-        await fs.mkdir(abs, { recursive: true });
+        await fs.mkdir(treeRoot, { recursive: true });
       } catch {
         return err("workspace_create_failed", "could not create workspace");
       }
-      const init = await runCandidateGit(bounded, abs, "init", ["-q"], { write: true });
+      const init = await runCandidateGit(bounded, treeRoot, "init", ["-q"], { write: true });
       if (!init.ok) {
         return err("workspace_create_failed", init.reason);
       }
-      return { ok: true, data: { workspaceId, treeRoot: abs, created: true } };
+      return { ok: true, data: { workspaceId, treeRoot, created: true } };
     }
     case "commit_candidate": {
       const repoRef = boundedString(f.repoRef, 256);
@@ -360,8 +380,10 @@ export async function handleEngineeringAction(
       // Resolve the working directory from the recipe's cwd policy and the
       // action's explicit workspace/project binding (fail closed otherwise).
       let cwd: string | null = null;
+      let treeRoot: string | null = null;
       if (typeof f.workspaceId === "string" && f.workspaceId.length > 0) {
         cwd = workspaceTreeRoot(ctx.rootConfig, f.workspaceId);
+        treeRoot = cwd;
       } else if (typeof f.projectId === "string" && f.projectId.length > 0) {
         const entry = ctx.projectRegistry.entries.get(f.projectId);
         cwd = entry && entry.enabled && entry.engineeringAllowed ? entry.canonicalRoot : null;
@@ -376,28 +398,82 @@ export async function handleEngineeringAction(
       if (!cwd) {
         return err("recipe_cwd_unresolved", "could not resolve recipe working directory");
       }
-      const executableId = path.basename(recipe.executable);
-      const limits = recipe.limits ?? {
-        wallMs: 120_000,
-        maxProcesses: 2,
-        maxOutputBytes: 4_194_304,
-      };
-      const result = await runBoundedCommand(bounded, {
-        executableId,
-        argv: [...recipe.argv],
-        cwd,
-        limits,
-      });
-      if (!result.ok) return err(result.errorCode, result.reason);
-      return {
-        ok: true,
-        data: {
-          exitCode: result.result.exitCode,
-          stdout: result.result.stdout,
-          stderr: result.result.stderr,
-          truncated: result.result.truncated,
-        },
-      };
+      // Qualified spawn lane (HY3-1): same recipe/limits/executable/cwd/
+      // isolation/network chain as the fixed-recipe service. Refusals never
+      // spawn; the exact child that executes the recipe is the child created
+      // inside the verified isolation mechanism (R5A).
+      const homeDir = mkdtempSync(path.join(tmpdir(), "ashley-eng-recipe-"));
+      try {
+        const prepared = await prepareQualifiedSpawn({
+          recipeId,
+          registry: ctx.recipes,
+          policy: ctx.activePolicy,
+          executableMappings: ctx.executableMappings,
+          rootConfig: ctx.rootConfig,
+          executionIsolation: ctx.executionIsolation ?? null,
+          isolationActivationLevel: ctx.isolationActivationLevel ?? 0,
+          networkIsolation: ctx.networkIsolation,
+          environmentSource: () => (ctx.environmentSource ? ctx.environmentSource() : {}),
+          explicitCwd: cwd,
+          treeRoot,
+          homeDir,
+          taskId: `eng-recipe-${Date.now().toString(36)}-${randomBytes(4).toString("hex")}`,
+          environmentDefaults: { GIT_TERMINAL_PROMPT: "0", GIT_PAGER: "cat" },
+        });
+        if (!prepared.ok) {
+          return err(prepared.refusal.errorCode, prepared.refusal.reason);
+        }
+        const startedWall = process.hrtime.bigint();
+        const runResult = await ctx.processRunner.run(prepared.runRequest);
+        const wallMs = Number(process.hrtime.bigint() - startedWall) / 1_000_000;
+        const terminalReason = runResult.terminalReason;
+        const capture = buildBoundedCapture(
+          runResult.stdout,
+          runResult.stderr,
+          prepared.effectiveLimits.maxOutputBytes,
+        );
+        ctx.auditSink({
+          kind: "broker_fixed_recipe_execution",
+          outcome: "completed",
+          errorCode: null,
+          stage: "receipt",
+          proposalId: envelopeField(eng.envelope, "proposalId"),
+          ownerId: ctx.ownerId,
+          sessionUuid: "",
+          capabilityUseId: null,
+          recipeId,
+          readiness: prepared.readiness,
+          category: prepared.recipe.category,
+          exitCode: runResult.exitCode,
+          terminalReason,
+          stdoutHash: capture.stdoutHash,
+          stderrHash: capture.stderrHash,
+          truncated: runResult.truncated || capture.truncated,
+          stdoutBytes: capture.stdoutBytes,
+          stderrBytes: capture.stderrBytes,
+          wallMs: Math.round(wallMs),
+          networkIsolation: "enforced",
+          receiptHash: null,
+          nonceHash: sha256Hex(envelopeField(eng.envelope, "nonce")),
+          isolationEvidenceSummary: prepared.isolationEvidenceSummary,
+          createdAtIso: new Date().toISOString(),
+        });
+        return {
+          ok: true,
+          data: {
+            exitCode: runResult.exitCode,
+            stdout: runResult.stdout,
+            stderr: runResult.stderr,
+            truncated: runResult.truncated,
+          },
+        };
+      } finally {
+        try {
+          rmSync(homeDir, { recursive: true, force: true });
+        } catch {
+          // best effort cleanup of the synthetic per-run home
+        }
+      }
     }
     case "run_diagnostic": {
       const diagnosticId = boundedString(f.diagnosticId, 128);
@@ -420,48 +496,6 @@ export async function handleEngineeringAction(
       return err("meta_action_not_executable", "meta actions carry no tool execution");
   }
   return err("unhandled_action", `unhandled action: ${action.type}`);
-}
-
-/** Narrow Ashley-agent restart lane entry point used by the broker surface. */
-export async function handleAgentRestart(
-  ctx: EngineeringHandlerContext,
-  payload: unknown,
-): Promise<BrokerResponse<unknown>> {
-  if (!isPlainRecord(payload) || !isPlainRecord(payload.envelope)) {
-    return err("request_invalid", "payload and envelope required");
-  }
-  const nowMs = Date.now();
-  const auth = await authorizeEngineering(ctx, payload.envelope, "ashley_agent_service_restart", nowMs);
-  if (!auth.ok) return err(auth.errorCode, auth.message);
-  const f = payload as Record<string, unknown>;
-  const unit = boundedString(f.unit, 128);
-  const incidentId = boundedString(f.incidentId, 256);
-  if (!unit || !incidentId) return err("request_invalid", "unit and incidentId required");
-  const health = f.health as { healthy: boolean; deterministic: boolean } | undefined;
-  if (!health) return err("request_invalid", "health required");
-  // Incident identity and attempt/cooldown state are broker-owned; the agent's
-  // claimed `restartState` is ignored (it must never govern the control loop).
-  const restartStore = getAgentRestartIncidentStore();
-  const state = restartStore.get(incidentId);
-  const decision = decideAgentRestart({ unit, incidentId, nowMs, health, state });
-  if (!decision.ok || !decision.allowed) {
-    return err("restart_denied", decision.ok ? decision.reason : decision.errorCode);
-  }
-  const result = await executeAgentRestart(
-    {
-      executableMappings: ctx.executableMappings as Record<string, string>,
-      processRunner: ctx.processRunner,
-      networkIsolation: ctx.networkIsolation,
-      envAllowlist: ctx.envAllowlist,
-    },
-    unit,
-  );
-  if (!result.ok) return err(result.errorCode, result.reason);
-  // Record the attempt under the broker clock so the once-per-incident + cooldown
-  // guarantee holds across requests and cannot be reset by the agent.
-  restartStore.recordAttempt(incidentId, nowMs, DEFAULT_RESTART_COOLDOWN_MS);
-  ctx.auditSink({ kind: "ashley_agent_restart", exitCode: result.exitCode } as unknown as BrokerAuditRecord);
-  return { ok: true, data: { restarted: true, exitCode: result.exitCode } };
 }
 
 // Re-export for broker wiring.

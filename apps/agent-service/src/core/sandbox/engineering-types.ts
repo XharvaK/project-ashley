@@ -85,27 +85,16 @@ export type EngineeringToolResult =
 
 /**
  * The execution port the operator drives. The production implementation wraps
- * the broker `sandbox.engineering.action` / `sandbox.agent.restart` messages;
- * a fake implements it in-process for unit tests. The broker remains final
- * authority for every call. The envelope/nowMs are baked into the port by the
- * production adapter (`broker-engineering-port.ts`).
+ * the broker `sandbox.engineering.action` message; a fake implements it
+ * in-process for unit tests. The broker remains final authority for every call.
+ * The envelope/nowMs are baked into the port by the production adapter
+ * (`broker-engineering-port.ts`).
  */
 export interface EngineeringExecutionPort {
   executeAction(
     action: EngineeringAction,
     envelope: DelegatedApprovalEnvelope,
   ): Promise<EngineeringToolResult>;
-  agentRestart(ctx: {
-    unit: string;
-    incidentId: string;
-    health: { healthy: boolean; deterministic: boolean };
-    restartState: {
-      incidentId: string;
-      lastAttemptAtMs: number | null;
-      attemptsForIncident: number;
-      cooldownMs: number;
-    };
-  }): Promise<EngineeringToolResult>;
 }
 
 /** Minimal thinking-model contract the operator uses for engineering reasoning. */

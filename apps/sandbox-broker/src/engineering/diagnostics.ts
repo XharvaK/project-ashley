@@ -51,16 +51,6 @@ export const DIAGNOSTIC_DEFINITIONS: ReadonlyMap<string, DiagnosticDefinition> =
     },
   ],
   [
-    "ashley_agent_status",
-    {
-      diagnosticId: "ashley_agent_status",
-      executableId: "systemctl",
-      argv: ["is-active", "ashley-agent.service"],
-      description: "report ashley-agent.service active state",
-      limits: { wallMs: 10_000, maxProcesses: 1, maxOutputBytes: 32_768 },
-    },
-  ],
-  [
     "broker_status",
     {
       diagnosticId: "broker_status",

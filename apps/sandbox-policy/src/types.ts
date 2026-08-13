@@ -59,7 +59,6 @@ export type SandboxCapabilityId =
   | "bounded_diagnostic_execution"
   | "engineering_project_read"
   | "candidate_repository_git_write"
-  | "ashley_agent_service_restart"
   | "apply_candidate_patch_live"
   | "write_live_repository"
   | "modify_live_git_metadata"

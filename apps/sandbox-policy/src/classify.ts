@@ -274,19 +274,6 @@ const OWNER_APPROVABLE_CAPABILITIES: readonly CapabilitySpec[] = [
     description: "restart or manage services",
   },
   {
-    id: "ashley_agent_service_restart",
-    class: "delegated_safe",
-    allowedIntents: [],
-    intrinsicRisk: "medium",
-    networkRequired: false,
-    externalSideEffects: false,
-    secretExposure: false,
-    recipeBound: false,
-    executableBound: false,
-    description:
-      "narrowly restart exactly the Ashley agent unit after deterministic health failure; broker restart remains owner approval",
-  },
-  {
     id: "package_install_remove_upgrade",
     class: "owner_approvable",
     allowedIntents: [],
