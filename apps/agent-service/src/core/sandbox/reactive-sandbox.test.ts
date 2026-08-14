@@ -6,6 +6,10 @@ import * as os from "node:os";
 
 import { executeSandboxWorkspaceFileRoundtrip } from "./roundtrip-profile.js";
 import {
+  reactiveSandboxRunResultToOperationalLicense,
+  type ExecuteReactiveSandboxTaskResult,
+} from "./reactive-execution.js";
+import {
   detectReactiveSandboxRoundtripRequest,
   evaluateReactiveSandboxAdmission,
 } from "./reactive-admission.js";
@@ -259,7 +263,7 @@ describe("Reactive Sandbox Execution — Authority-Binding Compatibility Suite",
     }
   });
 
-  it("3: same authenticated owner source message processed twice causes at most ONE execution attempt (mechanical replay guarantee)", async () => {
+  it("3: coordinator/broker execution path — replaying the same authenticated owner source message causes at most ONE execution attempt", async () => {
     const fixture = createRealFsRoundtripPort();
     try {
       const coordinator = new SandboxEngineeringCoordinator(
@@ -331,6 +335,32 @@ describe("Reactive Sandbox Execution — Authority-Binding Compatibility Suite",
     } finally {
       fixture.cleanup();
     }
+  });
+
+  it("immediate completed result without verified effect evidence produces no operational license", () => {
+    const runResult: ExecuteReactiveSandboxTaskResult = {
+      ok: false,
+      status: "completed",
+      evidence: null,
+      error: "missing_effect_evidence",
+      taskId: "task-missing-effect-evidence",
+    };
+
+    const operationalLicense = reactiveSandboxRunResultToOperationalLicense(
+      runResult,
+      "sandbox_workspace_file_roundtrip",
+      "uuid-missing-effect-evidence",
+    );
+
+    expect(runResult).toMatchObject({
+      status: "completed",
+      ok: false,
+      evidence: null,
+      error: "missing_effect_evidence",
+    });
+    expect(operationalLicense.state).toBe("none");
+    expect(operationalLicense.error).toBe("missing_effect_evidence");
+    expect(["succeeded", "admitted", "running"]).not.toContain(operationalLicense.state);
   });
 
   it("4: exact replay correlates exact task", () => {

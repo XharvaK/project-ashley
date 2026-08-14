@@ -186,7 +186,10 @@ import {
   evaluateReactiveSandboxAdmission,
   detectReactiveSandboxRoundtripRequest,
 } from "./sandbox/reactive-admission.js";
-import { executeReactiveSandboxTask } from "./sandbox/reactive-execution.js";
+import {
+  executeReactiveSandboxTask,
+  reactiveSandboxRunResultToOperationalLicense,
+} from "./sandbox/reactive-execution.js";
 import {
   isVerifiedRoundtripEffectEvidence,
   type RoundtripEffectEvidence,
@@ -844,30 +847,11 @@ export class AshleyCore {
             messageEntityUuid: messageEntityUuid ?? "",
             brokerClient: this.sandboxBrokerClient,
           });
-          if (runRes.ok && isVerifiedRoundtripEffectEvidence(runRes.evidence)) {
-            decision.operationalLicense = {
-              state: "succeeded",
-              taskId: runRes.taskId,
-              profile: reactiveAdmission.profile,
-              effectEvidence: runRes.evidence,
-              sourceMessageEntityUuid: messageEntityUuid ?? undefined,
-            };
-          } else if (runRes.status === "failed" || runRes.status === "aborted") {
-            decision.operationalLicense = {
-              state: "failed",
-              taskId: runRes.taskId,
-              profile: reactiveAdmission.profile,
-              error: runRes.error ?? "roundtrip_failed",
-              sourceMessageEntityUuid: messageEntityUuid ?? undefined,
-            };
-          } else {
-            decision.operationalLicense = {
-              state: "admitted",
-              taskId: runRes.taskId,
-              profile: reactiveAdmission.profile,
-              sourceMessageEntityUuid: messageEntityUuid ?? undefined,
-            };
-          }
+          decision.operationalLicense = reactiveSandboxRunResultToOperationalLicense(
+            runRes,
+            reactiveAdmission.profile,
+            messageEntityUuid ?? undefined,
+          );
         } else if (reactiveAdmission.replayed) {
           // Replayed admission: observe existing correlated task state, do NOT execute again
           const correlated = findCorrelatedEngineeringTask(this.db, input.ownerId, {

@@ -19,7 +19,9 @@ import {
   DEFAULT_ENGINEERING_BUDGETS,
   type EngineeringRoots,
   isVerifiedRoundtripEffectEvidence,
+  type OperationalClaimLicense,
   type RoundtripEffectEvidence,
+  type SandboxTaskProfile,
   type SandboxTaskStatus,
 } from "./engineering-types.js";
 import {
@@ -48,6 +50,41 @@ export type ExecuteReactiveSandboxTaskResult = {
   error: string | null;
   taskId: string;
 };
+
+export function reactiveSandboxRunResultToOperationalLicense(
+  result: ExecuteReactiveSandboxTaskResult,
+  profile: SandboxTaskProfile,
+  sourceMessageEntityUuid?: string,
+): OperationalClaimLicense {
+  const base = {
+    taskId: result.taskId,
+    profile,
+    ...(sourceMessageEntityUuid ? { sourceMessageEntityUuid } : {}),
+  };
+
+  if (result.ok && isVerifiedRoundtripEffectEvidence(result.evidence)) {
+    return {
+      ...base,
+      state: "succeeded",
+      effectEvidence: result.evidence,
+    };
+  }
+  if (result.status === "completed") {
+    return {
+      ...base,
+      state: "none",
+      error: result.error ?? "missing_effect_evidence",
+    };
+  }
+  if (result.status === "failed" || result.status === "aborted") {
+    return {
+      ...base,
+      state: "failed",
+      error: result.error ?? "roundtrip_failed",
+    };
+  }
+  return { ...base, state: "admitted" };
+}
 
 export async function executeReactiveSandboxTask(
   db: DatabaseSync,
