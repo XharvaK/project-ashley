@@ -1,10 +1,14 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const TOUCHED_VARS = [
+  "COMPOSER_ENV_FILE",
   "COGNITION_DISPATCH_INTERVAL_SEC",
   "MISTRAL_REQUESTS_PER_SECOND",
   "ASHLEY_SANDBOX_BROKER_ENABLED",
+  "ASHLEY_SANDBOX_BROKER_SOCKET",
+  "ASHLEY_SANDBOX_DELEGATED_ENABLED",
   "ASHLEY_SANDBOX_LIFECYCLE",
+  "ASHLEY_SANDBOX_ENGINEERING_LIFECYCLE_ENABLED",
   "ASHLEY_SANDBOX_NETWORK_PROVIDER",
   "ASHLEY_SANDBOX_POLICY_ARTIFACT",
   "ASHLEY_SANDBOX_POLICY_SIGNATURE",
@@ -13,6 +17,7 @@ const TOUCHED_VARS = [
   "ASHLEY_SANDBOX_DELEGATED_KEY_ENC_PATH",
   "ASHLEY_SANDBOX_STATE_ROOT",
   "ASHLEY_SANDBOX_WORKSPACE_ROOT",
+  "ASHLEY_SANDBOX_PROJECT_REGISTRY",
   "ASHLEY_SANDBOX_KEYS_DIR",
   "ASHLEY_SANDBOX_OWNER_KEY_ID",
   "ASHLEY_SANDBOX_OWNER_KEY_ENC_PATH",
@@ -21,10 +26,28 @@ const TOUCHED_VARS = [
 ];
 
 const originals = new Map<string, string | undefined>(
-  TOUCHED_VARS.map((name) => [name, process.env[name]]),
+  [...new Set([
+    ...TOUCHED_VARS,
+    ...Object.keys(process.env).filter((name) => name.startsWith("ASHLEY_SANDBOX_")),
+  ])].map((name) => [name, process.env[name]]),
 );
 
+function clearSandboxEnvironment(): void {
+  for (const name of Object.keys(process.env)) {
+    if (name.startsWith("ASHLEY_SANDBOX_")) delete process.env[name];
+  }
+}
+
+beforeEach(() => {
+  clearSandboxEnvironment();
+  // env.ts loads COMPOSER_ENV_FILE at module evaluation time. An empty path
+  // prevents a real owner .env from leaking into these parser unit tests.
+  process.env.COMPOSER_ENV_FILE = "";
+  vi.resetModules();
+});
+
 afterEach(() => {
+  clearSandboxEnvironment();
   for (const [name, original] of originals) {
     if (original === undefined) delete process.env[name];
     else process.env[name] = original;
