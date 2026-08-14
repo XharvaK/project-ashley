@@ -7,6 +7,7 @@ import {
   readText,
   runRollback,
   type MintFixture,
+  writeText,
 } from "./mint-script-test-helpers.js";
 
 const fixtures: MintFixture[] = [];
@@ -23,11 +24,24 @@ afterEach(() => {
 describe("rollback-engineering security finality", () => {
   it("disables persistent authority and proves service/socket finality", () => {
     const created = fixture();
+    writeText(
+      created.conf + "/.env",
+      `${readText(created.conf + "/.env")}ASHLEY_SANDBOX_LIFECYCLE=enabled\nASHLEY_SANDBOX_ENGINEERING_LIFECYCLE_ENABLED=true\n`,
+    );
     const result = runRollback(created);
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
     expect(readText(created.brokerEnv)).toContain("ASHLEY_SANDBOX_BROKER_ENABLED=false");
     expect(readText(created.brokerEnv)).toContain("ASHLEY_SANDBOX_DELEGATED_ENABLED=false");
-    expect(readText(created.conf + "/.env")).not.toContain("ASHLEY_SANDBOX_LIFECYCLE=ENABLED");
+    expect(readText(created.conf + "/.env")).not.toMatch(/^ASHLEY_SANDBOX_LIFECYCLE=/m);
+    expect(readText(created.conf + "/.env")).not.toMatch(
+      /^ASHLEY_SANDBOX_ENGINEERING_LIFECYCLE_ENABLED=/m,
+    );
+    expect(readText(created.sudoLog)).toContain(
+      "user=root command=grep -q ^ASHLEY_SANDBOX_BROKER_ENABLED=false$",
+    );
+    expect(readText(created.sudoLog)).toContain(
+      "user=root command=grep -q ^ASHLEY_SANDBOX_DELEGATED_ENABLED=false$",
+    );
     expect(readMarker(created).sandboxAutonomy).toBe("DISABLED");
     expect(readState(created, "service")).toBe("inactive");
     expect(readState(created, "socket")).toBe("inactive");

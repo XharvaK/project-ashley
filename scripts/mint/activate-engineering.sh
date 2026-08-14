@@ -29,6 +29,9 @@ BROKER_SERVICE="${BROKER_SERVICE:-ashley-exec-broker.service}"
 BROKER_SOCKET_UNIT="${BROKER_SOCKET_UNIT:-ashley-exec-broker.socket}"
 SYSTEMD_UNIT_ROOT="${SYSTEMD_UNIT_ROOT:-/etc/systemd/system}"
 CURL_BIN="${CURL_BIN:-curl}"
+AGENT_HEALTH_ATTEMPTS="${AGENT_HEALTH_ATTEMPTS:-30}"
+AGENT_HEALTH_INTERVAL_SECONDS="${AGENT_HEALTH_INTERVAL_SECONDS:-1}"
+AGENT_HEALTH_REQUEST_TIMEOUT_SECONDS="${AGENT_HEALTH_REQUEST_TIMEOUT_SECONDS:-2}"
 
 ACTIVATION_AUTHORITY_MUTATED=0
 ACTIVATION_SUCCEEDED=0
@@ -189,6 +192,104 @@ KILL_MODE="$(sudo systemctl show "$BROKER_SERVICE" -p KillMode --value)" || \
   fail "verify_installed_artifacts" "kill_mode_unavailable"
 [ "$KILL_MODE" = "control-group" ] || fail "verify_installed_artifacts" "kill_mode_not_control_group"
 
+# The agent must already have the owner-managed configuration that the
+# enabled lifecycle will consume. Activation validates it but never writes it.
+log "verify_agent_configuration"
+[ -f "$CONF/.env" ] || fail "verify_agent_configuration" "agent_env_missing"
+if ! AGENT_CONFIG_ERROR="$(
+  python3 - "$CONF/.env" "$CONF" <<'PY'
+import posixpath
+import sys
+
+env_path = sys.argv[1]
+conf = sys.argv[2]
+
+def reject(reason: str) -> None:
+    print(reason)
+    raise SystemExit(1)
+
+try:
+    with open(env_path, encoding="utf-8") as handle:
+        lines = handle.read().splitlines()
+except OSError:
+    reject("agent_env_unreadable")
+
+values = {}
+for raw_line in lines:
+    line = raw_line.strip()
+    if not line or line.startswith("#") or "=" not in line:
+        continue
+    key, value = line.split("=", 1)
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        value = value[1:-1]
+    values[key.strip()] = value
+
+def present(name: str) -> str:
+    value = values.get(name, "").strip()
+    if not value:
+        reject(f"agent_config_missing:{name}")
+    return value
+
+for name in (
+    "ASHLEY_SANDBOX_POLICY_ARTIFACT",
+    "ASHLEY_SANDBOX_POLICY_SIGNATURE",
+    "ASHLEY_SANDBOX_DELEGATED_ENABLED",
+    "ASHLEY_SANDBOX_BROKER_SOCKET",
+    "ASHLEY_SANDBOX_PROJECT_REGISTRY",
+):
+    present(name)
+
+if values["ASHLEY_SANDBOX_DELEGATED_ENABLED"].strip() != "true":
+    reject("agent_config_invalid:ASHLEY_SANDBOX_DELEGATED_ENABLED:expected_true")
+
+keys_dir = values.get(
+    "ASHLEY_SANDBOX_KEYS_DIR",
+    posixpath.join(conf, "keys"),
+).strip()
+owner_key_id = values.get("ASHLEY_SANDBOX_OWNER_KEY_ID", "owner-ed25519-v1").strip()
+continuity_key_id = values.get(
+    "ASHLEY_SANDBOX_CONTINUITY_KEY_ID",
+    "continuity-tombstone-ed25519-v1",
+).strip()
+
+path_defaults = {
+    "ASHLEY_SANDBOX_POLICY_ARTIFACT": None,
+    "ASHLEY_SANDBOX_POLICY_SIGNATURE": None,
+    "ASHLEY_SANDBOX_PROJECT_REGISTRY": None,
+    "ASHLEY_SANDBOX_KEY_PASSPHRASE_PATH": posixpath.join(keys_dir, "master.pass"),
+    "ASHLEY_SANDBOX_OWNER_KEY_ENC_PATH": posixpath.join(keys_dir, "owner-approval.key.enc"),
+    "ASHLEY_SANDBOX_CONTINUITY_KEY_ENC_PATH": posixpath.join(keys_dir, "continuity-tombstone.key.enc"),
+    "ASHLEY_SANDBOX_OWNER_PUBLIC_KEY": posixpath.join(keys_dir, f"{owner_key_id}.pub"),
+    "ASHLEY_SANDBOX_CONTINUITY_PUBLIC_KEY": posixpath.join(keys_dir, f"{continuity_key_id}.pub"),
+    "ASHLEY_SANDBOX_DELEGATED_KEY_ENC_PATH": posixpath.join(keys_dir, "delegated-runtime.key.enc"),
+}
+
+def file_exists(path: str) -> bool:
+    try:
+        with open(path, "rb"):
+            return True
+    except OSError:
+        return False
+
+for name, default in path_defaults.items():
+    if default is None:
+        path = values[name].strip()
+    else:
+        path = values.get(name, default).strip()
+    if not file_exists(path):
+        reject(f"agent_config_path_missing:{name}:{path}")
+
+# loadEngineeringTrustAnchors() resolves the owner public key from keysDir and
+# the configured owner key id, independently of the explicit readiness path.
+computed_owner_public = posixpath.join(keys_dir, f"{owner_key_id}.pub")
+if not file_exists(computed_owner_public):
+    reject(f"agent_config_path_missing:ASHLEY_SANDBOX_KEYS_DIR:{computed_owner_public}")
+PY
+)"; then
+  fail "verify_agent_configuration" "${AGENT_CONFIG_ERROR:-agent_config_invalid}"
+fi
+
 # Cleanup is armed before the first persistent authority mutation.
 maybe_fail "before_first_gate_mutation"
 ACTIVATION_AUTHORITY_MUTATED=1
@@ -262,16 +363,22 @@ if [ ! -d "$SELF_IMPROVE_CLONE/.git" ]; then
     fail "init_self_improvement_clone" "clone_failed"
   git -C "$TMP_CLONE/repo" remote remove origin 2>/dev/null || true
   git -C "$TMP_CLONE/repo" config --local core.hooksPath /dev/null
-  git -C "$TMP_CLONE/repo" remote -v | grep -q . && \
-    fail "init_self_improvement_clone" "clone_has_remote"
   sudo install -d -o ashley-sandbox -g ashley-sandbox "$(dirname "$SELF_IMPROVE_CLONE")"
   sudo rm -rf "$SELF_IMPROVE_CLONE"
   sudo mv "$TMP_CLONE/repo" "$SELF_IMPROVE_CLONE"
   sudo chown -R ashley-sandbox:ashley-sandbox "$SELF_IMPROVE_CLONE"
   rm -rf "$TMP_CLONE"
 fi
-git -C "$SELF_IMPROVE_CLONE" remote -v | grep -q . && \
-  fail "init_self_improvement_clone" "clone_has_remote"
+verify_clone_no_remote() {
+  local remote_list
+  if ! remote_list="$(sudo -n -u ashley-sandbox -- git -C "$SELF_IMPROVE_CLONE" remote -v)"; then
+    fail "init_self_improvement_clone" "clone_git_inspection_failed"
+  fi
+  if [ -n "$remote_list" ]; then
+    fail "init_self_improvement_clone" "clone_has_remote"
+  fi
+}
+verify_clone_no_remote
 
 log "init_activation_epoch"
 EPOCH="$(date +%s000)"
@@ -310,8 +417,12 @@ import tempfile
 path = sys.argv[1]
 with open(path, encoding="utf-8") as handle:
     lines = [line for line in handle.read().splitlines()
-             if not line.strip().startswith("ASHLEY_SANDBOX_LIFECYCLE=")]
-lines.append("ASHLEY_SANDBOX_LIFECYCLE=ENABLED")
+             if not line.strip().startswith((
+                 "ASHLEY_SANDBOX_LIFECYCLE=",
+                 "ASHLEY_SANDBOX_ENGINEERING_LIFECYCLE_ENABLED=",
+             ))]
+lines.append("ASHLEY_SANDBOX_LIFECYCLE=enabled")
+lines.append("ASHLEY_SANDBOX_ENGINEERING_LIFECYCLE_ENABLED=true")
 directory = os.path.dirname(path) or "."
 fd, temporary = tempfile.mkstemp(prefix=".activation-owner-env-", dir=directory)
 try:
@@ -335,8 +446,39 @@ maybe_fail "during_agent_restart"
 log "verify_agent_health"
 maybe_fail "during_agent_health_verification"
 systemctl --user is-active --quiet ashley-agent.service || fail "verify_agent_health" "agent_not_active"
-"$CURL_BIN" -fsS "http://127.0.0.1:3710/health" >/dev/null 2>&1 || \
-  fail "verify_agent_health" "agent_health_endpoint_unreachable"
+agent_health_ready=0
+for ((attempt=1; attempt<=AGENT_HEALTH_ATTEMPTS; attempt++)); do
+  health_payload=""
+  if health_payload="$("$CURL_BIN" -fsS --max-time "$AGENT_HEALTH_REQUEST_TIMEOUT_SECONDS" \
+      "http://127.0.0.1:3710/health" 2>/dev/null)"; then
+    if printf '%s\n' "$health_payload" | python3 -c '
+import json
+import sys
+
+try:
+    payload = json.load(sys.stdin)
+except (json.JSONDecodeError, TypeError):
+    raise SystemExit(1)
+
+if not isinstance(payload, dict):
+    raise SystemExit(1)
+
+if (
+    payload.get("ok") is not True
+    or payload.get("ready") is not True
+    or payload.get("state") not in {"ready", "busy"}
+):
+    raise SystemExit(1)
+'; then
+      agent_health_ready=1
+      break
+    fi
+  fi
+  if [ "$attempt" -lt "$AGENT_HEALTH_ATTEMPTS" ]; then
+    sleep "$AGENT_HEALTH_INTERVAL_SECONDS"
+  fi
+done
+[ "$agent_health_ready" = "1" ] || fail "verify_agent_health" "agent_health_not_ready"
 
 log "verify_historical_admissions_untouched"
 [ -z "$(git -C "$REPO" status --porcelain)" ] || \

@@ -42,6 +42,8 @@ export type MintFixture = {
   clone: string;
   registry: string;
   fakeBin: string;
+  healthAttempts: string;
+  sudoLog: string;
   systemdState: string;
   systemdUnits: string;
 };
@@ -62,7 +64,7 @@ function executable(target: string, contents: string): void {
   chmodSync(target, 0o755);
 }
 
-function git(cwd: string, ...args: string[]): string {
+export function git(cwd: string, ...args: string[]): string {
   const result = spawnSync("git", args, { cwd, encoding: "utf8" });
   if (result.status !== 0) throw new Error(result.stderr);
   return result.stdout.trim();
@@ -73,7 +75,25 @@ function createFakeCommands(fixture: MintFixture): void {
   executable(
     path.join(fixture.fakeBin, "sudo"),
     `#!/bin/sh
-if [ "\${1:-}" = "-n" ] || [ "\${1:-}" = "-v" ]; then shift; fi
+set -eu
+user=root
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -n|-v) shift ;;
+    -u) user="$2"; shift 2 ;;
+    --) shift; break ;;
+    *) break ;;
+  esac
+done
+if [ -n "\${ASHLEY_FAKE_SUDO_LOG:-}" ]; then
+  printf 'user=%s command=%s\\n' "$user" "$*" >> "$ASHLEY_FAKE_SUDO_LOG"
+fi
+if [ "\${ASHLEY_FAKE_GIT_REMOTE_FAIL:-}" = "1" ] && [ "\${1:-}" = "git" ]; then
+  case "$*" in
+    *" remote -v"*) exit 73 ;;
+  esac
+fi
+export ASHLEY_FAKE_EFFECTIVE_USER="$user"
 exec "$@"
 `,
   );
@@ -144,7 +164,24 @@ esac
 exit 0
 `,
   );
-  executable(path.join(fixture.fakeBin, "curl"), "#!/bin/sh\nexit 0\n");
+  executable(
+    path.join(fixture.fakeBin, "curl"),
+    `#!/bin/sh
+set -e
+attempt_file="\${ASHLEY_FAKE_HEALTH_ATTEMPTS_FILE:-/tmp/ashley-health-attempts}"
+attempt="$(cat "$attempt_file" 2>/dev/null || printf 0)"
+attempt=$((attempt + 1))
+printf '%s\\n' "$attempt" > "$attempt_file"
+token="$(printf '%s' "\${ASHLEY_FAKE_HEALTH_SEQUENCE:-ready}" | awk -F, -v slot="$attempt" '{ if (slot > NF) slot = NF; print $slot }')"
+case "$token" in
+  ready) printf '{"ok":true,"ready":true,"state":"ready"}\\n' ;;
+  busy) printf '{"ok":true,"ready":true,"state":"busy"}\\n' ;;
+  not-ready) printf '{"ok":true,"ready":false,"state":"offline"}\\n' ;;
+  malformed) printf '{not-json}\\n' ;;
+  unreachable|timeout) exit 28 ;;
+  *) printf '%s\\n' "$token" ;;
+esac
+`);
   executable(path.join(fixture.fakeBin, "sleep"), "#!/bin/sh\nexit 0\n");
 }
 
@@ -177,6 +214,8 @@ export function makeMintFixture(): MintFixture {
     clone: path.join(state, "self-improvement", "project-ashley"),
     registry: path.join(conf, "project-roots.json"),
     fakeBin: path.join(root, "fake-bin"),
+    healthAttempts: path.join(root, "health-attempts"),
+    sudoLog: path.join(root, "sudo.log"),
     systemdState: path.join(root, "systemd-state"),
     systemdUnits: path.join(root, "systemd-units"),
   };
@@ -239,13 +278,52 @@ export function makeMintFixture(): MintFixture {
   file(path.join(fixture.systemdUnits, "ashley-exec-broker.service"), "service-unit\n");
   file(path.join(fixture.systemdUnits, "ashley-exec-broker.socket"), "socket-unit\n");
 
-  file(path.join(conf, ".env"), "MEMORY_OWNER_ID=owner\n");
+  const keysDir = path.join(conf, "keys");
+  const policyArtifact = path.join(keysDir, "policy.json");
+  const policySignature = path.join(keysDir, "policy.json.sig");
+  const ownerKey = path.join(keysDir, "owner-approval.key.enc");
+  const ownerPublicKey = path.join(keysDir, "owner-ed25519-v1.pub");
+  const continuityKey = path.join(keysDir, "continuity-tombstone.key.enc");
+  const continuityPublicKey = path.join(keysDir, "continuity-tombstone-ed25519-v1.pub");
+  const passphrase = path.join(keysDir, "master.pass");
+  const delegatedKey = path.join(keysDir, "delegated-runtime.key.enc");
+  for (const target of [
+    ownerKey,
+    ownerPublicKey,
+    continuityKey,
+    continuityPublicKey,
+    passphrase,
+    delegatedKey,
+  ]) {
+    file(target, "fixture\n");
+  }
   file(
-    path.join(conf, "keys", "policy.json"),
+    policyArtifact,
     JSON.stringify({ policyId: "policy", policyVersion: 1, expiresAt: "2099-01-01T00:00:00Z" }),
   );
-  file(path.join(conf, "keys", "policy.json.sha256"), "hash\n");
+  file(policySignature, "signature\n");
+  file(path.join(keysDir, "policy.json.sha256"), "hash\n");
   file(fixture.registry, JSON.stringify([{ projectId: "fixture", canonicalRoot: posix(repo) }]));
+  file(
+    path.join(conf, ".env"),
+    [
+      "MEMORY_OWNER_ID=owner",
+      `ASHLEY_SANDBOX_KEYS_DIR=${keysDir}`,
+      "ASHLEY_SANDBOX_OWNER_KEY_ID=owner-ed25519-v1",
+      "ASHLEY_SANDBOX_CONTINUITY_KEY_ID=continuity-tombstone-ed25519-v1",
+      `ASHLEY_SANDBOX_KEY_PASSPHRASE_PATH=${passphrase}`,
+      `ASHLEY_SANDBOX_OWNER_KEY_ENC_PATH=${ownerKey}`,
+      `ASHLEY_SANDBOX_CONTINUITY_KEY_ENC_PATH=${continuityKey}`,
+      `ASHLEY_SANDBOX_OWNER_PUBLIC_KEY=${ownerPublicKey}`,
+      `ASHLEY_SANDBOX_CONTINUITY_PUBLIC_KEY=${continuityPublicKey}`,
+      `ASHLEY_SANDBOX_DELEGATED_KEY_ENC_PATH=${delegatedKey}`,
+      `ASHLEY_SANDBOX_POLICY_ARTIFACT=${policyArtifact}`,
+      `ASHLEY_SANDBOX_POLICY_SIGNATURE=${policySignature}`,
+      "ASHLEY_SANDBOX_DELEGATED_ENABLED=true",
+      `ASHLEY_SANDBOX_BROKER_SOCKET=${path.join(root, "run", "broker.sock")}`,
+      `ASHLEY_SANDBOX_PROJECT_REGISTRY=${fixture.registry}`,
+    ].join("\n") + "\n",
+  );
   file(
     fixture.marker,
     JSON.stringify({ sandboxAutonomy: "DISABLED", sourcePin: fixture.sourcePin }),
@@ -350,7 +428,10 @@ function baseEnvironment(fixture: MintFixture): NodeJS.ProcessEnv {
     PROVENANCE_HELPER: posix(PROVENANCE),
     FAILED_ACTIVATION_CLEANUP: posix(ROLLBACK),
     CURL_BIN: posix(path.join(fixture.fakeBin, "curl")),
-    ROLLBACK_FINALITY_ATTEMPTS: "2",
+    ASHLEY_FAKE_HEALTH_ATTEMPTS_FILE: posix(fixture.healthAttempts),
+    ASHLEY_FAKE_SUDO_LOG: posix(fixture.sudoLog),
+    ASHLEY_FAKE_HEALTH_SEQUENCE: "ready",
+    ROLLBACK_FINALITY_ATTEMPTS: "1",
     SYSTEMD_UNIT_ROOT: posix(fixture.systemdUnits),
     ASHLEY_FAKE_SYSTEMD_STATE: posix(fixture.systemdState),
   };
@@ -397,6 +478,10 @@ export function readMarker(fixture: MintFixture): Record<string, unknown> {
 
 export function readText(target: string): string {
   return readFileSync(target, "utf8");
+}
+
+export function writeText(target: string, contents: string): void {
+  writeFileSync(target, contents);
 }
 
 export function writeJson(target: string, value: unknown): void {

@@ -66,7 +66,10 @@ import tempfile
 path = sys.argv[1]
 with open(path, encoding="utf-8") as handle:
     lines = [line for line in handle.read().splitlines()
-             if not line.strip().startswith("ASHLEY_SANDBOX_LIFECYCLE=")]
+             if not line.strip().startswith((
+                 "ASHLEY_SANDBOX_LIFECYCLE=",
+                 "ASHLEY_SANDBOX_ENGINEERING_LIFECYCLE_ENABLED=",
+             ))]
 directory = os.path.dirname(path) or "."
 fd, temporary = tempfile.mkstemp(prefix=".rollback-owner-env-", dir=directory)
 try:
@@ -168,9 +171,11 @@ systemctl --user is-active --quiet ashley-agent.service || \
 log "verify_postcondition"
 grep -q '^ASHLEY_SANDBOX_LIFECYCLE=' "$CONF/.env" && \
   fail "verify_postcondition" "lifecycle_still_present"
-grep -q '^ASHLEY_SANDBOX_BROKER_ENABLED=false$' "$BROKER_ENV_FILE" || \
+grep -q '^ASHLEY_SANDBOX_ENGINEERING_LIFECYCLE_ENABLED=' "$CONF/.env" && \
+  fail "verify_postcondition" "engineering_lifecycle_still_present"
+sudo -n grep -q '^ASHLEY_SANDBOX_BROKER_ENABLED=false$' "$BROKER_ENV_FILE" || \
   fail "verify_postcondition" "broker_gate_not_disabled"
-grep -q '^ASHLEY_SANDBOX_DELEGATED_ENABLED=false$' "$BROKER_ENV_FILE" || \
+sudo -n grep -q '^ASHLEY_SANDBOX_DELEGATED_ENABLED=false$' "$BROKER_ENV_FILE" || \
   fail "verify_postcondition" "delegated_gate_not_disabled"
 python3 - "$ACTIVATION_MARKER" <<'PY' || fail "verify_postcondition" "marker_autonomy_not_disabled"
 import json
