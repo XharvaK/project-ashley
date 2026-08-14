@@ -1,60 +1,30 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 EXPECTED_SOURCE_COMMIT="${1:?expected source commit}"
-SOURCE_ROOT="${2:-/home/xarvak/project-ashley-isolation-dev}"
-PRODUCTION_ROOT="/home/xarvak/project-ashley"
-FROZEN_ROOT="/home/xarvak/project-ashley-isolation-qual"
-EXPECTED_PRODUCTION_HEAD="873ab34b48859d459f4394d990bcd48f502455c3"
-EXPECTED_FROZEN_HEAD="565bf6e113366ebf093b77f56a9ba45d69ba7d80"
-EXPECTED_PRODUCTION_STATUS=$'?? 0\n?? query.js'
+PRODUCTION_ROOT="${2:?protected production checkout}"
+die() {
+  printf 'BLOCKED %s\n' "${1:-qualification_failed}" >&2
+  exit 1
+}
+[[ "$EXPECTED_SOURCE_COMMIT" =~ ^[a-f0-9]{40}$ ]] || die source_commit_invalid
 SERVICE="ashley-exec-broker.service"
 SOCKET="ashley-exec-broker.socket"
-QUALIFICATION_ROOT="/opt/ashley-sandbox/qualification/sandbox-isolation-02c"
+QUALIFICATION_BASE="/var/lib/ashley-sandbox/qualification/sandbox-isolation-02c/runs"
+RUN_ROOT="$QUALIFICATION_BASE/$EXPECTED_SOURCE_COMMIT"
+QUALIFICATION_ROOT="/opt/ashley-sandbox/qualification/sandbox-isolation-02c/runs/$EXPECTED_SOURCE_COMMIT"
 RUNTIME_ROOT="$QUALIFICATION_ROOT/runtime"
-FIXTURE_ROOT="/var/lib/ashley-sandbox/qualification/sandbox-isolation-02c/fixture"
-WORKSPACE_ROOT="/var/lib/ashley-sandbox/qualification/sandbox-isolation-02c/workspace"
-EVIDENCE_DIR="/var/lib/ashley-sandbox/qualification/sandbox-isolation-02c"
+FIXTURE_ROOT="$RUN_ROOT/fixture"
+WORKSPACE_ROOT="$RUN_ROOT/workspace"
+EVIDENCE_DIR="$RUN_ROOT"
 EVIDENCE_PATH="$EVIDENCE_DIR/evidence.json"
 FIXTURE_MANIFEST_PATH="$EVIDENCE_DIR/fixture-probe-manifest.json"
 INVENTORY_PATH="$EVIDENCE_DIR/control-plane-inventory.json"
 CANARY_RECEIPT_PATH="$EVIDENCE_DIR/canary-receipt.json"
 TRANSIENT_LOG="$WORKSPACE_ROOT/transient.log"
 TRANSIENT_UNIT="ashley-sandbox-isolation-02c.service"
-PROBE_SOURCE="$SOURCE_ROOT/deploy/linux-mint/sandbox/qualification/bubblewrap-probe.sh"
 BROKER_ENV="/etc/ashley-sandbox/broker.env"
 NODE_BIN="/opt/ashley-sandbox/bin/node"
 JQ_BIN="/usr/bin/jq"
-POLICY_PREFLIGHT_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/execution/qualification-policy-preflight-cli.js"
-SERVICE_STABILITY_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/execution/qualification-service-state-cli.js"
-PROBE_RUNTIME="$RUNTIME_ROOT/bubblewrap-probe.sh"
-SERVICE_SOURCE="$SOURCE_ROOT/deploy/linux-mint/sandbox/systemd/ashley-exec-broker.service"
-SOCKET_SOURCE="$SOURCE_ROOT/deploy/linux-mint/sandbox/systemd/ashley-exec-broker.socket"
-die_transient_with_diagnostics() {
-  local reason="$1"
-  printf 'BLOCKED %s\n' "$reason" >&2
-  if sudo -n test -r "$TRANSIENT_LOG" >/dev/null 2>&1; then
-    printf 'DIAGNOSTICS_BEGIN\n' >&2
-    sudo -n /usr/bin/tail -c 4096 "$TRANSIENT_LOG" >&2 || true
-    printf '\nDIAGNOSTICS_END\n' >&2
-  fi
-  exit 1
-}
-CLI_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/execution/bubblewrap-qualification-cli.js"
-RUNNER_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/execution/bubblewrap-qualification-runner.js"
-ISOLATION_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/execution/bubblewrap-execution-isolation.js"
-EXECUTION_ISOLATION_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/execution/execution-isolation.js"
-REAL_RUNNER_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/process/real-runner.js"
-CLI_RUNTIME="$RUNTIME_ROOT/execution/bubblewrap-qualification-cli.js"
-TOOLCHAIN_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/execution/qualification-toolchain.js"
-TOOLCHAIN_RUNTIME="$RUNTIME_ROOT/execution/qualification-toolchain.js"
-BOUNDED_OUTPUT_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/execution/bounded-output.js"
-CRYPTO_TYPES_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/crypto/types.js"
-BOUNDED_OUTPUT_RUNTIME="$RUNTIME_ROOT/execution/bounded-output.js"
-CRYPTO_TYPES_RUNTIME="$RUNTIME_ROOT/crypto/types.js"
-die() {
-  printf 'BLOCKED %s\n' "${1:-qualification_failed}" >&2
-  exit 1
-}
 require_equal() {
   local label="$1"
   local actual="$2"
@@ -70,6 +40,66 @@ require_path() {
 require_privileged_path() {
   local path="$1"
   sudo -n test -e "$path" || die "missing_path:$path"
+}
+validate_protected_source() {
+  local root="$1"
+  local expected="$2"
+  local status
+  require_path "$root/.git"
+  require_equal protected_source_head "$(git -C "$root" rev-parse HEAD)" "$expected"
+  if ! status="$(git -C "$root" status --porcelain --untracked-files=all)"; then
+    die protected_source_status_unreadable
+  fi
+  [[ -z "$status" ]] || die protected_source_worktree_dirty
+  git -C "$root" cat-file -e "$expected^{commit}" || die expected_source_commit_unavailable
+}
+validate_protected_source "$PRODUCTION_ROOT" "$EXPECTED_SOURCE_COMMIT"
+SOURCE_STAGE_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/ashley-sandbox-02c-source.XXXXXX")"
+SOURCE_ROOT="$SOURCE_STAGE_ROOT/repo"
+RENDERED_SERVICE=""
+cleanup_source_stage() {
+  if [[ -n "${RENDERED_SERVICE:-}" ]]; then
+    rm -f -- "$RENDERED_SERVICE"
+  fi
+  rm -rf -- "$SOURCE_STAGE_ROOT"
+}
+trap cleanup_source_stage EXIT
+git clone --local --no-hardlinks --no-checkout "$PRODUCTION_ROOT" "$SOURCE_ROOT" >/dev/null 2>&1 \
+  || die source_checkout_clone_failed
+git -C "$SOURCE_ROOT" checkout --detach --quiet "$EXPECTED_SOURCE_COMMIT" \
+  || die source_checkout_checkout_failed
+require_equal source_checkout_head "$(git -C "$SOURCE_ROOT" rev-parse HEAD)" "$EXPECTED_SOURCE_COMMIT"
+if ! SOURCE_CHECKOUT_STATUS="$(git -C "$SOURCE_ROOT" status --porcelain --untracked-files=all)"; then
+  die source_checkout_status_unreadable
+fi
+[[ -z "$SOURCE_CHECKOUT_STATUS" ]] || die source_checkout_dirty
+PROBE_SOURCE="$SOURCE_ROOT/deploy/linux-mint/sandbox/qualification/bubblewrap-probe.sh"
+POLICY_PREFLIGHT_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/execution/qualification-policy-preflight-cli.js"
+SERVICE_STABILITY_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/execution/qualification-service-state-cli.js"
+PROBE_RUNTIME="$RUNTIME_ROOT/bubblewrap-probe.sh"
+SERVICE_SOURCE="$SOURCE_ROOT/deploy/linux-mint/sandbox/systemd/ashley-exec-broker.service"
+SOCKET_SOURCE="$SOURCE_ROOT/deploy/linux-mint/sandbox/systemd/ashley-exec-broker.socket"
+CLI_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/execution/bubblewrap-qualification-cli.js"
+RUNNER_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/execution/bubblewrap-qualification-runner.js"
+ISOLATION_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/execution/bubblewrap-execution-isolation.js"
+EXECUTION_ISOLATION_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/execution/execution-isolation.js"
+REAL_RUNNER_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/process/real-runner.js"
+CLI_RUNTIME="$RUNTIME_ROOT/execution/bubblewrap-qualification-cli.js"
+TOOLCHAIN_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/execution/qualification-toolchain.js"
+TOOLCHAIN_RUNTIME="$RUNTIME_ROOT/execution/qualification-toolchain.js"
+BOUNDED_OUTPUT_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/execution/bounded-output.js"
+CRYPTO_TYPES_SOURCE="$SOURCE_ROOT/apps/sandbox-broker/dist/crypto/types.js"
+BOUNDED_OUTPUT_RUNTIME="$RUNTIME_ROOT/execution/bounded-output.js"
+CRYPTO_TYPES_RUNTIME="$RUNTIME_ROOT/crypto/types.js"
+die_transient_with_diagnostics() {
+  local reason="$1"
+  printf 'BLOCKED %s\n' "$reason" >&2
+  if sudo -n test -r "$TRANSIENT_LOG" >/dev/null 2>&1; then
+    printf 'DIAGNOSTICS_BEGIN\n' >&2
+    sudo -n /usr/bin/tail -c 4096 "$TRANSIENT_LOG" >&2 || true
+    printf '\nDIAGNOSTICS_END\n' >&2
+  fi
+  exit 1
 }
 check_pinned_node() {
   [[ "$NODE_BIN" == /opt/ashley-sandbox/bin/node ]] || die node_path_changed
@@ -164,19 +194,35 @@ run_stable_service_check() {
   grep -q '"status": "stable"' <<<"$output" \
     || die service_stability_result_invalid
 }
-[[ "$QUALIFICATION_ROOT" == /opt/ashley-sandbox/qualification/sandbox-isolation-02c ]] || die qualification_root_changed
-[[ "$FIXTURE_ROOT" == /var/lib/ashley-sandbox/qualification/sandbox-isolation-02c/fixture ]] || die fixture_root_changed
-[[ "$WORKSPACE_ROOT" == /var/lib/ashley-sandbox/qualification/sandbox-isolation-02c/workspace ]] || die workspace_root_changed
+[[ "$QUALIFICATION_ROOT" == "/opt/ashley-sandbox/qualification/sandbox-isolation-02c/runs/$EXPECTED_SOURCE_COMMIT" ]] || die qualification_root_changed
+[[ "$RUN_ROOT" == "/var/lib/ashley-sandbox/qualification/sandbox-isolation-02c/runs/$EXPECTED_SOURCE_COMMIT" ]] || die run_root_changed
+[[ "$FIXTURE_ROOT" == "$RUN_ROOT/fixture" ]] || die fixture_root_changed
+[[ "$WORKSPACE_ROOT" == "$RUN_ROOT/workspace" ]] || die workspace_root_changed
 require_path "$RUNNER_SOURCE"
 require_path "$ISOLATION_SOURCE"
 require_path "$EXECUTION_ISOLATION_SOURCE"
 require_path "$REAL_RUNNER_SOURCE"
-[[ "$EVIDENCE_PATH" == /var/lib/ashley-sandbox/qualification/sandbox-isolation-02c/evidence.json ]] || die evidence_path_changed
-[[ "$FIXTURE_MANIFEST_PATH" == /var/lib/ashley-sandbox/qualification/sandbox-isolation-02c/fixture-probe-manifest.json ]] || die fixture_manifest_path_changed
-[[ "$INVENTORY_PATH" == /var/lib/ashley-sandbox/qualification/sandbox-isolation-02c/control-plane-inventory.json ]] || die inventory_path_changed
-[[ "$CANARY_RECEIPT_PATH" == /var/lib/ashley-sandbox/qualification/sandbox-isolation-02c/canary-receipt.json ]] || die canary_receipt_path_changed
+[[ "$EVIDENCE_PATH" == "$RUN_ROOT/evidence.json" ]] || die evidence_path_changed
+[[ "$FIXTURE_MANIFEST_PATH" == "$RUN_ROOT/fixture-probe-manifest.json" ]] || die fixture_manifest_path_changed
+[[ "$INVENTORY_PATH" == "$RUN_ROOT/control-plane-inventory.json" ]] || die inventory_path_changed
+[[ "$CANARY_RECEIPT_PATH" == "$RUN_ROOT/canary-receipt.json" ]] || die canary_receipt_path_changed
+if ! sudo -n true >/dev/null 2>&1; then
+  printf 'BLOCKED sudo_noninteractive_unavailable\n' >&2
+  exit 77
+fi
+if ! sudo -n -u ashley-sandbox id >/dev/null 2>&1; then
+  printf 'BLOCKED sudo_service_user_unavailable\n' >&2
+  exit 77
+fi
+if sudo -n test -e "$RUN_ROOT" || sudo -n test -L "$RUN_ROOT" || \
+  sudo -n test -e "$QUALIFICATION_ROOT" || sudo -n test -L "$QUALIFICATION_ROOT"; then
+  die qualification_run_already_exists
+fi
 require_path "$SOURCE_ROOT/.git"
 require_path "$SERVICE_SOURCE"
+npm ci --prefix "$SOURCE_ROOT/apps/sandbox-policy" >/dev/null || die source_policy_dependencies_failed
+npm --prefix "$SOURCE_ROOT/apps/sandbox-policy" run build >/dev/null || die source_policy_build_failed
+npm ci --prefix "$SOURCE_ROOT/apps/sandbox-broker" >/dev/null || die source_broker_dependencies_failed
 npm --prefix "$SOURCE_ROOT/apps/sandbox-broker" run build >/dev/null || die source_build_failed
 require_path "$SOCKET_SOURCE"
 require_path "$PROBE_SOURCE"
@@ -186,26 +232,10 @@ require_path "$POLICY_PREFLIGHT_SOURCE"
 require_path "$SERVICE_STABILITY_SOURCE"
 require_path "$BOUNDED_OUTPUT_SOURCE"
 require_path "$CRYPTO_TYPES_SOURCE"
-require_path "$PRODUCTION_ROOT/.git"
-require_path "$FROZEN_ROOT/.git"
-require_path "$PRODUCTION_ROOT/0"
-require_path "$PRODUCTION_ROOT/query.js"
-require_equal source_head "$(git -C "$SOURCE_ROOT" rev-parse HEAD)" "$EXPECTED_SOURCE_COMMIT"
-require_equal production_head "$(git -C "$PRODUCTION_ROOT" rev-parse HEAD)" "$EXPECTED_PRODUCTION_HEAD"
-require_equal frozen_head "$(git -C "$FROZEN_ROOT" rev-parse HEAD)" "$EXPECTED_FROZEN_HEAD"
-require_equal production_status "$(git -C "$PRODUCTION_ROOT" status --short --untracked-files=all)" "$EXPECTED_PRODUCTION_STATUS"
-[[ -z "$(git -C "$FROZEN_ROOT" status --porcelain --untracked-files=all)" ]] || die frozen_worktree_dirty
-PRODUCTION_ZERO_DIGEST="$(sha256sum "$PRODUCTION_ROOT/0" | awk '{print $1}')"
-PRODUCTION_QUERY_DIGEST="$(sha256sum "$PRODUCTION_ROOT/query.js" | awk '{print $1}')"
-if ! sudo -n true >/dev/null 2>&1; then
-  printf 'BLOCKED sudo_noninteractive_unavailable\n' >&2
-  exit 77
+if ! SOURCE_STATUS="$(git -C "$SOURCE_ROOT" status --porcelain --untracked-files=all)"; then
+  die source_checkout_status_unreadable
 fi
-if ! sudo -n -u ashley-sandbox id >/dev/null 2>&1; then
-  printf 'BLOCKED sudo_service_user_unavailable\n' >&2
-  exit 77
-fi
-[[ -z "$(git -C "$SOURCE_ROOT" status --porcelain)" ]] || die source_worktree_dirty
+[[ -z "$SOURCE_STATUS" ]] || die source_checkout_dirty_after_build
 [[ -x "$PROBE_SOURCE" ]] || die probe_not_executable
 require_equal bwrap_path "$(command -v bwrap)" /usr/bin/bwrap
 require_equal bwrap_version "$(/usr/bin/bwrap --version | awk 'NR == 1 { print $1 "/" $2 }')" bubblewrap/0.9.0
@@ -393,7 +423,6 @@ AGENT_UID="$(broker_env_value ASHLEY_SANDBOX_AGENT_UID)"
 AGENT_USER="$(getent passwd "$AGENT_UID" | awk -F: 'NR == 1 { print $1 }')"
 [[ -n "$AGENT_USER" ]] || die broker_agent_user_unavailable
 RENDERED_SERVICE="$(mktemp)"
-trap 'rm -f "$RENDERED_SERVICE"' EXIT
 sed -e 's|@NODE@|/opt/ashley-sandbox/bin/node|g' "$SERVICE_SOURCE" >"$RENDERED_SERVICE"
 sudo -n install -o root -g root -m 0644 "$RENDERED_SERVICE" "/etc/systemd/system/$SERVICE"
 sudo -n install -o root -g root -m 0644 "$SOCKET_SOURCE" "/etc/systemd/system/$SOCKET"
@@ -481,7 +510,6 @@ else
   [[ "$gate_status" -eq 1 ]] || die service_gate_unverifiable
 fi
 prepare_transient_unit
-sudo -n rm -rf -- "$QUALIFICATION_ROOT" "$FIXTURE_ROOT" "$WORKSPACE_ROOT" "$EVIDENCE_PATH" "$FIXTURE_MANIFEST_PATH" "$INVENTORY_PATH" "$CANARY_RECEIPT_PATH"
 sudo -n install -d -o ashley-sandbox -g ashley-sandbox -m 0750 \
   "$QUALIFICATION_ROOT" "$RUNTIME_ROOT" "$RUNTIME_ROOT/execution" \
   "$RUNTIME_ROOT/process" "$RUNTIME_ROOT/crypto" "$EVIDENCE_DIR" "$FIXTURE_ROOT" "$WORKSPACE_ROOT"
@@ -567,9 +595,9 @@ INVENTORY_JSON="$(
     "/run/ashley" \
     "/run/ashley/broker.sock" \
     "/home/xarvak" \
-    "/home/xarvak/project-ashley" \
-    "/home/xarvak/project-ashley-isolation-dev" \
-    "/home/xarvak/project-ashley-isolation-qual" \
+    "$PRODUCTION_ROOT" \
+    "$SOURCE_ROOT" \
+    "$RUN_ROOT" \
     "/opt/other-runtime"
   do
     if sudo -n test -e "$inventory_path" || sudo -n test -L "$inventory_path"; then
@@ -812,14 +840,16 @@ sudo -n chown root:ashley-sandbox "$CANARY_RECEIPT_PATH"
 sudo -n chmod 0440 "$CANARY_RECEIPT_PATH"
 sudo -n rm -f -- "$TRANSIENT_LOG"
 sudo -n rm -rf -- "$WORKSPACE_ROOT"
-require_equal production_head_post "$(git -C "$PRODUCTION_ROOT" rev-parse HEAD)" "$EXPECTED_PRODUCTION_HEAD"
-require_equal frozen_head_post "$(git -C "$FROZEN_ROOT" rev-parse HEAD)" "$EXPECTED_FROZEN_HEAD"
-require_equal production_status_post "$(git -C "$PRODUCTION_ROOT" status --short --untracked-files=all)" "$EXPECTED_PRODUCTION_STATUS"
-[[ -z "$(git -C "$FROZEN_ROOT" status --porcelain --untracked-files=all)" ]] || die frozen_worktree_dirty_post
-require_equal production_zero_digest_post "$(sha256sum "$PRODUCTION_ROOT/0" | awk '{print $1}')" "$PRODUCTION_ZERO_DIGEST"
-require_equal production_query_digest_post "$(sha256sum "$PRODUCTION_ROOT/query.js" | awk '{print $1}')" "$PRODUCTION_QUERY_DIGEST"
-require_equal source_head_post "$(git -C "$SOURCE_ROOT" rev-parse HEAD)" "$EXPECTED_SOURCE_COMMIT"
-[[ -z "$(git -C "$SOURCE_ROOT" status --porcelain --untracked-files=all)" ]] || die source_worktree_dirty_post
+require_equal production_head_post "$(git -C "$PRODUCTION_ROOT" rev-parse HEAD)" "$EXPECTED_SOURCE_COMMIT"
+if ! PRODUCTION_STATUS_POST="$(git -C "$PRODUCTION_ROOT" status --porcelain --untracked-files=all)"; then
+  die protected_source_status_unreadable_post
+fi
+require_equal protected_source_worktree_clean_post "$PRODUCTION_STATUS_POST" ""
+require_equal source_checkout_head_post "$(git -C "$SOURCE_ROOT" rev-parse HEAD)" "$EXPECTED_SOURCE_COMMIT"
+if ! SOURCE_STATUS_POST="$(git -C "$SOURCE_ROOT" status --porcelain --untracked-files=all)"; then
+  die source_checkout_status_unreadable_post
+fi
+require_equal source_checkout_worktree_clean_post "$SOURCE_STATUS_POST" ""
 printf 'source_commit=%s\n' "$EXPECTED_SOURCE_COMMIT"
 printf 'provider_path=/usr/bin/bwrap\n'
 printf 'provider_version=bubblewrap/0.9.0\n'
@@ -828,4 +858,5 @@ printf 'boundary_fingerprint=%s\n' "$BROKER_BOUNDARY"
 printf 'pids_max=%s\n' "$EXPECTED_PIDS_MAX"
 printf 'pids_current=%s\n' "$PIDS_CURRENT"
 printf 'evidence_path=%s\n' "$EVIDENCE_PATH"
+printf 'canary_receipt_path=%s\n' "$CANARY_RECEIPT_PATH"
 printf 'qualification=PASS\n'

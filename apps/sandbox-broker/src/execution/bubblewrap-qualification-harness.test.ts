@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { BUBBLEWRAP_QUALIFICATION_TOOL_CONTRACT } from "./qualification-toolchain.js";
 import { createDefaultQualificationManifest } from "./bubblewrap-qualification-runner.js";
+const BASH = process.platform === "win32" ? "C:\\Program Files\\Git\\bin\\bash.exe" : "/usr/bin/bash";
 const qualificationHelper = readFileSync(
   new URL(
     "../../../../deploy/linux-mint/sandbox/qualification/run-02c.sh",
@@ -60,6 +61,14 @@ function hasOnlyReviewedChildExecutables(references: ReadonlySet<string>): boole
   const reviewed = new Set(BUBBLEWRAP_QUALIFICATION_TOOL_CONTRACT.map((tool) => tool.path));
   return [...references].every((reference) => reviewed.has(reference));
 }
+
+function shellPath(value: string): string {
+  if (process.platform !== "win32") return value;
+  return value
+    .replace(/^([A-Za-z]):/, (_match, drive: string) => `/${drive.toLowerCase()}`)
+    .replaceAll("\\", "/");
+}
+
 describe("02C qualification helper source contract", () => {
   it("validates an EnvironmentFile-backed gate without printing environment contents", () => {
     expect(qualificationHelper).toContain(
@@ -126,9 +135,40 @@ describe("02C qualification helper source contract", () => {
       '.fixtureProbeManifestDigest == $manifest',
     );
   });
-  it("binds qualification to transferable broker hardening, not a transient unit path", () => {
-    expect(qualificationHelper).toContain('EXPECTED_PRODUCTION_HEAD="873ab34b48859d459f4394d990bcd48f502455c3"');
-    expect(qualificationHelper).toContain('EXPECTED_FROZEN_HEAD="565bf6e113366ebf093b77f56a9ba45d69ba7d80"');
+  it("binds qualification to an explicit current source checkout and a fresh source-versioned run", () => {
+    expect(qualificationHelper).toContain(
+      'EXPECTED_SOURCE_COMMIT="${1:?expected source commit}"',
+    );
+    expect(qualificationHelper).toContain(
+      'PRODUCTION_ROOT="${2:?protected production checkout}"',
+    );
+    expect(qualificationHelper).toContain("validate_protected_source()");
+    expect(qualificationHelper).toContain(
+      'git clone --local --no-hardlinks --no-checkout "$PRODUCTION_ROOT" "$SOURCE_ROOT"',
+    );
+    expect(qualificationHelper).toContain(
+      'git -C "$SOURCE_ROOT" checkout --detach --quiet "$EXPECTED_SOURCE_COMMIT"',
+    );
+    expect(qualificationHelper).toContain(
+      'require_equal source_checkout_head "$(git -C "$SOURCE_ROOT" rev-parse HEAD)" "$EXPECTED_SOURCE_COMMIT"',
+    );
+    expect(qualificationHelper).toContain(
+      'QUALIFICATION_BASE="/var/lib/ashley-sandbox/qualification/sandbox-isolation-02c/runs"',
+    );
+    expect(qualificationHelper).toContain(
+      'RUN_ROOT="$QUALIFICATION_BASE/$EXPECTED_SOURCE_COMMIT"',
+    );
+    expect(qualificationHelper).toContain(
+      'qualification_run_already_exists',
+    );
+    expect(qualificationHelper).not.toContain("project-ashley-isolation-dev");
+    expect(qualificationHelper).not.toContain("project-ashley-isolation-qual");
+    expect(qualificationHelper).not.toContain("EXPECTED_PRODUCTION_HEAD");
+    expect(qualificationHelper).not.toContain("EXPECTED_FROZEN_HEAD");
+    expect(qualificationHelper).not.toContain("EXPECTED_PRODUCTION_STATUS");
+    expect(qualificationHelper).not.toContain(
+      'sudo -n rm -rf -- "$QUALIFICATION_ROOT"',
+    );
     expect(qualificationHelper).toContain('npm --prefix "$SOURCE_ROOT/apps/sandbox-broker" run build');
     for (const property of [
       "ProtectKernelTunables",
@@ -180,7 +220,77 @@ describe("02C qualification helper source contract", () => {
     expect(qualificationHelper).not.toContain('sudo -n chmod 0750 /run/ashley');
     expect(qualificationHelper).toContain('BLOCKED sudo_noninteractive_unavailable');
     expect(qualificationHelper).toContain('die transient_descendant_remains');
-    expect(qualificationHelper).toContain('production_zero_digest_post');
+    expect(qualificationHelper).toContain('production_head_post');
+    expect(qualificationHelper).toContain('source_checkout_head_post');
+    expect(qualificationHelper).toContain('protected_source_worktree_clean_post');
+  });
+
+  it("accepts the current source SHA and rejects a mismatched SHA before qualification", () => {
+    const bindingStart = qualificationHelper.indexOf(
+      "validate_protected_source() {",
+    );
+    const bindingEnd = qualificationHelper.indexOf("\n}", bindingStart);
+    expect(bindingStart).toBeGreaterThanOrEqual(0);
+    expect(bindingEnd).toBeGreaterThan(bindingStart);
+
+    const fixtureRoot = mkdtempSync(join(tmpdir(), "ashley-02c-source-binding-"));
+    const fixtureRepo = fixtureRoot;
+    const fixturePath = shellPath(fixtureRepo);
+    try {
+      writeFileSync(join(fixtureRepo, "README.md"), "fixture\n", "utf8");
+      for (const args of [
+        ["init", "--quiet"],
+        ["config", "user.email", "fixture@example.invalid"],
+        ["config", "user.name", "Fixture"],
+        ["add", "README.md"],
+        ["commit", "--quiet", "-m", "fixture"],
+      ]) {
+        const result = spawnSync("git", args, {
+          cwd: fixtureRepo,
+          encoding: "utf8",
+        });
+        expect(result.status, result.stderr).toBe(0);
+      }
+      const sourceCommit = spawnSync(
+        "git",
+        ["-C", fixtureRepo, "rev-parse", "HEAD"],
+        { encoding: "utf8" },
+      ).stdout.trim();
+      const bindingSource = qualificationHelper.slice(
+        bindingStart,
+        bindingEnd + 2,
+      );
+      const run = (expected: string) =>
+        spawnSync(
+          BASH,
+          [
+            "-c",
+            [
+              "set -Eeuo pipefail",
+              'die() { printf \'BLOCKED %s\\n\' "$1" >&2; exit 1; }',
+              'require_path() { [[ -e "$1" ]] || die "missing_path:$1"; }',
+              'require_equal() { [[ "$2" == "$3" ]] || die "${1}_mismatch"; }',
+              bindingSource,
+              'validate_protected_source "$1" "$2"',
+            ].join("\n"),
+            "source-binding",
+            fixturePath,
+            expected,
+          ],
+          { encoding: "utf8" },
+        );
+
+      const current = run(sourceCommit);
+      expect(current.status, `${current.stdout}\n${current.stderr}`).toBe(0);
+
+      const mismatched = run("0".repeat(40));
+      expect(mismatched.status).not.toBe(0);
+      expect(`${mismatched.stdout}\n${mismatched.stderr}`).toContain(
+        "protected_source_head_mismatch",
+      );
+    } finally {
+      rmSync(fixtureRoot, { force: true, recursive: true });
+    }
   });
   it("pins the corrected systemd namespace and memory contract", () => {
     expect(serviceUnit).toContain(
@@ -578,7 +688,9 @@ describe("02C qualification helper source contract", () => {
     expect(cleanup).not.toContain("systemctl kill");
     expect(cleanup).not.toContain("pkill");
     expect(
-      qualificationHelper.indexOf("prepare_transient_unit\nsudo -n rm -rf"),
+      qualificationHelper.indexOf(
+        "prepare_transient_unit\nsudo -n install -d -o ashley-sandbox",
+      ),
     ).toBeGreaterThanOrEqual(0);
     expect(
       qualificationHelper.lastIndexOf("\nprepare_transient_unit\n"),
@@ -1022,7 +1134,7 @@ describe("02K complete qualification runtime import closure", () => {
       );
       expect(qualificationHelper.indexOf(sourceCheck)).toBeLessThan(
         qualificationHelper.indexOf(
-          'sudo -n rm -rf -- "$QUALIFICATION_ROOT"',
+          'sudo -n install -d -o ashley-sandbox -g ashley-sandbox -m 0750',
         ),
       );
     }
