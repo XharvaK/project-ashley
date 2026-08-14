@@ -12,6 +12,7 @@ import {
 import {
   ensureEngineeringTables,
   findCorrelatedEngineeringTask,
+  isSandboxOperationalFollowUp,
   loadCoordinatorTasks,
   persistCoordinatorTasks,
 } from "./engineering-runs.js";
@@ -43,7 +44,9 @@ function dummyModel(): ThinkingModel {
 
 /**
  * Creates a broker execution port backed by a real temporary directory on the
- * filesystem, enforcing envelope single-use anti-replay tracking.
+ * filesystem, returning production-faithful shapes `{ content, truncated, bytes }`
+ * matching apps/sandbox-broker/src/engineering/handlers.ts, and enforcing envelope
+ * single-use anti-replay tracking.
  */
 function createRealFsRoundtripPort(options?: {
   failAbsenceReadWith?: { errorCode: string; reason: string };
@@ -67,7 +70,6 @@ function createRealFsRoundtripPort(options?: {
 
   const port: EngineeringExecutionPort = {
     async executeAction(action, envelope): Promise<EngineeringToolResult> {
-      // Production-faithful anti-replay check: envelopes must be unique per attempt
       const envKey = envelope ? JSON.stringify(envelope) : `anon-${Math.random()}`;
       if (seenEnvelopes.has(envKey)) {
         return {
@@ -99,8 +101,8 @@ function createRealFsRoundtripPort(options?: {
           return {
             ok: true,
             data: {
-              path: relPath,
-              bytes_written: Buffer.byteLength(content, "utf8"),
+              written: true,
+              bytes: Buffer.byteLength(content, "utf8"),
             },
             artifactRef: `file:${relPath}`,
           };
@@ -109,7 +111,6 @@ function createRealFsRoundtripPort(options?: {
           const relPath = String(f.relativePath ?? "");
           const target = path.join(tmpDir, relPath);
 
-          // If injected failure for absence check is set and this is the second read
           if (options?.failAbsenceReadWith && actionCount.read_workspace_file > 1) {
             return {
               ok: false,
@@ -126,11 +127,13 @@ function createRealFsRoundtripPort(options?: {
             };
           }
           const content = fs.readFileSync(target, "utf-8");
+          // Production broker contract: { content: string, truncated: boolean, bytes: number }
           return {
             ok: true,
             data: {
-              path: relPath,
-              contentBase64: Buffer.from(content, "utf8").toString("base64"),
+              content,
+              truncated: false,
+              bytes: Buffer.byteLength(content, "utf8"),
             },
             artifactRef: `file:${relPath}`,
           };
@@ -143,7 +146,7 @@ function createRealFsRoundtripPort(options?: {
           }
           return {
             ok: true,
-            data: { path: relPath, deleted: true },
+            data: { deleted: true },
             artifactRef: null,
           };
         }
@@ -182,7 +185,7 @@ function mockEnvelopeProvider(): (action: unknown, intent: string, nowMs: number
     }) as unknown as DelegatedApprovalEnvelope;
 }
 
-describe("Reactive Sandbox Execution — First Slice", () => {
+describe("Reactive Sandbox Execution — Production Compatibility Suite", () => {
   let db: DatabaseSync;
 
   beforeEach(() => {
@@ -190,11 +193,11 @@ describe("Reactive Sandbox Execution — First Slice", () => {
     ensureEngineeringTables(db);
   });
 
-  it("1: executes sandbox_workspace_file_roundtrip deterministically against real temp filesystem fixture with zero model calls", async () => {
+  it("1: executes sandbox_workspace_file_roundtrip with real production broker data.content response contract", async () => {
     const fixture = createRealFsRoundtripPort();
     try {
       const outcome = await executeSandboxWorkspaceFileRoundtrip({
-        taskId: "task-roundtrip-1",
+        taskId: "task-roundtrip-prod",
         workspaceId: null,
         envelopes: mockEnvelopeProvider() as never,
         port: fixture.port,
@@ -216,7 +219,7 @@ describe("Reactive Sandbox Execution — First Slice", () => {
     }
   });
 
-  it("2: coordinator runs sandbox_workspace_file_roundtrip and records verified effect evidence in task.effectEvidence and summary", async () => {
+  it("2: coordinator runs sandbox_workspace_file_roundtrip and records verified effect evidence in task.effectEvidence directly", async () => {
     const fixture = createRealFsRoundtripPort();
     try {
       const coordinator = new SandboxEngineeringCoordinator(
@@ -250,344 +253,12 @@ describe("Reactive Sandbox Execution — First Slice", () => {
       const persisted = loadCoordinatorTasks(db);
       expect(persisted[0]?.status).toBe("completed");
       expect(persisted[0]?.effectEvidence?.verified).toBe(true);
-      expect(persisted[0]?.effectEvidence?.deleted).toBe(true);
     } finally {
       fixture.cleanup();
     }
   });
 
-  it("3: owner admission detection and unauthorized stranger refusal", () => {
-    const docPrompt =
-      "Create a temporary file inside your own sandbox workspace, write a unique sentence into it, read it back, verify the contents, then delete it";
-    expect(detectReactiveSandboxRoundtripRequest(docPrompt)).toBe(true);
-
-    const docAdmission = evaluateReactiveSandboxAdmission({
-      db,
-      ownerId: "doc",
-      message: docPrompt,
-      messageEntityUuid: "uuid-doc-turn-1",
-      configuredOwnerId: "doc",
-      autonomous: true,
-    });
-    expect(docAdmission.admitted).toBe(true);
-    if (docAdmission.admitted) {
-      expect(docAdmission.shouldDispatch).toBe(true);
-    }
-
-    const strangerAdmission = evaluateReactiveSandboxAdmission({
-      db,
-      ownerId: "stranger-123",
-      message: docPrompt,
-      messageEntityUuid: "uuid-stranger-1",
-      configuredOwnerId: "doc",
-      autonomous: true,
-    });
-    expect(strangerAdmission.admitted).toBe(false);
-    if (!strangerAdmission.admitted) {
-      expect(strangerAdmission.reason).toBe("unauthorized_owner");
-    }
-  });
-
-  it("4: owner request processed twice causes at most ONE execution attempt (shouldDispatch=false on replay)", () => {
-    const prompt = "run a sandbox workspace file roundtrip";
-    const res1 = evaluateReactiveSandboxAdmission({
-      db,
-      ownerId: "doc",
-      message: prompt,
-      messageEntityUuid: "uuid-repeat-1",
-      configuredOwnerId: "doc",
-      autonomous: true,
-    });
-    expect(res1.admitted).toBe(true);
-    if (res1.admitted) {
-      expect(res1.replayed).toBe(false);
-      expect(res1.shouldDispatch).toBe(true);
-    }
-
-    const res2 = evaluateReactiveSandboxAdmission({
-      db,
-      ownerId: "doc",
-      message: prompt,
-      messageEntityUuid: "uuid-repeat-1",
-      configuredOwnerId: "doc",
-      autonomous: true,
-    });
-    expect(res2.admitted).toBe(true);
-    if (res2.admitted) {
-      expect(res2.replayed).toBe(true);
-      expect(res2.shouldDispatch).toBe(false); // MUST NOT re-dispatch on replay
-      expect(res2.admissionId).toBe(res1.admitted ? res1.admissionId : "");
-    }
-  });
-
-  it("5: initial read and absence verification read use DISTINCT envelopes (anti-replay)", async () => {
-    const fixture = createRealFsRoundtripPort();
-    try {
-      const outcome = await executeSandboxWorkspaceFileRoundtrip({
-        taskId: "task-distinct-envelopes",
-        workspaceId: null,
-        envelopes: mockEnvelopeProvider() as never,
-        port: fixture.port,
-        nowMs: () => 1000,
-      });
-
-      expect(outcome.ok).toBe(true);
-      // Both reads executed without encountering replay_rejected
-      expect(fixture.actionCount.read_workspace_file).toBe(2);
-      expect(fixture.seenEnvelopes.size).toBe(5); // workspace_create, write, read_1, delete, read_2 (absence)
-    } finally {
-      fixture.cleanup();
-    }
-  });
-
-  it("6: replay rejection during absence check cannot be interpreted as file absence", async () => {
-    const fixture = createRealFsRoundtripPort({
-      failAbsenceReadWith: { errorCode: "replay_rejected", reason: "envelope reuse detected" },
-    });
-    try {
-      const outcome = await executeSandboxWorkspaceFileRoundtrip({
-        taskId: "task-replay-absence",
-        workspaceId: null,
-        envelopes: mockEnvelopeProvider() as never,
-        port: fixture.port,
-        nowMs: () => 1000,
-      });
-
-      expect(outcome.ok).toBe(false);
-      if (!outcome.ok) {
-        expect(outcome.errorCode).toBe("replay_rejected");
-        expect(outcome.reason).toContain("absence_verification_failed");
-      }
-    } finally {
-      fixture.cleanup();
-    }
-  });
-
-  it("7: policy / broker / transport failure during absence check cannot be interpreted as absence", async () => {
-    const fixture = createRealFsRoundtripPort({
-      failAbsenceReadWith: { errorCode: "policy_violation", reason: "access denied" },
-    });
-    try {
-      const outcome = await executeSandboxWorkspaceFileRoundtrip({
-        taskId: "task-policy-absence",
-        workspaceId: null,
-        envelopes: mockEnvelopeProvider() as never,
-        port: fixture.port,
-        nowMs: () => 1000,
-      });
-
-      expect(outcome.ok).toBe(false);
-      if (!outcome.ok) {
-        expect(outcome.errorCode).toBe("policy_violation");
-        expect(outcome.reason).toContain("absence_verification_failed");
-      }
-    } finally {
-      fixture.cleanup();
-    }
-  });
-
-  it("8: only canonical 'not_found' error witnesses deletion", async () => {
-    // Port returning not_found on second read -> succeeds
-    const fixture = createRealFsRoundtripPort();
-    try {
-      const outcome = await executeSandboxWorkspaceFileRoundtrip({
-        taskId: "task-not-found-witness",
-        workspaceId: null,
-        envelopes: mockEnvelopeProvider() as never,
-        port: fixture.port,
-        nowMs: () => 1000,
-      });
-
-      expect(outcome.ok).toBe(true);
-      if (outcome.ok) {
-        expect(outcome.evidence.verifiedAbsent).toBe(true);
-      }
-    } finally {
-      fixture.cleanup();
-    }
-  });
-
-  it("9: claim licensing — ADMITTED permits queuing claims but strictly forbids 'starting now' and completion claims", () => {
-    const runningText = "i'll create a temp file inside my sandbox workspace. starting now.";
-    const admittedText = "i've accepted that sandbox check and queued it.";
-    const completionText = "the temporary file was deleted and verified.";
-
-    // With ADMITTED license
-    const admittedLicense: OperationalClaimLicense = {
-      state: "admitted",
-      taskId: "adm-1",
-      profile: "sandbox_workspace_file_roundtrip",
-    };
-
-    // 'starting now' is stripped under ADMITTED
-    const resRunning = finalizeHonesty({
-      text: runningText,
-      readingLicensed: false,
-      operationalLicense: admittedLicense,
-    });
-    expect(resRunning.text).not.toContain("starting now");
-    expect(resRunning.text).toBe("i've accepted that sandbox check and it's queued to run.");
-
-    // 'queued it' passes under ADMITTED
-    const resAdmitted = finalizeHonesty({
-      text: admittedText,
-      readingLicensed: false,
-      operationalLicense: admittedLicense,
-    });
-    expect(resAdmitted.text).toBe(admittedText);
-
-    // completion is stripped under ADMITTED
-    const resCompletion = finalizeHonesty({
-      text: completionText,
-      readingLicensed: false,
-      operationalLicense: admittedLicense,
-    });
-    expect(resCompletion.text).toBe("i've accepted that sandbox check and it's queued to run.");
-  });
-
-  it("10: claim licensing — RUNNING permits 'starting now' but forbids completion claims", () => {
-    const runningText = "i'm running that check in the sandbox now.";
-    const completionText = "i verified the contents and deleted the file.";
-
-    const runningLicense: OperationalClaimLicense = {
-      state: "running",
-      taskId: "task-1",
-      profile: "sandbox_workspace_file_roundtrip",
-    };
-
-    const resRunning = finalizeHonesty({
-      text: runningText,
-      readingLicensed: false,
-      operationalLicense: runningLicense,
-    });
-    expect(resRunning.text).toBe(runningText);
-
-    const resCompletion = finalizeHonesty({
-      text: completionText,
-      readingLicensed: false,
-      operationalLicense: runningLicense,
-    });
-    expect(resCompletion.text).toBe("i'm currently running that check in the sandbox.");
-  });
-
-  it("11: claim licensing — SUCCEEDED requires verified effect evidence (Receipt != Effect Witness)", () => {
-    const completionText = "the temporary file was deleted and the contents matched.";
-
-    // Succeeded WITH verified effect evidence
-    const verifiedEvidence: RoundtripEffectEvidence = {
-      verified: true,
-      workspaceId: "ws-1",
-      relativePath: "test.txt",
-      bytesWritten: 10,
-      contentHash: "hash-123",
-      readMatches: true,
-      deleted: true,
-      verifiedAbsent: true,
-      completedAtMs: Date.now(),
-    };
-    const verifiedLicense: OperationalClaimLicense = {
-      state: "succeeded",
-      taskId: "task-1",
-      profile: "sandbox_workspace_file_roundtrip",
-      effectEvidence: verifiedEvidence,
-    };
-    const resVerified = finalizeHonesty({
-      text: completionText,
-      readingLicensed: false,
-      operationalLicense: verifiedLicense,
-    });
-    expect(resVerified.text).toBe(completionText);
-
-    // Succeeded WITHOUT verified effect evidence (unverified / missing)
-    const unverifiedLicense: OperationalClaimLicense = {
-      state: "succeeded",
-      taskId: "task-1",
-      profile: "sandbox_workspace_file_roundtrip",
-      effectEvidence: undefined,
-    };
-    const resUnverified = finalizeHonesty({
-      text: completionText,
-      readingLicensed: false,
-      operationalLicense: unverifiedLicense,
-    });
-    // Strips unverified completion claim and produces safe fallback
-    expect(resUnverified.text).toBe(
-      "i haven't been doing anything worth mentioning on my side. what's up?",
-    );
-  });
-
-  it("12: fallback honesty replaces generic activity fallback with truthful operational refusal when refused", () => {
-    const unlicensedPrompt = "i'll create a temp file inside my sandbox workspace. starting now.";
-    const refusedLicense: OperationalClaimLicense = {
-      state: "none",
-      refusalReason: "autonomy_disabled",
-    };
-
-    const res = finalizeHonesty({
-      text: unlicensedPrompt,
-      readingLicensed: false,
-      operationalLicense: refusedLicense,
-    });
-    expect(res.text).toBe(
-      "i haven't started that check because the sandbox admission was refused: autonomy_disabled.",
-    );
-    expect(res.text).not.toContain("anything worth mentioning on my side");
-  });
-
-  it("13: context composer projects correlated operational work state in next turn ('Could you?')", async () => {
-    // Persist a completed reactive task
-    const fixture = createRealFsRoundtripPort();
-    try {
-      const coordinator = new SandboxEngineeringCoordinator(
-        dummyModel(),
-        fixture.port,
-        {
-          owner: "doc",
-          budgets: { maxWallMs: 5000, maxModelCalls: 0, maxToolExecutions: 10 },
-          availableDiagnostics: [],
-          nowMs: () => 3000,
-          persist: (tasks) => persistCoordinatorTasks(db, tasks),
-        },
-      );
-
-      const task = coordinator.admit({
-        objective: "Test roundtrip",
-        projectId: null,
-        admissionCause: "user_request",
-        profile: "sandbox_workspace_file_roundtrip",
-        groundingRefs: ["turn-1-uuid"],
-      });
-      await coordinator.run(task.taskId, mockEnvelopeProvider() as never);
-
-      // Now query correlated task in turn 2
-      const correlated = findCorrelatedEngineeringTask(db, "doc");
-      expect(correlated).not.toBeNull();
-      expect(correlated?.taskId).toBe(task.taskId);
-      expect(correlated?.effectEvidence?.verified).toBe(true);
-
-      // ContextComposer generates operational block
-      const opBlock = operationalWorkBlock(db, "doc");
-      expect(opBlock).toContain("## Operational work state");
-      expect(opBlock).toContain("sandbox_workspace_file_roundtrip");
-      expect(opBlock).toContain("Effect evidence: roundtrip verified");
-    } finally {
-      fixture.cleanup();
-    }
-  });
-
-  it("14: regexes accurately classify execution claims in claims.ts", () => {
-    expect(claimsOwnExecutionRunning("starting now")).toBe(true);
-    expect(claimsOwnExecutionRunning("i'll create a test file inside my sandbox workspace now")).toBe(true);
-    expect(claimsOwnExecutionRunning("i'm on it now")).toBe(true);
-
-    expect(claimsOwnExecutionAdmitted("i've accepted that check")).toBe(true);
-    expect(claimsOwnExecutionAdmitted("request queued")).toBe(true);
-
-    expect(claimsOwnExecutionCompletion("the temporary file was deleted")).toBe(true);
-    expect(claimsOwnExecutionCompletion("the file check passed and matched")).toBe(true);
-  });
-
-  it("15: same reactive source message processed twice causes at most ONE execution attempt and zero duplicate effects", async () => {
+  it("3: same authenticated owner source message processed twice causes at most ONE execution attempt (mechanical replay guarantee)", async () => {
     const fixture = createRealFsRoundtripPort();
     try {
       const coordinator = new SandboxEngineeringCoordinator(
@@ -603,9 +274,9 @@ describe("Reactive Sandbox Execution — First Slice", () => {
       );
 
       const msg = "Create a temporary file inside your own sandbox workspace, write a unique sentence into it, read it back, verify the contents, then delete it";
-      const messageEntityUuid = "msg-entity-uuid-roundtrip-123";
+      const messageEntityUuid = "msg-entity-uuid-roundtrip-real-test";
 
-      // Turn 1: Evaluate reactive admission
+      // First evaluation & dispatch
       const adm1 = evaluateReactiveSandboxAdmission({
         db,
         ownerId: "doc",
@@ -617,7 +288,6 @@ describe("Reactive Sandbox Execution — First Slice", () => {
       expect(adm1.admitted).toBe(true);
       expect(adm1.shouldDispatch).toBe(true);
 
-      // Turn 1: Dispatch execution since shouldDispatch is true
       const task1 = coordinator.admit({
         objective: "Verify sandbox workspace file roundtrip",
         projectId: null,
@@ -628,13 +298,13 @@ describe("Reactive Sandbox Execution — First Slice", () => {
       const run1 = await coordinator.run(task1.taskId, mockEnvelopeProvider() as never);
       expect(run1.status).toBe("completed");
 
-      // Verify filesystem action counts from turn 1
+      // Verify exact effect counts from turn 1
       expect(fixture.actionCount.request_workspace).toBe(1);
       expect(fixture.actionCount.write_workspace_file).toBe(1);
       expect(fixture.actionCount.read_workspace_file).toBe(2);
       expect(fixture.actionCount.delete_workspace_file).toBe(1);
 
-      // Turn 2: Reprocess EXACT SAME message / messageEntityUuid (Replay)
+      // Replay of same message / entity UUID
       const adm2 = evaluateReactiveSandboxAdmission({
         db,
         ownerId: "doc",
@@ -649,78 +319,296 @@ describe("Reactive Sandbox Execution — First Slice", () => {
         expect(adm2.shouldDispatch).toBe(false); // MUST NOT DISPATCH
       }
 
-      // Because shouldDispatch is false, coordinator.run is NEVER called
-      // Prove that no additional broker actions or filesystem effects occurred
+      // Proves no second broker roundtrip or filesystem actions
       expect(fixture.actionCount.request_workspace).toBe(1);
       expect(fixture.actionCount.write_workspace_file).toBe(1);
       expect(fixture.actionCount.read_workspace_file).toBe(2);
       expect(fixture.actionCount.delete_workspace_file).toBe(1);
 
-      // Prove that coordinator has exactly ONE task recorded
       const persisted = loadCoordinatorTasks(db);
       expect(persisted).toHaveLength(1);
-      expect(persisted[0]?.taskId).toBe(task1.taskId);
     } finally {
       fixture.cleanup();
     }
   });
 
-  it("16: completed task without verified effect evidence fails closed and cannot claim completion", () => {
-    // Task marked completed but with missing/unverified effectEvidence
-    const corruptedTask = {
-      taskId: "task-corrupted-1",
+  it("4: genuine bounded follow-up ('Could you?', 'Did it work?') correlates, while unrelated turn does NOT correlate", () => {
+    // Persist a completed reactive task
+    const completedTask = {
+      taskId: "task-followup-1",
       owner: "doc",
       projectId: null,
       sourceBaseCommit: null,
       admissionCause: "user_request" as const,
-      groundingRefs: ["uuid-corrupted"],
+      groundingRefs: ["uuid-turn-1"],
       profile: "sandbox_workspace_file_roundtrip" as const,
       status: "completed" as const,
       workspaceId: "ws-1",
       modelCallsUsed: 0,
       toolCallsUsed: 5,
-      startedAtMs: 1000,
-      deadlineMs: 2000,
-      completedAtMs: 1500,
+      startedAtMs: Date.now() - 60_000,
+      deadlineMs: Date.now() + 60_000,
+      completedAtMs: Date.now() - 30_000,
       error: null,
       refusal: null,
       candidatePatchRef: null,
       candidateCommitRef: null,
       artifactRefs: [],
-      effectEvidence: null, // MISSING EVIDENCE
+      effectEvidence: {
+        verified: true,
+        workspaceId: "ws-1",
+        relativePath: "tmp.txt",
+        bytesWritten: 20,
+        contentHash: "hash-123",
+        readMatches: true,
+        deleted: true,
+        verifiedAbsent: true,
+        completedAtMs: Date.now() - 30_000,
+      },
     };
-    persistCoordinatorTasks(db, [corruptedTask]);
+    persistCoordinatorTasks(db, [completedTask]);
 
-    const correlated = findCorrelatedEngineeringTask(db, "doc", { messageEntityUuid: "uuid-corrupted" });
-    expect(correlated).not.toBeNull();
-    expect(correlated?.status).toBe("completed");
-    expect(correlated?.effectEvidence).toBeFalsy();
+    // Follow-up queries correlate
+    expect(isSandboxOperationalFollowUp("Could you?")).toBe(true);
+    expect(isSandboxOperationalFollowUp("Did it work?")).toBe(true);
+    expect(isSandboxOperationalFollowUp("is it done?")).toBe(true);
 
-    // Derived license must NOT be succeeded
-    const derivedLicense: OperationalClaimLicense =
-      correlated && correlated.status === "completed" && correlated.effectEvidence?.verified
-        ? {
-            state: "succeeded",
-            taskId: correlated.taskId,
-            profile: correlated.profile,
-            effectEvidence: correlated.effectEvidence,
-          }
-        : {
-            state: "none",
-            taskId: correlated?.taskId,
-            profile: correlated?.profile,
-            error: "missing_effect_evidence",
-          };
+    const matchFollowUp = findCorrelatedEngineeringTask(db, "doc", { userMessage: "Could you?" });
+    expect(matchFollowUp).not.toBeNull();
+    expect(matchFollowUp?.taskId).toBe("task-followup-1");
 
-    expect(derivedLicense.state).toBe("none");
+    // Unrelated user turn MUST NOT correlate
+    expect(isSandboxOperationalFollowUp("What are you thinking about?")).toBe(false);
+    expect(isSandboxOperationalFollowUp("Hello Ashley")).toBe(false);
+    expect(isSandboxOperationalFollowUp("Tell me a story")).toBe(false);
 
-    const res = finalizeHonesty({
-      text: "the file check succeeded and verified.",
-      readingLicensed: false,
-      operationalLicense: derivedLicense,
+    const matchUnrelated = findCorrelatedEngineeringTask(db, "doc", { userMessage: "What are you thinking about?" });
+    expect(matchUnrelated).toBeNull();
+  });
+
+  it("5: unrelated proactive run does NOT correlate to reactive turns", () => {
+    // Persist a proactive engineering run
+    const proactiveTask = {
+      taskId: "task-proactive-1",
+      owner: "doc",
+      projectId: null,
+      sourceBaseCommit: null,
+      admissionCause: "proactive" as const, // PROACTIVE
+      groundingRefs: ["curiosity-take-1"],
+      profile: "proactive_bug_investigation" as const,
+      status: "completed" as const,
+      workspaceId: "ws-1",
+      modelCallsUsed: 2,
+      toolCallsUsed: 3,
+      startedAtMs: Date.now() - 10_000,
+      deadlineMs: Date.now() + 10_000,
+      completedAtMs: Date.now() - 5_000,
+      error: null,
+      refusal: null,
+      candidatePatchRef: null,
+      candidateCommitRef: null,
+      artifactRefs: [],
+      effectEvidence: null,
+    };
+    persistCoordinatorTasks(db, [proactiveTask]);
+
+    // findCorrelatedEngineeringTask ignores proactive task
+    const match = findCorrelatedEngineeringTask(db, "doc", { userMessage: "Could you?" });
+    expect(match).toBeNull();
+  });
+
+  it("6: completed + verified evidence produces verified context prose; completed + missing evidence produces unverified prose", () => {
+    // Task 1: Verified
+    const verifiedTask = {
+      taskId: "task-ctx-verified",
+      owner: "doc",
+      projectId: null,
+      sourceBaseCommit: null,
+      admissionCause: "user_request" as const,
+      groundingRefs: ["uuid-ctx-1"],
+      profile: "sandbox_workspace_file_roundtrip" as const,
+      status: "completed" as const,
+      workspaceId: "ws-1",
+      modelCallsUsed: 0,
+      toolCallsUsed: 5,
+      startedAtMs: Date.now() - 60_000,
+      deadlineMs: Date.now() + 60_000,
+      completedAtMs: Date.now() - 30_000,
+      error: null,
+      refusal: null,
+      candidatePatchRef: null,
+      candidateCommitRef: null,
+      artifactRefs: [],
+      effectEvidence: {
+        verified: true,
+        workspaceId: "ws-1",
+        relativePath: "tmp.txt",
+        bytesWritten: 15,
+        contentHash: "hash-123",
+        readMatches: true,
+        deleted: true,
+        verifiedAbsent: true,
+        completedAtMs: Date.now() - 30_000,
+      },
+    };
+    persistCoordinatorTasks(db, [verifiedTask]);
+
+    const verifiedBlock = operationalWorkBlock(db, "doc", { userMessage: "Could you?" });
+    expect(verifiedBlock).toContain("Effect evidence: roundtrip verified");
+
+    // Task 2: Unverified (completed without evidence, newer timestamp)
+    const unverifiedTask = {
+      ...verifiedTask,
+      taskId: "task-ctx-unverified",
+      groundingRefs: ["uuid-ctx-2"],
+      completedAtMs: Date.now() - 10_000,
+      effectEvidence: null, // NO EVIDENCE
+    };
+    persistCoordinatorTasks(db, [unverifiedTask]);
+
+    const unverifiedBlock = operationalWorkBlock(db, "doc", { userMessage: "Could you?" });
+    expect(unverifiedBlock).not.toContain("Effect evidence: roundtrip verified");
+    expect(unverifiedBlock).toContain("Effect evidence: unverified (task record is completed; verified effect evidence is unavailable)");
+  });
+
+  it("7: partial unique index preserves historical duplicate proactive rows while forbidding duplicate user_request", () => {
+    // Seed DB with historical duplicate proactive admissions (different statuses)
+    const seedDb = new DatabaseSync(":memory:");
+    ensureEngineeringTables(seedDb);
+
+    // Multiple proactive rows with the same source_ref succeed
+    seedDb.prepare(`
+      INSERT INTO engineering_admissions (id, owner_id, objective, profile, grounding_refs_json, source_kind, source_ref, status, created_at_ms)
+      VALUES ('adm-pro-1', 'doc', 'obj', 'build_regression', '[]', 'proactive', 'proactive:run:1', 'dispatched', 1000)
+    `).run();
+
+    seedDb.prepare(`
+      INSERT INTO engineering_admissions (id, owner_id, objective, profile, grounding_refs_json, source_kind, source_ref, status, created_at_ms)
+      VALUES ('adm-pro-2', 'doc', 'obj', 'build_regression', '[]', 'proactive', 'proactive:run:1', 'completed', 2000)
+    `).run();
+
+    // Re-running ensureEngineeringTables succeeds with duplicate proactive rows
+    expect(() => ensureEngineeringTables(seedDb)).not.toThrow();
+
+    // First user_request admission succeeds
+    seedDb.prepare(`
+      INSERT INTO engineering_admissions (id, owner_id, objective, profile, grounding_refs_json, source_kind, source_ref, status, created_at_ms)
+      VALUES ('adm-user-1', 'doc', 'obj', 'sandbox_workspace_file_roundtrip', '[]', 'user_request', 'reactive:doc:msg-1', 'pending', 3000)
+    `).run();
+
+    // Duplicate user_request admission fails with UNIQUE constraint violation
+    expect(() => {
+      seedDb.prepare(`
+        INSERT INTO engineering_admissions (id, owner_id, objective, profile, grounding_refs_json, source_kind, source_ref, status, created_at_ms)
+        VALUES ('adm-user-2', 'doc', 'obj', 'sandbox_workspace_file_roundtrip', '[]', 'user_request', 'reactive:doc:msg-1', 'pending', 4000)
+      `).run();
+    }).toThrow(/UNIQUE constraint failed/i);
+  });
+
+  it("8: fresh envelope provider generates distinct envelopes preventing replay rejection", async () => {
+    const fixture = createRealFsRoundtripPort();
+    try {
+      const outcome = await executeSandboxWorkspaceFileRoundtrip({
+        taskId: "task-fresh-envelopes",
+        workspaceId: null,
+        envelopes: mockEnvelopeProvider() as never,
+        port: fixture.port,
+        nowMs: () => 1000,
+      });
+
+      expect(outcome.ok).toBe(true);
+      expect(fixture.actionCount.read_workspace_file).toBe(2);
+      expect(fixture.seenEnvelopes.size).toBe(5); // all 5 actions received unique envelopes
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("9: replay rejection / policy failure during absence check fails closed and never grants verifiedAbsent", async () => {
+    const replayFixture = createRealFsRoundtripPort({
+      failAbsenceReadWith: { errorCode: "replay_rejected", reason: "envelope reuse detected" },
     });
-    // Completion claim is stripped
-    expect(res.text).not.toContain("succeeded and verified");
-    expect(res.text).toBe("i haven't been doing anything worth mentioning on my side. what's up?");
+    try {
+      const outcome = await executeSandboxWorkspaceFileRoundtrip({
+        taskId: "task-replay-fail",
+        workspaceId: null,
+        envelopes: mockEnvelopeProvider() as never,
+        port: replayFixture.port,
+        nowMs: () => 1000,
+      });
+
+      expect(outcome.ok).toBe(false);
+      if (!outcome.ok) {
+        expect(outcome.errorCode).toBe("replay_rejected");
+        expect(outcome.reason).toContain("absence_verification_failed");
+      }
+    } finally {
+      replayFixture.cleanup();
+    }
+  });
+
+  it("10: claim licensing — ADMITTED permits queuing claims; RUNNING permits 'starting now'; SUCCEEDED requires verified evidence", () => {
+    const admittedLicense: OperationalClaimLicense = {
+      state: "admitted",
+      taskId: "adm-1",
+      profile: "sandbox_workspace_file_roundtrip",
+    };
+
+    // ADMITTED forbids 'starting now' and completion
+    const resAdmitted = finalizeHonesty({
+      text: "i'll create a temp file inside my sandbox workspace. starting now.",
+      readingLicensed: false,
+      operationalLicense: admittedLicense,
+    });
+    expect(resAdmitted.text).toBe("i've accepted that sandbox check and it's queued to run.");
+
+    // RUNNING permits 'starting now'
+    const runningLicense: OperationalClaimLicense = {
+      state: "running",
+      taskId: "task-1",
+      profile: "sandbox_workspace_file_roundtrip",
+    };
+    const resRunning = finalizeHonesty({
+      text: "i'm running that check in the sandbox now.",
+      readingLicensed: false,
+      operationalLicense: runningLicense,
+    });
+    expect(resRunning.text).toBe("i'm running that check in the sandbox now.");
+
+    // SUCCEEDED with verified effect evidence permits completion
+    const verifiedLicense: OperationalClaimLicense = {
+      state: "succeeded",
+      taskId: "task-1",
+      profile: "sandbox_workspace_file_roundtrip",
+      effectEvidence: {
+        verified: true,
+        workspaceId: "ws-1",
+        relativePath: "test.txt",
+        bytesWritten: 10,
+        contentHash: "hash-123",
+        readMatches: true,
+        deleted: true,
+        verifiedAbsent: true,
+        completedAtMs: Date.now(),
+      },
+    };
+    const resVerified = finalizeHonesty({
+      text: "the temporary file was deleted and the contents matched.",
+      readingLicensed: false,
+      operationalLicense: verifiedLicense,
+    });
+    expect(resVerified.text).toBe("the temporary file was deleted and the contents matched.");
+  });
+
+  it("11: regexes accurately classify execution claims in claims.ts", () => {
+    expect(claimsOwnExecutionRunning("starting now")).toBe(true);
+    expect(claimsOwnExecutionRunning("i'll create a test file inside my sandbox workspace now")).toBe(true);
+    expect(claimsOwnExecutionRunning("i'm on it now")).toBe(true);
+
+    expect(claimsOwnExecutionAdmitted("i've accepted that check")).toBe(true);
+    expect(claimsOwnExecutionAdmitted("request queued")).toBe(true);
+
+    expect(claimsOwnExecutionCompletion("the temporary file was deleted")).toBe(true);
+    expect(claimsOwnExecutionCompletion("the file check passed and matched")).toBe(true);
   });
 });

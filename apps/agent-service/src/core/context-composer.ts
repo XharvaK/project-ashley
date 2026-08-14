@@ -121,10 +121,11 @@ function structuredDecisionPrompt(decision: Decision): string {
 export function operationalWorkBlock(
   db: DatabaseSync,
   ownerId: string,
-  options?: { messageEntityUuid?: string | null },
+  options?: { messageEntityUuid?: string | null; userMessage?: string },
 ): string {
   const task = findCorrelatedEngineeringTask(db, ownerId, {
     messageEntityUuid: options?.messageEntityUuid ?? undefined,
+    userMessage: options?.userMessage,
   });
   if (!task) return "";
 
@@ -138,13 +139,21 @@ export function operationalWorkBlock(
     task.refusal ? `Refusal: ${task.refusal}` : "",
   ].filter(Boolean);
 
-  if (
-    task.profile === "sandbox_workspace_file_roundtrip" &&
-    task.status === "completed"
-  ) {
-    lines.push(
-      "Effect evidence: roundtrip verified (temporary file created, exact bytes verified on read, file deleted, verified absent).",
-    );
+  if (task.profile === "sandbox_workspace_file_roundtrip" && task.status === "completed") {
+    if (
+      task.effectEvidence &&
+      task.effectEvidence.verified &&
+      task.effectEvidence.deleted &&
+      task.effectEvidence.verifiedAbsent
+    ) {
+      lines.push(
+        "Effect evidence: roundtrip verified (temporary file created, exact bytes verified on read, file deleted, verified absent).",
+      );
+    } else {
+      lines.push(
+        "Effect evidence: unverified (task record is completed; verified effect evidence is unavailable).",
+      );
+    }
   }
 
   return ["## Operational work state (cognitive attention only)", ...lines].join(
@@ -176,6 +185,7 @@ export function composeTurnContext(
   const mindState = mindStateBlock(db, ownerId);
   const operational = operationalWorkBlock(db, ownerId, {
     messageEntityUuid: input.messageEntityUuid,
+    userMessage: input.userMessage,
   });
   // Questions only when Thought selected question evidence or none selected yet
   // would dump — skip global question dump; selected questions arrive via evidence.

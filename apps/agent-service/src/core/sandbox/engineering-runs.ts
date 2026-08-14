@@ -44,7 +44,10 @@ CREATE TABLE IF NOT EXISTS engineering_admissions (
   status TEXT NOT NULL,
   created_at_ms INTEGER NOT NULL
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_engineering_admissions_source ON engineering_admissions (source_kind, source_ref);`;
+DROP INDEX IF EXISTS idx_engineering_admissions_source;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_engineering_admissions_reactive_source
+  ON engineering_admissions (source_ref)
+  WHERE source_kind = 'user_request';`;
 
 const SIGNALS_DDL = `
 CREATE TABLE IF NOT EXISTS engineering_signals (
@@ -292,17 +295,37 @@ export function recordReactiveEngineeringAdmission(
   return { accepted: true, shouldDispatch: true, id, replayed: false, status: "pending" };
 }
 
+export const OPERATIONAL_FOLLOW_UP_PATTERNS: readonly RegExp[] = [
+  /^(?:could|can|did|have)\s+you\??$/i,
+  /\b(?:did\s+it\s+work|is\s+it\s+(?:done|running|finished)|did\s+that\s+work|how\s+did\s+it\s+go)\b/i,
+  /\b(?:what\s+happened|were\s+you\s+able\s+to|did\s+the\s+check\s+finish|status\s+of\s+the\s+(?:sandbox|check|task|roundtrip))\b/i,
+];
+
+export function isSandboxOperationalFollowUp(message: string): boolean {
+  const clean = message.trim();
+  if (!clean) return false;
+  return OPERATIONAL_FOLLOW_UP_PATTERNS.some((re) => re.test(clean));
+}
+
 /**
  * Correlate a recent/active reactive engineering task to its source message
- * or owner, isolating reactive operational concerns from unrelated proactive runs.
+ * or genuine follow-up query, strictly isolating reactive operational concerns from
+ * unrelated proactive runs and unrelated user turns.
  */
 export function findCorrelatedEngineeringTask(
   db: DatabaseSync,
   ownerId: string,
-  options?: { messageEntityUuid?: string },
+  options?: {
+    messageEntityUuid?: string;
+    userMessage?: string;
+    maxAgeMs?: number;
+    nowMs?: number;
+  },
 ): SandboxTask | null {
   ensureEngineeringTables(db);
   const tasks = loadCoordinatorTasks(db);
+
+  // Case 1: Exact source message entity match (e.g. replay of same turn)
   if (options?.messageEntityUuid) {
     const match = tasks.find(
       (t) =>
@@ -312,11 +335,25 @@ export function findCorrelatedEngineeringTask(
     );
     if (match) return match;
   }
-  // Otherwise return the most recently completed or running reactive task for this owner
-  const reactiveTasks = tasks
-    .filter((t) => t.owner === ownerId && t.admissionCause === "user_request")
-    .sort((a, b) => (b.completedAtMs ?? b.startedAtMs ?? 0) - (a.completedAtMs ?? a.startedAtMs ?? 0));
-  return reactiveTasks[0] ?? null;
+
+  // Case 2: Immediate genuine follow-up query (e.g. "Could you?", "Did it work?")
+  // with bounded temporal relevance (default 30 mins)
+  if (options?.userMessage && isSandboxOperationalFollowUp(options.userMessage)) {
+    const maxAge = options.maxAgeMs ?? 30 * 60 * 1000;
+    const now = options.nowMs ?? Date.now();
+    const reactiveTasks = tasks
+      .filter(
+        (t) =>
+          t.owner === ownerId &&
+          t.admissionCause === "user_request" &&
+          (now - (t.completedAtMs ?? t.startedAtMs ?? now)) <= maxAge,
+      )
+      .sort((a, b) => (b.completedAtMs ?? b.startedAtMs ?? 0) - (a.completedAtMs ?? a.startedAtMs ?? 0));
+    return reactiveTasks[0] ?? null;
+  }
+
+  // Otherwise: unrelated turns or proactive runs MUST NOT correlate
+  return null;
 }
 
 /**

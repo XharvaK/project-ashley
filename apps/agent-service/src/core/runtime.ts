@@ -929,6 +929,7 @@ export class AshleyCore {
       } else {
         const correlated = findCorrelatedEngineeringTask(this.db, input.ownerId, {
           messageEntityUuid: messageEntityUuid ?? undefined,
+          userMessage: message,
         });
         if (correlated) {
           if (correlated.status === "completed" && correlated.effectEvidence?.verified) {

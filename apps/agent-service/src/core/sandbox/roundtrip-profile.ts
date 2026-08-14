@@ -141,15 +141,18 @@ export async function executeSandboxWorkspaceFileRoundtrip(
   }
   if (readRes.artifactRef) artifactRefs.push(readRes.artifactRef);
   const readData = readRes.data as Record<string, unknown> | undefined;
-  const base64Content = readData?.contentBase64 ?? readData?.content_base64;
   const readContent =
-    base64Content != null
-      ? Buffer.from(String(base64Content), "base64").toString("utf8")
+    typeof readData?.content === "string"
+      ? readData.content
       : typeof readData?.content_utf8 === "string"
         ? readData.content_utf8
         : typeof readData?.contentUtf8 === "string"
           ? readData.contentUtf8
-          : "";
+          : typeof readData?.contentBase64 === "string"
+            ? Buffer.from(readData.contentBase64, "base64").toString("utf8")
+            : typeof readData?.content_base64 === "string"
+              ? Buffer.from(readData.content_base64, "base64").toString("utf8")
+              : "";
   if (readContent !== uniqueSentence) {
     return {
       ok: false,

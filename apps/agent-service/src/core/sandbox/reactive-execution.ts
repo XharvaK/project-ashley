@@ -119,20 +119,16 @@ export async function executeReactiveSandboxTask(
   markAdmissionDispatched(db, input.admissionId);
   const result = await coordinator.run(task.taskId, envelopes);
 
-  let evidence: RoundtripEffectEvidence | null = null;
-  if (result.status === "completed" && result.summary) {
-    try {
-      evidence = JSON.parse(result.summary) as RoundtripEffectEvidence;
-    } catch {
-      evidence = null;
-    }
-  }
+  const evidence: RoundtripEffectEvidence | null =
+    result.status === "completed" && result.effectEvidence && result.effectEvidence.verified
+      ? result.effectEvidence
+      : null;
 
   return {
-    ok: result.status === "completed",
+    ok: result.status === "completed" && evidence !== null,
     status: result.status,
     evidence,
-    error: result.status === "completed" ? null : result.summary,
+    error: result.status === "completed" ? (evidence ? null : "missing_effect_evidence") : result.summary,
     taskId: result.taskId,
   };
 }
