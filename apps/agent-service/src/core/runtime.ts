@@ -180,7 +180,17 @@ import {
 } from "./sandbox/weekly-review-delivery.js";
 import {
   engineeringStatusSnapshot,
+  findCorrelatedEngineeringTask,
 } from "./sandbox/engineering-runs.js";
+import {
+  evaluateReactiveSandboxAdmission,
+  detectReactiveSandboxRoundtripRequest,
+} from "./sandbox/reactive-admission.js";
+import { executeReactiveSandboxTask } from "./sandbox/reactive-execution.js";
+import type {
+  RoundtripEffectEvidence,
+  OperationalClaimState,
+} from "./sandbox/engineering-types.js";
 import type { AttachmentIntakeRef } from "./perception/types.js";
 import { runPerceptionTurn } from "./perception/index.js";
 import { thoughtDeadlineAtMs } from "./perception/turn-budget.js";
@@ -841,11 +851,101 @@ export class AshleyCore {
       });
       decision.perceptionLicenses = perception.licenses;
 
+      // Reactive sandbox execution (First Reactive Slice)
+      const reactiveAdmission = evaluateReactiveSandboxAdmission({
+        db: this.db,
+        ownerId: input.ownerId,
+        message,
+        messageEntityUuid: messageEntityUuid ?? "",
+      });
+
+      if (reactiveAdmission.admitted) {
+        if (env.sandboxEngineeringLifecycleEnabled) {
+          const runRes = await executeReactiveSandboxTask(this.db, {
+            ownerId: input.ownerId,
+            admissionId: reactiveAdmission.admissionId,
+            messageEntityUuid: messageEntityUuid ?? "",
+          });
+          if (runRes.ok && runRes.evidence?.verified) {
+            decision.operationalLicense = {
+              state: "succeeded",
+              taskId: runRes.taskId,
+              profile: reactiveAdmission.profile,
+              effectEvidence: runRes.evidence,
+              sourceMessageEntityUuid: messageEntityUuid ?? undefined,
+            };
+          } else if (runRes.status === "failed" || runRes.status === "aborted") {
+            decision.operationalLicense = {
+              state: "failed",
+              taskId: runRes.taskId,
+              profile: reactiveAdmission.profile,
+              error: runRes.error ?? "roundtrip_failed",
+              sourceMessageEntityUuid: messageEntityUuid ?? undefined,
+            };
+          } else {
+            decision.operationalLicense = {
+              state: "admitted",
+              taskId: runRes.taskId,
+              profile: reactiveAdmission.profile,
+              sourceMessageEntityUuid: messageEntityUuid ?? undefined,
+            };
+          }
+        } else {
+          decision.operationalLicense = {
+            state: "admitted",
+            taskId: reactiveAdmission.admissionId,
+            profile: reactiveAdmission.profile,
+            sourceMessageEntityUuid: messageEntityUuid ?? undefined,
+          };
+        }
+      } else if (detectReactiveSandboxRoundtripRequest(message)) {
+        decision.operationalLicense = {
+          state: "none",
+          refusalReason: reactiveAdmission.reason,
+          sourceMessageEntityUuid: messageEntityUuid ?? undefined,
+        };
+      } else {
+        const correlated = findCorrelatedEngineeringTask(this.db, input.ownerId, {
+          messageEntityUuid: messageEntityUuid ?? undefined,
+        });
+        if (correlated) {
+          let effectEvidence: RoundtripEffectEvidence | undefined;
+          if (correlated.status === "completed" && correlated.summary) {
+            try {
+              effectEvidence = JSON.parse(correlated.summary) as RoundtripEffectEvidence;
+            } catch {
+              effectEvidence = undefined;
+            }
+          }
+          const opState: OperationalClaimState =
+            correlated.status === "completed"
+              ? "succeeded"
+              : correlated.status === "running"
+                ? "running"
+                : correlated.status === "failed" || correlated.status === "aborted"
+                  ? "failed"
+                  : correlated.status === "admitted"
+                    ? "admitted"
+                    : "outcome_unknown";
+          decision.operationalLicense = {
+            state: opState,
+            taskId: correlated.taskId,
+            profile: correlated.profile,
+            effectEvidence,
+            error: correlated.error ?? undefined,
+            sourceMessageEntityUuid: messageEntityUuid ?? undefined,
+          };
+        } else {
+          decision.operationalLicense = { state: "none" };
+        }
+      }
+
       const turn = composeTurnContext(this.db, input.ownerId, {
         channel: "discord",
         userMessage: message,
         decision,
         excludeMessageId: userMessageId,
+        messageEntityUuid,
       });
 
       if (isTerminalDecision(decision) || complexity.mode === "terminal") {

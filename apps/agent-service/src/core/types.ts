@@ -1,3 +1,5 @@
+import type { OperationalClaimLicense } from "./sandbox/engineering-types.js";
+
 export type DecisionKind =
   | "speak"
   | "silence"
@@ -169,6 +171,7 @@ export type Decision = {
   authorizedClaims: AuthorizedClaims;
   perceptionLicenses?: PerceptionLicenses;
   ownTimeReport?: OwnTimeReportMarker;
+  operationalLicense?: OperationalClaimLicense;
   holdReasonCode?: HoldReasonCode | null;
   silenceReasonCode?: SilenceReasonCode | null;
 };

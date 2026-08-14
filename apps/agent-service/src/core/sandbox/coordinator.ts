@@ -42,6 +42,8 @@ export type CoordinatorResult = {
 
 let taskCounter = 0;
 
+import { executeSandboxWorkspaceFileRoundtrip } from "./roundtrip-profile.js";
+
 export class SandboxEngineeringCoordinator {
   private readonly config: CoordinatorConfig;
   private readonly port: EngineeringExecutionPort;
@@ -128,6 +130,44 @@ export class SandboxEngineeringCoordinator {
     task.deadlineMs = task.startedAtMs + this.config.budgets.maxWallMs;
     this.persist();
 
+    if (task.profile === "sandbox_workspace_file_roundtrip") {
+      try {
+        const roundtrip = await executeSandboxWorkspaceFileRoundtrip({
+          taskId,
+          workspaceId: task.workspaceId,
+          envelopes,
+          port: this.port,
+          nowMs: this.config.nowMs,
+        });
+        task.modelCallsUsed = 0;
+        task.toolCallsUsed = roundtrip.ok ? 5 : 1;
+        task.completedAtMs = this.config.nowMs();
+        const wasCancelled = this.cancelRequested.has(taskId);
+        if (wasCancelled) {
+          task.status = "aborted";
+        } else if (roundtrip.ok) {
+          task.status = "completed";
+          task.workspaceId = roundtrip.workspaceId;
+          task.artifactRefs = roundtrip.artifactRefs;
+        } else {
+          task.status = "failed";
+          task.error = roundtrip.reason;
+        }
+        this.cancelRequested.delete(taskId);
+        this.activeTaskId = null;
+        this.persist();
+        const summary = roundtrip.ok ? JSON.stringify(roundtrip.evidence) : task.error;
+        return this.result(task, task.status, task.error, summary);
+      } catch (err) {
+        task.status = "failed";
+        task.error = err instanceof Error ? err.message : "roundtrip_error";
+        task.completedAtMs = this.config.nowMs();
+        this.activeTaskId = null;
+        this.persist();
+        return this.result(task, "failed", task.error);
+      }
+    }
+
     const operator = new EngineeringOperatorAdapter(this.model, this.port);
     try {
       const outcome = await operator.runTask({
@@ -200,13 +240,18 @@ export class SandboxEngineeringCoordinator {
     return task;
   }
 
-  private result(task: SandboxTask, status: SandboxTaskStatus, error: string | null): CoordinatorResult {
+  private result(
+    task: SandboxTask,
+    status: SandboxTaskStatus,
+    error: string | null,
+    summary?: string | null,
+  ): CoordinatorResult {
     return {
       taskId: task.taskId,
       status,
       modelCallsUsed: task.modelCallsUsed,
       toolCallsUsed: task.toolCallsUsed,
-      summary: error,
+      summary: summary !== undefined ? summary : error,
       candidatePatchRef: task.candidatePatchRef,
       candidateCommitRef: task.candidateCommitRef,
       artifactRefs: task.artifactRefs,

@@ -36,6 +36,35 @@ const CONVERSATIONAL_READ_PATTERNS: RegExp[] = [
   /\bthe page (?:says|shows|mentions)\b/i,
 ];
 
+const EXECUTION_RUNNING_PATTERNS: RegExp[] = [
+  /\b(?:starting|running|doing that|executing|working on that|testing that)\s+now\b/i,
+  /\bi(?:'ll| will)\s+(?:create|write|read|verify|delete|run|test|execute)\b/i,
+  /\bi(?:'m| am)\s+(?:on it|starting|running it|doing it|executing it|testing it)\b/i,
+  /\bi(?:'ve| have)\s+started\b/i,
+  /\bstarting\s+now\b/i,
+  /\bexecuting\s+now\b/i,
+  /\bon\s+it\s+now\b/i,
+];
+
+const EXECUTION_ADMITTED_PATTERNS: RegExp[] = [
+  /\bi(?:'ve| have)\s+(?:accepted|queued|admitted)\b/i,
+  /\bi\s+accepted\s+(?:the|that|this)\s+(?:task|check|test|request)\b/i,
+  /\b(?:task|request)\s+(?:accepted|queued|admitted)\b/i,
+];
+
+const EXECUTION_COMPLETION_PATTERNS: RegExp[] = [
+  /\bi (?:just |already )?(?:created|wrote|read|verified|deleted|completed|finished)\b.*\b(?:temp|temporary|test|file|sandbox)\b/i,
+  /\b(?:roundtrip|file check|sandbox test)\s+(?:matched|passed|succeeded|finished|completed)\b/i,
+  /\bi\s+(?:did it|finished it|completed the roundtrip|verified the contents)\b/i,
+  /\bthe\s+temporary\s+file\s+was\s+deleted\b/i,
+  /\bthe\s+file\s+has\s+been\s+deleted\b/i,
+];
+
+const EXECUTION_FAILURE_PATTERNS: RegExp[] = [
+  /\b(?:it|the check|the test|execution|roundtrip)\s+failed\b/i,
+  /\bi\s+tried,?\s+but\s+(?:it\s+failed|there was an error)\b/i,
+];
+
 /** Remove quoted/hypothetical spans before activity detection. */
 export function stripQuotedHypotheticals(text: string): string {
   return text
@@ -71,11 +100,37 @@ export function claimsOwnConversationalReadActivity(text: string): boolean {
   return CONVERSATIONAL_READ_PATTERNS.some((pattern) => pattern.test(clean));
 }
 
+export function claimsOwnExecutionRunning(text: string): boolean {
+  const clean = stripQuotedHypotheticals(text.trim());
+  if (!clean) return false;
+  return EXECUTION_RUNNING_PATTERNS.some((pattern) => pattern.test(clean));
+}
+
+export function claimsOwnExecutionAdmitted(text: string): boolean {
+  const clean = stripQuotedHypotheticals(text.trim());
+  if (!clean) return false;
+  return EXECUTION_ADMITTED_PATTERNS.some((pattern) => pattern.test(clean));
+}
+
+export function claimsOwnExecutionCompletion(text: string): boolean {
+  const clean = stripQuotedHypotheticals(text.trim());
+  if (!clean) return false;
+  return EXECUTION_COMPLETION_PATTERNS.some((pattern) => pattern.test(clean));
+}
+
+export function claimsOwnExecutionFailure(text: string): boolean {
+  const clean = stripQuotedHypotheticals(text.trim());
+  if (!clean) return false;
+  return EXECUTION_FAILURE_PATTERNS.some((pattern) => pattern.test(clean));
+}
+
 export function claimsOwnActivity(text: string): boolean {
   return (
     claimsOwnReadingActivity(text) ||
     claimsOwnGeneralActivity(text) ||
     claimsOwnVisionActivity(text) ||
-    claimsOwnConversationalReadActivity(text)
+    claimsOwnConversationalReadActivity(text) ||
+    claimsOwnExecutionRunning(text) ||
+    claimsOwnExecutionCompletion(text)
   );
 }

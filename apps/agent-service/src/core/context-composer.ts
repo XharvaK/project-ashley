@@ -13,6 +13,7 @@ import {
 import { getState } from "./state/store.js";
 import { getAffectiveState } from "./state/affect.js";
 import { listActiveMindStateItems } from "./state/mind-items.js";
+import { findCorrelatedEngineeringTask } from "./sandbox/engineering-runs.js";
 import type { Decision, EvidenceRef } from "./types.js";
 import { capabilityCanInfluence } from "./rollout/capabilities.js";
 
@@ -35,6 +36,8 @@ export type ComposeTurnContextInput = {
   decision?: Decision;
   /** Current user message id — excluded from hot window / evidence text. */
   excludeMessageId?: number | null;
+  /** Current user message entity uuid for correlation. */
+  messageEntityUuid?: string | null;
   /** Extra Thought-selected refs beyond Decision.evidenceRefs. */
   evidenceRefs?: EvidenceRef[];
 };
@@ -115,6 +118,40 @@ function structuredDecisionPrompt(decision: Decision): string {
   ].join("\n");
 }
 
+export function operationalWorkBlock(
+  db: DatabaseSync,
+  ownerId: string,
+  options?: { messageEntityUuid?: string | null },
+): string {
+  const task = findCorrelatedEngineeringTask(db, ownerId, {
+    messageEntityUuid: options?.messageEntityUuid ?? undefined,
+  });
+  if (!task) return "";
+
+  const lines = [
+    `Status: ${task.status}`,
+    `Profile: ${task.profile}`,
+    `Task ID: ${task.taskId}`,
+    task.startedAtMs ? `Started: ${new Date(task.startedAtMs).toISOString()}` : "",
+    task.completedAtMs ? `Completed: ${new Date(task.completedAtMs).toISOString()}` : "",
+    task.error ? `Error: ${task.error}` : "",
+    task.refusal ? `Refusal: ${task.refusal}` : "",
+  ].filter(Boolean);
+
+  if (
+    task.profile === "sandbox_workspace_file_roundtrip" &&
+    task.status === "completed"
+  ) {
+    lines.push(
+      "Effect evidence: roundtrip verified (temporary file created, exact bytes verified on read, file deleted, verified absent).",
+    );
+  }
+
+  return ["## Operational work state (cognitive attention only)", ...lines].join(
+    "\n",
+  );
+}
+
 /**
  * ContextComposer — sole owner of turn context assembly.
  * Assembles existing peer outputs; does not reinterpret, score, or rewrite them.
@@ -137,6 +174,9 @@ export function composeTurnContext(
   });
   const identity = stableIdentityBlock(db, ownerId);
   const mindState = mindStateBlock(db, ownerId);
+  const operational = operationalWorkBlock(db, ownerId, {
+    messageEntityUuid: input.messageEntityUuid,
+  });
   // Questions only when Thought selected question evidence or none selected yet
   // would dump — skip global question dump; selected questions arrive via evidence.
   const questions = "";
@@ -149,6 +189,7 @@ export function composeTurnContext(
       ? `## Memory context\n${memory.memoryBlock}`
       : "",
     mindState,
+    operational,
     questions,
   ].filter(Boolean);
 

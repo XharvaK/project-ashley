@@ -188,6 +188,132 @@ export function recordPendingEngineeringAdmission(
   return { accepted: true, id };
 }
 
+export type ReactiveAdmissionResult = {
+  accepted: boolean;
+  id?: string;
+  replayed?: boolean;
+  reason?: string;
+};
+
+/**
+ * Record an authenticated reactive engineering admission bound to the exact
+ * messageEntityUuid / sourceRef (idempotent, non-replayable).
+ */
+export function recordReactiveEngineeringAdmission(
+  db: DatabaseSync,
+  input: {
+    ownerId: string;
+    objective: string;
+    projectId: string | null;
+    profile: SandboxTaskProfile;
+    groundingRefs: string[];
+    sourceRef: string;
+    autonomous: boolean;
+    nowMs?: number;
+  },
+): ReactiveAdmissionResult {
+  ensureEngineeringTables(db);
+  const now = input.nowMs ?? Date.now();
+
+  // Strict idempotency: check across ALL statuses for this source_ref and source_kind
+  const existing = db
+    .prepare(
+      `SELECT id, status FROM engineering_admissions WHERE source_ref = ? AND source_kind = 'user_request'`,
+    )
+    .get(input.sourceRef) as { id: string; status: string } | undefined;
+  if (existing) {
+    return {
+      accepted: existing.status !== "rejected",
+      id: existing.id,
+      replayed: true,
+      reason: existing.status === "rejected" ? "prior_admission_rejected" : undefined,
+    };
+  }
+
+  if (!input.autonomous) {
+    const id = `adm-reactive-${now.toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    db.prepare(
+      `INSERT INTO engineering_admissions
+         (id, owner_id, objective, project_id, profile, grounding_refs_json, source_kind, source_ref, status, created_at_ms)
+       VALUES (?, ?, ?, ?, ?, ?, 'user_request', ?, 'rejected', ?)`,
+    ).run(
+      id,
+      input.ownerId,
+      input.objective,
+      input.projectId,
+      input.profile,
+      JSON.stringify(input.groundingRefs),
+      input.sourceRef,
+      now,
+    );
+    return { accepted: false, id, reason: "autonomy_disabled" };
+  }
+
+  const activeRuns = countActiveCoordinatorRuns(db);
+  if (activeRuns >= ENGINEERING_MAX_CONCURRENCY) {
+    const id = `adm-reactive-${now.toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    db.prepare(
+      `INSERT INTO engineering_admissions
+         (id, owner_id, objective, project_id, profile, grounding_refs_json, source_kind, source_ref, status, created_at_ms)
+       VALUES (?, ?, ?, ?, ?, ?, 'user_request', ?, 'rejected', ?)`,
+    ).run(
+      id,
+      input.ownerId,
+      input.objective,
+      input.projectId,
+      input.profile,
+      JSON.stringify(input.groundingRefs),
+      input.sourceRef,
+      now,
+    );
+    return { accepted: false, id, reason: "concurrency_limit" };
+  }
+
+  const id = `adm-reactive-${now.toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+  db.prepare(
+    `INSERT INTO engineering_admissions
+       (id, owner_id, objective, project_id, profile, grounding_refs_json, source_kind, source_ref, status, created_at_ms)
+     VALUES (?, ?, ?, ?, ?, ?, 'user_request', ?, 'pending', ?)`,
+  ).run(
+    id,
+    input.ownerId,
+    input.objective,
+    input.projectId,
+    input.profile,
+    JSON.stringify(input.groundingRefs),
+    input.sourceRef,
+    now,
+  );
+  return { accepted: true, id, replayed: false };
+}
+
+/**
+ * Correlate a recent/active reactive engineering task to its source message
+ * or owner, isolating reactive operational concerns from unrelated proactive runs.
+ */
+export function findCorrelatedEngineeringTask(
+  db: DatabaseSync,
+  ownerId: string,
+  options?: { messageEntityUuid?: string },
+): SandboxTask | null {
+  ensureEngineeringTables(db);
+  const tasks = loadCoordinatorTasks(db);
+  if (options?.messageEntityUuid) {
+    const match = tasks.find(
+      (t) =>
+        t.owner === ownerId &&
+        t.admissionCause === "user_request" &&
+        t.groundingRefs.includes(options.messageEntityUuid!),
+    );
+    if (match) return match;
+  }
+  // Otherwise return the most recently completed or running reactive task for this owner
+  const reactiveTasks = tasks
+    .filter((t) => t.owner === ownerId && t.admissionCause === "user_request")
+    .sort((a, b) => (b.completedAtMs ?? b.startedAtMs ?? 0) - (a.completedAtMs ?? a.startedAtMs ?? 0));
+  return reactiveTasks[0] ?? null;
+}
+
 /**
  * Claim the oldest pending admission that is NOT a pre-activation historical
  * admission (created_at_ms >= activationEpochMs). Returns null when none.

@@ -42,7 +42,45 @@ export type SandboxTaskProfile =
   | "self_improvement"
   | "health_maintenance"
   | "local_service_recovery"
-  | "project_investigation";
+  | "project_investigation"
+  | "sandbox_workspace_file_roundtrip";
+
+/**
+ * Structured effect evidence for the sandbox_workspace_file_roundtrip profile.
+ * Proves that actual filesystem invariants were verified (Receipt != Effect Witness).
+ */
+export type RoundtripEffectEvidence = {
+  verified: boolean;
+  workspaceId: string;
+  relativePath: string;
+  bytesWritten: number;
+  contentHash: string;
+  readMatches: boolean;
+  deleted: boolean;
+  verifiedAbsent: boolean;
+  completedAtMs: number;
+};
+
+/** Structured operational claim states for Expression & Honesty enforcement. */
+export type OperationalClaimState =
+  | "none"
+  | "proposed"
+  | "admitted"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "outcome_unknown";
+
+export type OperationalClaimLicense = {
+  state: OperationalClaimState;
+  taskId?: string | null;
+  profile?: SandboxTaskProfile | string | null;
+  effectEvidence?: RoundtripEffectEvidence | null;
+  receiptRef?: string | null;
+  error?: string | null;
+  refusalReason?: string | null;
+  sourceMessageEntityUuid?: string | null;
+};
 
 export type SandboxTask = {
   taskId: string;

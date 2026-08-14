@@ -193,6 +193,22 @@ const NON_LIVE: Record<string, NonLiveRule> = {
     cls: "CONTROL_PLANE",
     reason: "observe-only sandbox effect admission ledger; never influences live behavior; shadow turn decisions may differ (deliberation) so the ledger is not part of the live projection",
   },
+  engineering_admissions: {
+    cls: "CONTROL_PLANE",
+    reason: "sandbox engineering task admission ledger; control-plane state",
+  },
+  engineering_runs: {
+    cls: "CONTROL_PLANE",
+    reason: "sandbox engineering task run execution state; control-plane state",
+  },
+  engineering_signals: {
+    cls: "CONTROL_PLANE",
+    reason: "sandbox engineering runtime cancel signals; control-plane state",
+  },
+  runtime_flags: {
+    cls: "CONTROL_PLANE",
+    reason: "dynamic engineering runtime flags; control-plane state",
+  },
   forget_receipts: {
     cls: "OBSERVABILITY_EXCEPTION",
     reason: "correction #4: explicit /forget receipt may truthfully include shadow artifact counts; documented, not a behavioral divergence",

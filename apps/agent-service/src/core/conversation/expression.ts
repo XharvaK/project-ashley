@@ -221,6 +221,7 @@ export async function expressSpeak(
     visionLicensed: (decision.perceptionLicenses?.imageIncluded.length ?? 0) > 0,
     conversationalReadLicensed:
       (decision.perceptionLicenses?.conversationalReadIncluded.length ?? 0) > 0,
+    operationalLicense: decision.operationalLicense,
   });
   return applyRendering({
     text: finalized.text,

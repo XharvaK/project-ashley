@@ -80,7 +80,7 @@ function defaultEngineeringProject(registry: AgentProjectRegistry): string | nul
 }
 
 /** Resolve trusted project/candidate roots from the host allowlist registry. */
-function buildResolveRoots(): (projectId: string | null) => EngineeringRoots {
+export function buildResolveRoots(): (projectId: string | null) => EngineeringRoots {
   let registry: AgentProjectRegistry | null = null;
   try {
     registry = AgentProjectRegistry.loadFromFile(env.sandboxProjectRegistryPath);
