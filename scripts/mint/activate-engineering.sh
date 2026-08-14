@@ -14,22 +14,8 @@ ENGINEERING_WORKSPACE="${ENGINEERING_WORKSPACE:-$SANDBOX_ROOT/workspace/apps/age
 SELF_IMPROVE_CLONE="${SELF_IMPROVE_CLONE:-$SANDBOX_ROOT/self-improvement/project-ashley}"
 ACTIVATION_MARKER="${ACTIVATION_MARKER:-$CONF/engineering-activation.json}"
 QUALIFICATION_DIR="${QUALIFICATION_DIR:-$SANDBOX_ROOT/qualification}"
-ISOLATION_EVIDENCE="${ISOLATION_EVIDENCE:-}"
-CANARY_RECEIPT="${CANARY_RECEIPT:-}"
-if [ -z "$ISOLATION_EVIDENCE" ]; then
-  if [ -f "$QUALIFICATION_DIR/sandbox-isolation-02c/runs/$SOURCE_PIN/evidence.json" ]; then
-    ISOLATION_EVIDENCE="$QUALIFICATION_DIR/sandbox-isolation-02c/runs/$SOURCE_PIN/evidence.json"
-  else
-    ISOLATION_EVIDENCE="$QUALIFICATION_DIR/sandbox-isolation-02c/evidence.json"
-  fi
-fi
-if [ -z "$CANARY_RECEIPT" ]; then
-  if [ -f "$QUALIFICATION_DIR/sandbox-isolation-02c/runs/$SOURCE_PIN/canary-receipt.json" ]; then
-    CANARY_RECEIPT="$QUALIFICATION_DIR/sandbox-isolation-02c/runs/$SOURCE_PIN/canary-receipt.json"
-  else
-    CANARY_RECEIPT="$QUALIFICATION_DIR/sandbox-isolation-02c/canary-receipt.json"
-  fi
-fi
+ISOLATION_EVIDENCE="${ISOLATION_EVIDENCE:-$QUALIFICATION_DIR/sandbox-isolation-02c/evidence.json}"
+CANARY_RECEIPT="${CANARY_RECEIPT:-$QUALIFICATION_DIR/sandbox-isolation-02c/canary-receipt.json}"
 BROKER_ENV_FILE="${BROKER_ENV_FILE:-/etc/ashley-sandbox/broker.env}"
 BROKER_SOCKET="${BROKER_SOCKET:-/run/ashley/broker.sock}"
 PROJECT_REGISTRY="${PROJECT_REGISTRY:-$CONF/project-roots.json}"
@@ -140,13 +126,38 @@ log "verify_qualification_evidence"
 sudo python3 - "$ISOLATION_EVIDENCE" "$CANARY_RECEIPT" "$SOURCE_PIN" <<'PY' || \
   fail "verify_qualification_evidence" "qualification_evidence_invalid"
 import json
+import os
 import sys
 
 evidence_path, canary_path, source_pin = sys.argv[1:]
-with open(evidence_path, encoding="utf-8") as handle:
-    document = json.load(handle)
-with open(canary_path, encoding="utf-8") as handle:
-    canary = json.load(handle)
+if os.path.exists(evidence_path):
+    with open(evidence_path, encoding="utf-8") as handle:
+        document = json.load(handle)
+    if document.get("evidence", {}).get("sourceCommit") != source_pin:
+        run_evidence = os.path.join(os.path.dirname(evidence_path), "runs", source_pin, "evidence.json")
+        if os.path.exists(run_evidence):
+            evidence_path = run_evidence
+            with open(evidence_path, encoding="utf-8") as handle:
+                document = json.load(handle)
+else:
+    run_evidence = os.path.join(os.path.dirname(evidence_path), "runs", source_pin, "evidence.json")
+    with open(run_evidence, encoding="utf-8") as handle:
+        document = json.load(handle)
+
+if os.path.exists(canary_path):
+    with open(canary_path, encoding="utf-8") as handle:
+        canary = json.load(handle)
+    if canary.get("sourceCommit") != source_pin:
+        run_canary = os.path.join(os.path.dirname(canary_path), "runs", source_pin, "canary-receipt.json")
+        if os.path.exists(run_canary):
+            canary_path = run_canary
+            with open(canary_path, encoding="utf-8") as handle:
+                canary = json.load(handle)
+else:
+    run_canary = os.path.join(os.path.dirname(canary_path), "runs", source_pin, "canary-receipt.json")
+    with open(run_canary, encoding="utf-8") as handle:
+        canary = json.load(handle)
+
 if document.get("status") != "qualified":
     raise SystemExit(1)
 evidence = document.get("evidence")
