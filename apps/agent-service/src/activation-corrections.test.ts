@@ -5,6 +5,7 @@ import {
   cleanupFixture,
   git,
   makeMintFixture,
+  posix,
   readMarker,
   readState,
   readText,
@@ -304,7 +305,7 @@ describe("activate-engineering fail-closed behavior", () => {
     "ASHLEY_SANDBOX_PROJECT_REGISTRY",
   ])("rejects a present but missing %s file before gate mutation", (missingKey) => {
     const created = fixture();
-    const missingPath = `${created.root}/missing-${missingKey}.file`;
+    const missingPath = posix(path.join(created.root, `missing-${missingKey}.file`));
     writeText(
       created.conf + "/.env",
       readText(created.conf + "/.env").replace(

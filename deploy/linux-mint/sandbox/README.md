@@ -230,3 +230,35 @@ delegated keypair, issues the capability **before** signing the envelope
 (clamped inside the capability window), and transitions the session to
 `completed`/`aborted`. Session `sandbox_operator_light`, one capability, one
 tool execution — no autonomy path is enabled by this run.
+
+## Successor Deployment Lifecycle State Machine
+
+The sandbox successor deployment lifecycle is governed by an authoritative derived state machine inspected via `deploy/linux-mint/sandbox/status.sh` (or `install-provenance.py inspect-lifecycle`).
+
+| Lifecycle State | Description | Next Legal Transition | Canonical Operator Command |
+|---|---|---|---|
+| `ACTIVATED` | Host is running active candidate, all sources match, autonomy enabled, gates true | `DEACTIVATE` | `bash scripts/mint/rollback-engineering.sh` |
+| `DISABLED_UNQUALIFIED` | Autonomy disabled, checkout HEAD does not match qualification evidence | `QUALIFY` (or `DEACTIVATE` if broker gate enabled) | `bash deploy/linux-mint/sandbox/qualification/run-02c.sh <HEAD> <REPO>` |
+| `QUALIFIED_NOT_INSTALLED` | Qualification passed for HEAD, but runtime is not installed for HEAD | `INSTALL` | `sudo bash deploy/linux-mint/sandbox/install.sh --apply ...` |
+| `INSTALL_RECOVERY_REQUIRED` | Interrupted install or broken manifests detected with partial files | `RECOVER_INSTALL` | `sudo bash deploy/linux-mint/sandbox/install.sh --apply ...` |
+| `POLICY_REFRESH_REQUIRED` | Runtime installed & qualified, but policy is expired or missing | `ISSUE_POLICY` | `node scripts/mint/issue-sandbox-policy.mjs --confirm-owner-issuance ...` |
+| `PRE_ACTIVATION_READY` | Exact alignment across HEAD, qualified, installed; fresh policy; all 7 preconditions pass | `ACTIVATE` | `bash scripts/mint/activate-engineering.sh <HEAD>` |
+| `INSTALLED_NOT_READY` | Installed matches HEAD, but configuration or repo cleanliness check failed | `FIX_CONFIGURATION` | (Address reported blocking reason) |
+| `UNKNOWN_INVALID_STATE` | Unclassifiable corrupted files or missing essentials | `RECOVER` | `bash scripts/mint/rollback-engineering.sh` |
+
+### Inspection and Operator Commands
+
+```bash
+# Check human status and derived state
+bash deploy/linux-mint/sandbox/status.sh
+
+# Output machine-readable lifecycle JSON
+bash deploy/linux-mint/sandbox/status.sh --lifecycle
+
+# Verify canonical 7-step pre-activation readiness (exits 0 on ready, 1 on blocked)
+bash deploy/linux-mint/sandbox/status.sh --readiness
+
+# Run activation pre-check without mutating authority
+bash scripts/mint/activate-engineering.sh --check <COMMIT>
+```
+

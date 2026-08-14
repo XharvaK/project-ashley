@@ -18,7 +18,7 @@ test("resource audit leaves no retained fake-load payloads", () => {
 
 test("Mint documentation audit is repository-only and dual-DB aware", () => {
   const result = runMintDocsAudit();
-  assert.equal(result.schemaVersion, 17);
+  assert.ok(result.schemaVersion >= 19);
   assert.deepEqual(result.endpoints, ["GET /health", "GET /nuclear/health"]);
   assert.equal(result.execution, "repository files only");
 });

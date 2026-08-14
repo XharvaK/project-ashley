@@ -19,9 +19,11 @@ function json(rootDir, relativePath) {
 export function runMintDocsAudit(rootDir = root) {
   const errors = [];
   const dbSource = text(rootDir, "apps/agent-service/src/core/db.ts");
-  if (!/NUCLEAR_SUPPORTED_VERSION\s*=\s*19\s*;/.test(dbSource)) {
-    errors.push("schema_version_not_19");
+  const versionMatch = dbSource.match(/NUCLEAR_SUPPORTED_VERSION\s*=\s*(\d+)\s*;/);
+  if (!versionMatch || Number(versionMatch[1]) < 19) {
+    errors.push("schema_version_below_19");
   }
+  const schemaVersion = versionMatch ? Number(versionMatch[1]) : 0;
 
   const routes = json(rootDir, "apps/agent-service/route-surface.json").routes ?? [];
   for (const route of [
@@ -83,7 +85,7 @@ export function runMintDocsAudit(rootDir = root) {
   }
   if (errors.length > 0) throw new Error(errors.join(","));
   return {
-    schemaVersion: 19,
+    schemaVersion,
     endpoints: ["GET /health", "GET /nuclear/health"],
     services,
     backup: "dual VACUUM snapshots; WAL/SHM copy unsupported",

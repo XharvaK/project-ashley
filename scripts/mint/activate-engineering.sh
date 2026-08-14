@@ -3,9 +3,11 @@
 # Host-gated activation of the Autonomous Engineering Workstation.
 # Run only on the Linux Mint production host as the owner. This script never
 # pushes, mutates the protected live checkout, or changes policy.
+# Supports --check / --dry-run to execute pre-activation verification without mutating authority.
 set -euo pipefail
 
-SOURCE_PIN="${SOURCE_PIN:-${1:-}}"
+SOURCE_PIN=""
+CHECK_ONLY=0
 REPO="${REPO:-/home/xarvak/project-ashley}"
 CONF="${CONF:-$HOME/.composer-assistant}"
 SANDBOX_ROOT="${SANDBOX_ROOT:-/var/lib/ashley-sandbox}"
@@ -13,15 +15,9 @@ BROKER_INSTALL_ROOT="${BROKER_INSTALL_ROOT:-/opt/ashley-sandbox}"
 ENGINEERING_WORKSPACE="${ENGINEERING_WORKSPACE:-$SANDBOX_ROOT/workspace/apps/agent-service}"
 SELF_IMPROVE_CLONE="${SELF_IMPROVE_CLONE:-$SANDBOX_ROOT/self-improvement/project-ashley}"
 ACTIVATION_MARKER="${ACTIVATION_MARKER:-$CONF/engineering-activation.json}"
-QUALIFICATION_DIR="${QUALIFICATION_DIR:-$SANDBOX_ROOT/qualification}"
-ISOLATION_EVIDENCE="${ISOLATION_EVIDENCE:-$QUALIFICATION_DIR/sandbox-isolation-02c/evidence.json}"
-CANARY_RECEIPT="${CANARY_RECEIPT:-$QUALIFICATION_DIR/sandbox-isolation-02c/canary-receipt.json}"
 BROKER_ENV_FILE="${BROKER_ENV_FILE:-/etc/ashley-sandbox/broker.env}"
 BROKER_SOCKET="${BROKER_SOCKET:-/run/ashley/broker.sock}"
 PROJECT_REGISTRY="${PROJECT_REGISTRY:-$CONF/project-roots.json}"
-BROKER_DIST="${BROKER_DIST:-$BROKER_INSTALL_ROOT/dist/main.js}"
-PROVENANCE_MANIFEST="${PROVENANCE_MANIFEST:-$BROKER_INSTALL_ROOT/install-manifest.json}"
-WORKSPACE_PROVENANCE_MANIFEST="${WORKSPACE_PROVENANCE_MANIFEST:-$SANDBOX_ROOT/meta/engineering-workspace-manifest.json}"
 PROVENANCE_HELPER="${PROVENANCE_HELPER:-$REPO/deploy/linux-mint/sandbox/install-provenance.py}"
 FAILED_ACTIVATION_CLEANUP="${FAILED_ACTIVATION_CLEANUP:-$REPO/scripts/mint/rollback-engineering.sh}"
 ACTIVATION_FAIL_AT="${ASHLEY_ACTIVATION_FAIL_AT:-}"
@@ -30,9 +26,28 @@ BROKER_SOCKET_UNIT="${BROKER_SOCKET_UNIT:-ashley-exec-broker.socket}"
 SYSTEMD_UNIT_ROOT="${SYSTEMD_UNIT_ROOT:-/etc/systemd/system}"
 CURL_BIN="${CURL_BIN:-curl}"
 GIT_BIN="${GIT_BIN:-git}"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
 AGENT_HEALTH_ATTEMPTS="${AGENT_HEALTH_ATTEMPTS:-30}"
 AGENT_HEALTH_INTERVAL_SECONDS="${AGENT_HEALTH_INTERVAL_SECONDS:-1}"
 AGENT_HEALTH_REQUEST_TIMEOUT_SECONDS="${AGENT_HEALTH_REQUEST_TIMEOUT_SECONDS:-2}"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --check|--dry-run) CHECK_ONLY=1; shift ;;
+    --repo) REPO="$2"; shift 2 ;;
+    --conf) CONF="$2"; shift 2 ;;
+    --state) SANDBOX_ROOT="$2"; shift 2 ;;
+    --broker) BROKER_INSTALL_ROOT="$2"; shift 2 ;;
+    --systemd) SYSTEMD_UNIT_ROOT="$2"; shift 2 ;;
+    *)
+      if [[ -z "$SOURCE_PIN" ]]; then
+        SOURCE_PIN="$1"; shift
+      else
+        echo "Unknown option: $1" >&2; exit 2
+      fi
+      ;;
+  esac
+done
 
 ACTIVATION_AUTHORITY_MUTATED=0
 ACTIVATION_SUCCEEDED=0
@@ -78,7 +93,7 @@ trap cleanup_on_exit EXIT
 
 set_privileged_env_value() {
   local target="$1" key="$2" value="$3"
-  sudo python3 - "$target" "$key" "$value" <<'PY'
+  sudo "$PYTHON_BIN" - "$target" "$key" "$value" <<'PY'
 import os
 import sys
 import tempfile
@@ -118,202 +133,24 @@ PY
 
 [ -n "$SOURCE_PIN" ] || fail "usage" "source_pin_required"
 
-log "verify_source"
-CURRENT="$("$GIT_BIN" -C "$REPO" rev-parse HEAD)" || fail "verify_source" "repo_unavailable"
-[ "$CURRENT" = "$SOURCE_PIN" ] || fail "verify_source" "source_commit_mismatch:$CURRENT"
-
-log "verify_qualification_evidence"
-sudo python3 - "$ISOLATION_EVIDENCE" "$CANARY_RECEIPT" "$SOURCE_PIN" <<'PY' || \
-  fail "verify_qualification_evidence" "qualification_evidence_invalid"
-import json
-import os
-import sys
-
-evidence_path, canary_path, source_pin = sys.argv[1:]
-if os.path.exists(evidence_path):
-    with open(evidence_path, encoding="utf-8") as handle:
-        document = json.load(handle)
-    if document.get("evidence", {}).get("sourceCommit") != source_pin:
-        run_evidence = os.path.join(os.path.dirname(evidence_path), "runs", source_pin, "evidence.json")
-        if os.path.exists(run_evidence):
-            evidence_path = run_evidence
-            with open(evidence_path, encoding="utf-8") as handle:
-                document = json.load(handle)
-else:
-    run_evidence = os.path.join(os.path.dirname(evidence_path), "runs", source_pin, "evidence.json")
-    with open(run_evidence, encoding="utf-8") as handle:
-        document = json.load(handle)
-
-if os.path.exists(canary_path):
-    with open(canary_path, encoding="utf-8") as handle:
-        canary = json.load(handle)
-    if canary.get("sourceCommit") != source_pin:
-        run_canary = os.path.join(os.path.dirname(canary_path), "runs", source_pin, "canary-receipt.json")
-        if os.path.exists(run_canary):
-            canary_path = run_canary
-            with open(canary_path, encoding="utf-8") as handle:
-                canary = json.load(handle)
-else:
-    run_canary = os.path.join(os.path.dirname(canary_path), "runs", source_pin, "canary-receipt.json")
-    with open(run_canary, encoding="utf-8") as handle:
-        canary = json.load(handle)
-
-if document.get("status") != "qualified":
-    raise SystemExit(1)
-evidence = document.get("evidence")
-if not isinstance(evidence, dict):
-    raise SystemExit(1)
-if evidence.get("sourceCommit") != source_pin or evidence.get("providerKind") != "bubblewrap":
-    raise SystemExit(1)
-if canary.get("schema") != "bubblewrap-qualification-canary-v1":
-    raise SystemExit(1)
-if canary.get("status") != "pass" or canary.get("sourceCommit") != source_pin:
-    raise SystemExit(1)
-for field in (
-    "evidenceId",
-    "profileFingerprint",
-    "providerBinaryDigest",
-    "fixtureProbeManifestDigest",
-):
-    value = evidence.get(field)
-    if not isinstance(value, str) or not value or canary.get(field) != value:
-        raise SystemExit(1)
-PY
-
-log "verify_policy"
-[ -f "$CONF/keys/policy.json" ] || fail "verify_policy" "policy_artifact_missing"
-[ -f "$CONF/keys/policy.json.sha256" ] || fail "verify_policy" "policy_hash_missing"
-python3 - "$CONF/keys/policy.json" <<'PY' || fail "verify_policy" "policy_expired_or_expiring"
-import json
-import sys
-from datetime import datetime, timezone
-
-with open(sys.argv[1], encoding="utf-8") as handle:
-    policy = json.load(handle)
-if policy.get("expiresAt"):
-    expiry = datetime.fromisoformat(policy["expiresAt"].replace("Z", "+00:00"))
-    if (expiry - datetime.now(timezone.utc)).total_seconds() < 30:
-        raise SystemExit(1)
-PY
-
-log "verify_protected_live_checkout"
-[ -z "$("$GIT_BIN" -C "$REPO" status --porcelain)" ] || \
-  fail "verify_protected_live_checkout" "live_checkout_dirty"
-
-log "verify_source_bound_runtime"
-sudo python3 "$PROVENANCE_HELPER" verify \
+log "canonical_preactivation_verification"
+verify_output="$(sudo "$PYTHON_BIN" "$PROVENANCE_HELPER" verify-preactivation \
   --repo-root "$REPO" \
-  --broker-root "$BROKER_INSTALL_ROOT" \
+  --conf-root "$CONF" \
   --state-root "$SANDBOX_ROOT" \
+  --broker-root "$BROKER_INSTALL_ROOT" \
   --systemd-root "$SYSTEMD_UNIT_ROOT" \
-  --workspace-root "$ENGINEERING_WORKSPACE" \
-  --manifest "$PROVENANCE_MANIFEST" \
-  --workspace-manifest "$WORKSPACE_PROVENANCE_MANIFEST" \
-  --source-commit "$SOURCE_PIN" \
-  --require-root-owned || fail "verify_source_bound_runtime" "provenance_mismatch"
-
-log "verify_installed_artifacts"
-[ -s "$BROKER_DIST" ] || fail "verify_installed_artifacts" "broker_dist_missing_or_empty"
-KILL_MODE="$(sudo systemctl show "$BROKER_SERVICE" -p KillMode --value)" || \
-  fail "verify_installed_artifacts" "kill_mode_unavailable"
-[ "$KILL_MODE" = "control-group" ] || fail "verify_installed_artifacts" "kill_mode_not_control_group"
-
-# The agent must already have the owner-managed configuration that the
-# enabled lifecycle will consume. Activation validates it but never writes it.
-log "verify_agent_configuration"
-[ -f "$CONF/.env" ] || fail "verify_agent_configuration" "agent_env_missing"
-if ! AGENT_CONFIG_ERROR="$(
-  python3 - "$CONF/.env" "$CONF" <<'PY'
-import posixpath
-import sys
-
-env_path = sys.argv[1]
-conf = sys.argv[2]
-
-def reject(reason: str) -> None:
-    print(reason)
-    raise SystemExit(1)
-
-try:
-    with open(env_path, encoding="utf-8") as handle:
-        lines = handle.read().splitlines()
-except OSError:
-    reject("agent_env_unreadable")
-
-values = {}
-for raw_line in lines:
-    line = raw_line.strip()
-    if not line or line.startswith("#") or "=" not in line:
-        continue
-    key, value = line.split("=", 1)
-    value = value.strip()
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-        value = value[1:-1]
-    values[key.strip()] = value
-
-def present(name: str) -> str:
-    value = values.get(name, "").strip()
-    if not value:
-        reject(f"agent_config_missing:{name}")
-    return value
-
-for name in (
-    "ASHLEY_SANDBOX_POLICY_ARTIFACT",
-    "ASHLEY_SANDBOX_POLICY_SIGNATURE",
-    "ASHLEY_SANDBOX_DELEGATED_ENABLED",
-    "ASHLEY_SANDBOX_BROKER_SOCKET",
-    "ASHLEY_SANDBOX_PROJECT_REGISTRY",
-):
-    present(name)
-
-if values["ASHLEY_SANDBOX_DELEGATED_ENABLED"].strip() != "true":
-    reject("agent_config_invalid:ASHLEY_SANDBOX_DELEGATED_ENABLED:expected_true")
-
-keys_dir = values.get(
-    "ASHLEY_SANDBOX_KEYS_DIR",
-    posixpath.join(conf, "keys"),
-).strip()
-owner_key_id = values.get("ASHLEY_SANDBOX_OWNER_KEY_ID", "owner-ed25519-v1").strip()
-continuity_key_id = values.get(
-    "ASHLEY_SANDBOX_CONTINUITY_KEY_ID",
-    "continuity-tombstone-ed25519-v1",
-).strip()
-
-path_defaults = {
-    "ASHLEY_SANDBOX_POLICY_ARTIFACT": None,
-    "ASHLEY_SANDBOX_POLICY_SIGNATURE": None,
-    "ASHLEY_SANDBOX_PROJECT_REGISTRY": None,
-    "ASHLEY_SANDBOX_KEY_PASSPHRASE_PATH": posixpath.join(keys_dir, "master.pass"),
-    "ASHLEY_SANDBOX_OWNER_KEY_ENC_PATH": posixpath.join(keys_dir, "owner-approval.key.enc"),
-    "ASHLEY_SANDBOX_CONTINUITY_KEY_ENC_PATH": posixpath.join(keys_dir, "continuity-tombstone.key.enc"),
-    "ASHLEY_SANDBOX_OWNER_PUBLIC_KEY": posixpath.join(keys_dir, f"{owner_key_id}.pub"),
-    "ASHLEY_SANDBOX_CONTINUITY_PUBLIC_KEY": posixpath.join(keys_dir, f"{continuity_key_id}.pub"),
-    "ASHLEY_SANDBOX_DELEGATED_KEY_ENC_PATH": posixpath.join(keys_dir, "delegated-runtime.key.enc"),
+  --source-pin "$SOURCE_PIN" \
+  --require-root-owned 2>&1)" || {
+  stage="$(python3 -c "import json, sys; doc=json.loads(sys.argv[1]); print(doc.get('stage','verification_failed'))" "$verify_output" 2>/dev/null || echo "verify_preactivation")"
+  reason="$(python3 -c "import json, sys; doc=json.loads(sys.argv[1]); print(doc.get('reason','verification_failed'))" "$verify_output" 2>/dev/null || echo "$verify_output")"
+  fail "$stage" "$reason"
 }
 
-def file_exists(path: str) -> bool:
-    try:
-        with open(path, "rb"):
-            return True
-    except OSError:
-        return False
-
-for name, default in path_defaults.items():
-    if default is None:
-        path = values[name].strip()
-    else:
-        path = values.get(name, default).strip()
-    if not file_exists(path):
-        reject(f"agent_config_path_missing:{name}:{path}")
-
-# loadEngineeringTrustAnchors() resolves the owner public key from keysDir and
-# the configured owner key id, independently of the explicit readiness path.
-computed_owner_public = posixpath.join(keys_dir, f"{owner_key_id}.pub")
-if not file_exists(computed_owner_public):
-    reject(f"agent_config_path_missing:ASHLEY_SANDBOX_KEYS_DIR:{computed_owner_public}")
-PY
-)"; then
-  fail "verify_agent_configuration" "${AGENT_CONFIG_ERROR:-agent_config_invalid}"
+if [[ "$CHECK_ONLY" -eq 1 ]]; then
+  printf '%s\n' "$verify_output"
+  log "read-only preactivation verification passed"
+  exit 0
 fi
 
 # Cleanup is armed before the first persistent authority mutation.

@@ -217,6 +217,7 @@ case "$token" in
 esac
 `);
   executable(path.join(fixture.fakeBin, "sleep"), "#!/bin/sh\nexit 0\n");
+  executable(path.join(fixture.fakeBin, "python3"), `#!/bin/sh\nexec ${posix(PYTHON)} "$@"\n`);
 }
 
 export function makeMintFixture(): MintFixture {
@@ -469,6 +470,7 @@ function baseEnvironment(fixture: MintFixture): NodeJS.ProcessEnv {
     ROLLBACK_FINALITY_ATTEMPTS: "1",
     SYSTEMD_UNIT_ROOT: posix(fixture.systemdUnits),
     ASHLEY_FAKE_SYSTEMD_STATE: posix(fixture.systemdState),
+    PYTHON_BIN: posix(PYTHON),
   };
 }
 

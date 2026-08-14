@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Idempotent installer for the production Mint sandbox broker.
-# It still refuses to mutate the host until every build and boundary check passes.
+# Transactional fail-safe installer for the production Mint sandbox broker.
+# PREPARE: all validation, builds, staging, and verification run without modifying live runtime.
+# COMMIT: explicit bounded transaction materializing candidate runtime and publishing manifests.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -21,9 +22,6 @@ POLICY_SIGNATURE="${ASHLEY_SANDBOX_POLICY_SIGNATURE:-}"
 DELEGATED_KEY_ID="${ASHLEY_SANDBOX_DELEGATED_KEY_ID:-delegated-runtime-ed25519-v1}"
 CAPABILITY_KEY_ID="${ASHLEY_SANDBOX_CAPABILITY_KEY_ID:-broker-session-capability-ed25519-v1}"
 DELEGATED_ENABLED=false
-# R5B network isolation seam. `unavailable` is the only default; `none`
-# requires the qualification flag (set only for hosts that passed the R5B
-# qualification run) and a trusted absolute unshare binary.
 NETWORK_PROVIDER="${ASHLEY_SANDBOX_NETWORK_PROVIDER:-unavailable}"
 NETWORK_ISOLATION_QUALIFIED="${ASHLEY_SANDBOX_NETWORK_ISOLATION_QUALIFIED:-false}"
 UNSHARE_PATH="${ASHLEY_SANDBOX_UNSHARE_PATH:-/usr/bin/unshare}"
@@ -47,6 +45,9 @@ SYSTEMCTL_BIN="${ASHLEY_SYSTEMCTL_BIN:-systemctl}"
 SUDO_BIN="${ASHLEY_SUDO_BIN:-sudo}"
 INSTALL_FAIL_AT="${ASHLEY_INSTALL_FAIL_AT:-}"
 
+TX_STATE="INIT"
+TX_FILE="$SANDBOX_STATE_ROOT/meta/install-transaction.json"
+
 maybe_fail() {
   if [[ "$INSTALL_FAIL_AT" == "$1" ]]; then
     printf 'injected_failure:%s\n' "$1" >&2
@@ -54,12 +55,34 @@ maybe_fail() {
   fi
 }
 
+on_exit() {
+  local exit_code=$?
+  if [[ "$exit_code" -ne 0 && "$TX_STATE" == "COMMITTING" ]]; then
+    if [[ -d "$SANDBOX_STATE_ROOT/meta" ]]; then
+      python3 - "$TX_FILE" "${source_commit:-unknown}" "$INSTALL_FAIL_AT" <<'PY' 2>/dev/null || true
+import json, sys, time
+path, commit, stage = sys.argv[1:]
+data = {
+    "state": "INSTALL_RECOVERY_REQUIRED",
+    "candidateCommit": commit,
+    "failedStage": stage or "unknown",
+    "failedAt": int(time.time() * 1000)
+}
+with open(path, "w", encoding="utf-8") as f:
+    json.dump(data, f, indent=2)
+PY
+    fi
+    printf 'INSTALL_RECOVERY_REQUIRED: Installation interrupted during commit. Run install.sh --apply to recover.\n' >&2
+  fi
+}
+trap on_exit EXIT
+
 usage() {
   cat <<'EOF'
 Usage: install.sh [options]
 
-Without --apply this is a read-only preflight. No user, group, directory, key,
-unit, or service is changed without --apply.
+Without --apply this is a read-only PREPARE validation. No live user, group, directory, key,
+unit, manifest, or service is changed without --apply.
 
 Options:
   --apply                          Perform installation after all checks pass
@@ -112,28 +135,19 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# ==============================================================================
+# PHASE 1: PREPARE (Read-only validation, builds, and isolated staging)
+# ==============================================================================
+
 if ! command -v python3 >/dev/null 2>&1; then
   echo 'python3 is required for source and installation provenance checks.' >&2
   exit 2
 fi
+
 python3 "$PROVENANCE_HELPER" source-preflight --repo-root "$ROOT"
 source_commit="$(git -C "$ROOT" rev-parse HEAD)"
 
 ASHLEY_ROOT="$ROOT" bash "$PREFLIGHT_HELPER" --require-daemon
-
-if [[ "$APPLY" -ne 1 ]]; then
-  printf '%s\n' 'Dry run only. Re-run with --apply after reviewing the daemon, transport, and Mint boundary.'
-  exit 0
-fi
-
-if [[ "$EUID" -eq 0 ]]; then
-  SUDO=()
-else
-  SUDO=("$SUDO_BIN")
-  "$SUDO_BIN" -v
-fi
-
-root_run() { "${SUDO[@]}" "$@"; }
 
 if [[ -z "$AGENT_USER" || "$AGENT_USER" == "root" ]]; then
   echo 'Set --agent-user to the normal Mint user that runs ashley-agent.' >&2
@@ -143,6 +157,14 @@ if ! "$ID_BIN" "$AGENT_USER" >/dev/null 2>&1; then
   echo "Agent user does not exist: $AGENT_USER" >&2
   exit 2
 fi
+
+agent_home="$("$GETENT_BIN" passwd "$AGENT_USER" | cut -d: -f6)"
+if [[ -z "$agent_home" || ! -d "$agent_home" ]]; then
+  echo "Unable to resolve agent home directory: $AGENT_USER" >&2
+  exit 2
+fi
+agent_keys_dir="$agent_home/.composer-assistant/keys"
+
 if ! command -v "$CC_BIN" >/dev/null 2>&1; then
   echo 'A C compiler is required to build the SO_PEERCRED helper.' >&2
   exit 2
@@ -151,12 +173,40 @@ if [[ -z "$OWNER_ID" || ! "$OWNER_ID" =~ ^[A-Za-z0-9._:-]+$ ]]; then
   echo 'Set --owner-id to the configured Ashley owner ID.' >&2
   exit 2
 fi
+
 for key in "$OWNER_PUBLIC_KEY" "$CONTINUITY_PUBLIC_KEY" "$DELEGATED_PUBLIC_KEY" "$CAPABILITY_KEY" "$MASTER_PASSPHRASE" "$POLICY_ARTIFACT" "$POLICY_SIGNATURE"; do
   if [[ -z "$key" || ! -f "$key" ]]; then
     echo "Required file is missing: ${key:-<empty>}" >&2
     exit 2
   fi
 done
+
+# Validate policy artifact is readable and structurally valid JSON
+if ! python3 - "$POLICY_ARTIFACT" <<'PY' >/dev/null 2>&1
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as f:
+    doc = json.load(f)
+assert isinstance(doc, dict) and doc.get("policyId") and doc.get("version")
+PY
+then
+  echo "Policy artifact is not a valid JSON policy: $POLICY_ARTIFACT" >&2
+  exit 2
+fi
+
+# Check for policy source == destination alias (same path, realpath, or inode)
+POLICY_SAME_FILE=0
+src_real="$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$POLICY_ARTIFACT")"
+dst_real="$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$agent_keys_dir/policy.json" 2>/dev/null || echo "$agent_keys_dir/policy.json")"
+if [[ "$src_real" == "$dst_real" ]]; then
+  POLICY_SAME_FILE=1
+elif [[ -f "$agent_keys_dir/policy.json" ]]; then
+  src_ino="$(python3 -c 'import os, sys; s = os.stat(sys.argv[1]); print(f"{s.st_dev}:{s.st_ino}")' "$POLICY_ARTIFACT" 2>/dev/null || true)"
+  dst_ino="$(python3 -c 'import os, sys; s = os.stat(sys.argv[1]); print(f"{s.st_dev}:{s.st_ino}")' "$agent_keys_dir/policy.json" 2>/dev/null || true)"
+  if [[ -n "$src_ino" && "$src_ino" == "$dst_ino" ]]; then
+    POLICY_SAME_FILE=1
+  fi
+fi
+
 if [[ -z "$RECIPE_MANIFEST" ]]; then
   RECIPE_MANIFEST="$ROOT/deploy/linux-mint/sandbox/recipes.json"
 fi
@@ -164,6 +214,7 @@ if [[ ! -f "$RECIPE_MANIFEST" ]]; then
   echo "Recipe manifest is missing: $RECIPE_MANIFEST" >&2
   exit 2
 fi
+
 owner_key_name="$(basename -- "$OWNER_PUBLIC_KEY")"
 continuity_key_name="$(basename -- "$CONTINUITY_PUBLIC_KEY")"
 delegated_key_name="$(basename -- "$DELEGATED_PUBLIC_KEY")"
@@ -202,16 +253,40 @@ if [[ "$NETWORK_ISOLATION_QUALIFIED" == "true" && "$NETWORK_PROVIDER" != "none" 
   exit 2
 fi
 
-maybe_fail before_invalidation
-root_run rm -f "$INSTALL_MANIFEST" "$WORKSPACE_MANIFEST"
-maybe_fail after_invalidation
+node_binary="${ASHLEY_NODE_BINARY:-$(readlink -f "$(command -v node)")}"
+if [[ ! -x "$node_binary" ]]; then
+  echo "Node binary is missing or not executable: $node_binary" >&2
+  exit 2
+fi
+
+npm_cli="${ASHLEY_NPM_CLI:-$(readlink -f "$(command -v npm)")}"
+npm_pkg_dir="${ASHLEY_NPM_PACKAGE_DIR:-$(dirname -- "$(dirname -- "$npm_cli")")}"
+if [[ ! -f "$npm_cli" || ! -d "$npm_pkg_dir" ]]; then
+  echo "Unable to resolve the npm package layout: $npm_cli" >&2
+  exit 2
+fi
 
 if ! command -v "$NPM_BIN" >/dev/null 2>&1; then
   echo 'npm is required to build the reviewed broker before installation.' >&2
   exit 2
 fi
-# Ignored build outputs are not source identity. Remove them only after the
-# trusted manifests have been invalidated, then rebuild from the clean HEAD.
+
+maybe_fail during_prepare_validation
+
+if [[ "$APPLY" -ne 1 ]]; then
+  printf '%s\n' 'Dry run only. All PREPARE validation checks passed. Re-run with --apply to commit.'
+  exit 0
+fi
+
+if [[ "$EUID" -eq 0 ]]; then
+  SUDO=()
+else
+  SUDO=("$SUDO_BIN")
+  "$SUDO_BIN" -v
+fi
+root_run() { "${SUDO[@]}" "$@"; }
+
+# Build packages in repository clean checkout
 rm -rf \
   "$ROOT/apps/sandbox-policy/dist" \
   "$ROOT/apps/sandbox-broker/dist" \
@@ -222,6 +297,97 @@ rm -rf \
 "$NPM_BIN" run build --prefix "$ROOT/apps/sandbox-broker"
 "$NPM_BIN" ci --prefix "$ROOT/apps/agent-service"
 "$NPM_BIN" run build --prefix "$ROOT/apps/agent-service"
+
+maybe_fail during_prepare_build
+
+# Assemble Candidate Staging Tree (outside live runtime)
+STAGE_ROOT="$SANDBOX_STATE_ROOT/.staging/$source_commit"
+STAGE_BROKER_DIR="$STAGE_ROOT/broker"
+STAGE_WORKSPACE_DIR="$STAGE_ROOT/workspace/apps/agent-service"
+STAGE_META_DIR="$STAGE_ROOT/meta"
+
+root_run rm -rf "$STAGE_ROOT"
+root_run "$INSTALL_BIN" -d -o root -g root -m 0755 "$STAGE_ROOT"
+root_run "$INSTALL_BIN" -d -o root -g root -m 0755 "$STAGE_BROKER_DIR"
+root_run "$INSTALL_BIN" -d -o root -g root -m 0755 "$STAGE_BROKER_DIR/dist"
+root_run "$INSTALL_BIN" -d -o root -g root -m 0755 "$STAGE_BROKER_DIR/bin"
+root_run "$INSTALL_BIN" -d -o root -g root -m 0755 "$STAGE_BROKER_DIR/lib"
+root_run "$INSTALL_BIN" -d -o root -g root -m 0755 "$STAGE_BROKER_DIR/lib/node_modules"
+root_run "$INSTALL_BIN" -d -o root -g root -m 0755 "$STAGE_BROKER_DIR/node_modules"
+root_run "$INSTALL_BIN" -d -o root -g root -m 0755 "$STAGE_BROKER_DIR/node_modules/@composer-assistant"
+root_run "$INSTALL_BIN" -d -o root -g root -m 0755 "$STAGE_BROKER_DIR/node_modules/@composer-assistant/sandbox-policy"
+root_run "$INSTALL_BIN" -d -o root -g root -m 0755 "$STAGE_BROKER_DIR/node_modules/@composer-assistant/sandbox-policy/dist"
+
+root_run "$INSTALL_BIN" -o root -g root -m 0755 "$node_binary" "$STAGE_BROKER_DIR/bin/node"
+root_run cp -RL "$npm_pkg_dir" "$STAGE_BROKER_DIR/lib/node_modules/npm"
+root_run "$CHOWN_BIN" -R root:root "$STAGE_BROKER_DIR/lib/node_modules/npm"
+root_run "$FIND_BIN" "$STAGE_BROKER_DIR/lib/node_modules/npm" -type d -exec chmod 0755 {} +
+root_run "$FIND_BIN" "$STAGE_BROKER_DIR/lib/node_modules/npm" -type f -exec chmod 0644 {} +
+
+npm_wrapper_tmp="$(mktemp)"
+cat >"$npm_wrapper_tmp" <<EOF
+#!/bin/sh
+export PATH="$BROKER_INSTALL_ROOT/bin:\$PATH"
+exec "$BROKER_INSTALL_ROOT/bin/node" "$BROKER_INSTALL_ROOT/lib/node_modules/npm/bin/npm-cli.js" "\$@"
+EOF
+root_run "$INSTALL_BIN" -o root -g root -m 0755 "$npm_wrapper_tmp" "$STAGE_BROKER_DIR/bin/npm"
+rm -f "$npm_wrapper_tmp"
+
+root_run cp -R "$ROOT/apps/sandbox-broker/dist/." "$STAGE_BROKER_DIR/dist/"
+root_run "$CHOWN_BIN" -R root:root "$STAGE_BROKER_DIR/dist"
+root_run "$FIND_BIN" "$STAGE_BROKER_DIR/dist" -type d -exec chmod 0755 {} +
+root_run "$FIND_BIN" "$STAGE_BROKER_DIR/dist" -type f -exec chmod 0644 {} +
+root_run "$INSTALL_BIN" -o root -g root -m 0644 "$ROOT/apps/sandbox-broker/package.json" "$STAGE_BROKER_DIR/package.json"
+
+root_run cp -R "$ROOT/apps/sandbox-policy/dist/." "$STAGE_BROKER_DIR/node_modules/@composer-assistant/sandbox-policy/dist/"
+root_run "$CHOWN_BIN" -R root:root "$STAGE_BROKER_DIR/node_modules/@composer-assistant/sandbox-policy/dist"
+root_run "$FIND_BIN" "$STAGE_BROKER_DIR/node_modules/@composer-assistant/sandbox-policy/dist" -type d -exec chmod 0755 {} +
+root_run "$FIND_BIN" "$STAGE_BROKER_DIR/node_modules/@composer-assistant/sandbox-policy/dist" -type f -exec chmod 0644 {} +
+root_run "$INSTALL_BIN" -o root -g root -m 0644 "$ROOT/apps/sandbox-policy/package.json" "$STAGE_BROKER_DIR/node_modules/@composer-assistant/sandbox-policy/package.json"
+
+peer_helper_tmp="$(mktemp)"
+trap 'rm -f "${peer_helper_tmp:-}"' EXIT
+"$CC_BIN" -O2 -Wall -Wextra -o "$peer_helper_tmp" "$ROOT/apps/sandbox-broker/src/peer-credentials-helper.c"
+root_run "$INSTALL_BIN" -o root -g root -m 0755 "$peer_helper_tmp" "$STAGE_BROKER_DIR/bin/peer-credentials"
+rm -f "$peer_helper_tmp"
+
+# Stage workspace
+root_run "$INSTALL_BIN" -d -o ashley-sandbox -g ashley-sandbox -m 0750 "$(dirname "$STAGE_WORKSPACE_DIR")"
+root_run "$STAGE_BROKER_DIR/bin/node" "$SCRIPT_DIR/provision-workspace.mjs" \
+  --source "$ROOT/apps/agent-service" \
+  --dest "$STAGE_WORKSPACE_DIR" \
+  --workspace "@composer-assistant/sandbox-policy=$ROOT/apps/sandbox-policy" \
+  --workspace "@composer-assistant/sandbox-broker=$ROOT/apps/sandbox-broker"
+root_run "$CHOWN_BIN" -R ashley-sandbox:ashley-sandbox "$STAGE_WORKSPACE_DIR"
+
+maybe_fail during_prepare_staging
+
+# Staged smoke checks
+if ! (cd "$STAGE_BROKER_DIR" && root_run "$STAGE_BROKER_DIR/bin/node" --input-type=module -e "await import('@composer-assistant/sandbox-policy')"); then
+  echo 'Staged production module-resolution smoke check failed.' >&2
+  exit 2
+fi
+
+if ! (cd "$STAGE_BROKER_DIR" && root_run "$STAGE_BROKER_DIR/bin/node" --check "$STAGE_BROKER_DIR/dist/main.js"); then
+  echo 'Staged broker entrypoint syntax/compilation check failed.' >&2
+  exit 2
+fi
+
+maybe_fail during_prepare_verification
+
+# ==============================================================================
+# PHASE 2: COMMIT (Bounded transaction materializing candidate to live runtime)
+# ==============================================================================
+
+TX_STATE="COMMITTING"
+root_run "$INSTALL_BIN" -d -o root -g ashley-sandbox -m 0750 "$SANDBOX_STATE_ROOT/meta"
+python3 - "$TX_FILE" "$source_commit" <<'PY'
+import json, sys, time
+path, commit = sys.argv[1:]
+data = {"state": "COMMITTING", "candidateCommit": commit, "startedAt": int(time.time() * 1000)}
+with open(path, "w", encoding="utf-8") as f:
+    json.dump(data, f, indent=2)
+PY
 
 if ! "$GETENT_BIN" group ashley-broker >/dev/null 2>&1; then
   root_run groupadd --system ashley-broker
@@ -245,128 +411,50 @@ root_run "$INSTALL_BIN" -d -o root -g ashley-sandbox -m 0750 "$BROKER_CONFIG_ROO
 root_run "$INSTALL_BIN" -d -o root -g root -m 0755 "$BROKER_INSTALL_ROOT"
 root_run "$INSTALL_BIN" -d -o root -g root -m 0755 "$BROKER_INSTALL_ROOT/dist"
 root_run "$INSTALL_BIN" -d -o root -g root -m 0755 "$BROKER_INSTALL_ROOT/bin"
-
-node_binary="${ASHLEY_NODE_BINARY:-$(readlink -f "$(command -v node)")}"
-if [[ ! -x "$node_binary" ]]; then
-  echo "Node binary is missing or not executable: $node_binary" >&2
-  exit 2
-fi
-root_run "$INSTALL_BIN" -o root -g root -m 0755 "$node_binary" "$BROKER_INSTALL_ROOT/bin/node"
-
-# R5B toolchain seam: pin a broker-controlled npm launcher as a regular
-# file (the resolver rejects symlinks). The whole npm package is copied
-# under the broker install root so the broker never depends on nvm paths or
-# the agent's home for toolchain resolution.
-npm_cli="${ASHLEY_NPM_CLI:-$(readlink -f "$(command -v npm)")}"
-npm_pkg_dir="${ASHLEY_NPM_PACKAGE_DIR:-$(dirname -- "$(dirname -- "$npm_cli")")}"
-if [[ ! -f "$npm_cli" || ! -d "$npm_pkg_dir" ]]; then
-  echo "Unable to resolve the npm package layout: $npm_cli" >&2
-  exit 2
-fi
 root_run "$INSTALL_BIN" -d -o root -g root -m 0755 "$BROKER_INSTALL_ROOT/lib"
 root_run "$INSTALL_BIN" -d -o root -g root -m 0755 "$BROKER_INSTALL_ROOT/lib/node_modules"
-root_run cp -RL "$npm_pkg_dir" "$BROKER_INSTALL_ROOT/lib/node_modules/npm"
-root_run "$CHOWN_BIN" -R root:root "$BROKER_INSTALL_ROOT/lib/node_modules/npm"
-root_run "$FIND_BIN" "$BROKER_INSTALL_ROOT/lib/node_modules/npm" -type d -exec chmod 0755 {} +
-root_run "$FIND_BIN" "$BROKER_INSTALL_ROOT/lib/node_modules/npm" -type f -exec chmod 0644 {} +
-npm_wrapper_tmp="$(mktemp)"
-cat >"$npm_wrapper_tmp" <<EOF
-#!/bin/sh
-# Ashley broker-owned npm launcher (R5B). Regular file, root-owned.
-# Prepends the broker-owned bin dir so children (tsc, vitest) resolve
-# /usr/bin/env node against the pinned broker node binary only.
-export PATH="$BROKER_INSTALL_ROOT/bin:\$PATH"
-exec "$BROKER_INSTALL_ROOT/bin/node" "$BROKER_INSTALL_ROOT/lib/node_modules/npm/bin/npm-cli.js" "\$@"
-EOF
-root_run "$INSTALL_BIN" -o root -g root -m 0755 "$npm_wrapper_tmp" "$BROKER_INSTALL_ROOT/bin/npm"
-rm -f "$npm_wrapper_tmp"
-maybe_fail during_npm_wrapper_installation
-
-root_run cp -R "$ROOT/apps/sandbox-broker/dist/." "$BROKER_INSTALL_ROOT/dist/"
-maybe_fail during_broker_dist_installation
-root_run "$CHOWN_BIN" -R root:root "$BROKER_INSTALL_ROOT/dist"
-root_run "$FIND_BIN" "$BROKER_INSTALL_ROOT/dist" -type d -exec chmod 0755 {} +
-root_run "$FIND_BIN" "$BROKER_INSTALL_ROOT/dist" -type f -exec chmod 0644 {} +
-root_run "$INSTALL_BIN" -o root -g root -m 0644 "$ROOT/apps/sandbox-broker/package.json" \
-  "$BROKER_INSTALL_ROOT/package.json"
-
 root_run "$INSTALL_BIN" -d -o root -g root -m 0755 "$BROKER_INSTALL_ROOT/node_modules"
 root_run "$INSTALL_BIN" -d -o root -g root -m 0755 "$BROKER_INSTALL_ROOT/node_modules/@composer-assistant"
 root_run "$INSTALL_BIN" -d -o root -g root -m 0755 "$BROKER_INSTALL_ROOT/node_modules/@composer-assistant/sandbox-policy"
-root_run "$INSTALL_BIN" -d -o root -g root -m 0755 "$BROKER_INSTALL_ROOT/node_modules/@composer-assistant/sandbox-policy/dist"
-root_run cp -R "$ROOT/apps/sandbox-policy/dist/." "$BROKER_INSTALL_ROOT/node_modules/@composer-assistant/sandbox-policy/dist/"
-maybe_fail during_policy_runtime_installation
-root_run "$CHOWN_BIN" -R root:root "$BROKER_INSTALL_ROOT/node_modules/@composer-assistant/sandbox-policy/dist"
-root_run "$FIND_BIN" "$BROKER_INSTALL_ROOT/node_modules/@composer-assistant/sandbox-policy/dist" -type d -exec chmod 0755 {} +
-root_run "$FIND_BIN" "$BROKER_INSTALL_ROOT/node_modules/@composer-assistant/sandbox-policy/dist" -type f -exec chmod 0644 {} +
-root_run "$INSTALL_BIN" -o root -g root -m 0644 "$ROOT/apps/sandbox-policy/package.json" \
-  "$BROKER_INSTALL_ROOT/node_modules/@composer-assistant/sandbox-policy/package.json"
 
-# R5B workspace provisioning: the fixed `verify:agent-tsc` recipe anchors at
-# the broker workspace root (`cwdPolicy: workspace`), so the workspace must
-# contain a real `apps/agent-service` tree with its dependencies. The
-# packaging helper preserves package-manager executable-link semantics
-# (`node_modules/.bin/*` stays symlinked, e.g. `.bin/tsc -> ../typescript/bin/tsc`)
-# while materializing only the known `@composer-assistant/*` workspace package
-# links as real self-contained package trees, so the staged workspace can never
-# reproduce `Cannot find module '../lib/tsc.js'` and never resolves back into
-# the live checkout. The broker process owns the result.
-root_run "$INSTALL_BIN" -d -o ashley-sandbox -g ashley-sandbox -m 0750 \
-  "$SANDBOX_STATE_ROOT/workspace/apps"
-root_run "$BROKER_INSTALL_ROOT/bin/node" "$SCRIPT_DIR/provision-workspace.mjs" \
-  --source "$ROOT/apps/agent-service" \
-  --dest "$ENGINEERING_WORKSPACE" \
-  --workspace "@composer-assistant/sandbox-policy=$ROOT/apps/sandbox-policy" \
-  --workspace "@composer-assistant/sandbox-broker=$ROOT/apps/sandbox-broker"
-maybe_fail during_workspace_provisioning
+# Commit broker runtime from stage
+root_run cp -a "$STAGE_BROKER_DIR/." "$BROKER_INSTALL_ROOT/"
+root_run "$CHOWN_BIN" -R root:root "$BROKER_INSTALL_ROOT"
+root_run "$FIND_BIN" "$BROKER_INSTALL_ROOT" -type d -exec chmod 0755 {} +
+root_run "$FIND_BIN" "$BROKER_INSTALL_ROOT/dist" -type f -exec chmod 0644 {} +
+root_run "$FIND_BIN" "$BROKER_INSTALL_ROOT/bin" -type f -exec chmod 0755 {} +
+maybe_fail during_commit_runtime
+
+# Commit workspace from stage
+root_run "$INSTALL_BIN" -d -o ashley-sandbox -g ashley-sandbox -m 0750 "$SANDBOX_STATE_ROOT/workspace/apps"
+root_run rm -rf "$ENGINEERING_WORKSPACE"
+root_run cp -a "$STAGE_WORKSPACE_DIR" "$ENGINEERING_WORKSPACE"
 root_run "$CHOWN_BIN" -R ashley-sandbox:ashley-sandbox "$ENGINEERING_WORKSPACE"
+maybe_fail during_commit_workspace
 
-peer_helper_tmp="$(mktemp)"
-env_tmp=""
-trap 'rm -f "${env_tmp:-}" "${peer_helper_tmp:-}"' EXIT
-"$CC_BIN" -O2 -Wall -Wextra -o "$peer_helper_tmp" \
-  "$ROOT/apps/sandbox-broker/src/peer-credentials-helper.c"
-root_run "$INSTALL_BIN" -o root -g root -m 0755 "$peer_helper_tmp" \
-  "$BROKER_INSTALL_ROOT/bin/peer-credentials"
-maybe_fail during_peer_helper_installation
-root_run "$INSTALL_BIN" -o root -g root -m 0644 "$RECIPE_MANIFEST" \
-  "$SANDBOX_STATE_ROOT/meta/recipes.json"
-maybe_fail during_recipes_installation
+# Commit recipes and trust artifacts
+root_run "$INSTALL_BIN" -o root -g root -m 0644 "$RECIPE_MANIFEST" "$SANDBOX_STATE_ROOT/meta/recipes.json"
+root_run "$INSTALL_BIN" -o root -g ashley-sandbox -m 0644 "$OWNER_PUBLIC_KEY" "$SANDBOX_STATE_ROOT/meta/keys/owner/$owner_key_name"
+root_run "$INSTALL_BIN" -o root -g ashley-sandbox -m 0644 "$CONTINUITY_PUBLIC_KEY" "$SANDBOX_STATE_ROOT/meta/keys/continuity/$continuity_key_name"
+root_run "$INSTALL_BIN" -o root -g ashley-sandbox -m 0644 "$DELEGATED_PUBLIC_KEY" "$SANDBOX_STATE_ROOT/meta/keys/delegated/$delegated_key_name"
+root_run "$INSTALL_BIN" -o root -g ashley-sandbox -m 0640 "$CAPABILITY_KEY" "$SANDBOX_STATE_ROOT/meta/keys/broker/broker-session-capability.key.enc"
+root_run "$INSTALL_BIN" -o root -g ashley-sandbox -m 0640 "$MASTER_PASSPHRASE" "$SANDBOX_STATE_ROOT/meta/keys/broker/master.pass"
+root_run "$INSTALL_BIN" -o root -g ashley-sandbox -m 0644 "$POLICY_ARTIFACT" "$SANDBOX_STATE_ROOT/meta/policy/policy.json"
+root_run "$INSTALL_BIN" -o root -g ashley-sandbox -m 0644 "$POLICY_SIGNATURE" "$SANDBOX_STATE_ROOT/meta/policy/policy.json.sig"
 
-root_run "$INSTALL_BIN" -o root -g ashley-sandbox -m 0644 "$OWNER_PUBLIC_KEY" \
-  "$SANDBOX_STATE_ROOT/meta/keys/owner/$owner_key_name"
-root_run "$INSTALL_BIN" -o root -g ashley-sandbox -m 0644 "$CONTINUITY_PUBLIC_KEY" \
-  "$SANDBOX_STATE_ROOT/meta/keys/continuity/$continuity_key_name"
-root_run "$INSTALL_BIN" -o root -g ashley-sandbox -m 0644 "$DELEGATED_PUBLIC_KEY" \
-  "$SANDBOX_STATE_ROOT/meta/keys/delegated/$delegated_key_name"
-root_run "$INSTALL_BIN" -o root -g ashley-sandbox -m 0640 "$CAPABILITY_KEY" \
-  "$SANDBOX_STATE_ROOT/meta/keys/broker/broker-session-capability.key.enc"
-root_run "$INSTALL_BIN" -o root -g ashley-sandbox -m 0640 "$MASTER_PASSPHRASE" \
-  "$SANDBOX_STATE_ROOT/meta/keys/broker/master.pass"
-root_run "$INSTALL_BIN" -o root -g ashley-sandbox -m 0644 "$POLICY_ARTIFACT" \
-  "$SANDBOX_STATE_ROOT/meta/policy/policy.json"
-root_run "$INSTALL_BIN" -o root -g ashley-sandbox -m 0644 "$POLICY_SIGNATURE" \
-  "$SANDBOX_STATE_ROOT/meta/policy/policy.json.sig"
-
-# Public trust artifacts for the agent user: the signed policy pair and the
-# delegated runtime public key are copied into the agent's key directory so
-# the operator-side one-shot recipe driver can verify the broker's active
-# policy and the delegated signing keypair without touching broker-owned
-# state. Private key material is never installed by this script.
-agent_home="$("$GETENT_BIN" passwd "$AGENT_USER" | cut -d: -f6)"
-if [[ -z "$agent_home" || ! -d "$agent_home" ]]; then
-  echo "Unable to resolve agent home directory: $AGENT_USER" >&2
-  exit 2
-fi
-agent_keys_dir="$agent_home/.composer-assistant/keys"
+# Agent public trust artifacts
 root_run "$INSTALL_BIN" -d -o "$AGENT_USER" -g "$AGENT_USER" -m 0700 "$agent_keys_dir"
-root_run "$INSTALL_BIN" -o "$AGENT_USER" -g "$AGENT_USER" -m 0640 "$POLICY_ARTIFACT" \
-  "$agent_keys_dir/policy.json"
-root_run "$INSTALL_BIN" -o "$AGENT_USER" -g "$AGENT_USER" -m 0640 "$POLICY_SIGNATURE" \
-  "$agent_keys_dir/policy.json.sig"
-root_run "$INSTALL_BIN" -o "$AGENT_USER" -g "$AGENT_USER" -m 0640 "$DELEGATED_PUBLIC_KEY" \
-  "$agent_keys_dir/delegated-runtime-ed25519-v1.pub"
+if [[ "$POLICY_SAME_FILE" -eq 1 ]]; then
+  root_run "$CHOWN_BIN" "$AGENT_USER:$AGENT_USER" "$agent_keys_dir/policy.json"
+  root_run chmod 0640 "$agent_keys_dir/policy.json"
+else
+  root_run "$INSTALL_BIN" -o "$AGENT_USER" -g "$AGENT_USER" -m 0640 "$POLICY_ARTIFACT" "$agent_keys_dir/policy.json"
+fi
+root_run "$INSTALL_BIN" -o "$AGENT_USER" -g "$AGENT_USER" -m 0640 "$POLICY_SIGNATURE" "$agent_keys_dir/policy.json.sig"
+root_run "$INSTALL_BIN" -o "$AGENT_USER" -g "$AGENT_USER" -m 0640 "$DELEGATED_PUBLIC_KEY" "$agent_keys_dir/delegated-runtime-ed25519-v1.pub"
+maybe_fail during_commit_keys
 
+# Write broker.env
 env_tmp="$(mktemp)"
 cat >"$env_tmp" <<EOF
 ASHLEY_SANDBOX_OWNER_ID=$OWNER_ID
@@ -394,34 +482,18 @@ ASHLEY_SANDBOX_UNSHARE_PATH=$UNSHARE_PATH
 ASHLEY_SANDBOX_EXECUTABLE_NPM=$BROKER_INSTALL_ROOT/bin/npm
 EOF
 root_run "$INSTALL_BIN" -o root -g ashley-sandbox -m 0640 "$env_tmp" "$BROKER_CONFIG_ROOT/broker.env"
+rm -f "$env_tmp"
 
+# Install systemd unit files
 for unit in ashley-exec-broker.socket ashley-exec-broker.service; do
   rendered="$(mktemp)"
   sed -e "s|@NODE@|$BROKER_INSTALL_ROOT/bin/node|g" "$SCRIPT_DIR/systemd/$unit" >"$rendered"
   root_run "$INSTALL_BIN" -o root -g root -m 0644 "$rendered" "$SYSTEMD_UNIT_ROOT/$unit"
   rm -f "$rendered"
 done
+maybe_fail during_commit_units
 
-if ! (cd "$BROKER_INSTALL_ROOT" && root_run "$BROKER_INSTALL_ROOT/bin/node" --input-type=module -e "await import('@composer-assistant/sandbox-policy')"); then
-  echo 'Production module-resolution smoke check failed.' >&2
-  exit 2
-fi
-
-# main.js requires a socket argument or socket activation. We verify it compiles cleanly.
-if ! (cd "$BROKER_INSTALL_ROOT" && root_run "$BROKER_INSTALL_ROOT/bin/node" --check "$BROKER_INSTALL_ROOT/dist/main.js"); then
-  echo 'Broker entrypoint syntax/compilation check failed.' >&2
-  exit 2
-fi
-
-if ! root_run "$FIND_BIN" "$BROKER_INSTALL_ROOT" -not -user root -print -quit | grep -q .; then
-  # Assertion passed: no files found that are not owned by root
-  :
-else
-  echo "FATAL: Found files in $BROKER_INSTALL_ROOT not owned by root!" >&2
-  exit 2
-fi
-
-maybe_fail during_enumeration
+# Publish provenance manifests atomically
 PROVENANCE_FAIL_ARGS=()
 if [[ -n "$INSTALL_FAIL_AT" ]]; then
   PROVENANCE_FAIL_ARGS=(--fail-at "$INSTALL_FAIL_AT")
@@ -436,10 +508,23 @@ root_run python3 "$PROVENANCE_HELPER" publish \
   --workspace-manifest "$WORKSPACE_MANIFEST" \
   --source-commit "$source_commit" \
   "${PROVENANCE_FAIL_ARGS[@]}"
+maybe_fail during_commit_publish
+
+# Update transaction state to COMMITTED
+TX_STATE="COMMITTED"
+python3 - "$TX_FILE" "$source_commit" <<'PY'
+import json, sys, time
+path, commit = sys.argv[1:]
+data = {"state": "COMMITTED", "installedCommit": commit, "completedAt": int(time.time() * 1000)}
+with open(path, "w", encoding="utf-8") as f:
+    json.dump(data, f, indent=2)
+PY
 
 root_run "$SYSTEMCTL_BIN" daemon-reload
-
 root_run "$SYSTEMCTL_BIN" enable --now ashley-exec-broker.socket
+
+# Cleanup staging
+root_run rm -rf "$STAGE_ROOT"
 
 printf '%s\n' 'Sandbox broker installation completed.'
 printf '%s\n' 'The agent user was added to ashley-broker; log out/in or reboot before testing IPC.'

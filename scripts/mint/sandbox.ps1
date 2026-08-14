@@ -6,7 +6,7 @@ This wrapper never copies private keys; the key paths are remote paths to public
 key files already staged on Mint.
 #>
 param(
-  [ValidateSet("Preflight", "Status", "Install", "Remove", "StagePublicKeys")]
+  [ValidateSet("Preflight", "Status", "Readiness", "Lifecycle", "Install", "Remove", "StagePublicKeys")]
   [string]$Action = "Preflight",
   [switch]$Apply,
   [switch]$PushFirst,
@@ -160,6 +160,8 @@ if ($PushFirst) {
 switch ($Action) {
   "Preflight" { $lines += "bash $scriptPath/preflight.sh" }
   "Status" { $lines += "bash $scriptPath/status.sh" }
+  "Readiness" { $lines += "bash $scriptPath/status.sh --readiness" }
+  "Lifecycle" { $lines += "bash $scriptPath/status.sh --lifecycle" }
   "Install" {
     $installArgs = @("bash", "$scriptPath/install.sh", "--apply")
     if ($AgentUser) { $installArgs += @("--agent-user", $AgentUser) }

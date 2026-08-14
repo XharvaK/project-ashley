@@ -7,6 +7,10 @@ die() {
   exit 1
 }
 [[ "$EXPECTED_SOURCE_COMMIT" =~ ^[a-f0-9]{40}$ ]] || die source_commit_invalid
+if ! sudo -n true 2>/dev/null; then
+  printf 'BLOCKED sudo_noninteractive_unavailable: Owner terminal required; active sudo session not established in this execution scope. Run sudo -v before qualification.\n' >&2
+  exit 77
+fi
 SERVICE="ashley-exec-broker.service"
 SOCKET="ashley-exec-broker.socket"
 QUALIFICATION_BASE="/var/lib/ashley-sandbox/qualification/sandbox-isolation-02c/runs"
@@ -510,7 +514,8 @@ BROKER_BOUNDARY="$(boundary_fingerprint "$SERVICE")" || die broker_boundary_unav
 MAIN_PID="$(systemctl show "$SERVICE" -p MainPID --value)"
 [[ "$MAIN_PID" =~ ^[1-9][0-9]*$ ]] || die service_pid_missing
 if sudo -n grep -zq 'ASHLEY_SANDBOX_BROKER_ENABLED=true' "/proc/$MAIN_PID/environ"; then
-  die service_gate_enabled
+  printf 'BLOCKED host_active_broker_gate_enabled: host is activated; canonical DEACTIVATE transition required before qualification (run scripts/mint/rollback-engineering.sh).\n' >&2
+  exit 1
 else
   gate_status=$?
   [[ "$gate_status" -eq 1 ]] || die service_gate_unverifiable
@@ -542,7 +547,7 @@ verify_runtime_import_closure() {
     PATH=/usr/bin \
     "$NODE_BIN" \
     --input-type=module \
-    --eval 'for (const modulePath of process.argv.slice(1)) await import(modulePath)' \
+    --eval 'const { pathToFileURL } = await import("node:url"); for (const modulePath of process.argv.slice(1)) await import(pathToFileURL(modulePath).href)' \
     "$RUNTIME_ROOT/execution/qualification-toolchain.js" \
     "$RUNTIME_ROOT/execution/bubblewrap-qualification-runner.js" \
     "$RUNTIME_ROOT/execution/bubblewrap-execution-isolation.js" \

@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -164,9 +164,13 @@ describe("installer source preflight", () => {
     writeFileSync(path.join(workspace, "package.json"), "{\"name\":\"agent\"}\n");
     writeFileSync(path.join(workspace, "src", "index.ts"), "export {};\n");
     writeFileSync(path.join(toolchain, "bin", "npm-cli.js"), "toolchain\n");
-    for (const name of ["owner.pub", "continuity.pub", "delegated.pub", "capability.key", "master.pass", "policy.json", "policy.sig"]) {
+    for (const name of ["owner.pub", "continuity.pub", "delegated.pub", "capability.key", "master.pass", "policy.sig"]) {
       writeFileSync(path.join(keys, name), `${name}\n`);
     }
+    writeFileSync(
+      path.join(keys, "policy.json"),
+      JSON.stringify({ policyId: "test-policy", version: "1.0", expiresAt: "2026-08-20T00:00:00Z" }) + "\n",
+    );
     executable(preflight, "#!/bin/sh\nexit 0\n");
     executable(path.join(fakeBin, "sudo"), "#!/bin/sh\nif [ \"${1:-}\" = -v ]; then exit 0; fi\nexec \"$@\"\n");
     executable(
@@ -180,7 +184,25 @@ esac
 exit 0
 `,
     );
-    executable(path.join(fakeBin, "node"), "#!/bin/sh\nexit 0\n");
+    executable(
+      path.join(fakeBin, "node"),
+      `#!/bin/sh
+case "$*" in
+  *"provision-workspace.mjs"*)
+    dest=""
+    while [ $# -gt 0 ]; do
+      if [ "$1" = "--dest" ]; then dest="$2"; shift 2; else shift; fi
+    done
+    if [ -n "$dest" ]; then
+      mkdir -p "$dest/src"
+      printf 'export {};\\n' > "$dest/src/index.ts"
+      printf '{"name":"agent"}\\n' > "$dest/package.json"
+    fi
+    ;;
+esac
+exit 0
+`,
+    );
     executable(path.join(fakeBin, "systemctl"), "#!/bin/sh\nexit 0\n");
     executable(path.join(fakeBin, "chown"), "#!/bin/sh\nexit 0\n");
     executable(path.join(fakeBin, "chown.exe"), "#!/bin/sh\nexit 0\n");
@@ -328,21 +350,12 @@ fi
     if (initialVerification.error) throw initialVerification.error;
     expect(initialVerification.status, initialVerification.stderr).toBe(0);
 
+    // PREPARE failures must leave the existing installed runtime and manifests intact
     for (const stage of [
-      "before_invalidation",
-      "after_invalidation",
-      "during_npm_wrapper_installation",
-      "during_broker_dist_installation",
-      "during_policy_runtime_installation",
-      "during_workspace_provisioning",
-      "during_peer_helper_installation",
-      "during_recipes_installation",
-      "during_enumeration",
-      "during_hashing",
-      "during_runtime_temp_creation",
-      "before_runtime_rename",
-      "after_runtime_rename",
-      "after_workspace_rename",
+      "during_prepare_validation",
+      "during_prepare_build",
+      "during_prepare_staging",
+      "during_prepare_verification",
     ]) {
       const attempt = spawnSync(BASH, [posix(INSTALL), "--apply", "--repo", posix(repo)], {
         encoding: "utf8",
@@ -353,26 +366,19 @@ fi
       expect(attempt.stderr).toContain(`injected_failure:${stage}`);
       const verification = spawnSync(PYTHON, provenanceArgs, { encoding: "utf8" });
       if (verification.error) throw verification.error;
-      if (stage === "before_invalidation" || stage === "after_workspace_rename") {
-        expect(verification.status, `${stage}: ${verification.stderr}`).toBe(0);
-      } else {
-        expect(verification.status, `${stage} unexpectedly verified`).not.toBe(0);
-      }
-
-      if (stage !== "after_workspace_rename") {
-        const restore = spawnSync(
-          PYTHON,
-          [
-            HELPER,
-            "publish",
-            ...provenanceArgs.slice(2),
-          ],
-          { encoding: "utf8" },
-        );
-        if (restore.error) throw restore.error;
-        expect(restore.status, `${stage}: ${restore.stderr}`).toBe(0);
-      }
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      expect(verification.status, `PREPARE failure at ${stage} must leave previous installation verified`).toBe(0);
     }
+
+    // Policy alias test: same-file policy.json copy succeeds idempotently
+    const agentKeysDir = path.join(home, ".composer-assistant", "keys");
+    mkdirSync(agentKeysDir, { recursive: true });
+    const sameFilePolicy = path.join(agentKeysDir, "policy.json");
+    copyFileSync(path.join(keys, "policy.json"), sameFilePolicy);
+    const aliasAttempt = spawnSync(BASH, [posix(INSTALL), "--apply", "--repo", posix(repo)], {
+      encoding: "utf8",
+      env: { ...env, ASHLEY_SANDBOX_POLICY_ARTIFACT: posix(sameFilePolicy) },
+    });
+    if (aliasAttempt.error) throw aliasAttempt.error;
+    expect(aliasAttempt.status, `${aliasAttempt.stdout}\n${aliasAttempt.stderr}`).toBe(0);
   }, 180_000);
 });

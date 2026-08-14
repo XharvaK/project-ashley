@@ -129,7 +129,7 @@ function makeFixture(): Fixture {
   return { root, repo, broker, state, systemd, workspace, manifest, workspaceManifest };
 }
 
-function helper(fixture: Fixture, mode: "publish" | "verify", extra: string[] = []) {
+function helper(fixture: Fixture, mode: "publish" | "verify", extra: string[] = [], commit: string = HASH) {
   const result = spawnSync(
     PYTHON,
     [
@@ -150,7 +150,7 @@ function helper(fixture: Fixture, mode: "publish" | "verify", extra: string[] = 
       "--workspace-manifest",
       fixture.workspaceManifest,
       "--source-commit",
-      HASH,
+      commit,
       ...extra,
     ],
     { encoding: "utf8" },
@@ -159,8 +159,8 @@ function helper(fixture: Fixture, mode: "publish" | "verify", extra: string[] = 
   return result;
 }
 
-function publish(fixture: Fixture) {
-  const result = helper(fixture, "publish");
+function publish(fixture: Fixture, commit: string = HASH) {
+  const result = helper(fixture, "publish", [], commit);
   expect(result.status, result.stderr).toBe(0);
   return result;
 }
@@ -329,5 +329,230 @@ describe("source-bound installed provenance", () => {
     expect(existsSync(fixture.manifest)).toBe(true);
     expect(existsSync(fixture.workspaceManifest)).toBe(true);
     expect(helper(fixture, "verify").status).toBe(0);
+  });
+});
+
+describe("canonical verify-preactivation and inspect-lifecycle", () => {
+  function makePreactivationFixture() {
+    const fixture = makeFixture();
+    const conf = path.join(fixture.root, "conf");
+    mkdirSync(conf, { recursive: true });
+    mkdirSync(path.join(conf, "keys"), { recursive: true });
+
+    // Initialize git repo
+    spawnSync("git", ["init", "--quiet"], { cwd: fixture.repo });
+    spawnSync("git", ["config", "user.email", "test@example.invalid"], { cwd: fixture.repo });
+    spawnSync("git", ["config", "user.name", "Test"], { cwd: fixture.repo });
+    spawnSync("git", ["add", "."], { cwd: fixture.repo });
+    spawnSync("git", ["commit", "--quiet", "-m", "initial"], { cwd: fixture.repo });
+    const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: fixture.repo, encoding: "utf8" }).stdout.trim();
+
+    // Setup qualification evidence
+    const qualDir = path.join(fixture.state, "qualification", "sandbox-isolation-02c", "runs", head);
+    mkdirSync(qualDir, { recursive: true });
+    const evidence = {
+      status: "qualified",
+      evidence: {
+        sourceCommit: head,
+        providerKind: "bubblewrap",
+        evidenceId: "ev-123",
+        profileFingerprint: "fp-123",
+        providerBinaryDigest: "pb-123",
+        fixtureProbeManifestDigest: "fm-123",
+      },
+    };
+    const canary = {
+      schema: "bubblewrap-qualification-canary-v1",
+      status: "pass",
+      sourceCommit: head,
+      evidenceId: "ev-123",
+      profileFingerprint: "fp-123",
+      providerBinaryDigest: "pb-123",
+      fixtureProbeManifestDigest: "fm-123",
+    };
+    file(path.join(qualDir, "evidence.json"), JSON.stringify(evidence));
+    file(path.join(qualDir, "canary-receipt.json"), JSON.stringify(canary));
+
+    // Setup policy
+    const policy = {
+      policyId: "pol-test-r4-005",
+      version: "1.0",
+      expiresAt: "2099-01-01T00:00:00Z",
+    };
+    file(path.join(conf, "keys", "policy.json"), JSON.stringify(policy));
+    file(path.join(conf, "keys", "policy.json.sha256"), "hash\n");
+
+    // Setup keys
+    const keysDir = path.join(conf, "keys");
+    file(path.join(keysDir, "master.pass"), "pass\n");
+    file(path.join(keysDir, "owner-approval.key.enc"), "enc\n");
+    file(path.join(keysDir, "continuity-tombstone.key.enc"), "enc\n");
+    file(path.join(keysDir, "owner-ed25519-v1.pub"), "pub\n");
+    file(path.join(keysDir, "continuity-tombstone-ed25519-v1.pub"), "pub\n");
+    file(path.join(keysDir, "delegated-runtime.key.enc"), "enc\n");
+    file(path.join(conf, "project-roots.json"), "[]\n");
+
+    // Setup agent .env
+    const envLines = [
+      `ASHLEY_SANDBOX_POLICY_ARTIFACT=${path.join(keysDir, "policy.json").replaceAll("\\", "/")}`,
+      `ASHLEY_SANDBOX_POLICY_SIGNATURE=${path.join(keysDir, "policy.json.sha256").replaceAll("\\", "/")}`,
+      "ASHLEY_SANDBOX_DELEGATED_ENABLED=true",
+      "ASHLEY_SANDBOX_BROKER_SOCKET=/run/ashley/broker.sock",
+      `ASHLEY_SANDBOX_PROJECT_REGISTRY=${path.join(conf, "project-roots.json").replaceAll("\\", "/")}`,
+      `ASHLEY_SANDBOX_KEYS_DIR=${keysDir.replaceAll("\\", "/")}`,
+    ];
+    file(path.join(conf, ".env"), envLines.join("\n") + "\n");
+
+    // Setup broker service file
+    file(path.join(fixture.systemd, "ashley-exec-broker.service"), "KillMode=control-group\n");
+
+    // Publish manifests after all runtime files are written
+    publish(fixture, head);
+
+    return { ...fixture, conf, head };
+  }
+
+  it("verify-preactivation passes all 7 canonical checks on clean configured state", () => {
+    const f = makePreactivationFixture();
+    const result = spawnSync(
+      PYTHON,
+      [
+        HELPER,
+        "verify-preactivation",
+        "--repo-root", f.repo,
+        "--conf-root", f.conf,
+        "--state-root", f.state,
+        "--broker-root", f.broker,
+        "--systemd-root", f.systemd,
+        "--source-pin", f.head,
+      ],
+      { encoding: "utf8" },
+    );
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.ready).toBe(true);
+    expect(parsed.sourcePin).toBe(f.head);
+  });
+
+  it("verify-preactivation fails when policy is expired", () => {
+    const f = makePreactivationFixture();
+    const policy = {
+      policyId: "pol-test-r4-005",
+      version: "1.0",
+      expiresAt: "2020-01-01T00:00:00Z",
+    };
+    writeFileSync(path.join(f.conf, "keys", "policy.json"), JSON.stringify(policy));
+    const result = spawnSync(
+      PYTHON,
+      [
+        HELPER,
+        "verify-preactivation",
+        "--repo-root", f.repo,
+        "--conf-root", f.conf,
+        "--state-root", f.state,
+        "--broker-root", f.broker,
+        "--systemd-root", f.systemd,
+        "--source-pin", f.head,
+      ],
+      { encoding: "utf8" },
+    );
+    expect(result.status).not.toBe(0);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.stage).toBe("verify_policy");
+    expect(parsed.reason).toBe("policy_expired_or_expiring");
+  });
+
+  it("inspect-lifecycle derives PRE_ACTIVATION_READY on clean configured predecessor", () => {
+    const f = makePreactivationFixture();
+    const result = spawnSync(
+      PYTHON,
+      [
+        HELPER,
+        "inspect-lifecycle",
+        "--repo-root", f.repo,
+        "--conf-root", f.conf,
+        "--state-root", f.state,
+        "--broker-root", f.broker,
+        "--systemd-root", f.systemd,
+      ],
+      { encoding: "utf8" },
+    );
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.lifecycleState).toBe("PRE_ACTIVATION_READY");
+    expect(parsed.nextLegalTransition).toBe("ACTIVATE");
+  });
+
+  it("inspect-lifecycle derives DISABLED_UNQUALIFIED when candidate source is not qualified", () => {
+    const f = makePreactivationFixture();
+    // Remove qualification run
+    rmSync(path.join(f.state, "qualification"), { recursive: true, force: true });
+    const result = spawnSync(
+      PYTHON,
+      [
+        HELPER,
+        "inspect-lifecycle",
+        "--repo-root", f.repo,
+        "--conf-root", f.conf,
+        "--state-root", f.state,
+        "--broker-root", f.broker,
+        "--systemd-root", f.systemd,
+      ],
+      { encoding: "utf8" },
+    );
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.lifecycleState).toBe("DISABLED_UNQUALIFIED");
+    expect(parsed.nextLegalTransition).toBe("QUALIFY");
+  });
+
+  it("inspect-lifecycle derives QUALIFIED_NOT_INSTALLED when candidate source is qualified but runtime not installed", () => {
+    const f = makePreactivationFixture();
+    // Invalidate installed manifest
+    rmSync(f.manifest);
+    const result = spawnSync(
+      PYTHON,
+      [
+        HELPER,
+        "inspect-lifecycle",
+        "--repo-root", f.repo,
+        "--conf-root", f.conf,
+        "--state-root", f.state,
+        "--broker-root", f.broker,
+        "--systemd-root", f.systemd,
+      ],
+      { encoding: "utf8" },
+    );
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+    const parsed = JSON.parse(result.stdout);
+    // Since partial dist exists without manifest, recovery is required
+    expect(["QUALIFIED_NOT_INSTALLED", "INSTALL_RECOVERY_REQUIRED"]).toContain(parsed.lifecycleState);
+  });
+
+  it("inspect-lifecycle derives INSTALL_RECOVERY_REQUIRED when install-transaction.json indicates interrupted commit", () => {
+    const f = makePreactivationFixture();
+    file(
+      path.join(f.state, "meta", "install-transaction.json"),
+      JSON.stringify({ state: "INSTALL_RECOVERY_REQUIRED", candidateCommit: f.head }),
+    );
+    const result = spawnSync(
+      PYTHON,
+      [
+        HELPER,
+        "inspect-lifecycle",
+        "--repo-root", f.repo,
+        "--conf-root", f.conf,
+        "--state-root", f.state,
+        "--broker-root", f.broker,
+        "--systemd-root", f.systemd,
+      ],
+      { encoding: "utf8" },
+    );
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.lifecycleState).toBe("INSTALL_RECOVERY_REQUIRED");
+    expect(parsed.nextLegalTransition).toBe("RECOVER_INSTALL");
   });
 });

@@ -1073,7 +1073,7 @@ describe("02J canonical address-family set comparison", () => {
 
   function runNormalization(input: string) {
     return spawnSync(
-      "bash",
+      BASH,
       [
         "-c",
         [
@@ -1090,7 +1090,7 @@ describe("02J canonical address-family set comparison", () => {
 
   function runTokenSetCheck(actual: string, expected: string) {
     return spawnSync(
-      "bash",
+      BASH,
       [
         "-c",
         [
@@ -1118,7 +1118,7 @@ describe("02J canonical address-family set comparison", () => {
     namespaces = "user mnt pid net uts ipc",
   ) {
     return spawnSync(
-      "bash",
+      BASH,
       [
         "-c",
         [
@@ -1235,7 +1235,7 @@ describe("02K complete qualification runtime import closure", () => {
     omitted: "none" | "bounded-output" | "crypto-types" = "none",
   ) {
     return spawnSync(
-      "bash",
+      BASH,
       [
         "-c",
         [
