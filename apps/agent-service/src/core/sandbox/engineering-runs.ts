@@ -44,7 +44,6 @@ CREATE TABLE IF NOT EXISTS engineering_admissions (
   status TEXT NOT NULL,
   created_at_ms INTEGER NOT NULL
 );
-DROP INDEX IF EXISTS idx_engineering_admissions_source;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_engineering_admissions_reactive_source
   ON engineering_admissions (source_ref)
   WHERE source_kind = 'user_request';`;
@@ -76,6 +75,15 @@ export type PendingEngineeringAdmission = {
 
 export function ensureEngineeringTables(db: DatabaseSync): void {
   db.exec(RUNS_DDL);
+  // Migration check: drop legacy non-partial index only if it currently exists in schema
+  const legacyIdx = db
+    .prepare(
+      `SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_engineering_admissions_source'`,
+    )
+    .get();
+  if (legacyIdx) {
+    db.exec(`DROP INDEX IF EXISTS idx_engineering_admissions_source;`);
+  }
   db.exec(ADMISSIONS_DDL);
   db.exec(SIGNALS_DDL);
   db.exec(RUNTIME_FLAGS_DDL);
@@ -311,12 +319,23 @@ export function isSandboxOperationalFollowUp(message: string): boolean {
  * Correlate a recent/active reactive engineering task to its source message
  * or genuine follow-up query, strictly isolating reactive operational concerns from
  * unrelated proactive runs and unrelated user turns.
+ *
+ * Follow-up correlation requires:
+ * 1. isSandboxOperationalFollowUp(userMessage) === true
+ * 2. Same active thread (threadId)
+ * 3. Originating sandbox source message is the immediately preceding USER message
+ *    in that thread before the current user turn (intervening assistant turns are permitted;
+ *    any intervening user turn breaks correlation)
+ * 4. Task belongs to same owner with admissionCause === "user_request"
+ * 5. Bounded temporal relevance holds
  */
 export function findCorrelatedEngineeringTask(
   db: DatabaseSync,
   ownerId: string,
   options?: {
     messageEntityUuid?: string;
+    threadId?: string;
+    userMessageId?: number;
     userMessage?: string;
     maxAgeMs?: number;
     nowMs?: number;
@@ -336,20 +355,52 @@ export function findCorrelatedEngineeringTask(
     if (match) return match;
   }
 
-  // Case 2: Immediate genuine follow-up query (e.g. "Could you?", "Did it work?")
-  // with bounded temporal relevance (default 30 mins)
-  if (options?.userMessage && isSandboxOperationalFollowUp(options.userMessage)) {
-    const maxAge = options.maxAgeMs ?? 30 * 60 * 1000;
-    const now = options.nowMs ?? Date.now();
-    const reactiveTasks = tasks
-      .filter(
+  // Case 2: New follow-up user message grounded in the same thread's prior user turn
+  if (
+    options?.userMessage &&
+    options?.threadId &&
+    isSandboxOperationalFollowUp(options.userMessage)
+  ) {
+    // Find the immediately preceding USER message in this thread
+    const prevUserRow = options.userMessageId
+      ? (db
+          .prepare(
+            `SELECT entity_uuid, id, text, created_at
+             FROM mem_messages
+             WHERE thread_id = ? AND role = 'user' AND id < ?
+             ORDER BY id DESC
+             LIMIT 1`,
+          )
+          .get(options.threadId, options.userMessageId) as
+          | { entity_uuid: string | null; id: number; text: string; created_at: string }
+          | undefined)
+      : (db
+          .prepare(
+            `SELECT entity_uuid, id, text, created_at
+             FROM mem_messages
+             WHERE thread_id = ? AND role = 'user'
+             ORDER BY id DESC
+             LIMIT 1`,
+          )
+          .get(options.threadId) as
+          | { entity_uuid: string | null; id: number; text: string; created_at: string }
+          | undefined);
+
+    if (prevUserRow?.entity_uuid) {
+      const maxAge = options.maxAgeMs ?? 30 * 60 * 1000;
+      const now = options.nowMs ?? Date.now();
+
+      const candidate = tasks.find(
         (t) =>
           t.owner === ownerId &&
           t.admissionCause === "user_request" &&
-          (now - (t.completedAtMs ?? t.startedAtMs ?? now)) <= maxAge,
-      )
-      .sort((a, b) => (b.completedAtMs ?? b.startedAtMs ?? 0) - (a.completedAtMs ?? a.startedAtMs ?? 0));
-    return reactiveTasks[0] ?? null;
+          t.groundingRefs.includes(prevUserRow.entity_uuid!) &&
+          now - (t.completedAtMs ?? t.startedAtMs ?? now) <= maxAge,
+      );
+      if (candidate) {
+        return candidate;
+      }
+    }
   }
 
   // Otherwise: unrelated turns or proactive runs MUST NOT correlate

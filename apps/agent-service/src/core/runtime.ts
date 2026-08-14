@@ -187,10 +187,12 @@ import {
   detectReactiveSandboxRoundtripRequest,
 } from "./sandbox/reactive-admission.js";
 import { executeReactiveSandboxTask } from "./sandbox/reactive-execution.js";
-import type {
-  RoundtripEffectEvidence,
-  OperationalClaimState,
+import {
+  isVerifiedRoundtripEffectEvidence,
+  type RoundtripEffectEvidence,
+  type OperationalClaimState,
 } from "./sandbox/engineering-types.js";
+import type { SandboxBrokerClient } from "./sandbox/broker-client.js";
 import type { AttachmentIntakeRef } from "./perception/types.js";
 import { runPerceptionTurn } from "./perception/index.js";
 import { thoughtDeadlineAtMs } from "./perception/turn-budget.js";
@@ -435,6 +437,7 @@ export class AshleyCore {
   private readonly activeOwners = new Set<string>();
   private readonly sessionId: string | null;
   private readonly sandboxBrokerTransport: BrokerClientTransport | null;
+  private readonly sandboxBrokerClient: SandboxBrokerClient | null;
   private readonly reflectionReviewAdjudicator: OpenCognitiveReviewAdjudicator | undefined;
 
   constructor(
@@ -442,6 +445,7 @@ export class AshleyCore {
     options?: {
       reflectionMode?: ReflectionMode;
       sandboxBrokerTransport?: BrokerClientTransport | null;
+      sandboxBrokerClient?: SandboxBrokerClient | null;
       reflectionReviewAdjudicator?: OpenCognitiveReviewAdjudicator;
     },
   ) {
@@ -461,6 +465,10 @@ export class AshleyCore {
       options && "sandboxBrokerTransport" in options
         ? options.sandboxBrokerTransport ?? null
         : createConfiguredUnixBrokerTransport();
+    this.sandboxBrokerClient =
+      options && "sandboxBrokerClient" in options
+        ? options.sandboxBrokerClient ?? null
+        : null;
     refreshSandboxQualificationBaseline();
     if (this.sandboxBrokerTransport && env.memoryOwnerId) {
       void probeSandboxBrokerReachability(
@@ -834,8 +842,9 @@ export class AshleyCore {
             ownerId: input.ownerId,
             admissionId: reactiveAdmission.admissionId,
             messageEntityUuid: messageEntityUuid ?? "",
+            brokerClient: this.sandboxBrokerClient,
           });
-          if (runRes.ok && runRes.evidence?.verified) {
+          if (runRes.ok && isVerifiedRoundtripEffectEvidence(runRes.evidence)) {
             decision.operationalLicense = {
               state: "succeeded",
               taskId: runRes.taskId,
@@ -865,7 +874,7 @@ export class AshleyCore {
             messageEntityUuid: messageEntityUuid ?? undefined,
           });
           if (correlated) {
-            if (correlated.status === "completed" && correlated.effectEvidence?.verified) {
+            if (correlated.status === "completed" && isVerifiedRoundtripEffectEvidence(correlated.effectEvidence)) {
               decision.operationalLicense = {
                 state: "succeeded",
                 taskId: correlated.taskId,
@@ -929,10 +938,12 @@ export class AshleyCore {
       } else {
         const correlated = findCorrelatedEngineeringTask(this.db, input.ownerId, {
           messageEntityUuid: messageEntityUuid ?? undefined,
+          threadId: reservation.threadId,
+          userMessageId,
           userMessage: message,
         });
         if (correlated) {
-          if (correlated.status === "completed" && correlated.effectEvidence?.verified) {
+          if (correlated.status === "completed" && isVerifiedRoundtripEffectEvidence(correlated.effectEvidence)) {
             decision.operationalLicense = {
               state: "succeeded",
               taskId: correlated.taskId,

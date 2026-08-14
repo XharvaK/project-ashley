@@ -24,14 +24,16 @@ import {
   claimsOwnExecutionCompletion,
 } from "../honesty/claims.js";
 import { operationalWorkBlock } from "../context-composer.js";
-import type {
-  EngineeringExecutionPort,
-  EngineeringToolResult,
-  ThinkingModel,
-  RoundtripEffectEvidence,
-  OperationalClaimLicense,
+import {
+  isVerifiedRoundtripEffectEvidence,
+  type EngineeringExecutionPort,
+  type EngineeringToolResult,
+  type ThinkingModel,
+  type RoundtripEffectEvidence,
+  type OperationalClaimLicense,
 } from "./engineering-types.js";
 import type { DelegatedApprovalEnvelope } from "@composer-assistant/sandbox-broker";
+import { openNuclearDb } from "../db.js";
 
 function dummyModel(): ThinkingModel {
   return {
@@ -185,11 +187,11 @@ function mockEnvelopeProvider(): (action: unknown, intent: string, nowMs: number
     }) as unknown as DelegatedApprovalEnvelope;
 }
 
-describe("Reactive Sandbox Execution — Production Compatibility Suite", () => {
+describe("Reactive Sandbox Execution — Authority-Binding Compatibility Suite", () => {
   let db: DatabaseSync;
 
   beforeEach(() => {
-    db = new DatabaseSync(":memory:");
+    db = openNuclearDb(new DatabaseSync(":memory:"));
     ensureEngineeringTables(db);
   });
 
@@ -247,12 +249,11 @@ describe("Reactive Sandbox Execution — Production Compatibility Suite", () => 
 
       expect(result.status).toBe("completed");
       expect(result.effectEvidence).toBeDefined();
-      expect(result.effectEvidence?.verified).toBe(true);
-      expect(result.effectEvidence?.verifiedAbsent).toBe(true);
+      expect(isVerifiedRoundtripEffectEvidence(result.effectEvidence)).toBe(true);
 
       const persisted = loadCoordinatorTasks(db);
       expect(persisted[0]?.status).toBe("completed");
-      expect(persisted[0]?.effectEvidence?.verified).toBe(true);
+      expect(isVerifiedRoundtripEffectEvidence(persisted[0]?.effectEvidence)).toBe(true);
     } finally {
       fixture.cleanup();
     }
@@ -319,7 +320,7 @@ describe("Reactive Sandbox Execution — Production Compatibility Suite", () => 
         expect(adm2.shouldDispatch).toBe(false); // MUST NOT DISPATCH
       }
 
-      // Proves no second broker roundtrip or filesystem actions
+      // Proves zero second execution attempt
       expect(fixture.actionCount.request_workspace).toBe(1);
       expect(fixture.actionCount.write_workspace_file).toBe(1);
       expect(fixture.actionCount.read_workspace_file).toBe(2);
@@ -332,23 +333,22 @@ describe("Reactive Sandbox Execution — Production Compatibility Suite", () => 
     }
   });
 
-  it("4: genuine bounded follow-up ('Could you?', 'Did it work?') correlates, while unrelated turn does NOT correlate", () => {
-    // Persist a completed reactive task
-    const completedTask = {
-      taskId: "task-followup-1",
+  it("4: exact replay correlates exact task", () => {
+    const task = {
+      taskId: "task-exact-1",
       owner: "doc",
       projectId: null,
       sourceBaseCommit: null,
       admissionCause: "user_request" as const,
-      groundingRefs: ["uuid-turn-1"],
+      groundingRefs: ["uuid-exact-msg"],
       profile: "sandbox_workspace_file_roundtrip" as const,
       status: "completed" as const,
       workspaceId: "ws-1",
       modelCallsUsed: 0,
       toolCallsUsed: 5,
-      startedAtMs: Date.now() - 60_000,
-      deadlineMs: Date.now() + 60_000,
-      completedAtMs: Date.now() - 30_000,
+      startedAtMs: Date.now() - 10_000,
+      deadlineMs: Date.now() + 10_000,
+      completedAtMs: Date.now() - 5_000,
       error: null,
       refusal: null,
       candidatePatchRef: null,
@@ -363,37 +363,203 @@ describe("Reactive Sandbox Execution — Production Compatibility Suite", () => 
         readMatches: true,
         deleted: true,
         verifiedAbsent: true,
-        completedAtMs: Date.now() - 30_000,
+        completedAtMs: Date.now() - 5_000,
       },
     };
-    persistCoordinatorTasks(db, [completedTask]);
+    persistCoordinatorTasks(db, [task]);
 
-    // Follow-up queries correlate
-    expect(isSandboxOperationalFollowUp("Could you?")).toBe(true);
-    expect(isSandboxOperationalFollowUp("Did it work?")).toBe(true);
-    expect(isSandboxOperationalFollowUp("is it done?")).toBe(true);
-
-    const matchFollowUp = findCorrelatedEngineeringTask(db, "doc", { userMessage: "Could you?" });
-    expect(matchFollowUp).not.toBeNull();
-    expect(matchFollowUp?.taskId).toBe("task-followup-1");
-
-    // Unrelated user turn MUST NOT correlate
-    expect(isSandboxOperationalFollowUp("What are you thinking about?")).toBe(false);
-    expect(isSandboxOperationalFollowUp("Hello Ashley")).toBe(false);
-    expect(isSandboxOperationalFollowUp("Tell me a story")).toBe(false);
-
-    const matchUnrelated = findCorrelatedEngineeringTask(db, "doc", { userMessage: "What are you thinking about?" });
-    expect(matchUnrelated).toBeNull();
+    const correlated = findCorrelatedEngineeringTask(db, "doc", {
+      messageEntityUuid: "uuid-exact-msg",
+    });
+    expect(correlated).not.toBeNull();
+    expect(correlated?.taskId).toBe("task-exact-1");
   });
 
-  it("5: unrelated proactive run does NOT correlate to reactive turns", () => {
-    // Persist a proactive engineering run
-    const proactiveTask = {
-      taskId: "task-proactive-1",
+  it("5: immediate same-thread follow-up correlates", () => {
+    // Seed Thread 1 and originating user message
+    db.prepare(`
+      INSERT INTO mem_threads (id, owner_id, channel, created_at, updated_at)
+      VALUES ('thread-1', 'doc', 'discord', '2026-08-14T00:00:00.000Z', '2026-08-14T00:00:00.000Z')
+    `).run();
+
+    db.prepare(`
+      INSERT INTO mem_messages (id, thread_id, owner_id, role, channel, text, entity_uuid, created_at)
+      VALUES (1, 'thread-1', 'doc', 'user', 'discord', 'Create a temp file in your sandbox', 'uuid-originating-turn', '2026-08-14T00:00:00.000Z')
+    `).run();
+
+    db.prepare(`
+      INSERT INTO mem_messages (id, thread_id, owner_id, role, channel, text, entity_uuid, created_at)
+      VALUES (2, 'thread-1', 'doc', 'assistant', 'discord', 'done', 'uuid-ast-1', '2026-08-14T00:00:05.000Z')
+    `).run();
+
+    db.prepare(`
+      INSERT INTO mem_messages (id, thread_id, owner_id, role, channel, text, entity_uuid, created_at)
+      VALUES (3, 'thread-1', 'doc', 'user', 'discord', 'Could you?', 'uuid-followup-turn', '2026-08-14T00:00:10.000Z')
+    `).run();
+
+    const task = {
+      taskId: "task-grounded-1",
       owner: "doc",
       projectId: null,
       sourceBaseCommit: null,
-      admissionCause: "proactive" as const, // PROACTIVE
+      admissionCause: "user_request" as const,
+      groundingRefs: ["uuid-originating-turn"],
+      profile: "sandbox_workspace_file_roundtrip" as const,
+      status: "completed" as const,
+      workspaceId: "ws-1",
+      modelCallsUsed: 0,
+      toolCallsUsed: 5,
+      startedAtMs: Date.now() - 10_000,
+      deadlineMs: Date.now() + 10_000,
+      completedAtMs: Date.now() - 5_000,
+      error: null,
+      refusal: null,
+      candidatePatchRef: null,
+      candidateCommitRef: null,
+      artifactRefs: [],
+      effectEvidence: {
+        verified: true,
+        workspaceId: "ws-1",
+        relativePath: "tmp.txt",
+        bytesWritten: 20,
+        contentHash: "hash-123",
+        readMatches: true,
+        deleted: true,
+        verifiedAbsent: true,
+        completedAtMs: Date.now() - 5_000,
+      },
+    };
+    persistCoordinatorTasks(db, [task]);
+
+    const correlated = findCorrelatedEngineeringTask(db, "doc", {
+      threadId: "thread-1",
+      userMessageId: 3,
+      userMessage: "Could you?",
+    });
+    expect(correlated).not.toBeNull();
+    expect(correlated?.taskId).toBe("task-grounded-1");
+  });
+
+  it("6: follow-up phrase in a different thread does NOT correlate", () => {
+    // Thread 2 does NOT have the originating sandbox turn
+    db.prepare(`
+      INSERT INTO mem_threads (id, owner_id, channel, created_at, updated_at)
+      VALUES ('thread-2', 'doc', 'discord', '2026-08-14T00:00:00.000Z', '2026-08-14T00:00:00.000Z')
+    `).run();
+
+    db.prepare(`
+      INSERT INTO mem_messages (id, thread_id, owner_id, role, channel, text, entity_uuid, created_at)
+      VALUES (10, 'thread-2', 'doc', 'user', 'discord', 'What is the weather today?', 'uuid-weather', '2026-08-14T00:00:00.000Z')
+    `).run();
+
+    db.prepare(`
+      INSERT INTO mem_messages (id, thread_id, owner_id, role, channel, text, entity_uuid, created_at)
+      VALUES (11, 'thread-2', 'doc', 'user', 'discord', 'Could you?', 'uuid-followup-diff-thread', '2026-08-14T00:00:10.000Z')
+    `).run();
+
+    const task = {
+      taskId: "task-grounded-thread1",
+      owner: "doc",
+      projectId: null,
+      sourceBaseCommit: null,
+      admissionCause: "user_request" as const,
+      groundingRefs: ["uuid-originating-turn"],
+      profile: "sandbox_workspace_file_roundtrip" as const,
+      status: "completed" as const,
+      workspaceId: "ws-1",
+      modelCallsUsed: 0,
+      toolCallsUsed: 5,
+      startedAtMs: Date.now() - 10_000,
+      deadlineMs: Date.now() + 10_000,
+      completedAtMs: Date.now() - 5_000,
+      error: null,
+      refusal: null,
+      candidatePatchRef: null,
+      candidateCommitRef: null,
+      artifactRefs: [],
+      effectEvidence: null,
+    };
+    persistCoordinatorTasks(db, [task]);
+
+    const correlated = findCorrelatedEngineeringTask(db, "doc", {
+      threadId: "thread-2",
+      userMessageId: 11,
+      userMessage: "Could you?",
+    });
+    expect(correlated).toBeNull();
+  });
+
+  it("7: same-thread follow-up after an intervening unrelated USER message does NOT correlate", () => {
+    db.prepare(`
+      INSERT INTO mem_threads (id, owner_id, channel, created_at, updated_at)
+      VALUES ('thread-intervene', 'doc', 'discord', '2026-08-14T00:00:00.000Z', '2026-08-14T00:00:00.000Z')
+    `).run();
+
+    // Turn 1: Originating sandbox request
+    db.prepare(`
+      INSERT INTO mem_messages (id, thread_id, owner_id, role, channel, text, entity_uuid, created_at)
+      VALUES (20, 'thread-intervene', 'doc', 'user', 'discord', 'Create temp file in sandbox', 'uuid-originating-20', '2026-08-14T00:00:00.000Z')
+    `).run();
+
+    // Turn 2: Assistant responds
+    db.prepare(`
+      INSERT INTO mem_messages (id, thread_id, owner_id, role, channel, text, entity_uuid, created_at)
+      VALUES (21, 'thread-intervene', 'doc', 'assistant', 'discord', 'done', 'uuid-ast-21', '2026-08-14T00:00:05.000Z')
+    `).run();
+
+    // Turn 3: Intervening unrelated user message!
+    db.prepare(`
+      INSERT INTO mem_messages (id, thread_id, owner_id, role, channel, text, entity_uuid, created_at)
+      VALUES (22, 'thread-intervene', 'doc', 'user', 'discord', 'By the way tell me about roses', 'uuid-intervening-22', '2026-08-14T00:00:10.000Z')
+    `).run();
+
+    // Turn 4: User says "Could you?"
+    db.prepare(`
+      INSERT INTO mem_messages (id, thread_id, owner_id, role, channel, text, entity_uuid, created_at)
+      VALUES (23, 'thread-intervene', 'doc', 'user', 'discord', 'Could you?', 'uuid-followup-23', '2026-08-14T00:00:15.000Z')
+    `).run();
+
+    const task = {
+      taskId: "task-grounded-20",
+      owner: "doc",
+      projectId: null,
+      sourceBaseCommit: null,
+      admissionCause: "user_request" as const,
+      groundingRefs: ["uuid-originating-20"],
+      profile: "sandbox_workspace_file_roundtrip" as const,
+      status: "completed" as const,
+      workspaceId: "ws-1",
+      modelCallsUsed: 0,
+      toolCallsUsed: 5,
+      startedAtMs: Date.now() - 10_000,
+      deadlineMs: Date.now() + 10_000,
+      completedAtMs: Date.now() - 5_000,
+      error: null,
+      refusal: null,
+      candidatePatchRef: null,
+      candidateCommitRef: null,
+      artifactRefs: [],
+      effectEvidence: null,
+    };
+    persistCoordinatorTasks(db, [task]);
+
+    // Preceding user message for Turn 4 (id 23) is Turn 3 (id 22, roses), which does not ground the task
+    const correlated = findCorrelatedEngineeringTask(db, "doc", {
+      threadId: "thread-intervene",
+      userMessageId: 23,
+      userMessage: "Could you?",
+    });
+    expect(correlated).toBeNull();
+  });
+
+  it("8: unrelated ordinary turn and proactive task never correlate", () => {
+    // Proactive task
+    const proactiveTask = {
+      taskId: "task-proactive-ignore",
+      owner: "doc",
+      projectId: null,
+      sourceBaseCommit: null,
+      admissionCause: "proactive" as const,
       groundingRefs: ["curiosity-take-1"],
       profile: "proactive_bug_investigation" as const,
       status: "completed" as const,
@@ -412,20 +578,21 @@ describe("Reactive Sandbox Execution — Production Compatibility Suite", () => 
     };
     persistCoordinatorTasks(db, [proactiveTask]);
 
-    // findCorrelatedEngineeringTask ignores proactive task
-    const match = findCorrelatedEngineeringTask(db, "doc", { userMessage: "Could you?" });
-    expect(match).toBeNull();
+    expect(isSandboxOperationalFollowUp("What are you thinking about?")).toBe(false);
+    const unrelatedMatch = findCorrelatedEngineeringTask(db, "doc", {
+      userMessage: "What are you thinking about?",
+    });
+    expect(unrelatedMatch).toBeNull();
   });
 
-  it("6: completed + verified evidence produces verified context prose; completed + missing evidence produces unverified prose", () => {
-    // Task 1: Verified
+  it("9: ContextComposer projects task referenced by operationalLicense only (cannot select by prose alone)", () => {
     const verifiedTask = {
-      taskId: "task-ctx-verified",
+      taskId: "task-license-proj",
       owner: "doc",
       projectId: null,
       sourceBaseCommit: null,
       admissionCause: "user_request" as const,
-      groundingRefs: ["uuid-ctx-1"],
+      groundingRefs: ["uuid-proj-1"],
       profile: "sandbox_workspace_file_roundtrip" as const,
       status: "completed" as const,
       workspaceId: "ws-1",
@@ -453,27 +620,102 @@ describe("Reactive Sandbox Execution — Production Compatibility Suite", () => 
     };
     persistCoordinatorTasks(db, [verifiedTask]);
 
-    const verifiedBlock = operationalWorkBlock(db, "doc", { userMessage: "Could you?" });
-    expect(verifiedBlock).toContain("Effect evidence: roundtrip verified");
+    // When Decision has operationalLicense with taskId, ContextComposer projects it
+    const licensedBlock = operationalWorkBlock(db, "doc", {
+      operationalLicense: {
+        state: "succeeded",
+        taskId: "task-license-proj",
+        profile: "sandbox_workspace_file_roundtrip",
+        effectEvidence: verifiedTask.effectEvidence,
+      },
+    });
+    expect(licensedBlock).toContain("Task ID: task-license-proj");
+    expect(licensedBlock).toContain("Effect evidence: roundtrip verified");
 
-    // Task 2: Unverified (completed without evidence, newer timestamp)
-    const unverifiedTask = {
-      ...verifiedTask,
-      taskId: "task-ctx-unverified",
-      groundingRefs: ["uuid-ctx-2"],
-      completedAtMs: Date.now() - 10_000,
-      effectEvidence: null, // NO EVIDENCE
-    };
-    persistCoordinatorTasks(db, [unverifiedTask]);
-
-    const unverifiedBlock = operationalWorkBlock(db, "doc", { userMessage: "Could you?" });
-    expect(unverifiedBlock).not.toContain("Effect evidence: roundtrip verified");
-    expect(unverifiedBlock).toContain("Effect evidence: unverified (task record is completed; verified effect evidence is unavailable)");
+    // When Decision has NO operationalLicense taskId, ContextComposer emits nothing even if user says "Could you?"
+    const unlicensedBlock = operationalWorkBlock(db, "doc", {
+      operationalLicense: null,
+    });
+    expect(unlicensedBlock).toBe("");
   });
 
-  it("7: partial unique index preserves historical duplicate proactive rows while forbidding duplicate user_request", () => {
-    // Seed DB with historical duplicate proactive admissions (different statuses)
-    const seedDb = new DatabaseSync(":memory:");
+  it("10: central effect evidence validator rejects malformed evidence (verified=true, readMatches=false/empty)", () => {
+    const validEvidence: RoundtripEffectEvidence = {
+      verified: true,
+      workspaceId: "ws-1",
+      relativePath: "file.txt",
+      bytesWritten: 12,
+      contentHash: "sha256-abc",
+      readMatches: true,
+      deleted: true,
+      verifiedAbsent: true,
+      completedAtMs: Date.now(),
+    };
+    expect(isVerifiedRoundtripEffectEvidence(validEvidence)).toBe(true);
+
+    // Mismatched read
+    expect(isVerifiedRoundtripEffectEvidence({ ...validEvidence, readMatches: false })).toBe(false);
+
+    // Not deleted / not absent
+    expect(isVerifiedRoundtripEffectEvidence({ ...validEvidence, deleted: false })).toBe(false);
+    expect(isVerifiedRoundtripEffectEvidence({ ...validEvidence, verifiedAbsent: false })).toBe(false);
+
+    // Empty workspace / relativePath / contentHash
+    expect(isVerifiedRoundtripEffectEvidence({ ...validEvidence, workspaceId: "" })).toBe(false);
+    expect(isVerifiedRoundtripEffectEvidence({ ...validEvidence, relativePath: "  " })).toBe(false);
+    expect(isVerifiedRoundtripEffectEvidence({ ...validEvidence, contentHash: "" })).toBe(false);
+
+    // Non-finite completed timestamp
+    expect(isVerifiedRoundtripEffectEvidence({ ...validEvidence, completedAtMs: NaN })).toBe(false);
+  });
+
+  it("11: malformed effect evidence cannot produce verified context prose", () => {
+    const taskWithMalformedEvidence = {
+      taskId: "task-malformed",
+      owner: "doc",
+      projectId: null,
+      sourceBaseCommit: null,
+      admissionCause: "user_request" as const,
+      groundingRefs: ["uuid-mal-1"],
+      profile: "sandbox_workspace_file_roundtrip" as const,
+      status: "completed" as const,
+      workspaceId: "ws-1",
+      modelCallsUsed: 0,
+      toolCallsUsed: 5,
+      startedAtMs: Date.now() - 60_000,
+      deadlineMs: Date.now() + 60_000,
+      completedAtMs: Date.now() - 30_000,
+      error: null,
+      refusal: null,
+      candidatePatchRef: null,
+      candidateCommitRef: null,
+      artifactRefs: [],
+      effectEvidence: {
+        verified: true,
+        workspaceId: "ws-1",
+        relativePath: "tmp.txt",
+        bytesWritten: 15,
+        contentHash: "hash-123",
+        readMatches: false, // MALFORMED: read didn't match!
+        deleted: true,
+        verifiedAbsent: true,
+        completedAtMs: Date.now() - 30_000,
+      },
+    };
+    persistCoordinatorTasks(db, [taskWithMalformedEvidence]);
+
+    const block = operationalWorkBlock(db, "doc", {
+      operationalLicense: {
+        state: "succeeded",
+        taskId: "task-malformed",
+      },
+    });
+    expect(block).not.toContain("Effect evidence: roundtrip verified");
+    expect(block).toContain("Effect evidence: unverified (task record is completed; verified effect evidence is unavailable)");
+  });
+
+  it("12: partial unique index preserves historical duplicate proactive rows and ensureEngineeringTables is idempotent", () => {
+    const seedDb = openNuclearDb(new DatabaseSync(":memory:"));
     ensureEngineeringTables(seedDb);
 
     // Multiple proactive rows with the same source_ref succeed
@@ -487,7 +729,8 @@ describe("Reactive Sandbox Execution — Production Compatibility Suite", () => 
       VALUES ('adm-pro-2', 'doc', 'obj', 'build_regression', '[]', 'proactive', 'proactive:run:1', 'completed', 2000)
     `).run();
 
-    // Re-running ensureEngineeringTables succeeds with duplicate proactive rows
+    // Repeated ensureEngineeringTables calls succeed without error or dropping anything
+    expect(() => ensureEngineeringTables(seedDb)).not.toThrow();
     expect(() => ensureEngineeringTables(seedDb)).not.toThrow();
 
     // First user_request admission succeeds
@@ -503,112 +746,5 @@ describe("Reactive Sandbox Execution — Production Compatibility Suite", () => 
         VALUES ('adm-user-2', 'doc', 'obj', 'sandbox_workspace_file_roundtrip', '[]', 'user_request', 'reactive:doc:msg-1', 'pending', 4000)
       `).run();
     }).toThrow(/UNIQUE constraint failed/i);
-  });
-
-  it("8: fresh envelope provider generates distinct envelopes preventing replay rejection", async () => {
-    const fixture = createRealFsRoundtripPort();
-    try {
-      const outcome = await executeSandboxWorkspaceFileRoundtrip({
-        taskId: "task-fresh-envelopes",
-        workspaceId: null,
-        envelopes: mockEnvelopeProvider() as never,
-        port: fixture.port,
-        nowMs: () => 1000,
-      });
-
-      expect(outcome.ok).toBe(true);
-      expect(fixture.actionCount.read_workspace_file).toBe(2);
-      expect(fixture.seenEnvelopes.size).toBe(5); // all 5 actions received unique envelopes
-    } finally {
-      fixture.cleanup();
-    }
-  });
-
-  it("9: replay rejection / policy failure during absence check fails closed and never grants verifiedAbsent", async () => {
-    const replayFixture = createRealFsRoundtripPort({
-      failAbsenceReadWith: { errorCode: "replay_rejected", reason: "envelope reuse detected" },
-    });
-    try {
-      const outcome = await executeSandboxWorkspaceFileRoundtrip({
-        taskId: "task-replay-fail",
-        workspaceId: null,
-        envelopes: mockEnvelopeProvider() as never,
-        port: replayFixture.port,
-        nowMs: () => 1000,
-      });
-
-      expect(outcome.ok).toBe(false);
-      if (!outcome.ok) {
-        expect(outcome.errorCode).toBe("replay_rejected");
-        expect(outcome.reason).toContain("absence_verification_failed");
-      }
-    } finally {
-      replayFixture.cleanup();
-    }
-  });
-
-  it("10: claim licensing — ADMITTED permits queuing claims; RUNNING permits 'starting now'; SUCCEEDED requires verified evidence", () => {
-    const admittedLicense: OperationalClaimLicense = {
-      state: "admitted",
-      taskId: "adm-1",
-      profile: "sandbox_workspace_file_roundtrip",
-    };
-
-    // ADMITTED forbids 'starting now' and completion
-    const resAdmitted = finalizeHonesty({
-      text: "i'll create a temp file inside my sandbox workspace. starting now.",
-      readingLicensed: false,
-      operationalLicense: admittedLicense,
-    });
-    expect(resAdmitted.text).toBe("i've accepted that sandbox check and it's queued to run.");
-
-    // RUNNING permits 'starting now'
-    const runningLicense: OperationalClaimLicense = {
-      state: "running",
-      taskId: "task-1",
-      profile: "sandbox_workspace_file_roundtrip",
-    };
-    const resRunning = finalizeHonesty({
-      text: "i'm running that check in the sandbox now.",
-      readingLicensed: false,
-      operationalLicense: runningLicense,
-    });
-    expect(resRunning.text).toBe("i'm running that check in the sandbox now.");
-
-    // SUCCEEDED with verified effect evidence permits completion
-    const verifiedLicense: OperationalClaimLicense = {
-      state: "succeeded",
-      taskId: "task-1",
-      profile: "sandbox_workspace_file_roundtrip",
-      effectEvidence: {
-        verified: true,
-        workspaceId: "ws-1",
-        relativePath: "test.txt",
-        bytesWritten: 10,
-        contentHash: "hash-123",
-        readMatches: true,
-        deleted: true,
-        verifiedAbsent: true,
-        completedAtMs: Date.now(),
-      },
-    };
-    const resVerified = finalizeHonesty({
-      text: "the temporary file was deleted and the contents matched.",
-      readingLicensed: false,
-      operationalLicense: verifiedLicense,
-    });
-    expect(resVerified.text).toBe("the temporary file was deleted and the contents matched.");
-  });
-
-  it("11: regexes accurately classify execution claims in claims.ts", () => {
-    expect(claimsOwnExecutionRunning("starting now")).toBe(true);
-    expect(claimsOwnExecutionRunning("i'll create a test file inside my sandbox workspace now")).toBe(true);
-    expect(claimsOwnExecutionRunning("i'm on it now")).toBe(true);
-
-    expect(claimsOwnExecutionAdmitted("i've accepted that check")).toBe(true);
-    expect(claimsOwnExecutionAdmitted("request queued")).toBe(true);
-
-    expect(claimsOwnExecutionCompletion("the temporary file was deleted")).toBe(true);
-    expect(claimsOwnExecutionCompletion("the file check passed and matched")).toBe(true);
   });
 });

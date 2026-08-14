@@ -61,6 +61,34 @@ export type RoundtripEffectEvidence = {
   completedAtMs: number;
 };
 
+/**
+ * Validates the complete critical invariant of roundtrip effect evidence.
+ * Must fail closed on any missing, false, empty, or non-finite property.
+ */
+export function isVerifiedRoundtripEffectEvidence(
+  value: unknown,
+): value is RoundtripEffectEvidence {
+  if (!value || typeof value !== "object") return false;
+  const e = value as Partial<RoundtripEffectEvidence>;
+  return (
+    e.verified === true &&
+    e.readMatches === true &&
+    e.deleted === true &&
+    e.verifiedAbsent === true &&
+    typeof e.workspaceId === "string" &&
+    e.workspaceId.trim().length > 0 &&
+    typeof e.relativePath === "string" &&
+    e.relativePath.trim().length > 0 &&
+    typeof e.contentHash === "string" &&
+    e.contentHash.trim().length > 0 &&
+    typeof e.bytesWritten === "number" &&
+    Number.isFinite(e.bytesWritten) &&
+    e.bytesWritten >= 0 &&
+    typeof e.completedAtMs === "number" &&
+    Number.isFinite(e.completedAtMs)
+  );
+}
+
 /** Structured operational claim states for Expression & Honesty enforcement. */
 export type OperationalClaimState =
   | "none"

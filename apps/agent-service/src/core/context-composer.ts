@@ -13,7 +13,14 @@ import {
 import { getState } from "./state/store.js";
 import { getAffectiveState } from "./state/affect.js";
 import { listActiveMindStateItems } from "./state/mind-items.js";
-import { findCorrelatedEngineeringTask } from "./sandbox/engineering-runs.js";
+import {
+  ensureEngineeringTables,
+  loadCoordinatorTasks,
+} from "./sandbox/engineering-runs.js";
+import {
+  isVerifiedRoundtripEffectEvidence,
+  type OperationalClaimLicense,
+} from "./sandbox/engineering-types.js";
 import type { Decision, EvidenceRef } from "./types.js";
 import { capabilityCanInfluence } from "./rollout/capabilities.js";
 
@@ -121,12 +128,14 @@ function structuredDecisionPrompt(decision: Decision): string {
 export function operationalWorkBlock(
   db: DatabaseSync,
   ownerId: string,
-  options?: { messageEntityUuid?: string | null; userMessage?: string },
+  options?: { operationalLicense?: OperationalClaimLicense | null },
 ): string {
-  const task = findCorrelatedEngineeringTask(db, ownerId, {
-    messageEntityUuid: options?.messageEntityUuid ?? undefined,
-    userMessage: options?.userMessage,
-  });
+  const taskId = options?.operationalLicense?.taskId;
+  if (!taskId) return "";
+
+  ensureEngineeringTables(db);
+  const tasks = loadCoordinatorTasks(db);
+  const task = tasks.find((t) => t.owner === ownerId && t.taskId === taskId);
   if (!task) return "";
 
   const lines = [
@@ -140,12 +149,7 @@ export function operationalWorkBlock(
   ].filter(Boolean);
 
   if (task.profile === "sandbox_workspace_file_roundtrip" && task.status === "completed") {
-    if (
-      task.effectEvidence &&
-      task.effectEvidence.verified &&
-      task.effectEvidence.deleted &&
-      task.effectEvidence.verifiedAbsent
-    ) {
+    if (isVerifiedRoundtripEffectEvidence(task.effectEvidence)) {
       lines.push(
         "Effect evidence: roundtrip verified (temporary file created, exact bytes verified on read, file deleted, verified absent).",
       );
@@ -184,8 +188,7 @@ export function composeTurnContext(
   const identity = stableIdentityBlock(db, ownerId);
   const mindState = mindStateBlock(db, ownerId);
   const operational = operationalWorkBlock(db, ownerId, {
-    messageEntityUuid: input.messageEntityUuid,
-    userMessage: input.userMessage,
+    operationalLicense: decision?.operationalLicense,
   });
   // Questions only when Thought selected question evidence or none selected yet
   // would dump — skip global question dump; selected questions arrive via evidence.

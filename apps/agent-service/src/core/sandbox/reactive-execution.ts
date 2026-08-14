@@ -18,6 +18,7 @@ import { createBrokerEngineeringPort } from "./broker-engineering-port.js";
 import {
   DEFAULT_ENGINEERING_BUDGETS,
   type EngineeringRoots,
+  isVerifiedRoundtripEffectEvidence,
   type RoundtripEffectEvidence,
   type SandboxTaskStatus,
 } from "./engineering-types.js";
@@ -120,7 +121,7 @@ export async function executeReactiveSandboxTask(
   const result = await coordinator.run(task.taskId, envelopes);
 
   const evidence: RoundtripEffectEvidence | null =
-    result.status === "completed" && result.effectEvidence && result.effectEvidence.verified
+    result.status === "completed" && isVerifiedRoundtripEffectEvidence(result.effectEvidence)
       ? result.effectEvidence
       : null;
 
