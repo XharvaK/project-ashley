@@ -14,8 +14,22 @@ ENGINEERING_WORKSPACE="${ENGINEERING_WORKSPACE:-$SANDBOX_ROOT/workspace/apps/age
 SELF_IMPROVE_CLONE="${SELF_IMPROVE_CLONE:-$SANDBOX_ROOT/self-improvement/project-ashley}"
 ACTIVATION_MARKER="${ACTIVATION_MARKER:-$CONF/engineering-activation.json}"
 QUALIFICATION_DIR="${QUALIFICATION_DIR:-$SANDBOX_ROOT/qualification}"
-ISOLATION_EVIDENCE="${ISOLATION_EVIDENCE:-$QUALIFICATION_DIR/sandbox-isolation-02c/evidence.json}"
-CANARY_RECEIPT="${CANARY_RECEIPT:-$QUALIFICATION_DIR/sandbox-isolation-02c/canary-receipt.json}"
+ISOLATION_EVIDENCE="${ISOLATION_EVIDENCE:-}"
+CANARY_RECEIPT="${CANARY_RECEIPT:-}"
+if [ -z "$ISOLATION_EVIDENCE" ]; then
+  if [ -f "$QUALIFICATION_DIR/sandbox-isolation-02c/runs/$SOURCE_PIN/evidence.json" ]; then
+    ISOLATION_EVIDENCE="$QUALIFICATION_DIR/sandbox-isolation-02c/runs/$SOURCE_PIN/evidence.json"
+  else
+    ISOLATION_EVIDENCE="$QUALIFICATION_DIR/sandbox-isolation-02c/evidence.json"
+  fi
+fi
+if [ -z "$CANARY_RECEIPT" ]; then
+  if [ -f "$QUALIFICATION_DIR/sandbox-isolation-02c/runs/$SOURCE_PIN/canary-receipt.json" ]; then
+    CANARY_RECEIPT="$QUALIFICATION_DIR/sandbox-isolation-02c/runs/$SOURCE_PIN/canary-receipt.json"
+  else
+    CANARY_RECEIPT="$QUALIFICATION_DIR/sandbox-isolation-02c/canary-receipt.json"
+  fi
+fi
 BROKER_ENV_FILE="${BROKER_ENV_FILE:-/etc/ashley-sandbox/broker.env}"
 BROKER_SOCKET="${BROKER_SOCKET:-/run/ashley/broker.sock}"
 PROJECT_REGISTRY="${PROJECT_REGISTRY:-$CONF/project-roots.json}"
@@ -29,6 +43,7 @@ BROKER_SERVICE="${BROKER_SERVICE:-ashley-exec-broker.service}"
 BROKER_SOCKET_UNIT="${BROKER_SOCKET_UNIT:-ashley-exec-broker.socket}"
 SYSTEMD_UNIT_ROOT="${SYSTEMD_UNIT_ROOT:-/etc/systemd/system}"
 CURL_BIN="${CURL_BIN:-curl}"
+GIT_BIN="${GIT_BIN:-git}"
 AGENT_HEALTH_ATTEMPTS="${AGENT_HEALTH_ATTEMPTS:-30}"
 AGENT_HEALTH_INTERVAL_SECONDS="${AGENT_HEALTH_INTERVAL_SECONDS:-1}"
 AGENT_HEALTH_REQUEST_TIMEOUT_SECONDS="${AGENT_HEALTH_REQUEST_TIMEOUT_SECONDS:-2}"
@@ -118,7 +133,7 @@ PY
 [ -n "$SOURCE_PIN" ] || fail "usage" "source_pin_required"
 
 log "verify_source"
-CURRENT="$(git -C "$REPO" rev-parse HEAD)" || fail "verify_source" "repo_unavailable"
+CURRENT="$("$GIT_BIN" -C "$REPO" rev-parse HEAD)" || fail "verify_source" "repo_unavailable"
 [ "$CURRENT" = "$SOURCE_PIN" ] || fail "verify_source" "source_commit_mismatch:$CURRENT"
 
 log "verify_qualification_evidence"
@@ -171,7 +186,7 @@ if policy.get("expiresAt"):
 PY
 
 log "verify_protected_live_checkout"
-[ -z "$(git -C "$REPO" status --porcelain)" ] || \
+[ -z "$("$GIT_BIN" -C "$REPO" status --porcelain)" ] || \
   fail "verify_protected_live_checkout" "live_checkout_dirty"
 
 log "verify_source_bound_runtime"
@@ -359,10 +374,16 @@ PY
 log "init_self_improvement_clone"
 if [ ! -d "$SELF_IMPROVE_CLONE/.git" ]; then
   TMP_CLONE="$(mktemp -d)"
-  git clone --local "$REPO" "$TMP_CLONE/repo" >/dev/null 2>&1 || \
+  CLONE_LOG="$TMP_CLONE/clone.log"
+  if ! "$GIT_BIN" clone --local --no-hardlinks "$REPO" "$TMP_CLONE/repo" >"$CLONE_LOG" 2>&1; then
+    CLONE_ERR="$(head -n 5 "$CLONE_LOG" 2>/dev/null | tr '\n' ' ' || true)"
+    rm -rf "$TMP_CLONE"
+    log "clone error: $CLONE_ERR"
     fail "init_self_improvement_clone" "clone_failed"
-  git -C "$TMP_CLONE/repo" remote remove origin 2>/dev/null || true
-  git -C "$TMP_CLONE/repo" config --local core.hooksPath /dev/null
+  fi
+  rm -f "$CLONE_LOG"
+  "$GIT_BIN" -C "$TMP_CLONE/repo" remote remove origin 2>/dev/null || true
+  "$GIT_BIN" -C "$TMP_CLONE/repo" config --local core.hooksPath /dev/null
   sudo install -d -o ashley-sandbox -g ashley-sandbox "$(dirname "$SELF_IMPROVE_CLONE")"
   sudo rm -rf "$SELF_IMPROVE_CLONE"
   sudo mv "$TMP_CLONE/repo" "$SELF_IMPROVE_CLONE"
@@ -481,7 +502,7 @@ done
 [ "$agent_health_ready" = "1" ] || fail "verify_agent_health" "agent_health_not_ready"
 
 log "verify_historical_admissions_untouched"
-[ -z "$(git -C "$REPO" status --porcelain)" ] || \
+[ -z "$("$GIT_BIN" -C "$REPO" status --porcelain)" ] || \
   fail "verify_historical_admissions_untouched" "live_checkout_modified_during_activation"
 
 ACTIVATION_SUCCEEDED=1

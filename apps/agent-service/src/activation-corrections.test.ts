@@ -1,3 +1,5 @@
+import { copyFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   cleanupFixture,
@@ -140,6 +142,68 @@ describe("activate-engineering fail-closed behavior", () => {
     expect(result.status).not.toBe(0);
     expect(`${result.stdout}\n${result.stderr}`).toContain("clone_has_remote");
     expectSafeState(created);
+  });
+
+  it("initializes self-improvement clone via real local clone when absent, removing remotes and disabling hooks", () => {
+    const created = fixture();
+    rmSync(created.clone, { recursive: true, force: true });
+    expect(existsSync(created.clone)).toBe(false);
+
+    const result = runActivation(created);
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+    expect(existsSync(path.join(created.clone, ".git"))).toBe(true);
+    expect(git(created.clone, "remote")).toBe("");
+    expect(["/dev/null", "nul"]).toContain(
+      git(created.clone, "config", "--local", "--get", "core.hooksPath"),
+    );
+    expect(git(created.clone, "rev-parse", "HEAD")).toBe(created.sourcePin);
+  });
+
+  it("preserves existing self-improvement clone non-destructively on subsequent activation", () => {
+    const created = fixture();
+    const canaryFile = path.join(created.clone, "canary-marker.txt");
+    writeText(canaryFile, "preserve-existing-clone\n");
+
+    const result = runActivation(created);
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+    expect(existsSync(canaryFile)).toBe(true);
+    expect(readText(canaryFile).trim()).toBe("preserve-existing-clone");
+  });
+
+  it("fails closed when git clone fails during initialization and cleans up partial state", () => {
+    const created = fixture();
+    rmSync(created.clone, { recursive: true, force: true });
+
+    const result = runActivation(created, undefined, {
+      ASHLEY_FAKE_GIT_CLONE_FAIL: "1",
+    });
+    expect(result.status).not.toBe(0);
+    expect(`${result.stdout}\n${result.stderr}`).toContain("clone_failed");
+    expect(existsSync(created.clone)).toBe(false);
+    expectSafeState(created);
+  });
+
+  it("accepts qualification evidence from runs/$sourcePin subdirectory when top-level evidence is absent", () => {
+    const created = fixture();
+    const runsDir = path.join(
+      created.state,
+      "qualification",
+      "sandbox-isolation-02c",
+      "runs",
+      created.sourcePin,
+    );
+    mkdirSync(runsDir, { recursive: true });
+    copyFileSync(created.evidence, path.join(runsDir, "evidence.json"));
+    copyFileSync(created.canary, path.join(runsDir, "canary-receipt.json"));
+    rmSync(created.evidence, { force: true });
+    rmSync(created.canary, { force: true });
+
+    const result = runActivation(created, undefined, {
+      ISOLATION_EVIDENCE: "",
+      CANARY_RECEIPT: "",
+    });
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+    expect(result.stdout).toContain('"ok":true');
   });
 
   it("rejects HTTP success while the agent is not ready", () => {

@@ -72,6 +72,24 @@ export function git(cwd: string, ...args: string[]): string {
 
 function createFakeCommands(fixture: MintFixture): void {
   mkdirSync(fixture.fakeBin, { recursive: true });
+  const realGitCmd =
+    process.platform === "win32"
+      ? `"${posix(spawnSync("where.exe", ["git.exe"], { encoding: "utf8" }).stdout.split("\n")[0].trim())}"`
+      : "/usr/bin/git";
+  executable(
+    path.join(fixture.fakeBin, "git"),
+    `#!/bin/sh
+if [ "\${ASHLEY_FAKE_GIT_CLONE_FAIL:-}" = "1" ]; then
+  case "$*" in
+    *clone*)
+      echo "fatal: simulated git clone failure" >&2
+      exit 128
+      ;;
+  esac
+fi
+exec ${realGitCmd} "$@"
+`,
+  );
   executable(
     path.join(fixture.fakeBin, "sudo"),
     `#!/bin/sh
@@ -92,6 +110,22 @@ if [ "\${ASHLEY_FAKE_GIT_REMOTE_FAIL:-}" = "1" ] && [ "\${1:-}" = "git" ]; then
   case "$*" in
     *" remote -v"*) exit 73 ;;
   esac
+fi
+if [ "\${1:-}" = "install" ]; then
+  shift
+  target=""
+  for arg in "$@"; do
+    case "$arg" in
+      -*) ;;
+      ashley-sandbox|root) ;;
+      *) target="$arg" ;;
+    esac
+  done
+  if [ -n "$target" ]; then mkdir -p "$target"; fi
+  exit 0
+fi
+if [ "\${1:-}" = "chown" ]; then
+  exit 0
 fi
 export ASHLEY_FAKE_EFFECTIVE_USER="$user"
 exec "$@"
@@ -428,6 +462,7 @@ function baseEnvironment(fixture: MintFixture): NodeJS.ProcessEnv {
     PROVENANCE_HELPER: posix(PROVENANCE),
     FAILED_ACTIVATION_CLEANUP: posix(ROLLBACK),
     CURL_BIN: posix(path.join(fixture.fakeBin, "curl")),
+    GIT_BIN: posix(path.join(fixture.fakeBin, "git")),
     ASHLEY_FAKE_HEALTH_ATTEMPTS_FILE: posix(fixture.healthAttempts),
     ASHLEY_FAKE_SUDO_LOG: posix(fixture.sudoLog),
     ASHLEY_FAKE_HEALTH_SEQUENCE: "ready",
