@@ -1,7 +1,15 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { BUBBLEWRAP_QUALIFICATION_TOOL_CONTRACT } from "./qualification-toolchain.js";
 import { createDefaultQualificationManifest } from "./bubblewrap-qualification-runner.js";
@@ -290,6 +298,185 @@ describe("02C qualification helper source contract", () => {
       );
     } finally {
       rmSync(fixtureRoot, { force: true, recursive: true });
+    }
+  });
+  it("builds a clean source checkout before verifying generated qualification artifacts", () => {
+    const buildStart = qualificationHelper.indexOf("build_source_checkout() {");
+    const verifyStart = qualificationHelper.indexOf(
+      "verify_built_source_artifacts() {",
+    );
+    expect(buildStart).toBeGreaterThanOrEqual(0);
+    expect(verifyStart).toBeGreaterThanOrEqual(0);
+    const extractFunction = (start: number) => {
+      const end = qualificationHelper.indexOf("\n}", start);
+      expect(end).toBeGreaterThan(start);
+      return qualificationHelper.slice(start, end + 2);
+    };
+    const buildSource = extractFunction(buildStart);
+    const verifySource = extractFunction(verifyStart);
+    const generatedArtifacts = [
+      "apps/sandbox-broker/dist/execution/bubblewrap-qualification-cli.js",
+      "apps/sandbox-broker/dist/execution/bubblewrap-qualification-runner.js",
+      "apps/sandbox-broker/dist/execution/bubblewrap-execution-isolation.js",
+      "apps/sandbox-broker/dist/execution/execution-isolation.js",
+      "apps/sandbox-broker/dist/execution/qualification-toolchain.js",
+      "apps/sandbox-broker/dist/execution/qualification-policy-preflight-cli.js",
+      "apps/sandbox-broker/dist/execution/qualification-service-state-cli.js",
+      "apps/sandbox-broker/dist/execution/bounded-output.js",
+      "apps/sandbox-broker/dist/crypto/types.js",
+      "apps/sandbox-broker/dist/process/real-runner.js",
+    ];
+    const fakeNpmSource = [
+      "#!/usr/bin/env bash",
+      "set -Eeuo pipefail",
+      'printf \'%s\\n\' "$*" >> "$BUILD_LOG"',
+      'if [[ "$*" == *"run build"* && "$*" == *"sandbox-broker"* ]]; then',
+      `  for artifact in ${generatedArtifacts.join(" ")}; do`,
+      '    [[ "${OMIT_ARTIFACT:-}" == "$artifact" ]] && continue',
+      '    mkdir -p "$SOURCE_ROOT/$(dirname "$artifact")"',
+      '    : > "$SOURCE_ROOT/$artifact"',
+      "  done",
+      "fi",
+      "",
+    ].join("\n");
+
+    const createFixture = () => {
+      const root = mkdtempSync(join(tmpdir(), "ashley-02c-build-order-"));
+      const seedRoot = join(root, "seed");
+      const sourceRoot = join(root, "source");
+      const fakeBin = join(root, "bin");
+      const buildLog = join(root, "build.log");
+      mkdirSync(seedRoot, { recursive: true });
+      mkdirSync(fakeBin, { recursive: true });
+      for (const [relativePath, contents] of [
+        ["README.md", "clean fixture\n"],
+        [
+          ".gitignore",
+          "apps/sandbox-broker/dist/\napps/sandbox-policy/dist/\napps/*/node_modules/\n",
+        ],
+        ["apps/sandbox-policy/package.json", "{}\n"],
+        ["apps/sandbox-policy/package-lock.json", "{}\n"],
+        ["apps/sandbox-broker/package.json", "{}\n"],
+        ["apps/sandbox-broker/package-lock.json", "{}\n"],
+        [
+          "deploy/linux-mint/sandbox/systemd/ashley-exec-broker.service",
+          "[Unit]\n",
+        ],
+        [
+          "deploy/linux-mint/sandbox/systemd/ashley-exec-broker.socket",
+          "[Socket]\n",
+        ],
+        [
+          "deploy/linux-mint/sandbox/qualification/bubblewrap-probe.sh",
+          "#!/usr/bin/env bash\n",
+        ],
+      ] as const) {
+        const target = join(seedRoot, relativePath);
+        mkdirSync(dirname(target), { recursive: true });
+        writeFileSync(target, contents, "utf8");
+      }
+      writeFileSync(join(fakeBin, "npm"), fakeNpmSource, "utf8");
+      chmodSync(join(fakeBin, "npm"), 0o755);
+      for (const args of [
+        ["init", "--quiet"],
+        ["config", "user.email", "fixture@example.invalid"],
+        ["config", "user.name", "Fixture"],
+        ["add", "."],
+        ["commit", "--quiet", "-m", "clean source"],
+      ]) {
+        const result = spawnSync("git", args, {
+          cwd: seedRoot,
+          encoding: "utf8",
+        });
+        expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+      }
+      const clone = spawnSync(
+        "git",
+        ["clone", "--local", "--no-hardlinks", seedRoot, sourceRoot],
+        { cwd: root, encoding: "utf8" },
+      );
+      expect(clone.status, `${clone.stdout}\n${clone.stderr}`).toBe(0);
+      const detach = spawnSync(
+        "git",
+        ["-C", sourceRoot, "checkout", "--detach", "--quiet", "HEAD"],
+        { encoding: "utf8" },
+      );
+      expect(detach.status, `${detach.stdout}\n${detach.stderr}`).toBe(0);
+      expect(
+        existsSync(join(sourceRoot, "apps/sandbox-broker/dist")),
+      ).toBe(false);
+      return { root, sourceRoot, fakeBin, buildLog };
+    };
+    const run = (fixture: ReturnType<typeof createFixture>, omitted = "") => {
+      const sourcePath = shellPath(fixture.sourceRoot);
+      const variables = {
+        SOURCE_ROOT: sourcePath,
+        SERVICE_SOURCE: `${sourcePath}/deploy/linux-mint/sandbox/systemd/ashley-exec-broker.service`,
+        SOCKET_SOURCE: `${sourcePath}/deploy/linux-mint/sandbox/systemd/ashley-exec-broker.socket`,
+        PROBE_SOURCE: `${sourcePath}/deploy/linux-mint/sandbox/qualification/bubblewrap-probe.sh`,
+        CLI_SOURCE: `${sourcePath}/apps/sandbox-broker/dist/execution/bubblewrap-qualification-cli.js`,
+        RUNNER_SOURCE: `${sourcePath}/apps/sandbox-broker/dist/execution/bubblewrap-qualification-runner.js`,
+        ISOLATION_SOURCE: `${sourcePath}/apps/sandbox-broker/dist/execution/bubblewrap-execution-isolation.js`,
+        EXECUTION_ISOLATION_SOURCE: `${sourcePath}/apps/sandbox-broker/dist/execution/execution-isolation.js`,
+        REAL_RUNNER_SOURCE: `${sourcePath}/apps/sandbox-broker/dist/process/real-runner.js`,
+        TOOLCHAIN_SOURCE: `${sourcePath}/apps/sandbox-broker/dist/execution/qualification-toolchain.js`,
+        POLICY_PREFLIGHT_SOURCE: `${sourcePath}/apps/sandbox-broker/dist/execution/qualification-policy-preflight-cli.js`,
+        SERVICE_STABILITY_SOURCE: `${sourcePath}/apps/sandbox-broker/dist/execution/qualification-service-state-cli.js`,
+        BOUNDED_OUTPUT_SOURCE: `${sourcePath}/apps/sandbox-broker/dist/execution/bounded-output.js`,
+        CRYPTO_TYPES_SOURCE: `${sourcePath}/apps/sandbox-broker/dist/crypto/types.js`,
+        BUILD_LOG: shellPath(fixture.buildLog),
+        OMIT_ARTIFACT: omitted,
+        PATH: `${shellPath(fixture.fakeBin)}:${process.env.PATH ?? process.env.Path ?? ""}`,
+      };
+      return spawnSync(
+        BASH,
+        [
+          "-c",
+          [
+            "set -Eeuo pipefail",
+            'die() { printf \'BLOCKED %s\\n\' "$1" >&2; exit 1; }',
+            'require_path() { [[ -e "$1" ]] || die "missing_path:$1"; }',
+            buildSource,
+            verifySource,
+            "build_source_checkout",
+            "verify_built_source_artifacts",
+          ].join("\n"),
+          "build-order",
+        ],
+        { encoding: "utf8", env: variables },
+      );
+    };
+
+    const completeFixture = createFixture();
+    const missingFixture = createFixture();
+    try {
+      const complete = run(completeFixture);
+      expect(complete.status, `${complete.stdout}\n${complete.stderr}`).toBe(0);
+      expect(readFileSync(completeFixture.buildLog, "utf8")).toContain(
+        "run build",
+      );
+      expect(
+        spawnSync(
+          "git",
+          ["-C", completeFixture.sourceRoot, "status", "--porcelain", "--untracked-files=all"],
+          { encoding: "utf8" },
+        ).stdout,
+      ).toBe("");
+
+      const missing = run(
+        missingFixture,
+        "apps/sandbox-broker/dist/execution/bubblewrap-qualification-runner.js",
+      );
+      expect(readFileSync(missingFixture.buildLog, "utf8")).toContain(
+        "run build",
+      );
+      expect(missing.status).not.toBe(0);
+      expect(`${missing.stdout}\n${missing.stderr}`).toContain(
+        "missing_path:",
+      );
+    } finally {
+      rmSync(completeFixture.root, { force: true, recursive: true });
+      rmSync(missingFixture.root, { force: true, recursive: true });
     }
   });
   it("pins the corrected systemd namespace and memory contract", () => {

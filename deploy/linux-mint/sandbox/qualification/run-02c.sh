@@ -194,14 +194,36 @@ run_stable_service_check() {
   grep -q '"status": "stable"' <<<"$output" \
     || die service_stability_result_invalid
 }
+build_source_checkout() {
+  require_path "$SOURCE_ROOT/.git"
+  require_path "$SERVICE_SOURCE"
+  npm ci --prefix "$SOURCE_ROOT/apps/sandbox-policy" >/dev/null || die source_policy_dependencies_failed
+  npm --prefix "$SOURCE_ROOT/apps/sandbox-policy" run build >/dev/null || die source_policy_build_failed
+  npm ci --prefix "$SOURCE_ROOT/apps/sandbox-broker" >/dev/null || die source_broker_dependencies_failed
+  npm --prefix "$SOURCE_ROOT/apps/sandbox-broker" run build >/dev/null || die source_build_failed
+}
+verify_built_source_artifacts() {
+  require_path "$SOCKET_SOURCE"
+  require_path "$PROBE_SOURCE"
+  require_path "$CLI_SOURCE"
+  require_path "$RUNNER_SOURCE"
+  require_path "$ISOLATION_SOURCE"
+  require_path "$EXECUTION_ISOLATION_SOURCE"
+  require_path "$REAL_RUNNER_SOURCE"
+  require_path "$TOOLCHAIN_SOURCE"
+  require_path "$POLICY_PREFLIGHT_SOURCE"
+  require_path "$SERVICE_STABILITY_SOURCE"
+  require_path "$BOUNDED_OUTPUT_SOURCE"
+  require_path "$CRYPTO_TYPES_SOURCE"
+  if ! SOURCE_STATUS="$(git -C "$SOURCE_ROOT" status --porcelain --untracked-files=all)"; then
+    die source_checkout_status_unreadable
+  fi
+  [[ -z "$SOURCE_STATUS" ]] || die source_checkout_dirty_after_build
+}
 [[ "$QUALIFICATION_ROOT" == "/opt/ashley-sandbox/qualification/sandbox-isolation-02c/runs/$EXPECTED_SOURCE_COMMIT" ]] || die qualification_root_changed
 [[ "$RUN_ROOT" == "/var/lib/ashley-sandbox/qualification/sandbox-isolation-02c/runs/$EXPECTED_SOURCE_COMMIT" ]] || die run_root_changed
 [[ "$FIXTURE_ROOT" == "$RUN_ROOT/fixture" ]] || die fixture_root_changed
 [[ "$WORKSPACE_ROOT" == "$RUN_ROOT/workspace" ]] || die workspace_root_changed
-require_path "$RUNNER_SOURCE"
-require_path "$ISOLATION_SOURCE"
-require_path "$EXECUTION_ISOLATION_SOURCE"
-require_path "$REAL_RUNNER_SOURCE"
 [[ "$EVIDENCE_PATH" == "$RUN_ROOT/evidence.json" ]] || die evidence_path_changed
 [[ "$FIXTURE_MANIFEST_PATH" == "$RUN_ROOT/fixture-probe-manifest.json" ]] || die fixture_manifest_path_changed
 [[ "$INVENTORY_PATH" == "$RUN_ROOT/control-plane-inventory.json" ]] || die inventory_path_changed
@@ -218,24 +240,8 @@ if sudo -n test -e "$RUN_ROOT" || sudo -n test -L "$RUN_ROOT" || \
   sudo -n test -e "$QUALIFICATION_ROOT" || sudo -n test -L "$QUALIFICATION_ROOT"; then
   die qualification_run_already_exists
 fi
-require_path "$SOURCE_ROOT/.git"
-require_path "$SERVICE_SOURCE"
-npm ci --prefix "$SOURCE_ROOT/apps/sandbox-policy" >/dev/null || die source_policy_dependencies_failed
-npm --prefix "$SOURCE_ROOT/apps/sandbox-policy" run build >/dev/null || die source_policy_build_failed
-npm ci --prefix "$SOURCE_ROOT/apps/sandbox-broker" >/dev/null || die source_broker_dependencies_failed
-npm --prefix "$SOURCE_ROOT/apps/sandbox-broker" run build >/dev/null || die source_build_failed
-require_path "$SOCKET_SOURCE"
-require_path "$PROBE_SOURCE"
-require_path "$CLI_SOURCE"
-require_path "$TOOLCHAIN_SOURCE"
-require_path "$POLICY_PREFLIGHT_SOURCE"
-require_path "$SERVICE_STABILITY_SOURCE"
-require_path "$BOUNDED_OUTPUT_SOURCE"
-require_path "$CRYPTO_TYPES_SOURCE"
-if ! SOURCE_STATUS="$(git -C "$SOURCE_ROOT" status --porcelain --untracked-files=all)"; then
-  die source_checkout_status_unreadable
-fi
-[[ -z "$SOURCE_STATUS" ]] || die source_checkout_dirty_after_build
+build_source_checkout
+verify_built_source_artifacts
 [[ -x "$PROBE_SOURCE" ]] || die probe_not_executable
 require_equal bwrap_path "$(command -v bwrap)" /usr/bin/bwrap
 require_equal bwrap_version "$(/usr/bin/bwrap --version | awk 'NR == 1 { print $1 "/" $2 }')" bubblewrap/0.9.0
