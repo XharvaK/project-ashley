@@ -48,6 +48,7 @@ export type EvaluateReactiveSandboxAdmissionInput = {
 export type ReactiveAdmissionDecision =
   | {
       admitted: true;
+      shouldDispatch: boolean;
       admissionId: string;
       profile: SandboxTaskProfile;
       replayed: boolean;
@@ -55,6 +56,7 @@ export type ReactiveAdmissionDecision =
     }
   | {
       admitted: false;
+      shouldDispatch: false;
       reason: string;
       profile?: SandboxTaskProfile;
     };
@@ -65,11 +67,11 @@ export function evaluateReactiveSandboxAdmission(
   const { db, ownerId, message, messageEntityUuid } = input;
 
   if (!isAuthorizedOwnerId(ownerId, { configuredOwnerId: input.configuredOwnerId })) {
-    return { admitted: false, reason: "unauthorized_owner" };
+    return { admitted: false, shouldDispatch: false, reason: "unauthorized_owner" };
   }
 
   if (!detectReactiveSandboxRoundtripRequest(message)) {
-    return { admitted: false, reason: "unsupported_reactive_request" };
+    return { admitted: false, shouldDispatch: false, reason: "unsupported_reactive_request" };
   }
 
   const profile: SandboxTaskProfile = "sandbox_workspace_file_roundtrip";
@@ -89,6 +91,7 @@ export function evaluateReactiveSandboxAdmission(
   if (!res.accepted) {
     return {
       admitted: false,
+      shouldDispatch: false,
       reason: res.reason ?? "admission_rejected",
       profile,
     };
@@ -96,6 +99,7 @@ export function evaluateReactiveSandboxAdmission(
 
   return {
     admitted: true,
+    shouldDispatch: res.shouldDispatch === true,
     admissionId: res.id!,
     profile,
     replayed: res.replayed === true,

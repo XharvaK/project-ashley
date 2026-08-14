@@ -630,6 +630,7 @@ export class FakeSandboxBrokerClient implements SandboxBrokerClient, SandboxBrok
           const root = action.type === "inspect_project_file" ? this.sourceRoot : this.destinationRoot;
           const p = path.join(root, rel(f.relativePath));
           if (!isDescendant(p, root)) return refuse("path_escape");
+          if (!existsSync(p)) return refuse("not_found");
           const buf = readFileSync(p, "utf8");
           return { ok: true, data: { content: buf, truncated: false, bytes: buf.length }, artifactRef: null };
         }

@@ -102,6 +102,7 @@ export type SandboxTask = {
   candidatePatchRef: string | null;
   candidateCommitRef: string | null;
   artifactRefs: string[];
+  effectEvidence?: RoundtripEffectEvidence | null;
 };
 
 export type EngineeringBudgets = {

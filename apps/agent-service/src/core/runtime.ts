@@ -787,37 +787,6 @@ export class AshleyCore {
         decision = attachAuthorizedClaims(decision, recentTakes);
       }
 
-      this.db.exec("BEGIN IMMEDIATE");
-      let decisionId: number;
-      try {
-        decisionId = logDecision(this.db, {
-          ownerId: input.ownerId,
-          channel: input.channel,
-          trigger: "reactive",
-          decision,
-        });
-        this.db
-          .prepare(
-            `UPDATE delivery_reservations SET decision_id = ? WHERE id = ? AND decision_id IS NULL`,
-          )
-          .run(decisionId, reservation.id);
-        this.db.exec("COMMIT");
-      } catch (error) {
-        this.db.exec("ROLLBACK");
-        throw error;
-      }
-      decision.id = decisionId;
-      setLastDecision(this.db, input.ownerId, decisionId);
-      // Observe-only: record a deterministic sandbox effect admission intent
-      // if the decision's OCI evidence grounds one. Zero authority — nothing
-      // is scheduled or executed from an admission.
-      observeSandboxEffectIntentAdmission(
-        this.db,
-        input.ownerId,
-        decision,
-        "reactive",
-      );
-
       const reservationUuidRow = this.db
         .prepare(`SELECT entity_uuid FROM delivery_reservations WHERE id = ?`)
         .get(reservation.id) as { entity_uuid?: string } | undefined;
@@ -860,7 +829,7 @@ export class AshleyCore {
       });
 
       if (reactiveAdmission.admitted) {
-        if (env.sandboxEngineeringLifecycleEnabled) {
+        if (reactiveAdmission.shouldDispatch && env.sandboxEngineeringLifecycleEnabled) {
           const runRes = await executeReactiveSandboxTask(this.db, {
             ownerId: input.ownerId,
             admissionId: reactiveAdmission.admissionId,
@@ -890,6 +859,59 @@ export class AshleyCore {
               sourceMessageEntityUuid: messageEntityUuid ?? undefined,
             };
           }
+        } else if (reactiveAdmission.replayed) {
+          // Replayed admission: observe existing correlated task state, do NOT execute again
+          const correlated = findCorrelatedEngineeringTask(this.db, input.ownerId, {
+            messageEntityUuid: messageEntityUuid ?? undefined,
+          });
+          if (correlated) {
+            if (correlated.status === "completed" && correlated.effectEvidence?.verified) {
+              decision.operationalLicense = {
+                state: "succeeded",
+                taskId: correlated.taskId,
+                profile: correlated.profile,
+                effectEvidence: correlated.effectEvidence,
+                sourceMessageEntityUuid: messageEntityUuid ?? undefined,
+              };
+            } else if (correlated.status === "completed") {
+              decision.operationalLicense = {
+                state: "none",
+                taskId: correlated.taskId,
+                profile: correlated.profile,
+                error: "missing_effect_evidence",
+                sourceMessageEntityUuid: messageEntityUuid ?? undefined,
+              };
+            } else if (correlated.status === "running") {
+              decision.operationalLicense = {
+                state: "running",
+                taskId: correlated.taskId,
+                profile: correlated.profile,
+                sourceMessageEntityUuid: messageEntityUuid ?? undefined,
+              };
+            } else if (correlated.status === "failed" || correlated.status === "aborted") {
+              decision.operationalLicense = {
+                state: "failed",
+                taskId: correlated.taskId,
+                profile: correlated.profile,
+                error: correlated.error ?? undefined,
+                sourceMessageEntityUuid: messageEntityUuid ?? undefined,
+              };
+            } else {
+              decision.operationalLicense = {
+                state: "admitted",
+                taskId: correlated.taskId,
+                profile: correlated.profile,
+                sourceMessageEntityUuid: messageEntityUuid ?? undefined,
+              };
+            }
+          } else {
+            decision.operationalLicense = {
+              state: "admitted",
+              taskId: reactiveAdmission.admissionId,
+              profile: reactiveAdmission.profile,
+              sourceMessageEntityUuid: messageEntityUuid ?? undefined,
+            };
+          }
         } else {
           decision.operationalLicense = {
             state: "admitted",
@@ -909,36 +931,80 @@ export class AshleyCore {
           messageEntityUuid: messageEntityUuid ?? undefined,
         });
         if (correlated) {
-          let effectEvidence: RoundtripEffectEvidence | undefined;
-          if (correlated.status === "completed" && correlated.summary) {
-            try {
-              effectEvidence = JSON.parse(correlated.summary) as RoundtripEffectEvidence;
-            } catch {
-              effectEvidence = undefined;
-            }
+          if (correlated.status === "completed" && correlated.effectEvidence?.verified) {
+            decision.operationalLicense = {
+              state: "succeeded",
+              taskId: correlated.taskId,
+              profile: correlated.profile,
+              effectEvidence: correlated.effectEvidence,
+              sourceMessageEntityUuid: messageEntityUuid ?? undefined,
+            };
+          } else if (correlated.status === "completed") {
+            decision.operationalLicense = {
+              state: "none",
+              taskId: correlated.taskId,
+              profile: correlated.profile,
+              error: "missing_effect_evidence",
+              sourceMessageEntityUuid: messageEntityUuid ?? undefined,
+            };
+          } else if (correlated.status === "running") {
+            decision.operationalLicense = {
+              state: "running",
+              taskId: correlated.taskId,
+              profile: correlated.profile,
+              sourceMessageEntityUuid: messageEntityUuid ?? undefined,
+            };
+          } else if (correlated.status === "failed" || correlated.status === "aborted") {
+            decision.operationalLicense = {
+              state: "failed",
+              taskId: correlated.taskId,
+              profile: correlated.profile,
+              error: correlated.error ?? undefined,
+              sourceMessageEntityUuid: messageEntityUuid ?? undefined,
+            };
+          } else {
+            decision.operationalLicense = {
+              state: "admitted",
+              taskId: correlated.taskId,
+              profile: correlated.profile,
+              sourceMessageEntityUuid: messageEntityUuid ?? undefined,
+            };
           }
-          const opState: OperationalClaimState =
-            correlated.status === "completed"
-              ? "succeeded"
-              : correlated.status === "running"
-                ? "running"
-                : correlated.status === "failed" || correlated.status === "aborted"
-                  ? "failed"
-                  : correlated.status === "admitted"
-                    ? "admitted"
-                    : "outcome_unknown";
-          decision.operationalLicense = {
-            state: opState,
-            taskId: correlated.taskId,
-            profile: correlated.profile,
-            effectEvidence,
-            error: correlated.error ?? undefined,
-            sourceMessageEntityUuid: messageEntityUuid ?? undefined,
-          };
         } else {
           decision.operationalLicense = { state: "none" };
         }
       }
+
+      this.db.exec("BEGIN IMMEDIATE");
+      let decisionId: number;
+      try {
+        decisionId = logDecision(this.db, {
+          ownerId: input.ownerId,
+          channel: input.channel,
+          trigger: "reactive",
+          decision,
+        });
+        this.db
+          .prepare(
+            `UPDATE delivery_reservations SET decision_id = ? WHERE id = ? AND decision_id IS NULL`,
+          )
+          .run(decisionId, reservation.id);
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+      decision.id = decisionId;
+      setLastDecision(this.db, input.ownerId, decisionId);
+      // Observe-only: record a deterministic sandbox effect admission intent
+      // if the decision's OCI evidence grounds one. Zero authority — nothing
+      // is scheduled or executed from an admission.
+      observeSandboxEffectIntentAdmission(
+        this.db,
+        input.ownerId,
+        decision,
+        "reactive",
+      );
 
       const turn = composeTurnContext(this.db, input.ownerId, {
         channel: "discord",

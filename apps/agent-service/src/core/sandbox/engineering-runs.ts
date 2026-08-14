@@ -43,7 +43,8 @@ CREATE TABLE IF NOT EXISTS engineering_admissions (
   source_ref TEXT NOT NULL,
   status TEXT NOT NULL,
   created_at_ms INTEGER NOT NULL
-);`;
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_engineering_admissions_source ON engineering_admissions (source_kind, source_ref);`;
 
 const SIGNALS_DDL = `
 CREATE TABLE IF NOT EXISTS engineering_signals (
@@ -190,8 +191,10 @@ export function recordPendingEngineeringAdmission(
 
 export type ReactiveAdmissionResult = {
   accepted: boolean;
+  shouldDispatch: boolean;
   id?: string;
   replayed?: boolean;
+  status?: string;
   reason?: string;
 };
 
@@ -224,8 +227,10 @@ export function recordReactiveEngineeringAdmission(
   if (existing) {
     return {
       accepted: existing.status !== "rejected",
+      shouldDispatch: false,
       id: existing.id,
       replayed: true,
+      status: existing.status,
       reason: existing.status === "rejected" ? "prior_admission_rejected" : undefined,
     };
   }
@@ -246,7 +251,7 @@ export function recordReactiveEngineeringAdmission(
       input.sourceRef,
       now,
     );
-    return { accepted: false, id, reason: "autonomy_disabled" };
+    return { accepted: false, shouldDispatch: false, id, replayed: false, status: "rejected", reason: "autonomy_disabled" };
   }
 
   const activeRuns = countActiveCoordinatorRuns(db);
@@ -266,7 +271,7 @@ export function recordReactiveEngineeringAdmission(
       input.sourceRef,
       now,
     );
-    return { accepted: false, id, reason: "concurrency_limit" };
+    return { accepted: false, shouldDispatch: false, id, replayed: false, status: "rejected", reason: "concurrency_limit" };
   }
 
   const id = `adm-reactive-${now.toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
@@ -284,7 +289,7 @@ export function recordReactiveEngineeringAdmission(
     input.sourceRef,
     now,
   );
-  return { accepted: true, id, replayed: false };
+  return { accepted: true, shouldDispatch: true, id, replayed: false, status: "pending" };
 }
 
 /**

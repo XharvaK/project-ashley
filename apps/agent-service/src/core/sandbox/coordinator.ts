@@ -7,7 +7,7 @@
  * the `SandboxOperatorAdapter` against the broker `EngineeringExecutionPort`.
  */
 
-import type { EngineeringExecutionPort, SandboxTask, SandboxTaskProfile, SandboxTaskStatus } from "./engineering-types.js";
+import type { EngineeringExecutionPort, RoundtripEffectEvidence, SandboxTask, SandboxTaskProfile, SandboxTaskStatus } from "./engineering-types.js";
 import { EngineeringOperatorAdapter, type OperatorEnvelopeProvider } from "./engineering-operator.js";
 import type { ThinkingModel } from "./engineering-types.js";
 
@@ -38,6 +38,7 @@ export type CoordinatorResult = {
   candidatePatchRef: string | null;
   candidateCommitRef: string | null;
   artifactRefs: string[];
+  effectEvidence?: RoundtripEffectEvidence | null;
 };
 
 let taskCounter = 0;
@@ -149,6 +150,7 @@ export class SandboxEngineeringCoordinator {
           task.status = "completed";
           task.workspaceId = roundtrip.workspaceId;
           task.artifactRefs = roundtrip.artifactRefs;
+          task.effectEvidence = roundtrip.evidence;
         } else {
           task.status = "failed";
           task.error = roundtrip.reason;
@@ -255,6 +257,7 @@ export class SandboxEngineeringCoordinator {
       candidatePatchRef: task.candidatePatchRef,
       candidateCommitRef: task.candidateCommitRef,
       artifactRefs: task.artifactRefs,
+      effectEvidence: task.effectEvidence ?? null,
     };
   }
 

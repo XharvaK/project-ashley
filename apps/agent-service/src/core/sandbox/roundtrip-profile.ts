@@ -183,12 +183,33 @@ export async function executeSandboxWorkspaceFileRoundtrip(
   }
 
   // Step 6: Verify absence of deleted file (Effect Witness)
-  const verifyAbsenceRes = await input.port.executeAction(readAction, readEnvelope);
+  // Must use a fresh envelope with distinct timestamp/nonce for anti-replay.
+  const verifyAbsenceEnvelope = input.envelopes(
+    readAction,
+    "candidate_workspace_read_write_delete",
+    nowMs(),
+  );
+  const verifyAbsenceRes = await input.port.executeAction(
+    readAction,
+    verifyAbsenceEnvelope,
+  );
   if (verifyAbsenceRes.ok) {
     return {
       ok: false,
       errorCode: "file_still_present",
       reason: "file was not removed after delete operation",
+      workspaceId,
+    };
+  }
+
+  // Canonical broker error for an absent file is "not_found".
+  // Any other error (e.g. policy rejection, replay rejection, transport/broker error)
+  // is NOT proof of absence (Receipt != Effect Witness).
+  if (verifyAbsenceRes.errorCode !== "not_found") {
+    return {
+      ok: false,
+      errorCode: verifyAbsenceRes.errorCode,
+      reason: `absence_verification_failed: expected not_found but received ${verifyAbsenceRes.errorCode} (${verifyAbsenceRes.reason})`,
       workspaceId,
     };
   }
