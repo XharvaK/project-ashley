@@ -256,6 +256,96 @@ describe("source-bound installed provenance", () => {
     expect(verified.stderr).toContain("installed_set_mismatch");
   });
 
+  it("includes hidden runtime .npmrc in published provenance", () => {
+    const fixture = makeFixture();
+    file(path.join(fixture.repo, "apps", "sandbox-broker", "dist", ".npmrc"), "audit=false\n");
+    file(path.join(fixture.broker, "dist", ".npmrc"), "audit=false\n");
+    publish(fixture);
+    const manifest = JSON.parse(readFileSync(fixture.manifest, "utf8"));
+    const identities = manifest.artifacts.map(
+      (entry: { root: string; path: string }) => `${entry.root}:${entry.path}`,
+    );
+    expect(identities).toContain("broker:dist/.npmrc");
+    expect(helper(fixture, "verify").status).toBe(0);
+  });
+
+  it("includes broker-root .npmrc in the installed identity walk", () => {
+    const fixture = makeFixture();
+    publish(fixture);
+    file(path.join(fixture.broker, ".npmrc"), "audit=false\n");
+    const verified = helper(fixture, "verify");
+    expect(verified.status).not.toBe(0);
+    expect(verified.stderr).toContain("installed_set_mismatch");
+  });
+
+  it("fails closed on unexpected hidden runtime", () => {
+    const fixture = makeFixture();
+    publish(fixture);
+    file(path.join(fixture.broker, ".hidden-payload"), "unexpected\n");
+    const verified = helper(fixture, "verify");
+    expect(verified.status).not.toBe(0);
+    expect(verified.stderr).toContain("installed_set_mismatch");
+  });
+
+  it("walks node_modules/.bin instead of skipping hidden directories", () => {
+    const fixture = makeFixture();
+    publish(fixture);
+    file(path.join(fixture.broker, "node_modules", ".bin", "tsc"), "#!/bin/sh\n");
+    const verified = helper(fixture, "verify");
+    expect(verified.status).not.toBe(0);
+    expect(verified.stderr).toContain("installed_set_mismatch");
+  });
+
+  it("keeps the production hidden allowlist empty with no invented exclusion", () => {
+    const inspect = spawnSync(
+      PYTHON,
+      [
+        "-c",
+        "import importlib.util, pathlib, sys; p=pathlib.Path(sys.argv[1]); spec=importlib.util.spec_from_file_location('prov', p); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); assert m.PRODUCTION_HIDDEN_ALLOWLIST == frozenset(); banned={'.gitignore','.gitattributes','.DS_Store','.git'}; assert not (banned & set(m.PRODUCTION_HIDDEN_ALLOWLIST)); print('empty_allowlist')",
+        HELPER,
+      ],
+      { encoding: "utf8" },
+    );
+    expect(inspect.status, inspect.stderr).toBe(0);
+    expect(inspect.stdout).toContain("empty_allowlist");
+    const fixture = makeFixture();
+    publish(fixture);
+    file(path.join(fixture.broker, ".gitignore"), "unexpected\n");
+    const verified = helper(fixture, "verify");
+    expect(verified.status).not.toBe(0);
+    expect(verified.stderr).toContain("installed_set_mismatch");
+  });
+
+  it.each([".gitattributes", ".DS_Store"])(
+    "empty production allowlist fails closed on %s",
+    (name) => {
+      const fixture = makeFixture();
+      publish(fixture);
+      file(path.join(fixture.broker, name), "unexpected\n");
+      const verified = helper(fixture, "verify");
+      expect(verified.status).not.toBe(0);
+      expect(verified.stderr).toContain("installed_set_mismatch");
+    },
+  );
+
+  it("empty production allowlist fails closed on unexpected .git contents", () => {
+    const fixture = makeFixture();
+    publish(fixture);
+    file(path.join(fixture.broker, ".git", "config"), "unexpected\n");
+    const verified = helper(fixture, "verify");
+    expect(verified.status).not.toBe(0);
+    expect(verified.stderr).toContain("installed_set_mismatch");
+  });
+
+  it("a test-only exclude name is a fixture, not a production branch", () => {
+    const fixture = makeFixture();
+    publish(fixture);
+    file(path.join(fixture.broker, ".fixture-exclude"), "fixture\n");
+    const verified = helper(fixture, "verify");
+    expect(verified.status).not.toBe(0);
+    expect(verified.stderr).toContain("installed_set_mismatch");
+  });
+
   it.each(["../escape", "./dist/main.js", "/absolute", "dist\\main.js", "dist//main.js"])(
     "refuses unsafe manifest path %s without normalizing it",
     (unsafe) => {
@@ -330,6 +420,7 @@ describe("source-bound installed provenance", () => {
     expect(existsSync(fixture.workspaceManifest)).toBe(true);
     expect(helper(fixture, "verify").status).toBe(0);
   });
+
 });
 
 describe("canonical verify-preactivation and inspect-lifecycle", () => {

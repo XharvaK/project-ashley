@@ -28,6 +28,10 @@ BUILD_RELEVANT_UNTRACKED_PREFIXES = (
     "apps/agent-service/",
 )
 BUILD_RELEVANT_UNTRACKED_FILES = (".npmrc", "package.json", "package-lock.json")
+# Hidden runtime is included by default (node_modules/.bin, .npmrc).
+# Production allowlist is empty: unexpected hidden names fail closed via
+# identity mismatch. Do not add .gitignore / .gitattributes / .DS_Store / .git.
+PRODUCTION_HIDDEN_ALLOWLIST: frozenset[str] = frozenset()
 
 
 class ContractError(Exception):
@@ -182,18 +186,22 @@ def installed_runtime_identities(
     for directory, dirnames, filenames in os.walk(broker_root, followlinks=False):
         directory_path = Path(directory)
         for name in list(dirnames):
-            if name.startswith("."):
-                dirnames.remove(name)
-                continue
             child = directory_path / name
             relative = child.relative_to(broker_root).as_posix()
+            if name.startswith(".") and (
+                name in PRODUCTION_HIDDEN_ALLOWLIST or relative in PRODUCTION_HIDDEN_ALLOWLIST
+            ):
+                dirnames.remove(name)
+                continue
             if child.is_symlink() and not relative.startswith("lib/node_modules/npm/"):
                 raise ContractError("unsupported_file_type")
         for name in filenames:
-            if name.startswith("."):
-                continue
             child = directory_path / name
             relative = child.relative_to(broker_root).as_posix()
+            if name.startswith(".") and (
+                name in PRODUCTION_HIDDEN_ALLOWLIST or relative in PRODUCTION_HIDDEN_ALLOWLIST
+            ):
+                continue
             if relative == manifest_name:
                 continue
             if relative == "bin/node" or relative.startswith("lib/node_modules/npm/"):

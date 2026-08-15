@@ -1,185 +1,95 @@
-# mint-corrections-2 — single pre-activation correction pass
+# mint-corrections-2  -  source follow-up after cd9586a (not activation-accepted)
 
-Runbook for applying and activating the DeepSeek correction audit pass
-(`mint-corrections-2`). This pass closes 11 known source-side blockers with
-ONE coherent commit; it must be pulled with a strict fast-forward and its HEAD
-becomes the `SOURCE_PIN` that binds qualification evidence, the canary, and
-the activation epoch.
+This document is the handoff for the **source-only** follow-up on top of
+`cd9586a937e60a7cc38bbf693fd32beb5a3673d0`. It is **not** a pull-and-activate
+instruction. It does **not** accept the candidate. Do not treat this follow-up
+as qualified, installed, or activation-ready.
 
-Base: `CORRECTION_BASE = 2a4b448` (origin/master before this pass).
-Corrections commit: the single commit on top of `CORRECTION_BASE` produced by
-this pass (see the final report for its SHA).
+## SHA / HEAD honesty
 
-## What this pass changed
+| Field | Value |
+|---|---|
+| Predecessor HEAD | `cd9586a937e60a7cc38bbf693fd32beb5a3673d0` |
+| This follow-up | the single commit on top of `cd9586a` that contains only A-C (see `git log -1` / `git rev-parse HEAD`) |
+| `origin/master` | **not** claimed to be this follow-up |
+| `SOURCE_PIN` | **unset / not this SHA** until a later accepted candidate |
+| `LIVE_WITNESS_IMPLEMENTED` | **NO** |
+| `WORKTREE_CLEAN` | **NO**  -  untracked `docs/architecture/research/*` remain untracked by design |
 
-| # | Blocker | Resolution |
-|---|---------|------------|
-| 1 | HY3-1: engineering `execute_recipe` ran on a fictional lane | Moved onto the shared qualified lane (`qualified-recipe-execution.ts`): readiness → strictest-of limits → executable → cwd native/workspace-anchored → isolation gate (evidence merge) → spawn-coupled network refusal; fixed Windows `workspaceTreeRoot` path bug; `effectHash` envelope allowlist + shape check (`effect_hash_invalid`) |
-| 2 | HY3-2: effect binding was not real | Real effect binding (`engineering-effect.ts`): envelope `effectHash` + `verifyEngineeringEffectBinding` before authorization |
-| 3 | Activation referenced fictional steps/artifacts | `scripts/mint/activate-engineering.sh` rewritten: SOURCE_PIN-required, owner-run, verify_installed_artifacts (`/opt/ashley-sandbox/dist/main.js`), framed-protocol broker readiness (not curl), `ASHLEY_SANDBOX_LIFECYCLE` in the owner `.env`; `rollback-engineering.sh` rewritten consistently |
-| 4 | Registry filename/env drift | `config/engineering-projects.example.json` → `config/project-roots.example.json` (top-level array, `ASHLEY_SANDBOX_PROJECT_REGISTRY`) + policy contract test |
-| 5 | Broker held physical agent-restart authority | Removed (`agent-restart` handler + diagnostics deleted); only negative-assertion reference remains |
-| 6 | Weekly review stopped at a filesystem artifact | Routed through the real ledgered delivery path: agent claims `decision_log`('share') → `initiative_reservations` → `delivery_reservations`/bubbles; `GET /delivery/pending?owner_id=`; discord-bot scheduler drains with send → receipt → finalize |
-| 7 | No engineering status surface / epoch admission proof | `GET /nuclear/engineering?owner_id=` (activation epoch, admission backlog, weekly review deliveries pending) + epoch-gate tests; fixed real production bug: `runtime_flags` DDL was never created outside tests |
-| 8 | No single verification entry point | `deploy/linux-mint/sandbox/test-all.sh` (builds all 4 packages + runs all suites; optional `--with-canary`) |
-| 9 | No operator runbook | This document |
-| 10 | Stale references to removed artifacts | Repo-wide grep clean (`engineering-projects`, `ASHLEY_ENGINEERING_PROJECT_REGISTRY`, `sudo -u ashley`, `engineering.conf`, fictional env names) |
-| 11 | Final verification + single commit | Section "Final report" below |
+`cd9586a` is not amended. This follow-up is not pushed. Physical 02C for the
+new SHA is **NOT RUN**.
 
-## Local (Windows) verification evidence
+## What this follow-up changed
 
-All suites green on the corrections commit:
+| Item | Change |
+|---|---|
+| A | `install-provenance.py`: replace the committed extra `broker_root` `startswith(".")` skip. Hidden runtime is included by default (`node_modules/.bin`, `.npmrc`). Production hidden allowlist is an empty frozen set. Unexpected hidden fails closed. `.gitignore` / `.gitattributes` / `.DS_Store` / `.git` are not on a production allowlist. |
+| A tests | `install-provenance.test.ts`: `.npmrc` included; unexpected hidden fail-closed; empty-allowlist (no invented exclusion). No "proven metadata excluded" production regression. Test-only exclude name is a fixture, not a production branch. |
+| B | `install.sh`: compose EXIT traps (recovery + temp cleanup) so `on_exit` still runs during COMMIT. Move `systemctl daemon-reload` and `systemctl enable --now ashley-exec-broker.socket` into COMMITTING, after publish and before `TX_STATE=COMMITTED`. Never enable/start `ashley-exec-broker.service`. |
+| B tests | `install-dirty-source.test.ts`: COMMIT fail-at `during_commit_runtime`, `during_commit_workspace`, `during_commit_keys`, `during_commit_units`, `during_commit_publish`; crash after publish before systemd (still COMMITTING / `INSTALL_RECOVERY_REQUIRED`); crash after systemd before COMMITTED write. No "crash after COMMITTED before systemd" case. |
+| C | This document: SHA/HEAD honesty, `WORKTREE_CLEAN`, real verification commands, `LIVE_WITNESS_IMPLEMENTED=NO`, no pull-and-activate as if accepted. |
 
-- `apps/sandbox-policy`: tsc clean; `npm test` 4/4.
-- `apps/sandbox-broker`: tsc clean; `npm test` 898 passed / 16 failed /
-  32 skipped — the 16 failures are pre-existing environmental
-  (`bubblewrap-qualification-harness.test.ts` requires real WSL/Linux bash);
-  `npm run build` succeeds.
-- `apps/agent-service`: tsc clean; `test:offline` 128 files / 963 passed /
-  2 skipped (includes the 7 new weekly-review-delivery tests, 5 new
-  engineering-status tests, and the delivery suite).
-- `apps/discord-bot`: tsc clean; `npm test` 78/78 (includes 4 new
-  weekly-review drain tests + the route-surface drift check covering the two
-  new routes).
+## Trap addendum
 
-## Mint host activation steps
+The PREPARE-phase peer-helper EXIT trap previously **replaced** the line-78
+`on_exit` trap. A COMMIT crash then left EXIT not writing
+`INSTALL_RECOVERY_REQUIRED`.
 
-Owner (`xarvak`) on the production Linux Mint host. Never `sudo -u` this
-runbook. The host is expected to already have: the broker installed from the
-qualified dist, the 02C isolation evidence + canary receipt at
-`/var/lib/ashley-sandbox/qualification/`, owner keys + policy pair under
-`~/.composer-assistant/keys/`, and the project registry at
-`~/.composer-assistant/project-roots.json`.
+Traps are now **composed**: `on_exit` still runs during COMMIT and also
+removes the peer-helper temp file. The second trap is not a replacement.
 
-**Important:** The production checkout at `/home/xarvak/project-ashley` may have
-owner-controlled untracked files (`0` and `query.js`). These MUST NOT be
-automatically deleted, moved, or normalized. Their disposition is determined by
-the owner (see below).
+`systemctl daemon-reload` and `systemctl enable --now ashley-exec-broker.socket`
+run while the journal is still `COMMITTING`, after publish and before the
+`COMMITTED` write. The socket may already be live while the journal is still
+`COMMITTING` / `INSTALL_RECOVERY_REQUIRED`.
 
-1. Pull the corrections commit (strict fast-forward only):
+Recovery remains a full `install.sh --apply` re-run. There is **no** `recover`
+subcommand. The re-run must be idempotent.
 
-   ```bash
-   cd /home/xarvak/project-ashley
-   git fetch origin
-   git rev-parse origin/master            # must be the corrections commit SHA
-   git pull --ff-only origin master
-   git rev-parse HEAD                     # this becomes SOURCE_PIN
-   ```
+## WORKTREE_CLEAN
 
-2. Inspect owner-controlled files in the production checkout:
+`WORKTREE_CLEAN=NO`.
 
-   ```bash
-   cd /home/xarvak/project-ashley
-   git status --short --untracked-files=all
-   ```
+Untracked research documents under `docs/architecture/research/` stay
+untracked. They are not part of this follow-up and must not be staged.
 
-   You will see untracked files `0` and/or `query.js`. These are owner-controlled
-   artifacts. Determine their disposition:
+## Verification commands that actually exist
 
-   - **Disposable build artifacts**: If they are temporary build outputs no longer
-     needed, the owner may delete them.
-   - **Retained owner data**: If they contain owner-specific configuration or
-     data, the owner must preserve them.
+Root package.json has no build script and no test:offline script.
+Use build:agent and build:discord at the repo root.
+test:offline lives under apps/agent-service.
+Changed sandbox-broker tests only: install-provenance.test.ts and install-dirty-source.test.ts.
+Full suites are UNVERIFIED here. Qualifier will run full suites later.
+Do not claim PASS from this document.
 
-   The owner decides; this task does NOT automatically delete or move any files.
+## Not done / not accepted
 
-3. Run the full verification entry point (may take several minutes):
+- no push
+- no amend of cd9586a
+- no 02C
+- no live installer apply
+- no policy issuance
+- no engineering activation
+- no live witness
+- no PASS claim
+- no Cursor cloud agents
+- no pull-and-activate as if this follow-up is accepted
 
-   ```bash
-   deploy/linux-mint/sandbox/test-all.sh
-   ```
+## Historical predecessor (not this follow-up)
 
-   Expected: all four suites PASS. (Skip `--with-canary` here; the canary is
-   run by the activation script itself.)
-
-4. Read the activation script first, then run it with the HEAD commit:
-
-   ```bash
-   SOURCE_PIN="$(git rev-parse HEAD)" bash scripts/mint/activate-engineering.sh
-   ```
-
-   It verifies (in order, fail-closed): source pin → 02C isolation evidence
-   (status/sourceCommit/providerKind) + canary receipt → policy artifact + freshness
-   → clean protected live checkout → installed broker dist + source-bound provenance
-   → broker gate envs + socket/unit restart → framed-protocol
-   readiness (`sandbox.readiness`, `ready && networkIsolationOperational &&
-   networkMode=="none"`) → R5B canary (`verify-agent-tsc.mjs`, `"ok":true` +
-   `"outcome":"succeeded"`) → project registry validity → no-remote
-   self-improvement clone → activation epoch marker → `ASHLEY_SANDBOX_LIFECYCLE=ENABLED`
-   in `~/.composer-assistant/.env` → agent (user unit) restart → agent health
-   (`/health`) → worker health (non-fatal) → historical admissions untouched.
-
-   Success prints `{"ok":true,"activationEpochMs":…,"canary":"PASS",…}`.
-
-5. Post-activation join-proof:
-
-   ```bash
-   curl -fsS "http://127.0.0.1:3710/nuclear/engineering?owner_id=<owner-id>"
-   ```
-
-   Expect `activationEpochMs` set, `eligiblePendingAdmissions` counting only
-   post-cutover pending admissions, and `weeklyReviewDeliveriesPending` 0
-   (until the first weekly review is due).
-
-   ```bash
-   curl -fsS "http://127.0.0.1:3710/delivery/pending?owner_id=<owner-id>"
-   ```
-
-   Expect `{"deliveries":[]}` until the weekly review timer fires; then the
-   discord-bot scheduler drains each ledgered review with send → receipt →
-   finalize (console: `weekly review delivered reservation=…`).
-
-5. Rollback (only if something is wrong after activation):
-
-   ```bash
-   bash scripts/mint/rollback-engineering.sh
-   ```
-
-   Removes the lifecycle flag from the owner `.env`, writes both persistent
-   broker gates to `false`, flips the activation marker to
-   `sandboxAutonomy:"DISABLED"`, stops the broker socket and service, verifies
-   `KillMode=control-group`, inactive systemd state, `MainPID=0`, and an empty
-   surviving broker cgroup, restarts the agent user unit in non-autonomous
-   mode, and preserves qualification evidence.
-
-## Final report
-
-After the commit is pushed, the operator records the two readiness strings
-verbatim (plus the corrections commit SHA):
-
-```
-READY FOR DEEPSEEK CORRECTION-DIFF AUDIT: YES/NO
-READY FOR MINT PHYSICAL QUALIFICATION: YES/NO
-Corrections commit: <sha>
-```
+cd9586a is the transactional successor-lifecycle predecessor. Earlier text
+in this file that treated a corrections commit as an activation SOURCE_PIN
+and instructed a fast-forward pull plus activation is not operative for
+this follow-up.
 
 ## Installation provenance ownership
-
-The installer publishes two source-bound subjects after installation:
-
-- `broker-runtime`: broker `dist/**`, sandbox-policy `dist/**` and package
-  metadata, broker package metadata, `bin/peer-credentials`, the generated
-  `bin/npm` wrapper, `meta/recipes.json`, and the installed broker systemd
-  service/socket units. Host `bin/node` and the copied npm package are
-  toolchain substrate and are not represented as Ashley source artifacts.
-- `engineering-workspace`: the complete provisioned
-  `workspace/apps/agent-service` tree, including safe bounded symlinks, under
-  its own manifest. It is not part of broker runtime identity.
-
-Activation independently derives the required runtime artifact set. It then
-requires exact manifest-set equality, verifies final installed digests, and
-verifies the separate workspace manifest before any authority mutation.
-
-`broker.env`, policy/key material, and qualification evidence remain separate
-mutable configuration, authorization, and physical-qualification subjects.
-They are not source identity.
+Two source-bound subjects: broker-runtime and engineering-workspace.
+Hidden runtime is included in the installed identity walk by default.
+Config, keys, and qualification evidence remain separate subjects.
 
 ## 02C evidence semantics
-
-- **02C PASS**: `7963d2d235b66f34f4dedfb47fa6bd1b0c1f5edf`
-- **After source correction**: fresh qualification REQUIRED.
-- If a new correction SHA is created, the final report must state:
-  - **PHYSICAL QUALIFICATION FOR NEW SHA**: NOT RUN
-  - The canonical 02C canary path is
-    `/var/lib/ashley-sandbox/qualification/sandbox-isolation-02c/canary-receipt.json`
-  - Activation uses the canonical 02C receipt (not any copied duplicate)
+- Historical 02C PASS predecessor only: 7963d2d235b66f34f4dedfb47fa6bd1b0c1f5edf
+- After source correction: fresh qualification REQUIRED.
+- PHYSICAL QUALIFICATION FOR NEW SHA: NOT RUN
+- LIVE_WITNESS_IMPLEMENTED: NO
+- Canonical 02C canary path remains under /var/lib/ashley-sandbox/qualification/sandbox-isolation-02c/canary-receipt.json

@@ -1,4 +1,4 @@
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -156,7 +156,9 @@ describe("installer source preflight", () => {
     const keys = path.join(root, "keys");
     const toolchain = path.join(root, "toolchain", "npm");
     const preflight = path.join(root, "preflight.sh");
+    const systemctlLog = path.join(root, "systemctl.log");
     mkdirSync(fakeBin, { recursive: true });
+    writeFileSync(systemctlLog, "");
     mkdirSync(path.join(workspace, "src"), { recursive: true });
     mkdirSync(path.join(toolchain, "bin"), { recursive: true });
     mkdirSync(home, { recursive: true });
@@ -203,7 +205,13 @@ esac
 exit 0
 `,
     );
-    executable(path.join(fakeBin, "systemctl"), "#!/bin/sh\nexit 0\n");
+    executable(
+      path.join(fakeBin, "systemctl"),
+      `#!/bin/sh
+printf '%s\n' "$*" >> '${posix(systemctlLog)}'
+exit 0
+`,
+    );
     executable(path.join(fakeBin, "chown"), "#!/bin/sh\nexit 0\n");
     executable(path.join(fakeBin, "chown.exe"), "#!/bin/sh\nexit 0\n");
     executable(path.join(fakeBin, "usermod"), "#!/bin/sh\nexit 0\n");
@@ -369,6 +377,83 @@ fi
       expect(verification.status, `PREPARE failure at ${stage} must leave previous installation verified`).toBe(0);
     }
 
+    const txPath = path.join(state, "meta", "install-transaction.json");
+    expect(JSON.parse(readFileSync(txPath, "utf8")).state).toBe("COMMITTED");
+    const successfulLog = readFileSync(systemctlLog, "utf8");
+    expect(successfulLog).toContain("daemon-reload");
+    expect(successfulLog).toContain("enable --now ashley-exec-broker.socket");
+    expect(successfulLog).not.toMatch(/enable --now ashley-exec-broker\.service/);
+    expect(successfulLog).not.toMatch(/\bstart ashley-exec-broker\.service\b/);
+
+    const runApply = (failAt?: string) =>
+      spawnSync(BASH, [posix(INSTALL), "--apply", "--repo", posix(repo)], {
+        encoding: "utf8",
+        env: failAt ? { ...env, ASHLEY_INSTALL_FAIL_AT: failAt } : env,
+      });
+
+    for (const stage of [
+      "during_commit_runtime",
+      "during_commit_workspace",
+      "during_commit_keys",
+      "during_commit_units",
+      "during_commit_publish",
+    ]) {
+      writeFileSync(systemctlLog, "");
+      const attempt = runApply(stage);
+      if (attempt.error) throw attempt.error;
+      expect(attempt.status, `${stage}\n${attempt.stdout}\n${attempt.stderr}`).not.toBe(0);
+      expect(attempt.stderr).toContain(`injected_failure:${stage}`);
+      expect(attempt.stderr).toContain("INSTALL_RECOVERY_REQUIRED");
+      const interrupted = JSON.parse(readFileSync(txPath, "utf8"));
+      expect(interrupted.state).toBe("INSTALL_RECOVERY_REQUIRED");
+      expect(interrupted.failedStage).toBe(stage);
+      const log = existsSync(systemctlLog) ? readFileSync(systemctlLog, "utf8") : "";
+      expect(log).not.toContain("daemon-reload");
+      expect(log).not.toContain("enable --now ashley-exec-broker.socket");
+      expect(log).not.toMatch(/enable --now ashley-exec-broker\.service/);
+      const recovered = runApply();
+      if (recovered.error) throw recovered.error;
+      expect(recovered.status, `${stage} recovery\n${recovered.stdout}\n${recovered.stderr}`).toBe(0);
+      expect(JSON.parse(readFileSync(txPath, "utf8")).state).toBe("COMMITTED");
+    }
+
+    writeFileSync(systemctlLog, "");
+    const beforeSystemd = runApply("after_publish_before_systemd");
+    if (beforeSystemd.error) throw beforeSystemd.error;
+    expect(beforeSystemd.status, `${beforeSystemd.stdout}\n${beforeSystemd.stderr}`).not.toBe(0);
+    expect(beforeSystemd.stderr).toContain("injected_failure:after_publish_before_systemd");
+    expect(beforeSystemd.stderr).toContain("INSTALL_RECOVERY_REQUIRED");
+    const beforeState = JSON.parse(readFileSync(txPath, "utf8"));
+    expect(beforeState.state).toBe("INSTALL_RECOVERY_REQUIRED");
+    expect(beforeState.failedStage).toBe("after_publish_before_systemd");
+    expect(existsSync(manifest)).toBe(true);
+    const beforeLog = existsSync(systemctlLog) ? readFileSync(systemctlLog, "utf8") : "";
+    expect(beforeLog).not.toContain("daemon-reload");
+    expect(beforeLog).not.toContain("ashley-exec-broker.socket");
+    const recoveredBefore = runApply();
+    if (recoveredBefore.error) throw recoveredBefore.error;
+    expect(recoveredBefore.status, `${recoveredBefore.stdout}\n${recoveredBefore.stderr}`).toBe(0);
+    expect(JSON.parse(readFileSync(txPath, "utf8")).state).toBe("COMMITTED");
+
+    writeFileSync(systemctlLog, "");
+    const afterSystemd = runApply("after_systemd_before_committed");
+    if (afterSystemd.error) throw afterSystemd.error;
+    expect(afterSystemd.status, `${afterSystemd.stdout}\n${afterSystemd.stderr}`).not.toBe(0);
+    expect(afterSystemd.stderr).toContain("injected_failure:after_systemd_before_committed");
+    expect(afterSystemd.stderr).toContain("INSTALL_RECOVERY_REQUIRED");
+    const afterState = JSON.parse(readFileSync(txPath, "utf8"));
+    expect(afterState.state).toBe("INSTALL_RECOVERY_REQUIRED");
+    expect(afterState.failedStage).toBe("after_systemd_before_committed");
+    expect(existsSync(manifest)).toBe(true);
+    const afterLog = readFileSync(systemctlLog, "utf8");
+    expect(afterLog).toContain("daemon-reload");
+    expect(afterLog).toContain("enable --now ashley-exec-broker.socket");
+    expect(afterLog).not.toMatch(/enable --now ashley-exec-broker\.service/);
+    const recoveredAfter = runApply();
+    if (recoveredAfter.error) throw recoveredAfter.error;
+    expect(recoveredAfter.status, `${recoveredAfter.stdout}\n${recoveredAfter.stderr}`).toBe(0);
+    expect(JSON.parse(readFileSync(txPath, "utf8")).state).toBe("COMMITTED");
+
     // Policy alias test: same-file policy.json copy succeeds idempotently
     const agentKeysDir = path.join(home, ".composer-assistant", "keys");
     mkdirSync(agentKeysDir, { recursive: true });
@@ -380,5 +465,5 @@ fi
     });
     if (aliasAttempt.error) throw aliasAttempt.error;
     expect(aliasAttempt.status, `${aliasAttempt.stdout}\n${aliasAttempt.stderr}`).toBe(0);
-  }, 180_000);
+  }, 300_000);
 });

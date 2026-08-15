@@ -57,6 +57,7 @@ maybe_fail() {
 
 on_exit() {
   local exit_code=$?
+  rm -f "${peer_helper_tmp:-}"
   if [[ "$exit_code" -ne 0 && "$TX_STATE" == "COMMITTING" ]]; then
     if [[ -d "$SANDBOX_STATE_ROOT/meta" ]]; then
       python3 - "$TX_FILE" "${source_commit:-unknown}" "$INSTALL_FAIL_AT" <<'PY' 2>/dev/null || true
@@ -105,6 +106,10 @@ Options:
   --network-provider NAME          Network isolation provider (unavailable|none; default: unavailable)
   --network-isolation-qualified    Declare the host network isolation qualified (required for none)
   --unshare-path PATH              Trusted absolute unshare binary (default: /usr/bin/unshare)
+
+Interrupted COMMIT leaves INSTALL_RECOVERY_REQUIRED. Recover by re-running this
+script with --apply (idempotent). There is no recover subcommand. The broker
+socket may already be live while the journal is still COMMITTING.
 EOF
 }
 
@@ -346,7 +351,6 @@ root_run "$FIND_BIN" "$STAGE_BROKER_DIR/node_modules/@composer-assistant/sandbox
 root_run "$INSTALL_BIN" -o root -g root -m 0644 "$ROOT/apps/sandbox-policy/package.json" "$STAGE_BROKER_DIR/node_modules/@composer-assistant/sandbox-policy/package.json"
 
 peer_helper_tmp="$(mktemp)"
-trap 'rm -f "${peer_helper_tmp:-}"' EXIT
 "$CC_BIN" -O2 -Wall -Wextra -o "$peer_helper_tmp" "$ROOT/apps/sandbox-broker/src/peer-credentials-helper.c"
 root_run "$INSTALL_BIN" -o root -g root -m 0755 "$peer_helper_tmp" "$STAGE_BROKER_DIR/bin/peer-credentials"
 rm -f "$peer_helper_tmp"
@@ -510,6 +514,16 @@ root_run python3 "$PROVENANCE_HELPER" publish \
   "${PROVENANCE_FAIL_ARGS[@]}"
 maybe_fail during_commit_publish
 
+# systemd stays inside COMMITTING, after publish and before COMMITTED.
+# Enable the socket only  -  never ashley-exec-broker.service.
+# A crash here leaves the journal COMMITTING / INSTALL_RECOVERY_REQUIRED even if
+# the socket is already live. Recovery is a full idempotent install.sh --apply
+# re-run; there is no recover subcommand.
+maybe_fail after_publish_before_systemd
+root_run "$SYSTEMCTL_BIN" daemon-reload
+root_run "$SYSTEMCTL_BIN" enable --now ashley-exec-broker.socket
+maybe_fail after_systemd_before_committed
+
 # Update transaction state to COMMITTED
 TX_STATE="COMMITTED"
 python3 - "$TX_FILE" "$source_commit" <<'PY'
@@ -519,9 +533,6 @@ data = {"state": "COMMITTED", "installedCommit": commit, "completedAt": int(time
 with open(path, "w", encoding="utf-8") as f:
     json.dump(data, f, indent=2)
 PY
-
-root_run "$SYSTEMCTL_BIN" daemon-reload
-root_run "$SYSTEMCTL_BIN" enable --now ashley-exec-broker.socket
 
 # Cleanup staging
 root_run rm -rf "$STAGE_ROOT"
