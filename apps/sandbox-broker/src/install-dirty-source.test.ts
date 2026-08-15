@@ -143,7 +143,7 @@ describe("installer source preflight", () => {
     expect(() => rmSync(buildMarker)).toThrow();
   });
 
-  it("a clean scratch installation reaches trusted manifest publication", async () => {
+  function scratchInstall() {
     const repo = fixtureRepo();
     const root = repo;
     const fakeBin = path.join(root, "install-fake-bin");
@@ -358,7 +358,44 @@ fi
     if (initialVerification.error) throw initialVerification.error;
     expect(initialVerification.status, initialVerification.stderr).toBe(0);
 
-    // PREPARE failures must leave the existing installed runtime and manifests intact
+    const txPath = path.join(state, "meta", "install-transaction.json");
+    expect(JSON.parse(readFileSync(txPath, "utf8")).state).toBe("COMMITTED");
+    const successfulLog = readFileSync(systemctlLog, "utf8");
+    expect(successfulLog).toContain("daemon-reload");
+    expect(successfulLog).toContain("enable --now ashley-exec-broker.socket");
+    expect(successfulLog).not.toMatch(/enable --now ashley-exec-broker\.service/);
+    expect(successfulLog).not.toMatch(/\bstart ashley-exec-broker\.service\b/);
+
+    const runApply = (failAt?: string) =>
+      spawnSync(BASH, [posix(INSTALL), "--apply", "--repo", posix(repo)], {
+        encoding: "utf8",
+        env: failAt ? { ...env, ASHLEY_INSTALL_FAIL_AT: failAt } : env,
+      });
+
+    return {
+      repo,
+      env,
+      broker,
+      state,
+      systemd,
+      workspace,
+      systemctlLog,
+      keys,
+      home,
+      manifest,
+      workspaceManifest,
+      txPath,
+      provenanceArgs,
+      runApply,
+    };
+  }
+
+  it("a clean scratch installation reaches trusted manifest publication", () => {
+    scratchInstall();
+  }, 60_000);
+
+  it("PREPARE fail-at leaves the previous installation verified", () => {
+    const { repo, env, provenanceArgs } = scratchInstall();
     for (const stage of [
       "during_prepare_validation",
       "during_prepare_build",
@@ -376,21 +413,10 @@ fi
       if (verification.error) throw verification.error;
       expect(verification.status, `PREPARE failure at ${stage} must leave previous installation verified`).toBe(0);
     }
+  }, 120_000);
 
-    const txPath = path.join(state, "meta", "install-transaction.json");
-    expect(JSON.parse(readFileSync(txPath, "utf8")).state).toBe("COMMITTED");
-    const successfulLog = readFileSync(systemctlLog, "utf8");
-    expect(successfulLog).toContain("daemon-reload");
-    expect(successfulLog).toContain("enable --now ashley-exec-broker.socket");
-    expect(successfulLog).not.toMatch(/enable --now ashley-exec-broker\.service/);
-    expect(successfulLog).not.toMatch(/\bstart ashley-exec-broker\.service\b/);
-
-    const runApply = (failAt?: string) =>
-      spawnSync(BASH, [posix(INSTALL), "--apply", "--repo", posix(repo)], {
-        encoding: "utf8",
-        env: failAt ? { ...env, ASHLEY_INSTALL_FAIL_AT: failAt } : env,
-      });
-
+  it("COMMIT fail-at writes INSTALL_RECOVERY_REQUIRED and recovers", () => {
+    const { systemctlLog, txPath, runApply } = scratchInstall();
     for (const stage of [
       "during_commit_runtime",
       "during_commit_workspace",
@@ -416,7 +442,10 @@ fi
       expect(recovered.status, `${stage} recovery\n${recovered.stdout}\n${recovered.stderr}`).toBe(0);
       expect(JSON.parse(readFileSync(txPath, "utf8")).state).toBe("COMMITTED");
     }
+  }, 180_000);
 
+  it("crash after publish before systemd stays INSTALL_RECOVERY_REQUIRED", () => {
+    const { systemctlLog, txPath, manifest, runApply } = scratchInstall();
     writeFileSync(systemctlLog, "");
     const beforeSystemd = runApply("after_publish_before_systemd");
     if (beforeSystemd.error) throw beforeSystemd.error;
@@ -434,7 +463,10 @@ fi
     if (recoveredBefore.error) throw recoveredBefore.error;
     expect(recoveredBefore.status, `${recoveredBefore.stdout}\n${recoveredBefore.stderr}`).toBe(0);
     expect(JSON.parse(readFileSync(txPath, "utf8")).state).toBe("COMMITTED");
+  }, 90_000);
 
+  it("crash after systemd before COMMITTED write still recovers", () => {
+    const { systemctlLog, txPath, manifest, runApply } = scratchInstall();
     writeFileSync(systemctlLog, "");
     const afterSystemd = runApply("after_systemd_before_committed");
     if (afterSystemd.error) throw afterSystemd.error;
@@ -453,8 +485,10 @@ fi
     if (recoveredAfter.error) throw recoveredAfter.error;
     expect(recoveredAfter.status, `${recoveredAfter.stdout}\n${recoveredAfter.stderr}`).toBe(0);
     expect(JSON.parse(readFileSync(txPath, "utf8")).state).toBe("COMMITTED");
+  }, 90_000);
 
-    // Policy alias test: same-file policy.json copy succeeds idempotently
+  it("same-file policy.json copy succeeds idempotently", () => {
+    const { home, keys, env, repo } = scratchInstall();
     const agentKeysDir = path.join(home, ".composer-assistant", "keys");
     mkdirSync(agentKeysDir, { recursive: true });
     const sameFilePolicy = path.join(agentKeysDir, "policy.json");
@@ -465,5 +499,5 @@ fi
     });
     if (aliasAttempt.error) throw aliasAttempt.error;
     expect(aliasAttempt.status, `${aliasAttempt.stdout}\n${aliasAttempt.stderr}`).toBe(0);
-  }, 300_000);
+  }, 60_000);
 });

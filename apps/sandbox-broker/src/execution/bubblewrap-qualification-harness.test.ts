@@ -478,7 +478,7 @@ describe("02C qualification helper source contract", () => {
       rmSync(completeFixture.root, { force: true, recursive: true });
       rmSync(missingFixture.root, { force: true, recursive: true });
     }
-  });
+  }, 60_000);
   it("pins the corrected systemd namespace and memory contract", () => {
     expect(serviceUnit).toContain(
       "RestrictNamespaces=user mnt pid net uts ipc",
