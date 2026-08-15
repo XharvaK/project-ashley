@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 
 export const PROJECT_ROOT = path.resolve(__dirname, "../../..");
 export const BASH = process.platform === "win32" ? "C:\\Program Files\\Git\\bin\\bash.exe" : "/usr/bin/bash";
@@ -494,6 +494,40 @@ export function runActivation(
   });
   if (result.error) throw result.error;
   return result;
+}
+
+export function runActivationAsync(
+  fixture: MintFixture,
+  failAt?: string,
+  overrides: NodeJS.ProcessEnv = {},
+): Promise<{ status: number | null; stdout: string; stderr: string }> {
+  const useUserNamespace = process.platform === "linux" && process.getuid?.() !== 0;
+  const command = useUserNamespace ? USER_NAMESPACE : BASH;
+  const args = useUserNamespace
+    ? ["-Ur", BASH, posix(ACTIVATE), fixture.sourcePin]
+    : [posix(ACTIVATE), fixture.sourcePin];
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: {
+        ...baseEnvironment(fixture),
+        ASHLEY_ACTIVATION_FAIL_AT: failAt ?? "",
+        ...overrides,
+      },
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    child.on("error", reject);
+    child.on("close", (status) => resolve({ status, stdout, stderr }));
+  });
 }
 
 export function runRollback(fixture: MintFixture, overrides: NodeJS.ProcessEnv = {}) {
