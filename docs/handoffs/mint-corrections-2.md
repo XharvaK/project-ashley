@@ -10,14 +10,15 @@ as qualified, installed, or activation-ready.
 | Field | Value |
 |---|---|
 | Predecessor HEAD | `cd9586a937e60a7cc38bbf693fd32beb5a3673d0` |
-| This follow-up | the single commit on top of `cd9586a` that contains only A-C (see `git log -1` / `git rev-parse HEAD`) |
-| `origin/master` | **not** claimed to be this follow-up |
+| This follow-up | `474e691048e25431a720361d577e092d80c060a1` |
+| `origin/master` | this follow-up (`474e691`) |
+| Pushed | **yes** (`1a82263..474e691`). Push is not activation and not PASS. |
 | `SOURCE_PIN` | **unset / not this SHA** until a later accepted candidate |
 | `LIVE_WITNESS_IMPLEMENTED` | **NO** |
-| `WORKTREE_CLEAN` | **NO**  -  untracked `docs/architecture/research/*` remain untracked by design |
+| `WORKTREE_CLEAN` | **NO** because untracked `docs/architecture/research/*` remain |
 
-`cd9586a` is not amended. This follow-up is not pushed. Physical 02C for the
-new SHA is **NOT RUN**.
+`cd9586a` is not amended. This follow-up was pushed to `origin/master`. Push is
+not activation and not PASS. Physical 02C for the new SHA is **NOT RUN**.
 
 ## What this follow-up changed
 
@@ -64,7 +65,7 @@ Do not claim PASS from this document.
 
 ## Not done / not accepted
 
-- no push
+- pushed `474e691` to `origin/master` (not activation, not PASS)
 - no amend of cd9586a
 - no 02C
 - no live installer apply
