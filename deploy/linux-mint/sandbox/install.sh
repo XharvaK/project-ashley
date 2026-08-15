@@ -191,7 +191,7 @@ if ! python3 - "$POLICY_ARTIFACT" <<'PY' >/dev/null 2>&1
 import json, sys
 with open(sys.argv[1], encoding="utf-8") as f:
     doc = json.load(f)
-assert isinstance(doc, dict) and doc.get("policyId") and doc.get("version")
+assert isinstance(doc, dict) and doc.get("policyId") and doc.get("policyVersion")
 PY
 then
   echo "Policy artifact is not a valid JSON policy: $POLICY_ARTIFACT" >&2
