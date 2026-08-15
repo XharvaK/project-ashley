@@ -32,6 +32,21 @@ function r4005Policy(overrides: Partial<SandboxPolicyDocument> = {}) {
 }
 
 describe("prepareR4006Policy", () => {
+
+  it("pins the exact R4-006 engineering recipe allowlist", () => {
+    expect(R4006_ENGINEERING_RECIPE_IDS).toEqual([
+      "verify:agent-tsc",
+      "verify:sandbox-broker-tsc",
+      "test:agent-vitest",
+      "test:sandbox-broker-vitest",
+      "test:sandbox-broker-dirty-source-vitest",
+      "git:status",
+      "git:diff",
+      "git:log",
+      "git:rev-parse",
+      "patch:generate",
+    ]);
+  });
   it("derives R4-006 with the approved engineering capability set and preserves owner/absolute protections", () => {
     const source = r4005Policy();
     const result = prepareR4006Policy(source, {

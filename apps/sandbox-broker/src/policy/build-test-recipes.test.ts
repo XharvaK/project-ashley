@@ -123,6 +123,22 @@ describe("fixed build and test recipes", () => {
       "vitest",
       "run",
     ]);
+    expect(recipe.description).toBe("run the sandbox-broker rest suite via vitest.config.ts");
+  });
+
+  it("5b. test:sandbox-broker-dirty-source-vitest pins the dirty-source Vitest invocation", () => {
+    const recipe = fixedRecipeRegistry().get("test:sandbox-broker-dirty-source-vitest")!;
+    expect(recipe.argv).toEqual([
+      "exec",
+      "--prefix",
+      "apps/sandbox-broker",
+      "--",
+      "vitest",
+      "run",
+      "--config",
+      "apps/sandbox-broker/vitest.dirty-source.config.ts",
+    ]);
+    expect(recipe.description).toBe("run install-dirty-source.test.ts via vitest.dirty-source.config.ts");
   });
 
   it("6. build and test recipes run the local toolchain, never lifecycle hooks", () => {

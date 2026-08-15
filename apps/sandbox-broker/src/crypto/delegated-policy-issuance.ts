@@ -50,6 +50,7 @@ export const R4006_ENGINEERING_RECIPE_IDS: readonly string[] = [
   "verify:sandbox-broker-tsc",
   "test:agent-vitest",
   "test:sandbox-broker-vitest",
+  "test:sandbox-broker-dirty-source-vitest",
   "git:status",
   "git:diff",
   "git:log",
