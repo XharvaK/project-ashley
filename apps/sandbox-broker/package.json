@@ -13,7 +13,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "vitest run",
+    "test": "vitest run --config vitest.dirty-source.config.ts && vitest run",
     "prepare:r4-006": "node scripts/prepare-r4-006.mjs"
   },
   "dependencies": {

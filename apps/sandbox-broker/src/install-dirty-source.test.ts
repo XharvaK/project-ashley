@@ -1,8 +1,45 @@
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
+
+type RunResult = {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+  error?: Error;
+};
+
+function run(
+  command: string,
+  args: string[],
+  options: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
+): Promise<RunResult> {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, {
+      cwd: options.cwd,
+      env: options.env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    child.on("error", (error) => {
+      resolve({ status: null, stdout, stderr, error });
+    });
+    child.on("close", (status) => {
+      resolve({ status, stdout, stderr });
+    });
+  });
+}
 
 const REPO_ROOT = path.resolve(__dirname, "../../..");
 const HELPER = path.join(
@@ -23,12 +60,12 @@ const INSTALL = path.join(
 );
 const roots: string[] = [];
 
-function git(cwd: string, ...args: string[]) {
-  const result = spawnSync("git", args, { cwd, encoding: "utf8" });
+async function git(cwd: string, ...args: string[]) {
+  const result = await run("git", args, { cwd });
   expect(result.status, result.stderr).toBe(0);
 }
 
-function fixtureRepo(): string {
+async function fixtureRepo(): Promise<string> {
   const repo = mkdtempSync(path.join(tmpdir(), "ashley-source-preflight-"));
   roots.push(repo);
   const files: Record<string, string> = {
@@ -52,18 +89,16 @@ function fixtureRepo(): string {
     mkdirSync(path.dirname(target), { recursive: true });
     writeFileSync(target, contents);
   }
-  git(repo, "init", "--quiet");
-  git(repo, "config", "user.email", "fixture@example.invalid");
-  git(repo, "config", "user.name", "Fixture");
-  git(repo, "add", ".");
-  git(repo, "commit", "--quiet", "-m", "fixture");
+  await git(repo, "init", "--quiet");
+  await git(repo, "config", "user.email", "fixture@example.invalid");
+  await git(repo, "config", "user.name", "Fixture");
+  await git(repo, "add", ".");
+  await git(repo, "commit", "--quiet", "-m", "fixture");
   return repo;
 }
 
-function preflight(repo: string) {
-  const result = spawnSync(PYTHON, [HELPER, "source-preflight", "--repo-root", repo], {
-    encoding: "utf8",
-  });
+async function preflight(repo: string) {
+  const result = await run(PYTHON, [HELPER, "source-preflight", "--repo-root", repo]);
   if (result.error) throw result.error;
   return result;
 }
@@ -82,40 +117,40 @@ afterEach(() => {
 });
 
 describe("installer source preflight", () => {
-  it("accepts a clean HEAD and ignores an unrelated untracked owner file", () => {
-    const repo = fixtureRepo();
+  it("accepts a clean HEAD and ignores an unrelated untracked owner file", async () => {
+    const repo = await fixtureRepo();
     writeFileSync(path.join(repo, "query.js"), "owner operational file\n");
-    const result = preflight(repo);
+    const result = await preflight(repo);
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain("source_preflight_passed");
   });
 
   it.each([
-    ["unstaged modification", (repo: string) => writeFileSync(path.join(repo, "README.md"), "changed\n")],
-    ["staged modification", (repo: string) => {
+    ["unstaged modification", async (repo: string) => writeFileSync(path.join(repo, "README.md"), "changed\n")],
+    ["staged modification", async (repo: string) => {
       writeFileSync(path.join(repo, "README.md"), "changed\n");
-      git(repo, "add", "README.md");
+      await git(repo, "add", "README.md");
     }],
-    ["staged deletion", (repo: string) => git(repo, "rm", "README.md")],
-    ["staged rename", (repo: string) => git(repo, "mv", "README.md", "RENAMED.md")],
-  ])("refuses a tracked %s against HEAD", (_label, mutate) => {
-    const repo = fixtureRepo();
-    mutate(repo);
-    const result = preflight(repo);
+    ["staged deletion", async (repo: string) => { await git(repo, "rm", "README.md"); }],
+    ["staged rename", async (repo: string) => { await git(repo, "mv", "README.md", "RENAMED.md"); }],
+  ])("refuses a tracked %s against HEAD", async (_label, mutate) => {
+    const repo = await fixtureRepo();
+    await mutate(repo);
+    const result = await preflight(repo);
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("tracked_source_dirty");
   });
 
-  it("refuses an untracked build-relevant source input", () => {
-    const repo = fixtureRepo();
+  it("refuses an untracked build-relevant source input", async () => {
+    const repo = await fixtureRepo();
     writeFileSync(path.join(repo, "apps", "sandbox-broker", "src", "injected.ts"), "export {};\n");
-    const result = preflight(repo);
+    const result = await preflight(repo);
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("untracked_build_input");
   });
 
-  it("the real installer refuses dirty tracked source before invoking npm", () => {
-    const repo = fixtureRepo();
+  it("the real installer refuses dirty tracked source before invoking npm", async () => {
+    const repo = await fixtureRepo();
     writeFileSync(path.join(repo, "README.md"), "dirty\n");
     const fakeBin = path.join(repo, "fake-bin");
     const buildMarker = path.join(repo, "npm-invoked");
@@ -126,11 +161,10 @@ describe("installer source preflight", () => {
       `#!/bin/sh\nprintf 'invoked\\n' > '${posix(buildMarker)}'\nexit 86\n`,
     );
     chmodSync(npm, 0o755);
-    const result = spawnSync(
+    const result = await run(
       BASH,
       [posix(INSTALL), "--apply", "--repo", posix(repo)],
       {
-        encoding: "utf8",
         env: {
           ...process.env,
           PATH: `${posix(fakeBin)}:${process.env.PATH ?? ""}`,
@@ -143,8 +177,8 @@ describe("installer source preflight", () => {
     expect(() => rmSync(buildMarker)).toThrow();
   });
 
-  function scratchInstall() {
-    const repo = fixtureRepo();
+  async function scratchInstall() {
+    const repo = await fixtureRepo();
     const root = repo;
     const fakeBin = path.join(root, "install-fake-bin");
     const broker = path.join(root, "opt", "ashley-sandbox");
@@ -319,8 +353,7 @@ fi
       ASHLEY_SANDBOX_POLICY_ARTIFACT: posix(path.join(keys, "policy.json")),
       ASHLEY_SANDBOX_POLICY_SIGNATURE: posix(path.join(keys, "policy.sig")),
     };
-    const result = spawnSync(BASH, [posix(INSTALL), "--apply", "--repo", posix(repo)], {
-      encoding: "utf8",
+    const result = await run(BASH, [posix(INSTALL), "--apply", "--repo", posix(repo)], {
       env,
     });
     if (result.error) throw result.error;
@@ -331,9 +364,7 @@ fi
     expect(existsSync(manifest)).toBe(true);
     expect(existsSync(workspaceManifest)).toBe(true);
 
-    const sourcePin = spawnSync("git", ["-C", repo, "rev-parse", "HEAD"], {
-      encoding: "utf8",
-    }).stdout.trim();
+    const sourcePin = (await run("git", ["-C", repo, "rev-parse", "HEAD"])).stdout.trim();
     const provenanceArgs = [
       HELPER,
       "verify",
@@ -354,7 +385,7 @@ fi
       "--source-commit",
       sourcePin,
     ];
-    const initialVerification = spawnSync(PYTHON, provenanceArgs, { encoding: "utf8" });
+    const initialVerification = await run(PYTHON, provenanceArgs);
     if (initialVerification.error) throw initialVerification.error;
     expect(initialVerification.status, initialVerification.stderr).toBe(0);
 
@@ -367,8 +398,7 @@ fi
     expect(successfulLog).not.toMatch(/\bstart ashley-exec-broker\.service\b/);
 
     const runApply = (failAt?: string) =>
-      spawnSync(BASH, [posix(INSTALL), "--apply", "--repo", posix(repo)], {
-        encoding: "utf8",
+      run(BASH, [posix(INSTALL), "--apply", "--repo", posix(repo)], {
         env: failAt ? { ...env, ASHLEY_INSTALL_FAIL_AT: failAt } : env,
       });
 
@@ -390,33 +420,32 @@ fi
     };
   }
 
-  it("a clean scratch installation reaches trusted manifest publication", () => {
-    scratchInstall();
+  it("a clean scratch installation reaches trusted manifest publication", async () => {
+    await scratchInstall();
   }, 60_000);
 
-  it("PREPARE fail-at leaves the previous installation verified", () => {
-    const { repo, env, provenanceArgs } = scratchInstall();
+  it("PREPARE fail-at leaves the previous installation verified", async () => {
+    const { repo, env, provenanceArgs } = await scratchInstall();
     for (const stage of [
       "during_prepare_validation",
       "during_prepare_build",
       "during_prepare_staging",
       "during_prepare_verification",
     ]) {
-      const attempt = spawnSync(BASH, [posix(INSTALL), "--apply", "--repo", posix(repo)], {
-        encoding: "utf8",
+      const attempt = await run(BASH, [posix(INSTALL), "--apply", "--repo", posix(repo)], {
         env: { ...env, ASHLEY_INSTALL_FAIL_AT: stage },
       });
       if (attempt.error) throw attempt.error;
       expect(attempt.status, `${stage}\n${attempt.stdout}\n${attempt.stderr}`).not.toBe(0);
       expect(attempt.stderr).toContain(`injected_failure:${stage}`);
-      const verification = spawnSync(PYTHON, provenanceArgs, { encoding: "utf8" });
+      const verification = await run(PYTHON, provenanceArgs);
       if (verification.error) throw verification.error;
       expect(verification.status, `PREPARE failure at ${stage} must leave previous installation verified`).toBe(0);
     }
   }, 120_000);
 
-  it("COMMIT fail-at writes INSTALL_RECOVERY_REQUIRED and recovers", () => {
-    const { systemctlLog, txPath, runApply } = scratchInstall();
+  it("COMMIT fail-at writes INSTALL_RECOVERY_REQUIRED and recovers", async () => {
+    const { systemctlLog, txPath, runApply } = await scratchInstall();
     for (const stage of [
       "during_commit_runtime",
       "during_commit_workspace",
@@ -425,7 +454,7 @@ fi
       "during_commit_publish",
     ]) {
       writeFileSync(systemctlLog, "");
-      const attempt = runApply(stage);
+      const attempt = await runApply(stage);
       if (attempt.error) throw attempt.error;
       expect(attempt.status, `${stage}\n${attempt.stdout}\n${attempt.stderr}`).not.toBe(0);
       expect(attempt.stderr).toContain(`injected_failure:${stage}`);
@@ -437,17 +466,17 @@ fi
       expect(log).not.toContain("daemon-reload");
       expect(log).not.toContain("enable --now ashley-exec-broker.socket");
       expect(log).not.toMatch(/enable --now ashley-exec-broker\.service/);
-      const recovered = runApply();
+      const recovered = await runApply();
       if (recovered.error) throw recovered.error;
       expect(recovered.status, `${stage} recovery\n${recovered.stdout}\n${recovered.stderr}`).toBe(0);
       expect(JSON.parse(readFileSync(txPath, "utf8")).state).toBe("COMMITTED");
     }
   }, 180_000);
 
-  it("crash after publish before systemd stays INSTALL_RECOVERY_REQUIRED", () => {
-    const { systemctlLog, txPath, manifest, runApply } = scratchInstall();
+  it("crash after publish before systemd stays INSTALL_RECOVERY_REQUIRED", async () => {
+    const { systemctlLog, txPath, manifest, runApply } = await scratchInstall();
     writeFileSync(systemctlLog, "");
-    const beforeSystemd = runApply("after_publish_before_systemd");
+    const beforeSystemd = await runApply("after_publish_before_systemd");
     if (beforeSystemd.error) throw beforeSystemd.error;
     expect(beforeSystemd.status, `${beforeSystemd.stdout}\n${beforeSystemd.stderr}`).not.toBe(0);
     expect(beforeSystemd.stderr).toContain("injected_failure:after_publish_before_systemd");
@@ -459,16 +488,16 @@ fi
     const beforeLog = existsSync(systemctlLog) ? readFileSync(systemctlLog, "utf8") : "";
     expect(beforeLog).not.toContain("daemon-reload");
     expect(beforeLog).not.toContain("ashley-exec-broker.socket");
-    const recoveredBefore = runApply();
+    const recoveredBefore = await runApply();
     if (recoveredBefore.error) throw recoveredBefore.error;
     expect(recoveredBefore.status, `${recoveredBefore.stdout}\n${recoveredBefore.stderr}`).toBe(0);
     expect(JSON.parse(readFileSync(txPath, "utf8")).state).toBe("COMMITTED");
   }, 90_000);
 
-  it("crash after systemd before COMMITTED write still recovers", () => {
-    const { systemctlLog, txPath, manifest, runApply } = scratchInstall();
+  it("crash after systemd before COMMITTED write still recovers", async () => {
+    const { systemctlLog, txPath, manifest, runApply } = await scratchInstall();
     writeFileSync(systemctlLog, "");
-    const afterSystemd = runApply("after_systemd_before_committed");
+    const afterSystemd = await runApply("after_systemd_before_committed");
     if (afterSystemd.error) throw afterSystemd.error;
     expect(afterSystemd.status, `${afterSystemd.stdout}\n${afterSystemd.stderr}`).not.toBe(0);
     expect(afterSystemd.stderr).toContain("injected_failure:after_systemd_before_committed");
@@ -481,20 +510,19 @@ fi
     expect(afterLog).toContain("daemon-reload");
     expect(afterLog).toContain("enable --now ashley-exec-broker.socket");
     expect(afterLog).not.toMatch(/enable --now ashley-exec-broker\.service/);
-    const recoveredAfter = runApply();
+    const recoveredAfter = await runApply();
     if (recoveredAfter.error) throw recoveredAfter.error;
     expect(recoveredAfter.status, `${recoveredAfter.stdout}\n${recoveredAfter.stderr}`).toBe(0);
     expect(JSON.parse(readFileSync(txPath, "utf8")).state).toBe("COMMITTED");
   }, 90_000);
 
-  it("same-file policy.json copy succeeds idempotently", () => {
-    const { home, keys, env, repo } = scratchInstall();
+  it("same-file policy.json copy succeeds idempotently", async () => {
+    const { home, keys, env, repo } = await scratchInstall();
     const agentKeysDir = path.join(home, ".composer-assistant", "keys");
     mkdirSync(agentKeysDir, { recursive: true });
     const sameFilePolicy = path.join(agentKeysDir, "policy.json");
     copyFileSync(path.join(keys, "policy.json"), sameFilePolicy);
-    const aliasAttempt = spawnSync(BASH, [posix(INSTALL), "--apply", "--repo", posix(repo)], {
-      encoding: "utf8",
+    const aliasAttempt = await run(BASH, [posix(INSTALL), "--apply", "--repo", posix(repo)], {
       env: { ...env, ASHLEY_SANDBOX_POLICY_ARTIFACT: posix(sameFilePolicy) },
     });
     if (aliasAttempt.error) throw aliasAttempt.error;
