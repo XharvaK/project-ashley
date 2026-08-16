@@ -190,6 +190,7 @@ import {
   executeReactiveSandboxTask,
   reactiveSandboxRunResultToOperationalLicense,
 } from "./sandbox/reactive-execution.js";
+import { executeReactiveSandboxTaskV2 } from "./sandbox/v2-execution.js";
 import {
   isVerifiedRoundtripEffectEvidence,
   type RoundtripEffectEvidence,
@@ -841,17 +842,10 @@ export class AshleyCore {
 
       if (reactiveAdmission.admitted) {
         if (reactiveAdmission.shouldDispatch && env.sandboxEngineeringLifecycleEnabled) {
-          const runRes = await executeReactiveSandboxTask(this.db, {
-            ownerId: input.ownerId,
-            admissionId: reactiveAdmission.admissionId,
-            messageEntityUuid: messageEntityUuid ?? "",
-            brokerClient: this.sandboxBrokerClient,
+          decision.operationalLicense = await executeReactiveSandboxTaskV2({
+            messageEntityUuid: messageEntityUuid ?? undefined,
+            deadlineAtMs: thoughtDeadline,
           });
-          decision.operationalLicense = reactiveSandboxRunResultToOperationalLicense(
-            runRes,
-            reactiveAdmission.profile,
-            messageEntityUuid ?? undefined,
-          );
         } else if (reactiveAdmission.replayed) {
           // Replayed admission: observe existing correlated task state, do NOT execute again
           const correlated = findCorrelatedEngineeringTask(this.db, input.ownerId, {
