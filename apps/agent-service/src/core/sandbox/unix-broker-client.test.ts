@@ -3,7 +3,10 @@ import type {
   BrokerClientTransport,
   BrokerDispatchResult,
 } from "../change-proposal/broker-client.js";
-import type { FixedRecipeExecutionRequest } from "@composer-assistant/sandbox-broker";
+import type {
+  DelegatedApprovalEnvelope,
+  FixedRecipeExecutionRequest,
+} from "@composer-assistant/sandbox-broker";
 import { UnixSandboxBrokerClient } from "./unix-broker-client.js";
 
 function readinessPayload(
@@ -170,55 +173,50 @@ describe("UnixSandboxBrokerClient execution outcomes", () => {
 });
 
 describe("engineeringAction wire contract", () => {
-  it("accepts broker canonical success shape for request_workspace", () => {
+  it("accepts broker canonical success shape for request_workspace", async () => {
     // The broker returns {ok: true, data: {workspaceId, treeRoot, created: true}}
     // after protocolResult, result.data = {workspaceId, treeRoot, created: true}
     // isEngineeringToolResult should accept this broker canonical success shape
-    const result: BrokerDispatchResult = { ok: true, data: { workspaceId: "ws-123", treeRoot: "/tmp", created: true } };
-    const engineeringToolResult = unixBrokerClient.engineeringAction({
+    const data = { workspaceId: "ws-123", treeRoot: "/tmp", created: true };
+    const engineeringToolResult = await clientFor(data).engineeringAction({
       envelope: {} as DelegatedApprovalEnvelope,
       nowMs: Date.now(),
       action: { type: "request_workspace", fields: { reason: "ephemeral roundtrip check" } },
     });
     expect(engineeringToolResult.ok).toBe(true);
-    expect(engineeringToolResult.data).toEqual({ workspaceId: "ws-123", treeRoot: "/tmp", created: true });
-    expect(engineeringToolResult.artifactRef).toBeNull();
-  });
-
-  it("rejects malformed success payload lacking required fields", () => {
-    // A payload with ok:true but no data field should be rejected
-    const result: BrokerDispatchResult = { ok: true, data: {} };
-    // The engineeringAction method checks isEngineeringToolResult which now
-    // accepts broker canonical shapes; but a completely empty data object
-    // should still be handled by the fail-closed path.
-    // We test that the client's engineeringAction correctly validates.
-    expect.assertions(2);
-    try {
-      const r = await unixBrokerClient.engineeringAction({
-        envelope: {} as DelegatedApprovalEnvelope,
-        nowMs: Date.now(),
-        action: { type: "request_workspace", fields: { reason: "test" } },
-      });
-      // If we get here, the result was accepted; verify it has expected shape
-      expect(r.ok).toBe(true);
-      expect(r.data).toBeDefined();
-    } catch (e) {
-      // Expected: malformed payload should fail closed
-      expect(e).toBeDefined();
+    if (engineeringToolResult.ok) {
+      expect(engineeringToolResult.data).toEqual(data);
+      expect(engineeringToolResult.artifactRef).toBeNull();
     }
   });
 
-  it("rejects payloads with ok:false but missing errorCode/reason", () => {
+  it("rejects malformed success payload lacking required fields", async () => {
+    // A payload with ok:true but no data field should be rejected
+    const data = {};
+    const r = await clientFor(data).engineeringAction({
+      envelope: {} as DelegatedApprovalEnvelope,
+      nowMs: Date.now(),
+      action: { type: "request_workspace", fields: { reason: "test" } },
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.errorCode).toBe("broker_response_invalid");
+    }
+  });
+
+  it("rejects payloads with ok:false but missing errorCode/reason", async () => {
     // Error responses must have errorCode and reason strings;
     // missing those should fail closed
-    const result: BrokerDispatchResult = { ok: false, message: "some error" };
-    const engineeringToolResult = unixBrokerClient.engineeringAction({
+    const data = { ok: false, message: "some error" };
+    const engineeringToolResult = await clientFor(data).engineeringAction({
       envelope: {} as DelegatedApprovalEnvelope,
       nowMs: Date.now(),
       action: { type: "request_workspace", fields: { reason: "test" } },
     });
     // Should fail with broker_response_invalid since errorCode/reason are missing
     expect(engineeringToolResult.ok).toBe(false);
-    expect(engineeringToolResult.errorCode).toBe("broker_response_invalid");
+    if (!engineeringToolResult.ok) {
+      expect(engineeringToolResult.errorCode).toBe("broker_response_invalid");
+    }
   });
 });
