@@ -144,7 +144,7 @@ export function minimalExpressionContext(
 
 /**
  * Options for the visible fallback dispatch (one hop maximum).
- * - Route: ashley_expression_fallback (Groq llama-3.3-70b-versa)
+ * - Route: ashley_expression_fallback (Groq qwen/qwen3.6-27b)
  * - No tools, no sandbox authority, no perception parts.
  */
 export function fallbackCompletionOptions(input: {
@@ -155,11 +155,11 @@ export function fallbackCompletionOptions(input: {
   lane: ExpressionFallbackLane;
 }): CompletionOptions {
   return {
-    model: "llama-3.3-70b-versatile",
+    model: "qwen/qwen3.6-27b",
     route: "ashley_expression_fallback",
     maxTokens: 900,
     temperature: 0.7,
-    reasoningEffort: "low",
+    reasoningEffort: "none",
     lane: input.lane,
     purpose: "expression",
     deadlineAtMs: input.deadlineAtMs ?? undefined,

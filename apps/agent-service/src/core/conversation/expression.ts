@@ -28,6 +28,7 @@ import {
   isEligibleMistralFailure,
   type ExpressionComplete,
   type ExpressionFallbackLane,
+  type ExpressionFallbackPolicy,
 } from "./expression-fallback.js";
 
 /** Complete wording from Expression (before transport). */
@@ -171,6 +172,7 @@ export async function expressSpeak(
     // Fallback eligibility is decided entirely from local state BEFORE any
     // data leaves for the fallback provider (single hop, no recursion).
     const policy = buildExpressionFallbackPolicy(turn, decision, current);
+    recordExpressionFallbackPolicy(attentionDb, options.decisionId, policy);
     const deadlineOk =
       options.deadlineAtMs == null || Date.now() < options.deadlineAtMs;
     const fallbackAllowed =
@@ -236,6 +238,22 @@ function applyRendering(output: ExpressionOutput): RenderedOutput {
     model: output.model,
     readingLicensed: output.readingLicensed,
   };
+}
+
+/**
+ * Records the fallback policy on the existing decision_log row when the
+ * primary dispatch fails. The column was added by migration-18; this is its
+ * first write path. No-op when no decision id is available.
+ */
+function recordExpressionFallbackPolicy(
+  db: DatabaseSync,
+  decisionId: number | null | undefined,
+  policy: ExpressionFallbackPolicy,
+): void {
+  if (decisionId == null) return;
+  db.prepare(
+    "UPDATE decision_log SET expression_fallback_policy = ? WHERE id = ?",
+  ).run(policy, decisionId);
 }
 
 function offlineOutput(): ExpressionOutput {

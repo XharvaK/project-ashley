@@ -39,7 +39,7 @@ describe("groq-adapter fixtures", () => {
     );
     const result = await adapter.dispatch({
       messages,
-      modelId: "llama-3.3-70b-versatile",
+      modelId: "qwen/qwen3.6-27b",
       options: {},
     });
     expect(result.text).toBe("hi there");
@@ -70,12 +70,31 @@ describe("groq-adapter fixtures", () => {
     );
     const result = await adapter.dispatch({
       messages,
-      modelId: "llama-3.3-70b-versatile",
+      modelId: "qwen/qwen3.6-27b",
       options: {},
     });
     expect(result.toolCalls).toEqual([
       { id: "call_1", function: { name: "summarize", arguments: '{"n":3}' } },
     ]);
+  });
+
+  it("serializes reasoning_effort in request body when specified", async () => {
+    env.groqApiKey = "test";
+    let capturedBody: Record<string, unknown> | undefined;
+    const adapter = createGroqAdapter(async (_url, init) => {
+      capturedBody = JSON.parse(init?.body as string);
+      return fakeResponse({
+        choices: [{ message: { content: "ok" } }],
+        usage: { prompt_tokens: 5, completion_tokens: 1 },
+      });
+    });
+    await adapter.dispatch({
+      messages,
+      modelId: "qwen/qwen3.6-27b",
+      options: { reasoningEffort: "none" },
+    });
+    expect(capturedBody?.reasoning_effort).toBe("none");
+    expect(capturedBody?.model).toBe("qwen/qwen3.6-27b");
   });
 
   it("throws agent_not_ready when the API key is missing", async () => {

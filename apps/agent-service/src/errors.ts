@@ -7,6 +7,7 @@ export type ErrorCode =
   | "chat_in_progress"
   | "message_too_long"
   | "rate_limited"
+  | "quota_exhausted"
   | "mistral_unavailable"
   | "provider_unavailable"
    | "agent_not_ready"

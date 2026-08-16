@@ -24,7 +24,7 @@ export const ROUTE_BINDINGS: readonly RouteBinding[] = [
   {
     route: "ashley_expression_fallback",
     provider: "groq",
-    configuredModelId: "llama-3.3-70b-versatile",
+    configuredModelId: "qwen/qwen3.6-27b",
     contextProfile: "minimal_expression_identity",
     enabled: true,
   },

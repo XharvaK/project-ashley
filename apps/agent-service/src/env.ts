@@ -184,10 +184,10 @@ export const env = {
     process.env.NIM_BASE_URL ?? "https://integrate.api.nvidia.com/v1",
   // Visible Expression fallback (Wave 3): when the primary Mistral dispatch
   // fails on an eligible turn, retry once over the minimal profile via the
-  // ashley_expression_fallback (Groq) route. Evaluation-gated off by default;
-  // activate only after owner approval.
+  // ashley_expression_fallback (Groq) route. ON by default; opt out with
+  // ASHLEY_EXPRESSION_FALLBACK=false.
   expressionFallbackEnabled:
-    process.env.ASHLEY_EXPRESSION_FALLBACK === "true",
+    process.env.ASHLEY_EXPRESSION_FALLBACK !== "false",
   expressionFallbackRecentTurns: numericEnv(
     "ASHLEY_EXPRESSION_FALLBACK_RECENT_TURNS",
     6,

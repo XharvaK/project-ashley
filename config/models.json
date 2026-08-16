@@ -20,7 +20,7 @@
     },
     "ashley_expression_fallback": {
       "provider": "groq",
-      "configured_model_id": "llama-3.3-70b-versatile",
+      "configured_model_id": "qwen/qwen3.6-27b",
       "context_profile": "minimal_expression_identity",
       "enabled": true,
       "quota_contract": { "rps": 40, "rpm": 3600, "rpd": 3600, "tpm": 6100, "tpd": 80000 }

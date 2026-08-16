@@ -14,6 +14,8 @@ import {
   type RenderedOutput,
 } from "./expression.js";
 import type { ExpressionComplete } from "./expression-fallback.js";
+import { logDecision } from "../agency/log.js";
+import { mapMistralError } from "../model-routing/adapters/mistral-adapter.js";
 
 type SavedEnv = {
   enabled: boolean;
@@ -91,12 +93,16 @@ type Fake = { calls: Call[]; fn: ExpressionComplete };
 
 function makeFake(opts: {
   primaryFail?: boolean;
+  primaryError?: AppError;
   fallbackFail?: boolean;
   fallbackText?: string;
 }): Fake {
   const calls: Call[] = [];
   const fn: ExpressionComplete = vi.fn(async (messages, options) => {
     calls.push({ messages, options });
+    if (options?.route === "ashley_expression" && opts.primaryError) {
+      throw opts.primaryError;
+    }
     if (opts.primaryFail && options?.route === "ashley_expression") {
       throw new AppError("provider_unavailable", "provider", 503);
     }
@@ -147,6 +153,116 @@ describe("expression fallback (Wave 3)", () => {
     expect(fake.calls[1].options?.route).toBe("ashley_expression_fallback");
     const fallbackBinding = routeBinding("ashley_expression_fallback" as RouteId);
     expect(result.model).toBe(fallbackBinding.configuredModelId);
+  });
+
+  it("primary success never dispatches the fallback hop", async () => {
+    setup();
+    const fake = makeFake({ fallbackText: "should not be used" });
+    const result = await expressSpeak(
+      makeTurn(),
+      baseDecision(),
+      USER_MARKER,
+      "discord",
+      { attentionDb: db },
+      fake.fn,
+    );
+
+    expect(fake.calls.length).toBe(1);
+    expect(fake.calls[0].options?.route).toBe("ashley_expression");
+    expect(result.model).toBe(env.mistralModel);
+  });
+
+  it("quota exhaustion (HTTP 402) falls back once to the Groq route and records the policy", async () => {
+    setup();
+    const fake = makeFake({
+      primaryError: new AppError("quota_exhausted", "quota", 402),
+    });
+    const decision = baseDecision();
+    const decisionId = logDecision(db, "doc", "discord", "reactive", decision);
+    const result = await expressSpeak(
+      makeTurn(),
+      decision,
+      USER_MARKER,
+      "discord",
+      { attentionDb: db, decisionId },
+      fake.fn,
+    );
+
+    expect(fake.calls.length).toBe(2);
+    expect(fake.calls[1].options?.route).toBe("ashley_expression_fallback");
+    expect(fake.calls[1].options?.model).toBe("qwen/qwen3.6-27b");
+    expect(fake.calls[1].options?.reasoningEffort).toBe("none");
+    expect(result.model).toBe("qwen/qwen3.6-27b");
+    const row = db
+      .prepare(
+        "SELECT expression_fallback_policy FROM decision_log WHERE id = ?",
+      )
+      .get(decisionId) as { expression_fallback_policy: string | null };
+    expect(row.expression_fallback_policy).toBe("minimal_identity_allowed");
+  });
+
+  it("rate limiting (HTTP 429) falls back once", async () => {
+    setup();
+    const fake = makeFake({
+      primaryError: new AppError("rate_limited", "limited", 429, 30),
+    });
+    const result = await expressSpeak(
+      makeTurn(),
+      baseDecision(),
+      USER_MARKER,
+      "discord",
+      { attentionDb: db },
+      fake.fn,
+    );
+
+    expect(fake.calls.length).toBe(2);
+    expect(fake.calls[1].options?.route).toBe("ashley_expression_fallback");
+    expect(result.model).not.toBe("offline");
+  });
+
+  it("owner-marked mistral_only kinds never fall back and record the policy", async () => {
+    setup();
+    env.mistralOnlyKinds = ["speak"];
+    const fake = makeFake({ primaryFail: true });
+    const decision = baseDecision({ kind: "speak" });
+    const decisionId = logDecision(db, "doc", "discord", "reactive", decision);
+    const result = await expressSpeak(
+      makeTurn(),
+      decision,
+      USER_MARKER,
+      "discord",
+      { attentionDb: db, decisionId },
+      fake.fn,
+    );
+
+    expect(fake.calls.length).toBe(1);
+    expect(fake.calls[0].options?.route).toBe("ashley_expression");
+    expect(result.model).toBe("offline");
+    const row = db
+      .prepare(
+        "SELECT expression_fallback_policy FROM decision_log WHERE id = ?",
+      )
+      .get(decisionId) as { expression_fallback_policy: string | null };
+    expect(row.expression_fallback_policy).toBe("mistral_only");
+  });
+
+  it("turn-deadline aborts (AbortError) are not eligible for fallback", async () => {
+    setup();
+    const abort = new Error("aborted");
+    abort.name = "AbortError";
+    const fake = makeFake({ primaryError: abort as AppError });
+    const result = await expressSpeak(
+      makeTurn(),
+      baseDecision(),
+      USER_MARKER,
+      "discord",
+      { attentionDb: db },
+      fake.fn,
+    );
+
+    expect(fake.calls.length).toBe(1);
+    expect(fake.calls[0].options?.route).toBe("ashley_expression");
+    expect(result.model).toBe("offline");
   });
 
   it("fallback receives a minimal profile that excludes the full Expression context", async () => {
@@ -329,6 +445,38 @@ describe("expression fallback (Wave 3)", () => {
     expect(bucketForRoute(route)).toBe(`${binding.provider}:${binding.configuredModelId}`);
     expect(binding.provider).toBe("groq");
     expect(binding.route).toBe("ashley_expression_fallback");
+  });
+});
+
+describe("Mistral failure classification (reason categories)", () => {
+  it("HTTP 402 maps to quota_exhausted", () => {
+    const mapped = mapMistralError(
+      Object.assign(new Error("quota"), { statusCode: 402 }),
+    );
+    expect(mapped).toBeInstanceOf(AppError);
+    expect(mapped.code).toBe("quota_exhausted");
+    expect(mapped.httpStatus).toBe(402);
+  });
+
+  it("quota/payment wording without a status still maps to quota_exhausted", () => {
+    const mapped = mapMistralError(
+      new Error("Payment Required: subscription quota exceeded"),
+    );
+    expect(mapped.code).toBe("quota_exhausted");
+  });
+
+  it("HTTP 429 still maps to rate_limited (regression)", () => {
+    const mapped = mapMistralError(
+      Object.assign(new Error("limited"), { statusCode: 429 }),
+    );
+    expect(mapped.code).toBe("rate_limited");
+  });
+
+  it("HTTP 503 still maps to mistral_unavailable (regression)", () => {
+    const mapped = mapMistralError(
+      Object.assign(new Error("down"), { statusCode: 503 }),
+    );
+    expect(mapped.code).toBe("mistral_unavailable");
   });
 });
 

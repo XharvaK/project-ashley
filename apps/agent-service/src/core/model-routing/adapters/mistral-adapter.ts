@@ -124,6 +124,9 @@ export function mapMistralError(err: unknown): AppError {
     msg.slice(0, 500),
   );
 
+  if (status === 402 || /402|quota|payment/i.test(msg)) {
+    return new AppError("quota_exhausted", "Mistral quota exhausted", 402);
+  }
   if (status === 429 || /429|rate.?limit/i.test(msg)) {
     return new AppError(
       "rate_limited",

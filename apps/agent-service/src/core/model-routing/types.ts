@@ -78,7 +78,7 @@ export type CompletionOptions = {
   maxTokens?: number;
   temperature?: number;
   presencePenalty?: number;
-  reasoningEffort?: "low" | "medium" | "high";
+  reasoningEffort?: "none" | "low" | "medium" | "high";
   tools?: ToolDefinition[];
   toolChoice?: string | Record<string, unknown>;
   signal?: AbortSignal;

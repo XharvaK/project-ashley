@@ -75,6 +75,9 @@ function buildRequestBody(
   if (options.presencePenalty !== undefined) {
     body.presence_penalty = options.presencePenalty;
   }
+  if (options.reasoningEffort !== undefined) {
+    body.reasoning_effort = options.reasoningEffort;
+  }
   return body;
 }
 
