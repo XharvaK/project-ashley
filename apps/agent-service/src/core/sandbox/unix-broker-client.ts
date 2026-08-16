@@ -184,6 +184,16 @@ function isExecutionResult(data: unknown): data is FixedRecipeExecutionResult {
   return false;
 }
 
+const BROKER_SUCCESS_FIELD_NAMES = new Set([
+  "workspaceId", "treeRoot", "created", "written", "deleted",
+  "content", "entries", "matches", "stdout", "stderr", "exitCode",
+  "applied", "artifactRef", "title",
+]);
+
+function hasBrokerSuccessField(data: Record<string, unknown>): boolean {
+  return Object.keys(data).some(key => BROKER_SUCCESS_FIELD_NAMES.has(key));
+}
+
 function isEngineeringToolResult(data: unknown): data is EngineeringToolResult {
   if (!isPlainRecord(data)) return false;
   if (data.ok === true) {
@@ -191,6 +201,15 @@ function isEngineeringToolResult(data: unknown): data is EngineeringToolResult {
   }
   if (data.ok === false) {
     return typeof data.errorCode === "string" && typeof data.reason === "string";
+  }
+  // Broker canonical success: plain record without ok field,
+  // without errorCode/reason pattern (those are error responses),
+  // and with at least one own property and a known broker success field name
+  // (rejects arbitrary records like {banana: 123} or {})
+  if (!("ok" in data) && !(typeof data.errorCode === "string" && typeof data.reason === "string")) {
+    if (Object.keys(data).length === 0) return false;
+    if (!hasBrokerSuccessField(data)) return false;
+    return true;
   }
   return false;
 }
@@ -596,7 +615,7 @@ export class UnixSandboxBrokerClient implements SandboxBrokerClient {
       return { ok: false, errorCode: "broker_response_oversized", reason: "broker response oversized" };
     }
     if (isEngineeringToolResult(result.data)) {
-      return result.data as EngineeringToolResult;
+      return { ok: true, data: result.data, artifactRef: null } as EngineeringToolResult;
     }
     return { ok: false, errorCode: "broker_response_invalid", reason: "malformed engineeringAction response" };
   }
