@@ -107,6 +107,12 @@ export type ClaimReactiveInput = {
   inboundDiscordMessageIds: string[];
   finalFragmentReceivedAtMs: number;
   nowMs?: number;
+  /**
+   * True when the inbound IDs are local placeholders rather than real Discord
+   * delivery (API/simulated path). No real first-bubble pacing exists then, so
+   * no hard first-bubble deadline is imposed on the generation pipeline.
+   */
+  simulateDelivery?: boolean;
 };
 
 export type ClaimReactiveResult =
@@ -132,9 +138,12 @@ export function claimReactiveDelivery(
   }
   const nowMs = input.nowMs ?? Date.now();
   const nowIso = new Date(nowMs).toISOString();
-  const deadlineIso = new Date(
-    firstBubbleDeadlineAt(input.finalFragmentReceivedAtMs),
-  ).toISOString();
+  const deadlineIso =
+    input.simulateDelivery === true
+      ? null
+      : new Date(
+          firstBubbleDeadlineAt(input.finalFragmentReceivedAtMs),
+        ).toISOString();
   const leaseIso = new Date(nowMs + GENERATION_LEASE_MS).toISOString();
 
   db.exec("BEGIN IMMEDIATE");

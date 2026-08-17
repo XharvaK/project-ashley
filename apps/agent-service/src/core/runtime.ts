@@ -576,6 +576,7 @@ export class AshleyCore {
         mergedUserText: message,
         inboundDiscordMessageIds: inboundIds,
         finalFragmentReceivedAtMs,
+        simulateDelivery,
       });
 
       if (claim.kind === "duplicate") {
