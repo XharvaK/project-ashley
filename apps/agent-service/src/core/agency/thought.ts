@@ -654,9 +654,14 @@ export async function deliberateThoughtContinuation(
   const allowedIds = new Set(
     motivations.map((item) => item.id).filter((id): id is number => id !== undefined),
   );
-  const motivationIds = Array.isArray(proposal.motivationIds)
+  const proposedIds = Array.isArray(proposal.motivationIds)
     ? proposal.motivationIds.map(Number).filter((id) => allowedIds.has(id))
-    : intermediateDecision.motivationIds;
+    : [];
+  // The continuation re-decides after evidence; motivation selection was
+  // already grounded in pass 1, so an empty re-selection inherits the
+  // intermediate selection instead of discarding the evidence interpretation.
+  const motivationIds =
+    proposedIds.length > 0 ? proposedIds : intermediateDecision.motivationIds;
 
   if (
     !kinds.has(kind) ||

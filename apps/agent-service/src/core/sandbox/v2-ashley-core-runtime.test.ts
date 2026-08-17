@@ -226,6 +226,110 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
     expect(loggedDecision.thought_source).toBe("model");
   });
 
+  it("Thought Pass 2 with empty motivationIds inherits the grounded pass-1 selection instead of discarding the evidence interpretation", async () => {
+    const dbPath = join(tmpDir, `ashley-core-${randomUUID()}.db`);
+    const db = openNuclearDb(new DatabaseSync(dbPath));
+    activateProjectInspection(db);
+
+    const callLog: string[] = [];
+    let expressionPrompt = "";
+
+    vi.spyOn(mistral, "completeChat").mockImplementation(async (messages: any[]) => {
+      const systemContent = messages.find((m) => m.role === "system")?.content ?? "";
+      const userContent = messages.find((m) => m.role === "user")?.content ?? "";
+
+      if (systemContent.includes("Ashley's Thought layer, not her Expression layer")) {
+        callLog.push("thought_pass1");
+        const parsedUser = JSON.parse(userContent);
+        const candidates = Array.isArray(parsedUser.candidates) ? parsedUser.candidates : [];
+        const motivationId = candidates.length > 0 ? candidates[0].id : 1;
+        return {
+          text: JSON.stringify({
+            kind: "speak",
+            effort: "high",
+            completion: "complete",
+            objective: "inspect constants.ts",
+            reason: "need repository evidence",
+            motivationIds: [motivationId],
+            shouldSpeak: true,
+            uncertainty: 0.1,
+            urgency: 0.3,
+            evidenceDisposition: "acquire_project_evidence",
+            inspectionRequest: {
+              operation: "project.read_file",
+              projectId: "project-ashley",
+              path: "src/constants.ts",
+            },
+          }),
+          model: "mistral-large",
+          modelAlias: "thought",
+          resolvedModelId: "mistral-large",
+        };
+      }
+
+      if (systemContent.includes("Ashley's Thought layer continuing deliberation")) {
+        callLog.push("thought_pass2");
+        const parsedUser = JSON.parse(userContent);
+        expect(parsedUser.observation.contentUtf8).toBe("export const CODE_NAME = 'WAVE_M2';");
+        return {
+          text: JSON.stringify({
+            kind: "speak",
+            effort: "medium",
+            completion: "complete",
+            objective: "confirm CODE_NAME is WAVE_M2",
+            reason: "verified observation from project-ashley",
+            inspectionCognitiveResult: "CODE_NAME is defined as WAVE_M2 in src/constants.ts",
+            shouldSpeak: true,
+            uncertainty: 0.05,
+            urgency: 0.4,
+            motivationIds: [],
+          }),
+          model: "mistral-large",
+          modelAlias: "thought",
+          resolvedModelId: "mistral-large",
+        };
+      }
+
+      callLog.push("expression");
+      expressionPrompt = systemContent + "\n" + userContent;
+      return {
+        text: "i checked `src/constants.ts` and the code name is indeed `WAVE_M2`.",
+        model: "mistral-large",
+        modelAlias: "expression",
+        resolvedModelId: "mistral-large",
+      };
+    });
+
+    vi.spyOn(SandboxV2Dispatcher.prototype, "dispatch").mockResolvedValue({
+      outcome: "succeeded",
+      operation: "project.read_file",
+      executedAtMs: 1000,
+      result: {
+        kind: "project.read_file",
+        path: "src/constants.ts",
+        contentBase64: Buffer.from("export const CODE_NAME = 'WAVE_M2';").toString("base64"),
+        bytes: 34,
+        sha256: "hash34",
+        truncated: false,
+      },
+    });
+
+    const core = new AshleyCore(db);
+
+    const result = await core.handleReactiveChat({
+      message: "debug: can you check what CODE_NAME is in src/constants.ts?",
+      ownerId: "doc",
+      channel: "discord",
+    });
+
+    expect(callLog).toEqual(["thought_pass1", "thought_pass2", "expression"]);
+    expect(result.text).toContain("WAVE_M2");
+    expect(result.decisionKind).toBe("speak");
+    // The evidence interpretation must survive the empty re-selection and
+    // reach Expression; otherwise Expression has metadata only and can guess.
+    expect(expressionPrompt).toContain("CODE_NAME is defined as WAVE_M2 in src/constants.ts");
+  });
+
   it("Negative path: Sandbox unavailable -> Thought Pass 2 receives error -> Truthful response without inferring absence", async () => {
     const dbPath = join(tmpDir, `ashley-core-${randomUUID()}.db`);
     const db = openNuclearDb(new DatabaseSync(dbPath));
