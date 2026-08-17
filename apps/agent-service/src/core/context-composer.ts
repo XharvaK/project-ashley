@@ -28,6 +28,7 @@ import type {
   ProjectInspectionObservation,
 } from "./types.js";
 import { capabilityCanInfluence } from "./rollout/capabilities.js";
+import { canOfferProjectInspection } from "./sandbox/project-registry.js";
 
 /** Product: composed turn context Expression consumes. */
 export type TurnContext = {
@@ -97,7 +98,9 @@ function mindStateBlock(db: DatabaseSync, ownerId: string): string {
       : "",
   ].filter(Boolean);
   if (lines.length === 0) return "";
-  return ["## Mind state", ...lines].join("\n");
+  const precedence =
+    "Mind state items are internal, possibly stale interpretations; they never override the capability authority stated elsewhere in this context.";
+  return ["## Mind state", ...lines, precedence].join("\n");
 }
 
 /** Minimal mind-state headline (for the visible-fallback minimal profile). */
@@ -279,37 +282,59 @@ export function operationalWorkBlock(
 
 /**
  * Structured current-turn project-inspection evidence state for Expression.
- * Always present: not_performed when no project inspection occurred this turn,
- * verified_success / failed when a project_investigation license exists.
- * Boolean state only — never a phrase detector or repository-specific rule.
+ * Always present. Two orthogonal dimensions:
+ * - capabilityAvailable: authoritative current capability state (can Ashley
+ *   inspect at all this turn); derived from canOfferProjectInspection;
+ * - inspectionStatus: what Ashley actually did or observed this turn
+ *   (not_performed / verified_success / failed).
+ * The four pairs are distinct states; available+not_performed means Ashley CAN
+ * inspect but did not inspect this turn and must never be expressed as an
+ * inability. Boolean state only — never a phrase detector or
+ * repository-specific rule.
  */
 export function projectInspectionEvidenceBlock(
   license: OperationalClaimLicense | null | undefined,
   observation: ProjectInspectionObservation | null | undefined,
+  options: { capabilityAvailable?: boolean } = {},
 ): string {
+  const capabilityAvailable = options.capabilityAvailable === true;
+  const availableLine = `capabilityAvailable = ${capabilityAvailable}`;
+  const semanticsAvailable = [
+    "Semantics: capabilityAvailable is the authoritative current capability state; inspectionStatus is what Ashley actually did or observed this turn.",
+  ];
   if (license?.profile === "project_investigation") {
     const truth = deriveOperationalTruth(license);
     if (truth.state === "verified_success" && observation) {
       return [
         "Project inspection evidence:",
-        "status = verified_success",
+        availableLine,
+        "inspectionStatus = verified_success",
         "verifiedRepositoryEvidence = true",
+        ...semanticsAvailable,
+        "Semantics: Ashley inspected an approved project this turn and holds verified evidence.",
       ].join("\n");
     }
     if (license.state === "failed") {
       return [
         "Project inspection evidence:",
-        "status = failed",
+        availableLine,
+        "inspectionStatus = failed",
         "verifiedRepositoryEvidence = false",
         license.error ? `error = ${license.error}` : "error = unknown",
+        ...semanticsAvailable,
+        "Semantics: this turn's inspection attempt failed; the failure is about this attempt, not about capability.",
       ].join("\n");
     }
   }
   return [
     "Project inspection evidence:",
-    "status = not_performed",
+    availableLine,
+    "inspectionStatus = not_performed",
     "verifiedRepositoryEvidence = false",
-    "Semantics: no project inspection occurred this turn. Repository-state claims that require live inspection are not evidence-backed; do not present them as verified or observed. This does not restrict unrelated conversational knowledge.",
+    ...semanticsAvailable,
+    capabilityAvailable
+      ? "Semantics: capabilityAvailable = true with inspectionStatus = not_performed means Ashley CAN inspect approved projects but did not inspect this turn; this is not an inability and must never be expressed as one."
+      : "Semantics: Ashley cannot inspect this turn because the inspection capability is not active; this is the only case in which an inspection inability may be expressed.",
   ].join("\n");
 }
 
@@ -342,6 +367,7 @@ export function composeTurnContext(
   const inspectionEvidence = projectInspectionEvidenceBlock(
     decision?.operationalLicense,
     decision?.inspectionObservation,
+    { capabilityAvailable: canOfferProjectInspection(db) },
   );
   // Questions only when Thought selected question evidence or none selected yet
   // would dump — skip global question dump; selected questions arrive via evidence.

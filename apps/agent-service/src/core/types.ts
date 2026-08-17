@@ -106,6 +106,24 @@ export type HoldReasonCode =
 
 export type Trigger = "reactive" | "proactive";
 
+/**
+ * Structured Thought evidence-disposition state. The four states are mutually
+ * exclusive and structurally validated against the authoritative capability
+ * state at deliberation time:
+ * - sufficient: the supplied context already holds everything needed to decide;
+ * - acquire_project_evidence: this turn requires repository evidence that an
+ *   available inspection can provide now — REQUIRES a typed inspectionRequest;
+ * - capability_unavailable: inspection is genuinely unavailable this turn and
+ *   only valid when the authoritative capability state says so;
+ * - defer: intentional postponement of the motivation to a later turn; never a
+ *   stand-in for "I need evidence now" when acquisition is available.
+ */
+export type EvidenceDisposition =
+  | "sufficient"
+  | "acquire_project_evidence"
+  | "capability_unavailable"
+  | "defer";
+
 export type ReflectionMode = "observe" | "apply";
 export type CognitionMode = "observe" | "apply";
 
@@ -226,6 +244,7 @@ export type Decision = {
   perceptionLicenses?: PerceptionLicenses;
   ownTimeReport?: OwnTimeReportMarker;
   operationalLicense?: OperationalClaimLicense;
+  evidenceDisposition?: EvidenceDisposition | null;
   inspectionRequest?: CognitionInspectionRequest | null;
   inspectionObservation?: ProjectInspectionObservation | null;
   inspectionCognitiveResult?: string | null;

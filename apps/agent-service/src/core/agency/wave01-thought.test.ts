@@ -232,6 +232,7 @@ describe("Wave 01 Thought call gating", () => {
             shouldSpeak: true,
             effort: "high",
             completion: "complete",
+            evidenceDisposition: "sufficient",
             uncertainty: 0.2,
             urgency: 0.9,
             objective: "debug the urgent deadlock",

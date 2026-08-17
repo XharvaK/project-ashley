@@ -12,6 +12,8 @@ import {
   currentBuildIdentity,
   capabilityNames,
 } from "../rollout/capabilities.js";
+import { runThoughtModel } from "../agency/thought.js";
+import type { Decision, Motivation } from "../types.js";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -112,6 +114,7 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
             shouldSpeak: true,
             uncertainty: 0.1,
             urgency: 0.5,
+            evidenceDisposition: "acquire_project_evidence",
             inspectionRequest: {
               operation: "project.read_file",
               projectId: "project-ashley",
@@ -250,6 +253,7 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
             shouldSpeak: true,
             uncertainty: 0.1,
             urgency: 0.5,
+            evidenceDisposition: "acquire_project_evidence",
             inspectionRequest: {
               operation: "project.read_file",
               projectId: "project-ashley",
@@ -349,6 +353,7 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
             shouldSpeak: true,
             uncertainty: 0.1,
             urgency: 0.5,
+            evidenceDisposition: "acquire_project_evidence",
             inspectionRequest: {
               operation: "project.search_text",
               projectId: "project-ashley",
@@ -459,6 +464,7 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
             shouldSpeak: true,
             uncertainty: 0.1,
             urgency: 0.5,
+            evidenceDisposition: "acquire_project_evidence",
             inspectionRequest: {
               operation: "project.read_file",
               projectId: "project-ashley",
@@ -568,6 +574,7 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
             shouldSpeak: true,
             uncertainty: 0.1,
             urgency: 0.5,
+            evidenceDisposition: "acquire_project_evidence",
             inspectionRequest: {
               operation: "project.read_file",
               projectId: "project-ashley",
@@ -628,7 +635,7 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
     // A typed failure must surface as failed evidence state, never as a
     // fabricated repository fact.
     expect(expressionSystemPrompt).toContain("Project inspection evidence:");
-    expect(expressionSystemPrompt).toContain("status = failed");
+    expect(expressionSystemPrompt).toContain("inspectionStatus = failed");
     expect(expressionSystemPrompt).toContain("verifiedRepositoryEvidence = false");
     expect(expressionSystemPrompt).toContain("error = path_invalid");
 
@@ -688,6 +695,7 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
             shouldSpeak: true,
             uncertainty: 0.1,
             urgency: 0.2,
+            evidenceDisposition: "capability_unavailable",
           }),
           model: "mistral-large",
           modelAlias: "thought",
@@ -719,6 +727,12 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
 
     // Verify self-model passed to Expression explicitly states inspection is not active in rollout
     expect(expressionSystemPrompt).toContain("Sandbox V2: inspection capability not active in rollout");
+    // Structured authority: capability genuinely unavailable, inspection not performed.
+    expect(expressionSystemPrompt).toContain("capabilityAvailable = false");
+    expect(expressionSystemPrompt).toContain("inspectionStatus = not_performed");
+    expect(expressionSystemPrompt).toContain(
+      "Semantics: Ashley cannot inspect this turn because the inspection capability is not active",
+    );
 
     // Zero M2 execution and zero M1 execution
     const m2Count = emittedAudits.filter((a) => a.profile === "project_investigation").length;
@@ -771,6 +785,7 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
             shouldSpeak: true,
             uncertainty: 0.1,
             urgency: 0.4,
+            evidenceDisposition: "acquire_project_evidence",
             inspectionRequest: {
               operation: "project.read_file",
               projectId: "project-ashley",
@@ -851,8 +866,9 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
 
     // Verified execution must surface structured evidence state to Expression.
     expect(expressionSystemPrompt).toContain("Project inspection evidence:");
-    expect(expressionSystemPrompt).toContain("status = verified_success");
+    expect(expressionSystemPrompt).toContain("inspectionStatus = verified_success");
     expect(expressionSystemPrompt).toContain("verifiedRepositoryEvidence = true");
+    expect(expressionSystemPrompt).toContain("capabilityAvailable = true");
 
     expect(emittedAudits.length).toBe(1);
     const audit = emittedAudits[0]!;
@@ -970,6 +986,7 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
             shouldSpeak: true,
             uncertainty: 0.3,
             urgency: 0.2,
+            evidenceDisposition: "sufficient",
           }),
           model: "mistral-large",
           modelAlias: "thought",
@@ -1070,9 +1087,10 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
     // Expression must see the structural no-evidence floor: no repository
     // evidence exists this turn, so repository facts are not evidence-backed.
     expect(expressionSystemPrompt).toContain("Project inspection evidence:");
-    expect(expressionSystemPrompt).toContain("status = not_performed");
+    expect(expressionSystemPrompt).toContain("inspectionStatus = not_performed");
     expect(expressionSystemPrompt).toContain("verifiedRepositoryEvidence = false");
-    expect(expressionSystemPrompt).not.toContain("status = verified_success");
+    expect(expressionSystemPrompt).not.toContain("inspectionStatus = verified_success");
+    expect(expressionSystemPrompt).not.toContain("capabilityAvailable = false");
     expect(result.text).toContain("i can check project-ashley.");
   });
 
@@ -1104,6 +1122,7 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
             objective: "ask",
             reason: "hold",
             motivationIds: [motivationId],
+            evidenceDisposition: "defer",
           }),
           model: "gpt-oss-120b",
           modelAlias: "thought",
@@ -1140,5 +1159,466 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
       .get("doc") as any;
     expect(logged.decision_kind).toBe("ask");
     expect(logged.thought_source).toBe("model");
+  });
+
+  it("Contract: the exact production pattern (need evidence while inspection available) is rejected unless a typed request accompanies acquire_project_evidence", async () => {
+    const dbPath = join(tmpDir, `ashley-core-${randomUUID()}.db`);
+    const db = openNuclearDb(new DatabaseSync(dbPath));
+    activateProjectInspection(db);
+    try {
+      const baseDecision: Decision = {
+        trigger: "reactive",
+        kind: "speak",
+        motivationIds: [1],
+        score: 40,
+        reason: "respond",
+        evidenceRefs: [],
+        uncertainty: 0.2,
+        urgency: 0.5,
+        thoughtSource: "deterministic",
+        thoughtError: null,
+        affectLicense: {
+          permitted: false,
+          valence: 0,
+          activation: 0.5,
+          openness: 0.5,
+          tension: 0,
+          reason: "test",
+        },
+        cognitiveAllocation: { shouldSpeak: true, effort: "medium", completion: "complete" },
+        authorizedClaims: { readingRecordIds: [], readingTitles: [], readingClaims: [] },
+      };
+      const motivation: Motivation = {
+        id: 1,
+        kind: "user_message",
+        score: 100,
+        summary: "Can you inspect your Project Ashley repository and tell me what version is in package.json?",
+        refType: "message",
+        refId: 1,
+      };
+
+      // The pre-repair production output claimed to need repository data but
+      // carried no inspection request. Under the disposition contract the
+      // evidence-needing choice is structurally unreachable without the
+      // typed request: fail closed.
+      const noRequest = await runThoughtModel(
+        db,
+        baseDecision,
+        [motivation],
+        "reactive",
+        async () => ({
+          text: JSON.stringify({
+            kind: "delay",
+            delayClass: "standard",
+            shouldSpeak: false,
+            effort: "medium",
+            completion: "hold",
+            uncertainty: 0,
+            urgency: 0,
+            objective: "retrieve package version",
+            reason: "need repository data",
+            motivationIds: [1],
+            evidenceDisposition: "acquire_project_evidence",
+          }),
+        }),
+      );
+      expect(noRequest).toEqual({ ok: false, error: "invalid_response" });
+
+      // Unapproved project id in the request is also rejected structurally.
+      const unapproved = await runThoughtModel(
+        db,
+        baseDecision,
+        [motivation],
+        "reactive",
+        async () => ({
+          text: JSON.stringify({
+            kind: "speak",
+            delayClass: null,
+            shouldSpeak: true,
+            effort: "medium",
+            completion: "complete",
+            uncertainty: 0.1,
+            urgency: 0.4,
+            objective: "read package.json for the version",
+            reason: "the question asks for a repository fact that needs evidence",
+            motivationIds: [1],
+            evidenceDisposition: "acquire_project_evidence",
+            inspectionRequest: {
+              operation: "project.read_file",
+              projectId: "other-project",
+              path: "package.json",
+            },
+          }),
+        }),
+      );
+      expect(unapproved).toEqual({ ok: false, error: "invalid_response" });
+
+      // The correct contract usage passes: acquire + typed approved request.
+      let thoughtSystemPrompt = "";
+      const accepted = await runThoughtModel(
+        db,
+        baseDecision,
+        [motivation],
+        "reactive",
+        async (messages) => {
+          thoughtSystemPrompt = String(messages[0]?.content ?? "");
+          return {
+            text: JSON.stringify({
+              kind: "speak",
+              delayClass: null,
+              shouldSpeak: true,
+              effort: "medium",
+              completion: "complete",
+              uncertainty: 0.1,
+              urgency: 0.4,
+              objective: "read package.json for the version",
+              reason: "the question asks for a repository fact that needs evidence",
+              motivationIds: [1],
+              evidenceDisposition: "acquire_project_evidence",
+              inspectionRequest: {
+                operation: "project.read_file",
+                projectId: "project-ashley",
+                path: "package.json",
+              },
+            }),
+          };
+        },
+      );
+      expect(accepted.ok).toBe(true);
+      if (accepted.ok) {
+        expect(accepted.proposal.evidenceDisposition).toBe("acquire_project_evidence");
+        expect(accepted.proposal.inspectionRequest).toEqual({
+          operation: "project.read_file",
+          projectId: "project-ashley",
+          path: "package.json",
+        });
+      }
+      // The contract must be visible to Thought and separate defer from acquisition.
+      expect(thoughtSystemPrompt).toContain("acquire_project_evidence");
+      expect(thoughtSystemPrompt).toContain("defer does not acquire evidence");
+      expect(thoughtSystemPrompt).toContain("Approved project IDs: project-ashley");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("Contract: capability_unavailable is invalid while inspection is offered, and defer remains valid without forcing a tool", async () => {
+    const dbPath = join(tmpDir, `ashley-core-${randomUUID()}.db`);
+    const db = openNuclearDb(new DatabaseSync(dbPath));
+    activateProjectInspection(db);
+    try {
+      const baseDecision: Decision = {
+        trigger: "reactive",
+        kind: "speak",
+        motivationIds: [1],
+        score: 40,
+        reason: "respond",
+        evidenceRefs: [],
+        uncertainty: 0.2,
+        urgency: 0.1,
+        thoughtSource: "deterministic",
+        thoughtError: null,
+        affectLicense: {
+          permitted: false,
+          valence: 0,
+          activation: 0.5,
+          openness: 0.5,
+          tension: 0,
+          reason: "test",
+        },
+        cognitiveAllocation: { shouldSpeak: true, effort: "medium", completion: "complete" },
+        authorizedClaims: { readingRecordIds: [], readingTitles: [], readingClaims: [] },
+      };
+      const motivation: Motivation = {
+        id: 1,
+        kind: "user_message",
+        score: 40,
+        summary: "some ordinary message",
+        refType: "message",
+        refId: 1,
+      };
+
+      // Claiming unavailability while the capability is offered contradicts
+      // the authoritative capability state: rejected structurally.
+      const unavailableWhileOffered = await runThoughtModel(
+        db,
+        baseDecision,
+        [motivation],
+        "reactive",
+        async () => ({
+          text: JSON.stringify({
+            kind: "speak",
+            delayClass: null,
+            shouldSpeak: true,
+            effort: "low",
+            completion: "complete",
+            uncertainty: 0.1,
+            urgency: 0.2,
+            objective: "decline inspection",
+            reason: "no inspection available",
+            motivationIds: [1],
+            evidenceDisposition: "capability_unavailable",
+          }),
+        }),
+      );
+      expect(unavailableWhileOffered).toEqual({ ok: false, error: "invalid_response" });
+
+      // Intentional, unrelated deferral stays valid and acquires nothing:
+      // not every missing-information turn is forced to execute a tool.
+      const deferred = await runThoughtModel(
+        db,
+        baseDecision,
+        [motivation],
+        "reactive",
+        async () => ({
+          text: JSON.stringify({
+            kind: "delay",
+            delayClass: "standard",
+            shouldSpeak: false,
+            effort: "low",
+            completion: "hold",
+            uncertainty: 0.2,
+            urgency: 0.1,
+            objective: "revisit tomorrow",
+            reason: "not worth acting on right now",
+            motivationIds: [1],
+            evidenceDisposition: "defer",
+          }),
+        }),
+      );
+      expect(deferred.ok).toBe(true);
+      if (deferred.ok) {
+        expect(deferred.proposal.evidenceDisposition).toBe("defer");
+        expect(deferred.proposal.inspectionRequest ?? null).toBeNull();
+      }
+
+      // defer alongside a request is contradictory: rejected.
+      const deferredWithRequest = await runThoughtModel(
+        db,
+        baseDecision,
+        [motivation],
+        "reactive",
+        async () => ({
+          text: JSON.stringify({
+            kind: "speak",
+            delayClass: null,
+            shouldSpeak: true,
+            effort: "low",
+            completion: "complete",
+            uncertainty: 0.1,
+            urgency: 0.2,
+            objective: "read file",
+            reason: "inspection",
+            motivationIds: [1],
+            evidenceDisposition: "defer",
+            inspectionRequest: {
+              operation: "project.read_file",
+              projectId: "project-ashley",
+              path: "src/index.ts",
+            },
+          }),
+        }),
+      );
+      expect(deferredWithRequest).toEqual({ ok: false, error: "invalid_response" });
+
+      // sufficient alongside a request is contradictory: rejected.
+      const sufficientWithRequest = await runThoughtModel(
+        db,
+        baseDecision,
+        [motivation],
+        "reactive",
+        async () => ({
+          text: JSON.stringify({
+            kind: "speak",
+            delayClass: null,
+            shouldSpeak: true,
+            effort: "low",
+            completion: "complete",
+            uncertainty: 0.1,
+            urgency: 0.2,
+            objective: "read file",
+            reason: "inspection",
+            motivationIds: [1],
+            evidenceDisposition: "sufficient",
+            inspectionRequest: {
+              operation: "project.read_file",
+              projectId: "project-ashley",
+              path: "src/index.ts",
+            },
+          }),
+        }),
+      );
+      expect(sufficientWithRequest).toEqual({ ok: false, error: "invalid_response" });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("Contract: capability genuinely unavailable makes capability_unavailable valid and acquire unreachable", async () => {
+    const dbPath = join(tmpDir, `ashley-core-${randomUUID()}.db`);
+    const db = openNuclearDb(new DatabaseSync(dbPath));
+    activateProjectInspection(db);
+    env.sandboxEngineeringLifecycleEnabled = false;
+    try {
+      const baseDecision: Decision = {
+        trigger: "reactive",
+        kind: "speak",
+        motivationIds: [1],
+        score: 40,
+        reason: "respond",
+        evidenceRefs: [],
+        uncertainty: 0.2,
+        urgency: 0.1,
+        thoughtSource: "deterministic",
+        thoughtError: null,
+        affectLicense: {
+          permitted: false,
+          valence: 0,
+          activation: 0.5,
+          openness: 0.5,
+          tension: 0,
+          reason: "test",
+        },
+        cognitiveAllocation: { shouldSpeak: true, effort: "medium", completion: "complete" },
+        authorizedClaims: { readingRecordIds: [], readingTitles: [], readingClaims: [] },
+      };
+      const motivation: Motivation = {
+        id: 1,
+        kind: "user_message",
+        score: 40,
+        summary: "some ordinary message",
+        refType: "message",
+        refId: 1,
+      };
+
+      const unavailable = await runThoughtModel(
+        db,
+        baseDecision,
+        [motivation],
+        "reactive",
+        async () => ({
+          text: JSON.stringify({
+            kind: "speak",
+            delayClass: null,
+            shouldSpeak: true,
+            effort: "low",
+            completion: "complete",
+            uncertainty: 0.1,
+            urgency: 0.2,
+            objective: "respond without inspection",
+            reason: "inspection not licensed",
+            motivationIds: [1],
+            evidenceDisposition: "capability_unavailable",
+          }),
+        }),
+      );
+      expect(unavailable.ok).toBe(true);
+      if (unavailable.ok) {
+        expect(unavailable.proposal.evidenceDisposition).toBe("capability_unavailable");
+      }
+
+      const acquire = await runThoughtModel(
+        db,
+        baseDecision,
+        [motivation],
+        "reactive",
+        async () => ({
+          text: JSON.stringify({
+            kind: "speak",
+            delayClass: null,
+            shouldSpeak: true,
+            effort: "low",
+            completion: "complete",
+            uncertainty: 0.1,
+            urgency: 0.2,
+            objective: "read file",
+            reason: "inspection",
+            motivationIds: [1],
+            evidenceDisposition: "acquire_project_evidence",
+            inspectionRequest: {
+              operation: "project.read_file",
+              projectId: "project-ashley",
+              path: "src/index.ts",
+            },
+          }),
+        }),
+      );
+      expect(acquire).toEqual({ ok: false, error: "invalid_response" });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("available + not_performed surfaces as CAN-inspect-but-did-not, never as a capability absence", async () => {
+    const dbPath = join(tmpDir, `ashley-core-${randomUUID()}.db`);
+    const db = openNuclearDb(new DatabaseSync(dbPath));
+    activateProjectInspection(db);
+
+    const callLog: string[] = [];
+    let expressionSystemPrompt = "";
+
+    vi.spyOn(mistral, "completeChat").mockImplementation(async (messages: any[]) => {
+      const systemContent = messages.find((m) => m.role === "system")?.content ?? "";
+
+      if (systemContent.includes("Ashley's Thought layer, not her Expression layer")) {
+        callLog.push("thought_pass1");
+        const parsedUser = JSON.parse(
+          messages.find((m) => m.role === "user")?.content ?? "{}",
+        );
+        const candidates = Array.isArray(parsedUser.candidates) ? parsedUser.candidates : [];
+        const motivationId = candidates.length > 0 ? candidates[0].id : 1;
+        return {
+          text: JSON.stringify({
+            kind: "speak",
+            delayClass: null,
+            shouldSpeak: true,
+            effort: "low",
+            completion: "complete",
+            uncertainty: 0.3,
+            urgency: 0.2,
+            objective: "answer without repository evidence",
+            reason: "answer from memory without inspecting",
+            motivationIds: [motivationId],
+            evidenceDisposition: "sufficient",
+          }),
+          model: "gpt-oss-120b",
+          modelAlias: "thought",
+          resolvedModelId: "openai/gpt-oss-120b",
+        };
+      }
+
+      callLog.push("expression");
+      expressionSystemPrompt = systemContent;
+      return {
+        text: "i can inspect it but haven't this turn.",
+        model: "mistral-large",
+        modelAlias: "expression",
+        resolvedModelId: "mistral-large",
+      };
+    });
+
+    const core = new AshleyCore(db);
+
+    const result = await core.handleReactiveChat({
+      message:
+        "Can you inspect your Project Ashley repository and tell me what version is in package.json?",
+      ownerId: "doc",
+      channel: "discord",
+    });
+
+    expect(callLog).toEqual(["thought_pass1", "expression"]);
+    expect(result.text).toContain("inspect");
+
+    // Structured authority and evidence are independent: available + not_performed.
+    expect(expressionSystemPrompt).toContain("capabilityAvailable = true");
+    expect(expressionSystemPrompt).toContain("inspectionStatus = not_performed");
+    expect(expressionSystemPrompt).toContain("verifiedRepositoryEvidence = false");
+    expect(expressionSystemPrompt).toContain(
+      "Semantics: capabilityAvailable = true with inspectionStatus = not_performed means Ashley CAN inspect approved projects but did not inspect this turn; this is not an inability and must never be expressed as one.",
+    );
+    expect(expressionSystemPrompt).not.toContain("capabilityAvailable = false");
+    expect(expressionSystemPrompt).not.toContain(
+      "Semantics: Ashley cannot inspect this turn",
+    );
   });
 });

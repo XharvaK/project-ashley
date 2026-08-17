@@ -103,6 +103,7 @@ const thoughtResponseJson = {
   shouldSpeak: true,
   effort: "medium",
   completion: "complete",
+  evidenceDisposition: "sufficient",
   uncertainty: 0.2,
   urgency: 0.1,
   objective: "reply",

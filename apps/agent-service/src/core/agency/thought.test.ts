@@ -143,6 +143,7 @@ describe("Thought fallback", () => {
           shouldSpeak: true,
           effort: "medium",
           completion: "complete",
+          evidenceDisposition: "sufficient",
           uncertainty: 0.1,
           urgency: 0.5,
           objective: "Hold the boundary",

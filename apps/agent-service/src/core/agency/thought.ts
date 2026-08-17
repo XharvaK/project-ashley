@@ -8,6 +8,7 @@ import type {
   Decision,
   DecisionDelayClass,
   DecisionKind,
+  EvidenceDisposition,
   Motivation,
   ProjectInspectionObservation,
   Trigger,
@@ -133,8 +134,16 @@ export type ThoughtProposal = {
   urgency: number;
   modelAlias: string;
   resolvedModelId: string | null;
+  evidenceDisposition: EvidenceDisposition | null;
   inspectionRequest?: CognitionInspectionRequest | null;
 };
+
+const evidenceDispositions = new Set<EvidenceDisposition>([
+  "sufficient",
+  "acquire_project_evidence",
+  "capability_unavailable",
+  "defer",
+]);
 
 function isDecisionDelayClass(value: unknown): value is DecisionDelayClass {
   return (
@@ -211,8 +220,10 @@ export async function runThoughtModel(
   const approvedProjectIds = canOffer ? listApprovedReadProjectIds() : [];
   const projectContextPrompt =
     approvedProjectIds.length > 0
-      ? `When repository evidence is required to resolve a question or motivation, you may optionally propose inspectionRequest: {operation: "project.read_file"|"project.list_directory"|"project.search_text", projectId: "${approvedProjectIds.join('"|"')}", path: string, pattern?: string, maxMatches?: number}. Approved project IDs: ${approvedProjectIds.join(", ")}.`
+      ? `Approved project IDs: ${approvedProjectIds.join(", ")}. When repository evidence is required to resolve a question or motivation, set evidenceDisposition to "acquire_project_evidence" and include inspectionRequest: {operation: "project.read_file"|"project.list_directory"|"project.search_text", projectId: "${approvedProjectIds.join('"|"')}", path: string, pattern?: string, maxMatches?: number}; the runtime executes it before you continue.`
       : "No approved projects are currently configured or licensed for inspection; do not emit inspectionRequest.";
+  const dispositionContract =
+    'evidenceDisposition is one of: "sufficient" when the supplied context already holds everything needed to decide this turn; "acquire_project_evidence" when this turn requires repository evidence that inspection can provide now (REQUIRES a well-formed inspectionRequest, and is invalid when no approved projects are licensed); "capability_unavailable" when inspection is not currently available (valid ONLY when no approved projects are configured or licensed for inspection); "defer" for an intentional postponement of this motivation to a later turn. defer does not acquire evidence and must not stand in for evidence an available inspection can acquire now: if you need repository evidence this turn and inspection is available, use acquire_project_evidence. completion hold is a conversational/cognitive completion state only; it is not an evidence acquisition mechanism.';
 
   let response: ThoughtModelResult;
   try {
@@ -223,13 +234,14 @@ export async function runThoughtModel(
           content: [
             "You are Ashley's Thought layer, not her Expression layer.",
             "Choose whether and how to act from the supplied grounded motivations.",
-            "Return strict JSON only: {kind,delayClass,shouldSpeak,effort,completion,uncertainty,urgency,objective,reason,motivationIds,inspectionRequest?}.",
+            "Return strict JSON only: {kind,delayClass,shouldSpeak,effort,completion,uncertainty,urgency,objective,reason,motivationIds,evidenceDisposition,inspectionRequest?}.",
             "kind is speak|silence|delay|ask|revisit|share|challenge|refuse; delayClass is brief|standard|long|reflection_review only when kind is delay and otherwise null; effort is low|medium|high; completion is complete|hold.",
             "Never return a timestamp or duration. The host maps delayClass to a fixed duration.",
             "A refusal is reactive only and must select both the current user_message motivation and a supplied stable boundary motivation.",
             "Use only supplied motivation IDs. Silence is valid. Do not write the message Doc will see.",
             "objective and reason are short intent metadata, not prose to echo and not a copy of the user message.",
             projectContextPrompt,
+            dispositionContract,
           ].join(" "),
         },
         { role: "user", content: JSON.stringify({ trigger, base, candidates }) },
@@ -281,9 +293,34 @@ export async function runThoughtModel(
   if (shouldSpeak !== (kind !== "silence" && kind !== "delay" && !holding)) {
     return { ok: false, error: "invalid_response" };
   }
+  const disposition = String(proposal.evidenceDisposition ?? "");
   const inspectionRequest = canOffer
     ? parseInspectionRequest(proposal.inspectionRequest)
     : null;
+  if (!evidenceDispositions.has(disposition as EvidenceDisposition)) {
+    return { ok: false, error: "invalid_response" };
+  }
+  if (disposition === "acquire_project_evidence") {
+    // A typed, approved inspectionRequest is required, and acquisition is only
+    // reachable when the capability is genuinely available.
+    if (
+      !canOffer ||
+      !inspectionRequest ||
+      !approvedProjectIds.includes(inspectionRequest.projectId)
+    ) {
+      return { ok: false, error: "invalid_response" };
+    }
+  } else if (disposition === "capability_unavailable") {
+    // Must agree with the authoritative current capability state: valid only
+    // when inspection cannot be offered at all.
+    if (canOffer) {
+      return { ok: false, error: "invalid_response" };
+    }
+  } else if (inspectionRequest) {
+    // sufficient and defer never acquire evidence: a request alongside either
+    // is structurally contradictory.
+    return { ok: false, error: "invalid_response" };
+  }
   return {
     ok: true,
     proposal: {
@@ -299,6 +336,7 @@ export async function runThoughtModel(
       urgency: Math.max(0, Math.min(1, Number(proposal.urgency) || 0)),
       modelAlias: response.modelAlias ?? response.model ?? "",
       resolvedModelId: response.resolvedModelId ?? null,
+      evidenceDisposition: disposition as EvidenceDisposition,
       inspectionRequest,
     },
   };
@@ -452,6 +490,7 @@ export async function deliberateDecision(
       effort: proposal.effort === "high" || proposal.effort === "medium" ? proposal.effort : "low",
       completion: proposal.completion === "hold" ? "hold" : "complete",
     },
+    evidenceDisposition: proposal.evidenceDisposition,
     inspectionRequest: proposal.inspectionRequest ?? null,
   };
 }

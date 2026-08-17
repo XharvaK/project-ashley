@@ -154,6 +154,7 @@ describe("Sandbox V2 M2 Runtime Integration & Two-Pass Cognition Loop", () => {
         shouldSpeak: true,
         uncertainty: 0.2,
         urgency: 0.5,
+        evidenceDisposition: "acquire_project_evidence",
         inspectionRequest: {
           operation: "project.read_file",
           projectId: "project-ashley",

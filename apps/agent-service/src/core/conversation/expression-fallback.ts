@@ -7,6 +7,7 @@ import {
   mindStateHeadline,
   projectInspectionEvidenceBlock,
 } from "../context-composer.js";
+import { canOfferProjectInspection } from "../sandbox/project-registry.js";
 import type { TurnContext } from "../context-composer.js";
 import type { Decision } from "../types.js";
 import { AppError } from "../../errors.js";
@@ -113,6 +114,7 @@ export function minimalExpressionContext(
     projectInspectionEvidenceBlock(
       decision?.operationalLicense,
       decision?.inspectionObservation,
+      { capabilityAvailable: canOfferProjectInspection(db) },
     ),
     `## Honesty & rendering (minimal profile)\n${MINIMAL_RENDERING_CONSTRAINTS}`,
   ].filter(Boolean);
