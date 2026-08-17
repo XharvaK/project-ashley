@@ -538,6 +538,7 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
 
     const callLog: string[] = [];
     const emittedAudits: v2LicenseAudit.SandboxV2LicenseAuditRecord[] = [];
+    let expressionSystemPrompt = "";
 
     vi.spyOn(v2LicenseAudit, "emitSandboxV2LicenseAudit").mockImplementation(
       (license, observationOrSink) => {
@@ -604,6 +605,7 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
         };
       }
 
+      expressionSystemPrompt = systemContent;
       return {
         text: "i can't inspect `/etc/shadow` because it is outside the approved repository.",
         model: "mistral-large",
@@ -622,6 +624,13 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
 
     expect(callLog).toEqual(["thought_pass1", "thought_pass2"]);
     expect(result.text).toContain("outside the approved repository");
+
+    // A typed failure must surface as failed evidence state, never as a
+    // fabricated repository fact.
+    expect(expressionSystemPrompt).toContain("Project inspection evidence:");
+    expect(expressionSystemPrompt).toContain("status = failed");
+    expect(expressionSystemPrompt).toContain("verifiedRepositoryEvidence = false");
+    expect(expressionSystemPrompt).toContain("error = path_invalid");
 
     expect(emittedAudits.length).toBe(1);
     const audit = emittedAudits[0];
@@ -725,6 +734,8 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
 
     const callLog: string[] = [];
     const emittedAudits: v2LicenseAudit.SandboxV2LicenseAuditRecord[] = [];
+    let expressionSystemPrompt = "";
+    const thoughtCompletionOptions: Array<{ maxTokens?: number }> = [];
 
     vi.spyOn(v2LicenseAudit, "emitSandboxV2LicenseAudit").mockImplementation(
       (license, observationOrSink) => {
@@ -734,12 +745,13 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
       },
     );
 
-    vi.spyOn(mistral, "completeChat").mockImplementation(async (messages: any[]) => {
+    vi.spyOn(mistral, "completeChat").mockImplementation(async (messages: any[], options: any) => {
       const systemContent = messages.find((m) => m.role === "system")?.content ?? "";
       const userContent = messages.find((m) => m.role === "user")?.content ?? "";
 
       if (systemContent.includes("Ashley's Thought layer, not her Expression layer")) {
         callLog.push("thought_pass1");
+        thoughtCompletionOptions.push(options);
         // The inspection offer must be visible to Thought.
         expect(systemContent).toContain("Approved project IDs: project-ashley");
         const parsedUser = JSON.parse(userContent);
@@ -795,6 +807,7 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
       }
 
       callLog.push("expression");
+      expressionSystemPrompt = systemContent;
       return {
         text: "i opened `package.json` in project-ashley: the version is `0.2.0`.",
         model: "mistral-large",
@@ -831,6 +844,15 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
     expect(callLog).toEqual(["thought_pass1", "thought_pass2", "expression"]);
     expect(result.text).toContain("0.2.0");
     expect(result.decisionKind).toBe("speak");
+
+    // Thought completion budget must hold real-model response headroom (the
+    // production 450-token ceiling truncated JSON mid-object).
+    expect(thoughtCompletionOptions[0]?.maxTokens).toBe(1000);
+
+    // Verified execution must surface structured evidence state to Expression.
+    expect(expressionSystemPrompt).toContain("Project inspection evidence:");
+    expect(expressionSystemPrompt).toContain("status = verified_success");
+    expect(expressionSystemPrompt).toContain("verifiedRepositoryEvidence = true");
 
     expect(emittedAudits.length).toBe(1);
     const audit = emittedAudits[0]!;
@@ -978,5 +1000,145 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
 
     const m2Count = emittedAudits.filter((a) => a.profile === "project_investigation").length;
     expect(m2Count).toBe(0);
+  });
+
+  it("Exact production witness with real-model truncated Thought output: fallback runs, no M2, Expression sees the not_performed evidence floor", async () => {
+    const dbPath = join(tmpDir, `ashley-core-${randomUUID()}.db`);
+    const db = openNuclearDb(new DatabaseSync(dbPath));
+    activateProjectInspection(db);
+
+    const callLog: string[] = [];
+    const emittedAudits: v2LicenseAudit.SandboxV2LicenseAuditRecord[] = [];
+    let expressionSystemPrompt = "";
+
+    vi.spyOn(v2LicenseAudit, "emitSandboxV2LicenseAudit").mockImplementation(
+      (license, observationOrSink) => {
+        const obs = typeof observationOrSink === "function" ? null : observationOrSink ?? null;
+        const record = v2LicenseAudit.formatSandboxV2LicenseAudit(license, obs);
+        if (record) emittedAudits.push(record);
+      },
+    );
+
+    vi.spyOn(mistral, "completeChat").mockImplementation(async (messages: any[]) => {
+      const systemContent = messages.find((m) => m.role === "system")?.content ?? "";
+
+      if (systemContent.includes("Ashley's Thought layer, not her Expression layer")) {
+        callLog.push("thought_pass1");
+        // The exact raw response captured from production (truncated mid-object
+        // by the old 450-token ceiling): no closing brace, invalid JSON.
+        return {
+          text: `{ "kind": "ask", "delayClass": null, "shouldSpeak": false, "effort": "medium", "completion": "hold", `,
+          model: "gpt-oss-120b",
+          modelAlias: "thought",
+          resolvedModelId: "openai/gpt-oss-120b",
+        };
+      }
+
+      callLog.push("expression");
+      expressionSystemPrompt = systemContent;
+      return {
+        text: "i can check project-ashley.",
+        model: "mistral-large",
+        modelAlias: "expression",
+        resolvedModelId: "mistral-large",
+      };
+    });
+
+    const core = new AshleyCore(db);
+
+    const result = await core.handleReactiveChat({
+      message:
+        "Can you inspect your Project Ashley repository and tell me what version is in package.json?",
+      ownerId: "doc",
+      channel: "discord",
+    });
+
+    expect(callLog).toEqual(["thought_pass1", "expression"]);
+
+    // Zero M2 execution and zero audit: the truncated output was rejected
+    // before any inspection request could be parsed.
+    expect(emittedAudits.length).toBe(0);
+
+    const logged = db
+      .prepare(
+        `SELECT decision_kind, thought_source, thought_error FROM decision_log WHERE owner_id = ? ORDER BY id DESC LIMIT 1`,
+      )
+      .get("doc") as any;
+    expect(logged.thought_source).toBe("fallback");
+    expect(logged.thought_error).toBe("invalid_response");
+
+    // Expression must see the structural no-evidence floor: no repository
+    // evidence exists this turn, so repository facts are not evidence-backed.
+    expect(expressionSystemPrompt).toContain("Project inspection evidence:");
+    expect(expressionSystemPrompt).toContain("status = not_performed");
+    expect(expressionSystemPrompt).toContain("verifiedRepositoryEvidence = false");
+    expect(expressionSystemPrompt).not.toContain("status = verified_success");
+    expect(result.text).toContain("i can check project-ashley.");
+  });
+
+  it("Thought hold with shouldSpeak=false is a valid terminal cognition: no expression, no delivery", async () => {
+    const dbPath = join(tmpDir, `ashley-core-${randomUUID()}.db`);
+    const db = openNuclearDb(new DatabaseSync(dbPath));
+    activateProjectInspection(db);
+
+    const callLog: string[] = [];
+
+    vi.spyOn(mistral, "completeChat").mockImplementation(async (messages: any[]) => {
+      const systemContent = messages.find((m) => m.role === "system")?.content ?? "";
+      const userContent = messages.find((m) => m.role === "user")?.content ?? "";
+
+      if (systemContent.includes("Ashley's Thought layer, not her Expression layer")) {
+        callLog.push("thought_pass1");
+        const parsedUser = JSON.parse(userContent);
+        const candidates = Array.isArray(parsedUser.candidates) ? parsedUser.candidates : [];
+        const motivationId = candidates.length > 0 ? candidates[0].id : 1;
+        return {
+          text: JSON.stringify({
+            kind: "ask",
+            delayClass: null,
+            shouldSpeak: false,
+            effort: "medium",
+            completion: "hold",
+            uncertainty: 0.2,
+            urgency: 0.1,
+            objective: "ask",
+            reason: "hold",
+            motivationIds: [motivationId],
+          }),
+          model: "gpt-oss-120b",
+          modelAlias: "thought",
+          resolvedModelId: "openai/gpt-oss-120b",
+        };
+      }
+
+      callLog.push("expression");
+      return {
+        text: "must not be spoken",
+        model: "mistral-large",
+        modelAlias: "expression",
+        resolvedModelId: "mistral-large",
+      };
+    });
+
+    const core = new AshleyCore(db);
+
+    const result = await core.handleReactiveChat({
+      message: "debug: hold this thought",
+      ownerId: "doc",
+      channel: "discord",
+    });
+
+    expect(callLog).toEqual(["thought_pass1"]);
+    expect(result.text).toBe("");
+    expect(result.decisionKind).toBe("ask");
+    expect(result.model).toBe("none");
+
+    const logged = db
+      .prepare(
+        `SELECT decision_kind, thought_source FROM decision_log WHERE owner_id = ? ORDER BY id DESC LIMIT 1`,
+      )
+      .get("doc") as any;
+    expect(logged.decision_kind).toBe("ask");
+    expect(logged.thought_source).toBe("model");
   });
 });

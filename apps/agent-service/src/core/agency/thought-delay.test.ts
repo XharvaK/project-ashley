@@ -107,3 +107,98 @@ describe("Thought delay contract", () => {
     }
   });
 });
+
+describe("Thought hold semantics", () => {
+  it.each(["ask", "revisit", "share", "challenge", "refuse"])(
+    "accepts completion=hold with shouldSpeak=false as a terminal hold for %s",
+    async (kind) => {
+      const db = openNuclearDb(new DatabaseSync(":memory:"));
+      try {
+        const result = await runThoughtModel(
+          db,
+          base,
+          [motivation],
+          "proactive",
+          async () => ({
+            text: JSON.stringify({
+              kind,
+              delayClass: null,
+              shouldSpeak: false,
+              effort: "medium",
+              completion: "hold",
+              uncertainty: 0.2,
+              urgency: 0.1,
+              objective: "ask",
+              reason: "hold",
+              motivationIds: [1],
+            }),
+          }),
+        );
+        expect(result).toMatchObject({
+          ok: true,
+          proposal: { kind, shouldSpeak: false, completion: "hold" },
+        });
+      } finally {
+        db.close();
+      }
+    },
+  );
+
+  it("rejects completion=hold with shouldSpeak=true", async () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    try {
+      const result = await runThoughtModel(
+        db,
+        base,
+        [motivation],
+        "proactive",
+        async () => ({
+          text: JSON.stringify({
+            kind: "ask",
+            delayClass: null,
+            shouldSpeak: true,
+            effort: "medium",
+            completion: "hold",
+            uncertainty: 0.2,
+            urgency: 0.1,
+            objective: "ask",
+            reason: "hold",
+            motivationIds: [1],
+          }),
+        }),
+      );
+      expect(result).toEqual({ ok: false, error: "invalid_response" });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("still rejects a delay class attached to a non-delay decision with hold", async () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    try {
+      const result = await runThoughtModel(
+        db,
+        base,
+        [motivation],
+        "proactive",
+        async () => ({
+          text: JSON.stringify({
+            kind: "ask",
+            delayClass: "brief",
+            shouldSpeak: false,
+            effort: "medium",
+            completion: "hold",
+            uncertainty: 0.2,
+            urgency: 0.1,
+            objective: "ask",
+            reason: "hold",
+            motivationIds: [1],
+          }),
+        }),
+      );
+      expect(result).toEqual({ ok: false, error: "invalid_response" });
+    } finally {
+      db.close();
+    }
+  });
+});

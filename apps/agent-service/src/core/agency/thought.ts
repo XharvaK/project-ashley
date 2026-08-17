@@ -235,7 +235,7 @@ export async function runThoughtModel(
         { role: "user", content: JSON.stringify({ trigger, base, candidates }) },
       ],
       {
-        maxTokens: 450,
+        maxTokens: 1000,
         temperature: 0.15,
         reasoningEffort: "medium",
         lane: (options.lane as any) ?? "interactive",
@@ -277,7 +277,8 @@ export async function runThoughtModel(
     return { ok: false, error: "invalid_response" };
   }
   const shouldSpeak = proposal.shouldSpeak === true;
-  if (shouldSpeak !== (kind !== "silence" && kind !== "delay")) {
+  const holding = completion === "hold";
+  if (shouldSpeak !== (kind !== "silence" && kind !== "delay" && !holding)) {
     return { ok: false, error: "invalid_response" };
   }
   const inspectionRequest = canOffer
@@ -538,7 +539,7 @@ export async function deliberateThoughtContinuation(
         },
       ],
       {
-        maxTokens: 450,
+        maxTokens: 1000,
         temperature: 0.15,
         reasoningEffort: "medium",
         lane: (options.lane as any) ?? "interactive",
@@ -601,7 +602,8 @@ export async function deliberateThoughtContinuation(
   }
 
   const shouldSpeak = proposal.shouldSpeak === true;
-  if (shouldSpeak !== (kind !== "silence" && kind !== "delay")) {
+  const holding = completion === "hold";
+  if (shouldSpeak !== (kind !== "silence" && kind !== "delay" && !holding)) {
     return {
       ...intermediateDecision,
       inspectionObservation: observation,

@@ -5,6 +5,7 @@ import type { CompletionOptions } from "../model-routing/types.js";
 import {
   stableIdentityBlock,
   mindStateHeadline,
+  projectInspectionEvidenceBlock,
 } from "../context-composer.js";
 import type { TurnContext } from "../context-composer.js";
 import type { Decision } from "../types.js";
@@ -109,6 +110,10 @@ export function minimalExpressionContext(
   const systemParts = [
     stableIdentityBlock(db, ownerId),
     `## Mind state (headline only)\n${mindStateHeadline(db, ownerId)}`,
+    projectInspectionEvidenceBlock(
+      decision?.operationalLicense,
+      decision?.inspectionObservation,
+    ),
     `## Honesty & rendering (minimal profile)\n${MINIMAL_RENDERING_CONSTRAINTS}`,
   ].filter(Boolean);
 

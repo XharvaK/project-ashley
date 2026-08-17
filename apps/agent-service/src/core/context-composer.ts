@@ -278,6 +278,42 @@ export function operationalWorkBlock(
 }
 
 /**
+ * Structured current-turn project-inspection evidence state for Expression.
+ * Always present: not_performed when no project inspection occurred this turn,
+ * verified_success / failed when a project_investigation license exists.
+ * Boolean state only — never a phrase detector or repository-specific rule.
+ */
+export function projectInspectionEvidenceBlock(
+  license: OperationalClaimLicense | null | undefined,
+  observation: ProjectInspectionObservation | null | undefined,
+): string {
+  if (license?.profile === "project_investigation") {
+    const truth = deriveOperationalTruth(license);
+    if (truth.state === "verified_success" && observation) {
+      return [
+        "Project inspection evidence:",
+        "status = verified_success",
+        "verifiedRepositoryEvidence = true",
+      ].join("\n");
+    }
+    if (license.state === "failed") {
+      return [
+        "Project inspection evidence:",
+        "status = failed",
+        "verifiedRepositoryEvidence = false",
+        license.error ? `error = ${license.error}` : "error = unknown",
+      ].join("\n");
+    }
+  }
+  return [
+    "Project inspection evidence:",
+    "status = not_performed",
+    "verifiedRepositoryEvidence = false",
+    "Semantics: no project inspection occurred this turn. Repository-state claims that require live inspection are not evidence-backed; do not present them as verified or observed. This does not restrict unrelated conversational knowledge.",
+  ].join("\n");
+}
+
+/**
  * ContextComposer — sole owner of turn context assembly.
  * Assembles existing peer outputs; does not reinterpret, score, or rewrite them.
  * Omitting an empty peer section is assembly, not filtering.
@@ -303,6 +339,10 @@ export function composeTurnContext(
     operationalLicense: decision?.operationalLicense,
     inspectionObservation: decision?.inspectionObservation,
   });
+  const inspectionEvidence = projectInspectionEvidenceBlock(
+    decision?.operationalLicense,
+    decision?.inspectionObservation,
+  );
   // Questions only when Thought selected question evidence or none selected yet
   // would dump — skip global question dump; selected questions arrive via evidence.
   const questions = "";
@@ -316,6 +356,7 @@ export function composeTurnContext(
       : "",
     mindState,
     operational,
+    inspectionEvidence,
     questions,
   ].filter(Boolean);
 
