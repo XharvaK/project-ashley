@@ -57,6 +57,21 @@ describe("sandbox availability", () => {
 });
 
 describe("describeSandboxAvailability", () => {
+  it("describes disabled state with legacy V1 disambiguation", () => {
+    const line = describeSandboxAvailability({
+      brokerOptIn: false,
+      socketPath: "",
+      socketPresent: false,
+      signingKeys: { ownerApproval: false, continuityTombstone: false },
+      transportConfigured: false,
+      qualification: "disabled",
+      reachabilityCheckedAtMs: null,
+    });
+    expect(line).toBe(
+      "Legacy sandbox broker (V1): broker IPC disabled (ASHLEY_SANDBOX_BROKER_ENABLED is not true).",
+    );
+  });
+
   it("describes qualified state honestly", () => {
     const line = describeSandboxAvailability({
       brokerOptIn: true,
@@ -67,7 +82,7 @@ describe("describeSandboxAvailability", () => {
       qualification: "qualified",
       reachabilityCheckedAtMs: Date.now(),
     });
-    expect(line).toContain("qualified this session");
+    expect(line).toContain("Legacy sandbox broker (V1): OS sandbox broker is qualified this session");
     expect(line).toContain("owner-signed approval");
   });
 });

@@ -5,6 +5,7 @@ import {
 } from "../../mistral-client.js";
 import type { TurnContext } from "../context-composer.js";
 import { finalizeHonesty } from "../honesty/finalize.js";
+import { emitSandboxV2LicenseAudit } from "../sandbox/v2-license-audit.js";
 import {
   computeActivityLicense,
   emptyActivityLicenseNote,
@@ -216,6 +217,7 @@ export async function expressSpeak(
     model: response.model,
     readingLicensed,
   };
+  emitSandboxV2LicenseAudit(decision.operationalLicense);
   const finalized = finalizeHonesty({
     text: wording.text,
     readingLicensed: wording.readingLicensed,

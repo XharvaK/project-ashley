@@ -65,11 +65,22 @@ const EXECUTION_FAILURE_PATTERNS: RegExp[] = [
   /\bi\s+tried,?\s+but\s+(?:it\s+failed|there was an error)\b/i,
 ];
 
+const EXECUTION_UNAVAILABILITY_PATTERNS: RegExp[] = [
+  /\b(?:can't|cannot|can not|couldn't|could not)\s+(?:run|do|execute|perform|test)\s+(?:it|that|this)(?:\s+here)?\b/i,
+  /\bcan't\s+do\s+that\s+here\b/i,
+  /\b(?:can't|cannot|can not)\s+run\s+it\b/i,
+  /\b(?:sandbox\s+)?broker(?:'s|\s+is|\s+ipc\s+is|\s+ipc)?\s+(?:disabled|unavailable|turned off|not enabled)\b/i,
+  /\b(?:sandbox\s+)?broker\s+ipc\s+(?:is\s+)?disabled\b/i,
+  /\b(?:sandboxed?\s+execution|sandbox)\s+(?:is\s+)?(?:disabled|unavailable|turned off|not enabled)\b/i,
+  /\bdisabled\s+in\s+this\s+deployment\b/i,
+  /\b(?:unable|not able)\s+to\s+(?:run|execute|test)\s+(?:it|that|this)\b/i,
+];
+
 /** Remove quoted/hypothetical spans before activity detection. */
 export function stripQuotedHypotheticals(text: string): string {
   return text
     .replace(/"[^"]*"/g, " ")
-    .replace(/'[^']*'/g, " ")
+    .replace(/(?:^|(?<=[\s([{<]))'([^']*)'(?=$|[\s)\]}>,.;:!?])/g, " ")
     .replace(/\b(?:if|when|suppose) i (?:ran|read|saw|looked)[^.!?]*/gi, " ");
 }
 
@@ -122,6 +133,12 @@ export function claimsOwnExecutionFailure(text: string): boolean {
   const clean = stripQuotedHypotheticals(text.trim());
   if (!clean) return false;
   return EXECUTION_FAILURE_PATTERNS.some((pattern) => pattern.test(clean));
+}
+
+export function claimsOwnExecutionUnavailability(text: string): boolean {
+  const clean = stripQuotedHypotheticals(text.trim());
+  if (!clean) return false;
+  return EXECUTION_UNAVAILABILITY_PATTERNS.some((pattern) => pattern.test(clean));
 }
 
 export function claimsOwnActivity(text: string): boolean {

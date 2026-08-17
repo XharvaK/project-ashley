@@ -130,35 +130,79 @@ export function operationalWorkBlock(
   ownerId: string,
   options?: { operationalLicense?: OperationalClaimLicense | null },
 ): string {
-  const taskId = options?.operationalLicense?.taskId;
-  if (!taskId) return "";
+  const license = options?.operationalLicense;
+  if (!license) return "";
 
   ensureEngineeringTables(db);
   const tasks = loadCoordinatorTasks(db);
-  const task = tasks.find((t) => t.owner === ownerId && t.taskId === taskId);
-  if (!task) return "";
+  const task = license.taskId
+    ? tasks.find((t) => t.owner === ownerId && t.taskId === license.taskId)
+    : undefined;
+
+  if (task) {
+    const lines = [
+      `Status: ${task.status}`,
+      `Profile: ${task.profile}`,
+      `Task ID: ${task.taskId}`,
+      task.startedAtMs ? `Started: ${new Date(task.startedAtMs).toISOString()}` : "",
+      task.completedAtMs ? `Completed: ${new Date(task.completedAtMs).toISOString()}` : "",
+      task.error ? `Error: ${task.error}` : "",
+      task.refusal ? `Refusal: ${task.refusal}` : "",
+    ].filter(Boolean);
+
+    if (task.profile === "sandbox_workspace_file_roundtrip" && task.status === "completed") {
+      if (isVerifiedRoundtripEffectEvidence(task.effectEvidence)) {
+        lines.push(
+          "Effect evidence: roundtrip verified (temporary file created, exact bytes verified on read, file deleted, verified absent).",
+        );
+      } else {
+        lines.push(
+          "Effect evidence: unverified (task record is completed; verified effect evidence is unavailable).",
+        );
+      }
+    }
+
+    return ["## Operational work state (cognitive attention only)", ...lines].join(
+      "\n",
+    );
+  }
+
+  // Direct license projection scoped specifically to sandbox_workspace_file_roundtrip
+  if (license.profile !== "sandbox_workspace_file_roundtrip") {
+    return "";
+  }
+
+  if (
+    license.state === "none" &&
+    !license.taskId &&
+    !license.error &&
+    !license.refusalReason &&
+    !license.effectEvidence
+  ) {
+    return "";
+  }
 
   const lines = [
-    `Status: ${task.status}`,
-    `Profile: ${task.profile}`,
-    `Task ID: ${task.taskId}`,
-    task.startedAtMs ? `Started: ${new Date(task.startedAtMs).toISOString()}` : "",
-    task.completedAtMs ? `Completed: ${new Date(task.completedAtMs).toISOString()}` : "",
-    task.error ? `Error: ${task.error}` : "",
-    task.refusal ? `Refusal: ${task.refusal}` : "",
+    `Status: ${license.state}`,
+    `Profile: ${license.profile}`,
+    license.taskId ? `Task ID: ${license.taskId}` : "",
+    license.error ? `Error: ${license.error}` : "",
+    license.refusalReason ? `Refusal: ${license.refusalReason}` : "",
   ].filter(Boolean);
 
-  if (task.profile === "sandbox_workspace_file_roundtrip" && task.status === "completed") {
-    if (isVerifiedRoundtripEffectEvidence(task.effectEvidence)) {
+  if (license.state === "succeeded") {
+    if (isVerifiedRoundtripEffectEvidence(license.effectEvidence)) {
       lines.push(
         "Effect evidence: roundtrip verified (temporary file created, exact bytes verified on read, file deleted, verified absent).",
       );
     } else {
       lines.push(
-        "Effect evidence: unverified (task record is completed; verified effect evidence is unavailable).",
+        "Effect evidence: unverified (state is succeeded; verified effect evidence is unavailable; no completion licensed).",
       );
     }
   }
+
+  if (lines.length === 0) return "";
 
   return ["## Operational work state (cognitive attention only)", ...lines].join(
     "\n",

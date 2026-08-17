@@ -61,4 +61,125 @@ describe("nuclear honesty finalizer", () => {
     expect(result.flooredAffect).toBe(false);
     expect(result.text).toContain("hopeful");
   });
+
+  it("regression: witnessed false refusal 'sandbox broker\\'s disabled... can\\'t run it' with verified V2 license floors to truthful success", () => {
+    const result = finalizeHonesty({
+      text: "sandbox broker's disabled in this deployment. can't run it.",
+      readingLicensed: false,
+      operationalLicense: {
+        state: "succeeded",
+        taskId: "v2-m1-123",
+        profile: "sandbox_workspace_file_roundtrip",
+        effectEvidence: {
+          verified: true,
+          workspaceId: "ws-1",
+          relativePath: "test.txt",
+          bytesWritten: 10,
+          contentHash: "hash-123",
+          readMatches: true,
+          deleted: true,
+          verifiedAbsent: true,
+          completedAtMs: Date.now(),
+        },
+      },
+    });
+    expect(result.flooredActivity).toBe(true);
+    expect(result.text).toBe(
+      "the sandbox workspace check completed and the roundtrip verified.",
+    );
+  });
+
+  it("regression: witnessed false refusal 'can\\'t do that here, sandbox broker ipc is disabled...' with verified V2 license floors to truthful success", () => {
+    const result = finalizeHonesty({
+      text: "can't do that here, sandbox broker ipc is disabled in this deployment.",
+      readingLicensed: false,
+      operationalLicense: {
+        state: "succeeded",
+        taskId: "v2-m1-123",
+        profile: "sandbox_workspace_file_roundtrip",
+        effectEvidence: {
+          verified: true,
+          workspaceId: "ws-1",
+          relativePath: "test.txt",
+          bytesWritten: 10,
+          contentHash: "hash-123",
+          readMatches: true,
+          deleted: true,
+          verifiedAbsent: true,
+          completedAtMs: Date.now(),
+        },
+      },
+    });
+    expect(result.flooredActivity).toBe(true);
+    expect(result.text).toBe(
+      "the sandbox workspace check completed and the roundtrip verified.",
+    );
+  });
+
+  it("strips contradictory broker disabled claim while preserving truthful success statement", () => {
+    const result = finalizeHonesty({
+      text: "the sandbox test completed. sandbox broker's disabled in this deployment.",
+      readingLicensed: false,
+      operationalLicense: {
+        state: "succeeded",
+        taskId: "v2-m1-123",
+        profile: "sandbox_workspace_file_roundtrip",
+        effectEvidence: {
+          verified: true,
+          workspaceId: "ws-1",
+          relativePath: "test.txt",
+          bytesWritten: 10,
+          contentHash: "hash-123",
+          readMatches: true,
+          deleted: true,
+          verifiedAbsent: true,
+          completedAtMs: Date.now(),
+        },
+      },
+    });
+    expect(result.flooredActivity).toBe(true);
+    expect(result.text).toBe("the sandbox test completed.");
+  });
+
+  it("does not allow inventing 'broker disabled' on internal error and floors to actual error", () => {
+    const result = finalizeHonesty({
+      text: "sandbox broker is disabled in this deployment.",
+      readingLicensed: false,
+      operationalLicense: {
+        state: "failed",
+        taskId: "v2-m1-123",
+        profile: "sandbox_workspace_file_roundtrip",
+        error: "internal_error",
+      },
+    });
+    expect(result.flooredActivity).toBe(true);
+    expect(result.text).toBe(
+      "the sandbox check was attempted but failed: internal_error.",
+    );
+  });
+
+  it("allows bounded unavailability statement when license actually represents sandbox_unavailable", () => {
+    const result = finalizeHonesty({
+      text: "sandboxed execution is disabled in this deployment.",
+      readingLicensed: false,
+      operationalLicense: {
+        state: "none",
+        profile: "sandbox_workspace_file_roundtrip",
+        error: "sandbox_unavailable",
+      },
+    });
+    expect(result.flooredActivity).toBe(false);
+    expect(result.text).toBe("sandboxed execution is disabled in this deployment.");
+  });
+
+  it("does not censor conversational 'can\\'t do that here' in ordinary non-operational turn", () => {
+    const result = finalizeHonesty({
+      text: "i can't do that here, but let's talk about the design.",
+      readingLicensed: false,
+    });
+    expect(result.flooredActivity).toBe(false);
+    expect(result.text).toBe(
+      "i can't do that here, but let's talk about the design.",
+    );
+  });
 });

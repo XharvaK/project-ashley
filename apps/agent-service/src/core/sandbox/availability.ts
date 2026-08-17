@@ -164,24 +164,24 @@ export function describeSandboxAvailability(
 ): string {
   switch (snapshot.qualification) {
     case "disabled":
-      return "Sandboxed execution: broker IPC disabled (ASHLEY_SANDBOX_BROKER_ENABLED is not true).";
+      return "Legacy sandbox broker (V1): broker IPC disabled (ASHLEY_SANDBOX_BROKER_ENABLED is not true).";
     case "socket_missing":
-      return `Sandboxed execution: broker socket not present at ${snapshot.socketPath}.`;
+      return `Legacy sandbox broker (V1): broker socket not present at ${snapshot.socketPath}.`;
     case "keys_missing": {
       const missing: string[] = [];
       if (!snapshot.signingKeys.ownerApproval) missing.push("owner approval");
       if (!snapshot.signingKeys.continuityTombstone) missing.push("continuity tombstone");
-      return `Sandboxed execution: signing keys incomplete (${missing.join(", ")} not configured).`;
+      return `Legacy sandbox broker (V1): signing keys incomplete (${missing.join(", ")} not configured).`;
     }
     case "configured":
-      return "Sandboxed execution: broker socket and signing keys are configured; reachability has not been verified yet this session.";
+      return "Legacy sandbox broker (V1): broker socket and signing keys are configured; reachability has not been verified yet this session.";
     case "unreachable":
-      return `Sandboxed execution: broker socket is present but unreachable (${snapshot.reachabilityErrorCode ?? "broker_error"}).`;
+      return `Legacy sandbox broker (V1): broker socket is present but unreachable (${snapshot.reachabilityErrorCode ?? "broker_error"}).`;
     case "qualified":
-      return "Sandboxed execution: OS sandbox broker is qualified this session (socket reachable, signing keys configured). Each isolated task still requires owner-signed approval and is not licensed from conversation alone.";
+      return "Legacy sandbox broker (V1): OS sandbox broker is qualified this session (socket reachable, signing keys configured). Each isolated task still requires owner-signed approval and is not licensed from conversation alone.";
     default: {
       const never: never = snapshot.qualification;
-      return `Sandboxed execution: unknown state (${never}).`;
+      return `Legacy sandbox broker (V1): unknown state (${never}).`;
     }
   }
 }

@@ -7,6 +7,7 @@ import {
   claimsOwnExecutionAdmitted,
   claimsOwnExecutionCompletion,
   claimsOwnExecutionFailure,
+  claimsOwnExecutionUnavailability,
   stripQuotedHypotheticals,
 } from "./claims.js";
 import type { OperationalClaimLicense } from "../sandbox/engineering-types.js";
@@ -47,7 +48,7 @@ function operationalFallback(license: OperationalClaimLicense | undefined): stri
       }
       return ACTIVITY_FALLBACK;
     case "failed":
-      return `the sandbox check was attempted but failed${license.error ? `: ${license.error}` : "."}`;
+      return `the sandbox check was attempted but failed${license.error ? `: ${license.error}.` : "."}`;
     case "outcome_unknown":
       return "the sandbox check outcome is unknown after restart.";
     case "proposed":
@@ -74,6 +75,17 @@ function stripUnlicensedActivity(
     opState === "admitted" || opState === "running" || (opState === "succeeded" && hasVerifiedEffect);
   const completionAllowed = opState === "succeeded" && hasVerifiedEffect;
   const failureAllowed = opState === "failed";
+  const hasOperationalContext = Boolean(
+    options.operationalLicense &&
+      (options.operationalLicense.taskId ||
+        options.operationalLicense.profile ||
+        options.operationalLicense.error ||
+        options.operationalLicense.refusalReason ||
+        options.operationalLicense.state !== "none"),
+  );
+  const isSandboxUnavailable =
+    options.operationalLicense?.error === "sandbox_unavailable";
+  const unavailabilityAllowed = !hasOperationalContext || isSandboxUnavailable;
 
   return text
     .split(/(?<=[.!?])\s+|\r?\n+/)
@@ -89,6 +101,7 @@ function stripUnlicensedActivity(
       if (!admittedAllowed && claimsOwnExecutionAdmitted(probe)) return false;
       if (!completionAllowed && claimsOwnExecutionCompletion(probe)) return false;
       if (!failureAllowed && claimsOwnExecutionFailure(probe)) return false;
+      if (!unavailabilityAllowed && claimsOwnExecutionUnavailability(probe)) return false;
       return true;
     })
     .join(" ")
@@ -114,12 +127,24 @@ export function finalizeHonesty(
     opState === "admitted" || opState === "running" || (opState === "succeeded" && hasVerifiedEffect);
   const completionAllowed = opState === "succeeded" && hasVerifiedEffect;
   const failureAllowed = opState === "failed";
+  const hasOperationalContext = Boolean(
+    input.operationalLicense &&
+      (input.operationalLicense.taskId ||
+        input.operationalLicense.profile ||
+        input.operationalLicense.error ||
+        input.operationalLicense.refusalReason ||
+        input.operationalLicense.state !== "none"),
+  );
+  const isSandboxUnavailable =
+    input.operationalLicense?.error === "sandbox_unavailable";
+  const unavailabilityAllowed = !hasOperationalContext || isSandboxUnavailable;
 
   const unlicensedExecution =
     (!runningAllowed && claimsOwnExecutionRunning(probe)) ||
     (!admittedAllowed && claimsOwnExecutionAdmitted(probe)) ||
     (!completionAllowed && claimsOwnExecutionCompletion(probe)) ||
-    (!failureAllowed && claimsOwnExecutionFailure(probe));
+    (!failureAllowed && claimsOwnExecutionFailure(probe)) ||
+    (!unavailabilityAllowed && claimsOwnExecutionUnavailability(probe));
 
   const unlicensedActivity =
     claimsOwnGeneralActivity(probe) ||

@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { env } from "../../env.js";
 import { describeSandboxAvailability } from "../sandbox/availability.js";
+import { isSandboxV2Available } from "../sandbox/v2-execution.js";
 import { contractMismatch } from "../attention/ledger.js";
 import {
   currentContractId,
@@ -112,6 +113,23 @@ function describeCapability(snapshot: PerceptionCapabilitySnapshot): string {
   return `${label}: observe (recorded only; not licensed for model influence)`;
 }
 
+export function describeSandboxV2Availability(options?: {
+  lifecycleEnabled?: boolean;
+  substrateAvailable?: boolean;
+}): string {
+  const lifecycleEnabled =
+    options?.lifecycleEnabled ?? env.sandboxEngineeringLifecycleEnabled;
+  const substrateAvailable =
+    options?.substrateAvailable ?? isSandboxV2Available();
+  if (lifecycleEnabled && substrateAvailable) {
+    return "Sandbox V2 (file.roundtrip): available (bounded reactive workspace roundtrip enabled).";
+  }
+  if (!lifecycleEnabled) {
+    return "Sandbox V2 (file.roundtrip): disabled (ASHLEY_SANDBOX_ENGINEERING_LIFECYCLE_ENABLED is not true).";
+  }
+  return "Sandbox V2 (file.roundtrip): substrate unavailable (Linux bubblewrap required).";
+}
+
 export function composeSelfCapabilityContext(db: DatabaseSync): string {
   const snapshots = listPerceptionCapabilitySnapshots(db);
   const lines = [
@@ -120,6 +138,7 @@ export function composeSelfCapabilityContext(db: DatabaseSync): string {
     "- Attachment fetch requires sufficient thought deadline and capability release.",
     "- Conversational page reads require explicit user URL-read intent plus authorization.",
     "- Web search has no configured provider in this deployment.",
+    `- ${describeSandboxV2Availability()}`,
     `- ${describeSandboxAvailability()}`,
   ];
   return lines.join("\n");
