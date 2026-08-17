@@ -11,6 +11,10 @@ import {
   stripQuotedHypotheticals,
 } from "./claims.js";
 import type { OperationalClaimLicense } from "../sandbox/engineering-types.js";
+import {
+  deriveOperationalTruth,
+  renderOperationalTruth,
+} from "../sandbox/operational-truth.js";
 
 export type HonestyFinalizeInput = {
   text: string;
@@ -32,32 +36,6 @@ const ACTIVITY_FALLBACK =
 const AFFECT_FALLBACK = "i don't have a grounded feeling to report about that.";
 const AFFECT_CLAIM = /\b(?:i feel|i'm|i am)\s+(?:excited|happy|sad|upset|angry|anxious|tense|calm|hopeful|hurt|proud|frustrated|relieved|afraid|lonely)\b/i;
 
-function operationalFallback(license: OperationalClaimLicense | undefined): string {
-  if (!license) return ACTIVITY_FALLBACK;
-  if (license.refusalReason) {
-    return `i haven't started that check because the sandbox admission was refused: ${license.refusalReason}.`;
-  }
-  switch (license.state) {
-    case "admitted":
-      return "i've accepted that sandbox check and it's queued to run.";
-    case "running":
-      return "i'm currently running that check in the sandbox.";
-    case "succeeded":
-      if (license.effectEvidence?.verified) {
-        return "the sandbox workspace check completed and the roundtrip verified.";
-      }
-      return ACTIVITY_FALLBACK;
-    case "failed":
-      return `the sandbox check was attempted but failed${license.error ? `: ${license.error}.` : "."}`;
-    case "outcome_unknown":
-      return "the sandbox check outcome is unknown after restart.";
-    case "proposed":
-    case "none":
-    default:
-      return ACTIVITY_FALLBACK;
-  }
-}
-
 function stripUnlicensedActivity(
   text: string,
   options: {
@@ -67,13 +45,13 @@ function stripUnlicensedActivity(
     operationalLicense?: OperationalClaimLicense;
   },
 ): string {
-  const opState = options.operationalLicense?.state ?? "none";
-  const hasVerifiedEffect = options.operationalLicense?.effectEvidence?.verified === true;
+  const truth = deriveOperationalTruth(options.operationalLicense);
+  const opState = truth.state !== "none" ? truth.state : (options.operationalLicense?.state ?? "none");
 
   const runningAllowed = opState === "running";
   const admittedAllowed =
-    opState === "admitted" || opState === "running" || (opState === "succeeded" && hasVerifiedEffect);
-  const completionAllowed = opState === "succeeded" && hasVerifiedEffect;
+    opState === "admitted" || opState === "running" || opState === "verified_success";
+  const completionAllowed = opState === "verified_success";
   const failureAllowed = opState === "failed";
   const hasOperationalContext = Boolean(
     options.operationalLicense &&
@@ -116,16 +94,28 @@ function stripUnlicensedActivity(
 export function finalizeHonesty(
   input: HonestyFinalizeInput,
 ): HonestyFinalizeResult {
+  const truth = deriveOperationalTruth(input.operationalLicense);
+
+  // When current-turn operational truth is locked terminal, the factual
+  // operational result is rendered deterministically from OperationalTruth.
+  // Expression inference cannot alter or replace authoritative operational reality.
+  if (truth.locked && truth.semanticOutput) {
+    return {
+      text: truth.semanticOutput,
+      flooredActivity: true,
+      flooredAffect: false,
+    };
+  }
+
   const text = input.text.trim();
   const probe = stripQuotedHypotheticals(text);
 
-  const opState = input.operationalLicense?.state ?? "none";
-  const hasVerifiedEffect = input.operationalLicense?.effectEvidence?.verified === true;
+  const opState = truth.state !== "none" ? truth.state : (input.operationalLicense?.state ?? "none");
 
   const runningAllowed = opState === "running";
   const admittedAllowed =
-    opState === "admitted" || opState === "running" || (opState === "succeeded" && hasVerifiedEffect);
-  const completionAllowed = opState === "succeeded" && hasVerifiedEffect;
+    opState === "admitted" || opState === "running" || opState === "verified_success";
+  const completionAllowed = opState === "verified_success";
   const failureAllowed = opState === "failed";
   const hasOperationalContext = Boolean(
     input.operationalLicense &&
@@ -174,9 +164,12 @@ export function finalizeHonesty(
         .join(" ")
         .trim()
     : strippedActivity;
+
   if (!strippedAffect && !strippedActivity) {
     return {
-      text: unlicensedAffect ? AFFECT_FALLBACK : operationalFallback(input.operationalLicense),
+      text: unlicensedAffect
+        ? AFFECT_FALLBACK
+        : (renderOperationalTruth(truth) ?? ACTIVITY_FALLBACK),
       flooredActivity: unlicensedActivity,
       flooredAffect: unlicensedAffect,
     };

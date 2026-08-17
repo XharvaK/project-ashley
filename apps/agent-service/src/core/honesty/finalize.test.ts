@@ -116,7 +116,7 @@ describe("nuclear honesty finalizer", () => {
     );
   });
 
-  it("strips contradictory broker disabled claim while preserving truthful success statement", () => {
+  it("floors contradictory broker disabled claim to authoritative verified success", () => {
     const result = finalizeHonesty({
       text: "the sandbox test completed. sandbox broker's disabled in this deployment.",
       readingLicensed: false,
@@ -138,7 +138,9 @@ describe("nuclear honesty finalizer", () => {
       },
     });
     expect(result.flooredActivity).toBe(true);
-    expect(result.text).toBe("the sandbox test completed.");
+    expect(result.text).toBe(
+      "the sandbox workspace check completed and the roundtrip verified.",
+    );
   });
 
   it("does not allow inventing 'broker disabled' on internal error and floors to actual error", () => {
@@ -181,5 +183,134 @@ describe("nuclear honesty finalizer", () => {
     expect(result.text).toBe(
       "i can't do that here, but let's talk about the design.",
     );
+  });
+
+  it("regression: exact production false refusal with invented preconditions floors to truthful success via operational truth authority", () => {
+    const result = finalizeHonesty({
+      text: "can't do that on request, bounded roundtrip only triggers when there's an actual file task to witness. if you have a specific file to create, read, or delete, name it and i'll run the roundtrip as part of that.",
+      readingLicensed: false,
+      operationalLicense: {
+        state: "succeeded",
+        taskId: "v2-m1-1786928432697",
+        profile: "sandbox_workspace_file_roundtrip",
+        effectEvidence: {
+          verified: true,
+          workspaceId: "ws-1",
+          relativePath: "witness-v2-001.txt",
+          bytesWritten: 5,
+          contentHash: "hash-witness",
+          readMatches: true,
+          deleted: true,
+          verifiedAbsent: true,
+          completedAtMs: Date.now(),
+        },
+      },
+    });
+    expect(result.flooredActivity).toBe(true);
+    expect(result.text).toBe(
+      "the sandbox workspace check completed and the roundtrip verified.",
+    );
+  });
+
+  it("invariant: arbitrary conflicting model wording (not in any pattern list) floors to verified success under verified_success truth", () => {
+    const arbitraryPhrases = [
+      "I decided not to run that because the moon is full tonight.",
+      "We need more CPU cores before executing any roundtrip.",
+      "The protocol is waiting for quantum entanglement to stabilize.",
+      "you need to name a file first",
+      "that only triggers for an actual file task",
+      "give me a file and i'll run it",
+      "I am an elephant and cannot manipulate filesystem blocks.",
+    ];
+    for (const text of arbitraryPhrases) {
+      const result = finalizeHonesty({
+        text,
+        readingLicensed: false,
+        operationalLicense: {
+          state: "succeeded",
+          taskId: "v2-m1-123",
+          profile: "sandbox_workspace_file_roundtrip",
+          effectEvidence: {
+            verified: true,
+            workspaceId: "ws-1",
+            relativePath: "test.txt",
+            bytesWritten: 10,
+            contentHash: "hash-123",
+            readMatches: true,
+            deleted: true,
+            verifiedAbsent: true,
+            completedAtMs: Date.now(),
+          },
+        },
+      });
+      expect(result.flooredActivity).toBe(true);
+      expect(result.text).toBe(
+        "the sandbox workspace check completed and the roundtrip verified.",
+      );
+    }
+  });
+
+  it("invariant: failed operational truth cannot become success or false unavailability", () => {
+    const conflictingPhrases = [
+      "the sandbox roundtrip succeeded and passed!",
+      "sandbox broker is disabled in this deployment.",
+      "i decided to skip it.",
+    ];
+    for (const text of conflictingPhrases) {
+      const result = finalizeHonesty({
+        text,
+        readingLicensed: false,
+        operationalLicense: {
+          state: "failed",
+          taskId: "v2-m1-123",
+          profile: "sandbox_workspace_file_roundtrip",
+          error: "internal_error",
+        },
+      });
+      expect(result.flooredActivity).toBe(true);
+      expect(result.text).toBe(
+        "the sandbox check was attempted but failed: internal_error.",
+      );
+    }
+  });
+
+  it("invariant: outcome_unknown operational truth cannot become success or failure", () => {
+    const conflictingPhrases = [
+      "the sandbox check completed and the roundtrip verified.",
+      "the check failed with an error.",
+    ];
+    for (const text of conflictingPhrases) {
+      const result = finalizeHonesty({
+        text,
+        readingLicensed: false,
+        operationalLicense: {
+          state: "outcome_unknown",
+          taskId: "v2-m1-123",
+          profile: "sandbox_workspace_file_roundtrip",
+        },
+      });
+      expect(result.flooredActivity).toBe(true);
+      expect(result.text).toBe(
+        "the sandbox check outcome is unknown after restart.",
+      );
+    }
+  });
+
+  it("invariant: ordinary conversational statements are unaffected when no operational license exists", () => {
+    const cases = [
+      "you need to name a file before committing.",
+      "that configuration only triggers for an actual file path.",
+      "if you have a specific file, you can upload it to the channel.",
+      "i can't do that on request without your explicit permission.",
+      "the moon is full tonight and the sky is clear.",
+    ];
+    for (const text of cases) {
+      const result = finalizeHonesty({
+        text,
+        readingLicensed: false,
+      });
+      expect(result.flooredActivity).toBe(false);
+      expect(result.text).toBe(text);
+    }
   });
 });

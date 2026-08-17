@@ -66,8 +66,8 @@ const EXECUTION_FAILURE_PATTERNS: RegExp[] = [
 ];
 
 const EXECUTION_UNAVAILABILITY_PATTERNS: RegExp[] = [
-  /\b(?:can't|cannot|can not|couldn't|could not)\s+(?:run|do|execute|perform|test)\s+(?:it|that|this)(?:\s+here)?\b/i,
-  /\bcan't\s+do\s+that\s+here\b/i,
+  /\b(?:can't|cannot|can not|couldn't|could not)\s+(?:run|do|execute|perform|test)\s+(?:it|that|this)(?:\s+(?:here|on\s+request|on\s+demand))?\b/i,
+  /\bcan't\s+do\s+that\s+(?:here|on\s+request|on\s+demand)\b/i,
   /\b(?:can't|cannot|can not)\s+run\s+it\b/i,
   /\b(?:sandbox\s+)?broker(?:'s|\s+is|\s+ipc\s+is|\s+ipc)?\s+(?:disabled|unavailable|turned off|not enabled)\b/i,
   /\b(?:sandbox\s+)?broker\s+ipc\s+(?:is\s+)?disabled\b/i,

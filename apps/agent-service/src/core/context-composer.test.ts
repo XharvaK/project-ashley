@@ -106,6 +106,7 @@ describe("operationalWorkBlock", () => {
     expect(block).toContain("Profile: sandbox_workspace_file_roundtrip");
     expect(block).toContain("Task ID: v2-m1-999");
     expect(block).toContain("Effect evidence: roundtrip verified (temporary file created, exact bytes verified on read, file deleted, verified absent).");
+    expect(block).toContain("Current operational truth: verified_success (authoritative current-turn result; overrides generic capability self-model).");
     db.close();
   });
 

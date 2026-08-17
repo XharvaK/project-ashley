@@ -21,6 +21,7 @@ import {
   isVerifiedRoundtripEffectEvidence,
   type OperationalClaimLicense,
 } from "./sandbox/engineering-types.js";
+import { deriveOperationalTruth } from "./sandbox/operational-truth.js";
 import type { Decision, EvidenceRef } from "./types.js";
 import { capabilityCanInfluence } from "./rollout/capabilities.js";
 
@@ -133,6 +134,8 @@ export function operationalWorkBlock(
   const license = options?.operationalLicense;
   if (!license) return "";
 
+  const truth = deriveOperationalTruth(license);
+
   ensureEngineeringTables(db);
   const tasks = loadCoordinatorTasks(db);
   const task = license.taskId
@@ -154,6 +157,7 @@ export function operationalWorkBlock(
       if (isVerifiedRoundtripEffectEvidence(task.effectEvidence)) {
         lines.push(
           "Effect evidence: roundtrip verified (temporary file created, exact bytes verified on read, file deleted, verified absent).",
+          "Current operational truth: verified_success (authoritative current-turn result; overrides generic capability self-model).",
         );
       } else {
         lines.push(
@@ -162,9 +166,10 @@ export function operationalWorkBlock(
       }
     }
 
-    return ["## Operational work state (cognitive attention only)", ...lines].join(
-      "\n",
-    );
+    return [
+      "## Operational work state (cognitive attention only)",
+      ...lines,
+    ].join("\n");
   }
 
   // Direct license projection scoped specifically to sandbox_workspace_file_roundtrip
@@ -173,7 +178,8 @@ export function operationalWorkBlock(
   }
 
   if (
-    license.state === "none" &&
+    truth.state === "none" &&
+    !truth.locked &&
     !license.taskId &&
     !license.error &&
     !license.refusalReason &&
@@ -183,30 +189,30 @@ export function operationalWorkBlock(
   }
 
   const lines = [
-    `Status: ${license.state}`,
+    `Status: ${truth.state === "verified_success" ? "succeeded" : truth.state !== "none" ? truth.state : license.state}`,
     `Profile: ${license.profile}`,
     license.taskId ? `Task ID: ${license.taskId}` : "",
     license.error ? `Error: ${license.error}` : "",
     license.refusalReason ? `Refusal: ${license.refusalReason}` : "",
   ].filter(Boolean);
 
-  if (license.state === "succeeded") {
-    if (isVerifiedRoundtripEffectEvidence(license.effectEvidence)) {
-      lines.push(
-        "Effect evidence: roundtrip verified (temporary file created, exact bytes verified on read, file deleted, verified absent).",
-      );
-    } else {
-      lines.push(
-        "Effect evidence: unverified (state is succeeded; verified effect evidence is unavailable; no completion licensed).",
-      );
-    }
+  if (truth.state === "verified_success") {
+    lines.push(
+      "Effect evidence: roundtrip verified (temporary file created, exact bytes verified on read, file deleted, verified absent).",
+      "Current operational truth: verified_success (authoritative current-turn result; overrides generic capability self-model).",
+    );
+  } else if (license.state === "succeeded") {
+    lines.push(
+      "Effect evidence: unverified (state is succeeded; verified effect evidence is unavailable; no completion licensed).",
+    );
   }
 
   if (lines.length === 0) return "";
 
-  return ["## Operational work state (cognitive attention only)", ...lines].join(
-    "\n",
-  );
+  return [
+    "## Operational work state (cognitive attention only)",
+    ...lines,
+  ].join("\n");
 }
 
 /**
