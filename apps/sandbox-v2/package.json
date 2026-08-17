@@ -1,5 +1,5 @@
 {
-  "name": "@composer-assistant/sandbox-broker",
+  "name": "@composer-assistant/sandbox-v2",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -13,10 +13,10 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "vitest run --config vitest.dirty-source.config.ts && vitest run",
-    "prepare:r4-006": "node scripts/prepare-r4-006.mjs"
+    "test": "vitest run"
   },
   "dependencies": {
+    "@composer-assistant/sandbox-m1": "file:../sandbox-m1",
     "@composer-assistant/sandbox-policy": "file:../sandbox-policy",
     "@composer-assistant/sandbox-tree": "file:../sandbox-tree"
   },
@@ -34,7 +34,6 @@
     "@vitest/pretty-format": "3.2.6",
     "@vitest/runner": "3.2.6",
     "@vitest/snapshot": "3.2.6",
-    "@vitest/spy": "3.2.6",
     "@vitest/utils": "3.2.6"
   }
 }

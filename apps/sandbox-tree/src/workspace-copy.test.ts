@@ -15,10 +15,19 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { copySanitizedTree } from "./workspace-copy.js";
 import { buildWorkspaceExclusionSet } from "./workspace-exclusions.js";
-import { DISPOSABLE_WORKSPACE_HARD_LIMITS } from "./workspace-limits.js";
+import type { TreeCopyLimits } from "./workspace-copy.js";
 
 const NO_PROTECTED = { delegatedWriteDeniedOwnerApprovable: [], absoluteDenial: [] };
 const win = process.platform === "win32";
+
+const TEST_COPY_LIMITS: TreeCopyLimits = {
+  maxFiles: 10_000,
+  maxBytes: 100 * 1_024 * 1_024,
+  maxSingleFileBytes: 25 * 1_024 * 1_024,
+  maxPathLength: 1_024,
+  maxDepth: 32,
+  maxExcludedEntries: 20_000,
+};
 
 function makeSourceTree(files: Record<string, string>): string {
   const root = mkdtempSync(path.join(tmpdir(), "ashley-copy-src-"));
@@ -43,7 +52,7 @@ async function copy(
     sourceRoot: source,
     destinationRoot: dest,
     exclusionSet: buildWorkspaceExclusionSet(NO_PROTECTED, source),
-    limits: { ...DISPOSABLE_WORKSPACE_HARD_LIMITS },
+    limits: { ...TEST_COPY_LIMITS },
     ...overrides,
   });
 }
@@ -156,7 +165,7 @@ describe("sanitized tree copy", () => {
     const source = makeSourceTree({ "big.bin": "x".repeat(100) });
     const dest = makeDest();
     const result = await copy(source, dest, {
-      limits: { ...DISPOSABLE_WORKSPACE_HARD_LIMITS, maxSingleFileBytes: 50 },
+      limits: { ...TEST_COPY_LIMITS, maxSingleFileBytes: 50 },
     });
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -169,7 +178,7 @@ describe("sanitized tree copy", () => {
     const source = makeSourceTree({ "a.txt": "x".repeat(30), "b.txt": "y".repeat(30) });
     const dest = makeDest();
     const result = await copy(source, dest, {
-      limits: { ...DISPOSABLE_WORKSPACE_HARD_LIMITS, maxBytes: 50 },
+      limits: { ...TEST_COPY_LIMITS, maxBytes: 50 },
     });
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -182,7 +191,7 @@ describe("sanitized tree copy", () => {
     const source = makeSourceTree({ "a.txt": "x", "b.txt": "x", "c.txt": "x" });
     const dest = makeDest();
     const result = await copy(source, dest, {
-      limits: { ...DISPOSABLE_WORKSPACE_HARD_LIMITS, maxFiles: 2 },
+      limits: { ...TEST_COPY_LIMITS, maxFiles: 2 },
     });
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -195,7 +204,7 @@ describe("sanitized tree copy", () => {
     const source = makeSourceTree({ "a/b/c/d/e.txt": "x" });
     const dest = makeDest();
     const result = await copy(source, dest, {
-      limits: { ...DISPOSABLE_WORKSPACE_HARD_LIMITS, maxDepth: 3 },
+      limits: { ...TEST_COPY_LIMITS, maxDepth: 3 },
     });
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -208,7 +217,7 @@ describe("sanitized tree copy", () => {
     const source = makeSourceTree({ "x.txt": "x" });
     const dest = makeDest();
     const result = await copy(source, dest, {
-      limits: { ...DISPOSABLE_WORKSPACE_HARD_LIMITS, maxPathLength: 3 },
+      limits: { ...TEST_COPY_LIMITS, maxPathLength: 3 },
     });
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -226,7 +235,7 @@ describe("sanitized tree copy", () => {
     });
     const dest = makeDest();
     const result = await copy(source, dest, {
-      limits: { ...DISPOSABLE_WORKSPACE_HARD_LIMITS, maxExcludedEntries: 2 },
+      limits: { ...TEST_COPY_LIMITS, maxExcludedEntries: 2 },
     });
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -244,7 +253,7 @@ describe("sanitized tree copy", () => {
     mkdirSync(path.join(source, "d5"), { recursive: true });
     const dest = makeDest();
     const result = await copy(source, dest, {
-      limits: { ...DISPOSABLE_WORKSPACE_HARD_LIMITS, maxFiles: 2, maxExcludedEntries: 1 },
+      limits: { ...TEST_COPY_LIMITS, maxFiles: 2, maxExcludedEntries: 1 },
     });
     expect(result.ok).toBe(false);
     if (!result.ok) {
