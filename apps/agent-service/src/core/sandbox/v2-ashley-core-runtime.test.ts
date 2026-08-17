@@ -12,7 +12,7 @@ import {
   currentBuildIdentity,
   capabilityNames,
 } from "../rollout/capabilities.js";
-import { runThoughtModel } from "../agency/thought.js";
+import { runThoughtModel, deliberateDecision, deliberateThoughtContinuation } from "../agency/thought.js";
 import type { Decision, Motivation } from "../types.js";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -1297,6 +1297,175 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
       expect(thoughtSystemPrompt).toContain("acquire_project_evidence");
       expect(thoughtSystemPrompt).toContain("defer does not acquire evidence");
       expect(thoughtSystemPrompt).toContain("Approved project IDs: project-ashley");
+      expect(thoughtSystemPrompt).toContain(
+        "acquire_project_evidence is an action, not a postponement",
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("Contract: acquire paired with delay+hold is resolved to a speak-class decision (acquisition contradicts postponement)", async () => {
+    const dbPath = join(tmpDir, `ashley-core-${randomUUID()}.db`);
+    const db = openNuclearDb(new DatabaseSync(dbPath));
+    activateProjectInspection(db);
+    try {
+      const baseDecision: Decision = {
+        trigger: "reactive",
+        kind: "speak",
+        motivationIds: [1],
+        score: 40,
+        reason: "respond",
+        evidenceRefs: [],
+        uncertainty: 0.2,
+        urgency: 0.5,
+        thoughtSource: "deterministic",
+        thoughtError: null,
+        affectLicense: {
+          permitted: false,
+          valence: 0,
+          activation: 0.5,
+          openness: 0.5,
+          tension: 0,
+          reason: "test",
+        },
+        cognitiveAllocation: { shouldSpeak: true, effort: "medium", completion: "complete" },
+        authorizedClaims: { readingRecordIds: [], readingTitles: [], readingClaims: [] },
+      };
+      const motivation: Motivation = {
+        id: 1,
+        kind: "user_message",
+        score: 100,
+        summary: "Can you inspect your Project Ashley repository and tell me what version is in package.json?",
+        refType: "message",
+        refId: 1,
+      };
+
+      // Production observed the model pairing acquire_project_evidence with
+      // kind=delay + completion=hold. Acquisition and postponement are
+      // contradictory; the runtime resolves the contradiction in favor of
+      // completing the turn after the evidence arrives.
+      const pass1 = await deliberateDecision(
+        db,
+        baseDecision,
+        [motivation],
+        "reactive",
+        async () => ({
+          text: JSON.stringify({
+            kind: "delay",
+            delayClass: "brief",
+            shouldSpeak: false,
+            effort: "medium",
+            completion: "hold",
+            uncertainty: 0,
+            urgency: 0,
+            objective: "retrieve version from package.json",
+            reason: "need repository data to answer user request",
+            motivationIds: [1],
+            evidenceDisposition: "acquire_project_evidence",
+            inspectionRequest: {
+              operation: "project.read_file",
+              projectId: "project-ashley",
+              path: "package.json",
+            },
+          }),
+        }),
+      );
+      expect(pass1.kind).toBe("speak");
+      expect(pass1.thoughtSource).toBe("model");
+      expect(pass1.evidenceDisposition).toBe("acquire_project_evidence");
+      expect(pass1.inspectionRequest).toEqual({
+        operation: "project.read_file",
+        projectId: "project-ashley",
+        path: "package.json",
+      });
+      expect(pass1.cognitiveAllocation).toEqual({
+        shouldSpeak: true,
+        effort: "medium",
+        completion: "complete",
+      });
+      expect(pass1.delayClass).toBeUndefined();
+
+      // The continuation pass must run for acquire decisions even when the
+      // intermediate decision was a delay, so the evidence gets interpreted.
+      const observation = {
+        projectId: "project-ashley",
+        operation: "project.read_file" as const,
+        path: "package.json",
+        verified: true,
+        truncated: false as const,
+        executedAtMs: Date.now(),
+        contentUtf8: '{"name":"project-ashley","version":"0.2.0"}',
+        bytes: 45,
+        sha256: "abc",
+      };
+      let continuationRan = false;
+      const pass2 = await deliberateThoughtContinuation(
+        db,
+        pass1,
+        observation,
+        null,
+        [motivation],
+        "reactive",
+        async () => {
+          continuationRan = true;
+          return {
+            text: JSON.stringify({
+              kind: "speak",
+              delayClass: null,
+              shouldSpeak: true,
+              effort: "medium",
+              completion: "complete",
+              uncertainty: 0.1,
+              urgency: 0.4,
+              objective: "report the version from the evidence",
+              reason: "the repository inspection returned the version",
+              motivationIds: [1],
+              inspectionCognitiveResult: "package.json reports version 0.2.0",
+            }),
+          };
+        },
+      );
+      expect(continuationRan).toBe(true);
+      expect(pass2.kind).toBe("speak");
+      expect(pass2.inspectionObservation).toEqual(observation);
+      expect(pass2.inspectionRequest).toEqual({
+        operation: "project.read_file",
+        projectId: "project-ashley",
+        path: "package.json",
+      });
+
+      // If the continuation model again pairs acquisition with postponement,
+      // the contradiction is resolved the same way.
+      const pass2Stubborn = await deliberateThoughtContinuation(
+        db,
+        pass1,
+        observation,
+        null,
+        [motivation],
+        "reactive",
+        async () => ({
+          text: JSON.stringify({
+            kind: "delay",
+            delayClass: "brief",
+            shouldSpeak: false,
+            effort: "low",
+            completion: "hold",
+            uncertainty: 0,
+            urgency: 0,
+            objective: "postpone",
+            reason: "postpone",
+            motivationIds: [1],
+          }),
+        }),
+      );
+      expect(pass2Stubborn.kind).toBe("speak");
+      expect(pass2Stubborn.inspectionObservation).toEqual(observation);
+      expect(pass2Stubborn.cognitiveAllocation).toEqual({
+        shouldSpeak: true,
+        effort: "low",
+        completion: "complete",
+      });
     } finally {
       db.close();
     }

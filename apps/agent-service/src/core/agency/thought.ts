@@ -223,7 +223,7 @@ export async function runThoughtModel(
       ? `Approved project IDs: ${approvedProjectIds.join(", ")}. When repository evidence is required to resolve a question or motivation, set evidenceDisposition to "acquire_project_evidence" and include inspectionRequest: {operation: "project.read_file"|"project.list_directory"|"project.search_text", projectId: "${approvedProjectIds.join('"|"')}", path: string, pattern?: string, maxMatches?: number}; the runtime executes it before you continue.`
       : "No approved projects are currently configured or licensed for inspection; do not emit inspectionRequest.";
   const dispositionContract =
-    'evidenceDisposition is one of: "sufficient" when the supplied context already holds everything needed to decide this turn; "acquire_project_evidence" when this turn requires repository evidence that inspection can provide now (REQUIRES a well-formed inspectionRequest, and is invalid when no approved projects are licensed); "capability_unavailable" when inspection is not currently available (valid ONLY when no approved projects are configured or licensed for inspection); "defer" for an intentional postponement of this motivation to a later turn. defer does not acquire evidence and must not stand in for evidence an available inspection can acquire now: if you need repository evidence this turn and inspection is available, use acquire_project_evidence. completion hold is a conversational/cognitive completion state only; it is not an evidence acquisition mechanism.';
+    'evidenceDisposition is one of: "sufficient" when the supplied context already holds everything needed to decide this turn; "acquire_project_evidence" when this turn requires repository evidence that inspection can provide now (REQUIRES a well-formed inspectionRequest, and is invalid when no approved projects are licensed); "capability_unavailable" when inspection is not currently available (valid ONLY when no approved projects are configured or licensed for inspection); "defer" for an intentional postponement of this motivation to a later turn. defer does not acquire evidence and must not stand in for evidence an available inspection can acquire now: if you need repository evidence this turn and inspection is available, use acquire_project_evidence. acquire_project_evidence is an action, not a postponement: pair it with a speak-class kind (speak, ask, share, challenge) and completion complete, and the runtime executes the inspection before you continue. completion hold is a conversational/cognitive completion state only; it is not an evidence acquisition mechanism.';
 
   let response: ThoughtModelResult;
   try {
@@ -472,7 +472,7 @@ export async function deliberateDecision(
       },
     };
   }
-  return {
+  return resolveAcquisitionContradiction({
     ...base,
     kind,
     delayClass: proposal.delayClass ?? undefined,
@@ -492,6 +492,31 @@ export async function deliberateDecision(
     },
     evidenceDisposition: proposal.evidenceDisposition,
     inspectionRequest: proposal.inspectionRequest ?? null,
+  });
+}
+
+function resolveAcquisitionContradiction(decision: Decision): Decision {
+  // Acquisition contradicts postponement: when the model requested repository
+  // evidence for this turn, the turn is not being postponed. The runtime
+  // resolves the contradiction in favor of completing the turn after the
+  // evidence arrives, instead of leaving the acquired evidence uninterpreted.
+  if (
+    decision.evidenceDisposition !== "acquire_project_evidence" ||
+    (decision.kind !== "delay" && decision.kind !== "silence")
+  ) {
+    return decision;
+  }
+  return {
+    ...decision,
+    kind: "speak",
+    delayClass: undefined,
+    silenceReasonCode: undefined,
+    holdReasonCode: undefined,
+    cognitiveAllocation: {
+      shouldSpeak: true,
+      effort: decision.cognitiveAllocation.effort,
+      completion: "complete",
+    },
   };
 }
 
@@ -523,12 +548,17 @@ export async function deliberateThoughtContinuation(
   options: DeliberateThoughtContinuationOptions = {},
 ): Promise<Decision> {
   const allowModelThought = options.allowModelThought !== false;
+  const acquiring =
+    intermediateDecision.evidenceDisposition === "acquire_project_evidence";
   if (
     !allowModelThought ||
     !canInfluence(db) ||
     !env.groqApiKey ||
     intermediateDecision.kind === "silence" ||
-    intermediateDecision.kind === "delay"
+    // A delay that requested acquisition must still be interpreted after the
+    // evidence arrives; postponement and acquisition are contradictory, so the
+    // runtime resolves the contradiction instead of skipping the pass.
+    (intermediateDecision.kind === "delay" && !acquiring)
   ) {
     return {
       ...intermediateDecision,
@@ -681,7 +711,7 @@ export async function deliberateThoughtContinuation(
     };
   }
 
-  return {
+  return resolveAcquisitionContradiction({
     ...intermediateDecision,
     kind,
     delayClass: delayClass ?? undefined,
@@ -702,5 +732,5 @@ export async function deliberateThoughtContinuation(
     inspectionRequest: intermediateDecision.inspectionRequest,
     inspectionObservation: observation,
     operationalLicense: intermediateDecision.operationalLicense,
-  };
+  });
 }
