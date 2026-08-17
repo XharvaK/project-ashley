@@ -194,6 +194,7 @@ import {
   executeReactiveSandboxTaskV2,
   executeProjectInspectionV2,
 } from "./sandbox/v2-execution.js";
+import { canOfferProjectInspection } from "./sandbox/project-registry.js";
 import {
   isVerifiedRoundtripEffectEvidence,
   type RoundtripEffectEvidence,
@@ -747,7 +748,14 @@ export class AshleyCore {
         ownTimeReportActive: ownTimeConstraint?.canInfluence === true,
         relevantBoundaryIds: relevantBoundaries,
       });
-      if (complexity.mode === "hard") {
+      const inspectionOffered = canOfferProjectInspection(this.db);
+      // M2 reachability: a capability offered to cognition must have the
+      // cognition pass that can exercise it. When project inspection is
+      // offered (release active + lifecycle + substrate + approved projects),
+      // admit model Thought even for otherwise-easy turns; the deterministic
+      // floor and deadlines still bound it. Capability-driven admission, not a
+      // phrase detector.
+      if (complexity.mode === "hard" || inspectionOffered) {
         if (signal.aborted) {
           const finalized = finalizeDelivery(this.db, {
             reservationId: reservation.id,
@@ -1510,7 +1518,11 @@ export class AshleyCore {
         motivations,
         trigger: "proactive",
       });
-      if (complexity.mode === "hard") {
+      const inspectionOffered = canOfferProjectInspection(this.db);
+      // M2 reachability (proactive): same capability-driven admission as the
+      // reactive path — an offered inspection capability implies model Thought
+      // runs so the offer is reachable.
+      if (complexity.mode === "hard" || inspectionOffered) {
         decision = await deliberateDecision(
           this.db,
           decision,

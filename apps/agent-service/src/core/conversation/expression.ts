@@ -106,7 +106,7 @@ export async function expressSpeak(
   const system = [
     turn.systemPrompt,
     `## Capability self-model\n${selfCapability}`,
-    `## Activity license\n${licenseNote}`,
+    `## Reading claim license\n${licenseNote}`,
     `## Affect license\n${affectNote}`,
   ]
     .filter(Boolean)

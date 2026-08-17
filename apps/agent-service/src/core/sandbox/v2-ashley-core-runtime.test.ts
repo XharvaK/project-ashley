@@ -717,4 +717,266 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
     expect(m2Count).toBe(0);
     expect(m1Count).toBe(0);
   });
+
+  it("Exact production witness (easy turn): capability-offer admission runs Thought, executes M2 with no pre-existing license, continuation grounds the answer", async () => {
+    const dbPath = join(tmpDir, `ashley-core-${randomUUID()}.db`);
+    const db = openNuclearDb(new DatabaseSync(dbPath));
+    activateProjectInspection(db);
+
+    const callLog: string[] = [];
+    const emittedAudits: v2LicenseAudit.SandboxV2LicenseAuditRecord[] = [];
+
+    vi.spyOn(v2LicenseAudit, "emitSandboxV2LicenseAudit").mockImplementation(
+      (license, observationOrSink) => {
+        const obs = typeof observationOrSink === "function" ? null : observationOrSink ?? null;
+        const record = v2LicenseAudit.formatSandboxV2LicenseAudit(license, obs);
+        if (record) emittedAudits.push(record);
+      },
+    );
+
+    vi.spyOn(mistral, "completeChat").mockImplementation(async (messages: any[]) => {
+      const systemContent = messages.find((m) => m.role === "system")?.content ?? "";
+      const userContent = messages.find((m) => m.role === "user")?.content ?? "";
+
+      if (systemContent.includes("Ashley's Thought layer, not her Expression layer")) {
+        callLog.push("thought_pass1");
+        // The inspection offer must be visible to Thought.
+        expect(systemContent).toContain("Approved project IDs: project-ashley");
+        const parsedUser = JSON.parse(userContent);
+        // No pre-existing OperationalClaimLicense: the model may still propose
+        // inspection and execution must proceed — license-after-execution only.
+        expect(parsedUser.base?.operationalLicense ?? null).toBeNull();
+        const candidates = Array.isArray(parsedUser.candidates) ? parsedUser.candidates : [];
+        const motivationId = candidates.length > 0 ? candidates[0].id : 1;
+        return {
+          text: JSON.stringify({
+            kind: "speak",
+            effort: "medium",
+            completion: "complete",
+            objective: "read package.json for the version",
+            reason: "the question asks for a repository fact that needs evidence",
+            motivationIds: [motivationId],
+            shouldSpeak: true,
+            uncertainty: 0.1,
+            urgency: 0.4,
+            inspectionRequest: {
+              operation: "project.read_file",
+              projectId: "project-ashley",
+              path: "package.json",
+            },
+          }),
+          model: "mistral-large",
+          modelAlias: "thought",
+          resolvedModelId: "mistral-large",
+        };
+      }
+
+      if (systemContent.includes("Ashley's Thought layer continuing deliberation")) {
+        callLog.push("thought_pass2");
+        const parsedUser = JSON.parse(userContent);
+        expect(parsedUser.observation.contentUtf8).toContain("0.2.0");
+        expect(parsedUser.executionError).toBeNull();
+        return {
+          text: JSON.stringify({
+            kind: "speak",
+            effort: "medium",
+            completion: "complete",
+            objective: "answer with the version from package.json",
+            reason: "observation from project-ashley package.json",
+            inspectionCognitiveResult: "package.json declares version 0.2.0",
+            shouldSpeak: true,
+            uncertainty: 0.05,
+            urgency: 0.4,
+          }),
+          model: "mistral-large",
+          modelAlias: "thought",
+          resolvedModelId: "mistral-large",
+        };
+      }
+
+      callLog.push("expression");
+      return {
+        text: "i opened `package.json` in project-ashley: the version is `0.2.0`.",
+        model: "mistral-large",
+        modelAlias: "expression",
+        resolvedModelId: "mistral-large",
+      };
+    });
+
+    vi.spyOn(SandboxV2Dispatcher.prototype, "dispatch").mockResolvedValue({
+      outcome: "succeeded",
+      operation: "project.read_file",
+      executedAtMs: 1000,
+      result: {
+        kind: "project.read_file",
+        path: "package.json",
+        contentBase64: Buffer.from(
+          JSON.stringify({ name: "project-ashley", version: "0.2.0" }),
+        ).toString("base64"),
+        bytes: 44,
+        sha256: "hash44",
+        truncated: false,
+      },
+    });
+
+    const core = new AshleyCore(db);
+
+    const result = await core.handleReactiveChat({
+      message:
+        "Can you inspect your Project Ashley repository and tell me what version is in package.json?",
+      ownerId: "doc",
+      channel: "discord",
+    });
+
+    expect(callLog).toEqual(["thought_pass1", "thought_pass2", "expression"]);
+    expect(result.text).toContain("0.2.0");
+    expect(result.decisionKind).toBe("speak");
+
+    expect(emittedAudits.length).toBe(1);
+    const audit = emittedAudits[0]!;
+    expect(audit.state).toBe("succeeded");
+    expect(audit.verified).toBe(true);
+    expect(audit.profile).toBe("project_investigation");
+    expect(audit.inspection?.targetPath).toBe("package.json");
+
+    const logged = db
+      .prepare(
+        `SELECT decision_kind, thought_source FROM decision_log WHERE owner_id = ? ORDER BY id DESC LIMIT 1`,
+      )
+      .get("doc") as any;
+    expect(logged.decision_kind).toBe("speak");
+    expect(logged.thought_source).toBe("model");
+  });
+
+  it("Exact production witness without inspection offer (release observe): deterministic easy turn — Thought never runs, M2=0, M1=0", async () => {
+    const dbPath = join(tmpDir, `ashley-core-${randomUUID()}.db`);
+    const db = openNuclearDb(new DatabaseSync(dbPath));
+    const relId = currentReleaseId();
+    const now = new Date().toISOString();
+    for (const cap of capabilityNames) {
+      if (cap === "project_inspection") continue;
+      db.prepare(
+        `INSERT OR REPLACE INTO capability_releases (capability, release_id, state, updated_at, contract_id, build_identity, model_epoch)
+         VALUES (?, ?, 'active', ?, ?, ?, 0)`,
+      ).run(cap, relId, now, currentContractId(), currentBuildIdentity());
+    }
+
+    const callLog: string[] = [];
+    const emittedAudits: v2LicenseAudit.SandboxV2LicenseAuditRecord[] = [];
+
+    vi.spyOn(v2LicenseAudit, "emitSandboxV2LicenseAudit").mockImplementation(
+      (license, observationOrSink) => {
+        const obs = typeof observationOrSink === "function" ? null : observationOrSink ?? null;
+        const record = v2LicenseAudit.formatSandboxV2LicenseAudit(license, obs);
+        if (record) emittedAudits.push(record);
+      },
+    );
+
+    vi.spyOn(mistral, "completeChat").mockImplementation(async (messages: any[]) => {
+      const systemContent = messages.find((m) => m.role === "system")?.content ?? "";
+      if (systemContent.includes("Ashley's Thought layer, not her Expression layer")) {
+        callLog.push("thought_pass1");
+        throw new Error("Thought must not run on an easy turn without an inspection offer");
+      }
+      callLog.push("expression");
+      return {
+        text: "i can't verify that without checking the repository.",
+        model: "mistral-large",
+        modelAlias: "expression",
+        resolvedModelId: "mistral-large",
+      };
+    });
+
+    const core = new AshleyCore(db);
+
+    const result = await core.handleReactiveChat({
+      message:
+        "Can you inspect your Project Ashley repository and tell me what version is in package.json?",
+      ownerId: "doc",
+      channel: "discord",
+    });
+
+    expect(callLog).toEqual(["expression"]);
+    expect(result.decisionKind).toBe("speak");
+
+    const m2Count = emittedAudits.filter((a) => a.profile === "project_investigation").length;
+    const m1Count = emittedAudits.filter((a) => a.profile === "sandbox_workspace_file_roundtrip").length;
+    expect(m2Count).toBe(0);
+    expect(m1Count).toBe(0);
+
+    const logged = db
+      .prepare(
+        `SELECT thought_source FROM decision_log WHERE owner_id = ? ORDER BY id DESC LIMIT 1`,
+      )
+      .get("doc") as any;
+    expect(logged.thought_source).toBe("deterministic");
+  });
+
+  it("Exact witness with inspection offered but Thought declines: no M2, no license, no denial — plain response", async () => {
+    const dbPath = join(tmpDir, `ashley-core-${randomUUID()}.db`);
+    const db = openNuclearDb(new DatabaseSync(dbPath));
+    activateProjectInspection(db);
+
+    const callLog: string[] = [];
+    const emittedAudits: v2LicenseAudit.SandboxV2LicenseAuditRecord[] = [];
+
+    vi.spyOn(v2LicenseAudit, "emitSandboxV2LicenseAudit").mockImplementation(
+      (license, observationOrSink) => {
+        const obs = typeof observationOrSink === "function" ? null : observationOrSink ?? null;
+        const record = v2LicenseAudit.formatSandboxV2LicenseAudit(license, obs);
+        if (record) emittedAudits.push(record);
+      },
+    );
+
+    vi.spyOn(mistral, "completeChat").mockImplementation(async (messages: any[]) => {
+      const systemContent = messages.find((m) => m.role === "system")?.content ?? "";
+      const userContent = messages.find((m) => m.role === "user")?.content ?? "";
+
+      if (systemContent.includes("Ashley's Thought layer, not her Expression layer")) {
+        callLog.push("thought_pass1");
+        const parsedUser = JSON.parse(userContent);
+        const candidates = Array.isArray(parsedUser.candidates) ? parsedUser.candidates : [];
+        const motivationId = candidates.length > 0 ? candidates[0].id : 1;
+        return {
+          text: JSON.stringify({
+            kind: "speak",
+            effort: "low",
+            completion: "complete",
+            objective: "answer without repository evidence",
+            reason: "answer from memory without inspecting",
+            motivationIds: [motivationId],
+            shouldSpeak: true,
+            uncertainty: 0.3,
+            urgency: 0.2,
+          }),
+          model: "mistral-large",
+          modelAlias: "thought",
+          resolvedModelId: "mistral-large",
+        };
+      }
+
+      callLog.push("expression");
+      return {
+        text: "i don't have the version memorized right now.",
+        model: "mistral-large",
+        modelAlias: "expression",
+        resolvedModelId: "mistral-large",
+      };
+    });
+
+    const core = new AshleyCore(db);
+
+    const result = await core.handleReactiveChat({
+      message:
+        "Can you inspect your Project Ashley repository and tell me what version is in package.json?",
+      ownerId: "doc",
+      channel: "discord",
+    });
+
+    expect(callLog).toEqual(["thought_pass1", "expression"]);
+    expect(result.text).toContain("version memorized");
+
+    const m2Count = emittedAudits.filter((a) => a.profile === "project_investigation").length;
+    expect(m2Count).toBe(0);
+  });
 });

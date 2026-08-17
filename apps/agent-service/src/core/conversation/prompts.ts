@@ -32,7 +32,7 @@ export function loadNuclearSystemPrompt(channel: NuclearPromptChannel): string {
   const context = [
     "## Thin runtime rules",
     "English only. Do not invent memories, sources, actions, or activity.",
-    "Only claim reading when the Activity license note says so.",
+    "Only claim reading activity when the Reading claim license note says so; that note licenses claims, not capability execution.",
     "Identity is an expression, not a script. Use it when it fits the live turn.",
   ];
 
