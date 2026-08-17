@@ -65,6 +65,11 @@ function stripUnlicensedActivity(
     options.operationalLicense?.error === "sandbox_unavailable";
   const unavailabilityAllowed = !hasOperationalContext || isSandboxUnavailable;
 
+  const isInspectionSuccess =
+    options.operationalLicense?.profile === "project_investigation" &&
+    opState === "verified_success";
+  const readingPermitted = options.readingLicensed || isInspectionSuccess;
+
   return text
     .split(/(?<=[.!?])\s+|\r?\n+/)
     .map((part) => part.trim())
@@ -72,7 +77,7 @@ function stripUnlicensedActivity(
       if (!part.length) return false;
       const probe = stripQuotedHypotheticals(part);
       if (claimsOwnGeneralActivity(probe)) return false;
-      if (!options.readingLicensed && claimsOwnReadingActivity(probe)) return false;
+      if (!readingPermitted && claimsOwnReadingActivity(probe)) return false;
       if (!options.visionLicensed && claimsOwnVisionActivity(probe)) return false;
       if (!options.conversationalReadLicensed && claimsOwnConversationalReadActivity(probe)) return false;
       if (!runningAllowed && claimsOwnExecutionRunning(probe)) return false;
@@ -129,6 +134,11 @@ export function finalizeHonesty(
     input.operationalLicense?.error === "sandbox_unavailable";
   const unavailabilityAllowed = !hasOperationalContext || isSandboxUnavailable;
 
+  const isInspectionSuccess =
+    input.operationalLicense?.profile === "project_investigation" &&
+    opState === "verified_success";
+  const readingPermitted = input.readingLicensed || isInspectionSuccess;
+
   const unlicensedExecution =
     (!runningAllowed && claimsOwnExecutionRunning(probe)) ||
     (!admittedAllowed && claimsOwnExecutionAdmitted(probe)) ||
@@ -138,7 +148,7 @@ export function finalizeHonesty(
 
   const unlicensedActivity =
     claimsOwnGeneralActivity(probe) ||
-    (!input.readingLicensed && claimsOwnReadingActivity(probe)) ||
+    (!readingPermitted && claimsOwnReadingActivity(probe)) ||
     (!input.visionLicensed && claimsOwnVisionActivity(probe)) ||
     (!input.conversationalReadLicensed &&
       claimsOwnConversationalReadActivity(probe)) ||

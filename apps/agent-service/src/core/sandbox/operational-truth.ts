@@ -122,6 +122,37 @@ export function deriveOperationalTruth(
     }
   }
 
+  if (license.profile === "project_investigation") {
+    switch (license.state) {
+      case "succeeded":
+        return {
+          state: "verified_success",
+          locked: false,
+          profile: license.profile,
+          taskId: license.taskId,
+        };
+
+      case "failed":
+        return {
+          state: "failed",
+          locked: false,
+          profile: license.profile,
+          taskId: license.taskId,
+          error: license.error ?? null,
+        };
+
+      case "none":
+      default:
+        return {
+          state: "none",
+          locked: false,
+          profile: license.profile,
+          taskId: license.taskId,
+          error: license.error ?? null,
+        };
+    }
+  }
+
   return {
     state: "none",
     locked: false,

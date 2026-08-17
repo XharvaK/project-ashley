@@ -1,4 +1,58 @@
 import type { OperationalClaimLicense } from "./sandbox/engineering-types.js";
+import type {
+  SandboxV2InspectionEntry,
+  SandboxV2SearchMatch,
+} from "@composer-assistant/sandbox-v2";
+
+export type CognitionInspectionRequest =
+  | { operation: "project.read_file"; projectId: string; path: string }
+  | { operation: "project.list_directory"; projectId: string; path: string }
+  | {
+      operation: "project.search_text";
+      projectId: string;
+      path?: string;
+      pattern: string;
+      maxMatches?: number;
+    };
+
+export type ProjectReadFileObservation = {
+  projectId: string;
+  operation: "project.read_file";
+  path: string;
+  verified: boolean;
+  truncated: false;
+  executedAtMs: number;
+  contentUtf8: string;
+  bytes: number;
+  sha256: string;
+};
+
+export type ProjectListDirectoryObservation = {
+  projectId: string;
+  operation: "project.list_directory";
+  path: string;
+  verified: boolean;
+  truncated: boolean;
+  executedAtMs: number;
+  entries: SandboxV2InspectionEntry[];
+};
+
+export type ProjectSearchTextObservation = {
+  projectId: string;
+  operation: "project.search_text";
+  path: string;
+  pattern: string;
+  verified: boolean;
+  truncated: boolean;
+  executedAtMs: number;
+  matches: SandboxV2SearchMatch[];
+  filesScanned: number;
+};
+
+export type ProjectInspectionObservation =
+  | ProjectReadFileObservation
+  | ProjectListDirectoryObservation
+  | ProjectSearchTextObservation;
 
 export type DecisionKind =
   | "speak"
@@ -172,6 +226,9 @@ export type Decision = {
   perceptionLicenses?: PerceptionLicenses;
   ownTimeReport?: OwnTimeReportMarker;
   operationalLicense?: OperationalClaimLicense;
+  inspectionRequest?: CognitionInspectionRequest | null;
+  inspectionObservation?: ProjectInspectionObservation | null;
+  inspectionCognitiveResult?: string | null;
   holdReasonCode?: HoldReasonCode | null;
   silenceReasonCode?: SilenceReasonCode | null;
 };

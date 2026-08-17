@@ -4,7 +4,7 @@ import { NUCLEAR_DB_PATH } from "../paths.js";
 import { decide, attachAuthorizedClaims } from "./agency/decide.js";
 import { buildOwnTimeReportConstraint } from "./agency/own-time-report.js";
 import { collectMotivations, mindStateItemToMotivation } from "./agency/motivations.js";
-import { deliberateDecision } from "./agency/thought.js";
+import { deliberateDecision, deliberateThoughtContinuation } from "./agency/thought.js";
 import {
   motivationCurrentlyEligible,
   selectMotivationCandidates,
@@ -190,7 +190,10 @@ import {
   executeReactiveSandboxTask,
   reactiveSandboxRunResultToOperationalLicense,
 } from "./sandbox/reactive-execution.js";
-import { executeReactiveSandboxTaskV2 } from "./sandbox/v2-execution.js";
+import {
+  executeReactiveSandboxTaskV2,
+  executeProjectInspectionV2,
+} from "./sandbox/v2-execution.js";
 import {
   isVerifiedRoundtripEffectEvidence,
   type RoundtripEffectEvidence,
@@ -787,6 +790,34 @@ export class AshleyCore {
             ownerId: input.ownerId,
           },
         );
+
+        if (decision.inspectionRequest) {
+          const inspResult = await executeProjectInspectionV2({
+            request: decision.inspectionRequest,
+            messageEntityUuid: messageEntityUuid ?? undefined,
+            deadlineAtMs: thoughtDeadlineAtMs ?? undefined,
+            db: this.db,
+          });
+          decision.operationalLicense = inspResult.license;
+          decision.inspectionObservation = inspResult.observation;
+          decision = await deliberateThoughtContinuation(
+            this.db,
+            decision,
+            inspResult.observation,
+            inspResult.license.error ?? null,
+            motivations,
+            "reactive",
+            undefined,
+            undefined,
+            {
+              allowModelThought: thoughtCanInfluence,
+              firstBubbleDeadlineAtMs,
+              thoughtDeadlineAtMs,
+              deliveryReservationId: reservation.id,
+              ownerId: input.ownerId,
+            },
+          );
+        }
       }
       if (capabilityCanInfluence(this.db, "affect")) {
         decision = attachAffectLicense(
@@ -831,25 +862,96 @@ export class AshleyCore {
         decision,
       });
       decision.perceptionLicenses = perception.licenses;
+      // Reactive sandbox execution (M2 / M1 arbitration)
+      if (decision.inspectionRequest) {
+        // M2 inspection was requested and executed by Thought; skip M1 reactive admission (Constraint 3)
+      } else {
+        const reactiveAdmission = evaluateReactiveSandboxAdmission({
+          db: this.db,
+          ownerId: input.ownerId,
+          message,
+          messageEntityUuid: messageEntityUuid ?? "",
+        });
 
-      // Reactive sandbox execution (First Reactive Slice)
-      const reactiveAdmission = evaluateReactiveSandboxAdmission({
-        db: this.db,
-        ownerId: input.ownerId,
-        message,
-        messageEntityUuid: messageEntityUuid ?? "",
-      });
-
-      if (reactiveAdmission.admitted) {
-        if (reactiveAdmission.shouldDispatch && env.sandboxEngineeringLifecycleEnabled) {
-          decision.operationalLicense = await executeReactiveSandboxTaskV2({
-            messageEntityUuid: messageEntityUuid ?? undefined,
-            deadlineAtMs: thoughtDeadline,
-          });
-        } else if (reactiveAdmission.replayed) {
-          // Replayed admission: observe existing correlated task state, do NOT execute again
+        if (reactiveAdmission.admitted) {
+          if (reactiveAdmission.shouldDispatch && env.sandboxEngineeringLifecycleEnabled) {
+            decision.operationalLicense = await executeReactiveSandboxTaskV2({
+              messageEntityUuid: messageEntityUuid ?? undefined,
+              deadlineAtMs: thoughtDeadline,
+            });
+          } else if (reactiveAdmission.replayed) {
+            // Replayed admission: observe existing correlated task state, do NOT execute again
+            const correlated = findCorrelatedEngineeringTask(this.db, input.ownerId, {
+              messageEntityUuid: messageEntityUuid ?? undefined,
+            });
+            if (correlated) {
+              if (correlated.status === "completed" && isVerifiedRoundtripEffectEvidence(correlated.effectEvidence)) {
+                decision.operationalLicense = {
+                  state: "succeeded",
+                  taskId: correlated.taskId,
+                  profile: correlated.profile,
+                  effectEvidence: correlated.effectEvidence,
+                  sourceMessageEntityUuid: messageEntityUuid ?? undefined,
+                };
+              } else if (correlated.status === "completed") {
+                decision.operationalLicense = {
+                  state: "none",
+                  taskId: correlated.taskId,
+                  profile: correlated.profile,
+                  error: "missing_effect_evidence",
+                  sourceMessageEntityUuid: messageEntityUuid ?? undefined,
+                };
+              } else if (correlated.status === "running") {
+                decision.operationalLicense = {
+                  state: "running",
+                  taskId: correlated.taskId,
+                  profile: correlated.profile,
+                  sourceMessageEntityUuid: messageEntityUuid ?? undefined,
+                };
+              } else if (correlated.status === "failed" || correlated.status === "aborted") {
+                decision.operationalLicense = {
+                  state: "failed",
+                  taskId: correlated.taskId,
+                  profile: correlated.profile,
+                  error: correlated.error ?? undefined,
+                  sourceMessageEntityUuid: messageEntityUuid ?? undefined,
+                };
+              } else {
+                decision.operationalLicense = {
+                  state: "admitted",
+                  taskId: correlated.taskId,
+                  profile: correlated.profile,
+                  sourceMessageEntityUuid: messageEntityUuid ?? undefined,
+                };
+              }
+            } else {
+              decision.operationalLicense = {
+                state: "admitted",
+                taskId: reactiveAdmission.admissionId,
+                profile: reactiveAdmission.profile,
+                sourceMessageEntityUuid: messageEntityUuid ?? undefined,
+              };
+            }
+          } else {
+            decision.operationalLicense = {
+              state: "admitted",
+              taskId: reactiveAdmission.admissionId,
+              profile: reactiveAdmission.profile,
+              sourceMessageEntityUuid: messageEntityUuid ?? undefined,
+            };
+          }
+        } else if (detectReactiveSandboxRoundtripRequest(message)) {
+          decision.operationalLicense = {
+            state: "none",
+            refusalReason: reactiveAdmission.reason,
+            sourceMessageEntityUuid: messageEntityUuid ?? undefined,
+          };
+        } else {
           const correlated = findCorrelatedEngineeringTask(this.db, input.ownerId, {
             messageEntityUuid: messageEntityUuid ?? undefined,
+            threadId: reservation.threadId,
+            userMessageId,
+            userMessage: message,
           });
           if (correlated) {
             if (correlated.status === "completed" && isVerifiedRoundtripEffectEvidence(correlated.effectEvidence)) {
@@ -892,76 +994,8 @@ export class AshleyCore {
               };
             }
           } else {
-            decision.operationalLicense = {
-              state: "admitted",
-              taskId: reactiveAdmission.admissionId,
-              profile: reactiveAdmission.profile,
-              sourceMessageEntityUuid: messageEntityUuid ?? undefined,
-            };
+            decision.operationalLicense = { state: "none" };
           }
-        } else {
-          decision.operationalLicense = {
-            state: "admitted",
-            taskId: reactiveAdmission.admissionId,
-            profile: reactiveAdmission.profile,
-            sourceMessageEntityUuid: messageEntityUuid ?? undefined,
-          };
-        }
-      } else if (detectReactiveSandboxRoundtripRequest(message)) {
-        decision.operationalLicense = {
-          state: "none",
-          refusalReason: reactiveAdmission.reason,
-          sourceMessageEntityUuid: messageEntityUuid ?? undefined,
-        };
-      } else {
-        const correlated = findCorrelatedEngineeringTask(this.db, input.ownerId, {
-          messageEntityUuid: messageEntityUuid ?? undefined,
-          threadId: reservation.threadId,
-          userMessageId,
-          userMessage: message,
-        });
-        if (correlated) {
-          if (correlated.status === "completed" && isVerifiedRoundtripEffectEvidence(correlated.effectEvidence)) {
-            decision.operationalLicense = {
-              state: "succeeded",
-              taskId: correlated.taskId,
-              profile: correlated.profile,
-              effectEvidence: correlated.effectEvidence,
-              sourceMessageEntityUuid: messageEntityUuid ?? undefined,
-            };
-          } else if (correlated.status === "completed") {
-            decision.operationalLicense = {
-              state: "none",
-              taskId: correlated.taskId,
-              profile: correlated.profile,
-              error: "missing_effect_evidence",
-              sourceMessageEntityUuid: messageEntityUuid ?? undefined,
-            };
-          } else if (correlated.status === "running") {
-            decision.operationalLicense = {
-              state: "running",
-              taskId: correlated.taskId,
-              profile: correlated.profile,
-              sourceMessageEntityUuid: messageEntityUuid ?? undefined,
-            };
-          } else if (correlated.status === "failed" || correlated.status === "aborted") {
-            decision.operationalLicense = {
-              state: "failed",
-              taskId: correlated.taskId,
-              profile: correlated.profile,
-              error: correlated.error ?? undefined,
-              sourceMessageEntityUuid: messageEntityUuid ?? undefined,
-            };
-          } else {
-            decision.operationalLicense = {
-              state: "admitted",
-              taskId: correlated.taskId,
-              profile: correlated.profile,
-              sourceMessageEntityUuid: messageEntityUuid ?? undefined,
-            };
-          }
-        } else {
-          decision.operationalLicense = { state: "none" };
         }
       }
 
@@ -1487,6 +1521,25 @@ export class AshleyCore {
           undefined,
           { allowModelThought: true },
         );
+        if (decision.inspectionRequest) {
+          const inspResult = await executeProjectInspectionV2({
+            request: decision.inspectionRequest,
+            db: this.db,
+          });
+          decision.operationalLicense = inspResult.license;
+          decision.inspectionObservation = inspResult.observation;
+          decision = await deliberateThoughtContinuation(
+            this.db,
+            decision,
+            inspResult.observation,
+            inspResult.license.error ?? null,
+            motivations,
+            "proactive",
+            undefined,
+            undefined,
+            { allowModelThought: true },
+          );
+        }
       }
       if (capabilityCanInfluence(this.db, "affect")) {
         decision = attachAffectLicense(

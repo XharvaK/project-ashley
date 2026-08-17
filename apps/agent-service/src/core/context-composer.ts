@@ -22,7 +22,11 @@ import {
   type OperationalClaimLicense,
 } from "./sandbox/engineering-types.js";
 import { deriveOperationalTruth } from "./sandbox/operational-truth.js";
-import type { Decision, EvidenceRef } from "./types.js";
+import type {
+  Decision,
+  EvidenceRef,
+  ProjectInspectionObservation,
+} from "./types.js";
 import { capabilityCanInfluence } from "./rollout/capabilities.js";
 
 /** Product: composed turn context Expression consumes. */
@@ -120,6 +124,7 @@ function structuredDecisionPrompt(decision: Decision): string {
       completion: decision.cognitiveAllocation.completion,
       objective: decision.objective ?? null,
       reason: decision.reason,
+      inspectionCognitiveResult: decision.inspectionCognitiveResult ?? null,
       uncertainty: decision.uncertainty,
       urgency: decision.urgency,
     }),
@@ -129,7 +134,10 @@ function structuredDecisionPrompt(decision: Decision): string {
 export function operationalWorkBlock(
   db: DatabaseSync,
   ownerId: string,
-  options?: { operationalLicense?: OperationalClaimLicense | null },
+  options?: {
+    operationalLicense?: OperationalClaimLicense | null;
+    inspectionObservation?: ProjectInspectionObservation | null;
+  },
 ): string {
   const license = options?.operationalLicense;
   if (!license) return "";
@@ -166,6 +174,60 @@ export function operationalWorkBlock(
       }
     }
 
+    return [
+      "## Operational work state (cognitive attention only)",
+      ...lines,
+    ].join("\n");
+  }
+
+  // Handle project_investigation (M2 project inspection operational metadata)
+  if (license.profile === "project_investigation") {
+    const lines = [
+      `Status: ${truth.state === "verified_success" ? "succeeded" : truth.state !== "none" ? truth.state : license.state}`,
+      `Profile: ${license.profile}`,
+      license.taskId ? `Task ID: ${license.taskId}` : "",
+      license.error ? `Error: ${license.error}` : "",
+      license.refusalReason ? `Refusal: ${license.refusalReason}` : "",
+    ].filter(Boolean);
+
+    const obs = options?.inspectionObservation;
+    if (truth.state === "verified_success" && obs) {
+      lines.push(
+        `Project ID: ${obs.projectId}`,
+        `Operation: ${obs.operation}`,
+        `Path: ${obs.path}`,
+      );
+      if (obs.operation === "project.search_text") {
+        lines.push(`Pattern: ${obs.pattern}`);
+      }
+      if (obs.operation === "project.read_file") {
+        lines.push(
+          `Inspection evidence: verified read (${obs.bytes} bytes, SHA256: ${obs.sha256.substring(0, 12)}...).`,
+        );
+      } else if (obs.operation === "project.list_directory") {
+        lines.push(
+          `Inspection evidence: verified directory listing (${obs.entries.length} entries).`,
+        );
+      } else if (obs.operation === "project.search_text") {
+        lines.push(
+          `Inspection evidence: verified search (${obs.matches.length} matches across ${obs.filesScanned} files).`,
+        );
+      }
+      if (obs.truncated) {
+        lines.push(
+          "Truncated: true (output was truncated at kernel bounds; zero matches or partial listings are not proof of absence across the entire project).",
+        );
+      }
+      lines.push(
+        "Current operational truth: verified_success (authoritative current-turn result; overrides generic capability self-model).",
+      );
+    } else if (license.state === "failed") {
+      lines.push(
+        `Inspection status: failed (${license.error ?? "unknown"}). No successful observation licensed.`,
+      );
+    }
+
+    if (lines.length === 0) return "";
     return [
       "## Operational work state (cognitive attention only)",
       ...lines,
@@ -239,6 +301,7 @@ export function composeTurnContext(
   const mindState = mindStateBlock(db, ownerId);
   const operational = operationalWorkBlock(db, ownerId, {
     operationalLicense: decision?.operationalLicense,
+    inspectionObservation: decision?.inspectionObservation,
   });
   // Questions only when Thought selected question evidence or none selected yet
   // would dump — skip global question dump; selected questions arrive via evidence.

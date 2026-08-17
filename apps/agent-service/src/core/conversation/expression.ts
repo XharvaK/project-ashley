@@ -217,7 +217,7 @@ export async function expressSpeak(
     model: response.model,
     readingLicensed,
   };
-  emitSandboxV2LicenseAudit(decision.operationalLicense);
+  emitSandboxV2LicenseAudit(decision.operationalLicense, decision.inspectionObservation);
   const finalized = finalizeHonesty({
     text: wording.text,
     readingLicensed: wording.readingLicensed,

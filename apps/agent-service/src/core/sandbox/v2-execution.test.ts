@@ -1,184 +1,526 @@
-import { existsSync, readdirSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { describe, expect, it } from "vitest";
-import type { SandboxM1Result } from "@composer-assistant/sandbox-m1";
+import { describe, it, expect } from "vitest";
 import {
+  executeProjectInspectionV2,
   executeReactiveSandboxTaskV2,
-  isSandboxV2Available,
 } from "./v2-execution.js";
-import { isVerifiedRoundtripEffectEvidence } from "./engineering-types.js";
+import {
+  loadOperatorProjectReadRegistry,
+  listApprovedReadProjectIds,
+  canOfferProjectInspection,
+  V2ProjectReadRegistry,
+} from "./project-registry.js";
+import {
+  formatSandboxV2LicenseAudit,
+  type SandboxV2LicenseAuditRecord,
+} from "./v2-license-audit.js";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { openNuclearDb } from "../db.js";
+import {
+  currentReleaseId,
+  currentContractId,
+  currentBuildIdentity,
+  capabilityNames,
+} from "../rollout/capabilities.js";
+import type {
+  SandboxV2Request,
+  SandboxV2Result,
+} from "@composer-assistant/sandbox-v2";
 
-const SECRET_ENV_KEY = "ASHLEY_SANDBOX_M1_SECRET_SENTINEL";
-
-const completeSuccessResult: SandboxM1Result = {
-  version: 1,
-  kind: "file.roundtrip",
-  ok: true,
-  checks: {
-    roundtrip: true,
-    deleted: true,
-    absent: true,
-    homeAbsent: true,
-    runAbsent: true,
-    hostSentinelAbsent: true,
-    envClean: true,
-    loopbackIsolated: true,
-    externalIsolated: true,
-    fdClean: true,
-  },
-};
-
-describe("Sandbox V2 P1 execution adapter (executeReactiveSandboxTaskV2)", () => {
-  it("1. maps complete M1 success to succeeded license with verified effect evidence", async () => {
-    const license = await executeReactiveSandboxTaskV2({
-      content: "custom-test-witness",
-      messageEntityUuid: "msg-uuid-123",
-      executor: async (req, hostEvidence) => {
-        expect(req.version).toBe(1);
-        expect(req.kind).toBe("file.roundtrip");
-        expect(req.content).toBe("custom-test-witness");
-        expect(req.probePort).toBeGreaterThan(0);
-        expect(existsSync(req.sentinelPath)).toBe(true);
-        expect(hostEvidence.loopbackPositiveControlSucceeded).toBe(true);
-        expect(hostEvidence.hostLoopbackSandboxHits()).toBe(0);
-        return completeSuccessResult;
-      },
+describe("Sandbox V2 Execution Adapter & Operator Registry", () => {
+  describe("Operator Project Registry & Offer Gating", () => {
+    it("fails closed when unconfigured or non-existent", () => {
+      const registry = loadOperatorProjectReadRegistry("/non/existent/path.json");
+      expect(registry.list()).toHaveLength(0);
+      const res = registry.resolveReadRoot("project-ashley");
+      expect(res.ok).toBe(false);
+      if (!res.ok) {
+        expect(res.error).toBe("unknown_project");
+      }
     });
 
-    expect(license.state).toBe("succeeded");
-    expect(license.sourceMessageEntityUuid).toBe("msg-uuid-123");
-    expect(license.profile).toBe("sandbox_workspace_file_roundtrip");
-    expect(license.taskId).toMatch(/^v2-m1-\d+$/);
-    expect(license.effectEvidence).toBeDefined();
-    expect(isVerifiedRoundtripEffectEvidence(license.effectEvidence)).toBe(true);
-    expect(license.effectEvidence?.bytesWritten).toBe(Buffer.byteLength("custom-test-witness", "utf8"));
-    expect(license.effectEvidence?.readMatches).toBe(true);
-    expect(license.effectEvidence?.deleted).toBe(true);
-    expect(license.effectEvidence?.verifiedAbsent).toBe(true);
-  });
+    it("loads valid registry and returns only safe string IDs in listApprovedReadProjectIds", () => {
+      const tmp = mkdtempSync(join(tmpdir(), "v2-reg-test-"));
+      const configPath = join(tmp, "registry.json");
+      writeFileSync(
+        configPath,
+        JSON.stringify([
+          {
+            projectId: "project-ashley",
+            canonicalRoot: "/home/xarvak/project-ashley",
+            displayName: "Ashley",
+            enabled: true,
+            readAllowed: true,
+            candidateWorkspaceAllowed: false,
+            engineeringAllowed: false,
+          },
+          {
+            projectId: "disabled-project",
+            canonicalRoot: "/home/xarvak/disabled-project",
+            displayName: "Disabled",
+            enabled: false,
+            readAllowed: true,
+            candidateWorkspaceAllowed: false,
+            engineeringAllowed: false,
+          },
+          {
+            projectId: "no-read-project",
+            canonicalRoot: "/home/xarvak/no-read-project",
+            displayName: "No Read",
+            enabled: true,
+            readAllowed: false,
+            candidateWorkspaceAllowed: false,
+            engineeringAllowed: false,
+          },
+        ]),
+      );
 
-  it("2. maps M1 failure code to failed license without effect evidence", async () => {
-    const license = await executeReactiveSandboxTaskV2({
-      messageEntityUuid: "msg-uuid-456",
-      executor: async () => ({
-        version: 1,
-        kind: "file.roundtrip",
-        ok: false,
-        code: "timeout",
-      }),
+      try {
+        const registry = loadOperatorProjectReadRegistry(configPath);
+        expect(registry.list()).toHaveLength(3);
+
+        const approved = listApprovedReadProjectIds(registry);
+        expect(approved).toEqual(["project-ashley"]);
+        // Ensure no host paths leaked
+        expect(approved.some((id) => id.includes("/") || id.includes("\\"))).toBe(false);
+      } finally {
+        rmSync(tmp, { recursive: true, force: true });
+      }
     });
 
-    expect(license.state).toBe("failed");
-    expect(license.sourceMessageEntityUuid).toBe("msg-uuid-456");
-    expect(license.error).toBe("timeout");
-    expect(license.effectEvidence).toBeUndefined();
-  });
+    it("evaluates canOfferProjectInspection across capability, lifecycle, substrate, and registry", () => {
+      const path = join(tmpdir(), `ashley-offer-gate-${Date.now()}.db`);
+      const db = openNuclearDb(new DatabaseSync(path));
+      const registry = new V2ProjectReadRegistry([
+        {
+          projectId: "project-ashley",
+          canonicalRoot: "/home/xarvak/project-ashley",
+          displayName: "Ashley",
+          enabled: true,
+          readAllowed: true,
+          candidateWorkspaceAllowed: false,
+          engineeringAllowed: false,
+        },
+      ]);
 
-  it("3. fails closed when M1 returns ok:true with missing check keys", async () => {
-    const malformedResult = {
-      version: 1,
-      kind: "file.roundtrip",
-      ok: true,
-      checks: {
-        roundtrip: true,
-        deleted: true,
-        // missing absent, homeAbsent, fdClean, etc.
-      },
-    } as unknown as SandboxM1Result;
+      try {
+        // Default capability state is 'observe' -> cannot offer
+        expect(
+          canOfferProjectInspection(db, {
+            registry,
+            lifecycleEnabled: true,
+            substrateAvailable: true,
+          }),
+        ).toBe(false);
 
-    const license = await executeReactiveSandboxTaskV2({
-      executor: async () => malformedResult,
+        // Activate project_inspection and dependencies
+        const relId = currentReleaseId();
+        const now = new Date().toISOString();
+        for (const cap of capabilityNames) {
+          db.prepare(
+            `INSERT OR REPLACE INTO capability_releases (capability, release_id, state, updated_at, contract_id, build_identity, model_epoch)
+             VALUES (?, ?, 'active', ?, ?, ?, 0)`,
+          ).run(cap, relId, now, currentContractId(), currentBuildIdentity());
+        }
+
+        // With capability active, lifecycle true, substrate true, registry non-empty -> returns true
+        expect(
+          canOfferProjectInspection(db, {
+            registry,
+            lifecycleEnabled: true,
+            substrateAvailable: true,
+            masterMode: "apply",
+          }),
+        ).toBe(true);
+
+        // Lifecycle disabled -> false
+        expect(
+          canOfferProjectInspection(db, {
+            registry,
+            lifecycleEnabled: false,
+            substrateAvailable: true,
+          }),
+        ).toBe(false);
+
+        // Substrate unavailable -> false
+        expect(
+          canOfferProjectInspection(db, {
+            registry,
+            lifecycleEnabled: true,
+            substrateAvailable: false,
+          }),
+        ).toBe(false);
+
+        // Empty registry -> false
+        expect(
+          canOfferProjectInspection(db, {
+            registry: new V2ProjectReadRegistry([]),
+            lifecycleEnabled: true,
+            substrateAvailable: true,
+          }),
+        ).toBe(false);
+      } finally {
+        db.close();
+        try {
+          rmSync(path, { force: true });
+        } catch {}
+      }
     });
-
-    expect(license.state).toBe("failed");
-    expect(license.error).toBe("invalid_result");
-    expect(license.effectEvidence).toBeUndefined();
   });
 
-  it("4. fails closed when executor throws an unexpected exception", async () => {
-    const license = await executeReactiveSandboxTaskV2({
-      executor: async () => {
-        throw new Error("unexpected spawn crash");
-      },
-    });
-
-    expect(license.state).toBe("failed");
-    expect(license.error).toBe("internal_error");
-    expect(license.effectEvidence).toBeUndefined();
-  });
-
-  it("5. cleans up all host listener/sentinel resources on success", async () => {
-    const initialSentinels = readdirSync(tmpdir()).filter((e) => e.startsWith("ashley-v2-sentinel-"));
-    const secretBefore = process.env[SECRET_ENV_KEY];
-
-    await executeReactiveSandboxTaskV2({
-      executor: async () => completeSuccessResult,
-    });
-
-    const finalSentinels = readdirSync(tmpdir()).filter((e) => e.startsWith("ashley-v2-sentinel-"));
-    expect(finalSentinels).toEqual(initialSentinels);
-    expect(process.env[SECRET_ENV_KEY]).toBe(secretBefore);
-  });
-
-  it("6. cleans up all host listener/sentinel resources on failure or throw", async () => {
-    const initialSentinels = readdirSync(tmpdir()).filter((e) => e.startsWith("ashley-v2-sentinel-"));
-    const secretBefore = process.env[SECRET_ENV_KEY];
-
-    await executeReactiveSandboxTaskV2({
-      executor: async () => {
-        throw new Error("simulated failure");
-      },
-    });
-
-    const finalSentinels = readdirSync(tmpdir()).filter((e) => e.startsWith("ashley-v2-sentinel-"));
-    expect(finalSentinels).toEqual(initialSentinels);
-    expect(process.env[SECRET_ENV_KEY]).toBe(secretBefore);
-  });
-
-  it("7. fails closed gracefully with state='none' when sandbox is unavailable on host", async () => {
-    // If not running on Linux or without bwrap, default executor returns state="none"
-    if (!isSandboxV2Available()) {
-      const license = await executeReactiveSandboxTaskV2({
-        messageEntityUuid: "msg-uuid-none",
+  describe("executeProjectInspectionV2", () => {
+    it("fails immediately when deadlineAtMs is already exceeded", async () => {
+      const res = await executeProjectInspectionV2({
+        request: {
+          operation: "project.read_file",
+          projectId: "project-ashley",
+          path: "src/index.ts",
+        },
+        deadlineAtMs: Date.now() - 50,
       });
-      expect(license.state).toBe("none");
-      expect(license.error).toBe("sandbox_unavailable");
-      expect(license.sourceMessageEntityUuid).toBe("msg-uuid-none");
-    }
-  });
 
-  it("8. preserves sourceMessageEntityUuid when provided on error outcomes", async () => {
-    const failedLicense = await executeReactiveSandboxTaskV2({
-      messageEntityUuid: "msg-err-uuid",
-      executor: async () => ({
-        version: 1,
-        kind: "file.roundtrip",
-        ok: false,
-        code: "spawn-error",
-      }),
-    });
-    expect(failedLicense.state).toBe("failed");
-    expect(failedLicense.sourceMessageEntityUuid).toBe("msg-err-uuid");
-    expect(failedLicense.error).toBe("spawn-error");
-  });
-
-  it("9. executes purely in-process with zero broker socket or V1 coordinator interaction", async () => {
-    let brokerCalled = false;
-    const fakeBrokerClient = {
-      kind: "unix_socket" as const,
-      dispatch: () => {
-        brokerCalled = true;
-        throw new Error("V1 broker must not be called!");
-      },
-    };
-
-    const license = await executeReactiveSandboxTaskV2({
-      messageEntityUuid: "test-isolation",
-      executor: async () => completeSuccessResult,
+      expect(res.license.state).toBe("failed");
+      expect(res.license.error).toBe("deadline_exceeded");
+      expect(res.license.profile).toBe("project_investigation");
+      expect(res.observation).toBeNull();
     });
 
-    expect(brokerCalled).toBe(false);
-    expect(license.state).toBe("succeeded");
-    expect(license.effectEvidence?.verified).toBe(true);
+    it("fails closed with project_inspection_gate_denied when capability is in observe mode", async () => {
+      const path = join(tmpdir(), `ashley-cap-gate-${Date.now()}.db`);
+      const db = openNuclearDb(new DatabaseSync(path));
+
+      try {
+        const res = await executeProjectInspectionV2({
+          request: {
+            operation: "project.read_file",
+            projectId: "project-ashley",
+            path: "src/index.ts",
+          },
+          db,
+        });
+
+        expect(res.license.state).toBe("none");
+        expect(res.license.error).toBe("project_inspection_gate_denied");
+        expect(res.observation).toBeNull();
+      } finally {
+        db.close();
+        try {
+          rmSync(path, { force: true });
+        } catch {}
+      }
+    });
+
+    it("returns state=none, error=sandbox_lifecycle_disabled when lifecycle is disabled", async () => {
+      const res = await executeProjectInspectionV2({
+        request: {
+          operation: "project.read_file",
+          projectId: "project-ashley",
+          path: "src/index.ts",
+        },
+        envOverrides: {
+          sandboxEngineeringLifecycleEnabled: false,
+        },
+      });
+
+      expect(res.license.state).toBe("none");
+      expect(res.license.error).toBe("sandbox_lifecycle_disabled");
+      expect(res.observation).toBeNull();
+    });
+
+    it("returns state=none, error=sandbox_unavailable when substrate is unavailable", async () => {
+      const registry = new V2ProjectReadRegistry([
+        {
+          projectId: "project-ashley",
+          canonicalRoot: "/home/xarvak/project-ashley",
+          displayName: "Ashley",
+          enabled: true,
+          readAllowed: true,
+          candidateWorkspaceAllowed: false,
+          engineeringAllowed: false,
+        },
+      ]);
+
+      const res = await executeProjectInspectionV2({
+        request: {
+          operation: "project.read_file",
+          projectId: "project-ashley",
+          path: "src/index.ts",
+        },
+        registry,
+        envOverrides: {
+          sandboxAvailable: () => false,
+          sandboxEngineeringLifecycleEnabled: true,
+        },
+      });
+
+      expect(res.license.state).toBe("none");
+      expect(res.license.profile).toBe("project_investigation");
+      expect(res.license.error).toBe("sandbox_unavailable");
+      expect(res.observation).toBeNull();
+    });
+
+    it("returns state=failed, error=invalid_result on malformed kernel read_file result", async () => {
+      const mockResult: any = {
+        outcome: "succeeded",
+        operation: "project.read_file",
+        executedAtMs: 123456789,
+        result: {
+          kind: "project.read_file",
+          // missing contentBase64 and bytes
+        },
+      };
+
+      const res = await executeProjectInspectionV2({
+        request: {
+          operation: "project.read_file",
+          projectId: "project-ashley",
+          path: "src/index.ts",
+        },
+        dispatcher: {
+          dispatch: async () => mockResult,
+        } as any,
+        envOverrides: {
+          sandboxEngineeringLifecycleEnabled: true,
+        },
+      });
+
+      expect(res.license.state).toBe("failed");
+      expect(res.license.error).toBe("invalid_result");
+      expect(res.observation).toBeNull();
+    });
+
+    it("executes project.read_file successfully via custom dispatcher/spawn seam", async () => {
+      const mockResult: SandboxV2Result = {
+        outcome: "succeeded",
+        operation: "project.read_file",
+        executedAtMs: 123456789,
+        result: {
+          kind: "project.read_file",
+          path: "src/index.ts",
+          contentBase64: Buffer.from("console.log('hello world');").toString("base64"),
+          bytes: 27,
+          sha256: "abc123hash",
+          truncated: false,
+        },
+      };
+
+      const res = await executeProjectInspectionV2({
+        request: {
+          operation: "project.read_file",
+          projectId: "project-ashley",
+          path: "src/index.ts",
+        },
+        dispatcher: {
+          dispatch: async (req: SandboxV2Request) => mockResult,
+        } as any,
+        envOverrides: {
+          sandboxEngineeringLifecycleEnabled: true,
+        },
+      });
+
+      expect(res.license.state).toBe("succeeded");
+      expect(res.license.profile).toBe("project_investigation");
+      expect(res.license.error).toBeUndefined();
+      expect(res.observation).toEqual({
+        projectId: "project-ashley",
+        operation: "project.read_file",
+        path: "src/index.ts",
+        verified: true,
+        truncated: false,
+        executedAtMs: 123456789,
+        contentUtf8: "console.log('hello world');",
+        bytes: 27,
+        sha256: "abc123hash",
+      });
+    });
+
+    it("executes project.list_directory successfully with truncation flag preserved", async () => {
+      const mockResult: SandboxV2Result = {
+        outcome: "succeeded",
+        operation: "project.list_directory",
+        executedAtMs: 123456789,
+        result: {
+          kind: "project.list_directory",
+          path: "src",
+          entries: [
+            { name: "index.ts", kind: "file", size: 100 },
+            { name: "utils", kind: "dir", size: 0 },
+          ],
+          truncated: true,
+        },
+      };
+
+      const res = await executeProjectInspectionV2({
+        request: {
+          operation: "project.list_directory",
+          projectId: "project-ashley",
+          path: "src",
+        },
+        dispatcher: {
+          dispatch: async () => mockResult,
+        } as any,
+        envOverrides: {
+          sandboxEngineeringLifecycleEnabled: true,
+        },
+      });
+
+      expect(res.license.state).toBe("succeeded");
+      expect(res.observation).toEqual({
+        projectId: "project-ashley",
+        operation: "project.list_directory",
+        path: "src",
+        verified: true,
+        truncated: true,
+        executedAtMs: 123456789,
+        entries: [
+          { name: "index.ts", kind: "file", size: 100 },
+          { name: "utils", kind: "dir", size: 0 },
+        ],
+      });
+    });
+
+    it("executes project.search_text successfully with zero matches and truncation", async () => {
+      const mockResult: SandboxV2Result = {
+        outcome: "succeeded",
+        operation: "project.search_text",
+        executedAtMs: 123456789,
+        result: {
+          kind: "project.search_text",
+          path: ".",
+          matches: [],
+          filesScanned: 50,
+          truncated: true,
+        },
+      };
+
+      const res = await executeProjectInspectionV2({
+        request: {
+          operation: "project.search_text",
+          projectId: "project-ashley",
+          pattern: "nonexistent_pattern",
+        },
+        dispatcher: {
+          dispatch: async () => mockResult,
+        } as any,
+        envOverrides: {
+          sandboxEngineeringLifecycleEnabled: true,
+        },
+      });
+
+      expect(res.license.state).toBe("succeeded");
+      expect(res.observation).toEqual({
+        projectId: "project-ashley",
+        operation: "project.search_text",
+        path: ".",
+        pattern: "nonexistent_pattern",
+        verified: true,
+        truncated: true,
+        executedAtMs: 123456789,
+        matches: [],
+        filesScanned: 50,
+      });
+    });
+
+    it("handles typed failure outcome cleanly", async () => {
+      const mockResult: SandboxV2Result = {
+        outcome: "failed",
+        operation: "project.read_file",
+        executedAtMs: 123456789,
+        error: "not_found",
+      };
+
+      const res = await executeProjectInspectionV2({
+        request: {
+          operation: "project.read_file",
+          projectId: "project-ashley",
+          path: "missing.ts",
+        },
+        dispatcher: {
+          dispatch: async () => mockResult,
+        } as any,
+        envOverrides: {
+          sandboxEngineeringLifecycleEnabled: true,
+        },
+      });
+
+      expect(res.license.state).toBe("failed");
+      expect(res.license.error).toBe("not_found");
+      expect(res.observation).toBeNull();
+    });
+  });
+
+  describe("v2-license-audit for project_investigation", () => {
+    it("formats project_investigation audit record with metadata only and zero code content", () => {
+      const audit = formatSandboxV2LicenseAudit(
+        {
+          state: "succeeded",
+          profile: "project_investigation",
+          taskId: "v2-insp-12345",
+          sourceMessageEntityUuid: "msg-uuid-1",
+        },
+        {
+          projectId: "project-ashley",
+          operation: "project.read_file",
+          path: "apps/agent-service/src/index.ts",
+          verified: true,
+          truncated: false,
+          executedAtMs: 12345,
+          contentUtf8: "TOP_SECRET_CODE();",
+          bytes: 18,
+          sha256: "sha256-abc",
+        },
+      );
+
+      expect(audit).not.toBeNull();
+      expect(audit?.discriminator).toBe("ASHLEY_SANDBOX_V2_LICENSE");
+      expect(audit?.profile).toBe("project_investigation");
+      expect(audit?.verified).toBe(true);
+      expect(audit?.inspection).toEqual({
+        operation: "project.read_file",
+        projectId: "project-ashley",
+        targetPath: "apps/agent-service/src/index.ts",
+        targetPattern: undefined,
+        truncated: false,
+        bytes: 18,
+        filesScanned: undefined,
+        matchCount: undefined,
+        entryCount: undefined,
+      });
+
+      const serialized = JSON.stringify(audit);
+      expect(serialized).not.toContain("TOP_SECRET_CODE");
+    });
+  });
+
+  describe("M1 Preservation", () => {
+    it("preserves M1 file.roundtrip execution path", async () => {
+      const mockM1Executor = async () => ({
+        version: 1 as const,
+        kind: "file.roundtrip" as const,
+        ok: true as const,
+        checks: {
+          roundtrip: true,
+          deleted: true,
+          absent: true,
+          homeAbsent: true,
+          runAbsent: true,
+          hostSentinelAbsent: true,
+          envClean: true,
+          loopbackIsolated: true,
+          externalIsolated: true,
+          fdClean: true,
+        },
+      });
+
+      const license = await executeReactiveSandboxTaskV2({
+        executor: mockM1Executor,
+      });
+
+      expect(license.state).toBe("succeeded");
+      expect(license.profile).toBe("sandbox_workspace_file_roundtrip");
+      expect(license.effectEvidence).toBeDefined();
+    });
   });
 });

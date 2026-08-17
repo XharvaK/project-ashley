@@ -4,10 +4,12 @@ import { describeSandboxAvailability } from "../sandbox/availability.js";
 import { isSandboxV2Available } from "../sandbox/v2-execution.js";
 import { contractMismatch } from "../attention/ledger.js";
 import {
+  capabilityCanInfluence,
   currentContractId,
   currentReleaseId,
 } from "../rollout/capabilities.js";
 import type { CognitionMode } from "../types.js";
+import { listApprovedReadProjectIds } from "../sandbox/project-registry.js";
 
 export type PerceptionCapabilityName =
   | "vision"
@@ -114,31 +116,62 @@ function describeCapability(snapshot: PerceptionCapabilitySnapshot): string {
 }
 
 export function describeSandboxV2Availability(options?: {
+  db?: DatabaseSync;
+  masterMode?: CognitionMode;
   lifecycleEnabled?: boolean;
   substrateAvailable?: boolean;
+  approvedProjects?: string[];
+  inspectionCanInfluence?: boolean;
 }): string {
   const lifecycleEnabled =
     options?.lifecycleEnabled ?? env.sandboxEngineeringLifecycleEnabled;
   const substrateAvailable =
     options?.substrateAvailable ?? isSandboxV2Available();
+  const approvedProjects =
+    options?.approvedProjects ?? listApprovedReadProjectIds();
+
+  const canInfluence =
+    options?.inspectionCanInfluence !== undefined
+      ? options.inspectionCanInfluence
+      : options?.db
+        ? (() => {
+            try {
+              return capabilityCanInfluence(options.db, "project_inspection", options.masterMode);
+            } catch {
+              return false;
+            }
+          })()
+        : false;
+
   if (lifecycleEnabled && substrateAvailable) {
-    return "Sandbox V2 (file.roundtrip): available (bounded reactive workspace roundtrip enabled).";
+    if (approvedProjects.length > 0) {
+      if (canInfluence) {
+        return `Sandbox V2: available (bounded read-only inspection of approved projects: ${approvedProjects.join(", ")}; workspace file roundtrip enabled).`;
+      }
+      return `Sandbox V2: inspection capability not active in rollout (observe-only / non-influencing; cannot inspect repository; workspace file roundtrip enabled).`;
+    }
+    return "Sandbox V2: substrate available (file.roundtrip enabled; no approved read-only projects configured).";
   }
   if (!lifecycleEnabled) {
-    return "Sandbox V2 (file.roundtrip): disabled (ASHLEY_SANDBOX_ENGINEERING_LIFECYCLE_ENABLED is not true).";
+    return "Sandbox V2: disabled (ASHLEY_SANDBOX_ENGINEERING_LIFECYCLE_ENABLED is not true).";
   }
-  return "Sandbox V2 (file.roundtrip): substrate unavailable (Linux bubblewrap required).";
+  return "Sandbox V2: substrate unavailable (Linux bubblewrap required).";
 }
 
-export function composeSelfCapabilityContext(db: DatabaseSync): string {
-  const snapshots = listPerceptionCapabilitySnapshots(db);
+export function composeSelfCapabilityContext(
+  db: DatabaseSync,
+  options?: {
+    masterMode?: CognitionMode;
+  },
+): string {
+  const snapshots = listPerceptionCapabilitySnapshots(db, options?.masterMode);
   const lines = [
     "Perception capabilities (honest self-model):",
     ...snapshots.map((snapshot) => `- ${describeCapability(snapshot)}`),
     "- Attachment fetch requires sufficient thought deadline and capability release.",
     "- Conversational page reads require explicit user URL-read intent plus authorization.",
     "- Web search has no configured provider in this deployment.",
-    `- ${describeSandboxV2Availability()}`,
+    `- ${describeSandboxV2Availability({ db, masterMode: options?.masterMode })}`,
     `- ${describeSandboxAvailability()}`,
   ];
   return lines.join("\n");

@@ -31,6 +31,8 @@
 
     "@composer-assistant/sandbox-policy": "file:../sandbox-policy",
 
+    "@composer-assistant/sandbox-v2": "file:../sandbox-v2",
+
     "@mistralai/mistralai": "^1.7.0",
 
     "cors": "^2.8.5",
