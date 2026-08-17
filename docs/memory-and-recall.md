@@ -54,4 +54,9 @@ sidecar lineage mismatch; do not replace live databases from this document.
 
 ## Architecture
 
+Accepted memory evidence semantics (canonical evidence vs memory assertions vs
+retrieval projections, provenance, forgetting) are governed by
+[Ashley Memory Evidence Architecture](architecture/Ashley_Memory_Evidence_Architecture.md);
+this document describes the current implementation.
+
 See [Architecture_Index.md](Architecture_Index.md). Legacy `index.db` is archival (audit logger may still append session rows there; nuclear does not read it for chat).

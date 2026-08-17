@@ -2,7 +2,7 @@
 
 **Status:** Canonical document-status inventory
 
-**Canonicalized:** 2026-08-13
+**Canonicalized:** 2026-08-17
 
 This index answers which documents govern current architecture, which support
 it, and which preserve historical research. It does not replace the documents
@@ -42,7 +42,7 @@ upgrade one into another.
 | Ashley Glossary | [`docs/Ashley_Glossary.md`](../Ashley_Glossary.md) | Normative project vocabulary | Current | `AUTHORITATIVE` | Use for established semantic terms. The roadmap adds phase terms without redefining glossary entries. |
 | Ashley Design Patterns | [`docs/Ashley_Design_Patterns.md`](../Ashley_Design_Patterns.md) | Architecture ownership and review patterns | Current | `SUPPORTING` | Applies governing semantics to recurring design choices. |
 | Canonical Architecture Roadmap | [`docs/architecture/Ashley_Architecture_Roadmap.md`](Ashley_Architecture_Roadmap.md) | Current implementation boundary, current work, frozen roadmap, OSS disposition, anti-drift | 2026-08-13 | `AUTHORITATIVE` | Canonical source for current architectural direction beneath governance. |
-| Architecture Document Index | [`docs/architecture/Ashley_Architecture_Document_Index.md`](Ashley_Architecture_Document_Index.md) | Document authority and history | 2026-08-13 | `AUTHORITATIVE` | Canonical source for document status and relevance. |
+| Architecture Document Index | [`docs/architecture/Ashley_Architecture_Document_Index.md`](Ashley_Architecture_Document_Index.md) | Document authority and history | 2026-08-17 | `AUTHORITATIVE` | Canonical source for document status and relevance. |
 | Ashley Architecture Index | [`docs/Architecture_Index.md`](../Architecture_Index.md) | Runtime modules, ownership, endpoints, and current design links | Current | `SUPPORTING` | Implementation-oriented map. It is not the roadmap. |
 | Architecture Review Protocol | [`docs/Architecture_Review_Protocol.md`](../Architecture_Review_Protocol.md) | Architecture review discipline | Current | `SUPPORTING` | Applies governance and ownership rules during review. |
 | Wave Acceptance Protocol | [`docs/Wave_Acceptance_Protocol.md`](../Wave_Acceptance_Protocol.md) | Design, implementation, qualification, release, deployment, promotion states | Current | `AUTHORITATIVE` | Governs acceptance claims and evidence separation. |
@@ -62,6 +62,7 @@ upgrade one into another.
 | Ashley Evaluation Inventory | [`docs/architecture/evaluation/Ashley_Evaluation_Inventory.md`](evaluation/Ashley_Evaluation_Inventory.md) | Current evaluation mechanisms and gaps | 2026-08-13 | `SUPPORTING` | Source-grounded inventory. Existing checks do not automatically qualify a replacement model or fallback role. |
 | Evaluation First Spike | [`docs/architecture/evaluation/Evaluation_First_Spike.md`](evaluation/Evaluation_First_Spike.md) | Future `MODEL_PROFILE` evidence and qualification slice | 2026-08-13 | `SUPPORTING` | Implementation waits for MODEL-FABRIC-01 gates C-F. It creates no second profile registry or promotion path. |
 | Memory and Recall | [`docs/memory-and-recall.md`](../memory-and-recall.md) | Nuclear Recall, provenance, forgetting, and continuity | Current nuclear era | `SUPPORTING` | Use with current source and schema migrations. `nuclear.db` and `continuity.db` remain authoritative for their domains. |
+| Ashley Memory Evidence Architecture | [`docs/architecture/Ashley_Memory_Evidence_Architecture.md`](Ashley_Memory_Evidence_Architecture.md) | Persistent memory evidence: canonical evidence vs memory assertions vs retrieval projections; provenance; temporal / revision / forgetting semantics | 2026-08-17 | `AUTHORITATIVE` | Governs persistent memory evidence, assertions, retrieval projections, provenance, and temporal / revision / forgetting semantics within its domain. Implementation remains roadmap-gated. |
 | Proactive messages | [`docs/proactive-initiative.md`](../proactive-initiative.md) | Initiative scheduling, Agency decision, reserve/send/commit | Current nuclear era | `SUPPORTING` | Explains implemented proactive flow. Timer mechanics never become Agency. |
 | Grounded Curiosity Reader | [`docs/curiosity-reader.md`](../curiosity-reader.md) | Bounded public reading and evidence | Current nuclear era | `SUPPORTING` | Reading is untrusted evidence and never sends directly. |
 | Sandbox Design | [`docs/Sandbox_Design.md`](../Sandbox_Design.md) | OS-boundary threat model, broker, authority, IPC, isolation | Wave 07 onward | `AUTHORITATIVE` | Governing Sandbox design beneath higher governance. Current autonomy completion still follows the canonical roadmap. |
@@ -99,6 +100,7 @@ upgrade one into another.
 | Research Gaps and Contradictions | [`docs/architecture/salvage/Research_Gaps_and_Contradictions.md`](salvage/Research_Gaps_and_Contradictions.md) | Candidate conflicts and research gaps | 2026-08-09 | `HISTORICAL` | Preserves why Mastra, AgentFS, OpenHands, and Letta roles were narrowed. Some gaps were later resolved by P-01/P-02. |
 | Semantica Salvage Audit v1 | [`docs/architecture/salvage/Semantica_Salvage_Audit_v1.md`](salvage/Semantica_Salvage_Audit_v1.md) | Semantic-framework source audit | 2026-08-09 | `REFERENCE` | Supports no-wholesale-adoption and a possible read-only PROV-O export adapter. Semantica is not Ashley authority. |
 | Autonomous Work Semantics Salvage | [`docs/architecture/research/Autonomous_Work_Semantics_Salvage.md`](research/Autonomous_Work_Semantics_Salvage.md) | Autonomous-work semantic distinctions and candidate reconciliation | 2026-08-13 | `REFERENCE` | Records architectural pressure and future direction without freezing candidate names, selecting a substrate, or authorizing implementation. |
+| MemPalace Architecture Salvage Map | [`docs/architecture/research/MemPalace_Salvage_Map.md`](research/MemPalace_Salvage_Map.md) | Adjudicated MemPalace research and salvage decisions | 2026-08-17 | `SUPPORTING` | Adjudicated research provenance beneath the Ashley-native memory evidence architecture. Its decisions are frozen; none authorize implementation. It does not normatively outrank the architecture document. |
 
 ## 5. P-01 and P-02 evidence
 
