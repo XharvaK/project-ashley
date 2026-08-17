@@ -579,34 +579,35 @@ export async function deliberateThoughtContinuation(
   }
 
   let response: ThoughtModelResult;
+  const continuationMessages: Parameters<typeof completeChat>[0] = [
+    {
+      role: "system",
+      content: [
+        "You are Ashley's Thought layer continuing deliberation after receiving repository inspection execution results.",
+        "Interpret the structured observation or execution error truthfully to produce your final Decision.",
+        "Return strict JSON only: {kind,delayClass,shouldSpeak,effort,completion,uncertainty,urgency,objective,reason,motivationIds,inspectionCognitiveResult?}.",
+        "kind is speak|silence|delay|ask|revisit|share|challenge|refuse; effort is low|medium|high; completion is complete|hold.",
+        "Do NOT emit another inspectionRequest. Exactly one inspection round per turn.",
+        "If the sandbox failed or is unavailable, reason about the failure truthfully without inferring absence of files or zero matches.",
+        "objective and reason must reflect your cognitive interpretation of the evidence.",
+        "inspectionCognitiveResult is an optional concise factual summary of what was learned from the inspection to guide Expression without raw code dumps.",
+      ].join(" "),
+    },
+    {
+      role: "user",
+      content: JSON.stringify({
+        trigger,
+        intermediateObjective: intermediateDecision.objective,
+        intermediateReason: intermediateDecision.reason,
+        inspectionRequest: intermediateDecision.inspectionRequest,
+        observation: observation ?? null,
+        executionError: executionError ?? null,
+      }),
+    },
+  ];
   try {
     response = await complete(
-      [
-        {
-          role: "system",
-          content: [
-            "You are Ashley's Thought layer continuing deliberation after receiving repository inspection execution results.",
-            "Interpret the structured observation or execution error truthfully to produce your final Decision.",
-            "Return strict JSON only: {kind,delayClass,shouldSpeak,effort,completion,uncertainty,urgency,objective,reason,motivationIds,inspectionCognitiveResult?}.",
-            "kind is speak|silence|delay|ask|revisit|share|challenge|refuse; effort is low|medium|high; completion is complete|hold.",
-            "Do NOT emit another inspectionRequest. Exactly one inspection round per turn.",
-            "If the sandbox failed or is unavailable, reason about the failure truthfully without inferring absence of files or zero matches.",
-            "objective and reason must reflect your cognitive interpretation of the evidence.",
-            "inspectionCognitiveResult is an optional concise factual summary of what was learned from the inspection to guide Expression without raw code dumps.",
-          ].join(" "),
-        },
-        {
-          role: "user",
-          content: JSON.stringify({
-            trigger,
-            intermediateObjective: intermediateDecision.objective,
-            intermediateReason: intermediateDecision.reason,
-            inspectionRequest: intermediateDecision.inspectionRequest,
-            observation: observation ?? null,
-            executionError: executionError ?? null,
-          }),
-        },
-      ],
+      continuationMessages,
       {
         maxTokens: 1000,
         temperature: 0.15,
@@ -622,12 +623,42 @@ export async function deliberateThoughtContinuation(
       },
     );
   } catch (error) {
-    return {
-      ...intermediateDecision,
-      inspectionObservation: observation,
-      thoughtSource: "fallback",
-      thoughtError: sanitizedErrorCode(error),
-    };
+    const errorCode = sanitizedErrorCode(error);
+    // One bounded retry: transient lane failures must not silently discard
+    // the evidence interpretation; the deadline is re-checked before retrying.
+    if (thoughtDeadline != null && Date.now() >= thoughtDeadline) {
+      return {
+        ...intermediateDecision,
+        inspectionObservation: observation,
+        thoughtSource: "fallback",
+        thoughtError: errorCode,
+      };
+    }
+    try {
+      response = await complete(
+        continuationMessages,
+        {
+          maxTokens: 1000,
+          temperature: 0.15,
+          reasoningEffort: "medium",
+          lane: (options.lane as any) ?? "interactive",
+          purpose: (options.purpose as any) ?? "thought",
+          route: "thought",
+          deadlineAtMs: thoughtDeadline,
+          decisionId: options.decisionId,
+          deliveryReservationId: options.deliveryReservationId,
+          ownerId: options.ownerId,
+          attentionDb: options.attentionDb,
+        },
+      );
+    } catch (error2) {
+      return {
+        ...intermediateDecision,
+        inspectionObservation: observation,
+        thoughtSource: "fallback",
+        thoughtError: sanitizedErrorCode(error2),
+      };
+    }
   }
 
   if (thoughtDeadline != null && Date.now() >= thoughtDeadline) {

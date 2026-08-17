@@ -114,7 +114,10 @@ export function minimalExpressionContext(
     projectInspectionEvidenceBlock(
       decision?.operationalLicense,
       decision?.inspectionObservation,
-      { capabilityAvailable: canOfferProjectInspection(db) },
+      {
+        capabilityAvailable: canOfferProjectInspection(db),
+        interpretationAvailable: Boolean(decision?.inspectionCognitiveResult),
+      },
     ),
     `## Honesty & rendering (minimal profile)\n${MINIMAL_RENDERING_CONSTRAINTS}`,
   ].filter(Boolean);

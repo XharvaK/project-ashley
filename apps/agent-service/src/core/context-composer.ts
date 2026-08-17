@@ -295,9 +295,10 @@ export function operationalWorkBlock(
 export function projectInspectionEvidenceBlock(
   license: OperationalClaimLicense | null | undefined,
   observation: ProjectInspectionObservation | null | undefined,
-  options: { capabilityAvailable?: boolean } = {},
+  options: { capabilityAvailable?: boolean; interpretationAvailable?: boolean } = {},
 ): string {
   const capabilityAvailable = options.capabilityAvailable === true;
+  const interpretationAvailable = options.interpretationAvailable === true;
   const availableLine = `capabilityAvailable = ${capabilityAvailable}`;
   const semanticsAvailable = [
     "Semantics: capabilityAvailable is the authoritative current capability state; inspectionStatus is what Ashley actually did or observed this turn.",
@@ -305,12 +306,22 @@ export function projectInspectionEvidenceBlock(
   if (license?.profile === "project_investigation") {
     const truth = deriveOperationalTruth(license);
     if (truth.state === "verified_success" && observation) {
+      const interpretationLines = interpretationAvailable
+        ? [
+            "interpretationStatus = interpreted",
+            "Semantics: Thought interpreted the verified evidence this turn; the interpretation is authoritative current-turn content.",
+          ]
+        : [
+            "interpretationStatus = not_interpreted",
+            "Semantics: this turn's verified read was not interpreted by Thought. Do not invent the inspected content; say the verified read succeeded but you could not interpret its contents.",
+          ];
       return [
         "Project inspection evidence:",
         availableLine,
         "inspectionStatus = verified_success",
         "verifiedRepositoryEvidence = true",
         ...semanticsAvailable,
+        ...interpretationLines,
         "Semantics: Ashley inspected an approved project this turn and holds verified evidence.",
       ].join("\n");
     }
@@ -367,7 +378,10 @@ export function composeTurnContext(
   const inspectionEvidence = projectInspectionEvidenceBlock(
     decision?.operationalLicense,
     decision?.inspectionObservation,
-    { capabilityAvailable: canOfferProjectInspection(db) },
+    {
+      capabilityAvailable: canOfferProjectInspection(db),
+      interpretationAvailable: Boolean(decision?.inspectionCognitiveResult),
+    },
   );
   // Questions only when Thought selected question evidence or none selected yet
   // would dump — skip global question dump; selected questions arrive via evidence.
