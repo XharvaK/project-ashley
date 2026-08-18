@@ -16,6 +16,8 @@ import { executeProjectInspection, type ProjectInspectionExecutorOptions } from
   "./project-inspection/executor.js";
 import { handleFileRoundtripV2, type M1RoundtripExecutorOptions } from
   "./adapters/m1-roundtrip.js";
+import { executeWorkspaceExperiment, type WorkspaceExperimentSpawn } from
+  "./workspace/executor.js";
 import { v2CapabilitySpec, V2_DEFERRED_OPERATIONS, SANDBOX_V2_OPERATION_NAMES, isSandboxV2Request } from
   "./v2-types.js";
 import type { V2ProjectReadRegistry } from "./registry.js";
@@ -29,6 +31,11 @@ export type SandboxV2Environment = {
   sandboxAvailable?: () => boolean;
   /** Overrides the inspection spawner (tests inject a scripted runner). */
   spawnInspection?: ProjectInspectionExecutorOptions["spawnRunner"];
+  /** Overrides the workspace experiment spawner. */
+  spawnWorkspace?: WorkspaceExperimentSpawn;
+  /** Workspace manager override. */
+  workspaceManager?: import("./workspace/workspace-manager.js").WorkspaceManager;
+  managedWorkspaceRoot?: string;
   /** Overrides the sanitized view builder (tests map POSIX roots on any host). */
   viewBuilder?: ProjectInspectionExecutorOptions["viewBuilder"];
   /** Overrides the roundtrip executor (tests inject a fake M1). */
@@ -91,6 +98,27 @@ export class SandboxV2Dispatcher {
       return handleFileRoundtripV2(request, {
         executor: this.env.roundtripExecutor,
         available: this.env.sandboxAvailable,
+      });
+    }
+    if (
+      request.operation === "workspace.read_file" ||
+      request.operation === "workspace.list_directory" ||
+      request.operation === "workspace.search_text" ||
+      request.operation === "workspace.write_file" ||
+      request.operation === "workspace.replace_file" ||
+      request.operation === "workspace.edit_text" ||
+      request.operation === "workspace.delete_file" ||
+      request.operation === "workspace.create_directory"
+    ) {
+      const { registry, protectedRoots } = this.env;
+      return executeWorkspaceExperiment(request, {
+        registry,
+        protectedRoots,
+        available: this.env.sandboxAvailable,
+        spawnRunner: this.env.spawnWorkspace ?? this.env.spawnInspection,
+        workspaceManager: this.env.workspaceManager,
+        managedWorkspaceRoot: this.env.managedWorkspaceRoot,
+        timeoutMs: this.env.timeoutMs,
       });
     }
     return fail(request.operation, "unknown_operation");

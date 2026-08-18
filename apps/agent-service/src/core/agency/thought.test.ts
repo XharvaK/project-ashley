@@ -4,7 +4,7 @@ import { env } from "../../env.js";
 import { openNuclearDb } from "../db.js";
 import { seedIdentity } from "../identity/store.js";
 import { decide } from "./decide.js";
-import { deliberateDecision } from "./thought.js";
+import { deliberateDecision, parseWorkspaceRequest, parseInspectionRequest } from "./thought.js";
 import type { Motivation } from "../types.js";
 
 const originalMode = env.cognitionMode;
@@ -160,5 +160,224 @@ describe("Thought fallback", () => {
       { type: "identity", id: boundary.id },
     ]);
     db.close();
+  });
+});
+
+describe("Stage 1 — Canonical Operational Request Ontology", () => {
+  it("parses all 8 M3 workspace operations with strict schemas", () => {
+    // 1. read_file
+    expect(
+      parseWorkspaceRequest({
+        operation: "workspace.read_file",
+        projectId: "project-ashley",
+        workspaceId: "w1",
+        path: "src/a.ts",
+      }),
+    ).toEqual({
+      version: 2,
+      operation: "workspace.read_file",
+      projectId: "project-ashley",
+      workspaceId: "w1",
+      path: "src/a.ts",
+    });
+
+    // 2. list_directory
+    expect(
+      parseWorkspaceRequest({
+        operation: "workspace.list_directory",
+        projectId: "project-ashley",
+        workspaceId: "w1",
+        path: "src",
+      }),
+    ).toEqual({
+      version: 2,
+      operation: "workspace.list_directory",
+      projectId: "project-ashley",
+      workspaceId: "w1",
+      path: "src",
+    });
+
+    // 3. search_text with optional path
+    expect(
+      parseWorkspaceRequest({
+        operation: "workspace.search_text",
+        projectId: "project-ashley",
+        workspaceId: "w1",
+        pattern: "foo",
+      }),
+    ).toEqual({
+      version: 2,
+      operation: "workspace.search_text",
+      projectId: "project-ashley",
+      workspaceId: "w1",
+      path: ".",
+      pattern: "foo",
+      maxMatches: undefined,
+    });
+
+    expect(
+      parseWorkspaceRequest({
+        operation: "workspace.search_text",
+        projectId: "project-ashley",
+        workspaceId: "w1",
+        path: "src",
+        pattern: "foo",
+        maxMatches: 50,
+      }),
+    ).toEqual({
+      version: 2,
+      operation: "workspace.search_text",
+      projectId: "project-ashley",
+      workspaceId: "w1",
+      path: "src",
+      pattern: "foo",
+      maxMatches: 50,
+    });
+
+    // 4. write_file (create-only: mustNotExist must be true)
+    expect(
+      parseWorkspaceRequest({
+        operation: "workspace.write_file",
+        projectId: "project-ashley",
+        workspaceId: "w1",
+        path: "m3-witness.txt",
+        content: "m3-witness-ok",
+      }),
+    ).toEqual({
+      version: 2,
+      operation: "workspace.write_file",
+      projectId: "project-ashley",
+      workspaceId: "w1",
+      path: "m3-witness.txt",
+      content: "m3-witness-ok",
+      mustNotExist: true,
+    });
+
+    // 5. replace_file (requires expectedSha256)
+    expect(
+      parseWorkspaceRequest({
+        operation: "workspace.replace_file",
+        projectId: "project-ashley",
+        workspaceId: "w1",
+        path: "m3-witness.txt",
+        content: "updated",
+        expectedSha256: "a".repeat(64),
+      }),
+    ).toEqual({
+      version: 2,
+      operation: "workspace.replace_file",
+      projectId: "project-ashley",
+      workspaceId: "w1",
+      path: "m3-witness.txt",
+      content: "updated",
+      expectedSha256: "a".repeat(64),
+    });
+    // Missing expectedSha256 fails closed
+    expect(
+      parseWorkspaceRequest({
+        operation: "workspace.replace_file",
+        projectId: "project-ashley",
+        workspaceId: "w1",
+        path: "m3-witness.txt",
+        content: "updated",
+      }),
+    ).toBeNull();
+
+    // 6. edit_text (requires oldText, newText, expectedSha256)
+    expect(
+      parseWorkspaceRequest({
+        operation: "workspace.edit_text",
+        projectId: "project-ashley",
+        workspaceId: "w1",
+        path: "m3-witness.txt",
+        oldText: "witness-ok",
+        newText: "witness-pass",
+        expectedSha256: "b".repeat(64),
+      }),
+    ).toEqual({
+      version: 2,
+      operation: "workspace.edit_text",
+      projectId: "project-ashley",
+      workspaceId: "w1",
+      path: "m3-witness.txt",
+      oldText: "witness-ok",
+      newText: "witness-pass",
+      expectedSha256: "b".repeat(64),
+    });
+
+    // 7. delete_file (optional expectedSha256)
+    expect(
+      parseWorkspaceRequest({
+        operation: "workspace.delete_file",
+        projectId: "project-ashley",
+        workspaceId: "w1",
+        path: "m3-witness.txt",
+      }),
+    ).toEqual({
+      version: 2,
+      operation: "workspace.delete_file",
+      projectId: "project-ashley",
+      workspaceId: "w1",
+      path: "m3-witness.txt",
+    });
+
+    // 8. create_directory
+    expect(
+      parseWorkspaceRequest({
+        operation: "workspace.create_directory",
+        projectId: "project-ashley",
+        workspaceId: "w1",
+        path: "src/new-dir",
+      }),
+    ).toEqual({
+      version: 2,
+      operation: "workspace.create_directory",
+      projectId: "project-ashley",
+      workspaceId: "w1",
+      path: "src/new-dir",
+    });
+  });
+
+  it("fails closed on contradictory raw proposals (both M2 inspection and M3 workspace request)", async () => {
+    env.cognitionMode = "apply";
+    env.groqApiKey = "test";
+    const db = new DatabaseSync(":memory:");
+    const base = decide([motivation], "reactive");
+    const result = await deliberateDecision(
+      db,
+      base,
+      [motivation],
+      "reactive",
+      async () => ({
+        model: "test",
+        text: JSON.stringify({
+          kind: "speak",
+          shouldSpeak: true,
+          effort: "medium",
+          completion: "complete",
+          evidenceDisposition: "acquire_project_evidence",
+          inspectionRequest: {
+            operation: "project.read_file",
+            projectId: "project-ashley",
+            path: "package.json",
+          },
+          workspaceRequest: {
+            operation: "workspace.write_file",
+            projectId: "project-ashley",
+            path: "m3.txt",
+            content: "ok",
+          },
+          uncertainty: 0.1,
+          urgency: 0.5,
+          objective: "Contradictory test",
+          reason: "Testing contradiction",
+          motivationIds: [1],
+        }),
+      }),
+      () => true,
+    );
+    db.close();
+    expect(result.thoughtSource).toBe("fallback");
+    expect(result.thoughtError).toBe("invalid_response");
   });
 });

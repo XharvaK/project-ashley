@@ -1,12 +1,14 @@
 import { describe, it, expect } from "vitest";
 import {
   executeProjectInspectionV2,
+  executeWorkspaceExperimentV2,
   executeReactiveSandboxTaskV2,
 } from "./v2-execution.js";
 import {
   loadOperatorProjectReadRegistry,
   listApprovedReadProjectIds,
   canOfferProjectInspection,
+  canOfferCandidateWorkspace,
   V2ProjectReadRegistry,
 } from "./project-registry.js";
 import {
@@ -521,6 +523,168 @@ describe("Sandbox V2 Execution Adapter & Operator Registry", () => {
       expect(license.state).toBe("succeeded");
       expect(license.profile).toBe("sandbox_workspace_file_roundtrip");
       expect(license.effectEvidence).toBeDefined();
+    });
+  });
+
+  describe("executeWorkspaceExperimentV2 & Candidate Workspace", () => {
+    it("evaluates canOfferCandidateWorkspace requiring project_experimentation and candidateWorkspaceAllowed", () => {
+      const path = join(tmpdir(), `ashley-ws-gate-${Date.now()}.db`);
+      const db = openNuclearDb(new DatabaseSync(path));
+      const regAllowed = new V2ProjectReadRegistry([
+        {
+          projectId: "project-ashley",
+          canonicalRoot: "/home/xarvak/project-ashley",
+          displayName: "Ashley",
+          enabled: true,
+          readAllowed: true,
+          candidateWorkspaceAllowed: true,
+          engineeringAllowed: false,
+        },
+      ]);
+      const regDisallowed = new V2ProjectReadRegistry([
+        {
+          projectId: "project-ashley",
+          canonicalRoot: "/home/xarvak/project-ashley",
+          displayName: "Ashley",
+          enabled: true,
+          readAllowed: true,
+          candidateWorkspaceAllowed: false,
+          engineeringAllowed: false,
+        },
+      ]);
+
+      // Initially project_experimentation capability is observe -> canOfferCandidateWorkspace is false
+      expect(
+        canOfferCandidateWorkspace(db, {
+          registry: regAllowed,
+          masterMode: "apply",
+          substrateAvailable: true,
+          lifecycleEnabled: true,
+        }),
+      ).toBe(false);
+
+      // When candidateWorkspaceAllowed is false on registry, even if capability is promoted -> false
+      expect(
+        canOfferCandidateWorkspace(db, {
+          registry: regDisallowed,
+          masterMode: "apply",
+          substrateAvailable: true,
+          lifecycleEnabled: true,
+        }),
+      ).toBe(false);
+
+      db.close();
+      try { rmSync(path, { force: true }); } catch {}
+    });
+
+    it("executes candidate workspace operation and produces safe WorkspaceClaimEffect facts", async () => {
+      const reg = new V2ProjectReadRegistry([
+        {
+          projectId: "project-ashley",
+          canonicalRoot: "/home/xarvak/project-ashley",
+          displayName: "Ashley",
+          enabled: true,
+          readAllowed: true,
+          candidateWorkspaceAllowed: true,
+          engineeringAllowed: false,
+        },
+      ]);
+
+      const mockDispatcher = {
+        dispatch: async (req: SandboxV2Request): Promise<SandboxV2Result> => {
+          expect(req.operation).toBe("workspace.write_file");
+          return {
+            outcome: "succeeded",
+            operation: "workspace.write_file",
+            workspaceId: "ws-mock-42",
+            sourceSnapshotId: "snap_mock_99",
+            result: {
+              kind: "workspace.write_file",
+              path: "witness.txt",
+              bytesWritten: 12,
+              contentHash: "f".repeat(64),
+              readMatches: true,
+              deleted: false,
+              verifiedAbsent: false,
+              completedAtMs: Date.now(),
+            },
+            executedAtMs: Date.now(),
+          };
+        },
+      } as any;
+
+      const result = await executeWorkspaceExperimentV2({
+        request: {
+          version: 2,
+          operation: "workspace.write_file",
+          projectId: "project-ashley",
+          path: "witness.txt",
+          content: "witness-data",
+          mustNotExist: true,
+        },
+        dispatcher: mockDispatcher,
+        registry: reg,
+        skipCapabilityGate: true,
+        envOverrides: {
+          sandboxEngineeringLifecycleEnabled: true,
+        },
+      });
+
+      expect(result.license.state).toBe("succeeded");
+      expect(result.license.profile).toBe("project_experimentation");
+      expect(result.license.workspaceClaimEffect).toBeDefined();
+
+      const effect = result.license.workspaceClaimEffect!;
+      expect(effect.verified).toBe(true);
+      expect(effect.projectId).toBe("project-ashley");
+      expect(effect.workspaceId).toBe("ws-mock-42");
+      expect(effect.operation).toBe("workspace.write_file");
+      expect(effect.logicalRelativePath).toBe("witness.txt");
+      expect(effect.sourceSnapshotId).toBe("snap_mock_99");
+      expect(effect.bytesWritten).toBe(12);
+
+      // Safe facts verification: NO raw contents or host filesystem roots in license
+      const rawLicense = JSON.stringify(result.license);
+      expect(rawLicense).not.toContain("witness-data");
+      expect(rawLicense).not.toContain("/home/xarvak");
+
+      expect(result.observation).toBeDefined();
+      expect(result.observation?.workspaceId).toBe("ws-mock-42");
+      expect(result.observation?.operation).toBe("workspace.write_file");
+      expect(result.observation?.verified).toBe(true);
+    });
+
+    it("fails closed when project is not allowed for candidate workspaces", async () => {
+      const reg = new V2ProjectReadRegistry([
+        {
+          projectId: "project-ashley",
+          canonicalRoot: "/home/xarvak/project-ashley",
+          displayName: "Ashley",
+          enabled: true,
+          readAllowed: true,
+          candidateWorkspaceAllowed: false,
+          engineeringAllowed: false,
+        },
+      ]);
+
+      const result = await executeWorkspaceExperimentV2({
+        request: {
+          version: 2,
+          operation: "workspace.read_file",
+          projectId: "project-ashley",
+          path: "README.md",
+        },
+        registry: reg,
+        skipCapabilityGate: true,
+        envOverrides: {
+          sandboxAvailable: () => true,
+          sandboxEngineeringLifecycleEnabled: true,
+        },
+      });
+
+      expect(result.license.state).toBe("failed");
+      expect(result.license.error).toBe("workspace_not_allowed");
+      expect(result.observation).toBeNull();
     });
   });
 });

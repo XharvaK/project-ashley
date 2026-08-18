@@ -5,17 +5,21 @@ import { capabilityCanInfluence } from "../rollout/capabilities.js";
 import { probeDecisionCoercion } from "../relationship/coercion-gate.js";
 import type {
   CognitionInspectionRequest,
+  CognitionWorkspaceRequest,
+  CognitionOperationalRequest,
   Decision,
   DecisionDelayClass,
   DecisionKind,
   EvidenceDisposition,
   Motivation,
   ProjectInspectionObservation,
+  WorkspaceExperimentObservation,
   Trigger,
 } from "../types.js";
 import {
   listApprovedReadProjectIds,
   canOfferProjectInspection,
+  canOfferCandidateWorkspace,
 } from "../sandbox/project-registry.js";
 
 export type ThoughtModelResult = {
@@ -135,6 +139,7 @@ export type ThoughtProposal = {
   modelAlias: string;
   resolvedModelId: string | null;
   evidenceDisposition: EvidenceDisposition | null;
+  operationalRequest?: CognitionOperationalRequest | null;
   inspectionRequest?: CognitionInspectionRequest | null;
 };
 
@@ -154,7 +159,7 @@ function isDecisionDelayClass(value: unknown): value is DecisionDelayClass {
   );
 }
 
-function parseInspectionRequest(
+export function parseInspectionRequest(
   value: unknown,
 ): CognitionInspectionRequest | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -187,10 +192,110 @@ function parseInspectionRequest(
   return null;
 }
 
+export function parseWorkspaceRequest(
+  value: unknown,
+): CognitionWorkspaceRequest | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const obj = value as Record<string, unknown>;
+  const operation = String(obj.operation);
+  const projectId =
+    typeof obj.projectId === "string" ? obj.projectId.trim() : "";
+  const workspaceId =
+    typeof obj.workspaceId === "string" ? obj.workspaceId.trim() : "";
+  const path = typeof obj.path === "string" ? obj.path.trim() : undefined;
+  const pattern =
+    typeof obj.pattern === "string" ? obj.pattern.trim() : undefined;
+  const maxMatches =
+    typeof obj.maxMatches === "number" && Number.isInteger(obj.maxMatches)
+      ? obj.maxMatches
+      : undefined;
+  const content = typeof obj.content === "string" ? obj.content : undefined;
+  const expectedSha256 =
+    typeof obj.expectedSha256 === "string" ? obj.expectedSha256.trim() : undefined;
+  const oldText = typeof obj.oldText === "string" ? obj.oldText : undefined;
+  const newText = typeof obj.newText === "string" ? obj.newText : undefined;
+
+  if (!projectId) return null;
+
+  if (operation === "workspace.read_file") {
+    if (!path) return null;
+    return { version: 2, operation, projectId, workspaceId, path };
+  }
+  if (operation === "workspace.list_directory") {
+    if (path === undefined) return null;
+    return { version: 2, operation, projectId, workspaceId, path };
+  }
+  if (operation === "workspace.search_text") {
+    if (!pattern || pattern.length < 1 || pattern.length > 256) return null;
+    return {
+      version: 2,
+      operation,
+      projectId,
+      workspaceId,
+      path: path ?? ".",
+      pattern,
+      maxMatches,
+    };
+  }
+  if (operation === "workspace.write_file") {
+    if (!path || content === undefined) return null;
+    // create-only semantic: mustNotExist must be true
+    return {
+      version: 2,
+      operation,
+      projectId,
+      workspaceId,
+      path,
+      content,
+      mustNotExist: true,
+    };
+  }
+  if (operation === "workspace.replace_file") {
+    if (!path || content === undefined || !expectedSha256) return null;
+    return {
+      version: 2,
+      operation,
+      projectId,
+      workspaceId,
+      path,
+      content,
+      expectedSha256,
+    };
+  }
+  if (operation === "workspace.edit_text") {
+    if (!path || oldText === undefined || newText === undefined || !expectedSha256) return null;
+    return {
+      version: 2,
+      operation,
+      projectId,
+      workspaceId,
+      path,
+      oldText,
+      newText,
+      expectedSha256,
+    };
+  }
+  if (operation === "workspace.delete_file") {
+    if (!path) return null;
+    return {
+      version: 2,
+      operation,
+      projectId,
+      workspaceId,
+      path,
+      ...(expectedSha256 ? { expectedSha256 } : {}),
+    };
+  }
+  if (operation === "workspace.create_directory") {
+    if (!path) return null;
+    return { version: 2, operation, projectId, workspaceId, path };
+  }
+  return null;
+}
+
 export type ThoughtResult =
   | { ok: true; proposal: ThoughtProposal }
   | { ok: false; error: string };
-
 export async function runThoughtModel(
   db: DatabaseSync,
   base: Decision,
@@ -217,11 +322,20 @@ export async function runThoughtModel(
   }));
 
   const canOffer = canOfferProjectInspection(db);
-  const approvedProjectIds = canOffer ? listApprovedReadProjectIds() : [];
-  const projectContextPrompt =
-    approvedProjectIds.length > 0
-      ? `Approved project IDs: ${approvedProjectIds.join(", ")}. When repository evidence is required to resolve a question or motivation, set evidenceDisposition to "acquire_project_evidence" and include inspectionRequest: {operation: "project.read_file"|"project.list_directory"|"project.search_text", projectId: "${approvedProjectIds.join('"|"')}", path: string, pattern?: string, maxMatches?: number}; the runtime executes it before you continue.`
-      : "No approved projects are currently configured or licensed for inspection; do not emit inspectionRequest.";
+  const canOfferWorkspace = trigger === "reactive" ? canOfferCandidateWorkspace(db) : false;
+  const approvedProjectIds = (canOffer || canOfferWorkspace) ? listApprovedReadProjectIds() : [];
+
+  let projectContextPrompt = "No approved projects are currently configured or licensed for inspection; do not emit inspectionRequest.";
+  if (approvedProjectIds.length > 0) {
+    if (canOffer && canOfferWorkspace) {
+      projectContextPrompt = `Approved project IDs: ${approvedProjectIds.join(", ")}. When repository evidence is required to resolve a question or motivation, set evidenceDisposition to "acquire_project_evidence" and include inspectionRequest: {operation: "project.read_file"|"project.list_directory"|"project.search_text", projectId: "${approvedProjectIds.join('"|"')}", path: string, pattern?: string, maxMatches?: number}; the runtime executes it before you continue. When a candidate workspace experiment is required, include workspaceRequest: {operation: "workspace.read_file"|"workspace.list_directory"|"workspace.search_text"|"workspace.write_file"|"workspace.replace_file"|"workspace.edit_text"|"workspace.delete_file"|"workspace.create_directory", projectId: "${approvedProjectIds.join('"|"')}", workspaceId?: string, path: string, ...}; the runtime executes it before you continue.`;
+    } else if (canOffer) {
+      projectContextPrompt = `Approved project IDs: ${approvedProjectIds.join(", ")}. When repository evidence is required to resolve a question or motivation, set evidenceDisposition to "acquire_project_evidence" and include inspectionRequest: {operation: "project.read_file"|"project.list_directory"|"project.search_text", projectId: "${approvedProjectIds.join('"|"')}", path: string, pattern?: string, maxMatches?: number}; the runtime executes it before you continue.`;
+    } else if (canOfferWorkspace) {
+      projectContextPrompt = `Approved project IDs: ${approvedProjectIds.join(", ")}. When a candidate workspace experiment is required, include workspaceRequest: {operation: "workspace.read_file"|"workspace.list_directory"|"workspace.search_text"|"workspace.write_file"|"workspace.replace_file"|"workspace.edit_text"|"workspace.delete_file"|"workspace.create_directory", projectId: "${approvedProjectIds.join('"|"')}", workspaceId?: string, path: string, ...}; the runtime executes it before you continue.`;
+    }
+  }
+
   const dispositionContract =
     'evidenceDisposition is one of: "sufficient" when the supplied context already holds everything needed to decide this turn; "acquire_project_evidence" when this turn requires repository evidence that inspection can provide now (REQUIRES a well-formed inspectionRequest, and is invalid when no approved projects are licensed); "capability_unavailable" when inspection is not currently available (valid ONLY when no approved projects are configured or licensed for inspection); "defer" for an intentional postponement of this motivation to a later turn. defer does not acquire evidence and must not stand in for evidence an available inspection can acquire now: if you need repository evidence this turn and inspection is available, use acquire_project_evidence. acquire_project_evidence is an action, not a postponement: pair it with a speak-class kind (speak, ask, share, challenge) and completion complete, and the runtime executes the inspection before you continue. completion hold is a conversational/cognitive completion state only; it is not an evidence acquisition mechanism.';
 
@@ -234,7 +348,7 @@ export async function runThoughtModel(
           content: [
             "You are Ashley's Thought layer, not her Expression layer.",
             "Choose whether and how to act from the supplied grounded motivations.",
-            "Return strict JSON only: {kind,delayClass,shouldSpeak,effort,completion,uncertainty,urgency,objective,reason,motivationIds,evidenceDisposition,inspectionRequest?}.",
+            "Return strict JSON only: {kind,delayClass,shouldSpeak,effort,completion,uncertainty,urgency,objective,reason,motivationIds,evidenceDisposition,inspectionRequest?,workspaceRequest?}.",
             "kind is speak|silence|delay|ask|revisit|share|challenge|refuse; delayClass is brief|standard|long|reflection_review only when kind is delay and otherwise null; effort is low|medium|high; completion is complete|hold.",
             "Never return a timestamp or duration. The host maps delayClass to a fixed duration.",
             "A refusal is reactive only and must select both the current user_message motivation and a supplied stable boundary motivation.",
@@ -294,9 +408,27 @@ export async function runThoughtModel(
     return { ok: false, error: "invalid_response" };
   }
   const disposition = String(proposal.evidenceDisposition ?? "");
-  const inspectionRequest = canOffer
+
+  // Parse raw inspection and workspace requests
+  const rawInspection = canOffer
     ? parseInspectionRequest(proposal.inspectionRequest)
     : null;
+  const rawWorkspace = canOfferWorkspace
+    ? parseWorkspaceRequest(proposal.workspaceRequest ?? (proposal.operationalRequest && (proposal.operationalRequest as any).kind === "candidate_workspace_experiment" ? (proposal.operationalRequest as any).request : (proposal.inspectionRequest && String((proposal.inspectionRequest as any).operation).startsWith("workspace.") ? proposal.inspectionRequest : null)))
+    : null;
+
+  // FAIL CLOSED on contradictory requests: if both M2 and M3 are emitted in raw output
+  if (rawInspection && rawWorkspace) {
+    return { ok: false, error: "invalid_response" };
+  }
+
+  let operationalRequest: CognitionOperationalRequest | null = null;
+  if (rawInspection) {
+    operationalRequest = { kind: "project_inspection", request: rawInspection };
+  } else if (rawWorkspace) {
+    operationalRequest = { kind: "candidate_workspace_experiment", request: rawWorkspace };
+  }
+
   if (!evidenceDispositions.has(disposition as EvidenceDisposition)) {
     return { ok: false, error: "invalid_response" };
   }
@@ -305,8 +437,8 @@ export async function runThoughtModel(
     // reachable when the capability is genuinely available.
     if (
       !canOffer ||
-      !inspectionRequest ||
-      !approvedProjectIds.includes(inspectionRequest.projectId)
+      !rawInspection ||
+      !approvedProjectIds.includes(rawInspection.projectId)
     ) {
       return { ok: false, error: "invalid_response" };
     }
@@ -316,7 +448,7 @@ export async function runThoughtModel(
     if (canOffer) {
       return { ok: false, error: "invalid_response" };
     }
-  } else if (inspectionRequest) {
+  } else if (rawInspection) {
     // sufficient and defer never acquire evidence: a request alongside either
     // is structurally contradictory.
     return { ok: false, error: "invalid_response" };
@@ -337,7 +469,8 @@ export async function runThoughtModel(
       modelAlias: response.modelAlias ?? response.model ?? "",
       resolvedModelId: response.resolvedModelId ?? null,
       evidenceDisposition: disposition as EvidenceDisposition,
-      inspectionRequest,
+      operationalRequest,
+      inspectionRequest: rawInspection,
     },
   };
 }
@@ -491,6 +624,7 @@ export async function deliberateDecision(
       completion: proposal.completion === "hold" ? "hold" : "complete",
     },
     evidenceDisposition: proposal.evidenceDisposition,
+    operationalRequest: proposal.operationalRequest ?? null,
     inspectionRequest: proposal.inspectionRequest ?? null,
   });
 }
@@ -527,18 +661,18 @@ export type DeliberateThoughtContinuationOptions = ThoughtModelOptions & {
 /**
  * Second Cognitive Pass (Thought Continuation).
  *
- * Re-enters Thought after sandbox inspection execution, allowing Ashley's cognition
- * (not Expression) to reason about what the observed evidence or typed failure means.
+ * Re-enters Thought after sandbox inspection or workspace experiment execution, allowing
+ * Ashley's cognition (not Expression) to reason about what the observed evidence or typed failure means.
  *
  * Invariants (fail-closed):
- *  1. Exactly one M2 inspection round per turn: pass 2 cannot initiate another inspection;
- *  2. Execution evidence (inspectionRequest, observation, license, error) is immutable across continuation;
+ *  1. Exactly one operational execution round per turn: pass 2 cannot initiate another execution;
+ *  2. Execution evidence (operationalRequest, observation, license, error) is immutable across continuation;
  *  3. On sandbox failure or unavailability, cognition does not infer file absence or zero matches.
  */
 export async function deliberateThoughtContinuation(
   db: DatabaseSync,
   intermediateDecision: Decision,
-  observation: ProjectInspectionObservation | null,
+  observation: ProjectInspectionObservation | WorkspaceExperimentObservation | null,
   executionError: string | null,
   motivations: Motivation[],
   trigger: Trigger,
@@ -549,20 +683,23 @@ export async function deliberateThoughtContinuation(
 ): Promise<Decision> {
   const allowModelThought = options.allowModelThought !== false;
   const acquiring =
-    intermediateDecision.evidenceDisposition === "acquire_project_evidence";
+    intermediateDecision.evidenceDisposition === "acquire_project_evidence" ||
+    intermediateDecision.operationalRequest !== undefined;
   if (
     !allowModelThought ||
     !canInfluence(db) ||
     !env.groqApiKey ||
     intermediateDecision.kind === "silence" ||
-    // A delay that requested acquisition must still be interpreted after the
-    // evidence arrives; postponement and acquisition are contradictory, so the
-    // runtime resolves the contradiction instead of skipping the pass.
     (intermediateDecision.kind === "delay" && !acquiring)
   ) {
+    const isM2 = intermediateDecision.operationalRequest
+      ? intermediateDecision.operationalRequest.kind === "project_inspection"
+      : intermediateDecision.inspectionRequest != null;
     return {
       ...intermediateDecision,
-      inspectionObservation: observation,
+      operationalObservation: observation,
+      inspectionObservation: isM2 ? (observation as ProjectInspectionObservation | null) : null,
+      workspaceObservation: !isM2 ? (observation as WorkspaceExperimentObservation | null) : null,
     };
   }
 
@@ -572,9 +709,14 @@ export async function deliberateThoughtContinuation(
       ? options.firstBubbleDeadlineAtMs - env.thoughtExpressionGuardMs
       : null);
   if (thoughtDeadline != null && Date.now() >= thoughtDeadline) {
+    const isM2 = intermediateDecision.operationalRequest
+      ? intermediateDecision.operationalRequest.kind === "project_inspection"
+      : intermediateDecision.inspectionRequest != null;
     return {
       ...intermediateDecision,
-      inspectionObservation: observation,
+      operationalObservation: observation,
+      inspectionObservation: isM2 ? (observation as ProjectInspectionObservation | null) : null,
+      workspaceObservation: !isM2 ? (observation as WorkspaceExperimentObservation | null) : null,
     };
   }
 
@@ -583,14 +725,14 @@ export async function deliberateThoughtContinuation(
     {
       role: "system",
       content: [
-        "You are Ashley's Thought layer continuing deliberation after receiving repository inspection execution results.",
+        "You are Ashley's Thought layer continuing deliberation after receiving sandbox execution results.",
         "Interpret the structured observation or execution error truthfully to produce your final Decision.",
-        "Return strict JSON only: {kind,delayClass,shouldSpeak,effort,completion,uncertainty,urgency,objective,reason,motivationIds,inspectionCognitiveResult?}.",
+        "Return strict JSON only: {kind,delayClass,shouldSpeak,effort,completion,uncertainty,urgency,objective,reason,motivationIds,cognitiveResult?}.",
         "kind is speak|silence|delay|ask|revisit|share|challenge|refuse; effort is low|medium|high; completion is complete|hold.",
-        "Do NOT emit another inspectionRequest. Exactly one inspection round per turn.",
+        "Do NOT emit another inspectionRequest, workspaceRequest, or operationalRequest. Exactly one sandbox execution per turn.",
         "If the sandbox failed or is unavailable, reason about the failure truthfully without inferring absence of files or zero matches.",
         "objective and reason must reflect your cognitive interpretation of the evidence.",
-        "inspectionCognitiveResult is an optional concise factual summary of what was learned from the inspection to guide Expression without raw code dumps.",
+        "cognitiveResult is an optional concise factual summary of what was learned from execution to guide Expression without raw code dumps.",
       ].join(" "),
     },
     {
@@ -599,7 +741,7 @@ export async function deliberateThoughtContinuation(
         trigger,
         intermediateObjective: intermediateDecision.objective,
         intermediateReason: intermediateDecision.reason,
-        inspectionRequest: intermediateDecision.inspectionRequest,
+        operationalRequest: intermediateDecision.operationalRequest ?? null,
         observation: observation ?? null,
         executionError: executionError ?? null,
       }),
@@ -624,12 +766,15 @@ export async function deliberateThoughtContinuation(
     );
   } catch (error) {
     const errorCode = sanitizedErrorCode(error);
-    // One bounded retry: transient lane failures must not silently discard
-    // the evidence interpretation; the deadline is re-checked before retrying.
     if (thoughtDeadline != null && Date.now() >= thoughtDeadline) {
+      const isM2 = intermediateDecision.operationalRequest
+      ? intermediateDecision.operationalRequest.kind === "project_inspection"
+      : intermediateDecision.inspectionRequest != null;
       return {
         ...intermediateDecision,
-        inspectionObservation: observation,
+        operationalObservation: observation,
+        inspectionObservation: isM2 ? (observation as ProjectInspectionObservation | null) : null,
+        workspaceObservation: !isM2 ? (observation as WorkspaceExperimentObservation | null) : null,
         thoughtSource: "fallback",
         thoughtError: errorCode,
       };
@@ -652,9 +797,14 @@ export async function deliberateThoughtContinuation(
         },
       );
     } catch (error2) {
+      const isM2 = intermediateDecision.operationalRequest
+      ? intermediateDecision.operationalRequest.kind === "project_inspection"
+      : intermediateDecision.inspectionRequest != null;
       return {
         ...intermediateDecision,
-        inspectionObservation: observation,
+        operationalObservation: observation,
+        inspectionObservation: isM2 ? (observation as ProjectInspectionObservation | null) : null,
+        workspaceObservation: !isM2 ? (observation as WorkspaceExperimentObservation | null) : null,
         thoughtSource: "fallback",
         thoughtError: sanitizedErrorCode(error2),
       };
@@ -662,18 +812,37 @@ export async function deliberateThoughtContinuation(
   }
 
   if (thoughtDeadline != null && Date.now() >= thoughtDeadline) {
+    const isM2 = intermediateDecision.operationalRequest
+      ? intermediateDecision.operationalRequest.kind === "project_inspection"
+      : intermediateDecision.inspectionRequest != null;
     return {
       ...intermediateDecision,
-      inspectionObservation: observation,
+      operationalObservation: observation,
+      inspectionObservation: isM2 ? (observation as ProjectInspectionObservation | null) : null,
+      workspaceObservation: !isM2 ? (observation as WorkspaceExperimentObservation | null) : null,
     };
   }
 
   const proposal = parseObject(response.text);
+  const isM2 = intermediateDecision.operationalRequest
+    ? intermediateDecision.operationalRequest.kind === "project_inspection"
+    : intermediateDecision.inspectionRequest != null;
   if (!proposal) {
     return {
       ...intermediateDecision,
-      inspectionObservation: observation,
+      operationalObservation: observation,
+      inspectionObservation: isM2 ? (observation as ProjectInspectionObservation | null) : null,
+      workspaceObservation: !isM2 ? (observation as WorkspaceExperimentObservation | null) : null,
     };
+  }
+
+  // Pass 2 must NOT initiate any new sandbox execution (invariant 1)
+  if (
+    proposal.operationalRequest !== undefined ||
+    proposal.inspectionRequest !== undefined ||
+    proposal.workspaceRequest !== undefined
+  ) {
+    // Structural rejection of re-execution attempts in pass 2
   }
 
   const kind = String(proposal.kind) as DecisionKind;
@@ -688,9 +857,6 @@ export async function deliberateThoughtContinuation(
   const proposedIds = Array.isArray(proposal.motivationIds)
     ? proposal.motivationIds.map(Number).filter((id) => allowedIds.has(id))
     : [];
-  // The continuation re-decides after evidence; motivation selection was
-  // already grounded in pass 1, so an empty re-selection inherits the
-  // intermediate selection instead of discarding the evidence interpretation.
   const motivationIds =
     proposedIds.length > 0 ? proposedIds : intermediateDecision.motivationIds;
 
@@ -702,7 +868,9 @@ export async function deliberateThoughtContinuation(
   ) {
     return {
       ...intermediateDecision,
-      inspectionObservation: observation,
+      operationalObservation: observation,
+      inspectionObservation: isM2 ? (observation as ProjectInspectionObservation | null) : null,
+      workspaceObservation: !isM2 ? (observation as WorkspaceExperimentObservation | null) : null,
     };
   }
 
@@ -711,7 +879,9 @@ export async function deliberateThoughtContinuation(
   if (shouldSpeak !== (kind !== "silence" && kind !== "delay" && !holding)) {
     return {
       ...intermediateDecision,
-      inspectionObservation: observation,
+      operationalObservation: observation,
+      inspectionObservation: isM2 ? (observation as ProjectInspectionObservation | null) : null,
+      workspaceObservation: !isM2 ? (observation as WorkspaceExperimentObservation | null) : null,
     };
   }
 
@@ -721,7 +891,7 @@ export async function deliberateThoughtContinuation(
   const reason = String(
     proposal.reason ?? intermediateDecision.reason,
   ).trim().slice(0, 1000);
-  const inspectionCognitiveResult =
+  const cognitiveResult =
     typeof proposal.inspectionCognitiveResult === "string"
       ? proposal.inspectionCognitiveResult.trim().slice(0, 1000)
       : typeof proposal.cognitiveResult === "string"
@@ -743,7 +913,9 @@ export async function deliberateThoughtContinuation(
         effort: "low",
         completion: "complete",
       },
-      inspectionObservation: observation,
+      operationalObservation: observation,
+      inspectionObservation: isM2 ? (observation as ProjectInspectionObservation | null) : null,
+      workspaceObservation: !isM2 ? (observation as WorkspaceExperimentObservation | null) : null,
     };
   }
 
@@ -754,7 +926,8 @@ export async function deliberateThoughtContinuation(
     motivationIds,
     objective,
     reason,
-    inspectionCognitiveResult,
+    operationalCognitiveResult: cognitiveResult,
+    inspectionCognitiveResult: cognitiveResult,
     uncertainty: Math.max(0, Math.min(1, Number(proposal.uncertainty) || 0)),
     urgency: Math.max(0, Math.min(1, Number(proposal.urgency) || 0)),
     thoughtSource: "model",
@@ -765,8 +938,11 @@ export async function deliberateThoughtContinuation(
       completion: proposal.completion === "hold" ? "hold" : "complete",
     },
     // Invariant 2: Execution evidence is immutable across Thought continuation
+    operationalRequest: intermediateDecision.operationalRequest,
     inspectionRequest: intermediateDecision.inspectionRequest,
-    inspectionObservation: observation,
+    operationalObservation: observation,
+    inspectionObservation: isM2 ? (observation as ProjectInspectionObservation | null) : null,
+    workspaceObservation: !isM2 ? (observation as WorkspaceExperimentObservation | null) : null,
     operationalLicense: intermediateDecision.operationalLicense,
   });
 }

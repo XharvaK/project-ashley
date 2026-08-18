@@ -32,12 +32,42 @@ describe("isSandboxV2Request", () => {
 });
 
 describe("capability registry", () => {
-  it("has exactly the four closed operations", () => {
-    expect(V2_CAPABILITY_REGISTRY.map((spec) => spec.operation)).toEqual([
+  it("preserves M1 and M2 operation sets and registers M3 workspace family", () => {
+    const operations = V2_CAPABILITY_REGISTRY.map((spec) => spec.operation);
+    expect(operations).toEqual([
       "file.roundtrip",
       "project.read_file",
       "project.list_directory",
       "project.search_text",
+      "workspace.read_file",
+      "workspace.list_directory",
+      "workspace.search_text",
+      "workspace.write_file",
+      "workspace.replace_file",
+      "workspace.edit_text",
+      "workspace.delete_file",
+      "workspace.create_directory",
+    ]);
+
+    // M2 project_inspection family
+    const m2Ops = V2_CAPABILITY_REGISTRY.filter((s) => s.family === "project_inspection").map((s) => s.operation);
+    expect(m2Ops).toEqual([
+      "project.read_file",
+      "project.list_directory",
+      "project.search_text",
+    ]);
+
+    // M3 project_experimentation family
+    const m3Ops = V2_CAPABILITY_REGISTRY.filter((s) => s.family === "project_experimentation").map((s) => s.operation);
+    expect(m3Ops).toEqual([
+      "workspace.read_file",
+      "workspace.list_directory",
+      "workspace.search_text",
+      "workspace.write_file",
+      "workspace.replace_file",
+      "workspace.edit_text",
+      "workspace.delete_file",
+      "workspace.create_directory",
     ]);
   });
 
@@ -45,6 +75,17 @@ describe("capability registry", () => {
     for (const spec of V2_CAPABILITY_REGISTRY.filter((s) => s.family === "project_inspection")) {
       expect(spec.readOnly).toBe(true);
       expect(spec.requiresProject).toBe(true);
+    }
+  });
+
+  it("marks workspace experiments project-required with appropriate readOnly flags", () => {
+    for (const spec of V2_CAPABILITY_REGISTRY.filter((s) => s.family === "project_experimentation")) {
+      expect(spec.requiresProject).toBe(true);
+      if (["workspace.read_file", "workspace.list_directory", "workspace.search_text"].includes(spec.operation)) {
+        expect(spec.readOnly).toBe(true);
+      } else {
+        expect(spec.readOnly).toBe(false);
+      }
     }
   });
 

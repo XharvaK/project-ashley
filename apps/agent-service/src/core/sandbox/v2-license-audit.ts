@@ -11,9 +11,13 @@
 
 import {
   isVerifiedRoundtripEffectEvidence,
+  isVerifiedWorkspaceClaimEffect,
   type OperationalClaimLicense,
 } from "./engineering-types.js";
-import type { ProjectInspectionObservation } from "../types.js";
+import type {
+  ProjectInspectionObservation,
+  WorkspaceExperimentObservation,
+} from "../types.js";
 
 export type SandboxV2LicenseAuditRecord = {
   discriminator: "ASHLEY_SANDBOX_V2_LICENSE";
@@ -30,6 +34,17 @@ export type SandboxV2LicenseAuditRecord = {
     verifiedAbsent: boolean;
     bytesWritten: number;
   } | null;
+  workspaceEffect?: {
+    projectId: string;
+    workspaceId: string;
+    operation: string;
+    logicalRelativePath: string;
+    sourceSnapshotId: string;
+    bytesRead?: number;
+    bytesWritten?: number;
+    beforeSha256?: string;
+    afterSha256?: string;
+  } | null;
   inspection?: {
     operation?: string;
     projectId?: string;
@@ -45,14 +60,15 @@ export type SandboxV2LicenseAuditRecord = {
 
 export function formatSandboxV2LicenseAudit(
   license?: OperationalClaimLicense | null,
-  observation?: ProjectInspectionObservation | null,
+  observation?: ProjectInspectionObservation | WorkspaceExperimentObservation | null,
 ): SandboxV2LicenseAuditRecord | null {
   if (!license) {
     return null;
   }
   if (
     license.profile !== "sandbox_workspace_file_roundtrip" &&
-    license.profile !== "project_investigation"
+    license.profile !== "project_investigation" &&
+    license.profile !== "project_experimentation"
   ) {
     return null;
   }
@@ -82,34 +98,66 @@ export function formatSandboxV2LicenseAudit(
     };
   }
 
+  if (license.profile === "project_experimentation") {
+    const verified =
+      license.state === "succeeded" &&
+      isVerifiedWorkspaceClaimEffect(license.workspaceClaimEffect);
+    return {
+      discriminator: "ASHLEY_SANDBOX_V2_LICENSE",
+      sourceMessageEntityUuid: license.sourceMessageEntityUuid ?? null,
+      state: license.state,
+      taskId: license.taskId ?? null,
+      profile: license.profile,
+      verified,
+      error: license.error ?? null,
+      refusalReason: license.refusalReason ?? null,
+      effect: null,
+      workspaceEffect: license.workspaceClaimEffect
+        ? {
+            projectId: license.workspaceClaimEffect.projectId,
+            workspaceId: license.workspaceClaimEffect.workspaceId,
+            operation: license.workspaceClaimEffect.operation,
+            logicalRelativePath: license.workspaceClaimEffect.logicalRelativePath,
+            sourceSnapshotId: license.workspaceClaimEffect.sourceSnapshotId,
+            bytesRead: license.workspaceClaimEffect.bytesRead,
+            bytesWritten: license.workspaceClaimEffect.bytesWritten,
+            beforeSha256: license.workspaceClaimEffect.beforeSha256,
+            afterSha256: license.workspaceClaimEffect.afterSha256,
+          }
+        : null,
+      inspection: null,
+    };
+  }
+
   // profile === "project_investigation"
-  const verified = license.state === "succeeded" && observation?.verified === true;
+  const obs = observation && "kind" in observation && observation.kind === "workspace_experiment_observation" ? null : (observation as ProjectInspectionObservation | null);
+  const verified = license.state === "succeeded" && obs?.verified === true;
   let inspectionMeta: SandboxV2LicenseAuditRecord["inspection"] = null;
-  if (observation) {
+  if (obs) {
     inspectionMeta = {
-      operation: observation.operation,
-      projectId: observation.projectId,
-      targetPath: observation.path,
+      operation: obs.operation,
+      projectId: obs.projectId,
+      targetPath: obs.path,
       targetPattern:
-        observation.operation === "project.search_text"
-          ? observation.pattern
+        obs.operation === "project.search_text"
+          ? obs.pattern
           : undefined,
-      truncated: observation.truncated,
+      truncated: obs.truncated,
       bytes:
-        observation.operation === "project.read_file"
-          ? observation.bytes
+        obs.operation === "project.read_file"
+          ? obs.bytes
           : undefined,
       filesScanned:
-        observation.operation === "project.search_text"
-          ? observation.filesScanned
+        obs.operation === "project.search_text"
+          ? obs.filesScanned
           : undefined,
       matchCount:
-        observation.operation === "project.search_text"
-          ? observation.matches.length
+        obs.operation === "project.search_text"
+          ? obs.matches.length
           : undefined,
       entryCount:
-        observation.operation === "project.list_directory"
-          ? observation.entries.length
+        obs.operation === "project.list_directory"
+          ? obs.entries.length
           : undefined,
     };
   }
@@ -130,10 +178,10 @@ export function formatSandboxV2LicenseAudit(
 
 export function emitSandboxV2LicenseAudit(
   license?: OperationalClaimLicense | null,
-  observationOrSink?: ProjectInspectionObservation | null | ((msg: string) => void),
+  observationOrSink?: ProjectInspectionObservation | WorkspaceExperimentObservation | null | ((msg: string) => void),
   maybeSink?: (msg: string) => void,
 ): void {
-  let observation: ProjectInspectionObservation | null = null;
+  let observation: ProjectInspectionObservation | WorkspaceExperimentObservation | null = null;
   let sink: (msg: string) => void = console.info;
 
   if (typeof observationOrSink === "function") {

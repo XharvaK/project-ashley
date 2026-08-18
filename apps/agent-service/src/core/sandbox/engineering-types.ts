@@ -43,6 +43,7 @@ export type SandboxTaskProfile =
   | "health_maintenance"
   | "local_service_recovery"
   | "project_investigation"
+  | "project_experimentation"
   | "sandbox_workspace_file_roundtrip";
 
 /**
@@ -58,6 +59,25 @@ export type RoundtripEffectEvidence = {
   readMatches: boolean;
   deleted: boolean;
   verifiedAbsent: boolean;
+  completedAtMs: number;
+};
+
+/**
+ * Structured safe effect facts for verified M3 workspace operations.
+ * Excludes raw file contents, base64 payloads, search text, directory entries,
+ * canonicalRoot, and host filesystem paths.
+ */
+export type WorkspaceClaimEffect = {
+  verified: true;
+  projectId: string;
+  workspaceId: string;
+  operation: string;
+  logicalRelativePath: string;
+  sourceSnapshotId: string;
+  bytesRead?: number;
+  bytesWritten?: number;
+  beforeSha256?: string;
+  afterSha256?: string;
   completedAtMs: number;
 };
 
@@ -89,6 +109,27 @@ export function isVerifiedRoundtripEffectEvidence(
   );
 }
 
+export function isVerifiedWorkspaceClaimEffect(
+  value: unknown,
+): value is WorkspaceClaimEffect {
+  if (!value || typeof value !== "object") return false;
+  const e = value as Partial<WorkspaceClaimEffect>;
+  return (
+    e.verified === true &&
+    typeof e.projectId === "string" &&
+    e.projectId.trim().length > 0 &&
+    typeof e.workspaceId === "string" &&
+    e.workspaceId.trim().length > 0 &&
+    typeof e.operation === "string" &&
+    e.operation.startsWith("workspace.") &&
+    typeof e.logicalRelativePath === "string" &&
+    typeof e.sourceSnapshotId === "string" &&
+    e.sourceSnapshotId.trim().length > 0 &&
+    typeof e.completedAtMs === "number" &&
+    Number.isFinite(e.completedAtMs)
+  );
+}
+
 /** Structured operational claim states for Expression & Honesty enforcement. */
 export type OperationalClaimState =
   | "none"
@@ -104,6 +145,7 @@ export type OperationalClaimLicense = {
   taskId?: string | null;
   profile?: SandboxTaskProfile | string | null;
   effectEvidence?: RoundtripEffectEvidence | null;
+  workspaceClaimEffect?: WorkspaceClaimEffect | null;
   receiptRef?: string | null;
   error?: string | null;
   refusalReason?: string | null;

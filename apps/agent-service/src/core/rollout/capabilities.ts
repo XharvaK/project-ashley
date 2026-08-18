@@ -43,6 +43,7 @@ export const capabilityNames = [
   "external_private",
   "external_public",
   "project_inspection",
+  "project_experimentation",
 ] as const;
 
 export type CapabilityName = typeof capabilityNames[number];
@@ -78,6 +79,7 @@ const dependencies: Record<CapabilityName, CapabilityName[]> = {
   external_private: ["external_prepare", "thought"],
   external_public: ["external_prepare", "thought"],
   project_inspection: ["thought"],
+  project_experimentation: ["thought"],
 };
 
 const modelSensitive = new Set<string>(MODEL_SENSITIVE_SET_FOR_CONTRACT);

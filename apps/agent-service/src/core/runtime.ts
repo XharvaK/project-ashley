@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import type { ProjectInspectionObservation } from "./types.js";
 import { env } from "../env.js";
 import { NUCLEAR_DB_PATH } from "../paths.js";
 import { decide, attachAuthorizedClaims } from "./agency/decide.js";
@@ -193,8 +194,10 @@ import {
 import {
   executeReactiveSandboxTaskV2,
   executeProjectInspectionV2,
+  executeWorkspaceExperimentV2,
 } from "./sandbox/v2-execution.js";
-import { canOfferProjectInspection } from "./sandbox/project-registry.js";
+import { canOfferProjectInspection, canOfferCandidateWorkspace, loadOperatorProjectReadRegistry } from "./sandbox/project-registry.js";
+import { SandboxV2Dispatcher, type SandboxV2Environment, type SandboxV2Request, type SandboxV2Result } from "@composer-assistant/sandbox-v2";
 import {
   isVerifiedRoundtripEffectEvidence,
   type RoundtripEffectEvidence,
@@ -749,10 +752,10 @@ export class AshleyCore {
         ownTimeReportActive: ownTimeConstraint?.canInfluence === true,
         relevantBoundaryIds: relevantBoundaries,
       });
-      const inspectionOffered = canOfferProjectInspection(this.db);
-      // M2 reachability: a capability offered to cognition must have the
-      // cognition pass that can exercise it. When project inspection is
-      // offered (release active + lifecycle + substrate + approved projects),
+      const inspectionOffered = canOfferProjectInspection(this.db) || canOfferCandidateWorkspace(this.db);
+      // M2/M3 reachability: a capability offered to cognition must have the
+      // cognition pass that can exercise it. When project inspection or
+      // candidate workspace is offered (release active + lifecycle + substrate + approved projects),
       // admit model Thought even for otherwise-easy turns; the deterministic
       // floor and deadlines still bound it. Capability-driven admission, not a
       // phrase detector.
@@ -800,32 +803,63 @@ export class AshleyCore {
           },
         );
 
-        if (decision.inspectionRequest) {
-          const inspResult = await executeProjectInspectionV2({
-            request: decision.inspectionRequest,
-            messageEntityUuid: messageEntityUuid ?? undefined,
-            deadlineAtMs: thoughtDeadlineAtMs ?? undefined,
-            db: this.db,
-          });
-          decision.operationalLicense = inspResult.license;
-          decision.inspectionObservation = inspResult.observation;
-          decision = await deliberateThoughtContinuation(
-            this.db,
-            decision,
-            inspResult.observation,
-            inspResult.license.error ?? null,
-            motivations,
-            "reactive",
-            undefined,
-            undefined,
-            {
-              allowModelThought: thoughtCanInfluence,
-              firstBubbleDeadlineAtMs,
-              thoughtDeadlineAtMs,
-              deliveryReservationId: reservation.id,
-              ownerId: input.ownerId,
-            },
-          );
+        const opReq = decision.operationalRequest;
+        if (opReq) {
+          if (opReq.kind === "project_inspection") {
+            const inspResult = await executeProjectInspectionV2({
+              request: opReq.request,
+              messageEntityUuid: messageEntityUuid ?? undefined,
+              deadlineAtMs: thoughtDeadlineAtMs ?? undefined,
+              db: this.db,
+            });
+            decision.operationalLicense = inspResult.license;
+            decision.operationalObservation = inspResult.observation;
+            decision.inspectionObservation = inspResult.observation;
+            decision = await deliberateThoughtContinuation(
+              this.db,
+              decision,
+              inspResult.observation,
+              inspResult.license.error ?? null,
+              motivations,
+              "reactive",
+              undefined,
+              undefined,
+              {
+                allowModelThought: thoughtCanInfluence,
+                firstBubbleDeadlineAtMs,
+                thoughtDeadlineAtMs,
+                deliveryReservationId: reservation.id,
+                ownerId: input.ownerId,
+              },
+            );
+          } else if (opReq.kind === "candidate_workspace_experiment") {
+            const expResult = await executeWorkspaceExperimentV2({
+              request: opReq.request,
+              messageEntityUuid: messageEntityUuid ?? undefined,
+              deadlineAtMs: thoughtDeadlineAtMs ?? undefined,
+              db: this.db,
+            });
+            decision.operationalLicense = expResult.license;
+            decision.operationalObservation = expResult.observation;
+            decision.workspaceObservation = expResult.observation;
+            decision = await deliberateThoughtContinuation(
+              this.db,
+              decision,
+              expResult.observation,
+              expResult.license.error ?? null,
+              motivations,
+              "reactive",
+              undefined,
+              undefined,
+              {
+                allowModelThought: thoughtCanInfluence,
+                firstBubbleDeadlineAtMs,
+                thoughtDeadlineAtMs,
+                deliveryReservationId: reservation.id,
+                ownerId: input.ownerId,
+              },
+            );
+          }
         }
       }
       if (capabilityCanInfluence(this.db, "affect")) {
@@ -871,9 +905,9 @@ export class AshleyCore {
         decision,
       });
       decision.perceptionLicenses = perception.licenses;
-      // Reactive sandbox execution (M2 / M1 arbitration)
-      if (decision.inspectionRequest) {
-        // M2 inspection was requested and executed by Thought; skip M1 reactive admission (Constraint 3)
+      // Reactive sandbox execution (M2 / M3 / M1 arbitration)
+      if (decision.operationalRequest) {
+        // M2 inspection or M3 workspace experiment was requested and executed by Thought; skip M1 reactive admission (Constraint 3)
       } else {
         const reactiveAdmission = evaluateReactiveSandboxAdmission({
           db: this.db,
@@ -1522,7 +1556,9 @@ export class AshleyCore {
       const inspectionOffered = canOfferProjectInspection(this.db);
       // M2 reachability (proactive): same capability-driven admission as the
       // reactive path — an offered inspection capability implies model Thought
-      // runs so the offer is reachable.
+      // runs so the offer is reachable. Candidate workspace experiments (M3)
+      // are not executable from proactive turns in this wave, so canOfferCandidateWorkspace
+      // does not by itself make proactive Thought reachable.
       if (complexity.mode === "hard" || inspectionOffered) {
         decision = await deliberateDecision(
           this.db,
@@ -1534,24 +1570,37 @@ export class AshleyCore {
           undefined,
           { allowModelThought: true },
         );
-        if (decision.inspectionRequest) {
-          const inspResult = await executeProjectInspectionV2({
-            request: decision.inspectionRequest,
-            db: this.db,
-          });
-          decision.operationalLicense = inspResult.license;
-          decision.inspectionObservation = inspResult.observation;
-          decision = await deliberateThoughtContinuation(
-            this.db,
-            decision,
-            inspResult.observation,
-            inspResult.license.error ?? null,
-            motivations,
-            "proactive",
-            undefined,
-            undefined,
-            { allowModelThought: true },
-          );
+        const opReq = decision.operationalRequest;
+        if (opReq) {
+          if (opReq.kind === "project_inspection") {
+            const inspResult = await executeProjectInspectionV2({
+              request: opReq.request,
+              db: this.db,
+            });
+            decision.operationalLicense = inspResult.license;
+            decision.operationalObservation = inspResult.observation;
+            decision.inspectionObservation = inspResult.observation;
+            decision = await deliberateThoughtContinuation(
+              this.db,
+              decision,
+              inspResult.observation,
+              inspResult.license.error ?? null,
+              motivations,
+              "proactive",
+              undefined,
+              undefined,
+              { allowModelThought: true },
+            );
+          } else if (opReq.kind === "candidate_workspace_experiment") {
+            // M3 candidate workspace experiments are NOT authorized for proactive
+            // execution in this wave. Fail closed: do not execute, do not mutate workspaces,
+            // and do not fall through into M1.
+            decision.operationalLicense = {
+              state: "none",
+              profile: "project_experimentation",
+              error: "proactive_workspace_experiment_unauthorized",
+            };
+          }
         }
       }
       if (capabilityCanInfluence(this.db, "affect")) {

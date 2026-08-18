@@ -31,6 +31,15 @@ export type {
   SandboxV2ProjectReadFileRequest,
   SandboxV2ProjectListDirectoryRequest,
   SandboxV2ProjectSearchTextRequest,
+  SandboxV2WorkspaceReadFileRequest,
+  SandboxV2WorkspaceListDirectoryRequest,
+  SandboxV2WorkspaceSearchTextRequest,
+  SandboxV2WorkspaceWriteFileRequest,
+  SandboxV2WorkspaceReplaceFileRequest,
+  SandboxV2WorkspaceEditTextRequest,
+  SandboxV2WorkspaceDeleteFileRequest,
+  SandboxV2WorkspaceCreateDirectoryRequest,
+  SandboxV2WorkspaceRequest,
 } from "./v2-types.js";
 
 export { V2_LIMITS, V2_HOST_FACTS, V2_SECRET_ENV_KEY } from "./limits.js";
@@ -66,6 +75,21 @@ export {
   type InspectionSpawnInput,
   type InspectionSpawnOutput,
 } from "./project-inspection/executor.js";
+
+export {
+  executeWorkspaceExperiment,
+  spawnBubblewrapInspection as workspaceSpawnBubblewrapInspection,
+  type WorkspaceExperimentSpawn,
+  type WorkspaceExperimentSpawnInput,
+  type WorkspaceExperimentSpawnOutput,
+} from "./workspace/executor.js";
+
+export {
+  WorkspaceManager,
+  type WorkspaceManagerOptions,
+  type WorkspaceAcquisitionResult,
+  type WorkspaceManifest,
+} from "./workspace/workspace-manager.js";
 
 export {
   handleFileRoundtripV2,

@@ -45,7 +45,9 @@ import {
 } from "@composer-assistant/sandbox-v2";
 import type {
   CognitionInspectionRequest,
+  CognitionWorkspaceRequest,
   ProjectInspectionObservation,
+  WorkspaceExperimentObservation,
 } from "../types.js";
 import {
   loadOperatorProjectReadRegistry,
@@ -54,6 +56,7 @@ import {
 import type {
   OperationalClaimLicense,
   RoundtripEffectEvidence,
+  WorkspaceClaimEffect,
 } from "./engineering-types.js";
 
 import type { DatabaseSync } from "node:sqlite";
@@ -524,6 +527,245 @@ export async function executeProjectInspectionV2(
         state: "failed",
         taskId: `v2-insp-${Date.now()}`,
         profile: "project_investigation",
+        error: "internal_error",
+        ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
+      },
+      observation: null,
+    };
+  }
+}
+
+export type ExecuteWorkspaceExperimentV2Input = {
+  request: CognitionWorkspaceRequest;
+  messageEntityUuid?: string;
+  deadlineAtMs?: number;
+  dispatcher?: SandboxV2Dispatcher;
+  registry?: V2ProjectReadRegistry;
+  workspaceManager?: import("@composer-assistant/sandbox-v2").WorkspaceManager;
+  envOverrides?: Partial<SandboxV2Environment> & {
+    sandboxEngineeringLifecycleEnabled?: boolean;
+  };
+  db?: DatabaseSync;
+  masterMode?: CognitionMode;
+  skipCapabilityGate?: boolean;
+};
+
+export type ExecuteWorkspaceExperimentV2Result = {
+  license: OperationalClaimLicense;
+  observation: WorkspaceExperimentObservation | null;
+};
+
+/**
+ * Executes a typed M3 candidate workspace experiment request through the SandboxV2Dispatcher.
+ *
+ * Invariants (fail-closed):
+ *  1. Resolves projectId strictly through the operator-owned registry;
+ *  2. On non-Linux hosts without test seams, gracefully returns state="none", error="sandbox_unavailable";
+ *  3. On success, returns OperationalClaimLicense (profile: workspace_experiment, state: succeeded)
+ *     with narrow WorkspaceClaimEffect safe facts, and a separate WorkspaceExperimentObservation;
+ *  4. On failure, returns OperationalClaimLicense with state="failed", typed error, and observation=null;
+ *  5. On unavailable substrate, returns OperationalClaimLicense with state="none", error="sandbox_unavailable", and observation=null.
+ */
+export async function executeWorkspaceExperimentV2(
+  input: ExecuteWorkspaceExperimentV2Input,
+): Promise<ExecuteWorkspaceExperimentV2Result> {
+  const { request, messageEntityUuid } = input;
+
+  // 1. Enforce deadline
+  if (typeof input.deadlineAtMs === "number" && input.deadlineAtMs <= Date.now()) {
+    return {
+      license: {
+        state: "failed",
+        taskId: `v2-exp-${Date.now()}`,
+        profile: "project_experimentation",
+        error: "deadline_exceeded",
+        ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
+      },
+      observation: null,
+    };
+  }
+
+  // 2. Enforce capability release gate
+  if (input.db && !input.skipCapabilityGate) {
+    try {
+      if (!capabilityCanInfluence(input.db, "project_experimentation", input.masterMode)) {
+        return {
+          license: {
+            state: "none",
+            taskId: `v2-exp-${Date.now()}`,
+            profile: "project_experimentation",
+            error: "project_experimentation_gate_denied",
+            ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
+          },
+          observation: null,
+        };
+      }
+    } catch {
+      return {
+        license: {
+          state: "none",
+          taskId: `v2-exp-${Date.now()}`,
+          profile: "project_experimentation",
+          error: "project_experimentation_gate_denied",
+          ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
+        },
+        observation: null,
+      };
+    }
+  }
+
+  // 3. Enforce sandbox lifecycle gate
+  const lifecycleEnabled =
+    input.envOverrides?.sandboxEngineeringLifecycleEnabled !== undefined
+      ? input.envOverrides.sandboxEngineeringLifecycleEnabled
+      : env.sandboxEngineeringLifecycleEnabled;
+  if (!lifecycleEnabled) {
+    return {
+      license: {
+        state: "none",
+        taskId: `v2-exp-${Date.now()}`,
+        profile: "project_experimentation",
+        error: "sandbox_lifecycle_disabled",
+        ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
+      },
+      observation: null,
+    };
+  }
+
+  const registry =
+    input.registry ??
+    input.envOverrides?.registry ??
+    loadOperatorProjectReadRegistry();
+
+  const isCustomSeam =
+    input.dispatcher !== undefined ||
+    input.envOverrides?.spawnInspection !== undefined ||
+    input.envOverrides?.spawnWorkspace !== undefined ||
+    input.envOverrides?.sandboxAvailable !== undefined;
+
+  // 4. Enforce substrate availability
+  const substrateAvailable =
+    input.envOverrides?.sandboxAvailable !== undefined
+      ? input.envOverrides.sandboxAvailable()
+      : isSandboxV2Available();
+
+  if (!isCustomSeam && !substrateAvailable) {
+    return {
+      license: {
+        state: "none",
+        taskId: `v2-exp-${Date.now()}`,
+        profile: "project_experimentation",
+        error: "sandbox_unavailable",
+        ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
+      },
+      observation: null,
+    };
+  }
+
+  try {
+    const dispatcher =
+      input.dispatcher ??
+      new SandboxV2Dispatcher({
+        env: {
+          registry,
+          workspaceManager: input.workspaceManager,
+          ...input.envOverrides,
+        },
+      });
+
+    const v2Req: SandboxV2Request = {
+      ...request,
+      version: 2,
+    } as SandboxV2Request;
+
+    const res: SandboxV2Result = await dispatcher.dispatch(v2Req);
+
+    if (res.outcome === "succeeded") {
+      const workspaceId = res.workspaceId ?? (request as any).workspaceId ?? "unknown";
+      const sourceSnapshotId = res.sourceSnapshotId ?? "unknown";
+      const logicalRelativePath = (request as any).path ?? ".";
+
+      const workspaceClaimEffect: WorkspaceClaimEffect = {
+        verified: true,
+        projectId: request.projectId,
+        workspaceId,
+        operation: request.operation,
+        logicalRelativePath,
+        sourceSnapshotId,
+        bytesRead: res.result.kind === "workspace.read_file" ? res.result.bytes : undefined,
+        bytesWritten: (res.result as any).bytesWritten,
+        beforeSha256: (request as any).expectedSha256,
+        afterSha256: (res.result as any).contentHash ?? (res.result as any).sha256,
+        completedAtMs: res.executedAtMs,
+      };
+
+      const observation: WorkspaceExperimentObservation = {
+        kind: "workspace_experiment_observation",
+        projectId: request.projectId,
+        workspaceId,
+        operation: request.operation,
+        verified: true,
+        executedAtMs: res.executedAtMs,
+        logicalRelativePath,
+        sourceSnapshotId,
+        contentUtf8:
+          res.result.kind === "workspace.read_file" && typeof res.result.contentBase64 === "string"
+            ? Buffer.from(res.result.contentBase64, "base64").toString("utf8")
+            : undefined,
+        entries: res.result.kind === "workspace.list_directory" ? res.result.entries : undefined,
+        matches: res.result.kind === "workspace.search_text" ? res.result.matches : undefined,
+        filesScanned: res.result.kind === "workspace.search_text" ? res.result.filesScanned : undefined,
+        bytesWritten: (res.result as any).bytesWritten,
+        bytesRead: res.result.kind === "workspace.read_file" ? res.result.bytes : undefined,
+        beforeSha256: (request as any).expectedSha256,
+        afterSha256: (res.result as any).contentHash ?? (res.result as any).sha256,
+        contentHash: (res.result as any).contentHash,
+        deleted: (res.result as any).deleted,
+        verifiedAbsent: (res.result as any).verifiedAbsent,
+      };
+
+      return {
+        license: {
+          state: "succeeded",
+          taskId: `v2-exp-${res.executedAtMs}`,
+          profile: "project_experimentation",
+          workspaceClaimEffect,
+          ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
+        },
+        observation,
+      };
+    }
+
+    if (res.outcome === "unavailable") {
+      return {
+        license: {
+          state: "none",
+          taskId: `v2-exp-${res.executedAtMs}`,
+          profile: "project_experimentation",
+          error: res.error ?? "sandbox_unavailable",
+          ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
+        },
+        observation: null,
+      };
+    }
+
+    // res.outcome === "failed"
+    return {
+      license: {
+        state: "failed",
+        taskId: `v2-exp-${res.executedAtMs}`,
+        profile: "project_experimentation",
+        error: res.error ?? "workspace_experiment_failed",
+        ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
+      },
+      observation: null,
+    };
+  } catch {
+    return {
+      license: {
+        state: "failed",
+        taskId: `v2-exp-${Date.now()}`,
+        profile: "project_experimentation",
         error: "internal_error",
         ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
       },

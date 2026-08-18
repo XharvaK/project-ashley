@@ -1,5 +1,6 @@
 import {
   isVerifiedRoundtripEffectEvidence,
+  isVerifiedWorkspaceClaimEffect,
   type OperationalClaimLicense,
   type SandboxTaskProfile,
 } from "./engineering-types.js";
@@ -127,6 +128,45 @@ export function deriveOperationalTruth(
       case "succeeded":
         return {
           state: "verified_success",
+          locked: false,
+          profile: license.profile,
+          taskId: license.taskId,
+        };
+
+      case "failed":
+        return {
+          state: "failed",
+          locked: false,
+          profile: license.profile,
+          taskId: license.taskId,
+          error: license.error ?? null,
+        };
+
+      case "none":
+      default:
+        return {
+          state: "none",
+          locked: false,
+          profile: license.profile,
+          taskId: license.taskId,
+          error: license.error ?? null,
+        };
+    }
+  }
+
+  if (license.profile === "project_experimentation") {
+    switch (license.state) {
+      case "succeeded":
+        if (isVerifiedWorkspaceClaimEffect(license.workspaceClaimEffect)) {
+          return {
+            state: "verified_success",
+            locked: false,
+            profile: license.profile,
+            taskId: license.taskId,
+          };
+        }
+        return {
+          state: "none",
           locked: false,
           profile: license.profile,
           taskId: license.taskId,

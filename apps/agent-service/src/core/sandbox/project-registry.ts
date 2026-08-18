@@ -98,6 +98,44 @@ export function canOfferProjectInspection(
   return approved.length > 0;
 }
 
+/**
+ * Checks all four conditions for offering M3 candidate workspace experiment:
+ * 1. project_experimentation release state permits live influence;
+ * 2. sandbox lifecycle permits execution;
+ * 3. Sandbox V2 substrate is available;
+ * 4. at least one approved projectId exists with candidateWorkspaceAllowed.
+ */
+export function canOfferCandidateWorkspace(
+  db?: DatabaseSync,
+  options?: CanOfferProjectInspectionOptions,
+): boolean {
+  if (db) {
+    try {
+      if (!capabilityCanInfluence(db, "project_experimentation", options?.masterMode)) {
+        return false;
+      }
+    } catch {
+      return false;
+    }
+  }
+  const lifecycle =
+    options?.lifecycleEnabled ?? env.sandboxEngineeringLifecycleEnabled;
+  if (!lifecycle) return false;
+
+  const substrate =
+    options?.substrateAvailable ?? isSandboxV2Available();
+  if (!substrate) return false;
+
+  const registry = options?.registry ?? loadOperatorProjectReadRegistry();
+  const approved = listApprovedReadProjectIds(registry);
+  if (approved.length === 0) return false;
+  return approved.some((pid) => {
+    const resolution = registry.resolveReadRoot(pid);
+    if (!resolution?.ok) return false;
+    return resolution.entry.candidateWorkspaceAllowed;
+  });
+}
+
 export class AgentProjectRegistry {
   private registry: ProjectRootRegistry;
 

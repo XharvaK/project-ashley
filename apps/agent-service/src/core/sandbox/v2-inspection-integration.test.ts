@@ -442,6 +442,14 @@ describe("Sandbox V2 M2 Runtime Integration & Two-Pass Cognition Loop", () => {
       affectLicense: defaultAffectLicense,
       cognitiveAllocation: { shouldSpeak: true, effort: "high", completion: "complete" },
       authorizedClaims: defaultAuthorizedClaims,
+      operationalRequest: {
+        kind: "project_inspection",
+        request: {
+          operation: "project.read_file",
+          projectId: "project-ashley",
+          path: "src/secure.ts",
+        },
+      },
       inspectionRequest: {
         operation: "project.read_file",
         projectId: "project-ashley",

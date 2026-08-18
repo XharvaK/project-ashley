@@ -2,6 +2,14 @@ import type { OperationalClaimLicense } from "./sandbox/engineering-types.js";
 import type {
   SandboxV2InspectionEntry,
   SandboxV2SearchMatch,
+  SandboxV2WorkspaceReadFileRequest,
+  SandboxV2WorkspaceListDirectoryRequest,
+  SandboxV2WorkspaceSearchTextRequest,
+  SandboxV2WorkspaceWriteFileRequest,
+  SandboxV2WorkspaceReplaceFileRequest,
+  SandboxV2WorkspaceEditTextRequest,
+  SandboxV2WorkspaceDeleteFileRequest,
+  SandboxV2WorkspaceCreateDirectoryRequest,
 } from "@composer-assistant/sandbox-v2";
 
 export type CognitionInspectionRequest =
@@ -13,7 +21,22 @@ export type CognitionInspectionRequest =
       path?: string;
       pattern: string;
       maxMatches?: number;
-    };
+    }
+  | { operation: string; projectId: string; path: string };
+
+export type CognitionWorkspaceRequest =
+  | SandboxV2WorkspaceReadFileRequest
+  | SandboxV2WorkspaceListDirectoryRequest
+  | SandboxV2WorkspaceSearchTextRequest
+  | SandboxV2WorkspaceWriteFileRequest
+  | SandboxV2WorkspaceReplaceFileRequest
+  | SandboxV2WorkspaceEditTextRequest
+  | SandboxV2WorkspaceDeleteFileRequest
+  | SandboxV2WorkspaceCreateDirectoryRequest;
+
+export type CognitionOperationalRequest =
+  | { kind: "project_inspection"; request: CognitionInspectionRequest }
+  | { kind: "candidate_workspace_experiment"; request: CognitionWorkspaceRequest };
 
 export type ProjectReadFileObservation = {
   projectId: string;
@@ -53,6 +76,29 @@ export type ProjectInspectionObservation =
   | ProjectReadFileObservation
   | ProjectListDirectoryObservation
   | ProjectSearchTextObservation;
+
+export type WorkspaceExperimentObservation = {
+  kind: "workspace_experiment_observation";
+  projectId: string;
+  workspaceId: string;
+  operation: string;
+  verified: boolean;
+  executedAtMs: number;
+  logicalRelativePath?: string;
+  contentUtf8?: string;
+  entries?: SandboxV2InspectionEntry[];
+  matches?: SandboxV2SearchMatch[];
+  filesScanned?: number;
+  bytesWritten?: number;
+  bytesRead?: number;
+  beforeSha256?: string;
+  afterSha256?: string;
+  contentHash?: string;
+  deleted?: boolean;
+  verifiedAbsent?: boolean;
+  sourceSnapshotId?: string;
+  error?: string | null;
+};
 
 export type DecisionKind =
   | "speak"
@@ -245,9 +291,13 @@ export type Decision = {
   ownTimeReport?: OwnTimeReportMarker;
   operationalLicense?: OperationalClaimLicense;
   evidenceDisposition?: EvidenceDisposition | null;
+  operationalRequest?: CognitionOperationalRequest | null;
+  operationalObservation?: ProjectInspectionObservation | WorkspaceExperimentObservation | null;
+  operationalCognitiveResult?: string | null;
   inspectionRequest?: CognitionInspectionRequest | null;
   inspectionObservation?: ProjectInspectionObservation | null;
   inspectionCognitiveResult?: string | null;
+  workspaceObservation?: WorkspaceExperimentObservation | null;
   holdReasonCode?: HoldReasonCode | null;
   silenceReasonCode?: SilenceReasonCode | null;
 };
