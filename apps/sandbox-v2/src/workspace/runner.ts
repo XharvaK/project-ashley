@@ -81,7 +81,7 @@ function resolveSafe(rel) {
   var cur = WORKSPACE;
   for (var i = 0; i < parts.length; i += 1) {
     var segment = parts[i];
-    if (segment === "" || segment === ".") { return { ok: false, code: "invalid_path" }; }
+    if (segment === "" || segment === "." || segment === "..") { return { ok: false, code: "invalid_path" }; }
     cur = cur + "/" + segment;
     var st;
     try {
@@ -96,6 +96,38 @@ function resolveSafe(rel) {
   return { ok: true, abs: cur };
 }
 
+function resolveSafeParent(rel) {
+  if (typeof rel !== "string" || rel === "." || rel === "" || !isCanonicalRelativePath(rel)) {
+    return { ok: false, code: "invalid_path" };
+  }
+  var parts = rel.split("/");
+  var fileName = parts[parts.length - 1];
+  if (fileName === "" || fileName === "." || fileName === "..") {
+    return { ok: false, code: "invalid_path" };
+  }
+  var cur = WORKSPACE;
+  for (var i = 0; i < parts.length - 1; i += 1) {
+    var segment = parts[i];
+    if (segment === "" || segment === "." || segment === "..") { return { ok: false, code: "invalid_path" }; }
+    cur = cur + "/" + segment;
+    var st;
+    try {
+      st = fs.lstatSync(cur);
+    } catch (e) {
+      return { ok: false, code: "not_found" };
+    }
+    if (st.isSymbolicLink()) {
+      return { ok: false, code: "symlink_forbidden" };
+    }
+    if (!st.isDirectory()) {
+      return { ok: false, code: "not_a_directory" };
+    }
+  }
+  var parentAbs = cur;
+  var targetAbs = parentAbs + "/" + fileName;
+  return { ok: true, parentAbs: parentAbs, abs: targetAbs, fileName: fileName };
+}
+
 function ensureWithinWorkspace(abs) {
   var normalized;
   try {
@@ -104,7 +136,7 @@ function ensureWithinWorkspace(abs) {
     return { ok: false };
   }
   var wsRoot = fs.realpathSync(WORKSPACE);
-  if (!normalized.startsWith(wsRoot + "/")) {
+  if (normalized !== wsRoot && !normalized.startsWith(wsRoot + "/")) {
     return { ok: false };
   }
   return { ok: true };
@@ -319,10 +351,11 @@ function computeWorkspaceBytes() {
 
 function writeFileOp(req) {
   var path = req.path;
-  var resolved = resolveSafe(path);
+  var resolved = resolveSafeParent(path);
   if (!resolved.ok) { fail(resolved.code); }
+  var parentAbs = resolved.parentAbs;
   var abs = resolved.abs;
-  var within = ensureWithinWorkspace(abs);
+  var within = ensureWithinWorkspace(parentAbs);
   if (!within.ok) { fail("path_escapes_workspace"); }
   var st;
   var exists = false;
@@ -339,7 +372,7 @@ function writeFileOp(req) {
   var curBytes = computeWorkspaceBytes();
   if (curBytes + byteLen > WORKSPACE_MAX_BYTES) { fail("workspace_limit_exceeded"); }
 
-  var tmpAbs = abs + ".tmp." + Date.now() + "." + crypto.randomBytes(4).toString("hex");
+  var tmpAbs = parentAbs + "/.tmp." + Date.now() + "." + crypto.randomBytes(4).toString("hex");
   try {
     fs.writeFileSync(tmpAbs, req.content, "utf8");
     fs.renameSync(tmpAbs, abs);
@@ -355,6 +388,8 @@ function writeFileOp(req) {
     fail("verify_failed");
   }
   if (finalSt.isSymbolicLink()) { fail("symlink_forbidden_after_write"); }
+  var finalWithin = ensureWithinWorkspace(abs);
+  if (!finalWithin.ok) { fail("path_escapes_workspace"); }
   return {
     kind: "workspace.write_file",
     path: path,
@@ -539,27 +574,46 @@ function deleteFileOp(path, expectedSha256) {
 }
 
 function createDirectoryOp(path) {
-  var resolved = resolveSafe(path);
-  if (!resolved.ok) { fail(resolved.code); }
-  var abs = resolved.abs;
-  var within = ensureWithinWorkspace(abs);
-  if (!within.ok) { fail("path_escapes_workspace"); }
-  try {
-    fs.mkdirSync(abs, { recursive: true });
-  } catch (e) {
-    fail("mkdir_failed");
+  if (typeof path !== "string" || path === "." || path === "" || !isCanonicalRelativePath(path)) {
+    fail("invalid_path");
+  }
+  var parts = path.split("/");
+  var cur = WORKSPACE;
+  for (var i = 0; i < parts.length; i += 1) {
+    var segment = parts[i];
+    if (segment === "" || segment === "." || segment === "..") { fail("invalid_path"); }
+    cur = cur + "/" + segment;
+    var exists = false;
+    var st;
+    try {
+      st = fs.lstatSync(cur);
+      exists = true;
+    } catch (e) {}
+    if (exists) {
+      if (st.isSymbolicLink()) { fail("symlink_forbidden"); }
+      if (!st.isDirectory()) { fail("not_a_directory"); }
+    } else {
+      try {
+        fs.mkdirSync(cur);
+      } catch (e) {
+        fail("mkdir_failed");
+      }
+    }
   }
   var dirSt;
   try {
-    dirSt = fs.lstatSync(abs);
+    dirSt = fs.lstatSync(cur);
   } catch (e) {
     fail("verify_failed");
   }
   if (dirSt.isSymbolicLink()) { fail("symlink_forbidden"); }
   if (!dirSt.isDirectory()) { fail("not_a_directory"); }
+  var within = ensureWithinWorkspace(cur);
+  if (!within.ok) { fail("path_escapes_workspace"); }
   return {
     kind: "workspace.create_directory",
     path: path,
+    created: true,
     completedAtMs: Date.now()
   };
 }

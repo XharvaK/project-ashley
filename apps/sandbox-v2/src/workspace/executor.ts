@@ -203,7 +203,7 @@ export async function spawnBubblewrapInspection(
     stderrData += chunk.toString("utf8");
   });
 
-  if (Buffer.byteLength(input.requestJson, "utf8") > V2_LIMITS.REQUEST_MAX_BYTES) {
+  if (Buffer.byteLength(input.requestJson, "utf8") > V2_LIMITS.WORKSPACE_REQUEST_MAX_BYTES) {
     child.kill("SIGKILL");
     return {
       exitCode: null,
