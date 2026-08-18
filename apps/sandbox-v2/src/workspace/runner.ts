@@ -318,7 +318,8 @@ function searchOp(rel, pattern, maxMatches) {
     kind: "workspace.search_text",
     path: rel,
     matches: matches,
-    truncated: truncated
+    truncated: truncated,
+    filesScanned: filesScanned
   };
 }
 
