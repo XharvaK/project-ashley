@@ -248,7 +248,7 @@ export async function runSubstrateQualification(options = {}) {
         try {
           const versionOut = execSync(`${V2_HOST_FACTS.BWRAP} --version`).toString().trim();
           const probeOut = execSync(
-            `${V2_HOST_FACTS.BWRAP} --unshare-user --unshare-pid --unshare-net --ro-bind /usr /usr --proc /proc --dev /dev --tmpfs /tmp /bin/sh -c "echo bwrap-ok"`
+            `${V2_HOST_FACTS.BWRAP} --unshare-user --unshare-pid --unshare-net --ro-bind /usr /usr --symlink usr/bin /bin --symlink usr/lib /lib --symlink usr/lib64 /lib64 --proc /proc --dev /dev --tmpfs /tmp /bin/sh -c "echo bwrap-ok"`
           ).toString().trim();
           const pass = probeOut === "bwrap-ok";
           recordCase("B2", {
@@ -392,7 +392,7 @@ export async function runSubstrateQualification(options = {}) {
         });
       } else {
         // Real bwrap execution on Linux
-        const bwrapCmd = `${V2_HOST_FACTS.BWRAP} --unshare-user --unshare-pid --unshare-net --ro-bind /usr /usr --dev /dev --proc /proc --tmpfs /tmp --bind ${workspaceRoot}/${sharedWorkspaceId}/tree /workspace --clearenv /bin/sh -c "touch /usr/.probe 2>/dev/null || echo ro-usr-ok"`;
+        const bwrapCmd = `${V2_HOST_FACTS.BWRAP} --unshare-user --unshare-pid --unshare-net --ro-bind /usr /usr --symlink usr/bin /bin --symlink usr/lib /lib --symlink usr/lib64 /lib64 --dev /dev --proc /proc --tmpfs /tmp --bind ${workspaceRoot}/${sharedWorkspaceId}/tree /workspace --clearenv /bin/sh -c "touch /usr/.probe 2>/dev/null || echo ro-usr-ok"`;
         try {
           const out = execSync(bwrapCmd).toString().trim();
           recordCase("B6", {
@@ -534,37 +534,93 @@ export async function runSubstrateQualification(options = {}) {
     }
 
     // -------------------------------------------------------------
-    // Case B10: Full Typed Mutation Vocabulary
+    // Case B10: Full Typed Mutation & Inspection Vocabulary (All 8 Operations)
     // -------------------------------------------------------------
     if (selectedCase === "ALL" || selectedCase === "B10") {
       if (!sharedWorkspaceId) {
-        recordCase("B10", { expected: "Full mutation vocabulary verified", actual: "No workspaceId", verdict: "BLOCKED", evidenceClass: "CLASS_A_PHYSICAL_FS" });
+        recordCase("B10", { expected: "All 8 workspace operations verified", actual: "No workspaceId", verdict: "BLOCKED", evidenceClass: "CLASS_A_PHYSICAL_FS" });
       } else {
         const treePath = join(workspaceRoot, sharedWorkspaceId, "tree");
-        mkdirSync(join(treePath, "docs"), { recursive: true });
-        writeFileSync(join(treePath, "docs", "spec.txt"), "version 1", "utf8");
+        let hasDocsDir = false;
+        let finalContentBeforeDel = "";
+        let deletedAbsent = false;
+        let allOpsSucceeded = true;
 
-        // edit_text -> version 2
-        let text = readFileSync(join(treePath, "docs", "spec.txt"), "utf8");
-        text = text.replace("1", "2");
-        writeFileSync(join(treePath, "docs", "spec.txt"), text, "utf8");
+        if (isLinux) {
+          const createDirRes = await executeWorkspaceExperiment(
+            { version: 2, operation: "workspace.create_directory", projectId: "fixture-project", path: "docs", workspaceId: sharedWorkspaceId },
+            { registry: fixtureRegistry, managedWorkspaceRoot: workspaceRoot }
+          );
+          const writeRes = await executeWorkspaceExperiment(
+            { version: 2, operation: "workspace.write_file", projectId: "fixture-project", path: "docs/spec.txt", content: "version 1", mustNotExist: true, workspaceId: sharedWorkspaceId },
+            { registry: fixtureRegistry, managedWorkspaceRoot: workspaceRoot }
+          );
+          const editRes = await executeWorkspaceExperiment(
+            { version: 2, operation: "workspace.edit_text", projectId: "fixture-project", path: "docs/spec.txt", oldText: "1", newText: "2", expectedSha256: writeRes?.result?.contentHash, workspaceId: sharedWorkspaceId },
+            { registry: fixtureRegistry, managedWorkspaceRoot: workspaceRoot }
+          );
+          const replaceRes = await executeWorkspaceExperiment(
+            { version: 2, operation: "workspace.replace_file", projectId: "fixture-project", path: "docs/spec.txt", content: "version 3", expectedSha256: editRes?.result?.contentHash, workspaceId: sharedWorkspaceId },
+            { registry: fixtureRegistry, managedWorkspaceRoot: workspaceRoot }
+          );
+          const listRes = await executeWorkspaceExperiment(
+            { version: 2, operation: "workspace.list_directory", projectId: "fixture-project", path: "docs", workspaceId: sharedWorkspaceId },
+            { registry: fixtureRegistry, managedWorkspaceRoot: workspaceRoot }
+          );
+          const searchRes = await executeWorkspaceExperiment(
+            { version: 2, operation: "workspace.search_text", projectId: "fixture-project", path: "docs", pattern: "version 3", workspaceId: sharedWorkspaceId },
+            { registry: fixtureRegistry, managedWorkspaceRoot: workspaceRoot }
+          );
+          const readRes = await executeWorkspaceExperiment(
+            { version: 2, operation: "workspace.read_file", projectId: "fixture-project", path: "docs/spec.txt", workspaceId: sharedWorkspaceId },
+            { registry: fixtureRegistry, managedWorkspaceRoot: workspaceRoot }
+          );
+          const deleteRes = await executeWorkspaceExperiment(
+            { version: 2, operation: "workspace.delete_file", projectId: "fixture-project", path: "docs/spec.txt", expectedSha256: replaceRes?.result?.contentHash, workspaceId: sharedWorkspaceId },
+            { registry: fixtureRegistry, managedWorkspaceRoot: workspaceRoot }
+          );
 
-        // replace_file -> version 3
-        writeFileSync(join(treePath, "docs", "spec.txt"), "version 3", "utf8");
+          hasDocsDir = existsSync(join(treePath, "docs"));
+          finalContentBeforeDel = readRes?.result?.contentBase64 ? Buffer.from(readRes.result.contentBase64, "base64").toString("utf8") : "";
+          deletedAbsent = !existsSync(join(treePath, "docs", "spec.txt"));
 
-        // list_directory & search_text
-        const hasDocsDir = existsSync(join(treePath, "docs"));
-        const readSpec = readFileSync(join(treePath, "docs", "spec.txt"), "utf8");
+          allOpsSucceeded =
+            createDirRes.outcome === "succeeded" &&
+            writeRes.outcome === "succeeded" &&
+            editRes.outcome === "succeeded" &&
+            replaceRes.outcome === "succeeded" &&
+            listRes.outcome === "succeeded" &&
+            searchRes.outcome === "succeeded" &&
+            (searchRes.result?.matches?.length ?? 0) > 0 &&
+            readRes.outcome === "succeeded" &&
+            deleteRes.outcome === "succeeded";
+        } else {
+          mkdirSync(join(treePath, "docs"), { recursive: true });
+          writeFileSync(join(treePath, "docs", "spec.txt"), "version 1", "utf8");
 
-        // delete_file
-        rmSync(join(treePath, "docs", "spec.txt"), { force: true });
-        const deletedAbsent = !existsSync(join(treePath, "docs", "spec.txt"));
+          // edit_text -> version 2
+          let text = readFileSync(join(treePath, "docs", "spec.txt"), "utf8");
+          text = text.replace("1", "2");
+          writeFileSync(join(treePath, "docs", "spec.txt"), text, "utf8");
 
-        const pass = hasDocsDir && readSpec === "version 3" && deletedAbsent;
+          // replace_file -> version 3
+          writeFileSync(join(treePath, "docs", "spec.txt"), "version 3", "utf8");
+
+          // list_directory & search_text
+          hasDocsDir = existsSync(join(treePath, "docs"));
+          finalContentBeforeDel = readFileSync(join(treePath, "docs", "spec.txt"), "utf8");
+
+          // delete_file
+          rmSync(join(treePath, "docs", "spec.txt"), { force: true });
+          deletedAbsent = !existsSync(join(treePath, "docs", "spec.txt"));
+          allOpsSucceeded = true;
+        }
+
+        const pass = allOpsSucceeded && hasDocsDir && finalContentBeforeDel === "version 3" && deletedAbsent;
         recordCase("B10", {
           workspaceId: sharedWorkspaceId,
-          expected: "All 7 mutation operations (create_dir, write, edit, replace, search, list, delete) verified",
-          actual: `hasDocsDir=${hasDocsDir}, finalContentBeforeDel='${readSpec}', deletedAbsent=${deletedAbsent}`,
+          expected: "All 8 workspace operations (create_directory, write_file, edit_text, replace_file, list_directory, search_text, read_file, delete_file) verified",
+          actual: `allOpsSucceeded=${allOpsSucceeded}, hasDocsDir=${hasDocsDir}, finalContentBeforeDel='${finalContentBeforeDel}', deletedAbsent=${deletedAbsent}`,
           verdict: pass ? "PASS" : "FAIL",
           evidenceClass: "CLASS_A_PHYSICAL_FS",
         });
@@ -606,7 +662,7 @@ export async function runSubstrateQualification(options = {}) {
       } else {
         let sandboxConnectFailed = true;
         try {
-          const probeCmd = `${V2_HOST_FACTS.BWRAP} --unshare-user --unshare-pid --unshare-net --ro-bind /usr /usr --dev /dev --proc /proc --tmpfs /tmp /bin/sh -c "nc -z -w 1 127.0.0.1 ${probePort} 2>/dev/null && echo CONNECTED || echo ISOLATED"`;
+          const probeCmd = `${V2_HOST_FACTS.BWRAP} --unshare-user --unshare-pid --unshare-net --ro-bind /usr /usr --symlink usr/bin /bin --symlink usr/lib /lib --symlink usr/lib64 /lib64 --dev /dev --proc /proc --tmpfs /tmp /bin/sh -c "nc -z -w 1 127.0.0.1 ${probePort} 2>/dev/null && echo CONNECTED || echo ISOLATED"`;
           const out = execSync(probeCmd).toString().trim();
           sandboxConnectFailed = out === "ISOLATED";
         } catch {
@@ -637,7 +693,7 @@ export async function runSubstrateQualification(options = {}) {
       let envIsolated = true;
       if (isLinux) {
         try {
-          const cmd = `${V2_HOST_FACTS.BWRAP} --unshare-user --unshare-pid --unshare-net --ro-bind /usr /usr --dev /dev --proc /proc --tmpfs /tmp --clearenv --setenv PATH /usr/bin --setenv HOME /tmp /bin/sh -c "env"`;
+          const cmd = `${V2_HOST_FACTS.BWRAP} --unshare-user --unshare-pid --unshare-net --ro-bind /usr /usr --symlink usr/bin /bin --symlink usr/lib /lib --symlink usr/lib64 /lib64 --dev /dev --proc /proc --tmpfs /tmp --clearenv --setenv PATH /usr/bin --setenv HOME /tmp /bin/sh -c "env"`;
           const out = execSync(cmd).toString();
           envIsolated = !out.includes(process.env[V2_SECRET_ENV_KEY]);
         } catch {
@@ -682,7 +738,7 @@ export async function runSubstrateQualification(options = {}) {
     }
 
     // -------------------------------------------------------------
-    // Case B14: Authority Revalidation & Fail-Closed Revocation
+    // Case B14: Current Parent Authority Revocation (Fail-Closed)
     // Constraint 1: MUST execute every operation through executeWorkspaceExperimentV2
     // -------------------------------------------------------------
     if (selectedCase === "ALL" || selectedCase === "B14") {
@@ -748,7 +804,7 @@ export async function runSubstrateQualification(options = {}) {
 
       recordCase("B14", {
         workspaceId: sharedWorkspaceId,
-        expected: "All 8 operations fail closed with workspace_not_allowed; candidate storage intact",
+        expected: "All 8 operations fail closed with workspace_not_allowed when candidateWorkspaceAllowed revoked; candidate storage intact",
         actual: `allDenied=${allDenied}, storageIntact=${storageIntact}`,
         verdict: pass ? "PASS" : "FAIL",
         evidenceClass: "CLASS_D_PROCESS_AUDIT",
@@ -757,7 +813,7 @@ export async function runSubstrateQualification(options = {}) {
     }
 
     // -------------------------------------------------------------
-    // Case B15: Resource Bounds & Path Escape Rejection (Validation Layer)
+    // Case B15: Validation & Resource Limits (invalid_path, request_too_large, content_too_large)
     // -------------------------------------------------------------
     if (selectedCase === "ALL" || selectedCase === "B15") {
       const spawnWorkspaceFallback = async (input) => {
@@ -871,7 +927,7 @@ export async function runSubstrateQualification(options = {}) {
 
       const pass = escapePass && oversizedReqPass && oversizedContentPass && noEarlierGateDenial;
       recordCase("B15", {
-        expected: "Path traversal -> invalid_path, request > 128 KiB -> request_too_large, content > 64 KiB -> content_too_large at intended validation layer",
+        expected: "Intended validation errors (invalid_path, request_too_large, content_too_large) enforced fail-closed",
         actual: `escapeError=${escapeRes.license.error}, oversizedReqError=${oversizedReqRes.license.error}, oversizedContentError=${oversizedContentRes.license.error}`,
         verdict: pass ? "PASS" : "FAIL",
         evidenceClass: "CLASS_D_PROCESS_AUDIT",
@@ -909,11 +965,21 @@ export async function runSubstrateQualification(options = {}) {
         // Physical Linux Mint service restart path
         const witnessPath = join(workspaceRoot, sharedWorkspaceId, "tree", "restart-witness.txt");
         writeFileSync(witnessPath, "restart-witness-ok", "utf8");
+        let serviceRestarted = false;
+        try {
+          execSync("systemctl --user restart ashley-agent", { stdio: "pipe" });
+          const statusOut = execSync("systemctl --user is-active ashley-agent", { stdio: "pipe" }).toString().trim();
+          serviceRestarted = statusOut === "active";
+        } catch {
+          serviceRestarted = false;
+        }
+        const exists = existsSync(witnessPath);
+        const pass = serviceRestarted && exists;
         recordCase("B16", {
           workspaceId: sharedWorkspaceId,
           expected: "Candidate workspace file written; persists across real systemctl --user service restart",
-          actual: `restartWitnessExists=${existsSync(witnessPath)}`,
-          verdict: existsSync(witnessPath) ? "PASS" : "FAIL",
+          actual: `serviceRestarted=${serviceRestarted}, restartWitnessExists=${exists}`,
+          verdict: pass ? "PASS" : "FAIL",
           evidenceClass: "CLASS_A_PHYSICAL_FS",
         });
       }

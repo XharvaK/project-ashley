@@ -245,4 +245,51 @@ describe("Stage 2 — Workspace Experiment Executor", () => {
       });
     }
   });
+
+  it("ensures SANDBOX_V2_WORKSPACE_RUNNER_SOURCE compiles cleanly without syntax errors", async () => {
+    const { SANDBOX_V2_WORKSPACE_RUNNER_SOURCE } = await import("./runner.js");
+    expect(() => {
+      new Function(SANDBOX_V2_WORKSPACE_RUNNER_SOURCE);
+    }).not.toThrow();
+  });
+
+  it("ensures buildBwrapArgs establishes canonical merged-/usr projection and preserves isolation invariants", async () => {
+    const { buildBwrapArgs } = await import("./executor.js");
+    const args = buildBwrapArgs("/mock/workspace/tree");
+
+    // Merged-/usr projection symlinks
+    expect(args).toContain("--ro-bind");
+    const roBindIndex = args.indexOf("--ro-bind");
+    expect(args[roBindIndex + 1]).toBe("/usr");
+    expect(args[roBindIndex + 2]).toBe("/usr");
+
+    expect(args).toContain("--symlink");
+    expect(args).toContain("usr/lib");
+    expect(args).toContain("/lib");
+    expect(args).toContain("usr/lib64");
+    expect(args).toContain("/lib64");
+    expect(args).toContain("usr/bin");
+    expect(args).toContain("/bin");
+    expect(args).toContain("usr/sbin");
+    expect(args).toContain("/sbin");
+
+    // Workspace bind
+    expect(args).toContain("--bind");
+    const bindIndex = args.indexOf("--bind");
+    expect(args[bindIndex + 1]).toBe("/mock/workspace/tree");
+    expect(args[bindIndex + 2]).toBe("/workspace");
+
+    // Isolation invariants
+    expect(args).toContain("--unshare-user");
+    expect(args).toContain("--unshare-pid");
+    expect(args).toContain("--unshare-net");
+    expect(args).toContain("--unshare-ipc");
+    expect(args).toContain("--unshare-uts");
+    expect(args).toContain("--clearenv");
+
+    // Prohibited exposures
+    expect(args.includes("/home")).toBe(false);
+    expect(args.includes("/run")).toBe(false);
+    expect(args.includes("/home/xarvak")).toBe(false);
+  });
 });

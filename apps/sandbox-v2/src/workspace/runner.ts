@@ -286,6 +286,26 @@ function searchOp(rel, pattern, maxMatches) {
     kind: "workspace.search_text",
     path: rel,
     matches: matches,
+    truncated: truncated
+  };
+}
+
+function computeWorkspaceBytes() {
+  var total = 0;
+  function walk(dir) {
+    var entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch (e) {
+      return;
+    }
+    for (var i = 0; i < entries.length; i += 1) {
+      var entry = entries[i];
+      if (entry.isSymbolicLink()) { continue; }
+      var full = dir + "/" + entry.name;
+      if (entry.isDirectory()) {
+        walk(full);
+      } else if (entry.isFile()) {
         try {
           var st = fs.statSync(full);
           total += st.size;

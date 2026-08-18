@@ -93,7 +93,7 @@ export type WorkspaceExperimentExecutorOptions = {
 
 export type ProjectInspectionExecutorOptions = WorkspaceExperimentExecutorOptions;
 
-function buildBwrapArgs(viewRoot: string): string[] {
+export function buildBwrapArgs(viewRoot: string): string[] {
   return [
     "--unshare-user",
     "--unshare-pid",
