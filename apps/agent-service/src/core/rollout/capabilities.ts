@@ -57,6 +57,67 @@ export type CapabilityEventKind =
   | "operator_rollback"
   | "operator_cutover";
 
+/**
+ * Capability graduation policy — wave M3.
+ *
+ * ONE global eligibility policy cannot honestly serve every capability
+ * because capability effect semantics differ:
+ *
+ *  - `live_shadow` capabilities can accrue runtime-observed shadow evidence
+ *    while observe-only (their operations execute read-only in shadow mode),
+ *    so promotion legitimately requires live-shadow volume and span.
+ *  - `operator_cutover` capabilities are effectful/border capabilities whose
+ *    defining operation must NOT execute while observe-only. For those, the
+ *    operation itself can never produce live_shadow evidence, so requiring it
+ *    would make observe → active promotion structurally impossible. Their
+ *    graduation path is: owner-attested qualification (evaluation evidence
+ *    recorded through the canonical owner endpoint) → explicit owner
+ *    promotion → durable audited cutover.
+ *
+ * The policy is a declaration, like `dependencies`. It is NOT persisted state
+ * and does NOT bypass eligibility: every policy still requires eval seeds,
+ * qualification, dependency readiness, and valid release/contract state.
+ */
+export type CapabilityGraduationPolicy =
+  | {
+      kind: "live_shadow";
+      minEvalSeeds: number;
+      minLiveShadowEvents: number;
+      minLiveShadowSpanDays: number;
+      requiresQualification: boolean;
+    }
+  | {
+      kind: "operator_cutover";
+      minEvalSeeds: number;
+      requiresQualification: boolean;
+    };
+
+/** Default policy: exact historical live-shadow graduation semantics. */
+const DEFAULT_GRADUATION_POLICY: CapabilityGraduationPolicy = {
+  kind: "live_shadow",
+  minEvalSeeds: 3,
+  minLiveShadowEvents: 25,
+  minLiveShadowSpanDays: 7,
+  requiresQualification: true,
+};
+
+/** Per-capability graduation policy declarations (default applies otherwise). */
+const GRADUATION_POLICIES: Partial<
+  Record<CapabilityName, CapabilityGraduationPolicy>
+> = {
+  project_experimentation: {
+    kind: "operator_cutover",
+    minEvalSeeds: 3,
+    requiresQualification: true,
+  },
+};
+
+export function graduationPolicyFor(
+  capability: CapabilityName,
+): CapabilityGraduationPolicy {
+  return GRADUATION_POLICIES[capability] ?? DEFAULT_GRADUATION_POLICY;
+}
+
 const dependencies: Record<CapabilityName, CapabilityName[]> = {
   recall: [],
   mind_state: ["recall"],
@@ -92,6 +153,7 @@ export type CapabilityStatus = {
   modelEpoch: number;
   state: CapabilityState;
   effective: boolean;
+  graduationPolicy: CapabilityGraduationPolicy["kind"];
   dependencies: CapabilityName[];
   dependenciesReady: boolean;
   shadowExecutable: boolean;
@@ -313,6 +375,13 @@ function liveSpanDays(window: { first: string | null; last: string | null }): nu
  * Pure eligibility evaluation for an observe release. Never mutates state:
  * qualification evidence and live-shadow evidence are only consulted, and
  * activation happens exclusively through `promoteCapability`.
+ *
+ * Eligibility is graduation-policy driven: the capability's declared policy
+ * determines which evidence classes promotion requires. Default
+ * (`live_shadow`) preserves the historical semantics exactly; capabilities
+ * declared `operator_cutover` require the same qualification evidence but no
+ * live-shadow volume, because their defining operation cannot legitimately
+ * run while observe-only.
  */
 export function promotionEligible(
   db: DatabaseSync,
@@ -325,14 +394,15 @@ export function promotionEligible(
   if (capability === "recall") {
     return recallPromotionQualified(db, releaseId);
   }
+  const policy = graduationPolicyFor(capability);
   const release = db.prepare(
     `SELECT eval_seed_count, qualified_at, model_epoch FROM capability_releases
      WHERE capability = ? AND release_id = ?`,
   ).get(capability, releaseId);
   if (
     !isRow(release) ||
-    Number(release.eval_seed_count ?? 0) < 3 ||
-    typeof release.qualified_at !== "string"
+    Number(release.eval_seed_count ?? 0) < policy.minEvalSeeds ||
+    (policy.requiresQualification && typeof release.qualified_at !== "string")
   ) {
     return false;
   }
@@ -344,17 +414,23 @@ export function promotionEligible(
   ) {
     return false;
   }
-  const live = eventWindow(
-    db,
-    capability,
-    releaseId,
-    "live_shadow",
-    undefined,
-    modelSensitive.has(capability) ? epoch : null,
-  );
-  return live.count >= 25 &&
-    liveSpanDays(live) >= 7 &&
-    capabilityInfluenceDependenciesReady(db, capability, releaseId);
+  if (policy.kind === "live_shadow") {
+    const live = eventWindow(
+      db,
+      capability,
+      releaseId,
+      "live_shadow",
+      undefined,
+      modelSensitive.has(capability) ? epoch : null,
+    );
+    if (
+      live.count < policy.minLiveShadowEvents ||
+      liveSpanDays(live) < policy.minLiveShadowSpanDays
+    ) {
+      return false;
+    }
+  }
+  return capabilityInfluenceDependenciesReady(db, capability, releaseId);
 }
 
 /**
@@ -434,7 +510,10 @@ export function promoteCapability(
     releaseId,
     kind: "operator_promote",
     sourceKey: `promote:${now}`,
-    detail: { authorizedBy: authorizedBy.slice(0, 200) },
+    detail: {
+      authorizedBy: authorizedBy.slice(0, 200),
+      promotionPath: graduationPolicyFor(capability).kind,
+    },
     occurredAt: now,
   });
   return { ok: true, state: "active" };
@@ -722,6 +801,7 @@ export function listCapabilityStatuses(
         masterMode === "apply" &&
         state === "active" &&
         ready,
+      graduationPolicy: graduationPolicyFor(capability).kind,
       dependencies: dependencies[capability],
       dependenciesReady: ready,
       shadowExecutable: canExecuteShadowInternal(db, capability, releaseId),
