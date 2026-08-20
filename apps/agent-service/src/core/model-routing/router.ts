@@ -163,6 +163,39 @@ export function requireRouteEnabled(route: RouteId): RouteBinding {
   return binding;
 }
 
+function providerKeyPresent(provider: ProviderId): boolean {
+  switch (provider) {
+    case "mistral":
+      return Boolean(env.mistralApiKey);
+    case "groq":
+      return Boolean(env.groqApiKey);
+    case "nim":
+      return Boolean(env.nimApiKey);
+    default:
+      return false;
+  }
+}
+
+/**
+ * Canonical non-throwing route readiness check. A route is ready when it is
+ * enabled (configured record, else static binding) AND the provider actually
+ * bound to that route has its credential present. Cognition phases request a
+ * semantic route ("thought") and defer provider-specific readiness to the
+ * routing layer instead of hardcoding a provider.
+ */
+export function routeReady(route: RouteId): boolean {
+  try {
+    const binding = routeBinding(route);
+    const records = loadRouteRecords();
+    const matched = records.find((r) => r.route === route);
+    const enabled = matched ? matched.enabled : binding.enabled;
+    if (!enabled) return false;
+    return providerKeyPresent(matched ? matched.provider : binding.provider);
+  } catch {
+    return false;
+  }
+}
+
 export function routeForBucket(bucket: QuotaBucket): RouteRecord | undefined {
   const parts = bucket.split(":");
   const provider = parts[0] as ProviderId | undefined;

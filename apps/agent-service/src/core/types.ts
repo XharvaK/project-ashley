@@ -288,11 +288,23 @@ export type ThoughtValidationErrorCode =
   | "capability_unavailable";
 
 /**
+ * Cognitive phase identity for bounded Thought telemetry. `initial` is Pass 1
+ * (decision/origination); `continuation` is Pass 2 (post-operation
+ * interpretation). Optional for backward compatibility: historical Migration 28
+ * rows predate the field and remain readable without it.
+ */
+export type ThoughtValidationPhase = "initial" | "continuation";
+
+/**
  * Bounded forensic telemetry for one rejected Thought attempt. Never contains
  * raw model text: only a sha256 digest and bounded structural metadata.
+ * At most two attempts per phase (initial + at most one structural
+ * regeneration; continuation + at most one structural regeneration).
  */
 export type ThoughtValidationAttempt = {
-  /** 1-based attempt number within this turn (max 2 with regeneration). */
+  /** Cognitive phase that produced this attempt (absent on pre-phase rows). */
+  phase?: ThoughtValidationPhase;
+  /** 1-based attempt number within this phase (max 2 with regeneration). */
   attempt: number;
   providerOutcome: "completed" | "error";
   outputTokens: number | null;
@@ -309,6 +321,12 @@ export type ThoughtValidationAttempt = {
   sha256: string;
 };
 
+/**
+ * Bounded forensic envelope for one or both cognitive phases. When both phases
+ * produced telemetry, attempts are concatenated phase-first (initial, then
+ * continuation) and `finalErrorCode` reflects the terminal phase outcome.
+ * Raw model text and raw project evidence are never persisted.
+ */
 export type ThoughtValidationEnvelope = {
   attempts: ThoughtValidationAttempt[];
   finalErrorCode: ThoughtValidationErrorCode | null;

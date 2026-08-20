@@ -332,7 +332,7 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
     expect(expressionPrompt).not.toContain("not_interpreted");
   });
 
-  it("Thought Pass 2 transient lane failure retries once and still delivers the interpretation", async () => {
+  it("Thought Pass 2 structurally regenerates once (missing interpretation) and still delivers the interpretation", async () => {
     const dbPath = join(tmpDir, `ashley-core-${randomUUID()}.db`);
     const db = openNuclearDb(new DatabaseSync(dbPath));
     activateProjectInspection(db);
@@ -377,7 +377,23 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
       if (systemContent.includes("Ashley's Thought layer continuing deliberation")) {
         pass2Attempts += 1;
         if (pass2Attempts === 1) {
-          throw new Error("transient lane failure");
+          // Structural miss: verified M2 success without an interpretation.
+          return {
+            text: JSON.stringify({
+              kind: "speak",
+              effort: "medium",
+              completion: "complete",
+              objective: "confirm CODE_NAME is WAVE_M2",
+              reason: "verified observation from project-ashley",
+              shouldSpeak: true,
+              uncertainty: 0.05,
+              urgency: 0.4,
+              motivationIds: [1],
+            }),
+            model: "mistral-large",
+            modelAlias: "thought",
+            resolvedModelId: "mistral-large",
+          };
         }
         callLog.push("thought_pass2");
         return {
@@ -517,7 +533,7 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
       channel: "discord",
     });
 
-    expect(pass2Attempts).toBe(2);
+    expect(pass2Attempts).toBe(1);
     expect(callLog).toEqual(["thought_pass1", "expression"]);
     expect(expressionPrompt).toContain("interpretationStatus = not_interpreted");
     expect(expressionPrompt).toContain("Do not invent the inspected content");
@@ -784,6 +800,7 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
             completion: "complete",
             objective: "finish inspection",
             reason: "done",
+            inspectionCognitiveResult: "src/index.ts inspected",
             shouldSpeak: true,
             uncertainty: 0.05,
             urgency: 0.2,
@@ -1760,6 +1777,7 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
             objective: "postpone",
             reason: "postpone",
             motivationIds: [1],
+            inspectionCognitiveResult: "package.json reports version 0.2.0",
           }),
         }),
       );
