@@ -69,7 +69,7 @@ describe("Thought delay contract", () => {
           }),
         }),
       );
-      expect(result).toEqual({ ok: false, error: "invalid_response" });
+      expect(result).toMatchObject({ ok: false, error: "payload_invalid" });
     } finally {
       db.close();
     }
@@ -169,7 +169,7 @@ describe("Thought hold semantics", () => {
           }),
         }),
       );
-      expect(result).toEqual({ ok: false, error: "invalid_response" });
+      expect(result).toMatchObject({ ok: false, error: "contradictory_decision_fields" });
     } finally {
       db.close();
     }
@@ -198,7 +198,7 @@ describe("Thought hold semantics", () => {
           }),
         }),
       );
-      expect(result).toEqual({ ok: false, error: "invalid_response" });
+      expect(result).toMatchObject({ ok: false, error: "payload_invalid" });
     } finally {
       db.close();
     }

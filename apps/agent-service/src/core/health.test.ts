@@ -19,7 +19,7 @@ describe("wave10c health contract", () => {
       ready: false,
       provider: "unavailable",
       db: {
-        schemaVersion: 27,
+        schemaVersion: 28,
         integrity: "ok",
         foreignKeys: "enabled",
         continuity: {

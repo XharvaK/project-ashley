@@ -26,9 +26,13 @@ import type {
   Decision,
   EvidenceRef,
   ProjectInspectionObservation,
+  WorkspaceExperimentObservation,
 } from "./types.js";
 import { capabilityCanInfluence } from "./rollout/capabilities.js";
-import { canOfferProjectInspection } from "./sandbox/project-registry.js";
+import {
+  canOfferCandidateWorkspace,
+  canOfferProjectInspection,
+} from "./sandbox/project-registry.js";
 
 /** Product: composed turn context Expression consumes. */
 export type TurnContext = {
@@ -350,6 +354,61 @@ export function projectInspectionEvidenceBlock(
 }
 
 /**
+ * Structured current-turn candidate-workspace evidence state for Expression.
+ * Always present. Two orthogonal dimensions:
+ * - capabilityAvailable: authoritative current capability state (can Ashley
+ *   offer a candidate workspace at all this turn); derived from
+ *   canOfferCandidateWorkspace;
+ * - workspaceStatus: what Ashley actually did or observed this turn
+ *   (not_performed / verified_success / failed).
+ */
+export function candidateWorkspaceEvidenceBlock(
+  license: OperationalClaimLicense | null | undefined,
+  observation: WorkspaceExperimentObservation | null | undefined,
+  options: { capabilityAvailable?: boolean } = {},
+): string {
+  const capabilityAvailable = options.capabilityAvailable === true;
+  const availableLine = `capabilityAvailable = ${capabilityAvailable}`;
+  const semanticsAvailable = [
+    "Semantics: capabilityAvailable is the authoritative current capability state; workspaceStatus is what Ashley actually did or observed this turn.",
+  ];
+  if (license?.profile === "workspace_experiment") {
+    const truth = deriveOperationalTruth(license);
+    if (truth.state === "verified_success" && observation) {
+      return [
+        "Candidate workspace evidence:",
+        availableLine,
+        "workspaceStatus = verified_success",
+        "verifiedWorkspaceEffect = true",
+        ...semanticsAvailable,
+        "Semantics: Ashley executed a candidate workspace operation this turn and holds verified evidence.",
+      ].join("\n");
+    }
+    if (license.state === "failed") {
+      return [
+        "Candidate workspace evidence:",
+        availableLine,
+        "workspaceStatus = failed",
+        "verifiedWorkspaceEffect = false",
+        license.error ? `error = ${license.error}` : "error = unknown",
+        ...semanticsAvailable,
+        "Semantics: this turn's workspace attempt failed; the failure is about this attempt, not about capability.",
+      ].join("\n");
+    }
+  }
+  return [
+    "Candidate workspace evidence:",
+    availableLine,
+    "workspaceStatus = not_performed",
+    "verifiedWorkspaceEffect = false",
+    ...semanticsAvailable,
+    capabilityAvailable
+      ? "Semantics: capabilityAvailable = true with workspaceStatus = not_performed means Ashley CAN offer a candidate workspace this turn but did not; this is not an inability and must never be expressed as one."
+      : "Semantics: Ashley cannot offer a candidate workspace this turn because the workspace capability is not active or candidateWorkspaceAllowed is closed; this is the only case in which a workspace inability may be expressed.",
+  ].join("\n");
+}
+
+/**
  * ContextComposer — sole owner of turn context assembly.
  * Assembles existing peer outputs; does not reinterpret, score, or rewrite them.
  * Omitting an empty peer section is assembly, not filtering.
@@ -375,14 +434,25 @@ export function composeTurnContext(
     operationalLicense: decision?.operationalLicense,
     inspectionObservation: decision?.inspectionObservation,
   });
-  const inspectionEvidence = projectInspectionEvidenceBlock(
-    decision?.operationalLicense,
-    decision?.inspectionObservation,
-    {
-      capabilityAvailable: canOfferProjectInspection(db),
-      interpretationAvailable: Boolean(decision?.inspectionCognitiveResult),
-    },
-  );
+   const inspectionEvidence = projectInspectionEvidenceBlock(
+     decision?.operationalLicense,
+     decision?.inspectionObservation,
+     {
+       capabilityAvailable: canOfferProjectInspection(db),
+       interpretationAvailable: Boolean(decision?.inspectionCognitiveResult),
+     },
+   );
+   const workspaceEvidence = candidateWorkspaceEvidenceBlock(
+     decision?.operationalLicense,
+      decision?.operationalObservation &&
+      "kind" in decision.operationalObservation &&
+      decision.operationalObservation.kind === "workspace_experiment_observation"
+        ? decision.operationalObservation
+        : null,
+     {
+       capabilityAvailable: canOfferCandidateWorkspace(db),
+     },
+   );
   // Questions only when Thought selected question evidence or none selected yet
   // would dump — skip global question dump; selected questions arrive via evidence.
   const questions = "";
@@ -397,6 +467,7 @@ export function composeTurnContext(
     mindState,
     operational,
     inspectionEvidence,
+    workspaceEvidence,
     questions,
   ].filter(Boolean);
 

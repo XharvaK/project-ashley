@@ -9,7 +9,7 @@ import {
   currentReleaseId,
 } from "../rollout/capabilities.js";
 import type { CognitionMode } from "../types.js";
-import { listApprovedReadProjectIds } from "../sandbox/project-registry.js";
+import { listApprovedReadProjectIds, canOfferCandidateWorkspace } from "../sandbox/project-registry.js";
 
 export type PerceptionCapabilityName =
   | "vision"
@@ -158,6 +158,31 @@ export function describeSandboxV2Availability(options?: {
   return "Sandbox V2: substrate unavailable (Linux bubblewrap required).";
 }
 
+export function describeCandidateWorkspaceAvailability(options?: {
+  db?: DatabaseSync;
+  masterMode?: CognitionMode;
+}): string {
+  if (!options?.db) {
+    return "Candidate workspace (M3): unavailable (no db for capability check); cannot offer candidate workspace experiments this turn.";
+  }
+  const canInfluence = (() => {
+    try {
+      return capabilityCanInfluence(options.db, "project_experimentation", options.masterMode);
+    } catch {
+      return false;
+    }
+  })();
+  const registryAllows = canOfferCandidateWorkspace(options.db);
+  if (canInfluence && registryAllows) {
+    return "Candidate workspace (M3): available (project_experimentation active and candidateWorkspaceAllowed true; bounded read-only experimentation on private durable copies).";
+  }
+  return `Candidate workspace (M3): ${
+    !canInfluence
+      ? "inspection capability not active in rollout (observe-only; cannot offer candidate workspace experiments)"
+      : "candidateWorkspaceAllowed closed on the project registry (cannot offer candidate workspace experiments)"
+  }`;
+}
+
 export function composeSelfCapabilityContext(
   db: DatabaseSync,
   options?: {
@@ -172,6 +197,7 @@ export function composeSelfCapabilityContext(
     "- Conversational page reads require explicit user URL-read intent plus authorization.",
     "- Web search has no configured provider in this deployment.",
     `- ${describeSandboxV2Availability({ db, masterMode: options?.masterMode })}`,
+    `- ${describeCandidateWorkspaceAvailability({ db, masterMode: options?.masterMode })}`,
     `- ${describeSandboxAvailability()}`,
   ];
   return lines.join("\n");

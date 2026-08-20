@@ -34,6 +34,7 @@ function sourceV26Fixture(): Fixture {
     DROP INDEX idx_sandbox_task_admissions_owner_status;
     DROP INDEX idx_sandbox_task_admissions_decision;
     DROP TABLE sandbox_task_admissions;
+    ALTER TABLE decision_log DROP COLUMN thought_validation_json;
     PRAGMA user_version = 26;
   `);
   continuity
@@ -69,8 +70,8 @@ describe("nuclear schema v27 sandbox task admissions", () => {
   it("installs the admission ledger with zero rows and no auto admission", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     try {
-      expect(NUCLEAR_SUPPORTED_VERSION).toBe(27);
-      expect(schemaVersion(db)).toBe(27);
+      expect(NUCLEAR_SUPPORTED_VERSION).toBe(28);
+      expect(schemaVersion(db)).toBe(28);
       expect(
         (
           db.prepare(
@@ -166,7 +167,7 @@ describe("nuclear schema v27 sandbox task admissions", () => {
           }
         ).c,
       ).toBe(0);
-      expect(schemaVersion(db)).toBe(27);
+      expect(schemaVersion(db)).toBe(28);
     } finally {
       db.close();
     }
@@ -180,7 +181,7 @@ describe("nuclear schema v27 sandbox task admissions", () => {
       const reopen = openNuclearDb(fixture.nuclear, {
         continuity: fixture.continuity,
       });
-      expect(schemaVersion(reopen)).toBe(27);
+      expect(schemaVersion(reopen)).toBe(28);
       expect(
         (
           reopen.prepare(

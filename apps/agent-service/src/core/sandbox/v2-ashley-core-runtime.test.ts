@@ -1369,7 +1369,9 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
       channel: "discord",
     });
 
-    expect(callLog).toEqual(["thought_pass1", "expression"]);
+    // Bounded regeneration: attempt 1 fails (truncated JSON), attempt 2 also
+    // fails (same mock), then deterministic fallback.
+    expect(callLog).toEqual(["thought_pass1", "thought_pass1", "expression"]);
 
     // Zero M2 execution and zero audit: the truncated output was rejected
     // before any inspection request could be parsed.
@@ -1381,7 +1383,7 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
       )
       .get("doc") as any;
     expect(logged.thought_source).toBe("fallback");
-    expect(logged.thought_error).toBe("invalid_response");
+    expect(logged.thought_error).toBe("invalid_json");
 
     // Expression must see the structural no-evidence floor: no repository
     // evidence exists this turn, so repository facts are not evidence-backed.
@@ -1389,7 +1391,10 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
     expect(expressionSystemPrompt).toContain("inspectionStatus = not_performed");
     expect(expressionSystemPrompt).toContain("verifiedRepositoryEvidence = false");
     expect(expressionSystemPrompt).not.toContain("inspectionStatus = verified_success");
-    expect(expressionSystemPrompt).not.toContain("capabilityAvailable = false");
+    // The inspection evidence section must not claim capability is unavailable
+    // (the candidate workspace section may independently show capabilityAvailable = false).
+    const inspectionSection = expressionSystemPrompt.split("Candidate workspace evidence:")[0].split("Project inspection evidence:")[1] ?? "";
+    expect(inspectionSection).not.toContain("capabilityAvailable = false");
     expect(result.text).toContain("i can check project-ashley.");
   });
 
@@ -1521,7 +1526,7 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
           }),
         }),
       );
-      expect(noRequest).toEqual({ ok: false, error: "invalid_response" });
+      expect(noRequest).toMatchObject({ ok: false, error: "missing_required_field" });
 
       // Unapproved project id in the request is also rejected structurally.
       const unapproved = await runThoughtModel(
@@ -1550,7 +1555,7 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
           }),
         }),
       );
-      expect(unapproved).toEqual({ ok: false, error: "invalid_response" });
+      expect(unapproved).toMatchObject({ ok: false, error: "invalid_project" });
 
       // The correct contract usage passes: acquire + typed approved request.
       let thoughtSystemPrompt = "";
@@ -1829,7 +1834,7 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
           }),
         }),
       );
-      expect(unavailableWhileOffered).toEqual({ ok: false, error: "invalid_response" });
+      expect(unavailableWhileOffered).toMatchObject({ ok: false, error: "invalid_evidence_disposition_pairing" });
 
       // Intentional, unrelated deferral stays valid and acquires nothing:
       // not every missing-information turn is forced to execute a tool.
@@ -1887,7 +1892,7 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
           }),
         }),
       );
-      expect(deferredWithRequest).toEqual({ ok: false, error: "invalid_response" });
+      expect(deferredWithRequest).toMatchObject({ ok: false, error: "invalid_evidence_disposition_pairing" });
 
       // sufficient alongside a request is contradictory: rejected.
       const sufficientWithRequest = await runThoughtModel(
@@ -1916,7 +1921,7 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
           }),
         }),
       );
-      expect(sufficientWithRequest).toEqual({ ok: false, error: "invalid_response" });
+      expect(sufficientWithRequest).toMatchObject({ ok: false, error: "invalid_evidence_disposition_pairing" });
     } finally {
       db.close();
     }
@@ -2011,7 +2016,7 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
           }),
         }),
       );
-      expect(acquire).toEqual({ ok: false, error: "invalid_response" });
+      expect(acquire).toMatchObject({ ok: false, error: "capability_unavailable" });
     } finally {
       db.close();
     }
@@ -2084,9 +2089,12 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
     expect(expressionSystemPrompt).toContain(
       "Semantics: capabilityAvailable = true with inspectionStatus = not_performed means Ashley CAN inspect approved projects but did not inspect this turn; this is not an inability and must never be expressed as one.",
     );
-    expect(expressionSystemPrompt).not.toContain("capabilityAvailable = false");
     expect(expressionSystemPrompt).not.toContain(
       "Semantics: Ashley cannot inspect this turn",
     );
+    // The inspection evidence section must not claim capability is unavailable
+    // (the candidate workspace section may independently show capabilityAvailable = false).
+    const inspectionSection = expressionSystemPrompt.split("Candidate workspace evidence:")[0].split("Project inspection evidence:")[1] ?? "";
+    expect(inspectionSection).not.toContain("capabilityAvailable = false");
   });
 });

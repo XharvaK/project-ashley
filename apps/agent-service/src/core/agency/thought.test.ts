@@ -67,7 +67,7 @@ describe("Thought fallback", () => {
     db.close();
     expect(result).toMatchObject({
       thoughtSource: "fallback",
-      thoughtError: "invalid_response",
+      thoughtError: "invalid_json",
     });
   });
 
@@ -378,6 +378,6 @@ describe("Stage 1 — Canonical Operational Request Ontology", () => {
     );
     db.close();
     expect(result.thoughtSource).toBe("fallback");
-    expect(result.thoughtError).toBe("invalid_response");
+    expect(result.thoughtError).toBe("capability_unavailable");
   });
 });

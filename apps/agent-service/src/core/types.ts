@@ -268,6 +268,52 @@ export type OwnTimeReportMarker = {
   selectedTakeIds: number[];
 };
 
+/**
+ * Bounded Thought output-validation error taxonomy (replaces the coarse
+ * `invalid_response`). Structural codes are retryable exactly once; provider
+ * failure codes (rate_limited, mistral_unavailable, AbortError, ...) are never
+ * retried. Every code is deterministic and derives from the canonical
+ * operational-request contract shared by prompt, parser, and validator.
+ */
+export type ThoughtValidationErrorCode =
+  | "invalid_json"
+  | "truncation"
+  | "unsupported_operation"
+  | "missing_required_field"
+  | "multiple_operational_intents"
+  | "invalid_evidence_disposition_pairing"
+  | "invalid_project"
+  | "payload_invalid"
+  | "contradictory_decision_fields"
+  | "capability_unavailable";
+
+/**
+ * Bounded forensic telemetry for one rejected Thought attempt. Never contains
+ * raw model text: only a sha256 digest and bounded structural metadata.
+ */
+export type ThoughtValidationAttempt = {
+  /** 1-based attempt number within this turn (max 2 with regeneration). */
+  attempt: number;
+  providerOutcome: "completed" | "error";
+  outputTokens: number | null;
+  maxTokens: number | null;
+  truncated: boolean;
+  parseOk: boolean;
+  validationOk: boolean;
+  errorCode: ThoughtValidationErrorCode | null;
+  /** Bounded field/path reference when available (e.g. "request.path"). */
+  field: string | null;
+  /** Parsed operational kind if safely parsed (project_inspection / candidate_workspace_experiment). */
+  opKind: string | null;
+  bytes: number;
+  sha256: string;
+};
+
+export type ThoughtValidationEnvelope = {
+  attempts: ThoughtValidationAttempt[];
+  finalErrorCode: ThoughtValidationErrorCode | null;
+};
+
 export type Decision = {
   id?: number;
   trigger: Trigger;
@@ -283,6 +329,8 @@ export type Decision = {
   urgency: number;
   thoughtSource: "deterministic" | "model" | "fallback";
   thoughtError: string | null;
+  /** Bounded forensic envelope for rejected Thought validation attempts. */
+  thoughtValidation?: ThoughtValidationEnvelope | null;
   affectLicense: AffectLicense;
   learning?: LearningSnapshot;
   cognitiveAllocation: CognitiveAllocation;

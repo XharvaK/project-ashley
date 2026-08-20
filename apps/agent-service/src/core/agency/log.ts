@@ -5,6 +5,7 @@ import type {
   DecisionKind,
   EvidenceRef,
   MotivationKind,
+  ThoughtValidationEnvelope,
   Trigger,
 } from "../types.js";
 
@@ -29,6 +30,7 @@ export type LoggedDecision = {
   learningAdjustment: number;
   learningThroughEventId: number | null;
   outcomeText: string | null;
+  thoughtValidation: ThoughtValidationEnvelope | null;
   createdAt: string;
 };
 
@@ -169,6 +171,15 @@ function parseEvidenceRef(value: unknown): EvidenceRef | undefined {
   }
 }
 
+function parseThoughtValidation(value: unknown): ThoughtValidationEnvelope | null {
+  if (typeof value !== "string") return null;
+  try {
+    return JSON.parse(value) as ThoughtValidationEnvelope;
+  } catch {
+    return null;
+  }
+}
+
 function parseAffectLicense(value: unknown): AffectLicense {
   const fallback: AffectLicense = {
     permitted: false,
@@ -232,6 +243,7 @@ function mapDecision(row: unknown): LoggedDecision | null {
         : numberValue(row.learning_through_event_id),
     outcomeText:
       typeof row.outcome_text === "string" ? row.outcome_text : null,
+    thoughtValidation: parseThoughtValidation(row.thought_validation_json),
     createdAt: stringValue(row.created_at),
   };
 }
@@ -300,33 +312,34 @@ export function logDecision(
           learning_through_event_id, objective, evidence_refs_json, effort,
           completion, uncertainty, urgency, affect_license_json,
           thought_source, thought_error, outcome_text, hold_reason_code,
-          silence_reason_code, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
-      input.ownerId,
-      input.channel,
-      input.trigger,
-      input.decision.kind,
-      JSON.stringify(input.decision.motivationIds),
-      input.decision.reason,
-      input.decision.learning?.subjectKind ?? null,
-      input.decision.learning?.adjustment ?? 0,
-      input.decision.learning?.throughEventId ?? null,
-      input.decision.objective ?? null,
-      JSON.stringify(input.decision.evidenceRefs),
-      input.decision.cognitiveAllocation.effort,
-      input.decision.cognitiveAllocation.completion,
-      input.decision.uncertainty,
-      input.decision.urgency,
-      JSON.stringify(input.decision.affectLicense),
-      input.decision.thoughtSource,
-      input.decision.thoughtError,
-      input.outcomeText ?? null,
-      input.decision.holdReasonCode ?? null,
-      input.decision.silenceReasonCode ?? null,
-      new Date().toISOString(),
-    );
+          silence_reason_code, thought_validation_json, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        input.ownerId,
+        input.channel,
+        input.trigger,
+        input.decision.kind,
+        JSON.stringify(input.decision.motivationIds),
+        input.decision.reason,
+        input.decision.learning?.subjectKind ?? null,
+        input.decision.learning?.adjustment ?? 0,
+        input.decision.learning?.throughEventId ?? null,
+        input.decision.objective ?? null,
+        JSON.stringify(input.decision.evidenceRefs),
+        input.decision.cognitiveAllocation.effort,
+        input.decision.cognitiveAllocation.completion,
+        input.decision.uncertainty,
+        input.decision.urgency,
+        JSON.stringify(input.decision.affectLicense),
+        input.decision.thoughtSource,
+        input.decision.thoughtError,
+        input.outcomeText ?? null,
+        input.decision.holdReasonCode ?? null,
+        input.decision.silenceReasonCode ?? null,
+        input.decision.thoughtValidation ? JSON.stringify(input.decision.thoughtValidation) : null,
+        new Date().toISOString(),
+      );
   const ids = input.decision.motivationIds;
   if (ids.length > 0) {
     const placeholders = ids.map(() => "?").join(", ");
@@ -361,10 +374,10 @@ export function getDecision(
               learning_adjustment, learning_through_event_id,
               objective, evidence_refs_json, effort, completion,
               uncertainty, urgency, affect_license_json,
-              thought_source, thought_error,
-              outcome_text, created_at
-       FROM decision_log
-       WHERE id = ?`,
+          thought_source, thought_error,
+              outcome_text, thought_validation_json, created_at
+        FROM decision_log
+        WHERE id = ?`,
     )
     .get(decisionId);
   return mapDecision(row);
@@ -382,10 +395,10 @@ export function listRecentDecisions(
               learning_adjustment, learning_through_event_id,
               objective, evidence_refs_json, effort, completion,
               uncertainty, urgency, affect_license_json,
-              thought_source, thought_error,
-              outcome_text, created_at
-       FROM decision_log
-       WHERE owner_id = ?
+          thought_source, thought_error,
+              outcome_text, thought_validation_json, created_at
+        FROM decision_log
+        WHERE owner_id = ?
        ORDER BY id DESC
        LIMIT ?`,
     )
