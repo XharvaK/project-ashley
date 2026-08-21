@@ -131,7 +131,7 @@ describe("bounded delivery-owned phase lifecycle", () => {
         new Date(admittedAtMs + 125_000).toISOString(),
       );
       expect(claim.reservation.generationLeaseExpiresAt).toBe(
-        new Date(admittedAtMs + 80_000).toISOString(),
+        new Date(admittedAtMs + 89_447).toISOString(),
       );
       expect(claim.reservation.phaseLifecycle).toMatchObject({
         version: 1,
@@ -179,7 +179,7 @@ describe("bounded delivery-owned phase lifecycle", () => {
       const lifecycle = readPhaseLifecycle(db, claim.reservation.id);
       expect(lifecycle).toMatchObject({
         version: 1,
-        planVersion: "phase-budget-v2-m2-preparation-mechanism-placeholder",
+        planVersion: "phase-budget-v2-m2-preparation-39447",
         qualification: "unqualified",
         selectedBranch: "project_inspection",
         selectedAtOffsetMs: 100,
@@ -194,10 +194,10 @@ describe("bounded delivery-owned phase lifecycle", () => {
       });
       expect(lifecycle?.deadlineOffsetsMs.initialThought).toBe(6_000);
       expect(lifecycle?.deadlineOffsetsMs.projectInspectionPreparation).toBe(
-        36_000,
+        45_447,
       );
       expect(lifecycle?.deadlineOffsetsMs.projectInspectionContinuation).toBe(
-        52_000,
+        61_447,
       );
       expect(
         lifecycle?.deadlineOffsetsMs.projectInspectionChildTermination,
@@ -212,9 +212,9 @@ describe("bounded delivery-owned phase lifecycle", () => {
       );
       expect(lifecycle?.deadlineOffsetsMs).toMatchObject({
         softResponsiveness: 5_000,
-        projectInspectionPerception: 72_000,
-        projectInspectionExpression: 76_000,
-        projectInspectionGeneration: 80_000,
+        projectInspectionPerception: 81_447,
+        projectInspectionExpression: 85_447,
+        projectInspectionGeneration: 89_447,
         externalTransport: 120_000,
         firstBubbleReceipt: 125_000,
         deliveryFinal: 245_000,

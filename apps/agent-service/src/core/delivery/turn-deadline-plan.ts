@@ -269,12 +269,13 @@ function assertGenerationBeforeTransport(
 
 /**
  * Source-supported timing policy with Mint-physical qualification for
- * mandatory-cleanup reserves only (2026-08-21, host Mint 6.17.0-29-generic,
- * bwrap 0.9.0, 2 cores, ext4 SSD, /tmp). envelope: M2 limits
- * 10k files / 100 MiB / 25 MiB single / depth 32 / path 1024, warm+cold,
- * realistic CPU (1-core) + light-IO pressure. Worst synthetic torture
- * (2 cores + continuous fdatasync) exceeds envelope and remains fail-closed;
- * see qualification packet for full distributions and margin reasoning.
+ * mandatory-cleanup reserves and M2 projectInspectionPreparationMs
+ * (2026-08-21, host Mint 6.17.0-29-generic, bwrap 0.9.0, 2 cores, ext4 SSD,
+ * /tmp). envelope: M2 limits 10k files / 100 MiB / 25 MiB single / depth 32 /
+ * path 1024, warm+cold, realistic CPU (1-core) + light-IO pressure. Worst
+ * synthetic torture (2 cores + continuous fdatasync) exceeds envelope and
+ * remains fail-closed; see qualification packet for full distributions and
+ * margin reasoning.
  *
  * Qualified reserves:
  *  - sandboxM1.cleanupReserveMs 500ms Mint-qualified (M1 max 40ms, 12.5×).
@@ -293,19 +294,20 @@ function assertGenerationBeforeTransport(
  * 30s M1 cap, 6s M2 child cap (covers 5.042s tail, still explicitly
  * unqualified for child timing), 120s transport + final delivery.
  *
- * projectInspectionPreparationMs is a MECHANISM PLACEHOLDER (not qualified,
- * not a production timing decision): it models the explicit pre-child M2
- * acquisition-preparation phase (adapter/dispatcher transit, validation,
- * registry resolution, substrate preflight, sanitized view construction,
- * evidence resources, pre-dispatch gate). The final value requires a
- * dedicated Mint qualification campaign over the complete phase.
+ * projectInspectionPreparationMs is Mint-qualified 2026-08-21 on the
+ * complete pre-dispatch phase (reactive handoff → adapter/dispatcher →
+ * validation → registry → substrate preflight → sanitized view →
+ * sentinel/FD/env → loopback → positive-control → runner request →
+ * pre-dispatch gate). Realistic-pressure max 30112ms with 1.31× → 39447ms.
+ * Overall policy qualification stays "unqualified" because child execution
+ * and generation budgets are still provisional.
  *
  * The closed M3 branch has no provisional execution budget and cannot be
  * selected while candidateWorkspaceAllowed=false.
  */
 export const PROVISIONAL_UNQUALIFIED_TURN_DEADLINE_POLICY: TurnDeadlinePolicy =
   deepFreeze({
-    version: "phase-budget-v2-m2-preparation-mechanism-placeholder",
+    version: "phase-budget-v2-m2-preparation-39447",
     qualification: "unqualified",
     softResponsivenessTargetMs: 5_000,
     initialThoughtMs: 6_000,
@@ -328,13 +330,11 @@ export const PROVISIONAL_UNQUALIFIED_TURN_DEADLINE_POLICY: TurnDeadlinePolicy =
       generationSettlementMs: 4_000,
     },
     projectInspection: {
-      // MECHANISM PLACEHOLDER — NOT a production timing decision. The final
-      // projectInspectionPreparationMs value must be selected only after a
-      // dedicated Mint qualification campaign measures the complete phase
-      // (reactive execution handoff -> adapter/dispatcher -> executor
-      // validation -> sanitized view -> evidence resources -> pre-dispatch
-      // gate). Do not deploy or interpret this number as qualified.
-      projectInspectionPreparationMs: 30_000,
+      // Mint-qualified 2026-08-21: complete-phase realistic-pressure max
+      // 30112ms (worst-combined, 1 CPU + light IO), p95 30112, idle max
+      // 20410; 39447ms is ceil(30112 × 1.31) — same host multiplier as the
+      // accepted M2 cleanup reserve — 9335ms / 1.31× over observed max.
+      projectInspectionPreparationMs: 39_447,
       childExecutionMs: {
         "project.read_file": 6_000,
         "project.list_directory": 6_000,
