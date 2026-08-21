@@ -260,21 +260,37 @@ function assertGenerationBeforeTransport(
 }
 
 /**
- * Source-supported but NOT production-qualified timing policy.
+ * Source-supported timing policy with Mint-physical qualification for
+ * mandatory-cleanup reserves only (2026-08-21, host Mint 6.17.0-29-generic,
+ * bwrap 0.9.0, 2 cores, ext4 SSD, /tmp). envelope: M2 limits
+ * 10k files / 100 MiB / 25 MiB single / depth 32 / path 1024, warm+cold,
+ * realistic CPU (1-core) + light-IO pressure. Worst synthetic torture
+ * (2 cores + continuous fdatasync) exceeds envelope and remains fail-closed;
+ * see qualification packet for full distributions and margin reasoning.
  *
- * Values reuse existing hard boundaries or the corrected production incident:
- * - 5s soft target, 6s former pre-Expression Thought window, 4s guard,
- *   20s bounded Perception fetch, 30s M1 child cap, 120s synchronous agent
- *   transport, and 120s final delivery lease;
- * - M2's 6s child cap covers the observed 5.042s failure tail but remains
- *   explicitly unqualified until Mint measurement.
+ * Qualified reserves:
+ *  - sandboxM1.cleanupReserveMs 500ms Mint-qualified (M1 max 40ms, 12.5×).
+ *  - projectInspection.cleanupReserveMs 3500ms Mint-qualified: covers
+ *    realistic-pressure max 2672ms with 31% headroom (1.31×), idle max
+ *    1143ms with 3.06×, p95 2603→1.34×; tail tight (max-p95 69ms). Worst
+ *    synthetic max 4801ms is beyond qualified envelope (would need ~7200ms
+ *    reserve → 7700ms settlement, still <120s transport, note only).
+ * Termination grace (settlement − reserve): M1 3500ms, M2 500ms, both cover
+ * measured termination ack max 31ms combined-loaded (16×/5.6× over 89ms
+ * sub-READY tail) and wake tail 15ms (33×); zero unacked at 250ms across
+ * 140 probes, 500ms is 2× that proven window.
+ *
+ * All other budgets reuse prior hard boundaries / incident and remain
+ * provisional: 5s soft target, 6s Thought window, 4s guard, 20s Perception,
+ * 30s M1 cap, 6s M2 child cap (covers 5.042s tail, still explicitly
+ * unqualified for child timing), 120s transport + final delivery.
  *
  * The closed M3 branch has no provisional execution budget and cannot be
  * selected while candidateWorkspaceAllowed=false.
  */
 export const PROVISIONAL_UNQUALIFIED_TURN_DEADLINE_POLICY: TurnDeadlinePolicy =
   deepFreeze({
-    version: "phase-budget-v1-provisional-unqualified",
+    version: "phase-budget-v1-mint-cleanup-3500-500",
     qualification: "unqualified",
     softResponsivenessTargetMs: 5_000,
     initialThoughtMs: 6_000,
@@ -289,8 +305,9 @@ export const PROVISIONAL_UNQUALIFIED_TURN_DEADLINE_POLICY: TurnDeadlinePolicy =
     sandboxM1: {
       childExecutionMs: 30_000,
       acquisitionSettlementMs: 4_000,
-      // Mechanism-only placeholder. This profile remains unqualified and MUST NOT be promoted.
-      cleanupReserveMs: 1,
+      // Mint-qualified 2026-08-21: 500ms covers M1 mandatory post-child path
+      // max 40ms (sentinel 39ms) with 12.5×; M1 has no view removal.
+      cleanupReserveMs: 500,
       perceptionMs: 20_000,
       expressionMs: 4_000,
       generationSettlementMs: 4_000,
@@ -302,8 +319,10 @@ export const PROVISIONAL_UNQUALIFIED_TURN_DEADLINE_POLICY: TurnDeadlinePolicy =
         "project.search_text": 6_000,
       },
       acquisitionSettlementMs: 4_000,
-      // Mechanism-only placeholder. This profile remains unqualified and MUST NOT be promoted.
-      cleanupReserveMs: 1,
+      // Mint-qualified 2026-08-21: 3500ms covers realistic-pressure M2 cleanup
+      // max 2672ms (1.31×), p95 2603 (1.34×), idle max 1143 (3.06×). Worst
+      // synthetic torture max 4801ms exceeds envelope (see packet § residual).
+      cleanupReserveMs: 3500,
       continuationMs: 6_000,
       perceptionMs: 20_000,
       expressionMs: 4_000,

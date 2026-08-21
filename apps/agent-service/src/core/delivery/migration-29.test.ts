@@ -179,7 +179,7 @@ describe("bounded delivery-owned phase lifecycle", () => {
       const lifecycle = readPhaseLifecycle(db, claim.reservation.id);
       expect(lifecycle).toMatchObject({
         version: 1,
-        planVersion: "phase-budget-v1-provisional-unqualified",
+        planVersion: "phase-budget-v1-mint-cleanup-3500-500",
         qualification: "unqualified",
         selectedBranch: "project_inspection",
         selectedAtOffsetMs: 100,
