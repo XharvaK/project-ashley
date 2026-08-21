@@ -49,6 +49,7 @@ const M3_TEST_DEADLINE_POLICY: TurnDeadlinePolicy = {
   sandboxM1: {
     childExecutionMs: 30_000,
     acquisitionSettlementMs: 4_000,
+    cleanupReserveMs: 1_000,
     perceptionMs: 20_000,
     expressionMs: 4_000,
     generationSettlementMs: 4_000,
@@ -60,6 +61,7 @@ const M3_TEST_DEADLINE_POLICY: TurnDeadlinePolicy = {
       "project.search_text": 6_000,
     },
     acquisitionSettlementMs: 4_000,
+    cleanupReserveMs: 1_000,
     continuationMs: 6_000,
     perceptionMs: 20_000,
     expressionMs: 4_000,
@@ -78,6 +80,7 @@ const M3_TEST_DEADLINE_POLICY: TurnDeadlinePolicy = {
       "workspace.create_directory": 6_000,
     },
     acquisitionSettlementMs: 4_000,
+    cleanupReserveMs: 1_000,
     continuationMs: 6_000,
     perceptionMs: 20_000,
     expressionMs: 4_000,

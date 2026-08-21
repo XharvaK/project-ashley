@@ -123,6 +123,7 @@ describe("executeProjectInspection", () => {
     const result = await executeProjectInspection(readRequest, {
       registry,
       childExecutionDeadlineAtMs: 1_300,
+      childTerminationDeadlineAtMs: 1_400,
       settlementDeadlineAtMs: 1_500,
       clock: { nowMs: () => nowMs },
       viewBuilder: async (options: Parameters<typeof trackingViewBuilder>[0]) => {
@@ -160,6 +161,55 @@ describe("executeProjectInspection", () => {
     expect(forcedClosures).toBe(1);
     expect(nowMs).toBeLessThanOrEqual(1_500);
     expect(1_700 - nowMs).toBe(210);
+  });
+
+  it("stops an unacknowledged child at termination and cleans up inside settlement", async () => {
+    let nowMs = 1_000;
+    let dispatches = 0;
+    let cleanupStartedAtMs = -1;
+    const result = await executeProjectInspection(readRequest, {
+      registry,
+      childExecutionDeadlineAtMs: 1_300,
+      childTerminationDeadlineAtMs: 1_400,
+      settlementDeadlineAtMs: 1_500,
+      clock: { nowMs: () => nowMs },
+      viewBuilder: trackingViewBuilder,
+      spawnRunner: async (input) => {
+        dispatches += 1;
+        expect(input.childTerminationDeadlineAtMs).toBe(1_400);
+        expect(input.settlementDeadlineAtMs).toBe(1_500);
+        nowMs = 1_400;
+        return {
+          exitCode: null,
+          stdout: "",
+          stderr: "",
+          timedOut: true,
+          stdoutOverflow: false,
+          stderrOverflow: false,
+          cancellationRequested: true,
+          cancellationAcknowledged: false,
+        };
+      },
+      serverCloser: ((server: import("node:net").Server, connections: Set<import("node:net").Socket>) => {
+        cleanupStartedAtMs = nowMs;
+        server.close();
+        for (const socket of connections) socket.destroy();
+        connections.clear();
+        nowMs = 1_450;
+      }),
+    });
+
+    expect(dispatches).toBe(1);
+    expect(cleanupStartedAtMs).toBe(1_400);
+    expect(cleanupStartedAtMs).toBeLessThan(1_500);
+    expect(nowMs).toBeLessThan(1_500);
+    expect(result).toMatchObject({
+      outcome: "failed",
+      error: "timeout",
+      cancellationRequested: true,
+      cancellationAcknowledged: false,
+    });
+    expect(1_700 - nowMs).toBe(250);
   });
 
   it("derives the child timeout from the operation deadline after setup", async () => {

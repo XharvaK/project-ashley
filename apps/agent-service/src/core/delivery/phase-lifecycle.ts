@@ -141,6 +141,10 @@ function deadlineOffsets(plan: TurnDeadlinePlan): Record<string, number> {
     ordinaryExpression: offset(plan, plan.branches.ordinary.expressionDeadlineAtMs),
     ordinaryGeneration: offset(plan, plan.branches.ordinary.generationDeadlineAtMs),
     sandboxM1Child: offset(plan, plan.branches.sandbox_m1.childExecutionDeadlineAtMs),
+    sandboxM1ChildTermination: offset(
+      plan,
+      plan.branches.sandbox_m1.childTerminationDeadlineAtMs,
+    ),
     sandboxM1Settlement: offset(
       plan,
       plan.branches.sandbox_m1.acquisitionSettlementDeadlineAtMs,
@@ -154,6 +158,10 @@ function deadlineOffsets(plan: TurnDeadlinePlan): Record<string, number> {
     projectInspectionSettlement: offset(
       plan,
       plan.branches.project_inspection.acquisitionSettlementDeadlineAtMs,
+    ),
+    projectInspectionChildTermination: offset(
+      plan,
+      plan.branches.project_inspection.childTerminationDeadlineAtMs,
     ),
     projectInspectionContinuation: offset(
       plan,
@@ -179,6 +187,10 @@ function deadlineOffsets(plan: TurnDeadlinePlan): Record<string, number> {
   }
   const workspace = plan.branches.candidate_workspace_experiment;
   if (workspace.available) {
+    result.candidateWorkspaceChildTermination = offset(
+      plan,
+      workspace.childTerminationDeadlineAtMs,
+    );
     result.candidateWorkspaceSettlement = offset(
       plan,
       workspace.acquisitionSettlementDeadlineAtMs,

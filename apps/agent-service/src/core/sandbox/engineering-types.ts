@@ -156,6 +156,8 @@ export type OperationalClaimLicense = {
     | "effect_indeterminate"
     | null;
   lateEvidenceVerified?: boolean | null;
+  cancellationRequested?: boolean | null;
+  cancellationAcknowledged?: boolean | null;
 };
 
 export type SandboxTask = {

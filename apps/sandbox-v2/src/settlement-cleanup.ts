@@ -16,7 +16,7 @@ type CloseWaitChild = KillableChild & {
 };
 
 export type ChildCloseDeadlineOptions = {
-  settlementDeadlineAtMs: number;
+  childTerminationDeadlineAtMs: number;
   nowMs?: () => number;
   setTimer?: (callback: () => void, delayMs: number) => unknown;
   clearTimer?: (timer: unknown) => void;
@@ -43,7 +43,7 @@ export function terminateChild(child: KillableChild): void {
 }
 
 /**
- * Wait for the OS close acknowledgement only inside the settlement reserve.
+ * Wait for the OS close acknowledgement only until the termination boundary.
  * At the boundary, repeat the strongest available termination action, detach
  * the acknowledgement listeners, and let the owning executor settle.
  */
@@ -52,7 +52,7 @@ export function awaitChildCloseByDeadline(
   options: ChildCloseDeadlineOptions,
 ): Promise<{ closed: boolean; exitCode: number | null }> {
   const nowMs = options.nowMs ?? Date.now;
-  const remainingMs = options.settlementDeadlineAtMs - nowMs();
+  const remainingMs = options.childTerminationDeadlineAtMs - nowMs();
   if (remainingMs <= 0) {
     terminateChild(child);
     return Promise.resolve({ closed: false, exitCode: null });

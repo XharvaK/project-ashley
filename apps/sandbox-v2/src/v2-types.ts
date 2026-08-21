@@ -320,6 +320,8 @@ export type SandboxV2Result =
       sourceSnapshotId?: string;
       /** Present for M3 workspace execution. */
       executionTruth?: SandboxV2ExecutionTruth;
+      cancellationRequested?: boolean;
+      cancellationAcknowledged?: boolean;
       executedAtMs: number;
     }
   | {
@@ -330,6 +332,8 @@ export type SandboxV2Result =
       executionTruth?: SandboxV2ExecutionTruth;
       /** Safe fact only: valid evidence arrived after the current-turn settlement cutoff. */
       lateEvidenceVerified?: boolean;
+      cancellationRequested?: boolean;
+      cancellationAcknowledged?: boolean;
       executedAtMs: number;
     }
   | {
@@ -338,6 +342,8 @@ export type SandboxV2Result =
       error: string;
       /** Present for M3 workspace execution. */
       executionTruth?: SandboxV2ExecutionTruth;
+      cancellationRequested?: boolean;
+      cancellationAcknowledged?: boolean;
       executedAtMs: number;
     };
 

@@ -196,6 +196,11 @@ describe("bounded delivery-owned phase lifecycle", () => {
       expect(lifecycle?.deadlineOffsetsMs.projectInspectionContinuation).toBe(
         22_000,
       );
+      expect(
+        lifecycle?.deadlineOffsetsMs.projectInspectionChildTermination,
+      ).toBeLessThan(
+        lifecycle?.deadlineOffsetsMs.projectInspectionSettlement ?? 0,
+      );
       expect(lifecycle?.deadlineOffsetsMs).toMatchObject({
         softResponsiveness: 5_000,
         projectInspectionPerception: 42_000,
@@ -205,6 +210,19 @@ describe("bounded delivery-owned phase lifecycle", () => {
         firstBubbleReceipt: 125_000,
         deliveryFinal: 245_000,
       });
+
+      recordPhaseLifecycle(db, {
+        reservationId: claim.reservation.id,
+        phase: "project_inspection",
+        event: "cancellation_requested",
+        atMs: admittedAtMs + 16_000,
+      });
+      const cancellation = readPhaseLifecycle(db, claim.reservation.id);
+      expect(cancellation?.phases.project_inspection).toMatchObject({
+        cancellationRequested: true,
+      });
+      expect(cancellation?.phases.project_inspection)
+        .not.toHaveProperty("cancellationAcknowledged");
     } finally {
       db.close();
     }

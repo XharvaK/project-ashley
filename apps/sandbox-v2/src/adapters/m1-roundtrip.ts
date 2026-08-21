@@ -49,6 +49,7 @@ export type M1RoundtripExecutorOptions = {
   ) => Promise<SandboxM1Result>;
   available?: () => boolean;
   childExecutionDeadlineAtMs?: number;
+  childTerminationDeadlineAtMs?: number;
   settlementDeadlineAtMs?: number;
   clock?: { nowMs(): number };
   serverCloser?: (server: Server, connections: Set<Socket>) => void;
@@ -114,8 +115,15 @@ export async function handleFileRoundtripV2(
   }
   if (
     options.childExecutionDeadlineAtMs !== undefined &&
+    options.childTerminationDeadlineAtMs !== undefined &&
+    options.childExecutionDeadlineAtMs >= options.childTerminationDeadlineAtMs
+  ) {
+    return failed("invalid_deadline_plan");
+  }
+  if (
+    options.childTerminationDeadlineAtMs !== undefined &&
     options.settlementDeadlineAtMs !== undefined &&
-    options.childExecutionDeadlineAtMs >= options.settlementDeadlineAtMs
+    options.childTerminationDeadlineAtMs >= options.settlementDeadlineAtMs
   ) {
     return failed("invalid_deadline_plan");
   }
@@ -178,6 +186,7 @@ export async function handleFileRoundtripV2(
     if (remainingChildMs <= 0) return failed("child_execution_deadline_expired");
     const res = await executor(m1Request, hostEvidence, {
       timeoutMs: Math.min(30_000, remainingChildMs),
+      childTerminationDeadlineAtMs: options.childTerminationDeadlineAtMs,
       settlementDeadlineAtMs: options.settlementDeadlineAtMs,
       clock: options.clock,
     });
@@ -201,7 +210,13 @@ export async function handleFileRoundtripV2(
       };
     }
 
-    if (res.ok === false) return failed(res.code);
+    if (res.ok === false) {
+      return {
+        ...failed(res.code),
+        cancellationRequested: res.cancellationRequested,
+        cancellationAcknowledged: res.cancellationAcknowledged,
+      };
+    }
     return failed("invalid-result");
     } catch {
       return failed("internal-error");

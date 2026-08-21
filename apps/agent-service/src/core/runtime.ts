@@ -908,6 +908,8 @@ export class AshleyCore {
               request: opReq.request,
               messageEntityUuid: messageEntityUuid ?? undefined,
               childExecutionDeadlineAtMs: inspectionChildDeadlineAtMs,
+              childTerminationDeadlineAtMs:
+                selectedDeadlineBranch.childTerminationDeadlineAtMs,
               settlementDeadlineAtMs:
                 selectedDeadlineBranch.acquisitionSettlementDeadlineAtMs,
               db: this.db,
@@ -926,6 +928,22 @@ export class AshleyCore {
                   : "acquisition_settlement_deadline_expired"
                 : inspResult.license.error ?? "project_inspection_settled",
             });
+            if (inspResult.license.cancellationRequested === true) {
+              recordPhaseLifecycle(this.db, {
+                reservationId: reservation.id,
+                phase: "project_inspection",
+                event: "cancellation_requested",
+                atMs: Date.now(),
+              });
+            }
+            if (inspResult.license.cancellationAcknowledged === true) {
+              recordPhaseLifecycle(this.db, {
+                reservationId: reservation.id,
+                phase: "project_inspection",
+                event: "cancellation_acknowledged",
+                atMs: Date.now(),
+              });
+            }
             decision.operationalLicense = inspResult.license;
             const currentTurnObservation = inspectionLate
               ? null
@@ -996,6 +1014,8 @@ export class AshleyCore {
                   selectedDeadlineBranch.childExecutionDeadlineAtMs[
                     opReq.request.operation
                   ],
+                childTerminationDeadlineAtMs:
+                  selectedDeadlineBranch.childTerminationDeadlineAtMs,
                 settlementDeadlineAtMs:
                   selectedDeadlineBranch.acquisitionSettlementDeadlineAtMs,
                 db: this.db,
@@ -1012,6 +1032,22 @@ export class AshleyCore {
                   expResult.license.error ?? "workspace_experiment_settled",
                 executionTruth: expResult.license.executionTruth ?? undefined,
               });
+              if (expResult.license.cancellationRequested === true) {
+                recordPhaseLifecycle(this.db, {
+                  reservationId: reservation.id,
+                  phase: "candidate_workspace_experiment",
+                  event: "cancellation_requested",
+                  atMs: Date.now(),
+                });
+              }
+              if (expResult.license.cancellationAcknowledged === true) {
+                recordPhaseLifecycle(this.db, {
+                  reservationId: reservation.id,
+                  phase: "candidate_workspace_experiment",
+                  event: "cancellation_acknowledged",
+                  atMs: Date.now(),
+                });
+              }
               decision = await deliberateThoughtContinuation(
                 this.db,
                 decision,
@@ -1108,6 +1144,8 @@ export class AshleyCore {
               messageEntityUuid: messageEntityUuid ?? undefined,
               childExecutionDeadlineAtMs:
                 selectedDeadlineBranch.childExecutionDeadlineAtMs,
+              childTerminationDeadlineAtMs:
+                selectedDeadlineBranch.childTerminationDeadlineAtMs,
               settlementDeadlineAtMs:
                 selectedDeadlineBranch.acquisitionSettlementDeadlineAtMs,
             });
@@ -1119,6 +1157,22 @@ export class AshleyCore {
               statusCode:
                 decision.operationalLicense.error ?? "sandbox_m1_settled",
             });
+            if (decision.operationalLicense.cancellationRequested === true) {
+              recordPhaseLifecycle(this.db, {
+                reservationId: reservation.id,
+                phase: "sandbox_m1",
+                event: "cancellation_requested",
+                atMs: Date.now(),
+              });
+            }
+            if (decision.operationalLicense.cancellationAcknowledged === true) {
+              recordPhaseLifecycle(this.db, {
+                reservationId: reservation.id,
+                phase: "sandbox_m1",
+                event: "cancellation_acknowledged",
+                atMs: Date.now(),
+              });
+            }
           } else if (reactiveAdmission.replayed) {
             // Replayed admission: observe existing correlated task state, do NOT execute again
             const correlated = findCorrelatedEngineeringTask(this.db, input.ownerId, {

@@ -46,8 +46,13 @@ export type SandboxM1Checks = {
 };
 
 export type SandboxM1Result =
-  | { version: 1; kind: "file.roundtrip"; ok: true; checks: SandboxM1Checks }
-  | { version: 1; kind: "file.roundtrip"; ok: false; code: string };
+  (
+    | { version: 1; kind: "file.roundtrip"; ok: true; checks: SandboxM1Checks }
+    | { version: 1; kind: "file.roundtrip"; ok: false; code: string }
+  ) & {
+    cancellationRequested?: boolean;
+    cancellationAcknowledged?: boolean;
+  };
 
 const CHECK_KEYS = [
   "roundtrip",
@@ -133,6 +138,8 @@ const TIMEOUT_MS = 30_000;
 export type SandboxM1ExecutionOptions = {
   /** Child cap supplied by the owning phase plan. It can only reduce the frozen 30s cap. */
   timeoutMs?: number;
+  /** Absolute cutoff for awaiting child termination acknowledgement. */
+  childTerminationDeadlineAtMs?: number;
   /** Absolute settlement cutoff owned by the selected turn branch. */
   settlementDeadlineAtMs?: number;
   clock?: { nowMs(): number };
@@ -155,11 +162,20 @@ type CloseWaitChild = {
 
 function awaitChildCloseByDeadline(
   child: CloseWaitChild,
-  settlementDeadlineAtMs: number,
+  childTerminationDeadlineAtMs: number,
   nowMs: () => number,
 ): Promise<{ closed: boolean; exitCode: number | null }> {
-  const remainingMs = settlementDeadlineAtMs - nowMs();
-  if (remainingMs <= 0) return Promise.resolve({ closed: false, exitCode: null });
+  const remainingMs = childTerminationDeadlineAtMs - nowMs();
+  const terminate = (): void => {
+    child.kill("SIGKILL");
+    child.stdin.destroy();
+    child.stdout.destroy();
+    child.stderr.destroy();
+  };
+  if (remainingMs <= 0) {
+    terminate();
+    return Promise.resolve({ closed: false, exitCode: null });
+  }
   return new Promise((resolve) => {
     let settled = false;
     const finish = (closed: boolean, exitCode: number | null): void => {
@@ -169,12 +185,6 @@ function awaitChildCloseByDeadline(
       child.off("close", onClose);
       child.off("error", onError);
       resolve({ closed, exitCode });
-    };
-    const terminate = (): void => {
-      child.kill("SIGKILL");
-      child.stdin.destroy();
-      child.stdout.destroy();
-      child.stderr.destroy();
     };
     const onClose = (code: number | null): void => finish(true, code);
     const onError = (): void => terminate();
@@ -214,8 +224,14 @@ function buildBwrapArgs(workspace: string): string[] {
   ];
 }
 
-function failure(code: string): SandboxM1Result {
-  return { version: 1, kind: "file.roundtrip", ok: false, code };
+function failure(
+  code: string,
+  cancellation?: {
+    cancellationRequested: boolean;
+    cancellationAcknowledged: boolean;
+  },
+): SandboxM1Result {
+  return { version: 1, kind: "file.roundtrip", ok: false, code, ...cancellation };
 }
 
 function isValidRequest(request: SandboxM1Request): boolean {
@@ -325,6 +341,15 @@ export async function runSandboxM1(
     const effectiveTimeoutMs = Math.min(TIMEOUT_MS, suppliedTimeoutMs);
     const settlementDeadlineAtMs =
       options.settlementDeadlineAtMs ?? nowMs() + effectiveTimeoutMs;
+    const childTerminationDeadlineAtMs =
+      options.childTerminationDeadlineAtMs ?? settlementDeadlineAtMs;
+    if (
+      options.childTerminationDeadlineAtMs !== undefined &&
+      childTerminationDeadlineAtMs >= settlementDeadlineAtMs
+    ) {
+      terminateChild();
+      return failure("invalid-deadline-plan");
+    }
     const timer = setTimeout(() => {
       timedOut = true;
       terminateChild();
@@ -334,7 +359,7 @@ export async function runSandboxM1(
     try {
       closeResult = await awaitChildCloseByDeadline(
         child,
-        settlementDeadlineAtMs,
+        childTerminationDeadlineAtMs,
         nowMs,
       );
     } finally {
@@ -342,7 +367,12 @@ export async function runSandboxM1(
     }
     if (!closeResult.closed) timedOut = true;
 
-    if (timedOut) return failure("timeout");
+    if (timedOut) {
+      return failure("timeout", {
+        cancellationRequested: true,
+        cancellationAcknowledged: closeResult.closed,
+      });
+    }
     if (stdoutOverflow) return failure("stdout-overflow");
     if (stderrOverflow) return failure("stderr-overflow");
 

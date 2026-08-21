@@ -58,6 +58,7 @@ export type InspectionSpawnInput = {
   sentinelPath: string;
   fdSentinelCanonical: string;
   timeoutMs: number;
+  childTerminationDeadlineAtMs: number;
   settlementDeadlineAtMs: number;
   nowMs: () => number;
 };
@@ -67,6 +68,8 @@ export type InspectionSpawnOutput = {
   stdout: string;
   stderr: string;
   timedOut: boolean;
+  cancellationRequested?: boolean;
+  cancellationAcknowledged?: boolean;
   stdoutOverflow: boolean;
   stderrOverflow: boolean;
 };
@@ -89,6 +92,8 @@ export type ProjectInspectionExecutorOptions = {
   timeoutMs?: number;
   /** Absolute child-execution cutoff selected by the owning turn plan. */
   childExecutionDeadlineAtMs?: number;
+  /** Absolute cutoff for awaiting child termination acknowledgement. */
+  childTerminationDeadlineAtMs?: number;
   /** Absolute cutoff by which execution, validation, and cleanup must settle. */
   settlementDeadlineAtMs?: number;
   /** Deterministic test seam. */
@@ -230,7 +235,7 @@ export async function spawnBubblewrapInspection(
   let closeResult: { closed: boolean; exitCode: number | null };
   try {
     closeResult = await awaitChildCloseByDeadline(child, {
-      settlementDeadlineAtMs: input.settlementDeadlineAtMs,
+      childTerminationDeadlineAtMs: input.childTerminationDeadlineAtMs,
       nowMs: input.nowMs,
     });
   } finally {
@@ -243,6 +248,12 @@ export async function spawnBubblewrapInspection(
     stdout: stdoutData,
     stderr: stderrData,
     timedOut,
+    ...(timedOut
+      ? {
+          cancellationRequested: true,
+          cancellationAcknowledged: closeResult.closed,
+        }
+      : {}),
     stdoutOverflow,
     stderrOverflow,
   };
@@ -267,8 +278,15 @@ export async function executeProjectInspection(
 
   if (
     options.childExecutionDeadlineAtMs !== undefined &&
+    options.childTerminationDeadlineAtMs !== undefined &&
+    options.childExecutionDeadlineAtMs >= options.childTerminationDeadlineAtMs
+  ) {
+    return failed("invalid_deadline_plan", executedAtMs);
+  }
+  if (
+    options.childTerminationDeadlineAtMs !== undefined &&
     options.settlementDeadlineAtMs !== undefined &&
-    options.childExecutionDeadlineAtMs >= options.settlementDeadlineAtMs
+    options.childTerminationDeadlineAtMs >= options.settlementDeadlineAtMs
   ) {
     return failed("invalid_deadline_plan", executedAtMs);
   }
@@ -380,12 +398,22 @@ export async function executeProjectInspection(
       sentinelPath: sentinelCanonical,
       fdSentinelCanonical: sentinelCanonical,
       timeoutMs: childTimeoutMs,
+      childTerminationDeadlineAtMs:
+        options.childTerminationDeadlineAtMs ??
+        options.settlementDeadlineAtMs ??
+        nowMs() + childTimeoutMs,
       settlementDeadlineAtMs:
         options.settlementDeadlineAtMs ?? nowMs() + childTimeoutMs,
       nowMs,
     });
 
-    if (run.timedOut) return failed("timeout");
+    if (run.timedOut) {
+      return {
+        ...failed("timeout"),
+        cancellationRequested: run.cancellationRequested === true,
+        cancellationAcknowledged: run.cancellationAcknowledged === true,
+      };
+    }
     if (run.stdoutOverflow) return failed("stdout-overflow");
     if (run.stderrOverflow) return failed("stderr-overflow");
 

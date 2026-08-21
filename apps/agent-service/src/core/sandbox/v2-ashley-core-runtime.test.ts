@@ -219,6 +219,9 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
     ).phase_lifecycle_json;
     expect(JSON.parse(lifecycle)).toMatchObject({
       selectedBranch: "project_inspection",
+      deadlineOffsetsMs: {
+        projectInspectionChildTermination: expect.any(Number),
+      },
       phases: {
         project_inspection: {
           state: "settled",

@@ -28,6 +28,7 @@ type GenerationPolicy = {
 type OperationalPolicy<TOperation extends string> = GenerationPolicy & {
   childExecutionMs: Readonly<Record<TOperation, number>>;
   acquisitionSettlementMs: number;
+  cleanupReserveMs: number;
   continuationMs: number;
 };
 
@@ -52,6 +53,7 @@ export type TurnDeadlinePolicy = {
   sandboxM1: GenerationPolicy & {
     childExecutionMs: number;
     acquisitionSettlementMs: number;
+    cleanupReserveMs: number;
   };
   projectInspection: OperationalPolicy<ProjectInspectionOperation>;
   candidateWorkspaceExperiment:
@@ -79,6 +81,7 @@ export type SandboxM1TurnDeadlineBranch = Readonly<{
   kind: "sandbox_m1";
   available: true;
   childExecutionDeadlineAtMs: number;
+  childTerminationDeadlineAtMs: number;
   acquisitionSettlementDeadlineAtMs: number;
   perceptionDeadlineAtMs: number;
   expressionDeadlineAtMs: number;
@@ -89,6 +92,7 @@ export type ProjectInspectionTurnDeadlineBranch = Readonly<{
   kind: "project_inspection";
   available: true;
   childExecutionDeadlineAtMs: Readonly<Record<ProjectInspectionOperation, number>>;
+  childTerminationDeadlineAtMs: number;
   acquisitionSettlementDeadlineAtMs: number;
   continuationDeadlineAtMs: number;
   perceptionDeadlineAtMs: number;
@@ -101,6 +105,7 @@ export type CandidateWorkspaceTurnDeadlineBranch =
       kind: "candidate_workspace_experiment";
       available: true;
       childExecutionDeadlineAtMs: Readonly<Record<CandidateWorkspaceOperation, number>>;
+      childTerminationDeadlineAtMs: number;
       acquisitionSettlementDeadlineAtMs: number;
       continuationDeadlineAtMs: number;
       perceptionDeadlineAtMs: number;
@@ -204,6 +209,23 @@ function operationDeadlines<TOperation extends string>(
   return { deadlines, maxDeadlineAtMs };
 }
 
+function childTerminationDeadline(
+  policyName: string,
+  maxChildDeadlineAtMs: number,
+  acquisitionSettlementDeadlineAtMs: number,
+  cleanupReserveMs: number,
+): number {
+  requirePositiveDuration(`${policyName}.cleanupReserveMs`, cleanupReserveMs);
+  const deadlineAtMs = acquisitionSettlementDeadlineAtMs - cleanupReserveMs;
+  if (
+    maxChildDeadlineAtMs >= deadlineAtMs ||
+    deadlineAtMs >= acquisitionSettlementDeadlineAtMs
+  ) {
+    throw new Error(`turn_deadline_policy_invalid:${policyName}.termination_order`);
+  }
+  return deadlineAtMs;
+}
+
 function generationDeadlines(
   startAtMs: number,
   policy: GenerationPolicy,
@@ -267,6 +289,8 @@ export const PROVISIONAL_UNQUALIFIED_TURN_DEADLINE_POLICY: TurnDeadlinePolicy =
     sandboxM1: {
       childExecutionMs: 30_000,
       acquisitionSettlementMs: 4_000,
+      // Mechanism-only placeholder. This profile remains unqualified and MUST NOT be promoted.
+      cleanupReserveMs: 1,
       perceptionMs: 20_000,
       expressionMs: 4_000,
       generationSettlementMs: 4_000,
@@ -278,6 +302,8 @@ export const PROVISIONAL_UNQUALIFIED_TURN_DEADLINE_POLICY: TurnDeadlinePolicy =
         "project.search_text": 6_000,
       },
       acquisitionSettlementMs: 4_000,
+      // Mechanism-only placeholder. This profile remains unqualified and MUST NOT be promoted.
+      cleanupReserveMs: 1,
       continuationMs: 6_000,
       perceptionMs: 20_000,
       expressionMs: 4_000,
@@ -350,10 +376,17 @@ export function createTurnDeadlinePlan(
     common.initialThoughtDeadlineAtMs + policy.sandboxM1.childExecutionMs;
   const m1SettlementDeadlineAtMs =
     m1ChildDeadlineAtMs + policy.sandboxM1.acquisitionSettlementMs;
+  const m1TerminationDeadlineAtMs = childTerminationDeadline(
+    "sandboxM1",
+    m1ChildDeadlineAtMs,
+    m1SettlementDeadlineAtMs,
+    policy.sandboxM1.cleanupReserveMs,
+  );
   const sandboxM1: SandboxM1TurnDeadlineBranch = {
     kind: "sandbox_m1",
     available: true,
     childExecutionDeadlineAtMs: m1ChildDeadlineAtMs,
+    childTerminationDeadlineAtMs: m1TerminationDeadlineAtMs,
     acquisitionSettlementDeadlineAtMs: m1SettlementDeadlineAtMs,
     ...generationDeadlines(m1SettlementDeadlineAtMs, policy.sandboxM1),
   };
@@ -375,12 +408,19 @@ export function createTurnDeadlinePlan(
   const projectSettlementDeadlineAtMs =
     projectChildren.maxDeadlineAtMs +
     policy.projectInspection.acquisitionSettlementMs;
+  const projectTerminationDeadlineAtMs = childTerminationDeadline(
+    "projectInspection",
+    projectChildren.maxDeadlineAtMs,
+    projectSettlementDeadlineAtMs,
+    policy.projectInspection.cleanupReserveMs,
+  );
   const projectContinuationDeadlineAtMs =
     projectSettlementDeadlineAtMs + policy.projectInspection.continuationMs;
   const projectInspection: ProjectInspectionTurnDeadlineBranch = {
     kind: "project_inspection",
     available: true,
     childExecutionDeadlineAtMs: projectChildren.deadlines,
+    childTerminationDeadlineAtMs: projectTerminationDeadlineAtMs,
     acquisitionSettlementDeadlineAtMs: projectSettlementDeadlineAtMs,
     continuationDeadlineAtMs: projectContinuationDeadlineAtMs,
     ...generationDeadlines(
@@ -415,6 +455,12 @@ export function createTurnDeadlinePlan(
     const workspaceSettlementDeadlineAtMs =
       workspaceChildren.maxDeadlineAtMs +
       policy.candidateWorkspaceExperiment.acquisitionSettlementMs;
+    const workspaceTerminationDeadlineAtMs = childTerminationDeadline(
+      "candidateWorkspace",
+      workspaceChildren.maxDeadlineAtMs,
+      workspaceSettlementDeadlineAtMs,
+      policy.candidateWorkspaceExperiment.cleanupReserveMs,
+    );
     const workspaceContinuationDeadlineAtMs =
       workspaceSettlementDeadlineAtMs +
       policy.candidateWorkspaceExperiment.continuationMs;
@@ -422,6 +468,7 @@ export function createTurnDeadlinePlan(
       kind: "candidate_workspace_experiment",
       available: true,
       childExecutionDeadlineAtMs: workspaceChildren.deadlines,
+      childTerminationDeadlineAtMs: workspaceTerminationDeadlineAtMs,
       acquisitionSettlementDeadlineAtMs: workspaceSettlementDeadlineAtMs,
       continuationDeadlineAtMs: workspaceContinuationDeadlineAtMs,
       ...generationDeadlines(

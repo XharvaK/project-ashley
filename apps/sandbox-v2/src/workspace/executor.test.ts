@@ -119,6 +119,7 @@ describe("Stage 2 — Workspace Experiment Executor", () => {
         registry,
         workspaceManager: manager,
         childExecutionDeadlineAtMs: 1_300,
+        childTerminationDeadlineAtMs: 1_400,
         settlementDeadlineAtMs: 1_500,
         clock: { nowMs: () => nowMs },
         spawnRunner: async (input: WorkspaceExperimentSpawnInput) => {
@@ -159,6 +160,64 @@ describe("Stage 2 — Workspace Experiment Executor", () => {
     });
     expect(nowMs).toBeLessThanOrEqual(1_500);
     expect(1_700 - nowMs).toBe(210);
+  });
+
+  it("maps unacknowledged mutating termination to indeterminate truth without redispatch", async () => {
+    const { registry, manager } = createTestSetup();
+    let nowMs = 1_000;
+    let dispatches = 0;
+    let cleanupStartedAtMs = -1;
+    const result = await executeWorkspaceExperiment(
+      {
+        version: 2,
+        operation: "workspace.write_file",
+        projectId: "composer-assistant",
+        path: "witness.txt",
+        content: "witness-data",
+        mustNotExist: true,
+      },
+      {
+        registry,
+        workspaceManager: manager,
+        childExecutionDeadlineAtMs: 1_300,
+        childTerminationDeadlineAtMs: 1_400,
+        settlementDeadlineAtMs: 1_500,
+        clock: { nowMs: () => nowMs },
+        spawnRunner: async (input) => {
+          dispatches += 1;
+          expect(input.childTerminationDeadlineAtMs).toBe(1_400);
+          nowMs = 1_400;
+          return {
+            exitCode: null,
+            stdout: "",
+            stderr: "",
+            timedOut: true,
+            stdoutOverflow: false,
+            stderrOverflow: false,
+            cancellationRequested: true,
+            cancellationAcknowledged: false,
+          };
+        },
+        serverCloser: ((server: import("node:net").Server, connections: Set<import("node:net").Socket>) => {
+          cleanupStartedAtMs = nowMs;
+          server.close();
+          for (const socket of connections) socket.destroy();
+          connections.clear();
+          nowMs = 1_450;
+        }),
+      },
+    );
+
+    expect(dispatches).toBe(1);
+    expect(cleanupStartedAtMs).toBe(1_400);
+    expect(nowMs).toBeLessThan(1_500);
+    expect(result).toMatchObject({
+      outcome: "failed",
+      error: "timeout",
+      executionTruth: "effect_indeterminate",
+      cancellationRequested: true,
+      cancellationAcknowledged: false,
+    });
   });
 
   it("classifies a pre-dispatch acquisition timeout as no_effect_proven", async () => {

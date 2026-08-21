@@ -432,6 +432,8 @@ describe("Sandbox V2 Execution Adapter & Operator Registry", () => {
         operation: "project.read_file",
         executedAtMs: 123456789,
         error: "not_found",
+        cancellationRequested: true,
+        cancellationAcknowledged: false,
       };
 
       const res = await executeProjectInspectionV2({
@@ -450,6 +452,8 @@ describe("Sandbox V2 Execution Adapter & Operator Registry", () => {
 
       expect(res.license.state).toBe("failed");
       expect(res.license.error).toBe("not_found");
+      expect(res.license.cancellationRequested).toBe(true);
+      expect(res.license.cancellationAcknowledged).toBe(false);
       expect(res.observation).toBeNull();
     });
   });
@@ -543,12 +547,16 @@ describe("Sandbox V2 Execution Adapter & Operator Registry", () => {
     it("derives the M1 child timeout from the selected branch and preserves settlement reserve", async () => {
       let nowMs = 1_000;
       let receivedTimeoutMs = -1;
+      let receivedTerminationDeadlineAtMs = -1;
       const license = await executeReactiveSandboxTaskV2({
         childExecutionDeadlineAtMs: 1_300,
+        childTerminationDeadlineAtMs: 1_400,
         settlementDeadlineAtMs: 1_500,
         clock: { nowMs: () => nowMs },
         executor: async (_request, _evidence, options) => {
           receivedTimeoutMs = options?.timeoutMs ?? -1;
+          receivedTerminationDeadlineAtMs =
+            options?.childTerminationDeadlineAtMs ?? -1;
           nowMs = 1_400;
           return {
             version: 1,
@@ -571,7 +579,32 @@ describe("Sandbox V2 Execution Adapter & Operator Registry", () => {
       });
 
       expect(receivedTimeoutMs).toBe(300);
+      expect(receivedTerminationDeadlineAtMs).toBe(1_400);
       expect(license.state).toBe("succeeded");
+    });
+
+    it("preserves unacknowledged M1 cancellation truth", async () => {
+      const license = await executeReactiveSandboxTaskV2({
+        childExecutionDeadlineAtMs: 1_300,
+        childTerminationDeadlineAtMs: 1_400,
+        settlementDeadlineAtMs: 1_500,
+        clock: { nowMs: () => 1_000 },
+        executor: async () => ({
+          version: 1,
+          kind: "file.roundtrip",
+          ok: false,
+          code: "timeout",
+          cancellationRequested: true,
+          cancellationAcknowledged: false,
+        }),
+      });
+
+      expect(license).toMatchObject({
+        state: "failed",
+        error: "timeout",
+        cancellationRequested: true,
+        cancellationAcknowledged: false,
+      });
     });
 
     it("does not return M1 success after cleanup crosses its settlement boundary", async () => {
@@ -795,6 +828,8 @@ describe("Sandbox V2 Execution Adapter & Operator Registry", () => {
               operation: "workspace.write_file",
               error: "timeout",
               executionTruth: "effect_indeterminate",
+              cancellationRequested: true,
+              cancellationAcknowledged: false,
               executedAtMs: Date.now(),
             };
           },
@@ -812,6 +847,8 @@ describe("Sandbox V2 Execution Adapter & Operator Registry", () => {
         state: "outcome_unknown",
         executionTruth: "effect_indeterminate",
         error: "timeout",
+        cancellationRequested: true,
+        cancellationAcknowledged: false,
       });
     });
 

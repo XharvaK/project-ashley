@@ -44,6 +44,8 @@ export type SandboxV2Environment = {
   timeoutMs?: number;
   /** Absolute child-execution cutoff supplied by the owning turn plan. */
   childExecutionDeadlineAtMs?: number;
+  /** Absolute child termination-acknowledgement cutoff supplied by the turn plan. */
+  childTerminationDeadlineAtMs?: number;
   /** Absolute acquisition/validation/cleanup settlement cutoff. */
   settlementDeadlineAtMs?: number;
   /** Deterministic test seam for deadline enforcement. */
@@ -99,6 +101,7 @@ export class SandboxV2Dispatcher {
         viewBuilder: this.env.viewBuilder,
         timeoutMs: this.env.timeoutMs,
         childExecutionDeadlineAtMs: this.env.childExecutionDeadlineAtMs,
+        childTerminationDeadlineAtMs: this.env.childTerminationDeadlineAtMs,
         settlementDeadlineAtMs: this.env.settlementDeadlineAtMs,
         clock: this.env.clock,
       });
@@ -108,6 +111,7 @@ export class SandboxV2Dispatcher {
         executor: this.env.roundtripExecutor,
         available: this.env.sandboxAvailable,
         childExecutionDeadlineAtMs: this.env.childExecutionDeadlineAtMs,
+        childTerminationDeadlineAtMs: this.env.childTerminationDeadlineAtMs,
         settlementDeadlineAtMs: this.env.settlementDeadlineAtMs,
         clock: this.env.clock,
       });
@@ -132,6 +136,7 @@ export class SandboxV2Dispatcher {
         managedWorkspaceRoot: this.env.managedWorkspaceRoot,
         timeoutMs: this.env.timeoutMs,
         childExecutionDeadlineAtMs: this.env.childExecutionDeadlineAtMs,
+        childTerminationDeadlineAtMs: this.env.childTerminationDeadlineAtMs,
         settlementDeadlineAtMs: this.env.settlementDeadlineAtMs,
         clock: this.env.clock,
       });

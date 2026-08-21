@@ -52,7 +52,7 @@ it("kills a timed-out child and destroys every child pipe", async () => {
   expect(destroyedPipes).toBe(3);
 });
 
-it("bounds child close acknowledgement by the remaining settlement budget", async () => {
+it("stops awaiting child close at the termination deadline and preserves cleanup reserve", async () => {
   const modulePath = "./settlement-cleanup.js";
   const cleanupModule = await import(modulePath) as Record<string, unknown>;
   const awaitChildCloseByDeadline = cleanupModule.awaitChildCloseByDeadline;
@@ -82,6 +82,7 @@ it("bounds child close acknowledgement by the remaining settlement budget", asyn
     value: typeof child,
     options: Record<string, unknown>,
   ) => Promise<{ closed: boolean }>)(child, {
+    childTerminationDeadlineAtMs: 1_400,
     settlementDeadlineAtMs: 1_500,
     nowMs: () => nowMs,
     setTimer: (callback: () => void, delayMs: number) => {
@@ -92,10 +93,11 @@ it("bounds child close acknowledgement by the remaining settlement budget", asyn
     clearTimer: () => {},
   });
 
-  expect(scheduledForMs).toBe(300);
-  nowMs = 1_500;
+  expect(scheduledForMs).toBe(200);
+  nowMs = 1_400;
   scheduled?.();
 
   await expect(closePromise).resolves.toEqual({ closed: false, exitCode: null });
   expect(listeners.size).toBe(0);
+  expect(1_500 - nowMs).toBe(100);
 });

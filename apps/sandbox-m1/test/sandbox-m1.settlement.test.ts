@@ -83,11 +83,16 @@ it("destroys child pipes when the child deadline sends SIGKILL", async () => {
 
   child.emit("close", null);
   const result = await resultPromise;
-  expect(result).toMatchObject({ ok: false, code: "timeout" });
+  expect(result).toMatchObject({
+    ok: false,
+    code: "timeout",
+    cancellationRequested: true,
+    cancellationAcknowledged: true,
+  });
   expect(existsSync(workspace)).toBe(false);
 });
 
-it("does not await child close acknowledgement beyond the settlement deadline", async () => {
+it("stops awaiting child close before settlement so fixed cleanup retains its reserve", async () => {
   vi.useFakeTimers();
   vi.setSystemTime(1_000);
   const workspace = mkdtempSync(join(tmpdir(), "ashley-m1-close-bound-"));
@@ -119,6 +124,7 @@ it("does not await child close acknowledgement beyond the settlement deadline", 
     },
     {
       timeoutMs: 25,
+      childTerminationDeadlineAtMs: 1_030,
       settlementDeadlineAtMs: 1_040,
       clock: { nowMs: () => Date.now() },
       workspaceFactory: async () => workspace,
@@ -131,12 +137,70 @@ it("does not await child close acknowledgement beyond the settlement deadline", 
   void resultPromise.then(() => { settled = true; });
 
   for (let i = 0; i < 10 && spawnCalls === 0; i += 1) await Promise.resolve();
-  await vi.advanceTimersByTimeAsync(40);
+  await vi.advanceTimersByTimeAsync(30);
 
   expect(spawnCalls).toBe(1);
   expect(settled).toBe(true);
   expect(existsSync(workspace)).toBe(false);
+  await expect(resultPromise).resolves.toMatchObject({
+    ok: false,
+    code: "timeout",
+    cancellationRequested: true,
+    cancellationAcknowledged: false,
+  });
 
   child.emit("close", null);
-  await resultPromise;
+});
+
+it("repeats termination when close waiting starts at the termination boundary", async () => {
+  const workspace = mkdtempSync(join(tmpdir(), "ashley-m1-term-boundary-"));
+  const child = new EventEmitter() as EventEmitter & {
+    stdin: PassThrough;
+    stdout: PassThrough;
+    stderr: PassThrough;
+    kill(signal: NodeJS.Signals): boolean;
+  };
+  child.stdin = new PassThrough();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  const killSignals: NodeJS.Signals[] = [];
+  child.kill = (signal) => {
+    killSignals.push(signal);
+    return true;
+  };
+
+  const result = await runSandboxM1(
+    {
+      version: 1,
+      kind: "file.roundtrip",
+      content: "hello",
+      probePort: 3710,
+      sentinelPath: "/tmp/sentinel.txt",
+      fdSentinelCanonical: "/tmp/sentinel.txt",
+    },
+    {
+      loopbackPositiveControlSucceeded: true,
+      hostLoopbackSandboxHits: () => 0,
+    },
+    {
+      timeoutMs: 25,
+      childTerminationDeadlineAtMs: 1_030,
+      settlementDeadlineAtMs: 1_040,
+      clock: { nowMs: () => 1_030 },
+      workspaceFactory: async () => workspace,
+      spawnChild: (() => child),
+    } as any,
+  );
+
+  expect(killSignals).toEqual(["SIGKILL"]);
+  expect(child.stdin.destroyed).toBe(true);
+  expect(child.stdout.destroyed).toBe(true);
+  expect(child.stderr.destroyed).toBe(true);
+  expect(result).toMatchObject({
+    ok: false,
+    code: "timeout",
+    cancellationRequested: true,
+    cancellationAcknowledged: false,
+  });
+  expect(existsSync(workspace)).toBe(false);
 });

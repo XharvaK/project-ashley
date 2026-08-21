@@ -23,6 +23,7 @@ const testPolicy: TurnDeadlinePolicy = {
   sandboxM1: {
     childExecutionMs: 200,
     acquisitionSettlementMs: 50,
+    cleanupReserveMs: 20,
     perceptionMs: 100,
     expressionMs: 100,
     generationSettlementMs: 20,
@@ -34,6 +35,7 @@ const testPolicy: TurnDeadlinePolicy = {
       "project.search_text": 240,
     },
     acquisitionSettlementMs: 50,
+    cleanupReserveMs: 20,
     continuationMs: 100,
     perceptionMs: 100,
     expressionMs: 100,
@@ -69,6 +71,12 @@ describe("TurnDeadlinePlan", () => {
     expect(Object.isFrozen(plan.branches)).toBe(true);
     expect(Object.isFrozen(plan.branches.project_inspection)).toBe(true);
     expect(Object.isFrozen(plan.branches.project_inspection.childExecutionDeadlineAtMs)).toBe(true);
+    expect(plan.branches.sandbox_m1.childTerminationDeadlineAtMs).toBe(
+      admittedAtMs + 330,
+    );
+    expect(plan.branches.project_inspection.childTerminationDeadlineAtMs).toBe(
+      admittedAtMs + 370,
+    );
   });
 
   it("keeps branch deadlines unchanged when Pass 1 selects by reference", () => {
@@ -96,15 +104,18 @@ describe("TurnDeadlinePlan", () => {
     });
   });
 
-  it("orders M2 child execution, settlement, continuation, expression, generation, transport, receipt, and final delivery", () => {
+  it("orders M2 child execution, termination, settlement, continuation, expression, generation, transport, receipt, and final delivery", () => {
     const plan = createTurnDeadlinePlan(admittedAtMs, testPolicy);
     const branch = plan.branches.project_inspection;
     if (!branch.available) throw new Error("project inspection unavailable");
 
     for (const childDeadline of Object.values(branch.childExecutionDeadlineAtMs)) {
       expect(plan.common.initialThoughtDeadlineAtMs).toBeLessThan(childDeadline);
-      expect(childDeadline).toBeLessThan(branch.acquisitionSettlementDeadlineAtMs);
+      expect(childDeadline).toBeLessThan(branch.childTerminationDeadlineAtMs);
     }
+    expect(branch.childTerminationDeadlineAtMs).toBeLessThan(
+      branch.acquisitionSettlementDeadlineAtMs,
+    );
     expect(branch.acquisitionSettlementDeadlineAtMs).toBeLessThan(
       branch.continuationDeadlineAtMs,
     );
@@ -120,6 +131,30 @@ describe("TurnDeadlinePlan", () => {
     expect(plan.common.firstBubbleReceiptDeadlineAtMs).toBeLessThan(
       plan.common.reservationHardDeadlineAtMs,
     );
+  });
+
+  it.each([0, -1])("rejects cleanupReserveMs=%s", (cleanupReserveMs) => {
+    expect(() =>
+      createTurnDeadlinePlan(admittedAtMs, {
+        ...testPolicy,
+        projectInspection: {
+          ...testPolicy.projectInspection,
+          cleanupReserveMs,
+        },
+      }),
+    ).toThrow("turn_deadline_policy_invalid:projectInspection.cleanupReserveMs");
+  });
+
+  it("rejects a cleanup reserve that leaves no termination grace after the maximum child deadline", () => {
+    expect(() =>
+      createTurnDeadlinePlan(admittedAtMs, {
+        ...testPolicy,
+        projectInspection: {
+          ...testPolicy.projectInspection,
+          cleanupReserveMs: 50,
+        },
+      }),
+    ).toThrow("turn_deadline_policy_invalid:projectInspection.termination_order");
   });
 
   it("uses the inbound transport cutoff as the real Discord authority while keeping receipt and final delivery distinct", () => {

@@ -73,6 +73,7 @@ export type ExecuteProjectInspectionV2Input = {
   messageEntityUuid?: string;
   deadlineAtMs?: number;
   childExecutionDeadlineAtMs?: number;
+  childTerminationDeadlineAtMs?: number;
   settlementDeadlineAtMs?: number;
   dispatcher?: SandboxV2Dispatcher;
   registry?: V2ProjectReadRegistry;
@@ -94,6 +95,7 @@ export type ExecuteReactiveSandboxTaskV2Input = {
   messageEntityUuid?: string;
   deadlineAtMs?: number;
   childExecutionDeadlineAtMs?: number;
+  childTerminationDeadlineAtMs?: number;
   settlementDeadlineAtMs?: number;
   executor?: (
     request: SandboxM1Request,
@@ -146,8 +148,19 @@ export async function executeReactiveSandboxTaskV2(
     input.settlementDeadlineAtMs ?? input.deadlineAtMs;
   if (
     input.childExecutionDeadlineAtMs !== undefined &&
+    input.childTerminationDeadlineAtMs !== undefined &&
+    input.childExecutionDeadlineAtMs >= input.childTerminationDeadlineAtMs
+  ) {
+    return {
+      state: "failed",
+      profile: "sandbox_workspace_file_roundtrip",
+      error: "invalid_deadline_plan",
+    };
+  }
+  if (
+    input.childTerminationDeadlineAtMs !== undefined &&
     settlementDeadlineAtMs !== undefined &&
-    input.childExecutionDeadlineAtMs >= settlementDeadlineAtMs
+    input.childTerminationDeadlineAtMs >= settlementDeadlineAtMs
   ) {
     return {
       state: "failed",
@@ -244,6 +257,7 @@ export async function executeReactiveSandboxTaskV2(
     }
     const res = await executor(request, hostEvidence, {
       timeoutMs: Math.min(30_000, remainingChildMs),
+      childTerminationDeadlineAtMs: input.childTerminationDeadlineAtMs,
       settlementDeadlineAtMs,
       clock: input.clock,
     });
@@ -278,6 +292,8 @@ export async function executeReactiveSandboxTaskV2(
         taskId: `v2-m1-${completedAtMs}`,
         profile: "sandbox_workspace_file_roundtrip",
         error: typeof res.code === "string" ? res.code : "roundtrip_failed",
+        cancellationRequested: res.cancellationRequested === true,
+        cancellationAcknowledged: res.cancellationAcknowledged === true,
         ...(input.messageEntityUuid ? { sourceMessageEntityUuid: input.messageEntityUuid } : {}),
       };
     }
@@ -457,6 +473,7 @@ export async function executeProjectInspectionV2(
           registry,
           ...input.envOverrides,
           childExecutionDeadlineAtMs: input.childExecutionDeadlineAtMs,
+          childTerminationDeadlineAtMs: input.childTerminationDeadlineAtMs,
           settlementDeadlineAtMs,
         },
       });
@@ -597,6 +614,8 @@ export async function executeProjectInspectionV2(
         profile: "project_investigation",
         error: res.error ?? "inspection_failed",
         lateEvidenceVerified: res.lateEvidenceVerified === true,
+        cancellationRequested: res.cancellationRequested === true,
+        cancellationAcknowledged: res.cancellationAcknowledged === true,
         ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
       },
       observation: null,
@@ -620,6 +639,7 @@ export type ExecuteWorkspaceExperimentV2Input = {
   messageEntityUuid?: string;
   deadlineAtMs?: number;
   childExecutionDeadlineAtMs?: number;
+  childTerminationDeadlineAtMs?: number;
   settlementDeadlineAtMs?: number;
   dispatcher?: SandboxV2Dispatcher;
   registry?: V2ProjectReadRegistry;
@@ -758,6 +778,7 @@ export async function executeWorkspaceExperimentV2(
           workspaceManager: input.workspaceManager,
           ...input.envOverrides,
           childExecutionDeadlineAtMs: input.childExecutionDeadlineAtMs,
+          childTerminationDeadlineAtMs: input.childTerminationDeadlineAtMs,
           settlementDeadlineAtMs,
         },
       });
@@ -851,6 +872,8 @@ export async function executeWorkspaceExperimentV2(
         error: res.error ?? "workspace_experiment_failed",
         executionTruth: res.executionTruth ?? "no_effect_proven",
         lateEvidenceVerified: res.lateEvidenceVerified === true,
+        cancellationRequested: res.cancellationRequested === true,
+        cancellationAcknowledged: res.cancellationAcknowledged === true,
         ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
       },
       observation: null,
