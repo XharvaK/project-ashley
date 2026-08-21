@@ -131,7 +131,7 @@ describe("bounded delivery-owned phase lifecycle", () => {
         new Date(admittedAtMs + 125_000).toISOString(),
       );
       expect(claim.reservation.generationLeaseExpiresAt).toBe(
-        new Date(admittedAtMs + 68_000).toISOString(),
+        new Date(admittedAtMs + 80_000).toISOString(),
       );
       expect(claim.reservation.phaseLifecycle).toMatchObject({
         version: 1,
@@ -179,7 +179,7 @@ describe("bounded delivery-owned phase lifecycle", () => {
       const lifecycle = readPhaseLifecycle(db, claim.reservation.id);
       expect(lifecycle).toMatchObject({
         version: 1,
-        planVersion: "phase-budget-v1-mint-cleanup-3500-500",
+        planVersion: "phase-budget-v2-m2-preparation-mechanism-placeholder",
         qualification: "unqualified",
         selectedBranch: "project_inspection",
         selectedAtOffsetMs: 100,
@@ -193,19 +193,28 @@ describe("bounded delivery-owned phase lifecycle", () => {
         },
       });
       expect(lifecycle?.deadlineOffsetsMs.initialThought).toBe(6_000);
+      expect(lifecycle?.deadlineOffsetsMs.projectInspectionPreparation).toBe(
+        36_000,
+      );
       expect(lifecycle?.deadlineOffsetsMs.projectInspectionContinuation).toBe(
-        22_000,
+        52_000,
       );
       expect(
         lifecycle?.deadlineOffsetsMs.projectInspectionChildTermination,
       ).toBeLessThan(
         lifecycle?.deadlineOffsetsMs.projectInspectionSettlement ?? 0,
       );
+      expect(
+        lifecycle?.deadlineOffsetsMs.projectInspectionPreparation,
+      ).toBeLessThan(
+        lifecycle?.deadlineOffsetsMs["projectInspectionChild:project.read_file"] ??
+          0,
+      );
       expect(lifecycle?.deadlineOffsetsMs).toMatchObject({
         softResponsiveness: 5_000,
-        projectInspectionPerception: 42_000,
-        projectInspectionExpression: 46_000,
-        projectInspectionGeneration: 50_000,
+        projectInspectionPerception: 72_000,
+        projectInspectionExpression: 76_000,
+        projectInspectionGeneration: 80_000,
         externalTransport: 120_000,
         firstBubbleReceipt: 125_000,
         deliveryFinal: 245_000,

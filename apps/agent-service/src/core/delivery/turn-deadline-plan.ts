@@ -55,7 +55,9 @@ export type TurnDeadlinePolicy = {
     acquisitionSettlementMs: number;
     cleanupReserveMs: number;
   };
-  projectInspection: OperationalPolicy<ProjectInspectionOperation>;
+  projectInspection: OperationalPolicy<ProjectInspectionOperation> & {
+    projectInspectionPreparationMs: number;
+  };
   candidateWorkspaceExperiment:
     | AvailableWorkspacePolicy
     | UnavailableWorkspacePolicy;
@@ -91,6 +93,7 @@ export type SandboxM1TurnDeadlineBranch = Readonly<{
 export type ProjectInspectionTurnDeadlineBranch = Readonly<{
   kind: "project_inspection";
   available: true;
+  projectInspectionPreparationDeadlineAtMs: number;
   childExecutionDeadlineAtMs: Readonly<Record<ProjectInspectionOperation, number>>;
   childTerminationDeadlineAtMs: number;
   acquisitionSettlementDeadlineAtMs: number;
@@ -192,21 +195,26 @@ function requirePositiveDuration(name: string, value: number): void {
 }
 
 function operationDeadlines<TOperation extends string>(
-  admittedAtMs: number,
-  initialThoughtMs: number,
+  startAtMs: number,
   operations: readonly TOperation[],
   durations: Readonly<Record<TOperation, number>>,
-): { deadlines: Record<TOperation, number>; maxDeadlineAtMs: number } {
+): {
+  deadlines: Record<TOperation, number>;
+  maxDeadlineAtMs: number;
+  minDeadlineAtMs: number;
+} {
   const deadlines = {} as Record<TOperation, number>;
-  let maxDeadlineAtMs = admittedAtMs + initialThoughtMs;
+  let maxDeadlineAtMs = startAtMs;
+  let minDeadlineAtMs = Number.POSITIVE_INFINITY;
   for (const operation of operations) {
     const duration = durations[operation];
     requirePositiveDuration(`childExecutionMs.${operation}`, duration);
-    const deadline = admittedAtMs + initialThoughtMs + duration;
+    const deadline = startAtMs + duration;
     deadlines[operation] = deadline;
     maxDeadlineAtMs = Math.max(maxDeadlineAtMs, deadline);
+    minDeadlineAtMs = Math.min(minDeadlineAtMs, deadline);
   }
-  return { deadlines, maxDeadlineAtMs };
+  return { deadlines, maxDeadlineAtMs, minDeadlineAtMs };
 }
 
 function childTerminationDeadline(
@@ -285,12 +293,19 @@ function assertGenerationBeforeTransport(
  * 30s M1 cap, 6s M2 child cap (covers 5.042s tail, still explicitly
  * unqualified for child timing), 120s transport + final delivery.
  *
+ * projectInspectionPreparationMs is a MECHANISM PLACEHOLDER (not qualified,
+ * not a production timing decision): it models the explicit pre-child M2
+ * acquisition-preparation phase (adapter/dispatcher transit, validation,
+ * registry resolution, substrate preflight, sanitized view construction,
+ * evidence resources, pre-dispatch gate). The final value requires a
+ * dedicated Mint qualification campaign over the complete phase.
+ *
  * The closed M3 branch has no provisional execution budget and cannot be
  * selected while candidateWorkspaceAllowed=false.
  */
 export const PROVISIONAL_UNQUALIFIED_TURN_DEADLINE_POLICY: TurnDeadlinePolicy =
   deepFreeze({
-    version: "phase-budget-v1-mint-cleanup-3500-500",
+    version: "phase-budget-v2-m2-preparation-mechanism-placeholder",
     qualification: "unqualified",
     softResponsivenessTargetMs: 5_000,
     initialThoughtMs: 6_000,
@@ -313,6 +328,13 @@ export const PROVISIONAL_UNQUALIFIED_TURN_DEADLINE_POLICY: TurnDeadlinePolicy =
       generationSettlementMs: 4_000,
     },
     projectInspection: {
+      // MECHANISM PLACEHOLDER — NOT a production timing decision. The final
+      // projectInspectionPreparationMs value must be selected only after a
+      // dedicated Mint qualification campaign measures the complete phase
+      // (reactive execution handoff -> adapter/dispatcher -> executor
+      // validation -> sanitized view -> evidence resources -> pre-dispatch
+      // gate). Do not deploy or interpret this number as qualified.
+      projectInspectionPreparationMs: 30_000,
       childExecutionMs: {
         "project.read_file": 6_000,
         "project.list_directory": 6_000,
@@ -410,12 +432,23 @@ export function createTurnDeadlinePlan(
     ...generationDeadlines(m1SettlementDeadlineAtMs, policy.sandboxM1),
   };
 
+  requirePositiveDuration(
+    "projectInspection.projectInspectionPreparationMs",
+    policy.projectInspection.projectInspectionPreparationMs,
+  );
+  const projectPreparationDeadlineAtMs =
+    common.initialThoughtDeadlineAtMs +
+    policy.projectInspection.projectInspectionPreparationMs;
   const projectChildren = operationDeadlines(
-    admittedAtMs,
-    policy.initialThoughtMs,
+    projectPreparationDeadlineAtMs,
     PROJECT_INSPECTION_OPERATIONS,
     policy.projectInspection.childExecutionMs,
   );
+  if (projectChildren.minDeadlineAtMs <= projectPreparationDeadlineAtMs) {
+    throw new Error(
+      "turn_deadline_policy_invalid:projectInspection.preparation_order",
+    );
+  }
   requirePositiveDuration(
     "projectInspection.acquisitionSettlementMs",
     policy.projectInspection.acquisitionSettlementMs,
@@ -438,6 +471,7 @@ export function createTurnDeadlinePlan(
   const projectInspection: ProjectInspectionTurnDeadlineBranch = {
     kind: "project_inspection",
     available: true,
+    projectInspectionPreparationDeadlineAtMs: projectPreparationDeadlineAtMs,
     childExecutionDeadlineAtMs: projectChildren.deadlines,
     childTerminationDeadlineAtMs: projectTerminationDeadlineAtMs,
     acquisitionSettlementDeadlineAtMs: projectSettlementDeadlineAtMs,
@@ -458,8 +492,7 @@ export function createTurnDeadlinePlan(
     };
   } else {
     const workspaceChildren = operationDeadlines(
-      admittedAtMs,
-      policy.initialThoughtMs,
+      common.initialThoughtDeadlineAtMs,
       CANDIDATE_WORKSPACE_OPERATIONS,
       policy.candidateWorkspaceExperiment.childExecutionMs,
     );

@@ -29,6 +29,7 @@ const testPolicy: TurnDeadlinePolicy = {
     generationSettlementMs: 20,
   },
   projectInspection: {
+    projectInspectionPreparationMs: 80,
     childExecutionMs: {
       "project.read_file": 200,
       "project.list_directory": 220,
@@ -74,8 +75,11 @@ describe("TurnDeadlinePlan", () => {
     expect(plan.branches.sandbox_m1.childTerminationDeadlineAtMs).toBe(
       admittedAtMs + 330,
     );
+    expect(plan.branches.project_inspection.projectInspectionPreparationDeadlineAtMs).toBe(
+      admittedAtMs + 180,
+    );
     expect(plan.branches.project_inspection.childTerminationDeadlineAtMs).toBe(
-      admittedAtMs + 370,
+      admittedAtMs + 450,
     );
   });
 
@@ -87,7 +91,7 @@ describe("TurnDeadlinePlan", () => {
     expect(selected.ok).toBe(true);
     if (!selected.ok) throw new Error("expected selected branch");
     expect(selected.branch).toBe(plan.branches.project_inspection);
-    expect(selected.branch.continuationDeadlineAtMs).toBe(admittedAtMs + 490);
+    expect(selected.branch.continuationDeadlineAtMs).toBe(admittedAtMs + 570);
     expect(JSON.stringify(plan)).toBe(before);
   });
 
@@ -104,13 +108,16 @@ describe("TurnDeadlinePlan", () => {
     });
   });
 
-  it("orders M2 child execution, termination, settlement, continuation, expression, generation, transport, receipt, and final delivery", () => {
+  it("orders M2 preparation, child execution, termination, settlement, continuation, expression, generation, transport, receipt, and final delivery", () => {
     const plan = createTurnDeadlinePlan(admittedAtMs, testPolicy);
     const branch = plan.branches.project_inspection;
     if (!branch.available) throw new Error("project inspection unavailable");
 
+    expect(plan.common.initialThoughtDeadlineAtMs).toBeLessThan(
+      branch.projectInspectionPreparationDeadlineAtMs,
+    );
     for (const childDeadline of Object.values(branch.childExecutionDeadlineAtMs)) {
-      expect(plan.common.initialThoughtDeadlineAtMs).toBeLessThan(childDeadline);
+      expect(branch.projectInspectionPreparationDeadlineAtMs).toBeLessThan(childDeadline);
       expect(childDeadline).toBeLessThan(branch.childTerminationDeadlineAtMs);
     }
     expect(branch.childTerminationDeadlineAtMs).toBeLessThan(
@@ -143,6 +150,34 @@ describe("TurnDeadlinePlan", () => {
         },
       }),
     ).toThrow("turn_deadline_policy_invalid:projectInspection.cleanupReserveMs");
+  });
+
+  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])(
+    "rejects projectInspectionPreparationMs=%s",
+    (projectInspectionPreparationMs) => {
+      expect(() =>
+        createTurnDeadlinePlan(admittedAtMs, {
+          ...testPolicy,
+          projectInspection: {
+            ...testPolicy.projectInspection,
+            projectInspectionPreparationMs,
+          },
+        }),
+      ).toThrow(
+        "turn_deadline_policy_invalid:projectInspection.projectInspectionPreparationMs",
+      );
+    },
+  );
+
+  it("anchors every M2 child deadline strictly after the preparation boundary", () => {
+    const plan = createTurnDeadlinePlan(admittedAtMs, testPolicy);
+    const branch = plan.branches.project_inspection;
+    if (!branch.available) throw new Error("project inspection unavailable");
+    for (const childDeadline of Object.values(branch.childExecutionDeadlineAtMs)) {
+      expect(childDeadline).toBeGreaterThan(
+        branch.projectInspectionPreparationDeadlineAtMs,
+      );
+    }
   });
 
   it("rejects a cleanup reserve that leaves no termination grace after the maximum child deadline", () => {

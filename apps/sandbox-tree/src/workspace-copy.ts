@@ -83,6 +83,17 @@ export type WorkspaceCopyInput = {
   symlinkPolicy?: "skip" | "fail";
   /** Compute per-file SHA-256 digests and the aggregate digest. */
   digests?: boolean;
+  /**
+   * Cooperative absolute wall-clock cutoff, checked between traversal
+   * operations and enforced against in-flight streamed copies via abort.
+   * Optional; when absent behavior is unchanged. Individual synchronous
+   * metadata syscalls (lstat/readdir/mkdir/chmod) are NOT interruptible;
+   * callers bind that residual blocking tail to their own qualification
+   * envelope. No unconditional hard wall-clock cutoff is claimed.
+   */
+  deadlineAtMs?: number;
+  /** Deterministic clock seam for the cooperative deadline. */
+  clock?: { nowMs(): number };
 };
 
 type PendingEntry = { relPath: string; src: string; dest: string };
@@ -115,16 +126,38 @@ function truncatedReason(code: string, relPath: string): string {
   return `${code}:${visible}`;
 }
 
-/** Streams a regular file into the destination while optionally hashing it. */
+/** Streams a regular file into the destination while optionally hashing it.
+ *  When `signal` aborts, both streams are destroyed and the promise rejects;
+ *  the caller re-checks its deadline to classify the failure. */
 function copyFileWithOptionalDigest(
   source: string,
   destination: string,
   wantDigest: boolean,
+  signal?: AbortSignal,
 ): Promise<string | null> {
   return new Promise((resolve, reject) => {
     const input = createReadStream(source, { highWaterMark: 256 * 1024 });
     const output = createWriteStream(destination, { flags: "w" });
     const hash = wantDigest ? createHash("sha256") : null;
+    let settled = false;
+    const settle = (settleFn: () => void): void => {
+      if (settled) return;
+      settled = true;
+      if (signal) signal.removeEventListener("abort", onAbort);
+      settleFn();
+    };
+    const onAbort = (): void => {
+      input.destroy();
+      output.destroy();
+      settle(() => reject(new Error("copy_deadline_aborted")));
+    };
+    if (signal) {
+      if (signal.aborted) {
+        onAbort();
+        return;
+      }
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
     input.on("data", (chunk: string | Buffer) => {
       output.write(chunk);
       hash?.update(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, "utf8"));
@@ -134,14 +167,14 @@ function copyFileWithOptionalDigest(
     });
     input.on("error", (error) => {
       output.destroy();
-      reject(error);
+      settle(() => reject(error));
     });
     output.on("error", (error) => {
       input.destroy();
-      reject(error);
+      settle(() => reject(error));
     });
     output.on("finish", () => {
-      resolve(hash === null ? null : hash.digest("hex"));
+      settle(() => resolve(hash === null ? null : hash.digest("hex")));
     });
   });
 }
@@ -161,7 +194,12 @@ export function copySanitizedTree(
     limits,
     symlinkPolicy = "skip",
     digests = false,
+    deadlineAtMs,
+    clock,
   } = input;
+  const nowMs = clock?.nowMs ?? Date.now;
+  const deadlineArmed = deadlineAtMs !== undefined;
+  const expired = (): boolean => deadlineArmed && nowMs() >= deadlineAtMs!;
   const counts = emptyCounts();
   const fileDigests: Record<string, string> | null = digests ? {} : null;
   const aggregate = digests ? createHash("sha256") : null;
@@ -243,7 +281,12 @@ export function copySanitizedTree(
     const collision = registerName(relPath);
     if (collision !== null) return collision;
     try {
-      const digest = await copyFileWithOptionalDigest(src, dest, digests);
+      const digest = await copyFileWithOptionalDigest(
+        src,
+        dest,
+        digests,
+        deadlineArmed ? abortController!.signal : undefined,
+      );
       if (process.platform !== "win32") {
         chmodSync(dest, stats.mode & 0o777);
       }
@@ -255,6 +298,12 @@ export function copySanitizedTree(
         aggregate.update(`${relPath}\0${digest}\n`);
       }
     } catch {
+      // Causal classification: only an abort issued by the deadline timer
+      // classifies as deadline_exceeded. An independent I/O failure that
+      // merely happens after deadline passage preserves its actual cause.
+      if (deadlineArmed && abortController!.signal.aborted) {
+        return fail("deadline_exceeded", truncatedReason("deadline_exceeded", relPath));
+      }
       return fail("copy_failed", truncatedReason("file_copy_failed", relPath));
     }
     return null;
@@ -274,6 +323,9 @@ export function copySanitizedTree(
     const children: PendingEntry[] = [];
     for (const name of entries) {
       const childRel = relPath === "" ? name : `${relPath}/${name}`;
+      if (expired()) {
+        return { failed: fail("deadline_exceeded", truncatedReason("deadline_exceeded", childRel)) };
+      }
       const childSrc = `${src}${src.endsWith("/") ? "" : "/"}${name}`;
       const childDest = `${dest}${dest.endsWith("/") ? "" : "/"}${name}`;
       const verdict = excludeOrFail(childRel);
@@ -287,11 +339,27 @@ export function copySanitizedTree(
   };
 
   const stack: PendingEntry[] = [];
+  if (expired()) {
+    return Promise.resolve(fail("deadline_exceeded", "deadline_exceeded_at_entry"));
+  }
+  let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+  let abortController: AbortController | undefined;
+  if (deadlineArmed) {
+    abortController = new AbortController();
+    deadlineTimer = setTimeout(
+      () => abortController!.abort(),
+      Math.max(0, deadlineAtMs! - nowMs()),
+    );
+  }
   const first = processDir("", sourceRoot, destinationRoot);
-  if ("failed" in first) return Promise.resolve(first.failed);
+  if ("failed" in first) {
+    if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
+    return Promise.resolve(first.failed);
+  }
   stack.push(...first.descend.reverse());
 
   return (async () => {
+    try {
     for (;;) {
       if (stack.length === 0) {
         return {
@@ -303,6 +371,9 @@ export function copySanitizedTree(
       }
       const entry = stack.pop()!;
       const { relPath, src, dest } = entry;
+      if (expired()) {
+        return fail("deadline_exceeded", truncatedReason("deadline_exceeded", relPath));
+      }
       scanned += 1;
       if (scanned > scanBound) {
         return fail("limit_exceeded", truncatedReason("scan_exceeded", relPath));
@@ -346,6 +417,9 @@ export function copySanitizedTree(
       }
       const failure = await processFile(relPath, src, dest, stats);
       if (failure !== null) return failure;
+    }
+    } finally {
+      if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
     }
   })();
 }

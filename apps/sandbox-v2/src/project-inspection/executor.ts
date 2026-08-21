@@ -1,19 +1,34 @@
 /**
  * Sandbox V2 M2 project-inspection host executor.
  *
- * Fail-closed pipeline:
+ * Fail-closed pipeline. Everything before the Bubblewrap dispatch attempt is
+ * the explicit acquisition-preparation phase (PRE-DISPATCH HOST PREPARATION
+ * != CHILD EXECUTION):
  *  1. strict request validation (canonical relative paths only);
  *  2. projectId resolution through the operator-owned read registry
  *     (unknown / disabled / read-denied projects are refused);
  *  3. sanitized bounded source view materialization (exclusions + protected
- *     roots, symlinks never copied);
+ *     roots, symlinks never copied), cooperatively bounded by the absolute
+ *     preparation deadline;
  *  4. host-owned loopback evidence + sentinel file/fd + environment secret;
- *  5. direct Bubblewrap execution (fixed profile, no shell, no arbitrary
+ *  5. final pre-dispatch boundary validation;
+ *  6. direct Bubblewrap execution (fixed profile, no shell, no arbitrary
  *     argv, no dynamic executable selection) with the view ro-bound at
  *     /project, network/pid/user/ipc/uts namespaces isolated, clean env;
- *  6. bounded stdin/stdout/stderr, timeout -> SIGKILL -> await close;
- *  7. typed evidence validation + host loopback verdict (fail closed);
- *  8. disposable view + evidence cleanup in finally.
+ *  7. bounded stdin/stdout/stderr, timeout -> SIGKILL -> await close;
+ *  8. typed evidence validation + host loopback verdict (fail closed);
+ *  9. disposable view + evidence cleanup in finally.
+ *
+ * Phase ownership:
+ *  - preparation expiry before dispatch reports
+ *    `project_inspection_preparation_deadline_expired` with
+ *    dispatchAttempted=false and NO cancellation semantics — a child never
+ *    existed, so child-execution timing language is forbidden there;
+ *  - child-execution timing starts only after the actual dispatch attempt;
+ *  - on preparation failure the mandatory `finally` cleanup is acquisition-
+ *    SETTLEMENT work under the immutable settlement deadline: if it crosses
+ *    settlement the result reclassifies to `settlement_deadline_exceeded`,
+ *    never as a preparation failure.
  *
  * Execution/result truth is downstream of actual execution evidence only;
  * the model can never decide that an inspection happened.
@@ -88,8 +103,12 @@ export type ProjectInspectionExecutorOptions = {
   viewBuilder?: (options: {
     canonicalRoot: string;
     protectedRoots: ProtectedRootsConfig;
+    deadlineAtMs?: number;
+    clock?: { nowMs(): number };
   }) => Promise<ProjectSourceViewResult>;
   timeoutMs?: number;
+  /** Absolute preparation cutoff selected by the owning turn plan. */
+  projectInspectionPreparationDeadlineAtMs?: number;
   /** Absolute child-execution cutoff selected by the owning turn plan. */
   childExecutionDeadlineAtMs?: number;
   /** Absolute cutoff for awaiting child termination acknowledgement. */
@@ -275,44 +294,78 @@ export async function executeProjectInspection(
     executedAtMs,
   });
   const executedAtMs = nowMs();
+  let dispatchAttempted = false;
+  let dispatchAttemptedAtMs: number | undefined;
+  let preparationEndedReason: string | undefined;
+  const withDispatchTruth = (result: SandboxV2Result): SandboxV2Result => ({
+    ...result,
+    dispatchAttempted,
+    ...(dispatchAttemptedAtMs !== undefined ? { dispatchAttemptedAtMs } : {}),
+    ...(preparationEndedReason !== undefined ? { preparationEndedReason } : {}),
+  });
 
+  if (
+    options.projectInspectionPreparationDeadlineAtMs !== undefined &&
+    options.childExecutionDeadlineAtMs !== undefined &&
+    options.projectInspectionPreparationDeadlineAtMs >=
+      options.childExecutionDeadlineAtMs
+  ) {
+    return withDispatchTruth(failed("invalid_deadline_plan", executedAtMs));
+  }
   if (
     options.childExecutionDeadlineAtMs !== undefined &&
     options.childTerminationDeadlineAtMs !== undefined &&
     options.childExecutionDeadlineAtMs >= options.childTerminationDeadlineAtMs
   ) {
-    return failed("invalid_deadline_plan", executedAtMs);
+    return withDispatchTruth(failed("invalid_deadline_plan", executedAtMs));
   }
   if (
     options.childTerminationDeadlineAtMs !== undefined &&
     options.settlementDeadlineAtMs !== undefined &&
     options.childTerminationDeadlineAtMs >= options.settlementDeadlineAtMs
   ) {
-    return failed("invalid_deadline_plan", executedAtMs);
+    return withDispatchTruth(failed("invalid_deadline_plan", executedAtMs));
   }
   if (
     options.settlementDeadlineAtMs !== undefined &&
     nowMs() >= options.settlementDeadlineAtMs
   ) {
-    return failed("settlement_deadline_exceeded", executedAtMs);
+    return withDispatchTruth(
+      failed("settlement_deadline_exceeded", executedAtMs),
+    );
+  }
+  const preparationDeadlineAtMs =
+    options.projectInspectionPreparationDeadlineAtMs;
+  if (preparationDeadlineAtMs !== undefined && nowMs() >= preparationDeadlineAtMs) {
+    preparationEndedReason = "project_inspection_preparation_deadline_expired";
+    return withDispatchTruth(
+      failed("project_inspection_preparation_deadline_expired", executedAtMs),
+    );
   }
 
   const validated = validateProjectInspectionRequest(request);
-  if (!validated.ok) return failed(validated.error, executedAtMs);
+  if (!validated.ok) {
+    preparationEndedReason = validated.error;
+    return withDispatchTruth(failed(validated.error, executedAtMs));
+  }
 
   const resolution = options.registry.resolveReadRoot(validated.projectId);
-  if (!resolution.ok) return failed(resolution.error, executedAtMs);
+  if (!resolution.ok) {
+    preparationEndedReason = resolution.error;
+    return withDispatchTruth(failed(resolution.error, executedAtMs));
+  }
 
   const spawnRunner = options.spawnRunner ?? spawnBubblewrapInspection;
   const isCustomSpawn = options.spawnRunner !== undefined;
   const available = options.available ?? isV2InspectionAvailable;
   if (!isCustomSpawn && !available()) {
-    return {
+    preparationEndedReason = "sandbox_unavailable";
+    return withDispatchTruth({
       outcome: "unavailable",
       operation,
       error: "sandbox_unavailable",
       executedAtMs,
-    };
+    });
   }
 
   let viewRoot: string | undefined;
@@ -330,8 +383,19 @@ export async function executeProjectInspection(
         delegatedWriteDeniedOwnerApprovable: [],
         absoluteDenial: [],
       },
+      ...(preparationDeadlineAtMs !== undefined
+        ? { deadlineAtMs: preparationDeadlineAtMs }
+        : {}),
+      ...(options.clock ? { clock: options.clock } : {}),
     });
-    if (!view.ok) return failed(view.error);
+    if (!view.ok) {
+      const error =
+        view.error === "deadline_exceeded"
+          ? "project_inspection_preparation_deadline_expired"
+          : view.error;
+      preparationEndedReason = error;
+      return failed(error);
+    }
     const resolvedViewRoot = view.viewRoot;
     viewRoot = resolvedViewRoot;
 
@@ -384,13 +448,35 @@ export async function executeProjectInspection(
     };
 
     const requestJson = JSON.stringify(runnerRequest);
+    // Final pre-dispatch boundary validation: everything above this line is
+    // acquisition preparation. Expiry here is a preparation failure — no
+    // child exists, so child-execution language is forbidden.
+    if (
+      preparationDeadlineAtMs !== undefined &&
+      nowMs() >= preparationDeadlineAtMs
+    ) {
+      preparationEndedReason = "project_inspection_preparation_deadline_expired";
+      return failed("project_inspection_preparation_deadline_expired");
+    }
     const operationHardCapMs = options.timeoutMs ?? V2_LIMITS.TIMEOUT_MS;
+    const dispatchAttemptedAt = nowMs();
     const remainingChildMs =
       options.childExecutionDeadlineAtMs === undefined
         ? operationHardCapMs
-        : options.childExecutionDeadlineAtMs - nowMs();
-    if (remainingChildMs <= 0) return failed("child_execution_deadline_expired");
-    const childTimeoutMs = Math.min(operationHardCapMs, remainingChildMs);
+        : options.childExecutionDeadlineAtMs - dispatchAttemptedAt;
+    // Under enforced ordering (preparation < child) the remainder is positive
+    // past the gate. The clamp is defensive only for legacy callers that pass
+    // no preparation deadline; such a child is dispatched and then times out,
+    // which keeps child-execution semantics truthful.
+    const childTimeoutMs = Math.min(
+      operationHardCapMs,
+      Math.max(remainingChildMs, 1),
+    );
+    // Canonical dispatch truth: from this point the execution spawn seam was
+    // invoked. This does NOT prove successful process creation, Bubblewrap
+    // READY, child execution, or operation success.
+    dispatchAttempted = true;
+    dispatchAttemptedAtMs = dispatchAttemptedAt;
     const run = await spawnRunner({
       viewRoot: resolvedViewRoot,
       requestJson,
@@ -469,15 +555,17 @@ export async function executeProjectInspection(
     options.settlementDeadlineAtMs !== undefined &&
     nowMs() >= options.settlementDeadlineAtMs
   ) {
-    return result.outcome === "succeeded"
-      ? {
-          outcome: "failed",
-          operation,
-          error: "settlement_deadline_exceeded",
-          lateEvidenceVerified: true,
-          executedAtMs: nowMs(),
-        }
-      : failed("settlement_deadline_exceeded");
+    return withDispatchTruth(
+      result.outcome === "succeeded"
+        ? {
+            outcome: "failed",
+            operation,
+            error: "settlement_deadline_exceeded",
+            lateEvidenceVerified: true,
+            executedAtMs: nowMs(),
+          }
+        : failed("settlement_deadline_exceeded"),
+    );
   }
-  return result;
+  return withDispatchTruth(result);
 }

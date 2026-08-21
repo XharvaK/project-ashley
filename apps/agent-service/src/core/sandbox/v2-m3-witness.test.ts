@@ -55,6 +55,7 @@ const M3_TEST_DEADLINE_POLICY: TurnDeadlinePolicy = {
     generationSettlementMs: 4_000,
   },
   projectInspection: {
+    projectInspectionPreparationMs: 30_000,
     childExecutionMs: {
       "project.read_file": 6_000,
       "project.list_directory": 6_000,

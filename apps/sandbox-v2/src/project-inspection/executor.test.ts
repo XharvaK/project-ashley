@@ -208,6 +208,7 @@ describe("executeProjectInspection", () => {
       error: "timeout",
       cancellationRequested: true,
       cancellationAcknowledged: false,
+      dispatchAttempted: true,
     });
     expect(1_700 - nowMs).toBe(250);
   });
@@ -288,6 +289,7 @@ describe("executeProjectInspection", () => {
       outcome: "failed",
       error: "settlement_deadline_exceeded",
       lateEvidenceVerified: true,
+      dispatchAttempted: true,
     });
     expect(usedViews.every((view) => !existsSync(view))).toBe(true);
   });
@@ -327,7 +329,10 @@ describe("executeProjectInspection", () => {
       { registry, spawnRunner: makeRunner(() => ({})), viewBuilder: trackingViewBuilder },
     );
     expect(result.outcome).toBe("failed");
-    if (result.outcome === "failed") expect(result.error).toBe("unknown_project");
+    if (result.outcome === "failed") {
+      expect(result.error).toBe("unknown_project");
+      expect(result.dispatchAttempted).toBe(false);
+    }
     expect(usedViews.length).toBe(0);
   });
 
@@ -478,5 +483,224 @@ describe("executeProjectInspection", () => {
     });
     expect(result.outcome).toBe("succeeded");
     expect(process.env[V2_SECRET_ENV_KEY]).toBe("previous");
+  });
+});
+
+describe("executeProjectInspection preparation phase", () => {
+  let nowMs = 1_000;
+  const clock = { nowMs: () => nowMs };
+  let spawnCalls = 0;
+  const countingSpawn: InspectionSpawn = async (input) => {
+    spawnCalls += 1;
+    return makeRunner(() => ({
+      version: 2,
+      operation: "project.read_file",
+      ok: true,
+      result: {
+        kind: "project.read_file",
+        path: "src/main.ts",
+        bytes: 12,
+        contentBase64: "Y29uc3QgeCA9IDE7Cg==",
+        sha256: "f".repeat(64),
+        truncated: false,
+      },
+      checks: goodChecks(),
+    }))(input);
+  };
+
+  function reset(startAtMs = 1_000): void {
+    nowMs = startAtMs;
+    spawnCalls = 0;
+  }
+
+  it("reports preparation expiry at entry with no dispatch and no cancellation semantics", async () => {
+    reset();
+    const result = await executeProjectInspection(readRequest, {
+      registry,
+      projectInspectionPreparationDeadlineAtMs: 900,
+      childExecutionDeadlineAtMs: 1_300,
+      childTerminationDeadlineAtMs: 1_400,
+      settlementDeadlineAtMs: 1_500,
+      clock,
+      spawnRunner: countingSpawn,
+      viewBuilder: trackingViewBuilder,
+    });
+
+    expect(spawnCalls).toBe(0);
+    expect(usedViews.length).toBe(0);
+    expect(result).toMatchObject({
+      outcome: "failed",
+      error: "project_inspection_preparation_deadline_expired",
+      dispatchAttempted: false,
+    });
+    expect(result.cancellationRequested).toBeUndefined();
+    expect(result.cancellationAcknowledged).toBeUndefined();
+  });
+
+  it("maps mid-view cooperative expiry to the preparation error", async () => {
+    reset();
+    const result = await executeProjectInspection(readRequest, {
+      registry,
+      projectInspectionPreparationDeadlineAtMs: 1_200,
+      childExecutionDeadlineAtMs: 1_300,
+      childTerminationDeadlineAtMs: 1_400,
+      settlementDeadlineAtMs: 1_500,
+      clock,
+      spawnRunner: countingSpawn,
+      viewBuilder: async () => ({ ok: false, error: "deadline_exceeded" }),
+    });
+
+    expect(spawnCalls).toBe(0);
+    expect(result).toMatchObject({
+      outcome: "failed",
+      error: "project_inspection_preparation_deadline_expired",
+      dispatchAttempted: false,
+    });
+    expect(result.cancellationRequested).toBeUndefined();
+    expect(result.cancellationAcknowledged).toBeUndefined();
+  });
+
+  it("enforces the final pre-dispatch boundary after the view is built", async () => {
+    reset();
+    const result = await executeProjectInspection(readRequest, {
+      registry,
+      projectInspectionPreparationDeadlineAtMs: 1_200,
+      childExecutionDeadlineAtMs: 1_300,
+      childTerminationDeadlineAtMs: 1_400,
+      settlementDeadlineAtMs: 1_500,
+      clock,
+      spawnRunner: countingSpawn,
+      viewBuilder: async (options) => {
+        const view = await trackingViewBuilder(options);
+        nowMs = 1_250;
+        return view;
+      },
+    });
+
+    expect(spawnCalls).toBe(0);
+    expect(result).toMatchObject({
+      outcome: "failed",
+      error: "project_inspection_preparation_deadline_expired",
+      dispatchAttempted: false,
+    });
+    expect(usedViews.every((view) => !existsSync(view))).toBe(true);
+  });
+
+  it("reports explicit dispatch truth when preparation completes in budget", async () => {
+    reset();
+    const result = await executeProjectInspection(readRequest, {
+      registry,
+      projectInspectionPreparationDeadlineAtMs: 1_200,
+      childExecutionDeadlineAtMs: 1_300,
+      childTerminationDeadlineAtMs: 1_400,
+      settlementDeadlineAtMs: 1_500,
+      clock,
+      spawnRunner: async (input) => {
+        nowMs = 1_290;
+        return countingSpawn(input);
+      },
+      viewBuilder: async (options) => {
+        const view = await trackingViewBuilder(options);
+        nowMs = 1_100;
+        return view;
+      },
+    });
+
+    expect(spawnCalls).toBe(1);
+    expect(result.outcome).toBe("succeeded");
+    if (result.outcome === "succeeded") {
+      expect(result.dispatchAttempted).toBe(true);
+      expect(result.dispatchAttemptedAtMs).toBe(1_100);
+      expect(result.dispatchAttemptedAtMs!).toBeLessThanOrEqual(1_200);
+    }
+  });
+
+  it("rejects a plan whose preparation boundary is not before child execution", async () => {
+    reset();
+    const result = await executeProjectInspection(readRequest, {
+      registry,
+      projectInspectionPreparationDeadlineAtMs: 1_300,
+      childExecutionDeadlineAtMs: 1_300,
+      childTerminationDeadlineAtMs: 1_400,
+      settlementDeadlineAtMs: 1_500,
+      clock,
+      spawnRunner: countingSpawn,
+      viewBuilder: trackingViewBuilder,
+    });
+
+    expect(spawnCalls).toBe(0);
+    expect(result).toMatchObject({
+      outcome: "failed",
+      error: "invalid_deadline_plan",
+      dispatchAttempted: false,
+    });
+  });
+
+  it("reclassifies preparation-failure cleanup that crosses settlement while retaining the truthful preparation reason", async () => {
+    reset();
+    const result = await executeProjectInspection(readRequest, {
+      registry,
+      projectInspectionPreparationDeadlineAtMs: 1_200,
+      childExecutionDeadlineAtMs: 1_300,
+      childTerminationDeadlineAtMs: 1_400,
+      settlementDeadlineAtMs: 1_500,
+      clock,
+      spawnRunner: countingSpawn,
+      viewBuilder: async (options) => {
+        const view = await trackingViewBuilder(options);
+        // Preparation expires after the view is built, before dispatch.
+        nowMs = 1_250;
+        return view;
+      },
+      serverCloser: (server, connections) => {
+        // Mandatory settlement cleanup of the partial view overruns
+        // T_acquisition_settlement.
+        server.close();
+        for (const socket of connections) socket.destroy();
+        connections.clear();
+        nowMs = 1_600;
+      },
+    });
+
+    expect(spawnCalls).toBe(0);
+    expect(result).toMatchObject({
+      outcome: "failed",
+      error: "settlement_deadline_exceeded",
+      dispatchAttempted: false,
+      preparationEndedReason: "project_inspection_preparation_deadline_expired",
+    });
+    expect(result.cancellationRequested).toBeUndefined();
+    expect(result.cancellationAcknowledged).toBeUndefined();
+    expect(usedViews.every((view) => !existsSync(view))).toBe(true);
+  });
+
+  it("reports canonical dispatch truth when a synchronous spawnRunner throw follows the seam invocation", async () => {
+    reset();
+    const result = await executeProjectInspection(readRequest, {
+      registry,
+      projectInspectionPreparationDeadlineAtMs: 1_200,
+      childExecutionDeadlineAtMs: 1_300,
+      childTerminationDeadlineAtMs: 1_400,
+      settlementDeadlineAtMs: 1_500,
+      clock,
+      spawnRunner: () => {
+        throw new Error("spawn-seam-boom");
+      },
+      viewBuilder: async (options) => {
+        const view = await trackingViewBuilder(options);
+        nowMs = 1_100;
+        return view;
+      },
+    });
+
+    expect(result).toMatchObject({
+      outcome: "failed",
+      error: "internal-error",
+      dispatchAttempted: true,
+      dispatchAttemptedAtMs: 1_100,
+    });
+    expect(result.cancellationRequested).toBeUndefined();
+    expect(result.cancellationAcknowledged).toBeUndefined();
+    expect(usedViews.every((view) => !existsSync(view))).toBe(true);
   });
 });

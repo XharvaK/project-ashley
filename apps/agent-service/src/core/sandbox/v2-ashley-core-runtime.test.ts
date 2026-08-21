@@ -170,6 +170,8 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
         return {
           outcome: "succeeded",
           operation: "project.read_file",
+          dispatchAttempted: true,
+          dispatchAttemptedAtMs: admittedAtMs + 7_000,
           executedAtMs: admittedAtMs + 7_000,
           result: {
             kind: "project.read_file",
@@ -221,10 +223,17 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
       selectedBranch: "project_inspection",
       deadlineOffsetsMs: {
         projectInspectionChildTermination: expect.any(Number),
+        projectInspectionPreparation: expect.any(Number),
       },
       phases: {
+        project_inspection_preparation: {
+          state: "completed",
+          startedOffsetMs: expect.any(Number),
+          finishedOffsetMs: 7_000,
+        },
         project_inspection: {
           state: "settled",
+          dispatchedOffsetMs: 7_000,
           statusCode: "project_inspection_settled",
         },
         continuation: {
@@ -332,6 +341,8 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
     vi.spyOn(SandboxV2Dispatcher.prototype, "dispatch").mockResolvedValue({
       outcome: "succeeded",
       operation: "project.read_file",
+        dispatchAttempted: true,
+        dispatchAttemptedAtMs: 1000,
       executedAtMs: 1000,
       result: {
         kind: "project.read_file",
@@ -468,6 +479,8 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
     vi.spyOn(SandboxV2Dispatcher.prototype, "dispatch").mockResolvedValue({
       outcome: "succeeded",
       operation: "project.read_file",
+        dispatchAttempted: true,
+        dispatchAttemptedAtMs: 1000,
       executedAtMs: 1000,
       result: {
         kind: "project.read_file",
@@ -593,6 +606,8 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
     vi.spyOn(SandboxV2Dispatcher.prototype, "dispatch").mockResolvedValue({
       outcome: "succeeded",
       operation: "project.read_file",
+        dispatchAttempted: true,
+        dispatchAttemptedAtMs: 1000,
       executedAtMs: 1000,
       result: {
         kind: "project.read_file",
@@ -679,6 +694,8 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
     vi.spyOn(SandboxV2Dispatcher.prototype, "dispatch").mockResolvedValue({
       outcome: "succeeded",
       operation: "project.read_file",
+        dispatchAttempted: true,
+        dispatchAttemptedAtMs: 1000,
       executedAtMs: 1000,
       result: {
         kind: "project.read_file",
@@ -780,6 +797,8 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
     vi.spyOn(SandboxV2Dispatcher.prototype, "dispatch").mockResolvedValue({
       outcome: "unavailable",
       operation: "project.read_file",
+        dispatchAttempted: true,
+        dispatchAttemptedAtMs: 1000,
       executedAtMs: 1000,
       error: "sandbox_unavailable",
     });
@@ -882,6 +901,8 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
     vi.spyOn(SandboxV2Dispatcher.prototype, "dispatch").mockResolvedValue({
       outcome: "succeeded",
       operation: "project.search_text",
+        dispatchAttempted: true,
+        dispatchAttemptedAtMs: 1000,
       executedAtMs: 1000,
       result: {
         kind: "project.search_text",
@@ -987,6 +1008,8 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
     vi.spyOn(SandboxV2Dispatcher.prototype, "dispatch").mockResolvedValue({
       outcome: "succeeded",
       operation: "project.read_file",
+        dispatchAttempted: true,
+        dispatchAttemptedAtMs: 1000,
       executedAtMs: 1000,
       result: {
         kind: "project.read_file",
@@ -1315,6 +1338,8 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
     vi.spyOn(SandboxV2Dispatcher.prototype, "dispatch").mockResolvedValue({
       outcome: "succeeded",
       operation: "project.read_file",
+        dispatchAttempted: true,
+        dispatchAttemptedAtMs: 1000,
       executedAtMs: 1000,
       result: {
         kind: "project.read_file",

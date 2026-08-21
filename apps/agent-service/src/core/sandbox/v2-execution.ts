@@ -71,10 +71,16 @@ const BWRAP_PATH = "/usr/bin/bwrap";
 export type ExecuteProjectInspectionV2Input = {
   request: CognitionInspectionRequest;
   messageEntityUuid?: string;
-  deadlineAtMs?: number;
-  childExecutionDeadlineAtMs?: number;
-  childTerminationDeadlineAtMs?: number;
-  settlementDeadlineAtMs?: number;
+  /**
+   * REACTIVE CONTRACT: the full immutable turn-plan deadlines are required.
+   * A reactive caller must not silently omit the preparation deadline.
+   * The explicitly named legacy/proactive entry point
+   * (`executeProjectInspectionV2LegacyProactive`) is the only no-plan path.
+   */
+  projectInspectionPreparationDeadlineAtMs: number;
+  childExecutionDeadlineAtMs: number;
+  childTerminationDeadlineAtMs: number;
+  settlementDeadlineAtMs: number;
   dispatcher?: SandboxV2Dispatcher;
   registry?: V2ProjectReadRegistry;
   envOverrides?: Partial<SandboxV2Environment> & {
@@ -88,6 +94,40 @@ export type ExecuteProjectInspectionV2Input = {
 export type ExecuteProjectInspectionV2Result = {
   license: OperationalClaimLicense;
   observation: ProjectInspectionObservation | null;
+  /**
+   * Canonical dispatch truth: the execution spawn seam was invoked.
+   * This does NOT prove successful process creation, Bubblewrap READY,
+   * child execution, or operation success.
+   */
+  dispatchAttempted: boolean;
+  /** Occurrence timestamp of the dispatch attempt, captured at the seam. */
+  dispatchAttemptedAtMs?: number;
+  /**
+   * Truthful reason the acquisition-preparation phase ended when the final
+   * result was reclassified (e.g. settlement overrun of preparation-failure
+   * cleanup). Absent when preparation completed.
+   */
+  preparationEndedReason?: string;
+  /**
+   * Occurrence timestamp captured at the execution seam for the returned
+   * outcome (when the dispatcher produced one). Persisting callers must use
+   * this instead of result-consumption time.
+   */
+  occurredAtMs?: number;
+};
+
+/** Internal shape: deadlines optional so the legacy proactive path exists explicitly. */
+type ProjectInspectionExecutionInput = Omit<
+  ExecuteProjectInspectionV2Input,
+  | "projectInspectionPreparationDeadlineAtMs"
+  | "childExecutionDeadlineAtMs"
+  | "childTerminationDeadlineAtMs"
+  | "settlementDeadlineAtMs"
+> & {
+  projectInspectionPreparationDeadlineAtMs?: number;
+  childExecutionDeadlineAtMs?: number;
+  childTerminationDeadlineAtMs?: number;
+  settlementDeadlineAtMs?: number;
 };
 
 export type ExecuteReactiveSandboxTaskV2Input = {
@@ -364,57 +404,101 @@ export async function executeReactiveSandboxTaskV2(
  *     and a separate ProjectInspectionObservation;
  *  4. On failure, returns OperationalClaimLicense with state="failed", typed error, and observation=null;
  *  5. On unavailable substrate, returns OperationalClaimLicense with state="none", error="sandbox_unavailable", and observation=null.
+ *
+ * Reactive contract: requires the full immutable turn-plan deadlines —
+ * omission of the preparation deadline is a compile-time error. The only
+ * no-plan path is the explicitly named legacy/proactive entry point below;
+ * its missing timing plan is a pre-existing, deferred gap, not a reusable
+ * reactive API shape.
  */
 export async function executeProjectInspectionV2(
   input: ExecuteProjectInspectionV2Input,
 ): Promise<ExecuteProjectInspectionV2Result> {
+  return runProjectInspectionV2(input);
+}
+
+/**
+ * Explicitly isolated legacy/proactive M2 entry point WITHOUT a turn-deadline
+ * plan. Proactive timing redesign is out of scope for this repair; this path
+ * preserves existing proactive behavior and must not become the normal
+ * reactive API (the reactive input type makes every deadline required).
+ */
+export async function executeProjectInspectionV2LegacyProactive(
+  input: Omit<
+    ProjectInspectionExecutionInput,
+    | "projectInspectionPreparationDeadlineAtMs"
+    | "childExecutionDeadlineAtMs"
+    | "childTerminationDeadlineAtMs"
+    | "settlementDeadlineAtMs"
+  >,
+): Promise<ExecuteProjectInspectionV2Result> {
+  return runProjectInspectionV2(input);
+}
+
+async function runProjectInspectionV2(
+  input: ProjectInspectionExecutionInput,
+): Promise<ExecuteProjectInspectionV2Result> {
   const { request, messageEntityUuid } = input;
+  let dispatchAttempted = false;
+  let dispatchAttemptedAtMs: number | undefined;
+  let preparationEndedReason: string | undefined;
+  let occurredAtMs: number | undefined;
+  const finish = (
+    license: OperationalClaimLicense,
+    observation: ProjectInspectionObservation | null,
+  ): ExecuteProjectInspectionV2Result => ({
+    license,
+    observation,
+    dispatchAttempted,
+    ...(dispatchAttemptedAtMs !== undefined ? { dispatchAttemptedAtMs } : {}),
+    ...(preparationEndedReason !== undefined ? { preparationEndedReason } : {}),
+    ...(occurredAtMs !== undefined ? { occurredAtMs } : {}),
+  });
 
   // 1. Enforce deadline: already-expired request fails before starting sandbox work
-  const settlementDeadlineAtMs =
-    input.settlementDeadlineAtMs ?? input.deadlineAtMs;
+  const settlementDeadlineAtMs = input.settlementDeadlineAtMs;
   if (
     typeof settlementDeadlineAtMs === "number" &&
     settlementDeadlineAtMs <= Date.now()
   ) {
-    return {
-      license: {
+    return finish(
+      {
         state: "failed",
         taskId: `v2-insp-${Date.now()}`,
         profile: "project_investigation",
         error: "deadline_exceeded",
         ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
       },
-      observation: null,
-    };
+      null,
+    );
   }
 
   // 2. Enforce capability release gate
   if (input.db && !input.skipCapabilityGate) {
     try {
       if (!capabilityCanInfluence(input.db, "project_inspection", input.masterMode)) {
-        return {
-          license: {
+        return finish(
+          {
             state: "none",
             taskId: `v2-insp-${Date.now()}`,
             profile: "project_investigation",
             error: "project_inspection_gate_denied",
             ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
           },
-          observation: null,
-        };
+          null,
+        );
       }
     } catch {
-      return {
-        license: {
+      return finish(
+        {
           state: "none",
           taskId: `v2-insp-${Date.now()}`,
           profile: "project_investigation",
           error: "project_inspection_gate_denied",
           ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
         },
-        observation: null,
-      };
+        null,
+      );
     }
   }
 
@@ -424,16 +508,16 @@ export async function executeProjectInspectionV2(
       ? input.envOverrides.sandboxEngineeringLifecycleEnabled
       : env.sandboxEngineeringLifecycleEnabled;
   if (!lifecycleEnabled) {
-    return {
-      license: {
+    return finish(
+      {
         state: "none",
         taskId: `v2-insp-${Date.now()}`,
         profile: "project_investigation",
         error: "sandbox_lifecycle_disabled",
         ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
       },
-      observation: null,
-    };
+      null,
+    );
   }
 
   const registry =
@@ -453,16 +537,16 @@ export async function executeProjectInspectionV2(
       : isSandboxV2Available();
 
   if (!isCustomSeam && !substrateAvailable) {
-    return {
-      license: {
+    return finish(
+      {
         state: "none",
         taskId: `v2-insp-${Date.now()}`,
         profile: "project_investigation",
         error: "sandbox_unavailable",
         ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
       },
-      observation: null,
-    };
+      null,
+    );
   }
 
   try {
@@ -472,6 +556,8 @@ export async function executeProjectInspectionV2(
         env: {
           registry,
           ...input.envOverrides,
+          projectInspectionPreparationDeadlineAtMs:
+            input.projectInspectionPreparationDeadlineAtMs,
           childExecutionDeadlineAtMs: input.childExecutionDeadlineAtMs,
           childTerminationDeadlineAtMs: input.childTerminationDeadlineAtMs,
           settlementDeadlineAtMs,
@@ -484,6 +570,10 @@ export async function executeProjectInspectionV2(
     } as SandboxV2Request;
 
     const res: SandboxV2Result = await dispatcher.dispatch(v2Req);
+    dispatchAttempted = res.dispatchAttempted === true;
+    dispatchAttemptedAtMs = res.dispatchAttemptedAtMs;
+    preparationEndedReason = res.preparationEndedReason;
+    occurredAtMs = res.executedAtMs;
 
     if (res.outcome === "succeeded") {
       let observation: ProjectInspectionObservation;
@@ -493,16 +583,16 @@ export async function executeProjectInspectionV2(
           typeof res.result.bytes !== "number" ||
           typeof res.result.sha256 !== "string"
         ) {
-          return {
-            license: {
+          return finish(
+            {
               state: "failed",
               taskId: `v2-insp-${res.executedAtMs}`,
               profile: "project_investigation",
               error: "invalid_result",
               ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
             },
-            observation: null,
-          };
+            null,
+          );
         }
         const contentUtf8 = Buffer.from(
           res.result.contentBase64,
@@ -521,16 +611,16 @@ export async function executeProjectInspectionV2(
         };
       } else if (res.result.kind === "project.list_directory") {
         if (!Array.isArray(res.result.entries) || typeof res.result.truncated !== "boolean") {
-          return {
-            license: {
+          return finish(
+            {
               state: "failed",
               taskId: `v2-insp-${res.executedAtMs}`,
               profile: "project_investigation",
               error: "invalid_result",
               ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
             },
-            observation: null,
-          };
+            null,
+          );
         }
         observation = {
           projectId: request.projectId,
@@ -547,16 +637,16 @@ export async function executeProjectInspectionV2(
           typeof res.result.filesScanned !== "number" ||
           typeof res.result.truncated !== "boolean"
         ) {
-          return {
-            license: {
+          return finish(
+            {
               state: "failed",
               taskId: `v2-insp-${res.executedAtMs}`,
               profile: "project_investigation",
               error: "invalid_result",
               ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
             },
-            observation: null,
-          };
+            null,
+          );
         }
         observation = {
           projectId: request.projectId,
@@ -570,45 +660,45 @@ export async function executeProjectInspectionV2(
           filesScanned: res.result.filesScanned,
         };
       } else {
-        return {
-          license: {
+        return finish(
+          {
             state: "failed",
             taskId: `v2-insp-${res.executedAtMs}`,
             profile: "project_investigation",
             error: "invalid_result",
             ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
           },
-          observation: null,
-        };
+          null,
+        );
       }
 
-      return {
-        license: {
+      return finish(
+        {
           state: "succeeded",
           taskId: `v2-insp-${res.executedAtMs}`,
           profile: "project_investigation",
           ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
         },
         observation,
-      };
+      );
     }
 
     if (res.outcome === "unavailable") {
-      return {
-        license: {
+      return finish(
+        {
           state: "none",
           taskId: `v2-insp-${res.executedAtMs}`,
           profile: "project_investigation",
           error: res.error ?? "sandbox_unavailable",
           ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
         },
-        observation: null,
-      };
+        null,
+      );
     }
 
     // res.outcome === "failed"
-    return {
-      license: {
+    return finish(
+      {
         state: "failed",
         taskId: `v2-insp-${res.executedAtMs}`,
         profile: "project_investigation",
@@ -618,19 +708,19 @@ export async function executeProjectInspectionV2(
         cancellationAcknowledged: res.cancellationAcknowledged === true,
         ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
       },
-      observation: null,
-    };
+      null,
+    );
   } catch {
-    return {
-      license: {
+    return finish(
+      {
         state: "failed",
         taskId: `v2-insp-${Date.now()}`,
         profile: "project_investigation",
         error: "internal_error",
         ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
       },
-      observation: null,
-    };
+      null,
+    );
   }
 }
 

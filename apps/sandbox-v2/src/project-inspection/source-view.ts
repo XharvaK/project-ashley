@@ -55,6 +55,9 @@ export async function buildSanitizedProjectView(options: {
   protectedRoots: ProtectedRootsConfig;
   limits?: TreeCopyLimits;
   viewBase?: string;
+  /** Cooperative absolute preparation cutoff threaded into the tree copier. */
+  deadlineAtMs?: number;
+  clock?: { nowMs(): number };
 }): Promise<ProjectSourceViewResult> {
   const { canonicalRoot, protectedRoots, limits = V2_VIEW_COPY_LIMITS } = options;
   let sourceRoot: string;
@@ -80,6 +83,10 @@ export async function buildSanitizedProjectView(options: {
     limits,
     symlinkPolicy: "skip",
     digests: false,
+    ...(options.deadlineAtMs !== undefined
+      ? { deadlineAtMs: options.deadlineAtMs }
+      : {}),
+    ...(options.clock ? { clock: options.clock } : {}),
   });
 
   if (!result.ok) {

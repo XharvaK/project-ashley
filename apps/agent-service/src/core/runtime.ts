@@ -206,6 +206,7 @@ import {
 import {
   executeReactiveSandboxTaskV2,
   executeProjectInspectionV2,
+  executeProjectInspectionV2LegacyProactive,
   executeWorkspaceExperimentV2,
 } from "./sandbox/v2-execution.js";
 import { canOfferProjectInspection, canOfferCandidateWorkspace, loadOperatorProjectReadRegistry } from "./sandbox/project-registry.js";
@@ -890,10 +891,12 @@ export class AshleyCore {
               "project_inspection",
               Date.now(),
             );
+            // Preparation starts at the reactive execution handoff. The
+            // dispatched event below is recorded only from seam truth.
             recordPhaseLifecycle(this.db, {
               reservationId: reservation.id,
-              phase: "project_inspection",
-              event: "dispatched",
+              phase: "project_inspection_preparation",
+              event: "started",
               atMs: Date.now(),
             });
             const inspectionChildDeadlineAtMs = (
@@ -907,6 +910,8 @@ export class AshleyCore {
             const inspResult = await executeProjectInspectionV2({
               request: opReq.request,
               messageEntityUuid: messageEntityUuid ?? undefined,
+              projectInspectionPreparationDeadlineAtMs:
+                selectedDeadlineBranch.projectInspectionPreparationDeadlineAtMs,
               childExecutionDeadlineAtMs: inspectionChildDeadlineAtMs,
               childTerminationDeadlineAtMs:
                 selectedDeadlineBranch.childTerminationDeadlineAtMs,
@@ -914,6 +919,38 @@ export class AshleyCore {
                 selectedDeadlineBranch.acquisitionSettlementDeadlineAtMs,
               db: this.db,
             });
+            // Persist seam-captured occurrence timestamps; never consumption time.
+            const preparationFinishedAtMs =
+              inspResult.dispatchAttemptedAtMs ??
+              inspResult.occurredAtMs ??
+              Date.now();
+            if (inspResult.dispatchAttempted) {
+              recordPhaseLifecycle(this.db, {
+                reservationId: reservation.id,
+                phase: "project_inspection_preparation",
+                event: "completed",
+                atMs: preparationFinishedAtMs,
+              });
+              // "dispatched" means the Bubblewrap dispatch attempt was issued
+              // at the execution seam — not proof a child process started.
+              recordPhaseLifecycle(this.db, {
+                reservationId: reservation.id,
+                phase: "project_inspection",
+                event: "dispatched",
+                atMs: preparationFinishedAtMs,
+              });
+            } else {
+              recordPhaseLifecycle(this.db, {
+                reservationId: reservation.id,
+                phase: "project_inspection_preparation",
+                event: "failed",
+                atMs: inspResult.occurredAtMs ?? Date.now(),
+                statusCode:
+                  inspResult.preparationEndedReason ??
+                  inspResult.license.error ??
+                  "project_inspection_preparation_failed",
+              });
+            }
             const inspectionLate =
               Date.now() >=
               selectedDeadlineBranch.acquisitionSettlementDeadlineAtMs;
@@ -1914,7 +1951,10 @@ export class AshleyCore {
         const opReq = decision.operationalRequest;
         if (opReq) {
           if (opReq.kind === "project_inspection") {
-            const inspResult = await executeProjectInspectionV2({
+            // Pre-existing proactive timing gap (no turn-deadline plan),
+            // explicitly isolated on the legacy entry point; deferred, not
+            // silently optional for reactive callers.
+            const inspResult = await executeProjectInspectionV2LegacyProactive({
               request: opReq.request,
               db: this.db,
             });

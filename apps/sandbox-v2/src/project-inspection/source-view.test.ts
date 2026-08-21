@@ -122,6 +122,32 @@ describe("buildSanitizedProjectView", () => {
       rmSync(fileRoot, { recursive: true, force: true });
     }
   });
+
+  it("propagates the cooperative preparation deadline and removes the partial view", async () => {
+    const root = makeProject();
+    try {
+      const expired = await buildSanitizedProjectView({
+        canonicalRoot: root,
+        protectedRoots: EMPTY_PROTECTED,
+        deadlineAtMs: 1_000,
+        clock: { nowMs: () => 2_000 },
+      });
+      expect(expired.ok).toBe(false);
+      if (!expired.ok) expect(expired.error).toBe("deadline_exceeded");
+
+      let now = 1_000;
+      const midTraversal = await buildSanitizedProjectView({
+        canonicalRoot: root,
+        protectedRoots: EMPTY_PROTECTED,
+        deadlineAtMs: 1_500,
+        clock: { nowMs: () => (now += 400) },
+      });
+      expect(midTraversal.ok).toBe(false);
+      if (!midTraversal.ok) expect(midTraversal.error).toBe("deadline_exceeded");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("removeProjectView", () => {

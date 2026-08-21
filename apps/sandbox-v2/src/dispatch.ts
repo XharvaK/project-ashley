@@ -42,6 +42,8 @@ export type SandboxV2Environment = {
   roundtripExecutor?: M1RoundtripExecutorOptions["executor"];
   /** Inspection timeout override. */
   timeoutMs?: number;
+  /** Absolute preparation cutoff supplied by the owning turn plan (M2 only). */
+  projectInspectionPreparationDeadlineAtMs?: number;
   /** Absolute child-execution cutoff supplied by the owning turn plan. */
   childExecutionDeadlineAtMs?: number;
   /** Absolute child termination-acknowledgement cutoff supplied by the turn plan. */
@@ -100,6 +102,8 @@ export class SandboxV2Dispatcher {
         spawnRunner: this.env.spawnInspection,
         viewBuilder: this.env.viewBuilder,
         timeoutMs: this.env.timeoutMs,
+        projectInspectionPreparationDeadlineAtMs:
+          this.env.projectInspectionPreparationDeadlineAtMs,
         childExecutionDeadlineAtMs: this.env.childExecutionDeadlineAtMs,
         childTerminationDeadlineAtMs: this.env.childTerminationDeadlineAtMs,
         settlementDeadlineAtMs: this.env.settlementDeadlineAtMs,

@@ -322,6 +322,19 @@ export type SandboxV2Result =
       executionTruth?: SandboxV2ExecutionTruth;
       cancellationRequested?: boolean;
       cancellationAcknowledged?: boolean;
+      /**
+       * Canonical dispatch truth: the execution spawn seam was invoked.
+       * This does NOT prove successful process creation, Bubblewrap READY,
+       * child execution, or operation success.
+       */
+      dispatchAttempted?: boolean;
+      dispatchAttemptedAtMs?: number;
+      /**
+       * Truthful reason the acquisition-preparation phase ended when the
+       * final result was reclassified (e.g. settlement overrun of
+       * preparation-failure cleanup). Absent when preparation completed.
+       */
+      preparationEndedReason?: string;
       executedAtMs: number;
     }
   | {
@@ -334,6 +347,19 @@ export type SandboxV2Result =
       lateEvidenceVerified?: boolean;
       cancellationRequested?: boolean;
       cancellationAcknowledged?: boolean;
+      /**
+       * Canonical dispatch truth: the execution spawn seam was invoked.
+       * This does NOT prove successful process creation, Bubblewrap READY,
+       * child execution, or operation success.
+       */
+      dispatchAttempted?: boolean;
+      dispatchAttemptedAtMs?: number;
+      /**
+       * Truthful reason the acquisition-preparation phase ended when the
+       * final result was reclassified (e.g. settlement overrun of
+       * preparation-failure cleanup). Absent when preparation completed.
+       */
+      preparationEndedReason?: string;
       executedAtMs: number;
     }
   | {
@@ -344,6 +370,19 @@ export type SandboxV2Result =
       executionTruth?: SandboxV2ExecutionTruth;
       cancellationRequested?: boolean;
       cancellationAcknowledged?: boolean;
+      /**
+       * Canonical dispatch truth: the execution spawn seam was invoked.
+       * This does NOT prove successful process creation, Bubblewrap READY,
+       * child execution, or operation success.
+       */
+      dispatchAttempted?: boolean;
+      dispatchAttemptedAtMs?: number;
+      /**
+       * Truthful reason the acquisition-preparation phase ended when the
+       * final result was reclassified (e.g. settlement overrun of
+       * preparation-failure cleanup). Absent when preparation completed.
+       */
+      preparationEndedReason?: string;
       executedAtMs: number;
     };
 

@@ -174,20 +174,29 @@ describe("Sandbox V2 Execution Adapter & Operator Registry", () => {
   });
 
   describe("executeProjectInspectionV2", () => {
-    it("fails immediately when deadlineAtMs is already exceeded", async () => {
+    const REACTIVE_DEADLINES = {
+      projectInspectionPreparationDeadlineAtMs: Date.now() + 60_000,
+      childExecutionDeadlineAtMs: Date.now() + 66_000,
+      childTerminationDeadlineAtMs: Date.now() + 66_500,
+      settlementDeadlineAtMs: Date.now() + 70_000,
+    };
+
+    it("fails immediately when settlementDeadlineAtMs is already exceeded", async () => {
       const res = await executeProjectInspectionV2({
+        ...REACTIVE_DEADLINES,
         request: {
           operation: "project.read_file",
           projectId: "project-ashley",
           path: "src/index.ts",
         },
-        deadlineAtMs: Date.now() - 50,
+        settlementDeadlineAtMs: Date.now() - 50,
       });
 
       expect(res.license.state).toBe("failed");
       expect(res.license.error).toBe("deadline_exceeded");
       expect(res.license.profile).toBe("project_investigation");
       expect(res.observation).toBeNull();
+      expect(res.dispatchAttempted).toBe(false);
     });
 
     it("fails closed with project_inspection_gate_denied when capability is in observe mode", async () => {
@@ -196,6 +205,7 @@ describe("Sandbox V2 Execution Adapter & Operator Registry", () => {
 
       try {
         const res = await executeProjectInspectionV2({
+          ...REACTIVE_DEADLINES,
           request: {
             operation: "project.read_file",
             projectId: "project-ashley",
@@ -217,6 +227,7 @@ describe("Sandbox V2 Execution Adapter & Operator Registry", () => {
 
     it("returns state=none, error=sandbox_lifecycle_disabled when lifecycle is disabled", async () => {
       const res = await executeProjectInspectionV2({
+        ...REACTIVE_DEADLINES,
         request: {
           operation: "project.read_file",
           projectId: "project-ashley",
@@ -246,6 +257,7 @@ describe("Sandbox V2 Execution Adapter & Operator Registry", () => {
       ]);
 
       const res = await executeProjectInspectionV2({
+        ...REACTIVE_DEADLINES,
         request: {
           operation: "project.read_file",
           projectId: "project-ashley",
@@ -276,6 +288,7 @@ describe("Sandbox V2 Execution Adapter & Operator Registry", () => {
       };
 
       const res = await executeProjectInspectionV2({
+        ...REACTIVE_DEADLINES,
         request: {
           operation: "project.read_file",
           projectId: "project-ashley",
@@ -310,6 +323,7 @@ describe("Sandbox V2 Execution Adapter & Operator Registry", () => {
       };
 
       const res = await executeProjectInspectionV2({
+        ...REACTIVE_DEADLINES,
         request: {
           operation: "project.read_file",
           projectId: "project-ashley",
@@ -356,6 +370,7 @@ describe("Sandbox V2 Execution Adapter & Operator Registry", () => {
       };
 
       const res = await executeProjectInspectionV2({
+        ...REACTIVE_DEADLINES,
         request: {
           operation: "project.list_directory",
           projectId: "project-ashley",
@@ -399,6 +414,7 @@ describe("Sandbox V2 Execution Adapter & Operator Registry", () => {
       };
 
       const res = await executeProjectInspectionV2({
+        ...REACTIVE_DEADLINES,
         request: {
           operation: "project.search_text",
           projectId: "project-ashley",
@@ -437,6 +453,7 @@ describe("Sandbox V2 Execution Adapter & Operator Registry", () => {
       };
 
       const res = await executeProjectInspectionV2({
+        ...REACTIVE_DEADLINES,
         request: {
           operation: "project.read_file",
           projectId: "project-ashley",

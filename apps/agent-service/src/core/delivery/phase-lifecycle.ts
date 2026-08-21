@@ -11,6 +11,7 @@ export type PhaseLifecyclePhase =
   | "admission"
   | "initial_thought"
   | "sandbox_m1"
+  | "project_inspection_preparation"
   | "project_inspection"
   | "candidate_workspace_experiment"
   | "continuation"
@@ -25,6 +26,7 @@ export type PhaseLifecycleState =
   | "admitted"
   | "started"
   | "dispatched"
+  | "completed"
   | "settled"
   | "skipped"
   | "succeeded"
@@ -66,6 +68,7 @@ const PHASES = new Set<PhaseLifecyclePhase>([
   "admission",
   "initial_thought",
   "sandbox_m1",
+  "project_inspection_preparation",
   "project_inspection",
   "candidate_workspace_experiment",
   "continuation",
@@ -81,6 +84,7 @@ const STATES = new Set<PhaseLifecycleState>([
   "admitted",
   "started",
   "dispatched",
+  "completed",
   "settled",
   "skipped",
   "succeeded",
@@ -155,6 +159,10 @@ function deadlineOffsets(plan: TurnDeadlinePlan): Record<string, number> {
     ),
     sandboxM1Expression: offset(plan, plan.branches.sandbox_m1.expressionDeadlineAtMs),
     sandboxM1Generation: offset(plan, plan.branches.sandbox_m1.generationDeadlineAtMs),
+    projectInspectionPreparation: offset(
+      plan,
+      plan.branches.project_inspection.projectInspectionPreparationDeadlineAtMs,
+    ),
     projectInspectionSettlement: offset(
       plan,
       plan.branches.project_inspection.acquisitionSettlementDeadlineAtMs,
@@ -412,7 +420,11 @@ export function recordPhaseLifecycle(
       if (input.event === "admitted") current.admittedOffsetMs = atOffsetMs;
       if (input.event === "started") current.startedOffsetMs = atOffsetMs;
       if (input.event === "dispatched") current.dispatchedOffsetMs = atOffsetMs;
-      if (["settled", "skipped", "succeeded", "failed"].includes(input.event)) {
+      if (
+        ["settled", "skipped", "succeeded", "failed", "completed"].includes(
+          input.event,
+        )
+      ) {
         current.finishedOffsetMs = atOffsetMs;
       }
     }

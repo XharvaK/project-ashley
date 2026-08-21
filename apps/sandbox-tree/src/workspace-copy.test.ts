@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  rmSync,
   writeFileSync,
   readdirSync,
   statSync,
@@ -314,5 +316,74 @@ describe("sanitized tree copy", () => {
       expect(result.reason).toContain("privileged_file_forbidden");
       expect(result.counts.privilegedFiles).toBe(1);
     }
+  });
+});
+
+describe("sanitized tree copy cooperative deadline", () => {
+  it("behaves identically to baseline with a far-future deadline", async () => {
+    const files = {
+      "README.md": "hello",
+      "src/index.ts": "export const x = 1;",
+      "src/sub/deep.ts": "deep",
+    };
+    const source = makeSourceTree(files);
+    const dest = makeDest();
+    const result = await copy(source, dest, { deadlineAtMs: Date.now() + 60_000 });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(listTree(dest).sort()).toEqual(
+        ["README.md", "src", "src/index.ts", "src/sub", "src/sub/deep.ts"].sort(),
+      );
+      expect(readFileSync(path.join(dest, "src", "sub", "deep.ts"), "utf8")).toBe("deep");
+    }
+  });
+
+  it("fails closed with deadline_exceeded when the injected clock passes the cutoff mid-traversal", async () => {
+    const files: Record<string, string> = {};
+    for (let i = 0; i < 40; i++) files[`src/dir${i}/file.txt`] = `content-${i}`;
+    const source = makeSourceTree(files);
+    const dest = makeDest();
+    let now = 1_000;
+    const clock = { nowMs: () => (now += 250) };
+    const result = await copy(source, dest, { deadlineAtMs: 2_000, clock });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errorCode).toBe("deadline_exceeded");
+    }
+    expect(listTree(dest).length).toBeLessThan(Object.keys(files).length * 2);
+  });
+
+  it("aborts an in-flight streamed copy when the real deadline expires and leaves no locked handles", async () => {
+    const big = Buffer.alloc(8 * 1024 * 1024, 0x61).toString("utf8");
+    const source = makeSourceTree({ "big.bin": big, "small.txt": "s" });
+    const dest = makeDest();
+    const result = await copy(source, dest, { deadlineAtMs: Date.now() + 1 });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errorCode).toBe("deadline_exceeded");
+    }
+    let removed = false;
+    try {
+      rmSync(dest, { recursive: true, force: true });
+      removed = !existsSync(dest);
+    } catch {
+      removed = false;
+    }
+    expect(removed).toBe(true);
+    rmSync(source, { recursive: true, force: true });
+  });
+
+  it("fails immediately at entry when the deadline is already passed", async () => {
+    const source = makeSourceTree({ "a.txt": "x" });
+    const dest = makeDest();
+    const result = await copy(source, dest, {
+      deadlineAtMs: 1_000,
+      clock: { nowMs: () => 2_000 },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errorCode).toBe("deadline_exceeded");
+    }
+    expect(listTree(dest)).toEqual([]);
   });
 });

@@ -199,6 +199,10 @@ describe("Sandbox V2 M2 Runtime Integration & Two-Pass Cognition Loop", () => {
       request: pass1Decision.inspectionRequest!,
       dispatcher: mockDispatcher as any,
       db,
+      projectInspectionPreparationDeadlineAtMs: Date.now() + 60_000,
+      childExecutionDeadlineAtMs: Date.now() + 66_000,
+      childTerminationDeadlineAtMs: Date.now() + 66_500,
+      settlementDeadlineAtMs: Date.now() + 70_000,
     });
 
     expect(execResult.license.state).toBe("succeeded");
@@ -324,6 +328,10 @@ describe("Sandbox V2 M2 Runtime Integration & Two-Pass Cognition Loop", () => {
       request: pass1Decision.inspectionRequest!,
       dispatcher: mockDispatcher as any,
       db,
+      projectInspectionPreparationDeadlineAtMs: Date.now() + 60_000,
+      childExecutionDeadlineAtMs: Date.now() + 66_000,
+      childTerminationDeadlineAtMs: Date.now() + 66_500,
+      settlementDeadlineAtMs: Date.now() + 70_000,
     });
 
     expect(execResult.license.state).toBe("none");
