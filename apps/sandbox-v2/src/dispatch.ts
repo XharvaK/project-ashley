@@ -42,6 +42,12 @@ export type SandboxV2Environment = {
   roundtripExecutor?: M1RoundtripExecutorOptions["executor"];
   /** Inspection timeout override. */
   timeoutMs?: number;
+  /** Absolute child-execution cutoff supplied by the owning turn plan. */
+  childExecutionDeadlineAtMs?: number;
+  /** Absolute acquisition/validation/cleanup settlement cutoff. */
+  settlementDeadlineAtMs?: number;
+  /** Deterministic test seam for deadline enforcement. */
+  clock?: { nowMs(): number };
 };
 
 export type SandboxV2DispatchOptions = {
@@ -92,12 +98,18 @@ export class SandboxV2Dispatcher {
         spawnRunner: this.env.spawnInspection,
         viewBuilder: this.env.viewBuilder,
         timeoutMs: this.env.timeoutMs,
+        childExecutionDeadlineAtMs: this.env.childExecutionDeadlineAtMs,
+        settlementDeadlineAtMs: this.env.settlementDeadlineAtMs,
+        clock: this.env.clock,
       });
     }
     if (request.operation === "file.roundtrip") {
       return handleFileRoundtripV2(request, {
         executor: this.env.roundtripExecutor,
         available: this.env.sandboxAvailable,
+        childExecutionDeadlineAtMs: this.env.childExecutionDeadlineAtMs,
+        settlementDeadlineAtMs: this.env.settlementDeadlineAtMs,
+        clock: this.env.clock,
       });
     }
     if (
@@ -119,6 +131,9 @@ export class SandboxV2Dispatcher {
         workspaceManager: this.env.workspaceManager,
         managedWorkspaceRoot: this.env.managedWorkspaceRoot,
         timeoutMs: this.env.timeoutMs,
+        childExecutionDeadlineAtMs: this.env.childExecutionDeadlineAtMs,
+        settlementDeadlineAtMs: this.env.settlementDeadlineAtMs,
+        clock: this.env.clock,
       });
     }
     return fail(request.operation, "unknown_operation");

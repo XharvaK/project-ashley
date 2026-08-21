@@ -27,6 +27,7 @@ import {
   capabilityNames,
 } from "../rollout/capabilities.js";
 import type {
+  SandboxV2Dispatcher,
   SandboxV2Request,
   SandboxV2Result,
 } from "@composer-assistant/sandbox-v2";
@@ -497,6 +498,116 @@ describe("Sandbox V2 Execution Adapter & Operator Registry", () => {
   });
 
   describe("M1 Preservation", () => {
+    it("force-closes M1 cleanup before settlement so Expression keeps its reserve", async () => {
+      let nowMs = 1_000;
+      let forcedClosures = 0;
+      const license = await executeReactiveSandboxTaskV2({
+        childExecutionDeadlineAtMs: 1_300,
+        settlementDeadlineAtMs: 1_500,
+        clock: { nowMs: () => nowMs },
+        executor: async () => {
+          nowMs = 1_290;
+          return {
+            version: 1,
+            kind: "file.roundtrip",
+            ok: true,
+            checks: {
+              roundtrip: true,
+              deleted: true,
+              absent: true,
+              homeAbsent: true,
+              runAbsent: true,
+              hostSentinelAbsent: true,
+              envClean: true,
+              loopbackIsolated: true,
+              externalIsolated: true,
+              fdClean: true,
+            },
+          };
+        },
+        serverCloser: ((server: import("node:net").Server, connections: Set<import("node:net").Socket>) => {
+          forcedClosures += 1;
+          server.close();
+          for (const socket of connections) socket.destroy();
+          connections.clear();
+          nowMs = 1_490;
+        }),
+      } as any);
+
+      expect(license.state).toBe("succeeded");
+      expect(forcedClosures).toBe(1);
+      expect(nowMs).toBeLessThanOrEqual(1_500);
+      expect(1_700 - nowMs).toBe(210);
+    });
+
+    it("derives the M1 child timeout from the selected branch and preserves settlement reserve", async () => {
+      let nowMs = 1_000;
+      let receivedTimeoutMs = -1;
+      const license = await executeReactiveSandboxTaskV2({
+        childExecutionDeadlineAtMs: 1_300,
+        settlementDeadlineAtMs: 1_500,
+        clock: { nowMs: () => nowMs },
+        executor: async (_request, _evidence, options) => {
+          receivedTimeoutMs = options?.timeoutMs ?? -1;
+          nowMs = 1_400;
+          return {
+            version: 1,
+            kind: "file.roundtrip",
+            ok: true,
+            checks: {
+              roundtrip: true,
+              deleted: true,
+              absent: true,
+              homeAbsent: true,
+              runAbsent: true,
+              hostSentinelAbsent: true,
+              envClean: true,
+              loopbackIsolated: true,
+              externalIsolated: true,
+              fdClean: true,
+            },
+          };
+        },
+      });
+
+      expect(receivedTimeoutMs).toBe(300);
+      expect(license.state).toBe("succeeded");
+    });
+
+    it("does not return M1 success after cleanup crosses its settlement boundary", async () => {
+      let nowMs = 2_000;
+      const license = await executeReactiveSandboxTaskV2({
+        childExecutionDeadlineAtMs: 2_300,
+        settlementDeadlineAtMs: 2_500,
+        clock: { nowMs: () => nowMs },
+        executor: async () => {
+          nowMs = 2_510;
+          return {
+            version: 1,
+            kind: "file.roundtrip",
+            ok: true,
+            checks: {
+              roundtrip: true,
+              deleted: true,
+              absent: true,
+              homeAbsent: true,
+              runAbsent: true,
+              hostSentinelAbsent: true,
+              envClean: true,
+              loopbackIsolated: true,
+              externalIsolated: true,
+              fdClean: true,
+            },
+          };
+        },
+      });
+
+      expect(license).toMatchObject({
+        state: "failed",
+        error: "acquisition_settlement_deadline_expired",
+      });
+    });
+
     it("preserves M1 file.roundtrip execution path", async () => {
       const mockM1Executor = async () => ({
         version: 1 as const,
@@ -652,6 +763,56 @@ describe("Sandbox V2 Execution Adapter & Operator Registry", () => {
       expect(result.observation?.workspaceId).toBe("ws-mock-42");
       expect(result.observation?.operation).toBe("workspace.write_file");
       expect(result.observation?.verified).toBe(true);
+    });
+
+    it("maps an indeterminate post-dispatch outcome to outcome_unknown without redispatch", async () => {
+      const reg = new V2ProjectReadRegistry([
+        {
+          projectId: "project-ashley",
+          canonicalRoot: "/home/xarvak/project-ashley",
+          displayName: "Ashley",
+          enabled: true,
+          readAllowed: true,
+          candidateWorkspaceAllowed: true,
+          engineeringAllowed: false,
+        },
+      ]);
+      let dispatches = 0;
+      const result = await executeWorkspaceExperimentV2({
+        request: {
+          version: 2,
+          operation: "workspace.write_file",
+          projectId: "project-ashley",
+          path: "witness.txt",
+          content: "witness-data",
+          mustNotExist: true,
+        },
+        dispatcher: {
+          dispatch: async (): Promise<SandboxV2Result> => {
+            dispatches += 1;
+            return {
+              outcome: "failed",
+              operation: "workspace.write_file",
+              error: "timeout",
+              executionTruth: "effect_indeterminate",
+              executedAtMs: Date.now(),
+            };
+          },
+        } as unknown as SandboxV2Dispatcher,
+        registry: reg,
+        skipCapabilityGate: true,
+        envOverrides: {
+          sandboxEngineeringLifecycleEnabled: true,
+        },
+      });
+
+      expect(dispatches).toBe(1);
+      expect(result.observation).toBeNull();
+      expect(result.license).toMatchObject({
+        state: "outcome_unknown",
+        executionTruth: "effect_indeterminate",
+        error: "timeout",
+      });
     });
 
     it("fails closed when project is not allowed for candidate workspaces", async () => {

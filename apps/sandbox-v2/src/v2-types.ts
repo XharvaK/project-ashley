@@ -306,6 +306,11 @@ export type SandboxV2OperationResult =
       completedAtMs: number;
     };
 
+export type SandboxV2ExecutionTruth =
+  | "no_effect_proven"
+  | "effect_verified"
+  | "effect_indeterminate";
+
 export type SandboxV2Result =
   | {
       outcome: "succeeded";
@@ -313,18 +318,26 @@ export type SandboxV2Result =
       result: SandboxV2OperationResult;
       workspaceId?: string;
       sourceSnapshotId?: string;
+      /** Present for M3 workspace execution. */
+      executionTruth?: SandboxV2ExecutionTruth;
       executedAtMs: number;
     }
   | {
       outcome: "failed";
       operation: string;
       error: string;
+      /** Present for M3 workspace execution. */
+      executionTruth?: SandboxV2ExecutionTruth;
+      /** Safe fact only: valid evidence arrived after the current-turn settlement cutoff. */
+      lateEvidenceVerified?: boolean;
       executedAtMs: number;
     }
   | {
       outcome: "unavailable";
       operation: string;
       error: string;
+      /** Present for M3 workspace execution. */
+      executionTruth?: SandboxV2ExecutionTruth;
       executedAtMs: number;
     };
 

@@ -150,6 +150,12 @@ export type OperationalClaimLicense = {
   error?: string | null;
   refusalReason?: string | null;
   sourceMessageEntityUuid?: string | null;
+  executionTruth?:
+    | "no_effect_proven"
+    | "effect_verified"
+    | "effect_indeterminate"
+    | null;
+  lateEvidenceVerified?: boolean | null;
 };
 
 export type SandboxTask = {

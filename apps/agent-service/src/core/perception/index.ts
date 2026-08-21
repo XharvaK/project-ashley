@@ -183,10 +183,22 @@ export async function runPerceptionTurn(
   input: PerceptionTurnInput,
 ): Promise<PerceptionTurnResult> {
   const researchIntent = classifyResearchIntent(input.message);
-  const aggregateBytes = aggregateDeclaredBytes(input.attachments);
   const licenses = emptyLicenses();
   const thoughtParts: PerceptionInlinePart[] = [];
   const expressionParts: PerceptionInlinePart[] = [];
+  if (Date.now() >= input.deadlineAtMs) {
+    return {
+      artifactsCreated: 0,
+      conversationalReadCreated: false,
+      preflightBlocked: true,
+      preflightReason: "perception_budget_unavailable",
+      thoughtParts,
+      expressionParts,
+      licenses,
+      researchIntent,
+    };
+  }
+  const aggregateBytes = aggregateDeclaredBytes(input.attachments);
 
   const artifacts =
     input.attachments.length > 0
@@ -244,7 +256,7 @@ export async function runPerceptionTurn(
   const preflight = checkAttachmentPreflight(
     db,
     input.ownerId,
-    input.thoughtDeadlineAtMs,
+    input.deadlineAtMs,
     aggregateBytes,
   );
 
@@ -276,7 +288,7 @@ export async function runPerceptionTurn(
   ) {
     const readPreflight = conversationalReadPreflight(
       db,
-      input.thoughtDeadlineAtMs,
+      input.deadlineAtMs,
     );
     if (
       readPreflight.allowed &&

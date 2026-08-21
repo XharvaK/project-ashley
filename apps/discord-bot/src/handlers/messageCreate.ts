@@ -1,9 +1,9 @@
 import type { Message } from "discord.js";
 import {
   chatText,
+  AGENT_TRANSPORT_HARD_MS,
   checkHealth,
   finalizeDelivery,
-  lookupPreflight,
   pauseProactiveRemote,
   pollDeliveryUntilReady,
   receiptDeliveryAuxiliary,
@@ -15,7 +15,7 @@ import { channelQueue } from "../chat/channel-queue.js";
 import { MAX_IMAGES, describeIntake, type Intake } from "../chat/attachments.js";
 import { config } from "../config.js";
 import { agentErrorMessage } from "../chat/agent-errors.js";
-import { fumbleLine, lookingLine } from "../chat/fumble-lines.js";
+import { fumbleLine } from "../chat/fumble-lines.js";
 import { searchGif } from "../chat/gif-search.js";
 import { readKillSwitch } from "../chat/kill-switch.js";
 import { mediaCadence } from "../chat/media-cadence.js";
@@ -30,8 +30,6 @@ import {
 import { TurnBuffer } from "../chat/turn-buffer.js";
 import { runTypingLoop } from "../chat/typing-loop.js";
 
-const HARD_FIRST_BUBBLE_MS = 10_000;
-
 const turns = new TurnBuffer<Intake, Message>((channelId) => {
   void drainTurn(channelId);
 });
@@ -43,8 +41,8 @@ async function drainTurn(channelId: string): Promise<void> {
     const target = buffered.target;
     const tempoGapMs = tempoTracker.lastGapMs(channelId);
     const finalFragmentReceivedAtMs = buffered.finalFragmentReceivedAt;
-    const firstBubbleDeadlineAtMs =
-      finalFragmentReceivedAtMs + HARD_FIRST_BUBBLE_MS;
+    const externalTransportHardDeadlineAtMs =
+      finalFragmentReceivedAtMs + AGENT_TRANSPORT_HARD_MS;
     const turn = {
       text: buffered.fragments.map((f) => f.text).join("\n"),
       attachments: buffered.fragments
@@ -69,22 +67,15 @@ async function drainTurn(channelId: string): Promise<void> {
       stopTyping = await runTypingLoop(channel, () => done);
 
       try {
-        const looking = lookupPreflight(turn.text);
         const presence = getDiscordPresence();
         const replyPromise = chatText(turn.text, {
           attachments: turn.attachments,
           discordPresence: presence,
           inboundDiscordMessageIds: turn.inboundDiscordMessageIds,
           finalFragmentReceivedAtMs,
-          firstBubbleDeadlineAtMs,
+          externalTransportHardDeadlineAtMs,
         });
         void replyPromise.catch(() => {});
-
-        if ((await looking) && !signal.aborted) {
-          const progress = await channel.send(lookingLine(turn.text)).catch(() => null);
-          // Progress is ledgered after we have a reservation id.
-          void progress;
-        }
 
         let result: ChatTextResult = await replyPromise;
         if (result.__httpStatus === 202 || result.duplicate) {
@@ -93,7 +84,9 @@ async function drainTurn(channelId: string): Promise<void> {
           }
           result = await pollDeliveryUntilReady(
             result.reservationId,
-            firstBubbleDeadlineAtMs,
+            result.firstBubbleDeadlineAt
+              ? Date.parse(result.firstBubbleDeadlineAt)
+              : externalTransportHardDeadlineAtMs + 5_000,
           );
         }
 
@@ -163,6 +156,12 @@ async function drainTurn(channelId: string): Promise<void> {
         if (!media.gif) gifUrl = null;
 
         try {
+          const firstBubbleDeadlineAtMs = result.firstBubbleDeadlineAt
+            ? Date.parse(result.firstBubbleDeadlineAt)
+            : undefined;
+          const finalDeliveryDeadlineAtMs = result.finalDeliveryDeadlineAt
+            ? Date.parse(result.finalDeliveryDeadlineAt)
+            : undefined;
           const sendResult = await sendBubbles(
             channel,
             bubbles,
@@ -173,16 +172,25 @@ async function drainTurn(channelId: string): Promise<void> {
               stopTyping?.();
               stopTyping = undefined;
             },
-            { reservationId, skipFirstDelay: true },
+            {
+              reservationId,
+              skipFirstDelay: true,
+              firstBubbleDeadlineAtMs,
+              finalDeliveryDeadlineAtMs,
+              onBubbleSent:
+                reservationId == null
+                  ? undefined
+                  : async (ordinal, sentMessage) => {
+                      await receiptDeliveryBubble(
+                        reservationId,
+                        ordinal,
+                        sentMessage.id,
+                      );
+                    },
+            },
           );
 
           if (reservationId != null) {
-            for (let i = 0; i < sendResult.receiptedOrdinals.length; i++) {
-              const ordinal = sendResult.receiptedOrdinals[i]!;
-              const msg = sendResult.messages[i];
-              if (!msg) continue;
-              await receiptDeliveryBubble(reservationId, ordinal, msg.id);
-            }
             await finalizeDelivery(reservationId, "complete");
           }
         } catch (err) {

@@ -160,7 +160,7 @@ export class AgentManager {
     delivery?: {
       inboundDiscordMessageIds: string[];
       finalFragmentReceivedAtMs: number;
-      firstBubbleDeadlineAtMs?: number;
+      externalTransportHardDeadlineAtMs?: number;
     },
     attachments?: Array<{
       discordAttachmentId: string;
@@ -182,6 +182,7 @@ export class AgentManager {
     plannedBubbles?: Array<{ ordinal: number; text: string }>;
     media?: { react: string | null; gifQuery: string | null };
     firstBubbleDeadlineAt?: string | null;
+    finalDeliveryDeadlineAt?: string | null;
     statusUrl?: string;
     duplicate?: boolean;
   }> {
@@ -215,6 +216,8 @@ export class AgentManager {
         channel: "discord",
         inboundDiscordMessageIds: delivery?.inboundDiscordMessageIds,
         finalFragmentReceivedAtMs: delivery?.finalFragmentReceivedAtMs,
+        externalTransportHardDeadlineAtMs:
+          delivery?.externalTransportHardDeadlineAtMs,
         simulateDelivery: !hasInbound,
         attachments,
       });
@@ -251,6 +254,7 @@ export class AgentManager {
         plannedBubbles: result.plannedBubbles,
         media: result.media,
         firstBubbleDeadlineAt: result.firstBubbleDeadlineAt,
+        finalDeliveryDeadlineAt: result.finalDeliveryDeadlineAt,
         statusUrl: result.statusUrl,
         duplicate: result.duplicate,
       };

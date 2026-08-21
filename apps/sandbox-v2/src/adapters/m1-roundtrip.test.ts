@@ -26,6 +26,30 @@ function fakeExecutor(script: (request: SandboxM1Request, hostEvidence: SandboxM
 }
 
 describe("handleFileRoundtripV2", () => {
+  it("uses the selected child deadline and refuses a result outside settlement", async () => {
+    let nowMs = 1_000;
+    let timeoutMs = -1;
+    const result = await handleFileRoundtripV2(
+      { version: 2, operation: "file.roundtrip", content: "hello" },
+      {
+        childExecutionDeadlineAtMs: 1_300,
+        settlementDeadlineAtMs: 1_500,
+        clock: { nowMs: () => nowMs },
+        executor: async (_request, _evidence, options) => {
+          timeoutMs = options?.timeoutMs ?? -1;
+          nowMs = 1_510;
+          return complete;
+        },
+      },
+    );
+
+    expect(timeoutMs).toBe(300);
+    expect(result).toMatchObject({
+      outcome: "failed",
+      error: "settlement_deadline_exceeded",
+    });
+  });
+
   it("maps a complete M1 success into the V2 typed result with host evidence", async () => {
     let seenEvidence: SandboxM1HostEvidence | undefined;
     let seenRequest: SandboxM1Request | undefined;

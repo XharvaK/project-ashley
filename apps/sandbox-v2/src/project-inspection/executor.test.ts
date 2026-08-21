@@ -117,6 +117,131 @@ afterEach(() => {
 });
 
 describe("executeProjectInspection", () => {
+  it("force-closes cleanup before settlement so continuation keeps its reserve", async () => {
+    let nowMs = 1_000;
+    let forcedClosures = 0;
+    const result = await executeProjectInspection(readRequest, {
+      registry,
+      childExecutionDeadlineAtMs: 1_300,
+      settlementDeadlineAtMs: 1_500,
+      clock: { nowMs: () => nowMs },
+      viewBuilder: async (options: Parameters<typeof trackingViewBuilder>[0]) => {
+        const view = await trackingViewBuilder(options);
+        nowMs = 1_100;
+        return view;
+      },
+      spawnRunner: async (input: InspectionSpawnInput) => {
+        nowMs = 1_290;
+        return makeRunner(() => ({
+          version: 2,
+          operation: "project.read_file",
+          ok: true,
+          result: {
+            kind: "project.read_file",
+            path: "src/main.ts",
+            bytes: 12,
+            contentBase64: "Y29uc3QgeCA9IDE7Cg==",
+            sha256: "f".repeat(64),
+            truncated: false,
+          },
+          checks: goodChecks(),
+        }))(input);
+      },
+      serverCloser: ((server: import("node:net").Server, connections: Set<import("node:net").Socket>) => {
+        forcedClosures += 1;
+        server.close();
+        for (const socket of connections) socket.destroy();
+        connections.clear();
+        nowMs = 1_490;
+      }),
+    } as any);
+
+    expect(result.outcome).toBe("succeeded");
+    expect(forcedClosures).toBe(1);
+    expect(nowMs).toBeLessThanOrEqual(1_500);
+    expect(1_700 - nowMs).toBe(210);
+  });
+
+  it("derives the child timeout from the operation deadline after setup", async () => {
+    let nowMs = 1_000;
+    let receivedTimeoutMs = -1;
+    const result = await executeProjectInspection(readRequest, {
+      registry,
+      childExecutionDeadlineAtMs: 1_300,
+      settlementDeadlineAtMs: 1_500,
+      clock: { nowMs: () => nowMs },
+      viewBuilder: async (options) => {
+        const view = await trackingViewBuilder(options);
+        nowMs = 1_100;
+        return view;
+      },
+      spawnRunner: async (input) => {
+        receivedTimeoutMs = input.timeoutMs;
+        nowMs = 1_400;
+        return makeRunner(() => ({
+          version: 2,
+          operation: "project.read_file",
+          ok: true,
+          result: {
+            kind: "project.read_file",
+            path: "src/main.ts",
+            bytes: 12,
+            contentBase64: "Y29uc3QgeCA9IDE7Cg==",
+            sha256: "f".repeat(64),
+            truncated: false,
+          },
+          checks: goodChecks(),
+        }))(input);
+      },
+    });
+
+    expect(receivedTimeoutMs).toBe(200);
+    expect(result.outcome).toBe("succeeded");
+    expect(usedViews.every((view) => !existsSync(view))).toBe(true);
+  });
+
+  it("settles as deadline_exceeded after mandatory cleanup and never returns late evidence", async () => {
+    let nowMs = 2_000;
+    let dispatches = 0;
+    const result = await executeProjectInspection(readRequest, {
+      registry,
+      childExecutionDeadlineAtMs: 2_300,
+      settlementDeadlineAtMs: 2_500,
+      clock: { nowMs: () => nowMs },
+      viewBuilder: async (options) => {
+        const view = await trackingViewBuilder(options);
+        nowMs = 2_200;
+        return view;
+      },
+      spawnRunner: async (input) => {
+        dispatches += 1;
+        nowMs = 2_510;
+        return makeRunner(() => ({
+          version: 2,
+          operation: "project.read_file",
+          ok: true,
+          result: {
+            kind: "project.read_file",
+            path: "src/main.ts",
+            bytes: 12,
+            contentBase64: "Y29uc3QgeCA9IDE7Cg==",
+            sha256: "f".repeat(64),
+            truncated: false,
+          },
+          checks: goodChecks(),
+        }))(input);
+      },
+    });
+
+    expect(dispatches).toBe(1);
+    expect(result).toMatchObject({
+      outcome: "failed",
+      error: "settlement_deadline_exceeded",
+      lateEvidenceVerified: true,
+    });
+    expect(usedViews.every((view) => !existsSync(view))).toBe(true);
+  });
+
   it("succeeds with evidence: scripted runner -> validated evidence -> typed result, view cleaned up", async () => {
     const spawnRunner = makeRunner((input) => ({
       version: 2,

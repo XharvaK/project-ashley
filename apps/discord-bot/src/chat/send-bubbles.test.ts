@@ -13,6 +13,48 @@ function mockChannel(sends: unknown[] = []): SendableChannels {
 }
 
 describe("sendBubbles onFirstSend", () => {
+  it("receipts the first substantive bubble before sending the next bubble", async () => {
+    const order: string[] = [];
+    const channel = {
+      send: async (payload: unknown) => {
+        order.push(`send:${String(payload)}`);
+        return { id: String(payload) } as never;
+      },
+    } as SendableChannels;
+
+    await sendBubbles(channel, ["first", "second"], null, null, undefined, {
+      onBubbleSent: async (ordinal) => {
+        order.push(`receipt:${ordinal}`);
+      },
+    });
+
+    assert.deepEqual(order, [
+      "send:first",
+      "receipt:0",
+      "send:second",
+      "receipt:1",
+    ]);
+  });
+
+  it("treats receipt and final delivery as distinct hard boundaries", async () => {
+    let nowMs = 1_000;
+    const channel = {
+      send: async () => {
+        nowMs = 1_100;
+        return { id: "first" } as never;
+      },
+    } as SendableChannels;
+
+    await assert.rejects(
+      sendBubbles(channel, ["first", "second"], null, null, undefined, {
+        firstBubbleDeadlineAtMs: 1_050,
+        finalDeliveryDeadlineAtMs: 1_080,
+        clock: { nowMs: () => nowMs },
+      }),
+      /final_delivery_deadline_expired/,
+    );
+  });
+
   it("fires once after the first bubble, before later bubbles", async () => {
     const sends: unknown[] = [];
     const order: string[] = [];

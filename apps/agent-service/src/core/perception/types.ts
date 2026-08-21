@@ -71,8 +71,8 @@ export type PerceptionTurnInput = {
   sourceMessageEntityUuid: string;
   deliveryReservationEntityUuid: string;
   deliveryReservationId: number;
-  thoughtDeadlineAtMs: number;
-  firstBubbleDeadlineAtMs: number;
+  /** Absolute optional-Perception cutoff selected by the owning turn plan. */
+  deadlineAtMs: number;
   decision: Decision;
 };
 

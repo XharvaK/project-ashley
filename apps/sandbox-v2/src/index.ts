@@ -23,6 +23,7 @@ export type {
   SandboxV2OperationName,
   SandboxV2Request,
   SandboxV2Result,
+  SandboxV2ExecutionTruth,
   SandboxV2OperationResult,
   SandboxV2CapabilitySpec,
   SandboxV2InspectionEntry,
@@ -79,6 +80,7 @@ export {
 export {
   executeWorkspaceExperiment,
   spawnBubblewrapInspection as workspaceSpawnBubblewrapInspection,
+  type WorkspaceExperimentExecutorOptions,
   type WorkspaceExperimentSpawn,
   type WorkspaceExperimentSpawnInput,
   type WorkspaceExperimentSpawnOutput,

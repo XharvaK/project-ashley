@@ -14,6 +14,7 @@ import {
 } from "../rollout/capabilities.js";
 import { runThoughtModel, deliberateDecision, deliberateThoughtContinuation } from "../agency/thought.js";
 import type { Decision, Motivation } from "../types.js";
+import * as v2Execution from "./v2-execution.js";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -65,6 +66,7 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     env.cognitionMode = originalMode;
     env.groqApiKey = originalGroqKey;
     env.sandboxEngineeringLifecycleEnabled = originalLifecycle;
@@ -74,6 +76,166 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
       rmSync(tmpDir, { recursive: true, force: true });
     } catch {}
     vi.restoreAllMocks();
+  });
+
+  it("reserves Pass 2 after M2 completes beyond the former shared Thought deadline", async () => {
+    vi.useFakeTimers();
+    const admittedAtMs = Date.parse("2026-08-20T08:13:37.365Z");
+    vi.setSystemTime(admittedAtMs);
+
+    const dbPath = join(tmpDir, `ashley-core-phase-budget-${randomUUID()}.db`);
+    const db = openNuclearDb(new DatabaseSync(dbPath));
+    activateProjectInspection(db);
+
+    const calls: string[] = [];
+    let expressionPrompt = "";
+    const m1 = vi.spyOn(v2Execution, "executeReactiveSandboxTaskV2");
+    const m3 = vi.spyOn(v2Execution, "executeWorkspaceExperimentV2");
+
+    vi.spyOn(mistral, "completeChat").mockImplementation(async (messages: any[]) => {
+      const systemContent = messages.find((message) => message.role === "system")?.content ?? "";
+      const userContent = messages.find((message) => message.role === "user")?.content ?? "";
+
+      if (systemContent.includes("Ashley's Thought layer, not her Expression layer")) {
+        calls.push("pass1");
+        // Miss the 5s soft responsiveness target without crossing Pass 1's 6s hard cutoff.
+        vi.setSystemTime(admittedAtMs + 5_500);
+        const parsedUser = JSON.parse(userContent);
+        const motivationId = parsedUser.candidates[0]?.id ?? 1;
+        return {
+          text: JSON.stringify({
+            kind: "speak",
+            effort: "high",
+            completion: "complete",
+            objective: "inspect package.json",
+            reason: "need repository evidence",
+            motivationIds: [motivationId],
+            shouldSpeak: true,
+            uncertainty: 0.1,
+            urgency: 0.4,
+            evidenceDisposition: "acquire_project_evidence",
+            inspectionRequest: {
+              operation: "project.read_file",
+              projectId: "project-ashley",
+              path: "package.json",
+            },
+          }),
+          model: "mistral-large",
+          modelAlias: "thought",
+          resolvedModelId: "mistral-large",
+        };
+      }
+
+      if (systemContent.includes("Ashley's Thought layer continuing deliberation")) {
+        calls.push("pass2");
+        const parsedUser = JSON.parse(userContent);
+        expect(parsedUser.observation.contentUtf8).toContain('"version":"0.2.0"');
+        return {
+          text: JSON.stringify({
+            kind: "speak",
+            effort: "medium",
+            completion: "complete",
+            objective: "report the verified version",
+            reason: "verified project observation",
+            motivationIds: [1],
+            shouldSpeak: true,
+            uncertainty: 0.05,
+            urgency: 0.4,
+            inspectionCognitiveResult: "package.json reports version 0.2.0",
+          }),
+          model: "mistral-large",
+          modelAlias: "thought",
+          resolvedModelId: "mistral-large",
+        };
+      }
+
+      calls.push("expression");
+      expressionPrompt = `${systemContent}\n${userContent}`;
+      return {
+        text: "package.json reports version 0.2.0.",
+        model: "mistral-large",
+        modelAlias: "expression",
+        resolvedModelId: "mistral-large",
+      };
+    });
+
+    const dispatch = vi
+      .spyOn(SandboxV2Dispatcher.prototype, "dispatch")
+      .mockImplementation(async (request: any) => {
+        expect(request.operation).toBe("project.read_file");
+        calls.push("m2");
+        // The former shared Thought deadline was admittedAt + 6 seconds.
+        // Completion at +7 seconds reproduces the production ordering without sleeps.
+        vi.setSystemTime(admittedAtMs + 7_000);
+        return {
+          outcome: "succeeded",
+          operation: "project.read_file",
+          executedAtMs: admittedAtMs + 7_000,
+          result: {
+            kind: "project.read_file",
+            path: "package.json",
+            contentBase64: Buffer.from(
+              '{"name":"project-ashley","version":"0.2.0"}',
+            ).toString("base64"),
+            bytes: 45,
+            sha256: "a".repeat(64),
+            truncated: false,
+          },
+        };
+      });
+
+    const core = new AshleyCore(db);
+    const result = await core.handleReactiveChat({
+      message: "Can you inspect your Project Ashley repository and tell me what version is in package.json?",
+      ownerId: "doc",
+      channel: "discord",
+      inboundDiscordMessageIds: ["phase-budget-root-regression"],
+      finalFragmentReceivedAtMs: admittedAtMs,
+    });
+
+    expect(calls).toEqual(["pass1", "m2", "pass2", "expression"]);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(m1).not.toHaveBeenCalled();
+    expect(m3).not.toHaveBeenCalled();
+    expect(result.text).toContain("0.2.0");
+    expect(expressionPrompt).toContain("package.json reports version 0.2.0");
+
+    const logged = db
+      .prepare(
+        `SELECT objective, reason, thought_source, thought_error
+         FROM decision_log WHERE owner_id = ? ORDER BY id DESC LIMIT 1`,
+      )
+      .get("doc") as Record<string, unknown>;
+    expect(logged.objective).toBe("report the verified version");
+    expect(logged.thought_source).toBe("model");
+    expect(logged.thought_error).toBeNull();
+
+    const lifecycle = (
+      db
+        .prepare(
+          "SELECT phase_lifecycle_json FROM delivery_reservations WHERE id = ?",
+        )
+        .get(result.reservationId!) as { phase_lifecycle_json: string }
+    ).phase_lifecycle_json;
+    expect(JSON.parse(lifecycle)).toMatchObject({
+      selectedBranch: "project_inspection",
+      phases: {
+        project_inspection: {
+          state: "settled",
+          statusCode: "project_inspection_settled",
+        },
+        continuation: {
+          state: "succeeded",
+          statusCode: "continuation_succeeded",
+        },
+        initial_thought: {
+          state: "settled",
+          finishedOffsetMs: 5_500,
+        },
+      },
+    });
+
+    db.close();
   });
 
   it("Full reactive turn: Thought Pass 1 -> M2 Execution -> Thought Pass 2 -> Real Expression & Audit Verification", async () => {
@@ -1203,6 +1365,9 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
   });
 
   it("Exact production witness without inspection offer (release observe): deterministic easy turn — Thought never runs, M2=0, M1=0", async () => {
+    vi.useFakeTimers();
+    const admittedAtMs = Date.parse("2026-08-20T09:00:00.000Z");
+    vi.setSystemTime(admittedAtMs);
     const dbPath = join(tmpDir, `ashley-core-${randomUUID()}.db`);
     const db = openNuclearDb(new DatabaseSync(dbPath));
     const relId = currentReleaseId();
@@ -1251,6 +1416,7 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
     });
 
     expect(callLog).toEqual(["expression"]);
+    expect(Date.now()).toBe(admittedAtMs);
     expect(result.decisionKind).toBe("speak");
 
     const m2Count = emittedAudits.filter((a) => a.profile === "project_investigation").length;
@@ -1333,6 +1499,19 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
 
     const m2Count = emittedAudits.filter((a) => a.profile === "project_investigation").length;
     expect(m2Count).toBe(0);
+    const lifecycleRow = db
+      .prepare(
+        "SELECT phase_lifecycle_json FROM delivery_reservations WHERE id = ?",
+      )
+      .get(result.reservationId!) as { phase_lifecycle_json: string };
+    expect(JSON.parse(lifecycleRow.phase_lifecycle_json)).toMatchObject({
+      phases: {
+        continuation: {
+          state: "skipped",
+          statusCode: "continuation_not_needed",
+        },
+      },
+    });
   });
 
   it("Exact production witness with real-model truncated Thought output: fallback runs, no M2, Expression sees the not_performed evidence floor", async () => {

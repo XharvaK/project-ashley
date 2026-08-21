@@ -3,17 +3,22 @@ import {
   insertMessage,
   resolveActiveThread,
 } from "../memory/threads.js";
-import {
-  firstBubbleDeadlineAt,
-  GENERATION_LEASE_MS,
-  type DeliveryReservationRow,
-  type DeliveryTrigger,
-} from "./types.js";
+import type { DeliveryReservationRow, DeliveryTrigger } from "./types.js";
 import {
   CREDENTIAL_OMITTED_PLACEHOLDER,
   detectCredentialShape,
 } from "../privacy/secrets.js";
 import { assertWritebackAllowed } from "../continuity/process-guards.js";
+import {
+  initializePhaseLifecycle,
+  parsePhaseLifecycleJson,
+  recordPhaseLifecycle,
+} from "./phase-lifecycle.js";
+import {
+  createTurnDeadlinePlan,
+  type TurnDeadlinePlan,
+  type TurnDeadlinePolicy,
+} from "./turn-deadline-plan.js";
 
 type DbRow = Record<string, unknown>;
 
@@ -63,6 +68,9 @@ export function mapReservation(row: unknown): DeliveryReservationRow | null {
       row.delivery_lease_expires_at == null
         ? null
         : text(row.delivery_lease_expires_at),
+    phaseLifecycle: parsePhaseLifecycleJson(
+      row.phase_lifecycle_json == null ? null : text(row.phase_lifecycle_json),
+    ),
     createdAt: text(row.created_at),
     finalizedAt: row.finalized_at == null ? null : text(row.finalized_at),
   };
@@ -106,7 +114,11 @@ export type ClaimReactiveInput = {
   mergedUserText: string;
   inboundDiscordMessageIds: string[];
   finalFragmentReceivedAtMs: number;
+  /** Bot-owned absolute HTTP transport cutoff for this Discord turn. */
+  externalTransportHardDeadlineAtMs?: number;
   nowMs?: number;
+  /** Test/qualification seam. Production uses the versioned source policy. */
+  turnDeadlinePolicy?: TurnDeadlinePolicy;
   /**
    * True when the inbound IDs are local placeholders rather than real Discord
    * delivery (API/simulated path). No real first-bubble pacing exists then, so
@@ -119,6 +131,7 @@ export type ClaimReactiveResult =
   | {
       kind: "claimed";
       reservation: DeliveryReservationRow;
+      deadlinePlan: TurnDeadlinePlan;
       secretOmitted?: boolean;
     }
   | { kind: "duplicate"; reservation: DeliveryReservationRow };
@@ -138,13 +151,23 @@ export function claimReactiveDelivery(
   }
   const nowMs = input.nowMs ?? Date.now();
   const nowIso = new Date(nowMs).toISOString();
+  const deadlinePlan = createTurnDeadlinePlan(nowMs, input.turnDeadlinePolicy, {
+    externalTransportHardDeadlineAtMs:
+      input.externalTransportHardDeadlineAtMs,
+  });
   const deadlineIso =
     input.simulateDelivery === true
       ? null
       : new Date(
-          firstBubbleDeadlineAt(input.finalFragmentReceivedAtMs),
+          deadlinePlan.common.firstBubbleReceiptDeadlineAtMs,
         ).toISOString();
-  const leaseIso = new Date(nowMs + GENERATION_LEASE_MS).toISOString();
+  const generationDeadlines = Object.values(deadlinePlan.branches)
+    .filter(
+      (branch): branch is typeof branch & { generationDeadlineAtMs: number } =>
+        branch.available && "generationDeadlineAtMs" in branch,
+    )
+    .map((branch) => branch.generationDeadlineAtMs);
+  const leaseIso = new Date(Math.max(...generationDeadlines)).toISOString();
 
   db.exec("BEGIN IMMEDIATE");
   try {
@@ -180,6 +203,7 @@ export function claimReactiveDelivery(
         nowIso,
       );
     const reservationId = Number(insert.lastInsertRowid);
+    initializePhaseLifecycle(db, reservationId, deadlinePlan);
 
     const inboundStmt = db.prepare(
       `INSERT INTO delivery_inbound_messages
@@ -218,6 +242,7 @@ export function claimReactiveDelivery(
     return {
       kind: "claimed",
       reservation,
+      deadlinePlan,
       secretOmitted: secret.hit ? true : undefined,
     };
   } catch (error) {
@@ -373,6 +398,23 @@ export function recordBubbleReceipt(
       db.prepare(
         `UPDATE delivery_reservations SET first_sent_at = ? WHERE id = ? AND first_sent_at IS NULL`,
       ).run(sentAt, reservationId);
+      if (reservation.phaseLifecycle) {
+        const firstBubbleDeadlineMs = Date.parse(
+          reservation.firstBubbleDeadlineAt ?? "",
+        );
+        const deadlineMissed =
+          Number.isFinite(firstBubbleDeadlineMs) &&
+          sentAtMs >= firstBubbleDeadlineMs;
+        recordPhaseLifecycle(db, {
+          reservationId,
+          phase: "first_bubble",
+          event: deadlineMissed ? "failed" : "succeeded",
+          atMs: sentAtMs,
+          statusCode: deadlineMissed
+            ? "first_bubble_deadline_missed"
+            : "first_bubble_receipted",
+        });
+      }
     }
     db.exec("COMMIT");
   } catch (error) {

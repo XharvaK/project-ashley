@@ -47,6 +47,7 @@ export type DeliveryReservationRow = {
   firstSentAt: string | null;
   generationLeaseExpiresAt: string | null;
   deliveryLeaseExpiresAt: string | null;
+  phaseLifecycle: import("./phase-lifecycle.js").PhaseLifecycleEnvelope | null;
   createdAt: string;
   finalizedAt: string | null;
 };
@@ -60,19 +61,6 @@ export type DeliveryBubbleRow = {
 };
 
 export const DISCORD_CONTENT_LIMIT = 1990;
-
-export const SOFT_FIRST_BUBBLE_MS = 5_000;
-export const HARD_FIRST_BUBBLE_MS = 10_000;
-export const GENERATION_LEASE_MS = 10_000;
-export const DELIVERY_LEASE_MS = 120_000;
-
-export function softFirstBubbleTargetAt(finalFragmentReceivedAtMs: number): number {
-  return finalFragmentReceivedAtMs + SOFT_FIRST_BUBBLE_MS;
-}
-
-export function firstBubbleDeadlineAt(finalFragmentReceivedAtMs: number): number {
-  return finalFragmentReceivedAtMs + HARD_FIRST_BUBBLE_MS;
-}
 
 export function isTerminalDeliveryState(state: DeliveryState): boolean {
   switch (state) {

@@ -22,17 +22,19 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { createServer, connect as netConnect, type AddressInfo, type Server } from "node:net";
+import { createServer, connect as netConnect, type AddressInfo, type Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   isCompleteSuccessResult,
   runSandboxM1,
   type SandboxM1HostEvidence,
+  type SandboxM1ExecutionOptions,
   type SandboxM1Request,
   type SandboxM1Result,
 } from "@composer-assistant/sandbox-m1";
 import { V2_SECRET_ENV_KEY } from "../limits.js";
+import { forceCloseLoopbackServer } from "../settlement-cleanup.js";
 import type {
   SandboxV2FileRoundtripRequest,
   SandboxV2Result,
@@ -43,8 +45,13 @@ export type M1RoundtripExecutorOptions = {
   executor?: (
     request: SandboxM1Request,
     hostEvidence: SandboxM1HostEvidence,
+    options?: SandboxM1ExecutionOptions,
   ) => Promise<SandboxM1Result>;
   available?: () => boolean;
+  childExecutionDeadlineAtMs?: number;
+  settlementDeadlineAtMs?: number;
+  clock?: { nowMs(): number };
+  serverCloser?: (server: Server, connections: Set<Socket>) => void;
 };
 
 function tryConnect(port: number): Promise<boolean> {
@@ -85,7 +92,8 @@ export async function handleFileRoundtripV2(
   request: SandboxV2FileRoundtripRequest,
   options: M1RoundtripExecutorOptions = {},
 ): Promise<SandboxV2Result> {
-  const executedAtMs = Date.now();
+  const nowMs = (): number => options.clock?.nowMs() ?? Date.now();
+  const executedAtMs = nowMs();
   const failed = (error: string): SandboxV2Result => ({
     outcome: "failed",
     operation: "file.roundtrip",
@@ -104,15 +112,30 @@ export async function handleFileRoundtripV2(
       executedAtMs,
     };
   }
+  if (
+    options.childExecutionDeadlineAtMs !== undefined &&
+    options.settlementDeadlineAtMs !== undefined &&
+    options.childExecutionDeadlineAtMs >= options.settlementDeadlineAtMs
+  ) {
+    return failed("invalid_deadline_plan");
+  }
+  if (
+    options.settlementDeadlineAtMs !== undefined &&
+    nowMs() >= options.settlementDeadlineAtMs
+  ) {
+    return failed("settlement_deadline_exceeded");
+  }
 
   const content = request.content ?? "hello";
 
   let sentinelDir: string | undefined;
   let fd: number | undefined;
   let server: Server | undefined;
+  const serverConnections = new Set<Socket>();
   const previousSecret = process.env[V2_SECRET_ENV_KEY];
 
-  try {
+  const result = await (async (): Promise<SandboxV2Result> => {
+    try {
     sentinelDir = mkdtempSync(join(tmpdir(), "ashley-v2-sentinel-"));
     const sentinelPath = join(sentinelDir, "sentinel.txt");
     writeFileSync(sentinelPath, "sentinel", "utf8");
@@ -123,6 +146,8 @@ export async function handleFileRoundtripV2(
     let hits = 0;
     server = createServer((sock) => {
       hits += 1;
+      serverConnections.add(sock);
+      sock.once("close", () => serverConnections.delete(sock));
       sock.destroy();
     });
     await new Promise<void>((resolve, reject) => {
@@ -146,7 +171,16 @@ export async function handleFileRoundtripV2(
       hostLoopbackSandboxHits: () => hits - baselineHits,
     };
 
-    const res = await executor(m1Request, hostEvidence);
+    const remainingChildMs =
+      options.childExecutionDeadlineAtMs === undefined
+        ? 30_000
+        : options.childExecutionDeadlineAtMs - nowMs();
+    if (remainingChildMs <= 0) return failed("child_execution_deadline_expired");
+    const res = await executor(m1Request, hostEvidence, {
+      timeoutMs: Math.min(30_000, remainingChildMs),
+      settlementDeadlineAtMs: options.settlementDeadlineAtMs,
+      clock: options.clock,
+    });
 
     if (res.ok === true && isCompleteSuccessResult(res)) {
       return {
@@ -161,26 +195,24 @@ export async function handleFileRoundtripV2(
           readMatches: true,
           deleted: true,
           verifiedAbsent: true,
-          completedAtMs: Date.now(),
+          completedAtMs: nowMs(),
         },
-        executedAtMs: Date.now(),
+        executedAtMs: nowMs(),
       };
     }
 
     if (res.ok === false) return failed(res.code);
     return failed("invalid-result");
-  } catch {
-    return failed("internal-error");
-  } finally {
+    } catch {
+      return failed("internal-error");
+    } finally {
     if (fd !== undefined) {
       try {
         closeSync(fd);
       } catch {}
     }
     if (server) {
-      try {
-        await new Promise<void>((resolve) => server!.close(() => resolve()));
-      } catch {}
+      (options.serverCloser ?? forceCloseLoopbackServer)(server, serverConnections);
     }
     if (sentinelDir !== undefined) {
       try {
@@ -192,5 +224,14 @@ export async function handleFileRoundtripV2(
     } else {
       process.env[V2_SECRET_ENV_KEY] = previousSecret;
     }
+    }
+  })();
+
+  if (
+    options.settlementDeadlineAtMs !== undefined &&
+    nowMs() >= options.settlementDeadlineAtMs
+  ) {
+    return failed("settlement_deadline_exceeded");
   }
+  return result;
 }

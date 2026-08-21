@@ -12,7 +12,8 @@
  * loopbackIsolated verdict (LOOPBACK_FINAL_VERDICT_OWNER=host_launcher).
  */
 import { spawn } from "node:child_process";
-import { access, mkdtemp, rm } from "node:fs/promises";
+import { existsSync, rmSync } from "node:fs";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SANDBOX_M1_RUNNER_SOURCE } from "./sandbox-m1-runner.js";
@@ -129,6 +130,63 @@ const STDOUT_MAX_BYTES = 64 * 1024;
 const STDERR_MAX_BYTES = 64 * 1024;
 const TIMEOUT_MS = 30_000;
 
+export type SandboxM1ExecutionOptions = {
+  /** Child cap supplied by the owning phase plan. It can only reduce the frozen 30s cap. */
+  timeoutMs?: number;
+  /** Absolute settlement cutoff owned by the selected turn branch. */
+  settlementDeadlineAtMs?: number;
+  clock?: { nowMs(): number };
+  /** Deterministic test seam for the fixed Bubblewrap child. */
+  spawnChild?: typeof spawn;
+  /** Deterministic test seam for the disposable workspace. */
+  workspaceFactory?: (prefix: string) => Promise<string>;
+};
+
+type CloseWaitChild = {
+  kill(signal: NodeJS.Signals): boolean;
+  stdin: { destroy(): void };
+  stdout: { destroy(): void };
+  stderr: { destroy(): void };
+  once(event: "close", listener: (code: number | null) => void): unknown;
+  once(event: "error", listener: (error: Error) => void): unknown;
+  off(event: "close", listener: (code: number | null) => void): unknown;
+  off(event: "error", listener: (error: Error) => void): unknown;
+};
+
+function awaitChildCloseByDeadline(
+  child: CloseWaitChild,
+  settlementDeadlineAtMs: number,
+  nowMs: () => number,
+): Promise<{ closed: boolean; exitCode: number | null }> {
+  const remainingMs = settlementDeadlineAtMs - nowMs();
+  if (remainingMs <= 0) return Promise.resolve({ closed: false, exitCode: null });
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (closed: boolean, exitCode: number | null): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.off("close", onClose);
+      child.off("error", onError);
+      resolve({ closed, exitCode });
+    };
+    const terminate = (): void => {
+      child.kill("SIGKILL");
+      child.stdin.destroy();
+      child.stdout.destroy();
+      child.stderr.destroy();
+    };
+    const onClose = (code: number | null): void => finish(true, code);
+    const onError = (): void => terminate();
+    child.once("close", onClose);
+    child.once("error", onError);
+    const timer = setTimeout(() => {
+      terminate();
+      finish(false, null);
+    }, remainingMs);
+  });
+}
+
 function buildBwrapArgs(workspace: string): string[] {
   return [
     "--unshare-user",
@@ -183,18 +241,13 @@ function parseSingleJson(output: string): unknown | null {
   }
 }
 
-async function removeWorkspace(workspace: string): Promise<boolean> {
+export function removeBoundedM1Workspace(workspace: string): boolean {
   try {
-    await rm(workspace, { recursive: true, force: true });
+    rmSync(workspace, { recursive: true, force: true });
   } catch {
     return false;
   }
-  try {
-    await access(workspace);
-    return false;
-  } catch {
-    return true;
-  }
+  return !existsSync(workspace);
 }
 
 /**
@@ -205,14 +258,16 @@ async function removeWorkspace(workspace: string): Promise<boolean> {
 export async function runSandboxM1(
   request: SandboxM1Request,
   hostEvidence: SandboxM1HostEvidence,
+  options: SandboxM1ExecutionOptions = {},
 ): Promise<SandboxM1Result> {
+  const nowMs = (): number => options.clock?.nowMs() ?? Date.now();
   let workspace: string | undefined;
   try {
     if (!isValidRequest(request)) return failure("bad-request");
 
-    workspace = await mkdtemp(join(tmpdir(), "ashley-m1-"));
+    workspace = await (options.workspaceFactory ?? mkdtemp)(join(tmpdir(), "ashley-m1-"));
 
-    const child = spawn(BWRAP, buildBwrapArgs(workspace), {
+    const child = (options.spawnChild ?? spawn)(BWRAP, buildBwrapArgs(workspace), {
       stdio: ["pipe", "pipe", "pipe"],
     });
     const stdin = child.stdin;
@@ -223,6 +278,13 @@ export async function runSandboxM1(
     stdout.on("error", () => {});
     stderr.on("error", () => {});
 
+    const terminateChild = (): void => {
+      child.kill("SIGKILL");
+      stdin.destroy();
+      stdout.destroy();
+      stderr.destroy();
+    };
+
     let stdoutData = "";
     let stderrData = "";
     let stdoutOverflow = false;
@@ -231,7 +293,7 @@ export async function runSandboxM1(
       if (stdoutOverflow) return;
       if (stdoutData.length + chunk.length > STDOUT_MAX_BYTES) {
         stdoutOverflow = true;
-        child.kill("SIGKILL");
+        terminateChild();
         return;
       }
       stdoutData += chunk.toString("utf8");
@@ -240,7 +302,7 @@ export async function runSandboxM1(
       if (stderrOverflow) return;
       if (stderrData.length + chunk.length > STDERR_MAX_BYTES) {
         stderrOverflow = true;
-        child.kill("SIGKILL");
+        terminateChild();
         return;
       }
       stderrData += chunk.toString("utf8");
@@ -248,28 +310,37 @@ export async function runSandboxM1(
 
     const requestJson = JSON.stringify(request);
     if (Buffer.byteLength(requestJson, "utf8") > REQUEST_MAX_BYTES) {
+      terminateChild();
       return failure("bad-request");
     }
     stdin.write(requestJson);
     stdin.end();
 
     let timedOut = false;
+    const suppliedTimeoutMs = options.timeoutMs ?? TIMEOUT_MS;
+    if (!Number.isFinite(suppliedTimeoutMs) || suppliedTimeoutMs <= 0) {
+      terminateChild();
+      return failure("timeout");
+    }
+    const effectiveTimeoutMs = Math.min(TIMEOUT_MS, suppliedTimeoutMs);
+    const settlementDeadlineAtMs =
+      options.settlementDeadlineAtMs ?? nowMs() + effectiveTimeoutMs;
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGKILL");
-    }, TIMEOUT_MS);
+      terminateChild();
+    }, effectiveTimeoutMs);
 
-    let exitCode: number | null;
+    let closeResult: { closed: boolean; exitCode: number | null };
     try {
-      exitCode = await new Promise<number | null>((resolve, reject) => {
-        child.once("close", (code) => resolve(code));
-        child.once("error", (err) => reject(err));
-      });
-    } catch {
-      return failure("spawn-error");
+      closeResult = await awaitChildCloseByDeadline(
+        child,
+        settlementDeadlineAtMs,
+        nowMs,
+      );
     } finally {
       clearTimeout(timer);
     }
+    if (!closeResult.closed) timedOut = true;
 
     if (timedOut) return failure("timeout");
     if (stdoutOverflow) return failure("stdout-overflow");
@@ -277,9 +348,9 @@ export async function runSandboxM1(
 
     const parsed = parseSingleJson(stdoutData);
     if (parsed === null) {
-      return failure(exitCode === 0 ? "malformed-output" : "runner-error");
+      return failure(closeResult.exitCode === 0 ? "malformed-output" : "runner-error");
     }
-    if (exitCode !== 0) {
+    if (closeResult.exitCode !== 0) {
       const asRecord = parsed as Record<string, unknown>;
       return failure(typeof asRecord.code === "string" ? asRecord.code : "runner-error");
     }
@@ -311,11 +382,11 @@ export async function runSandboxM1(
     };
     if (!isCompleteSuccessResult(result)) return failure("invalid-result");
 
-    if (!(await removeWorkspace(workspace))) return failure("cleanup-failed");
+    if (!removeBoundedM1Workspace(workspace)) return failure("cleanup-failed");
     return result;
   } catch {
     return failure("internal-error");
   } finally {
-    if (workspace !== undefined) await removeWorkspace(workspace);
+    if (workspace !== undefined) removeBoundedM1Workspace(workspace);
   }
 }

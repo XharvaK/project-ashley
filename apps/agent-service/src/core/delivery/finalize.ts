@@ -14,6 +14,7 @@ import {
   type DeliveryFinalizationReason,
   type DeliveryState,
 } from "./types.js";
+import { recordPhaseLifecycle } from "./phase-lifecycle.js";
 
 export type FinalizeCause =
   | "complete"
@@ -225,6 +226,16 @@ export function finalizeDelivery(
            WHERE id = ? AND owner_id = ? AND committed_at IS NULL`,
         ).run(initiativeId, input.ownerId);
       }
+    }
+
+    if (reservation.phaseLifecycle) {
+      recordPhaseLifecycle(db, {
+        reservationId: input.reservationId,
+        phase: "delivery",
+        event: state === "committed" ? "succeeded" : "failed",
+        atMs: Date.now(),
+        statusCode: reason,
+      });
     }
 
     db.exec("COMMIT");

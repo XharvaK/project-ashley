@@ -32,7 +32,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { createServer, connect as netConnect, type AddressInfo, type Server } from "node:net";
+import { createServer, connect as netConnect, type AddressInfo, type Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WorkspaceManager, type WorkspaceAcquisitionResult } from "./workspace-manager.js";
@@ -40,6 +40,7 @@ import { SANDBOX_V2_WORKSPACE_RUNNER_SOURCE } from "./runner.js";
 import { isWorkspaceRunnerEvidence, type WorkspaceRunnerEvidence } from "./evidence.js";
 import { validateProjectInspectionRequest } from "../validation.js";
 import { V2_HOST_FACTS, V2_LIMITS, V2_SECRET_ENV_KEY } from "../limits.js";
+import { awaitChildCloseByDeadline, forceCloseLoopbackServer, terminateChild } from "../settlement-cleanup.js";
 import type { V2ProjectReadRegistry } from "../registry.js";
 import {
   SANDBOX_V2_OPERATION_NAMES,
@@ -65,6 +66,8 @@ export type WorkspaceExperimentSpawnInput = {
   sentinelPath: string;
   fdSentinelCanonical: string;
   timeoutMs: number;
+  settlementDeadlineAtMs: number;
+  nowMs: () => number;
 };
 
 export type WorkspaceExperimentSpawnOutput = {
@@ -89,6 +92,14 @@ export type WorkspaceExperimentExecutorOptions = {
   workspaceManager?: WorkspaceManager;
   managedWorkspaceRoot?: string;
   timeoutMs?: number;
+  /** Absolute child-execution cutoff selected by the owning turn plan. */
+  childExecutionDeadlineAtMs?: number;
+  /** Absolute cutoff by which acquisition, execution, validation, and cleanup must settle. */
+  settlementDeadlineAtMs?: number;
+  /** Deterministic test seam. */
+  clock?: { nowMs(): number };
+  /** Deterministic settlement teardown seam. */
+  serverCloser?: (server: Server, connections: Set<Socket>) => void;
 };
 
 export type ProjectInspectionExecutorOptions = WorkspaceExperimentExecutorOptions;
@@ -188,7 +199,7 @@ export async function spawnBubblewrapInspection(
     if (stdoutOverflow) return;
     if (stdoutData.length + chunk.length > V2_LIMITS.STDOUT_MAX_BYTES) {
       stdoutOverflow = true;
-      child.kill("SIGKILL");
+      terminateChild(child);
       return;
     }
     stdoutData += chunk.toString("utf8");
@@ -197,14 +208,14 @@ export async function spawnBubblewrapInspection(
     if (stderrOverflow) return;
     if (stderrData.length + chunk.length > V2_LIMITS.STDERR_MAX_BYTES) {
       stderrOverflow = true;
-      child.kill("SIGKILL");
+      terminateChild(child);
       return;
     }
     stderrData += chunk.toString("utf8");
   });
 
   if (Buffer.byteLength(input.requestJson, "utf8") > V2_LIMITS.WORKSPACE_REQUEST_MAX_BYTES) {
-    child.kill("SIGKILL");
+    terminateChild(child);
     return {
       exitCode: null,
       stdout: "",
@@ -220,30 +231,22 @@ export async function spawnBubblewrapInspection(
   let timedOut = false;
   const timer = setTimeout(() => {
     timedOut = true;
-    child.kill("SIGKILL");
+    terminateChild(child);
   }, input.timeoutMs);
 
-  let exitCode: number | null;
+  let closeResult: { closed: boolean; exitCode: number | null };
   try {
-    exitCode = await new Promise<number | null>((resolve, reject) => {
-      child.once("close", (code) => resolve(code));
-      child.once("error", (err) => reject(err));
+    closeResult = await awaitChildCloseByDeadline(child, {
+      settlementDeadlineAtMs: input.settlementDeadlineAtMs,
+      nowMs: input.nowMs,
     });
-  } catch {
-    return {
-      exitCode: null,
-      stdout: stdoutData,
-      stderr: stderrData,
-      timedOut,
-      stdoutOverflow,
-      stderrOverflow,
-    };
   } finally {
     clearTimeout(timer);
   }
+  if (!closeResult.closed) timedOut = true;
 
   return {
-    exitCode,
+    exitCode: closeResult.exitCode,
     stdout: stdoutData,
     stderr: stderrData,
     timedOut,
@@ -265,13 +268,37 @@ export async function executeWorkspaceExperiment(
   options: WorkspaceExperimentExecutorOptions,
 ): Promise<SandboxV2Result> {
   const operation = request.operation;
-  const failed = (error: string, executedAtMs = Date.now()): SandboxV2Result => ({
+  const nowMs = (): number => options.clock?.nowMs() ?? Date.now();
+  const mutatingOperation = ![
+    "workspace.read_file",
+    "workspace.list_directory",
+    "workspace.search_text",
+  ].includes(operation);
+  let dispatched = false;
+  const currentFailureTruth = (): "no_effect_proven" | "effect_indeterminate" =>
+    dispatched && mutatingOperation ? "effect_indeterminate" : "no_effect_proven";
+  const failed = (error: string, executedAtMs = nowMs()): SandboxV2Result => ({
     outcome: "failed",
     operation,
     error,
+    executionTruth: currentFailureTruth(),
     executedAtMs,
   });
-  const executedAtMs = Date.now();
+  const executedAtMs = nowMs();
+
+  if (
+    options.childExecutionDeadlineAtMs !== undefined &&
+    options.settlementDeadlineAtMs !== undefined &&
+    options.childExecutionDeadlineAtMs >= options.settlementDeadlineAtMs
+  ) {
+    return failed("invalid_deadline_plan", executedAtMs);
+  }
+  if (
+    options.settlementDeadlineAtMs !== undefined &&
+    nowMs() >= options.settlementDeadlineAtMs
+  ) {
+    return failed("settlement_deadline_exceeded", executedAtMs);
+  }
 
   // 1. Validate request is version 2 with valid operation
   if (!SANDBOX_V2_OPERATION_NAMES.includes(request.operation)) {
@@ -297,6 +324,7 @@ export async function executeWorkspaceExperiment(
       outcome: "unavailable",
       operation,
       error: "sandbox_unavailable",
+      executionTruth: "no_effect_proven",
       executedAtMs,
     };
   }
@@ -317,13 +345,21 @@ export async function executeWorkspaceExperiment(
   if (!acquisition.ok) {
     return failed(acquisition.error, executedAtMs);
   }
+  if (
+    options.settlementDeadlineAtMs !== undefined &&
+    nowMs() >= options.settlementDeadlineAtMs
+  ) {
+    return failed("settlement_deadline_exceeded");
+  }
 
   let sentinelDir: string | undefined;
   let fd: number | undefined;
   let server: Server | undefined;
+  const serverConnections = new Set<Socket>();
   let previousSecret: string | undefined;
 
-  try {
+  const result = await (async (): Promise<SandboxV2Result> => {
+    try {
     // 6. Establish host sentinel file & descriptor
     sentinelDir = mkdtempSync(join(tmpdir(), "ashley-v3-sentinel-"));
     const sentinelPath = join(sentinelDir, "sentinel.txt");
@@ -339,6 +375,8 @@ export async function executeWorkspaceExperiment(
     let hits = 0;
     server = createServer((sock) => {
       hits += 1;
+      serverConnections.add(sock);
+      sock.once("close", () => serverConnections.delete(sock));
       sock.destroy();
     });
     await new Promise<void>((resolve, reject) => {
@@ -405,13 +443,23 @@ export async function executeWorkspaceExperiment(
       return failed("request_too_large", executedAtMs);
     }
 
+    const operationHardCapMs = options.timeoutMs ?? V2_LIMITS.TIMEOUT_MS;
+    const remainingChildMs =
+      options.childExecutionDeadlineAtMs === undefined
+        ? operationHardCapMs
+        : options.childExecutionDeadlineAtMs - nowMs();
+    if (remainingChildMs <= 0) return failed("child_execution_deadline_expired");
+    dispatched = true;
     const run = await spawnRunner({
       viewRoot: acquisition.workspaceTreeRoot,
       requestJson,
       probePort,
       sentinelPath: sentinelCanonical,
       fdSentinelCanonical: sentinelCanonical,
-      timeoutMs: options.timeoutMs ?? V2_LIMITS.TIMEOUT_MS,
+      timeoutMs: Math.min(operationHardCapMs, remainingChildMs),
+      settlementDeadlineAtMs:
+        options.settlementDeadlineAtMs ?? nowMs() + Math.min(operationHardCapMs, remainingChildMs),
+      nowMs,
     });
 
     if (run.timedOut) return failed("timeout");
@@ -441,20 +489,19 @@ export async function executeWorkspaceExperiment(
       result: parsed.result,
       workspaceId: acquisition.workspaceId,
       sourceSnapshotId: acquisition.manifest.sourceSnapshotId,
-      executedAtMs: Date.now(),
+      executionTruth: "effect_verified",
+      executedAtMs: nowMs(),
     };
-  } catch {
-    return failed("internal-error");
-  } finally {
+    } catch {
+      return failed("internal-error");
+    } finally {
     if (fd !== undefined) {
       try {
         closeSync(fd);
       } catch {}
     }
     if (server) {
-      try {
-        await new Promise<void>((resolve) => server!.close(() => resolve()));
-      } catch {}
+      (options.serverCloser ?? forceCloseLoopbackServer)(server, serverConnections);
     }
     if (sentinelDir !== undefined) {
       try {
@@ -466,5 +513,23 @@ export async function executeWorkspaceExperiment(
     } else {
       process.env[V2_SECRET_ENV_KEY] = previousSecret;
     }
+    }
+  })();
+
+  if (
+    options.settlementDeadlineAtMs !== undefined &&
+    nowMs() >= options.settlementDeadlineAtMs
+  ) {
+    return result.outcome === "succeeded"
+      ? {
+          outcome: "failed",
+          operation,
+          error: "settlement_deadline_exceeded",
+          executionTruth: "effect_verified",
+          lateEvidenceVerified: true,
+          executedAtMs: nowMs(),
+        }
+      : failed("settlement_deadline_exceeded");
   }
+  return result;
 }

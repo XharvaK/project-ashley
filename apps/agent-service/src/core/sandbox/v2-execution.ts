@@ -27,13 +27,14 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { createServer, connect as netConnect, type AddressInfo, type Server } from "node:net";
+import { createServer, connect as netConnect, type AddressInfo, type Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   isCompleteSuccessResult,
   runSandboxM1,
   type SandboxM1HostEvidence,
+  type SandboxM1ExecutionOptions,
   type SandboxM1Request,
   type SandboxM1Result,
 } from "@composer-assistant/sandbox-m1";
@@ -71,6 +72,8 @@ export type ExecuteProjectInspectionV2Input = {
   request: CognitionInspectionRequest;
   messageEntityUuid?: string;
   deadlineAtMs?: number;
+  childExecutionDeadlineAtMs?: number;
+  settlementDeadlineAtMs?: number;
   dispatcher?: SandboxV2Dispatcher;
   registry?: V2ProjectReadRegistry;
   envOverrides?: Partial<SandboxV2Environment> & {
@@ -90,10 +93,15 @@ export type ExecuteReactiveSandboxTaskV2Input = {
   content?: string;
   messageEntityUuid?: string;
   deadlineAtMs?: number;
+  childExecutionDeadlineAtMs?: number;
+  settlementDeadlineAtMs?: number;
   executor?: (
     request: SandboxM1Request,
     hostEvidence: SandboxM1HostEvidence,
+    options?: SandboxM1ExecutionOptions,
   ) => Promise<SandboxM1Result>;
+  clock?: { nowMs(): number };
+  serverCloser?: (server: Server, connections: Set<Socket>) => void;
 };
 
 function tryConnect(port: number): Promise<boolean> {
@@ -124,9 +132,39 @@ export function isSandboxV2Available(): boolean {
   return process.platform === "linux" && existsSync(BWRAP_PATH);
 }
 
+function forceCloseLoopbackServer(server: Server, connections: Set<Socket>): void {
+  server.close();
+  for (const socket of connections) socket.destroy();
+  connections.clear();
+}
+
 export async function executeReactiveSandboxTaskV2(
   input: ExecuteReactiveSandboxTaskV2Input = {},
 ): Promise<OperationalClaimLicense> {
+  const nowMs = (): number => input.clock?.nowMs() ?? Date.now();
+  const settlementDeadlineAtMs =
+    input.settlementDeadlineAtMs ?? input.deadlineAtMs;
+  if (
+    input.childExecutionDeadlineAtMs !== undefined &&
+    settlementDeadlineAtMs !== undefined &&
+    input.childExecutionDeadlineAtMs >= settlementDeadlineAtMs
+  ) {
+    return {
+      state: "failed",
+      profile: "sandbox_workspace_file_roundtrip",
+      error: "invalid_deadline_plan",
+    };
+  }
+  if (
+    settlementDeadlineAtMs !== undefined &&
+    nowMs() >= settlementDeadlineAtMs
+  ) {
+    return {
+      state: "failed",
+      profile: "sandbox_workspace_file_roundtrip",
+      error: "acquisition_settlement_deadline_expired",
+    };
+  }
   const executor = input.executor ?? runSandboxM1;
   const isCustomExecutor = input.executor !== undefined;
 
@@ -143,9 +181,11 @@ export async function executeReactiveSandboxTaskV2(
   let sentinelDir: string | undefined;
   let fd: number | undefined;
   let server: Server | undefined;
+  const serverConnections = new Set<Socket>();
   const previousSecret = process.env[SECRET_ENV_KEY];
 
-  try {
+  const result = await (async (): Promise<OperationalClaimLicense> => {
+    try {
     // 1. Establish host sentinel file & descriptor
     sentinelDir = mkdtempSync(join(tmpdir(), "ashley-v2-sentinel-"));
     const sentinelPath = join(sentinelDir, "sentinel.txt");
@@ -160,6 +200,8 @@ export async function executeReactiveSandboxTaskV2(
     let hits = 0;
     server = createServer((sock) => {
       hits += 1;
+      serverConnections.add(sock);
+      sock.once("close", () => serverConnections.delete(sock));
       sock.destroy();
     });
     await new Promise<void>((resolve, reject) => {
@@ -189,10 +231,25 @@ export async function executeReactiveSandboxTaskV2(
     };
 
     // 6. Invoke frozen M1 executor
-    const res = await executor(request, hostEvidence);
+    const remainingChildMs =
+      input.childExecutionDeadlineAtMs === undefined
+        ? 30_000
+        : input.childExecutionDeadlineAtMs - nowMs();
+    if (remainingChildMs <= 0) {
+      return {
+        state: "failed",
+        profile: "sandbox_workspace_file_roundtrip",
+        error: "child_execution_deadline_expired",
+      };
+    }
+    const res = await executor(request, hostEvidence, {
+      timeoutMs: Math.min(30_000, remainingChildMs),
+      settlementDeadlineAtMs,
+      clock: input.clock,
+    });
 
     // 7. Validate and map result to OperationalClaimLicense
-    const completedAtMs = Date.now();
+    const completedAtMs = nowMs();
     if (res.ok === true && isCompleteSuccessResult(res)) {
       const contentHash = createHash("sha256").update(content, "utf8").digest("hex");
       const effectEvidence: RoundtripEffectEvidence = {
@@ -233,24 +290,22 @@ export async function executeReactiveSandboxTaskV2(
       error: "invalid_result",
       ...(input.messageEntityUuid ? { sourceMessageEntityUuid: input.messageEntityUuid } : {}),
     };
-  } catch {
-    return {
+    } catch {
+      return {
       state: "failed",
-      taskId: `v2-m1-${Date.now()}`,
+      taskId: `v2-m1-${nowMs()}`,
       profile: "sandbox_workspace_file_roundtrip",
       error: "internal_error",
       ...(input.messageEntityUuid ? { sourceMessageEntityUuid: input.messageEntityUuid } : {}),
-    };
-  } finally {
+      };
+    } finally {
     if (fd !== undefined) {
       try {
         closeSync(fd);
       } catch {}
     }
     if (server) {
-      try {
-        await new Promise<void>((resolve) => server!.close(() => resolve()));
-      } catch {}
+      (input.serverCloser ?? forceCloseLoopbackServer)(server, serverConnections);
     }
     if (sentinelDir) {
       try {
@@ -262,7 +317,24 @@ export async function executeReactiveSandboxTaskV2(
     } else {
       process.env[SECRET_ENV_KEY] = previousSecret;
     }
+    }
+  })();
+
+  if (
+    settlementDeadlineAtMs !== undefined &&
+    nowMs() >= settlementDeadlineAtMs
+  ) {
+    return {
+      state: "failed",
+      taskId: `v2-m1-${nowMs()}`,
+      profile: "sandbox_workspace_file_roundtrip",
+      error: "acquisition_settlement_deadline_expired",
+      ...(input.messageEntityUuid
+        ? { sourceMessageEntityUuid: input.messageEntityUuid }
+        : {}),
+    };
   }
+  return result;
 }
 
 /**
@@ -283,7 +355,12 @@ export async function executeProjectInspectionV2(
   const { request, messageEntityUuid } = input;
 
   // 1. Enforce deadline: already-expired request fails before starting sandbox work
-  if (typeof input.deadlineAtMs === "number" && input.deadlineAtMs <= Date.now()) {
+  const settlementDeadlineAtMs =
+    input.settlementDeadlineAtMs ?? input.deadlineAtMs;
+  if (
+    typeof settlementDeadlineAtMs === "number" &&
+    settlementDeadlineAtMs <= Date.now()
+  ) {
     return {
       license: {
         state: "failed",
@@ -379,6 +456,8 @@ export async function executeProjectInspectionV2(
         env: {
           registry,
           ...input.envOverrides,
+          childExecutionDeadlineAtMs: input.childExecutionDeadlineAtMs,
+          settlementDeadlineAtMs,
         },
       });
 
@@ -517,6 +596,7 @@ export async function executeProjectInspectionV2(
         taskId: `v2-insp-${res.executedAtMs}`,
         profile: "project_investigation",
         error: res.error ?? "inspection_failed",
+        lateEvidenceVerified: res.lateEvidenceVerified === true,
         ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
       },
       observation: null,
@@ -539,6 +619,8 @@ export type ExecuteWorkspaceExperimentV2Input = {
   request: CognitionWorkspaceRequest;
   messageEntityUuid?: string;
   deadlineAtMs?: number;
+  childExecutionDeadlineAtMs?: number;
+  settlementDeadlineAtMs?: number;
   dispatcher?: SandboxV2Dispatcher;
   registry?: V2ProjectReadRegistry;
   workspaceManager?: import("@composer-assistant/sandbox-v2").WorkspaceManager;
@@ -572,7 +654,12 @@ export async function executeWorkspaceExperimentV2(
   const { request, messageEntityUuid } = input;
 
   // 1. Enforce deadline
-  if (typeof input.deadlineAtMs === "number" && input.deadlineAtMs <= Date.now()) {
+  const settlementDeadlineAtMs =
+    input.settlementDeadlineAtMs ?? input.deadlineAtMs;
+  if (
+    typeof settlementDeadlineAtMs === "number" &&
+    settlementDeadlineAtMs <= Date.now()
+  ) {
     return {
       license: {
         state: "failed",
@@ -670,6 +757,8 @@ export async function executeWorkspaceExperimentV2(
           registry,
           workspaceManager: input.workspaceManager,
           ...input.envOverrides,
+          childExecutionDeadlineAtMs: input.childExecutionDeadlineAtMs,
+          settlementDeadlineAtMs,
         },
       });
 
@@ -730,6 +819,7 @@ export async function executeWorkspaceExperimentV2(
           taskId: `v2-exp-${res.executedAtMs}`,
           profile: "project_experimentation",
           workspaceClaimEffect,
+          executionTruth: res.executionTruth ?? "effect_verified",
           ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
         },
         observation,
@@ -752,10 +842,15 @@ export async function executeWorkspaceExperimentV2(
     // res.outcome === "failed"
     return {
       license: {
-        state: "failed",
+        state:
+          res.executionTruth === "effect_indeterminate"
+            ? "outcome_unknown"
+            : "failed",
         taskId: `v2-exp-${res.executedAtMs}`,
         profile: "project_experimentation",
         error: res.error ?? "workspace_experiment_failed",
+        executionTruth: res.executionTruth ?? "no_effect_proven",
+        lateEvidenceVerified: res.lateEvidenceVerified === true,
         ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
       },
       observation: null,

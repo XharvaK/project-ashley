@@ -183,7 +183,7 @@ describe("migration recovery schema content", () => {
             .prepare("SELECT nuclear_schema_version FROM lineage_state WHERE id = 1")
             .get() as { nuclear_schema_version: number }
         ).nuclear_schema_version,
-      ).toBe(28);
+      ).toBe(29);
     } finally {
       closeFixture(fixture);
     }
@@ -258,7 +258,7 @@ describe("migration recovery schema content", () => {
               user_version: number;
             }
           ).user_version,
-        ).toBe(28);
+        ).toBe(29);
         expect(getPendingNuclearMigration(fixture.continuity)).toBeNull();
         expect(
           (
@@ -268,7 +268,7 @@ describe("migration recovery schema content", () => {
               )
               .get() as { nuclear_schema_version: number }
           ).nuclear_schema_version,
-        ).toBe(28);
+        ).toBe(29);
       } finally {
         closeFixture(fixture);
       }

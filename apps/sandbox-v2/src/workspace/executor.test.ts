@@ -101,6 +101,151 @@ describe("Stage 2 — Workspace Experiment Executor", () => {
     tempDirs.length = 0;
   });
 
+  it("force-closes M3 cleanup before settlement without redispatch or truth loss", async () => {
+    const { registry, manager } = createTestSetup();
+    let nowMs = 1_000;
+    let dispatches = 0;
+    let forcedClosures = 0;
+    const result = await executeWorkspaceExperiment(
+      {
+        version: 2,
+        operation: "workspace.write_file",
+        projectId: "composer-assistant",
+        path: "witness.txt",
+        content: "witness-data",
+        mustNotExist: true,
+      },
+      {
+        registry,
+        workspaceManager: manager,
+        childExecutionDeadlineAtMs: 1_300,
+        settlementDeadlineAtMs: 1_500,
+        clock: { nowMs: () => nowMs },
+        spawnRunner: async (input: WorkspaceExperimentSpawnInput) => {
+          dispatches += 1;
+          nowMs = 1_290;
+          return makeRunner(() => ({
+            version: 2,
+            operation: "workspace.write_file",
+            ok: true,
+            result: {
+              kind: "workspace.write_file",
+              path: "witness.txt",
+              bytesWritten: 12,
+              contentHash: "a".repeat(64),
+              readMatches: true,
+              deleted: false,
+              verifiedAbsent: false,
+              completedAtMs: nowMs,
+            },
+            checks: goodChecks(),
+          }))(input);
+        },
+        serverCloser: ((server: import("node:net").Server, connections: Set<import("node:net").Socket>) => {
+          forcedClosures += 1;
+          server.close();
+          for (const socket of connections) socket.destroy();
+          connections.clear();
+          nowMs = 1_490;
+        }),
+      } as any,
+    );
+
+    expect(dispatches).toBe(1);
+    expect(forcedClosures).toBe(1);
+    expect(result).toMatchObject({
+      outcome: "succeeded",
+      executionTruth: "effect_verified",
+    });
+    expect(nowMs).toBeLessThanOrEqual(1_500);
+    expect(1_700 - nowMs).toBe(210);
+  });
+
+  it("classifies a pre-dispatch acquisition timeout as no_effect_proven", async () => {
+    const { registry, manager } = createTestSetup();
+    let nowMs = 1_000;
+    let dispatches = 0;
+    const slowManager = {
+      acquireWorkspace: async (...args: Parameters<WorkspaceManager["acquireWorkspace"]>) => {
+        const acquired = await manager.acquireWorkspace(...args);
+        nowMs = 1_600;
+        return acquired;
+      },
+    } as WorkspaceManager;
+
+    const result = await executeWorkspaceExperiment(
+      {
+        version: 2,
+        operation: "workspace.write_file",
+        projectId: "composer-assistant",
+        path: "witness.txt",
+        content: "witness-data",
+        mustNotExist: true,
+      },
+      {
+        registry,
+        workspaceManager: slowManager,
+        spawnRunner: async () => {
+          dispatches += 1;
+          throw new Error("must not dispatch");
+        },
+        childExecutionDeadlineAtMs: 1_300,
+        settlementDeadlineAtMs: 1_500,
+        clock: { nowMs: () => nowMs },
+      },
+    );
+
+    expect(dispatches).toBe(0);
+    expect(result).toMatchObject({
+      outcome: "failed",
+      error: "settlement_deadline_exceeded",
+      executionTruth: "no_effect_proven",
+    });
+  });
+
+  it("classifies a post-dispatch mutating timeout as effect_indeterminate and never redispatches", async () => {
+    const { registry, manager } = createTestSetup();
+    let nowMs = 2_000;
+    let dispatches = 0;
+    const result = await executeWorkspaceExperiment(
+      {
+        version: 2,
+        operation: "workspace.write_file",
+        projectId: "composer-assistant",
+        path: "witness.txt",
+        content: "witness-data",
+        mustNotExist: true,
+      },
+      {
+        registry,
+        workspaceManager: manager,
+        childExecutionDeadlineAtMs: 2_300,
+        settlementDeadlineAtMs: 2_500,
+        clock: { nowMs: () => nowMs },
+        spawnRunner: async (input) => {
+          dispatches += 1;
+          expect(input.timeoutMs).toBe(300);
+          nowMs = 2_310;
+          return {
+            exitCode: null,
+            stdout: "",
+            stderr: "",
+            timedOut: true,
+            stdoutOverflow: false,
+            stderrOverflow: false,
+          };
+        },
+      },
+    );
+
+    expect(dispatches).toBe(1);
+    expect(result).toMatchObject({
+      outcome: "failed",
+      error: "timeout",
+      executionTruth: "effect_indeterminate",
+    });
+  });
+
   it("fails closed when candidateWorkspaceAllowed is false", async () => {
     const { registry, manager } = createTestSetup();
     const result = await executeWorkspaceExperiment(
@@ -189,6 +334,7 @@ describe("Stage 2 — Workspace Experiment Executor", () => {
 
     expect(result.outcome).toBe("succeeded");
     if (result.outcome === "succeeded") {
+      expect(result.executionTruth).toBe("effect_verified");
       expect(result.operation).toBe("workspace.write_file");
       expect(result.workspaceId).toBeTruthy();
       expect(result.sourceSnapshotId).toMatch(/^snap_/);
@@ -198,6 +344,54 @@ describe("Stage 2 — Workspace Experiment Executor", () => {
         bytesWritten: 12,
       });
     }
+  });
+
+  it("preserves verified effect truth when valid M3 evidence settles too late for continuation", async () => {
+    const { registry, manager } = createTestSetup();
+    let nowMs = 3_000;
+    const result = await executeWorkspaceExperiment(
+      {
+        version: 2,
+        operation: "workspace.write_file",
+        projectId: "composer-assistant",
+        path: "witness.txt",
+        content: "witness-data",
+        mustNotExist: true,
+      },
+      {
+        registry,
+        workspaceManager: manager,
+        childExecutionDeadlineAtMs: 3_300,
+        settlementDeadlineAtMs: 3_500,
+        clock: { nowMs: () => nowMs },
+        spawnRunner: async (input) => {
+          nowMs = 3_510;
+          return makeRunner(() => ({
+            version: 2,
+            operation: "workspace.write_file",
+            ok: true,
+            result: {
+              kind: "workspace.write_file",
+              path: "witness.txt",
+              bytesWritten: 12,
+              contentHash: "a".repeat(64),
+              readMatches: true,
+              deleted: false,
+              verifiedAbsent: false,
+              completedAtMs: nowMs,
+            },
+            checks: goodChecks(),
+          }))(input);
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      outcome: "failed",
+      error: "settlement_deadline_exceeded",
+      executionTruth: "effect_verified",
+      lateEvidenceVerified: true,
+    });
   });
 
   it("executes workspace.search_text with default path .", async () => {

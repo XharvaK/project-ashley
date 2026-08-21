@@ -4,10 +4,6 @@ import "../qualification/mistral-client-mock.js";
 import { openNuclearDb } from "../db.js";
 import { planContentBubbles } from "./bubble-plan.js";
 import {
-  firstBubbleDeadlineAt,
-  softFirstBubbleTargetAt,
-} from "./types.js";
-import {
   attachDraftAndBubbles,
   claimReactiveDelivery,
   getDeliveryReservation,
@@ -29,12 +25,6 @@ describe("Wave 02 delivery", () => {
     expect(bubbles.length).toBeGreaterThanOrEqual(2);
     expect(bubbles.map((b) => b.text).join("")).toContain("second");
     expect(bubbles.every((b) => b.text.length <= 1990)).toBe(true);
-  });
-
-  it("starts latency from finalFragmentReceivedAt", () => {
-    const t0 = 1_000_000;
-    expect(softFirstBubbleTargetAt(t0)).toBe(t0 + 5_000);
-    expect(firstBubbleDeadlineAt(t0)).toBe(t0 + 10_000);
   });
 
   it("atomically claims user message with inbound ids", () => {
@@ -69,7 +59,7 @@ describe("Wave 02 delivery", () => {
     db.close();
   });
 
-  it("expires stale drafted reservations without a plan", () => {
+  it("expires a drafted reservation after its precomputed generation lease", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     const claim = claimReactiveDelivery(db, {
       ownerId: "doc",
@@ -81,7 +71,11 @@ describe("Wave 02 delivery", () => {
     });
     expect(claim.kind).toBe("claimed");
     if (claim.kind !== "claimed") return;
-    const expired = expireStaleDraftedReservations(db, Date.now());
+    const generationLeaseMs = Date.parse(
+      claim.reservation.generationLeaseExpiresAt ?? "",
+    );
+    expect(Number.isFinite(generationLeaseMs)).toBe(true);
+    const expired = expireStaleDraftedReservations(db, generationLeaseMs + 1);
     expect(expired).toBe(1);
     const row = getDeliveryReservation(db, claim.reservation.id);
     expect(row?.state).toBe("expired");

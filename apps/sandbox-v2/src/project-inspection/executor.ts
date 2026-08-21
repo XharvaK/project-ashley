@@ -30,7 +30,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { createServer, connect as netConnect, type AddressInfo, type Server } from "node:net";
+import { createServer, connect as netConnect, type AddressInfo, type Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SANDBOX_V2_INSPECTION_RUNNER_SOURCE } from "./runner.js";
@@ -38,6 +38,7 @@ import { isInspectionRunnerEvidence } from "./evidence.js";
 import { buildSanitizedProjectView, removeProjectView, type ProjectSourceViewResult } from "./source-view.js";
 import { validateProjectInspectionRequest } from "../validation.js";
 import { V2_HOST_FACTS, V2_LIMITS, V2_SECRET_ENV_KEY } from "../limits.js";
+import { awaitChildCloseByDeadline, forceCloseLoopbackServer, terminateChild } from "../settlement-cleanup.js";
 import type { V2ProjectReadRegistry } from "../registry.js";
 import type {
   SandboxV2ProjectListDirectoryRequest,
@@ -57,6 +58,8 @@ export type InspectionSpawnInput = {
   sentinelPath: string;
   fdSentinelCanonical: string;
   timeoutMs: number;
+  settlementDeadlineAtMs: number;
+  nowMs: () => number;
 };
 
 export type InspectionSpawnOutput = {
@@ -84,6 +87,14 @@ export type ProjectInspectionExecutorOptions = {
     protectedRoots: ProtectedRootsConfig;
   }) => Promise<ProjectSourceViewResult>;
   timeoutMs?: number;
+  /** Absolute child-execution cutoff selected by the owning turn plan. */
+  childExecutionDeadlineAtMs?: number;
+  /** Absolute cutoff by which execution, validation, and cleanup must settle. */
+  settlementDeadlineAtMs?: number;
+  /** Deterministic test seam. */
+  clock?: { nowMs(): number };
+  /** Deterministic settlement teardown seam. */
+  serverCloser?: (server: Server, connections: Set<Socket>) => void;
 };
 
 function buildBwrapArgs(viewRoot: string): string[] {
@@ -181,7 +192,7 @@ export async function spawnBubblewrapInspection(
     if (stdoutOverflow) return;
     if (stdoutData.length + chunk.length > V2_LIMITS.STDOUT_MAX_BYTES) {
       stdoutOverflow = true;
-      child.kill("SIGKILL");
+      terminateChild(child);
       return;
     }
     stdoutData += chunk.toString("utf8");
@@ -190,14 +201,14 @@ export async function spawnBubblewrapInspection(
     if (stderrOverflow) return;
     if (stderrData.length + chunk.length > V2_LIMITS.STDERR_MAX_BYTES) {
       stderrOverflow = true;
-      child.kill("SIGKILL");
+      terminateChild(child);
       return;
     }
     stderrData += chunk.toString("utf8");
   });
 
   if (Buffer.byteLength(input.requestJson, "utf8") > V2_LIMITS.REQUEST_MAX_BYTES) {
-    child.kill("SIGKILL");
+    terminateChild(child);
     return {
       exitCode: null,
       stdout: "",
@@ -213,30 +224,22 @@ export async function spawnBubblewrapInspection(
   let timedOut = false;
   const timer = setTimeout(() => {
     timedOut = true;
-    child.kill("SIGKILL");
+    terminateChild(child);
   }, input.timeoutMs);
 
-  let exitCode: number | null;
+  let closeResult: { closed: boolean; exitCode: number | null };
   try {
-    exitCode = await new Promise<number | null>((resolve, reject) => {
-      child.once("close", (code) => resolve(code));
-      child.once("error", (err) => reject(err));
+    closeResult = await awaitChildCloseByDeadline(child, {
+      settlementDeadlineAtMs: input.settlementDeadlineAtMs,
+      nowMs: input.nowMs,
     });
-  } catch {
-    return {
-      exitCode: null,
-      stdout: stdoutData,
-      stderr: stderrData,
-      timedOut,
-      stdoutOverflow,
-      stderrOverflow,
-    };
   } finally {
     clearTimeout(timer);
   }
+  if (!closeResult.closed) timedOut = true;
 
   return {
-    exitCode,
+    exitCode: closeResult.exitCode,
     stdout: stdoutData,
     stderr: stderrData,
     timedOut,
@@ -253,13 +256,28 @@ export async function executeProjectInspection(
   options: ProjectInspectionExecutorOptions,
 ): Promise<SandboxV2Result> {
   const operation = request.operation;
-  const failed = (error: string, executedAtMs = Date.now()): SandboxV2Result => ({
+  const nowMs = (): number => options.clock?.nowMs() ?? Date.now();
+  const failed = (error: string, executedAtMs = nowMs()): SandboxV2Result => ({
     outcome: "failed",
     operation,
     error,
     executedAtMs,
   });
-  const executedAtMs = Date.now();
+  const executedAtMs = nowMs();
+
+  if (
+    options.childExecutionDeadlineAtMs !== undefined &&
+    options.settlementDeadlineAtMs !== undefined &&
+    options.childExecutionDeadlineAtMs >= options.settlementDeadlineAtMs
+  ) {
+    return failed("invalid_deadline_plan", executedAtMs);
+  }
+  if (
+    options.settlementDeadlineAtMs !== undefined &&
+    nowMs() >= options.settlementDeadlineAtMs
+  ) {
+    return failed("settlement_deadline_exceeded", executedAtMs);
+  }
 
   const validated = validateProjectInspectionRequest(request);
   if (!validated.ok) return failed(validated.error, executedAtMs);
@@ -283,9 +301,11 @@ export async function executeProjectInspection(
   let sentinelDir: string | undefined;
   let fd: number | undefined;
   let server: Server | undefined;
+  const serverConnections = new Set<Socket>();
   const previousSecret = process.env[V2_SECRET_ENV_KEY];
 
-  try {
+  const result = await (async (): Promise<SandboxV2Result> => {
+    try {
     const view = await (options.viewBuilder ?? buildSanitizedProjectView)({
       canonicalRoot: resolution.entry.canonicalRoot,
       protectedRoots: options.protectedRoots ?? {
@@ -297,6 +317,13 @@ export async function executeProjectInspection(
     const resolvedViewRoot = view.viewRoot;
     viewRoot = resolvedViewRoot;
 
+    if (
+      options.settlementDeadlineAtMs !== undefined &&
+      nowMs() >= options.settlementDeadlineAtMs
+    ) {
+      return failed("settlement_deadline_exceeded");
+    }
+
     sentinelDir = mkdtempSync(join(tmpdir(), "ashley-v2-sentinel-"));
     const sentinelPath = join(sentinelDir, "sentinel.txt");
     writeFileSync(sentinelPath, "sentinel", "utf8");
@@ -307,6 +334,8 @@ export async function executeProjectInspection(
     let hits = 0;
     server = createServer((sock) => {
       hits += 1;
+      serverConnections.add(sock);
+      sock.once("close", () => serverConnections.delete(sock));
       sock.destroy();
     });
     await new Promise<void>((resolve, reject) => {
@@ -337,13 +366,23 @@ export async function executeProjectInspection(
     };
 
     const requestJson = JSON.stringify(runnerRequest);
+    const operationHardCapMs = options.timeoutMs ?? V2_LIMITS.TIMEOUT_MS;
+    const remainingChildMs =
+      options.childExecutionDeadlineAtMs === undefined
+        ? operationHardCapMs
+        : options.childExecutionDeadlineAtMs - nowMs();
+    if (remainingChildMs <= 0) return failed("child_execution_deadline_expired");
+    const childTimeoutMs = Math.min(operationHardCapMs, remainingChildMs);
     const run = await spawnRunner({
       viewRoot: resolvedViewRoot,
       requestJson,
       probePort,
       sentinelPath: sentinelCanonical,
       fdSentinelCanonical: sentinelCanonical,
-      timeoutMs: options.timeoutMs ?? V2_LIMITS.TIMEOUT_MS,
+      timeoutMs: childTimeoutMs,
+      settlementDeadlineAtMs:
+        options.settlementDeadlineAtMs ?? nowMs() + childTimeoutMs,
+      nowMs,
     });
 
     if (run.timedOut) return failed("timeout");
@@ -371,20 +410,18 @@ export async function executeProjectInspection(
       outcome: "succeeded",
       operation,
       result: parsed.result,
-      executedAtMs: Date.now(),
+      executedAtMs: nowMs(),
     };
-  } catch {
-    return failed("internal-error");
-  } finally {
+    } catch {
+      return failed("internal-error");
+    } finally {
     if (fd !== undefined) {
       try {
         closeSync(fd);
       } catch {}
     }
     if (server) {
-      try {
-        await new Promise<void>((resolve) => server!.close(() => resolve()));
-      } catch {}
+      (options.serverCloser ?? forceCloseLoopbackServer)(server, serverConnections);
     }
     if (viewRoot !== undefined) removeProjectView(viewRoot);
     if (sentinelDir !== undefined) {
@@ -397,5 +434,22 @@ export async function executeProjectInspection(
     } else {
       process.env[V2_SECRET_ENV_KEY] = previousSecret;
     }
+    }
+  })();
+
+  if (
+    options.settlementDeadlineAtMs !== undefined &&
+    nowMs() >= options.settlementDeadlineAtMs
+  ) {
+    return result.outcome === "succeeded"
+      ? {
+          outcome: "failed",
+          operation,
+          error: "settlement_deadline_exceeded",
+          lateEvidenceVerified: true,
+          executedAtMs: nowMs(),
+        }
+      : failed("settlement_deadline_exceeded");
   }
+  return result;
 }

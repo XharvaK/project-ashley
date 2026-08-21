@@ -1,4 +1,3 @@
-import { env } from "../../env.js";
 import { completeChat } from "../../mistral-client.js";
 import { routeReady } from "../model-routing/router.js";
 import type { DatabaseSync } from "node:sqlite";
@@ -504,7 +503,6 @@ type ChatMessages = Parameters<typeof completeChat>[0];
 type CallOptions = Parameters<typeof completeChat>[1];
 
 export type ThoughtModelOptions = {
-  firstBubbleDeadlineAtMs?: number | null;
   thoughtDeadlineAtMs?: number | null;
   decisionId?: number | null;
   deliveryReservationId?: number | null;
@@ -955,11 +953,7 @@ export async function runThoughtModel(
   complete: Complete = completeChat,
   options: ThoughtModelOptions = {},
 ): Promise<ThoughtResult & { envelope?: ThoughtValidationEnvelope }> {
-  const thoughtDeadline =
-    options.thoughtDeadlineAtMs ??
-    (options.firstBubbleDeadlineAtMs != null
-      ? options.firstBubbleDeadlineAtMs - env.thoughtExpressionGuardMs
-      : null);
+  const thoughtDeadline = options.thoughtDeadlineAtMs ?? null;
   const canOffer = canOfferProjectInspection(db);
   const canOfferWorkspace = trigger === "reactive" ? canOfferCandidateWorkspace(db) : false;
   const approvedProjectIds = (canOffer || canOfferWorkspace) ? listApprovedReadProjectIds() : [];
@@ -1044,11 +1038,7 @@ export async function deliberateDecision(
     return base;
   }
 
-  const preDeadline =
-    options.thoughtDeadlineAtMs ??
-    (options.firstBubbleDeadlineAtMs != null
-      ? options.firstBubbleDeadlineAtMs - env.thoughtExpressionGuardMs
-      : null);
+  const preDeadline = options.thoughtDeadlineAtMs ?? null;
   if (preDeadline != null && Date.now() >= preDeadline) {
     return base;
   }
@@ -1202,8 +1192,25 @@ function resolveAcquisitionContradiction(decision: Decision): Decision {
 /*  deliberateThoughtContinuation — pass 2 (no new execution)          */
 /* ------------------------------------------------------------------ */
 
+export type ContinuationLifecycleStatus =
+  | "continuation_not_needed"
+  | "continuation_budget_unavailable"
+  | "continuation_deadline_expired"
+  | "continuation_route_unavailable"
+  | "continuation_capability_unavailable"
+  | "continuation_dispatched"
+  | "continuation_model_failed"
+  | "continuation_structural_failure"
+  | "continuation_succeeded";
+
+export type ContinuationLifecycleEvent = {
+  status: ContinuationLifecycleStatus;
+  atMs: number;
+};
+
 export type DeliberateThoughtContinuationOptions = ThoughtModelOptions & {
   allowModelThought?: boolean;
+  onLifecycle?: (event: ContinuationLifecycleEvent) => void;
 };
 
 /**
@@ -1452,6 +1459,11 @@ export async function deliberateThoughtContinuation(
     capabilityCanInfluence(database, "thought"),
   options: DeliberateThoughtContinuationOptions = {},
 ): Promise<Decision> {
+  const lifecycle = (
+    status: Parameters<
+      NonNullable<DeliberateThoughtContinuationOptions["onLifecycle"]>
+    >[0]["status"],
+  ): void => options.onLifecycle?.({ status, atMs: Date.now() });
   const allowModelThought = options.allowModelThought !== false;
   const acquiring =
     intermediateDecision.evidenceDisposition === "acquire_project_evidence" ||
@@ -1467,25 +1479,29 @@ export async function deliberateThoughtContinuation(
     workspaceObservation: !isM2 ? (observation as WorkspaceExperimentObservation | null) : null,
   });
 
+  if (!allowModelThought || !canInfluence(db)) {
+    lifecycle("continuation_capability_unavailable");
+    return attachEvidence(intermediateDecision);
+  }
+  if (!routeReady("thought")) {
+    lifecycle("continuation_route_unavailable");
+    return attachEvidence(intermediateDecision);
+  }
   if (
-    !allowModelThought ||
-    !canInfluence(db) ||
-    !routeReady("thought") ||
     intermediateDecision.kind === "silence" ||
     (intermediateDecision.kind === "delay" && !acquiring)
   ) {
+    lifecycle("continuation_not_needed");
     return attachEvidence(intermediateDecision);
   }
 
-  const thoughtDeadline =
-    options.thoughtDeadlineAtMs ??
-    (options.firstBubbleDeadlineAtMs != null
-      ? options.firstBubbleDeadlineAtMs - env.thoughtExpressionGuardMs
-      : null);
+  const thoughtDeadline = options.thoughtDeadlineAtMs ?? null;
   if (thoughtDeadline != null && Date.now() >= thoughtDeadline) {
+    lifecycle("continuation_deadline_expired");
     return attachEvidence(intermediateDecision);
   }
 
+  lifecycle("continuation_dispatched");
   const outcome = await runBoundedCognition<ContinuationProposal>({
     phase: "continuation",
     complete,
@@ -1517,6 +1533,13 @@ export async function deliberateThoughtContinuation(
   );
 
   if (!outcome.ok) {
+    lifecycle(
+      outcome.error === "AbortError"
+        ? "continuation_deadline_expired"
+        : outcome.envelope.finalErrorCode !== null
+          ? "continuation_structural_failure"
+          : "continuation_model_failed",
+    );
     // Fail-closed: evidence attached, thought state marked, no authority change.
     return attachEvidence({
       ...intermediateDecision,
@@ -1525,6 +1548,8 @@ export async function deliberateThoughtContinuation(
       thoughtValidation: mergedEnvelope,
     });
   }
+
+  lifecycle("continuation_succeeded");
 
   const proposal = outcome.result!;
   const coercion = probeDecisionCoercion({

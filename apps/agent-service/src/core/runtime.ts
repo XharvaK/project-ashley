@@ -5,7 +5,11 @@ import { NUCLEAR_DB_PATH } from "../paths.js";
 import { decide, attachAuthorizedClaims } from "./agency/decide.js";
 import { buildOwnTimeReportConstraint } from "./agency/own-time-report.js";
 import { collectMotivations, mindStateItemToMotivation } from "./agency/motivations.js";
-import { deliberateDecision, deliberateThoughtContinuation } from "./agency/thought.js";
+import {
+  deliberateDecision,
+  deliberateThoughtContinuation,
+  type ContinuationLifecycleEvent,
+} from "./agency/thought.js";
 import {
   motivationCurrentlyEligible,
   selectMotivationCandidates,
@@ -175,7 +179,15 @@ import {
   clearDeliveryAbort,
   registerDeliveryAbort,
 } from "./delivery/abort-registry.js";
-import { DELIVERY_LEASE_MS } from "./delivery/types.js";
+import {
+  selectTurnDeadlineBranch,
+  type AvailableTurnDeadlineBranch,
+  type TurnDeadlinePolicy,
+} from "./delivery/turn-deadline-plan.js";
+import {
+  recordPhaseLifecycle,
+  selectPhaseLifecycleBranch,
+} from "./delivery/phase-lifecycle.js";
 import {
   listPendingWeeklyReviewDeliveries,
 } from "./sandbox/weekly-review-delivery.js";
@@ -206,7 +218,6 @@ import {
 import type { SandboxBrokerClient } from "./sandbox/broker-client.js";
 import type { AttachmentIntakeRef } from "./perception/types.js";
 import { runPerceptionTurn } from "./perception/index.js";
-import { thoughtDeadlineAtMs } from "./perception/turn-budget.js";
 import { randomUUID } from "node:crypto";
 import {
   createConfiguredUnixBrokerTransport,
@@ -226,6 +237,8 @@ export type ReactiveChatInput = {
   inboundDiscordMessageIds?: string[];
   /** Epoch ms when the final TurnBuffer fragment arrived. */
   finalFragmentReceivedAtMs?: number;
+  /** Bot-owned absolute HTTP transport cutoff. */
+  externalTransportHardDeadlineAtMs?: number;
   /**
    * When true (default if inbound IDs omitted), receipt every planned bubble
    * locally and finalize — used by unit tests without Discord.
@@ -234,6 +247,8 @@ export type ReactiveChatInput = {
   simulateDelivery?: boolean;
   abortSignal?: AbortSignal;
   attachments?: AttachmentIntakeRef[];
+  /** Local deterministic qualification seam. Never accepted from HTTP input. */
+  turnDeadlinePolicy?: TurnDeadlinePolicy;
 };
 
 export type ReactiveChatResult = {
@@ -248,6 +263,7 @@ export type ReactiveChatResult = {
   plannedBubbles?: Array<{ ordinal: number; text: string }>;
   media?: { react: string | null; gifQuery: string | null };
   firstBubbleDeadlineAt?: string | null;
+  finalDeliveryDeadlineAt?: string | null;
   statusUrl?: string;
   duplicate?: boolean;
   secretOmitted?: boolean;
@@ -579,6 +595,9 @@ export class AshleyCore {
         mergedUserText: message,
         inboundDiscordMessageIds: inboundIds,
         finalFragmentReceivedAtMs,
+        externalTransportHardDeadlineAtMs:
+          input.externalTransportHardDeadlineAtMs,
+        turnDeadlinePolicy: input.turnDeadlinePolicy,
         simulateDelivery,
       });
 
@@ -597,6 +616,8 @@ export class AshleyCore {
             text: b.text,
           })),
           firstBubbleDeadlineAt: claim.reservation.firstBubbleDeadlineAt,
+          finalDeliveryDeadlineAt:
+            claim.reservation.deliveryLeaseExpiresAt,
           statusUrl: `/delivery/${claim.reservation.id}`,
           duplicate: true,
         };
@@ -614,7 +635,7 @@ export class AshleyCore {
           bubbles,
           {
             deliveryLeaseExpiresAt: new Date(
-              Date.now() + DELIVERY_LEASE_MS,
+              claim.deadlinePlan.common.reservationHardDeadlineAtMs,
             ).toISOString(),
           },
         );
@@ -643,6 +664,7 @@ export class AshleyCore {
             deliveryState: finalized.state,
             plannedBubbles: bubbles,
             firstBubbleDeadlineAt: reserved.firstBubbleDeadlineAt,
+            finalDeliveryDeadlineAt: reserved.deliveryLeaseExpiresAt,
             secretOmitted: true,
           };
         }
@@ -657,12 +679,47 @@ export class AshleyCore {
           deliveryState: reserved.state,
           plannedBubbles: bubbles,
           firstBubbleDeadlineAt: reserved.firstBubbleDeadlineAt,
+          finalDeliveryDeadlineAt: reserved.deliveryLeaseExpiresAt,
           statusUrl: `/delivery/${claim.reservation.id}`,
           secretOmitted: true,
         };
       }
 
       const reservation = claim.reservation;
+      const deadlinePlan = claim.deadlinePlan;
+      recordPhaseLifecycle(this.db, {
+        reservationId: reservation.id,
+        phase: "transport",
+        event: "started",
+        atMs: Date.now(),
+      });
+      let selectedDeadlineBranch: AvailableTurnDeadlineBranch =
+        deadlinePlan.branches.ordinary;
+      const onContinuationLifecycle = (
+        event: ContinuationLifecycleEvent,
+      ): void => {
+        const preDispatch = new Set([
+          "continuation_not_needed",
+          "continuation_budget_unavailable",
+          "continuation_deadline_expired",
+          "continuation_route_unavailable",
+          "continuation_capability_unavailable",
+        ]).has(event.status);
+        recordPhaseLifecycle(this.db, {
+          reservationId: reservation.id,
+          phase: "continuation",
+          event:
+            event.status === "continuation_dispatched"
+              ? "dispatched"
+              : event.status === "continuation_succeeded"
+                ? "succeeded"
+                : preDispatch
+                  ? "skipped"
+                  : "failed",
+          atMs: event.atMs,
+          statusCode: event.status,
+        });
+      };
       reservationId = reservation.id;
       const userMessageId = reservation.userMessageId;
       if (userMessageId == null) throw new Error("delivery_user_message_missing");
@@ -778,14 +835,13 @@ export class AshleyCore {
             deliveryState: finalized.state,
           };
         }
-        const firstBubbleDeadlineAtMs = reservation.firstBubbleDeadlineAt
-          ? Date.parse(reservation.firstBubbleDeadlineAt)
-          : null;
-        const thoughtDeadlineAtMs =
-          firstBubbleDeadlineAtMs != null
-            ? firstBubbleDeadlineAtMs - env.thoughtExpressionGuardMs
-            : null;
         const thoughtCanInfluence = capabilityCanInfluence(this.db, "thought");
+        recordPhaseLifecycle(this.db, {
+          reservationId: reservation.id,
+          phase: "initial_thought",
+          event: "started",
+          atMs: Date.now(),
+        });
         decision = await deliberateDecision(
           this.db,
           decision,
@@ -796,70 +852,194 @@ export class AshleyCore {
           undefined,
           {
             allowModelThought: thoughtCanInfluence,
-            firstBubbleDeadlineAtMs,
-            thoughtDeadlineAtMs,
+            thoughtDeadlineAtMs:
+              deadlinePlan.common.initialThoughtDeadlineAtMs,
             deliveryReservationId: reservation.id,
             ownerId: input.ownerId,
           },
         );
+        recordPhaseLifecycle(this.db, {
+          reservationId: reservation.id,
+          phase: "initial_thought",
+          event: "settled",
+          atMs: Date.now(),
+          statusCode:
+            decision.thoughtSource === "model"
+              ? "initial_thought_succeeded"
+              : decision.thoughtError ?? "initial_thought_not_dispatched",
+        });
 
         const opReq = decision.operationalRequest;
         if (opReq) {
           if (opReq.kind === "project_inspection") {
+            const selection = selectTurnDeadlineBranch(
+              deadlinePlan,
+              "project_inspection",
+            );
+            if (!selection.ok || selection.branch.kind !== "project_inspection") {
+              throw new Error(
+                selection.ok
+                  ? "deadline_branch_mismatch"
+                  : selection.reason,
+              );
+            }
+            selectedDeadlineBranch = selection.branch;
+            selectPhaseLifecycleBranch(
+              this.db,
+              reservation.id,
+              "project_inspection",
+              Date.now(),
+            );
+            recordPhaseLifecycle(this.db, {
+              reservationId: reservation.id,
+              phase: "project_inspection",
+              event: "dispatched",
+              atMs: Date.now(),
+            });
+            const inspectionChildDeadlineAtMs = (
+              selectedDeadlineBranch.childExecutionDeadlineAtMs as Readonly<
+                Record<string, number>
+              >
+            )[opReq.request.operation];
+            if (!Number.isFinite(inspectionChildDeadlineAtMs)) {
+              throw new Error("deadline_operation_class_unavailable");
+            }
             const inspResult = await executeProjectInspectionV2({
               request: opReq.request,
               messageEntityUuid: messageEntityUuid ?? undefined,
-              deadlineAtMs: thoughtDeadlineAtMs ?? undefined,
+              childExecutionDeadlineAtMs: inspectionChildDeadlineAtMs,
+              settlementDeadlineAtMs:
+                selectedDeadlineBranch.acquisitionSettlementDeadlineAtMs,
               db: this.db,
             });
+            const inspectionLate =
+              Date.now() >=
+              selectedDeadlineBranch.acquisitionSettlementDeadlineAtMs;
+            recordPhaseLifecycle(this.db, {
+              reservationId: reservation.id,
+              phase: "project_inspection",
+              event: inspectionLate ? "failed" : "settled",
+              atMs: Date.now(),
+              statusCode: inspectionLate
+                ? inspResult.license.lateEvidenceVerified
+                  ? "acquisition_settlement_late_evidence_verified"
+                  : "acquisition_settlement_deadline_expired"
+                : inspResult.license.error ?? "project_inspection_settled",
+            });
             decision.operationalLicense = inspResult.license;
-            decision.operationalObservation = inspResult.observation;
-            decision.inspectionObservation = inspResult.observation;
+            const currentTurnObservation = inspectionLate
+              ? null
+              : inspResult.observation;
+            decision.operationalObservation = currentTurnObservation;
+            decision.inspectionObservation = currentTurnObservation;
             decision = await deliberateThoughtContinuation(
               this.db,
               decision,
-              inspResult.observation,
-              inspResult.license.error ?? null,
+              currentTurnObservation,
+              inspectionLate
+                ? "acquisition_settlement_deadline_expired"
+                : inspResult.license.error ?? null,
               motivations,
               "reactive",
               undefined,
               undefined,
               {
                 allowModelThought: thoughtCanInfluence,
-                firstBubbleDeadlineAtMs,
-                thoughtDeadlineAtMs,
+                thoughtDeadlineAtMs:
+                  selectedDeadlineBranch.continuationDeadlineAtMs,
                 deliveryReservationId: reservation.id,
                 ownerId: input.ownerId,
+                onLifecycle: onContinuationLifecycle,
               },
             );
           } else if (opReq.kind === "candidate_workspace_experiment") {
-            const expResult = await executeWorkspaceExperimentV2({
-              request: opReq.request,
-              messageEntityUuid: messageEntityUuid ?? undefined,
-              deadlineAtMs: thoughtDeadlineAtMs ?? undefined,
-              db: this.db,
-            });
-            decision.operationalLicense = expResult.license;
-            decision.operationalObservation = expResult.observation;
-            decision.workspaceObservation = expResult.observation;
-            decision = await deliberateThoughtContinuation(
-              this.db,
-              decision,
-              expResult.observation,
-              expResult.license.error ?? null,
-              motivations,
-              "reactive",
-              undefined,
-              undefined,
-              {
-                allowModelThought: thoughtCanInfluence,
-                firstBubbleDeadlineAtMs,
-                thoughtDeadlineAtMs,
-                deliveryReservationId: reservation.id,
-                ownerId: input.ownerId,
-              },
+            const selection = selectTurnDeadlineBranch(
+              deadlinePlan,
+              "candidate_workspace_experiment",
             );
+            if (!selection.ok) {
+              decision.operationalLicense = {
+                state: "none",
+                profile: "project_experimentation",
+                error: selection.reason,
+              };
+              recordPhaseLifecycle(this.db, {
+                reservationId: reservation.id,
+                phase: "candidate_workspace_experiment",
+                event: "skipped",
+                atMs: Date.now(),
+                statusCode: selection.reason,
+              });
+              recordPhaseLifecycle(this.db, {
+                reservationId: reservation.id,
+                phase: "continuation",
+                event: "skipped",
+                atMs: Date.now(),
+                statusCode: "continuation_capability_unavailable",
+              });
+            } else if (
+              selection.branch.kind !== "candidate_workspace_experiment"
+            ) {
+              throw new Error("deadline_branch_mismatch");
+            } else {
+              selectedDeadlineBranch = selection.branch;
+              selectPhaseLifecycleBranch(
+                this.db,
+                reservation.id,
+                "candidate_workspace_experiment",
+                Date.now(),
+              );
+              const expResult = await executeWorkspaceExperimentV2({
+                request: opReq.request,
+                messageEntityUuid: messageEntityUuid ?? undefined,
+                childExecutionDeadlineAtMs:
+                  selectedDeadlineBranch.childExecutionDeadlineAtMs[
+                    opReq.request.operation
+                  ],
+                settlementDeadlineAtMs:
+                  selectedDeadlineBranch.acquisitionSettlementDeadlineAtMs,
+                db: this.db,
+              });
+              decision.operationalLicense = expResult.license;
+              decision.operationalObservation = expResult.observation;
+              decision.workspaceObservation = expResult.observation;
+              recordPhaseLifecycle(this.db, {
+                reservationId: reservation.id,
+                phase: "candidate_workspace_experiment",
+                event: "settled",
+                atMs: Date.now(),
+                statusCode:
+                  expResult.license.error ?? "workspace_experiment_settled",
+                executionTruth: expResult.license.executionTruth ?? undefined,
+              });
+              decision = await deliberateThoughtContinuation(
+                this.db,
+                decision,
+                expResult.observation,
+                expResult.license.error ?? null,
+                motivations,
+                "reactive",
+                undefined,
+                undefined,
+                {
+                  allowModelThought: thoughtCanInfluence,
+                  thoughtDeadlineAtMs:
+                    selectedDeadlineBranch.continuationDeadlineAtMs,
+                  deliveryReservationId: reservation.id,
+                  ownerId: input.ownerId,
+                  onLifecycle: onContinuationLifecycle,
+                },
+              );
+            }
           }
+        } else {
+          recordPhaseLifecycle(this.db, {
+            reservationId: reservation.id,
+            phase: "continuation",
+            event: "skipped",
+            atMs: Date.now(),
+            statusCode: "continuation_not_needed",
+          });
         }
       }
       if (capabilityCanInfluence(this.db, "affect")) {
@@ -887,24 +1067,6 @@ export class AshleyCore {
           .run(deliveryReservationEntityUuid, reservation.id);
       }
 
-      const firstBubbleDeadlineAtMs = reservation.firstBubbleDeadlineAt
-        ? Date.parse(reservation.firstBubbleDeadlineAt)
-        : Date.now() + 10_000;
-      const thoughtDeadline =
-        thoughtDeadlineAtMs(firstBubbleDeadlineAtMs);
-
-      const perception = await runPerceptionTurn(this.db, {
-        ownerId: input.ownerId,
-        message,
-        attachments: input.attachments ?? [],
-        sourceMessageEntityUuid: messageEntityUuid,
-        deliveryReservationEntityUuid,
-        deliveryReservationId: reservation.id,
-        thoughtDeadlineAtMs: thoughtDeadline,
-        firstBubbleDeadlineAtMs,
-        decision,
-      });
-      decision.perceptionLicenses = perception.licenses;
       // Reactive sandbox execution (M2 / M3 / M1 arbitration)
       if (decision.operationalRequest) {
         // M2 inspection or M3 workspace experiment was requested and executed by Thought; skip M1 reactive admission (Constraint 3)
@@ -918,9 +1080,44 @@ export class AshleyCore {
 
         if (reactiveAdmission.admitted) {
           if (reactiveAdmission.shouldDispatch && env.sandboxEngineeringLifecycleEnabled) {
+            const selection = selectTurnDeadlineBranch(
+              deadlinePlan,
+              "sandbox_m1",
+            );
+            if (!selection.ok || selection.branch.kind !== "sandbox_m1") {
+              throw new Error(
+                selection.ok
+                  ? "deadline_branch_mismatch"
+                  : selection.reason,
+              );
+            }
+            selectedDeadlineBranch = selection.branch;
+            selectPhaseLifecycleBranch(
+              this.db,
+              reservation.id,
+              "sandbox_m1",
+              Date.now(),
+            );
+            recordPhaseLifecycle(this.db, {
+              reservationId: reservation.id,
+              phase: "sandbox_m1",
+              event: "dispatched",
+              atMs: Date.now(),
+            });
             decision.operationalLicense = await executeReactiveSandboxTaskV2({
               messageEntityUuid: messageEntityUuid ?? undefined,
-              deadlineAtMs: thoughtDeadline,
+              childExecutionDeadlineAtMs:
+                selectedDeadlineBranch.childExecutionDeadlineAtMs,
+              settlementDeadlineAtMs:
+                selectedDeadlineBranch.acquisitionSettlementDeadlineAtMs,
+            });
+            recordPhaseLifecycle(this.db, {
+              reservationId: reservation.id,
+              phase: "sandbox_m1",
+              event: "settled",
+              atMs: Date.now(),
+              statusCode:
+                decision.operationalLicense.error ?? "sandbox_m1_settled",
             });
           } else if (reactiveAdmission.replayed) {
             // Replayed admission: observe existing correlated task state, do NOT execute again
@@ -1042,6 +1239,39 @@ export class AshleyCore {
         }
       }
 
+      const perceptionExpired =
+        Date.now() >= selectedDeadlineBranch.perceptionDeadlineAtMs;
+      recordPhaseLifecycle(this.db, {
+        reservationId: reservation.id,
+        phase: "perception",
+        event: perceptionExpired ? "skipped" : "started",
+        atMs: Date.now(),
+        statusCode: perceptionExpired
+          ? "perception_budget_unavailable"
+          : undefined,
+      });
+      const perception = await runPerceptionTurn(this.db, {
+        ownerId: input.ownerId,
+        message,
+        attachments: input.attachments ?? [],
+        sourceMessageEntityUuid: messageEntityUuid,
+        deliveryReservationEntityUuid,
+        deliveryReservationId: reservation.id,
+        deadlineAtMs: selectedDeadlineBranch.perceptionDeadlineAtMs,
+        decision,
+      });
+      if (!perceptionExpired) {
+        recordPhaseLifecycle(this.db, {
+          reservationId: reservation.id,
+          phase: "perception",
+          event: perception.preflightBlocked ? "skipped" : "settled",
+          atMs: Date.now(),
+          statusCode:
+            perception.preflightReason ?? "perception_settled",
+        });
+      }
+      decision.perceptionLicenses = perception.licenses;
+
       this.db.exec("BEGIN IMMEDIATE");
       let decisionId: number;
       try {
@@ -1126,12 +1356,18 @@ export class AshleyCore {
         };
       }
 
-      const deadlineIso = reservation.firstBubbleDeadlineAt;
-      if (deadlineIso && deadlineIso <= new Date().toISOString()) {
+      if (Date.now() >= selectedDeadlineBranch.expressionDeadlineAtMs) {
+        recordPhaseLifecycle(this.db, {
+          reservationId: reservation.id,
+          phase: "expression",
+          event: "skipped",
+          atMs: Date.now(),
+          statusCode: "expression_deadline_expired",
+        });
         const finalized = finalizeDelivery(this.db, {
           reservationId: reservation.id,
           ownerId: input.ownerId,
-          cause: "first_bubble_deadline",
+          cause: "generation_lease",
           ownTimeOpen,
         });
         clearDeliveryAbort(reservation.id);
@@ -1148,17 +1384,27 @@ export class AshleyCore {
 
       let rendered;
       try {
-        const firstBubbleDeadlineAtMs = reservation.firstBubbleDeadlineAt
-          ? Date.parse(reservation.firstBubbleDeadlineAt)
-          : null;
+        recordPhaseLifecycle(this.db, {
+          reservationId: reservation.id,
+          phase: "expression",
+          event: "started",
+          atMs: Date.now(),
+        });
         rendered = await expressSpeak(turn, decision, message, "discord", {
-          deadlineAtMs: firstBubbleDeadlineAtMs,
+          deadlineAtMs: selectedDeadlineBranch.expressionDeadlineAtMs,
           decisionId,
           deliveryReservationId: reservation.id,
           ownerId: input.ownerId,
           perceptionExpressionParts: perception.expressionParts,
           perceptionThoughtParts: perception.thoughtParts,
           attentionDb: this.db,
+        });
+        recordPhaseLifecycle(this.db, {
+          reservationId: reservation.id,
+          phase: "expression",
+          event: "settled",
+          atMs: Date.now(),
+          statusCode: "expression_succeeded",
         });
         if (
           complexity.mode === "hard" &&
@@ -1235,6 +1481,39 @@ export class AshleyCore {
       }
 
       const media = extractMediaMarkers(rendered.text);
+      if (Date.now() >= selectedDeadlineBranch.generationDeadlineAtMs) {
+        recordPhaseLifecycle(this.db, {
+          reservationId: reservation.id,
+          phase: "generation",
+          event: "failed",
+          atMs: Date.now(),
+          statusCode: "generation_deadline_expired",
+        });
+        const finalized = finalizeDelivery(this.db, {
+          reservationId: reservation.id,
+          ownerId: input.ownerId,
+          cause: "generation_error",
+          ownTimeOpen,
+          errorCategory: "generation_deadline_expired",
+        });
+        clearDeliveryAbort(reservation.id);
+        return {
+          text: "",
+          threadId: turn.threadId,
+          model: rendered.model,
+          decisionId,
+          decisionKind: decision.kind,
+          reservationId: reservation.id,
+          deliveryState: finalized.state,
+        };
+      }
+      recordPhaseLifecycle(this.db, {
+        reservationId: reservation.id,
+        phase: "generation",
+        event: "settled",
+        atMs: Date.now(),
+        statusCode: "generation_succeeded",
+      });
       const bubbles = planContentBubbles(media.text);
       if (bubbles.length === 0) {
         const finalized = finalizeDelivery(this.db, {
@@ -1263,7 +1542,7 @@ export class AshleyCore {
         bubbles,
         {
           deliveryLeaseExpiresAt: new Date(
-            Date.now() + DELIVERY_LEASE_MS,
+            deadlinePlan.common.reservationHardDeadlineAtMs,
           ).toISOString(),
         },
       );
@@ -1303,6 +1582,13 @@ export class AshleyCore {
       }
 
       clearDeliveryAbort(reservation.id);
+      recordPhaseLifecycle(this.db, {
+        reservationId: reservation.id,
+        phase: "transport",
+        event: "dispatched",
+        atMs: Date.now(),
+        statusCode: "agent_response_dispatched",
+      });
       return {
         text: media.text,
         threadId: turn.threadId,
@@ -1314,6 +1600,7 @@ export class AshleyCore {
         plannedBubbles: bubbles,
         media: { react: media.react, gifQuery: media.gifQuery },
         firstBubbleDeadlineAt: reserved.firstBubbleDeadlineAt,
+        finalDeliveryDeadlineAt: reserved.deliveryLeaseExpiresAt,
         statusUrl: `/delivery/${reservation.id}`,
       };
     } catch (error) {

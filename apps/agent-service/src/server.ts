@@ -947,7 +947,7 @@ export function createServer(
         discordPresence,
         inboundDiscordMessageIds,
         finalFragmentReceivedAtMs,
-        firstBubbleDeadlineAtMs,
+        externalTransportHardDeadlineAtMs,
         attachments,
       } = req.body as {
         message?: string;
@@ -958,7 +958,7 @@ export function createServer(
         discordPresence?: string;
         inboundDiscordMessageIds?: string[];
         finalFragmentReceivedAtMs?: number;
-        firstBubbleDeadlineAtMs?: number;
+        externalTransportHardDeadlineAtMs?: number;
         attachments?: Array<{
           discordAttachmentId: string;
           declaredMime: string;
@@ -981,7 +981,7 @@ export function createServer(
           ? {
               inboundDiscordMessageIds,
               finalFragmentReceivedAtMs,
-              firstBubbleDeadlineAtMs,
+              externalTransportHardDeadlineAtMs,
             }
           : undefined;
       const result = await manager.handleTextChat(

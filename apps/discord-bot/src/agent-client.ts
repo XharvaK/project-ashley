@@ -1,5 +1,8 @@
 import { config } from "./config.js";
 
+/** Source-current synchronous agent transport ceiling. Not production-qualified. */
+export const AGENT_TRANSPORT_HARD_MS = 120_000;
+
 export type AgentError = {
   error: string;
   code: string;
@@ -19,7 +22,7 @@ function isTimeoutAbort(err: unknown): boolean {
 async function agentFetch<T>(
   path: string,
   init?: RequestInit,
-  timeoutMs = 120_000,
+  timeoutMs = AGENT_TRANSPORT_HARD_MS,
 ): Promise<T> {
   let res: Response;
   try {
@@ -65,6 +68,7 @@ export type ChatTextResult = {
   plannedBubbles?: Array<{ ordinal: number; text: string }>;
   media?: { react: string | null; gifQuery: string | null };
   firstBubbleDeadlineAt?: string | null;
+  finalDeliveryDeadlineAt?: string | null;
   statusUrl?: string;
   duplicate?: boolean;
   __httpStatus?: number;
@@ -84,14 +88,14 @@ export async function chatText(
     discordPresence?: DiscordPresencePayload;
     inboundDiscordMessageIds?: string[];
     finalFragmentReceivedAtMs?: number;
-    firstBubbleDeadlineAtMs?: number;
+    externalTransportHardDeadlineAtMs?: number;
   },
 ) {
-  const deadlineMs = options?.firstBubbleDeadlineAtMs;
+  const deadlineMs = options?.externalTransportHardDeadlineAtMs;
   const timeoutMs =
     deadlineMs != null
-      ? Math.max(1_000, deadlineMs - Date.now() + 500)
-      : 120_000;
+      ? Math.max(1_000, deadlineMs - Date.now())
+      : AGENT_TRANSPORT_HARD_MS;
   return agentFetch<ChatTextResult>(
     "/chat/text",
     {
@@ -105,7 +109,8 @@ export async function chatText(
         discordPresence: options?.discordPresence,
         inboundDiscordMessageIds: options?.inboundDiscordMessageIds,
         finalFragmentReceivedAtMs: options?.finalFragmentReceivedAtMs,
-        firstBubbleDeadlineAtMs: options?.firstBubbleDeadlineAtMs,
+        externalTransportHardDeadlineAtMs:
+          options?.externalTransportHardDeadlineAtMs,
       }),
     },
     timeoutMs,
@@ -137,6 +142,7 @@ export async function getDeliveryStatus(reservationId: number) {  const q = new 
       state: string;
       draftText: string | null;
       firstBubbleDeadlineAt: string | null;
+      deliveryLeaseExpiresAt: string | null;
     };
     bubbles: Array<{
       ordinal: number;
@@ -166,6 +172,8 @@ export async function pollDeliveryUntilReady(
           text: b.text,
         })),
         firstBubbleDeadlineAt: status.reservation.firstBubbleDeadlineAt,
+        finalDeliveryDeadlineAt:
+          status.reservation.deliveryLeaseExpiresAt,
         statusUrl: status.statusUrl,
       };
     }

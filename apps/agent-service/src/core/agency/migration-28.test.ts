@@ -123,11 +123,11 @@ const validEnvelope: ThoughtValidationEnvelope = {
 };
 
 describe("nuclear schema v28 thought validation telemetry", () => {
-  it("openNuclearDb installs the v28 schema on a fresh database", () => {
+  it("openNuclearDb preserves v28 telemetry in the current schema", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     try {
-      expect(NUCLEAR_SUPPORTED_VERSION).toBe(28);
-      expect(schemaVersion(db)).toBe(28);
+      expect(NUCLEAR_SUPPORTED_VERSION).toBe(29);
+      expect(schemaVersion(db)).toBe(29);
       expect(columnExists(db, "decision_log", "thought_validation_json")).toBe(true);
     } finally {
       db.close();
@@ -145,7 +145,7 @@ describe("nuclear schema v28 thought validation telemetry", () => {
 
       openNuclearDb(fixture.nuclear, { continuity: fixture.continuity });
 
-      expect(schemaVersion(fixture.nuclear)).toBe(28);
+      expect(schemaVersion(fixture.nuclear)).toBe(29);
       expect(columnExists(fixture.nuclear, "decision_log", "thought_validation_json")).toBe(true);
       expect(getPendingNuclearMigration(fixture.continuity)).toBeNull();
     } finally {
@@ -159,7 +159,7 @@ describe("nuclear schema v28 thought validation telemetry", () => {
       openNuclearDb(fixture.nuclear, { continuity: fixture.continuity });
       // After finalization, re-opening should not reject the v28 content.
       const reopen = openNuclearDb(fixture.nuclear, { continuity: fixture.continuity });
-      expect(schemaVersion(reopen)).toBe(28);
+      expect(schemaVersion(reopen)).toBe(29);
       expect(getPendingNuclearMigration(fixture.continuity)).toBeNull();
     } finally {
       closeFixture(fixture);

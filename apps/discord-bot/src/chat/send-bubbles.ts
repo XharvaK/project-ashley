@@ -9,6 +9,7 @@ import {
 export type BubbleSendFailureCategory =
   | "discord_send_failed"
   | "aborted"
+  | "deadline_expired"
   | "empty_plan";
 
 export type BubbleSendResult = {
@@ -43,8 +44,16 @@ export async function sendBubbles(
   gifUrl: string | null,
   pacing: { tempoGapMs: number | null; signal: AbortSignal } | null,
   onFirstSend?: () => void,
-  options?: { reservationId?: number | null; skipFirstDelay?: boolean },
+  options?: {
+    reservationId?: number | null;
+    skipFirstDelay?: boolean;
+    firstBubbleDeadlineAtMs?: number;
+    finalDeliveryDeadlineAtMs?: number;
+    onBubbleSent?: (ordinal: number, message: Message) => Promise<void>;
+    clock?: { nowMs(): number };
+  },
 ): Promise<BubbleSendResult> {
+  const nowMs = (): number => options?.clock?.nowMs() ?? Date.now();
   const planned: PlannedBubble[] = chunks.map((chunk, index) =>
     typeof chunk === "string"
       ? { ordinal: index, text: chunk }
@@ -80,6 +89,21 @@ export async function sendBubbles(
       result.failureCategory = "aborted";
       throw new DeliverySendError("send_aborted", result);
     }
+    if (
+      !firstSent &&
+      options?.firstBubbleDeadlineAtMs !== undefined &&
+      nowMs() >= options.firstBubbleDeadlineAtMs
+    ) {
+      result.failureCategory = "deadline_expired";
+      throw new DeliverySendError("first_bubble_deadline_expired", result);
+    }
+    if (
+      options?.finalDeliveryDeadlineAtMs !== undefined &&
+      nowMs() >= options.finalDeliveryDeadlineAtMs
+    ) {
+      result.failureCategory = "deadline_expired";
+      throw new DeliverySendError("final_delivery_deadline_expired", result);
+    }
 
     if (i > 0 && pacing && !pacing.signal.aborted) {
       const delay = bubbleDelayMs({
@@ -92,8 +116,9 @@ export async function sendBubbles(
     }
 
     const withGif = i === 0 && gifUrl;
+    let msg: Message;
     try {
-      const msg = await channel.send(
+      msg = await channel.send(
         withGif
           ? {
               content: bubble.text,
@@ -101,26 +126,32 @@ export async function sendBubbles(
             }
           : bubble.text,
       );
-      result.messages.push(msg);
-      result.receiptedOrdinals.push(bubble.ordinal);
-      result.anySubstantiveContentVisible = true;
-      markFirst();
     } catch (err) {
       console.warn(`[discord-bot] bubble ${bubble.ordinal} send failed:`, err);
       if (withGif) {
         try {
-          const msg = await channel.send(bubble.text);
-          result.messages.push(msg);
-          result.receiptedOrdinals.push(bubble.ordinal);
-          result.anySubstantiveContentVisible = true;
-          markFirst();
-          continue;
+          msg = await channel.send(bubble.text);
         } catch (retryErr) {
           console.warn("[discord-bot] text-only retry failed:", retryErr);
+          result.failureCategory = "discord_send_failed";
+          throw new DeliverySendError("bubble_send_failed", result);
         }
+      } else {
+        result.failureCategory = "discord_send_failed";
+        throw new DeliverySendError("bubble_send_failed", result);
       }
-      result.failureCategory = "discord_send_failed";
-      throw new DeliverySendError("bubble_send_failed", result);
+    }
+    result.messages.push(msg);
+    result.anySubstantiveContentVisible = true;
+    markFirst();
+    result.receiptedOrdinals.push(bubble.ordinal);
+    await options?.onBubbleSent?.(bubble.ordinal, msg);
+    if (
+      options?.finalDeliveryDeadlineAtMs !== undefined &&
+      nowMs() >= options.finalDeliveryDeadlineAtMs
+    ) {
+      result.failureCategory = "deadline_expired";
+      throw new DeliverySendError("final_delivery_deadline_expired", result);
     }
   }
 

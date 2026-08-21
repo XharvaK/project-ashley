@@ -24,6 +24,7 @@ import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, mkdirSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import type { TurnDeadlinePolicy } from "../delivery/turn-deadline-plan.js";
 
 function activateCapabilities(db: DatabaseSync) {
   const relId = currentReleaseId();
@@ -35,6 +36,54 @@ function activateCapabilities(db: DatabaseSync) {
     ).run(cap, relId, now, currentContractId(), currentBuildIdentity());
   }
 }
+
+const M3_TEST_DEADLINE_POLICY: TurnDeadlinePolicy = {
+  version: "phase-budget-m3-witness-test-v1",
+  qualification: "test_only",
+  softResponsivenessTargetMs: 5_000,
+  initialThoughtMs: 6_000,
+  externalTransportMs: 120_000,
+  firstBubbleReceiptReserveMs: 5_000,
+  finalDeliveryReserveMs: 120_000,
+  ordinary: { perceptionMs: 20_000, expressionMs: 4_000, generationSettlementMs: 4_000 },
+  sandboxM1: {
+    childExecutionMs: 30_000,
+    acquisitionSettlementMs: 4_000,
+    perceptionMs: 20_000,
+    expressionMs: 4_000,
+    generationSettlementMs: 4_000,
+  },
+  projectInspection: {
+    childExecutionMs: {
+      "project.read_file": 6_000,
+      "project.list_directory": 6_000,
+      "project.search_text": 6_000,
+    },
+    acquisitionSettlementMs: 4_000,
+    continuationMs: 6_000,
+    perceptionMs: 20_000,
+    expressionMs: 4_000,
+    generationSettlementMs: 4_000,
+  },
+  candidateWorkspaceExperiment: {
+    available: true,
+    childExecutionMs: {
+      "workspace.read_file": 6_000,
+      "workspace.list_directory": 6_000,
+      "workspace.search_text": 6_000,
+      "workspace.write_file": 6_000,
+      "workspace.replace_file": 6_000,
+      "workspace.edit_text": 6_000,
+      "workspace.delete_file": 6_000,
+      "workspace.create_directory": 6_000,
+    },
+    acquisitionSettlementMs: 4_000,
+    continuationMs: 6_000,
+    perceptionMs: 20_000,
+    expressionMs: 4_000,
+    generationSettlementMs: 4_000,
+  },
+};
 
 describe("Sandbox V2 M3 Root-A Closure & Full Cognition Witness", () => {
   const originalMode = env.cognitionMode;
@@ -464,6 +513,7 @@ describe("Sandbox V2 M3 Root-A Closure & Full Cognition Witness", () => {
         "Create a file named m3-witness.txt in a private candidate workspace for Project Ashley containing exactly:\nm3-witness-ok\nDo not modify the live repository. Tell me what happened.",
       ownerId: "doc",
       channel: "discord",
+      turnDeadlinePolicy: M3_TEST_DEADLINE_POLICY,
     });
 
     // 1. Thought pass 1 & pass 2 & expression occurred in exact order
@@ -706,6 +756,7 @@ describe("Sandbox V2 M3 Root-A Closure & Full Cognition Witness", () => {
       message: "run reactive check",
       ownerId: "doc",
       channel: "discord",
+      turnDeadlinePolicy: M3_TEST_DEADLINE_POLICY,
     });
     expect(m3Count).toBe(1);
     expect(reactiveResult.text).toBe("reactive response");
