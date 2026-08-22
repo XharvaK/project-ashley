@@ -350,11 +350,26 @@ export const PROVISIONAL_UNQUALIFIED_TURN_DEADLINE_POLICY: TurnDeadlinePolicy =
       expressionMs: 4_000,
       generationSettlementMs: 4_000,
     },
-    candidateWorkspaceExperiment: {
-      available: false,
-      unavailableReason: "candidate_workspace_closed",
+  candidateWorkspaceExperiment: {
+    available: true,
+    childExecutionMs: {
+      "workspace.read_file": 6_000,
+      "workspace.list_directory": 6_000,
+      "workspace.search_text": 6_000,
+      "workspace.write_file": 6_000,
+      "workspace.replace_file": 6_000,
+      "workspace.edit_text": 6_000,
+      "workspace.delete_file": 6_000,
+      "workspace.create_directory": 6_000,
     },
-  });
+    acquisitionSettlementMs: 4_000,
+    cleanupReserveMs: 1_000,
+    continuationMs: 6_000,
+    perceptionMs: 20_000,
+    expressionMs: 4_000,
+    generationSettlementMs: 4_000,
+  },
+});
 
 export function createTurnDeadlinePlan(
   admittedAtMs: number,

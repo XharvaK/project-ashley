@@ -211,4 +211,82 @@ describe("TurnDeadlinePlan", () => {
       admittedAtMs + 320,
     );
   });
+
+  describe("PROVISIONAL_UNQUALIFIED_TURN_DEADLINE_POLICY (Production Default)", () => {
+    it("accepts candidate_workspace_experiment with all 8 supported workspace operations", () => {
+      const plan = createTurnDeadlinePlan(admittedAtMs);
+
+      expect(plan.branches.ordinary.available).toBe(true);
+      expect(plan.branches.sandbox_m1.available).toBe(true);
+      expect(plan.branches.project_inspection.available).toBe(true);
+      expect(plan.branches.candidate_workspace_experiment.available).toBe(true);
+
+      const selected = selectTurnDeadlineBranch(plan, "candidate_workspace_experiment");
+      expect(selected.ok).toBe(true);
+      if (!selected.ok) throw new Error("expected candidate workspace branch to be available");
+
+      const branch = selected.branch;
+      expect(branch.kind).toBe("candidate_workspace_experiment");
+      expect(branch.available).toBe(true);
+
+      const expectedOperations = [
+        "workspace.read_file",
+        "workspace.list_directory",
+        "workspace.search_text",
+        "workspace.write_file",
+        "workspace.replace_file",
+        "workspace.edit_text",
+        "workspace.delete_file",
+        "workspace.create_directory",
+      ] as const;
+
+      for (const op of expectedOperations) {
+        const childDeadline = branch.childExecutionDeadlineAtMs[op];
+        expect(typeof childDeadline).toBe("number");
+        expect(childDeadline).toBe(plan.common.initialThoughtDeadlineAtMs + 6_000);
+        expect(plan.common.initialThoughtDeadlineAtMs).toBeLessThan(childDeadline);
+        expect(childDeadline).toBeLessThan(branch.childTerminationDeadlineAtMs);
+      }
+
+      expect(branch.childTerminationDeadlineAtMs).toBeLessThan(
+        branch.acquisitionSettlementDeadlineAtMs,
+      );
+      expect(branch.acquisitionSettlementDeadlineAtMs).toBeLessThan(
+        branch.continuationDeadlineAtMs,
+      );
+      expect(branch.continuationDeadlineAtMs).toBeLessThan(
+        branch.perceptionDeadlineAtMs,
+      );
+      expect(branch.perceptionDeadlineAtMs).toBeLessThan(
+        branch.expressionDeadlineAtMs,
+      );
+      expect(branch.expressionDeadlineAtMs).toBeLessThan(
+        branch.generationDeadlineAtMs,
+      );
+      expect(branch.generationDeadlineAtMs).toBeLessThan(
+        plan.common.externalTransportHardDeadlineAtMs,
+      );
+    });
+
+    it("preserves existing M1 and M2 deadline behavior in production default policy", () => {
+      const plan = createTurnDeadlinePlan(admittedAtMs);
+
+      const m1Selected = selectTurnDeadlineBranch(plan, "sandbox_m1");
+      expect(m1Selected.ok).toBe(true);
+      if (!m1Selected.ok) throw new Error("expected sandbox_m1 to be available");
+      expect(m1Selected.branch.childExecutionDeadlineAtMs).toBe(
+        plan.common.initialThoughtDeadlineAtMs + 30_000,
+      );
+
+      const m2Selected = selectTurnDeadlineBranch(plan, "project_inspection");
+      expect(m2Selected.ok).toBe(true);
+      if (!m2Selected.ok) throw new Error("expected project_inspection to be available");
+      expect(m2Selected.branch.projectInspectionPreparationDeadlineAtMs).toBe(
+        plan.common.initialThoughtDeadlineAtMs + 39_447,
+      );
+      expect(m2Selected.branch.childExecutionDeadlineAtMs["project.read_file"]).toBe(
+        m2Selected.branch.projectInspectionPreparationDeadlineAtMs + 6_000,
+      );
+    });
+  });
 });
