@@ -6,6 +6,7 @@ import { randomBytes } from "node:crypto";
 import { executeWorkspaceExperiment, type WorkspaceExperimentSpawnInput } from "./executor.js";
 import { WorkspaceManager } from "./workspace-manager.js";
 import { V2ProjectReadRegistry } from "../registry.js";
+import { V2_LIMITS } from "../limits.js";
 import type { ProjectRootEntry } from "@composer-assistant/sandbox-policy";
 
 const CANONICAL_ROOT = "/srv/projects/composer-assistant";
@@ -258,6 +259,36 @@ describe("Stage 2 — Workspace Experiment Executor", () => {
     expect(result).toMatchObject({
       outcome: "failed",
       error: "settlement_deadline_exceeded",
+      executionTruth: "no_effect_proven",
+    });
+  });
+
+  it("classifies oversized write content (> 64 KiB) as content_too_large and no_effect_proven before dispatch", async () => {
+    const { registry, manager } = createTestSetup();
+    let dispatches = 0;
+    const result = await executeWorkspaceExperiment(
+      {
+        version: 2,
+        operation: "workspace.write_file",
+        projectId: "composer-assistant",
+        path: "oversized.txt",
+        content: "x".repeat(V2_LIMITS.M3_WRITE_MAX_BYTES + 100),
+        mustNotExist: true,
+      },
+      {
+        registry,
+        workspaceManager: manager,
+        spawnRunner: async () => {
+          dispatches += 1;
+          throw new Error("must not dispatch");
+        },
+      },
+    );
+
+    expect(dispatches).toBe(0);
+    expect(result).toMatchObject({
+      outcome: "failed",
+      error: "content_too_large",
       executionTruth: "no_effect_proven",
     });
   });

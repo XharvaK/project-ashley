@@ -460,6 +460,14 @@ export async function executeWorkspaceExperiment(
     if (Buffer.byteLength(requestJson, "utf8") > V2_LIMITS.WORKSPACE_REQUEST_MAX_BYTES) {
       return failed("request_too_large", executedAtMs);
     }
+    if (
+      "content" in request &&
+      typeof (request as { content?: unknown }).content === "string" &&
+      Buffer.byteLength((request as { content: string }).content, "utf8") >
+        V2_LIMITS.M3_WRITE_MAX_BYTES
+    ) {
+      return failed("content_too_large", executedAtMs);
+    }
 
     const operationHardCapMs = options.timeoutMs ?? V2_LIMITS.TIMEOUT_MS;
     const remainingChildMs =
