@@ -7,6 +7,10 @@ Current architectural direction and roadmap status are canonicalized in
 Document authority and historical status are indexed in
 [`architecture/Ashley_Architecture_Document_Index.md`](architecture/Ashley_Architecture_Document_Index.md).
 This file remains the implementation-oriented module and observability map.
+Volatile schema integers, model IDs, and milestone maturity are not owned
+here. Resolve them live from [`apps/agent-service/src/core/db.ts`](../apps/agent-service/src/core/db.ts),
+routing source plus audited [`Routing_Status.md`](Routing_Status.md),
+exact-candidate packets, or production observation.
 
 ## Governance docs
 
@@ -31,50 +35,47 @@ VISION.md
 | [`Ashley_Ethics.md`](Ashley_Ethics.md) | Peer specialized governance: emotion/leverage, public privacy, credentials, external entities |
 | [`Ashley_Hierarchy.md`](Ashley_Hierarchy.md) | Normative order and conflict rule |
 | [`Vision_Implementation_Map.md`](Vision_Implementation_Map.md) | Commitment → owner → evidence → failure → status |
-| [`Wave_Acceptance_Protocol.md`](Wave_Acceptance_Protocol.md) | Six-stage acceptance ladder, gate packets, design vs implementation sequencing |
-| [`Sandbox_Design.md`](Sandbox_Design.md) | OS-boundary execution broker — threat model, IPC, hardening (**design/spec; Wave 07c local implementation**) |
-| [`Self_Modification_Design.md`](Self_Modification_Design.md) | Change proposals, isolated source workflow, consultation routing (**design only**) |
-| [`External_Agency_Design.md`](External_Agency_Design.md) | External-action broker, vault, dual authorization, dispatch FSM (**design only**) |
+| [`Wave_Acceptance_Protocol.md`](Wave_Acceptance_Protocol.md) | Historical Wave ladder plus current M-series acceptance mapping |
+| [`architecture/Ashley_Cross_Phase_Architecture.md`](architecture/Ashley_Cross_Phase_Architecture.md) | Shared state, authority, evidence, and current-fact laws |
+| [`architecture/sandbox/ASHLEY_SANDBOX_V2_ROADMAP.md`](architecture/sandbox/ASHLEY_SANDBOX_V2_ROADMAP.md) | Current Sandbox V2 M0-M7 authority, state, truth, and acceptance contracts |
+| [`Sandbox_Design.md`](Sandbox_Design.md) | Historical V1 broker threat model, IPC, and hardening; topology superseded for V2 |
+| [`Self_Modification_Design.md`](Self_Modification_Design.md) | Historical V1 workflow; selected change-set semantics are reference input for V2 M5/M7 |
+| [`architecture/External_Effect_and_Authority_Architecture.md`](architecture/External_Effect_and_Authority_Architecture.md) | Current cross-cutting owner for observation and external effects |
+| [`External_Agency_Design.md`](External_Agency_Design.md) | Historical Wave 09 broker design; salvageable semantics only |
+| [`architecture/Ashley_Observability_Plane.md`](architecture/Ashley_Observability_Plane.md) | Telemetry, correlation, redaction, and diagnostic-versus-control boundaries |
 | [`Stabilization_Design.md`](Stabilization_Design.md) | Wave 10 pre-release traceability, deterministic evaluation, health, resource, and backup assurance (**10c Wave_accepted; not release-qualified**) |
 
 Stewardship Compact and Ethics are peers beneath the Constitution. They clarify
 higher authority; they do not override it.
 
-## Planned model policy
+## Model routing and Model Fabric
 
-Current production routing remains documented in
-[`Routing_Status.md`](Routing_Status.md). The target MODEL-FABRIC-01 policy is:
-
-- main Thought primary: Groq `openai/gpt-oss-120b`;
-- specialist and utility primary candidate: NVIDIA
-  `nvidia/nemotron-3.5-lightning-30b-a3b`;
-- later route-qualified Lightning fallback: Groq `openai/gpt-oss-120b`;
-- former Groq 20B utility candidate: retired from planned architecture;
-- Expression primary: Mistral Medium, unchanged.
-
-The first Thought-observation shadow slice uses Lightning with
-`reliabilityClass = single_attempt`, `fallbackRouteIds = []`, and at most one
-provider request. The later GPT-OSS-120B fallback is not part of that slice.
-Contracts and bounded implementation planning are in
+Current production routing is the living snapshot in
+[`Routing_Status.md`](Routing_Status.md). Model IDs are policy, not Model
+Fabric architecture. Semantic ownership of future dispatch is
+[`architecture/Model_Fabric_Architecture.md`](architecture/Model_Fabric_Architecture.md).
+Frozen field contracts and bounded implementation planning remain in
 [`architecture/Model_Fabric_01_Contract_Draft.md`](architecture/Model_Fabric_01_Contract_Draft.md)
 and
 [`architecture/Model_Fabric_01_Implementation_Spike.md`](architecture/Model_Fabric_01_Implementation_Spike.md).
 Qualification meaning remains owned by
 [`architecture/Ashley_Evaluation_Qualification_Plane.md`](architecture/Ashley_Evaluation_Qualification_Plane.md).
 No Model Fabric implementation, provider activation, or deployment is authorized
-by these documents.
+by these documents. Planned or current model IDs belong in routing source and
+an explicitly audited Routing Status snapshot, not in this implementation map.
 
 ## Production (Mint)
 
 Two processes: `agent-service` (:3710) + `discord-bot` (gateway).
 
 ```
-Discord DM → /chat/text → AshleyCore (Identity → State → Agency → Conversation)
-Proactive tick → Agency.decide → draft → commit
+Discord DM → /chat/text → Identity + Mind State + Recall → Thought → Agency / Expression → delivery
+Proactive tick → Agency.decide → draft → reserve → send → receipt / reconcile → commit / finalize
 Curiosity feed → nuclear.db takes → Agency motivations
 Committed proactive reaction → Reflection → bounded future Thought calibration
 Completed exchange → durable cognition job → episode → Mind State / affect / learning proposal
 Urgent concern or commitment → Discord wake poll → normal Agency send pipeline
+Grounded engineering intent → admission → direct unprivileged Bubblewrap → receipt / reconcile
 ```
 
 SQLite: `~/.composer-assistant/conversations/nuclear.db`.
@@ -84,12 +85,12 @@ SQLite: `~/.composer-assistant/conversations/nuclear.db`.
 `apps/agent-service/src/core/` — identity, state, memory, cognition, learning,
 curiosity, agency, reflection, honesty, conversation, writers, runtime.
 
-Schema v9 adds grounded episodes with FTS5 retrieval, referenced Mind State
-items, bounded affect, durable cognition jobs/runs, verified fact provenance,
-edge-triggered urgent wake leases, Thought fallback auditing, and exact organic
-revision lineage. Schema v10 adds `own_time_sessions` for atomic owner
-absence/return presence (open = `ended_at IS NULL`). Cognition integration is atomic: a completed job produces one
-complete episode and all of its derived state, or none of them.
+Current supported nuclear schema is declared in
+[`apps/agent-service/src/core/db.ts`](../apps/agent-service/src/core/db.ts)
+(`NUCLEAR_SUPPORTED_VERSION`). Do not copy the integer here.
+
+Cognition integration is atomic: a completed job produces one complete episode
+and all of its derived state, or none of them.
 `ASHLEY_COGNITION_MODE=observe` records evidence and proposals without allowing
 behavioral influence. `apply` is the master ceiling; release-scoped capability
 states, dependencies, evaluation qualification, live-shadow thresholds, and
@@ -119,33 +120,49 @@ Shared utils: `apps/agent-service/src/lib/` (feed-parse, typography, metadata-ec
 
 Retired: voice, Telegram, habits, Moltbook, skills, legacy ChatService / `index.db` writers.
 
-## Sandbox (implemented locally; not deployed)
+## Sandbox V2 (current work)
 
-Target `ashley-exec-broker` system unit: dedicated `ashley-sandbox` UID, Unix socket
-at `/run/ashley/broker.sock`, state at `/var/lib/ashley-sandbox`. Agent proposes;
-approval-signer emits signed envelopes; broker executes under owner-authorized scope
-only. The local implementation adds a socket daemon, durable broker state,
-SO_PEERCRED helper, real bounded runner, and agent transport; the broker remains
-disabled until separately accepted and release-qualified. Full spec:
-[`Sandbox_Design.md`](Sandbox_Design.md). Gate packet:
-[`handoffs/wave-07c-gate-packet.md`](handoffs/wave-07c-gate-packet.md). Not deployed.
+The current V2 execution path uses direct, unprivileged Bubblewrap under
+`apps/sandbox-m1/` and `apps/sandbox-v2/`. It does not use the V1
+`ashley-exec-broker`, Unix socket, signed broker envelopes, or `source_*`
+scopes. M4 remains blocked until exact-candidate M3 is `PRODUCTION ACCEPTED`.
+Do not infer current qualification, deployment, or promotion from source
+presence. Full current authority:
+[`architecture/sandbox/ASHLEY_SANDBOX_V2_ROADMAP.md`](architecture/sandbox/ASHLEY_SANDBOX_V2_ROADMAP.md).
 
-## Self-modification (design only)
+The retained `apps/sandbox-broker/`, `apps/sandbox-policy/`, Wave 07 gate
+packets, and [`Sandbox_Design.md`](Sandbox_Design.md) preserve historical V1
+source and evidence. They are not a V2 dependency and MUST NOT be reconnected
+by implication.
 
-Ashley inspects isolated source copies and presents change proposals without live
-mutation. Source archives upload via broker artifacts; verification uses broker-owned
-recipes only. Full spec: [`Self_Modification_Design.md`](Self_Modification_Design.md).
-Not deployed.
+## Engineering authoring (planned V2 M5/M7)
 
-## External agency (design only)
+V2 M5 introduces a coherent, reviewable change-set contract. It does not use
+the V1 broker source workflow. Base identity, stale-base handling, system-derived
+receipts, secret exclusion, and approval-is-not-effect remain useful reference
+semantics from [`Self_Modification_Design.md`](Self_Modification_Design.md).
+Branch, commit, push, pull request, package, publish, deploy, and restart are
+separate M7 authority profiles. None is implied by authoring.
 
-Future `ashley-external` broker at `/var/lib/ashley-external/`: credential vault
-(operator-only local ingress), action policy engine, dual signed authorization,
-public-privacy pre-dispatch, dispatch FSM with reconciliation, fake adapter only in v1.
-Distinct from Wave 07 exec broker — vault never enters sandbox workspace. Full spec:
-[`External_Agency_Design.md`](External_Agency_Design.md). Not deployed.
+## External effect and authority (cross-cutting)
+
+Current observation and effect meaning is owned by
+[`architecture/External_Effect_and_Authority_Architecture.md`](architecture/External_Effect_and_Authority_Architecture.md).
+Connectors, qualified procedures, Computer Use, and Sandbox M7 consume that
+plane. Computer Use is not the parent of generic external action.
+
+Historical Wave 09 design and local fake-adapter source remain in
+[`External_Agency_Design.md`](External_Agency_Design.md),
+`apps/agent-service/src/core/external-agency/`, and `apps/external-broker/`.
+That machinery is undeployed and not qualified for a real adapter, account, or
+host.
 
 ## Observability
+
+Current owner-authenticated GET projections and process logs are diagnostic
+surfaces. They are not the Observability Plane. Plane architecture is
+[`architecture/Ashley_Observability_Plane.md`](architecture/Ashley_Observability_Plane.md).
+Owner-authenticated POST endpoints are control or effect paths, not telemetry.
 
 - `GET /health` → minimal public liveness/readiness and provider state
 - `GET /nuclear/health?owner_id=` → owner-only bounded diagnostics (metadata only)
@@ -155,8 +172,11 @@ Distinct from Wave 07 exec broker — vault never enters sandbox workspace. Full
 - `GET /nuclear/cognition?owner_id=` → affect, urgency, jobs, and runs
 - `GET /nuclear/capabilities?owner_id=` → release gates, evidence, and rollback
 - `GET /nuclear/revisions?owner_id=` → proposed/applied identity and opinion growth
-- `POST /nuclear/revisions/revert` → restore the prior value for one applied revision
 - `GET /nuclear/identity/reviews?owner_id=` → separate Ashley and Doc positions
+
+Control paths, not diagnostics:
+
+- `POST /nuclear/revisions/revert` → restore the prior value for one applied revision
 - `POST /nuclear/identity/reviews/ashley` → evidence-grounded Ashley position
 - `POST /nuclear/identity/reviews/doc` → owner-authorized Doc decision
 

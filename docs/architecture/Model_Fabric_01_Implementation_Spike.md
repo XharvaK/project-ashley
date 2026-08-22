@@ -1,6 +1,7 @@
-# MODEL-FABRIC-01 Implementation Spike
+# Model Fabric — First Implementation Spike
 
-- **Status:** proposed plan only
+- **Status:** `SUPPORTING / PLANNED FIRST SLICE`; not authorized
+- **Canonical phase name:** Model Fabric; the historical filename is retained for provenance
 - **Selected slice:** shadow Thought observation on NVIDIA Nemotron 3.5 Lightning 30B-A3B
 - **Default runtime state:** off
 - **Activation:** not authorized

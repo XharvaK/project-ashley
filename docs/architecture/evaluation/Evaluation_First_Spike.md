@@ -1,6 +1,6 @@
 # Evaluation Plane — First Future Spike
 
-Status: PROPOSED / NOT AUTHORIZED / WAITING FOR MODEL-FABRIC-01 CONTRACT IMPLEMENTATION + LOCAL ACCEPTANCE
+Status: `SUPPORTING / PROPOSED / NOT AUTHORIZED`; waiting for Model Fabric contract implementation and local acceptance
 
 Date: 2026-08-13
 
@@ -8,7 +8,7 @@ Purpose: define the smallest useful future implementation slice for `MODEL_PROFI
 
 ## Recommendation
 
-Wait until MODEL-FABRIC-01 implements its pure contracts, establishes real `ModelCapabilityProfile` identity and stage-valid `ModelAttemptReceipt` types, and passes local first-slice acceptance plus independent closure. Then build an Ashley-owned, Node-native evaluation contract and reporting layer around existing evaluators, focused only on `MODEL_PROFILE` evidence and qualification.
+Wait until Model Fabric implements its pure contracts, establishes real `ModelCapabilityProfile` identity and stage-valid `ModelAttemptReceipt` types, and passes local first-slice acceptance plus independent closure. Then build an Ashley-owned, Node-native evaluation contract and reporting layer around existing evaluators, focused only on `MODEL_PROFILE` evidence and qualification.
 
 Do not begin with Inspect AI. Do not create a provisional second model-profile registry. Do not rewrite the test stack. Do not add production gating.
 
@@ -22,7 +22,7 @@ Can Project Ashley describe, execute, and report a model-profile qualification c
 
 - `EvaluationDefinition v1` schema;
 - `QualificationResult v1` schema;
-- a static, versioned evaluation-definition registry that imports the implemented MODEL-FABRIC-01 profile/receipt contracts or consumes their generated canonical schemas;
+- a static, versioned evaluation-definition registry that imports the implemented Model Fabric profile/receipt contracts or consumes their generated canonical schemas;
 - an adapter for the existing persona replay and judge output;
 - an adapter for the existing deterministic stabilization evaluator;
 - one model-routing contract definition;
@@ -137,7 +137,7 @@ Required behaviors:
 
 The result contract MUST keep three bindings separate:
 
-1. **Profile binding:** import or canonically consume MODEL-FABRIC-01 `ModelProfileQualificationBinding` without renaming or extending `profileId`, `profileVersion`, `profileFingerprint`, `provider`, or `configuredModelId`.
+1. **Profile binding:** import or canonically consume Model Fabric `ModelProfileQualificationBinding` without renaming or extending `profileId`, `profileVersion`, `profileFingerprint`, `provider`, or `configuredModelId`.
 2. **Dispatch binding:** consume the real stage-discriminated `ModelAttemptReceipt` and separately bind route, purpose, resolved model when reported, context policy, generation, retry, fallback, and receipt-reference facts only when established.
 3. **Campaign / evaluation binding:** bind source SHA and dirty state, environment, corpus, rubric, judges, `EvaluationDefinition`, and evidence references.
 
@@ -267,7 +267,7 @@ config/evaluation/definitions/model-routing-contract-v1.json
 
 The final implementation may place the contract outside `apps/agent-service` if repository inspection shows a cleaner non-runtime package boundary. The key requirement is that importing the contract does not initialize Ashley runtime services.
 
-These files must not define or register model profiles or operational receipts. They import the implemented MODEL-FABRIC-01 TypeScript types or consume generated canonical schemas from the same source. No Evaluation-owned fallback registry, provider/model binding registry, or receipt schema is permitted.
+These files must not define or register model profiles or operational receipts. They import the implemented Model Fabric TypeScript types or consume generated canonical schemas from the same source. No Evaluation-owned fallback registry, provider/model binding registry, or receipt schema is permitted.
 
 ### New runner and adapter files
 
@@ -307,9 +307,9 @@ deploy/linux-mint/sandbox/**
 
 The rollout exclusion is intentional. Capability qualification remains a downstream governance consumer and is not integrated in the first slice.
 
-## Dependency on MODEL-FABRIC-01
+## Dependency on Model Fabric
 
-The spike requires real, implemented, locally accepted MODEL-FABRIC-01 contracts. Architecture work may proceed now. Implementation MUST wait until:
+The spike requires real, implemented, locally accepted Model Fabric contracts. Architecture work may proceed now. Implementation MUST wait until:
 
 1. Model Fabric pure contracts are implemented;
 2. canonical profile identity and `ModelProfileQualificationBinding` are real;
@@ -433,7 +433,7 @@ Stop the spike and request architectural review if any implementation requires:
 - storing raw private conversations without explicit owner policy;
 - treating framework sandboxing as Ashley Sandbox qualification;
 - modifying concurrent Sandbox work;
-- duplicating MODEL-FABRIC-01 profile authority;
+- duplicating Model Fabric profile authority;
 - weakening `REFUSED` versus `OUTCOME_UNKNOWN` semantics.
 
 ## Open decisions
@@ -447,7 +447,7 @@ The first-slice scope is decided: model-profile-only; no capability-qualificatio
 
 ## Final spike verdict
 
-FIRST IMPLEMENTATION SPIKE: **WAIT FOR MODEL-FABRIC-01 CONTRACT IMPLEMENTATION + LOCAL ACCEPTANCE, THEN RECOMMENDED AFTER OWNER AUTHORIZATION**
+FIRST IMPLEMENTATION SPIKE: **WAIT FOR MODEL FABRIC CONTRACT IMPLEMENTATION + LOCAL ACCEPTANCE, THEN RECOMMENDED AFTER OWNER AUTHORIZATION**
 
 FIRST SPIKE SUBJECT: **MODEL_PROFILE EVIDENCE / QUALIFICATION ONLY**
 
@@ -459,6 +459,6 @@ RUNTIME AUTHORITY IN FIRST SPIKE: **NO**
 
 INSPECT AI IN FIRST SPIKE: **NO**
 
-MODEL-FABRIC-01 SUPPORT: **YES**
+MODEL FABRIC SUPPORT: **YES**
 
 SECOND MODEL-PROFILE REGISTRY: **NO**

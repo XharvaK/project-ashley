@@ -1,10 +1,15 @@
 # Ashley Evaluation / Qualification Inventory
 
-Status: CURRENT-SOURCE RECONNAISSANCE / RECONCILED
+Status: `HISTORICAL SOURCE SNAPSHOT / REFERENCE`
 
 Date: 2026-08-13
 
 Source baseline: `82b30a9d218855bd1373121fc5a656a3403b1c85` on `master`
+
+> Counts, source versions, route bindings, and command results in this file
+> describe the named 2026-08-13 baseline and concurrent worktree only. They are
+> not current indefinitely. The authoritative cross-cutting contract is
+> [`Ashley_Evaluation_Qualification_Plane.md`](../Ashley_Evaluation_Qualification_Plane.md).
 
 Scope: repository mechanisms that test, evaluate, qualify, observe, or validate Ashley behavior
 
@@ -12,7 +17,8 @@ Exclusions: no production or Sandbox source was modified; no Mint or physical qu
 
 ## Inventory summary
 
-The repository contains a mature but fragmented evaluation stack.
+At the named baseline, the repository contained a mature but fragmented
+evaluation stack.
 
 - There are 247 source test or spec files across the application packages.
 - The agent service contains 127 test files.
@@ -105,7 +111,7 @@ The repository fits this codebase-aware taxonomy:
 - **WHAT IT DOES NOT PROVE:** deterministic authorization, full identity continuity, current source binding, production behavior, or provider independence
 - **DETERMINISTIC / MODEL-JUDGED / PHYSICAL:** model-generated; later judged
 - **RUN ENVIRONMENT:** local agent on port 3712 with a separate data directory, persona-eval mode, proactive and curiosity disabled, and retrieval top-k zero
-- **CURRENT STATUS:** 64 probes exist; `docs/persona-eval.md` still says 32 and is stale; historical outputs are not current-checkout qualification
+- **CURRENT STATUS:** Probe count is source-derived from `scripts/persona-eval/probes.json`. `docs/persona-eval.md` points at that corpus. Historical outputs are not current-checkout qualification
 - **REUSABLE FOR EVALUATION PLANE?:** yes; the runner and corpus are valuable, but the run record needs source, environment, model-profile, corpus, and configuration binding
 
 ### 6. Persona pairwise judge

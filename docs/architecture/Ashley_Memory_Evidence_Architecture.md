@@ -380,7 +380,7 @@ object (Section 14).
 
 ## 7. Retrieval Architecture
 
-`ACCEPTED ARCHITECTURE`; `FUTURE DESIGN` (main work is `CONTEXT-BUDGET-01`).
+`ACCEPTED ARCHITECTURE`; `FUTURE DESIGN` (main work is Context Budget).
 Conceptual pipeline:
 
 ```text
@@ -412,7 +412,7 @@ Rules:
 ## 8. Derived State and Recovery
 
 `ACCEPTED ARCHITECTURE`; `FUTURE DESIGN` (infrastructure laws owned by
-`OPERATIONAL-CONTINUITY-01`).
+Operational Continuity).
 
 - Indexes are disposable. Deleting any projection never deletes canonical
   evidence or durable accepted assertions.
@@ -595,20 +595,27 @@ Interaction rules:
 
 ## 16. Roadmap Ownership
 
-The roadmap is frozen. Each area maps to exactly one primary owner.
+Each area maps to exactly one primary owner. Memory Evidence maturation is a
+`HARD_DEPENDENCY` predecessor to Learned Autonomy. Learned Autonomy consumes qualified Memory
+Assertions; it does not create the generic assertion substrate that makes its
+learning attributable and revisable.
 
 | Memory area | Roadmap phase | Status |
 |---|---|---|
 | Canonical evidence capture, provenance, governed forgetting basics | Current implementation (`nuclear.db`, continuity sidecar) | `CURRENT IMPLEMENTATION` |
-| Worker-result provenance / WorkerRunJournal | MODEL-FABRIC-01 (only if naturally required) | `FUTURE DESIGN` |
-| Canonical-vs-derived state law; projector checkpoints; derived-state recovery; degraded-index behavior; freshness/staleness; writer ownership; rebuild semantics | OPERATIONAL-CONTINUITY-01 | `FUTURE DESIGN` |
-| Provenance / evidence laws for experience -> procedure | PROCEDURAL-SKILL-GRADUATION | `FUTURE DESIGN` |
-| Provenance-bearing learned preference / trust assertions | LEARNED-AUTONOMY-01 | `FUTURE DESIGN` |
-| FTS5; vector mechanism spike; hybrid retrieval; RRF / fusion benchmark; contextual adjacency; graduated recall; retrieval budgeting | CONTEXT-BUDGET-01 | `SPIKE` / `FUTURE DESIGN` |
-| Temporal Memory Assertions; working theories; model of the human; contradiction; supersession; consolidation / adjudication; confidence; revision; forgetting | Experience / Cognitive Graduation + Hardening | `FUTURE DESIGN` |
-| Experience-driven identity development | Experience / Cognitive Graduation, only where constitutionally permitted | `FUTURE DESIGN` |
+| Worker-result provenance / WorkerRunJournal | Model Fabric, only if naturally required | `FUTURE DESIGN` |
+| Canonical-vs-derived state law; projector checkpoints; derived-state recovery; degraded-index behavior; freshness/staleness; writer ownership; rebuild semantics | Operational Continuity | `FUTURE DESIGN` |
+| Provenance and evidence laws for experience -> procedure | Procedural Skill Graduation | `FUTURE DESIGN` |
+| Temporal Memory Assertions; evidence references; epistemic status; contradiction; supersession; consolidation and adjudication; confidence; revision; dependent forgetting | Memory Evidence maturation | `FUTURE DESIGN` |
+| Provenance-bearing learned interest, preference, opinion, salience, concern, and goal assertions | Learned Autonomy, consuming Memory Evidence maturation | `FUTURE DESIGN` |
+| FTS5; vector mechanism spike; hybrid retrieval; RRF or fusion benchmark; contextual adjacency; graduated recall; retrieval budgeting | Context Budget, consuming Memory Evidence contracts and Model Fabric ContextProjection | `SPIKE` / `FUTURE DESIGN` |
+| Working beliefs and theories; cognitive model of the human; evidence-bound lived-experience continuity; constitutionally permitted identity development | Cognitive Graduation, consuming Memory Evidence maturation, Learned Autonomy, and Context Budget | `FUTURE DESIGN` |
+| Relationship knowledge; learned partner and relationship assertions; bilateral commitment and repair evidence; relationship forgetting | Relational Graduation, consuming Memory Evidence maturation, selected Learned Autonomy, Context Budget, and relationship governance | `FUTURE DESIGN` |
 
-Nothing in this document moves work earlier or later.
+Cognitive Graduation and Relational Graduation are sibling phases with
+independent acceptance and influence gates. This mapping records semantic
+ownership and dependency. It does not authorize implementation, promotion, or
+deployment.
 
 ---
 

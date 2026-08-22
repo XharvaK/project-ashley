@@ -1,14 +1,19 @@
 # Ashley Evaluation / Qualification Plane
 
-Status: RECONNAISSANCE / RECONCILED DESIGN PROPOSAL / EVALUATION SPIKE WAITING FOR MODEL-FABRIC-01 CONTRACT IMPLEMENTATION + LOCAL ACCEPTANCE
+**Status:** `AUTHORITATIVE` cross-cutting plane. Implementation is not
+authorized by this document. The first evaluation spike waits for Model Fabric
+contract implementation and local acceptance.
 
-Date: 2026-08-13
+**Date:** 2026-08-13
 
-Repository baseline: `82b30a9d218855bd1373121fc5a656a3403b1c85` on `master`
+Historical reconnaissance baseline: `82b30a9d218855bd1373121fc5a656a3403b1c85` on `master`. Source inventories and command results bound to that baseline are historical evidence, not current source facts.
 
-Working-tree condition: concurrent, unrelated Sandbox work was present during reconnaissance
+Working-tree condition: concurrent, unrelated Sandbox work was present during reconnaissance.
 
-Authority: this document proposes architecture. It does not authorize implementation, release, deployment, capability promotion, model-family replacement, or Sandbox activation.
+**Authority:** This document owns evaluation, qualification, and promotion-claim
+semantics for its domain. It does not authorize implementation, release,
+deployment, capability promotion, model-family replacement, or Sandbox
+activation.
 
 ## Executive decision
 
@@ -23,7 +28,7 @@ The plane should provide four explicit boundaries:
 3. **Qualification** binds accepted evidence to a precise source, environment, subject, and claim.
 4. **Promotion** is a separate owner-governed action.
 
-The first slice should be Node-native, artifact-only, and limited to `MODEL_PROFILE` evidence and qualification. Its architecture may be specified now. Its implementation MUST wait until MODEL-FABRIC-01 has implemented its pure contracts, established real profile identity and stage-valid receipt types, and passed local first-slice acceptance. Evaluation should then import the real types or consume generated canonical schemas. It should define an Ashley-owned `EvaluationDefinition` contract and `QualificationResult` contract. It should not write to runtime databases, capability ledgers, Identity, Mind State, Recall, or production configuration. Capability qualification remains a downstream governance concern and is not part of this slice.
+The first slice should be Node-native, artifact-only, and limited to `MODEL_PROFILE` evidence and qualification. Its architecture may be specified now. Its implementation MUST wait until Model Fabric has implemented its pure contracts, established real profile identity and stage-valid receipt types, and passed local first-slice acceptance. Evaluation should then import the real types or consume generated canonical schemas. It should define an Ashley-owned `EvaluationDefinition` contract and `QualificationResult` contract. It should not write to runtime databases, capability ledgers, Identity, Mind State, Recall, or production configuration. Capability qualification remains a downstream governance concern and is not part of this slice.
 
 Inspect AI should be **SPIKED**, not adopted as the plane. It is a useful execution substrate for later model and agent evaluations. It must not define Ashley's invariants, pass semantics, evidence authority, or promotion rules.
 
@@ -277,7 +282,7 @@ These bindings are separate by construction:
 
 ### A. Profile binding
 
-`profileBinding` is the canonical mechanical identity supplied by MODEL-FABRIC-01 as `ModelProfileQualificationBinding`:
+`profileBinding` is the canonical mechanical identity supplied by Model Fabric as `ModelProfileQualificationBinding`:
 
 ```text
 profileId
@@ -599,18 +604,18 @@ Inspect should be evaluated only in a follow-on spike after the Ashley-owned res
 - [OpenTelemetry Logs data model](https://opentelemetry.io/docs/specs/otel/logs/data-model/) is **REFERENCE** for trace and resource correlation. Telemetry remains observability until an Ashley definition accepts it as evidence.
 - [Cua-Bench](https://cua.ai/cuabench/api/download-report) is **REFERENCE** for future computer-use scenario design. Benchmark success alone cannot qualify Ashley's action authority.
 
-## Relationship to MODEL-FABRIC-01
+## Relationship to Model Fabric
 
-The evaluation plane depends on implemented, locally accepted Model Fabric contracts. MODEL-FABRIC-01 should expose these as separate facts:
+The evaluation plane depends on implemented, locally accepted Model Fabric contracts. Model Fabric should expose these as separate facts:
 
 - canonical `ModelCapabilityProfile` identity and `ModelProfileQualificationBinding`;
 - stage-discriminated `ModelAttemptReceipt` evidence that never fabricates unresolved facts;
 - route ID, purpose, resolved model ID when reported, context policy, generation parameters, retry facts, fallback facts, and trace correlation as dispatch or invocation facts;
 - capability, multimodal, privacy, cost, latency, and suitability policy outside canonical profile identity where they are not mechanical profile facts.
 
-MODEL-FABRIC-01 should not own evaluation definitions, invariant meaning, pass semantics, or promotion authority.
+Model Fabric should not own evaluation definitions, invariant meaning, pass semantics, or promotion authority.
 
-The first Evaluation Plane implementation spike MUST wait for MODEL-FABRIC-01 pure-contract implementation, real profile identity, real stage-valid receipt contracts, and green local first-slice acceptance. It should then import those real TypeScript types or consume generated canonical schemas. A test double MAY be used only when it implements the real interface. Evaluation MUST NOT create provisional profile or receipt schemas, a second provider/model binding registry, or a dependency that blocks Model Fabric pure-contract implementation.
+The first Evaluation Plane implementation spike MUST wait for Model Fabric pure-contract implementation, real profile identity, real stage-valid receipt contracts, and green local first-slice acceptance. It should then import those real TypeScript types or consume generated canonical schemas. A test double MAY be used only when it implements the real interface. Evaluation MUST NOT create provisional profile or receipt schemas, a second provider/model binding registry, or a dependency that blocks Model Fabric pure-contract implementation.
 
 The dependency is acyclic:
 
@@ -628,7 +633,7 @@ I. separate promotion / enablement / deployment / activation decisions
 
 ## Recommended first slice
 
-After MODEL-FABRIC-01 implements its pure contracts and passes local first-slice acceptance plus independent closure, build an artifact-only, Node-native evaluation contract layer focused only on `MODEL_PROFILE` evidence and qualification.
+After Model Fabric implements its pure contracts and passes local first-slice acceptance plus independent closure, build an artifact-only, Node-native evaluation contract layer focused only on `MODEL_PROFILE` evidence and qualification.
 
 It should contain:
 
@@ -659,6 +664,34 @@ Identity corpora should be synthetic or sanitized by default. High-impact identi
 The first local artifact-only spike does not require cryptographic owner signatures unless a concrete threat model justifies them. Version and hash binding plus explicit owner review are sufficient initially.
 
 Inspect AI should be a later isolated adapter spike. The first slice is defined in [`evaluation/Evaluation_First_Spike.md`](evaluation/Evaluation_First_Spike.md).
+
+## Roadmap-domain coverage
+
+`EvaluationDefinition` and `QualificationResult` are shared envelopes, not one
+universal scoring method.
+
+| Domain | Required evidence emphasis |
+|---|---|
+| Model Fabric | profile identity, structured output, cancellation, dispatch truth, privacy, reliability, cost and latency claims |
+| Sandbox V2 | deterministic policy plus exact-candidate local and physical isolation/effect evidence per milestone |
+| Operational Continuity | crash matrix, fencing, input acceptance, resume authority, ambiguity, reconciliation, resource settlement |
+| Procedural Skill Graduation | trace provenance, interface and environment variation, invocation denial, effects, revocation, imported-content quarantine |
+| External Effect and Authority | credential exclusion, representation and commitment authority, privacy, idempotency, witness and reconciliation |
+| Computer Use | observation/mutation separation, session non-authority, deterministic-first mechanism selection, handoff and effect ambiguity |
+| Learned Autonomy | provenance, false-positive initiative, reversibility, non-authority, preference/command separation, long shadow periods |
+| Context Budget | source coverage, privacy ceilings, token/byte/media bounds, compression attribution, stale-summary and forgetting invariants |
+| Memory Evidence maturation | assertion provenance, temporal validity, contradiction, revision, unsupported state, forgetting propagation |
+| Cognitive Graduation | long-horizon goals, interests, opinions, identity continuity, initiative diversity, revision and rollback |
+| Relational Graduation | consent, reciprocity, bilateral evidence, non-manipulation, withdrawal, silence, repair and independent rollback |
+| Observability | redaction, bounded cardinality, cross-process correlation, no behavior change, telemetry/evidence separation |
+
+Authorization invariants remain deterministic. Behavioral and identity claims
+may require judged evaluation. Physical claims require physical evidence.
+Passing one class cannot waive another class's failure.
+
+The canonical release-readiness term is `RELEASE_QUALIFIED`. Historical Wave
+terms remain provenance aliases only where the Wave Acceptance Protocol says
+so.
 
 ## Decisions required before implementation
 

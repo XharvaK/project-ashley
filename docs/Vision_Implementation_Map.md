@@ -59,8 +59,9 @@ remain human-controlled.
 | Forgetting + same-lineage tombstone replay | Continuity sidecar + nuclear v13 (Wave 04 local) | `preview_id` targets; pending tombstone before cascade; entity_uuid; honesty about Discord/provider/old backups | Integer-PK tombstone after restore; silent non-local erasure claims | **local implementation present; not release-qualified** |
 | Dual-DB backup verification | Continuity backup package (Wave 04 local) | VACUUM snapshots; nuclear-then-continuity order; AES-GCM package; current sidecar precedence | Naive WAL/SHM copy as supported path; silent sidecar replacement | **local implementation present; not release-qualified** |
 | Untrusted external entities (`ETH-EXT-*`) | Curiosity, Thought, Agency (planned) | Provenance-bearing notes; no permission/tool/identity mutation from external text | External text grants permission, commands tools, or alters policy | documented; enforcement planned |
-| OS-boundary sandbox broker (`ETH-EXT-06`, Private Mint agency) | Sandbox Design (Wave 07) + Wave 07c | Dedicated `ashley-sandbox` UID; signed owner envelopes; continuity tombstones; Unix socket IPC; durable broker state; SO_PEERCRED gate | Same-user execution; inferred approval; broker topic-based forget; unprovisioned toolchain | **Wave_accepted (not release-qualified; not deployed)** — see [`Sandbox_Design.md`](Sandbox_Design.md) and [`handoffs/wave-07c-gate-packet.md`](handoffs/wave-07c-gate-packet.md) |
-| Self-inspection and change proposals (Wave 08) | Self-Modification Design | Isolated source archive; broker-owned recipes; change-proposal records; consultation routing; no auto-commit/deploy | Proposal → live mutation; repo script execution; inferred approval | **Wave_accepted** (not release-qualified) — see [`handoffs/wave-08b-gate-packet.md`](handoffs/wave-08b-gate-packet.md) |
+| Current private engineering workshop (`ETH-EXT-06`, Private Mint agency) | Sandbox V2 M-series | Direct unprivileged Bubblewrap; capability ceiling; immutable inputs; private candidate state; receipts; explicit authority progression; conservative borders | V1 broker revival; writable live source; inferred authority; outcome retry after ambiguity | **M1-M3 source present; M4 BLOCKED pending exact-candidate M3 acceptance** — see [`architecture/sandbox/ASHLEY_SANDBOX_V2_ROADMAP.md`](architecture/sandbox/ASHLEY_SANDBOX_V2_ROADMAP.md) |
+| Historical OS-boundary sandbox broker | Sandbox V1 Wave 07/07c | Dedicated `ashley-sandbox` UID; signed owner envelopes; continuity tombstones; Unix socket IPC; durable broker state; SO_PEERCRED gate | Treating retained V1 source or acceptance as current V2 topology or evidence | **HISTORICAL V1 — Wave_accepted only; topology superseded for V2** — see [`Sandbox_Design.md`](Sandbox_Design.md) and [`handoffs/wave-07c-gate-packet.md`](handoffs/wave-07c-gate-packet.md) |
+| Historical self-inspection and change proposals | Self-Modification V1 Wave 08 | Change-set provenance, stale-base handling, secret exclusion, receipts, consultation, approval-is-not-effect | Reusing V1 broker `source_*` topology; proposal → live mutation; inferred approval | **HISTORICAL V1 / SEMANTIC SALVAGE** — selected semantics inform V2 M5/M7; Wave acceptance does not qualify V2 |
 | No relationship scalars (`ETH-REL-*`) | Mind State v14 relationship tables (Wave 05 local) | Six explicit record types; observe/apply gates; coercion gate always on; no auto-sent reminders | Relationship reduced to scalar scores | **local implementation present; not release-qualified** |
 | Evaluation-fork isolation (`SC-LIN-01`–`SC-LIN-05`) | Continuity + process guards (Wave 04 local) | Fork create/destroy in sidecar; process-level outbound/writeback blocks | Fork writes live lineage or opens parent DB / Mistral / delivery | **local implementation present; not release-qualified** |
 | Cross-lineage deletion replay; old-package-only disaster restore | Continuity (explicit non-guarantee) | Fail closed or disaster acknowledgment; may resurrect forgotten material | Claiming prevention of cross-lineage / old-package resurrection | explicit **non-guarantees** |
@@ -95,6 +96,16 @@ For every material change, record:
 This map should describe what the repository actually guarantees. Planned work
 must remain labeled as planned until its evidence and release gates exist.
 
+### Current Sandbox V2 M-series
+
+The [Sandbox V2 M-Series Roadmap](architecture/sandbox/ASHLEY_SANDBOX_V2_ROADMAP.md)
+governs the current Sandbox program. M0 preserves physical proof. M1 ACT, M2
+PERCEIVE, and M3 EXPERIMENT exist in current source. M4 VERIFY is blocked until
+M3 is accepted for the exact candidate under the expanded acceptance ladder.
+M5 AUTHOR, M6 OPERATE, and M7 PROMOTE are design boundaries only. No later
+milestone, Git effect, package effect, publish, deploy, restart, or production
+authority is implied.
+
 ### Legacy local waves 00–05
 
 Waves 00–05 are implemented local work from before the current gate-packet
@@ -103,7 +114,8 @@ Doc acknowledged that implementation on 2026-08-04. They are not formally
 `Wave_accepted` in the living acceptance records. See
 [`handoffs/waves-00-05-implementation-record.md`](handoffs/waves-00-05-implementation-record.md).
 
-Wave status uses the acceptance ladder in
+The following Wave 06-10 sections preserve historical V1 provenance. They do
+not define the V2 execution topology. Wave status uses the acceptance ladder in
 [`Wave_Acceptance_Protocol.md`](Wave_Acceptance_Protocol.md). Passing tests does
 not accept a wave; gate packets and Doc sign-off do.
 
@@ -119,11 +131,11 @@ not accept a wave; gate packets and Doc sign-off do.
 - Gate packet: [`handoffs/wave-06-gate-packet.md`](handoffs/wave-06-gate-packet.md)
 - Doc accepted Wave 06 on 2026-08-04 after local verification. This does not authorize Release_qualified, Mint/live validation, `apply`, commit, push, production migration, or deployment.
 
-### Wave 07 (sandbox OS boundary — design only)
+### Wave 07 (historical Sandbox V1 OS boundary — design only)
 
 **Acceptance stage:** **Design_accepted** (2026-08-04)
 
-- [`Sandbox_Design.md`](Sandbox_Design.md): threat model, `ashley-sandbox` topology, approval-signer path, exact forget targeting, signed-scope canonicalization, systemd socket/tmpfiles ACL, v1 hardening (`ProtectProc=invisible`, `RestrictNamespaces=yes`)
+- [`Sandbox_Design.md`](Sandbox_Design.md): historical V1 threat model, `ashley-sandbox` topology, approval-signer path, exact forget targeting, signed-scope canonicalization, systemd socket/tmpfiles ACL, and V1 hardening (`ProtectProc=invisible`, `RestrictNamespaces=yes`). This topology is superseded for V2.
 - Gate packet: [`handoffs/wave-07-design-gate-packet.md`](handoffs/wave-07-design-gate-packet.md)
 - Wave 06, Wave 07b, and Wave 08b are **Wave_accepted**; Wave 07 and Wave 08 design are **Design_accepted**; Wave 09 design is **Design_accepted**. No `ashley-sandbox` user, Mint units, or service install is authorized by local verification or acceptance alone.
 
@@ -152,11 +164,11 @@ not accept a wave; gate packets and Doc sign-off do.
   process-group checks. No Mint user/unit/socket, agent opt-in, or restart was
   performed. Gate packet: [`handoffs/wave-07c-gate-packet.md`](handoffs/wave-07c-gate-packet.md)
 
-### Wave 08 (self-modification — design)
+### Wave 08 (historical V1 self-modification — design)
 
 **Acceptance stage:** **Design_accepted** (2026-08-04)
 
-- [`Self_Modification_Design.md`](Self_Modification_Design.md): change-proposal schema, consultation routing, broker-owned recipes, owner-auth review surfaces; **§13** binds 08b implementation constraints
+- [`Self_Modification_Design.md`](Self_Modification_Design.md): historical V1 change-proposal schema, consultation routing, broker-owned recipes, and owner-auth review surfaces. Selected change-set semantics remain reference input for V2 M5/M7; its broker topology is superseded.
 - Gate packet: [`handoffs/wave-08-design-gate-packet.md`](handoffs/wave-08-design-gate-packet.md)
 - Doc accepted Wave 08 design on 2026-08-04 with seven carried conditions (honest broker claims, frozen recipes, routing, MIGRATION_16 discipline, system-derived `verified`, secret-safe surfaces, explicit unsupported states)
 - Wave 08b is **Wave_accepted** (2026-08-04) — not **Release_qualified**

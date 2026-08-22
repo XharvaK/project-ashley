@@ -7,13 +7,14 @@ judge compares them pair by pair.
 ## Never point this at 3710
 
 Every probe archives the active thread. `replay.mjs` refuses port 3710 outright;
-the isolated runner uses 3712 with its own `COMPOSER_DATA_DIR`, proactive off,
+the isolated runner uses 3712 with an explicit isolated data plane
+(`~/.composer-assistant-persona-eval`), proactive off,
 and curiosity off so probes do not spend search credits or DM anyone.
 
 ## Run it
 
 ```powershell
-# one build, 32 probes, 1 seed, raw replies only
+# one build, current probe corpus, 1 seed, raw replies only
 powershell -File scripts\persona-eval\run-isolated.ps1 -Label wave5 -Seeds 1
 
 # full: 3 seeds per probe, then judged against a baseline label
@@ -25,6 +26,11 @@ powershell -File scripts\persona-eval\run-full.ps1 -Baseline baseline-w0 -Label 
 # compare against the shipped persona overhaul replay
 powershell -File scripts\persona-eval\run-full.ps1 -Baseline w6-ship3 -Label naturalness
 ```
+
+The probe count is source-derived from
+[`scripts/persona-eval/probes.json`](../scripts/persona-eval/probes.json).
+Commands and automation must read the corpus rather than relying on a
+duplicated count in this guide.
 
 Output lands in `~/.composer-assistant/persona-eval/<label>/` as `run.json` plus
 `replies.md`, and the comparison in `judge-<label>/judge.md`. The on-disk baseline

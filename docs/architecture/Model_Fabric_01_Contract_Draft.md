@@ -1,6 +1,8 @@
-# MODEL-FABRIC-01 Contract Draft
+# Project Ashley Model Fabric Contract
 
-- **Status:** preparation draft; not implemented
+- **Status:** `SUPPORTING`; frozen field contracts and first-slice specification beneath the current Model Fabric architecture
+- **Canonical phase owner:** [`Model_Fabric_Architecture.md`](Model_Fabric_Architecture.md)
+- **Historical filename:** retained to preserve existing links and reconciliation provenance. The canonical phase name is **Model Fabric**.
 - **Normative language:** MUST, MUST NOT, SHOULD, and MAY are requirements at their stated strength
 - **Applies to:** future provider-neutral model dispatch inside `apps/agent-service`
 - **Does not authorize:** activation, provider migration, sandbox changes, deployment, capability promotion, or Recall changes
@@ -17,7 +19,13 @@ The target separates five concepts that are currently mixed:
 4. `SpecialistSession` binds one bounded specialist purpose, budget, and correlation scope.
 5. `ModelProviderAdapter` converts Ashley contracts to provider wire contracts.
 
-AI SDK 7 is approved for a bounded spike, not wholesale adoption. OpenTelemetry is the required observability interface. OpenInference and Phoenix are optional, replaceable adapters. Inspect AI is a reference evaluation substrate, not an acceptance authority.
+AI SDK 7 is approved for a bounded mechanism spike, not architectural
+selection or wholesale adoption. Model Fabric emits through an Ashley-owned
+telemetry port governed by the
+[Observability Plane](Ashley_Observability_Plane.md). OpenTelemetry is a
+candidate adapter for that port, not a required semantic interface.
+OpenInference and Phoenix remain optional, replaceable candidates. Inspect AI
+is a reference evaluation substrate, not an acceptance authority.
 
 The first-slice specification decisions are resolved:
 
@@ -35,7 +43,8 @@ The first-slice specification decisions are resolved:
 These decisions authorize specification reconciliation only. They do not authorize implementation.
 
 The owner-approved model policy binds the first profile candidate without
-changing these contracts:
+changing these contracts. These values are `PLANNED TARGET` policy, not Model
+Fabric architecture:
 
 - `thought.decision` remains Groq `openai/gpt-oss-120b` primary;
 - Lightning-backed specialist and utility routes target NVIDIA
@@ -43,10 +52,32 @@ changing these contracts:
 - Groq `openai/gpt-oss-120b` is a later, route-qualified fallback candidate for
   those Lightning-backed routes;
 - the former Groq 20B utility candidate has no planned role;
-- Mistral Medium remains Expression primary;
-- the first `thought.observation` slice uses Lightning but remains
-  `single_attempt`, with `fallbackRouteIds = []` and no fallback provider
-  dispatch.
+
+Changing a provider or model binding must update versioned policy and profile
+identity. It must not require an architecture rewrite when the semantic
+purpose, privacy ceiling, reliability class, output contract, and authority
+boundary remain unchanged.
+
+## Document hierarchy
+
+This file is the frozen field-contract and first-slice specification. Semantic
+phase ownership lives in
+[`Model_Fabric_Architecture.md`](Model_Fabric_Architecture.md).
+
+| Document | Current role |
+|---|---|
+| [`Model_Fabric_Architecture.md`](Model_Fabric_Architecture.md) | `CURRENT PHASE CONTRACT` for Model Fabric meaning, ownership, state, and authority |
+| This contract | `SUPPORTING` frozen field contracts, profile/receipt schemas, and first-slice specification |
+| [`Model_Fabric_01_Codebase_Reconnaissance.md`](Model_Fabric_01_Codebase_Reconnaissance.md) | `HISTORICAL` source snapshot at its named baseline |
+| [`Model_Fabric_01_Implementation_Spike.md`](Model_Fabric_01_Implementation_Spike.md) | `SUPPORTING / PLANNED FIRST SLICE`; mechanism choices remain subject to dependency qualification |
+| [`research/Model_Fabric_01_Final_Implementation_Packet.md`](research/Model_Fabric_01_Final_Implementation_Packet.md) | `REFERENCE / PLANNING SNAPSHOT`; not implementation authority |
+| [`../Routing_Status.md`](../Routing_Status.md) | `SUPPORTING / LIVING SOURCE STATUS` for current route bindings |
+
+The historical filenames retain `01` for provenance. Current prose and roadmap
+identity use the clean phase name **Model Fabric**. Planned target policy,
+including Mistral Medium as Expression primary and a no-fallback first
+`thought.observation` slice, is recorded in the phase architecture. Those
+bindings are policy, not architectural identity.
 
 ## Model-Fabric target architecture
 
@@ -118,7 +149,7 @@ The arrows do not grant authority:
 
 - Prompts, system instructions, outputs, reasoning text, user content, attachment bytes, base64 data, URLs, filenames, private paths, secrets, credentials, headers, cookies, tool arguments, and tool results MUST NOT be recorded in telemetry.
 - Full exception messages and stacks MUST NOT be exported when they can contain request or response content.
-- A content-bearing debug mode is outside MODEL-FABRIC-01. It would require separate owner authorization, an isolated sink, bounded retention, and explicit deletion behavior.
+- A content-bearing debug mode is outside Model Fabric. It would require separate owner authorization, an isolated sink, bounded retention, and explicit deletion behavior.
 - Trace IDs MUST NOT become Recall, epistemic evidence, capability authority, or delivery truth.
 
 ## Proposed contracts
@@ -311,7 +342,7 @@ Rules:
 - The result MUST be immutable.
 - No `model?: string` field is permitted in a caller-facing request.
 - A fallback route MUST have a compatible or stricter privacy policy and satisfy the request’s required mechanical capabilities.
-- The MODEL-FABRIC-01 first-slice route MUST set `reliabilityClass` to `single_attempt` and `fallbackRouteIds` to `[]`.
+- The Model Fabric first-slice route MUST set `reliabilityClass` to `single_attempt` and `fallbackRouteIds` to `[]`.
 - `explicit_fallback` and non-empty `fallbackRouteIds` are later/general policy only. They are prohibited in the first slice.
 
 ### ContextProjection
@@ -796,7 +827,7 @@ A future same-model retry MAY be added only when:
 - the attention ledger represents both attempts;
 - a test proves the SDK adds no hidden attempts.
 
-## AI SDK 7 decision
+## AI SDK 7 mechanism decision
 
 **Decision: PREFERRED THIN TRANSPORT SPIKE IF QUALIFIED. Do not adopt
 wholesale.**
@@ -1009,7 +1040,12 @@ Recommended nested spans:
 
 ### OpenTelemetry, OpenInference, and Phoenix
 
-- OpenTelemetry API: **ADOPT.** It is the backend-neutral interface.
+- Ashley telemetry port: **REQUIRED SEMANTIC INTERFACE.** It uses Ashley-owned
+  event classes, privacy policy, and identifiers and is governed by the
+  Observability Plane.
+- OpenTelemetry API/SDK: **MECHANISM CANDIDATE.** It may implement the port
+  after an isolated conformance and privacy spike. Model Fabric core contracts
+  must not depend on OpenTelemetry types.
 - OpenInference semantic conventions: **SPIKE.** Use only through a privacy transformer that starts from Ashley’s allow-list. Do not accept content-capture defaults.
 - Phoenix: **SPIKE for local development only.** It is a replaceable collector/UI. It is not required for production and has no semantic authority.
 - Production export: **DEFER.** No Mint collector, endpoint, retention, or activation is authorized.
@@ -1089,7 +1125,8 @@ Sources: [Inspect tasks](https://inspect.aisi.org.uk/tasks.html), [Inspect eval 
 | `@ai-sdk/groq` | SPIKE later | Candidate transport for main Thought or route-qualified Lightning fallback | Route choice, automatic fallback, qualification inherited from Thought | Exact purpose-specific GPT-OSS-120B fixture and fallback qualification pass |
 | `@ai-sdk/mistral` | SPIKE later | Candidate replacement for current Mistral SDK adapter | Immediate Expression migration | Mistral text, image, cancellation, usage, and model-resolution fixtures pass |
 | AI SDK Gateway | REJECT for this phase | None | Routing, credentials, fallback, or provider abstraction | Reconsider only under a separate architecture decision |
-| OpenTelemetry API/SDK | ADOPT seam | Backend-neutral sanitized tracing | Content store, semantic evidence, Recall, acceptance authority | In-memory privacy tests pass before any exporter |
+| Ashley telemetry port | REQUIRED CONTRACT | Backend-neutral sanitized Model Fabric events beneath the Observability Plane | Content store, semantic evidence, Recall, acceptance authority | Core works with a no-op implementation and no external telemetry dependency |
+| OpenTelemetry API/SDK | MECHANISM CANDIDATE | Possible adapter for sanitized trace/metric/log transport | Semantic event types, content store, evidence, Recall, acceptance authority | Isolated conformance, privacy, cancellation, and no-behavior-change tests pass |
 | OpenInference | SPIKE | Optional sanitized GenAI semantic transformer | Default content capture; semantic authority | Attribute allow-list and redaction tests pass |
 | Phoenix | SPIKE local only | Replaceable local trace/eval viewer | Required production backend; source of truth | Local isolated use proves useful without content leakage |
 | Inspect AI | REFERENCE NOW | Evaluation design and possible later offline runner | Production transport, pass authority, unsanitized logs | Dedicated sanitized adapter and corpus policy exist |
@@ -1132,7 +1169,7 @@ The first-slice choices are resolved. Remaining architecture or environment ques
 2. Should the first strict schema preserve the exact current Thought proposal object, or deliberately reduce it to the subset stored by observation? Recommendation: generate the full current proposal, validate it, then store the same bounded comparison fields as today.
 3. Should provider request IDs be retained in the attention ledger? Recommendation: yes, when documented non-secret, bounded, and useful for incident correlation.
 4. Should route configuration fail service startup for any invalid disabled route, or only invalid active routes? Recommendation: validate all records; fail startup for active-route errors and surface disabled-route errors as readiness diagnostics until a migration policy is agreed.
-5. Is `mistral-medium-latest` alias movement acceptable for Expression continuity? This needs a separate model-continuity policy decision. MODEL-FABRIC-01 should preserve the current configured alias and record the resolved model when reported.
+5. Is `mistral-medium-latest` alias movement acceptable for Expression continuity? This needs a separate model-continuity policy decision. Model Fabric should preserve the current configured alias and record the resolved model when reported.
 6. What is the accepted Linux Mint Node runtime version? It must be verified in the dependency packet before package installation.
 
 ## Contract acceptance gates

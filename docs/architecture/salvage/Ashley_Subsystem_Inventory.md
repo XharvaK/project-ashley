@@ -13,7 +13,7 @@ names below are the required salvage-map schema.
 
 - SUBSYSTEM: Vision, Core Principles, Constitution, Stewardship Compact, Ethics, Hierarchy, Architecture Index, acceptance protocol.
 - PURPOSE: Define why Ashley exists, constitutional constraints, authority chain, ethical boundaries, architecture precedence, and release-state words.
-- CURRENT SOURCE FILES/MODULES: VISION.md; docs/Ashley_Core_Principles.md; docs/ASHLEY_Constitution.md; docs/Ashley_Stewardship_Compact.md; docs/Ashley_Ethics.md; docs/Ashley_Hierarchy.md; docs/Architecture_Index.md; docs/Wave_Acceptance_Protocol.md.
+- CURRENT SOURCE FILES/MODULES: VISION.md; docs/Ashley_Core_Principles.md; docs/Ashley_Constitution.md; docs/Ashley_Stewardship_Compact.md; docs/Ashley_Ethics.md; docs/Ashley_Hierarchy.md; docs/Architecture_Index.md; docs/Wave_Acceptance_Protocol.md.
 - CURRENT DATA TABLES/STATE: Governance documents; no runtime table.
 - UPSTREAM: Vision and operator consultation.
 - DOWNSTREAM: Every identity, capability, broker, prompt, release, and review decision.
@@ -752,4 +752,3 @@ names below are the required salvage-map schema.
 - RECOMMENDED DISPOSITION: RESEARCH NEXT.
 - CONFIDENCE: High that research is incomplete; low on candidate value.
 - OPEN QUESTIONS: Which Monoma project, if any, did the goal intend?
-

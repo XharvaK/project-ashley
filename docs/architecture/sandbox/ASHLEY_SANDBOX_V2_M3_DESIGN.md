@@ -1,8 +1,19 @@
 # Sandbox V2 M3 — Private Writable Candidate Workspace
 
-**Status:** Design / Local Implementation Target (not production accepted)
+**Status:** CURRENT V2 M3 MILESTONE CONTRACT. Implemented in current source.
+This document does not prove physical qualification or production acceptance
+for the current exact SHA.
 
-**Scope:** M3 only — private writable candidate workspace. Does not cover M4 (build/test/lint), M5 (patch authoring), M6 (autonomous engineering loops), or M7 (external effects).
+**Scope:** M3 only — private writable candidate workspace. Does not cover M4
+(build/test/lint), M5 (change-set authoring), M6 (bounded operation), or M7
+(controlled engineering effects).
+
+**Umbrella authority:** Read
+[`ASHLEY_SANDBOX_V2_ROADMAP.md`](ASHLEY_SANDBOX_V2_ROADMAP.md) first. It owns
+cross-cutting M-series order, V1 supersession, state and authority matrices,
+future milestone boundaries, and acceptance semantics. This file owns M3
+detail only. In the umbrella roadmap, M7 is refined and renamed to
+**PROMOTE — CONTROLLED ENGINEERING EFFECTS**.
 
 ---
 
@@ -48,7 +59,11 @@ projectId
 
 **Key fields in `ProjectRootEntry` (already present, M3 uses them):**
 - `candidateWorkspaceAllowed: boolean` — workspace creation authority (opt-in)
-- `engineeringAllowed: boolean` — reserved for M4+ (NOT used by M3)
+- `engineeringAllowed: boolean` — existing source field; M3 does not use it.
+  It MUST NOT be interpreted as blanket M4-M7 authority. Future verification,
+  authoring, bounded-operation, network, credential, live-repository, Git, and
+  promotion authority follows the narrow V2 authority matrix in
+  [`ASHLEY_SANDBOX_V2_ROADMAP.md`](ASHLEY_SANDBOX_V2_ROADMAP.md).
 
 **M3 does NOT:**
 - Modify production registry (operator action only)
@@ -309,7 +324,7 @@ M3 does NOT implement:
 - External accounts / credentials / sudo / root service / V1 broker
 - Self-modification / weekly patches / proactive autonomous engineering
 - Worker orchestration / autonomous retry loops / multi-step engineering loops
-- M4 verification / M5 authoring / M6 operate / M7 external effects
+- M4 verification / M5 authoring / M6 bounded operation / M7 controlled engineering effects
 
 ---
 
@@ -325,7 +340,13 @@ M3 does NOT implement:
 
 ---
 
-## 14. Physical Qualification Plan (Design Only — Mint Later)
+## 14. Embedded Physical Qualification Procedure (Historical Milestone Design)
+
+This section preserves the M3 milestone-design procedure. It is subordinate to
+the current exact-candidate qualification packet and executor prompt selected
+for an authorized run. It is not a current exact-candidate qualification
+packet. It grants no independent authority to access Mint, restart a service,
+deploy, activate M3, change a registry, or repeat a qualification attempt.
 
 **Gate 1 — Creation Witness:**
 ```
@@ -339,7 +360,8 @@ Do not modify the live repository. Tell me what happened.
 
 **Gate 2 — Persistence Witness:**
 1. Create m3-witness.txt via Gate 1
-2. Restart `ashley-agent.service` (supported deployment flow)
+2. Under a separately authorized exact-candidate qualification packet, restart
+   `ashley-agent.service` as specified by that packet
 3. Ask Ashley to inspect/read the SAME candidate workspace
 4. Verify workspaceId resolves, file still contains m3-witness-ok
 - Proves: workspace process lifetime != workspace state lifetime
@@ -353,7 +375,7 @@ Do not modify the live repository. Tell me what happened.
 Do not collapse states:
 ```
 DESIGN_ACCEPTED ≠ IMPLEMENTED ≠ LOCALLY_TESTED ≠ PHYSICALLY_QUALIFIED
-≠ RELEASED ≠ DEPLOYED ≠ CAPABILITY_PROMOTED ≠ PRODUCTION_WITNESSED
+≠ RELEASE_QUALIFIED ≠ DEPLOYED ≠ CAPABILITY_PROMOTED ≠ PRODUCTION_WITNESSED
 ≠ PRODUCTION_ACCEPTED
 ```
 

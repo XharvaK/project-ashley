@@ -1,8 +1,17 @@
 # Sandbox Design — Threat Model and OS Boundary
 
-**Status:** Design/specification. Wave 07b fake broker is accepted and the Wave
-07c daemon/transport is Wave_accepted but not release-qualified; neither is
-deployed to Mint.
+> **HISTORICAL SANDBOX V1 — SUPERSEDED FOR SANDBOX V2 EXECUTION TOPOLOGY.**
+> This document preserves the Wave 07 broker design and its provenance. The
+> current Sandbox V2 M-series uses direct, unprivileged Bubblewrap and MUST NOT
+> reconnect `ashley-exec-broker`, the V1 Unix socket, signed broker envelopes,
+> or V1 `source_*` scopes by implication. Use
+> [`architecture/sandbox/ASHLEY_SANDBOX_V2_ROADMAP.md`](architecture/sandbox/ASHLEY_SANDBOX_V2_ROADMAP.md)
+> for current direction. Threat-model, authority-separation, resource, and
+> evidence lessons are salvageable only when restated by a V2 contract.
+
+**Historical status:** Design/specification. Wave 07b fake broker was accepted
+and the Wave 07c daemon/transport was `Wave_accepted` but not
+release-qualified in this record.
 
 This document specifies the threat model, trust boundaries, and OS-boundary topology
 for Ashley's dedicated execution broker on Linux Mint. It operationalizes

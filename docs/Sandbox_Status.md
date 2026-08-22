@@ -1,13 +1,19 @@
 # Sandbox Status — Readiness, Snapshot Shape, Degradation
 
-**Status:** Local status/observability reference for the sandbox broker
+> **HISTORICAL SANDBOX V1 STATUS SNAPSHOT.** This file describes V1 broker
+> readiness and isolation work. It is not current Sandbox V2 readiness. Use
+> [`architecture/sandbox/ASHLEY_SANDBOX_V2_ROADMAP.md`](architecture/sandbox/ASHLEY_SANDBOX_V2_ROADMAP.md)
+> and current V2 milestone evidence. Do not infer a V2 broker dependency from
+> this record.
+
+**Historical status:** Local status/observability reference for the sandbox broker
 (`apps/sandbox-broker`, Sandbox Wave 4, Commit 12, SANDBOX-ISOLATION-01).
 Companion to [`Sandbox_Operations.md`](Sandbox_Operations.md). Production
 deployment, key provisioning, and service install are out of scope for this
 wave.
 
-This document is operational, not constitutional. It does not override
-[`Sandbox_Design.md`](Sandbox_Design.md).
+This document is operational, not constitutional. It does not override the
+current V2 roadmap.
 
 ## 0. SANDBOX-ISOLATION-02E source status
 

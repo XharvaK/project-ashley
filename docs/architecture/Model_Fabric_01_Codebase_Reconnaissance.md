@@ -1,7 +1,18 @@
-# MODEL-FABRIC-01 Codebase Reconnaissance
+# Model Fabric Codebase Reconnaissance
+
+> **STATUS: HISTORICAL SOURCE SNAPSHOT**
+>
+> This document describes source at the exact baselines below. It does not
+> describe the current worktree indefinitely. The current semantic owner is the
+> [Model Fabric Architecture](Model_Fabric_Architecture.md). Frozen field
+> contracts remain in the
+> [Model Fabric Contract](Model_Fabric_01_Contract_Draft.md). Current route
+> bindings are documented in [`docs/Routing_Status.md`](../Routing_Status.md)
+> from source/config.
 
 - **Research date:** 2026-08-13
 - **Mode:** documentation and codebase reconnaissance only
+- **Canonical phase name:** Model Fabric; the historical filename is retained for provenance
 - **Implementation status:** not implemented, not activated, not deployed
 - **General source baseline:** local `master` at `82b30a9d218855bd1373121fc5a656a3403b1c85`
 - **Engineering-source baseline:** `origin/master` at `2a4b448b74b407aad3dfa6cecb593c167e9f0501`

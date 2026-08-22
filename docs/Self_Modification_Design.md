@@ -1,6 +1,54 @@
 # Self-Modification Design — Change Proposals and Isolated Source Workflow
 
-**Status:** Design only. Not deployed.
+> **SALVAGEABLE SEMANTICS / SUPERSEDED MECHANISM.** The change-set semantics in
+> this historical design remain reference input for Sandbox V2 M5/M7 and
+> Self-Change Governance: target classification, exact base identity,
+> stale-base handling, source cleanliness, secret exclusion, system-derived
+> receipts, immutable audit history, advisory artifacts, separate Ashley and
+> Doc positions, and approval-is-not-effect. Its Wave 07 broker topology,
+> signed `source_*` scopes, broker workspace layout, broker-owned execution
+> path, self-improvement clone, and candidate-Git workflow are not current
+> Sandbox V2 mechanisms. Use
+> [`architecture/sandbox/ASHLEY_SANDBOX_V2_ROADMAP.md`](architecture/sandbox/ASHLEY_SANDBOX_V2_ROADMAP.md)
+> before applying any contract from this file. Self-change composition (organic
+> learning ≠ runtime/source change ≠ foundational identity/governance change;
+> M5/M7 ≠ authority to change Ashley) is owned by
+> [`architecture/Ashley_Cross_Phase_Architecture.md`](architecture/Ashley_Cross_Phase_Architecture.md).
+
+**Historical status:** Wave 08 design and local implementation provenance. Not
+current Sandbox V2 execution authority and not deployment authority.
+
+## Current Self-Change Governance disposition
+
+Self-Change Governance is an extension of existing owners. The composition
+owner is
+[`architecture/Ashley_Cross_Phase_Architecture.md`](architecture/Ashley_Cross_Phase_Architecture.md)
+§6.1. It is not a new roadmap phase, execution plane, generic
+self-modification capability, independent cognitive owner, or standalone
+document. Bounded research and contract reconciliation are required before
+implementation.
+
+The paths remain separate:
+
+| Path | Current owner | Disposition |
+|---|---|---|
+| Organic learning and revisable interpretation | Learning, Memory Evidence, Identity, Mind State, Thought, Agency, and Reflection as applicable | Extend existing provenance, evaluation, rollback, qualification, and capability-promotion rules. |
+| Foundational Identity or governance change | Identity review, constitutional governance, Ashley's position, and Doc's explicit decision | Preserve consultation and exact revision provenance. Neither self-confidence nor approval applies the change. |
+| Code, prompt, procedure, model-policy, or architecture change | Advisory change proposal plus the current Sandbox V2 M5/M6/M7 owners | Author, verify, and effect only through the current milestone contracts. |
+
+The current source includes change-proposal schema, lifecycle, routing,
+source-archive, stale-base, patch-guard, secret-guard, verification, and owner
+surfaces under `apps/agent-service/src/core/change-proposal/`. Historical V1
+broker integration and the default-off engineering self-improvement source
+remain implementation provenance. They do not become Sandbox V2 authority,
+activation evidence, deployment evidence, or promotion evidence.
+
+Required research must reconcile constitutional compatibility, proposal and
+source provenance, exact-base and target classification, rollback or
+compensation limits, deterministic evaluation, semantic evaluation where
+meaning changes, exact-candidate qualification, independent review, and
+separate explicit promotion. No self-change may silently merge the organic,
+foundational, and engineering paths.
 
 This document specifies how Ashley inspects herself, works on isolated source copies,
 runs bounded verification through the Wave 07 broker, and presents change proposals

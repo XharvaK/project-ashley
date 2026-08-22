@@ -8,7 +8,7 @@ and [`Architecture_Review_Protocol.md`](Architecture_Review_Protocol.md).
 
 **Critical rule:** Passing tests does not accept a wave. Each wave advances only
 via a gate packet plus Doc's explicit sign-off phrase. Acceptance never implies
-`apply`, **Release_qualified**, or **Deployed**.
+`apply`, **RELEASE_QUALIFIED**, or **Deployed**.
 
 ---
 
@@ -20,7 +20,7 @@ flowchart TD
   implPresent[Implementation_present]
   locallyVerified[Locally_verified]
   waveAccepted[Wave_accepted]
-  releaseQualified[Release_qualified]
+  releaseQualified[RELEASE_QUALIFIED]
   deployed[Deployed]
   designAccepted --> implPresent
   implPresent --> locallyVerified
@@ -35,12 +35,101 @@ flowchart TD
 | **Implementation present** | Code exists; not yet trusted | Engineering reports completion |
 | **Locally verified** | Builds, migrations, security/offline checks, targeted tests pass | Agent produces gate packet with command output |
 | **Wave accepted** | Doc explicitly accepts completion report | Doc says e.g. "Accept Wave 06" |
-| **Release-qualified** | Separate Mint/live validation authorized | Doc authorizes explicitly |
+| **RELEASE_QUALIFIED** | Separate Mint/live validation authorized | Doc authorizes explicitly |
 | **Deployed** | Separate deploy authorization | Doc authorizes explicitly |
 
 Design waves (07, 08, 09, 10) use **Design_complete** while awaiting Doc review, then
 **Design_accepted** after explicit design sign-off. Implementation waves use the
 full ladder from **Implementation_present** onward.
+
+## Current M-series acceptance ladder
+
+The historical Wave ladder above remains exact provenance for Wave records. It
+does not govern current Sandbox V2 milestone completion by itself. Sandbox V2
+uses this expanded ladder:
+
+```text
+DESIGN ACCEPTED
+  -> IMPLEMENTED
+    -> LOCALLY VERIFIED
+      -> INDEPENDENTLY REVIEWED
+        -> PHYSICALLY QUALIFIED
+          -> RELEASE_QUALIFIED
+            -> DEPLOYED
+              -> CAPABILITY PROMOTED
+                -> PRODUCTION WITNESSED
+                  -> PRODUCTION ACCEPTED
+```
+
+Each transition requires evidence bound to the exact candidate, contract, and
+environment required by that stage. No stage implies a later stage. Historical
+`Wave_accepted` records remain owner-acceptance provenance for their exact V1
+scope. They MUST NOT be automatically relabeled as V2 independent review,
+physical qualification, `RELEASE_QUALIFIED`, deployment, promotion, production witness,
+or production acceptance.
+
+`RELEASE_QUALIFIED` is the canonical release-readiness stage for both the
+historical Wave ladder and the current M-series ladder. `RELEASED` is not a
+separate stage. Historical `Release_qualified`, `Release-qualified`, and
+`release-qualified` spellings are exact semantic aliases for
+`RELEASE_QUALIFIED`; they do not grant a new or later authority state.
+
+The [Sandbox V2 M-Series Roadmap](architecture/sandbox/ASHLEY_SANDBOX_V2_ROADMAP.md)
+owns milestone-specific evidence requirements and predecessor gates. M4 remains
+blocked until exact-candidate M3 is `PRODUCTION ACCEPTED`. A prior-SHA M3
+physical result does not qualify a later SHA. Today’s pending gate and SHA
+maturity are not recorded here. Resolve them live from Git, source,
+exact-candidate packets, or production observation. If they cannot be
+established from permitted evidence: `UNKNOWN`.
+
+---
+
+## Verification lifecycle
+
+**Status:** Authoritative verification-economics owner for Project Ashley.
+Passing tests does not accept a wave, qualify a release, deploy, promote a
+capability, or prove production acceptance.
+
+Verification is selected by the claim being made, not by ritual.
+
+```text
+MORE TESTS ≠ MORE USEFUL EVIDENCE
+GENERIC CI ≠ PHYSICAL QUALIFICATION
+```
+
+```text
+ITERATION
+  -> focused falsification tests for the changed risk
+
+SETTLEMENT
+  -> affected regression + build/typecheck where relevant
+
+CANDIDATE FREEZE
+  -> one full corpus gate
+
+PHYSICAL QUALIFICATION
+  -> real host/environment evidence only where the claim depends on it
+
+PRODUCTION
+  -> exact-candidate production witness / acceptance
+```
+
+| Stage | Use when | Do not use as |
+|---|---|---|
+| `ITERATION` | Changing logic, docs, or contracts; need a cheap falsifier | Physical isolation proof; promotion |
+| `SETTLEMENT` | Closing a local change set that can regress nearby behavior | Mint Bubblewrap proof; production acceptance |
+| `CANDIDATE FREEZE` | Declaring a candidate ready for a corpus gate | A substitute for physical or production claims |
+| `PHYSICAL QUALIFICATION` | Claims about real Bubblewrap, process, filesystem, or host timing | Docs-only edits; generic CI green |
+| `PRODUCTION` | Exact-candidate witness on the production host/capability surface | Local tests; resemblance to an older SHA |
+
+Docs-only changes require documentation verification, not Bubblewrap and not a
+full corpus. Schema, migration, and data-plane changes require targeted
+authority/migration regressions plus settlement build/typecheck where relevant,
+and must not use the production database as a test fixture. Capability
+promotion requires an exact-candidate production witness.
+
+The worker-facing path matrix in [`AGENTS.md`](../AGENTS.md) summarizes
+selection only. This section owns the semantics.
 
 ---
 
@@ -101,23 +190,23 @@ Never mark **Wave_accepted** until Doc explicitly signs off.
 
 ---
 
-## Current wave status (living)
+## Historical V1 wave status (living provenance)
 
 | Wave | Stage | Gate packet |
 |------|-------|-------------|
 | 00–05 | **Implementation_present** (`legacy_local`; Doc acknowledged 2026-08-04; not Wave_accepted) | [`handoffs/waves-00-05-implementation-record.md`](handoffs/waves-00-05-implementation-record.md) |
-| 06 | **Wave_accepted** (not release-qualified) | [`handoffs/wave-06-gate-packet.md`](handoffs/wave-06-gate-packet.md) |
+| 06 | **Wave_accepted** (not `RELEASE_QUALIFIED`) | [`handoffs/wave-06-gate-packet.md`](handoffs/wave-06-gate-packet.md) |
 | 07 | **Design_accepted** | [`handoffs/wave-07-design-gate-packet.md`](handoffs/wave-07-design-gate-packet.md) |
-| 07b | **Wave_accepted** (not release-qualified) | [`handoffs/wave-07b-gate-packet.md`](handoffs/wave-07b-gate-packet.md) |
-| 07c | **Wave_accepted** (not release-qualified) | [`handoffs/wave-07c-gate-packet.md`](handoffs/wave-07c-gate-packet.md) |
+| 07b | **Wave_accepted** (not `RELEASE_QUALIFIED`) | [`handoffs/wave-07b-gate-packet.md`](handoffs/wave-07b-gate-packet.md) |
+| 07c | **Wave_accepted** (not `RELEASE_QUALIFIED`) | [`handoffs/wave-07c-gate-packet.md`](handoffs/wave-07c-gate-packet.md) |
 | 08 | **Design_accepted** | [`handoffs/wave-08-design-gate-packet.md`](handoffs/wave-08-design-gate-packet.md) |
-| 08b | **Wave_accepted** (not release-qualified) | [`handoffs/wave-08b-gate-packet.md`](handoffs/wave-08b-gate-packet.md) |
+| 08b | **Wave_accepted** (not `RELEASE_QUALIFIED`) | [`handoffs/wave-08b-gate-packet.md`](handoffs/wave-08b-gate-packet.md) |
 | 09 | **Design_accepted** | [`handoffs/wave-09-design-gate-packet.md`](handoffs/wave-09-design-gate-packet.md) |
-| 09b | **Wave_accepted** (not release-qualified) | [`handoffs/wave-09b-gate-packet.md`](handoffs/wave-09b-gate-packet.md) |
+| 09b | **Wave_accepted** (not `RELEASE_QUALIFIED`) | [`handoffs/wave-09b-gate-packet.md`](handoffs/wave-09b-gate-packet.md) |
 | 10 | **Design_accepted** | [`handoffs/wave-10-design-gate-packet.md`](handoffs/wave-10-design-gate-packet.md) |
-| 10a | **Wave_accepted** (not release-qualified) | [`handoffs/wave-10a-gate-packet.md`](handoffs/wave-10a-gate-packet.md) |
-| 10b | **Wave_accepted** (not release-qualified) | [`handoffs/wave-10b-gate-packet.md`](handoffs/wave-10b-gate-packet.md) |
-| 10c | **Wave_accepted** (not release-qualified) | [`handoffs/wave-10c-gate-packet.md`](handoffs/wave-10c-gate-packet.md) |
+| 10a | **Wave_accepted** (not `RELEASE_QUALIFIED`) | [`handoffs/wave-10a-gate-packet.md`](handoffs/wave-10a-gate-packet.md) |
+| 10b | **Wave_accepted** (not `RELEASE_QUALIFIED`) | [`handoffs/wave-10b-gate-packet.md`](handoffs/wave-10b-gate-packet.md) |
+| 10c | **Wave_accepted** (not `RELEASE_QUALIFIED`) | [`handoffs/wave-10c-gate-packet.md`](handoffs/wave-10c-gate-packet.md) |
 
 Update this table when gate packets are produced or Doc signs off.
 
@@ -126,10 +215,13 @@ Doc acknowledged the existing local implementation on 2026-08-04. They remain
 outside the formal **Wave_accepted** ladder until separately verified and
 accepted.
 
-**Next authorized gate:** Release-qualification review for the Mint sandbox.
-Wave 07c acceptance is an implementation sign-off only; no live services, Mint
-installation, credentials, network adapters, production dispatch, `apply`,
-commit, push, or deploy is authorized by wave acceptance alone.
+**Historical next-gate note:** This record formerly pointed from Wave 07c to a
+V1 Mint broker release-qualification review. That is not the current Sandbox
+V2 next gate. For V2, M4 is blocked until M3 satisfies its exact-candidate gate
+under the expanded ladder. Wave 07c acceptance remains V1 implementation
+provenance only. It authorizes no live services, Mint installation,
+credentials, network adapters, production dispatch, `apply`, commit, push, or
+deploy.
 
 ---
 
@@ -138,3 +230,4 @@ commit, push, or deploy is authorized by wave acceptance alone.
 - [`Vision_Implementation_Map.md`](Vision_Implementation_Map.md) — commitment tracking
 - [`Architecture_Index.md`](Architecture_Index.md) — module tree and governance index
 - [`Architecture_Review_Protocol.md`](Architecture_Review_Protocol.md) — boundary review artifacts
+- [`architecture/sandbox/ASHLEY_SANDBOX_V2_ROADMAP.md`](architecture/sandbox/ASHLEY_SANDBOX_V2_ROADMAP.md) — current Sandbox V2 milestones and acceptance gates

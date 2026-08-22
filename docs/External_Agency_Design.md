@@ -1,6 +1,27 @@
 # External Agency Design — Account and External-Action Broker
 
-**Status:** Design only. Not deployed.
+> **SALVAGEABLE SEMANTICS / SUPERSEDED MECHANISM.** This historical Wave
+> design remains reference input for capability and action separation,
+> credential custody through opaque references and bounded sessions, privacy,
+> payload binding, idempotency, emergency stop, receipts, reconciliation,
+> `OUTCOME_UNKNOWN`, untrusted external data, and forget semantics. Its Wave
+> dependency gates, mandatory separate-broker topology, fixed signer and scope
+> names, and fixed action/risk taxonomy are not the current universal
+> architecture. The authoritative cross-cutting owner is
+> [`architecture/External_Effect_and_Authority_Architecture.md`](architecture/External_Effect_and_Authority_Architecture.md).
+
+**Current-source implementation presence:** The agent-service contains external
+action schema, lifecycle, policy, owner surfaces, and metadata under
+`apps/agent-service/src/core/external-agency/`. The separate
+`apps/external-broker/` package contains vault, policy, dispatch, receipt, and
+reconciliation mechanisms. Only its fake local adapter is present. No
+production external-broker instantiation was found outside its package factory
+and tests. This architecture is not deployed or qualified for a real adapter,
+account, credential path, provider, host, or external effect.
+
+**Historical body status:** Wave external-account and external-action broker
+design plus implementation provenance. It is not current cross-cutting
+authority, deployment authority, or proof of real-mechanism qualification.
 
 This document specifies the platform-neutral authority boundary for future external
 accounts and actions: action policy, credential vault, dispatch FSM, public-privacy

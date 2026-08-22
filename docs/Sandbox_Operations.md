@@ -1,15 +1,22 @@
 # Sandbox Operations — Recovery, Sweep, Ceilings, Reconciliation
 
-**Status:** Local hardening runbook for the sandbox broker
+> **HISTORICAL SANDBOX V1 OPERATIONS.** This runbook describes the V1 broker.
+> It is not the operating model for Sandbox V2. Bounded cleanup, crash
+> finality, resource ceilings, and reconciliation are salvageable semantics;
+> the broker store, session ledger, Unix IPC, and workspace sweep topology are
+> not current V2 contracts. See
+> [`architecture/sandbox/ASHLEY_SANDBOX_V2_ROADMAP.md`](architecture/sandbox/ASHLEY_SANDBOX_V2_ROADMAP.md).
+
+**Historical status:** Local hardening runbook for the sandbox broker
 (`apps/sandbox-broker`, Sandbox Wave 4, Commit 12). Reflects the implemented
 local broker behavior. Production deployment to Linux Mint, key provisioning,
 and service install are out of scope for this wave and are not authorized by
 local verification alone (see [`Sandbox_Design.md`](Sandbox_Design.md) gate
 status).
 
-This document is operational, not constitutional. It sits below
-[`Sandbox_Design.md`](Sandbox_Design.md) in the authority chain and does not
-override it.
+This document is operational, not constitutional. Within the V1 record it sat
+below [`Sandbox_Design.md`](Sandbox_Design.md). Neither document overrides the
+current V2 roadmap.
 
 ---
 

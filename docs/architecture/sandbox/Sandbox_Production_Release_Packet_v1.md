@@ -1,5 +1,11 @@
 # ASHLEY SANDBOX PRODUCTION RELEASE PACKET v1
 
+> **HISTORICAL SANDBOX V1 RELEASE RECORD.** This packet concerns the retired
+> broker execution topology. It does not govern, qualify, release, deploy, or
+> promote Sandbox V2. Current V2 authority lives in
+> [`ASHLEY_SANDBOX_V2_ROADMAP.md`](ASHLEY_SANDBOX_V2_ROADMAP.md). Preserve this
+> file as exact-scope V1 provenance only.
+
 Prepared: 2026-08-09
 
 Scope: read-only release planning for the existing Ashley sandbox broker and
