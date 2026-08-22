@@ -32,8 +32,8 @@ function Invoke-MintBash {
   $tmp = Join-Path $env:TEMP ("ashley-mint-" + [guid]::NewGuid().ToString() + ".sh")
   [IO.File]::WriteAllText($tmp, $remote, [Text.UTF8Encoding]::new($false))
   try {
-    Get-Content -LiteralPath $tmp -Raw | & ssh -p $Port -o BatchMode=yes -o StrictHostKeyChecking=accept-new $target "tr -d '\r' | bash -s"
-    return $LASTEXITCODE
+    Get-Content -LiteralPath $tmp -Raw | & ssh -p $Port -o BatchMode=yes -o StrictHostKeyChecking=accept-new $target "tr -d '\r' | bash -s" | Out-Host
+    return [int]$LASTEXITCODE
   } finally {
     Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
   }
