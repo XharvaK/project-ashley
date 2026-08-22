@@ -161,20 +161,27 @@ export function describeSandboxV2Availability(options?: {
 export function describeCandidateWorkspaceAvailability(options?: {
   db?: DatabaseSync;
   masterMode?: CognitionMode;
+  /** Test seam: skip live capability lookup when provided. */
+  canInfluence?: boolean;
+  /** Test seam: skip live registry/substrate lookup when provided. */
+  registryAllows?: boolean;
 }): string {
   if (!options?.db) {
     return "Candidate workspace (M3): unavailable (no db for capability check); cannot offer candidate workspace experiments this turn.";
   }
-  const canInfluence = (() => {
-    try {
-      return capabilityCanInfluence(options.db, "project_experimentation", options.masterMode);
-    } catch {
-      return false;
-    }
-  })();
-  const registryAllows = canOfferCandidateWorkspace(options.db);
+  const canInfluence =
+    options.canInfluence ??
+    (() => {
+      try {
+        return capabilityCanInfluence(options.db, "project_experimentation", options.masterMode);
+      } catch {
+        return false;
+      }
+    })();
+  const registryAllows =
+    options.registryAllows ?? canOfferCandidateWorkspace(options.db);
   if (canInfluence && registryAllows) {
-    return "Candidate workspace (M3): available (project_experimentation active and candidateWorkspaceAllowed true; bounded read-only experimentation on private durable copies).";
+    return "Candidate workspace (M3): available (project_experimentation active and candidateWorkspaceAllowed true; bounded typed mutation of private durable candidate copies; not live-repository mutation).";
   }
   return `Candidate workspace (M3): ${
     !canInfluence

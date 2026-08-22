@@ -3,6 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import { openNuclearDb } from "../db.js";
 import {
   composeSelfCapabilityContext,
+  describeCandidateWorkspaceAvailability,
   describeSandboxV2Availability,
 } from "./capability-self-model.js";
 
@@ -76,6 +77,32 @@ describe("composeSelfCapabilityContext coexistence", () => {
     expect(context).toContain("Legacy sandbox broker (V1):");
     expect(context).toContain("Sandbox V2:");
     expect(context).not.toMatch(/^Sandboxed execution: broker IPC disabled/m);
+    db.close();
+  });
+});
+
+describe("describeCandidateWorkspaceAvailability", () => {
+  it("describes available M3 as typed candidate mutation, not read-only experimentation", () => {
+    const db = makeDb();
+    const line = describeCandidateWorkspaceAvailability({
+      db,
+      canInfluence: true,
+      registryAllows: true,
+    });
+    expect(line).toBe(
+      "Candidate workspace (M3): available (project_experimentation active and candidateWorkspaceAllowed true; bounded typed mutation of private durable candidate copies; not live-repository mutation).",
+    );
+    expect(line).not.toMatch(/read-only experimentation/i);
+    db.close();
+  });
+
+  it("does not describe observe-only M3 as read-only experimentation", () => {
+    const db = makeDb();
+    const context = composeSelfCapabilityContext(db);
+    expect(context).not.toMatch(/read-only experimentation/i);
+    expect(describeCandidateWorkspaceAvailability({ db })).not.toMatch(
+      /read-only experimentation/i,
+    );
     db.close();
   });
 });

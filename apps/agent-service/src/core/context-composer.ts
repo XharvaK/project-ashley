@@ -353,6 +353,14 @@ export function projectInspectionEvidenceBlock(
   ].join("\n");
 }
 
+const M3_MUTATING_OPERATIONS = new Set([
+  "workspace.write_file",
+  "workspace.replace_file",
+  "workspace.edit_text",
+  "workspace.delete_file",
+  "workspace.create_directory",
+]);
+
 /**
  * Structured current-turn candidate-workspace evidence state for Expression.
  * Always present. Two orthogonal dimensions:
@@ -361,6 +369,9 @@ export function projectInspectionEvidenceBlock(
  *   canOfferCandidateWorkspace;
  * - workspaceStatus: what Ashley actually did or observed this turn
  *   (not_performed / verified_success / failed).
+ *
+ * Verified success is candidate-workspace evidence only. It never licenses a
+ * live-repository mutation claim.
  */
 export function candidateWorkspaceEvidenceBlock(
   license: OperationalClaimLicense | null | undefined,
@@ -372,16 +383,22 @@ export function candidateWorkspaceEvidenceBlock(
   const semanticsAvailable = [
     "Semantics: capabilityAvailable is the authoritative current capability state; workspaceStatus is what Ashley actually did or observed this turn.",
   ];
-  if (license?.profile === "workspace_experiment") {
+  if (license?.profile === "project_experimentation") {
     const truth = deriveOperationalTruth(license);
     if (truth.state === "verified_success" && observation) {
+      const candidateChanged = M3_MUTATING_OPERATIONS.has(observation.operation);
       return [
         "Candidate workspace evidence:",
         availableLine,
         "workspaceStatus = verified_success",
         "verifiedWorkspaceEffect = true",
+        `candidateWorkspaceChanged = ${candidateChanged}`,
+        "liveRepositoryUnchanged = true",
         ...semanticsAvailable,
         "Semantics: Ashley executed a candidate workspace operation this turn and holds verified evidence.",
+        candidateChanged
+          ? "Semantics: the private candidate workspace changed; the live repository did not."
+          : "Semantics: this verified candidate-workspace observation did not mutate the live repository.",
       ].join("\n");
     }
     if (license.state === "failed") {
@@ -390,9 +407,11 @@ export function candidateWorkspaceEvidenceBlock(
         availableLine,
         "workspaceStatus = failed",
         "verifiedWorkspaceEffect = false",
+        "liveRepositoryUnchanged = true",
         license.error ? `error = ${license.error}` : "error = unknown",
         ...semanticsAvailable,
         "Semantics: this turn's workspace attempt failed; the failure is about this attempt, not about capability.",
+        "Semantics: a failed candidate-workspace attempt is not live-repository mutation.",
       ].join("\n");
     }
   }

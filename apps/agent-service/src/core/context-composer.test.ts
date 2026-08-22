@@ -5,11 +5,14 @@ import { recordIdentityEntry } from "./identity/store.js";
 import { patchState } from "./state/store.js";
 import { upsertMindStateItem } from "./state/mind-items.js";
 import {
+  candidateWorkspaceEvidenceBlock,
   mindStateHeadline,
   operationalWorkBlock,
   stableIdentityBlock,
 } from "./context-composer.js";
 import { persistCoordinatorTasks } from "./sandbox/engineering-runs.js";
+import type { WorkspaceExperimentObservation } from "./types.js";
+import type { OperationalClaimLicense } from "./sandbox/engineering-types.js";
 
 const OWNER = "doc";
 
@@ -215,5 +218,106 @@ describe("operationalWorkBlock", () => {
     });
     expect(block).toBe("");
     db.close();
+  });
+});
+
+function verifiedWriteLicense(
+  overrides: Partial<OperationalClaimLicense> = {},
+): OperationalClaimLicense {
+  return {
+    state: "succeeded",
+    taskId: "v2-exp-1",
+    profile: "project_experimentation",
+    workspaceClaimEffect: {
+      verified: true,
+      projectId: "project-ashley",
+      workspaceId: "ws-m3-1",
+      operation: "workspace.write_file",
+      logicalRelativePath: "m3-witness.txt",
+      sourceSnapshotId: "snap_abc",
+      bytesWritten: 13,
+      completedAtMs: Date.now(),
+    },
+    ...overrides,
+  };
+}
+
+function writeObservation(
+  overrides: Partial<WorkspaceExperimentObservation> = {},
+): WorkspaceExperimentObservation {
+  return {
+    kind: "workspace_experiment_observation",
+    projectId: "project-ashley",
+    workspaceId: "ws-m3-1",
+    operation: "workspace.write_file",
+    verified: true,
+    executedAtMs: Date.now(),
+    logicalRelativePath: "m3-witness.txt",
+    bytesWritten: 13,
+    sourceSnapshotId: "snap_abc",
+    ...overrides,
+  };
+}
+
+describe("candidateWorkspaceEvidenceBlock", () => {
+  it("treats a verified project_experimentation write as verified_success, not not_performed", () => {
+    const block = candidateWorkspaceEvidenceBlock(
+      verifiedWriteLicense(),
+      writeObservation(),
+      { capabilityAvailable: true },
+    );
+    expect(block).toContain("capabilityAvailable = true");
+    expect(block).toContain("workspaceStatus = verified_success");
+    expect(block).toContain("verifiedWorkspaceEffect = true");
+    expect(block).toContain("candidateWorkspaceChanged = true");
+    expect(block).toContain("liveRepositoryUnchanged = true");
+    expect(block).toContain("the private candidate workspace changed; the live repository did not.");
+    expect(block).not.toContain("workspaceStatus = not_performed");
+  });
+
+  it("keeps capability available orthogonal from a failed this-turn attempt", () => {
+    const block = candidateWorkspaceEvidenceBlock(
+      {
+        state: "failed",
+        taskId: "v2-exp-2",
+        profile: "project_experimentation",
+        error: "hash_mismatch",
+      },
+      null,
+      { capabilityAvailable: true },
+    );
+    expect(block).toContain("capabilityAvailable = true");
+    expect(block).toContain("workspaceStatus = failed");
+    expect(block).toContain("verifiedWorkspaceEffect = false");
+    expect(block).toContain("liveRepositoryUnchanged = true");
+    expect(block).toContain("error = hash_mismatch");
+    expect(block).not.toContain("workspaceStatus = not_performed");
+  });
+
+  it("does not claim candidate mutation for a verified workspace read", () => {
+    const block = candidateWorkspaceEvidenceBlock(
+      verifiedWriteLicense({
+        workspaceClaimEffect: {
+          verified: true,
+          projectId: "project-ashley",
+          workspaceId: "ws-m3-1",
+          operation: "workspace.read_file",
+          logicalRelativePath: "m3-witness.txt",
+          sourceSnapshotId: "snap_abc",
+          bytesRead: 13,
+          completedAtMs: Date.now(),
+        },
+      }),
+      writeObservation({
+        operation: "workspace.read_file",
+        bytesWritten: undefined,
+        bytesRead: 13,
+      }),
+      { capabilityAvailable: true },
+    );
+    expect(block).toContain("workspaceStatus = verified_success");
+    expect(block).toContain("candidateWorkspaceChanged = false");
+    expect(block).toContain("liveRepositoryUnchanged = true");
+    expect(block).not.toContain("workspaceStatus = not_performed");
   });
 });
