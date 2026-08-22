@@ -131,6 +131,9 @@ npm run build --prefix "${ROOT}/apps/sandbox-tree"
 npm ci --prefix "${ROOT}/apps/sandbox-broker"
 npm run build --prefix "${ROOT}/apps/sandbox-broker"
 
+npm ci --prefix "${ROOT}/apps/sandbox-policy"
+npm run build --prefix "${ROOT}/apps/sandbox-policy"
+
 npm ci --prefix "${ROOT}/apps/sandbox-v2"
 npm run build --prefix "${ROOT}/apps/sandbox-v2"
 

@@ -3,30 +3,29 @@
 **Milestone:** Sandbox V2 M4 (Candidate Verification)  
 **Predecessor:** M3 `PRODUCTION ACCEPTED` at SHA `28e157a4d2029c3196559fd2569d73e48c53e1b3`  
 ([`docs/handoffs/M3_PRODUCTION_ACCEPTANCE.md`](M3_PRODUCTION_ACCEPTANCE.md))  
-**Packet date:** 2026-08-22  
+**M4 qualification candidate SHA:** `553553b0d0ee6a6d2cabd8928b901400e5a1ea74`  
+**Packet date:** 2026-08-22 (exact-candidate delta)  
 **This packet status:** `PROPOSED FOR ACCEPTANCE`  
-**Not claimed:** `PRODUCTION ACCEPTED`, capability promotion, deployment, Discord witness, or production enablement
+**Not claimed:** `PRODUCTION ACCEPTED`, capability promotion, Discord witness, or production M4 enablement
 
-This file consolidates design, implementation, and Mint physical evidence so a reviewer can decide whether M4 may move from **implemented + physically qualified (kernel, overlay)** toward **PRODUCTION ACCEPTED**. It does not itself enable M4.
+This file consolidates design, implementation, and Mint physical evidence so a reviewer can decide whether M4 may move from **implemented + physically qualified on an exact SHA** toward **PRODUCTION ACCEPTED**. It does not itself enable M4.
 
 ---
 
-## 0. Honesty: two SHAs / two trees
+## 0. Honesty: candidate identity
 
-M4 is **not** on the production checkout `HEAD`.
+**Before this delta:** Mint M4 kernel evidence used a deleted `/tmp` overlay on production `28e157a` (M4 absent from that checkout). That overlay run was valid mechanical evidence and is **not** exact-candidate evidence.
+
+**After this delta:**
 
 | Tree | SHA | Porcelain | M4 source |
 |---|---|---|---|
-| Production Mint `~/project-ashley` (qualification host) | `28e157a4d2029c3196559fd2569d73e48c53e1b3` | empty at qualification time | **Absent** (`apps/sandbox-v2/src/verification/` missing; harness missing) |
-| This worktree (packet authoring) | `28e157a4d2029c3196559fd2569d73e48c53e1b3` on `master` | **dirty** — M4 implementation uncommitted | **Present** (uncommitted / untracked) |
+| Production Mint `~/project-ashley` | `553553b0d0ee6a6d2cabd8928b901400e5a1ea74` | empty at qualification | **Present** in this checkout (`apps/sandbox-v2/src/verification/`, harness committed) |
+| Qualifying commit | `553553b` `feat(sandbox): add M4 candidate verification boundary` | — | Exact candidate |
 
-Live `git` at packet writing (`C:\Users\Xharv\Projects\composer-assistant`):
+**M4 source for Mint run:** exact committed SHA `553553b0d0ee6a6d2cabd8928b901400e5a1ea74` in `~/project-ashley`. No overlay. No `/tmp` kernel copy. No manual file injection.
 
-- **HEAD:** `28e157a4d2029c3196559fd2569d73e48c53e1b3`
-- **branch:** `master`
-- **status:** M4 lives in modified `apps/sandbox-v2`, `apps/sandbox-policy`, `apps/agent-service`, and untracked `apps/sandbox-v2/src/verification/`, `scripts/mint/m3-m4-physical-qualification.mjs`, and related tests. Production Mint checkout was not this dirty tree.
-
-**M4 physical qualification source:** a **temporary overlay** of that worktree kernel onto a `/tmp` clone of production `28e157a`, compiled there, executed, then **deleted**. Overlay is not production state. Do not treat production `HEAD` as containing M4.
+Predecessor `28e157a` remains the M3 production-accepted SHA. M4 is a descendant commit on `master`.
 
 ---
 
@@ -63,21 +62,21 @@ Stages are independent. No stage implies a later stage.
 | Stage | Status in this packet | Evidence bound |
 |---|---|---|
 | **Design accepted** | **PASS** | [`ASHLEY_SANDBOX_V2_M4_DESIGN.md`](../architecture/sandbox/ASHLEY_SANDBOX_V2_M4_DESIGN.md) header `DESIGN ACCEPTED` |
-| **Implemented** | **PRESENT IN WORKTREE, NOT ON PRODUCTION HEAD** | Phases A–F source listed in §3. Production `28e157a` does not contain M4. |
-| **Locally verified** | **NOT RE-EXECUTED IN THIS PACKET** | Phase tests exist in the worktree (`recipe-catalog.test.ts`, `snapshot.test.ts`, `executor.test.ts`, `m4-phase-d.test.ts`, `m4-phase-e.test.ts`, `m4-phase-f.test.ts`). This packet does not attach a fresh corpus log. |
+| **Implemented** | **PASS at `553553b`** | Phases A–F in that commit. |
+| **Locally verified** | **PASS (pre-commit)** | `apps/sandbox-policy`: 118 passed. `apps/sandbox-v2`: 118 passed, 3 skipped. `apps/agent-service`: 1316 passed, 2 skipped. Builds: policy, sandbox-v2, agent-service `tsc` clean after a Phase F spy typing fix. Tests do not accept M4. |
 | **Independently reviewed** | **NOT CLAIMED** | No separate independent-review packet is attached here. |
-| **Physically qualified** | **PASS WITH NOTES** | Mint kernel harness §5–§6. Notes: overlay source; honest `verified_failure`; reduced `touch` probe not EROFS proof; kernel does not enforce `verificationAllowed` (agent layer does). |
-| **RELEASE_QUALIFIED** | **NO** | M4 is not an exact production-checkout candidate. |
-| **Deployed** | **NO** | Production checkout remains M3 SHA without M4. |
+| **Physically qualified** | **PASS WITH NOTES** | Exact-SHA Mint kernel harness §5–§6. Notes: honest `verified_failure`; reduced `touch` probe not EROFS proof; kernel does not enforce `verificationAllowed` (agent layer does). |
+| **RELEASE_QUALIFIED** | **NO** | Not claimed. Exact-SHA physical kernel evidence is not a full freeze packet. |
+| **Deployed (checkout)** | **CHECKOUT MATCHES CANDIDATE** | Mint `~/project-ashley` is `553553b`. Coherent `update.sh` failed until `sandbox-policy` was built; agent+discord were then started at the same SHA. Code presence ≠ M4 enabled. |
 | **Capability promoted** | **NO** | `candidate_verification` not promoted. Ingress branch defaults `available: false` / `candidate_verification_unqualified`. |
 | **Production witnessed** | **NO** | No Discord DM witness. |
 | **Production accepted** | **NOT ASSIGNED** | Reviewer/Doc decision only. This file proposes; it does not accept. |
 
 ---
 
-## 3. Implementation present (worktree)
+## 3. Implementation present (`553553b`)
 
-Not a claim that production runs this code.
+Source is in the qualification candidate commit. Running production M4 influence is still closed.
 
 ### Phase A — Recipe catalog
 
@@ -135,7 +134,7 @@ Source: `apps/agent-service/src/core/sandbox/m4-phase-f.test.ts`
 
 ## 4. Host (physical qualification)
 
-Recorded by the M4 harness at `2026-08-22T18:34:10.093Z` and by the M3 substrate run the same evening.
+Recorded by the exact-SHA M4 harness at `2026-08-22T19:15:08.260Z` and M3 substrate at `2026-08-22T19:14:48.188Z`.
 
 | Fact | Value |
 |---|---|
@@ -146,7 +145,7 @@ Recorded by the M4 harness at `2026-08-22T18:34:10.093Z` and by the M3 substrate
 | bwrap | bubblewrap 0.9.0 (`/usr/bin/bwrap`) |
 | Node (declared) | v22.23.2 at `/opt/node/bin/node` → nvm prefix `/home/xarvak/.nvm/versions/node/v22.23.2` |
 | TypeScript | Version 5.9.3 at `/opt/node/lib/node_modules/typescript/bin/tsc` |
-| Production SHA | `28e157a4d2029c3196559fd2569d73e48c53e1b3` |
+| Production SHA | `553553b0d0ee6a6d2cabd8928b901400e5a1ea74` |
 | Production branch | `master` |
 | Production git status | porcelain empty (harness `liveBefore` / `liveAfter`) |
 
@@ -156,21 +155,21 @@ Declared toolchain: `/opt/node` symlink to the nvm prefix. Identity `mint:node-v
 
 ## 5. M3 evidence (independent)
 
-**Command** (production checkout, no M4 overlay required):
+**Command** (production checkout at `553553b`, no overlay):
 
 ```bash
 cd ~/project-ashley
 node scripts/mint/m3-substrate-qualification.mjs --save-artifacts --json
 ```
 
-Artifact: Mint `/tmp/m3-phys-qual.json` (copied locally as untracked `m3-phys-qual.json`). Timestamp `2026-08-22T18:26:54.573Z`.
+Artifact: Mint `/tmp/m3-phys-qual-553553b.json`. Timestamp `2026-08-22T19:14:48.188Z`.
 
 | Field | Value |
 |---|---|
 | suite | `PROJECT_ASHLEY_SANDBOX_V2_M3_SUBSTRATE_QUALIFICATION` |
 | **verdict** | **M3 SUBSTRATE QUALIFIED** |
 | **physicalVerdict** | **PASS** |
-| workspace ID | `aKylKnBlUj2Gu-AbZlK2vw` |
+| workspace ID | `zAvKz4Ac-PIUBgdBnWZtHQ` |
 | B1–B17 | each `physicalVerdict: PASS` |
 | B7 live repo | `liveMutated: false`; sha256 `cf638cbb32331a0d99110697fb5f9ff790a11c15749bbc287a132bcc0bcc708e` |
 | B11 network | `sandboxHitsDelta: 0`, sandbox isolated |
@@ -189,9 +188,9 @@ Artifact: Mint `/tmp/m3-phys-qual.json` (copied locally as untracked `m3-phys-qu
 node scripts/mint/m3-m4-physical-qualification.mjs
 ```
 
-**How it was run:** production `HEAD` lacked M4 and lacked this script. Operator copied the already-implemented kernel and harness into `/tmp/ashley-m4-qual-20260822T182756Z` (clone of `28e157a` + overlay). Compiled with operator `/opt/node` TypeScript. **No `npm install` during verification.** Overlay **deleted** after the run.
+**How it was run:** from `~/project-ashley` at `553553b`. Harness and kernel were already in that commit. `sandbox-v2` `dist/` was produced by the Mint activation build. **No overlay. No `/tmp` source injection. No copied kernel.**
 
-Artifact: Mint `/tmp/m4-phys-qual.json` (local untracked `m4-phys-qual.json`). Suite `PROJECT_ASHLEY_SANDBOX_V2_M3_M4_PHYSICAL_QUALIFICATION`.
+Artifact: Mint `/tmp/m4-phys-qual-553553b.json`. Suite `PROJECT_ASHLEY_SANDBOX_V2_M3_M4_PHYSICAL_QUALIFICATION`.
 
 ### 6.1 Recipe admission
 
@@ -217,10 +216,10 @@ Isolated fixture `projectId: m4-phys-fixture` (not the live Ashley tree).
 
 | Field | Value |
 |---|---|
-| workspaceId | `JcAjEgk3fWqwb6LDEvc0BQ` |
+| workspaceId | `-8gFh-3HQrMC-aG5dhY35Q` |
 | projectId | `m4-phys-fixture` |
-| snapshotId | `vsnap_5c7c8b007c5ea48d064840c8bc9b8bc6` |
-| sourceSnapshotId | `snap_67748c279ccab48e7b4e716e` |
+| snapshotId | `vsnap_c112397725ad57d11b649eab72d4d26c` |
+| sourceSnapshotId | `snap_8833f1c43d4869d01275d0d1` |
 | candidateTreeHashBefore | `8a32d8d78b1a1a438662c40e979287acc444cd888350deeb885cdc7327ea071a` |
 | candidateTreeHashAfter | `8a32d8d78b1a1a438662c40e979287acc444cd888350deeb885cdc7327ea071a` |
 | hashesEqual | true |
@@ -273,8 +272,8 @@ s5 (injected spawn + `verificationAllowed: false` on an in-memory registry): `cl
 |---|---|
 | projection | `cleanupCompleted: true`, `projectionDiscarded: true` (s2 and s4) |
 | processes / mounts | post-run: no leftover `bwrap`, no `/tmp/ashley-m4-proj-*`, no stale ashley-m4 mounts |
-| overlay | `/tmp/ashley-m4-qual-20260822T182756Z` removed |
-| production checkout | `liveUnchanged: true`; SHA still `28e157a4d2029c3196559fd2569d73e48c53e1b3`; porcelain empty |
+| overlay | none used |
+| production checkout | `liveUnchanged: true`; SHA `553553b0d0ee6a6d2cabd8928b901400e5a1ea74`; porcelain empty |
 
 ---
 
@@ -305,12 +304,13 @@ Explicitly **not** done by this packet and **not** enabled on production:
 - Ingress deadline-branch availability for verification
 - Discord witness
 - Autonomous or proactive verification
-- Exact-candidate M4 on production `HEAD` (commit/deploy)
 - M5 change-sets
 - M6 iteration
 - M7 engineering effects
 
-`implemented != available != promoted`. Overlay physical qualification ≠ production M4.
+`implemented != available != promoted`. Exact-SHA kernel qualification ≠ production M4 authority.
+
+**Deploy-path note:** `deploy/linux-mint/update.sh` at `553553b` does not build `apps/sandbox-policy` before `agent-service`. First coherent activation failed `tsc` on `verificationAllowed`. Recovery: build policy, rebuild agent, start units, still at `553553b`. That script defect is not M4 enablement.
 
 ---
 
@@ -324,17 +324,18 @@ Explicitly **not** done by this packet and **not** enabled on production:
 
 Notes a reviewer may weigh:
 
-1. Physical kernel evidence is real Mint Bubblewrap with the declared toolchain, but the **code under test was an overlay**, not production `HEAD`.
+1. Physical kernel evidence is real Mint Bubblewrap on checkout **`553553b`**, not an overlay.
 2. Honest recipe result was `verified_failure`, not `verified_success`.
-3. Later Wave Acceptance stages (release qualification, deploy, promotion, Discord witness) have **no** evidence here.
+3. Capability, registry, Discord witness, and `PRODUCTION ACCEPTED` remain closed.
 4. Agent-layer `verificationAllowed` is not enforced inside the kernel executor.
+5. Coherent `update.sh` still needs a `sandbox-policy` build before `agent-service`.
 
 ```text
 ================================================================================
 M4 PACKET STATUS:        PROPOSED FOR ACCEPTANCE
-Production HEAD:         28e157a4d2029c3196559fd2569d73e48c53e1b3 (M4 absent)
-M4 source for Mint run:  temporary overlay, deleted
-M3 substrate:            QUALIFIED / PASS (independent)
+Qualification SHA:       553553b0d0ee6a6d2cabd8928b901400e5a1ea74
+M4 source for Mint run:  exact committed SHA in ~/project-ashley
+M3 substrate:            QUALIFIED / PASS (independent, same checkout)
 M4 kernel physical:      admitted + verified_failure; candidate unchanged; cleanup passed
 Capability promoted:     NO
 Registry enabled:        NO
