@@ -42,7 +42,7 @@ export type ThoughtModelResult = {
 
 export type Complete = (
   messages: Parameters<typeof completeChat>[0],
-  options?: Parameters<typeof completeChat>[1],
+  options: Parameters<typeof completeChat>[1],
 ) => Promise<ThoughtModelResult>;
 
 export type CapabilityGate = (db: DatabaseSync) => boolean;
@@ -181,6 +181,7 @@ function sanitizedErrorCode(error: unknown): string {
     "AbortError",
     "agent_not_ready",
     "attention_deadline",
+    "dispatch_data_plane_missing",
     "internal_error",
     "mistral_unavailable",
     "rate_limited",
@@ -201,6 +202,7 @@ function isProviderFailure(errorCode: string): boolean {
     "rate_limited",
     "request_exceeds_tpm_budget",
     "thought_error",
+    "dispatch_data_plane_missing",
   ]);
   return providerCodes.has(errorCode);
 }
@@ -735,6 +737,7 @@ export async function runBoundedCognition<TResult>(
 function buildThoughtCallOptions(
   options: ThoughtModelOptions,
   deadlineAtMs: number | null,
+  db: DatabaseSync,
 ): CallOptions {
   return {
     maxTokens: 1000,
@@ -747,7 +750,7 @@ function buildThoughtCallOptions(
     decisionId: options.decisionId,
     deliveryReservationId: options.deliveryReservationId,
     ownerId: options.ownerId,
-    attentionDb: options.attentionDb,
+    attentionDb: db,
   };
 }
 
@@ -972,7 +975,7 @@ export async function runThoughtModel(
         approvedProjectIds,
         retryContext: retryFeedbackText,
       }),
-    buildOptions: (deadlineAtMs) => buildThoughtCallOptions(options, deadlineAtMs),
+    buildOptions: (deadlineAtMs) => buildThoughtCallOptions(options, deadlineAtMs, db),
     parse: parseObject,
     validate: (parsed, response) =>
       validateInitialThoughtProposal(parsed, response, {
@@ -1514,7 +1517,7 @@ export async function deliberateThoughtContinuation(
         executionError,
         retryContext: retryFeedbackText,
       }),
-    buildOptions: (deadlineAtMs) => buildThoughtCallOptions(options, deadlineAtMs),
+    buildOptions: (deadlineAtMs) => buildThoughtCallOptions(options, deadlineAtMs, db),
     parse: parseObject,
     validate: (parsed, response) =>
       validateContinuationProposal(parsed, response, {

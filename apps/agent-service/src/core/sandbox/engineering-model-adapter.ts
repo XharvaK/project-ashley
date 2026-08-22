@@ -7,6 +7,7 @@
  * re-validates and authorizes every returned action via the broker.
  */
 
+import type { DatabaseSync } from "node:sqlite";
 import { completeChat } from "../../mistral-client.js";
 import { env } from "../../env.js";
 import type { EngineeringOperatorContext, ThinkingModel } from "./engineering-types.js";
@@ -43,7 +44,7 @@ function extractJsonObject(text: string): unknown {
   }
 }
 
-export function createEngineeringThinkingModel(): ThinkingModel {
+export function createEngineeringThinkingModel(attentionDb: DatabaseSync): ThinkingModel {
   return {
     route: "thinking",
     async proposeNextAction(ctx: EngineeringOperatorContext): Promise<unknown> {
@@ -63,7 +64,11 @@ export function createEngineeringThinkingModel(): ThinkingModel {
           { role: "system", content: SYSTEM_PROMPT },
           { role: "user", content: user },
         ],
-        { model: env.mistralModel, temperature: env.mistralChatTemperature },
+        {
+          model: env.mistralModel,
+          temperature: env.mistralChatTemperature,
+          attentionDb,
+        },
       );
       return extractJsonObject(res.text ?? "");
     },

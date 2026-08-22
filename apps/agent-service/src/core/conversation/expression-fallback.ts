@@ -1,7 +1,10 @@
 import type { DatabaseSync } from "node:sqlite";
 import { env } from "../../env.js";
 import type { ChatMessage } from "../model-routing/types.js";
-import type { CompletionOptions } from "../model-routing/types.js";
+import {
+  DispatchDataPlaneMissingError,
+  type CognitiveDispatchOptions,
+} from "../../mistral-client.js";
 import {
   stableIdentityBlock,
   mindStateHeadline,
@@ -17,7 +20,7 @@ export type ExpressionFallbackLane = "interactive" | "urgent_grounded" | "exchan
 
 export type ExpressionComplete = (
   messages: ChatMessage[],
-  options?: CompletionOptions,
+  options: CognitiveDispatchOptions,
 ) => Promise<{ text: string; model: string }>;
 
 // Failures from which a visible fallback is permitted. Missing-key, budget,
@@ -29,6 +32,7 @@ const INELIGIBLE_FAILURE_CODES: Set<string> = new Set([
   "request_exceeds_tpm_budget",
   "endpoint_retired",
   "attention_deadline",
+  "dispatch_data_plane_missing",
 ]);
 
 const SECRET_PATTERN =
@@ -45,6 +49,9 @@ function failureCode(err: unknown): string | undefined {
 }
 
 export function isEligibleMistralFailure(err: unknown): boolean {
+  if (err instanceof DispatchDataPlaneMissingError) {
+    return false;
+  }
   if (err instanceof Error && err.name === "AbortError") {
     return false;
   }
@@ -163,7 +170,8 @@ export function fallbackCompletionOptions(input: {
   ownerId: string | null | undefined;
   deadlineAtMs: number | null | undefined;
   lane: ExpressionFallbackLane;
-}): CompletionOptions {
+  attentionDb: DatabaseSync;
+}): CognitiveDispatchOptions {
   return {
     model: "qwen/qwen3.6-27b",
     route: "ashley_expression_fallback",
@@ -177,5 +185,6 @@ export function fallbackCompletionOptions(input: {
     deliveryReservationId: input.deliveryReservationId ?? undefined,
     ownerId: input.ownerId ?? undefined,
     tools: undefined,
+    attentionDb: input.attentionDb,
   };
 }

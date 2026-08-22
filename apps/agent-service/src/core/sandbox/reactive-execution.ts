@@ -134,7 +134,7 @@ export async function executeReactiveSandboxTask(
   });
 
   const port = createBrokerEngineeringPort({ client: brokerClient, nowMs });
-  const model = createEngineeringThinkingModel();
+  const model = createEngineeringThinkingModel(db);
 
   const coordinator = new SandboxEngineeringCoordinator(model, port, {
     owner: input.ownerId,

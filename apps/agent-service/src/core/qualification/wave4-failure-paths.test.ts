@@ -144,7 +144,7 @@ describe("wave4 Phase 3 — failure paths grant no credit and no live change", (
   it("(c) Thought throws: no credit, no hang, live Decision unchanged, A ≡ B", async () => {
     const mocked = vi.mocked(completeChat);
     const passthrough = mocked.getMockImplementation()!;
-    mocked.mockImplementation(async (messages, options = {}) => {
+    mocked.mockImplementation(async (messages, options) => {
       if (options.route === "thought") throw new Error("wave4_thought_failure");
       return passthrough(messages, options);
     });

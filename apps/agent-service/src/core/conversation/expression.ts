@@ -1,6 +1,7 @@
 import { env } from "../../env.js";
 import {
   completeChat,
+  DispatchDataPlaneMissingError,
   type ChatMessage,
 } from "../../mistral-client.js";
 import type { TurnContext } from "../context-composer.js";
@@ -100,7 +101,7 @@ export async function expressSpeak(
     : "No grounded affect claim is licensed for this turn. Do not invent a feeling to improve the message.";
 
   if (!options.attentionDb) {
-    throw new Error("attention_db_required");
+    throw new DispatchDataPlaneMissingError();
   }
   const attentionDb = options.attentionDb;
   const selfCapability = composeSelfCapabilityContext(attentionDb);
@@ -153,12 +154,14 @@ export async function expressSpeak(
     },
   ];
   const lane = (options.lane ?? "interactive") as ExpressionFallbackLane;
+  const dispatch: ExpressionComplete = (messagesToSend, callOptions) =>
+    complete(messagesToSend, { ...callOptions, attentionDb });
 
   // Expression fallback context is assembled below; the primary (Mistral)
   // dispatch uses the full turn messages.
   let response: { text: string; model: string };
   try {
-    response = await complete(messages, {
+    response = await dispatch(messages, {
       model: env.mistralModel,
       route: "ashley_expression",
       maxTokens: channel === "proactive" ? 500 : 900,
@@ -170,6 +173,7 @@ export async function expressSpeak(
       decisionId: options.decisionId,
       deliveryReservationId: options.deliveryReservationId,
       ownerId: options.ownerId,
+      attentionDb,
     });
   } catch (primaryError) {
     // Fallback eligibility is decided entirely from local state BEFORE any
@@ -197,7 +201,7 @@ export async function expressSpeak(
       current,
     );
     try {
-      response = await complete(
+      response = await dispatch(
         minimal,
         fallbackCompletionOptions({
           decisionId: options.decisionId,
@@ -205,6 +209,7 @@ export async function expressSpeak(
           ownerId: options.ownerId,
           deadlineAtMs: options.deadlineAtMs,
           lane,
+          attentionDb,
         }),
       );
     } catch {

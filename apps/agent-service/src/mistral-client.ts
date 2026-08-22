@@ -1,8 +1,7 @@
 import { Mistral } from "@mistralai/mistralai";
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
 import { env } from "./env.js";
 import { AppError } from "./errors.js";
-import { openNuclearDb } from "./core/db.js";
 import {
   runAttentiveDispatch,
   mapPurposeToLane,
@@ -42,6 +41,20 @@ export type {
   CompletionOptions,
   RouteId,
 } from "./core/model-routing/types.js";
+
+/** Cognitive dispatch consumes an already-authorized open nuclear handle. */
+export type CognitiveDispatchOptions = CompletionOptions & {
+  /** Required authorized open nuclear handle for attentive dispatch. */
+  attentionDb: DatabaseSync;
+};
+
+export class DispatchDataPlaneMissingError extends Error {
+  readonly code = "dispatch_data_plane_missing" as const;
+  constructor() {
+    super("dispatch_data_plane_missing");
+    this.name = "DispatchDataPlaneMissingError";
+  }
+}
 
 let client: Mistral | null = null;
 
@@ -132,7 +145,7 @@ function combineSignals(
 
 export async function completeChat(
   messages: ChatMessage[],
-  options: CompletionOptions = {},
+  options: CognitiveDispatchOptions,
 ): Promise<{
   text: string;
   /** @deprecated Prefer modelAlias / resolvedModelId. */
@@ -144,6 +157,10 @@ export async function completeChat(
   attentionRequestId?: number;
   acceptedDispatchIdentity?: AcceptedDispatchIdentity;
 }> {
+  if (!options?.attentionDb) {
+    throw new DispatchDataPlaneMissingError();
+  }
+  const attentionDb = options.attentionDb;
   // Missing key: no attention reservation / no limiter consumption.
   const mapped = mapLegacyLane(options.lane, options.purpose);
   const purpose = mapped.purpose;
@@ -154,9 +171,6 @@ export async function completeChat(
   const quotaBucket = quotaBucketFor(provider, modelAlias);
 
   assertOutboundAllowed(provider);
-  const db =
-    options.attentionDb ??
-    openNuclearDb(new DatabaseSync(":memory:"), { continuityOptional: true });
   const toolsJson = options.tools ? JSON.stringify(options.tools) : undefined;
 
   const attentive = await runAttentiveDispatch<{
@@ -164,7 +178,7 @@ export async function completeChat(
     toolCalls?: ToolCallResult[];
     usage?: TokenUsage;
     providerModel?: string | null;
-  }>(db, {
+  }>(attentionDb, {
     messages,
     purpose: mapped.purpose,
     lane: mapped.lane,
@@ -219,20 +233,4 @@ export async function completeChat(
     attentionRequestId: attentive.requestId,
     acceptedDispatchIdentity: attentive.acceptedDispatchIdentity,
   };
-}
-
-export async function smokeTest(): Promise<boolean> {
-  const { text } = await completeChat(
-    [{ role: "user", content: "Reply with exactly: pong" }],
-    {
-      model: env.mistralModel,
-      route: "ashley_expression",
-      maxTokens: 16,
-      temperature: 0,
-      reasoningEffort: "low",
-      purpose: "expression",
-      lane: "interactive",
-    },
-  );
-  return text.toLowerCase().includes("pong");
 }

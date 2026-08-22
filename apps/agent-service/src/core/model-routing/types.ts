@@ -93,8 +93,6 @@ export type CompletionOptions = {
   cognitiveJobId?: number | null;
   ownerId?: string | null;
   ageOriginAtMs?: number;
-  /** Test injection: use this DB instead of opening nuclear.db. */
-  attentionDb?: import("node:sqlite").DatabaseSync;
 };
 
 export type ProviderCompletion = {

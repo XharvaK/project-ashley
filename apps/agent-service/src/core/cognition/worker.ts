@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { env } from "../../env.js";
-import { completeChat } from "../../mistral-client.js";
+import { completeChat, DispatchDataPlaneMissingError } from "../../mistral-client.js";
 import {
   createEpisode,
   listUnconsolidatedMessages,
@@ -249,6 +249,9 @@ async function analyzeWithMistral(
       raw: "{}",
     };
   }
+  if (!context?.db) {
+    throw new DispatchDataPlaneMissingError();
+  }
   const response = await completeChat([
     {
       role: "system",
@@ -274,9 +277,9 @@ async function analyzeWithMistral(
     purpose: "exchange_cognition",
     route: "utility_bulk",
     lane: "exchange_cognition",
-    ownerId: context?.ownerId,
-    cognitiveJobId: context?.cognitiveJobId,
-    attentionDb: context?.db,
+    ownerId: context.ownerId,
+    cognitiveJobId: context.cognitiveJobId,
+    attentionDb: context.db,
   });
   return {
     analysis: analysisFrom(parseJson(response.text), transcript.slice(0, 700)),

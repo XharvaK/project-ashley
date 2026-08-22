@@ -164,7 +164,7 @@ export function startEngineeringAutonomyLoops(wiring: EngineeringRuntimeWiring):
           db,
           ownerId: wiring.ownerId,
           nowMs,
-          modelFactory: () => createEngineeringThinkingModel(),
+          modelFactory: () => createEngineeringThinkingModel(db),
           portFactory: () => createBrokerEngineeringPort({ client: brokerClient, nowMs }),
           resolveRoots,
           onCompleted: (result, admissionId) =>

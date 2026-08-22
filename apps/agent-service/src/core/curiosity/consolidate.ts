@@ -141,6 +141,7 @@ export async function consolidateCuriosityRead(
     purpose: "curiosity_consolidation",
     route: "utility_bulk",
     lane: "curiosity_maintenance",
+    attentionDb: db,
   });
   const analysis = normalize(parseObject(response.text));
   // Takes enter the pool ungated, but carry write-time authority: live only

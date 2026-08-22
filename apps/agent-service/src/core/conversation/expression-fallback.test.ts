@@ -3,7 +3,8 @@ import { DatabaseSync } from "node:sqlite";
 import { env } from "../../env.js";
 import { openNuclearDb } from "../db.js";
 import { AppError } from "../../errors.js";
-import type { ChatMessage, CompletionOptions } from "../model-routing/types.js";
+import type { ChatMessage } from "../model-routing/types.js";
+import type { CognitiveDispatchOptions } from "../../mistral-client.js";
 import { bucketForRoute, routeBinding } from "../model-routing/registry.js";
 import type { RouteId } from "../model-routing/types.js";
 import type { TurnContext } from "../context-composer.js";
@@ -88,7 +89,7 @@ function makeTurn(
   };
 }
 
-type Call = { messages: ChatMessage[]; options: CompletionOptions | undefined };
+type Call = { messages: ChatMessage[]; options: CognitiveDispatchOptions };
 type Fake = { calls: Call[]; fn: ExpressionComplete };
 
 function makeFake(opts: {
@@ -151,6 +152,8 @@ describe("expression fallback (Wave 3)", () => {
     expect(fake.calls.length).toBe(2);
     expect(fake.calls[0].options?.route).toBe("ashley_expression");
     expect(fake.calls[1].options?.route).toBe("ashley_expression_fallback");
+    expect(fake.calls[0].options?.attentionDb).toBe(db);
+    expect(fake.calls[1].options?.attentionDb).toBe(db);
     const fallbackBinding = routeBinding("ashley_expression_fallback" as RouteId);
     expect(result.model).toBe(fallbackBinding.configuredModelId);
   });
@@ -169,7 +172,40 @@ describe("expression fallback (Wave 3)", () => {
 
     expect(fake.calls.length).toBe(1);
     expect(fake.calls[0].options?.route).toBe("ashley_expression");
+    expect(fake.calls[0].options?.attentionDb).toBe(db);
     expect(result.model).toBe(env.mistralModel);
+  });
+
+  it("T2 primary complete hop receives the same attentionDb expressSpeak was given", async () => {
+    setup();
+    const fake = makeFake({ fallbackText: "primary" });
+    await expressSpeak(
+      makeTurn(),
+      baseDecision(),
+      USER_MARKER,
+      "discord",
+      { attentionDb: db },
+      fake.fn,
+    );
+    expect(fake.calls).toHaveLength(1);
+    expect(fake.calls[0]!.options?.attentionDb).toBe(db);
+  });
+
+  it("T3 fallback complete hop receives the same attentionDb as the primary hop", async () => {
+    setup();
+    const fake = makeFake({ primaryFail: true });
+    await expressSpeak(
+      makeTurn(),
+      baseDecision(),
+      USER_MARKER,
+      "discord",
+      { attentionDb: db },
+      fake.fn,
+    );
+    expect(fake.calls).toHaveLength(2);
+    expect(fake.calls[0]!.options?.attentionDb).toBe(db);
+    expect(fake.calls[1]!.options?.attentionDb).toBe(db);
+    expect(fake.calls[0]!.options?.attentionDb).toBe(fake.calls[1]!.options?.attentionDb);
   });
 
   it("quota exhaustion (HTTP 402) falls back once to the Groq route and records the policy", async () => {

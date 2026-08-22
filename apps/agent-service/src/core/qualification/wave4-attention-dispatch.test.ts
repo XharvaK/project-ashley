@@ -149,7 +149,7 @@ describe("wave4 Track M1 — shadow Thought dispatch wiring (no network)", () =>
     clearCaptures();
   });
 
-  it("thought observation reaches completeChat as purpose=thought_observation / lane=exchange_cognition / route=thought with no attentionDb", async () => {
+  it("thought observation reaches completeChat as purpose=thought_observation / lane=exchange_cognition / route=thought with fixture attentionDb", async () => {
     const fixture = new Fixture(true);
     try {
       await fixture.turn("tell me about dub techno");
@@ -164,14 +164,14 @@ describe("wave4 Track M1 — shadow Thought dispatch wiring (no network)", () =>
       expect(options.purpose).toBe("thought_observation");
       expect(options.lane).toBe("exchange_cognition");
       expect(options.route).toBe("thought");
-      expect(options.attentionDb).toBeUndefined();
+      expect(options.attentionDb).toBe(fixture.db);
       expect(
         thoughtCapture.every(
           (capture) =>
             capture.options.purpose === "thought_observation" &&
             capture.options.lane === "exchange_cognition" &&
             capture.options.route === "thought" &&
-            capture.options.attentionDb === undefined,
+            capture.options.attentionDb === fixture.db,
         ),
       ).toBe(true);
     } finally {
@@ -501,24 +501,16 @@ describe("wave4 Track M5 — continuity demotion coupling", () => {
 });
 
 describe("wave4 Track M6 — attentionDb default-path guard (documentation)", () => {
-  it("completeChat without attentionDb uses isolated memory instead of production", () => {
-    expect(readSource("../../mistral-client.ts")).toContain(
-      'openNuclearDb(new DatabaseSync(":memory:")',
-    );
-    expect(readSource("../../mistral-client.ts")).not.toContain(
-      "options.attentionDb ?? openNuclearDb()",
-    );
+  it("completeChat must not acquire or synthesize a data plane", () => {
+    const source = readSource("../../mistral-client.ts");
+    expect(source).not.toContain("openNuclearDb");
+    expect(source).not.toContain(":memory:");
   });
 
-  it("the live expression path passes attentionDb; the shadow Thought path does not", () => {
+  it("live expression and Thought bind the caller-owned attentionDb", () => {
     expect(readSource("../runtime.ts")).toContain("attentionDb: this.db,");
     expect(readSource("../conversation/expression.ts")).toContain("attentionDb,");
-    expect(readSource("../agency/thought.ts")).toContain(
-      "attentionDb: options.attentionDb,",
-    );
-    expect(readSource("../agency/thought-observation.ts")).not.toContain(
-      "attentionDb",
-    );
+    expect(readSource("../agency/thought.ts")).toContain("attentionDb: db");
   });
 
   it("guard: the Track M harness only stays offline because completeChat is mocked", () => {
