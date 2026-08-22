@@ -5,12 +5,18 @@ import {
   type DataPlaneContext,
 } from "../data-plane.js";
 
+function continuityError(code: string, message = code): Error {
+  const err = new Error(message) as Error & { code: string };
+  err.code = code;
+  return err;
+}
+
 export function openContinuityDb(
   existing?: DatabaseSync,
   options: { dataPlane?: DataPlaneContext; migrate?: boolean } = {},
 ): DatabaseSync {
   if (!existing) {
-    throw new Error("data_plane_required");
+    throw continuityError("data_plane_required");
   }
   const rows = existing.prepare("PRAGMA database_list").all() as Array<{
     name?: string;
@@ -20,7 +26,7 @@ export function openContinuityDb(
   const file = main?.file?.trim() ?? "";
   if (file && isReservedProductionStoragePath(file)) {
     if (options.dataPlane?.kind !== "production") {
-      throw new Error("production_data_plane_required");
+      throw continuityError("production_data_plane_required");
     }
   }
   migrateContinuity(existing, { migrate: options.migrate });
@@ -199,7 +205,7 @@ function parsePendingNuclearMigration(value: string): PendingNuclearMigration {
   try {
     parsed = JSON.parse(value) as unknown;
   } catch {
-    throw new Error("continuity_pending_migration_invalid");
+    throw continuityError("continuity_pending_migration_invalid");
   }
   if (
     !isRecord(parsed) ||
@@ -213,7 +219,7 @@ function parsePendingNuclearMigration(value: string): PendingNuclearMigration {
       parsed.phase as string,
     )
   ) {
-    throw new Error("continuity_pending_migration_invalid");
+    throw continuityError("continuity_pending_migration_invalid");
   }
   return {
     from: parsed.from as number,
@@ -245,7 +251,7 @@ function validateNuclearMigrationDescriptor(
     input.lineageId.trim() === "" ||
     input.buildIdentity.trim() === ""
   ) {
-    throw new Error("continuity_migration_descriptor_invalid");
+    throw continuityError("continuity_migration_descriptor_invalid");
   }
 }
 
@@ -284,7 +290,7 @@ function lineageState(
     typeof row.nuclear_schema_version !== "number" ||
     !Number.isSafeInteger(row.nuclear_schema_version)
   ) {
-    throw new Error("continuity_lineage_missing");
+    throw continuityError("continuity_lineage_missing");
   }
   return {
     lineageId: row.lineage_id,
@@ -311,11 +317,11 @@ export function beginNuclearMigration(
   withContinuityTransaction(continuity, () => {
     const existing = readPendingNuclearMigration(continuity);
     if (existing) {
-      throw new Error("continuity_migration_pending");
+      throw continuityError("continuity_migration_pending");
     }
     const state = lineageState(continuity);
     if (state.lineageId !== input.lineageId) {
-      throw new Error("continuity_lineage_mismatch");
+      throw continuityError("continuity_lineage_mismatch");
     }
     if (state.nuclearSchemaVersion !== input.from) {
       throw new Error(
@@ -352,10 +358,10 @@ export function markNuclearMigrationCommitted(
   withContinuityTransaction(continuity, () => {
     const existing = readPendingNuclearMigration(continuity);
     if (!existing || !sameNuclearMigration(existing, input)) {
-      throw new Error("continuity_migration_pending_mismatch");
+      throw continuityError("continuity_migration_pending_mismatch");
     }
     if (existing.phase !== "pending") {
-      throw new Error("continuity_migration_phase_invalid");
+      throw continuityError("continuity_migration_phase_invalid");
     }
     continuity
       .prepare(`UPDATE continuity_meta SET value = ? WHERE key = ?`)
@@ -386,14 +392,14 @@ export function finalizeNuclearMigration(
   withContinuityTransaction(continuity, () => {
     const existing = readPendingNuclearMigration(continuity);
     if (!existing || !sameNuclearMigration(existing, input)) {
-      throw new Error("continuity_migration_pending_mismatch");
+      throw continuityError("continuity_migration_pending_mismatch");
     }
     if (existing.phase !== "pending" && existing.phase !== "nuclear_committed") {
-      throw new Error("continuity_migration_phase_invalid");
+      throw continuityError("continuity_migration_phase_invalid");
     }
     const state = lineageState(continuity);
     if (state.lineageId !== input.lineageId) {
-      throw new Error("continuity_lineage_mismatch");
+      throw continuityError("continuity_lineage_mismatch");
     }
     const now = new Date().toISOString();
     continuity
@@ -429,14 +435,14 @@ export function rollbackNuclearMigration(
   withContinuityTransaction(continuity, () => {
     const existing = readPendingNuclearMigration(continuity);
     if (!existing || !sameNuclearMigration(existing, input)) {
-      throw new Error("continuity_migration_pending_mismatch");
+      throw continuityError("continuity_migration_pending_mismatch");
     }
     if (existing.phase !== "pending" && existing.phase !== "nuclear_committed") {
-      throw new Error("continuity_migration_phase_invalid");
+      throw continuityError("continuity_migration_phase_invalid");
     }
     const state = lineageState(continuity);
     if (state.lineageId !== input.lineageId) {
-      throw new Error("continuity_lineage_mismatch");
+      throw continuityError("continuity_lineage_mismatch");
     }
     if (state.nuclearSchemaVersion !== input.from) {
       throw new Error(
@@ -523,7 +529,7 @@ export function ensureAuthoritativeLineage(
     return { lineageId: existing.lineage_id, adopted: false };
   }
   if (!adoptIfMissing) {
-    throw new Error("continuity_lineage_missing");
+    throw continuityError("continuity_lineage_missing");
   }
   const lineageId = randomUUID();
   const now = new Date().toISOString();
@@ -571,10 +577,10 @@ export function requireSidecarLineageForNuclearMirror(
     .prepare(`SELECT lineage_id FROM lineage_state WHERE id = 1`)
     .get() as { lineage_id?: string } | undefined;
   if (!existing?.lineage_id) {
-    throw new Error("continuity_lineage_missing");
+    throw continuityError("continuity_lineage_missing");
   }
   if (existing.lineage_id !== nuclearMirrorLineageId) {
-    throw new Error("continuity_lineage_mismatch");
+    throw continuityError("continuity_lineage_mismatch");
   }
   continuity
     .prepare(
@@ -599,14 +605,14 @@ export function requireLineageMatch(
     .prepare(`SELECT lineage_id FROM lineage_state WHERE id = 1`)
     .get() as { lineage_id?: string } | undefined;
   if (!row?.lineage_id) {
-    throw new Error("continuity_lineage_missing");
+    throw continuityError("continuity_lineage_missing");
   }
   if (
     nuclearLineageId != null &&
     nuclearLineageId !== "" &&
     nuclearLineageId !== row.lineage_id
   ) {
-    throw new Error("continuity_lineage_mismatch");
+    throw continuityError("continuity_lineage_mismatch");
   }
   return row.lineage_id;
 }
@@ -640,6 +646,6 @@ export function getAuthoritativeLineageId(continuity: DatabaseSync): string {
   const row = continuity
     .prepare(`SELECT lineage_id FROM lineage_state WHERE id = 1`)
     .get() as { lineage_id?: string } | undefined;
-  if (!row?.lineage_id) throw new Error("continuity_lineage_missing");
+  if (!row?.lineage_id) throw continuityError("continuity_lineage_missing");
   return row.lineage_id;
 }

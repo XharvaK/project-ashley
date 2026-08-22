@@ -138,7 +138,9 @@ export function ensureEntityUuidAndClassification(
       `INSERT INTO lineage_mirror (id, lineage_id, updated_at) VALUES (1, ?, ?)`,
     ).run(lineageId, now);
   } else if (mirror.lineage_id !== lineageId) {
-    throw new Error("continuity_lineage_mismatch");
+    const err = new Error("continuity_lineage_mismatch") as Error & { code: string };
+    err.code = "continuity_lineage_mismatch";
+    throw err;
   }
 
   const receiptCols = columnNames(db, "forget_receipts");

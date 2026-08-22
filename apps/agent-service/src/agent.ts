@@ -9,6 +9,16 @@ import { AppError } from "./errors.js";
 import { isAuthorizedOwnerId } from "./owner-auth.js";
 import { DatabaseSync } from "node:sqlite";
 
+export class BootValidationError extends Error {
+  readonly code = "boot_validation_failed";
+  readonly errors: string[];
+  constructor(errors: string[]) {
+    super(`Boot configuration invalid: ${errors.join("; ")}`);
+    this.name = "BootValidationError";
+    this.errors = errors;
+  }
+}
+
 export type AgentState = "booting" | "ready" | "paused" | "busy" | "offline";
 
 export type ProviderState = "configured" | "degraded" | "unavailable";
@@ -104,7 +114,7 @@ export class AgentManager {
       for (const e of errors) console.error(`[agent-service] FATAL ${e}`);
       this.state = "offline";
       this.broadcast({ type: "offline", reason: "invalid_configuration" });
-      return;
+      throw new BootValidationError(errors);
     }
     if (!env.mistralApiKey) {
       this.state = "offline";

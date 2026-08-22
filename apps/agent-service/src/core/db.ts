@@ -1109,7 +1109,9 @@ function reconcilePendingNuclearMigration(
     throw new Error("nuclear_lineage_mirror_missing");
   }
   if (mirrorLineageId !== pending.lineageId) {
-    throw new Error("continuity_lineage_mismatch");
+    const err = new Error("continuity_lineage_mismatch") as Error & { code: string };
+    err.code = "continuity_lineage_mismatch";
+    throw err;
   }
   const actualVersion = userVersion(db);
   const descriptor: NuclearMigrationDescriptor = {
@@ -1309,9 +1311,13 @@ export function migrate(
   db.exec("PRAGMA foreign_keys = ON");
   const version = userVersion(db);
   if (version > NUCLEAR_SUPPORTED_VERSION) {
-    throw new Error(
+    const err = new Error(
       `unsupported_nuclear_schema:${version}>${NUCLEAR_SUPPORTED_VERSION}`,
-    );
+    ) as Error & { code: string; version: number; supportedVersion: number };
+    err.code = "unsupported_nuclear_schema";
+    err.version = version;
+    err.supportedVersion = NUCLEAR_SUPPORTED_VERSION;
+    throw err;
   }
   const filePath = nuclearMainFile(db);
   const authorized = mayMigrateStorage({
@@ -1321,7 +1327,9 @@ export function migrate(
   });
   if (!authorized) {
     if (options.migrate === true) {
-      throw new Error("nuclear_migration_authority_required");
+      const err = new Error("nuclear_migration_authority_required") as Error & { code: string };
+      err.code = "nuclear_migration_authority_required";
+      throw err;
     }
     if (version >= 25 && version <= NUCLEAR_SUPPORTED_VERSION) {
       validateNuclearSchemaContent(db, version as 25 | 26 | 27 | 28 | 29);
@@ -2743,7 +2751,9 @@ function assertNuclearOpenAllowed(
   if (plane?.kind === "production" && dataPlaneOwnsFile(plane, filePath)) {
     return;
   }
-  throw new Error("production_data_plane_required");
+  const err = new Error("production_data_plane_required") as Error & { code: string };
+  err.code = "production_data_plane_required";
+  throw err;
 }
 
 function openDefaultContinuity(
@@ -2796,7 +2806,9 @@ export function openNuclearDb(
   options: OpenNuclearOptions = {},
 ): DatabaseSync {
   if (!existing) {
-    throw new Error("data_plane_required");
+    const err = new Error("data_plane_required") as Error & { code: string };
+    err.code = "data_plane_required";
+    throw err;
   }
   const resolved = resolveMigrateOptions(existing, options);
   assertNuclearOpenAllowed(nuclearMainFile(existing), resolved.dataPlane);

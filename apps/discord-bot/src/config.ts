@@ -102,12 +102,20 @@ export const config = {
   reactPolicyEnabled: process.env.DISCORD_REACT_POLICY_ENABLED !== "false",
 };
 
+export class ConfigError extends Error {
+  readonly code = "config_missing";
+  constructor(message: string) {
+    super(message);
+    this.name = "ConfigError";
+  }
+}
+
 export function validateConfig(): void {
   const missing: string[] = [];
   if (!config.token) missing.push("DISCORD_BOT_TOKEN");
   if (!config.ownerId) missing.push("DISCORD_OWNER_ID");
   if (missing.length) {
-    throw new Error(`Missing env: ${missing.join(", ")}`);
+    throw new ConfigError(`Missing env: ${missing.join(", ")}`);
   }
   for (const warning of numericWarnings) {
     console.warn(`[discord-bot] ${warning}`);
