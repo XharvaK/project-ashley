@@ -1,5 +1,5 @@
 # Windows local Ashley stack. Production Discord bot runs on Mint only.
-# Prefer: npm run start:ashley  →  scripts/mint/remote-update.ps1
+# Prefer: npm run start:ashley  →  scripts/mint/remote-update.ps1 (checkout + exec update.sh)
 param(
     [switch]$Stop,
     # Explicit override for rare local smoke. Never use while Mint owns the token.

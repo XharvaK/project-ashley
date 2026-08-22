@@ -23,7 +23,7 @@
     "eval:full": "powershell -ExecutionPolicy Bypass -File scripts/persona-eval/run-full.ps1",
     "verify:status": "node scripts/stabilization/verify-status.mjs --check",
     "eval:deterministic": "node scripts/stabilization/eval-deterministic.mjs",
-    "test:stabilization": "node --test scripts/stabilization/*.test.mjs",
+    "test:stabilization": "node --test scripts/stabilization/*.test.mjs scripts/mint/coherent-activation.test.mjs",
     "assurance:10c": "node scripts/stabilization/audit-10c.mjs --check-only",
     "audit:mint-docs": "node scripts/stabilization/audit-mint-docs.mjs --check-only"
   }

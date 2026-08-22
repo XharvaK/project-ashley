@@ -51,11 +51,22 @@ bash ~/project-ashley/deploy/linux-mint/bootstrap.sh --env-file /path/to/ashley-
 
 ## Updates later
 
-After you push from Windows:
+Canonical path from Windows after push:
+
+```powershell
+npm run start:ashley
+```
+
+That SSHs to Mint, fast-forwards the checkout, then **exec**s that checkout's `update.sh`. Activation is stop → build → install candidate user-systemd policy → daemon-reload → start. Ashley is down for the build. If build or policy prep fails, units stay stopped.
+
+On the Mint laptop itself:
 
 ```bash
-bash ~/project-ashley/deploy/linux-mint/update.sh
+cd ~/project-ashley
+git pull --ff-only && bash deploy/linux-mint/update.sh
 ```
+
+`update.sh` activates the current checkout only. It does not fetch.
 
 ## Sandbox boundary (implemented locally, not deployed)
 
@@ -95,7 +106,7 @@ cd C:\Users\Xharv\Projects\project-ashley
 powershell -File scripts\mint\remote-update.ps1 -HostName 192.168.x.x -User YOUR_MINT_USER -PushFirst
 ```
 
-That SSHs in, `git pull`s, rebuilds, restarts systemd units. Lid can stay closed.
+That SSHs in, fast-forwards the checkout, then execs coherent activation (stop / build / candidate policy / start). Lid can stay closed.
 
 ## Ops
 

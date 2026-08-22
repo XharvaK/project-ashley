@@ -107,7 +107,7 @@ Pre-activation correction pass runbook: [`docs/handoffs/mint-corrections-2.md`](
 # ~/.composer-assistant/.env — see config/env.example
 cd C:\Users\Xharv\Projects\composer-assistant
 
-npm run start:ashley   # SSH to Mint: git pull + rebuild + restart systemd
+npm run start:ashley   # SSH to Mint: checkout + coherent stop/build/start
 npm run stop:ashley    # stops accidental Windows pids only
 npm run dev:agent      # agent only (no Discord gateway)
 npm run dev:discord    # agent + discord bot (conflicts with Mint)

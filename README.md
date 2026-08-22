@@ -209,7 +209,7 @@ Commands below are from the repository root `package.json`.
 ```powershell
 cd C:\Users\Xharv\Projects\composer-assistant
 
-npm run start:ashley   # SSH to Mint: git pull + rebuild + restart systemd
+npm run start:ashley   # SSH to Mint: checkout + coherent stop/build/start
 npm run stop:ashley    # stop accidental Windows pids only
 npm run dev:agent      # agent-service only (http://127.0.0.1:3710)
 npm run dev:discord    # agent + Discord bot (conflicts with Mint)
