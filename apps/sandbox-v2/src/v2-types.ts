@@ -1,5 +1,5 @@
 /**
- * Sandbox V2 typed-capability vocabulary (Sandbox V2 M2 + M3).
+ * Sandbox V2 typed-capability vocabulary (Sandbox V2 M2 + M3 + M4 kernel).
  *
  * The single typed seam for V2 operations. A request names one closed
  * operation; the dispatcher routes it to the capability handler registered
@@ -33,7 +33,8 @@ export type SandboxV2OperationName =
   | "workspace.replace_file"
   | "workspace.edit_text"
   | "workspace.delete_file"
-  | "workspace.create_directory";
+  | "workspace.create_directory"
+  | "workspace.verify";
 
 export const SANDBOX_V2_OPERATION_NAMES: readonly string[] = [
   "file.roundtrip",
@@ -48,6 +49,7 @@ export const SANDBOX_V2_OPERATION_NAMES: readonly string[] = [
   "workspace.edit_text",
   "workspace.delete_file",
   "workspace.create_directory",
+  "workspace.verify",
 ];
 
 /**
@@ -178,6 +180,14 @@ export type SandboxV2WorkspaceCreateDirectoryRequest = {
   path: string;
 };
 
+export type SandboxV2WorkspaceVerifyRequest = {
+  version: 2;
+  operation: "workspace.verify";
+  projectId: string;
+  workspaceId: string;
+  recipeId: string;
+};
+
 export type SandboxV2WorkspaceRequest =
   | SandboxV2WorkspaceReadFileRequest
   | SandboxV2WorkspaceListDirectoryRequest
@@ -193,7 +203,19 @@ export type SandboxV2Request =
   | SandboxV2ProjectReadFileRequest
   | SandboxV2ProjectListDirectoryRequest
   | SandboxV2ProjectSearchTextRequest
-  | SandboxV2WorkspaceRequest;
+  | SandboxV2WorkspaceRequest
+  | SandboxV2WorkspaceVerifyRequest;
+
+export type VerificationProtocolState =
+  | "admitted"
+  | "refused"
+  | "sandbox_failure"
+  | "cleanup_failure";
+
+export type VerificationOutcome =
+  | "verified_success"
+  | "verified_failure"
+  | "outcome_unknown";
 
 export type SandboxV2InspectionEntry = {
   name: string;
@@ -304,6 +326,32 @@ export type SandboxV2OperationResult =
       kind: "workspace.create_directory";
       path: string;
       completedAtMs: number;
+    }
+  | {
+      kind: "workspace.verify";
+      snapshotId: string;
+      workspaceId: string;
+      projectId: string;
+      candidateTreeHash: string;
+      candidateTreeHashAfter: string;
+      sourceSnapshotId: string;
+      treeHashAlgorithm: string;
+      recipeId: string;
+      recipeVersion: string;
+      recipeDefinitionHash: string;
+      executableIdentity: string;
+      argvIdentity: string;
+      protocolState: VerificationProtocolState;
+      verificationOutcome: VerificationOutcome;
+      exitCode: number | null;
+      timedOut: boolean;
+      stdoutTruncated: boolean;
+      stderrTruncated: boolean;
+      stdoutSha256: string;
+      stderrSha256: string;
+      cleanupCompleted: boolean;
+      projectionDiscarded: boolean;
+      candidateUnchanged: boolean;
     };
 
 export type SandboxV2ExecutionTruth =
@@ -335,6 +383,7 @@ export type SandboxV2Result =
        * preparation-failure cleanup). Absent when preparation completed.
        */
       preparationEndedReason?: string;
+      verificationReceipt?: Extract<SandboxV2OperationResult, { kind: "workspace.verify" }>;
       executedAtMs: number;
     }
   | {
@@ -360,6 +409,7 @@ export type SandboxV2Result =
        * preparation-failure cleanup). Absent when preparation completed.
        */
       preparationEndedReason?: string;
+      verificationReceipt?: Extract<SandboxV2OperationResult, { kind: "workspace.verify" }>;
       executedAtMs: number;
     }
   | {
@@ -383,13 +433,18 @@ export type SandboxV2Result =
        * preparation-failure cleanup). Absent when preparation completed.
        */
       preparationEndedReason?: string;
+      verificationReceipt?: Extract<SandboxV2OperationResult, { kind: "workspace.verify" }>;
       executedAtMs: number;
     };
 
 /** Operation-level capability metadata (the V2 capability registry rows). */
 export type SandboxV2CapabilitySpec = {
   operation: SandboxV2OperationName;
-  family: "sandbox_workspace_file_roundtrip" | "project_inspection" | "project_experimentation";
+  family:
+    | "sandbox_workspace_file_roundtrip"
+    | "project_inspection"
+    | "project_experimentation"
+    | "project_verification";
   /** Project inspection is strictly read-only: no mutation, no execution. */
   readOnly: boolean;
   /** Requires an operator-owned project registry resolution. */
@@ -467,6 +522,12 @@ export const V2_CAPABILITY_REGISTRY: readonly SandboxV2CapabilitySpec[] = [
     operation: "workspace.create_directory",
     family: "project_experimentation",
     readOnly: false,
+    requiresProject: true,
+  },
+  {
+    operation: "workspace.verify",
+    family: "project_verification",
+    readOnly: true,
     requiresProject: true,
   },
 ];
@@ -589,6 +650,12 @@ export function isSandboxV2OperationResult(
       return isWorkspaceDeleteFileResult(value);
     case "workspace.create_directory":
       return isWorkspaceCreateDirectoryResult(value);
+    case "workspace.verify":
+      return isWorkspaceVerifyResult(value);
+    default: {
+      const _exhaustive: never = operation;
+      return _exhaustive;
+    }
   }
 }
 
@@ -729,5 +796,60 @@ export function isWorkspaceCreateDirectoryResult(
     typeof value.path === "string" &&
     value.path.length > 0 &&
     isFiniteNumber(value.completedAtMs)
+  );
+}
+
+const PROTOCOL_STATES = new Set([
+  "admitted",
+  "refused",
+  "sandbox_failure",
+  "cleanup_failure",
+]);
+
+const VERIFICATION_OUTCOMES = new Set([
+  "verified_success",
+  "verified_failure",
+  "outcome_unknown",
+]);
+
+export function isWorkspaceVerifyResult(
+  value: unknown,
+): value is Extract<SandboxV2OperationResult, { kind: "workspace.verify" }> {
+  if (!isRecord(value)) return false;
+  return (
+    value.kind === "workspace.verify" &&
+    typeof value.snapshotId === "string" &&
+    value.snapshotId.length > 0 &&
+    typeof value.workspaceId === "string" &&
+    value.workspaceId.length > 0 &&
+    typeof value.projectId === "string" &&
+    value.projectId.length > 0 &&
+    typeof value.candidateTreeHash === "string" &&
+    value.candidateTreeHash.length === 64 &&
+    typeof value.candidateTreeHashAfter === "string" &&
+    value.candidateTreeHashAfter.length === 64 &&
+    typeof value.sourceSnapshotId === "string" &&
+    typeof value.treeHashAlgorithm === "string" &&
+    typeof value.recipeId === "string" &&
+    typeof value.recipeVersion === "string" &&
+    typeof value.recipeDefinitionHash === "string" &&
+    value.recipeDefinitionHash.length === 64 &&
+    typeof value.executableIdentity === "string" &&
+    typeof value.argvIdentity === "string" &&
+    typeof value.protocolState === "string" &&
+    PROTOCOL_STATES.has(value.protocolState) &&
+    typeof value.verificationOutcome === "string" &&
+    VERIFICATION_OUTCOMES.has(value.verificationOutcome) &&
+    (value.exitCode === null || isFiniteNumber(value.exitCode)) &&
+    typeof value.timedOut === "boolean" &&
+    typeof value.stdoutTruncated === "boolean" &&
+    typeof value.stderrTruncated === "boolean" &&
+    typeof value.stdoutSha256 === "string" &&
+    value.stdoutSha256.length === 64 &&
+    typeof value.stderrSha256 === "string" &&
+    value.stderrSha256.length === 64 &&
+    typeof value.cleanupCompleted === "boolean" &&
+    typeof value.projectionDiscarded === "boolean" &&
+    typeof value.candidateUnchanged === "boolean"
   );
 }

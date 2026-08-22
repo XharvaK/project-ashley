@@ -67,6 +67,11 @@ describe("TurnDeadlinePlan", () => {
       available: false,
       unavailableReason: "candidate_workspace_closed",
     });
+    expect(plan.branches.candidate_verification).toEqual({
+      kind: "candidate_verification",
+      available: false,
+      unavailableReason: "candidate_verification_unqualified",
+    });
     expect(Object.isFrozen(plan)).toBe(true);
     expect(Object.isFrozen(plan.common)).toBe(true);
     expect(Object.isFrozen(plan.branches)).toBe(true);
@@ -101,6 +106,10 @@ describe("TurnDeadlinePlan", () => {
     expect(selectTurnDeadlineBranch(plan, "candidate_workspace_experiment")).toEqual({
       ok: false,
       reason: "candidate_workspace_closed",
+    });
+    expect(selectTurnDeadlineBranch(plan, "candidate_verification")).toEqual({
+      ok: false,
+      reason: "candidate_verification_unqualified",
     });
     expect(selectTurnDeadlineBranch(plan, "not-a-branch" as never)).toEqual({
       ok: false,
@@ -220,6 +229,17 @@ describe("TurnDeadlinePlan", () => {
       expect(plan.branches.sandbox_m1.available).toBe(true);
       expect(plan.branches.project_inspection.available).toBe(true);
       expect(plan.branches.candidate_workspace_experiment.available).toBe(true);
+      expect(plan.branches.candidate_verification.available).toBe(false);
+      if (plan.branches.candidate_verification.available) {
+        throw new Error("m4 deadline branch must default unavailable");
+      }
+      expect(plan.branches.candidate_verification.unavailableReason).toBe(
+        "candidate_verification_unqualified",
+      );
+      expect(selectTurnDeadlineBranch(plan, "candidate_verification")).toEqual({
+        ok: false,
+        reason: "candidate_verification_unqualified",
+      });
 
       const selected = selectTurnDeadlineBranch(plan, "candidate_workspace_experiment");
       expect(selected.ok).toBe(true);

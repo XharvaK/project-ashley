@@ -119,7 +119,7 @@ function operatorPromoteDetail(
 }
 
 describe("capability graduation policy", () => {
-  it("defaults every capability to the historical live-shadow policy except project_experimentation", () => {
+  it("defaults every capability to the historical live-shadow policy except operator_cutover capabilities", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     for (const capability of ["recall", "mind_state", "affect", "thought", "learning", "refusal", "reading", "curiosity_consolidation", "source_discovery", "own_time_report", "project_inspection"] as const) {
       expect(graduationPolicyFor(capability)).toEqual({
@@ -131,6 +131,11 @@ describe("capability graduation policy", () => {
       });
     }
     expect(graduationPolicyFor("project_experimentation")).toEqual({
+      kind: "operator_cutover",
+      minEvalSeeds: 3,
+      requiresQualification: true,
+    });
+    expect(graduationPolicyFor("candidate_verification")).toEqual({
       kind: "operator_cutover",
       minEvalSeeds: 3,
       requiresQualification: true,

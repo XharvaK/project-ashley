@@ -11,6 +11,7 @@
 
 import {
   isVerifiedRoundtripEffectEvidence,
+  isVerifiedVerificationClaimEffect,
   isVerifiedWorkspaceClaimEffect,
   type OperationalClaimLicense,
 } from "./engineering-types.js";
@@ -56,6 +57,16 @@ export type SandboxV2LicenseAuditRecord = {
     matchCount?: number;
     entryCount?: number;
   } | null;
+  verificationEffect?: {
+    workspaceId: string;
+    snapshotId: string;
+    candidateTreeHash: string;
+    recipeId: string;
+    recipeVersion: string;
+    recipeDefinitionHash: string;
+    protocolState: string;
+    verificationOutcome: string;
+  } | null;
 };
 
 export function formatSandboxV2LicenseAudit(
@@ -68,7 +79,8 @@ export function formatSandboxV2LicenseAudit(
   if (
     license.profile !== "sandbox_workspace_file_roundtrip" &&
     license.profile !== "project_investigation" &&
-    license.profile !== "project_experimentation"
+    license.profile !== "project_experimentation" &&
+    license.profile !== "candidate_verification"
   ) {
     return null;
   }
@@ -126,6 +138,35 @@ export function formatSandboxV2LicenseAudit(
           }
         : null,
       inspection: null,
+    };
+  }
+
+  if (license.profile === "candidate_verification") {
+    const verified = isVerifiedVerificationClaimEffect(license.verificationClaimEffect);
+    return {
+      discriminator: "ASHLEY_SANDBOX_V2_LICENSE",
+      sourceMessageEntityUuid: license.sourceMessageEntityUuid ?? null,
+      state: license.state,
+      taskId: license.taskId ?? null,
+      profile: license.profile,
+      verified,
+      error: license.error ?? null,
+      refusalReason: license.refusalReason ?? null,
+      effect: null,
+      workspaceEffect: null,
+      inspection: null,
+      verificationEffect: license.verificationClaimEffect
+        ? {
+            workspaceId: license.verificationClaimEffect.workspaceId,
+            snapshotId: license.verificationClaimEffect.snapshotId,
+            candidateTreeHash: license.verificationClaimEffect.candidateTreeHash,
+            recipeId: license.verificationClaimEffect.recipeId,
+            recipeVersion: license.verificationClaimEffect.recipeVersion,
+            recipeDefinitionHash: license.verificationClaimEffect.recipeDefinitionHash,
+            protocolState: license.verificationClaimEffect.protocolState,
+            verificationOutcome: license.verificationClaimEffect.verificationOutcome,
+          }
+        : null,
     };
   }
 

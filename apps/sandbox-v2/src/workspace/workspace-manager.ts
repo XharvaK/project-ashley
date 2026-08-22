@@ -120,6 +120,17 @@ export class WorkspaceManager {
   }
 
   /**
+   * Resume an existing candidate workspace. Never creates.
+   * M4 verification must use this path; `acquireWorkspace` without an id creates.
+   */
+  resumeExistingWorkspace(
+    context: AuthorizedProjectExecutionContext,
+    workspaceId: string,
+  ): WorkspaceAcquisitionResult {
+    return this.resumeWorkspace(context, workspaceId);
+  }
+
+  /**
    * Resume an existing candidate workspace.
    * Validates manifest existence, schema, workspaceId, and matching projectId lineage.
    * Revalidates that the durable tree exists and is contained inside the managed root.

@@ -1,5 +1,6 @@
 import {
   isVerifiedRoundtripEffectEvidence,
+  isVerifiedVerificationClaimEffect,
   isVerifiedWorkspaceClaimEffect,
   type OperationalClaimLicense,
   type SandboxTaskProfile,
@@ -10,6 +11,7 @@ export type OperationalTruthState =
   | "admitted"
   | "running"
   | "verified_success"
+  | "verified_failure"
   | "failed"
   | "outcome_unknown";
 
@@ -21,6 +23,13 @@ export type OperationalTruth = {
   error?: string | null;
   refusalReason?: string | null;
   semanticOutput?: string | null;
+  snapshotId?: string | null;
+  workspaceId?: string | null;
+  candidateTreeHash?: string | null;
+  recipeId?: string | null;
+  recipeVersion?: string | null;
+  recipeDefinitionHash?: string | null;
+  verificationOutcome?: "verified_success" | "verified_failure" | null;
 };
 
 /**
@@ -191,6 +200,59 @@ export function deriveOperationalTruth(
           error: license.error ?? null,
         };
     }
+  }
+
+  if (license.profile === "candidate_verification") {
+    if (
+      license.state === "succeeded" &&
+      isVerifiedVerificationClaimEffect(license.verificationClaimEffect)
+    ) {
+      const effect = license.verificationClaimEffect;
+      return {
+        state: effect.verificationOutcome,
+        locked: true,
+        profile: license.profile,
+        taskId: license.taskId,
+        snapshotId: effect.snapshotId,
+        workspaceId: effect.workspaceId,
+        candidateTreeHash: effect.candidateTreeHash,
+        recipeId: effect.recipeId,
+        recipeVersion: effect.recipeVersion,
+        recipeDefinitionHash: effect.recipeDefinitionHash,
+        verificationOutcome: effect.verificationOutcome,
+        semanticOutput:
+          `recipe ${effect.recipeId} version ${effect.recipeVersion} produced ${effect.verificationOutcome} against snapshot ${effect.snapshotId}.`,
+      };
+    }
+    if (license.state === "outcome_unknown" || license.error === "outcome_unknown") {
+      return {
+        state: "outcome_unknown",
+        locked: true,
+        profile: license.profile,
+        taskId: license.taskId,
+        error: "outcome_unknown",
+        semanticOutput:
+          "the verification observer timed out; recipe postcondition is unknown.",
+      };
+    }
+    if (license.error === "sandbox_failure") {
+      return {
+        state: "failed",
+        locked: true,
+        profile: license.profile,
+        taskId: license.taskId,
+        error: "sandbox_failure",
+        semanticOutput:
+          "verification protocol ended in sandbox_failure; recipe outcome is unknown.",
+      };
+    }
+    return {
+      state: "none",
+      locked: false,
+      profile: license.profile,
+      taskId: license.taskId,
+      error: license.error ?? null,
+    };
   }
 
   return {

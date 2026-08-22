@@ -47,6 +47,7 @@ describe("capability registry", () => {
       "workspace.edit_text",
       "workspace.delete_file",
       "workspace.create_directory",
+      "workspace.verify",
     ]);
 
     // M2 project_inspection family
@@ -57,7 +58,6 @@ describe("capability registry", () => {
       "project.search_text",
     ]);
 
-    // M3 project_experimentation family
     const m3Ops = V2_CAPABILITY_REGISTRY.filter((s) => s.family === "project_experimentation").map((s) => s.operation);
     expect(m3Ops).toEqual([
       "workspace.read_file",
@@ -69,6 +69,9 @@ describe("capability registry", () => {
       "workspace.delete_file",
       "workspace.create_directory",
     ]);
+
+    const m4Ops = V2_CAPABILITY_REGISTRY.filter((s) => s.family === "project_verification").map((s) => s.operation);
+    expect(m4Ops).toEqual(["workspace.verify"]);
   });
 
   it("marks project inspection read-only and project-required", () => {
@@ -87,6 +90,13 @@ describe("capability registry", () => {
         expect(spec.readOnly).toBe(false);
       }
     }
+  });
+
+  it("marks verification as project-required and candidate-read-only", () => {
+    const spec = v2CapabilitySpec("workspace.verify");
+    expect(spec?.family).toBe("project_verification");
+    expect(spec?.readOnly).toBe(true);
+    expect(spec?.requiresProject).toBe(true);
   });
 
   it("defers the git ops fail-closed", () => {

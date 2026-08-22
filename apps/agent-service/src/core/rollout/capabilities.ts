@@ -44,6 +44,7 @@ export const capabilityNames = [
   "external_public",
   "project_inspection",
   "project_experimentation",
+  "candidate_verification",
 ] as const;
 
 export type CapabilityName = typeof capabilityNames[number];
@@ -110,6 +111,11 @@ const GRADUATION_POLICIES: Partial<
     minEvalSeeds: 3,
     requiresQualification: true,
   },
+  candidate_verification: {
+    kind: "operator_cutover",
+    minEvalSeeds: 3,
+    requiresQualification: true,
+  },
 };
 
 export function graduationPolicyFor(
@@ -141,6 +147,7 @@ const dependencies: Record<CapabilityName, CapabilityName[]> = {
   external_public: ["external_prepare", "thought"],
   project_inspection: ["thought"],
   project_experimentation: ["thought"],
+  candidate_verification: ["thought"],
 };
 
 const modelSensitive = new Set<string>(MODEL_SENSITIVE_SET_FOR_CONTRACT);

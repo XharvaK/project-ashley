@@ -50,9 +50,12 @@ function stripUnlicensedActivity(
 
   const runningAllowed = opState === "running";
   const admittedAllowed =
-    opState === "admitted" || opState === "running" || opState === "verified_success";
+    opState === "admitted" ||
+    opState === "running" ||
+    opState === "verified_success" ||
+    opState === "verified_failure";
   const completionAllowed = opState === "verified_success";
-  const failureAllowed = opState === "failed";
+  const failureAllowed = opState === "failed" || opState === "verified_failure";
   const hasOperationalContext = Boolean(
     options.operationalLicense &&
       (options.operationalLicense.taskId ||
@@ -119,9 +122,12 @@ export function finalizeHonesty(
 
   const runningAllowed = opState === "running";
   const admittedAllowed =
-    opState === "admitted" || opState === "running" || opState === "verified_success";
+    opState === "admitted" ||
+    opState === "running" ||
+    opState === "verified_success" ||
+    opState === "verified_failure";
   const completionAllowed = opState === "verified_success";
-  const failureAllowed = opState === "failed";
+  const failureAllowed = opState === "failed" || opState === "verified_failure";
   const hasOperationalContext = Boolean(
     input.operationalLicense &&
       (input.operationalLicense.taskId ||

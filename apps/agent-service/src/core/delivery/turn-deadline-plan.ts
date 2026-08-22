@@ -2,7 +2,8 @@ export type TurnDeadlineBranchKind =
   | "ordinary"
   | "sandbox_m1"
   | "project_inspection"
-  | "candidate_workspace_experiment";
+  | "candidate_workspace_experiment"
+  | "candidate_verification";
 
 export type ProjectInspectionOperation =
   | "project.read_file"
@@ -41,6 +42,14 @@ type UnavailableWorkspacePolicy = {
   unavailableReason: string;
 };
 
+type AvailableVerificationPolicy = GenerationPolicy & {
+  available: true;
+  childExecutionMs: number;
+  acquisitionSettlementMs: number;
+  cleanupReserveMs: number;
+  continuationMs: number;
+};
+
 export type TurnDeadlinePolicy = {
   version: string;
   qualification: "unqualified" | "test_only" | "qualified";
@@ -60,6 +69,13 @@ export type TurnDeadlinePolicy = {
   };
   candidateWorkspaceExperiment:
     | AvailableWorkspacePolicy
+    | UnavailableWorkspacePolicy;
+  /**
+   * M4 candidate verification. Default unavailable: implemented != available.
+   * Absence is treated as available: false.
+   */
+  candidateVerification?:
+    | AvailableVerificationPolicy
     | UnavailableWorkspacePolicy;
 };
 
@@ -121,17 +137,37 @@ export type CandidateWorkspaceTurnDeadlineBranch =
       unavailableReason: string;
     }>;
 
+export type CandidateVerificationTurnDeadlineBranch =
+  | Readonly<{
+      kind: "candidate_verification";
+      available: true;
+      childExecutionDeadlineAtMs: number;
+      childTerminationDeadlineAtMs: number;
+      acquisitionSettlementDeadlineAtMs: number;
+      continuationDeadlineAtMs: number;
+      perceptionDeadlineAtMs: number;
+      expressionDeadlineAtMs: number;
+      generationDeadlineAtMs: number;
+    }>
+  | Readonly<{
+      kind: "candidate_verification";
+      available: false;
+      unavailableReason: string;
+    }>;
+
 export type TurnDeadlineBranch =
   | OrdinaryTurnDeadlineBranch
   | SandboxM1TurnDeadlineBranch
   | ProjectInspectionTurnDeadlineBranch
-  | CandidateWorkspaceTurnDeadlineBranch;
+  | CandidateWorkspaceTurnDeadlineBranch
+  | CandidateVerificationTurnDeadlineBranch;
 
 export type AvailableTurnDeadlineBranch =
   | OrdinaryTurnDeadlineBranch
   | SandboxM1TurnDeadlineBranch
   | ProjectInspectionTurnDeadlineBranch
-  | Extract<CandidateWorkspaceTurnDeadlineBranch, { available: true }>;
+  | Extract<CandidateWorkspaceTurnDeadlineBranch, { available: true }>
+  | Extract<CandidateVerificationTurnDeadlineBranch, { available: true }>;
 
 type AvailableBranchByKind = {
   ordinary: OrdinaryTurnDeadlineBranch;
@@ -139,6 +175,10 @@ type AvailableBranchByKind = {
   project_inspection: ProjectInspectionTurnDeadlineBranch;
   candidate_workspace_experiment: Extract<
     CandidateWorkspaceTurnDeadlineBranch,
+    { available: true }
+  >;
+  candidate_verification: Extract<
+    CandidateVerificationTurnDeadlineBranch,
     { available: true }
   >;
 };
@@ -153,6 +193,7 @@ export type TurnDeadlinePlan = Readonly<{
     sandbox_m1: SandboxM1TurnDeadlineBranch;
     project_inspection: ProjectInspectionTurnDeadlineBranch;
     candidate_workspace_experiment: CandidateWorkspaceTurnDeadlineBranch;
+    candidate_verification: CandidateVerificationTurnDeadlineBranch;
   }>;
 }>;
 
@@ -369,6 +410,10 @@ export const PROVISIONAL_UNQUALIFIED_TURN_DEADLINE_POLICY: TurnDeadlinePolicy =
     expressionMs: 4_000,
     generationSettlementMs: 4_000,
   },
+  candidateVerification: {
+    available: false,
+    unavailableReason: "candidate_verification_unqualified",
+  },
 });
 
 export function createTurnDeadlinePlan(
@@ -545,11 +590,62 @@ export function createTurnDeadlinePlan(
     };
   }
 
+  const verificationPolicy = policy.candidateVerification ?? {
+    available: false as const,
+    unavailableReason: "candidate_verification_unqualified",
+  };
+  let candidateVerification: CandidateVerificationTurnDeadlineBranch;
+  if (!verificationPolicy.available) {
+    candidateVerification = {
+      kind: "candidate_verification",
+      available: false,
+      unavailableReason: verificationPolicy.unavailableReason.slice(0, 64),
+    };
+  } else {
+    requirePositiveDuration(
+      "candidateVerification.childExecutionMs",
+      verificationPolicy.childExecutionMs,
+    );
+    requirePositiveDuration(
+      "candidateVerification.acquisitionSettlementMs",
+      verificationPolicy.acquisitionSettlementMs,
+    );
+    requirePositiveDuration(
+      "candidateVerification.continuationMs",
+      verificationPolicy.continuationMs,
+    );
+    const verificationChildDeadlineAtMs =
+      common.initialThoughtDeadlineAtMs + verificationPolicy.childExecutionMs;
+    const verificationSettlementDeadlineAtMs =
+      verificationChildDeadlineAtMs + verificationPolicy.acquisitionSettlementMs;
+    const verificationTerminationDeadlineAtMs = childTerminationDeadline(
+      "candidateVerification",
+      verificationChildDeadlineAtMs,
+      verificationSettlementDeadlineAtMs,
+      verificationPolicy.cleanupReserveMs,
+    );
+    const verificationContinuationDeadlineAtMs =
+      verificationSettlementDeadlineAtMs + verificationPolicy.continuationMs;
+    candidateVerification = {
+      kind: "candidate_verification",
+      available: true,
+      childExecutionDeadlineAtMs: verificationChildDeadlineAtMs,
+      childTerminationDeadlineAtMs: verificationTerminationDeadlineAtMs,
+      acquisitionSettlementDeadlineAtMs: verificationSettlementDeadlineAtMs,
+      continuationDeadlineAtMs: verificationContinuationDeadlineAtMs,
+      ...generationDeadlines(
+        verificationContinuationDeadlineAtMs,
+        verificationPolicy,
+      ),
+    };
+  }
+
   const branches = {
     ordinary,
     sandbox_m1: sandboxM1,
     project_inspection: projectInspection,
     candidate_workspace_experiment: candidateWorkspaceExperiment,
+    candidate_verification: candidateVerification,
   };
   for (const branch of Object.values(branches)) {
     assertGenerationBeforeTransport(

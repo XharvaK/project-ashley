@@ -208,8 +208,9 @@ import {
   executeProjectInspectionV2,
   executeProjectInspectionV2LegacyProactive,
   executeWorkspaceExperimentV2,
+  executeCandidateVerificationV2,
 } from "./sandbox/v2-execution.js";
-import { canOfferProjectInspection, canOfferCandidateWorkspace, loadOperatorProjectReadRegistry } from "./sandbox/project-registry.js";
+import { canOfferProjectInspection, canOfferCandidateWorkspace, canOfferCandidateVerification, loadOperatorProjectReadRegistry } from "./sandbox/project-registry.js";
 import { SandboxV2Dispatcher, type SandboxV2Environment, type SandboxV2Request, type SandboxV2Result } from "@composer-assistant/sandbox-v2";
 import {
   isVerifiedRoundtripEffectEvidence,
@@ -825,13 +826,15 @@ export class AshleyCore {
         ownTimeReportActive: ownTimeConstraint?.canInfluence === true,
         relevantBoundaryIds: relevantBoundaries,
       });
-      const inspectionOffered = canOfferProjectInspection(this.db) || canOfferCandidateWorkspace(this.db);
-      // M2/M3 reachability: a capability offered to cognition must have the
-      // cognition pass that can exercise it. When project inspection or
-      // candidate workspace is offered (release active + lifecycle + substrate + approved projects),
-      // admit model Thought even for otherwise-easy turns; the deterministic
-      // floor and deadlines still bound it. Capability-driven admission, not a
-      // phrase detector.
+      const inspectionOffered =
+        canOfferProjectInspection(this.db) ||
+        canOfferCandidateWorkspace(this.db) ||
+        canOfferCandidateVerification(this.db);
+      // M2/M3/M4 reachability: a capability offered to cognition must have the
+      // cognition pass that can exercise it. When project inspection, candidate
+      // workspace, or candidate verification is offered, admit model Thought
+      // even for otherwise-easy turns. Capability-driven admission, not a
+      // phrase detector. Deadline-branch availability is a later runtime gate.
       if (complexity.mode === "hard" || inspectionOffered) {
         if (signal.aborted) {
           const finalized = finalizeDelivery(this.db, {
@@ -1119,6 +1122,83 @@ export class AshleyCore {
                 },
               );
             }
+          } else if (opReq.kind === "candidate_verification") {
+            const selection = selectTurnDeadlineBranch(
+              deadlinePlan,
+              "candidate_verification",
+            );
+            if (!selection.ok) {
+              decision.operationalLicense = {
+                state: "none",
+                profile: "candidate_verification",
+                error: selection.reason,
+              };
+              recordPhaseLifecycle(this.db, {
+                reservationId: reservation.id,
+                phase: "candidate_verification",
+                event: "skipped",
+                atMs: Date.now(),
+                statusCode: selection.reason,
+              });
+              recordPhaseLifecycle(this.db, {
+                reservationId: reservation.id,
+                phase: "continuation",
+                event: "skipped",
+                atMs: Date.now(),
+                statusCode: "continuation_capability_unavailable",
+              });
+            } else if (selection.branch.kind !== "candidate_verification") {
+              throw new Error("deadline_branch_mismatch");
+            } else {
+              selectedDeadlineBranch = selection.branch;
+              selectPhaseLifecycleBranch(
+                this.db,
+                reservation.id,
+                "candidate_verification",
+                Date.now(),
+              );
+              const verifyResult = await executeCandidateVerificationV2({
+                request: opReq.request,
+                messageEntityUuid: messageEntityUuid ?? undefined,
+                deadlineAtMs:
+                  selectedDeadlineBranch.acquisitionSettlementDeadlineAtMs,
+                db: this.db,
+              });
+              decision.operationalLicense = verifyResult.license;
+              recordPhaseLifecycle(this.db, {
+                reservationId: reservation.id,
+                phase: "candidate_verification",
+                event: "settled",
+                atMs: Date.now(),
+                statusCode:
+                  verifyResult.license.error ?? "candidate_verification_settled",
+              });
+              decision = await deliberateThoughtContinuation(
+                this.db,
+                decision,
+                null,
+                verifyResult.license.error ?? null,
+                motivations,
+                "reactive",
+                undefined,
+                undefined,
+                {
+                  allowModelThought: thoughtCanInfluence,
+                  thoughtDeadlineAtMs:
+                    selectedDeadlineBranch.continuationDeadlineAtMs,
+                  deliveryReservationId: reservation.id,
+                  ownerId: input.ownerId,
+                  onLifecycle: onContinuationLifecycle,
+                },
+              );
+            }
+          } else {
+            const _never: never = opReq;
+            void _never;
+            decision.operationalLicense = {
+              state: "none",
+              error: "unsupported_operation",
+            };
           }
         } else {
           recordPhaseLifecycle(this.db, {
@@ -1155,7 +1235,7 @@ export class AshleyCore {
           .run(deliveryReservationEntityUuid, reservation.id);
       }
 
-      // Reactive sandbox execution (M2 / M3 / M1 arbitration)
+      // Reactive sandbox execution (M2 / M3 / M4 / M1 arbitration)
       if (decision.operationalRequest) {
         // M2 inspection or M3 workspace experiment was requested and executed by Thought; skip M1 reactive admission (Constraint 3)
       } else {
@@ -1995,6 +2075,12 @@ export class AshleyCore {
               state: "none",
               profile: "project_experimentation",
               error: "proactive_workspace_experiment_unauthorized",
+            };
+          } else if (opReq.kind === "candidate_verification") {
+            decision.operationalLicense = {
+              state: "none",
+              profile: "candidate_verification",
+              error: "proactive_candidate_verification_unauthorized",
             };
           }
         }

@@ -18,6 +18,11 @@ import { handleFileRoundtripV2, type M1RoundtripExecutorOptions } from
   "./adapters/m1-roundtrip.js";
 import { executeWorkspaceExperiment, type WorkspaceExperimentSpawn } from
   "./workspace/executor.js";
+import {
+  executeCandidateVerification,
+  type VerificationSpawn,
+} from "./verification/executor.js";
+import type { RecipeCatalog } from "./verification/recipe-catalog.js";
 import { v2CapabilitySpec, V2_DEFERRED_OPERATIONS, SANDBOX_V2_OPERATION_NAMES, isSandboxV2Request } from
   "./v2-types.js";
 import type { V2ProjectReadRegistry } from "./registry.js";
@@ -33,6 +38,12 @@ export type SandboxV2Environment = {
   spawnInspection?: ProjectInspectionExecutorOptions["spawnRunner"];
   /** Overrides the workspace experiment spawner. */
   spawnWorkspace?: WorkspaceExperimentSpawn;
+  /**
+   * Overrides the M4 verification spawner. Must not fall back to the M3
+   * writable workspace spawn seam.
+   */
+  spawnVerification?: VerificationSpawn;
+  recipeCatalog?: RecipeCatalog;
   /** Workspace manager override. */
   workspaceManager?: import("./workspace/workspace-manager.js").WorkspaceManager;
   managedWorkspaceRoot?: string;
@@ -138,6 +149,23 @@ export class SandboxV2Dispatcher {
         spawnRunner: this.env.spawnWorkspace ?? this.env.spawnInspection,
         workspaceManager: this.env.workspaceManager,
         managedWorkspaceRoot: this.env.managedWorkspaceRoot,
+        timeoutMs: this.env.timeoutMs,
+        childExecutionDeadlineAtMs: this.env.childExecutionDeadlineAtMs,
+        childTerminationDeadlineAtMs: this.env.childTerminationDeadlineAtMs,
+        settlementDeadlineAtMs: this.env.settlementDeadlineAtMs,
+        clock: this.env.clock,
+      });
+    }
+    if (request.operation === "workspace.verify") {
+      const { registry, protectedRoots } = this.env;
+      return executeCandidateVerification(request, {
+        registry,
+        protectedRoots,
+        available: this.env.sandboxAvailable,
+        spawnVerification: this.env.spawnVerification,
+        workspaceManager: this.env.workspaceManager,
+        managedWorkspaceRoot: this.env.managedWorkspaceRoot,
+        recipeCatalog: this.env.recipeCatalog,
         timeoutMs: this.env.timeoutMs,
         childExecutionDeadlineAtMs: this.env.childExecutionDeadlineAtMs,
         childTerminationDeadlineAtMs: this.env.childTerminationDeadlineAtMs,

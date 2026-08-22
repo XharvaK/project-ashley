@@ -14,6 +14,7 @@ export type PhaseLifecyclePhase =
   | "project_inspection_preparation"
   | "project_inspection"
   | "candidate_workspace_experiment"
+  | "candidate_verification"
   | "continuation"
   | "perception"
   | "expression"
@@ -71,6 +72,7 @@ const PHASES = new Set<PhaseLifecyclePhase>([
   "project_inspection_preparation",
   "project_inspection",
   "candidate_workspace_experiment",
+  "candidate_verification",
   "continuation",
   "perception",
   "expression",
@@ -96,6 +98,7 @@ const BRANCHES = new Set<TurnDeadlineBranchKind>([
   "sandbox_m1",
   "project_inspection",
   "candidate_workspace_experiment",
+  "candidate_verification",
 ]);
 
 const EXECUTION_TRUTHS = new Set<M3ExecutionTruth>([
@@ -218,6 +221,25 @@ function deadlineOffsets(plan: TurnDeadlinePlan): Record<string, number> {
     )) {
       result[`candidateWorkspaceChild:${operation}`] = offset(plan, deadlineAtMs);
     }
+  }
+  const verification = plan.branches.candidate_verification;
+  if (verification.available) {
+    result.candidateVerificationChild = offset(
+      plan,
+      verification.childExecutionDeadlineAtMs,
+    );
+    result.candidateVerificationChildTermination = offset(
+      plan,
+      verification.childTerminationDeadlineAtMs,
+    );
+    result.candidateVerificationSettlement = offset(
+      plan,
+      verification.acquisitionSettlementDeadlineAtMs,
+    );
+    result.candidateVerificationContinuation = offset(
+      plan,
+      verification.continuationDeadlineAtMs,
+    );
   }
   return result;
 }

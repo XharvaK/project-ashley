@@ -136,6 +136,49 @@ export function canOfferCandidateWorkspace(
   });
 }
 
+/**
+ * Checks conditions for offering M4 candidate verification:
+ * 1. candidate_verification release state permits live influence;
+ * 2. sandbox lifecycle permits execution;
+ * 3. Sandbox V2 substrate is available;
+ * 4. at least one approved project has verificationAllowed and a non-empty recipe allowlist.
+ *
+ * engineeringAllowed and candidateWorkspaceAllowed never grant M4.
+ * Substrate availability is not permission.
+ */
+export function canOfferCandidateVerification(
+  db?: DatabaseSync,
+  options?: CanOfferProjectInspectionOptions,
+): boolean {
+  if (db) {
+    try {
+      if (!capabilityCanInfluence(db, "candidate_verification", options?.masterMode)) {
+        return false;
+      }
+    } catch {
+      return false;
+    }
+  }
+  const lifecycle =
+    options?.lifecycleEnabled ?? env.sandboxEngineeringLifecycleEnabled;
+  if (!lifecycle) return false;
+
+  const substrate =
+    options?.substrateAvailable ?? isSandboxV2Available();
+  if (!substrate) return false;
+
+  const registry = options?.registry ?? loadOperatorProjectReadRegistry();
+  const approved = listApprovedReadProjectIds(registry);
+  if (approved.length === 0) return false;
+  return approved.some((pid) => {
+    const resolution = registry.resolveReadRoot(pid);
+    if (!resolution?.ok) return false;
+    const entry = resolution.entry;
+    if (entry.verificationAllowed !== true) return false;
+    return (entry.allowedRecipeIds?.length ?? 0) > 0;
+  });
+}
+
 export class AgentProjectRegistry {
   private registry: ProjectRootRegistry;
 
@@ -171,5 +214,9 @@ export class AgentProjectRegistry {
 
   isWorkspaceAllowed(projectId: string): boolean {
     return this.get(projectId)?.candidateWorkspaceAllowed ?? false;
+  }
+
+  isVerificationAllowed(projectId: string): boolean {
+    return this.get(projectId)?.verificationAllowed === true;
   }
 }

@@ -9,7 +9,7 @@ import {
   currentReleaseId,
 } from "../rollout/capabilities.js";
 import type { CognitionMode } from "../types.js";
-import { listApprovedReadProjectIds, canOfferCandidateWorkspace } from "../sandbox/project-registry.js";
+import { listApprovedReadProjectIds, canOfferCandidateWorkspace, canOfferCandidateVerification } from "../sandbox/project-registry.js";
 
 export type PerceptionCapabilityName =
   | "vision"
@@ -190,6 +190,36 @@ export function describeCandidateWorkspaceAvailability(options?: {
   }`;
 }
 
+export function describeCandidateVerificationAvailability(options?: {
+  db?: DatabaseSync;
+  masterMode?: CognitionMode;
+  canInfluence?: boolean;
+  registryAllows?: boolean;
+}): string {
+  if (!options?.db) {
+    return "Candidate verification (M4): unavailable (no db for capability check); cannot request workspace.verify this turn.";
+  }
+  const canInfluence =
+    options.canInfluence ??
+    (() => {
+      try {
+        return capabilityCanInfluence(options.db, "candidate_verification", options.masterMode);
+      } catch {
+        return false;
+      }
+    })();
+  const registryAllows =
+    options.registryAllows ?? canOfferCandidateVerification(options.db);
+  if (canInfluence && registryAllows) {
+    return "Candidate verification (M4): offerable (candidate_verification active and verificationAllowed with a recipe allowlist; mechanical recipe outcome for a named snapshot; not engineering judgment). Deadline-branch availability is a separate runtime gate.";
+  }
+  return `Candidate verification (M4): ${
+    !canInfluence
+      ? "capability not active in rollout (observe-only; cannot request workspace.verify)"
+      : "verificationAllowed closed or recipe allowlist empty (cannot request workspace.verify)"
+  }`;
+}
+
 export function composeSelfCapabilityContext(
   db: DatabaseSync,
   options?: {
@@ -205,6 +235,7 @@ export function composeSelfCapabilityContext(
     "- Web search has no configured provider in this deployment.",
     `- ${describeSandboxV2Availability({ db, masterMode: options?.masterMode })}`,
     `- ${describeCandidateWorkspaceAvailability({ db, masterMode: options?.masterMode })}`,
+    `- ${describeCandidateVerificationAvailability({ db, masterMode: options?.masterMode })}`,
     `- ${describeSandboxAvailability()}`,
   ];
   return lines.join("\n");

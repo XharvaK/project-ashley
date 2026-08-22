@@ -91,6 +91,23 @@ describe("Stage 2 — WorkspaceManager Lifecycle", () => {
     expect(readFileSync(join(resumeResult.workspaceTreeRoot, "src", "index.ts"), "utf8")).toBe('console.log("mutated");');
   });
 
+  it("resumeExistingWorkspace never creates a missing workspace", async () => {
+    const ctx = { ...context, canonicalRoot: sourceRoot };
+    const created = await manager.acquireWorkspace(ctx);
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+
+    const missing = manager.resumeExistingWorkspace(ctx, "nonexistent-workspace-id");
+    expect(missing.ok).toBe(false);
+    if (!missing.ok) expect(missing.error).toBe("workspace_not_found");
+
+    const resumed = manager.resumeExistingWorkspace(ctx, created.workspaceId);
+    expect(resumed.ok).toBe(true);
+    if (!resumed.ok) return;
+    expect(resumed.isNew).toBe(false);
+    expect(resumed.workspaceId).toBe(created.workspaceId);
+  });
+
   it("fails closed on non-existent workspace resume", async () => {
     const ctx = { ...context, canonicalRoot: sourceRoot };
     const result = await manager.acquireWorkspace(ctx, "nonexistent-workspace-id");

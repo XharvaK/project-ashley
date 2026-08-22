@@ -30,6 +30,7 @@ import type {
 } from "./types.js";
 import { capabilityCanInfluence } from "./rollout/capabilities.js";
 import {
+  canOfferCandidateVerification,
   canOfferCandidateWorkspace,
   canOfferProjectInspection,
 } from "./sandbox/project-registry.js";
@@ -241,6 +242,40 @@ export function operationalWorkBlock(
     ].join("\n");
   }
 
+  if (license.profile === "candidate_verification") {
+    const lines = [
+      `Status: ${truth.state !== "none" ? truth.state : license.state}`,
+      `Profile: ${license.profile}`,
+      license.taskId ? `Task ID: ${license.taskId}` : "",
+      license.error ? `Error: ${license.error}` : "",
+      license.refusalReason ? `Refusal: ${license.refusalReason}` : "",
+    ].filter(Boolean);
+    const effect = license.verificationClaimEffect;
+    if (
+      (truth.state === "verified_success" || truth.state === "verified_failure") &&
+      effect
+    ) {
+      lines.push(
+        `Recipe ID: ${effect.recipeId}`,
+        `Recipe version: ${effect.recipeVersion}`,
+        `Snapshot ID: ${effect.snapshotId}`,
+        `Workspace ID: ${effect.workspaceId}`,
+        `Candidate tree hash: ${effect.candidateTreeHash}`,
+        `Verification outcome: ${effect.verificationOutcome}`,
+        "Semantics: this is a mechanical recipe outcome for a named candidate snapshot. It is not engineering judgment, merge authority, deployment readiness, or self-improvement.",
+      );
+    } else if (license.error) {
+      lines.push(
+        `Verification status: not licensed (${license.error}). No mechanical verification claim is authorized.`,
+      );
+    }
+    if (lines.length === 0) return "";
+    return [
+      "## Operational work state (cognitive attention only)",
+      ...lines,
+    ].join("\n");
+  }
+
   // Direct license projection scoped specifically to sandbox_workspace_file_roundtrip
   if (license.profile !== "sandbox_workspace_file_roundtrip") {
     return "";
@@ -428,6 +463,87 @@ export function candidateWorkspaceEvidenceBlock(
 }
 
 /**
+ * Structured current-turn candidate-verification evidence for Expression.
+ * Always present. Licensed facts are mechanical recipe outcomes only.
+ */
+export function candidateVerificationEvidenceBlock(
+  license: OperationalClaimLicense | null | undefined,
+  options: { capabilityAvailable?: boolean } = {},
+): string {
+  const capabilityAvailable = options.capabilityAvailable === true;
+  const availableLine = `capabilityAvailable = ${capabilityAvailable}`;
+  const semanticsAvailable = [
+    "Semantics: capabilityAvailable is the authoritative current capability state; verificationStatus is what Ashley actually did or observed this turn.",
+    "Semantics: a licensed verification outcome is a mechanical recipe result for a named snapshot. It is not engineering judgment, quality, approval, merge, deployment, or self-improvement.",
+  ];
+  if (license?.profile === "candidate_verification") {
+    const truth = deriveOperationalTruth(license);
+    if (
+      (truth.state === "verified_success" || truth.state === "verified_failure") &&
+      license.verificationClaimEffect
+    ) {
+      const effect = license.verificationClaimEffect;
+      return [
+        "Candidate verification evidence:",
+        availableLine,
+        `verificationStatus = ${effect.verificationOutcome}`,
+        `recipeId = ${effect.recipeId}`,
+        `recipeVersion = ${effect.recipeVersion}`,
+        `snapshotId = ${effect.snapshotId}`,
+        `candidateTreeHash = ${effect.candidateTreeHash}`,
+        `verificationOutcome = ${effect.verificationOutcome}`,
+        ...semanticsAvailable,
+        `Semantics: the verification recipe completed with outcome ${effect.verificationOutcome} for snapshot ${effect.snapshotId}.`,
+      ].join("\n");
+    }
+    if (license.state === "outcome_unknown" || license.error === "outcome_unknown") {
+      return [
+        "Candidate verification evidence:",
+        availableLine,
+        "verificationStatus = outcome_unknown",
+        "verifiedMechanicalOutcome = false",
+        "error = outcome_unknown",
+        ...semanticsAvailable,
+        "Semantics: the verification observer timed out or the recipe postcondition is unknown. Do not describe this as a recipe failure.",
+      ].join("\n");
+    }
+    if (license.error === "sandbox_failure") {
+      return [
+        "Candidate verification evidence:",
+        availableLine,
+        "verificationStatus = outcome_unknown",
+        "protocolState = sandbox_failure",
+        "verifiedMechanicalOutcome = false",
+        "error = sandbox_failure",
+        ...semanticsAvailable,
+        "Semantics: verification protocol ended in sandbox_failure. Recipe outcome is unknown, not verified_failure.",
+      ].join("\n");
+    }
+    if (license.error) {
+      return [
+        "Candidate verification evidence:",
+        availableLine,
+        "verificationStatus = refused",
+        "verifiedMechanicalOutcome = false",
+        `error = ${license.error}`,
+        ...semanticsAvailable,
+        "Semantics: this turn did not produce a licensed mechanical verification claim.",
+      ].join("\n");
+    }
+  }
+  return [
+    "Candidate verification evidence:",
+    availableLine,
+    "verificationStatus = not_performed",
+    "verifiedMechanicalOutcome = false",
+    ...semanticsAvailable,
+    capabilityAvailable
+      ? "Semantics: capabilityAvailable = true with verificationStatus = not_performed means Ashley CAN run an admitted verification recipe this turn but did not; this is not an inability and must never be expressed as one."
+      : "Semantics: Ashley cannot run candidate verification this turn because candidate_verification is not active or verificationAllowed/recipe allowlist is closed.",
+  ].join("\n");
+}
+
+/**
  * ContextComposer — sole owner of turn context assembly.
  * Assembles existing peer outputs; does not reinterpret, score, or rewrite them.
  * Omitting an empty peer section is assembly, not filtering.
@@ -472,6 +588,12 @@ export function composeTurnContext(
        capabilityAvailable: canOfferCandidateWorkspace(db),
      },
    );
+   const verificationEvidence = candidateVerificationEvidenceBlock(
+     decision?.operationalLicense,
+     {
+       capabilityAvailable: canOfferCandidateVerification(db),
+     },
+   );
   // Questions only when Thought selected question evidence or none selected yet
   // would dump — skip global question dump; selected questions arrive via evidence.
   const questions = "";
@@ -487,6 +609,7 @@ export function composeTurnContext(
     operational,
     inspectionEvidence,
     workspaceEvidence,
+    verificationEvidence,
     questions,
   ].filter(Boolean);
 

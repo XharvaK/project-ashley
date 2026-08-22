@@ -40,6 +40,8 @@ export const V2_LIMITS = {
   // Request field bounds
   PROJECT_ID_MAX: 128,
   PATH_MAX: 1024,
+  RECIPE_ID_MAX: 128,
+  RECIPE_VERSION_MAX: 64,
 
   // Workspace experiment bounds (M3)
   WORKSPACE_MAX_BYTES: 100 * 1024 * 1024,

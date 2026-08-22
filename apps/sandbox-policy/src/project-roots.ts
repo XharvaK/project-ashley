@@ -19,6 +19,16 @@ export type ProjectRootEntry = {
   readAllowed: boolean;
   candidateWorkspaceAllowed: boolean;
   engineeringAllowed: boolean;
+  /**
+   * M4 verification grant. Missing/false means verification is refused.
+   * Independent of engineeringAllowed. Normalized to false when absent.
+   */
+  verificationAllowed?: boolean;
+  /**
+   * Explicit recipe allowlist. Missing or empty means no recipe is admitted.
+   * Independent of the operator catalog; a catalog hit is not a project grant.
+   */
+  allowedRecipeIds?: readonly string[];
 };
 
 export type ProjectRootRegistry = {
@@ -70,6 +80,11 @@ export function validateProjectRootRegistry(
       reasons.push(`duplicate_canonical_root:${entry.canonicalRoot}`);
       continue;
     }
+    const allowedRecipeIds = normalizeAllowedRecipeIds(entry.allowedRecipeIds);
+    if (!allowedRecipeIds.ok) {
+      reasons.push(`allowed_recipe_ids_invalid:${entry.projectId}`);
+      continue;
+    }
     const normalized: ProjectRootEntry = {
       projectId: entry.projectId,
       canonicalRoot: entry.canonicalRoot,
@@ -78,12 +93,40 @@ export function validateProjectRootRegistry(
       readAllowed: entry.readAllowed !== false,
       candidateWorkspaceAllowed: entry.candidateWorkspaceAllowed === true,
       engineeringAllowed: entry.engineeringAllowed === true,
+      verificationAllowed: entry.verificationAllowed === true,
+      allowedRecipeIds: allowedRecipeIds.ids,
     };
     entries.set(normalized.projectId, normalized);
     roots.push(normalized.canonicalRoot);
   }
   if (reasons.length > 0) return { ok: false, reasons };
   return { ok: true, registry: { entries, roots } };
+}
+
+function normalizeAllowedRecipeIds(
+  value: unknown,
+): { ok: true; ids: readonly string[] } | { ok: false } {
+  if (value === undefined || value === null) {
+    return { ok: true, ids: Object.freeze([]) };
+  }
+  if (!Array.isArray(value)) return { ok: false };
+  const ids: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string" || item.length < 1 || item.length > 128) {
+      return { ok: false };
+    }
+    ids.push(item);
+  }
+  return { ok: true, ids: Object.freeze(ids) };
+}
+
+export function isVerificationRecipeAllowed(
+  entry: ProjectRootEntry,
+  recipeId: string,
+): boolean {
+  if (entry.verificationAllowed !== true) return false;
+  if (typeof recipeId !== "string" || recipeId.length < 1) return false;
+  return (entry.allowedRecipeIds ?? []).includes(recipeId);
 }
 
 export type ProjectRootAccessKind = "read" | "workspace" | "engineering";

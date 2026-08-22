@@ -3,6 +3,7 @@ import { describe, it, expect } from "vitest";
 import {
   validateProjectRootRegistry,
   classifyProjectRootAccess,
+  isVerificationRecipeAllowed,
   type ProjectRootEntry,
 } from "./project-roots.js";
 
@@ -70,5 +71,48 @@ describe("project root registry", () => {
     expect(entry).toBeDefined();
     expect(entry?.canonicalRoot).toBe("/home/xarvak/project-ashley");
     expect(entry?.engineeringAllowed).toBe(true);
+    expect(entry?.verificationAllowed).toBe(false);
+    expect(entry?.allowedRecipeIds).toEqual([]);
+  });
+
+  it("defaults verificationAllowed false and empty recipe allowlist", () => {
+    const r = validateProjectRootRegistry(entries);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const a = r.registry.entries.get("projA");
+    expect(a?.verificationAllowed).toBe(false);
+    expect(a?.allowedRecipeIds).toEqual([]);
+    expect(a?.engineeringAllowed).toBe(true);
+    expect(isVerificationRecipeAllowed(a!, "typescript_fixture_compile_v1")).toBe(false);
+  });
+
+  it("refuses a missing recipe allowlist even when verificationAllowed is true", () => {
+    const r = validateProjectRootRegistry([
+      {
+        ...entries[0]!,
+        verificationAllowed: true,
+      },
+    ]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const entry = r.registry.entries.get("projA");
+    expect(entry?.verificationAllowed).toBe(true);
+    expect(entry?.allowedRecipeIds).toEqual([]);
+    expect(isVerificationRecipeAllowed(entry!, "typescript_fixture_compile_v1")).toBe(false);
+  });
+
+  it("admits only recipes on the explicit allowlist", () => {
+    const r = validateProjectRootRegistry([
+      {
+        ...entries[0]!,
+        verificationAllowed: true,
+        allowedRecipeIds: ["typescript_fixture_compile_v1"],
+      },
+    ]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const entry = r.registry.entries.get("projA")!;
+    expect(isVerificationRecipeAllowed(entry, "typescript_fixture_compile_v1")).toBe(true);
+    expect(isVerificationRecipeAllowed(entry, "other_recipe")).toBe(false);
   });
 });

@@ -1,11 +1,11 @@
 /**
  * @composer-assistant/sandbox-v2 — Sandbox V2 typed-capability kernel
- * (Sandbox V2 M2).
+ * (Sandbox V2 M1–M4).
  *
  * Exports the V2 vocabulary, capability registry, operator-owned project
  * read registry, request validation, the typed dispatcher seam, the
- * read-only project-inspection family (read_file / list_directory /
- * search_text) and the M1 roundtrip adapter. All boundaries fail closed.
+ * read-only project-inspection family, M3 workspace experiments, and the
+ * M4 verification kernel. All boundaries fail closed.
  */
 
 export {
@@ -18,6 +18,7 @@ export {
   isProjectListDirectoryResult,
   isProjectSearchTextResult,
   isSandboxV2OperationResult,
+  isWorkspaceVerifyResult,
 } from "./v2-types.js";
 export type {
   SandboxV2OperationName,
@@ -40,7 +41,10 @@ export type {
   SandboxV2WorkspaceEditTextRequest,
   SandboxV2WorkspaceDeleteFileRequest,
   SandboxV2WorkspaceCreateDirectoryRequest,
+  SandboxV2WorkspaceVerifyRequest,
   SandboxV2WorkspaceRequest,
+  VerificationProtocolState,
+  VerificationOutcome,
 } from "./v2-types.js";
 
 export { V2_LIMITS, V2_HOST_FACTS, V2_SECRET_ENV_KEY } from "./limits.js";
@@ -92,6 +96,29 @@ export {
   type WorkspaceAcquisitionResult,
   type WorkspaceManifest,
 } from "./workspace/workspace-manager.js";
+
+export {
+  RecipeCatalog,
+  createFirstSliceRecipeCatalog,
+  validateWorkspaceVerifyRequest,
+  typescriptFixtureCompileV1,
+} from "./verification/recipe-catalog.js";
+export type { RecipeDefinition, RecipeRecord } from "./verification/recipe-catalog.js";
+export {
+  executeCandidateVerification,
+  spawnBubblewrapVerification,
+  isV2VerificationAvailable,
+  buildVerificationBwrapArgs,
+  type CandidateVerificationExecutorOptions,
+  type VerificationSpawn,
+  type VerificationSpawnInput,
+  type VerificationSpawnOutput,
+} from "./verification/executor.js";
+export {
+  computeProvisionalCandidateTreeHash,
+  bindCandidateSnapshot,
+  PROVISIONAL_TREE_HASH_ALGORITHM,
+} from "./verification/snapshot.js";
 
 export {
   handleFileRoundtripV2,

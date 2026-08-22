@@ -34,9 +34,17 @@ export type CognitionWorkspaceRequest =
   | SandboxV2WorkspaceDeleteFileRequest
   | SandboxV2WorkspaceCreateDirectoryRequest;
 
+export type CognitionVerificationRequest = {
+  operation: "workspace.verify";
+  projectId: string;
+  workspaceId: string;
+  recipeId: string;
+};
+
 export type CognitionOperationalRequest =
   | { kind: "project_inspection"; request: CognitionInspectionRequest }
-  | { kind: "candidate_workspace_experiment"; request: CognitionWorkspaceRequest };
+  | { kind: "candidate_workspace_experiment"; request: CognitionWorkspaceRequest }
+  | { kind: "candidate_verification"; request: CognitionVerificationRequest };
 
 export type ProjectReadFileObservation = {
   projectId: string;

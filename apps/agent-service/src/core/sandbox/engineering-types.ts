@@ -44,6 +44,7 @@ export type SandboxTaskProfile =
   | "local_service_recovery"
   | "project_investigation"
   | "project_experimentation"
+  | "candidate_verification"
   | "sandbox_workspace_file_roundtrip";
 
 /**
@@ -122,9 +123,57 @@ export function isVerifiedWorkspaceClaimEffect(
     e.workspaceId.trim().length > 0 &&
     typeof e.operation === "string" &&
     e.operation.startsWith("workspace.") &&
+    e.operation !== "workspace.verify" &&
     typeof e.logicalRelativePath === "string" &&
     typeof e.sourceSnapshotId === "string" &&
     e.sourceSnapshotId.trim().length > 0 &&
+    typeof e.completedAtMs === "number" &&
+    Number.isFinite(e.completedAtMs)
+  );
+}
+
+/**
+ * Licensed mechanical verification claim. Binds a named snapshot to a named
+ * recipe outcome. Never a quality, approval, merge, or deployment judgment.
+ */
+export type VerificationClaimEffect = {
+  verified: true;
+  projectId: string;
+  workspaceId: string;
+  snapshotId: string;
+  candidateTreeHash: string;
+  recipeId: string;
+  recipeVersion: string;
+  recipeDefinitionHash: string;
+  protocolState: "admitted";
+  verificationOutcome: "verified_success" | "verified_failure";
+  completedAtMs: number;
+};
+
+export function isVerifiedVerificationClaimEffect(
+  value: unknown,
+): value is VerificationClaimEffect {
+  if (!value || typeof value !== "object") return false;
+  const e = value as Partial<VerificationClaimEffect>;
+  return (
+    e.verified === true &&
+    e.protocolState === "admitted" &&
+    (e.verificationOutcome === "verified_success" ||
+      e.verificationOutcome === "verified_failure") &&
+    typeof e.projectId === "string" &&
+    e.projectId.trim().length > 0 &&
+    typeof e.workspaceId === "string" &&
+    e.workspaceId.trim().length > 0 &&
+    typeof e.snapshotId === "string" &&
+    e.snapshotId.trim().length > 0 &&
+    typeof e.candidateTreeHash === "string" &&
+    e.candidateTreeHash.length === 64 &&
+    typeof e.recipeId === "string" &&
+    e.recipeId.trim().length > 0 &&
+    typeof e.recipeVersion === "string" &&
+    e.recipeVersion.trim().length > 0 &&
+    typeof e.recipeDefinitionHash === "string" &&
+    e.recipeDefinitionHash.length === 64 &&
     typeof e.completedAtMs === "number" &&
     Number.isFinite(e.completedAtMs)
   );
@@ -146,6 +195,7 @@ export type OperationalClaimLicense = {
   profile?: SandboxTaskProfile | string | null;
   effectEvidence?: RoundtripEffectEvidence | null;
   workspaceClaimEffect?: WorkspaceClaimEffect | null;
+  verificationClaimEffect?: VerificationClaimEffect | null;
   receiptRef?: string | null;
   error?: string | null;
   refusalReason?: string | null;

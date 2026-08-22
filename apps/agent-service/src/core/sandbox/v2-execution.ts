@@ -44,6 +44,7 @@ import {
   type SandboxV2Request,
   type SandboxV2Result,
 } from "@composer-assistant/sandbox-v2";
+import { isVerificationRecipeAllowed } from "@composer-assistant/sandbox-policy";
 import type {
   CognitionInspectionRequest,
   CognitionWorkspaceRequest,
@@ -64,6 +65,10 @@ import type { DatabaseSync } from "node:sqlite";
 import type { CognitionMode } from "../types.js";
 import { capabilityCanInfluence } from "../rollout/capabilities.js";
 import { env } from "../../env.js";
+import {
+  issueCandidateVerificationLicense,
+  type CandidateVerificationRequest,
+} from "./verification-license.js";
 
 const SECRET_ENV_KEY = "ASHLEY_SANDBOX_M1_SECRET_SENTINEL";
 const BWRAP_PATH = "/usr/bin/bwrap";
@@ -979,5 +984,155 @@ export async function executeWorkspaceExperimentV2(
       },
       observation: null,
     };
+  }
+}
+
+export type ExecuteCandidateVerificationV2Input = {
+  request: CandidateVerificationRequest;
+  messageEntityUuid?: string;
+  deadlineAtMs?: number;
+  dispatcher?: SandboxV2Dispatcher;
+  registry?: V2ProjectReadRegistry;
+  workspaceManager?: import("@composer-assistant/sandbox-v2").WorkspaceManager;
+  envOverrides?: Partial<SandboxV2Environment> & {
+    sandboxEngineeringLifecycleEnabled?: boolean;
+  };
+  db?: DatabaseSync;
+  masterMode?: CognitionMode;
+  skipCapabilityGate?: boolean;
+};
+
+export type ExecuteCandidateVerificationV2Result = {
+  license: OperationalClaimLicense;
+};
+
+/**
+ * Maps a completed M4 verification receipt onto OperationalClaimLicense.
+ * Reactive only. Does not invent Thought requests, Discord paths, or
+ * background verification.
+ */
+export async function executeCandidateVerificationV2(
+  input: ExecuteCandidateVerificationV2Input,
+): Promise<ExecuteCandidateVerificationV2Result> {
+  const { request, messageEntityUuid } = input;
+  const none = (
+    error: string,
+    extras?: Partial<OperationalClaimLicense>,
+  ): ExecuteCandidateVerificationV2Result => ({
+    license: {
+      state: "none",
+      taskId: extras?.taskId ?? `v2-verify-${Date.now()}`,
+      profile: "candidate_verification",
+      error,
+      ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
+      ...extras,
+    },
+  });
+
+  const settlementDeadlineAtMs = input.deadlineAtMs;
+  if (
+    typeof settlementDeadlineAtMs === "number" &&
+    settlementDeadlineAtMs <= Date.now()
+  ) {
+    return {
+      license: {
+        state: "failed",
+        taskId: `v2-verify-${Date.now()}`,
+        profile: "candidate_verification",
+        error: "deadline_exceeded",
+        ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
+      },
+    };
+  }
+
+  if (input.db && !input.skipCapabilityGate) {
+    try {
+      if (!capabilityCanInfluence(input.db, "candidate_verification", input.masterMode)) {
+        return none("candidate_verification_gate_denied");
+      }
+    } catch {
+      return none("candidate_verification_gate_denied");
+    }
+  }
+
+  const lifecycleEnabled =
+    input.envOverrides?.sandboxEngineeringLifecycleEnabled !== undefined
+      ? input.envOverrides.sandboxEngineeringLifecycleEnabled
+      : env.sandboxEngineeringLifecycleEnabled;
+  if (!lifecycleEnabled) {
+    return none("sandbox_lifecycle_disabled");
+  }
+
+  const registry =
+    input.registry ??
+    input.envOverrides?.registry ??
+    loadOperatorProjectReadRegistry();
+
+  const resolved = registry.resolveReadRoot(request.projectId);
+  if (!resolved.ok) {
+    return none("verification_not_allowed");
+  }
+  if (resolved.entry.verificationAllowed !== true) {
+    return none("verification_not_allowed");
+  }
+  if (!isVerificationRecipeAllowed(resolved.entry, request.recipeId)) {
+    return none("recipe_not_allowed");
+  }
+
+  const isCustomSeam =
+    input.dispatcher !== undefined ||
+    input.envOverrides?.spawnVerification !== undefined ||
+    input.envOverrides?.sandboxAvailable !== undefined;
+
+  const substrateAvailable =
+    input.envOverrides?.sandboxAvailable !== undefined
+      ? input.envOverrides.sandboxAvailable()
+      : isSandboxV2Available();
+
+  if (!isCustomSeam && !substrateAvailable) {
+    return none("sandbox_unavailable");
+  }
+
+  try {
+    const dispatcher =
+      input.dispatcher ??
+      new SandboxV2Dispatcher({
+        env: {
+          registry,
+          workspaceManager: input.workspaceManager,
+          ...input.envOverrides,
+        },
+      });
+
+    const res: SandboxV2Result = await dispatcher.dispatch({
+      version: 2,
+      operation: "workspace.verify",
+      projectId: request.projectId,
+      workspaceId: request.workspaceId,
+      recipeId: request.recipeId,
+    });
+
+    const receipt =
+      res.verificationReceipt ??
+      (res.outcome === "succeeded" && res.result.kind === "workspace.verify"
+        ? res.result
+        : undefined);
+
+    return {
+      license: issueCandidateVerificationLicense({
+        request,
+        receipt,
+        executedAtMs: res.executedAtMs,
+        messageEntityUuid,
+        error:
+          res.outcome === "unavailable"
+            ? (res.error ?? "sandbox_unavailable")
+            : res.outcome === "failed"
+              ? (res.error ?? "verification_failed")
+              : null,
+      }),
+    };
+  } catch {
+    return none("internal_error");
   }
 }
