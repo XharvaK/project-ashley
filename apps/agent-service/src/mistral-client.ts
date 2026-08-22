@@ -1,4 +1,5 @@
 import { Mistral } from "@mistralai/mistralai";
+import { DatabaseSync } from "node:sqlite";
 import { env } from "./env.js";
 import { AppError } from "./errors.js";
 import { openNuclearDb } from "./core/db.js";
@@ -153,7 +154,9 @@ export async function completeChat(
   const quotaBucket = quotaBucketFor(provider, modelAlias);
 
   assertOutboundAllowed(provider);
-  const db = options.attentionDb ?? openNuclearDb();
+  const db =
+    options.attentionDb ??
+    openNuclearDb(new DatabaseSync(":memory:"), { continuityOptional: true });
   const toolsJson = options.tools ? JSON.stringify(options.tools) : undefined;
 
   const attentive = await runAttentiveDispatch<{

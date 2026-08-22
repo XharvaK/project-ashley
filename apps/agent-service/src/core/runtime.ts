@@ -1,7 +1,8 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { ProjectInspectionObservation } from "./types.js";
 import { env } from "../env.js";
-import { NUCLEAR_DB_PATH } from "../paths.js";
+import type { DataPlaneContext } from "./data-plane.js";
+import { connectNuclearDb } from "./db.js";
 import { decide, attachAuthorizedClaims } from "./agency/decide.js";
 import { buildOwnTimeReportConstraint } from "./agency/own-time-report.js";
 import { collectMotivations, mindStateItemToMotivation } from "./agency/motivations.js";
@@ -56,7 +57,6 @@ import {
 import { runNuclearCuriosityTick } from "./curiosity/tick.js";
 import { recordPendingEngineeringAdmission } from "./sandbox/engineering-runs.js";
 import { listRecentReads } from "./curiosity/reads.js";
-import { openNuclearDb } from "./db.js";
 import { getContinuityFor } from "./continuity/registry.js";
 import {
   bindForgetPreviewDiscordMessage,
@@ -468,6 +468,8 @@ export class AshleyCore {
   private readonly sandboxBrokerClient: SandboxBrokerClient | null;
   private readonly reflectionReviewAdjudicator: OpenCognitiveReviewAdjudicator | undefined;
 
+  private readonly dataPlane: DataPlaneContext | null;
+
   constructor(
     db?: DatabaseSync,
     options?: {
@@ -475,17 +477,20 @@ export class AshleyCore {
       sandboxBrokerTransport?: BrokerClientTransport | null;
       sandboxBrokerClient?: SandboxBrokerClient | null;
       reflectionReviewAdjudicator?: OpenCognitiveReviewAdjudicator;
+      dataPlane?: DataPlaneContext;
     },
   ) {
-    const priorContinuity = db ? getContinuityFor(db) : undefined;
-    this.db = openNuclearDb(
+    if (!db) {
+      throw new Error("data_plane_required");
+    }
+    const priorContinuity = getContinuityFor(db);
+    this.db = connectNuclearDb(
       db,
       priorContinuity
-        ? { continuity: priorContinuity }
-        : db
-          ? {}
-          : {},
+        ? { continuity: priorContinuity, dataPlane: options?.dataPlane }
+        : { dataPlane: options?.dataPlane },
     );
+    this.dataPlane = options?.dataPlane ?? null;
     this.continuity = getContinuityFor(this.db) ?? priorContinuity ?? null;
     this.reflectionMode = options?.reflectionMode ?? env.reflectionMode;
     this.reflectionReviewAdjudicator = options?.reflectionReviewAdjudicator;
@@ -521,6 +526,16 @@ export class AshleyCore {
     }
     recoverStaleRequests(this.db);
     processPendingReflectionEvents(this.db);
+  }
+
+  private nuclearFilePath(): string | null {
+    const rows = this.db.prepare("PRAGMA database_list").all() as Array<{
+      name?: string;
+      file?: string;
+    }>;
+    const main = rows.find((row) => row.name === "main");
+    const file = main?.file?.trim() ?? "";
+    return file.length > 0 ? file : null;
   }
 
   /** The source-proposal layer can use this only when the operator enables it. */
@@ -2107,6 +2122,8 @@ export class AshleyCore {
                 initiativeClass === "urgent_grounded"
                   ? "urgent_grounded"
                   : "interactive",
+              attentionDb: this.db,
+              ownerId,
             },
           );
         } catch (error) {
@@ -3439,7 +3456,10 @@ export class AshleyCore {
       return {
         ok: version >= 10,
         nuclearEnabled: true,
-        dbPath: NUCLEAR_DB_PATH,
+        dbPath:
+          this.dataPlane?.nuclearDbPath ??
+          this.nuclearFilePath() ??
+          ":memory:",
         schemaVersion: version,
         reflectionMode: this.reflectionMode,
         cognitionMode: env.cognitionMode,
@@ -3457,7 +3477,10 @@ export class AshleyCore {
       return {
         ok: false,
         nuclearEnabled: true,
-        dbPath: NUCLEAR_DB_PATH,
+        dbPath:
+          this.dataPlane?.nuclearDbPath ??
+          this.nuclearFilePath() ??
+          ":memory:",
         schemaVersion: 0,
         reflectionMode: this.reflectionMode,
         cognitionMode: env.cognitionMode,

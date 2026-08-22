@@ -7,13 +7,9 @@ import {
 } from "@composer-assistant/sandbox-broker";
 import { SANDBOX_AUTONOMY_LIFECYCLE_VALUES } from "./core/sandbox/lifecycle.js";
 
-const ENV_PATH =
-  process.env.COMPOSER_ENV_FILE ??
-  join(homedir(), ".composer-assistant", ".env");
-
-function loadDotEnv(): void {
-  if (!existsSync(ENV_PATH)) return;
-  const content = readFileSync(ENV_PATH, "utf-8");
+function applyDotEnvFile(envPath: string): void {
+  if (!existsSync(envPath)) return;
+  const content = readFileSync(envPath, "utf-8");
   for (const line of content.split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("#")) continue;
@@ -33,15 +29,19 @@ function loadDotEnv(): void {
   }
 }
 
-loadDotEnv();
+/** Explicit env-file activation. Importing this module does not load production .env. */
+export function loadEnvFile(envPath: string): void {
+  applyDotEnvFile(envPath);
+  refreshEnvFromProcess();
+}
 
 /**
  * Boot errors are fatal: malformed security configuration must never be
  * coerced into a permissive value. `ok: false` from validateBoot() sends the
  * agent offline instead of running with a guessed setting.
  */
-const bootErrors: string[] = [];
-const numericWarnings: string[] = [];
+let bootErrors: string[] = [];
+let numericWarnings: string[] = [];
 
 function numericEnv(
   name: string,
@@ -99,20 +99,23 @@ function strictTrimmed(name: string, fallback: string): string {
   return trimmed;
 }
 
-const sandboxKeysDir = strictTrimmed(
-  "ASHLEY_SANDBOX_KEYS_DIR",
-  join(homedir(), ".composer-assistant", "keys"),
-);
-const sandboxOwnerKeyId = strictTrimmed(
-  "ASHLEY_SANDBOX_OWNER_KEY_ID",
-  "owner-ed25519-v1",
-);
-const sandboxContinuityKeyId = strictTrimmed(
-  "ASHLEY_SANDBOX_CONTINUITY_KEY_ID",
-  "continuity-tombstone-ed25519-v1",
-);
+function createEnv() {
+  bootErrors = [];
+  numericWarnings = [];
+  const sandboxKeysDir = strictTrimmed(
+    "ASHLEY_SANDBOX_KEYS_DIR",
+    join(homedir(), ".composer-assistant", "keys"),
+  );
+  const sandboxOwnerKeyId = strictTrimmed(
+    "ASHLEY_SANDBOX_OWNER_KEY_ID",
+    "owner-ed25519-v1",
+  );
+  const sandboxContinuityKeyId = strictTrimmed(
+    "ASHLEY_SANDBOX_CONTINUITY_KEY_ID",
+    "continuity-tombstone-ed25519-v1",
+  );
 
-export const env = {
+  return {
   ashleyReleaseId: process.env.ASHLEY_RELEASE_ID ?? "",
   mistralApiKey: process.env.MISTRAL_API_KEY ?? "",
   mistralModel: process.env.MISTRAL_MODEL ?? "mistral-medium-latest",
@@ -368,7 +371,19 @@ export const env = {
     16,
     true,
   ),
-};
+  };
+}
+
+const pointedEnvFile = process.env.COMPOSER_ENV_FILE?.trim();
+if (pointedEnvFile) {
+  applyDotEnvFile(pointedEnvFile);
+}
+
+export const env = createEnv();
+
+export function refreshEnvFromProcess(): void {
+  Object.assign(env, createEnv());
+}
 
 function sandboxIsActive(): boolean {
   return env.sandboxBrokerEnabled || env.sandboxLifecycle !== "disabled";
@@ -384,17 +399,17 @@ function sandboxReadinessErrors(): string[] {
   const continuity = env.sandboxContinuityKeyEncPath;
   const passphrase = env.sandboxKeyPassphrasePath;
   if (!existsSync(owner)) missingKeys.push(`owner approval key (${owner})`);
-  if (!existsSync(join(sandboxKeysDir, `${sandboxOwnerKeyId}.pub`))) {
+  if (!existsSync(join(env.sandboxKeysDir, `${env.sandboxOwnerKeyId}.pub`))) {
     missingKeys.push(
-      `owner approval public key (${join(sandboxKeysDir, `${sandboxOwnerKeyId}.pub`)})`,
+      `owner approval public key (${join(env.sandboxKeysDir, `${env.sandboxOwnerKeyId}.pub`)})`,
     );
   }
   if (!existsSync(continuity)) {
     missingKeys.push(`continuity tombstone key (${continuity})`);
   }
-  if (!existsSync(join(sandboxKeysDir, `${sandboxContinuityKeyId}.pub`))) {
+  if (!existsSync(join(env.sandboxKeysDir, `${env.sandboxContinuityKeyId}.pub`))) {
     missingKeys.push(
-      `continuity tombstone public key (${join(sandboxKeysDir, `${sandboxContinuityKeyId}.pub`)})`,
+      `continuity tombstone public key (${join(env.sandboxKeysDir, `${env.sandboxContinuityKeyId}.pub`)})`,
     );
   }
   if (!existsSync(passphrase)) missingKeys.push(`master passphrase (${passphrase})`);

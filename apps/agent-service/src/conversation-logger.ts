@@ -1,7 +1,7 @@
 import { mkdirSync, appendFileSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { CONVERSATIONS_DIR, DB_PATH, SESSIONS_DIR } from "./paths.js";
+import type { DataPlaneContext } from "./core/data-plane.js";
 
 export type LogMessage = {
   ts: string;
@@ -30,11 +30,13 @@ export type SessionMeta = {
 
 export class ConversationLogger {
   private db: DatabaseSync;
+  private readonly dataPlane: DataPlaneContext;
 
-  constructor(existingDb?: DatabaseSync) {
-    mkdirSync(SESSIONS_DIR, { recursive: true });
-    mkdirSync(CONVERSATIONS_DIR, { recursive: true });
-    this.db = existingDb ?? new DatabaseSync(DB_PATH);
+  constructor(dataPlane: DataPlaneContext, existingDb?: DatabaseSync) {
+    this.dataPlane = dataPlane;
+    mkdirSync(dataPlane.sessionsDir, { recursive: true });
+    mkdirSync(dataPlane.conversationsDir, { recursive: true });
+    this.db = existingDb ?? new DatabaseSync(dataPlane.archiveDbPath);
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS sessions (
         id TEXT PRIMARY KEY,
@@ -58,7 +60,7 @@ export class ConversationLogger {
   }
 
   sessionDir(sessionId: string): string {
-    const dir = join(SESSIONS_DIR, sessionId);
+    const dir = join(this.dataPlane.sessionsDir, sessionId);
     mkdirSync(dir, { recursive: true });
     return dir;
   }
@@ -84,7 +86,7 @@ export class ConversationLogger {
 
   endSession(sessionId: string): void {
     const ended = new Date().toISOString();
-    const dir = join(SESSIONS_DIR, sessionId);
+    const dir = join(this.dataPlane.sessionsDir, sessionId);
     const path = join(dir, "session.json");
     if (existsSync(path)) {
       const meta = JSON.parse(readFileSync(path, "utf-8")) as SessionMeta;

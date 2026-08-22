@@ -3,13 +3,12 @@ import { mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterAll, describe, expect, it } from "vitest";
+import { createIsolatedDataPlane } from "../data-plane.js";
 
-const previousDataDir = process.env.COMPOSER_DATA_DIR;
 const dataDir = mkdtempSync(join(tmpdir(), "ashley-v22-file-backed-"));
-process.env.COMPOSER_DATA_DIR = dataDir;
-mkdirSync(join(dataDir, "conversations"), { recursive: true });
+const plane = createIsolatedDataPlane(dataDir);
+mkdirSync(plane.conversationsDir, { recursive: true });
 
-const { CONTINUITY_DB_PATH, NUCLEAR_DB_PATH } = await import("../../paths.js");
 const { openContinuityDb } = await import("../continuity/db.js");
 const { openNuclearDb } = await import("../db.js");
 const { recordRecallLiveCutover } = await import("../memory/cutover.js");
@@ -23,8 +22,6 @@ const {
 const connections: DatabaseSync[] = [];
 
 afterAll(() => {
-  if (previousDataDir === undefined) delete process.env.COMPOSER_DATA_DIR;
-  else process.env.COMPOSER_DATA_DIR = previousDataDir;
   for (const connection of connections) {
     try {
       connection.close();
@@ -84,9 +81,14 @@ function downgradeToV21(db: DatabaseSync): void {
 
 describe("migration-22 file-backed qualification", () => {
   it("migrates, closes, reopens, and preserves authority identity and release isolation", () => {
-    const continuity = openContinuityDb(new DatabaseSync(CONTINUITY_DB_PATH));
+    const continuity = openContinuityDb(new DatabaseSync(plane.continuityDbPath), {
+      dataPlane: plane,
+    });
     connections.push(continuity);
-    const db = openNuclearDb(new DatabaseSync(NUCLEAR_DB_PATH), { continuity });
+    const db = openNuclearDb(new DatabaseSync(plane.nuclearDbPath), {
+      continuity,
+      dataPlane: plane,
+    });
     connections.push(db);
     const releaseId = currentContractId();
     const historicalEpisodeId = 7;
@@ -140,7 +142,10 @@ describe("migration-22 file-backed qualification", () => {
     ).run();
     db.close();
 
-    const migrated = openNuclearDb(new DatabaseSync(NUCLEAR_DB_PATH), { continuity });
+    const migrated = openNuclearDb(new DatabaseSync(plane.nuclearDbPath), {
+      continuity,
+      dataPlane: plane,
+    });
     try {
       expect(migrated.prepare("PRAGMA user_version").get()).toEqual({ user_version: 29 });
       expect(migrated.prepare("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 });
@@ -239,9 +244,15 @@ describe("migration-22 file-backed qualification", () => {
       continuity.close();
     }
 
-    const reopenedContinuity = openContinuityDb(new DatabaseSync(CONTINUITY_DB_PATH));
+    const reopenedContinuity = openContinuityDb(
+      new DatabaseSync(plane.continuityDbPath),
+      { dataPlane: plane },
+    );
     connections.push(reopenedContinuity);
-    const reopened = openNuclearDb(new DatabaseSync(NUCLEAR_DB_PATH), { continuity: reopenedContinuity });
+    const reopened = openNuclearDb(new DatabaseSync(plane.nuclearDbPath), {
+      continuity: reopenedContinuity,
+      dataPlane: plane,
+    });
     connections.push(reopened);
     try {
       expect(reopened.prepare("PRAGMA user_version").get()).toEqual({ user_version: 29 });

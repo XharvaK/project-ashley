@@ -40,8 +40,8 @@ function clearSandboxEnvironment(): void {
 
 beforeEach(() => {
   clearSandboxEnvironment();
-  // env.ts loads COMPOSER_ENV_FILE at module evaluation time. An empty path
-  // prevents a real owner .env from leaking into these parser unit tests.
+  // Importing env.ts does not load production .env. An empty COMPOSER_ENV_FILE
+  // keeps tests from accidentally calling loadEnvFile on a real owner path.
   process.env.COMPOSER_ENV_FILE = "";
   vi.resetModules();
 });

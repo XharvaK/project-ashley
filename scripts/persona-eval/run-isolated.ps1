@@ -1,5 +1,5 @@
 # Run persona probes against a throwaway agent on port 3712.
-# Isolated on purpose: its own COMPOSER_DATA_DIR, proactive off so it never DMs anyone.
+# Isolated on purpose: explicit isolated DataPlaneContext, proactive off so it never DMs anyone.
 param(
     [string]$Label = "",
     [string]$Tags = "",
@@ -11,7 +11,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
-$EvalData = Join-Path $env:USERPROFILE ".composer-assistant\persona-eval-data"
+# Must sit outside reserved production ~/.composer-assistant.
+$EvalData = Join-Path $env:USERPROFILE ".composer-assistant-persona-eval"
 
 # A leftover eval agent keeps a handle on the DB and would make -Fresh fail
 # halfway through, leaving a half-deleted data dir behind.
@@ -32,14 +33,13 @@ npm run build --prefix (Join-Path $Root "apps\agent-service") | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "agent-service build failed" }
 
 $env:AGENT_PORT = "$Port"
-$env:COMPOSER_DATA_DIR = $EvalData
 $env:ASHLEY_NUCLEAR = "true"
 $env:PERSONA_EVAL_MODE = "true"
 $env:PROACTIVE_ENABLED = "false"
 # Her inner life is live infrastructure: in a probe run it would spend search
 # credits and make the same probe answer differently on Tuesday.
 $env:CURIOSITY_ENABLED = "false"
-# Fresh COMPOSER_DATA_DIR already isolates memory; -WithRetrieval is reserved
+# Isolated eval data already isolates memory; -WithRetrieval is reserved
 # for future retrieval harnesses (no-op under nuclear today).
 if (-not $WithRetrieval) { $env:MEMORY_RETRIEVAL_TOP_K = "0" }
 
@@ -48,9 +48,10 @@ New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 $stdout = Join-Path $logDir "agent-eval.out.log"
 $stderr = Join-Path $logDir "agent-eval.err.log"
 
+$isolatedEntry = Join-Path $Root "apps\agent-service\dist\isolated-index.js"
 Write-Host "Starting isolated agent on 127.0.0.1:$Port (data: $EvalData)"
 $agent = Start-Process node `
-    -ArgumentList (Join-Path $Root "apps\agent-service\dist\index.js") `
+    -ArgumentList @($isolatedEntry, $EvalData) `
     -WorkingDirectory $Root `
     -RedirectStandardOutput $stdout `
     -RedirectStandardError $stderr `
@@ -72,7 +73,7 @@ try {
         Stop-Process -Id $agent.Id -Force
         Write-Host "Stopped isolated agent (pid $($agent.Id))"
     }
-    Remove-Item Env:\AGENT_PORT, Env:\COMPOSER_DATA_DIR, Env:\ASHLEY_NUCLEAR, `
+    Remove-Item Env:\AGENT_PORT, Env:\ASHLEY_NUCLEAR, `
         Env:\PERSONA_EVAL_MODE, Env:\PROACTIVE_ENABLED, Env:\MEMORY_RETRIEVAL_TOP_K, `
         Env:\CURIOSITY_ENABLED `
         -ErrorAction SilentlyContinue

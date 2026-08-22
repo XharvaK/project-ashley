@@ -1,11 +1,13 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { ConversationLogger } from "./conversation-logger.js";
-import { STATE_PATH, DATA_DIR } from "./paths.js";
 import { AshleyCore } from "./core/index.js";
+import type { DataPlaneContext } from "./core/data-plane.js";
+import { openNuclearDb } from "./core/db.js";
 import { env, validateBoot } from "./env.js";
 import { AppError } from "./errors.js";
 import { isAuthorizedOwnerId } from "./owner-auth.js";
+import { DatabaseSync } from "node:sqlite";
 
 export type AgentState = "booting" | "ready" | "paused" | "busy" | "offline";
 
@@ -21,14 +23,24 @@ type PersistedState = {
 
 export class AgentManager {
   private state: AgentState = "booting";
-  readonly logger = new ConversationLogger();
+  readonly logger: ConversationLogger;
   readonly core: AshleyCore;
+  readonly dataPlane: DataPlaneContext;
   private sseClients = new Set<SseClient>();
   private readonly bootedAt = Date.now();
 
-  constructor() {
-    mkdirSync(DATA_DIR, { recursive: true });
-    this.core = new AshleyCore();
+  constructor(dataPlane: DataPlaneContext, existingNuclear?: DatabaseSync) {
+    this.dataPlane = dataPlane;
+    mkdirSync(dataPlane.dataDir, { recursive: true });
+    mkdirSync(dataPlane.conversationsDir, { recursive: true });
+    this.logger = new ConversationLogger(dataPlane);
+    const db =
+      existingNuclear ??
+      openNuclearDb(new DatabaseSync(dataPlane.nuclearDbPath), {
+        dataPlane,
+        migrate: true,
+      });
+    this.core = new AshleyCore(db, { dataPlane });
   }
 
   getState(): AgentState {
@@ -76,13 +88,13 @@ export class AgentManager {
   }
 
   private loadState(): PersistedState {
-    if (!existsSync(STATE_PATH)) return {};
-    return JSON.parse(readFileSync(STATE_PATH, "utf-8")) as PersistedState;
+    if (!existsSync(this.dataPlane.statePath)) return {};
+    return JSON.parse(readFileSync(this.dataPlane.statePath, "utf-8")) as PersistedState;
   }
 
   private saveState(patch: Partial<PersistedState>): void {
     const prev = this.loadState();
-    writeFileSync(STATE_PATH, JSON.stringify({ ...prev, ...patch }, null, 2));
+    writeFileSync(this.dataPlane.statePath, JSON.stringify({ ...prev, ...patch }, null, 2));
   }
 
   async init(): Promise<void> {

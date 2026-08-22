@@ -501,9 +501,12 @@ describe("wave4 Track M5 — continuity demotion coupling", () => {
 });
 
 describe("wave4 Track M6 — attentionDb default-path guard (documentation)", () => {
-  it("completeChat with no attentionDb opens the real nuclear DB", () => {
+  it("completeChat without attentionDb uses isolated memory instead of production", () => {
     expect(readSource("../../mistral-client.ts")).toContain(
-      "const db = options.attentionDb ?? openNuclearDb();",
+      'openNuclearDb(new DatabaseSync(":memory:")',
+    );
+    expect(readSource("../../mistral-client.ts")).not.toContain(
+      "options.attentionDb ?? openNuclearDb()",
     );
   });
 

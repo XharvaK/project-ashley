@@ -1,8 +1,31 @@
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
-import { CONTINUITY_DB_PATH, DATA_DIR } from "../../paths.js";
+import {
+  isReservedProductionStoragePath,
+  type DataPlaneContext,
+} from "../data-plane.js";
+
+export function openContinuityDb(
+  existing?: DatabaseSync,
+  options: { dataPlane?: DataPlaneContext; migrate?: boolean } = {},
+): DatabaseSync {
+  if (!existing) {
+    throw new Error("data_plane_required");
+  }
+  const rows = existing.prepare("PRAGMA database_list").all() as Array<{
+    name?: string;
+    file?: string;
+  }>;
+  const main = rows.find((row) => row.name === "main");
+  const file = main?.file?.trim() ?? "";
+  if (file && isReservedProductionStoragePath(file)) {
+    if (options.dataPlane?.kind !== "production") {
+      throw new Error("production_data_plane_required");
+    }
+  }
+  migrateContinuity(existing, { migrate: options.migrate });
+  return existing;
+}
 
 export const CONTINUITY_SCHEMA_VERSION = 1;
 
@@ -438,14 +461,20 @@ export function rollbackNuclearMigration(
   });
 }
 
-export function migrateContinuity(db: DatabaseSync): void {
-  db.exec("PRAGMA foreign_keys = ON");
+export function migrateContinuity(
+  db: DatabaseSync,
+  options: { migrate?: boolean } = {},
+): void {
   const version = userVersion(db);
   if (version > CONTINUITY_SCHEMA_VERSION) {
     throw new Error(
       `unsupported_continuity_schema:${version}>${CONTINUITY_SCHEMA_VERSION}`,
     );
   }
+  if (options.migrate === false) {
+    return;
+  }
+  db.exec("PRAGMA foreign_keys = ON");
   if (version < 1) {
     db.exec("BEGIN IMMEDIATE");
     try {
@@ -463,18 +492,6 @@ export function migrateContinuity(db: DatabaseSync): void {
       ON forget_previews (owner_id, confirmation_discord_message_id)
       WHERE status = 'pending' AND confirmation_discord_message_id IS NOT NULL;
   `);
-}
-
-export function openContinuityDb(existing?: DatabaseSync): DatabaseSync {
-  if (existing) {
-    migrateContinuity(existing);
-    return existing;
-  }
-  mkdirSync(DATA_DIR, { recursive: true });
-  mkdirSync(dirname(CONTINUITY_DB_PATH), { recursive: true });
-  const db = new DatabaseSync(CONTINUITY_DB_PATH);
-  migrateContinuity(db);
-  return db;
 }
 
 export function ensureAuthoritativeLineage(

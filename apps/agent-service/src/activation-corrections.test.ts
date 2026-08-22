@@ -52,6 +52,8 @@ async function withProductionEnv<T>(
   process.env.COMPOSER_ENV_FILE = `${created.conf}/.env`;
   vi.resetModules();
   try {
+    const { loadEnvFile } = await import("./env.js");
+    loadEnvFile(`${created.conf}/.env`);
     return await action();
   } finally {
     for (const [name, original] of originals) {

@@ -1,12 +1,16 @@
-import { mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import {
-  CONVERSATIONS_DIR,
-  DATA_DIR,
-  MIGRATION_BACKUPS_DIR,
-  NUCLEAR_DB_PATH,
-} from "../paths.js";
+  dataPlaneOwnsFile,
+  isolatedPlaneForFile,
+  isReservedProductionStoragePath,
+  mayMigrateStorage,
+  reservedProductionDataDir,
+  reservedProductionNuclearDbPath,
+  type DataPlaneContext,
+} from "./data-plane.js";
 import {
   beginNuclearMigration,
   ensureAuthoritativeLineage,
@@ -72,7 +76,7 @@ import {
 import { reconcileSandboxApprovals } from "./sandbox/approval-store.js";
 import { currentBuildIdentity } from "./rollout/capabilities.js";
 
-export { NUCLEAR_DB_PATH };
+export { reservedProductionNuclearDbPath as NUCLEAR_DB_PATH };
 
 export const NUCLEAR_SUPPORTED_VERSION = 29;
 
@@ -1298,17 +1302,34 @@ export function migrate(
     testMigrationFault?: NuclearMigrationTestFault;
     /** Test-only fault injection after nuclear commit and before sidecar finalization. */
     testFailAfterNuclearCommitBeforeContinuityFinalization?: boolean;
+    dataPlane?: DataPlaneContext;
+    migrate?: boolean;
   } = {},
 ): void {
   db.exec("PRAGMA foreign_keys = ON");
   const version = userVersion(db);
-  if (options.continuity) {
-    reconcilePendingNuclearMigration(db, options.continuity);
-  }
   if (version > NUCLEAR_SUPPORTED_VERSION) {
     throw new Error(
       `unsupported_nuclear_schema:${version}>${NUCLEAR_SUPPORTED_VERSION}`,
     );
+  }
+  const filePath = nuclearMainFile(db);
+  const authorized = mayMigrateStorage({
+    filePath,
+    plane: options.dataPlane,
+    migrate: options.migrate,
+  });
+  if (!authorized) {
+    if (options.migrate === true) {
+      throw new Error("nuclear_migration_authority_required");
+    }
+    if (version >= 25 && version <= NUCLEAR_SUPPORTED_VERSION) {
+      validateNuclearSchemaContent(db, version as 25 | 26 | 27 | 28 | 29);
+    }
+    return;
+  }
+  if (options.continuity) {
+    reconcilePendingNuclearMigration(db, options.continuity);
   }
   if (userVersion(db) < 1) {
     db.exec("BEGIN IMMEDIATE");
@@ -1563,16 +1584,11 @@ export function migrate(
       }).lineageId;
     }
     // One consistent pre-migration snapshot per upgrade run — production nuclear path only.
-    const mainFile = nuclearMainFile(db);
-    if (mainFile) {
-      const normalizedMain = mainFile.replace(/\\/g, "/").toLowerCase();
-      const normalizedProd = NUCLEAR_DB_PATH.replace(/\\/g, "/").toLowerCase();
-      if (normalizedMain === normalizedProd) {
-        mkdirSync(MIGRATION_BACKUPS_DIR, { recursive: true });
-        const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-        const snapshotPath = join(
-          MIGRATION_BACKUPS_DIR,
-          `nuclear-v${priorVersion}-pre13-${stamp}.db`,
+    const snapshotDir = nuclearSnapshotDir(db, options.dataPlane);
+    if (snapshotDir) {
+        const snapshotPath = allocateSnapshotPath(
+          snapshotDir,
+          `nuclear-v${priorVersion}-pre13`,
         );
         try {
           const escaped = snapshotPath.replace(/'/g, "''");
@@ -1594,7 +1610,6 @@ export function migrate(
             path: snapshotPath,
           },
         });
-      }
     }
     recordContinuityEvent(continuity, {
       kind: "migration",
@@ -1673,16 +1688,11 @@ export function migrate(
         buildIdentity: currentBuildIdentity(),
       },
     );
-    const mainFile = nuclearMainFile(db);
-    if (mainFile) {
-      const normalizedMain = mainFile.replace(/\\/g, "/").toLowerCase();
-      const normalizedProd = NUCLEAR_DB_PATH.replace(/\\/g, "/").toLowerCase();
-      if (normalizedMain === normalizedProd) {
-        mkdirSync(MIGRATION_BACKUPS_DIR, { recursive: true });
-        const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-        const snapshotPath = join(
-          MIGRATION_BACKUPS_DIR,
-          `nuclear-v${priorVersion}-pre14-${stamp}.db`,
+    const snapshotDir = nuclearSnapshotDir(db, options.dataPlane);
+    if (snapshotDir) {
+        const snapshotPath = allocateSnapshotPath(
+          snapshotDir,
+          `nuclear-v${priorVersion}-pre14`,
         );
         try {
           const escaped = snapshotPath.replace(/'/g, "''");
@@ -1704,7 +1714,6 @@ export function migrate(
             path: snapshotPath,
           },
         });
-      }
     }
     recordContinuityEvent(continuity, {
       kind: "migration",
@@ -1790,16 +1799,11 @@ export function migrate(
         buildIdentity: currentBuildIdentity(),
       },
     );
-    const mainFile = nuclearMainFile(db);
-    if (mainFile) {
-      const normalizedMain = mainFile.replace(/\\/g, "/").toLowerCase();
-      const normalizedProd = NUCLEAR_DB_PATH.replace(/\\/g, "/").toLowerCase();
-      if (normalizedMain === normalizedProd) {
-        mkdirSync(MIGRATION_BACKUPS_DIR, { recursive: true });
-        const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-        const snapshotPath = join(
-          MIGRATION_BACKUPS_DIR,
-          `nuclear-v${priorVersion}-pre15-${stamp}.db`,
+    const snapshotDir = nuclearSnapshotDir(db, options.dataPlane);
+    if (snapshotDir) {
+        const snapshotPath = allocateSnapshotPath(
+          snapshotDir,
+          `nuclear-v${priorVersion}-pre15`,
         );
         try {
           const escaped = snapshotPath.replace(/'/g, "''");
@@ -1821,7 +1825,6 @@ export function migrate(
             path: snapshotPath,
           },
         });
-      }
     }
     recordContinuityEvent(continuity, {
       kind: "migration",
@@ -2347,14 +2350,11 @@ export function migrate(
     let transactionOpened = false;
     try {
       // 1. Create VACUUM INTO pre-v22 snapshot for the real file-backed DB.
-      const normalizedMain = nuclearMainFile(db)?.toLowerCase()?.replace(/\\/g, "/");
-      const normalizedProd = NUCLEAR_DB_PATH.toLowerCase().replace(/\\/g, "/");
-      if (normalizedMain === normalizedProd) {
-        mkdirSync(MIGRATION_BACKUPS_DIR, { recursive: true });
-        const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-        const snapshotPath = join(
-          MIGRATION_BACKUPS_DIR,
-          `nuclear-v${priorVersion}-pre22-${stamp}.db`,
+      const snapshotDir = nuclearSnapshotDir(db, options.dataPlane);
+      if (snapshotDir) {
+        const snapshotPath = allocateSnapshotPath(
+          snapshotDir,
+          `nuclear-v${priorVersion}-pre22`,
         );
         try {
           const escaped = snapshotPath.replace(/'/g, "''");
@@ -2693,6 +2693,9 @@ export type OpenNuclearOptions = {
   testMigrationFault?: NuclearMigrationTestFault;
   /** Test-only fault injection after nuclear commit and before sidecar finalization. */
   testFailAfterNuclearCommitBeforeContinuityFinalization?: boolean;
+  dataPlane?: DataPlaneContext;
+  /** When false, never migrate. Opening is not migration authority. */
+  migrate?: boolean;
 };
 
 function nuclearMainFile(db: DatabaseSync): string | null {
@@ -2705,45 +2708,116 @@ function nuclearMainFile(db: DatabaseSync): string | null {
   return file.length > 0 ? file : null;
 }
 
+function nuclearSnapshotDir(
+  db: DatabaseSync,
+  plane?: DataPlaneContext,
+): string | null {
+  if (plane) return plane.migrationBackupsDir;
+  const mainFile = nuclearMainFile(db);
+  if (!mainFile) return null;
+  if (isReservedProductionStoragePath(mainFile)) {
+    return join(reservedProductionDataDir(), "migration-backups");
+  }
+  return null;
+}
+
+function allocateSnapshotPath(dir: string, basenamePrefix: string): string {
+  mkdirSync(dir, { recursive: true });
+  for (let i = 0; i < 32; i += 1) {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const snapshotPath = join(
+      dir,
+      `${basenamePrefix}-${stamp}-${randomUUID().slice(0, 8)}.db`,
+    );
+    if (!existsSync(snapshotPath)) return snapshotPath;
+  }
+  throw new Error("pre_migration_snapshot_failed:unique_path_exhausted");
+}
+
+function assertNuclearOpenAllowed(
+  filePath: string | null,
+  plane?: DataPlaneContext,
+): void {
+  if (!filePath || filePath === ":memory:") return;
+  if (!isReservedProductionStoragePath(filePath)) return;
+  if (plane?.kind === "production" && dataPlaneOwnsFile(plane, filePath)) {
+    return;
+  }
+  throw new Error("production_data_plane_required");
+}
+
+function openDefaultContinuity(
+  plane: DataPlaneContext | undefined,
+  migrate: boolean | undefined,
+): DatabaseSync {
+  const shouldMigrate = migrate !== false;
+  if (plane?.kind !== "production") {
+    return openContinuityDb(new DatabaseSync(":memory:"), {
+      dataPlane: plane,
+      migrate: shouldMigrate,
+    });
+  }
+  mkdirSync(dirname(plane.continuityDbPath), { recursive: true });
+  return openContinuityDb(new DatabaseSync(plane.continuityDbPath), {
+    dataPlane: plane,
+    migrate: shouldMigrate,
+  });
+}
+
+export function nuclearSchemaVersion(db: DatabaseSync): number {
+  return userVersion(db);
+}
+
+function resolveMigrateOptions(
+  db: DatabaseSync,
+  options: OpenNuclearOptions,
+): OpenNuclearOptions {
+  const mainFile = nuclearMainFile(db);
+  if (options.dataPlane) return options;
+  if (!mainFile) return options;
+  if (isReservedProductionStoragePath(mainFile)) return options;
+  if (options.migrate === false) return options;
+  return {
+    ...options,
+    migrate: true,
+    dataPlane: isolatedPlaneForFile(mainFile),
+  };
+}
+
+export function connectNuclearDb(
+  existing: DatabaseSync,
+  options: OpenNuclearOptions = {},
+): DatabaseSync {
+  return openNuclearDb(existing, { ...options, migrate: false });
+}
+
 export function openNuclearDb(
   existing?: DatabaseSync,
   options: OpenNuclearOptions = {},
 ): DatabaseSync {
-  if (existing) {
-    const mainFile = nuclearMainFile(existing);
-    const continuity =
-      options.continuity ??
-      getContinuityFor(existing) ??
-      (mainFile ? getContinuityForNuclearPath(mainFile) : undefined) ??
-      (options.continuityOptional
-        ? undefined
-        : openContinuityDb(new DatabaseSync(":memory:")));
-    migrate(existing, {
-      continuity,
-      skipContinuityRequirement: options.continuityOptional && !continuity,
-      testMigrationFault: options.testMigrationFault,
-      testFailAfterNuclearCommitBeforeContinuityFinalization:
-        options.testFailAfterNuclearCommitBeforeContinuityFinalization,
-    });
-    reconcileSandboxApprovals(existing);
-    if (continuity) registerContinuityFor(existing, continuity, mainFile);
-    return existing;
+  if (!existing) {
+    throw new Error("data_plane_required");
   }
-
-  mkdirSync(DATA_DIR, { recursive: true });
-  mkdirSync(CONVERSATIONS_DIR, { recursive: true });
+  const resolved = resolveMigrateOptions(existing, options);
+  assertNuclearOpenAllowed(nuclearMainFile(existing), resolved.dataPlane);
+  const mainFile = nuclearMainFile(existing);
   const continuity =
-    options.continuity ??
-    getContinuityForNuclearPath(NUCLEAR_DB_PATH) ??
-    (options.continuityOptional ? undefined : openContinuityDb());
-  const db = new DatabaseSync(NUCLEAR_DB_PATH);
-  migrate(db, {
+    resolved.continuity ??
+    getContinuityFor(existing) ??
+    (mainFile ? getContinuityForNuclearPath(mainFile) : undefined) ??
+    (resolved.continuityOptional
+      ? undefined
+      : openDefaultContinuity(resolved.dataPlane, resolved.migrate));
+  migrate(existing, {
     continuity,
-    testMigrationFault: options.testMigrationFault,
+    skipContinuityRequirement: resolved.continuityOptional && !continuity,
+    testMigrationFault: resolved.testMigrationFault,
     testFailAfterNuclearCommitBeforeContinuityFinalization:
-      options.testFailAfterNuclearCommitBeforeContinuityFinalization,
+      resolved.testFailAfterNuclearCommitBeforeContinuityFinalization,
+    dataPlane: resolved.dataPlane,
+    migrate: resolved.migrate,
   });
-  reconcileSandboxApprovals(db);
-  if (continuity) registerContinuityFor(db, continuity, NUCLEAR_DB_PATH);
-  return db;
+  reconcileSandboxApprovals(existing);
+  if (continuity) registerContinuityFor(existing, continuity, mainFile);
+  return existing;
 }

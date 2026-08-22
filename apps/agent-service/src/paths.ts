@@ -1,20 +1,18 @@
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  reservedProductionContinuityDbPath,
+  reservedProductionDataDir,
+  reservedProductionNuclearDbPath,
+} from "./core/data-plane.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-export const DATA_DIR =
-  process.env.COMPOSER_DATA_DIR ?? join(homedir(), ".composer-assistant");
-export const STATE_PATH = join(DATA_DIR, "state.json");
-export const CONFIG_PATH = join(DATA_DIR, "config.json");
-export const CONVERSATIONS_DIR = join(DATA_DIR, "conversations");
-export const SESSIONS_DIR = join(CONVERSATIONS_DIR, "sessions");
-export const DB_PATH = join(CONVERSATIONS_DIR, "index.db");
-export const NUCLEAR_DB_PATH = join(CONVERSATIONS_DIR, "nuclear.db");
-export const CONTINUITY_DB_PATH = join(DATA_DIR, "continuity.db");
+/** Reserved production location identity — not an implicit open/migrate target. */
+export const NUCLEAR_DB_PATH = reservedProductionNuclearDbPath();
+export const CONTINUITY_DB_PATH = reservedProductionContinuityDbPath();
+export const DATA_DIR = reservedProductionDataDir();
 export const MIGRATION_BACKUPS_DIR = join(DATA_DIR, "migration-backups");
-export const LOGS_DIR = join(DATA_DIR, "logs");
 
 export const WORKSPACE_PATH =
   process.env.COMPOSER_WORKSPACE ?? join(__dirname, "..", "..", "..", "workspace");

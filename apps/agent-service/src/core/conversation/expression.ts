@@ -21,7 +21,6 @@ import { renderForTransport } from "./rendering.js";
 import { composeSelfCapabilityContext } from "../perception/capability-self-model.js";
 import type { PerceptionInlinePart } from "../perception/types.js";
 import type { DatabaseSync } from "node:sqlite";
-import { openNuclearDb } from "../db.js";
 import {
   buildExpressionFallbackPolicy,
   minimalExpressionContext,
@@ -100,7 +99,10 @@ export async function expressSpeak(
       ].join("\n")
     : "No grounded affect claim is licensed for this turn. Do not invent a feeling to improve the message.";
 
-  const attentionDb = options.attentionDb ?? openNuclearDb();
+  if (!options.attentionDb) {
+    throw new Error("attention_db_required");
+  }
+  const attentionDb = options.attentionDb;
   const selfCapability = composeSelfCapabilityContext(attentionDb);
 
   const system = [
