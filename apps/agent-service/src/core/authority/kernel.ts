@@ -46,6 +46,14 @@ export function evaluateAuthority(input: {
 }): AuthorityEvaluation {
   const nowMs = input.nowMs ?? Date.now();
   const intent = input.intent;
+  if (intent.kind !== "effect_intent") {
+    return {
+      outcome: "refused",
+      intent,
+      code: "model_cannot_create_intent",
+      detail: "only_effect_intent_is_evaluable",
+    };
+  }
   const policy = evaluateCommunicationPolicy(intent);
   if (!policy.ok) {
     return {

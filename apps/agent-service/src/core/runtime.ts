@@ -679,6 +679,7 @@ export class AshleyCore {
             reservationId: claim.reservation.id,
             deliveryState: finalized.state,
             secretOmitted: true,
+            silenced: true,
           };
         }
         const bubbles = [{ ordinal: 0, text: secretCommit.prepared.payloadText }];
@@ -1632,6 +1633,7 @@ export class AshleyCore {
           decisionKind: decision.kind,
           reservationId: reservation.id,
           deliveryState: finalized.state,
+          silenced: true,
         };
       }
 
@@ -1792,6 +1794,8 @@ export class AshleyCore {
         db: this.db,
         evaluation: communicationAuth,
         payloadText: media.text,
+        preHonestyText: extractMediaMarkers(rendered.preHonestyText).text,
+        honestyMutated: rendered.honestyMutated,
       });
       if (commit.outcome !== "commit") {
         const finalized = finalizeDelivery(this.db, {
@@ -1811,6 +1815,7 @@ export class AshleyCore {
           reservationId: reservation.id,
           deliveryState: finalized.state,
           media: { react: media.react, gifQuery: media.gifQuery },
+          silenced: true,
         };
       }
 
@@ -2362,6 +2367,8 @@ export class AshleyCore {
           db: this.db,
           evaluation: proactiveAuth,
           payloadText: media.text,
+          preHonestyText: extractMediaMarkers(rendered.preHonestyText).text,
+          honestyMutated: rendered.honestyMutated,
         });
         if (proactiveCommit.outcome !== "commit") {
           recordProactiveDiagnostic(

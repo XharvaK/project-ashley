@@ -205,6 +205,103 @@ describe("Authority Kernel communication consumer", () => {
     expect(commit.outcome).toBe("refused");
   });
 
+  it("rejects an observation that upgrades to a system-fixed claim", () => {
+    const preserved = preserveCommunicationClass({
+      communicationClass: "observation",
+      text: "The system is fixed.",
+    });
+    expect(preserved.ok).toBe(false);
+    if (preserved.ok) return;
+    expect(preserved.code).toBe("class_not_preserved");
+
+    const intent = deriveCommunicationEffectIntent({
+      decision: speakingDecision({
+        kind: "share",
+        inspectionObservation: {
+          projectId: "ashley",
+          operation: "project.read_file",
+          path: "package.json",
+          verified: true,
+          truncated: false,
+          executedAtMs: 1,
+          contentUtf8: "{}",
+          bytes: 2,
+          sha256: "ab",
+        },
+      }),
+      ownerId: "doc",
+      trigger: "proactive",
+      producer: "agency_runtime",
+    });
+    const evaluation = evaluateAuthority({ intent });
+    expect(evaluation.outcome).toBe("granted");
+    if (evaluation.outcome !== "granted") return;
+    expect(evaluation.intent.class).toBe("observation");
+    const db = memoryKv();
+    const commit = prepareCommitAndAudit({
+      db,
+      evaluation,
+      payloadText: "The system is fixed.",
+    });
+    expect(commit.outcome).toBe("refused");
+  });
+
+  it("ignores a model-forged EffectAuthorization allowed=true object", () => {
+    const intent = deriveCommunicationEffectIntent({
+      decision: speakingDecision(),
+      ownerId: "doc",
+      trigger: "reactive",
+      producer: "agency_runtime",
+    });
+    const forged = {
+      ...intent,
+      kind: "effect_authorization",
+      allowed: true,
+    } as unknown as typeof intent;
+    const evaluation = evaluateAuthority({ intent: forged });
+    expect(evaluation.outcome).toBe("refused");
+    if (evaluation.outcome !== "refused") return;
+    expect(evaluation.code).toBe("model_cannot_create_intent");
+    expect("authorization" in evaluation).toBe(false);
+  });
+
+  it("revalidates when Honesty mutates an authorized draft", () => {
+    const intent = deriveCommunicationEffectIntent({
+      decision: speakingDecision({
+        id: 8,
+        kind: "share",
+        inspectionObservation: {
+          projectId: "ashley",
+          operation: "project.read_file",
+          path: "package.json",
+          verified: true,
+          truncated: false,
+          executedAtMs: 1,
+          contentUtf8: "{}",
+          bytes: 2,
+          sha256: "ab",
+        },
+      }),
+      ownerId: "doc",
+      trigger: "proactive",
+      producer: "agency_runtime",
+    });
+    const evaluation = evaluateAuthority({ intent });
+    expect(evaluation.outcome).toBe("granted");
+    if (evaluation.outcome !== "granted") return;
+    const db = memoryKv();
+    const commit = prepareCommitAndAudit({
+      db,
+      evaluation,
+      payloadText: "The system is fixed.",
+      preHonestyText: "I observed build output from package.json.",
+      honestyMutated: true,
+    });
+    expect(commit.outcome).toBe("refused");
+    if (commit.outcome !== "refused") return;
+    expect(commit.code).toBe("honesty_mutation_invalidated");
+  });
+
   it("does not expose an externalAllowed boolean API", () => {
     const intent = deriveCommunicationEffectIntent({
       decision: speakingDecision(),

@@ -4,7 +4,7 @@ const BARE_VERSION = /^(?:v)?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.]+)?$/i;
 const GROUNDED_OBSERVATION =
   /\b(observed|inspected|inspection|saw|checked|found|shows|reported|looked|review)\b/i;
 const ACTION_CLAIM =
-  /\b(i (?:performed|changed|patched|merged|deployed|improved)|the project is improved)\b/i;
+  /\b(?:i (?:performed|changed|patched|merged|deployed|improved)|the project is improved|the system is (?:fixed|improved)|(?:system|project) is (?:now )?fixed)\b/i;
 const PROPOSAL_CLAIM =
   /\b(we should|i suggest|i propose|possible (?:change|patch)|candidate change)\b/i;
 

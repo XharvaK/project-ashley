@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { persistAuthorityAudit, auditFromEvaluation } from "./audit.js";
 import { decideCommunicationCommit } from "./commit.js";
 import { evaluateAuthority } from "./kernel.js";
+import { prepareEffect } from "./prepared-effect.js";
 import type {
   AuthorityEvaluation,
   AuthorityRefusal,
@@ -24,6 +25,8 @@ export function prepareCommitAndAudit(input: {
   evaluation: AuthorityEvaluation;
   payloadText: string;
   previousPrepared?: PreparedEffect;
+  preHonestyText?: string;
+  honestyMutated?: boolean;
   nowMs?: number;
 }):
   | { outcome: "commit"; evaluation: AuthorityEvaluation; prepared: PreparedEffect }
@@ -32,10 +35,27 @@ export function prepareCommitAndAudit(input: {
     persistAuthorityAudit(input.db, auditFromEvaluation(input.evaluation));
     return input.evaluation;
   }
+  let previousPrepared = input.previousPrepared;
+  if (
+    previousPrepared === undefined &&
+    input.honestyMutated === true &&
+    input.preHonestyText !== undefined
+  ) {
+    const prior = prepareEffect({
+      authorization: input.evaluation.authorization,
+      payloadText: input.preHonestyText,
+      nowMs: input.nowMs,
+    });
+    if (prior.outcome !== "prepared") {
+      persistAuthorityAudit(input.db, auditFromEvaluation(prior));
+      return prior;
+    }
+    previousPrepared = prior.prepared;
+  }
   const decision = decideCommunicationCommit({
     evaluation: input.evaluation,
     payloadText: input.payloadText,
-    previousPrepared: input.previousPrepared,
+    previousPrepared,
     nowMs: input.nowMs,
   });
   if (decision.outcome !== "commit") {
