@@ -883,12 +883,56 @@ provenance.
 
 ### 17.2 Milestone gates
 
-| Milestone | Entry gate | Exit evidence | Physical qualification | Authority-negative tests | Production witness | Remains blocked afterward |
+The **Production-acceptance predecessor** column is the production-track
+gate. It is not the implementation-track entry for M5–M7. Physical
+qualification criteria in this table are unchanged. Owner-selected batching
+of that physical campaign is §17.2.1.
+
+| Milestone | Production-acceptance predecessor | Exit evidence | Physical qualification | Authority-negative tests | Production witness | Remains blocked afterward |
 |---|---|---|---|---|---|---|
 | M4 VERIFY | Exact M3 candidate is `PRODUCTION ACCEPTED` | Immutable snapshot, admitted recipe/toolchain/dependency identities, candidate non-mutation, bounded receipt, cleanup, full M1-M3 regression | Required on Mint for real Bubblewrap/toolchain | Repo script cannot self-authorize; candidate hash unchanged; network/package/Git/credentials denied | One offline recipe with generated output isolated from candidate | M5 authorship, M6 loop, all borders |
 | M5 AUTHOR | M4 `PRODUCTION ACCEPTED` | Change-set identity, base/stale semantics, sealed diff, verification binding, live/Git non-mutation, M1-M4 regression | Required where Git/filesystem mechanics are host-dependent | No writable `.git`; approval cannot apply; stale base blocks; secrets excluded | One coherent multi-file candidate change set | M6 autonomous operation and all M7 effects |
 | M6 OPERATE | M5 `PRODUCTION ACCEPTED` | Finite objective, per-step authority/budgets, stop/cancel, ambiguity handling, partial progress, no auto-resume, M1-M5 regression | Required for the real controller and failure/cleanup paths | No border gain, no unbounded loop, no peer identity, no blind retry, child authority attenuated | One bounded multi-step candidate-only objective | Every M7 effect; general continuity and worker fabric |
 | M7 PROMOTE | M6 `PRODUCTION ACCEPTED` plus accepted design for one exact effect profile | `PREPARE -> REVALIDATE -> COMMIT`, exact target/authority, receipt/witness/reconciliation, rollback, all prior regressions | Required per effect profile and real destination | Other profiles denied; authority expiry/revocation; stale target; ambiguous effect blocks retry; credentials/network absent unless named | First: one `patch_export`; later: one witness per independently accepted profile | Every unqualified M7 profile and all generic External Agency effects |
+
+### 17.2.1 Owner-selected M-series qualification batching
+
+From M5 through the end of the Sandbox V2 M-series, host-dependent physical
+qualification is deferred until the M-series implementation track is complete.
+This is qualification batching, not acceptance by implication. Milestone
+semantics, physical criteria, production-witness requirements, and the
+canonical ladder in §17.1 are unchanged.
+
+Implementation track:
+
+```text
+M5 design, implement, local falsification, independent review
+  -> M6 design, implement, local falsification, independent review
+    -> M7 design, implement, local falsification, independent review
+      -> FREEZE EXACT M-SERIES CANDIDATE
+        -> COORDINATED MINT PHYSICAL QUALIFICATION
+          -> release / deploy / promotion / production witnessing
+            -> production acceptance decisions
+```
+
+Implementation-track entry:
+
+- M6 implementation may begin after M5 is `INDEPENDENTLY REVIEWED`.
+- M7 implementation may begin after M6 is `INDEPENDENTLY REVIEWED`.
+
+Production-acceptance predecessors remain the table above. M6
+`PRODUCTION ACCEPTED` still requires M5 `PRODUCTION ACCEPTED`. M7
+`PRODUCTION ACCEPTED` still requires M6 `PRODUCTION ACCEPTED` plus accepted
+design for the named effect profile. No milestone receives
+`PHYSICALLY QUALIFIED`, `RELEASE_QUALIFIED`, `DEPLOYED`, capability promotion,
+production witness, or `PRODUCTION ACCEPTED` by inheritance from a local
+settlement or from a later sibling.
+
+Workers must not stop after every M5/M6/M7 implementation to run Mint
+qualification. They must still complete that milestone's design,
+implementation, local verification, and independent review before starting
+the next M-series implementation. The coordinated Mint campaign still has to
+satisfy every physical criterion named in §17.2.
 
 ### 17.3 Current gate truth
 

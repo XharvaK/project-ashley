@@ -267,7 +267,7 @@ Live (`2026-08-23`): M4 remains `PROPOSED FOR ACCEPTANCE`. Not accepted.
 | Does not create | Approved Ashley changes; live-repo mutation; Git publication; autonomous improvement |
 | Forbidden reading | “Ashley wrote a patch, so Ashley should become that patch” |
 | Evidence | Exact-candidate M5 witness required by the M-series contract |
-| Verification | Selected by the M5 claim: local falsification, then physical if host-bound |
+| Verification | Selected by the M5 claim: local falsification and independent review before the next M-series implementation. Physical qualification remains required where Git/filesystem mechanics are host-bound; it is batched with later M-series Mint qualification and is not skipped |
 | Promotion | Separate later capability admission. M5 completion is not M5 promotion |
 | Rollback | Candidate change remains inert; no live mutation on failure |
 
@@ -281,13 +281,13 @@ treat M5 as blocked on S1.
 | Track | mechanism |
 | Purpose | Pursue one admitted engineering objective through a finite M3/M4/M5 sequence |
 | Existing owner | Sandbox Autonomy / M6 contract |
-| Must already be true | M5 accepted for the candidate used |
+| Must already be true | Implementation track: M5 `INDEPENDENTLY REVIEWED` for the candidate used. Production acceptance still requires M5 `PRODUCTION ACCEPTED` |
 | Must not be treated as required | M7 border profiles; Computer Use; Operational Continuity as a new brain |
 | Creates | One bounded operate attempt with budgets, receipts, and finite stop |
 | Does not create | New effect class; worker identity; restart-transparent agency; “Ashley decided to keep going” |
 | Forbidden reading | “A workflow ran, therefore Agency chose” |
 | Evidence | One admitted objective completed through a finite sequence |
-| Verification | Claim-selected tests + receipts; physical if host-bound |
+| Verification | Claim-selected tests + receipts. Physical qualification remains required for the real controller and failure/cleanup paths; it is batched with the later M-series Mint campaign and is not skipped |
 | Promotion | Separate |
 | Rollback | Cancel/expire fail closed; no new authority on retry |
 
@@ -298,7 +298,7 @@ treat M5 as blocked on S1.
 | Track | mechanism |
 | Purpose | Cross one named engineering border under independently authorized profiles |
 | Existing owner | Sandbox M7 + External Effect and Authority |
-| Must already be true | M6; External Effect contract for the named profile |
+| Must already be true | Implementation track: M6 `INDEPENDENTLY REVIEWED`. Production acceptance still requires M6 `PRODUCTION ACCEPTED` plus the External Effect contract for the named profile |
 | Must not be treated as required | Computer Use; generic external agency; self-change; F1 |
 | Creates | One named engineering-border profile admitted, committed, receipted, reconciled |
 | Does not create | Computer Use; email/browser/purchase/account agency; apply-to-Ashley |

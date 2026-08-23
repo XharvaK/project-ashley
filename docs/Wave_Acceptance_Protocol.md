@@ -82,6 +82,15 @@ maturity are not recorded here. Resolve them live from Git, source,
 exact-candidate packets, or production observation. If they cannot be
 established from permitted evidence: `UNKNOWN`.
 
+Owner-selected execution policy for Sandbox V2 M5–M7: do not run physical Mint
+qualification after every remaining M-series implementation. Each of M5, M6,
+and M7 still requires its own design, implementation, local verification, and
+independent review. Host-dependent physical qualification is one coordinated
+Mint campaign after the M-series implementation track is complete and an exact
+candidate is frozen. This batches qualification. It does not skip physical
+criteria, promote a capability, or confer `PRODUCTION ACCEPTED` by
+inheritance. See roadmap §17.2.1. The ladder stages above remain distinct.
+
 ---
 
 ## Verification lifecycle

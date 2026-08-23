@@ -525,6 +525,12 @@ Required where Git/filesystem mechanics are host-dependent. First-slice local
 falsification does not need Bubblewrap. Physical qualification is a later
 ladder stage and is not claimed by this design.
 
+Owner-selected M-series policy: do not run Mint physical qualification after
+M5 local settlement. Preserve every physical criterion named here and in the
+M-series roadmap. Execute those criteria in the coordinated Mint campaign
+after M7 independent review, against an exact frozen M-series candidate. Local
+settlement of M5 is not `PHYSICALLY QUALIFIED` and not `PRODUCTION ACCEPTED`.
+
 ---
 
 ## 23. Production witness
