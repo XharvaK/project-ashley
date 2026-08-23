@@ -35,8 +35,9 @@ Attempted from Cloud Agent host, not from Mint.
 | Collector user | `ubuntu` uid 1000 | **Observed** (`id`) |
 | Collector OS | Linux (Cloud Agent pod) | **Observed** |
 | SSH identity file | present `~/.ssh/ashley-qualification-temp` (mode 600); `ssh-keygen -y` succeeds | **Observed** (key material not recorded here) |
-| `~/.ssh/config` Host mint | User `xarvak`; IdentityFile set; HostName `mint` | **Observed** |
-| DNS `mint` after key install | still unresolved | **Observed** `ssh mint` → `Could not resolve hostname mint` |
+| `~/.ssh/config` Host mint | User `xarvak`; HostName `192.168.1.118`; IdentityFile set | **Observed** |
+| TCP 192.168.1.118:22 from Cloud Agent | timeout (exit 124) | **Observed** 2026-08-23T11:38Z |
+| `ssh mint` after HostName set | `connect to host 192.168.1.118 port 22: Connection timed out` | **Observed** |
 | Mint hostname | **Unknown** | Unreachable |
 | Mint user `xarvak` live session | **Unknown** | Unreachable |
 | Node version on Mint | **Unknown** | Unreachable |
