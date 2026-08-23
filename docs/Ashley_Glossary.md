@@ -263,9 +263,39 @@ A receipt is not an Effect Witness.
 
 Honesty claim licenses are not Effect Authorizations.
 
+An Effect Authorization cannot authorize another effect. Payload, audience,
+mechanism, material wording, restart, and policy change invalidate it unless
+a matching revalidation succeeds.
+
+Canonical contract:
+[`architecture/Ashley_Authority_Kernel_Architecture.md`](architecture/Ashley_Authority_Kernel_Architecture.md)
+
 **Design implication**
 
 Do not implement `externalAllowed: true`.
+
+Canonical contract:
+[`architecture/Ashley_Authority_Kernel_Architecture.md`](architecture/Ashley_Authority_Kernel_Architecture.md)
+
+---
+
+## Prepared Effect
+
+**Definition**
+
+A Prepared Effect is the concrete external effect about to commit. It is not
+permission and sits below Authority.
+
+**Why it matters**
+
+A prepared Discord payload must not be treated as a grant to send.
+
+**Distinctions**
+
+Preparation without a current matching Effect Authorization cannot commit.
+
+Class preservation is checked after Expression and after Honesty. Honesty
+mutation invalidates the previous prepared payload.
 
 ---
 

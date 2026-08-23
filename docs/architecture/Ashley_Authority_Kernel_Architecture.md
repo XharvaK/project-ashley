@@ -222,22 +222,52 @@ Rejected placements, recorded so they are not reopened:
 ## 6. Ontology
 
 **CONFIRMED FROM SOURCE.** Do not create a competing object family. The kernel
-uses External Effect terms.
+uses External Effect terms. Runtime already has a zero-authority cousin,
+`AgencyEffectIntent` from `deriveEffectIntent`. A later implementation must
+extend or wrap that seam. It must not invent a speech ontology.
 
 | Object | Meaning | Authority content |
 |---|---|---|
 | `OperationalRequest` | Attributed operational input | None |
-| `EffectIntent` | Desired external state transition | Zero |
-| `EffectAuthorization` | Bounded current grant evidence | The grant |
-| `PreparedEffect` | Immutable exact candidate | None until revalidated |
+| `EffectIntent` | Requested exact external state transition | Zero |
+| `EffectAuthorization` | Bounded current grant for that intent | The grant |
+| `PreparedEffect` | Concrete candidate about to commit | None |
 | `EffectCommitRecord` | Attempt boundary | Records exercise; does not grant |
 | `Receipt` | Mechanism-observed facts | Not a witness |
 | `EffectWitness` | Claim-scoped outcome proof | Not new permission |
 | `EffectReconciliation` | Ambiguity disposition | Not retry authority |
 
-**DESIGN DECISION.** Conceptual fields of `EffectAuthorization`:
+### 6.1 `EffectIntent`
 
-Required:
+**DESIGN DECISION.** `EffectIntent` is only a requested external effect. It
+is not a grant, not a capability call, not wording, and not evidence.
+
+Who creates it:
+
+- A deterministic producer after Agency admission, from the Agency Decision,
+  bound evidence references, and declared effect class.
+- Agency admits initiative. Agency does not mint authority by creating an
+  intent.
+- Thought may propose candidate meaning. Thought does not create
+  `EffectIntent`.
+- Model output cannot create `EffectIntent`. Model text is candidate input
+  to Thought/Agency only.
+
+**DESIGN DECISION.** `EffectIntent` must carry semantic class and kernel
+dimensions (domain, direction, consequence, representation, commitment,
+trigger), plus target/audience and a payload-class predicate. Class is bound
+before Expression, not inferred from generated wording.
+
+**CONFIRMED FROM SOURCE.** `deriveEffectIntent` today maps a grounded
+`question` to `sandbox_verify_build_health` and grants zero execution
+authority. That function is the reuse seam, not a Discord-send grantor.
+
+### 6.2 `EffectAuthorization`
+
+**DESIGN DECISION.** An authorization is bounded, specific, non-transferable,
+tied to one effect, and invalidated by meaningful mutation.
+
+Required conceptual fields:
 
 - authorization identity
 - subject
@@ -259,11 +289,51 @@ Forbidden:
 - model endorsement
 - historical-similar-grant reuse as current permission
 - standing unbounded permission
+- transfer to another class, target, mechanism, or payload
+
+**DESIGN DECISION.** Survival rules:
+
+| Change | Does the grant survive? |
+|---|---|
+| Payload / class predicate change | No |
+| Audience / channel change | No |
+| Mechanism change | No. New mechanism requires fresh admission. |
+| Material wording change | No, until a new `PreparedEffect` is revalidated against the same bound class and predicate. Class-violating wording never survives. |
+| Process restart | No. Persisted grant is not assumed current. |
+| Policy / capability / eligibility change | No. Re-evaluate. |
+| Honesty mutation of wording | No, until revalidation of the mutated payload. |
+| Replay after COMMIT consumed the slot | No |
 
 **DESIGN DECISION.** `Decision.authorizedClaims` remains a Honesty claim
 license, not an `EffectAuthorization`. Implementation planning may rename the
 field later to prevent confusion. This document does not authorize a schema
 change.
+
+### 6.3 `PreparedEffect`
+
+**DESIGN DECISION.** `PreparedEffect` is the concrete effect about to commit.
+It is not permission. It sits below Authority. Preparation without a current
+matching `EffectAuthorization` cannot commit. A prepared Discord payload is
+not a grant to send.
+
+---
+
+## 6.4 Authorization non-transferability
+
+**DESIGN DECISION.** An `EffectAuthorization` cannot authorize another
+effect. Narrow grants never become broad permission.
+
+Examples:
+
+- A Discord `observation` grant cannot become a `proposal` grant, an
+  engineering invoke grant, or a memory-write grant.
+- A candidate verification result cannot become merge authority, deployment
+  authority, or a self-improvement claim.
+- An M2 inspection grant cannot become a Discord send grant.
+- An owner-command-reply grant cannot become unsolicited proactive speech.
+
+If a later act needs a different class, target, mechanism, or payload, it
+needs a new `EffectIntent` and a new evaluation.
 
 ---
 
@@ -295,7 +365,7 @@ authority must be a subset of current parent authority.
 2. communication of that invocation’s result.
 
 A permitted inspection does not authorize a Discord payload. A permitted
-local change-set does not authorize presenting that change-set.
+local change-set does not authorize presenting that change-set. See §6.4.
 
 ---
 
@@ -312,7 +382,8 @@ revoked, widened, stale, or unprovable input fails closed.
 
 Agency silence cannot be overridden by a grant. A grant cannot be created by
 Agency want. Honesty cannot fill a missing grant. A receipt cannot become a
-later grant.
+later grant. Capability success cannot fill a missing grant. Evidence cannot
+fill a missing grant.
 
 ---
 
@@ -326,18 +397,20 @@ policy rather than invent a second speech kernel.
 
 ### 9.1 Classes
 
-| Class | Meaning |
-|---|---|
-| `observation` | Grounded report of current evidence, class-preserving |
-| `question` | Genuine uncertainty-reducing question |
-| `relationship` | Relational presence without operational or engineering claim |
-| `proposal` | Present a candidate plan or artifact as a proposal, not as a done change |
-| `action_report` | Claim that an effect occurred |
-| `owner_command_reply` | Direct answer to an owner message |
+These are different external effects, not tones of one speech act.
+
+| Class | External effect | Meaning |
+|---|---|---|
+| `observation` | Present a grounded report | “I observed X under this identity.” |
+| `question` | Present a genuine question | “I do not know X and am asking.” |
+| `relationship` | Present relational presence | Presence without operational or engineering claim |
+| `proposal` | Present a candidate future change | “I suggest a possible future change.” Not “I changed it.” |
+| `action_report` | Present a proven performed effect | “I performed X and current evidence proves it.” |
+| `owner_command_reply` | Present a direct answer to Doc | Answer to an owner message, not unsolicited initiative |
 
 ### 9.2 Class rules
 
-| Class | Evidence | Proactive | Reactive | Extra approval |
+| Class | Evidence | Proactive | Reactive | Owner approval |
 |---|---|---|---|---|
 | `observation` | Current bound observation identity | Deny unless evidence is bound and class is preserved | Permit if Agency admitted and Honesty passes | None beyond current communication gates |
 | `question` | None for world facts; class preservation required | Deny unless Agency `ask` and class preserved | Permit | None |
@@ -352,7 +425,26 @@ what was inspected or observed, under what identity, what was seen. A bare
 token fails class preservation even if the token appeared in inspection
 bytes.
 
-### 9.3 Discord send path
+**DESIGN DECISION.** Observation is not proposal. Proposal is not action
+report. A verification outcome may license an observation, or a licensed
+`action_report` of that recipe result only. It does not license “the project
+is improved,” merge, deploy, or self-change.
+
+### 9.3 Capability success is not communication authority
+
+**CONFIRMED FROM SOURCE.** Tool present is not authority to use it.
+Capability success is not permission to speak.
+
+**DESIGN DECISION.**
+
+| Result | May authorize | Does not authorize |
+|---|---|---|
+| M2 inspection success | Communication `observation` of that inspection identity and result, if separately granted | System modification, proposal, self-improvement claim, unsolicited Discord send |
+| M4 verification receipt | Communication `observation` or licensed `action_report` of that recipe outcome, if separately granted | “The project is improved,” merge, deploy, M5 authorship, live Git |
+
+Evidence answers what happened. It does not grant the next effect.
+
+### 9.4 Discord send path
 
 **DESIGN DECISION.** Replace:
 
@@ -410,6 +502,30 @@ is itself a newly authorized `PreparedEffect`.
 If Honesty mutates wording, including locked OperationalTruth replacement,
 the payload changed. Revalidation is required. Locked replacement is
 license-owned mechanical wording, not Honesty granting send permission.
+
+### 10.1 Where class is preserved
+
+Evaluated options:
+
+| Option | Meaning | Verdict |
+|---|---|---|
+| A. Before Expression only | Bind class, never recheck wording | Rejected. Expression can mutate meaning. |
+| B. After Expression only | Ignore Honesty mutation | Rejected. Honesty can mutate meaning. |
+| C. After every meaning mutation | Check after Expression and after Honesty | Selected |
+
+**DESIGN DECISION.** Class is bound on `EffectIntent` / `EffectAuthorization`
+before Expression. Preservation is checked after Expression and again after
+Honesty. Honesty mutation invalidates the previous prepared payload. Commit
+requires a current grant matching the final `PreparedEffect`.
+
+```text
+Authorized meaning
+  -> Expression
+    -> class preservation
+      -> Honesty
+        -> class preservation / REVALIDATE
+          -> COMMIT or refuse
+```
 
 ---
 
@@ -482,6 +598,32 @@ rollback reduces future authority; it does not erase a completed send
 
 Compensation is a new effect with its own authorization.
 
+### 13.1 First Discord slice: ephemeral grant, durable audit
+
+**DESIGN DECISION.** First Discord implementation uses ephemeral per-attempt
+grants plus durable evaluation audit.
+
+- The grant is not reusable, not standing, and not valid across restart.
+- The evaluation outcome (grant identity or typed refusal, class, intent
+  hash, decision reference) is recorded on existing decision/delivery audit
+  surfaces so bypass closure is inspectable.
+- No durable grant table is required to close the Discord bypass.
+- Restart cannot resurrect a grant. Fail closed.
+
+This optimizes for bypass closure, auditability, and fail-closed behavior.
+It does not optimize for future multi-step external accounts.
+
+### 13.2 Discord intercept
+
+**DESIGN DECISION.** Authority intercepts after Agency admission and before
+delivery reservation.
+
+Reuse `AgencyEffectIntent` / `deriveEffectIntent` and External Effect names.
+Do not rewrite Thought, Agency philosophy, Sandbox M2–M4, or Honesty as a
+grantor. Do not create a speech ontology.
+
+If Agency wants to speak and Authority refuses: no reservation, no send.
+
 ---
 
 ## 14. Threat model
@@ -553,6 +695,8 @@ This architecture is accepted as the kernel contract when:
 - no generic external-allow boolean is introduced;
 - Discord send is recognized as a Communication Policy consumer;
 - Expression cannot change class or mint grants;
+- class preservation runs after Expression and after Honesty;
+- authorizations are non-transferable;
 - Honesty remains negative;
 - M5 remains undesigned here and blocked on documented predecessors;
 - implementation remains unauthorized until a separate implementation plan
@@ -560,6 +704,31 @@ This architecture is accepted as the kernel contract when:
 
 This document does not implement the kernel. It does not complete a
 milestone. It does not accept M3, M4, or M5.
+
+---
+
+## 15.1 Implementation readiness
+
+**DESIGN DECISION.** The Authority Kernel architecture is complete enough
+for the next artifact:
+
+```text
+Authority Kernel — Communication Consumer Implementation Plan
+```
+
+That plan is not this document and is not implementation. It must contain:
+
+- seam inventory (proactive runtime, `POST /chat/text`, Expression, Honesty,
+  weekly template, delivery reservation, `sendBubbles`);
+- migration order: intercept send before reservation; wrap
+  `deriveEffectIntent`; add Communication Policy evaluation; add class
+  checks after Expression and Honesty; reuse delivery COMMIT;
+- acceptance criteria: no Discord send without a current matching grant;
+- falsification tests listed in the planning foundation;
+- rollback: feature-closed fail-closed, no standing grants to unwind.
+
+More kernel-design change is not required before that planning artifact.
+Code, schema, and M5 remain unauthorized.
 
 ---
 
@@ -573,3 +742,6 @@ milestone. It does not accept M3, M4, or M5.
 | M4 candidate SHA in packet | `553553b0d0ee6a6d2cabd8928b901400e5a1ea74` |
 | `"0.2.0"` cause | `UNKNOWN` |
 | Deployed SHA | `UNKNOWN` |
+| Production proactive M2 enabled | `UNKNOWN` |
+| Slash-command ephemeral status class | `UNKNOWN` until each command path is classified |
+| Whether to rename `authorizedClaims` | Implementation-time; architecture forbids treating it as a grant |

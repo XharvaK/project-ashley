@@ -14,7 +14,14 @@ promotion, M5, or production enablement.
 - [`External_Effect_and_Authority_Architecture.md`](External_Effect_and_Authority_Architecture.md)
 
 The architecture is ready for an implementation plan. This file is not that
-plan. It records what a later plan must answer.
+plan. It records what a later plan must answer. After the 2026-08-23
+refinement pass, the next authorized artifact is:
+
+```text
+Authority Kernel — Communication Consumer Implementation Plan
+```
+
+That plan is still not implementation.
 
 ---
 
@@ -100,23 +107,25 @@ philosophy.
 
 ---
 
-## 5. Naming questions a later plan must resolve
+## 5. Naming and first-slice locks
 
-These are planning questions, not schema authorization.
+**DESIGN DECISION, locked for first Discord slice:**
 
-1. Keep `EffectAuthorization` as the runtime name, matching architecture?
-2. Rename `authorizedClaims` to a claim-license name so it cannot be mistaken
-   for effect authority?
-3. Where does `effect_class` live: on `EffectIntent`, on a Communication
-   Policy input, or both?
-4. Is class preservation a deterministic checker after Expression, before
-   Honesty, after Honesty, or both after Expression and after Honesty?
-5. Are grants durable rows in `nuclear.db`, or ephemeral per send for the
-   first slice?
+- Class preservation runs after Expression and after Honesty.
+- Grants are ephemeral per send attempt. Evaluation outcomes are audited on
+  existing decision/delivery surfaces. No reusable grant table. Restart
+  fails closed.
+- `EffectIntent` must carry semantic class. Communication Policy may refine
+  it; it may not invent a second class system.
 
-**DESIGN DECISION for first slice, if the later plan does not override it:**
-ephemeral per-attempt grants are enough for Discord send. Durable grant
-tables are not required to close the bypass.
+A later implementation plan may still choose:
+
+1. Runtime name `EffectAuthorization` vs a local type alias.
+2. Whether to rename `authorizedClaims` to a claim-license name.
+3. Exact TypeScript fields, without changing this ontology.
+
+Those choices are not new architecture. They must not reintroduce a speech
+ontology or a durable reusable grant.
 
 ---
 
@@ -170,7 +179,27 @@ there. A later physical or production claim must observe them.
    substantial grant of external authority (`SC-CON-06`). Closing the Discord
    bypass is constraint, not a new grant, but a later widening would be
    consultation-bearing.
-6. The implementation plan names the exact files, objects, refusal codes,
-   and falsification tests above.
+6. The Communication Consumer Implementation Plan names: seam inventory;
+   migration order; acceptance criteria; falsification tests; rollback.
 
 Until that plan exists and is accepted, implementation is not authorized.
+
+---
+
+## 9. Required contents of the next planning artifact
+
+The Communication Consumer Implementation Plan must specify, without writing
+code:
+
+| Section | Required content |
+|---|---|
+| Seam inventory | Proactive runtime, `POST /chat/text`, Expression, Honesty, weekly template, reservation, `sendBubbles` |
+| Reuse | `AgencyEffectIntent`, `deriveEffectIntent`, External Effect object names |
+| Non-rewrite | Thought, Agency philosophy, Sandbox M2–M4, Honesty as grantor, speech ontology |
+| Migration order | Intercept before reservation → wrap intent derivation → Communication Policy → class checks after Expression and Honesty → reuse COMMIT |
+| Acceptance | No Discord send without a current matching grant; class-violating wording refuses |
+| Falsification | Tests in §6 |
+| Rollback | Feature-closed fail-closed; ephemeral grants need no unwind table |
+
+**DESIGN DECISION.** Kernel architecture is complete enough to write that
+plan. It is not complete as implementation.
