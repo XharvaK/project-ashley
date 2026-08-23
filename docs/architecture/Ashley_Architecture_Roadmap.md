@@ -191,7 +191,10 @@ SANDBOX M5 AUTHORSHIP
 Milestones below convert already-named roadmap items into dependency-ordered
 engineering work. They do not add architecture. Closing evidence is the
 smallest honest witness already named by the phase contract. Wave Acceptance
-stages remain distinct.
+stages remain distinct. Execution contracts, leakage guards, and artifact
+requirements live in
+[Milestone Execution Governance](Ashley_Milestone_Execution_Governance.md).
+That file does not add milestones.
 
 Two sequences remain uncollapsed ([Architecture Freeze](Ashley_Architecture_Freeze.md)
 §5):
