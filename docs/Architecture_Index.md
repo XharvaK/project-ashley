@@ -138,14 +138,17 @@ packets, and [`Sandbox_Design.md`](Sandbox_Design.md) preserve historical V1
 source and evidence. They are not a V2 dependency and MUST NOT be reconnected
 by implication.
 
-## Engineering authoring (planned V2 M5/M7)
+## Engineering authoring (V2 M5 / later M7)
 
-V2 M5 introduces a coherent, reviewable change-set contract. It does not use
-the V1 broker source workflow. Base identity, stale-base handling, system-derived
-receipts, secret exclusion, and approval-is-not-effect remain useful reference
-semantics from [`Self_Modification_Design.md`](Self_Modification_Design.md).
-Branch, commit, push, pull request, package, publish, deploy, and restart are
-separate M7 authority profiles. None is implied by authoring.
+V2 M5 is specified by
+[`architecture/sandbox/ASHLEY_SANDBOX_V2_M5_DESIGN.md`](architecture/sandbox/ASHLEY_SANDBOX_V2_M5_DESIGN.md).
+It introduces a coherent, reviewable candidate change-set contract. It does
+not use the V1 broker source workflow. Base identity, stale-base handling,
+system-derived receipts, secret exclusion, and approval-is-not-effect remain
+useful reference semantics from [`Self_Modification_Design.md`](Self_Modification_Design.md).
+Branch, commit, push, pull request, package, publish, deploy, restart, and
+apply-to-Ashley are not M5. M7 owns named engineering-border profiles. None is
+implied by authoring.
 
 ## External effect and authority (cross-cutting)
 

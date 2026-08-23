@@ -94,6 +94,8 @@ Ashley.
 |---|---|---|
 | This document | `AUTHORITATIVE` | Cross-cutting M-series order, authority, state, truth, acceptance, and anti-drift law |
 | [`ASHLEY_SANDBOX_V2_M3_DESIGN.md`](ASHLEY_SANDBOX_V2_M3_DESIGN.md) | `CURRENT MILESTONE CONTRACT` | M3 workspace semantics and detailed execution shape. Its embedded physical procedure is historical milestone-design material subordinate to a separately authorized current exact-candidate qualification packet. |
+| [`ASHLEY_SANDBOX_V2_M4_DESIGN.md`](ASHLEY_SANDBOX_V2_M4_DESIGN.md) | `CURRENT MILESTONE CONTRACT` | M4 verification: snapshot identity, recipe catalog, evidence, honesty boundary |
+| [`ASHLEY_SANDBOX_V2_M5_DESIGN.md`](ASHLEY_SANDBOX_V2_M5_DESIGN.md) | `CURRENT MILESTONE CONTRACT` | M5 authorship: candidate change-set identity, seal, advisory proposal, non-apply |
 | [`../../../M3_PHYSICAL_MINT_QUALIFICATION_PACKET.md`](../../../M3_PHYSICAL_MINT_QUALIFICATION_PACKET.md) | `SUPPORTING / EXACT-CANDIDATE PROCEDURE` | M3 physical qualification procedure and evidence vocabulary; status claims bind only their exact candidate and run |
 | `apps/sandbox-m1/`, `apps/sandbox-v2/`, and the V2 adapter under `apps/agent-service/src/core/sandbox/` | `CURRENT SOURCE` | Current implementation facts. Source presence is not release, deployment, activation, or production acceptance |
 
@@ -544,6 +546,9 @@ identity of a multi-file candidate change as one governed change set.
 
 ### 13.2 Change-set contract
 
+First-slice schema, lifecycle, and store surface:
+[`ASHLEY_SANDBOX_V2_M5_DESIGN.md`](ASHLEY_SANDBOX_V2_M5_DESIGN.md).
+
 Each change set must bind:
 
 - stable change-set identity and version;
@@ -992,7 +997,11 @@ semantics or the direct Bubblewrap direction.
 
 1. Exact M4 snapshot/projection mechanism and toolchain packaging, after the
    M3 predecessor gate closes.
-2. Exact M5 change-set store and retention surface.
+2. Exact M5 change-set store and retention surface is bound by
+   [`ASHLEY_SANDBOX_V2_M5_DESIGN.md`](ASHLEY_SANDBOX_V2_M5_DESIGN.md) for the
+   first slice (nuclear control-plane tables plus sealed artifacts under the
+   workspace manager `_control/` directory). Later retention/forget and
+   revise/rebase remain deferred there.
 3. Exact M6 minimal task-record store and process-lifetime controller, subject
    to the prohibition on general Operational Continuity.
 4. Which M7 profile follows `patch_export`, based on an owner-selected real
