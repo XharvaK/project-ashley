@@ -172,13 +172,27 @@ Not changed: `apps/sandbox-broker/src/policy/recipe-registry.ts` (intentional).
 
 ## 7. Measured improvement (local corpus)
 
-Full M6/M7 local corpus under the new policy is recorded after this file’s
-first landing. Historical serialized agent corpus baseline: **≈4.5 minutes /
-1313 tests / 159 files**, excluding host scripts.
+One full intended M6/M7 local corpus under the new policy (2026-08-23,
+this runner). Host Mint scripts excluded. No new flakes. No `onTaskUpdate`.
 
-Expected from subset scaling: agent sandbox 42.5s → 13.3s (≈3.2×). Full
-corpus should drop similarly if file-level parallelism dominates, without
-claiming that until the corpus run completes.
+| Surface | Tests | Wall-clock | Exit |
+|---|---|---|---|
+| sandbox-policy | 120 passed | 0.95s | 0 |
+| sandbox-tree | 31 passed | 0.63s | 0 |
+| sandbox-m1 | 11 passed, 1 skipped | 0.57s | 0 |
+| sandbox-v2 | 142 passed, 2 skipped | 2.11s | 0 |
+| agent-service `npm test` | 1313 passed / 159 files | **64.21s** | 0 |
+| agent-service `test:offline` | 1313 passed / 159 files | 64.26s | 0 |
+| **sum** | | **≈133s** | 0 |
+
+Historical serialized agent corpus (M5 settlement, same 1313/159 exclude):
+**≈270s (4.5 min)**. New policy: **64s**. About **4.2×** wall-clock on
+agent-service. Combined local corpus including sandbox packages: **≈2.2 min**,
+versus an M5 settlement that spent ~30 min including hung host scripts and
+serial agent runs.
+
+Skipped sandbox-m1/v2 rows remain host Bubblewrap skips, not Mint
+qualification.
 
 ---
 
