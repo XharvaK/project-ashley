@@ -129,7 +129,7 @@ describe("wave06 migration", () => {
       continuity
         .prepare(
           `SELECT detail_json FROM continuity_events
-           WHERE kind = 'migration' ORDER BY id DESC LIMIT 24`,
+           WHERE kind = 'migration' ORDER BY id DESC`,
         )
         .all()
         .map((row) => JSON.parse(String((row as { detail_json: string }).detail_json)).phase),
