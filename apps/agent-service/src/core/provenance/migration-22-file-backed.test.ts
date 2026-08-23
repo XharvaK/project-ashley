@@ -10,7 +10,7 @@ const plane = createIsolatedDataPlane(dataDir);
 mkdirSync(plane.conversationsDir, { recursive: true });
 
 const { openContinuityDb } = await import("../continuity/db.js");
-const { openNuclearDb } = await import("../db.js");
+const { openNuclearDb, NUCLEAR_SUPPORTED_VERSION } = await import("../db.js");
 const { recordRecallLiveCutover } = await import("../memory/cutover.js");
 const { createEpisode, listUnconsolidatedMessages } = await import("../memory/episodes.js");
 const {
@@ -147,7 +147,9 @@ describe("migration-22 file-backed qualification", () => {
       dataPlane: plane,
     });
     try {
-      expect(migrated.prepare("PRAGMA user_version").get()).toEqual({ user_version: 29 });
+      expect(migrated.prepare("PRAGMA user_version").get()).toEqual({
+        user_version: NUCLEAR_SUPPORTED_VERSION,
+      });
       expect(migrated.prepare("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 });
       expect(migrated.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
       expect(migrated.prepare("PRAGMA quick_check").get()).toEqual({ quick_check: "ok" });
@@ -255,7 +257,9 @@ describe("migration-22 file-backed qualification", () => {
     });
     connections.push(reopened);
     try {
-      expect(reopened.prepare("PRAGMA user_version").get()).toEqual({ user_version: 29 });
+      expect(reopened.prepare("PRAGMA user_version").get()).toEqual({
+        user_version: NUCLEAR_SUPPORTED_VERSION,
+      });
       expect(reopened.prepare("SELECT id, entity_uuid FROM episodes WHERE id = ?").get(historicalEpisodeId))
         .toEqual({ id: historicalEpisodeId, entity_uuid: historicalUuid });
       expect(reopened.prepare("SELECT cutoff_message_id FROM recall_live_cutovers WHERE owner_id = 'doc' AND release_id = ?").get(releaseId))
