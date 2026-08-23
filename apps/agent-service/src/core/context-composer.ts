@@ -411,6 +411,9 @@ export function operationalWorkBlock(
  *   inspect at all this turn); derived from canOfferProjectInspection;
  * - inspectionStatus: what Ashley actually did or observed this turn
  *   (not_performed / verified_success / failed).
+ * When Thought did not complete (attention_deadline), inspection could not be
+ * requested this turn; that is execution unavailability, not a missing user
+ * ask and not proof the capability is inactive.
  * The four pairs are distinct states; available+not_performed means Ashley CAN
  * inspect but did not inspect this turn and must never be expressed as an
  * inability. Boolean state only — never a phrase detector or
@@ -419,10 +422,18 @@ export function operationalWorkBlock(
 export function projectInspectionEvidenceBlock(
   license: OperationalClaimLicense | null | undefined,
   observation: ProjectInspectionObservation | null | undefined,
-  options: { capabilityAvailable?: boolean; interpretationAvailable?: boolean } = {},
+  options: {
+    capabilityAvailable?: boolean;
+    interpretationAvailable?: boolean;
+    thoughtCompleted?: boolean;
+    thoughtError?: string | null;
+  } = {},
 ): string {
   const capabilityAvailable = options.capabilityAvailable === true;
   const interpretationAvailable = options.interpretationAvailable === true;
+  const thoughtBlockedThisTurn =
+    options.thoughtCompleted === false &&
+    options.thoughtError === "attention_deadline";
   const availableLine = `capabilityAvailable = ${capabilityAvailable}`;
   const semanticsAvailable = [
     "Semantics: capabilityAvailable is the authoritative current capability state; inspectionStatus is what Ashley actually did or observed this turn.",
@@ -460,6 +471,18 @@ export function projectInspectionEvidenceBlock(
         "Semantics: this turn's inspection attempt failed; the failure is about this attempt, not about capability.",
       ].join("\n");
     }
+  }
+  if (thoughtBlockedThisTurn) {
+    return [
+      "Project inspection evidence:",
+      availableLine,
+      "inspectionStatus = not_performed",
+      "verifiedRepositoryEvidence = false",
+      "thoughtCompleted = false",
+      "thoughtError = attention_deadline",
+      ...semanticsAvailable,
+      "Semantics: Thought did not complete this turn (attention_deadline), so inspection could not be requested or executed. This is this-turn execution unavailability, not a wording problem and not proof that the inspection capability is inactive. Do not invite the user to ask for inspection as if they had not already asked. Do not claim an inspection occurred.",
+    ].join("\n");
   }
   return [
     "Project inspection evidence:",
@@ -812,6 +835,8 @@ export function composeTurnContext(
      {
        capabilityAvailable: canOfferProjectInspection(db),
        interpretationAvailable: Boolean(decision?.inspectionCognitiveResult),
+       thoughtCompleted: decision?.thoughtSource === "model",
+       thoughtError: decision?.thoughtError ?? null,
      },
    );
    const workspaceEvidence = candidateWorkspaceEvidenceBlock(

@@ -321,6 +321,105 @@ describe("deadlines and priority", () => {
     db.close();
   });
 
+  it("fail-closes deadline-bound thought when groq TPM wait exceeds the 6s thought window", () => {
+    const db = openDb();
+    const clock = createFakeClock(3_000_000);
+    const bucket = "groq:openai/gpt-oss-120b";
+    const prior = insertQueuedRequest(
+      db,
+      {
+        lane: "interactive",
+        purpose: "thought",
+        modelAlias: "openai/gpt-oss-120b",
+        providerId: "groq",
+        quotaBucket: bucket,
+        estimatedInputTokens: 2_000,
+        estimatedOutputTokens: 2_000,
+      },
+      clock,
+    );
+    expect(tryAdmitRequest(db, prior, clock).admitted).toBe(true);
+    markRunning(db, prior, clock);
+    completeRequest(
+      db,
+      prior,
+      { outcome: "completed", actualInput: 2_000, actualOutput: 2_000 },
+      clock,
+    );
+    const id = insertQueuedRequest(
+      db,
+      {
+        lane: "interactive",
+        purpose: "thought",
+        modelAlias: "openai/gpt-oss-120b",
+        providerId: "groq",
+        quotaBucket: bucket,
+        estimatedInputTokens: 5_000,
+        estimatedOutputTokens: 1_000,
+        deadlineAtMs: clock.nowMs() + 6_000,
+      },
+      clock,
+    );
+    const result = tryAdmitRequest(db, id, clock);
+    expect(result).toEqual({ admitted: false, reason: "deadline" });
+    expect(getRequest(db, id)).toMatchObject({
+      state: "terminal",
+      outcome: "timeout",
+      error_class: "deadline_before_dispatch",
+    });
+    db.close();
+  });
+
+  it("admits deadline-bound thought when groq TPM frees inside the 6s window", () => {
+    const db = openDb();
+    const clock = createFakeClock(2_943_000);
+    const bucket = "groq:openai/gpt-oss-120b";
+    const prior = insertQueuedRequest(
+      db,
+      {
+        lane: "interactive",
+        purpose: "thought",
+        modelAlias: "openai/gpt-oss-120b",
+        providerId: "groq",
+        quotaBucket: bucket,
+        estimatedInputTokens: 2_000,
+        estimatedOutputTokens: 2_000,
+      },
+      clock,
+    );
+    expect(tryAdmitRequest(db, prior, clock).admitted).toBe(true);
+    markRunning(db, prior, clock);
+    completeRequest(
+      db,
+      prior,
+      { outcome: "completed", actualInput: 2_000, actualOutput: 2_000 },
+      clock,
+    );
+    clock.advance(57_000);
+    const id = insertQueuedRequest(
+      db,
+      {
+        lane: "interactive",
+        purpose: "thought",
+        modelAlias: "openai/gpt-oss-120b",
+        providerId: "groq",
+        quotaBucket: bucket,
+        estimatedInputTokens: 5_000,
+        estimatedOutputTokens: 1_000,
+        deadlineAtMs: clock.nowMs() + 6_000,
+      },
+      clock,
+    );
+    expect(tryAdmitRequest(db, id, clock)).toEqual({
+      admitted: false,
+      reason: "budget_wait",
+    });
+    clock.advance(3_000);
+    expect(tryAdmitRequest(db, id, clock).admitted).toBe(true);
+    expect(getRequest(db, id)).toMatchObject({ state: "reserved" });
+    db.close();
+  });
+
   it("never admits overdue background ahead of interactive", () => {
     const db = openDb();
     const clock = createFakeClock(4_000_000);

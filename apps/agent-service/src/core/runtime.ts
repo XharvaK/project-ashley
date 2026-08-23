@@ -214,6 +214,7 @@ import {
 import { executeBoundedOperationV2 } from "./sandbox/bounded-operation-execution.js";
 import { executePatchExportV2 } from "./sandbox/patch-export-execution.js";
 import { canOfferProjectInspection, canOfferCandidateWorkspace, canOfferCandidateVerification, canOfferCandidateAuthorship, canOfferBoundedOperation, canOfferPatchExport, loadOperatorProjectReadRegistry } from "./sandbox/project-registry.js";
+import { shouldRunProactiveModelThought } from "./agency/proactive-thought-gate.js";
 import { SandboxV2Dispatcher, type SandboxV2Environment, type SandboxV2Request, type SandboxV2Result } from "@composer-assistant/sandbox-v2";
 import {
   isVerifiedRoundtripEffectEvidence,
@@ -2153,13 +2154,12 @@ export class AshleyCore {
         motivations,
         trigger: "proactive",
       });
-      const inspectionOffered = canOfferProjectInspection(this.db);
-      // M2 reachability (proactive): same capability-driven admission as the
-      // reactive path — an offered inspection capability implies model Thought
-      // runs so the offer is reachable. Candidate workspace experiments (M3)
-      // are not executable from proactive turns in this wave, so canOfferCandidateWorkspace
-      // does not by itself make proactive Thought reachable.
-      if (complexity.mode === "hard" || inspectionOffered) {
+      // Reactive Discord already admits model Thought when inspection is
+      // offered. Proactive 120b Thought on every wake because M2 is offerable
+      // shares groq TPM with the 6s reactive Thought window and fail-closes
+      // live inspection as deadline_before_dispatch. Hard complexity still
+      // runs proactive Thought. M3 remains non-executable from proactive.
+      if (shouldRunProactiveModelThought(complexity.mode)) {
         decision = await deliberateDecision(
           this.db,
           decision,

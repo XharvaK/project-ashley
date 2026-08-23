@@ -268,7 +268,8 @@ export function earliestLegalDispatchMs(
     });
   }
 
-  for (let i = 0; i < 8; i++) {
+  const maxAdvanceSteps = Math.max(1, Math.ceil(TPM_WINDOW_MS / 1_000));
+  for (let i = 0; i < maxAdvanceSteps; i++) {
     const windowStart = new Date(candidate - TPM_WINDOW_MS + 1).toISOString();
     const nowIso = new Date(candidate).toISOString();
     const used = tokensInWindow(db, windowStart, nowIso, quotaBucket);

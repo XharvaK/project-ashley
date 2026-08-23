@@ -124,6 +124,8 @@ export function minimalExpressionContext(
       {
         capabilityAvailable: canOfferProjectInspection(db),
         interpretationAvailable: Boolean(decision?.inspectionCognitiveResult),
+        thoughtCompleted: decision?.thoughtSource === "model",
+        thoughtError: decision?.thoughtError ?? null,
       },
     ),
     `## Honesty & rendering (minimal profile)\n${MINIMAL_RENDERING_CONSTRAINTS}`,

@@ -2322,4 +2322,208 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
     const inspectionSection = expressionSystemPrompt.split("Candidate workspace evidence:")[0].split("Project inspection evidence:")[1] ?? "";
     expect(inspectionSection).not.toContain("capabilityAvailable = false");
   });
+
+  it("natural-language inspect without internal operation names still runs M2 when Thought requests inspection", async () => {
+    const dbPath = join(tmpDir, `ashley-core-${randomUUID()}.db`);
+    const db = openNuclearDb(new DatabaseSync(dbPath));
+    activateProjectInspection(db);
+    const calls: string[] = [];
+    const m3 = vi.spyOn(v2Execution, "executeWorkspaceExperimentV2");
+
+    vi.spyOn(mistral, "completeChat").mockImplementation(async (messages: any[]) => {
+      const systemContent = messages.find((message) => message.role === "system")?.content ?? "";
+      if (systemContent.includes("Ashley's Thought layer, not her Expression layer")) {
+        calls.push("thought");
+        const parsedUser = JSON.parse(
+          messages.find((message) => message.role === "user")?.content ?? "{}",
+        );
+        expect(JSON.stringify(parsedUser)).not.toContain("project.read_file");
+        return {
+          text: JSON.stringify({
+            kind: "speak",
+            delayClass: null,
+            shouldSpeak: true,
+            effort: "high",
+            completion: "complete",
+            uncertainty: 0.1,
+            urgency: 0.4,
+            objective: "locate the wiring from repository evidence",
+            reason: "user asked for inspection of an approved project",
+            motivationIds: [parsedUser.candidates?.[0]?.id ?? 1],
+            evidenceDisposition: "acquire_project_evidence",
+            operationalRequest: {
+              kind: "project_inspection",
+              request: {
+                operation: "project.search_text",
+                projectId: "project-ashley",
+                path: "apps/agent-service/src",
+                pattern: "candidate_authorship",
+              },
+            },
+          }),
+          model: "gpt-oss-120b",
+          modelAlias: "thought",
+          resolvedModelId: "openai/gpt-oss-120b",
+        };
+      }
+      if (systemContent.includes("Ashley's Thought layer continuing deliberation")) {
+        calls.push("continuation");
+        return {
+          text: JSON.stringify({
+            kind: "speak",
+            delayClass: null,
+            shouldSpeak: true,
+            effort: "medium",
+            completion: "complete",
+            uncertainty: 0.05,
+            urgency: 0.3,
+            objective: "report verified wiring",
+            reason: "inspection evidence is in hand",
+            motivationIds: [1],
+            inspectionCognitiveResult: "candidate_authorship is referenced in the thought operational union",
+          }),
+          model: "gpt-oss-120b",
+          modelAlias: "thought",
+          resolvedModelId: "openai/gpt-oss-120b",
+        };
+      }
+      calls.push("expression");
+      return {
+        text: "candidate_authorship is wired through the thought operational-request union.",
+        model: "mistral-large",
+        modelAlias: "expression",
+        resolvedModelId: "mistral-large",
+      };
+    });
+
+    vi.spyOn(SandboxV2Dispatcher.prototype, "dispatch").mockImplementation(async (request: any) => {
+      expect(request.operation).toBe("project.search_text");
+      expect(request.projectId).toBe("project-ashley");
+      calls.push("m2");
+      return {
+        outcome: "succeeded",
+        operation: "project.search_text",
+        dispatchAttempted: true,
+        dispatchAttemptedAtMs: Date.now(),
+        executedAtMs: Date.now(),
+        result: {
+          kind: "project.search_text",
+          path: "apps/agent-service/src",
+          pattern: "candidate_authorship",
+          matches: [
+            { path: "apps/agent-service/src/core/types.ts", line: 88, text: "CognitionOperationalRequest" },
+          ],
+          truncated: false,
+          filesScanned: 1,
+        },
+      };
+    });
+
+    const core = new AshleyCore(db);
+    const result = await core.handleReactiveChat({
+      message:
+        "Inspect Project Ashley and tell me where candidate_authorship is wired into the runtime. Don’t change anything.",
+      ownerId: "doc",
+      channel: "discord",
+    });
+
+    expect(calls).toEqual(["thought", "m2", "continuation", "expression"]);
+    expect(m3).not.toHaveBeenCalled();
+    expect(result.text).toContain("candidate_authorship");
+    db.close();
+  });
+
+  it("unauthorized project inspection fail-closes without executing M2", async () => {
+    const dbPath = join(tmpDir, `ashley-core-${randomUUID()}.db`);
+    const db = openNuclearDb(new DatabaseSync(dbPath));
+    activateProjectInspection(db);
+    const calls: string[] = [];
+    vi.spyOn(mistral, "completeChat").mockImplementation(async (messages: any[]) => {
+      const systemContent = messages.find((message) => message.role === "system")?.content ?? "";
+      if (systemContent.includes("Ashley's Thought layer, not her Expression layer")) {
+        calls.push("thought");
+        return {
+          text: JSON.stringify({
+            kind: "speak",
+            delayClass: null,
+            shouldSpeak: true,
+            effort: "low",
+            completion: "complete",
+            uncertainty: 0.1,
+            urgency: 0.2,
+            objective: "inspect",
+            reason: "user asked",
+            motivationIds: [1],
+            evidenceDisposition: "acquire_project_evidence",
+            operationalRequest: {
+              kind: "project_inspection",
+              request: {
+                operation: "project.read_file",
+                projectId: "not-approved",
+                path: "README.md",
+              },
+            },
+          }),
+          model: "gpt-oss-120b",
+          modelAlias: "thought",
+          resolvedModelId: "openai/gpt-oss-120b",
+        };
+      }
+      calls.push("expression");
+      return {
+        text: "I cannot inspect that project.",
+        model: "mistral-large",
+        modelAlias: "expression",
+        resolvedModelId: "mistral-large",
+      };
+    });
+    const dispatch = vi.spyOn(SandboxV2Dispatcher.prototype, "dispatch");
+    const core = new AshleyCore(db);
+    await core.handleReactiveChat({
+      message: "Inspect not-approved and tell me what README says. Don’t change anything.",
+      ownerId: "doc",
+      channel: "discord",
+    });
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(calls).toContain("thought");
+    db.close();
+  });
+
+  it("Thought attention_deadline makes this-turn inspection unreachable without claiming a look", async () => {
+    const dbPath = join(tmpDir, `ashley-core-${randomUUID()}.db`);
+    const db = openNuclearDb(new DatabaseSync(dbPath));
+    activateProjectInspection(db);
+    let expressionSystemPrompt = "";
+    const dispatch = vi.spyOn(SandboxV2Dispatcher.prototype, "dispatch");
+    vi.spyOn(mistral, "completeChat").mockImplementation(async (messages: any[]) => {
+      const systemContent = messages.find((message) => message.role === "system")?.content ?? "";
+      if (systemContent.includes("Ashley's Thought layer, not her Expression layer")) {
+        throw Object.assign(new Error("attention_deadline"), {
+          code: "attention_deadline",
+        });
+      }
+      expressionSystemPrompt = systemContent;
+      return {
+        text: "I could not inspect anything this turn because Thought did not finish in time.",
+        model: "mistral-large",
+        modelAlias: "expression",
+        resolvedModelId: "mistral-large",
+      };
+    });
+    const core = new AshleyCore(db);
+    const result = await core.handleReactiveChat({
+      message:
+        "Inspect Project Ashley and tell me where candidate_authorship is wired into the runtime. Don’t change anything.",
+      ownerId: "doc",
+      channel: "discord",
+    });
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(expressionSystemPrompt).toContain("thoughtError = attention_deadline");
+    expect(expressionSystemPrompt).toContain("inspection could not be requested or executed");
+    expect(expressionSystemPrompt).not.toContain(
+      "this is not an inability and must never be expressed as one",
+    );
+    expect(result.text.toLowerCase()).not.toMatch(/i inspected/);
+    db.close();
+  });
 });

@@ -6,6 +6,7 @@ import { patchState } from "./state/store.js";
 import { upsertMindStateItem } from "./state/mind-items.js";
 import {
   candidateWorkspaceEvidenceBlock,
+  projectInspectionEvidenceBlock,
   mindStateHeadline,
   operationalWorkBlock,
   stableIdentityBlock,
@@ -319,5 +320,33 @@ describe("candidateWorkspaceEvidenceBlock", () => {
     expect(block).toContain("candidateWorkspaceChanged = false");
     expect(block).toContain("liveRepositoryUnchanged = true");
     expect(block).not.toContain("workspaceStatus = not_performed");
+  });
+});
+
+describe("projectInspectionEvidenceBlock", () => {
+  it("does not treat Thought attention_deadline as a missing user ask", () => {
+    const block = projectInspectionEvidenceBlock(null, null, {
+      capabilityAvailable: true,
+      thoughtCompleted: false,
+      thoughtError: "attention_deadline",
+    });
+    expect(block).toContain("capabilityAvailable = true");
+    expect(block).toContain("inspectionStatus = not_performed");
+    expect(block).toContain("thoughtCompleted = false");
+    expect(block).toContain("thoughtError = attention_deadline");
+    expect(block).toContain("inspection could not be requested or executed");
+    expect(block).toContain("Do not invite the user to ask for inspection");
+    expect(block).not.toContain("this is not an inability and must never be expressed as one");
+  });
+
+  it("keeps available + not_performed when Thought completed without inspecting", () => {
+    const block = projectInspectionEvidenceBlock(null, null, {
+      capabilityAvailable: true,
+      thoughtCompleted: true,
+    });
+    expect(block).toContain(
+      "capabilityAvailable = true with inspectionStatus = not_performed means Ashley CAN inspect approved projects but did not inspect this turn",
+    );
+    expect(block).not.toContain("thoughtError = attention_deadline");
   });
 });
