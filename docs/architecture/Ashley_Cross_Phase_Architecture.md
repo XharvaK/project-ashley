@@ -244,7 +244,7 @@ COMPUTER USE DEPENDS ON EXTERNAL EFFECT/AUTHORITY FOR CONSEQUENTIAL ACTION
 | Evaluation / Qualification | Every phase | `CROSS_CUTTING_INTERFACE` | Domain-specific closure evidence. | Evaluation does not grant runtime authority. |
 | Observability | Every phase | `CROSS_CUTTING_INTERFACE` | Correlation and diagnostics designed with each lifecycle. | Telemetry is not evidence, memory, or authorization. |
 | Security / Authority | Every phase | `CROSS_CUTTING_INTERFACE` | Global authority matrix. Phases narrow it. | No giant trusted or tool-allowed boolean. |
-| External Effect and Authority | Connectors, procedures, Computer Use, Sandbox M7, effectful Operational Continuity | `CROSS_CUTTING_INTERFACE` | Effect meaning, credentials, representation, commit, witness, and reconciliation. | Not a child of Computer Use. Not owned by Sandbox. |
+| External Effect and Authority | Connectors, procedures, Computer Use, Sandbox M7, Discord communication, effectful Operational Continuity | `CROSS_CUTTING_INTERFACE` | Effect meaning, credentials, representation, commit, witness, and reconciliation. Runtime evaluation is the Authority Kernel. | Not a child of Computer Use. Not owned by Sandbox. Not a Speech Authorization System. |
 
 ### 3.3 Non-dependencies
 
@@ -327,6 +327,7 @@ model or worker may emit a bounded proposal where stated.
 | Artifact | Artifact Registry + creating domain | No | Yes | No | Candidate bytes within grant | May become evidence only after admission | No | Content-addressable materialization may rebuild | No | Yes | Artifact owner + Continuity | Sandbox / Operational Continuity |
 | Operational Work Concern | Operational Continuity | No | Yes | No | No | Correlates attempts | No cognitive or effect authority | No | No | Yes | Operational Continuity | Operational Continuity |
 | EffectCommitRecord | External Effect owner or bounded engineering-effect owner | No | Yes | No | No | Commit-boundary record | Records exercised authority; does not grant it | No | No | Yes | Effect domain | External Effect / Sandbox M7 |
+| EffectAuthorization | Authority Kernel | No | Bounded | No | No | Grant evidence | Current bounded grant only; not a goal, not a witness | No | No | Restart must revalidate | Effect domain | Authority Kernel |
 | Credential reference | Credential Authority | No | Yes | No | No | Metadata only | No action authority | No | No | Yes | Credential Authority | External Effect and Authority |
 | Authenticated session state | Session Broker / provider adapter | No | Bounded | No | No | Mechanism metadata | No action authority | No | No | Contract-specific | Session Broker | External Effect mechanisms |
 | ApprovalProjection | Approval owner | No | Yes | No | No | Approval evidence | Scoped approval only | No | No | Yes | Approval owner | External Effect / governance domains |
@@ -354,7 +355,12 @@ stand for these distinct authorities.
 | Browser observation | Computer Use + External Effect admission | Session, target, read scope, privacy | Mutation, communication, purchase, commitment |
 | Browser mutation | Computer Use mechanism + External Effect authority | Prepared effect, current revalidation, action scope | Representation, purchase, irreversible commitment |
 | External representation | Agency + External Effect policy + owner scope where required | Represented party, bounded subject/action scope | General communication or account access is insufficient |
-| Communication | Agency + destination capability | Content, recipient, channel, privacy, effect intent | Agreement, owner representation, human receipt |
+| Communication | Agency + Authority Kernel + destination capability | Content, recipient, channel, privacy, current communication-class grant | Agreement, owner representation, human receipt, capability success |
+
+Initiative admission is not delivery and not an external effect. A Discord
+send is a communication effect and requires a current Authority Kernel grant.
+Capability success is not that grant. See
+[`Ashley_Authority_Kernel_Architecture.md`](Ashley_Authority_Kernel_Architecture.md).
 | Purchase or commitment | External Effect policy + explicit owner authority | Terms, amount/obligation, target, revalidation, witness plan | Browser access, credential access, prior similar approval |
 | Git effects | Sandbox M7 engineering-effect profile | Exact repository, operation, branch, current qualification and owner scope | Deploy, publish, external representation |
 | Deployment | Deployment authority profile | Exact artifact, environment, rollback, owner authorization | Capability promotion or production acceptance |

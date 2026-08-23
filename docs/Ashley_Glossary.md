@@ -82,6 +82,41 @@ Prefer architectural solutions over prompt-generated illusions.
 
 ---
 
+## Authority Kernel
+
+**Definition**
+
+The Authority Kernel is the runtime evaluator that answers whether one exact
+external effect may happen now. It instantiates External Effect and Authority
+law. It issues bounded grants or typed refusals. It does not choose goals.
+
+**Why it matters**
+
+Without the kernel, Agency can want to act and Expression can generate
+language without a current grant for the exact external effect.
+
+**Distinctions**
+
+The kernel is not Agency.
+
+The kernel is not Thought.
+
+The kernel is not Honesty.
+
+The kernel is not a Speech Authorization System.
+
+A capability result is not a grant.
+
+**Design implication**
+
+Discord send, and later engineering presentation and account effects, consume
+the same kernel through domain policies.
+
+Canonical contract:
+[`architecture/Ashley_Authority_Kernel_Architecture.md`](architecture/Ashley_Authority_Kernel_Architecture.md)
+
+---
+
 ## Autonomy
 
 **Definition**
@@ -203,6 +238,34 @@ Emergent behavior scales better than manually scripted behavior.
 
 Prefer systems that naturally produce initiative over prompts instructing
 initiative.
+
+---
+
+## Effect Authorization
+
+**Definition**
+
+An Effect Authorization is a bounded, revocable, time-limited grant for one
+exact external effect. It is not a generic allow flag and not proof that the
+effect occurred.
+
+**Why it matters**
+
+Authority must name the class, target, payload, audience, representation,
+commitment, trigger, and budget. Otherwise “may Ashley speak?” collapses
+distinct effects.
+
+**Distinctions**
+
+Effect Intent has zero execution authority.
+
+A receipt is not an Effect Witness.
+
+Honesty claim licenses are not Effect Authorizations.
+
+**Design implication**
+
+Do not implement `externalAllowed: true`.
 
 ---
 

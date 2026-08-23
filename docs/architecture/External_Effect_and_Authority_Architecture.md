@@ -32,6 +32,12 @@ This plane is not a second Agency. It does not choose Ashley's goals. It
 converts an admitted semantic decision into bounded, enforceable, observable
 effect contracts.
 
+Runtime evaluation of those contracts is owned by
+[`Ashley_Authority_Kernel_Architecture.md`](Ashley_Authority_Kernel_Architecture.md).
+The kernel instantiates this plane. It does not replace it. Discord
+communication is a consumer of this plane through Communication Policy. There
+is no separate Speech Authorization System.
+
 Authority order remains the order in
 [`Ashley_Cross_Phase_Architecture.md`](Ashley_Cross_Phase_Architecture.md).
 This document is subordinate to higher governance and the canonical roadmap.
@@ -729,6 +735,8 @@ Consumer interfaces:
 
 | Consumer | What it receives | What it returns | What it never owns |
 |---|---|---|---|
+| Authority Kernel | Admitted `EffectIntent` plus current authority evidence | `EffectAuthorization` or typed refusal | Goals, wording, world-truth, Agency silence override |
+| Communication Policy | Communication-class intent and evidence | Class-preserving present/refuse decision for send | Engineering apply, account write, generic speech rights |
 | Connector or direct API | Observation contract or `PreparedEffect` plus attenuated commit grant | Observation, receipt, witness input, reconciliation evidence | Intent, Agency, representation, commitment |
 | Qualified procedure | Qualified invocation plus bounded request/effect inputs | Typed trace, artifacts, receipt, outcome evidence | Generic effect authority |
 | Computer Use | Semantic UI observation or exact prepared interaction | UI observations, mechanism receipts, witness input | Generic external-effect authority |
@@ -741,7 +749,7 @@ This document does not select:
 
 - connector vendors, API clients, vault products, browser drivers, desktop
   frameworks, or provider accounts;
-- universal action-kind or risk taxonomies;
+- numeric risk scores;
 - storage schema, IPC topology, service topology, or process identity;
 - automatic credential provisioning or account registration;
 - legal or financial delegation policy;
@@ -750,5 +758,8 @@ This document does not select:
 - deployment or activation sequence;
 - implementation milestones.
 
-Those choices require bounded domain contracts, threat analysis, source design,
-qualification plans, and separate implementation authority.
+Effect dimensions (domain, direction, consequence, representation,
+commitment, trigger) and Communication Policy classes are owned by
+[`Ashley_Authority_Kernel_Architecture.md`](Ashley_Authority_Kernel_Architecture.md).
+Those choices fill this deferred taxonomy hole. They do not authorize
+implementation.

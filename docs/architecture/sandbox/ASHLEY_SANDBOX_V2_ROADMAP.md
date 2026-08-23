@@ -594,6 +594,12 @@ effect on the live repository. Owner approval of a change set records a
 decision state. It does not by itself authorize apply, commit, push, deploy,
 restart, installation, or capability promotion.
 
+Presenting a sealed change set to Doc is a communication effect. It is not
+included in M5 authorship. It requires a current Authority Kernel
+communication grant. See
+[`../Ashley_Authority_Kernel_Architecture.md`](../Ashley_Authority_Kernel_Architecture.md).
+This roadmap still does not design M5 presentation policy beyond that split.
+
 ### 13.6 Smallest production witness
 
 Create one coherent multi-file change set against an explicit base. Produce a
