@@ -24,7 +24,8 @@ export type FinalizeCause =
   | "send_failure"
   | "first_bubble_deadline"
   | "generation_lease"
-  | "delivery_lease";
+  | "delivery_lease"
+  | "authority_refused";
 
 export type FinalizeDeliveryInput = {
   reservationId: number;
@@ -75,6 +76,7 @@ function reasonFor(
       case "empty_draft":
       case "first_bubble_deadline":
       case "generation_lease":
+      case "authority_refused":
         return {
           state: "partially_delivered",
           reason: "send_failure_after_partial",
@@ -101,6 +103,8 @@ function reasonFor(
       return { state: "expired", reason: "generation_lease_expired" };
     case "delivery_lease":
       return { state: "expired", reason: "delivery_lease_expired" };
+    case "authority_refused":
+      return { state: "aborted", reason: "authority_refused" };
     case "complete":
       return { state: "aborted", reason: "empty_draft" };
     default: {

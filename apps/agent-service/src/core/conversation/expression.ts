@@ -44,6 +44,8 @@ export type RenderedOutput = {
   text: string;
   model: string;
   readingLicensed: boolean;
+  preHonestyText: string;
+  honestyMutated: boolean;
 };
 
 /**
@@ -234,11 +236,16 @@ export async function expressSpeak(
       (decision.perceptionLicenses?.conversationalReadIncluded.length ?? 0) > 0,
     operationalLicense: decision.operationalLicense,
   });
-  return applyRendering({
+  const rendered = applyRendering({
     text: finalized.text,
     model: wording.model,
     readingLicensed: wording.readingLicensed,
   });
+  return {
+    ...rendered,
+    preHonestyText: wording.text,
+    honestyMutated: wording.text.trim() !== finalized.text.trim(),
+  };
 }
 
 function applyRendering(output: ExpressionOutput): RenderedOutput {
@@ -246,6 +253,8 @@ function applyRendering(output: ExpressionOutput): RenderedOutput {
     text: renderForTransport(output.text),
     model: output.model,
     readingLicensed: output.readingLicensed,
+    preHonestyText: output.text,
+    honestyMutated: false,
   };
 }
 

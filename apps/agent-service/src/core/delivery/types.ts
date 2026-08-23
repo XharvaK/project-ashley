@@ -21,7 +21,8 @@ export type DeliveryFinalizationReason =
   | "first_bubble_deadline_expired"
   | "generation_lease_expired"
   | "delivery_lease_expired"
-  | "delivery_lease_expired_after_partial";
+  | "delivery_lease_expired_after_partial"
+  | "authority_refused";
 
 export type DeliveryAuxKind = "progress" | "delivery_error";
 
