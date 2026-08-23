@@ -47,6 +47,10 @@ This document defines the Ashley memory evidence architecture:
 - what happens on contradiction, revision, forgetting, and redaction;
 - where each future implementation area lands on the frozen roadmap.
 
+Canonical writing (architecture, Identity, known limits) is not Memory /
+Evidence. It may later be projected by Context Budget. It is not lived
+evidence, assertion, or belief.
+
 The core architecture is:
 
 ```text

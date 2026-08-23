@@ -21,12 +21,13 @@ owner and not a current-state dashboard.
 4. [`Ashley_Stewardship_Compact.md`](../Ashley_Stewardship_Compact.md) and [`Ashley_Ethics.md`](../Ashley_Ethics.md)
 5. [`Ashley_Hierarchy.md`](../Ashley_Hierarchy.md)
 6. [Canonical Architecture Roadmap](Ashley_Architecture_Roadmap.md)
-7. [Cross-Phase Architecture](Ashley_Cross_Phase_Architecture.md)
-8. task-specific focused contract
-9. live state resolution from Git / source / exact-candidate evidence / production observation
+7. [Architecture Freeze](Ashley_Architecture_Freeze.md) (owner map and event terminology; not a dashboard)
+8. [Cross-Phase Architecture](Ashley_Cross_Phase_Architecture.md)
+9. task-specific focused contract
+10. live state resolution from Git / source / exact-candidate evidence / production observation
 
-Constitution, Stewardship Compact, and Ethics are not skippable. Steps 1–7 are
-architecture / governance authority. Step 8 is the task contract. Step 9
+Constitution, Stewardship Compact, and Ethics are not skippable. Steps 1–8 are
+architecture / governance authority. Step 9 is the task contract. Step 10
 resolves volatile facts from their actual owners.
 
 ### Live state resolution
@@ -97,6 +98,8 @@ upgrade one into another.
 | Ashley Glossary | [`docs/Ashley_Glossary.md`](../Ashley_Glossary.md) | Normative project vocabulary | Current | `AUTHORITATIVE` | Use for established semantic terms. The roadmap adds phase terms without redefining glossary entries. |
 | Ashley Design Patterns | [`docs/Ashley_Design_Patterns.md`](../Ashley_Design_Patterns.md) | Architecture ownership and review patterns | Current | `SUPPORTING` | Applies governing semantics to recurring design choices. |
 | Canonical Architecture Roadmap | [`docs/architecture/Ashley_Architecture_Roadmap.md`](Ashley_Architecture_Roadmap.md) | Current implementation boundary, owner-selected delivery map, classified dependency edges, phase names, delivery focus, and framework disposition | 2026-08-21 | `AUTHORITATIVE` | Canonical source for current architectural direction beneath governance. |
+| Architecture Freeze | [`docs/architecture/Ashley_Architecture_Freeze.md`](Ashley_Architecture_Freeze.md) | Frozen owner map, event-term split, external inspiration disposition, architecture-justified sequence before advanced autonomy | 2026-08-23 | `AUTHORITATIVE` | Completeness research landed here. Adds no owners. Distinguishes historical research, frozen architecture, planned work, and owner-selected delivery. |
+| Architecture Freeze documentation sync | [`docs/handoffs/ashley-architecture-freeze-doc-sync.md`](../handoffs/ashley-architecture-freeze-doc-sync.md) | Change plan, term classification, and consistency report for the freeze documentation pass | 2026-08-23 | `SUPPORTING` | Records this documentation synchronization. It is not an architecture owner and authorizes no implementation. |
 | Cross-Phase Architecture | [`docs/architecture/Ashley_Cross_Phase_Architecture.md`](Ashley_Cross_Phase_Architecture.md) | Shared laws, classified dependency edges, state ownership, authority matrix, effect/ambiguity contract, and current-fact policy | 2026-08-21 | `AUTHORITATIVE` | Governs interfaces used by every phase. Owns `HARD_DEPENDENCY`, `EVIDENCE_DEPENDENCY`, `OWNER_SELECTED_IMPLEMENTATION_ORDER`, and `CROSS_CUTTING_INTERFACE`. The roadmap owns delivery priority. |
 | Sandbox V2 M-Series Roadmap | [`docs/architecture/sandbox/ASHLEY_SANDBOX_V2_ROADMAP.md`](sandbox/ASHLEY_SANDBOX_V2_ROADMAP.md) | Current M0-M7 boundaries, V1 supersession, state ownership, authority progression, operational truth, and acceptance gates | 2026-08-21 | `AUTHORITATIVE` | Governs Sandbox V2 beneath higher governance and the canonical architecture roadmap. Read before implementing any later V2 milestone. |
 | Architecture Document Index | [`docs/architecture/Ashley_Architecture_Document_Index.md`](Ashley_Architecture_Document_Index.md) | Document authority and history | 2026-08-17 | `AUTHORITATIVE` | Canonical source for document status and relevance. |
@@ -169,7 +172,7 @@ upgrade one into another.
 | Research Gaps and Contradictions | [`docs/architecture/salvage/Research_Gaps_and_Contradictions.md`](salvage/Research_Gaps_and_Contradictions.md) | Candidate conflicts and research gaps | 2026-08-09 | `HISTORICAL` | Preserves why Mastra, AgentFS, OpenHands, and Letta roles were narrowed. Some gaps were later resolved by P-01/P-02. |
 | Semantica Salvage Audit v1 | [`docs/architecture/salvage/Semantica_Salvage_Audit_v1.md`](salvage/Semantica_Salvage_Audit_v1.md) | Semantic-framework source audit | 2026-08-09 | `REFERENCE` | Supports no-wholesale-adoption and a possible read-only PROV-O export adapter. Semantica is not Ashley authority. |
 | Autonomous Work Semantics Salvage | [`docs/architecture/research/Autonomous_Work_Semantics_Salvage.md`](research/Autonomous_Work_Semantics_Salvage.md) | Autonomous-work semantic distinctions and candidate reconciliation | 2026-08-13 | `REFERENCE` | Records architectural pressure and future direction without freezing candidate names, selecting a substrate, or authorizing implementation. Historical `-01` labels are provenance. |
-| Operational Continuity Codebase Reconnaissance | [`docs/architecture/research/Operational_Continuity_01_Codebase_Reconnaissance.md`](research/Operational_Continuity_01_Codebase_Reconnaissance.md) | Dated inventory of durable jobs, delivery, leases, and recovery patterns | 2026-08-14 | `HISTORICAL` | Exact-baseline snapshot. V1 broker, schema v27, and serial phase labels are not current. Use the Operational Continuity Architecture for current direction. Historical filename retained. |
+| Operational Continuity Codebase Reconnaissance | [`docs/architecture/research/Operational_Continuity_01_Codebase_Reconnaissance.md`](research/Operational_Continuity_01_Codebase_Reconnaissance.md) | Dated inventory of durable jobs, delivery, leases, and recovery patterns | 2026-08-14 | `HISTORICAL` | Exact-baseline snapshot. V1 broker, schema v27, and serial phase labels are not current. Use the Operational Continuity Architecture for current direction. Historical filename retained. The phrase “Event Fabric” in that snapshot means the durable inbox, not the later typed Event Spine. |
 | Sandbox Final Activation Path Reconnaissance | [`docs/architecture/research/Sandbox_Final_Activation_Path_Reconnaissance.md`](research/Sandbox_Final_Activation_Path_Reconnaissance.md) | V1 broker install/activation path | 2026-08 | `HISTORICAL` | Historical Sandbox V1 broker activation reconnaissance. It does not define Sandbox V2 activation. |
 | Untracked root qualification packets | repository root (`M3_*`, `oc-m1-*`, `QUALIFICATION_PACKET_*`, and similar) | Exact-candidate or investigation working evidence | mixed | `HISTORICAL` / untracked working evidence | Not architecture. Bind only the packet’s stated SHA, host, and claim. Do not infer current HEAD maturity from a historical packet. |
 | Model Fabric Final Implementation Packet | [`docs/architecture/research/Model_Fabric_01_Final_Implementation_Packet.md`](research/Model_Fabric_01_Final_Implementation_Packet.md) | Read-only first-slice planning snapshot | 2026-08-14 | `REFERENCE` | Planning packet only. Does not authorize implementation or outrank the Model Fabric Architecture. |

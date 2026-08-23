@@ -43,6 +43,12 @@ The phase preserves:
 - Context Composer as composition mechanism, not semantic owner;
 - provenance, privacy, least privilege, and auditable continuity.
 
+Canonical documents (Identity, principles, architecture, known limits) may
+later be projected into a turn as bounded, inspectable context. That is
+Context Budget work, not a Knowledge layer. Documentation is not memory and
+not belief. External “docs for agents” products (for example Mintlify-style
+Markdown/`llms.txt` projection) inspire this projection pattern only.
+
 ## 3. New capability
 
 The phase adds:

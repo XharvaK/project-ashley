@@ -23,7 +23,8 @@ not proof of graduated cognition.
 
 The accepted target below matures epistemic state, goals, salience, concerns,
 opinions, and evidence-bound lived-experience continuity under their existing
-owners.
+owners. Completing Sandbox or Model Fabric does not unlock this phase. See
+[Architecture Freeze](Ashley_Architecture_Freeze.md).
 
 ## 1. Purpose
 

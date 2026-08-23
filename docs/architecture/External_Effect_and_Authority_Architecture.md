@@ -55,6 +55,8 @@ This plane protects these requirements:
   blind retry.
 - Credential possession and authenticated session availability never imply
   authority to act.
+- Computer or session availability never implies Computer Use admission.
+  `COMPUTER AVAILABLE != COMPUTER AUTHORIZED`.
 
 ## 3. New capability
 

@@ -18,12 +18,13 @@ owner. Verification lifecycle semantics are owned by
 4. [`docs/Ashley_Stewardship_Compact.md`](docs/Ashley_Stewardship_Compact.md) and [`docs/Ashley_Ethics.md`](docs/Ashley_Ethics.md)
 5. [`docs/Ashley_Hierarchy.md`](docs/Ashley_Hierarchy.md)
 6. [`docs/architecture/Ashley_Architecture_Roadmap.md`](docs/architecture/Ashley_Architecture_Roadmap.md)
-7. [`docs/architecture/Ashley_Cross_Phase_Architecture.md`](docs/architecture/Ashley_Cross_Phase_Architecture.md)
-8. task-specific focused contract
-9. live state resolution from Git / source / exact-candidate evidence / production observation
+7. [`docs/architecture/Ashley_Architecture_Freeze.md`](docs/architecture/Ashley_Architecture_Freeze.md)
+8. [`docs/architecture/Ashley_Cross_Phase_Architecture.md`](docs/architecture/Ashley_Cross_Phase_Architecture.md)
+9. task-specific focused contract
+10. live state resolution from Git / source / exact-candidate evidence / production observation
 
-Do not skip Constitution, Stewardship Compact, or Ethics. Steps 1–7 are
-architecture / governance authority. Step 8 is the task contract. Step 9
+Do not skip Constitution, Stewardship Compact, or Ethics. Steps 1–8 are
+architecture / governance authority. Step 9 is the task contract. Step 10
 resolves volatile facts from their actual owners. Architecture documents are
 not current-state dashboards.
 

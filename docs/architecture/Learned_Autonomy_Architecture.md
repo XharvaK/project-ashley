@@ -23,6 +23,8 @@ not proof that Learned Autonomy is complete.
 
 The accepted contract below defines the target phase. Runtime behavior remains
 unchanged until separately implemented, qualified, activated, and promoted.
+Completing Sandbox or Model Fabric does not unlock this phase. See
+[Architecture Freeze](Ashley_Architecture_Freeze.md).
 
 ## 1. Purpose
 

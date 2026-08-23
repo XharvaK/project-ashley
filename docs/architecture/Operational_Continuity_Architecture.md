@@ -28,6 +28,14 @@ It does not answer:
 
 > What does Ashley care about, remember, believe, want, or choose to pursue?
 
+Historical research used “Event Fabric” for incoming-event classification and
+a durable inbox. That name is historical. This contract owns the **inbox**
+(classification, durable mid-flight input, crash-safe acknowledgement).
+`EVENT != INSTRUCTION`. Correlation and reconstruction of committed owner
+transitions belong to a future typed Event Spine, which is not this inbox, not
+a bus, and not a source of truth. See
+[`Ashley_Architecture_Freeze.md`](Ashley_Architecture_Freeze.md).
+
 ## 2. Vision and Principle basis
 
 Operational Continuity advances the Vision by letting Ashley sustain bounded

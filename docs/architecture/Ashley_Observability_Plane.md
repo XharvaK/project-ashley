@@ -34,6 +34,10 @@ SPAN COMPLETION IS NOT SEMANTIC COMPLETION.
 RECEIPT IS NOT EFFECT WITNESS.
 ```
 
+Observability is not the Event Spine. A future spine may carry Observability
+correlation IDs. It does not replace owner ledgers or this plane. Historical
+“Event Fabric” is not this plane.
+
 ## 2. Ownership model
 
 Observability does not create one global event authority. Each semantic owner

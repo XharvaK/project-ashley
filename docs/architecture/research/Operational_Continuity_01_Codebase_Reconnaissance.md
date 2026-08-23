@@ -8,7 +8,8 @@
 > Current Sandbox V2 uses direct, unprivileged Bubblewrap. Mentions of
 > `broker.db`, Wave 07c closure as the live Sandbox path, Mistral as the sole
 > API client, and schema v27 are dated snapshot facts. Do not copy them into
-> current-facing documents.
+> current-facing documents. In this snapshot, “Event Fabric” means the
+> durable inbox, not the later typed Event Spine.
 
 **Status:** `HISTORICAL` architecture reconnaissance report (adversarially refined)  
 **Date:** 2026-08-14  

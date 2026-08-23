@@ -1,22 +1,19 @@
 # Project Ashley
 
-Project Ashley is an autonomous AI companion built on an explicit artificial
-cognitive architecture.
+Project Ashley is a persistent AI companion with an explicit cognitive
+architecture: Identity, cognition, agency, and controlled effects.
 
-Ashley is designed as a persistent cognitive system rather than a stateless
-chatbot or generic agent loop. There is one Ashley. Bounded specialists or
+Ashley is not a chatbot wrapper, an autonomous worker swarm, a generic agent
+framework, or a tool router. There is one Ashley. Bounded specialists or
 workers may help; they do not become additional Ashleys. Ashley owns meaning.
 Models, runtimes, and tools provide mechanisms.
 
 The current runtime is Discord-only on a Linux Mint production host. Discord is
-an interaction boundary, not the definition of the system. Identity, Mind
-State, Recall, Thought, Agency, Expression, provenance, and capability
-authority are separate concerns with separate constraints.
-
-Autonomy here is bounded and earned. Model output can help propose a thought or
-expression; it cannot create continuity, promote its own capabilities,
-authorize host execution, or turn untrusted data into truth. This project does
-not claim consciousness or personhood.
+an interaction boundary, not the definition of the system. Autonomy is bounded
+and earned. Model output can help propose a thought or expression; it cannot
+create continuity, promote its own capabilities, authorize host execution, or
+turn untrusted data into truth. This project does not claim consciousness,
+personhood, production autonomy, or self-improvement authority.
 
 ## What is Ashley?
 
@@ -79,6 +76,30 @@ authority.
 This is an architecture-first project: prompts express identity, while systems
 produce behavior. New behavior belongs at the lowest layer that naturally owns
 it.
+
+The owner map is frozen. Completeness research did not add a kernel, faculty,
+boundary, or infrastructure primitive. Current category membership:
+
+```text
+Cognitive owners
+  Identity, Mind State, Thought, Agency, Reflection, Relationship, Curiosity
+
+Boundary / control
+  Authority, Capability, Sandbox, Honesty, Evaluation, Stewardship,
+  External Effect, Attention (resource)
+
+Persistence / evidence
+  Memory / Evidence, Continuity
+
+Infrastructure
+  Operational Continuity, Context Budget, Model Fabric, Observability,
+  future typed Event Spine (design later; not a phase)
+```
+
+Recall is the retrieval surface of Memory / Evidence, not a peer cognitive
+owner. Computer Use is a later mechanism under External Effect, not Authority.
+Canonical freeze:
+[`docs/architecture/Ashley_Architecture_Freeze.md`](docs/architecture/Ashley_Architecture_Freeze.md).
 
 ## Why Ashley is different
 
@@ -170,6 +191,8 @@ is organized. Do not skip Constitution, Stewardship Compact, or Ethics.
   Vocabulary: [`docs/Ashley_Glossary.md`](docs/Ashley_Glossary.md).
 - [`docs/architecture/Ashley_Architecture_Roadmap.md`](docs/architecture/Ashley_Architecture_Roadmap.md)
   — canonical multi-track map and classified dependencies.
+- [`docs/architecture/Ashley_Architecture_Freeze.md`](docs/architecture/Ashley_Architecture_Freeze.md)
+  — frozen owner map and event terminology; not a dashboard.
 - [`docs/architecture/Ashley_Cross_Phase_Architecture.md`](docs/architecture/Ashley_Cross_Phase_Architecture.md)
   — laws shared by every phase.
 - Then the task-specific focused contract. Full map:
@@ -188,13 +211,24 @@ is organized. Do not skip Constitution, Stewardship Compact, or Ethics.
   [`docs/architecture/Ashley_Memory_Evidence_Architecture.md`](docs/architecture/Ashley_Memory_Evidence_Architecture.md)
   — Recall and the evidence / assertion / index distinction.
 
-The roadmap is multi-track, not one linear ladder. Engineering capability
-(Sandbox, Model Fabric, Operational Continuity, Procedural Skill Graduation,
-Computer Use) is only one part of Ashley. Memory / Evidence, Learned Autonomy,
-Context Budget, Cognitive Graduation, and Relational Graduation are
-first-class. Cognitive Graduation and Relational Graduation are siblings.
-Learned Autonomy is not “more tools.” Evaluation / Qualification,
-Observability, and External Effect / Authority are cross-cutting planes;
+The roadmap is multi-track, not one linear ladder. Owner-selected delivery
+after the current Sandbox gate is Model Fabric — mechanism work, not cognitive
+advancement. Architecture-justified substance before advanced autonomy is
+Memory / Evidence maturation, self-change specification (not a kernel; M5
+authorship stays unblocked), Context Budget, Operational Continuity, then
+Event Spine design later if reconstruction needs a join. Do not invent an
+Event Spine phase. Learned Autonomy and the graduations stay later named
+phases. Computer Use, voice, broad tools, and self-modification execution
+remain deferred.
+
+Engineering capability (Sandbox, Model Fabric, Operational Continuity,
+Procedural Skill Graduation, Computer Use) is only one part of Ashley. Memory /
+Evidence, Learned Autonomy, Context Budget, Cognitive Graduation, and
+Relational Graduation are first-class. Cognitive Graduation and Relational
+Graduation are siblings. Learned Autonomy is not “more tools.” Evaluation /
+Qualification, Observability, and External Effect / Authority are cross-cutting
+planes; historical research is preserved as history and is not current law
+because it is older or more detailed.
 Observability is not evaluation, and evaluation is not promotion. Focused
 contracts are linked from the Document Index. Volatile HEAD, schema, routes,
 qualification, deployment, and promotion are resolved live from Git, source,
@@ -238,6 +272,17 @@ Project Ashley keeps inspection separate from mutation:
 - Logs and future traces are mechanical telemetry. They do not become Recall,
   qualification, authorization, or an Effect Witness. Observability is not
   evaluation; evaluation is not qualification; qualification is not promotion.
+
+## Research philosophy
+
+Architecture research is preserved as research. Frozen architecture is current
+law. Named later phases are planned work, not current delivery. Owner-selected
+implementation order is delivery, not semantic parenthood.
+
+External projects may inspire mechanisms for existing owners. They do not add
+kernels, faculties, boundaries, or primitives. Historical phrases such as
+“Event Fabric” are dated; current terms are the Operational Continuity inbox
+and a future typed Event Spine.
 
 ## Project status
 

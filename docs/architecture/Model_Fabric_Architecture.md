@@ -36,6 +36,9 @@ It does not answer:
 
 > What does Ashley believe, want, remember, or authorize?
 
+Model Fabric is mechanism work, not cognitive advancement. Completing a
+Fabric slice does not graduate Thought, Agency, or Learned Autonomy.
+
 ## 2. Vision and Principle basis
 
 Model Fabric serves the Vision by keeping Ashley one subject across changing

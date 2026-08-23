@@ -92,6 +92,13 @@ The following laws apply to every phase:
 > ARCHITECTURE BEFORE PROMPTING. EMERGENCE BEFORE PRESCRIPTION. GROWTH BEFORE
 > RANDOMNESS. TRUTH BEFORE COMFORT.
 
+The owner map, event terminology, and architecture-justified sequence before
+advanced autonomy are frozen in
+[Architecture Freeze](Ashley_Architecture_Freeze.md). That freeze does not
+add phases, kernels, or `OWNER_SELECTED_IMPLEMENTATION_ORDER` edges. It does
+not make Model Fabric cognitive advancement. Historical “Event Fabric”
+research is not this map.
+
 The full laws and matrices are in the
 [Cross-Phase Architecture](Ashley_Cross_Phase_Architecture.md). In particular:
 
@@ -224,6 +231,25 @@ The current delivery focus remains Sandbox Autonomy. Model Fabric is the next
 owner-selected implementation phase. Parallel documentation or research does
 not change that delivery gate. Owner-selected order is not a hard dependency.
 
+Do not collapse that delivery sequence into the architecture-justified
+substance order. Before advanced autonomy (Learned Autonomy, Cognitive
+Graduation), existing owners must mature in this research order. This is not
+a new phase list and not a replacement of `OWNER_SELECTED_IMPLEMENTATION_ORDER`:
+
+1. Memory / Evidence maturation (source vs assertion, contradiction,
+   forgetting, provenance, live/shadow) — `HARD_DEPENDENCY` for Learned
+   Autonomy and Cognitive Graduation
+2. Self-change lifecycle specification — before any apply-to-Ashley path;
+   does not block Sandbox M5 authorship; not a new kernel or phase
+3. Context Budget
+4. Operational Continuity
+5. Typed Event Spine — design later if cross-owner reconstruction or recovery
+   joins require it; **not a roadmap phase**
+
+Model Fabric remains mechanism work. Completing Sandbox or Model Fabric does
+not unlock Learned Autonomy, Cognitive Graduation, or self-modification
+execution.
+
 | Phase or plane | Status | Dependencies (classified) | Adds | Does not add | Governing document | Smallest closing evidence |
 |---|---|---|---|---|---|---|
 | Sandbox Autonomy | `CURRENT WORK` | `HARD_DEPENDENCY` on governance, current source baseline, and exact-candidate M-series gates | A bounded engineering workshop and separately promoted engineering effects | Generic external agency, cognitive learning authority, or permission to alter Ashley herself | [Sandbox V2 Roadmap](sandbox/ASHLEY_SANDBOX_V2_ROADMAP.md) | Exact-candidate milestone witness and acceptance required by the M-series contract |
@@ -251,6 +277,9 @@ credentials, purchases, communication, cognitive learning, or self-change
 governance.
 
 ### Model Fabric
+
+Model Fabric is mechanism work, not cognitive advancement. Completing it does
+not graduate Thought, Agency, or Learned Autonomy.
 
 Model Fabric is an Ashley-owned semantic dispatch boundary over replaceable
 provider mechanisms. It does not derive authority or semantic ownership from

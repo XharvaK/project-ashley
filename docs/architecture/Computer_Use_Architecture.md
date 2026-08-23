@@ -32,6 +32,18 @@ connector or direct semantic API
 Each fallback requires a named reason and current admission. Convenience,
 model familiarity, or an already-open UI is not sufficient.
 
+```text
+Authority
+  -> Capability
+    -> Computer Use adapter
+      -> execution environment
+```
+
+An isolated desktop, snapshot, or clone (including Orgo-like substrates) is
+an execution environment. Computer available ≠ computer authorized. The
+environment is not Authority, not Sandbox-the-workshop, and not Agency.
+See [`Ashley_Architecture_Freeze.md`](Ashley_Architecture_Freeze.md).
+
 ## 2. Vision and Principle basis
 
 Computer Use preserves:

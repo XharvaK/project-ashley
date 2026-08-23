@@ -10,6 +10,12 @@ These definitions are normative.
 Whenever a term is used elsewhere in the project, it should carry the meaning
 defined here.
 
+Owner-map and event-term freeze:
+[`architecture/Ashley_Architecture_Freeze.md`](architecture/Ashley_Architecture_Freeze.md).
+The freeze does not redefine these glossary entries. It classifies owners and
+splits historical “Event Fabric” into the Operational Continuity inbox and a
+future Event Spine.
+
 ---
 
 # A
@@ -223,6 +229,34 @@ Meaningful conversation is preferable to prolonged conversation.
 
 ---
 
+## Event Spine
+
+**Definition**
+
+The Event Spine is a future, design-later infrastructure primitive: a typed
+record that a named owner committed a named transition. It supports
+correlation, reconstruction, and observation.
+
+**Distinctions**
+
+It is not a bus, brain, dispatcher, or source of truth.
+It is not the Operational Continuity inbox.
+It does not authorize, decide, assert memory, or witness effects.
+
+```text
+EVENT != TRUTH
+EVENT != PERMISSION
+EVENT != MEMORY ASSERTION
+EVENT != EFFECT WITNESS
+EVENT != INSTRUCTION
+SPINE ANNOUNCES. OWNER LEDGER DEFINES.
+```
+
+Historical research sometimes used “Event Fabric” for inbox, correlation, or
+both. That name is historical. Current architecture splits inbox from spine.
+
+---
+
 # G
 
 ## Grounded Continuity
@@ -336,6 +370,11 @@ Memory is not continuity.
 Memory stores.
 Continuity connects.
 Identity integrates.
+
+Memory is not world truth. Memory / Evidence distinguishes source records,
+revisable assertions, and retrieval indexes. A retrieval hit is not belief.
+Project documentation is not memory. See
+[`architecture/Ashley_Architecture_Freeze.md`](architecture/Ashley_Architecture_Freeze.md).
 
 ---
 

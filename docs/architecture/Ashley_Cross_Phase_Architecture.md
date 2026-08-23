@@ -85,6 +85,17 @@ ORGANIC LEARNING != RUNTIME / SOURCE MODIFICATION
 RUNTIME / SOURCE MODIFICATION != FOUNDATIONAL IDENTITY / GOVERNANCE MODIFICATION
 SANDBOX M5 AUTHORSHIP != AUTHORITY TO CHANGE ASHLEY
 SANDBOX M7 ENGINEERING EFFECTS != AUTHORITY TO CHANGE FOUNDATIONAL IDENTITY / GOVERNANCE
+EVENT != TRUTH
+EVENT != PERMISSION
+EVENT != MEMORY ASSERTION
+EVENT != EFFECT WITNESS
+EVENT != INSTRUCTION
+SPINE ANNOUNCES. OWNER LEDGER DEFINES.
+RECONSTRUCT != REPLAY
+LOG PRESENCE IS NOT EVENT AUTHORITY
+COMPUTER AVAILABLE != COMPUTER AUTHORIZED
+DOCUMENTATION != MEMORY ASSERTION
+OPERATIONAL INBOX != EVENT SPINE
 ```
 
 ### 2.1 Additional derived laws
@@ -105,6 +116,12 @@ SANDBOX M7 ENGINEERING EFFECTS != AUTHORITY TO CHANGE FOUNDATIONAL IDENTITY / GO
   candidate by resemblance.
 - System hardening is continuous acceptance work. It is not a final phase that
   can repair missing semantic ownership after implementation.
+- Historical research that said “Event Fabric” is not current terminology.
+  Incoming classification and durable mid-flight input belong to the
+  Operational Continuity inbox. Correlation, reconstruction, and observation
+  of committed owner transitions belong to a future typed Event Spine, which
+  is not a bus, brain, dispatcher, or source of truth. See
+  [Architecture Freeze](Ashley_Architecture_Freeze.md).
 
 ### 2.2 Production data-plane authority
 
@@ -137,6 +154,34 @@ Implementation presence, commit identity, deployment, and production
 acceptance are not recorded here. Resolve them live from Git, source,
 exact-candidate evidence, or production observation. If they cannot be
 established from permitted evidence: `UNKNOWN`.
+
+## 2.3 Frozen owner map
+
+The architecture owner map is frozen. Completeness research did not add a
+kernel, faculty, boundary, or infrastructure primitive. Current-facing
+category membership:
+
+```text
+COGNITIVE OWNERS
+Identity, Mind State, Thought, Agency, Reflection, Relationship, Curiosity
+
+BOUNDARY / CONTROL
+Authority, Capability, Sandbox, Honesty, Evaluation, Stewardship,
+External Effect, Attention (resource)
+
+PERSISTENCE / EVIDENCE
+Memory / Evidence, Continuity
+
+INFRASTRUCTURE
+Operational Continuity, Context Budget, Model Fabric, Observability,
+future typed Event Spine (design later; not a phase)
+```
+
+Do not mix categories. Do not treat Recall as a peer cognitive owner (it is
+the retrieval surface of Memory / Evidence). Computer Use is a later
+mechanism phase under External Effect, not a cognitive owner and not
+Authority. Full freeze, event split, and architecture-justified sequence:
+[Architecture Freeze](Ashley_Architecture_Freeze.md).
 
 ## 3. Roadmap topology
 

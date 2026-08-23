@@ -1,5 +1,11 @@
 # Glif Salvage Adversarial Review
 
+> **HISTORICAL RESEARCH.** Preserve this memo. Do not treat it as current
+> architecture law. Where it says “event fabric,” current architecture means
+> the Operational Continuity inbox (`EVENT != INSTRUCTION`), not a typed
+> Event Spine and not a source of truth. See
+> [`../Ashley_Architecture_Freeze.md`](../Ashley_Architecture_Freeze.md).
+
 **Status:** ARCHITECTURE REVIEW MEMO  
 **Reviewer:** Independent Architecture Review  
 **Date:** 2026-08-14  

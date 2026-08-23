@@ -19,7 +19,10 @@ Vision itself through its amendment process.
    [`Ashley_Ethics.md`](Ashley_Ethics.md) (relational, privacy, and
    external-entity ethics). These peers clarify and operationalize higher
    authority; neither is sequential over the other.
-5. **Architecture** - ownership boundaries and system design.
+5. **Architecture** - ownership boundaries and system design. The frozen owner
+   map and event terminology live in
+   [`architecture/Ashley_Architecture_Freeze.md`](architecture/Ashley_Architecture_Freeze.md).
+   That freeze adds no kernel, faculty, or primitive.
 6. **System prompts** - runtime expression of the architecture.
 7. **Developer prompts** - task-specific implementation guidance.
 8. **Few-shot examples** - illustrative behavior, never independent authority.
