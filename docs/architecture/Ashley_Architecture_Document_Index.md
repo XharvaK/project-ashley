@@ -205,6 +205,8 @@ upgrade one into another.
 | Wave 4 Kilo Handoff | [`docs/handoffs/wave-4-kilo-handoff.md`](../handoffs/wave-4-kilo-handoff.md) | Worker handoff | Earlier rollout | `REFERENCE` | Handoff context, not current authority. |
 | Sandbox V2 M5 local settlement | [`docs/handoffs/m5-local-settlement.md`](../handoffs/m5-local-settlement.md) | M5 independent review and local verification packet | 2026-08-23 | `SUPPORTING` | Records `LOCALLY SETTLED` only. Not physically qualified, not production accepted. |
 | Sandbox V2 M6 design handoff | [`docs/handoffs/m6-design-handoff.md`](../handoffs/m6-design-handoff.md) | Frozen M6 question after M5 local settlement | 2026-08-23 | `SUPPORTING` | Restates roadmap §14. Does not authorize M6 implementation by itself. |
+| Sandbox V2 M6 local settlement | [`docs/handoffs/m6-local-settlement.md`](../handoffs/m6-local-settlement.md) | M6 independent review and local verification packet | 2026-08-23 | `SUPPORTING` | Records `LOCALLY SETTLED` only. Not physically qualified, not production accepted. |
+| Sandbox V2 M7 design handoff | [`docs/handoffs/m7-design-handoff.md`](../handoffs/m7-design-handoff.md) | Frozen M7 `patch_export` question after M6 local settlement | 2026-08-23 | `SUPPORTING` | Restates roadmap §15. Does not authorize M7 implementation by itself. |
 
 ## 7. Explicitly historical design handoffs
 
