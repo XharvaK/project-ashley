@@ -34,7 +34,10 @@ Attempted from Cloud Agent host, not from Mint.
 | Collector host | `cursor` | **Observed** (`hostname`) |
 | Collector user | `ubuntu` uid 1000 | **Observed** (`id`) |
 | Collector OS | Linux (Cloud Agent pod) | **Observed** |
+| SSH client | present (`/usr/bin/ssh`) | **Observed** |
 | SSH private key | absent (`~/.ssh/id_rsa` missing; no `~/.ssh/config`) | **Observed** |
+| `ssh-agent` | sockets exist; `ssh-add -l` → no identities | **Observed** (retry 2026-08-23T11:11Z) |
+| Cloud Agent injected secrets | Discord bot token, owner id, Mistral key. **No SSH key, no Mint host.** | **Observed** (`CLOUD_AGENT_INJECTED_SECRET_NAMES`) |
 | DNS `mint` | `Could not resolve hostname mint: No address associated with hostname` | **Observed** (`ssh` / `getent`) |
 | `ssh -o BatchMode=yes mint` | fail: unresolved hostname | **Observed** |
 | `ssh xarvak@mint` | fail: unresolved hostname | **Observed** |
@@ -121,16 +124,12 @@ message on the live channel.
 - Production activation
 - Capability promotion
 - M5
-**What would unblock (operator on Mint or a host with `Host mint` SSH):**
-1. On Mint: `git -C ~/project-ashley rev-parse HEAD` (or actual checkout path).
-2. If SHA ≠ `0742f62c04695e02221ac289e883bcc3dd64abc2`, **do not** qualify that
-   other SHA under this packet. Either check out the candidate under a separate
-   deploy authorization, or open a new packet named for the actual SHA.
-3. If SHA matches: record hostname, `node -v`, systemd/user unit status, config
-   identity without secrets.
-4. Run the live communication / refusal / class / proactive / weekly / secret
-   witnesses and capture Discord snowflakes or proven non-delivery.
-5. Search the **running** tree for send surfaces; classify each.
+**What would unblock this Cloud Agent:**
+1. A resolvable Mint host (LAN IP, Tailscale name, or public SSH host) as secret `MINT_HOST`.
+2. An SSH private key authorized for `xarvak@<MINT_HOST>` as secret `SSH_PRIVATE_KEY` (or agent forwarding with identities). Do not paste the key into chat.
+3. Then: `ssh -o BatchMode=yes xarvak@$MINT_HOST 'git -C ~/project-ashley rev-parse HEAD'`.
+4. If SHA ≠ `0742f62c04695e02221ac289e883bcc3dd64abc2`, **STOP**. Do not qualify a different SHA under this packet.
+5. If SHA matches: record hostname, `node -v`, user-unit status, config identity without secrets; then live communication / refusal / class / proactive / weekly / secret witnesses with Discord snowflakes or proven non-delivery; search the running tree for send surfaces.
 No production activation was performed from this collector.
 No M5.
 No Authority promotion.
