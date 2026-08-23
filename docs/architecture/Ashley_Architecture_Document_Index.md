@@ -207,6 +207,9 @@ upgrade one into another.
 | Sandbox V2 M6 design handoff | [`docs/handoffs/m6-design-handoff.md`](../handoffs/m6-design-handoff.md) | Frozen M6 question after M5 local settlement | 2026-08-23 | `SUPPORTING` | Restates roadmap §14. Does not authorize M6 implementation by itself. |
 | Sandbox V2 M6 local settlement | [`docs/handoffs/m6-local-settlement.md`](../handoffs/m6-local-settlement.md) | M6 independent review and local verification packet | 2026-08-23 | `SUPPORTING` | Records `LOCALLY SETTLED` only. Not physically qualified, not production accepted. |
 | Sandbox V2 M7 design handoff | [`docs/handoffs/m7-design-handoff.md`](../handoffs/m7-design-handoff.md) | Frozen M7 `patch_export` question after M6 local settlement | 2026-08-23 | `SUPPORTING` | Restates roadmap §15. Does not authorize M7 implementation by itself. |
+| Sandbox V2 M7 local settlement | [`docs/handoffs/m7-local-settlement.md`](../handoffs/m7-local-settlement.md) | M7 `patch_export` independent review and local verification packet | 2026-08-23 | `SUPPORTING` | Records `LOCALLY SETTLED` only. Not physically qualified, not production accepted. No later M7 profile is authorized. |
+| M-series local freeze | [`docs/handoffs/m-series-local-freeze.md`](../handoffs/m-series-local-freeze.md) | Local M3–M7 implementation-track freeze | 2026-08-23 | `SUPPORTING` | Implementation track locally complete. M5–M7 remain unqualified for production. |
+| M-series Mint campaign plan | [`docs/handoffs/m-series-mint-campaign-plan.md`](../handoffs/m-series-mint-campaign-plan.md) | Later coordinated Mint campaign order | 2026-08-23 | `SUPPORTING` | Plan only. Does not authorize SSH, qualification, deploy, or promotion. |
 
 ## 7. Explicitly historical design handoffs
 
