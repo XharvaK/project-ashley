@@ -79,12 +79,19 @@ export type CognitionBoundedOperationRequest = {
   };
 };
 
+export type CognitionPatchExportRequest = {
+  operation: "patch_export";
+  projectId: string;
+  changesetId: string;
+};
+
 export type CognitionOperationalRequest =
   | { kind: "project_inspection"; request: CognitionInspectionRequest }
   | { kind: "candidate_workspace_experiment"; request: CognitionWorkspaceRequest }
   | { kind: "candidate_verification"; request: CognitionVerificationRequest }
   | { kind: "candidate_authorship"; request: CognitionAuthorshipRequest }
-  | { kind: "bounded_operation"; request: CognitionBoundedOperationRequest };
+  | { kind: "bounded_operation"; request: CognitionBoundedOperationRequest }
+  | { kind: "patch_export"; request: CognitionPatchExportRequest };
 
 export type ProjectReadFileObservation = {
   projectId: string;

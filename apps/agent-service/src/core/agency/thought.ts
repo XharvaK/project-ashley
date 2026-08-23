@@ -12,6 +12,7 @@ import type {
   CognitionAuthorshipRiskClass,
   CognitionBoundedOperationRequest,
   CognitionBoundedOperationStep,
+  CognitionPatchExportRequest,
   CognitionOperationalRequest,
   Decision,
   DecisionDelayClass,
@@ -33,6 +34,7 @@ import {
   canOfferCandidateVerification,
   canOfferCandidateAuthorship,
   canOfferBoundedOperation,
+  canOfferPatchExport,
 } from "../sandbox/project-registry.js";
 import { M6_MAX_STEPS, M6_MAX_WALL_MS } from "@composer-assistant/sandbox-v2";
 
@@ -780,6 +782,73 @@ export function parseBoundedOperationRequest(
   };
 }
 
+type ParsePatchExportResult =
+  | { ok: true; request: CognitionPatchExportRequest }
+  | { ok: false; errorCode: ThoughtValidationErrorCode; field: string };
+
+const PATCH_EXPORT_ALLOWED_FIELDS = new Set(["operation", "version", "projectId", "changesetId"]);
+
+const PATCH_EXPORT_FORBIDDEN_FIELDS = [
+  "destination",
+  "destinationRoot",
+  "path",
+  "artifactRef",
+  "expectedSha256",
+  "apply",
+  "git",
+  "argv",
+  "command",
+  "executable",
+  "network",
+  "credentials",
+  "host",
+  "cwd",
+  "shell",
+  "live_apply",
+  "commit",
+  "merge",
+  "deploy",
+] as const;
+
+/**
+ * Thought names the sealed artifact and allowlisted project. Destination,
+ * bytes, Git, apply, and host paths stay operator/kernel authority.
+ */
+export function parsePatchExportRequest(value: unknown): ParsePatchExportResult {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { ok: false, errorCode: "payload_invalid", field: "request" };
+  }
+  const obj = value as Record<string, unknown>;
+  for (const field of PATCH_EXPORT_FORBIDDEN_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(obj, field)) {
+      return { ok: false, errorCode: "unsupported_operation", field };
+    }
+  }
+  for (const field of Object.keys(obj)) {
+    if (!PATCH_EXPORT_ALLOWED_FIELDS.has(field)) {
+      return { ok: false, errorCode: "unsupported_operation", field };
+    }
+  }
+  if (obj.version !== undefined && obj.version !== 2) {
+    return { ok: false, errorCode: "unsupported_operation", field: "version" };
+  }
+  if (obj.operation !== "patch_export") {
+    return { ok: false, errorCode: "unsupported_operation", field: "operation" };
+  }
+  const projectId = boundedId(obj.projectId);
+  if (!projectId) {
+    return { ok: false, errorCode: "missing_required_field", field: "projectId" };
+  }
+  const changesetId = boundedId(obj.changesetId);
+  if (!changesetId || !changesetId.startsWith("cs_")) {
+    return { ok: false, errorCode: "missing_required_field", field: "changesetId" };
+  }
+  return {
+    ok: true,
+    request: { operation: "patch_export", projectId, changesetId },
+  };
+}
+
 /** Legacy aliases — backward compat. */
 export const parseInspectionRequestLegacy = parseInspectionRequest;
 export const parseWorkspaceRequestLegacy = parseWorkspaceRequest;
@@ -803,6 +872,7 @@ function normalizeOperationalRequest(
   canOfferVerification: boolean,
   canOfferAuthorship: boolean,
   canOfferOperation: boolean,
+  canOfferExport: boolean,
 ): LegacyNormalizedRequest {
   const canonicalRaw = proposal.operationalRequest;
   const legacyInspectionRaw = proposal.inspectionRequest;
@@ -828,6 +898,9 @@ function normalizeOperationalRequest(
     } else if (cKind === "bounded_operation" && canOfferOperation) {
       const parsed = parseBoundedOperationRequest(cObj.request);
       if (parsed.ok) canonical = { kind: "bounded_operation", request: parsed.request };
+    } else if (cKind === "patch_export" && canOfferExport) {
+      const parsed = parsePatchExportRequest(cObj.request);
+      if (parsed.ok) canonical = { kind: "patch_export", request: parsed.request };
     }
   }
 
@@ -1181,6 +1254,7 @@ function buildInitialThoughtMessages(input: {
   canOfferVerification: boolean;
   canOfferAuthorship: boolean;
   canOfferOperation: boolean;
+  canOfferExport: boolean;
   approvedProjectIds: string[];
   retryContext?: string;
 }): ChatMessages {
@@ -1193,6 +1267,7 @@ function buildInitialThoughtMessages(input: {
     canOfferVerification,
     canOfferAuthorship,
     canOfferOperation,
+    canOfferExport,
     approvedProjectIds,
     retryContext,
   } = input;
@@ -1251,6 +1326,13 @@ function buildInitialThoughtMessages(input: {
         "M6 bounds and operates the admitted sequence. It does not choose a new objective and does not cross an engineering border.",
       );
     }
+    if (canOfferExport) {
+      parts.push(
+        `When a sealed candidate change-set should be copied to the operator review location, include operationalRequest: {kind: "patch_export", request: {operation: "patch_export", projectId: "${quotedProjectIds}", changesetId: string}}.`,
+        "Thought names only the allowlisted project and sealed changesetId. Do not supply destination paths, commands, Git operations, apply, network, or credentials.",
+        "Export copies the sealed artifact. It does not apply the patch, merge it, or make it Ashley.",
+      );
+    }
 
     projectContextPrompt = `Approved project IDs: ${projectList}. ${parts.join(" ")}`;
   }
@@ -1268,7 +1350,7 @@ function buildInitialThoughtMessages(input: {
     "A refusal is reactive only and must select both the current user_message motivation and a supplied stable boundary motivation.",
     "Use only supplied motivation IDs. Silence is valid. Do not write the message Doc will see.",
     "objective and reason are short intent metadata, not prose to echo and not a copy of the user message.",
-    `operationalRequest is optional. When present, it must be exactly one of: {kind: "project_inspection", request: CognitionInspectionRequest}, {kind: "candidate_workspace_experiment", request: CognitionWorkspaceRequest}, {kind: "candidate_verification", request: {operation: "workspace.verify", projectId, workspaceId, recipeId}}, {kind: "candidate_authorship", request: {operation: "changeset.author", projectId, workspaceId, objective, rationale, riskClass}}, or {kind: "bounded_operation", request: {operation: "objective.operate", projectId, workspaceId, origin, objective, successCondition, failureCondition, steps, budget}}. Emit at most one operationalRequest.`,
+    `operationalRequest is optional. When present, it must be exactly one of: {kind: "project_inspection", request: CognitionInspectionRequest}, {kind: "candidate_workspace_experiment", request: CognitionWorkspaceRequest}, {kind: "candidate_verification", request: {operation: "workspace.verify", projectId, workspaceId, recipeId}}, {kind: "candidate_authorship", request: {operation: "changeset.author", projectId, workspaceId, objective, rationale, riskClass}}, {kind: "bounded_operation", request: {operation: "objective.operate", projectId, workspaceId, origin, objective, successCondition, failureCondition, steps, budget}}, or {kind: "patch_export", request: {operation: "patch_export", projectId, changesetId}}. Emit at most one operationalRequest.`,
     projectContextPrompt,
     dispositionContract,
     ...(retryContext ? [retryContext] : []),
@@ -1291,10 +1373,11 @@ function validateInitialThoughtProposal(
     canOfferVerification: boolean;
     canOfferAuthorship: boolean;
     canOfferOperation: boolean;
+    canOfferExport: boolean;
     approvedProjectIds: string[];
   },
 ): BoundedCognitionValidation<ThoughtProposal> {
-  const { base, motivations, canOffer, canOfferWorkspace, canOfferVerification, canOfferAuthorship, canOfferOperation, approvedProjectIds } = ctx;
+  const { base, motivations, canOffer, canOfferWorkspace, canOfferVerification, canOfferAuthorship, canOfferOperation, canOfferExport, approvedProjectIds } = ctx;
   const kind = String(parsed.kind) as DecisionKind;
   const delayClass = isDecisionDelayClass(parsed.delayClass)
     ? parsed.delayClass
@@ -1339,7 +1422,8 @@ function validateInitialThoughtProposal(
       opKind !== "candidate_workspace_experiment" &&
       opKind !== "candidate_verification" &&
       opKind !== "candidate_authorship" &&
-      opKind !== "bounded_operation"
+      opKind !== "bounded_operation" &&
+      opKind !== "patch_export"
     ) {
       return {
         ok: false,
@@ -1383,6 +1467,18 @@ function validateInitialThoughtProposal(
         };
       }
     }
+    if (opKind === "patch_export") {
+      const parsedExport = parsePatchExportRequest(
+        (rawOp as Record<string, unknown>).request,
+      );
+      if (!parsedExport.ok) {
+        return {
+          ok: false,
+          errorCode: parsedExport.errorCode,
+          field: `operationalRequest.request.${parsedExport.field}`,
+        };
+      }
+    }
   }
 
   const { operationalRequest: normalizedRequest, conflict } = normalizeOperationalRequest(
@@ -1392,6 +1488,7 @@ function validateInitialThoughtProposal(
     canOfferVerification,
     canOfferAuthorship,
     canOfferOperation,
+    canOfferExport,
   );
   if (conflict) {
     return { ok: false, errorCode: "multiple_operational_intents" };
@@ -1475,8 +1572,10 @@ export async function runThoughtModel(
     trigger === "reactive" ? canOfferCandidateAuthorship(db) : false;
   const canOfferOperation =
     trigger === "reactive" ? canOfferBoundedOperation(db) : false;
+  const canOfferExport =
+    trigger === "reactive" ? canOfferPatchExport(db) : false;
   const approvedProjectIds =
-    canOffer || canOfferWorkspace || canOfferVerification || canOfferAuthorship || canOfferOperation
+    canOffer || canOfferWorkspace || canOfferVerification || canOfferAuthorship || canOfferOperation || canOfferExport
       ? listApprovedReadProjectIds()
       : [];
 
@@ -1494,6 +1593,7 @@ export async function runThoughtModel(
         canOfferVerification,
         canOfferAuthorship,
         canOfferOperation,
+        canOfferExport,
         approvedProjectIds,
         retryContext: retryFeedbackText,
       }),
@@ -1508,6 +1608,7 @@ export async function runThoughtModel(
         canOfferVerification,
         canOfferAuthorship,
         canOfferOperation,
+        canOfferExport,
         approvedProjectIds,
       }),
     retryableCodes: STRUCTURAL_RETRYABLE_CODES,

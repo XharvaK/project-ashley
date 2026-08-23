@@ -212,7 +212,8 @@ import {
   executeCandidateAuthorshipV2,
 } from "./sandbox/v2-execution.js";
 import { executeBoundedOperationV2 } from "./sandbox/bounded-operation-execution.js";
-import { canOfferProjectInspection, canOfferCandidateWorkspace, canOfferCandidateVerification, canOfferCandidateAuthorship, canOfferBoundedOperation, loadOperatorProjectReadRegistry } from "./sandbox/project-registry.js";
+import { executePatchExportV2 } from "./sandbox/patch-export-execution.js";
+import { canOfferProjectInspection, canOfferCandidateWorkspace, canOfferCandidateVerification, canOfferCandidateAuthorship, canOfferBoundedOperation, canOfferPatchExport, loadOperatorProjectReadRegistry } from "./sandbox/project-registry.js";
 import { SandboxV2Dispatcher, type SandboxV2Environment, type SandboxV2Request, type SandboxV2Result } from "@composer-assistant/sandbox-v2";
 import {
   isVerifiedRoundtripEffectEvidence,
@@ -833,7 +834,8 @@ export class AshleyCore {
         canOfferCandidateWorkspace(this.db) ||
         canOfferCandidateVerification(this.db) ||
         canOfferCandidateAuthorship(this.db) ||
-        canOfferBoundedOperation(this.db);
+        canOfferBoundedOperation(this.db) ||
+        canOfferPatchExport(this.db);
       // M2/M3/M4 reachability: a capability offered to cognition must have the
       // cognition pass that can exercise it. When project inspection, candidate
       // workspace, or candidate verification is offered, admit model Thought
@@ -1287,6 +1289,31 @@ export class AshleyCore {
               {
                 allowModelThought: thoughtCanInfluence,
                 thoughtDeadlineAtMs: opReq.request.budget.deadlineAtMs,
+                deliveryReservationId: reservation.id,
+                ownerId: input.ownerId,
+                onLifecycle: onContinuationLifecycle,
+              },
+            );
+          } else if (opReq.kind === "patch_export") {
+            const exportResult = await executePatchExportV2({
+              request: opReq.request,
+              ownerId: input.ownerId,
+              messageEntityUuid: messageEntityUuid ?? undefined,
+              db: this.db,
+            });
+            decision.operationalLicense = exportResult.license;
+            decision = await deliberateThoughtContinuation(
+              this.db,
+              decision,
+              null,
+              exportResult.license.error ?? null,
+              motivations,
+              "reactive",
+              undefined,
+              undefined,
+              {
+                allowModelThought: thoughtCanInfluence,
+                thoughtDeadlineAtMs: Date.now() + 30_000,
                 deliveryReservationId: reservation.id,
                 ownerId: input.ownerId,
                 onLifecycle: onContinuationLifecycle,
@@ -2193,6 +2220,12 @@ export class AshleyCore {
               state: "none",
               profile: "bounded_operation",
               error: "proactive_bounded_operation_unauthorized",
+            };
+          } else if (opReq.kind === "patch_export") {
+            decision.operationalLicense = {
+              state: "none",
+              profile: "patch_export",
+              error: "proactive_patch_export_unauthorized",
             };
           }
         }

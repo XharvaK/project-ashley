@@ -238,12 +238,15 @@ export function getChangeSet(
   patch_bytes: number | null;
   quarantine_reason: string | null;
   evidence_refs_json: string;
+  owner_id: string;
+  project_id: string;
+  workspace_id: string;
 } | null {
   return (
     (db
       .prepare(
         `SELECT status, review_status, artifact_ref, patch_sha256, patch_bytes,
-                quarantine_reason, evidence_refs_json
+                quarantine_reason, evidence_refs_json, owner_id, project_id, workspace_id
            FROM candidate_changesets WHERE changeset_id = ?`,
       )
       .get(changesetId) as {
@@ -254,6 +257,9 @@ export function getChangeSet(
       patch_bytes: number | null;
       quarantine_reason: string | null;
       evidence_refs_json: string;
+      owner_id: string;
+      project_id: string;
+      workspace_id: string;
     } | undefined) ?? null
   );
 }

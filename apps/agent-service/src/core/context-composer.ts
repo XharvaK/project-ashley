@@ -35,6 +35,7 @@ import {
   canOfferCandidateWorkspace,
   canOfferProjectInspection,
   canOfferBoundedOperation,
+  canOfferPatchExport,
 } from "./sandbox/project-registry.js";
 
 /** Product: composed turn context Expression consumes. */
@@ -323,6 +324,34 @@ export function operationalWorkBlock(
         `Stop reason: ${effect.stopReason}`,
         "Border state: none",
         "Semantics: only the admitted finite M3/M4/M5 sequence ran. No patch was exported, applied, committed, or deployed.",
+      );
+    }
+    if (lines.length === 0) return "";
+    return [
+      "## Operational work state (cognitive attention only)",
+      ...lines,
+    ].join("\n");
+  }
+
+  if (license.profile === "patch_export") {
+    const lines = [
+      `Status: ${truth.state !== "none" ? truth.state : license.state}`,
+      `Profile: ${license.profile}`,
+      license.taskId ? `Task ID: ${license.taskId}` : "",
+      license.error ? `Error: ${license.error}` : "",
+    ].filter(Boolean);
+    const effect = license.patchExportClaimEffect;
+    if (truth.state === "verified_success" && effect) {
+      lines.push(
+        `Change-set ID: ${effect.changesetId}`,
+        `Destination name: ${effect.destinationRelativeName}`,
+        `Witness digest: ${effect.witnessedSha256}`,
+        "Applied: false",
+        "Semantics: the sealed candidate artifact was copied to the operator review location. It has not been applied.",
+      );
+    } else if (license.error) {
+      lines.push(
+        `Export status: not licensed (${license.error}). No patch_export claim is authorized.`,
       );
     }
     if (lines.length === 0) return "";
@@ -703,6 +732,54 @@ export function boundedOperationEvidenceBlock(
   ].join("\n");
 }
 
+export function patchExportEvidenceBlock(
+  license: OperationalClaimLicense | null | undefined,
+  options: { capabilityAvailable?: boolean } = {},
+): string {
+  const capabilityAvailable = options.capabilityAvailable === true;
+  const availableLine = `capabilityAvailable = ${capabilityAvailable}`;
+  const semantics = [
+    "Semantics: capabilityAvailable is the authoritative current M7 grant; exportStatus is what actually ran.",
+    "Semantics: a licensed patch_export is a witnessed copy of a sealed M5 artifact to the operator review location. It is not apply, merge, Git, deploy, or Ashley.",
+  ];
+  if (license?.profile === "patch_export") {
+    const effect = license.patchExportClaimEffect;
+    if (effect) {
+      return [
+        "Patch export evidence:",
+        availableLine,
+        "exportStatus = witnessed",
+        `changesetId = ${effect.changesetId}`,
+        `destinationRelativeName = ${effect.destinationRelativeName}`,
+        `witnessedSha256 = ${effect.witnessedSha256}`,
+        "applied = false",
+        "liveUnwritten = true",
+        "gitUnwritten = true",
+        ...semantics,
+        "Semantics: the sealed candidate artifact was copied to the operator review location. It has not been applied.",
+      ].join("\n");
+    }
+    if (license.error) {
+      return [
+        "Patch export evidence:",
+        availableLine,
+        "exportStatus = refused",
+        `error = ${license.error}`,
+        ...semantics,
+      ].join("\n");
+    }
+  }
+  return [
+    "Patch export evidence:",
+    availableLine,
+    "exportStatus = not_performed",
+    ...semantics,
+    capabilityAvailable
+      ? "Semantics: M7 patch_export is offerable this turn but no export ran."
+      : "Semantics: Ashley cannot export a patch this turn because patch_export is not active or patchExportAllowed is closed.",
+  ].join("\n");
+}
+
 /**
  * ContextComposer — sole owner of turn context assembly.
  * Assembles existing peer outputs; does not reinterpret, score, or rewrite them.
@@ -766,6 +843,12 @@ export function composeTurnContext(
        capabilityAvailable: canOfferBoundedOperation(db),
      },
    );
+   const exportEvidence = patchExportEvidenceBlock(
+     decision?.operationalLicense,
+     {
+       capabilityAvailable: canOfferPatchExport(db),
+     },
+   );
   // Questions only when Thought selected question evidence or none selected yet
   // would dump — skip global question dump; selected questions arrive via evidence.
   const questions = "";
@@ -784,6 +867,7 @@ export function composeTurnContext(
     verificationEvidence,
     authorshipEvidence,
     operationEvidence,
+    exportEvidence,
     questions,
   ].filter(Boolean);
 

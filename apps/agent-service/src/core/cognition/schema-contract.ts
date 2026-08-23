@@ -500,6 +500,70 @@ function requireNoV31Objects(db: DatabaseSync, version: number): void {
   }
 }
 
+const V32_TABLES = ["patch_export_records"] as const;
+
+const V32_COLUMNS: Record<string, ColumnSpec[]> = {
+  patch_export_records: [
+    { name: "id", primaryKey: true },
+    { name: "entity_uuid", notNull: true },
+    { name: "data_classification", notNull: true, defaultValue: "'never_public'" },
+    { name: "owner_id", notNull: true },
+    { name: "task_id", notNull: true },
+    { name: "project_id", notNull: true },
+    { name: "changeset_id", notNull: true },
+    { name: "artifact_ref", notNull: true },
+    { name: "destination_path", notNull: true },
+    { name: "expected_sha256", notNull: true },
+    { name: "status", notNull: true },
+    { name: "created_at", notNull: true },
+  ],
+};
+
+const V32_INDEXES: IndexSpec[] = [
+  {
+    table: "patch_export_records",
+    name: "idx_patch_export_records_owner_status",
+    columns: ["owner_id", "status", "created_at"],
+  },
+  {
+    table: "patch_export_records",
+    name: "idx_patch_export_records_entity_uuid",
+    columns: ["entity_uuid"],
+    unique: true,
+  },
+  {
+    table: "patch_export_records",
+    name: "idx_patch_export_records_changeset",
+    columns: ["changeset_id", "created_at"],
+  },
+];
+
+const V32_TABLE_FRAGMENTS: Record<string, string[]> = {
+  patch_export_records: [
+    "check(status in('succeeded','failed','outcome_unknown'))",
+    "check(applied=0)",
+    "check(live_unwritten=1)",
+    "check(git_unwritten=1)",
+    "unique(task_id)",
+  ],
+};
+
+const V32_ONLY_OBJECTS = [
+  ...V32_TABLES,
+  "idx_patch_export_records_owner_status",
+  "idx_patch_export_records_entity_uuid",
+  "idx_patch_export_records_changeset",
+] as const;
+
+function requireNoV32Objects(db: DatabaseSync, version: number): void {
+  for (const name of V32_ONLY_OBJECTS) {
+    const type = V32_TABLES.includes(name as (typeof V32_TABLES)[number])
+      ? "table"
+      : "index";
+    if (masterRow(db, type, name)) fail(version, `unexpected_v32_object:${name}`);
+  }
+}
+
 function normalizeSql(value: string): string {
   return value
     .toLowerCase()
@@ -724,7 +788,7 @@ function requireNoV30Objects(db: DatabaseSync, version: number): void {
 
 export function validateNuclearSchemaContent(
   db: DatabaseSync,
-  version: 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31,
+  version: 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32,
   options: { rejectNewerContent?: boolean } = {},
 ): void {
   if (version === 22) {
@@ -816,6 +880,17 @@ export function validateNuclearSchemaContent(
     requireFragments(db, version, table, V31_TABLE_FRAGMENTS[table] ?? []);
   }
   for (const index of V31_INDEXES) requireIndex(db, version, index);
+  if (version === 31 && options.rejectNewerContent === true) {
+    requireNoV32Objects(db, version);
+    return;
+  }
+  if (version === 31) return;
+  for (const table of V32_TABLES) requireTable(db, version, table);
+  for (const [table, columns] of Object.entries(V32_COLUMNS)) {
+    requireColumns(db, version, table, columns);
+    requireFragments(db, version, table, V32_TABLE_FRAGMENTS[table] ?? []);
+  }
+  for (const index of V32_INDEXES) requireIndex(db, version, index);
 }
 
 function addColumnIfMissing(

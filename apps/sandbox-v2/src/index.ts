@@ -1,6 +1,6 @@
 /**
  * @composer-assistant/sandbox-v2 — Sandbox V2 typed-capability kernel
- * (Sandbox V2 M1–M6).
+ * (Sandbox V2 M1–M7).
  *
  * Exports the V2 vocabulary, capability registry, operator-owned project
  * read registry, request validation, the typed dispatcher seam, the
@@ -21,6 +21,7 @@ export {
   isSandboxV2OperationResult,
   isWorkspaceVerifyResult,
   isChangesetAuthorResult,
+  isPatchExportResult,
 } from "./v2-types.js";
 export type {
   SandboxV2OperationName,
@@ -45,6 +46,7 @@ export type {
   SandboxV2WorkspaceCreateDirectoryRequest,
   SandboxV2WorkspaceVerifyRequest,
   SandboxV2WorkspaceAuthorRequest,
+  SandboxV2PatchExportRequest,
   SandboxV2WorkspaceRequest,
   SandboxV2ChangedPath,
   SandboxV2SourceCleanliness,
@@ -135,6 +137,16 @@ export {
   isM5ApplyForbiddenOperation,
   refuseApplyCandidateChangeSet,
 } from "./authorship/apply.js";
+
+export {
+  executePatchExport,
+  validatePatchExportRequest,
+} from "./export/executor.js";
+export {
+  M7_FORBIDDEN_PROFILES,
+  isForbiddenM7Profile,
+  refuseUnadmittedM7Profile,
+} from "./export/forbidden.js";
 
 export {
   M6_MAX_STEPS,

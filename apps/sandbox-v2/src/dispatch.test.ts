@@ -169,13 +169,20 @@ describe("SandboxV2Dispatcher", () => {
     if (result.outcome === "failed") expect(result.error).toBe("unknown_operation");
   });
 
-  it("does not admit M6/M7 operations as dispatcher effects", async () => {
+  it("does not admit M6 composition or unadmitted M7 profiles as dispatcher effects", async () => {
     const dispatcher = new SandboxV2Dispatcher({ env: env() });
-    for (const operation of ["objective.operate", "patch_export", "live_apply"]) {
-      const result = await dispatcher.dispatch({ version: 2, operation });
-      expect(result.outcome).toBe("failed");
-      if (result.outcome === "failed") expect(result.error).toBe("unknown_operation");
-    }
+    const operate = await dispatcher.dispatch({ version: 2, operation: "objective.operate" });
+    expect(operate.outcome).toBe("failed");
+    if (operate.outcome === "failed") expect(operate.error).toBe("unknown_operation");
+    const live = await dispatcher.dispatch({ version: 2, operation: "live_apply" });
+    expect(live.outcome).toBe("failed");
+    if (live.outcome === "failed") expect(live.error).toBe("m7_profile_forbidden");
+    const gitCommit = await dispatcher.dispatch({ version: 2, operation: "git_commit" });
+    expect(gitCommit.outcome).toBe("failed");
+    if (gitCommit.outcome === "failed") expect(gitCommit.error).toBe("m7_profile_forbidden");
+    const patch = await dispatcher.dispatch({ version: 2, operation: "patch_export" });
+    expect(patch.outcome).toBe("failed");
+    if (patch.outcome === "failed") expect(patch.error).toBe("missing_project");
   });
 
   it("fails closed for deferred git operations", async () => {

@@ -35,7 +35,8 @@ export type SandboxV2OperationName =
   | "workspace.delete_file"
   | "workspace.create_directory"
   | "workspace.verify"
-  | "changeset.author";
+  | "changeset.author"
+  | "patch_export";
 
 export const SANDBOX_V2_OPERATION_NAMES: readonly string[] = [
   "file.roundtrip",
@@ -52,6 +53,7 @@ export const SANDBOX_V2_OPERATION_NAMES: readonly string[] = [
   "workspace.create_directory",
   "workspace.verify",
   "changeset.author",
+  "patch_export",
 ];
 
 /**
@@ -204,6 +206,16 @@ export type SandboxV2WorkspaceAuthorRequest = {
   intendedPaths?: readonly string[];
 };
 
+export type SandboxV2PatchExportRequest = {
+  version: 2;
+  operation: "patch_export";
+  projectId: string;
+  changesetId: string;
+  artifactRef: string;
+  expectedSha256: string;
+  destinationRoot: string;
+};
+
 export type SandboxV2ChangedPath = {
   path: string;
   changeKind: "added" | "modified" | "deleted";
@@ -233,7 +245,8 @@ export type SandboxV2Request =
   | SandboxV2ProjectSearchTextRequest
   | SandboxV2WorkspaceRequest
   | SandboxV2WorkspaceVerifyRequest
-  | SandboxV2WorkspaceAuthorRequest;
+  | SandboxV2WorkspaceAuthorRequest
+  | SandboxV2PatchExportRequest;
 
 export type VerificationProtocolState =
   | "admitted"
@@ -403,6 +416,23 @@ export type SandboxV2OperationResult =
       liveUnwritten: true;
       protocolState: "admitted";
       completedAtMs: number;
+    }
+  | {
+      kind: "patch_export";
+      projectId: string;
+      changesetId: string;
+      destinationRelativeName: string;
+      artifactRef: string;
+      destinationPath: string;
+      patchSha256: string;
+      witnessedSha256: string;
+      bytesWritten: number;
+      liveUnwritten: true;
+      gitUnwritten: true;
+      applied: false;
+      protocolState: "admitted";
+      witnessState: "digest_readback";
+      completedAtMs: number;
     };
 
 export type SandboxV2ExecutionTruth =
@@ -496,7 +526,8 @@ export type SandboxV2CapabilitySpec = {
     | "project_inspection"
     | "project_experimentation"
     | "project_verification"
-    | "project_authorship";
+    | "project_authorship"
+    | "patch_export";
   /** Project inspection is strictly read-only: no mutation, no execution. */
   readOnly: boolean;
   /** Requires an operator-owned project registry resolution. */
@@ -586,6 +617,12 @@ export const V2_CAPABILITY_REGISTRY: readonly SandboxV2CapabilitySpec[] = [
     operation: "changeset.author",
     family: "project_authorship",
     readOnly: true,
+    requiresProject: true,
+  },
+  {
+    operation: "patch_export",
+    family: "patch_export",
+    readOnly: false,
     requiresProject: true,
   },
 ];
@@ -712,6 +749,8 @@ export function isSandboxV2OperationResult(
       return isWorkspaceVerifyResult(value);
     case "changeset.author":
       return isChangesetAuthorResult(value);
+    case "patch_export":
+      return isPatchExportResult(value);
     default: {
       const _exhaustive: never = operation;
       return _exhaustive;
@@ -956,6 +995,38 @@ export function isChangesetAuthorResult(
     value.candidateUnchanged === true &&
     value.liveUnwritten === true &&
     value.protocolState === "admitted" &&
+    isFiniteNumber(value.completedAtMs)
+  );
+}
+
+export function isPatchExportResult(
+  value: unknown,
+): value is Extract<SandboxV2OperationResult, { kind: "patch_export" }> {
+  if (!isRecord(value)) return false;
+  return (
+    value.kind === "patch_export" &&
+    typeof value.projectId === "string" &&
+    value.projectId.length > 0 &&
+    typeof value.changesetId === "string" &&
+    value.changesetId.startsWith("cs_") &&
+    typeof value.destinationRelativeName === "string" &&
+    value.destinationRelativeName.endsWith(".patch") &&
+    typeof value.artifactRef === "string" &&
+    value.artifactRef.length > 0 &&
+    typeof value.destinationPath === "string" &&
+    value.destinationPath.length > 0 &&
+    typeof value.patchSha256 === "string" &&
+    value.patchSha256.length === 64 &&
+    typeof value.witnessedSha256 === "string" &&
+    value.witnessedSha256.length === 64 &&
+    value.witnessedSha256 === value.patchSha256 &&
+    isFiniteNumber(value.bytesWritten) &&
+    value.bytesWritten >= 1 &&
+    value.liveUnwritten === true &&
+    value.gitUnwritten === true &&
+    value.applied === false &&
+    value.protocolState === "admitted" &&
+    value.witnessState === "digest_readback" &&
     isFiniteNumber(value.completedAtMs)
   );
 }

@@ -3,6 +3,7 @@ import {
   isVerifiedVerificationClaimEffect,
   isVerifiedAuthorshipClaimEffect,
   isVerifiedBoundedOperationClaimEffect,
+  isVerifiedPatchExportClaimEffect,
   isVerifiedWorkspaceClaimEffect,
   type OperationalClaimLicense,
   type SandboxTaskProfile,
@@ -301,6 +302,41 @@ export function deriveOperationalTruth(
         taskId: license.taskId,
         workspaceId: effect.workspaceId,
         semanticOutput,
+      };
+    }
+    return {
+      state: "none",
+      locked: false,
+      profile: license.profile,
+      taskId: license.taskId,
+      error: license.error ?? null,
+    };
+  }
+
+  if (license.profile === "patch_export") {
+    if (
+      license.state === "succeeded" &&
+      isVerifiedPatchExportClaimEffect(license.patchExportClaimEffect)
+    ) {
+      const effect = license.patchExportClaimEffect;
+      return {
+        state: "verified_success",
+        locked: true,
+        profile: license.profile,
+        taskId: license.taskId,
+        semanticOutput:
+          `copied sealed candidate change-set ${effect.changesetId} to the operator review location as ${effect.destinationRelativeName}. the export was witnessed by digest ${effect.witnessedSha256}. it has not been applied.`,
+      };
+    }
+    if (license.state === "outcome_unknown") {
+      return {
+        state: "outcome_unknown",
+        locked: true,
+        profile: license.profile,
+        taskId: license.taskId,
+        error: license.error ?? "outcome_unknown",
+        semanticOutput:
+          "patch export commit may have occurred and the effect witness is missing or conflicting; the outcome is unknown and was not repeated.",
       };
     }
     return {

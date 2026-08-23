@@ -41,6 +41,17 @@ export type ProjectRootEntry = {
    * candidateWorkspaceAllowed, verificationAllowed, and authorshipAllowed.
    */
   operationAllowed?: boolean;
+  /**
+   * M7 patch_export grant. Missing/false means sealed-artifact export is
+   * refused. Independent of authorshipAllowed, operationAllowed, and
+   * engineeringAllowed. Requires exportDestinationCanonicalRoot.
+   */
+  patchExportAllowed?: boolean;
+  /**
+   * Operator-bound review destination for patch_export. Canonical absolute
+   * POSIX directory. The model cannot supply this path.
+   */
+  exportDestinationCanonicalRoot?: string;
 };
 
 export type ProjectRootRegistry = {
@@ -97,6 +108,27 @@ export function validateProjectRootRegistry(
       reasons.push(`allowed_recipe_ids_invalid:${entry.projectId}`);
       continue;
     }
+    if (entry.patchExportAllowed === true) {
+      if (
+        typeof entry.exportDestinationCanonicalRoot !== "string" ||
+        !isCanonicalForm(entry.exportDestinationCanonicalRoot)
+      ) {
+        reasons.push(`export_destination_not_canonical:${String(entry.projectId)}`);
+        continue;
+      }
+      if (FORBIDDEN_ROOT_PATTERNS.includes(entry.exportDestinationCanonicalRoot)) {
+        reasons.push(`export_destination_forbidden:${String(entry.projectId)}`);
+        continue;
+      }
+      if (
+        entry.exportDestinationCanonicalRoot === entry.canonicalRoot ||
+        isWithin(entry.canonicalRoot, entry.exportDestinationCanonicalRoot) ||
+        isWithin(entry.exportDestinationCanonicalRoot, entry.canonicalRoot)
+      ) {
+        reasons.push(`export_destination_overlaps_live_root:${String(entry.projectId)}`);
+        continue;
+      }
+    }
     const normalized: ProjectRootEntry = {
       projectId: entry.projectId,
       canonicalRoot: entry.canonicalRoot,
@@ -109,6 +141,10 @@ export function validateProjectRootRegistry(
       allowedRecipeIds: allowedRecipeIds.ids,
       authorshipAllowed: entry.authorshipAllowed === true,
       operationAllowed: entry.operationAllowed === true,
+      patchExportAllowed: entry.patchExportAllowed === true,
+      ...(entry.patchExportAllowed === true
+        ? { exportDestinationCanonicalRoot: entry.exportDestinationCanonicalRoot }
+        : {}),
     };
     entries.set(normalized.projectId, normalized);
     roots.push(normalized.canonicalRoot);
@@ -149,6 +185,14 @@ export function isAuthorshipAllowed(entry: ProjectRootEntry): boolean {
 
 export function isOperationAllowed(entry: ProjectRootEntry): boolean {
   return entry.operationAllowed === true;
+}
+
+export function isPatchExportAllowed(entry: ProjectRootEntry): boolean {
+  return (
+    entry.patchExportAllowed === true &&
+    typeof entry.exportDestinationCanonicalRoot === "string" &&
+    entry.exportDestinationCanonicalRoot.length > 0
+  );
 }
 
 export type ProjectRootAccessKind = "read" | "workspace" | "engineering";

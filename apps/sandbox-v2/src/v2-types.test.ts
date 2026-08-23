@@ -56,6 +56,7 @@ describe("capability registry", () => {
       "workspace.create_directory",
       "workspace.verify",
       "changeset.author",
+      "patch_export",
     ]);
 
     // M2 project_inspection family
@@ -83,6 +84,8 @@ describe("capability registry", () => {
 
     const m5Ops = V2_CAPABILITY_REGISTRY.filter((s) => s.family === "project_authorship").map((s) => s.operation);
     expect(m5Ops).toEqual(["changeset.author"]);
+    const m7Ops = V2_CAPABILITY_REGISTRY.filter((s) => s.family === "patch_export").map((s) => s.operation);
+    expect(m7Ops).toEqual(["patch_export"]);
   });
 
   it("marks project inspection read-only and project-required", () => {

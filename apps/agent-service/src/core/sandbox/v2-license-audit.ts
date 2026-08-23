@@ -14,6 +14,7 @@ import {
   isVerifiedVerificationClaimEffect,
   isVerifiedAuthorshipClaimEffect,
   isVerifiedBoundedOperationClaimEffect,
+  isVerifiedPatchExportClaimEffect,
   isVerifiedWorkspaceClaimEffect,
   type OperationalClaimLicense,
 } from "./engineering-types.js";
@@ -86,6 +87,14 @@ export type SandboxV2LicenseAuditRecord = {
     stopReason: string;
     borderState: string;
   } | null;
+  patchExportEffect?: {
+    changesetId: string;
+    destinationRelativeName: string;
+    witnessedSha256: string;
+    applied: false;
+    liveUnwritten: true;
+    gitUnwritten: true;
+  } | null;
 };
 
 export function formatSandboxV2LicenseAudit(
@@ -101,7 +110,8 @@ export function formatSandboxV2LicenseAudit(
     license.profile !== "project_experimentation" &&
     license.profile !== "candidate_verification" &&
     license.profile !== "candidate_authorship" &&
-    license.profile !== "bounded_operation"
+    license.profile !== "bounded_operation" &&
+    license.profile !== "patch_export"
   ) {
     return null;
   }
@@ -244,6 +254,36 @@ export function formatSandboxV2LicenseAudit(
             maxSteps: license.boundedOperationClaimEffect.maxSteps,
             stopReason: license.boundedOperationClaimEffect.stopReason,
             borderState: license.boundedOperationClaimEffect.borderState,
+          }
+        : null,
+    };
+  }
+
+  if (license.profile === "patch_export") {
+    const verified = isVerifiedPatchExportClaimEffect(license.patchExportClaimEffect);
+    return {
+      discriminator: "ASHLEY_SANDBOX_V2_LICENSE",
+      sourceMessageEntityUuid: license.sourceMessageEntityUuid ?? null,
+      state: license.state,
+      taskId: license.taskId ?? null,
+      profile: license.profile,
+      verified,
+      error: license.error ?? null,
+      refusalReason: license.refusalReason ?? null,
+      effect: null,
+      workspaceEffect: null,
+      inspection: null,
+      verificationEffect: null,
+      authorshipEffect: null,
+      boundedOperationEffect: null,
+      patchExportEffect: license.patchExportClaimEffect
+        ? {
+            changesetId: license.patchExportClaimEffect.changesetId,
+            destinationRelativeName: license.patchExportClaimEffect.destinationRelativeName,
+            witnessedSha256: license.patchExportClaimEffect.witnessedSha256,
+            applied: false,
+            liveUnwritten: true,
+            gitUnwritten: true,
           }
         : null,
     };

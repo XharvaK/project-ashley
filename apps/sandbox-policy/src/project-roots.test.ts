@@ -6,6 +6,7 @@ import {
   isVerificationRecipeAllowed,
   isAuthorshipAllowed,
   isOperationAllowed,
+  isPatchExportAllowed,
   type ProjectRootEntry,
 } from "./project-roots.js";
 
@@ -76,6 +77,7 @@ describe("project root registry", () => {
     expect(entry?.verificationAllowed).toBe(false);
     expect(entry?.authorshipAllowed).toBe(false);
     expect(entry?.operationAllowed).toBe(false);
+    expect(entry?.patchExportAllowed).toBe(false);
     expect(entry?.allowedRecipeIds).toEqual([]);
   });
 
@@ -87,6 +89,7 @@ describe("project root registry", () => {
     expect(a?.verificationAllowed).toBe(false);
     expect(a?.authorshipAllowed).toBe(false);
     expect(a?.operationAllowed).toBe(false);
+    expect(a?.patchExportAllowed).toBe(false);
     expect(a?.allowedRecipeIds).toEqual([]);
     expect(a?.engineeringAllowed).toBe(true);
     expect(isVerificationRecipeAllowed(a!, "typescript_fixture_compile_v1")).toBe(false);
@@ -146,6 +149,51 @@ describe("project root registry", () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(isOperationAllowed(r.registry.entries.get("projA")!)).toBe(true);
+  });
+
+  it("does not treat authorship or operation as patch_export authority", () => {
+    const r = validateProjectRootRegistry([
+      {
+        ...entries[0]!,
+        authorshipAllowed: true,
+        operationAllowed: true,
+        patchExportAllowed: false,
+      },
+    ]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const entry = r.registry.entries.get("projA")!;
+    expect(isAuthorshipAllowed(entry)).toBe(true);
+    expect(isOperationAllowed(entry)).toBe(true);
+    expect(isPatchExportAllowed(entry)).toBe(false);
+  });
+
+  it("admits patch_export only with destination root and patchExportAllowed", () => {
+    const missingDest = validateProjectRootRegistry([
+      { ...entries[0]!, patchExportAllowed: true },
+    ]);
+    expect(missingDest.ok).toBe(false);
+    const r = validateProjectRootRegistry([
+      {
+        ...entries[0]!,
+        patchExportAllowed: true,
+        exportDestinationCanonicalRoot: "/var/lib/ashley-sandbox/review/projA",
+      },
+    ]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(isPatchExportAllowed(r.registry.entries.get("projA")!)).toBe(true);
+  });
+
+  it("refuses an export destination inside the live project root", () => {
+    const r = validateProjectRootRegistry([
+      {
+        ...entries[0]!,
+        patchExportAllowed: true,
+        exportDestinationCanonicalRoot: `${entries[0]!.canonicalRoot}/review`,
+      },
+    ]);
+    expect(r.ok).toBe(false);
   });
 
   it("refuses a missing recipe allowlist even when verificationAllowed is true", () => {

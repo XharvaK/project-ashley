@@ -209,6 +209,10 @@ const NON_LIVE: Record<string, NonLiveRule> = {
     cls: "CONTROL_PLANE",
     reason: "M6 bounded-operation step receipts; operational history only",
   },
+  patch_export_records: {
+    cls: "CONTROL_PLANE",
+    reason: "M7 named patch_export receipt/witness metadata; copy facts only; not apply or Identity",
+  },
   engineering_admissions: {
     cls: "CONTROL_PLANE",
     reason: "sandbox engineering task admission ledger; control-plane state",

@@ -9,7 +9,7 @@ import {
   currentReleaseId,
 } from "../rollout/capabilities.js";
 import type { CognitionMode } from "../types.js";
-import { listApprovedReadProjectIds, canOfferCandidateWorkspace, canOfferCandidateVerification, canOfferCandidateAuthorship, canOfferBoundedOperation } from "../sandbox/project-registry.js";
+import { listApprovedReadProjectIds, canOfferCandidateWorkspace, canOfferCandidateVerification, canOfferCandidateAuthorship, canOfferBoundedOperation, canOfferPatchExport } from "../sandbox/project-registry.js";
 
 export type PerceptionCapabilityName =
   | "vision"
@@ -280,6 +280,36 @@ export function describeBoundedOperationAvailability(options?: {
   }`;
 }
 
+export function describePatchExportAvailability(options?: {
+  db?: DatabaseSync;
+  masterMode?: CognitionMode;
+  canInfluence?: boolean;
+  registryAllows?: boolean;
+}): string {
+  if (!options?.db) {
+    return "Patch export (M7): unavailable (no db for capability check); cannot request patch_export this turn.";
+  }
+  const canInfluence =
+    options.canInfluence ??
+    (() => {
+      try {
+        return capabilityCanInfluence(options.db, "patch_export", options.masterMode);
+      } catch {
+        return false;
+      }
+    })();
+  const registryAllows =
+    options.registryAllows ?? canOfferPatchExport(options.db);
+  if (canInfluence && registryAllows) {
+    return "Patch export (M7): offerable (patch_export active and patchExportAllowed; sealed artifact copy to operator review location; not apply, Git, or deploy).";
+  }
+  return `Patch export (M7): ${
+    !canInfluence
+      ? "capability not active in rollout (observe-only; cannot request patch_export)"
+      : "patchExportAllowed closed on the project registry (cannot request patch_export)"
+  }`;
+}
+
 export function composeSelfCapabilityContext(
   db: DatabaseSync,
   options?: {
@@ -298,6 +328,7 @@ export function composeSelfCapabilityContext(
     `- ${describeCandidateVerificationAvailability({ db, masterMode: options?.masterMode })}`,
     `- ${describeCandidateAuthorshipAvailability({ db, masterMode: options?.masterMode })}`,
     `- ${describeBoundedOperationAvailability({ db, masterMode: options?.masterMode })}`,
+    `- ${describePatchExportAvailability({ db, masterMode: options?.masterMode })}`,
     `- ${describeSandboxAvailability()}`,
   ];
   return lines.join("\n");

@@ -150,6 +150,11 @@ describe("capability graduation policy", () => {
       minEvalSeeds: 3,
       requiresQualification: true,
     });
+    expect(graduationPolicyFor("patch_export")).toEqual({
+      kind: "operator_cutover",
+      minEvalSeeds: 3,
+      requiresQualification: true,
+    });
     const status = listCapabilityStatuses(db, "apply", releaseId)
       .find((s) => s.capability === "project_experimentation");
     expect(status?.graduationPolicy).toBe("operator_cutover");

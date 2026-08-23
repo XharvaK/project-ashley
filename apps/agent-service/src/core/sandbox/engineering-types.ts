@@ -47,6 +47,7 @@ export type SandboxTaskProfile =
   | "candidate_verification"
   | "candidate_authorship"
   | "bounded_operation"
+  | "patch_export"
   | "sandbox_workspace_file_roundtrip";
 
 /**
@@ -241,6 +242,52 @@ export function isVerifiedBoundedOperationClaimEffect(
   );
 }
 
+export type PatchExportClaimEffect = {
+  verified: true;
+  projectId: string;
+  changesetId: string;
+  destinationRelativeName: string;
+  patchSha256: string;
+  witnessedSha256: string;
+  bytesWritten: number;
+  applied: false;
+  liveUnwritten: true;
+  gitUnwritten: true;
+  protocolState: "admitted";
+  witnessState: "digest_readback";
+  completedAtMs: number;
+};
+
+export function isVerifiedPatchExportClaimEffect(
+  value: unknown,
+): value is PatchExportClaimEffect {
+  if (!value || typeof value !== "object") return false;
+  const e = value as Partial<PatchExportClaimEffect>;
+  return (
+    e.verified === true &&
+    e.applied === false &&
+    e.liveUnwritten === true &&
+    e.gitUnwritten === true &&
+    e.protocolState === "admitted" &&
+    e.witnessState === "digest_readback" &&
+    typeof e.projectId === "string" &&
+    e.projectId.trim().length > 0 &&
+    typeof e.changesetId === "string" &&
+    e.changesetId.startsWith("cs_") &&
+    typeof e.destinationRelativeName === "string" &&
+    e.destinationRelativeName.endsWith(".patch") &&
+    typeof e.patchSha256 === "string" &&
+    e.patchSha256.length === 64 &&
+    typeof e.witnessedSha256 === "string" &&
+    e.witnessedSha256 === e.patchSha256 &&
+    typeof e.bytesWritten === "number" &&
+    Number.isFinite(e.bytesWritten) &&
+    e.bytesWritten >= 1 &&
+    typeof e.completedAtMs === "number" &&
+    Number.isFinite(e.completedAtMs)
+  );
+}
+
 /**
  * Licensed mechanical verification claim. Binds a named snapshot to a named
  * recipe outcome. Never a quality, approval, merge, or deployment judgment.
@@ -307,6 +354,7 @@ export type OperationalClaimLicense = {
   verificationClaimEffect?: VerificationClaimEffect | null;
   authorshipClaimEffect?: AuthorshipClaimEffect | null;
   boundedOperationClaimEffect?: BoundedOperationClaimEffect | null;
+  patchExportClaimEffect?: PatchExportClaimEffect | null;
   receiptRef?: string | null;
   error?: string | null;
   refusalReason?: string | null;

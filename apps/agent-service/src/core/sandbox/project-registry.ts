@@ -261,6 +261,51 @@ export function canOfferBoundedOperation(
   });
 }
 
+/**
+ * Checks conditions for offering M7 patch_export:
+ * 1. patch_export release state permits live influence;
+ * 2. sandbox lifecycle permits execution;
+ * 3. Sandbox V2 substrate is available;
+ * 4. at least one approved project has patchExportAllowed and a destination root.
+ *
+ * authorshipAllowed, operationAllowed, verificationAllowed, and
+ * engineeringAllowed never grant M7.
+ */
+export function canOfferPatchExport(
+  db?: DatabaseSync,
+  options?: CanOfferProjectInspectionOptions,
+): boolean {
+  if (db) {
+    try {
+      if (!capabilityCanInfluence(db, "patch_export", options?.masterMode)) {
+        return false;
+      }
+    } catch {
+      return false;
+    }
+  }
+  const lifecycle =
+    options?.lifecycleEnabled ?? env.sandboxEngineeringLifecycleEnabled;
+  if (!lifecycle) return false;
+
+  const substrate =
+    options?.substrateAvailable ?? isSandboxV2Available();
+  if (!substrate) return false;
+
+  const registry = options?.registry ?? loadOperatorProjectReadRegistry();
+  const approved = listApprovedReadProjectIds(registry);
+  if (approved.length === 0) return false;
+  return approved.some((pid) => {
+    const resolution = registry.resolveReadRoot(pid);
+    if (!resolution?.ok) return false;
+    return (
+      resolution.entry.patchExportAllowed === true &&
+      typeof resolution.entry.exportDestinationCanonicalRoot === "string" &&
+      resolution.entry.exportDestinationCanonicalRoot.length > 0
+    );
+  });
+}
+
 export class AgentProjectRegistry {
   private registry: ProjectRootRegistry;
 

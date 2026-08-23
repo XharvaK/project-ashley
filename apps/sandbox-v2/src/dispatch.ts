@@ -29,6 +29,11 @@ import {
   isM5ApplyForbiddenOperation,
   refuseApplyCandidateChangeSet,
 } from "./authorship/apply.js";
+import {
+  isForbiddenM7Profile,
+  refuseUnadmittedM7Profile,
+} from "./export/forbidden.js";
+import { executePatchExport } from "./export/executor.js";
 import type { RecipeCatalog } from "./verification/recipe-catalog.js";
 import { v2CapabilitySpec, V2_DEFERRED_OPERATIONS, SANDBOX_V2_OPERATION_NAMES, isSandboxV2Request } from
   "./v2-types.js";
@@ -99,6 +104,9 @@ export class SandboxV2Dispatcher {
     }
     if (isM5ApplyForbiddenOperation(envelope.operation)) {
       return fail(envelope.operation, refuseApplyCandidateChangeSet().error);
+    }
+    if (isForbiddenM7Profile(envelope.operation)) {
+      return fail(envelope.operation, refuseUnadmittedM7Profile().error);
     }
     if (V2_DEFERRED_OPERATIONS.includes(envelope.operation)) {
       return fail(envelope.operation, "unsupported_operation");
@@ -192,6 +200,12 @@ export class SandboxV2Dispatcher {
         managedWorkspaceRoot: this.env.managedWorkspaceRoot,
         viewBuilder: this.env.viewBuilder,
         settlementDeadlineAtMs: this.env.settlementDeadlineAtMs,
+        clock: this.env.clock,
+      });
+    }
+    if (request.operation === "patch_export") {
+      return executePatchExport(request, {
+        registry: this.env.registry,
         clock: this.env.clock,
       });
     }
