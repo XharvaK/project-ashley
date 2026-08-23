@@ -25,6 +25,10 @@ import {
 import {
   executeCandidateAuthorship,
 } from "./authorship/executor.js";
+import {
+  isM5ApplyForbiddenOperation,
+  refuseApplyCandidateChangeSet,
+} from "./authorship/apply.js";
 import type { RecipeCatalog } from "./verification/recipe-catalog.js";
 import { v2CapabilitySpec, V2_DEFERRED_OPERATIONS, SANDBOX_V2_OPERATION_NAMES, isSandboxV2Request } from
   "./v2-types.js";
@@ -92,6 +96,9 @@ export class SandboxV2Dispatcher {
     const envelope = request as Record<string, unknown>;
     if (envelope.version !== 2 || typeof envelope.operation !== "string") {
       return fail("unknown", "invalid-request");
+    }
+    if (isM5ApplyForbiddenOperation(envelope.operation)) {
+      return fail(envelope.operation, refuseApplyCandidateChangeSet().error);
     }
     if (V2_DEFERRED_OPERATIONS.includes(envelope.operation)) {
       return fail(envelope.operation, "unsupported_operation");

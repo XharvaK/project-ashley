@@ -68,6 +68,9 @@ export function collectTreeRecords(treeRoot: string): Map<string, TreeFileRecord
 }
 
 export function candidateContainsGitMetadata(treeRoot: string): boolean {
+  if (existsSync(join(treeRoot, ".git"))) {
+    return true;
+  }
   for (const path of collectTreeRecords(treeRoot).keys()) {
     if (path === ".git" || path === ".git/" || path.startsWith(".git/")) {
       return true;

@@ -158,6 +158,8 @@ export function persistQuarantinedChangeSet(
     quarantineReason: string;
   },
 ): PersistedChangeSet {
+  // Secret scan does not identify which Thought field hit. Persist no raw
+  // Thought text and no patch bytes.
   const createdAt = nowIso();
   db.prepare(
     `INSERT INTO candidate_changesets (
@@ -175,7 +177,7 @@ export function persistQuarantinedChangeSet(
     input.projectId,
     input.workspaceId,
     input.sourceSnapshotId,
-    input.objective.slice(0, 500),
+    "[redacted:secret_detected]",
     "[redacted:secret_detected]",
     input.riskClass,
     jsonBound(input.evidenceRefs),

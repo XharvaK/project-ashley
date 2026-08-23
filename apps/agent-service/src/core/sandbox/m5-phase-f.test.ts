@@ -380,6 +380,20 @@ describe("M5 Phase F end-to-end authorship witness", () => {
       ).state,
     ).toBe("active");
     expect(refuseApplyCandidateChangeSet().error).toBe("m5_apply_forbidden");
+    const dispatcher = new SandboxV2Dispatcher({
+      env: { registry: loadOperatorProjectReadRegistry() },
+    });
+    for (const operation of ["changeset.apply", "changeset.merge", "git.commit", "git.push"] as const) {
+      const applyAttempt = await dispatcher.dispatch({
+        version: 2,
+        operation,
+        projectId: PROJECT,
+      });
+      expect(applyAttempt.outcome).toBe("failed");
+      if (applyAttempt.outcome === "failed") {
+        expect(applyAttempt.error).toBe("m5_apply_forbidden");
+      }
+    }
     db.close();
   });
 

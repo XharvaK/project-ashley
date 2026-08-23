@@ -130,7 +130,11 @@ export {
   validateChangesetAuthorRequest,
 } from "./authorship/executor.js";
 export { scanAuthorshipText } from "./authorship/secret-scan.js";
-export { refuseApplyCandidateChangeSet } from "./authorship/apply.js";
+export {
+  M5_APPLY_FORBIDDEN_OPERATIONS,
+  isM5ApplyForbiddenOperation,
+  refuseApplyCandidateChangeSet,
+} from "./authorship/apply.js";
 
 export {
   handleFileRoundtripV2,

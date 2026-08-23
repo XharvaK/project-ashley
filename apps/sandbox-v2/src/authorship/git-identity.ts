@@ -17,7 +17,21 @@ const GIT_ENV: NodeJS.ProcessEnv = {
   GIT_OPTIONAL_LOCKS: "0",
 };
 
+const ALLOWED_GIT_IDENTITY_ARGS: ReadonlyArray<readonly string[]> = [
+  ["rev-parse", "HEAD"],
+  ["status", "--porcelain"],
+];
+
+function isAllowedGitIdentityInvocation(args: readonly string[]): boolean {
+  return ALLOWED_GIT_IDENTITY_ARGS.some(
+    (allowed) => allowed.length === args.length && allowed.every((token, i) => token === args[i]),
+  );
+}
+
 function git(args: string[], cwd: string): string | null {
+  if (!isAllowedGitIdentityInvocation(args)) {
+    return null;
+  }
   try {
     const out = execFileSync("git", args, {
       cwd,

@@ -1345,7 +1345,10 @@ export async function executeCandidateAuthorshipV2(
         verificationRecipeIds: request.verificationRecipeIds ?? [],
         intendedPaths: request.intendedPaths,
         changedPaths: receipt.changedPaths,
-        linkedVerificationRefs: request.evidenceRefs ?? [],
+        // First slice does not look up matching M4 receipts. Declared
+        // evidenceRefs stay on evidence_refs_json; this column would
+        // overclaim a verified match.
+        linkedVerificationRefs: [],
         patchSha256: receipt.patchSha256,
         patchBytes: receipt.patchBytes,
         artifactRef: receipt.artifactRef,

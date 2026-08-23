@@ -56,8 +56,10 @@ export const SANDBOX_V2_OPERATION_NAMES: readonly string[] = [
 
 /**
  * Engineering-vocabulary actions that are explicitly known but NOT supported
- * by this slice. They fail closed with `unsupported_operation` (never a
- * silent unknown, never a partial implementation).
+ * by this slice. Git-inspect names fail closed with `unsupported_operation`.
+ * Apply/merge/commit/push are intercepted before this list and fail closed
+ * with `m5_apply_forbidden` (apply is permanently refuse-closed in M5, not
+ * merely unimplemented).
  */
 export const V2_DEFERRED_OPERATIONS: readonly string[] = [
   "inspect_project_git_status",

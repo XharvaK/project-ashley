@@ -265,18 +265,20 @@ describe("M5 Phase D authority + truth", () => {
     expect(changesetId).toEqual(expect.any(String));
     const stored = db
       .prepare(
-        `SELECT status, review_status, evidence_refs_json, patch_sha256
+        `SELECT status, review_status, evidence_refs_json, linked_verification_refs_json, patch_sha256
            FROM candidate_changesets WHERE changeset_id = ?`,
       )
       .get(changesetId as string) as {
       status: string;
       review_status: string;
       evidence_refs_json: string;
+      linked_verification_refs_json: string;
       patch_sha256: string;
     };
     expect(stored.status).toBe("proposed");
     expect(stored.review_status).toBe("submitted");
     expect(JSON.parse(stored.evidence_refs_json)).toEqual(["op_verif_01"]);
+    expect(JSON.parse(stored.linked_verification_refs_json)).toEqual([]);
     expect(stored.patch_sha256).toHaveLength(64);
     expect(listChangeSetEventTypes(db, changesetId as string)).toEqual([
       "created",
@@ -310,12 +312,13 @@ describe("M5 Phase D authority + truth", () => {
     expect(result.license.error).toBe("secret_detected");
     const stored = db
       .prepare(
-        `SELECT status, review_status, rationale, quarantine_reason, patch_sha256, artifact_ref
+        `SELECT status, review_status, objective, rationale, quarantine_reason, patch_sha256, artifact_ref
            FROM candidate_changesets`,
       )
       .get() as {
       status: string;
       review_status: string | null;
+      objective: string;
       rationale: string;
       quarantine_reason: string;
       patch_sha256: string | null;
@@ -323,11 +326,54 @@ describe("M5 Phase D authority + truth", () => {
     };
     expect(stored.status).toBe("quarantined");
     expect(stored.review_status).toBeNull();
+    expect(stored.objective).toBe("[redacted:secret_detected]");
     expect(stored.rationale).toBe("[redacted:secret_detected]");
     expect(stored.quarantine_reason).toBe("secret_detected");
     expect(stored.patch_sha256).toBeNull();
     expect(stored.artifact_ref).toBeNull();
     expect(JSON.stringify({ license: result.license, stored })).not.toContain(marker);
+    db.close();
+  });
+
+  it("quarantines a credential-shaped objective without persisting the secret", async () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    activate(db, capabilityNames);
+    const marker = "ghp_";
+    const objective = `token ${marker}${"B".repeat(36)}`;
+    let dispatches = 0;
+    const result = await executeCandidateAuthorshipV2({
+      request: { ...authorRequest, objective },
+      ownerId: "doc",
+      db,
+      masterMode: "apply",
+      registry: authorshipRegistry(),
+      dispatcher: {
+        dispatch: async () => {
+          dispatches += 1;
+          return mockReceiptResult();
+        },
+      } as unknown as SandboxV2Dispatcher,
+      envOverrides: { sandboxEngineeringLifecycleEnabled: true },
+    });
+    expect(dispatches).toBe(0);
+    expect(result.license.error).toBe("secret_detected");
+    const stored = db
+      .prepare(`SELECT status, objective, rationale, patch_sha256, artifact_ref FROM candidate_changesets`)
+      .get() as {
+      status: string;
+      objective: string;
+      rationale: string;
+      patch_sha256: string | null;
+      artifact_ref: string | null;
+    };
+    expect(stored.status).toBe("quarantined");
+    expect(stored.objective).toBe("[redacted:secret_detected]");
+    expect(stored.rationale).toBe("[redacted:secret_detected]");
+    expect(stored.patch_sha256).toBeNull();
+    expect(stored.artifact_ref).toBeNull();
+    const blob = JSON.stringify({ license: result.license, stored });
+    expect(blob).not.toContain(marker);
+    expect(blob).not.toContain(objective);
     db.close();
   });
 

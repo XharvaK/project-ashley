@@ -298,9 +298,39 @@ describe("M5 changeset.author executor", () => {
       });
       expect(result.outcome).toBe("failed");
       if (result.outcome === "failed") {
-        expect(result.error).toBe("unsupported_operation");
+        expect(result.error).toBe("m5_apply_forbidden");
         expect(result.operation).toBe(operation);
       }
     }
+  });
+
+  it("still names git-inspect ops as unsupported rather than apply", async () => {
+    const h = makeHarness();
+    const dispatcher = new SandboxV2Dispatcher({ env: { registry: h.registry } });
+    const result = await dispatcher.dispatch({
+      version: 2,
+      operation: "inspect_project_git_status",
+      projectId: "composer-assistant",
+    });
+    expect(result.outcome).toBe("failed");
+    if (result.outcome === "failed") expect(result.error).toBe("unsupported_operation");
+  });
+
+  it("refuses an empty .git directory inside the candidate tree", async () => {
+    const h = makeHarness();
+    const { manager, acquired } = await seedWorkspace(h.sourceRoot, h.managedRoot);
+    writeFileSync(join(acquired.workspaceTreeRoot, "src", "a.ts"), "export const a = 9;\n", "utf8");
+    mkdirSync(join(acquired.workspaceTreeRoot, ".git"), { recursive: true });
+    const gitMeta = await executeCandidateAuthorship(
+      {
+        version: 2,
+        operation: "changeset.author",
+        projectId: "composer-assistant",
+        workspaceId: acquired.workspaceId,
+      },
+      { registry: h.registry, workspaceManager: manager, managedWorkspaceRoot: h.managedRoot },
+    );
+    expect(gitMeta.outcome).toBe("failed");
+    if (gitMeta.outcome === "failed") expect(gitMeta.error).toBe("git_metadata_in_candidate");
   });
 });
