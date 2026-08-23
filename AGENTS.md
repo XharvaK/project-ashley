@@ -300,3 +300,25 @@ npm test
 npm run phase0:offline
 npm run eval:full -- -Baseline baseline-w0 -Label wave5
 ```
+
+## Cursor Cloud
+
+Cloud agents use [`.cursor/environment.json`](.cursor/environment.json). Install
+is [`.cursor/install.sh`](.cursor/install.sh): Node **≥ 22.16** (FTS5 for
+`node:sqlite`), then `npm ci` + build for `apps/agent-service` and
+`apps/discord-bot`.
+
+Linux equivalents when PowerShell wrappers are unavailable:
+
+```bash
+npm test --prefix apps/agent-service
+npm run build --prefix apps/agent-service
+npm run build --prefix apps/discord-bot
+npm test --prefix apps/discord-bot
+```
+
+Do not start `dev:discord` / a second Discord gateway — production is Mint only.
+Optional local agent: `npm run dev --prefix apps/agent-service` on port 3710.
+
+Secrets stay in the Cursor environment Secrets tab (same keys as
+`config/env.example`). Never write them into the repo or commit `.env`.
