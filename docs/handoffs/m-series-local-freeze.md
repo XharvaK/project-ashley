@@ -44,8 +44,9 @@ Resolve live from Git after this packet lands. At packet writing:
 | sandbox-policy | `0.1.0` |
 | sandbox-v2 | `0.1.0` |
 
-Working tree at freeze writing is this docs packet on `69a57ac`.
-Do not treat worktree source as deployed.
+Working tree after this packet is the docs commit named above plus any SHA-pin
+follow-up. Resolve current branch HEAD live. Do not treat worktree source as
+deployed.
 
 ---
 
