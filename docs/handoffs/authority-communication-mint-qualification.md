@@ -34,13 +34,9 @@ Attempted from Cloud Agent host, not from Mint.
 | Collector host | `cursor` | **Observed** (`hostname`) |
 | Collector user | `ubuntu` uid 1000 | **Observed** (`id`) |
 | Collector OS | Linux (Cloud Agent pod) | **Observed** |
-| SSH client | present (`/usr/bin/ssh`) | **Observed** |
-| SSH private key | absent (`~/.ssh/id_rsa` missing; no `~/.ssh/config`) | **Observed** |
-| `ssh-agent` | sockets exist; `ssh-add -l` → no identities | **Observed** (retry 2026-08-23T11:11Z) |
-| Cloud Agent injected secrets | Discord bot token, owner id, Mistral key. **No SSH key, no Mint host.** | **Observed** (`CLOUD_AGENT_INJECTED_SECRET_NAMES`) |
-| DNS `mint` | `Could not resolve hostname mint: No address associated with hostname` | **Observed** (`ssh` / `getent`) |
-| `ssh -o BatchMode=yes mint` | fail: unresolved hostname | **Observed** |
-| `ssh xarvak@mint` | fail: unresolved hostname | **Observed** |
+| SSH identity file | present `~/.ssh/ashley-qualification-temp` (mode 600); `ssh-keygen -y` succeeds | **Observed** (key material not recorded here) |
+| `~/.ssh/config` Host mint | User `xarvak`; IdentityFile set; HostName `mint` | **Observed** |
+| DNS `mint` after key install | still unresolved | **Observed** `ssh mint` → `Could not resolve hostname mint` |
 | Mint hostname | **Unknown** | Unreachable |
 | Mint user `xarvak` live session | **Unknown** | Unreachable |
 | Node version on Mint | **Unknown** | Unreachable |
