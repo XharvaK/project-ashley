@@ -81,6 +81,9 @@ After the Constitution, read the peer specialized governance documents
 operational and ethical constraints; they do not override higher authority.
 
 Current roadmap direction: [`docs/architecture/Ashley_Architecture_Roadmap.md`](docs/architecture/Ashley_Architecture_Roadmap.md).
+Engineering milestones from current live state are in that file §5. They
+convert existing items. They do not add architecture.
+
 Cross-phase laws: [`docs/architecture/Ashley_Cross_Phase_Architecture.md`](docs/architecture/Ashley_Cross_Phase_Architecture.md).
 Document authority and history: [`docs/architecture/Ashley_Architecture_Document_Index.md`](docs/architecture/Ashley_Architecture_Document_Index.md).
 

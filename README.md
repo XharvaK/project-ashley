@@ -211,15 +211,19 @@ is organized. Do not skip Constitution, Stewardship Compact, or Ethics.
   [`docs/architecture/Ashley_Memory_Evidence_Architecture.md`](docs/architecture/Ashley_Memory_Evidence_Architecture.md)
   — Recall and the evidence / assertion / index distinction.
 
-The roadmap is multi-track, not one linear ladder. Owner-selected delivery
-after the current Sandbox gate is Model Fabric — mechanism work, not cognitive
+The roadmap is multi-track, not one linear ladder. From current live state,
+engineering work is grouped as mechanism, cognitive maturation, governance
+specification, and deferred capability. Owner-selected delivery after the
+current Sandbox gate is Model Fabric — mechanism work, not cognitive
 advancement. Architecture-justified substance before advanced autonomy is
 Memory / Evidence maturation, self-change specification (not a kernel; M5
 authorship stays unblocked), Context Budget, Operational Continuity, then
 Event Spine design later if reconstruction needs a join. Do not invent an
 Event Spine phase. Learned Autonomy and the graduations stay later named
 phases. Computer Use, voice, broad tools, and self-modification execution
-remain deferred.
+remain deferred. Milestones live in
+[`docs/architecture/Ashley_Architecture_Roadmap.md`](docs/architecture/Ashley_Architecture_Roadmap.md)
+§5.
 
 Engineering capability (Sandbox, Model Fabric, Operational Continuity,
 Procedural Skill Graduation, Computer Use) is only one part of Ashley. Memory /

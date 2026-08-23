@@ -4,9 +4,14 @@
 
 **Hardened:** 2026-08-21
 
+**Engineering-milestone conversion:** 2026-08-23
+
 **Scope:** Architecture and roadmap. This document does not authorize source
 changes, installation, activation, deployment, promotion, provider use, or an
-external effect.
+external effect. The 2026-08-23 conversion does not add owners, kernels,
+faculties, boundaries, infrastructure primitives, or roadmap phases. It
+converts already-named items into dependency-ordered engineering milestones
+from current live state forward.
 
 This document is the canonical map of Project Ashley's architectural direction.
 It is subordinate to governance. The
@@ -114,10 +119,27 @@ The full laws and matrices are in the
   activation, deployment, promotion, and production acceptance are different
   claims.
 
-## 3. Current source baseline
+## 3. Current live state
 
-This section is deliberately structural. See current source and living status
-documents for volatile values.
+This section is structural plus live-resolved volatile facts. Architecture
+status is not delivery status. Source presence is not production acceptance.
+
+Live resolution for this conversion (`2026-08-23`):
+
+| Fact | Live reading | Authority |
+|---|---|---|
+| `origin/master` | `9e930db` — M4 exact-candidate qualification packet | Git |
+| Freeze / this conversion branch | documentation only; not production | Git |
+| Owner-selected current delivery | Sandbox Autonomy | owner context + this roadmap |
+| Sandbox V2 path | Direct unprivileged Bubblewrap. V1 broker must not return | Sandbox V2 roadmap |
+| M0–M3 architecture | Accepted contracts. M1–M3 source exists | Sandbox V2 contracts + source |
+| M3 `PRODUCTION ACCEPTED` | `UNKNOWN` in this worktree. The M4 packet asserts predecessor `28e157a` via `docs/handoffs/M3_PRODUCTION_ACCEPTANCE.md`, which is **absent here** | exact-candidate packet / production observation |
+| M4 | Design accepted. Source present at `553553b`. Packet `PROPOSED FOR ACCEPTANCE`. Not `PRODUCTION ACCEPTED`. Not capability-promoted | M4 design + M4 packet |
+| M5–M7 | Architecture refined. Not current delivery | Sandbox V2 roadmap |
+| Model Fabric | Phase contract exists. Implementation not authorized. Waits owner-selected Sandbox gate | Model Fabric Architecture |
+| Later named phases | Architecturally defined, deferred as current implementation | phase contracts |
+
+If a volatile fact cannot be established from permitted evidence: `UNKNOWN`.
 
 | Area | Current local source state | Architectural boundary |
 |---|---|---|
@@ -128,12 +150,11 @@ documents for volatile values.
 | Delivery and initiative | Current source includes proactive admission, reservation, delivery, receipts, ambiguity, and finalization. | A wake is not motivation. A transport attempt is not committed delivery truth. |
 | Model routing | Current source has Ashley-owned purpose and route logic plus provider adapters. Configuration, hard-coded purpose mapping, and registry source are not yet one validated registry snapshot. | Model IDs are policy facts. A provider SDK must not own semantic routes, fallback, budgets, or authority. |
 | Capability release | Current source has capability records, gates, promotion, rollback, and domain additions beyond the older common contract material. | A capability name or stored release record is not proof that one contract covers every domain. |
-| Sandbox | The accepted V2 path uses direct, unprivileged Bubblewrap. M1-M3 source exists. The current exact candidate is not thereby physically or production qualified. | The retained V1 broker and `source_*` topology are historical and MUST NOT be reintroduced by implication. |
-| External effects | Source contains external-agency and broker-era machinery, including non-production adapters. | Source presence does not establish current external-effect architecture, deployment, credential authority, or authorization. The cross-cutting External Effect and Authority contract governs future reconciliation. |
+| Sandbox | Accepted V2 path uses direct, unprivileged Bubblewrap. See live table above for M-series maturity. | Retained V1 broker and `source_*` topology are historical and MUST NOT be reintroduced by implication. |
+| External effects | Source contains external-agency and broker-era machinery, including non-production adapters. | Source presence does not establish current external-effect architecture, deployment, credential authority, or authorization. |
 | Procedures and Computer Use | No production Procedural Skill Graduation or general Computer Use runtime exists. | Imported formats and browser access remain inert mechanisms until qualified and authorized. |
 
-Known source/document mismatches that need later source work are recorded, not
-repaired, by this documentation task:
+Known source/document mismatches remain recorded, not repaired, here:
 
 - Runtime-session metadata supplies an older hard-coded nuclear schema value.
 - Current route facts are split across configuration, a hard-coded purpose map,
@@ -144,9 +165,43 @@ repaired, by this documentation task:
   while the planned first Model Fabric slice requires one request and no
   fallback.
 
-## 4. Roadmap topology
+## 4. Work classes
 
-The drawing below is the owner-selected delivery map. It is not a
+These classes sort **existing** roadmap items. They are not new owners and not
+new phases.
+
+| Class | Meaning | Existing items |
+|---|---|---|
+| Mechanism work | Substrates, workshops, dispatch, durable work, procedures, later computer interaction | Sandbox remaining M-series; Model Fabric; Operational Continuity; Procedural Skill Graduation; Computer Use (deferred as current work) |
+| Cognitive maturation | Existing cognitive / evidence / attention owners becoming qualified | Memory / Evidence maturation; Context Budget; Learned Autonomy; Cognitive Graduation; Relational Graduation |
+| Governance specification | Lifecycle and admission rules composed from existing owners | Self-change lifecycle **specification**; Evaluation / Qualification remains the promotion plane |
+| Deferred capability | Named later, not current engineering | Typed Event Spine design; Computer Use implementation; voice; broad external tools; self-modification **execution**; longitudinal companion evaluation campaign |
+
+```text
+MECHANISM COMPLETION
+  != COGNITIVE MATURATION
+  != GOVERNANCE SPECIFICATION
+  != DEFERRED CAPABILITY
+SANDBOX M5 AUTHORSHIP
+  != AUTHORITY TO CHANGE ASHLEY
+```
+
+## 5. Engineering milestones from current state
+
+Milestones below convert already-named roadmap items into dependency-ordered
+engineering work. They do not add architecture. Closing evidence is the
+smallest honest witness already named by the phase contract. Wave Acceptance
+stages remain distinct.
+
+Two sequences remain uncollapsed ([Architecture Freeze](Ashley_Architecture_Freeze.md)
+§5):
+
+- **Owner-selected delivery:** Sandbox → Model Fabric → Operational Continuity.
+- **Architecture-justified before advanced autonomy:** Memory / Evidence
+  maturation → self-change specification → Context Budget → Operational
+  Continuity → Event Spine design later if joins require it.
+
+The drawing below remains the owner-selected delivery map. It is not a
 hard-dependency ladder. Edge classes live in the
 [Cross-Phase Architecture](Ashley_Cross_Phase_Architecture.md#31-dependency-classes).
 
@@ -225,30 +280,77 @@ normative. Full edge notes are in the Cross-Phase Architecture.
     resumable context. They do not make workflow state into Mind State or a
     cognitive concern.
 
-## 5. Current work and phase map
+### 5.1 Close the current Sandbox gate (now)
 
-The current delivery focus remains Sandbox Autonomy. Model Fabric is the next
-owner-selected implementation phase. Parallel documentation or research does
-not change that delivery gate. Owner-selected order is not a hard dependency.
+Current owner-selected delivery is Sandbox. Do not start Model Fabric
+implementation while this gate is the selected delivery focus.
 
-Do not collapse that delivery sequence into the architecture-justified
-substance order. Before advanced autonomy (Learned Autonomy, Cognitive
-Graduation), existing owners must mature in this research order. This is not
-a new phase list and not a replacement of `OWNER_SELECTED_IMPLEMENTATION_ORDER`:
+| ID | Milestone | Class | Depends on | Smallest closing evidence | Explicitly not |
+|---|---|---|---|---|---|
+| G0 | Establish M3 `PRODUCTION ACCEPTED` from permitted evidence | Mechanism | M3 architecture + exact-candidate production evidence | The missing `docs/handoffs/M3_PRODUCTION_ACCEPTANCE.md` recovered, or equivalent production observation bound to SHA `28e157a` | Inferring M3 production acceptance from M4 source presence |
+| G1 | Close M4 production acceptance | Mechanism | G0. Architecture still blocks M4 production acceptance on M3 production acceptance | Reviewer decision on the existing M4 packet (`PROPOSED FOR ACCEPTANCE` at candidate `553553b`), then distinct promotion / Discord witness if claimed | Treating the packet, Mint kernel run, or checkout match as `PRODUCTION ACCEPTED` |
+| G2 | Promote M4 capability only after G1 | Mechanism | G1 | Capability record + current admission showing `candidate_verification` authorized | Source presence or local tests as promotion |
 
-1. Memory / Evidence maturation (source vs assertion, contradiction,
-   forgetting, provenance, live/shadow) — `HARD_DEPENDENCY` for Learned
-   Autonomy and Cognitive Graduation
-2. Self-change lifecycle specification — before any apply-to-Ashley path;
-   does not block Sandbox M5 authorship; not a new kernel or phase
-3. Context Budget
-4. Operational Continuity
-5. Typed Event Spine — design later if cross-owner reconstruction or recovery
-   joins require it; **not a roadmap phase**
+G0 is `UNKNOWN` in this worktree because the cited M3 packet file is absent.
 
-Model Fabric remains mechanism work. Completing Sandbox or Model Fabric does
-not unlock Learned Autonomy, Cognitive Graduation, or self-modification
-execution.
+### 5.2 Mechanism track (owner-selected)
+
+Do not reorder these `OWNER_SELECTED_IMPLEMENTATION_ORDER` edges.
+
+| ID | Milestone | Existing item | Depends on | Smallest closing evidence | Explicitly not |
+|---|---|---|---|---|---|
+| M5 | Sandbox M5 authorship | Sandbox Autonomy | G1 | Exact-candidate M5 witness required by the M-series contract | Authority to change Ashley; live-repo mutation; Git publication |
+| M6 | Sandbox M6 bounded operate | Sandbox Autonomy | M5 | One admitted objective completed through a finite M3/M4/M5 sequence | New effect class; border authority; worker identity |
+| M7 | Sandbox M7 controlled engineering effects | Sandbox Autonomy | M6 + External Effect and Authority for the named profile | One named engineering-border profile admitted, committed, receipted, and reconciled | Computer Use; generic external agency; self-change |
+| F1 | Model Fabric first slice | Model Fabric | Owner-selected Sandbox gate (after current Sandbox delivery, not semantic parenthood) | One accepted Thought-observation slice: one provider request, no fallback, receipts, privacy, cancellation, semantic qualification | Cognitive advancement; full Context Budget; execution authority |
+| OC1 | Operational Continuity first durable-work slice | Operational Continuity | Owner-selected after F1. Model-backed attempts use Model Fabric as `CROSS_CUTTING_INTERFACE` | Restart-resumable bounded work whose authority, artifact lineage, cancellation, and ambiguous effect reconcile | Mind State; `OpenConcern`; exactly-once external reality; Event Spine |
+| P1 | Procedural Skill Graduation of one procedure | Procedural Skill Graduation | `EVIDENCE_DEPENDENCY` on attributable traces. General OC1 is not required | One evidence-bound procedure graduates, runs only under current authority, and can be revoked | Capability admission; Identity change; automatic graduation from repetition |
+
+Computer Use remains a named later mechanism. It is not a current
+implementation milestone. See §5.5.
+
+### 5.3 Cognitive maturation track
+
+This track is not unlocked by Sandbox or Model Fabric completion. It may
+proceed in parallel with mechanism work except where a classified dependency
+says otherwise.
+
+| ID | Milestone | Existing item | Depends on | Smallest closing evidence | Explicitly not |
+|---|---|---|---|---|---|
+| C1 | Memory / Evidence maturation | Memory / Evidence | Current evidence architecture | Source vs assertion, contradiction, forgetting, provenance, and live/shadow are contract-complete for later consumers | World truth; a Knowledge layer; docs-as-memory |
+| C2 | Context Budget first bounded projection | Context Budget | `HARD_DEPENDENCY` on C1. `CROSS_CUTTING_INTERFACE` on Model Fabric `ContextProjection` (minimal envelope, not complete Fabric) | Same persistent state yields inspectable projections under multiple budgets without changing memory or semantic truth | Recall authority; forgetting; Mind State mutation |
+| C3 | Learned Autonomy first qualified influence | Learned Autonomy | `HARD_DEPENDENCY` on C1 | A learned influence changes a later choice for a traceable reason, stays inside authority, survives contradiction, and can be demoted | Obedience optimization; Identity mutation; Computer Use |
+| C4 | Cognitive Graduation | Cognitive Graduation | `HARD_DEPENDENCY` on C1 and C3. Context Budget and Operational Continuity are `EVIDENCE_DEPENDENCY` | Long-horizon evidence of grounded view revision, continuity, initiative diversity, refusal, and rollback without fabricated experience | Personhood; external authority; silent Identity change |
+| C5 | Relational Graduation | Relational Graduation | `HARD_DEPENDENCY` on relationship-state foundation and C1. C3 is `CROSS_CUTTING_INTERFACE`, not a predecessor. Sibling of C4 | Long-horizon evidence of continuity, disagreement, withdrawal, repair, privacy, non-manipulation, and no authority widening | Engagement maximization; inferred consent; cognitive qualification |
+
+### 5.4 Governance specification
+
+Not a kernel. Not a phase. Not Sandbox M5.
+
+| ID | Milestone | Existing item | Depends on | Smallest closing evidence | Explicitly not |
+|---|---|---|---|---|---|
+| S1 | Self-change lifecycle specification | composed Identity, Stewardship, Evaluation, Continuity, Authority, Sandbox M5/M7 | Required before any apply-to-Ashley path. Does **not** block M5 authorship | Written lifecycle: propose, review, exact-candidate bind, admit, apply, receipt, rollback, and what remains forbidden | A seventh kernel; self-modification execution; M5 authorship as self-change |
+
+Evaluation / Qualification remains the promotion plane for every track.
+
+### 5.5 Deferred capabilities
+
+Do not pull these into current engineering. They stay named later work.
+
+| ID | Existing item | Why deferred | Re-entry condition |
+|---|---|---|---|
+| D1 | Typed Event Spine | Freeze: design later; not a phase | Cross-owner reconstruction or recovery actually needs a join |
+| D2 | Computer Use implementation | Named later mechanism under External Effect | External Effect contract + current admission; not implied by M7 or an available desktop |
+| D3 | Voice / extra channels | Channel-neutral continuity is prior | A channel-specific privacy, rendering, identity, and qualification contract |
+| D4 | Broad external tools | Capability availability is not authority | Per-tool admission under External Effect and Capability |
+| D5 | Self-modification execution | Specification (S1) is prior | S1 closed; then exact-candidate execution under existing owners |
+| D6 | Longitudinal companion evaluation campaign | Evaluation-plane extension, not a cognitive owner | C1, C3, C4/C5, and privacy-safe long-horizon evidence |
+
+### 5.6 Existing phase-contract register
+
+The rows below are unchanged phase contracts. They are not a delivery queue.
+Status `CURRENT WORK` applies only to Sandbox Autonomy as the owner-selected
+delivery focus.
 
 | Phase or plane | Status | Dependencies (classified) | Adds | Does not add | Governing document | Smallest closing evidence |
 |---|---|---|---|---|---|---|
@@ -256,13 +358,13 @@ execution.
 | Model Fabric | `CURRENT PHASE CONTRACT`; implementation blocked by owner-selected Sandbox delivery gate | `OWNER_SELECTED_IMPLEMENTATION_ORDER` after Sandbox. No semantic or authority derivation from Sandbox. First-slice package qualification is evidence, not architecture. | Provider-neutral model profiles, purpose dispatch, bounded specialist sessions, receipts, and a minimal typed `ContextProjection` transport boundary | Provider ownership of meaning, full Context Budget, cognitive writes, or execution authority | [Model Fabric Architecture](Model_Fabric_Architecture.md) | One accepted Thought-observation slice with one provider request, no fallback, receipts, privacy, cancellation, and semantic qualification |
 | Operational Continuity | `CURRENT PHASE CONTRACT`; planned | `OWNER_SELECTED_IMPLEMENTATION_ORDER` after Model Fabric. Model-backed work is a `CROSS_CUTTING_INTERFACE`. Does not own model intelligence. | Durable work concerns, attempts, stages, leases, resumption, cancellation, artifacts, fan-out/fan-in, and effect reconciliation | Mind State, `OpenConcern`, motivation, or exactly-once external reality | [Operational Continuity Architecture](Operational_Continuity_Architecture.md) | Restart-resumable bounded work whose authority, artifact lineage, cancellation, and ambiguous effect reconcile correctly |
 | Procedural Skill Graduation | `CURRENT PHASE CONTRACT`; planned | `EVIDENCE_DEPENDENCY` on attributable traces matching the procedure's evidence contract. General Operational Continuity is not required. | Candidate-to-qualified procedure lifecycle, versioning, bindings, revocation, and retirement | Capability admission, Identity, learned autonomy, or automatic graduation from repetition | [Procedural Skill Graduation Architecture](Procedural_Skill_Graduation_Architecture.md) | One evidence-bound procedure graduates, runs only under current authority, and can be revoked without residual availability |
-| Computer Use | `CURRENT PHASE CONTRACT`; planned | `HARD_DEPENDENCY` on External Effect and Authority. Procedure rung is `OWNER_SELECTED_IMPLEMENTATION_ORDER`. Multi-step recovery is `EVIDENCE_DEPENDENCY`. | Semantic application surfaces, deterministic UI control, bounded visual fallback, handoff and re-observation | Generic external-effect meaning, credential authority, blanket browser permission, or cognitive authority | [Computer Use Architecture](Computer_Use_Architecture.md) | One bounded action is observed, prepared, revalidated, committed, witnessed or reconciled, and safely resumed after interruption |
+| Computer Use | `CURRENT PHASE CONTRACT`; planned / deferred as current implementation | `HARD_DEPENDENCY` on External Effect and Authority. Procedure rung is `OWNER_SELECTED_IMPLEMENTATION_ORDER`. Multi-step recovery is `EVIDENCE_DEPENDENCY`. | Semantic application surfaces, deterministic UI control, bounded visual fallback, handoff and re-observation | Generic external-effect meaning, credential authority, blanket browser permission, or cognitive authority | [Computer Use Architecture](Computer_Use_Architecture.md) | One bounded action is observed, prepared, revalidated, committed, witnessed or reconciled, and safely resumed after interruption |
 | Learned Autonomy | `CURRENT PHASE CONTRACT`; planned cognitive track | `HARD_DEPENDENCY` on Memory / Evidence maturation. Cognition owners are `CROSS_CUTTING_INTERFACE`. Unattended continuity is `EVIDENCE_DEPENDENCY`. | Evidence-bound learned preferences, bounded initiative influence, revision, decay, contradiction, rollback, and non-manipulative growth | Wider capability, obedience optimization, Identity mutation, relationship optimization, or random novelty | [Learned Autonomy Architecture](Learned_Autonomy_Architecture.md) | A learned influence changes a later choice for a traceable reason, remains within authority, survives contradiction tests, and can be demoted |
 | Context Budget | `CURRENT PHASE CONTRACT`; planned attention track | `HARD_DEPENDENCY` on Memory / Evidence. `CROSS_CUTTING_INTERFACE` on Model Fabric `ContextProjection`. Operational Continuity is `EVIDENCE_DEPENDENCY` for resumable work. | Typed selection, hierarchy, budgets, compression, eviction, inspection, and deterministic rebuild rules for active context | Recall authority, forgetting, Mind State mutation, model-routing authority, or truth | [Context Budget Architecture](Context_Budget_Architecture.md) | The same persistent state yields bounded, inspectable projections under multiple budgets without changing memory or semantic truth |
 | Cognitive Graduation | `CURRENT PHASE CONTRACT`; planned | `HARD_DEPENDENCY` on Memory / Evidence and Learned Autonomy. Context Budget and Operational Continuity are `EVIDENCE_DEPENDENCY`. | Epistemic maturation, durable goals and concerns, evidence-bound lived-experience continuity, belief/view revision, and integrated cognitive coherence | Personhood claims, external authority, relationship optimization, or silent Identity change | [Cognitive Graduation Architecture](Cognitive_Graduation_Architecture.md) | Long-horizon evidence shows grounded view revision, continuity, initiative diversity, refusal, and rollback without fabricated experience |
 | Relational Graduation | `CURRENT PHASE CONTRACT`; planned | `HARD_DEPENDENCY` on relationship-state foundation and Memory / Evidence. Learned Autonomy is `CROSS_CUTTING_INTERFACE`, not a predecessor. | Mutual commitment semantics, tension/withdrawal continuity, non-compellable relationship development, and long-horizon relational evaluation | Engagement maximization, attachment engineering, inferred consent, ownership, or cognitive qualification | [Relational Graduation Architecture](Relational_Graduation_Architecture.md) | Long-horizon evidence shows continuity, disagreement, withdrawal, repair, privacy, non-manipulation, and no authority widening |
 
-## 6. Phase decisions
+## 6. Phase contracts (not a delivery queue)
 
 ### Sandbox Autonomy
 
@@ -514,7 +616,7 @@ humility about metaphysical claims.
 ## 11. Roadmap Extension Recommendations
 
 These recommendations are outside the hardened roadmap. They are not
-implementation authorization.
+implementation authorization and they are not engineering milestones in §5.
 
 ### Self-Change Governance
 
@@ -647,7 +749,9 @@ topology:
 
 1. Read [`VISION.md`](../../VISION.md) and governing documents in authority
    order.
-2. Read this roadmap.
+2. Read this roadmap. Use §3 for live state, §4 for work classes, and §5 for
+   engineering milestones from current state forward. §6 is phase contracts,
+   not a delivery queue.
 3. Read the [Document Index](Ashley_Architecture_Document_Index.md),
    [Cross-Phase Architecture](Ashley_Cross_Phase_Architecture.md), and the
    relevant cross-cutting plane.

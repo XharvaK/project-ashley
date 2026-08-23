@@ -165,6 +165,10 @@ recovery or reconstruction actually needs a join.
 Fabric → Operational Continuity. Model Fabric does not derive meaning or
 authority from Sandbox.
 
+The canonical roadmap now presents already-named items as engineering
+milestones from current live state. That conversion does not add phases and
+does not reorder `OWNER_SELECTED_IMPLEMENTATION_ORDER` edges.
+
 **Architecture-justified before advanced autonomy** (cognitive/safety
 substance; not a new ladder of phases):
 

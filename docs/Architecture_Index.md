@@ -37,6 +37,7 @@ VISION.md
 | [`Vision_Implementation_Map.md`](Vision_Implementation_Map.md) | Commitment → owner → evidence → failure → status |
 | [`Wave_Acceptance_Protocol.md`](Wave_Acceptance_Protocol.md) | Historical Wave ladder plus current M-series acceptance mapping |
 | [`architecture/Ashley_Architecture_Freeze.md`](architecture/Ashley_Architecture_Freeze.md) | Frozen owner map, event-term split, and architecture-justified sequence; not a dashboard |
+| [`architecture/Ashley_Architecture_Roadmap.md`](architecture/Ashley_Architecture_Roadmap.md) | Canonical direction. §5 converts existing items into engineering milestones from live state. It does not add architecture. |
 | [`architecture/Ashley_Cross_Phase_Architecture.md`](architecture/Ashley_Cross_Phase_Architecture.md) | Shared state, authority, evidence, and current-fact laws |
 | [`architecture/sandbox/ASHLEY_SANDBOX_V2_ROADMAP.md`](architecture/sandbox/ASHLEY_SANDBOX_V2_ROADMAP.md) | Current Sandbox V2 M0-M7 authority, state, truth, and acceptance contracts |
 | [`Sandbox_Design.md`](Sandbox_Design.md) | Historical V1 broker threat model, IPC, and hardening; topology superseded for V2 |
