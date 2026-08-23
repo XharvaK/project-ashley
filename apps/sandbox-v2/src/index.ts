@@ -1,11 +1,12 @@
 /**
  * @composer-assistant/sandbox-v2 — Sandbox V2 typed-capability kernel
- * (Sandbox V2 M1–M4).
+ * (Sandbox V2 M1–M5).
  *
  * Exports the V2 vocabulary, capability registry, operator-owned project
  * read registry, request validation, the typed dispatcher seam, the
- * read-only project-inspection family, M3 workspace experiments, and the
- * M4 verification kernel. All boundaries fail closed.
+ * read-only project-inspection family, M3 workspace experiments, the
+ * M4 verification kernel, and the M5 authorship kernel. All boundaries fail
+ * closed.
  */
 
 export {
@@ -19,6 +20,7 @@ export {
   isProjectSearchTextResult,
   isSandboxV2OperationResult,
   isWorkspaceVerifyResult,
+  isChangesetAuthorResult,
 } from "./v2-types.js";
 export type {
   SandboxV2OperationName,
@@ -42,7 +44,10 @@ export type {
   SandboxV2WorkspaceDeleteFileRequest,
   SandboxV2WorkspaceCreateDirectoryRequest,
   SandboxV2WorkspaceVerifyRequest,
+  SandboxV2WorkspaceAuthorRequest,
   SandboxV2WorkspaceRequest,
+  SandboxV2ChangedPath,
+  SandboxV2SourceCleanliness,
   VerificationProtocolState,
   VerificationOutcome,
 } from "./v2-types.js";
@@ -119,6 +124,13 @@ export {
   bindCandidateSnapshot,
   PROVISIONAL_TREE_HASH_ALGORITHM,
 } from "./verification/snapshot.js";
+
+export {
+  executeCandidateAuthorship,
+  validateChangesetAuthorRequest,
+} from "./authorship/executor.js";
+export { scanAuthorshipText } from "./authorship/secret-scan.js";
+export { refuseApplyCandidateChangeSet } from "./authorship/apply.js";
 
 export {
   handleFileRoundtripV2,

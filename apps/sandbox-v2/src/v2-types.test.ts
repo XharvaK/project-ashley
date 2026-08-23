@@ -17,6 +17,13 @@ describe("isSandboxV2Request", () => {
       { version: 2, operation: "project.read_file", projectId: "p", path: "a.ts" },
       { version: 2, operation: "project.list_directory", projectId: "p", path: "." },
       { version: 2, operation: "project.search_text", projectId: "p", path: ".", pattern: "x" },
+      { version: 2, operation: "workspace.verify", projectId: "p", workspaceId: "ws", recipeId: "r" },
+      {
+        version: 2,
+        operation: "changeset.author",
+        projectId: "p",
+        workspaceId: "ws",
+      },
     ]) {
       expect(isSandboxV2Request(request)).toBe(true);
     }
@@ -48,6 +55,7 @@ describe("capability registry", () => {
       "workspace.delete_file",
       "workspace.create_directory",
       "workspace.verify",
+      "changeset.author",
     ]);
 
     // M2 project_inspection family
@@ -72,6 +80,9 @@ describe("capability registry", () => {
 
     const m4Ops = V2_CAPABILITY_REGISTRY.filter((s) => s.family === "project_verification").map((s) => s.operation);
     expect(m4Ops).toEqual(["workspace.verify"]);
+
+    const m5Ops = V2_CAPABILITY_REGISTRY.filter((s) => s.family === "project_authorship").map((s) => s.operation);
+    expect(m5Ops).toEqual(["changeset.author"]);
   });
 
   it("marks project inspection read-only and project-required", () => {
@@ -99,11 +110,22 @@ describe("capability registry", () => {
     expect(spec?.requiresProject).toBe(true);
   });
 
+  it("marks authorship as project-required and candidate-read-only", () => {
+    const spec = v2CapabilitySpec("changeset.author");
+    expect(spec?.family).toBe("project_authorship");
+    expect(spec?.readOnly).toBe(true);
+    expect(spec?.requiresProject).toBe(true);
+  });
+
   it("defers the git ops fail-closed", () => {
     expect(V2_DEFERRED_OPERATIONS).toEqual([
       "inspect_project_git_status",
       "inspect_project_git_diff",
       "inspect_project_git_log",
+      "changeset.apply",
+      "changeset.merge",
+      "git.commit",
+      "git.push",
     ]);
     expect(v2CapabilitySpec("inspect_project_git_status")).toBeUndefined();
   });

@@ -30,6 +30,7 @@ import type {
 } from "./types.js";
 import { capabilityCanInfluence } from "./rollout/capabilities.js";
 import {
+  canOfferCandidateAuthorship,
   canOfferCandidateVerification,
   canOfferCandidateWorkspace,
   canOfferProjectInspection,
@@ -267,6 +268,37 @@ export function operationalWorkBlock(
     } else if (license.error) {
       lines.push(
         `Verification status: not licensed (${license.error}). No mechanical verification claim is authorized.`,
+      );
+    }
+    if (lines.length === 0) return "";
+    return [
+      "## Operational work state (cognitive attention only)",
+      ...lines,
+    ].join("\n");
+  }
+
+  if (license.profile === "candidate_authorship") {
+    const lines = [
+      `Status: ${truth.state !== "none" ? truth.state : license.state}`,
+      `Profile: ${license.profile}`,
+      license.taskId ? `Task ID: ${license.taskId}` : "",
+      license.error ? `Error: ${license.error}` : "",
+      license.refusalReason ? `Refusal: ${license.refusalReason}` : "",
+    ].filter(Boolean);
+    const effect = license.authorshipClaimEffect;
+    if (truth.state === "verified_success" && effect) {
+      lines.push(
+        `Change-set ID: ${effect.changesetId}`,
+        `Workspace ID: ${effect.workspaceId}`,
+        `Candidate tree hash: ${effect.candidateTreeHash}`,
+        `Base tree hash: ${effect.baseTreeHash}`,
+        `Status: ${effect.status}`,
+        `Review: ${effect.reviewStatus}`,
+        "Semantics: this named candidate change-set was sealed as advisory candidate work. It has not been applied.",
+      );
+    } else if (license.error) {
+      lines.push(
+        `Authorship status: not licensed (${license.error}). No sealed change-set claim is authorized.`,
       );
     }
     if (lines.length === 0) return "";
@@ -544,6 +576,61 @@ export function candidateVerificationEvidenceBlock(
 }
 
 /**
+ * Structured current-turn candidate-authorship evidence for Expression.
+ * Always present. Licensed facts are sealed advisory change-sets only.
+ */
+export function candidateAuthorshipEvidenceBlock(
+  license: OperationalClaimLicense | null | undefined,
+  options: { capabilityAvailable?: boolean } = {},
+): string {
+  const capabilityAvailable = options.capabilityAvailable === true;
+  const availableLine = `capabilityAvailable = ${capabilityAvailable}`;
+  const semanticsAvailable = [
+    "Semantics: capabilityAvailable is the authoritative current capability state; authorshipStatus is what Ashley actually did or observed this turn.",
+    "Semantics: a licensed authorship outcome is a sealed advisory candidate change-set. It is not apply, merge, deployment, Identity change, or self-improvement.",
+  ];
+  if (license?.profile === "candidate_authorship") {
+    const truth = deriveOperationalTruth(license);
+    if (truth.state === "verified_success" && license.authorshipClaimEffect) {
+      const effect = license.authorshipClaimEffect;
+      return [
+        "Candidate authorship evidence:",
+        availableLine,
+        "authorshipStatus = proposed",
+        `changesetId = ${effect.changesetId}`,
+        `snapshotId = ${effect.snapshotId}`,
+        `candidateTreeHash = ${effect.candidateTreeHash}`,
+        `baseTreeHash = ${effect.baseTreeHash}`,
+        `reviewStatus = ${effect.reviewStatus}`,
+        ...semanticsAvailable,
+        "Semantics: this named candidate change-set was sealed against this named base as advisory candidate work. It has not been applied.",
+      ].join("\n");
+    }
+    if (license.error) {
+      return [
+        "Candidate authorship evidence:",
+        availableLine,
+        "authorshipStatus = refused",
+        "sealedAdvisoryChangeset = false",
+        `error = ${license.error}`,
+        ...semanticsAvailable,
+        "Semantics: this turn did not produce a licensed sealed candidate change-set.",
+      ].join("\n");
+    }
+  }
+  return [
+    "Candidate authorship evidence:",
+    availableLine,
+    "authorshipStatus = not_performed",
+    "sealedAdvisoryChangeset = false",
+    ...semanticsAvailable,
+    capabilityAvailable
+      ? "Semantics: capabilityAvailable = true with authorshipStatus = not_performed means Ashley CAN seal an admitted candidate change-set this turn but did not; this is not an inability and must never be expressed as one."
+      : "Semantics: Ashley cannot seal a candidate change-set this turn because candidate_authorship is not active or authorshipAllowed is closed.",
+  ].join("\n");
+}
+
+/**
  * ContextComposer — sole owner of turn context assembly.
  * Assembles existing peer outputs; does not reinterpret, score, or rewrite them.
  * Omitting an empty peer section is assembly, not filtering.
@@ -594,6 +681,12 @@ export function composeTurnContext(
        capabilityAvailable: canOfferCandidateVerification(db),
      },
    );
+   const authorshipEvidence = candidateAuthorshipEvidenceBlock(
+     decision?.operationalLicense,
+     {
+       capabilityAvailable: canOfferCandidateAuthorship(db),
+     },
+   );
   // Questions only when Thought selected question evidence or none selected yet
   // would dump — skip global question dump; selected questions arrive via evidence.
   const questions = "";
@@ -610,6 +703,7 @@ export function composeTurnContext(
     inspectionEvidence,
     workspaceEvidence,
     verificationEvidence,
+    authorshipEvidence,
     questions,
   ].filter(Boolean);
 

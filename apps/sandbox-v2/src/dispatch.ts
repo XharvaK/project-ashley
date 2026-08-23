@@ -22,6 +22,9 @@ import {
   executeCandidateVerification,
   type VerificationSpawn,
 } from "./verification/executor.js";
+import {
+  executeCandidateAuthorship,
+} from "./authorship/executor.js";
 import type { RecipeCatalog } from "./verification/recipe-catalog.js";
 import { v2CapabilitySpec, V2_DEFERRED_OPERATIONS, SANDBOX_V2_OPERATION_NAMES, isSandboxV2Request } from
   "./v2-types.js";
@@ -169,6 +172,18 @@ export class SandboxV2Dispatcher {
         timeoutMs: this.env.timeoutMs,
         childExecutionDeadlineAtMs: this.env.childExecutionDeadlineAtMs,
         childTerminationDeadlineAtMs: this.env.childTerminationDeadlineAtMs,
+        settlementDeadlineAtMs: this.env.settlementDeadlineAtMs,
+        clock: this.env.clock,
+      });
+    }
+    if (request.operation === "changeset.author") {
+      const { registry, protectedRoots } = this.env;
+      return executeCandidateAuthorship(request, {
+        registry,
+        protectedRoots,
+        workspaceManager: this.env.workspaceManager,
+        managedWorkspaceRoot: this.env.managedWorkspaceRoot,
+        viewBuilder: this.env.viewBuilder,
         settlementDeadlineAtMs: this.env.settlementDeadlineAtMs,
         clock: this.env.clock,
       });

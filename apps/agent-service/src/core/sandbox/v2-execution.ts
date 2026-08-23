@@ -40,6 +40,8 @@ import {
 } from "@composer-assistant/sandbox-m1";
 import {
   SandboxV2Dispatcher,
+  isChangesetAuthorResult,
+  scanAuthorshipText,
   type SandboxV2Environment,
   type SandboxV2Request,
   type SandboxV2Result,
@@ -48,6 +50,7 @@ import { isVerificationRecipeAllowed } from "@composer-assistant/sandbox-policy"
 import type {
   CognitionInspectionRequest,
   CognitionWorkspaceRequest,
+  CognitionAuthorshipRequest,
   ProjectInspectionObservation,
   WorkspaceExperimentObservation,
 } from "../types.js";
@@ -69,6 +72,11 @@ import {
   issueCandidateVerificationLicense,
   type CandidateVerificationRequest,
 } from "./verification-license.js";
+import { issueCandidateAuthorshipLicense } from "./authorship-license.js";
+import {
+  persistProposedChangeSet,
+  persistQuarantinedChangeSet,
+} from "./changeset-store.js";
 
 const SECRET_ENV_KEY = "ASHLEY_SANDBOX_M1_SECRET_SENTINEL";
 const BWRAP_PATH = "/usr/bin/bwrap";
@@ -1136,3 +1144,233 @@ export async function executeCandidateVerificationV2(
     return none("internal_error");
   }
 }
+
+export type ExecuteCandidateAuthorshipV2Input = {
+  request: CognitionAuthorshipRequest;
+  ownerId?: string;
+  messageEntityUuid?: string;
+  deadlineAtMs?: number;
+  dispatcher?: SandboxV2Dispatcher;
+  registry?: V2ProjectReadRegistry;
+  workspaceManager?: import("@composer-assistant/sandbox-v2").WorkspaceManager;
+  envOverrides?: Partial<SandboxV2Environment> & {
+    sandboxEngineeringLifecycleEnabled?: boolean;
+  };
+  db?: DatabaseSync;
+  masterMode?: CognitionMode;
+  skipCapabilityGate?: boolean;
+};
+
+export type ExecuteCandidateAuthorshipV2Result = {
+  license: OperationalClaimLicense;
+};
+
+function authorshipSecretText(request: CognitionAuthorshipRequest): string {
+  return [
+    request.objective,
+    request.rationale,
+    request.targetArea ?? "",
+    request.expectedEffect ?? "",
+  ].join("\n");
+}
+
+/**
+ * Maps a completed M5 authorship receipt onto OperationalClaimLicense and
+ * persists control-plane work state. Reactive only. Never applies a patch.
+ */
+export async function executeCandidateAuthorshipV2(
+  input: ExecuteCandidateAuthorshipV2Input,
+): Promise<ExecuteCandidateAuthorshipV2Result> {
+  const { request, messageEntityUuid } = input;
+  const none = (
+    error: string,
+    extras?: Partial<OperationalClaimLicense>,
+  ): ExecuteCandidateAuthorshipV2Result => ({
+    license: {
+      state: "none",
+      taskId: extras?.taskId ?? `v2-author-${Date.now()}`,
+      profile: "candidate_authorship",
+      error,
+      ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
+      ...extras,
+    },
+  });
+
+  const settlementDeadlineAtMs = input.deadlineAtMs;
+  if (
+    typeof settlementDeadlineAtMs === "number" &&
+    settlementDeadlineAtMs <= Date.now()
+  ) {
+    return {
+      license: {
+        state: "failed",
+        taskId: `v2-author-${Date.now()}`,
+        profile: "candidate_authorship",
+        error: "deadline_exceeded",
+        ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
+      },
+    };
+  }
+
+  if (input.db && !input.skipCapabilityGate) {
+    try {
+      if (!capabilityCanInfluence(input.db, "candidate_authorship", input.masterMode)) {
+        return none("candidate_authorship_gate_denied");
+      }
+    } catch {
+      return none("candidate_authorship_gate_denied");
+    }
+  }
+
+  const lifecycleEnabled =
+    input.envOverrides?.sandboxEngineeringLifecycleEnabled !== undefined
+      ? input.envOverrides.sandboxEngineeringLifecycleEnabled
+      : env.sandboxEngineeringLifecycleEnabled;
+  if (!lifecycleEnabled) {
+    return none("sandbox_lifecycle_disabled");
+  }
+
+  if (!input.ownerId) {
+    return none("owner_id_required");
+  }
+
+  const registry =
+    input.registry ??
+    input.envOverrides?.registry ??
+    loadOperatorProjectReadRegistry();
+
+  const resolved = registry.resolveReadRoot(request.projectId);
+  if (!resolved.ok) {
+    return none("authorship_not_allowed");
+  }
+  if (resolved.entry.authorshipAllowed !== true) {
+    return none("authorship_not_allowed");
+  }
+
+  const isCustomSeam =
+    input.dispatcher !== undefined ||
+    input.envOverrides?.sandboxAvailable !== undefined;
+
+  const substrateAvailable =
+    input.envOverrides?.sandboxAvailable !== undefined
+      ? input.envOverrides.sandboxAvailable()
+      : isSandboxV2Available();
+
+  if (!isCustomSeam && !substrateAvailable) {
+    return none("sandbox_unavailable");
+  }
+
+  const secretProbe = scanAuthorshipText(authorshipSecretText(request));
+  if (secretProbe.hit) {
+    if (input.db) {
+      persistQuarantinedChangeSet(input.db, {
+        ownerId: input.ownerId,
+        changesetId: `cs_${randomBytes(16).toString("hex")}`,
+        projectId: request.projectId,
+        workspaceId: request.workspaceId,
+        sourceSnapshotId: "unsealed",
+        objective: request.objective,
+        rationale: request.rationale,
+        riskClass: request.riskClass,
+        evidenceRefs: request.evidenceRefs ?? [],
+        verificationRecipeIds: request.verificationRecipeIds ?? [],
+        quarantineReason: "secret_detected",
+      });
+    }
+    return none("secret_detected");
+  }
+
+  try {
+    const dispatcher =
+      input.dispatcher ??
+      new SandboxV2Dispatcher({
+        env: {
+          registry,
+          workspaceManager: input.workspaceManager,
+          ...input.envOverrides,
+        },
+      });
+
+    const res: SandboxV2Result = await dispatcher.dispatch({
+      version: 2,
+      operation: "changeset.author",
+      projectId: request.projectId,
+      workspaceId: request.workspaceId,
+      ...(request.intendedPaths ? { intendedPaths: request.intendedPaths } : {}),
+    });
+
+    if (res.outcome === "failed" && res.error === "secret_detected") {
+      if (input.db) {
+        persistQuarantinedChangeSet(input.db, {
+          ownerId: input.ownerId,
+          changesetId: `cs_${randomBytes(16).toString("hex")}`,
+          projectId: request.projectId,
+          workspaceId: request.workspaceId,
+          sourceSnapshotId: "unsealed",
+          objective: request.objective,
+          rationale: request.rationale,
+          riskClass: request.riskClass,
+          evidenceRefs: request.evidenceRefs ?? [],
+          verificationRecipeIds: request.verificationRecipeIds ?? [],
+          quarantineReason: "secret_detected",
+        });
+      }
+      return none("secret_detected");
+    }
+
+    const receipt =
+      res.outcome === "succeeded" && isChangesetAuthorResult(res.result)
+        ? res.result
+        : undefined;
+
+    if (receipt && input.db && res.outcome === "succeeded") {
+      persistProposedChangeSet(input.db, {
+        ownerId: input.ownerId,
+        changesetId: receipt.changesetId,
+        projectId: receipt.projectId,
+        workspaceId: receipt.workspaceId,
+        sourceSnapshotId: receipt.sourceSnapshotId,
+        candidateSnapshotId: receipt.snapshotId,
+        candidateTreeHash: receipt.candidateTreeHash,
+        baseTreeHash: receipt.baseTreeHash,
+        baseCommit: receipt.baseCommit,
+        sourceCleanliness: receipt.sourceCleanliness,
+        treeHashAlgorithm: receipt.treeHashAlgorithm,
+        objective: request.objective,
+        rationale: request.rationale,
+        targetArea: request.targetArea,
+        expectedEffect: request.expectedEffect,
+        riskClass: request.riskClass,
+        evidenceRefs: request.evidenceRefs ?? [],
+        verificationRecipeIds: request.verificationRecipeIds ?? [],
+        intendedPaths: request.intendedPaths,
+        changedPaths: receipt.changedPaths,
+        linkedVerificationRefs: request.evidenceRefs ?? [],
+        patchSha256: receipt.patchSha256,
+        patchBytes: receipt.patchBytes,
+        artifactRef: receipt.artifactRef,
+      });
+    }
+
+    return {
+      license: issueCandidateAuthorshipLicense({
+        request: {
+          projectId: request.projectId,
+          workspaceId: request.workspaceId,
+        },
+        receipt,
+        executedAtMs: res.executedAtMs,
+        messageEntityUuid,
+        error:
+          res.outcome === "unavailable"
+            ? (res.error ?? "sandbox_unavailable")
+            : res.outcome === "failed"
+              ? (res.error ?? "authorship_failed")
+              : null,
+      }),
+    };
+  } catch {
+    return none("internal_error");
+  }
+}
+

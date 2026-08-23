@@ -193,6 +193,14 @@ const NON_LIVE: Record<string, NonLiveRule> = {
     cls: "CONTROL_PLANE",
     reason: "observe-only sandbox effect admission ledger; never influences live behavior; shadow turn decisions may differ (deliberation) so the ledger is not part of the live projection",
   },
+  candidate_changesets: {
+    cls: "CONTROL_PLANE",
+    reason: "M5 sealed candidate change-set metadata; advisory work state; not Identity/Mind State/Recall",
+  },
+  candidate_changeset_events: {
+    cls: "CONTROL_PLANE",
+    reason: "M5 append-only change-set audit metadata; no patch bytes or secrets",
+  },
   engineering_admissions: {
     cls: "CONTROL_PLANE",
     reason: "sandbox engineering task admission ledger; control-plane state",

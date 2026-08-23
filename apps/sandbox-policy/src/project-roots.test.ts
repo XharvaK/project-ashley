@@ -4,6 +4,7 @@ import {
   validateProjectRootRegistry,
   classifyProjectRootAccess,
   isVerificationRecipeAllowed,
+  isAuthorshipAllowed,
   type ProjectRootEntry,
 } from "./project-roots.js";
 
@@ -72,6 +73,7 @@ describe("project root registry", () => {
     expect(entry?.canonicalRoot).toBe("/home/xarvak/project-ashley");
     expect(entry?.engineeringAllowed).toBe(true);
     expect(entry?.verificationAllowed).toBe(false);
+    expect(entry?.authorshipAllowed).toBe(false);
     expect(entry?.allowedRecipeIds).toEqual([]);
   });
 
@@ -81,9 +83,38 @@ describe("project root registry", () => {
     if (!r.ok) return;
     const a = r.registry.entries.get("projA");
     expect(a?.verificationAllowed).toBe(false);
+    expect(a?.authorshipAllowed).toBe(false);
     expect(a?.allowedRecipeIds).toEqual([]);
     expect(a?.engineeringAllowed).toBe(true);
     expect(isVerificationRecipeAllowed(a!, "typescript_fixture_compile_v1")).toBe(false);
+    expect(isAuthorshipAllowed(a!)).toBe(false);
+  });
+
+  it("does not treat engineering or verification as authorship", () => {
+    const r = validateProjectRootRegistry([
+      {
+        ...entries[0]!,
+        engineeringAllowed: true,
+        verificationAllowed: true,
+        allowedRecipeIds: ["typescript_fixture_compile_v1"],
+        authorshipAllowed: false,
+      },
+    ]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const entry = r.registry.entries.get("projA")!;
+    expect(entry.engineeringAllowed).toBe(true);
+    expect(entry.verificationAllowed).toBe(true);
+    expect(isAuthorshipAllowed(entry)).toBe(false);
+  });
+
+  it("admits authorship only when authorshipAllowed is true", () => {
+    const r = validateProjectRootRegistry([
+      { ...entries[0]!, authorshipAllowed: true },
+    ]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(isAuthorshipAllowed(r.registry.entries.get("projA")!)).toBe(true);
   });
 
   it("refuses a missing recipe allowlist even when verificationAllowed is true", () => {

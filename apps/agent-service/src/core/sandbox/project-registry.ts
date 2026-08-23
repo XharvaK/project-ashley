@@ -179,6 +179,47 @@ export function canOfferCandidateVerification(
   });
 }
 
+/**
+ * Checks conditions for offering M5 candidate authorship:
+ * 1. candidate_authorship release state permits live influence;
+ * 2. sandbox lifecycle permits execution;
+ * 3. Sandbox V2 substrate is available;
+ * 4. at least one approved project has authorshipAllowed.
+ *
+ * engineeringAllowed, candidateWorkspaceAllowed, and verificationAllowed
+ * never grant M5. Substrate availability is not permission.
+ */
+export function canOfferCandidateAuthorship(
+  db?: DatabaseSync,
+  options?: CanOfferProjectInspectionOptions,
+): boolean {
+  if (db) {
+    try {
+      if (!capabilityCanInfluence(db, "candidate_authorship", options?.masterMode)) {
+        return false;
+      }
+    } catch {
+      return false;
+    }
+  }
+  const lifecycle =
+    options?.lifecycleEnabled ?? env.sandboxEngineeringLifecycleEnabled;
+  if (!lifecycle) return false;
+
+  const substrate =
+    options?.substrateAvailable ?? isSandboxV2Available();
+  if (!substrate) return false;
+
+  const registry = options?.registry ?? loadOperatorProjectReadRegistry();
+  const approved = listApprovedReadProjectIds(registry);
+  if (approved.length === 0) return false;
+  return approved.some((pid) => {
+    const resolution = registry.resolveReadRoot(pid);
+    if (!resolution?.ok) return false;
+    return resolution.entry.authorshipAllowed === true;
+  });
+}
+
 export class AgentProjectRegistry {
   private registry: ProjectRootRegistry;
 
@@ -218,5 +259,9 @@ export class AgentProjectRegistry {
 
   isVerificationAllowed(projectId: string): boolean {
     return this.get(projectId)?.verificationAllowed === true;
+  }
+
+  isAuthorshipAllowed(projectId: string): boolean {
+    return this.get(projectId)?.authorshipAllowed === true;
   }
 }

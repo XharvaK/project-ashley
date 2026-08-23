@@ -12,6 +12,7 @@
 import {
   isVerifiedRoundtripEffectEvidence,
   isVerifiedVerificationClaimEffect,
+  isVerifiedAuthorshipClaimEffect,
   isVerifiedWorkspaceClaimEffect,
   type OperationalClaimLicense,
 } from "./engineering-types.js";
@@ -67,6 +68,16 @@ export type SandboxV2LicenseAuditRecord = {
     protocolState: string;
     verificationOutcome: string;
   } | null;
+  authorshipEffect?: {
+    workspaceId: string;
+    changesetId: string;
+    snapshotId: string;
+    candidateTreeHash: string;
+    baseTreeHash: string;
+    pathCount: number;
+    status: string;
+    reviewStatus: string;
+  } | null;
 };
 
 export function formatSandboxV2LicenseAudit(
@@ -80,7 +91,8 @@ export function formatSandboxV2LicenseAudit(
     license.profile !== "sandbox_workspace_file_roundtrip" &&
     license.profile !== "project_investigation" &&
     license.profile !== "project_experimentation" &&
-    license.profile !== "candidate_verification"
+    license.profile !== "candidate_verification" &&
+    license.profile !== "candidate_authorship"
   ) {
     return null;
   }
@@ -165,6 +177,36 @@ export function formatSandboxV2LicenseAudit(
             recipeDefinitionHash: license.verificationClaimEffect.recipeDefinitionHash,
             protocolState: license.verificationClaimEffect.protocolState,
             verificationOutcome: license.verificationClaimEffect.verificationOutcome,
+          }
+        : null,
+    };
+  }
+
+  if (license.profile === "candidate_authorship") {
+    const verified = isVerifiedAuthorshipClaimEffect(license.authorshipClaimEffect);
+    return {
+      discriminator: "ASHLEY_SANDBOX_V2_LICENSE",
+      sourceMessageEntityUuid: license.sourceMessageEntityUuid ?? null,
+      state: license.state,
+      taskId: license.taskId ?? null,
+      profile: license.profile,
+      verified,
+      error: license.error ?? null,
+      refusalReason: license.refusalReason ?? null,
+      effect: null,
+      workspaceEffect: null,
+      inspection: null,
+      verificationEffect: null,
+      authorshipEffect: license.authorshipClaimEffect
+        ? {
+            workspaceId: license.authorshipClaimEffect.workspaceId,
+            changesetId: license.authorshipClaimEffect.changesetId,
+            snapshotId: license.authorshipClaimEffect.snapshotId,
+            candidateTreeHash: license.authorshipClaimEffect.candidateTreeHash,
+            baseTreeHash: license.authorshipClaimEffect.baseTreeHash,
+            pathCount: license.authorshipClaimEffect.pathCount,
+            status: license.authorshipClaimEffect.status,
+            reviewStatus: license.authorshipClaimEffect.reviewStatus,
           }
         : null,
     };

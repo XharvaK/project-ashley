@@ -9,7 +9,7 @@ import {
   currentReleaseId,
 } from "../rollout/capabilities.js";
 import type { CognitionMode } from "../types.js";
-import { listApprovedReadProjectIds, canOfferCandidateWorkspace, canOfferCandidateVerification } from "../sandbox/project-registry.js";
+import { listApprovedReadProjectIds, canOfferCandidateWorkspace, canOfferCandidateVerification, canOfferCandidateAuthorship } from "../sandbox/project-registry.js";
 
 export type PerceptionCapabilityName =
   | "vision"
@@ -220,6 +220,36 @@ export function describeCandidateVerificationAvailability(options?: {
   }`;
 }
 
+export function describeCandidateAuthorshipAvailability(options?: {
+  db?: DatabaseSync;
+  masterMode?: CognitionMode;
+  canInfluence?: boolean;
+  registryAllows?: boolean;
+}): string {
+  if (!options?.db) {
+    return "Candidate authorship (M5): unavailable (no db for capability check); cannot request changeset.author this turn.";
+  }
+  const canInfluence =
+    options.canInfluence ??
+    (() => {
+      try {
+        return capabilityCanInfluence(options.db, "candidate_authorship", options.masterMode);
+      } catch {
+        return false;
+      }
+    })();
+  const registryAllows =
+    options.registryAllows ?? canOfferCandidateAuthorship(options.db);
+  if (canInfluence && registryAllows) {
+    return "Candidate authorship (M5): offerable (candidate_authorship active and authorshipAllowed; sealed advisory candidate change-set; not apply, merge, or self-change). Deadline-branch availability is a separate runtime gate.";
+  }
+  return `Candidate authorship (M5): ${
+    !canInfluence
+      ? "capability not active in rollout (observe-only; cannot request changeset.author)"
+      : "authorshipAllowed closed on the project registry (cannot request changeset.author)"
+  }`;
+}
+
 export function composeSelfCapabilityContext(
   db: DatabaseSync,
   options?: {
@@ -236,6 +266,7 @@ export function composeSelfCapabilityContext(
     `- ${describeSandboxV2Availability({ db, masterMode: options?.masterMode })}`,
     `- ${describeCandidateWorkspaceAvailability({ db, masterMode: options?.masterMode })}`,
     `- ${describeCandidateVerificationAvailability({ db, masterMode: options?.masterMode })}`,
+    `- ${describeCandidateAuthorshipAvailability({ db, masterMode: options?.masterMode })}`,
     `- ${describeSandboxAvailability()}`,
   ];
   return lines.join("\n");

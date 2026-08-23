@@ -4,7 +4,7 @@ import { EXIT_CODES } from "./exit-codes.js";
 
 describe("classifyAgentStartupError", () => {
   it("classifies unsupported_nuclear_schema as OPERATOR_REQUIRED", () => {
-    const err = new Error("unsupported_nuclear_schema:30>29") as Error & { code?: string };
+    const err = new Error("unsupported_nuclear_schema:31>30") as Error & { code?: string };
     err.code = "unsupported_nuclear_schema";
     const res = classifyAgentStartupError(err);
     expect(res.kind).toBe("OPERATOR_REQUIRED");

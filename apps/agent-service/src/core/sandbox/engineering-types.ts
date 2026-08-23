@@ -45,6 +45,7 @@ export type SandboxTaskProfile =
   | "project_investigation"
   | "project_experimentation"
   | "candidate_verification"
+  | "candidate_authorship"
   | "sandbox_workspace_file_roundtrip";
 
 /**
@@ -133,6 +134,64 @@ export function isVerifiedWorkspaceClaimEffect(
 }
 
 /**
+ * Licensed mechanical authorship claim. Binds a sealed candidate change-set
+ * identity. Never apply, merge, deployment, or self-change.
+ */
+export type AuthorshipClaimEffect = {
+  verified: true;
+  projectId: string;
+  workspaceId: string;
+  changesetId: string;
+  changesetVersion: 1;
+  snapshotId: string;
+  candidateTreeHash: string;
+  baseTreeHash: string;
+  pathCount: number;
+  patchSha256: string;
+  status: "proposed";
+  reviewStatus: "submitted";
+  candidateUnchanged: true;
+  liveUnwritten: true;
+  protocolState: "admitted";
+  completedAtMs: number;
+};
+
+export function isVerifiedAuthorshipClaimEffect(
+  value: unknown,
+): value is AuthorshipClaimEffect {
+  if (!value || typeof value !== "object") return false;
+  const e = value as Partial<AuthorshipClaimEffect>;
+  return (
+    e.verified === true &&
+    e.changesetVersion === 1 &&
+    e.status === "proposed" &&
+    e.reviewStatus === "submitted" &&
+    e.candidateUnchanged === true &&
+    e.liveUnwritten === true &&
+    e.protocolState === "admitted" &&
+    typeof e.projectId === "string" &&
+    e.projectId.trim().length > 0 &&
+    typeof e.workspaceId === "string" &&
+    e.workspaceId.trim().length > 0 &&
+    typeof e.changesetId === "string" &&
+    e.changesetId.startsWith("cs_") &&
+    typeof e.snapshotId === "string" &&
+    e.snapshotId.trim().length > 0 &&
+    typeof e.candidateTreeHash === "string" &&
+    e.candidateTreeHash.length === 64 &&
+    typeof e.baseTreeHash === "string" &&
+    e.baseTreeHash.length === 64 &&
+    typeof e.patchSha256 === "string" &&
+    e.patchSha256.length === 64 &&
+    typeof e.pathCount === "number" &&
+    Number.isFinite(e.pathCount) &&
+    e.pathCount >= 1 &&
+    typeof e.completedAtMs === "number" &&
+    Number.isFinite(e.completedAtMs)
+  );
+}
+
+/**
  * Licensed mechanical verification claim. Binds a named snapshot to a named
  * recipe outcome. Never a quality, approval, merge, or deployment judgment.
  */
@@ -196,6 +255,7 @@ export type OperationalClaimLicense = {
   effectEvidence?: RoundtripEffectEvidence | null;
   workspaceClaimEffect?: WorkspaceClaimEffect | null;
   verificationClaimEffect?: VerificationClaimEffect | null;
+  authorshipClaimEffect?: AuthorshipClaimEffect | null;
   receiptRef?: string | null;
   error?: string | null;
   refusalReason?: string | null;

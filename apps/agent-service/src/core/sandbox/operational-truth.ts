@@ -1,6 +1,7 @@
 import {
   isVerifiedRoundtripEffectEvidence,
   isVerifiedVerificationClaimEffect,
+  isVerifiedAuthorshipClaimEffect,
   isVerifiedWorkspaceClaimEffect,
   type OperationalClaimLicense,
   type SandboxTaskProfile,
@@ -244,6 +245,33 @@ export function deriveOperationalTruth(
         error: "sandbox_failure",
         semanticOutput:
           "verification protocol ended in sandbox_failure; recipe outcome is unknown.",
+      };
+    }
+    return {
+      state: "none",
+      locked: false,
+      profile: license.profile,
+      taskId: license.taskId,
+      error: license.error ?? null,
+    };
+  }
+
+  if (license.profile === "candidate_authorship") {
+    if (
+      license.state === "succeeded" &&
+      isVerifiedAuthorshipClaimEffect(license.authorshipClaimEffect)
+    ) {
+      const effect = license.authorshipClaimEffect;
+      return {
+        state: "verified_success",
+        locked: true,
+        profile: license.profile,
+        taskId: license.taskId,
+        snapshotId: effect.snapshotId,
+        workspaceId: effect.workspaceId,
+        candidateTreeHash: effect.candidateTreeHash,
+        semanticOutput:
+          `named candidate change-set ${effect.changesetId} was sealed against this named base as advisory candidate work. it has not been applied.`,
       };
     }
     return {

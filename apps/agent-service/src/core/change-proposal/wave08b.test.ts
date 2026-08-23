@@ -38,7 +38,7 @@ function schemaVersion(db: DatabaseSync): number {
 describe("wave08b change proposals", () => {
   it("migrates fresh database to v16 with proposal tables", () => {
     const db = openTestDb();
-    expect(schemaVersion(db)).toBe(29);
+    expect(schemaVersion(db)).toBe(30);
     const tables = db
       .prepare(
         `SELECT name FROM sqlite_master

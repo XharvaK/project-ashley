@@ -1,5 +1,5 @@
 /**
- * Sandbox V2 typed-capability vocabulary (Sandbox V2 M2 + M3 + M4 kernel).
+ * Sandbox V2 typed-capability vocabulary (Sandbox V2 M2 + M3 + M4 + M5 kernel).
  *
  * The single typed seam for V2 operations. A request names one closed
  * operation; the dispatcher routes it to the capability handler registered
@@ -34,7 +34,8 @@ export type SandboxV2OperationName =
   | "workspace.edit_text"
   | "workspace.delete_file"
   | "workspace.create_directory"
-  | "workspace.verify";
+  | "workspace.verify"
+  | "changeset.author";
 
 export const SANDBOX_V2_OPERATION_NAMES: readonly string[] = [
   "file.roundtrip",
@@ -50,6 +51,7 @@ export const SANDBOX_V2_OPERATION_NAMES: readonly string[] = [
   "workspace.delete_file",
   "workspace.create_directory",
   "workspace.verify",
+  "changeset.author",
 ];
 
 /**
@@ -61,6 +63,10 @@ export const V2_DEFERRED_OPERATIONS: readonly string[] = [
   "inspect_project_git_status",
   "inspect_project_git_diff",
   "inspect_project_git_log",
+  "changeset.apply",
+  "changeset.merge",
+  "git.commit",
+  "git.push",
 ];
 
 export type SandboxV2FileRoundtripRequest = {
@@ -188,6 +194,26 @@ export type SandboxV2WorkspaceVerifyRequest = {
   recipeId: string;
 };
 
+export type SandboxV2WorkspaceAuthorRequest = {
+  version: 2;
+  operation: "changeset.author";
+  projectId: string;
+  workspaceId: string;
+  intendedPaths?: readonly string[];
+};
+
+export type SandboxV2ChangedPath = {
+  path: string;
+  changeKind: "added" | "modified" | "deleted";
+  beforeSha256: string | null;
+  afterSha256: string | null;
+};
+
+export type SandboxV2SourceCleanliness =
+  | "clean"
+  | "dirty_explicit_manifest"
+  | "unknown";
+
 export type SandboxV2WorkspaceRequest =
   | SandboxV2WorkspaceReadFileRequest
   | SandboxV2WorkspaceListDirectoryRequest
@@ -204,7 +230,8 @@ export type SandboxV2Request =
   | SandboxV2ProjectListDirectoryRequest
   | SandboxV2ProjectSearchTextRequest
   | SandboxV2WorkspaceRequest
-  | SandboxV2WorkspaceVerifyRequest;
+  | SandboxV2WorkspaceVerifyRequest
+  | SandboxV2WorkspaceAuthorRequest;
 
 export type VerificationProtocolState =
   | "admitted"
@@ -352,6 +379,28 @@ export type SandboxV2OperationResult =
       cleanupCompleted: boolean;
       projectionDiscarded: boolean;
       candidateUnchanged: boolean;
+    }
+  | {
+      kind: "changeset.author";
+      changesetId: string;
+      changesetVersion: 1;
+      projectId: string;
+      workspaceId: string;
+      snapshotId: string;
+      sourceSnapshotId: string;
+      candidateTreeHash: string;
+      baseTreeHash: string;
+      baseCommit: string | null;
+      sourceCleanliness: SandboxV2SourceCleanliness;
+      treeHashAlgorithm: string;
+      changedPaths: SandboxV2ChangedPath[];
+      patchSha256: string;
+      patchBytes: number;
+      artifactRef: string;
+      candidateUnchanged: true;
+      liveUnwritten: true;
+      protocolState: "admitted";
+      completedAtMs: number;
     };
 
 export type SandboxV2ExecutionTruth =
@@ -444,7 +493,8 @@ export type SandboxV2CapabilitySpec = {
     | "sandbox_workspace_file_roundtrip"
     | "project_inspection"
     | "project_experimentation"
-    | "project_verification";
+    | "project_verification"
+    | "project_authorship";
   /** Project inspection is strictly read-only: no mutation, no execution. */
   readOnly: boolean;
   /** Requires an operator-owned project registry resolution. */
@@ -527,6 +577,12 @@ export const V2_CAPABILITY_REGISTRY: readonly SandboxV2CapabilitySpec[] = [
   {
     operation: "workspace.verify",
     family: "project_verification",
+    readOnly: true,
+    requiresProject: true,
+  },
+  {
+    operation: "changeset.author",
+    family: "project_authorship",
     readOnly: true,
     requiresProject: true,
   },
@@ -652,6 +708,8 @@ export function isSandboxV2OperationResult(
       return isWorkspaceCreateDirectoryResult(value);
     case "workspace.verify":
       return isWorkspaceVerifyResult(value);
+    case "changeset.author":
+      return isChangesetAuthorResult(value);
     default: {
       const _exhaustive: never = operation;
       return _exhaustive;
@@ -851,5 +909,51 @@ export function isWorkspaceVerifyResult(
     typeof value.cleanupCompleted === "boolean" &&
     typeof value.projectionDiscarded === "boolean" &&
     typeof value.candidateUnchanged === "boolean"
+  );
+}
+
+const CLEANLINESS = new Set(["clean", "dirty_explicit_manifest", "unknown"]);
+const CHANGE_KINDS = new Set(["added", "modified", "deleted"]);
+
+export function isChangesetAuthorResult(
+  value: unknown,
+): value is Extract<SandboxV2OperationResult, { kind: "changeset.author" }> {
+  if (!isRecord(value)) return false;
+  if (value.kind !== "changeset.author") return false;
+  if (typeof value.changesetId !== "string" || !value.changesetId.startsWith("cs_")) {
+    return false;
+  }
+  if (value.changesetVersion !== 1) return false;
+  if (typeof value.projectId !== "string" || value.projectId.length < 1) return false;
+  if (typeof value.workspaceId !== "string" || value.workspaceId.length < 1) return false;
+  if (typeof value.snapshotId !== "string" || value.snapshotId.length < 1) return false;
+  if (typeof value.sourceSnapshotId !== "string") return false;
+  if (typeof value.candidateTreeHash !== "string" || value.candidateTreeHash.length !== 64) {
+    return false;
+  }
+  if (typeof value.baseTreeHash !== "string" || value.baseTreeHash.length !== 64) return false;
+  if (value.baseCommit !== null && typeof value.baseCommit !== "string") return false;
+  if (typeof value.sourceCleanliness !== "string" || !CLEANLINESS.has(value.sourceCleanliness)) {
+    return false;
+  }
+  if (typeof value.treeHashAlgorithm !== "string") return false;
+  if (!Array.isArray(value.changedPaths) || value.changedPaths.length < 1) return false;
+  for (const change of value.changedPaths) {
+    if (!isRecord(change)) return false;
+    if (typeof change.path !== "string" || change.path.length < 1) return false;
+    if (typeof change.changeKind !== "string" || !CHANGE_KINDS.has(change.changeKind)) {
+      return false;
+    }
+    if (change.beforeSha256 !== null && typeof change.beforeSha256 !== "string") return false;
+    if (change.afterSha256 !== null && typeof change.afterSha256 !== "string") return false;
+  }
+  if (typeof value.patchSha256 !== "string" || value.patchSha256.length !== 64) return false;
+  if (!isFiniteNumber(value.patchBytes) || value.patchBytes < 1) return false;
+  if (typeof value.artifactRef !== "string" || value.artifactRef.length < 1) return false;
+  return (
+    value.candidateUnchanged === true &&
+    value.liveUnwritten === true &&
+    value.protocolState === "admitted" &&
+    isFiniteNumber(value.completedAtMs)
   );
 }

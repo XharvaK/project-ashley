@@ -10,15 +10,15 @@ describe("wave05 migration", () => {
   it("migrates through v14 relationship tables to current schema with continuity", () => {
     const continuity = openContinuityDb(new DatabaseSync(":memory:"));
     const nuclear = openNuclearDb(new DatabaseSync(":memory:"), { continuity });
-    expect(NUCLEAR_SUPPORTED_VERSION).toBe(29);
+    expect(NUCLEAR_SUPPORTED_VERSION).toBe(30);
     const version = (
       nuclear.prepare("PRAGMA user_version").get() as { user_version: number }
     ).user_version;
-    expect(version).toBe(29);
+    expect(version).toBe(30);
     const sidecarVersion = continuity
       .prepare(`SELECT nuclear_schema_version FROM lineage_state WHERE id = 1`)
       .get() as { nuclear_schema_version?: number };
-    expect(sidecarVersion.nuclear_schema_version).toBe(29);
+    expect(sidecarVersion.nuclear_schema_version).toBe(30);
     for (const table of [
       "doc_reminders",
       "ashley_self_commitments",
@@ -47,7 +47,7 @@ describe("wave05 migration", () => {
     expect(
       (nuclear.prepare("PRAGMA user_version").get() as { user_version: number })
         .user_version,
-    ).toBe(29);
+    ).toBe(30);
     nuclear.close();
     continuity.close();
   });

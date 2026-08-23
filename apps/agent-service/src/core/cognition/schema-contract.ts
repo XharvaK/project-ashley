@@ -338,6 +338,83 @@ const V29_COLUMNS: Record<string, ColumnSpec[]> = {
   delivery_reservations: [{ name: "phase_lifecycle_json" }],
 };
 
+const V30_TABLES = ["candidate_changesets", "candidate_changeset_events"] as const;
+
+const V30_COLUMNS: Record<string, ColumnSpec[]> = {
+  candidate_changesets: [
+    { name: "id", primaryKey: true },
+    { name: "entity_uuid", notNull: true },
+    { name: "data_classification", notNull: true, defaultValue: "'never_public'" },
+    { name: "owner_id", notNull: true },
+    { name: "changeset_id", notNull: true },
+    { name: "changeset_version", notNull: true, defaultValue: "1" },
+    { name: "project_id", notNull: true },
+    { name: "workspace_id", notNull: true },
+    { name: "source_snapshot_id", notNull: true },
+    { name: "objective", notNull: true },
+    { name: "rationale", notNull: true },
+    { name: "risk_class", notNull: true },
+    { name: "status", notNull: true },
+    { name: "created_at", notNull: true },
+    { name: "updated_at", notNull: true },
+  ],
+  candidate_changeset_events: [
+    { name: "id", primaryKey: true },
+    { name: "entity_uuid", notNull: true },
+    { name: "data_classification", notNull: true, defaultValue: "'never_public'" },
+    { name: "owner_id", notNull: true },
+    { name: "changeset_id", notNull: true },
+    { name: "event_type", notNull: true },
+    { name: "metadata_json", notNull: true, defaultValue: "'{}'" },
+    { name: "recorded_at", notNull: true },
+  ],
+};
+
+const V30_INDEXES: IndexSpec[] = [
+  {
+    table: "candidate_changesets",
+    name: "idx_candidate_changesets_owner_status",
+    columns: ["owner_id", "status", "created_at"],
+  },
+  {
+    table: "candidate_changesets",
+    name: "idx_candidate_changesets_entity_uuid",
+    columns: ["entity_uuid"],
+    unique: true,
+  },
+  {
+    table: "candidate_changeset_events",
+    name: "idx_candidate_changeset_events_changeset",
+    columns: ["changeset_id", "recorded_at"],
+  },
+  {
+    table: "candidate_changeset_events",
+    name: "idx_candidate_changeset_events_entity_uuid",
+    columns: ["entity_uuid"],
+    unique: true,
+  },
+];
+
+const V30_TABLE_FRAGMENTS: Record<string, string[]> = {
+  candidate_changesets: [
+    "check(status in('proposed','quarantined','stale_base','superseded','abandoned'))",
+    "check(review_status is null or review_status='submitted')",
+    "check(risk_class in('low','medium','high','consultation'))",
+    "unique(changeset_id)",
+  ],
+  candidate_changeset_events: [
+    "check(event_type in('created','sealed','proposed','secret_quarantined'))",
+  ],
+};
+
+const V30_ONLY_OBJECTS = [
+  ...V30_TABLES,
+  "idx_candidate_changesets_owner_status",
+  "idx_candidate_changesets_entity_uuid",
+  "idx_candidate_changeset_events_changeset",
+  "idx_candidate_changeset_events_entity_uuid",
+] as const;
+
 function normalizeSql(value: string): string {
   return value
     .toLowerCase()
@@ -551,9 +628,18 @@ function validateV22Source(db: DatabaseSync): void {
   }
 }
 
+function requireNoV30Objects(db: DatabaseSync, version: number): void {
+  for (const name of V30_ONLY_OBJECTS) {
+    const type = V30_TABLES.includes(name as (typeof V30_TABLES)[number])
+      ? "table"
+      : "index";
+    if (masterRow(db, type, name)) fail(version, `unexpected_v30_object:${name}`);
+  }
+}
+
 export function validateNuclearSchemaContent(
   db: DatabaseSync,
-  version: 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29,
+  version: 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30,
   options: { rejectNewerContent?: boolean } = {},
 ): void {
   if (version === 22) {
@@ -623,6 +709,17 @@ export function validateNuclearSchemaContent(
   for (const [table, columns] of Object.entries(V29_COLUMNS)) {
     requireColumns(db, version, table, columns);
   }
+  if (version === 29 && options.rejectNewerContent === true) {
+    requireNoV30Objects(db, version);
+    return;
+  }
+  if (version === 29) return;
+  for (const table of V30_TABLES) requireTable(db, version, table);
+  for (const [table, columns] of Object.entries(V30_COLUMNS)) {
+    requireColumns(db, version, table, columns);
+    requireFragments(db, version, table, V30_TABLE_FRAGMENTS[table] ?? []);
+  }
+  for (const index of V30_INDEXES) requireIndex(db, version, index);
 }
 
 function addColumnIfMissing(

@@ -41,10 +41,27 @@ export type CognitionVerificationRequest = {
   recipeId: string;
 };
 
+export type CognitionAuthorshipRiskClass = "low" | "medium" | "high" | "consultation";
+
+export type CognitionAuthorshipRequest = {
+  operation: "changeset.author";
+  projectId: string;
+  workspaceId: string;
+  objective: string;
+  rationale: string;
+  riskClass: CognitionAuthorshipRiskClass;
+  targetArea?: string;
+  expectedEffect?: string;
+  evidenceRefs?: string[];
+  verificationRecipeIds?: string[];
+  intendedPaths?: string[];
+};
+
 export type CognitionOperationalRequest =
   | { kind: "project_inspection"; request: CognitionInspectionRequest }
   | { kind: "candidate_workspace_experiment"; request: CognitionWorkspaceRequest }
-  | { kind: "candidate_verification"; request: CognitionVerificationRequest };
+  | { kind: "candidate_verification"; request: CognitionVerificationRequest }
+  | { kind: "candidate_authorship"; request: CognitionAuthorshipRequest };
 
 export type ProjectReadFileObservation = {
   projectId: string;

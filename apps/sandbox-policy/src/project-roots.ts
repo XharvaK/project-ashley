@@ -29,6 +29,12 @@ export type ProjectRootEntry = {
    * Independent of the operator catalog; a catalog hit is not a project grant.
    */
   allowedRecipeIds?: readonly string[];
+  /**
+   * M5 authorship grant. Missing/false means candidate change-set sealing is
+   * refused. Independent of engineeringAllowed, candidateWorkspaceAllowed, and
+   * verificationAllowed.
+   */
+  authorshipAllowed?: boolean;
 };
 
 export type ProjectRootRegistry = {
@@ -95,6 +101,7 @@ export function validateProjectRootRegistry(
       engineeringAllowed: entry.engineeringAllowed === true,
       verificationAllowed: entry.verificationAllowed === true,
       allowedRecipeIds: allowedRecipeIds.ids,
+      authorshipAllowed: entry.authorshipAllowed === true,
     };
     entries.set(normalized.projectId, normalized);
     roots.push(normalized.canonicalRoot);
@@ -127,6 +134,10 @@ export function isVerificationRecipeAllowed(
   if (entry.verificationAllowed !== true) return false;
   if (typeof recipeId !== "string" || recipeId.length < 1) return false;
   return (entry.allowedRecipeIds ?? []).includes(recipeId);
+}
+
+export function isAuthorshipAllowed(entry: ProjectRootEntry): boolean {
+  return entry.authorshipAllowed === true;
 }
 
 export type ProjectRootAccessKind = "read" | "workspace" | "engineering";
