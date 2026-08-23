@@ -167,7 +167,10 @@ authority from Sandbox.
 
 The canonical roadmap now presents already-named items as engineering
 milestones from current live state. That conversion does not add phases and
-does not reorder `OWNER_SELECTED_IMPLEMENTATION_ORDER` edges.
+does not reorder `OWNER_SELECTED_IMPLEMENTATION_ORDER` edges. Execution
+discipline for those milestones is
+[Milestone Execution Governance](Ashley_Milestone_Execution_Governance.md).
+That file does not add architecture.
 
 **Architecture-justified before advanced autonomy** (cognitive/safety
 substance; not a new ladder of phases):

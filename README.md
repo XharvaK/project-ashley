@@ -223,7 +223,8 @@ Event Spine phase. Learned Autonomy and the graduations stay later named
 phases. Computer Use, voice, broad tools, and self-modification execution
 remain deferred. Milestones live in
 [`docs/architecture/Ashley_Architecture_Roadmap.md`](docs/architecture/Ashley_Architecture_Roadmap.md)
-§5.
+§5. Execution contracts live in
+[`docs/architecture/Ashley_Milestone_Execution_Governance.md`](docs/architecture/Ashley_Milestone_Execution_Governance.md).
 
 Engineering capability (Sandbox, Model Fabric, Operational Continuity,
 Procedural Skill Graduation, Computer Use) is only one part of Ashley. Memory /
