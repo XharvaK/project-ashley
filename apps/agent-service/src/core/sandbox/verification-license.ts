@@ -18,8 +18,8 @@ import {
 
 export type CandidateVerificationRequest = {
   projectId: string;
-  workspaceId: string;
-  recipeId: string;
+  workspaceId?: string;
+  recipeId?: string;
 };
 
 export function issueCandidateVerificationLicense(input: {

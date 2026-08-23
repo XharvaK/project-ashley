@@ -37,8 +37,8 @@ export type CognitionWorkspaceRequest =
 export type CognitionVerificationRequest = {
   operation: "workspace.verify";
   projectId: string;
-  workspaceId: string;
-  recipeId: string;
+  workspaceId?: string;
+  recipeId?: string;
 };
 
 export type CognitionAuthorshipRiskClass = "low" | "medium" | "high" | "consultation";

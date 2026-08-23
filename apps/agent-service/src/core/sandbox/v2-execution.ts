@@ -47,6 +47,7 @@ import {
   type SandboxV2Result,
 } from "@composer-assistant/sandbox-v2";
 import { isVerificationRecipeAllowed } from "@composer-assistant/sandbox-policy";
+import { resolveVerificationBinding } from "./verification-binding.js";
 import type {
   CognitionInspectionRequest,
   CognitionWorkspaceRequest,
@@ -1083,7 +1084,22 @@ export async function executeCandidateVerificationV2(
   if (resolved.entry.verificationAllowed !== true) {
     return none("verification_not_allowed");
   }
-  if (!isVerificationRecipeAllowed(resolved.entry, request.recipeId)) {
+  const bound = resolveVerificationBinding({
+    projectId: request.projectId,
+    workspaceId: request.workspaceId,
+    recipeId: request.recipeId,
+    entry: resolved.entry,
+    workspaceManager: input.workspaceManager,
+  });
+  if (!bound.ok) {
+    return none(bound.error);
+  }
+  const boundRequest = {
+    ...request,
+    workspaceId: bound.workspaceId,
+    recipeId: bound.recipeId,
+  };
+  if (!isVerificationRecipeAllowed(resolved.entry, boundRequest.recipeId)) {
     return none("recipe_not_allowed");
   }
 
@@ -1115,9 +1131,9 @@ export async function executeCandidateVerificationV2(
     const res: SandboxV2Result = await dispatcher.dispatch({
       version: 2,
       operation: "workspace.verify",
-      projectId: request.projectId,
-      workspaceId: request.workspaceId,
-      recipeId: request.recipeId,
+      projectId: boundRequest.projectId,
+      workspaceId: boundRequest.workspaceId,
+      recipeId: boundRequest.recipeId,
     });
 
     const receipt =
@@ -1128,7 +1144,7 @@ export async function executeCandidateVerificationV2(
 
     return {
       license: issueCandidateVerificationLicense({
-        request,
+        request: boundRequest,
         receipt,
         executedAtMs: res.executedAtMs,
         messageEntityUuid,

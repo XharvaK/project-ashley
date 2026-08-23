@@ -178,18 +178,26 @@ describe("parseCandidateVerificationRequest", () => {
     });
   });
 
-  it.each(["projectId", "workspaceId", "recipeId"] as const)(
-    "rejects missing %s",
-    (field) => {
-      const { [field]: _omit, ...rest } = validRequest;
-      void _omit;
-      const result = parseCandidateVerificationRequest(rest);
-      expect(result.ok).toBe(false);
-      if (result.ok) return;
-      expect(result.errorCode).toBe("missing_required_field");
-      expect(result.field).toBe(field);
-    },
-  );
+  it("requires projectId and allows omitted workspaceId and recipeId", () => {
+    expect(
+      parseCandidateVerificationRequest({
+        operation: "workspace.verify",
+        projectId: "project-ashley",
+      }),
+    ).toEqual({
+      ok: true,
+      request: { operation: "workspace.verify", projectId: "project-ashley" },
+    });
+    const missingProject = parseCandidateVerificationRequest({
+      operation: "workspace.verify",
+      workspaceId: "ws-m4-1",
+      recipeId: RECIPE,
+    });
+    expect(missingProject.ok).toBe(false);
+    if (missingProject.ok) return;
+    expect(missingProject.errorCode).toBe("missing_required_field");
+    expect(missingProject.field).toBe("projectId");
+  });
 });
 
 describe("M4 Phase E cognition and turn admission", () => {
@@ -571,5 +579,18 @@ describe("M4 Phase E cognition and turn admission", () => {
     expect(capture.user).toContain("vsnap_live_1");
     expect(capture.user).toContain(RECIPE);
     expect(capture.user).toContain("verified_success");
+  });
+
+  it("omitted workspaceId and recipeId still reach M4 execute for a unique current-candidate verify", async () => {
+    const { execute, result } = await runReactive({
+      deadlinePolicy: M4_AVAILABLE_POLICY,
+      pass1: { operation: "workspace.verify", projectId: "project-ashley" },
+    });
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute.mock.calls[0]?.[0]?.request).toEqual({
+      operation: "workspace.verify",
+      projectId: "project-ashley",
+    });
+    expect(result.text.toLowerCase()).not.toMatch(/workspaceid/);
   });
 });

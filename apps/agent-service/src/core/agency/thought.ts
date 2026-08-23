@@ -36,6 +36,7 @@ import {
   canOfferBoundedOperation,
   canOfferPatchExport,
 } from "../sandbox/project-registry.js";
+import { describeVerificationGrounding } from "../sandbox/verification-binding.js";
 import { M6_MAX_STEPS, M6_MAX_WALL_MS } from "@composer-assistant/sandbox-v2";
 
 /* ------------------------------------------------------------------ */
@@ -494,17 +495,16 @@ export function parseCandidateVerificationRequest(
   if (!projectId) {
     return { ok: false, errorCode: "missing_required_field", field: "projectId" };
   }
-  const workspaceId = boundedId(obj.workspaceId);
-  if (!workspaceId) {
-    return { ok: false, errorCode: "missing_required_field", field: "workspaceId" };
-  }
-  const recipeId = boundedId(obj.recipeId);
-  if (!recipeId) {
-    return { ok: false, errorCode: "missing_required_field", field: "recipeId" };
-  }
+  const workspaceId = boundedId(obj.workspaceId) ?? undefined;
+  const recipeId = boundedId(obj.recipeId) ?? undefined;
   return {
     ok: true,
-    request: { operation: "workspace.verify", projectId, workspaceId, recipeId },
+    request: {
+      operation: "workspace.verify",
+      projectId,
+      ...(workspaceId ? { workspaceId } : {}),
+      ...(recipeId ? { recipeId } : {}),
+    },
   };
 }
 
@@ -1305,12 +1305,14 @@ function buildInitialThoughtMessages(input: {
     }
     if (canOfferVerification) {
       parts.push(
-        `When a named candidate snapshot should be verified, include operationalRequest: {kind: "candidate_verification", request: {operation: "workspace.verify", projectId: "${quotedProjectIds}", workspaceId: string, recipeId: string}}.`,
-        "Thought names the verification only: projectId, workspaceId, and recipeId.",
+        `When a named candidate snapshot should be verified, include operationalRequest: {kind: "candidate_verification", request: {operation: "workspace.verify", projectId: "${quotedProjectIds}", workspaceId?: string, recipeId?: string}}.`,
+        "Thought names the verification only: projectId, and workspaceId/recipeId when those control-plane identifiers are already grounded below.",
         "Do not invent recipes, commands, argv, executables, environment, network, cwd, timeouts, or shell.",
         "Recipe catalog, capability, and registry remain the execution authority.",
         "A verification outcome is a mechanical recipe result, not engineering judgment, merge, or deployment readiness.",
       );
+      const grounding = describeVerificationGrounding(approvedProjectIds);
+      if (grounding) parts.push(grounding);
     }
     if (canOfferAuthorship) {
       parts.push(
@@ -1350,7 +1352,7 @@ function buildInitialThoughtMessages(input: {
     "A refusal is reactive only and must select both the current user_message motivation and a supplied stable boundary motivation.",
     "Use only supplied motivation IDs. Silence is valid. Do not write the message Doc will see.",
     "objective and reason are short intent metadata, not prose to echo and not a copy of the user message.",
-    `operationalRequest is optional. When present, it must be exactly one of: {kind: "project_inspection", request: CognitionInspectionRequest}, {kind: "candidate_workspace_experiment", request: CognitionWorkspaceRequest}, {kind: "candidate_verification", request: {operation: "workspace.verify", projectId, workspaceId, recipeId}}, {kind: "candidate_authorship", request: {operation: "changeset.author", projectId, workspaceId, objective, rationale, riskClass}}, {kind: "bounded_operation", request: {operation: "objective.operate", projectId, workspaceId, origin, objective, successCondition, failureCondition, steps, budget}}, or {kind: "patch_export", request: {operation: "patch_export", projectId, changesetId}}. Emit at most one operationalRequest.`,
+    `operationalRequest is optional. When present, it must be exactly one of: {kind: "project_inspection", request: CognitionInspectionRequest}, {kind: "candidate_workspace_experiment", request: CognitionWorkspaceRequest}, {kind: "candidate_verification", request: {operation: "workspace.verify", projectId, workspaceId?, recipeId?}}, {kind: "candidate_authorship", request: {operation: "changeset.author", projectId, workspaceId, objective, rationale, riskClass}}, {kind: "bounded_operation", request: {operation: "objective.operate", projectId, workspaceId, origin, objective, successCondition, failureCondition, steps, budget}}, or {kind: "patch_export", request: {operation: "patch_export", projectId, changesetId}}. Emit at most one operationalRequest.`,
     projectContextPrompt,
     dispositionContract,
     ...(retryContext ? [retryContext] : []),

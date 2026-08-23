@@ -120,6 +120,58 @@ export class WorkspaceManager {
   }
 
   /**
+   * Durable candidate workspaces for one operator project, newest `lastUsedAt` first.
+   * Does not create, resume, or pick a current workspace.
+   */
+  listProjectWorkspaces(projectId: string): WorkspaceManifest[] {
+    if (!existsSync(this.managedRoot) || typeof projectId !== "string" || projectId.length < 1) {
+      return [];
+    }
+    const out: WorkspaceManifest[] = [];
+    let names: string[] = [];
+    try {
+      names = readdirSync(this.managedRoot);
+    } catch {
+      return [];
+    }
+    for (const name of names) {
+      if (name.startsWith(".")) continue;
+      if (!this.isValidWorkspaceId(name)) continue;
+      const manifestPath = join(this.managedRoot, name, "manifest.json");
+      if (!existsSync(manifestPath)) continue;
+      try {
+        const raw: unknown = JSON.parse(readFileSync(manifestPath, "utf8"));
+        if (
+          !raw ||
+          typeof raw !== "object" ||
+          (raw as WorkspaceManifest).schemaVersion !== 2 ||
+          (raw as WorkspaceManifest).workspaceId !== name ||
+          (raw as WorkspaceManifest).projectId !== projectId
+        ) {
+          continue;
+        }
+        const manifest = raw as WorkspaceManifest;
+        if (
+          typeof manifest.createdAt !== "string" ||
+          typeof manifest.lastUsedAt !== "string" ||
+          typeof manifest.sourceSnapshotId !== "string"
+        ) {
+          continue;
+        }
+        out.push(manifest);
+      } catch {
+        continue;
+      }
+    }
+    out.sort((a, b) => {
+      const used = b.lastUsedAt.localeCompare(a.lastUsedAt);
+      if (used !== 0) return used;
+      return b.createdAt.localeCompare(a.createdAt);
+    });
+    return out;
+  }
+
+  /**
    * Resume an existing candidate workspace. Never creates.
    * M4 verification must use this path; `acquireWorkspace` without an id creates.
    */

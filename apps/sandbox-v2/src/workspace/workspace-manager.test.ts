@@ -179,4 +179,51 @@ describe("Stage 2 — WorkspaceManager Lifecycle", () => {
     // Upstream drift must NOT have leaked into or invalidated candidate workspace
     expect(existsSync(join(resumeResult.workspaceTreeRoot, "src", "new_source.ts"))).toBe(false);
   });
+
+  it("lists project workspaces with newest lastUsedAt first", async () => {
+    const ctx = { ...context, canonicalRoot: sourceRoot };
+    const older = await manager.acquireWorkspace(ctx);
+    expect(older.ok).toBe(true);
+    if (!older.ok) return;
+    const newer = await manager.acquireWorkspace(ctx);
+    expect(newer.ok).toBe(true);
+    if (!newer.ok) return;
+    const listed = manager.listProjectWorkspaces("project-ashley");
+    expect(listed.map((row) => row.workspaceId)).toEqual([
+      newer.workspaceId,
+      older.workspaceId,
+    ]);
+    expect(manager.listProjectWorkspaces("other-project")).toEqual([]);
+  });
+
+  it("skips corrupt manifests and never creates during list", async () => {
+    const ctx = { ...context, canonicalRoot: sourceRoot };
+    const created = await manager.acquireWorkspace(ctx);
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    const before = manager.listProjectWorkspaces("project-ashley").length;
+    mkdirSync(join(managedRoot, "not-a-valid-id"), { recursive: true });
+    writeFileSync(
+      join(managedRoot, created.workspaceId, "manifest.json.bak"),
+      "{}",
+      "utf8",
+    );
+    const bogusDir = join(managedRoot, "AAAAAAAAAAAAAAAAAAAAAA");
+    mkdirSync(bogusDir, { recursive: true });
+    writeFileSync(
+      join(bogusDir, "manifest.json"),
+      JSON.stringify({
+        schemaVersion: 2,
+        workspaceId: "AAAAAAAAAAAAAAAAAAAAAA",
+        projectId: "project-ashley",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        sourceSnapshotId: "snap",
+      }),
+      "utf8",
+    );
+    const listed = manager.listProjectWorkspaces("project-ashley");
+    expect(listed.map((row) => row.workspaceId)).toEqual([created.workspaceId]);
+    expect(listed).toHaveLength(before);
+    expect(existsSync(join(bogusDir, "tree"))).toBe(false);
+  });
 });

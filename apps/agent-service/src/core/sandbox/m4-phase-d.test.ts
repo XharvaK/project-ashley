@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { DatabaseSync } from "node:sqlite";
-import { V2ProjectReadRegistry, type SandboxV2Dispatcher, type SandboxV2Result } from "@composer-assistant/sandbox-v2";
+import { mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { randomBytes } from "node:crypto";
+import {
+  V2ProjectReadRegistry,
+  WorkspaceManager,
+  type SandboxV2Dispatcher,
+  type SandboxV2Request,
+  type SandboxV2Result,
+} from "@composer-assistant/sandbox-v2";
 import { openNuclearDb } from "../db.js";
 import {
   capabilityCanInfluence,
@@ -56,11 +66,12 @@ function verificationRegistry(overrides: Record<string, unknown> = {}) {
 
 function mockReceiptResult(
   outcome: "verified_success" | "verified_failure" = "verified_success",
+  workspaceId = "ws-m4-1",
 ): SandboxV2Result {
   const receipt = {
     kind: "workspace.verify" as const,
     snapshotId: "vsnap_live_1",
-    workspaceId: "ws-m4-1",
+    workspaceId,
     projectId: "project-ashley",
     candidateTreeHash: HASH,
     candidateTreeHashAfter: HASH,
@@ -309,5 +320,186 @@ describe("M4 Phase D authority + truth", () => {
     expect(block).toContain("verificationStatus = verified_success");
     expect(block).toContain("snapshotId = vsnap_live_1");
     expect(block.toLowerCase()).not.toMatch(/\bcorrect\b|\bready\b|should merge|improved/);
+  });
+
+  it("after a unique last-used candidate exists, omitted ids bind and dispatch without owner magic words", async () => {
+    const testRoot = join(tmpdir(), `ashley-m4-bind-${randomBytes(8).toString("hex")}`);
+    const sourceRoot = join(testRoot, "project");
+    mkdirSync(sourceRoot, { recursive: true });
+    writeFileSync(join(sourceRoot, "package.json"), "{}", "utf8");
+    const manager = new WorkspaceManager({ managedRoot: join(testRoot, "workspaces") });
+    const created = await manager.acquireWorkspace({
+      projectId: "project-ashley",
+      canonicalRoot: sourceRoot,
+    });
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    const seen: SandboxV2Request[] = [];
+    const result = await executeCandidateVerificationV2({
+      request: { projectId: "project-ashley" },
+      skipCapabilityGate: true,
+      registry: verificationRegistry(),
+      workspaceManager: manager,
+      dispatcher: {
+        dispatch: async (req: SandboxV2Request) => {
+          seen.push(req);
+          return mockReceiptResult("verified_success", created.workspaceId);
+        },
+      } as unknown as SandboxV2Dispatcher,
+      envOverrides: { sandboxEngineeringLifecycleEnabled: true },
+    });
+    expect(seen).toEqual([
+      {
+        version: 2,
+        operation: "workspace.verify",
+        projectId: "project-ashley",
+        workspaceId: created.workspaceId,
+        recipeId: RECIPE,
+      },
+    ]);
+    expect(result.license.state).toBe("succeeded");
+    expect(result.license.verificationClaimEffect?.workspaceId).toBe(created.workspaceId);
+    expect(result.license.verificationClaimEffect?.recipeId).toBe(RECIPE);
+    if (existsSync(testRoot)) rmSync(testRoot, { recursive: true, force: true });
+  });
+
+  it("omitted current workspace with none present refuses before dispatch", async () => {
+    let dispatches = 0;
+    const result = await executeCandidateVerificationV2({
+      request: { projectId: "project-ashley" },
+      skipCapabilityGate: true,
+      registry: verificationRegistry(),
+      workspaceManager: new WorkspaceManager({
+        managedRoot: join(tmpdir(), `ashley-m4-empty-${randomBytes(8).toString("hex")}`),
+      }),
+      dispatcher: {
+        dispatch: async () => {
+          dispatches += 1;
+          return mockReceiptResult();
+        },
+      } as unknown as SandboxV2Dispatcher,
+      envOverrides: { sandboxEngineeringLifecycleEnabled: true },
+    });
+    expect(dispatches).toBe(0);
+    expect(result.license.error).toBe("no_current_workspace");
+  });
+
+  it("injected unallowlisted recipe cannot be authorized by unique binding", async () => {
+    let dispatches = 0;
+    const result = await executeCandidateVerificationV2({
+      request: {
+        projectId: "project-ashley",
+        workspaceId: "ws-m4-1",
+        recipeId: "invented_recipe",
+      },
+      skipCapabilityGate: true,
+      registry: verificationRegistry(),
+      dispatcher: {
+        dispatch: async () => {
+          dispatches += 1;
+          return mockReceiptResult();
+        },
+      } as unknown as SandboxV2Dispatcher,
+      envOverrides: { sandboxEngineeringLifecycleEnabled: true },
+    });
+    expect(dispatches).toBe(0);
+    expect(result.license.error).toBe("recipe_not_allowed");
+  });
+
+  it("unknown workspace is refused without a mutation claim", async () => {
+    const result = await executeCandidateVerificationV2({
+      request: {
+        projectId: "project-ashley",
+        workspaceId: "foreign-ws",
+        recipeId: RECIPE,
+      },
+      skipCapabilityGate: true,
+      registry: verificationRegistry(),
+      dispatcher: {
+        dispatch: async () => ({
+          outcome: "failed",
+          operation: "workspace.verify",
+          error: "workspace_not_found",
+          executedAtMs: 1,
+        }),
+      } as unknown as SandboxV2Dispatcher,
+      envOverrides: { sandboxEngineeringLifecycleEnabled: true },
+    });
+    expect(result.license.state).toBe("none");
+    expect(result.license.error).toBe("workspace_not_found");
+    expect(result.license.verificationClaimEffect).toBeUndefined();
+    expect(result.license.workspaceClaimEffect).toBeUndefined();
+  });
+
+  it("keeps an explicit authorized workspace instead of rebinding to a newer current", async () => {
+    const testRoot = join(tmpdir(), `ashley-m4-explicit-${randomBytes(8).toString("hex")}`);
+    const sourceRoot = join(testRoot, "project");
+    mkdirSync(sourceRoot, { recursive: true });
+    writeFileSync(join(sourceRoot, "package.json"), "{}", "utf8");
+    const manager = new WorkspaceManager({ managedRoot: join(testRoot, "workspaces") });
+    const older = await manager.acquireWorkspace({
+      projectId: "project-ashley",
+      canonicalRoot: sourceRoot,
+    });
+    const newer = await manager.acquireWorkspace({
+      projectId: "project-ashley",
+      canonicalRoot: sourceRoot,
+    });
+    expect(older.ok && newer.ok).toBe(true);
+    if (!older.ok || !newer.ok) return;
+    const seen: SandboxV2Request[] = [];
+    const result = await executeCandidateVerificationV2({
+      request: {
+        projectId: "project-ashley",
+        workspaceId: older.workspaceId,
+        recipeId: RECIPE,
+      },
+      skipCapabilityGate: true,
+      registry: verificationRegistry(),
+      workspaceManager: manager,
+      dispatcher: {
+        dispatch: async (req: SandboxV2Request) => {
+          seen.push(req);
+          return mockReceiptResult("verified_success", older.workspaceId);
+        },
+      } as unknown as SandboxV2Dispatcher,
+      envOverrides: { sandboxEngineeringLifecycleEnabled: true },
+    });
+    expect(seen).toEqual([
+      {
+        version: 2,
+        operation: "workspace.verify",
+        projectId: "project-ashley",
+        workspaceId: older.workspaceId,
+        recipeId: RECIPE,
+      },
+    ]);
+    expect(result.license.state).toBe("succeeded");
+    if (existsSync(testRoot)) rmSync(testRoot, { recursive: true, force: true });
+  });
+
+  it("refuses a cross-project workspace without a mutation claim", async () => {
+    const result = await executeCandidateVerificationV2({
+      request: {
+        projectId: "project-ashley",
+        workspaceId: "other-project-ws",
+        recipeId: RECIPE,
+      },
+      skipCapabilityGate: true,
+      registry: verificationRegistry(),
+      dispatcher: {
+        dispatch: async () => ({
+          outcome: "failed",
+          operation: "workspace.verify",
+          error: "workspace_project_mismatch",
+          executedAtMs: 1,
+        }),
+      } as unknown as SandboxV2Dispatcher,
+      envOverrides: { sandboxEngineeringLifecycleEnabled: true },
+    });
+    expect(result.license.state).toBe("none");
+    expect(result.license.error).toBe("workspace_project_mismatch");
+    expect(result.license.verificationClaimEffect).toBeUndefined();
+    expect(result.license.workspaceClaimEffect).toBeUndefined();
   });
 });
