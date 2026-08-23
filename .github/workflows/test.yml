@@ -13,7 +13,6 @@ on:
       - "scripts/ci/**"
       - "scripts/phase0/**"
       - "workspace/prompts/**"
-      - "tools/orchid-tg/**"
   pull_request:
     paths:
       - ".github/workflows/test.yml"
@@ -27,8 +26,10 @@ on:
       - "scripts/ci/**"
       - "scripts/phase0/**"
       - "workspace/prompts/**"
-      - "tools/orchid-tg/**"
 
+# Offline contract matches scripts/phase0/run-all.ps1 -Tier offline:
+# sandbox dist emit, then agent-service npm ci / tsc / vitest.
+# Retired Telegram orchid steps and test-recall-patterns.mjs are not restored.
 jobs:
   offline:
     runs-on: ubuntu-latest
@@ -48,14 +49,3 @@ jobs:
       - name: Vitest
         working-directory: apps/agent-service
         run: npm test
-      - name: Recall patterns
-        run: node scripts/phase0/test-recall-patterns.mjs
-      - name: Orchid seed script guard
-        shell: pwsh
-        run: pwsh -File scripts/phase0/check-orchid-no-seed-scripts.ps1
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Orchid gates unit
-        working-directory: tools/orchid-tg
-        run: python -m unittest orchid_tg.tests.test_gates -v
