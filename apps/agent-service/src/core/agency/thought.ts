@@ -10,6 +10,8 @@ import type {
   CognitionVerificationRequest,
   CognitionAuthorshipRequest,
   CognitionAuthorshipRiskClass,
+  CognitionBoundedOperationRequest,
+  CognitionBoundedOperationStep,
   CognitionOperationalRequest,
   Decision,
   DecisionDelayClass,
@@ -30,7 +32,9 @@ import {
   canOfferCandidateWorkspace,
   canOfferCandidateVerification,
   canOfferCandidateAuthorship,
+  canOfferBoundedOperation,
 } from "../sandbox/project-registry.js";
+import { M6_MAX_STEPS, M6_MAX_WALL_MS } from "@composer-assistant/sandbox-v2";
 
 /* ------------------------------------------------------------------ */
 /*  ThoughtModelResult — carries usage for truncation detection       */
@@ -631,6 +635,151 @@ export function parseCandidateAuthorshipRequest(
   };
 }
 
+type ParseBoundedOperationResult =
+  | { ok: true; request: CognitionBoundedOperationRequest }
+  | { ok: false; errorCode: ThoughtValidationErrorCode; field: string };
+
+const OPERATE_ALLOWED_FIELDS = new Set([
+  "operation",
+  "version",
+  "projectId",
+  "workspaceId",
+  "origin",
+  "objective",
+  "successCondition",
+  "failureCondition",
+  "steps",
+  "budget",
+]);
+
+const OPERATE_FORBIDDEN_FIELDS = [
+  "continueUntilSolved",
+  "continueUntil",
+  "patch",
+  "apply",
+  "argv",
+  "commands",
+  "export",
+  "destination",
+  "git",
+];
+
+export function parseBoundedOperationRequest(
+  value: unknown,
+): ParseBoundedOperationResult {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { ok: false, errorCode: "payload_invalid", field: "request" };
+  }
+  const obj = value as Record<string, unknown>;
+  for (const field of OPERATE_FORBIDDEN_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(obj, field)) {
+      return { ok: false, errorCode: "unsupported_operation", field };
+    }
+  }
+  for (const field of Object.keys(obj)) {
+    if (!OPERATE_ALLOWED_FIELDS.has(field)) {
+      return { ok: false, errorCode: "unsupported_operation", field };
+    }
+  }
+  if (obj.operation !== "objective.operate") {
+    return { ok: false, errorCode: "unsupported_operation", field: "operation" };
+  }
+  const projectId = boundedId(obj.projectId);
+  if (!projectId) {
+    return { ok: false, errorCode: "missing_required_field", field: "projectId" };
+  }
+  const workspaceId = boundedId(obj.workspaceId);
+  if (!workspaceId || workspaceId.length < 8) {
+    return { ok: false, errorCode: "missing_required_field", field: "workspaceId" };
+  }
+  if (obj.origin !== "owner_request" && obj.origin !== "ashley_private_interest") {
+    return { ok: false, errorCode: "payload_invalid", field: "origin" };
+  }
+  const objective = boundedText(obj.objective, 500);
+  if (!objective) {
+    return { ok: false, errorCode: "missing_required_field", field: "objective" };
+  }
+  const successCondition = boundedText(obj.successCondition, 500);
+  if (!successCondition) {
+    return { ok: false, errorCode: "missing_required_field", field: "successCondition" };
+  }
+  const failureCondition = boundedText(obj.failureCondition, 500);
+  if (!failureCondition) {
+    return { ok: false, errorCode: "missing_required_field", field: "failureCondition" };
+  }
+  if (!Array.isArray(obj.steps) || obj.steps.length < 1) {
+    return { ok: false, errorCode: "payload_invalid", field: "steps" };
+  }
+  if (obj.steps.length > M6_MAX_STEPS) {
+    return { ok: false, errorCode: "unsupported_operation", field: "steps" };
+  }
+  const steps: CognitionBoundedOperationStep[] = [];
+  for (const [index, rawStep] of obj.steps.entries()) {
+    if (!rawStep || typeof rawStep !== "object" || Array.isArray(rawStep)) {
+      return { ok: false, errorCode: "payload_invalid", field: `steps.${index}` };
+    }
+    const stepObj = rawStep as Record<string, unknown>;
+    const kind = String(stepObj.kind);
+    if (kind === "candidate_workspace_experiment") {
+      const parsed = parseWorkspaceRequest(stepObj.request);
+      if (!parsed) {
+        return { ok: false, errorCode: "payload_invalid", field: `steps.${index}.request` };
+      }
+      steps.push({ kind, request: parsed });
+      continue;
+    }
+    if (kind === "candidate_verification") {
+      const parsed = parseCandidateVerificationRequest(stepObj.request);
+      if (!parsed.ok) {
+        return { ok: false, errorCode: parsed.errorCode, field: `steps.${index}.request.${parsed.field}` };
+      }
+      steps.push({ kind, request: parsed.request });
+      continue;
+    }
+    if (kind === "candidate_authorship") {
+      const parsed = parseCandidateAuthorshipRequest(stepObj.request);
+      if (!parsed.ok) {
+        return { ok: false, errorCode: parsed.errorCode, field: `steps.${index}.request.${parsed.field}` };
+      }
+      steps.push({ kind, request: parsed.request });
+      continue;
+    }
+    return { ok: false, errorCode: "unsupported_operation", field: `steps.${index}.kind` };
+  }
+  if (!obj.budget || typeof obj.budget !== "object" || Array.isArray(obj.budget)) {
+    return { ok: false, errorCode: "missing_required_field", field: "budget" };
+  }
+  const budget = obj.budget as Record<string, unknown>;
+  if (Object.prototype.hasOwnProperty.call(budget, "continueUntilSolved")) {
+    return { ok: false, errorCode: "unsupported_operation", field: "budget.continueUntilSolved" };
+  }
+  const maxSteps = Number(budget.maxSteps);
+  const deadlineAtMs = Number(budget.deadlineAtMs);
+  if (!Number.isInteger(maxSteps) || maxSteps !== steps.length || maxSteps > M6_MAX_STEPS) {
+    return { ok: false, errorCode: "unsupported_operation", field: "budget.maxSteps" };
+  }
+  if (!Number.isFinite(deadlineAtMs) || deadlineAtMs <= 0) {
+    return { ok: false, errorCode: "payload_invalid", field: "budget.deadlineAtMs" };
+  }
+  if (deadlineAtMs - Date.now() > M6_MAX_WALL_MS) {
+    return { ok: false, errorCode: "unsupported_operation", field: "budget.deadlineAtMs" };
+  }
+  return {
+    ok: true,
+    request: {
+      operation: "objective.operate",
+      projectId,
+      workspaceId,
+      origin: obj.origin,
+      objective,
+      successCondition,
+      failureCondition,
+      steps,
+      budget: { maxSteps, deadlineAtMs },
+    },
+  };
+}
+
 /** Legacy aliases — backward compat. */
 export const parseInspectionRequestLegacy = parseInspectionRequest;
 export const parseWorkspaceRequestLegacy = parseWorkspaceRequest;
@@ -653,6 +802,7 @@ function normalizeOperationalRequest(
   canOfferWorkspace: boolean,
   canOfferVerification: boolean,
   canOfferAuthorship: boolean,
+  canOfferOperation: boolean,
 ): LegacyNormalizedRequest {
   const canonicalRaw = proposal.operationalRequest;
   const legacyInspectionRaw = proposal.inspectionRequest;
@@ -675,6 +825,9 @@ function normalizeOperationalRequest(
     } else if (cKind === "candidate_authorship" && canOfferAuthorship) {
       const parsed = parseCandidateAuthorshipRequest(cObj.request);
       if (parsed.ok) canonical = { kind: "candidate_authorship", request: parsed.request };
+    } else if (cKind === "bounded_operation" && canOfferOperation) {
+      const parsed = parseBoundedOperationRequest(cObj.request);
+      if (parsed.ok) canonical = { kind: "bounded_operation", request: parsed.request };
     }
   }
 
@@ -1027,6 +1180,7 @@ function buildInitialThoughtMessages(input: {
   canOfferWorkspace: boolean;
   canOfferVerification: boolean;
   canOfferAuthorship: boolean;
+  canOfferOperation: boolean;
   approvedProjectIds: string[];
   retryContext?: string;
 }): ChatMessages {
@@ -1038,6 +1192,7 @@ function buildInitialThoughtMessages(input: {
     canOfferWorkspace,
     canOfferVerification,
     canOfferAuthorship,
+    canOfferOperation,
     approvedProjectIds,
     retryContext,
   } = input;
@@ -1089,6 +1244,13 @@ function buildInitialThoughtMessages(input: {
         "A sealed change-set is advisory candidate work. It is not applied, merged, or Ashley.",
       );
     }
+    if (canOfferOperation) {
+      parts.push(
+        `When one admitted engineering objective needs a finite sequence of already-accepted M3/M4/M5 operations, include operationalRequest: {kind: "bounded_operation", request: {operation: "objective.operate", projectId: "${quotedProjectIds}", workspaceId: string, origin: "owner_request"|"ashley_private_interest", objective: string, successCondition: string, failureCondition: string, steps: [...], budget: {maxSteps: number, deadlineAtMs: number}}}.`,
+        "The sequence is closed at admission. Do not emit continueUntilSolved. Do not request patch_export, apply, git, deploy, network, or credentials.",
+        "M6 bounds and operates the admitted sequence. It does not choose a new objective and does not cross an engineering border.",
+      );
+    }
 
     projectContextPrompt = `Approved project IDs: ${projectList}. ${parts.join(" ")}`;
   }
@@ -1106,7 +1268,7 @@ function buildInitialThoughtMessages(input: {
     "A refusal is reactive only and must select both the current user_message motivation and a supplied stable boundary motivation.",
     "Use only supplied motivation IDs. Silence is valid. Do not write the message Doc will see.",
     "objective and reason are short intent metadata, not prose to echo and not a copy of the user message.",
-    `operationalRequest is optional. When present, it must be exactly one of: {kind: "project_inspection", request: CognitionInspectionRequest}, {kind: "candidate_workspace_experiment", request: CognitionWorkspaceRequest}, {kind: "candidate_verification", request: {operation: "workspace.verify", projectId, workspaceId, recipeId}}, or {kind: "candidate_authorship", request: {operation: "changeset.author", projectId, workspaceId, objective, rationale, riskClass}}. Emit at most one operationalRequest.`,
+    `operationalRequest is optional. When present, it must be exactly one of: {kind: "project_inspection", request: CognitionInspectionRequest}, {kind: "candidate_workspace_experiment", request: CognitionWorkspaceRequest}, {kind: "candidate_verification", request: {operation: "workspace.verify", projectId, workspaceId, recipeId}}, {kind: "candidate_authorship", request: {operation: "changeset.author", projectId, workspaceId, objective, rationale, riskClass}}, or {kind: "bounded_operation", request: {operation: "objective.operate", projectId, workspaceId, origin, objective, successCondition, failureCondition, steps, budget}}. Emit at most one operationalRequest.`,
     projectContextPrompt,
     dispositionContract,
     ...(retryContext ? [retryContext] : []),
@@ -1128,10 +1290,11 @@ function validateInitialThoughtProposal(
     canOfferWorkspace: boolean;
     canOfferVerification: boolean;
     canOfferAuthorship: boolean;
+    canOfferOperation: boolean;
     approvedProjectIds: string[];
   },
 ): BoundedCognitionValidation<ThoughtProposal> {
-  const { base, motivations, canOffer, canOfferWorkspace, canOfferVerification, canOfferAuthorship, approvedProjectIds } = ctx;
+  const { base, motivations, canOffer, canOfferWorkspace, canOfferVerification, canOfferAuthorship, canOfferOperation, approvedProjectIds } = ctx;
   const kind = String(parsed.kind) as DecisionKind;
   const delayClass = isDecisionDelayClass(parsed.delayClass)
     ? parsed.delayClass
@@ -1175,7 +1338,8 @@ function validateInitialThoughtProposal(
       opKind !== "project_inspection" &&
       opKind !== "candidate_workspace_experiment" &&
       opKind !== "candidate_verification" &&
-      opKind !== "candidate_authorship"
+      opKind !== "candidate_authorship" &&
+      opKind !== "bounded_operation"
     ) {
       return {
         ok: false,
@@ -1207,6 +1371,18 @@ function validateInitialThoughtProposal(
         };
       }
     }
+    if (opKind === "bounded_operation") {
+      const parsedOperate = parseBoundedOperationRequest(
+        (rawOp as Record<string, unknown>).request,
+      );
+      if (!parsedOperate.ok) {
+        return {
+          ok: false,
+          errorCode: parsedOperate.errorCode,
+          field: `operationalRequest.request.${parsedOperate.field}`,
+        };
+      }
+    }
   }
 
   const { operationalRequest: normalizedRequest, conflict } = normalizeOperationalRequest(
@@ -1215,6 +1391,7 @@ function validateInitialThoughtProposal(
     canOfferWorkspace,
     canOfferVerification,
     canOfferAuthorship,
+    canOfferOperation,
   );
   if (conflict) {
     return { ok: false, errorCode: "multiple_operational_intents" };
@@ -1296,8 +1473,10 @@ export async function runThoughtModel(
     trigger === "reactive" ? canOfferCandidateVerification(db) : false;
   const canOfferAuthorship =
     trigger === "reactive" ? canOfferCandidateAuthorship(db) : false;
+  const canOfferOperation =
+    trigger === "reactive" ? canOfferBoundedOperation(db) : false;
   const approvedProjectIds =
-    canOffer || canOfferWorkspace || canOfferVerification || canOfferAuthorship
+    canOffer || canOfferWorkspace || canOfferVerification || canOfferAuthorship || canOfferOperation
       ? listApprovedReadProjectIds()
       : [];
 
@@ -1314,6 +1493,7 @@ export async function runThoughtModel(
         canOfferWorkspace,
         canOfferVerification,
         canOfferAuthorship,
+        canOfferOperation,
         approvedProjectIds,
         retryContext: retryFeedbackText,
       }),
@@ -1327,6 +1507,7 @@ export async function runThoughtModel(
         canOfferWorkspace,
         canOfferVerification,
         canOfferAuthorship,
+        canOfferOperation,
         approvedProjectIds,
       }),
     retryableCodes: STRUCTURAL_RETRYABLE_CODES,

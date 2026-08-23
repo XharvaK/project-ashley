@@ -46,6 +46,7 @@ export const capabilityNames = [
   "project_experimentation",
   "candidate_verification",
   "candidate_authorship",
+  "bounded_operation",
 ] as const;
 
 export type CapabilityName = typeof capabilityNames[number];
@@ -122,6 +123,11 @@ const GRADUATION_POLICIES: Partial<
     minEvalSeeds: 3,
     requiresQualification: true,
   },
+  bounded_operation: {
+    kind: "operator_cutover",
+    minEvalSeeds: 3,
+    requiresQualification: true,
+  },
 };
 
 export function graduationPolicyFor(
@@ -155,6 +161,7 @@ const dependencies: Record<CapabilityName, CapabilityName[]> = {
   project_experimentation: ["thought"],
   candidate_verification: ["thought"],
   candidate_authorship: ["thought"],
+  bounded_operation: ["thought"],
 };
 
 const modelSensitive = new Set<string>(MODEL_SENSITIVE_SET_FOR_CONTRACT);

@@ -57,11 +57,34 @@ export type CognitionAuthorshipRequest = {
   intendedPaths?: string[];
 };
 
+export type CognitionBoundedOperationOrigin = "owner_request" | "ashley_private_interest";
+
+export type CognitionBoundedOperationStep =
+  | { kind: "candidate_workspace_experiment"; request: CognitionWorkspaceRequest }
+  | { kind: "candidate_verification"; request: CognitionVerificationRequest }
+  | { kind: "candidate_authorship"; request: CognitionAuthorshipRequest };
+
+export type CognitionBoundedOperationRequest = {
+  operation: "objective.operate";
+  projectId: string;
+  workspaceId: string;
+  origin: CognitionBoundedOperationOrigin;
+  objective: string;
+  successCondition: string;
+  failureCondition: string;
+  steps: CognitionBoundedOperationStep[];
+  budget: {
+    maxSteps: number;
+    deadlineAtMs: number;
+  };
+};
+
 export type CognitionOperationalRequest =
   | { kind: "project_inspection"; request: CognitionInspectionRequest }
   | { kind: "candidate_workspace_experiment"; request: CognitionWorkspaceRequest }
   | { kind: "candidate_verification"; request: CognitionVerificationRequest }
-  | { kind: "candidate_authorship"; request: CognitionAuthorshipRequest };
+  | { kind: "candidate_authorship"; request: CognitionAuthorshipRequest }
+  | { kind: "bounded_operation"; request: CognitionBoundedOperationRequest };
 
 export type ProjectReadFileObservation = {
   projectId: string;

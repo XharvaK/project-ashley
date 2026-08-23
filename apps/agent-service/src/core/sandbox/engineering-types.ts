@@ -46,6 +46,7 @@ export type SandboxTaskProfile =
   | "project_experimentation"
   | "candidate_verification"
   | "candidate_authorship"
+  | "bounded_operation"
   | "sandbox_workspace_file_roundtrip";
 
 /**
@@ -192,6 +193,55 @@ export function isVerifiedAuthorshipClaimEffect(
 }
 
 /**
+ * Licensed M6 bounded-operation claim. Describes only the admitted finite
+ * sequence that ran. Never apply, export, deploy, or self-change.
+ */
+export type BoundedOperationClaimEffect = {
+  verified: true;
+  projectId: string;
+  workspaceId: string;
+  taskId: string;
+  stepsExecuted: number;
+  maxSteps: number;
+  stopReason: string;
+  borderState: "none";
+  applied: false;
+  exported: false;
+  protocolState: "admitted";
+  completedAtMs: number;
+};
+
+export function isVerifiedBoundedOperationClaimEffect(
+  value: unknown,
+): value is BoundedOperationClaimEffect {
+  if (!value || typeof value !== "object") return false;
+  const e = value as Partial<BoundedOperationClaimEffect>;
+  return (
+    e.verified === true &&
+    e.applied === false &&
+    e.exported === false &&
+    e.borderState === "none" &&
+    e.protocolState === "admitted" &&
+    typeof e.projectId === "string" &&
+    e.projectId.trim().length > 0 &&
+    typeof e.workspaceId === "string" &&
+    e.workspaceId.trim().length > 0 &&
+    typeof e.taskId === "string" &&
+    e.taskId.trim().length > 0 &&
+    typeof e.stepsExecuted === "number" &&
+    Number.isFinite(e.stepsExecuted) &&
+    e.stepsExecuted >= 0 &&
+    typeof e.maxSteps === "number" &&
+    Number.isFinite(e.maxSteps) &&
+    e.maxSteps >= 1 &&
+    typeof e.stopReason === "string" &&
+    e.stopReason.trim().length > 0 &&
+    typeof e.completedAtMs === "number" &&
+    Number.isFinite(e.completedAtMs)
+  );
+}
+
+/**
  * Licensed mechanical verification claim. Binds a named snapshot to a named
  * recipe outcome. Never a quality, approval, merge, or deployment judgment.
  */
@@ -256,6 +306,7 @@ export type OperationalClaimLicense = {
   workspaceClaimEffect?: WorkspaceClaimEffect | null;
   verificationClaimEffect?: VerificationClaimEffect | null;
   authorshipClaimEffect?: AuthorshipClaimEffect | null;
+  boundedOperationClaimEffect?: BoundedOperationClaimEffect | null;
   receiptRef?: string | null;
   error?: string | null;
   refusalReason?: string | null;

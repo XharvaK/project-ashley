@@ -211,7 +211,8 @@ import {
   executeCandidateVerificationV2,
   executeCandidateAuthorshipV2,
 } from "./sandbox/v2-execution.js";
-import { canOfferProjectInspection, canOfferCandidateWorkspace, canOfferCandidateVerification, canOfferCandidateAuthorship, loadOperatorProjectReadRegistry } from "./sandbox/project-registry.js";
+import { executeBoundedOperationV2 } from "./sandbox/bounded-operation-execution.js";
+import { canOfferProjectInspection, canOfferCandidateWorkspace, canOfferCandidateVerification, canOfferCandidateAuthorship, canOfferBoundedOperation, loadOperatorProjectReadRegistry } from "./sandbox/project-registry.js";
 import { SandboxV2Dispatcher, type SandboxV2Environment, type SandboxV2Request, type SandboxV2Result } from "@composer-assistant/sandbox-v2";
 import {
   isVerifiedRoundtripEffectEvidence,
@@ -831,7 +832,8 @@ export class AshleyCore {
         canOfferProjectInspection(this.db) ||
         canOfferCandidateWorkspace(this.db) ||
         canOfferCandidateVerification(this.db) ||
-        canOfferCandidateAuthorship(this.db);
+        canOfferCandidateAuthorship(this.db) ||
+        canOfferBoundedOperation(this.db);
       // M2/M3/M4 reachability: a capability offered to cognition must have the
       // cognition pass that can exercise it. When project inspection, candidate
       // workspace, or candidate verification is offered, admit model Thought
@@ -1265,6 +1267,31 @@ export class AshleyCore {
                 },
               );
             }
+          } else if (opReq.kind === "bounded_operation") {
+            const operateResult = await executeBoundedOperationV2({
+              request: opReq.request,
+              ownerId: input.ownerId,
+              messageEntityUuid: messageEntityUuid ?? undefined,
+              db: this.db,
+            });
+            decision.operationalLicense = operateResult.license;
+            decision = await deliberateThoughtContinuation(
+              this.db,
+              decision,
+              null,
+              operateResult.license.error ?? null,
+              motivations,
+              "reactive",
+              undefined,
+              undefined,
+              {
+                allowModelThought: thoughtCanInfluence,
+                thoughtDeadlineAtMs: opReq.request.budget.deadlineAtMs,
+                deliveryReservationId: reservation.id,
+                ownerId: input.ownerId,
+                onLifecycle: onContinuationLifecycle,
+              },
+            );
           } else {
             const _never: never = opReq;
             void _never;
@@ -2160,6 +2187,12 @@ export class AshleyCore {
               state: "none",
               profile: "candidate_authorship",
               error: "proactive_candidate_authorship_unauthorized",
+            };
+          } else if (opReq.kind === "bounded_operation") {
+            decision.operationalLicense = {
+              state: "none",
+              profile: "bounded_operation",
+              error: "proactive_bounded_operation_unauthorized",
             };
           }
         }

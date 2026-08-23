@@ -26,6 +26,12 @@ function sourceV29Fixture(): Fixture {
   const continuity = openContinuityDb(new DatabaseSync(":memory:"));
   const nuclear = openNuclearDb(new DatabaseSync(":memory:"), { continuity });
   nuclear.exec(`
+    DROP INDEX IF EXISTS idx_bounded_operation_steps_entity_uuid;
+    DROP INDEX IF EXISTS idx_bounded_operation_steps_task;
+    DROP INDEX IF EXISTS idx_bounded_operation_tasks_entity_uuid;
+    DROP INDEX IF EXISTS idx_bounded_operation_tasks_owner_status;
+    DROP TABLE IF EXISTS bounded_operation_steps;
+    DROP TABLE IF EXISTS bounded_operation_tasks;
     DROP INDEX IF EXISTS idx_candidate_changeset_events_entity_uuid;
     DROP INDEX IF EXISTS idx_candidate_changeset_events_changeset;
     DROP INDEX IF EXISTS idx_candidate_changesets_entity_uuid;
@@ -44,8 +50,8 @@ describe("nuclear schema v30 candidate change-sets", () => {
   it("installs control-plane tables with zero rows", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     try {
-      expect(NUCLEAR_SUPPORTED_VERSION).toBe(30);
-      expect(schemaVersion(db)).toBe(30);
+      expect(NUCLEAR_SUPPORTED_VERSION).toBe(31);
+      expect(schemaVersion(db)).toBe(31);
       expect(
         (db.prepare(`SELECT COUNT(*) AS c FROM candidate_changesets`).get() as { c: number }).c,
       ).toBe(0);
@@ -125,7 +131,7 @@ describe("nuclear schema v30 candidate change-sets", () => {
         to: 30,
       });
       const reopen = openNuclearDb(fixture.nuclear, { continuity: fixture.continuity });
-      expect(schemaVersion(reopen)).toBe(30);
+      expect(schemaVersion(reopen)).toBe(31);
       expect(getPendingNuclearMigration(fixture.continuity)).toBeNull();
     } finally {
       fixture.nuclear.close();

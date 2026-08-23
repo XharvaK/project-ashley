@@ -201,6 +201,14 @@ const NON_LIVE: Record<string, NonLiveRule> = {
     cls: "CONTROL_PLANE",
     reason: "M5 append-only change-set audit metadata; no patch bytes or secrets",
   },
+  bounded_operation_tasks: {
+    cls: "CONTROL_PLANE",
+    reason: "M6 bounded-operation task work state; audit and safe-stop only; not Identity/Mind State/Recall; no automatic resume",
+  },
+  bounded_operation_steps: {
+    cls: "CONTROL_PLANE",
+    reason: "M6 bounded-operation step receipts; operational history only",
+  },
   engineering_admissions: {
     cls: "CONTROL_PLANE",
     reason: "sandbox engineering task admission ledger; control-plane state",

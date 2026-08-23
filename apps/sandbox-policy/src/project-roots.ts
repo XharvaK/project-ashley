@@ -35,6 +35,12 @@ export type ProjectRootEntry = {
    * verificationAllowed.
    */
   authorshipAllowed?: boolean;
+  /**
+   * M6 bounded-operation grant. Missing/false means an admitted finite
+   * M3/M4/M5 sequence is refused. Independent of engineeringAllowed,
+   * candidateWorkspaceAllowed, verificationAllowed, and authorshipAllowed.
+   */
+  operationAllowed?: boolean;
 };
 
 export type ProjectRootRegistry = {
@@ -102,6 +108,7 @@ export function validateProjectRootRegistry(
       verificationAllowed: entry.verificationAllowed === true,
       allowedRecipeIds: allowedRecipeIds.ids,
       authorshipAllowed: entry.authorshipAllowed === true,
+      operationAllowed: entry.operationAllowed === true,
     };
     entries.set(normalized.projectId, normalized);
     roots.push(normalized.canonicalRoot);
@@ -138,6 +145,10 @@ export function isVerificationRecipeAllowed(
 
 export function isAuthorshipAllowed(entry: ProjectRootEntry): boolean {
   return entry.authorshipAllowed === true;
+}
+
+export function isOperationAllowed(entry: ProjectRootEntry): boolean {
+  return entry.operationAllowed === true;
 }
 
 export type ProjectRootAccessKind = "read" | "workspace" | "engineering";

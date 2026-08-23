@@ -415,6 +415,91 @@ const V30_ONLY_OBJECTS = [
   "idx_candidate_changeset_events_entity_uuid",
 ] as const;
 
+const V31_TABLES = ["bounded_operation_tasks", "bounded_operation_steps"] as const;
+
+const V31_COLUMNS: Record<string, ColumnSpec[]> = {
+  bounded_operation_tasks: [
+    { name: "id", primaryKey: true },
+    { name: "entity_uuid", notNull: true },
+    { name: "data_classification", notNull: true, defaultValue: "'never_public'" },
+    { name: "owner_id", notNull: true },
+    { name: "task_id", notNull: true },
+    { name: "project_id", notNull: true },
+    { name: "workspace_id", notNull: true },
+    { name: "origin", notNull: true },
+    { name: "objective", notNull: true },
+    { name: "status", notNull: true },
+    { name: "max_steps", notNull: true },
+    { name: "deadline_at_ms", notNull: true },
+    { name: "created_at", notNull: true },
+    { name: "updated_at", notNull: true },
+  ],
+  bounded_operation_steps: [
+    { name: "id", primaryKey: true },
+    { name: "entity_uuid", notNull: true },
+    { name: "data_classification", notNull: true, defaultValue: "'never_public'" },
+    { name: "owner_id", notNull: true },
+    { name: "task_id", notNull: true },
+    { name: "step_index", notNull: true },
+    { name: "step_kind", notNull: true },
+    { name: "outcome", notNull: true },
+    { name: "recorded_at", notNull: true },
+  ],
+};
+
+const V31_INDEXES: IndexSpec[] = [
+  {
+    table: "bounded_operation_tasks",
+    name: "idx_bounded_operation_tasks_owner_status",
+    columns: ["owner_id", "status", "created_at"],
+  },
+  {
+    table: "bounded_operation_tasks",
+    name: "idx_bounded_operation_tasks_entity_uuid",
+    columns: ["entity_uuid"],
+    unique: true,
+  },
+  {
+    table: "bounded_operation_steps",
+    name: "idx_bounded_operation_steps_task",
+    columns: ["task_id", "step_index"],
+  },
+  {
+    table: "bounded_operation_steps",
+    name: "idx_bounded_operation_steps_entity_uuid",
+    columns: ["entity_uuid"],
+    unique: true,
+  },
+];
+
+const V31_TABLE_FRAGMENTS: Record<string, string[]> = {
+  bounded_operation_tasks: [
+    "check(origin in('owner_request','ashley_private_interest'))",
+    "check(border_state='none')",
+    "unique(task_id)",
+  ],
+  bounded_operation_steps: [
+    "check(outcome in('succeeded','failed','skipped'))",
+  ],
+};
+
+const V31_ONLY_OBJECTS = [
+  ...V31_TABLES,
+  "idx_bounded_operation_tasks_owner_status",
+  "idx_bounded_operation_tasks_entity_uuid",
+  "idx_bounded_operation_steps_task",
+  "idx_bounded_operation_steps_entity_uuid",
+] as const;
+
+function requireNoV31Objects(db: DatabaseSync, version: number): void {
+  for (const name of V31_ONLY_OBJECTS) {
+    const type = V31_TABLES.includes(name as (typeof V31_TABLES)[number])
+      ? "table"
+      : "index";
+    if (masterRow(db, type, name)) fail(version, `unexpected_v31_object:${name}`);
+  }
+}
+
 function normalizeSql(value: string): string {
   return value
     .toLowerCase()
@@ -639,7 +724,7 @@ function requireNoV30Objects(db: DatabaseSync, version: number): void {
 
 export function validateNuclearSchemaContent(
   db: DatabaseSync,
-  version: 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30,
+  version: 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31,
   options: { rejectNewerContent?: boolean } = {},
 ): void {
   if (version === 22) {
@@ -720,6 +805,17 @@ export function validateNuclearSchemaContent(
     requireFragments(db, version, table, V30_TABLE_FRAGMENTS[table] ?? []);
   }
   for (const index of V30_INDEXES) requireIndex(db, version, index);
+  if (version === 30 && options.rejectNewerContent === true) {
+    requireNoV31Objects(db, version);
+    return;
+  }
+  if (version === 30) return;
+  for (const table of V31_TABLES) requireTable(db, version, table);
+  for (const [table, columns] of Object.entries(V31_COLUMNS)) {
+    requireColumns(db, version, table, columns);
+    requireFragments(db, version, table, V31_TABLE_FRAGMENTS[table] ?? []);
+  }
+  for (const index of V31_INDEXES) requireIndex(db, version, index);
 }
 
 function addColumnIfMissing(

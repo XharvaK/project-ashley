@@ -9,7 +9,7 @@ import {
   currentReleaseId,
 } from "../rollout/capabilities.js";
 import type { CognitionMode } from "../types.js";
-import { listApprovedReadProjectIds, canOfferCandidateWorkspace, canOfferCandidateVerification, canOfferCandidateAuthorship } from "../sandbox/project-registry.js";
+import { listApprovedReadProjectIds, canOfferCandidateWorkspace, canOfferCandidateVerification, canOfferCandidateAuthorship, canOfferBoundedOperation } from "../sandbox/project-registry.js";
 
 export type PerceptionCapabilityName =
   | "vision"
@@ -250,6 +250,36 @@ export function describeCandidateAuthorshipAvailability(options?: {
   }`;
 }
 
+export function describeBoundedOperationAvailability(options?: {
+  db?: DatabaseSync;
+  masterMode?: CognitionMode;
+  canInfluence?: boolean;
+  registryAllows?: boolean;
+}): string {
+  if (!options?.db) {
+    return "Bounded operation (M6): unavailable (no db for capability check); cannot request objective.operate this turn.";
+  }
+  const canInfluence =
+    options.canInfluence ??
+    (() => {
+      try {
+        return capabilityCanInfluence(options.db, "bounded_operation", options.masterMode);
+      } catch {
+        return false;
+      }
+    })();
+  const registryAllows =
+    options.registryAllows ?? canOfferBoundedOperation(options.db);
+  if (canInfluence && registryAllows) {
+    return "Bounded operation (M6): offerable (bounded_operation active and operationAllowed; finite admitted M3/M4/M5 sequence; not a border effect, worker, or second Agency).";
+  }
+  return `Bounded operation (M6): ${
+    !canInfluence
+      ? "capability not active in rollout (observe-only; cannot request objective.operate)"
+      : "operationAllowed closed on the project registry (cannot request objective.operate)"
+  }`;
+}
+
 export function composeSelfCapabilityContext(
   db: DatabaseSync,
   options?: {
@@ -267,6 +297,7 @@ export function composeSelfCapabilityContext(
     `- ${describeCandidateWorkspaceAvailability({ db, masterMode: options?.masterMode })}`,
     `- ${describeCandidateVerificationAvailability({ db, masterMode: options?.masterMode })}`,
     `- ${describeCandidateAuthorshipAvailability({ db, masterMode: options?.masterMode })}`,
+    `- ${describeBoundedOperationAvailability({ db, masterMode: options?.masterMode })}`,
     `- ${describeSandboxAvailability()}`,
   ];
   return lines.join("\n");

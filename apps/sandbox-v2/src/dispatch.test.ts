@@ -169,6 +169,15 @@ describe("SandboxV2Dispatcher", () => {
     if (result.outcome === "failed") expect(result.error).toBe("unknown_operation");
   });
 
+  it("does not admit M6/M7 operations as dispatcher effects", async () => {
+    const dispatcher = new SandboxV2Dispatcher({ env: env() });
+    for (const operation of ["objective.operate", "patch_export", "live_apply"]) {
+      const result = await dispatcher.dispatch({ version: 2, operation });
+      expect(result.outcome).toBe("failed");
+      if (result.outcome === "failed") expect(result.error).toBe("unknown_operation");
+    }
+  });
+
   it("fails closed for deferred git operations", async () => {
     const dispatcher = new SandboxV2Dispatcher({ env: env() });
     const result = await dispatcher.dispatch({

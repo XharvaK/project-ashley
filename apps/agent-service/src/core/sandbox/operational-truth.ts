@@ -2,6 +2,7 @@ import {
   isVerifiedRoundtripEffectEvidence,
   isVerifiedVerificationClaimEffect,
   isVerifiedAuthorshipClaimEffect,
+  isVerifiedBoundedOperationClaimEffect,
   isVerifiedWorkspaceClaimEffect,
   type OperationalClaimLicense,
   type SandboxTaskProfile,
@@ -272,6 +273,34 @@ export function deriveOperationalTruth(
         candidateTreeHash: effect.candidateTreeHash,
         semanticOutput:
           `named candidate change-set ${effect.changesetId} was sealed against this named base as advisory candidate work. it has not been applied.`,
+      };
+    }
+    return {
+      state: "none",
+      locked: false,
+      profile: license.profile,
+      taskId: license.taskId,
+      error: license.error ?? null,
+    };
+  }
+
+  if (license.profile === "bounded_operation") {
+    if (
+      (license.state === "succeeded" || license.state === "failed") &&
+      isVerifiedBoundedOperationClaimEffect(license.boundedOperationClaimEffect)
+    ) {
+      const effect = license.boundedOperationClaimEffect;
+      const semanticOutput =
+        effect.stopReason === "succeeded"
+          ? `completed ${effect.stepsExecuted} admitted sandbox operations toward the named objective. no border effect was performed.`
+          : `stopped after ${effect.stepsExecuted} of ${effect.maxSteps} admitted sandbox operations because ${effect.stopReason}. no border effect was performed.`;
+      return {
+        state: effect.stopReason === "succeeded" ? "verified_success" : "failed",
+        locked: true,
+        profile: license.profile,
+        taskId: license.taskId,
+        workspaceId: effect.workspaceId,
+        semanticOutput,
       };
     }
     return {

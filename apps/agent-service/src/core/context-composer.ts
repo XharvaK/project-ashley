@@ -34,6 +34,7 @@ import {
   canOfferCandidateVerification,
   canOfferCandidateWorkspace,
   canOfferProjectInspection,
+  canOfferBoundedOperation,
 } from "./sandbox/project-registry.js";
 
 /** Product: composed turn context Expression consumes. */
@@ -299,6 +300,29 @@ export function operationalWorkBlock(
     } else if (license.error) {
       lines.push(
         `Authorship status: not licensed (${license.error}). No sealed change-set claim is authorized.`,
+      );
+    }
+    if (lines.length === 0) return "";
+    return [
+      "## Operational work state (cognitive attention only)",
+      ...lines,
+    ].join("\n");
+  }
+
+  if (license.profile === "bounded_operation") {
+    const lines = [
+      `Status: ${truth.state !== "none" ? truth.state : license.state}`,
+      `Profile: ${license.profile}`,
+      license.taskId ? `Task ID: ${license.taskId}` : "",
+      license.error ? `Error: ${license.error}` : "",
+    ].filter(Boolean);
+    const effect = license.boundedOperationClaimEffect;
+    if (effect) {
+      lines.push(
+        `Steps executed: ${effect.stepsExecuted} of ${effect.maxSteps}`,
+        `Stop reason: ${effect.stopReason}`,
+        "Border state: none",
+        "Semantics: only the admitted finite M3/M4/M5 sequence ran. No patch was exported, applied, committed, or deployed.",
       );
     }
     if (lines.length === 0) return "";
@@ -630,6 +654,55 @@ export function candidateAuthorshipEvidenceBlock(
   ].join("\n");
 }
 
+export function boundedOperationEvidenceBlock(
+  license: OperationalClaimLicense | null | undefined,
+  options: { capabilityAvailable?: boolean } = {},
+): string {
+  const capabilityAvailable = options.capabilityAvailable === true;
+  const availableLine = `capabilityAvailable = ${capabilityAvailable}`;
+  const semantics = [
+    "Semantics: capabilityAvailable is the authoritative current M6 grant; operationStatus is what actually ran.",
+    "Semantics: a licensed bounded operation is a finite admitted M3/M4/M5 sequence. It is not apply, export, deploy, or a second Agency.",
+  ];
+  if (license?.profile === "bounded_operation") {
+    const effect = license.boundedOperationClaimEffect;
+    if (effect) {
+      return [
+        "Bounded operation evidence:",
+        availableLine,
+        `operationStatus = ${effect.stopReason}`,
+        `stepsExecuted = ${effect.stepsExecuted}`,
+        `maxSteps = ${effect.maxSteps}`,
+        "borderState = none",
+        "applied = false",
+        "exported = false",
+        ...semantics,
+        effect.stopReason === "succeeded"
+          ? "Semantics: the admitted finite sequence completed. No border effect was performed."
+          : `Semantics: the admitted sequence stopped because ${effect.stopReason}. No border effect was performed.`,
+      ].join("\n");
+    }
+    if (license.error) {
+      return [
+        "Bounded operation evidence:",
+        availableLine,
+        "operationStatus = refused",
+        `error = ${license.error}`,
+        ...semantics,
+      ].join("\n");
+    }
+  }
+  return [
+    "Bounded operation evidence:",
+    availableLine,
+    "operationStatus = not_performed",
+    ...semantics,
+    capabilityAvailable
+      ? "Semantics: M6 is offerable this turn but no bounded operation ran."
+      : "Semantics: Ashley cannot run a bounded operation this turn because bounded_operation is not active or operationAllowed is closed.",
+  ].join("\n");
+}
+
 /**
  * ContextComposer — sole owner of turn context assembly.
  * Assembles existing peer outputs; does not reinterpret, score, or rewrite them.
@@ -687,6 +760,12 @@ export function composeTurnContext(
        capabilityAvailable: canOfferCandidateAuthorship(db),
      },
    );
+   const operationEvidence = boundedOperationEvidenceBlock(
+     decision?.operationalLicense,
+     {
+       capabilityAvailable: canOfferBoundedOperation(db),
+     },
+   );
   // Questions only when Thought selected question evidence or none selected yet
   // would dump — skip global question dump; selected questions arrive via evidence.
   const questions = "";
@@ -704,6 +783,7 @@ export function composeTurnContext(
     workspaceEvidence,
     verificationEvidence,
     authorshipEvidence,
+    operationEvidence,
     questions,
   ].filter(Boolean);
 

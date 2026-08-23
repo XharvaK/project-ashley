@@ -5,6 +5,7 @@ import {
   classifyProjectRootAccess,
   isVerificationRecipeAllowed,
   isAuthorshipAllowed,
+  isOperationAllowed,
   type ProjectRootEntry,
 } from "./project-roots.js";
 
@@ -74,6 +75,7 @@ describe("project root registry", () => {
     expect(entry?.engineeringAllowed).toBe(true);
     expect(entry?.verificationAllowed).toBe(false);
     expect(entry?.authorshipAllowed).toBe(false);
+    expect(entry?.operationAllowed).toBe(false);
     expect(entry?.allowedRecipeIds).toEqual([]);
   });
 
@@ -84,6 +86,7 @@ describe("project root registry", () => {
     const a = r.registry.entries.get("projA");
     expect(a?.verificationAllowed).toBe(false);
     expect(a?.authorshipAllowed).toBe(false);
+    expect(a?.operationAllowed).toBe(false);
     expect(a?.allowedRecipeIds).toEqual([]);
     expect(a?.engineeringAllowed).toBe(true);
     expect(isVerificationRecipeAllowed(a!, "typescript_fixture_compile_v1")).toBe(false);
@@ -115,6 +118,34 @@ describe("project root registry", () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(isAuthorshipAllowed(r.registry.entries.get("projA")!)).toBe(true);
+  });
+
+  it("does not treat authorship or engineering as bounded-operation authority", () => {
+    const r = validateProjectRootRegistry([
+      {
+        ...entries[0]!,
+        engineeringAllowed: true,
+        candidateWorkspaceAllowed: true,
+        verificationAllowed: true,
+        allowedRecipeIds: ["typescript_fixture_compile_v1"],
+        authorshipAllowed: true,
+        operationAllowed: false,
+      },
+    ]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const entry = r.registry.entries.get("projA")!;
+    expect(isAuthorshipAllowed(entry)).toBe(true);
+    expect(isOperationAllowed(entry)).toBe(false);
+  });
+
+  it("admits bounded operation only when operationAllowed is true", () => {
+    const r = validateProjectRootRegistry([
+      { ...entries[0]!, operationAllowed: true },
+    ]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(isOperationAllowed(r.registry.entries.get("projA")!)).toBe(true);
   });
 
   it("refuses a missing recipe allowlist even when verificationAllowed is true", () => {
