@@ -37,14 +37,14 @@ Resolve live from Git after this packet lands. At packet writing:
 | M5 implementation | `d0e84c753e7788d8b4f5539aa1c1a80ef5c3b85d` |
 | M6 implementation | `9f6544bf4692c2544011ab3f31543446bf8d3c42` |
 | M7 implementation | `34e5798278786f0cb40808abcb242db93512d4bc` |
-| Freeze packet | the commit that introduces this file on the branch above |
+| Freeze packet | `69a57acb744bfb5dfc099a26aeb4ac86a2abe8a3` |
 | Nuclear schema | source `NUCLEAR_SUPPORTED_VERSION = 32` in `apps/agent-service/src/core/db.ts` |
 | Root package | `project-ashley` `0.2.0` |
 | agent-service | `0.1.0` |
 | sandbox-policy | `0.1.0` |
 | sandbox-v2 | `0.1.0` |
 
-Working tree at freeze writing is this docs packet on top of `34e5798`.
+Working tree at freeze writing is this docs packet on `69a57ac`.
 Do not treat worktree source as deployed.
 
 ---
