@@ -58,6 +58,7 @@ export function mindStateItemToMotivation(
 }
 
 function ageHours(iso: string): number {
+
   const parsed = Date.parse(iso);
   return Number.isFinite(parsed)
     ? Math.max(0, (Date.now() - parsed) / 3_600_000)
@@ -109,10 +110,81 @@ function userMessageScore(message: string): number {
     : 100;
 }
 
-function isSilenceRequest(message: string): boolean {
-  return /\b(?:stop(?: messaging| pinging)?|busy|later|not now|leave me alone|don't ping|do not ping)\b/i.test(
-    message,
-  );
+/**
+ * Detects unambiguous conversational requests for space or silence from the owner.
+ *
+ * Conservative by design: false-positive silence suppresses cognition entirely,
+ * while false-negative silence safely proceeds to Thought where the model can
+ * still choose to remain silent.
+ *
+ * Distinguishes conversational directives ("stop messaging me", "leave me alone",
+ * standalone "stop") from procedural/task control language ("stop after X",
+ * "stop when verification fails", "stop on error").
+ */
+export function isSilenceRequest(message: string): boolean {
+  const trimmed = message.trim();
+  if (trimmed.length === 0) return false;
+
+  // 1. Explicit qualified conversational silence phrases (unambiguous intent)
+  const qualifiedSilence =
+    /\b(?:stop\s+(?:messaging|pinging|talking|replying)(?:\s+me|\s+to\s+me)?|don't\s+(?:message|ping|talk\s+to|reply\s+to)\s+me|do\s+not\s+(?:message|ping|talk\s+to|reply\s+to)\s+me|leave\s+me\s+alone|give\s+me\s+(?:some\s+)?space|i\s+need\s+(?:some\s+)?space)\b/i;
+  if (qualifiedSilence.test(trimmed)) {
+    return true;
+  }
+
+  // 2. Standalone or near-standalone conversational space directives
+  const normalized = trimmed
+    .replace(/^["'`]|["'`]$/g, "")
+    .replace(/[!.?]+$/g, "")
+    .trim()
+    .toLowerCase();
+
+  const standaloneDirectives = new Set([
+    "stop",
+    "please stop",
+    "pls stop",
+    "not now",
+    "not right now",
+    "later",
+    "talk later",
+    "catch you later",
+    "can we talk later",
+    "let's talk later",
+    "lets talk later",
+    "busy",
+    "i'm busy",
+    "im busy",
+    "busy right now",
+    "i am busy",
+    "i'm busy right now",
+    "im busy right now",
+    "i'm busy, talk later",
+    "im busy, talk later",
+    "busy, talk later",
+    "i'm busy talk later",
+    "im busy talk later",
+    "busy talk later",
+    "leave me alone",
+    "please leave me alone",
+    "give me space",
+    "please give me space",
+  ]);
+
+  if (standaloneDirectives.has(normalized)) {
+    return true;
+  }
+
+  // Also match short compound patterns like "i'm busy [...] not now/later" under ~40 chars
+  if (
+    normalized.length <= 40 &&
+    /^(?:i(?:'m|\s+am)\s+busy|busy)\s*[,;-]?\s*(?:talk\s+later|later|not\s+now|not\s+right\s+now)$/i.test(
+      normalized,
+    )
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 function tokenize(text: string): Set<string> {

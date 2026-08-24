@@ -10,6 +10,7 @@ import type { OwnTimeReportConstraint } from "./own-time-constraint.js";
 import { relevantBoundaryIdSet } from "./boundary-relevance.js";
 import { evaluateWithdrawalSilence } from "../relationship/repair.js";
 import { env } from "../../env.js";
+import { isSilenceRequest } from "./motivations.js";
 
 /**
  * Thought implementation (Agency location).
@@ -23,12 +24,6 @@ function motivationIds(motivations: Motivation[]): number[] {
 
 function isFluff(summary: string): boolean {
   return /^(?:hi|hey|hello|ok|okay|k|lol|haha|nice|cool|thanks|ty|yeah|yep|nope|hm|hmm)[!.? ]*$/i.test(
-    summary.trim(),
-  );
-}
-
-function isSilenceSummary(summary: string): boolean {
-  return /\b(?:stop(?: messaging| pinging)?|busy|later|not now|leave me alone|don't ping|do not ping)\b/i.test(
     summary.trim(),
   );
 }
@@ -394,7 +389,7 @@ export function decide(
         };
       }
     }
-    if (isSilenceSummary(userMessage.summary)) {
+    if (isSilenceRequest(userMessage.summary)) {
       return makeDecision(
         trigger,
         "silence",
