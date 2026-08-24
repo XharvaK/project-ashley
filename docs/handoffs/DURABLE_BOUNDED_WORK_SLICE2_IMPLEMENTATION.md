@@ -55,7 +55,9 @@ Missing source: terminal `stopReason=missing_source_message`, no M6.
 
 ### Linux CI
 
-Final candidate SHA is the tip of `cursor/m-series-local-completion-2357` after this repair commit (filled after push).
+Final candidate SHA: `2260f0abefb775b99a92a4431e6941fe1ae0f5cf`  
+Branch: `cursor/m-series-local-completion-2357`  
+Push is GitHub Actions / ubuntu-latest only. No Mint. No production flag change.
 
 Slice-1 accepted Linux baseline: `91b39f968b8da7380418ff2c68a2246e3a61018b` — 1482 pass / 5 fail (`thought-delay.test.ts` ×2, `m5-phase-f.test.ts` ×3). Do not repair those five.
 
