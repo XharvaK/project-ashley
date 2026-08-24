@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
-import { openNuclearDb } from "./db.js";
+import { NUCLEAR_SUPPORTED_VERSION, openNuclearDb } from "./db.js";
 import { AshleyCore } from "./runtime.js";
 import { openContinuityDb } from "./continuity/db.js";
 
@@ -19,7 +19,7 @@ describe("wave10c health contract", () => {
       ready: false,
       provider: "unavailable",
       db: {
-        schemaVersion: 33,
+        schemaVersion: NUCLEAR_SUPPORTED_VERSION,
         integrity: "ok",
         foreignKeys: "enabled",
         continuity: {
