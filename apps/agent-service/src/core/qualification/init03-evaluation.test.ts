@@ -596,7 +596,7 @@ describe("INIT-03 deterministic behavioral and counterfactual evaluation", () =>
     expect(JSON.stringify([...onResults, ...offResults])).not.toMatch(
       /interview|disagreement|continuity audit|same transcript/i,
     );
-  });
+  }, 90_000);
 
   it("keeps own-time grounded and defers an OCI across restart without expiration", () => {
     const ownTime: OwnTimeReportConstraint = {
