@@ -826,25 +826,13 @@ export function parseBoundedOperationRequest(
   if (!projectId) {
     return { ok: false, errorCode: "missing_required_field", field: "projectId" };
   }
-  const workspaceId = boundedId(obj.workspaceId);
-  if (!workspaceId || workspaceId.length < 8) {
-    return { ok: false, errorCode: "missing_required_field", field: "workspaceId" };
-  }
-  if (obj.origin !== "owner_request" && obj.origin !== "ashley_private_interest") {
-    return { ok: false, errorCode: "payload_invalid", field: "origin" };
-  }
-  const objective = boundedText(obj.objective, 500);
-  if (!objective) {
-    return { ok: false, errorCode: "missing_required_field", field: "objective" };
-  }
-  const successCondition = boundedText(obj.successCondition, 500);
-  if (!successCondition) {
-    return { ok: false, errorCode: "missing_required_field", field: "successCondition" };
-  }
-  const failureCondition = boundedText(obj.failureCondition, 500);
-  if (!failureCondition) {
-    return { ok: false, errorCode: "missing_required_field", field: "failureCondition" };
-  }
+  const workspaceId = boundedId(obj.workspaceId) ?? undefined;
+  const origin: "owner_request" | "ashley_private_interest" =
+    obj.origin === "ashley_private_interest" ? "ashley_private_interest" : "owner_request";
+  const objective = boundedText(obj.objective, 500) || "admitted bounded sequence";
+  const successCondition = boundedText(obj.successCondition, 500) || "admitted steps complete";
+  const failureCondition = boundedText(obj.failureCondition, 500) || "any step fails";
+
   if (!Array.isArray(obj.steps) || obj.steps.length < 1) {
     return { ok: false, errorCode: "payload_invalid", field: "steps" };
   }
@@ -884,31 +872,40 @@ export function parseBoundedOperationRequest(
     }
     return { ok: false, errorCode: "unsupported_operation", field: `steps.${index}.kind` };
   }
-  if (!obj.budget || typeof obj.budget !== "object" || Array.isArray(obj.budget)) {
-    return { ok: false, errorCode: "missing_required_field", field: "budget" };
+
+  let maxSteps = steps.length;
+  let deadlineAtMs = Date.now() + 30_000;
+  if (obj.budget && typeof obj.budget === "object" && !Array.isArray(obj.budget)) {
+    const budget = obj.budget as Record<string, unknown>;
+    if (Object.prototype.hasOwnProperty.call(budget, "continueUntilSolved")) {
+      return { ok: false, errorCode: "unsupported_operation", field: "continueUntilSolved" };
+    }
+    if (budget.maxSteps !== undefined) {
+      const numSteps = Number(budget.maxSteps);
+      if (!Number.isInteger(numSteps) || numSteps !== steps.length || numSteps > M6_MAX_STEPS) {
+        return { ok: false, errorCode: "unsupported_operation", field: "budget.maxSteps" };
+      }
+      maxSteps = numSteps;
+    }
+    if (budget.deadlineAtMs !== undefined) {
+      const dMs = Number(budget.deadlineAtMs);
+      if (!Number.isFinite(dMs) || dMs <= 0) {
+        return { ok: false, errorCode: "payload_invalid", field: "budget.deadlineAtMs" };
+      }
+      if (dMs - Date.now() > M6_MAX_WALL_MS) {
+        return { ok: false, errorCode: "unsupported_operation", field: "budget.deadlineAtMs" };
+      }
+      deadlineAtMs = dMs;
+    }
   }
-  const budget = obj.budget as Record<string, unknown>;
-  if (Object.prototype.hasOwnProperty.call(budget, "continueUntilSolved")) {
-    return { ok: false, errorCode: "unsupported_operation", field: "budget.continueUntilSolved" };
-  }
-  const maxSteps = Number(budget.maxSteps);
-  const deadlineAtMs = Number(budget.deadlineAtMs);
-  if (!Number.isInteger(maxSteps) || maxSteps !== steps.length || maxSteps > M6_MAX_STEPS) {
-    return { ok: false, errorCode: "unsupported_operation", field: "budget.maxSteps" };
-  }
-  if (!Number.isFinite(deadlineAtMs) || deadlineAtMs <= 0) {
-    return { ok: false, errorCode: "payload_invalid", field: "budget.deadlineAtMs" };
-  }
-  if (deadlineAtMs - Date.now() > M6_MAX_WALL_MS) {
-    return { ok: false, errorCode: "unsupported_operation", field: "budget.deadlineAtMs" };
-  }
+
   return {
     ok: true,
     request: {
       operation: "objective.operate",
       projectId,
-      workspaceId,
-      origin: obj.origin,
+      ...(workspaceId ? { workspaceId } : {}),
+      origin,
       objective,
       successCondition,
       failureCondition,
@@ -1519,8 +1516,11 @@ export function composeInitialThoughtMessages(input: {
     }
     if (canOfferOperation) {
       parts.push(
-        `When one admitted engineering objective needs a finite sequence of already-accepted M3/M4/M5 operations, include operationalRequest: {kind: "bounded_operation", request: {operation: "objective.operate", projectId: "${quotedProjectIds}", workspaceId: string, origin: "owner_request"|"ashley_private_interest", objective: string, successCondition: string, failureCondition: string, steps: [...], budget: {maxSteps: number, deadlineAtMs: number}}}.`,
-        "The sequence is closed at admission. Do not emit continueUntilSolved. Do not request patch_export, apply, git, deploy, network, or credentials.",
+        `When one admitted engineering objective requires a finite multi-step sequence of two or more distinct sandbox operations (such as creating/writing a candidate file, mechanically verifying the candidate, and sealing an advisory candidate change-set), you MUST include operationalRequest: {kind: "bounded_operation", request: {operation: "objective.operate", projectId: "${quotedProjectIds}", workspaceId?: string, origin: "owner_request"|"ashley_private_interest", objective: string, successCondition: string, failureCondition: string, steps: [{kind: "candidate_workspace_experiment", request: {operation: "workspace.write_file"|"workspace.replace_file"|"workspace.edit_text"|"workspace.delete_file"|"workspace.create_directory", projectId: "${quotedProjectIds}", path: string, content?: string}}, {kind: "candidate_verification", request: {operation: "workspace.verify", projectId: "${quotedProjectIds}", recipeId?: string}}, {kind: "candidate_authorship", request: {operation: "changeset.author", projectId: "${quotedProjectIds}", objective: string, rationale: string, riskClass: "low"|"medium"|"high"|"consultation"}}], budget: {maxSteps: number}}}.`,
+        "When only a single sandbox operation is requested (e.g. only write a file, or only verify a candidate, or only seal a change-set), emit that single operationalRequest directly (candidate_workspace_experiment, candidate_verification, or candidate_authorship). Do NOT wrap single-action requests in bounded_operation.",
+        "When a multi-step sequence of multiple operations is requested (such as write then verify then seal), do NOT select candidate_workspace_experiment alone; you MUST emit bounded_operation with the full sequence of steps in operationalRequest.",
+        "The sequence is closed at admission. Allowed step kinds are: candidate_workspace_experiment, candidate_verification, candidate_authorship. Do not emit continueUntilSolved. Do not request patch_export, apply, git, deploy, network, or credentials.",
+        "When starting a fresh candidate workspace, omit workspaceId; the runtime binds and threads workspace continuity across all steps in the sequence.",
         "M6 bounds and operates the admitted sequence. It does not choose a new objective and does not cross an engineering border.",
       );
     }
@@ -1549,7 +1549,7 @@ export function composeInitialThoughtMessages(input: {
     "A refusal is reactive only and must select both the current user_message motivation and a supplied stable boundary motivation.",
     "Use only supplied motivation IDs. Silence is valid. Do not write the message Doc will see.",
     "objective and reason are short intent metadata, not prose to echo and not a copy of the user message.",
-    `operationalRequest is optional. When present, it must be exactly one of: {kind: "project_inspection", request: CognitionInspectionRequest}, {kind: "candidate_workspace_experiment", request: CognitionWorkspaceRequest}, {kind: "candidate_verification", request: {operation: "workspace.verify", projectId, workspaceId?, recipeId?}}, {kind: "candidate_authorship", request: {operation: "changeset.author", projectId, workspaceId?, objective, rationale, riskClass}}, {kind: "bounded_operation", request: {operation: "objective.operate", projectId, workspaceId, origin, objective, successCondition, failureCondition, steps, budget}}, or {kind: "patch_export", request: {operation: "patch_export", projectId, changesetId}}. Emit at most one operationalRequest.`,
+    `operationalRequest is optional. When present, it must be exactly one of: {kind: "project_inspection", request: CognitionInspectionRequest}, {kind: "candidate_workspace_experiment", request: CognitionWorkspaceRequest}, {kind: "candidate_verification", request: {operation: "workspace.verify", projectId, workspaceId?, recipeId?}}, {kind: "candidate_authorship", request: {operation: "changeset.author", projectId, workspaceId?, objective, rationale, riskClass}}, {kind: "bounded_operation", request: {operation: "objective.operate", projectId, workspaceId?, origin?, objective, successCondition, failureCondition, steps: Array<{kind, request}>, budget?: {maxSteps?}}}, or {kind: "patch_export", request: {operation: "patch_export", projectId, changesetId}}. Emit at most one operationalRequest.`,
     projectContextPrompt,
     dispositionContract,
     ...(retryContext ? [retryContext] : []),
@@ -1562,7 +1562,7 @@ export function composeInitialThoughtMessages(input: {
 }
 
 function validateInitialThoughtProposal(
-  parsed: Record<string, unknown>,
+  rawParsed: Record<string, unknown>,
   response: ThoughtModelResult,
   ctx: {
     base: Decision;
@@ -1577,6 +1577,27 @@ function validateInitialThoughtProposal(
   },
 ): BoundedCognitionValidation<ThoughtProposal> {
   const { base, motivations, canOffer, canOfferWorkspace, canOfferVerification, canOfferAuthorship, canOfferOperation, canOfferExport, approvedProjectIds } = ctx;
+  let parsed = rawParsed;
+  const rawKind = String(rawParsed.kind);
+  if (
+    rawKind === "candidate_verification" ||
+    rawKind === "candidate_authorship" ||
+    rawKind === "candidate_workspace_experiment" ||
+    rawKind === "bounded_operation" ||
+    rawKind === "project_inspection" ||
+    rawKind === "patch_export"
+  ) {
+    parsed = {
+      ...rawParsed,
+      kind: "speak",
+      completion: "complete",
+      operationalRequest: {
+        kind: rawKind,
+        request: rawParsed.request,
+      },
+    };
+  }
+
   const kind = String(parsed.kind) as DecisionKind;
   const delayClass = isDecisionDelayClass(parsed.delayClass)
     ? parsed.delayClass

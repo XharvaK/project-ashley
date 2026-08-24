@@ -193,12 +193,14 @@ export async function executeBoundedOperationV2(
     return none(admitted.reason, { taskId }, messageEntityUuid);
   }
 
+  let activeWorkspaceId = request.workspaceId;
+
   if (input.db) {
     persistAdmittedBoundedOperation(input.db, {
       ownerId: input.ownerId,
       taskId,
       projectId: request.projectId,
-      workspaceId: request.workspaceId,
+      workspaceId: request.workspaceId ?? "pending_acquisition",
       origin: request.origin,
       objective: request.objective,
       successCondition: request.successCondition,
@@ -240,26 +242,53 @@ export async function executeBoundedOperationV2(
       }
       switch (admitted.kind) {
         case "candidate_workspace_experiment": {
+          const stepReq = {
+            ...admitted.request,
+            ...(activeWorkspaceId && !admitted.request.workspaceId
+              ? { workspaceId: activeWorkspaceId }
+              : {}),
+          };
           const child = await executeWorkspaceExperimentV2({
             ...shared,
-            request: admitted.request,
+            request: stepReq,
           });
+          if (child.license.workspaceClaimEffect?.workspaceId) {
+            activeWorkspaceId = child.license.workspaceClaimEffect.workspaceId;
+          }
           if (child.license.state === "succeeded") return { ok: true };
           return { ok: false, error: mapChildError(child.license.error ?? "step_failed") };
         }
         case "candidate_verification": {
+          const stepReq = {
+            ...admitted.request,
+            ...(activeWorkspaceId && !admitted.request.workspaceId
+              ? { workspaceId: activeWorkspaceId }
+              : {}),
+          };
           const child = await executeCandidateVerificationV2({
             ...shared,
-            request: admitted.request,
+            request: stepReq,
           });
+          if (child.license.verificationClaimEffect?.workspaceId) {
+            activeWorkspaceId = child.license.verificationClaimEffect.workspaceId;
+          }
           if (child.license.state === "succeeded") return { ok: true };
           return { ok: false, error: mapChildError(child.license.error ?? "step_failed") };
         }
         case "candidate_authorship": {
+          const stepReq = {
+            ...admitted.request,
+            ...(activeWorkspaceId && !admitted.request.workspaceId
+              ? { workspaceId: activeWorkspaceId }
+              : {}),
+          };
           const child = await executeCandidateAuthorshipV2({
             ...shared,
-            request: admitted.request,
+            request: stepReq,
           });
+          if (child.license.authorshipClaimEffect?.workspaceId) {
+            activeWorkspaceId = child.license.authorshipClaimEffect.workspaceId;
+          }
           if (child.license.state === "succeeded") return { ok: true };
           return { ok: false, error: mapChildError(child.license.error ?? "step_failed") };
         }
@@ -279,6 +308,7 @@ export async function executeBoundedOperationV2(
       stopReason: result.stopReason,
       stepsExecuted: result.stepsExecuted,
       stepRecords: result.stepRecords,
+      workspaceId: activeWorkspaceId,
     });
   }
 
@@ -286,7 +316,7 @@ export async function executeBoundedOperationV2(
   const claim = {
     verified: true as const,
     projectId: request.projectId,
-    workspaceId: request.workspaceId,
+    workspaceId: activeWorkspaceId ?? request.workspaceId ?? "unknown",
     taskId,
     stepsExecuted: result.stepsExecuted,
     maxSteps: request.budget.maxSteps,

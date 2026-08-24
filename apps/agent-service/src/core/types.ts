@@ -67,7 +67,7 @@ export type CognitionBoundedOperationStep =
 export type CognitionBoundedOperationRequest = {
   operation: "objective.operate";
   projectId: string;
-  workspaceId: string;
+  workspaceId?: string;
   origin: CognitionBoundedOperationOrigin;
   objective: string;
   successCondition: string;

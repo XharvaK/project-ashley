@@ -76,6 +76,38 @@ const EXECUTION_UNAVAILABILITY_PATTERNS: RegExp[] = [
   /\b(?:unable|not able)\s+to\s+(?:run|execute|test)\s+(?:it|that|this)\b/i,
 ];
 
+const CANDIDATE_VERIFICATION_PATTERNS: RegExp[] = [
+  /\b(?:mechanically verified|mechanically verify|ran verification|run verification|verified the candidate|verification (?:produced|passed|succeeded|failed)|recipe (?:produced|passed|succeeded|failed))\b/i,
+  /\b(?:verified it|verified the file|verified the workspace|completed verification)\b/i,
+];
+
+const CANDIDATE_VERIFICATION_EXCLUSIONS: RegExp[] = [
+  /\b(?:did not verify|didn't verify|was not verified|verification (?:was )?not run|without verifying|never verified|not verified)\b/i,
+];
+
+const CANDIDATE_AUTHORSHIP_PATTERNS: RegExp[] = [
+  /\b(?:sealed|authored|created) (?:advisory )?(?:candidate )?change-?set\b/i,
+  /\bsealed (?:advisory )?(?:candidate )?work\b/i,
+  /\bcs_[0-9a-fA-F_-]+\b/i,
+];
+
+const CANDIDATE_AUTHORSHIP_EXCLUSIONS: RegExp[] = [
+  /\b(?:did not seal|didn't seal|was not sealed|change-?set (?:was )?not sealed|without sealing|not sealed)\b/i,
+];
+
+const PATCH_EXPORT_PATTERNS: RegExp[] = [
+  /\b(?:exported|copied) (?:the )?(?:sealed )?(?:candidate )?patch\b/i,
+  /\bpatch export\b/i,
+];
+
+const LIVE_APPLY_PATTERNS: RegExp[] = [
+  /\b(?:applied (?:the |this )?(?:patch|change|code|changeset)|merged (?:the |this )?(?:patch|change|branch)|deployed (?:the |this )?(?:change|patch|code)|improved (?:her|my)self)\b/i,
+];
+
+const LIVE_APPLY_EXCLUSIONS: RegExp[] = [
+  /\b(?:not applied|nothing was applied|has not been applied|did not apply|do not apply|never applied|not merged|without applying)\b/i,
+];
+
 /** Remove quoted/hypothetical spans before activity detection. */
 export function stripQuotedHypotheticals(text: string): string {
   return text
@@ -139,6 +171,45 @@ export function claimsOwnExecutionUnavailability(text: string): boolean {
   const clean = stripQuotedHypotheticals(text.trim());
   if (!clean) return false;
   return EXECUTION_UNAVAILABILITY_PATTERNS.some((pattern) => pattern.test(clean));
+}
+
+export function claimsOwnCandidateVerification(text: string): boolean {
+  const clean = stripQuotedHypotheticals(text.trim());
+  if (!clean) return false;
+  if (CANDIDATE_VERIFICATION_EXCLUSIONS.some((p) => p.test(clean))) {
+    return false;
+  }
+  return CANDIDATE_VERIFICATION_PATTERNS.some((p) => p.test(clean));
+}
+
+export function claimsOwnCandidateAuthorship(text: string): boolean {
+  const clean = stripQuotedHypotheticals(text.trim());
+  if (!clean) return false;
+  if (CANDIDATE_AUTHORSHIP_EXCLUSIONS.some((p) => p.test(clean))) {
+    return false;
+  }
+  return CANDIDATE_AUTHORSHIP_PATTERNS.some((p) => p.test(clean));
+}
+
+export function claimsOwnPatchExport(text: string): boolean {
+  const clean = stripQuotedHypotheticals(text.trim());
+  if (!clean) return false;
+  return PATCH_EXPORT_PATTERNS.some((p) => p.test(clean));
+}
+
+export function claimsOwnLiveApplyOrMerge(text: string): boolean {
+  const clean = stripQuotedHypotheticals(text.trim());
+  if (!clean) return false;
+  if (LIVE_APPLY_EXCLUSIONS.some((p) => p.test(clean))) {
+    return false;
+  }
+  return LIVE_APPLY_PATTERNS.some((p) => p.test(clean));
+}
+
+export function extractCandidateChangeSetIds(text: string): string[] {
+  const clean = stripQuotedHypotheticals(text);
+  const matches = clean.match(/\bcs_[0-9a-fA-F_-]+\b/g);
+  return matches ? Array.from(new Set(matches)) : [];
 }
 
 export function claimsOwnActivity(text: string): boolean {

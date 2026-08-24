@@ -95,14 +95,23 @@ export function finalizeBoundedOperation(
     stopReason: M6StopReason;
     stepsExecuted: number;
     stepRecords: readonly M6StepRecord[];
+    workspaceId?: string;
   },
 ): void {
   const updatedAt = nowIso();
-  db.prepare(
-    `UPDATE bounded_operation_tasks
-        SET status = ?, stop_reason = ?, steps_executed = ?, updated_at = ?
-      WHERE task_id = ?`,
-  ).run(input.status, input.stopReason, input.stepsExecuted, updatedAt, input.taskId);
+  if (input.workspaceId) {
+    db.prepare(
+      `UPDATE bounded_operation_tasks
+          SET status = ?, stop_reason = ?, steps_executed = ?, workspace_id = ?, updated_at = ?
+        WHERE task_id = ?`,
+    ).run(input.status, input.stopReason, input.stepsExecuted, input.workspaceId, updatedAt, input.taskId);
+  } else {
+    db.prepare(
+      `UPDATE bounded_operation_tasks
+          SET status = ?, stop_reason = ?, steps_executed = ?, updated_at = ?
+        WHERE task_id = ?`,
+    ).run(input.status, input.stopReason, input.stepsExecuted, updatedAt, input.taskId);
+  }
 
   const classification = defaultUnclassifiedConversational();
   const insert = db.prepare(
