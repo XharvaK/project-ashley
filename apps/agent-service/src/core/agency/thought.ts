@@ -38,6 +38,7 @@ import {
 } from "../sandbox/project-registry.js";
 import { describeVerificationGrounding } from "../sandbox/verification-binding.js";
 import { M6_MAX_STEPS, M6_MAX_WALL_MS } from "@composer-assistant/sandbox-v2";
+import type { WorkspaceManager } from "@composer-assistant/sandbox-v2";
 
 /* ------------------------------------------------------------------ */
 /*  ThoughtModelResult — carries usage for truncation detection       */
@@ -50,6 +51,7 @@ export type ThoughtModelResult = {
   resolvedModelId?: string | null;
   usage?: TokenUsage;
   maxTokens?: number;
+  finishReason?: string | null;
 };
 
 export type Complete = (
@@ -107,7 +109,6 @@ const STRUCTURAL_RETRYABLE_CODES = new Set<ThoughtValidationErrorCode>([
   "invalid_evidence_disposition_pairing",
   "invalid_project",
   "payload_invalid",
-  "contradictory_decision_fields",
 ]);
 
 /**
@@ -189,6 +190,112 @@ function parseObject(text: string): Record<string, unknown> | null {
   } catch {
     return null;
   }
+}
+
+export function expectedShouldSpeak(
+  kind: DecisionKind,
+  completion: string,
+): boolean {
+  return kind !== "silence" && kind !== "delay" && completion !== "hold";
+}
+
+/**
+ * `shouldSpeak` is redundant with kind+completion. gpt-oss json_object often
+ * omits it or emits a string boolean; that is not a semantic contradiction.
+ * Genuine boolean mismatches still fail closed.
+ */
+export function resolveShouldSpeak(
+  raw: unknown,
+  kind: DecisionKind,
+  completion: string,
+): { ok: true; shouldSpeak: boolean } | { ok: false } {
+  const expected = expectedShouldSpeak(kind, completion);
+  if (raw === undefined || raw === null) {
+    return { ok: true, shouldSpeak: expected };
+  }
+  let value: boolean | null = null;
+  if (typeof raw === "boolean") value = raw;
+  else if (typeof raw === "string") {
+    const lower = raw.trim().toLowerCase();
+    if (lower === "true") value = true;
+    else if (lower === "false") value = false;
+  }
+  if (value === null) return { ok: false };
+  if (value !== expected) return { ok: false };
+  return { ok: true, shouldSpeak: value };
+}
+
+/**
+ * gpt-oss often pairs `operationalRequest` with `completion: "hold"` and
+ * `shouldSpeak: true` (incident 1327 / live preflight sample). Hold means a
+ * terminal non-act; an operational request is this-turn work. Keep the request
+ * and treat completion as complete.
+ */
+export function completionForOperationalIntent(
+  completion: string,
+  parsed: Record<string, unknown>,
+): string {
+  const rawOp = parsed.operationalRequest;
+  if (rawOp !== undefined && rawOp !== null && completion === "hold") {
+    return "complete";
+  }
+  return completion;
+}
+
+function boundedFinishReason(raw: unknown): string | null {
+  if (typeof raw !== "string" || raw.length === 0) return null;
+  const value = raw.trim().slice(0, 32);
+  if (value === "stop" || value === "length" || value === "tool_calls" || value === "content_filter") {
+    return value;
+  }
+  return "other";
+}
+
+function boundedDecisionTelemetry(parsed: Record<string, unknown> | null): {
+  decisionKind: string | null;
+  completion: string | null;
+  shouldSpeak: boolean | null;
+  shouldSpeakOmitted: boolean | null;
+  evidenceDisposition: string | null;
+  opKind: string | null;
+} {
+  if (!parsed) {
+    return {
+      decisionKind: null,
+      completion: null,
+      shouldSpeak: null,
+      shouldSpeakOmitted: null,
+      evidenceDisposition: null,
+      opKind: null,
+    };
+  }
+  const decisionKind =
+    typeof parsed.kind === "string" ? parsed.kind.trim().slice(0, 24) : null;
+  const completion =
+    typeof parsed.completion === "string" ? parsed.completion.trim().slice(0, 16) : null;
+  const shouldSpeakOmitted = parsed.shouldSpeak === undefined || parsed.shouldSpeak === null;
+  const shouldSpeak =
+    parsed.shouldSpeak === true ? true : parsed.shouldSpeak === false ? false : null;
+  const evidenceDisposition =
+    typeof parsed.evidenceDisposition === "string" &&
+    evidenceDispositions.has(parsed.evidenceDisposition as EvidenceDisposition)
+      ? parsed.evidenceDisposition
+      : null;
+  const rawOp = parsed.operationalRequest;
+  const opKind =
+    rawOp && typeof rawOp === "object" && !Array.isArray(rawOp)
+      ? typeof (rawOp as Record<string, unknown>).kind === "string"
+        ? String((rawOp as Record<string, unknown>).kind).slice(0, 48)
+        : null
+      : null;
+  return {
+    decisionKind,
+    completion,
+    shouldSpeak,
+    shouldSpeakOmitted,
+    evidenceDisposition,
+    opKind,
+  };
 }
 
 function sanitizedErrorCode(error: unknown): string {
@@ -1030,6 +1137,7 @@ export type ThoughtModelOptions = {
   attentionDb?: DatabaseSync;
   purpose?: string;
   lane?: string;
+  verificationWorkspaceManager?: WorkspaceManager;
 };
 
 export type BoundedCognitionPhase = "initial" | "continuation";
@@ -1078,7 +1186,10 @@ function thoughtAttemptTelemetry(input: {
   maxTokens?: number;
   rawText: string;
   parseOk?: boolean;
+  parsed?: Record<string, unknown> | null;
+  finishReason?: string | null;
 }): ThoughtValidationAttempt {
+  const decision = boundedDecisionTelemetry(input.parsed ?? null);
   return {
     phase: input.phase,
     attempt: input.attempt,
@@ -1092,9 +1203,17 @@ function thoughtAttemptTelemetry(input: {
     validationOk: input.ok,
     errorCode: input.errorCode,
     field: input.field,
-    opKind: input.opKind,
+    opKind: input.opKind ?? decision.opKind,
     bytes: Buffer.byteLength(input.rawText, "utf8"),
     sha256: input.rawText ? sha256(input.rawText) : "",
+    promptTokens: input.usage?.promptTokens ?? null,
+    reasoningTokens: input.usage?.reasoningTokens ?? null,
+    finishReason: boundedFinishReason(input.finishReason),
+    decisionKind: decision.decisionKind,
+    completion: decision.completion,
+    shouldSpeak: decision.shouldSpeak,
+    shouldSpeakOmitted: decision.shouldSpeakOmitted,
+    evidenceDisposition: decision.evidenceDisposition,
   };
 }
 
@@ -1178,6 +1297,7 @@ export async function runBoundedCognition<TResult>(
           field: null,
           opKind: null,
           rawText: response.text ?? "",
+          finishReason: response.finishReason,
         }),
       );
       return failClosed("AbortError", null);
@@ -1205,6 +1325,7 @@ export async function runBoundedCognition<TResult>(
           maxTokens,
           rawText,
           parseOk: false,
+          finishReason: response.finishReason,
         }),
       );
       if (
@@ -1236,6 +1357,8 @@ export async function runBoundedCognition<TResult>(
           usage,
           maxTokens,
           rawText,
+          parsed,
+          finishReason: response.finishReason,
         }),
       );
       return {
@@ -1258,6 +1381,8 @@ export async function runBoundedCognition<TResult>(
         usage,
         maxTokens,
         rawText,
+        parsed,
+        finishReason: response.finishReason,
       }),
     );
     if (
@@ -1301,7 +1426,7 @@ function buildThoughtCallOptions(
   };
 }
 
-function buildInitialThoughtMessages(input: {
+export function composeInitialThoughtMessages(input: {
   base: Decision;
   motivations: Motivation[];
   trigger: Trigger;
@@ -1313,6 +1438,7 @@ function buildInitialThoughtMessages(input: {
   canOfferExport: boolean;
   approvedProjectIds: string[];
   retryContext?: string;
+  verificationWorkspaceManager?: WorkspaceManager;
 }): ChatMessages {
   const {
     base,
@@ -1326,6 +1452,7 @@ function buildInitialThoughtMessages(input: {
     canOfferExport,
     approvedProjectIds,
     retryContext,
+    verificationWorkspaceManager,
   } = input;
   const candidates = motivations.slice(0, 12).map((motivation) => ({
     id: motivation.id,
@@ -1368,7 +1495,9 @@ function buildInitialThoughtMessages(input: {
         "Recipe catalog, capability, and registry remain the execution authority.",
         "A verification outcome is a mechanical recipe result, not engineering judgment, merge, or deployment readiness.",
       );
-      const grounding = describeVerificationGrounding(approvedProjectIds);
+      const grounding = describeVerificationGrounding(approvedProjectIds, {
+        workspaceManager: verificationWorkspaceManager,
+      });
       if (grounding) parts.push(grounding);
     }
     if (canOfferAuthorship) {
@@ -1443,7 +1572,7 @@ function validateInitialThoughtProposal(
     ? parsed.delayClass
     : null;
   const effort = String(parsed.effort);
-  const completion = String(parsed.completion);
+  const completion = completionForOperationalIntent(String(parsed.completion), parsed);
   const allowedIds = new Set(
     motivations.map((item) => item.id).filter((id): id is number => id !== undefined),
   );
@@ -1460,11 +1589,11 @@ function validateInitialThoughtProposal(
     return { ok: false, errorCode: "payload_invalid" };
   }
 
-  const shouldSpeak = parsed.shouldSpeak === true;
-  const holding = completion === "hold";
-  if (shouldSpeak !== (kind !== "silence" && kind !== "delay" && !holding)) {
+  const spoken = resolveShouldSpeak(parsed.shouldSpeak, kind, completion);
+  if (!spoken.ok) {
     return { ok: false, errorCode: "contradictory_decision_fields" };
   }
+  const shouldSpeak = spoken.shouldSpeak;
 
   const disposition = String(parsed.evidenceDisposition ?? "");
   if (!evidenceDispositions.has(disposition as EvidenceDisposition)) {
@@ -1644,7 +1773,7 @@ export async function runThoughtModel(
     complete,
     deadlineAtMs: thoughtDeadline,
     buildMessages: (retryFeedbackText) =>
-      buildInitialThoughtMessages({
+      composeInitialThoughtMessages({
         base,
         motivations,
         trigger,
@@ -1656,6 +1785,7 @@ export async function runThoughtModel(
         canOfferExport,
         approvedProjectIds,
         retryContext: retryFeedbackText,
+        verificationWorkspaceManager: options.verificationWorkspaceManager,
       }),
     buildOptions: (deadlineAtMs) => buildThoughtCallOptions(options, deadlineAtMs, db),
     parse: parseObject,
@@ -1913,7 +2043,6 @@ const CONTINUATION_RETRYABLE_CODES = new Set<ThoughtValidationErrorCode>([
   "unsupported_operation",
   "missing_required_field",
   "payload_invalid",
-  "contradictory_decision_fields",
 ]);
 
 /** Fixed bounded regeneration feedback for continuation validation codes. */
@@ -2054,7 +2183,7 @@ function validateContinuationProposal(
     ? parsed.delayClass
     : null;
   const effort = String(parsed.effort);
-  const completion = String(parsed.completion);
+  const completion = completionForOperationalIntent(String(parsed.completion), parsed);
   const allowedIds = new Set(
     motivations.map((item) => item.id).filter((id): id is number => id !== undefined),
   );
@@ -2073,11 +2202,11 @@ function validateContinuationProposal(
     return { ok: false, errorCode: "payload_invalid" };
   }
 
-  const shouldSpeak = parsed.shouldSpeak === true;
-  const holding = completion === "hold";
-  if (shouldSpeak !== (kind !== "silence" && kind !== "delay" && !holding)) {
+  const spoken = resolveShouldSpeak(parsed.shouldSpeak, kind, completion);
+  if (!spoken.ok) {
     return { ok: false, errorCode: "contradictory_decision_fields" };
   }
+  const shouldSpeak = spoken.shouldSpeak;
 
   const cognitiveResult =
     typeof parsed.inspectionCognitiveResult === "string"

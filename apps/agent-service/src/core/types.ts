@@ -374,6 +374,14 @@ export type ThoughtValidationAttempt = {
   opKind: string | null;
   bytes: number;
   sha256: string;
+  promptTokens?: number | null;
+  reasoningTokens?: number | null;
+  finishReason?: string | null;
+  decisionKind?: string | null;
+  completion?: string | null;
+  shouldSpeak?: boolean | null;
+  shouldSpeakOmitted?: boolean | null;
+  evidenceDisposition?: string | null;
 };
 
 /**

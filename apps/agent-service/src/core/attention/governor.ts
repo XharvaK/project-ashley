@@ -27,6 +27,7 @@ import type {
   AttentionLane,
   AttentionPurpose,
 } from "./types.js";
+import type { TokenUsage } from "../model-routing/types.js";
 import { mapPurposeToLane, realClock } from "./types.js";
 import {
   DECLARED_CONTRACT_ID,
@@ -59,7 +60,7 @@ export type AttentionDispatchInput = {
     signal?: AbortSignal;
   }) => Promise<{
     providerModel?: string | null;
-    usage?: { promptTokens: number; completionTokens: number };
+    usage?: TokenUsage;
     result: unknown;
   }>;
   demoteActiveSensitive?: (db: DatabaseSync) => void;
@@ -71,7 +72,7 @@ export type AttentionDispatchResult<T> = {
   resolvedModelId: string | null;
   acceptedDispatchIdentity: AcceptedDispatchIdentity;
   result: T;
-  usage?: { promptTokens: number; completionTokens: number };
+  usage?: TokenUsage;
 };
 
 function defaultDemote(db: DatabaseSync): void {

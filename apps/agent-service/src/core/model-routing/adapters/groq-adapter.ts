@@ -48,7 +48,20 @@ function toTokenUsage(raw: unknown): TokenUsage | undefined {
   if (!Number.isFinite(promptTokens) || !Number.isFinite(completionTokens)) {
     return undefined;
   }
-  return { promptTokens, completionTokens };
+  const reasoningRaw = Number(r.completion_tokens_details?.reasoning_tokens);
+  const usage: TokenUsage = { promptTokens, completionTokens };
+  if (Number.isFinite(reasoningRaw) && reasoningRaw >= 0) {
+    usage.reasoningTokens = reasoningRaw;
+  }
+  return usage;
+}
+
+const FINISH_REASONS = new Set(["stop", "length", "tool_calls", "content_filter"]);
+
+function toFinishReason(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const value = raw.trim().slice(0, 32);
+  return FINISH_REASONS.has(value) ? value : "other";
 }
 
 function buildRequestBody(
@@ -261,7 +274,8 @@ export function createGroqAdapter(
         });
       }
       const json = (await res.json()) as GroqResponse;
-      const msg = json.choices?.[0]?.message;
+      const choice = json.choices?.[0];
+      const msg = choice?.message;
       const text = msg?.content ? extractText(msg.content) : "";
       const completion: ProviderCompletion = {
         text,
@@ -269,6 +283,7 @@ export function createGroqAdapter(
         usage: toTokenUsage(json.usage),
         providerModel:
           typeof json.model === "string" ? json.model : null,
+        finishReason: toFinishReason(choice?.finish_reason),
       };
       return completion;
     },

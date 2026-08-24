@@ -192,7 +192,12 @@ describe("groq-adapter fixtures", () => {
       '{"kind":"speak","operationalRequest":{"kind":"candidate_verification"',
     );
     expect(result.text).not.toContain("hidden chain");
-    expect(result.usage).toEqual({ promptTokens: 2293, completionTokens: 1000 });
+    expect(result.usage).toEqual({
+      promptTokens: 2293,
+      completionTokens: 1000,
+      reasoningTokens: 850,
+    });
+    expect(result.finishReason).toBe("length");
   });
 
   it("throws agent_not_ready when the API key is missing", async () => {

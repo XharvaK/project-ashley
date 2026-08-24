@@ -192,4 +192,138 @@ describe("Thought structured output (1122)", () => {
     expect(outcome.ok).toBe(false);
     expect(outcome.error).toBe("invalid_json");
   });
+
+  it("accepts omitted shouldSpeak when kind and completion already agree", async () => {
+    stubVerificationOffer();
+    env.cognitionMode = "apply";
+    env.groqApiKey = "test";
+    const db = new DatabaseSync(":memory:");
+    const withoutSpeak = JSON.parse(COMPACT_M4_DECISION) as Record<string, unknown>;
+    delete withoutSpeak.shouldSpeak;
+    const result = await runThoughtModel(
+      db,
+      decide([motivation], "reactive"),
+      [motivation],
+      "reactive",
+      async () => ({
+        text: JSON.stringify(withoutSpeak),
+        usage: { promptTokens: 400, completionTokens: 90 },
+        finishReason: "stop",
+      }),
+    );
+    db.close();
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected omitted shouldSpeak to derive");
+    expect(result.proposal.shouldSpeak).toBe(true);
+    expect(result.proposal.operationalRequest?.kind).toBe("candidate_verification");
+  });
+
+  it("accepts string shouldSpeak=true when it matches kind and completion", async () => {
+    stubVerificationOffer();
+    env.cognitionMode = "apply";
+    env.groqApiKey = "test";
+    const db = new DatabaseSync(":memory:");
+    const payload = {
+      ...JSON.parse(COMPACT_M4_DECISION),
+      shouldSpeak: "true",
+    };
+    const result = await runThoughtModel(
+      db,
+      decide([motivation], "reactive"),
+      [motivation],
+      "reactive",
+      async () => ({ text: JSON.stringify(payload) }),
+    );
+    db.close();
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected string shouldSpeak");
+    expect(result.proposal.shouldSpeak).toBe(true);
+  });
+
+  it("accepts operationalRequest with completion=hold and shouldSpeak=true as this-turn work", async () => {
+    stubVerificationOffer();
+    env.cognitionMode = "apply";
+    env.groqApiKey = "test";
+    const db = new DatabaseSync(":memory:");
+    const livePreflightHold = {
+      kind: "share",
+      delayClass: null,
+      shouldSpeak: true,
+      effort: "medium",
+      completion: "hold",
+      uncertainty: 0,
+      urgency: 0,
+      objective: "verify candidate workspace",
+      reason: "mechanical verification request",
+      motivationIds: [1],
+      evidenceDisposition: "sufficient",
+      operationalRequest: {
+        kind: "candidate_verification",
+        request: {
+          operation: "workspace.verify",
+          projectId: "project-ashley",
+        },
+      },
+    };
+    const result = await runThoughtModel(
+      db,
+      decide([motivation], "reactive"),
+      [motivation],
+      "reactive",
+      async () => ({
+        text: JSON.stringify(livePreflightHold),
+        usage: { promptTokens: 1861, completionTokens: 347, reasoningTokens: 251 },
+        finishReason: "stop",
+      }),
+    );
+    db.close();
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected hold+op to normalize");
+    expect(result.proposal.completion).toBe("complete");
+    expect(result.proposal.shouldSpeak).toBe(true);
+    expect(result.proposal.kind).toBe("share");
+    expect(result.proposal.operationalRequest?.kind).toBe("candidate_verification");
+  });
+
+  it("does not retry a genuine contradictory_decision_fields after a completed Groq call", async () => {
+    stubVerificationOffer();
+    env.cognitionMode = "apply";
+    env.groqApiKey = "test";
+    const db = new DatabaseSync(":memory:");
+    let calls = 0;
+    const result = await runThoughtModel(
+      db,
+      decide([motivation], "reactive"),
+      [motivation],
+      "reactive",
+      async () => {
+        calls += 1;
+        return {
+          text: JSON.stringify({
+            ...JSON.parse(COMPACT_M4_DECISION),
+            shouldSpeak: false,
+          }),
+          usage: { promptTokens: 2334, completionTokens: 381 },
+        };
+      },
+      { thoughtDeadlineAtMs: Date.now() + 8_000 },
+    );
+    db.close();
+    expect(calls).toBe(1);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected contradiction");
+    expect(result.error).toBe("contradictory_decision_fields");
+    expect(result.envelope?.attempts[0]).toMatchObject({
+      parseOk: true,
+      validationOk: false,
+      errorCode: "contradictory_decision_fields",
+      decisionKind: "speak",
+      completion: "complete",
+      shouldSpeak: false,
+      shouldSpeakOmitted: false,
+      opKind: "candidate_verification",
+      promptTokens: 2334,
+      outputTokens: 381,
+    });
+  });
 });

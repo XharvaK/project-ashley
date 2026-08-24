@@ -51,6 +51,8 @@ export type ChatMessage = {
 export type TokenUsage = {
   promptTokens: number;
   completionTokens: number;
+  /** Hidden reasoning tokens when the provider reports them separately. */
+  reasoningTokens?: number;
 };
 
 export type ToolDefinition = {
@@ -102,6 +104,8 @@ export type ProviderCompletion = {
   toolCalls?: ToolCallResult[];
   usage?: TokenUsage;
   providerModel?: string | null;
+  /** Provider finish_reason when supplied (stop, length, …). Never a secret. */
+  finishReason?: string | null;
 };
 
 export type ProviderDispatchArgs = {

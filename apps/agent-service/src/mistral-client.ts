@@ -154,6 +154,7 @@ export async function completeChat(
   resolvedModelId: string | null;
   toolCalls?: ToolCallResult[];
   usage?: TokenUsage;
+  finishReason?: string | null;
   attentionRequestId?: number;
   acceptedDispatchIdentity?: AcceptedDispatchIdentity;
 }> {
@@ -178,6 +179,7 @@ export async function completeChat(
     toolCalls?: ToolCallResult[];
     usage?: TokenUsage;
     providerModel?: string | null;
+    finishReason?: string | null;
   }>(attentionDb, {
     messages,
     purpose: mapped.purpose,
@@ -213,6 +215,7 @@ export async function completeChat(
             toolCalls: completion.toolCalls,
             usage: completion.usage,
             providerModel: completion.providerModel,
+            finishReason: completion.finishReason ?? null,
           },
         };
       } catch (err) {
@@ -231,6 +234,7 @@ export async function completeChat(
     resolvedModelId: attentive.resolvedModelId,
     toolCalls: inner.toolCalls,
     usage: attentive.usage ?? inner.usage,
+    finishReason: inner.finishReason ?? null,
     attentionRequestId: attentive.requestId,
     acceptedDispatchIdentity: attentive.acceptedDispatchIdentity,
   };

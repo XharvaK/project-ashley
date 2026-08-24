@@ -1,8 +1,8 @@
 # M4 Live Invocation Repair — Structured Thought First Break
 
 **Status:** `M4 CAPABILITY ACCEPTANCE = UNCHANGED`  
-**Live smoke ledger at deploy:** M2 PASS · M3 PASS · M4 FAIL until owner Discord smoke  
-**This packet:** first-break structured Thought repair + prior selection/binding repair, deployed together
+**Live smoke ledger:** M2 PASS · M3 PASS · M4 FAIL until a later owner Discord smoke  
+**This packet:** live `a24bf39` first break is Thought schema (`contradictory_decision_fields`), not Discord and not M4 execution.
 
 Owner Discord smoke is not fabricated here. Pass requires actual mechanical M4 execution after a valid reactive Thought decision.
 
@@ -191,3 +191,71 @@ Binder was **not** reached.
 `apps/agent-service/src/core/sandbox/m4-live-composition.e2e.test.ts` starts at the exact smoke utterance, uses real Thought composition (no mocked grounding string), Case A omitted-id `candidate_verification` → binder + execute seam, Case B asserts the composed contract + legal Groq effort mapping. No keyword routing.
 
 M5–M7: same Thought Groq request would 400; the illegal `none` is a **generic Thought provider** defect, not an M4-only affordance gap. Durable-state projection (workspace/recipe/changeset) remains a later selection risk once Thought actually completes.
+
+---
+
+## Post-a24bf39 live smoke failure (decision 1327)
+
+**Incident SHA (deployed, still running at investigation):** `a24bf39667ff7cd300f00a60ad0b27ff7a515b57`  
+**Newest owner smoke:** thread `2d445d64-ca17-4fd7-91e3-9f3578062a16`, user mem **339**, assistant mem **340**, inbound Discord `1541368503418888202`, outbound `1541368524369432586`, reservation **147**, decision **1327**, attention Thought **1183** (retry **1184**) / Expression **1185**.  
+Process start `2026-08-24T08:41:38+03`. `accepted_build_identity` on 1183/1185 = `a24bf39`. Dist artifact: `reasoningEffort: "low"`, `json_object`, `THOUGHT_MAX_OUTPUT_TOKENS = 1000`.
+
+### Stage trace
+
+| Stage | Reached |
+|---|---|
+| Discord ingress | YES |
+| Context composition | YES (Thought payload is trigger/base/candidates, not Expression clipping) |
+| Capability projection | YES (deadline envelope includes M4 child keys; registry `verificationAllowed`) |
+| Attention reservation | YES (1183 reserved, dispatched) |
+| Provider request | YES |
+| Provider response | YES — Groq completed; 2334 prompt / 381 completion tokens; 394 visible bytes; sha256 `f61f11b39f114b1c82471e7d764028f08e8b5f83945553c3b90d27c6727aaf61` |
+| Thought parser | YES (`parseOk: true`) |
+| Agency decision | YES as **fallback** — `validationOk: false`, `contradictory_decision_fields` |
+| operationalRequest | **NO** — invalid proposal discarded; no partial admission |
+| Verification binding | **NOT REACHED** |
+| Deadline qualification / M4 admission / execution / evidence | **NOT REACHED** |
+| Honesty / Expression | YES — fallback sentence `I did not run a verification this turn.` |
+
+Attempt 2 (1184): `deadline_before_dispatch` after 2715 billed tokens; retry estimate 5236+1000 cannot enter Groq 8000 TPM. `thought_error` stored as `attention_deadline` (masking).
+
+### First causal break
+
+`THOUGHT_SCHEMA_FAILURE`
+
+Not truncation (381 << 1000). Not HTTP 400. Raw Groq body was not retained; bounded telemetry now records `decisionKind` / `shouldSpeak` / `completion` / `opKind` / `finishReason` / `reasoningTokens` without raw owner text.
+
+### Live provider request (runtime, not source-only)
+
+| Field | Evidence |
+|---|---|
+| model | `openai/gpt-oss-120b` (attention 1183 `model_alias`) |
+| provider | `groq` |
+| max output reserved | 1000 (`estimated_output_tokens`) |
+| temperature | 0.15 (running dist `buildThoughtCallOptions`; not copied onto attention row) |
+| reasoning_effort | `low` (running dist; journal silent on 200s) |
+| response_format | `json_object` (running dist) |
+| input tokens | actual 2334; estimate 5184 (overestimate, not a dropped-section clip) |
+| TPM | first attempt actual 2715; retry blocked |
+
+Live-provider preflight (Mint, isolated DB, no M4 execute, production registry/workspaces):
+
+- N=1 structured gate: **PASS** in 999ms. `finish_reason=stop`. prompt 1861, completion 207, reasoning 109, visible 410 bytes. Valid JSON selecting `candidate_verification` with omitted-id `workspace.verify` / `project-ashley`.
+- N=5 characterization (TPD 429 on two samples): 2× `candidate_verification` + `speak`/`complete`/`shouldSpeak true`; 2× `rate_limited` (daily TPD, not TPM); 1× **exact schema failure** `kind=share`, `shouldSpeak=true`, `completion=hold`, plus `candidate_verification`. Visible 385 bytes — same class as live 394-byte sha256 `f61f11…`.
+
+`low` + 1000 is physically sufficient. Hidden reasoning on successful samples was 63–251 tokens, not a ceiling.
+
+### Repair (this candidate)
+
+- Derive omitted/`"true"`/`"false"` `shouldSpeak` from kind+completion; still reject genuine boolean contradictions.
+- When `operationalRequest` is present, `completion: "hold"` normalizes to `complete` (hold is a terminal non-act; an operational request is this-turn work).
+- Do not structurally retry `contradictory_decision_fields` (TPM theater after a completed Groq call).
+- Persist bounded decision-field telemetry + Groq `finish_reason` / `reasoning_tokens`.
+- Live-provider preflight: `npx tsx src/core/agency/thought-live-provider-preflight.ts --live` (optional `--samples 5`). No production DB writes. No M4 execute.
+
+Gates stay split: DETERMINISTIC COMPOSITION E2E · LIVE PROVIDER STRUCTURED-THOUGHT PREFLIGHT · LIVE DISCORD M4 SMOKE.
+
+M5–M7 share the same Thought structured-output → `operationalRequest` seam. Authorship/operation/export contracts are in the same system prompt when those registry flags are true (production `project-roots.json` has them). Provider/schema reliability here is a shared prerequisite; do not treat an M4 Discord miss as M4-only.
+
+Workspace at investigation: 7 Project Ashley workspaces; unique newest `ZZZvUs-K1s43xWw4psdMOw` at `2026-08-23T20:47:01.875Z`; sole recipe `typescript_fixture_compile_v1`. Binder not reached on this turn.
+
