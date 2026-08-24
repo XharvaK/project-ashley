@@ -6,6 +6,7 @@ import { randomBytes } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { getRequest } from "../attention/ledger.js";
 import type { CognitionBoundedOperationRequest } from "../types.js";
+import { M6_MAX_WALL_MS } from "@composer-assistant/sandbox-v2";
 import { persistAdmittedBoundedOperation } from "./bounded-operation-store.js";
 import {
   DURABLE_COGNITION_ACK_TEXT,
@@ -50,6 +51,12 @@ export type NormalizedDurableThought = {
   operationalKind: string | null;
   operationalRequest: CognitionBoundedOperationRequest | null;
   thoughtError: string | null;
+  /** Decision.kind analogue when distinct from `kind`. */
+  resultKind?: string | null;
+  /** HoldReasonCode / thoughtError / refusal code. Never raw model prose. */
+  reasonCode?: string | null;
+  /** Structured clarification to ask; not chain-of-thought. */
+  clarificationQuestion?: string | null;
 };
 
 export type DurableThoughtAttemptResult =
@@ -195,7 +202,9 @@ export function admitDurableCognitionEnvelope(
   };
 }
 
-function parseNormalized(json: string): NormalizedDurableThought | null {
+export function parseNormalizedDurableThought(
+  json: string,
+): NormalizedDurableThought | null {
   try {
     const parsed = JSON.parse(json) as NormalizedDurableThought;
     if (parsed.schemaVersion !== 1 || typeof parsed.kind !== "string") return null;
@@ -209,12 +218,14 @@ function persistAdmittedM6FromThought(
   db: DatabaseSync,
   job: OperationalJobRow,
   thought: NormalizedDurableThought,
+  nowMs: number,
 ): boolean {
   if (!thought.operationalRequest || thought.operationalKind !== "bounded_operation") {
     return false;
   }
   const request = thought.operationalRequest;
   const taskId = mintM6TaskId();
+  const executionDeadlineAtMs = nowMs + M6_MAX_WALL_MS;
   db.exec("BEGIN IMMEDIATE");
   try {
     persistAdmittedBoundedOperation(db, {
@@ -237,14 +248,14 @@ function persistAdmittedM6FromThought(
         })),
       ),
       maxSteps: request.budget.maxSteps,
-      deadlineAtMs: request.budget.deadlineAtMs,
+      deadlineAtMs: executionDeadlineAtMs,
       originJobId: job.jobId,
     });
     const attached = attachBoundedOperationToCognitionJob(db, {
       jobId: job.jobId,
       boundedOperationTaskId: taskId,
       projectId: request.projectId,
-      lifetimeExpiresAtMs: request.budget.deadlineAtMs,
+      lifetimeExpiresAtMs: executionDeadlineAtMs,
     });
     if (!attached) {
       db.exec("ROLLBACK");
@@ -350,7 +361,7 @@ function attachPersistedThought(ctx: DurableCognitionContext, job: OperationalJo
     return;
   }
   const thought = job.normalizedThoughtJson
-    ? parseNormalized(job.normalizedThoughtJson)
+    ? parseNormalizedDurableThought(job.normalizedThoughtJson)
     : null;
   if (!thought) {
     terminalizeCognitionJob(ctx.db, {
@@ -363,7 +374,7 @@ function attachPersistedThought(ctx: DurableCognitionContext, job: OperationalJo
     return;
   }
   if (thought.operationalKind === "bounded_operation" && thought.operationalRequest) {
-    persistAdmittedM6FromThought(ctx.db, job, thought);
+    persistAdmittedM6FromThought(ctx.db, job, thought, ctx.nowMs());
     return;
   }
   settleNonM6Thought(ctx.db, job, thought);

@@ -880,6 +880,7 @@ const V34_COLUMNS: Record<string, ColumnSpec[]> = {
     { name: "normalized_thought_json" },
     { name: "normalized_thought_schema_version" },
     { name: "thought_attention_request_id" },
+    { name: "thought_attention_attempt_ids_json" },
   ],
 };
 

@@ -56,10 +56,15 @@ Unknown-after-restart Attention rows are treated as transport failure, never as 
 
 Clocks are separate: Discord ack ≠ Thought attempt timeout ≠ cognition lifetime ≠ M6 lifetime ≠ completion-report lifetime.
 
-- cognition lifetime: 15 minutes
+- cognition lifetime: 15 minutes (`cognition_expires_at_ms`), starts when the envelope is admitted
+- M6 execution lifetime: established at M6 attach/admission using existing Slice-1/M6 wall policy (`M6_MAX_WALL_MS` from attach now). Cognition wait does not consume M6 remaining time.
 - transport retries: max 5, backoff 5s / 15s / 45s / 90s / 180s (fake clocks in tests)
 - structural retries: max 2, then terminal `structural_thought_failed`
 - routing/model selection is unchanged; this layer only decides WHEN another attempt may occur
+
+Normalized Thought schema v1 now also carries `resultKind`, `reasonCode`, and `clarificationQuestion` so restart can render the owed owner response without a second Thought call and without persisting raw provider reasoning.
+
+`thought_attention_request_id` remains the latest attempt. `thought_attention_attempt_ids_json` plus Attention ledger rows enumerate every Thought Attention attempt for a job.
 
 ## Atomic M6 attach
 

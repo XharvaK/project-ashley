@@ -47,6 +47,7 @@ export type OperationalJobRow = {
   normalizedThoughtJson: string | null;
   normalizedThoughtSchemaVersion: number | null;
   thoughtAttentionRequestId: number | null;
+  thoughtAttentionAttemptIdsJson: string | null;
   cancelRequested: boolean;
   currentStepIndex: number;
   lifetimeExpiresAtMs: number;
@@ -113,6 +114,10 @@ function mapRow(row: Record<string, unknown>): OperationalJobRow {
       row.thought_attention_request_id == null
         ? null
         : Number(row.thought_attention_request_id),
+    thoughtAttentionAttemptIdsJson:
+      row.thought_attention_attempt_ids_json == null
+        ? null
+        : String(row.thought_attention_attempt_ids_json),
     cancelRequested: Number(row.cancel_requested) === 1,
     currentStepIndex: Number(row.current_step_index),
     lifetimeExpiresAtMs: Number(row.lifetime_expires_at_ms),
@@ -287,8 +292,8 @@ export function findClaimableOperationalJob(
       `SELECT * FROM operational_jobs
         WHERE status IN ('admitted', 'running')
           AND cancel_requested = 0
+          AND job_phase = 'execution_admitted'
           AND bounded_operation_task_id IS NOT NULL
-          AND IFNULL(job_phase, 'execution_admitted') = 'execution_admitted'
           AND (status = 'admitted'
                OR runner_owner_token IS NULL
                OR runner_lease_until_ms IS NULL
@@ -628,6 +633,9 @@ export function persistNormalizedThought(
       input.token,
       input.generation,
     );
+  if (result.changes === 1 && input.attentionRequestId != null) {
+    appendThoughtAttentionAttemptId(db, input.jobId, input.attentionRequestId);
+  }
   return result.changes === 1;
 }
 
@@ -740,6 +748,37 @@ export function terminalizeCognitionJob(
   return result.changes === 1;
 }
 
+function parseThoughtAttentionAttemptIds(raw: string | null | undefined): number[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((id): id is number => typeof id === "number" && Number.isInteger(id));
+  } catch {
+    return [];
+  }
+}
+
+function appendThoughtAttentionAttemptId(
+  db: DatabaseSync,
+  jobId: string,
+  attentionRequestId: number,
+): void {
+  const row = db
+    .prepare(
+      `SELECT thought_attention_attempt_ids_json AS json
+         FROM operational_jobs WHERE job_id = ?`,
+    )
+    .get(jobId) as { json?: string | null } | undefined;
+  const ids = parseThoughtAttentionAttemptIds(row?.json ?? null);
+  if (!ids.includes(attentionRequestId)) ids.push(attentionRequestId);
+  db.prepare(
+    `UPDATE operational_jobs
+        SET thought_attention_attempt_ids_json = ?, updated_at = ?
+      WHERE job_id = ?`,
+  ).run(JSON.stringify(ids), nowIso(), jobId);
+}
+
 export function recordThoughtAttentionRequest(
   db: DatabaseSync,
   input: { jobId: string; attentionRequestId: number },
@@ -751,7 +790,48 @@ export function recordThoughtAttentionRequest(
         WHERE job_id = ? AND job_phase = 'cognition_pending'`,
     )
     .run(input.attentionRequestId, nowIso(), input.jobId);
+  if (result.changes === 1) {
+    appendThoughtAttentionAttemptId(db, input.jobId, input.attentionRequestId);
+  }
   return result.changes === 1;
+}
+
+export type ThoughtAttentionAttempt = {
+  attemptNumber: number;
+  attentionRequestId: number;
+  outcome: string | null;
+  errorClass: string | null;
+  queuedAt: string | null;
+  endedAt: string | null;
+};
+
+export function listThoughtAttentionAttempts(
+  db: DatabaseSync,
+  jobId: string,
+): ThoughtAttentionAttempt[] {
+  const job = getOperationalJob(db, jobId);
+  const ids = parseThoughtAttentionAttemptIds(job?.thoughtAttentionAttemptIdsJson ?? null);
+  return ids.map((attentionRequestId, index) => {
+    const row = db
+      .prepare(
+        `SELECT outcome, error_class AS errorClass, queued_at AS queuedAt, ended_at AS endedAt
+           FROM attention_requests WHERE id = ?`,
+      )
+      .get(attentionRequestId) as {
+      outcome?: string | null;
+      errorClass?: string | null;
+      queuedAt?: string | null;
+      endedAt?: string | null;
+    } | undefined;
+    return {
+      attemptNumber: index + 1,
+      attentionRequestId,
+      outcome: row?.outcome ?? null,
+      errorClass: row?.errorClass ?? null,
+      queuedAt: row?.queuedAt ?? null,
+      endedAt: row?.endedAt ?? null,
+    };
+  });
 }
 
 export function listExpiredCognitionJobs(

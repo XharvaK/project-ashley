@@ -47,5 +47,6 @@ export function ensureNuclearV34Schema(db: DatabaseSync): void {
     "INTEGER",
   );
   addColumnIfMissing(db, "operational_jobs", "thought_attention_request_id", "INTEGER");
+  addColumnIfMissing(db, "operational_jobs", "thought_attention_attempt_ids_json", "TEXT");
   db.exec(MIGRATION_34_DURABLE_COGNITION_DDL);
 }

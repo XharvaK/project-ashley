@@ -15,6 +15,7 @@ import {
   isVerifiedWorkspaceClaimEffect,
   type OperationalClaimLicense,
 } from "./engineering-types.js";
+import { parseNormalizedDurableThought } from "./durable-cognition.js";
 import { deriveOperationalTruth, renderOperationalTruth } from "./operational-truth.js";
 import {
   bindOperationalJobDeliveryReservation,
@@ -60,6 +61,9 @@ export type ReconstructedOperationalFacts = {
   m4Status: string | null;
   m5Status: string | null;
   m5Reached: boolean;
+  resultKind: string | null;
+  reasonCode: string | null;
+  clarificationQuestion: string | null;
 };
 
 function stepByKind(steps: DurableStepRow[], kind: string): DurableStepRow | undefined {
@@ -145,6 +149,10 @@ export function reconstructOperationalFacts(input: {
     ? getChangeSetByOriginChildTaskId(input.db, m5.childTaskId)
     : null;
 
+  const thought = input.job.normalizedThoughtJson
+    ? parseNormalizedDurableThought(input.job.normalizedThoughtJson)
+    : null;
+
   const facts: ReconstructedOperationalFacts = {
     jobId: input.job.jobId,
     jobStatus: input.job.status,
@@ -168,6 +176,9 @@ export function reconstructOperationalFacts(input: {
     m4Status: m4?.stepRunStatus ?? null,
     m5Status: m5?.stepRunStatus ?? null,
     m5Reached: Boolean(m5 && m5.stepRunStatus && m5.stepRunStatus !== "skipped"),
+    resultKind: thought?.resultKind ?? thought?.kind ?? null,
+    reasonCode: thought?.reasonCode ?? thought?.thoughtError ?? null,
+    clarificationQuestion: thought?.clarificationQuestion ?? null,
   };
 
   const license: OperationalClaimLicense = {
@@ -306,6 +317,24 @@ export function reconstructOperationalFacts(input: {
 export function renderOperationalCompletionFloor(
   facts: ReconstructedOperationalFacts,
 ): string {
+  if (!facts.m6TaskId) {
+    if (facts.stopReason === "needs_clarification") {
+      return facts.clarificationQuestion
+        ? `I need a clarification before I can proceed: ${facts.clarificationQuestion}`
+        : "I need a clarification before I can proceed.";
+    }
+    if (facts.stopReason === "capability_unavailable") {
+      return facts.reasonCode
+        ? `that capability is not available (${facts.reasonCode}).`
+        : "that capability is not available this turn.";
+    }
+    if (facts.stopReason === "non_m6_operation") {
+      return "I selected work that is not a durable bounded operation, so no M3/M4/M5/M7 execution ran.";
+    }
+    if (facts.stopReason === "no_bounded_operation") {
+      return "I completed thought without admitting a bounded operation.";
+    }
+  }
   const parts: string[] = [];
   parts.push(`the requested bounded operation is ${facts.jobStatus.split("_").join(" ")}.`);
   if (facts.m3Status === "succeeded" && facts.workspaceId) {

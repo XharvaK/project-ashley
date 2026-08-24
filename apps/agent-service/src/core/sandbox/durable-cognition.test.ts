@@ -15,7 +15,15 @@ import {
   admitDurableBoundedOperation,
   tickDurableOperationalJobs,
 } from "./durable-job-runner.js";
-import { getOperationalJob, requestOperationalJobCancel } from "./operational-job-store.js";
+import {
+  findClaimableOperationalJob,
+  getOperationalJob,
+  listThoughtAttentionAttempts,
+  requestOperationalJobCancel,
+} from "./operational-job-store.js";
+import { getBoundedOperationTaskRow } from "./bounded-operation-store.js";
+import { reconstructOperationalFacts, renderOperationalCompletionFloor } from "./durable-job-completion.js";
+import { M6_MAX_WALL_MS } from "@composer-assistant/sandbox-v2";
 
 const ELIGIBLE =
   "Using the bounded operation capability, create ashley-m6-smoke.txt, verify it, then seal an advisory change-set.";
@@ -424,6 +432,373 @@ describe("durable cognition slice 2", () => {
         },
       });
       expect(getOperationalJob(db, admitted.jobId)?.status).toBe("succeeded");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("blocks the execution runner from claiming cognition_pending jobs", async () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    let childCalls = 0;
+    try {
+      const begun = envelope(db, 1_000, ELIGIBLE, "msg-no-claim");
+      if (!begun.admitted) return;
+      expect(findClaimableOperationalJob(db, 1_000)).toBeNull();
+      await tickDurableOperationalJobs({
+        db,
+        nowMs: () => 1_000,
+        drivers: {
+          async runExperiment() {
+            childCalls += 1;
+            throw new Error("must_not_run");
+          },
+          async runVerification() {
+            childCalls += 1;
+            throw new Error("must_not_run");
+          },
+          async runAuthorship() {
+            childCalls += 1;
+            throw new Error("must_not_run");
+          },
+        },
+      });
+      expect(childCalls).toBe(0);
+      expect(getOperationalJob(db, begun.jobId)?.boundedOperationTaskId).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("does not let the execution runner claim persisted Thought before M6 attach", async () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    try {
+      const begun = envelope(db, 1_000, ELIGIBLE, "msg-thought-only");
+      if (!begun.admitted) return;
+      await tickDurableCognition({
+        db,
+        nowMs: () => 1_000,
+        runDurableThought: async () => ({
+          kind: "ok",
+          normalized: thoughtOk(),
+          attentionRequestId: 11,
+        }),
+      });
+      const job = getOperationalJob(db, begun.jobId);
+      expect(job?.normalizedThoughtJson).toBeTruthy();
+      expect(job?.jobPhase).toBe("execution_admitted");
+      expect(job?.boundedOperationTaskId).toBeTruthy();
+      const claimable = findClaimableOperationalJob(db, 1_000);
+      expect(claimable?.jobId).toBe(begun.jobId);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("starts a full M6 lifetime at attach even after 90% of cognition time", async () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const t0 = 10_000;
+    const thoughtAt = t0 + Math.floor(DURABLE_COGNITION_LIFETIME_MS * 0.9);
+    try {
+      const begun = envelope(db, t0, ELIGIBLE, "msg-clock");
+      if (!begun.admitted) return;
+      await tickDurableCognition({
+        db,
+        nowMs: () => thoughtAt,
+        runDurableThought: async () => ({
+          kind: "ok",
+          normalized: thoughtOk({
+            operationalRequest: {
+              ...m6Request(),
+              budget: { maxSteps: 3, deadlineAtMs: t0 + DURABLE_COGNITION_LIFETIME_MS },
+            },
+          }),
+          attentionRequestId: 12,
+        }),
+      });
+      const job = getOperationalJob(db, begun.jobId);
+      expect(job?.lifetimeExpiresAtMs).toBe(thoughtAt + M6_MAX_WALL_MS);
+      const task = job?.boundedOperationTaskId
+        ? getBoundedOperationTaskRow(db, job.boundedOperationTaskId)
+        : null;
+      expect(task?.deadlineAtMs).toBe(thoughtAt + M6_MAX_WALL_MS);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("gives full M6 lifetime when Thought succeeds immediately", async () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const t0 = 50_000;
+    try {
+      const begun = envelope(db, t0, ELIGIBLE, "msg-clock-now");
+      if (!begun.admitted) return;
+      await tickDurableCognition({
+        db,
+        nowMs: () => t0 + 1,
+        runDurableThought: async () => ({
+          kind: "ok",
+          normalized: thoughtOk(),
+          attentionRequestId: 13,
+        }),
+      });
+      const job = getOperationalJob(db, begun.jobId);
+      expect(job?.lifetimeExpiresAtMs).toBe(t0 + 1 + M6_MAX_WALL_MS);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("reports M6 execution expiry without rewriting succeeded cognition", async () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const t0 = 80_000;
+    try {
+      const begun = envelope(db, t0, ELIGIBLE, "msg-m6-expire");
+      if (!begun.admitted) return;
+      await tickDurableCognition({
+        db,
+        nowMs: () => t0 + 5,
+        runDurableThought: async () => ({
+          kind: "ok",
+          normalized: thoughtOk(),
+          attentionRequestId: 14,
+        }),
+      });
+      const attached = getOperationalJob(db, begun.jobId);
+      expect(attached?.cognitionState).toBe("succeeded");
+      await tickDurableOperationalJobs({
+        db,
+        nowMs: () => (attached?.lifetimeExpiresAtMs ?? 0) + 1,
+        drivers: {
+          async runExperiment() {
+            throw new Error("expired_before_effect");
+          },
+          async runVerification() {
+            throw new Error("expired_before_effect");
+          },
+          async runAuthorship() {
+            throw new Error("expired_before_effect");
+          },
+        },
+      });
+      const expired = getOperationalJob(db, begun.jobId);
+      expect(expired?.cognitionState).toBe("succeeded");
+      expect(expired?.status).toBe("deadline_exceeded");
+      expect(expired?.normalizedThoughtJson).toBeTruthy();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("recovers clarification after restart without a second Thought call", async () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    let thoughtCalls = 0;
+    try {
+      const begun = envelope(db, 1_000, ELIGIBLE, "msg-clarify-restart");
+      if (!begun.admitted) return;
+      await tickDurableCognition({
+        db,
+        nowMs: () => 2_000,
+        runDurableThought: async () => {
+          thoughtCalls += 1;
+          return {
+            kind: "ok",
+            normalized: thoughtOk({
+              kind: "ask",
+              operationalKind: null,
+              operationalRequest: null,
+              resultKind: "ask",
+              reasonCode: "missing_required_field",
+              clarificationQuestion: "Which project path should I inspect?",
+            }),
+            attentionRequestId: 21,
+          };
+        },
+      });
+      await tickDurableCognition({
+        db,
+        nowMs: () => 3_000,
+        runDurableThought: async () => {
+          thoughtCalls += 1;
+          throw new Error("second_thought_forbidden");
+        },
+      });
+      expect(thoughtCalls).toBe(1);
+      const job = getOperationalJob(db, begun.jobId);
+      expect(job?.stopReason).toBe("needs_clarification");
+      const reconstructed = reconstructOperationalFacts({ db, job: job! });
+      expect(renderOperationalCompletionFloor(reconstructed.facts)).toContain(
+        "Which project path should I inspect?",
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("recovers refusal and capability-unavailable speech after restart", async () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    try {
+      const refused = envelope(db, 1_000, ELIGIBLE, "msg-refuse");
+      if (!refused.admitted) return;
+      await tickDurableCognition({
+        db,
+        nowMs: () => 2_000,
+        runDurableThought: async () => ({
+          kind: "ok",
+          normalized: thoughtOk({
+            kind: "refuse",
+            operationalKind: null,
+            operationalRequest: null,
+            resultKind: "refuse",
+            reasonCode: "owner_boundary",
+            thoughtError: "owner_boundary",
+          }),
+          attentionRequestId: 22,
+        }),
+      });
+      await tickDurableCognition({
+        db,
+        nowMs: () => 3_000,
+        runDurableThought: async () => {
+          throw new Error("second_thought_forbidden");
+        },
+      });
+      const refuseJob = getOperationalJob(db, refused.jobId);
+      expect(refuseJob?.stopReason).toBe("capability_unavailable");
+      expect(
+        renderOperationalCompletionFloor(reconstructOperationalFacts({ db, job: refuseJob! }).facts),
+      ).toContain("owner_boundary");
+
+      const unavailable = envelope(db, 4_000, ELIGIBLE, "msg-unavail");
+      if (!unavailable.admitted) return;
+      await tickDurableCognition({
+        db,
+        nowMs: () => 5_000,
+        runDurableThought: async () => ({
+          kind: "ok",
+          normalized: thoughtOk({
+            kind: "act",
+            thoughtError: "capability_unavailable",
+            operationalKind: null,
+            operationalRequest: null,
+            resultKind: "act",
+            reasonCode: "capability_unavailable",
+          }),
+          attentionRequestId: 23,
+        }),
+      });
+      const unavailJob = getOperationalJob(db, unavailable.jobId);
+      expect(unavailJob?.stopReason).toBe("capability_unavailable");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("settles non-M6 operations without durable M3/M4/M5/M7 execution", async () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    try {
+      const begun = envelope(db, 1_000, ELIGIBLE, "msg-non-m6");
+      if (!begun.admitted) return;
+      await tickDurableCognition({
+        db,
+        nowMs: () => 2_000,
+        runDurableThought: async () => ({
+          kind: "ok",
+          normalized: thoughtOk({
+            operationalKind: "project_inspection",
+            operationalRequest: null,
+            resultKind: "act",
+            reasonCode: "non_m6_operation",
+          }),
+          attentionRequestId: 24,
+        }),
+      });
+      const job = getOperationalJob(db, begun.jobId);
+      expect(job?.boundedOperationTaskId).toBeNull();
+      expect(job?.stopReason).toBe("non_m6_operation");
+      expect(findClaimableOperationalJob(db, 2_000)).toBeNull();
+      expect(
+        renderOperationalCompletionFloor(reconstructOperationalFacts({ db, job: job! }).facts),
+      ).toContain("not a durable bounded operation");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("enumerates every Thought Attention attempt for a job", async () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const clock = { now: 1_000 };
+    try {
+      const begun = envelope(db, clock.now, ELIGIBLE, "msg-attn");
+      if (!begun.admitted) return;
+      await tickDurableCognition({
+        db,
+        nowMs: () => clock.now,
+        runDurableThought: async () => ({
+          kind: "error",
+          class: "transport",
+          code: "429",
+          attentionRequestId: 31,
+        }),
+      });
+      clock.now += backoffMsForAttempt(1) + 1;
+      await tickDurableCognition({
+        db,
+        nowMs: () => clock.now,
+        runDurableThought: async () => ({
+          kind: "ok",
+          normalized: thoughtOk(),
+          attentionRequestId: 32,
+        }),
+      });
+      const attempts = listThoughtAttentionAttempts(db, begun.jobId);
+      expect(attempts.map((row) => row.attentionRequestId)).toEqual([31, 32]);
+      expect(attempts.map((row) => row.attemptNumber)).toEqual([1, 2]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("creates no child effects when cognition and execution wake together before attach", async () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    let release!: () => void;
+    const hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let childCalls = 0;
+    try {
+      const begun = envelope(db, 1_000, ELIGIBLE, "msg-race");
+      if (!begun.admitted) return;
+      const cognition = tickDurableCognition({
+        db,
+        nowMs: () => 2_000,
+        runDurableThought: async () => {
+          await hold;
+          return { kind: "ok", normalized: thoughtOk(), attentionRequestId: 41 };
+        },
+      });
+      const execution = tickDurableOperationalJobs({
+        db,
+        nowMs: () => 2_000,
+        drivers: {
+          async runExperiment() {
+            childCalls += 1;
+            throw new Error("must_not_run");
+          },
+          async runVerification() {
+            childCalls += 1;
+            throw new Error("must_not_run");
+          },
+          async runAuthorship() {
+            childCalls += 1;
+            throw new Error("must_not_run");
+          },
+        },
+      });
+      await execution;
+      expect(childCalls).toBe(0);
+      expect(findClaimableOperationalJob(db, 2_000)).toBeNull();
+      release();
+      await cognition;
     } finally {
       db.close();
     }

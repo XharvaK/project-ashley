@@ -22,6 +22,7 @@ describe("nuclear schema v34 durable cognition", () => {
       expect(names).toContain("cognition_state");
       expect(names).toContain("normalized_thought_json");
       expect(names).toContain("thought_attention_request_id");
+      expect(names).toContain("thought_attention_attempt_ids_json");
       expect(classifyTable("operational_jobs").cls).toBe("CONTROL_PLANE");
     } finally {
       db.close();

@@ -1,8 +1,9 @@
 /**
  * Slice-2 durable-cognition eligibility.
  *
- * Conservative explicit class only. No second model call. No generic
- * operational-language detector. Ordinary chat stays synchronous Thought.
+ * Conservative explicit opt-in bridge only. This is NOT the final semantic
+ * durable-work router. No second model call. No generic operational-language
+ * detector. Ordinary chat stays synchronous Thought.
  */
 export const DURABLE_COGNITION_ACK_TEXT =
   "I'll work on that in my own time. No sandbox operation is admitted yet.";
