@@ -189,8 +189,10 @@ describe("resolveVerificationBinding", () => {
         resolveReadRoot: () => ({ ok: true, entry: entry() }),
       } as never,
     });
-    expect(text).toContain(`currentWorkspaceId=${created.workspaceId}`);
-    expect(text).toContain(`allowedRecipeIds=${RECIPE}`);
-    expect(text).toContain("Do not ask the owner for workspaceId or recipeId");
+    expect(text).not.toContain(created.workspaceId);
+    expect(text).not.toContain(RECIPE);
+    expect(text).toContain("currently resolvable");
+    expect(text).toContain("omit workspaceId and recipeId");
+    expect(text).toContain("Do not ask the owner for control-plane identifiers");
   });
 });

@@ -64,6 +64,15 @@ export type CapabilityGate = (db: DatabaseSync) => boolean;
 /* ------------------------------------------------------------------ */
 
 const MAX_THOUGHT_ATTEMPTS = 2;
+/** Route-specific Thought completion cap. Attention TPM reserves this entire output budget. */
+export const THOUGHT_MAX_OUTPUT_TOKENS = 1000;
+/**
+ * Minimum remaining reactive window before a structural retry is dispatched.
+ * A second Groq Thought after a full 1000-token burn cannot repay 8000 TPM
+ * inside the leftover ~3s of a 6s window; retry must not become
+ * `deadline_before_dispatch` theater.
+ */
+export const MIN_THOUGHT_RETRY_REMAINING_MS = 2_500;
 
 const kinds = new Set<DecisionKind>([
   "speak",
@@ -236,6 +245,24 @@ function sha256(text: string): string {
 function detectTruncation(usage: TokenUsage | undefined, maxTokens: number | undefined): boolean {
   if (!usage || !maxTokens) return false;
   return usage.completionTokens >= maxTokens;
+}
+
+function shouldRetryStructural(input: {
+  attempt: number;
+  maxAttempts: number;
+  deadlineAtMs: number | null;
+  usage?: TokenUsage;
+  requestedMaxTokens?: number;
+  retryable: boolean;
+}): boolean {
+  if (!input.retryable || input.attempt >= input.maxAttempts) return false;
+  if (input.deadlineAtMs == null) return true;
+  const remaining = input.deadlineAtMs - Date.now();
+  if (remaining < MIN_THOUGHT_RETRY_REMAINING_MS) return false;
+  // Hitting the output ceiling consumed the TPM reservation a same-route
+  // retry cannot repay before a reactive Thought deadline.
+  if (detectTruncation(input.usage, input.requestedMaxTokens)) return false;
+  return true;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1050,6 +1077,7 @@ function thoughtAttemptTelemetry(input: {
   usage?: TokenUsage;
   maxTokens?: number;
   rawText: string;
+  parseOk?: boolean;
 }): ThoughtValidationAttempt {
   return {
     phase: input.phase,
@@ -1058,7 +1086,9 @@ function thoughtAttemptTelemetry(input: {
     outputTokens: input.usage?.completionTokens ?? null,
     maxTokens: input.maxTokens ?? null,
     truncated: detectTruncation(input.usage, input.maxTokens),
-    parseOk: input.ok || input.errorCode !== "invalid_json",
+    parseOk:
+      input.parseOk ??
+      (input.ok || input.errorCode !== "invalid_json"),
     validationOk: input.ok,
     errorCode: input.errorCode,
     field: input.field,
@@ -1155,27 +1185,41 @@ export async function runBoundedCognition<TResult>(
 
     const rawText = response.text ?? "";
     const usage = response.usage;
-    const maxTokens = response.maxTokens;
+    const requestedMaxTokens = options.maxTokens ?? response.maxTokens;
+    const maxTokens = requestedMaxTokens;
+    const hitOutputCeiling = detectTruncation(usage, requestedMaxTokens);
 
     const parsed = call.parse(rawText);
     if (!parsed) {
-      lastCode = "invalid_json";
+      lastCode = hitOutputCeiling ? "truncation" : "invalid_json";
       attempts.push(
         thoughtAttemptTelemetry({
           phase: call.phase,
           attempt,
           providerOutcome: "completed",
           ok: false,
-          errorCode: "invalid_json",
+          errorCode: lastCode,
           field: null,
           opKind: null,
           usage,
           maxTokens,
           rawText,
+          parseOk: false,
         }),
       );
-      if (attempt < maxAttempts) continue;
-      return failClosed("invalid_json", "invalid_json");
+      if (
+        shouldRetryStructural({
+          attempt,
+          maxAttempts,
+          deadlineAtMs: call.deadlineAtMs,
+          usage,
+          requestedMaxTokens,
+          retryable: call.retryableCodes.has(lastCode),
+        })
+      ) {
+        continue;
+      }
+      return failClosed(lastCode, lastCode);
     }
 
     const verdict = call.validate(parsed, response);
@@ -1216,7 +1260,16 @@ export async function runBoundedCognition<TResult>(
         rawText,
       }),
     );
-    if (call.retryableCodes.has(verdict.errorCode) && attempt < maxAttempts) {
+    if (
+      shouldRetryStructural({
+        attempt,
+        maxAttempts,
+        deadlineAtMs: call.deadlineAtMs,
+        usage,
+        requestedMaxTokens,
+        retryable: call.retryableCodes.has(verdict.errorCode),
+      })
+    ) {
       continue;
     }
     return failClosed(verdict.errorCode, verdict.errorCode);
@@ -1231,9 +1284,10 @@ function buildThoughtCallOptions(
   db: DatabaseSync,
 ): CallOptions {
   return {
-    maxTokens: 1000,
+    maxTokens: THOUGHT_MAX_OUTPUT_TOKENS,
     temperature: 0.15,
-    reasoningEffort: "medium",
+    reasoningEffort: "none",
+    responseFormat: "json_object",
     lane: (options.lane as any) ?? "interactive",
     purpose: (options.purpose as any) ?? "thought",
     route: "thought",
@@ -1306,7 +1360,8 @@ function buildInitialThoughtMessages(input: {
     if (canOfferVerification) {
       parts.push(
         `When a named candidate snapshot should be verified, include operationalRequest: {kind: "candidate_verification", request: {operation: "workspace.verify", projectId: "${quotedProjectIds}", workspaceId?: string, recipeId?: string}}.`,
-        "Thought names the verification only: projectId, and workspaceId/recipeId when those control-plane identifiers are already grounded below.",
+        "Thought names the verification only: projectId is required. When grounded verification state below says the current candidate is currently resolvable, omit workspaceId and recipeId; the runtime binds those control-plane facts. Do not ask the owner for workspaceId or recipeId in that unique case.",
+        "A question about whether a candidate is good, ready, or high quality is not by itself mechanical verification.",
         "Do not invent recipes, commands, argv, executables, environment, network, cwd, timeouts, or shell.",
         "Recipe catalog, capability, and registry remain the execution authority.",
         "A verification outcome is a mechanical recipe result, not engineering judgment, merge, or deployment readiness.",
@@ -1345,8 +1400,9 @@ function buildInitialThoughtMessages(input: {
   const systemParts = [
     "You are Ashley's Thought layer, not her Expression layer.",
     "Choose whether and how to act from the supplied grounded motivations.",
-    "Return strict JSON only.",
+    "Return one compact JSON object only. No markdown, preamble, or chain-of-thought.",
     "Schema: {kind, delayClass, shouldSpeak, effort, completion, uncertainty, urgency, objective, reason, motivationIds, evidenceDisposition, operationalRequest?}.",
+    "objective and reason are short phrases, not essays.",
     "kind is speak|silence|delay|ask|revisit|share|challenge|refuse; delayClass is brief|standard|long|reflection_review only when kind is delay and otherwise null; effort is low|medium|high; completion is complete|hold.",
     "Never return a timestamp or duration. The host maps delayClass to a fixed duration.",
     "A refusal is reactive only and must select both the current user_message motivation and a supplied stable boundary motivation.",
@@ -1933,7 +1989,8 @@ function buildContinuationMessages(input: {
   const systemParts = [
     "You are Ashley's Thought layer continuing deliberation after receiving sandbox execution results.",
     "Interpret the structured observation or execution error truthfully to produce your final Decision.",
-    "Return strict JSON only: {kind,delayClass,shouldSpeak,effort,completion,uncertainty,urgency,objective,reason,motivationIds,cognitiveResult?}.",
+    "Return one compact JSON object only. No markdown, preamble, or chain-of-thought.",
+    "Schema: {kind,delayClass,shouldSpeak,effort,completion,uncertainty,urgency,objective,reason,motivationIds,cognitiveResult?}.",
     "kind is speak|silence|delay|ask|revisit|share|challenge|refuse; effort is low|medium|high; completion is complete|hold.",
     "Do NOT emit another operationalRequest, inspectionRequest, workspaceRequest, verificationRequest, or authorshipRequest. Exactly one sandbox execution per turn.",
     "If the sandbox failed or is unavailable, reason about the failure truthfully without inferring absence of files or zero matches.",

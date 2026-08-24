@@ -18,6 +18,7 @@ import { createQuestion } from "../state/questions.js";
 import { parseCandidateVerificationRequest } from "../agency/thought.js";
 import { createTurnDeadlinePlan, type TurnDeadlinePolicy } from "../delivery/turn-deadline-plan.js";
 import * as v2Execution from "./v2-execution.js";
+import * as verificationBinding from "./verification-binding.js";
 import type { OperationalClaimLicense } from "./engineering-types.js";
 import type { CognitionVerificationRequest } from "../types.js";
 
@@ -377,11 +378,11 @@ describe("M4 Phase E cognition and turn admission", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
-  it("default deadline branch remains unavailable and refuses M4", async () => {
+  it("production default deadline branch admits M4 when Thought emits a request", async () => {
     const { execute } = await runReactive({});
-    expect(execute).not.toHaveBeenCalled();
+    expect(execute).toHaveBeenCalledTimes(1);
     expect(createTurnDeadlinePlan(1_000_000).branches.candidate_verification.available).toBe(
-      false,
+      true,
     );
   });
 
@@ -592,5 +593,117 @@ describe("M4 Phase E cognition and turn admission", () => {
       projectId: "project-ashley",
     });
     expect(result.text.toLowerCase()).not.toMatch(/workspaceid/);
+  });
+
+  it.each([
+    "Verify the current candidate workspace.",
+    "Verify the candidate you just changed.",
+    "Run candidate verification on the current candidate.",
+  ])(
+    "from utterance, Thought can emit omitted-id M4 when grounded state is currently resolvable: %s",
+    async (utterance) => {
+      const db = openNuclearDb(new DatabaseSync(join(tmpDir, `${randomUUID()}.db`)));
+      activateCapabilities(db);
+      vi.spyOn(verificationBinding, "describeVerificationGrounding").mockReturnValue(
+        "project-ashley: currently resolvable. omit workspaceId and recipeId. Do not ask the owner for control-plane identifiers.",
+      );
+      const execute = vi.spyOn(v2Execution, "executeCandidateVerificationV2").mockResolvedValue({
+        license: licensedSuccess(),
+      });
+      let thoughtPrompt = "";
+      vi.spyOn(mistral, "completeChat").mockImplementation(async (messages: any[]) => {
+        const systemContent = String(messages.find((m) => m.role === "system")?.content ?? "");
+        if (systemContent.includes("Ashley's Thought layer, not her Expression layer")) {
+          thoughtPrompt = systemContent;
+          const omitted = {
+            operation: "workspace.verify",
+            projectId: "project-ashley",
+          };
+          const canOmit =
+            systemContent.includes("currently resolvable") &&
+            (systemContent.includes("omit workspaceId") ||
+              systemContent.includes("workspaceId?: string"));
+          if (!canOmit) {
+            return thoughtPass1({
+              operation: "workspace.verify",
+              projectId: "project-ashley",
+              workspaceId: "should-not-be-required",
+              recipeId: RECIPE,
+            });
+          }
+          return thoughtPass1(omitted);
+        }
+        if (systemContent.includes("Ashley's Thought layer continuing deliberation")) {
+          return thoughtPass2();
+        }
+        return {
+          text: "Mechanical verification ran.",
+          model: "mistral-large",
+          modelAlias: "expression",
+          resolvedModelId: "mistral-large",
+        };
+      });
+      const core = new AshleyCore(db);
+      await core.handleReactiveChat({
+        message: utterance,
+        ownerId: "doc",
+        channel: "discord",
+      });
+      expect(thoughtPrompt).toContain("currently resolvable");
+      expect(thoughtPrompt).toMatch(/workspaceId\?:/);
+      expect(execute).toHaveBeenCalledTimes(1);
+      expect(execute.mock.calls[0]?.[0]?.request).toEqual({
+        operation: "workspace.verify",
+        projectId: "project-ashley",
+      });
+      db.close();
+    },
+  );
+
+  it("quality questions do not force M4 from a verify keyword", async () => {
+    const db = openNuclearDb(new DatabaseSync(join(tmpDir, `${randomUUID()}.db`)));
+    activateCapabilities(db);
+    const execute = vi.spyOn(v2Execution, "executeCandidateVerificationV2").mockResolvedValue({
+      license: licensedSuccess(),
+    });
+    vi.spyOn(mistral, "completeChat").mockImplementation(async (messages: any[]) => {
+      const systemContent = String(messages.find((m) => m.role === "system")?.content ?? "");
+      const userContent = String(messages.find((m) => m.role === "user")?.content ?? "");
+      if (systemContent.includes("Ashley's Thought layer, not her Expression layer")) {
+        expect(systemContent).toContain("not by itself mechanical verification");
+        if (userContent.includes("good") || userContent.includes("Is the candidate")) {
+          return {
+            text: JSON.stringify({
+              kind: "speak",
+              effort: "low",
+              completion: "complete",
+              objective: "answer the quality question without mechanical verification",
+              reason: "owner asked for judgment, not a recipe outcome",
+              motivationIds: [1],
+              shouldSpeak: true,
+              evidenceDisposition: "sufficient",
+            }),
+            model: "mistral-large",
+            modelAlias: "thought",
+            resolvedModelId: "mistral-large",
+          };
+        }
+        return thoughtPass1(validRequest);
+      }
+      return {
+        text: "I do not have a mechanical verification outcome to report.",
+        model: "mistral-large",
+        modelAlias: "expression",
+        resolvedModelId: "mistral-large",
+      };
+    });
+    const core = new AshleyCore(db);
+    await core.handleReactiveChat({
+      message: "Is this candidate good?",
+      ownerId: "doc",
+      channel: "discord",
+    });
+    expect(execute).not.toHaveBeenCalled();
+    db.close();
   });
 });

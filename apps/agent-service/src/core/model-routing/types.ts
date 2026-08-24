@@ -79,6 +79,8 @@ export type CompletionOptions = {
   temperature?: number;
   presencePenalty?: number;
   reasoningEffort?: "none" | "low" | "medium" | "high";
+  /** Enforce a JSON object completion. Thought uses this; adapters ignore if unsupported. */
+  responseFormat?: "json_object";
   tools?: ToolDefinition[];
   toolChoice?: string | Record<string, unknown>;
   signal?: AbortSignal;

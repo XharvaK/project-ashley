@@ -83,6 +83,28 @@ export function resolveVerificationBinding(input: {
   return { ok: true, workspaceId, recipeId };
 }
 
+export type VerificationResolvabilityStatus =
+  | "currently_resolvable"
+  | "no_current_workspace"
+  | "ambiguous_current_workspace"
+  | "no_allowed_recipe"
+  | "ambiguous_recipe"
+  | "verification_not_allowed";
+
+export function assessVerificationResolvability(input: {
+  projectId: string;
+  entry: ProjectRootEntry;
+  workspaceManager?: WorkspaceManager;
+}): VerificationResolvabilityStatus {
+  if (input.entry.verificationAllowed !== true) return "verification_not_allowed";
+  const manager = input.workspaceManager ?? new WorkspaceManager();
+  const current = uniqueCurrentWorkspaceId(manager.listProjectWorkspaces(input.projectId));
+  if (!current.ok) return current.error;
+  const recipe = uniqueAllowedRecipeId(input.entry);
+  if (!recipe.ok) return recipe.error;
+  return "currently_resolvable";
+}
+
 export function describeVerificationGrounding(
   projectIds: readonly string[],
   options?: { registry?: V2ProjectReadRegistry; workspaceManager?: WorkspaceManager },
@@ -94,18 +116,39 @@ export function describeVerificationGrounding(
   for (const projectId of projectIds) {
     const resolved = registry.resolveReadRoot(projectId);
     if (!resolved.ok || resolved.entry.verificationAllowed !== true) continue;
-    const recipes = resolved.entry.allowedRecipeIds ?? [];
-    const current = uniqueCurrentWorkspaceId(manager.listProjectWorkspaces(projectId));
-    const currentId = current.ok ? current.workspaceId : "none";
+    const status = assessVerificationResolvability({
+      projectId,
+      entry: resolved.entry,
+      workspaceManager: manager,
+    });
+    if (status === "currently_resolvable") {
+      rows.push(
+        `${projectId}: candidate verification is currently resolvable. Emit candidate_verification with projectId only; omit workspaceId and recipeId. Do not ask the owner for control-plane identifiers.`,
+      );
+      continue;
+    }
+    if (status === "no_current_workspace") {
+      rows.push(`${projectId}: no current candidate workspace exists.`);
+      continue;
+    }
+    if (status === "ambiguous_current_workspace") {
+      rows.push(
+        `${projectId}: current candidate workspace is ambiguous; do not guess a workspaceId.`,
+      );
+      continue;
+    }
+    if (status === "no_allowed_recipe") {
+      rows.push(`${projectId}: no mechanical verification recipe is bound.`);
+      continue;
+    }
     rows.push(
-      `${projectId}: currentWorkspaceId=${currentId} allowedRecipeIds=${recipes.length > 0 ? recipes.join(",") : "none"}`,
+      `${projectId}: several mechanical recipes are bound; ask by recipe purpose, not opaque control-plane ids.`,
     );
   }
   if (rows.length === 0) return "";
   return [
-    "Grounded verification bindings (operator-owned control-plane facts; not owner-supplied magic words):",
+    "Grounded verification resolvability (operator-owned control-plane facts; not owner-supplied magic words; opaque workspaceId/recipeId are not for the owner and need not appear in Thought output when currently resolvable):",
     ...rows,
-    "When a unique currentWorkspaceId and a unique allowedRecipeId are listed and the owner asks to verify the current or just-changed candidate, emit candidate_verification for that projectId. Copy those identifiers or omit workspaceId and recipeId so the runtime binds the unique projection. Do not ask the owner for workspaceId or recipeId in that unique case.",
-    "If currentWorkspaceId is none, say no current candidate workspace exists. If several recipes are listed and the owner did not distinguish by purpose, ask using recipe purpose, not opaque control-plane ids.",
+    "Quality, goodness, or whether a change is 'good' is not mechanical verification. Emit candidate_verification only when mechanical recipe verification is the intended act.",
   ].join(" ");
 }

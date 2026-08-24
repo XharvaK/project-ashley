@@ -6,6 +6,17 @@ import type {
 
 export const PHASE_LIFECYCLE_VERSION = 1 as const;
 export const PHASE_LIFECYCLE_MAX_BYTES = 8_192;
+/**
+ * Parser ceiling for `deadlineOffsetsMs` keys.
+ *
+ * Production M3+M4 encoder count (provisional policy, M5 authorship closed):
+ * 24 common/M1/M2 keys + 14 M3 workspace keys + 4 M4 verification keys = 42.
+ * M5 authorship adds 4 more (46) if that branch is ever available.
+ * The previous cap of 40 discarded the envelope (`phase_lifecycle_missing`)
+ * once M4 offsets existed. 64 is a fixed parser bound, not a model-controlled
+ * budget: Thought cannot add keys, and values above 64 still fail closed.
+ */
+export const PHASE_LIFECYCLE_MAX_DEADLINE_KEYS = 64;
 
 export type PhaseLifecyclePhase =
   | "admission"
@@ -140,7 +151,7 @@ function offset(plan: TurnDeadlinePlan, atMs: number): number {
   return Math.max(0, Math.min(86_400_000, Math.round(atMs - plan.admittedAtMs)));
 }
 
-function deadlineOffsets(plan: TurnDeadlinePlan): Record<string, number> {
+export function deadlineOffsets(plan: TurnDeadlinePlan): Record<string, number> {
   const result: Record<string, number> = {
     softResponsiveness: offset(plan, plan.common.softResponsivenessTargetAtMs),
     initialThought: offset(plan, plan.common.initialThoughtDeadlineAtMs),
@@ -336,7 +347,9 @@ export function parsePhaseLifecycleJson(
       if (deadline === null) return null;
       parsedDeadlines[key] = deadline;
     }
-    if (Object.keys(parsedDeadlines).length > 40) return null;
+    if (Object.keys(parsedDeadlines).length > PHASE_LIFECYCLE_MAX_DEADLINE_KEYS) {
+      return null;
+    }
     const phases: PhaseLifecycleEnvelope["phases"] = {};
     for (const [key, value] of Object.entries(parsed.phases)) {
       if (!PHASES.has(key as PhaseLifecyclePhase)) return null;

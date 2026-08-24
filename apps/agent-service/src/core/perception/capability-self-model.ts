@@ -211,7 +211,7 @@ export function describeCandidateVerificationAvailability(options?: {
   const registryAllows =
     options.registryAllows ?? canOfferCandidateVerification(options.db);
   if (canInfluence && registryAllows) {
-    return "Candidate verification (M4): offerable (candidate_verification active and verificationAllowed with a recipe allowlist; current candidate workspace and sole allowlisted recipe are operator-bound control-plane facts, not owner-supplied magic words; mechanical recipe outcome for a named snapshot; not engineering judgment). Deadline-branch availability is a separate runtime gate.";
+    return "Candidate verification (M4): offerable (candidate_verification active and verificationAllowed with a recipe allowlist; when grounded state is currently resolvable, emit candidate_verification with projectId only and omit workspaceId/recipeId; those are operator-bound control-plane facts, not owner-supplied magic words; mechanical recipe outcome for a named snapshot; not engineering judgment). Deadline-branch availability is a separate runtime gate.";
   }
   return `Candidate verification (M4): ${
     !canInfluence

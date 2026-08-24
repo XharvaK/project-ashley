@@ -238,17 +238,17 @@ describe("TurnDeadlinePlan", () => {
       expect(plan.branches.sandbox_m1.available).toBe(true);
       expect(plan.branches.project_inspection.available).toBe(true);
       expect(plan.branches.candidate_workspace_experiment.available).toBe(true);
-      expect(plan.branches.candidate_verification.available).toBe(false);
-      if (plan.branches.candidate_verification.available) {
-        throw new Error("m4 deadline branch must default unavailable");
+      expect(plan.branches.candidate_verification.available).toBe(true);
+      if (!plan.branches.candidate_verification.available) {
+        throw new Error("m4 deadline branch must default available after G2 promotion");
       }
-      expect(plan.branches.candidate_verification.unavailableReason).toBe(
-        "candidate_verification_unqualified",
+      const m4 = selectTurnDeadlineBranch(plan, "candidate_verification");
+      expect(m4.ok).toBe(true);
+      if (!m4.ok) throw new Error("expected candidate verification branch to be available");
+      expect(m4.branch.kind).toBe("candidate_verification");
+      expect(m4.branch.childExecutionDeadlineAtMs).toBe(
+        plan.common.initialThoughtDeadlineAtMs + 6_000,
       );
-      expect(selectTurnDeadlineBranch(plan, "candidate_verification")).toEqual({
-        ok: false,
-        reason: "candidate_verification_unqualified",
-      });
       expect(plan.branches.candidate_authorship.available).toBe(false);
       if (plan.branches.candidate_authorship.available) {
         throw new Error("m5 deadline branch must default unavailable");

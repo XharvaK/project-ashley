@@ -14,6 +14,8 @@ import {
   readPhaseLifecycle,
   recordPhaseLifecycle,
   selectPhaseLifecycleBranch,
+  deadlineOffsets,
+  PHASE_LIFECYCLE_MAX_DEADLINE_KEYS,
 } from "./phase-lifecycle.js";
 import {
   createTurnDeadlinePlan,
@@ -285,5 +287,32 @@ describe("bounded delivery-owned phase lifecycle", () => {
     expect(parsePhaseLifecycleJson(null)).toBeNull();
     expect(parsePhaseLifecycleJson("not-json")).toBeNull();
     expect(parsePhaseLifecycleJson(JSON.stringify({ version: 99 }))).toBeNull();
+  });
+
+  it("M3+M4 deadline key count exceeds 40 and stays under the 64 parser ceiling", () => {
+    const plan = createTurnDeadlinePlan(
+      1_000_000,
+      PROVISIONAL_UNQUALIFIED_TURN_DEADLINE_POLICY,
+    );
+    const keys = Object.keys(deadlineOffsets(plan));
+    expect(keys.length).toBeGreaterThan(40);
+    expect(keys.length).toBeLessThanOrEqual(PHASE_LIFECYCLE_MAX_DEADLINE_KEYS);
+    const tooMany: Record<string, number> = {};
+    for (let i = 0; i < PHASE_LIFECYCLE_MAX_DEADLINE_KEYS + 1; i++) {
+      tooMany[`k${i}`] = 1;
+    }
+    expect(
+      parsePhaseLifecycleJson(
+        JSON.stringify({
+          version: 1,
+          planVersion: "x",
+          qualification: "unqualified",
+          selectedBranch: null,
+          selectedAtOffsetMs: null,
+          deadlineOffsetsMs: tooMany,
+          phases: {},
+        }),
+      ),
+    ).toBeNull();
   });
 });

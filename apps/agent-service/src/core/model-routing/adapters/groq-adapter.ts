@@ -16,6 +16,9 @@ type GroqErrorResponse = {
 
 type GroqMessage = {
   content?: string | Array<unknown>;
+  /** gpt-oss hidden reasoning — never copied into Thought JSON text. */
+  reasoning?: unknown;
+  reasoning_content?: unknown;
   tool_calls?: Array<{
     id?: string;
     type?: string;
@@ -23,11 +26,12 @@ type GroqMessage = {
   }>;
 };
 
-type GroqChoice = { message?: GroqMessage };
+type GroqChoice = { message?: GroqMessage; finish_reason?: string };
 
 type GroqUsage = {
   prompt_tokens?: number;
   completion_tokens?: number;
+  completion_tokens_details?: { reasoning_tokens?: number };
 };
 
 type GroqResponse = {
@@ -77,6 +81,9 @@ function buildRequestBody(
   }
   if (options.reasoningEffort !== undefined) {
     body.reasoning_effort = options.reasoningEffort;
+  }
+  if (options.responseFormat === "json_object") {
+    body.response_format = { type: "json_object" };
   }
   return body;
 }

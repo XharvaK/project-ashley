@@ -97,6 +97,58 @@ describe("groq-adapter fixtures", () => {
     expect(capturedBody?.model).toBe("qwen/qwen3.6-27b");
   });
 
+  it("serializes json_object response_format when requested", async () => {
+    env.groqApiKey = "test";
+    let capturedBody: Record<string, unknown> | undefined;
+    const adapter = createGroqAdapter(async (_url, init) => {
+      capturedBody = JSON.parse(init?.body as string);
+      return fakeResponse({
+        choices: [{ message: { content: "{}" } }],
+        usage: { prompt_tokens: 5, completion_tokens: 1 },
+      });
+    });
+    await adapter.dispatch({
+      messages,
+      modelId: "openai/gpt-oss-120b",
+      options: { responseFormat: "json_object", reasoningEffort: "none" },
+    });
+    expect(capturedBody?.response_format).toEqual({ type: "json_object" });
+  });
+
+  it("uses message.content only and ignores gpt-oss reasoning fields", async () => {
+    env.groqApiKey = "test";
+    const adapter = createGroqAdapter(async () =>
+      fakeResponse({
+        choices: [
+          {
+            finish_reason: "length",
+            message: {
+              content:
+                '{"kind":"speak","operationalRequest":{"kind":"candidate_verification"',
+              reasoning: "a".repeat(4000),
+              reasoning_content: "hidden chain of thought that must not parse",
+            },
+          },
+        ],
+        usage: {
+          prompt_tokens: 2293,
+          completion_tokens: 1000,
+          completion_tokens_details: { reasoning_tokens: 850 },
+        },
+      }),
+    );
+    const result = await adapter.dispatch({
+      messages,
+      modelId: "openai/gpt-oss-120b",
+      options: { maxTokens: 1000 },
+    });
+    expect(result.text).toBe(
+      '{"kind":"speak","operationalRequest":{"kind":"candidate_verification"',
+    );
+    expect(result.text).not.toContain("hidden chain");
+    expect(result.usage).toEqual({ promptTokens: 2293, completionTokens: 1000 });
+  });
+
   it("throws agent_not_ready when the API key is missing", async () => {
     env.groqApiKey = "";
     const adapter = createGroqAdapter(async () => fakeResponse({}));
