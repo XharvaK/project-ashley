@@ -303,6 +303,11 @@ function createEnv() {
     "ASHLEY_DURABLE_BOUNDED_OPERATION_ENABLED",
     false,
   ),
+  /** Slice-2 durable Initial Thought. Requires slice-1 flag. Default off. */
+  durableOperationalThoughtEnabled: strictBoolean(
+    "ASHLEY_DURABLE_OPERATIONAL_THOUGHT_ENABLED",
+    false,
+  ),
   // Host-provided allowlisted project-root registry (operator config, never
   // model-writable). Empty/unset => no roots => envelope precheck refuses writes.
   sandboxProjectRegistryPath: strictTrimmed(
@@ -476,6 +481,14 @@ export function validateBoot(): {
   if (!env.memoryOwnerId) {
     warnings.push(
       "MEMORY_OWNER_ID / DISCORD_OWNER_ID missing — set owner for nuclear memory",
+    );
+  }
+  if (
+    env.durableOperationalThoughtEnabled &&
+    !env.durableBoundedOperationEnabled
+  ) {
+    errors.push(
+      "ASHLEY_DURABLE_OPERATIONAL_THOUGHT_ENABLED requires ASHLEY_DURABLE_BOUNDED_OPERATION_ENABLED",
     );
   }
   return { ok: errors.length === 0, errors, warnings };

@@ -30,15 +30,15 @@ describe("wave06 migration", () => {
   it("migrates fresh db to v16 with v3 contract and perception tables", () => {
     const continuity = openContinuityDb(new DatabaseSync(":memory:"));
     const nuclear = openNuclearDb(new DatabaseSync(":memory:"), { continuity });
-    expect(NUCLEAR_SUPPORTED_VERSION).toBe(33);
+    expect(NUCLEAR_SUPPORTED_VERSION).toBe(34);
     const version = (
       nuclear.prepare("PRAGMA user_version").get() as { user_version: number }
     ).user_version;
-    expect(version).toBe(33);
+    expect(version).toBe(34);
     const sidecarVersion = continuity
       .prepare(`SELECT nuclear_schema_version FROM lineage_state WHERE id = 1`)
       .get() as { nuclear_schema_version?: number };
-    expect(sidecarVersion.nuclear_schema_version).toBe(33);
+    expect(sidecarVersion.nuclear_schema_version).toBe(34);
     for (const table of ["perception_artifacts", "conversational_reads"]) {
       expect(
         nuclear
@@ -107,7 +107,7 @@ describe("wave06 migration", () => {
     expect(
       (nuclear.prepare("PRAGMA user_version").get() as { user_version: number })
         .user_version,
-    ).toBe(33);
+    ).toBe(34);
     expect(
       (
         continuity
@@ -116,7 +116,7 @@ describe("wave06 migration", () => {
           )
           .get() as { nuclear_schema_version?: number }
       ).nuclear_schema_version,
-    ).toBe(33);
+    ).toBe(34);
     expect(getPendingNuclearMigration(continuity)).toBeNull();
     expect(
       nuclear
@@ -188,7 +188,7 @@ describe("wave06 migration", () => {
     expect(
       (nuclear.prepare("PRAGMA user_version").get() as { user_version: number })
         .user_version,
-    ).toBe(33);
+    ).toBe(34);
     nuclear.close();
     continuity.close();
   });

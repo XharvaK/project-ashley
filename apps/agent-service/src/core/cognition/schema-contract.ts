@@ -869,9 +869,31 @@ function requireNoV33Objects(db: DatabaseSync, version: number): void {
   }
 }
 
+const V34_COLUMNS: Record<string, ColumnSpec[]> = {
+  operational_jobs: [
+    { name: "job_phase", notNull: true, defaultValue: "'execution_admitted'" },
+    { name: "cognition_state", notNull: true, defaultValue: "'not_required'" },
+    { name: "thought_attempt_count", notNull: true, defaultValue: "0" },
+    { name: "next_thought_attempt_at_ms" },
+    { name: "last_thought_error_class" },
+    { name: "cognition_expires_at_ms" },
+    { name: "normalized_thought_json" },
+    { name: "normalized_thought_schema_version" },
+    { name: "thought_attention_request_id" },
+  ],
+};
+
+function requireNoV34Columns(db: DatabaseSync, version: number): void {
+  for (const column of V34_COLUMNS.operational_jobs ?? []) {
+    if (tableInfo(db, "operational_jobs").some((row) => row.name === column.name)) {
+      fail(version, `unexpected_v34_column:${column.name}`);
+    }
+  }
+}
+
 export function validateNuclearSchemaContent(
   db: DatabaseSync,
-  version: 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33,
+  version: 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34,
   options: { rejectNewerContent?: boolean } = {},
 ): void {
   if (version === 22) {
@@ -984,6 +1006,14 @@ export function validateNuclearSchemaContent(
     requireColumns(db, version, table, columns);
   }
   for (const index of V33_INDEXES) requireIndex(db, version, index);
+  if (version === 33 && options.rejectNewerContent === true) {
+    requireNoV34Columns(db, version);
+    return;
+  }
+  if (version === 33) return;
+  for (const [table, columns] of Object.entries(V34_COLUMNS)) {
+    requireColumns(db, version, table, columns);
+  }
 }
 
 function addColumnIfMissing(

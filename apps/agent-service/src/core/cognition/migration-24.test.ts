@@ -20,8 +20,8 @@ describe("nuclear schema v24 cognition continuity", () => {
   it("adds host-owned model identity to OCI rows", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
 
-    expect(NUCLEAR_SUPPORTED_VERSION).toBe(33);
-    expect(schemaVersion(db)).toBe(33);
+    expect(NUCLEAR_SUPPORTED_VERSION).toBe(34);
+    expect(schemaVersion(db)).toBe(34);
     expect(
       (
         db.prepare("PRAGMA table_info(open_cognitive_items)").all() as Array<{
@@ -76,7 +76,7 @@ describe("nuclear schema v24 cognition continuity", () => {
     openNuclearDb(db, { continuity });
 
     expect(getPendingNuclearMigration(continuity)).toBeNull();
-    expect(schemaVersion(db)).toBe(33);
+    expect(schemaVersion(db)).toBe(34);
     expect(
       (
         continuity
@@ -85,7 +85,7 @@ describe("nuclear schema v24 cognition continuity", () => {
           )
           .get() as { nuclear_schema_version?: number }
       ).nuclear_schema_version,
-    ).toBe(33);
+    ).toBe(34);
     db.close();
     continuity.close();
   });

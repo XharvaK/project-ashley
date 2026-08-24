@@ -43,6 +43,11 @@ import {
   type OperationalJobRow,
   type OperationalJobStatus,
 } from "./operational-job-store.js";
+import {
+  tickDurableCognition,
+  ownerCognitionStatus,
+  type RunDurableThought,
+} from "./durable-cognition.js";
 import { getVerificationReceiptByTaskId } from "./verification-receipt-store.js";
 import { getChangeSetByOriginChildTaskId } from "./changeset-store.js";
 import { drainOperationalJobCompletions } from "./durable-job-completion.js";
@@ -80,6 +85,7 @@ export type DurableRunnerContext = {
     floorText: string;
     license: OperationalClaimLicense;
   }) => Promise<string | null>;
+  runDurableThought?: RunDurableThought;
 };
 
 type EffectClass = "NO_EFFECT" | "RECONCILABLE_EFFECT" | "AMBIGUOUS_EFFECT";
@@ -495,6 +501,15 @@ export async function tickDurableOperationalJobs(ctx: DurableRunnerContext): Pro
     express: ctx.expressCompletion,
   });
   if (ctx.shouldStop?.()) return;
+  if (ctx.runDurableThought) {
+    await tickDurableCognition({
+      db: ctx.db,
+      nowMs: ctx.nowMs,
+      runDurableThought: ctx.runDurableThought,
+      shouldStop: ctx.shouldStop,
+    });
+  }
+  if (ctx.shouldStop?.()) return;
   const claimable = findClaimableOperationalJob(ctx.db, ctx.nowMs());
   if (!claimable) return;
   const claimed = claimOperationalJob(ctx.db, claimable.jobId, ctx.nowMs());
@@ -609,6 +624,9 @@ export function durableJobStatusSnapshot(
     projectId: job.projectId,
     currentStepIndex: job.currentStepIndex,
     totalSteps: steps.length,
+    jobPhase: job.jobPhase,
+    cognitionState: job.cognitionState,
+    ownerStatus: ownerCognitionStatus(job),
     cancelRequested: job.cancelRequested,
     stopReason: job.stopReason,
     createdAt: job.createdAt,

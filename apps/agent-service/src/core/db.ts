@@ -85,6 +85,10 @@ import {
   MIGRATION_33_OPERATIONAL_JOBS_DDL,
 } from "./sandbox/migration-33.js";
 import {
+  ensureNuclearV34Schema,
+  MIGRATION_34_DURABLE_COGNITION_DDL,
+} from "./sandbox/migration-34.js";
+import {
   continuityGeneration,
   durableSemanticKeyHash,
   semanticIdentityHash,
@@ -94,7 +98,7 @@ import { currentBuildIdentity } from "./rollout/capabilities.js";
 
 export { reservedProductionNuclearDbPath as NUCLEAR_DB_PATH };
 
-export const NUCLEAR_SUPPORTED_VERSION = 33;
+export const NUCLEAR_SUPPORTED_VERSION = 34;
 
 export type NuclearMigrationTestFault =
   | "before_pending"
@@ -1140,14 +1144,14 @@ function reconcilePendingNuclearMigration(
     buildIdentity: pending.buildIdentity,
   };
   if (actualVersion === pending.from) {
-    validateNuclearSchemaContent(db, pending.from as 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33, {
+    validateNuclearSchemaContent(db, pending.from as 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34, {
       rejectNewerContent: true,
     });
     rollbackNuclearMigration(continuity, descriptor);
     return;
   }
   if (actualVersion === pending.to) {
-    validateNuclearSchemaContent(db, pending.to as 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33, {
+    validateNuclearSchemaContent(db, pending.to as 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34, {
       rejectNewerContent: true,
     });
     finalizeNuclearMigration(continuity, descriptor, "recovered");
@@ -1257,13 +1261,15 @@ function migrateNuclearSchemaWithProtocol(input: {
       ensureNuclearV32Schema(db);
     } else if (targetVersion === 33) {
       ensureNuclearV33Schema(db);
+    } else if (targetVersion === 34) {
+      ensureNuclearV34Schema(db);
     } else {
       db.exec(ddl);
     }
     db.exec(`PRAGMA user_version = ${targetVersion}`);
     validateNuclearSchemaContent(
       db,
-      targetVersion as 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33,
+      targetVersion as 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34,
     );
     const fk = db.prepare("PRAGMA foreign_key_check").all();
     if (fk.length > 0) throw new Error("nuclear_fk_check_failed");
@@ -1362,7 +1368,7 @@ export function migrate(
       throw err;
     }
     if (version >= 25 && version <= NUCLEAR_SUPPORTED_VERSION) {
-      validateNuclearSchemaContent(db, version as 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33);
+      validateNuclearSchemaContent(db, version as 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34);
     }
     return;
   }
@@ -2806,10 +2812,36 @@ export function migrate(
         options.testFailAfterNuclearCommitBeforeContinuityFinalization,
     });
   }
+  if (userVersion(db) < 34) {
+    const continuity = options.continuity;
+    const priorVersion = userVersion(db);
+    const lineageId = nuclearLineageMirrorId(db);
+    if (!continuity && !options.skipContinuityRequirement) {
+      throw new Error("continuity_unavailable");
+    }
+    migrateNuclearSchemaWithProtocol({
+      db,
+      continuity: continuity && lineageId ? continuity : undefined,
+      targetVersion: 34,
+      descriptor:
+        continuity && lineageId
+          ? {
+              from: priorVersion,
+              to: 34,
+              lineageId,
+              buildIdentity: currentBuildIdentity(),
+            }
+          : undefined,
+      ddl: MIGRATION_34_DURABLE_COGNITION_DDL,
+      testMigrationFault: options.testMigrationFault,
+      testFailAfterNuclearCommitBeforeContinuityFinalization:
+        options.testFailAfterNuclearCommitBeforeContinuityFinalization,
+    });
+  }
   if (userVersion(db) >= 25) {
     validateNuclearSchemaContent(
       db,
-      userVersion(db) as 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33,
+      userVersion(db) as 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34,
     );
   }
   if (!options.skipContinuityRequirement && userVersion(db) >= 15) {

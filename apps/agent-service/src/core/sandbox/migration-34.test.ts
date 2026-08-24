@@ -9,20 +9,20 @@ function schemaVersion(db: DatabaseSync): number {
   );
 }
 
-describe("nuclear schema v33 durable operational jobs", () => {
-  it("installs envelope and recovery tables with zero rows", () => {
+describe("nuclear schema v34 durable cognition", () => {
+  it("adds cognition columns without rewriting v33 tables", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     try {
       expect(NUCLEAR_SUPPORTED_VERSION).toBe(34);
       expect(schemaVersion(db)).toBe(34);
-      expect(
-        (db.prepare(`SELECT COUNT(*) AS c FROM operational_jobs`).get() as { c: number }).c,
-      ).toBe(0);
-      expect(
-        (db.prepare(`SELECT COUNT(*) AS c FROM verification_receipts`).get() as { c: number }).c,
-      ).toBe(0);
+      const names = (
+        db.prepare(`PRAGMA table_info(operational_jobs)`).all() as Array<{ name: string }>
+      ).map((row) => row.name);
+      expect(names).toContain("job_phase");
+      expect(names).toContain("cognition_state");
+      expect(names).toContain("normalized_thought_json");
+      expect(names).toContain("thought_attention_request_id");
       expect(classifyTable("operational_jobs").cls).toBe("CONTROL_PLANE");
-      expect(classifyTable("verification_receipts").cls).toBe("CONTROL_PLANE");
     } finally {
       db.close();
     }

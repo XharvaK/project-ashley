@@ -17,6 +17,18 @@ export type OperationalJobStatus =
   | "deadline_exceeded"
   | "outcome_unknown";
 
+export type OperationalJobPhase = "cognition_pending" | "execution_admitted" | "terminal";
+
+export type OperationalCognitionState =
+  | "not_required"
+  | "pending"
+  | "running"
+  | "waiting_retry"
+  | "succeeded"
+  | "failed"
+  | "expired"
+  | "cancelled";
+
 export type OperationalJobRow = {
   jobId: string;
   ownerId: string;
@@ -26,6 +38,15 @@ export type OperationalJobRow = {
   boundedOperationTaskId: string | null;
   projectId: string | null;
   status: OperationalJobStatus;
+  jobPhase: OperationalJobPhase;
+  cognitionState: OperationalCognitionState;
+  thoughtAttemptCount: number;
+  nextThoughtAttemptAtMs: number | null;
+  lastThoughtErrorClass: string | null;
+  cognitionExpiresAtMs: number | null;
+  normalizedThoughtJson: string | null;
+  normalizedThoughtSchemaVersion: number | null;
+  thoughtAttentionRequestId: number | null;
   cancelRequested: boolean;
   currentStepIndex: number;
   lifetimeExpiresAtMs: number;
@@ -69,6 +90,29 @@ function mapRow(row: Record<string, unknown>): OperationalJobRow {
         : String(row.bounded_operation_task_id),
     projectId: row.project_id == null ? null : String(row.project_id),
     status: String(row.status) as OperationalJobStatus,
+    jobPhase: String(row.job_phase ?? "execution_admitted") as OperationalJobPhase,
+    cognitionState: String(
+      row.cognition_state ?? "not_required",
+    ) as OperationalCognitionState,
+    thoughtAttemptCount: Number(row.thought_attempt_count ?? 0),
+    nextThoughtAttemptAtMs:
+      row.next_thought_attempt_at_ms == null
+        ? null
+        : Number(row.next_thought_attempt_at_ms),
+    lastThoughtErrorClass:
+      row.last_thought_error_class == null ? null : String(row.last_thought_error_class),
+    cognitionExpiresAtMs:
+      row.cognition_expires_at_ms == null ? null : Number(row.cognition_expires_at_ms),
+    normalizedThoughtJson:
+      row.normalized_thought_json == null ? null : String(row.normalized_thought_json),
+    normalizedThoughtSchemaVersion:
+      row.normalized_thought_schema_version == null
+        ? null
+        : Number(row.normalized_thought_schema_version),
+    thoughtAttentionRequestId:
+      row.thought_attention_request_id == null
+        ? null
+        : Number(row.thought_attention_request_id),
     cancelRequested: Number(row.cancel_requested) === 1,
     currentStepIndex: Number(row.current_step_index),
     lifetimeExpiresAtMs: Number(row.lifetime_expires_at_ms),
@@ -150,6 +194,47 @@ export function insertAdmittedOperationalJob(
   return row;
 }
 
+export function insertCognitionPendingOperationalJob(
+  db: DatabaseSync,
+  input: {
+    ownerId: string;
+    sourceMessageEntityUuid: string;
+    sourceUserMessageId: number | null;
+    admissionReservationId: number;
+    cognitionExpiresAtMs: number;
+    lifetimeExpiresAtMs: number;
+    jobId?: string;
+  },
+): OperationalJobRow {
+  const createdAt = nowIso();
+  const jobId = input.jobId ?? mintJobId();
+  db.prepare(
+    `INSERT INTO operational_jobs (
+       entity_uuid, data_classification, job_id, owner_id, source_message_entity_uuid,
+       source_user_message_id, admission_reservation_id, bounded_operation_task_id,
+       project_id, status, job_phase, cognition_state, thought_attempt_count,
+       cognition_expires_at_ms, cancel_requested, current_step_index,
+       lifetime_expires_at_ms, runner_lease_generation, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, 'admitted', 'cognition_pending',
+       'pending', 0, ?, 0, 0, ?, 0, ?, ?)`,
+  ).run(
+    newEntityUuid(),
+    defaultUnclassifiedConversational(),
+    jobId,
+    input.ownerId,
+    input.sourceMessageEntityUuid,
+    input.sourceUserMessageId,
+    input.admissionReservationId,
+    input.cognitionExpiresAtMs,
+    input.lifetimeExpiresAtMs,
+    createdAt,
+    createdAt,
+  );
+  const row = getOperationalJob(db, jobId);
+  if (!row) throw new Error("operational_job_insert_lost");
+  return row;
+}
+
 export function requestOperationalJobCancel(db: DatabaseSync, jobId: string): boolean {
   const result = db
     .prepare(
@@ -202,6 +287,8 @@ export function findClaimableOperationalJob(
       `SELECT * FROM operational_jobs
         WHERE status IN ('admitted', 'running')
           AND cancel_requested = 0
+          AND bounded_operation_task_id IS NOT NULL
+          AND IFNULL(job_phase, 'execution_admitted') = 'execution_admitted'
           AND (status = 'admitted'
                OR runner_owner_token IS NULL
                OR runner_lease_until_ms IS NULL
@@ -448,4 +535,255 @@ export function listOperationalJobsForOwner(
     )
     .all(ownerId) as Array<Record<string, unknown>>;
   return rows.map(mapRow);
+}
+
+export function findClaimableCognitionJob(
+  db: DatabaseSync,
+  nowMs: number,
+): OperationalJobRow | null {
+  const row = db
+    .prepare(
+      `SELECT * FROM operational_jobs
+        WHERE job_phase = 'cognition_pending'
+          AND cognition_state IN ('pending', 'waiting_retry')
+          AND cancel_requested = 0
+          AND bounded_operation_task_id IS NULL
+          AND (cognition_expires_at_ms IS NULL OR cognition_expires_at_ms > ?)
+          AND (cognition_state = 'pending'
+               OR next_thought_attempt_at_ms IS NULL
+               OR next_thought_attempt_at_ms <= ?)
+          AND (runner_owner_token IS NULL
+               OR runner_lease_until_ms IS NULL
+               OR runner_lease_until_ms < ?)
+        ORDER BY created_at ASC
+        LIMIT 1`,
+    )
+    .get(nowMs, nowMs, nowMs) as Record<string, unknown> | undefined;
+  return row ? mapRow(row) : null;
+}
+
+export function claimCognitionJob(
+  db: DatabaseSync,
+  jobId: string,
+  nowMs: number,
+  leaseMs: number = LEASE_MS,
+): ClaimResult {
+  const token = mintToken();
+  const until = nowMs + leaseMs;
+  const result = db
+    .prepare(
+      `UPDATE operational_jobs
+          SET runner_owner_token = ?,
+              runner_lease_generation = runner_lease_generation + 1,
+              runner_lease_until_ms = ?,
+              cognition_state = 'running',
+              thought_attempt_count = thought_attempt_count + 1,
+              updated_at = ?
+        WHERE job_id = ?
+          AND job_phase = 'cognition_pending'
+          AND cognition_state IN ('pending', 'waiting_retry')
+          AND cancel_requested = 0
+          AND bounded_operation_task_id IS NULL
+          AND (runner_owner_token IS NULL OR runner_lease_until_ms IS NULL OR runner_lease_until_ms < ?)`,
+    )
+    .run(token, until, nowIso(), jobId, nowMs);
+  if (result.changes !== 1) return { ok: false };
+  const job = getOperationalJob(db, jobId);
+  if (!job || job.runnerOwnerToken !== token) return { ok: false };
+  return { ok: true, job, token, generation: job.runnerLeaseGeneration };
+}
+
+export function persistNormalizedThought(
+  db: DatabaseSync,
+  input: {
+    jobId: string;
+    token: string;
+    generation: number;
+    json: string;
+    schemaVersion: number;
+    attentionRequestId: number | null;
+  },
+): boolean {
+  const result = db
+    .prepare(
+      `UPDATE operational_jobs
+          SET normalized_thought_json = ?,
+              normalized_thought_schema_version = ?,
+              thought_attention_request_id = ?,
+              cognition_state = 'succeeded',
+              runner_owner_token = NULL,
+              updated_at = ?
+        WHERE job_id = ?
+          AND runner_owner_token = ?
+          AND runner_lease_generation = ?
+          AND job_phase = 'cognition_pending'
+          AND bounded_operation_task_id IS NULL`,
+    )
+    .run(
+      input.json,
+      input.schemaVersion,
+      input.attentionRequestId,
+      nowIso(),
+      input.jobId,
+      input.token,
+      input.generation,
+    );
+  return result.changes === 1;
+}
+
+export function scheduleCognitionRetry(
+  db: DatabaseSync,
+  input: {
+    jobId: string;
+    token: string;
+    generation: number;
+    nextAttemptAtMs: number;
+    errorClass: string;
+  },
+): boolean {
+  const result = db
+    .prepare(
+      `UPDATE operational_jobs
+          SET cognition_state = 'waiting_retry',
+              next_thought_attempt_at_ms = ?,
+              last_thought_error_class = ?,
+              runner_owner_token = NULL,
+              updated_at = ?
+        WHERE job_id = ?
+          AND runner_owner_token = ?
+          AND runner_lease_generation = ?
+          AND job_phase = 'cognition_pending'`,
+    )
+    .run(
+      input.nextAttemptAtMs,
+      input.errorClass,
+      nowIso(),
+      input.jobId,
+      input.token,
+      input.generation,
+    );
+  return result.changes === 1;
+}
+
+export function attachBoundedOperationToCognitionJob(
+  db: DatabaseSync,
+  input: {
+    jobId: string;
+    boundedOperationTaskId: string;
+    projectId: string;
+    lifetimeExpiresAtMs: number;
+  },
+): boolean {
+  const result = db
+    .prepare(
+      `UPDATE operational_jobs
+          SET bounded_operation_task_id = ?,
+              project_id = ?,
+              job_phase = 'execution_admitted',
+              cognition_state = 'succeeded',
+              lifetime_expires_at_ms = ?,
+              runner_owner_token = NULL,
+              updated_at = ?
+        WHERE job_id = ?
+          AND job_phase = 'cognition_pending'
+          AND bounded_operation_task_id IS NULL
+          AND cancel_requested = 0`,
+    )
+    .run(
+      input.boundedOperationTaskId,
+      input.projectId,
+      input.lifetimeExpiresAtMs,
+      nowIso(),
+      input.jobId,
+    );
+  return result.changes === 1;
+}
+
+export function terminalizeCognitionJob(
+  db: DatabaseSync,
+  input: {
+    jobId: string;
+    status: Exclude<OperationalJobStatus, "admitted" | "running">;
+    cognitionState: Exclude<
+      OperationalCognitionState,
+      "pending" | "running" | "waiting_retry" | "not_required"
+    >;
+    stopReason: string;
+    token?: string;
+    generation?: number;
+  },
+): boolean {
+  const result = db
+    .prepare(
+      `UPDATE operational_jobs
+          SET status = ?,
+              job_phase = 'terminal',
+              cognition_state = ?,
+              stop_reason = ?,
+              runner_owner_token = NULL,
+              updated_at = ?
+        WHERE job_id = ?
+          AND job_phase = 'cognition_pending'
+          AND bounded_operation_task_id IS NULL
+          AND (? IS NULL OR (runner_owner_token = ? AND runner_lease_generation = ?))`,
+    )
+    .run(
+      input.status,
+      input.cognitionState,
+      input.stopReason,
+      nowIso(),
+      input.jobId,
+      input.token ?? null,
+      input.token ?? null,
+      input.generation ?? 0,
+    );
+  return result.changes === 1;
+}
+
+export function recordThoughtAttentionRequest(
+  db: DatabaseSync,
+  input: { jobId: string; attentionRequestId: number },
+): boolean {
+  const result = db
+    .prepare(
+      `UPDATE operational_jobs
+          SET thought_attention_request_id = ?, updated_at = ?
+        WHERE job_id = ? AND job_phase = 'cognition_pending'`,
+    )
+    .run(input.attentionRequestId, nowIso(), input.jobId);
+  return result.changes === 1;
+}
+
+export function listExpiredCognitionJobs(
+  db: DatabaseSync,
+  nowMs: number,
+): OperationalJobRow[] {
+  const rows = db
+    .prepare(
+      `SELECT * FROM operational_jobs
+        WHERE job_phase = 'cognition_pending'
+          AND cognition_state IN ('pending', 'waiting_retry', 'running')
+          AND cognition_expires_at_ms IS NOT NULL
+          AND cognition_expires_at_ms <= ?`,
+    )
+    .all(nowMs) as Array<Record<string, unknown>>;
+  return rows.map(mapRow);
+}
+
+export function findCognitionJobAwaitingAttach(
+  db: DatabaseSync,
+): OperationalJobRow | null {
+  const row = db
+    .prepare(
+      `SELECT * FROM operational_jobs
+        WHERE job_phase = 'cognition_pending'
+          AND cognition_state = 'succeeded'
+          AND normalized_thought_json IS NOT NULL
+          AND bounded_operation_task_id IS NULL
+          AND cancel_requested = 0
+        ORDER BY created_at ASC
+        LIMIT 1`,
+    )
+    .get() as Record<string, unknown> | undefined;
+  return row ? mapRow(row) : null;
 }

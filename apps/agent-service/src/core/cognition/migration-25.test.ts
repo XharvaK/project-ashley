@@ -94,8 +94,8 @@ describe("nuclear schema v25 INIT-03 ordering metadata", () => {
   it("adds durable accepted-dispatch provenance and OCI generation order", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     try {
-      expect(NUCLEAR_SUPPORTED_VERSION).toBe(33);
-      expect(schemaVersion(db)).toBe(33);
+      expect(NUCLEAR_SUPPORTED_VERSION).toBe(34);
+      expect(schemaVersion(db)).toBe(34);
       const attentionColumns = columnNames(db, "attention_requests");
       expect(attentionColumns.has("accepted_contract_id")).toBe(true);
       expect(attentionColumns.has("accepted_build_identity")).toBe(true);
@@ -186,7 +186,7 @@ describe("nuclear schema v25 INIT-03 ordering metadata", () => {
       }
 
       openNuclearDb(fixture.nuclear, { continuity: fixture.continuity });
-      expect(schemaVersion(fixture.nuclear)).toBe(33);
+      expect(schemaVersion(fixture.nuclear)).toBe(34);
       expect(getPendingNuclearMigration(fixture.continuity)).toBeNull();
       expect(
         (
@@ -194,7 +194,7 @@ describe("nuclear schema v25 INIT-03 ordering metadata", () => {
             .prepare("SELECT nuclear_schema_version FROM lineage_state WHERE id = 1")
             .get() as { nuclear_schema_version: number }
       ).nuclear_schema_version,
-    ).toBe(33);
+    ).toBe(34);
     } finally {
       closeFixture(fixture);
     }

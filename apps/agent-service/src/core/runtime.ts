@@ -224,6 +224,7 @@ import {
   admitDurableBoundedOperation,
   durableJobStatusSnapshot,
 } from "./sandbox/durable-job-runner.js";
+import { admitDurableCognitionEnvelope } from "./sandbox/durable-cognition.js";
 import { executePatchExportV2 } from "./sandbox/patch-export-execution.js";
 import { canOfferProjectInspection, canOfferCandidateWorkspace, canOfferCandidateVerification, canOfferCandidateAuthorship, canOfferBoundedOperation, canOfferPatchExport, loadOperatorProjectReadRegistry } from "./sandbox/project-registry.js";
 import { shouldRunProactiveModelThought } from "./agency/proactive-thought-gate.js";
@@ -855,6 +856,42 @@ export class AshleyCore {
       // even for otherwise-easy turns. Capability-driven admission, not a
       // phrase detector. Deadline-branch availability is a later runtime gate.
       if (complexity.mode === "hard" || inspectionOffered) {
+        if (
+          env.durableBoundedOperationEnabled &&
+          env.durableOperationalThoughtEnabled &&
+          decision.kind !== "silence" &&
+          canOfferBoundedOperation(this.db)
+        ) {
+          const begun = admitDurableCognitionEnvelope(this.db, {
+            ownerId: input.ownerId,
+            sourceMessageEntityUuid: messageEntityUuid ?? "",
+            sourceUserMessageId: userMessageId ?? null,
+            admissionReservationId: reservation.id,
+            nowMs: Date.now(),
+            messageText: message,
+            boundedOperationOffered: true,
+            durableOperationEnabled: true,
+            durableThoughtEnabled: true,
+          });
+          if (begun.admitted) {
+            const finalized = finalizeDelivery(this.db, {
+              reservationId: reservation.id,
+              ownerId: input.ownerId,
+              cause: "complete",
+              ownTimeOpen,
+            });
+            return {
+              text: begun.ackText,
+              threadId: reservation.threadId,
+              model: "none",
+              decisionId: reservation.decisionId ?? 0,
+              decisionKind: "speak",
+              silenced: false,
+              reservationId: reservation.id,
+              deliveryState: finalized.state,
+            };
+          }
+        }
         if (signal.aborted) {
           const finalized = finalizeDelivery(this.db, {
             reservationId: reservation.id,
