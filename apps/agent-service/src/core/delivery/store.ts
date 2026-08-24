@@ -40,6 +40,11 @@ export function mapReservation(row: unknown): DeliveryReservationRow | null {
   if (!isRow(row)) return null;
   const trigger = text(row.trigger);
   const state = text(row.state);
+  const lane = text(row.delivery_lane);
+  const deliveryLane: DeliveryReservationRow["deliveryLane"] =
+    lane === "proactive" || lane === "operational_fulfillment"
+      ? lane
+      : "reactive";
   if (trigger !== "reactive" && trigger !== "proactive") return null;
   return {
     id: Number(row.id),
@@ -49,6 +54,7 @@ export function mapReservation(row: unknown): DeliveryReservationRow | null {
     userMessageId: num(row.user_message_id),
     decisionId: num(row.decision_id),
     trigger,
+    deliveryLane,
     initiativeReservationId: num(row.initiative_reservation_id),
     state: state as DeliveryReservationRow["state"],
     errorCategory: row.error_category == null ? null : text(row.error_category),
@@ -187,11 +193,11 @@ export function claimReactiveDelivery(
       .prepare(
         `INSERT INTO delivery_reservations
            (owner_id, channel, thread_id, user_message_id, decision_id, trigger,
-            initiative_reservation_id, state, error_category, finalization_reason,
+            delivery_lane, initiative_reservation_id, state, error_category, finalization_reason,
             draft_text, first_bubble_deadline_at, first_sent_at,
             generation_lease_expires_at, delivery_lease_expires_at,
             created_at, finalized_at)
-         VALUES (?, ?, ?, NULL, NULL, 'reactive', NULL, 'drafted', NULL, NULL,
+         VALUES (?, ?, ?, NULL, NULL, 'reactive', 'reactive', NULL, 'drafted', NULL, NULL,
                  NULL, ?, NULL, ?, NULL, ?, NULL)`,
       )
       .run(
@@ -476,11 +482,11 @@ export function claimProactiveDeliveryInTransaction(
     .prepare(
       `INSERT INTO delivery_reservations
          (owner_id, channel, thread_id, user_message_id, decision_id, trigger,
-          initiative_reservation_id, state, error_category, finalization_reason,
+          delivery_lane, initiative_reservation_id, state, error_category, finalization_reason,
           draft_text, first_bubble_deadline_at, first_sent_at,
           generation_lease_expires_at, delivery_lease_expires_at,
           created_at, finalized_at)
-       VALUES (?, ?, ?, NULL, ?, 'proactive', ?, 'reserved', NULL, NULL,
+       VALUES (?, ?, ?, NULL, ?, 'proactive', 'proactive', ?, 'reserved', NULL, NULL,
                ?, NULL, NULL, NULL, ?, ?, NULL)`,
     )
     .run(
@@ -522,4 +528,79 @@ export function claimProactiveDelivery(
   }
 }
 
+export type ClaimOperationalFulfillmentDeliveryInput = {
+  ownerId: string;
+  channel: string;
+  threadId: string;
+  draftText: string;
+  bubbles: Array<{ ordinal: number; text: string }>;
+  deliveryLeaseMs?: number;
+  nowMs?: number;
+};
+
+/**
+ * Inserts an operational fulfillment delivery reservation inside the caller's transaction.
+ * The caller must already own the transaction and must roll it back on error.
+ * Satisfies the trigger column constraint by using trigger = 'proactive' while setting
+ * delivery_lane = 'operational_fulfillment' and decision_id = NULL / initiative_reservation_id = NULL.
+ */
+export function claimOperationalFulfillmentDeliveryInTransaction(
+  db: DatabaseSync,
+  input: ClaimOperationalFulfillmentDeliveryInput,
+): DeliveryReservationRow {
+  assertWritebackAllowed("delivery_claim_operational_fulfillment");
+  const nowMs = input.nowMs ?? Date.now();
+  const nowIso = new Date(nowMs).toISOString();
+  const leaseIso = new Date(
+    nowMs + (input.deliveryLeaseMs ?? 120_000),
+  ).toISOString();
+  const insert = db
+    .prepare(
+      `INSERT INTO delivery_reservations
+         (owner_id, channel, thread_id, user_message_id, decision_id, trigger,
+          delivery_lane, initiative_reservation_id, state, error_category, finalization_reason,
+          draft_text, first_bubble_deadline_at, first_sent_at,
+          generation_lease_expires_at, delivery_lease_expires_at,
+          created_at, finalized_at)
+       VALUES (?, ?, ?, NULL, NULL, 'proactive', 'operational_fulfillment', NULL, 'reserved', NULL, NULL,
+               ?, NULL, NULL, NULL, ?, ?, NULL)`,
+    )
+    .run(
+      input.ownerId,
+      input.channel,
+      input.threadId,
+      input.draftText,
+      leaseIso,
+      nowIso,
+    );
+  const reservationId = Number(insert.lastInsertRowid);
+  const insertBubble = db.prepare(
+    `INSERT INTO delivery_bubbles
+       (reservation_id, ordinal, text, discord_message_id, sent_at)
+     VALUES (?, ?, ?, NULL, NULL)`,
+  );
+  for (const bubble of input.bubbles) {
+    insertBubble.run(reservationId, bubble.ordinal, bubble.text);
+  }
+  const reservation = getDeliveryReservation(db, reservationId);
+  if (!reservation) throw new Error("operational_fulfillment_delivery_claim_lost");
+  return reservation;
+}
+
+export function claimOperationalFulfillmentDelivery(
+  db: DatabaseSync,
+  input: ClaimOperationalFulfillmentDeliveryInput,
+): DeliveryReservationRow {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const reservation = claimOperationalFulfillmentDeliveryInTransaction(db, input);
+    db.exec("COMMIT");
+    return reservation;
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
 export type { DeliveryTrigger };
+

@@ -1042,9 +1042,10 @@ export function createServer(
   app.get("/delivery/pending", (req, res) => {
     try {
       const ownerId = String(req.query.owner_id ?? "");
+      const lane = typeof req.query.lane === "string" ? req.query.lane : undefined;
       const owner = requireOwner(ownerId || undefined);
       res.json({
-        deliveries: manager.core.getPendingWeeklyReviewDeliveries(owner),
+        deliveries: manager.core.getPendingDeliveries(owner, { lane }),
       });
     } catch (err) {
       const { status, body } = toErrorResponse(err);

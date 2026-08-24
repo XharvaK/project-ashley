@@ -1,5 +1,7 @@
 export type DeliveryTrigger = "reactive" | "proactive";
 
+export type DeliveryLane = "reactive" | "proactive" | "operational_fulfillment";
+
 export type DeliveryState =
   | "drafted"
   | "reserved"
@@ -38,6 +40,7 @@ export type DeliveryReservationRow = {
   userMessageId: number | null;
   decisionId: number | null;
   trigger: DeliveryTrigger;
+  deliveryLane: DeliveryLane;
   initiativeReservationId: number | null;
   state: DeliveryState;
   errorCategory: string | null;

@@ -70,8 +70,8 @@ describe("nuclear schema v27 sandbox task admissions", () => {
   it("installs the admission ledger with zero rows and no auto admission", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     try {
-      expect(NUCLEAR_SUPPORTED_VERSION).toBe(34);
-      expect(schemaVersion(db)).toBe(34);
+      expect(NUCLEAR_SUPPORTED_VERSION).toBe(35);
+      expect(schemaVersion(db)).toBe(35);
       expect(
         (
           db.prepare(
@@ -167,7 +167,7 @@ describe("nuclear schema v27 sandbox task admissions", () => {
           }
         ).c,
       ).toBe(0);
-      expect(schemaVersion(db)).toBe(34);
+      expect(schemaVersion(db)).toBe(35);
     } finally {
       db.close();
     }
@@ -181,7 +181,7 @@ describe("nuclear schema v27 sandbox task admissions", () => {
       const reopen = openNuclearDb(fixture.nuclear, {
         continuity: fixture.continuity,
       });
-      expect(schemaVersion(reopen)).toBe(34);
+      expect(schemaVersion(reopen)).toBe(35);
       expect(
         (
           reopen.prepare(

@@ -205,7 +205,7 @@ export function finalizeDelivery(
       });
     }
 
-    if (reservation.trigger === "proactive" && receiptCount > 0) {
+    if (reservation.deliveryLane === "proactive" && receiptCount > 0) {
       const initiativeId = reservation.initiativeReservationId;
       if (initiativeId != null) {
         const firstDiscordId = receipted[0]?.discordMessageId ?? null;
@@ -218,7 +218,7 @@ export function finalizeDelivery(
       }
     }
 
-    if (reservation.trigger === "proactive" && receiptCount === 0) {
+    if (reservation.deliveryLane === "proactive" && receiptCount === 0) {
       const initiativeId = reservation.initiativeReservationId;
       if (initiativeId != null) {
         db.prepare(

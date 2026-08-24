@@ -2066,11 +2066,22 @@ export class AshleyCore {
     };
   }
 
-  getPendingWeeklyReviewDeliveries(ownerId: string) {
+  getPendingDeliveries(ownerId: string, options: { lane?: string } = {}) {
+    const lane = options.lane?.trim();
+    if (lane === "operational_fulfillment") {
+      return listPendingOperationalCompletionDeliveries(this.db, ownerId);
+    }
+    if (lane === "weekly_review" || lane === "proactive") {
+      return listPendingWeeklyReviewDeliveries(this.db, ownerId);
+    }
     return [
       ...listPendingWeeklyReviewDeliveries(this.db, ownerId),
       ...listPendingOperationalCompletionDeliveries(this.db, ownerId),
     ];
+  }
+
+  getPendingWeeklyReviewDeliveries(ownerId: string) {
+    return listPendingWeeklyReviewDeliveries(this.db, ownerId);
   }
 
   getEngineeringStatus(ownerId: string) {

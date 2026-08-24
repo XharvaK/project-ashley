@@ -89,6 +89,10 @@ import {
   MIGRATION_34_DURABLE_COGNITION_DDL,
 } from "./sandbox/migration-34.js";
 import {
+  ensureNuclearV35Schema,
+  MIGRATION_35_DELIVERY_LANE_DDL,
+} from "./sandbox/migration-35.js";
+import {
   continuityGeneration,
   durableSemanticKeyHash,
   semanticIdentityHash,
@@ -98,7 +102,7 @@ import { currentBuildIdentity } from "./rollout/capabilities.js";
 
 export { reservedProductionNuclearDbPath as NUCLEAR_DB_PATH };
 
-export const NUCLEAR_SUPPORTED_VERSION = 34;
+export const NUCLEAR_SUPPORTED_VERSION = 35;
 
 export type NuclearMigrationTestFault =
   | "before_pending"
@@ -1123,7 +1127,10 @@ function reconcilePendingNuclearMigration(
     (pending.from !== 28 || pending.to !== 29) &&
     (pending.from !== 29 || pending.to !== 30) &&
     (pending.from !== 30 || pending.to !== 31) &&
-    (pending.from !== 31 || pending.to !== 32)
+    (pending.from !== 31 || pending.to !== 32) &&
+    (pending.from !== 32 || pending.to !== 33) &&
+    (pending.from !== 33 || pending.to !== 34) &&
+    (pending.from !== 34 || pending.to !== 35)
   ) {
     throw new Error("continuity_pending_migration_unsupported");
   }
@@ -1144,14 +1151,14 @@ function reconcilePendingNuclearMigration(
     buildIdentity: pending.buildIdentity,
   };
   if (actualVersion === pending.from) {
-    validateNuclearSchemaContent(db, pending.from as 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34, {
+    validateNuclearSchemaContent(db, pending.from as 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35, {
       rejectNewerContent: true,
     });
     rollbackNuclearMigration(continuity, descriptor);
     return;
   }
   if (actualVersion === pending.to) {
-    validateNuclearSchemaContent(db, pending.to as 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34, {
+    validateNuclearSchemaContent(db, pending.to as 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35, {
       rejectNewerContent: true,
     });
     finalizeNuclearMigration(continuity, descriptor, "recovered");
@@ -1263,13 +1270,15 @@ function migrateNuclearSchemaWithProtocol(input: {
       ensureNuclearV33Schema(db);
     } else if (targetVersion === 34) {
       ensureNuclearV34Schema(db);
+    } else if (targetVersion === 35) {
+      ensureNuclearV35Schema(db);
     } else {
       db.exec(ddl);
     }
     db.exec(`PRAGMA user_version = ${targetVersion}`);
     validateNuclearSchemaContent(
       db,
-      targetVersion as 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34,
+      targetVersion as 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35,
     );
     const fk = db.prepare("PRAGMA foreign_key_check").all();
     if (fk.length > 0) throw new Error("nuclear_fk_check_failed");
@@ -1368,7 +1377,7 @@ export function migrate(
       throw err;
     }
     if (version >= 25 && version <= NUCLEAR_SUPPORTED_VERSION) {
-      validateNuclearSchemaContent(db, version as 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34);
+      validateNuclearSchemaContent(db, version as 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35);
     }
     return;
   }
@@ -2838,10 +2847,36 @@ export function migrate(
         options.testFailAfterNuclearCommitBeforeContinuityFinalization,
     });
   }
+  if (userVersion(db) < 35) {
+    const continuity = options.continuity;
+    const priorVersion = userVersion(db);
+    const lineageId = nuclearLineageMirrorId(db);
+    if (!continuity && !options.skipContinuityRequirement) {
+      throw new Error("continuity_unavailable");
+    }
+    migrateNuclearSchemaWithProtocol({
+      db,
+      continuity: continuity && lineageId ? continuity : undefined,
+      targetVersion: 35,
+      descriptor:
+        continuity && lineageId
+          ? {
+              from: priorVersion,
+              to: 35,
+              lineageId,
+              buildIdentity: currentBuildIdentity(),
+            }
+          : undefined,
+      ddl: MIGRATION_35_DELIVERY_LANE_DDL,
+      testMigrationFault: options.testMigrationFault,
+      testFailAfterNuclearCommitBeforeContinuityFinalization:
+        options.testFailAfterNuclearCommitBeforeContinuityFinalization,
+    });
+  }
   if (userVersion(db) >= 25) {
     validateNuclearSchemaContent(
       db,
-      userVersion(db) as 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34,
+      userVersion(db) as 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35,
     );
   }
   if (!options.skipContinuityRequirement && userVersion(db) >= 15) {

@@ -129,7 +129,17 @@ export type PendingWeeklyReviewDelivery = {
 };
 
 export async function listPendingWeeklyReviewDeliveries() {
-  const q = new URLSearchParams({ owner_id: config.ownerId });
+  const q = new URLSearchParams({ owner_id: config.ownerId, lane: "weekly_review" });
+  return agentFetch<{ deliveries: PendingWeeklyReviewDelivery[] }>(
+    `/delivery/pending?${q}`,
+  );
+}
+
+export async function listPendingOperationalDeliveries() {
+  const q = new URLSearchParams({
+    owner_id: config.ownerId,
+    lane: "operational_fulfillment",
+  });
   return agentFetch<{ deliveries: PendingWeeklyReviewDelivery[] }>(
     `/delivery/pending?${q}`,
   );

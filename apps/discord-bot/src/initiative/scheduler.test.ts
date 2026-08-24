@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import type { AgentManager } from "../../../agent-service/src/agent.js";
 import { AshleyCore } from "../../../agent-service/src/core/runtime.js";
+import { openNuclearDb } from "../../../agent-service/src/core/db.js";
 import { env as agentEnv } from "../../../agent-service/src/env.js";
 import { createServer } from "../../../agent-service/src/server.js";
 import {
@@ -112,7 +113,7 @@ async function runLocalSchedulerFixture(
   size: number,
   options: { deferred?: boolean; reviewDue?: boolean } = {},
 ) {
-  const db = new DatabaseSync(":memory:");
+  const db = openNuclearDb(new DatabaseSync(":memory:"));
   const core = new AshleyCore(db, { sandboxBrokerTransport: null });
   seedSchedulerInventory(db, size, options);
   const metrics = instrumentSchedulerQueries(db);

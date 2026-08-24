@@ -892,9 +892,31 @@ function requireNoV34Columns(db: DatabaseSync, version: number): void {
   }
 }
 
+const V35_COLUMNS: Record<string, ColumnSpec[]> = {
+  delivery_reservations: [
+    { name: "delivery_lane", notNull: true, defaultValue: "'reactive'" },
+  ],
+};
+
+const V35_INDEXES: IndexSpec[] = [
+  {
+    table: "delivery_reservations",
+    name: "idx_delivery_reservations_lane",
+    columns: ["owner_id", "delivery_lane", "state", "id"],
+  },
+];
+
+function requireNoV35Columns(db: DatabaseSync, version: number): void {
+  for (const column of V35_COLUMNS.delivery_reservations ?? []) {
+    if (tableInfo(db, "delivery_reservations").some((row) => row.name === column.name)) {
+      fail(version, `unexpected_v35_column:${column.name}`);
+    }
+  }
+}
+
 export function validateNuclearSchemaContent(
   db: DatabaseSync,
-  version: 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34,
+  version: 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35,
   options: { rejectNewerContent?: boolean } = {},
 ): void {
   if (version === 22) {
@@ -1015,6 +1037,15 @@ export function validateNuclearSchemaContent(
   for (const [table, columns] of Object.entries(V34_COLUMNS)) {
     requireColumns(db, version, table, columns);
   }
+  if (version === 34 && options.rejectNewerContent === true) {
+    requireNoV35Columns(db, version);
+    return;
+  }
+  if (version === 34) return;
+  for (const [table, columns] of Object.entries(V35_COLUMNS)) {
+    requireColumns(db, version, table, columns);
+  }
+  for (const index of V35_INDEXES) requireIndex(db, version, index);
 }
 
 function addColumnIfMissing(

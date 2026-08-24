@@ -40,8 +40,8 @@ describe("nuclear schema v29 phase lifecycle telemetry", () => {
   it("installs Migration 29 on fresh databases", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     try {
-      expect(NUCLEAR_SUPPORTED_VERSION).toBe(34);
-      expect(schemaVersion(db)).toBe(34);
+      expect(NUCLEAR_SUPPORTED_VERSION).toBe(35);
+      expect(schemaVersion(db)).toBe(35);
       expect(
         columnExists(db, "delivery_reservations", "phase_lifecycle_json"),
       ).toBe(true);
@@ -91,7 +91,7 @@ describe("nuclear schema v29 phase lifecycle telemetry", () => {
       });
       openNuclearDb(nuclear, { continuity });
 
-      expect(schemaVersion(nuclear)).toBe(34);
+      expect(schemaVersion(nuclear)).toBe(35);
       expect(getPendingNuclearMigration(continuity)).toBeNull();
       const historical = getDeliveryReservation(nuclear, claim.reservation.id);
       expect(historical?.phaseLifecycle).toBeNull();
