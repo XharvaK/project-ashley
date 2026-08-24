@@ -438,6 +438,19 @@ export async function tickDurableCognition(ctx: DurableCognitionContext): Promis
     });
   }
 
+  if (result.kind === "error" && result.code === "missing_source_message") {
+    terminalizeCognitionJob(ctx.db, {
+      jobId: job.jobId,
+      status: "failed",
+      cognitionState: "failed",
+      stopReason: "missing_source_message",
+      token: claimed.token,
+      generation: claimed.generation,
+    });
+    enqueueCompletion(ctx.db, job.jobId);
+    return;
+  }
+
   if (result.kind === "ok") {
     persistNormalizedThought(ctx.db, {
       jobId: job.jobId,

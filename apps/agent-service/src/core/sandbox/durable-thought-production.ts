@@ -1,20 +1,30 @@
 /**
  * Production durable-cognition Thought driver.
- * Wires cognition_pending jobs to the same Attention / Initial Thought path
- * as a reactive turn. Grants no extra effect authority.
+ *
+ * Same owner-reactive Thought path as a live Discord turn:
+ * stored source message → collectMotivations → decide → deliberateDecision.
+ * Grants no extra effect authority. Does not attach M6.
  */
-import type { DatabaseSync } from "node:sqlite";
+import { completeChat } from "../../mistral-client.js";
 import { capabilityCanInfluence } from "../rollout/capabilities.js";
 import { collectMotivations } from "../agency/motivations.js";
 import { decide } from "../agency/decide.js";
 import { buildOwnTimeReportConstraint } from "../agency/own-time-report.js";
-import { deliberateDecision } from "../agency/thought.js";
+import {
+  deliberateDecision,
+  type Complete,
+  type CapabilityGate,
+} from "../agency/thought.js";
 import type { Decision } from "../types.js";
-import type {
-  NormalizedDurableThought,
-  RunDurableThought,
+import type { DatabaseSync } from "node:sqlite";
+import {
+  DURABLE_COGNITION_LIFETIME_MS,
+  type NormalizedDurableThought,
+  type RunDurableThought,
 } from "./durable-cognition.js";
 import type { OperationalJobRow } from "./operational-job-store.js";
+
+export const MISSING_SOURCE_MESSAGE = "missing_source_message";
 
 const TRANSPORT_THOUGHT_CODES = new Set([
   "AbortError",
@@ -60,115 +70,137 @@ export function mapDecisionToNormalizedDurableThought(
   };
 }
 
-function loadSourceMessageText(db: DatabaseSync, job: OperationalJobRow): string {
-  if (job.sourceUserMessageId != null) {
-    const byId = db
-      .prepare(`SELECT text FROM mem_messages WHERE id = ?`)
-      .get(job.sourceUserMessageId) as { text?: string } | undefined;
-    if (typeof byId?.text === "string" && byId.text.trim()) return byId.text;
-  }
-  try {
-    const byUuid = db
-      .prepare(`SELECT text FROM mem_messages WHERE entity_uuid = ?`)
-      .get(job.sourceMessageEntityUuid) as { text?: string } | undefined;
-    if (typeof byUuid?.text === "string" && byUuid.text.trim()) return byUuid.text;
-  } catch {
-    /* entity_uuid may be absent on older local fixtures */
-  }
-  return "";
+export function thoughtDeadlineAtMsForJob(
+  job: OperationalJobRow,
+  nowMs: number,
+): number {
+  const expiresAtMs =
+    job.cognitionExpiresAtMs ?? nowMs + DURABLE_COGNITION_LIFETIME_MS;
+  const remainingMs = expiresAtMs - nowMs;
+  if (remainingMs <= 0) return Date.now();
+  return Date.now() + remainingMs;
 }
 
-function latestThoughtAttentionRequestId(
+export function loadCanonicalSourceMessage(
   db: DatabaseSync,
   job: OperationalJobRow,
-): number | null {
+): { text: string; messageId: number | null } | null {
+  const uuid = job.sourceMessageEntityUuid?.trim();
+  if (!uuid) return null;
   try {
     const row = db
       .prepare(
-        `SELECT id FROM attention_requests
-          WHERE purpose = 'thought'
-            AND (owner_id = ? OR owner_id IS NULL)
-            AND (delivery_reservation_id = ? OR delivery_reservation_id IS NULL)
-          ORDER BY id DESC LIMIT 1`,
+        `SELECT id, text, owner_id FROM mem_messages WHERE entity_uuid = ? LIMIT 1`,
       )
-      .get(job.ownerId, job.admissionReservationId) as { id?: number } | undefined;
-    return typeof row?.id === "number" ? row.id : null;
+      .get(uuid) as
+      | { id?: number; text?: string; owner_id?: string }
+      | undefined;
+    if (!row || typeof row.text !== "string" || !row.text.trim()) return null;
+    if (row.owner_id !== job.ownerId) return null;
+    if (
+      job.sourceUserMessageId != null &&
+      Number(row.id) !== job.sourceUserMessageId
+    ) {
+      return null;
+    }
+    return { text: row.text, messageId: Number(row.id) };
   } catch {
     return null;
   }
 }
 
-export const runProductionDurableThought: RunDurableThought = async (input) => {
-  const { db, job } = input;
-  const message = loadSourceMessageText(db, job);
-  if (!message.trim()) {
-    return {
-      kind: "error",
-      class: "structural",
-      code: "missing_source_message",
-      attentionRequestId: null,
-    };
-  }
-
-  const motivations = collectMotivations(
-    db,
-    job.ownerId,
-    "reactive",
-    message,
-    job.sourceUserMessageId ?? undefined,
-  );
-  const ownTime =
-    job.sourceUserMessageId != null
-      ? buildOwnTimeReportConstraint(db, {
-          ownerId: job.ownerId,
-          userMessage: message,
-          userMessageId: job.sourceUserMessageId,
-        })
-      : null;
-  const base = decide(motivations, "reactive", {
-    ownTime,
-    userMessage: message,
-    db,
-    ownerId: job.ownerId,
-  });
-  const thoughtCanInfluence = capabilityCanInfluence(db, "thought");
-  const decision = await deliberateDecision(
-    db,
-    base,
-    motivations,
-    "reactive",
-    undefined,
-    undefined,
-    undefined,
-    {
-      allowModelThought: thoughtCanInfluence,
-      thoughtDeadlineAtMs: job.cognitionExpiresAtMs,
-      deliveryReservationId: job.admissionReservationId,
-      ownerId: job.ownerId,
-    },
-  );
-  const attentionRequestId = latestThoughtAttentionRequestId(db, job);
-
-  if (decision.thoughtError) {
-    return {
-      kind: "error",
-      class: classifyDurableThoughtError(decision.thoughtError),
-      code: decision.thoughtError,
-      attentionRequestId,
-    };
-  }
-  if (decision.thoughtSource === "fallback") {
-    return {
-      kind: "error",
-      class: "structural",
-      code: "thought_fallback",
-      attentionRequestId,
-    };
-  }
-
-  return {
-    kind: "ok",
-    normalized: mapDecisionToNormalizedDurableThought(decision),
-    attentionRequestId,
-  };
+export type ProductionDurableThoughtDeps = {
+  complete?: Complete;
+  canInfluence?: CapabilityGate;
+  canRefuse?: CapabilityGate;
 };
+
+export function createProductionDurableThought(
+  deps: ProductionDurableThoughtDeps = {},
+): RunDurableThought {
+  return async (input) => {
+    const { db, job, nowMs } = input;
+    const source = loadCanonicalSourceMessage(db, job);
+    if (!source) {
+      return {
+        kind: "error",
+        class: "structural",
+        code: MISSING_SOURCE_MESSAGE,
+        attentionRequestId: null,
+      };
+    }
+
+    const motivations = collectMotivations(
+      db,
+      job.ownerId,
+      "reactive",
+      source.text,
+      source.messageId ?? undefined,
+      { persist: false },
+    );
+    const ownTime =
+      source.messageId != null
+        ? buildOwnTimeReportConstraint(db, {
+            ownerId: job.ownerId,
+            userMessage: source.text,
+            userMessageId: source.messageId,
+          })
+        : null;
+    const base = decide(motivations, "reactive", {
+      ownTime,
+      userMessage: source.text,
+      db,
+      ownerId: job.ownerId,
+    });
+    const thoughtCanInfluence = (deps.canInfluence ?? ((database) =>
+      capabilityCanInfluence(database, "thought")))(db);
+    let attentionRequestId: number | null = null;
+    const complete: Complete = async (messages, options) => {
+      const run = deps.complete ?? completeChat;
+      const result = await run(messages, options);
+      const captured = (result as { attentionRequestId?: number }).attentionRequestId;
+      if (typeof captured === "number") attentionRequestId = captured;
+      return result;
+    };
+    const decision = await deliberateDecision(
+      db,
+      base,
+      motivations,
+      "reactive",
+      complete,
+      deps.canInfluence,
+      deps.canRefuse,
+      {
+        allowModelThought: thoughtCanInfluence,
+        thoughtDeadlineAtMs: thoughtDeadlineAtMsForJob(job, nowMs),
+        ownerId: job.ownerId,
+      },
+    );
+
+    if (decision.thoughtError) {
+      return {
+        kind: "error",
+        class: classifyDurableThoughtError(decision.thoughtError),
+        code: decision.thoughtError,
+        attentionRequestId,
+      };
+    }
+    if (decision.thoughtSource === "fallback") {
+      return {
+        kind: "error",
+        class: "structural",
+        code: "thought_fallback",
+        attentionRequestId,
+      };
+    }
+
+    return {
+      kind: "ok",
+      normalized: mapDecisionToNormalizedDurableThought(decision),
+      attentionRequestId,
+    };
+  };
+}
+
+export const runProductionDurableThought: RunDurableThought =
+  createProductionDurableThought();

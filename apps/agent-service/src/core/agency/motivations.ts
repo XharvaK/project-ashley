@@ -36,6 +36,11 @@ export type MindStateMotivationInput = {
 export type MotivationCollectionOptions = {
   /** Qualification-only ablation; the production default keeps OCI enabled. */
   includeOpenCognitiveItems?: boolean;
+  /**
+   * When false, build in-memory motivations without inserting rows.
+   * Durable Thought retries must not re-persist the owner request.
+   */
+  persist?: boolean;
 };
 
 export function mindStateItemToMotivation(
@@ -65,6 +70,8 @@ function ageHours(iso: string): number {
     : Number.POSITIVE_INFINITY;
 }
 
+let ephemeralMotivationId = 0;
+
 function persistMotivation(
   db: DatabaseSync,
   ownerId: string,
@@ -73,8 +80,24 @@ function persistMotivation(
   summary: string,
   refType: string | null = null,
   refId: string | number | null = null,
+  write = true,
 ): Motivation {
   const createdAt = new Date().toISOString();
+  const clipped = summary.trim().slice(0, 1000);
+  const boundedScore = Math.max(0, score);
+  if (!write) {
+    ephemeralMotivationId -= 1;
+    return {
+      id: ephemeralMotivationId,
+      ownerId,
+      kind,
+      score: boundedScore,
+      refType,
+      refId,
+      summary: clipped,
+      createdAt,
+    };
+  }
   const result = db
     .prepare(
       `INSERT INTO motivations
@@ -84,20 +107,20 @@ function persistMotivation(
     .run(
       ownerId,
       kind,
-      Math.max(0, score),
+      boundedScore,
       refType,
       refId == null ? null : String(refId),
-      summary.trim().slice(0, 1000),
+      clipped,
       createdAt,
     );
   return {
     id: Number(result.lastInsertRowid),
     ownerId,
     kind,
-    score: Math.max(0, score),
+    score: boundedScore,
     refType,
     refId,
-    summary: summary.trim().slice(0, 1000),
+    summary: clipped,
     createdAt,
   };
 }
@@ -218,6 +241,7 @@ function addOpinions(
   opinions: Opinion[],
   message: string,
   requireRelevance: boolean,
+  write: boolean,
 ): Motivation[] {
   return opinions
     .filter((opinion) => ageHours(opinion.updatedAt) <= 168)
@@ -235,6 +259,7 @@ function addOpinions(
         `Current opinion on ${opinion.topic}: ${opinion.stance}`,
         "opinion",
         opinion.id,
+        write,
       ),
     );
 }
@@ -259,6 +284,7 @@ function addOpenCognitiveItems(
   ownerId: string,
   trigger: Trigger,
   message: string,
+  write: boolean,
 ): Motivation[] {
   const reactiveRelevant = trigger === "reactive";
   const now = new Date();
@@ -282,6 +308,7 @@ function addOpenCognitiveItems(
         item.semanticSummary,
         "open_cognitive_item",
         item.entityUuid,
+        write,
       );
     });
 }
@@ -295,6 +322,7 @@ export function collectMotivations(
   options: MotivationCollectionOptions = {},
 ): Motivation[] {
   const motivations: Motivation[] = [];
+  const write = options.persist !== false;
   const state = getState(db, ownerId);
   const message = userMessage?.trim() ?? "";
   const reactiveRelevant = trigger === "reactive";
@@ -316,6 +344,7 @@ export function collectMotivations(
         question.text,
         "question",
         question.id,
+        write,
       ),
     );
   }
@@ -337,6 +366,7 @@ export function collectMotivations(
         `${fact.key}: ${fact.value}`,
         "fact",
         fact.id,
+        write,
       ),
     );
   }
@@ -348,6 +378,7 @@ export function collectMotivations(
       listOpinions(db, ownerId),
       message,
       reactiveRelevant && Boolean(message),
+      write,
     ),
   );
 
@@ -378,6 +409,7 @@ export function collectMotivations(
         `${take.title}: ${take.take}`,
         "take",
         take.id,
+        write,
       ),
     );
   }
@@ -399,6 +431,7 @@ export function collectMotivations(
         unfinished,
         "state",
         ownerId,
+        write,
       ),
     );
   }
@@ -423,12 +456,12 @@ export function collectMotivations(
       id: item.id,
     });
     motivations.push(
-      persistMotivation(db, ownerId, m.kind, m.score, m.summary, m.refType, m.refId),
+      persistMotivation(db, ownerId, m.kind, m.score, m.summary, m.refType, m.refId, write),
     );
   }
 
   if (options.includeOpenCognitiveItems !== false) {
-    motivations.push(...addOpenCognitiveItems(db, ownerId, trigger, message));
+    motivations.push(...addOpenCognitiveItems(db, ownerId, trigger, message, write));
   }
 
   for (const projection of listRelationshipMotivationProjections(
@@ -446,6 +479,7 @@ export function collectMotivations(
         projection.summary,
         projection.refType,
         projection.refId,
+        write,
       ),
     );
   }
@@ -460,6 +494,7 @@ export function collectMotivations(
         `Availability is ${state.availability}.`,
         "state",
         ownerId,
+        write,
       ),
     );
   }
@@ -474,6 +509,7 @@ export function collectMotivations(
         message,
         "message",
         userMessageId ?? null,
+        write,
       ),
     );
     // Boundaries enter the pool only when relevance-licensed.
@@ -492,6 +528,7 @@ export function collectMotivations(
           boundary.text,
           "identity",
           boundary.id,
+          write,
         ),
       );
     }
@@ -513,6 +550,7 @@ export function collectMotivations(
           boundary.text,
           "identity",
           boundary.id,
+          write,
         ),
       );
     }
@@ -532,6 +570,7 @@ export function collectMotivations(
         reminder.text,
         "doc_reminder",
         reminder.entityUuid,
+        write,
       );
       if (
         tryClaimRelationshipMotivation(db, {
@@ -553,6 +592,9 @@ export function collectMotivations(
       "silence_ok",
       trigger === "proactive" ? 8 : 2,
       "Silence is always available when nothing earns the interruption.",
+      null,
+      null,
+      write,
     ),
   );
 

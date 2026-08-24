@@ -8,6 +8,57 @@ DURABILITY != NEW AUTHORITY
 
 JOB EXISTS != OPERATION ADMITTED
 
+## Production Thought wiring repair (CI only)
+
+`f2253231dbe3696c2d9397f428dae549ddc8329a` is **superseded**. That candidate could admit `cognition_pending` while `serve.ts` started the durable runner **without** `runDurableThought`, so production never dispatched owner-reactive Thought.
+
+`aba0439675185968b7495c1006dffbe1f7d2096c` wired `runProductionDurableThought` behind `ASHLEY_DURABLE_OPERATIONAL_THOUGHT_ENABLED`, but the driver still had retry/authority holes:
+
+- source lookup preferred `source_user_message_id` then a conversation-shaped scan
+- `collectMotivations` persisted rows on every Thought attempt
+- `deliberateDecision` was given `deliveryReservationId: admissionReservationId`, so an expired Discord interactive deadline could abort background Thought
+- missing source retried as ordinary structural failure instead of fail-closed
+
+This repair keeps production wiring only. No Mint deploy. No production flag change.
+
+### Call graph (owner-reactive)
+
+`operational_jobs.source_message_entity_uuid` → exact `mem_messages` row (owner + optional id match) → `collectMotivations(..., "reactive", { persist: false })` → `decide(..., "reactive")` → `deliberateDecision` → Attention / Initial Thought (`complete`) → `mapDecisionToNormalizedDurableThought` → cognition persist/admission → **existing** atomic M6 attach.
+
+Proactive Agency initiative scoring is **not** on this path. Trigger is `"reactive"`. Test H: zero `initiative_reservations`.
+
+### Retry / restart persistence
+
+| Artifact | Retry behavior |
+|---|---|
+| motivations | not inserted (`persist: false`) |
+| decision_log | not written by this driver |
+| initiative reservations | not created (reactive; claim path is proactive-only) |
+| mind-state / episodes / callbacks / user-message ingest / completion obligations | not created by the driver |
+| Attention request rows | expected, attempt-scoped |
+| M6 | only after validated normalized Thought + existing cognition admission |
+
+Missing source: terminal `stopReason=missing_source_message`, no M6.
+
+### Background Thought deadline
+
+`thoughtDeadlineAtMsForJob` maps **remaining cognition lifetime** onto wall-clock `Date.now()`. It does **not** pass `deliveryReservationId`. Discord interactive expiry therefore cannot starve the 15-minute cognition window. Attempt bound is still provider/Attention via that deadline. `M6_MAX_WALL_MS = 900000` unchanged; M6 wall still starts at attach.
+
+### Authority boundary
+
+`durable-thought-production.ts` returns ok/error only. It does not attach M6. Invalid/fallback Thought is structural error; cognition does not persist a bounded_operation or admit M6.
+
+### Local gates (this pass)
+
+- `durable-thought-production` + `durable-cognition` + `durable-job-runner` + migration 33/34: **50 passed / 0 failed**
+- agent-service, sandbox-v2, discord-bot `tsc --noEmit`: **clean**
+
+### Linux CI
+
+Final candidate SHA is the tip of `cursor/m-series-local-completion-2357` after this repair commit (filled after push).
+
+Slice-1 accepted Linux baseline: `91b39f968b8da7380418ff2c68a2246e3a61018b` — 1482 pass / 5 fail (`thought-delay.test.ts` ×2, `m5-phase-f.test.ts` ×3). Do not repair those five.
+
 ## Slice-1 dependency
 
 Differential Slice-1 candidate: `91b39f968b8da7380418ff2c68a2246e3a61018b`
