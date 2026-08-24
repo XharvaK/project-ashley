@@ -180,7 +180,7 @@ describe("parseCandidateAuthorshipRequest", () => {
     },
   );
 
-  it.each(["projectId", "workspaceId", "objective", "rationale", "riskClass"] as const)(
+  it.each(["projectId", "objective", "rationale", "riskClass"] as const)(
     "rejects missing %s",
     (field) => {
       const { [field]: _omit, ...rest } = validRequest;
@@ -192,6 +192,15 @@ describe("parseCandidateAuthorshipRequest", () => {
       expect(result.field).toBe(field);
     },
   );
+
+  it("accepts missing workspaceId (omitted for runtime resolution)", () => {
+    const { workspaceId: _omit, ...rest } = validRequest;
+    void _omit;
+    const result = parseCandidateAuthorshipRequest(rest);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.request.workspaceId).toBeUndefined();
+  });
 
   it("rejects a workspaceId shorter than the kernel bound", () => {
     const result = parseCandidateAuthorshipRequest({
@@ -300,8 +309,8 @@ describe("M5 Phase E cognition and turn admission", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
-  it("production deadline branch defaults unavailable", () => {
-    expect(createTurnDeadlinePlan(1_000_000).branches.candidate_authorship.available).toBe(false);
+  it("production deadline branch defaults available after promotion", () => {
+    expect(createTurnDeadlinePlan(1_000_000).branches.candidate_authorship.available).toBe(true);
   });
 
   it("executes authorship on an available test deadline branch and does not run M4", async () => {

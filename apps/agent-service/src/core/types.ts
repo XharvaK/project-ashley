@@ -46,7 +46,7 @@ export type CognitionAuthorshipRiskClass = "low" | "medium" | "high" | "consulta
 export type CognitionAuthorshipRequest = {
   operation: "changeset.author";
   projectId: string;
-  workspaceId: string;
+  workspaceId?: string;
   objective: string;
   rationale: string;
   riskClass: CognitionAuthorshipRiskClass;

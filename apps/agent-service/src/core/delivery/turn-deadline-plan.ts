@@ -454,8 +454,14 @@ export const PROVISIONAL_UNQUALIFIED_TURN_DEADLINE_POLICY: TurnDeadlinePolicy =
     generationSettlementMs: 4_000,
   },
   candidateAuthorship: {
-    available: false,
-    unavailableReason: "candidate_authorship_unqualified",
+    available: true,
+    childExecutionMs: 6_000,
+    acquisitionSettlementMs: 4_000,
+    cleanupReserveMs: 1_000,
+    continuationMs: 6_000,
+    perceptionMs: 20_000,
+    expressionMs: 4_000,
+    generationSettlementMs: 4_000,
   },
 });
 

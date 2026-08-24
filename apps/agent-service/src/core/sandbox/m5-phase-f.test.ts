@@ -19,16 +19,23 @@ import { AshleyCore } from "../runtime.js";
 import * as mistral from "../../mistral-client.js";
 import {
   capabilityNames,
+  capabilityCanInfluence,
   currentBuildIdentity,
   currentContractId,
   currentReleaseId,
 } from "../rollout/capabilities.js";
+import { currentModelEpoch } from "../attention/continuity.js";
 import { createQuestion } from "../state/questions.js";
 import { parseCandidateAuthorshipRequest } from "../agency/thought.js";
 import { enqueueCognitiveJob } from "../cognition/jobs.js";
 import { processNextCognitiveJob } from "../cognition/worker.js";
 import type { TurnDeadlinePolicy } from "../delivery/turn-deadline-plan.js";
-import { loadOperatorProjectReadRegistry } from "./project-registry.js";
+import {
+  loadOperatorProjectReadRegistry,
+  canOfferCandidateAuthorship,
+  listApprovedReadProjectIds,
+} from "./project-registry.js";
+import { isSandboxV2Available } from "./v2-execution.js";
 import { formatSandboxV2LicenseAudit } from "./v2-license-audit.js";
 import { getChangeSet, listChangeSetEventTypes } from "./changeset-store.js";
 import * as v2Execution from "./v2-execution.js";
@@ -101,12 +108,13 @@ function gitHead(cwd: string): string {
 function activateCapabilities(db: DatabaseSync, except: readonly string[] = []): void {
   const relId = currentReleaseId();
   const now = new Date().toISOString();
+  const epoch = currentModelEpoch(db, env.mistralModel);
   for (const cap of capabilityNames) {
     if (except.includes(cap)) continue;
     db.prepare(
       `INSERT OR REPLACE INTO capability_releases (capability, release_id, state, updated_at, contract_id, build_identity, model_epoch)
-       VALUES (?, ?, 'active', ?, ?, ?, 0)`,
-    ).run(cap, relId, now, currentContractId(), currentBuildIdentity());
+       VALUES (?, ?, 'active', ?, ?, ?, ?)`,
+    ).run(cap, relId, now, currentContractId(), currentBuildIdentity(), epoch);
   }
 }
 
@@ -154,6 +162,7 @@ function thoughtPass2(extra: Record<string, unknown> = {}) {
 describe("M5 Phase F end-to-end authorship witness", () => {
   const originalMode = env.cognitionMode;
   const originalGroqKey = env.groqApiKey;
+  const originalNimKey = env.nimApiKey;
   const originalLifecycle = env.sandboxEngineeringLifecycleEnabled;
   const originalRegistryPath = env.sandboxProjectRegistryPath;
 
@@ -169,6 +178,7 @@ describe("M5 Phase F end-to-end authorship witness", () => {
   beforeEach(async () => {
     env.cognitionMode = "apply";
     env.groqApiKey = "test-key";
+    env.nimApiKey = "test-key";
     env.sandboxEngineeringLifecycleEnabled = true;
     process.env.SANDBOX_V2_FORCE_AVAILABLE = "true";
     tmpDir = mkdtempSync(join(tmpdir(), "v2-m5-phase-f-"));
@@ -203,7 +213,7 @@ describe("M5 Phase F end-to-end authorship witness", () => {
       JSON.stringify([
         {
           projectId: PROJECT,
-          canonicalRoot: liveRepoDir,
+          canonicalRoot: "/srv/projects/m5-fixture",
           displayName: "M5 fixture",
           enabled: true,
           readAllowed: true,
@@ -247,6 +257,7 @@ describe("M5 Phase F end-to-end authorship witness", () => {
   afterEach(() => {
     env.cognitionMode = originalMode;
     env.groqApiKey = originalGroqKey;
+    env.nimApiKey = originalNimKey;
     env.sandboxEngineeringLifecycleEnabled = originalLifecycle;
     env.sandboxProjectRegistryPath = originalRegistryPath;
     delete process.env.SANDBOX_V2_FORCE_AVAILABLE;

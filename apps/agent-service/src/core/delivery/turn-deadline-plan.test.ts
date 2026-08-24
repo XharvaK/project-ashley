@@ -249,17 +249,17 @@ describe("TurnDeadlinePlan", () => {
       expect(m4.branch.childExecutionDeadlineAtMs).toBe(
         plan.common.initialThoughtDeadlineAtMs + 6_000,
       );
-      expect(plan.branches.candidate_authorship.available).toBe(false);
-      if (plan.branches.candidate_authorship.available) {
-        throw new Error("m5 deadline branch must default unavailable");
+      expect(plan.branches.candidate_authorship.available).toBe(true);
+      if (!plan.branches.candidate_authorship.available) {
+        throw new Error("m5 deadline branch must default available after promotion");
       }
-      expect(plan.branches.candidate_authorship.unavailableReason).toBe(
-        "candidate_authorship_unqualified",
+      const m5 = selectTurnDeadlineBranch(plan, "candidate_authorship");
+      expect(m5.ok).toBe(true);
+      if (!m5.ok) throw new Error("expected candidate authorship branch to be available");
+      expect(m5.branch.kind).toBe("candidate_authorship");
+      expect(m5.branch.childExecutionDeadlineAtMs).toBe(
+        plan.common.initialThoughtDeadlineAtMs + 6_000,
       );
-      expect(selectTurnDeadlineBranch(plan, "candidate_authorship")).toEqual({
-        ok: false,
-        reason: "candidate_authorship_unqualified",
-      });
 
       const selected = selectTurnDeadlineBranch(plan, "candidate_workspace_experiment");
       expect(selected.ok).toBe(true);

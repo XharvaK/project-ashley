@@ -48,6 +48,7 @@ import {
 } from "@composer-assistant/sandbox-v2";
 import { isVerificationRecipeAllowed } from "@composer-assistant/sandbox-policy";
 import { resolveVerificationBinding } from "./verification-binding.js";
+import { resolveAuthorshipBinding } from "./authorship-binding.js";
 import type {
   CognitionInspectionRequest,
   CognitionWorkspaceRequest,
@@ -1266,6 +1267,20 @@ export async function executeCandidateAuthorshipV2(
     return none("authorship_not_allowed");
   }
 
+  const bound = resolveAuthorshipBinding({
+    projectId: request.projectId,
+    workspaceId: request.workspaceId,
+    entry: resolved.entry,
+    workspaceManager: input.workspaceManager,
+  });
+  if (!bound.ok) {
+    return none(bound.error);
+  }
+  const boundRequest: CognitionAuthorshipRequest & { workspaceId: string } = {
+    ...request,
+    workspaceId: bound.workspaceId,
+  };
+
   const isCustomSeam =
     input.dispatcher !== undefined ||
     input.envOverrides?.sandboxAvailable !== undefined;
@@ -1279,20 +1294,20 @@ export async function executeCandidateAuthorshipV2(
     return none("sandbox_unavailable");
   }
 
-  const secretProbe = scanAuthorshipText(authorshipSecretText(request));
+  const secretProbe = scanAuthorshipText(authorshipSecretText(boundRequest));
   if (secretProbe.hit) {
     if (input.db) {
       persistQuarantinedChangeSet(input.db, {
         ownerId: input.ownerId,
         changesetId: `cs_${randomBytes(16).toString("hex")}`,
-        projectId: request.projectId,
-        workspaceId: request.workspaceId,
+        projectId: boundRequest.projectId,
+        workspaceId: boundRequest.workspaceId,
         sourceSnapshotId: "unsealed",
-        objective: request.objective,
-        rationale: request.rationale,
-        riskClass: request.riskClass,
-        evidenceRefs: request.evidenceRefs ?? [],
-        verificationRecipeIds: request.verificationRecipeIds ?? [],
+        objective: boundRequest.objective,
+        rationale: boundRequest.rationale,
+        riskClass: boundRequest.riskClass,
+        evidenceRefs: boundRequest.evidenceRefs ?? [],
+        verificationRecipeIds: boundRequest.verificationRecipeIds ?? [],
         quarantineReason: "secret_detected",
       });
     }
@@ -1313,9 +1328,9 @@ export async function executeCandidateAuthorshipV2(
     const res: SandboxV2Result = await dispatcher.dispatch({
       version: 2,
       operation: "changeset.author",
-      projectId: request.projectId,
-      workspaceId: request.workspaceId,
-      ...(request.intendedPaths ? { intendedPaths: request.intendedPaths } : {}),
+      projectId: boundRequest.projectId,
+      workspaceId: boundRequest.workspaceId,
+      ...(boundRequest.intendedPaths ? { intendedPaths: boundRequest.intendedPaths } : {}),
     });
 
     if (res.outcome === "failed" && res.error === "secret_detected") {
@@ -1323,14 +1338,14 @@ export async function executeCandidateAuthorshipV2(
         persistQuarantinedChangeSet(input.db, {
           ownerId: input.ownerId,
           changesetId: `cs_${randomBytes(16).toString("hex")}`,
-          projectId: request.projectId,
-          workspaceId: request.workspaceId,
+          projectId: boundRequest.projectId,
+          workspaceId: boundRequest.workspaceId,
           sourceSnapshotId: "unsealed",
-          objective: request.objective,
-          rationale: request.rationale,
-          riskClass: request.riskClass,
-          evidenceRefs: request.evidenceRefs ?? [],
-          verificationRecipeIds: request.verificationRecipeIds ?? [],
+          objective: boundRequest.objective,
+          rationale: boundRequest.rationale,
+          riskClass: boundRequest.riskClass,
+          evidenceRefs: boundRequest.evidenceRefs ?? [],
+          verificationRecipeIds: boundRequest.verificationRecipeIds ?? [],
           quarantineReason: "secret_detected",
         });
       }
@@ -1355,14 +1370,14 @@ export async function executeCandidateAuthorshipV2(
         baseCommit: receipt.baseCommit,
         sourceCleanliness: receipt.sourceCleanliness,
         treeHashAlgorithm: receipt.treeHashAlgorithm,
-        objective: request.objective,
-        rationale: request.rationale,
-        targetArea: request.targetArea,
-        expectedEffect: request.expectedEffect,
-        riskClass: request.riskClass,
-        evidenceRefs: request.evidenceRefs ?? [],
-        verificationRecipeIds: request.verificationRecipeIds ?? [],
-        intendedPaths: request.intendedPaths,
+        objective: boundRequest.objective,
+        rationale: boundRequest.rationale,
+        targetArea: boundRequest.targetArea,
+        expectedEffect: boundRequest.expectedEffect,
+        riskClass: boundRequest.riskClass,
+        evidenceRefs: boundRequest.evidenceRefs ?? [],
+        verificationRecipeIds: boundRequest.verificationRecipeIds ?? [],
+        intendedPaths: boundRequest.intendedPaths,
         changedPaths: receipt.changedPaths,
         // First slice does not look up matching M4 receipts. Declared
         // evidenceRefs stay on evidence_refs_json; this column would
@@ -1377,8 +1392,8 @@ export async function executeCandidateAuthorshipV2(
     return {
       license: issueCandidateAuthorshipLicense({
         request: {
-          projectId: request.projectId,
-          workspaceId: request.workspaceId,
+          projectId: boundRequest.projectId,
+          workspaceId: boundRequest.workspaceId,
         },
         receipt,
         executedAtMs: res.executedAtMs,

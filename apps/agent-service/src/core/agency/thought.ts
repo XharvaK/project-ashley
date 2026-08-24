@@ -37,6 +37,7 @@ import {
   canOfferPatchExport,
 } from "../sandbox/project-registry.js";
 import { describeVerificationGrounding } from "../sandbox/verification-binding.js";
+import { describeAuthorshipGrounding } from "../sandbox/authorship-binding.js";
 import { M6_MAX_STEPS, M6_MAX_WALL_MS } from "@composer-assistant/sandbox-v2";
 import type { WorkspaceManager } from "@composer-assistant/sandbox-v2";
 
@@ -713,11 +714,12 @@ export function parseCandidateAuthorshipRequest(
   if (!projectId) {
     return { ok: false, errorCode: "missing_required_field", field: "projectId" };
   }
-  const workspaceId = boundedId(obj.workspaceId);
-  if (!workspaceId) {
-    return { ok: false, errorCode: "missing_required_field", field: "workspaceId" };
+  const workspaceId =
+    obj.workspaceId !== undefined ? (boundedId(obj.workspaceId) ?? undefined) : undefined;
+  if (obj.workspaceId !== undefined && !workspaceId) {
+    return { ok: false, errorCode: "payload_invalid", field: "workspaceId" };
   }
-  if (workspaceId.length < 8) {
+  if (workspaceId && workspaceId.length < 8) {
     return { ok: false, errorCode: "payload_invalid", field: "workspaceId" };
   }
   const objective = boundedText(obj.objective, 500);
@@ -758,7 +760,7 @@ export function parseCandidateAuthorshipRequest(
     request: {
       operation: "changeset.author",
       projectId,
-      workspaceId,
+      ...(workspaceId ? { workspaceId } : {}),
       objective,
       rationale,
       riskClass: obj.riskClass as CognitionAuthorshipRiskClass,
@@ -1502,10 +1504,15 @@ export function composeInitialThoughtMessages(input: {
     }
     if (canOfferAuthorship) {
       parts.push(
-        `When a bounded candidate change-set should be sealed for review, include operationalRequest: {kind: "candidate_authorship", request: {operation: "changeset.author", projectId: "${quotedProjectIds}", workspaceId: string, objective: string, rationale: string, riskClass: "low"|"medium"|"high"|"consultation", targetArea?: string, expectedEffect?: string, evidenceRefs?: string[], verificationRecipeIds?: string[], intendedPaths?: string[]}}.`,
-        "Thought supplies rationale and bounds only. Do not supply patch text, file contents, argv, commands, apply, commit, merge, or deploy instructions.",
+        `When a bounded candidate change-set should be sealed for review, include operationalRequest: {kind: "candidate_authorship", request: {operation: "changeset.author", projectId: "${quotedProjectIds}", workspaceId?: string, objective: string, rationale: string, riskClass: "low"|"medium"|"high"|"consultation", targetArea?: string, expectedEffect?: string, evidenceRefs?: string[], verificationRecipeIds?: string[], intendedPaths?: string[]}}.`,
+        "Thought supplies rationale and bounds only. When grounded authorship state below says the current candidate is currently resolvable, omit workspaceId; the runtime binds that control-plane fact. Do not ask the owner for workspaceId in that unique case.",
+        "Do not supply patch text, file contents, argv, commands, apply, commit, merge, or deploy instructions.",
         "A sealed change-set is advisory candidate work. It is not applied, merged, or Ashley.",
       );
+      const grounding = describeAuthorshipGrounding(approvedProjectIds, {
+        workspaceManager: verificationWorkspaceManager,
+      });
+      if (grounding) parts.push(grounding);
     }
     if (canOfferOperation) {
       parts.push(
@@ -1539,7 +1546,7 @@ export function composeInitialThoughtMessages(input: {
     "A refusal is reactive only and must select both the current user_message motivation and a supplied stable boundary motivation.",
     "Use only supplied motivation IDs. Silence is valid. Do not write the message Doc will see.",
     "objective and reason are short intent metadata, not prose to echo and not a copy of the user message.",
-    `operationalRequest is optional. When present, it must be exactly one of: {kind: "project_inspection", request: CognitionInspectionRequest}, {kind: "candidate_workspace_experiment", request: CognitionWorkspaceRequest}, {kind: "candidate_verification", request: {operation: "workspace.verify", projectId, workspaceId?, recipeId?}}, {kind: "candidate_authorship", request: {operation: "changeset.author", projectId, workspaceId, objective, rationale, riskClass}}, {kind: "bounded_operation", request: {operation: "objective.operate", projectId, workspaceId, origin, objective, successCondition, failureCondition, steps, budget}}, or {kind: "patch_export", request: {operation: "patch_export", projectId, changesetId}}. Emit at most one operationalRequest.`,
+    `operationalRequest is optional. When present, it must be exactly one of: {kind: "project_inspection", request: CognitionInspectionRequest}, {kind: "candidate_workspace_experiment", request: CognitionWorkspaceRequest}, {kind: "candidate_verification", request: {operation: "workspace.verify", projectId, workspaceId?, recipeId?}}, {kind: "candidate_authorship", request: {operation: "changeset.author", projectId, workspaceId?, objective, rationale, riskClass}}, {kind: "bounded_operation", request: {operation: "objective.operate", projectId, workspaceId, origin, objective, successCondition, failureCondition, steps, budget}}, or {kind: "patch_export", request: {operation: "patch_export", projectId, changesetId}}. Emit at most one operationalRequest.`,
     projectContextPrompt,
     dispositionContract,
     ...(retryContext ? [retryContext] : []),
