@@ -185,6 +185,9 @@ export function isSandboxV2Available(): boolean {
   if (process.env.SANDBOX_V2_FORCE_AVAILABLE === "true") {
     return true;
   }
+  if (process.env.SANDBOX_V2_FORCE_AVAILABLE === "false") {
+    return false;
+  }
   return process.platform === "linux" && existsSync(BWRAP_PATH);
 }
 

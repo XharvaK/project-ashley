@@ -373,7 +373,7 @@ describe("M4 Phase E cognition and turn admission", () => {
   });
 
   it("sandbox unavailable closes the offer so M4 does not execute", async () => {
-    delete process.env.SANDBOX_V2_FORCE_AVAILABLE;
+    process.env.SANDBOX_V2_FORCE_AVAILABLE = "false";
     const { execute } = await runReactive({ deadlinePolicy: M4_AVAILABLE_POLICY });
     expect(execute).not.toHaveBeenCalled();
   });
