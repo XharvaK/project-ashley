@@ -79,6 +79,7 @@ import {
   persistProposedChangeSet,
   persistQuarantinedChangeSet,
 } from "./changeset-store.js";
+import { persistVerificationReceipt } from "./verification-receipt-store.js";
 
 const SECRET_ENV_KEY = "ASHLEY_SANDBOX_M1_SECRET_SENTINEL";
 const BWRAP_PATH = "/usr/bin/bwrap";
@@ -758,6 +759,8 @@ export type ExecuteWorkspaceExperimentV2Input = {
   db?: DatabaseSync;
   masterMode?: CognitionMode;
   skipCapabilityGate?: boolean;
+  /** Preallocated durable child identity. When set, used on every license path. */
+  taskId?: string;
 };
 
 export type ExecuteWorkspaceExperimentV2Result = {
@@ -780,6 +783,8 @@ export async function executeWorkspaceExperimentV2(
   input: ExecuteWorkspaceExperimentV2Input,
 ): Promise<ExecuteWorkspaceExperimentV2Result> {
   const { request, messageEntityUuid } = input;
+  const assignedTaskId = input.taskId?.trim() || "";
+  const expTaskId = (fallback: string): string => assignedTaskId || fallback;
 
   // 1. Enforce deadline
   const settlementDeadlineAtMs =
@@ -791,7 +796,7 @@ export async function executeWorkspaceExperimentV2(
     return {
       license: {
         state: "failed",
-        taskId: `v2-exp-${Date.now()}`,
+        taskId: expTaskId(`v2-exp-${Date.now()}`),
         profile: "project_experimentation",
         error: "deadline_exceeded",
         ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
@@ -807,7 +812,7 @@ export async function executeWorkspaceExperimentV2(
         return {
           license: {
             state: "none",
-            taskId: `v2-exp-${Date.now()}`,
+            taskId: expTaskId(`v2-exp-${Date.now()}`),
             profile: "project_experimentation",
             error: "project_experimentation_gate_denied",
             ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
@@ -819,7 +824,7 @@ export async function executeWorkspaceExperimentV2(
       return {
         license: {
           state: "none",
-          taskId: `v2-exp-${Date.now()}`,
+          taskId: expTaskId(`v2-exp-${Date.now()}`),
           profile: "project_experimentation",
           error: "project_experimentation_gate_denied",
           ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
@@ -838,7 +843,7 @@ export async function executeWorkspaceExperimentV2(
     return {
       license: {
         state: "none",
-        taskId: `v2-exp-${Date.now()}`,
+        taskId: expTaskId(`v2-exp-${Date.now()}`),
         profile: "project_experimentation",
         error: "sandbox_lifecycle_disabled",
         ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
@@ -868,7 +873,7 @@ export async function executeWorkspaceExperimentV2(
     return {
       license: {
         state: "none",
-        taskId: `v2-exp-${Date.now()}`,
+        taskId: expTaskId(`v2-exp-${Date.now()}`),
         profile: "project_experimentation",
         error: "sandbox_unavailable",
         ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
@@ -885,6 +890,7 @@ export async function executeWorkspaceExperimentV2(
           registry,
           workspaceManager: input.workspaceManager,
           ...input.envOverrides,
+          originChildTaskId: assignedTaskId || undefined,
           childExecutionDeadlineAtMs: input.childExecutionDeadlineAtMs,
           childTerminationDeadlineAtMs: input.childTerminationDeadlineAtMs,
           settlementDeadlineAtMs,
@@ -942,10 +948,17 @@ export async function executeWorkspaceExperimentV2(
         verifiedAbsent: (res.result as any).verifiedAbsent,
       };
 
+      if (assignedTaskId && input.workspaceManager && workspaceId && workspaceId !== "unknown") {
+        try {
+          input.workspaceManager.bindOriginChildTaskId(workspaceId, assignedTaskId);
+        } catch {
+          /* recovery provenance is best-effort after effect */
+        }
+      }
       return {
         license: {
           state: "succeeded",
-          taskId: `v2-exp-${res.executedAtMs}`,
+          taskId: expTaskId(`v2-exp-${res.executedAtMs}`),
           profile: "project_experimentation",
           workspaceClaimEffect,
           executionTruth: res.executionTruth ?? "effect_verified",
@@ -959,7 +972,7 @@ export async function executeWorkspaceExperimentV2(
       return {
         license: {
           state: "none",
-          taskId: `v2-exp-${res.executedAtMs}`,
+          taskId: expTaskId(`v2-exp-${res.executedAtMs}`),
           profile: "project_experimentation",
           error: res.error ?? "sandbox_unavailable",
           ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
@@ -975,7 +988,7 @@ export async function executeWorkspaceExperimentV2(
           res.executionTruth === "effect_indeterminate"
             ? "outcome_unknown"
             : "failed",
-        taskId: `v2-exp-${res.executedAtMs}`,
+        taskId: expTaskId(`v2-exp-${res.executedAtMs}`),
         profile: "project_experimentation",
         error: res.error ?? "workspace_experiment_failed",
         executionTruth: res.executionTruth ?? "no_effect_proven",
@@ -990,7 +1003,7 @@ export async function executeWorkspaceExperimentV2(
     return {
       license: {
         state: "failed",
-        taskId: `v2-exp-${Date.now()}`,
+        taskId: expTaskId(`v2-exp-${Date.now()}`),
         profile: "project_experimentation",
         error: "internal_error",
         ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
@@ -1013,6 +1026,8 @@ export type ExecuteCandidateVerificationV2Input = {
   db?: DatabaseSync;
   masterMode?: CognitionMode;
   skipCapabilityGate?: boolean;
+  taskId?: string;
+  ownerId?: string;
 };
 
 export type ExecuteCandidateVerificationV2Result = {
@@ -1028,13 +1043,14 @@ export async function executeCandidateVerificationV2(
   input: ExecuteCandidateVerificationV2Input,
 ): Promise<ExecuteCandidateVerificationV2Result> {
   const { request, messageEntityUuid } = input;
+  const assignedTaskId = input.taskId?.trim() || "";
   const none = (
     error: string,
     extras?: Partial<OperationalClaimLicense>,
   ): ExecuteCandidateVerificationV2Result => ({
     license: {
       state: "none",
-      taskId: extras?.taskId ?? `v2-verify-${Date.now()}`,
+        taskId: extras?.taskId ?? (assignedTaskId || `v2-verify-${Date.now()}`),
       profile: "candidate_verification",
       error,
       ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
@@ -1050,7 +1066,7 @@ export async function executeCandidateVerificationV2(
     return {
       license: {
         state: "failed",
-        taskId: `v2-verify-${Date.now()}`,
+        taskId: assignedTaskId || `v2-verify-${Date.now()}`,
         profile: "candidate_verification",
         error: "deadline_exceeded",
         ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
@@ -1146,20 +1162,46 @@ export async function executeCandidateVerificationV2(
         ? res.result
         : undefined);
 
-    return {
-      license: issueCandidateVerificationLicense({
+    const license = issueCandidateVerificationLicense({
         request: boundRequest,
         receipt,
         executedAtMs: res.executedAtMs,
         messageEntityUuid,
+        taskId: assignedTaskId || undefined,
         error:
           res.outcome === "unavailable"
             ? (res.error ?? "sandbox_unavailable")
             : res.outcome === "failed"
               ? (res.error ?? "verification_failed")
               : null,
-      }),
-    };
+      });
+    if (
+      input.db &&
+      assignedTaskId &&
+      (receipt || res.outcome === "succeeded" || res.outcome === "failed")
+    ) {
+      try {
+        persistVerificationReceipt(input.db, {
+          ownerId: input.ownerId ?? "unknown",
+          taskId: assignedTaskId,
+          workspaceId: boundRequest.workspaceId ?? "unknown",
+          recipeId: boundRequest.recipeId ?? "unknown",
+          snapshotId:
+            receipt && typeof receipt === "object" && "snapshotId" in receipt
+              ? String((receipt as { snapshotId?: unknown }).snapshotId ?? "")
+              : null,
+          candidateTreeHash:
+            receipt && typeof receipt === "object" && "candidateTreeHash" in receipt
+              ? String((receipt as { candidateTreeHash?: unknown }).candidateTreeHash ?? "")
+              : null,
+          outcome: res.outcome,
+          facts: { error: license.error ?? null },
+        });
+      } catch {
+        /* unique receipt already recorded */
+      }
+    }
+    return { license };
   } catch {
     return none("internal_error");
   }
@@ -1179,6 +1221,7 @@ export type ExecuteCandidateAuthorshipV2Input = {
   db?: DatabaseSync;
   masterMode?: CognitionMode;
   skipCapabilityGate?: boolean;
+  taskId?: string;
 };
 
 export type ExecuteCandidateAuthorshipV2Result = {
@@ -1202,13 +1245,14 @@ export async function executeCandidateAuthorshipV2(
   input: ExecuteCandidateAuthorshipV2Input,
 ): Promise<ExecuteCandidateAuthorshipV2Result> {
   const { request, messageEntityUuid } = input;
+  const assignedTaskId = input.taskId?.trim() || "";
   const none = (
     error: string,
     extras?: Partial<OperationalClaimLicense>,
   ): ExecuteCandidateAuthorshipV2Result => ({
     license: {
       state: "none",
-      taskId: extras?.taskId ?? `v2-author-${Date.now()}`,
+        taskId: extras?.taskId ?? (assignedTaskId || `v2-author-${Date.now()}`),
       profile: "candidate_authorship",
       error,
       ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
@@ -1224,7 +1268,7 @@ export async function executeCandidateAuthorshipV2(
     return {
       license: {
         state: "failed",
-        taskId: `v2-author-${Date.now()}`,
+        taskId: assignedTaskId || `v2-author-${Date.now()}`,
         profile: "candidate_authorship",
         error: "deadline_exceeded",
         ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
@@ -1386,6 +1430,7 @@ export async function executeCandidateAuthorshipV2(
         patchSha256: receipt.patchSha256,
         patchBytes: receipt.patchBytes,
         artifactRef: receipt.artifactRef,
+        originChildTaskId: assignedTaskId || null,
       });
     }
 
@@ -1395,6 +1440,7 @@ export async function executeCandidateAuthorshipV2(
           projectId: boundRequest.projectId,
           workspaceId: boundRequest.workspaceId,
         },
+        taskId: assignedTaskId || undefined,
         receipt,
         executedAtMs: res.executedAtMs,
         messageEntityUuid,

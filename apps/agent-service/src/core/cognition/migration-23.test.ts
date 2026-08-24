@@ -25,8 +25,8 @@ describe("nuclear schema v23/v24 open cognitive items", () => {
   it("creates bounded OCI, attention, and transition tables", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
 
-    expect(NUCLEAR_SUPPORTED_VERSION).toBe(32);
-    expect(schemaVersion(db)).toBe(32);
+    expect(NUCLEAR_SUPPORTED_VERSION).toBe(33);
+    expect(schemaVersion(db)).toBe(33);
 
     const tables = (
       db

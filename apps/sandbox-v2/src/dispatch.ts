@@ -75,6 +75,8 @@ export type SandboxV2Environment = {
   settlementDeadlineAtMs?: number;
   /** Deterministic test seam for deadline enforcement. */
   clock?: { nowMs(): number };
+  /** Recovery provenance only. Grants no workspace authority. */
+  originChildTaskId?: string;
 };
 
 export type SandboxV2DispatchOptions = {
@@ -172,6 +174,7 @@ export class SandboxV2Dispatcher {
         childTerminationDeadlineAtMs: this.env.childTerminationDeadlineAtMs,
         settlementDeadlineAtMs: this.env.settlementDeadlineAtMs,
         clock: this.env.clock,
+        originChildTaskId: this.env.originChildTaskId,
       });
     }
     if (request.operation === "workspace.verify") {

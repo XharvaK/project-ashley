@@ -298,6 +298,11 @@ function createEnv() {
     "ASHLEY_SANDBOX_ENGINEERING_LIFECYCLE_ENABLED",
     false,
   ),
+  /** Slice-1 durable M6: admit then detach. Default off. */
+  durableBoundedOperationEnabled: strictBoolean(
+    "ASHLEY_DURABLE_BOUNDED_OPERATION_ENABLED",
+    false,
+  ),
   // Host-provided allowlisted project-root registry (operator config, never
   // model-writable). Empty/unset => no roots => envelope precheck refuses writes.
   sandboxProjectRegistryPath: strictTrimmed(

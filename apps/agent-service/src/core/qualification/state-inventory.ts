@@ -205,6 +205,18 @@ const NON_LIVE: Record<string, NonLiveRule> = {
     cls: "CONTROL_PLANE",
     reason: "M6 bounded-operation task work state; audit and safe-stop only; not Identity/Mind State/Recall; no automatic resume",
   },
+  operational_jobs: {
+    cls: "CONTROL_PLANE",
+    reason: "durable operational-job envelope; identity/lifecycle/fencing/reporting; not sandbox authority",
+  },
+  operational_job_deliveries: {
+    cls: "CONTROL_PLANE",
+    reason: "idempotent ack/completion delivery linkage for durable operational jobs",
+  },
+  verification_receipts: {
+    cls: "CONTROL_PLANE",
+    reason: "M4 verification recovery/evidence receipts; not a permission source",
+  },
   bounded_operation_steps: {
     cls: "CONTROL_PLANE",
     reason: "M6 bounded-operation step receipts; operational history only",

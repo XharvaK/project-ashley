@@ -198,6 +198,36 @@ export function createServer(
     }
   });
 
+  app.get("/nuclear/jobs", (req, res) => {
+    try {
+      const ownerId = String(req.query.owner_id ?? "");
+      const jobId = String(req.query.job_id ?? "");
+      requireOwner(ownerId || undefined);
+      if (!jobId) {
+        res.json({ jobs: manager.core.listDurableOperationalJobs(ownerId) });
+        return;
+      }
+      res.json(manager.core.getDurableOperationalJobStatus(ownerId, jobId));
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/nuclear/jobs/cancel", (req, res) => {
+    try {
+      const { userId, jobId } = req.body as { userId?: string; jobId?: string };
+      const ownerId = requireOwner(userId);
+      if (typeof jobId !== "string" || !jobId.trim()) {
+        throw new AppError("message_required", "job_id required", 400);
+      }
+      res.json(manager.core.cancelDurableOperationalJob(ownerId, jobId.trim()));
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
   app.get("/nuclear/engineering", (req, res) => {
     try {
       const ownerId = String(req.query.owner_id ?? "");

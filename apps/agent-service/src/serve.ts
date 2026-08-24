@@ -16,6 +16,10 @@ import {
   startEngineeringAutonomyLoops,
   stopEngineeringAutonomyLoops,
 } from "./core/sandbox/engineering-runtime.js";
+import {
+  startDurableOperationalJobRunner,
+  stopDurableOperationalJobRunner,
+} from "./core/sandbox/durable-job-runner.js";
 import { claimWeeklyReviewDelivery } from "./core/sandbox/weekly-review-delivery.js";
 
 export async function serveAgent(manager: AgentManager): Promise<void> {
@@ -73,6 +77,12 @@ export async function serveAgent(manager: AgentManager): Promise<void> {
     },
     onRefused: (reason) => console.log(`[engineering] refused: ${reason}`),
   });
+  if (env.durableBoundedOperationEnabled) {
+    startDurableOperationalJobRunner({
+      db: manager.core.getDatabase(),
+      nowMs: () => Date.now(),
+    });
+  }
   console.log(
     `[agent-service] nuclear core enabled db=${manager.core.getHealth().dbPath} plane=${manager.dataPlane.kind}`,
   );
@@ -82,6 +92,7 @@ export async function serveAgent(manager: AgentManager): Promise<void> {
     stopNuclearCuriosityLoop();
     stopCognitionLoop();
     stopEngineeringAutonomyLoops();
+  await stopDurableOperationalJobRunner();
     sandboxBrokerClient?.close();
     await manager.shutdown();
     server.close();

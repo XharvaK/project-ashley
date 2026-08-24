@@ -105,6 +105,8 @@ export type WorkspaceExperimentExecutorOptions = {
   clock?: { nowMs(): number };
   /** Deterministic settlement teardown seam. */
   serverCloser?: (server: Server, connections: Set<Socket>) => void;
+  /** Recovery provenance only. Grants no workspace authority. */
+  originChildTaskId?: string;
 };
 
 export type ProjectInspectionExecutorOptions = WorkspaceExperimentExecutorOptions;
@@ -359,6 +361,7 @@ export async function executeWorkspaceExperiment(
       protectedRoots: options.protectedRoots,
     },
     request.workspaceId,
+    options.originChildTaskId,
   );
   if (!acquisition.ok) {
     return failed(acquisition.error, executedAtMs);

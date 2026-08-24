@@ -30,6 +30,12 @@ function sourceV31Fixture(): Fixture {
     DROP INDEX IF EXISTS idx_patch_export_records_entity_uuid;
     DROP INDEX IF EXISTS idx_patch_export_records_owner_status;
     DROP TABLE IF EXISTS patch_export_records;
+    DROP INDEX IF EXISTS idx_operational_jobs_entity_uuid;
+    DROP INDEX IF EXISTS idx_operational_job_deliveries_kind;
+    DROP INDEX IF EXISTS idx_verification_receipts_task;
+    DROP TABLE IF EXISTS operational_job_deliveries;
+    DROP TABLE IF EXISTS operational_jobs;
+    DROP TABLE IF EXISTS verification_receipts;
     PRAGMA user_version = 31;
   `);
   continuity
@@ -42,8 +48,8 @@ describe("nuclear schema v32 patch export", () => {
   it("installs control-plane tables with zero rows", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     try {
-      expect(NUCLEAR_SUPPORTED_VERSION).toBe(32);
-      expect(schemaVersion(db)).toBe(32);
+      expect(NUCLEAR_SUPPORTED_VERSION).toBe(33);
+      expect(schemaVersion(db)).toBe(33);
       expect(
         (db.prepare(`SELECT COUNT(*) AS c FROM patch_export_records`).get() as { c: number }).c,
       ).toBe(0);
@@ -74,7 +80,7 @@ describe("nuclear schema v32 patch export", () => {
         to: 32,
       });
       const reopen = openNuclearDb(fixture.nuclear, { continuity: fixture.continuity });
-      expect(schemaVersion(reopen)).toBe(32);
+      expect(schemaVersion(reopen)).toBe(33);
       expect(getPendingNuclearMigration(fixture.continuity)).toBeNull();
       persistPatchExportRecord(reopen, {
         ownerId: "doc",

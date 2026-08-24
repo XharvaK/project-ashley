@@ -28,10 +28,11 @@ export function issueCandidateVerificationLicense(input: {
   executedAtMs?: number;
   messageEntityUuid?: string;
   error?: string | null;
+  taskId?: string;
 }): OperationalClaimLicense {
   const base: OperationalClaimLicense = {
     state: "none",
-    taskId: `v2-verify-${input.executedAtMs ?? Date.now()}`,
+    taskId: input.taskId?.trim() || `v2-verify-${input.executedAtMs ?? Date.now()}`,
     profile: "candidate_verification",
     error: input.error ?? null,
     ...(input.messageEntityUuid

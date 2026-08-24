@@ -786,9 +786,92 @@ function requireNoV30Objects(db: DatabaseSync, version: number): void {
   }
 }
 
+const V33_TABLES = [
+  "operational_jobs",
+  "operational_job_deliveries",
+  "verification_receipts",
+] as const;
+
+const V33_COLUMNS: Record<string, ColumnSpec[]> = {
+  operational_jobs: [
+    { name: "id", primaryKey: true },
+    { name: "entity_uuid", notNull: true },
+    { name: "data_classification", notNull: true, defaultValue: "'never_public'" },
+    { name: "job_id", notNull: true },
+    { name: "owner_id", notNull: true },
+    { name: "source_message_entity_uuid", notNull: true },
+    { name: "admission_reservation_id", notNull: true },
+    { name: "status", notNull: true },
+    { name: "created_at", notNull: true },
+    { name: "updated_at", notNull: true },
+  ],
+  operational_job_deliveries: [
+    { name: "id", primaryKey: true },
+    { name: "entity_uuid", notNull: true },
+    { name: "job_id", notNull: true },
+    { name: "delivery_kind", notNull: true },
+    { name: "delivery_reservation_id", notNull: true },
+    { name: "created_at", notNull: true },
+  ],
+  verification_receipts: [
+    { name: "id", primaryKey: true },
+    { name: "entity_uuid", notNull: true },
+    { name: "owner_id", notNull: true },
+    { name: "task_id", notNull: true },
+    { name: "workspace_id", notNull: true },
+    { name: "recipe_id", notNull: true },
+    { name: "outcome", notNull: true },
+    { name: "settled_at", notNull: true },
+  ],
+  bounded_operation_tasks: [{ name: "origin_job_id" }],
+  bounded_operation_steps: [
+    { name: "child_task_id" },
+    { name: "causation_key" },
+    { name: "step_run_status" },
+  ],
+  candidate_changesets: [{ name: "origin_child_task_id" }],
+};
+
+const V33_INDEXES: IndexSpec[] = [
+  {
+    table: "operational_jobs",
+    name: "idx_operational_jobs_entity_uuid",
+    columns: ["entity_uuid"],
+    unique: true,
+  },
+  {
+    table: "operational_job_deliveries",
+    name: "idx_operational_job_deliveries_kind",
+    columns: ["job_id", "delivery_kind"],
+    unique: true,
+  },
+  {
+    table: "verification_receipts",
+    name: "idx_verification_receipts_task",
+    columns: ["task_id"],
+    unique: true,
+  },
+];
+
+const V33_ONLY_OBJECTS = [
+  ...V33_TABLES,
+  "idx_operational_jobs_entity_uuid",
+  "idx_operational_job_deliveries_kind",
+  "idx_verification_receipts_task",
+] as const;
+
+function requireNoV33Objects(db: DatabaseSync, version: number): void {
+  for (const name of V33_ONLY_OBJECTS) {
+    const type = V33_TABLES.includes(name as (typeof V33_TABLES)[number])
+      ? "table"
+      : "index";
+    if (masterRow(db, type, name)) fail(version, `unexpected_v33_object:${name}`);
+  }
+}
+
 export function validateNuclearSchemaContent(
   db: DatabaseSync,
-  version: 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32,
+  version: 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33,
   options: { rejectNewerContent?: boolean } = {},
 ): void {
   if (version === 22) {
@@ -891,6 +974,16 @@ export function validateNuclearSchemaContent(
     requireFragments(db, version, table, V32_TABLE_FRAGMENTS[table] ?? []);
   }
   for (const index of V32_INDEXES) requireIndex(db, version, index);
+  if (version === 32 && options.rejectNewerContent === true) {
+    requireNoV33Objects(db, version);
+    return;
+  }
+  if (version === 32) return;
+  for (const table of V33_TABLES) requireTable(db, version, table);
+  for (const [table, columns] of Object.entries(V33_COLUMNS)) {
+    requireColumns(db, version, table, columns);
+  }
+  for (const index of V33_INDEXES) requireIndex(db, version, index);
 }
 
 function addColumnIfMissing(

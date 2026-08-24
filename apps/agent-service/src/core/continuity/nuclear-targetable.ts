@@ -51,6 +51,9 @@ export const TARGETABLE_TABLES: Array<{
   { table: "bounded_operation_tasks", idColumn: "id", ownerColumn: "owner_id", needsClassification: true },
   { table: "bounded_operation_steps", idColumn: "id", ownerColumn: "owner_id", needsClassification: true },
   { table: "patch_export_records", idColumn: "id", ownerColumn: "owner_id", needsClassification: true },
+  { table: "operational_jobs", idColumn: "id", ownerColumn: "owner_id", needsClassification: true },
+  { table: "operational_job_deliveries", idColumn: "id", ownerColumn: null, needsClassification: true },
+  { table: "verification_receipts", idColumn: "id", ownerColumn: "owner_id", needsClassification: true },
 ];
 
 export const RELATIONSHIP_ENTITY_TYPES = [

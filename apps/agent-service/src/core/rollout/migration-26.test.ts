@@ -75,8 +75,8 @@ describe("nuclear schema v26 Recall qualification epochs", () => {
   it("installs the epoch registry with zero current epochs and no auto campaign", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     try {
-      expect(NUCLEAR_SUPPORTED_VERSION).toBe(32);
-      expect(schemaVersion(db)).toBe(32);
+      expect(NUCLEAR_SUPPORTED_VERSION).toBe(33);
+      expect(schemaVersion(db)).toBe(33);
       expect(
         (
           db.prepare(
@@ -130,7 +130,7 @@ describe("nuclear schema v26 Recall qualification epochs", () => {
         .get();
 
       openNuclearDb(fixture.nuclear, { continuity: fixture.continuity });
-      expect(schemaVersion(fixture.nuclear)).toBe(32);
+      expect(schemaVersion(fixture.nuclear)).toBe(33);
       expect(
         fixture.nuclear.prepare("SELECT * FROM capability_events ORDER BY source_key").all(),
       ).toEqual(beforeEvents);
@@ -272,7 +272,7 @@ describe("nuclear schema v26 Recall qualification epochs", () => {
       }
 
       openNuclearDb(fixture.nuclear, { continuity: fixture.continuity });
-      expect(schemaVersion(fixture.nuclear)).toBe(32);
+      expect(schemaVersion(fixture.nuclear)).toBe(33);
       expect(getPendingNuclearMigration(fixture.continuity)).toBeNull();
       expect(
         (
@@ -280,7 +280,7 @@ describe("nuclear schema v26 Recall qualification epochs", () => {
             .prepare("SELECT nuclear_schema_version FROM lineage_state WHERE id = 1")
             .get() as { nuclear_schema_version: number }
         ).nuclear_schema_version,
-      ).toBe(32);
+      ).toBe(33);
     } finally {
       closeFixture(fixture);
     }

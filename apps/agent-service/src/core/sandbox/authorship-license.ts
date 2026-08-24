@@ -26,10 +26,11 @@ export function issueCandidateAuthorshipLicense(input: {
   error?: string | null;
   status?: "proposed";
   reviewStatus?: "submitted";
+  taskId?: string;
 }): OperationalClaimLicense {
   const base: OperationalClaimLicense = {
     state: "none",
-    taskId: `v2-author-${input.executedAtMs ?? Date.now()}`,
+    taskId: input.taskId?.trim() || `v2-author-${input.executedAtMs ?? Date.now()}`,
     profile: "candidate_authorship",
     error: input.error ?? null,
     ...(input.messageEntityUuid

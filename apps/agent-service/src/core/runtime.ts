@@ -192,6 +192,14 @@ import {
   listPendingWeeklyReviewDeliveries,
 } from "./sandbox/weekly-review-delivery.js";
 import {
+  listPendingOperationalCompletionDeliveries,
+} from "./sandbox/durable-job-completion.js";
+import {
+  listOperationalJobsForOwner,
+  requestOperationalJobCancel,
+  getOperationalJob,
+} from "./sandbox/operational-job-store.js";
+import {
   engineeringStatusSnapshot,
   findCorrelatedEngineeringTask,
 } from "./sandbox/engineering-runs.js";
@@ -212,6 +220,10 @@ import {
   executeCandidateAuthorshipV2,
 } from "./sandbox/v2-execution.js";
 import { executeBoundedOperationV2 } from "./sandbox/bounded-operation-execution.js";
+import {
+  admitDurableBoundedOperation,
+  durableJobStatusSnapshot,
+} from "./sandbox/durable-job-runner.js";
 import { executePatchExportV2 } from "./sandbox/patch-export-execution.js";
 import { canOfferProjectInspection, canOfferCandidateWorkspace, canOfferCandidateVerification, canOfferCandidateAuthorship, canOfferBoundedOperation, canOfferPatchExport, loadOperatorProjectReadRegistry } from "./sandbox/project-registry.js";
 import { shouldRunProactiveModelThought } from "./agency/proactive-thought-gate.js";
@@ -1271,30 +1283,49 @@ export class AshleyCore {
               );
             }
           } else if (opReq.kind === "bounded_operation") {
-            const operateResult = await executeBoundedOperationV2({
-              request: opReq.request,
-              ownerId: input.ownerId,
-              messageEntityUuid: messageEntityUuid ?? undefined,
-              db: this.db,
-            });
-            decision.operationalLicense = operateResult.license;
-            decision = await deliberateThoughtContinuation(
-              this.db,
-              decision,
-              null,
-              operateResult.license.error ?? null,
-              motivations,
-              "reactive",
-              undefined,
-              undefined,
-              {
-                allowModelThought: thoughtCanInfluence,
-                thoughtDeadlineAtMs: opReq.request.budget.deadlineAtMs,
-                deliveryReservationId: reservation.id,
+            if (env.durableBoundedOperationEnabled) {
+              const taskId = `v2-operate-${randomUUID().replaceAll("-", "").slice(0, 16)}`;
+              const admitted = admitDurableBoundedOperation(this.db, {
                 ownerId: input.ownerId,
-                onLifecycle: onContinuationLifecycle,
-              },
-            );
+                sourceMessageEntityUuid: messageEntityUuid ?? taskId,
+                sourceUserMessageId: userMessageId ?? null,
+                admissionReservationId: reservation.id,
+                request: opReq.request,
+                taskId,
+              });
+              decision.operationalLicense = {
+                state: "none",
+                taskId: admitted.taskId,
+                profile: "bounded_operation",
+                error: null,
+                sourceMessageEntityUuid: messageEntityUuid ?? undefined,
+              };
+            } else {
+              const operateResult = await executeBoundedOperationV2({
+                request: opReq.request,
+                ownerId: input.ownerId,
+                messageEntityUuid: messageEntityUuid ?? undefined,
+                db: this.db,
+              });
+              decision.operationalLicense = operateResult.license;
+              decision = await deliberateThoughtContinuation(
+                this.db,
+                decision,
+                null,
+                operateResult.license.error ?? null,
+                motivations,
+                "reactive",
+                undefined,
+                undefined,
+                {
+                  allowModelThought: thoughtCanInfluence,
+                  thoughtDeadlineAtMs: opReq.request.budget.deadlineAtMs,
+                  deliveryReservationId: reservation.id,
+                  ownerId: input.ownerId,
+                  onLifecycle: onContinuationLifecycle,
+                },
+              );
+            }
           } else if (opReq.kind === "patch_export") {
             const exportResult = await executePatchExportV2({
               request: opReq.request,
@@ -1951,11 +1982,31 @@ export class AshleyCore {
   }
 
   getPendingWeeklyReviewDeliveries(ownerId: string) {
-    return listPendingWeeklyReviewDeliveries(this.db, ownerId);
+    return [
+      ...listPendingWeeklyReviewDeliveries(this.db, ownerId),
+      ...listPendingOperationalCompletionDeliveries(this.db, ownerId),
+    ];
   }
 
   getEngineeringStatus(ownerId: string) {
     return engineeringStatusSnapshot(this.db, ownerId);
+  }
+
+  getDurableOperationalJobStatus(ownerId: string, jobId: string) {
+    return durableJobStatusSnapshot(this.db, ownerId, jobId);
+  }
+
+  listDurableOperationalJobs(ownerId: string) {
+    return listOperationalJobsForOwner(this.db, ownerId)
+      .map((job) => durableJobStatusSnapshot(this.db, ownerId, job.jobId))
+      .filter((row) => row !== null);
+  }
+
+  cancelDurableOperationalJob(ownerId: string, jobId: string) {
+    const job = getOperationalJob(this.db, jobId);
+    if (!job || job.ownerId !== ownerId) return { ok: false as const, reason: "not_found" };
+    const ok = requestOperationalJobCancel(this.db, jobId);
+    return { ok, observationOnly: false as const };
   }
 
   receiptDeliveryBubble(

@@ -39,6 +39,8 @@ export type WorkspaceManifest = {
   createdAt: string;
   lastUsedAt: string;
   sourceSnapshotId: string;
+  /** Recovery provenance only. Grants no authority. */
+  originChildTaskId?: string;
 };
 
 export type AuthorizedProjectExecutionContext = {
@@ -112,11 +114,16 @@ export class WorkspaceManager {
   async acquireWorkspace(
     context: AuthorizedProjectExecutionContext,
     requestedWorkspaceId?: string,
+    originChildTaskId?: string,
   ): Promise<WorkspaceAcquisitionResult> {
     if (requestedWorkspaceId) {
-      return this.resumeWorkspace(context, requestedWorkspaceId);
+      const resumed = this.resumeWorkspace(context, requestedWorkspaceId);
+      if (resumed.ok && originChildTaskId) {
+        this.bindOriginChildTaskId(requestedWorkspaceId, originChildTaskId);
+      }
+      return resumed;
     }
-    return this.createWorkspace(context);
+    return this.createWorkspace(context, originChildTaskId);
   }
 
   /**
@@ -263,6 +270,7 @@ export class WorkspaceManager {
    */
   private async createWorkspace(
     context: AuthorizedProjectExecutionContext,
+    originChildTaskId?: string,
   ): Promise<WorkspaceAcquisitionResult> {
     const workspaceId = randomBytes(16).toString("base64url");
     const finalDir = join(this.managedRoot, workspaceId);
@@ -314,6 +322,7 @@ export class WorkspaceManager {
           createdAt: new Date().toISOString(),
           lastUsedAt: new Date().toISOString(),
           sourceSnapshotId,
+          ...(originChildTaskId ? { originChildTaskId } : {}),
         };
 
         const stagingManifestPath = join(stagingDir, "manifest.json");
@@ -339,6 +348,44 @@ export class WorkspaceManager {
       this.cleanDir(stagingDir);
       return { ok: false, error: "workspace_creation_failed" };
     }
+  }
+
+  bindOriginChildTaskId(workspaceId: string, originChildTaskId: string): boolean {
+    const manifestPath = join(this.managedRoot, workspaceId, "manifest.json");
+    if (!existsSync(manifestPath)) return false;
+    try {
+      const raw = JSON.parse(readFileSync(manifestPath, "utf8")) as WorkspaceManifest;
+      if (raw.originChildTaskId && raw.originChildTaskId !== originChildTaskId) {
+        return false;
+      }
+      raw.originChildTaskId = originChildTaskId;
+      writeFileSync(manifestPath, JSON.stringify(raw, null, 2), { encoding: "utf8", mode: 0o600 });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  findWorkspaceByOriginChildTaskId(originChildTaskId: string): WorkspaceManifest | null {
+    if (!existsSync(this.managedRoot) || !originChildTaskId) return null;
+    let names: string[] = [];
+    try {
+      names = readdirSync(this.managedRoot);
+    } catch {
+      return null;
+    }
+    for (const name of names) {
+      if (name.startsWith(".")) continue;
+      const manifestPath = join(this.managedRoot, name, "manifest.json");
+      if (!existsSync(manifestPath)) continue;
+      try {
+        const raw = JSON.parse(readFileSync(manifestPath, "utf8")) as WorkspaceManifest;
+        if (raw.originChildTaskId === originChildTaskId) return raw;
+      } catch {
+        continue;
+      }
+    }
+    return null;
   }
 
   private isValidWorkspaceId(id: string): boolean {

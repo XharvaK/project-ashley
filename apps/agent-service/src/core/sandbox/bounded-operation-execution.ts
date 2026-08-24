@@ -50,6 +50,9 @@ export type ExecuteBoundedOperationV2Input = {
   skipCapabilityGate?: boolean;
   clock?: { nowMs(): number };
   cancelled?: () => boolean;
+  taskId?: string;
+  originJobId?: string;
+  stopAfterAdmit?: boolean;
 };
 
 export type ExecuteBoundedOperationV2Result = {
@@ -132,7 +135,7 @@ export async function executeBoundedOperationV2(
   input: ExecuteBoundedOperationV2Input,
 ): Promise<ExecuteBoundedOperationV2Result> {
   const { request, messageEntityUuid } = input;
-  const taskId = `v2-operate-${randomBytes(8).toString("hex")}`;
+  const taskId = input.taskId?.trim() || `v2-operate-${randomBytes(8).toString("hex")}`;
   const nowMs = () => (input.clock ? input.clock.nowMs() : Date.now());
 
   if (input.db && !input.skipCapabilityGate) {
@@ -210,7 +213,20 @@ export async function executeBoundedOperationV2(
       ),
       maxSteps: request.budget.maxSteps,
       deadlineAtMs: request.budget.deadlineAtMs,
+      originJobId: input.originJobId ?? null,
     });
+  }
+
+  if (input.stopAfterAdmit) {
+    return {
+      license: {
+        state: "none",
+        taskId,
+        profile: "bounded_operation",
+        error: null,
+        ...(messageEntityUuid ? { sourceMessageEntityUuid: messageEntityUuid } : {}),
+      },
+    };
   }
 
   const shared = {

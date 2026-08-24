@@ -64,6 +64,7 @@ export function persistProposedChangeSet(
     patchSha256: string;
     patchBytes: number;
     artifactRef: string;
+    originChildTaskId?: string | null;
   },
 ): PersistedChangeSet {
   const createdAt = nowIso();
@@ -77,8 +78,8 @@ export function persistProposedChangeSet(
        expected_effect, risk_class, evidence_refs_json, verification_recipe_ids_json,
        intended_paths_json, changed_paths_json, linked_verification_refs_json,
        patch_sha256, patch_bytes, artifact_ref, status, review_status,
-       quarantine_reason, created_at, updated_at
-     ) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'proposed', 'submitted', NULL, ?, ?)`,
+       quarantine_reason, origin_child_task_id, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'proposed', 'submitted', NULL, ?, ?, ?)`,
   ).run(
     newEntityUuid(),
     classification,
@@ -106,6 +107,7 @@ export function persistProposedChangeSet(
     input.patchSha256,
     input.patchBytes,
     input.artifactRef,
+    input.originChildTaskId ?? null,
     createdAt,
     createdAt,
   );
@@ -273,4 +275,20 @@ export function listChangeSetEventTypes(db: DatabaseSync, changesetId: string): 
       )
       .all(changesetId) as Array<{ event_type: string }>
   ).map((row) => row.event_type);
+}
+
+export function getChangeSetByOriginChildTaskId(
+  db: DatabaseSync,
+  originChildTaskId: string,
+): { changesetId: string; workspaceId: string; candidateTreeHash: string | null } | null {
+  const row = db
+    .prepare(
+      `SELECT changeset_id AS changesetId, workspace_id AS workspaceId,
+              candidate_tree_hash AS candidateTreeHash
+         FROM candidate_changesets WHERE origin_child_task_id = ?`,
+    )
+    .get(originChildTaskId) as
+    | { changesetId: string; workspaceId: string; candidateTreeHash: string | null }
+    | undefined;
+  return row ?? null;
 }
