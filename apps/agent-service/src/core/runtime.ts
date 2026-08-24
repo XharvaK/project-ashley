@@ -874,12 +874,56 @@ export class AshleyCore {
             durableThoughtEnabled: true,
           });
           if (begun.admitted) {
-            const finalized = finalizeDelivery(this.db, {
-              reservationId: reservation.id,
-              ownerId: input.ownerId,
-              cause: "complete",
-              ownTimeOpen,
-            });
+            const bubbles = planContentBubbles(begun.ackText);
+            const plannedBubbles =
+              bubbles.length > 0
+                ? bubbles
+                : [{ ordinal: 0, text: begun.ackText }];
+            const reserved = attachDraftAndBubbles(
+              this.db,
+              reservation.id,
+              begun.ackText,
+              plannedBubbles,
+              {
+                deliveryLeaseExpiresAt: new Date(
+                  deadlinePlan.common.reservationHardDeadlineAtMs,
+                ).toISOString(),
+              },
+            );
+            if (!ownTimeOpen) {
+              patchState(this.db, input.ownerId, { availability: "available" });
+            }
+            if (simulateDelivery) {
+              for (const bubble of plannedBubbles) {
+                recordBubbleReceipt(
+                  this.db,
+                  reservation.id,
+                  bubble.ordinal,
+                  `sim:${reservation.id}:${bubble.ordinal}`,
+                );
+              }
+              const finalized = finalizeDelivery(this.db, {
+                reservationId: reservation.id,
+                ownerId: input.ownerId,
+                cause: "complete",
+                ownTimeOpen,
+              });
+              clearDeliveryAbort(reservation.id);
+              return {
+                text: finalized.deliveredText || begun.ackText,
+                threadId: reservation.threadId,
+                model: "none",
+                decisionId: reservation.decisionId ?? 0,
+                decisionKind: "speak",
+                silenced: false,
+                reservationId: reservation.id,
+                deliveryState: finalized.state,
+                plannedBubbles,
+                firstBubbleDeadlineAt: reserved.firstBubbleDeadlineAt,
+                finalDeliveryDeadlineAt: reserved.deliveryLeaseExpiresAt,
+              };
+            }
+            clearDeliveryAbort(reservation.id);
             return {
               text: begun.ackText,
               threadId: reservation.threadId,
@@ -888,7 +932,11 @@ export class AshleyCore {
               decisionKind: "speak",
               silenced: false,
               reservationId: reservation.id,
-              deliveryState: finalized.state,
+              deliveryState: reserved.state,
+              plannedBubbles,
+              firstBubbleDeadlineAt: reserved.firstBubbleDeadlineAt,
+              finalDeliveryDeadlineAt: reserved.deliveryLeaseExpiresAt,
+              statusUrl: `/delivery/${reservation.id}`,
             };
           }
         }
