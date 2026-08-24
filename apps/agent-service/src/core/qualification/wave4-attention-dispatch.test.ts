@@ -54,9 +54,9 @@ import {
 const EXPRESSION_ROUTE = routeBinding("ashley_expression");
 const THOUGHT_ROUTE = routeBinding("thought");
 const MISTRAL_BUCKET = bucketForRoute("ashley_expression");
-const GROQ_THOUGHT_BUCKET = bucketForRoute("thought");
+const THOUGHT_BUCKET = bucketForRoute("thought");
 
-const SAVED = { groq: env.groqApiKey, mistral: env.mistralApiKey };
+const SAVED = { groq: env.groqApiKey, mistral: env.mistralApiKey, nim: env.nimApiKey };
 
 const temps: Array<{ db: DatabaseSync; path: string }> = [];
 
@@ -114,7 +114,7 @@ function enqueueShadowThought(
       purpose: "thought_observation",
       modelAlias: THOUGHT_ROUTE.configuredModelId,
       providerId: THOUGHT_ROUTE.provider,
-      quotaBucket: GROQ_THOUGHT_BUCKET,
+      quotaBucket: THOUGHT_BUCKET,
       routeAlias: "thought",
       estimatedInputTokens: 400,
       estimatedOutputTokens: 450,
@@ -179,9 +179,9 @@ describe("wave4 Track M1 — shadow Thought dispatch wiring (no network)", () =>
     }
   });
 
-  it("route='thought' resolves to the production-equivalent groq 120B binding", () => {
-    expect(THOUGHT_ROUTE.provider).toBe("groq");
-    expect(THOUGHT_ROUTE.configuredModelId).toBe("openai/gpt-oss-120b");
+  it("route='thought' resolves to the production-equivalent nim 20B binding", () => {
+    expect(THOUGHT_ROUTE.provider).toBe("nim");
+    expect(THOUGHT_ROUTE.configuredModelId).toBe("openai/gpt-oss-20b");
     expect(THOUGHT_ROUTE.enabled).toBe(true);
   });
 });
@@ -190,10 +190,12 @@ describe("wave4 Track M2 — ledger A/B: shadow Thought vs live Expression admis
   beforeEach(() => {
     env.groqApiKey = "wave4-fake-groq";
     env.mistralApiKey = "wave4-fake-mistral";
+    env.nimApiKey = "wave4-fake-nim";
   });
   afterEach(() => {
     env.groqApiKey = SAVED.groq;
     env.mistralApiKey = SAVED.mistral;
+    env.nimApiKey = SAVED.nim;
     closeTempDbs();
   });
 
@@ -329,24 +331,26 @@ describe("wave4 Track M4 — quota bucket isolation (NO DEFECT)", () => {
   beforeEach(() => {
     env.groqApiKey = "wave4-fake-groq";
     env.mistralApiKey = "wave4-fake-mistral";
+    env.nimApiKey = "wave4-fake-nim";
   });
   afterEach(() => {
     env.groqApiKey = SAVED.groq;
     env.mistralApiKey = SAVED.mistral;
+    env.nimApiKey = SAVED.nim;
     closeTempDbs();
   });
 
   it("groq-thought and mistral-expression resolve to different quota buckets", () => {
-    expect(GROQ_THOUGHT_BUCKET).toBe("groq:openai/gpt-oss-120b");
+    expect(THOUGHT_BUCKET).toBe("nim:openai/gpt-oss-20b");
     expect(MISTRAL_BUCKET).toBe("mistral:mistral-medium-latest");
-    expect(GROQ_THOUGHT_BUCKET).not.toBe(MISTRAL_BUCKET);
+    expect(THOUGHT_BUCKET).not.toBe(MISTRAL_BUCKET);
     expect(THOUGHT_ROUTE.provider).not.toBe(EXPRESSION_ROUTE.provider);
   });
 
   it("saturating the groq-thought TPM window leaves the mistral-expression bucket dispatchable now", () => {
     const clock = createFakeClock(Date.parse("2026-02-01T00:00:00.000Z"));
     const db = tempDb();
-    const thoughtTpm = quotaContractFor(GROQ_THOUGHT_BUCKET).tpm;
+    const thoughtTpm = quotaContractFor(THOUGHT_BUCKET).tpm;
 
     const hog = insertQueuedRequest(
       db,
@@ -355,7 +359,7 @@ describe("wave4 Track M4 — quota bucket isolation (NO DEFECT)", () => {
         purpose: "thought",
         modelAlias: THOUGHT_ROUTE.configuredModelId,
         providerId: THOUGHT_ROUTE.provider,
-        quotaBucket: GROQ_THOUGHT_BUCKET,
+        quotaBucket: THOUGHT_BUCKET,
         routeAlias: "thought",
         estimatedInputTokens: thoughtTpm - 1,
         estimatedOutputTokens: 1,
@@ -365,7 +369,7 @@ describe("wave4 Track M4 — quota bucket isolation (NO DEFECT)", () => {
     expect(tryAdmitRequest(db, hog, clock).admitted).toBe(true);
 
     expect(
-      earliestLegalDispatchMs(db, 100, clock, GROQ_THOUGHT_BUCKET),
+      earliestLegalDispatchMs(db, 100, clock, THOUGHT_BUCKET),
     ).toBeGreaterThan(clock.nowMs());
     expect(earliestLegalDispatchMs(db, 100, clock, MISTRAL_BUCKET)).toBe(
       clock.nowMs(),
@@ -380,10 +384,12 @@ describe("wave4 Track M5 — continuity demotion coupling", () => {
   beforeEach(() => {
     env.groqApiKey = "wave4-fake-groq";
     env.mistralApiKey = "wave4-fake-mistral";
+    env.nimApiKey = "wave4-fake-nim";
   });
   afterEach(() => {
     env.groqApiKey = SAVED.groq;
     env.mistralApiKey = SAVED.mistral;
+    env.nimApiKey = SAVED.nim;
     closeTempDbs();
   });
 
@@ -399,7 +405,7 @@ describe("wave4 Track M5 — continuity demotion coupling", () => {
         purpose: "thought",
         lane: "interactive",
         providerId: THOUGHT_ROUTE.provider,
-        quotaBucket: GROQ_THOUGHT_BUCKET,
+        quotaBucket: THOUGHT_BUCKET,
         routeAlias: "thought",
         modelAlias: alias,
         maxTokens: 64,
@@ -445,11 +451,11 @@ describe("wave4 Track M5 — continuity demotion coupling", () => {
       before.every((row) => (row as { state: string }).state === "observe"),
     ).toBe(true);
 
-    await dispatchThought(db, "gpt-oss-120b-2026-01", clock);
+    await dispatchThought(db, "gpt-oss-20b-2026-01", clock);
     expect(currentModelEpoch(db, alias)).toBe(1);
 
     clock.advance(1_000);
-    await dispatchThought(db, "gpt-oss-120b-2026-02", clock);
+    await dispatchThought(db, "gpt-oss-20b-2026-02", clock);
     expect(currentModelEpoch(db, alias)).toBe(2);
 
     const events = db
@@ -483,7 +489,7 @@ describe("wave4 Track M5 — continuity demotion coupling", () => {
     ] as CapabilityName[]) {
       capabilityCanExecuteShadow(db, capability);
     }
-    await dispatchThought(db, "gpt-oss-120b-2026-01", clock);
+    await dispatchThought(db, "gpt-oss-20b-2026-01", clock);
 
     for (const capability of ["thought", "reading", "recall"]) {
       db.prepare(
@@ -492,7 +498,7 @@ describe("wave4 Track M5 — continuity demotion coupling", () => {
     }
 
     clock.advance(1_000);
-    await dispatchThought(db, "gpt-oss-120b-2026-02", clock);
+    await dispatchThought(db, "gpt-oss-20b-2026-02", clock);
 
     expect(capabilityState(db, "thought")).toBe("observe");
     expect(capabilityState(db, "reading")).toBe("observe");

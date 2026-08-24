@@ -16,11 +16,14 @@ import { env } from "../../env.js";
 // fires in the ON fixture; the OFF fixture still never fires it because its
 // worker never runs (no correlated shadow episode). Restored per-test.
 const SAVED_GROQ = env.groqApiKey;
+const SAVED_NIM = env.nimApiKey;
 export function armGroqKey(): void {
   env.groqApiKey = "wave4-fake-groq-key";
+  env.nimApiKey = "wave4-fake-nim-key";
 }
 export function restoreGroqKey(): void {
   env.groqApiKey = SAVED_GROQ;
+  env.nimApiKey = SAVED_NIM;
 }
 
 export { expressionCapture, thoughtCapture, clearCaptures } from "./mistral-client-mock-state.js";
