@@ -1480,12 +1480,15 @@ export function composeInitialThoughtMessages(input: {
     if (canOfferWorkspace) {
       parts.push(
         `When a candidate workspace experiment is required, include operationalRequest: {kind: "candidate_workspace_experiment", request: {operation: "workspace.read_file"|"workspace.list_directory"|"workspace.search_text"|"workspace.write_file"|"workspace.replace_file"|"workspace.edit_text"|"workspace.delete_file"|"workspace.create_directory", projectId: "${quotedProjectIds}", workspaceId?: string, path: string, ...}}.`,
-        "A candidate workspace is a private bounded working copy for an approved project.",
+        "The candidate workspace environment is runtime-managed. When working in or starting a candidate workspace, omit workspaceId; the runtime automatically acquires a fresh candidate workspace initialized from the repository. Never use workspace.create_directory to create, start, or name the candidate workspace itself.",
+        "workspace.write_file with path and content creates a new file (mustNotExist semantics) or writes file contents inside the candidate workspace. Use this whenever asked to create, write, or add a file, or when file content is provided.",
+        "workspace.create_directory with path creates an empty directory/folder at that relative path inside the candidate workspace.",
+        "workspace.replace_file with path and content completely replaces an existing file.",
+        "workspace.edit_text with path, targetContent, and replacementContent performs surgical in-place edits on an existing file.",
+        "workspace.delete_file with path deletes a file inside the candidate workspace.",
         "Workspace mutation does NOT modify the live repository; it is for candidate experimentation only.",
         "Workspace availability is controlled by runtime authority.",
         "It grants no Git/commit/push/deploy authority and no external-account authority.",
-        "workspace.write_file with content creates a new file (mustNotExist semantics).",
-        "Use workspace.edit_text for surgical in-place edits on existing files.",
       );
     }
     if (canOfferVerification) {
@@ -1590,8 +1593,7 @@ function validateInitialThoughtProposal(
   if (
     !kinds.has(kind) ||
     motivationIds.length === 0 ||
-    (kind === "delay" && delayClass === null) ||
-    (kind !== "delay" && parsed.delayClass != null)
+    (kind === "delay" && delayClass === null)
   ) {
     return { ok: false, errorCode: "payload_invalid" };
   }
@@ -1718,7 +1720,7 @@ function validateInitialThoughtProposal(
     ok: true,
     result: {
       kind,
-      delayClass,
+      delayClass: kind === "delay" ? delayClass : null,
       shouldSpeak,
       effort,
       completion,
@@ -2128,8 +2130,8 @@ function buildContinuationMessages(input: {
     "You are Ashley's Thought layer continuing deliberation after receiving sandbox execution results.",
     "Interpret the structured observation or execution error truthfully to produce your final Decision.",
     "Return one compact JSON object only. No markdown, preamble, or chain-of-thought.",
-    "Schema: {kind,delayClass,shouldSpeak,effort,completion,uncertainty,urgency,objective,reason,motivationIds,cognitiveResult?}.",
-    "kind is speak|silence|delay|ask|revisit|share|challenge|refuse; effort is low|medium|high; completion is complete|hold.",
+    "Schema: {kind,delayClass?,shouldSpeak,effort,completion,uncertainty,urgency,objective,reason,motivationIds,cognitiveResult?}.",
+    "kind is speak|silence|delay|ask|revisit|share|challenge|refuse; delayClass is brief|standard|long|reflection_review (only when kind is delay); effort is low|medium|high; completion is complete|hold.",
     "Do NOT emit another operationalRequest, inspectionRequest, workspaceRequest, verificationRequest, or authorshipRequest. Exactly one sandbox execution per turn.",
     "If the sandbox failed or is unavailable, reason about the failure truthfully without inferring absence of files or zero matches.",
     "If mechanicalVerification is present, reason only about snapshot identity, recipe identity, and the mechanical outcome. Do not claim quality, approval, merge, deployment, or self-improvement.",
@@ -2203,8 +2205,7 @@ function validateContinuationProposal(
   if (
     !kinds.has(kind) ||
     motivationIds.length === 0 ||
-    (kind === "delay" && delayClass === null) ||
-    (kind !== "delay" && parsed.delayClass != null)
+    (kind === "delay" && delayClass === null)
   ) {
     return { ok: false, errorCode: "payload_invalid" };
   }
@@ -2231,7 +2232,7 @@ function validateContinuationProposal(
     ok: true,
     result: {
       kind,
-      delayClass,
+      delayClass: kind === "delay" ? delayClass : null,
       shouldSpeak,
       effort,
       completion,

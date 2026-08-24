@@ -4,8 +4,20 @@ import { env } from "../../env.js";
 import { openNuclearDb } from "../db.js";
 import { seedIdentity } from "../identity/store.js";
 import { decide } from "./decide.js";
-import { deliberateDecision, parseWorkspaceRequest, parseInspectionRequest } from "./thought.js";
+import { deliberateDecision, parseWorkspaceRequest, parseInspectionRequest, composeInitialThoughtMessages } from "./thought.js";
+import { currentReleaseId, currentContractId, currentBuildIdentity, capabilityNames } from "../rollout/capabilities.js";
 import type { Motivation } from "../types.js";
+
+function activateCapabilities(db: DatabaseSync) {
+  const relId = currentReleaseId();
+  const now = new Date().toISOString();
+  for (const cap of capabilityNames) {
+    db.prepare(
+      `INSERT OR REPLACE INTO capability_releases (capability, release_id, state, updated_at, contract_id, build_identity, model_epoch)
+       VALUES (?, ?, 'active', ?, ?, ?, 0)`,
+    ).run(cap, relId, now, currentContractId(), currentBuildIdentity());
+  }
+}
 
 const originalMode = env.cognitionMode;
 const originalKey = env.mistralApiKey;
@@ -379,5 +391,25 @@ describe("Stage 1 — Canonical Operational Request Ontology", () => {
     db.close();
     expect(result.thoughtSource).toBe("fallback");
     expect(result.thoughtError).toBe("capability_unavailable");
+  });
+
+  it("composeInitialThoughtMessages contains unambiguous M3 write_file, create_directory, and workspace lifecycle guidance", () => {
+    const messages = composeInitialThoughtMessages({
+      base: decide([motivation], "reactive"),
+      motivations: [motivation],
+      trigger: "reactive",
+      canOffer: true,
+      canOfferWorkspace: true,
+      canOfferVerification: true,
+      canOfferAuthorship: true,
+      canOfferOperation: false,
+      canOfferExport: false,
+      approvedProjectIds: ["project-ashley"],
+    });
+    const prompt = messages[0].content;
+    expect(prompt).toContain("workspace.write_file with path and content creates a new file");
+    expect(prompt).toContain("workspace.create_directory with path creates an empty directory/folder");
+    expect(prompt).toContain("The candidate workspace environment is runtime-managed");
+    expect(prompt).toContain("Never use workspace.create_directory to create, start, or name the candidate workspace itself.");
   });
 });

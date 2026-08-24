@@ -848,4 +848,109 @@ describe("M4 repair: Pass 1 shared substrate smoke", () => {
       db.close();
     }
   });
+
+  it("continuation proposal accepts non-delay decision with delayClass present and normalizes it to null", async () => {
+    const operationalLicense = {
+      discriminator: "ASHLEY_SANDBOX_V2_LICENSE" as const,
+      state: "succeeded" as const,
+      taskId: "task-m3-exp",
+      profile: "project_experimentation" as const,
+      workspaceEffect: {
+        projectId: "project-ashley",
+        workspaceId: "w-fresh",
+        operation: "workspace.write_file" as const,
+        logicalRelativePath: "smoke.txt",
+        sourceSnapshotId: "snap-1",
+      },
+    };
+    const m3Intermediate = baseDecision({
+      objective: "write smoke file",
+      operationalRequest: {
+        kind: "candidate_workspace_experiment",
+        request: {
+          version: 2,
+          operation: "workspace.write_file",
+          projectId: "project-ashley",
+          path: "smoke.txt",
+          content: "test",
+          mustNotExist: true,
+        },
+      },
+      operationalLicense,
+      thoughtSource: "model",
+      thoughtError: null,
+    });
+
+    const result = await run(
+      m3Intermediate,
+      null,
+      null,
+      async () => ({
+        text: JSON.stringify({
+          kind: "speak",
+          delayClass: "standard", // emitted on speak decision by model following schema
+          shouldSpeak: true,
+          effort: "medium",
+          completion: "complete",
+          uncertainty: 0.1,
+          urgency: 0.2,
+          objective: "wrote smoke file",
+          reason: "file created in workspace",
+          motivationIds: [1],
+        }),
+        model: "openai/gpt-oss-20b",
+      }),
+    );
+
+    expect(result.thoughtSource).toBe("model");
+    expect(result.kind).toBe("speak");
+    expect(result.delayClass).toBeFalsy();
+    expect(result.operationalLicense).toEqual(operationalLicense);
+  });
+
+  it("retains verified OperationalClaimLicense when continuation fails with structural error", async () => {
+    const operationalLicense = {
+      discriminator: "ASHLEY_SANDBOX_V2_LICENSE" as const,
+      state: "succeeded" as const,
+      taskId: "task-m3-exp-fail",
+      profile: "project_experimentation" as const,
+      workspaceEffect: {
+        projectId: "project-ashley",
+        workspaceId: "w-fresh",
+        operation: "workspace.write_file" as const,
+        logicalRelativePath: "smoke.txt",
+        sourceSnapshotId: "snap-1",
+      },
+    };
+    const m3Intermediate = baseDecision({
+      objective: "write smoke file",
+      operationalRequest: {
+        kind: "candidate_workspace_experiment",
+        request: {
+          version: 2,
+          operation: "workspace.write_file",
+          projectId: "project-ashley",
+          path: "smoke.txt",
+          content: "test",
+          mustNotExist: true,
+        },
+      },
+      operationalLicense,
+      thoughtSource: "model",
+      thoughtError: null,
+    });
+
+    const result = await run(
+      m3Intermediate,
+      null,
+      null,
+      async () => ({
+        text: "completely invalid json output from continuation",
+        model: "openai/gpt-oss-20b",
+      }),
+    );
+
+    expect(result.thoughtSource).toBe("fallback");
+    expect(result.operationalLicense).toEqual(operationalLicense);
+  });
 });
