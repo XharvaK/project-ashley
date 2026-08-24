@@ -81,7 +81,7 @@ describe("Thought structured output (1122)", () => {
       async (_messages, options) => {
         calls += 1;
         expect(options?.maxTokens).toBe(THOUGHT_MAX_OUTPUT_TOKENS);
-        expect(options?.reasoningEffort).toBe("none");
+        expect(options?.reasoningEffort).toBe("low");
         expect(options?.responseFormat).toBe("json_object");
         return {
           text: INCIDENT_1122_TRUNCATED_JSON,

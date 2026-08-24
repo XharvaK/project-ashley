@@ -144,3 +144,50 @@ Owner utterance (do not fabricate):
 > Verify the current candidate workspace for Project Ashley using the verification capability available to you. Report the mechanical outcome only. Don’t tell me whether the change is good, and don’t modify anything.
 
 Live pass requires: valid Thought → `candidate_verification` → governed bind → M4 admission → mechanical verification → grounded mechanical reply.
+
+---
+
+## Post-98ec359 live smoke failure
+
+**Incident SHA (deployed):** `98ec3598759d0375303a8635d2a3120a06c644b3`  
+**Newest turn:** thread `2d445d64-ca17-4fd7-91e3-9f3578062a16`, user mem **337**, assistant mem **338**, inbound Discord `1541355336584134667`, outbound `1541355352891859054`, reservation **146**, decision **1326**, attention Thought **1180** / Expression **1181**.  
+Process start `2026-08-24T07:49:11Z`. `accepted_build_identity` on 1180 = `98ec359`. Uptime after deploy was new; artifact matched SHA.
+
+### Stage trace
+
+| Stage | Reached |
+|---|---|
+| Discord ingress | YES |
+| Context / self-model / Thought admission | YES (queued, reserved, dispatched) |
+| Provider request | YES |
+| Provider completion | **NO** — Groq HTTP 400 in 326ms, no tokens |
+| Thought parse / Agency operationalRequest | NO |
+| Binding / M4 / Honesty license from execution | NO |
+| Expression fallback | YES (`I did not run a verification this turn.`) |
+
+### First causal break
+
+`THOUGHT_PROVIDER_FAILURE`
+
+`reasoning_effort: "none"` is illegal on Groq `openai/gpt-oss-120b` (allowed: `low`/`medium`/`high`). Journal: `[groq] 400`. Same 400 hit proactive Thought **1179** immediately after activate — generic Thought dispatch, not M4-specific selection.
+
+Provider request on 98ec359 **was** constructed with `reasoning_effort=none`, `response_format=json_object`, `max_tokens=1000` (source + Groq 400). There was **no** completion, no JSON, no `candidate_verification` choice.
+
+Previous tests missed this because they stubbed `completeChat` and never sent the Groq body for gpt-oss.
+
+Context budget is not the first break (request died at HTTP 400). Estimated Thought input 5210; M4 keys were present on the reservation deadline envelope (`candidateVerificationChild` etc.).
+
+Binder was **not** reached.
+
+### Repair
+
+- Thought `reasoningEffort: "low"` (minimum legal gpt-oss effort).
+- Adapter maps `none` → `low` for `openai/gpt-oss*`.
+- Keep `json_object`.
+- Parse Groq 400 body text; do not remapping `AppError`.
+
+### Production-equivalent regression
+
+`apps/agent-service/src/core/sandbox/m4-live-composition.e2e.test.ts` starts at the exact smoke utterance, uses real Thought composition (no mocked grounding string), Case A omitted-id `candidate_verification` → binder + execute seam, Case B asserts the composed contract + legal Groq effort mapping. No keyword routing.
+
+M5–M7: same Thought Groq request would 400; the illegal `none` is a **generic Thought provider** defect, not an M4-only affordance gap. Durable-state projection (workspace/recipe/changeset) remains a later selection risk once Thought actually completes.

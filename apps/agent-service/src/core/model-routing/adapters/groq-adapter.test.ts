@@ -97,6 +97,52 @@ describe("groq-adapter fixtures", () => {
     expect(capturedBody?.model).toBe("qwen/qwen3.6-27b");
   });
 
+  it("maps gpt-oss reasoning_effort none to low so Groq does not 400", async () => {
+    env.groqApiKey = "test";
+    let capturedBody: Record<string, unknown> | undefined;
+    const adapter = createGroqAdapter(async (_url, init) => {
+      capturedBody = JSON.parse(init?.body as string);
+      return fakeResponse({
+        choices: [{ message: { content: "{}" } }],
+        usage: { prompt_tokens: 5, completion_tokens: 1 },
+      });
+    });
+    await adapter.dispatch({
+      messages,
+      modelId: "openai/gpt-oss-120b",
+      options: {
+        reasoningEffort: "none",
+        responseFormat: "json_object",
+        maxTokens: 1000,
+      },
+    });
+    expect(capturedBody?.reasoning_effort).toBe("low");
+    expect(capturedBody?.response_format).toEqual({ type: "json_object" });
+    expect(capturedBody?.max_tokens).toBe(1000);
+  });
+
+  it("surfaces Groq 400 provider text instead of [object Object]", async () => {
+    env.groqApiKey = "test";
+    const adapter = createGroqAdapter(async () =>
+      fakeResponse(
+        {
+          error: {
+            message:
+              "'none' is not a valid reasoning_effort for model openai/gpt-oss-120b",
+          },
+        },
+        { status: 400 },
+      ),
+    );
+    await expect(
+      adapter.dispatch({
+        messages,
+        modelId: "openai/gpt-oss-120b",
+        options: { reasoningEffort: "none" },
+      }),
+    ).rejects.toMatchObject({ code: "internal_error" });
+  });
+
   it("serializes json_object response_format when requested", async () => {
     env.groqApiKey = "test";
     let capturedBody: Record<string, unknown> | undefined;

@@ -80,7 +80,10 @@ function buildRequestBody(
     body.presence_penalty = options.presencePenalty;
   }
   if (options.reasoningEffort !== undefined) {
-    body.reasoning_effort = options.reasoningEffort;
+    const effort = groqReasoningEffortForModel(model, options.reasoningEffort);
+    if (effort !== undefined) {
+      body.reasoning_effort = effort;
+    }
   }
   if (options.responseFormat === "json_object") {
     body.response_format = { type: "json_object" };
@@ -118,11 +121,33 @@ function statusCode(err: unknown): number | undefined {
   return typeof code === "number" && Number.isFinite(code) ? code : undefined;
 }
 
+/**
+ * gpt-oss accepts only low|medium|high. `none`/`default` are Qwen-only and
+ * Groq returns HTTP 400 for openai/gpt-oss-120b (`98ec359` live smoke).
+ */
+export function groqReasoningEffortForModel(
+  modelId: string,
+  requested: NonNullable<CompletionOptions["reasoningEffort"]>,
+): "none" | "low" | "medium" | "high" {
+  if (modelId.startsWith("openai/gpt-oss")) {
+    if (requested === "none") return "low";
+    return requested;
+  }
+  return requested;
+}
+
 export function mapGroqError(err: unknown): AppError {
+  if (err instanceof AppError) return err;
   if (err instanceof Error && err.name === "AbortError") {
     throw err;
   }
-  const msg = err instanceof Error ? err.message : String(err);
+  const rawMessage =
+    err instanceof Error
+      ? err.message
+      : typeof (err as { message?: unknown }).message === "string"
+        ? (err as { message: string }).message
+        : String(err);
+  const msg = rawMessage;
   const status = statusCode(err);
   console.error("[groq]", status ?? "no-status", msg.slice(0, 500));
 
@@ -219,10 +244,20 @@ export function createGroqAdapter(
         signal: args.signal,
       });
       if (!res.ok) {
+        let detail = `groq_error:${res.status}`;
+        try {
+          const errJson = (await res.json()) as GroqErrorResponse;
+          const providerMessage = errJson.error?.message;
+          if (typeof providerMessage === "string" && providerMessage.length > 0) {
+            detail = providerMessage.slice(0, 300);
+          }
+        } catch {
+          /* body not JSON */
+        }
         throw mapGroqError({
           statusCode: res.status,
           headers: res.headers,
-          message: `groq_error:${res.status}`,
+          message: detail,
         });
       }
       const json = (await res.json()) as GroqResponse;

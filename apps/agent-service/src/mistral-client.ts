@@ -217,6 +217,7 @@ export async function completeChat(
         };
       } catch (err) {
         if (err instanceof Error && err.name === "AbortError") throw err;
+        if (err instanceof AppError) throw err;
         throw provider === "mistral" ? mapMistralError(err) : mapGroqError(err);
       }
     },
