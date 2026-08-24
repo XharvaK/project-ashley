@@ -30,8 +30,8 @@ export const ROUTE_BINDINGS: readonly RouteBinding[] = [
   },
   {
     route: "thought",
-    provider: "groq",
-    configuredModelId: "openai/gpt-oss-120b",
+    provider: "nim",
+    configuredModelId: "openai/gpt-oss-20b",
     contextProfile: "thought_summary",
     enabled: true,
   },

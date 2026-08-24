@@ -20,10 +20,12 @@ import { withOfflineAppGateDisabled } from "../qualification/offline-test-helper
 
 const ORIGINAL_MISTRAL_KEY = env.mistralApiKey;
 const ORIGINAL_GROQ_KEY = env.groqApiKey;
+const ORIGINAL_NIM_KEY = env.nimApiKey;
 
 afterEach(() => {
   env.mistralApiKey = ORIGINAL_MISTRAL_KEY;
   env.groqApiKey = ORIGINAL_GROQ_KEY;
+  env.nimApiKey = ORIGINAL_NIM_KEY;
 });
 
 function freshDb(): DatabaseSync {
@@ -44,11 +46,11 @@ describe("route-to-provider mapping", () => {
     expect(b.configuredModelId).toBe("mistral-medium-latest");
   });
 
-  it("thought routes to Groq 120B", () => {
+  it("thought routes to NIM 20B primary", () => {
     const b = resolveRoute("thought");
     expect(b.route).toBe("thought");
-    expect(b.provider).toBe("groq");
-    expect(b.configuredModelId).toBe("openai/gpt-oss-120b");
+    expect(b.provider).toBe("nim");
+    expect(b.configuredModelId).toBe("openai/gpt-oss-20b");
   });
 
   it.each([
@@ -108,6 +110,7 @@ describe("disabled routes fail closed", () => {
       // the call is rejected; the route itself must be the gate.
       env.mistralApiKey = "present";
       env.groqApiKey = "present";
+      env.nimApiKey = "present";
       await expect(
         completeChat([], { route: route as never, attentionDb: db }),
       ).rejects.toMatchObject({ code: "operator_disabled" });
@@ -116,9 +119,9 @@ describe("disabled routes fail closed", () => {
     },
   );
 
-  it("adapterFor fails closed for unimplemented providers (NIM)", () => {
-    expect(() => adapterFor("nim" as ProviderId)).toThrow(
-      "unsupported_provider:nim",
+  it("adapterFor fails closed for unsupported providers", () => {
+    expect(() => adapterFor("unknown_provider" as ProviderId)).toThrow(
+      "unsupported_provider:unknown_provider",
     );
   });
 
@@ -147,6 +150,7 @@ describe("provider-aware missing key gating", () => {
   it("Mistral route fails before reservation when MISTRAL_API_KEY is absent", async () => {
     env.mistralApiKey = "";
     env.groqApiKey = "present";
+    env.nimApiKey = "present";
     const db = freshDb();
     await expect(
       withOfflineAppGateDisabled(() => completeChat(
@@ -158,9 +162,10 @@ describe("provider-aware missing key gating", () => {
     db.close();
   });
 
-  it("Groq route fails before reservation when GROQ_API_KEY is absent", async () => {
+  it("Thought route fails before reservation when both NIM and Groq keys are absent", async () => {
     env.mistralApiKey = "present";
     env.groqApiKey = "";
+    env.nimApiKey = "";
     const db = freshDb();
     await expect(
       withOfflineAppGateDisabled(() => completeChat(
@@ -220,22 +225,23 @@ describe("shared 20B quota bucket at the dispatch layer", () => {
     it("Thought failure leaves Expression independently dispatchable in its own bucket", async () => {
       env.mistralApiKey = "test";
       env.groqApiKey = "";
+      env.nimApiKey = "";
       const db = freshDb();
-      // Groq gate closed -> Thought fails before any reservation/dispatch.
+      // NIM & Groq gates closed -> Thought fails before any reservation/dispatch.
       await expect(
         withOfflineAppGateDisabled(() => completeChat(
           [{ role: "user", content: "x" }],
           { route: "thought", attentionDb: db },
         )),
       ).rejects.toMatchObject({ code: "agent_not_ready" });
-      const groqRows = Number(
+      const nimRows = Number(
         (
           db.prepare(
-            `SELECT COUNT(*) AS c FROM attention_requests WHERE quota_bucket LIKE 'groq:%'`,
+            `SELECT COUNT(*) AS c FROM attention_requests WHERE quota_bucket LIKE 'nim:%' OR quota_bucket LIKE 'groq:%'`,
           ).get() as { c: number }
         ).c,
       );
-      expect(groqRows).toBe(0);
+      expect(nimRows).toBe(0);
 
       // Expression (Mistral lane) is untouched and still dispatches.
       const b = resolveRoute("expression");

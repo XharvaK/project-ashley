@@ -26,11 +26,11 @@
       "quota_contract": { "rps": 40, "rpm": 3600, "rpd": 3600, "tpm": 6100, "tpd": 80000 }
     },
     "thought": {
-      "provider": "groq",
-      "configured_model_id": "openai/gpt-oss-120b",
+      "provider": "nim",
+      "configured_model_id": "openai/gpt-oss-20b",
       "context_profile": "thought_summary",
       "enabled": true,
-      "quota_contract": { "rps": 40, "rpm": 3600, "rpd": 3600, "tpm": 12000, "tpd": 200000 }
+      "quota_contract": { "rps": 30, "rpm": 600, "rpd": 600, "tpm": 16000, "tpd": 120000 }
     },
     "utility_bulk": {
       "provider": "groq",

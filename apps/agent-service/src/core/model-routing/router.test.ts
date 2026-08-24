@@ -51,7 +51,8 @@ describe("model-routing router", () => {
     expect(cols).toEqual(
       expect.arrayContaining(["provider_id", "route_alias", "quota_bucket"]),
     );
-    expect(routeBinding("thought").provider).toBe("groq");
+    expect(routeBinding("thought").provider).toBe("nim");
+    expect(routeBinding("thought").configuredModelId).toBe("openai/gpt-oss-20b");
     db.close();
     continuity.close();
   });

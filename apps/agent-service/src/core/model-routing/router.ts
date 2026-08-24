@@ -190,7 +190,12 @@ export function routeReady(route: RouteId): boolean {
     const matched = records.find((r) => r.route === route);
     const enabled = matched ? matched.enabled : binding.enabled;
     if (!enabled) return false;
-    return providerKeyPresent(matched ? matched.provider : binding.provider);
+    const provider = matched ? matched.provider : binding.provider;
+    if (providerKeyPresent(provider)) return true;
+    if (route === "thought" && provider === "nim" && providerKeyPresent("groq")) {
+      return true;
+    }
+    return false;
   } catch {
     return false;
   }

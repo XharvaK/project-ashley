@@ -49,17 +49,16 @@ tables without that audit.
 |---|---|---|---|---|
 | `expression` | `ashley_expression` | Mistral | `mistral-medium-latest` | `mistral:mistral-medium-latest` unless `MISTRAL_MODEL` overrides |
 | Expression fallback after an eligible primary failure | `ashley_expression_fallback` | Groq | `qwen/qwen3.6-27b` | `groq:qwen/qwen3.6-27b` |
-| `thought` | `thought` | Groq | `openai/gpt-oss-120b` | `groq:openai/gpt-oss-120b` |
+| `thought` | `thought` | NVIDIA NIM (primary) / Groq (failover) | `openai/gpt-oss-20b` | `nim:openai/gpt-oss-20b` (primary) / `groq:openai/gpt-oss-20b` (failover) |
 | `exchange_cognition` | `utility_bulk` | Groq | `openai/gpt-oss-20b` | `groq:openai/gpt-oss-20b` |
 | `curiosity_consolidation` | `utility_bulk` | Groq | `openai/gpt-oss-20b` | `groq:openai/gpt-oss-20b` |
 | `thought_observation` | `utility_bulk` | Groq | `openai/gpt-oss-20b` | `groq:openai/gpt-oss-20b` |
 | `maintenance` | `utility_bulk` | Groq | `openai/gpt-oss-20b` | `groq:openai/gpt-oss-20b` |
 
 This table is the audited source snapshot at the route-table audit baseline
-named above. It is not the future Model Fabric target. The Expression fallback
-is one visible fallback hop under the current Expression fallback policy. It is
-not a general provider fallback chain and does not apply to the first Model
-Fabric slice.
+named above. The Thought route implements bounded same-model provider failover
+(NVIDIA NIM `openai/gpt-oss-20b` primary -> Groq `openai/gpt-oss-20b` secondary
+on eligible transport/capacity failures when remaining deadline >= 2500ms).
 The planned policy retires the former Groq 20B utility candidate from all future
 roles, keeps Groq
 `openai/gpt-oss-120b` as main Thought primary, and selects NVIDIA

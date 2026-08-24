@@ -1,9 +1,9 @@
 /**
- * Live Groq structured-Thought preflight. Does not mutate production nuclear.db
+ * Live structured-Thought preflight. Does not mutate production nuclear.db
  * and does not execute M4. Invoke explicitly:
  *
  *   npx tsx src/core/agency/thought-live-provider-preflight.ts --live
- *   npx tsx src/core/agency/thought-live-provider-preflight.ts --live --samples 5
+ *   npx tsx src/core/agency/thought-live-provider-preflight.ts --live --provider groq --samples 3
  */
 import { mkdirSync, writeFileSync, existsSync, mkdtempSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -12,7 +12,9 @@ import { DatabaseSync } from "node:sqlite";
 import { WorkspaceManager } from "@composer-assistant/sandbox-v2";
 import { env, loadEnvFile, refreshEnvFromProcess } from "../../env.js";
 import { openNuclearDb } from "../db.js";
+import { createNimAdapter } from "../model-routing/adapters/nim-adapter.js";
 import { createGroqAdapter } from "../model-routing/adapters/groq-adapter.js";
+import type { ModelProviderAdapter } from "../model-routing/types.js";
 import {
   currentBuildIdentity,
   currentContractId,
@@ -89,8 +91,9 @@ function classify(result: Awaited<ReturnType<typeof runThoughtModel>>): string {
 async function oneSample(input: {
   db: DatabaseSync;
   manager: WorkspaceManager;
-  adapter: ReturnType<typeof createGroqAdapter>;
+  adapter: ModelProviderAdapter;
   modelId: string;
+  provider: "nim" | "groq";
 }): Promise<Record<string, unknown>> {
   const motivation: Motivation = {
     id: 1,
@@ -154,7 +157,7 @@ async function oneSample(input: {
     httpOk: thought.ok || Boolean(visible),
     request: {
       model: input.modelId,
-      provider: "groq",
+      provider: input.provider,
       reasoningEffort: "low",
       responseFormat: "json_object",
       maxTokens: THOUGHT_MAX_OUTPUT_TOKENS,
@@ -183,13 +186,19 @@ async function oneSample(input: {
   };
 }
 
-export async function runLiveThoughtStructuredPreflight(sampleCount: number): Promise<{
+export async function runLiveThoughtStructuredPreflight(
+  sampleCount: number,
+  provider: "nim" | "groq" = "nim",
+): Promise<{
   gate: "PASS" | "FAIL";
   samples: Record<string, unknown>[];
 }> {
   loadEnvFile(join(homedir(), ".composer-assistant", ".env"));
   refreshEnvFromProcess();
-  if (!env.groqApiKey) {
+  if (provider === "nim" && !env.nimApiKey) {
+    throw new Error("NIM_API_KEY missing; preflight not run");
+  }
+  if (provider === "groq" && !env.groqApiKey) {
     throw new Error("GROQ_API_KEY missing; preflight not run");
   }
   process.env.SANDBOX_V2_FORCE_AVAILABLE = "true";
@@ -234,15 +243,15 @@ export async function runLiveThoughtStructuredPreflight(sampleCount: number): Pr
 
   const db = openNuclearDb(new DatabaseSync(join(tmp, "preflight.db")));
   activateCapabilities(db);
-  const adapter = createGroqAdapter();
-  const modelId = "openai/gpt-oss-120b";
+  const adapter = provider === "nim" ? createNimAdapter() : createGroqAdapter();
+  const modelId = "openai/gpt-oss-20b";
   const samples: Record<string, unknown>[] = [];
   const count = Math.max(1, Math.min(5, sampleCount));
   for (let i = 0; i < count; i += 1) {
     if (i > 0) {
-      await new Promise((resolve) => setTimeout(resolve, 20_000));
+      await new Promise((resolve) => setTimeout(resolve, 5_000));
     }
-    samples.push(await oneSample({ db, manager, adapter, modelId }));
+    samples.push(await oneSample({ db, manager, adapter, modelId, provider }));
   }
   db.close();
 
@@ -255,7 +264,12 @@ if (live) {
   const samplesFlag = process.argv.indexOf("--samples");
   const n =
     samplesFlag >= 0 ? Number(process.argv[samplesFlag + 1] ?? 1) : 1;
-  runLiveThoughtStructuredPreflight(Number.isFinite(n) ? n : 1)
+  const providerFlag = process.argv.indexOf("--provider");
+  const provider =
+    providerFlag >= 0 && process.argv[providerFlag + 1] === "groq"
+      ? "groq"
+      : "nim";
+  runLiveThoughtStructuredPreflight(Number.isFinite(n) ? n : 1, provider)
     .then((result) => {
       process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
       process.exit(result.gate === "PASS" ? 0 : 1);
