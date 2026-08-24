@@ -20,6 +20,7 @@ import {
   startDurableOperationalJobRunner,
   stopDurableOperationalJobRunner,
 } from "./core/sandbox/durable-job-runner.js";
+import { runProductionDurableThought } from "./core/sandbox/durable-thought-production.js";
 import { claimWeeklyReviewDelivery } from "./core/sandbox/weekly-review-delivery.js";
 
 export async function serveAgent(manager: AgentManager): Promise<void> {
@@ -81,6 +82,9 @@ export async function serveAgent(manager: AgentManager): Promise<void> {
     startDurableOperationalJobRunner({
       db: manager.core.getDatabase(),
       nowMs: () => Date.now(),
+      runDurableThought: env.durableOperationalThoughtEnabled
+        ? runProductionDurableThought
+        : undefined,
     });
   }
   console.log(
