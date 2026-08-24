@@ -12,9 +12,13 @@ import {
   listDeliveryBubbles,
 } from "../delivery/store.js";
 import { finalizeHonesty } from "../honesty/finalize.js";
-import type {
-  OperationalClaimLicense,
-  OperationalClaimState,
+import {
+  isVerifiedAuthorshipClaimEffect,
+  isVerifiedBoundedOperationClaimEffect,
+  isVerifiedVerificationClaimEffect,
+  isVerifiedWorkspaceClaimEffect,
+  type OperationalClaimLicense,
+  type OperationalClaimState,
 } from "./engineering-types.js";
 import { parseNormalizedDurableThought } from "./durable-cognition.js";
 import { deriveOperationalTruth, renderOperationalTruth } from "./operational-truth.js";
@@ -27,7 +31,6 @@ import {
   type OperationalJobStatus,
 } from "./operational-job-store.js";
 import {
-  getBoundedOperationStatus,
   getBoundedOperationTaskRow,
   listDurableSteps,
   type DurableStepRow,
@@ -108,8 +111,7 @@ export function reconstructOperationalFacts(input: {
   workspaceManager?: WorkspaceManager;
 }): { facts: ReconstructedOperationalFacts; license: OperationalClaimLicense } {
   const m6Id = input.job.boundedOperationTaskId;
-  const taskStatus = m6Id ? getBoundedOperationStatus(input.db, m6Id) : null;
-  const taskRow = m6Id ? getBoundedOperationTaskRow(input.db, m6Id) : null;
+  const task = m6Id ? getBoundedOperationTaskRow(input.db, m6Id) : null;
   const steps = m6Id ? listDurableSteps(input.db, m6Id) : [];
   const m3 = stepByKind(steps, "candidate_workspace_experiment");
   const m4 = stepByKind(steps, "candidate_verification");
@@ -150,123 +152,169 @@ export function reconstructOperationalFacts(input: {
   const changeset = m5?.childTaskId
     ? getChangeSetByOriginChildTaskId(input.db, m5.childTaskId)
     : null;
-  const changesetId = changeset?.changesetId ?? null;
-  const candidateTreeHash =
-    (changeset && "candidateTreeHash" in changeset
-      ? String(changeset.candidateTreeHash)
-      : null) ??
-    (receiptFacts.candidateTreeHash ? String(receiptFacts.candidateTreeHash) : null);
 
-  const parsedThought = input.job.normalizedThoughtJson
+  const thought = input.job.normalizedThoughtJson
     ? parseNormalizedDurableThought(input.job.normalizedThoughtJson)
     : null;
 
   const facts: ReconstructedOperationalFacts = {
     jobId: input.job.jobId,
     jobStatus: input.job.status,
-    stopReason: taskStatus?.stopReason ?? null,
+    stopReason: input.job.stopReason,
     m6TaskId: m6Id,
-    projectId: input.job.projectId,
+    projectId: task?.projectId ?? input.job.projectId,
     workspaceId,
     snapshotId,
     recipeId,
     recipeVersion,
     recipeDefinitionHash,
     verificationOutcome,
-    changesetId,
-    candidateTreeHash,
-    m3Status: m3?.outcome ?? m3?.stepRunStatus ?? null,
-    m4Status: m4?.outcome ?? m4?.stepRunStatus ?? null,
-    m5Status: m5?.outcome ?? m5?.stepRunStatus ?? null,
-    m5Reached: m5 !== undefined,
-    resultKind: parsedThought?.resultKind ?? null,
-    reasonCode: parsedThought?.reasonCode ?? null,
-    clarificationQuestion: parsedThought?.clarificationQuestion ?? null,
+    changesetId: changeset?.changesetId ?? null,
+    candidateTreeHash:
+      changeset && "candidateTreeHash" in changeset
+        ? (changeset.candidateTreeHash as string | null)
+        : receipt && "candidateTreeHash" in receipt
+          ? (receipt.candidateTreeHash as string | null)
+          : null,
+    m3Status: m3?.stepRunStatus ?? null,
+    m4Status: m4?.stepRunStatus ?? null,
+    m5Status: m5?.stepRunStatus ?? null,
+    m5Reached: Boolean(m5 && m5.stepRunStatus && m5.stepRunStatus !== "skipped"),
+    resultKind: thought?.resultKind ?? thought?.kind ?? null,
+    reasonCode: thought?.reasonCode ?? thought?.thoughtError ?? null,
+    clarificationQuestion: thought?.clarificationQuestion ?? null,
   };
 
   const license: OperationalClaimLicense = {
     state: mapJobState(input.job.status),
-    taskId: input.job.boundedOperationTaskId,
+    taskId: m6Id,
     profile: "bounded_operation",
     sourceMessageEntityUuid: input.job.sourceMessageEntityUuid,
-    error: input.job.status === "succeeded" ? null : input.job.status,
-    refusalReason: null,
-    workspaceClaimEffect:
-      workspaceId && snapshotId
-        ? {
-            verified: true,
-            projectId: input.job.projectId ?? "unknown",
-            workspaceId,
-            operation: "workspace.experiment",
-            logicalRelativePath: ".",
-            sourceSnapshotId: snapshotId,
-            completedAtMs: Date.now(),
-          }
-        : null,
-    verificationClaimEffect:
-      workspaceId && snapshotId && recipeId && verificationOutcome
-        ? {
-            verified: true,
-            projectId: input.job.projectId ?? "unknown",
-            workspaceId,
-            snapshotId,
-            candidateTreeHash: candidateTreeHash ?? "",
-            recipeId,
-            recipeVersion: recipeVersion ?? "1",
-            recipeDefinitionHash: recipeDefinitionHash ?? "",
-            protocolState: "admitted",
-            verificationOutcome,
-            completedAtMs: Date.now(),
-          }
-        : null,
-    authorshipClaimEffect:
-      changesetId && candidateTreeHash && workspaceId && snapshotId
-        ? {
-            verified: true,
-            projectId: input.job.projectId ?? "unknown",
-            workspaceId,
-            changesetId,
-            changesetVersion: 1,
-            snapshotId,
-            candidateTreeHash,
-            baseTreeHash:
-              (changeset && "baseTreeHash" in changeset
-                ? String(changeset.baseTreeHash)
-                : "") || candidateTreeHash,
-            pathCount:
-              (changeset && "pathCount" in changeset
-                ? Number(changeset.pathCount)
-                : 1) || 1,
-            patchSha256:
-              (changeset && "patchSha256" in changeset
-                ? String(changeset.patchSha256)
-                : "") || "0".repeat(64),
-            status: "proposed",
-            reviewStatus: "submitted",
-            candidateUnchanged: true,
-            liveUnwritten: true,
-            protocolState: "admitted",
-            completedAtMs: Date.now(),
-          }
-        : null,
-    boundedOperationClaimEffect:
-      taskStatus && taskRow && input.job.status === "succeeded" && workspaceId
-        ? {
-            verified: true,
-            projectId: input.job.projectId ?? "unknown",
-            workspaceId,
-            taskId: m6Id!,
-            stepsExecuted: steps.length,
-            maxSteps: taskRow.maxSteps,
-            stopReason: taskStatus.stopReason ?? "succeeded",
-            borderState: "none",
-            applied: false,
-            exported: false,
-            protocolState: "admitted",
-            completedAtMs: Date.now(),
-          }
-        : null,
+    error: input.job.stopReason,
   };
+
+  if (workspace && facts.projectId && snapshotId) {
+    const effect = {
+      verified: true as const,
+      projectId: facts.projectId,
+      workspaceId: workspace.workspaceId,
+      operation:
+        m3?.operation && m3.operation.startsWith("workspace.")
+          ? m3.operation
+          : "workspace.write_file",
+      logicalRelativePath: "",
+      sourceSnapshotId: snapshotId,
+      completedAtMs: Date.now(),
+    };
+    if (isVerifiedWorkspaceClaimEffect(effect)) {
+      license.workspaceClaimEffect = effect;
+    }
+  }
+
+  const candidateTreeHash = facts.candidateTreeHash;
+  if (
+    receipt &&
+    facts.projectId &&
+    snapshotId &&
+    candidateTreeHash &&
+    candidateTreeHash.length === 64 &&
+    recipeId &&
+    recipeVersion &&
+    recipeDefinitionHash &&
+    recipeDefinitionHash.length === 64 &&
+    verificationOutcome &&
+    "workspaceId" in receipt
+  ) {
+    const effect = {
+      verified: true as const,
+      projectId: facts.projectId,
+      workspaceId: String(receipt.workspaceId),
+      snapshotId,
+      candidateTreeHash,
+      recipeId,
+      recipeVersion,
+      recipeDefinitionHash,
+      protocolState: "admitted" as const,
+      verificationOutcome,
+      completedAtMs: Date.now(),
+    };
+    if (isVerifiedVerificationClaimEffect(effect)) {
+      license.verificationClaimEffect = effect;
+    }
+  }
+
+  if (changeset && facts.projectId && m5?.childTaskId) {
+    const row = input.db
+      .prepare(
+        `SELECT changeset_id AS changesetId, workspace_id AS workspaceId,
+                source_snapshot_id AS snapshotId, candidate_tree_hash AS candidateTreeHash,
+                base_tree_hash AS baseTreeHash, patch_sha256 AS patchSha256,
+                changed_paths_json AS changedPathsJson
+           FROM candidate_changesets WHERE origin_child_task_id = ?`,
+      )
+      .get(m5.childTaskId) as
+      | {
+          changesetId: string;
+          workspaceId: string;
+          snapshotId: string;
+          candidateTreeHash: string;
+          baseTreeHash: string;
+          patchSha256: string;
+          changedPathsJson: string;
+        }
+      | undefined;
+    if (row) {
+      let pathCount = 1;
+      try {
+        const paths = JSON.parse(row.changedPathsJson) as unknown;
+        if (Array.isArray(paths) && paths.length >= 1) pathCount = paths.length;
+      } catch {
+        pathCount = 1;
+      }
+      const effect = {
+        verified: true as const,
+        projectId: facts.projectId,
+        workspaceId: row.workspaceId,
+        changesetId: row.changesetId,
+        changesetVersion: 1 as const,
+        snapshotId: row.snapshotId,
+        candidateTreeHash: row.candidateTreeHash,
+        baseTreeHash: row.baseTreeHash,
+        pathCount,
+        patchSha256: row.patchSha256,
+        status: "proposed" as const,
+        reviewStatus: "submitted" as const,
+        candidateUnchanged: true as const,
+        liveUnwritten: true as const,
+        protocolState: "admitted" as const,
+        completedAtMs: Date.now(),
+      };
+      if (isVerifiedAuthorshipClaimEffect(effect)) {
+        license.authorshipClaimEffect = effect;
+      }
+    }
+  }
+
+  if (facts.projectId && workspaceId && m6Id) {
+    const executed = steps.filter((step) => step.stepRunStatus === "succeeded").length;
+    const effect = {
+      verified: true as const,
+      projectId: facts.projectId,
+      workspaceId,
+      taskId: m6Id,
+      stepsExecuted: executed,
+      maxSteps: Math.max(task?.maxSteps ?? steps.length, 1),
+      stopReason: input.job.stopReason ?? input.job.status,
+      borderState: "none" as const,
+      applied: false as const,
+      exported: false as const,
+      protocolState: "admitted" as const,
+      completedAtMs: Date.now(),
+    };
+    if (isVerifiedBoundedOperationClaimEffect(effect)) {
+      license.boundedOperationClaimEffect = effect;
+    }
+  }
 
   return { facts, license };
 }
@@ -274,34 +322,80 @@ export function reconstructOperationalFacts(input: {
 export function renderOperationalCompletionFloor(
   facts: ReconstructedOperationalFacts,
 ): string {
+  if (!facts.m6TaskId) {
+    if (facts.stopReason === "needs_clarification") {
+      return facts.clarificationQuestion
+        ? `I need a clarification before I can proceed: ${facts.clarificationQuestion}`
+        : "I need a clarification before I can proceed.";
+    }
+    if (facts.stopReason === "capability_unavailable") {
+      return facts.reasonCode
+        ? `that capability is not available (${facts.reasonCode}).`
+        : "that capability is not available this turn.";
+    }
+    if (facts.stopReason === "non_m6_operation") {
+      return "I selected work that is not a durable bounded operation, so no M3/M4/M5/M7 execution ran.";
+    }
+    if (facts.stopReason === "no_bounded_operation") {
+      return "I completed thought without admitting a bounded operation.";
+    }
+  }
   const parts: string[] = [];
-  const statusLabel =
-    facts.jobStatus === "succeeded"
-      ? "completed successfully"
-      : `ended with status: ${facts.jobStatus}`;
-  parts.push(`Operational job ${facts.jobId} ${statusLabel}.`);
+  parts.push(`the requested bounded operation is ${facts.jobStatus.split("_").join(" ")}.`);
+  if (facts.m3Status === "succeeded" && facts.workspaceId) {
+    parts.push(`a candidate workspace ${facts.workspaceId} was created.`);
+    if (facts.snapshotId) parts.push(`its source snapshot is ${facts.snapshotId}.`);
+  } else if (facts.m3Status === "succeeded") {
+    parts.push("a candidate workspace was created.");
+  } else if (facts.m3Status === "failed") {
+    parts.push("the candidate workspace step failed.");
+  } else if (facts.m3Status === "outcome_unknown") {
+    parts.push("the candidate workspace outcome is unknown.");
+  } else {
+    parts.push("no candidate workspace was created.");
+  }
 
-  if (facts.projectId) parts.push(`Project: ${facts.projectId}.`);
-  if (facts.workspaceId) parts.push(`Workspace: ${facts.workspaceId}.`);
-  if (facts.snapshotId) parts.push(`Snapshot: ${facts.snapshotId}.`);
-
-  if (facts.recipeId && facts.verificationOutcome) {
+  if (facts.m4Status === "succeeded" && facts.verificationOutcome === "verified_success") {
     parts.push(
-      `Verification recipe ${facts.recipeId} produced ${facts.verificationOutcome}.`,
+      facts.recipeId
+        ? `verification against recipe ${facts.recipeId} succeeded.`
+        : "verification succeeded.",
+    );
+  } else if (
+    facts.m4Status === "failed" ||
+    facts.verificationOutcome === "verified_failure"
+  ) {
+    parts.push("the admitted follow-up step did not succeed, so no sealed change-set was created.");
+  } else if (facts.m4Status === "outcome_unknown") {
+    parts.push("verification outcome is unknown, so authorship was not treated as proven.");
+  } else {
+    parts.push("verification was not reached.");
+  }
+
+  if (facts.m5Reached && facts.changesetId) {
+    parts.push(
+      `a sealed candidate change-set ${facts.changesetId} exists. it has not been applied.`,
+    );
+  } else if (facts.m5Reached && facts.m5Status === "failed") {
+    parts.push("authorship was attempted and failed. nothing was applied.");
+  } else {
+    parts.push("authorship was not performed.");
+  }
+
+  if (facts.jobStatus === "cancelled") {
+    parts.push(
+      "the owner cancelled remaining work. already committed child effects were not undone.",
     );
   }
-  if (facts.changesetId) {
-    parts.push(`Authorship candidate change-set: ${facts.changesetId}.`);
+  if (facts.jobStatus === "deadline_exceeded") {
+    parts.push("the job stopped because its deadline was exceeded.");
   }
-  if (facts.candidateTreeHash) {
-    parts.push(`Candidate tree hash: ${facts.candidateTreeHash}.`);
+  if (facts.jobStatus === "outcome_unknown") {
+    parts.push(
+      "at least one in-flight effect could not be reconciled, so the outcome stays unknown.",
+    );
   }
-  if (facts.stopReason) {
-    parts.push(`Stop reason: ${facts.stopReason}.`);
-  }
-  if (facts.clarificationQuestion) {
-    parts.push(`Clarification requested: ${facts.clarificationQuestion}`);
-  }
+  parts.push("no live apply, merge, or deploy was performed.");
   return parts.join(" ");
 }
 
@@ -451,7 +545,6 @@ export async function draftOperationalJobCompletion(
   if (!job) return { drafted: false, usedExpression: false, reservationId: null };
   switch (job.status) {
     case "succeeded":
-      break;
     case "failed":
     case "cancelled":
     case "deadline_exceeded":

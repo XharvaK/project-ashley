@@ -361,10 +361,11 @@ describe("Operational Fulfillment M1 (Prompt Delivery + Semantic Separation + Ta
       const resId2 = Number(deliveryRow2.delivery_reservation_id);
       expect(resId2).toBeGreaterThan(resId1);
 
-      // Verify the new reservation is in reserved state
+      // Verify the new reservation is in reserved state and preserves identical deterministic completion semantics
       const res2 = getDeliveryReservation(db, resId2);
       expect(res2?.state).toBe("reserved");
       expect(res2?.deliveryLane).toBe("operational_fulfillment");
+      expect(res2?.draftText).toBe(res1?.draftText);
 
       // Verify the old reservation is preserved in the database for forensic audit
       const oldRes = getDeliveryReservation(db, resId1);

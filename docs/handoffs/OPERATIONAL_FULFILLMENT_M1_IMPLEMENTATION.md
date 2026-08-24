@@ -54,7 +54,20 @@ Durable Bounded Work remains **CLOSED and PRODUCTION PROVEN**.
 
 - `apps/agent-service/src/core/sandbox/migration-35.test.ts`: 4/4 passing
 - `apps/agent-service/src/core/sandbox/operational-fulfillment-m1.test.ts`: 8/8 passing
+- `apps/agent-service/src/core/sandbox/durable-cognition.test.ts`: 24/24 passing
+- `apps/agent-service/src/core/sandbox/durable-job-runner.test.ts`: 15/15 passing
 - `apps/agent-service/src/core/data-plane-authority.test.ts`: 10/10 passing
 - All migration test suites (`migration-*`): 19/19 files, 77/77 passing
 - `apps/discord-bot` test suite: 20 suites, 105/105 passing
 - Clean TypeScript compilation for both `agent-service` and `discord-bot`.
+
+---
+
+## 5. Targeted Repair 2: Canonical Completion Rendering Restored
+
+- Restored accepted canonical completion floor renderer in `apps/agent-service/src/core/sandbox/durable-job-completion.ts`.
+- Preserves all nuanced completion distinctions:
+  - Non-M6 Thought settlement (`needs_clarification`, `capability_unavailable`, `non_m6_operation`, `no_bounded_operation`).
+  - Distinguishes refusal / `owner_boundary` truthful speech.
+  - Reconstructed child evidence truth for M3 candidate workspace, M4 verification receipts, and M5 sealed candidate change-sets without live-apply inflation.
+  - Verified evidence-bounded semantic stability across transport retries.
