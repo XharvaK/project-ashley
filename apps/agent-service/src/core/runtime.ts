@@ -94,7 +94,6 @@ import {
   getOpenCognitiveContinuityStatus,
 } from "./cognition/open-items.js";
 import {
-  applyMindStateDispositions,
   claimUrgentMindState,
   consumeUrgentWake,
   listActiveMindStateItems,
@@ -210,6 +209,7 @@ import {
   evaluateReactiveSandboxAdmission,
   detectReactiveSandboxRoundtripRequest,
 } from "./sandbox/reactive-admission.js";
+import { authorizeReactiveOperationalExecution } from "./sandbox/reactive-operational-admission.js";
 import {
   executeReactiveSandboxTask,
   reactiveSandboxRunResultToOperationalLicense,
@@ -982,6 +982,7 @@ export class AshleyCore {
               deadlinePlan.common.initialThoughtDeadlineAtMs,
             deliveryReservationId: reservation.id,
             ownerId: input.ownerId,
+            currentMessageEntityUuid: messageEntityUuid ?? null,
           },
         );
         recordPhaseLifecycle(this.db, {
@@ -997,7 +998,21 @@ export class AshleyCore {
 
         const opReq = decision.operationalRequest;
         if (opReq) {
-          if (opReq.kind === "project_inspection") {
+          const authorized = authorizeReactiveOperationalExecution({
+            decision,
+            userMessage: message,
+            motivations,
+            currentMessageEntityUuid: messageEntityUuid ?? null,
+          });
+          if (authorized.permitted) {
+            decision.reactiveOperationalAdmission = authorized.admission;
+          }
+          if (!authorized.permitted) {
+            decision.operationalLicense = {
+              state: "none",
+              error: "unauthorized_task_continuation",
+            };
+          } else if (opReq.kind === "project_inspection") {
             const selection = selectTurnDeadlineBranch(
               deadlinePlan,
               "project_inspection",
@@ -1726,9 +1741,6 @@ export class AshleyCore {
       }
       decision.id = decisionId;
       setLastDecision(this.db, input.ownerId, decisionId);
-      if (decision.mindStateDispositions && decision.mindStateDispositions.length > 0) {
-        applyMindStateDispositions(this.db, decision.mindStateDispositions);
-      }
       // Observe-only: record a deterministic sandbox effect admission intent
       // if the decision's OCI evidence grounds one. Zero authority — nothing
       // is scheduled or executed from an admission.
@@ -2455,9 +2467,6 @@ export class AshleyCore {
         );
         decisionLogged = true;
         decision.id = decisionId;
-        if (decision.mindStateDispositions && decision.mindStateDispositions.length > 0) {
-          applyMindStateDispositions(this.db, decision.mindStateDispositions);
-        }
         observeSandboxEffectIntentAdmission(this.db, ownerId, decision, "proactive");
         return { shouldSend: false, reason: decision.reason };
       }
@@ -2478,9 +2487,6 @@ export class AshleyCore {
       );
       decisionLogged = true;
       decision.id = decisionId;
-      if (decision.mindStateDispositions && decision.mindStateDispositions.length > 0) {
-        applyMindStateDispositions(this.db, decision.mindStateDispositions);
-      }
       observeSandboxEffectIntentAdmission(this.db, ownerId, decision, "proactive");
 
       const candidate =

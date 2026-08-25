@@ -101,6 +101,7 @@ const STRUCTURAL_CODES = new Set([
   "invalid_json",
   "truncation",
   "unsupported_operation",
+  "unauthorized_task_continuation",
   "missing_required_field",
   "multiple_operational_intents",
   "invalid_evidence_disposition_pairing",

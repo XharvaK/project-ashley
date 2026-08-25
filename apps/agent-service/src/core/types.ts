@@ -334,6 +334,7 @@ export type ThoughtValidationErrorCode =
   | "invalid_json"
   | "truncation"
   | "unsupported_operation"
+  | "unauthorized_task_continuation"
   | "missing_required_field"
   | "multiple_operational_intents"
   | "invalid_evidence_disposition_pairing"
@@ -384,6 +385,33 @@ export type ThoughtValidationAttempt = {
   evidenceDisposition?: string | null;
 };
 
+export type ReactiveOperationalAdmissionClass =
+  | "current_owner_request"
+  | "explicit_resumption";
+
+export type ReactiveOperationalRequestIdentity = {
+  kind: CognitionOperationalRequest["kind"];
+  operation?: string;
+  projectId?: string;
+  targetPath?: string | null;
+  workspaceId?: string | null;
+};
+
+/**
+ * Host-authored reactive execution license. Model output cannot create this
+ * object; Thought validation and runtime consult the same evaluator.
+ */
+export type ReactiveOperationalAdmission = {
+  admitted: true;
+  admissionClass: ReactiveOperationalAdmissionClass;
+  claimedBasisMotivationId: number | null;
+  validatedBasisMotivationId: number;
+  basisKind: MotivationKind;
+  operationalKind: CognitionOperationalRequest["kind"];
+  requestIdentity: ReactiveOperationalRequestIdentity;
+  currentMessageEntityUuid: string | null;
+};
+
 /**
  * Bounded forensic envelope for one or both cognitive phases. When both phases
  * produced telemetry, attempts are concatenated phase-first (initial, then
@@ -393,6 +421,8 @@ export type ThoughtValidationAttempt = {
 export type ThoughtValidationEnvelope = {
   attempts: ThoughtValidationAttempt[];
   finalErrorCode: ThoughtValidationErrorCode | null;
+  /** System-authored admission evidence. Never model-emitted authority. */
+  reactiveOperationalAdmission?: ReactiveOperationalAdmission | null;
 };
 
 export type MindStateDispositionType =
@@ -435,8 +465,10 @@ export type Decision = {
   operationalRequest?: CognitionOperationalRequest | null;
   operationalObservation?: ProjectInspectionObservation | WorkspaceExperimentObservation | null;
   operationalCognitiveResult?: string | null;
+  /** Model-claimed basis ID. Provenance only; never execution authority. */
   operationalBasisMotivationId?: number | null;
-  mindStateDispositions?: MindStateDisposition[];
+  /** Trusted host admission. Never copied from model output. */
+  reactiveOperationalAdmission?: ReactiveOperationalAdmission | null;
   inspectionRequest?: CognitionInspectionRequest | null;
   inspectionObservation?: ProjectInspectionObservation | null;
   inspectionCognitiveResult?: string | null;

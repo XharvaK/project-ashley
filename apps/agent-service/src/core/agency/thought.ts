@@ -25,7 +25,7 @@ import type {
   ThoughtValidationErrorCode,
   WorkspaceExperimentObservation,
   Trigger,
-  MindStateDisposition,
+  ReactiveOperationalAdmission,
 } from "../types.js";
 import type { TokenUsage } from "../model-routing/types.js";
 import type { LogicalModelRole } from "../model-fabric/types.js";
@@ -42,54 +42,10 @@ import { describeVerificationGrounding } from "../sandbox/verification-binding.j
 import { describeAuthorshipGrounding } from "../sandbox/authorship-binding.js";
 import { M6_MAX_STEPS, M6_MAX_WALL_MS } from "@composer-assistant/sandbox-v2";
 import type { WorkspaceManager } from "@composer-assistant/sandbox-v2";
-import { isTextRelevant } from "./motivations.js";
-
-/**
- * Evaluates whether a reactive user message grants task-continuation authority
- * to execute an operationalRequest (inspection, workspace, verification, etc.).
- *
- * Distinguishes conversational surfacing ("what are you thinking?") from explicit
- * operational task authorization ("can you inspect package.json?", "what version is it?").
- */
-export function hasReactiveTaskContinuationAdmission(
-  userMessage: string,
-  candidateMotivations?: Motivation[],
-  selectedMotivationIds?: number[],
-): boolean {
-  const msg = userMessage.trim().toLowerCase();
-  if (!msg) return false;
-
-  // 1. Direct operational / repository inspection requests
-  const directTaskPatterns = [
-    /\b(?:package\.json|version|repo|repository|codebase|workspace|file|files|directory|diff|patch|branch|git)\b/i,
-    /\b(?:inspect|read|search|verify|test|build|check|run|lint|find|look\s+at|show\s+me)\b/i,
-  ];
-  if (
-    directTaskPatterns[0].test(msg) ||
-    (directTaskPatterns[1].test(msg) &&
-      /\b(?:project|code|file|folder|dir|repo|version|package)\b/i.test(msg))
-  ) {
-    return true;
-  }
-
-  // 2. Explicit resumption of selected background motivation
-  if (candidateMotivations && selectedMotivationIds && selectedMotivationIds.length > 0) {
-    const selected = candidateMotivations.filter(
-      (m) =>
-        m.id !== undefined &&
-        selectedMotivationIds.includes(m.id) &&
-        m.kind !== "user_message" &&
-        m.kind !== "silence_signal",
-    );
-    for (const item of selected) {
-      if (isTextRelevant(userMessage, item.summary)) {
-        return true;
-      }
-    }
-  }
-
-  return false;
-}
+import {
+  evaluateReactiveOperationalAdmission,
+  parseClaimedOperationalBasisId,
+} from "../sandbox/reactive-operational-admission.js";
 
 /* ------------------------------------------------------------------ */
 /*  ThoughtModelResult — carries usage for truncation detection       */
@@ -155,6 +111,7 @@ const STRUCTURAL_RETRYABLE_CODES = new Set<ThoughtValidationErrorCode>([
   "invalid_json",
   "truncation",
   "unsupported_operation",
+  "unauthorized_task_continuation",
   "missing_required_field",
   "multiple_operational_intents",
   "invalid_evidence_disposition_pairing",
@@ -174,6 +131,8 @@ function retryFeedback(code: ThoughtValidationErrorCode): string {
       "Previous output was truncated. Emit a complete, compact JSON object.",
     unsupported_operation:
       "Previous output contained an unsupported operation. Use only the operations listed in the contract.",
+    unauthorized_task_continuation:
+      "The requested operational continuation is not authorized by the current reactive turn. Keep the response conversational and you may surface the background matter, but do not emit an operationalRequest unless the current owner turn explicitly admits that exact task.",
     missing_required_field:
       "Previous output was missing a required field. Emit all required fields.",
     multiple_operational_intents:
@@ -1159,7 +1118,7 @@ export type ThoughtProposal = {
   /** Derived backward-compat: populated from operationalRequest.kind === "project_inspection". */
   inspectionRequest?: CognitionInspectionRequest | null;
   operationalBasisMotivationId?: number | null;
-  mindStateDispositions?: MindStateDisposition[];
+  reactiveOperationalAdmission?: ReactiveOperationalAdmission | null;
 };
 
 /* ------------------------------------------------------------------ */
@@ -1185,6 +1144,7 @@ export type ThoughtModelOptions = {
   decisionId?: number | null;
   deliveryReservationId?: number | null;
   ownerId?: string | null;
+  currentMessageEntityUuid?: string | null;
   attentionDb?: DatabaseSync;
   purpose?: string;
   lane?: string;
@@ -1596,14 +1556,14 @@ export function composeInitialThoughtMessages(input: {
     "You are Ashley's Thought layer, not her Expression layer.",
     "Choose whether and how to act from the supplied grounded motivations.",
     "Return one compact JSON object only. No markdown, preamble, or chain-of-thought.",
-    "Schema: {kind, delayClass, shouldSpeak, effort, completion, uncertainty, urgency, objective, reason, motivationIds, evidenceDisposition, operationalRequest?}.",
+    "Schema: {kind, delayClass, shouldSpeak, effort, completion, uncertainty, urgency, objective, reason, motivationIds, evidenceDisposition, operationalRequest?, operationalBasisMotivationId?}.",
     "objective and reason are short phrases, not essays.",
     "kind is speak|silence|delay|ask|revisit|share|challenge|refuse; delayClass is brief|standard|long|reflection_review only when kind is delay and otherwise null; effort is low|medium|high; completion is complete|hold.",
     "Never return a timestamp or duration. The host maps delayClass to a fixed duration.",
     "A refusal is reactive only and must select both the current user_message motivation and a supplied stable boundary motivation.",
     "Use only supplied motivation IDs. Silence is valid. Do not write the message Doc will see.",
     "objective and reason are short intent metadata, not prose to echo and not a copy of the user message.",
-    `operationalRequest is optional. When present, it must be exactly one of: {kind: "project_inspection", request: CognitionInspectionRequest}, {kind: "candidate_workspace_experiment", request: CognitionWorkspaceRequest}, {kind: "candidate_verification", request: {operation: "workspace.verify", projectId, workspaceId?, recipeId?}}, {kind: "candidate_authorship", request: {operation: "changeset.author", projectId, workspaceId?, objective, rationale, riskClass}}, {kind: "bounded_operation", request: {operation: "objective.operate", projectId, workspaceId?, origin?, objective, successCondition, failureCondition, steps: Array<{kind, request}>, budget?: {maxSteps?}}}, or {kind: "patch_export", request: {operation: "patch_export", projectId, changesetId}}. Emit at most one operationalRequest.`,
+    `operationalRequest is optional. When present, it must be exactly one of: {kind: "project_inspection", request: CognitionInspectionRequest}, {kind: "candidate_workspace_experiment", request: CognitionWorkspaceRequest}, {kind: "candidate_verification", request: {operation: "workspace.verify", projectId, workspaceId?, recipeId?}}, {kind: "candidate_authorship", request: {operation: "changeset.author", projectId, workspaceId?, objective, rationale, riskClass}}, {kind: "bounded_operation", request: {operation: "objective.operate", projectId, workspaceId?, origin?, objective, successCondition, failureCondition, steps: Array<{kind, request}>, budget?: {maxSteps?}}}, or {kind: "patch_export", request: {operation: "patch_export", projectId, changesetId}}. Emit at most one operationalRequest. On a reactive turn, operationalBasisMotivationId names the current-input motivation Thought claims licenses that request; the host independently validates that claim. Do not emit operationalRequest for background Mind State that is only being mentioned.`,
     projectContextPrompt,
     dispositionContract,
     ...(retryContext ? [retryContext] : []),
@@ -1629,9 +1589,10 @@ function validateInitialThoughtProposal(
     canOfferExport: boolean;
     approvedProjectIds: string[];
     trigger?: Trigger;
+    currentMessageEntityUuid?: string | null;
   },
 ): BoundedCognitionValidation<ThoughtProposal> {
-  const { base, motivations, canOffer, canOfferWorkspace, canOfferVerification, canOfferAuthorship, canOfferOperation, canOfferExport, approvedProjectIds, trigger } = ctx;
+  const { base, motivations, canOffer, canOfferWorkspace, canOfferVerification, canOfferAuthorship, canOfferOperation, canOfferExport, approvedProjectIds, trigger, currentMessageEntityUuid } = ctx;
   let parsed = rawParsed;
   const rawKind = String(rawParsed.kind);
   if (
@@ -1793,28 +1754,45 @@ function validateInitialThoughtProposal(
   }
 
   let operationalBasisMotivationId: number | null = null;
+  let reactiveOperationalAdmission: ReactiveOperationalAdmission | null = null;
   if (disposition === "acquire_project_evidence" || normalizedRequest !== null) {
     if (trigger === "reactive") {
+      if (!normalizedRequest) {
+        return {
+          ok: false,
+          errorCode: "missing_required_field",
+          field: "operationalRequest",
+        };
+      }
       const userMsg = motivations.find(
         (m) => m.kind === "user_message" || m.kind === "silence_signal",
       );
       const userText = userMsg?.summary ?? "";
-      if (!hasReactiveTaskContinuationAdmission(userText, motivations, motivationIds)) {
+      const claimed = parseClaimedOperationalBasisId(parsed.operationalBasisMotivationId);
+      if (claimed !== undefined && Number.isNaN(claimed)) {
         return {
           ok: false,
-          errorCode: "unsupported_operation",
+          errorCode: "unauthorized_task_continuation",
+          field: "operationalBasisMotivationId",
+        };
+      }
+      const admission = evaluateReactiveOperationalAdmission({
+        userMessage: userText,
+        motivations,
+        selectedMotivationIds: motivationIds,
+        claimedBasisMotivationId: claimed,
+        operationalRequest: normalizedRequest,
+        currentMessageEntityUuid: currentMessageEntityUuid ?? null,
+      });
+      if (!admission.admitted) {
+        return {
+          ok: false,
+          errorCode: "unauthorized_task_continuation",
           field: "operationalRequest",
         };
       }
-      const selectedBg = motivations.find(
-        (m) =>
-          m.id !== undefined &&
-          motivationIds.includes(m.id) &&
-          m.kind !== "user_message" &&
-          m.kind !== "silence_signal" &&
-          isTextRelevant(userText, m.summary),
-      );
-      operationalBasisMotivationId = selectedBg?.id ?? userMsg?.id ?? null;
+      operationalBasisMotivationId = admission.validatedBasisMotivationId;
+      reactiveOperationalAdmission = admission;
     } else {
       operationalBasisMotivationId = motivationIds[0] ?? null;
     }
@@ -1841,6 +1819,7 @@ function validateInitialThoughtProposal(
         ? normalizedRequest.request
         : null,
       operationalBasisMotivationId,
+      reactiveOperationalAdmission,
     },
     opKind: normalizedRequest?.kind ?? null,
   };
@@ -1915,6 +1894,7 @@ export async function runThoughtModel(
         canOfferExport,
         approvedProjectIds,
         trigger,
+        currentMessageEntityUuid: options.currentMessageEntityUuid ?? null,
       }),
     retryableCodes: STRUCTURAL_RETRYABLE_CODES,
     retryFeedback,
@@ -2098,8 +2078,22 @@ export async function deliberateDecision(
       ? proposal.operationalRequest.request
       : null,
     operationalBasisMotivationId: proposal.operationalBasisMotivationId ?? null,
-    mindStateDispositions: proposal.mindStateDispositions,
-    thoughtValidation: envelope,
+    reactiveOperationalAdmission: proposal.reactiveOperationalAdmission ?? null,
+    thoughtValidation: envelope
+      ? {
+          ...envelope,
+          reactiveOperationalAdmission:
+            proposal.reactiveOperationalAdmission ??
+            envelope.reactiveOperationalAdmission ??
+            null,
+        }
+      : proposal.reactiveOperationalAdmission
+        ? {
+            attempts: [],
+            finalErrorCode: null,
+            reactiveOperationalAdmission: proposal.reactiveOperationalAdmission,
+          }
+        : envelope,
   });
 }
 
@@ -2171,6 +2165,8 @@ function continuationRetryFeedback(code: ThoughtValidationErrorCode): string {
       "Previous output was truncated. Emit a complete, compact JSON object.",
     unsupported_operation:
       "Previous output contained operationalRequest/inspectionRequest/workspaceRequest. Do NOT emit any of them: exactly one sandbox execution per turn.",
+    unauthorized_task_continuation:
+      "Do not emit an operationalRequest on continuation. Exactly one sandbox execution per turn.",
     missing_required_field:
       "Previous output was missing inspectionCognitiveResult. The verified repository inspection succeeded, so you MUST emit inspectionCognitiveResult (or cognitiveResult) summarizing what you learned.",
     payload_invalid:

@@ -28,70 +28,101 @@
   - The resulting observation (`"0.2.0"`) was rendered by Expression without any current conversational context anchoring the operational authority.
 
 ============================================================
-3. ARCHITECTURAL INVARIANTS & REPAIR
+3. INDEPENDENT REVIEW OF ed3b975
 ============================================================
 
-The following frozen architectural laws were implemented:
+Independent implementation review of `ed3b975e61dcf69cdc1484407699b91af60716b8`:
+
+`MIND STATE / SPEECH INCIDENT REPAIR INDEPENDENT REVIEW = REPAIR REQUIRED`
+
+Accepted blocker **B1**: `operationalBasisMotivationId` was derived telemetry, not an execution license. Reactive admission used a broad noun/verb detector, so a turn such as `"Did you get the file?"` plus a stale package.json goal could still admit `project_inspection`.
+
+Accepted nonblocking:
+- **N1**: `unsupported_operation` was overloaded for unauthorized continuation.
+- **N2**: Test 13 collided unique Mind State provenance (`sourceType=custom`, `sourceId=1`).
+- **N4 / dispositions**: `MindStateDisposition` types and `applyMindStateDispositions` existed, but Thought never authored dispositions. End-to-end lifecycle was not implemented.
+
+============================================================
+4. REPAIR ON TOP OF ed3b975 (this candidate)
+============================================================
+
+Frozen laws remain:
 
 1. **PERSISTED MIND STATE != CURRENT TURN AUTHORITY**
 2. **BACKGROUND MIND STATE MAY SURFACE != MAY EXECUTE**
 3. **UNRESOLVED INTENTION != CURRENT OPERATIONAL AUTHORITY**
-4. **EVIDENCE REF != FULFILLMENT**
-5. **DELIVERY COMPLETE != MIND-STATE COMPLETE**
+4. **MODEL-CLAIMED BASIS ID != VALIDATED ADMISSION**
+5. **REACTIVE OWNER-TURN AUTHORITY != PROACTIVE INITIATIVE AUTHORITY**
 6. **THOUGHT OWNS COGNITION, EXPRESSION OWNS REALIZATION**
 
-### Key Mechanisms:
-- **Task Continuation Admission Gate** (`hasReactiveTaskContinuationAdmission` in `apps/agent-service/src/core/agency/thought.ts`):
-  - Requires explicit task admission from the user turn (direct operational commands or explicit resumption of the background task) before any `operationalRequest` (`project_inspection`, `candidate_workspace_experiment`, `candidate_verification`, etc.) can be admitted on a reactive turn.
-  - Merely including the current user motivation alongside a stale motivation fails validation with `unsupported_operation`, triggering standard bounded regeneration back into natural conversation.
-- **Explicit Operational Basis Provenance** (`operationalBasisMotivationId` in `Decision`):
-  - Every operational request is tied deterministically to the motivation ID that licensed it.
-- **Mind State Lifecycle Protection** (`apps/agent-service/src/core/state/mind-items.ts`):
-  - Wake operations (`claimUrgentMindState`, `consumeUrgentWake`, `retryUrgentWake`) strictly preserve `updated_at`.
-  - Added typed explicit lifecycle resolution methods (`resolveMindStateItem`, `cancelMindStateItem`, `resolveMindStateBySource`, `applyMindStateDispositions`).
-  - Delivery remains completely uninvolved in cognitive lifecycle decisions.
+### Trusted admission
+
+Single evaluator: `evaluateReactiveOperationalAdmission` in
+`apps/agent-service/src/core/sandbox/reactive-operational-admission.ts`.
+
+Thought structural validation calls it. Runtime `authorizeReactiveOperationalExecution`
+requires a trusted `Decision.reactiveOperationalAdmission` and re-invokes the same
+evaluator immediately before side effect.
+
+`operationalBasisMotivationId` remains model-claimed / omitted provenance only.
+The host never treats writing that ID as authority.
+
+Admission classes:
+- `current_owner_request` — the current owner utterance materially requests THIS operation (kind + target identity where present).
+- `explicit_resumption` — the owner resumes THIS historical motivation, uniquely, with matching request identity.
+
+Omitted claimed basis defaults to the current-turn `user_message` (even if Thought selected a related question ID). An invalid claimed ID is rejected; it is not replaced with a convenient stale ID.
+
+Unauthorized reactive operations fail closed with `unauthorized_task_continuation` before execution. Retry feedback tells the model to stay conversational / surface the matter, not to pick another supported operation.
+
+Proactive execution is unchanged: this gate is reactive-only.
+
+### MindStateDisposition
+
+**DEFERRED.** Automatic Thought-authored lifecycle resolution is not part of this candidate.
+
+Persistence helpers (`resolveMindStateItem`, `cancelMindStateItem`, `resolveMindStateBySource`, `applyMindStateDispositions`) remain for explicit operator/test use. Runtime no longer applies decision-authored dispositions. Production cleanup of stale rows remains a governed operator action after acceptance.
+
+### `updated_at`
+
+Wake operations still do not refresh semantic `updated_at`. No age-decay policy was added.
 
 ============================================================
-4. EXACT AFFECTED SOURCE
+5. EXACT AFFECTED SOURCE
 ============================================================
 
-- `apps/agent-service/src/core/types.ts`:
-  - Added `MindStateDispositionType`, `MindStateDisposition`, and fields `operationalBasisMotivationId`, `mindStateDispositions` to `Decision`.
-- `apps/agent-service/src/core/agency/thought.ts`:
-  - Added `hasReactiveTaskContinuationAdmission`.
-  - Updated `validateInitialThoughtProposal` to validate reactive task continuation and derive `operationalBasisMotivationId`.
-  - Updated `deliberateDecision` to populate `operationalBasisMotivationId` and `mindStateDispositions`.
-- `apps/agent-service/src/core/agency/motivations.ts`:
-  - Exported `tokenize` and `isTextRelevant`.
-- `apps/agent-service/src/core/state/mind-items.ts`:
-  - Preserved `updated_at` across wake transitions.
-  - Implemented `resolveMindStateItem`, `cancelMindStateItem`, `resolveMindStateBySource`, `applyMindStateDispositions`.
-- `apps/agent-service/src/core/runtime.ts`:
-  - Applied `applyMindStateDispositions` after decision logging.
-- `apps/agent-service/src/core/agency/mind-state-authority.test.ts`:
-  - 20 unit tests covering all matrix items (core authority, relevance filtering, candidate selection, task admission, lifecycle resolution, and the exact incident turn failure mode).
+Prior ed3b975 files plus this delta:
+
+- `apps/agent-service/src/core/sandbox/reactive-operational-admission.ts` (new)
+- `apps/agent-service/src/core/types.ts`
+- `apps/agent-service/src/core/agency/thought.ts`
+- `apps/agent-service/src/core/runtime.ts`
+- `apps/agent-service/src/core/sandbox/durable-cognition.ts`
+- `apps/agent-service/src/core/agency/mind-state-authority.test.ts`
+- `docs/handoffs/MIND_STATE_SPEECH_INCIDENT_REPAIR.md`
+
+Model Fabric paths were not modified.
 
 ============================================================
-5. VERIFICATION TOTALS & TEST EVIDENCE
+6. VERIFICATION
 ============================================================
 
-Focused verification executed across 8 test files:
-- `src/core/agency/mind-state-authority.test.ts` (20 tests) — **PASS**
-  - Test 18 (Open-ended "what are you thinking?" surfaces background concern conversationally without execution) — **PASS**
-  - Test 19 (Explicit owner request to resume becomes valid operational basis) — **PASS**
-  - Test 20 (User motivation included alongside stale motivation does NOT license unrelated execution) — **PASS**
-- `src/core/state/mind-items.test.ts` (2 tests) — **PASS**
-- `src/core/agency/candidate-selection.test.ts` & `src/core/agency/decide.test.ts` (8 tests) — **PASS**
-- `src/core/agency/thought.test.ts` & `src/core/agency/thought-continuation-repair.test.ts` (33 tests) — **PASS**
-- `src/core/conversation/expression-fallback.test.ts` & `src/core/honesty/finalize.test.ts` (48 tests) — **PASS**
-- **Total Tests**: 111 / 111 Passed (0 failed)
-- **TypeScript Compilation**: `tsc` clean (0 errors).
+Focused verification (not the full corpus):
+
+- `mind-state-authority.test.ts` including Tests 18–20 and adversarial A–L
+- thought / continuation / structured-output
+- mind-items, candidate-selection, decide
+- m4-phase-e, m5-phase-e, reactive-sandbox, durable-cognition
+
+`thought-delay.test.ts` still has two pre-existing failures (`payload_invalid` vs missing `evidenceDisposition`); they are proactive fixtures without `evidenceDisposition` and were not part of this repair.
 
 ============================================================
-6. PRODUCTION POSTURE & STATUS
+7. PRODUCTION POSTURE
 ============================================================
 
-- **Production Cleanup**: Stale DB rows in production `nuclear.db` have NOT been mutated.
-- **Mint Access**: No SSH or remote host deployment has been performed.
-- **Model Fabric TARGET**: TARGET route remains dark with zero activations or approvals.
-- **Production Requalification**: Pending owner acceptance.
+- **Production requalification**: not started.
+- **Production cleanup**: stale `nuclear.db` rows have NOT been mutated.
+- **Mint**: no SSH / deploy.
+- **Push**: none.
+- **Model Fabric TARGET**: still dark. No ActivationRef / OwnerApprovalRef created.
+- **Model Fabric**: production compatibility pass; non-causal for this incident.
