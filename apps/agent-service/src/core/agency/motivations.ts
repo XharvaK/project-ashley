@@ -210,7 +210,7 @@ export function isSilenceRequest(message: string): boolean {
   return false;
 }
 
-function tokenize(text: string): Set<string> {
+export function tokenize(text: string): Set<string> {
   return new Set(
     text
       .toLowerCase()
@@ -221,7 +221,7 @@ function tokenize(text: string): Set<string> {
 }
 
 /** Bounded relevance: shared tokens or explicit mind-state text match. */
-function isTextRelevant(message: string, candidate: string): boolean {
+export function isTextRelevant(message: string, candidate: string): boolean {
   const msg = message.trim();
   if (!msg) return false;
   const messageTokens = tokenize(msg);

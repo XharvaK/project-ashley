@@ -25,6 +25,7 @@ import type {
   ThoughtValidationErrorCode,
   WorkspaceExperimentObservation,
   Trigger,
+  MindStateDisposition,
 } from "../types.js";
 import type { TokenUsage } from "../model-routing/types.js";
 import type { LogicalModelRole } from "../model-fabric/types.js";
@@ -41,6 +42,54 @@ import { describeVerificationGrounding } from "../sandbox/verification-binding.j
 import { describeAuthorshipGrounding } from "../sandbox/authorship-binding.js";
 import { M6_MAX_STEPS, M6_MAX_WALL_MS } from "@composer-assistant/sandbox-v2";
 import type { WorkspaceManager } from "@composer-assistant/sandbox-v2";
+import { isTextRelevant } from "./motivations.js";
+
+/**
+ * Evaluates whether a reactive user message grants task-continuation authority
+ * to execute an operationalRequest (inspection, workspace, verification, etc.).
+ *
+ * Distinguishes conversational surfacing ("what are you thinking?") from explicit
+ * operational task authorization ("can you inspect package.json?", "what version is it?").
+ */
+export function hasReactiveTaskContinuationAdmission(
+  userMessage: string,
+  candidateMotivations?: Motivation[],
+  selectedMotivationIds?: number[],
+): boolean {
+  const msg = userMessage.trim().toLowerCase();
+  if (!msg) return false;
+
+  // 1. Direct operational / repository inspection requests
+  const directTaskPatterns = [
+    /\b(?:package\.json|version|repo|repository|codebase|workspace|file|files|directory|diff|patch|branch|git)\b/i,
+    /\b(?:inspect|read|search|verify|test|build|check|run|lint|find|look\s+at|show\s+me)\b/i,
+  ];
+  if (
+    directTaskPatterns[0].test(msg) ||
+    (directTaskPatterns[1].test(msg) &&
+      /\b(?:project|code|file|folder|dir|repo|version|package)\b/i.test(msg))
+  ) {
+    return true;
+  }
+
+  // 2. Explicit resumption of selected background motivation
+  if (candidateMotivations && selectedMotivationIds && selectedMotivationIds.length > 0) {
+    const selected = candidateMotivations.filter(
+      (m) =>
+        m.id !== undefined &&
+        selectedMotivationIds.includes(m.id) &&
+        m.kind !== "user_message" &&
+        m.kind !== "silence_signal",
+    );
+    for (const item of selected) {
+      if (isTextRelevant(userMessage, item.summary)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
 
 /* ------------------------------------------------------------------ */
 /*  ThoughtModelResult — carries usage for truncation detection       */
@@ -1109,6 +1158,8 @@ export type ThoughtProposal = {
   operationalRequest?: CognitionOperationalRequest | null;
   /** Derived backward-compat: populated from operationalRequest.kind === "project_inspection". */
   inspectionRequest?: CognitionInspectionRequest | null;
+  operationalBasisMotivationId?: number | null;
+  mindStateDispositions?: MindStateDisposition[];
 };
 
 /* ------------------------------------------------------------------ */
@@ -1577,9 +1628,10 @@ function validateInitialThoughtProposal(
     canOfferOperation: boolean;
     canOfferExport: boolean;
     approvedProjectIds: string[];
+    trigger?: Trigger;
   },
 ): BoundedCognitionValidation<ThoughtProposal> {
-  const { base, motivations, canOffer, canOfferWorkspace, canOfferVerification, canOfferAuthorship, canOfferOperation, canOfferExport, approvedProjectIds } = ctx;
+  const { base, motivations, canOffer, canOfferWorkspace, canOfferVerification, canOfferAuthorship, canOfferOperation, canOfferExport, approvedProjectIds, trigger } = ctx;
   let parsed = rawParsed;
   const rawKind = String(rawParsed.kind);
   if (
@@ -1740,6 +1792,34 @@ function validateInitialThoughtProposal(
     return { ok: false, errorCode: "invalid_evidence_disposition_pairing" };
   }
 
+  let operationalBasisMotivationId: number | null = null;
+  if (disposition === "acquire_project_evidence" || normalizedRequest !== null) {
+    if (trigger === "reactive") {
+      const userMsg = motivations.find(
+        (m) => m.kind === "user_message" || m.kind === "silence_signal",
+      );
+      const userText = userMsg?.summary ?? "";
+      if (!hasReactiveTaskContinuationAdmission(userText, motivations, motivationIds)) {
+        return {
+          ok: false,
+          errorCode: "unsupported_operation",
+          field: "operationalRequest",
+        };
+      }
+      const selectedBg = motivations.find(
+        (m) =>
+          m.id !== undefined &&
+          motivationIds.includes(m.id) &&
+          m.kind !== "user_message" &&
+          m.kind !== "silence_signal" &&
+          isTextRelevant(userText, m.summary),
+      );
+      operationalBasisMotivationId = selectedBg?.id ?? userMsg?.id ?? null;
+    } else {
+      operationalBasisMotivationId = motivationIds[0] ?? null;
+    }
+  }
+
   return {
     ok: true,
     result: {
@@ -1760,6 +1840,7 @@ function validateInitialThoughtProposal(
       inspectionRequest: normalizedRequest?.kind === "project_inspection"
         ? normalizedRequest.request
         : null,
+      operationalBasisMotivationId,
     },
     opKind: normalizedRequest?.kind ?? null,
   };
@@ -1833,6 +1914,7 @@ export async function runThoughtModel(
         canOfferOperation,
         canOfferExport,
         approvedProjectIds,
+        trigger,
       }),
     retryableCodes: STRUCTURAL_RETRYABLE_CODES,
     retryFeedback,
@@ -1872,9 +1954,9 @@ export async function deliberateDecision(
   trigger: Trigger,
   complete: Complete = completeChat,
   canInfluence: CapabilityGate = (database) =>
-    capabilityCanInfluence(database, "thought"),
+  capabilityCanInfluence(database, "thought"),
   canRefuse: CapabilityGate = (database) =>
-    capabilityCanInfluence(database, "refusal"),
+  capabilityCanInfluence(database, "refusal"),
   options: DeliberateOptions = {},
 ): Promise<Decision> {
   const allowModelThought = options.allowModelThought !== false;
@@ -2015,6 +2097,8 @@ export async function deliberateDecision(
     inspectionRequest: proposal.operationalRequest?.kind === "project_inspection"
       ? proposal.operationalRequest.request
       : null,
+    operationalBasisMotivationId: proposal.operationalBasisMotivationId ?? null,
+    mindStateDispositions: proposal.mindStateDispositions,
     thoughtValidation: envelope,
   });
 }

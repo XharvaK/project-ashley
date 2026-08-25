@@ -94,6 +94,7 @@ import {
   getOpenCognitiveContinuityStatus,
 } from "./cognition/open-items.js";
 import {
+  applyMindStateDispositions,
   claimUrgentMindState,
   consumeUrgentWake,
   listActiveMindStateItems,
@@ -1725,6 +1726,9 @@ export class AshleyCore {
       }
       decision.id = decisionId;
       setLastDecision(this.db, input.ownerId, decisionId);
+      if (decision.mindStateDispositions && decision.mindStateDispositions.length > 0) {
+        applyMindStateDispositions(this.db, decision.mindStateDispositions);
+      }
       // Observe-only: record a deterministic sandbox effect admission intent
       // if the decision's OCI evidence grounds one. Zero authority — nothing
       // is scheduled or executed from an admission.
@@ -2451,6 +2455,9 @@ export class AshleyCore {
         );
         decisionLogged = true;
         decision.id = decisionId;
+        if (decision.mindStateDispositions && decision.mindStateDispositions.length > 0) {
+          applyMindStateDispositions(this.db, decision.mindStateDispositions);
+        }
         observeSandboxEffectIntentAdmission(this.db, ownerId, decision, "proactive");
         return { shouldSend: false, reason: decision.reason };
       }
@@ -2471,6 +2478,9 @@ export class AshleyCore {
       );
       decisionLogged = true;
       decision.id = decisionId;
+      if (decision.mindStateDispositions && decision.mindStateDispositions.length > 0) {
+        applyMindStateDispositions(this.db, decision.mindStateDispositions);
+      }
       observeSandboxEffectIntentAdmission(this.db, ownerId, decision, "proactive");
 
       const candidate =

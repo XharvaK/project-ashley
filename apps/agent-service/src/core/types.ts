@@ -395,6 +395,18 @@ export type ThoughtValidationEnvelope = {
   finalErrorCode: ThoughtValidationErrorCode | null;
 };
 
+export type MindStateDispositionType =
+  | "preserve"
+  | "resolve"
+  | "cancel"
+  | "consume_callback";
+
+export type MindStateDisposition = {
+  itemId: number;
+  disposition: MindStateDispositionType;
+  reason?: string;
+};
+
 export type Decision = {
   id?: number;
   trigger: Trigger;
@@ -423,6 +435,8 @@ export type Decision = {
   operationalRequest?: CognitionOperationalRequest | null;
   operationalObservation?: ProjectInspectionObservation | WorkspaceExperimentObservation | null;
   operationalCognitiveResult?: string | null;
+  operationalBasisMotivationId?: number | null;
+  mindStateDispositions?: MindStateDisposition[];
   inspectionRequest?: CognitionInspectionRequest | null;
   inspectionObservation?: ProjectInspectionObservation | null;
   inspectionCognitiveResult?: string | null;

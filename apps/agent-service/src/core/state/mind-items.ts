@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { MindStateItem, MindStateItemKind } from "../types.js";
+import type { MindStateDisposition, MindStateItem, MindStateItemKind } from "../types.js";
 
 type Row = Record<string, unknown>;
 
@@ -40,8 +40,8 @@ export function upsertMindStateItem(
     ownerId: string;
     kind: MindStateItemKind;
     text: string;
-    sourceType: string;
-    sourceId: string | number;
+    sourceType?: string;
+    sourceId?: string | number;
     activation?: number;
     urgency?: number;
     dueAt?: string | null;
@@ -50,6 +50,8 @@ export function upsertMindStateItem(
   const text = input.text.trim().slice(0, 600);
   if (!text) return 0;
   const now = new Date().toISOString();
+  const sourceType = input.sourceType ?? "custom";
+  const sourceId = String(input.sourceId ?? "1");
   const existing = db.prepare(
     `SELECT text, urgency, wake_state, wake_attempts, next_wake_at,
             claimed_at, surfaced_at
@@ -58,8 +60,8 @@ export function upsertMindStateItem(
   ).get(
     input.ownerId,
     input.kind,
-    input.sourceType,
-    String(input.sourceId),
+    sourceType,
+    sourceId,
   ) as Record<string, unknown> | undefined;
   const urgency = Math.max(0, Math.min(1, input.urgency ?? 0));
   const urgentKind = input.kind === "commitment" || input.kind === "concern";
@@ -93,8 +95,8 @@ export function upsertMindStateItem(
     input.ownerId,
     input.kind,
     text,
-    input.sourceType,
-    String(input.sourceId),
+    sourceType,
+    sourceId,
     Math.max(0, Math.min(1, input.activation ?? 0.5)),
     urgency,
     input.dueAt ?? null,
@@ -121,7 +123,7 @@ export function upsertMindStateItem(
   const row = db.prepare(
     `SELECT id FROM mind_state_items
      WHERE owner_id = ? AND kind = ? AND source_type = ? AND source_id = ?`,
-  ).get(input.ownerId, input.kind, input.sourceType, String(input.sourceId)) as { id?: number } | undefined;
+  ).get(input.ownerId, input.kind, sourceType, sourceId) as { id?: number } | undefined;
   return row?.id ?? 0;
 }
 
@@ -185,12 +187,11 @@ export function claimUrgentMindState(
     db.prepare(
       `UPDATE mind_state_items
        SET wake_state = 'claimed', wake_attempts = wake_attempts + 1,
-           claimed_at = ?, next_wake_at = ?, updated_at = ?
+           claimed_at = ?, next_wake_at = ?
        WHERE id = ?`,
     ).run(
       nowIso,
       new Date(now.getTime() + 5 * 60_000).toISOString(),
-      nowIso,
       row.id,
     );
     const claimed = db.prepare(
@@ -212,9 +213,9 @@ export function consumeUrgentWake(db: DatabaseSync, itemId: number): void {
   db.prepare(
     `UPDATE mind_state_items
      SET wake_state = 'consumed', surfaced_at = ?, claimed_at = NULL,
-         next_wake_at = NULL, updated_at = ?
+         next_wake_at = NULL
      WHERE id = ? AND wake_state = 'claimed'`,
-  ).run(now, now, itemId);
+  ).run(now, itemId);
 }
 
 export function retryUrgentWake(db: DatabaseSync, itemId: number): void {
@@ -227,11 +228,72 @@ export function retryUrgentWake(db: DatabaseSync, itemId: number): void {
   const now = new Date();
   db.prepare(
     `UPDATE mind_state_items
-     SET wake_state = 'pending', claimed_at = NULL, next_wake_at = ?, updated_at = ?
+     SET wake_state = 'pending', claimed_at = NULL, next_wake_at = ?
      WHERE id = ? AND wake_state = 'claimed'`,
   ).run(
     new Date(now.getTime() + delayMin * 60_000).toISOString(),
-    now.toISOString(),
     itemId,
   );
+}
+
+export function resolveMindStateItem(
+  db: DatabaseSync,
+  itemId: number,
+  reason?: string,
+): boolean {
+  const now = new Date().toISOString();
+  const res = db.prepare(
+    `UPDATE mind_state_items
+     SET status = 'resolved', wake_state = 'consumed', claimed_at = NULL,
+         next_wake_at = NULL, updated_at = ?
+     WHERE id = ? AND status = 'active'`,
+  ).run(now, itemId);
+  return Number(res.changes) > 0;
+}
+
+export function cancelMindStateItem(
+  db: DatabaseSync,
+  itemId: number,
+  reason?: string,
+): boolean {
+  const now = new Date().toISOString();
+  const res = db.prepare(
+    `UPDATE mind_state_items
+     SET status = 'forgotten', wake_state = 'consumed', claimed_at = NULL,
+         next_wake_at = NULL, updated_at = ?
+     WHERE id = ? AND status = 'active'`,
+  ).run(now, itemId);
+  return Number(res.changes) > 0;
+}
+
+export function resolveMindStateBySource(
+  db: DatabaseSync,
+  ownerId: string,
+  sourceType: string,
+  sourceId: string | number,
+): number {
+  const now = new Date().toISOString();
+  const res = db.prepare(
+    `UPDATE mind_state_items
+     SET status = 'resolved', wake_state = 'consumed', claimed_at = NULL,
+         next_wake_at = NULL, updated_at = ?
+     WHERE owner_id = ? AND source_type = ? AND source_id = ? AND status = 'active'`,
+  ).run(now, ownerId, sourceType, String(sourceId));
+  return Number(res.changes);
+}
+
+export function applyMindStateDispositions(
+  db: DatabaseSync,
+  dispositions?: MindStateDisposition[] | null,
+): void {
+  if (!dispositions || dispositions.length === 0) return;
+  for (const item of dispositions) {
+    if (item.disposition === "resolve") {
+      resolveMindStateItem(db, item.itemId, item.reason);
+    } else if (item.disposition === "cancel") {
+      cancelMindStateItem(db, item.itemId, item.reason);
+    } else if (item.disposition === "consume_callback") {
+      consumeUrgentWake(db, item.itemId);
+    }
+  }
 }
