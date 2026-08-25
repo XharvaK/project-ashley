@@ -33,6 +33,8 @@ import {
   minimalExpressionContext,
   fallbackCompletionOptions,
   isEligibleMistralFailure,
+  EXPRESSION_MAX_OUTPUT_TOKENS,
+  EXPRESSION_PROACTIVE_MAX_OUTPUT_TOKENS,
   type ExpressionComplete,
   type ExpressionFallbackLane,
   type ExpressionFallbackPolicy,
@@ -177,7 +179,7 @@ export async function expressSpeak(
     response = await dispatch(messages, {
       model: env.mistralModel,
       route: "ashley_expression",
-      maxTokens: channel === "proactive" ? 500 : 900,
+      maxTokens: channel === "proactive" ? EXPRESSION_PROACTIVE_MAX_OUTPUT_TOKENS : EXPRESSION_MAX_OUTPUT_TOKENS,
       temperature: env.mistralChatTemperature,
       reasoningEffort: decision.cognitiveAllocation.effort,
       lane: options.lane ?? "interactive",

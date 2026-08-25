@@ -12,7 +12,7 @@ import {
   currentBuildIdentity,
   capabilityNames,
 } from "../rollout/capabilities.js";
-import { runThoughtModel, deliberateDecision, deliberateThoughtContinuation } from "../agency/thought.js";
+import { runThoughtModel, deliberateDecision, deliberateThoughtContinuation, THOUGHT_MAX_OUTPUT_TOKENS } from "../agency/thought.js";
 import type { Decision, Motivation } from "../types.js";
 import * as v2Execution from "./v2-execution.js";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
@@ -1368,7 +1368,7 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
 
     // Thought completion budget must hold real-model response headroom (the
     // production 450-token ceiling truncated JSON mid-object).
-    expect(thoughtCompletionOptions[0]?.maxTokens).toBe(1000);
+    expect(thoughtCompletionOptions[0]?.maxTokens).toBe(THOUGHT_MAX_OUTPUT_TOKENS);
 
     // Verified execution must surface structured evidence state to Expression.
     expect(expressionSystemPrompt).toContain("Project inspection evidence:");

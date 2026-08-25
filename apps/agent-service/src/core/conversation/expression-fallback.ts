@@ -23,6 +23,9 @@ import {
 export type ExpressionFallbackPolicy = "minimal_identity_allowed" | "mistral_only";
 export type ExpressionFallbackLane = "interactive" | "urgent_grounded" | "exchange_cognition" | "curiosity_maintenance";
 
+export const EXPRESSION_MAX_OUTPUT_TOKENS = 2048;
+export const EXPRESSION_PROACTIVE_MAX_OUTPUT_TOKENS = 500;
+
 export type ExpressionComplete = (
   messages: ChatMessage[],
   options: CognitiveDispatchOptions,
@@ -187,7 +190,7 @@ export function fallbackCompletionOptions(input: {
   return {
     model: "qwen/qwen3.6-27b",
     route: "ashley_expression_fallback",
-    maxTokens: 900,
+    maxTokens: EXPRESSION_MAX_OUTPUT_TOKENS,
     temperature: 0.7,
     reasoningEffort: "none",
     lane: input.lane,

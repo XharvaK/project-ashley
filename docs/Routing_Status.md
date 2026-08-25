@@ -37,6 +37,10 @@ Pass-2/2.1 MF-M2–MF-ACT contracts are `IMPLEMENTATION_READY` machinery.
 The local MF-M2 candidate does not change the live table below. Live Thought remains NIM
 `openai/gpt-oss-20b` wire `low` (normalized policy `economical`, not
 `standard`). Live Expression remains Mistral primary → Qwen `none`.
+Live output ceilings (caller-owned, not a model change): Thought `2048`
+with the existing 6000 ms interactive deadline; interactive Expression
+`2048`. Declared TARGET after `mfp_target_12_9_v2` is still dark. See
+[`docs/handoffs/MODEL_FABRIC_TARGET_PORTFOLIO_TOKEN_ENVELOPE_RECONCILIATION.md`](../handoffs/MODEL_FABRIC_TARGET_PORTFOLIO_TOKEN_ENVELOPE_RECONCILIATION.md).
 Luna MUST NOT treat documentation fixtures as dispatch.
 
 Nuclear schema version is source-derived from

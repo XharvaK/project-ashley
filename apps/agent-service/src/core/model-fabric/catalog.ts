@@ -256,7 +256,7 @@ function normalizeTargetRow(raw: Record<string, unknown>): ModelFabricPolicyRow 
 }
 
 export function loadTargetPortfolio(): TargetPortfolio {
-  const path = configFilePath("portfolios/target-12-9.v1.json");
+  const path = configFilePath("portfolios/target-12-9.v2.json");
   const raw = JSON.parse(readFileSync(path, "utf-8")) as Record<string, unknown>;
   if (
     raw.schema !== "ashley.model_fabric.portfolio_revision.v1" ||

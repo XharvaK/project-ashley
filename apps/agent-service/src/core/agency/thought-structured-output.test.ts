@@ -85,7 +85,7 @@ describe("Thought structured output (1122)", () => {
         expect(options?.responseFormat).toBe("json_object");
         return {
           text: INCIDENT_1122_TRUNCATED_JSON,
-          usage: { promptTokens: 2293, completionTokens: 1000 },
+          usage: { promptTokens: 2293, completionTokens: THOUGHT_MAX_OUTPUT_TOKENS },
         };
       },
       { thoughtDeadlineAtMs: Date.now() + 3_000 },
@@ -100,7 +100,7 @@ describe("Thought structured output (1122)", () => {
       truncated: true,
       parseOk: false,
       maxTokens: THOUGHT_MAX_OUTPUT_TOKENS,
-      outputTokens: 1000,
+      outputTokens: THOUGHT_MAX_OUTPUT_TOKENS,
       errorCode: "truncation",
     });
     expect(JSON.stringify(result.envelope)).not.toContain("operationalRequest");

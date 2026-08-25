@@ -74,7 +74,7 @@ export type CapabilityGate = (db: DatabaseSync) => boolean;
 
 const MAX_THOUGHT_ATTEMPTS = 2;
 /** Route-specific Thought completion cap. Attention TPM reserves this entire output budget. */
-export const THOUGHT_MAX_OUTPUT_TOKENS = 1000;
+export const THOUGHT_MAX_OUTPUT_TOKENS = 2048;
 /**
  * Minimum remaining reactive window before a structural retry is dispatched.
  * A second Groq Thought after a full 1000-token burn cannot repay 8000 TPM
