@@ -234,6 +234,19 @@ receipt, witness, and reconciliation. A complete trace does not resolve
 `OUTCOME_UNKNOWN`. Only current target-state observation or another accepted
 claim-specific witness can do that.
 
+### 9.5 Model Fabric receipts
+
+Model Fabric receipts are mechanical facts. Observability may correlate them.
+They must be able to answer, after the fact: logical role, route, model,
+backend, provider, tokens, fallback class, latency, outcome, qualification
+identity. They must not persist hidden chain-of-thought. A receipt is not
+qualification or promotion.
+
+Current Attention surfaces cannot yet answer total token pressure by Ashley
+workload (`GET /nuclear/attention` is Mistral-default TPM/RPS;
+`foldAttentionDailyUsage` is test-only). Fabric should make retrospective
+accounting possible without claiming Mint percentages in advance.
+
 ## 10. Mechanism dispositions
 
 | Mechanism | Architectural role | Disposition |

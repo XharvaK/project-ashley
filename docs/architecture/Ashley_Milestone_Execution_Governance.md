@@ -216,7 +216,9 @@ format when it becomes current work. This section does not add it.
 | Promotion | Out of scope |
 | Rollback | If evidence cannot be established, leave M3 `UNKNOWN` and keep G1 blocked |
 
-Live (`2026-08-23`): `UNKNOWN` in this worktree. Cited file absent.
+Closed by exact-candidate M3 production-acceptance evidence. The later
+M-series closure at `48bad019fe601d5c871a54dd9902879862c6e96a` confirms the
+accepted predecessor chain. This contract remains as gate-order provenance.
 
 ### G1 — Close M4 production acceptance
 
@@ -235,7 +237,10 @@ Live (`2026-08-23`): `UNKNOWN` in this worktree. Cited file absent.
 | Promotion | Out of scope. See G2 |
 | Rollback | Rejection or deferral leaves M4 unaccepted; M5 stays blocked |
 
-Live (`2026-08-23`): M4 remains `PROPOSED FOR ACCEPTANCE`. Not accepted.
+Closed by exact-candidate packet `M4_PRODUCTION_ACCEPTANCE_553553b0d0ee.md`
+(filename identity; not in this `8eedad8` planning tree). In-tree generic
+[`M4_PRODUCTION_ACCEPTANCE.md`](../handoffs/M4_PRODUCTION_ACCEPTANCE.md)
+remains as gate-order provenance.
 
 ### G2 — Promote M4 only after G1
 
@@ -253,6 +258,12 @@ Live (`2026-08-23`): M4 remains `PROPOSED FOR ACCEPTANCE`. Not accepted.
 | Verification | Capability-plane inspection, not a new M4 implementation |
 | Promotion | This *is* the promotion step. It still is not production witness of later milestones |
 | Rollback | Fail closed: capability remains unauthorized if admission cannot be shown |
+
+G2 is closed. The exact-candidate M-series closure records
+`candidate_verification` active and witnessed. M5, M6, and the named M7
+`patch_export` profile are also production accepted at
+`48bad019fe601d5c871a54dd9902879862c6e96a`. These facts do not broaden any
+capability or effect profile.
 
 ### M5 — Authorship
 
@@ -308,25 +319,33 @@ treat M5 as blocked on S1.
 | Promotion | Separate per profile. One profile does not admit another |
 | Rollback | Reconcile `OUTCOME_UNKNOWN`; never blind retry |
 
-### F1 — Model Fabric first Thought-observation slice
+### F1 — Model Fabric first code slice (MF-M1)
 
 | Field | Contract |
 |---|---|
 | Track | mechanism |
-| Purpose | One accepted Thought-observation slice over replaceable providers |
+| Purpose | Seam around **existing** production model routes with zero intended behavior change |
 | Existing owner | Model Fabric |
-| Must already be true | Owner-selected Sandbox delivery gate closed enough that F1 is the selected next implementation. No semantic parenthood from Sandbox |
-| Must not be treated as required | Full Context Budget; Learned Autonomy; Cognitive Graduation; execution authority |
-| Creates | Provider-neutral dispatch for one slice: one request, no fallback, receipts, privacy, cancellation, semantic qualification |
-| Does not create | Better Identity; autonomy; self-improvement; truth; complete Context Budget |
-| Forbidden reading | “Better routing means a more advanced mind” |
-| Evidence | One accepted Thought-observation slice as named by the Fabric contract |
-| Verification | Settlement for the slice; no second structural provider request |
-| Promotion | Separate. A shadow slice is not live Thought |
-| Rollback | Disable the slice; current purpose routing remains policy, not Fabric completion |
+| Must already be true | Owner has selected Fabric next. Sandbox V2 M1–M7 production acceptance is exact-candidate evidence, not semantic parenthood for Fabric |
+| Must not be treated as required | Full Context Budget; Learned Autonomy; Cognitive Graduation; execution authority; OpenCode; F1-obs Lightning observation |
+| Creates | Typed role/route/backend/model identity and receipts on current `completeChat` path; truthful exposure of current ugliness |
+| Does not create | Better Identity; autonomy; new providers; catalog auto-route; observation-route repair |
+| Forbidden reading | “Better routing means a more advanced mind” or “the seam may silently repair production routes” |
+| Evidence | Unchanged live Thought NIM 20B→Groq 20B and Expression Mistral→Qwen eligibility; observation configured≠dispatched recorded; no §12.9 target leakage |
+| Verification | Settlement tests for current failover/fallback eligibility; no OpenCode |
+| Promotion | Separate. A seam is not live Thought promotion |
+| Rollback | Disable the seam; current purpose routing remains |
 
-Do not start F1 implementation while Sandbox remains the owner-selected
-current delivery focus.
+Historical **F1-obs** (Thought-observation Lightning, `single_attempt`, no
+fallback) is deferred optional. It does not block MF-M1.
+
+The owner selected Model Fabric next on `2026-08-25`. Sandbox V2 M1–M7 is
+production accepted against exact candidate
+`48bad019fe601d5c871a54dd9902879862c6e96a`, with M7 limited to the named
+`patch_export` profile. MF-M1 is the owner-selected next code cut. Owner
+**scope** is closed. Runtime implementation is `PENDING` (paused for the
+Operational Fulfillment exact integration SHA). This delivery decision does
+not create a semantic dependency from Model Fabric to Sandbox.
 
 ### OC1 — Operational Continuity first durable-work slice
 
@@ -460,7 +479,7 @@ apply-to-Ashley implementation. It must not block M5 authorship.
 | M5 | mechanism | G1; Sandbox authorship borders | Advisory authored candidate change sets | Approved Ashley changes; live Git mutation; autonomy |
 | M6 | mechanism | M5 | One finite bounded operate attempt | New effect class; worker identity; Agency-by-workflow |
 | M7 | mechanism | M6 + External Effect for the named profile | One named engineering-border effect, receipted and reconciled | Computer Use; generic agency; self-change |
-| F1 | mechanism | Owner-selected after current Sandbox delivery | One Thought-observation Fabric slice | Identity; autonomy; self-improvement; full Context Budget |
+| F1 | mechanism | Owner-selected after current Sandbox delivery | **MF-M1** existing-route seam; F1-obs deferred | Identity; autonomy; self-improvement; full Context Budget; OpenCode |
 | OC1 | mechanism | Owner-selected after F1 | One durable resumable work concern | Mind State; Event Spine; exactly-once world; instruction-by-event |
 | C1 | cognition | Current Memory / Evidence architecture | Matured source/assertion/provenance/live-shadow contract | World truth; Knowledge layer; autonomy |
 | C2 | cognition | C1 hard; Fabric `ContextProjection` interface | Bounded inspectable context projections | Forgetting; Recall authority; belief |
@@ -487,11 +506,13 @@ No milestone in this set is permitted to close a leakage by adding an owner.
 
 1. **Missing prerequisite?** G1 currently lacks a worktree-visible M3
    `PRODUCTION ACCEPTED` packet. That is a missing **evidence** prerequisite,
-   not a missing architecture prerequisite. M5 is blocked on G1. F1 is blocked
-   on owner-selected Sandbox delivery remaining current. C3 is blocked on C1,
+   not a missing architecture prerequisite. M5 is blocked on G1. F1 (**MF-M1**)
+   is blocked on owner-selected Sandbox delivery remaining current. C3 is blocked
+   on C1,
    not on Sandbox.
 2. **Early capability grant?** G2 would be early if performed before G1. M7
-   would be early if treated as Computer Use. F1 would be early if started
+   would be early if treated as Computer Use. F1 (**MF-M1**) would be early if
+   started
    while Sandbox is still the selected delivery focus. C3 would be early
    without C1.
 3. **Architecture work in the wrong place?** S1 must stay specification under
@@ -510,28 +531,31 @@ No reordering is recommended.
 
 ## 8. What should happen next from current repository state
 
-Live (`2026-08-23`):
+Live resolution refreshed `2026-08-25`:
 
 | Fact | Reading |
 |---|---|
-| Owner-selected delivery | Sandbox |
-| `origin/master` | `9e930db` — M4 packet |
-| M3 `PRODUCTION ACCEPTED` | `UNKNOWN` here |
-| M4 | `PROPOSED FOR ACCEPTANCE`; not accepted; not promoted |
-| Allowed parallel now | S1 specification writing; C1 design/maturation under Memory / Evidence, labeled as not current Sandbox delivery |
-| Not allowed now | M5 implementation as current delivery; F1 implementation as current delivery; G2; apply-to-Ashley; Event Spine implementation |
+| Owner-selected delivery | Model Fabric, beginning with MF-M1 |
+| `origin/master` | `48bad019fe601d5c871a54dd9902879862c6e96a` |
+| Sandbox V2 M1–M7 | `PRODUCTION ACCEPTED` against the exact candidate above. M7 is limited to `patch_export` |
+| Allowed now | MF-M1 implementation review and then the bounded existing-route seam; separately authorized documentation/design work that does not compete with that delivery |
+| Not allowed by this selection | F1-obs as the first Fabric cut; new provider/model routing in MF-M1; OpenCode production routing; live apply; Git effects; deployment; self-change; Event Spine implementation |
 
-**Next mechanism action:** G0. Recover or equivalently observe M3 production
-acceptance for SHA `28e157a`. If that cannot be done, G1 stays blocked and
-M3 remains `UNKNOWN`.
+**Next mechanism action:** review and execute MF-M1 against the current live
+routing surface. Preserve all existing routing, provider, model, failover,
+fallback, and mismatch behavior while adding typed identity and truthful
+receipts.
 
-**Next governance action (parallel):** S1 specification only.
+**Next governance action (parallel):** S1 specification only, if separately
+selected and kept outside the MF-M1 implementation scope.
 
 **Next cognition action (parallel, not a Sandbox substitute):** C1
 maturation under the existing Memory / Evidence contract.
 
-**Do not do next:** treat the M4 packet as accepted; promote M4; start M5 as
-if G1 were closed; start F1; design Event Spine as a phase.
+**Do not do next:** reopen accepted Sandbox milestones without contradictory
+exact-candidate evidence; treat M7 `patch_export` as generic engineering
+authority; implement F1-obs, OpenCode routing, or provider migration inside
+MF-M1; design Event Spine as a phase.
 
 This document does not authorize those next actions. It only ranks them.
 

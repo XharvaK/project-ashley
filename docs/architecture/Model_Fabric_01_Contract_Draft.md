@@ -1,11 +1,12 @@
 # Project Ashley Model Fabric Contract
 
-- **Status:** `SUPPORTING`; frozen field contracts and first-slice specification beneath the current Model Fabric architecture
+- **Status:** `SUPPORTING`; field contracts reconciled beneath the current Model Fabric architecture. Historical first-slice (Thought-observation / Lightning / no fallback) is **F1-obs**: deferred optional witness, **not** the first implementation milestone.
 - **Canonical phase owner:** [`Model_Fabric_Architecture.md`](Model_Fabric_Architecture.md)
+- **First implementation milestone:** **MF-M1** (seam around existing production routes). Owner **scope** closed 2026-08-25. Runtime implementation `PENDING`.
 - **Historical filename:** retained to preserve existing links and reconciliation provenance. The canonical phase name is **Model Fabric**.
 - **Normative language:** MUST, MUST NOT, SHOULD, and MAY are requirements at their stated strength
 - **Applies to:** future provider-neutral model dispatch inside `apps/agent-service`
-- **Does not authorize:** activation, provider migration, sandbox changes, deployment, capability promotion, or Recall changes
+- **Does not authorize:** this file does not itself implement MF-M1. It does not authorize OpenCode production routing, provider migration, sandbox changes, deployment, capability promotion, or Recall changes.
 
 ## Decision summary
 
@@ -27,31 +28,44 @@ candidate adapter for that port, not a required semantic interface.
 OpenInference and Phoenix remain optional, replaceable candidates. Inspect AI
 is a reference evaluation substrate, not an acceptance authority.
 
-The first-slice specification decisions are resolved:
+The deferred F1-obs specification decisions are resolved **as supporting
+historical policy beneath the current owner document**. They do not authorize
+implementation and they do not define MF-M1.
 
-- `thought_observation` remains first;
-- `ASHLEY_MODEL_FABRIC_MODE=off` remains the default;
+- `thought_observation` remains the historical first *semantic* slice in this
+  file;
+- `ASHLEY_MODEL_FABRIC_MODE=off` remains the default in this specification;
 - `thought_observation_shadow` replaces the existing shadow transport while enabled;
 - dual dispatch is prohibited;
 - active Thought remains unchanged;
-- no durable telemetry exporter, Phoenix, or OpenInference is part of the first slice;
+- no durable telemetry exporter, Phoenix, or OpenInference is part of that slice;
 - the compatibility resolver is temporary and has explicit removal criteria;
 - Vitest and injected fixtures remain the implementation-test mechanism;
 - Inspect AI remains deferred;
 - live provider qualification is a separate, later gate.
 
-These decisions authorize specification reconciliation only. They do not authorize implementation.
+**2026-08-25 delivery-order (CLOSED):** the
+[Model Fabric Architecture](Model_Fabric_Architecture.md) first
+implementation milestone is **MF-M1** (no-behavior-change seam around
+*existing* production routes). This file's Thought-observation shadow slice
+is **F1-obs**: supporting, deferred, optional. Implementers MUST NOT treat
+this file's first-slice identity as MF-M1. Field contracts (profiles,
+receipts, ContextProjection, SpecialistSession) remain in force unless the
+architecture explicitly supersedes them. These decisions still do not
+implement code.
 
-The owner-approved model policy binds the first profile candidate without
-changing these contracts. These values are `PLANNED TARGET` policy, not Model
-Fabric architecture:
+The model IDs in the next list are historical `2026-08-13 F1-obs PLANNED
+TARGET` policy, not MF-M1 policy. Live IDs live in
+[`docs/Routing_Status.md`](../Routing_Status.md). If a string here disagrees
+with Routing Status or `registry.ts`, **source wins**.
 
 - `thought.decision` remains Groq `openai/gpt-oss-120b` primary;
 - Lightning-backed specialist and utility routes target NVIDIA
   `nvidia/nemotron-3.5-lightning-30b-a3b` primary;
 - Groq `openai/gpt-oss-120b` is a later, route-qualified fallback candidate for
   those Lightning-backed routes;
-- the former Groq 20B utility candidate has no planned role;
+- the then-proposed retirement of Groq 20B from future utility is provenance
+  only; current shared utility/Thought-failover use is preserved in MF-M1;
 
 Changing a provider or model binding must update versioned policy and profile
 identity. It must not require an architecture rewrite when the semantic
@@ -60,16 +74,16 @@ boundary remain unchanged.
 
 ## Document hierarchy
 
-This file is the frozen field-contract and first-slice specification. Semantic
+This file is the supporting field-contract and deferred F1-obs specification. Semantic
 phase ownership lives in
 [`Model_Fabric_Architecture.md`](Model_Fabric_Architecture.md).
 
 | Document | Current role |
 |---|---|
 | [`Model_Fabric_Architecture.md`](Model_Fabric_Architecture.md) | `CURRENT PHASE CONTRACT` for Model Fabric meaning, ownership, state, and authority |
-| This contract | `SUPPORTING` frozen field contracts, profile/receipt schemas, and first-slice specification |
+| This contract | `SUPPORTING` field contracts, MF-M1 receipt reconciliation, and deferred F1-obs specification |
 | [`Model_Fabric_01_Codebase_Reconnaissance.md`](Model_Fabric_01_Codebase_Reconnaissance.md) | `HISTORICAL` source snapshot at its named baseline |
-| [`Model_Fabric_01_Implementation_Spike.md`](Model_Fabric_01_Implementation_Spike.md) | `SUPPORTING / PLANNED FIRST SLICE`; mechanism choices remain subject to dependency qualification |
+| [`Model_Fabric_01_Implementation_Spike.md`](Model_Fabric_01_Implementation_Spike.md) | `SUPPORTING / DEFERRED F1-obs`; mechanism choices remain subject to dependency qualification |
 | [`research/Model_Fabric_01_Final_Implementation_Packet.md`](research/Model_Fabric_01_Final_Implementation_Packet.md) | `REFERENCE / PLANNING SNAPSHOT`; not implementation authority |
 | [`../Routing_Status.md`](../Routing_Status.md) | `SUPPORTING / LIVING SOURCE STATUS` for current route bindings |
 
@@ -127,11 +141,15 @@ The arrows do not grant authority:
 ### Dispatch authority
 
 - The resolved route MUST be immutable for one attempt.
-- A first-slice invocation MUST perform zero or one provider HTTP dispatch.
+- One explicit attempt MUST perform zero or one provider HTTP dispatch.
 - The provider adapter MUST NOT retry.
 - Any SDK used by an adapter MUST be configured with `maxRetries: 0` or its proven equivalent.
-- The first slice MUST use `reliabilityClass = single_attempt` and `fallbackRouteIds = []`.
-- The first slice MUST NOT perform provider fallback. One invocation may attempt at most one provider dispatch.
+- MF-M1 MAY preserve multiple explicit attempts or invocations only where the
+  current Thought failover or Expression fallback policy already permits them.
+  It MUST receipt each attempt and MUST NOT add a new retry or fallback path.
+- Deferred F1-obs MUST use `reliabilityClass = single_attempt` and
+  `fallbackRouteIds = []`. Its invocation may attempt at most one provider
+  dispatch.
 - A deterministic local fail-closed result that makes no additional provider request is not provider fallback.
 - A later route policy MAY name Ashley-owned fallback routes. A caller using that later policy MUST NOT name a provider or model.
 - Timeout and cancellation MUST NOT automatically cause fallback in any policy.
@@ -171,6 +189,22 @@ export type ModelPurposeId =
   | "execution.review"
   | "execution.verify";
 
+export type LogicalModelRole =
+  | "thought"
+  | "expression"
+  | "thought_observation"
+  | "reflection_initiative"
+  | "exchange_cognition"
+  | "curiosity_consolidation"
+  | "maintenance"
+  | "engineering"
+  | "research";
+
+export type SpecialistRequirement = {
+  seat: string;
+  requiredIndependenceGroup?: string;
+};
+
 export type ModelRouteId = string & { readonly __brand: "ModelRouteId" };
 export type ProviderId = string & { readonly __brand: "ProviderId" };
 export type ModelProfileId = string & { readonly __brand: "ModelProfileId" };
@@ -191,12 +225,12 @@ The brands prevent accidental interchange. They are not runtime validation. Runt
 
 `ProviderId` is an Ashley-owned validated identifier, not a provider union
 imported from an SDK. The adapter registry determines which provider IDs are
-recognized and enabled. The first spike registers only `nvidia`, for the exact
-configured model `nvidia/nemotron-3.5-lightning-30b-a3b`. Existing Mistral,
-Groq, and declared-but-disabled NIM routes do not imply that any adapter is
-qualified for Model Fabric. Adding a later provider MUST require a new adapter
-registration and independent qualification, but MUST NOT require rewriting
-every core contract.
+recognized and enabled. MF-M1 registers mechanical profiles for the exact
+current Mistral, Groq, and NIM bindings under `existing_compatibility`; this is
+not qualification. The deferred F1-obs spike may later register `nvidia` for
+the exact configured Lightning model after its dependency packet. Adding any
+new provider requires adapter registration, exact qualification, and owner
+approval, but MUST NOT require rewriting every core contract.
 
 ### ModelCapabilityProfile
 
@@ -281,7 +315,7 @@ Rules:
 - `ModelProfileQualificationBinding` is the lossless Model Fabric fact shape consumed by that plane. It carries no status, score, recommendation, or promotion decision.
 - A local index MAY expose `ModelProfileQualificationReference` values as derived, rebuildable discoverability metadata. The Evaluation Plane owns the target `QualificationResult`. Such references are outside the canonical profile, MUST NOT be consulted during Model Fabric dispatch, and grant no qualification, promotion, enablement, or dispatch authority.
 
-The first planned binding is:
+The first **deferred F1-obs** new-provider binding is:
 
 ```text
 profileId: nvidia.nemotron-3.5-lightning-30b-a3b
@@ -301,36 +335,67 @@ facts remain conservative until the dependency packet proves them.
 Route policy is Ashley-owned dispatch policy.
 
 ```ts
+export type RouteAdmissionBasis =
+  | {
+      kind: "existing_compatibility";
+      compatibilityBindingId: string;
+    }
+  | {
+      kind: "qualification_owner_approved";
+      qualificationResultRef: string;
+      ownerApprovalRef: string;
+    };
+
+export type ReasoningPolicy =
+  | "disabled"
+  | "economical"
+  | "standard"
+  | "high"
+  | "max_supported";
+
+export type InferencePolicyFingerprint = string;
+
 export type ModelRoutePolicy = {
   routeId: ModelRouteId;
-  purpose: ModelPurposeId;
+  logicalRole: LogicalModelRole;
+  purposes: readonly ModelPurposeId[];
+  specialistRequirement: SpecialistRequirement | null;
   enabled: boolean;
   profileId: ModelProfileId;
   profileVersion: ModelProfileVersion;
   profileFingerprint: ModelProfileFingerprint;
+  reasoningPolicy: ReasoningPolicy;
   contextPolicyId: ContextPolicyId;
   quotaClass: string;
   latencyClass: "interactive" | "urgent" | "background" | "batch";
   reliabilityClass: "single_attempt" | "explicit_fallback";
   privacyPolicyId: string;
-  permittedSpecialists: readonly ModelPurposeId[];
+  permittedSeats: readonly string[];
   fallbackRouteIds: readonly ModelRouteId[];
+  admissionBasis: RouteAdmissionBasis;
 };
 
 export type ResolvedModelRoute = {
-  routeId: ModelRouteId;
-  purpose: ModelPurposeId;
+  logicalRole: LogicalModelRole;
+  requestedPurpose: ModelPurposeId;
+  specialistRequirement: SpecialistRequirement | null;
+  configuredRouteId: ModelRouteId;
+  dispatchedRouteId: ModelRouteId;
   profileId: ModelProfileId;
   profileVersion: ModelProfileVersion;
   profileFingerprint: ModelProfileFingerprint;
   provider: ProviderId;
   configuredModelId: string;
+  reasoningPolicy: ReasoningPolicy;
+  effectiveReasoning: string | null;
+  inferencePolicyFingerprint: InferencePolicyFingerprint;
   contextPolicyId: ContextPolicyId;
   quotaClass: string;
   latencyClass: ModelRoutePolicy["latencyClass"];
   reliabilityClass: ModelRoutePolicy["reliabilityClass"];
   privacyPolicyId: string;
   fallbackRouteIds: readonly ModelRouteId[];
+  admissionBasis: RouteAdmissionBasis;
   registryVersion: string;
 };
 ```
@@ -341,9 +406,21 @@ Rules:
 - Resolution MUST fail closed for an unknown purpose, disabled route, unknown profile, profile-binding mismatch, or invalid registry.
 - The result MUST be immutable.
 - No `model?: string` field is permitted in a caller-facing request.
+- MF-M1 MAY ingest current caller `model` overrides only inside its temporary
+  compatibility adapter so the seam can expose existing mismatches without
+  changing behavior. The normalized caller-facing Fabric contract still
+  prohibits arbitrary model selection.
 - A fallback route MUST have a compatible or stricter privacy policy and satisfy the request’s required mechanical capabilities.
-- The Model Fabric first-slice route MUST set `reliabilityClass` to `single_attempt` and `fallbackRouteIds` to `[]`.
-- `explicit_fallback` and non-empty `fallbackRouteIds` are later/general policy only. They are prohibited in the first slice.
+- `existing_compatibility` MUST bind the exact pre-MF-M1 role, configured and
+  dispatched routes, provider, model, fallback/failover topology, and a
+  behavior-affecting **inference-policy fingerprint** (reasoning, temperature,
+  top_p, max-output, structured-output, and other semantic provider options
+  when material). Same model id with a different material reasoning setting is
+  a different compatibility identity. The tuple cannot authorize any normative
+  change.
+- The deferred F1-obs route MUST set `reliabilityClass` to `single_attempt`
+  and `fallbackRouteIds` to `[]`. That F1-obs restriction does not erase the
+  current Thought failover or Expression fallback that MF-M1 must preserve.
 
 ### ContextProjection
 
@@ -587,7 +664,10 @@ export type ModelInvocation<T> = {
   generation: {
     maxOutputTokens: number;
     temperature: number | null;
-    reasoningEffort: "none" | "low" | "medium" | "high";
+    reasoningPolicy: ReasoningPolicy;
+    effectiveReasoning: string | null;
+    temperature: number | null;
+    topP: number | null;
   };
   budget: {
     deadlineAtMs: number | null;
@@ -621,26 +701,42 @@ export type DispatchTruth =
   | "sent_outcome_unknown"
   | "response_received";
 
-export type ModelAttemptReceiptBase = {
+export type ModelFallbackClass =
+  | "none"
+  | "transport_failover"
+  | "model_substitution";
+
+export type ModelFallbackChain = {
+  chainId: string;
+  invocationOrdinal: number;
+  fallbackFromInvocationId: string | null;
+  fallbackClass: ModelFallbackClass;
+};
+
+export type ModelInvocationReceiptBase = {
   invocationId: string;
   sessionId: SpecialistSessionId;
-  purpose: ModelPurposeId;
+  logicalRole: LogicalModelRole;
+  requestedPurpose: ModelPurposeId;
+  specialistRequirement: SpecialistRequirement | null;
   latencyMs: number;
   attentionRequestId: number | null;
   traceId: string | null;
   projectionId: ProjectionId | null;
   projectionContentBinding: ProjectionContentBinding | null;
   projectionTelemetryFingerprint: ProjectionTelemetryFingerprint | null;
+  fallbackChain: ModelFallbackChain | null;
 };
 
-export type ModelPreResolutionReceipt = ModelAttemptReceiptBase & {
-  receiptStage: "pre_resolution";
-  attemptCount: 0;
-  dispatchTruth: "not_sent";
-};
+export type ModelPreResolutionInvocationReceipt =
+  ModelInvocationReceiptBase & {
+    receiptStage: "pre_resolution";
+    configuredRouteId: null;
+    attempts: readonly [];
+  };
 
 export type ModelResolvedDispatchFacts = {
-  routeId: ModelRouteId;
+  dispatchedRouteId: ModelRouteId;
   registryVersion: string;
   profileId: ModelProfileId;
   profileVersion: ModelProfileVersion;
@@ -648,19 +744,38 @@ export type ModelResolvedDispatchFacts = {
   provider: ProviderId;
   configuredModelId: string;
   contextPolicyId: ContextPolicyId;
+  admissionBasis: RouteAdmissionBasis;
+  requestedReasoningPolicy: ReasoningPolicy | null;
+  effectiveReasoning: string | null;
+  inferencePolicyFingerprint: InferencePolicyFingerprint | null;
+};
+
+export type ModelAttemptReceiptBase = {
+  invocationId: string;
+  attemptId: string;
+  attemptOrdinal: number;
+  fallbackFromAttemptId: string | null;
+  fallbackClass: ModelFallbackClass;
+  providerRequestCount: 0 | 1;
+  latencyMs: number;
+  projectionId: ProjectionId | null;
+  projectionContentBinding: ProjectionContentBinding | null;
+  projectionTelemetryFingerprint: ProjectionTelemetryFingerprint | null;
+  requestedReasoningPolicy: ReasoningPolicy | null;
+  effectiveReasoningSent: string | null;
 };
 
 export type ModelResolvedNotSentReceipt = ModelAttemptReceiptBase &
   ModelResolvedDispatchFacts & {
     receiptStage: "resolved_not_sent";
-    attemptCount: 0;
+    providerRequestCount: 0;
     dispatchTruth: "not_sent";
   };
 
 export type ModelDispatchAttemptedReceipt = ModelAttemptReceiptBase &
   ModelResolvedDispatchFacts & {
     receiptStage: "dispatch_attempted";
-    attemptCount: 1;
+    providerRequestCount: 1;
     dispatchTruth: "sent_outcome_unknown";
     projectionId: ProjectionId;
     projectionContentBinding: ProjectionContentBinding;
@@ -670,7 +785,7 @@ export type ModelDispatchAttemptedReceipt = ModelAttemptReceiptBase &
 export type ModelProviderResponseReceipt = ModelAttemptReceiptBase &
   ModelResolvedDispatchFacts & {
     receiptStage: "provider_response";
-    attemptCount: 1;
+    providerRequestCount: 1;
     dispatchTruth: "response_received";
     projectionId: ProjectionId;
     projectionContentBinding: ProjectionContentBinding;
@@ -682,34 +797,65 @@ export type ModelProviderResponseReceipt = ModelAttemptReceiptBase &
   };
 
 export type ModelAttemptReceipt =
-  | ModelPreResolutionReceipt
   | ModelResolvedNotSentReceipt
   | ModelDispatchAttemptedReceipt
   | ModelProviderResponseReceipt;
+
+export type ModelResolvedInvocationReceipt = ModelInvocationReceiptBase & {
+  receiptStage: "resolved";
+  configuredRouteId: ModelRouteId;
+  finalDispatchedRouteId: ModelRouteId;
+  finalAttemptId: string;
+  fallbackClass: ModelFallbackClass;
+  attempts: readonly [ModelAttemptReceipt, ...ModelAttemptReceipt[]];
+};
+
+export type ModelInvocationReceipt =
+  | ModelPreResolutionInvocationReceipt
+  | ModelResolvedInvocationReceipt;
 
 export type ModelResult<T> =
   | {
       ok: true;
       value: T;
-      receipt: ModelProviderResponseReceipt;
+      receipt: ModelResolvedInvocationReceipt;
     }
   | {
       ok: false;
       failure: ModelFailure;
-      receipt: ModelAttemptReceipt;
+      receipt: ModelInvocationReceipt;
     };
 ```
 
-`ModelAttemptReceipt` is stage-discriminated operational evidence:
+Receipt levels are not interchangeable:
 
-- `pre_resolution` carries only request facts known before a route is established. It MUST NOT require or fabricate route, registry, profile, provider, or model fields.
-- `resolved_not_sent` adds the immutable resolved route/profile/provider facts, but proves that no provider request was sent.
+- `ModelPreResolutionInvocationReceipt` carries only request facts known before
+  a route is established. It has no attempts and MUST NOT fabricate route,
+  registry, profile, provider, or model fields.
+- `ModelAttemptReceipt` is stage-discriminated evidence for exactly one
+  resolved provider attempt. `receiptStage` (lifecycle) and `dispatchTruth`
+  (send outcome) are orthogonal. `providerRequestCount` is zero or one and is
+  not the number of attempts in the invocation. Attempt receipts record
+  requested vs sent reasoning when known.
+- `resolved_not_sent` adds immutable dispatched-route/profile/provider facts,
+  but proves that no provider request was sent.
 - `dispatch_attempted` means a request may have been sent but no definitive provider response was established. It MUST NOT invent response IDs, resolved-model facts, finish reasons, or usage.
 - `provider_response` means Ashley received a definitive provider response. It may carry safely reported response facts and usage.
-- Projection fields are nullable only until the exact projection fact exists. A provider attempt requires the exact projection identity and bindings.
-- A failure's `dispatchTruth` MUST exactly equal its receipt's `dispatchTruth`.
+- `ModelInvocationReceipt` records one `completeChat`/Fabric invocation and
+  retains every ordered attempt. Current Thought NIM → Groq failover is two
+  attempts in one invocation.
+- `ModelFallbackChain` links caller-owned invocations. Current
+  Expression Mistral → Qwen fallback is two invocations in one chain.
+- Projection fields remain nullable on a resolved attempt only when local
+  refusal occurred before the exact projection existed. Any attempted provider
+  request requires the exact projection identity and bindings.
+- A failure's `dispatchTruth` MUST exactly equal the terminal attempt's
+  `dispatchTruth`. A pre-resolution invocation failure is `not_sent` and has
+  no attempt.
 
-The receipt records transport truth. It does not state that the caller accepted the result or that any behavior occurred.
+The receipts record transport and correlation truth. They do not state that
+the caller accepted the result or that any behavior occurred. Aggregates MUST
+NOT erase attempts or reconstruct unresolved provider facts.
 
 ### Failure taxonomy
 
@@ -750,18 +896,32 @@ Provider errors MUST be normalized into this closed taxonomy. Raw response bodie
 
 ## Retry, timeout, and fallback policy
 
-### First-slice policy
+### MF-M1 compatibility policy
+
+- Preserve the current Thought NIM → Groq same-model failover eligibility.
+- Preserve the current Expression Mistral → Qwen caller-level fallback
+  eligibility.
+- Every explicit provider attempt uses `providerRequestCount` zero or one and
+  has its own `ModelAttemptReceipt`.
+- Every `completeChat`/Fabric invocation has one `ModelInvocationReceipt`.
+- Expression primary and fallback invocations share one explicit
+  `ModelFallbackChain`.
+- No new retry, fallback, provider, model, route, or eligibility rule is
+  introduced.
+
+### Deferred F1-obs policy
 
 - The route policy is `reliabilityClass = single_attempt` with `fallbackRouteIds = []`.
 - Provider dispatch count is at most one.
 - AI SDK `maxRetries` is zero.
 - No same-model retry occurs.
-- No alternate route or provider fallback occurs inside or outside `ModelFabric.invoke` for this invocation.
-- A first-slice failure MUST NOT use `retryability = policy_may_fallback`.
+- No alternate route or provider fallback occurs inside or outside
+  `ModelFabric.invoke` for this F1-obs invocation.
+- An F1-obs failure MUST NOT use `retryability = policy_may_fallback`.
 - Timeout, cancellation, `sent_outcome_unknown`, and any other failure MUST NOT trigger another provider request.
 - Deterministic local fail-closed behavior MAY return an Ashley-owned local result only when it makes no additional provider request.
 
-### First-slice decision matrix
+### Deferred F1-obs decision matrix
 
 | Failure | Dispatch truth | Automatic retry | Automatic alternate | Permitted owner |
 |---|---|---|---|---|
@@ -790,7 +950,9 @@ A received HTTP 429 is `provider_quota + response_received`. A received model-un
 
 Receipt staging follows the same facts:
 
-- registry, unknown-purpose, disabled-route, unknown-profile, and binding failures before immutable resolution use `pre_resolution + not_sent`;
+- registry, unknown-purpose, disabled-route, unknown-profile, and binding
+  failures before immutable resolution use a `pre_resolution` invocation
+  receipt with no attempts; the failure is `not_sent`;
 - projection, capability, budget, media, deadline, cancellation, or attention failures after immutable resolution but before send use `resolved_not_sent + not_sent`;
 - post-send connection ambiguity, in-flight cancellation, or timeout after possible send use `dispatch_attempted + sent_outcome_unknown`;
 - definitive 404, 429, 5xx, malformed provider body, and other definitive provider responses use `provider_response + response_received`.
@@ -799,7 +961,12 @@ No variant invents a provider response or resolved dispatch fact that was not es
 
 ### LATER / GENERAL POLICY
 
-A later route policy MAY use `reliabilityClass = explicit_fallback` with explicit `fallbackRouteIds`. Those routes remain Ashley-owned policy. They are not available to the first slice. An SDK or provider registry MUST NOT select the alternate. An ambiguous `sent_outcome_unknown` MUST NOT silently retry or fall back.
+A later route policy MAY use `reliabilityClass = explicit_fallback` with
+explicit `fallbackRouteIds`. Those routes remain Ashley-owned policy. MF-M1
+admits only the exact current Thought and Expression compatibility policies;
+it cannot add one of these later policies. An SDK or provider registry MUST
+NOT select the alternate. An ambiguous `sent_outcome_unknown` MUST NOT
+silently retry or fall back.
 
 For Lightning-backed routes, the planned later policy is:
 
@@ -827,12 +994,12 @@ A future same-model retry MAY be added only when:
 - the attention ledger represents both attempts;
 - a test proves the SDK adds no hidden attempts.
 
-## AI SDK 7 mechanism decision
+## Deferred F1-obs AI SDK 7 mechanism decision
 
 **Decision: PREFERRED THIN TRANSPORT SPIKE IF QUALIFIED. Do not adopt
 wholesale.**
 
-The first NVIDIA transport mechanism is intentionally unresolved. The dependency
+The F1-obs NVIDIA transport mechanism is intentionally unresolved. The dependency
 packet must select one evidence-backed option:
 
 1. a suitable official NVIDIA provider for AI SDK 7;
@@ -862,7 +1029,7 @@ Do not use:
 - SDK tool execution;
 - SDK agents;
 - content telemetry;
-- streaming in the first slice.
+- streaming in F1-obs.
 
 Reasons:
 
@@ -877,7 +1044,7 @@ The previous Groq source research remains useful background for current
 routing, but it no longer selects the first adapter. The dependency packet must
 record the exact primary sources used for the NVIDIA transport decision.
 
-### Dependency qualification prerequisite
+### Deferred F1-obs dependency qualification prerequisite
 
 Before any implementation installs packages, the dependency packet MUST qualify
 NVIDIA `nvidia/nemotron-3.5-lightning-30b-a3b` and record:
@@ -911,7 +1078,10 @@ NVIDIA `nvidia/nemotron-3.5-lightning-30b-a3b` and record:
 
 The packet must also establish the exact `ai` and provider-package versions if
 AI SDK is selected, the exact structured-output surface used, and fixture
-evidence that one invocation creates at most one provider request.
+evidence that one SDK-level attempt creates at most one provider request and
+that hidden retries are disabled. The deferred F1-obs invocation remains one
+attempt. MF-M1 may preserve multiple explicit attempts in one invocation only
+where current route policy already does so.
 
 Separately, before Groq `openai/gpt-oss-120b` may be enabled as a Lightning
 fallback for any route, a later packet and `QualificationResult` must establish
@@ -919,7 +1089,10 @@ the exact fallback route's input/output contract, semantic suitability,
 structured-output and context compatibility, privacy, retry/fallback safety,
 separate attention accounting and receipts, and permitted fallback conditions.
 
-The packet is an implementation prerequisite, not another architecture research phase. This document deliberately does not select versions. Installing packages remains separately authorized work.
+The packet is an F1-obs implementation prerequisite, not an MF-M1
+prerequisite and not another architecture research phase. MF-M1 adds no
+provider package. This document deliberately does not select versions.
+Installing packages remains separately authorized work.
 
 ## SpecialistSession decision
 
@@ -1056,9 +1229,12 @@ Sources: [OpenTelemetry specifications](https://opentelemetry.io/docs/specs/otel
 
 ## Evaluation plan
 
-The [Ashley Evaluation / Qualification Plane](Ashley_Evaluation_Qualification_Plane.md) owns `EvaluationDefinition`, `QualificationResult`, invariant meaning, PASS/FAIL/BLOCKED/INCONCLUSIVE semantics, and qualification evidence binding. Model Fabric owns stable profile definitions, stage-valid `ModelAttemptReceipt` evidence, resolved-route facts when established, normalized failures, usage, and trace correlation facts that the Evaluation Plane may consume.
+The [Ashley Evaluation / Qualification Plane](Ashley_Evaluation_Qualification_Plane.md) owns `EvaluationDefinition`, `QualificationResult`, invariant meaning, PASS/FAIL/BLOCKED/INCONCLUSIVE semantics, and qualification evidence binding. Model Fabric owns stable profile definitions, stage-valid `ModelAttemptReceipt` evidence, `ModelInvocationReceipt` aggregation, caller-supplied fallback-chain correlation, resolved-route facts when established, normalized failures, usage, and trace facts that the Evaluation Plane may consume.
 
-Vitest remains the implementation-test mechanism for the first slice. Adapter and fixture tests are mandatory. Test success is local implementation evidence; it is not automatically a reusable `QualificationResult` and never promotes a profile.
+Vitest remains the implementation-test mechanism for MF-M1 and for the later
+F1-obs slice. Adapter and fixture tests are mandatory. Test success is local
+implementation evidence; it is not automatically a reusable
+`QualificationResult` and never promotes a profile.
 
 Formal reusable qualification MUST map losslessly into `QualificationResult` once that contract exists. Its `profileBinding` MUST consume the exact `ModelProfileQualificationBinding` supplied by Model Fabric. Model Fabric MUST NOT create a parallel qualification result, decide promotion, or write capability state. An evaluation framework may execute fixtures and display results. It cannot declare a capability or profile promoted.
 
@@ -1066,10 +1242,12 @@ Formal reusable qualification MUST map losslessly into `QualificationResult` onc
 
 | Test family | Required evidence |
 |---|---|
-| Route preservation | Every current purpose remains truthfully represented. The enabled first-slice `thought.observation` policy resolves to the Lightning profile for NVIDIA `nvidia/nemotron-3.5-lightning-30b-a3b`; the default-off path preserves current source behavior. Explicit route mismatch is refused. |
+| MF-M1 caller preservation | Every current production caller maps to the exact logical role in Model Fabric Architecture §12.2. Current configured/dispatched mismatches are recorded, not repaired. `utility_bulk` remains a route, not a substitute semantic role. |
 | Profile identity | Canonical profile serialization is deterministic; changing any normative field changes `profileVersion` and `profileFingerprint`; qualification references do not change the profile fingerprint. |
+| Compatibility admission | Every current binding uses exact `existing_compatibility`. Any changed provider, model, route, role, seat, fallback, or privacy class fails closed until an exact `QualificationResult` and owner approval exist. |
 | Provider failure normalization | Representative 401/403, 404 model, 429, 5xx, network reset, and malformed provider body map to the closed taxonomy without leaking content. |
-| Stage-valid receipt and dispatch truth | Pre-resolution failures omit unresolved route/profile/provider facts; resolved pre-send failures use `resolved_not_sent`; local TPM refusal is `local_quota_exceeded + not_sent`; received 429/404/5xx or malformed bodies use `provider_response + response_received`; post-send reset/cancellation races use `dispatch_attempted + sent_outcome_unknown`; failure and receipt truth match. |
+| Stage-valid receipt and dispatch truth | Pre-resolution invocation failures have no attempt and omit unresolved route/profile/provider facts; resolved pre-send attempts use `resolved_not_sent`; local TPM refusal is `local_quota_exceeded + not_sent`; received 429/404/5xx or malformed bodies use `provider_response + response_received`; post-send reset/cancellation races use `dispatch_attempted + sent_outcome_unknown`; failure and terminal-attempt truth match. |
+| Invocation and fallback truth | Thought NIM → Groq retains two ordered attempt receipts in one invocation. Expression Mistral → Qwen retains two invocation receipts in one caller fallback chain. No attempt is overwritten by the final result. |
 | Strict structured output | Valid object passes transport schema. Missing, extra, wrong-type, prose-wrapped, truncated, and schema-invalid outputs produce `malformed_output`. |
 | Specialist adherence | A session cannot change purpose, profile, context policy, provider, model, or output schema after creation. |
 | Parent/child session | Child context is explicit, provider/model still resolve through route policy, authority does not increase, and child budget is reserved from the parent. |
@@ -1078,8 +1256,9 @@ Formal reusable qualification MUST map losslessly into `QualificationResult` onc
 | Capability mismatch | Image/document/audio/structured/reasoning requests fail before dispatch when the profile is unqualified. |
 | Multimodal | Existing image artifact is materialized once, size and hash are rechecked, lease is released, and provider fixture receives the expected SDK message. |
 | Cancellation | Pre-dispatch cancellation yields `not_sent`. In-flight cancellation yields `sent_outcome_unknown` unless the transport proves otherwise. No provider fallback occurs. |
-| Hidden retries | One invocation causes exactly one fixture HTTP request. SDK retry defaults are overridden. |
-| First-slice no provider fallback | The route is `single_attempt`, `fallbackRouteIds` is empty, and every failure path causes at most one provider request. Deterministic local fail-closed behavior makes no provider request. |
+| Hidden retries | One explicit attempt causes at most one fixture HTTP request. SDK retry defaults are overridden. Multiple requests occur only as separately receipted attempts already allowed by current route policy. |
+| MF-M1 no new fallback | Existing Thought failover and Expression fallback eligibility are unchanged. No new fallback route, retry, provider, or model is admitted. |
+| Deferred F1-obs single attempt | The optional F1-obs route remains `single_attempt`, `fallbackRouteIds` is empty, and every failure path causes at most one provider request. |
 | Independent review | Review session uses a distinct purpose, context policy, and route. It cannot share the author session’s hidden content. |
 | Privacy | Spans contain allow-listed metadata only. Prompts, outputs, URLs, filenames, media, secrets, and raw exceptions are absent. |
 | Authority isolation | A schema-valid model proposal still has no effect until the existing Ashley validator accepts it. No `OutputContract` callback can perform semantic validation or a durable cognitive write. |
@@ -1139,19 +1318,22 @@ This table assigns each discovered defect to an implementation slice. It does no
 
 | Current defect | Disposition |
 |---|---|
-| Thought observation forces `thought` instead of the current `utility_bulk` purpose binding | Owned by the first Model Fabric shadow slice. Flag-off behavior remains unchanged. Flag-on tests MUST prove the temporary compatibility route concept resolves to NVIDIA `nvidia/nemotron-3.5-lightning-30b-a3b`, without claiming the current production `utility_bulk` binding already changed. |
-| Reflection uses a Groq route with `env.mistralModel` override | Real cognition defect. Do not fix it in the first slice. Correct and migrate it to the Lightning target only in a separately authorized cognition-sensitive slice. |
-| Engineering uses a Groq route with `env.mistralModel` override | Sandbox/engineering workstream. Do not touch until the accepted Sandbox SHA is known and the public engineering seam is re-audited. Its future specialist primary is Lightning, subject to exact claim qualification. |
+| Thought observation forces `thought` instead of the current `utility_bulk` purpose binding | MF-M1 MUST record configured ≠ dispatched without repair. Deferred F1-obs may later replace the shadow transport only after its own dependency and qualification gates. |
+| Reflection uses a Groq route with `env.mistralModel` override | MF-M1 maps it to `reflection_initiative` and records the exact mismatch. Correct it only in a separately authorized cognition-sensitive slice. |
+| Engineering uses an Expression route with `env.mistralModel` override | MF-M1 maps it to `logicalRole = engineering` plus `SpecialistRequirement(seat = complex_orchestration)` without changing route/model behavior. A later specialist-model migration requires exact qualification and owner approval. |
 | Exchange cognition compares continuity against ambient `env.mistralModel` | Provenance/continuity defect. Its later Lightning migration MUST use immutable resolved `ModelAttemptReceipt` profile and resolved-model identity. |
-| Attention observability/model epoch remains Mistral-specific | Multi-provider debt. The first shadow slice MAY preserve current attention storage, but a correct `ModelAttemptReceipt` does not solve this debt. Correct and qualify it before broader active Model Fabric migration depends on provider-neutral continuity. |
-| Curiosity consolidation omits owner/cognitive-job/attention-DB correlations | Preserve for the dedicated curiosity migration slice. Do not expand the first slice to fix it. |
+| Attention observability/model epoch remains Mistral-specific | Multi-provider debt. MF-M1 MAY preserve current attention storage, but correct receipts do not solve this debt. Correct and qualify it before broader active Model Fabric migration depends on provider-neutral continuity. |
+| Curiosity consolidation omits owner/cognitive-job/attention-DB correlations | MF-M1 maps the caller to `curiosity_consolidation` and preserves the missing correlations. Correct them only in a dedicated later slice. |
 
-## Sandbox dependencies and things to wait for
+## Sandbox boundary after production acceptance
 
-The following work MUST wait until the current sandbox and Autonomous Engineering Workstation work is finished, frozen, and independently qualified:
+Sandbox V2 M1–M7 is production accepted at exact candidate
+`48bad019fe601d5c871a54dd9902879862c6e96a`, with M7 limited to
+`patch_export`. MF-M1 may integrate its seam at current model-call boundaries.
+MF-M1 MUST NOT use that acceptance to authorize any of the following:
 
-- editing `apps/agent-service/src/core/sandbox/engineering-model-adapter.ts`;
-- editing `engineering-types.ts`, `engineering-operator.ts`, `coordinator.ts`, or `engineering-runtime.ts`;
+- changing Sandbox execution semantics in `engineering-types.ts`,
+  `engineering-operator.ts`, `coordinator.ts`, or `engineering-runtime.ts`;
 - changing engineering budgets or fixing the zero-call dispatch finding;
 - adding execution-review or execution-verification specialists to live operator flow;
 - changing approval envelopes, delegated signing, broker IPC, execution recipes, restart behavior, or Mint services;
@@ -1159,18 +1341,23 @@ The following work MUST wait until the current sandbox and Autonomous Engineerin
 - activating any disabled sandbox route;
 - deploying Model Fabric or a telemetry exporter to Mint.
 
-The later engineering migration MUST begin from the then-accepted sandbox SHA, not this reconnaissance snapshot. It must re-audit the live `ThinkingModel` and `EngineeringExecutionPort` contracts before editing.
+Any later engineering-model migration MUST begin from current source and the
+accepted Sandbox boundary. It must re-audit the live `ThinkingModel` and
+`EngineeringExecutionPort` contracts before changing their semantics.
 
 ## Open questions for Doc/GPT
 
-The first-slice choices are resolved. Remaining architecture or environment questions are:
+The MF-M1 contract choices are resolved. Remaining implementation or
+environment questions are:
 
 1. Should the long-term route registry remain JSON, become typed TypeScript, or use generated TypeScript from a validated JSON schema? Recommendation: validated versioned JSON plus generated/read-only runtime snapshot.
 2. Should the first strict schema preserve the exact current Thought proposal object, or deliberately reduce it to the subset stored by observation? Recommendation: generate the full current proposal, validate it, then store the same bounded comparison fields as today.
 3. Should provider request IDs be retained in the attention ledger? Recommendation: yes, when documented non-secret, bounded, and useful for incident correlation.
 4. Should route configuration fail service startup for any invalid disabled route, or only invalid active routes? Recommendation: validate all records; fail startup for active-route errors and surface disabled-route errors as readiness diagnostics until a migration policy is agreed.
 5. Is `mistral-medium-latest` alias movement acceptable for Expression continuity? This needs a separate model-continuity policy decision. Model Fabric should preserve the current configured alias and record the resolved model when reported.
-6. What is the accepted Linux Mint Node runtime version? It must be verified in the dependency packet before package installation.
+6. What is the accepted Linux Mint Node runtime version for any later package
+   installation? It must be verified in the F1-obs dependency packet before
+   that installation. MF-M1 adds no package.
 
 ## Contract acceptance gates
 
@@ -1179,18 +1366,22 @@ The draft is ready for an implementation spike only if reviewers agree that:
 - route policy and capability profile are separate;
 - profile identity is stable and versioned; qualification history is outside the canonical profile;
 - core provider identity is Ashley-owned and provider-neutral;
-- caller model overrides are prohibited;
+- arbitrary caller model overrides are prohibited by the normalized contract;
+  the MF-M1 compatibility adapter may expose current legacy overrides without
+  changing them;
 - context enters Fabric only through `ContextProjection`;
 - projection content binding and telemetry fingerprint have distinct semantics;
 - `SpecialistSession` has no effect authority;
 - child sessions inherit neither hidden context nor new authority or budget;
 - semantic validation and cognitive materialization remain caller-owned;
-- provider dispatch is at most one in the first slice;
+- provider dispatch is at most one per explicit attempt;
 - SDK retries are disabled;
-- first-slice provider fallback is prohibited by `single_attempt` plus empty `fallbackRouteIds`; later/general fallback remains explicit and Ashley-owned;
+- MF-M1 preserves only existing failover/fallback policy; deferred F1-obs
+  prohibits fallback through `single_attempt` plus empty `fallbackRouteIds`;
 - local quota refusal, definitive provider response, and ambiguous post-send failure remain distinct;
 - telemetry is allow-list-only and content-free;
 - Evaluation Plane contracts own qualification and promotion semantics;
 - Perception remains media authority;
-- the first slice is shadow-only Thought observation;
+- MF-M1 is the first implementation slice and covers the exact current caller
+  map with zero intended behavior change; F1-obs is deferred;
 - sandbox and Mint paths remain untouched.

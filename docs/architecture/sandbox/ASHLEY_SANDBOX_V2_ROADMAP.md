@@ -4,9 +4,16 @@
 
 **Hardened:** 2026-08-21
 
+**Dated production evidence pointer (not architecture):** M1–M7 are
+`PRODUCTION ACCEPTED` at exact candidate
+`48bad019fe601d5c871a54dd9902879862c6e96a`. Closure packet filename
+`SANDBOX_V2_PRODUCTION_CLOSURE_48bad019fe60.md` is not in this `8eedad8`
+planning tree; the SHA identity is preserved without copying that packet here.
+M7 acceptance is limited to the named `patch_export` profile.
+
 **Scope:** Sandbox V2 M0 through M7 architecture. This document does not
 implement a milestone, authorize a capability, change an operator registry,
-qualify a host, activate M3, begin M4, deploy, or promote production authority.
+qualify a host, activate a capability, deploy, or promote production authority.
 
 **Authority:** This document is subordinate to `VISION.md`, the Core
 Principles, the Constitution, the Stewardship Compact, and Ethics. It is the
@@ -21,20 +28,17 @@ milestone detail. Historical Sandbox V1 documents remain provenance only.
 2. Sandbox V2 executes through direct, unprivileged Bubblewrap. It does not use
    `ashley-exec-broker`, a root service, `/run/ashley/broker.sock`, signed V1
    broker envelopes, or V1 `source_*` broker scopes.
-3. M0, M1, M2, and M3 semantics are accepted. Current source presence,
-   exact-SHA physical qualification, deployment, promotion, and production
-   acceptance are **not** recorded in this architecture document. Resolve them
-   live from Git, source, exact-candidate packets, or production observation.
-   If they cannot be established from permitted evidence: `UNKNOWN`.
-4. M3 remains the current milestone *boundary*: a durable private writable
-   candidate workspace. It is not live repository mutation and not general
-   engineering autonomy.
-5. M4 is the next milestone in the M-series. M4 is **BLOCKED** until the M3
-   predecessor gate for the exact candidate is closed through
-   `PRODUCTION ACCEPTED`. Whether that gate is presently open is not recorded
-   here. Resolve it live. If it cannot be established from permitted
-   evidence: `UNKNOWN`.
-6. M4 adds verification over an ephemeral execution projection. It must not
+3. M0–M7 semantics are accepted. Current maturity still resolves from Git,
+   source, exact-candidate packets, or production observation. The dated
+   pointer above records the accepted `2026-08-23` closure without turning
+   this architecture into a current-state dashboard.
+4. The accepted M7 boundary is one named `patch_export` profile. It does not
+   grant live repository mutation, Git effects, deployment, network,
+   self-change, Computer Use, or general engineering autonomy.
+5. No later M-series milestone is implied. A new M7 effect profile requires
+   its own architecture, qualification, promotion, witness, and production
+   acceptance.
+6. M4 verification uses an ephemeral execution projection. It must not
    make the durable M3 candidate workspace writable to build or test commands.
 7. Authority lives in Ashley-owned capability, project-registry, operation,
    and border contracts. Model JSON, repository files, installed tools, and
@@ -174,8 +178,9 @@ M0 PROVE THE SUBSTRATE
               -> M7 PROMOTE THROUGH A NAMED ENGINEERING BORDER
 ```
 
-M1 through M3 are not reopened by this roadmap. M4 through M7 are planned
-architecture. No planned milestone is an implementation claim.
+M1 through M7 are not reopened by this roadmap. The table defines milestone
+architecture; the dated pointer at the top records later exact-candidate
+production evidence without converting architecture rows into maturity claims.
 
 Current milestone maturity is not recorded here. Resolve it live from Git,
 source, exact-candidate packets, or production observation.

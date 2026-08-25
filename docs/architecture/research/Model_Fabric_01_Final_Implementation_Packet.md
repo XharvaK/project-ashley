@@ -3,6 +3,10 @@
 > **REFERENCE / PLANNING SNAPSHOT.** Canonical phase name is Model Fabric.
 > This packet does not authorize implementation and does not outrank
 > [`../Model_Fabric_Architecture.md`](../Model_Fabric_Architecture.md).
+>
+> Historical F1-obs planning packet. MF-M1 source baseline is
+> `8eedad8bebbed2d8cd984849a269afe256a3d08a`. First **code** milestone is the
+> existing-route seam, not this Lightning observation slice.
 
 - **Status:** `REFERENCE` refined read-only planning snapshot
 - **Planning Baseline SHA:** `bcc185e40f347a0235407896fc809d9de461fd7b`

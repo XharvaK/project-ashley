@@ -25,7 +25,7 @@ Do not flatten these into one voice.
 | Historical exploration | Dated research, salvage, wave packets, reconnaissance | Preserve. Banner if terminology drifted. Do not rewrite as current law |
 | Frozen architecture | Owner map, non-ownership laws, “nothing new” conclusion | This document, Cross-Phase laws, current phase contracts |
 | Future planned work | Named phases and later design (Event Spine, Computer Use, …) | Roadmap / phase contracts. Not current delivery unless marked `CURRENT WORK` |
-| Owner-selected delivery | Sandbox gate, then Model Fabric | Delivery sequence. Not semantic parenthood and not the cognitive-track order |
+| Owner-selected delivery | Model Fabric current after exact-candidate Sandbox M1–M7 closure; Operational Continuity later | Delivery sequence. Not semantic parenthood and not the cognitive-track order |
 
 ```text
 HISTORICAL RESEARCH
@@ -162,8 +162,10 @@ recovery or reconstruction actually needs a join.
 ## 5. Two sequences that must not be collapsed
 
 **Owner-selected delivery** (already classified): Sandbox Autonomy → Model
-Fabric → Operational Continuity. Model Fabric does not derive meaning or
-authority from Sandbox.
+Fabric → Operational Continuity. The Sandbox leg is closed through M7 at exact
+candidate `48bad019fe601d5c871a54dd9902879862c6e96a`, with M7 limited to
+`patch_export`; Model Fabric is current. Model Fabric does not derive meaning
+or authority from Sandbox.
 
 The canonical roadmap now presents already-named items as engineering
 milestones from current live state. That conversion does not add phases and

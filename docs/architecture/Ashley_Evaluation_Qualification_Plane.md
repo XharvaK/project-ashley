@@ -4,7 +4,13 @@
 authorized by this document. The first evaluation spike waits for Model Fabric
 contract implementation and local acceptance.
 
-**Date:** 2026-08-13
+**Date:** 2026-08-13; Model Fabric delivery-order banner 2026-08-25
+
+Model Fabric first **code** milestone is **MF-M1** (existing-route seam) in
+[`Model_Fabric_Architecture.md`](Model_Fabric_Architecture.md). Owner scope is
+closed. Runtime is `PENDING`. This plane still waits for implemented Fabric
+profile identity and stage-valid receipts before its own first spike. It does not own routing. Historical Lightning /
+Groq 120B strings below are **not** live routes and **not** the MF-M1 roster.
 
 Historical reconnaissance baseline: `82b30a9d218855bd1373121fc5a656a3403b1c85` on `master`. Source inventories and command results bound to that baseline are historical evidence, not current source facts.
 
@@ -28,7 +34,7 @@ The plane should provide four explicit boundaries:
 3. **Qualification** binds accepted evidence to a precise source, environment, subject, and claim.
 4. **Promotion** is a separate owner-governed action.
 
-The first slice should be Node-native, artifact-only, and limited to `MODEL_PROFILE` evidence and qualification. Its architecture may be specified now. Its implementation MUST wait until Model Fabric has implemented its pure contracts, established real profile identity and stage-valid receipt types, and passed local first-slice acceptance. Evaluation should then import the real types or consume generated canonical schemas. It should define an Ashley-owned `EvaluationDefinition` contract and `QualificationResult` contract. It should not write to runtime databases, capability ledgers, Identity, Mind State, Recall, or production configuration. Capability qualification remains a downstream governance concern and is not part of this slice.
+The first Evaluation slice should be Node-native, artifact-only, and limited to `MODEL_PROFILE` evidence and qualification. Its architecture may be specified now. Its implementation MUST wait until Model Fabric has implemented its pure contracts, established real profile identity and stage-valid receipt types, and passed MF-M1 local acceptance plus independent closure. Evaluation should then import the real types or consume generated canonical schemas. It should define an Ashley-owned `EvaluationDefinition` contract and `QualificationResult` contract. It should not write to runtime databases, capability ledgers, Identity, Mind State, Recall, or production configuration. Capability qualification remains a downstream governance concern and is not part of this slice.
 
 Inspect AI should be **SPIKED**, not adopted as the plane. It is a useful execution substrate for later model and agent evaluations. It must not define Ashley's invariants, pass semantics, evidence authority, or promotion rules.
 
@@ -358,21 +364,30 @@ If an effect may have occurred but neither a conclusive receipt nor sufficient w
 
 Model qualification should be route-specific. A provider or benchmark score is not sufficient.
 
-The planned model policy does not alter this rule. Main Thought remains Groq
-`openai/gpt-oss-120b`. Lightning-backed specialist and utility routes target
-NVIDIA `nvidia/nemotron-3.5-lightning-30b-a3b`, with Groq
-`openai/gpt-oss-120b` only as a later fallback candidate. Each Lightning primary
-claim and each GPT-OSS-120B fallback claim requires its own route-specific
-`QualificationResult`. Thought qualification does not transfer to fallback use,
-and one Lightning qualification does not transfer to another purpose.
+The planned **live** model bindings do not alter this rule. Current Thought,
+Expression, and utility facts live in
+[`docs/Routing_Status.md`](../Routing_Status.md) at
+`sourceBaselineSha` `8eedad8bebbed2d8cd984849a269afe256a3d08a`.
+Owner-selected **future** occupants (Architecture §12.9) are not current
+routes. Historical 2026-08-13 Lightning / Groq 120B **as live Thought** is
+incorrect for this baseline; Groq 120B is a **target** for post-MF-M1 Thought,
+not current dispatch.
+Owner 2026-08-25 scouting occupants (Spark, Hy3, MiMo, Ultra, Lightning)
+are qualification hypotheses for specialist **seats**, not production
+routes. Each occupant × seat claim requires its own `QualificationResult`.
+Thought qualification does not transfer to failover use, Expression
+qualification does not transfer to Qwen fallback, and one Lightning
+qualification does not transfer to another purpose or seat.
 
 The process should bind three separate categories:
 
 1. **Profile binding:** the exact `ModelProfileQualificationBinding` with profile ID, profile version, profile fingerprint, provider, and configured model ID.
-2. **Dispatch binding:** route ID, purpose, resolved model ID when reported, context policy, system and identity prompt versions, generation parameters, structured-output mode, retry facts, fallback facts, tool and multimodal use, privacy/data-boundary facts, and a stage-valid receipt reference.
+2. **Dispatch binding:** route ID, purpose, resolved model ID when reported, context policy, system and identity prompt versions, generation parameters **including material reasoning/inference-policy configuration**, structured-output mode, retry facts, fallback facts, tool and multimodal use, privacy/data-boundary facts, and a stage-valid receipt reference.
 3. **Campaign binding:** source commit and dirty state, environment, corpus, rubric, judges, Evaluation Definition, evidence references, limitations, and unverified boundaries.
 
 These categories MUST remain separate. Route or campaign facts MUST NOT be reconstructed as model-profile fields.
+
+Same model under a materially different reasoning or inference-policy configuration may require separate qualification evidence. Owner-selected target occupants in Model Fabric Architecture §12.9 are a qualification **priority list**, not production routes.
 
 The minimum process should be:
 
@@ -394,6 +409,7 @@ Route-specific emphasis should differ:
 | Thought | evidence selection, refusal, authorization, effort allocation, completion |
 | Utility cognition | provenance, structured output, bounded transformation, privacy |
 | Fallback expression | minimal context, privacy, honesty, route visibility, graceful degradation |
+| Architecture / implementation / review / adversarial / debugging / bulk / research / long-context / multimodal packs | See Model Fabric Architecture §15. Seat packs do not transfer across seats. Owner hands-on ranking is not a `QualificationResult`. |
 | Multimodal perception | observation fidelity, quote awareness, uncertainty, prompt injection resistance |
 
 Latency, tokens, and cost should be recorded. They should not compensate for failures in Identity, security, authorization, or honesty.
@@ -413,7 +429,7 @@ This epoch should be distinct from the current model continuity epoch and capabi
 - baseline profile;
 - campaign results and human review.
 
-A new epoch should be required when any identity-bearing input changes. This includes provider, resolved model, context profile, identity prompt, fallback policy, rubric, or corpus.
+A new epoch should be required when any identity-bearing input changes. This includes provider, resolved model, context profile, identity prompt, fallback policy, **material reasoning/inference-policy configuration**, rubric, or corpus.
 
 The corpus should default to synthetic and sanitized fixtures derived from governance. Raw private conversations should not enter the repository. Any historical sample should require explicit opt-in, minimization, redaction, and a declared retention policy.
 
@@ -609,31 +625,43 @@ Inspect should be evaluated only in a follow-on spike after the Ashley-owned res
 The evaluation plane depends on implemented, locally accepted Model Fabric contracts. Model Fabric should expose these as separate facts:
 
 - canonical `ModelCapabilityProfile` identity and `ModelProfileQualificationBinding`;
-- stage-discriminated `ModelAttemptReceipt` evidence that never fabricates unresolved facts;
-- route ID, purpose, resolved model ID when reported, context policy, generation parameters, retry facts, fallback facts, and trace correlation as dispatch or invocation facts;
+- stage-discriminated `ModelAttemptReceipt` evidence for each resolved provider
+  attempt and `ModelInvocationReceipt` evidence that retains ordered attempts
+  without fabricating unresolved facts;
+- logical role, requested purpose, configured route, dispatched route, resolved
+  model ID when reported, context policy, generation parameters, retry facts,
+  fallback-chain facts, and trace correlation as dispatch or invocation facts;
 - capability, multimodal, privacy, cost, latency, and suitability policy outside canonical profile identity where they are not mechanical profile facts.
 
 Model Fabric should not own evaluation definitions, invariant meaning, pass semantics, or promotion authority.
 
-The first Evaluation Plane implementation spike MUST wait for Model Fabric pure-contract implementation, real profile identity, real stage-valid receipt contracts, and green local first-slice acceptance. It should then import those real TypeScript types or consume generated canonical schemas. A test double MAY be used only when it implements the real interface. Evaluation MUST NOT create provisional profile or receipt schemas, a second provider/model binding registry, or a dependency that blocks Model Fabric pure-contract implementation.
+The first Evaluation Plane implementation spike MUST wait for Model Fabric pure-contract implementation, real profile identity, real stage-valid receipt contracts, and green MF-M1 local acceptance plus independent closure. It should then import those real TypeScript types or consume generated canonical schemas. A test double MAY be used only when it implements the real interface. Evaluation MUST NOT create provisional profile or receipt schemas, a second provider/model binding registry, or a dependency that blocks Model Fabric pure-contract implementation.
 
 The dependency is acyclic:
 
 ```text
 A. Sandbox accepted/frozen independently
-B. exact Model Fabric dependency packet
-C. pure Model Fabric contracts
-D. dependency-packet-selected NVIDIA Lightning fixture adapter
-E. default-off Thought-observation shadow replacement
-F. local Model Fabric acceptance + independent closure
-G. Evaluation First Spike consumes implemented Model Fabric profile/receipt contract
-H. separately authorized exact-provider QualificationResult campaign
-I. separate promotion / enablement / deployment / activation decisions
+B. MF-M1 pure contracts + existing-route source/policy freeze + seam
+C. MF-M1 local acceptance + independent closure
+D. Evaluation First Spike consumes implemented Model Fabric profile/receipt contract
+E. separately authorized exact-provider QualificationResult campaign
+F. separate owner approval / promotion / enablement / deployment / activation decisions
+
+Deferred independent branch after its own dependency packet:
+F1-obs-1. exact NVIDIA/transport dependency qualification packet
+F1-obs-2. NVIDIA Lightning fixture adapter
+F1-obs-3. default-off Thought-observation shadow replacement
 ```
+
+F1-obs does not precede or block MF-M1, MF-M1 closure, or the Evaluation
+First Spike. Evaluation may record exact MF-M1 `existing_compatibility` as an
+admission fact, but MUST NOT convert that state into a `QualificationResult`.
+MF-M1 adds no provider package and does not wait on the F1-obs dependency
+packet.
 
 ## Recommended first slice
 
-After Model Fabric implements its pure contracts and passes local first-slice acceptance plus independent closure, build an artifact-only, Node-native evaluation contract layer focused only on `MODEL_PROFILE` evidence and qualification.
+After Model Fabric implements its pure contracts and passes MF-M1 local acceptance plus independent closure, build an artifact-only, Node-native evaluation contract layer focused only on `MODEL_PROFILE` evidence and qualification.
 
 It should contain:
 

@@ -2,13 +2,19 @@
 
 Status: `SUPPORTING / PROPOSED / NOT AUTHORIZED`; waiting for Model Fabric contract implementation and local acceptance
 
-Date: 2026-08-13
+Date: 2026-08-13; banner 2026-08-25
+
+**Delivery-order banner:** Model Fabric first **code** milestone is **MF-M1**
+(existing-route seam). Historical Lightning Thought-observation (D/E in the
+DAG below) is **F1-obs**, deferred. This spike still waits for real Fabric
+profile identity and stage-valid receipts; it must not treat F1-obs as the
+prerequisite that blocks MF-M1.
 
 Purpose: define the smallest useful future implementation slice for `MODEL_PROFILE` evidence and qualification without changing runtime authority
 
 ## Recommendation
 
-Wait until Model Fabric implements its pure contracts, establishes real `ModelCapabilityProfile` identity and stage-valid `ModelAttemptReceipt` types, and passes local first-slice acceptance plus independent closure. Then build an Ashley-owned, Node-native evaluation contract and reporting layer around existing evaluators, focused only on `MODEL_PROFILE` evidence and qualification.
+Wait until Model Fabric implements its pure contracts, establishes real `ModelCapabilityProfile` identity and stage-valid `ModelAttemptReceipt` types, and passes **MF-M1** (then MF-M2 as needed) local acceptance plus independent closure. Then build an Ashley-owned, Node-native evaluation contract and reporting layer around existing evaluators, focused only on `MODEL_PROFILE` evidence and qualification. Do not wait on F1-obs Lightning observation.
 
 Do not begin with Inspect AI. Do not create a provisional second model-profile registry. Do not rewrite the test stack. Do not add production gating.
 
@@ -138,7 +144,11 @@ Required behaviors:
 The result contract MUST keep three bindings separate:
 
 1. **Profile binding:** import or canonically consume Model Fabric `ModelProfileQualificationBinding` without renaming or extending `profileId`, `profileVersion`, `profileFingerprint`, `provider`, or `configuredModelId`.
-2. **Dispatch binding:** consume the real stage-discriminated `ModelAttemptReceipt` and separately bind route, purpose, resolved model when reported, context policy, generation, retry, fallback, and receipt-reference facts only when established.
+2. **Dispatch binding:** consume the real stage-discriminated
+   `ModelAttemptReceipt` values and their `ModelInvocationReceipt`; separately
+   bind logical role, requested purpose, configured route, dispatched route,
+   resolved model when reported, context policy, generation, retry,
+   fallback-chain, and receipt-reference facts only when established.
 3. **Campaign / evaluation binding:** bind source SHA and dirty state, environment, corpus, rubric, judges, `EvaluationDefinition`, and evidence references.
 
 Qualification history MUST NOT affect `profileFingerprint`. Route preference, privacy suitability, cost, latency, semantic suitability, fallback policy, and Evaluation status MUST NOT enter `ModelCapabilityProfile`.
@@ -314,7 +324,7 @@ The spike requires real, implemented, locally accepted Model Fabric contracts. A
 1. Model Fabric pure contracts are implemented;
 2. canonical profile identity and `ModelProfileQualificationBinding` are real;
 3. stage-valid `ModelAttemptReceipt` contracts are real;
-4. local Model Fabric first-slice acceptance and independent closure are green.
+4. MF-M1 local acceptance and independent closure are green.
 
 Then Evaluation may import the real TypeScript types, consume generated canonical schemas if that becomes the repository mechanism, and use a test double that implements the real interface.
 
@@ -324,15 +334,20 @@ The dependency DAG is:
 
 ```text
 A. Sandbox accepted/frozen independently
-B. exact Model Fabric dependency packet
-C. pure Model Fabric contracts
-D. dependency-packet-selected NVIDIA Lightning fixture adapter
-E. default-off Thought-observation shadow replacement
-F. local Model Fabric acceptance + independent closure
-G. Evaluation First Spike consumes implemented Model Fabric profile/receipt contract
-H. separately authorized exact-provider QualificationResult campaign
-I. separate promotion / enablement / deployment / activation decisions
+B. MF-M1 pure contracts + existing-route source/policy freeze + seam (MF-M2 unification as needed)
+C. MF-M1 local acceptance + independent closure
+D. Evaluation First Spike consumes implemented Model Fabric profile/receipt contract
+E. separately authorized exact-provider QualificationResult campaign
+F. separate owner approval / promotion / enablement / deployment / activation decisions
+
+Deferred independent branch:
+F1-obs-1. exact NVIDIA/transport dependency qualification packet
+F1-obs-2. NVIDIA Lightning fixture adapter
+F1-obs-3. default-off Thought-observation shadow replacement
 ```
+
+MF-M1 adds no provider package and does not wait on the F1-obs dependency
+packet.
 
 This ordering has no circular dependency. If gates C through F are incomplete, profile-bound Evaluation implementation remains `BLOCKED` or `NOT_RUN`. A provisional Evaluation-owned substitute is prohibited.
 

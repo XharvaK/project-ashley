@@ -1,15 +1,17 @@
-# Model Fabric — First Implementation Spike
+# Model Fabric — F1-obs Implementation Spike (deferred)
 
-- **Status:** `SUPPORTING / PLANNED FIRST SLICE`; not authorized
+- **Status:** `SUPPORTING / DEFERRED` (historical F1 Thought-observation slice). **Not** the first implementation milestone.
 - **Canonical phase name:** Model Fabric; the historical filename is retained for provenance
-- **Selected slice:** shadow Thought observation on NVIDIA Nemotron 3.5 Lightning 30B-A3B
+- **Canonical first code milestone:** **MF-M1** in [`Model_Fabric_Architecture.md`](Model_Fabric_Architecture.md)
+- **This slice:** shadow Thought observation on NVIDIA Nemotron 3.5 Lightning 30B-A3B (**F1-obs**, optional later)
 - **Default runtime state:** off
 - **Activation:** not authorized
 - **Sandbox impact:** none permitted
+- **Target-policy note (2026-08-25):** owner-selected **post-MF-M1** Thought-observation occupant is Nemotron 3 Ultra (Architecture §12.9), not this file's Lightning F1-obs candidate. This spike remains deferred historical F1-obs. It does not describe live `8eedad8` dispatch.
 
 ## First implementation spike
 
-Implement the smallest end-to-end Model Fabric path behind a default-off feature flag. Migrate only the transport used by the existing `thought_observation` shadow call.
+Implement the smallest end-to-end **F1-obs** Model Fabric path behind a default-off feature flag. This is **not MF-M1**. Migrate only the transport used by the existing `thought_observation` shadow call.
 
 Do not dual-dispatch. When the flag is off, the current shadow path remains unchanged. When the flag is set to the shadow spike value, the existing shadow dispatch is replaced by the Model Fabric dispatch. The active Thought decision path remains unchanged in both modes.
 

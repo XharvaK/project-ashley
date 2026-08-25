@@ -1,0 +1,168 @@
+# Project Ashley — Roadmap Handoff: Model Fabric
+
+**Source Document:** [`docs/architecture/Ashley_Architecture_Roadmap.md`](../architecture/Ashley_Architecture_Roadmap.md)
+**Governing architecture:** [`docs/architecture/Model_Fabric_Architecture.md`](../architecture/Model_Fabric_Architecture.md)
+**Owner decisions:** [`MODEL_FABRIC_OWNER_DECISION_PACKET.md`](MODEL_FABRIC_OWNER_DECISION_PACKET.md)
+**Status:** `DOCS FREEZE` — owner scope `CLOSED`; runtime implementation `PENDING`
+**Date:** 2026-08-25
+
+This documentation pass does **not** implement MF-M1. Runtime remains
+`PENDING`. No routing, OpenCode adapter, Mint, or Operational Fulfillment M1
+changes are included. Resume:
+[`MODEL_FABRIC_MF_M1_IMPLEMENTATION_CHECKPOINT.md`](MODEL_FABRIC_MF_M1_IMPLEMENTATION_CHECKPOINT.md).
+
+```text
+SOURCE SNAPSHOT != PROMOTED CANDIDATE != RUNNING PRODUCTION
+```
+
+| | SHA |
+|---|---|
+| MF-M1 `planningBaselineSha` | `8eedad8bebbed2d8cd984849a269afe256a3d08a` |
+| MF-M1 `productionBaselineSha` (this freeze) | `8eedad8bebbed2d8cd984849a269afe256a3d08a` — **not** guaranteed as final implementation SHA |
+| Not the Fabric source baseline | `48bad019fe601d5c871a54dd9902879862c6e96a` (Sandbox M-series closure) |
+| Historical routing line inherited by `8eedad8` | `04beaf1c21c9f7e0c9580692f57ed533d822f61e` |
+
+If a later production repair commit lands, freeze must revalidate against that
+exact integration SHA.
+
+---
+
+## 1. Exact next track
+
+* **Canonical track:** Model Fabric
+* **First implementation milestone:** **`MF-M1`** — seam around **existing**
+  production routes at `8eedad8`; zero intended routing/provider/model/reasoning
+  behavior change
+* **Not first:** historical **`F1` / F1-obs** Thought-observation Lightning
+  shadow (retained, deferred, optional)
+* **Not MF-M1:** owner-selected §12.9 target map (Qwen-primary Expression, Groq
+  120B Thought, Nemotron Super/Ultra, …)
+* **Classification:** Mechanism work
+* **OpenCode in MF-M1:** **No**
+
+---
+
+## 2. Prerequisite status
+
+* **Order classification:** `OWNER_SELECTED_IMPLEMENTATION_ORDER` following
+  Sandbox Autonomy. Model Fabric does **not** derive semantic parenthood
+  from Sandbox.
+* **Sandbox closure evidence:** M1–M7 are `PRODUCTION ACCEPTED` at exact
+  candidate `48bad019fe601d5c871a54dd9902879862c6e96a`. M7 is limited to the
+  named `patch_export` profile. That SHA is **not** the MF-M1 source tree.
+* **MF-M0:** COMPLETE as documentation (research + reconciliation + this
+  source-baseline correction).
+* **Blocker for starting MF-M1 code:** Operational Fulfillment M1 duplicate-delivery
+  repair must settle the **exact** integration SHA. Then follow
+  [`MODEL_FABRIC_MF_M1_IMPLEMENTATION_CHECKPOINT.md`](MODEL_FABRIC_MF_M1_IMPLEMENTATION_CHECKPOINT.md).
+
+---
+
+## 3. Milestone sequence (corrected dependency)
+
+| ID | Meaning | Production OpenCode? |
+|---|---|---|
+| MF-M0 | Docs / current-state freeze | No — complete |
+| MF-M1 | Existing-route seam + receipts | **No** |
+| MF-M2 | Unified identity; replace split route authority incrementally | No |
+| MF-M3 | Catalog + qualification **minimum** (`discovered` → … → `owner_approved`) | **No production route** |
+| MF-M4 | First optional elastic **utility** backend; qualified + owner-approved only | Track A utility only |
+| MF-M5 | Dynamic availability + approved pools / seat assignment | Among approved |
+| MF-M6 | Specialist seats production-active | After packs |
+| F1-obs | Historical observation witness | Separate |
+
+**Why MF-M3 before MF-M4:** `MODEL AVAILABLE != QUALIFIED != APPROVED FOR
+ROLE`. An elastic backend must not become a production route before
+qualification records exist.
+
+Track B (OpenCode Worker) is **not** in this sequence.
+
+Track B is not empty history. OC-M0 physically passed the bounded off-tree
+transport/isolation spike. OC-M1 physically passed one synthetic bugfix with a
+temporary standalone Groq upstream. No OpenCode package, Ashley repository
+integration, Model Fabric qualification, production route, or worker
+activation exists in this repository.
+
+---
+
+## 4. What Sandbox V2 provides / does not provide
+
+Unchanged: isolation substrate, specialist **operation** seams, state
+separation, receipts ≠ truth. Sandbox does not own routing, dispatch,
+ContextProjection, or model intelligence.
+
+---
+
+## 5. Future target policy summary (not live)
+
+See Architecture §12.9. Highlights:
+
+- Thought **target:** Groq 120B + NIM 120B same-model failover, reasoning `high`
+- Expression **target:** Qwen primary / Mistral fallback (reverses live order)
+- Observation / reflection **target:** Nemotron 3 Ultra + Groq 120B,
+  `max_supported`
+- Utility/bulk **target:** Lightning / GPT-OSS 20B as listed
+- OpenCode seat portfolio remains accepted (Spark, Hy3, MiMo, Ultra, Lightning)
+
+None of this is MF-M1 expected current behavior.
+
+---
+
+## 6. MF-M1 smallest closing evidence
+
+Typed seam on current `completeChat` / Attention path such that:
+
+- Thought NIM `openai/gpt-oss-20b` `reasoningEffort: "low"` → Groq same-model
+  20B failover eligibility is unchanged
+- Expression Mistral→Qwen substitution eligibility is unchanged
+- `thought_observation` still configures `utility_bulk` and still dispatches
+  `thought`; receipts expose the mismatch
+- shared `groq:openai/gpt-oss-20b` bucket is unchanged
+- every current caller maps to the exact logical role in Model Fabric
+  Architecture §12.2; `utility_bulk` remains a route
+- engineering records `logicalRole = engineering` plus
+  `SpecialistRequirement(seat = complex_orchestration)` without specialist
+  model selection
+- each provider attempt has a stage-valid `ModelAttemptReceipt`
+- each Fabric invocation has an ordered `ModelInvocationReceipt`
+- Expression primary/fallback invocations share an explicit
+  `ModelFallbackChain`
+- current routes use non-transferable `existing_compatibility` including
+  inference-policy fingerprint; no historical qualification is fabricated
+- no provider package; no Fabric schema/DB migration; no OpenCode
+- no Mint routing change
+
+Explicitly not: cognitive advancement; full Context Budget; execution
+authority; OpenCode worker authority; observation-route repair; §12.9 cutover.
+
+---
+
+## 7. Implementation order (docs complete; code paused)
+
+Do **not** start TypeScript until
+[`MODEL_FABRIC_MF_M1_IMPLEMENTATION_CHECKPOINT.md`](MODEL_FABRIC_MF_M1_IMPLEMENTATION_CHECKPOINT.md)
+resume gate is satisfied (exact OF-M1 integration SHA).
+
+Then:
+
+1. Characterization tests against **live** callers at that SHA (not §12.9
+   targets). Planning snapshot was `8eedad8`; re-audit if SHA moved.
+2. Fabric seam + caller `logicalRole` stamps; preserve configured ≠ requested ≠
+   dispatched.
+3. Falsification; Thought two attempts / one invocation; Expression two
+   invocations / one chain.
+4. Failed invocation: attach receipt to thrown `AppError` without changing
+   error semantics.
+5. Settlement tests. No push. No Mint.
+
+---
+
+## 8. Documents to read next
+
+1. [`docs/architecture/Model_Fabric_Architecture.md`](../architecture/Model_Fabric_Architecture.md) — sole current owner; live §11; targets §12.9; MF-M1 §31
+2. [`MODEL_FABRIC_MF_M1_IMPLEMENTATION_CHECKPOINT.md`](MODEL_FABRIC_MF_M1_IMPLEMENTATION_CHECKPOINT.md) — resume gate
+3. [`MODEL_FABRIC_OWNER_DECISION_PACKET.md`](MODEL_FABRIC_OWNER_DECISION_PACKET.md) — closed vs open
+4. [`docs/Routing_Status.md`](../Routing_Status.md) — live route facts only
+5. [`docs/architecture/Model_Fabric_01_Contract_Draft.md`](../architecture/Model_Fabric_01_Contract_Draft.md) — frozen fields; F1-obs not MF-M1
+6. [`docs/architecture/Ashley_Milestone_Execution_Governance.md`](../architecture/Ashley_Milestone_Execution_Governance.md)
+7. [`docs/architecture/Ashley_Cross_Phase_Architecture.md`](../architecture/Ashley_Cross_Phase_Architecture.md)

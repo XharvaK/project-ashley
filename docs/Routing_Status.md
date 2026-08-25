@@ -9,15 +9,18 @@ architecture and not a current-state dashboard. Source is authoritative.
 Document reviewed at repository revision
   !=
 Route bindings audited against revision
+  !=
+Owner-selected future target policy
 ```
 
 Do not infer an audit SHA from git history alone.
 
 | | |
 |---|---|
-| Document reviewed at repository revision | `01d066d20268c10fd4b9415ae8483fee7b76452c` |
-| Route-table audit baseline | `01d066d20268c10fd4b9415ae8483fee7b76452c` |
+| Document reviewed at repository revision | `8eedad8bebbed2d8cd984849a269afe256a3d08a` |
+| Route-table audit baseline | `8eedad8bebbed2d8cd984849a269afe256a3d08a` |
 | Audit method | Read-only comparison of the Wave 1 table below to `config/models.json` `purpose_routes` / `routes`, `PURPOSE_TO_ROUTE` in [`router.ts`](../apps/agent-service/src/core/model-routing/router.ts), and `ROUTE_BINDINGS` in [`registry.ts`](../apps/agent-service/src/core/model-routing/registry.ts) |
+| Last route-table audit | 2026-08-25 MF-M1 source-baseline rebase |
 | Stale when | those source files change, or `git rev-parse HEAD` differs and a new audit has not been performed |
 
 Current route facts are split across:
@@ -56,21 +59,19 @@ tables without that audit.
 | `maintenance` | `utility_bulk` | Groq | `openai/gpt-oss-20b` | `groq:openai/gpt-oss-20b` |
 
 This table is the audited source snapshot at the route-table audit baseline
-named above. The Thought route implements bounded same-model provider failover
+named above. **Dispatch caveat:** `thought_observation` is *configured* as
+`utility_bulk` in `config/models.json` and `PURPOSE_TO_ROUTE`, but
+`runThoughtModel` currently **forces** `route: "thought"` (NIM/Groq 20B
+failover), so observation does not actually consume the Groq utility bucket.
+See the naming seam below.
 (NVIDIA NIM `openai/gpt-oss-20b` primary -> Groq `openai/gpt-oss-20b` secondary
 on eligible transport/capacity failures when remaining deadline >= 2500ms).
-The planned policy retires the former Groq 20B utility candidate from all future
-roles, keeps Groq
-`openai/gpt-oss-120b` as main Thought primary, and selects NVIDIA
-`nvidia/nemotron-3.5-lightning-30b-a3b` as the specialist/utility primary
-candidate. GPT-OSS-120B is only a later, route-qualified fallback candidate for
-Lightning-backed routes. The first Thought-observation Model Fabric slice has no
-fallback. See the current phase contract in the
-[Model Fabric Architecture](architecture/Model_Fabric_Architecture.md).
 
-Specific planned model candidates remain versioned policy. Changing them does
-not change Model Fabric architecture when purpose, context, output, reliability,
-privacy, and authority contracts remain the same.
+Live model IDs are **current facts**, not architecture. Owner-selected
+**future** direct-provider targets (including Qwen-primary Expression and Groq
+120B Thought) live only in
+[Model Fabric Architecture §12.9](architecture/Model_Fabric_Architecture.md).
+This file must not claim those targets are already production-routed.
 
 Current callers do not use one uniform resolution path. Some pass a route
 explicitly. Others begin with a purpose. The Thought observation path begins
@@ -86,29 +87,43 @@ These identifiers are not interchangeable:
 | `thought_observation` | Attention/routing purpose requested by the observation job |
 | `utility_bulk` | Configured compatibility route for that purpose |
 | `thought` | Route currently forced by `runThoughtModel`, which overrides the compatibility mapping at dispatch |
-| `thought.observation` | Planned Model Fabric semantic purpose |
-| `thought_observation_shadow` | Planned default-off feature mode for the first Model Fabric slice |
+| `thought.observation` | Historical F1-obs planned semantic purpose; not current dispatch; not MF-M1 |
+| `thought_observation_shadow` | Deferred F1-obs feature mode; not MF-M1 |
 
-The first Model Fabric slice must resolve this mismatch explicitly. It must not
-claim that the current `utility_bulk` mapping is the route actually dispatched
-by the existing observation call.
+**MF-M1** must **preserve and expose** this mismatch. It must not claim that
+the current `utility_bulk` mapping is the route actually dispatched, and it
+must not repair the force-to-`thought` behavior while establishing the seam.
 
 ## Shared quota buckets
 
-The four utility purposes (`exchange_cognition`, `curiosity_consolidation`,
-`thought_observation`, `maintenance`) all consume the single
-`groq:openai/gpt-oss-20b` bucket. Quota is keyed by `provider:configuredModelId`,
-not by purpose, so distinct purposes never spawn separate pools for the same
-model. `resolved_model_id` is continuity metadata only and does **not** alter the
-quota bucket.
+Quota is keyed by `provider:configuredModelId`, not by purpose.
+`resolved_model_id` is continuity metadata only.
+
+- `exchange_cognition`, `curiosity_consolidation`, and `maintenance` that
+  actually dispatch `utility_bulk` share `groq:openai/gpt-oss-20b` (TPM 8000).
+- Thought **failover** uses that **same** Groq 20B bucket. Utility load can
+  starve NIM→Groq Thought failover.
+- `thought_observation` is *configured* as `utility_bulk` but is **dispatched
+  as `thought`**, so it does **not** consume the utility bucket unless failover
+  fires. The observation enqueue path also no-ops without `GROQ_API_KEY`.
+- Expression fallback is a distinct Groq bucket `groq:qwen/qwen3.6-27b` (TPM
+  **6100**).
 
 ## Key handling (provider-aware)
 
 - Mistral routes require `MISTRAL_API_KEY`; Groq routes require `GROQ_API_KEY`.
 - A missing key fails **before** attention reservation / limiter consumption and
   raises `agent_not_ready` (503). No `attention_requests` row is created.
-- NIM (`NIM_API_KEY`) is only required for an **enabled** NIM route; NIM routes
-  are currently disabled and require no key at boot.
+- NIM (`NIM_API_KEY`) is required to dispatch the **primary** Thought NIM
+  adapter. `routeReady("thought")` is true when the Thought route is enabled and
+  **either** `NIM_API_KEY` or `GROQ_API_KEY` is present, because Thought may
+  fail over to Groq on the same configured model id. Comments in
+  [`config/env.example`](../config/env.example) that still say NIM is disabled
+  and Thought is Groq 120B are **stale** relative to `config/models.json` and
+  `registry.ts` as of this audit.
+- Thought observation (`enqueueThoughtObservation`) still **no-ops without
+  `GROQ_API_KEY`**, even though the subsequent call forces `route: "thought"`.
+  NIM-only Thought can therefore run while observation is skipped.
 
 ## Fail-closed behavior
 
@@ -118,8 +133,8 @@ quota bucket.
   key, and make no network call (e.g. no NIM `/v1/models`). There is **no
   fallback** to Mistral.
 - **Unknown routes** raise `route_disabled` (404).
-- **Unknown / not-yet-implemented providers** (e.g. `nim` before enablement)
-  cause `adapterFor` to fail closed with `operator_disabled`.
+- **Unknown providers** cause `adapterFor` to fail closed with
+  `operator_disabled`. NIM is a live Thought primary adapter as of this audit.
 - Route lifecycle (`enabled`) is checked before adapter selection.
 
 ## Thought failure model
@@ -131,13 +146,16 @@ background cognition is Groq-only.
 
 ## Disabled waves (NOT implemented)
 
-- NVIDIA / NIM provider integration — disabled.
+- NVIDIA / NIM provider integration is **implemented** for the enabled
+  `thought` route (`openai/gpt-oss-20b` primary, Groq same-model failover).
+  Older prose that said "NIM is disabled" is obsolete as of this audit.
 - Model-driven sandbox operator routes (`sandbox_operator_light`,
-  `sandbox_operator_deep`, `sandbox_reviewer`) — disabled. Their names do not
-  grant capability and their retained configuration does not create a V2
+  `sandbox_operator_deep`, `sandbox_reviewer`) — still **disabled**. Their names
+  do not grant capability and their retained configuration does not create a V2
   broker dependency. Any future use must satisfy the direct-Bubblewrap V2
   milestone contract, purpose-specific Model Fabric qualification, and the
   relevant authority gates.
+- `experimental_auditor` and `experimental_multimodal` remain disabled.
 
 ## Observability
 
@@ -146,3 +164,8 @@ status: route alias, provider, configured model ID, enabled state, quota
 bucket, health (`ok`/`degraded`/`disabled`/`unused`), quota availability, last
 successful dispatch time, last error class, and resolved model ID when known.
 No API keys, raw prompts, model outputs, or secret-bearing errors are exposed.
+
+`GET /nuclear/attention?owner_id=` reports queue/continuity/outcomes, but its
+`rpsLimit` / `tpmLimit` / `reservedTpm` fields are **Mistral env defaults**,
+not per-bucket Groq/NIM pressure. Use `/nuclear/routing` for per-route TPM.
+`foldAttentionDailyUsage` is not invoked in production.

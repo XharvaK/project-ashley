@@ -8,7 +8,11 @@
 > contracts remain in the
 > [Model Fabric Contract](Model_Fabric_01_Contract_Draft.md). Current route
 > bindings are documented in [`docs/Routing_Status.md`](../Routing_Status.md)
-> from source/config.
+> from source/config. Live routing facts were re-audited 2026-08-25 against
+> `8eedad8bebbed2d8cd984849a269afe256a3d08a` in Routing Status and the Model
+> Fabric Architecture. This file remains a 2026-08-13 baseline (and still
+> describes Groq 120B Thought as then-current). That is **historical
+> provenance**, not the MF-M1 live table.
 
 - **Research date:** 2026-08-13
 - **Mode:** documentation and codebase reconnaissance only
@@ -24,7 +28,12 @@ Ashley already has a useful routing and attention substrate. It does not yet hav
 
 The current transport entry point is `completeChat`. It combines route resolution, caller-selected model overrides, quota accounting, attention admission, provider dispatch, error normalization, and continuity recording. Provider capabilities are implicit. Structured output is prompt-and-parse. Context profiles are labels rather than executable projection contracts. Retry and fallback policy are distributed across callers.
 
-The safest first implementation slice is the existing `thought_observation` shadow path. That path has no current-turn authority, already expects structured data, and exposes a real routing defect: it asks for purpose `thought_observation` but `runThoughtModel` forces route `thought`. The first slice MUST remain shadow-only and MUST NOT touch the sandbox or Autonomous Engineering Workstation.
+The safest **historical** first implementation slice (2026-08-13) was the
+existing `thought_observation` shadow path. **Superseded as first code
+milestone:** owner 2026-08-25 closed **MF-M1** (seam around existing
+production routes, zero intended behavior change). F1-obs retains this
+observation path as a later optional witness. The routing defect remains
+current source truth and **must not be repaired in MF-M1**.
 
 ## Contract reconciliation status
 
@@ -38,9 +47,15 @@ The source findings below remain unchanged. The target contracts were reconciled
 - definitive provider error responses are distinct from local admission refusal and ambiguous post-send failures;
 - semantic validation and durable cognitive materialization remain caller-owned.
 
-The selected first slice remains default-off `thought_observation_shadow` transport replacement. It does not dual-dispatch and does not change active Thought.
+The selected **F1-obs** slice remains default-off `thought_observation_shadow`
+transport replacement. It is **not MF-M1**. It does not dual-dispatch and
+does not change active Thought.
 
-### Owner-approved target model policy
+### Owner-approved target model policy (historical 2026-08-13 / F1-obs)
+
+These bullets are **not MF-M1** and **not live routing**. Live facts:
+[`docs/Routing_Status.md`](../Routing_Status.md). Scouting occupants (Spark,
+Hy3, MiMo, Ultra, Lightning seats): Model Fabric Architecture §12.
 
 The current-source findings in this reconnaissance remain historical and
 diagnostic truth. They do not define the amended target binding.

@@ -307,7 +307,10 @@ COMPUTER USE DEPENDS ON EXTERNAL EFFECT/AUTHORITY FOR CONSEQUENTIAL ACTION
   the typed, bounded transport artifact that Context Budget later selects and
   constructs.
 - Model Fabric does not wait semantically on Sandbox. Current delivery order is
-  owner-selected.
+  owner-selected. The first **code** milestone is **MF-M1** (existing-route
+  seam), not historical Thought-observation Lightning (F1-obs). MF-M1 owner
+  scope is closed; runtime remains `PENDING` until the exact integration SHA
+  is named.
 - Operational Continuity does not wait semantically on Model Fabric. It does
   not own model intelligence.
 - Procedural Skill Graduation does not wait on general Operational Continuity
@@ -407,7 +410,29 @@ stand for these distinct authorities.
 | Capability promotion | Capability Authority + owner | QualificationResult, release/contract identity, explicit promotion | Deployment, model result, test pass |
 | Identity change | Identity revision and owner-review authority | Exact revision, provenance, constitutional review | Self-improvement proposal or model confidence |
 
-### 6.1 Self-change composition
+### 6.1 Model catalog refresh composition
+
+Model Fabric owns normalized catalog observations and
+`discovered / unqualified` candidate records. It does not own network
+authority.
+
+An active catalog refresh composes:
+
+```text
+Model Fabric refresh request
+  + Network capability admission
+      (exact destination + method + data classification + budget)
+  + External Effect preparation / revalidation where required
+  -> bounded catalog observation
+  -> discovered / unqualified candidate record
+```
+
+Catalog presence, transport success, or a discovery score cannot produce
+qualification, owner approval, promotion, enablement, or routing authority.
+Offline import of an owner-supplied catalog artifact does not consume network
+authority, but it remains unqualified discovery evidence.
+
+### 6.2 Self-change composition
 
 Organic learning is not runtime or source modification. Runtime or source
 modification is not foundational Identity or governance modification.
