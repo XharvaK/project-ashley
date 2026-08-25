@@ -1,4 +1,9 @@
 import type { AttentionLane, AttentionPurpose } from "../attention/types.js";
+import type {
+  LogicalModelRole,
+  ModelFallbackChain,
+  SpecialistRequirement,
+} from "../model-fabric/types.js";
 
 /**
  * Multi-provider model routing types (Wave 1).
@@ -89,6 +94,12 @@ export type CompletionOptions = {
   /** Legacy two-lane hint; mapped to attention lanes. */
   lane?: Lane | AttentionLane;
   purpose?: AttentionPurpose;
+  /** Explicit Ashley-owned semantic role recorded by Model Fabric. */
+  logicalRole?: LogicalModelRole;
+  /** Correlation only; MF-M1 does not select a specialist model. */
+  specialistRequirement?: SpecialistRequirement | null;
+  /** Caller-owned chain for an explicit multi-invocation fallback. */
+  modelFallbackChain?: ModelFallbackChain | null;
   /** Explicit route selection; resolved by the router when absent. */
   route?: RouteId;
   deadlineAtMs?: number | null;

@@ -245,6 +245,7 @@ async function modelReflectionAdjudicator(
       {
         route: "thought",
         purpose: "thought_observation",
+        logicalRole: "reflection_initiative",
         lane: "exchange_cognition",
         model: env.mistralModel,
         maxTokens: 300,

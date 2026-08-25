@@ -1,0 +1,258 @@
+import { randomUUID } from "node:crypto";
+import { sha256, stableJson } from "./hash.js";
+import type {
+  ContextPolicyId,
+  InferencePolicyFingerprint,
+  LogicalModelRole,
+  ModelCapabilityProfile,
+  ModelCapabilityProfileDefinition,
+  ModelFallbackClass,
+  ModelProfileFingerprint,
+  ModelProfileId,
+  ModelProfileVersion,
+  ModelPurposeId,
+  ModelRouteId,
+  ProviderId,
+  ResolvedModelRoute,
+  RouteAdmissionBasis,
+  SpecialistRequirement,
+  ReasoningPolicy,
+} from "./types.js";
+
+const PROFILE_VERSION = 1 as ModelProfileVersion;
+
+function profileIdFor(provider: string, model: string): ModelProfileId {
+  const safeModel = model.replace(/[^a-zA-Z0-9._-]+/g, "_");
+  return `${provider}.${safeModel}` as ModelProfileId;
+}
+
+function mechanicalDefinition(
+  provider: string,
+  configuredModelId: string,
+): ModelCapabilityProfileDefinition {
+  const structured = provider === "mistral" ? "none" : "json";
+  return {
+    profileId: profileIdFor(provider, configuredModelId),
+    profileVersion: PROFILE_VERSION,
+    provider: provider as ProviderId,
+    configuredModelId,
+    input: {
+      text: true,
+      image: "inline_bytes",
+      document: "none",
+      audio: "none",
+    },
+    output: {
+      text: true,
+      structured,
+      toolCalls: true,
+      streaming: false,
+    },
+    reasoning: {
+      mode: "configurable",
+      efforts: ["low", "medium", "high"],
+    },
+    cancellation: "abort_signal",
+    limits: {
+      // These are the current adapter's bounded request defaults, not a
+      // provider entitlement or qualification claim.
+      contextTokens: 0,
+      maxOutputTokens: 2048,
+      maxMediaBytes: null,
+      maxMediaParts: null,
+    },
+    providerOptionsPolicy: {
+      allowedKeys: [
+        "maxTokens",
+        "temperature",
+        "presencePenalty",
+        "reasoningEffort",
+        "responseFormat",
+        "tools",
+        "toolChoice",
+      ],
+    },
+  };
+}
+
+/**
+ * Returns only mechanical facts for the exact current adapter binding.
+ * Qualification and promotion are intentionally absent.
+ */
+export function capabilityProfileFor(
+  provider: string,
+  configuredModelId: string,
+): ModelCapabilityProfile {
+  const definition = mechanicalDefinition(provider, configuredModelId);
+  const profile = {
+    ...definition,
+    profileFingerprint: `sha256:${sha256(definition)}` as ModelProfileFingerprint,
+  } satisfies ModelCapabilityProfile;
+  return Object.freeze({
+    ...profile,
+    input: Object.freeze({ ...profile.input }),
+    output: Object.freeze({ ...profile.output }),
+    reasoning: Object.freeze({
+      ...profile.reasoning,
+      ...(profile.reasoning.mode === "configurable"
+        ? { efforts: Object.freeze([...profile.reasoning.efforts]) }
+        : {}),
+    }),
+    limits: Object.freeze({ ...profile.limits }),
+    providerOptionsPolicy: Object.freeze({
+      allowedKeys: Object.freeze([...profile.providerOptionsPolicy.allowedKeys]),
+    }),
+  });
+}
+
+export function normalizeReasoningPolicy(
+  value: string | null | undefined,
+): ReasoningPolicy {
+  switch (value) {
+    case "none":
+      return "disabled";
+    case "low":
+      return "economical";
+    case "medium":
+      return "standard";
+    case "high":
+      return "high";
+    case "max_supported":
+      return "max_supported";
+    default:
+      return "standard";
+  }
+}
+
+export function wireReasoningFor(
+  provider: string,
+  model: string,
+  requested: string | null | undefined,
+): string | null {
+  if (!requested) return null;
+  if ((provider === "groq" || provider === "nim") && model.startsWith("openai/gpt-oss")) {
+    return requested === "none" ? "low" : requested;
+  }
+  return requested;
+}
+
+export type InferencePolicyInput = {
+  provider: string;
+  configuredModelId: string;
+  reasoningEffort?: string | null;
+  temperature?: number | null;
+  topP?: number | null;
+  maxTokens?: number | null;
+  presencePenalty?: number | null;
+  responseFormat?: string | null;
+  toolCount?: number;
+  toolNames?: readonly string[];
+};
+
+/** Fingerprints material provider options, never prompt or output content. */
+export function createInferencePolicyFingerprint(
+  input: InferencePolicyInput,
+): InferencePolicyFingerprint {
+  const material = {
+    provider: input.provider,
+    configuredModelId: input.configuredModelId,
+    reasoningEffort: input.reasoningEffort ?? null,
+    temperature: input.temperature ?? null,
+    topP: input.topP ?? null,
+    maxTokens: input.maxTokens ?? null,
+    presencePenalty: input.presencePenalty ?? null,
+    responseFormat: input.responseFormat ?? null,
+    toolCount: input.toolCount ?? 0,
+    toolNames: input.toolNames ? [...input.toolNames].sort() : [],
+  };
+  return `sha256:${sha256(material)}` as InferencePolicyFingerprint;
+}
+
+export function createCompatibilityBindingId(input: {
+  logicalRole: LogicalModelRole;
+  requestedPurpose: ModelPurposeId;
+  configuredRouteId: string;
+  dispatchedRouteId: string;
+  provider: string;
+  configuredModelId: string;
+  fallbackTopology: string;
+  inferencePolicyFingerprint: InferencePolicyFingerprint;
+}): string {
+  return `existing-compatibility:${sha256(input)}`;
+}
+
+export function backendFor(provider: string): string {
+  switch (provider) {
+    case "mistral":
+      return "mistral_direct";
+    case "groq":
+      return "groq";
+    case "nim":
+      return "nim";
+    default:
+      return provider;
+  }
+}
+
+export function resolvedRouteFor(input: {
+  logicalRole: LogicalModelRole;
+  requestedPurpose: ModelPurposeId;
+  specialistRequirement: SpecialistRequirement | null;
+  configuredRouteId: string;
+  dispatchedRouteId: string;
+  provider: string;
+  configuredModelId: string;
+  contextPolicyId: string;
+  reasoningPolicy: ReasoningPolicy;
+  effectiveReasoning: string | null;
+  inferencePolicyFingerprint: InferencePolicyFingerprint;
+  fallbackClass: ModelFallbackClass;
+  admissionBasis: RouteAdmissionBasis;
+}): ResolvedModelRoute {
+  const profile = capabilityProfileFor(input.provider, input.configuredModelId);
+  // MF-M1 preserves caller-owned fallback topology. It does not introduce a
+  // route-policy fallback registry, so current route IDs remain empty here.
+  const fallbackRouteIds: ModelRouteId[] = [];
+  const route = {
+    logicalRole: input.logicalRole,
+    requestedPurpose: input.requestedPurpose,
+    specialistRequirement: input.specialistRequirement,
+    configuredRouteId: input.configuredRouteId as ResolvedModelRoute["configuredRouteId"],
+    dispatchedRouteId: input.dispatchedRouteId as ResolvedModelRoute["dispatchedRouteId"],
+    profileId: profile.profileId,
+    profileVersion: profile.profileVersion,
+    profileFingerprint: profile.profileFingerprint,
+    provider: profile.provider,
+    configuredModelId: input.configuredModelId,
+    reasoningPolicy: input.reasoningPolicy,
+    effectiveReasoning: input.effectiveReasoning,
+    inferencePolicyFingerprint: input.inferencePolicyFingerprint,
+    contextPolicyId: input.contextPolicyId as ContextPolicyId,
+    quotaClass: `${input.provider}:${input.configuredModelId}`,
+    latencyClass: input.requestedPurpose === "expression" || input.requestedPurpose === "thought"
+      ? "interactive"
+      : "background",
+    reliabilityClass: input.fallbackClass === "none" ? "single_attempt" : "explicit_fallback",
+    privacyPolicyId: input.contextPolicyId,
+    fallbackRouteIds,
+    admissionBasis: input.admissionBasis,
+    registryVersion: "current-route-registry-v1",
+  } satisfies ResolvedModelRoute;
+  return Object.freeze({
+    ...route,
+    fallbackRouteIds: Object.freeze([...route.fallbackRouteIds]),
+  });
+}
+
+export function newCorrelationId(): string {
+  return randomUUID();
+}
+
+export function profileDefinitionJson(
+  profile: ModelCapabilityProfile,
+): string {
+  return stableJson({
+    ...profile,
+    profileFingerprint: undefined,
+  });
+}

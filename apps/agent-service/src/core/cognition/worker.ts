@@ -275,6 +275,7 @@ async function analyzeWithMistral(
     temperature: 0.2,
     reasoningEffort: "medium",
     purpose: "exchange_cognition",
+    logicalRole: "exchange_cognition",
     route: "utility_bulk",
     lane: "exchange_cognition",
     ownerId: context.ownerId,

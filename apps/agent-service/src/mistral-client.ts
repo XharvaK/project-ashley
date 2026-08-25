@@ -24,6 +24,22 @@ import {
 } from "./core/model-routing/adapters/nim-adapter.js";
 import { resolveRoute, requireRouteEnabled } from "./core/model-routing/router.js";
 import { quotaBucketFor } from "./core/model-routing/types.js";
+import {
+  attachModelFabricMetadata,
+  createCompatibilityBindingId,
+  createContextProjection,
+  createInferencePolicyFingerprint,
+  createModelFabricInvocation,
+  modelFailureFor,
+  normalizeReasoningPolicy,
+  resolvedRouteFor,
+  wireReasoningFor,
+  type LogicalModelRole,
+  type ModelFabricDispatchMetadata,
+  type ModelFallbackClass,
+  type ModelPurposeId,
+  type SpecialistRequirement,
+} from "./core/model-fabric/index.js";
 
 import type {
   ChatMessage,
@@ -164,6 +180,51 @@ function mapLegacyLane(
   }
 }
 
+function logicalRoleFor(purpose: AttentionPurpose): LogicalModelRole {
+  switch (purpose) {
+    case "expression":
+      return "expression";
+    case "thought":
+      return "thought";
+    case "thought_observation":
+      return "thought_observation";
+    case "exchange_cognition":
+      return "exchange_cognition";
+    case "curiosity_consolidation":
+      return "curiosity_consolidation";
+    case "maintenance":
+      return "maintenance";
+  }
+}
+
+function fallbackTopologyFor(
+  purpose: AttentionPurpose,
+  routeId: RouteId,
+): string {
+  if (purpose === "expression" || routeId.startsWith("ashley_expression")) {
+    return "expression_mistral_to_qwen_caller_fallback";
+  }
+  if (purpose === "thought" || routeId === "thought") {
+    return "thought_nim_to_groq_same_model_transport_failover";
+  }
+  return "none";
+}
+
+function errorClassFor(error: unknown): string {
+  if (error && typeof error === "object" && "code" in error) {
+    const code = (error as { code?: unknown }).code;
+    if (typeof code === "string") return code;
+  }
+  if (error instanceof Error && error.name) return error.name;
+  return "error";
+}
+
+function isDefinitiveProviderError(error: unknown): boolean {
+  if (!(error instanceof AppError)) return false;
+  if (error.code === "agent_not_ready") return false;
+  return error.httpStatus >= 400;
+}
+
 function combineSignals(
   signal: AbortSignal | undefined,
   deadlineAtMs: number | null | undefined,
@@ -193,6 +254,7 @@ export async function completeChat(
   finishReason?: string | null;
   attentionRequestId?: number;
   acceptedDispatchIdentity?: AcceptedDispatchIdentity;
+  modelFabric?: ModelFabricDispatchMetadata;
 }> {
   if (!options?.attentionDb) {
     throw new DispatchDataPlaneMissingError();
@@ -201,114 +263,336 @@ export async function completeChat(
   const mapped = mapLegacyLane(options.lane, options.purpose);
   const purpose = mapped.purpose;
   const routeId: RouteId | undefined = options.route;
-  const binding = routeId ? requireRouteEnabled(routeId) : resolveRoute(purpose);
+  const logicalRole = options.logicalRole ?? logicalRoleFor(purpose);
+  const specialistRequirement: SpecialistRequirement | null =
+    options.specialistRequirement ?? null;
+
+  let binding;
+  try {
+    binding = routeId ? requireRouteEnabled(routeId) : resolveRoute(purpose);
+  } catch (error) {
+    const preProjection = createContextProjection({
+      purpose: purpose as ModelPurposeId,
+      contextPolicyId: "unresolved",
+      messages,
+    });
+    const preRecorder = createModelFabricInvocation({
+      logicalRole,
+      requestedPurpose: purpose as ModelPurposeId,
+      specialistRequirement,
+      fallbackChain: options.modelFallbackChain ?? null,
+      projection: preProjection,
+    });
+    const failure = modelFailureFor(error, "route_resolution", "not_sent");
+    attachModelFabricMetadata(
+      error,
+      preRecorder.preResolutionMetadata(failure),
+    );
+    throw error;
+  }
+
+  // An explicit route is a compatibility override. Keep the purpose-resolved
+  // route visible as configured state when it can be resolved, while the
+  // existing explicit route remains the dispatched route.
+  let configuredBinding = binding;
+  if (routeId) {
+    try {
+      configuredBinding = resolveRoute(purpose);
+    } catch {
+      configuredBinding = binding;
+    }
+  }
+  const projection = createContextProjection({
+    purpose: purpose as ModelPurposeId,
+    contextPolicyId: binding.contextProfile,
+    messages,
+  });
+  const fabric = createModelFabricInvocation({
+    logicalRole,
+    requestedPurpose: purpose as ModelPurposeId,
+    specialistRequirement,
+    fallbackChain: options.modelFallbackChain ?? null,
+    projection,
+  });
+  fabric.resolve(configuredBinding.route);
+
   const provider: ProviderId = binding.provider;
   const modelAlias = options.model ?? binding.configuredModelId;
   const quotaBucket = quotaBucketFor(provider, modelAlias);
 
   const toolsJson = options.tools ? JSON.stringify(options.tools) : undefined;
+  let attemptOrdinal = 0;
+  let previousAttemptId: string | null = null;
+  let transportFailoverUsed = false;
+
+  const beginAttempt = (
+    targetProvider: ProviderId,
+    targetModel: string,
+    fallbackFromAttemptId: string | null,
+    fallbackClass: ModelFallbackClass,
+  ) => {
+    const requestedWireReasoning =
+      options.reasoningEffort ??
+      (targetProvider === "mistral" ? env.mistralReasoningEffort : null);
+    const requestedReasoningPolicy = requestedWireReasoning
+      ? normalizeReasoningPolicy(requestedWireReasoning)
+      : null;
+    const effectiveReasoning = wireReasoningFor(
+      targetProvider,
+      targetModel,
+      requestedWireReasoning,
+    );
+    const inferencePolicyFingerprint = createInferencePolicyFingerprint({
+      provider: targetProvider,
+      configuredModelId: targetModel,
+      reasoningEffort: requestedWireReasoning,
+      temperature: options.temperature ?? null,
+      maxTokens: options.maxTokens ?? null,
+      presencePenalty: options.presencePenalty ?? null,
+      responseFormat: options.responseFormat ?? null,
+      toolCount: options.tools?.length ?? 0,
+      toolNames: options.tools?.map((tool) => tool.function.name) ?? [],
+    });
+    const compatibilityBindingId = createCompatibilityBindingId({
+      logicalRole,
+      requestedPurpose: purpose as ModelPurposeId,
+      configuredRouteId: configuredBinding.route,
+      dispatchedRouteId: binding.route,
+      provider: targetProvider,
+      configuredModelId: targetModel,
+      fallbackTopology: fallbackTopologyFor(purpose, binding.route),
+      inferencePolicyFingerprint,
+    });
+    const admissionBasis = {
+      kind: "existing_compatibility" as const,
+      compatibilityBindingId,
+    };
+    const resolvedRoute = resolvedRouteFor({
+      logicalRole,
+      requestedPurpose: purpose as ModelPurposeId,
+      specialistRequirement,
+      configuredRouteId: configuredBinding.route,
+      dispatchedRouteId: binding.route,
+      provider: targetProvider,
+      configuredModelId: targetModel,
+      contextPolicyId: binding.contextProfile,
+      reasoningPolicy: requestedReasoningPolicy ?? "standard",
+      effectiveReasoning,
+      inferencePolicyFingerprint,
+      fallbackClass,
+      admissionBasis,
+    });
+    fabric.setResolvedRoute(resolvedRoute);
+    attemptOrdinal += 1;
+    const attemptId = `${fabric.invocationId}:attempt:${attemptOrdinal}`;
+    const attempt = fabric.beginAttempt({
+      invocationId: fabric.invocationId,
+      attemptId,
+      attemptOrdinal,
+      fallbackFromAttemptId,
+      fallbackClass,
+      facts: {
+        dispatchedRouteId: binding.route as typeof resolvedRoute.dispatchedRouteId,
+        registryVersion: resolvedRoute.registryVersion,
+        profileId: resolvedRoute.profileId,
+        profileVersion: resolvedRoute.profileVersion,
+        profileFingerprint: resolvedRoute.profileFingerprint,
+        provider: resolvedRoute.provider,
+        configuredModelId: targetModel,
+        contextPolicyId: resolvedRoute.contextPolicyId,
+        admissionBasis,
+        requestedReasoningPolicy,
+        effectiveReasoning,
+        inferencePolicyFingerprint,
+      },
+      projection,
+      backend: resolvedRoute.provider === "mistral"
+        ? "mistral_direct"
+        : resolvedRoute.provider,
+      requestedReasoningPolicy,
+      effectiveReasoningSent: effectiveReasoning,
+    });
+    previousAttemptId = attemptId;
+    return { attempt, resolvedRoute };
+  };
 
   const singleDispatch = async (
     targetProvider: ProviderId,
     targetModel: string,
     targetBucket: string,
   ) => {
+    const fallbackClass: ModelFallbackClass =
+      targetProvider === provider ? "none" : "transport_failover";
+    const fallbackFromAttemptId =
+      fallbackClass === "none" ? null : previousAttemptId;
+    const attemptContext = beginAttempt(
+      targetProvider,
+      targetModel,
+      fallbackFromAttemptId,
+      fallbackClass,
+    );
+    const attempt = attemptContext.attempt;
     assertOutboundAllowed(targetProvider);
-    return runAttentiveDispatch<{
-      text: string;
-      toolCalls?: ToolCallResult[];
-      usage?: TokenUsage;
-      providerModel?: string | null;
-      finishReason?: string | null;
-    }>(attentionDb, {
-      messages,
-      purpose: mapped.purpose,
-      lane: mapped.lane,
-      providerId: targetProvider,
-      quotaBucket: targetBucket,
-      routeAlias: routeId ?? null,
-      modelAlias: targetModel,
-      maxTokens: options.maxTokens,
-      toolsJson,
-      signal: options.signal,
-      deadlineAtMs: options.deadlineAtMs,
-      decisionId: options.decisionId,
-      deliveryReservationId: options.deliveryReservationId,
-      cognitiveJobId: options.cognitiveJobId,
-      ownerId: options.ownerId,
-      ageOriginAtMs: options.ageOriginAtMs,
-      dispatch: async ({ modelAlias: alias, signal }) => {
-        const merged = combineSignals(signal, options.deadlineAtMs);
-        const adapter = adapterFor(targetProvider);
-        try {
-          const completion = await adapter.dispatch({
-            messages,
-            modelId: alias,
-            options: { ...options, model: alias },
-            signal: merged,
-          });
-          return {
-            providerModel: completion.providerModel,
-            usage: completion.usage,
-            result: {
-              text: completion.text,
-              toolCalls: completion.toolCalls,
-              usage: completion.usage,
-              providerModel: completion.providerModel,
-              finishReason: completion.finishReason ?? null,
-            },
-          };
-        } catch (err) {
-          if (err instanceof Error && err.name === "AbortError") throw err;
-          if (err instanceof AppError) throw err;
-          if (targetProvider === "mistral") throw mapMistralError(err);
-          if (targetProvider === "groq") throw mapGroqError(err);
-          if (targetProvider === "nim") throw mapNimError(err);
-          throw err;
-        }
-      },
-    });
-  };
-
-  let attentive;
-  const isThoughtRoute =
-    (routeId === "thought" || purpose === "thought") && provider === "nim";
-
-  if (isThoughtRoute) {
     try {
-      attentive = await singleDispatch(provider, modelAlias, quotaBucket);
-    } catch (primaryErr) {
-      if (!isEligibleThoughtFailover(primaryErr)) {
-        throw primaryErr;
-      }
-      const remainingMs =
-        options.deadlineAtMs != null ? options.deadlineAtMs - Date.now() : Infinity;
-      if (remainingMs < 2500) {
-        throw primaryErr;
-      }
-      // Failover attempt: secondary Groq provider for same logical model
-      const secondaryProvider: ProviderId = "groq";
-      const secondaryBucket = quotaBucketFor(secondaryProvider, modelAlias);
-      attentive = await singleDispatch(
-        secondaryProvider,
-        modelAlias,
-        secondaryBucket,
-      );
+      const result = await runAttentiveDispatch<{
+        text: string;
+        toolCalls?: ToolCallResult[];
+        usage?: TokenUsage;
+        providerModel?: string | null;
+        finishReason?: string | null;
+      }>(attentionDb, {
+        messages,
+        purpose: mapped.purpose,
+        lane: mapped.lane,
+        providerId: targetProvider,
+        quotaBucket: targetBucket,
+        routeAlias: routeId ?? null,
+        modelAlias: targetModel,
+        maxTokens: options.maxTokens,
+        toolsJson,
+        signal: options.signal,
+        deadlineAtMs: options.deadlineAtMs,
+        decisionId: options.decisionId,
+        deliveryReservationId: options.deliveryReservationId,
+        cognitiveJobId: options.cognitiveJobId,
+        ownerId: options.ownerId,
+        ageOriginAtMs: options.ageOriginAtMs,
+        dispatch: async ({ modelAlias: alias, signal }) => {
+          const merged = combineSignals(signal, options.deadlineAtMs);
+          const adapter = adapterFor(targetProvider);
+          attempt.markDispatchAttempted();
+          try {
+            const completion = await adapter.dispatch({
+              messages,
+              modelId: alias,
+              options: { ...options, model: alias },
+              signal: merged,
+            });
+            attempt.markProviderResponse({
+              resolvedModelId: completion.providerModel ?? null,
+              finishReason: completion.finishReason ?? null,
+              usage: completion.usage,
+            });
+            return {
+              providerModel: completion.providerModel,
+              usage: completion.usage,
+              result: {
+                text: completion.text,
+                toolCalls: completion.toolCalls,
+                usage: completion.usage,
+                providerModel: completion.providerModel,
+                finishReason: completion.finishReason ?? null,
+              },
+            };
+          } catch (err) {
+            if (err instanceof Error && err.name === "AbortError") {
+              attempt.markFailure("AbortError");
+              throw err;
+            }
+            if (err instanceof AppError) {
+              if (isDefinitiveProviderError(err)) {
+                attempt.markProviderResponse({
+                  resolvedModelId: null,
+                  usage: undefined,
+                });
+              }
+              attempt.markFailure(err.code);
+              throw err;
+            }
+            try {
+              const mappedError =
+                targetProvider === "mistral"
+                  ? mapMistralError(err)
+                  : targetProvider === "groq"
+                    ? mapGroqError(err)
+                    : targetProvider === "nim"
+                      ? mapNimError(err)
+                      : err;
+              attempt.markFailure(errorClassFor(mappedError));
+              throw mappedError;
+            } catch (mappedError) {
+              attempt.markFailure(errorClassFor(mappedError));
+              throw mappedError;
+            }
+          }
+        },
+      });
+      fabric.setAttentionRequestId(result.requestId);
+      return result;
+    } catch (error) {
+      attempt.markFailure(errorClassFor(error));
+      throw error;
     }
-  } else {
-    attentive = await singleDispatch(provider, modelAlias, quotaBucket);
-  }
-
-  const inner = attentive.result;
-  return {
-    text: inner.text,
-    model: attentive.modelAlias,
-    modelAlias: attentive.modelAlias,
-    resolvedModelId: attentive.resolvedModelId,
-    toolCalls: inner.toolCalls,
-    usage: attentive.usage ?? inner.usage,
-    finishReason: inner.finishReason ?? null,
-    attentionRequestId: attentive.requestId,
-    acceptedDispatchIdentity: attentive.acceptedDispatchIdentity,
   };
+
+  try {
+    let attentive;
+    const isThoughtRoute =
+      (routeId === "thought" || purpose === "thought") && provider === "nim";
+
+    if (isThoughtRoute) {
+      try {
+        attentive = await singleDispatch(provider, modelAlias, quotaBucket);
+      } catch (primaryErr) {
+        if (!isEligibleThoughtFailover(primaryErr)) {
+          throw primaryErr;
+        }
+        const remainingMs =
+          options.deadlineAtMs != null ? options.deadlineAtMs - Date.now() : Infinity;
+        if (remainingMs < 2500) {
+          throw primaryErr;
+        }
+        // Existing compatibility failover: secondary Groq for the same model.
+        const secondaryProvider: ProviderId = "groq";
+        const secondaryBucket = quotaBucketFor(secondaryProvider, modelAlias);
+        transportFailoverUsed = true;
+        attentive = await singleDispatch(
+          secondaryProvider,
+          modelAlias,
+          secondaryBucket,
+        );
+      }
+    } else {
+      attentive = await singleDispatch(provider, modelAlias, quotaBucket);
+    }
+
+    const inner = attentive.result;
+    const modelFabric = fabric.finalize(
+      transportFailoverUsed
+        ? "transport_failover"
+        : options.modelFallbackChain?.fallbackClass ?? "none",
+    );
+    return {
+      text: inner.text,
+      model: attentive.modelAlias,
+      modelAlias: attentive.modelAlias,
+      resolvedModelId: attentive.resolvedModelId,
+      toolCalls: inner.toolCalls,
+      usage: attentive.usage ?? inner.usage,
+      finishReason: inner.finishReason ?? null,
+      attentionRequestId: attentive.requestId,
+      acceptedDispatchIdentity: attentive.acceptedDispatchIdentity,
+      modelFabric,
+    };
+  } catch (error) {
+    const last = fabric.finalize(
+      options.modelFallbackChain?.fallbackClass ?? "none",
+    );
+    const terminalAttempt =
+      last.receipt.receiptStage === "resolved"
+        ? last.receipt.attempts[last.receipt.attempts.length - 1]
+        : null;
+    const dispatchTruth = terminalAttempt?.dispatchTruth ?? "not_sent";
+    const failure = modelFailureFor(
+      error,
+      dispatchTruth === "not_sent" ? "attention_admission" : "provider_dispatch",
+      dispatchTruth,
+    );
+    const metadata: ModelFabricDispatchMetadata = {
+      ...last,
+      failure,
+    };
+    attachModelFabricMetadata(error, metadata);
+    throw error;
+  }
 }

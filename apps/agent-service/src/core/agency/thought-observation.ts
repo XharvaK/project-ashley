@@ -59,6 +59,7 @@ export function enqueueThoughtObservation(input: {
       purpose: "thought_observation",
       lane: "exchange_cognition",
       ...input.options,
+      logicalRole: "thought_observation",
     },
   ).then((result) => {
     inFlightThoughtObservations.delete(input.decisionId);

@@ -27,6 +27,7 @@ import type {
   Trigger,
 } from "../types.js";
 import type { TokenUsage } from "../model-routing/types.js";
+import type { LogicalModelRole } from "../model-fabric/types.js";
 import {
   listApprovedReadProjectIds,
   canOfferProjectInspection,
@@ -1136,6 +1137,7 @@ export type ThoughtModelOptions = {
   attentionDb?: DatabaseSync;
   purpose?: string;
   lane?: string;
+  logicalRole?: LogicalModelRole;
   verificationWorkspaceManager?: WorkspaceManager;
 };
 
@@ -1416,6 +1418,7 @@ function buildThoughtCallOptions(
     responseFormat: "json_object",
     lane: (options.lane as any) ?? "interactive",
     purpose: (options.purpose as any) ?? "thought",
+    logicalRole: options.logicalRole ?? "thought",
     route: "thought",
     deadlineAtMs,
     decisionId: options.decisionId,

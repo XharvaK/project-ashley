@@ -154,6 +154,20 @@ describe("expression fallback (Wave 3)", () => {
     expect(fake.calls[1].options?.route).toBe("ashley_expression_fallback");
     expect(fake.calls[0].options?.attentionDb).toBe(db);
     expect(fake.calls[1].options?.attentionDb).toBe(db);
+    expect(fake.calls[0].options?.logicalRole).toBe("expression");
+    expect(fake.calls[1].options?.logicalRole).toBe("expression");
+    expect(fake.calls[0].options?.modelFallbackChain).toMatchObject({
+      invocationOrdinal: 1,
+      fallbackFromInvocationId: null,
+      fallbackClass: "none",
+    });
+    expect(fake.calls[1].options?.modelFallbackChain).toMatchObject({
+      invocationOrdinal: 2,
+      fallbackClass: "model_substitution",
+    });
+    expect(fake.calls[1].options?.modelFallbackChain?.chainId).toBe(
+      fake.calls[0].options?.modelFallbackChain?.chainId,
+    );
     const fallbackBinding = routeBinding("ashley_expression_fallback" as RouteId);
     expect(result.model).toBe(fallbackBinding.configuredModelId);
   });

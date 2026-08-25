@@ -21,6 +21,12 @@ import type { NuclearPromptChannel } from "./prompts.js";
 import { renderForTransport } from "./rendering.js";
 import { composeSelfCapabilityContext } from "../perception/capability-self-model.js";
 import type { PerceptionInlinePart } from "../perception/types.js";
+import {
+  createModelFallbackChain,
+  metadataFromError,
+  newCorrelationId,
+  type ModelFabricDispatchMetadata,
+} from "../model-fabric/index.js";
 import type { DatabaseSync } from "node:sqlite";
 import {
   buildExpressionFallbackPolicy,
@@ -159,7 +165,14 @@ export async function expressSpeak(
 
   // Expression fallback context is assembled below; the primary (Mistral)
   // dispatch uses the full turn messages.
-  let response: { text: string; model: string };
+  let response: { text: string; model: string; modelFabric?: ModelFabricDispatchMetadata };
+  const fallbackChainId = newCorrelationId();
+  const primaryFallbackChain = createModelFallbackChain({
+    chainId: fallbackChainId,
+    invocationOrdinal: 1,
+    fallbackFromInvocationId: null,
+    fallbackClass: "none",
+  });
   try {
     response = await dispatch(messages, {
       model: env.mistralModel,
@@ -169,6 +182,8 @@ export async function expressSpeak(
       reasoningEffort: decision.cognitiveAllocation.effort,
       lane: options.lane ?? "interactive",
       purpose: "expression",
+      logicalRole: "expression",
+      modelFallbackChain: primaryFallbackChain,
       deadlineAtMs: options.deadlineAtMs,
       decisionId: options.decisionId,
       deliveryReservationId: options.deliveryReservationId,
@@ -193,6 +208,9 @@ export async function expressSpeak(
     if (!canFallback) {
       return applyRendering(offlineOutput());
     }
+    const primaryInvocationId =
+      metadataFromError(primaryError)?.receipt.invocationId ??
+      `unresolved:${fallbackChainId}:primary`;
     const minimal = minimalExpressionContext(
       attentionDb,
       options.ownerId ?? "",
@@ -210,6 +228,12 @@ export async function expressSpeak(
           deadlineAtMs: options.deadlineAtMs,
           lane,
           attentionDb,
+          modelFallbackChain: createModelFallbackChain({
+            chainId: fallbackChainId,
+            invocationOrdinal: 2,
+            fallbackFromInvocationId: primaryInvocationId,
+            fallbackClass: "model_substitution",
+          }),
         }),
       );
     } catch {

@@ -14,6 +14,11 @@ import { canOfferProjectInspection } from "../sandbox/project-registry.js";
 import type { TurnContext } from "../context-composer.js";
 import type { Decision } from "../types.js";
 import { AppError } from "../../errors.js";
+import {
+  createModelFallbackChain,
+  type ModelFabricDispatchMetadata,
+  type ModelFallbackChain,
+} from "../model-fabric/index.js";
 
 export type ExpressionFallbackPolicy = "minimal_identity_allowed" | "mistral_only";
 export type ExpressionFallbackLane = "interactive" | "urgent_grounded" | "exchange_cognition" | "curiosity_maintenance";
@@ -21,7 +26,11 @@ export type ExpressionFallbackLane = "interactive" | "urgent_grounded" | "exchan
 export type ExpressionComplete = (
   messages: ChatMessage[],
   options: CognitiveDispatchOptions,
-) => Promise<{ text: string; model: string }>;
+) => Promise<{
+  text: string;
+  model: string;
+  modelFabric?: ModelFabricDispatchMetadata;
+}>;
 
 // Failures from which a visible fallback is permitted. Missing-key, budget,
 // route-lifecycle and abort/deadline failures are intentionally NOT eligible:
@@ -173,6 +182,7 @@ export function fallbackCompletionOptions(input: {
   deadlineAtMs: number | null | undefined;
   lane: ExpressionFallbackLane;
   attentionDb: DatabaseSync;
+  modelFallbackChain?: ModelFallbackChain | null;
 }): CognitiveDispatchOptions {
   return {
     model: "qwen/qwen3.6-27b",
@@ -182,6 +192,8 @@ export function fallbackCompletionOptions(input: {
     reasoningEffort: "none",
     lane: input.lane,
     purpose: "expression",
+    logicalRole: "expression",
+    modelFallbackChain: input.modelFallbackChain ?? null,
     deadlineAtMs: input.deadlineAtMs ?? undefined,
     decisionId: input.decisionId ?? undefined,
     deliveryReservationId: input.deliveryReservationId ?? undefined,

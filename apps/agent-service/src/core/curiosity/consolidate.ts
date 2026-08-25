@@ -139,6 +139,7 @@ export async function consolidateCuriosityRead(
     temperature: 0.35,
     reasoningEffort: "medium",
     purpose: "curiosity_consolidation",
+    logicalRole: "curiosity_consolidation",
     route: "utility_bulk",
     lane: "curiosity_maintenance",
     attentionDb: db,
