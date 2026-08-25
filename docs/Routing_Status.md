@@ -17,11 +17,11 @@ Do not infer an audit SHA from git history alone.
 
 | | |
 |---|---|
-| Document reviewed at repository revision | `e36613bf805bb0a4f5e95ec11f0b8dd5dfb5857a` |
-| Route-table audit baseline | `e36613bf805bb0a4f5e95ec11f0b8dd5dfb5857a` |
-| Audit method | Read-only comparison of the Wave 1 table below to `config/models.json` `purpose_routes` / `routes`, `PURPOSE_TO_ROUTE` in [`router.ts`](../apps/agent-service/src/core/model-routing/router.ts), and `ROUTE_BINDINGS` in [`registry.ts`](../apps/agent-service/src/core/model-routing/registry.ts) |
-| Last route-table audit | 2026-08-25 post-OF baseline confirmation; route-binding inputs unchanged from the prior `8eedad8` audit |
-| Stale when | those source files change, or `git rev-parse HEAD` differs and a new audit has not been performed |
+| Document reviewed at repository revision | `d918572c7ae01d5b367323692bd6e8fbcf257895` |
+| Route-table audit baseline | `d918572c7ae01d5b367323692bd6e8fbcf257895` |
+| Audit method | Read-only comparison of the Wave 1 table below to `config/models.json` `purpose_routes` / `routes`, `PURPOSE_TO_ROUTE` in [`router.ts`](../apps/agent-service/src/core/model-routing/router.ts), `ROUTE_BINDINGS` in [`registry.ts`](../apps/agent-service/src/core/model-routing/registry.ts), and the MF-M1 implementation diff from exact `5a05e96e` |
+| Last route-table audit | 2026-08-25 MF-M1 candidate audit; route-binding inputs and dispatch behavior remain unchanged from the `e36613b` live-route baseline |
+| Stale when | those source files or route-dispatch behavior change and a new audit has not been performed |
 
 Current route facts are split across:
 
@@ -48,8 +48,10 @@ tables without that audit.
 
 The post-OF source comparison found no changes from `8eedad8` to
 `e36613b` in `config/models.json`, the model-routing source, the provider
-adapters, or the audited `completeChat` caller paths. The prior route-table
-content therefore remains valid at the `e36613b` integration baseline.
+adapters, or the audited `completeChat` caller paths. The MF-M1 candidate
+started from exact `5a05e96e` and adds typed identity/receipt metadata without
+changing route selection, provider/model bindings, failover, or fallback
+eligibility. The route-table content therefore remains valid at the candidate.
 
 ## Implemented routing (Wave 1)
 
@@ -71,6 +73,10 @@ failover), so observation does not actually consume the Groq utility bucket.
 See the naming seam below.
 (NVIDIA NIM `openai/gpt-oss-20b` primary -> Groq `openai/gpt-oss-20b` secondary
 on eligible transport/capacity failures when remaining deadline >= 2500ms).
+
+The MF-M1 candidate records configured route, dispatched route, provider/model
+identity, reasoning policy, compatibility fingerprint, and receipt truth for
+these current paths. It does not alter the bindings shown here.
 
 Live model IDs are **current facts**, not architecture. Owner-selected
 **future** direct-provider targets (including Qwen-primary Expression and Groq

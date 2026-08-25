@@ -1,7 +1,7 @@
 # Model Fabric — MF-M1 implementation checkpoint
 
-**Status:** `SUPPORTING` resume record. Not architecture. Not a production
-closure.
+**Status:** `SUPPORTING` implementation checkpoint. Not architecture. Not a
+production closure.
 
 **Date:** 2026-08-25
 
@@ -11,11 +11,12 @@ closure.
 **Owner decisions:**
 [`MODEL_FABRIC_OWNER_DECISION_PACKET.md`](MODEL_FABRIC_OWNER_DECISION_PACKET.md)
 
-This file exists so stopped MF-M1 implementation work is **not lost** and is
-**not restarted from stale SHAs or stale topologies**.
+This file records the completed local MF-M1 implementation checkpoint so later
+acceptance work is **not restarted from stale SHAs or stale topologies**.
 
-Do **not** treat this file as authorization to write TypeScript until the
-resume gate in §C is satisfied.
+The pre-implementation instruction in §C is historical evidence that the
+resume gate was satisfied. This file does **not** authorize acceptance,
+promotion, production activation, or deployment.
 
 ---
 
@@ -26,17 +27,20 @@ resume gate in §C is satisfied.
 | Selected first implementation milestone | **MF-M1** |
 | MF-M1 owner scope / design | `CLOSED` |
 | MF-M1 architecture / docs | `READY` |
-| MF-M1 runtime implementation | `PENDING` |
+| MF-M1 runtime implementation | `IMPLEMENTED (LOCAL CANDIDATE)` at `d918572c` |
 | Implementation acceptance | `NOT YET EVALUATED` |
 | Production status | `NOT IMPLEMENTED` |
 
 `CLOSED` applies only to **owner scope**. It does not mean implemented,
 independently reviewed, `PRODUCTION ACCEPTED`, or routed in production.
 
-**Why implementation is paused:** Operational Fulfillment M1 is
-production-proven at exact SHA `e36613bf805bb0a4f5e95ec11f0b8dd5dfb5857a`.
-MF-M1 remains pending because its source/caller resume gate has not yet been
-executed on this canonical integration line.
+**Why this checkpoint exists:** Operational Fulfillment M1 is production-proven
+at exact SHA `e36613bf805bb0a4f5e95ec11f0b8dd5dfb5857a`. The autonomous MF-M1
+implementation started from exact integrated baseline
+`5a05e96e4d5d6afbd6d44e9ca518f141fa8292c6` and is locally checkpointed at
+`d918572c7ae01d5b367323692bd6e8fbcf257895`. Local verification passed; MF-M1
+acceptance is `NOT YET EVALUATED`, and production status is
+`NOT IMPLEMENTED`.
 
 Live compatibility (planning snapshot) remains:
 
@@ -62,26 +66,33 @@ e36613bf805bb0a4f5e95ec11f0b8dd5dfb5857a
 documentationCheckpointSha =
 7a7883753a7e6e5a002bf23d226645ce85730ee5
 
+implementationStartSha =
+5a05e96e4d5d6afbd6d44e9ca518f141fa8292c6
+
+candidateCommitSha =
+d918572c7ae01d5b367323692bd6e8fbcf257895
+
 historicalPreRepairPlanningBaselineSha =
 8eedad8bebbed2d8cd984849a269afe256a3d08a
 ```
 
 The runtime integration baseline is the exact production-proven
-Operational Fulfillment M1 SHA. MF-M1 runtime is still `PENDING`; this SHA
-is not an MF-M1 implementation or candidate-freeze SHA. The
+Operational Fulfillment M1 SHA. It remains the live-route source baseline and
+is not the MF-M1 implementation or candidate-freeze SHA. The
 `documentationCheckpointSha` identifies the docs-only MF-M1 checkpoint that
 was created on the historical pre-repair planning line.
 
-Do not begin MF-M1 implementation from this baseline without completing the
-resume gate below. If a later accepted candidate supersedes `e36613b`, obtain
-that exact SHA from owner / production observation / exact-candidate evidence
-and re-run the gate.
+The implementation began from `implementationStartSha`, which is the exact
+integrated baseline requested for this run. If a later accepted candidate
+supersedes `e36613b`, obtain that exact SHA from owner / production
+observation / exact-candidate evidence before starting a new candidate.
 
 ---
 
-## C. RESUME GATE
+## C. PRE-IMPLEMENTATION RESUME GATE (SATISFIED)
 
-Before **any** TypeScript modification:
+Before **any** TypeScript modification (historical gate; satisfied for the
+candidate recorded in this checkpoint):
 
 1. Use exact `e36613bf805bb0a4f5e95ec11f0b8dd5dfb5857a` as the current
    accepted integration SHA. If a later accepted candidate supersedes it,
@@ -125,9 +136,10 @@ Existing production paths (stamp / wrap; do not change behavior):
 | Config (read-only in MF-M1) | `config/models.json` |
 
 New Fabric contract types/helpers (smallest module consistent with surrounding
-style; typical location under `apps/agent-service/src/core/model-routing/`):
+style; implemented under `apps/agent-service/src/core/model-fabric/`):
 `logicalRole` stamps, `existing_compatibility` fingerprint, attempt /
-invocation / fallback-chain receipts, `ContextProjection` wrap.
+invocation / fallback-chain receipts, `ContextProjection` wrap, and
+mechanical capability profiles.
 
 Focused tests (extend; do not replace live topology):
 
@@ -248,26 +260,40 @@ No:
 
 ---
 
-## NEXT ACTION WHEN OPERATIONAL FULFILLMENT SETTLES
+## NEXT ACTIONS AFTER THE LOCAL CANDIDATE
 
 Do **NOT** redesign MF-M1.
 
-Given the exact accepted integration SHA:
+Given the local candidate and its exact starting SHA:
 
-1. Rebase / create a clean MF-M1 **implementation** worktree from that SHA.
-2. Perform a differential `completeChat` caller audit vs this checkpoint.
+1. Preserve the candidate's exact start `5a05e96e` and commit
+   `d918572c`; do not substitute a stale route snapshot.
+2. Perform the separate MF-M1 implementation-acceptance review.
 3. Reconfirm `planningBaselineSha` / `sourceBaselineSha` in Architecture
-   and this file if a later accepted candidate supersedes `e36613b`.
-4. Update `existing_compatibility` tuples if actual current source changed.
-5. Write characterization tests **FIRST**.
-6. Implement the smallest MF-M1 seam.
-7. Focused verification (characterization + falsification + existing
+   if a later accepted candidate supersedes `e36613b`.
+4. Focused verification (characterization + falsification + existing
    failover/fallback tests). No generic full-corpus ritual unless Wave
    Acceptance requires it for the claim.
-8. Independent architectural / code review.
-9. Candidate freeze against the **exact** integration SHA.
+5. Keep production promotion, activation, and deployment separate.
 
-This is the continuation point.
+### Verification recorded for the local candidate
+
+- Worktree: `C:\Users\Xharv\Projects\model-fabric-implementation`
+- Branch: `model-fabric-autopilot`
+- Build: `npm run build` passed.
+- Focused MF-M1 and preserved-routing suites: 4 files, 46 tests passed.
+- Full agent-service suite: 184 files; 1,537 passed; 2 skipped; 11 failed.
+- Full-suite failures remained in the baseline failure classes:
+  Thought-delay error precedence, Sandbox M5 authorship fixtures, Sandbox M7
+  Windows temporary-path canonicalization, and Sandbox V2 M3 tooling syntax.
+  No new failure class appeared.
+- `git diff --check`: passed.
+
+The candidate is locally verified but remains `NOT YET EVALUATED` for
+implementation acceptance and is not production-routed.
+
+This is the continuation point for acceptance and later owner-closed
+milestone re-evaluation.
 
 ---
 

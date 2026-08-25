@@ -19,9 +19,11 @@ semantic evidence.
 
 | Identity | SHA | Meaning |
 |---|---|---|
-| `planningBaselineSha` | `e36613bf805bb0a4f5e95ec11f0b8dd5dfb5857a` | Canonical post-OF integration baseline for the MF-M1 source/caller re-audit. MF-M1 runtime remains `PENDING`. |
+| `planningBaselineSha` | `e36613bf805bb0a4f5e95ec11f0b8dd5dfb5857a` | Canonical post-OF integration baseline for the MF-M1 source/caller re-audit. |
 | `sourceBaselineSha` | `e36613bf805bb0a4f5e95ec11f0b8dd5dfb5857a` | Source identity for this canonical integration line. **Not** an MF-M1 implementation or candidate-freeze SHA. |
-| `productionBaselineSha` | `e36613bf805bb0a4f5e95ec11f0b8dd5dfb5857a` | Exact production-proven runtime baseline. MF-M1 itself remains unimplemented and not production-routed. |
+| `productionBaselineSha` | `e36613bf805bb0a4f5e95ec11f0b8dd5dfb5857a` | Exact production-proven runtime baseline. MF-M1 is not production-routed. |
+| `implementationStartSha` | `5a05e96e4d5d6afbd6d44e9ca518f141fa8292c6` | Exact integrated baseline requested for autonomous MF-M1 implementation; docs-only on top of the `e36613b` runtime ancestor. |
+| `mfM1CandidateSha` | `d918572c7ae01d5b367323692bd6e8fbcf257895` | Local MF-M1 implementation candidate produced from `implementationStartSha`; acceptance and production promotion remain separate. |
 | Historical MF documentation checkpoint | `7a7883753a7e6e5a002bf23d226645ce85730ee5` | Docs-only MF-M1 checkpoint based on the pre-repair `8eedad8` line; preserved for provenance. |
 | Historical pre-repair MF planning baseline | `8eedad8bebbed2d8cd984849a269afe256a3d08a` | Original MF-M1 planning/source snapshot; superseded by `e36613b` for this integration line. |
 | Historical routing audit | `04beaf1c21c9f7e0c9580692f57ed533d822f61e` | Inherited Thought NIM→Groq 20B line; superseded as *planning* base |
@@ -32,10 +34,11 @@ production-proven at exact SHA
 `e36613bf805bb0a4f5e95ec11f0b8dd5dfb5857a`. That SHA is the canonical
 runtime integration baseline for MF-M1. The MF documentation checkpoint
 `7a7883753a7e6e5a002bf23d226645ce85730ee5` is docs-only, and its
-pre-repair `8eedad8` planning identity is historical. MF-M1 runtime remains
-`PENDING`. Before any MF-M1 implementation, re-audit every
-`completeChat` caller from `e36613b` and revalidate the candidate freeze
-against the exact implementation SHA.
+pre-repair `8eedad8` planning identity is historical. The autonomous MF-M1
+implementation started from exact `implementationStartSha`
+`5a05e96e4d5d6afbd6d44e9ca518f141fa8292c6` and is checkpointed locally at
+`mfM1CandidateSha` `d918572c7ae01d5b367323692bd6e8fbcf257895`. Acceptance,
+production promotion, and activation remain separate gates.
 Resume:
 [`docs/handoffs/MODEL_FABRIC_MF_M1_IMPLEMENTATION_CHECKPOINT.md`](../handoffs/MODEL_FABRIC_MF_M1_IMPLEMENTATION_CHECKPOINT.md).
 
@@ -62,36 +65,39 @@ expected current behavior.
 | Selected first implementation milestone | **MF-M1** |
 | Owner scope / design decisions | `OWNER CLOSED` |
 | Architecture / documentation | `READY` (this freeze) |
-| Runtime implementation | `PENDING` |
+| Runtime implementation | `IMPLEMENTED (LOCAL CANDIDATE)` at `d918572c` |
 | Implementation acceptance | `NOT YET EVALUATED` |
 | Production status | `NOT IMPLEMENTED` |
 
 `OWNER CLOSED` means the owner has closed **scope and design**. It does **not**
-mean MF-M1 is implemented, independently reviewed, accepted, promoted, or
-production-proven. Do not write “MF-M1 CLOSED” as if it were a runtime or
-production closure.
+mean MF-M1 is implementation-accepted, promoted, or production-proven. The
+local candidate is implemented and internally reviewed; acceptance and
+production closure remain separate. Do not write “MF-M1 CLOSED” as if it were
+a runtime or production closure.
 
-Current source already has Ashley-owned purpose and route logic plus provider
-adapters. It does **not** implement this Fabric contract. Sandbox wait is
-delivery order, not semantic or authority derivation from Sandbox. That
-Sandbox delivery-order gate is closed through named M7 `patch_export`. MF-M1
-is the **owner-selected next code cut**, with runtime still `PENDING`.
+Current source has Ashley-owned purpose and route logic plus provider adapters.
+The local candidate adds the MF-M1 compatibility seam without changing those
+routes or their fallback behavior. Sandbox wait is delivery order, not semantic
+or authority derivation from Sandbox. That Sandbox delivery-order gate is closed
+through named M7 `patch_export`. MF-M1 is implemented locally but remains not
+accepted and not production-routed.
 
 **Selected first implementation milestone:** **MF-M1** — a seam around
 **existing** production routes with **zero intended** routing, provider,
-model, or reasoning behavior change. This documentation freeze does **not**
-implement MF-M1.
+model, or reasoning behavior change. The original documentation freeze did not
+implement MF-M1; the local candidate status is recorded above.
 
 **Not the first implementation milestone:** historical **F1** /
 Thought-observation Lightning shadow. Retained as **F1-obs**
 (`SUPPORTING` / deferred optional witness). Provenance is preserved. It does
 not block MF-M1.
 
-**Scope:** Architecture and documentation only. This pass does not change
-runtime routing, providers, `config/models.json`, OpenCode adapters, Mint,
-deployment, Operational Fulfillment M1, or qualification execution. Later
-slices (elastic backend activation, catalog auto-route, specialist seats in
-production) remain gated by the milestone sequence in §34.
+**Scope:** This status reconciliation records the local MF-M1 candidate. It
+does not change runtime route selection, providers, `config/models.json`,
+OpenCode adapters, Mint, deployment, Operational Fulfillment M1, or
+qualification execution. Later slices (elastic backend activation, catalog
+auto-route, specialist seats in production) remain gated by the milestone
+sequence in §34.
 
 **Evidence classes used in this revision:**
 
@@ -375,7 +381,8 @@ for that exact role/seat**. They must not promote an unqualified model.
 
 Live compatibility snapshot: `sourceBaselineSha` =
 `e36613bf805bb0a4f5e95ec11f0b8dd5dfb5857a` (canonical post-OF integration
-baseline; MF-M1 runtime is not implemented). Refresh
+baseline for live route facts). The MF-M1 implementation start and local
+candidate are tracked separately above. Refresh
 [`docs/Routing_Status.md`](../Routing_Status.md) when that source changes.
 Routing Status remains living **current** facts. It must not be rewritten as
 the §12.9 future target table.
@@ -1394,11 +1401,13 @@ qualification meaning. Profiles can be disabled independently. Changing a
 model ID updates versioned policy, not architecture, when purpose, privacy,
 reliability, output contract, and authority remain unchanged.
 
-## 31. MF-M1 implementation contract (`OWNER CLOSED` **scope**; runtime `PENDING`)
+## 31. MF-M1 implementation contract (`OWNER CLOSED` **scope**; local candidate)
 
-Owner scope for this witness is closed. Runtime implementation is **not**
-started, not accepted, and not production. Do not read this heading as
-“MF-M1 CLOSED” in the Wave Acceptance sense.
+Owner scope for this witness is closed. The implementation is checkpointed as
+a local candidate at `d918572c7ae01d5b367323692bd6e8fbcf257895`, started from
+exact `5a05e96e4d5d6afbd6d44e9ca518f141fa8292c6`. It is not accepted and not
+production. Do not read this heading as “MF-M1 CLOSED” in the Wave Acceptance
+sense.
 
 **F1-obs (historical, deferred):** one default-off Thought-observation
 shadow attempt, Lightning, no fallback, active Thought unchanged. Not the
@@ -1527,8 +1536,8 @@ MF-M1–MF-M4.
 | Ephemeral catalog | [`research/Model_Fabric_OpenCode_Research_Snapshot_2026-08-25.md`](research/Model_Fabric_OpenCode_Research_Snapshot_2026-08-25.md) | `EPHEMERAL RESEARCH` |
 | Worker future | [`research/Ashley_OpenCode_Worker_Future.md`](research/Ashley_OpenCode_Worker_Future.md) | `FUTURE / NON-NORMATIVE FOR MF` |
 | Owner decisions | [`../handoffs/MODEL_FABRIC_OWNER_DECISION_PACKET.md`](../handoffs/MODEL_FABRIC_OWNER_DECISION_PACKET.md) | Current decision record |
-| Roadmap handoff | [`../handoffs/MODEL_FABRIC_ROADMAP_HANDOFF.md`](../handoffs/MODEL_FABRIC_ROADMAP_HANDOFF.md) | Docs freeze; runtime implementation `PENDING` |
-| MF-M1 implementation checkpoint | [`../handoffs/MODEL_FABRIC_MF_M1_IMPLEMENTATION_CHECKPOINT.md`](../handoffs/MODEL_FABRIC_MF_M1_IMPLEMENTATION_CHECKPOINT.md) | Resume after OF-M1 exact integration SHA |
+| Roadmap handoff | [`../handoffs/MODEL_FABRIC_ROADMAP_HANDOFF.md`](../handoffs/MODEL_FABRIC_ROADMAP_HANDOFF.md) | Supporting status; local MF-M1 candidate checkpointed; acceptance and promotion remain separate |
+| MF-M1 implementation checkpoint | [`../handoffs/MODEL_FABRIC_MF_M1_IMPLEMENTATION_CHECKPOINT.md`](../handoffs/MODEL_FABRIC_MF_M1_IMPLEMENTATION_CHECKPOINT.md) | Candidate, verification, and acceptance boundary |
 | Evaluation meaning | [`Ashley_Evaluation_Qualification_Plane.md`](Ashley_Evaluation_Qualification_Plane.md) | Sibling plane |
 
 ### Policy layers (not live routing)

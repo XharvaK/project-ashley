@@ -346,8 +346,9 @@ COMPUTER USE DEPENDS ON EXTERNAL EFFECT/AUTHORITY FOR CONSEQUENTIAL ACTION
   owner-selected. The first **code** milestone is **MF-M1** (existing-route
   seam), not historical Thought-observation Lightning (F1-obs). MF-M1 owner
   scope is closed; the canonical post-OF runtime integration baseline is
-  `e36613bf805bb0a4f5e95ec11f0b8dd5dfb5857a`. MF-M1 runtime remains
-  `PENDING`; the baseline does not authorize implementation.
+  `e36613bf805bb0a4f5e95ec11f0b8dd5dfb5857a`. A local MF-M1 candidate is
+  checkpointed at `d918572c` from exact `5a05e96e`; implementation acceptance
+  and production promotion remain separate.
 - Operational Continuity does not wait semantically on Model Fabric. It does
   not own model intelligence.
 - Procedural Skill Graduation does not wait on general Operational Continuity

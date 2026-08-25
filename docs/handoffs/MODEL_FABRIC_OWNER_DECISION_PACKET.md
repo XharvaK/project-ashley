@@ -4,7 +4,7 @@
 
 **Date:** 2026-08-25
 
-**Does not implement MF-M1.** Canonical architecture:
+**Does not authorize MF-M1 acceptance or production activation.** Canonical architecture:
 [`../architecture/Model_Fabric_Architecture.md`](../architecture/Model_Fabric_Architecture.md)
 
 This file records owner + ChatGPT design decisions. It is not a second
@@ -25,8 +25,10 @@ MF documentation checkpoint:
 `7a7883753a7e6e5a002bf23d226645ce85730ee5` (docs-only, based on the
 historical `8eedad8` line).
 
-Owner **scope** for MF-M1 is `CLOSED`. Runtime implementation is `PENDING`.
-This packet does **not** mean MF-M1 is implemented or production-accepted.
+Owner **scope** for MF-M1 is `CLOSED`. The local implementation candidate is
+`d918572c7ae01d5b367323692bd6e8fbcf257895`, started from exact
+`5a05e96e4d5d6afbd6d44e9ca518f141fa8292c6`. This packet does **not** mean
+MF-M1 is implementation-accepted or production-routed.
 
 Operational Fulfillment M1 is production-proven at exact
 `e36613bf805bb0a4f5e95ec11f0b8dd5dfb5857a`. The original `8eedad8`

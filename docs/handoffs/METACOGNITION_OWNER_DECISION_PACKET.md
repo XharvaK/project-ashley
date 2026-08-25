@@ -26,8 +26,9 @@ OWNER-CLOSED ANSWER != IMPLEMENTATION AUTHORIZATION
 **Metacognition documentation checkpoint:** `7a7883753a7e6e5a002bf23d226645ce85730ee5`
 
 Operational Fulfillment M1 is production-proven at the canonical runtime
-baseline above. MF-M1 owner scope remains `CLOSED`. MF-M1 runtime remains
-`PENDING`. This packet must not reopen Fabric rows.
+baseline above. MF-M1 owner scope remains `CLOSED`. A local MF-M1 candidate is
+checkpointed at `d918572c` from exact `5a05e96e`; acceptance and production
+promotion remain separate. This packet must not reopen Fabric rows.
 
 Q0 is a foundational Vision addition. Q1–Q16 are owner-closed for architecture
 reconciliation. Remaining items in the architecture file are implementation

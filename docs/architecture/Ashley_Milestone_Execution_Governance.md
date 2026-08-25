@@ -342,10 +342,11 @@ fallback) is deferred optional. It does not block MF-M1.
 The owner selected Model Fabric next on `2026-08-25`. Sandbox V2 M1–M7 is
 production accepted against exact candidate
 `48bad019fe601d5c871a54dd9902879862c6e96a`, with M7 limited to the named
-`patch_export` profile. MF-M1 is the owner-selected next code cut. Owner
-**scope** is closed. Runtime implementation is `PENDING` (paused for the
-Operational Fulfillment exact integration SHA). This delivery decision does
-not create a semantic dependency from Model Fabric to Sandbox.
+`patch_export` profile. MF-M1 is the owner-selected code cut. Owner **scope**
+is closed. A local candidate is checkpointed at `d918572c` from exact
+`5a05e96e`; implementation acceptance, production promotion, and activation
+remain separate. This delivery decision does not create a semantic dependency
+from Model Fabric to Sandbox.
 
 ### OC1 — Operational Continuity first durable-work slice
 
@@ -538,13 +539,14 @@ Live resolution refreshed `2026-08-25`:
 | Owner-selected delivery | Model Fabric, beginning with MF-M1 |
 | `origin/master` | `48bad019fe601d5c871a54dd9902879862c6e96a` |
 | Sandbox V2 M1–M7 | `PRODUCTION ACCEPTED` against the exact candidate above. M7 is limited to `patch_export` |
-| Allowed now | MF-M1 implementation review and then the bounded existing-route seam; separately authorized documentation/design work that does not compete with that delivery |
+| Allowed now | MF-M1 implementation acceptance review and later owner-closed milestone re-evaluation; separately authorized documentation/design work that does not compete with that delivery |
 | Not allowed by this selection | F1-obs as the first Fabric cut; new provider/model routing in MF-M1; OpenCode production routing; live apply; Git effects; deployment; self-change; Event Spine implementation |
 
-**Next mechanism action:** review and execute MF-M1 against the current live
-routing surface. Preserve all existing routing, provider, model, failover,
-fallback, and mismatch behavior while adding typed identity and truthful
-receipts.
+**Next mechanism action:** perform the separate MF-M1 implementation-acceptance
+review, then re-evaluate MF-M2 and later milestones against their still-open or
+deferred contracts. The local candidate preserves all existing routing,
+provider, model, failover, fallback, and mismatch behavior while adding typed
+identity and truthful receipts.
 
 **Next governance action (parallel):** S1 specification only, if separately
 selected and kept outside the MF-M1 implementation scope.

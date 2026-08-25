@@ -2,11 +2,11 @@
 
 - **Status:** `SUPPORTING`; field contracts reconciled beneath the current Model Fabric architecture. Historical first-slice (Thought-observation / Lightning / no fallback) is **F1-obs**: deferred optional witness, **not** the first implementation milestone.
 - **Canonical phase owner:** [`Model_Fabric_Architecture.md`](Model_Fabric_Architecture.md)
-- **First implementation milestone:** **MF-M1** (seam around existing production routes). Owner **scope** closed 2026-08-25. Runtime implementation `PENDING`.
+- **First implementation milestone:** **MF-M1** (seam around existing production routes). Owner **scope** closed 2026-08-25. Local implementation candidate `d918572c`; acceptance and production routing remain separate.
 - **Historical filename:** retained to preserve existing links and reconciliation provenance. The canonical phase name is **Model Fabric**.
 - **Normative language:** MUST, MUST NOT, SHOULD, and MAY are requirements at their stated strength
 - **Applies to:** future provider-neutral model dispatch inside `apps/agent-service`
-- **Does not authorize:** this file does not itself implement MF-M1. It does not authorize OpenCode production routing, provider migration, sandbox changes, deployment, capability promotion, or Recall changes.
+- **Does not authorize:** this file does not itself implement MF-M1 or authorize acceptance. It does not authorize OpenCode production routing, provider migration, sandbox changes, deployment, capability promotion, or Recall changes.
 
 ## Decision summary
 

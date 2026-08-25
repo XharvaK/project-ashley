@@ -18,6 +18,10 @@ M1 line. The documentation checkpoint is the Model Fabric docs-only identity
 from the historical planning worktree. It is **not** an MF-M1 implementation,
 qualification, integration, promotion, or production SHA.
 
+The separate local MF-M1 implementation candidate is `d918572c`, started from
+exact `5a05e96e`. Its acceptance and production promotion remain outside this
+policy profile.
+
 **Authority:** Beneath Vision, Core Principles, Constitution, Stewardship
 Compact, Ethics, Hierarchy, Freeze, Cross-Phase, and the Canonical Roadmap.
 The Metacognition profile defines shared constraints and request semantics.

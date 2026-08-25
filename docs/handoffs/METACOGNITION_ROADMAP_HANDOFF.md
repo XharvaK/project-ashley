@@ -11,9 +11,9 @@ direction · **does not authorize implementation**
 
 The runtime baseline is the exact production-proven Operational Fulfillment
 M1 line. The documentation checkpoint is a Model Fabric **docs-only** identity
-from the historical planning worktree. MF-M1 runtime is `PENDING`; neither
-document identity authorizes implementation, qualification, promotion, or
-production routing.
+from the historical planning worktree. A separate local MF-M1 candidate is
+checkpointed at `d918572c` from exact `5a05e96e`; acceptance, qualification,
+promotion, and production routing remain separate.
 
 **Owner decisions:** [`METACOGNITION_OWNER_DECISION_PACKET.md`](METACOGNITION_OWNER_DECISION_PACKET.md)
 
@@ -44,11 +44,11 @@ From the canonical roadmap / freeze at this SHA:
 closed at exact candidate `48bad019...`, which is **not** this worktree) ->
 **Model Fabric** (current; MF-M1 first code slice) -> Operational Continuity.
 
-MF-M1 current integration baseline is `e36613b...`; MF-M1 runtime remains
-`PENDING`. The MF documentation checkpoint is `7a78837...`, and the
-pre-repair planning identity `8eedad8...` remains historical provenance.
-Roadmap §5.6 may still label Sandbox `CURRENT WORK`; live delivery is §3 +
-Fabric (runtime `PENDING`).
+MF-M1 current integration baseline is `e36613b...`; the local candidate is
+`d918572c` from exact `5a05e96e`. The MF documentation checkpoint is
+`7a78837...`, and the pre-repair planning identity `8eedad8...` remains
+historical provenance. Roadmap §5.6 may still label Sandbox `CURRENT WORK`;
+live delivery is §3 + Fabric, with acceptance and promotion still separate.
 
 **Architecture-justified before advanced autonomy:**
 
