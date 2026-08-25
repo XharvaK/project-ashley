@@ -79,7 +79,11 @@ This phase does not:
 - infer relational consent or mutual commitment;
 - authorize Relational Graduation;
 - claim consciousness, sentience, human emotion, or human-equivalent
-  experience.
+  experience;
+- own a Metacognition calibration ledger,
+  global intelligence score, or one global confidence number;
+- convert calibration history into I3
+  owner-model authority.
 
 ## 5. Predecessor and dependency contracts
 
@@ -338,7 +342,9 @@ Qualification has independent dimensions:
 1. Deterministic authority, owner, provenance, temporal, and transition
    invariants.
 2. Epistemic and belief maturation: attribution, uncertainty, contradiction,
-   supersession, revision, calibration, and resistance to confident falsehood.
+   supersession, revision, and resistance to confident falsehood.
+    selected prediction/outcome calibration,
+   and correction class versus calibration consequence.
 3. Goal and salience maturation: relevance without authority inflation,
    persistence without fixation, and revision under changing evidence.
 4. Evidence-bound lived-experience continuity: accurate distinction among
@@ -430,7 +436,11 @@ Deferred decisions include:
 - a fuller own-time or lived-experience program beyond evidence-bound
   continuity;
 - open-world embodiment and multimodal experience;
-- cross-device or distributed continuity.
+- cross-device or distributed continuity;
+- owner-invoked deep reflection and
+  Fabric-backed independent review (later consumers; not this phase's first
+  witness);
+- a separate Metacognition store.
 
 A fuller own-time or lived-experience program is a roadmap-extension candidate.
 It is not silently created as a new phase by this contract.

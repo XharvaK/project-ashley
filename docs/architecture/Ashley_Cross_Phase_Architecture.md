@@ -4,6 +4,12 @@
 
 **Date:** 2026-08-21
 
+**Metacognition (accepted 2026-08-25):** Named cross-cutting policy profile.
+Cross-Phase remains the owner of cross-phase laws. The Metacognition profile
+defines shared constraints and request semantics. Cross-Phase and the
+relevant domain owners own and enforce them. Naming the profile is not a
+Freeze-map amendment.
+
 **Scope:** Architecture and documentation only. This document grants no
 implementation, installation, activation, provider, Mint, deployment,
 promotion, Git-effect, or external-effect authority.
@@ -122,6 +128,28 @@ OPERATIONAL INBOX != EVENT SPINE
   of committed owner transitions belong to a future typed Event Spine, which
   is not a bus, brain, dispatcher, or source of truth. See
   [Architecture Freeze](Ashley_Architecture_Freeze.md).
+- Metacognition is a named cross-cutting policy profile under existing
+  owners. It is not a freeze-map owner, cognitive faculty, persistence owner,
+  or standalone phase. See
+  [Ashley Metacognition Architecture](Ashley_Metacognition_Architecture.md).
+  The following laws are accepted Cross-Phase laws for this profile. They do
+  not amend the Freeze map. The Metacognition profile defines these shared
+  constraints and request semantics. Cross-Phase and the relevant domain
+  owners own and enforce them.
+
+```text
+INHERITANCE != IDENTITY AUTHORITY
+OWNER IDENTITY != ASHLEY IDENTITY != OWNER MODEL != INHERITED SEED
+SHARED DEVELOPMENT != SHARED IDENTITY
+SIMILARITY != INHERITANCE PROVENANCE
+EVIDENTIAL STRENGTH != INFLUENCE CLASS
+LOCAL PERSISTENCE != LOCAL INFERENCE
+ATTENTION ADMITS RESOURCES; IT DOES NOT OWN SEMANTIC SALIENCE
+CORRECTION ENDS CURRENT VALIDITY AND EVERY CURRENT OR DOWNSTREAM
+INFLUENCE DERIVED FROM THE CORRECTED SCOPE, INCLUDING I1 ADAPTATION,
+UNLESS A NARROWER VALID REPLACEMENT IS EXPLICITLY ADJUDICATED.
+HISTORY AND SOURCE EVIDENCE REMAIN.
+```
 
 ### 2.2 Production data-plane authority
 
@@ -183,6 +211,9 @@ mechanism phase under External Effect, not a cognitive owner and not
 Authority. Full freeze, event split, and architecture-justified sequence:
 [Architecture Freeze](Ashley_Architecture_Freeze.md).
 
+Do not add Metacognition to this map. The existence of a metacognitive
+feature is not proof of an independently owned lifecycle.
+
 ## 3. Roadmap topology
 
 The roadmap drawing preserves owner-selected delivery order. It is not a
@@ -212,6 +243,11 @@ Memory Evidence maturation
 Cognitive Graduation
   + Relational Graduation
   -> integrated long-horizon hardening gate
+
+Metacognition policy is consumed across this track. It is not a node, phase,
+or freeze-map owner. The first visible
+metacognitive proof is Memory Evidence maturation. Shared-interest and
+shared-culture proofs belong to later consumers, not to C1 closure.
 
 ATTENTION TRACK
 Memory Evidence contracts
@@ -269,8 +305,8 @@ COMPUTER USE DEPENDS ON EXTERNAL EFFECT/AUTHORITY FOR CONSEQUENTIAL ACTION
 | Model Fabric | Computer Use | `CROSS_CUTTING_INTERFACE` | Perception or specialist dispatch, when models are used. | Deterministic Computer Use does not require Model Fabric. |
 | Sandbox Autonomy | Procedural Skill Graduation | `EVIDENCE_DEPENDENCY` | Local engineering procedures need a qualified execution mechanism and receipts. | General procedure architecture does not wait for Sandbox. Other qualified mechanisms may supply evidence. |
 | Computer Use | Procedural Skill Graduation | `CROSS_CUTTING_INTERFACE` | Only for procedures whose mechanism is UI control. | Computer Use is not a predecessor of Procedural Skill Graduation. |
-| Memory Evidence maturation | Learned Autonomy | `HARD_DEPENDENCY` | Learned influence requires attributed, revisable, temporally bounded assertions. Retrieval hits and prompt residue are insufficient. | Learned Autonomy does not own Recall or world truth. |
-| Identity + Mind State + Thought + Agency + Reflection + OCI | Learned Autonomy | `CROSS_CUTTING_INTERFACE` | Learned Autonomy extends existing owners. It must not replace them. | Those owners are not a serial roadmap phase. |
+| Memory Evidence maturation | Learned Autonomy | `HARD_DEPENDENCY` | Learned influence requires attributed, revisable, temporally bounded assertions. Retrieval hits and prompt residue are insufficient. | Learned Autonomy does not own Recall or world truth. Owner-model hypotheses are not Ashley Identity. |
+| Identity + Mind State + Thought + Agency + Reflection + OCI | Learned Autonomy | `CROSS_CUTTING_INTERFACE` | Learned Autonomy extends existing owners. It must not replace them. Inherited seeds remain Identity. | Those owners are not a serial roadmap phase. |
 | Operational Continuity | Learned Autonomy | `EVIDENCE_DEPENDENCY` | Unattended, restart-surviving, or resumable learning witnesses need durable work evidence. | Interests, preferences, goals, and motivations can be defined without Operational Continuity. |
 | Learned Autonomy | Cognitive Graduation | `HARD_DEPENDENCY` | Cognitive Graduation integrates qualified learned interests, preferences, goals, concerns, and governed development. | Learned Autonomy does not authorize Cognitive Graduation promotion. |
 | Memory Evidence maturation | Cognitive Graduation | `HARD_DEPENDENCY` | Epistemic maturation needs attributed, revisable assertions and forgetting. | Retrieval indexes are not beliefs. |
@@ -309,8 +345,9 @@ COMPUTER USE DEPENDS ON EXTERNAL EFFECT/AUTHORITY FOR CONSEQUENTIAL ACTION
 - Model Fabric does not wait semantically on Sandbox. Current delivery order is
   owner-selected. The first **code** milestone is **MF-M1** (existing-route
   seam), not historical Thought-observation Lightning (F1-obs). MF-M1 owner
-  scope is closed; runtime remains `PENDING` until the exact integration SHA
-  is named.
+  scope is closed; the canonical post-OF runtime integration baseline is
+  `e36613bf805bb0a4f5e95ec11f0b8dd5dfb5857a`. MF-M1 runtime remains
+  `PENDING`; the baseline does not authorize implementation.
 - Operational Continuity does not wait semantically on Model Fabric. It does
   not own model intelligence.
 - Procedural Skill Graduation does not wait on general Operational Continuity

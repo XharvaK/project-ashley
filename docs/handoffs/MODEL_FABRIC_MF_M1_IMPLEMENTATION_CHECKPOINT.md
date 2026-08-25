@@ -33,10 +33,10 @@ resume gate in §C is satisfied.
 `CLOSED` applies only to **owner scope**. It does not mean implemented,
 independently reviewed, `PRODUCTION ACCEPTED`, or routed in production.
 
-**Why implementation is paused:** Operational Fulfillment M1 has a confirmed
-production **duplicate-delivery concurrency defect** under investigation.
-MF-M1 must not start production code until that repair settles and the
-**exact** accepted integration SHA is named.
+**Why implementation is paused:** Operational Fulfillment M1 is
+production-proven at exact SHA `e36613bf805bb0a4f5e95ec11f0b8dd5dfb5857a`.
+MF-M1 remains pending because its source/caller resume gate has not yet been
+executed on this canonical integration line.
 
 Live compatibility (planning snapshot) remains:
 
@@ -50,21 +50,32 @@ be expected by characterization tests.
 
 ---
 
-## B. CURRENT PLANNING BASELINE
+## B. CURRENT RUNTIME INTEGRATION BASELINE
 
 ```text
 planningBaselineSha =
+e36613bf805bb0a4f5e95ec11f0b8dd5dfb5857a
+
+sourceBaselineSha =
+e36613bf805bb0a4f5e95ec11f0b8dd5dfb5857a
+
+documentationCheckpointSha =
+7a7883753a7e6e5a002bf23d226645ce85730ee5
+
+historicalPreRepairPlanningBaselineSha =
 8eedad8bebbed2d8cd984849a269afe256a3d08a
 ```
 
-This SHA is the current **planning** baseline. It is **not** guaranteed to
-be the final MF-M1 implementation or candidate-freeze SHA.
+The runtime integration baseline is the exact production-proven
+Operational Fulfillment M1 SHA. MF-M1 runtime is still `PENDING`; this SHA
+is not an MF-M1 implementation or candidate-freeze SHA. The
+`documentationCheckpointSha` identifies the docs-only MF-M1 checkpoint that
+was created on the historical pre-repair planning line.
 
-**DO NOT blindly implement against this SHA if a later accepted Operational
-Fulfillment repair exists.**
-
-Do not invent that future SHA. Obtain it from owner / production observation
-/ exact-candidate packet after OF-M1 settles.
+Do not begin MF-M1 implementation from this baseline without completing the
+resume gate below. If a later accepted candidate supersedes `e36613b`, obtain
+that exact SHA from owner / production observation / exact-candidate evidence
+and re-run the gate.
 
 ---
 
@@ -72,9 +83,9 @@ Do not invent that future SHA. Obtain it from owner / production observation
 
 Before **any** TypeScript modification:
 
-1. Obtain the exact current **accepted integration SHA** (OF-M1 repair SHA
-   if one was accepted; otherwise confirm `8eedad8` is still the intended
-   freeze).
+1. Use exact `e36613bf805bb0a4f5e95ec11f0b8dd5dfb5857a` as the current
+   accepted integration SHA. If a later accepted candidate supersedes it,
+   re-run this gate against that exact SHA.
 2. Create a **clean isolated** MF-M1 implementation worktree from that SHA.
    Do not implement in the mixed `composer-assistant` worktree.
 3. Re-read every `completeChat` caller on that exact tree.
@@ -245,8 +256,8 @@ Given the exact accepted integration SHA:
 
 1. Rebase / create a clean MF-M1 **implementation** worktree from that SHA.
 2. Perform a differential `completeChat` caller audit vs this checkpoint.
-3. Update `planningBaselineSha` / `sourceBaselineSha` in Architecture and
-   this file.
+3. Reconfirm `planningBaselineSha` / `sourceBaselineSha` in Architecture
+   and this file if a later accepted candidate supersedes `e36613b`.
 4. Update `existing_compatibility` tuples if actual current source changed.
 5. Write characterization tests **FIRST**.
 6. Implement the smallest MF-M1 seam.
@@ -262,11 +273,13 @@ This is the continuation point.
 
 ## Isolated planning-tree evidence packets
 
-This `8eedad8` planning worktree does **not** contain the SHA-named Sandbox
+This `e36613b` integration tree does **not** contain the SHA-named Sandbox
 M-series closure packets (`SANDBOX_V2_PRODUCTION_CLOSURE_48bad019fe60.md`,
 `M5`/`M6`/`M7_PRODUCTION_ACCEPTANCE_48bad019fe60.md`,
 `M4_PRODUCTION_ACCEPTANCE_553553b0d0ee.md`). Those files exist as mixed-tree
-documentation overlay, not as git objects on `8eedad8`.
+documentation overlay, not as git objects on this integration line. The
+original `7a788375` checkpoint and its `8eedad8` planning parent retain
+their historical identities.
 
 Classification: **A** as evidence identity on the mixed documentation line;
 **B** as clickable hrefs if introduced into this isolated tree.

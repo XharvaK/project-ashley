@@ -17,13 +17,16 @@ SOURCE SNAPSHOT != PROMOTED CANDIDATE != RUNNING PRODUCTION
 
 | | SHA |
 |---|---|
-| MF-M1 `planningBaselineSha` | `8eedad8bebbed2d8cd984849a269afe256a3d08a` |
-| MF-M1 `productionBaselineSha` (this freeze) | `8eedad8bebbed2d8cd984849a269afe256a3d08a` — **not** guaranteed as final implementation SHA |
+| MF-M1 `planningBaselineSha` (current integration line) | `e36613bf805bb0a4f5e95ec11f0b8dd5dfb5857a` |
+| MF-M1 `sourceBaselineSha` (current integration line) | `e36613bf805bb0a4f5e95ec11f0b8dd5dfb5857a` |
+| MF-M1 `productionBaselineSha` (runtime baseline) | `e36613bf805bb0a4f5e95ec11f0b8dd5dfb5857a` — OF-M1 production-proven; MF-M1 itself is not implemented |
+| Historical MF documentation checkpoint | `7a7883753a7e6e5a002bf23d226645ce85730ee5` — docs-only |
+| Historical pre-repair MF planning baseline | `8eedad8bebbed2d8cd984849a269afe256a3d08a` |
 | Not the Fabric source baseline | `48bad019fe601d5c871a54dd9902879862c6e96a` (Sandbox M-series closure) |
 | Historical routing line inherited by `8eedad8` | `04beaf1c21c9f7e0c9580692f57ed533d822f61e` |
 
-If a later production repair commit lands, freeze must revalidate against that
-exact integration SHA.
+If a later accepted candidate supersedes `e36613b`, freeze must revalidate
+against that exact integration SHA.
 
 ---
 
@@ -31,7 +34,7 @@ exact integration SHA.
 
 * **Canonical track:** Model Fabric
 * **First implementation milestone:** **`MF-M1`** — seam around **existing**
-  production routes at `8eedad8`; zero intended routing/provider/model/reasoning
+  production routes at `e36613b`; zero intended routing/provider/model/reasoning
   behavior change
 * **Not first:** historical **`F1` / F1-obs** Thought-observation Lightning
   shadow (retained, deferred, optional)
@@ -52,8 +55,9 @@ exact integration SHA.
   named `patch_export` profile. That SHA is **not** the MF-M1 source tree.
 * **MF-M0:** COMPLETE as documentation (research + reconciliation + this
   source-baseline correction).
-* **Blocker for starting MF-M1 code:** Operational Fulfillment M1 duplicate-delivery
-  repair must settle the **exact** integration SHA. Then follow
+* **Resume condition for starting MF-M1 code:** use the exact accepted
+  integration baseline `e36613bf805bb0a4f5e95ec11f0b8dd5dfb5857a`, create a
+  clean implementation worktree from it, and follow
   [`MODEL_FABRIC_MF_M1_IMPLEMENTATION_CHECKPOINT.md`](MODEL_FABRIC_MF_M1_IMPLEMENTATION_CHECKPOINT.md).
 
 ---
@@ -146,7 +150,9 @@ resume gate is satisfied (exact OF-M1 integration SHA).
 Then:
 
 1. Characterization tests against **live** callers at that SHA (not §12.9
-   targets). Planning snapshot was `8eedad8`; re-audit if SHA moved.
+   targets). The pre-repair planning snapshot was `8eedad8`; the MF docs
+   checkpoint was `7a788375`; the current integration baseline is
+   `e36613b`.
 2. Fabric seam + caller `logicalRole` stamps; preserve configured ≠ requested ≠
    dispatched.
 3. Falsification; Thought two attempts / one invocation; Expression two

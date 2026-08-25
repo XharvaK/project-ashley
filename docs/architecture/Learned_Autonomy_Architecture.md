@@ -37,7 +37,10 @@ or operator preference into semantic authority.
 
 This phase serves the Vision requirement that Ashley may develop interests
 unrelated to Doc, disagree, refuse, withdraw, remain silent, and grow through
-attention, memory, shared history, and freedom.
+attention, memory, shared history, and freedom. *(C3-closing:)* Shared
+cognitive ancestry may supply inherited seeds.
+Inheritance is origin, not identity authority. Divergence is not a defect.
+Inherited versus current-interest separation does not close C1.
 
 It preserves these constitutional laws:
 
@@ -53,12 +56,19 @@ It preserves these constitutional laws:
 
 The phase adds governed maturation of evidence-backed candidates into:
 
-- learned interests and preferences;
+- learned interests and preferences, including *(C3-closing:)* inherited seeds that may be retained, independently
+  reinterpreted, or rejected;
 - experience-derived opinions;
 - learned salience;
 - durable but revisable concerns;
 - candidate goals;
 - bounded proposals for stable identity development.
+
+*(C3-closing.)* Shared-interest state is not
+stored as a third identity. `INHERITED OVERLAP` proves origin only.
+`CURRENT SHARED INTEREST` requires separately current owner and Ashley
+evidence. `SHARED-CULTURE INTEREST` is Relationship state. This witness does
+not close C1.
 
 The result remains typed state under its natural owner. Learned Autonomy is not
 an omnibus learning store.
@@ -78,7 +88,21 @@ This phase does not:
 - depend on Computer Use;
 - require complete Operational Continuity before its cognitive types and
   authority boundaries can be implemented or qualified;
-- authorize Cognitive Graduation or Relational Graduation.
+- authorize Cognitive Graduation or Relational Graduation;
+- treat remaining similar to the owner as a
+  learning objective;
+- let owner correction of an owner-model
+  hypothesis rewrite Ashley Identity;
+- let Ashley divergence rewrite the owner
+  model;
+- crowd out independent interests with
+  shared-interest relevance;
+- optimize engagement around inherited or
+  shared interests;
+- retroactively label an existing Ashley
+  interest as inherited merely because Alex shares it
+  (`SIMILARITY != INHERITANCE PROVENANCE`). Inheritance requires an explicit
+  seed record, historical source, or owner designation with honest timing.
 
 ## 5. Predecessor and dependency contracts
 
@@ -402,7 +426,11 @@ Deferred decisions include:
 - UI or command surfaces;
 - any Computer Use integration;
 - any claim of consciousness, feeling, attachment, or human-equivalent
-  development.
+  development;
+- a global similarity score or "how much
+  Ashley is still Alex" metric;
+- an owner-to-Ashley synchronization
+  mechanism.
 
 These decisions require separate design, evidence, and authorization.
 

@@ -6,6 +6,13 @@
 
 **Engineering-milestone conversion:** 2026-08-23
 
+**Metacognition (accepted 2026-08-25):** Named cross-cutting policy profile
+consumed by the cognitive-track owners. Not a freeze-map owner, faculty,
+store, authority, model role, standalone phase, or §5 milestone. The
+2026-08-23 conversion still adds no architecture. Later metacognition
+recommendations stay in §11 and
+[Ashley Metacognition Architecture](Ashley_Metacognition_Architecture.md) §22.
+
 **Scope:** Architecture and roadmap. This document does not authorize source
 changes, installation, activation, deployment, promotion, provider use, or an
 external effect. The 2026-08-23 conversion does not add owners, kernels,
@@ -130,13 +137,14 @@ packets, and the owner-selected current task:
 | Fact | Live reading | Authority |
 |---|---|---|
 | `origin/master` (dated Git snapshot in this roadmap file) | `48bad019fe601d5c871a54dd9902879862c6e96a` | Git at last roadmap freeze of that row — **not** MF-M1 source identity |
-| MF-M1 `planningBaselineSha` / `productionBaselineSha` (this freeze) | `8eedad8bebbed2d8cd984849a269afe256a3d08a` | Planning snapshot; **not** guaranteed as final MF-M1 implementation SHA if OF-M1 repair lands |
-| Current working branch | `mf-m1-planning` documentation overlay on `8eedad8`. Not a routing change | Git |
+| MF-M1 `planningBaselineSha` / `sourceBaselineSha` / `productionBaselineSha` (current integration line) | `e36613bf805bb0a4f5e95ec11f0b8dd5dfb5857a` | Exact production-proven OF-M1 runtime baseline; MF-M1 runtime remains `PENDING` |
+| Historical MF documentation checkpoint | `7a7883753a7e6e5a002bf23d226645ce85730ee5` | Docs-only checkpoint based on the historical pre-repair `8eedad8` line |
+| Current working branch | `integration/post-of-docs` documentation integration on `e36613b`. Not a routing change | Git |
 | Owner-selected current delivery | Model Fabric, beginning with MF-M1 | owner context |
 | Sandbox V2 path | Direct unprivileged Bubblewrap. V1 broker must not return | Sandbox V2 roadmap |
-| Sandbox V2 M1–M7 | **`PRODUCTION ACCEPTED`** against exact candidate `48bad019fe601d5c871a54dd9902879862c6e96a`; M7 acceptance is limited to the named `patch_export` profile | Exact-candidate closure packet filename `SANDBOX_V2_PRODUCTION_CLOSURE_48bad019fe60.md` (not present in this `8eedad8` planning tree; SHA identity is preserved) plus milestone acceptance records |
+| Sandbox V2 M1–M7 | **`PRODUCTION ACCEPTED`** against exact candidate `48bad019fe601d5c871a54dd9902879862c6e96a`; M7 acceptance is limited to the named `patch_export` profile | Exact-candidate closure packet filename `SANDBOX_V2_PRODUCTION_CLOSURE_48bad019fe60.md` (not present in this `e36613b` integration tree; SHA identity is preserved) plus milestone acceptance records |
 | Sandbox authority after closure | Candidate inspection, experimentation, verification, authorship, bounded operation, and named patch export are available only through their separate grants. Live apply, Git effects, deployment, network, package acquisition/install, self-change, Computer Use, and unbounded autonomy remain excluded | exact-candidate closure + Sandbox V2 roadmap |
-| Model Fabric | Phase contract exists. **MF-M1** is the owner-selected next implementation milestone: seam around **live** `8eedad8` routes (NIM 20B Thought, Mistral→Qwen Expression). Zero intended routing/provider/model/reasoning change. §12.9 targets are post-MF-M1 | Model Fabric Architecture + owner context |
+| Model Fabric | Phase contract exists. **MF-M1** is the owner-selected next implementation milestone: seam around **live** `e36613b` routes (NIM 20B Thought, Mistral→Qwen Expression). Zero intended routing/provider/model/reasoning change. §12.9 targets are post-MF-M1 | Model Fabric Architecture + owner context |
 | Later named phases | Architecturally defined, deferred as current implementation | phase contracts |
 
 If a volatile fact cannot be established from permitted evidence: `UNKNOWN`.
@@ -174,7 +182,7 @@ new phases.
 | Class | Meaning | Existing items |
 |---|---|---|
 | Mechanism work | Substrates, workshops, dispatch, durable work, procedures, later computer interaction | Sandbox remaining M-series; Model Fabric; Operational Continuity; Procedural Skill Graduation; Computer Use (deferred as current work) |
-| Cognitive maturation | Existing cognitive / evidence / attention owners becoming qualified | Memory / Evidence maturation; Context Budget; Learned Autonomy; Cognitive Graduation; Relational Graduation |
+| Cognitive maturation | Existing cognitive / evidence / attention owners becoming qualified | Memory / Evidence maturation; Context Budget; Learned Autonomy; Cognitive Graduation; Relational Graduation. Metacognition is a named policy profile consumed by those owners. It is not a separate class, phase, freeze-map owner, or §5 milestone. |
 | Governance specification | Lifecycle and admission rules composed from existing owners | Self-change lifecycle **specification**; Evaluation / Qualification remains the promotion plane |
 | Deferred capability | Named later, not current engineering | Typed Event Spine design; Computer Use implementation; voice; broad external tools; self-modification **execution**; longitudinal companion evaluation campaign |
 
@@ -296,7 +304,7 @@ Its first **code** milestone is **MF-M1**, not historical F1-obs.
 | ID | Milestone | Class | Depends on | Smallest closing evidence | Explicitly not |
 |---|---|---|---|---|---|
 | G0 | Establish M3 `PRODUCTION ACCEPTED` from permitted evidence | Mechanism | M3 architecture + exact-candidate production evidence | **Closed:** M3 production-acceptance record and later M-series closure bind the predecessor chain | Inferring M3 production acceptance from source presence |
-| G1 | Close M4 production acceptance | Mechanism | G0 | **Closed:** exact-candidate packet `M4_PRODUCTION_ACCEPTANCE_553553b0d0ee.md` (filename identity; not in this `8eedad8` planning tree). In-tree generic [`M4_PRODUCTION_ACCEPTANCE.md`](../handoffs/M4_PRODUCTION_ACCEPTANCE.md) remains | Treating local or physical evidence alone as acceptance |
+| G1 | Close M4 production acceptance | Mechanism | G0 | **Closed:** exact-candidate packet `M4_PRODUCTION_ACCEPTANCE_553553b0d0ee.md` (filename identity; not in this `e36613b` integration tree). In-tree generic [`M4_PRODUCTION_ACCEPTANCE.md`](../handoffs/M4_PRODUCTION_ACCEPTANCE.md) remains | Treating local or physical evidence alone as acceptance |
 | G2 | Promote M4 capability only after G1 | Mechanism | G1 | **Closed:** exact-candidate closure records `candidate_verification` active and witnessed | Source presence or local tests as promotion |
 
 These rows preserve the gate order. They are no longer pending work.
@@ -326,15 +334,21 @@ implementation milestone. See §5.5.
 
 This track is not unlocked by Sandbox or Model Fabric completion. It may
 proceed in parallel with mechanism work except where a classified dependency
-says otherwise.
+says otherwise. It is not a linear continuation of
+`Model Fabric → Operational Continuity`.
+
+Metacognition is not a milestone in this
+table. It is a named policy profile distributed across these owners. The first
+visible metacognitive proof belongs to C1. Later recommendations are in §11
+and Metacognition architecture §22, not in §5.
 
 | ID | Milestone | Existing item | Depends on | Smallest closing evidence | Explicitly not |
 |---|---|---|---|---|---|
-| C1 | Memory / Evidence maturation | Memory / Evidence | Current evidence architecture | Source vs assertion, contradiction, forgetting, provenance, and live/shadow are contract-complete for later consumers | World truth; a Knowledge layer; docs-as-memory |
-| C2 | Context Budget first bounded projection | Context Budget | `HARD_DEPENDENCY` on C1. `CROSS_CUTTING_INTERFACE` on Model Fabric `ContextProjection` (minimal envelope, not complete Fabric) | Same persistent state yields inspectable projections under multiple budgets without changing memory or semantic truth | Recall authority; forgetting; Mind State mutation |
-| C3 | Learned Autonomy first qualified influence | Learned Autonomy | `HARD_DEPENDENCY` on C1 | A learned influence changes a later choice for a traceable reason, stays inside authority, survives contradiction, and can be demoted | Obedience optimization; Identity mutation; Computer Use |
-| C4 | Cognitive Graduation | Cognitive Graduation | `HARD_DEPENDENCY` on C1 and C3. Context Budget and Operational Continuity are `EVIDENCE_DEPENDENCY` | Long-horizon evidence of grounded view revision, continuity, initiative diversity, refusal, and rollback without fabricated experience | Personhood; external authority; silent Identity change |
-| C5 | Relational Graduation | Relational Graduation | `HARD_DEPENDENCY` on relationship-state foundation and C1. C3 is `CROSS_CUTTING_INTERFACE`, not a predecessor. Sibling of C4 | Long-horizon evidence of continuity, disagreement, withdrawal, repair, privacy, non-manipulation, and no authority widening | Engagement maximization; inferred consent; cognitive qualification |
+| C1 | Memory / Evidence maturation | Memory / Evidence | Current evidence architecture | Source vs assertion, contradiction, forgetting, provenance, and live/shadow are contract-complete for later consumers. Owner-correction witness that historical interpretation `X` is inspectable; correction ends current validity and every current or downstream influence derived from the corrected scope, including I1 adaptation, unless a narrower valid replacement is explicitly adjudicated; history and source evidence remain; retrieval cannot silently revive `X`; the correct calibration consequence is recorded; Ashley Identity is not mutated. C1 may state compatibility requirements for later C3/C5 consumers; those consumers do not close C1 | World truth; a Knowledge layer; docs-as-memory; a Metacognition store; rewriting Ashley Identity from an owner correction; closing C1 on shared-interest or shared-culture projection behavior |
+| C2 | Context Budget first bounded projection | Context Budget | `HARD_DEPENDENCY` on C1. `CROSS_CUTTING_INTERFACE` on Model Fabric `ContextProjection` (minimal envelope, not complete Fabric) | Same persistent state yields inspectable projections under multiple budgets without changing memory or semantic truth. Eligible current hypotheses are projected under privacy ceilings; remote routes receive only the approved minimum; local persistence is not treated as local inference | Recall authority; forgetting; Mind State mutation; sending ineligible psychological hypotheses off-box |
+| C3 | Learned Autonomy first qualified influence | Learned Autonomy | `HARD_DEPENDENCY` on C1 | A learned influence changes a later choice for a traceable reason, stays inside authority, survives contradiction, and can be demoted. Inherited versus current interests remain distinguishable; `SIMILARITY != INHERITANCE PROVENANCE`; divergence is not engagement failure; owner correction does not rewrite Ashley Identity | Obedience optimization; Identity mutation; Computer Use; remaining similar to the owner as a goal; retroactive inherited labels from mere overlap |
+| C4 | Cognitive Graduation | Cognitive Graduation | `HARD_DEPENDENCY` on C1 and C3. Context Budget and Operational Continuity are `EVIDENCE_DEPENDENCY` | Long-horizon evidence of grounded view revision, continuity, initiative diversity, refusal, and rollback without fabricated experience. Selected prediction/outcome calibration owned by Thought, Memory / Evidence, Reflection, and Evaluation | Personhood; external authority; silent Identity change; a Metacognition-owned calibration ledger; one global confidence score |
+| C5 | Relational Graduation | Relational Graduation | `HARD_DEPENDENCY` on relationship-state foundation and C1. C3 is `CROSS_CUTTING_INTERFACE`, not a predecessor. Sibling of C4 | Long-horizon evidence of continuity, disagreement, withdrawal, repair, privacy, non-manipulation, and no authority widening. Shared-culture recomputation from separately current owner and Ashley states; interaction-contract drift and misunderstanding repair; historical shared culture remains historically true after current overlap ends | Engagement maximization; inferred consent; cognitive qualification; inherited similarity as interaction obligation |
 
 ### 5.4 Governance specification
 
@@ -480,6 +494,15 @@ contradiction, revision, decay, rollback, and hard authority ceilings. Owner
 preference is evidence about the owner, not a command and not Ashley's own
 preference. Trust changes evidence weight only. It never expands authority.
 
+Learned Autonomy also carries inherited,
+independent, and shared-interest distinctions. `INHERITED OVERLAP` proves
+origin only. Current shared interest requires separately current owner and
+Ashley evidence. Shared-culture interest is Relationship state, not a Learned
+Autonomy rewrite of Identity. Ordinary inherited interests may diverge without
+owner approval and without engagement optimization. Owner correction of an
+owner-model hypothesis must not rewrite Ashley Identity.
+`SIMILARITY != INHERITANCE PROVENANCE`.
+
 ### Context Budget
 
 Context Budget owns bounded attention over persistent state. It determines what
@@ -488,7 +511,9 @@ a specific semantic purpose and budget.
 
 It does not own memory, forgetting, truth, Identity, Mind State, or model
 routing. `CONTEXT EVICTION != FORGETTING`. A retrieval or compression mechanism
-must never mutate the source state it projects.
+must never mutate the source state it projects. Eligible current metacognitive hypotheses, when present, are
+projected under privacy ceilings. Local persistence of a hypothesis is not
+permission to send it to a remote model.
 
 ### Cognitive Graduation
 
@@ -502,6 +527,12 @@ It is not a final catch-all and cannot claim that Ashley is conscious, feels,
 cares, or is a person. It must prove that present choices depend truthfully on
 real prior state and evidence rather than generated narrative.
 
+Selected prediction/outcome calibration for
+consequential judgments is consumed here. Thought, Memory / Evidence,
+Reflection, and Evaluation retain ownership. The Metacognition profile does
+not own a calibration ledger. Current Reflection runtime is narrower than this
+future calibration architecture.
+
 ### Relational Graduation
 
 Relational Graduation is separate because relationship commitments, tensions,
@@ -514,6 +545,14 @@ infer consent, manufacture loyalty, or punish distance. Relational evidence
 cannot substitute for Cognitive Graduation evidence, and the reverse is also
 true. Learned Autonomy is a boundary interface, not a hard predecessor.
 
+Shared-culture interest, interaction-contract
+drift, misunderstanding, and repair are Relational Graduation consumption of
+metacognition policy. Historical shared culture remains historically true
+after current overlap ends. An explicit owner standing instruction may become
+active immediately through the proper Relationship / Memory path; repetition
+is not required. Inherited similarity creates no interaction obligation. C5
+closes shared-culture recomputation; that proof does not close C1.
+
 ## 7. Cross-cutting planes
 
 ### Evaluation / Qualification
@@ -523,7 +562,9 @@ defines accepted claims, evidence bindings, deterministic invariants,
 adversarial scenarios, judges, qualification results, and release decisions.
 Deterministic gates outrank model judges. Test success does not imply
 `RELEASE_QUALIFIED`. Qualification binds an exact subject, definition,
-environment, source, evidence set, and decision.
+environment, source, evidence set, and decision. Metacognition policy adds stale-model, false-trait, calibration,
+sovereignty, privacy, and dependency-resistance witnesses under the owners
+above. It does not create a separate evaluation domain or freeze-map owner.
 
 ### Observability
 
@@ -540,7 +581,11 @@ separates source evidence, assertions, interpretations, materialization,
 projections, forgetting, and derived indexes. Learned Autonomy has a
 `HARD_DEPENDENCY` on that maturation. Context Budget and both graduation
 phases consume it. No graph or vector substrate may become Recall or truth
-authority.
+authority. The first visible metacognitive
+proof — temporal owner models, correction classes, influence eligibility, and
+non-revival after owner correction — belongs here. The Metacognition profile
+is a consumer, not a second store. Shared-interest and shared-culture
+recompute do not close C1.
 
 ### Security / Authority
 
@@ -622,7 +667,15 @@ required outcome is not synthetic personality texture. It is truthful
 dependence of Ashley's present on her real past; multiple grounded sources of
 initiative; capacity for disagreement, refusal, silence, and withdrawal;
 evidence-bound development of interests and views; non-manipulative relational
-continuity; and honest limits about unseen experience and inner status.
+continuity; honest limits about unseen experience and inner status;
+shared cognitive ancestry that is origin
+rather than identity authority; and the capacity to diverge without that
+divergence being treated as a defect.
+
+Ashley may become a strong cognitive
+exoskeleton. Metacognitive assistance must preserve or increase the owner's
+capacity for independent judgment. Engineered dependence is failure. Helpful
+reliance is not engineered dependence.
 
 Even successful completion would not prove consciousness, feeling, care,
 personhood, or moral status. Architecture can create and qualify continuity,
@@ -687,6 +740,9 @@ implementation authorization and they are not engineering milestones in §5.
 - **Existing coverage:** Memory / Evidence and Cognitive Graduation now own the
   semantic boundary. Learned Autonomy may consume qualified revisions. A
   dedicated belief store or graph has not been selected and may not be needed.
+  metacognition policy adds influence
+  classes, correction classes, and selected calibration without creating a
+  Metacognition store.
 - **Prerequisites:** assertion/evidence separation, contradiction handling,
   provenance, forgetting, Context Budget, Reflection boundaries, and
   longitudinal evaluation.
@@ -697,6 +753,34 @@ implementation authorization and they are not engineering milestones in §5.
   developing coherent, revisable views of her own.
 - **Risk if premature:** a premature belief graph could freeze model output as
   truth, create identity drift, or duplicate Recall authority.
+
+### Metacognition policy (distributed; not a phase)
+
+- **Problem:** longitudinal examination of interpretations, uncertainty,
+  calibration, corrections, inherited cognitive lineage, divergence, and
+  shared patterns is unowned as a named policy, even though no new faculty is
+  justified.
+- **Existing coverage:** Vision (shared ancestry / divergence);
+  [Metacognition Architecture](Ashley_Metacognition_Architecture.md)
+  (accepted policy profile); Memory / Evidence (first visible proof); Context
+  Budget; Learned Autonomy; Cognitive Graduation; Relational Graduation;
+  Evaluation; Model Fabric receipts as later interfaces.
+- **Prerequisites:** C1 for the first owner-correction witness. Later work
+  listed below does not precede C1 and does not precede MF-M1 runtime.
+- **Classification:** named cross-cutting policy profile under existing
+  owners. Not a freeze-map owner. Not a standalone phase. Not MF-M1 work.
+- **Urgency:** `HIGH-VALUE NEXT RESEARCH` for remaining later paths; first
+  visible proof is C1 when that cognitive work is selected.
+- **Later named work (not §5 milestones):** owner-invoked deep reflection;
+  selected prediction/outcome calibration; shared-interest and
+  lineage-divergence monitoring; dyadic metacognition; Fabric-backed
+  independent review; timeline projection; later temporal graph/timeline
+  projection; deferred voice and cross-modal presentation. These remain in
+  this §11 item and in Metacognition architecture §22.
+- **Risk if omitted:** stale owner models, silent revival of corrected
+  interpretations, and owner-model/Identity contamination.
+- **Risk if premature:** a Metacognition store, freeze-map organ, periodic
+  psych reports, visualization-as-authority, or MF-M1 scope expansion.
 
 ### Multimodal presence, voice, and embodiment
 
@@ -761,6 +845,9 @@ topology:
   engagement or attachment optimization.
 - Whether a Self-Change Governance design spike discovers an unowned lifecycle
   that justifies a distinct future phase.
+- Exact SQL, numeric “material contradiction” / “long gap” thresholds, I1
+  operational bounds, and approved deep-reflection remote routes for
+  metacognition policy. These do not reopen Q0–Q16 or add a freeze-map owner.
 
 ## 13. Canonical entry path
 

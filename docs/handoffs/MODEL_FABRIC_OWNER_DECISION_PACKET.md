@@ -15,14 +15,22 @@ SOURCE SNAPSHOT != PROMOTED CANDIDATE != RUNNING PRODUCTION
 OWNER-SELECTED TARGET != CURRENT ROUTING != QUALIFIED != AUTHORIZED ACTIVATION
 ```
 
-MF-M1 `planningBaselineSha` (this freeze):
+Historical MF-M1 `planningBaselineSha` (pre-OF repair freeze):
 `8eedad8bebbed2d8cd984849a269afe256a3d08a`.
+
+Canonical runtime integration baseline for the current MF-M1 starting line:
+`e36613bf805bb0a4f5e95ec11f0b8dd5dfb5857a`.
+
+MF documentation checkpoint:
+`7a7883753a7e6e5a002bf23d226645ce85730ee5` (docs-only, based on the
+historical `8eedad8` line).
 
 Owner **scope** for MF-M1 is `CLOSED`. Runtime implementation is `PENDING`.
 This packet does **not** mean MF-M1 is implemented or production-accepted.
 
-Operational Fulfillment M1 has a confirmed duplicate-delivery defect.
-`8eedad8` is **not** guaranteed as the final MF-M1 implementation SHA.
+Operational Fulfillment M1 is production-proven at exact
+`e36613bf805bb0a4f5e95ec11f0b8dd5dfb5857a`. The original `8eedad8`
+planning identity is historical for this current integration line.
 
 `48bad019…` is Sandbox M-series closure evidence only. It is **not** the MF-M1
 source baseline. `04beaf1…` is historical routing-audit provenance on the line
@@ -58,7 +66,7 @@ Resume: [`MODEL_FABRIC_MF_M1_IMPLEMENTATION_CHECKPOINT.md`](MODEL_FABRIC_MF_M1_I
 | 22 | **Expression target** is Qwen 3.6 27B primary (reasoning on / provider `default`, not `none`) with Mistral Medium fallback. **Live MF-M1 remains Mistral primary → Qwen fallback** | CLOSED |
 | 23 | **Thought target** is Groq GPT-OSS 120B with NIM GPT-OSS 120B same-model transport failover; desired reasoning `high` (`max_supported` only after interactive latency qualifies). **Live MF-M1 remains NIM 20B `low` + Groq 20B failover** | CLOSED |
 | 24 | Normalized `ReasoningPolicy` (`disabled` / `economical` / `standard` / `high` / `max_supported`) is first-class route policy. Capability profiles do not decide desired reasoning | CLOSED |
-| 25 | MF-M1 **planning** baseline is exact SHA `8eedad8…`, not `48bad019…`. A later accepted OF repair SHA, if named, supersedes it for **implementation**. Owner scope remains closed | CLOSED |
+| 25 | Historical MF-M1 **planning** baseline was exact SHA `8eedad8…`, not `48bad019…`. The accepted post-OF integration baseline is `e36613b…`; owner scope remains closed | CLOSED |
 
 Do not reopen closed rows as if they were still owner questions.
 
@@ -74,7 +82,7 @@ Do not reopen closed rows as if they were still owner questions.
 | F | Exact vendor strings / backends for §12.9 occupants | Policy data; not architecture |
 | G | Ordered curiosity secondary chain (MiniMax vs Groq 120B) | Owner forbade inventing an order until qualification/policy defines one |
 | H | Owner **activation** of any §12.9 target after qualification | Separate from selection |
-| I | Whether a later OF forensic repair SHA supersedes `8eedad8` as MF-M1 freeze | Contingent; revalidate if production repair lands |
+| I | Whether a later OF forensic repair SHA supersedes `8eedad8` as MF-M1 freeze | Resolved for this integration line: `e36613b…` supersedes `8eedad8`; revalidate only if a later accepted candidate is named |
 
 ## MF-M1 contract (exact; not implemented here)
 

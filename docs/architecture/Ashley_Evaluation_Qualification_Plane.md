@@ -367,7 +367,9 @@ Model qualification should be route-specific. A provider or benchmark score is n
 The planned **live** model bindings do not alter this rule. Current Thought,
 Expression, and utility facts live in
 [`docs/Routing_Status.md`](../Routing_Status.md) at
-`sourceBaselineSha` `8eedad8bebbed2d8cd984849a269afe256a3d08a`.
+`sourceBaselineSha` `e36613bf805bb0a4f5e95ec11f0b8dd5dfb5857a`.
+The MF documentation checkpoint `7a7883753a7e6e5a002bf23d226645ce85730ee5`
+and pre-repair planning baseline `8eedad8` remain historical identities.
 Owner-selected **future** occupants (Architecture §12.9) are not current
 routes. Historical 2026-08-13 Lightning / Groq 120B **as live Thought** is
 incorrect for this baseline; Groq 120B is a **target** for post-MF-M1 Thought,
@@ -706,11 +708,11 @@ universal scoring method.
 | Procedural Skill Graduation | trace provenance, interface and environment variation, invocation denial, effects, revocation, imported-content quarantine |
 | External Effect and Authority | credential exclusion, representation and commitment authority, privacy, idempotency, witness and reconciliation |
 | Computer Use | observation/mutation separation, session non-authority, deterministic-first mechanism selection, handoff and effect ambiguity |
-| Learned Autonomy | provenance, false-positive initiative, reversibility, non-authority, preference/command separation, long shadow periods |
-| Context Budget | source coverage, privacy ceilings, token/byte/media bounds, compression attribution, stale-summary and forgetting invariants |
-| Memory Evidence maturation | assertion provenance, temporal validity, contradiction, revision, unsupported state, forgetting propagation |
-| Cognitive Graduation | long-horizon goals, interests, opinions, identity continuity, initiative diversity, revision and rollback |
-| Relational Graduation | consent, reciprocity, bilateral evidence, non-manipulation, withdrawal, silence, repair and independent rollback |
+| Learned Autonomy | provenance, false-positive initiative, reversibility, non-authority, preference/command separation, long shadow periods. *(C3-closing:)* inherited vs current interest, `SIMILARITY != INHERITANCE PROVENANCE`, divergence without engagement optimization |
+| Context Budget | source coverage, privacy ceilings, token/byte/media bounds, compression attribution, stale-summary and forgetting invariants. Eligible-hypothesis projection, local-persistence-versus-local-inference |
+| Memory Evidence maturation | assertion provenance, temporal validity, contradiction, revision, unsupported state, forgetting propagation. *(C1-closing:)* owner-model correction classes, influence-class eligibility, non-revival after owner correction, calibration consequence, no Ashley-Identity rewrite. Inherited/current-interest separation and shared-culture recompute do not close this domain |
+| Cognitive Graduation | long-horizon goals, interests, opinions, identity continuity, initiative diversity, revision and rollback. Selected prediction/outcome calibration, sovereignty and dependency-resistance |
+| Relational Graduation | consent, reciprocity, bilateral evidence, non-manipulation, withdrawal, silence, repair and independent rollback. *(C5-closing:)* shared-culture recomputation, interaction-contract drift |
 | Observability | redaction, bounded cardinality, cross-process correlation, no behavior change, telemetry/evidence separation |
 
 Authorization invariants remain deterministic. Behavioral and identity claims

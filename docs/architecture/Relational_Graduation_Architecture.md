@@ -61,7 +61,13 @@ The phase adds governed maturation of:
 - scheduled relational intentions that remain separately authorized;
 - tension, rupture, repair, and unresolved-status records;
 - withdrawal, silence, and boundary continuity;
-- companion behavior grounded in shared history over long horizons.
+- companion behavior grounded in shared history over long horizons;
+- *(C5-closing:)* shared-culture interest as a
+  projection over separately owned owner and Ashley state, recomputed from
+  separately current states after owner correction;
+- interaction-contract types: explicit
+  owner standing instruction, Ashley standing boundary, mutual contract,
+  implicit interaction hypothesis.
 
 ## 4. Explicit non-capabilities
 
@@ -76,7 +82,16 @@ This phase does not:
 - open accounts, spend money, publish, contact others, or use Computer Use;
 - override refusal, withdrawal, privacy, or silence;
 - make Cognitive Graduation pass;
-- claim human emotion, consciousness, or a guaranteed reciprocal bond.
+- claim human emotion, consciousness, or a guaranteed reciprocal bond;
+- treat inherited similarity or shared
+  interest as an interaction obligation;
+- require repetition before an explicit
+  owner standing instruction becomes active through the proper Relationship /
+  Memory path;
+- let current overlap ending erase
+  historically true shared culture;
+- silently promote an implicit interaction
+  hypothesis into a strong contract.
 
 ## 5. Predecessor and dependency contracts
 
@@ -436,7 +451,11 @@ Deferred decisions include:
 - external representation;
 - autonomous high-impact commitments;
 - claims about care, attachment, consciousness, or human-equivalent
-  reciprocity.
+  reciprocity;
+- first-slice visualization of the
+  relationship as a mind-graph;
+- dyadic metacognition as a product cadence
+  of psychological reports.
 
 Each requires separate architecture, evidence, ethical review, and
 authorization.

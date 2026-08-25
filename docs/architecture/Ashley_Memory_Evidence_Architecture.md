@@ -7,6 +7,11 @@ implementation.
 
 **Canonicalized:** 2026-08-17
 
+**Metacognition (accepted 2026-08-25):** Memory / Evidence policy for
+owner-model correction, influence eligibility, and the C1 witness. Accepted
+in this document's domain. It does not amend the Architecture Freeze owner
+map.
+
 **Scope:** Ashley's persistent memory architecture: how evidence, derived
 interpretation, retrieval mechanics, and recollection relate; the invariants
 that govern them. This is an Ashley architecture document. It results partly
@@ -26,6 +31,7 @@ It does not reorder the roadmap, create a new phase, or authorize code.
 | `FUTURE DESIGN` | Accepted direction, not yet implemented. |
 | `SPIKE / NON-DECISION` | Unselected; experiment required. |
 | `REJECTED` | Explicitly not accepted. |
+| `ACCEPTED MEMORY/EVIDENCE POLICY` | Accepted in this document's domain. Not a Freeze-map amendment. |
 
 ---
 
@@ -121,6 +127,17 @@ The accepted memory invariants. These are frozen.
 | `CANONICAL EVIDENCE IS LOSSLESS UNTIL GOVERNED DELETION / REDACTION` | `ACCEPT` (replaces "immutable forever") |
 | `DERIVED OBJECTS RETAIN DERIVATION IDENTITY` | `ACCEPT` |
 
+The table above is frozen. The following invariants are accepted Memory /
+Evidence policy. They do not amend the Architecture Freeze owner map.
+
+| Accepted policy invariant | Status |
+|---|---|
+| `OWNER IDENTITY != ASHLEY IDENTITY != OWNER MODEL != INHERITED SEED` | `ACCEPTED MEMORY/EVIDENCE POLICY` |
+| `EVIDENTIAL STRENGTH != INFLUENCE CLASS` | `ACCEPTED MEMORY/EVIDENCE POLICY` |
+| `OWNER CORRECTION MUST BE REPRESENTABLE WITHOUT DELETING HISTORY` | `ACCEPTED MEMORY/EVIDENCE POLICY` |
+| `SIMILARITY != INHERITANCE PROVENANCE` | `ACCEPTED MEMORY/EVIDENCE POLICY` |
+| Correction ends current validity and every current or downstream influence derived from the corrected scope, including I1 adaptation, unless a narrower valid replacement is explicitly adjudicated. History and source evidence remain. | `ACCEPTED MEMORY/EVIDENCE POLICY` |
+
 Role relationships, not a single greater-than chain: for provenance questions,
 source evidence dominates. For current world-state truth, recent direct
 verified observations may dominate old conversational evidence. Operational
@@ -212,6 +229,18 @@ Assertions must remain provenance-bearing (Section 4), temporally bounded
 (Section 5), epistemically labeled (Section 6), and revisable (Section 11).
 An assertion is not Ashley's truth merely because it exists. An assertion that
 loses all supporting evidence is marked unsupported.
+
+Owner-model hypotheses, Ashley Identity,
+inherited seeds, and shared-culture projections are different objects.
+Beliefs about the owner are temporally bounded owner-model assertions. They
+are not owner Identity, not Ashley Identity, and not an inherited seed.
+Owner correction of an owner-model assertion must not rewrite an inherited
+Ashley seed. `SIMILARITY != INHERITANCE PROVENANCE`: an existing Ashley
+interest must not be retroactively labeled inherited merely because Alex
+shares it. Inheritance requires an explicit seed record, historical source,
+or owner designation with honest timing. A live episode summary that
+essentializes the owner is a current Mika leak (`CURRENT IMPLEMENTATION`
+risk; `FUTURE DESIGN` to bind or expire).
 
 ### 3.3 Retrieval Projections
 
@@ -380,6 +409,17 @@ the assertion record so that Ashley can remember having believed something
 (Section 11). Status labels never elevate an assertion into an authorizing
 object (Section 14).
 
+Evidential strength is not influence class.
+Influence eligibility (`I0`–`I4`) is recorded separately from confidence. I0
+has no direct behavioral influence; Thought may evaluate I0 evidence when
+forming a new I1/I2 candidate. There is no unconfirmed I3: an interpretation
+approaching I3 remains I2 until confirmation or an explicit, current owner
+statement. Repeated behavior, calibration history, or model confidence cannot
+by themselves authorize `I3`. `I4` (diagnosis, consent, owner Identity,
+relationship obligation, external-action authority, self-modification
+authority) is forbidden. See
+[Ashley Metacognition Architecture](Ashley_Metacognition_Architecture.md).
+
 ---
 
 ## 7. Retrieval Architecture
@@ -502,6 +542,20 @@ Cognitive Graduation).
   overwrite.
 - Revisions are themselves derived objects: they carry derivation identity,
   evidence refs, and timestamps.
+- Owner correction of an owner-model interpretation uses one of four classes
+  (`FUTURE DESIGN` mechanism; accepted Memory / Evidence policy):
+  `TEMPORAL_SUPERSESSION`, `INTERPRETATION_INVALIDATION`, `SOURCE_DISPUTE`,
+  `SCOPE_REFINEMENT`. Correction ends current validity and every current or
+  downstream influence derived from the corrected scope, including I1
+  adaptation, unless a narrower valid replacement is explicitly adjudicated.
+  History and source evidence remain inspectable. Correction class and
+  calibration consequence remain distinct. If classification is ambiguous,
+  stop that current and downstream influence first.
+- Future retrieval MUST see the correction and MUST NOT silently revive the
+  corrected interpretation as current.
+- Independently verifiable external facts are not rewritten by owner
+  self-description. Owner self-description outranks a model-derived trait
+  label about the owner.
 
 ---
 
@@ -610,7 +664,7 @@ learning attributable and revisable.
 | Worker-result provenance / WorkerRunJournal | Model Fabric, only if naturally required | `FUTURE DESIGN` |
 | Canonical-vs-derived state law; projector checkpoints; derived-state recovery; degraded-index behavior; freshness/staleness; writer ownership; rebuild semantics | Operational Continuity | `FUTURE DESIGN` |
 | Provenance and evidence laws for experience -> procedure | Procedural Skill Graduation | `FUTURE DESIGN` |
-| Temporal Memory Assertions; evidence references; epistemic status; contradiction; supersession; consolidation and adjudication; confidence; revision; dependent forgetting | Memory Evidence maturation | `FUTURE DESIGN` |
+| Temporal Memory Assertions; evidence references; epistemic status; contradiction; supersession; consolidation and adjudication; confidence; revision; dependent forgetting. Owner-model temporal validity; correction classes; influence eligibility; first metacognitive owner-correction witness. Shared-interest and shared-culture recompute are later-consumer compatibility, not C1 closure. | Memory Evidence maturation | `FUTURE DESIGN` |
 | Provenance-bearing learned interest, preference, opinion, salience, concern, and goal assertions | Learned Autonomy, consuming Memory Evidence maturation | `FUTURE DESIGN` |
 | FTS5; vector mechanism spike; hybrid retrieval; RRF or fusion benchmark; contextual adjacency; graduated recall; retrieval budgeting | Context Budget, consuming Memory Evidence contracts and Model Fabric ContextProjection | `SPIKE` / `FUTURE DESIGN` |
 | Working beliefs and theories; cognitive model of the human; evidence-bound lived-experience continuity; constitutionally permitted identity development | Cognitive Graduation, consuming Memory Evidence maturation, Learned Autonomy, and Context Budget | `FUTURE DESIGN` |
@@ -642,7 +696,12 @@ experiments as settled architecture:
 - exact FTS5 configuration;
 - recall budget numbers;
 - adjacency window sizes;
-- graduated recall policy parameters.
+- graduated recall policy parameters;
+- exact SQL for influence classes `I0`–`I4` and the four owner-correction
+  classes;
+- whether live episode summaries become temporally labeled assertions or
+  expire as consolidation objects (the leak must be bound; the mechanism is
+  not chosen here).
 
 `SPIKE / NON-DECISION` until measured evidence on Ashley's own corpus and host
 decides otherwise.
@@ -676,3 +735,19 @@ requirements, not aspirations:
 13. Failed or stale projections must not present themselves as current.
 14. An adjudicated Memory Assertion is durable Ashley-owned cognitive state:
     revisable and provenance-bearing, not disposable like a projection.
+15. *(C1-closing.)* An owner correction of
+    interpretation `X` must end current validity and every current or
+    downstream influence derived from the corrected scope, including I1
+    adaptation, unless a narrower valid replacement is explicitly
+    adjudicated; keep historical evidence inspectable; prevent silent revival
+    in later retrieval; and record the correct calibration consequence
+    without rewriting Ashley Identity or independently verifiable external
+    facts.
+16. *(Compatibility for C3; does not close C1.)*
+    Inherited versus current-interest separation, including
+    `SIMILARITY != INHERITANCE PROVENANCE`. C3 closes this witness. C1 may
+    name it as a compatibility requirement for later consumers.
+17. *(Compatibility for C5; does not close C1.)*
+    Shared-culture projections that depended on `X` must recompute from
+    separately current owner and Ashley state. C5 closes this witness. C1 may
+    name it as a compatibility requirement for later consumers.

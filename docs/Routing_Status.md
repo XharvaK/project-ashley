@@ -17,10 +17,10 @@ Do not infer an audit SHA from git history alone.
 
 | | |
 |---|---|
-| Document reviewed at repository revision | `8eedad8bebbed2d8cd984849a269afe256a3d08a` |
-| Route-table audit baseline | `8eedad8bebbed2d8cd984849a269afe256a3d08a` |
+| Document reviewed at repository revision | `e36613bf805bb0a4f5e95ec11f0b8dd5dfb5857a` |
+| Route-table audit baseline | `e36613bf805bb0a4f5e95ec11f0b8dd5dfb5857a` |
 | Audit method | Read-only comparison of the Wave 1 table below to `config/models.json` `purpose_routes` / `routes`, `PURPOSE_TO_ROUTE` in [`router.ts`](../apps/agent-service/src/core/model-routing/router.ts), and `ROUTE_BINDINGS` in [`registry.ts`](../apps/agent-service/src/core/model-routing/registry.ts) |
-| Last route-table audit | 2026-08-25 MF-M1 source-baseline rebase |
+| Last route-table audit | 2026-08-25 post-OF baseline confirmation; route-binding inputs unchanged from the prior `8eedad8` audit |
 | Stale when | those source files change, or `git rev-parse HEAD` differs and a new audit has not been performed |
 
 Current route facts are split across:
@@ -45,6 +45,11 @@ Model IDs, quota values, and enabled states are `SOURCE-DERIVED CURRENT FACT`,
 not architectural law. Model Fabric owns the future semantic profile/dispatch
 contract. Refresh this file by re-auditing source; do not copy HEAD into the
 tables without that audit.
+
+The post-OF source comparison found no changes from `8eedad8` to
+`e36613b` in `config/models.json`, the model-routing source, the provider
+adapters, or the audited `completeChat` caller paths. The prior route-table
+content therefore remains valid at the `e36613b` integration baseline.
 
 ## Implemented routing (Wave 1)
 

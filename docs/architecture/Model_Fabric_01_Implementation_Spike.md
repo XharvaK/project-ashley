@@ -7,7 +7,7 @@
 - **Default runtime state:** off
 - **Activation:** not authorized
 - **Sandbox impact:** none permitted
-- **Target-policy note (2026-08-25):** owner-selected **post-MF-M1** Thought-observation occupant is Nemotron 3 Ultra (Architecture §12.9), not this file's Lightning F1-obs candidate. This spike remains deferred historical F1-obs. It does not describe live `8eedad8` dispatch.
+- **Target-policy note (2026-08-25):** owner-selected **post-MF-M1** Thought-observation occupant is Nemotron 3 Ultra (Architecture §12.9), not this file's Lightning F1-obs candidate. This spike remains deferred historical F1-obs. It does not describe live `e36613b` dispatch.
 
 ## First implementation spike
 

@@ -76,7 +76,12 @@ Context Budget does not:
 - alter evidence because a token limit was reached;
 - give Model Fabric access to databases or retrieval callbacks;
 - grant models, workers, or specialists semantic or effect authority;
-- depend on Learned Autonomy or Computer Use.
+- depend on Learned Autonomy or Computer Use;
+- treat local persistence of a hypothesis as
+  permission to include it in a remote projection;
+- own semantic salience or metacognitive
+  trigger policy (Attention admits resources; Thought owns relevance among
+  eligible inputs).
 
 ## 5. Predecessor and dependency contracts
 
@@ -181,6 +186,15 @@ after dispatch.
 Eligibility filtering MUST occur before ranking, summarization, and model
 dispatch. A lower-trust model or specialist receives only the minimum
 projection authorized for that exact request.
+
+`LOCAL PERSISTENCE != LOCAL INFERENCE`.
+Durable psychological or owner-pattern hypotheses are local by default.
+Sending them, or the evidence behind them, to a remote model is data egress
+even when the output will be stored locally. Ineligible, `I4`, or
+privacy-blocked material MUST NOT enter remote projections. `I2` or `I3`
+material requires explicit, scope-bound egress approval and an approved
+remote route. A candidate lacking `I3` approval remains `I2`. Every
+permitted projection remains minimized to its approved purpose.
 
 Receipts SHOULD retain stable references and hashes rather than duplicate
 private content. Logs MUST NOT contain secrets or unrestricted prompt bodies.
@@ -405,6 +419,8 @@ Deferred decisions include:
 - multimodal projection formats;
 - provider-specific prompt caching;
 - distributed context stores;
-- any mechanism that treats context as canonical memory.
+- any mechanism that treats context as canonical memory;
+- owner-invoked deep-reflection projection
+  envelopes (later; explicit owner request; not first Context Budget slice).
 
 Each requires separate measurement and authorization.

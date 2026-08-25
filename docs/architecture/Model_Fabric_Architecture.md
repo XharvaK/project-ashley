@@ -19,20 +19,25 @@ semantic evidence.
 
 | Identity | SHA | Meaning |
 |---|---|---|
-| `planningBaselineSha` | `8eedad8bebbed2d8cd984849a269afe256a3d08a` | Current MF-M1 **planning** baseline. Re-audit callers from this tree unless a later accepted OF repair SHA exists. |
-| `sourceBaselineSha` | same as `planningBaselineSha` until an accepted repair SHA is named | Planning snapshot identity. **Not** guaranteed to be the final MF-M1 implementation/candidate freeze. |
-| `productionBaselineSha` | `8eedad8bebbed2d8cd984849a269afe256a3d08a` | Owner-stated production checkout at this documentation freeze. May move if Operational Fulfillment repair lands. |
+| `planningBaselineSha` | `e36613bf805bb0a4f5e95ec11f0b8dd5dfb5857a` | Canonical post-OF integration baseline for the MF-M1 source/caller re-audit. MF-M1 runtime remains `PENDING`. |
+| `sourceBaselineSha` | `e36613bf805bb0a4f5e95ec11f0b8dd5dfb5857a` | Source identity for this canonical integration line. **Not** an MF-M1 implementation or candidate-freeze SHA. |
+| `productionBaselineSha` | `e36613bf805bb0a4f5e95ec11f0b8dd5dfb5857a` | Exact production-proven runtime baseline. MF-M1 itself remains unimplemented and not production-routed. |
+| Historical MF documentation checkpoint | `7a7883753a7e6e5a002bf23d226645ce85730ee5` | Docs-only MF-M1 checkpoint based on the pre-repair `8eedad8` line; preserved for provenance. |
+| Historical pre-repair MF planning baseline | `8eedad8bebbed2d8cd984849a269afe256a3d08a` | Original MF-M1 planning/source snapshot; superseded by `e36613b` for this integration line. |
 | Historical routing audit | `04beaf1c21c9f7e0c9580692f57ed533d822f61e` | Inherited Thought NIM→Groq 20B line; superseded as *planning* base |
 | Historical Sandbox M-series closure | `48bad019fe601d5c871a54dd9902879862c6e96a` | Predecessor evidence only. **Not** the MF-M1 source baseline |
 
-**Operational Fulfillment pause:** Operational Fulfillment M1 has a confirmed
-production **duplicate-delivery concurrency defect** under investigation.
-`8eedad8` is the current planning baseline. It is **not** guaranteed to be
-the final MF-M1 implementation SHA. Do **not** invent the future repair SHA.
-If an accepted OF repair lands, MF-M1 implementation MUST move to that exact
-SHA and re-audit every `completeChat` caller before production code changes.
-Candidate freeze must revalidate against that exact SHA. Do not invent it.
-Resume: [`docs/handoffs/MODEL_FABRIC_MF_M1_IMPLEMENTATION_CHECKPOINT.md`](../handoffs/MODEL_FABRIC_MF_M1_IMPLEMENTATION_CHECKPOINT.md).
+**Operational Fulfillment status:** Operational Fulfillment M1 is
+production-proven at exact SHA
+`e36613bf805bb0a4f5e95ec11f0b8dd5dfb5857a`. That SHA is the canonical
+runtime integration baseline for MF-M1. The MF documentation checkpoint
+`7a7883753a7e6e5a002bf23d226645ce85730ee5` is docs-only, and its
+pre-repair `8eedad8` planning identity is historical. MF-M1 runtime remains
+`PENDING`. Before any MF-M1 implementation, re-audit every
+`completeChat` caller from `e36613b` and revalidate the candidate freeze
+against the exact implementation SHA.
+Resume:
+[`docs/handoffs/MODEL_FABRIC_MF_M1_IMPLEMENTATION_CHECKPOINT.md`](../handoffs/MODEL_FABRIC_MF_M1_IMPLEMENTATION_CHECKPOINT.md).
 
 ```text
 OWNER-SELECTED TARGET
@@ -368,9 +373,9 @@ for that exact role/seat**. They must not promote an unqualified model.
 
 ## 11. Current-state map (`CONFIRMED FROM SOURCE`)
 
-Live compatibility snapshot: `planningBaselineSha` =
-`8eedad8bebbed2d8cd984849a269afe256a3d08a` (not guaranteed as the final
-implementation SHA). Refresh
+Live compatibility snapshot: `sourceBaselineSha` =
+`e36613bf805bb0a4f5e95ec11f0b8dd5dfb5857a` (canonical post-OF integration
+baseline; MF-M1 runtime is not implemented). Refresh
 [`docs/Routing_Status.md`](../Routing_Status.md) when that source changes.
 Routing Status remains living **current** facts. It must not be rewritten as
 the §12.9 future target table.
@@ -544,7 +549,7 @@ hidden chain-of-thought.
 Do not collapse these layers.
 
 **Live source / MF-M1 `existing_compatibility`** (`CONFIRMED FROM SOURCE` at
-`8eedad8`; see Routing Status):
+`e36613b`; see Routing Status):
 
 - Thought: NIM `openai/gpt-oss-20b` primary, `reasoningEffort: "low"`, eligible
   Groq same-model 20B transport failover (one `completeChat` invocation, two
@@ -665,7 +670,7 @@ purpose into a route name:
 | `modelReflectionAdjudicator` | `reflection_initiative` | none | purpose maps to `utility_bulk` | caller forces `thought` and overrides `model: env.mistralModel`; preserve and expose the mismatch |
 | cognition `analyzeExchange` | `exchange_cognition` | none | `utility_bulk` | `utility_bulk` |
 | `consolidateCuriosityRead` | `curiosity_consolidation` | none | `utility_bulk` | `utility_bulk` |
-| `createEngineeringThinkingModel` | `engineering` | `complex_orchestration` | omitted purpose/lane resolves to `ashley_expression` (`CONFIRMED FROM SOURCE` at `8eedad8`) | current `model: env.mistralModel` and Expression quota coupling remain; seat is recorded but does not select a model in MF-M1 |
+| `createEngineeringThinkingModel` | `engineering` | `complex_orchestration` | omitted purpose/lane resolves to `ashley_expression` (`CONFIRMED FROM SOURCE` at `e36613b`) | current `model: env.mistralModel` and Expression quota coupling remain; seat is recorded but does not select a model in MF-M1 |
 | configured maintenance purpose | `maintenance` | none | `utility_bulk` | no current production caller; configuration remains visible |
 
 `utility_bulk` is a current route identity. It MUST NOT replace
@@ -1515,7 +1520,7 @@ MF-M1–MF-M4.
 |---|---|---|
 | Semantic architecture | This file | `CURRENT PHASE CONTRACT` (sole owner) |
 | Frozen fields / F1-obs spec | [`Model_Fabric_01_Contract_Draft.md`](Model_Fabric_01_Contract_Draft.md) | `SUPPORTING`; delivery order superseded |
-| Current routes | [`docs/Routing_Status.md`](../Routing_Status.md) | `SUPPORTING / LIVING SOURCE STATUS` — live facts at `8eedad8`; **not** the §12.9 target table |
+| Current routes | [`docs/Routing_Status.md`](../Routing_Status.md) | `SUPPORTING / LIVING SOURCE STATUS` — live facts at `e36613b`; **not** the §12.9 target table |
 | Post-MF-M1 target occupants | This file §12.9 | `OWNER CLOSED` as target policy only |
 | F1-obs mechanism spike | [`Model_Fabric_01_Implementation_Spike.md`](Model_Fabric_01_Implementation_Spike.md) | `SUPPORTING / DEFERRED` |
 | Historical reconnaissance | [`Model_Fabric_01_Codebase_Reconnaissance.md`](Model_Fabric_01_Codebase_Reconnaissance.md) | `HISTORICAL SOURCE SNAPSHOT` |
