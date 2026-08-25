@@ -36,7 +36,7 @@ Governing contract:
 | MF-M3 | `IMPLEMENTED / focused verified` | None |
 | MF-M4 | `IMPLEMENTED / focused verified` | None |
 | MF-M5 | `IMPLEMENTED / focused verified` | None |
-| MF-M6 | `PENDING` | None |
+| MF-M6 | `IMPLEMENTED / focused verified` | None |
 | MF-ACT | `PENDING` | None |
 
 ## SLICE 0 evidence
@@ -161,8 +161,30 @@ Focused MF-M5 settlement:
 - `apps/agent-service` `npm run build`: **PASS**;
 - `git diff --check`: **PASS**.
 
+## MF-M6 evidence
+
+Local commit:
+`054662b8c56eb52cc910a1caf8b0e7a9fb3a5f9e`
+
+Implemented:
+
+- generic specialist-seat resolution against the declared target row;
+- fail-closed dark `routine_validation` behavior without approved records;
+- independence-group enforcement and approved-chain health selection;
+- Evaluation seat ownership and non-user-visible assertions;
+- separation from current direct engineering cognition;
+- response-backed specialist execution witness validation with no fabricated
+  `SpecialistSession`.
+
+Focused MF-M6 settlement:
+
+- **3 test files, 20 tests passed** across MF-M3 catalog, MF-M5 health, and
+  MF-M6 specialist resolution;
+- `apps/agent-service` `npm run build`: **PASS**;
+- `git diff --check`: **PASS**.
+
 ## Gates remaining
 
-- Specialist and activation machinery are not implemented yet.
+- Activation machinery is not implemented yet.
 - No route is qualified, owner-approved, activation-approved, deployed, or
   production-accepted by this worktree.
