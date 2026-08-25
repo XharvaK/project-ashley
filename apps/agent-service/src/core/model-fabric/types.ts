@@ -151,8 +151,14 @@ export type ResolvedModelRoute = Readonly<{
   logicalRole: LogicalModelRole;
   requestedPurpose: ModelPurposeId;
   specialistRequirement: SpecialistRequirement | null;
+  policyRowId: string;
+  occupancyKey: string;
+  occupantId: string;
+  portfolioRevisionId: string;
   configuredRouteId: ModelRouteId;
   dispatchedRouteId: ModelRouteId;
+  routeOverride: string | null;
+  modelOverride: string | null;
   profileId: ModelProfileId;
   profileVersion: ModelProfileVersion;
   profileFingerprint: ModelProfileFingerprint;

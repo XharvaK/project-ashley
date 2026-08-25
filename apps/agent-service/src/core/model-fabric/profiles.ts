@@ -198,8 +198,14 @@ export function resolvedRouteFor(input: {
   logicalRole: LogicalModelRole;
   requestedPurpose: ModelPurposeId;
   specialistRequirement: SpecialistRequirement | null;
+  policyRowId: string;
+  occupancyKey: string;
+  occupantId: string;
+  portfolioRevisionId: string;
   configuredRouteId: string;
   dispatchedRouteId: string;
+  routeOverride: string | null;
+  modelOverride: string | null;
   provider: string;
   configuredModelId: string;
   contextPolicyId: string;
@@ -208,6 +214,7 @@ export function resolvedRouteFor(input: {
   inferencePolicyFingerprint: InferencePolicyFingerprint;
   fallbackClass: ModelFallbackClass;
   admissionBasis: RouteAdmissionBasis;
+  registryVersion: string;
 }): ResolvedModelRoute {
   const profile = capabilityProfileFor(input.provider, input.configuredModelId);
   // MF-M1 preserves caller-owned fallback topology. It does not introduce a
@@ -217,8 +224,14 @@ export function resolvedRouteFor(input: {
     logicalRole: input.logicalRole,
     requestedPurpose: input.requestedPurpose,
     specialistRequirement: input.specialistRequirement,
+    policyRowId: input.policyRowId,
+    occupancyKey: input.occupancyKey,
+    occupantId: input.occupantId,
+    portfolioRevisionId: input.portfolioRevisionId,
     configuredRouteId: input.configuredRouteId as ResolvedModelRoute["configuredRouteId"],
     dispatchedRouteId: input.dispatchedRouteId as ResolvedModelRoute["dispatchedRouteId"],
+    routeOverride: input.routeOverride,
+    modelOverride: input.modelOverride,
     profileId: profile.profileId,
     profileVersion: profile.profileVersion,
     profileFingerprint: profile.profileFingerprint,
@@ -236,7 +249,7 @@ export function resolvedRouteFor(input: {
     privacyPolicyId: input.contextPolicyId,
     fallbackRouteIds,
     admissionBasis: input.admissionBasis,
-    registryVersion: "current-route-registry-v1",
+    registryVersion: input.registryVersion,
   } satisfies ResolvedModelRoute;
   return Object.freeze({
     ...route,

@@ -1,7 +1,6 @@
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { env } from "../../env.js";
 import { AppError } from "../../errors.js";
+import { routeRecordsFromCurrentPortfolio } from "../model-fabric/portfolio.js";
 import { ROUTE_BINDINGS, routeBinding } from "./registry.js";
 import type {
   ContextProfile,
@@ -28,19 +27,14 @@ export type RouteRecord = {
   quotaContract: QuotaContract | "env";
 };
 
-const DEFAULT_MODELS_PATH = join(process.cwd(), "config", "models.json");
-
-/** @internal Exported for tests. */
 export function loadRouteRecords(): RouteRecord[] {
-  const configured = loadConfiguredRoutes();
-  if (configured) return configured;
-  return ROUTE_BINDINGS.map((b) => ({
-    route: b.route,
-    provider: b.provider,
-    configuredModelId: b.configuredModelId,
-    contextProfile: b.contextProfile,
-    enabled: b.enabled,
-    quotaContract: contractForProvider(b.provider),
+  return routeRecordsFromCurrentPortfolio().map((record) => ({
+    route: record.route as RouteId,
+    provider: record.provider as ProviderId,
+    configuredModelId: record.configuredModelId,
+    contextProfile: record.contextProfile as ContextProfile,
+    enabled: record.enabled,
+    quotaContract: record.quotaContract as QuotaContract | "env",
   }));
 }
 
@@ -55,73 +49,6 @@ function contractForProvider(provider: ProviderId): QuotaContract | "env" {
     default:
       return "env";
   }
-}
-
-type RawRoute = {
-  provider?: string;
-  configured_model_id?: string;
-  context_profile?: string;
-  enabled?: boolean;
-  quota_contract?: QuotaContract | "env";
-};
-
-type RawConfig = {
-  version?: number;
-  purpose_routes?: Record<string, string>;
-  routes?: Record<string, RawRoute>;
-};
-
-function loadConfiguredRoutes(): RouteRecord[] | undefined {
-  const file =
-    process.env.ASHLEY_MODELS_CONFIG ?? DEFAULT_MODELS_PATH;
-  if (!existsSync(file)) return undefined;
-  try {
-    const raw = JSON.parse(
-      readFileSync(file, "utf-8"),
-    ) as RawConfig;
-    if (!raw.routes) return undefined;
-    const records: RouteRecord[] = [];
-    for (const [route, rawRoute] of Object.entries(raw.routes)) {
-      const provider = rawRoute.provider as ProviderId | undefined;
-      if (!provider) continue;
-      records.push({
-        route: route as RouteId,
-        provider,
-        configuredModelId:
-          rawRoute.configured_model_id ?? defaultModelId(provider),
-        contextProfile:
-          (rawRoute.context_profile as ContextProfile | undefined) ??
-          defaultContextProfile(provider),
-        enabled: rawRoute.enabled ?? true,
-        quotaContract:
-          rawRoute.quota_contract === "env"
-            ? "env"
-            : rawRoute.quota_contract ?? contractForProvider(provider),
-      });
-    }
-    return records;
-  } catch {
-    return undefined;
-  }
-}
-
-function defaultModelId(provider: ProviderId): string {
-  switch (provider) {
-    case "mistral":
-      return env.mistralModel;
-    case "groq":
-      return "openai/gpt-oss-20b";
-    case "nim":
-      return "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning";
-    default:
-      return "";
-  }
-}
-
-function defaultContextProfile(provider: ProviderId): ContextProfile {
-  if (provider === "mistral") return "full_expression";
-  if (provider === "groq") return "utility_redacted";
-  return "experimental_internal_project";
 }
 
 const PURPOSE_TO_ROUTE: Partial<Record<string, RouteId>> = {

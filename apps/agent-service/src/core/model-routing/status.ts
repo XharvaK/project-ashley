@@ -8,6 +8,7 @@ import type {
   ProviderId,
   QuotaBucket,
 } from "./types.js";
+import { currentPortfolio } from "../model-fabric/portfolio.js";
 
 export type RoutingHealth = "ok" | "degraded" | "disabled" | "unused";
 
@@ -29,6 +30,37 @@ export type RoutingRouteStatus = {
   lastErrorClass: string | null;
   lastErrorAt: string | null;
   resolvedModelId: string | null;
+  fabric: RoutingFabricStatus;
+};
+
+export type RoutingFabricHealth = {
+  configured: boolean;
+  available: boolean;
+  ready: boolean;
+  qualified: boolean;
+  ownerApproved: boolean | "not_required";
+  active: boolean;
+  degraded: boolean;
+};
+
+export type RoutingPolicyStatus = {
+  policyRowId: string;
+  logicalRole: string;
+  occupancyKey: string;
+  occupantId: string;
+  provider: string;
+  configuredModelId: string;
+  configuredRouteId: string;
+  dispatchedRouteId: string;
+  admissionBasis: Readonly<Record<string, unknown>> | null;
+  activeActivationRefId: string | null;
+  health: RoutingFabricHealth;
+};
+
+export type RoutingFabricStatus = {
+  portfolioRevisionId: string;
+  registryVersion: string;
+  policyRows: RoutingPolicyStatus[];
 };
 
 type SuccessRow = {
@@ -44,6 +76,7 @@ type ErrorRow = {
 
 export function routingStatus(db: DatabaseSync): RoutingRouteStatus[] {
   const records = loadRouteRecords();
+  const portfolio = currentPortfolio();
 
   const lastSuccessByBucket = new Map<string, { at: string; resolved: string | null }>();
   const lastErrorByBucket = new Map<string, { at: string; cls: string }>();
@@ -110,6 +143,39 @@ export function routingStatus(db: DatabaseSync): RoutingRouteStatus[] {
     } else {
       health = "ok";
     }
+    const degraded = health === "degraded";
+    const policyRows: RoutingPolicyStatus[] = [];
+    for (const row of portfolio.rows) {
+      const configuredRouteId = row.configuredRouteId ?? defaultRouteForRole(row.logicalRole);
+      const dispatchedRouteId = row.dispatchedRouteId ?? configuredRouteId;
+      if (configuredRouteId !== r.route && dispatchedRouteId !== r.route) continue;
+      for (const occupant of row.occupants) {
+        policyRows.push({
+          policyRowId: row.policyRowId,
+          logicalRole: row.logicalRole,
+          occupancyKey: row.occupancyKey,
+          occupantId: occupant.occupantId,
+          provider: occupant.provider,
+          configuredModelId: occupant.configuredModelId,
+          configuredRouteId,
+          dispatchedRouteId,
+          admissionBasis: occupant.admissionBasis ?? null,
+          activeActivationRefId: "compatibility_default",
+          health: {
+            configured: true,
+            available: !degraded,
+            ready: !degraded,
+            qualified: occupant.admissionBasis?.kind === "existing_compatibility",
+            ownerApproved:
+              occupant.admissionBasis?.kind === "existing_compatibility"
+                ? "not_required"
+                : false,
+            active: true,
+            degraded,
+          },
+        });
+      }
+    }
     return {
       route: r.route,
       provider: r.provider as ProviderId,
@@ -128,6 +194,24 @@ export function routingStatus(db: DatabaseSync): RoutingRouteStatus[] {
       lastErrorClass: lastError ? lastError.cls : null,
       lastErrorAt: lastError ? lastError.at : null,
       resolvedModelId: lastSuccess ? lastSuccess.resolved : null,
+      fabric: {
+        portfolioRevisionId: portfolio.portfolioRevisionId,
+        registryVersion: portfolio.registryVersion,
+        policyRows,
+      },
     };
   });
+}
+
+function defaultRouteForRole(role: string): string {
+  switch (role) {
+    case "thought":
+      return "thought";
+    case "expression":
+      return "ashley_expression";
+    case "engineering":
+      return "ashley_expression";
+    default:
+      return "utility_bulk";
+  }
 }

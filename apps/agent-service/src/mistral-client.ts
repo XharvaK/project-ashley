@@ -22,7 +22,7 @@ import {
   createNimAdapter,
   mapNimError,
 } from "./core/model-routing/adapters/nim-adapter.js";
-import { resolveRoute, requireRouteEnabled } from "./core/model-routing/router.js";
+import { requireRouteEnabled } from "./core/model-routing/router.js";
 import { quotaBucketFor } from "./core/model-routing/types.js";
 import {
   attachModelFabricMetadata,
@@ -32,6 +32,7 @@ import {
   createModelFabricInvocation,
   modelFailureFor,
   normalizeReasoningPolicy,
+  resolveCurrentPolicy,
   resolvedRouteFor,
   wireReasoningFor,
   type LogicalModelRole,
@@ -299,8 +300,29 @@ export async function completeChat(
     options.specialistRequirement ?? null;
 
   let binding;
+  let configuredBinding;
+  let currentPolicy;
   try {
-    binding = routeId ? requireRouteEnabled(routeId) : resolveRoute(purpose);
+    if (routeId) {
+      // Validate an explicit route before policy resolution so disabled and
+      // unknown compatibility routes retain their existing fail-closed path.
+      binding = requireRouteEnabled(routeId);
+    }
+    currentPolicy = resolveCurrentPolicy({
+      logicalRole,
+      purpose: purpose as ModelPurposeId,
+      lane: mapped.lane,
+      deadlineAtMs: options.deadlineAtMs,
+      routeId,
+      model: options.model,
+      specialistRequirement,
+    });
+    configuredBinding = requireRouteEnabled(
+      currentPolicy.configuredRouteId as RouteId,
+    );
+    if (!binding) {
+      binding = requireRouteEnabled(currentPolicy.dispatchedRouteId as RouteId);
+    }
   } catch (error) {
     const preProjection = createContextProjection({
       purpose: purpose as ModelPurposeId,
@@ -322,16 +344,8 @@ export async function completeChat(
     throw error;
   }
 
-  // An explicit route is a compatibility override. Keep the purpose-resolved
-  // route visible as configured state when it can be resolved, while the
-  // existing explicit route remains the dispatched route.
-  let configuredBinding = binding;
-  if (routeId) {
-    try {
-      configuredBinding = resolveRoute(purpose);
-    } catch {
-      configuredBinding = binding;
-    }
+  if (!currentPolicy || !configuredBinding || !binding) {
+    throw new Error("model_fabric_current_policy_unresolved");
   }
   const projection = createContextProjection({
     purpose: purpose as ModelPurposeId,
@@ -348,7 +362,7 @@ export async function completeChat(
   fabric.resolve(configuredBinding.route);
 
   const provider: ProviderId = binding.provider;
-  const modelAlias = options.model ?? binding.configuredModelId;
+  const modelAlias = currentPolicy.configuredModelId;
   const quotaBucket = quotaBucketFor(provider, modelAlias);
 
   const toolsJson = options.tools ? JSON.stringify(options.tools) : undefined;
@@ -364,6 +378,7 @@ export async function completeChat(
   ) => {
     const requestedWireReasoning =
       options.reasoningEffort ??
+      currentPolicy.occupant.effectiveReasoning ??
       (targetProvider === "mistral" ? env.mistralReasoningEffort : null);
     const requestedReasoningPolicy = requestedWireReasoning
       ? normalizeReasoningPolicy(requestedWireReasoning)
@@ -394,16 +409,31 @@ export async function completeChat(
       fallbackTopology: fallbackTopologyFor(purpose, binding.route),
       inferencePolicyFingerprint,
     });
-    const admissionBasis = {
-      kind: "existing_compatibility" as const,
-      compatibilityBindingId,
-    };
+    const currentAdmissionBasis = currentPolicy.occupant.admissionBasis;
+    const admissionBasis =
+      currentAdmissionBasis?.kind === "existing_compatibility" &&
+      typeof currentAdmissionBasis.compatibilityBindingId === "string"
+        ? {
+            kind: "existing_compatibility" as const,
+            compatibilityBindingId:
+              currentAdmissionBasis.compatibilityBindingId,
+          }
+        : {
+            kind: "existing_compatibility" as const,
+            compatibilityBindingId,
+          };
     const resolvedRoute = resolvedRouteFor({
       logicalRole,
       requestedPurpose: purpose as ModelPurposeId,
       specialistRequirement,
+      policyRowId: currentPolicy.policyRow.policyRowId,
+      occupancyKey: currentPolicy.policyRow.occupancyKey,
+      occupantId: currentPolicy.occupant.occupantId,
+      portfolioRevisionId: currentPolicy.portfolioRevisionId,
       configuredRouteId: configuredBinding.route,
       dispatchedRouteId: binding.route,
+      routeOverride: currentPolicy.routeOverride,
+      modelOverride: currentPolicy.modelOverride,
       provider: targetProvider,
       configuredModelId: targetModel,
       contextPolicyId: binding.contextProfile,
@@ -412,6 +442,7 @@ export async function completeChat(
       inferencePolicyFingerprint,
       fallbackClass,
       admissionBasis,
+      registryVersion: currentPolicy.registryVersion,
     });
     fabric.setResolvedRoute(resolvedRoute);
     attemptOrdinal += 1;
