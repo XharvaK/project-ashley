@@ -832,7 +832,14 @@ export function writeOwnerActivation(input: {
   if (!input.authorization.ownerAuthenticated) {
     throw new Error("owner_authentication_required");
   }
-  validateActivation(input);
+  const validated = validateActivation(input);
+  const pointerActivationRefId =
+    input.pointer.rows[validated.policyRow.logicalRole]?.[
+      validated.policyRow.occupancyKey
+    ];
+  if (pointerActivationRefId !== input.activation.activationRefId) {
+    throw new Error("activation_pointer_reference_mismatch");
+  }
   writeOwnerArtifact({
     controlDir: input.controlDir,
     artifact: input.activation,

@@ -268,6 +268,37 @@ describe("MF-ACT activation mechanics", () => {
     );
   });
 
+  it("requires the pointer written with an activation to cite that exact ActivationRef", () => {
+    const root = controlRoot();
+    writeQualification(root);
+    writeConsultation(root);
+    writeImmutableArtifact({
+      controlDir: root,
+      directory: "preflights",
+      id: "cpf_target_thought_fixture",
+      artifact: preflight(),
+      controlRootMode: "fixture",
+    });
+    writeApproval(root);
+
+    expect(() =>
+      writeOwnerActivation({
+        controlDir: root,
+        activation: activation(),
+        pointer: pointer("act_different_fixture"),
+        targetPortfolio,
+        qualifications: [qualification()],
+        approvals: [approval()],
+        consultations: [consultation()],
+        preflights: [preflight()],
+        authorization: { ownerAuthenticated: true, controlRootMode: "fixture" },
+      }),
+    ).toThrow("activation_pointer_reference_mismatch");
+    expect(existsSync(join(root, "activations", `${activation().activationRefId}.json`))).toBe(
+      false,
+    );
+  });
+
   it("rejects stale qualification and falls back to current compatibility", () => {
     const root = controlRoot();
     const stale = qualification({ invalidated: true, invalidatedBy: "qrev_1" });

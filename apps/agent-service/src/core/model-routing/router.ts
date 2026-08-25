@@ -89,7 +89,14 @@ export function requireRouteEnabled(route: RouteId): RouteBinding {
   if (!enabled) {
     throw disabledRouteError(route);
   }
-  return binding;
+  if (!matched) return binding;
+  return {
+    ...binding,
+    provider: matched.provider,
+    configuredModelId: matched.configuredModelId,
+    contextProfile: matched.contextProfile,
+    enabled: matched.enabled,
+  };
 }
 
 function providerKeyPresent(provider: ProviderId): boolean {

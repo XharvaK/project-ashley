@@ -3,8 +3,14 @@ import { describe, expect, it, vi, afterEach } from "vitest";
 import { env } from "../../env.js";
 import { openNuclearDb } from "../db.js";
 import { openContinuityDb } from "../continuity/db.js";
-import { resolveRoute, quotaContractFor, routeForBucket } from "./router.js";
+import {
+  requireRouteEnabled,
+  resolveRoute,
+  quotaContractFor,
+  routeForBucket,
+} from "./router.js";
 import { routeBinding } from "./registry.js";
+import * as portfolioModule from "../model-fabric/portfolio.js";
 
 const originalRps = env.mistralRequestsPerSecond;
 const originalTpm = env.mistralTokensPerMinute;
@@ -38,6 +44,26 @@ describe("model-routing router", () => {
 
   it("returns undefined for unknown buckets", () => {
     expect(routeForBucket("bogus:model")).toBeUndefined();
+  });
+
+  it("returns provider/model/context from the CURRENT snapshot record", () => {
+    vi.spyOn(portfolioModule, "routeRecordsFromCurrentPortfolio").mockReturnValue([
+      {
+        route: "thought",
+        provider: "groq",
+        configuredModelId: "fixture/current-model",
+        contextProfile: "thought_summary",
+        enabled: true,
+        quotaContract: { rps: 1, rpm: 1, rpd: 1, tpm: 1, tpd: 1 },
+      },
+    ]);
+
+    expect(requireRouteEnabled("thought")).toMatchObject({
+      provider: "groq",
+      configuredModelId: "fixture/current-model",
+      contextProfile: "thought_summary",
+      enabled: true,
+    });
   });
 
   it("survives a full migrate to v18 with routing columns present", () => {
