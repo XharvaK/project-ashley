@@ -33,7 +33,7 @@ Governing contract:
 |---|---|---|
 | SLICE 0 | `IMPLEMENTED / focused verified` | None |
 | MF-M2 | `IMPLEMENTED / focused verified` | None |
-| MF-M3 | `PENDING` | None |
+| MF-M3 | `IMPLEMENTED / focused verified` | None |
 | MF-M4 | `PENDING` | None |
 | MF-M5 | `PENDING` | None |
 | MF-M6 | `PENDING` | None |
@@ -92,10 +92,31 @@ Focused MF-M2 settlement:
 - `apps/agent-service` `npm run build`: **PASS**;
 - `git diff --check`: **PASS**.
 
+## MF-M3 evidence
+
+Local commit:
+`9311d0a`
+
+Implemented:
+
+- independence-group, specialist-seat, and coupling catalog records;
+- declared target portfolio `target-12-9.v1.json`, kept dark and excluded from
+  CURRENT dispatch;
+- discovery records that begin `unqualified` and do not mint owner approval;
+- lifecycle transition guards for owner approval, invalidation, and degraded
+  recovery;
+- exact qualification-result-to-profile/inference binding validation;
+- rejection of compatibility and aggregate reports as qualification evidence;
+- independent-judge group separation and unordered candidate preservation.
+
+Focused MF-M3 settlement:
+
+- **2 test files, 14 tests passed** (MF-M2 adjacent regression plus MF-M3);
+- `apps/agent-service` `npm run build`: **PASS**;
+- `git diff --check`: **PASS**.
+
 ## Gates remaining
 
-- Target portfolio and qualification/catalog records are not implemented yet.
-- Catalog, qualification citation validation, Zen, health, specialist, and
-  activation machinery are not implemented yet.
+- Zen, health, specialist, and activation machinery are not implemented yet.
 - No route is qualified, owner-approved, activation-approved, deployed, or
   production-accepted by this worktree.
