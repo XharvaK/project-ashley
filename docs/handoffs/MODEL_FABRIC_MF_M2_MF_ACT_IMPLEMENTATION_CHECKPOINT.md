@@ -1,6 +1,6 @@
 # Model Fabric MF-M2 → MF-ACT implementation checkpoint
 
-**Status:** `IN_PROGRESS` — local machinery implementation only.
+**Status:** `IMPLEMENTED / FOCUSED VERIFIED / INTERNAL SECOND PASS COMPLETE` — local machinery only.
 
 **Worktree:** `C:\Users\Xharv\Projects\model-fabric-m2-act-implementation`
 
@@ -17,6 +17,7 @@ approval, activation, or Mint witness.
 ```text
 CURRENT ROUTING PRESERVED
 TARGET 12.9 ROUTING DARK
+NO TARGET ROUTE ACTIVATED
 NO PRODUCTION OWNER APPROVAL REF CREATED
 NO PRODUCTION ACTIVATION REF CREATED
 NO MINT
@@ -37,7 +38,7 @@ Governing contract:
 | MF-M4 | `IMPLEMENTED / focused verified` | None |
 | MF-M5 | `IMPLEMENTED / focused verified` | None |
 | MF-M6 | `IMPLEMENTED / focused verified` | None |
-| MF-ACT | `PENDING` | None |
+| MF-ACT | `IMPLEMENTED / focused verified` | None |
 
 ## SLICE 0 evidence
 
@@ -78,6 +79,8 @@ Implemented:
   contracts;
 - typed, validated, stable-hashed CURRENT resolver;
 - explicit route/model override recording;
+- `requireRouteEnabled` returns provider, model, context, and enablement from
+  the current portfolio snapshot rather than static registry values;
 - configured-versus-dispatched observation and reflection scars;
 - engineering `SpecialistRequirement` record-only behavior;
 - snapshot-backed route lifecycle/quota records;
@@ -183,8 +186,64 @@ Focused MF-M6 settlement:
 - `apps/agent-service` `npm run build`: **PASS**;
 - `git diff --check`: **PASS**.
 
+## MF-ACT evidence
+
+Local commit:
+`25b398975bb16c68a87e6fec9825f82b4e58e29e` (base machinery)
+
+Authority-correction commit:
+`87338d78c4d7b8e0379e35b5dcaa619328809e9d`
+
+Implemented:
+
+- immutable qualification, consultation, preflight, approval, and activation
+  artifact readers/writers with content-integrity checks;
+- owner-authenticated activation writer that accepts owner-created IDs and
+  never generates `OwnerApprovalRef` or `ActivationRef` IDs;
+- target-row, qualification/profile, approval, consultation, privacy, and
+  coupling-preflight validation;
+- atomic same-directory `active.json.tmp` fsync/rename pointer replacement;
+- missing/unreadable/stale/fixture-in-production pointer fallback to CURRENT
+  compatibility;
+- per-role partial activation resolution and rollback provenance validation;
+- owner activation requires the active pointer to reference the exact
+  validated `ActivationRef` being written;
+- process-safe fixture controls with no default-control-directory writes.
+
+Focused MF-ACT settlement:
+
+- direct MF-ACT tests: **13 tests passed**;
+- `apps/agent-service` `npm run build`: **PASS**;
+- `git diff --check`: **PASS**.
+
+## Review evidence
+
+- An independent reviewer was requested against the frozen baseline, but no
+  completed report or findings were returned before that reviewer was shut
+  down. This is recorded as **unavailable**, not as a clean review.
+- The required internal second pass found two authority defects: static router
+  values could outrank the CURRENT snapshot, and activation writing did not
+  require an exact pointer-to-`ActivationRef` match.
+- Both defects were covered by failing characterization tests, repaired in
+  `87338d78c4d7b8e0379e35b5dcaa619328809e9d`, and re-run green.
+
+## Final focused verification
+
+- Consolidated focused regression pack: **17 test files, 172 tests passed, 0
+  failures**.
+- The pack covered SLICE 0, MF-M2, MF-M3, MF-M4, MF-M5, MF-M6, MF-ACT, model
+  routing, provider adapters, Thought failover, Expression fallback,
+  qualification route precedence, Mistral receipts, and environment wiring.
+- `apps/agent-service` `npm run build`: **PASS**.
+- `git diff --check`: **PASS**.
+- Full agent-service regression was **NOT RUN after the owner test-scope
+  override**. The historical baseline remains recorded separately and was not
+  repeated as ritual verification.
+
 ## Gates remaining
 
-- Activation machinery is not implemented yet.
+- No implementation gate remains for the local MF-M2 → MF-ACT machinery.
+- Owner qualification, OwnerApprovalRef, ActivationRef, Mint qualification,
+  deployment, production acceptance, and promotion remain separate owner gates.
 - No route is qualified, owner-approved, activation-approved, deployed, or
   production-accepted by this worktree.
