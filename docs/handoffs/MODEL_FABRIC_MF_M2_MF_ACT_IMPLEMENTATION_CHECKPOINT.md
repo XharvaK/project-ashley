@@ -31,8 +31,8 @@ Governing contract:
 
 | Slice | Local state | Production routing change |
 |---|---|---|
-| SLICE 0 | `IMPLEMENTING / focused verified` | None |
-| MF-M2 | `PENDING` | None |
+| SLICE 0 | `IMPLEMENTED / focused verified` | None |
+| MF-M2 | `IMPLEMENTED / focused verified` | None |
 | MF-M3 | `PENDING` | None |
 | MF-M4 | `PENDING` | None |
 | MF-M5 | `PENDING` | None |
@@ -66,9 +66,35 @@ The earlier broad baseline run is historical evidence only. Per the owner
 test-scope override, it will not be repeated unless a concrete cross-subsystem
 failure requires the smallest additional focused suite.
 
+## MF-M2 evidence
+
+Local commit:
+`b9f4ed1015ada9cd56f0f2b2d4046ed6a9a49095`
+
+Implemented:
+
+- complete `config/model-fabric/portfolios/current-compatibility.v1.json`
+  with all current role/occupancy rows and copied route enablement/quota
+  contracts;
+- typed, validated, stable-hashed CURRENT resolver;
+- explicit route/model override recording;
+- configured-versus-dispatched observation and reflection scars;
+- engineering `SpecialistRequirement` record-only behavior;
+- snapshot-backed route lifecycle/quota records;
+- owner routing status projection with policy rows, occupants, admission basis,
+  compatibility activation state, and distinct health predicates;
+- provider wire translation data and Mistral retry pin.
+
+Focused MF-M2 settlement:
+
+- **10 test files, 110 tests passed** across Fabric, routing, adapters,
+  Expression fallback, and route-precedence regressions;
+- `apps/agent-service` `npm run build`: **PASS**;
+- `git diff --check`: **PASS**.
+
 ## Gates remaining
 
-- CURRENT portfolio and unified resolver are not implemented yet.
+- Target portfolio and qualification/catalog records are not implemented yet.
 - Catalog, qualification citation validation, Zen, health, specialist, and
   activation machinery are not implemented yet.
 - No route is qualified, owner-approved, activation-approved, deployed, or

@@ -17,29 +17,24 @@ Do not infer an audit SHA from git history alone.
 
 | | |
 |---|---|
-| Document reviewed at repository revision | `d918572c7ae01d5b367323692bd6e8fbcf257895` |
-| Route-table audit baseline | `d918572c7ae01d5b367323692bd6e8fbcf257895` |
-| Audit method | Read-only comparison of the Wave 1 table below to `config/models.json` `purpose_routes` / `routes`, `PURPOSE_TO_ROUTE` in [`router.ts`](../apps/agent-service/src/core/model-routing/router.ts), `ROUTE_BINDINGS` in [`registry.ts`](../apps/agent-service/src/core/model-routing/registry.ts), and the MF-M1 implementation diff from exact `5a05e96e` |
-| Last route-table audit | 2026-08-25 MF-M1 candidate audit; route-binding inputs and dispatch behavior remain unchanged from the `e36613b` live-route baseline |
-| Stale when | those source files or route-dispatch behavior change and a new audit has not been performed |
+| Document reviewed at repository revision | `b9f4ed1015ada9cd56f0f2b2d4046ed6a9a49095` |
+| Route-table audit baseline | `b9f4ed1015ada9cd56f0f2b2d4046ed6a9a49095` |
+| Audit method | Read-only comparison of the Wave 1 table below to `config/model-fabric/portfolios/current-compatibility.v1.json`, `portfolio.ts`, `router.ts`, `registry.ts`, provider adapters, and the focused MF-M1/MF-M2 routing regressions |
+| Last route-table audit | 2026-08-25 MF-M2 candidate audit; current occupants, buckets, enablement, and compatibility scars remain unchanged |
+| Stale when | the CURRENT portfolio, resolver, route-dispatch behavior, or provider bindings change and a new audit has not been performed |
 
-Current route facts are split across:
+Current route facts are now consumed from one validated CURRENT snapshot:
 
-- [`config/models.json`](../config/models.json), which supplies configured route
-  entries and enablement;
-- [`router.ts`](../apps/agent-service/src/core/model-routing/router.ts), whose
-  `PURPOSE_TO_ROUTE` mapping currently resolves purposes; and
-- [`registry.ts`](../apps/agent-service/src/core/model-routing/registry.ts),
-  which currently owns dispatched provider and model values.
+- [`config/model-fabric/portfolios/current-compatibility.v1.json`](../config/model-fabric/portfolios/current-compatibility.v1.json), which owns the complete current policy rows, route bindings, enablement, and quota contracts;
+- [`portfolio.ts`](../apps/agent-service/src/core/model-fabric/portfolio.ts), which validates and hashes the snapshot and resolves role/occupancy/overrides; and
+- [`router.ts`](../apps/agent-service/src/core/model-routing/router.ts), which projects the snapshot for Attention quota and route lifecycle checks.
 
-No one file is yet the complete route authority. A future Model Fabric **MF-M2** implementation must replace this split with
-one validated CURRENT registry snapshot consumed by dispatch and status.
-Until that code exists, the split remains. Documentation must not imply that
-`config/models.json` already owns the whole route contract. Owner-selected
-§12.9 targets are **not** current routing.
+`config/models.json` remains historical compatibility configuration and is no
+longer the dispatch authority after MF-M2. Owner-selected §12.9 targets are
+**not** current routing.
 
 Pass-2/2.1 MF-M2–MF-ACT contracts are `IMPLEMENTATION_READY` machinery.
-They do not change the live table below. Live Thought remains NIM
+The local MF-M2 candidate does not change the live table below. Live Thought remains NIM
 `openai/gpt-oss-20b` wire `low` (normalized policy `economical`, not
 `standard`). Live Expression remains Mistral primary → Qwen `none`.
 Luna MUST NOT treat documentation fixtures as dispatch.
@@ -53,12 +48,9 @@ not architectural law. Model Fabric owns the future semantic profile/dispatch
 contract. Refresh this file by re-auditing source; do not copy HEAD into the
 tables without that audit.
 
-The post-OF source comparison found no changes from `8eedad8` to
-`e36613b` in `config/models.json`, the model-routing source, the provider
-adapters, or the audited `completeChat` caller paths. The MF-M1 candidate
-started from exact `5a05e96e` and adds typed identity/receipt metadata without
-changing route selection, provider/model bindings, failover, or fallback
-eligibility. The route-table content therefore remains valid at the candidate.
+The MF-M2 candidate started from exact `12b6b022c56321c8104d556fdd8a35a95419a51c`
+and moves current route authority into the hashed portfolio without changing
+occupants, provider/model bindings, failover eligibility, or fallback ownership.
 
 ## Implemented routing (Wave 1)
 
@@ -69,7 +61,7 @@ eligibility. The route-table content therefore remains valid at the candidate.
 | `thought` | `thought` | NVIDIA NIM (primary) / Groq (failover) | `openai/gpt-oss-20b` | `nim:openai/gpt-oss-20b` (primary) / `groq:openai/gpt-oss-20b` (failover) |
 | `exchange_cognition` | `utility_bulk` | Groq | `openai/gpt-oss-20b` | `groq:openai/gpt-oss-20b` |
 | `curiosity_consolidation` | `utility_bulk` | Groq | `openai/gpt-oss-20b` | `groq:openai/gpt-oss-20b` |
-| `thought_observation` | `utility_bulk` | Groq | `openai/gpt-oss-20b` | `groq:openai/gpt-oss-20b` |
+| `thought_observation` | `utility_bulk` configured / `thought` dispatched | NIM primary / Groq failover | `openai/gpt-oss-20b` | Thought buckets; Groq failover shares `groq:openai/gpt-oss-20b` |
 | `maintenance` | `utility_bulk` | Groq | `openai/gpt-oss-20b` | `groq:openai/gpt-oss-20b` |
 
 This table is the audited source snapshot at the route-table audit baseline
@@ -91,10 +83,12 @@ Live model IDs are **current facts**, not architecture. Owner-selected
 [Model Fabric Architecture §12.9](architecture/Model_Fabric_Architecture.md).
 This file must not claim those targets are already production-routed.
 
-Current callers do not use one uniform resolution path. Some pass a route
-explicitly. Others begin with a purpose. The Thought observation path begins
-with a purpose but is later forced to the `thought` route. This is why the
-current split sources cannot be treated as one coherent registry.
+All production `completeChat` callers now enter the MF-M2 CURRENT resolver.
+Explicit route/model choices remain recorded overrides. The Thought
+observation path still begins with `thought_observation` but dispatches the
+forced `thought` route. Reflection still forces `thought` and overrides
+`model: env.mistralModel`. Engineering still records its specialist
+requirement while using the Expression/Mistral compatibility row.
 
 ### Thought-observation naming seam
 
@@ -108,9 +102,9 @@ These identifiers are not interchangeable:
 | `thought.observation` | Historical F1-obs planned semantic purpose; not current dispatch; not MF-M1 |
 | `thought_observation_shadow` | Deferred F1-obs feature mode; not MF-M1 |
 
-**MF-M1** must **preserve and expose** this mismatch. It must not claim that
-the current `utility_bulk` mapping is the route actually dispatched, and it
-must not repair the force-to-`thought` behavior while establishing the seam.
+**MF-M1/MF-M2** preserve and expose this mismatch. The current `utility_bulk`
+mapping is not claimed to be the route actually dispatched, and the
+force-to-`thought` behavior is not repaired.
 
 ## Shared quota buckets
 
@@ -194,8 +188,11 @@ Do not document these as already-migrated to Nemotron Ultra or as repaired.
 `GET /nuclear/routing?owner_id=` (owner-only) returns per-route, non-secret
 status: route alias, provider, configured model ID, enabled state, quota
 bucket, health (`ok`/`degraded`/`disabled`/`unused`), quota availability, last
-successful dispatch time, last error class, and resolved model ID when known.
-No API keys, raw prompts, model outputs, or secret-bearing errors are exposed.
+successful dispatch time, last error class, resolved model ID when known, and
+the MF-M2 `fabric` projection containing portfolio revision, snapshot hash,
+policy-row/occupant identity, admission basis, compatibility activation state,
+and distinct health predicates. No API keys, raw prompts, model outputs, or
+secret-bearing errors are exposed.
 
 `GET /nuclear/attention?owner_id=` reports queue/continuity/outcomes, but its
 `rpsLimit` / `tpmLimit` / `reservedTpm` fields are **Mistral env defaults**,
