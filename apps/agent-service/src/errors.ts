@@ -10,6 +10,7 @@ export type ErrorCode =
   | "quota_exhausted"
   | "mistral_unavailable"
   | "provider_unavailable"
+  | "capability_mismatch"
    | "agent_not_ready"
   | "route_disabled"
   | "operator_disabled"

@@ -22,6 +22,10 @@ import {
   createNimAdapter,
   mapNimError,
 } from "./core/model-routing/adapters/nim-adapter.js";
+import {
+  createZenAdapter,
+  mapZenError,
+} from "./core/model-routing/adapters/zen-adapter.js";
 import { requireRouteEnabled } from "./core/model-routing/router.js";
 import { quotaBucketFor } from "./core/model-routing/types.js";
 import {
@@ -109,6 +113,8 @@ function adapterFor(provider: ProviderId): ModelProviderAdapter {
     adapter = createGroqAdapter();
   } else if (provider === "nim") {
     adapter = createNimAdapter();
+  } else if (provider === "opencode_zen") {
+    adapter = createZenAdapter();
   } else {
     // Unknown / not-yet-implemented providers fail closed.
     throw new AppError(
@@ -125,7 +131,7 @@ export function resetAdapterCache(): void {
   adapterCache.clear();
 }
 
-export { mapMistralError, mapGroqError, mapNimError, adapterFor };
+export { mapMistralError, mapGroqError, mapNimError, mapZenError, adapterFor };
 
 const ELIGIBLE_THOUGHT_FAILOVER_CODES = new Set([
   "rate_limited",
@@ -573,8 +579,10 @@ export async function completeChat(
                   ? mapMistralError(err)
                   : targetProvider === "groq"
                     ? mapGroqError(err)
-                    : targetProvider === "nim"
+                  : targetProvider === "nim"
                       ? mapNimError(err)
+                      : targetProvider === "opencode_zen"
+                        ? mapZenError(err)
                       : err;
               attempt.markFailure(errorClassFor(mappedError));
               throw mappedError;

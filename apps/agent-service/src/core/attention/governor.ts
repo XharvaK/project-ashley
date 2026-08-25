@@ -119,7 +119,13 @@ export async function runAttentiveDispatch<T>(
   const providerId = input.providerId ?? "mistral";
   const modelAlias =
     input.modelAlias ??
-    (providerId === "mistral" ? env.mistralModel : providerId === "nim" ? "openai/gpt-oss-20b" : env.groqDefaultModel);
+    (providerId === "mistral"
+      ? env.mistralModel
+      : providerId === "nim"
+        ? "openai/gpt-oss-20b"
+        : providerId === "opencode_zen"
+          ? "minimax/minimax-m2"
+          : env.groqDefaultModel);
   const quotaBucket = input.quotaBucket ?? `${providerId}:${modelAlias}`;
   // Provider-specific key gate — no attention reservation / no limiter consumption.
   if (providerId === "mistral" && !env.mistralApiKey) {
@@ -134,6 +140,9 @@ export async function runAttentiveDispatch<T>(
   }
   if (providerId === "nim" && !env.nimApiKey) {
     throw new AppError("agent_not_ready", "NVIDIA NIM API key not configured", 503);
+  }
+  if (providerId === "opencode_zen" && !env.opencodeZenApiKey) {
+    throw new AppError("agent_not_ready", "OpenCode Zen API key not configured", 503);
   }
   const estimate = estimateRequestTokens(input.messages, {
     maxTokens: input.maxTokens,

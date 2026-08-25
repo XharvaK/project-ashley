@@ -46,6 +46,8 @@ function contractForProvider(provider: ProviderId): QuotaContract | "env" {
       return { rps: 40, rpm: 3600, rpd: 3600, tpm: 8000, tpd: 80000 };
     case "nim":
       return { rps: 30, rpm: 600, rpd: 600, tpm: 16000, tpd: 120000 };
+    case "opencode_zen":
+      return { rps: 10, rpm: 600, rpd: 600, tpm: 16000, tpd: 120000 };
     default:
       return "env";
   }
@@ -98,6 +100,8 @@ function providerKeyPresent(provider: ProviderId): boolean {
       return Boolean(env.groqApiKey);
     case "nim":
       return Boolean(env.nimApiKey);
+    case "opencode_zen":
+      return Boolean(env.opencodeZenApiKey);
     default:
       return false;
   }

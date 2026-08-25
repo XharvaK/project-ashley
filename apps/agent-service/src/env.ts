@@ -185,6 +185,11 @@ function createEnv() {
   nimApiKey: process.env.NIM_API_KEY ?? "",
   nimBaseUrl:
     process.env.NIM_BASE_URL ?? "https://integrate.api.nvidia.com/v1",
+  // OpenCode Zen is a dark, utility-only Track A substrate. Missing key does
+  // not affect boot or current compatibility routing.
+  opencodeZenApiKey: process.env.OPENCODE_ZEN_API_KEY ?? "",
+  opencodeZenBaseUrl:
+    process.env.OPENCODE_ZEN_BASE_URL ?? "https://opencode.ai/zen/v1",
   // Visible Expression fallback (Wave 3): when the primary Mistral dispatch
   // fails on an eligible turn, retry once over the minimal profile via the
   // ashley_expression_fallback (Groq) route. ON by default; opt out with

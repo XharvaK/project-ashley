@@ -2,6 +2,7 @@ import type { AttentionLane, AttentionPurpose } from "../attention/types.js";
 import type {
   LogicalModelRole,
   ModelFallbackChain,
+  ProjectionClassification,
   SpecialistRequirement,
 } from "../model-fabric/types.js";
 
@@ -13,7 +14,7 @@ import type {
  * `provider:configuredApiModelId`; `resolved_model_id` stays continuity-only.
  */
 
-export type ProviderId = "mistral" | "groq" | "nim";
+export type ProviderId = "mistral" | "groq" | "nim" | "opencode_zen";
 
 export type RouteId =
   | "ashley_expression"
@@ -96,6 +97,8 @@ export type CompletionOptions = {
   purpose?: AttentionPurpose;
   /** Explicit Ashley-owned semantic role recorded by Model Fabric. */
   logicalRole?: LogicalModelRole;
+  /** Projection classification enforced by privacy-aware adapters. */
+  projectionClassification?: ProjectionClassification;
   /** Correlation only; MF-M1 does not select a specialist model. */
   specialistRequirement?: SpecialistRequirement | null;
   /** Caller-owned chain for an explicit multi-invocation fallback. */
