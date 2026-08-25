@@ -31,7 +31,7 @@ export type CurrentRouteRecord = {
 
 export type ModelFabricOccupant = Readonly<{
   occupantId: string;
-  ordinal: number;
+  ordinal?: number;
   provider: string;
   backend: string;
   configuredModelId: string;

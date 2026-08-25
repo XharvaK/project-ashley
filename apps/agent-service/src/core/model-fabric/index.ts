@@ -3,3 +3,4 @@ export * from "./profiles.js";
 export * from "./projection.js";
 export * from "./receipts.js";
 export * from "./portfolio.js";
+export * from "./catalog.js";
