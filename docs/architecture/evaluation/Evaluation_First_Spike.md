@@ -10,6 +10,11 @@ DAG below) is **F1-obs**, deferred. This spike still waits for real Fabric
 profile identity and stage-valid receipts; it must not treat F1-obs as the
 prerequisite that blocks MF-M1.
 
+Pass-2/2.1: MF-M2–MF-ACT **machinery** contracts are `IMPLEMENTATION_READY`.
+This spike still waits for that code plus MF-M1 local acceptance. SLICE 0
+must land before receipts are used as qualification evidence. Contracts
+do not authorize §12.9 activation.
+
 Purpose: define the smallest useful future implementation slice for `MODEL_PROFILE` evidence and qualification without changing runtime authority
 
 ## Recommendation
@@ -453,10 +458,22 @@ Stop the spike and request architectural review if any implementation requires:
 
 ## Open decisions
 
-1. What user-local directory and retention policy should hold evaluation artifacts?
-2. Which providers or model families count as materially independent judges for each high-impact campaign?
-3. What exact consultation artifact satisfies `SC-CON-04`?
+Closed for Model Fabric machinery (2026-08-25):
+
+1. Qualification artifacts: `~/.composer-assistant/control/model-fabric/qualifications/`.
+2. Independence_group catalog; same family on two providers is not independent.
+3. `SC-CON-04` artifact = `ashley.stewardship.consultation.v1` (see
+   `docs/governance/SC-CON-04_2026-08-25_Constitution_Model.md` for the
+   Constitution-text instance).
+
+Still open for the Evaluation spike itself:
+
 4. Should a held-out synthetic or sanitized identity corpus be owner-visible, evaluator-visible, or split between the two?
+5. Screenshot/judge-log retention beyond the control-plane directory.
+
+The first-slice scope is decided: model-profile-only; no capability-qualification integration; no provisional model-profile registry; no cryptographic owner signature unless a concrete threat model requires it; and Inspect AI remains a follow-on spike.
+
+MF-M1 receipt repairs R1/R2 (SLICE 0) MUST pass before this spike consumes attempt/invocation `dispatchTruth` or invocation `fallbackClass` as evidence.
 
 The first-slice scope is decided: model-profile-only; no capability-qualification integration; no provisional model-profile registry; no cryptographic owner signature unless a concrete threat model requires it; and Inspect AI remains a follow-on spike.
 

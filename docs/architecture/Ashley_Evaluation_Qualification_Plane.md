@@ -4,7 +4,8 @@
 authorized by this document. The first evaluation spike waits for Model Fabric
 contract implementation and local acceptance.
 
-**Date:** 2026-08-13; Model Fabric delivery-order banner 2026-08-25
+**Date:** 2026-08-13; Model Fabric delivery-order banner 2026-08-25; Pass-2
+qualification-binding closure 2026-08-25
 
 Model Fabric first **code** milestone is **MF-M1** (existing-route seam) in
 [`Model_Fabric_Architecture.md`](Model_Fabric_Architecture.md). Owner scope is
@@ -384,8 +385,15 @@ qualification does not transfer to another purpose or seat.
 The process should bind three separate categories:
 
 1. **Profile binding:** the exact `ModelProfileQualificationBinding` with profile ID, profile version, profile fingerprint, provider, and configured model ID.
-2. **Dispatch binding:** route ID, purpose, resolved model ID when reported, context policy, system and identity prompt versions, generation parameters **including material reasoning/inference-policy configuration**, structured-output mode, retry facts, fallback facts, tool and multimodal use, privacy/data-boundary facts, and a stage-valid receipt reference.
+2. **Dispatch binding:** route ID, purpose, resolved model ID when reported, context policy, system and identity prompt versions, generation parameters **including material reasoning/inference-policy configuration**, structured-output mode, retry facts, fallback facts, tool and multimodal use, privacy/data-boundary facts, and a stage-valid receipt reference. **Qualification subject** is logical role/seat + material inference fingerprint. Each fallback occupant needs its own `QualificationResult`.
 3. **Campaign binding:** source commit and dirty state, environment, corpus, rubric, judges, Evaluation Definition, evidence references, limitations, and unverified boundaries.
+
+`OwnerApprovalRef` and `ActivationRef` are **not** Evaluation artifacts.
+Evaluation MUST NOT create them. A PASS plus recommendation is not
+activation. Shadow/counterfactual execution is Evaluation-only when a
+campaign requires it. There is no default live dual-run of user turns.
+`SHADOW OUTPUT != LIVE AUTHORITY`. E6 shadow evidence is not required for
+every route.
 
 These categories MUST remain separate. Route or campaign facts MUST NOT be reconstructed as model-profile fields.
 
@@ -725,11 +733,30 @@ so.
 
 ## Decisions required before implementation
 
-1. Where should immutable qualification artifacts live after the local prototype? Local user data is the recommended initial location.
-2. What exact artifact satisfies `SC-CON-04` consultation for a model-family change?
-3. What retention and deletion policy applies to model inputs, outputs, screenshots, and judge logs?
-4. Which providers or model families count as materially independent judges for each high-impact campaign?
-5. Who owns reviewing and refreshing the currently stale stabilization baselines after concurrent schema work settles?
+Closed for Model Fabric M2–MF-ACT machinery (2026-08-25 owner answers):
+
+1. Immutable qualification artifacts live initially under
+   `~/.composer-assistant/control/model-fabric/qualifications/` (not
+   `nuclear.db`). Evaluation owns meaning; Fabric may store bytes.
+2. `SC-CON-04` consultation artifact is
+   `ashley.stewardship.consultation.v1`. Constitution-text instance:
+   [`../governance/SC-CON-04_2026-08-25_Constitution_Model.md`](../governance/SC-CON-04_2026-08-25_Constitution_Model.md).
+   New model-family **activation** requires a separate record with Ashley’s
+   position `recorded` before `OwnerApprovalRef`.
+3. Independence_group is training-lineage data in Git catalog. Different
+   provider of the same family is not independence. Mandatory dual review:
+   high-impact identity/model-family qualification; `architecture_critique`
+   and `adversarial_audit` when those seats are active. Not ordinary
+   Reflection or Expression.
+
+Still Evaluation-spike local (does not block Fabric machinery):
+
+- retention/deletion policy details for screenshots and judge logs beyond
+  the control-plane directory;
+- held-out identity corpus visibility (evaluator vs owner);
+- numeric pack thresholds;
+- who refreshes currently stale stabilization baselines after concurrent
+  schema work settles.
 
 The first-slice decisions are no longer open: it is model-profile-only; capability integration is deferred; identity corpora default to synthetic or sanitized; same-family judging cannot stand alone for high-impact campaigns; and cryptographic owner signatures are not required without a concrete threat model.
 

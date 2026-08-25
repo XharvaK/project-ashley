@@ -1,0 +1,23 @@
+{
+  "schema": "ashley.model_fabric.reasoning_maps.v1",
+  "maps": {
+    "gpt_oss_groq_nim": {
+      "disabled": { "result": "capability_mismatch" },
+      "economical": { "wire": "low" },
+      "standard": { "wire": "medium" },
+      "high": { "wire": "high" },
+      "max_supported": { "wire": "high" }
+    },
+    "qwen_3_6_groq": {
+      "disabled": { "wire": "none" },
+      "economical": { "wire": "none" },
+      "standard": { "wire": "default" },
+      "high": { "wire": "default" },
+      "max_supported": { "wire": "default" }
+    },
+    "muse_glimmer": {
+      "high": { "wire": "high" },
+      "max_supported": { "wire": "xhigh" }
+    }
+  }
+}

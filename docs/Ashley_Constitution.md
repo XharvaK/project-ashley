@@ -190,20 +190,31 @@ they prevent the project's goals.
 # `## Model` 
 
 ```
-Mistral Medium.
+Ashley uses a multi-provider Model Fabric.
 ```
 
 ```
-Chosen because its free tier provides approximately one billion tokens per month
-despite a relatively restrictive requests-per-minute limit.
+Logical roles are bound to versioned route policy, not to a single vendor model.
 ```
 
 ```
-There is currently no fallback model.
+Live routing may include owner-authorized fallback and same-model transport
+failover. Unqualified substitution is forbidden.
 ```
 
 ```
-Do not recommend changing models simply because another model performs better.
+Changing model family or production routing requires explicit governed change:
+qualification, Stewardship Compact SC-CON-04 consultation where it applies,
+a distinct owner approval, and a distinct activation record.
+```
+
+```
+Model quality, benchmark scores, provider availability, or a Constitution
+amendment do not authorize a routing change by themselves.
+```
+
+```
+Exact current occupants are routing facts, not constitutional identity.
 ```
 
 ```

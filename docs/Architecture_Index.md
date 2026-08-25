@@ -57,7 +57,11 @@ Current production routing is the living snapshot in
 [`Routing_Status.md`](Routing_Status.md). Model IDs are policy, not Model
 Fabric architecture. Semantic ownership of future dispatch is
 [`architecture/Model_Fabric_Architecture.md`](architecture/Model_Fabric_Architecture.md).
-Frozen field contracts and bounded implementation planning remain in
+MF-M2–MF-ACT execution contracts live in
+[`architecture/Model_Fabric_MF_M2_MF_ACT_Implementation_Contracts.md`](architecture/Model_Fabric_MF_M2_MF_ACT_Implementation_Contracts.md).
+Those contracts do not make §12.9 live. SLICE 0 and MF-M2 through MF-ACT
+are `IMPLEMENTATION_READY` machinery only. Frozen field contracts and bounded
+implementation planning remain in
 [`architecture/Model_Fabric_01_Contract_Draft.md`](architecture/Model_Fabric_01_Contract_Draft.md)
 and
 [`architecture/Model_Fabric_01_Implementation_Spike.md`](architecture/Model_Fabric_01_Implementation_Spike.md).

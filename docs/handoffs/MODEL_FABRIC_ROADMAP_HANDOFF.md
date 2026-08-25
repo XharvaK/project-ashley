@@ -3,8 +3,10 @@
 **Source Document:** [`docs/architecture/Ashley_Architecture_Roadmap.md`](../architecture/Ashley_Architecture_Roadmap.md)
 **Governing architecture:** [`docs/architecture/Model_Fabric_Architecture.md`](../architecture/Model_Fabric_Architecture.md)
 **Owner decisions:** [`MODEL_FABRIC_OWNER_DECISION_PACKET.md`](MODEL_FABRIC_OWNER_DECISION_PACKET.md)
-**Status:** `LOCAL MF-M1 CANDIDATE` — owner scope `CLOSED`; acceptance
-`NOT YET EVALUATED`; production `NOT IMPLEMENTED`
+**Status:** `LOCAL MF-M1 CANDIDATE` plus Pass-2 `IMPLEMENTATION_READY`
+machinery contracts (SLICE 0 and MF-M2 through MF-ACT). Owner scope for
+MF-M1 `CLOSED`; acceptance `NOT YET EVALUATED`; production
+`NOT IMPLEMENTED`. §12.9 not live.
 **Date:** 2026-08-25
 
 The local MF-M1 candidate is implemented and checkpointed at
@@ -72,11 +74,13 @@ candidate must revalidate against that exact integration SHA.
 |---|---|---|
 | MF-M0 | Docs / current-state freeze | No — complete |
 | MF-M1 | Existing-route seam + receipts | **No** |
-| MF-M2 | Unified identity; replace split route authority incrementally | No |
-| MF-M3 | Catalog + qualification **minimum** (`discovered` → … → `owner_approved`) | **No production route** |
-| MF-M4 | First optional elastic **utility** backend; qualified + owner-approved only | Track A utility only |
-| MF-M5 | Dynamic availability + approved pools / seat assignment | Among approved |
-| MF-M6 | Specialist seats production-active | After packs |
+| SLICE 0 | R1/R2 receipt-truth repairs | No |
+| MF-M2 | Unified CURRENT snapshot | No |
+| MF-M3 | Catalog + qualification **minimum** | **No production route** |
+| MF-M4 | Zen HTTP utility adapter (dark) | Track A utility only |
+| MF-M5 | Availability among approved | Among approved |
+| MF-M6 | Specialist resolve; `routine_validation` dark | After packs + owner activation |
+| MF-ACT | Activation **mechanism** | Not a route cutover |
 | F1-obs | Historical observation witness | Separate |
 
 **Why MF-M3 before MF-M4:** `MODEL AVAILABLE != QUALIFIED != APPROVED FOR
@@ -170,9 +174,11 @@ re-evaluation. No production promotion or activation is implied.
 ## 8. Documents to read next
 
 1. [`docs/architecture/Model_Fabric_Architecture.md`](../architecture/Model_Fabric_Architecture.md) — sole current owner; live §11; targets §12.9; MF-M1 §31
-2. [`MODEL_FABRIC_MF_M1_IMPLEMENTATION_CHECKPOINT.md`](MODEL_FABRIC_MF_M1_IMPLEMENTATION_CHECKPOINT.md) — resume gate
-3. [`MODEL_FABRIC_OWNER_DECISION_PACKET.md`](MODEL_FABRIC_OWNER_DECISION_PACKET.md) — closed vs open
-4. [`docs/Routing_Status.md`](../Routing_Status.md) — live route facts only
-5. [`docs/architecture/Model_Fabric_01_Contract_Draft.md`](../architecture/Model_Fabric_01_Contract_Draft.md) — frozen fields; F1-obs not MF-M1
-6. [`docs/architecture/Ashley_Milestone_Execution_Governance.md`](../architecture/Ashley_Milestone_Execution_Governance.md)
-7. [`docs/architecture/Ashley_Cross_Phase_Architecture.md`](../architecture/Ashley_Cross_Phase_Architecture.md)
+2. [`docs/architecture/Model_Fabric_MF_M2_MF_ACT_Implementation_Contracts.md`](../architecture/Model_Fabric_MF_M2_MF_ACT_Implementation_Contracts.md) — MF-M2–MF-ACT machinery contracts
+3. [`MODEL_FABRIC_MF_M1_IMPLEMENTATION_CHECKPOINT.md`](MODEL_FABRIC_MF_M1_IMPLEMENTATION_CHECKPOINT.md) — resume gate
+4. [`MODEL_FABRIC_OWNER_DECISION_PACKET.md`](MODEL_FABRIC_OWNER_DECISION_PACKET.md) — 2026-08-25 closed packet
+5. [`MODEL_FABRIC_MF_M2_MF_M6_OWNER_DECISION_PACKET.md`](MODEL_FABRIC_MF_M2_MF_M6_OWNER_DECISION_PACKET.md) — Pass-1 questions, now owner-closed
+6. [`docs/Routing_Status.md`](../Routing_Status.md) — live route facts only
+7. [`docs/architecture/Model_Fabric_01_Contract_Draft.md`](../architecture/Model_Fabric_01_Contract_Draft.md) — frozen fields; F1-obs not MF-M1
+8. [`docs/architecture/Ashley_Milestone_Execution_Governance.md`](../architecture/Ashley_Milestone_Execution_Governance.md)
+9. [`docs/architecture/Ashley_Cross_Phase_Architecture.md`](../architecture/Ashley_Cross_Phase_Architecture.md)

@@ -339,6 +339,113 @@ treat M5 as blocked on S1.
 Historical **F1-obs** (Thought-observation Lightning, `single_attempt`, no
 fallback) is deferred optional. It does not block MF-M1.
 
+Execution contracts for later Fabric machinery:
+[`Model_Fabric_MF_M2_MF_ACT_Implementation_Contracts.md`](Model_Fabric_MF_M2_MF_ACT_Implementation_Contracts.md).
+MF-ACT implements activation **mechanics**. It does not authorize §12.9
+production routing.
+
+### MF-M2 — Unified CURRENT snapshot
+
+| Field | Contract |
+|---|---|
+| Track | mechanism |
+| Purpose | One validated CURRENT route-policy snapshot; zero intended user-visible routing change |
+| Existing owner | Model Fabric |
+| Must already be true | MF-M1 seam. SLICE 0 before M3 consumes receipt truth |
+| Must not be treated as required | OpenCode; §12.9 activation; Evaluation campaigns |
+| Creates | Git current-compatibility portfolio; unified resolver; override recording |
+| Does not create | Target routing; Fabric DB |
+| Forbidden reading | “Unified registry is Qwen-primary / 120B Thought” |
+| Evidence | Caller characterization vs `d918572c` |
+| Verification | Settlement tests; no hidden retries |
+| Promotion | Out of scope |
+| Rollback | Occupants unchanged if resolver reverts |
+
+### MF-M3 — Catalog and qualification records
+
+| Field | Contract |
+|---|---|
+| Track | mechanism |
+| Purpose | Occupancy, packs as names, lifecycle, independence_group; discovery → unqualified only |
+| Existing owner | Model Fabric records; Evaluation owns result meaning |
+| Must already be true | MF-M2 identity; SLICE 0 |
+| Must not be treated as required | Production OpenCode; numeric eval thresholds |
+| Creates | Catalog files; binding types; local qualification artifact layout |
+| Does not create | Production routes; auto-promotion |
+| Forbidden reading | “Cataloged means routable” |
+| Evidence | Discovery cannot promote |
+| Verification | Record state-machine tests |
+| Promotion | Out of scope |
+| Rollback | Catalog revert; live routing unchanged |
+
+### MF-M4 — Zen HTTP Track A utility adapter
+
+| Field | Contract |
+|---|---|
+| Track | mechanism |
+| Purpose | OpenCode Zen HTTP chat-completions, utility-only, fail-closed if absent, dark by default |
+| Existing owner | Model Fabric |
+| Must already be true | MF-M3 records |
+| Must not be treated as required | `opencode serve`; Track B; Thought/Expression on Zen |
+| Creates | `opencode_zen_http` adapter |
+| Does not create | Live utility cutover |
+| Forbidden reading | “Zen package exists, therefore utility uses Zen” |
+| Evidence | Boot without Zen key; no Thought failover theft |
+| Verification | One POST per attempt; no tools |
+| Promotion | Out of scope |
+| Rollback | Disable adapter |
+
+### MF-M5 — Availability among approved occupants
+
+| Field | Contract |
+|---|---|
+| Track | mechanism |
+| Purpose | Health predicates and approved-chain walk. Not core cutover |
+| Existing owner | Model Fabric |
+| Must already be true | M3 records |
+| Must not be treated as required | Owner §12.9 ActivationRef |
+| Creates | Process-local health; chain walk |
+| Does not create | Unqualified shopping; catalog daemon |
+| Forbidden reading | “Quota picked a cheaper Thought model” |
+| Evidence | Unhealthy ≠ unqualified |
+| Verification | Fail-closed when chain empty |
+| Promotion | Out of scope |
+| Rollback | Disable walker |
+
+### MF-M6 — Specialist-seat resolution
+
+| Field | Contract |
+|---|---|
+| Track | mechanism |
+| Purpose | Generic seat resolve; first vertical candidate `routine_validation` / Lightning, dark |
+| Existing owner | Model Fabric |
+| Must already be true | M3 seats; M5 health |
+| Must not be treated as required | Full specialist portfolio live |
+| Creates | Resolver; executed session id only if specialist ran |
+| Does not create | Track B; fabricated sessions |
+| Forbidden reading | “M6 activated every seat” |
+| Evidence | Dark without ActivationRef |
+| Verification | Unqualified occupant refused |
+| Promotion | Out of scope |
+| Rollback | Engineering remains record-only |
+
+### MF-ACT — Activation mechanism
+
+| Field | Contract |
+|---|---|
+| Track | mechanism (control plane) |
+| Purpose | Owner-gated per-role activation/rollback mechanics |
+| Existing owner | Model Fabric control plane |
+| Must already be true | M2 snapshot; M3 records; schemas |
+| Must not be treated as required | Owner actually activating §12.9 |
+| Creates | Atomic pointer; validators; coupling preflight; owner-invoked writer |
+| Does not create | Any target production route |
+| Forbidden reading | “MF-ACT implemented, therefore production switched” |
+| Evidence | `NO TARGET ROUTE ACTIVATED` on completion |
+| Verification | Pointer atomicity; stale fail-closed; Luna cannot mint owner refs |
+| Promotion | Out of scope. Production route qualification remains a later owner gate |
+| Rollback | New rollback ActivationRef; never mutate history |
+
 The owner selected Model Fabric next on `2026-08-25`. Sandbox V2 M1–M7 is
 production accepted against exact candidate
 `48bad019fe601d5c871a54dd9902879862c6e96a`, with M7 limited to the named
@@ -539,14 +646,14 @@ Live resolution refreshed `2026-08-25`:
 | Owner-selected delivery | Model Fabric, beginning with MF-M1 |
 | `origin/master` | `48bad019fe601d5c871a54dd9902879862c6e96a` |
 | Sandbox V2 M1–M7 | `PRODUCTION ACCEPTED` against the exact candidate above. M7 is limited to `patch_export` |
-| Allowed now | MF-M1 implementation acceptance review and later owner-closed milestone re-evaluation; separately authorized documentation/design work that does not compete with that delivery |
-| Not allowed by this selection | F1-obs as the first Fabric cut; new provider/model routing in MF-M1; OpenCode production routing; live apply; Git effects; deployment; self-change; Event Spine implementation |
+| Allowed now | MF-M1 implementation-acceptance review **or** owner-authorized SLICE 0 + MF-M2–MF-ACT machinery implementation against the Pass-2 contracts. Neither is §12.9 production routing |
+| Not allowed by this selection | F1-obs as the first Fabric cut; new provider/model routing without ActivationRef; OpenCode production routing; live apply; Git effects; deployment; self-change; Event Spine implementation; Luna-created OwnerApprovalRef / ActivationRef |
 
-**Next mechanism action:** perform the separate MF-M1 implementation-acceptance
-review, then re-evaluate MF-M2 and later milestones against their still-open or
-deferred contracts. The local candidate preserves all existing routing,
-provider, model, failover, fallback, and mismatch behavior while adding typed
-identity and truthful receipts.
+**Next mechanism action:** either complete the separate MF-M1
+implementation-acceptance review, or implement SLICE 0 then MF-M2–MF-ACT
+**mechanics** from
+[`Model_Fabric_MF_M2_MF_ACT_Implementation_Contracts.md`](Model_Fabric_MF_M2_MF_ACT_Implementation_Contracts.md).
+Do not activate §12.9 occupants.
 
 **Next governance action (parallel):** S1 specification only, if separately
 selected and kept outside the MF-M1 implementation scope.
@@ -565,4 +672,5 @@ This document does not authorize those next actions. It only ranks them.
 
 When a deferred item (D1–D6 or P1) becomes current work, fill §1 against its
 already-existing phase contract. Do not add a phase. Do not add an ID that is
-not already on the roadmap.
+not already on the roadmap, except owner-created IDs already listed here
+(MF-M2–MF-M6, MF-ACT).

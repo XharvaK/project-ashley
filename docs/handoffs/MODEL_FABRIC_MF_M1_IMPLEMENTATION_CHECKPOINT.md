@@ -52,6 +52,11 @@ Owner-selected **future** targets (Architecture §12.9), including Groq 120B
 Thought and Qwen-primary Expression, are **not** current routes and must not
 be expected by characterization tests.
 
+Later SLICE 0 (R1/R2) and MF-M2–MF-ACT **machinery** contracts:
+[`../architecture/Model_Fabric_MF_M2_MF_ACT_Implementation_Contracts.md`](../architecture/Model_Fabric_MF_M2_MF_ACT_Implementation_Contracts.md).
+Those contracts do not change this checkpoint’s MF-M1 acceptance status
+(`NOT YET EVALUATED`) or production status (`NOT IMPLEMENTED`).
+
 ---
 
 ## B. CURRENT RUNTIME INTEGRATION BASELINE

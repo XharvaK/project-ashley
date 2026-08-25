@@ -32,10 +32,17 @@ Current route facts are split across:
 - [`registry.ts`](../apps/agent-service/src/core/model-routing/registry.ts),
   which currently owns dispatched provider and model values.
 
-No one file is yet the complete route authority. A future Model Fabric
-implementation must replace this split with one validated registry snapshot
-consumed by dispatch and status. Documentation must not imply that
-`config/models.json` already owns the whole route contract.
+No one file is yet the complete route authority. A future Model Fabric **MF-M2** implementation must replace this split with
+one validated CURRENT registry snapshot consumed by dispatch and status.
+Until that code exists, the split remains. Documentation must not imply that
+`config/models.json` already owns the whole route contract. Owner-selected
+§12.9 targets are **not** current routing.
+
+Pass-2/2.1 MF-M2–MF-ACT contracts are `IMPLEMENTATION_READY` machinery.
+They do not change the live table below. Live Thought remains NIM
+`openai/gpt-oss-20b` wire `low` (normalized policy `economical`, not
+`standard`). Live Expression remains Mistral primary → Qwen `none`.
+Luna MUST NOT treat documentation fixtures as dispatch.
 
 Nuclear schema version is source-derived from
 [`core/db.ts`](../apps/agent-service/src/core/db.ts). Do not copy the integer
@@ -167,6 +174,20 @@ background cognition is Groq-only.
   milestone contract, purpose-specific Model Fabric qualification, and the
   relevant authority gates.
 - `experimental_auditor` and `experimental_multimodal` remain disabled.
+
+## Additional live callers (not extra Wave 1 purposes)
+
+These paths exist in source at the MF-M1 candidate. They are **current**
+facts. They are not §12.9 targets. MF-M1 preserved them; MF-M2 must keep
+them as recorded overrides / scars.
+
+| Caller | Logical role | What actually happens |
+|---|---|---|
+| `reflection/initiative.ts` | `reflection_initiative` | Purpose maps `utility_bulk`, then forced `thought` with `model: env.mistralModel` |
+| `engineering-model-adapter.ts` | `engineering` | Omitted purpose resolves to Expression / Mistral quota; `SpecialistRequirement` recorded only |
+| Durable/proactive Thought | `thought` | Same NIM→Groq 20B occupants as reactive Thought; deadline is remaining job time or none |
+
+Do not document these as already-migrated to Nemotron Ultra or as repaired.
 
 ## Observability
 

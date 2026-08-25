@@ -10,6 +10,10 @@
 This file records owner + ChatGPT design decisions. It is not a second
 architecture.
 
+Pass-2/2.1: SLICE 0 and MF-M2 through MF-ACT are `IMPLEMENTATION_READY`
+machinery. §12.9 is not live. Luna must not mint `OwnerApprovalRef` or
+`ActivationRef`.
+
 ```text
 SOURCE SNAPSHOT != PROMOTED CANDIDATE != RUNNING PRODUCTION
 OWNER-SELECTED TARGET != CURRENT ROUTING != QUALIFIED != AUTHORIZED ACTIVATION
@@ -74,17 +78,20 @@ Do not reopen closed rows as if they were still owner questions.
 
 ## Remaining open
 
-| # | Question | Why still open |
+Pass-2 (2026-08-25) closed A, C, D, E, G, H for **machinery**. B and F remain
+policy/evaluation data. I already resolved.
+
+| # | Question | Status after Pass 2 |
 |---|---|---|
-| A | Exact first OpenCode Track A **transport** (Zen HTTP vs isolated `serve` vs other qualified backend) | Implementation/qualification choice; not architectural identity |
-| B | Exact qualification **corpus and thresholds** per pack | Evaluation Plane + later execution; this pass only designed packs |
-| C | When specialist seats become **production-active** | MF-M6 gate; evidence-dependent |
-| D | Catalog **refresh cadence** | Operational, not a law |
-| E | Precise **independence enforcement** threshold (when dual-model review is mandatory vs optional) | Policy detail after a real dual-review path exists |
-| F | Exact vendor strings / backends for §12.9 occupants | Policy data; not architecture |
-| G | Ordered curiosity secondary chain (MiniMax vs Groq 120B) | Owner forbade inventing an order until qualification/policy defines one |
-| H | Owner **activation** of any §12.9 target after qualification | Separate from selection |
-| I | Whether a later OF forensic repair SHA supersedes `8eedad8` as MF-M1 freeze | Resolved for this integration line: `e36613b…` supersedes `8eedad8`; revalidate only if a later accepted candidate is named |
+| A | Track A transport | **CLOSED:** OpenCode Zen HTTP chat-completions. `opencode serve` deferred. |
+| B | Exact qualification corpus and thresholds per pack | Still Evaluation-owned. Does not block M2–MF-ACT machinery. |
+| C | When specialist seats become production-active | **CLOSED:** generic resolve in M6; first vertical `routine_validation`/Lightning dark until owner ActivationRef. No full-portfolio activation. |
+| D | Catalog refresh cadence | **CLOSED:** no periodic Fabric daemon. Owner/OC-admitted discovery / invalidation only. |
+| E | Independence enforcement | **CLOSED:** `independence_group` is training-lineage. Dual review for high-impact identity/model-family, `architecture_critique`, `adversarial_audit`. Not ordinary Reflection/Expression. |
+| F | Exact vendor strings | Still mutable policy data. Examples in `docs/architecture/model-fabric/examples/`. |
+| G | Curiosity secondary order | **CLOSED:** remain unordered candidates. Only Super activatable until owner orders a qualified chain. |
+| H | §12.9 activation | **CLOSED as mechanism:** MF-ACT. Actual cutover still requires owner `ActivationRef`. |
+| I | OF forensic SHA | Already resolved: `e36613b` supersedes `8eedad8`. |
 
 ## MF-M1 contract (exact; implementation is in local candidate)
 

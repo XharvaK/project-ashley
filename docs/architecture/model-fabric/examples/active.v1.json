@@ -1,0 +1,7 @@
+{
+  "schema": "ashley.model_fabric.active_pointer.v1",
+  "pointerGeneration": 0,
+  "replacedPointerGeneration": null,
+  "notes": "Empty rows means every role uses Git current-compatibility. This file is an example, not Mint state.",
+  "rows": {}
+}

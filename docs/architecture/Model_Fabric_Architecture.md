@@ -2,9 +2,11 @@
 
 **Status:** `CURRENT PHASE CONTRACT`
 
-**Date:** 2026-08-25 (owner-decision reconciliation; source-baseline + target-policy correction)
+**Date:** 2026-08-25 (Pass-2 implementation contracts; Constitution `## Model` amended)
 
 **Sole current owner:** this file. Do not add a parallel Model Fabric design.
+Execution contracts for MF-M2–MF-ACT:
+[`Model_Fabric_MF_M2_MF_ACT_Implementation_Contracts.md`](Model_Fabric_MF_M2_MF_ACT_Implementation_Contracts.md).
 
 ```text
 SOURCE SNAPSHOT
@@ -24,6 +26,7 @@ semantic evidence.
 | `productionBaselineSha` | `e36613bf805bb0a4f5e95ec11f0b8dd5dfb5857a` | Exact production-proven runtime baseline. MF-M1 is not production-routed. |
 | `implementationStartSha` | `5a05e96e4d5d6afbd6d44e9ca518f141fa8292c6` | Exact integrated baseline requested for autonomous MF-M1 implementation; docs-only on top of the `e36613b` runtime ancestor. |
 | `mfM1CandidateSha` | `d918572c7ae01d5b367323692bd6e8fbcf257895` | Local MF-M1 implementation candidate produced from `implementationStartSha`; acceptance and production promotion remain separate. |
+| Pass-2 planning HEAD | `d915af86483e2af4f5edf2838023ffe22f875dcc` | Docs/planning worktree for MF-M2–MF-ACT contracts. Not an implementation candidate. |
 | Historical MF documentation checkpoint | `7a7883753a7e6e5a002bf23d226645ce85730ee5` | Docs-only MF-M1 checkpoint based on the pre-repair `8eedad8` line; preserved for provenance. |
 | Historical pre-repair MF planning baseline | `8eedad8bebbed2d8cd984849a269afe256a3d08a` | Original MF-M1 planning/source snapshot; superseded by `e36613b` for this integration line. |
 | Historical routing audit | `04beaf1c21c9f7e0c9580692f57ed533d822f61e` | Inherited Thought NIM→Groq 20B line; superseded as *planning* base |
@@ -68,6 +71,7 @@ expected current behavior.
 | Runtime implementation | `IMPLEMENTED (LOCAL CANDIDATE)` at `d918572c` |
 | Implementation acceptance | `NOT YET EVALUATED` |
 | Production status | `NOT IMPLEMENTED` |
+| MF-M2–MF-ACT contracts | `IMPLEMENTATION_READY` (machinery). Activation of §12.9 remains owner control-plane. |
 
 `OWNER CLOSED` means the owner has closed **scope and design**. It does **not**
 mean MF-M1 is implementation-accepted, promoted, or production-proven. The
@@ -95,9 +99,11 @@ not block MF-M1.
 **Scope:** This status reconciliation records the local MF-M1 candidate. It
 does not change runtime route selection, providers, `config/models.json`,
 OpenCode adapters, Mint, deployment, Operational Fulfillment M1, or
-qualification execution. Later slices (elastic backend activation, catalog
-auto-route, specialist seats in production) remain gated by the milestone
-sequence in §34.
+qualification execution. Later slices (elastic backend **mechanics**, catalog records, specialist
+resolution, activation **mechanism**) are contracted in
+[`Model_Fabric_MF_M2_MF_ACT_Implementation_Contracts.md`](Model_Fabric_MF_M2_MF_ACT_Implementation_Contracts.md).
+Those contracts do not activate §12.9 occupants. Actual production routing
+change still requires owner-created `ActivationRef`.
 
 **Evidence classes used in this revision:**
 
@@ -870,9 +876,25 @@ engineering review, adversarial audit, root-cause debugging, research
 synthesis, complex orchestration) target `max_supported`. Bulk/throughput
 seats may use lower reasoning.
 
-## 13. Identity design (`PROPOSAL`)
+## 13. Identity design (`OWNER CLOSED` for M2–MF-ACT identity grain)
 
 Canonical identities. Do not collapse them into one config string.
+
+Exact field contracts:
+[`Model_Fabric_MF_M2_MF_ACT_Implementation_Contracts.md`](Model_Fabric_MF_M2_MF_ACT_Implementation_Contracts.md)
+§1–§3.
+
+```text
+PortfolioRevisionId     mfp_…
+PolicyRowId             mfr_<logicalRole>_<occupancyKey>_<rev>
+OccupantId              mfo_…
+LogicalModelRole        thought | expression | …
+occupancyKey            interactive | durable_proactive | default | seat id
+SpecialistSeat          data, not 25 purposes
+QualificationSubject    role/seat + material inference fingerprint
+AdmissionBasis          existing_compatibility | qualification + OwnerApprovalRef
+ActivationRef           distinct owner act; required for production-routed target rows
+```
 
 ```text
 LogicalModelRole        thought | expression | thought_observation | exchange_cognition | engineering | …
@@ -916,13 +938,19 @@ Where providers only expose moving aliases, record `revision_detectable:
 false` and require periodic re-qualification rather than silent drift
 authorization.
 
-## 15. Qualification (`PROPOSAL`)
+## 15. Qualification (`OWNER CLOSED` subject grain; Evaluation still owns meaning)
 
-Evaluation Plane owns qualification meaning and promotion.
-Model Fabric supplies bound profile and receipt facts.
+Evaluation Plane owns qualification meaning and promotion recommendation.
+Model Fabric supplies bound profile and receipt facts and **binds** a
+`QualificationResult` to a role/seat + material inference fingerprint +
+policy-row identity. Each fallback occupant requires its own
+`QualificationResult`. Chains and portfolios are not transferable
+qualification blobs.
+
 `RELEASE_QUALIFIED` remains the canonical release-readiness term.
 A local adapter test is not qualification.
 A green test is not owner approval.
+Owner approval is not activation.
 Same model under a materially different reasoning or inference-policy
 configuration may require separate qualification evidence. Target occupants
 in §12.9 tell Evaluation **which configurations to qualify first**. They do
@@ -1005,7 +1033,19 @@ Thought/Expression packs remain mandatory before any later attempt to change
 those production routes. Seat packs apply before a scouting occupant becomes
 `owner_approved` for that seat.
 
-## 16. Dynamic availability (`PROPOSAL`)
+## 16. Dynamic availability (`OWNER CLOSED` for M5 machinery)
+
+Required predicates: `configured`, `available`, `ready`, `qualified`,
+`owner_approved`, `active`, `degraded`. These are distinct. Unhealthy ≠
+unqualified. Recovery does not re-qualify.
+
+Process-local cooldown is reconstructable and is not qualification
+authority. No periodic Fabric catalog/qualification daemon in M2–M6.
+
+If today's free model disappears, core Thought and Expression remain on
+their **active** approved occupants or, if none remain, fail closed per
+the role. Outage MUST NOT rewrite canonical target policy. Unqualified
+substitution never runs live.
 
 Required states: route health, unavailable, cooldown, transient vs durable
 unavailability, provider/model-not-found, rate-limit, quota exhaustion,
@@ -1056,7 +1096,7 @@ Never: keep trying random free models until one responds.
 |---|---|---|
 | Transport failover | Same model, other provider | Role policy allows; Thought already does NIM→Groq 20B |
 | Semantic model substitution | Different model | Role-specific owner authorization among **approved** candidates |
-| Unqualified substitution | Highest | Never |
+| Unqualified substitution | Highest | **Never.** No emergency unqualified availability exception. |
 
 Per-role default:
 
@@ -1157,7 +1197,7 @@ Continuity keeps lease, resume, and artifact lifecycle.
 
 ## 22. OpenCode — two tracks
 
-### Track A — inference backend (this phase; **not MF-M1**)
+### Track A — inference backend (**MF-M4** transport closed: Zen HTTP chat-completions)
 
 ```text
 Ashley cognitive owner
@@ -1265,7 +1305,7 @@ Distinguish:
 | Code analysis | Natural for agent; still not authority | Weaker without files |
 | Engineering worker | Track B | N/A as the worker itself |
 
-### 23.5 Adapter options (`PROPOSAL`)
+### 23.5 Adapter options (first Track A transport `OWNER CLOSED`; remaining options `PROPOSAL`)
 
 | Option | Latency | Isolation | Complexity | First MF inference? |
 |---|---|---|---|---|
@@ -1276,11 +1316,16 @@ Distinguish:
 | E. Zen HTTP as provider adapter | Similar to Groq adapter | Ashley-owned prompts | Lowest | Preferred Track A candidate; transport is not identity |
 | F. Another qualified hosted/direct API | Adapter-shaped | Ashley-owned prompts | Lowest | Allowed if it meets privacy + qualification |
 
+Owner Q17 closed **option E** as the first Track A transport. Options A–D
+and F remain later research, not competing first-implementation choices.
+
 **Recommended first OpenCode-related implementation (after MF-M1, MF-M2, and
-MF-M3 qualification records):** a **utility-only** Track A adapter. Exact
-transport (Zen HTTP vs isolated `serve` vs another qualified backend) is an
-implementation/qualification choice, not architectural identity. Do not wrap
-the coding agent for Thought or Expression. Do not put OpenCode in MF-M1.
+MF-M3 qualification records):** a **utility-only** Track A adapter using
+**OpenCode Zen HTTP chat-completions** (`POST https://opencode.ai/zen/v1/chat/completions`).
+Isolated `opencode serve` remains future research, not the first transport.
+Do not wrap the coding agent for Thought or Expression. Do not put OpenCode in MF-M1.
+The adapter MAY ship dark. Live utility cutover still requires
+`QualificationResult` + `OwnerApprovalRef` + `ActivationRef`.
 
 If a session-shaped path is used later, fail closed:
 
@@ -1491,11 +1536,13 @@ the dependency while preserving IDs' provenance in notes.
 |---|---|---|---|
 | MF-M0 | Architecture / research / current-state freeze | Docs only | No |
 | MF-M1 | Seam around **existing** routes; typed identity; receipts | **Zero intended** | **No** |
-| MF-M2 | Unified provider/result/error/model/route identity used by adapters; incrementally replace split route authority | No intended user-visible routing change | No |
+| SLICE 0 | MF-M1 R1/R2 receipt-truth repairs | Receipt metadata only | No |
+| MF-M2 | Unified CURRENT policy snapshot; replace split route authority | No intended user-visible routing change | No |
 | MF-M3 | Catalog + qualification **minimum**: occupancy records, packs, lifecycle states, independence_group. Discovery may create `unqualified`. **No production OpenCode route.** | Records only | No production activation |
-| MF-M4 | First optional elastic **utility-only** backend, fail-closed if absent, **only** owner-approved + qualified occupants | Only if owner enables | Track A utility only |
-| MF-M5 | Dynamic availability + owner-approved pools / seat assignment among already-approved routes | Utility/seat pools; still not Thought/Expression | Capacity among approved |
-| MF-M6 | Specialist seats production-active where evidence justifies | Later | After packs + approval |
+| MF-M4 | First Track A backend: Zen HTTP chat-completions, utility-only, fail-closed if absent, dark until owner activation | Adapter only unless owner activates | Track A utility only |
+| MF-M5 | Dynamic availability among already-approved occupants | Health among approved; still not Thought/Expression cutover | Capacity among approved |
+| MF-M6 | Generic specialist-seat resolution; first vertical candidate `routine_validation` / Lightning, dark | Mechanics only | After packs + owner activation |
+| MF-ACT | Activation mechanism: `OwnerApprovalRef`, `ActivationRef`, atomic pointer, per-role rollback | None until owner creates records | N/A |
 | F1-obs | Historical Thought-observation Lightning shadow | Separate optional witness | Not MF-M1 |
 
 MF-M0 is **COMPLETE as documentation** with this reconciliation.
@@ -1510,17 +1557,26 @@ MF-M1–MF-M4.
 
 ## 35. Deferred work
 
-- exact schema and storage placement;
-- adapter topology and exact Track A transport;
-- exact qualification corpus/thresholds;
-- catalog refresh cadence;
-- independence enforcement threshold;
-- when specialist seats become production-active;
-- **activation** of §12.9 target occupants (selection is closed; qualification and routing are not);
+Closed in Pass-2 contracts (do not reopen as architecture holes):
+
+- schema / Git vs local control-plane placement;
+- Track A first transport = Zen HTTP chat-completions;
+- independence_group as training-lineage data;
+- no periodic Fabric daemon;
+- unqualified substitution never live;
+- MF-ACT as the activation mechanism, not M5/M6 core cutover.
+
+Still deferred / out of this program:
+
+- exact Evaluation numeric thresholds and corpora (Evaluation-owned);
+- live Ashley SC-CON-04 position for **future family cutovers** (blocks
+  those activations, not machinery);
+- **actual** activation of §12.9 occupants (owner `ActivationRef` only);
 - Inspect AI / OpenInference / Phoenix trials;
 - production exporter configuration;
 - OpenCode worker (Track B);
-- moving Thought or Expression onto OpenCode **before** qualification + owner activation;
+- isolated `opencode serve` as Track A transport;
+- moving Thought or Expression onto OpenCode;
 - F1-obs Lightning observation slice.
 
 ## 36. Document map
@@ -1528,15 +1584,19 @@ MF-M1–MF-M4.
 | Layer | Owner document | Status |
 |---|---|---|
 | Semantic architecture | This file | `CURRENT PHASE CONTRACT` (sole owner) |
+| MF-M2–MF-ACT execution contracts | [`Model_Fabric_MF_M2_MF_ACT_Implementation_Contracts.md`](Model_Fabric_MF_M2_MF_ACT_Implementation_Contracts.md) | `IMPLEMENTATION_READY` machinery; not production activation |
 | Frozen fields / F1-obs spec | [`Model_Fabric_01_Contract_Draft.md`](Model_Fabric_01_Contract_Draft.md) | `SUPPORTING`; delivery order superseded |
-| Current routes | [`docs/Routing_Status.md`](../Routing_Status.md) | `SUPPORTING / LIVING SOURCE STATUS` — live facts at `e36613b`; **not** the §12.9 target table |
+| Current routes | [`docs/Routing_Status.md`](../Routing_Status.md) | `SUPPORTING / LIVING SOURCE STATUS` — live facts; **not** the §12.9 target table |
 | Post-MF-M1 target occupants | This file §12.9 | `OWNER CLOSED` as target policy only |
+| Constitution `## Model` | [`../Ashley_Constitution.md`](../Ashley_Constitution.md) | Amended 2026-08-25 to multi-provider Fabric governance |
+| SC-CON-04 consultation | [`../governance/SC-CON-04_2026-08-25_Constitution_Model.md`](../governance/SC-CON-04_2026-08-25_Constitution_Model.md) | Constitution-text consultation; not family-cutover consultation |
 | F1-obs mechanism spike | [`Model_Fabric_01_Implementation_Spike.md`](Model_Fabric_01_Implementation_Spike.md) | `SUPPORTING / DEFERRED` |
 | Historical reconnaissance | [`Model_Fabric_01_Codebase_Reconnaissance.md`](Model_Fabric_01_Codebase_Reconnaissance.md) | `HISTORICAL SOURCE SNAPSHOT` |
 | Ephemeral catalog | [`research/Model_Fabric_OpenCode_Research_Snapshot_2026-08-25.md`](research/Model_Fabric_OpenCode_Research_Snapshot_2026-08-25.md) | `EPHEMERAL RESEARCH` |
 | Worker future | [`research/Ashley_OpenCode_Worker_Future.md`](research/Ashley_OpenCode_Worker_Future.md) | `FUTURE / NON-NORMATIVE FOR MF` |
-| Owner decisions | [`../handoffs/MODEL_FABRIC_OWNER_DECISION_PACKET.md`](../handoffs/MODEL_FABRIC_OWNER_DECISION_PACKET.md) | Current decision record |
-| Roadmap handoff | [`../handoffs/MODEL_FABRIC_ROADMAP_HANDOFF.md`](../handoffs/MODEL_FABRIC_ROADMAP_HANDOFF.md) | Supporting status; local MF-M1 candidate checkpointed; acceptance and promotion remain separate |
+| Owner decisions (2026-08-25) | [`../handoffs/MODEL_FABRIC_OWNER_DECISION_PACKET.md`](../handoffs/MODEL_FABRIC_OWNER_DECISION_PACKET.md) | Prior closed packet |
+| Pass-1 questions | [`../handoffs/MODEL_FABRIC_MF_M2_MF_M6_OWNER_DECISION_PACKET.md`](../handoffs/MODEL_FABRIC_MF_M2_MF_M6_OWNER_DECISION_PACKET.md) | `OWNER CLOSED` by Pass-2 answers |
+| Roadmap handoff | [`../handoffs/MODEL_FABRIC_ROADMAP_HANDOFF.md`](../handoffs/MODEL_FABRIC_ROADMAP_HANDOFF.md) | Supporting status |
 | MF-M1 implementation checkpoint | [`../handoffs/MODEL_FABRIC_MF_M1_IMPLEMENTATION_CHECKPOINT.md`](../handoffs/MODEL_FABRIC_MF_M1_IMPLEMENTATION_CHECKPOINT.md) | Candidate, verification, and acceptance boundary |
 | Evaluation meaning | [`Ashley_Evaluation_Qualification_Plane.md`](Ashley_Evaluation_Qualification_Plane.md) | Sibling plane |
 
