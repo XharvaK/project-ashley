@@ -34,7 +34,7 @@ Governing contract:
 | SLICE 0 | `IMPLEMENTED / focused verified` | None |
 | MF-M2 | `IMPLEMENTED / focused verified` | None |
 | MF-M3 | `IMPLEMENTED / focused verified` | None |
-| MF-M4 | `PENDING` | None |
+| MF-M4 | `IMPLEMENTED / focused verified` | None |
 | MF-M5 | `PENDING` | None |
 | MF-M6 | `PENDING` | None |
 | MF-ACT | `PENDING` | None |
@@ -115,8 +115,30 @@ Focused MF-M3 settlement:
 - `apps/agent-service` `npm run build`: **PASS**;
 - `git diff --check`: **PASS**.
 
+## MF-M4 evidence
+
+Local commit:
+`e61d563e824c15e27a8cf74134d87fab3ffb879d`
+
+Implemented:
+
+- raw OpenCode Zen `chat/completions` adapter with no SDK retry behavior;
+- absent-key, unsupported-responses-endpoint, tool-bearing, and owner-private
+  privacy refusals;
+- one-provider-request accounting and normalized completion/error handling;
+- explicit dark provider registration without adding Zen to the CURRENT route
+  snapshot or Thought failover bucket;
+- boot-safe environment fields for `OPENCODE_ZEN_API_KEY` and the Zen base URL.
+
+Focused MF-M4 settlement:
+
+- **4 test files, 49 tests passed** across the Zen adapter, routing integration,
+  Thought failover, and MF-M2 current-routing regressions;
+- `apps/agent-service` `npm run build`: **PASS**;
+- `git diff --check`: **PASS**.
+
 ## Gates remaining
 
-- Zen, health, specialist, and activation machinery are not implemented yet.
+- Health, specialist, and activation machinery are not implemented yet.
 - No route is qualified, owner-approved, activation-approved, deployed, or
   production-accepted by this worktree.
