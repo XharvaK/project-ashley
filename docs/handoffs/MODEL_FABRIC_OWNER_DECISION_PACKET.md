@@ -86,7 +86,7 @@ Do not reopen closed rows as if they were still owner questions.
 | H | Owner **activation** of any §12.9 target after qualification | Separate from selection |
 | I | Whether a later OF forensic repair SHA supersedes `8eedad8` as MF-M1 freeze | Resolved for this integration line: `e36613b…` supersedes `8eedad8`; revalidate only if a later accepted candidate is named |
 
-## MF-M1 contract (exact; not implemented here)
+## MF-M1 contract (exact; implementation is in local candidate)
 
 In: exact per-caller logical role; optional `SpecialistRequirement`; requested
 purpose; configured route; explicit requested route; dispatched route; backend;
