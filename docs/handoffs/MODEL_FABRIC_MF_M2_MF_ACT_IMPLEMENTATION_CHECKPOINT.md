@@ -35,7 +35,7 @@ Governing contract:
 | MF-M2 | `IMPLEMENTED / focused verified` | None |
 | MF-M3 | `IMPLEMENTED / focused verified` | None |
 | MF-M4 | `IMPLEMENTED / focused verified` | None |
-| MF-M5 | `PENDING` | None |
+| MF-M5 | `IMPLEMENTED / focused verified` | None |
 | MF-M6 | `PENDING` | None |
 | MF-ACT | `PENDING` | None |
 
@@ -137,8 +137,32 @@ Focused MF-M4 settlement:
 - `apps/agent-service` `npm run build`: **PASS**;
 - `git diff --check`: **PASS**.
 
+## MF-M5 evidence
+
+Local commit:
+`e909a68b45ca83b7b498f934e562430efa751a8f`
+
+Implemented:
+
+- distinct configured, available, qualified, owner-approved, active, degraded,
+  cooldown, and ready predicates;
+- process-local health registry with explicit failure, success, and restart
+  behavior;
+- ordered approved-chain filtering and deterministic ready-occupant walking;
+- exclusion of unqualified, invalidated, revoked, inactive, and unordered
+  candidates;
+- fail-closed behavior when no approved occupant is ready, including quota
+  pressure without arbitrary cheaper-occupant selection.
+
+Focused MF-M5 settlement:
+
+- **2 test files, 15 tests passed** (MF-M5 health plus MF-M2 routing-status
+  regression);
+- `apps/agent-service` `npm run build`: **PASS**;
+- `git diff --check`: **PASS**.
+
 ## Gates remaining
 
-- Health, specialist, and activation machinery are not implemented yet.
+- Specialist and activation machinery are not implemented yet.
 - No route is qualified, owner-approved, activation-approved, deployed, or
   production-accepted by this worktree.
