@@ -197,10 +197,73 @@ export function listPendingWeeklyReviewDeliveries(
   return result;
 }
 
+export const WEEKLY_REVIEW_DELIVERY_LEASE_MS = 120_000;
+
+function clampWeeklyLeaseMs(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return WEEKLY_REVIEW_DELIVERY_LEASE_MS;
+  if (value < 30_000) return 30_000;
+  if (value > 600_000) return 600_000;
+  return value;
+}
+
+function reconcileExpiredWeeklySending(
+  db: DatabaseSync,
+  ownerId: string,
+  nowIso: string,
+): void {
+  const staleRows = db
+    .prepare(
+      `SELECT d.id FROM delivery_reservations d
+         JOIN initiative_reservations i ON i.id = d.initiative_reservation_id
+        WHERE d.owner_id = ?
+          AND d.trigger = 'proactive'
+          AND d.state = 'sending'
+          AND d.delivery_lease_expires_at IS NOT NULL
+          AND d.delivery_lease_expires_at <= ?
+          AND i.material_key LIKE ?||'%'`,
+    )
+    .all(ownerId, nowIso, WEEKLY_REVIEW_MATERIAL_PREFIX) as Array<{ id: unknown }>;
+  for (const row of staleRows) {
+    if (typeof row !== "object" || row === null) continue;
+    const reservationId = Number((row as { id?: unknown }).id);
+    if (!Number.isFinite(reservationId)) continue;
+    const bubbles = listDeliveryBubbles(db, reservationId);
+    const receipted = bubbles.filter((b) => b.discordMessageId != null);
+    const receiptCount = receipted.length;
+    const plannedCount = bubbles.length;
+    if (plannedCount === 0) {
+      db.prepare(
+        `UPDATE delivery_reservations SET state='expired', finalization_reason='delivery_lease_expired', finalized_at=? WHERE id=? AND state='sending'`,
+      ).run(nowIso, reservationId);
+      continue;
+    }
+    if (receiptCount === 0) {
+      db.prepare(
+        `UPDATE delivery_reservations SET state='expired', finalization_reason='delivery_lease_expired', finalized_at=? WHERE id=? AND state='sending'`,
+      ).run(nowIso, reservationId);
+      // mirror finalize: zero receipt proactive cleans initiative if still uncommitted
+      const res = getDeliveryReservation(db, reservationId);
+      const initId = res?.initiativeReservationId;
+      if (initId != null) {
+        db.prepare(`DELETE FROM initiative_reservations WHERE id=? AND committed_at IS NULL`).run(initId);
+      }
+    } else if (receiptCount < plannedCount) {
+      db.prepare(
+        `UPDATE delivery_reservations SET state='partially_delivered', finalization_reason='delivery_lease_expired_after_partial', finalized_at=? WHERE id=? AND state='sending'`,
+      ).run(nowIso, reservationId);
+    } else {
+      db.prepare(
+        `UPDATE delivery_reservations SET state='committed', finalization_reason='all_bubbles_delivered', finalized_at=? WHERE id=? AND state='sending'`,
+      ).run(nowIso, reservationId);
+    }
+  }
+}
+
 /**
  * Atomically checks out pending weekly review deliveries in a transaction.
  * Transitions reserved -> sending, setting delivery_lease_expires_at.
  * first_sent_at remains NULL (Claimed != Sent).
+ * Stale sending leases for this owner/lane are reconciled first in the same transaction.
  */
 export function claimPendingWeeklyReviewDeliveries(
   db: DatabaseSync,
@@ -211,47 +274,51 @@ export function claimPendingWeeklyReviewDeliveries(
   },
 ): PendingWeeklyReviewDelivery[] {
   const nowMs = input.nowMs ?? Date.now();
-  const leaseMs = input.leaseMs ?? 120_000;
+  const leaseMs = clampWeeklyLeaseMs(input.leaseMs);
+  const nowIso = new Date(nowMs).toISOString();
   const leaseExpiresAt = new Date(nowMs + leaseMs).toISOString();
 
   db.exec("BEGIN IMMEDIATE");
   try {
-    const rows = db
+    reconcileExpiredWeeklySending(db, input.ownerId, nowIso);
+
+    const row = db
       .prepare(
         `SELECT d.id
            FROM delivery_reservations d
-           JOIN initiative_reservations i ON i.id = d.initiative_reservation_id
+            JOIN initiative_reservations i ON i.id = d.initiative_reservation_id
           WHERE d.owner_id = ?
             AND d.trigger = 'proactive'
             AND d.state = 'reserved'
             AND i.material_key LIKE ?||'%'
-          ORDER BY d.id ASC`,
+          ORDER BY d.id ASC
+          LIMIT 1`,
       )
-      .all(input.ownerId, WEEKLY_REVIEW_MATERIAL_PREFIX);
+      .get(input.ownerId, WEEKLY_REVIEW_MATERIAL_PREFIX) as { id?: unknown } | undefined;
 
     const claimed: PendingWeeklyReviewDelivery[] = [];
-    const updateStmt = db.prepare(
-      `UPDATE delivery_reservations
+    if (row && typeof row === "object") {
+      const reservationId = Number((row as { id?: unknown }).id);
+      if (Number.isFinite(reservationId)) {
+        const updateResult = db
+          .prepare(
+            `UPDATE delivery_reservations
           SET state = 'sending',
               delivery_lease_expires_at = ?
         WHERE id = ?
           AND state = 'reserved'`,
-    );
-
-    for (const row of rows) {
-      if (typeof row !== "object" || row === null) continue;
-      const reservationId = Number((row as { id?: unknown }).id);
-      if (!Number.isFinite(reservationId)) continue;
-      const updateResult = updateStmt.run(leaseExpiresAt, reservationId);
-      if (updateResult.changes === 1) {
-        const reservation = getDeliveryReservation(db, reservationId);
-        if (reservation && reservation.state === "sending") {
-          claimed.push({
-            reservationId,
-            draftText: reservation.draftText ?? "",
-            bubbles: listDeliveryBubbles(db, reservationId),
-            statusUrl: `/delivery/${reservationId}`,
-          });
+          )
+          .run(leaseExpiresAt, reservationId);
+        if (updateResult.changes === 1) {
+          const reservation = getDeliveryReservation(db, reservationId);
+          if (reservation && reservation.state === "sending") {
+            claimed.push({
+              reservationId,
+              draftText: reservation.draftText ?? "",
+              bubbles: listDeliveryBubbles(db, reservationId),
+              statusUrl: `/delivery/${reservationId}`,
+            });
+          }
         }
       }
     }

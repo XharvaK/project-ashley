@@ -16,8 +16,13 @@ import {
   listPendingOperationalCompletionDeliveries,
 } from "./durable-job-completion.js";
 import {
+  claimPendingWeeklyReviewDeliveries,
+  claimWeeklyReviewDelivery,
+} from "./weekly-review-delivery.js";
+import {
   getOperationalJob,
   insertAdmittedOperationalJob,
+  listOperationalCompletionsAwaitingDraft,
   listTerminalJobsMissingCompletion,
   tryEnqueueOperationalJobDelivery,
 } from "./operational-job-store.js";
@@ -715,6 +720,202 @@ describe("Operational Fulfillment M1 (Prompt Delivery + Semantic Separation + Ta
         .prepare(`SELECT COUNT(*) AS c FROM operational_job_deliveries WHERE job_id = ?`)
         .get(job.jobId) as { c: number };
       expect(totalDeliveries.c).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("server-owned lease: client leaseMs 0/negative/NaN/huge are clamped and cannot create zero/overflow lease", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    try {
+      const threadId = resolveActiveThread(db, "doc", "discord");
+      const nowMs = 1_700_000_000_000;
+      // create one reserved
+      const r = claimOperationalFulfillmentDelivery(db, {
+        ownerId: "doc", channel: "discord", threadId, draftText: "lease test", bubbles: [{ ordinal: 0, text: "lease test" }], nowMs,
+      });
+      // claim with 0 -> clamped to 30_000
+      const c0 = claimPendingOperationalCompletionDeliveries(db, { ownerId: "doc", leaseMs: 0, nowMs });
+      expect(c0.length).toBe(1);
+      const row0 = getDeliveryReservation(db, r.id);
+      const exp0 = new Date(nowMs + 30_000).toISOString();
+      expect(row0?.deliveryLeaseExpiresAt).toBe(exp0);
+      // reset to reserved for next variant
+      db.prepare(`UPDATE delivery_reservations SET state='reserved', delivery_lease_expires_at=NULL WHERE id=?`).run(r.id);
+      const cNeg = claimPendingOperationalCompletionDeliveries(db, { ownerId: "doc", leaseMs: -5000, nowMs });
+      expect(cNeg.length).toBe(1);
+      const rowNeg = getDeliveryReservation(db, r.id);
+      expect(rowNeg?.deliveryLeaseExpiresAt).toBe(exp0);
+      db.prepare(`UPDATE delivery_reservations SET state='reserved', delivery_lease_expires_at=NULL WHERE id=?`).run(r.id);
+      const cNaN = claimPendingOperationalCompletionDeliveries(db, { ownerId: "doc", leaseMs: NaN as unknown as number, nowMs });
+      expect(cNaN.length).toBe(1);
+      const rowNaN = getDeliveryReservation(db, r.id);
+      expect(rowNaN?.deliveryLeaseExpiresAt).toBe(new Date(nowMs + 120_000).toISOString());
+      db.prepare(`UPDATE delivery_reservations SET state='reserved', delivery_lease_expires_at=NULL WHERE id=?`).run(r.id);
+      const cHuge = claimPendingOperationalCompletionDeliveries(db, { ownerId: "doc", leaseMs: 9_999_999_999, nowMs });
+      expect(cHuge.length).toBe(1);
+      const rowHuge = getDeliveryReservation(db, r.id);
+      expect(rowHuge?.deliveryLeaseExpiresAt).toBe(new Date(nowMs + 600_000).toISOString());
+    } finally {
+      db.close();
+    }
+  });
+
+  it("bounded claim: one reservation per claim, oldest first", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    try {
+      const threadId = resolveActiveThread(db, "doc", "discord");
+      const now = 1_700_000_000_000;
+      const r1 = claimOperationalFulfillmentDelivery(db, { ownerId: "doc", channel: "discord", threadId, draftText: "r1", bubbles: [{ ordinal: 0, text: "r1" }], nowMs: now });
+      const r2 = claimOperationalFulfillmentDelivery(db, { ownerId: "doc", channel: "discord", threadId, draftText: "r2", bubbles: [{ ordinal: 0, text: "r2" }], nowMs: now + 1 });
+      const r3 = claimOperationalFulfillmentDelivery(db, { ownerId: "doc", channel: "discord", threadId, draftText: "r3", bubbles: [{ ordinal: 0, text: "r3" }], nowMs: now + 2 });
+      const c1 = claimPendingOperationalCompletionDeliveries(db, { ownerId: "doc", nowMs: now });
+      expect(c1.length).toBe(1);
+      expect(c1[0].reservationId).toBe(r1.id);
+      const remaining1 = listPendingOperationalCompletionDeliveries(db, "doc");
+      expect(remaining1.some(p => p.reservationId === r2.id)).toBe(true);
+      expect(remaining1.some(p => p.reservationId === r3.id)).toBe(true);
+      expect(remaining1.some(p => p.reservationId === r1.id)).toBe(false);
+      // second claim gets r2
+      const c2 = claimPendingOperationalCompletionDeliveries(db, { ownerId: "doc", nowMs: now + 100 });
+      expect(c2.length).toBe(1);
+      expect(c2[0].reservationId).toBe(r2.id);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("stale sending reconciliation via real claim entrypoint: zero receipts -> expired/unknown, no retry", async () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    try {
+      const now = 1_700_000_000_000;
+      resolveActiveThread(db, "doc", "discord");
+      const job = insertAdmittedOperationalJob(db, { ownerId: "doc", sourceMessageEntityUuid: "src_stale_zero", sourceUserMessageId: 1, admissionReservationId: 1, boundedOperationTaskId: "task_stale_zero", projectId: "proj_1", lifetimeExpiresAtMs: now + 60_000, jobId: "job_stale_zero" });
+      db.prepare(`UPDATE operational_jobs SET status='succeeded', job_phase='terminal' WHERE job_id=?`).run(job.jobId);
+      await drainOperationalJobCompletions({ db, nowMs: () => now });
+      const row = db.prepare(`SELECT delivery_reservation_id FROM operational_job_deliveries WHERE job_id=?`).get(job.jobId) as { delivery_reservation_id: number };
+      const resId = Number(row.delivery_reservation_id);
+      // claim to sending
+      const claimed = claimPendingOperationalCompletionDeliveries(db, { ownerId: "doc", leaseMs: 60_000, nowMs: now });
+      expect(claimed.length).toBe(1);
+      // advance past lease, next claim should reconcile stale to expired before claiming next
+      const afterLease = now + 61_000;
+      // create second job/reservation that is pending
+      const job2 = insertAdmittedOperationalJob(db, { ownerId: "doc", sourceMessageEntityUuid: "src_stale_zero2", sourceUserMessageId: 2, admissionReservationId: 2, boundedOperationTaskId: "task_stale_zero2", projectId: "proj_1", lifetimeExpiresAtMs: afterLease + 60_000, jobId: "job_stale_zero2" });
+      db.prepare(`UPDATE operational_jobs SET status='succeeded', job_phase='terminal' WHERE job_id=?`).run(job2.jobId);
+      await drainOperationalJobCompletions({ db, nowMs: () => afterLease });
+      const row2 = db.prepare(`SELECT delivery_reservation_id FROM operational_job_deliveries WHERE job_id=?`).get(job2.jobId) as { delivery_reservation_id: number };
+      const resId2 = Number(row2.delivery_reservation_id);
+      // next claim at afterLease should reconcile first stale to expired and claim r2
+      const claimed2 = claimPendingOperationalCompletionDeliveries(db, { ownerId: "doc", nowMs: afterLease });
+      expect(claimed2.length).toBe(1);
+      expect(claimed2[0].reservationId).toBe(resId2);
+      const stale = getDeliveryReservation(db, resId);
+      expect(stale?.state).toBe("expired");
+      expect(stale?.finalizationReason).toBe("delivery_lease_expired");
+      // original job must not be redrafted
+      const draft = await draftOperationalJobCompletion(db, { jobId: job.jobId, nowMs: afterLease + 1000 });
+      expect(draft.drafted).toBe(false);
+      expect(draft.reservationId).toBe(resId);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("stale sending with partial receipts -> partially_delivered via real claim", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    try {
+      const now = 1_700_000_000_000;
+      const threadId = resolveActiveThread(db, "doc", "discord");
+      const r = claimOperationalFulfillmentDelivery(db, { ownerId: "doc", channel: "discord", threadId, draftText: "A".repeat(2500), bubbles: [{ ordinal: 0, text: "A".repeat(1800) }, { ordinal: 1, text: "B" }], nowMs: now });
+      // claim
+      claimPendingOperationalCompletionDeliveries(db, { ownerId: "doc", leaseMs: 60_000, nowMs: now });
+      // receipt bubble 0
+      db.prepare(`UPDATE delivery_bubbles SET discord_message_id='msg0', sent_at=? WHERE reservation_id=? AND ordinal=0`).run(new Date(now + 500).toISOString(), r.id);
+      db.prepare(`UPDATE delivery_reservations SET first_sent_at=? WHERE id=?`).run(new Date(now + 500).toISOString(), r.id);
+      // advance past lease and claim (next owner/lane claim triggers reconcile)
+      const after = now + 61_000;
+      // need a pending to trigger claim, or claim itself will reconcile even if no pending? Our claim reconciles before selecting next reserved; if no reserved, it still reconciles stale. So call claim again
+      const c = claimPendingOperationalCompletionDeliveries(db, { ownerId: "doc", nowMs: after });
+      expect(c.length).toBe(0); // no new reserved
+      const stale = getDeliveryReservation(db, r.id);
+      expect(stale?.state).toBe("partially_delivered");
+      expect(stale?.finalizationReason).toBe("delivery_lease_expired_after_partial");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("stale sending with all receipts -> committed via real claim", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    try {
+      const now = 1_700_000_000_000;
+      const threadId = resolveActiveThread(db, "doc", "discord");
+      const r = claimOperationalFulfillmentDelivery(db, { ownerId: "doc", channel: "discord", threadId, draftText: "done", bubbles: [{ ordinal: 0, text: "done" }], nowMs: now });
+      claimPendingOperationalCompletionDeliveries(db, { ownerId: "doc", leaseMs: 60_000, nowMs: now });
+      db.prepare(`UPDATE delivery_bubbles SET discord_message_id='msg_all', sent_at=? WHERE reservation_id=?`).run(new Date(now + 500).toISOString(), r.id);
+      db.prepare(`UPDATE delivery_reservations SET first_sent_at=? WHERE id=?`).run(new Date(now + 500).toISOString(), r.id);
+      const after = now + 61_000;
+      claimPendingOperationalCompletionDeliveries(db, { ownerId: "doc", nowMs: after });
+      const stale = getDeliveryReservation(db, r.id);
+      expect(stale?.state).toBe("committed");
+      expect(stale?.finalizationReason).toBe("all_bubbles_delivered");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("expired/unknown is not advertised as retryable by store nor draft", async () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    try {
+      const now = 1_700_000_000_000;
+      resolveActiveThread(db, "doc", "discord");
+      const job = insertAdmittedOperationalJob(db, { ownerId: "doc", sourceMessageEntityUuid: "src_expired_q", sourceUserMessageId: 1, admissionReservationId: 1, boundedOperationTaskId: "task_expired_q", projectId: "proj_1", lifetimeExpiresAtMs: now + 60_000, jobId: "job_expired_q" });
+      db.prepare(`UPDATE operational_jobs SET status='succeeded', job_phase='terminal' WHERE job_id=?`).run(job.jobId);
+      await drainOperationalJobCompletions({ db, nowMs: () => now });
+      const row = db.prepare(`SELECT delivery_reservation_id FROM operational_job_deliveries WHERE job_id=?`).get(job.jobId) as { delivery_reservation_id: number };
+      const resId = Number(row.delivery_reservation_id);
+      claimPendingOperationalCompletionDeliveries(db, { ownerId: "doc", leaseMs: 60_000, nowMs: now });
+      // manually expire via claim reconciliation (advance time)
+      claimPendingOperationalCompletionDeliveries(db, { ownerId: "doc", nowMs: now + 61_000 });
+      const res = getDeliveryReservation(db, resId);
+      expect(res?.state).toBe("expired");
+      // store should NOT list it
+      const awaiting = listOperationalCompletionsAwaitingDraft(db);
+      expect(awaiting.some(j => j.jobId === job.jobId)).toBe(false);
+      const draft = await draftOperationalJobCompletion(db, { jobId: job.jobId, nowMs: now + 30_000 });
+      expect(draft.drafted).toBe(false);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("weekly atomic claim: one per claim and stale weekly reconciled via real claim", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    try {
+      const now = 1_700_000_000_000;
+      const candidate = { title: "t", whyImportant: "w", problem: "p", filesChanged: ["a"], diffStat: "1", testsRun: ["t"], testResults: "ok", securityImpact: "none", knownLimitations: "none", remainingUncertainty: "none", ownerReviewFocus: "none" } as any;
+      const w1 = claimWeeklyReviewDelivery(db, { ownerId: "doc", reportRef: "ref1", candidate, nowMs: now });
+      const w2 = claimWeeklyReviewDelivery(db, { ownerId: "doc", reportRef: "ref2", candidate, nowMs: now + 1 });
+      expect(w1).not.toBeNull();
+      expect(w2).not.toBeNull();
+      const c1 = claimPendingWeeklyReviewDeliveries(db, { ownerId: "doc", nowMs: now });
+      expect(c1.length).toBe(1);
+      expect(c1[0].reservationId).toBe(w1!.deliveryReservationId);
+      const c2 = claimPendingWeeklyReviewDeliveries(db, { ownerId: "doc", nowMs: now + 10 });
+      expect(c2.length).toBe(1);
+      expect(c2[0].reservationId).toBe(w2!.deliveryReservationId);
+      // stale weekly with zero receipts
+      const staleId = w1!.deliveryReservationId;
+      // first claim already moved w1 to sending, advance past lease
+      const after = now + 121_000;
+      // need another weekly to trigger reconcile
+      const w3 = claimWeeklyReviewDelivery(db, { ownerId: "doc", reportRef: "ref3", candidate, nowMs: after });
+      const c3 = claimPendingWeeklyReviewDeliveries(db, { ownerId: "doc", nowMs: after });
+      // w1 should be expired after reconcile, c3 should claim w3 (oldest remaining)
+      const stale = getDeliveryReservation(db, staleId);
+      expect(stale?.state).toBe("expired");
+      expect(c3.some(c => c.reservationId === w3!.deliveryReservationId)).toBe(true);
     } finally {
       db.close();
     }

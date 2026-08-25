@@ -36,6 +36,32 @@ export class ChannelQueue {
     return next;
   }
 
+  enqueueOrThrow(channelId: string, job: Job): Promise<void> {
+    const rawPrev = this.tails.get(channelId) ?? Promise.resolve();
+    const prev = rawPrev.catch(() => {});
+    const next = prev.then(async () => {
+      const controller = new AbortController();
+      this.running.set(channelId, controller);
+      try {
+        await job({ signal: controller.signal });
+      } finally {
+        if (this.running.get(channelId) === controller) {
+          this.running.delete(channelId);
+        }
+      }
+    });
+    // keep queue moving even if this job fails — store caught version for chaining
+    const forTail = next.catch(() => {});
+    this.tails.set(channelId, forTail);
+    void forTail.finally(() => {
+      if (this.tails.get(channelId) === forTail) this.tails.delete(channelId);
+    });
+    void next.catch((err) => {
+      console.error(`[discord-bot] queue error on ${channelId}:`, err);
+    });
+    return next;
+  }
+
   /** Doc sent something new: stop waiting between her old bubbles. */
   abort(channelId: string): void {
     this.running.get(channelId)?.abort();

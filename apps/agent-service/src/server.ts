@@ -1056,13 +1056,11 @@ export function createServer(
   app.post("/delivery/claim", (req, res) => {
     try {
       const owner = requireOwner((req.body as { userId?: string }).userId);
-      const { lane, leaseMs } = (req.body ?? {}) as {
+      const { lane } = (req.body ?? {}) as {
         lane?: string;
-        leaseMs?: number;
       };
       const claimed = manager.core.claimPendingDeliveries(owner, {
         lane,
-        leaseMs,
       });
       res.json({ deliveries: claimed });
     } catch (err) {

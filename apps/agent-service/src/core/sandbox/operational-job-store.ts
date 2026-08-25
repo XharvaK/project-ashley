@@ -463,16 +463,16 @@ export function listOperationalCompletionsAwaitingDraft(
     .prepare(
       `SELECT j.*
          FROM operational_jobs j
-         JOIN operational_job_deliveries d
-           ON d.job_id = j.job_id AND d.delivery_kind = 'completion'
-         LEFT JOIN delivery_reservations r
-           ON r.id = d.delivery_reservation_id
-        WHERE j.status IN ('succeeded', 'failed', 'cancelled', 'deadline_exceeded', 'outcome_unknown')
-          AND (
-            d.delivery_reservation_id = 0
-            OR r.id IS NULL
-            OR (r.state IN ('aborted', 'expired', 'cancelled') AND r.first_sent_at IS NULL)
-          )`,
+          JOIN operational_job_deliveries d
+            ON d.job_id = j.job_id AND d.delivery_kind = 'completion'
+          LEFT JOIN delivery_reservations r
+            ON r.id = d.delivery_reservation_id
+         WHERE j.status IN ('succeeded', 'failed', 'cancelled', 'deadline_exceeded', 'outcome_unknown')
+           AND (
+             d.delivery_reservation_id = 0
+             OR r.id IS NULL
+             OR (r.state = 'aborted' AND r.finalization_reason = 'send_failure' AND r.first_sent_at IS NULL)
+           )`,
     )
     .all() as Array<Record<string, unknown>>;
   return rows.map(mapRow);

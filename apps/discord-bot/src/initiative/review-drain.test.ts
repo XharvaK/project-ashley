@@ -144,7 +144,8 @@ test("drain never throws for a single failing review", async () => {
   });
 
   assert.equal(drained, 1);
-  assert.deepEqual(finalizeCalls, ["31:send_failure", "32:complete"]);
+  // generic error after dispatchStarted => UNKNOWN (delivery_lease)
+  assert.deepEqual(finalizeCalls, ["31:delivery_lease", "32:complete"]);
 });
 
 test("drain returns zero when nothing is pending", async () => {

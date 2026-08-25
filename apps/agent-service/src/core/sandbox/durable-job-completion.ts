@@ -701,11 +701,67 @@ export function listPendingOperationalCompletionDeliveries(
   return result;
 }
 
+export const OPERATIONAL_DELIVERY_LEASE_MS = 120_000;
+
+function clampOperationalLeaseMs(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return OPERATIONAL_DELIVERY_LEASE_MS;
+  if (value < 30_000) return 30_000;
+  if (value > 600_000) return 600_000;
+  return value;
+}
+
+function reconcileExpiredOperationalSending(
+  db: DatabaseSync,
+  ownerId: string,
+  nowIso: string,
+): void {
+  const staleRows = db
+    .prepare(
+      `SELECT id FROM delivery_reservations
+        WHERE owner_id = ?
+          AND delivery_lane = 'operational_fulfillment'
+          AND state = 'sending'
+          AND delivery_lease_expires_at IS NOT NULL
+          AND delivery_lease_expires_at <= ?
+        ORDER BY id ASC`,
+    )
+    .all(ownerId, nowIso) as Array<{ id: unknown }>;
+  for (const row of staleRows) {
+    if (typeof row !== "object" || row === null) continue;
+    const reservationId = Number((row as { id?: unknown }).id);
+    if (!Number.isFinite(reservationId)) continue;
+    const bubbles = listDeliveryBubbles(db, reservationId);
+    const receipted = bubbles.filter((b) => b.discordMessageId != null);
+    const receiptCount = receipted.length;
+    const plannedCount = bubbles.length;
+    if (plannedCount === 0) {
+      db.prepare(
+        `UPDATE delivery_reservations SET state='expired', finalization_reason='delivery_lease_expired', finalized_at=? WHERE id=? AND state='sending'`,
+      ).run(nowIso, reservationId);
+      continue;
+    }
+    if (receiptCount === 0) {
+      db.prepare(
+        `UPDATE delivery_reservations SET state='expired', finalization_reason='delivery_lease_expired', finalized_at=? WHERE id=? AND state='sending'`,
+      ).run(nowIso, reservationId);
+    } else if (receiptCount < plannedCount) {
+      db.prepare(
+        `UPDATE delivery_reservations SET state='partially_delivered', finalization_reason='delivery_lease_expired_after_partial', finalized_at=? WHERE id=? AND state='sending'`,
+      ).run(nowIso, reservationId);
+    } else {
+      db.prepare(
+        `UPDATE delivery_reservations SET state='committed', finalization_reason='all_bubbles_delivered', finalized_at=? WHERE id=? AND state='sending'`,
+      ).run(nowIso, reservationId);
+    }
+  }
+}
+
 /**
  * Atomically checks out pending operational fulfillment deliveries in a transaction.
  * Transitions reserved -> sending, setting delivery_lease_expires_at.
  * first_sent_at remains NULL (Claimed != Sent).
  * Concurrent claims cannot receive the same reservation.
+ * Stale sending leases for this owner/lane are reconciled first in the same transaction.
  */
 export function claimPendingOperationalCompletionDeliveries(
   db: DatabaseSync,
@@ -721,21 +777,25 @@ export function claimPendingOperationalCompletionDeliveries(
   statusUrl: string;
 }> {
   const nowMs = input.nowMs ?? Date.now();
-  const leaseMs = input.leaseMs ?? 120_000;
+  const leaseMs = clampOperationalLeaseMs(input.leaseMs);
+  const nowIso = new Date(nowMs).toISOString();
   const leaseExpiresAt = new Date(nowMs + leaseMs).toISOString();
 
   db.exec("BEGIN IMMEDIATE");
   try {
-    const rows = db
+    reconcileExpiredOperationalSending(db, input.ownerId, nowIso);
+
+    const row = db
       .prepare(
         `SELECT id
            FROM delivery_reservations
           WHERE owner_id = ?
             AND delivery_lane = 'operational_fulfillment'
             AND state = 'reserved'
-          ORDER BY id ASC`,
+          ORDER BY id ASC
+          LIMIT 1`,
       )
-      .all(input.ownerId);
+      .get(input.ownerId) as { id?: unknown } | undefined;
 
     const claimed: Array<{
       reservationId: number;
@@ -744,28 +804,28 @@ export function claimPendingOperationalCompletionDeliveries(
       statusUrl: string;
     }> = [];
 
-    const updateStmt = db.prepare(
-      `UPDATE delivery_reservations
+    if (row && typeof row === "object") {
+      const reservationId = Number((row as { id?: unknown }).id);
+      if (Number.isFinite(reservationId)) {
+        const updateResult = db
+          .prepare(
+            `UPDATE delivery_reservations
           SET state = 'sending',
               delivery_lease_expires_at = ?
         WHERE id = ?
           AND state = 'reserved'`,
-    );
-
-    for (const row of rows) {
-      if (typeof row !== "object" || row === null) continue;
-      const reservationId = Number((row as { id?: unknown }).id);
-      if (!Number.isFinite(reservationId)) continue;
-      const updateResult = updateStmt.run(leaseExpiresAt, reservationId);
-      if (updateResult.changes === 1) {
-        const reservation = getDeliveryReservation(db, reservationId);
-        if (reservation && reservation.state === "sending") {
-          claimed.push({
-            reservationId,
-            draftText: reservation.draftText ?? "",
-            bubbles: listDeliveryBubbles(db, reservationId),
-            statusUrl: `/delivery/${reservationId}`,
-          });
+          )
+          .run(leaseExpiresAt, reservationId);
+        if (updateResult.changes === 1) {
+          const reservation = getDeliveryReservation(db, reservationId);
+          if (reservation && reservation.state === "sending") {
+            claimed.push({
+              reservationId,
+              draftText: reservation.draftText ?? "",
+              bubbles: listDeliveryBubbles(db, reservationId),
+              statusUrl: `/delivery/${reservationId}`,
+            });
+          }
         }
       }
     }

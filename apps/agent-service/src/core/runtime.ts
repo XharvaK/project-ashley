@@ -2084,29 +2084,25 @@ export class AshleyCore {
 
   claimPendingDeliveries(
     ownerId: string,
-    options: { lane?: string; leaseMs?: number } = {},
+    options: { lane?: string } = {},
   ) {
     const lane = options.lane?.trim();
     if (lane === "operational_fulfillment") {
       return claimPendingOperationalCompletionDeliveries(this.db, {
         ownerId,
-        leaseMs: options.leaseMs,
       });
     }
     if (lane === "weekly_review" || lane === "proactive") {
       return claimPendingWeeklyReviewDeliveries(this.db, {
         ownerId,
-        leaseMs: options.leaseMs,
       });
     }
     return [
       ...claimPendingWeeklyReviewDeliveries(this.db, {
         ownerId,
-        leaseMs: options.leaseMs,
       }),
       ...claimPendingOperationalCompletionDeliveries(this.db, {
         ownerId,
-        leaseMs: options.leaseMs,
       }),
     ];
   }

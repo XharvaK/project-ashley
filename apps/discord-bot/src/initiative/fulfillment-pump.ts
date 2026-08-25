@@ -9,7 +9,7 @@ import {
   finalizeDelivery,
   receiptDeliveryBubble,
 } from "../agent-client.js";
-import { sendBubbles } from "../chat/send-bubbles.js";
+import { DeliverySendError, sendBubbles } from "../chat/send-bubbles.js";
 
 export type FulfillmentPumpDependencies = {
   claim: typeof claimPendingOperationalDeliveries;
@@ -54,43 +54,92 @@ export async function drainPendingOperationalDeliveries(
               text,
             }));
 
-      const sendHolder: {
-        result: Awaited<ReturnType<typeof sendBubbles>> | null;
-      } = { result: null };
-
-      await channelQueue.enqueue(dm.id, async ({ signal }) => {
-        sendHolder.result = await deps.send(
-          dm,
-          bubbles,
-          null,
-          {
-            tempoGapMs: null,
-            signal,
-          },
-          undefined,
-          { reservationId: delivery.reservationId },
-        );
-      });
-
-      const sendResult = sendHolder.result;
-      if (!sendResult || !sendResult.anySubstantiveContentVisible) {
-        await deps
-          .finalize(delivery.reservationId, "send_failure")
-          .catch(() => {});
+      if (bubbles.length === 0) {
+        await deps.finalize(delivery.reservationId, "send_failure").catch(() => {});
         continue;
       }
 
-      const receipts = sendResult.receiptedOrdinals
-        .map((ordinal, i) => ({
+      let dispatchStarted = false;
+      let sendError: unknown = null;
+      let sendResult: Awaited<ReturnType<typeof sendBubbles>> | null = null;
+
+      try {
+        await channelQueue.enqueueOrThrow(dm.id, async ({ signal }) => {
+          dispatchStarted = true;
+          sendResult = await deps.send(
+            dm,
+            bubbles,
+            null,
+            {
+              tempoGapMs: null,
+              signal,
+            },
+            undefined,
+            {
+              reservationId: delivery.reservationId,
+              onBubbleSent: async (ordinal, msg) => {
+                await deps.receipt(delivery.reservationId, ordinal, msg.id).catch(() => {});
+              },
+            },
+          );
+        });
+      } catch (err) {
+        sendError = err;
+      }
+
+      if (sendError) {
+        const maybeDeliveryErr = sendError as Partial<DeliverySendError> & { result?: import("../chat/send-bubbles.js").BubbleSendResult };
+        if (maybeDeliveryErr && maybeDeliveryErr.result && typeof maybeDeliveryErr.result.receiptedOrdinals !== "undefined") {
+          const r = maybeDeliveryErr.result as import("../chat/send-bubbles.js").BubbleSendResult;
+          // Receipts for successful bubbles already persisted via onBubbleSent
+          if (r.receiptedOrdinals.length > 0) {
+            // Partial: at least one bubble durably receipted
+            await deps.finalize(delivery.reservationId, "send_failure").catch(() => {});
+          } else {
+            // Zero receipts — distinguish before vs after dispatch
+            const externalAttempted =
+              r.failureCategory === "discord_send_failed" && r.attemptedOrdinal !== null;
+            if (externalAttempted) {
+              // Generic Discord rejection after dispatch => UNKNOWN
+              await deps.finalize(delivery.reservationId, "delivery_lease").catch(() => {});
+            } else if (
+              r.failureCategory === "aborted" ||
+              r.failureCategory === "deadline_expired" ||
+              r.failureCategory === "empty_plan"
+            ) {
+              await deps.finalize(delivery.reservationId, "send_failure").catch(() => {});
+            } else {
+              // Default to UNKNOWN for safety
+              await deps.finalize(delivery.reservationId, "delivery_lease").catch(() => {});
+            }
+          }
+        } else {
+          // Generic error: if dispatch started, treat as UNKNOWN
+          if (dispatchStarted) {
+            await deps.finalize(delivery.reservationId, "delivery_lease").catch(() => {});
+          } else {
+            await deps.finalize(delivery.reservationId, "send_failure").catch(() => {});
+          }
+        }
+        continue;
+      }
+
+      if (!sendResult || !(sendResult as import("../chat/send-bubbles.js").BubbleSendResult).anySubstantiveContentVisible) {
+        await deps.finalize(delivery.reservationId, "send_failure").catch(() => {});
+        continue;
+      }
+
+      // Success: receipts already persisted via onBubbleSent; handle mock paths that return result without callback
+      const successResult = sendResult as import("../chat/send-bubbles.js").BubbleSendResult;
+      const receipts = successResult.receiptedOrdinals
+        .map((ordinal: number, i: number) => ({
           ordinal,
-          discordMessageId: sendResult.messages[i]?.id ?? "",
+          discordMessageId: successResult.messages[i]?.id ?? "",
         }))
-        .filter((r) => r.discordMessageId);
+        .filter((r: { discordMessageId: string }) => r.discordMessageId);
 
       for (const receipt of receipts) {
-        await deps
-          .receipt(delivery.reservationId, receipt.ordinal, receipt.discordMessageId)
-          .catch(() => {});
+        await deps.receipt(delivery.reservationId, receipt.ordinal, receipt.discordMessageId).catch(() => {});
       }
 
       await deps.finalize(delivery.reservationId, "complete").catch(() => {});
@@ -104,7 +153,7 @@ export async function drainPendingOperationalDeliveries(
         error,
       );
       try {
-        await deps.finalize(delivery.reservationId, "send_failure");
+        await deps.finalize(delivery.reservationId, "delivery_lease");
       } catch {
         /* best effort */
       }

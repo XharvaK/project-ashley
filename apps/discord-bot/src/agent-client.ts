@@ -147,7 +147,6 @@ export async function listPendingOperationalDeliveries() {
 
 export async function claimPendingDeliveries(options?: {
   lane?: "operational_fulfillment" | "weekly_review";
-  leaseMs?: number;
 }) {
   return agentFetch<{ deliveries: PendingWeeklyReviewDelivery[] }>(
     `/delivery/claim`,
@@ -156,27 +155,20 @@ export async function claimPendingDeliveries(options?: {
       body: JSON.stringify({
         userId: config.ownerId,
         lane: options?.lane,
-        leaseMs: options?.leaseMs,
       }),
     },
   );
 }
 
-export async function claimPendingWeeklyReviewDeliveries(options?: {
-  leaseMs?: number;
-}) {
+export async function claimPendingWeeklyReviewDeliveries() {
   return claimPendingDeliveries({
     lane: "weekly_review",
-    leaseMs: options?.leaseMs,
   });
 }
 
-export async function claimPendingOperationalDeliveries(options?: {
-  leaseMs?: number;
-}) {
+export async function claimPendingOperationalDeliveries() {
   return claimPendingDeliveries({
     lane: "operational_fulfillment",
-    leaseMs: options?.leaseMs,
   });
 }
 

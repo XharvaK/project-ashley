@@ -6,6 +6,7 @@ import { splitMessage } from "../chat/split-message.js";
 import {
   abortInitiative,
   checkHealth,
+  claimPendingWeeklyReviewDeliveries,
   commitInitiative,
   finalizeDelivery,
   initiativeStatus,
@@ -74,7 +75,8 @@ export async function runProactiveSchedulerCycle(
 }
 
 export type WeeklyReviewDrainDependencies = {
-  list: typeof listPendingWeeklyReviewDeliveries;
+  claim: typeof claimPendingWeeklyReviewDeliveries;
+  list?: typeof listPendingWeeklyReviewDeliveries;
   send: typeof sendBubbles;
   receipt: typeof receiptDeliveryBubble;
   finalize: typeof finalizeDelivery;
@@ -89,13 +91,18 @@ export type WeeklyReviewDrainDependencies = {
 export async function drainPendingWeeklyReviewDeliveries(
   client: Client,
   dependencies: WeeklyReviewDrainDependencies = {
-    list: listPendingWeeklyReviewDeliveries,
+    claim: claimPendingWeeklyReviewDeliveries,
     send: sendBubbles,
     receipt: receiptDeliveryBubble,
     finalize: finalizeDelivery,
   },
 ): Promise<number> {
-  const { deliveries } = await dependencies.list();
+  const deliveriesResult = await (async () => {
+    if (dependencies.claim) return dependencies.claim();
+    if (dependencies.list) return (dependencies.list as unknown as typeof claimPendingWeeklyReviewDeliveries)();
+    return claimPendingWeeklyReviewDeliveries();
+  })();
+  const { deliveries } = deliveriesResult;
   if (deliveries.length === 0) return 0;
 
   const user = await client.users.fetch(config.ownerId);
@@ -112,44 +119,70 @@ export async function drainPendingWeeklyReviewDeliveries(
               text,
             }));
       if (bubbles.length === 0) {
-        await dependencies
-          .finalize(delivery.reservationId, "send_failure")
-          .catch(() => {});
+        await dependencies.finalize(delivery.reservationId, "send_failure").catch(() => {});
         continue;
       }
-      const sendHolder: {
-        result: Awaited<ReturnType<typeof sendBubbles>> | null;
-      } = { result: null };
-      await channelQueue.enqueue(dm.id, async ({ signal }) => {
-        sendHolder.result = await dependencies.send(
-          dm,
-          bubbles,
-          null,
-          {
-            tempoGapMs: null,
-            signal,
-          },
-          undefined,
-          { reservationId: delivery.reservationId },
-        );
-      });
-      const sendResult = sendHolder.result;
-      if (!sendResult || !sendResult.anySubstantiveContentVisible) {
-        await dependencies
-          .finalize(delivery.reservationId, "send_failure")
-          .catch(() => {});
+      let dispatchStarted = false;
+      let sendError: unknown = null;
+      let sendResult: Awaited<ReturnType<typeof sendBubbles>> | null = null;
+      try {
+        await channelQueue.enqueueOrThrow(dm.id, async ({ signal }) => {
+          dispatchStarted = true;
+          sendResult = await dependencies.send(
+            dm,
+            bubbles,
+            null,
+            { tempoGapMs: null, signal },
+            undefined,
+            {
+              reservationId: delivery.reservationId,
+              onBubbleSent: async (ordinal, msg) => {
+                await dependencies.receipt(delivery.reservationId, ordinal, msg.id).catch(() => {});
+              },
+            },
+          );
+        });
+      } catch (err) {
+        sendError = err;
+      }
+      if (sendError) {
+        const maybeDeliveryErr = sendError as Partial<DeliverySendError> & { result?: import("../chat/send-bubbles.js").BubbleSendResult };
+        if (maybeDeliveryErr && maybeDeliveryErr.result && typeof maybeDeliveryErr.result.receiptedOrdinals !== "undefined") {
+          const r = maybeDeliveryErr.result as import("../chat/send-bubbles.js").BubbleSendResult;
+          if (r.receiptedOrdinals.length > 0) {
+            await dependencies.finalize(delivery.reservationId, "send_failure").catch(() => {});
+          } else {
+            const externalAttempted = r.failureCategory === "discord_send_failed" && r.attemptedOrdinal !== null;
+            if (externalAttempted) {
+              await dependencies.finalize(delivery.reservationId, "delivery_lease").catch(() => {});
+            } else if (r.failureCategory === "aborted" || r.failureCategory === "deadline_expired" || r.failureCategory === "empty_plan") {
+              await dependencies.finalize(delivery.reservationId, "send_failure").catch(() => {});
+            } else {
+              await dependencies.finalize(delivery.reservationId, "delivery_lease").catch(() => {});
+            }
+          }
+        } else {
+          if (dispatchStarted) {
+            await dependencies.finalize(delivery.reservationId, "delivery_lease").catch(() => {});
+          } else {
+            await dependencies.finalize(delivery.reservationId, "send_failure").catch(() => {});
+          }
+        }
         continue;
       }
-      const receipts = sendResult.receiptedOrdinals
-        .map((ordinal, i) => ({
+      if (!sendResult || !(sendResult as import("../chat/send-bubbles.js").BubbleSendResult).anySubstantiveContentVisible) {
+        await dependencies.finalize(delivery.reservationId, "send_failure").catch(() => {});
+        continue;
+      }
+      const successResult = sendResult as import("../chat/send-bubbles.js").BubbleSendResult;
+      const receipts = successResult.receiptedOrdinals
+        .map((ordinal: number, i: number) => ({
           ordinal,
-          discordMessageId: sendResult.messages[i]?.id ?? "",
+          discordMessageId: successResult.messages[i]?.id ?? "",
         }))
-        .filter((r) => r.discordMessageId);
+        .filter((r: { discordMessageId: string }) => r.discordMessageId);
       for (const receipt of receipts) {
-        await dependencies
-          .receipt(delivery.reservationId, receipt.ordinal, receipt.discordMessageId)
-          .catch(() => {});
+        await dependencies.receipt(delivery.reservationId, receipt.ordinal, receipt.discordMessageId).catch(() => {});
       }
       await dependencies.finalize(delivery.reservationId, "complete").catch(() => {});
       drained += 1;
@@ -161,9 +194,7 @@ export async function drainPendingWeeklyReviewDeliveries(
         `[discord-bot] weekly review drain failed reservation=${delivery.reservationId}:`,
         err,
       );
-      await dependencies
-        .finalize(delivery.reservationId, "send_failure")
-        .catch(() => {});
+      await dependencies.finalize(delivery.reservationId, "delivery_lease").catch(() => {});
     }
   }
   return drained;

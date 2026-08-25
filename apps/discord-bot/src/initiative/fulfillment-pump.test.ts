@@ -176,7 +176,8 @@ test("fulfillment pump never throws or halts on single item error", async () => 
 
   assert.equal(count, 1);
   assert.equal(finalizations.length, 2);
-  assert.equal(finalizations[0].cause, "send_failure");
+  // generic network error after dispatchStarted => UNKNOWN (delivery_lease), not proven send_failure
+  assert.equal(finalizations[0].cause, "delivery_lease");
   assert.equal(finalizations[1].cause, "complete");
 });
 
@@ -298,5 +299,70 @@ test("fulfillment pump completion-relative pacing: does not overlap ticks", asyn
 
   // Next ticks fired sequentially without storming
   assert.ok(claimCalls >= 2 && claimCalls <= 4);
+});
+
+test("generic Discord rejection after dispatch is UNKNOWN (delivery_lease), not proven not_sent", async () => {
+  const finalizations: Array<{ cause: string }> = [];
+  const pending: PendingWeeklyReviewDelivery[] = [
+    { reservationId: 501, draftText: "unknown", bubbles: [{ ordinal: 0, text: "unknown", discordMessageId: null }], statusUrl: "/delivery/501" },
+  ];
+  const { DeliverySendError } = await import("../chat/send-bubbles.js");
+  const fakeDeps: FulfillmentPumpDependencies = {
+    claim: async () => ({ deliveries: pending }),
+    receipt: async () => ({ ok: true }),
+    finalize: async (_id, cause) => { finalizations.push({ cause }); return { state: "expired", finalizationReason: "delivery_lease_expired", deliveredText: "" }; },
+    send: async (_ch, _chunks, _gif, _pacing, _onFirst, opts) => {
+      const result = { reservationId: opts?.reservationId ?? null, attemptedOrdinal: 0, receiptedOrdinals: [] as number[], failureCategory: "discord_send_failed" as const, anySubstantiveContentVisible: false, messages: [] as Message[] };
+      throw new DeliverySendError("bubble_send_failed", result);
+    },
+  };
+  const client = makeFakeClient({ id: "dm-unknown" });
+  await drainPendingOperationalDeliveries(client, fakeDeps);
+  assert.equal(finalizations[0].cause, "delivery_lease");
+});
+
+test("proven pre-dispatch failure (aborted before send) is safe send_failure", async () => {
+  const finalizations: Array<{ cause: string }> = [];
+  const pending: PendingWeeklyReviewDelivery[] = [
+    { reservationId: 502, draftText: "pre", bubbles: [{ ordinal: 0, text: "pre", discordMessageId: null }], statusUrl: "/delivery/502" },
+  ];
+  const { DeliverySendError } = await import("../chat/send-bubbles.js");
+  const fakeDeps: FulfillmentPumpDependencies = {
+    claim: async () => ({ deliveries: pending }),
+    receipt: async () => ({ ok: true }),
+    finalize: async (_id, cause) => { finalizations.push({ cause }); return { state: "aborted", finalizationReason: "send_failure", deliveredText: "" }; },
+    send: async () => {
+      const result = { reservationId: null, attemptedOrdinal: null, receiptedOrdinals: [] as number[], failureCategory: "aborted" as const, anySubstantiveContentVisible: false, messages: [] as Message[] };
+      throw new DeliverySendError("send_aborted", result);
+    },
+  };
+  const client = makeFakeClient({ id: "dm-pre" });
+  await drainPendingOperationalDeliveries(client, fakeDeps);
+  assert.equal(finalizations[0].cause, "send_failure");
+});
+
+test("partial success persists first bubble incrementally and finalizes partially_delivered", async () => {
+  const receipts: Array<{ ordinal: number }> = [];
+  const finalizations: Array<{ cause: string }> = [];
+  const pending: PendingWeeklyReviewDelivery[] = [
+    { reservationId: 503, draftText: "A".repeat(2500), bubbles: [{ ordinal: 0, text: "A".repeat(1800) }, { ordinal: 1, text: "B" }], statusUrl: "/delivery/503" },
+  ];
+  const { DeliverySendError } = await import("../chat/send-bubbles.js");
+  const fakeDeps: FulfillmentPumpDependencies = {
+    claim: async () => ({ deliveries: pending }),
+    receipt: async (_id, ordinal) => { receipts.push({ ordinal }); return { ok: true }; },
+    finalize: async (_id, cause) => { finalizations.push({ cause }); return { state: "partially_delivered", finalizationReason: "send_failure_after_partial", deliveredText: "" }; },
+    send: async (_ch, _chunks, _gif, _pacing, _onFirst, opts) => {
+      const onSent = opts?.onBubbleSent as ((ordinal: number, msg: Message) => Promise<void>) | undefined;
+      if (onSent) await onSent(0, { id: "msg_partial_0" } as Message);
+      const result = { reservationId: opts?.reservationId ?? null, attemptedOrdinal: 1, receiptedOrdinals: [0] as number[], failureCategory: "discord_send_failed" as const, anySubstantiveContentVisible: true, messages: [{ id: "msg_partial_0" } as Message] };
+      throw new DeliverySendError("bubble_send_failed", result);
+    },
+  };
+  const client = makeFakeClient({ id: "dm-partial" });
+  await drainPendingOperationalDeliveries(client, fakeDeps);
+  assert.equal(receipts.length, 1);
+  assert.equal(receipts[0].ordinal, 0);
+  assert.equal(finalizations[0].cause, "send_failure");
 });
 
