@@ -102,6 +102,9 @@ function reasonFor(
     case "delivery_lease":
       return { state: "expired", reason: "delivery_lease_expired" };
     case "complete":
+      if (plannedCount > 0) {
+        return { state: "expired", reason: "delivery_lease_expired" };
+      }
       return { state: "aborted", reason: "empty_draft" };
     default: {
       const _exhaustive: never = cause;
@@ -168,6 +171,22 @@ export function finalizeDelivery(
     );
 
     if (deliveredText && reservation.threadId) {
+      // Ensure thread exists for archival: weekly placeholder 'dm' may not be a real mem_threads row.
+      const existingThread = db
+        .prepare(`SELECT id FROM mem_threads WHERE id = ?`)
+        .get(reservation.threadId) as { id?: unknown } | undefined;
+      if (!existingThread) {
+        const nowIsoThread = new Date().toISOString();
+        db.prepare(
+          `INSERT OR IGNORE INTO mem_threads (id, owner_id, status, channel, created_at, updated_at) VALUES (?, ?, 'active', ?, ?, ?)`,
+        ).run(
+          reservation.threadId,
+          input.ownerId,
+          reservation.channel === "discord" ? "discord" : "discord",
+          nowIsoThread,
+          nowIsoThread,
+        );
+      }
       const assistantMessageId = insertMessage(db, {
         threadId: reservation.threadId,
         ownerId: input.ownerId,

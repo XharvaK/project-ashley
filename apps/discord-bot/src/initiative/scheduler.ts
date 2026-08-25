@@ -82,6 +82,27 @@ export type WeeklyReviewDrainDependencies = {
   finalize: typeof finalizeDelivery;
 };
 
+async function persistReceiptWithRetryWeekly(
+  receipt: WeeklyReviewDrainDependencies["receipt"],
+  reservationId: number,
+  ordinal: number,
+  discordMessageId: string,
+): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await receipt(reservationId, ordinal, discordMessageId);
+      return;
+    } catch (err) {
+      lastError = err;
+      if (attempt < 2) {
+        await new Promise((r) => setTimeout(r, 10 * (attempt + 1)));
+      }
+    }
+  }
+  throw lastError;
+}
+
 /**
  * Drain ledgered weekly self-improvement review deliveries using the SAME
  * send -> receipt -> finalize flow as any proactive reach-out. Only
@@ -137,7 +158,7 @@ export async function drainPendingWeeklyReviewDeliveries(
             {
               reservationId: delivery.reservationId,
               onBubbleSent: async (ordinal, msg) => {
-                await dependencies.receipt(delivery.reservationId, ordinal, msg.id).catch(() => {});
+                await persistReceiptWithRetryWeekly(dependencies.receipt, delivery.reservationId, ordinal, msg.id);
               },
             },
           );
@@ -181,13 +202,32 @@ export async function drainPendingWeeklyReviewDeliveries(
           discordMessageId: successResult.messages[i]?.id ?? "",
         }))
         .filter((r: { discordMessageId: string }) => r.discordMessageId);
+      let receiptFailures = 0;
+      let successfulReceipts = 0;
       for (const receipt of receipts) {
-        await dependencies.receipt(delivery.reservationId, receipt.ordinal, receipt.discordMessageId).catch(() => {});
+        try {
+          await persistReceiptWithRetryWeekly(dependencies.receipt, delivery.reservationId, receipt.ordinal, receipt.discordMessageId);
+          successfulReceipts += 1;
+        } catch {
+          receiptFailures += 1;
+        }
+      }
+      if (receiptFailures > 0) {
+        await dependencies.finalize(delivery.reservationId, "delivery_lease").catch(() => {});
+        continue;
+      }
+      if (successfulReceipts === 0 && receipts.length > 0) {
+        await dependencies.finalize(delivery.reservationId, "delivery_lease").catch(() => {});
+        continue;
+      }
+      if (successfulReceipts === 0 && receipts.length === 0 && successResult.messages.length > 0) {
+        await dependencies.finalize(delivery.reservationId, "delivery_lease").catch(() => {});
+        continue;
       }
       await dependencies.finalize(delivery.reservationId, "complete").catch(() => {});
       drained += 1;
       console.log(
-        `[discord-bot] weekly review delivered reservation=${delivery.reservationId} bubbles=${receipts.length}/${bubbles.length}`,
+        `[discord-bot] weekly review delivered reservation=${delivery.reservationId} bubbles=${successfulReceipts}/${bubbles.length}`,
       );
     } catch (err) {
       console.warn(

@@ -6,6 +6,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { WorkspaceManager } from "@composer-assistant/sandbox-v2";
 import { resolveActiveThread } from "../memory/threads.js";
+import { finalizeDelivery } from "../delivery/finalize.js";
 import {
   claimOperationalFulfillmentDeliveryInTransaction,
   getDeliveryReservation,
@@ -730,28 +731,14 @@ function reconcileExpiredOperationalSending(
     if (typeof row !== "object" || row === null) continue;
     const reservationId = Number((row as { id?: unknown }).id);
     if (!Number.isFinite(reservationId)) continue;
-    const bubbles = listDeliveryBubbles(db, reservationId);
-    const receipted = bubbles.filter((b) => b.discordMessageId != null);
-    const receiptCount = receipted.length;
-    const plannedCount = bubbles.length;
-    if (plannedCount === 0) {
-      db.prepare(
-        `UPDATE delivery_reservations SET state='expired', finalization_reason='delivery_lease_expired', finalized_at=? WHERE id=? AND state='sending'`,
-      ).run(nowIso, reservationId);
+    try {
+      finalizeDelivery(db, {
+        reservationId,
+        ownerId,
+        cause: "delivery_lease",
+      });
+    } catch {
       continue;
-    }
-    if (receiptCount === 0) {
-      db.prepare(
-        `UPDATE delivery_reservations SET state='expired', finalization_reason='delivery_lease_expired', finalized_at=? WHERE id=? AND state='sending'`,
-      ).run(nowIso, reservationId);
-    } else if (receiptCount < plannedCount) {
-      db.prepare(
-        `UPDATE delivery_reservations SET state='partially_delivered', finalization_reason='delivery_lease_expired_after_partial', finalized_at=? WHERE id=? AND state='sending'`,
-      ).run(nowIso, reservationId);
-    } else {
-      db.prepare(
-        `UPDATE delivery_reservations SET state='committed', finalization_reason='all_bubbles_delivered', finalized_at=? WHERE id=? AND state='sending'`,
-      ).run(nowIso, reservationId);
     }
   }
 }
@@ -781,9 +768,10 @@ export function claimPendingOperationalCompletionDeliveries(
   const nowIso = new Date(nowMs).toISOString();
   const leaseExpiresAt = new Date(nowMs + leaseMs).toISOString();
 
+  reconcileExpiredOperationalSending(db, input.ownerId, nowIso);
+
   db.exec("BEGIN IMMEDIATE");
   try {
-    reconcileExpiredOperationalSending(db, input.ownerId, nowIso);
 
     const row = db
       .prepare(

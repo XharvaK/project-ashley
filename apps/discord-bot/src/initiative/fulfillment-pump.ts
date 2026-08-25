@@ -23,6 +23,27 @@ export const FULFILLMENT_POLL_INTERVAL_MS = 1500;
 // Local in-flight set as client defense-in-depth; server atomic claim is authoritative
 const localInFlightReservations = new Set<number>();
 
+async function persistReceiptWithRetry(
+  receipt: FulfillmentPumpDependencies["receipt"],
+  reservationId: number,
+  ordinal: number,
+  discordMessageId: string,
+): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await receipt(reservationId, ordinal, discordMessageId);
+      return;
+    } catch (err) {
+      lastError = err;
+      if (attempt < 2) {
+        await new Promise((r) => setTimeout(r, 10 * (attempt + 1)));
+      }
+    }
+  }
+  throw lastError;
+}
+
 export async function drainPendingOperationalDeliveries(
   client: Client,
   deps: FulfillmentPumpDependencies = {
@@ -78,7 +99,7 @@ export async function drainPendingOperationalDeliveries(
             {
               reservationId: delivery.reservationId,
               onBubbleSent: async (ordinal, msg) => {
-                await deps.receipt(delivery.reservationId, ordinal, msg.id).catch(() => {});
+                await persistReceiptWithRetry(deps.receipt, delivery.reservationId, ordinal, msg.id);
               },
             },
           );
@@ -91,7 +112,7 @@ export async function drainPendingOperationalDeliveries(
         const maybeDeliveryErr = sendError as Partial<DeliverySendError> & { result?: import("../chat/send-bubbles.js").BubbleSendResult };
         if (maybeDeliveryErr && maybeDeliveryErr.result && typeof maybeDeliveryErr.result.receiptedOrdinals !== "undefined") {
           const r = maybeDeliveryErr.result as import("../chat/send-bubbles.js").BubbleSendResult;
-          // Receipts for successful bubbles already persisted via onBubbleSent
+          // Receipts for successful bubbles already persisted via onBubbleSent (or failed with retry exhausted -> generic path below but DeliverySendError path handles partial)
           if (r.receiptedOrdinals.length > 0) {
             // Partial: at least one bubble durably receipted
             await deps.finalize(delivery.reservationId, "send_failure").catch(() => {});
@@ -114,7 +135,7 @@ export async function drainPendingOperationalDeliveries(
             }
           }
         } else {
-          // Generic error: if dispatch started, treat as UNKNOWN
+          // Generic error: if dispatch started, treat as UNKNOWN (includes receipt persistence failure after Discord Message)
           if (dispatchStarted) {
             await deps.finalize(delivery.reservationId, "delivery_lease").catch(() => {});
           } else {
@@ -138,14 +159,40 @@ export async function drainPendingOperationalDeliveries(
         }))
         .filter((r: { discordMessageId: string }) => r.discordMessageId);
 
+      let receiptFailures = 0;
+      let successfulReceipts = 0;
       for (const receipt of receipts) {
-        await deps.receipt(delivery.reservationId, receipt.ordinal, receipt.discordMessageId).catch(() => {});
+        try {
+          await persistReceiptWithRetry(deps.receipt, delivery.reservationId, receipt.ordinal, receipt.discordMessageId);
+          successfulReceipts += 1;
+        } catch {
+          receiptFailures += 1;
+        }
       }
 
+      if (receiptFailures > 0) {
+        // At least one durable receipt failed after bounded retries -> preserve UNKNOWN
+        await deps.finalize(delivery.reservationId, "delivery_lease").catch(() => {});
+        continue;
+      }
+
+      if (successfulReceipts === 0 && receipts.length > 0) {
+        // Zero durable receipts survived despite dispatch success -> UNKNOWN, not empty_draft
+        await deps.finalize(delivery.reservationId, "delivery_lease").catch(() => {});
+        continue;
+      }
+
+      if (successfulReceipts === 0 && receipts.length === 0 && successResult.messages.length > 0) {
+        // Messages returned but no ordinals mapped -> UNKNOWN
+        await deps.finalize(delivery.reservationId, "delivery_lease").catch(() => {});
+        continue;
+      }
+
+      // N-3 guard: if we thought we succeeded but durability is zero, treat as UNKNOWN already handled above; now safe to complete
       await deps.finalize(delivery.reservationId, "complete").catch(() => {});
       deliveredCount += 1;
       console.log(
-        `[discord-bot] operational fulfillment delivered reservation=${delivery.reservationId} bubbles=${receipts.length}/${bubbles.length}`,
+        `[discord-bot] operational fulfillment delivered reservation=${delivery.reservationId} bubbles=${successfulReceipts}/${bubbles.length}`,
       );
     } catch (error) {
       console.error(

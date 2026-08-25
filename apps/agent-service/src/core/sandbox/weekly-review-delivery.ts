@@ -14,6 +14,7 @@
  */
 
 import type { DatabaseSync } from "node:sqlite";
+import { finalizeDelivery } from "../delivery/finalize.js";
 import { claimProactiveDeliveryInTransaction } from "../delivery/store.js";
 import { listDeliveryBubbles } from "../delivery/store.js";
 import { getDeliveryReservation } from "../delivery/store.js";
@@ -214,7 +215,7 @@ function reconcileExpiredWeeklySending(
   const staleRows = db
     .prepare(
       `SELECT d.id FROM delivery_reservations d
-         JOIN initiative_reservations i ON i.id = d.initiative_reservation_id
+          JOIN initiative_reservations i ON i.id = d.initiative_reservation_id
         WHERE d.owner_id = ?
           AND d.trigger = 'proactive'
           AND d.state = 'sending'
@@ -227,34 +228,14 @@ function reconcileExpiredWeeklySending(
     if (typeof row !== "object" || row === null) continue;
     const reservationId = Number((row as { id?: unknown }).id);
     if (!Number.isFinite(reservationId)) continue;
-    const bubbles = listDeliveryBubbles(db, reservationId);
-    const receipted = bubbles.filter((b) => b.discordMessageId != null);
-    const receiptCount = receipted.length;
-    const plannedCount = bubbles.length;
-    if (plannedCount === 0) {
-      db.prepare(
-        `UPDATE delivery_reservations SET state='expired', finalization_reason='delivery_lease_expired', finalized_at=? WHERE id=? AND state='sending'`,
-      ).run(nowIso, reservationId);
+    try {
+      finalizeDelivery(db, {
+        reservationId,
+        ownerId,
+        cause: "delivery_lease",
+      });
+    } catch {
       continue;
-    }
-    if (receiptCount === 0) {
-      db.prepare(
-        `UPDATE delivery_reservations SET state='expired', finalization_reason='delivery_lease_expired', finalized_at=? WHERE id=? AND state='sending'`,
-      ).run(nowIso, reservationId);
-      // mirror finalize: zero receipt proactive cleans initiative if still uncommitted
-      const res = getDeliveryReservation(db, reservationId);
-      const initId = res?.initiativeReservationId;
-      if (initId != null) {
-        db.prepare(`DELETE FROM initiative_reservations WHERE id=? AND committed_at IS NULL`).run(initId);
-      }
-    } else if (receiptCount < plannedCount) {
-      db.prepare(
-        `UPDATE delivery_reservations SET state='partially_delivered', finalization_reason='delivery_lease_expired_after_partial', finalized_at=? WHERE id=? AND state='sending'`,
-      ).run(nowIso, reservationId);
-    } else {
-      db.prepare(
-        `UPDATE delivery_reservations SET state='committed', finalization_reason='all_bubbles_delivered', finalized_at=? WHERE id=? AND state='sending'`,
-      ).run(nowIso, reservationId);
     }
   }
 }
@@ -278,9 +259,10 @@ export function claimPendingWeeklyReviewDeliveries(
   const nowIso = new Date(nowMs).toISOString();
   const leaseExpiresAt = new Date(nowMs + leaseMs).toISOString();
 
+  reconcileExpiredWeeklySending(db, input.ownerId, nowIso);
+
   db.exec("BEGIN IMMEDIATE");
   try {
-    reconcileExpiredWeeklySending(db, input.ownerId, nowIso);
 
     const row = db
       .prepare(
