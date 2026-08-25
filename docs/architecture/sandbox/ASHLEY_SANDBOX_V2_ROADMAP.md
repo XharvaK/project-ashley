@@ -7,8 +7,9 @@
 **Dated production evidence pointer (not architecture):** M1–M7 are
 `PRODUCTION ACCEPTED` at exact candidate
 `48bad019fe601d5c871a54dd9902879862c6e96a`. Closure packet filename
-`SANDBOX_V2_PRODUCTION_CLOSURE_48bad019fe60.md` is not in this `8eedad8`
-planning tree; the SHA identity is preserved without copying that packet here.
+`SANDBOX_V2_PRODUCTION_CLOSURE_48bad019fe60.md` is not in this `e36613b`
+integration tree; the SHA identity is preserved without copying that packet
+here.
 M7 acceptance is limited to the named `patch_export` profile.
 
 **Scope:** Sandbox V2 M0 through M7 architecture. This document does not

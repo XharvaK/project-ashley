@@ -238,7 +238,7 @@ accepted predecessor chain. This contract remains as gate-order provenance.
 | Rollback | Rejection or deferral leaves M4 unaccepted; M5 stays blocked |
 
 Closed by exact-candidate packet `M4_PRODUCTION_ACCEPTANCE_553553b0d0ee.md`
-(filename identity; not in this `8eedad8` planning tree). In-tree generic
+(filename identity; not in this `e36613b` integration tree). In-tree generic
 [`M4_PRODUCTION_ACCEPTANCE.md`](../handoffs/M4_PRODUCTION_ACCEPTANCE.md)
 remains as gate-order provenance.
 
