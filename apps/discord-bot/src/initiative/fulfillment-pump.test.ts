@@ -3,6 +3,8 @@ import { test } from "node:test";
 import type { Client, DMChannel, Message, User } from "discord.js";
 import {
   drainPendingOperationalDeliveries,
+  startFulfillmentPump,
+  stopFulfillmentPump,
   type FulfillmentPumpDependencies,
 } from "./fulfillment-pump.js";
 import type { PendingWeeklyReviewDelivery } from "../agent-client.js";
@@ -47,7 +49,7 @@ test("fulfillment pump drains, receipts and finalizes pending operational delive
   ];
 
   const fakeDeps: FulfillmentPumpDependencies = {
-    list: async () => ({ deliveries: pending }),
+    claim: async () => ({ deliveries: pending }),
     receipt: async (reservationId, ordinal, discordMessageId) => {
       receipts.push({ reservationId, ordinal, messageId: discordMessageId });
       return { ok: true };
@@ -101,7 +103,7 @@ test("fulfillment pump records send_failure when Discord send has no visible con
   ];
 
   const fakeDeps: FulfillmentPumpDependencies = {
-    list: async () => ({ deliveries: pending }),
+    claim: async () => ({ deliveries: pending }),
     receipt: async () => ({ ok: true }),
     finalize: async (reservationId, cause) => {
       finalizations.push({ reservationId, cause });
@@ -147,7 +149,7 @@ test("fulfillment pump never throws or halts on single item error", async () => 
 
   let first = true;
   const fakeDeps: FulfillmentPumpDependencies = {
-    list: async () => ({ deliveries: pending }),
+    claim: async () => ({ deliveries: pending }),
     receipt: async () => ({ ok: true }),
     finalize: async (reservationId, cause) => {
       finalizations.push({ reservationId, cause });
@@ -180,7 +182,7 @@ test("fulfillment pump never throws or halts on single item error", async () => 
 
 test("fulfillment pump returns zero when no operational deliveries are pending", async () => {
   const fakeDeps: FulfillmentPumpDependencies = {
-    list: async () => ({ deliveries: [] }),
+    claim: async () => ({ deliveries: [] }),
     receipt: async () => ({ ok: true }),
     finalize: async () => ({ state: "committed", finalizationReason: "all_bubbles_delivered", deliveredText: "" }),
     send: async () => ({
@@ -197,3 +199,104 @@ test("fulfillment pump returns zero when no operational deliveries are pending",
   const count = await drainPendingOperationalDeliveries(fakeClient, fakeDeps);
   assert.equal(count, 0);
 });
+
+test("fulfillment pump double-drain protection: send function called exactly once during in-flight delivery", async () => {
+  let sendCount = 0;
+  let sendEntered: (() => void) | null = null;
+  const sendEnteredPromise = new Promise<void>((r) => { sendEntered = r; });
+  let resolveSend: (() => void) | null = null;
+  const sendReleasePromise = new Promise<void>((r) => { resolveSend = r; });
+
+  const pending: PendingWeeklyReviewDelivery[] = [
+    {
+      reservationId: 401,
+      draftText: "Concurrent claim test",
+      bubbles: [{ ordinal: 0, text: "Concurrent claim test", discordMessageId: null }],
+      statusUrl: "/delivery/401",
+    },
+  ];
+
+  let claimedCount = 0;
+  const fakeDeps: FulfillmentPumpDependencies = {
+    claim: async () => {
+      claimedCount += 1;
+      // First call claims the item, subsequent call returns empty (atomic claim behavior)
+      if (claimedCount === 1) {
+        return { deliveries: pending };
+      }
+      return { deliveries: [] };
+    },
+    receipt: async () => ({ ok: true }),
+    finalize: async () => ({ state: "committed", finalizationReason: "all_bubbles_delivered", deliveredText: "" }),
+    send: async () => {
+      sendCount += 1;
+      sendEntered?.();
+      // Hold in-flight
+      await sendReleasePromise;
+      return {
+        reservationId: null,
+        attemptedOrdinal: null,
+        receiptedOrdinals: [0],
+        failureCategory: null,
+        anySubstantiveContentVisible: true,
+        messages: [{ id: "msg_held_1" } as Message],
+      };
+    },
+  };
+
+  const fakeClient = makeFakeClient({ id: "dm-op-double" });
+
+  // Start drain 1
+  const drain1Promise = drainPendingOperationalDeliveries(fakeClient, fakeDeps);
+
+  // Wait until send is in-flight
+  await sendEnteredPromise;
+  assert.equal(sendCount, 1);
+
+  // Attempt drain 2 concurrently while send 1 is in-flight
+  const drain2Promise = drainPendingOperationalDeliveries(fakeClient, fakeDeps);
+
+  // Release held send
+  resolveSend?.();
+  const [drained1, drained2] = await Promise.all([drain1Promise, drain2Promise]);
+
+  assert.equal(drained1, 1);
+  assert.equal(drained2, 0);
+  assert.equal(sendCount, 1);
+});
+
+test("fulfillment pump completion-relative pacing: does not overlap ticks", async () => {
+  stopFulfillmentPump();
+  let claimCalls = 0;
+
+  const fakeDeps: FulfillmentPumpDependencies = {
+    claim: async () => {
+      claimCalls += 1;
+      return { deliveries: [] };
+    },
+    receipt: async () => ({ ok: true }),
+    finalize: async () => ({ state: "committed", finalizationReason: "all_bubbles_delivered", deliveredText: "" }),
+    send: async () => ({
+      reservationId: null,
+      attemptedOrdinal: null,
+      receiptedOrdinals: [],
+      failureCategory: null,
+      anySubstantiveContentVisible: false,
+      messages: [],
+    }),
+  };
+
+  const fakeClient = makeFakeClient({ id: "dm-pacing" });
+  startFulfillmentPump(fakeClient, 20, fakeDeps);
+
+  // Immediate tick runs at t=0
+  assert.equal(claimCalls, 1);
+
+  // Wait 50ms (exceeds the 20ms interval)
+  await new Promise((r) => setTimeout(r, 55));
+  stopFulfillmentPump();
+
+  // Next ticks fired sequentially without storming
+  assert.ok(claimCalls >= 2 && claimCalls <= 4);
+});
+

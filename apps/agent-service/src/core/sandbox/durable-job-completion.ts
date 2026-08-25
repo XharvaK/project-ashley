@@ -488,7 +488,9 @@ function claimAndBindOperationalCompletionReservation(
         existingRes &&
         (existingRes.state === "reserved" ||
           existingRes.state === "committed" ||
-          existingRes.state === "sending")
+          existingRes.state === "sending" ||
+          existingRes.state === "partially_delivered" ||
+          existingRes.state === "expired")
       ) {
         db.exec("COMMIT");
         return { reservationId: currentResId, reused: true };
@@ -578,7 +580,13 @@ export async function draftOperationalJobCompletion(
   if (currentResId > 0) {
     const res = getDeliveryReservation(db, currentResId);
     if (res) {
-      if (res.state === "committed" || res.state === "reserved" || res.state === "sending") {
+      if (
+        res.state === "committed" ||
+        res.state === "reserved" ||
+        res.state === "sending" ||
+        res.state === "partially_delivered" ||
+        res.state === "expired"
+      ) {
         return {
           drafted: false,
           usedExpression: false,
@@ -593,7 +601,7 @@ export async function draftOperationalJobCompletion(
           reservationId: res.id,
         };
       }
-      // Zero substantive content delivered -> transport failure is retryable!
+      // Zero substantive content delivered (and not ambiguous expired) -> transport failure is retryable!
       // Proceed to create a replacement delivery reservation atomically.
     }
   }
@@ -653,6 +661,10 @@ export async function drainOperationalJobCompletions(input: {
   }
 }
 
+/**
+ * Read-only diagnostic listing of pending operational fulfillment deliveries.
+ * Does NOT mutate delivery state.
+ */
 export function listPendingOperationalCompletionDeliveries(
   db: DatabaseSync,
   ownerId: string,
@@ -687,4 +699,85 @@ export function listPendingOperationalCompletionDeliveries(
     });
   }
   return result;
+}
+
+/**
+ * Atomically checks out pending operational fulfillment deliveries in a transaction.
+ * Transitions reserved -> sending, setting delivery_lease_expires_at.
+ * first_sent_at remains NULL (Claimed != Sent).
+ * Concurrent claims cannot receive the same reservation.
+ */
+export function claimPendingOperationalCompletionDeliveries(
+  db: DatabaseSync,
+  input: {
+    ownerId: string;
+    leaseMs?: number;
+    nowMs?: number;
+  },
+): Array<{
+  reservationId: number;
+  draftText: string;
+  bubbles: ReturnType<typeof listDeliveryBubbles>;
+  statusUrl: string;
+}> {
+  const nowMs = input.nowMs ?? Date.now();
+  const leaseMs = input.leaseMs ?? 120_000;
+  const leaseExpiresAt = new Date(nowMs + leaseMs).toISOString();
+
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const rows = db
+      .prepare(
+        `SELECT id
+           FROM delivery_reservations
+          WHERE owner_id = ?
+            AND delivery_lane = 'operational_fulfillment'
+            AND state = 'reserved'
+          ORDER BY id ASC`,
+      )
+      .all(input.ownerId);
+
+    const claimed: Array<{
+      reservationId: number;
+      draftText: string;
+      bubbles: ReturnType<typeof listDeliveryBubbles>;
+      statusUrl: string;
+    }> = [];
+
+    const updateStmt = db.prepare(
+      `UPDATE delivery_reservations
+          SET state = 'sending',
+              delivery_lease_expires_at = ?
+        WHERE id = ?
+          AND state = 'reserved'`,
+    );
+
+    for (const row of rows) {
+      if (typeof row !== "object" || row === null) continue;
+      const reservationId = Number((row as { id?: unknown }).id);
+      if (!Number.isFinite(reservationId)) continue;
+      const updateResult = updateStmt.run(leaseExpiresAt, reservationId);
+      if (updateResult.changes === 1) {
+        const reservation = getDeliveryReservation(db, reservationId);
+        if (reservation && reservation.state === "sending") {
+          claimed.push({
+            reservationId,
+            draftText: reservation.draftText ?? "",
+            bubbles: listDeliveryBubbles(db, reservationId),
+            statusUrl: `/delivery/${reservationId}`,
+          });
+        }
+      }
+    }
+
+    db.exec("COMMIT");
+    return claimed;
+  } catch (error) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      /* ignore */
+    }
+    throw error;
+  }
 }

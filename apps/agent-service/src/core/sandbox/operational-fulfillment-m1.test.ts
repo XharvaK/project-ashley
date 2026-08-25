@@ -10,6 +10,7 @@ import {
 import { finalizeDelivery } from "../delivery/finalize.js";
 import { resolveActiveThread } from "../memory/threads.js";
 import {
+  claimPendingOperationalCompletionDeliveries,
   draftOperationalJobCompletion,
   drainOperationalJobCompletions,
   listPendingOperationalCompletionDeliveries,
@@ -514,6 +515,206 @@ describe("Operational Fulfillment M1 (Prompt Delivery + Semantic Separation + Ta
       // Filter by weekly_review / proactive
       const proactivePending = core.getPendingDeliveries("doc", { lane: "weekly_review" });
       expect(proactivePending.some((p) => p.reservationId === opRes.id)).toBe(false);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("atomic claim operation: transitions reserved to sending and prevents concurrent claim", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    try {
+      const nowMs = 1_700_000_000_000;
+      const threadId = resolveActiveThread(db, "doc", "discord");
+
+      // 1. Create a reserved operational fulfillment reservation
+      const opRes = claimOperationalFulfillmentDelivery(db, {
+        ownerId: "doc",
+        channel: "discord",
+        threadId,
+        draftText: "atomic claim test",
+        bubbles: [{ ordinal: 0, text: "atomic claim test" }],
+        nowMs,
+      });
+      expect(opRes.state).toBe("reserved");
+      expect(opRes.firstSentAt).toBeNull();
+
+      // 2. Claimant A claims pending deliveries
+      const claimedA = claimPendingOperationalCompletionDeliveries(db, {
+        ownerId: "doc",
+        leaseMs: 60_000,
+        nowMs,
+      });
+      expect(claimedA.length).toBe(1);
+      expect(claimedA[0].reservationId).toBe(opRes.id);
+
+      // Verify row state in DB: state is 'sending', delivery_lease_expires_at is set, first_sent_at remains NULL
+      const resInDb = getDeliveryReservation(db, opRes.id);
+      expect(resInDb?.state).toBe("sending");
+      expect(resInDb?.deliveryLeaseExpiresAt).toBe(new Date(nowMs + 60_000).toISOString());
+      expect(resInDb?.firstSentAt).toBeNull(); // CLAIMED != SENT
+
+      // 3. Concurrent Claimant B attempts claim: receives EMPTY array
+      const claimedB = claimPendingOperationalCompletionDeliveries(db, {
+        ownerId: "doc",
+        leaseMs: 60_000,
+        nowMs,
+      });
+      expect(claimedB.length).toBe(0);
+
+      // Observational GET /delivery/pending also returns EMPTY
+      const pendingList = listPendingOperationalCompletionDeliveries(db, "doc");
+      expect(pendingList.length).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("crash / sent_outcome_unknown: expired unreceipted delivery is quarantined and blocks automatic replay", async () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    try {
+      const nowMs = 1_700_000_000_000;
+      resolveActiveThread(db, "doc", "discord");
+
+      const job = insertAdmittedOperationalJob(db, {
+        ownerId: "doc",
+        sourceMessageEntityUuid: "src_msg_crash",
+        sourceUserMessageId: 1,
+        admissionReservationId: 1,
+        boundedOperationTaskId: "task_crash_1",
+        projectId: "proj_1",
+        lifetimeExpiresAtMs: nowMs + 60_000,
+        jobId: "job_crash_1",
+      });
+
+      db.prepare(
+        `UPDATE operational_jobs SET status = 'succeeded', job_phase = 'terminal' WHERE job_id = ?`,
+      ).run(job.jobId);
+
+      // Draft completion
+      await drainOperationalJobCompletions({
+        db,
+        nowMs: () => nowMs,
+      });
+
+      const deliveryRow = db
+        .prepare(
+          `SELECT delivery_reservation_id FROM operational_job_deliveries WHERE job_id = ? AND delivery_kind = 'completion'`,
+        )
+        .get(job.jobId) as { delivery_reservation_id: number };
+      const resId = Number(deliveryRow.delivery_reservation_id);
+
+      // Claim delivery (state -> sending)
+      const claimed = claimPendingOperationalCompletionDeliveries(db, {
+        ownerId: "doc",
+        leaseMs: 60_000,
+        nowMs,
+      });
+      expect(claimed.length).toBe(1);
+
+      // Simulate crash where lease expires without any receipt persistence (sent_outcome_unknown)
+      finalizeDelivery(db, {
+        ownerId: "doc",
+        reservationId: resId,
+        cause: "delivery_lease",
+      });
+
+      const resState = getDeliveryReservation(db, resId);
+      expect(resState?.state).toBe("expired");
+      expect(resState?.finalizationReason).toBe("delivery_lease_expired");
+
+      // Next drain pass must NOT auto-recreate/replay! (UNKNOWN remains UNKNOWN)
+      const drainResult = await draftOperationalJobCompletion(db, {
+        jobId: job.jobId,
+        nowMs: nowMs + 70_000,
+      });
+      expect(drainResult.drafted).toBe(false);
+      expect(drainResult.reservationId).toBe(resId);
+
+      // Exactly ONE obligation exists
+      const totalDeliveries = db
+        .prepare(`SELECT COUNT(*) AS c FROM operational_job_deliveries WHERE job_id = ?`)
+        .get(job.jobId) as { c: number };
+      expect(totalDeliveries.c).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("definite zero-visible failure: permits retry for the same logical obligation with zero effect replay", async () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    try {
+      const nowMs = 1_700_000_000_000;
+      resolveActiveThread(db, "doc", "discord");
+
+      const job = insertAdmittedOperationalJob(db, {
+        ownerId: "doc",
+        sourceMessageEntityUuid: "src_msg_not_sent",
+        sourceUserMessageId: 1,
+        admissionReservationId: 1,
+        boundedOperationTaskId: "task_not_sent_1",
+        projectId: "proj_1",
+        lifetimeExpiresAtMs: nowMs + 60_000,
+        jobId: "job_not_sent_1",
+      });
+
+      db.prepare(
+        `UPDATE operational_jobs SET status = 'succeeded', job_phase = 'terminal' WHERE job_id = ?`,
+      ).run(job.jobId);
+
+      // Initial draft
+      await drainOperationalJobCompletions({
+        db,
+        nowMs: () => nowMs,
+      });
+
+      const initialRow = db
+        .prepare(
+          `SELECT delivery_reservation_id FROM operational_job_deliveries WHERE job_id = ? AND delivery_kind = 'completion'`,
+        )
+        .get(job.jobId) as { delivery_reservation_id: number };
+      const firstResId = Number(initialRow.delivery_reservation_id);
+
+      // Claim delivery
+      claimPendingOperationalCompletionDeliveries(db, {
+        ownerId: "doc",
+        leaseMs: 60_000,
+        nowMs,
+      });
+
+      // Definite failure before send (not_sent)
+      finalizeDelivery(db, {
+        ownerId: "doc",
+        reservationId: firstResId,
+        cause: "send_failure",
+      });
+
+      const firstResState = getDeliveryReservation(db, firstResId);
+      expect(firstResState?.state).toBe("aborted");
+      expect(firstResState?.finalizationReason).toBe("send_failure");
+      expect(firstResState?.firstSentAt).toBeNull(); // Proven not sent
+
+      // Next drain pass creates a replacement reservation for the SAME obligation
+      await drainOperationalJobCompletions({
+        db,
+        nowMs: () => nowMs + 5000,
+      });
+
+      const secondRow = db
+        .prepare(
+          `SELECT delivery_reservation_id FROM operational_job_deliveries WHERE job_id = ? AND delivery_kind = 'completion'`,
+        )
+        .get(job.jobId) as { delivery_reservation_id: number };
+      const secondResId = Number(secondRow.delivery_reservation_id);
+
+      expect(secondResId).toBeGreaterThan(firstResId);
+      const secondResState = getDeliveryReservation(db, secondResId);
+      expect(secondResState?.state).toBe("reserved");
+
+      // Verify exactly ONE logical obligation row remains in operational_job_deliveries
+      const totalDeliveries = db
+        .prepare(`SELECT COUNT(*) AS c FROM operational_job_deliveries WHERE job_id = ?`)
+        .get(job.jobId) as { c: number };
+      expect(totalDeliveries.c).toBe(1);
     } finally {
       db.close();
     }

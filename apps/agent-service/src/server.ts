@@ -1053,6 +1053,24 @@ export function createServer(
     }
   });
 
+  app.post("/delivery/claim", (req, res) => {
+    try {
+      const owner = requireOwner((req.body as { userId?: string }).userId);
+      const { lane, leaseMs } = (req.body ?? {}) as {
+        lane?: string;
+        leaseMs?: number;
+      };
+      const claimed = manager.core.claimPendingDeliveries(owner, {
+        lane,
+        leaseMs,
+      });
+      res.json({ deliveries: claimed });
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
   app.get("/delivery/:id", (req, res) => {
     try {
       const ownerId = String(req.query.owner_id ?? "");

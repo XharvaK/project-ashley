@@ -189,9 +189,11 @@ import {
   selectPhaseLifecycleBranch,
 } from "./delivery/phase-lifecycle.js";
 import {
+  claimPendingWeeklyReviewDeliveries,
   listPendingWeeklyReviewDeliveries,
 } from "./sandbox/weekly-review-delivery.js";
 import {
+  claimPendingOperationalCompletionDeliveries,
   listPendingOperationalCompletionDeliveries,
 } from "./sandbox/durable-job-completion.js";
 import {
@@ -2077,6 +2079,35 @@ export class AshleyCore {
     return [
       ...listPendingWeeklyReviewDeliveries(this.db, ownerId),
       ...listPendingOperationalCompletionDeliveries(this.db, ownerId),
+    ];
+  }
+
+  claimPendingDeliveries(
+    ownerId: string,
+    options: { lane?: string; leaseMs?: number } = {},
+  ) {
+    const lane = options.lane?.trim();
+    if (lane === "operational_fulfillment") {
+      return claimPendingOperationalCompletionDeliveries(this.db, {
+        ownerId,
+        leaseMs: options.leaseMs,
+      });
+    }
+    if (lane === "weekly_review" || lane === "proactive") {
+      return claimPendingWeeklyReviewDeliveries(this.db, {
+        ownerId,
+        leaseMs: options.leaseMs,
+      });
+    }
+    return [
+      ...claimPendingWeeklyReviewDeliveries(this.db, {
+        ownerId,
+        leaseMs: options.leaseMs,
+      }),
+      ...claimPendingOperationalCompletionDeliveries(this.db, {
+        ownerId,
+        leaseMs: options.leaseMs,
+      }),
     ];
   }
 

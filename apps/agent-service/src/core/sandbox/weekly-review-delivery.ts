@@ -196,3 +196,75 @@ export function listPendingWeeklyReviewDeliveries(
   }
   return result;
 }
+
+/**
+ * Atomically checks out pending weekly review deliveries in a transaction.
+ * Transitions reserved -> sending, setting delivery_lease_expires_at.
+ * first_sent_at remains NULL (Claimed != Sent).
+ */
+export function claimPendingWeeklyReviewDeliveries(
+  db: DatabaseSync,
+  input: {
+    ownerId: string;
+    leaseMs?: number;
+    nowMs?: number;
+  },
+): PendingWeeklyReviewDelivery[] {
+  const nowMs = input.nowMs ?? Date.now();
+  const leaseMs = input.leaseMs ?? 120_000;
+  const leaseExpiresAt = new Date(nowMs + leaseMs).toISOString();
+
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const rows = db
+      .prepare(
+        `SELECT d.id
+           FROM delivery_reservations d
+           JOIN initiative_reservations i ON i.id = d.initiative_reservation_id
+          WHERE d.owner_id = ?
+            AND d.trigger = 'proactive'
+            AND d.state = 'reserved'
+            AND i.material_key LIKE ?||'%'
+          ORDER BY d.id ASC`,
+      )
+      .all(input.ownerId, WEEKLY_REVIEW_MATERIAL_PREFIX);
+
+    const claimed: PendingWeeklyReviewDelivery[] = [];
+    const updateStmt = db.prepare(
+      `UPDATE delivery_reservations
+          SET state = 'sending',
+              delivery_lease_expires_at = ?
+        WHERE id = ?
+          AND state = 'reserved'`,
+    );
+
+    for (const row of rows) {
+      if (typeof row !== "object" || row === null) continue;
+      const reservationId = Number((row as { id?: unknown }).id);
+      if (!Number.isFinite(reservationId)) continue;
+      const updateResult = updateStmt.run(leaseExpiresAt, reservationId);
+      if (updateResult.changes === 1) {
+        const reservation = getDeliveryReservation(db, reservationId);
+        if (reservation && reservation.state === "sending") {
+          claimed.push({
+            reservationId,
+            draftText: reservation.draftText ?? "",
+            bubbles: listDeliveryBubbles(db, reservationId),
+            statusUrl: `/delivery/${reservationId}`,
+          });
+        }
+      }
+    }
+
+    db.exec("COMMIT");
+    return claimed;
+  } catch (error) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      /* ignore */
+    }
+    throw error;
+  }
+}
+

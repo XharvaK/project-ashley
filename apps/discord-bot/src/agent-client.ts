@@ -145,6 +145,41 @@ export async function listPendingOperationalDeliveries() {
   );
 }
 
+export async function claimPendingDeliveries(options?: {
+  lane?: "operational_fulfillment" | "weekly_review";
+  leaseMs?: number;
+}) {
+  return agentFetch<{ deliveries: PendingWeeklyReviewDelivery[] }>(
+    `/delivery/claim`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        userId: config.ownerId,
+        lane: options?.lane,
+        leaseMs: options?.leaseMs,
+      }),
+    },
+  );
+}
+
+export async function claimPendingWeeklyReviewDeliveries(options?: {
+  leaseMs?: number;
+}) {
+  return claimPendingDeliveries({
+    lane: "weekly_review",
+    leaseMs: options?.leaseMs,
+  });
+}
+
+export async function claimPendingOperationalDeliveries(options?: {
+  leaseMs?: number;
+}) {
+  return claimPendingDeliveries({
+    lane: "operational_fulfillment",
+    leaseMs: options?.leaseMs,
+  });
+}
+
 export async function getDeliveryStatus(reservationId: number) {  const q = new URLSearchParams({ owner_id: config.ownerId });
   return agentFetch<{
     reservation: {

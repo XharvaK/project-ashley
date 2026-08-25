@@ -1,6 +1,7 @@
 import { validateConfig, config } from "./config.js";
 import { startBot } from "./client.js";
 import { channelQueue } from "./chat/channel-queue.js";
+import { stopFulfillmentPump } from "./initiative/fulfillment-pump.js";
 import { stopProactiveScheduler } from "./initiative/scheduler.js";
 import { stopPresence } from "./presence.js";
 import { checkGatewayBotAdmission, type GatewayAdmissionResult } from "./gateway/admission.js";
@@ -87,6 +88,7 @@ export async function runDiscordMain(
       if (shuttingDown) return;
       shuttingDown = true;
       console.log(`[discord-bot] ${signal}`);
+      stopFulfillmentPump();
       stopProactiveScheduler();
       stopPresence();
       // Her reply is already committed to memory at this point. Aborting drops the
