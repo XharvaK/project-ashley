@@ -36,9 +36,10 @@ import {
   createModelFabricInvocation,
   modelFailureFor,
   normalizeReasoningPolicy,
-  resolveCurrentPolicy,
+  resolveDispatchPolicy,
   resolvedRouteFor,
   wireReasoningFor,
+  type ControlRootMode,
   type LogicalModelRole,
   type ModelFabricDispatchMetadata,
   type ModelFallbackClass,
@@ -56,6 +57,7 @@ import type {
   ProviderId,
   ModelProviderAdapter,
   RouteId,
+  ContextProfile,
 } from "./core/model-routing/types.js";
 export type {
   ChatMessage,
@@ -71,6 +73,9 @@ export type {
 export type CognitiveDispatchOptions = CompletionOptions & {
   /** Required authorized open nuclear handle for attentive dispatch. */
   attentionDb: DatabaseSync;
+  /** Test-only Model Fabric control root. Production uses the default dir. */
+  modelFabricControlDir?: string;
+  modelFabricControlRootMode?: ControlRootMode;
 };
 
 export class DispatchDataPlaneMissingError extends Error {
@@ -222,6 +227,20 @@ function fallbackTopologyFor(
   return "none";
 }
 
+function completionReasoning(
+  value: string | null | undefined,
+): CompletionOptions["reasoningEffort"] | undefined {
+  switch (value) {
+    case "none":
+    case "low":
+    case "medium":
+    case "high":
+      return value;
+    default:
+      return undefined;
+  }
+}
+
 function errorClassFor(error: unknown): string {
   if (error && typeof error === "object" && "code" in error) {
     const code = (error as { code?: unknown }).code;
@@ -309,12 +328,7 @@ export async function completeChat(
   let configuredBinding;
   let currentPolicy;
   try {
-    if (routeId) {
-      // Validate an explicit route before policy resolution so disabled and
-      // unknown compatibility routes retain their existing fail-closed path.
-      binding = requireRouteEnabled(routeId);
-    }
-    currentPolicy = resolveCurrentPolicy({
+    currentPolicy = resolveDispatchPolicy({
       logicalRole,
       purpose: purpose as ModelPurposeId,
       lane: mapped.lane,
@@ -322,12 +336,37 @@ export async function completeChat(
       routeId,
       model: options.model,
       specialistRequirement,
+      controlDir: options.modelFabricControlDir,
+      controlRootMode: options.modelFabricControlRootMode,
     });
-    configuredBinding = requireRouteEnabled(
-      currentPolicy.configuredRouteId as RouteId,
-    );
-    if (!binding) {
-      binding = requireRouteEnabled(currentPolicy.dispatchedRouteId as RouteId);
+    if (currentPolicy.source === "activated") {
+      const occupantProvider = currentPolicy.occupant.provider as ProviderId;
+      configuredBinding = {
+        route: currentPolicy.configuredRouteId as RouteId,
+        provider: occupantProvider,
+        configuredModelId: currentPolicy.configuredModelId,
+        contextProfile: currentPolicy.policyRow
+          .contextPolicyId as ContextProfile,
+        enabled: true,
+      };
+      binding = {
+        ...configuredBinding,
+        route: currentPolicy.dispatchedRouteId as RouteId,
+        provider: occupantProvider,
+        configuredModelId: currentPolicy.occupant.configuredModelId,
+      };
+    } else {
+      if (routeId) {
+        // Validate an explicit route before compatibility dispatch so disabled
+        // and unknown compatibility routes retain their existing fail-closed path.
+        binding = requireRouteEnabled(routeId);
+      }
+      configuredBinding = requireRouteEnabled(
+        currentPolicy.configuredRouteId as RouteId,
+      );
+      if (!binding) {
+        binding = requireRouteEnabled(currentPolicy.dispatchedRouteId as RouteId);
+      }
     }
   } catch (error) {
     const preProjection = createContextProjection({
@@ -382,10 +421,15 @@ export async function completeChat(
     fallbackFromAttemptId: string | null,
     fallbackClass: ModelFallbackClass,
   ) => {
+    const occupantWire = currentPolicy.occupant.effectiveReasoning ?? null;
     const requestedWireReasoning =
-      options.reasoningEffort ??
-      currentPolicy.occupant.effectiveReasoning ??
-      (targetProvider === "mistral" ? env.mistralReasoningEffort : null);
+      currentPolicy.source === "activated"
+        ? occupantWire ??
+          options.reasoningEffort ??
+          (targetProvider === "mistral" ? env.mistralReasoningEffort : null)
+        : options.reasoningEffort ??
+          occupantWire ??
+          (targetProvider === "mistral" ? env.mistralReasoningEffort : null);
     const requestedReasoningPolicy = requestedWireReasoning
       ? normalizeReasoningPolicy(requestedWireReasoning)
       : null;
@@ -481,7 +525,7 @@ export async function completeChat(
       effectiveReasoningSent: effectiveReasoning,
     });
     previousAttemptId = attemptId;
-    return { attempt, resolvedRoute };
+    return { attempt, resolvedRoute, requestedWireReasoning, effectiveReasoning };
   };
 
   const singleDispatch = async (
@@ -533,7 +577,14 @@ export async function completeChat(
             const completion = await adapter.dispatch({
               messages,
               modelId: alias,
-              options: { ...options, model: alias },
+              options: {
+                ...options,
+                model: alias,
+                reasoningEffort: completionReasoning(
+                  attemptContext.effectiveReasoning ??
+                    attemptContext.requestedWireReasoning,
+                ),
+              },
               signal: merged,
             });
             attempt.markProviderResponse({
@@ -604,7 +655,9 @@ export async function completeChat(
   try {
     let attentive;
     const isThoughtRoute =
-      (routeId === "thought" || purpose === "thought") && provider === "nim";
+      currentPolicy.source !== "activated" &&
+      (routeId === "thought" || purpose === "thought") &&
+      provider === "nim";
 
     if (isThoughtRoute) {
       try {

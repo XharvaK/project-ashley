@@ -9,6 +9,7 @@ import type {
   QuotaBucket,
 } from "./types.js";
 import { currentPortfolio } from "../model-fabric/portfolio.js";
+import { resolveActivePolicy } from "../model-fabric/activation.js";
 
 export type RoutingHealth = "ok" | "degraded" | "disabled" | "unused";
 
@@ -150,17 +151,25 @@ export function routingStatus(db: DatabaseSync): RoutingRouteStatus[] {
       const dispatchedRouteId = row.dispatchedRouteId ?? configuredRouteId;
       if (configuredRouteId !== r.route && dispatchedRouteId !== r.route) continue;
       for (const occupant of row.occupants) {
-        policyRows.push({
-          policyRowId: row.policyRowId,
-          logicalRole: row.logicalRole,
-          occupancyKey: row.occupancyKey,
-          occupantId: occupant.occupantId,
-          provider: occupant.provider,
-          configuredModelId: occupant.configuredModelId,
-          configuredRouteId,
-          dispatchedRouteId,
-          admissionBasis: occupant.admissionBasis ?? null,
-          activeActivationRefId: "compatibility_default",
+          const active = resolveActivePolicy({
+            logicalRole: row.logicalRole,
+            occupancyKey: row.occupancyKey,
+          });
+          const occupancyActivated =
+            active.source === "activated" && active.activationRefId != null;
+          policyRows.push({
+            policyRowId: row.policyRowId,
+            logicalRole: row.logicalRole,
+            occupancyKey: row.occupancyKey,
+            occupantId: occupant.occupantId,
+            provider: occupant.provider,
+            configuredModelId: occupant.configuredModelId,
+            configuredRouteId,
+            dispatchedRouteId,
+            admissionBasis: occupant.admissionBasis ?? null,
+            activeActivationRefId: occupancyActivated
+              ? active.activationRefId
+              : "compatibility_default",
           health: {
             configured: true,
             available: !degraded,

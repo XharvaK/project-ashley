@@ -18,10 +18,15 @@ import {
 import { capabilityProfileFor } from "./profiles.js";
 import {
   currentPortfolio,
+  defaultRouteForRow,
+  occupancyKeyFor,
+  resolveCurrentPolicy,
+  type CurrentPolicyResolution,
+  type CurrentPolicyResolutionInput,
   type ModelFabricOccupant,
   type ModelFabricPolicyRow,
 } from "./portfolio.js";
-import { sha256Text, stableJson } from "./hash.js";
+import { freezeDeep, sha256Text, stableJson } from "./hash.js";
 import type { QualificationResultRecord } from "./catalog.js";
 
 export type ControlRootMode = "fixture" | "production";
@@ -714,6 +719,72 @@ export type ActivePolicyResolution = Readonly<{
   activationRefId: string | null;
   reason: string | null;
 }>;
+
+export type DispatchPolicyResolution = CurrentPolicyResolution &
+  Readonly<{
+    source: ActivePolicyResolution["source"];
+    activationRefId: string | null;
+    activationReason: string | null;
+  }>;
+
+function resolveActivatedDispatch(
+  row: ModelFabricPolicyRow,
+): CurrentPolicyResolution {
+  const occupant = row.occupants[0];
+  if (!occupant) {
+    throw new Error(`model_fabric_activated_occupants_missing:${row.policyRowId}`);
+  }
+  const configuredRouteId = row.configuredRouteId ?? defaultRouteForRow(row);
+  const dispatchedRouteId = row.dispatchedRouteId ?? configuredRouteId;
+  return freezeDeep({
+    registryVersion: currentPortfolio().registryVersion,
+    portfolioRevisionId: row.portfolioRevisionId,
+    policyRow: row,
+    occupant,
+    specialistRequirement: null,
+    configuredRouteId,
+    dispatchedRouteId,
+    configuredModelId: occupant.configuredModelId,
+    routeOverride: null,
+    modelOverride: null,
+  });
+}
+
+/**
+ * Canonical production dispatch resolver. Activation authority is
+ * `resolveActivePolicy`; this maps that result onto the CURRENT dispatch
+ * shape. Caller route/model overrides apply only on the compatibility path.
+ */
+export function resolveDispatchPolicy(
+  input: CurrentPolicyResolutionInput & {
+    controlDir?: string;
+    controlRootMode?: ControlRootMode;
+  },
+): DispatchPolicyResolution {
+  const occupancyKey = occupancyKeyFor(input);
+  const active = resolveActivePolicy({
+    logicalRole: input.logicalRole,
+    occupancyKey,
+    controlDir: input.controlDir,
+    controlRootMode: input.controlRootMode,
+  });
+  if (active.source === "activated" && active.row) {
+    return freezeDeep({
+      ...resolveActivatedDispatch(active.row),
+      specialistRequirement: input.specialistRequirement ?? null,
+      source: "activated" as const,
+      activationRefId: active.activationRefId,
+      activationReason: null,
+    });
+  }
+  const current = resolveCurrentPolicy(input);
+  return freezeDeep({
+    ...current,
+    source: active.source,
+    activationRefId: null,
+    activationReason: active.reason,
+  });
+}
 
 function currentRowFor(
   logicalRole: string,

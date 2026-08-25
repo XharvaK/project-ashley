@@ -183,11 +183,11 @@ describe("M5 production-equivalent live composition", () => {
     expect(captured.system).toContain("currently resolvable");
     expect(captured.system).toMatch(/omit workspaceId/);
     expect(captured.system).toContain("operation: \"changeset.author\"");
-    expect(captured.options).toEqual({
+    expect(captured.options).toMatchObject({
       maxTokens: THOUGHT_MAX_OUTPUT_TOKENS,
-      reasoningEffort: "low",
       responseFormat: "json_object",
     });
+    expect(captured.options?.reasoningEffort).toBeUndefined();
   });
 
   it("Case A: omitted-id candidate_authorship from the smoke utterance reaches M5 execute", async () => {
@@ -199,7 +199,7 @@ describe("M5 production-equivalent live composition", () => {
     vi.spyOn(mistral, "completeChat").mockImplementation(async (messages, options) => {
       const systemContent = String(messages.find((m) => m.role === "system")?.content ?? "");
       if (systemContent.includes("Ashley's Thought layer, not her Expression layer")) {
-        expect(options?.reasoningEffort).toBe("low");
+        expect(options?.reasoningEffort).toBeUndefined();
         expect(systemContent).toContain("currently resolvable");
         return chatResult(
           JSON.stringify({

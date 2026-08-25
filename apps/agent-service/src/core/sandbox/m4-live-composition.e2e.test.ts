@@ -180,11 +180,11 @@ describe("M4 production-equivalent live composition", () => {
     expect(captured.system).toMatch(/omit workspaceId/);
     expect(captured.system).toContain("not by itself mechanical verification");
     expect(captured.system).toContain("operation: \"workspace.verify\"");
-    expect(captured.options).toEqual({
+    expect(captured.options).toMatchObject({
       maxTokens: THOUGHT_MAX_OUTPUT_TOKENS,
-      reasoningEffort: "low",
       responseFormat: "json_object",
     });
+    expect(captured.options?.reasoningEffort).toBeUndefined();
     expect(groqReasoningEffortForModel("openai/gpt-oss-120b", "low")).toBe("low");
     expect(groqReasoningEffortForModel("openai/gpt-oss-120b", "none")).toBe("low");
   });
@@ -198,7 +198,7 @@ describe("M4 production-equivalent live composition", () => {
     vi.spyOn(mistral, "completeChat").mockImplementation(async (messages, options) => {
       const systemContent = String(messages.find((m) => m.role === "system")?.content ?? "");
       if (systemContent.includes("Ashley's Thought layer, not her Expression layer")) {
-        expect(options?.reasoningEffort).toBe("low");
+        expect(options?.reasoningEffort).toBeUndefined();
         expect(systemContent).toContain("currently resolvable");
         return chatResult(
           JSON.stringify({

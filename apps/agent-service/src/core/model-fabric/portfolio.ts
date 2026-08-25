@@ -240,7 +240,7 @@ export function routeRecordsFromCurrentPortfolio(): CurrentRouteRecord[] {
   }));
 }
 
-function occupancyKeyFor(input: CurrentPolicyResolutionInput): string {
+export function occupancyKeyFor(input: CurrentPolicyResolutionInput): string {
   if (input.logicalRole === "thought") {
     return input.lane === "interactive" || input.lane === "urgent_grounded" || input.deadlineAtMs != null
       ? "interactive"
@@ -250,7 +250,7 @@ function occupancyKeyFor(input: CurrentPolicyResolutionInput): string {
   return "default";
 }
 
-function defaultRouteForRow(row: ModelFabricPolicyRow): string {
+export function defaultRouteForRow(row: ModelFabricPolicyRow): string {
   if (row.configuredRouteId) return row.configuredRouteId;
   switch (row.logicalRole) {
     case "thought":

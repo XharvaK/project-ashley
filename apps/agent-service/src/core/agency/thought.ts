@@ -1423,9 +1423,6 @@ function buildThoughtCallOptions(
   return {
     maxTokens: THOUGHT_MAX_OUTPUT_TOKENS,
     temperature: 0.15,
-    // gpt-oss-120b rejects reasoning_effort=none (Groq HTTP 400). low is the
-    // minimum legal effort that still bounds hidden reasoning vs medium.
-    reasoningEffort: "low",
     responseFormat: "json_object",
     lane: (options.lane as any) ?? "interactive",
     purpose: (options.purpose as any) ?? "thought",
