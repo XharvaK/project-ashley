@@ -78,6 +78,8 @@ export class DispatchDataPlaneMissingError extends Error {
 
 let client: Mistral | null = null;
 
+export const MISTRAL_RETRY_CONFIG = { strategy: "none" } as const;
+
 function getClient(): Mistral {
   if (!env.mistralApiKey) {
     throw new AppError(
@@ -87,7 +89,10 @@ function getClient(): Mistral {
     );
   }
   if (!client) {
-    client = new Mistral({ apiKey: env.mistralApiKey });
+    client = new Mistral({
+      apiKey: env.mistralApiKey,
+      retryConfig: MISTRAL_RETRY_CONFIG,
+    });
   }
   return client;
 }
@@ -223,6 +228,32 @@ function isDefinitiveProviderError(error: unknown): boolean {
   if (!(error instanceof AppError)) return false;
   if (error.code === "agent_not_ready") return false;
   return error.httpStatus >= 400;
+}
+
+function observedHttpStatus(error: unknown): number | null {
+  if (!error || typeof error !== "object") return null;
+  const value = error as {
+    status?: unknown;
+    statusCode?: unknown;
+    response?: { status?: unknown; statusCode?: unknown };
+  };
+  const candidates = [
+    value.status,
+    value.statusCode,
+    value.response?.status,
+    value.response?.statusCode,
+  ];
+  for (const candidate of candidates) {
+    if (
+      typeof candidate === "number" &&
+      Number.isInteger(candidate) &&
+      candidate >= 400 &&
+      candidate <= 599
+    ) {
+      return candidate;
+    }
+  }
+  return null;
 }
 
 function combineSignals(
@@ -499,6 +530,12 @@ export async function completeChat(
               attempt.markFailure(err.code);
               throw err;
             }
+            if (observedHttpStatus(err) !== null) {
+              attempt.markProviderResponse({
+                resolvedModelId: null,
+                usage: undefined,
+              });
+            }
             try {
               const mappedError =
                 targetProvider === "mistral"
@@ -576,7 +613,9 @@ export async function completeChat(
     };
   } catch (error) {
     const last = fabric.finalize(
-      options.modelFallbackChain?.fallbackClass ?? "none",
+      transportFailoverUsed
+        ? "transport_failover"
+        : options.modelFallbackChain?.fallbackClass ?? "none",
     );
     const terminalAttempt =
       last.receipt.receiptStage === "resolved"
