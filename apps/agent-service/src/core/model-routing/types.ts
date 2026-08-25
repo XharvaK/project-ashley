@@ -122,11 +122,21 @@ export type ProviderCompletion = {
   finishReason?: string | null;
 };
 
+/**
+ * Trusted Model Fabric translation only. Callers must not populate this with
+ * raw provider extras; the NIM adapter applies it as already-resolved wire.
+ */
+export type TrustedReasoningControl =
+  | { kind: "reasoning_effort"; value: "none" | "low" | "medium" | "high" }
+  | { kind: "chat_template_thinking"; enableThinking: boolean };
+
 export type ProviderDispatchArgs = {
   messages: ChatMessage[];
   /** Configured API model id for the bucket (never resolved_model_id). */
   modelId: string;
   options: CompletionOptions;
+  /** Originates from Model Fabric translation, never from cognition callers. */
+  fabricReasoning?: TrustedReasoningControl;
   signal?: AbortSignal;
 };
 

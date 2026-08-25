@@ -38,6 +38,10 @@ import {
   normalizeReasoningPolicy,
   resolveDispatchPolicy,
   resolvedRouteFor,
+  translateReasoningPolicy,
+  formatTranslatedWireControl,
+  resolveOccupantSemanticPolicy,
+  toTrustedReasoningControl,
   wireReasoningFor,
   type ControlRootMode,
   type LogicalModelRole,
@@ -421,27 +425,92 @@ export async function completeChat(
     fallbackFromAttemptId: string | null,
     fallbackClass: ModelFallbackClass,
   ) => {
-    const occupantWire = currentPolicy.occupant.effectiveReasoning ?? null;
-    const requestedWireReasoning =
-      currentPolicy.source === "activated"
-        ? occupantWire ??
-          options.reasoningEffort ??
-          (targetProvider === "mistral" ? env.mistralReasoningEffort : null)
-        : options.reasoningEffort ??
-          occupantWire ??
-          (targetProvider === "mistral" ? env.mistralReasoningEffort : null);
-    const requestedReasoningPolicy = requestedWireReasoning
-      ? normalizeReasoningPolicy(requestedWireReasoning)
-      : null;
-    const effectiveReasoning = wireReasoningFor(
-      targetProvider,
-      targetModel,
-      requestedWireReasoning,
-    );
+    const occupant = currentPolicy.occupant;
+    const occupantWire = occupant.effectiveReasoning ?? null;
+    let requestedWireReasoning: string | null | undefined;
+    let requestedReasoningPolicy: ReturnType<typeof normalizeReasoningPolicy> | null;
+    let effectiveReasoning: string | null;
+    let translatedWireControl: string | null = null;
+    let fabricReasoning: ReturnType<typeof toTrustedReasoningControl> | undefined;
+    let translationError: { code: string; message: string } | undefined;
+    let fingerprintReasoning: string | null | undefined;
+    let fingerprintTranslated: string | undefined;
+
+    if (currentPolicy.source === "activated") {
+      const semantic = resolveOccupantSemanticPolicy({
+        provider: targetProvider,
+        configuredModelId: targetModel,
+        reasoningPolicy: occupant.reasoningPolicy ?? null,
+        effectiveReasoning: occupantWire,
+      });
+      if (!semantic.ok) {
+        requestedReasoningPolicy = null;
+        requestedWireReasoning = occupantWire;
+        effectiveReasoning = null;
+        translationError = {
+          code: semantic.code,
+          message: semantic.code,
+        };
+      } else {
+        requestedReasoningPolicy = semantic.policy;
+        const translated = translateReasoningPolicy({
+          provider: targetProvider,
+          configuredModelId: targetModel,
+          semanticPolicy: semantic.policy,
+        });
+        if (translated.status === "translated") {
+          fabricReasoning = toTrustedReasoningControl(translated.control);
+          translatedWireControl = formatTranslatedWireControl(translated.control);
+          effectiveReasoning = translatedWireControl;
+          requestedWireReasoning = occupantWire;
+          fingerprintTranslated = translatedWireControl ?? undefined;
+          fingerprintReasoning =
+            translated.control.kind === "reasoning_effort"
+              ? translated.control.value
+              : null;
+        } else if (translated.status === "unsupported") {
+          requestedWireReasoning = occupantWire;
+          effectiveReasoning = null;
+          translationError = {
+            code: translated.code,
+            message: translated.code,
+          };
+        } else {
+          requestedWireReasoning =
+            occupantWire ??
+            options.reasoningEffort ??
+            (targetProvider === "mistral" ? env.mistralReasoningEffort : null);
+          requestedReasoningPolicy = requestedWireReasoning
+            ? normalizeReasoningPolicy(requestedWireReasoning)
+            : semantic.policy;
+          effectiveReasoning = wireReasoningFor(
+            targetProvider,
+            targetModel,
+            requestedWireReasoning,
+          );
+          fingerprintReasoning = requestedWireReasoning;
+        }
+      }
+    } else {
+      requestedWireReasoning =
+        options.reasoningEffort ??
+        occupantWire ??
+        (targetProvider === "mistral" ? env.mistralReasoningEffort : null);
+      requestedReasoningPolicy = requestedWireReasoning
+        ? normalizeReasoningPolicy(requestedWireReasoning)
+        : null;
+      effectiveReasoning = wireReasoningFor(
+        targetProvider,
+        targetModel,
+        requestedWireReasoning,
+      );
+      fingerprintReasoning = requestedWireReasoning;
+    }
     const inferencePolicyFingerprint = createInferencePolicyFingerprint({
       provider: targetProvider,
       configuredModelId: targetModel,
-      reasoningEffort: requestedWireReasoning,
+      reasoningEffort: fingerprintReasoning,
+      translatedWireControl: fingerprintTranslated,
       temperature: options.temperature ?? null,
       maxTokens: options.maxTokens ?? null,
       presencePenalty: options.presencePenalty ?? null,
@@ -515,6 +584,7 @@ export async function completeChat(
         admissionBasis,
         requestedReasoningPolicy,
         effectiveReasoning,
+        translatedWireControl,
         inferencePolicyFingerprint,
       },
       projection,
@@ -523,9 +593,17 @@ export async function completeChat(
         : resolvedRoute.provider,
       requestedReasoningPolicy,
       effectiveReasoningSent: effectiveReasoning,
+      translatedWireControl,
     });
     previousAttemptId = attemptId;
-    return { attempt, resolvedRoute, requestedWireReasoning, effectiveReasoning };
+    return {
+      attempt,
+      resolvedRoute,
+      requestedWireReasoning,
+      effectiveReasoning,
+      fabricReasoning,
+      translationError,
+    };
   };
 
   const singleDispatch = async (
@@ -545,6 +623,14 @@ export async function completeChat(
     );
     const attempt = attemptContext.attempt;
     assertOutboundAllowed(targetProvider);
+    if (attemptContext.translationError) {
+      attempt.markFailure("capability_mismatch");
+      throw new AppError(
+        "capability_mismatch",
+        attemptContext.translationError.message,
+        400,
+      );
+    }
     try {
       const result = await runAttentiveDispatch<{
         text: string;
@@ -580,11 +666,14 @@ export async function completeChat(
               options: {
                 ...options,
                 model: alias,
-                reasoningEffort: completionReasoning(
-                  attemptContext.effectiveReasoning ??
-                    attemptContext.requestedWireReasoning,
-                ),
+                reasoningEffort: attemptContext.fabricReasoning
+                  ? undefined
+                  : completionReasoning(
+                      attemptContext.effectiveReasoning ??
+                        attemptContext.requestedWireReasoning,
+                    ),
               },
+              fabricReasoning: attemptContext.fabricReasoning,
               signal: merged,
             });
             attempt.markProviderResponse({

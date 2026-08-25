@@ -122,6 +122,26 @@ describe("nim-adapter fixtures", () => {
     expect(capturedBody?.max_tokens).toBe(1000);
   });
 
+  it("applies trusted Ultra fabric translation as reasoning_effort high", async () => {
+    env.nimApiKey = "test";
+    let capturedBody: Record<string, unknown> | undefined;
+    const adapter = createNimAdapter(async (_url, init) => {
+      capturedBody = JSON.parse(init?.body as string);
+      return fakeResponse({
+        choices: [{ message: { content: "ok" } }],
+        usage: { prompt_tokens: 5, completion_tokens: 1 },
+      });
+    });
+    await adapter.dispatch({
+      messages,
+      modelId: "nvidia/nemotron-3-ultra-550b-a55b",
+      options: {},
+      fabricReasoning: { kind: "reasoning_effort", value: "high" },
+    });
+    expect(capturedBody?.reasoning_effort).toBe("high");
+    expect(JSON.stringify(capturedBody)).not.toContain("max_supported");
+  });
+
   it("surfaces NIM 400 provider error message", async () => {
     env.nimApiKey = "test";
     const adapter = createNimAdapter(async () =>

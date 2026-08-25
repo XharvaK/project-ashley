@@ -106,6 +106,10 @@ const LIFECYCLE_TRANSITIONS: Readonly<Record<CatalogLifecycle, readonly CatalogL
   retired: [],
 };
 
+export function modelFabricConfigFilePath(relative: string): string {
+  return configFilePath(relative);
+}
+
 function configFilePath(relative: string): string {
   const configuredRoot = process.env.ASHLEY_MODEL_FABRIC_CONFIG_ROOT?.trim();
   if (configuredRoot) {

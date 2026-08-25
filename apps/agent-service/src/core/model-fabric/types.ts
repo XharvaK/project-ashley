@@ -127,6 +127,15 @@ export type ReasoningPolicy =
   | "high"
   | "max_supported";
 
+export type TranslatedWireControl =
+  | { kind: "reasoning_effort"; value: "none" | "low" | "medium" | "high" }
+  | { kind: "chat_template_thinking"; enableThinking: boolean };
+
+export type ObservedReasoning =
+  | { status: "tokens"; reasoningTokens: number }
+  | { status: "unknown" }
+  | { status: "unavailable" };
+
 export type ModelRoutePolicy = {
   routeId: ModelRouteId;
   logicalRole: LogicalModelRole;
@@ -326,6 +335,7 @@ export type ModelResolvedDispatchFacts = {
   admissionBasis: RouteAdmissionBasis;
   requestedReasoningPolicy: ReasoningPolicy | null;
   effectiveReasoning: string | null;
+  translatedWireControl: string | null;
   inferencePolicyFingerprint: InferencePolicyFingerprint | null;
 };
 
@@ -342,6 +352,8 @@ export type ModelAttemptReceiptBase = {
   projectionTelemetryFingerprint: ProjectionTelemetryFingerprint | null;
   requestedReasoningPolicy: ReasoningPolicy | null;
   effectiveReasoningSent: string | null;
+  translatedWireControl: string | null;
+  observedReasoning: ObservedReasoning;
   /** Current backend identity. This is mechanical, not semantic authority. */
   backend: string;
   /** Sanitized terminal error class, when the attempt failed. */

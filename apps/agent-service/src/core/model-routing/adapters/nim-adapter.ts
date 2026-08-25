@@ -1,5 +1,6 @@
 import { env } from "../../../env.js";
 import { AppError } from "../../../errors.js";
+import { applyTranslatedControlToNimBody } from "../../model-fabric/reasoning-translation.js";
 import type {
   ChatMessage,
   CompletionOptions,
@@ -8,6 +9,7 @@ import type {
   TokenUsage,
   ToolCallResult,
   ProviderDispatchArgs,
+  TrustedReasoningControl,
 } from "../types.js";
 
 type NimErrorResponse = {
@@ -71,6 +73,7 @@ function buildRequestBody(
   messages: ChatMessage[],
   options: CompletionOptions,
   model: string,
+  fabricReasoning?: TrustedReasoningControl,
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {
     model,
@@ -95,7 +98,9 @@ function buildRequestBody(
   if (options.presencePenalty !== undefined) {
     body.presence_penalty = options.presencePenalty;
   }
-  if (options.reasoningEffort !== undefined) {
+  if (fabricReasoning) {
+    applyTranslatedControlToNimBody(body, model, fabricReasoning);
+  } else if (options.reasoningEffort !== undefined) {
     const effort = nimReasoningEffortForModel(model, options.reasoningEffort);
     if (effort !== undefined) {
       body.reasoning_effort = effort;
@@ -105,6 +110,15 @@ function buildRequestBody(
     body.response_format = { type: "json_object" };
   }
   return body;
+}
+
+export function buildNimRequestBody(
+  messages: ChatMessage[],
+  options: CompletionOptions,
+  model: string,
+  fabricReasoning?: TrustedReasoningControl,
+): Record<string, unknown> {
+  return buildRequestBody(messages, options, model, fabricReasoning);
 }
 
 function parseRetryAfterSec(err: unknown): number | undefined {
@@ -248,7 +262,12 @@ export function createNimAdapter(
       if (!env.nimApiKey) {
         throw new AppError("agent_not_ready", "NVIDIA NIM API key not configured", 503);
       }
-      const body = buildRequestBody(args.messages, args.options, args.modelId);
+      const body = buildRequestBody(
+        args.messages,
+        args.options,
+        args.modelId,
+        args.fabricReasoning,
+      );
       const res = await fetchFn(`${env.nimBaseUrl}/chat/completions`, {
         method: "POST",
         headers: {

@@ -20,11 +20,13 @@ import type {
   ModelUsage,
   LogicalModelRole,
   ModelPurposeId,
+  ObservedReasoning,
   ResolvedModelRoute,
   RouteAdmissionBasis,
   SpecialistRequirement,
   ReasoningPolicy,
 } from "./types.js";
+import { observedReasoningFromUsage } from "./reasoning-translation.js";
 
 type AttemptInput = {
   invocationId: string;
@@ -37,6 +39,8 @@ type AttemptInput = {
   backend: string;
   requestedReasoningPolicy: ReasoningPolicy | null;
   effectiveReasoningSent: string | null;
+  translatedWireControl?: string | null;
+  observedReasoning?: ObservedReasoning;
 };
 
 export function createModelFallbackChain(
@@ -63,6 +67,7 @@ type AttemptBuilder = AttemptInput & {
   providerRequestId: string | null;
   finishReason: string | null;
   usage: ModelUsage;
+  observedReasoning: ObservedReasoning;
   errorClass: string | null;
   outcome: string | null;
 };
@@ -126,6 +131,9 @@ function attemptReceipt(builder: AttemptBuilder): ModelAttemptReceipt {
     errorClass: builder.errorClass,
     outcome: builder.outcome,
     ...builder.facts,
+    translatedWireControl:
+      builder.translatedWireControl ?? builder.facts.translatedWireControl ?? null,
+    observedReasoning: builder.observedReasoning,
   };
   if (builder.stage === "resolved_not_sent") {
     const receipt: ModelResolvedNotSentReceipt = {
@@ -182,6 +190,7 @@ function modelFailureCode(
 ): ModelFailureCode {
   const code = failureCode(error);
   if (code === "route_disabled" || code === "operator_disabled") return "route_disabled";
+  if (code === "capability_mismatch") return "capability_mismatch";
   if (code === "request_exceeds_tpm_budget") return "local_quota_exceeded";
   if (code === "agent_not_ready") return "configuration_error";
   if (code === "rate_limited" || code === "quota_exhausted") return "provider_quota";
@@ -267,6 +276,7 @@ export function createModelFabricInvocation(input: {
     beginAttempt(attemptInput) {
       const builder: AttemptBuilder = {
         ...attemptInput,
+        translatedWireControl: attemptInput.translatedWireControl ?? null,
         startedAtMs: Date.now(),
         stage: "resolved_not_sent",
         providerRequestCount: 0,
@@ -275,6 +285,7 @@ export function createModelFabricInvocation(input: {
         providerRequestId: null,
         finishReason: null,
         usage: usageFor(),
+        observedReasoning: { status: "unknown" },
         errorClass: null,
         outcome: null,
       };
@@ -293,6 +304,7 @@ export function createModelFabricInvocation(input: {
           builder.providerRequestId = response.providerRequestId ?? null;
           builder.finishReason = response.finishReason ?? null;
           builder.usage = usageFor(response.usage);
+          builder.observedReasoning = observedReasoningFromUsage(response.usage);
         },
         markFailure(errorClass, outcome = null) {
           builder.errorClass = errorClass.slice(0, 64);

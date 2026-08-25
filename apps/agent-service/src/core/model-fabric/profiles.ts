@@ -140,6 +140,7 @@ export type InferencePolicyInput = {
   provider: string;
   configuredModelId: string;
   reasoningEffort?: string | null;
+  translatedWireControl?: string | null;
   temperature?: number | null;
   topP?: number | null;
   maxTokens?: number | null;
@@ -164,6 +165,9 @@ export function createInferencePolicyFingerprint(
     responseFormat: input.responseFormat ?? null,
     toolCount: input.toolCount ?? 0,
     toolNames: input.toolNames ? [...input.toolNames].sort() : [],
+    ...(input.translatedWireControl
+      ? { translatedWireControl: input.translatedWireControl }
+      : {}),
   };
   return `sha256:${sha256(material)}` as InferencePolicyFingerprint;
 }
