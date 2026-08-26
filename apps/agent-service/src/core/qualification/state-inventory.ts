@@ -249,6 +249,30 @@ const NON_LIVE: Record<string, NonLiveRule> = {
     cls: "CONTROL_PLANE",
     reason: "Track C explicit live watermark configuration",
   },
+  cognitive_predictions: {
+    cls: "SHADOW_ARTIFACT",
+    reason: "C4 selected prediction history; observe/dark-apply integration is not live Thought authority",
+  },
+  cognitive_outcome_observations: {
+    cls: "SHADOW_ARTIFACT",
+    reason: "C4 append-only operational observation history; not semantic authority",
+  },
+  cognitive_outcome_adjudications: {
+    cls: "SHADOW_ARTIFACT",
+    reason: "C4 append-only semantic adjudication history; not current truth",
+  },
+  working_view_links: {
+    cls: "SHADOW_ARTIFACT",
+    reason: "C4 links to C1 assertions; C1 remains currentness authority",
+  },
+  lived_experience_links: {
+    cls: "SHADOW_ARTIFACT",
+    reason: "C4 index over independently owned episodes and operational receipts",
+  },
+  thought_calibration_adjustments: {
+    cls: "SHADOW_ARTIFACT",
+    reason: "C4 future-Thought calibration history; no current-turn authority",
+  },
 };
 
 const FTS_RE = /_fts(_data|_idx|_docsize|_config|_content)?$/;

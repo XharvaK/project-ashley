@@ -15,6 +15,11 @@ import {
   C3_TABLES,
   validateNuclearV38Schema,
 } from "../learned-autonomy/migration-37.js";
+import {
+  C4_INDEXES,
+  C4_TABLES,
+  validateNuclearV39Schema,
+} from "../cognitive-graduation/migration-38.js";
 
 type TableInfoRow = {
   name?: string;
@@ -971,9 +976,26 @@ function requireNoV38Objects(db: DatabaseSync, version: number): void {
   }
 }
 
+function requireNoV39Objects(db: DatabaseSync, version: number): void {
+  for (const table of C4_TABLES) {
+    if (masterRow(db, "table", table)) {
+      fail(version, `unexpected_v39_table:${table}`);
+    }
+  }
+  for (const index of C4_INDEXES) {
+    if (masterRow(db, "index", index)) {
+      fail(version, `unexpected_v39_index:${index}`);
+    }
+  }
+  const marker = db.prepare(
+    `SELECT 1 FROM cognitive_maturation_contract_state WHERE wave = 'c4' LIMIT 1`,
+  ).get();
+  if (marker) fail(version, "unexpected_v39_c4_marker");
+}
+
 export function validateNuclearSchemaContent(
   db: DatabaseSync,
-  version: 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37 | 38,
+  version: 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37 | 38 | 39,
   options: { rejectNewerContent?: boolean } = {},
 ): void {
   if (version === 22) {
@@ -1122,6 +1144,12 @@ export function validateNuclearSchemaContent(
   }
   if (version === 37) return;
   validateNuclearV38Schema(db, version);
+  if (version === 38 && options.rejectNewerContent === true) {
+    requireNoV39Objects(db, version);
+    return;
+  }
+  if (version === 38) return;
+  validateNuclearV39Schema(db, version);
 }
 
 function addColumnIfMissing(

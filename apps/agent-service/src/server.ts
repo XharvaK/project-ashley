@@ -33,6 +33,7 @@ import {
   assertC3ContractCompatible,
   listActiveLearnedInfluences,
 } from "./core/learned-autonomy/index.js";
+import { getCognitiveGraduationDiagnostics } from "./core/cognitive-graduation/diagnostics.js";
 
 const MAX_DISCORD_MESSAGE = 4000;
 
@@ -365,6 +366,17 @@ export function createServer(
           secretBodiesIncluded: false,
         },
       });
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.get("/nuclear/cognitive-graduation", (req, res) => {
+    try {
+      const ownerId = String(req.query.owner_id ?? "");
+      requireOwner(ownerId || undefined);
+      res.json(getCognitiveGraduationDiagnostics(manager.core.getDatabase(), ownerId));
     } catch (err) {
       const { status, body } = toErrorResponse(err);
       res.status(status).json(body);
