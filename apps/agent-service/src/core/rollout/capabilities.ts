@@ -49,6 +49,10 @@ export const capabilityNames = [
   "bounded_operation",
   "patch_export",
   "memory_evidence",
+  "context_budget",
+  "learned_autonomy",
+  "cognitive_graduation",
+  "relational_graduation",
 ] as const;
 
 export type CapabilityName = typeof capabilityNames[number];
@@ -171,6 +175,10 @@ const dependencies: Record<CapabilityName, CapabilityName[]> = {
   bounded_operation: ["thought"],
   patch_export: ["thought"],
   memory_evidence: ["recall"],
+  context_budget: ["memory_evidence"],
+  learned_autonomy: ["memory_evidence"],
+  cognitive_graduation: ["memory_evidence", "learned_autonomy"],
+  relational_graduation: ["memory_evidence", "relationship_state"],
 };
 
 const modelSensitive = new Set<string>(MODEL_SENSITIVE_SET_FOR_CONTRACT);

@@ -1,4 +1,5 @@
 import { env } from "../../env.js";
+import { randomUUID } from "node:crypto";
 import {
   completeChat,
   DispatchDataPlaneMissingError,
@@ -29,6 +30,11 @@ import {
   type ModelFabricDispatchMetadata,
 } from "../model-fabric/index.js";
 import type { DatabaseSync } from "node:sqlite";
+import { selectAndRender } from "../context-budget/render.js";
+import type {
+  ContextAllocation,
+  ContextBudgetMode,
+} from "../context-budget/types.js";
 import {
   buildExpressionFallbackPolicy,
   minimalExpressionContext,
@@ -55,6 +61,53 @@ export type RenderedOutput = {
   readingLicensed: boolean;
 };
 
+function budgetExpressionMessages(
+  db: DatabaseSync,
+  messages: ChatMessage[],
+  options: {
+    ownerId?: string | null;
+    contextBudgetMode?: ContextBudgetMode;
+    contextBudgetPolicyId?: string;
+    contextBudgetMaxUtf8Bytes?: number;
+    contextBudgetSectionBudgets?: Record<string, number>;
+  },
+  purpose: "expression" | "expression_fallback",
+  routeId: "ashley_expression" | "ashley_expression_fallback",
+): ContextAllocation {
+  if (options.contextBudgetMode === "apply") {
+    throw new Error("context_budget_live_apply_not_authorized");
+  }
+  const ownerId = options.ownerId?.trim();
+  if (!ownerId) throw new Error("context_budget_owner_required");
+  const requestId = `${purpose}-${randomUUID()}`;
+  return selectAndRender(db, {
+    requestId,
+    ownerId,
+    purpose,
+    routeId,
+    surface: "private",
+    requiredSections: ["safety", "current_message"],
+    capabilityMode: "dark_apply",
+    policyId: options.contextBudgetPolicyId,
+    maxUtf8Bytes: options.contextBudgetMaxUtf8Bytes,
+    sectionBudgets: options.contextBudgetSectionBudgets,
+    inputs: messages.map((message, index) => ({
+      ref: { type: "message", id: `${requestId}:${index}` },
+      sourceType: "message",
+      sourceId: `${requestId}:${index}`,
+      section: index === 0
+        ? "safety"
+        : index === messages.length - 1 ? "current_message" : "history",
+      content: message.content,
+      classification: "never_public",
+      influenceEligible: true,
+      retrievalEligible: true,
+      required: index === 0 || index === messages.length - 1,
+      messageRole: message.role,
+    })),
+  });
+}
+
 /**
  * Expression: TurnContext + Decision → wording.
  * Owns language generation; does not perform Discord transport formatting.
@@ -77,6 +130,10 @@ export async function expressSpeak(
     perceptionExpressionParts?: PerceptionInlinePart[];
     perceptionThoughtParts?: PerceptionInlinePart[];
     attentionDb?: DatabaseSync;
+    contextBudgetMode?: ContextBudgetMode;
+    contextBudgetPolicyId?: string;
+    contextBudgetMaxUtf8Bytes?: number;
+    contextBudgetSectionBudgets?: Record<string, number>;
   } = {},
   complete: ExpressionComplete = completeChat,
 ): Promise<RenderedOutput> {
@@ -163,6 +220,18 @@ export async function expressSpeak(
     },
   ];
   const lane = (options.lane ?? "interactive") as ExpressionFallbackLane;
+  let primaryAllocation: ContextAllocation | null = null;
+  let primaryMessages = messages;
+  if (options.contextBudgetMode === "dark_apply" || options.contextBudgetMode === "apply") {
+    primaryAllocation = budgetExpressionMessages(
+      attentionDb,
+      messages,
+      options,
+      "expression",
+      "ashley_expression",
+    );
+    primaryMessages = primaryAllocation.messages;
+  }
   const dispatch: ExpressionComplete = (messagesToSend, callOptions) =>
     complete(messagesToSend, { ...callOptions, attentionDb });
 
@@ -177,7 +246,7 @@ export async function expressSpeak(
     fallbackClass: "none",
   });
   try {
-    response = await dispatch(messages, {
+    response = await dispatch(primaryMessages, {
       model: env.mistralModel,
       route: "ashley_expression",
       maxTokens: channel === "proactive" ? EXPRESSION_PROACTIVE_MAX_OUTPUT_TOKENS : EXPRESSION_MAX_OUTPUT_TOKENS,
@@ -192,6 +261,7 @@ export async function expressSpeak(
       deliveryReservationId: options.deliveryReservationId,
       ownerId: options.ownerId,
       attentionDb,
+      contextProjection: primaryAllocation?.projection,
     });
   } catch (primaryError) {
     // Fallback eligibility is decided entirely from local state BEFORE any
@@ -222,8 +292,20 @@ export async function expressSpeak(
       current,
     );
     try {
+      let fallbackMessages = minimal;
+      let fallbackAllocation: ContextAllocation | null = null;
+      if (options.contextBudgetMode === "dark_apply" || options.contextBudgetMode === "apply") {
+        fallbackAllocation = budgetExpressionMessages(
+          attentionDb,
+          minimal,
+          options,
+          "expression_fallback",
+          "ashley_expression_fallback",
+        );
+        fallbackMessages = fallbackAllocation.messages;
+      }
       response = await dispatch(
-        minimal,
+        fallbackMessages,
         fallbackCompletionOptions({
           decisionId: options.decisionId,
           deliveryReservationId: options.deliveryReservationId,
@@ -237,6 +319,11 @@ export async function expressSpeak(
             fallbackFromInvocationId: primaryInvocationId,
             fallbackClass: "model_substitution",
           }),
+          contextBudgetMode: options.contextBudgetMode,
+          contextBudgetPolicyId: options.contextBudgetPolicyId,
+          contextBudgetMaxUtf8Bytes: options.contextBudgetMaxUtf8Bytes,
+          contextBudgetSectionBudgets: options.contextBudgetSectionBudgets,
+          contextProjection: fallbackAllocation?.projection,
         }),
       );
     } catch {

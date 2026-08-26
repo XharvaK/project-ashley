@@ -19,6 +19,8 @@ import {
   type ModelFabricDispatchMetadata,
   type ModelFallbackChain,
 } from "../model-fabric/index.js";
+import type { ContextBudgetMode } from "../context-budget/types.js";
+import type { ContextProjection } from "../model-fabric/projection.js";
 
 export type ExpressionFallbackPolicy = "minimal_identity_allowed" | "mistral_only";
 export type ExpressionFallbackLane = "interactive" | "urgent_grounded" | "exchange_cognition" | "curiosity_maintenance";
@@ -186,6 +188,11 @@ export function fallbackCompletionOptions(input: {
   lane: ExpressionFallbackLane;
   attentionDb: DatabaseSync;
   modelFallbackChain?: ModelFallbackChain | null;
+  contextBudgetMode?: ContextBudgetMode;
+  contextBudgetPolicyId?: string;
+  contextBudgetMaxUtf8Bytes?: number;
+  contextBudgetSectionBudgets?: Record<string, number>;
+  contextProjection?: ContextProjection;
 }): CognitiveDispatchOptions {
   return {
     model: "qwen/qwen3.6-27b",
@@ -197,6 +204,11 @@ export function fallbackCompletionOptions(input: {
     purpose: "expression",
     logicalRole: "expression",
     modelFallbackChain: input.modelFallbackChain ?? null,
+    contextBudgetMode: input.contextBudgetMode,
+    contextBudgetPolicyId: input.contextBudgetPolicyId,
+    contextBudgetMaxUtf8Bytes: input.contextBudgetMaxUtf8Bytes,
+    contextBudgetSectionBudgets: input.contextBudgetSectionBudgets,
+    contextProjection: input.contextProjection,
     deadlineAtMs: input.deadlineAtMs ?? undefined,
     decisionId: input.decisionId ?? undefined,
     deliveryReservationId: input.deliveryReservationId ?? undefined,

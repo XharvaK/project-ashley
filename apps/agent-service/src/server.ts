@@ -28,6 +28,7 @@ import {
 } from "./core/memory/fanout.js";
 import { getMemoryContractState } from "./core/memory/contract-state.js";
 import { capabilityCanInfluence } from "./core/rollout/capabilities.js";
+import { inspectAllocation } from "./core/context-budget/inspect.js";
 
 const MAX_DISCORD_MESSAGE = 4000;
 
@@ -247,6 +248,52 @@ export function createServer(
       const ownerId = String(req.query.owner_id ?? "");
       requireOwner(ownerId || undefined);
       res.json(manager.core.getEngineeringStatus(ownerId));
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.get("/nuclear/context-budget", (req, res) => {
+    try {
+      const ownerId = String(req.query.owner_id ?? "");
+      requireOwner(ownerId || undefined);
+      const db = manager.core.getDatabase();
+      const limit = Math.min(100, Math.max(1, Number(req.query.limit ?? 20) || 20));
+      const policies = db.prepare(
+        `SELECT policy_id, version, total_utf8_bytes, section_json,
+                token_estimate_divisor, created_at
+         FROM context_budget_policies ORDER BY created_at DESC LIMIT ?`,
+      ).all(limit).map((row) => {
+        const value = row as Record<string, unknown>;
+        let sections: unknown = {};
+        try {
+          sections = JSON.parse(String(value.section_json ?? "{}"));
+        } catch {
+          sections = {};
+        }
+        return {
+          policyId: String(value.policy_id),
+          version: Number(value.version),
+          totalUtf8Bytes: Number(value.total_utf8_bytes),
+          sectionBudgets: sections,
+          tokenEstimateDivisor: Number(value.token_estimate_divisor),
+          createdAt: String(value.created_at),
+        };
+      });
+      const receiptRows = db.prepare(
+        `SELECT receipt_id FROM context_allocation_receipts
+         WHERE owner_id = ? ORDER BY created_at DESC LIMIT ?`,
+      ).all(ownerId, limit) as Array<{ receipt_id?: string }>;
+      res.json({
+        nuclear: true,
+        capability: "context_budget",
+        state: "observe",
+        policies,
+        allocations: receiptRows
+          .filter((row): row is { receipt_id: string } => typeof row.receipt_id === "string")
+          .map((row) => inspectAllocation(db, row.receipt_id)),
+      });
     } catch (err) {
       const { status, body } = toErrorResponse(err);
       res.status(status).json(body);

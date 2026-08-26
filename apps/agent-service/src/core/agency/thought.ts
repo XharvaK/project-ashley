@@ -1,7 +1,7 @@
 import { completeChat } from "../../mistral-client.js";
 import { routeReady } from "../model-routing/router.js";
 import type { DatabaseSync } from "node:sqlite";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { capabilityCanInfluence } from "../rollout/capabilities.js";
 import { probeDecisionCoercion } from "../relationship/coercion-gate.js";
 import type {
@@ -29,6 +29,8 @@ import type {
 } from "../types.js";
 import type { TokenUsage } from "../model-routing/types.js";
 import type { LogicalModelRole } from "../model-fabric/types.js";
+import { selectAndRender } from "../context-budget/render.js";
+import type { ContextBudgetMode, ContextProjection } from "../context-budget/types.js";
 import {
   listApprovedReadProjectIds,
   canOfferProjectInspection,
@@ -1150,6 +1152,11 @@ export type ThoughtModelOptions = {
   lane?: string;
   logicalRole?: LogicalModelRole;
   verificationWorkspaceManager?: WorkspaceManager;
+  /** C2 is inert in observe; dark_apply is test-only and never live authority. */
+  contextBudgetMode?: ContextBudgetMode;
+  contextBudgetPolicyId?: string;
+  contextBudgetMaxUtf8Bytes?: number;
+  contextBudgetSectionBudgets?: Record<string, number>;
 };
 
 export type BoundedCognitionPhase = "initial" | "continuation";
@@ -1415,10 +1422,53 @@ export async function runBoundedCognition<TResult>(
   return failClosed(lastCode ?? "internal_error", lastCode);
 }
 
+function budgetThoughtMessages(
+  db: DatabaseSync,
+  rawMessages: ChatMessages,
+  options: ThoughtModelOptions,
+  phase: "initial" | "continuation",
+): { messages: ChatMessages; projection: ContextProjection } {
+  if (options.contextBudgetMode === "apply") {
+    throw new Error("context_budget_live_apply_not_authorized");
+  }
+  if (options.contextBudgetMode !== "dark_apply") {
+    throw new Error("context_budget_mode_not_enabled");
+  }
+  const ownerId = options.ownerId?.trim();
+  if (!ownerId) throw new Error("context_budget_owner_required");
+  const requestId = `thought-${phase}-${randomUUID()}`;
+  const allocation = selectAndRender(db, {
+    requestId,
+    ownerId,
+    purpose: "thought",
+    routeId: "thought",
+    surface: "private",
+    requiredSections: ["safety", "evidence"],
+    capabilityMode: "dark_apply",
+    policyId: options.contextBudgetPolicyId,
+    maxUtf8Bytes: options.contextBudgetMaxUtf8Bytes,
+    sectionBudgets: options.contextBudgetSectionBudgets,
+    inputs: rawMessages.map((message, index) => ({
+      ref: { type: "message", id: `${requestId}:${index}` },
+      sourceType: "message",
+      sourceId: `${requestId}:${index}`,
+      section: index === 0 ? "safety" : "evidence",
+      content: message.content,
+      classification: "never_public",
+      influenceEligible: true,
+      retrievalEligible: true,
+      required: index === 0 || index === rawMessages.length - 1,
+      messageRole: message.role,
+    })),
+  });
+  return { messages: allocation.messages, projection: allocation.projection };
+}
+
 function buildThoughtCallOptions(
   options: ThoughtModelOptions,
   deadlineAtMs: number | null,
   db: DatabaseSync,
+  contextProjection?: ContextProjection,
 ): CallOptions {
   return {
     maxTokens: THOUGHT_MAX_OUTPUT_TOKENS,
@@ -1433,6 +1483,7 @@ function buildThoughtCallOptions(
     deliveryReservationId: options.deliveryReservationId,
     ownerId: options.ownerId,
     attentionDb: db,
+    contextProjection,
   };
 }
 
@@ -1464,7 +1515,7 @@ export function composeInitialThoughtMessages(input: {
     retryContext,
     verificationWorkspaceManager,
   } = input;
-  const candidates = motivations.slice(0, 12).map((motivation) => ({
+  const candidates = motivations.map((motivation) => ({
     id: motivation.id,
     kind: motivation.kind,
     score: motivation.score,
@@ -1864,13 +1915,14 @@ export async function runThoughtModel(
     canOffer || canOfferWorkspace || canOfferVerification || canOfferAuthorship || canOfferOperation || canOfferExport
       ? listApprovedReadProjectIds()
       : [];
+  let contextProjection: ContextProjection | undefined;
 
   const outcome = await runBoundedCognition<ThoughtProposal>({
     phase: "initial",
     complete,
     deadlineAtMs: thoughtDeadline,
-    buildMessages: (retryFeedbackText) =>
-      composeInitialThoughtMessages({
+    buildMessages: (retryFeedbackText) => {
+      const rawMessages = composeInitialThoughtMessages({
         base,
         motivations,
         trigger,
@@ -1883,8 +1935,17 @@ export async function runThoughtModel(
         approvedProjectIds,
         retryContext: retryFeedbackText,
         verificationWorkspaceManager: options.verificationWorkspaceManager,
-      }),
-    buildOptions: (deadlineAtMs) => buildThoughtCallOptions(options, deadlineAtMs, db),
+      });
+      if (options.contextBudgetMode === "dark_apply" || options.contextBudgetMode === "apply") {
+        const budgeted = budgetThoughtMessages(db, rawMessages, options, "initial");
+        contextProjection = budgeted.projection;
+        return budgeted.messages;
+      }
+      contextProjection = undefined;
+      return rawMessages;
+    },
+    buildOptions: (deadlineAtMs) =>
+      buildThoughtCallOptions(options, deadlineAtMs, db, contextProjection),
     parse: parseObject,
     validate: (parsed, response) =>
       validateInitialThoughtProposal(parsed, response, {
@@ -2445,19 +2506,29 @@ export async function deliberateThoughtContinuation(
   }
 
   lifecycle("continuation_dispatched");
+  let contextProjection: ContextProjection | undefined;
   const outcome = await runBoundedCognition<ContinuationProposal>({
     phase: "continuation",
     complete,
     deadlineAtMs: thoughtDeadline,
-    buildMessages: (retryFeedbackText) =>
-      buildContinuationMessages({
+    buildMessages: (retryFeedbackText) => {
+      const rawMessages = buildContinuationMessages({
         trigger,
         intermediateDecision,
         observation,
         executionError,
         retryContext: retryFeedbackText,
-      }),
-    buildOptions: (deadlineAtMs) => buildThoughtCallOptions(options, deadlineAtMs, db),
+      });
+      if (options.contextBudgetMode === "dark_apply" || options.contextBudgetMode === "apply") {
+        const budgeted = budgetThoughtMessages(db, rawMessages, options, "continuation");
+        contextProjection = budgeted.projection;
+        return budgeted.messages;
+      }
+      contextProjection = undefined;
+      return rawMessages;
+    },
+    buildOptions: (deadlineAtMs) =>
+      buildThoughtCallOptions(options, deadlineAtMs, db, contextProjection),
     parse: parseObject,
     validate: (parsed, response) =>
       validateContinuationProposal(parsed, response, {

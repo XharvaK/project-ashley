@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
 import type { ChatMessage } from "../model-routing/types.js";
+import type { EvidenceRef as CoreEvidenceRef } from "../types.js";
 import { freezeDeep, sha256, sha256Text } from "./hash.js";
 import type {
   ContextPolicyId,
   ContextProjection,
+  EvidenceRef as ModelFabricEvidenceRef,
   MediaRef,
   ModelContentPart,
   ModelPurposeId,
@@ -12,10 +14,17 @@ import type {
   ProjectionTelemetryFingerprint,
 } from "./types.js";
 
+export type { ContextProjection } from "./types.js";
+
 export type ContextProjectionInput = {
-  purpose: ModelPurposeId;
+  /** String compatibility is retained for C2's open purpose vocabulary. */
+  purpose: ModelPurposeId | string;
   contextPolicyId: string;
-  messages: readonly ChatMessage[];
+  messages?: readonly ChatMessage[];
+  parts?: readonly ModelContentPart[];
+  evidenceRefs?: readonly (CoreEvidenceRef | ModelFabricEvidenceRef)[];
+  currentMessage?: string;
+  tokenEstimateDivisor?: number;
   bounds?: Partial<ContextProjection["bounds"]>;
   privacyPolicyId?: string;
 };
@@ -74,8 +83,47 @@ function partsFor(messages: readonly ChatMessage[]): ModelContentPart[] {
   return parts;
 }
 
+function clonePart(part: ModelContentPart): ModelContentPart {
+  switch (part.kind) {
+    case "text":
+      return {
+        ...part,
+        evidenceRef: part.evidenceRef ? { ...part.evidenceRef } : undefined,
+      };
+    case "image_ref":
+    case "document_page_ref":
+    case "audio_ref":
+      return {
+        ...part,
+        mediaRef: { ...part.mediaRef },
+        evidenceRef: part.evidenceRef ? { ...part.evidenceRef } : undefined,
+      };
+    case "structured_observation":
+      return {
+        ...part,
+        value: { ...part.value },
+        evidenceRefs: part.evidenceRefs.map((ref) => ({ ...ref })),
+      };
+  }
+}
+
 function utf8Bytes(value: string): number {
   return Buffer.byteLength(value, "utf8");
+}
+
+function mediaBytesFor(part: ModelContentPart): number {
+  switch (part.kind) {
+    case "image_ref":
+    case "document_page_ref":
+    case "audio_ref":
+      return part.mediaRef.byteSize;
+    default:
+      return 0;
+  }
+}
+
+function textBytesFor(part: ModelContentPart): number {
+  return part.kind === "text" ? utf8Bytes(part.text) : 0;
 }
 
 function sizeBucket(value: number): string {
@@ -106,35 +154,119 @@ function telemetryFingerprint(
   return `projection_structure_v1:${sha256(structural)}` as ProjectionTelemetryFingerprint;
 }
 
-/** Builds an immutable metadata projection without changing provider messages. */
+function projectionKind(ref: CoreEvidenceRef): ModelFabricEvidenceRef["kind"] {
+  switch (ref.type) {
+    case "message":
+      return "message";
+    case "episode":
+      return "episode";
+    case "take":
+    case "question":
+      return "read";
+    case "open_cognitive_item":
+      return "task";
+    default:
+      return "artifact";
+  }
+}
+
+function isModelFabricEvidenceRef(
+  value: CoreEvidenceRef | ModelFabricEvidenceRef,
+): value is ModelFabricEvidenceRef {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "kind" in value &&
+    "entityUuid" in value &&
+    "provenance" in value
+  );
+}
+
+function normalizeEvidenceRef(
+  value: CoreEvidenceRef | ModelFabricEvidenceRef,
+): ModelFabricEvidenceRef {
+  if (isModelFabricEvidenceRef(value)) return { ...value };
+  return {
+    kind: projectionKind(value),
+    entityUuid: `${value.type}:${String(value.id)}`,
+    provenance: "external_untrusted",
+  };
+}
+
+function maxBound(
+  value: number,
+  predicate: (candidate: number) => boolean,
+  error: string,
+): number {
+  if (!predicate(value)) throw new Error(error);
+  return value;
+}
+
+/** Builds an immutable, bounded metadata projection without changing provider messages. */
 export function createContextProjection(
   input: ContextProjectionInput,
 ): ContextProjection {
-  const bounds = {
-    ...DEFAULT_BOUNDS,
-    ...(input.bounds ?? {}),
-  };
-  const rawParts = partsFor(input.messages);
-  const parts = rawParts.map((part) => freezeDeep(part));
-  const evidenceRefs: [] = [];
+  if (!input.contextPolicyId.trim()) throw new Error("context_projection_policy_required");
+  if (!input.purpose.trim()) throw new Error("context_projection_purpose_required");
+
+  const maxParts = maxBound(
+    Number(input.bounds?.maxParts ?? DEFAULT_BOUNDS.maxParts),
+    (value) => Number.isInteger(value) && value > 0,
+    "context_projection_max_parts_invalid",
+  );
+  const maxUtf8Bytes = maxBound(
+    Number(input.bounds?.maxUtf8Bytes ?? DEFAULT_BOUNDS.maxUtf8Bytes),
+    (value) => Number.isInteger(value) && value > 0,
+    "context_projection_max_bytes_invalid",
+  );
+  const divisor = maxBound(
+    Number(input.tokenEstimateDivisor ?? 4),
+    (value) => Number.isInteger(value) && value > 0,
+    "context_projection_token_divisor_invalid",
+  );
+  const maxEstimatedTokens = maxBound(
+    Number(input.bounds?.maxEstimatedTokens ?? DEFAULT_BOUNDS.maxEstimatedTokens),
+    (value) => Number.isInteger(value) && value > 0,
+    "context_projection_max_tokens_invalid",
+  );
+  const maxMediaBytes = maxBound(
+    Number(input.bounds?.maxMediaBytes ?? DEFAULT_BOUNDS.maxMediaBytes),
+    (value) => Number.isInteger(value) && value >= 0,
+    "context_projection_max_media_invalid",
+  );
+
+  const parts = input.parts
+    ? input.parts.map(clonePart)
+    : partsFor(input.messages ?? []);
+  if (parts.length > maxParts) throw new Error("context_projection_parts_overflow");
+
+  if (input.currentMessage !== undefined) {
+    const occurrences = parts.filter(
+      (part) => part.kind === "text" && part.text === input.currentMessage,
+    ).length;
+    if (occurrences > 1) throw new Error("context_current_message_duplicated");
+  }
+
+  const evidenceRefs = (input.evidenceRefs ?? []).map(normalizeEvidenceRef);
   const measured = {
     parts: parts.length,
-    utf8Bytes: parts.reduce(
-      (sum, part) => sum + (part.kind === "text" ? utf8Bytes(part.text) : 0),
-      0,
-    ),
-    estimatedTokens: Math.ceil(
-      parts.reduce(
-        (sum, part) => sum + (part.kind === "text" ? utf8Bytes(part.text) : 0),
-        0,
-      ) / 4,
-    ),
-    mediaBytes: parts.reduce(
-      (sum, part) =>
-        sum + (part.kind === "image_ref" ? part.mediaRef.byteSize : 0),
-      0,
-    ),
+    utf8Bytes: parts.reduce((sum, part) => sum + textBytesFor(part), 0),
+    estimatedTokens: 0,
+    mediaBytes: parts.reduce((sum, part) => sum + mediaBytesFor(part), 0),
   };
+  measured.estimatedTokens = Math.ceil(measured.utf8Bytes / divisor);
+
+  if (measured.utf8Bytes > maxUtf8Bytes) {
+    throw new Error("context_projection_bytes_overflow");
+  }
+  if (measured.estimatedTokens > maxEstimatedTokens) {
+    throw new Error("context_projection_tokens_overflow");
+  }
+  if (measured.mediaBytes > maxMediaBytes) {
+    throw new Error("context_projection_media_overflow");
+  }
+
+  const bounds = { maxParts, maxUtf8Bytes, maxEstimatedTokens, maxMediaBytes };
   const contentBinding: ProjectionContentBinding = {
     canonicalization: "context_projection_content_v1",
     algorithm: "sha256",
@@ -150,12 +282,12 @@ export function createContextProjection(
   const projection: ContextProjection = {
     projectionId: randomUUID() as ContextProjection["projectionId"],
     contextPolicyId: input.contextPolicyId as ContextPolicyId,
-    purpose: input.purpose,
+    purpose: input.purpose as ModelPurposeId,
     parts,
     evidenceRefs,
     contentBinding,
     telemetryFingerprint: telemetryFingerprint(
-      input.purpose,
+      input.purpose as ModelPurposeId,
       input.contextPolicyId,
       parts,
       measured,

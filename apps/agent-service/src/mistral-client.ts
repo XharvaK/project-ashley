@@ -50,6 +50,9 @@ import {
   type ModelPurposeId,
   type SpecialistRequirement,
 } from "./core/model-fabric/index.js";
+import type { ContextProjection } from "./core/model-fabric/projection.js";
+import type { EvidenceRef as CoreEvidenceRef } from "./core/types.js";
+import type { ContextBudgetMode } from "./core/context-budget/types.js";
 
 import type {
   ChatMessage,
@@ -80,6 +83,15 @@ export type CognitiveDispatchOptions = CompletionOptions & {
   /** Test-only Model Fabric control root. Production uses the default dir. */
   modelFabricControlDir?: string;
   modelFabricControlRootMode?: ControlRootMode;
+  /** Optional caller-built C2 projection. It never changes route selection. */
+  contextProjection?: ContextProjection;
+  /** Optional C2 evidence refs for the minimal projection extension. */
+  contextProjectionEvidenceRefs?: readonly CoreEvidenceRef[];
+  contextPolicyId?: string;
+  contextBudgetMode?: ContextBudgetMode;
+  contextBudgetPolicyId?: string;
+  contextBudgetMaxUtf8Bytes?: number;
+  contextBudgetSectionBudgets?: Record<string, number>;
 };
 
 export class DispatchDataPlaneMissingError extends Error {
@@ -316,6 +328,7 @@ export async function completeChat(
   attentionRequestId?: number;
   acceptedDispatchIdentity?: AcceptedDispatchIdentity;
   modelFabric?: ModelFabricDispatchMetadata;
+  contextProjection?: ContextProjection;
 }> {
   if (!options?.attentionDb) {
     throw new DispatchDataPlaneMissingError();
@@ -323,6 +336,16 @@ export async function completeChat(
   const attentionDb = options.attentionDb;
   const mapped = mapLegacyLane(options.lane, options.purpose);
   const purpose = mapped.purpose;
+  const contextProjection = options.contextProjection ?? (
+    options.contextProjectionEvidenceRefs
+      ? createContextProjection({
+          contextPolicyId: options.contextPolicyId ?? "legacy-compatibility",
+          purpose,
+          messages,
+          evidenceRefs: options.contextProjectionEvidenceRefs,
+        })
+      : undefined
+  );
   const routeId: RouteId | undefined = options.route;
   const logicalRole = options.logicalRole ?? logicalRoleFor(purpose);
   const specialistRequirement: SpecialistRequirement | null =
@@ -373,11 +396,11 @@ export async function completeChat(
       }
     }
   } catch (error) {
-    const preProjection = createContextProjection({
-      purpose: purpose as ModelPurposeId,
-      contextPolicyId: "unresolved",
-      messages,
-    });
+    const preProjection = contextProjection ?? createContextProjection({
+        purpose: purpose as ModelPurposeId,
+        contextPolicyId: "unresolved",
+        messages,
+      });
     const preRecorder = createModelFabricInvocation({
       logicalRole,
       requestedPurpose: purpose as ModelPurposeId,
@@ -396,11 +419,11 @@ export async function completeChat(
   if (!currentPolicy || !configuredBinding || !binding) {
     throw new Error("model_fabric_current_policy_unresolved");
   }
-  const projection = createContextProjection({
-    purpose: purpose as ModelPurposeId,
-    contextPolicyId: binding.contextProfile,
-    messages,
-  });
+  const projection = contextProjection ?? createContextProjection({
+      purpose: purpose as ModelPurposeId,
+      contextPolicyId: binding.contextProfile,
+      messages,
+    });
   const fabric = createModelFabricInvocation({
     logicalRole,
     requestedPurpose: purpose as ModelPurposeId,
@@ -791,6 +814,7 @@ export async function completeChat(
       attentionRequestId: attentive.requestId,
       acceptedDispatchIdentity: attentive.acceptedDispatchIdentity,
       modelFabric,
+      contextProjection,
     };
   } catch (error) {
     const last = fabric.finalize(

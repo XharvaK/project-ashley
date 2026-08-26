@@ -5,6 +5,11 @@ import {
   C1_TABLES,
   validateNuclearV36Schema,
 } from "../memory/migration.js";
+import {
+  C2_INDEXES,
+  C2_TABLES,
+  validateNuclearV37Schema,
+} from "../context-budget/migration-36.js";
 
 type TableInfoRow = {
   name?: string;
@@ -932,9 +937,22 @@ function requireNoC1Objects(db: DatabaseSync, version: number): void {
   }
 }
 
+function requireNoC2Objects(db: DatabaseSync, version: number): void {
+  for (const table of C2_TABLES) {
+    if (masterRow(db, "table", table)) {
+      fail(version, `unexpected_c2_table:${table}`);
+    }
+  }
+  for (const index of C2_INDEXES) {
+    if (masterRow(db, "index", index)) {
+      fail(version, `unexpected_c2_index:${index}`);
+    }
+  }
+}
+
 export function validateNuclearSchemaContent(
   db: DatabaseSync,
-  version: 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36,
+  version: 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37,
   options: { rejectNewerContent?: boolean } = {},
 ): void {
   if (version === 22) {
@@ -1071,6 +1089,12 @@ export function validateNuclearSchemaContent(
   }
   if (version === 35) return;
   validateNuclearV36Schema(db, version);
+  if (version === 36 && options.rejectNewerContent === true) {
+    requireNoC2Objects(db, version);
+    return;
+  }
+  if (version === 36) return;
+  validateNuclearV37Schema(db, version);
 }
 
 function addColumnIfMissing(
