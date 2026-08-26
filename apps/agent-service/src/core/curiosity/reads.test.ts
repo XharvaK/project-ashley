@@ -108,7 +108,9 @@ describe("curiosity read provenance", () => {
     clearCurrentActivity();
   });
 
-  it("marks a read current only while fetch is in flight, then none after success", async () => {
+  const articleHtml = `<html><body><p>${"Evidence for a bounded full article read. ".repeat(20)}</p></body></html>`;
+
+  it("does not treat fetch as currently reading, even while the request is in flight", async () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     const sourceId = upsertSource(db, {
       slug: "test", title: "Test", kind: "rss",
@@ -129,26 +131,24 @@ describe("curiosity read provenance", () => {
     const pending = performGroundedReads(db, "doc", {
       resolve: async () => [{ address: "93.184.216.34", family: 4 }],
       fetcher: async () => {
-        expect(getCurrentActivity()).toMatchObject({
-          state: "active",
-          kind: "reading",
-          title: "The Left Hand of Darkness",
-        });
+        expect(getCurrentActivity()).toEqual({ state: "none" });
         await gate;
-        return new Response(
-          `<html><body><p>${"Evidence for a bounded full article read. ".repeat(20)}</p></body></html>`,
-          { status: 200, headers: { "content-type": "text/html" } },
-        );
+        return new Response(articleHtml, {
+          status: 200,
+          headers: { "content-type": "text/html" },
+        });
       },
     });
     release();
     const result = await pending;
     expect(result.readsCreated).toBe(1);
     expect(getCurrentActivity()).toEqual({ state: "none" });
+    expect(db.prepare("SELECT status FROM cognitive_jobs").get())
+      .toMatchObject({ status: "pending" });
     db.close();
   });
 
-  it("clears current reading after a failed fetch", async () => {
+  it("never becomes currently reading when fetch fails", async () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     const sourceId = upsertSource(db, {
       slug: "test", title: "Test", kind: "rss",
@@ -162,14 +162,43 @@ describe("curiosity read provenance", () => {
       interest: "systems",
       score: 90,
     });
+    const seen: Array<ReturnType<typeof getCurrentActivity>> = [];
     const result = await performGroundedReads(db, "doc", {
       resolve: async () => [{ address: "93.184.216.34", family: 4 }],
       fetcher: async () => {
+        seen.push(getCurrentActivity());
         throw new Error("network_down");
       },
     });
     expect(result.readsCreated).toBe(0);
     expect(result.errors.some((error) => error.includes("network_down"))).toBe(true);
+    expect(seen).toEqual([{ state: "none" }]);
+    expect(getCurrentActivity()).toEqual({ state: "none" });
+    db.close();
+  });
+
+  it("never becomes currently reading when MIME or extraction fails", async () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const sourceId = upsertSource(db, {
+      slug: "test", title: "Test", kind: "rss",
+      url: "https://example.com/feed.xml", interest: "systems",
+    });
+    insertItem(db, {
+      sourceId,
+      url: "https://example.com/pdf",
+      title: "Not HTML",
+      excerpt: "excerpt",
+      interest: "systems",
+      score: 90,
+    });
+    const result = await performGroundedReads(db, "doc", {
+      resolve: async () => [{ address: "93.184.216.34", family: 4 }],
+      fetcher: async () => new Response("%PDF-1.4", {
+        status: 200,
+        headers: { "content-type": "application/pdf" },
+      }),
+    });
+    expect(result.readsCreated).toBe(0);
     expect(getCurrentActivity()).toEqual({ state: "none" });
     db.close();
   });

@@ -45,6 +45,8 @@ grounded motivations only after their capability gates permit influence;
 Thought and the normal Agency safeguards decide whether any material earns an
 interruption.
 
-A successful `cur_reads` row is completed reading, not currently reading.
-Discord presence rules for that distinction are in
+Fetch, validation, and extraction are not currently reading. A successful
+`cur_reads` row is completed retrieval, not currently reading. Present-tense
+Discord `reading <title>` is allowed only while
+`consolidateCuriosityRead` is actually running. Rules:
 [`docs/architecture/Discord_Presence_Truth.md`](architecture/Discord_Presence_Truth.md).

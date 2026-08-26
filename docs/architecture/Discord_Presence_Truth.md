@@ -1,6 +1,7 @@
 # Discord presence truth
 
-**Status:** `SUPPORTING`  
+**Status:** `SUPPORTING`
+
 **Date:** 2026-08-26
 
 Discord custom status is a rendering of current activity. It is not the owner
@@ -37,12 +38,23 @@ a product contract for Discord.
 
 `networkActivity` / `researchTopic` were never populated by agent-service.
 
+A first repair stopped take-recency from becoming current reading, but it
+began `currentActivity` around `fetchValidatedResource`. Candidate selection
+and network retrieval are not reading. That boundary is now consolidation.
+
 ## Ownership
 
-Curiosity owns in-flight reading as process-local `currentActivity`
-(`begin` around fetch, `end` in `finally`, matching id so an older completion
-cannot clear a newer read). Restart empties that slot. A persisted `cur_reads`
-row or `cur_takes` row cannot refill it.
+Curiosity owns in-flight reading as process-local `currentActivity`.
+`consolidateCuriosityRead` begins the slot after a grounded `cur_reads` row
+exists and after the offline (no-provider) early return, immediately before
+the consolidation model call. It ends the slot in `finally`. The activity id
+is `read:<readId>`. Title is the read-record title.
+
+Fetch, MIME checks, extraction, failed read-record writes, and a pending
+`consolidate_curiosity` job must not fill the slot.
+
+Restart empties the slot. A persisted `cur_reads` row or `cur_takes` row
+cannot refill it.
 
 `getCuriosityStatus` projects `currentActivity` plus optional historical
 `lastTake`. Status reads do not write cognitive or curiosity state.
@@ -50,12 +62,18 @@ row or `cur_takes` row cannot refill it.
 Discord renders `currentActivity`. It ignores `lastTake` for labels. Idle
 defaults remain `feed quiet`, `curiosity off`, and `around`.
 
+The cognition loop claims one job at a time (`running` guard, sequential
+`await processNextCognitiveJob`). Overlapping curiosity consolidations are
+not a current source path. The single activity slot is kept.
+
 ## Semantics
 
 | Case | Source | Discord |
 |---|---|---|
-| Active read (fetch in flight) | `currentActivity.state === "active"`, kind `reading` | `reading <title>` is allowed |
-| Completed or failed/aborted read | slot cleared | must not say `reading <title>` |
+| Fetch / validate / extract in flight | `currentActivity.state === "none"` | must not say `reading <title>` |
+| Grounded read recorded, consolidation queued | `none` | must not say `reading <title>` |
+| `consolidateCuriosityRead` running a model call | `active`, kind `reading` | `reading <title>` is allowed |
+| Consolidation done, failed, or aborted | slot cleared | must not say `reading <title>` |
 | Recent take / recent thought artifact | `lastTake` or other stored rows | not current activity; no `last:` leak |
 | No current activity | `state: "none"` | existing idle / mode labels |
 
@@ -75,8 +93,9 @@ the bot polls. It is not a recency-to-currentness window.
 
 ## Remaining limits
 
-A genuine in-flight read is usually shorter than the ten-minute poll, so
+A genuine consolidation call is usually shorter than the ten-minute poll, so
 Discord may never show `reading <title>` even when the semantic slot is
 briefly active. That is fail-closed, not a license to stretch completed reads
-into currentness. No Operational Continuity, Event Spine, or Discord-owned
-cognition was added to close that gap.
+into currentness. Low observability is not falsehood. No Operational
+Continuity, Event Spine, or Discord-owned cognition was added to close that
+gap.

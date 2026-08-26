@@ -1,8 +1,9 @@
 /**
  * Process-local current-activity truth for presence projection.
  *
- * A persisted take or read record is historical. Only an in-flight lifecycle
- * that has started and not yet ended may claim present-progressive activity.
+ * A persisted take or read record is historical. Only in-flight grounded
+ * curiosity consolidation may claim present-progressive reading. Fetch,
+ * validation, extraction, and a queued job are not currently reading.
  * Restart clears this slot by construction (module state is not durable).
  */
 

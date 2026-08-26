@@ -6,6 +6,10 @@ import { createQuestion } from "../state/questions.js";
 import { insertTake, urlKey } from "./feed.js";
 import { listRecentReads } from "./reads.js";
 import { capabilityCanInfluence } from "../rollout/capabilities.js";
+import {
+  beginCurrentActivity,
+  endCurrentActivity,
+} from "./current-activity.js";
 
 type Complete = typeof completeChat;
 
@@ -112,6 +116,15 @@ export async function consolidateCuriosityRead(
   if (!env.groqApiKey) {
     return { analysis: normalize({}), model: "offline", raw: "{}" };
   }
+  const activityId = `read:${read.id}`;
+  beginCurrentActivity({
+    state: "active",
+    kind: "reading",
+    id: activityId,
+    title: read.title,
+    startedAt: new Date().toISOString(),
+  });
+  try {
   const response = await complete([
     {
       role: "system",
@@ -236,4 +249,7 @@ export async function consolidateCuriosityRead(
     throw error;
   }
   return { analysis, model: response.model, raw: response.text };
+  } finally {
+    endCurrentActivity(activityId);
+  }
 }

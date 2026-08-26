@@ -7,6 +7,10 @@ import { recordSuccessfulRead } from "./reads.js";
 import { consolidateCuriosityRead } from "./consolidate.js";
 import { processSourceProbation } from "./sources.js";
 import { currentReleaseId } from "../rollout/capabilities.js";
+import {
+  clearCurrentActivity,
+  getCurrentActivity,
+} from "./current-activity.js";
 
 const originalKey = env.mistralApiKey;
 const originalGroqKey = env.groqApiKey;
@@ -16,6 +20,7 @@ afterEach(() => {
   env.mistralApiKey = originalKey;
   env.groqApiKey = originalGroqKey;
   env.cognitionMode = originalCognitionMode;
+  clearCurrentActivity();
 });
 
 function activate(db: DatabaseSync, names: string[]): void {
@@ -204,6 +209,63 @@ describe("curiosity consolidation", () => {
     await consolidateCuriosityRead(db, "doc", noDiscoveryReadId, true, completeNoDiscovery as never);
     expect(db.prepare("SELECT provenance FROM cur_source_candidates ORDER BY id DESC LIMIT 1").get())
       .toMatchObject({ provenance: "shadow" });
+    db.close();
+  });
+
+  it("is currently reading only while consolidation is running, then none", async () => {
+    env.groqApiKey = "test";
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const readId = seededRead(db);
+    const complete = vi.fn(async () => {
+      expect(getCurrentActivity()).toMatchObject({
+        state: "active",
+        kind: "reading",
+        id: `read:${readId}`,
+        title: "Article",
+      });
+      return {
+        model: "test-model",
+        text: JSON.stringify({
+          take: "A grounded take.",
+          interest: null,
+          questions: [],
+          opinions: [],
+          sourceProposals: [],
+        }),
+      };
+    });
+    expect(getCurrentActivity()).toEqual({ state: "none" });
+    await consolidateCuriosityRead(db, "doc", readId, true, complete as never);
+    expect(complete).toHaveBeenCalledTimes(1);
+    expect(getCurrentActivity()).toEqual({ state: "none" });
+    db.close();
+  });
+
+  it("clears currently reading when consolidation throws", async () => {
+    env.groqApiKey = "test";
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const readId = seededRead(db);
+    const complete = vi.fn(async () => {
+      expect(getCurrentActivity()).toMatchObject({
+        state: "active",
+        id: `read:${readId}`,
+      });
+      throw new Error("provider_down");
+    });
+    await expect(
+      consolidateCuriosityRead(db, "doc", readId, true, complete as never),
+    ).rejects.toThrow("provider_down");
+    expect(getCurrentActivity()).toEqual({ state: "none" });
+    db.close();
+  });
+
+  it("does not claim currently reading on the offline early return", async () => {
+    env.groqApiKey = "";
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const readId = seededRead(db);
+    const result = await consolidateCuriosityRead(db, "doc", readId, true);
+    expect(result.model).toBe("offline");
+    expect(getCurrentActivity()).toEqual({ state: "none" });
     db.close();
   });
 });

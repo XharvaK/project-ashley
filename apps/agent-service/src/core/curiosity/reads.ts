@@ -11,10 +11,6 @@ import {
   type FetchLike,
   type ResolveHost,
 } from "./network.js";
-import {
-  beginCurrentActivity,
-  endCurrentActivity,
-} from "./current-activity.js";
 
 export type ReadRecord = {
   id: number;
@@ -235,14 +231,6 @@ export async function performGroundedReads(
   const errors: string[] = [];
   const liveAuthority = capabilityCanInfluence(db, "reading");
   for (const { item, lane } of selected) {
-    const activityId = `read:${item.id}`;
-    beginCurrentActivity({
-      state: "active",
-      kind: "reading",
-      id: activityId,
-      title: item.title,
-      startedAt: new Date().toISOString(),
-    });
     try {
       const resource = await fetchValidatedResource(item.url, {
         accept: "text/html, text/plain;q=0.9, application/xhtml+xml;q=0.8",
@@ -288,8 +276,6 @@ export async function performGroundedReads(
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       errors.push(`item:${item.id}:${message}`);
-    } finally {
-      endCurrentActivity(activityId);
     }
   }
   return { readsCreated, errors };
