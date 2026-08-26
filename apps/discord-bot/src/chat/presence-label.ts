@@ -1,6 +1,18 @@
 /**
  * Informative Discord custom status — glanceable true state, never a KPI count.
+ *
+ * Discord renders currentness. It does not infer currentness from lastTake age.
  */
+
+export type PresenceCurrentActivity =
+  | { state: "none" }
+  | {
+      state: "active";
+      kind: "reading";
+      id: string;
+      title: string;
+      startedAt?: string;
+    };
 
 export type PresenceSnapshot = {
   healthy: boolean;
@@ -12,6 +24,7 @@ export type PresenceSnapshot = {
     curiosityEnabled: boolean;
     networkActivity?: string | null;
     owing: { topic: string; id: number } | null;
+    currentActivity?: PresenceCurrentActivity | null;
     lastTake: {
       title: string;
       depth: "full" | "excerpt";
@@ -103,36 +116,8 @@ export function pickPresenceLabel(snap: PresenceSnapshot): PresencePick {
     };
   }
 
-  const take = p?.lastTake;
-  if (take && take.ageMin <= 120) {
-    const title = snipTitle(take.title);
-    if (take.depth === "full") {
-      const label = clampLabel(`reading ${title}`);
-      return {
-        priority: 4,
-        label,
-        contentKey: `p4a:${take.createdAt}:${title}`,
-        discordStatus: "online",
-      };
-    }
-    const label = clampLabel(`skimmed ${title}`);
-    return {
-      priority: 4,
-      label,
-      contentKey: `p4b:${take.createdAt}:${title}`,
-      discordStatus: "online",
-    };
-  }
-  if (take && take.ageMin <= 720) {
-    const title = snipTitle(take.title);
-    const label = clampLabel(`last: ${title}`);
-    return {
-      priority: 4,
-      label,
-      contentKey: `p4c:${take.createdAt}:${title}`,
-      discordStatus: "online",
-    };
-  }
+  const live = liveReadingPick(p?.currentActivity);
+  if (live) return live;
 
   const curiosityOn = p?.curiosityEnabled ?? snap.enabled;
   if (curiosityOn && snap.takesToday === 0) {
@@ -160,19 +145,36 @@ export function pickPresenceLabel(snap: PresenceSnapshot): PresencePick {
   };
 }
 
+function liveReadingPick(
+  activity: PresenceCurrentActivity | null | undefined,
+): PresencePick | null {
+  if (!activity || activity.state === "none") return null;
+  switch (activity.kind) {
+    case "reading": {
+      const title = snipTitle(activity.title);
+      return {
+        priority: 4,
+        label: clampLabel(`reading ${title}`),
+        contentKey: `p4:reading:${activity.id}`,
+        discordStatus: "online",
+      };
+    }
+    default: {
+      const _exhaustive: never = activity.kind;
+      return _exhaustive;
+    }
+  }
+}
+
 /** Min dwell (ms) before swapping within the same priority band. */
 export function minDwellMs(priority: number): number {
-  if (priority <= 2) return 0;
-  if (priority === 3) return 15 * 60_000;
-  if (priority === 4) return 20 * 60_000;
+  if (priority <= 4) return 0;
   return 45 * 60_000;
 }
 
 /** How long a sticky label can block a weaker (higher) priority. */
 export function stickyTtlMs(priority: number): number {
-  if (priority <= 2) return Number.POSITIVE_INFINITY;
-  if (priority === 3) return Number.POSITIVE_INFINITY;
-  if (priority === 4) return 2 * 60 * 60_000;
+  if (priority <= 4) return 0;
   return 45 * 60_000;
 }
 
@@ -188,6 +190,6 @@ export function shouldApplyPresence(
   if (candidate.priority === sticky.priority) {
     return age >= minDwellMs(candidate.priority);
   }
-  // Weaker signal (higher priority number)
+  if (sticky.priority <= 4) return true;
   return age >= stickyTtlMs(sticky.priority);
 }

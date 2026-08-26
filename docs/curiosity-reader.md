@@ -44,3 +44,7 @@ Reading and consolidation never send a Discord message. They can produce
 grounded motivations only after their capability gates permit influence;
 Thought and the normal Agency safeguards decide whether any material earns an
 interruption.
+
+A successful `cur_reads` row is completed reading, not currently reading.
+Discord presence rules for that distinction are in
+[`docs/architecture/Discord_Presence_Truth.md`](architecture/Discord_Presence_Truth.md).

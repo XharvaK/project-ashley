@@ -312,6 +312,16 @@ export async function curiosityStatus() {
         createdAt: string;
         ageMin: number;
       } | null;
+      currentActivity?:
+        | { state: "none" }
+        | {
+            state: "active";
+            kind: "reading";
+            id: string;
+            title: string;
+            startedAt?: string;
+          }
+        | null;
     };
   }>("/curiosity/status");
 }

@@ -57,6 +57,7 @@ import {
 import { runNuclearCuriosityTick } from "./curiosity/tick.js";
 import { recordPendingEngineeringAdmission } from "./sandbox/engineering-runs.js";
 import { listRecentReads } from "./curiosity/reads.js";
+import { getCurrentActivity } from "./curiosity/current-activity.js";
 import { getContinuityFor } from "./continuity/registry.js";
 import {
   bindForgetPreviewDiscordMessage,
@@ -3766,6 +3767,7 @@ export class AshleyCore {
       proactivePaused: boolean;
       curiosityEnabled: boolean;
       owing: null;
+      currentActivity: ReturnType<typeof getCurrentActivity>;
       lastTake: {
         title: string;
         depth: "full" | "excerpt";
@@ -3801,6 +3803,7 @@ export class AshleyCore {
         proactivePaused: this.isProactivePaused(ownerId),
         curiosityEnabled: env.curiosityEnabled,
         owing: null,
+        currentActivity: getCurrentActivity(),
         lastTake: last
           ? {
               title: last.title,

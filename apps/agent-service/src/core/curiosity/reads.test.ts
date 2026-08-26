@@ -1,7 +1,11 @@
 import { DatabaseSync } from "node:sqlite";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { openNuclearDb } from "../db.js";
 import { insertItem, upsertSource } from "./feed.js";
+import {
+  clearCurrentActivity,
+  getCurrentActivity,
+} from "./current-activity.js";
 import { listRecentReads, performGroundedReads, recordSuccessfulRead } from "./reads.js";
 
 describe("curiosity read provenance", () => {
@@ -97,6 +101,76 @@ describe("curiosity read provenance", () => {
     ).get()).toMatchObject({ count: 2 });
     expect(db.prepare("SELECT COUNT(*) AS count FROM cognitive_jobs").get())
       .toMatchObject({ count: 12 });
+    db.close();
+  });
+
+  afterEach(() => {
+    clearCurrentActivity();
+  });
+
+  it("marks a read current only while fetch is in flight, then none after success", async () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const sourceId = upsertSource(db, {
+      slug: "test", title: "Test", kind: "rss",
+      url: "https://example.com/feed.xml", interest: "systems",
+    });
+    insertItem(db, {
+      sourceId,
+      url: "https://example.com/article",
+      title: "The Left Hand of Darkness",
+      excerpt: "excerpt",
+      interest: "systems",
+      score: 90,
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const pending = performGroundedReads(db, "doc", {
+      resolve: async () => [{ address: "93.184.216.34", family: 4 }],
+      fetcher: async () => {
+        expect(getCurrentActivity()).toMatchObject({
+          state: "active",
+          kind: "reading",
+          title: "The Left Hand of Darkness",
+        });
+        await gate;
+        return new Response(
+          `<html><body><p>${"Evidence for a bounded full article read. ".repeat(20)}</p></body></html>`,
+          { status: 200, headers: { "content-type": "text/html" } },
+        );
+      },
+    });
+    release();
+    const result = await pending;
+    expect(result.readsCreated).toBe(1);
+    expect(getCurrentActivity()).toEqual({ state: "none" });
+    db.close();
+  });
+
+  it("clears current reading after a failed fetch", async () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const sourceId = upsertSource(db, {
+      slug: "test", title: "Test", kind: "rss",
+      url: "https://example.com/feed.xml", interest: "systems",
+    });
+    insertItem(db, {
+      sourceId,
+      url: "https://example.com/article",
+      title: "Broken fetch",
+      excerpt: "excerpt",
+      interest: "systems",
+      score: 90,
+    });
+    const result = await performGroundedReads(db, "doc", {
+      resolve: async () => [{ address: "93.184.216.34", family: 4 }],
+      fetcher: async () => {
+        throw new Error("network_down");
+      },
+    });
+    expect(result.readsCreated).toBe(0);
+    expect(result.errors.some((error) => error.includes("network_down"))).toBe(true);
+    expect(getCurrentActivity()).toEqual({ state: "none" });
     db.close();
   });
 });
