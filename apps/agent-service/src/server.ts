@@ -29,6 +29,10 @@ import {
 import { getMemoryContractState } from "./core/memory/contract-state.js";
 import { capabilityCanInfluence } from "./core/rollout/capabilities.js";
 import { inspectAllocation } from "./core/context-budget/inspect.js";
+import {
+  assertC3ContractCompatible,
+  listActiveLearnedInfluences,
+} from "./core/learned-autonomy/index.js";
 
 const MAX_DISCORD_MESSAGE = 4000;
 
@@ -293,6 +297,73 @@ export function createServer(
         allocations: receiptRows
           .filter((row): row is { receipt_id: string } => typeof row.receipt_id === "string")
           .map((row) => inspectAllocation(db, row.receipt_id)),
+      });
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.get("/nuclear/learned-autonomy", (req, res) => {
+    try {
+      const ownerId = String(req.query.owner_id ?? "");
+      requireOwner(ownerId || undefined);
+      const db = manager.core.getDatabase();
+      assertC3ContractCompatible(db);
+      const state = db.prepare(
+        `SELECT highest_contract_version, live_authority_existed,
+                cutover_or_activation_state, state
+         FROM cognitive_maturation_contract_state WHERE wave = 'c3'`,
+      ).get() as Record<string, unknown> | undefined;
+      const total = db.prepare(
+        `SELECT COUNT(*) AS count FROM learned_influences WHERE owner_id = ?`,
+      ).get(ownerId) as { count?: number } | undefined;
+      const byState = db.prepare(
+        `SELECT adjudication_state, contradiction_state, COUNT(*) AS count
+         FROM learned_influences WHERE owner_id = ?
+         GROUP BY adjudication_state, contradiction_state`,
+      ).all(ownerId) as Array<Record<string, unknown>>;
+      const byLineage = db.prepare(
+        `SELECT lineage_kind, COUNT(*) AS count
+         FROM learned_influences WHERE owner_id = ? GROUP BY lineage_kind`,
+      ).all(ownerId) as Array<Record<string, unknown>>;
+      const byProvenance = db.prepare(
+        `SELECT provenance, capability_mode_at_write, COUNT(*) AS count
+         FROM learned_influences WHERE owner_id = ?
+         GROUP BY provenance, capability_mode_at_write`,
+      ).all(ownerId) as Array<Record<string, unknown>>;
+      const byClassification = db.prepare(
+        `SELECT data_classification, COUNT(*) AS count
+         FROM learned_influences WHERE owner_id = ?
+         GROUP BY data_classification`,
+      ).all(ownerId) as Array<Record<string, unknown>>;
+      const receipts = db.prepare(
+        `SELECT COUNT(*) AS count FROM learned_choice_receipts WHERE owner_id = ?`,
+      ).get(ownerId) as { count?: number } | undefined;
+      res.json({
+        mode: env.cognitionMode,
+        contract: {
+          highestContractVersion: Number(state?.highest_contract_version ?? 0),
+          liveAuthorityExisted: Number(state?.live_authority_existed ?? 0) === 1,
+          state: String(state?.state ?? state?.cutover_or_activation_state ?? "observe"),
+        },
+        counts: {
+          total: Number(total?.count ?? 0),
+          choiceReceipts: Number(receipts?.count ?? 0),
+          derivedEligibleInDarkApply: listActiveLearnedInfluences(
+            db,
+            ownerId,
+            { mode: "dark_apply" },
+          ).length,
+        },
+        byState,
+        byLineage,
+        byProvenance,
+        byClassification,
+        privacy: {
+          rawTextIncluded: false,
+          secretBodiesIncluded: false,
+        },
       });
     } catch (err) {
       const { status, body } = toErrorResponse(err);

@@ -83,6 +83,7 @@ function actionKind(motivation: Motivation): DecisionKind | null {
     case "availability":
     case "reminder":
     case "scheduled_proactive":
+    case "learned_interest":
       return null;
     default: {
       const _exhaustive: never = motivation.kind;

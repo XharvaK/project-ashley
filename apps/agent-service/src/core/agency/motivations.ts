@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { listOpenQuestions } from "../state/questions.js";
 import { listRecentTakes } from "../curiosity/feed.js";
@@ -15,7 +16,11 @@ import type {
   Opinion,
   Trigger,
 } from "../types.js";
+import type { DataClassification } from "../privacy/classification.js";
 import { capabilityCanInfluence } from "../rollout/capabilities.js";
+import { listActiveLearnedInfluences } from "../learned-autonomy/eligibility.js";
+import { recordChoiceReceipt } from "../learned-autonomy/receipts.js";
+import type { LearnedAutonomyMode } from "../learned-autonomy/types.js";
 import { isBoundaryRelevant } from "./boundary-relevance.js";
 import { relationshipCanInfluence } from "../relationship/influence.js";
 import { listDueDocReminders } from "../relationship/store.js";
@@ -43,6 +48,8 @@ export type MotivationCollectionOptions = {
    * Durable Thought retries must not re-persist the owner request.
    */
   persist?: boolean;
+  /** Qualification-only C3 mode; observe is the default. */
+  learnedAutonomyMode?: LearnedAutonomyMode;
 };
 
 export function mindStateItemToMotivation(
@@ -83,6 +90,7 @@ function persistMotivation(
   refType: string | null = null,
   refId: string | number | null = null,
   write = true,
+  dataClassification: DataClassification | null = null,
 ): Motivation {
   const createdAt = new Date().toISOString();
   const clipped = summary.trim().slice(0, 1000);
@@ -103,8 +111,9 @@ function persistMotivation(
   const result = db
     .prepare(
       `INSERT INTO motivations
-         (owner_id, kind, score, ref_type, ref_id, summary, created_at, consumed_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`,
+         (owner_id, kind, score, ref_type, ref_id, summary, created_at,
+          consumed_at, data_classification)
+       VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
     )
     .run(
       ownerId,
@@ -114,6 +123,7 @@ function persistMotivation(
       refId == null ? null : String(refId),
       clipped,
       createdAt,
+      dataClassification,
     );
   return {
     id: Number(result.lastInsertRowid),
@@ -125,6 +135,50 @@ function persistMotivation(
     summary: clipped,
     createdAt,
   };
+}
+
+function learnedMotivationHash(value: string): string {
+  return `sha256:${createHash("sha256").update(value).digest("hex")}`;
+}
+
+function addLearnedInterestMotivations(
+  db: DatabaseSync,
+  ownerId: string,
+  mode: LearnedAutonomyMode | undefined,
+  write: boolean,
+): Motivation[] {
+  if (mode !== "dark_apply") return [];
+  const learned = listActiveLearnedInfluences(db, ownerId, { mode });
+  return learned.map((influence) => {
+    const motivation = persistMotivation(
+      db,
+      ownerId,
+      "learned_interest",
+      62,
+      influence.text,
+      "learned_influence",
+      String(influence.id),
+      write,
+      influence.dataClassification,
+    );
+    if (write) {
+      recordChoiceReceipt(db, {
+        learnedInfluenceId: influence.id,
+        choiceKind: "motivation_admission",
+        candidateIds: [`learned:${influence.id}`],
+        selectedIds: [`learned:${influence.id}`],
+        rankDelta: { [String(influence.id)]: 1 },
+        policyBinding: "c3-agency-dark-v1",
+        reasonCode: "qualified_learned_interest",
+        inputContentHash: learnedMotivationHash(`learned:${influence.id}`),
+        outputContentHash: learnedMotivationHash(motivation.summary),
+        eligibleInputAffectedRanking: true,
+        agencyMadeFinalChoice: false,
+        dataClassification: influence.dataClassification,
+      });
+    }
+    return motivation;
+  });
 }
 
 function userMessageScore(message: string): number {
@@ -420,6 +474,15 @@ export function collectMotivations(
       ),
     );
   }
+
+  motivations.push(
+    ...addLearnedInterestMotivations(
+      db,
+      ownerId,
+      options.learnedAutonomyMode,
+      write,
+    ),
+  );
 
   for (const unfinished of state.unfinished.slice(0, 4)) {
     if (

@@ -67,6 +67,8 @@ function mapMotivationKind(kind: MotivationKind): DecisionKind {
       return "revisit";
     case "scheduled_proactive":
       return "share";
+    case "learned_interest":
+      return "share";
     default: {
       const _exhaustive: never = kind;
       return _exhaustive;

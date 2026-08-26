@@ -10,6 +10,11 @@ import {
   C2_TABLES,
   validateNuclearV37Schema,
 } from "../context-budget/migration-36.js";
+import {
+  C3_INDEXES,
+  C3_TABLES,
+  validateNuclearV38Schema,
+} from "../learned-autonomy/migration-37.js";
 
 type TableInfoRow = {
   name?: string;
@@ -950,9 +955,25 @@ function requireNoC2Objects(db: DatabaseSync, version: number): void {
   }
 }
 
+function requireNoV38Objects(db: DatabaseSync, version: number): void {
+  for (const table of C3_TABLES) {
+    if (masterRow(db, "table", table)) {
+      fail(version, `unexpected_v38_table:${table}`);
+    }
+  }
+  for (const index of C3_INDEXES) {
+    if (masterRow(db, "index", index)) {
+      fail(version, `unexpected_v38_index:${index}`);
+    }
+  }
+  if (tableInfo(db, "cognitive_maturation_contract_state").some((row) => row.name === "state")) {
+    fail(version, "unexpected_v38_column:cognitive_maturation_contract_state.state");
+  }
+}
+
 export function validateNuclearSchemaContent(
   db: DatabaseSync,
-  version: 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37,
+  version: 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37 | 38,
   options: { rejectNewerContent?: boolean } = {},
 ): void {
   if (version === 22) {
@@ -1095,6 +1116,12 @@ export function validateNuclearSchemaContent(
   }
   if (version === 36) return;
   validateNuclearV37Schema(db, version);
+  if (version === 37 && options.rejectNewerContent === true) {
+    requireNoV38Objects(db, version);
+    return;
+  }
+  if (version === 37) return;
+  validateNuclearV38Schema(db, version);
 }
 
 function addColumnIfMissing(

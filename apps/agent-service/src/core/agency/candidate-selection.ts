@@ -12,6 +12,10 @@ import {
   mindStateItemInfluenceEligibleAt,
   sourceCoveredByDenyBarrier,
 } from "../memory/eligibility.js";
+import {
+  isLearnedInfluenceEligible,
+} from "../learned-autonomy/eligibility.js";
+import type { LearnedAutonomyMode } from "../learned-autonomy/types.js";
 
 export const MAX_PROACTIVE_MOTIVATION_CANDIDATES = 8;
 export const MAX_REACTIVE_MOTIVATION_CANDIDATES = 12;
@@ -61,6 +65,7 @@ function sourceIsCurrentlyEligible(
   item: Motivation,
   nowIso: string,
   relationshipRefs: Set<string>,
+  learnedAutonomyMode: LearnedAutonomyMode = "observe",
 ): boolean {
   if (item.ownerId != null && item.ownerId !== ownerId) return false;
   if (item.refType == null || item.refId == null) {
@@ -177,6 +182,17 @@ function sourceIsCurrentlyEligible(
           numericId,
         )
       );
+    case "learned_influence":
+      return (
+        numericId !== null &&
+        learnedAutonomyMode === "dark_apply" &&
+        isLearnedInfluenceEligible(
+          db,
+          numericId,
+          learnedAutonomyMode,
+          new Date(nowIso),
+        )
+      );
     case "doc_reminder":
       return (
         capabilityCanInfluence(db, "relational_initiative") &&
@@ -211,6 +227,7 @@ export function motivationCurrentlyEligible(
   ownerId: string,
   item: Motivation,
   now = new Date(),
+  learnedAutonomyMode: LearnedAutonomyMode = "observe",
 ): boolean {
   const needsRelationshipRefs =
     item.refType === "ashley_self_commitment" ||
@@ -225,6 +242,7 @@ export function motivationCurrentlyEligible(
     item,
     now.toISOString(),
     relationshipRefs,
+    learnedAutonomyMode,
   );
 }
 
@@ -285,6 +303,7 @@ export function selectMotivationCandidates(
   trigger: Trigger,
   motivations: Motivation[],
   now = new Date(),
+  options: { learnedAutonomyMode?: LearnedAutonomyMode } = {},
 ): Motivation[] {
   const nowIso = now.toISOString();
   const needsRelationshipRefs = motivations.some(
@@ -305,6 +324,7 @@ export function selectMotivationCandidates(
         item,
         nowIso,
         relationshipRefs,
+        options.learnedAutonomyMode ?? "observe",
       ),
     )
     .filter(

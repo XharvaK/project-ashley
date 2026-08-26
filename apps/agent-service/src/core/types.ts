@@ -185,7 +185,8 @@ export type MotivationKind =
   | "silence_signal"
   | "silence_ok"
   | "reminder"
-  | "scheduled_proactive";
+  | "scheduled_proactive"
+  | "learned_interest";
 
 export type SilenceReasonCode =
   | "user_requested_space"
