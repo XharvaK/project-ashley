@@ -17,6 +17,7 @@ import {
   mindStateItemInfluenceEligibleAt,
 } from "./eligibility.js";
 import { getMemoryContractState } from "./contract-state.js";
+import { recomputeSharedCulture } from "../relationship/projections.js";
 
 export type CorrectionOutcomeErrorKind =
   | "stale_persistence"
@@ -432,6 +433,12 @@ export function fanoutCorrection(
     }
   }
   const updatedTargets = listCorrectionTargets(db, correction.id);
+  if (updatedTargets.some((target) => {
+    const assertion = getAssertion(db, target.assertionId);
+    return assertion?.subjectFacet === "owner_model" && target.applicationState === "applied";
+  })) {
+    recomputeSharedCulture(db, correction.ownerId);
+  }
   const readback = readBack(db, correction, updatedTargets);
   if (!readback.ok) {
     markReceiptFailed(db, correction.id);

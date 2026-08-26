@@ -5,7 +5,8 @@ import {
   maxClassification,
   type DataClassification,
 } from "../privacy/classification.js";
-import type { DocReminderStatus } from "./types.js";
+import type { C5Provenance, DocReminderStatus } from "./types.js";
+import { relationshipProjectionDiagnostics } from "./projections.js";
 
 function textHash(text: string): string {
   return createHash("sha256")
@@ -24,12 +25,16 @@ export function upsertDocReminder(
     sourceEntityUuid: string;
     classification: DataClassification;
     status?: DocReminderStatus;
+    provenance?: C5Provenance;
+    partySubjectScope?: string;
   },
 ): string {
   const text = input.text.trim().slice(0, 600);
   if (!text) throw new Error("relationship_text_required");
   const now = new Date().toISOString();
   const hash = textHash(text);
+  const provenance = input.provenance ?? "shadow";
+  const partySubjectScope = input.partySubjectScope?.trim().slice(0, 200) || "owner";
   const existing = db
     .prepare(
       `SELECT entity_uuid FROM doc_reminders
@@ -42,14 +47,17 @@ export function upsertDocReminder(
   db.prepare(
     `INSERT INTO doc_reminders
        (owner_id, entity_uuid, data_classification, text, status, due_at,
-        source_entity_type, source_entity_uuid, text_hash, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        source_entity_type, source_entity_uuid, text_hash, created_at, updated_at,
+        provenance, party_subject_scope)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(owner_id, source_entity_uuid, text_hash) DO UPDATE SET
        text = excluded.text,
        due_at = excluded.due_at,
        status = excluded.status,
        data_classification = excluded.data_classification,
-       updated_at = excluded.updated_at`,
+       updated_at = excluded.updated_at,
+       provenance = excluded.provenance,
+       party_subject_scope = excluded.party_subject_scope`,
   ).run(
     input.ownerId,
     entityUuid,
@@ -62,6 +70,8 @@ export function upsertDocReminder(
     hash,
     now,
     now,
+    provenance,
+    partySubjectScope,
   );
   return entityUuid;
 }
@@ -117,6 +127,7 @@ export function listRelationshipSummary(
   mutualProposed: number;
   tensions: number;
   withdrawals: number;
+  c5: ReturnType<typeof relationshipProjectionDiagnostics> & { warnings: string[] };
   items: Array<{ kind: string; status: string; text: string }>;
 } {
   const safeLimit = Math.max(1, Math.min(25, limit));
@@ -156,13 +167,22 @@ export function listRelationshipSummary(
           .get(ownerId) as { c?: number }
       ).c ?? 0,
     );
+  const selfCommitmentCount = count("ashley_self_commitments", "AND status = 'active'");
+  const tensionCount = count("relational_tensions", "AND status = 'open'");
+  const c5Diagnostics = relationshipProjectionDiagnostics(db, ownerId);
+  const warnings: string[] = [];
+  if (c5Diagnostics.currentCount === 0) warnings.push("c5_current_shared_culture_not_computed");
+  if (c5Diagnostics.historicalCount === 0) warnings.push("c5_no_historical_shared_culture_snapshot");
+  if (selfCommitmentCount === 0) warnings.push("c5_no_self_commitments_recorded");
+  if (tensionCount === 0) warnings.push("c5_no_relational_tensions_recorded");
   return {
     docReminders: count("doc_reminders", "AND status NOT IN ('fulfilled','cancelled')"),
-    selfCommitments: count("ashley_self_commitments", "AND status = 'active'"),
+    selfCommitments: selfCommitmentCount,
     mutualActive: count("mutual_commitments", "AND status = 'active'"),
     mutualProposed: count("mutual_commitments", "AND status = 'proposed'"),
-    tensions: count("relational_tensions", "AND status = 'open'"),
+    tensions: tensionCount,
     withdrawals: count("withdrawal_records", "AND status = 'active'"),
+    c5: { ...c5Diagnostics, warnings },
     items: items.slice(0, safeLimit),
   };
 }

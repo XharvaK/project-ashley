@@ -30,7 +30,7 @@ describe("withdrawal repair", () => {
       consumeActiveTurnWithdrawal(db, "doc");
       expect(evaluateWithdrawalSilence(db, "doc", "apply", "hello")).toBeNull();
     } else {
-      expect(evaluateWithdrawalSilence(db, "doc", "observe", "hello")).toBeNull();
+      expect(evaluateWithdrawalSilence(db, "doc", "observe", "hello")).toBe("withdrawal_turn");
     }
     expect(activeWithdrawal(db, "doc")).toBeTruthy();
     db.close();

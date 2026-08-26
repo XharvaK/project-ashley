@@ -155,6 +155,40 @@ import {
 } from "./rollout/recall-qualification-epoch.js";
 import { listRelationshipSummary } from "./relationship/store.js";
 import { observeReactiveRelationshipSignals } from "./relationship/authority.js";
+import { recomputeSharedCulture } from "./relationship/projections.js";
+import {
+  recordAshleySelfCommitment,
+  type AshleySelfCommitmentInput,
+} from "./relationship/self-commitments.js";
+import {
+  recordRelationalTension,
+  type RelationalTensionInput,
+} from "./relationship/tensions.js";
+import {
+  recordConsentEvent,
+  type ConsentRecordInput,
+} from "./relationship/consent.js";
+import {
+  proposeMutualCommitment,
+  confirmMutualDoc,
+  confirmMutualAshleyDecision,
+  confirmMutualAshleyDelivery,
+  tryActivateMutualCommitment,
+  withdrawMutualCommitment,
+} from "./relationship/transitions.js";
+import {
+  recordRepairProposal,
+  recordRepairEvidence,
+  recordRepairAdjudication,
+  type RepairProposalInput,
+  type RepairEvidenceInput,
+  type RepairAdjudicationInput,
+} from "./relationship/repair.js";
+import {
+  recordInteractionContract,
+  type InteractionContractInput,
+} from "./relationship/interaction-contracts.js";
+import type { C5Mode } from "./relationship/types.js";
 import { assignNewEntityUuid } from "./continuity/nuclear-targetable.js";
 import {
   consumeActiveTurnWithdrawal,
@@ -2339,7 +2373,10 @@ export class AshleyCore {
         // only records a bounded operational outcome.
         recordProactiveDiagnostic(this.db, ownerId, "agency", "no_open_material");
       }
-      let decision = decide(motivations, "proactive");
+      let decision = decide(motivations, "proactive", {
+        db: this.db,
+        ownerId,
+      });
       const complexity = classifyTurnComplexity({
         decision,
         motivations,
@@ -2705,7 +2742,10 @@ export class AshleyCore {
         this.reflectionMode,
       ),
     );
-    const decision = decide(motivations, "proactive");
+    const decision = decide(motivations, "proactive", {
+      db: this.db,
+      ownerId,
+    });
     if (!decision.cognitiveAllocation.shouldSpeak || decision.score < 25) {
       return {
         shouldReachOut: false,
@@ -3155,6 +3195,141 @@ export class AshleyCore {
     return listRelationshipSummary(this.db, ownerId, limit, offset);
   }
 
+  /**
+   * Explicit owner-authenticated C5 admission seam. Runtime callers are
+   * restricted to observe or the master apply mode; C5 apply remains refused
+   * by the C5 contract state. Model output never calls these methods directly.
+   */
+  private c5RuntimeMode(): C5Mode {
+    return env.cognitionMode === "apply" ? "apply" : "observe";
+  }
+
+  private requireC5MutualOwner(ownerId: string, entityUuid: string): void {
+    const row = this.db.prepare(
+      `SELECT owner_id FROM mutual_commitments WHERE entity_uuid = ?`,
+    ).get(entityUuid) as { owner_id?: string } | undefined;
+    if (!row) throw new Error("mutual_commitment_unavailable");
+    if (row.owner_id !== ownerId) throw new Error("mutual_commitment_owner_mismatch");
+  }
+
+  recordC5AshleySelfCommitment(input: AshleySelfCommitmentInput) {
+    return recordAshleySelfCommitment(this.db, {
+      ...input,
+      capabilityMode: this.c5RuntimeMode(),
+    });
+  }
+
+  recordC5RelationalTension(input: RelationalTensionInput) {
+    return recordRelationalTension(this.db, {
+      ...input,
+      capabilityMode: this.c5RuntimeMode(),
+    });
+  }
+
+  recordC5Consent(input: ConsentRecordInput) {
+    return recordConsentEvent(this.db, {
+      ...input,
+      capabilityMode: this.c5RuntimeMode(),
+    });
+  }
+
+  recordC5InteractionContract(input: InteractionContractInput) {
+    return recordInteractionContract(this.db, {
+      ...input,
+      capabilityMode: this.c5RuntimeMode(),
+    });
+  }
+
+  recordC5RepairProposal(input: RepairProposalInput) {
+    return recordRepairProposal(this.db, {
+      ...input,
+      capabilityMode: this.c5RuntimeMode(),
+    });
+  }
+
+  recordC5RepairEvidence(input: RepairEvidenceInput) {
+    return recordRepairEvidence(this.db, {
+      ...input,
+      capabilityMode: this.c5RuntimeMode(),
+    });
+  }
+
+  recordC5RepairAdjudication(input: RepairAdjudicationInput) {
+    return recordRepairAdjudication(this.db, {
+      ...input,
+      capabilityMode: this.c5RuntimeMode(),
+    });
+  }
+
+  recordC5MutualProposal(input: {
+    ownerId: string;
+    text: string;
+    sourceEntityType: string;
+    sourceEntityUuid: string;
+    classification: import("./privacy/classification.js").DataClassification;
+  }) {
+    return proposeMutualCommitment(this.db, {
+      ...input,
+      capabilityMode: this.c5RuntimeMode(),
+    });
+  }
+
+  recordC5MutualDocConfirmation(
+    ownerId: string,
+    entityUuid: string,
+    evidenceRef: string,
+  ): void {
+    this.requireC5MutualOwner(ownerId, entityUuid);
+    confirmMutualDoc(this.db, entityUuid, evidenceRef, {
+      capabilityMode: this.c5RuntimeMode(),
+    });
+  }
+
+  recordC5MutualAshleyDecision(
+    ownerId: string,
+    entityUuid: string,
+    decisionId: number,
+    evidenceRef?: string,
+  ): void {
+    this.requireC5MutualOwner(ownerId, entityUuid);
+    confirmMutualAshleyDecision(this.db, entityUuid, decisionId, evidenceRef, {
+      capabilityMode: this.c5RuntimeMode(),
+    });
+  }
+
+  recordC5MutualDelivery(
+    ownerId: string,
+    entityUuid: string,
+    deliveryEntityUuid: string,
+    decisionId?: number,
+  ): void {
+    this.requireC5MutualOwner(ownerId, entityUuid);
+    confirmMutualAshleyDelivery(
+      this.db,
+      entityUuid,
+      deliveryEntityUuid,
+      decisionId,
+      { capabilityMode: this.c5RuntimeMode() },
+    );
+  }
+
+  activateC5MutualCommitment(ownerId: string, entityUuid: string): boolean {
+    this.requireC5MutualOwner(ownerId, entityUuid);
+    return tryActivateMutualCommitment(this.db, entityUuid, {
+      capabilityMode: this.c5RuntimeMode(),
+    });
+  }
+
+  withdrawC5MutualCommitment(
+    ownerId: string,
+    entityUuid: string,
+    initiator: "doc" | "ashley",
+    evidenceRef: string,
+  ): void {
+    this.requireC5MutualOwner(ownerId, entityUuid);
+    withdrawMutualCommitment(this.db, entityUuid, { initiator, evidenceRef });
+  }
+
   nuclearStatusSnapshot(ownerId: string): {
     health: ReturnType<AshleyCore["getHealth"]>;
     initiative: ReturnType<AshleyCore["getProactiveStatus"]>;
@@ -3301,10 +3476,11 @@ export class AshleyCore {
       `SELECT revision_id FROM identity_reviews WHERE id = ? AND owner_id = ?`,
     ).get(reviewId, ownerId) as { revision_id?: number } | undefined;
     if (!row?.revision_id) return;
-    applyEligibleRevisions(this.db, ownerId, env.cognitionMode, {
+    const applied = applyEligibleRevisions(this.db, ownerId, env.cognitionMode, {
       allowShadow: true,
       revisionIds: [Number(row.revision_id)],
     });
+    if (applied.length > 0) recomputeSharedCulture(this.db, ownerId);
   }
 
   recordAshleyIdentityPosition(input: {

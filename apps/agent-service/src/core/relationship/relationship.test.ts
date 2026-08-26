@@ -33,7 +33,7 @@ describe("relationship store", () => {
     continuity.close();
   });
 
-  it("records withdrawal and evaluates silence when apply active is false in observe", () => {
+  it("records withdrawal and evaluates silence regardless of optional influence mode", () => {
     const continuity = openContinuityDb(new DatabaseSync(":memory:"));
     const db = openNuclearDb(new DatabaseSync(":memory:"), { continuity });
     recordWithdrawal(db, {
@@ -46,7 +46,7 @@ describe("relationship store", () => {
     });
     expect(
       evaluateWithdrawalSilence(db, "doc", "observe", "hello"),
-    ).toBeNull();
+    ).toBe("withdrawal_turn");
     db.close();
     continuity.close();
   });

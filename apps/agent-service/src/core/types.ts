@@ -192,6 +192,7 @@ export type SilenceReasonCode =
   | "user_requested_space"
   | "withdrawal_turn"
   | "withdrawal_topic"
+  | "withdrawal_initiative"
   | "withdrawal_pause"
   | "withdrawal_boundary_repair"
   | "constitutional_refusal"

@@ -34,6 +34,148 @@ import {
   listActiveLearnedInfluences,
 } from "./core/learned-autonomy/index.js";
 import { getCognitiveGraduationDiagnostics } from "./core/cognitive-graduation/diagnostics.js";
+import type { DataClassification } from "./core/privacy/classification.js";
+import type {
+  ConsentEventKind,
+  ConsentGrantorRole,
+  InteractionContractKind,
+  InteractionContractLifecycle,
+  RepairDisposition,
+  RepairProposalOrigin,
+} from "./core/relationship/types.js";
+import type { InteractionContractEvidenceRef } from "./core/relationship/interaction-contracts.js";
+
+const C5_CLASSIFICATIONS = ["ordinary", "sensitive", "never_public", "secret"] as const;
+const C5_OPERATIONS = [
+  "self_commitment",
+  "tension",
+  "consent",
+  "interaction_contract",
+  "repair_proposal",
+  "repair_evidence",
+  "repair_adjudication",
+  "mutual_proposal",
+  "mutual_doc_confirmation",
+  "mutual_ashley_decision",
+  "mutual_delivery",
+  "mutual_activate",
+  "mutual_withdraw",
+] as const;
+
+function c5RequiredString(body: Record<string, unknown>, key: string, max = 2000): string {
+  const value = body[key];
+  if (typeof value !== "string" || !value.trim()) {
+    throw new AppError("message_required", `${key} is required`, 400);
+  }
+  return value.trim().slice(0, max);
+}
+
+function c5NullableString(
+  body: Record<string, unknown>,
+  key: string,
+  max = 2000,
+): string | null | undefined {
+  if (!(key in body) || body[key] === undefined) return undefined;
+  if (body[key] === null) return null;
+  if (typeof body[key] !== "string") {
+    throw new AppError("message_required", `${key} must be a string or null`, 400);
+  }
+  return body[key].trim().slice(0, max);
+}
+
+function c5OptionalString(
+  body: Record<string, unknown>,
+  key: string,
+  max = 2000,
+): string | undefined {
+  const value = c5NullableString(body, key, max);
+  return value === null ? undefined : value;
+}
+
+function c5RequiredInteger(body: Record<string, unknown>, key: string): number {
+  const value = body[key];
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    throw new AppError("message_required", `${key} must be an integer`, 400);
+  }
+  return value;
+}
+
+function c5NullableInteger(
+  body: Record<string, unknown>,
+  key: string,
+): number | null | undefined {
+  if (!(key in body) || body[key] === undefined) return undefined;
+  if (body[key] === null) return null;
+  if (typeof body[key] !== "number" || !Number.isInteger(body[key])) {
+    throw new AppError("message_required", `${key} must be an integer or null`, 400);
+  }
+  return body[key] as number;
+}
+
+function c5OptionalInteger(
+  body: Record<string, unknown>,
+  key: string,
+): number | undefined {
+  const value = c5NullableInteger(body, key);
+  return value === null ? undefined : value;
+}
+
+function c5Array(body: Record<string, unknown>, key: string): unknown[] {
+  const value = body[key];
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new AppError("message_required", `${key} must be a non-empty array`, 400);
+  }
+  return value;
+}
+
+function c5OptionalArray(body: Record<string, unknown>, key: string): unknown[] | undefined {
+  if (!(key in body) || body[key] === undefined) return undefined;
+  if (!Array.isArray(body[key])) {
+    throw new AppError("message_required", `${key} must be an array`, 400);
+  }
+  return body[key];
+}
+
+function c5Object(body: Record<string, unknown>, key: string): Record<string, unknown> | undefined {
+  if (!(key in body) || body[key] === undefined) return undefined;
+  const value = body[key];
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new AppError("message_required", `${key} must be an object`, 400);
+  }
+  return value as Record<string, unknown>;
+}
+
+function c5Enum<T extends string>(
+  body: Record<string, unknown>,
+  key: string,
+  allowed: readonly T[],
+): T {
+  const value = body[key];
+  if (typeof value !== "string" || !allowed.includes(value as T)) {
+    throw new AppError("message_required", `${key} has an invalid value`, 400);
+  }
+  return value as T;
+}
+
+function c5Classification(body: Record<string, unknown>): DataClassification {
+  return c5Enum(body, "classification", C5_CLASSIFICATIONS);
+}
+
+function c5InteractionEvidenceRefs(
+  body: Record<string, unknown>,
+): InteractionContractEvidenceRef[] {
+  return c5Array(body, "evidenceRefs").map((value) => {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      throw new AppError("message_required", "evidenceRefs contains an invalid reference", 400);
+    }
+    const ref = value as Record<string, unknown>;
+    if (typeof ref.type !== "string" || !ref.type.trim() ||
+        (typeof ref.id !== "string" && typeof ref.id !== "number")) {
+      throw new AppError("message_required", "evidenceRefs contains an invalid reference", 400);
+    }
+    return { type: ref.type.trim().slice(0, 200), id: ref.id };
+  });
+}
 
 const MAX_DISCORD_MESSAGE = 4000;
 
@@ -190,6 +332,214 @@ export function createServer(
       const limit = Math.min(25, Number(req.query.limit ?? 25) || 25);
       const offset = Math.max(0, Number(req.query.offset ?? 0) || 0);
       res.json(manager.core.relationshipSummary(ownerId, limit, offset));
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  /**
+   * Explicit owner-authenticated C5 admission. The request is an event
+   * envelope, not a model callback. The runtime selects the current master
+   * mode; callers cannot request dark_apply or bypass the apply ceiling.
+   */
+  app.post("/nuclear/relationship/c5", (req, res) => {
+    try {
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const ownerId = requireOwner(
+        typeof body.userId === "string" ? body.userId : undefined,
+      );
+      const operation = c5Enum(body, "operation", C5_OPERATIONS);
+      let result: unknown;
+      switch (operation) {
+        case "self_commitment":
+          result = manager.core.recordC5AshleySelfCommitment({
+            ownerId,
+            text: c5RequiredString(body, "text", 600),
+            sourceEntityType: c5RequiredString(body, "sourceEntityType", 200),
+            sourceEntityUuid: c5RequiredString(body, "sourceEntityUuid", 200),
+            decisionId: c5NullableInteger(body, "decisionId"),
+            evidenceRefs: c5Array(body, "evidenceRefs"),
+            hostValidationOk: true,
+            classification: c5Classification(body),
+            partySubjectScope: c5OptionalString(body, "partySubjectScope", 200),
+            dueAt: c5NullableString(body, "dueAt", 80),
+          });
+          break;
+        case "tension":
+          result = manager.core.recordC5RelationalTension({
+            ownerId,
+            text: c5RequiredString(body, "text", 600),
+            sourceEntityType: c5RequiredString(body, "sourceEntityType", 200),
+            sourceEntityUuid: c5RequiredString(body, "sourceEntityUuid", 200),
+            decisionId: c5NullableInteger(body, "decisionId"),
+            evidenceRefs: c5Array(body, "evidenceRefs"),
+            hostValidationOk: true,
+            classification: c5Classification(body),
+            partySubjectScope: c5OptionalString(body, "partySubjectScope", 200),
+          });
+          break;
+        case "consent":
+          result = manager.core.recordC5Consent({
+            ownerId,
+            grantorIdentityRole: c5Enum<ConsentGrantorRole>(body, "grantorIdentityRole", ["doc", "ashley"]),
+            granteeOrConsumer: c5RequiredString(body, "granteeOrConsumer", 200),
+            scope: c5RequiredString(body, "scope", 200),
+            purpose: c5RequiredString(body, "purpose", 500),
+            evidenceOrDecisionRef: c5RequiredString(body, "evidenceOrDecisionRef", 300),
+            classification: c5Classification(body),
+            eventKind: c5Enum<ConsentEventKind>(body, "eventKind", ["grant", "revoke", "expire", "supersede"]),
+            supersedesConsentId: c5NullableInteger(body, "supersedesConsentId"),
+            grantedAt: c5OptionalString(body, "grantedAt", 80),
+            effectiveFrom: c5OptionalString(body, "effectiveFrom", 80),
+            effectiveTo: c5NullableString(body, "effectiveTo", 80),
+            expiresAt: c5NullableString(body, "expiresAt", 80),
+          });
+          break;
+        case "interaction_contract":
+          result = manager.core.recordC5InteractionContract({
+            ownerId,
+            kind: c5Enum<InteractionContractKind>(body, "kind", [
+              "owner_standing_instruction",
+              "ashley_standing_boundary",
+              "mutual_contract",
+              "implicit_hypothesis",
+            ]),
+            lifecycleState: body.lifecycleState == null
+              ? undefined
+              : c5Enum<InteractionContractLifecycle>(body, "lifecycleState", [
+                "recorded",
+                "in_force",
+                "withdrawn",
+                "superseded",
+                "proposed",
+                "bilaterally_evidenced",
+                "hypothesis",
+              ]),
+            classification: c5Classification(body),
+            partySubjectScope: c5OptionalString(body, "partySubjectScope", 200),
+            evidenceRefs: c5InteractionEvidenceRefs(body),
+            effectiveFrom: c5OptionalString(body, "effectiveFrom", 80),
+            effectiveTo: c5NullableString(body, "effectiveTo", 80),
+            scope: c5NullableString(body, "scope", 500),
+            audience: c5NullableString(body, "audience", 500),
+            withdrawalRefs: c5OptionalArray(body, "withdrawalRefs"),
+            correctionRefs: c5OptionalArray(body, "correctionRefs"),
+            supersessionRefs: c5OptionalArray(body, "supersessionRefs"),
+            identityEntryId: c5NullableInteger(body, "identityEntryId"),
+            identityIntervalVersion: c5NullableString(body, "identityIntervalVersion", 200),
+            proposalId: c5NullableString(body, "proposalId", 200),
+            ownerConfirmationEvidenceRef: c5NullableString(body, "ownerConfirmationEvidenceRef", 300),
+            ashleyConfirmationEvidenceRef: c5NullableString(body, "ashleyConfirmationEvidenceRef", 300),
+            ashleyDecisionId: c5NullableInteger(body, "ashleyDecisionId"),
+            deliveryReference: c5NullableString(body, "deliveryReference", 300),
+            typedEvidence: c5Object(body, "typedEvidence"),
+            uncertainty: body.uncertainty == null
+              ? undefined
+              : typeof body.uncertainty === "number" ? body.uncertainty : (() => {
+                throw new AppError("message_required", "uncertainty must be a number", 400);
+              })(),
+            adaptationPolicy: c5NullableString(body, "adaptationPolicy", 500),
+            text: c5NullableString(body, "text", 1000),
+          });
+          break;
+        case "repair_proposal":
+          result = manager.core.recordC5RepairProposal({
+            ownerId,
+            tensionId: c5NullableInteger(body, "tensionId"),
+            proposalOrigin: c5Enum<RepairProposalOrigin>(body, "proposalOrigin", [
+              "model",
+              "worker",
+              "deterministic_extractor",
+              "owner",
+            ]),
+            proposalDecisionId: c5NullableInteger(body, "proposalDecisionId"),
+            text: c5RequiredString(body, "text", 1000),
+            evidenceRefs: c5Array(body, "evidenceRefs"),
+            classification: c5Classification(body),
+            partySubjectScope: c5OptionalString(body, "partySubjectScope", 200),
+          });
+          break;
+        case "repair_evidence":
+          result = manager.core.recordC5RepairEvidence({
+            ownerId,
+            proposalId: c5RequiredInteger(body, "proposalId"),
+            evidenceRefs: c5Array(body, "evidenceRefs"),
+            classification: c5Classification(body),
+            partySubjectScope: c5OptionalString(body, "partySubjectScope", 200),
+          });
+          break;
+        case "repair_adjudication":
+          result = manager.core.recordC5RepairAdjudication({
+            ownerId,
+            proposalId: c5RequiredInteger(body, "proposalId"),
+            disposition: c5Enum<RepairDisposition>(body, "disposition", [
+              "repaired",
+              "not_repaired",
+              "unresolved",
+              "withdrawn",
+            ]),
+            adjudicatingDecisionId: c5NullableInteger(body, "adjudicatingDecisionId"),
+            hostValidationOk: true,
+            classification: c5Classification(body),
+            evidenceRefs: c5OptionalArray(body, "evidenceRefs"),
+            partySubjectScope: c5OptionalString(body, "partySubjectScope", 200),
+            deliveryReceiptId: c5NullableString(body, "deliveryReceiptId", 300),
+            supersedesAdjudicationId: c5NullableInteger(body, "supersedesAdjudicationId"),
+          });
+          break;
+        case "mutual_proposal":
+          result = manager.core.recordC5MutualProposal({
+            ownerId,
+            text: c5RequiredString(body, "text", 600),
+            sourceEntityType: c5RequiredString(body, "sourceEntityType", 200),
+            sourceEntityUuid: c5RequiredString(body, "sourceEntityUuid", 200),
+            classification: c5Classification(body),
+          });
+          break;
+        case "mutual_doc_confirmation":
+          manager.core.recordC5MutualDocConfirmation(
+            ownerId,
+            c5RequiredString(body, "entityUuid", 200),
+            c5RequiredString(body, "evidenceRef", 300),
+          );
+          result = null;
+          break;
+        case "mutual_ashley_decision":
+          manager.core.recordC5MutualAshleyDecision(
+            ownerId,
+            c5RequiredString(body, "entityUuid", 200),
+            c5RequiredInteger(body, "decisionId"),
+            c5OptionalString(body, "evidenceRef", 300),
+          );
+          result = null;
+          break;
+        case "mutual_delivery":
+          manager.core.recordC5MutualDelivery(
+            ownerId,
+            c5RequiredString(body, "entityUuid", 200),
+            c5RequiredString(body, "deliveryEntityUuid", 200),
+            c5OptionalInteger(body, "decisionId"),
+          );
+          result = null;
+          break;
+        case "mutual_activate":
+          result = manager.core.activateC5MutualCommitment(
+            ownerId,
+            c5RequiredString(body, "entityUuid", 200),
+          );
+          break;
+        case "mutual_withdraw":
+          manager.core.withdrawC5MutualCommitment(
+            ownerId,
+            c5RequiredString(body, "entityUuid", 200),
+            c5Enum(body, "initiator", ["doc", "ashley"]),
+            c5RequiredString(body, "evidenceRef", 300),
+          );
+          result = null;
+          break;
+      }
+      res.json({ ok: true, operation, result });
     } catch (err) {
       const { status, body } = toErrorResponse(err);
       res.status(status).json(body);

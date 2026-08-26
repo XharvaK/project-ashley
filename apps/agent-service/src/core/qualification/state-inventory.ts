@@ -133,6 +133,86 @@ const LIVE: Record<string, LiveRule> = {
 
 /** Tables excluded from the live projection (each with a stated reason). */
 const NON_LIVE: Record<string, NonLiveRule> = {
+  memory_contract_state: {
+    cls: "CONTROL_PLANE",
+    reason: "C1 contract marker and cutover ledger; memory_evidence remains unpromoted",
+  },
+  memory_assertions: {
+    cls: "SHADOW_ARTIFACT",
+    reason: "C1 assertion-first evidence remains observe-only and non-influential before promotion",
+  },
+  memory_corrections: {
+    cls: "SHADOW_ARTIFACT",
+    reason: "C1 correction proposals and receipts are shadow evidence before promotion",
+  },
+  memory_correction_targets: {
+    cls: "SHADOW_ARTIFACT",
+    reason: "C1 correction target resolution is shadow-only before promotion",
+  },
+  memory_deny_barriers: {
+    cls: "SHADOW_ARTIFACT",
+    reason: "C1 deny barriers are observe-only protection artifacts before promotion",
+  },
+  memory_deny_barrier_members: {
+    cls: "SHADOW_ARTIFACT",
+    reason: "C1 deny-barrier membership history is shadow-only before promotion",
+  },
+  memory_contradictions: {
+    cls: "SHADOW_ARTIFACT",
+    reason: "C1 contradiction records are evidence artifacts, not promoted live truth",
+  },
+  memory_derivation_links: {
+    cls: "SHADOW_ARTIFACT",
+    reason: "C1 derivation links are shadow lineage metadata before promotion",
+  },
+  memory_episode_claims: {
+    cls: "SHADOW_ARTIFACT",
+    reason: "C1 episode claim links remain shadow evidence before promotion",
+  },
+  memory_correction_receipts: {
+    cls: "SHADOW_ARTIFACT",
+    reason: "C1 correction receipts are settlement evidence, not live behavioral state",
+  },
+  memory_correction_outcomes: {
+    cls: "SHADOW_ARTIFACT",
+    reason: "C1 correction outcomes are shadow settlement evidence before promotion",
+  },
+  memory_reconciliation_requests: {
+    cls: "SHADOW_ARTIFACT",
+    reason: "C1 reconciliation requests are shadow repair metadata before promotion",
+  },
+  cognitive_maturation_contract_state: {
+    cls: "CONTROL_PLANE",
+    reason: "C1-C5 contract marker and activation ledger; not live behavioral state",
+  },
+  context_budget_policies: {
+    cls: "SHADOW_ARTIFACT",
+    reason: "C2 bounded projection policy metadata; no durable semantic mutation",
+  },
+  context_allocation_receipts: {
+    cls: "SHADOW_ARTIFACT",
+    reason: "C2 allocation receipts and route metadata; prompt projection is not memory authority",
+  },
+  context_summary_projections: {
+    cls: "SHADOW_ARTIFACT",
+    reason: "C2 bounded summary artifacts; same persistent truth can produce different projections",
+  },
+  learned_influences: {
+    cls: "SHADOW_ARTIFACT",
+    reason: "C3 learned bindings remain unpromoted shadow/fixture influence records",
+  },
+  learned_influence_evidence: {
+    cls: "SHADOW_ARTIFACT",
+    reason: "C3 evidence links remain subordinate to C1 currentness and provenance",
+  },
+  learned_choice_receipts: {
+    cls: "SHADOW_ARTIFACT",
+    reason: "C3 choice receipts prove bounded selection, not Agency authority",
+  },
+  identity_seed_lineage: {
+    cls: "SHADOW_ARTIFACT",
+    reason: "C3 seed lineage does not mutate Ashley Identity authority",
+  },
   episodes: { cls: "SHADOW_ARTIFACT", reason: "shadow episodes diverge pre-promotion; live subset compared in Track E/C" },
   episode_messages: { cls: "SHADOW_ARTIFACT", reason: "derived from episodes" },
   cognitive_runs: { cls: "SHADOW_ARTIFACT", reason: "shadow analysis run (shadow-only reader)" },
@@ -272,6 +352,30 @@ const NON_LIVE: Record<string, NonLiveRule> = {
   thought_calibration_adjustments: {
     cls: "SHADOW_ARTIFACT",
     reason: "C4 future-Thought calibration history; no current-turn authority",
+  },
+  relationship_projections: {
+    cls: "SHADOW_ARTIFACT",
+    reason: "C5 current/history projection; observe or fixture-only dark apply, never live behavioral authority",
+  },
+  interaction_contracts: {
+    cls: "SHADOW_ARTIFACT",
+    reason: "C5 typed relationship contracts; accepted state is not promoted live authority",
+  },
+  consent_records: {
+    cls: "SHADOW_ARTIFACT",
+    reason: "C5 append-only consent evidence; derived eligibility is not a capability authority flag",
+  },
+  repair_proposals: {
+    cls: "SHADOW_ARTIFACT",
+    reason: "C5 repair proposals remain separate from adjudicated relationship state",
+  },
+  repair_evidence: {
+    cls: "SHADOW_ARTIFACT",
+    reason: "C5 repair evidence is inspectable shadow evidence, not delivery or authority",
+  },
+  repair_adjudications: {
+    cls: "SHADOW_ARTIFACT",
+    reason: "C5 repair adjudication is evidence for Evaluation/Relationship, not a score or authority widening",
   },
 };
 

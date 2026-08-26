@@ -13,7 +13,7 @@ describe("nuclear schema v34 durable cognition", () => {
   it("adds cognition columns without rewriting v33 tables", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     try {
-      expect(NUCLEAR_SUPPORTED_VERSION).toBe(37);
+      expect(NUCLEAR_SUPPORTED_VERSION).toBe(40);
       expect(schemaVersion(db)).toBe(NUCLEAR_SUPPORTED_VERSION);
       const names = (
         db.prepare(`PRAGMA table_info(operational_jobs)`).all() as Array<{ name: string }>

@@ -67,9 +67,9 @@ function mapOpinion(row: unknown): Opinion | null {
 export function listIdentity(
   db: DatabaseSync,
   ownerId: string,
-  options: { layer?: IdentityLayer; limit?: number } = {},
+  options: { layer?: IdentityLayer; limit?: number; seed?: boolean } = {},
 ): IdentityEntry[] {
-  seedIdentity(db, ownerId);
+  if (options.seed !== false) seedIdentity(db, ownerId);
   const limit = Math.max(1, Math.min(100, options.limit ?? 40));
   const rows =
     options.layer === undefined

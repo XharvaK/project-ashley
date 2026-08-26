@@ -249,6 +249,8 @@ describe("OCI forget and provenance boundaries", () => {
         sourceEntityType: "message",
         sourceEntityUuid: "source-message-relationship",
         classification: "ordinary",
+        provenance: "live",
+        partySubjectScope: "owner",
       });
       const reminder = db
         .prepare("SELECT id FROM doc_reminders WHERE entity_uuid = ?")

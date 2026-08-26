@@ -20,6 +20,12 @@ import {
   C4_TABLES,
   validateNuclearV39Schema,
 } from "../cognitive-graduation/migration-38.js";
+import {
+  C5_INDEXES,
+  C5_EXISTING_TABLE_COLUMNS,
+  C5_TABLES,
+  validateNuclearV40Schema,
+} from "../relationship/migration-39.js";
 
 type TableInfoRow = {
   name?: string;
@@ -993,9 +999,33 @@ function requireNoV39Objects(db: DatabaseSync, version: number): void {
   if (marker) fail(version, "unexpected_v39_c4_marker");
 }
 
+function requireNoV40Objects(db: DatabaseSync, version: number): void {
+  for (const table of C5_TABLES) {
+    if (masterRow(db, "table", table)) {
+      fail(version, `unexpected_v40_table:${table}`);
+    }
+  }
+  for (const index of C5_INDEXES) {
+    if (masterRow(db, "index", index)) {
+      fail(version, `unexpected_v40_index:${index}`);
+    }
+  }
+  for (const [table, columns] of Object.entries(C5_EXISTING_TABLE_COLUMNS)) {
+    for (const column of columns) {
+      if (tableInfo(db, table).some((row) => row.name === column)) {
+        fail(version, `unexpected_v40_column:${table}.${column}`);
+      }
+    }
+  }
+  const marker = db.prepare(
+    `SELECT 1 FROM cognitive_maturation_contract_state WHERE wave = 'c5' LIMIT 1`,
+  ).get();
+  if (marker) fail(version, "unexpected_v40_c5_marker");
+}
+
 export function validateNuclearSchemaContent(
   db: DatabaseSync,
-  version: 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37 | 38 | 39,
+  version: 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37 | 38 | 39 | 40,
   options: { rejectNewerContent?: boolean } = {},
 ): void {
   if (version === 22) {
@@ -1150,6 +1180,12 @@ export function validateNuclearSchemaContent(
   }
   if (version === 38) return;
   validateNuclearV39Schema(db, version);
+  if (version === 39 && options.rejectNewerContent === true) {
+    requireNoV40Objects(db, version);
+    return;
+  }
+  if (version === 39) return;
+  validateNuclearV40Schema(db, version);
 }
 
 function addColumnIfMissing(

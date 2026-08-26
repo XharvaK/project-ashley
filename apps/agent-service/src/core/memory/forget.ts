@@ -17,6 +17,7 @@ import {
   listRelationshipForgetTargets,
   redactRelationshipTargets,
 } from "../relationship/forget.js";
+import { recomputeSharedCulture } from "../relationship/projections.js";
 import {
   listPerceptionForgetTargets,
   redactPerceptionTargets,
@@ -1071,6 +1072,7 @@ function applyForgetTargetsInTransaction(
   const messagesRedacted = redactMessages(db, ownerId, messageIds, receiptId);
   redactDeliveryTargets(db, ownerId, targets);
   redactRelationshipTargets(db, ownerId, targets);
+  recomputeSharedCulture(db, ownerId);
   redactPerceptionTargets(db, ownerId, targets);
   redactOpenCognitiveItems(db, ownerId, effectiveTargets);
   detachRelationshipMotivations(

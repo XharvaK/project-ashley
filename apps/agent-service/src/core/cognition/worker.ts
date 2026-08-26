@@ -37,6 +37,7 @@ import { materializeOpenCognitiveItem } from "./open-items.js";
 import { currentModelContinuityIdentity } from "../attention/continuity.js";
 import type { AcceptedDispatchIdentity } from "../attention/types.js";
 import { messagesCoveredByDenyBarrier } from "../memory/eligibility.js";
+import { recomputeSharedCulture } from "../relationship/projections.js";
 
 export type CognitionAnalysis = {
   summary: string;
@@ -666,7 +667,10 @@ export async function processNextCognitiveJob(
           });
         }
         if (canInfluence("learning")) {
-          applyEligibleRevisions(db, job.ownerId, mode);
+          const appliedRevisions = applyEligibleRevisions(db, job.ownerId, mode);
+          if (appliedRevisions.length > 0) {
+            recomputeSharedCulture(db, job.ownerId);
+          }
         }
       }
       logRun(

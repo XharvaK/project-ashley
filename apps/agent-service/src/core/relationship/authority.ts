@@ -6,7 +6,7 @@ import type {
   WithdrawalScope,
 } from "./types.js";
 import { repairCoolingHours } from "./repair.js";
-import { relationshipCanRecord } from "./influence.js";
+import { relationshipCanInfluence, relationshipCanRecord } from "./influence.js";
 import { upsertDocReminder } from "./store.js";
 import { env } from "../../env.js";
 
@@ -92,6 +92,8 @@ export function observeReactiveRelationshipSignals(
     ownerId: string;
     message: string;
     messageEntityUuid: string;
+    /** Only an explicit parsed due time may make a reminder due. */
+    dueAt?: string | null;
   },
 ): void {
   if (!relationshipCanRecord(db, env.cognitionMode)) return;
@@ -99,11 +101,17 @@ export function observeReactiveRelationshipSignals(
     upsertDocReminder(db, {
       ownerId: input.ownerId,
       text: input.message.trim().slice(0, 600),
-      dueAt: null,
+      dueAt: input.dueAt ?? null,
       sourceEntityType: "message",
       sourceEntityUuid: input.messageEntityUuid,
       classification: defaultUnclassifiedConversational(),
       status: "pending",
+      provenance: relationshipCanInfluence(
+        db,
+        env.cognitionMode,
+        "relational_initiative",
+      ) ? "live" : "shadow",
+      partySubjectScope: "owner",
     });
   }
   const space = detectSpaceRequest(input.message);

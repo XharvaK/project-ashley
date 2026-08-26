@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
+import { env } from "../../env.js";
 import { listOpenQuestions } from "../state/questions.js";
 import { listRecentTakes } from "../curiosity/feed.js";
 import { listActiveFacts } from "../memory/facts.js";
@@ -629,7 +630,7 @@ export function collectMotivations(
 
   if (
     trigger === "proactive" &&
-    relationshipCanInfluence(db, "apply", "relational_initiative")
+    relationshipCanInfluence(db, env.cognitionMode, "relational_initiative")
   ) {
     const nowIso = new Date().toISOString();
     for (const reminder of listDueDocReminders(db, ownerId, nowIso)) {

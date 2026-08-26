@@ -41,6 +41,43 @@ export type WithdrawalRepairStatus =
   | "attempted"
   | "backoff";
 
+export type C5Mode = "observe" | "dark_apply" | "apply";
+export type C5Provenance = "shadow" | "live";
+
+export type RelationshipProjectionKind =
+  | "current_shared_culture"
+  | "historical_as_of";
+
+export type InteractionContractKind =
+  | "owner_standing_instruction"
+  | "ashley_standing_boundary"
+  | "mutual_contract"
+  | "implicit_hypothesis";
+
+export type InteractionContractLifecycle =
+  | "recorded"
+  | "in_force"
+  | "withdrawn"
+  | "superseded"
+  | "proposed"
+  | "bilaterally_evidenced"
+  | "hypothesis";
+
+export type ConsentGrantorRole = "doc" | "ashley";
+export type ConsentEventKind = "grant" | "revoke" | "expire" | "supersede";
+
+export type RepairProposalOrigin =
+  | "model"
+  | "worker"
+  | "deterministic_extractor"
+  | "owner";
+
+export type RepairDisposition =
+  | "repaired"
+  | "not_repaired"
+  | "unresolved"
+  | "withdrawn";
+
 export type WithdrawalScope =
   | "turn"
   | "topic"
@@ -54,6 +91,7 @@ export type SilenceReasonCode =
   | "user_requested_space"
   | "withdrawal_turn"
   | "withdrawal_topic"
+  | "withdrawal_initiative"
   | "withdrawal_pause"
   | "withdrawal_boundary_repair"
   | "constitutional_refusal"

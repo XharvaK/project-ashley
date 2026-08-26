@@ -459,6 +459,29 @@ export function decide(
     );
   }
 
+  if (options.db && options.ownerId) {
+    const withdrawalCode = evaluateWithdrawalSilence(
+      options.db,
+      options.ownerId,
+      env.cognitionMode,
+      undefined,
+      { proactive: true },
+    );
+    if (withdrawalCode) {
+      return {
+        ...makeDecision(
+          trigger,
+          "silence",
+          motivations.slice(0, 1),
+          "Honoring active withdrawal scope.",
+          motivations[0]?.score ?? 0,
+          { relevantBoundaryIds },
+        ),
+        silenceReasonCode: withdrawalCode,
+      };
+    }
+  }
+
   // Proactive: never emit unsolicited refuse from a boundary motivation.
   const candidate = motivations
     .filter(
