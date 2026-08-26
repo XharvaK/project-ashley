@@ -1471,6 +1471,13 @@ export function composeInitialThoughtMessages(input: {
     summary: motivation.summary,
     refType: motivation.refType,
     refId: motivation.refId,
+    ...(motivation.memoryContextRole
+      ? {
+          memory_context_role: motivation.memoryContextRole,
+          memory_assertion_ids: motivation.memoryAssertionIds ?? [],
+          memory_correction_ids: motivation.memoryCorrectionIds ?? [],
+        }
+      : {}),
   }));
 
   let projectContextPrompt =

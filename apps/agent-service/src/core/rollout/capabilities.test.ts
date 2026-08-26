@@ -95,6 +95,17 @@ describe("capability rollout", () => {
     db.close();
   });
 
+  it("keeps memory_evidence observe-only until a separate authorized promotion", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    expect(statusOf(db, "memory_evidence", "apply")).toMatchObject({
+      state: "observe",
+      effective: false,
+      promotionEligible: false,
+    });
+    expect(capabilityCanInfluence(db, "memory_evidence", "apply", releaseId)).toBe(false);
+    db.close();
+  });
+
   it("activates only through explicit authorized promotion", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     qualify(db, "recall");

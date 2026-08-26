@@ -1,133 +1,141 @@
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { DatabaseSync } from "node:sqlite";
-import { installFakeClock, uninstallFakeClock } from "../qualification/fake-clock.js";
+import { describe, expect, it } from "vitest";
 import { openNuclearDb } from "../db.js";
-import { recordRecallLiveCutover } from "./cutover.js";
-import { currentContractId } from "../rollout/capabilities.js";
+import { upsertFact } from "./facts.js";
+import {
+  buildLegacyImpactInventory,
+  cutoverMemoryAssertions,
+  verifyC1Consistency,
+} from "./cutover.js";
+import { getMemoryContractState } from "./contract-state.js";
 
-describe("recordRecallLiveCutover", () => {
-  beforeEach(() => installFakeClock());
-  afterEach(() => uninstallFakeClock());
+const OWNER_ID = "doc";
 
-  it("calculates cutoff from MAX(id) of mem_messages atomically, records operator_cutover, and allows idempotent retry", () => {
-    const db = openNuclearDb(new DatabaseSync(":memory:"));
-    try {
-      db.exec(`
-        INSERT INTO mem_threads (id, owner_id, status, channel, created_at, updated_at)
-        VALUES ('thread1', 'doc', 'active', 'discord', '2026', '2026');
-        INSERT INTO mem_messages (id, thread_id, owner_id, role, text, channel, created_at)
-        VALUES (1, 'thread1', 'doc', 'user', 'msg1', 'discord', '2026'),
-               (2, 'thread1', 'doc', 'user', 'msg2', 'discord', '2026');
-      `);
+function openFixture(): DatabaseSync {
+  return openNuclearDb(new DatabaseSync(":memory:"));
+}
 
-      db.exec(`INSERT INTO capability_releases (capability, release_id, state, updated_at) VALUES ('recall', '${currentContractId()}', 'active', 'now')`);
-
-      const res = recordRecallLiveCutover(db, "doc", { authorizedBy: "doc", masterMode: "observe" });
-      expect(res.success).toBe(true);
-      expect(res.status).toBe("cutover_recorded");
-      expect(res.cutoffMessageId).toBe(2);
-
-      const cutovers = db.prepare("SELECT * FROM recall_live_cutovers").all() as any[];
-      expect(cutovers.length).toBe(1);
-      expect(cutovers[0].cutoff_message_id).toBe(2);
-
-      const events = db.prepare("SELECT * FROM capability_events WHERE kind = 'operator_cutover'").all();
-      expect(events.length).toBe(1);
-
-      db.prepare(
-        `INSERT INTO mem_messages
-           (thread_id, owner_id, role, text, channel, created_at)
-         VALUES ('thread1', 'doc', 'user', 'post-cutover', 'discord', '2026')`,
-      ).run();
-
-      // Idempotent retry
-      const res2 = recordRecallLiveCutover(db, "doc", { authorizedBy: "doc", masterMode: "observe" });
-      expect(res2.success).toBe(true);
-      expect(res2.status).toBe("already_cutover");
-      expect(res2.cutoffMessageId).toBe(2);
-
-      const events2 = db.prepare("SELECT * FROM capability_events WHERE kind = 'operator_cutover'").all();
-      expect(events2.length).toBe(1);
-    } finally {
-      db.close();
-    }
+function fact(
+  db: DatabaseSync,
+  value = "likes coffee",
+  origin: "explicit_user" | "legacy" = "explicit_user",
+): number {
+  return upsertFact(db, {
+    ownerId: OWNER_ID,
+    category: "preference",
+    key: "coffee",
+    value,
+    origin,
   });
+}
 
-  it("rolls back cutover insertion if audit event fails", () => {
-    const db = openNuclearDb(new DatabaseSync(":memory:"));
+describe("C1 authority cutover", () => {
+  it("refuses inconsistent dual-write rows and leaves the marker unchanged", () => {
+    const db = openFixture();
     try {
-      db.exec(`INSERT INTO capability_releases (capability, release_id, state, updated_at) VALUES ('recall', '${currentContractId()}', 'active', 'now')`);
+      const factId = fact(db);
+      db.prepare("UPDATE mem_facts SET value = 'drifted' WHERE id = ?").run(factId);
 
-      // Intentionally cause event insertion to fail by dropping the table
-      db.exec("DROP TABLE capability_events");
-
-      expect(() => recordRecallLiveCutover(db, "doc", { authorizedBy: "doc", masterMode: "observe" })).toThrow();
-
-      const cutovers = db.prepare("SELECT * FROM recall_live_cutovers").all();
-      expect(cutovers.length).toBe(0);
-    } finally {
-      db.close();
-    }
-  });
-
-  it("requires a non-empty owner and does not create a cutover for an invalid owner", () => {
-    const db = openNuclearDb(new DatabaseSync(":memory:"));
-    try {
-      expect(() => recordRecallLiveCutover(db, " ", { authorizedBy: "doc", masterMode: "observe" }))
-        .toThrow("cutover_requires_owner");
-      expect(db.prepare("SELECT COUNT(*) AS c FROM recall_live_cutovers").get()).toEqual({ c: 0 });
-    } finally {
-      db.close();
-    }
-  });
-
-  it("fails closed unless the current Recall release is active in observe mode", () => {
-    const db = openNuclearDb(new DatabaseSync(":memory:"));
-    try {
-      expect(recordRecallLiveCutover(db, "doc", {
-        authorizedBy: "doc",
-        masterMode: "observe",
-      })).toMatchObject({ success: false, status: "not_active" });
-
-      db.prepare(
-        "UPDATE capability_releases SET state = 'active' WHERE capability = 'recall' AND release_id = ?",
-      ).run(currentContractId());
-      expect(recordRecallLiveCutover(db, "doc", {
-        authorizedBy: "doc",
-        masterMode: "apply",
-      })).toMatchObject({ success: false, status: "not_observe" });
-
-      db.prepare("UPDATE capability_contracts SET spec_hash = ? WHERE active = 1").run("mismatch");
-      expect(recordRecallLiveCutover(db, "doc", {
-        authorizedBy: "doc",
-        masterMode: "observe",
-      })).toMatchObject({ success: false, status: "contract_mismatch" });
-      expect(db.prepare("SELECT COUNT(*) AS c FROM recall_live_cutovers").get()).toEqual({ c: 0 });
-    } finally {
-      db.close();
-    }
-  });
-
-  it("does not commit a cutover when the audit insert is ignored", () => {
-    const db = openNuclearDb(new DatabaseSync(":memory:"));
-    try {
-      const releaseId = currentContractId();
-      db.exec(`INSERT INTO capability_releases (capability, release_id, state, updated_at) VALUES ('recall', '${releaseId}', 'active', 'now')`);
-      db.prepare(
-        `INSERT INTO capability_events
-           (capability, release_id, kind, source_key, detail_json, occurred_at,
-            contract_id, build_identity, model_epoch)
-         VALUES ('recall', ?, 'operator_cutover', ?, '{}', ?, ?, 'test-build', 0)`,
-      ).run(
-        releaseId,
-        `operator_cutover:doc:${releaseId}`,
-        new Date().toISOString(),
-        releaseId,
+      const report = verifyC1Consistency(db);
+      expect(report.ok).toBe(false);
+      expect(report.mismatchedFactIds).toContain(factId);
+      expect(() => cutoverMemoryAssertions(db)).toThrow(
+        "memory_cutover_consistency_failed",
       );
+      expect(getMemoryContractState(db)?.currentnessAuthority).toBe("mem_facts");
+    } finally {
+      db.close();
+    }
+  });
 
-      expect(() => recordRecallLiveCutover(db, "doc", { authorizedBy: "doc", masterMode: "observe" }))
-        .toThrow(/audit/i);
-      expect(db.prepare("SELECT COUNT(*) AS c FROM recall_live_cutovers").get()).toEqual({ c: 0 });
+  it("refuses a remaining independent mem_facts writer", () => {
+    const db = openFixture();
+    try {
+      fact(db);
+      expect(() => cutoverMemoryAssertions(db, {
+        writerInventory: [{
+          name: "unbridged-test-writer",
+          sourcePath: "test-fixture",
+          assertionFirst: false,
+        }],
+      })).toThrow("memory_cutover_independent_writer");
+      expect(getMemoryContractState(db)?.currentnessAuthority).toBe("mem_facts");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rolls back an interrupted marker conversion", () => {
+    const db = openFixture();
+    try {
+      fact(db);
+      expect(() => cutoverMemoryAssertions(db, {
+        testFailAfterMarker: true,
+      })).toThrow("memory_cutover_interrupted");
+      expect(getMemoryContractState(db)?.currentnessAuthority).toBe("mem_facts");
+      expect(getMemoryContractState(db)?.cutoverAt).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("flips authority atomically and rebuilds the compatibility projection on restart", () => {
+    const db = openFixture();
+    try {
+      const factId = fact(db);
+      const result = cutoverMemoryAssertions(db, {
+        now: new Date(Date.now() + 1000).toISOString(),
+      });
+      expect(result.marker.currentnessAuthority).toBe("memory_assertions");
+      expect(result.consistency.ok).toBe(true);
+      db.prepare("DELETE FROM mem_facts WHERE id = ?").run(factId);
+
+      openNuclearDb(db, { continuityOptional: true });
+      expect(db.prepare(
+        "SELECT owner_id, category, key, value, superseded_by FROM mem_facts",
+      ).all()).toEqual([{
+        owner_id: OWNER_ID,
+        category: "preference",
+        key: "coffee",
+        value: "likes coffee",
+        superseded_by: null,
+      }]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("reports quantified legacy facet impact before reader cutover", () => {
+    const db = openFixture();
+    try {
+      fact(db, "derived legacy value", "legacy");
+      const inventory = buildLegacyImpactInventory(db, OWNER_ID);
+      expect(inventory.totalMigratedAssertions).toBe(1);
+      expect(inventory.countsByFacet.unknown).toBe(1);
+      expect(inventory.remainingUnknown).toBe(1);
+      expect(inventory.currentlyInfluentialLegacyFacts).toBe(1);
+      expect(inventory.affectedPaths).toEqual([
+        "motivation_insert",
+        "mindStateBlock",
+        "resolveEvidenceRefs",
+        "thought_candidate_json",
+        "expression_memory_block",
+      ]);
+      expect(inventory.ownerVisibleBehaviorChange).toBe("yes");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses a persisted C1 contract newer than this executable", () => {
+    const db = openFixture();
+    try {
+      db.prepare(
+        "UPDATE memory_contract_state SET c1_contract_version = 2",
+      ).run();
+      expect(() => openNuclearDb(db, { continuityOptional: true })).toThrow(
+        "unsupported_memory_contract",
+      );
     } finally {
       db.close();
     }

@@ -14,6 +14,20 @@ import type { SandboxBrokerClient } from "./core/sandbox/broker-client.js";
 import type { SandboxApprovalPathTarget, SandboxApprovalProposalSource, SandboxApprovalProposalStatus } from "./core/sandbox/approval-proposal.js";
 import type { SandboxCapabilityId, SandboxRiskClass } from "@composer-assistant/sandbox-policy";
 import type { ErrorCode } from "./errors.js";
+import {
+  admitOwnerCorrection,
+  type AdmissionPath,
+  type CorrectionClass,
+  type InclusionReason,
+  type ResolutionBasis,
+} from "./core/memory/corrections.js";
+import {
+  correctionDiagnostics,
+  correctionHighWater,
+  fanoutCorrection,
+} from "./core/memory/fanout.js";
+import { getMemoryContractState } from "./core/memory/contract-state.js";
+import { capabilityCanInfluence } from "./core/rollout/capabilities.js";
 
 const MAX_DISCORD_MESSAGE = 4000;
 
@@ -233,6 +247,89 @@ export function createServer(
       const ownerId = String(req.query.owner_id ?? "");
       requireOwner(ownerId || undefined);
       res.json(manager.core.getEngineeringStatus(ownerId));
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.get("/nuclear/memory/corrections", (req, res) => {
+    try {
+      const ownerId = String(req.query.owner_id ?? "");
+      requireOwner(ownerId || undefined);
+      const db = manager.core.getDatabase();
+      res.json({
+        currentnessAuthority: getMemoryContractState(db)?.currentnessAuthority ?? "UNKNOWN",
+        correctionSeq: correctionHighWater(db),
+        corrections: correctionDiagnostics(db, ownerId),
+      });
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/nuclear/memory/corrections", (req, res) => {
+    try {
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const ownerId = requireOwner(
+        typeof body.userId === "string" ? body.userId : undefined,
+      );
+      const sourceMessageId = Number(body.sourceMessageId);
+      const correctionOrdinal = Number(body.correctionOrdinal);
+      const scopeText = typeof body.scopeText === "string" ? body.scopeText : "";
+      if (!Number.isInteger(sourceMessageId) || !Number.isInteger(correctionOrdinal) || !scopeText.trim()) {
+        throw new AppError("message_required", "sourceMessageId, correctionOrdinal, and scopeText are required", 400);
+      }
+      const admissionPath = String(body.admissionPath ?? "typed_control") as AdmissionPath;
+      const correctionClass = body.class == null ? undefined : String(body.class) as CorrectionClass;
+      const rawTargets = body.targets == null ? [] : body.targets;
+      if (!Array.isArray(rawTargets)) {
+        throw new AppError("message_required", "targets must be an array", 400);
+      }
+      const targets = rawTargets.map((raw) => {
+        if (typeof raw !== "object" || raw === null) {
+          throw new AppError("message_required", "invalid correction target", 400);
+        }
+        const target = raw as Record<string, unknown>;
+        return {
+          assertionId: Number(target.assertionId),
+          inclusionReason: String(target.inclusionReason) as InclusionReason,
+          resolutionBasis: String(target.resolutionBasis) as ResolutionBasis,
+        };
+      });
+      const requestedMode = body.capabilityMode == null
+        ? "observe"
+        : String(body.capabilityMode);
+      if (requestedMode !== "observe" && requestedMode !== "apply") {
+        throw new AppError("message_required", "capabilityMode must be observe or apply", 400);
+      }
+      const db = manager.core.getDatabase();
+      const capabilityMode = requestedMode === "apply" &&
+        capabilityCanInfluence(db, "memory_evidence", "apply")
+        ? "apply"
+        : "observe";
+      const admitted = admitOwnerCorrection(db, {
+        ownerId,
+        sourceMessageId,
+        correctionOrdinal,
+        admissionPath,
+        class: correctionClass,
+        scopeText,
+        proposal: body.proposal,
+        targets,
+        capabilityMode,
+      });
+      const fanout = capabilityMode === "apply" &&
+        admitted.correction.lifecycleStatus === "applying"
+        ? fanoutCorrection(db, admitted.correction.id)
+        : null;
+      res.json({
+        requestedMode,
+        capabilityMode,
+        admitted,
+        fanout,
+      });
     } catch (err) {
       const { status, body } = toErrorResponse(err);
       res.status(status).json(body);

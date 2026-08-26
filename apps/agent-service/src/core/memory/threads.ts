@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import type { DataClassification } from "../privacy/classification.js";
 import { newEntityUuid } from "../continuity/entity-uuid.js";
+import { annotateHotMessage } from "./context-role.js";
 
 export type MessageRole = "user" | "assistant" | "system";
 
@@ -15,6 +16,12 @@ export type MemoryMessage = {
   createdAt: string;
   entityUuid?: string;
   dataClassification?: DataClassification;
+  memory_context_role?:
+    | "current_source_evidence"
+    | "historical_source_evidence"
+    | "corrected_source_evidence";
+  memory_assertion_ids?: number[];
+  memory_correction_ids?: number[];
 };
 
 type InsertMessageInput = {
@@ -160,7 +167,10 @@ export function getHotMessages(
     .all(threadId, Math.min(100, limit))
     .map(mapMessage)
     .filter((message): message is MemoryMessage => message !== null);
-  return rows.reverse();
+  const ordered = rows.reverse();
+  // Hot-window role annotations are a post-cutover C1 contract. Before the
+  // marker, retain the legacy raw-message shape and behavior.
+  return ordered.map((message) => annotateHotMessage(db, message));
 }
 
 export function listMessageIdsMatchingTopic(

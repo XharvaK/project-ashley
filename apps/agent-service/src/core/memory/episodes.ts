@@ -3,6 +3,7 @@ import { newEntityUuid } from "../continuity/entity-uuid.js";
 import { defaultUnclassifiedConversational } from "../privacy/classification.js";
 import { reconcileUnsupportedRevisions } from "../learning/revisions.js";
 import { literalLikePattern } from "./facts.js";
+import { insertAssertion } from "./assertions.js";
 import type { MemoryMessage } from "./threads.js";
 import type { EvidenceProvenance } from "../types.js";
 import { currentReleaseId } from "../rollout/capabilities.js";
@@ -27,6 +28,91 @@ type Row = Record<string, unknown>;
 
 function row(value: unknown): Row | null {
   return typeof value === "object" && value !== null ? value as Row : null;
+}
+
+function countRows(
+  db: DatabaseSync,
+  sql: string,
+  ...params: (string | number)[]
+): number {
+  const value = db.prepare(sql).get(...params);
+  const item = row(value);
+  return item ? Number(item.count ?? 0) : 0;
+}
+
+function c1MemorySchemaPresent(db: DatabaseSync): boolean {
+  return Boolean(db.prepare(
+    "SELECT 1 AS found FROM sqlite_master WHERE type = 'table' AND name = 'memory_assertions'",
+  ).get());
+}
+
+function assertionAuthorityEnd(
+  authorityFrom: string | null,
+  now: string,
+): string {
+  if (authorityFrom == null || authorityFrom < now) return now;
+  const fromMs = Date.parse(authorityFrom);
+  const nowMs = Date.parse(now);
+  if (Number.isFinite(fromMs) && Number.isFinite(nowMs)) {
+    return new Date(Math.max(fromMs + 1, nowMs + 1)).toISOString();
+  }
+  return `${now}Z`;
+}
+
+function endC1FactAssertion(
+  db: DatabaseSync,
+  ownerId: string,
+  factId: number,
+  reason: "forgotten" | "superseded" = "forgotten",
+): void {
+  const assertion = db.prepare(
+    `SELECT id, authority_from
+     FROM memory_assertions
+     WHERE owner_id = ? AND legacy_fact_id = ?
+       AND termination_reason IS NULL
+     ORDER BY id DESC LIMIT 1`,
+  ).get(ownerId, factId) as { id?: number; authority_from?: string | null } | undefined;
+  if (assertion?.id == null) {
+    throw new Error(`memory_assertion_missing_for_fact:${factId}`);
+  }
+  const now = new Date().toISOString();
+  db.prepare(
+    `UPDATE memory_assertions
+     SET termination_reason = ?, authority_to = ?, key = '', value = '',
+         source_message_id = NULL, source_quote = NULL, updated_at = ?
+     WHERE id = ? AND termination_reason IS NULL`,
+  ).run(
+    reason,
+    assertionAuthorityEnd(assertion.authority_from ?? null, now),
+    now,
+    assertion.id,
+  );
+}
+
+function updateC1FactSource(
+  db: DatabaseSync,
+  ownerId: string,
+  factId: number,
+  sourceMessageId: number,
+): void {
+  const assertion = db.prepare(
+    `SELECT id
+     FROM memory_assertions
+     WHERE owner_id = ? AND legacy_fact_id = ?
+       AND termination_reason IS NULL
+     ORDER BY id DESC LIMIT 1`,
+  ).get(ownerId, factId) as { id?: number } | undefined;
+  if (assertion?.id == null) {
+    throw new Error(`memory_assertion_missing_for_fact:${factId}`);
+  }
+  const now = new Date().toISOString();
+  db.prepare(
+    `UPDATE memory_assertions
+     SET source_message_id = ?, updated_at = ? WHERE id = ?`,
+  ).run(sourceMessageId, now, assertion.id);
+  db.prepare(
+    "UPDATE mem_facts SET source_message_id = ? WHERE id = ?",
+  ).run(sourceMessageId, factId);
 }
 
 function mapEpisode(value: unknown): Episode | null {
@@ -171,6 +257,35 @@ export function createEpisode(
       "INSERT INTO episodes_fts (rowid, summary, entities) VALUES (?, ?, ?)",
     ).run(id, summary, entities);
   }
+  if (c1MemorySchemaPresent(db)) {
+    const existingClaim = db.prepare(
+      `SELECT assertion_id FROM memory_episode_claims WHERE episode_id = ? LIMIT 1`,
+    ).get(id) as { assertion_id?: number } | undefined;
+    if (existingClaim?.assertion_id == null) {
+      const assertionId = insertAssertion(db, {
+        ownerId: input.ownerId,
+        kind: "episode_claim",
+        subjectFacet: "unknown",
+        lineageKind: "unknown",
+        derivationKind: "derived",
+        supportState: "uncertain",
+        influenceClass: "I0",
+        claimText: summary,
+        sourceKind: "episode_summary",
+        legacyEpisodeId: id,
+        recordedAt: now,
+        worldIntervalBasis: "legacy_unknown",
+        authorityFrom: null,
+        authorityBasis: "legacy_current",
+        dataClassification: defaultUnclassifiedConversational(),
+      });
+      db.prepare(
+        `INSERT INTO memory_episode_claims
+           (episode_id, assertion_id, span_start, span_end, excerpt)
+         VALUES (?, ?, 0, ?, ?)` ,
+      ).run(id, assertionId, summary.length, summary);
+    }
+  }
   return getEpisode(db, id);
 }
 
@@ -310,7 +425,56 @@ export function liveMessagesRemainEligible(
   return ids.every((id) => id > watermark);
 }
 
-export function forgetEpisodesByIds(
+function redactLinkedEpisodeAssertions(
+  db: DatabaseSync,
+  ownerId: string,
+  episodeIds: number[],
+): void {
+  if (!c1MemorySchemaPresent(db) || episodeIds.length === 0) return;
+  const marks = episodeIds.map(() => "?").join(", ");
+  const assertions = db.prepare(
+    `SELECT DISTINCT a.id, a.authority_from
+     FROM memory_assertions a
+     WHERE a.owner_id = ?
+       AND (a.legacy_episode_id IN (${marks}) OR EXISTS (
+         SELECT 1 FROM memory_episode_claims c
+         WHERE c.assertion_id = a.id AND c.episode_id IN (${marks})
+       ))`,
+  ).all(ownerId, ...episodeIds, ...episodeIds).flatMap((value) => {
+    const item = row(value);
+    if (!item) return [];
+    return [{
+      id: Number(item.id),
+      authorityFrom: typeof item.authority_from === "string"
+        ? item.authority_from
+        : null,
+    }];
+  });
+  const now = new Date().toISOString();
+  const updateAssertion = db.prepare(
+    `UPDATE memory_assertions
+     SET termination_reason = COALESCE(termination_reason, 'forgotten'),
+         authority_to = CASE WHEN termination_reason IS NULL THEN ? ELSE authority_to END,
+         claim_text = CASE WHEN kind <> 'keyed_fact' THEN '' ELSE claim_text END,
+         source_message_id = NULL, source_quote = NULL, updated_at = ?
+     WHERE id = ? AND owner_id = ?`,
+  );
+  for (const assertion of assertions) {
+    if (!Number.isInteger(assertion.id) || assertion.id <= 0) continue;
+    updateAssertion.run(
+      assertionAuthorityEnd(assertion.authorityFrom, now),
+      now,
+      assertion.id,
+      ownerId,
+    );
+  }
+  db.prepare(
+    `UPDATE memory_episode_claims SET excerpt = ''
+     WHERE episode_id IN (${marks})`,
+  ).run(...episodeIds);
+}
+
+function forgetEpisodesByIdsInTransaction(
   db: DatabaseSync,
   ownerId: string,
   episodeIds: number[],
@@ -335,6 +499,7 @@ export function forgetEpisodesByIds(
     .filter((item) => item.type === "fact")
     .map((item) => Number(item.id))
     .filter(Number.isFinite);
+  const c1 = c1MemorySchemaPresent(db);
   const messageIds = db.prepare(
     `SELECT DISTINCT message_id FROM episode_messages
      WHERE episode_id IN (${placeholders})`,
@@ -372,6 +537,7 @@ export function forgetEpisodesByIds(
        WHERE owner_id = ? AND episode_id = ?`,
     ).run(ownerId, id);
   }
+  redactLinkedEpisodeAssertions(db, ownerId, matches);
   db.prepare(
     `DELETE FROM evidence_links
      WHERE owner_id = ? AND source_type = 'episode'
@@ -389,17 +555,19 @@ export function forgetEpisodesByIds(
     ).run(ownerId, ...factIds, ...messageIds);
   }
   for (const factId of factIds) {
-    db.prepare(
-      `UPDATE mem_facts SET superseded_by = id
-       WHERE id = ? AND owner_id = ? AND origin = 'explicit_user'
-         AND superseded_by IS NULL
-         AND NOT EXISTS (
-           SELECT 1 FROM evidence_links l
-           WHERE l.owner_id = mem_facts.owner_id
-             AND l.target_type = 'fact'
-             AND l.target_id = CAST(mem_facts.id AS TEXT)
-         )`,
-    ).run(factId, ownerId);
+    if (!c1) {
+      db.prepare(
+        `UPDATE mem_facts SET superseded_by = id
+         WHERE id = ? AND owner_id = ? AND origin = 'explicit_user'
+           AND superseded_by IS NULL
+           AND NOT EXISTS (
+             SELECT 1 FROM evidence_links l
+             WHERE l.owner_id = mem_facts.owner_id
+               AND l.target_type = 'fact'
+               AND l.target_id = CAST(mem_facts.id AS TEXT)
+           )`,
+      ).run(factId, ownerId);
+    }
     const fact = db
       .prepare(
         `SELECT source_message_id, source_quote, superseded_by
@@ -444,10 +612,29 @@ export function forgetEpisodesByIds(
           )
         : undefined;
       if (replacement) {
-        db.prepare(
-          "UPDATE mem_facts SET source_message_id = ? WHERE id = ?",
-        ).run(replacement.id, factId);
+        if (c1) {
+          updateC1FactSource(db, ownerId, factId, replacement.id);
+        } else {
+          db.prepare(
+            "UPDATE mem_facts SET source_message_id = ? WHERE id = ?",
+          ).run(replacement.id, factId);
+        }
       } else {
+        if (c1) endC1FactAssertion(db, ownerId, factId);
+        db.prepare(
+          "UPDATE mem_facts SET superseded_by = id WHERE id = ?",
+        ).run(factId);
+      }
+    } else if (c1 && fact && fact.superseded_by == null) {
+      const remaining = countRows(
+        db,
+        `SELECT COUNT(*) AS count FROM evidence_links
+         WHERE owner_id = ? AND target_type = 'fact' AND target_id = ?`,
+        ownerId,
+        String(factId),
+      );
+      if (remaining === 0) {
+        endC1FactAssertion(db, ownerId, factId);
         db.prepare(
           "UPDATE mem_facts SET superseded_by = id WHERE id = ?",
         ).run(factId);
@@ -456,6 +643,30 @@ export function forgetEpisodesByIds(
   }
   reconcileUnsupportedRevisions(db, ownerId, revisionIds);
   return matches.length;
+}
+
+export function forgetEpisodesByIds(
+  db: DatabaseSync,
+  ownerId: string,
+  episodeIds: number[],
+  inTransaction = false,
+): number {
+  if (inTransaction) {
+    return forgetEpisodesByIdsInTransaction(db, ownerId, episodeIds);
+  }
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const result = forgetEpisodesByIdsInTransaction(db, ownerId, episodeIds);
+    db.exec("COMMIT");
+    return result;
+  } catch (error) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      /* preserve the original episode-forget error */
+    }
+    throw error;
+  }
 }
 
 export function forgetEpisodesByTopic(

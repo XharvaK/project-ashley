@@ -6,12 +6,14 @@ import { applyModelContinuity, currentModelContinuityIdentity } from "../attenti
 import { runAttentiveDispatch } from "../attention/governor.js";
 import { insertMessage, resolveActiveThread } from "../memory/threads.js";
 import { retrieveEpisodes } from "../memory/episodes.js";
+import { upsertFact } from "../memory/facts.js";
+import { admitOwnerCorrection } from "../memory/corrections.js";
+import { cutoverMemoryAssertions, recordRecallLiveCutover } from "../memory/cutover.js";
 import { getAffectiveState } from "../state/affect.js";
 import { listActiveMindStateItems } from "../state/mind-items.js";
 import { listRevisions } from "../learning/revisions.js";
 import { listActiveFacts } from "../memory/facts.js";
 import { currentContractId, recordCriticalFailure } from "../rollout/capabilities.js";
-import { recordRecallLiveCutover } from "../memory/cutover.js";
 import { currentBuildIdentity } from "../rollout/capabilities.js";
 import { listOpenCognitiveItems } from "./open-items.js";
 import { enqueueCognitiveJob, recoverCognitiveJobs } from "./jobs.js";
@@ -414,6 +416,64 @@ describe("continuous cognition worker", () => {
     expect(shadowCounts("learning")).toBe(0);
 
     expect(retrieveEpisodes(db, "doc", "")).toHaveLength(0);
+    db.close();
+  });
+
+  it("re-reads open C1 barriers after claiming a job and before derived writes", async () => {
+    const { db, threadId, userMessageId } = setup();
+    const factId = upsertFact(db, {
+      ownerId: "doc",
+      category: "ongoing",
+      key: "synth_performance",
+      value: "Doc's modular synth performance is Friday.",
+      confidence: 0.95,
+      importance: 80,
+      sourceMessageId: userMessageId,
+      sourceQuote: "My synth performance is Friday.",
+      origin: "explicit_user",
+    });
+    const assertion = db.prepare(
+      "SELECT id FROM memory_assertions WHERE legacy_fact_id = ?",
+    ).get(factId) as { id?: number } | undefined;
+    if (assertion?.id == null) throw new Error("worker_barrier_assertion_missing");
+    cutoverMemoryAssertions(db);
+
+    const analyze = async () => {
+      const correctionMessageId = insertMessage(db, {
+        threadId,
+        ownerId: "doc",
+        role: "user",
+        text: "The stored performance memory is wrong.",
+        channel: "discord",
+      });
+      const correction = admitOwnerCorrection(db, {
+        ownerId: "doc",
+        sourceMessageId: correctionMessageId,
+        correctionOrdinal: 1,
+        admissionPath: "typed_control",
+        class: "INTERPRETATION_INVALIDATION",
+        scopeText: "stored performance memory",
+        targets: [{
+          assertionId: assertion.id!,
+          inclusionReason: "owner_confirmed",
+          resolutionBasis: "owner_confirmed",
+        }],
+        capabilityMode: "apply",
+      });
+      expect(correction.barrier).not.toBeNull();
+      return { analysis, model: "test", raw: "{}" };
+    };
+
+    expect(await processNextCognitiveJob(db, "apply", analyze, allCapabilitiesActive)).toBe(true);
+    expect(retrieveEpisodes(db, "doc", "")).toHaveLength(0);
+    expect(db.prepare("SELECT status FROM cognitive_jobs LIMIT 1").get())
+      .toMatchObject({ status: "completed" });
+    const run = db.prepare(
+      "SELECT input_json, output_json FROM cognitive_runs ORDER BY id DESC LIMIT 1",
+    ).get() as { input_json?: string; output_json?: string } | undefined;
+    expect(`${run?.input_json ?? ""}${run?.output_json ?? ""}`).toContain(
+      "open_memory_deny_barrier",
+    );
     db.close();
   });
 });

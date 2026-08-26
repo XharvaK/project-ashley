@@ -23,6 +23,7 @@ import {
   getAuthoritativeLineageId,
   recordContinuityEvent,
 } from "./db.js";
+import { getMemoryContractState } from "../memory/contract-state.js";
 
 export const BACKUP_PACKAGE_VERSION = 1;
 
@@ -31,6 +32,7 @@ export type BackupManifest = {
   lineageId: string;
   nuclearSchemaVersion: number;
   continuitySchemaVersion: number;
+  c1CorrectionSeq: number | null;
   nuclearHash: string;
   continuityHash: string;
   nuclearSnapshotAt: string;
@@ -39,8 +41,105 @@ export type BackupManifest = {
   createdAt: string;
 };
 
+export type C1RestoreContinuityStatus = "proven" | "gap" | "unknown";
+
+export type C1RestoreContinuity = {
+  status: C1RestoreContinuityStatus;
+  influenceFailClosed: boolean;
+  restoredCorrectionSeq: number | null;
+  sidecarCorrectionSeq: number | null;
+  manifestCorrectionSeq: number | null;
+  reason: string;
+};
+
+function normalizedCorrectionSeq(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const number = typeof value === "number" ? value : Number(value);
+  return Number.isSafeInteger(number) && number >= 0 ? number : null;
+}
+
+/**
+ * Compare the restored nuclear C1 high-water with both independent backup
+ * witnesses. Matching old checkpoints do not prove that a later correction
+ * was not lost.
+ */
+export function assessC1RestoreContinuity(input: {
+  restoredCorrectionSeq: number | null | undefined;
+  sidecarCorrectionSeq: number | null | undefined;
+  manifestCorrectionSeq: number | null | undefined;
+  appliedC1AuthorityExists: boolean;
+  sameOlderCheckpoint?: boolean;
+}): C1RestoreContinuity {
+  const restored = normalizedCorrectionSeq(input.restoredCorrectionSeq);
+  const sidecar = normalizedCorrectionSeq(input.sidecarCorrectionSeq);
+  const manifest = normalizedCorrectionSeq(input.manifestCorrectionSeq);
+  const failClosed = (status: C1RestoreContinuityStatus, reason: string): C1RestoreContinuity => ({
+    status,
+    influenceFailClosed: true,
+    restoredCorrectionSeq: restored,
+    sidecarCorrectionSeq: sidecar,
+    manifestCorrectionSeq: manifest,
+    reason,
+  });
+
+  if (input.appliedC1AuthorityExists && restored == null) {
+    return failClosed("unknown", "restored_nuclear_c1_high_water_unavailable");
+  }
+  if (input.appliedC1AuthorityExists && (sidecar == null || manifest == null)) {
+    return failClosed("unknown", "independent_c1_high_water_witness_missing");
+  }
+  if (sidecar != null && manifest != null && sidecar !== manifest) {
+    return failClosed("unknown", "independent_c1_high_water_witness_mismatch");
+  }
+  const witnesses = [sidecar, manifest].filter(
+    (value): value is number => value != null,
+  );
+  if (restored == null && witnesses.length > 0) {
+    return failClosed("gap", "restored_nuclear_c1_high_water_missing");
+  }
+  if (restored != null && witnesses.some((value) => restored < value)) {
+    return failClosed("gap", "restored_nuclear_c1_high_water_gap");
+  }
+  if (
+    input.appliedC1AuthorityExists &&
+    input.sameOlderCheckpoint === true &&
+    restored != null &&
+    sidecar != null &&
+    manifest != null &&
+    restored === sidecar &&
+    sidecar === manifest
+  ) {
+    return failClosed("unknown", "matching_older_checkpoints_do_not_prove_completeness");
+  }
+  return {
+    status: "proven",
+    influenceFailClosed: false,
+    restoredCorrectionSeq: restored,
+    sidecarCorrectionSeq: sidecar,
+    manifestCorrectionSeq: manifest,
+    reason: input.appliedC1AuthorityExists
+      ? "restored_nuclear_c1_high_water_meets_independent_witnesses"
+      : "no_applied_c1_authority_requires_restore_gap_fencing",
+  };
+}
+
 function sha256File(path: string): string {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
+
+function readC1CorrectionSeq(nuclearDbPath: string): number | null {
+  const db = new DatabaseSync(nuclearDbPath);
+  try {
+    const exists = db.prepare(
+      "SELECT 1 AS found FROM sqlite_master WHERE type = 'table' AND name = 'memory_contract_state'",
+    ).get();
+    if (!exists) return null;
+    const state = getMemoryContractState(db);
+    if (!state) throw new Error("backup_c1_correction_seq_unavailable");
+    return state.correctionSeq;
+  } finally {
+    db.close();
+  }
 }
 
 function vacuumInto(sourcePath: string, destPath: string): void {
@@ -83,6 +182,9 @@ export function createDualBackupPackage(input: {
   const nuclearSnap = join(work, "nuclear.db");
   const continuitySnap = join(work, "continuity.db");
   try {
+    // Capture this before the nuclear snapshot. The number is a witness only;
+    // assertions and barriers remain authoritative in nuclear.db.
+    const c1CorrectionSeq = readC1CorrectionSeq(input.nuclearDbPath);
     vacuumInto(input.nuclearDbPath, nuclearSnap);
     // Continuity snapshot after nuclear so newer tombstones remain replayable.
     vacuumInto(input.continuityDbPath, continuitySnap);
@@ -93,6 +195,7 @@ export function createDualBackupPackage(input: {
       lineageId,
       nuclearSchemaVersion: input.nuclearSchemaVersion,
       continuitySchemaVersion: input.continuitySchemaVersion,
+      c1CorrectionSeq,
       nuclearHash,
       continuityHash,
       nuclearSnapshotAt: new Date().toISOString(),
@@ -160,7 +263,7 @@ export function createDualBackupPackage(input: {
         nuclearHash,
         continuityHash,
         createHash("sha256").update(packageBytes).digest("hex"),
-        JSON.stringify({ packagePath }),
+        JSON.stringify({ packagePath, c1CorrectionSeq }),
       );
     return { packagePath, manifest };
   } finally {

@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { openNuclearDb } from "../db.js";
 import {
+  assessC1RestoreContinuity,
   createDualBackupPackage,
   restoreVerifyPackage,
   verifyBackupPackage,
@@ -55,6 +56,14 @@ describe("wave10c backup and restore assurance", () => {
       });
       expect(manifest.nuclearSchemaVersion).toBe(18);
       expect(manifest.continuitySchemaVersion).toBe(1);
+      expect(manifest.c1CorrectionSeq).toBe(0);
+      const watermark = continuity.prepare(
+        `SELECT detail_json FROM backup_watermarks
+         WHERE kind = 'backup' ORDER BY id DESC LIMIT 1`,
+      ).get() as { detail_json?: string } | undefined;
+      expect(JSON.parse(watermark?.detail_json ?? "{}")).toMatchObject({
+        c1CorrectionSeq: 0,
+      });
       expect(restoreVerifyPackage({
         packagePath: result.packagePath,
         transferKeyHex: key,
@@ -87,5 +96,45 @@ describe("wave10c backup and restore assurance", () => {
       continuity.close();
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("fails closed for a C1 restore gap, missing witness, and matching old checkpoints", () => {
+    expect(assessC1RestoreContinuity({
+      restoredCorrectionSeq: 4,
+      sidecarCorrectionSeq: 5,
+      manifestCorrectionSeq: 5,
+      appliedC1AuthorityExists: true,
+    })).toMatchObject({
+      status: "gap",
+      influenceFailClosed: true,
+    });
+    expect(assessC1RestoreContinuity({
+      restoredCorrectionSeq: 5,
+      sidecarCorrectionSeq: undefined,
+      manifestCorrectionSeq: 5,
+      appliedC1AuthorityExists: true,
+    })).toMatchObject({
+      status: "unknown",
+      influenceFailClosed: true,
+    });
+    expect(assessC1RestoreContinuity({
+      restoredCorrectionSeq: 5,
+      sidecarCorrectionSeq: 5,
+      manifestCorrectionSeq: 5,
+      appliedC1AuthorityExists: true,
+      sameOlderCheckpoint: true,
+    })).toMatchObject({
+      status: "unknown",
+      influenceFailClosed: true,
+    });
+    expect(assessC1RestoreContinuity({
+      restoredCorrectionSeq: 5,
+      sidecarCorrectionSeq: 5,
+      manifestCorrectionSeq: 5,
+      appliedC1AuthorityExists: true,
+    })).toMatchObject({
+      status: "proven",
+      influenceFailClosed: false,
+    });
   });
 });

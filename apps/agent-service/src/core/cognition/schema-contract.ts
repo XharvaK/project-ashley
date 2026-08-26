@@ -1,5 +1,10 @@
 import type { DatabaseSync } from "node:sqlite";
 import { MIGRATION_24_OPEN_COGNITIVE_WAKE_CURSOR_DDL } from "./migration-24.js";
+import {
+  C1_INDEXES,
+  C1_TABLES,
+  validateNuclearV36Schema,
+} from "../memory/migration.js";
 
 type TableInfoRow = {
   name?: string;
@@ -914,9 +919,22 @@ function requireNoV35Columns(db: DatabaseSync, version: number): void {
   }
 }
 
+function requireNoC1Objects(db: DatabaseSync, version: number): void {
+  for (const table of C1_TABLES) {
+    if (masterRow(db, "table", table)) {
+      fail(version, `unexpected_c1_table:${table}`);
+    }
+  }
+  for (const index of C1_INDEXES) {
+    if (masterRow(db, "index", index)) {
+      fail(version, `unexpected_c1_index:${index}`);
+    }
+  }
+}
+
 export function validateNuclearSchemaContent(
   db: DatabaseSync,
-  version: 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35,
+  version: 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36,
   options: { rejectNewerContent?: boolean } = {},
 ): void {
   if (version === 22) {
@@ -1039,6 +1057,7 @@ export function validateNuclearSchemaContent(
   }
   if (version === 34 && options.rejectNewerContent === true) {
     requireNoV35Columns(db, version);
+    requireNoC1Objects(db, version);
     return;
   }
   if (version === 34) return;
@@ -1046,6 +1065,12 @@ export function validateNuclearSchemaContent(
     requireColumns(db, version, table, columns);
   }
   for (const index of V35_INDEXES) requireIndex(db, version, index);
+  if (version === 35 && options.rejectNewerContent === true) {
+    requireNoC1Objects(db, version);
+    return;
+  }
+  if (version === 35) return;
+  validateNuclearV36Schema(db, version);
 }
 
 function addColumnIfMissing(

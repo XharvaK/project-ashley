@@ -6,6 +6,12 @@ import {
 } from "../cognition/open-items.js";
 import { capabilityCanInfluence } from "../rollout/capabilities.js";
 import type { Motivation, Trigger } from "../types.js";
+import { factInfluenceEligibleAt } from "../memory/facts.js";
+import {
+  episodeInfluenceEligibleAt,
+  mindStateItemInfluenceEligibleAt,
+  sourceCoveredByDenyBarrier,
+} from "../memory/eligibility.js";
 
 export const MAX_PROACTIVE_MOTIVATION_CANDIDATES = 8;
 export const MAX_REACTIVE_MOTIVATION_CANDIDATES = 12;
@@ -90,13 +96,7 @@ function sourceIsCurrentlyEligible(
     case "fact":
       return (
         numericId !== null &&
-        rowExists(
-          db,
-          `SELECT 1 FROM mem_facts
-           WHERE id = ? AND owner_id = ? AND superseded_by IS NULL`,
-          numericId,
-          ownerId,
-        )
+        factInfluenceEligibleAt(db, ownerId, numericId, nowIso)
       );
     case "opinion":
       return (
@@ -124,7 +124,8 @@ function sourceIsCurrentlyEligible(
            WHERE id = ? AND owner_id = ? AND status = 'active'`,
           numericId,
           ownerId,
-        )
+        ) &&
+        mindStateItemInfluenceEligibleAt(db, ownerId, numericId, nowIso)
       );
     case "identity":
       return (
@@ -159,7 +160,9 @@ function sourceIsCurrentlyEligible(
              AND provenance = 'live'`,
           numericId,
           ownerId,
-        )
+        ) &&
+        episodeInfluenceEligibleAt(db, ownerId, numericId, nowIso) &&
+        !sourceCoveredByDenyBarrier(db, "episode", numericId, nowIso)
       );
     case "take":
       return (

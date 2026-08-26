@@ -20,6 +20,7 @@ import type { Decision } from "../types.js";
 import type { NuclearPromptChannel } from "./prompts.js";
 import { renderForTransport } from "./rendering.js";
 import { composeSelfCapabilityContext } from "../perception/capability-self-model.js";
+import { renderMemoryContextMessage } from "../memory/context-role.js";
 import type { PerceptionInlinePart } from "../perception/types.js";
 import {
   createModelFallbackChain,
@@ -128,7 +129,7 @@ export async function expressSpeak(
     .filter((message) => message.text.trim() !== current)
     .map((message) => ({
       role: message.role as "user" | "assistant" | "system",
-      content: message.text,
+      content: renderMemoryContextMessage(message),
     }));
 
   const expressionImages =

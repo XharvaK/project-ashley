@@ -468,7 +468,7 @@ function reconcileFacts(
   for (const factId of [...new Set(factIds)]) {
     const fact = db
       .prepare(
-        `SELECT source_message_id, source_quote, origin, superseded_by
+      `SELECT source_message_id, source_quote, origin, superseded_by
        FROM mem_facts WHERE id = ? AND owner_id = ?`,
       )
       .get(factId, ownerId) as {
@@ -540,6 +540,7 @@ function reconcileFacts(
         );
       }
     }
+    redactLinkedAssertion(db, ownerId, factId);
     db.prepare(
       `UPDATE mem_facts
        SET key = '', value = '', source_message_id = NULL, source_quote = NULL
@@ -547,6 +548,191 @@ function reconcileFacts(
     ).run(factId, ownerId);
   }
   return changed;
+}
+
+function c1MemorySchemaPresent(db: DatabaseSync): boolean {
+  const tableExists = (table: string): boolean => Boolean(db.prepare(
+    "SELECT 1 AS found FROM sqlite_master WHERE type = 'table' AND name = ?",
+  ).get(table));
+  return tableExists("memory_assertions") && tableExists("memory_contract_state");
+}
+
+function assertionAuthorityEnd(
+  authorityFrom: string | null,
+  now: string,
+): string {
+  if (authorityFrom == null || authorityFrom < now) return now;
+  const fromMs = Date.parse(authorityFrom);
+  const nowMs = Date.parse(now);
+  if (Number.isFinite(fromMs) && Number.isFinite(nowMs)) {
+    return new Date(Math.max(fromMs + 1, nowMs + 1)).toISOString();
+  }
+  return `${now}Z`;
+}
+
+function redactLinkedAssertion(
+  db: DatabaseSync,
+  ownerId: string,
+  factId: number,
+  force = false,
+): void {
+  if (!c1MemorySchemaPresent(db)) return;
+  const fact = db.prepare(
+    `SELECT category, key, value, superseded_by
+     FROM mem_facts WHERE id = ? AND owner_id = ?`,
+  ).get(factId, ownerId) as {
+    category?: string;
+    key?: string;
+    value?: string;
+    superseded_by?: number | null;
+  } | undefined;
+  if (!force &&
+    fact &&
+    fact.superseded_by == null &&
+    (fact.key ?? "") !== "" &&
+    (fact.value ?? "") !== ""
+  ) return;
+  const assertion = db.prepare(
+    `SELECT id, authority_from
+     FROM memory_assertions
+     WHERE owner_id = ? AND legacy_fact_id = ?
+     ORDER BY id DESC LIMIT 1`,
+  ).get(ownerId, factId) as { id?: number; authority_from?: string | null } | undefined;
+  const fallback = assertion?.id == null && fact
+    ? db.prepare(
+      `SELECT id, authority_from
+       FROM memory_assertions
+       WHERE owner_id = ? AND kind = 'keyed_fact'
+         AND category = ? AND key = ? AND value = ?
+       ORDER BY id DESC LIMIT 1`,
+    ).get(ownerId, fact.category ?? null, fact.key ?? null, fact.value ?? null) as {
+      id?: number;
+      authority_from?: string | null;
+    } | undefined
+    : undefined;
+  const target = assertion ?? fallback;
+  if (target?.id == null) return;
+  const now = new Date().toISOString();
+  db.prepare(
+    `UPDATE memory_assertions
+     SET termination_reason = COALESCE(termination_reason, 'forgotten'),
+         authority_to = CASE WHEN termination_reason IS NULL THEN ? ELSE authority_to END,
+         key = CASE WHEN kind = 'keyed_fact' THEN '' ELSE key END,
+         value = CASE WHEN kind = 'keyed_fact' THEN '' ELSE value END,
+         source_message_id = NULL, source_quote = NULL, updated_at = ?
+     WHERE id = ? AND owner_id = ?`,
+  ).run(
+    assertionAuthorityEnd(target.authority_from ?? null, now),
+    now,
+    target.id,
+    ownerId,
+  );
+}
+
+/** Redact episode claims without deleting their assertion or correction identity. */
+function redactLinkedEpisodeAssertions(
+  db: DatabaseSync,
+  ownerId: string,
+  episodeIds: number[],
+): void {
+  if (!c1MemorySchemaPresent(db) || episodeIds.length === 0) return;
+  const marks = placeholders(episodeIds);
+  const assertions = db.prepare(
+    `SELECT DISTINCT a.id, a.authority_from
+     FROM memory_assertions a
+     WHERE a.owner_id = ?
+       AND (a.legacy_episode_id IN (${marks}) OR EXISTS (
+         SELECT 1 FROM memory_episode_claims c
+         WHERE c.assertion_id = a.id AND c.episode_id IN (${marks})
+       ))`,
+  ).all(ownerId, ...episodeIds, ...episodeIds).flatMap((value) => {
+    if (!isRow(value)) return [];
+    return [{
+      id: Number(value.id),
+      authorityFrom: typeof value.authority_from === "string"
+        ? value.authority_from
+        : null,
+    }];
+  });
+  const now = new Date().toISOString();
+  const updateAssertion = db.prepare(
+    `UPDATE memory_assertions
+     SET termination_reason = COALESCE(termination_reason, 'forgotten'),
+         authority_to = CASE WHEN termination_reason IS NULL THEN ? ELSE authority_to END,
+         claim_text = CASE WHEN kind <> 'keyed_fact' THEN '' ELSE claim_text END,
+         source_message_id = NULL, source_quote = NULL, updated_at = ?
+     WHERE id = ? AND owner_id = ?`,
+  );
+  for (const assertion of assertions) {
+    if (!Number.isInteger(assertion.id) || assertion.id <= 0) continue;
+    updateAssertion.run(
+      assertionAuthorityEnd(assertion.authorityFrom, now),
+      now,
+      assertion.id,
+      ownerId,
+    );
+  }
+  db.prepare(
+    `UPDATE memory_episode_claims
+     SET excerpt = ''
+     WHERE episode_id IN (${marks})`,
+  ).run(...episodeIds);
+}
+
+/** Forget removes sensitive correction wording but preserves correction identity and outcomes. */
+function redactMatchingCorrectionContent(
+  db: DatabaseSync,
+  ownerId: string,
+  messageIds: number[],
+  episodeIds: number[],
+  factIds: number[],
+): number {
+  if (!c1MemorySchemaPresent(db)) return 0;
+  const correctionIds = new Set<number>();
+  if (messageIds.length > 0) {
+    const marks = placeholders(messageIds);
+    for (const value of db.prepare(
+      `SELECT id FROM memory_corrections
+       WHERE owner_id = ? AND source_message_id IN (${marks})`,
+    ).all(ownerId, ...messageIds)) {
+      if (isRow(value)) correctionIds.add(Number(value.id));
+    }
+  }
+  if (episodeIds.length > 0 || factIds.length > 0) {
+    const factClause = factIds.length > 0
+      ? `a.legacy_fact_id IN (${placeholders(factIds)})`
+      : "0";
+    const episodeClause = episodeIds.length > 0
+      ? `(a.legacy_episode_id IN (${placeholders(episodeIds)}) OR EXISTS (
+           SELECT 1 FROM memory_episode_claims ec
+           WHERE ec.assertion_id = a.id AND ec.episode_id IN (${placeholders(episodeIds)})
+         ))`
+      : "0";
+    const values = db.prepare(
+      `SELECT DISTINCT c.id
+       FROM memory_corrections c
+       JOIN memory_correction_targets t ON t.correction_id = c.id
+       JOIN memory_assertions a ON a.id = t.assertion_id
+       WHERE c.owner_id = ? AND a.owner_id = ?
+         AND (${factClause} OR ${episodeClause})`,
+    ).all(
+      ownerId,
+      ownerId,
+      ...factIds,
+      ...episodeIds,
+      ...episodeIds,
+    );
+    for (const value of values) {
+      if (isRow(value)) correctionIds.add(Number(value.id));
+    }
+  }
+  if (correctionIds.size === 0) return 0;
+  const marks = placeholders([...correctionIds]);
+  return Number(db.prepare(
+    `UPDATE memory_corrections
+     SET scope_text = '[redacted]', proposal_json = '{}'
+     WHERE owner_id = ? AND id IN (${marks})`,
+  ).run(ownerId, ...correctionIds).changes);
 }
 
 function assertForgetIntegrity(
@@ -766,7 +952,7 @@ function redactDeliveryTargets(
 /**
  * Nuclear cascade keyed by entity_uuid targets (idempotent when rows already gone).
  */
-export function applyForgetTargets(
+function applyForgetTargetsInTransaction(
   db: DatabaseSync,
   ownerId: string,
   targets: ForgetTarget[],
@@ -841,8 +1027,21 @@ export function applyForgetTargets(
     ).run(receiptId, ownerId, new Date().toISOString());
   }
 
+  // Governed forget redacts correction wording in the same transaction. The
+  // correction row, class, targets, and outcomes remain durable history.
+  redactMatchingCorrectionContent(
+    db,
+    ownerId,
+    messageIds,
+    episodeIds,
+    factIds,
+  );
+
   let factsForgotten = 0;
   for (const factId of factIds) {
+    // The assertion is the semantic owner of the ending. The compatibility
+    // row is updated only after this write succeeds in the same transaction.
+    redactLinkedAssertion(db, ownerId, factId, true);
     factsForgotten += Number(
       db
         .prepare(
@@ -854,7 +1053,7 @@ export function applyForgetTargets(
   }
   let episodesForgotten = 0;
   if (episodeIds.length > 0) {
-    episodesForgotten = forgetEpisodesByIds(db, ownerId, episodeIds);
+    episodesForgotten = forgetEpisodesByIds(db, ownerId, episodeIds, true);
   }
   redactQuestions(db, ownerId, questionIds);
   let messageEvidenceRemoved = 0;
@@ -948,6 +1147,26 @@ export function applyForgetTargets(
   };
 }
 
+export function applyForgetTargets(
+  db: DatabaseSync,
+  ownerId: string,
+  targets: ForgetTarget[],
+  options: { tombstoneId?: string | null; inTransaction?: boolean } = {},
+): ForgetResult {
+  if (options.inTransaction === true) {
+    return applyForgetTargetsInTransaction(db, ownerId, targets, options);
+  }
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const result = applyForgetTargetsInTransaction(db, ownerId, targets, options);
+    db.exec("COMMIT");
+    return result;
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
 export function replayPendingTombstones(
   continuity: DatabaseSync,
   nuclear: DatabaseSync,
@@ -976,6 +1195,7 @@ export type ForgetOwnerOptions = {
   previewId?: string | null;
   confirmationDiscordMessageId?: string | null;
   cancel?: boolean;
+  inTransaction?: boolean;
 };
 
 export function forgetOwnerTopic(
@@ -1014,7 +1234,10 @@ export function forgetOwnerTopic(
       throw new Error("forget_preview_targets_missing");
     }
     // Exact stored targets only — never recompute from topic / topicHint.
-    const result = applyForgetTargets(db, ownerId, targets, { tombstoneId });
+    const result = applyForgetTargets(db, ownerId, targets, {
+      tombstoneId,
+      inTransaction: options.inTransaction,
+    });
     markTombstoneApplied(continuity, tombstoneId, result.receiptId);
     return {
       ...result,

@@ -12,6 +12,8 @@ import {
   recordLiveShadowEvent,
 } from "./core/rollout/capabilities.js";
 import { startDeterministicRecallEpoch } from "./core/rollout/recall-epoch-test-util.js";
+import { insertMessage, resolveActiveThread } from "./core/memory/threads.js";
+import { upsertFact } from "./core/memory/facts.js";
 
 const start = new Date("2026-07-01T00:00:00.000Z");
 const OWNER = "doc";
@@ -28,6 +30,7 @@ function makeManager(db: DatabaseSync): AgentManager {
     getUptimeSec: () => 0,
     getProviderState: () => "unavailable",
     core: {
+      getDatabase: () => db,
       promoteCapability: (input: { capability: string; authorizedBy: string }) =>
         core.promoteCapability(input),
       operatorRollbackCapability: (input: { capability: string; authorizedBy: string }) =>
@@ -84,6 +87,24 @@ async function post(
   }
 }
 
+async function get(
+  app: ReturnType<typeof createServer>,
+  path: string,
+): Promise<{ status: number; body: unknown }> {
+  const server = app.listen(0, "127.0.0.1");
+  try {
+    await new Promise<void>((resolve) => server.once("listening", resolve));
+    const address = server.address() as AddressInfo;
+    const response = await fetch(`http://127.0.0.1:${address.port}${path}`);
+    const payload = await response.json();
+    return { status: response.status, body: payload };
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
+}
+
 async function withServer(
   db: DatabaseSync,
   fn: (app: ReturnType<typeof createServer>) => Promise<void>,
@@ -102,6 +123,86 @@ async function withServer(
     env.personaEvalMode = originalPersonaEvalMode;
   }
 }
+
+describe("memory correction endpoints", () => {
+  it("keeps a requested apply observe-only and exposes owner-scoped diagnostics", async () => {
+    const db = makeDb();
+    try {
+      const threadId = resolveActiveThread(db, OWNER, "discord");
+      const factSourceMessageId = insertMessage(db, {
+        threadId,
+        ownerId: OWNER,
+        role: "user",
+        text: "I like coffee.",
+        channel: "discord",
+      });
+      const factId = upsertFact(db, {
+        ownerId: OWNER,
+        category: "preference",
+        key: "coffee",
+        value: "likes coffee",
+        origin: "explicit_user",
+        sourceMessageId: factSourceMessageId,
+      });
+      const assertionId = Number((db.prepare(
+        "SELECT id FROM memory_assertions WHERE legacy_fact_id = ?",
+      ).get(factId) as { id?: number } | undefined)?.id);
+      const correctionSourceMessageId = insertMessage(db, {
+        threadId,
+        ownerId: OWNER,
+        role: "user",
+        text: "The stored coffee memory is wrong.",
+        channel: "discord",
+      });
+
+      await withServer(db, async (app) => {
+        const write = await post(app, "/nuclear/memory/corrections", {
+          userId: OWNER,
+          sourceMessageId: correctionSourceMessageId,
+          correctionOrdinal: 1,
+          admissionPath: "typed_control",
+          class: "INTERPRETATION_INVALIDATION",
+          scopeText: "stored coffee memory",
+          targets: [{
+            assertionId,
+            inclusionReason: "owner_confirmed",
+            resolutionBasis: "owner_confirmed",
+          }],
+          capabilityMode: "apply",
+        });
+        expect(write.status).toBe(200);
+        expect(write.body).toMatchObject({
+          requestedMode: "apply",
+          capabilityMode: "observe",
+          fanout: null,
+          admitted: {
+            correction: {
+              lifecycleStatus: "observe_recorded",
+              barrierId: null,
+            },
+            receipt: {
+              barrierCommitted: false,
+              fanoutState: "not_started",
+            },
+          },
+        });
+
+        const diagnostics = await get(app, "/nuclear/memory/corrections?owner_id=doc");
+        expect(diagnostics.status).toBe(200);
+        expect(diagnostics.body).toMatchObject({
+          currentnessAuthority: "mem_facts",
+          correctionSeq: 1,
+          corrections: [expect.objectContaining({
+            lifecycle_status: "observe_recorded",
+            stop_committed: false,
+          })],
+        });
+      });
+    } finally {
+      db.close();
+    }
+  });
+});
 
 describe("POST /nuclear/capabilities/promote (operator endpoint)", () => {
   it("promotes an eligible live-shadow capability for the owner", async () => {

@@ -4,11 +4,27 @@ import {
   getOpenCognitiveItem,
   openCognitiveItemEligibleForInfluence,
 } from "../cognition/open-items.js";
+import { getMemoryContractState } from "../memory/contract-state.js";
+import {
+  annotationForAssertion,
+  annotationForFact,
+} from "../memory/context-role.js";
+import { factInfluenceEligibleAt } from "../memory/facts.js";
+import {
+  influenceEligibleAt,
+  mindStateItemInfluenceEligibleAt,
+} from "../memory/eligibility.js";
 
 export type ResolvedEvidenceLine = {
   ref: EvidenceRef;
   label: string;
   text: string;
+  memory_context_role?:
+    | "current_source_evidence"
+    | "historical_source_evidence"
+    | "corrected_source_evidence";
+  memory_assertion_ids?: number[];
+  memory_correction_ids?: number[];
 };
 
 function isRow(value: unknown): value is Record<string, unknown> {
@@ -53,9 +69,13 @@ export function resolveEvidenceRefs(
   db: DatabaseSync,
   ownerId: string,
   refs: EvidenceRef[],
-  options: { excludeMessageId?: number | null } = {},
+  options: {
+    excludeMessageId?: number | null;
+    purpose?: "current_assumption" | "inspect";
+  } = {},
 ): ResolvedEvidenceLine[] {
   const excludeMessageId = options.excludeMessageId ?? null;
+  const inspect = options.purpose === "inspect";
   const lines: ResolvedEvidenceLine[] = [];
   const seen = new Set<string>();
 
@@ -126,13 +146,24 @@ export function resolveEvidenceRefs(
           )
           .get(id, ownerId);
         if (!isRow(row)) continue;
+        const c1 = getMemoryContractState(db)?.currentnessAuthority === "memory_assertions";
+        const eligible = factInfluenceEligibleAt(db, ownerId, id);
+        if (c1 && !eligible && !inspect) continue;
+        const annotation = c1 ? annotationForFact(db, ownerId, id) : null;
+        const blockedAnnotation = annotation &&
+          annotation.memory_context_role !== "corrected_source_evidence"
+          ? { ...annotation, memory_context_role: "historical_source_evidence" as const }
+          : annotation;
         lines.push({
           ref,
-          label: `fact:${id}`,
+          label: blockedAnnotation && !eligible
+            ? `${blockedAnnotation.memory_context_role}:fact:${id}`
+            : `fact:${id}`,
           text: `${text(row.category)}/${text(row.key)}: ${text(row.value)}`.slice(
             0,
             800,
           ),
+          ...(blockedAnnotation && !eligible ? blockedAnnotation : {}),
         });
         break;
       }
@@ -149,6 +180,68 @@ export function resolveEvidenceRefs(
           )
           .get(id, ownerId);
         if (!isRow(row) || !text(row.summary).trim()) continue;
+        const c1 = getMemoryContractState(db)?.currentnessAuthority === "memory_assertions";
+        if (c1) {
+          const claims = db.prepare(
+            `SELECT assertion_id, excerpt
+             FROM memory_episode_claims
+             WHERE episode_id = ? ORDER BY assertion_id ASC`,
+          ).all(id) as Array<{ assertion_id?: number; excerpt?: string }>;
+          let claimLines = 0;
+          for (const claim of claims) {
+            const assertionId = Number(claim.assertion_id);
+            if (!Number.isFinite(assertionId)) continue;
+            const eligible = influenceEligibleAt(db, assertionId);
+            if (!eligible && !inspect) continue;
+            const annotation = annotationForAssertion(db, ownerId, assertionId);
+            const blockedAnnotation = annotation &&
+              annotation.memory_context_role === "corrected_source_evidence"
+              ? annotation
+              : {
+                  memory_context_role: "historical_source_evidence" as const,
+                  memory_assertion_ids: [assertionId],
+                  memory_correction_ids: annotation?.memory_correction_ids ?? [],
+                };
+            lines.push({
+              ref,
+              label: eligible
+                ? `episode_claim:${assertionId}`
+                : `${blockedAnnotation.memory_context_role}:episode_claim:${assertionId}`,
+              text: text(claim.excerpt).trim().slice(0, 800),
+              ...(eligible
+                ? {
+                    memory_context_role: "current_source_evidence" as const,
+                    memory_assertion_ids: [assertionId],
+                  }
+                : blockedAnnotation),
+            });
+            claimLines += 1;
+          }
+          if (claimLines > 0) break;
+          if (!inspect) continue;
+          const assertionIds = claims
+            .map((claim) => Number(claim.assertion_id))
+            .filter(Number.isFinite);
+          const correctionIds = assertionIds.length > 0
+            ? (db.prepare(
+              `SELECT DISTINCT correction_id
+               FROM memory_correction_targets
+               WHERE assertion_id IN (${assertionIds.map(() => "?").join(", ")})
+               ORDER BY correction_id ASC`,
+            ).all(...assertionIds) as Array<{ correction_id?: number }>)
+              .map((claim) => Number(claim.correction_id))
+              .filter(Number.isFinite)
+            : [];
+          lines.push({
+            ref,
+            label: "historical_source_evidence:episode:" + id,
+            text: text(row.summary).trim().slice(0, 800),
+            memory_context_role: "historical_source_evidence",
+            memory_assertion_ids: assertionIds,
+            memory_correction_ids: correctionIds,
+          });
+          break;
+        }
         lines.push({
           ref,
           label: `episode:${id}`,
@@ -229,6 +322,10 @@ export function resolveEvidenceRefs(
         break;
       }
       case "mind_state": {
+        if (
+          getMemoryContractState(db)?.currentnessAuthority === "memory_assertions" &&
+          !mindStateItemInfluenceEligibleAt(db, ownerId, id)
+        ) continue;
         const row = db
           .prepare(
             `SELECT id, kind, text FROM mind_state_items
@@ -259,6 +356,17 @@ export function formatResolvedEvidence(
   if (lines.length === 0) return "";
   return [
     "## Thought-selected evidence",
-    ...lines.map((line) => `- [${line.label}] ${line.text}`),
+    ...lines.map((line) => {
+      const role = line.memory_context_role
+        ? ` memory_context_role=${line.memory_context_role}`
+        : "";
+      const assertions = line.memory_assertion_ids?.length
+        ? ` assertion_ids=${line.memory_assertion_ids.join(",")}`
+        : "";
+      const corrections = line.memory_correction_ids?.length
+        ? ` correction_ids=${line.memory_correction_ids.join(",")}`
+        : "";
+      return `- [${line.label}${role}${assertions}${corrections}] ${line.text}`;
+    }),
   ].join("\n");
 }

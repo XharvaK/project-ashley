@@ -36,6 +36,7 @@ import { defaultUnclassifiedConversational } from "../privacy/classification.js"
 import { materializeOpenCognitiveItem } from "./open-items.js";
 import { currentModelContinuityIdentity } from "../attention/continuity.js";
 import type { AcceptedDispatchIdentity } from "../attention/types.js";
+import { messagesCoveredByDenyBarrier } from "../memory/eligibility.js";
 
 export type CognitionAnalysis = {
   summary: string;
@@ -451,6 +452,28 @@ export async function processNextCognitiveJob(
         db.exec("COMMIT");
         return true;
       }
+      // The model analyzed outside this transaction. Re-read open C1
+      // membership after the job claim and before any derived write so an
+      // in-flight correction cannot be bypassed by a stale analysis result.
+      if (messagesCoveredByDenyBarrier(
+        db,
+        job.ownerId,
+        messages.map((message) => message.id),
+      )) {
+        logRun(
+          db,
+          job,
+          { threadId, messageIds: messages.map((message) => message.id) },
+          { skipped: "open_memory_deny_barrier" },
+          "completed",
+          result.model,
+          null,
+          null,
+        );
+        completeJob(db, job.id);
+        db.exec("COMMIT");
+        return true;
+      }
       const episode = createEpisode(db, {
         ownerId: job.ownerId,
         threadId,
@@ -598,6 +621,7 @@ export async function processNextCognitiveJob(
             sourceMessageId: source.id,
             origin: "explicit_user",
             sourceQuote: quote,
+            inTransaction: true,
           });
           if (factId) {
             const link = db.prepare(

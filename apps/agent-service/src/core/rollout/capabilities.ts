@@ -48,6 +48,7 @@ export const capabilityNames = [
   "candidate_authorship",
   "bounded_operation",
   "patch_export",
+  "memory_evidence",
 ] as const;
 
 export type CapabilityName = typeof capabilityNames[number];
@@ -169,6 +170,7 @@ const dependencies: Record<CapabilityName, CapabilityName[]> = {
   candidate_authorship: ["thought"],
   bounded_operation: ["thought"],
   patch_export: ["thought"],
+  memory_evidence: ["recall"],
 };
 
 const modelSensitive = new Set<string>(MODEL_SENSITIVE_SET_FOR_CONTRACT);

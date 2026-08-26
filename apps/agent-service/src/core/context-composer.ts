@@ -13,6 +13,7 @@ import {
 import { getState } from "./state/store.js";
 import { getAffectiveState } from "./state/affect.js";
 import { listActiveMindStateItems } from "./state/mind-items.js";
+import { mindStateItemInfluenceEligibleAt } from "./memory/eligibility.js";
 import {
   ensureEngineeringTables,
   loadCoordinatorTasks,
@@ -82,13 +83,14 @@ export function stableIdentityBlock(db: DatabaseSync, ownerId: string): string {
   ].join("\n");
 }
 
-function mindStateBlock(db: DatabaseSync, ownerId: string): string {
+export function mindStateBlock(db: DatabaseSync, ownerId: string): string {
   const state = getState(db, ownerId);
   const affect = getAffectiveState(db, ownerId);
   const mindStateActive = capabilityCanInfluence(db, "mind_state");
   const affectActive = capabilityCanInfluence(db, "affect");
   const items = mindStateActive
     ? listActiveMindStateItems(db, ownerId, 12)
+        .filter((item) => mindStateItemInfluenceEligibleAt(db, ownerId, item.id))
     : [];
   const lines = [
     state.focus ? `Focus: ${state.focus}` : "",

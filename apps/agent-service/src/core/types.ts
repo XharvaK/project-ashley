@@ -520,6 +520,12 @@ export type Motivation = {
   refId?: string | number | null;
   summary: string;
   createdAt?: string;
+  memoryContextRole?:
+    | "current_source_evidence"
+    | "historical_source_evidence"
+    | "corrected_source_evidence";
+  memoryAssertionIds?: number[];
+  memoryCorrectionIds?: number[];
 };
 
 export type IdentityLayer = "stable" | "dynamic";

@@ -799,7 +799,7 @@ export class AshleyCore {
         };
       }
 
-      const written = writeFromUserTurn(this.db, input.ownerId, message);
+      const written = writeFromUserTurn(this.db, input.ownerId, message, userMessageId);
       if (written.forgotTopic) {
         if (this.continuity) {
           forgetOwnerTopicImmediate(
@@ -3072,6 +3072,7 @@ export class AshleyCore {
         continuity: this.continuity,
         previewId: options.previewId,
         cancel: options.cancel,
+        inTransaction: true,
       });
       this.db.exec("COMMIT");
       return result;

@@ -5,6 +5,8 @@ import { listActiveFacts } from "../memory/facts.js";
 import { getState } from "../state/store.js";
 import { listIdentity, listOpinions } from "../identity/store.js";
 import { listActiveMindStateItems } from "../state/mind-items.js";
+import { mindStateItemInfluenceEligibleAt } from "../memory/eligibility.js";
+import { annotationForFact } from "../memory/context-role.js";
 import type {
   MindStateItem,
   MindStateItemKind,
@@ -357,8 +359,7 @@ export function collectMotivations(
     ) {
       continue;
     }
-    motivations.push(
-      persistMotivation(
+    const motivation = persistMotivation(
         db,
         ownerId,
         "fact",
@@ -367,8 +368,14 @@ export function collectMotivations(
         "fact",
         fact.id,
         write,
-      ),
-    );
+      );
+    const annotation = annotationForFact(db, ownerId, fact.id);
+    if (annotation) {
+      motivation.memoryContextRole = annotation.memory_context_role;
+      motivation.memoryAssertionIds = annotation.memory_assertion_ids;
+      motivation.memoryCorrectionIds = annotation.memory_correction_ids;
+    }
+    motivations.push(motivation);
   }
 
   motivations.push(
@@ -438,6 +445,7 @@ export function collectMotivations(
 
   for (const item of capabilityCanInfluence(db, "mind_state")
     ? listActiveMindStateItems(db, ownerId, 12)
+        .filter((candidate) => mindStateItemInfluenceEligibleAt(db, ownerId, candidate.id))
     : []) {
     // Active Mind State may always candidate; relevance still preferred on reactive.
     if (

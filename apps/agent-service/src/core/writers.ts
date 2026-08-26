@@ -108,6 +108,7 @@ export function writeFromUserTurn(
   db: DatabaseSync,
   ownerId: string,
   message: string,
+  sourceMessageId: number | null = null,
 ): {
   pinned: boolean;
   forgotTopic: string | null;
@@ -127,6 +128,7 @@ export function writeFromUserTurn(
       confidence: 1,
       importance: 90,
       origin: "manual",
+      sourceMessageId,
     });
     return {
       pinned: true,

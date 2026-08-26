@@ -11,6 +11,7 @@ import {
   formatResolvedEvidence,
   resolveEvidenceRefs,
 } from "../agency/resolve-evidence.js";
+import { renderMemoryContextMessage } from "./context-role.js";
 
 /** Memory-only retrieval. Identity / Mind State belong to ContextComposer. */
 export type AssembledMemory = {
@@ -55,7 +56,7 @@ export function assembleMemoryBlock(
 
   const recentLines = hotMessages
     .slice(-8)
-    .map((message) => `${message.role}: ${message.text}`);
+    .map((message) => renderMemoryContextMessage(message));
 
   const sections = [
     formatResolvedEvidence(resolved),
