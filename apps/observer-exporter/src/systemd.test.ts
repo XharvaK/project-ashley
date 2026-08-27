@@ -17,6 +17,20 @@ describe("disabled deployment candidates", () => {
     expect(service).not.toMatch(/DISCORD_BOT_TOKEN|MISTRAL_API_KEY|GROQ_API_KEY/);
   });
 
+  it("executes from the separate observer checkout while observing production Ashley", () => {
+    const service = readFileSync(
+      join(repoRoot, "deploy/linux-mint/systemd/ashley-observer-export.service"),
+      "utf8",
+    );
+    expect(service).toContain(
+      "WorkingDirectory=%h/ashley-observer-tools/apps/observer-exporter",
+    );
+    expect(service).toContain("--ashley-checkout %h/project-ashley");
+    expect(service).not.toContain(
+      "WorkingDirectory=%h/project-ashley/apps/observer-exporter",
+    );
+  });
+
   it("uses the explicit Istanbul calendar expression without a Timezone directive", () => {
     const timer = readFileSync(
       join(repoRoot, "deploy/linux-mint/systemd/ashley-observer-export.timer"),
