@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { listActiveLearnedInfluences } from "../learned-autonomy/eligibility.js";
 import { getAssertion } from "../memory/assertions.js";
 import { influenceEligibleAt } from "../memory/eligibility.js";
 import { assertC4ContractCompatible } from "./contract-state.js";
@@ -59,6 +60,17 @@ export function currentWorkingViewLinks(
   prediction: CognitivePrediction,
   at = new Date().toISOString(),
 ): WorkingViewLink[] {
+  const learnedRefs = prediction.evidenceRefs.filter((ref) => ref.type === "learned_influence");
+  if (learnedRefs.length > 0) {
+    if (prediction.capabilityModeAtWrite !== "dark_apply") return [];
+    const active = new Set(
+      listActiveLearnedInfluences(db, prediction.ownerId, {
+        mode: "dark_apply",
+        at: new Date(at),
+      }).map((influence) => influence.id),
+    );
+    if (learnedRefs.some((ref) => !active.has(Number(ref.id)))) return [];
+  }
   return listWorkingViewLinks(db, prediction.id).filter((link) => {
     const assertion = getAssertion(db, link.assertionId);
     return assertion?.ownerId === prediction.ownerId && influenceEligibleAt(db, link.assertionId, at);

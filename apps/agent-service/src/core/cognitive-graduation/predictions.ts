@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { getDecision } from "../agency/log.js";
+import { listLearnedInfluenceEvidence } from "../learned-autonomy/admit.js";
+import { listActiveLearnedInfluences } from "../learned-autonomy/eligibility.js";
 import { getAssertion } from "../memory/assertions.js";
 import { influenceEligibleAt } from "../memory/eligibility.js";
 import {
@@ -25,6 +27,7 @@ import {
   assertC4ContractCompatible,
 } from "./contract-state.js";
 import type {
+  CognitiveEvidenceRef,
   CognitivePrediction,
   CognitivePredictionInput,
   C4Mode,
@@ -104,9 +107,6 @@ function validateC1Evidence(
   at: string,
 ): { classifications: Array<"ordinary" | "sensitive" | "never_public" | "secret">; assertionIds: number[] } {
   const uniqueIds = [...new Set(ids)];
-  if (uniqueIds.length < 2) {
-    throw new Error("cognitive_graduation_c1_evidence_minimum");
-  }
   const classifications: Array<"ordinary" | "sensitive" | "never_public" | "secret"> = [];
   for (const assertionId of uniqueIds) {
     const assertion = getAssertion(db, assertionId);
@@ -119,6 +119,59 @@ function validateC1Evidence(
     classifications.push(assertion.dataClassification);
   }
   return { classifications, assertionIds: uniqueIds };
+}
+
+function learnedInfluenceIds(refs: CognitiveEvidenceRef[]): number[] {
+  return refs.flatMap((ref) => {
+    if (ref.type !== "learned_influence") return [];
+    const id = Number(ref.id);
+    return Number.isSafeInteger(id) && id > 0 ? [id] : [];
+  });
+}
+
+function validateC3Evidence(
+  db: DatabaseSync,
+  ownerId: string,
+  refs: CognitiveEvidenceRef[],
+  at: string,
+  mode: C4Mode,
+): { classifications: Array<"ordinary" | "sensitive" | "never_public" | "secret">; assertionIds: number[] } {
+  const ids = learnedInfluenceIds(refs);
+  if (refs.some((ref) => ref.type === "learned_influence" && !ids.includes(Number(ref.id)))) {
+    throw new Error("cognitive_graduation_c3_learned_influence_invalid");
+  }
+  if (ids.length === 0) return { classifications: [], assertionIds: [] };
+  if (mode !== "dark_apply") {
+    throw new Error("cognitive_graduation_c3_learned_influence_requires_dark_apply");
+  }
+  const active = new Map(
+    listActiveLearnedInfluences(db, ownerId, {
+      mode: "dark_apply",
+      at: new Date(at),
+    }).map((influence) => [influence.id, influence]),
+  );
+  const classifications: Array<"ordinary" | "sensitive" | "never_public" | "secret"> = [];
+  const assertionIds: number[] = [];
+  for (const id of [...new Set(ids)]) {
+    const influence = active.get(id);
+    if (!influence) {
+      throw new Error("cognitive_graduation_c3_learned_influence_not_current");
+    }
+    classifications.push(influence.dataClassification);
+    const evidence = listLearnedInfluenceEvidence(db, id);
+    if (evidence.length < 2 || evidence.some((item) => item.provenance !== "live")) {
+      throw new Error("cognitive_graduation_c3_learned_evidence_not_current");
+    }
+    for (const item of evidence) {
+      const assertion = getAssertion(db, item.assertionId);
+      if (!assertion || assertion.ownerId !== ownerId || !influenceEligibleAt(db, assertion.id, at)) {
+        throw new Error("cognitive_graduation_c3_learned_evidence_not_current");
+      }
+      classifications.push(assertion.dataClassification);
+      assertionIds.push(assertion.id);
+    }
+  }
+  return { classifications, assertionIds: [...new Set(assertionIds)] };
 }
 
 function validatePredictionInput(
@@ -148,7 +201,13 @@ function validatePredictionInput(
   }
   const judgmentClass = requireText(input.judgmentClass, "judgment_class", 64);
   const evidenceRefs = normalizeEvidenceRefs(input.evidenceRefs);
+  const mode = normalizeC4WriteMode(db, input.capabilityMode);
   const c1 = validateC1Evidence(db, ownerId, assertionIds(evidenceRefs), now);
+  const c3 = validateC3Evidence(db, ownerId, evidenceRefs, now, mode);
+  const currentAssertionIds = [...new Set([...c1.assertionIds, ...c3.assertionIds])];
+  if (currentAssertionIds.length < 2) {
+    throw new Error("cognitive_graduation_c1_evidence_minimum");
+  }
   const evidentialStrength = Number(input.evidentialStrength);
   if (!Number.isFinite(evidentialStrength) || evidentialStrength < 0 || evidentialStrength > 1) {
     throw new Error("cognitive_graduation_evidential_strength_invalid");
@@ -159,7 +218,6 @@ function validatePredictionInput(
   }
   const expectedHorizon = requireText(input.expectedHorizon, "expected_horizon", 128);
   const routeReceipt = requireText(input.modelRouteReceiptId, "model_route_receipt_id", 200);
-  const mode = normalizeC4WriteMode(db, input.capabilityMode);
   if (input.selected === false) throw new Error("cognitive_graduation_selection_required");
 
   let decisionId: number | null = null;
@@ -176,15 +234,16 @@ function validatePredictionInput(
   }
 
   const workingViewAssertionId = input.workingViewAssertionId == null
-    ? c1.assertionIds[0] ?? null
+    ? currentAssertionIds[0] ?? null
     : Number(input.workingViewAssertionId);
-  if (workingViewAssertionId == null || !c1.assertionIds.includes(workingViewAssertionId)) {
+  if (workingViewAssertionId == null || !currentAssertionIds.includes(workingViewAssertionId)) {
     throw new Error("cognitive_graduation_working_view_assertion_required");
   }
 
   const classification = combinedClassification(
     input.dataClassification,
     ...c1.classifications,
+    ...c3.classifications,
   );
   rejectSecret(classification, "cognitive_graduation_secret_evidence_refused");
   const policyLineage = validatePolicyLineage(input.policyLineage);

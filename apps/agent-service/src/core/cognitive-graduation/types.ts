@@ -5,7 +5,7 @@ export type C4Mode = "observe" | "dark_apply" | "apply";
 export type C4Provenance = "shadow" | "live";
 
 export type CognitiveEvidenceRef = EvidenceRef | {
-  type: "assertion";
+  type: "assertion" | "learned_influence";
   id: string | number;
 };
 

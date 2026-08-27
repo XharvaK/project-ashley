@@ -80,7 +80,9 @@ export function parseEvidenceRefs(value: unknown): CognitiveEvidenceRef[] {
     if (!isRow(entry) || (typeof entry.id !== "string" && typeof entry.id !== "number")) {
       return [];
     }
-    if (entry.type === "assertion") return [{ type: "assertion", id: entry.id }];
+    if (entry.type === "assertion" || entry.type === "learned_influence") {
+      return [{ type: entry.type, id: entry.id } as CognitiveEvidenceRef];
+    }
     const allowed = new Set([
       "message", "episode", "fact", "question", "opinion", "take", "identity",
       "mind_state", "doc_reminder", "ashley_self_commitment", "mutual_commitment",
@@ -101,7 +103,7 @@ export function normalizeEvidenceRefs(value: CognitiveEvidenceRef[]): CognitiveE
       throw new Error("cognitive_graduation_evidence_ref_invalid");
     }
     const type = String(item.type);
-    const allowed = type === "assertion" || new Set([
+    const allowed = (type === "assertion" || type === "learned_influence") || new Set([
       "message", "episode", "fact", "question", "opinion", "take", "identity",
       "mind_state", "doc_reminder", "ashley_self_commitment", "mutual_commitment",
       "scheduled_proactive", "relational_tension", "withdrawal", "open_cognitive_item",
