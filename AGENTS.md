@@ -109,8 +109,8 @@ Pre-activation correction pass runbook: [`docs/handoffs/mint-corrections-2.md`](
 ## Quick start
 
 ```powershell
-# ~/.composer-assistant/.env — see config/env.example
-cd C:\Users\Xharv\Projects\composer-assistant
+# From the repository root. Env file: ~/.composer-assistant/.env
+# See config/env.example. Commands come from this repository's package.json.
 
 npm run start:ashley   # SSH to Mint: checkout + coherent stop/build/start
 npm run stop:ashley    # stops accidental Windows pids only
