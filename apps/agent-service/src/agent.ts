@@ -57,6 +57,11 @@ export class AgentManager {
     return this.state;
   }
 
+  /** Trusted host state used by guarded C1 currentness activation. */
+  isPaused(): boolean {
+    return this.state === "paused";
+  }
+
   getAgentId(): string | null {
     return null;
   }

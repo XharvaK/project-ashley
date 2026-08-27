@@ -152,6 +152,12 @@ import {
 } from "./rollout/capabilities.js";
 import { recordRecallLiveCutover } from "./memory/cutover.js";
 import {
+  executeMemoryEvidenceCutover as executeMemoryEvidenceCutoverRelease,
+  getMemoryEvidenceCutoverReadiness as getMemoryEvidenceCutoverReadinessRelease,
+  type MemoryEvidenceCutoverReadiness,
+  type MemoryEvidenceCutoverResult,
+} from "./memory/activation.js";
+import {
   recordC1ShadowWitness,
   type C1ShadowWitnessInput,
   type C1ShadowWitnessRecordResult,
@@ -161,6 +167,15 @@ import {
   listRecallQualificationEpochs,
   startRecallQualificationEpoch as startRecallQualificationEpochRelease,
 } from "./rollout/recall-qualification-epoch.js";
+import {
+  getCurrentMemoryEvidenceQualificationEpoch,
+  getMemoryEvidenceQualificationReadiness,
+  listMemoryEvidenceQualificationEpochs,
+  recordMemoryEvidenceIsolatedEvaluation,
+  startMemoryEvidenceQualificationEpoch as startMemoryEvidenceQualificationEpochRelease,
+  type RecordC1EvaluationInput,
+  type StartC1EpochInput,
+} from "./rollout/memory-evidence-qualification-epoch.js";
 import { listRelationshipSummary } from "./relationship/store.js";
 import { observeReactiveRelationshipSignals } from "./relationship/authority.js";
 import { recomputeSharedCulture } from "./relationship/projections.js";
@@ -3072,6 +3087,11 @@ export class AshleyCore {
     return getKv(this.db, kvKey(ownerId)) === "true";
   }
 
+  /** Trusted host-facing quiescence observation for guarded currentness cutover. */
+  isExpressionQuiesced(ownerId: string): boolean {
+    return !this.activeOwners.has(ownerId);
+  }
+
   getProactiveOperationalStatus(ownerId: string): {
     enabled: boolean;
     paused: boolean;
@@ -3997,6 +4017,50 @@ export class AshleyCore {
       current: getCurrentRecallQualificationEpoch(this.db),
       epochs: listRecallQualificationEpochs(this.db),
     };
+  }
+
+  startMemoryEvidenceQualificationEpoch(input: StartC1EpochInput) {
+    const result = startMemoryEvidenceQualificationEpochRelease(this.db, input);
+    return {
+      ...result,
+      qualificationEpochs: listMemoryEvidenceQualificationEpochs(this.db, input.ownerId),
+      currentQualificationEpoch: getCurrentMemoryEvidenceQualificationEpoch(
+        this.db,
+        input.ownerId,
+      ),
+    };
+  }
+
+  listMemoryEvidenceQualificationEpochs(ownerId: string) {
+    return {
+      current: getCurrentMemoryEvidenceQualificationEpoch(this.db, ownerId),
+      epochs: listMemoryEvidenceQualificationEpochs(this.db, ownerId),
+    };
+  }
+
+  recordMemoryEvidenceEvaluation(input: RecordC1EvaluationInput) {
+    const result = recordMemoryEvidenceIsolatedEvaluation(this.db, input);
+    return {
+      ...result,
+      qualificationEpochs: listMemoryEvidenceQualificationEpochs(this.db, input.ownerId),
+      currentQualificationEpoch: getCurrentMemoryEvidenceQualificationEpoch(
+        this.db,
+        input.ownerId,
+      ),
+      readiness: getMemoryEvidenceQualificationReadiness(this.db, input.ownerId),
+    };
+  }
+
+  getMemoryEvidenceCutoverReadiness(
+    input: Parameters<typeof getMemoryEvidenceCutoverReadinessRelease>[1],
+  ): MemoryEvidenceCutoverReadiness {
+    return getMemoryEvidenceCutoverReadinessRelease(this.db, input);
+  }
+
+  executeMemoryEvidenceCutover(
+    input: Parameters<typeof executeMemoryEvidenceCutoverRelease>[1],
+  ): MemoryEvidenceCutoverResult {
+    return executeMemoryEvidenceCutoverRelease(this.db, input);
   }
 
   revertRevision(ownerId: string, revisionId: number): boolean {

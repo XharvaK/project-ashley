@@ -28,6 +28,11 @@ import {
 } from "./core/memory/fanout.js";
 import { getMemoryContractState } from "./core/memory/contract-state.js";
 import { capabilityCanInfluence } from "./core/rollout/capabilities.js";
+import {
+  C1_EVALUATION_DEFINITION_ID,
+  C1_EVALUATION_DEFINITION_VERSION,
+  C1_REQUIRED_EVAL_SEEDS,
+} from "./core/rollout/memory-evidence-qualification-epoch.js";
 import { inspectAllocation } from "./core/context-budget/inspect.js";
 import {
   assertC3ContractCompatible,
@@ -184,6 +189,90 @@ function requireOwner(userId: string | undefined): string {
     throw new AppError("forbidden", "Forbidden", 403);
   }
   return userId;
+}
+
+function c1Body(req: express.Request): Record<string, unknown> {
+  const body = req.body;
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    throw new AppError("bad_request", "request body must be an object", 400);
+  }
+  return body as Record<string, unknown>;
+}
+
+function c1RequiredString(
+  body: Record<string, unknown>,
+  key: string,
+  max = 300,
+): string {
+  const value = body[key];
+  if (typeof value !== "string" || !value.trim()) {
+    throw new AppError("message_required", `${key} is required`, 400);
+  }
+  const clean = value.trim();
+  if (clean.length > max) {
+    throw new AppError("message_required", `${key} is too long`, 400);
+  }
+  return clean;
+}
+
+function c1RequiredNullableString(
+  body: Record<string, unknown>,
+  key: string,
+): string | null {
+  if (!(key in body)) {
+    throw new AppError("message_required", `${key} is required`, 400);
+  }
+  const value = body[key];
+  if (value === null) return null;
+  if (typeof value !== "string" || !value.trim()) {
+    throw new AppError("message_required", `${key} must be a string or null`, 400);
+  }
+  const clean = value.trim();
+  if (clean.length > 300) {
+    throw new AppError("message_required", `${key} is too long`, 400);
+  }
+  return clean;
+}
+
+function c1EvaluationSeeds(
+  body: Record<string, unknown>,
+): Array<{ id: string; passed: boolean }> {
+  const value = body.seeds;
+  if (!Array.isArray(value) || value.length !== C1_REQUIRED_EVAL_SEEDS.length) {
+    throw new AppError("message_required", "seeds must contain all required C1 seeds", 400);
+  }
+  const allowed = new Set<string>(C1_REQUIRED_EVAL_SEEDS);
+  const seen = new Set<string>();
+  const seeds = value.map((candidate) => {
+    if (typeof candidate !== "object" || candidate === null || Array.isArray(candidate)) {
+      throw new AppError("message_required", "seeds contains an invalid entry", 400);
+    }
+    const seed = candidate as Record<string, unknown>;
+    if (
+      typeof seed.id !== "string" ||
+      !allowed.has(seed.id) ||
+      seen.has(seed.id) ||
+      typeof seed.passed !== "boolean"
+    ) {
+      throw new AppError("message_required", "seeds contains an invalid value", 400);
+    }
+    seen.add(seed.id);
+    return { id: seed.id, passed: seed.passed };
+  });
+  if (seen.size !== C1_REQUIRED_EVAL_SEEDS.length) {
+    throw new AppError("message_required", "seeds must contain all required C1 seeds", 400);
+  }
+  return seeds;
+}
+
+function trustedC1Quiescence(manager: AgentManager, ownerId: string): {
+  expressionPlanePaused: boolean;
+  ownerExpressionActive: boolean;
+} {
+  return {
+    expressionPlanePaused: manager.isPaused(),
+    ownerExpressionActive: !manager.core.isExpressionQuiesced(ownerId),
+  };
 }
 
 function gone(_req: express.Request, res: express.Response): void {
@@ -826,6 +915,13 @@ export function createServer(
         sourceKey?: string;
       };
       requireOwner(userId);
+      if (capability === "memory_evidence") {
+        res.status(400).json({
+          ok: false,
+          reason: "memory_evidence_requires_bound_evaluation",
+        });
+        return;
+      }
       if (
         typeof capability !== "string" ||
         typeof seeds !== "number" ||
@@ -922,6 +1018,97 @@ export function createServer(
       const { userId } = req.query as { userId?: string };
       requireOwner(userId);
       res.json(manager.core.listRecallQualificationEpochs());
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/nuclear/capabilities/memory-evidence/qualification-epoch/start", (req, res) => {
+    try {
+      const body = c1Body(req);
+      const ownerId = requireOwner(
+        typeof body.userId === "string" ? body.userId : undefined,
+      );
+      res.json(manager.core.startMemoryEvidenceQualificationEpoch({
+        ownerId,
+        startRequestKey: c1RequiredString(body, "startRequestKey"),
+        predecessorEpochId: c1RequiredNullableString(body, "predecessorEpochId"),
+      }));
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.get("/nuclear/capabilities/memory-evidence/qualification-epochs", (req, res) => {
+    try {
+      const userId = typeof req.query.userId === "string" ? req.query.userId : undefined;
+      const ownerId = requireOwner(userId);
+      res.json(manager.core.listMemoryEvidenceQualificationEpochs(ownerId));
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/nuclear/capabilities/memory-evidence/evaluation", (req, res) => {
+    try {
+      const body = c1Body(req);
+      const ownerId = requireOwner(
+        typeof body.userId === "string" ? body.userId : undefined,
+      );
+      const definitionId = c1RequiredString(body, "definitionId", 100);
+      const definitionVersion = body.definitionVersion;
+      if (definitionId !== C1_EVALUATION_DEFINITION_ID ||
+          definitionVersion !== C1_EVALUATION_DEFINITION_VERSION) {
+        throw new AppError("message_required", "invalid C1 evaluation definition", 400);
+      }
+      res.json(manager.core.recordMemoryEvidenceEvaluation({
+        ownerId,
+        sourceKey: c1RequiredString(body, "sourceKey"),
+        definitionId,
+        definitionVersion,
+        definitionHash: c1RequiredString(body, "definitionHash", 128),
+        seeds: c1EvaluationSeeds(body),
+      }));
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.get("/nuclear/capabilities/memory-evidence/readiness", (req, res) => {
+    try {
+      const userId = typeof req.query.userId === "string" ? req.query.userId : undefined;
+      const ownerId = requireOwner(userId);
+      const current = manager.core.listMemoryEvidenceQualificationEpochs(ownerId).current;
+      const quiescence = trustedC1Quiescence(manager, ownerId);
+      res.json(manager.core.getMemoryEvidenceCutoverReadiness({
+        ownerId,
+        epochId: current?.epochId ?? "",
+        masterMode: env.cognitionMode,
+        ...quiescence,
+      }));
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/nuclear/capabilities/memory-evidence/cutover", (req, res) => {
+    try {
+      const body = c1Body(req);
+      const ownerId = requireOwner(
+        typeof body.userId === "string" ? body.userId : undefined,
+      );
+      const quiescence = trustedC1Quiescence(manager, ownerId);
+      res.json(manager.core.executeMemoryEvidenceCutover({
+        ownerId,
+        epochId: c1RequiredString(body, "epochId"),
+        masterMode: env.cognitionMode,
+        ...quiescence,
+      }));
     } catch (err) {
       const { status, body } = toErrorResponse(err);
       res.status(status).json(body);
@@ -2091,6 +2278,9 @@ export function createServer(
     try {
       const { userId } = req.body as { userId?: string };
       const owner = requireOwner(userId);
+      if (manager.isPaused()) {
+        throw new AppError("agent_not_ready", "Agent not ready", 503);
+      }
       res.json(await manager.core.tickProactive(owner));
     } catch (err) {
       const { status, body } = toErrorResponse(err);

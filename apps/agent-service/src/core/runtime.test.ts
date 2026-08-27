@@ -549,6 +549,29 @@ describe("AshleyCore", () => {
     }
   });
 
+  it("reports an active owner Expression attempt as non-quiescent", async () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const core = new AshleyCore(db);
+    let quiescedDuringExpression: boolean | null = null;
+    const previousHook = proactiveExpressionHook.beforeReturn;
+    proactiveExpressionHook.beforeReturn = () => {
+      quiescedDuringExpression = core.isExpressionQuiesced("doc");
+    };
+    try {
+      expect(core.isExpressionQuiesced("doc")).toBe(true);
+      await core.handleReactiveChat({
+        message: "observe the expression guard",
+        ownerId: "doc",
+        channel: "discord",
+      });
+      expect(quiescedDuringExpression).toBe(false);
+      expect(core.isExpressionQuiesced("doc")).toBe(true);
+    } finally {
+      proactiveExpressionHook.beforeReturn = previousHook;
+      db.close();
+    }
+  });
+
   it("reserves and commits a proactive message in the legacy shape", async () => {
     const path = join(tmpdir(), `ashley-nuclear-${randomUUID()}.db`);
     const db = openNuclearDb(new DatabaseSync(path));

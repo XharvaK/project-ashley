@@ -24,6 +24,18 @@ async function stopTestServer(server: Server): Promise<void> {
 }
 
 describe("route surface registry", () => {
+  it("includes the dedicated C1 control-plane routes without a witness insertion route", () => {
+    const keys = routeSurface.map((entry) => `${entry.method} ${entry.path}`);
+    expect(keys).toEqual(expect.arrayContaining([
+      "POST /nuclear/capabilities/memory-evidence/qualification-epoch/start",
+      "GET /nuclear/capabilities/memory-evidence/qualification-epochs",
+      "POST /nuclear/capabilities/memory-evidence/evaluation",
+      "GET /nuclear/capabilities/memory-evidence/readiness",
+      "POST /nuclear/capabilities/memory-evidence/cutover",
+    ]));
+    expect(keys.some((key) => key.includes("memory-evidence/witness"))).toBe(false);
+  });
+
   it("accepts an app whose registered routes match the registry", () => {
     const app = express();
     for (const entry of routeSurface) {

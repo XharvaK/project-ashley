@@ -1,6 +1,6 @@
 import type { AddressInfo } from "node:net";
 import { DatabaseSync } from "node:sqlite";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { env } from "./env.js";
 import { createServer } from "./server.js";
 import type { AgentManager } from "./agent.js";
@@ -8,10 +8,21 @@ import { AshleyCore } from "./core/runtime.js";
 import { openNuclearDb } from "./core/db.js";
 import {
   currentContractId,
+  promoteCapability,
   recordIsolatedEvaluation,
   recordLiveShadowEvent,
+  recordRecallLiveCutover,
 } from "./core/rollout/capabilities.js";
 import { startDeterministicRecallEpoch } from "./core/rollout/recall-epoch-test-util.js";
+import {
+  C1_EVALUATION_DEFINITION_HASH,
+  C1_EVALUATION_DEFINITION_ID,
+  C1_EVALUATION_DEFINITION_VERSION,
+  C1_REQUIRED_EVAL_SEEDS,
+  recordMemoryEvidenceIsolatedEvaluation,
+  recordMemoryEvidenceLiveShadow,
+  startMemoryEvidenceQualificationEpoch,
+} from "./core/rollout/memory-evidence-qualification-epoch.js";
 import { insertMessage, resolveActiveThread } from "./core/memory/threads.js";
 import { upsertFact } from "./core/memory/facts.js";
 
@@ -23,10 +34,18 @@ function makeDb(): DatabaseSync {
   return openNuclearDb(new DatabaseSync(":memory:"));
 }
 
-function makeManager(db: DatabaseSync): AgentManager {
+function makeManager(
+  db: DatabaseSync,
+  options: {
+    state?: "ready" | "paused";
+    expressionQuiesced?: boolean;
+    tick?: (ownerId: string) => Promise<unknown>;
+  } = {},
+): AgentManager {
   const core = new AshleyCore(db);
   return {
-    getState: () => "ready",
+    getState: () => options.state ?? "ready",
+    isPaused: () => (options.state ?? "ready") === "paused",
     getUptimeSec: () => 0,
     getProviderState: () => "unavailable",
     core: {
@@ -41,6 +60,26 @@ function makeManager(db: DatabaseSync): AgentManager {
         passed: boolean;
         sourceKey: string;
       }) => core.recordCapabilityEvaluation(input),
+      startMemoryEvidenceQualificationEpoch: (
+        input: Parameters<AshleyCore["startMemoryEvidenceQualificationEpoch"]>[0],
+      ) =>
+        core.startMemoryEvidenceQualificationEpoch(input),
+      listMemoryEvidenceQualificationEpochs: (ownerId: string) =>
+        core.listMemoryEvidenceQualificationEpochs(ownerId),
+      recordMemoryEvidenceEvaluation: (
+        input: Parameters<AshleyCore["recordMemoryEvidenceEvaluation"]>[0],
+      ) =>
+        core.recordMemoryEvidenceEvaluation(input),
+      getMemoryEvidenceCutoverReadiness: (
+        input: Parameters<AshleyCore["getMemoryEvidenceCutoverReadiness"]>[0],
+      ) =>
+        core.getMemoryEvidenceCutoverReadiness(input),
+      executeMemoryEvidenceCutover: (
+        input: Parameters<AshleyCore["executeMemoryEvidenceCutover"]>[0],
+      ) =>
+        core.executeMemoryEvidenceCutover(input),
+      isExpressionQuiesced: () => options.expressionQuiesced ?? true,
+      tickProactive: options.tick ?? vi.fn(async () => ({ shouldSend: false, reason: "test" })),
     },
   } as unknown as AgentManager;
 }
@@ -62,6 +101,61 @@ function qualify(
       occurredAt: at.toISOString(),
     });
   }
+}
+
+function prepareC1Epoch(db: DatabaseSync, requestKey: string): string {
+  qualify(db, "recall");
+  expect(promoteCapability(db, "recall", {
+    releaseId: currentContractId(),
+    authorizedBy: OWNER,
+  })).toMatchObject({ ok: true, state: "active" });
+  expect(recordRecallLiveCutover(db, OWNER, {
+    authorizedBy: OWNER,
+    masterMode: "observe",
+  })).toMatchObject({ success: true });
+  const started = startMemoryEvidenceQualificationEpoch(db, {
+    ownerId: OWNER,
+    startRequestKey: requestKey,
+    predecessorEpochId: null,
+  });
+  expect(started).toMatchObject({ ok: true, created: true });
+  if (!started.ok) throw new Error("endpoint_c1_epoch_setup_failed");
+  return started.epochId;
+}
+
+function seedC1Evidence(db: DatabaseSync, epochId: string): void {
+  void epochId;
+  expect(recordMemoryEvidenceIsolatedEvaluation(db, {
+    ownerId: OWNER,
+    sourceKey: `c1-eval:v1:${C1_EVALUATION_DEFINITION_HASH}:endpoint-run`,
+    definitionId: C1_EVALUATION_DEFINITION_ID,
+    definitionVersion: C1_EVALUATION_DEFINITION_VERSION,
+    definitionHash: C1_EVALUATION_DEFINITION_HASH,
+    seeds: C1_REQUIRED_EVAL_SEEDS.map((id) => ({ id, passed: true })),
+  })).toEqual({ recorded: true });
+  const startAt = new Date("2026-07-01T00:00:00.000Z");
+  for (let index = 0; index < 24; index += 1) {
+    expect(recordMemoryEvidenceLiveShadow(db, {
+      ownerId: OWNER,
+      sourceKey: `c1-shadow:v1:decision:${index + 1}`,
+      decisionClass: "same_current",
+      qualifies: true,
+      trigger: "reactive",
+      sourceCount: 1,
+      detail: { decisionId: String(index + 1) },
+      occurredAt: new Date(startAt.getTime() + index * (7 * 86_400_000 / 24)).toISOString(),
+    })).toEqual({ recorded: true });
+  }
+  expect(recordMemoryEvidenceLiveShadow(db, {
+    ownerId: OWNER,
+    sourceKey: "c1-shadow:v1:decision:25",
+    decisionClass: "would_narrow",
+    qualifies: true,
+    trigger: "proactive",
+    sourceCount: 1,
+    detail: { decisionId: "25" },
+    occurredAt: new Date(startAt.getTime() + 7 * 86_400_000).toISOString(),
+  })).toEqual({ recorded: true });
 }
 
 async function post(
@@ -108,6 +202,7 @@ async function get(
 async function withServer(
   db: DatabaseSync,
   fn: (app: ReturnType<typeof createServer>) => Promise<void>,
+  managerOptions: Parameters<typeof makeManager>[1] = {},
 ): Promise<void> {
   const originalDiscordOwnerId = env.discordOwnerId;
   const originalMemoryOwnerId = env.memoryOwnerId;
@@ -115,7 +210,7 @@ async function withServer(
   env.discordOwnerId = OWNER;
   env.memoryOwnerId = OWNER;
   try {
-    const app = createServer(makeManager(db));
+    const app = createServer(makeManager(db, managerOptions));
     await fn(app);
   } finally {
     env.discordOwnerId = originalDiscordOwnerId;
@@ -484,6 +579,218 @@ describe("POST /nuclear/capabilities/evaluation (qualification recording)", () =
         expect(row.state).toBe("observe");
       });
     } finally {
+      db.close();
+    }
+  });
+});
+
+describe("C1 memory-evidence control-plane routes", () => {
+  it("requires the Recall owner boundary on every dedicated route", async () => {
+    const db = makeDb();
+    try {
+      await withServer(db, async (app) => {
+        const deniedStart = await post(app, "/nuclear/capabilities/memory-evidence/qualification-epoch/start", {
+          startRequestKey: "missing-owner",
+          predecessorEpochId: null,
+        });
+        const deniedList = await get(app, "/nuclear/capabilities/memory-evidence/qualification-epochs");
+        const deniedEvaluation = await post(app, "/nuclear/capabilities/memory-evidence/evaluation", {
+          sourceKey: "missing-owner",
+          definitionId: C1_EVALUATION_DEFINITION_ID,
+          definitionVersion: C1_EVALUATION_DEFINITION_VERSION,
+          definitionHash: C1_EVALUATION_DEFINITION_HASH,
+          seeds: [],
+        });
+        const deniedReadiness = await get(app, "/nuclear/capabilities/memory-evidence/readiness");
+        const deniedCutover = await post(app, "/nuclear/capabilities/memory-evidence/cutover", {
+          epochId: "missing-owner",
+        });
+        expect([
+          deniedStart.status,
+          deniedList.status,
+          deniedEvaluation.status,
+          deniedReadiness.status,
+          deniedCutover.status,
+        ]).toEqual([403, 403, 403, 403, 403]);
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("returns dedicated epoch/evaluation/readiness schemas and rejects generic C1 evaluation", async () => {
+    const db = makeDb();
+    try {
+      qualify(db, "recall");
+      expect(promoteCapability(db, "recall", {
+        releaseId: currentContractId(),
+        authorizedBy: OWNER,
+      })).toMatchObject({ ok: true, state: "active" });
+      expect(recordRecallLiveCutover(db, OWNER, {
+        authorizedBy: OWNER,
+        masterMode: "observe",
+      })).toMatchObject({ success: true });
+      await withServer(db, async (app) => {
+        const generic = await post(app, "/nuclear/capabilities/evaluation", {
+          userId: OWNER,
+          capability: "memory_evidence",
+          seeds: 6,
+          passed: true,
+          sourceKey: "generic-c1-evaluation",
+        });
+        expect(generic.status).toBe(400);
+        expect(generic.body).toMatchObject({
+          ok: false,
+          reason: "memory_evidence_requires_bound_evaluation",
+        });
+
+        const started = await post(app, "/nuclear/capabilities/memory-evidence/qualification-epoch/start", {
+          userId: OWNER,
+          startRequestKey: "endpoint-c1-start",
+          predecessorEpochId: null,
+        });
+        expect(started.status).toBe(200);
+        expect(started.body).toMatchObject({
+          ok: true,
+          created: true,
+          currentQualificationEpoch: {
+            ownerId: OWNER,
+          },
+          qualificationEpochs: expect.any(Array),
+        });
+        const epochId = (started.body as { epochId?: string }).epochId;
+        expect(typeof epochId).toBe("string");
+
+        const listed = await get(app, `/nuclear/capabilities/memory-evidence/qualification-epochs?userId=${encodeURIComponent(OWNER)}`);
+        expect(listed.status).toBe(200);
+        expect(listed.body).toMatchObject({
+          current: { epochId },
+          epochs: expect.arrayContaining([expect.objectContaining({ epochId })]),
+        });
+
+        const evaluation = await post(app, "/nuclear/capabilities/memory-evidence/evaluation", {
+          userId: OWNER,
+          sourceKey: `c1-eval:v1:${C1_EVALUATION_DEFINITION_HASH}:endpoint-route-run`,
+          definitionId: C1_EVALUATION_DEFINITION_ID,
+          definitionVersion: C1_EVALUATION_DEFINITION_VERSION,
+          definitionHash: C1_EVALUATION_DEFINITION_HASH,
+          seeds: C1_REQUIRED_EVAL_SEEDS.map((id) => ({ id, passed: true })),
+        });
+        expect(evaluation.status).toBe(200);
+        expect(evaluation.body).toMatchObject({
+          recorded: true,
+          currentQualificationEpoch: { epochId },
+          readiness: { epochId },
+        });
+
+        const readiness = await get(app, `/nuclear/capabilities/memory-evidence/readiness?userId=${encodeURIComponent(OWNER)}`);
+        expect(readiness.status).toBe(200);
+        expect(readiness.body).toMatchObject({
+          eligible: false,
+          epochId,
+          blockerCodes: expect.arrayContaining([
+            "memory_evidence_not_active",
+            "live_shadow_count_insufficient",
+          ]),
+          qualification: { epochId },
+        });
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("requires trusted paused/quiescent state and ignores client quiescence fields", async () => {
+    const db = makeDb();
+    const originalMode = env.cognitionMode;
+    env.cognitionMode = "observe";
+    try {
+      const epochId = prepareC1Epoch(db, "endpoint-cutover-start");
+      seedC1Evidence(db, epochId);
+      expect(promoteCapability(db, "memory_evidence", {
+        releaseId: currentContractId(),
+        authorizedBy: OWNER,
+      })).toMatchObject({ ok: true, state: "active" });
+
+      await withServer(db, async (app) => {
+        const untrustedClientFlags = await post(app, "/nuclear/capabilities/memory-evidence/cutover", {
+          userId: OWNER,
+          epochId,
+          paused: true,
+          quiesced: true,
+        });
+        expect(untrustedClientFlags.status).toBe(200);
+        expect(untrustedClientFlags.body).toMatchObject({
+          ok: false,
+          reason: "expression_plane_not_paused",
+        });
+        expect(db.prepare(
+          "SELECT currentness_authority FROM memory_contract_state WHERE id = 1",
+        ).get()).toMatchObject({ currentness_authority: "mem_facts" });
+
+        const paused = await post(app, "/initiative/tick", { userId: OWNER });
+        expect(paused.status).toBe(200);
+      }, { state: "ready", expressionQuiesced: true });
+
+      const tick = vi.fn(async () => ({ shouldSend: true }));
+      await withServer(db, async (app) => {
+        const paused = await post(app, "/initiative/tick", { userId: OWNER });
+        expect(paused.status).toBe(503);
+        expect(paused.body).toMatchObject({ code: "agent_not_ready" });
+        expect(tick).not.toHaveBeenCalled();
+      }, { state: "paused", expressionQuiesced: true, tick });
+    } finally {
+      env.cognitionMode = originalMode;
+      db.close();
+    }
+  });
+
+  it("cuts over only after exact qualification and returns an idempotent sticky result", async () => {
+    const db = makeDb();
+    const originalMode = env.cognitionMode;
+    env.cognitionMode = "observe";
+    try {
+      const epochId = prepareC1Epoch(db, "endpoint-cutover-success");
+      seedC1Evidence(db, epochId);
+      expect(promoteCapability(db, "memory_evidence", {
+        releaseId: currentContractId(),
+        authorizedBy: OWNER,
+      })).toMatchObject({ ok: true, state: "active" });
+
+      await withServer(db, async (app) => {
+        const first = await post(app, "/nuclear/capabilities/memory-evidence/cutover", {
+          userId: OWNER,
+          epochId,
+        });
+        expect(first.status).toBe(200);
+        expect(first.body).toMatchObject({
+          ok: true,
+          alreadyCutOver: false,
+          epochId,
+          markerBefore: { currentnessAuthority: "mem_facts" },
+          markerAfter: { currentnessAuthority: "memory_assertions" },
+          consistencyBefore: { ok: true },
+          consistencyAfter: { ok: true },
+          stickyRollbackDiagnostics: {
+            reverseCutoverAvailable: false,
+            barriersRemainEnforced: true,
+          },
+        });
+
+        const retry = await post(app, "/nuclear/capabilities/memory-evidence/cutover", {
+          userId: OWNER,
+          epochId,
+        });
+        expect(retry.status).toBe(200);
+        expect(retry.body).toMatchObject({
+          ok: true,
+          alreadyCutOver: true,
+          markerBefore: { currentnessAuthority: "memory_assertions" },
+          markerAfter: { currentnessAuthority: "memory_assertions" },
+        });
+      }, { state: "paused", expressionQuiesced: true });
+    } finally {
+      env.cognitionMode = originalMode;
       db.close();
     }
   });
