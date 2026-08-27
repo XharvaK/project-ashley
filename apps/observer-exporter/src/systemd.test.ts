@@ -31,6 +31,25 @@ describe("disabled deployment candidates", () => {
     );
   });
 
+  it("enforces the approved OS custody boundary", () => {
+    const service = readFileSync(
+      join(repoRoot, "deploy/linux-mint/systemd/ashley-observer-export.service"),
+      "utf8",
+    );
+    for (const directive of [
+      "NoNewPrivileges=yes",
+      "PrivateNetwork=yes",
+      "PrivateTmp=yes",
+      "ProtectSystem=strict",
+      "ReadOnlyPaths=%h/.composer-assistant",
+      "ReadOnlyPaths=%h/project-ashley",
+      "ReadOnlyPaths=%h/ashley-observer-tools",
+      "ReadWritePaths=%h/.ashley-field-observer-bundles",
+    ]) {
+      expect(service).toContain(directive);
+    }
+  });
+
   it("uses the explicit Istanbul calendar expression without a Timezone directive", () => {
     const timer = readFileSync(
       join(repoRoot, "deploy/linux-mint/systemd/ashley-observer-export.timer"),
