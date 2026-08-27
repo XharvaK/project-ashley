@@ -2,12 +2,12 @@
 
 **Status:** `CURRENT PHASE CONTRACT`
 
-**Delivery status:** `ARCHITECTURALLY DEFINED BUT DEFERRED` · `RESEARCH NEEDED`
-· `NOT CURRENT DELIVERY WORK`
+Implementation, deployment, and promotion are living facts, not this contract.
+Resolve them from Canonical Architecture Roadmap §3 and exact-candidate
+evidence. This document does not authorize activation, promotion, or live
+influence.
 
-**Scope:** Accepted architecture contract for a planned phase. This document does
-not claim implementation, source qualification, activation, deployment, or
-production acceptance.
+**Scope:** Accepted architecture contract for the named C4 phase.
 
 **Authority chain:** VISION.md -> Core Principles -> Constitution -> Stewardship
 Compact and Ethics -> Ashley Hierarchy -> this phase contract.
@@ -23,7 +23,8 @@ not proof of graduated cognition.
 
 The accepted target below matures epistemic state, goals, salience, concerns,
 opinions, and evidence-bound lived-experience continuity under their existing
-owners. Completing Sandbox or Model Fabric does not unlock this phase. See
+owners. Completing Sandbox or Model Fabric does not promote C4 or grant live
+cognitive influence. See
 [Architecture Freeze](Ashley_Architecture_Freeze.md).
 
 ## 1. Purpose

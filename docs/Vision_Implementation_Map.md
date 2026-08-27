@@ -4,6 +4,12 @@ This document connects [`VISION.md`](../VISION.md) to the systems that must
 protect it. It is a living engineering map, not a substitute for the Vision and
 not a runtime prompt.
 
+**Document class:** `SUPPORTING` living traceability. Maturity cells in the
+table below go stale. Resolve current qualification, deployment, and promotion
+from Git, source, exact-candidate packets, or production observation. This map
+does not outrank the Canonical Architecture Roadmap or the Architecture
+Document Index.
+
 ## Authority and amendment
 
 The normative chain is:
@@ -59,7 +65,7 @@ remain human-controlled.
 | Forgetting + same-lineage tombstone replay | Continuity sidecar + nuclear v13 (Wave 04 local) | `preview_id` targets; pending tombstone before cascade; entity_uuid; honesty about Discord/provider/old backups | Integer-PK tombstone after restore; silent non-local erasure claims | **local implementation present; not release-qualified** |
 | Dual-DB backup verification | Continuity backup package (Wave 04 local) | VACUUM snapshots; nuclear-then-continuity order; AES-GCM package; current sidecar precedence | Naive WAL/SHM copy as supported path; silent sidecar replacement | **local implementation present; not release-qualified** |
 | Untrusted external entities (`ETH-EXT-*`) | Curiosity, Thought, Agency (planned) | Provenance-bearing notes; no permission/tool/identity mutation from external text | External text grants permission, commands tools, or alters policy | documented; enforcement planned |
-| Current private engineering workshop (`ETH-EXT-06`, Private Mint agency) | Sandbox V2 M-series | Direct unprivileged Bubblewrap; capability ceiling; immutable inputs; private candidate state; receipts; explicit authority progression; conservative borders | V1 broker revival; writable live source; inferred authority; outcome retry after ambiguity | **M1-M3 source present; M4 BLOCKED pending exact-candidate M3 acceptance** — see [`architecture/sandbox/ASHLEY_SANDBOX_V2_ROADMAP.md`](architecture/sandbox/ASHLEY_SANDBOX_V2_ROADMAP.md) |
+| Current private engineering workshop (`ETH-EXT-06`, Private Mint agency) | Sandbox V2 M-series | Direct unprivileged Bubblewrap; capability ceiling; immutable inputs; private candidate state; receipts; explicit authority progression; conservative borders | V1 broker revival; writable live source; inferred authority; outcome retry after ambiguity | **M1–M7 production accepted** at `48bad019fe601d5c871a54dd9902879862c6e96a`; M7 limited to named `patch_export`. Not live apply, Git, self-change, or Computer Use — see [`architecture/sandbox/ASHLEY_SANDBOX_V2_ROADMAP.md`](architecture/sandbox/ASHLEY_SANDBOX_V2_ROADMAP.md) |
 | Historical OS-boundary sandbox broker | Sandbox V1 Wave 07/07c | Dedicated `ashley-sandbox` UID; signed owner envelopes; continuity tombstones; Unix socket IPC; durable broker state; SO_PEERCRED gate | Treating retained V1 source or acceptance as current V2 topology or evidence | **HISTORICAL V1 — Wave_accepted only; topology superseded for V2** — see [`Sandbox_Design.md`](Sandbox_Design.md) and [`handoffs/wave-07c-gate-packet.md`](handoffs/wave-07c-gate-packet.md) |
 | Historical self-inspection and change proposals | Self-Modification V1 Wave 08 | Change-set provenance, stale-base handling, secret exclusion, receipts, consultation, approval-is-not-effect | Reusing V1 broker `source_*` topology; proposal → live mutation; inferred approval | **HISTORICAL V1 / SEMANTIC SALVAGE** — selected semantics inform V2 M5/M7; Wave acceptance does not qualify V2 |
 | No relationship scalars (`ETH-REL-*`) | Mind State v14 relationship tables (Wave 05 local) | Six explicit record types; observe/apply gates; coercion gate always on; no auto-sent reminders | Relationship reduced to scalar scores | **local implementation present; not release-qualified** |
@@ -99,12 +105,11 @@ must remain labeled as planned until its evidence and release gates exist.
 ### Current Sandbox V2 M-series
 
 The [Sandbox V2 M-Series Roadmap](architecture/sandbox/ASHLEY_SANDBOX_V2_ROADMAP.md)
-governs the current Sandbox program. M0 preserves physical proof. M1 ACT, M2
-PERCEIVE, and M3 EXPERIMENT exist in current source. M4 VERIFY is blocked until
-M3 is accepted for the exact candidate under the expanded acceptance ladder.
-M5 AUTHOR, M6 OPERATE, and M7 PROMOTE are design boundaries only. No later
-milestone, Git effect, package effect, publish, deploy, restart, or production
-authority is implied.
+governs the current Sandbox program. M0–M7 exist as architecture. Exact-candidate
+evidence production-accepted M1–M7 at `48bad019fe601d5c871a54dd9902879862c6e96a`,
+with M7 limited to named `patch_export`. Live apply, Git effect, package
+effect, publish, deploy, restart, self-change, and unbounded production
+authority are not implied.
 
 ### Legacy local waves 00–05
 

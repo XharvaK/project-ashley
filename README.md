@@ -137,6 +137,7 @@ established from permitted evidence: `UNKNOWN`.
 | Identity and Mind State | Implemented |
 | Thought and cognitive processing | Implemented |
 | Grounded Recall | Implemented; qualification remains a separate claim |
+| Cognitive maturation C1–C5 | Implemented in source; production deployed and accepted in `observe` / unpromoted / non-live. Evidence: [`docs/handoffs/COGNITIVE_MATURATION_C1_C5_PRODUCTION_ACCEPTANCE.md`](docs/handoffs/COGNITIVE_MATURATION_C1_C5_PRODUCTION_ACCEPTANCE.md). Deployed is not promoted. |
 | Multi-provider model routing | Implemented as Thought, Expression, and utility/bulk routes plus a routing registry. Concrete bindings: routing source and audited [`docs/Routing_Status.md`](docs/Routing_Status.md) |
 | Sandbox Autonomy | Architecture: Sandbox V2 M0–M7. Current qualification, deployment, and promotion: resolve live; `UNKNOWN` unless permitted evidence exists |
 | Agent Plugins interoperability | Parser contract tested; runtime not integrated |
@@ -214,14 +215,15 @@ is organized. Do not skip Constitution, Stewardship Compact, or Ethics.
 The roadmap is multi-track, not one linear ladder. From current live state,
 engineering work is grouped as mechanism, cognitive maturation, governance
 specification, and deferred capability. Owner-selected delivery after the
-current Sandbox gate is Model Fabric — mechanism work, not cognitive
+closed Sandbox gate is Model Fabric — mechanism work, not cognitive
 advancement. Architecture-justified substance before advanced autonomy is
 Memory / Evidence maturation, self-change specification (not a kernel; M5
 authorship stays unblocked), Context Budget, Operational Continuity, then
 Event Spine design later if reconstruction needs a join. Do not invent an
-Event Spine phase. Learned Autonomy and the graduations stay later named
-phases. Computer Use, voice, broad tools, and self-modification execution
-remain deferred. Milestones live in
+Event Spine phase. Learned Autonomy and the graduations remain named architectural phases.
+Their C1–C5 source is production-deployed in observe: implemented, accepted,
+and deployed, but unpromoted and non-live. Computer Use, voice, broad tools,
+and self-modification execution remain deferred. Milestones live in
 [`docs/architecture/Ashley_Architecture_Roadmap.md`](docs/architecture/Ashley_Architecture_Roadmap.md)
 §5. Execution contracts live in
 [`docs/architecture/Ashley_Milestone_Execution_Governance.md`](docs/architecture/Ashley_Milestone_Execution_Governance.md).
@@ -246,7 +248,8 @@ Production Discord runs on Linux Mint. Windows is for development. See
 Commands below are from the repository root `package.json`.
 
 ```powershell
-cd C:\Users\Xharv\Projects\composer-assistant
+# From the repository root. Env file: ~/.composer-assistant/.env
+# See config/env.example. Commands come from this repository's package.json.
 
 npm run start:ashley   # SSH to Mint: checkout + coherent stop/build/start
 npm run stop:ashley    # stop accidental Windows pids only

@@ -2,12 +2,12 @@
 
 **Status:** `CURRENT PHASE CONTRACT`
 
-**Delivery status:** `ARCHITECTURALLY DEFINED BUT DEFERRED` · `RESEARCH NEEDED`
-· `NOT CURRENT DELIVERY WORK`
+Implementation, deployment, and promotion are living facts, not this contract.
+Resolve them from Canonical Architecture Roadmap §3 and exact-candidate
+evidence. This document does not authorize activation, promotion, or live
+influence.
 
-**Scope:** Accepted architecture contract for a planned phase. This document does
-not claim implementation, source qualification, activation, deployment, or
-production acceptance.
+**Scope:** Accepted architecture contract for the named C3 phase.
 
 **Authority chain:** VISION.md -> Core Principles -> Constitution -> Stewardship
 Compact and Ethics -> Ashley Hierarchy -> this phase contract.
@@ -21,9 +21,8 @@ capability gates, provenance classes, Reflection, Agency motivations, Mind
 State, and persistent cognitive records. Those mechanisms are current source,
 not proof that Learned Autonomy is complete.
 
-The accepted contract below defines the target phase. Runtime behavior remains
-unchanged until separately implemented, qualified, activated, and promoted.
-Completing Sandbox or Model Fabric does not unlock this phase. See
+The accepted contract below defines the named phase. Completing Sandbox or
+Model Fabric does not unlock live Learned Autonomy. See
 [Architecture Freeze](Ashley_Architecture_Freeze.md).
 
 ## 1. Purpose

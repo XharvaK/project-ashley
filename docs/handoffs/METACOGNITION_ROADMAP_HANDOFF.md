@@ -50,6 +50,10 @@ MF-M1 current integration baseline is `e36613b...`; the local candidate is
 historical provenance. Roadmap §5.6 may still label Sandbox `CURRENT WORK`;
 live delivery is §3 + Fabric, with acceptance and promotion still separate.
 
+> **Later currentness (2026-08-27, not this handoff's law):** Roadmap §5.6 was
+> later repaired. Sandbox is a closed dated gate. C1–C5 are production-accepted
+> in observe / unpromoted / non-live. This file remains a Pass-3 record.
+
 **Architecture-justified before advanced autonomy:**
 
 1. Memory / Evidence maturation

@@ -1,5 +1,11 @@
 # Cognitive Maturation C1–C5 — Final Local Settlement
 
+> **Later evidence:** Production deployment and acceptance of reconciled
+> candidate `09b73fbb180234a2ac7056756fc339083735f40e` is recorded in
+> [`COGNITIVE_MATURATION_C1_C5_PRODUCTION_ACCEPTANCE.md`](COGNITIVE_MATURATION_C1_C5_PRODUCTION_ACCEPTANCE.md).
+> This file remains the local-settlement record. It does not supersede that
+> later production evidence.
+
 Date: 2026-08-27
 
 ## Final status

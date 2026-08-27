@@ -98,7 +98,12 @@ the following:
 
 ## Lineage and custody
 
-Enforcement of these clauses is planned; the doctrine is normative now.
+The doctrine is normative now. Enforcement status does not weaken it.
+[`Vision_Implementation_Map.md`](Vision_Implementation_Map.md) records
+implementation evidence separately: `SC-LIN-01`–`05` have local
+implementation that is not release-qualified; `SC-LIN-06`–`08` were
+`Wave_accepted` on a fake adapter and are not release-qualified. Remaining
+runtime enforcement remains planned.
 
 - `SC-LIN-01` An isolated evaluation fork is a non-authoritative simulation.
 - `SC-LIN-02` An isolated evaluation fork has no outbound authority.

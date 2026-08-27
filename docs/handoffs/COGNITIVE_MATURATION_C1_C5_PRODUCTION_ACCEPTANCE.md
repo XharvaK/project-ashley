@@ -1,5 +1,12 @@
 # Cognitive Maturation C1–C5 — Production Deployment and Acceptance
 
+**Document class:** `EVIDENCE / HANDOFF`
+
+This file records the 2026-08-27 production deployment and bounded acceptance
+of C1–C5 at exact SHA `09b73fbb180234a2ac7056756fc339083735f40e`. It is not
+architecture, not a promotion decision, and not a living dashboard. Do not
+silently rewrite its evidence claims.
+
 Date: 2026-08-27
 
 ## Final status

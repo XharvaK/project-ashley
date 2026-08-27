@@ -3,7 +3,8 @@
 **Status:** `ACCEPTED ARCHITECTURE` for the memory evidence model described
 below. Implementation status varies by area and is marked throughout
 (Section 16 is the phase map). Acceptance of the model does not authorize
-implementation.
+promotion or live influence. Resolve C1 delivery from Canonical Architecture
+Roadmap §3 and exact-candidate evidence.
 
 **Canonicalized:** 2026-08-17
 

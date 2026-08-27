@@ -17,10 +17,12 @@ Do not infer an audit SHA from git history alone.
 
 | | |
 |---|---|
-| Document reviewed at repository revision | `b9f4ed1015ada9cd56f0f2b2d4046ed6a9a49095` |
-| Route-table audit baseline | `b9f4ed1015ada9cd56f0f2b2d4046ed6a9a49095` |
-| Audit method | Read-only comparison of the Wave 1 table below to `config/model-fabric/portfolios/current-compatibility.v1.json`, `portfolio.ts`, `router.ts`, `registry.ts`, provider adapters, and the focused MF-M1/MF-M2 routing regressions |
-| Last route-table audit | 2026-08-25 MF-M2 candidate audit; current occupants, buckets, enablement, and compatibility scars remain unchanged |
+| Document reviewed at repository revision | `c84c651492a31e8f7543748a172d840b8e544bbd` (docs baseline; functional production SHA `09b73fbb180234a2ac7056756fc339083735f40e`) |
+| Route-table occupant audit baseline | `b9f4ed1015ada9cd56f0f2b2d4046ed6a9a49095` |
+| Occupant-table compatibility check | 2026-08-27 read-only diff of CURRENT occupants against production `09b73fbb…` / docs `c84c651…`. Occupants, providers, models, buckets, enablement, and the `thought_observation` dispatch scar are unchanged. Thought `maxOutputTokens` 1000→2048 and Expression `maxOutputTokens` null→2048 since the occupant audit; those ceilings are already recorded below as caller-owned, not an occupant change. |
+| Audit method | Original occupant audit: read-only comparison of the Wave 1 table below to `config/model-fabric/portfolios/current-compatibility.v1.json`, `portfolio.ts`, `router.ts`, `registry.ts`, provider adapters, and the focused MF-M1/MF-M2 routing regressions. Later check: occupant rows only; not a new full route-table audit. |
+| Last route-table audit | 2026-08-25 MF-M2 candidate audit at `b9f4ed10…`; current occupants, buckets, enablement, and compatibility scars remain unchanged |
+| Currentness | Living status. Compatible with production `09b73fbb…`. Not constitutional law. |
 | Stale when | the CURRENT portfolio, resolver, route-dispatch behavior, or provider bindings change and a new audit has not been performed |
 
 Current route facts are now consumed from one validated CURRENT snapshot:

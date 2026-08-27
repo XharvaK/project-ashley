@@ -1,22 +1,32 @@
 # Self-Modification Design — Change Proposals and Isolated Source Workflow
 
-> **SALVAGEABLE SEMANTICS / SUPERSEDED MECHANISM.** The change-set semantics in
-> this historical design remain reference input for Sandbox V2 M5/M7 and
-> Self-Change Governance: target classification, exact base identity,
-> stale-base handling, source cleanliness, secret exclusion, system-derived
-> receipts, immutable audit history, advisory artifacts, separate Ashley and
-> Doc positions, and approval-is-not-effect. Its Wave 07 broker topology,
-> signed `source_*` scopes, broker workspace layout, broker-owned execution
-> path, self-improvement clone, and candidate-Git workflow are not current
-> Sandbox V2 mechanisms. Use
-> [`architecture/sandbox/ASHLEY_SANDBOX_V2_ROADMAP.md`](architecture/sandbox/ASHLEY_SANDBOX_V2_ROADMAP.md)
-> before applying any contract from this file. Self-change composition (organic
-> learning ≠ runtime/source change ≠ foundational identity/governance change;
-> M5/M7 ≠ authority to change Ashley) is owned by
-> [`architecture/Ashley_Cross_Phase_Architecture.md`](architecture/Ashley_Cross_Phase_Architecture.md).
+**Document class:** `HISTORICAL / SUPERSEDED MECHANISM` (salvageable semantics)
+
+> **NOT CURRENT EXECUTABLE ARCHITECTURE.**
+>
+> Do not implement from this file. The Wave 07 broker workflow, Sandbox V1
+> topology, signed `source_*` scopes, broker workspace layout, broker-owned
+> execution path, self-improvement clone, and candidate-Git workflow are
+> superseded. Imperative steps, schemas, gates, and interface contracts below
+> are historical reconstruction of the Wave 08 design. They are not a current
+> implementation contract.
+>
+> **Current mechanism:** Sandbox V2 M5/M7 in
+> [`architecture/sandbox/ASHLEY_SANDBOX_V2_ROADMAP.md`](architecture/sandbox/ASHLEY_SANDBOX_V2_ROADMAP.md).
+> **Current composition:** Self-Change Governance in
+> [`architecture/Ashley_Cross_Phase_Architecture.md`](architecture/Ashley_Cross_Phase_Architecture.md)
+> §6.1.
+>
+> Salvageable *concepts* remain reference input for V2 M5/M7 and Self-Change
+> Governance: target classification, exact base identity, stale-base handling,
+> source cleanliness, secret exclusion, system-derived receipts, immutable
+> audit history, advisory artifacts, separate Ashley and Doc positions, and
+> approval-is-not-effect. Preserve those as concepts. Do not resurrect Sandbox
+> V1, the old broker topology, or Wave 07 implementation authority.
 
 **Historical status:** Wave 08 design and local implementation provenance. Not
-current Sandbox V2 execution authority and not deployment authority.
+current Sandbox V2 execution authority, not deployment authority, and not an
+executable runbook.
 
 ## Current Self-Change Governance disposition
 
@@ -50,16 +60,16 @@ meaning changes, exact-candidate qualification, independent review, and
 separate explicit promotion. No self-change may silently merge the organic,
 foundational, and engineering paths.
 
-This document specifies how Ashley inspects herself, works on isolated source copies,
-runs bounded verification through the Wave 07 broker, and presents change proposals
-in conversation — without live mutation, commit, deployment, or hidden self-revision
-authority. It derives from
-[`WAVE-08-SELF-MODIFICATION.md`](https://github.com/XharvaK/composer-assistant)
-(prompt), [`Ashley_Stewardship_Compact.md`](Ashley_Stewardship_Compact.md)
-(`SC-CON-*`, `SC-REC-*`), and [`Sandbox_Design.md`](Sandbox_Design.md). It does not
-invent authority beyond the signed Wave 07 contract.
+The remainder of this file reconstructs the superseded Wave 08 design: how
+that design intended Ashley to inspect herself, work on isolated source
+copies, run bounded verification through the Wave 07 broker, and present
+change proposals without live mutation. It derives from the historical
+`WAVE-08-SELF-MODIFICATION.md` prompt,
+[`Ashley_Stewardship_Compact.md`](Ashley_Stewardship_Compact.md)
+(`SC-CON-*`, `SC-REC-*`), and [`Sandbox_Design.md`](Sandbox_Design.md).
+Treat every imperative sentence from this point as historical reconstruction.
 
-## Authority chain
+## Historical authority chain (Wave 08)
 
 ```text
 VISION.md
@@ -71,9 +81,12 @@ VISION.md
             → Self-Modification Design (this document)
 ```
 
-## Scope and gates
+## Historical scope and gates (Wave 08 reconstruction)
 
-**In scope (this document):** change-proposal records, immutable audit events,
+These gates and in-scope lists describe the Wave 08 design surface. They are
+not current V2 implementation instructions.
+
+**Historically in scope:** change-proposal records, immutable audit events,
 consultation routing, source isolation workflow, broker interface consumption,
 review surfaces, provenance/retention/forget, explicit deferrals.
 

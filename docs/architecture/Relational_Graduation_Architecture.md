@@ -2,12 +2,12 @@
 
 **Status:** `CURRENT PHASE CONTRACT`
 
-**Delivery status:** `ARCHITECTURALLY DEFINED BUT DEFERRED` · `RESEARCH NEEDED`
-· `NOT CURRENT DELIVERY WORK`
+Implementation, deployment, and promotion are living facts, not this contract.
+Resolve them from Canonical Architecture Roadmap §3 and exact-candidate
+evidence. This document does not authorize activation, promotion, or live
+influence.
 
-**Scope:** Accepted architecture contract for a planned phase. This document does
-not claim implementation, source qualification, activation, deployment, or
-production acceptance.
+**Scope:** Accepted architecture contract for the named C5 phase.
 
 **Authority chain:** VISION.md -> Core Principles -> Constitution -> Stewardship
 Compact and Ethics -> Ashley Hierarchy -> this phase contract.
