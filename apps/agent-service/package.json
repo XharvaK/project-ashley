@@ -25,6 +25,8 @@
 
   "dependencies": {
 
+    "@composer-assistant/privacy-core": "file:../../packages/privacy-core",
+
     "@composer-assistant/sandbox-broker": "file:../sandbox-broker",
 
     "@composer-assistant/sandbox-m1": "file:../sandbox-m1",
