@@ -8,8 +8,8 @@ describe("C3 additive schema", () => {
   it("creates typed influence, evidence, receipt, and seed-lineage tables", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     try {
-      expect(NUCLEAR_SUPPORTED_VERSION).toBe(39);
-      expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: 39 });
+      expect(NUCLEAR_SUPPORTED_VERSION).toBe(40);
+      expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: 40 });
       for (const table of C3_TABLES) {
         expect(db.prepare(
           "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
@@ -38,12 +38,12 @@ describe("C3 additive schema", () => {
     }
   });
 
-  it("rejects a C4 object when a v38 reader validates newer content", () => {
+  it("rejects a C5 object when a v39 reader validates newer content", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     try {
-      db.exec("PRAGMA user_version = 38");
-      expect(() => validateNuclearSchemaContent(db, 38, { rejectNewerContent: true }))
-        .toThrow(/unexpected_v39/);
+      db.exec("PRAGMA user_version = 39");
+      expect(() => validateNuclearSchemaContent(db, 39, { rejectNewerContent: true }))
+        .toThrow(/unexpected_v40/);
     } finally {
       db.close();
     }

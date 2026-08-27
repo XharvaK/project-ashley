@@ -7,17 +7,21 @@ Date: 2026-08-26
 `C3 LOCAL_SETTLED: YES`
 
 C3 is implemented on the committed C2 baseline
-`6f83395fcf859274abfc1e4e92071eb3ddfe5f33`.
+`56d28258c7c1b066ee0059f5a88048fdf5a415cb`, on the current-production
+line rooted at `968787d1a5261aef4bf266091b8cf044eddbfdb2`.
+
+`IMPLEMENTATION_HEAD: 5f65bec1a977a35d8a62d3a05b5713de6d79aba8`
 
 The `learned_autonomy` capability remains `observe`. Dark apply is a fixture
 only path. No live promotion, activation, or provider execution is included.
 
 ## Implementation scope
 
-- Added additive nuclear schema v37 for learned influences, attributed C1
+- Added additive nuclear schema v38 for learned influences, attributed C1
   evidence, typed choice receipts, and explicit Identity seed lineage.
-- Added fail-closed C3 contract compatibility and v36 reader rejection of v37
-  content.
+- Added fail-closed C3 contract compatibility and v37 reader rejection of v38
+  content. The historical `migration-37.ts` filename is retained, but its
+  logical target is v38 on the current-production line.
 - Added first-wave `interest` admission with two temporally distinct C1-live
   evidence references, typed validation, explicit Thought or natural-owner
   adjudication, and no model-only admission.
@@ -34,7 +38,8 @@ only path. No live promotion, activation, or provider execution is included.
 
 ## Schema and migration
 
-- Nuclear schema progression: v35 (C1) → v36 (C2) → v37 (C3).
+- Nuclear schema progression: v35 (current production) → v36 (C1) → v37
+  (C2) → v38 (C3).
 - C3 contract version is `1` and its durable state defaults to `observe` with
   no live authority high-water mark.
 - The existing maturation-state table retains the C2
@@ -114,6 +119,10 @@ npm test --prefix apps/agent-service -- src/core/learned-autonomy/learned-gap.te
 ```
 
 Result: `11` test files passed, `21` tests passed.
+
+After current-production reconciliation and schema renumbering, the exact C3
+pack passed `11` files and `24` tests. The consolidated cognitive pack passed
+`54` files and `150` tests.
 
 Additional verification:
 

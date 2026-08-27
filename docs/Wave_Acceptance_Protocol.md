@@ -91,6 +91,23 @@ candidate is frozen. This batches qualification. It does not skip physical
 criteria, promote a capability, or confer `PRODUCTION ACCEPTED` by
 inheritance. See roadmap §17.2.1. The ladder stages above remain distinct.
 
+### Exact-candidate production ancestry precheck
+
+Before `CANDIDATE FREEZE`, and again before `PHYSICAL QUALIFICATION`, the
+candidate packet MUST record the current production SHA and the candidate SHA,
+then prove that the current production SHA is an ancestor of the candidate:
+
+```text
+git merge-base --is-ancestor CURRENT_PRODUCTION_SHA CANDIDATE_SHA
+```
+
+A failed ancestry check makes the candidate ineligible for physical or
+production qualification under the current production line. The packet MUST
+classify the candidate as a reconciliation or alternate-line candidate and
+identify the owner-reviewed release topology required before qualification can
+resume. Evidence for an older or non-ancestor SHA MUST NOT transfer to the
+candidate by resemblance, shared history, or local test equivalence.
+
 ---
 
 ## Verification lifecycle

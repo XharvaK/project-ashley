@@ -7,7 +7,10 @@ Date: 2026-08-26
 `C2 LOCAL_SETTLED: YES`
 
 C2 is implemented on the committed C1 baseline
-`378e14b2a7dc1b61f0313e0729b2ac45dda666d6`.
+`e71e1342551556212601db463f020e4d8642e163`, which is based directly on
+current production `968787d1a5261aef4bf266091b8cf044eddbfdb2`.
+
+`IMPLEMENTATION_HEAD: 56d28258c7c1b066ee0059f5a88048fdf5a415cb`
 
 The C2 capability remains `observe`. Dark-apply is a local test and inspection
 path only. It does not grant live influence, route authority, promotion, or
@@ -15,9 +18,11 @@ activation.
 
 ## Implementation scope
 
-- Added additive nuclear schema v36 for versioned context-budget policies,
+- Added additive nuclear schema v37 for versioned context-budget policies,
   allocation receipts, summary projections, and maturation contract state.
-- Added fail-closed v35/v36 schema validation and migration wiring.
+- Added fail-closed v36/v37 schema validation and migration wiring. The
+  historical `migration-36.ts` filename is retained, but its logical target
+  is v37 on the current-production line.
 - Added C2 eligibility from C1 currentness, provenance, privacy classification,
   retrieval eligibility, correction barriers, and canonical route bindings.
 - Added UTF-8-byte budget planning with separate token estimation, required
@@ -38,10 +43,11 @@ projection layer and does not become Recall or Memory authority.
 
 ## Schema and migration
 
-- Nuclear schema progression: v35 (C1 baseline) → v36 (C2).
+- Nuclear schema progression: v35 (current production) → v36 (C1) → v37
+  (C2).
 - C2 contract state is versioned at contract version `1` and defaults to
   `observe` with no live high-water mark.
-- C2 schema validation rejects newer v36 objects while validating a v35
+- C2 schema validation rejects newer v37 objects while validating a v36
   database and fails closed for unsupported newer schema versions.
 
 ## Exact implementation files
@@ -116,6 +122,10 @@ npm test --prefix apps/agent-service -- src/core/context-budget/context-budget-g
 ```
 
 Result: `11` test files passed, `30` tests passed.
+
+Current-production reconciliation verification also passed for the combined
+C1/C2-focused pack: `27` test files, `91` tests. The consolidated cognitive
+pack passed `54` files and `150` tests.
 
 Additional verification:
 

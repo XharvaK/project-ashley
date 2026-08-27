@@ -7,7 +7,11 @@ Date: 2026-08-27
 `C4 LOCAL_SETTLED: YES`
 
 C4 is implemented on the committed C3 baseline
-`cb6b454a01988afea7678393f3c328bfeb9d2b3f`.
+`5f65bec1a977a35d8a62d3a05b5713de6d79aba8`, on the current-production line
+rooted at `968787d1a5261aef4bf266091b8cf044eddbfdb2`.
+
+`IMPLEMENTATION_HEAD: 2f918bd95feca44538d31c2970e2503f77a94540`
+`RECONCILIATION_REPAIR: d7842efc8cac1cf6054d15454ea7cfce1382d2a6`
 
 The `cognitive_graduation` capability remains `observe`. `dark_apply` is a
 fixture-only local path. No C4 record grants live Thought authority,
@@ -15,11 +19,11 @@ qualification, activation, promotion, or external action authority.
 
 ## Implementation scope
 
-- Added additive nuclear schema v38 for selected consequential predictions,
+- Added additive nuclear schema v39 for selected consequential predictions,
   operational outcome observations, semantic outcome adjudications, C1
   working-view links, receipt-backed lived-experience links, and bounded
   future-Thought calibration adjustments.
-- Added fail-closed C4 contract compatibility, v37-reader rejection of v38
+- Added fail-closed C4 contract compatibility, v38-reader rejection of v39
   objects, append-only observation/adjudication triggers, and an observe-only
   C4 contract-state marker.
 - Added explicit Thought-owned prediction selection. Selection requires two
@@ -54,10 +58,11 @@ qualification, activation, promotion, or external action authority.
 
 ## Schema and migration
 
-- Nuclear schema progression: v35 (C1) → v36 (C2) → v37 (C3) → v38 (C4).
+- Nuclear schema progression: v35 (current production) → v36 (C1) → v37
+  (C2) → v38 (C3) → v39 (C4).
 - C4 contract version is `1`. Its durable marker defaults to `observe` with
   `live_authority_existed = 0`.
-- The C2 and C3 schema characterization fixtures now assert the current v38
+- The C2 and C3 schema characterization fixtures now assert the current v39
   database while retaining their historical contract-specific checks.
 - No historical `decision_log` rows were backfilled into C4 predictions.
 - No C5 tables or shared-culture state were added.
@@ -149,6 +154,11 @@ npm test --prefix apps/agent-service -- src/core/cognitive-graduation/prediction
 ```
 
 Result: `9` test files passed, `27` tests passed.
+
+After current-production reconciliation and schema renumbering, the C4 plus
+compatibility pack passed `13` files and `35` tests. The C3-to-C4 interface
+repair is included in the final candidate. The consolidated cognitive pack
+passed `54` files and `150` tests.
 
 Affected compatibility command:
 

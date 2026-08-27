@@ -7,7 +7,11 @@ Date: 2026-08-27
 `C5 LOCAL_SETTLED: YES`
 
 C5 is implemented on the committed C4 baseline
-`947119d707e650aa10819838d0f6a64b3f3818d9`.
+`2f918bd95feca44538d31c2970e2503f77a94540`, on the current-production line
+rooted at `968787d1a5261aef4bf266091b8cf044eddbfdb2`.
+
+`IMPLEMENTATION_HEAD: 407c3b1b3466ddd58115d6b9ce6cab01dbb607ef`
+`RECONCILIATION_REPAIR: d7842efc8cac1cf6054d15454ea7cfce1382d2a6`
 
 This is a local milestone checkpoint. It is not the C1–C5 program
 completion claim. C5 remains observe/unpromoted; the dark-apply path is a
@@ -61,22 +65,22 @@ promotion, deployment, push, production mutation, or external effects.
 - Added recomputation seams after owner correction, Ashley Identity revision,
   cognition-worker revision application, and relationship redaction.
 - Updated the historical v34 schema characterization to assert the current
-  source-supported v39 database while retaining its durable-cognition column
+  source-supported v40 database while retaining its durable-cognition column
   witness.
 - Aligned the route registry with the already-registered C2/C3/C4 diagnostics
   while adding the C5 admission route.
 
 ## Schema and migration
 
-- Nuclear schema progression: v35 (C1) → v36 (C2) → v37 (C3) → v38 (C4) →
-  v39 (C5).
+- Nuclear schema progression: v35 (current production) → v36 (C1) → v37
+  (C2) → v38 (C3) → v39 (C4) → v40 (C5).
 - Current schema authority is `apps/agent-service/src/core/db.ts`;
-  `NUCLEAR_SUPPORTED_VERSION` is `39` at this implementation head.
+  `NUCLEAR_SUPPORTED_VERSION` is `40` at this implementation head.
 - C5 contract version is `1`. The durable C5 marker starts at `observe` with
   `live_authority_existed = 0`.
-- v39 is additive. It does not backfill historical shared culture, infer
+- v40 is additive. It does not backfill historical shared culture, infer
   consent, create a relationship score, auto-send reminders, or promote C5.
-- v38 readers reject v39 C5 tables, indexes, columns, and the C5 contract
+- v39 readers reject v40 C5 tables, indexes, columns, and the C5 contract
   marker when newer content rejection is requested.
 
 ## Exact implementation files
@@ -185,6 +189,10 @@ npm test --prefix apps/agent-service -- src/core/relationship/graduation-gap.tes
 ```
 
 Result: `18` test files passed, `52` tests passed.
+
+After current-production reconciliation and schema renumbering, the exact C5
+plus compatibility pack passed `22` files and `59` tests. The consolidated
+cognitive pack passed `54` files and `150` tests.
 
 Additional verification:
 
