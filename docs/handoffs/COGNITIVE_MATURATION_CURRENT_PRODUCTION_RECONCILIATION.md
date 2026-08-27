@@ -6,7 +6,12 @@ Date: 2026-08-27
 
 `RECONCILED_ON_CURRENT_PRODUCTION: YES`
 
-`NEW_RECONCILED_CANDIDATE_SHA: PENDING_FINAL_DOCS_COMMIT`
+`NEW_RECONCILED_CANDIDATE_SHA: 09b73fbb180234a2ac7056756fc339083735f40e`
+
+The final handoff binding is a documentation-only descendant of this exact
+candidate. Its exact HEAD is recorded by the final `git rev-parse HEAD` in the
+return; the candidate SHA above remains the implementation candidate under
+review.
 
 The candidate is based directly on current production. The previous cognitive
 candidate remains historical evidence only.

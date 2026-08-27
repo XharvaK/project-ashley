@@ -16,7 +16,7 @@ Date: 2026-08-27
 
 `FINAL_CROSS_MILESTONE_SETTLEMENT: PASS`
 
-`NEW_RECONCILED_CANDIDATE_SHA: PENDING_FINAL_DOCS_COMMIT`
+`NEW_RECONCILED_CANDIDATE_SHA: 09b73fbb180234a2ac7056756fc339083735f40e`
 
 This is a current-production reconciliation candidate. It is ready for
 independent differential review. It is not production-accepted, physically
@@ -36,9 +36,12 @@ qualified, activated, promoted, or deployed.
 | Reconciled C4 | `2f918bd95feca44538d31c2970e2503f77a94540` |
 | Reconciled C5 | `407c3b1b3466ddd58115d6b9ce6cab01dbb607ef` |
 | C3-to-C4 evidence-binding repair | `d7842efc8cac1cf6054d15454ea7cfce1382d2a6` |
-| Final HEAD | `PENDING_FINAL_DOCS_COMMIT` |
+| Final candidate commit | `09b73fbb180234a2ac7056756fc339083735f40e` |
+| Final handoff HEAD | Documentation-only descendant; exact value is recorded by the final `git rev-parse HEAD` in the return |
 
-The final candidate is a descendant of current production. The required
+The final candidate commit is a descendant of current production. The final
+handoff binding is documentation-only and does not change implementation
+source. The required
 ancestry proof is:
 
 ```text
@@ -167,7 +170,8 @@ bounded reruns above exited cleanly.
 - `npm run build --prefix apps/agent-service`: PASS.
 - `git diff --check`: PASS; only expected Windows line-ending warnings were
   emitted.
-- Final worktree: must be clean at the final candidate SHA.
+- Final worktree: clean at the final handoff HEAD, with the implementation
+  candidate commit recorded separately above.
 
 ## Cross-milestone verdict
 
