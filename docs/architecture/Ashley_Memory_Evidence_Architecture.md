@@ -6,7 +6,7 @@ below. Implementation status varies by area and is marked throughout
 promotion or live influence. Resolve C1 delivery from Canonical Architecture
 Roadmap §3 and exact-candidate evidence.
 
-**Canonicalized:** 2026-08-17
+**Canonicalized:** 2026-08-27
 
 **Metacognition (accepted 2026-08-25):** Memory / Evidence policy for
 owner-model correction, influence eligibility, and the C1 witness. Accepted
@@ -423,6 +423,93 @@ authority) is forbidden. See
 
 ---
 
+### 6.1 C1 Qualification, Shadow Evidence, and Currentness Boundary
+
+`ACCEPTED MEMORY/EVIDENCE POLICY`; current candidate, deployment, and lifecycle
+status are resolved from the Canonical Architecture Roadmap and exact-candidate
+evidence.
+
+C1 qualification uses a dedicated owner-bound qualification epoch. Generic
+capability events are not C1 qualification authority. The epoch binds the
+owner, build identity, capability contract, predecessor epoch, deterministic
+evaluation definition, live-shadow evidence, blockers, and release seal.
+
+Recall is a hard predecessor. C1 campaign evidence counts only after Recall is
+active and the owner's Recall live cutoff exists. Recall qualification and C1
+qualification are separate campaigns.
+
+During C1 collection, `mem_facts` remains the live currentness authority. A
+qualifying shadow witness evaluates this read-only counterfactual:
+
+> What would assertions-based C1 policy have done to the exact governed memory
+> material presented to this real Expression attempt?
+
+The witness is bound to:
+
+- a persisted positive Decision;
+- final provider-bound Context and selected-motivation identifiers;
+- an admitted reactive or proactive Expression attempt; and
+- the point immediately before `expressSpeak(...)`.
+
+It is not produced from debug composition, cancelled or terminal paths,
+provider/model output, arbitrary administrative insertion, or a caller-chosen
+witness identity. The live-shadow source key is
+`c1-shadow:v1:decision:<persisted-decision-id>`. The witness is a bounded,
+text-free, provider-independent receipt.
+
+Shadow evaluation MUST NOT alter the Decision, selected motivations, Context,
+provider-bound content, memory rows, user-visible behavior, or provider call
+count. It does not change `currentness_authority`.
+
+The C1 policy preserves these epistemic boundaries:
+
+- Owner self-description outranks an Ashley-derived owner-model interpretation
+  for current influence.
+- Recorded event evidence may contradict either participant's recollection of
+  what was recorded, but proves the recorded event only, not current world
+  truth.
+- Ashley's cognitive history may contradict the owner's recollection of
+  Ashley's historical belief, but proves the historical belief only, not its
+  truth.
+- Model confidence is metadata. It never substitutes for evidence, provenance,
+  an authority interval, or influence eligibility.
+- Disagreement affecting influence is proof-carrying or explicitly uncertain.
+- Corrections preserve source and history, terminate affected current
+  influence, and do not revive superseded or corrected claims.
+
+The dedicated readiness threshold is a rollout contract, not proof that a
+campaign has run. It requires a current owner-bound epoch; exact build and
+capability-contract matches; `memory_evidence` in `observe`; `mem_facts` as
+currentness authority; Recall active with the owner cutoff; all six
+deterministic evaluation seeds passing; at least 25 qualifying real
+live-shadow Decisions spanning at least seven days; at least one reactive and
+one proactive witness; zero blocking witness or integrity events; and
+dependency readiness at promotion time. Synthetic traffic cannot be used only
+to satisfy these thresholds.
+
+Promotion and currentness cutover are different authority operations.
+Promotion changes the C1 capability release from `observe` to `active` and
+atomically seals the exact qualified epoch to that release. Promotion does not
+change currentness. Changing `currentness_authority` from `mem_facts` to
+`memory_assertions` changes real memory-reader semantics even when global
+cognition is `observe`.
+
+Guarded cutover requires global `observe`, a paused AgentManager, a trusted
+host-state proof that the owner Expression plane is quiesced, Recall active
+with its cutoff, an active exact release, an exact sealed epoch, exact build
+and contract identity, `mem_facts` still current, and passing C1 writer and
+consistency checks. It runs only through the existing atomic cutover
+primitive.
+
+Cutover is sticky. Generic capability rollback suppresses capability release
+influence but does not restore `memory_assertions` to `mem_facts`, and no
+reverse cutover exists. Semantic safety filtering, barriers, terminations, and
+corrections remain active independently of capability release state. If the
+post-cutover source is unsafe, pause or observe it and repair forward under a
+new exact source candidate; do not restore legacy currentness.
+
+---
+
 ## 7. Retrieval Architecture
 
 `ACCEPTED ARCHITECTURE`; `FUTURE DESIGN` (main work is Context Budget).
@@ -665,7 +752,7 @@ learning attributable and revisable.
 | Worker-result provenance / WorkerRunJournal | Model Fabric, only if naturally required | `FUTURE DESIGN` |
 | Canonical-vs-derived state law; projector checkpoints; derived-state recovery; degraded-index behavior; freshness/staleness; writer ownership; rebuild semantics | Operational Continuity | `FUTURE DESIGN` |
 | Provenance and evidence laws for experience -> procedure | Procedural Skill Graduation | `FUTURE DESIGN` |
-| Temporal Memory Assertions; evidence references; epistemic status; contradiction; supersession; consolidation and adjudication; confidence; revision; dependent forgetting. Owner-model temporal validity; correction classes; influence eligibility; first metacognitive owner-correction witness. Shared-interest and shared-culture recompute are later-consumer compatibility, not C1 closure. | Memory Evidence maturation | `FUTURE DESIGN` |
+| Temporal Memory Assertions; evidence references; epistemic status; contradiction; supersession; consolidation and adjudication; confidence; revision; dependent forgetting. Owner-model temporal validity; correction classes; influence eligibility; first metacognitive owner-correction witness; dedicated C1 qualification epochs; real pre-influence shadow witnesses; promotion/cutover separation; sticky currentness. Shared-interest and shared-culture recompute are later-consumer compatibility, not C1 closure. | Memory Evidence maturation | `ACCEPTED ARCHITECTURE` for the C1 policy and qualification boundary; broader Temporal Memory Assertions maturation remains `FUTURE DESIGN` |
 | Provenance-bearing learned interest, preference, opinion, salience, concern, and goal assertions | Learned Autonomy, consuming Memory Evidence maturation | `FUTURE DESIGN` |
 | FTS5; vector mechanism spike; hybrid retrieval; RRF or fusion benchmark; contextual adjacency; graduated recall; retrieval budgeting | Context Budget, consuming Memory Evidence contracts and Model Fabric ContextProjection | `SPIKE` / `FUTURE DESIGN` |
 | Working beliefs and theories; cognitive model of the human; evidence-bound lived-experience continuity; constitutionally permitted identity development | Cognitive Graduation, consuming Memory Evidence maturation, Learned Autonomy, and Context Budget | `FUTURE DESIGN` |

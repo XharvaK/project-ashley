@@ -142,15 +142,38 @@ where still true. Worktree name and branch name are not currentness.
 | MF-M1 `implementationStartSha` / `candidateCommitSha` | `5a05e96e4d5d6afbd6d44e9ca518f141fa8292c6` / `d918572c7ae01d5b367323692bd6e8fbcf257895` | Local implementation candidate; acceptance and production promotion remain separate |
 | Historical MF documentation checkpoint | `7a7883753a7e6e5a002bf23d226645ce85730ee5` | Docs-only checkpoint based on the historical pre-repair `8eedad8` line |
 | Production deployed functional SHA | `09b73fbb180234a2ac7056756fc339083735f40e` | production observation + [`COGNITIVE_MATURATION_C1_C5_PRODUCTION_ACCEPTANCE.md`](../handoffs/COGNITIVE_MATURATION_C1_C5_PRODUCTION_ACCEPTANCE.md) |
+| C1 Memory Evidence base capability at production | `IMPLEMENTED` / `PRODUCTION DEPLOYED` / `PRODUCTION ACCEPTED` / `OBSERVE` / `UNPROMOTED` / `NON-LIVE` at `09b73fbb180234a2ac7056756fc339083735f40e` | Exact-candidate production acceptance; this is not the new qualification-bootstrap candidate |
+| C1 Qualification Bootstrap source candidate | `IMPLEMENTED` / `REVIEWED` / `ACCEPTED IN CANONICAL SOURCE`; `NOT DEPLOYED`; `NO CAMPAIGN STARTED`; `NOT PROMOTED`; `NOT CUT OVER`. Functional SHA `f3da03db4831a11ac60261d142aa354749cd188a`; settlement descendant `23d7c418fbc2f22f1685e7da2fb292d0416391e1` | Exact-candidate [`implementation settlement`](../handoffs/C1_QUALIFICATION_BOOTSTRAP_IMPLEMENTATION.md) and [`independent review`](../handoffs/C1_QUALIFICATION_BOOTSTRAP_INDEPENDENT_REVIEW.md); no production claim follows |
+| Current production currentness authority | `mem_facts` | Production observation and the exact-candidate C1–C5 production-acceptance record |
 | Docs-only descendants of that SHA | Git objects only. Resolve `git rev-parse HEAD` / `git log`. Do not infer currentness from a worktree or branch name | Git |
 | Current working branch | Do not infer from folder or branch name. `integration/post-of-docs` is a historical integration line, not current production | Git object identity |
 | Owner-selected current delivery | Model Fabric remains the mechanism-track delivery. C1–C5 landing is not promotion and not a substitute for Model Fabric work | owner context |
-| Cognitive maturation C1–C5 | **`IMPLEMENTED` / `PRODUCTION_DEPLOYED_AND_ACCEPTED` / `OBSERVE` / `UNPROMOTED` / `NON-LIVE`**. Exact evidence: [`COGNITIVE_MATURATION_C1_C5_PRODUCTION_ACCEPTANCE.md`](../handoffs/COGNITIVE_MATURATION_C1_C5_PRODUCTION_ACCEPTANCE.md) at functional SHA `09b73fbb…`. Deployed is not promoted. `ASHLEY_COGNITION_MODE=apply` did not activate these capabilities. | exact-candidate production acceptance |
+| Cognitive maturation C1–C5 base capabilities | **`IMPLEMENTED` / `PRODUCTION_DEPLOYED_AND_ACCEPTED` / `OBSERVE` / `UNPROMOTED` / `NON-LIVE`**. Exact evidence: [`COGNITIVE_MATURATION_C1_C5_PRODUCTION_ACCEPTANCE.md`](../handoffs/COGNITIVE_MATURATION_C1_C5_PRODUCTION_ACCEPTANCE.md) at functional SHA `09b73fbb…`. Deployed is not promoted. `ASHLEY_COGNITION_MODE=apply` did not activate these capabilities. The separate C1 Qualification Bootstrap source candidate is not deployed. | exact-candidate production acceptance plus the C1 bootstrap handoffs |
 | Sandbox V2 path | Direct unprivileged Bubblewrap. V1 broker must not return | Sandbox V2 roadmap |
 | Sandbox V2 M1–M7 | **`PRODUCTION ACCEPTED`** against exact candidate `48bad019fe601d5c871a54dd9902879862c6e96a`; M7 acceptance is limited to the named `patch_export` profile | Exact-candidate closure packet filename `SANDBOX_V2_PRODUCTION_CLOSURE_48bad019fe60.md` (not present in this `e36613b` integration tree; SHA identity is preserved) plus milestone acceptance records |
 | Sandbox authority after closure | Candidate inspection, experimentation, verification, authorship, bounded operation, and named patch export are available only through their separate grants. Live apply, Git effects, deployment, network, package acquisition/install, self-change, Computer Use, and unbounded autonomy remain excluded | exact-candidate closure + Sandbox V2 roadmap |
 | Model Fabric | Phase contract exists. **MF-M1** is implemented locally at `d918572c`. MF-M2–MF-ACT contracts are implementation-ready machinery. Live routes remain NIM 20B Thought and Mistral→Qwen Expression. §12.9 is target policy only | Model Fabric Architecture + Pass-2 contracts |
-| Later named phases | Architecturally defined. C1–C5 are implemented and production-accepted in observe / unpromoted / non-live. Other named phases remain deferred as current implementation | phase contracts + exact-candidate C1–C5 production acceptance |
+| Later named phases | Architecturally defined. C1–C5 base capabilities are implemented and production-accepted in observe / unpromoted / non-live. The C1 Qualification Bootstrap remains a non-deployed source candidate. Other named phases remain deferred as current implementation | phase contracts + exact-candidate evidence |
+
+### C1 status boundary (2026-08-27)
+
+The existing C1 Memory Evidence base capability at production
+`09b73fbb180234a2ac7056756fc339083735f40e` is `IMPLEMENTED`, `PRODUCTION
+DEPLOYED`, `PRODUCTION ACCEPTED`, `OBSERVE`, `UNPROMOTED`, and `NON-LIVE`.
+
+The new C1 Qualification Bootstrap is a separate source candidate. It is
+`IMPLEMENTED`, `REVIEWED`, and `ACCEPTED IN CANONICAL SOURCE`, with functional
+SHA `f3da03db4831a11ac60261d142aa354749cd188a` and accepted settlement
+descendant `23d7c418fbc2f22f1685e7da2fb292d0416391e1`. It is `NOT DEPLOYED`.
+No C1 qualification campaign has started. It is `NOT PROMOTED` and `NOT CUT
+OVER`.
+
+Production currentness remains `mem_facts`. Recall qualification, promotion,
+and the owner Recall live cutoff are the hard predecessor boundary for C1
+campaign credit. Recall was not newly qualified or promoted by the bootstrap.
+
+The next C1 phase is to deploy the inert qualification instrumentation and
+then run the real C1 campaign after the Recall predecessor is satisfied.
 
 If a volatile fact cannot be established from permitted evidence: `UNKNOWN`.
 
@@ -350,10 +373,13 @@ proceed in parallel with mechanism work except where a classified dependency
 says otherwise. It is not a linear continuation of
 `Model Fabric → Operational Continuity`.
 
-C1–C5 source is now implemented, physically qualified, production deployed,
-and production accepted. Each capability remains individually `observe`,
+The existing C1–C5 base capabilities are implemented, production deployed,
+and production accepted under the observe ceiling at the exact production
+candidate recorded below. Each capability remains individually `observe`,
 unpromoted, and non-live. `IMPLEMENTED` / `DEPLOYED` / `ACCEPTED` is not
-`PROMOTED` / `LIVE`. Exact evidence:
+`PROMOTED` / `LIVE`. The separate C1 Qualification Bootstrap source candidate
+is implemented and independently reviewed, but is not deployed and has not
+started a C1 qualification campaign. Exact evidence:
 [`COGNITIVE_MATURATION_C1_C5_PRODUCTION_ACCEPTANCE.md`](../handoffs/COGNITIVE_MATURATION_C1_C5_PRODUCTION_ACCEPTANCE.md).
 The rows below remain architectural closing-evidence definitions. They do not
 authorize promotion.
@@ -402,10 +428,12 @@ promotion dashboard.
 Sandbox Autonomy is a closed dated gate, not current delivery. Owner-selected
 current mechanism delivery is Model Fabric.
 
-C1–C5 (Memory / Evidence, Context Budget, Learned Autonomy, Cognitive
-Graduation, Relational Graduation) are implemented, physically qualified,
-production deployed, and production accepted. Each remains `observe`,
-unpromoted, and non-live. Deployed / accepted is not promoted / live.
+The existing C1–C5 base capabilities (Memory / Evidence, Context Budget,
+Learned Autonomy, Cognitive Graduation, Relational Graduation) are implemented,
+production deployed, and production accepted under the observe ceiling. Each
+remains `observe`, unpromoted, and non-live. Deployed / accepted is not
+promoted / live. The separate C1 Qualification Bootstrap is an implemented,
+independently reviewed source candidate and is not deployed.
 
 | Phase or plane | Status | Dependencies (classified) | Adds | Does not add | Governing document | Smallest closing evidence |
 |---|---|---|---|---|---|---|
@@ -413,7 +441,7 @@ unpromoted, and non-live. Deployed / accepted is not promoted / live.
 | Model Fabric | `CURRENT PHASE CONTRACT`; first **code** milestone is **MF-M1**. Local candidate `d918572c` is implemented; acceptance remains separate. MF-M2–MF-ACT contracts are `IMPLEMENTATION_READY` machinery | `OWNER_SELECTED_IMPLEMENTATION_ORDER` after Sandbox. No semantic or authority derivation from Sandbox. MF-M1 qualification is evidence, not architecture | Provider-neutral profiles, specialist portfolio, purpose dispatch, bounded sessions, receipts, minimal `ContextProjection`, CURRENT policy snapshot, catalog records, Zen Track A adapter, activation mechanics | Provider ownership of meaning, full Context Budget, cognitive writes, execution authority, OpenCode worker, silent §12.9 cutover | [Model Fabric Architecture](Model_Fabric_Architecture.md) | MF-M1: typed seam on current routes with unchanged Thought failover and Expression substitution; observation mismatch exposed not repaired. Later slices: see implementation contracts |
 | Operational Continuity | `CURRENT PHASE CONTRACT`; planned | `OWNER_SELECTED_IMPLEMENTATION_ORDER` after Model Fabric. Model-backed work is a `CROSS_CUTTING_INTERFACE`. Does not own model intelligence. | Durable work concerns, attempts, stages, leases, resumption, cancellation, artifacts, fan-out/fan-in, and effect reconciliation | Mind State, `OpenConcern`, motivation, or exactly-once external reality | [Operational Continuity Architecture](Operational_Continuity_Architecture.md) | Restart-resumable bounded work whose authority, artifact lineage, cancellation, and ambiguous effect reconcile correctly |
 | Procedural Skill Graduation | `CURRENT PHASE CONTRACT`; planned | `EVIDENCE_DEPENDENCY` on attributable traces matching the procedure's evidence contract. General Operational Continuity is not required. | Candidate-to-qualified procedure lifecycle, versioning, bindings, revocation, and retirement | Capability admission, Identity, learned autonomy, or automatic graduation from repetition | [Procedural Skill Graduation Architecture](Procedural_Skill_Graduation_Architecture.md) | One evidence-bound procedure graduates, runs only under current authority, and can be revoked without residual availability |
-| Memory / Evidence maturation | `CURRENT PHASE CONTRACT`; C1 `IMPLEMENTED` / `PRODUCTION_DEPLOYED_AND_ACCEPTED` / `OBSERVE` / `UNPROMOTED` / `NON-LIVE` | Current evidence architecture. Later C3/C5 consumers do not close C1 | Source vs assertion, contradiction, forgetting, provenance, live/shadow, and owner-correction witness contracts | World truth; a Knowledge layer; docs-as-memory; rewriting Ashley Identity from an owner correction; live influence from observe-mode source | [Memory Evidence Architecture](Ashley_Memory_Evidence_Architecture.md) | Contract-complete evidence for later consumers. Observe-mode deployment is not promotion |
+| Memory / Evidence maturation | `CURRENT PHASE CONTRACT`; C1 base capability `IMPLEMENTED` / `PRODUCTION_DEPLOYED_AND_ACCEPTED` / `OBSERVE` / `UNPROMOTED` / `NON-LIVE` at `09b73fbb…`; C1 Qualification Bootstrap `IMPLEMENTED` / `REVIEWED` / `ACCEPTED IN CANONICAL SOURCE` at settlement `23d7c418…`, not deployed | Current evidence architecture. Later C3/C5 consumers do not close C1. Recall active plus owner cutoff precede C1 campaign credit | Source vs assertion, contradiction, forgetting, provenance, live/shadow, dedicated C1 epoch, real pre-influence witness, promotion/cutover separation, and sticky currentness | World truth; a Knowledge layer; docs-as-memory; rewriting Ashley Identity from an owner correction; live influence from observe-mode source; treating the bootstrap as production qualification | [Memory Evidence Architecture](Ashley_Memory_Evidence_Architecture.md) | Contract-complete evidence for later consumers. The base observe deployment is not promotion, and the bootstrap source candidate is not a campaign result |
 | Computer Use | `CURRENT PHASE CONTRACT`; planned / deferred as current implementation | `HARD_DEPENDENCY` on External Effect and Authority. Procedure rung is `OWNER_SELECTED_IMPLEMENTATION_ORDER`. Multi-step recovery is `EVIDENCE_DEPENDENCY`. | Semantic application surfaces, deterministic UI control, bounded visual fallback, handoff and re-observation | Generic external-effect meaning, credential authority, blanket browser permission, or cognitive authority | [Computer Use Architecture](Computer_Use_Architecture.md) | One bounded action is observed, prepared, revalidated, committed, witnessed or reconciled, and safely resumed after interruption |
 | Learned Autonomy | `CURRENT PHASE CONTRACT`; C3 `IMPLEMENTED` / `PRODUCTION_DEPLOYED_AND_ACCEPTED` / `OBSERVE` / `UNPROMOTED` / `NON-LIVE` | `HARD_DEPENDENCY` on Memory / Evidence maturation. Cognition owners are `CROSS_CUTTING_INTERFACE`. Unattended continuity is `EVIDENCE_DEPENDENCY`. | Evidence-bound learned preferences, bounded initiative influence, revision, decay, contradiction, rollback, and non-manipulative growth | Wider capability, obedience optimization, Identity mutation, relationship optimization, random novelty, or live influence from observe-mode source | [Learned Autonomy Architecture](Learned_Autonomy_Architecture.md) | A learned influence changes a later choice for a traceable reason, remains within authority, survives contradiction tests, and can be demoted. Observe-mode deployment does not satisfy that closing evidence. |
 | Context Budget | `CURRENT PHASE CONTRACT`; C2 `IMPLEMENTED` / `PRODUCTION_DEPLOYED_AND_ACCEPTED` / `OBSERVE` / `UNPROMOTED` / `NON-LIVE` | `HARD_DEPENDENCY` on Memory / Evidence. `CROSS_CUTTING_INTERFACE` on Model Fabric `ContextProjection`. Operational Continuity is `EVIDENCE_DEPENDENCY` for resumable work. | Typed selection, hierarchy, budgets, compression, eviction, inspection, and deterministic rebuild rules for active context | Recall authority, forgetting, Mind State mutation, model-routing authority, truth, or live influence from observe-mode source | [Context Budget Architecture](Context_Budget_Architecture.md) | The same persistent state yields bounded, inspectable projections under multiple budgets without changing memory or semantic truth. Observe-mode deployment does not promote the capability. |

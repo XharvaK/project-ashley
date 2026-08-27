@@ -1,10 +1,21 @@
 # C1 QUALIFICATION BOOTSTRAP IMPLEMENTATION SETTLEMENT
 
-Status: IMPLEMENTED / TESTED
+Status: IMPLEMENTED / FOCUSED-TESTED —
+FULL CORPUS FAILURES RECORDED
 
 This document records the implementation settlement for the C1 Qualification
 Bootstrap. It is prepared for the owner and independent differential reviewer.
 It does not assert any later capability lifecycle state.
+
+Independent differential review: `ACCEPT_WITH_NONBLOCKING_NOTES`
+
+Functional SHA: `f3da03db4831a11ac60261d142aa354749cd188a`
+
+Accepted settlement descendant: `23d7c418fbc2f22f1685e7da2fb292d0416391e1`
+
+Blocking findings: `0`
+
+Candidate regressions: `0`
 
 ## Source identity
 
@@ -149,11 +160,14 @@ candidate and evidence available for independent differential review.
 
 ## Review handoff
 
-The independent reviewer should review the exact range
+The independent differential review recorded the verdict above against the
+exact implementation range
 `d5a110be2e4e5c52ca31ec56d8c9f5dd55a08ec1..f3da03db4831a11ac60261d142aa354749cd188a`,
-confirm the C1-only scope, rerun the focused commands, inspect the full-corpus
-blocker against a clean compatible repository state, and check that the
-currentness marker and provider-bound behavior remain unchanged.
+with settlement descendant
+`23d7c418fbc2f22f1685e7da2fb292d0416391e1`. It confirmed the C1-only scope and
+the currentness/provider-boundary constraints. The nonblocking notes and the
+review-environment preservation facts are recorded in
+[`C1_QUALIFICATION_BOOTSTRAP_INDEPENDENT_REVIEW.md`](C1_QUALIFICATION_BOOTSTRAP_INDEPENDENT_REVIEW.md).
 
 The implementation worker did not delegate this task, create another
 implementation task, or restart the implementation. No push was performed.

@@ -40,6 +40,7 @@ VISION.md
 | [`architecture/Ashley_Architecture_Roadmap.md`](architecture/Ashley_Architecture_Roadmap.md) | Canonical direction. §5 converts existing items into engineering milestones from live state. It does not add architecture. |
 | [`architecture/Ashley_Milestone_Execution_Governance.md`](architecture/Ashley_Milestone_Execution_Governance.md) | Execution discipline for those milestones. Does not add architecture. |
 | [`architecture/Ashley_Cross_Phase_Architecture.md`](architecture/Ashley_Cross_Phase_Architecture.md) | Shared state, authority, evidence, and current-fact laws |
+| [`architecture/Ashley_Memory_Evidence_Architecture.md`](architecture/Ashley_Memory_Evidence_Architecture.md) | Accepted memory/evidence semantics, C1 shadow qualification boundary, and sticky currentness rules; current lifecycle status remains in the canonical roadmap and exact-candidate handoffs |
 | [`architecture/sandbox/ASHLEY_SANDBOX_V2_ROADMAP.md`](architecture/sandbox/ASHLEY_SANDBOX_V2_ROADMAP.md) | Current Sandbox V2 M0-M7 authority, state, truth, and acceptance contracts |
 | [`Sandbox_Design.md`](Sandbox_Design.md) | Historical V1 broker threat model, IPC, and hardening; topology superseded for V2 |
 | [`Self_Modification_Design.md`](Self_Modification_Design.md) | Historical V1 workflow; selected change-set semantics are reference input for V2 M5/M7 |
