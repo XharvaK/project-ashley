@@ -133,6 +133,14 @@ const LIVE: Record<string, LiveRule> = {
 
 /** Tables excluded from the live projection (each with a stated reason). */
 const NON_LIVE: Record<string, NonLiveRule> = {
+  memory_evidence_qualification_epochs: {
+    cls: "CONTROL_PLANE",
+    reason: "C1 qualification epoch custody; no live semantic authority",
+  },
+  memory_evidence_qualification_events: {
+    cls: "CONTROL_PLANE",
+    reason: "C1 qualification evidence ledger; no live semantic authority",
+  },
   memory_contract_state: {
     cls: "CONTROL_PLANE",
     reason: "C1 contract marker and cutover ledger; memory_evidence remains unpromoted",

@@ -15,8 +15,8 @@ describe("C4 additive schema", () => {
   it("creates append-only prediction, outcome, link, and calibration tables", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     try {
-      expect(NUCLEAR_SUPPORTED_VERSION).toBe(40);
-      expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: 40 });
+      expect(NUCLEAR_SUPPORTED_VERSION).toBe(41);
+      expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: 41 });
       for (const table of TABLES) {
         expect(db.prepare(
           "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",

@@ -26,6 +26,11 @@ import {
   C5_TABLES,
   validateNuclearV40Schema,
 } from "../relationship/migration-39.js";
+import {
+  C1_QUALIFICATION_INDEXES,
+  C1_QUALIFICATION_TABLES,
+  validateNuclearV41Schema,
+} from "../rollout/migration-41.js";
 
 type TableInfoRow = {
   name?: string;
@@ -1023,9 +1028,22 @@ function requireNoV40Objects(db: DatabaseSync, version: number): void {
   if (marker) fail(version, "unexpected_v40_c5_marker");
 }
 
+function requireNoV41Objects(db: DatabaseSync, version: number): void {
+  for (const table of C1_QUALIFICATION_TABLES) {
+    if (masterRow(db, "table", table)) {
+      fail(version, `unexpected_v41_table:${table}`);
+    }
+  }
+  for (const index of C1_QUALIFICATION_INDEXES) {
+    if (masterRow(db, "index", index)) {
+      fail(version, `unexpected_v41_index:${index}`);
+    }
+  }
+}
+
 export function validateNuclearSchemaContent(
   db: DatabaseSync,
-  version: 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37 | 38 | 39 | 40,
+  version: 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37 | 38 | 39 | 40 | 41,
   options: { rejectNewerContent?: boolean } = {},
 ): void {
   if (version === 22) {
@@ -1186,6 +1204,12 @@ export function validateNuclearSchemaContent(
   }
   if (version === 39) return;
   validateNuclearV40Schema(db, version);
+  if (version === 40 && options.rejectNewerContent === true) {
+    requireNoV41Objects(db, version);
+    return;
+  }
+  if (version === 40) return;
+  validateNuclearV41Schema(db, version);
 }
 
 function addColumnIfMissing(

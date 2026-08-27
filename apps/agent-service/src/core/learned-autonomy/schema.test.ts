@@ -8,8 +8,8 @@ describe("C3 additive schema", () => {
   it("creates typed influence, evidence, receipt, and seed-lineage tables", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     try {
-      expect(NUCLEAR_SUPPORTED_VERSION).toBe(40);
-      expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: 40 });
+      expect(NUCLEAR_SUPPORTED_VERSION).toBe(41);
+      expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: 41 });
       for (const table of C3_TABLES) {
         expect(db.prepare(
           "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
