@@ -7,10 +7,12 @@ import { describe, expect, it, vi } from "vitest";
 
 const proactiveExpressionHook = vi.hoisted(() => ({
   beforeReturn: null as (() => void) | null,
+  callCount: 0,
 }));
 
 vi.mock("./conversation/expression.js", () => ({
-  expressSpeak: async () => {
+  expressSpeak: async (..._args: unknown[]) => {
+    proactiveExpressionHook.callCount += 1;
     proactiveExpressionHook.beforeReturn?.();
     return {
       text: "i can answer that from the live thread.",
@@ -31,7 +33,15 @@ import {
   getOpenOwnTimeSession,
   hasOpenOwnTimeSession,
 } from "./state/own-time.js";
-import { AshleyCore } from "./runtime.js";
+import {
+  AshleyCore,
+  recordC1ShadowWitnessAtExpression,
+} from "./runtime.js";
+import { composeTurnContext } from "./context-composer.js";
+import {
+  type C1ShadowWitnessInput,
+  type C1ShadowWitnessRecordResult,
+} from "./memory/shadow-witness.js";
 import { currentReleaseId } from "./rollout/capabilities.js";
 import * as expression from "./conversation/expression.js";
 import { insertMessage, resolveActiveThread } from "./memory/threads.js";
@@ -44,6 +54,7 @@ import { listIdentity } from "./identity/store.js";
 import {
   currentBuildIdentity,
   currentContractId,
+  recordRecallLiveCutover,
 } from "./rollout/capabilities.js";
 import {
   getOpenCognitiveItem,
@@ -52,6 +63,23 @@ import {
 import { listOpenCognitiveItemReviewRequests } from "./cognition/reconsideration.js";
 import { applyForgetTargets } from "./memory/forget.js";
 import { listSandboxTaskAdmissions } from "./sandbox/task-admission.js";
+import { PROVISIONAL_UNQUALIFIED_TURN_DEADLINE_POLICY } from "./delivery/turn-deadline-plan.js";
+import {
+  recordC1ShadowWitness,
+} from "./memory/shadow-witness.js";
+import { startMemoryEvidenceQualificationEpoch } from "./rollout/memory-evidence-qualification-epoch.js";
+
+function captureC1Witnesses(
+  db: DatabaseSync,
+  witnesses: C1ShadowWitnessInput[],
+): AshleyCore {
+  return new AshleyCore(db, {
+    c1ShadowWitnessRecorder: (_db, input) => {
+      witnesses.push(input);
+      return { recorded: true } satisfies C1ShadowWitnessRecordResult;
+    },
+  });
+}
 
 function activateCapabilities(db: DatabaseSync, names: string[]): void {
   const releaseId = currentReleaseId();
@@ -62,6 +90,19 @@ function activateCapabilities(db: DatabaseSync, names: string[]): void {
      VALUES (?, ?, 'active', ?, ?)`,
   );
   for (const name of names) insert.run(name, releaseId, now, now);
+}
+
+function armMemoryEvidenceWitnessEpoch(db: DatabaseSync): void {
+  activateCapabilities(db, ["recall"]);
+  expect(recordRecallLiveCutover(db, "doc", {
+    authorizedBy: "doc",
+    masterMode: "observe",
+  })).toMatchObject({ success: true });
+  expect(startMemoryEvidenceQualificationEpoch(db, {
+    ownerId: "doc",
+    startRequestKey: "runtime-c1-witness",
+    predecessorEpochId: null,
+  })).toMatchObject({ ok: true, created: true });
 }
 
 function addCommittedQuestionInitiative(
@@ -243,6 +284,269 @@ describe("AshleyCore", () => {
 
     db.close();
     rmSync(path, { force: true });
+  });
+
+  it("records one reactive C1 witness after the persisted Decision and final turn exist", async () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const witnesses: C1ShadowWitnessInput[] = [];
+    const beforeExpressionCalls = proactiveExpressionHook.callCount;
+    try {
+      armMemoryEvidenceWitnessEpoch(db);
+      const core = new AshleyCore(db, {
+        c1ShadowWitnessRecorder: (innerDb, input, now) => {
+          witnesses.push(input);
+          return recordC1ShadowWitness(innerDb, input, now);
+        },
+      });
+      const reply = await core.handleReactiveChat({
+        message: "Explain the bounded retry path.",
+        ownerId: "doc",
+        channel: "discord",
+      });
+
+      expect(reply.decisionId).toBeGreaterThan(0);
+      expect(witnesses).toHaveLength(1);
+      const witness = witnesses[0];
+      expect(witness).toMatchObject({
+        ownerId: "doc",
+        decisionId: reply.decisionId,
+        trigger: "reactive",
+        observedAt: expect.any(String),
+        decision: {
+          evidenceRefs: expect.any(Array),
+          motivationIds: expect.any(Array),
+        },
+        turn: {
+          facts: expect.any(Array),
+          hotMessages: expect.any(Array),
+        },
+      });
+      expect(witness?.motivations.every((motivation) =>
+        Object.keys(motivation).every((key) =>
+          ["id", "kind", "refType", "refId"].includes(key),
+        ),
+      )).toBe(true);
+      expect(proactiveExpressionHook.callCount).toBe(beforeExpressionCalls + 1);
+      expect(db.prepare(
+        "SELECT decision_id FROM delivery_reservations WHERE decision_id = ?",
+      ).get(reply.decisionId)).toBeDefined();
+      expect(db.prepare(
+        `SELECT source_key, decision_class, trigger, detail_json
+         FROM memory_evidence_qualification_events
+         WHERE source_key = ?`,
+      ).get(`c1-shadow:v1:decision:${reply.decisionId}`)).toMatchObject({
+        source_key: `c1-shadow:v1:decision:${reply.decisionId}`,
+        trigger: "reactive",
+      });
+      expect(db.prepare(
+        `SELECT detail_json
+         FROM memory_evidence_qualification_events
+         WHERE source_key = ?`,
+      ).get(`c1-shadow:v1:decision:${reply.decisionId}`)).not.toMatchObject({
+        detail_json: expect.stringContaining("Explain the bounded retry path."),
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("records one proactive C1 witness for a real proactive Expression attempt", async () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const witnesses: C1ShadowWitnessInput[] = [];
+    const originalEnabled = env.proactiveEnabled;
+    const originalIdle = env.proactiveMinIdleHours;
+    const originalCap = env.proactiveMaxPerDay;
+    try {
+      env.proactiveEnabled = true;
+      env.proactiveMinIdleHours = 0;
+      env.proactiveMaxPerDay = 10;
+      createQuestion(db, {
+        ownerId: "doc",
+        subject: "about_doc",
+        text: "What should we verify next?",
+        priority: 50,
+      });
+      armMemoryEvidenceWitnessEpoch(db);
+      const core = new AshleyCore(db, {
+        c1ShadowWitnessRecorder: (innerDb, input, now) => {
+          witnesses.push(input);
+          return recordC1ShadowWitness(innerDb, input, now);
+        },
+      });
+      const result = await core.tickProactive("doc");
+
+      expect(result.shouldSend).toBe(true);
+      expect(witnesses).toHaveLength(1);
+      expect(witnesses[0]).toMatchObject({
+        ownerId: "doc",
+        trigger: "proactive",
+        decisionId: expect.any(Number),
+        observedAt: expect.any(String),
+        decision: {
+          evidenceRefs: expect.any(Array),
+          motivationIds: expect.any(Array),
+        },
+        turn: {
+          facts: expect.any(Array),
+          hotMessages: expect.any(Array),
+        },
+      });
+      const decision = db.prepare(
+        "SELECT id FROM decision_log WHERE id = ?",
+      ).get(witnesses[0]?.decisionId);
+      expect(decision).toBeDefined();
+      expect(db.prepare(
+        `SELECT source_key, trigger
+         FROM memory_evidence_qualification_events
+         WHERE source_key = ?`,
+      ).get(`c1-shadow:v1:decision:${witnesses[0]?.decisionId}`)).toMatchObject({
+        source_key: `c1-shadow:v1:decision:${witnesses[0]?.decisionId}`,
+        trigger: "proactive",
+      });
+    } finally {
+      env.proactiveEnabled = originalEnabled;
+      env.proactiveMinIdleHours = originalIdle;
+      env.proactiveMaxPerDay = originalCap;
+      db.close();
+    }
+  });
+
+  it("keeps a retry of the same persisted Decision idempotent", async () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const witnesses: C1ShadowWitnessInput[] = [];
+    try {
+      armMemoryEvidenceWitnessEpoch(db);
+      const core = new AshleyCore(db, {
+        c1ShadowWitnessRecorder: (innerDb, input, now) => {
+          witnesses.push(input);
+          return recordC1ShadowWitness(innerDb, input, now);
+        },
+      });
+      const reply = await core.handleReactiveChat({
+        message: "record this attempt once",
+        ownerId: "doc",
+        channel: "discord",
+      });
+      const input = witnesses[0];
+      if (!input) throw new Error("runtime_c1_retry_input_missing");
+
+      expect(recordC1ShadowWitness(db, input, new Date())).toEqual({
+        recorded: false,
+        reason: "idempotent",
+      });
+      expect(db.prepare(
+        `SELECT COUNT(*) AS count
+         FROM memory_evidence_qualification_events
+         WHERE source_key = ?`,
+      ).get(`c1-shadow:v1:decision:${reply.decisionId}`)).toMatchObject({ count: 1 });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("does not record a C1 witness for debug composition or pre-Expression terminal paths", async () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const witnesses: C1ShadowWitnessInput[] = [];
+    const core = captureC1Witnesses(db, witnesses);
+    const beforeExpressionCalls = proactiveExpressionHook.callCount;
+    const controller = new AbortController();
+    controller.abort();
+    try {
+      composeTurnContext(db, "doc", {
+        channel: "discord",
+        userMessage: "debug only",
+      });
+      await core.handleReactiveChat({
+        message: "this request is cancelled",
+        ownerId: "doc",
+        channel: "discord",
+        abortSignal: controller.signal,
+      });
+      await core.handleReactiveChat({
+        message: "stop messaging me for now",
+        ownerId: "doc",
+        channel: "discord",
+      });
+
+      const deadlinePolicy = {
+        ...PROVISIONAL_UNQUALIFIED_TURN_DEADLINE_POLICY,
+        initialThoughtMs: 1,
+        ordinary: {
+          ...PROVISIONAL_UNQUALIFIED_TURN_DEADLINE_POLICY.ordinary,
+          perceptionMs: 1,
+          expressionMs: 1,
+          generationSettlementMs: 1,
+        },
+      };
+      await core.handleReactiveChat({
+        message: "this turn reaches its expression deadline",
+        ownerId: "doc",
+        channel: "discord",
+        turnDeadlinePolicy: deadlinePolicy,
+      });
+
+      expect(witnesses).toHaveLength(0);
+      expect(proactiveExpressionHook.callCount).toBe(beforeExpressionCalls);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps the live turn and single provider call when witness recording fails, while blocking the campaign", async () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const recorder = vi.fn(() => {
+      throw new Error("test_c1_witness_recorder_failure");
+    });
+    const core = new AshleyCore(db, {
+      c1ShadowWitnessRecorder: recorder,
+    });
+    const beforeExpressionCalls = proactiveExpressionHook.callCount;
+    try {
+      const reply = await core.handleReactiveChat({
+        message: "continue with the live answer",
+        ownerId: "doc",
+        channel: "discord",
+      });
+
+      expect(reply.text).toContain("live thread");
+      expect(recorder).toHaveBeenCalledTimes(1);
+      expect(proactiveExpressionHook.callCount).toBe(beforeExpressionCalls + 1);
+      expect(db.prepare(
+        `SELECT capability, kind, source_key
+         FROM capability_events
+         WHERE capability = 'memory_evidence' AND kind = 'critical_failure'`,
+      ).get()).toMatchObject({
+        capability: "memory_evidence",
+        kind: "critical_failure",
+        source_key: `c1-shadow:recorder-error:${reply.decisionId}`,
+      });
+      expect(db.prepare(
+        `SELECT state FROM capability_releases
+         WHERE capability = 'memory_evidence' AND release_id = ?`,
+      ).get(currentReleaseId())).toMatchObject({ state: "disabled" });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("returns a typed diagnostic and never invokes the recorder without a persisted Decision ID", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const recorder = vi.fn(() => ({ recorded: true } satisfies C1ShadowWitnessRecordResult));
+    try {
+      const result = recordC1ShadowWitnessAtExpression(db, recorder, {
+        ownerId: "doc",
+        decisionId: null,
+        trigger: "reactive",
+        decision: { evidenceRefs: [], motivationIds: [] },
+        motivations: [],
+        turn: { facts: [], hotMessages: [] },
+        observedAt: new Date().toISOString(),
+      });
+      expect(result).toEqual({ recorded: false, reason: "decision_id_required" });
+      expect(recorder).not.toHaveBeenCalled();
+    } finally {
+      db.close();
+    }
   });
 
   it("reserves and commits a proactive message in the legacy shape", async () => {

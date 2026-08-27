@@ -23,7 +23,10 @@ import {
 import { relevantBoundaryIdSet } from "./agency/boundary-relevance.js";
 import { logDecision, setDecisionOutcome } from "./agency/log.js";
 import { observeSandboxEffectIntentAdmission } from "./sandbox/task-admission.js";
-import { composeTurnContext } from "./context-composer.js";
+import {
+  composeTurnContext,
+  type TurnContext,
+} from "./context-composer.js";
 import { expressSpeak } from "./conversation/expression.js";
 import { seedIdentity } from "./identity/seed.js";
 import { routingStatus } from "./model-routing/status.js";
@@ -148,6 +151,11 @@ import {
   type CapabilityName,
 } from "./rollout/capabilities.js";
 import { recordRecallLiveCutover } from "./memory/cutover.js";
+import {
+  recordC1ShadowWitness,
+  type C1ShadowWitnessInput,
+  type C1ShadowWitnessRecordResult,
+} from "./memory/shadow-witness.js";
 import {
   getCurrentRecallQualificationEpoch,
   listRecallQualificationEpochs,
@@ -325,6 +333,73 @@ export type ReactiveChatResult = {
   duplicate?: boolean;
   secretOmitted?: boolean;
 };
+
+export type C1ShadowWitnessRecorder = (
+  db: DatabaseSync,
+  input: C1ShadowWitnessInput,
+  now?: Date,
+) => C1ShadowWitnessRecordResult;
+
+export type C1ShadowWitnessAttemptInput = Omit<C1ShadowWitnessInput, "decisionId"> & {
+  decisionId: number | null;
+};
+
+export type C1ShadowWitnessAttemptResult =
+  | C1ShadowWitnessRecordResult
+  | { recorded: false; reason: "recorder_error" };
+
+/** Runtime seam: a witness cannot be emitted until a persisted Decision exists. */
+export function recordC1ShadowWitnessAtExpression(
+  db: DatabaseSync,
+  recorder: C1ShadowWitnessRecorder,
+  input: C1ShadowWitnessAttemptInput,
+): C1ShadowWitnessAttemptResult {
+  if (
+    input.decisionId === null ||
+    !Number.isSafeInteger(input.decisionId) ||
+    input.decisionId <= 0
+  ) {
+    return { recorded: false, reason: "decision_id_required" };
+  }
+  try {
+    return recorder(db, {
+      ...input,
+      decisionId: input.decisionId,
+    }, new Date());
+  } catch {
+    return { recorded: false, reason: "recorder_error" };
+  }
+}
+
+function c1ShadowAttemptInput(
+  ownerId: string,
+  decisionId: number,
+  trigger: "reactive" | "proactive",
+  decision: Pick<Decision, "evidenceRefs" | "motivationIds">,
+  motivations: readonly Motivation[],
+  turn: Pick<TurnContext, "facts" | "hotMessages">,
+): C1ShadowWitnessInput {
+  return {
+    ownerId,
+    decisionId,
+    trigger,
+    decision: {
+      evidenceRefs: decision.evidenceRefs.map(({ type, id }) => ({ type, id })),
+      motivationIds: [...decision.motivationIds],
+    },
+    motivations: motivations.map(({ id, kind, refType, refId }) => ({
+      id,
+      kind,
+      refType,
+      refId,
+    })),
+    turn: {
+      facts: turn.facts.map(({ id }) => ({ id })),
+      hotMessages: turn.hotMessages.map(({ id }) => ({ id })),
+    },
+    observedAt: new Date().toISOString(),
+  };
+}
 
 export type ProactiveSkip = {
   shouldSend: false;
@@ -523,6 +598,7 @@ export class AshleyCore {
   private readonly sandboxBrokerTransport: BrokerClientTransport | null;
   private readonly sandboxBrokerClient: SandboxBrokerClient | null;
   private readonly reflectionReviewAdjudicator: OpenCognitiveReviewAdjudicator | undefined;
+  private readonly c1ShadowWitnessRecorder: C1ShadowWitnessRecorder;
 
   private readonly dataPlane: DataPlaneContext | null;
 
@@ -534,6 +610,7 @@ export class AshleyCore {
       sandboxBrokerClient?: SandboxBrokerClient | null;
       reflectionReviewAdjudicator?: OpenCognitiveReviewAdjudicator;
       dataPlane?: DataPlaneContext;
+      c1ShadowWitnessRecorder?: C1ShadowWitnessRecorder;
     },
   ) {
     if (!db) {
@@ -550,6 +627,8 @@ export class AshleyCore {
     this.continuity = getContinuityFor(this.db) ?? priorContinuity ?? null;
     this.reflectionMode = options?.reflectionMode ?? env.reflectionMode;
     this.reflectionReviewAdjudicator = options?.reflectionReviewAdjudicator;
+    this.c1ShadowWitnessRecorder =
+      options?.c1ShadowWitnessRecorder ?? recordC1ShadowWitness;
     this.sandboxBrokerTransport =
       options && "sandboxBrokerTransport" in options
         ? options.sandboxBrokerTransport ?? null
@@ -630,6 +709,33 @@ export class AshleyCore {
   private capabilityStatuses(): ReturnType<typeof listCapabilityStatuses> {
     this.auditReadingProvenance();
     return listCapabilityStatuses(this.db);
+  }
+
+  private recordC1ShadowWitnessAtExpression(
+    input: C1ShadowWitnessInput,
+  ): void {
+    const result = recordC1ShadowWitnessAtExpression(
+      this.db,
+      this.c1ShadowWitnessRecorder,
+      input,
+    );
+    if (result.recorded) return;
+    if (
+      result.reason !== "recorder_error" &&
+      result.reason !== "invalid_source_key" &&
+      result.reason !== "invalid_receipt"
+    ) return;
+    try {
+      recordCriticalFailure(
+        this.db,
+        "memory_evidence",
+        `c1-shadow:recorder-error:${input.decisionId}`,
+        "corruption",
+        `C1 shadow witness recorder failed: ${result.reason}`,
+      );
+    } catch {
+      // Expression remains live even when the diagnostic write cannot settle.
+    }
   }
 
   async handleReactiveChat(
@@ -1873,6 +1979,14 @@ export class AshleyCore {
           event: "started",
           atMs: Date.now(),
         });
+        this.recordC1ShadowWitnessAtExpression(c1ShadowAttemptInput(
+          input.ownerId,
+          decisionId,
+          "reactive",
+          decision,
+          motivations,
+          turn,
+        ));
         rendered = await expressSpeak(turn, decision, message, "discord", {
           deadlineAtMs: selectedDeadlineBranch.expressionDeadlineAtMs,
           decisionId,
@@ -2571,6 +2685,14 @@ export class AshleyCore {
       try {
         let rendered: Awaited<ReturnType<typeof expressSpeak>>;
         try {
+          this.recordC1ShadowWitnessAtExpression(c1ShadowAttemptInput(
+            ownerId,
+            decisionId,
+            "proactive",
+            decision,
+            motivations,
+            turn,
+          ));
           rendered = await expressSpeak(
             turn,
             decision,
