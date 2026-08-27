@@ -1,6 +1,9 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
-import { openContinuityDb } from "../continuity/db.js";
+import {
+  getPendingNuclearMigration,
+  openContinuityDb,
+} from "../continuity/db.js";
 import { NUCLEAR_SUPPORTED_VERSION, openNuclearDb } from "../db.js";
 
 const EPOCH_TABLE = "memory_evidence_qualification_epochs";
@@ -31,6 +34,37 @@ function migrateToVersion41(): MigrationFixture {
   const fixture = databaseAtVersion40();
   openNuclearDb(fixture.db, { continuity: fixture.continuity, migrate: true });
   return fixture;
+}
+
+function closeFixture(fixture: MigrationFixture): void {
+  try {
+    fixture.db.close();
+  } finally {
+    fixture.continuity.close();
+  }
+}
+
+function nuclearUserVersion(db: DatabaseSync): number {
+  return (
+    db.prepare("PRAGMA user_version").get() as { user_version: number }
+  ).user_version;
+}
+
+function sidecarNuclearVersion(continuity: DatabaseSync): number {
+  return (
+    continuity
+      .prepare("SELECT nuclear_schema_version FROM lineage_state WHERE id = 1")
+      .get() as { nuclear_schema_version: number }
+  ).nuclear_schema_version;
+}
+
+function setPendingNuclearMigration(continuity: DatabaseSync, value: string): void {
+  continuity
+    .prepare(
+      `INSERT INTO continuity_meta (key, value) VALUES ('pending_nuclear_migration', ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    )
+    .run(value);
 }
 
 function insertEpoch(db: DatabaseSync, epochId = "epoch-1", status = "current"): void {
@@ -217,6 +251,125 @@ describe("nuclear schema v41 C1 qualification bootstrap", () => {
       } finally {
         continuity.close();
       }
+    }
+  });
+});
+
+describe("nuclear schema v41 pending migration recovery", () => {
+  it("reconciles pending 40→41 when nuclear remains at schema 40", () => {
+    const fixture = databaseAtVersion40();
+    try {
+      expect(() => openNuclearDb(fixture.db, {
+        continuity: fixture.continuity,
+        migrate: true,
+        testMigrationFault: "during_ddl",
+      })).toThrow("test_fault_during_ddl");
+      expect(nuclearUserVersion(fixture.db)).toBe(40);
+      expect(getPendingNuclearMigration(fixture.continuity)).toMatchObject({
+        from: 40,
+        to: 41,
+        phase: "pending",
+      });
+      expect(sidecarNuclearVersion(fixture.continuity)).toBe(40);
+
+      openNuclearDb(fixture.db, { continuity: fixture.continuity, migrate: true });
+      expect(nuclearUserVersion(fixture.db)).toBe(41);
+      expect(getPendingNuclearMigration(fixture.continuity)).toBeNull();
+      expect(sidecarNuclearVersion(fixture.continuity)).toBe(41);
+      expect(fixture.db.prepare(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+      ).get(EPOCH_TABLE)).toEqual({ 1: 1 });
+      expect(fixture.db.prepare(`SELECT COUNT(*) AS c FROM ${EPOCH_TABLE}`).get())
+        .toEqual({ c: 0 });
+    } finally {
+      closeFixture(fixture);
+    }
+  });
+
+  it("finalizes pending 40→41 when nuclear already committed schema 41", () => {
+    const fixture = databaseAtVersion40();
+    try {
+      expect(() => openNuclearDb(fixture.db, {
+        continuity: fixture.continuity,
+        migrate: true,
+        testMigrationFault: "after_nuclear_commit",
+      })).toThrow("test_fault_after_nuclear_commit");
+      expect(nuclearUserVersion(fixture.db)).toBe(41);
+      expect(getPendingNuclearMigration(fixture.continuity)).toMatchObject({
+        from: 40,
+        to: 41,
+        phase: "pending",
+      });
+      expect(sidecarNuclearVersion(fixture.continuity)).toBe(40);
+
+      openNuclearDb(fixture.db, { continuity: fixture.continuity, migrate: true });
+      expect(nuclearUserVersion(fixture.db)).toBe(41);
+      expect(getPendingNuclearMigration(fixture.continuity)).toBeNull();
+      expect(sidecarNuclearVersion(fixture.continuity)).toBe(41);
+    } finally {
+      closeFixture(fixture);
+    }
+  });
+
+  it("fails closed on malformed pending 40→41 metadata", () => {
+    const fixture = databaseAtVersion40();
+    try {
+      setPendingNuclearMigration(fixture.continuity, "{not-json");
+      expect(() => openNuclearDb(fixture.db, {
+        continuity: fixture.continuity,
+        migrate: true,
+      })).toThrow("continuity_pending_migration_invalid");
+      expect(nuclearUserVersion(fixture.db)).toBe(40);
+      expect(
+        (
+          fixture.continuity
+            .prepare(
+              "SELECT value FROM continuity_meta WHERE key = 'pending_nuclear_migration'",
+            )
+            .get() as { value: string }
+        ).value,
+      ).toBe("{not-json");
+    } finally {
+      closeFixture(fixture);
+    }
+  });
+
+  it("fails closed when nuclear version does not match pending 40→41", () => {
+    const fixture = databaseAtVersion40();
+    try {
+      expect(() => openNuclearDb(fixture.db, {
+        continuity: fixture.continuity,
+        migrate: true,
+        testMigrationFault: "after_pending",
+      })).toThrow("test_fault_after_pending");
+      fixture.db.exec("PRAGMA user_version = 39");
+      expect(() => openNuclearDb(fixture.db, {
+        continuity: fixture.continuity,
+        migrate: true,
+      })).toThrow("continuity_pending_migration_version_mismatch:39");
+      expect(getPendingNuclearMigration(fixture.continuity)).toMatchObject({
+        from: 40,
+        to: 41,
+        phase: "pending",
+      });
+      expect(nuclearUserVersion(fixture.db)).toBe(39);
+      expect(sidecarNuclearVersion(fixture.continuity)).toBe(40);
+    } finally {
+      closeFixture(fixture);
+    }
+  });
+
+  it("fails closed when nuclear schema is newer than supported", () => {
+    const fixture = migrateToVersion41();
+    try {
+      fixture.db.exec("PRAGMA user_version = 42");
+      expect(() => openNuclearDb(fixture.db, {
+        continuity: fixture.continuity,
+        migrate: true,
+      })).toThrow("unsupported_nuclear_schema:42>41");
+      expect(nuclearUserVersion(fixture.db)).toBe(42);
+    } finally {
+      closeFixture(fixture);
     }
   });
 });

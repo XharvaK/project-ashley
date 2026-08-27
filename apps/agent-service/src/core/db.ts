@@ -1160,7 +1160,8 @@ function reconcilePendingNuclearMigration(
     (pending.from !== 36 || pending.to !== 37) &&
     (pending.from !== 37 || pending.to !== 38) &&
     (pending.from !== 38 || pending.to !== 39) &&
-    (pending.from !== 39 || pending.to !== 40)
+    (pending.from !== 39 || pending.to !== 40) &&
+    (pending.from !== 40 || pending.to !== 41)
   ) {
     throw new Error("continuity_pending_migration_unsupported");
   }
