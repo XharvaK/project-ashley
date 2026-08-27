@@ -20,6 +20,11 @@ import {
   recordRecallIsolatedEvaluation,
   recordRecallLiveShadowEvent,
 } from "./recall-qualification-epoch.js";
+import {
+  getCurrentMemoryEvidenceQualificationEpoch,
+  getMemoryEvidenceQualificationReadiness,
+  sealMemoryEvidenceQualificationEpoch,
+} from "./memory-evidence-qualification-epoch.js";
 
 export const capabilityNames = [
   "recall",
@@ -432,6 +437,14 @@ export function promotionEligible(
   if (capability === "recall") {
     return recallPromotionQualified(db, releaseId);
   }
+  if (capability === "memory_evidence") {
+    if (releaseId !== currentContractId()) return false;
+    const epoch = getCurrentMemoryEvidenceQualificationEpoch(db);
+    return epoch !== null && getMemoryEvidenceQualificationReadiness(
+      db,
+      epoch.ownerId,
+    ).eligible;
+  }
   const policy = graduationPolicyFor(capability);
   const release = db.prepare(
     `SELECT eval_seed_count, qualified_at, model_epoch FROM capability_releases
@@ -533,6 +546,58 @@ export function promoteCapability(
   if (!promotionEligible(db, capability, releaseId)) {
     return { ok: false, reason: "not_eligible" };
   }
+  if (capability === "memory_evidence") {
+    const epoch = getCurrentMemoryEvidenceQualificationEpoch(db);
+    if (!epoch || epoch.ownerId !== authorizedBy || releaseId !== currentContractId()) {
+      return { ok: false, reason: "not_eligible" };
+    }
+    const now = new Date().toISOString();
+    db.exec("BEGIN IMMEDIATE");
+    let transactionOpen = true;
+    try {
+      const sealed = sealMemoryEvidenceQualificationEpoch(db, {
+        ownerId: authorizedBy,
+        epochId: epoch.epochId,
+        releaseId,
+        sealedAt: now,
+      });
+      if (!sealed) throw new Error("memory_evidence_epoch_seal_failed");
+      const updated = db.prepare(
+        `UPDATE capability_releases
+         SET state = 'active', promoted_at = ?, failure_kind = NULL,
+             failure_reason = NULL, updated_at = ?, model_epoch = 0
+         WHERE capability = 'memory_evidence' AND release_id = ? AND state = 'observe'`,
+      ).run(now, now, releaseId);
+      if (Number(updated.changes) !== 1) {
+        throw new Error("memory_evidence_release_state_changed");
+      }
+      const recorded = recordEvent(db, {
+        capability,
+        releaseId,
+        kind: "operator_promote",
+        sourceKey: `promote:${now}`,
+        detail: {
+          authorizedBy: authorizedBy.slice(0, 200),
+          promotionPath: graduationPolicyFor(capability).kind,
+          qualificationEpochId: epoch.epochId,
+        },
+        occurredAt: now,
+      });
+      if (!recorded) throw new Error("memory_evidence_operator_promote_not_recorded");
+      db.exec("COMMIT");
+      transactionOpen = false;
+      return { ok: true, state: "active" };
+    } catch (error) {
+      if (transactionOpen) {
+        try {
+          db.exec("ROLLBACK");
+        } catch {
+          /* preserve the original failure */
+        }
+      }
+      throw error;
+    }
+  }
   const now = new Date().toISOString();
   const epoch = modelSensitive.has(capability)
     ? currentModelEpoch(db, env.mistralModel)
@@ -604,6 +669,9 @@ export function recordIsolatedEvaluation(
 ): void {
   const releaseId = input.releaseId ?? currentReleaseId();
   const seeds = Math.max(0, Math.trunc(input.seeds));
+  if (capability === "memory_evidence") {
+    throw new Error("memory_evidence_requires_bound_evaluation");
+  }
   if (capability === "recall") {
     // Recall dual-write: the provenance-bearing capability_events row and the
     // epoch-registry mirror converge in ONE transaction, so no failure can
@@ -673,6 +741,9 @@ export function recordLiveShadowEvent(
   } = {},
 ): { recorded: boolean; reason?: "recall_qualification_epoch_unavailable" } {
   const releaseId = input.releaseId ?? currentReleaseId();
+  if (capability === "memory_evidence") {
+    throw new Error("memory_evidence_requires_semantic_witness");
+  }
   if (capability === "recall") {
     // Recall dual-write: provenance ledger row and epoch-registry mirror
     // converge in ONE transaction. The returned result reflects the
@@ -794,6 +865,10 @@ export function listCapabilityStatuses(
   const cutoff = new Date(now.getTime() - 7 * 86_400_000).toISOString();
   const epoch = currentModelEpoch(db, env.mistralModel);
   const build = currentBuildIdentity();
+  const memoryEvidenceEpoch = getCurrentMemoryEvidenceQualificationEpoch(db);
+  const memoryEvidenceReadiness = memoryEvidenceEpoch
+    ? getMemoryEvidenceQualificationReadiness(db, memoryEvidenceEpoch.ownerId, now)
+    : null;
   return capabilityNames.map((capability) => {
     ensureRelease(db, capability, releaseId);
     const release = db.prepare(
@@ -847,23 +922,33 @@ export function listCapabilityStatuses(
       influenceDependenciesReady: ready,
       evalSeedCount: capability === "recall"
         ? recallQualification?.evalSeedCount ?? 0
+        : capability === "memory_evidence"
+          ? memoryEvidenceReadiness?.evalSeedCount ?? 0
         : isRow(release)
           ? Number(release.eval_seed_count ?? 0)
           : 0,
       qualifiedAt: capability === "recall"
         ? recallQualification?.qualifiedAt ?? null
+        : capability === "memory_evidence"
+          ? memoryEvidenceReadiness?.qualifiedAt ?? null
         : isRow(release) && typeof release.qualified_at === "string"
           ? release.qualified_at
           : null,
       promotionEligible: promotionEligible(db, capability, releaseId),
       liveShadowEvents: capability === "recall"
         ? recallQualification?.liveShadowEvents ?? 0
+        : capability === "memory_evidence"
+          ? memoryEvidenceReadiness?.qualifyingCount ?? 0
         : live.count,
       liveShadowSpanDays: capability === "recall"
         ? recallQualification?.liveShadowSpanDays ?? 0
+        : capability === "memory_evidence"
+          ? memoryEvidenceReadiness?.spanDays ?? 0
         : liveSpanDays(live),
       qualificationEpochId: capability === "recall"
         ? recallQualification?.epochId ?? null
+        : capability === "memory_evidence"
+          ? memoryEvidenceReadiness?.epochId ?? null
         : null,
       behavioralBreachesSevenDays: breaches.count,
       promotedAt: isRow(release) && typeof release.promoted_at === "string"

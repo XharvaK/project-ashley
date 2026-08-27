@@ -103,6 +103,17 @@ describe("capability rollout", () => {
       promotionEligible: false,
     });
     expect(capabilityCanInfluence(db, "memory_evidence", "apply", releaseId)).toBe(false);
+    expect(() => recordIsolatedEvaluation(db, "memory_evidence", {
+      seeds: 6,
+      passed: true,
+      sourceKey: "memory_evidence:generic-eval",
+      releaseId,
+      occurredAt: start.toISOString(),
+    })).toThrow("memory_evidence_requires_bound_evaluation");
+    expect(() => recordLiveShadowEvent(db, "memory_evidence", "memory_evidence:generic-shadow", {
+      releaseId,
+      occurredAt: start.toISOString(),
+    })).toThrow("memory_evidence_requires_semantic_witness");
     db.close();
   });
 
