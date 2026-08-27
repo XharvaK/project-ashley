@@ -3,7 +3,16 @@ import { describe, expect, it } from "vitest";
 import { openNuclearDb } from "../db.js";
 import { insertMessage, resolveActiveThread } from "./threads.js";
 import { insertAssertion } from "./assertions.js";
-import { influenceEligibleAt } from "./eligibility.js";
+import {
+  episodeInfluenceEligibleAt,
+  episodeInfluenceEligibleUnderAssertionsAt,
+  influenceEligibleAt,
+  influenceEligibleUnderAssertionsAt,
+  mindStateItemInfluenceEligibleAt,
+  mindStateItemInfluenceEligibleUnderAssertionsAt,
+  sourceCoveredByDenyBarrier,
+  sourceCoveredByDenyBarrierUnderAssertions,
+} from "./eligibility.js";
 
 const OWNER_ID = "doc";
 const AT = "2026-08-26T12:00:00.000Z";
@@ -67,6 +76,23 @@ function addOpenBarrier(db: DatabaseSync, assertionId: number): void {
 }
 
 describe("C1 influence eligibility", () => {
+  it("delegates raw assertions policy without reading the currentness marker", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    try {
+      const id = createAssertion(db);
+      expect(influenceEligibleUnderAssertionsAt(db, id, AT)).toBe(true);
+      expect(influenceEligibleAt(db, id, AT)).toBe(true);
+      expect(sourceCoveredByDenyBarrierUnderAssertions(db, "fact", 1, AT)).toBe(false);
+      expect(sourceCoveredByDenyBarrier(db, "fact", 1, AT)).toBe(false);
+      expect(episodeInfluenceEligibleUnderAssertionsAt(db, OWNER_ID, 999, AT)).toBe(false);
+      expect(episodeInfluenceEligibleAt(db, OWNER_ID, 999, AT)).toBe(true);
+      expect(mindStateItemInfluenceEligibleUnderAssertionsAt(db, OWNER_ID, 999, AT)).toBe(false);
+      expect(mindStateItemInfluenceEligibleAt(db, OWNER_ID, 999, AT)).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
+
   it("applies the orthogonal fail-closed formula", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     try {

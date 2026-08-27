@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { getMemoryContractState } from "./contract-state.js";
-import { influenceEligibleAt } from "./eligibility.js";
+import { influenceEligibleUnderAssertionsAt } from "./eligibility.js";
 import type { MemoryMessage } from "./threads.js";
 
 export type MemoryContextRole =
@@ -79,12 +79,11 @@ function correctionHasCommittedEffect(
   ).get(...correctionIds) !== undefined;
 }
 
-export function annotationForAssertion(
+export function annotationForAssertionUnderAssertions(
   db: DatabaseSync,
   ownerId: string,
   assertionId: number,
 ): MemoryContextAnnotation | null {
-  if (!c1CurrentnessAuthority(db)) return null;
   const row = asRow(db.prepare(
     `SELECT id, termination_reason
      FROM memory_assertions
@@ -98,7 +97,7 @@ export function annotationForAssertion(
   return {
     memory_context_role: corrected
       ? "corrected_source_evidence"
-      : influenceEligibleAt(db, id)
+      : influenceEligibleUnderAssertionsAt(db, id)
         ? "current_source_evidence"
         : "historical_source_evidence",
     memory_assertion_ids: [id],
@@ -106,12 +105,20 @@ export function annotationForAssertion(
   };
 }
 
-export function annotationForMessage(
+export function annotationForAssertion(
+  db: DatabaseSync,
+  ownerId: string,
+  assertionId: number,
+): MemoryContextAnnotation | null {
+  if (!c1CurrentnessAuthority(db)) return null;
+  return annotationForAssertionUnderAssertions(db, ownerId, assertionId);
+}
+
+export function annotationForMessageUnderAssertions(
   db: DatabaseSync,
   ownerId: string,
   messageId: number,
-): MemoryContextAnnotation | null {
-  if (!c1CurrentnessAuthority(db)) return null;
+): MemoryContextAnnotation {
   const assertionRows = db.prepare(
     `SELECT id, termination_reason
      FROM memory_assertions
@@ -127,7 +134,7 @@ export function annotationForMessage(
   ].filter((id, index, all) => all.indexOf(id) === index);
   const terminated = assertionRows.some((row) => row.termination_reason != null);
   const corrected = terminated || correctionHasCommittedEffect(db, correctionIds);
-  const eligible = assertionIds.some((id) => influenceEligibleAt(db, id));
+  const eligible = assertionIds.some((id) => influenceEligibleUnderAssertionsAt(db, id));
   return {
     memory_context_role: corrected
       ? "corrected_source_evidence"
@@ -137,12 +144,20 @@ export function annotationForMessage(
   };
 }
 
-export function annotationForFact(
+export function annotationForMessage(
+  db: DatabaseSync,
+  ownerId: string,
+  messageId: number,
+): MemoryContextAnnotation | null {
+  if (!c1CurrentnessAuthority(db)) return null;
+  return annotationForMessageUnderAssertions(db, ownerId, messageId);
+}
+
+export function annotationForFactUnderAssertions(
   db: DatabaseSync,
   ownerId: string,
   factId: number,
-): MemoryContextAnnotation | null {
-  if (!c1CurrentnessAuthority(db)) return null;
+): MemoryContextAnnotation {
   const rows = db.prepare(
     `SELECT id, termination_reason
      FROM memory_assertions
@@ -160,7 +175,7 @@ export function annotationForFact(
   const correctionIds = correctionIdsForAssertions(db, assertionIds);
   const corrected = rows.some((row) => row.termination_reason != null) ||
     correctionHasCommittedEffect(db, correctionIds);
-  const eligible = assertionIds.some((id) => influenceEligibleAt(db, id));
+  const eligible = assertionIds.some((id) => influenceEligibleUnderAssertionsAt(db, id));
   return {
     memory_context_role: corrected
       ? "corrected_source_evidence"
@@ -168,6 +183,15 @@ export function annotationForFact(
     memory_assertion_ids: assertionIds,
     memory_correction_ids: corrected ? correctionIds : [],
   };
+}
+
+export function annotationForFact(
+  db: DatabaseSync,
+  ownerId: string,
+  factId: number,
+): MemoryContextAnnotation | null {
+  if (!c1CurrentnessAuthority(db)) return null;
+  return annotationForFactUnderAssertions(db, ownerId, factId);
 }
 
 export function annotateHotMessage(

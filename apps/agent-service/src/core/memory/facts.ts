@@ -213,16 +213,32 @@ export function factInfluenceEligibleAt(
   factId: number,
   at = new Date().toISOString(),
 ): boolean {
+  const state = getMemoryContractState(db);
+  if (state?.currentnessAuthority !== "memory_assertions") {
+    const fact = db.prepare(
+      `SELECT id FROM mem_facts
+       WHERE id = ? AND owner_id = ? AND superseded_by IS NULL LIMIT 1`,
+    ).get(factId, ownerId);
+    return Boolean(fact);
+  }
+  return factInfluenceEligibleUnderAssertionsAt(db, ownerId, factId, at);
+}
+
+/** Assertion-only fact-source check. This deliberately ignores the cutover marker. */
+export function factInfluenceEligibleUnderAssertionsAt(
+  db: DatabaseSync,
+  ownerId: string,
+  factId: number,
+  at = new Date().toISOString(),
+): boolean {
   const fact = db.prepare(
     `SELECT id FROM mem_facts
      WHERE id = ? AND owner_id = ? AND superseded_by IS NULL LIMIT 1`,
   ).get(factId, ownerId);
   if (!fact) return false;
-  const state = getMemoryContractState(db);
-  if (state?.currentnessAuthority !== "memory_assertions") return true;
   const assertions = db.prepare(
     `SELECT id FROM memory_assertions
-     WHERE owner_id = ? AND legacy_fact_id = ? AND termination_reason IS NULL
+     WHERE owner_id = ? AND legacy_fact_id = ?
      ORDER BY id DESC`,
   ).all(ownerId, factId) as Array<{ id?: number }>;
   return assertions.some((assertion) =>

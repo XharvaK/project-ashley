@@ -14,8 +14,15 @@ import { admitOwnerCorrection } from "./corrections.js";
 import { cutoverMemoryAssertions } from "./cutover.js";
 import { insertAssertion } from "./assertions.js";
 import { createEpisode } from "./episodes.js";
-import { mindStateItemInfluenceEligibleAt } from "./eligibility.js";
-import { factInfluenceEligibleAt, upsertFact } from "./facts.js";
+import {
+  influenceEligibleUnderAssertionsAt,
+  mindStateItemInfluenceEligibleAt,
+} from "./eligibility.js";
+import {
+  factInfluenceEligibleAt,
+  factInfluenceEligibleUnderAssertionsAt,
+  upsertFact,
+} from "./facts.js";
 import { assembleMemoryBlock } from "./assemble.js";
 import {
   getHotMessages,
@@ -128,6 +135,7 @@ describe("C1 reader cutover", () => {
         sourceQuote: "I like coffee.",
       });
       const assertionId = assertionIdForFact(db, factId);
+      expect(factInfluenceEligibleUnderAssertionsAt(db, OWNER_ID, factId)).toBe(true);
       cutoverMemoryAssertions(db);
       const mindStateId = upsertMindStateItem(db, {
         ownerId: OWNER_ID,
@@ -156,6 +164,7 @@ describe("C1 reader cutover", () => {
       });
 
       expect(factInfluenceEligibleAt(db, OWNER_ID, factId)).toBe(false);
+      expect(factInfluenceEligibleUnderAssertionsAt(db, OWNER_ID, factId)).toBe(false);
       expect(mindStateItemInfluenceEligibleAt(db, OWNER_ID, mindStateId)).toBe(false);
       expect(db.prepare(
         "SELECT id FROM mind_state_items WHERE id = ? AND status = 'active'",
@@ -264,6 +273,8 @@ describe("C1 reader cutover", () => {
       const coffeeClaim = insertEpisodeClaim(db, episode.id, "Coffee claim remains current.");
       const teaClaim = insertEpisodeClaim(db, episode.id, "Tea claim remains current.");
       cutoverMemoryAssertions(db);
+
+      expect(influenceEligibleUnderAssertionsAt(db, coffeeClaim)).toBe(true);
 
       const currentLines = resolveEvidenceRefs(db, OWNER_ID, [{ type: "episode", id: episode.id }]);
       expect(currentLines.map((line) => line.text)).toEqual([

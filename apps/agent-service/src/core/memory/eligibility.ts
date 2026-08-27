@@ -87,8 +87,8 @@ export function assertionCurrentAt(
   return assertion.authorityTo === null || at < assertion.authorityTo;
 }
 
-/** Return true only when all C1 current-influence predicates are proven. */
-export function influenceEligibleAt(
+/** Return true only when all C1 assertions-policy predicates are proven. */
+export function influenceEligibleUnderAssertionsAt(
   db: DatabaseSync,
   assertionId: number,
   at = new Date().toISOString(),
@@ -104,6 +104,15 @@ export function influenceEligibleAt(
   const contradiction = contradictionBlocks(db, assertion);
   if (contradiction !== false) return false;
   return true;
+}
+
+/** Live compatibility wrapper; the historical result is unchanged. */
+export function influenceEligibleAt(
+  db: DatabaseSync,
+  assertionId: number,
+  at = new Date().toISOString(),
+): boolean {
+  return influenceEligibleUnderAssertionsAt(db, assertionId, at);
 }
 
 export function listEligibleAssertions(
@@ -136,6 +145,19 @@ export function sourceCoveredByDenyBarrier(
   if (getMemoryContractState(db)?.currentnessAuthority !== "memory_assertions") {
     return false;
   }
+  return sourceCoveredByDenyBarrierUnderAssertions(db, sourceType, sourceId, at);
+}
+
+/**
+ * Evaluate the assertions deny barrier without consulting the currentness
+ * marker. This is the pre-cutover policy seam used by C1 shadow evaluation.
+ */
+export function sourceCoveredByDenyBarrierUnderAssertions(
+  db: DatabaseSync,
+  sourceType: string,
+  sourceId: string | number,
+  at = new Date().toISOString(),
+): boolean {
   try {
     if (sourceType === "fact" || sourceType === "mem_fact") {
       return db.prepare(
@@ -221,6 +243,15 @@ export function episodeInfluenceEligibleAt(
   if (getMemoryContractState(db)?.currentnessAuthority !== "memory_assertions") {
     return true;
   }
+  return episodeInfluenceEligibleUnderAssertionsAt(db, ownerId, episodeId, at);
+}
+
+export function episodeInfluenceEligibleUnderAssertionsAt(
+  db: DatabaseSync,
+  ownerId: string,
+  episodeId: number,
+  at = new Date().toISOString(),
+): boolean {
   try {
     const episode = db.prepare(
       `SELECT 1 FROM episodes
@@ -233,7 +264,7 @@ export function episodeInfluenceEligibleAt(
        WHERE episode_id = ?`,
     ).all(episodeId) as Array<{ assertion_id?: number }>;
     return claims.some((claim) =>
-      claim.assertion_id != null && influenceEligibleAt(db, Number(claim.assertion_id), at),
+      claim.assertion_id != null && influenceEligibleUnderAssertionsAt(db, Number(claim.assertion_id), at),
     );
   } catch {
     return false;
@@ -247,7 +278,19 @@ export function mindStateInfluenceEligibleAt(
   sourceId: string | number,
   at = new Date().toISOString(),
 ): boolean {
-  return !sourceCoveredByDenyBarrier(db, sourceType, sourceId, at);
+  if (getMemoryContractState(db)?.currentnessAuthority !== "memory_assertions") {
+    return true;
+  }
+  return mindStateInfluenceEligibleUnderAssertionsAt(db, sourceType, sourceId, at);
+}
+
+function mindStateInfluenceEligibleUnderAssertionsAt(
+  db: DatabaseSync,
+  sourceType: string,
+  sourceId: string | number,
+  at: string,
+): boolean {
+  return !sourceCoveredByDenyBarrierUnderAssertions(db, sourceType, sourceId, at);
 }
 
 export function mindStateItemInfluenceEligibleAt(
@@ -259,6 +302,15 @@ export function mindStateItemInfluenceEligibleAt(
   if (getMemoryContractState(db)?.currentnessAuthority !== "memory_assertions") {
     return true;
   }
+  return mindStateItemInfluenceEligibleUnderAssertionsAt(db, ownerId, itemId, at);
+}
+
+export function mindStateItemInfluenceEligibleUnderAssertionsAt(
+  db: DatabaseSync,
+  ownerId: string,
+  itemId: number,
+  at = new Date().toISOString(),
+): boolean {
   try {
     const item = db.prepare(
       `SELECT source_type, source_id FROM mind_state_items
@@ -268,7 +320,7 @@ export function mindStateItemInfluenceEligibleAt(
       source_id?: string;
     } | undefined;
     if (!item || !item.source_type || item.source_id == null) return false;
-    return mindStateInfluenceEligibleAt(db, item.source_type, item.source_id, at);
+    return mindStateInfluenceEligibleUnderAssertionsAt(db, item.source_type, item.source_id, at);
   } catch {
     return false;
   }

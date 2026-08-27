@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { openNuclearDb } from "../db.js";
 import {
   listActiveFacts,
+  factInfluenceEligibleAt,
+  factInfluenceEligibleUnderAssertionsAt,
   upsertFact,
 } from "./facts.js";
 import {
@@ -80,6 +82,24 @@ describe("C1 current-source gap characterization", () => {
       expect(hotMessage?.text).toBe("I no longer like coffee.");
       expect(assembled.memoryBlock).toContain("user: I no longer like coffee.");
       expect(assembled.memoryBlock).not.toContain("memory_context_role");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps raw assertion eligibility available without changing the legacy marker path", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    try {
+      const factId = upsertFact(db, {
+        ownerId: OWNER_ID,
+        category: "preference",
+        key: "tea",
+        value: "likes tea",
+        origin: "explicit_user",
+      });
+
+      expect(factInfluenceEligibleUnderAssertionsAt(db, OWNER_ID, factId)).toBe(true);
+      expect(factInfluenceEligibleAt(db, OWNER_ID, factId)).toBe(true);
     } finally {
       db.close();
     }
