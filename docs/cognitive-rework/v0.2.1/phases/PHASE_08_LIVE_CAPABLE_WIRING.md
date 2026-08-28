@@ -30,17 +30,19 @@ Source (flag-gated, default legacy):
 - Import CLI and cutover rehearsal script exist
 - Deploy scripts unchanged except they already honor env (no SHA rewrite)
 
-Then: clean tree, commit, record `CANDIDATE_SHA` in `artifacts/CANDIDATE_FREEZE.md`.
+Then: clean tracked tree. **Candidate SHA = that functional source commit** (`git rev-parse HEAD`). Do **not** embed that SHA in a tracked file inside the same commit. Write untracked `artifacts/runtime/CANDIDATE_FREEZE.md` pointing **to** the SHA. Push Gate R review ref (QUALIFICATION_PROTOCOL Q2).
 
 ## FILES TO CREATE
 
 - `cognitive-v021/dispatch/live.ts` + tests
-- `cognitive-v021/shadow/replicator.ts` + tests
+- `cognitive-v021/cycle/inbox-consumer.ts` + tests (durable claim/lease)
+- `cognitive-v021/shadow/replicator.ts` + tests (**legacy delivery mirror only**)
 - `cognitive-v021/shadow/runner.ts` + tests
 - `cognitive-v021/dispatch/health.ts` + tests
+- `cognitive-v021/evidence/compatibility-projector.ts` + tests
+- Discord `/remember` flag-gated wiring + idle scheduler tick (cannot send until `v021`)
 - `scripts/cognitive-v021/cutover-rehearsal.mjs` (isolated paths only)
-- `apps/discord-bot` handler extraction if not done in Phase 01/03
-- `artifacts/CANDIDATE_FREEZE.md`
+- `scripts/cognitive-v021/dispose-shadow-semantic-state.mjs`
 
 ## FILES TO MODIFY
 
@@ -102,16 +104,32 @@ Default `legacy`. Doc still hears Expression/decide path. Candidate speech impos
 
 ### Task 8.5 Cutover rehearsal script (isolated)
 
-- [ ] `scripts/cognitive-v021/cutover-rehearsal.mjs` on temp copies: import dry-run, verify, projector crash tests, rollback copy
+- [ ] Isolated copies only; **must not** invoke production `update.sh`
+- [ ] Import dry-run, verify, projector crash tests, shadow dispose rehearsal, rollback copy
 - [ ] Refuses reserved production paths
 - [ ] Commit: `feat(cognitive-v021): isolated cutover rehearsal script`
 
-### Task 8.6 CANDIDATE FREEZE
+### Task 8.6 Durable inbox consumer + shadow isolation
 
-- [ ] `git status` clean of kernel work (HARD BLOCKER 5 if dirty)
-- [ ] `git rev-parse HEAD` recorded as `CANDIDATE_SHA`
-- [ ] `artifacts/CANDIDATE_FREEZE.md` binds spec versions, sidecar schema 1, Thought contract 1, outbox bridge 1, import tool 1, selected baseline SHA
-- [ ] Commit: `docs(cognitive-v021): record candidate freeze SHA` **or** the freeze commit **is** the candidate (include freeze file in that commit)
+- [ ] Crash after 202: event processed on restart
+- [ ] `shadow`/`legacy`: sidecar ingress throw does **not** block `chatText`
+- [ ] `v021`: ingress failure fails closed (no silent legacy cognition)
+- [ ] Shadow outbox rows are `suppressed_shadow`; never sendable after simulated cutover
+- [ ] Replicator mirrors legacy **delivered** Ashley text; does not duplicate owner ingress
+- [ ] Commit: `feat(cognitive-v021): durable consumer and shadow isolation`
+
+### Task 8.7 Slash + scheduler live wiring
+
+- [ ] `/remember` maps to `admitOwnerSuppliedClaim` when kernel `v021` (flag-gated)
+- [ ] Idle scheduler ticks kernel when `shadow`|`v021` without sending in shadow
+- [ ] Commit: `feat(cognitive-v021): remember and idle scheduler flag-gated wiring`
+
+### Task 8.8 CANDIDATE FREEZE
+
+- [ ] Tracked `git status --porcelain` clean (HARD BLOCKER 5 if dirty)
+- [ ] `CANDIDATE_SHA = git rev-parse HEAD` of the **functional source commit**
+- [ ] Untracked `artifacts/runtime/CANDIDATE_FREEZE.md` points **to** that SHA (not committed inside it)
+- [ ] Push `review/cognitive-v021-candidate-<shortsha>` at exactly that SHA (Gate R)
 - [ ] After this commit: **no functional source changes**
 
 ## FULL PHASE GATE
@@ -119,7 +137,7 @@ Default `legacy`. Doc still hears Expression/decide path. Candidate speech impos
 ```powershell
 npm run build:agent
 npm run build:discord
-npx tsc --noEmit
+npm exec --prefix apps/agent-service -- tsc --noEmit
 npm test --prefix apps/agent-service -- src/core/cognitive-v021
 npm test --prefix apps/discord-bot -- src/handlers/messageCreate.ingress.integration.test.ts
 npm run test:offline --prefix apps/agent-service
@@ -127,7 +145,7 @@ npm run test:offline --prefix apps/agent-service
 
 ## EXPECTED PASS SIGNATURE
 
-All above green. `CANDIDATE_FREEZE.md` exists. Default kernel still `legacy`.
+All above green. Untracked freeze record exists. Default kernel still `legacy`. Shadow cannot send.
 
 ## AUTONOMOUS REPAIR POLICY
 
@@ -139,7 +157,7 @@ Shadow sends Discord. Live dispatcher reachable with default env. Dirty freeze. 
 
 ## OUTPUT ARTIFACT
 
-`artifacts/PHASE_08_GATE.md` + `artifacts/CANDIDATE_FREEZE.md`
+`artifacts/runtime/PHASE_08_GATE.md` + `artifacts/runtime/CANDIDATE_FREEZE.md`
 
 ## NEXT PHASE PRECONDITIONS
 

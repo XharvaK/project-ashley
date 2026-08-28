@@ -24,7 +24,7 @@ Ashley thinks in **Cognitive Cycles**. Each cycle is fenced by `cycleId` + `gene
 
 Thought may, before publication, author **intra-cycle operational intent** (observe or effect). That intent is already meaning. It is Authority-checked, fenced, and receipt-bounded. It must not write conversational or durable semantic stores. The world may change; Ashley’s Working Context, occupancy, Memory, Identity, triggers, subscriptions, and licensed speech do not until publication.
 
-When Thought is done, it emits a **Cognitive Settlement**. That object publishes **atomically**: Working Context, concern lineage, Mind State occupancy, FutureTriggers, ObservationSubscriptions, DurableNominations (queued), and — if speaking — a **speech outbox** intent containing the licensed draft. If that transaction fails, nothing semantic publishes.
+When Thought is done, it emits a **Cognitive Settlement**. That object publishes **atomically**: Working Context, concern lineage, Mind State occupancy, FutureTriggers, ObservationSubscriptions, DurableNominations (queued), and — if speaking — a **speech outbox** intent containing the licensed draft. If that transaction fails, nothing semantic publishes. Software contracts implement this as `ThoughtSettlementDraft` (Thought JSON; no `finalLicensedText` / outbox / reservation) versus `PublishedCognitiveSettlement` (kernel-finalized licensed text). That is a type-boundary split, not a second semantic author.
 
 **Expression**, if used, only adapts the already-licensed draft without transcript, memory, perception, or tools. Default Discord path delivers Thought’s `surfaceDraft` from the outbox.
 

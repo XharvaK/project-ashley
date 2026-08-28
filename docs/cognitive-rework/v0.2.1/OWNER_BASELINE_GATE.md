@@ -1,6 +1,8 @@
 # Owner Gate A — Implementation baseline selection
 
-**Status:** `UNSET` — `BLOCKED_PENDING_OWNER_BASELINE_SELECTION`
+**Status:** `UNSET` — still a later human gate. Packet R3 must pass independent review **before** Doc fills this file.
+
+Quota-aware Q3/Q5 and R3 contract fixes do **not** fill this gate and do **not** choose M / C / Other.
 
 **Luna must not begin Phase 00 implementation until this file records an owner-selected SHA.** Filling this file is an owner act. Luna must not guess.
 
@@ -75,6 +77,10 @@ SOURCE_MAP_REVALIDATED_AT=<unset>
 SOURCE_MAP_REVALIDATION_RESULT=<unset>
 ```
 
-Until `OWNER_SELECTED_IMPLEMENTATION_BASELINE_SHA` is a 40-character SHA recorded by Doc: packet **execution** status remains `BLOCKED_PENDING_OWNER_BASELINE_SELECTION`.
+This file remains **UNSET**. Filling it is a later owner act **after** packet R3 passes independent review.
 
-Quota-aware Q3 (packet R2.1) does **not** fill this gate and does **not** choose M / C / Other.
+Until then, packet **execution** status is `BLOCKED — PACKET R3 AWAITING INDEPENDENT REVIEW` (contract reconciliation), not “blocked only by baseline selection.”
+
+After R3 PASSES, if this file is still empty, execution is `BLOCKED_PENDING_OWNER_BASELINE_SELECTION`. Once Doc records the SHA and Luna revalidates the source map, implementation may begin.
+
+Quota-aware Q3 (packet R2.1) and R3 contract fixes do **not** fill this gate and do **not** choose M / C / Other.

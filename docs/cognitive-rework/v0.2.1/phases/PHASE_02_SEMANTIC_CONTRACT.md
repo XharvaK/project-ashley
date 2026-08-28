@@ -22,7 +22,7 @@ Phase 01 PASS.
 
 ## TARGET SOURCE STATE
 
-- `validateSettlement`
+- `validateThoughtSettlementDraft`
 - `buildThoughtInput`
 - `parseThoughtStepOutput`
 - `runThoughtModel` using `invokeThoughtComplete` → `completeChat` route `thought` with injected fake that still requires `attentionDb`
@@ -54,7 +54,7 @@ Phase 01 txn, log, fence. `completeChat` type from `mistral-client.ts`. Identity
 
 ## INTERFACES PRODUCED
 
-`validateSettlement`, `buildThoughtInput`, `parseThoughtStepOutput`, `invokeThoughtComplete`, `runThoughtModel`, `ThoughtInput`, `ThoughtStepOutput`, `getCapabilityReality`.
+`validateThoughtSettlementDraft`, `buildThoughtInput`, `parseThoughtStepOutput`, `invokeThoughtComplete`, `runThoughtModel`, `ThoughtInput`, `ThoughtStepOutput`, `getCapabilityReality`.
 
 ## DATABASE / MIGRATION CHANGES
 
@@ -68,7 +68,7 @@ Legacy Thought JSON remains on production path.
 
 ## TEST-FIRST TASK SEQUENCE
 
-### Task 2.1 validateSettlement
+### Task 2.1 validateThoughtSettlementDraft
 
 - [ ] Failing cases: missing schemaVersion; draft without surfaceDraft; mode none with draft text; empty commitments + draft; effectsCompleted unknown id; revisionCount 3
 - [ ] Valid private `mode=none` with occupancyDelta
@@ -140,7 +140,7 @@ Ordinary owner_message: `acceptedSettlements === 1` (no Expression). Fail if `ac
 
 ```powershell
 npx vitest run src/core/cognitive-v021 --config vitest.offline.config.ts
-npx tsc --noEmit
+npm exec --prefix apps/agent-service -- tsc --noEmit
 npm run test:offline --prefix apps/agent-service
 ```
 
@@ -158,7 +158,7 @@ Cannot obtain capability flags without calling Expression. Cannot run perception
 
 ## OUTPUT ARTIFACT
 
-`artifacts/PHASE_02_GATE.md`
+`artifacts/runtime/PHASE_02_GATE.md`
 
 ## COMMIT GROUPING
 

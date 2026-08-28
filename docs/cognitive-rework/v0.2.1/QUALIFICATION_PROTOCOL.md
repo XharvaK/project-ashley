@@ -2,7 +2,7 @@
 
 **When:** After Phase 08 candidate freeze. Phase 09 executes this file. **No source changes.**
 
-**Protocol revision:** `r2.1` (quota-aware Q3). Architecture laws are unchanged.
+**Protocol revision:** `r3` (R3 contracts + quota-aware shadow). Architecture laws are unchanged.
 
 **Result vocabulary:** `PASS` or `FAIL`. There is no `PASS_WITH_NOTES` that bypasses a hard cognitive invariant.
 
@@ -40,11 +40,11 @@ Every artifact binds:
 
 | Field | Source |
 |---|---|
-| `candidateSha` | `git rev-parse HEAD` == `CANDIDATE_FREEZE.md` |
+| `candidateSha` | freeze source commit; runtime freeze file **points to** it |
 | `selectedBaselineSha` | OWNER_BASELINE_GATE |
 | `architectureVersion` | `v0.2.1` |
-| `implementationSpecVersion` | `0.2.1.r2` |
-| `qualificationProtocolRevision` | `r2.1` |
+| `implementationSpecVersion` | `0.2.1.r3` |
+| `qualificationProtocolRevision` | `r3` |
 | `sidecarSchemaVersion` | `1` |
 | `thoughtContractVersion` | `1` |
 | `modelRoute` / occupant | live `thought` route + resolved occupant id (no secrets) |
@@ -82,14 +82,17 @@ No aggregate benchmark score may override a hard architecture invariant.
 
 Exact integers are **OWNER / CONFIGURATION PARAMETERS** because free-tier quotas change. They are not architecture. The invariant is: **bounded, recorded, never silent-unbounded.**
 
-Before Q3 starts, Luna **must** write `artifacts/QUOTA_BUDGET.md` with the values in force. If Doc has not set them, Luna uses the **recommended ceilings** below and records that fact. Luna may not raise a ceiling without Doc. Luna may lower a ceiling.
+Before Q3 starts, Luna **must** write `artifacts/runtime/QUOTA_BUDGET.md` with the values in force. If Doc has not set them, Luna uses the **recommended ceilings** below and records that fact. Luna may not raise a ceiling without Doc. Luna may lower a ceiling.
 
 | Parameter | Meaning | Recommended ceiling if unset |
 |---|---|---|
 | `REAL_MODEL_WITNESS_MAX_CALLS` | Fresh live Thought API invocations for Q3 (all families + allowed perturbations + allowed retries) | `20` |
 | `REAL_MODEL_WITNESS_RETRY_CAP` | Extra live attempts of the **same** failed family after implementation defects are excluded | `2` then stop that family |
 | `FALLBACK_SMOKE_MAX_CALLS` | Fallback-route smoke only (if architecture requires a fallback) | `2` |
-| `SHADOW_MODEL_CALL_BUDGET` | Cap on **synthetic extra** live calls during Q5. Real mirrored ingress is not a synthetic suite. | `0` synthetic extras; shadow window is real traffic only |
+| `SHADOW_MODEL_CALL_BUDGET` | Cap on **synthetic extra** live calls during Q5 | `0` |
+| `SHADOW_REAL_THOUGHT_MAX_CALLS` | Real mirrored shadow Thought invocations (candidate kernel) | `40` |
+| `SHADOW_MAX_CYCLES` | Candidate cycles during Q5 | `40` |
+| `SHADOW_MAX_DURATION` | Wall clock | `48h` |
 | `LIVE_WITNESS_RETRY_CAP` | Diagnostic recapture of a failed live turn after cutover | `1` then record defect/incomplete |
 
 Hitting a ceiling without a completed required family is not an automatic architecture FAIL. Classify: quota exhausted vs occupant incompatible vs implementation bug. Quota exhaustion from **blind retries** is an **execution defect**: stop, do not keep calling.
@@ -101,7 +104,7 @@ Hitting a ceiling without a completed required family is not an automatic archit
 ```powershell
 npm run build:agent
 npm run build:discord
-npx tsc --noEmit --prefix apps/agent-service
+npm exec --prefix apps/agent-service -- tsc --noEmit
 npm test --prefix apps/agent-service -- src/core/cognitive-v021
 npm run test:offline --prefix apps/agent-service
 npm test --prefix apps/discord-bot
@@ -138,9 +141,19 @@ Host-only Bubblewrap tests are **not** required on Windows. Q4 covers Mint.
 
 ## Q2 — Independent exact-candidate review (Owner Gate R)
 
-Review the **exact** `CANDIDATE_SHA`. Luna is not the independent reviewer. STOP until Doc commissions review and records verdict in `artifacts/EXACT_CANDIDATE_REVIEW.md`.
+Review the **exact** `CANDIDATE_SHA`. Luna is not the independent reviewer.
 
-No later source changes. If review requires code: new SHA, restart Q1.
+**Publication mechanism (pre-authorized for this packet):** after the functional source commit and a **clean** tree:
+
+1. Verify `git status --porcelain` has no tracked dirt.
+2. Write **untracked** `docs/cognitive-rework/v0.2.1/artifacts/runtime/CANDIDATE_FREEZE.md` pointing **to** `CANDIDATE_SHA` (do not commit it into the candidate).
+3. Create and push **non-merging** ref `review/cognitive-v021-candidate-<shortsha>` at **exactly** `CANDIDATE_SHA`.
+4. No source modifications on that push. No force push. No PR/merge required.
+5. Return repository, review ref, full SHA, runtime artifact coordinates.
+6. **STOP.** Doc gives those coordinates to the independent reviewer.
+7. Verdict is recorded in untracked `artifacts/runtime/EXACT_CANDIDATE_REVIEW.md`.
+
+This push is the **explicit exception** to “do not push unless Doc asked” for Gate R only. Other pushes still require Doc.
 
 **PASS iff:** independent verdict ACCEPT (or ACCEPT_WITH_NONBLOCKING_NOTES that do not touch frozen contracts) bound to `CANDIDATE_SHA`.
 
@@ -238,15 +251,27 @@ They must not be treated as live inhabit evidence for a new occupant or a change
 
 ## Q4 — Isolated Mint qualification
 
-Exact candidate on Mint in **non-production-authoritative** mode (isolated data dir / `dataPlane.kind=isolated` copies — never the live `nuclear.db` as the write target).
+Q4 occurs **before** Owner Gate B. It **must not** stop or restart production `ashley-discord.service` / `ashley-agent.service`.
 
-Prove: schema init/migration, service start, process restart, sidecar recovery, orphan operation recovery, outbox projector recovery, provider credentials/config **presence** without exposing secrets, Bubblewrap/Sandbox integration still loads, database path/permissions, `deploy/linux-mint/update.sh` on this SHA, cutover rehearsal, rollback rehearsal (restore copies).
+`deploy/linux-mint/update.sh` stops those units. **Do not run it against the production checkout for Q4.**
 
-Q4 is an environment/rehearsal gate. It is not a second full live-model corpus.
+Frozen isolated path:
 
-**PASS iff:** rehearsal script PASS on isolated copies.
+- separate worktree/checkout of `CANDIDATE_SHA`;
+- isolated data dir (`dataPlane.kind=isolated`); never live `nuclear.db` / production sidecar as write target;
+- alternate agent port;
+- `node` process or **temporary qualification units that do not replace live Ashley**;
+- static review of `update.sh` plus rehearsal of equivalent build/start **in isolation**.
 
-HARD BLOCKER 10 if skipped.
+If true isolation cannot be achieved on that host: **Owner Gate Q4-HOST** before any disruptive rehearsal.
+
+Prove: schema init/migration, isolated service start/restart, sidecar recovery, orphan recovery, outbox projector recovery, credentials/config **presence** without exposing secrets, Bubblewrap/Sandbox still loads, database path/permissions, isolated cutover/rollback rehearsal on copies.
+
+Q4 is not a second live-model corpus.
+
+**PASS iff:** isolated rehearsal script PASS.
+
+HARD BLOCKER 10 if skipped or if production units were stopped without owner authorization.
 
 ---
 
@@ -265,11 +290,13 @@ Legacy Ashley remains the only authority responding to Doc. Candidate:
 
 Run a meaningful shadow window (not a single fixture). Treat **real shadow settlements** as high-value model-inhabitation evidence. Prefer real traffic + causal trace inspection over large artificial prompt suites.
 
-Do **not** automatically repeat every shadow interaction through an additional synthetic real-model call to increase sample count. `SHADOW_MODEL_CALL_BUDGET` recommended `0` synthetic extras.
+The shadow window **ends** on whichever comes first: `SHADOW_MAX_DURATION`, `SHADOW_REAL_THOUGHT_MAX_CALLS`, `SHADOW_MAX_CYCLES`, sufficient evidence recorded, or hard failure. No unbounded mirror. Record `SHADOW_CALLS_USED`.
 
-Collect: real traffic settlements, latency, model failures, retrieval, rapid-message behavior, candidate WC/concern/occupancy, nominations, Authority objections, draft quality, comparison to legacy replies where useful.
+Candidate outbox must be `suppressed_shadow`. Zero sendable shadow rows at window end.
 
-`artifacts/SHADOW_RESULT.md` + config hash.
+Legacy replies must still occur if sidecar ingress fails.
+
+`artifacts/runtime/SHADOW_RESULT.md` + config hash.
 
 HARD BLOCKER 11 if no owner auth. HARD BLOCKER 12 if no real shadow evidence.
 
@@ -311,14 +338,14 @@ Architectural contradiction: HARD BLOCKER 23.
 
 ## Result file
 
-`docs/cognitive-rework/v0.2.1/artifacts/QUALIFICATION_RESULT.md`
+`docs/cognitive-rework/v0.2.1/artifacts/runtime/QUALIFICATION_RESULT.md`
 
 ```
 RESULT: PASS | FAIL
 QUALIFIED_SHA: <sha>
 CANDIDATE_SHA: <sha>
 selectedBaselineSha: <sha>
-qualificationProtocolRevision: r2.1
+qualificationProtocolRevision: r3
 ...identity table...
 
 ARCHITECTURE_CORPUS_RESULT: PASS | FAIL

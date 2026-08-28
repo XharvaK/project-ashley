@@ -14,7 +14,7 @@ S25 (reserved path / data plane), S26 (harness exists), S24 (sidecar is not prod
 
 ## CURRENT SOURCE STATE
 
-- Nuclear: `openNuclearDb` / `NUCLEAR_SUPPORTED_VERSION = 41` (`db.ts`)
+- Nuclear: `openNuclearDb` / inspected `c7c81c4` has `NUCLEAR_SUPPORTED_VERSION = 41` (`db.ts`). After Gate A, record the selected baseline’s constant; do not assume 41.
 - Continuity sidecar pattern: `continuity/db.ts` `openContinuityDb`
 - Reserved paths: `data-plane.ts` `reservedProductionNuclearDbPath`, `reservedProductionContinuityDbPath`
 - Env: `env.ts` has `cognitionMode`, no `ASHLEY_COGNITIVE_KERNEL`
@@ -25,9 +25,9 @@ S25 (reserved path / data plane), S26 (harness exists), S24 (sidecar is not prod
 - `env.cognitiveKernel: KernelMode` default `legacy`
 - `reservedProductionCognitiveSidecarDbPath()`
 - `openCognitiveSidecarDb` with production-path guard
-- Sidecar schema version **1** with **complete v1 DDL** from spec §W.1 (not meta-only)
+- Sidecar schema version **1** with **complete v1 DDL** from [04_STORAGE_AND_DISPATCH_CONTRACT.md](../04_STORAGE_AND_DISPATCH_CONTRACT.md)
+- Record `OBSERVED_NUCLEAR_SUPPORTED_VERSION` from selected baseline (inspect `NUCLEAR_SUPPORTED_VERSION`; do not assume 41 after Gate A)
 - `assertCausalInvariants` exported and tested
-- Nuclear current-pin tests use 41 / `NUCLEAR_SUPPORTED_VERSION`
 - Legacy `handleReactiveChat` order unchanged
 
 ## FILES TO CREATE
@@ -39,7 +39,7 @@ S25 (reserved path / data plane), S26 (harness exists), S24 (sidecar is not prod
 - `apps/agent-service/src/core/cognitive-v021/sidecar/db.test.ts`
 - `apps/agent-service/src/core/cognitive-v021/acceptance/causal-harness.test.ts`
 - `apps/agent-service/src/core/cognitive-v021/env-kernel.test.ts`
-- `docs/cognitive-rework/v0.2.1/artifacts/PHASE_00_GATE.md`
+- `docs/cognitive-rework/v0.2.1/artifacts/runtime/PHASE_00_GATE.md`
 
 ## FILES TO MODIFY
 
@@ -61,11 +61,11 @@ S25 (reserved path / data plane), S26 (harness exists), S24 (sidecar is not prod
 
 `ARCHITECTURE_EPOCH`, `COGNITIVE_SIDECAR_SCHEMA_VERSION`, `KernelMode`, `openCognitiveSidecarDb`, `reservedProductionCognitiveSidecarDbPath`, `assertCausalInvariants`, `CausalBundle`, `env.cognitiveKernel`.
 
-Stub throws: `runCognitiveCycle`, `publishSemanticTransaction`, `validateSettlement`, `checkAuthority` — message `not_implemented_until_phase_N`.
+Stub throws: `runCognitiveCycle`, `publishSemanticTransaction`, `validateThoughtSettlementDraft`, `checkAuthority` — message `not_implemented_until_phase_N`.
 
 ## DATABASE / MIGRATION CHANGES
 
-Sidecar only. Apply spec §W.1 DDL at version **1**. No nuclear `user_version` bump in this phase (outbox column is Phase 05). **Do not bump sidecar to version 2.**
+Sidecar only. Apply 04 complete v1 DDL. No nuclear `user_version` bump in this phase (outbox column is Phase 05 as **baseline version + 1**). **Do not bump sidecar to version 2.**
 
 ## LEGACY COMPATIBILITY BEHAVIOR
 
@@ -168,7 +168,7 @@ From `apps/agent-service`:
 ```powershell
 npx vitest run src/core/cognitive-v021 --config vitest.offline.config.ts
 npx vitest run src/core/data-plane-authority.test.ts --config vitest.offline.config.ts
-npx tsc --noEmit
+npm exec --prefix apps/agent-service -- tsc --noEmit
 ```
 
 From repo root:
@@ -177,7 +177,7 @@ From repo root:
 npm run test:offline --prefix apps/agent-service
 ```
 
-Offline corpus must remain green. If corpus fails on **pre-existing** `NUCLEAR_SUPPORTED_VERSION === 35` assertion only, fix that assertion to `41` and record it as hygiene in the gate file — not a kernel feature.
+Offline corpus must remain green. Current-pin tests should use `NUCLEAR_SUPPORTED_VERSION`, not a stale 35. After Phase 05’s additive migration, current-pins follow the new integer. Historical waypoint tests remain historical.
 
 ## EXPECTED PASS SIGNATURE
 
@@ -196,7 +196,7 @@ Git handoff invalidation; architecture requiring nuclear migrate in Phase 0 (it 
 
 ## OUTPUT ARTIFACT / ACCEPTANCE REPORT
 
-`docs/cognitive-rework/v0.2.1/artifacts/PHASE_00_GATE.md` with SHA, command outputs summary, `runtime.ts` unchanged.
+`docs/cognitive-rework/v0.2.1/artifacts/runtime/PHASE_00_GATE.md` with SHA, command outputs summary, `runtime.ts` unchanged.
 
 ## COMMIT MESSAGE / COMMIT GROUPING
 

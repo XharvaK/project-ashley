@@ -124,8 +124,14 @@ Live honesty surgery remains on production.
 - [ ] Cycle state visits `awaiting_operation`
 - [ ] Receipt/observation reinjected; original log still in next `ThoughtInput`
 - [ ] Stale generation step ignored
-- [ ] `pass` increments; `MAX_THOUGHT_PASSES` fail-closed
+- [ ] `acceptedThoughtPasses` increments; compose cancels do not exhaust `MAX_THOUGHT_PASSES`
 - [ ] Commit: `feat(cognitive-v021): Thought step protocol operation loop`
+
+### Task 4.12 Dispatch generation fence
+
+- [ ] Generation N proposes effect; owner correction preempts; executor must not run N (`STALE_GENERATION`)
+- [ ] Nested EffectProposal generation mismatch vs envelope → no dispatch
+- [ ] Commit: `feat(cognitive-v021): stale generation cannot dispatch effects`
 
 ## CAUSAL ACCEPTANCE TESTS
 
@@ -147,7 +153,7 @@ Tool cycle may use `DEFAULT_TOOL_CYCLE_LEASE_MS`; ordinary non-tool still 1 Thou
 
 ```powershell
 npx vitest run src/core/cognitive-v021 --config vitest.offline.config.ts
-npx tsc --noEmit
+npm exec --prefix apps/agent-service -- tsc --noEmit
 npm run test:offline --prefix apps/agent-service
 ```
 
@@ -165,7 +171,7 @@ Need live Bubblewrap for unit Authority tests (must fake). Need to change honest
 
 ## OUTPUT ARTIFACT
 
-`artifacts/PHASE_04_GATE.md`
+`artifacts/runtime/PHASE_04_GATE.md`
 
 ## NEXT PHASE PRECONDITIONS
 

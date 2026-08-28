@@ -2,15 +2,15 @@
 
 **Status:** `ACCEPTED ARCHITECTURE / IMPLEMENTATION PLANNED`
 
-**Execution status:** `BLOCKED_PENDING_OWNER_BASELINE_SELECTION` until [`OWNER_BASELINE_GATE.md`](OWNER_BASELINE_GATE.md) records Doc’s SHA. After that gate, Luna may implement. This packet still does not authorize production cutover or `PRODUCTION_ACCEPTED`.
+**Execution status:** `BLOCKED — PACKET R3 AWAITING INDEPENDENT REVIEW`. Owner Gate A remains `UNSET` (do not select M / C / Other until R3 review PASSES). After that, Luna revalidates the source map on the selected SHA. This packet still does not authorize production cutover or `PRODUCTION_ACCEPTED`.
 
-**Packet revision:** R2.1 (quota-aware Q3; Gate A still unset). Changelog: [`PACKET_CORRECTION_R2.md`](PACKET_CORRECTION_R2.md).
+**Packet revision:** R3. Changelog: [`PACKET_CORRECTION_R3.md`](PACKET_CORRECTION_R3.md). Prior R2 notes: [`PACKET_CORRECTION_R2.md`](PACKET_CORRECTION_R2.md).
 
-**Architecture-reference inspection SHA:** `c7c81c4f5ebcf9e6d67d10990d76cfda4e21c28a` (detached HEAD at packet R2 inspection). **Do not implement from a detached historical SHA.** Owner must select the implementation baseline.
+**Architecture-reference inspection SHA:** `c7c81c4f5ebcf9e6d67d10990d76cfda4e21c28a`. **Do not implement from a detached historical SHA.**
 
 **Canonical architecture:** [00_ARCHITECTURE_REFERENCE.md](00_ARCHITECTURE_REFERENCE.md) and focused contract [`docs/architecture/cognitive/Ashley_Cognitive_Architecture_v0.2.1.md`](../../architecture/cognitive/Ashley_Cognitive_Architecture_v0.2.1.md).
 
-**Software contracts:** [02_IMPLEMENTATION_SPECIFICATION.md](02_IMPLEMENTATION_SPECIFICATION.md) (`IMPLEMENTATION_SPEC_VERSION = "0.2.1.r2"`).
+**Software contracts:** [02_IMPLEMENTATION_SPECIFICATION.md](02_IMPLEMENTATION_SPECIFICATION.md) (`IMPLEMENTATION_SPEC_VERSION = "0.2.1.r3"`) and [04_STORAGE_AND_DISPATCH_CONTRACT.md](04_STORAGE_AND_DISPATCH_CONTRACT.md).
 
 **Do not reinterpret the architecture.** If a phase document and the specification disagree, the specification wins for types/names; the architecture reference wins for laws. If those two disagree, **HARD BLOCKER**.
 
@@ -27,13 +27,14 @@ Read in this exact order before any code:
 5. [00_ARCHITECTURE_REFERENCE.md](00_ARCHITECTURE_REFERENCE.md)
 6. [01_SOURCE_BASELINE_AND_MIGRATION_MAP.md](01_SOURCE_BASELINE_AND_MIGRATION_MAP.md) — revalidate on the selected SHA
 7. [02_IMPLEMENTATION_SPECIFICATION.md](02_IMPLEMENTATION_SPECIFICATION.md)
-8. [03_MASTER_IMPLEMENTATION_PLAN.md](03_MASTER_IMPLEMENTATION_PLAN.md)
-9. The current phase file under [phases/](phases/)
-10. After candidate freeze: [QUALIFICATION_PROTOCOL.md](QUALIFICATION_PROTOCOL.md)
-11. After qualification PASS and owner cutover authority: [CUTOVER_AND_ROLLBACK_RUNBOOK.md](CUTOVER_AND_ROLLBACK_RUNBOOK.md)
-12. After cutover: [LIVE_EVIDENCE_PROTOCOL.md](LIVE_EVIDENCE_PROTOCOL.md)
+8. [04_STORAGE_AND_DISPATCH_CONTRACT.md](04_STORAGE_AND_DISPATCH_CONTRACT.md)
+9. [03_MASTER_IMPLEMENTATION_PLAN.md](03_MASTER_IMPLEMENTATION_PLAN.md)
+10. The current phase file under [phases/](phases/)
+11. After candidate freeze: [QUALIFICATION_PROTOCOL.md](QUALIFICATION_PROTOCOL.md)
+12. After qualification PASS and owner cutover authority: [CUTOVER_AND_ROLLBACK_RUNBOOK.md](CUTOVER_AND_ROLLBACK_RUNBOOK.md)
+13. After cutover: [LIVE_EVIDENCE_PROTOCOL.md](LIVE_EVIDENCE_PROTOCOL.md)
 
-Do not skip 3–8. Do not begin Phase N+1 until Phase N’s gate report exists and PASS. Do not create source in Phases 09–11.
+Do not skip 3–9. Do not begin Phase N+1 until Phase N’s gate report exists and PASS. Do not create source in Phases 09–11.
 
 ---
 
@@ -43,7 +44,8 @@ Do not skip 3–8. Do not begin Phase N+1 until Phase N’s gate report exists a
 |---|---|
 | [OWNER_ACCEPTANCE_RECORD.md](OWNER_ACCEPTANCE_RECORD.md) | Owner accepted v0.2.1 as target architecture |
 | [OWNER_BASELINE_GATE.md](OWNER_BASELINE_GATE.md) | Owner Gate A — implementation SHA |
-| [PACKET_CORRECTION_R2.md](PACKET_CORRECTION_R2.md) | What R2 changed after the NO-GO review |
+| [PACKET_CORRECTION_R3.md](PACKET_CORRECTION_R3.md) | R3 contract reconciliation after second independent NO-GO |
+| [04_STORAGE_AND_DISPATCH_CONTRACT.md](04_STORAGE_AND_DISPATCH_CONTRACT.md) | Complete sidecar v1 DDL + type/store matrix |
 | [00_ARCHITECTURE_REFERENCE.md](00_ARCHITECTURE_REFERENCE.md) | Frozen v0.2.1 architecture (laws S1–S31) |
 | [01_SOURCE_BASELINE_AND_MIGRATION_MAP.md](01_SOURCE_BASELINE_AND_MIGRATION_MAP.md) | Live source mapped KEEP/REHOME/REDESIGN/RETIRE |
 | [02_IMPLEMENTATION_SPECIFICATION.md](02_IMPLEMENTATION_SPECIFICATION.md) | Implementable types, Thought steps, ingress, outbox bridge, import tool |

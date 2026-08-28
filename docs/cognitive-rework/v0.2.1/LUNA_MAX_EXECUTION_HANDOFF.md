@@ -4,7 +4,7 @@ You are implementing Project Ashley Cognitive Architecture v0.2.1 using this pac
 
 ## Read order
 
-Follow [README.md](README.md). **STOP** if [OWNER_BASELINE_GATE.md](OWNER_BASELINE_GATE.md) is unset.
+Follow [README.md](README.md). **STOP** if R3 independent review has not PASSed. **STOP** if [OWNER_BASELINE_GATE.md](OWNER_BASELINE_GATE.md) is unset.
 
 ## Repository / baseline
 
@@ -25,13 +25,13 @@ Do not skip. Do not create source in 09–11. Do not start 10 without Doc cutove
 
 ## Autonomy policy
 
-While a phase gate can pass after repair: diagnose, repair implementation, add regression, rerun, write `artifacts/PHASE_XX_GATE.md`, continue.
+While a phase gate can pass after repair: diagnose, repair implementation, add regression, rerun, write `artifacts/runtime/PHASE_XX_GATE.md`, continue.
 
 Do not ask Doc for TypeScript, SQL, or test-fix choices the spec resolves.
 
 You **may** decide: test fixture data (not HY3 special cases), file splits under `cognitive-v021/`, fake `completeChat` internals for Q1 **as long as** `attentionDb` remains required, isolated rehearsal paths.
 
-You **must stop** for owner Gates A, R, B, C, D.
+You **must stop** for owner Gates A, R, B, C, D. Exception: Gate R **pre-authorizes** pushing `review/cognitive-v021-candidate-<shortsha>` at exact `CANDIDATE_SHA` with no source change and no merge.
 
 ## Repair policy
 
@@ -47,7 +47,7 @@ Master plan list 1–23. Preserve evidence. Do not improvise architecture.
 
 ## Thought / speech invariants
 
-- `ThoughtStepOutput` union; operation loop is real.
+- `ThoughtSettlementDraft` vs `PublishedCognitiveSettlement`; Thought JSON must not contain `finalLicensedText`.
 - `invokeThoughtComplete` uses live `completeChat` + required `attentionDb`.
 - Rapid messages: `thoughtModelAttempts` may exceed 1; only accepted generation publishes.
 - Published speech is `finalLicensedText` / outbox `licensedText`.
@@ -57,7 +57,7 @@ Master plan list 1–23. Preserve evidence. Do not improvise architecture.
 
 `QUALIFIED_SHA` must equal freeze SHA, HEAD, and deployed SHA.
 
-**Architecture qualification (Q1)** is exhaustive and deterministic. **Model-inhabitation witnessing (Q3)** is a bounded witness set of the configured `thought` occupant only. Record `artifacts/QUOTA_BUDGET.md` before Q3. First meaningful live-model failure → classify implementation vs occupant → repair locally if implementation → deterministic fixture → smallest affected live family only. Do not retry-storm. Occupant change → OCCUPANT CONTRACT WITNESS, not a live Q1 rerun. Q5 real shadow and Phase 11 live Discord are higher-value real-model evidence than extra synthetic suites.
+**Architecture qualification (Q1)** is exhaustive and deterministic. **Model-inhabitation witnessing (Q3)** is a bounded witness set of the configured `thought` occupant only. Record `artifacts/runtime/QUOTA_BUDGET.md` before Q3. First meaningful live-model failure → classify implementation vs occupant → repair locally if implementation → deterministic fixture → smallest affected live family only. Do not retry-storm. Occupant change → OCCUPANT CONTRACT WITNESS, not a live Q1 rerun. Q5 real shadow and Phase 11 live Discord are higher-value real-model evidence than extra synthetic suites.
 
 Report Q1/Q2/Q3/Q4/Q5/Q6 **separately**. No aggregate model score overrides an architecture invariant.
 

@@ -4,7 +4,7 @@
 
 **For agentic workers:** Execute phases in order using the phase files. Do not implement from this master file alone.
 
-**Execution status until Gate A:** `BLOCKED_PENDING_OWNER_BASELINE_SELECTION`.
+**Execution status until R3 independent review PASSES:** `BLOCKED — PACKET R3 AWAITING INDEPENDENT REVIEW`. Gate A remains UNSET.
 
 ---
 
@@ -78,7 +78,7 @@ DOC: PRODUCTION_ACCEPTED | REJECTED / REPAIR REQUIRED (Gate D)
 |---|---|---|---|---|
 | 0 | [PHASE_00_BASELINE_SIDECAR_HARNESS.md](phases/PHASE_00_BASELINE_SIDECAR_HARNESS.md) | yes | none | baseline selected; sidecar opens; harness fails closed; stale nuclear v35 pins inventoried |
 | 1 | [PHASE_01_EXECUTIVE_CONCURRENCY.md](phases/PHASE_01_EXECUTIVE_CONCURRENCY.md) | yes | none | durable ingress (not behind chat wait); fence; atomic txn; outbox row |
-| 2 | [PHASE_02_SEMANTIC_CONTRACT.md](phases/PHASE_02_SEMANTIC_CONTRACT.md) | yes | none | ThoughtStepOutput + validateSettlement + attentionDb adapter |
+| 2 | [PHASE_02_SEMANTIC_CONTRACT.md](phases/PHASE_02_SEMANTIC_CONTRACT.md) | yes | none | ThoughtStepOutput + validateThoughtSettlementDraft + attentionDb adapter |
 | 3 | [PHASE_03_CONVERSATIONAL_CONTINUITY.md](phases/PHASE_03_CONVERSATIONAL_CONTINUITY.md) | yes | none | HY3/compose-preempt; **accepted generation** not one model call; bot→agent ingress test |
 | 4 | [PHASE_04_AUTHORITY_OBSERVATION_EFFECT.md](phases/PHASE_04_AUTHORITY_OBSERVATION_EFFECT.md) | yes | none | operation loop via Thought steps |
 | 5 | [PHASE_05_SPEECH_EXPRESSION_DELIVERY.md](phases/PHASE_05_SPEECH_EXPRESSION_DELIVERY.md) | yes | none | finalLicensedText; outbox projector to nuclear reservations |
@@ -101,7 +101,7 @@ If a defect is found in 09–11: return to implementation, new SHA, restart qual
 
 TypeScript errors; unit/integration failures; migration fixture mismatch; SQL txn bugs; deterministic race tests; malformed settlement handling; extra model attempts from compose/preempt; source seam slightly different but mapping still valid **after** selected-baseline revalidation.
 
-Loop: diagnose root → repair implementation → smallest tests → full phase gate → write `docs/cognitive-rework/v0.2.1/artifacts/PHASE_XX_GATE.md` → next phase.
+Loop: diagnose root → repair implementation → smallest tests → full phase gate → write `docs/cognitive-rework/v0.2.1/artifacts/runtime/PHASE_XX_GATE.md` → next phase.
 
 Do not ask Doc for routine coding choices.
 
@@ -178,13 +178,14 @@ Doc’s review of this packet is not a commit instruction.
 | E6 | occupant | KEEP route `thought` / registry model | Swap test uses fake occupantId |
 | E7 | admission keys | From Thought nomination, not transcript scanner | Fence test |
 | E8 | idle cadence | `DEFAULT_IDLE_TICK_MS = 60_000` | Empty house 0 calls regardless of cadence |
-| E9 | max Thought passes | `MAX_THOUGHT_PASSES = 6` | Includes observation/effect rounds and compose restarts of the attempt |
+| E9 | max Thought passes | `MAX_THOUGHT_PASSES = 6` accepted semantic passes | Compose cancelled attempts use `composeCancelledAttempts`, not this cap |
 | E10 | max observation rounds | `MAX_OBSERVATION_ROUNDS = 4` | Per generation |
 | E11 | max effect rounds | `MAX_EFFECT_ROUNDS = 4` | Per generation |
-| E12 | Q3 live-call ceiling | Owner/config `REAL_MODEL_WITNESS_MAX_CALLS` (recommended 20 if unset) | Recorded in `artifacts/QUOTA_BUDGET.md` before Q3 |
+| E12 | Q3 live-call ceiling | Owner/config `REAL_MODEL_WITNESS_MAX_CALLS` (recommended 20 if unset) | Recorded in `artifacts/runtime/QUOTA_BUDGET.md` before Q3 |
 | E13 | Q3 family retry cap | Owner/config `REAL_MODEL_WITNESS_RETRY_CAP` (recommended 2) | Stop family; no retry storm |
 | E14 | Fallback smoke | Owner/config `FALLBACK_SMOKE_MAX_CALLS` (recommended 2) | Fallback route only; no horse race |
 | E15 | Shadow synthetic extras | Owner/config `SHADOW_MODEL_CALL_BUDGET` (recommended 0) | Real ingress is the evidence |
+| E17 | Shadow real Thought | `SHADOW_REAL_THOUGHT_MAX_CALLS` / `SHADOW_MAX_CYCLES` / `SHADOW_MAX_DURATION` | Window ends on first exhausted bound |
 | E16 | Live witness recapture | Owner/config `LIVE_WITNESS_RETRY_CAP` (recommended 1) | Then defect/incomplete |
 
 Open but named: `IDLE_NOOP_BEFORE_DORMANT = 3`, `DEFAULT_MAX_SUBSCRIPTIONS = 16`, `DEFAULT_MISS_ROUND_CAP = 1`, `DEFAULT_TOOL_CYCLE_LEASE_MS = 120_000`. Changing defaults is not architecture if tests still enforce the laws. E12–E16 are **not** architecture; they bound quota. Unbounded silent API spend is an execution defect.
@@ -247,16 +248,11 @@ Phases 00–08: implement and gate. Freeze. Phase 09: Q1–Q6 on frozen SHA, **n
 
 ```
 docs/cognitive-rework/v0.2.1/artifacts/
-  PHASE_00_GATE.md … PHASE_08_GATE.md
-  CANDIDATE_FREEZE.md          # CANDIDATE_SHA, spec versions, dirty=false
-  QUOTA_BUDGET.md              # recorded before Q3; owner/config ceilings
-  QUALIFICATION_RESULT.md      # QUALIFIED_SHA; separate Q1–Q6 fields; quota used
-  SHADOW_RESULT.md
-  CUTOVER_RESULT.md
-  LIVE_EVIDENCE_REPORT.md
+  README.md
+  runtime/                 # gitignored outputs; freeze file POINTS TO candidate SHA
 ```
 
-Every qualification artifact binds: `candidateSha`, `selectedBaselineSha`, `architectureVersion=v0.2.1`, `implementationSpecVersion=0.2.1.r2`, `qualificationProtocolRevision=r2.1`, `sidecarSchemaVersion=1`, `thoughtContractVersion=1`, Thought route/occupant, Mint host identity, timestamp, shadow mode config hash, `legacyImportToolVersion=1`, `outboxBridgeVersion=1`, recorded quota ceilings.
+Every qualification artifact binds: `candidateSha`, `selectedBaselineSha`, `architectureVersion=v0.2.1`, `implementationSpecVersion=0.2.1.r3`, `qualificationProtocolRevision=r3`, `sidecarSchemaVersion=1`, `thoughtContractVersion=1`, Thought route/occupant, Mint host identity, timestamp, shadow mode config hash, `legacyImportToolVersion=1`, `outboxBridgeVersion=1`, recorded quota ceilings including shadow real-Thought caps.
 
 ---
 

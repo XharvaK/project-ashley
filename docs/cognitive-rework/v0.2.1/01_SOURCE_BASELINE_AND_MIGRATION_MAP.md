@@ -55,7 +55,7 @@ Legend: **KEEP** reuse as-is on new kernel; **REHOME** keep mechanism, new owner
 | Send bubbles | `chat/send-bubbles.ts` `sendBubbles` | Sequential Discord send + receipt callback | After projector | KEEP | 5, 8 | never |
 | Channel queue / pacing | `chat/channel-queue.ts`, `chat/pacing.ts` | Serial cognition+send; abort does not cancel `chatText` | Serial **send only**; abort KEEP for pacing | REDESIGN | 1, 8 | inbound wait on Thought: 8/10 |
 | Fulfillment pump | `initiative/fulfillment-pump.ts` | Claims operational/weekly_review and sends | Pattern for v021 reactive outbox | REHOME | 5, 8 | never |
-| Slash commands | `handlers/interactionCreate.ts`, `commands/*.ts` | `/remember` `/memory` `/new` `/forget` `/proactive` `/identity` `/commitments` `/continuity` `/status` | `/remember` = OwnerSuppliedClaim; others KEEP | REHOME remember/forget | 6, 8 | `/remember` bypassing conversational teaching: 10 |
+| Slash commands | `handlers/interactionCreate.ts`, `commands/*.ts` | `/remember` `/memory` `/new` `/forget` `/proactive` `/identity` `/commitments` `/continuity` `/status` | `/remember` = OwnerSuppliedClaim; others KEEP via evidence projection | REHOME remember Discord wiring | 6 tests, **8 live wiring** | never |
 | Presence payload | `agent-client.ts` sends `discordPresence`; `server.ts` types it `string` and ignores | Unused | Out of scope | KEEP unused | none | never |
 | Preflight | `POST /chat/preflight` always `{ lookup: false }` | Dead | Unused | RETIRE on new path | 8 | 10 |
 
@@ -220,7 +220,7 @@ These are **confirmed at `c7c81c4`**. Plan around them; do not invent architectu
 | `discordPresence` ignored | CONFIRMED type mismatch | Out of scope. |
 | `/chat/preflight` false | CONFIRMED | Out of scope. |
 | C1–C5 live influence | Source has modules; `capabilityCanInfluence` needs master apply + active release. Promotion state is **UNKNOWN** without production observation. | Rehome mechanisms. Do not assume they currently influence production speech. |
-| Tests asserting schema 35 as **current** | See §7 inventory. Live `NUCLEAR_SUPPORTED_VERSION = 41`. | Phase 00: update **current-pin** assertions to 41 (or `toBe(NUCLEAR_SUPPORTED_VERSION)`). Keep v35 **waypoint** assertions in `migration-35.test.ts` (`pending?.to === 35`). |
+| Tests asserting schema 35 as **current** | See §7 inventory. Inspected SHA live `NUCLEAR_SUPPORTED_VERSION = 41`. | Phase 00: current-pin tests must use `toBe(NUCLEAR_SUPPORTED_VERSION)` (or the live constant). After the outbox additive migration, that integer is **baseline + 1**. Keep v35 **waypoint** assertions in `migration-35.test.ts` (`pending?.to === 35`). Do not leave timeless current-pins at 41 once the migration exists. |
 | Expression fallback second mind | CONFIRMED Groq path | RETIRE as meaning on new kernel. |
 | Durable ack without Thought | CONFIRMED | Infrastructure notice, not `surfaceDraft`. |
 | Discord ChannelQueue waits on `/chat/text` | CONFIRMED `drainTurn` enqueues cognition+send; `chatText` not aborted by `channelQueue.abort` | Packet R1 KEEP was **wrong**. REDESIGN ingress (spec §E.1). |

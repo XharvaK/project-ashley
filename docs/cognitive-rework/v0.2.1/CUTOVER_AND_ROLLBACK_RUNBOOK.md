@@ -15,9 +15,9 @@
 
 ## Preconditions (all required)
 
-1. `artifacts/QUALIFICATION_RESULT.md` `RESULT: PASS` and `QUALIFIED_SHA` set.
+1. `artifacts/runtime/QUALIFICATION_RESULT.md` `RESULT: PASS` and `QUALIFIED_SHA` set.
 2. Local and Mint `git rev-parse HEAD` == `QUALIFIED_SHA` after fetch/checkout of that exact SHA.
-3. `artifacts/CANDIDATE_FREEZE.md` SHA matches.
+3. Untracked `artifacts/runtime/CANDIDATE_FREEZE.md` points to `QUALIFIED_SHA`.
 4. Q2 independent review bound to that SHA.
 5. Q3–Q6 PASS on that SHA. Q3 means the **bounded** inhabit witness in QUALIFICATION_PROTOCOL, not a live rerun of the Q1 corpus.
 6. Database backup/snapshot on Mint:
@@ -25,7 +25,7 @@
    - `~/.composer-assistant/continuity.db`
    - `~/.composer-assistant/cognitive-v021.db`
 7. Rollback directory `~/.composer-assistant/backups/cognitive-v021-<utc>/` plus recorded SHA.
-8. Import: `node scripts/cognitive-v021/import-legacy-semantic-state.mjs --mode apply` then `--mode verify` on the cutover sidecar (isolated rehearsal already PASS in Q4). Verify expected count, actual count, hashes, provenance, rejected/quarantined, duplicate/no-op. Mismatch = HARD BLOCKER 15.
+8. Shadow dispose: zero sendable shadow outbox; discard candidate semantic shadow state; keep delivered conversation evidence as specified. Then import: `node scripts/cognitive-v021/import-legacy-semantic-state.mjs --mode apply` then `--mode verify` on the cutover sidecar (isolated rehearsal already PASS in Q4). Verify expected count, actual count, hashes, provenance, rejected/quarantined, duplicate/no-op. Mismatch = HARD BLOCKER 15.
 9. Outbox projector idempotency already proven in freeze tests (HARD BLOCKER 14 if not).
 10. Service preflight: `bash deploy/linux-mint/status.sh` + `curl -s http://127.0.0.1:3710/health`.
 11. Env: set `ASHLEY_COGNITIVE_KERNEL=v021` **after stop, before start**. Do not paste secrets into chat. `ASHLEY_COGNITION_MODE` unchanged unless Doc says.

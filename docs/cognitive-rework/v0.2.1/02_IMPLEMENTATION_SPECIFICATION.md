@@ -2,7 +2,7 @@
 
 **Status:** Software contract for Cognitive Architecture v0.2.1. Types and names here are frozen for all phases. Architecture laws: [00_ARCHITECTURE_REFERENCE.md](00_ARCHITECTURE_REFERENCE.md). Source mapping: [01_SOURCE_BASELINE_AND_MIGRATION_MAP.md](01_SOURCE_BASELINE_AND_MIGRATION_MAP.md).
 
-**Spec version:** `IMPLEMENTATION_SPEC_VERSION = "0.2.1.r2"` (packet R2). Luna must persist this string on sidecar meta and qualification artifacts.
+**Spec version:** `IMPLEMENTATION_SPEC_VERSION = "0.2.1.r3"` (packet R3). Luna must persist this string on sidecar meta and qualification artifacts. Complete sidecar DDL: [04_STORAGE_AND_DISPATCH_CONTRACT.md](04_STORAGE_AND_DISPATCH_CONTRACT.md) (must match §W.1).
 
 **Module root:** `apps/agent-service/src/core/cognitive-v021/`
 
@@ -16,14 +16,18 @@
 
 ```ts
 export const ARCHITECTURE_EPOCH = "v0.2.1" as const;
-export const IMPLEMENTATION_SPEC_VERSION = "0.2.1.r2" as const;
+export const IMPLEMENTATION_SPEC_VERSION = "0.2.1.r3" as const;
 export const THOUGHT_CONTRACT_VERSION = 1 as const;
 export const COGNITIVE_SIDECAR_SCHEMA_VERSION = 1 as const;
 export const SETTLEMENT_SCHEMA_VERSION = 1 as const;
 export const OUTBOX_BRIDGE_VERSION = 1 as const;
 export const LEGACY_IMPORT_TOOL_VERSION = 1 as const;
 export const MAX_AUTHORITY_REVISIONS = 2 as const;
-export const MAX_THOUGHT_PASSES = 6 as const;
+export const MAX_THOUGHT_PASSES = 6 as const; // accepted semantic passes of the current generation only
+export const MAX_THOUGHT_MODEL_ATTEMPTS = 12 as const; // raw network invocations including cancelled compose attempts
+export const PRIVATE_THOUGHT_MAX_CALLS_PER_HOUR = 12 as const;
+export const PRIVATE_THOUGHT_MAX_CONCURRENT = 1 as const;
+export const PRIVATE_SUBSCRIPTION_ITEMS_PER_IDLE = 4 as const;
 export const MAX_OBSERVATION_ROUNDS = 4 as const;
 export const MAX_EFFECT_ROUNDS = 4 as const;
 export const DEFAULT_LAST_N_TURNS = 12 as const; // matches getHotMessages limit
@@ -58,7 +62,7 @@ Default production: `legacy`. Shadow and v021 never implied by `ASHLEY_COGNITION
 ```ts
 export type CycleId = string;           // ulid or uuid; opaque
 export type Generation = number;        // integer, starts at 1, monotonic per conversation
-export type ConversationId = string;    // ownerId + channel thread key; use nuclear threadId
+export type ConversationId = string;    // EXACTLY nuclear mem_threads.id / delivery_reservations.thread_id for the active DM thread. Not ownerId+channel concatenation.
 export type AuthorityEpoch = number;    // monotonic; bump when mutable Authority packs change
 export type OccupantId = string;        // resolved Thought route + model id snapshot
 export type IdempotencyKey = string;
@@ -111,7 +115,9 @@ export type CycleRecord = {
 6. Cancellation: abort of Discord turn maps to: if unpublished, drop Workspace and mark cycle `idle` without settlement; if published, outbox still sends.
 7. Late provider result: ignore if `generation` mismatch; if match and not yet published, Thought may integrate.
 
-**Idle admit:** Agency may enqueue `idle_opportunity`. Fence admits Thought **iff** `count(occupancy status in active|investigating|waiting_for_evidence) > 0` OR `newSubscriptionItems > 0` OR due `FutureTrigger` after revalidation. Else **zero Thought calls**.
+**ConversationId resolution:** ingress uses KEEP `resolveActiveThread(nuclear, ownerId, channel)` and sets sidecar `conversation_id` to that `threadId`. `/new` uses existing nuclear new-thread behavior; subsequent ingress binds the new `threadId`. Shadow **may READ** nuclear thread id to bind conversation id. Shadow **must not WRITE** nuclear thread rows or semantic stores. Utterance evidence projection (strategy A, §E.2) writes `mem_messages` only as classified evidence after cutover (or as specified idempotent owner/legacy-delivery mirrors).
+
+**Idle admit:** Agency may enqueue `idle_opportunity`. Fence admits Thought **iff** `count(occupancy status in active|investigating|waiting_for_evidence) > 0` OR `newSubscriptionItems > 0` OR due `FutureTrigger` after revalidation. Else **zero Thought calls**. Private cognition is also bounded by `PRIVATE_THOUGHT_MAX_CALLS_PER_HOUR` / `PRIVATE_THOUGHT_MAX_CONCURRENT` / `PRIVATE_SUBSCRIPTION_ITEMS_PER_IDLE` (executive budget; not interestingness). Owner messages are not subject to the private budget.
 
 ---
 
@@ -138,9 +144,89 @@ If any write fails: `ROLLBACK`. Callers see `PublishAborted`. No partial WC. No 
 
 ---
 
-## C. Cognitive Settlement
+## C. Thought settlement draft vs published settlement
 
-**File:** `settlement/schema.ts`. JSON stored as `settlement_json` plus generated columns for cycleId/generation.
+Thought JSON **must not** contain `finalLicensedText`, outbox id, nuclear reservation id, or delivery state. The parser **must not** inject those fields to satisfy a type.
+
+```ts
+export type ThoughtSpeechDraft = {
+  mode: SpeechMode;
+  mustSay: string[];
+  mustNot: string[];
+  surfaceDraft: string | null;
+  acceptableRealizations: string[];
+  presentationDirectives: string[];
+};
+
+export type ThoughtSettlementDraft = {
+  schemaVersion: SettlementSchemaVersion;
+  cycleId: CycleId;
+  generation: Generation;
+  authorityEpoch: AuthorityEpoch;
+  occupantId: OccupantId;
+  architectureEpoch: typeof ARCHITECTURE_EPOCH;
+  triggerRef: string;
+  interpretation: {
+    discourseActs: DiscourseAct[];
+    referentBindings: ReferentBinding[];
+    corrections: CorrectionRecord[];
+    unresolvedAmbiguities: string[];
+    topics: string[];
+  };
+  commitments: {
+    epistemic: EpistemicCommitment[];
+    conversational: ConversationalCommitment[];
+    stance: Stance;
+  };
+  speech: ThoughtSpeechDraft;
+  workingContextDelta: WorkingContextDelta[];
+  concernDeltas: ConcernDelta[];
+  occupancyDelta: OccupancyDelta[];
+  futureTriggers: FutureTriggerDelta[];
+  subscriptions: SubscriptionDelta[];
+  durableNominations: DurableNomination[];
+  operations: {
+    observationsConsumed: string[];
+    effectsCompleted: string[];
+    intentsStillInFlight: string[];
+  };
+  authority: {
+    objectionsApplied: AuthorityCode[];
+    revisionCount: number;
+  };
+};
+
+export type PublishedSpeech = ThoughtSpeechDraft & {
+  finalLicensedText: string | null;
+};
+
+export type PublishedCognitiveSettlement = ThoughtSettlementDraft & {
+  speech: PublishedSpeech;
+  settlementId: string;
+};
+
+/** Harness/publication alias. Never the Thought JSON type. */
+export type CognitiveSettlement = PublishedCognitiveSettlement;
+```
+
+`ThoughtSettlementStep.settlement` is **`ThoughtSettlementDraft`**. Table `settlements.payload_json` stores **`PublishedCognitiveSettlement`**.
+
+Kernel finalization (same generation, before publish):
+
+```
+surfaceDraft
+  → optional starved Expression
+  → fidelityCheck
+  → renderForTransport (KEEP mechanical; non-semantic)
+  → finalLicensedText
+  → publishSemanticTransaction
+```
+
+**Audit property:** `outbox.licensedText === published.speech.finalLicensedText ===` the exact text passed into `planContentBubbles`.
+
+## C.published field list (for DiscourseAct onward)
+
+**File:** `settlement/schema.ts`.
 
 ```ts
 export type SettlementSchemaVersion = 1;
@@ -191,60 +277,11 @@ export type Stance = {
 
 export type SpeechMode = "none" | "draft";
 
-export type CognitiveSettlement = {
-  schemaVersion: SettlementSchemaVersion;
-  cycleId: CycleId;
-  generation: Generation;
-  authorityEpoch: AuthorityEpoch;
-  occupantId: OccupantId;
-  architectureEpoch: typeof ARCHITECTURE_EPOCH;
-  triggerRef: string;
-
-  interpretation: {                // AUTHORITATIVE semantic
-    discourseActs: DiscourseAct[];
-    referentBindings: ReferentBinding[];
-    corrections: CorrectionRecord[];
-    unresolvedAmbiguities: string[];
-    topics: string[];
-  };
-
-  commitments: {                   // AUTHORITATIVE semantic
-    epistemic: EpistemicCommitment[];
-    conversational: ConversationalCommitment[];
-    stance: Stance;
-  };
-
-  speech: {                        // AUTHORITATIVE semantic
-    mode: SpeechMode;
-    mustSay: string[];
-    mustNot: string[];
-    surfaceDraft: string | null;   // Thought-authored wording; required non-empty if mode=draft
-    finalLicensedText: string | null; // set at publication; not a Thought-model field
-    acceptableRealizations: string[];
-    presentationDirectives: string[]; // convenience; cannot contradict commitments
-  };
-
-  workingContextDelta: WorkingContextDelta[];
-  concernDeltas: ConcernDelta[];
-  occupancyDelta: OccupancyDelta[];
-  futureTriggers: FutureTriggerDelta[];
-  subscriptions: SubscriptionDelta[];
-  durableNominations: DurableNomination[];
-
-  operations: {
-    observationsConsumed: string[];
-    effectsCompleted: string[];      // claims ≤ receipts
-    intentsStillInFlight: string[];
-  };
-
-  authority: {
-    objectionsApplied: AuthorityCode[];
-    revisionCount: number;
-  };
-};
+// ThoughtSettlementDraft / PublishedCognitiveSettlement are defined in §C above.
+// Do not re-export a third CognitiveSettlement shape here.
 ```
 
-**Validation** (`settlement/validate.ts` `validateSettlement`):
+**Validation** (`settlement/validate.ts`): `validateThoughtSettlementDraft` for model JSON; `validatePublishedSettlement` after kernel finalization.
 
 | Condition | Result |
 |---|---|
@@ -252,13 +289,15 @@ export type CognitiveSettlement = {
 | `schemaVersion !== 1` | `malformed` |
 | `mode === "draft"` and (`surfaceDraft` null/empty) | `malformed` |
 | `mode === "none"` and `surfaceDraft` non-null | `malformed` (must be null) |
-| Thought JSON includes `finalLicensedText` | `malformed` (kernel writes this at publication only) |
+| Thought JSON includes `finalLicensedText` / outbox / reservation / delivery fields | `malformed` |
+| envelope vs nested vs active `cycleId`/`generation` mismatch | `stale` / `malformed`; no dispatch; no publish |
+| nested `settlement.occupantId` / `authorityEpoch` mismatch vs active snapshot (unless documented epoch bump this pass) | `malformed` |
 | `revisionCount > MAX_AUTHORITY_REVISIONS` | `malformed` |
 | `effectsCompleted` id not in consumed receipts | `malformed` |
 | draft/commitment conflict (spec §C.1) | `conflict` not publish |
 | valid `mode=none` with occupancy/triggers | **ok** (private success) |
 
-Malformed Thought output: **do not speak in Ashley’s voice**. Emit `infrastructure_notice` (spec §U). Do not run Expression. Do not call `decide()`.
+Malformed Thought output: **do not speak in Ashley’s voice**. Emit `SystemNoticeOutbox` (spec §U). Do not run Expression. Do not call `decide()`.
 
 ### C.1 Draft / commitment precedence
 
@@ -282,18 +321,19 @@ Expression, if enabled, runs **before** semantic publication. It cannot change p
 Thought surfaceDraft
   → optional starved Expression adaptation
   → fidelityCheck (reject → Thought revision, not Expression invention)
-  → kernel sets speech.finalLicensedText
+  → renderForTransport (KEEP; typography + marker strip only)
+  → kernel sets published.speech.finalLicensedText
   → publishSemanticTransaction writes SpeechOutboxRow.licensedText = finalLicensedText
-  → OutboxDeliveryProjector copies that exact text to nuclear delivery_reservations.draft_text / bubbles
+  → OutboxDeliveryProjector copies that exact text to nuclear draft_text / bubbles
 ```
 
 | Condition | `finalLicensedText` |
 |---|---|
-| `expressionEnabled === false` | equals `surfaceDraft` |
-| Expression ran and fidelity passed | post-Expression text |
-| `mode === "none"` | null; no outbox row |
+| `expressionEnabled === false` | `renderForTransport(surfaceDraft)` |
+| Expression ran and fidelity passed | `renderForTransport(post-Expression text)` |
+| `mode === "none"` | null; no speech outbox row |
 
-Canonical published-speech field: **`finalLicensedText`** on the published settlement; **`licensedText`** on `SpeechOutboxRow`. They must be equal. Do not require `outbox.licensedText === surfaceDraft` when Expression ran.
+Canonical published-speech field: **`finalLicensedText`** on `PublishedCognitiveSettlement`; **`licensedText`** on `SpeechOutboxRow`. They must be equal. Do not require `licensedText === surfaceDraft` when Expression or renderForTransport changed bytes.
 
 ---
 
@@ -373,7 +413,7 @@ export type ThoughtEffectProposalStep = ThoughtStepBase & {
 
 export type ThoughtSettlementStep = ThoughtStepBase & {
   kind: "settlement";
-  settlement: CognitiveSettlement;
+  settlement: ThoughtSettlementDraft;
 };
 
 export type ThoughtFailureStep = ThoughtStepBase & {
@@ -427,11 +467,22 @@ thinking
        → infrastructure notice; no Ashley voice
 ```
 
-Cancellation: abort `completeChat` `signal` when generation is preempted. Stale step with `generation !== activeGeneration` is ignored; it must not publish, dispatch, or write outbox.
+Cancellation: abort `completeChat` `signal` when generation is preempted. **Identity freeze:** `ThoughtStepBase.cycleId === active cycleId`, `ThoughtStepBase.generation === active generation`. Nested `ObservationRequest` / `EffectProposal` / `ThoughtSettlementDraft` `cycleId`/`generation` must equal the envelope. Nested settlement `occupantId` and `authorityEpoch` must match the active Thought snapshot unless this pass documents an epoch bump already applied in-sidecar. Any mismatch: **STALE / MALFORMED** — no observation dispatch, no effect dispatch, no publication, no outbox. Tests: a nested EffectProposal with stale generation must not execute even if the outer envelope was rewritten.
 
-**Pass accounting:** `pass` increments for every model invocation attempt that the kernel accepts as a Thought step, including compose-triggered restarts and settle-then-draft (E2). Structural JSON retries inside `runBoundedCognition` (max 2) are **not** extra `pass` values; they are retries of the same pass.
+**Pass accounting (separate counters, persisted in `thought_attempt_counters`):**
 
-**Caps:** `pass > MAX_THOUGHT_PASSES` → `failure.reason=pass_exhausted`. Observation rounds > `MAX_OBSERVATION_ROUNDS` or effect rounds > `MAX_EFFECT_ROUNDS` → fail closed (`pass_exhausted` or Authority). Authority `revisionCount` still capped at `MAX_AUTHORITY_REVISIONS` independently.
+| Counter | Counts |
+|---|---|
+| `thoughtModelAttempts` | every network/model invocation |
+| `acceptedThoughtPasses` | valid `ThoughtStepOutput` accepted for the **current** generation |
+| `structuralRetries` | parser/schema retries of one attempted pass (max 2; not extra passes) |
+| `composeCancelledAttempts` | abandoned because newer owner evidence composed/preempted |
+| `authorityRevisions` | Authority send-backs |
+| `observationRounds` / `effectRounds` | accepted operation loops |
+
+`MAX_THOUGHT_PASSES` bounds **`acceptedThoughtPasses`**, not cancelled stale calls. `MAX_THOUGHT_MODEL_ATTEMPTS` bounds raw invocations. Rapid-message test: three owner messages may cancel/restart calls without exhausting the semantic operation budget. Only current generation publishes.
+
+**Caps:** `acceptedThoughtPasses > MAX_THOUGHT_PASSES` → `failure.reason=pass_exhausted`. Observation/effect rounds as before. Authority revisions independent.
 
 **What is re-sent on the next pass:** full original `ThoughtInput` evidence (log, WC, constitution, capability, occupancy, LearnedSelf, retrieval) plus appended observations/receipts plus compact `priorSteps[]` `{ kind, requestId, correlationId, observation|receipt }` without Workspace prose. Original evidence remains available; it is not replaced by the step summary.
 
@@ -503,28 +554,53 @@ export type EvidenceSourceStatus =
   | "deleted"
   | "unavailable";
 
+export type DataClassification = "never_public" | "secret" | "internal";
+
 export type ConversationEvidenceRecord = {
-  id: string;                        // entity uuid
+  rowId: string;                     // primary key
+  lineageId: string;                 // stable across edits
+  version: number;                   // edits append version+1, same lineageId
   conversationId: ConversationId;
   role: "owner" | "ashley" | "system";
-  text: string | null;               // null if redacted/unavailable
+  text: string | null;               // null if redacted/unavailable; never raw credential-shaped text
   createdAtMs: number;
   discordMessageIds: string[];
   reservationId: ReservationId | null;
-  producingCycleId: CycleId | null;  // Ashley speech only
+  producingCycleId: CycleId | null;
   architectureEpoch: typeof ARCHITECTURE_EPOCH | "legacy";
-  contentHash: string;               // sha256 of role+text+ids
+  contentHash: string;
   sourceStatus: EvidenceSourceStatus;
-  version: number;                   // edits append new version, same lineage id
+  dataClassification: DataClassification;
+  secretOmitted: boolean;
+  delivered: boolean;                // ashley-role rows: true only after Discord receipt of that text
 };
 
-export type InboxEvent =
-  | { kind: "owner_message"; evidenceId: string; discordMessageIds: string[] }
-  | { kind: "idle_opportunity"; atMs: number }
-  | { kind: "subscription_item"; subscriptionId: string; observationId: string }
-  | { kind: "future_trigger_due"; triggerId: string }
-  | { kind: "receipt"; effectId: string; receiptId: string }
-  | { kind: "recovery"; correlationId: string };
+export type InboxConsumerStatus =
+  | "pending"
+  | "claimed"
+  | "consumed"
+  | "failed_retryable";
+
+export type InboxEvent = {
+  id: string;
+  conversationId: ConversationId;
+  kind:
+    | "owner_message"
+    | "idle_opportunity"
+    | "subscription_item"
+    | "future_trigger_due"
+    | "receipt"
+    | "recovery";
+  payload: Record<string, unknown>;
+  createdAtMs: number;
+  status: InboxConsumerStatus;
+  claimToken: string | null;
+  workerId: string | null;
+  leaseExpiresAtMs: number | null;
+  attemptCount: number;
+  claimedAtMs: number | null;
+  consumedAtMs: number | null;
+};
 ```
 
 ### E.1 Durable Discord ingress (frozen)
@@ -555,11 +631,41 @@ Response: HTTP **202** `{ evidenceRecordId, inboxEventId, admittedAtMs, duplicat
 
 **Bot:** `apps/discord-bot/src/agent-client.ts` adds `ingressChat` calling `/chat/ingress`. `handleMessage` / TurnBuffer `onReady` MUST call `ingressChat` **outside** `channelQueue.enqueue`. Extract `createMessageCreateHandler(deps)` so tests inject `ingressChat` and `channelQueue`. `ChannelQueue` is **delivery-only** (KEEP abort-on-new-message for bubble pacing).
 
-**Legacy/shadow:** after ingress ACK, if `cognitiveKernel` is `legacy` or `shadow`, enqueue **legacy** `chatText`+send on `channelQueue` so Doc still hears legacy Ashley. Ingress of message B must still complete while that legacy job runs. **v021:** do not call `chatText`; delivery pump claims nuclear reservations (existing `fulfillment-pump.ts` pattern, lane `reactive` or `cognitive_v021`).
+**Legacy/shadow failure isolation:** after attempting sidecar ingress, if sidecar infrastructure throws, **log a shadow/legacy defect and still enqueue legacy `chatText`+send**. Shadow/legacy must not reduce production availability. **v021:** ingress is production-authoritative; durable ingress failure fails closed; do **not** silently fall back to legacy cognition.
+
+**Bot tests:** sidecar 5xx/timeout during `shadow` still produces a legacy reply; during `v021` does not call `chatText`.
 
 **TurnBuffer KEEP** for fragment coalescing only (1500ms/5s). It is not a cognition mutex.
 
 **`POST /chat/text` KEEP** until cutover for legacy/shadow live replies. New kernel must not depend on it for durable admit.
+
+**HTTP 202** means durable admission **and** a durable consumer will process the inbox row after restart. Phase 08 wires the consumer loop: atomic claim per conversation (lease), one active semantic generation, startup scan of `pending`/`claimed` with expired lease/`failed_retryable`. Crash after 202 before cycle: event still claimed later. Crash after publish before `consumed`: idempotent recovery (settlement unique on cycle+generation). Duplicate ingress: same discord id → `duplicate: true`, no second evidence lineage.
+
+### E.1a Privacy on ingress (KEEP `detectCredentialShape`)
+
+Owner text: `detectCredentialShape` (`apps/agent-service/src/core/privacy/secrets.ts`). On hit: persist `CREDENTIAL_OMITTED_PLACEHOLDER`, `dataClassification="secret"`, `secretOmitted=true`. Do not persist raw credential-shaped text in sidecar, causal ledger, qualification artifacts, or shadow replicator. Perception/Observation payloads and EffectReceipts must use the same omission. Thought may receive ephemeral request material only under existing privacy policy. Legacy import must not declassify protected nuclear rows.
+
+### E.1b Delivery-truth for Ashley-role rows
+
+`role=ashley` Conversation Evidence means **what Doc actually received**. Write it from delivered/receipted outbox text + Discord ids. If a published outbox is never delivered, conversation history must **not** claim Ashley said it. Semantic/causality history may record intended/drafted speech. “What did you just say?” uses delivered evidence only.
+
+### E.1c Shadow conversation Doc experienced
+
+Q5: legacy Ashley replies to Doc. Candidate Thought must see:
+
+A. Owner inbound → sidecar evidence (from `/chat/ingress` only; **not** also from `shadow/replicator.ts`).
+B. Legacy Ashley **delivered** reply → replicator mirrors actual delivered text into sidecar `role=ashley`, `architectureEpoch=legacy`, `delivered=true`, classified.
+C. Candidate shadow draft → evaluation/ledger only. **Must not** enter Conversation Evidence as “what Ashley said.”
+
+Idempotency: Discord message id / nuclear reservation id.
+
+### E.2 Evidence compatibility (strategy A)
+
+After **v021 cutover**, surviving slash/observer surfaces still read nuclear `mem_messages`. Freeze an idempotent **EvidenceCompatibilityProjector**: Conversation Evidence Log → `mem_messages` as **utterance evidence only** (not semantic interpretation). Preserve `dataClassification`. Distinguishes delivered Ashley speech from undelivered drafts (drafts are not projected). Not dual-write of production meaning.
+
+Covered KEEP surfaces: `/remember`, `/memory`, `/new`, `/forget`, `/continuity`, `/identity`, `/commitments`, `/status`, `/proactive`, and field-observation readers that use current messages. `/remember` Discord wiring is **Phase 08** (flag-gated); helper exists in Phase 06 tests.
+
+Shadow: do not project candidate drafts into `mem_messages`. Legacy path already writes owner+legacy Ashley via existing delivery.
 
 ---
 
@@ -568,7 +674,7 @@ Response: HTTP **202** `{ evidenceRecordId, inboxEventId, admittedAtMs, duplicat
 - Owner Discord text appends **immediately** in the inbox transaction (sidecar). Rapid messages: three owner rows for HY4 / I meant HY3 / it’s an LLM, never dropped.
 - Edits: insert version+1; Thought sees latest available version; prior versions remain fetchable until retention.
 - Redaction: `sourceStatus=redacted`, `text=null`. Thought must not invent the missing text (S3, S31).
-- Ashley speech rows written **from outbox after publish**, not from Expression improvisation.
+- Ashley speech rows written **from delivered outbox text after Discord receipt**, not from settlement publication and not from Expression improvisation.
 - `architectureEpoch`: sidecar-native rows `v0.2.1`; replicated legacy `legacy`.
 
 Retention: hook `retention.ts` `applyRetention(nowMs)` no-ops in Phase 1 (function exists, deletes nothing). Phase 6 may enable; default windows are open parameters, not architecture.
@@ -638,14 +744,16 @@ export type OccupancyStatus =
   | "investigating"
   | "waiting_for_evidence"
   | "dormant_but_revisitable"
-  | "resolved";
+  | "resolved"
+  | "quarantined";
 
 export type MindOccupancy = {
   conversationId: ConversationId;
   concernId: ConcernId;
   status: OccupancyStatus;
-  priority: number;                  // orders her concerns; NOT a speech threshold
+  priority: number;
   updatedCycle: CycleId;
+  updatedGeneration: Generation;
 };
 
 export type ConcernDelta =
@@ -824,8 +932,9 @@ export type EffectProposal = {
 
 export type InFlightRecord = {
   effectId: string;
-  idempotencyKey: IdempotencyKey;
+  cycleId: CycleId;
   generation: Generation;
+  idempotencyKey: IdempotencyKey;
   dispatchedAtMs: number;
   status: "in_flight" | "receipted" | "unknown";
 };
@@ -866,6 +975,7 @@ export type AuthorityCode =
   | "SECRET_OR_CREDENTIAL"
   | "REVISION_BUDGET_EXHAUSTED"
   | "DISPATCH_EPOCH_CHANGED"
+  | "STALE_GENERATION"
   | "DRAFT_COMMITMENT_CONFLICT"
   | "EMPTY_COMMITMENTS_WITH_DRAFT";
 
@@ -878,7 +988,7 @@ export type AuthorityVerdict =
 export function checkAuthority(
   stage: AuthorityStage,
   input: {
-    settlement?: CognitiveSettlement;
+    settlement?: ThoughtSettlementDraft | PublishedCognitiveSettlement;
     proposal?: EffectProposal | ObservationRequest;
     packs: AuthorityPacks;
     authorityEpoch: AuthorityEpoch;
@@ -902,7 +1012,7 @@ Packs (deterministic, no model): `epistemic`, `currentness`, `receipt`, `capabil
 
 - **Proposal:** gate intents.
 - **Settlement:** gate publish + draft detectors vs commitments (currentness untagged evasive draft fails).
-- **Dispatch:** recheck **mutable** packs only (withdrawal, capability, sandbox permission, `authorityEpoch`). Do not reinterpret intent. If blocked: do not dispatch; return `DISPATCH_EPOCH_CHANGED` or specific code to Thought/recovery.
+- **Dispatch:** immediately before executor run, recheck **mutable** packs (withdrawal, capability, sandbox permission, `authorityEpoch`) **and** `proposal.cycleId`/`generation` === current active dispatchable generation. If preempted: do **not** dispatch; `STALE_GENERATION`. Already-dispatched effects remain receipt/recovery. Do not reinterpret intent.
 
 Authority never authors `surfaceDraft`. `maxRevisions = 2` after first bound, then fail closed or publish largest fully licensed **droppable** subset (`mode=none` if speech cannot be licensed) — never livelock.
 
@@ -917,77 +1027,119 @@ Relational “never mention X”: stored constraint; Authority matches `mustNot`
 ```ts
 export type OutboxSendStatus =
   | "pending"
+  | "projecting"
+  | "projected"
   | "sending"
   | "delivered"
+  | "partially_delivered"
   | "send_failure"
-  | "suppressed";
+  | "suppressed"
+  | "suppressed_shadow";
+
+export type OutboxOrigin = "live" | "shadow";
+
+export type DeliveryIntent = {
+  ownerId: string;
+  channel: string;
+  threadId: string;                 // = ConversationId
+  conversationId: ConversationId;
+  trigger: "owner_message_reactive" | "idle" | "future_trigger" | "subscription";
+  deliveryLane: "reactive" | "proactive";
+  purpose: "licensed_speech";
+};
 
 export type SpeechOutboxRow = {
   outboxId: OutboxId;
   cycleId: CycleId;
   generation: Generation;
-  reservationId: ReservationId;
+  conversationId: ConversationId;
+  nuclearReservationId: ReservationId | null;
   licensedText: string;
   sendStatus: OutboxSendStatus;
   discordMessageIds: string[];
   suppressed: boolean;
+  origin: OutboxOrigin;
+  deliveryIntent: DeliveryIntent;
+  nuclearFinalizationReason: string | null;
 };
 ```
 
-Publish txn inserts `pending` when `mode=draft`. Transport sends **`licensedText`** (equals `finalLicensedText`). Crash after publish: recovery sends the same row; **no new Thought**. Discord id persisted as soon as known; retry no-ops if set. Duplicate confirmation: recovery speech suppression (S27).
+**Legal transitions:** `pending → projecting → projected → sending → delivered | partially_delivered | send_failure`; `pending|projecting|projected|sending → suppressed` (preempt undelivered); shadow publish **inserts `suppressed_shadow`**, never `pending`. Terminal: `delivered`, `partially_delivered`, `send_failure`, `suppressed`, `suppressed_shadow`. Restart: resume from stored status; never invent a reservation.
 
-### O.1 Outbox → nuclear delivery projector (frozen; version 1)
+`mode=draft` + kernel `legacy` is impossible on this outbox. `mode=draft` + `shadow` → `origin=shadow`, `sendStatus=suppressed_shadow`. `mode=draft` + `v021` → `pending` then projector.
 
-SQLite does not provide atomic commits across `cognitive-v021.db` and `nuclear.db`. Do not claim cross-database atomicity.
+**Cutover precondition:** zero **sendable** rows (`pending|projecting|projected|sending`) with `origin=shadow`. Do not rely only on “projector was off.”
 
-**Bridge identity:** `OutboxDeliveryProjector` in `cognitive-v021/delivery/outbox-projector.ts`. `OUTBOX_BRIDGE_VERSION = 1`.
+### O.1 ExternalizationGate (executive; not interestingness)
 
-**Nuclear additive column** (Phase 05, before freeze):
+Source KEEP: `evaluateProactiveEligibility` mechanical checks in `agency/proactive-eligibility.ts`.
 
-```sql
-ALTER TABLE delivery_reservations ADD COLUMN cognitive_v021_outbox_id TEXT;
-CREATE UNIQUE INDEX IF NOT EXISTS delivery_reservations_v021_outbox
-  ON delivery_reservations(cognitive_v021_outbox_id)
-  WHERE cognitive_v021_outbox_id IS NOT NULL;
+```ts
+export type ExternalizationGateReason =
+  | "ok"
+  | "proactive_disabled"
+  | "proactive_paused"
+  | "daily_cap"
+  | "chat_in_progress"
+  | "unavailable"
+  | "idle_floor"
+  | "private_compute_budget";
+
+export function evaluateExternalizationGate(input: {
+  deliveryIntent: DeliveryIntent;
+  paused: boolean;
+  enabled: boolean;
+  sentToday: number;
+  maxPerDay: number;
+  chatInProgress: boolean;
+  availabilityOk: boolean;
+  idleFloorRemainingSec: number;
+  privateBudgetRemaining: number;
+}): { ok: true } | { ok: false; reason: ExternalizationGateReason };
 ```
 
-Legacy rows leave the column NULL. Legacy path ignores it.
+Applies only when `deliveryLane === "proactive"` (idle / FutureTrigger / subscription speech). Owner-message reactive speech is not gated by pause/daily cap/idle floor.
 
-| Piece | Value |
+KEEP: `paused`, `enabled`, `daily_cap`, `chat_in_progress`, `unavailable` (own_time / availability), ordinary `idle_floor`.
+
+RETIRE as **semantic shortcut:** `urgent_grounded` must **not** skip pause, daily cap, or availability. It must not decide interestingness. Thought already set `speech.mode=draft`.
+
+If gate fails: semantic settlement **remains recorded**; outbox `suppressed` or stays unprojected per reason (`daily_cap` → defer until next eligible tick if still sendable and not shadow; `paused` → `suppressed` until owner unpauses then only **new** generations, not a backlog dump — **decision rule:** paused proactive outbox is `suppressed`, not delivered later automatically).
+
+Proactive `threadId` = current `ConversationId` (active nuclear thread). Delivered speech becomes Conversation Evidence on that lineage.
+
+### O.2 Outbox → nuclear delivery projector (frozen; version 1)
+
+SQLite does not provide atomic commits across databases. **Bridge:** `OutboxDeliveryProjector`. Nuclear column via **versioned migration** (04; Phase 05), not unversioned ALTER in prose only.
+
+Lane: `DeliveryIntent.deliveryLane` maps to nuclear `delivery_lane` / `trigger` (`reactive` vs `proactive`). **Do not** hardcode `delivery_lane = reactive` for every v0.2.1 speech.
+
+Nuclear `DeliveryState` translation (nuclear has **no** `send_failure` state; that is `DeliveryFinalizationReason`):
+
+| Nuclear state | Sidecar sendStatus |
 |---|---|
-| Source | sidecar `speech_outbox` row (`outboxId`, `cycleId`, `generation`, `licensedText`, `sendStatus`) |
-| Projector | `OutboxDeliveryProjector.project(outboxId)` |
-| Correlation / idempotency | `cognitive_v021_outbox_id = str(outboxId)` unique on nuclear |
-| Destination | `delivery_reservations` + bubbles via existing `attachDraftAndBubbles` / `planContentBubbles` |
-| Final text | exactly `licensedText` (already `finalLicensedText`) |
-| Destination lane | `delivery_lane = 'reactive'` (same Discord DM path as claimReactiveDelivery) |
+| drafted / reserved | projecting or projected |
+| sending | sending |
+| committed | delivered |
+| partially_delivered | partially_delivered |
+| aborted / cancelled / expired | suppressed or send_failure using `finalizationReason` (`send_failure` / `send_failure_after_partial` → `send_failure` or `partially_delivered`) |
 
-**Protocol (idempotent reconciliation):**
+Projector tests must not assume a nuclear state named `send_failure`.
 
-1. Read sidecar outbox `pending` or `projecting`.
-2. Sidecar: set `projecting` if `pending` (same DB txn).
-3. INSERT nuclear reservation with `cognitive_v021_outbox_id`. On UNIQUE conflict: SELECT existing id; do not insert a second reservation.
-4. Attach draft/bubbles from `licensedText` if reservation state is still `drafted` and draft_text is null. If destination already `sending`/`committed`/`cancelled`: skip attach.
-5. Sidecar: store `nuclear_reservation_id`, set outbox `sending` (or keep `projecting` until first Discord id).
-6. Existing Discord claim/send/receipt/finalize writes Discord ids onto nuclear.
-7. Projector/reconcile: when nuclear `committed`, sidecar `delivered` + Discord ids copied. When nuclear `send_failure`, sidecar `send_failure`.
+**Protocol:** pending → projecting → INSERT reservation (UNIQUE `cognitive_v021_outbox_id`) → store `nuclearReservationId` → projected → sending when Discord send starts → terminal as table above.
 
-**Crashes:**
+Shadow: projector **off**; rows are `suppressed_shadow`.
 
-| Crash | Recovery |
-|---|---|
-| Before nuclear INSERT | sidecar still `pending`/`projecting`; retry INSERT |
-| After nuclear INSERT, before sidecar map | UNIQUE hit on retry; bind nuclear id; continue |
-| After destination committed, sidecar still projecting | mark sidecar `delivered`; do not send again |
-| Duplicate projector tick | UNIQUE + state checks; no second Discord send |
+### O.3 SystemNoticeOutbox
 
-**Superseded generation:** do not project; set sidecar `suppressed`. If nuclear reservation exists but Discord not sent, finalize/cancel via existing delivery finalize `cancel` — do not unsend delivered messages.
+Not Ashley speech. Not Memory. Independent of CognitiveSettlement.
 
-**Tests (required):** crash-before-dest, crash-after-dest, retry, duplicate tick, dest already committed, Discord id reconciliation, source completion, recovery suppression, shadow mode never calls Discord send.
+```ts
+export const THOUGHT_UNAVAILABLE_NOTICE =
+  "[system] Thought did not complete. Please send the message again." as const;
+```
 
-This bridge is implemented and rehearsed **before candidate freeze** (Phase 05 + Phase 08 wiring).
-
-Map to existing helpers: `attachDraftAndBubbles` **only** with outbox `licensedText`.
+Do **not** use first-person Ashley voice. Do **not** treat `recordAuxiliaryMessage` as a send function: it only records after a Discord send and requires an existing reservation. Frozen path: insert `system_notice_outbox` `pending` → projector creates a nuclear reservation (transport may use `trigger=reactive` / lane `reactive` for DM mechanics) → send the notice text → persist Discord id → `recordAuxiliaryMessage` **after** send if a reservation exists. Conversation Evidence `role=system`. Cannot answer the owner’s question.
 
 ---
 
@@ -1002,6 +1154,7 @@ export type DurableNomination = {
   generation: Generation;
   assertionKey: AssertionKey;
   statement: string;
+  memoryKind: MemoryKind;
   dimensions: EpistemicDimensions;
   supersedesAssertionKey: AssertionKey | null;
   concernId: ConcernId | null;
@@ -1012,9 +1165,24 @@ Queued in publish txn. Admission is async, off speech path. Fence: before live M
 
 ---
 
-## Q. Durable Memory + epistemic dimensions
+## Q. Durable Memory + epistemic dimensions + semantic kind
+
+Dimensional epistemology answers **how we know**. `MemoryKind` answers **what kind of assertion**.
 
 ```ts
+export type MemoryKind =
+  | "owner_preference"
+  | "owner_self_description"
+  | "owner_goal"
+  | "owner_world_claim"
+  | "project_knowledge"
+  | "commitment"
+  | "relational_boundary"
+  | "shared_episode"
+  | "open_question"
+  | "ashley_interpretation"
+  | "learned_self_evidence";
+
 export type EpistemicSource =
   | "owner_utterance"
   | "ashley_interpretation"
@@ -1050,34 +1218,49 @@ export type EpistemicDimensions = {
 export type MemoryAssertion = {
   assertionKey: AssertionKey;
   statement: string;
+  memoryKind: MemoryKind;
   dimensions: EpistemicDimensions;
   lineageParentKey: AssertionKey | null;
   admittedGeneration: Generation;
   live: boolean;
 };
+
+export type MemorySupport = {
+  supportId: string;
+  assertionKey: AssertionKey;
+  source: EpistemicSource;
+  settlementId: string | null;
+  evidenceLineageId: string | null;
+  observationId: string | null;
+  receiptId: string | null;
+  dimensions: EpistemicDimensions;
+  createdAtMs: number;
+};
 ```
 
-No persistable `AshleyBelief` type at cutover (do not add the identifier). Evidence supports are additional rows, same `assertionKey`. Correction/retraction: supersede lineage; occupancy/triggers revalidate.
+One `assertionKey` accumulates multiple `MemorySupport` rows (owner said X + tool later observes X). Do **not** overwrite a single EpistemicDimensions blob and lose source history.
 
-Reuse C1 `memory_assertions` **after cutover** or keep sidecar `memory_assertions` during shadow (**decision rule:** sidecar table `sidecar_memory_assertions` during shadow; cutover imports live rows — do not dual-write production C1 tables in shadow).
+**Views (deterministic; no LLM):** `OwnerKnowledgeView` = live assertions whose `memoryKind` is `owner_preference` | `owner_self_description` | `owner_goal` | `owner_world_claim`. `RelationalConstraintView` = live `relational_boundary`. No prose reinterpretation.
+
+Reuse C1 `memory_assertions` **after cutover** or keep sidecar tables during shadow (**decision rule:** sidecar only in shadow; no dual-write of production C1).
 
 ---
 
-## R. Identity / LearnedSelf
+## R. Identity / LearnedSelf (Option B)
 
 ```ts
 export type IdentitySlice = {
-  constitutional: string[];          // value/principle/constitution entries
-  stableSelf: string[];              // protected
+  constitutional: string[];
+  stableSelf: string[];
 };
 
 export type LearnedSelfSlice = {
-  dispositions: string[];            // not world facts ("HY3 is an LLM" forbidden)
+  dispositions: string[];
   interests: string[];
 };
 ```
 
-Constitution: no ordinary writer. LearnedSelf: accumulated from settled experience; compact always-on; never speaks; never fires subscriptions. Owner Model store remains **absent**.
+Constitution: no ordinary writer. **This reconstruction does not implement automatic LearnedSelf accumulation.** There is no `LearnedSelfCandidate` admission writer, no v1 LearnedSelf write table, and Phase 06 must not invent one. Compact `LearnedSelfSlice` may be **empty** or **injected in tests** from already-admitted/quarantined nuclear rows as **read-only**. Cutover may **read** quarantined historical LearnedSelf; new automatic accumulation is **POST-CUTOVER MATURATION**. Architecture remains designed; the implementation packet does not say “implement accumulation” without a contract. World claims still must not be stuffed into the slice (test). Owner Model store remains **absent**.
 
 ---
 
@@ -1127,14 +1310,7 @@ export type CausalLedgerEntry = {
 
 ## U. Infrastructure notice
 
-When Thought is unavailable or settlement malformed:
-
-```ts
-export const THOUGHT_UNAVAILABLE_NOTICE =
-  "I couldn't finish thinking just now. Give me a moment and say that again." as const;
-```
-
-This is **not** `surfaceDraft`, not Expression, not `decide()`. Delivery may send it as `role=system` auxiliary (`recordAuxiliaryMessage` KEEP) or a dedicated outbox `suppressed` Ashley voice with `speech.mode=none` plus auxiliary. **Decision rule:** use existing `recordAuxiliaryMessage` kind `delivery_error` / progress — **not** `attachDraftAndBubbles` with Ashley persona. Test: ledger `thoughtUnavailable=true`; no CognitiveSettlement speech; no Expression call.
+See §O.3. `THOUGHT_UNAVAILABLE_NOTICE` is system text. Test: ledger `thoughtUnavailable=true`; no PublishedCognitiveSettlement speech; no Expression; Conversation Evidence `role=system` if delivered.
 
 ---
 
@@ -1159,161 +1335,15 @@ export function openCognitiveSidecarDb(
 ): DatabaseSync;
 ```
 
-Copy `openContinuityDb` reserved-path guard. Schema version **always 1** at open after applying `sidecar/schema-v1.sql`. Shadow kernel **reads** replicated evidence; **writes only sidecar**. Production nuclear semantic writers stay live until configuration-only cutover of the frozen SHA. Additive nuclear column `cognitive_v021_outbox_id` is allowed before freeze (not a semantic writer).
+Copy `openContinuityDb` reserved-path guard. Schema version **always 1** at open after applying complete v1 DDL. Shadow kernel **reads** replicated **legacy delivered** assistant text (replicator) and owner evidence (**ingress only**). **Writes only sidecar.** Production nuclear semantic writers stay live until configuration-only cutover. Additive nuclear outbox column is a versioned nuclear migration (04).
 
-Replicator (`shadow/replicator.ts`): copy new inbound Discord text + ids into sidecar evidence log with `architectureEpoch: "legacy"` **without waiting for Thought**. Never write WC/Memory to nuclear in shadow. Candidate must never send Discord.
+`shadow/replicator.ts`: mirror **legacy Ashley delivered Discord text** into sidecar Conversation Evidence (`role=ashley`, `architectureEpoch=legacy`, `delivered=true`). **Do not** copy owner inbound (ingress already did). Never write WC/Memory to nuclear in shadow. Candidate must never send Discord. Candidate outbox is `suppressed_shadow`.
 
 ### W.1 Initial schema (version 1 only)
 
-File: `apps/agent-service/src/core/cognitive-v021/sidecar/schema-v1.sql`. Applied on open. No version-2 migration in this packet.
+**The SQL in [04_STORAGE_AND_DISPATCH_CONTRACT.md](04_STORAGE_AND_DISPATCH_CONTRACT.md) is the complete v1 DDL.** Phase 00 applies that file (`sidecar/schema-v1.sql`). Do not apply a meta-only subset. Do not bump to version 2. Meta insert: `implementation_spec_version='0.2.1.r3'`, `authority_epoch=1`.
 
-```sql
-CREATE TABLE IF NOT EXISTS cognitive_sidecar_meta (
-  schema_version INTEGER NOT NULL,
-  architecture_epoch TEXT NOT NULL,
-  implementation_spec_version TEXT NOT NULL,
-  thought_contract_version INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS conversation_evidence_log (
-  id TEXT PRIMARY KEY,
-  conversation_id TEXT NOT NULL,
-  role TEXT NOT NULL,
-  text TEXT,
-  created_at_ms INTEGER NOT NULL,
-  discord_message_ids_json TEXT NOT NULL,
-  reservation_id INTEGER,
-  producing_cycle_id TEXT,
-  architecture_epoch TEXT NOT NULL,
-  content_hash TEXT NOT NULL,
-  source_status TEXT NOT NULL,
-  version INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS inbox_events (
-  id TEXT PRIMARY KEY,
-  conversation_id TEXT NOT NULL,
-  kind TEXT NOT NULL,
-  payload_json TEXT NOT NULL,
-  created_at_ms INTEGER NOT NULL,
-  consumed INTEGER NOT NULL DEFAULT 0
-);
-CREATE TABLE IF NOT EXISTS cycle_records (
-  cycle_id TEXT PRIMARY KEY,
-  conversation_id TEXT NOT NULL,
-  generation INTEGER NOT NULL,
-  state TEXT NOT NULL,
-  trigger_kind TEXT NOT NULL,
-  occupant_id TEXT,
-  authority_epoch INTEGER NOT NULL,
-  created_at_ms INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS thought_steps (
-  request_id TEXT PRIMARY KEY,
-  cycle_id TEXT NOT NULL,
-  generation INTEGER NOT NULL,
-  pass INTEGER NOT NULL,
-  kind TEXT NOT NULL,
-  payload_json TEXT NOT NULL,
-  created_at_ms INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS working_context_items (
-  id TEXT PRIMARY KEY,
-  conversation_id TEXT NOT NULL,
-  type TEXT NOT NULL,
-  payload_json TEXT NOT NULL,
-  superseded INTEGER NOT NULL DEFAULT 0,
-  updated_cycle TEXT,
-  updated_generation INTEGER
-);
-CREATE TABLE IF NOT EXISTS concerns (
-  concern_id TEXT PRIMARY KEY,
-  conversation_id TEXT NOT NULL,
-  statement TEXT NOT NULL,
-  source_refs_json TEXT NOT NULL,
-  dimensions_json TEXT NOT NULL,
-  assertion_key TEXT,
-  updated_cycle TEXT
-);
-CREATE TABLE IF NOT EXISTS mind_occupancy (
-  concern_id TEXT PRIMARY KEY,
-  status TEXT NOT NULL,
-  priority INTEGER NOT NULL,
-  updated_cycle TEXT NOT NULL,
-  updated_generation INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS future_triggers (
-  trigger_id TEXT PRIMARY KEY,
-  conversation_id TEXT NOT NULL,
-  due_at_ms INTEGER NOT NULL,
-  occupancy_hash TEXT NOT NULL,
-  cancelled INTEGER NOT NULL DEFAULT 0,
-  payload_json TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS observation_subscriptions (
-  subscription_id TEXT PRIMARY KEY,
-  conversation_id TEXT NOT NULL,
-  spec_json TEXT NOT NULL,
-  cancelled INTEGER NOT NULL DEFAULT 0
-);
-CREATE TABLE IF NOT EXISTS observations (
-  observation_id TEXT PRIMARY KEY,
-  cycle_id TEXT,
-  generation INTEGER,
-  payload_json TEXT NOT NULL,
-  created_at_ms INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS speech_outbox (
-  outbox_id INTEGER PRIMARY KEY AUTOINCREMENT,
-  cycle_id TEXT NOT NULL,
-  generation INTEGER NOT NULL,
-  licensed_text TEXT NOT NULL,
-  send_status TEXT NOT NULL,
-  nuclear_reservation_id INTEGER,
-  discord_message_ids_json TEXT NOT NULL DEFAULT '[]',
-  suppressed INTEGER NOT NULL DEFAULT 0
-);
-CREATE TABLE IF NOT EXISTS in_flight_effects (
-  effect_id TEXT PRIMARY KEY,
-  cycle_id TEXT NOT NULL,
-  generation INTEGER NOT NULL,
-  correlation_id TEXT NOT NULL,
-  replay_safe INTEGER NOT NULL,
-  state TEXT NOT NULL,
-  payload_json TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS durable_nominations (
-  nomination_id TEXT PRIMARY KEY,
-  cycle_id TEXT NOT NULL,
-  generation INTEGER NOT NULL,
-  assertion_key TEXT NOT NULL,
-  statement TEXT NOT NULL,
-  dimensions_json TEXT NOT NULL,
-  admitted INTEGER NOT NULL DEFAULT 0
-);
-CREATE TABLE IF NOT EXISTS sidecar_memory_assertions (
-  assertion_key TEXT PRIMARY KEY,
-  statement TEXT NOT NULL,
-  dimensions_json TEXT NOT NULL,
-  lineage_parent_key TEXT,
-  admitted_generation INTEGER NOT NULL,
-  live INTEGER NOT NULL,
-  content_hash TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS settlements (
-  settlement_id TEXT PRIMARY KEY,
-  cycle_id TEXT NOT NULL,
-  generation INTEGER NOT NULL,
-  payload_json TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS causal_ledger (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  cycle_id TEXT NOT NULL,
-  generation INTEGER NOT NULL,
-  payload_json TEXT NOT NULL
-);
-```
-
-Meta insert on first open: `schema_version=1`, `architecture_epoch='v0.2.1'`, `implementation_spec_version='0.2.1.r2'`, `thought_contract_version=1`.
+If §W.1 and 04 diverge, HARD BLOCKER.
 
 ---
 
@@ -1327,6 +1357,8 @@ export type KernelRunResult = {
   outboxId: OutboxId | null;
   infrastructureNotice: string | null;
   thoughtModelAttempts: number;
+  acceptedThoughtPasses: number;
+  composeCancelledAttempts: number;
   acceptedSettlements: number;
 };
 
@@ -1353,7 +1385,7 @@ export type KernelDeps = {
   expressionEnabled: boolean;
   adaptExpression?: (input: {
     draft: string;
-    commitments: CognitiveSettlement["commitments"];
+    commitments: ThoughtSettlementDraft["commitments"];
     stance: Stance;
     directives: string[];
     profile: string;
@@ -1367,7 +1399,7 @@ export type KernelDeps = {
 
 Tests may fake `completeChat` but the fake must still accept `CognitiveDispatchOptions` including `attentionDb`. Production `sendDiscord` is **not** a KernelDeps function; Discord send is the existing bot pump after nuclear reservation projection.
 
-`KernelRunResult.thoughtModelAttempts` counts raw model invocations (including compose restarts). `acceptedSettlements` is 0 or 1 for the generation that published.
+`KernelRunResult.thoughtModelAttempts` counts raw model invocations (including compose restarts). `acceptedThoughtPasses` counts accepted semantic steps of the current generation. `acceptedSettlements` is 0 or 1 for the generation that published. Cancelled compose attempts must not exhaust `MAX_THOUGHT_PASSES`.
 
 ---
 
@@ -1379,7 +1411,7 @@ Tests may fake `completeChat` but the fake must still accept `CognitiveDispatchO
 export type CausalBundle = {
   evidenceShownToThought: ConversationEvidenceRecord[];
   thoughtInputHash: string;
-  settlement: CognitiveSettlement | null;
+  settlement: PublishedCognitiveSettlement | null;
   workingContext: WorkingContextItem[];
   occupancy: MindOccupancy[];
   authorityCodes: AuthorityCode[];
@@ -1400,7 +1432,7 @@ Hard fails if:
 - `deliveredText` set AND `settlement` null (unless infrastructure notice path, which forbids Ashley voice)
 - `expressionInput` contains transcript/memory/perception markers
 - `mode=draft` AND commitments empty
-- Expression skipped AND `outboxText !== settlement.speech.surfaceDraft`
+- Expression skipped AND `outboxText !== renderForTransport(settlement.speech.surfaceDraft)` (when mode=draft)
 - Expression ran AND `outboxText !== settlement.speech.finalLicensedText`
 - Expression ran AND `outboxText` introduces mustNot violation
 - `acceptedSettlements === 0` on owner_message ordinary turn that should speak or privately settle
@@ -1436,13 +1468,17 @@ node scripts/cognitive-v021/import-legacy-semantic-state.mjs
 | Rollback | delete sidecar file or restore sidecar snapshot; never write nuclear |
 | Failure codes | `INPUT_UNREADABLE`, `SCHEMA_UNSUPPORTED`, `COUNT_MISMATCH`, `HASH_MISMATCH`, `PROVENANCE_MISMATCH`, `RESERVED_PATH_REFUSED` |
 
-**Imported semantic classes:** conversation evidence (from `mem_messages` + inbound discord ids), C1 assertions (quarantined), identity constitutional entries (read-only copy into `IdentitySlice` source, not LearnedSelf), open mind_state_items as concerns+occupancy **quarantined** (`status=background` until Thought re-admits).
+**Imported semantic classes:** conversation evidence (from `mem_messages` + inbound discord ids, preserving classification/secret omission), C1 assertions (quarantined), identity constitutional entries (read-only copy into `IdentitySlice` source, not LearnedSelf), open mind_state_items as concerns+occupancy **quarantined** (`status=quarantined` until Thought re-admits).
+
+**Shadow vs import:** candidate semantic state from Q5 is **discarded/quarantined** at cutover (not live). Conversation Evidence of owner + **delivered** legacy Ashley **may survive**. Then initialize clean live semantic projections; then `import --apply` once into that clean sidecar. Do not apply import twice into a sidecar still holding shadow Memory/concerns.
+
+**Cutover command order:** (1) `dispose-shadow-semantic-state` (verify zero sendable shadow outbox; drop/quarantine WC, concerns, occupancy, nominations, triggers, subscriptions, candidate outbox); (2) preserve/copy conversation evidence of delivered reality; (3) import-legacy apply+verify; (4) start `v021`.
 
 **Quarantine classes:** `cur_takes`, episodes, learning_revisions without exact owner-reviewed ids, relationship scores, affect, decide() rows, Expression transcripts as meaning.
 
 **Ignored:** V1 sandbox broker tables, capability observe/apply flags (remain nuclear), delivery_reservations (operational; not semantic import).
 
-**Report:** `docs/cognitive-rework/v0.2.1/artifacts/LEGACY_IMPORT_REPORT.json` with `toolVersion`, counts expected/actual, hashes, `rejectedCount`, `quarantinedCount`, `duplicateCount`, `provenanceOk`. Count or hash mismatch is HARD BLOCKER 15.
+**Report:** `docs/cognitive-rework/v0.2.1/artifacts/runtime/LEGACY_IMPORT_REPORT.json` with `toolVersion`, counts expected/actual, hashes, `rejectedCount`, `quarantinedCount`, `duplicateCount`, `provenanceOk`. Count or hash mismatch is HARD BLOCKER 15.
 
 Cutover runbook invokes `--mode apply` on isolated copies first, then `--mode verify` on the cutover sidecar.
 
@@ -1456,5 +1492,5 @@ Software contracts in this file are proven exhaustively in **Q1** with stubs, pr
 
 ## Interface name freeze (import these)
 
-`ARCHITECTURE_EPOCH`, `IMPLEMENTATION_SPEC_VERSION`, `THOUGHT_CONTRACT_VERSION`, `COGNITIVE_SIDECAR_SCHEMA_VERSION`, `OUTBOX_BRIDGE_VERSION`, `LEGACY_IMPORT_TOOL_VERSION`, `MAX_THOUGHT_PASSES`, `KernelMode`, `CycleId`, `Generation`, `CycleState`, `CycleTriggerKind`, `CycleRecord`, `CognitiveSettlement`, `ThoughtInput`, `ThoughtStepOutput`, `ThoughtCompleteOptions`, `invokeThoughtComplete`, `CognitiveWorkspace`, `ConversationEvidenceRecord`, `InboxEvent`, `WorkingContextItem`, `ConcernRecord`, `MindOccupancy`, `OccupancyStatus`, `FutureTrigger`, `ObservationSubscription`, `RetrievalRequest`, `RetrievalResult`, `Observation`, `EffectProposal`, `InFlightRecord`, `EffectReceipt`, `AuthorityCode`, `AuthorityStage`, `checkAuthority`, `SpeechOutboxRow`, `OutboxDeliveryProjector`, `DurableNomination`, `EpistemicDimensions`, `MemoryAssertion`, `IdentitySlice`, `LearnedSelfSlice`, `RuntimeCondition`, `CausalLedgerEntry`, `CausalBundle`, `assertCausalInvariants`, `runCognitiveCycle`, `publishSemanticTransaction`, `validateSettlement`, `openCognitiveSidecarDb`, `reservedProductionCognitiveSidecarDbPath`, `tokenizeForDiscovery`, `THOUGHT_UNAVAILABLE_NOTICE`, `WorkingContextDelta`, `ConcernDelta`, `OccupancyDelta`, `FutureTriggerDelta`, `SubscriptionDelta`, `ObservationRequest`, `CapabilityReality`, `AuthorityPacks`, `KernelDeps`, `KernelRunResult`, `finalLicensedText`.
+`ARCHITECTURE_EPOCH`, `IMPLEMENTATION_SPEC_VERSION`, `THOUGHT_CONTRACT_VERSION`, `COGNITIVE_SIDECAR_SCHEMA_VERSION`, `OUTBOX_BRIDGE_VERSION`, `LEGACY_IMPORT_TOOL_VERSION`, `MAX_THOUGHT_PASSES`, `MAX_THOUGHT_MODEL_ATTEMPTS`, `KernelMode`, `CycleId`, `Generation`, `CycleState`, `CycleTriggerKind`, `CycleRecord`, `ThoughtSettlementDraft`, `PublishedCognitiveSettlement`, `CognitiveSettlement`, `ThoughtInput`, `ThoughtStepOutput`, `ThoughtCompleteOptions`, `invokeThoughtComplete`, `CognitiveWorkspace`, `ConversationEvidenceRecord`, `InboxEvent`, `InboxConsumerStatus`, `WorkingContextItem`, `ConcernRecord`, `MindOccupancy`, `OccupancyStatus`, `FutureTrigger`, `ObservationSubscription`, `RetrievalRequest`, `RetrievalResult`, `Observation`, `EffectProposal`, `InFlightRecord`, `EffectReceipt`, `AuthorityCode`, `AuthorityStage`, `checkAuthority`, `SpeechOutboxRow`, `OutboxSendStatus`, `DeliveryIntent`, `OutboxDeliveryProjector`, `ExternalizationGateReason`, `evaluateExternalizationGate`, `DurableNomination`, `MemoryKind`, `EpistemicDimensions`, `MemoryAssertion`, `MemorySupport`, `IdentitySlice`, `LearnedSelfSlice`, `RuntimeCondition`, `CausalLedgerEntry`, `CausalBundle`, `assertCausalInvariants`, `runCognitiveCycle`, `publishSemanticTransaction`, `validateThoughtSettlementDraft`, `openCognitiveSidecarDb`, `reservedProductionCognitiveSidecarDbPath`, `tokenizeForDiscovery`, `THOUGHT_UNAVAILABLE_NOTICE`, `WorkingContextDelta`, `ConcernDelta`, `OccupancyDelta`, `FutureTriggerDelta`, `SubscriptionDelta`, `ObservationRequest`, `CapabilityReality`, `AuthorityPacks`, `KernelDeps`, `KernelRunResult`, `finalLicensedText`, `SystemNoticeOutbox`.
 

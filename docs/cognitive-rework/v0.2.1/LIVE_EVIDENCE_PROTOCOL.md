@@ -26,7 +26,7 @@ Talk normally. Cover the shapes below without announcing test numbers.
 
 ## B. Causal trace (per selected interaction)
 
-Record: evidence log ids; cycleId; generation; evidence visible to Thought; CognitiveSettlement (interpretation, commitments, `speech.mode`, `surfaceDraft`, `finalLicensedText`); WC / concern / occupancy deltas; nominations; Authority codes; outbox `licensedText` + sendStatus + discord ids; occupantId / thought route; `thoughtModelAttempts` vs `acceptedSettlements`; latency (admittedAt → first bubble). No secrets.
+Record: evidence log ids; cycleId; generation; evidence visible to Thought; `ThoughtSettlementDraft` / `PublishedCognitiveSettlement` (interpretation, commitments, `speech.mode`, `surfaceDraft`, `finalLicensedText`); WC / concern / occupancy deltas; nominations; Authority codes; outbox `licensedText` + sendStatus + discord ids; occupantId / thought route; `thoughtModelAttempts` vs `acceptedSettlements`; latency (admittedAt → first bubble). No secrets.
 
 ---
 
@@ -96,7 +96,7 @@ Severe causal owner error (S26): `LIVE_DEFECT_FOUND` + HARD BLOCKER 22. Capture 
 
 ## Report
 
-`docs/cognitive-rework/v0.2.1/artifacts/LIVE_EVIDENCE_REPORT.md`
+`docs/cognitive-rework/v0.2.1/artifacts/runtime/LIVE_EVIDENCE_REPORT.md`
 
 ```
 LUNA_RESULT: PRODUCTION_WITNESSED / PROPOSED_FOR_ACCEPTANCE | WITNESS_INCOMPLETE | LIVE_DEFECT_FOUND

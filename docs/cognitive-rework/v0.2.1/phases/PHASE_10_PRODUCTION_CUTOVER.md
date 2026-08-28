@@ -22,7 +22,7 @@ Identical to qualified candidate. Live still `legacy` until env change on Mint.
 
 ## FILES TO CREATE
 
-`artifacts/CUTOVER_RESULT.md` only.
+`artifacts/runtime/CUTOVER_RESULT.md` only — untracked under `artifacts/runtime/`.
 
 ## FILES TO MODIFY
 

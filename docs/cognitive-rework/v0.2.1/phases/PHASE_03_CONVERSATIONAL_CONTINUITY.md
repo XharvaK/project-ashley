@@ -161,7 +161,7 @@ Each scenario `acceptedSettlements === 1` unless miss round (`acceptedSettlement
 
 ```powershell
 npx vitest run src/core/cognitive-v021 --config vitest.offline.config.ts
-npx tsc --noEmit
+npm exec --prefix apps/agent-service -- tsc --noEmit
 npm run test:offline --prefix apps/agent-service
 ```
 
@@ -179,7 +179,7 @@ Referents require Expression transcript to work.
 
 ## OUTPUT ARTIFACT
 
-`artifacts/PHASE_03_GATE.md`
+`artifacts/runtime/PHASE_03_GATE.md`
 
 ## NEXT PHASE PRECONDITIONS
 

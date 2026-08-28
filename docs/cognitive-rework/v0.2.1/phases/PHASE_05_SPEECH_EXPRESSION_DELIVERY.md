@@ -22,7 +22,7 @@ Phase 04 PASS.
 
 ## TARGET SOURCE STATE
 
-`fidelityCheck`; optional `adaptExpression` with hashed forbidden-evidence exclusion; outbox send adapter calling existing `planContentBubbles` + reservation helpers **in tests with fake Discord**; `THOUGHT_UNAVAILABLE_NOTICE` via `recordAuxiliaryMessage` equivalent sidecar auxiliary table.
+`fidelityCheck`; optional `adaptExpression`; `renderForTransport` **before** `finalLicensedText`; `SystemNoticeOutbox` (not `recordAuxiliaryMessage` as send); nuclear migration for `cognitive_v021_outbox_id`.
 
 ## FILES TO CREATE
 
@@ -70,8 +70,9 @@ Production still uses expressSpeak.
 
 ### Task 5.2 Default skip Expression
 
-- [ ] Kernel deps `expressionEnabled: false` (default): `outbox.licensedText === settlement.speech.surfaceDraft === settlement.speech.finalLicensedText`; expressionInput null
-- [ ] Commit: `feat(cognitive-v021): default Discord path uses Thought surfaceDraft as finalLicensedText`
+- [ ] Kernel deps `expressionEnabled: false` (default): `outbox.licensedText === published.speech.finalLicensedText === renderForTransport(surfaceDraft)`
+- [ ] Thought JSON must not contain `finalLicensedText`
+- [ ] Commit: `feat(cognitive-v021): default Discord path publishes rendered Thought draft`
 
 ### Task 5.3 Starved Expression
 
@@ -98,8 +99,8 @@ Production still uses expressSpeak.
 
 ### Task 5.7 Thought outage notice (U)
 
-- [ ] completeChat throws / route not ready → auxiliary notice `THOUGHT_UNAVAILABLE_NOTICE`; no expressSpeak; no decide()
-- [ ] Commit: `feat(cognitive-v021): Thought outage uses infrastructure notice`
+- [ ] completeChat throws → `SystemNoticeOutbox` with `THOUGHT_UNAVAILABLE_NOTICE`; not Ashley first-person; no expressSpeak; no decide()
+- [ ] Commit: `feat(cognitive-v021): Thought outage uses system notice outbox`
 
 ### Task 5.8 High-risk detector reject-only
 
@@ -109,8 +110,8 @@ Production still uses expressSpeak.
 
 ### Task 5.9 Presentation KEEP
 
-- [ ] After fidelity, `renderForTransport` applied to outbox text (import existing)
-- [ ] Commit: `feat(cognitive-v021): apply renderForTransport after fidelity`
+- [ ] `renderForTransport` runs **before** `finalLicensedText` is published (spec C.2). Outbox text equals published `finalLicensedText`. Delivery must not mutate it again.
+- [ ] Commit: `feat(cognitive-v021): renderForTransport before licensed publication`
 
 ### Task 5.10 Private silence
 
@@ -119,7 +120,7 @@ Production still uses expressSpeak.
 
 ### Task 5.11 OutboxDeliveryProjector (cross-DB, not atomic)
 
-- [ ] Nuclear additive `cognitive_v021_outbox_id` unique index
+- [ ] Nuclear **versioned** migration: `NUCLEAR_SUPPORTED_VERSION` (selected baseline) + 1; column `cognitive_v021_outbox_id` unique index. Current-pin tests use `NUCLEAR_SUPPORTED_VERSION` after the bump.
 - [ ] Project pending outbox → nuclear reservation `draft_text` equals `licensedText`
 - [ ] Crash before dest INSERT: retry succeeds once
 - [ ] Crash after dest INSERT: UNIQUE hit; no second reservation
@@ -150,7 +151,7 @@ Default path serial LLM = 1. Expression enabled test may be 2 and is **opt-in** 
 
 ```powershell
 npx vitest run src/core/cognitive-v021 --config vitest.offline.config.ts
-npx tsc --noEmit
+npm exec --prefix apps/agent-service -- tsc --noEmit
 npm run test:offline --prefix apps/agent-service
 ```
 
@@ -168,7 +169,7 @@ Rendering requires Decision prompt. Discord send requires live bot in unit tests
 
 ## OUTPUT ARTIFACT
 
-`artifacts/PHASE_05_GATE.md`
+`artifacts/runtime/PHASE_05_GATE.md`
 
 ## NEXT PHASE PRECONDITIONS
 

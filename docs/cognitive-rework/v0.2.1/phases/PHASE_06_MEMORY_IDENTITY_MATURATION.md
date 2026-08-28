@@ -32,7 +32,9 @@ Shadow: do not write production `memory_assertions`.
 - `memory/nomination.ts` + tests
 - `memory/admission.ts` + tests
 - `memory/assertions.ts` + tests
-- `identity/learned-self.ts` + tests
+- `memory/supports.ts` + tests
+- `memory/views.ts` + tests (`OwnerKnowledgeView`, `RelationalConstraintView`; no LLM)
+- `identity/learned-self.ts` + tests (**read-only slice / Option B**; no accumulation writer)
 - `identity/constitution.ts` (reader over nuclear seed for integration tests)
 - `calibration/occupant.ts` + tests
 - `relationship/constraints.ts` (read-only view builder from injected rows)
@@ -58,7 +60,7 @@ C1 types conceptually; copy needed columns into sidecar, do not import productio
 
 ## DATABASE / MIGRATION CHANGES
 
-`sidecar_memory_assertions`, `sidecar_memory_supports`, `admission_log`.
+`sidecar_memory_assertions`, `sidecar_memory_supports`, `admission_log` already in **v1 DDL** (Phase 00). This phase writes them. Do not ADD tables.
 
 ## LEGACY COMPATIBILITY
 
@@ -87,7 +89,7 @@ Live `/remember` still pins facts.
 
 ### Task 6.4 Explicit `/remember` immediate
 
-- [ ] Helper `admitOwnerSuppliedClaim` used by tests (Discord slash wiring Phase 10)
+- [ ] Helper `admitOwnerSuppliedClaim` used by tests. Discord `/remember` wiring is **Phase 08** (flag-gated; not Phase 10).
 - [ ] Immediate if generation current
 - [ ] Commit: `feat(cognitive-v021): explicit remember is immediate owner-supplied admission`
 
@@ -103,9 +105,9 @@ Live `/remember` still pins facts.
 
 ### Task 6.7 LearnedSelf not world facts
 
-- [ ] Ingesting “HY3 is an LLM” into LearnedSelf rejected; belongs in Memory
-- [ ] Interests compact slice always-on in ThoughtInput
-- [ ] Commit: `feat(cognitive-v021): LearnedSelf cannot hold world claims`
+- [ ] Ingesting “HY3 is an LLM” into LearnedSelf slice rejected; belongs in Memory
+- [ ] No `LearnedSelfCandidate` writer; slice may be empty
+- [ ] Commit: `feat(cognitive-v021): LearnedSelf cannot hold world claims (no accumulation writer)`
 
 ### Task 6.8 C4 occupant calibration
 
@@ -152,7 +154,7 @@ Repeat inferred ≠ owner_supplied. Belief type absent.
 
 ```powershell
 npx vitest run src/core/cognitive-v021 --config vitest.offline.config.ts
-npx tsc --noEmit
+npm exec --prefix apps/agent-service -- tsc --noEmit
 npm run test:offline --prefix apps/agent-service
 ```
 
@@ -172,7 +174,7 @@ C1 production tables required for sidecar tests.
 
 ## OUTPUT ARTIFACT
 
-`artifacts/PHASE_06_GATE.md`
+`artifacts/runtime/PHASE_06_GATE.md`
 
 ## NEXT PHASE PRECONDITIONS
 

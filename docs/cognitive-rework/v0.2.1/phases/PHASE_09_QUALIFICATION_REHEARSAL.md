@@ -10,7 +10,7 @@ All S1–S31 as qualification checks.
 
 ## DEPENDENCIES
 
-Phase 08 freeze. `artifacts/CANDIDATE_FREEZE.md`. Clean `git rev-parse HEAD` == `CANDIDATE_SHA`.
+Phase 08 freeze. Untracked `artifacts/runtime/CANDIDATE_FREEZE.md` points to `CANDIDATE_SHA`. Clean tracked tree. `git rev-parse HEAD` == `CANDIDATE_SHA`.
 
 ## CURRENT SOURCE STATE
 
@@ -18,7 +18,7 @@ Frozen candidate. Default kernel `legacy`.
 
 ## TARGET SOURCE STATE
 
-**Unchanged source.** `artifacts/QUALIFICATION_RESULT.md` with `QUALIFIED_SHA = <CANDIDATE_SHA>` or FAIL.
+**Unchanged source.** `artifacts/runtime/QUALIFICATION_RESULT.md` with `QUALIFIED_SHA = <CANDIDATE_SHA>` or FAIL.
 
 ## FILES TO CREATE
 
@@ -56,7 +56,7 @@ See master plan 6–16. Any source edit this phase is HARD BLOCKER 7. Sending th
 
 ## OUTPUT ARTIFACT
 
-`artifacts/QUALIFICATION_RESULT.md` — must include `QUALIFIED_SHA` and separate Q1–Q6 result fields plus quota used. `artifacts/QUOTA_BUDGET.md` before Q3.
+`artifacts/runtime/QUALIFICATION_RESULT.md` — must include `QUALIFIED_SHA` and separate Q1–Q6 result fields plus quota used. `artifacts/runtime/QUOTA_BUDGET.md` before Q3.
 
 ## NEXT PHASE PRECONDITIONS
 

@@ -20,7 +20,7 @@ Phase 00 PASS.
 
 ## TARGET SOURCE STATE
 
-Sidecar tables and functions per spec A, B, E, O, M (in_flight pointer only). Fake settlement publisher for tests (minimal JSON) **only** to exercise the txn — real `validateSettlement` is Phase 02. Phase 01 `publishSemanticTransaction` accepts an already-valid `CognitiveSettlement` object in memory (tests construct it).
+Sidecar tables and functions per spec A, B, E, O, M (in_flight pointer only). Fake settlement publisher for tests (minimal JSON) **only** to exercise the txn — real `validateThoughtSettlementDraft` is Phase 02. Phase 01 `publishSemanticTransaction` accepts an already-valid `PublishedCognitiveSettlement` object in memory (tests construct it, including kernel-set `finalLicensedText`).
 
 ## FILES TO CREATE
 
@@ -31,6 +31,8 @@ Sidecar tables and functions per spec A, B, E, O, M (in_flight pointer only). Fa
 - `cognitive-v021/speech/outbox.ts` + `.test.ts`
 - `cognitive-v021/effect/in-flight.ts` + `.test.ts`
 - `cognitive-v021/ingress/http.ts` + server route tests
+- `cognitive-v021/cycle/inbox-consumer.ts` claim/lease primitives + restart tests
+- Privacy: `detectCredentialShape` on owner append
 
 ## FILES TO MODIFY
 
@@ -144,7 +146,7 @@ None (no LLM).
 
 ```powershell
 npx vitest run src/core/cognitive-v021 --config vitest.offline.config.ts
-npx tsc --noEmit
+npm exec --prefix apps/agent-service -- tsc --noEmit
 npm run test:offline --prefix apps/agent-service
 ```
 
@@ -164,7 +166,7 @@ Need to modify live `activeOwners` to pass these tests (must not). If SQLite can
 
 ## OUTPUT ARTIFACT
 
-`artifacts/PHASE_01_GATE.md`
+`artifacts/runtime/PHASE_01_GATE.md`
 
 ## COMMIT MESSAGE / COMMIT GROUPING
 

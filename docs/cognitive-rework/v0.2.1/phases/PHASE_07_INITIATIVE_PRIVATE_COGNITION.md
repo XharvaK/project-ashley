@@ -33,7 +33,7 @@ Phase 06 PASS.
 
 ## FILES TO MODIFY
 
-Kernel trigger kinds; Discord scheduler **not** yet (Phase 10 / 8 may add flag-gated idle tick that cannot send).
+Kernel trigger kinds. Discord idle scheduler wiring is **Phase 08** (flag-gated; must not send until `v021`). Not Phase 10.
 
 ## FILES / PATHS THAT MUST NOT CHANGE
 
@@ -103,6 +103,12 @@ Production proactive unchanged.
 - [ ] Inject curiosity take; no subscription; idle empty occupancy → 0 Thought
 - [ ] Commit: `feat(cognitive-v021): curiosity takes are not speech motivations`
 
+### Task 7.9 ExternalizationGate
+
+- [ ] Thought `mode=draft` idle speech + `paused=true` → settlement recorded, outbox not delivered
+- [ ] Daily cap hit → defer/suppress per spec; settlement remains
+- [ ] Commit: `feat(cognitive-v021): proactive speech cannot bypass pause or daily cap`
+
 ## CAUSAL ACCEPTANCE TESTS
 
 A, B, C, D, interest-must-not-speak.
@@ -117,13 +123,15 @@ Grep idle.ts for `score`, `interesting`, `decide(`.
 
 ## LATENCY / RESOURCE TESTS
 
-Empty house 0 LLM. Occupancy idle 1 LLM.
+Empty house 0 LLM. Occupancy idle bounded by `PRIVATE_THOUGHT_MAX_CALLS_PER_HOUR`. Budget exhaustion is executive (`not now`); Thought still authors if a cycle runs.
+
+- [ ] Active concern; 13 idle ticks in an hour with fake clock → Thought calls stop when budget exhausted without scoring importance
 
 ## FULL PHASE GATE
 
 ```powershell
 npx vitest run src/core/cognitive-v021 --config vitest.offline.config.ts
-npx tsc --noEmit
+npm exec --prefix apps/agent-service -- tsc --noEmit
 npm run test:offline --prefix apps/agent-service
 ```
 
@@ -141,7 +149,7 @@ Idle requires Discord scheduler to unit-test empty house.
 
 ## OUTPUT ARTIFACT
 
-`artifacts/PHASE_07_GATE.md`
+`artifacts/runtime/PHASE_07_GATE.md`
 
 ## NEXT PHASE PRECONDITIONS
 

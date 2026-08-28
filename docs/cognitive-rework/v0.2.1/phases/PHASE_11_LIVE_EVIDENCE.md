@@ -18,7 +18,7 @@ Phase 10 cutover complete.
 
 ## TARGET SOURCE STATE
 
-Unchanged. `artifacts/LIVE_EVIDENCE_REPORT.md` with Luna result:
+Unchanged. Runtime artifact `artifacts/runtime/LIVE_EVIDENCE_REPORT.md` (gitignored) with Luna result:
 
 - `PRODUCTION_WITNESSED / PROPOSED_FOR_ACCEPTANCE`
 - `WITNESS_INCOMPLETE`
@@ -68,7 +68,7 @@ Follow LIVE_EVIDENCE_PROTOCOL A–I. Grounded idle revisit is **not optional**. 
 
 ## OUTPUT ARTIFACT
 
-`LIVE_EVIDENCE_REPORT.md`
+`artifacts/runtime/LIVE_EVIDENCE_REPORT.md` (untracked; gitignored)
 
 ## AUTONOMOUS REPAIR POLICY
 
