@@ -49,6 +49,14 @@ Missing work is **maturation of existing owners**, not additional organs.
 Self-change is a composed lifecycle chokepoint, not a peer kernel. Model
 Fabric is mechanism work, not cognitive advancement.
 
+**Cognitive reconstruction v0.2.1 (accepted 2026-08-29):** This freeze still
+forbids adding a faculty. Project Ashley Cognitive Architecture v0.2.1
+matures the existing **Thought** and **Agency** owners. It does not add a
+box. Thought owns semantic judgment. Agency owns executive mechanics. Focused
+contract: [`cognitive/Ashley_Cognitive_Architecture_v0.2.1.md`](cognitive/Ashley_Cognitive_Architecture_v0.2.1.md).
+Status: `ACCEPTED ARCHITECTURE / IMPLEMENTATION PLANNED`. Not implemented,
+qualified, deployed, or production accepted.
+
 ## 2. Frozen owner map
 
 Do not mix categories. A box may use another category. It may not absorb it.
@@ -92,8 +100,8 @@ frozen owners. They are not two maps.
 |---|---|
 | Identity | Identity |
 | Mind State | Mind State |
-| Thought | Thought |
-| Agency | Agency |
+| Thought | Thought (semantic judgment; v0.2.1 sole semantic author) |
+| Agency | Agency (executive mechanics; v0.2.1 kernel fencing/dispatch/delivery) |
 | Reflection | Reflection |
 | Relationship | Relationship |
 | Curiosity | Curiosity |

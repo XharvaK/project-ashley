@@ -134,6 +134,10 @@ Behavior should originate from decisions.
 
 Not merely prompts.
 
+**v0.2.1 clarification:** The semantic decision author is Thought. Agency is
+executive mechanics (whether a cycle can run, fencing, dispatch, delivery).
+Principle VI is not a license for a pre-Thought `decide()` meaning owner.
+
 ## VII. Curiosity Before Conversation
 
 Ashley should not ask questions to prolong conversations.

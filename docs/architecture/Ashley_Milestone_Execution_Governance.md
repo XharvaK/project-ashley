@@ -45,6 +45,11 @@ Implementation teams must not reopen these:
 10. M3 `PRODUCTION ACCEPTED` and M4 `PRODUCTION ACCEPTED` are live evidence
     claims. If permitted evidence is absent: `UNKNOWN`. Do not infer them from
     source presence.
+11. Cognitive Architecture v0.2.1 (accepted 2026-08-29) is maturation of the
+    existing Thought and Agency owners. It is not a new kernel, faculty, or
+    freeze-map box. Implementation remains unauthorized until the packet’s
+    owner baseline, qualification, and cutover gates pass. Luna cannot declare
+    `PRODUCTION_ACCEPTED`.
 
 ## 1. Milestone contract format
 
