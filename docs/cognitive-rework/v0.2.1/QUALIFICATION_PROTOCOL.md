@@ -2,7 +2,7 @@
 
 **When:** After Phase 08 candidate freeze. Phase 09 executes this file. **No source changes.**
 
-**Protocol revision:** `r4` (R4 data-plane contracts). Architecture laws are unchanged.
+**Protocol revision:** `r5` (R5 execution-identity and persistence contracts). Architecture laws are unchanged.
 
 **Result vocabulary:** `PASS` or `FAIL`. There is no `PASS_WITH_NOTES` that bypasses a hard cognitive invariant.
 
@@ -41,10 +41,10 @@ Every artifact binds:
 | Field | Source |
 |---|---|
 | `candidateSha` | freeze source commit; runtime freeze file **points to** it |
-| `selectedBaselineSha` | OWNER_BASELINE_GATE |
+| `selectedBaselineSha` | ignored IMPLEMENTATION_IDENTITY.md (Doc instruction) |
 | `architectureVersion` | `v0.2.1` |
-| `implementationSpecVersion` | `0.2.1.r4` |
-| `qualificationProtocolRevision` | `r4` |
+| `implementationSpecVersion` | `0.2.1.r5` |
+| `qualificationProtocolRevision` | `r5` |
 | `sidecarSchemaVersion` | `1` |
 | `thoughtContractVersion` | `1` |
 | `modelRoute` / occupant | live `thought` route + resolved occupant id (no secrets) |
@@ -101,6 +101,8 @@ Hitting a ceiling without a completed required family is not an automatic archit
 
 ## Q1 — Full automated corpus (exhaustive, mostly deterministic)
 
+FROM REPOSITORY ROOT:
+
 ```powershell
 npm run build:agent
 npm run build:discord
@@ -115,12 +117,13 @@ Q1 **must** cover with **no live Thought API requirement**:
 - semantic ownership
 - ThoughtStep protocol (including malformed / incomplete JSON)
 - generation fencing; compose/preempt; accepted generation ≠ raw call count
-- atomic publication
+- atomic publication **and** crash-after-publish replay (zero duplicate deltas/outbox)
 - Authority codes
-- outbox / projector idempotency
-- retrieval and trigger-term discovery (HY3 + perturbed entities as **fixtures**)
+- outbox / projector idempotency including global `DeliveryProjectionKey` (`speech:` vs `system:`)
+- retrieval and trigger-term discovery (HY3 + perturbed entities as **fixtures**); live vs quarantined Memory tagging
 - correction lineage
-- admission fencing
+- admission fencing; `/remember` directive vs Thought-authored kind
+- forget matrix restart (forgotten source cannot re-enter)
 - crash / recovery injection
 - migration / import dry-run on isolated copies
 - bot ingress integration test (real ChannelQueue)
@@ -266,6 +269,8 @@ Frozen isolated path:
 If true isolation cannot be achieved on that host: **Owner Gate Q4-HOST** before any disruptive rehearsal.
 
 Prove: schema init/migration, isolated service start/restart, sidecar recovery, orphan recovery, outbox projector recovery, credentials/config **presence** without exposing secrets, Bubblewrap/Sandbox still loads, database path/permissions, isolated cutover/rollback rehearsal on copies.
+
+Any build/tsc/test commands used in Q4 follow the repository-root command freeze (README).
 
 Q4 is not a second live-model corpus.
 

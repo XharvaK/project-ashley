@@ -2,7 +2,7 @@
 
 Tracked: this README and `runtime/README.md` only.
 
-Luna writes **execution** outputs under [`runtime/`](runtime/) (gitignored except its README). Do not commit `QUALIFICATION_RESULT.md`, `CANDIDATE_FREEZE.md`, or gate reports into the candidate SHA.
+Luna writes **execution** outputs under [`runtime/`](runtime/) (gitignored except its README). Do not commit `IMPLEMENTATION_IDENTITY.md`, `QUALIFICATION_RESULT.md`, `CANDIDATE_FREEZE.md`, or gate reports into the candidate SHA.
 
 Every execution artifact must bind `candidateSha`, `selectedBaselineSha`, `architectureVersion`, `implementationSpecVersion`, `qualificationProtocolRevision`, `sidecarSchemaVersion`, `thoughtContractVersion`, Thought occupant, Mint identity, timestamp, shadow config hash, import tool version, outbox bridge version.
 

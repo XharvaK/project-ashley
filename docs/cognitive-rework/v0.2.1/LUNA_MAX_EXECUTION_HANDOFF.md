@@ -4,14 +4,14 @@ You are implementing Project Ashley Cognitive Architecture v0.2.1 using this pac
 
 ## Read order
 
-Follow [README.md](README.md). **STOP** if R4 independent review has not PASSed. **STOP** if [OWNER_BASELINE_GATE.md](OWNER_BASELINE_GATE.md) `OWNER_SELECTED_SOURCE_BASELINE_SHA` is unset. **STOP** if `IMPLEMENTATION_START_SHA` is unset (perform packet bind first).
+Follow [README.md](README.md). **STOP** if R5 independent review has not PASSed. **STOP** if Doc has not supplied `OWNER_SELECTED_SOURCE_BASELINE_SHA` in the owner instruction. **STOP** if ignored `artifacts/runtime/IMPLEMENTATION_IDENTITY.md` does not yet record `IMPLEMENTATION_START_SHA` (perform packet bind first per [PACKET_BIND_MANIFEST.md](PACKET_BIND_MANIFEST.md)). Do not write execution SHAs into tracked [OWNER_BASELINE_GATE.md](OWNER_BASELINE_GATE.md).
 
 ## Repository / baseline
 
-- Architecture-reference inspection SHA: `c7c81c4f5ebcf9e6d67d10990d76cfda4e21c28a` (may be detached).
-- `OWNER_SELECTED_SOURCE_BASELINE_SHA`: **owner-selected only**.
-- `IMPLEMENTATION_START_SHA`: docs-only bind of `APPROVED_PACKET_REVIEW_SHA` onto that baseline ([OWNER_BASELINE_GATE.md](OWNER_BASELINE_GATE.md)). Do not cherry-pick. Do not implement from a detached historical SHA that lacks the packet.
-- After bind: revalidate production source against the **source baseline**. HARD BLOCKER 4 on material seam drift.
+- Architecture-reference inspection SHA / `PACKET_BASE_SHA`: `c7c81c4f5ebcf9e6d67d10990d76cfda4e21c28a` (may be detached).
+- `OWNER_SELECTED_SOURCE_BASELINE_SHA`: **owner-selected only**, from the Luna goal.
+- `IMPLEMENTATION_START_SHA`: docs-only bind of `APPROVED_PACKET_REVIEW_SHA` onto that baseline using the manifest (NEW_EXACT_FILE + three-way overlay). Do not cherry-pick. Do not checkout whole pre-existing governing files from the packet branch. Do not implement from a detached historical SHA that lacks the packet.
+- After bind: `PRODUCTION_SOURCE_DIFF=NONE` for `apps/**` `packages/**` `scripts/**` `deploy/**`. Revalidate production source against the **source baseline**. HARD BLOCKER 4 on material seam drift. Overlay conflict is HARD BLOCKER 3c.
 - Do not commit untracked junk at repo root.
 
 ## Target architecture
@@ -44,7 +44,7 @@ Forbidden: decide()/easy bypass/honesty surgery/Expression-as-brain; HY3 regex; 
 
 ## HARD BLOCKERS
 
-Master plan list 1–23. Preserve evidence. Do not improvise architecture.
+Master plan list 1–23 including 3b/3c. Preserve evidence. Do not improvise architecture.
 
 ## Thought / speech invariants
 
@@ -53,8 +53,13 @@ Master plan list 1–23. Preserve evidence. Do not improvise architecture.
 - Rapid messages: `thoughtModelAttempts` may exceed 1; only accepted generation publishes.
 - Published speech is `finalLicensedText` / outbox `licensedText`.
 - Sidecar schema version is 1. Authority field is `relational.withdrawalActive`.
-- `DataClassification` is imported from `privacy/classification.ts` (`ordinary` \| `sensitive` \| `never_public` \| `secret`).
-- Durable Memory authority is sidecar assertions+supports. `/forget` must mutate that plane.
+- `DataClassification` is imported from `privacy/classification.ts` (`ordinary` \| `sensitive` \| `never_public` \| `secret`). Classification follows Observations and Memory. No downgrade.
+- Durable Memory authority is sidecar assertions+supports. `/forget` uses `V021_FORGET_TARGET_MATRIX`. `/remember` is a persist directive; Thought authors `MemoryKind`.
+- Publication is replay-idempotent per `(cycleId, generation)`. Projection keys are globally unique (`speech:` / `system:`).
+
+## Commands
+
+FROM REPOSITORY ROOT only. See README command freeze.
 
 ## Qualification identity
 

@@ -74,7 +74,7 @@ Legacy tokenize remains on production motivations.
 - [ ] `"Have you heard about HY3?"` includes `hy3`
 - [ ] `"it's an LLM"` includes `llm`
 - [ ] `"Qwen"` includes `qwen`
-- [ ] Command: `npx vitest run src/core/cognitive-v021/retrieval/discover.test.ts`
+- [ ] Command: `npm exec --prefix apps/agent-service -- vitest run src/core/cognitive-v021/retrieval/discover.test.ts --config vitest.offline.config.ts`
 - [ ] Commit: `feat(cognitive-v021): discovery tokenizer keeps short trigger terms`
 
 ### Task 3.2 Retrieval fallbacks
@@ -82,6 +82,7 @@ Legacy tokenize remains on production motivations.
 - [ ] Request with wrong `assertionKeys: ["hy4"]` but triggerTerms from “I meant HY3” still returns lexical hit on log text HY3
 - [ ] Keys never exclusive: `hits.some(h => h.kind === "lexical" || h.kind === "log")`
 - [ ] `includeLogSearch` always true
+- [ ] Hits carry `sourceStore` (`conversation_log` | `live_memory` | `quarantined_memory`)
 - [ ] Commit: `feat(cognitive-v021): retrieval fallbacks when keys are wrong`
 
 ### Task 3.3 WC correction supersession
@@ -159,8 +160,10 @@ Each scenario `acceptedSettlements === 1` unless miss round (`acceptedSettlement
 
 ## FULL PHASE GATE
 
+FROM REPOSITORY ROOT:
+
 ```powershell
-npx vitest run src/core/cognitive-v021 --config vitest.offline.config.ts
+npm exec --prefix apps/agent-service -- vitest run src/core/cognitive-v021 --config vitest.offline.config.ts
 npm exec --prefix apps/agent-service -- tsc --noEmit
 npm run test:offline --prefix apps/agent-service
 ```

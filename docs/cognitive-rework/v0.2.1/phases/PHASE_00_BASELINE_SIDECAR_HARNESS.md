@@ -10,9 +10,7 @@ S25 (reserved path / data plane), S26 (harness exists), S24 (sidecar is not prod
 
 ## DEPENDENCIES
 
-[`OWNER_BASELINE_GATE.md`](../OWNER_BASELINE_GATE.md): `OWNER_SELECTED_SOURCE_BASELINE_SHA` filled by Doc; `IMPLEMENTATION_START_SHA` recorded after packet bind. Governing docs show v0.2.1 `ACCEPTED ARCHITECTURE / IMPLEMENTATION PLANNED` (HARD BLOCKER 1 if not).
-
-## CURRENT SOURCE STATE
+[`OWNER_BASELINE_GATE.md`](../OWNER_BASELINE_GATE.md): Doc supplies `OWNER_SELECTED_SOURCE_BASELINE_SHA` after R5 PASS; ignored `IMPLEMENTATION_IDENTITY.md` records `IMPLEMENTATION_START_SHA` after bind. Governing docs show v0.2.1 `ACCEPTED ARCHITECTURE / IMPLEMENTATION PLANNED` (HARD BLOCKER 1 if not).
 
 ## CURRENT SOURCE STATE
 
@@ -79,17 +77,18 @@ Default kernel `legacy`. Production Discord unchanged. Opening sidecar is not do
 
 ### Task 0.0 Packet bind (docs-only; after Gate A)
 
-- [ ] **STOP** if [`OWNER_BASELINE_GATE.md`](../OWNER_BASELINE_GATE.md) `OWNER_SELECTED_SOURCE_BASELINE_SHA` is unset (HARD BLOCKER 2).
-- [ ] **STOP** if R4 independent review has not PASSed and `APPROVED_PACKET_REVIEW_SHA` is unset.
-- [ ] Follow OWNER_BASELINE_GATE **Packet binding**: new branch from source baseline; `git checkout APPROVED_PACKET_REVIEW_SHA --` the listed packet paths; docs-only commit; **do not cherry-pick**.
-- [ ] `git diff --name-only OWNER_SELECTED_SOURCE_BASELINE_SHA` is a subset of those packet/governance/`.gitignore` paths (HARD BLOCKER 3b if `apps/` or SQL/runtime differs).
+- [ ] **STOP** if Doc has not supplied `OWNER_SELECTED_SOURCE_BASELINE_SHA` (HARD BLOCKER 2).
+- [ ] **STOP** if R5 independent review has not PASSed and `APPROVED_PACKET_REVIEW_SHA` is unset.
+- [ ] Follow [`PACKET_BIND_MANIFEST.md`](../PACKET_BIND_MANIFEST.md): new branch from source baseline; `NEW_EXACT_FILE` checkout; three-way overlay for governing docs/`.gitignore`; **do not** `git checkout` whole pre-existing governing files; **do not cherry-pick**.
+- [ ] Overlay same-hunk conflict → HARD BLOCKER 3c. Do not pick wording.
+- [ ] `git diff --name-only OWNER_SELECTED_SOURCE_BASELINE_SHA` is a subset of the manifest (HARD BLOCKER 3b if `apps/` `packages/` `scripts/` `deploy/` or SQL/runtime differs). `PRODUCTION_SOURCE_DIFF=NONE`.
 - [ ] `git merge-base --is-ancestor OWNER_SELECTED_SOURCE_BASELINE_SHA HEAD`
-- [ ] Record `IMPLEMENTATION_START_SHA = git rev-parse HEAD` and `IMPLEMENTATION_BRANCH` in OWNER_BASELINE_GATE (Luna fills these two; does not choose M/C/Other).
+- [ ] Docs-only bind commit. **Then** `IMPLEMENTATION_START_SHA = git rev-parse HEAD`. Write ignored `artifacts/runtime/IMPLEMENTATION_IDENTITY.md`. **Do not** edit tracked `OWNER_BASELINE_GATE.md`. **No extra commit.**
 - Commit boundary: the bind commit itself.
 
 ### Task 0.1 Git handoff on IMPLEMENTATION_START_SHA
 
-- [ ] **STOP** if `IMPLEMENTATION_START_SHA` is unset.
+- [ ] **STOP** if ignored `artifacts/runtime/IMPLEMENTATION_IDENTITY.md` does not record `IMPLEMENTATION_START_SHA`.
 - [ ] Work on `IMPLEMENTATION_BRANCH`. `git rev-parse HEAD` must equal `IMPLEMENTATION_START_SHA` at the start of this task (later tasks add kernel commits). Do **not** require `HEAD == OWNER_SELECTED_SOURCE_BASELINE_SHA`.
 - [ ] Revalidate [01_SOURCE_BASELINE_AND_MIGRATION_MAP.md](../01_SOURCE_BASELINE_AND_MIGRATION_MAP.md) against production files on `OWNER_SELECTED_SOURCE_BASELINE_SHA` (`git diff --name-only <inspection-c7c81c4>...OWNER_SELECTED_SOURCE_BASELINE_SHA` plus `secrets.ts` if Choice M).
 - [ ] If named seams (`messageCreate.ts`, `channel-queue.ts`, `runtime.ts`, `thought.ts`, `mistral-client.ts`, `delivery/store.ts`) drifted in a way that invalidates the map: **HARD BLOCKER 4**. Reconcile the packet; do not invent architecture.
@@ -101,7 +100,7 @@ Default kernel `legacy`. Production Discord unchanged. Opening sidecar is not do
 - [ ] Update the 20 `NUCLEAR_SUPPORTED_VERSION.toBe(35)` **current-pins** listed in source map §7.1 to `toBe(NUCLEAR_SUPPORTED_VERSION)` (the live constant on the selected baseline / after later additive migration).
 - [ ] Keep `migration-35.test.ts` waypoint `pending?.to === 35`.
 - [ ] Do **not** write a timeless literal `41` in current-pin assertions or commit messages.
-- [ ] `npx vitest run` those files PASS
+- [ ] `npm exec --prefix apps/agent-service -- vitest run` those pin files `--config vitest.offline.config.ts` PASS
 - [ ] Commit: `test(db): use nuclear supported version for current schema assertions`
 
 ### Task 0.2 Kernel env flag
@@ -112,7 +111,7 @@ Default kernel `legacy`. Production Discord unchanged. Opening sidecar is not do
   - `shadow` → `shadow`
   - `v021` → `v021`
   - `Shadow` / `on` / `true` → boot throw (test `createEnv` in isolation by spawning or extracting parse function `parseCognitiveKernel(raw: string | undefined): KernelMode`)
-- [ ] Command: `npx vitest run src/core/cognitive-v021/env-kernel.test.ts --config vitest.offline.config.ts` from `apps/agent-service`
+- [ ] Command: `npm exec --prefix apps/agent-service -- vitest run src/core/cognitive-v021/env-kernel.test.ts --config vitest.offline.config.ts` (FROM REPOSITORY ROOT)
 - [ ] Expected failure: `parseCognitiveKernel` not defined / `cognitiveKernel` missing on env
 - [ ] Implement `parseCognitiveKernel` in `env.ts`; attach `cognitiveKernel` on `createEnv()` return
 - [ ] Same command: PASS
@@ -125,7 +124,7 @@ Default kernel `legacy`. Production Discord unchanged. Opening sidecar is not do
 - [ ] **Failing test** in `src/core/data-plane-authority.test.ts` (same describe style as existing `openNuclearDb` / continuity reserved-path cases in that file): production path `join(homedir(), ".composer-assistant", "cognitive-v021.db")` requires `dataPlane.kind === "production"` to open; isolated `:memory:` succeeds.
 - [ ] Expected failure: function missing
 - [ ] Implement `reservedProductionCognitiveSidecarDbPath` and `cognitiveSidecarDbPath` on `DataPlaneContext` via `pathsFromDataDir`
-- [ ] `npx vitest run src/core/data-plane-authority.test.ts` PASS
+- [ ] `npm exec --prefix apps/agent-service -- vitest run src/core/data-plane-authority.test.ts --config vitest.offline.config.ts` PASS
 - [ ] Commit: `feat(cognitive-v021): reserve cognitive-v021 sidecar path`
 
 ### Task 0.4 openCognitiveSidecarDb
@@ -134,9 +133,10 @@ Default kernel `legacy`. Production Discord unchanged. Opening sidecar is not do
   1. `:memory:` + isolated → pragma user_version or meta schema_version = 1
   2. production file path + isolated dataPlane → throws (same error shape as continuity `production_data_plane_required`)
   3. migrate idempotent second open
+  4. meta is singleton `id=1`; second insert fails; `authority_epoch` round-trips via `WHERE id = 1`
 - [ ] Expected failure: module missing
 - [ ] Implement schema + open
-- [ ] Command: `npx vitest run src/core/cognitive-v021/sidecar/db.test.ts` PASS
+- [ ] Command: `npm exec --prefix apps/agent-service -- vitest run src/core/cognitive-v021/sidecar/db.test.ts --config vitest.offline.config.ts` PASS
 - [ ] Commit: `feat(cognitive-v021): open isolated cognitive sidecar schema v1`
 
 ### Task 0.5 Causal harness
@@ -148,7 +148,7 @@ Default kernel `legacy`. Production Discord unchanged. Opening sidecar is not do
   4. Valid bundle with settlement + matching outbox → no throw
 - [ ] Expected failure: `assertCausalInvariants` missing
 - [ ] Implement per spec §Y
-- [ ] Command: `npx vitest run src/core/cognitive-v021/acceptance/causal-harness.test.ts` PASS
+- [ ] Command: `npm exec --prefix apps/agent-service -- vitest run src/core/cognitive-v021/acceptance/causal-harness.test.ts --config vitest.offline.config.ts` PASS
 - [ ] Commit: `feat(cognitive-v021): add causal invariant harness`
 
 ### Task 0.6 Stub kernel exports
@@ -176,17 +176,12 @@ None.
 
 ## FULL PHASE GATE COMMANDS
 
-From `apps/agent-service`:
+FROM REPOSITORY ROOT:
 
 ```powershell
-npx vitest run src/core/cognitive-v021 --config vitest.offline.config.ts
-npx vitest run src/core/data-plane-authority.test.ts --config vitest.offline.config.ts
+npm exec --prefix apps/agent-service -- vitest run src/core/cognitive-v021 --config vitest.offline.config.ts
+npm exec --prefix apps/agent-service -- vitest run src/core/data-plane-authority.test.ts --config vitest.offline.config.ts
 npm exec --prefix apps/agent-service -- tsc --noEmit
-```
-
-From repo root:
-
-```powershell
 npm run test:offline --prefix apps/agent-service
 ```
 

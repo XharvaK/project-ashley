@@ -65,7 +65,7 @@ Production still throws `chat_in_progress` on `/chat/text`. Ingress endpoint exi
 ### Task 1.1 Evidence log append
 
 - [ ] Failing test: three owner messages HY4 / I meant HY3 / it’s an LLM → three rows, none dropped, hashes differ
-- [ ] Command: `npx vitest run src/core/cognitive-v021/evidence/conversation-log.test.ts`
+- [ ] Command: `npm exec --prefix apps/agent-service -- vitest run src/core/cognitive-v021/evidence/conversation-log.test.ts --config vitest.offline.config.ts`
 - [ ] Expected failure: `appendOwnerUtterance` missing
 - [ ] Implement append-only insert; edits increment `version`
 - [ ] PASS
@@ -143,6 +143,14 @@ Production still throws `chat_in_progress` on `/chat/text`. Ingress endpoint exi
 - [ ] Credential-shaped text → `secret` + placeholder; never raw
 - [ ] Commit: `feat(cognitive-v021): sidecar evidence uses source DataClassification`
 
+### Task 1.12 Publication replay idempotency
+
+- [ ] Inbox claimed → `publishSemanticTransaction` COMMIT succeeds → process dies before inbox `consumed`
+- [ ] Restart reclaims same inbox event; publish replayed
+- [ ] Zero duplicate WC/concern/occupancy/nomination/speech outbox; original settlement/outbox ids returned; inbox eventually consumed
+- [ ] Meta remains singleton `id=1`
+- [ ] Commit: `feat(cognitive-v021): semantic publication replay is idempotent`
+
 ## CAUSAL ACCEPTANCE TESTS
 
 Rapid three-message log preservation (J partial). Atomic abort (F).
@@ -161,13 +169,13 @@ None (no LLM).
 
 ## FULL PHASE GATE COMMANDS
 
+FROM REPOSITORY ROOT:
+
 ```powershell
-npx vitest run src/core/cognitive-v021 --config vitest.offline.config.ts
+npm exec --prefix apps/agent-service -- vitest run src/core/cognitive-v021 --config vitest.offline.config.ts
 npm exec --prefix apps/agent-service -- tsc --noEmit
 npm run test:offline --prefix apps/agent-service
 ```
-
-(from `apps/agent-service` for vitest/tsc; offline from repo root as shown)
 
 ## EXPECTED PASS SIGNATURE
 

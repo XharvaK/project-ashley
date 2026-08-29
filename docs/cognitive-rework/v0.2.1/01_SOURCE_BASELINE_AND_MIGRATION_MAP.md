@@ -4,7 +4,7 @@
 
 **Inspected at packet R2:** detached HEAD `c7c81c4`; `origin/master` `9d50740` is a verified descendant (six observer/docs commits; `privacy/secrets.ts` changed). Untracked files exist; they are not source.
 
-**Nuclear schema authority:** `NUCLEAR_SUPPORTED_VERSION = 41` in `apps/agent-service/src/core/db.ts`.
+**Nuclear schema authority:** `NUCLEAR_SUPPORTED_VERSION = 41` in `apps/agent-service/src/core/db.ts` at that inspect.
 
 **If selected HEAD differs:** revalidate every named seam on `OWNER_SELECTED_SOURCE_BASELINE_SHA`. STOP (HARD BLOCKER 4) if a delta invalidates a mapping below.
 
@@ -94,7 +94,7 @@ Legend: **KEEP** reuse as-is on new kernel; **REHOME** keep mechanism, new owner
 | `logDecision` | `agency/log.ts` | Persist Decision | Causality ledger, not Decision | REDESIGN | 1, 2 | Decision-as-speech-authority: 10 |
 | Motivations collect | `agency/motivations.ts` `collectMotivations` (373), `tokenize` length≥4, `isTextRelevant` 2-hit | Candidate pool for decide/Thought | Retrieval candidates only; not interestingness | REDESIGN tokenize; RETIRE as speech gate | 3, 7 | tokenize-miss of HY3: 3 (sidecar), 10 (live) |
 | Candidate selection | `agency/candidate-selection.ts` `selectMotivationCandidates` | Currentness filter | Retrieval, not motivation-as-care | REHOME | 3 | 10 |
-| `writers.ts` `writeFromUserTurn` | pin/forget regex, questions, departure | Pre-Thought side writes | Teaching/correction authored by Thought; `/remember` remains explicit admission | REDESIGN conversational writes | 3, 6 | PIN_RE as silent memory: 10 |
+| `writers.ts` `writeFromUserTurn` | pin/forget regex, questions, departure | Pre-Thought side writes | Teaching/correction authored by Thought; `/remember` is persist directive, kind authored by Thought | REDESIGN conversational writes | 3, 6 | PIN_RE as silent memory: 10 |
 
 ### 2.5 Expression / honesty / prompts — REDESIGN / RETIRE
 
@@ -130,14 +130,14 @@ Legend: **KEEP** reuse as-is on new kernel; **REHOME** keep mechanism, new owner
 | Tokenize filter | `motivations.ts` `tokenize` ≥4, 2 shared tokens | Drops HY3/LLM/API | Lexical fallback must include short tokens | REDESIGN | 3 | HY3 miss: 3 |
 | C1 assertions | `memory/assertions.ts`, `eligibility.ts`, `corrections.ts`, `cutover.ts`, `context-role.ts` | Lineage, currentness, sticky cutover | Salvage lineage/corrections/currentness/supports into **sidecar** Memory; nuclear C1 is not a second live v021 authority | KEEP concepts / REHOME store | 6 | nuclear C1 as live v021 Memory: 10 |
 | C1 contract state | `memory/contract-state.ts` `currentnessAuthority` | mem_facts \| memory_assertions | Sidecar Memory is assertion-native | REHOME | 6 | never |
-| Forget | `memory/forget.ts` + continuity tombstones | Preview/tombstone; mutates messages/episodes/facts/revisions | **REDESIGN** v021 path: sidecar evidence+Memory authority + compatibility cleanup + KEEP continuity tombstones | REDESIGN | 6, 8 | forget-only-mem_messages: 10 |
+| Forget | `memory/forget.ts` + continuity tombstones | Preview/tombstone; mutates messages/episodes/facts/revisions | **REDESIGN** v021 path: `V021_FORGET_TARGET_MATRIX` on sidecar + compatibility cleanup + KEEP continuity tombstones | REDESIGN | 6, 8 | forget-only-mem_messages: 10 |
 | Cognition worker | `cognition/worker.ts` `processNextCognitiveJob` | consolidate_thread → facts/episodes/mind/revisions | Must not write live Memory without fenced nomination | REDESIGN | 6, 10 | auto-fact as owner-explicit: 10 |
 
 ### 2.8 Identity / mind / relationship / C2–C5
 
 | Component | File / symbol | Current | v0.2.1 | Verdict | Change | Unreachable |
 |---|---|---|---|---|---|---|
-| Identity store | `identity/store.ts` `listIdentity`, `recordIdentityEntry`, `seedIdentity` SEED_VERSION 5 | identity_entries | Constitutional always-on; LearnedSelf separate | KEEP constitution; REDESIGN LearnedSelf | 2, 6 | never |
+| Identity store | `identity/store.ts` `listIdentity`, `recordIdentityEntry`, `seedIdentity` SEED_VERSION 5 | identity_entries | Constitutional always-on via **reader**; not imported into sidecar | KEEP constitution; REDESIGN LearnedSelf | 2, 6 | never |
 | Identity reviews | `learning/revisions.ts` `proposeRevision`, `listIdentityReviews` | Foundational review | Protected admission | KEEP | 6 | never |
 | internal_state | `state/store.ts` `getState`, `patchState` | focus/mood/unfinished | Occupancy index, not duplicate prose | REDESIGN | 3 | mood-as-selfhood: 10 |
 | mind_state_items | `state/mind-items.ts` `upsertMindStateItem`, `hasUrgentMindState` | Items + urgent wake | Concern lineage + occupancy | REDESIGN | 3, 7 | 10 |
@@ -188,7 +188,7 @@ Legend: **KEEP** reuse as-is on new kernel; **REHOME** keep mechanism, new owner
 
 | Component | File / symbol | Current | v0.2.1 | Verdict | Change | Unreachable |
 |---|---|---|---|---|---|---|
-| Nuclear DB | `db.ts` `openNuclearDb`, `migrate`, v41 | Production semantic+ops | Legacy writers remain until cutover config; additive `cognitive_v021_outbox_id` before freeze | KEEP + additive column | 5, 8 | never freeze writers during shadow |
+| Nuclear DB | `db.ts` `openNuclearDb`, `migrate`, v41 | Production semantic+ops | Legacy writers remain until cutover config; additive `cognitive_v021_projection_key` before freeze | KEEP + additive column | 5, 8 | never freeze writers during shadow |
 | Continuity | `continuity/db.ts` `openContinuityDb`, `CONTINUITY_SCHEMA_VERSION = 1` | Lineage, forget, sessions | Pattern for sidecar open/reserved path | KEEP pattern | 0 | never |
 | Data plane | `data-plane.ts` `reservedProductionNuclearDbPath`, `reservedProductionContinuityDbPath` | Production vs isolated | Add `reservedProductionCognitiveSidecarDbPath` → `~/.composer-assistant/cognitive-v021.db` | KEEP pattern | 0 | sidecar on production path without production dataPlane: 0 |
 | BEGIN IMMEDIATE | `db.ts` and delivery/jobs | SQLite writer lock | Atomic semantic txn uses same | KEEP | 1 | never |

@@ -23,7 +23,7 @@ Phase 05 PASS.
 
 ## TARGET SOURCE STATE
 
-Sidecar Memory tables are the **only** v021 Memory authority. Admission worker reads nominations, applies fence. `/remember` in **tests** maps to OwnerSuppliedClaim immediate admission if generation still current. Cognition worker **must not** be called from sidecar tests. LearnedSelf slice is empty or already-admitted (`live=true`) only — never quarantined.
+Sidecar Memory tables are the **only** v021 Memory authority. Admission worker reads nominations, applies fence. `/remember` is a mechanical persist directive; Thought authors `MemoryKind`; `admitOwnerSuppliedClaim` runs only after that settlement and must not invent kind. Cognition worker **must not** be called from sidecar tests. LearnedSelf slice is empty or already-admitted (`live=true`) only — never quarantined. IdentitySlice reads nuclear identity; import does not copy identity into sidecar.
 
 Shadow: do not write production `memory_assertions`.
 
@@ -89,9 +89,10 @@ Live `/remember` still pins facts.
 
 ### Task 6.4 Explicit `/remember` immediate
 
-- [ ] Helper `admitOwnerSuppliedClaim` used by tests. Discord `/remember` wiring is **Phase 08** (flag-gated; not Phase 10).
-- [ ] Immediate if generation current
-- [ ] Commit: `feat(cognitive-v021): explicit remember is immediate owner-supplied admission`
+- [ ] `/remember` appends owner evidence + `RememberDirective` (`rememberRequested=true`). Thought authors `DurableNomination.memoryKind`. Helper `admitOwnerSuppliedClaim` runs **after** that published settlement and does **not** choose kind.
+- [ ] Discord `/remember` wiring is **Phase 08** (flag-gated; not Phase 10).
+- [ ] Immediate admission if generation current
+- [ ] Commit: `feat(cognitive-v021): remember directive then Thought-authored nomination`
 
 ### Task 6.5 Correction retraction
 
@@ -132,16 +133,29 @@ Live `/remember` still pins facts.
 - [ ] `--mode apply` idempotent; second run `duplicateCount` increases, hashes stable
 - [ ] `--mode verify` COUNT_MISMATCH / HASH_MISMATCH exits nonzero on tamper
 - [ ] Quarantine classes not `live=true`; supports have `provenance=legacy_import` and epistemic `source` unchanged
+- [ ] Imported assertions: `admittedGeneration=null`, `live=false`
+- [ ] Import does **not** write a sidecar Identity table; `IdentitySlice` still reads nuclear identity
 - [ ] Conversation evidence dedupe: preserved shadow A/B + import of same A/B → exactly one lineage each (Discord id / entity_uuid)
+- [ ] Classification never downgraded; four-class round-trip on Memory
 - [ ] Reserved production path refused (`RESERVED_PATH_REFUSED`)
 - [ ] Commit: `feat(cognitive-v021): idempotent legacy semantic import tool`
 
 ### Task 6.12 v021 forget / memory read (library)
 
-- [ ] Forget topic redacts sidecar Conversation Evidence + Memory assertions (not only a `mem_messages` copy)
-- [ ] Compatibility copies cleaned when present; continuity tombstone KEEP
+- [ ] Forget topic applies `V021_FORGET_TARGET_MATRIX` (spec §E.4 / 04): evidence, Memory, WC, concerns, occupancy, triggers, subscriptions, thought_steps, settlements, observations, receipts, outbox local text, compatibility `mem_messages`
+- [ ] Continuity preview/tombstone KEEP; uses `v021_*` entity types
 - [ ] Memory view for `/memory` reads sidecar `OwnerKnowledgeView`, not `mem_facts` as authority
+- [ ] Restart after apply: forgotten source cannot re-enter Thought via log, Memory, WC, concern, observation, settlement payload, compatibility, or quarantine retrieval
 - [ ] Commit: `feat(cognitive-v021): forget and memory summary use sidecar authority`
+
+### Task 6.13 Retrieval live vs quarantine
+
+- [ ] Live Memory participates in discovery for current trigger terms
+- [ ] Imported `live=false` assertion absent from always-on / OwnerKnowledgeView / LearnedSelf
+- [ ] Relevant retrieval returns `sourceStore: "quarantined_memory"` with provenance/kind/classification
+- [ ] Unrelated turn does not receive it
+- [ ] Quarantine hit does not auto-upgrade
+- [ ] Commit: `feat(cognitive-v021): retrieval tags quarantined memory`
 
 ## CAUSAL ACCEPTANCE TESTS
 
@@ -161,8 +175,10 @@ Repeat inferred ≠ owner_supplied. Belief type absent.
 
 ## FULL PHASE GATE
 
+FROM REPOSITORY ROOT:
+
 ```powershell
-npx vitest run src/core/cognitive-v021 --config vitest.offline.config.ts
+npm exec --prefix apps/agent-service -- vitest run src/core/cognitive-v021 --config vitest.offline.config.ts
 npm exec --prefix apps/agent-service -- tsc --noEmit
 npm run test:offline --prefix apps/agent-service
 ```

@@ -129,8 +129,10 @@ Empty house 0 LLM. Occupancy idle bounded by `PRIVATE_THOUGHT_MAX_CALLS_PER_HOUR
 
 ## FULL PHASE GATE
 
+FROM REPOSITORY ROOT:
+
 ```powershell
-npx vitest run src/core/cognitive-v021 --config vitest.offline.config.ts
+npm exec --prefix apps/agent-service -- vitest run src/core/cognitive-v021 --config vitest.offline.config.ts
 npm exec --prefix apps/agent-service -- tsc --noEmit
 npm run test:offline --prefix apps/agent-service
 ```

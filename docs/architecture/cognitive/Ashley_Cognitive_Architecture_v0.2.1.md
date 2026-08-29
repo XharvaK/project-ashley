@@ -77,11 +77,15 @@ Luna must not treat `docs/Ashley_Glossary.md`’s pre-2026-08-29 Agency wording,
 
 Owned by the v0.2.1 implementation packet. Execution requires:
 
-1. owner-selected implementation baseline SHA;
-2. source-map revalidation on that SHA;
-3. phases 00–08 complete in source, then candidate freeze;
-4. same-SHA qualification: exhaustive deterministic corpus, bounded real-Thought inhabit witness, isolated Mint, owner-authorized shadow;
-5. owner cutover authorization;
-6. configuration-only cutover of `QUALIFIED_SHA`;
-7. live witness;
-8. owner `PRODUCTION_ACCEPTED` (Luna cannot declare this).
+1. independently approved packet SHA (`APPROVED_PACKET_REVIEW_SHA`);
+2. owner-selected source baseline SHA (`OWNER_SELECTED_SOURCE_BASELINE_SHA`);
+3. packet bind onto that baseline, producing `IMPLEMENTATION_START_SHA` (documentation/governance/`.gitignore` only; production source byte-identical to the source baseline);
+4. source-map revalidation on `OWNER_SELECTED_SOURCE_BASELINE_SHA`;
+5. phases 00–08 complete in source starting at `IMPLEMENTATION_START_SHA`, then candidate freeze;
+6. same-SHA qualification: exhaustive deterministic corpus, bounded real-Thought inhabit witness, isolated Mint, owner-authorized shadow;
+7. owner cutover authorization;
+8. configuration-only cutover of `QUALIFIED_SHA`;
+9. live witness;
+10. owner `PRODUCTION_ACCEPTED` (Luna cannot declare this).
+
+Do not collapse those SHAs. Tracked Gate A is a template; execution values live in ignored runtime artifacts.

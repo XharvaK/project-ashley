@@ -138,6 +138,9 @@ Live honesty surgery remains on production.
 - [ ] Receipt written to `effect_receipts` (not observations)
 - [ ] Restart: `loadAuthorityPacks().receipt.receiptsByEffectId` returns the same row; duplicate dispatch no-ops
 - [ ] `originJobId` nullable on in_flight; sandbox job linked when applicable
+- [ ] `correlationId` required; restart/reinjection maps receipt to the originating Thought step
+- [ ] No `replay_safe` column on `in_flight_effects`
+- [ ] Observation persist `dataClassification` + `secretOmitted`; four-class round-trip; no secret plaintext
 - [ ] Commit: `feat(cognitive-v021): persist EffectReceipt for Authority and recovery`
 
 ## CAUSAL ACCEPTANCE TESTS
@@ -158,8 +161,10 @@ Tool cycle may use `DEFAULT_TOOL_CYCLE_LEASE_MS`; ordinary non-tool still 1 Thou
 
 ## FULL PHASE GATE
 
+FROM REPOSITORY ROOT:
+
 ```powershell
-npx vitest run src/core/cognitive-v021 --config vitest.offline.config.ts
+npm exec --prefix apps/agent-service -- vitest run src/core/cognitive-v021 --config vitest.offline.config.ts
 npm exec --prefix apps/agent-service -- tsc --noEmit
 npm run test:offline --prefix apps/agent-service
 ```

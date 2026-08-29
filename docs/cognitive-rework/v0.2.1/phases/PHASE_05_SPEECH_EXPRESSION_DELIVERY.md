@@ -22,7 +22,7 @@ Phase 04 PASS.
 
 ## TARGET SOURCE STATE
 
-`fidelityCheck`; optional `adaptExpression`; `renderForTransport` **before** `finalLicensedText`; `SystemNoticeOutbox` (not `recordAuxiliaryMessage` as send); nuclear migration for `cognitive_v021_outbox_id`.
+`fidelityCheck`; optional `adaptExpression`; `renderForTransport` **before** `finalLicensedText`; `SystemNoticeOutbox` (not `recordAuxiliaryMessage` as send); nuclear migration for `cognitive_v021_projection_key`.
 
 ## FILES TO CREATE
 
@@ -102,6 +102,7 @@ Production still uses expressSpeak.
 - [ ] completeChat throws → typed `SystemNoticeOutbox` with persisted `deliveryIntent` (ownerId/channel/threadId); `THOUGHT_UNAVAILABLE_NOTICE`; not Ashley first-person; no expressSpeak; no decide()
 - [ ] Ledger `thoughtUnavailable=true`
 - [ ] Restart: projector still knows where to send
+- [ ] Reprocessing the same failure uses `noticeKey`; no duplicate notice row
 - [ ] Commit: `feat(cognitive-v021): Thought outage uses system notice outbox`
 
 ### Task 5.8 High-risk detector reject-only
@@ -122,8 +123,9 @@ Production still uses expressSpeak.
 
 ### Task 5.11 OutboxDeliveryProjector (cross-DB, not atomic)
 
-- [ ] Nuclear **versioned** migration: `NUCLEAR_SUPPORTED_VERSION` (selected baseline) + 1; column `cognitive_v021_outbox_id` unique index. Current-pin tests use `NUCLEAR_SUPPORTED_VERSION` after the bump.
+- [ ] Nuclear **versioned** migration: `NUCLEAR_SUPPORTED_VERSION` (selected baseline) + 1; column `cognitive_v021_projection_key` unique index. Current-pin tests use `NUCLEAR_SUPPORTED_VERSION` after the bump.
 - [ ] Project pending outbox → nuclear reservation `draft_text` equals `licensedText`
+- [ ] Speech outbox id 1 and system notice id 1 produce `speech:1` and `system:1`; two reservations; retries reconcile to the correct source rows
 - [ ] Crash before dest INSERT: retry succeeds once
 - [ ] Crash after dest INSERT: UNIQUE hit; no second reservation
 - [ ] Duplicate projector tick: no second send
@@ -150,7 +152,7 @@ Preempt after pending outbox: suppressed, not sent (Phase 01 already; reassert w
 
 Import grep test: `cognitive-v021/**` must not import `finalizeHonesty` or `expressSpeak` from `conversation/expression.ts`. Adapter is new file.
 
-**Decision rule:** `npx vitest` file `import-boundary.test.ts` reads source via `fs.readFileSync` and asserts no `from "../conversation/expression.js"` except comment, and no `finalizeHonesty`.
+**Decision rule:** `import-boundary.test.ts` reads source via `fs.readFileSync` and asserts no `from "../conversation/expression.js"` except comment, and no `finalizeHonesty`.
 
 ## LATENCY / RESOURCE TESTS
 
@@ -158,8 +160,10 @@ Default path serial LLM = 1. Expression enabled test may be 2 and is **opt-in** 
 
 ## FULL PHASE GATE
 
+FROM REPOSITORY ROOT:
+
 ```powershell
-npx vitest run src/core/cognitive-v021 --config vitest.offline.config.ts
+npm exec --prefix apps/agent-service -- vitest run src/core/cognitive-v021 --config vitest.offline.config.ts
 npm exec --prefix apps/agent-service -- tsc --noEmit
 npm run test:offline --prefix apps/agent-service
 ```

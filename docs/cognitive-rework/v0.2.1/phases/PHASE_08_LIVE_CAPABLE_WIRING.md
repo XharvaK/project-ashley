@@ -66,7 +66,7 @@ Live dispatcher (disabled), shadow runner (disabled), health fields, freeze reco
 
 ## DATABASE / MIGRATION CHANGES
 
-None beyond already-specified nuclear `cognitive_v021_outbox_id` (must already exist from Phase 05).
+None beyond already-specified nuclear `cognitive_v021_projection_key` (must already exist from Phase 05).
 
 ## LEGACY COMPATIBILITY
 
@@ -112,6 +112,7 @@ Default `legacy`. Doc still hears Expression/decide path. Candidate speech impos
 ### Task 8.6 Durable inbox consumer + shadow isolation
 
 - [ ] Crash after 202: event processed on restart
+- [ ] Crash after publication COMMIT before inbox consumed: replay returns original ids; no duplicate deltas/outbox
 - [ ] `shadow`/`legacy`: sidecar ingress throw does **not** block `chatText`
 - [ ] `v021`: ingress failure fails closed (no silent legacy cognition)
 - [ ] Shadow outbox rows are `suppressed_shadow`; never sendable after simulated cutover
@@ -120,9 +121,9 @@ Default `legacy`. Doc still hears Expression/decide path. Candidate speech impos
 
 ### Task 8.7 Slash + scheduler live wiring
 
-- [ ] `/remember` → `admitOwnerSuppliedClaim` when kernel `v021` (flag-gated)
+- [ ] `/remember` → owner evidence + `RememberDirective`; Thought authors kind; then immediate admission when kernel `v021` (flag-gated)
 - [ ] `/memory` summary → sidecar Memory views + mechanical evidence narrative when `v021`
-- [ ] `/forget` → sidecar evidence+Memory redact/retract + compatibility cleanup + continuity tombstones when `v021`
+- [ ] `/forget` → `V021_FORGET_TARGET_MATRIX` apply + compatibility cleanup + continuity tombstones when `v021`
 - [ ] `/new` → nuclear archive+resolve; next ingress uses new ConversationId
 - [ ] Idle scheduler ticks kernel when `shadow`|`v021` without sending in shadow
 - [ ] Commit: `feat(cognitive-v021): remember memory forget new and idle scheduler flag-gated wiring`
@@ -136,6 +137,8 @@ Default `legacy`. Doc still hears Expression/decide path. Candidate speech impos
 - [ ] After this commit: **no functional source changes**
 
 ## FULL PHASE GATE
+
+FROM REPOSITORY ROOT:
 
 ```powershell
 npm run build:agent

@@ -4,7 +4,7 @@
 
 **For agentic workers:** Execute phases in order using the phase files. Do not implement from this master file alone.
 
-**Execution status until R4 independent review PASSES:** `BLOCKED — PACKET R4 AWAITING INDEPENDENT REVIEW`. Gate A remains UNSET.
+**Execution status until R5 independent review PASSES:** `BLOCKED — PACKET R5 AWAITING INDEPENDENT REVIEW`. Gate A remains UNSET.
 
 ---
 
@@ -13,7 +13,7 @@
 The live cognitive inversion is concentrated in `runtime.ts` `handleReactiveChat` **and** in Discord `drainTurn`, which waits on `POST /chat/text` inside `ChannelQueue`. Rewriting runtime in place, or assuming compose/preempt after only removing `activeOwners`, would leave inbound cognition serialized at the bot. Therefore:
 
 1. Owner architecture acceptance (done) and **owner source-baseline selection** (Gate A).
-2. **Packet bind:** materialize `APPROVED_PACKET_REVIEW_SHA` onto a branch from `OWNER_SELECTED_SOURCE_BASELINE_SHA` → `IMPLEMENTATION_START_SHA` ([OWNER_BASELINE_GATE.md](OWNER_BASELINE_GATE.md)).
+2. **Packet bind:** follow [`PACKET_BIND_MANIFEST.md`](PACKET_BIND_MANIFEST.md). Three-way overlay. Write `IMPLEMENTATION_START_SHA` to ignored `artifacts/runtime/IMPLEMENTATION_IDENTITY.md`. Do not mutate tracked Gate A.
 3. Revalidate the source map on the **source baseline** (production TypeScript/SQL must match that SHA).
 4. Build the sidecar kernel (Phases 00–07) starting at `IMPLEMENTATION_START_SHA`.
 5. Complete **all live-capable source** while still flag-gated (Phase 08): ingress split, live dispatcher, health, import tool, outbox projector, shadow/live modes, recovery, deploy hooks.
@@ -113,7 +113,8 @@ Do not ask Doc for routine coding choices.
 1. v0.2.1 not authoritatively reconciled into governing architecture docs.
 2. No owner-selected source baseline.
 3. Selected baseline is not a verified descendant / legitimate production-line source.
-3b. Packet bind missing or `git diff SOURCE_BASELINE..IMPLEMENTATION_START` includes production TypeScript/SQL/runtime.
+3b. Packet bind missing, overlay conflict, `git diff SOURCE_BASELINE..IMPLEMENTATION_START` not a subset of [`PACKET_BIND_MANIFEST.md`](PACKET_BIND_MANIFEST.md), or that diff includes production TypeScript/SQL/runtime (`PRODUCTION_SOURCE_DIFF` not `NONE`).
+3c. Overlay same-hunk conflict on a governing document (Luna must not pick wording).
 4. Source map materially invalid on selected **source baseline**.
 5. Candidate git tree dirty at freeze.
 6. Deployed SHA != qualified SHA.
@@ -256,7 +257,7 @@ docs/cognitive-rework/v0.2.1/artifacts/
   runtime/                 # gitignored outputs; freeze file POINTS TO candidate SHA
 ```
 
-Every qualification artifact binds: `candidateSha`, `selectedBaselineSha`, `architectureVersion=v0.2.1`, `implementationSpecVersion=0.2.1.r4`, `qualificationProtocolRevision=r4`, `sidecarSchemaVersion=1`, `thoughtContractVersion=1`, Thought route/occupant, Mint host identity, timestamp, shadow mode config hash, `legacyImportToolVersion=1`, `outboxBridgeVersion=1`, recorded quota ceilings including shadow real-Thought caps.
+Every qualification artifact binds: `candidateSha`, `selectedBaselineSha`, `architectureVersion=v0.2.1`, `implementationSpecVersion=0.2.1.r5`, `qualificationProtocolRevision=r5`, `sidecarSchemaVersion=1`, `thoughtContractVersion=1`, Thought route/occupant, Mint host identity, timestamp, shadow mode config hash, `legacyImportToolVersion=1`, `outboxBridgeVersion=1`, recorded quota ceilings including shadow real-Thought caps.
 
 ---
 
@@ -267,3 +268,9 @@ Every qualification artifact binds: `candidateSha`, `selectedBaselineSha`, `arch
 - `npm run build:agent` passed in that phase gate (Phases 00–08)
 - No HARD BLOCKER open
 - After Phase 08: `CANDIDATE_FREEZE.md` exists; Phases 09–11 must not change source
+
+---
+
+## Command working directory (frozen)
+
+All phase gates and qualification commands run from the **repository root**. See [README.md](README.md). Do not mix `cd apps/agent-service` with `--prefix apps/agent-service`.

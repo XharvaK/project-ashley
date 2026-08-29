@@ -72,7 +72,7 @@ Legacy Thought JSON remains on production path.
 
 - [ ] Failing cases: missing schemaVersion; draft without surfaceDraft; mode none with draft text; empty commitments + draft; effectsCompleted unknown id; revisionCount 3
 - [ ] Valid private `mode=none` with occupancyDelta
-- [ ] Command: `npx vitest run src/core/cognitive-v021/settlement/validate.test.ts`
+- [ ] Command: `npm exec --prefix apps/agent-service -- vitest run src/core/cognitive-v021/settlement/validate.test.ts --config vitest.offline.config.ts`
 - [ ] Implement
 - [ ] PASS
 - [ ] Commit: `feat(cognitive-v021): validate CognitiveSettlement schema and speech rules`
@@ -140,8 +140,10 @@ Ordinary owner_message: `acceptedSettlements === 1` (no Expression). Fail if `ac
 
 ## FULL PHASE GATE COMMANDS
 
+FROM REPOSITORY ROOT:
+
 ```powershell
-npx vitest run src/core/cognitive-v021 --config vitest.offline.config.ts
+npm exec --prefix apps/agent-service -- vitest run src/core/cognitive-v021 --config vitest.offline.config.ts
 npm exec --prefix apps/agent-service -- tsc --noEmit
 npm run test:offline --prefix apps/agent-service
 ```
