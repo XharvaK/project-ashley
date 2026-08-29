@@ -69,6 +69,7 @@ export * from "./migration/import-legacy.js";
 export * from "./initiative/idle.js";
 export * from "./initiative/future-triggers.js";
 export * from "./observation/subscriptions.js";
+export * from "./dispatch/live.js";
 
 export function speechProjectionKey(outboxId: number): `speech:${number}` {
   return `speech:${outboxId}`;

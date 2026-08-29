@@ -287,6 +287,7 @@ export async function runCognitiveCycle(
       cycleId: admittedCycle.cycleId,
       generation: admittedCycle.generation,
       reason,
+      origin: deps.origin,
       trigger: deliveryIntentFor(admittedCycle, payload, "system_notice").trigger,
       deliveryLane: deliveryIntentFor(admittedCycle, payload, "system_notice").deliveryLane,
     });
@@ -475,6 +476,7 @@ export async function runCognitiveCycle(
       nowMs: deps.nowMs(),
       triggerKind: cycle.triggerKind,
       fidelity: validation.draft.speech.mode === "draft" ? "passed" : "skipped",
+      origin: deps.origin,
       deliveryIntent: deliveryIntentFor(cycle, payload, "licensed_speech"),
     });
     if (!publication.published) {

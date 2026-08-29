@@ -8,6 +8,20 @@ import { env, validateBoot } from "./env.js";
 import { AppError } from "./errors.js";
 import { isAuthorizedOwnerId } from "./owner-auth.js";
 import { DatabaseSync } from "node:sqlite";
+import {
+  openCognitiveSidecarDb,
+} from "./core/cognitive-v021/sidecar/db.js";
+import {
+  runLiveCognitiveTurn,
+} from "./core/cognitive-v021/dispatch/live.js";
+import type {
+  InboxEvent,
+  KernelDeps,
+  KernelRunResult,
+  OutboxDeliveryProjector,
+} from "./core/cognitive-v021/types.js";
+
+export type CognitiveDispatchResult = KernelRunResult | null;
 
 export class BootValidationError extends Error {
   readonly code = "boot_validation_failed";
@@ -36,6 +50,10 @@ export class AgentManager {
   readonly logger: ConversationLogger;
   readonly core: AshleyCore;
   readonly dataPlane: DataPlaneContext;
+  private cognitiveSidecar: DatabaseSync | null = null;
+  private cognitiveDeps: KernelDeps | null = null;
+  private cognitiveProjector: OutboxDeliveryProjector | undefined;
+  private cognitiveShadowDispatch: ((event: InboxEvent) => Promise<KernelRunResult>) | null = null;
   private sseClients = new Set<SseClient>();
   private readonly bootedAt = Date.now();
 
@@ -55,6 +73,55 @@ export class AgentManager {
 
   getState(): AgentState {
     return this.state;
+  }
+
+  getCognitiveKernel(): "legacy" | "shadow" | "v021" {
+    return env.cognitiveKernel;
+  }
+
+  /** Open the sidecar only for the explicitly selected non-legacy mode. */
+  openCognitiveSidecar(): DatabaseSync | null {
+    if (env.cognitiveKernel === "legacy") return null;
+    if (this.cognitiveSidecar) return this.cognitiveSidecar;
+    this.cognitiveSidecar = openCognitiveSidecarDb(
+      new DatabaseSync(this.dataPlane.cognitiveSidecarDbPath),
+      { dataPlane: this.dataPlane },
+    );
+    return this.cognitiveSidecar;
+  }
+
+  getCognitiveSidecar(): DatabaseSync | null {
+    return this.cognitiveSidecar;
+  }
+
+  /** Bind the live/shadow worker dependencies after the service has opened its stores. */
+  configureCognitiveDispatch(input: {
+    deps: KernelDeps;
+    projector?: OutboxDeliveryProjector;
+    shadowDispatch?: (event: InboxEvent) => Promise<KernelRunResult>;
+  }): void {
+    this.cognitiveDeps = input.deps;
+    this.cognitiveProjector = input.projector;
+    this.cognitiveShadowDispatch = input.shadowDispatch ?? null;
+  }
+
+  /** Flag-gated event dispatch. Legacy returns null and keeps `/chat/text` authoritative. */
+  async dispatchCognitiveEvent(event: InboxEvent): Promise<CognitiveDispatchResult> {
+    if (env.cognitiveKernel === "legacy") return null;
+    const sidecar = this.openCognitiveSidecar();
+    const deps = this.cognitiveDeps;
+    if (!sidecar || !deps) throw new AppError("agent_not_ready", "Cognitive dispatcher unavailable", 503);
+    if (env.cognitiveKernel === "v021") {
+      return runLiveCognitiveTurn({
+        sidecar,
+        nuclear: this.core.getDatabase(),
+        event,
+        deps,
+        projector: this.cognitiveProjector,
+      });
+    }
+    if (!this.cognitiveShadowDispatch) throw new AppError("agent_not_ready", "Shadow dispatcher unavailable", 503);
+    return this.cognitiveShadowDispatch(event);
   }
 
   /** Trusted host state used by guarded C1 currentness activation. */

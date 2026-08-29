@@ -797,6 +797,8 @@ export type KernelDeps = {
   }) => Promise<string>;
   projectOutbox: (outboxId: OutboxId) => Promise<void>;
   projectSystemNotice?: (noticeId: NoticeId) => Promise<void>;
+  /** Shadow supplies `shadow`; live/default execution remains `live`. */
+  origin?: OutboxOrigin;
   constitution: IdentitySlice;
   capabilityReality: CapabilityReality;
 };
