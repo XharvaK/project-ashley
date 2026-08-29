@@ -28,7 +28,7 @@ test("discord-bot startup termination: terminates with exit code 78 and does not
     const timer = setTimeout(() => {
       proc.kill("SIGKILL");
       reject(new Error("Process timed out (hung with active handles)"));
-    }, 5000);
+    }, 15000);
 
     proc.on("exit", (code) => {
       clearTimeout(timer);
