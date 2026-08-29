@@ -1,12 +1,15 @@
+import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
+import { openNuclearDb } from "../../db.js";
 import { appendOwnerUtterance } from "../evidence/conversation-log.js";
 import { applyWorkingContextDelta, listWorkingContext } from "../evidence/working-context.js";
 import { insertOutboxPending } from "../speech/outbox.js";
+import { sendOutbox } from "../speech/send.js";
 import { openTestSidecar } from "../test-support.js";
 import { retrieveCandidates } from "../retrieval/discover.js";
 import { upsertMemoryAssertion } from "./assertions.js";
 import { buildOwnerKnowledgeView } from "./views.js";
-import { applyV021Forget } from "./forget.js";
+import { applyV021Forget, applyV021ForgetTargets } from "./forget.js";
 
 describe("v0.2.1 forget matrix", () => {
   it("redacts semantic content and suppresses future delivery", () => {
@@ -28,6 +31,45 @@ describe("v0.2.1 forget matrix", () => {
       expect(retrieveCandidates(db, { conversationId: "thread-1", request: { triggerTerms: ["HY3"], workingContextTopics: [], assertionKeys: ["memory:hy3"], includeLogSearch: true } }).hits).toEqual([]);
     } finally {
       db.close();
+    }
+  });
+
+  it("cancels a projected undelivered Nuclear reservation before local redaction", async () => {
+    const sidecar = openTestSidecar();
+    const nuclear = openNuclearDb(new DatabaseSync(":memory:"));
+    try {
+      const outbox = insertOutboxPending(sidecar, {
+        settlementId: "settlement-delivery-forget",
+        cycleId: "cycle-delivery-forget",
+        generation: 1,
+        conversationId: "thread-delivery-forget",
+        licensedText: "forget this delivery topic",
+        origin: "live",
+      });
+      nuclear.prepare(
+        `INSERT INTO delivery_reservations
+           (owner_id, channel, thread_id, trigger, delivery_lane, state,
+            draft_text, created_at)
+         VALUES ('doc', 'discord', 'thread-delivery-forget', 'reactive',
+                 'reactive', 'reserved', 'forget this delivery topic',
+                 '1970-01-01T00:00:01.000Z')`,
+      ).run();
+      sidecar.prepare(
+        "UPDATE speech_outbox SET nuclear_reservation_id = 1 WHERE outbox_id = ?",
+      ).run(outbox.outboxId);
+
+      const target = { entityType: "v021_speech_outbox", entityUuid: String(outbox.outboxId), action: "cancel" as const };
+      applyV021ForgetTargets(sidecar, [target], {
+        delivery: { nuclearDb: nuclear, ownerId: "doc" },
+        nowMs: 2,
+      });
+      expect(nuclear.prepare("SELECT state FROM delivery_reservations WHERE id = 1").get()).toMatchObject({ state: "cancelled" });
+      expect(sidecar.prepare("SELECT send_status, licensed_text FROM speech_outbox WHERE outbox_id = ?").get(outbox.outboxId)).toMatchObject({ send_status: "suppressed", licensed_text: "[redacted]" });
+      await expect(sendOutbox(sidecar, outbox.outboxId, async () => ["must-not-send"]))
+        .rejects.toThrow("speech_outbox_suppressed");
+    } finally {
+      nuclear.close();
+      sidecar.close();
     }
   });
 });

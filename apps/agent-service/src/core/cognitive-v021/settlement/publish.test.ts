@@ -62,4 +62,23 @@ describe("v0.2.1 semantic publication transaction", () => {
       db.close();
     }
   });
+
+  it("replays by cycle and generation before applying a second semantic delta set", () => {
+    const db = openTestSidecar();
+    try {
+      admitCycle(db, { cycleId: "cycle-replay", conversationId: "thread-replay", triggerKind: "owner_message", triggerRef: "one", occupantId: "doc", authorityEpoch: 1, nowMs: 1 });
+      const first = publishSemanticTransaction(db, settlement({ cycleId: "cycle-replay", settlementId: "settlement-original" }));
+      const replay = publishSemanticTransaction(db, settlement({
+        cycleId: "cycle-replay",
+        settlementId: "settlement-random-retry",
+        workingContextDelta: [{ op: "upsert", item: { id: "wc-retry", conversationId: "thread-replay", type: "topic", text: "retry must not apply", concernId: null, sourceTurnIds: [], status: "active", supersedesId: null } }],
+      }));
+      expect(first).toMatchObject({ published: true, replayed: false, settlementId: "settlement-original" });
+      expect(replay).toMatchObject({ published: true, replayed: true, settlementId: "settlement-original", outboxId: first.outboxId });
+      expect(db.prepare("SELECT COUNT(*) AS count FROM settlements").get()).toMatchObject({ count: 1 });
+      expect(db.prepare("SELECT COUNT(*) AS count FROM working_context_items").get()).toMatchObject({ count: 1 });
+    } finally {
+      db.close();
+    }
+  });
 });

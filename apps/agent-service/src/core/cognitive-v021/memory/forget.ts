@@ -1,6 +1,9 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { V021ForgetTarget } from "../types.js";
 import { hashMemoryAssertion, getMemoryAssertion, REDACTED_MEMORY_STATEMENT } from "./assertions.js";
+import { cancelDeliveryReservation } from "../../delivery/abort-registry.js";
+import { getDeliveryReservation } from "../../delivery/store.js";
+import { isTerminalDeliveryState } from "../../delivery/types.js";
 
 type Row = Record<string, unknown>;
 
@@ -399,6 +402,55 @@ function targetIds(targets: V021ForgetTarget[], entityType: string): Set<string>
   return new Set(targets.filter((target) => target.entityType === entityType).map((target) => target.entityUuid));
 }
 
+export type V021ForgetDeliveryAuthority = {
+  nuclearDb: DatabaseSync;
+  ownerId: string;
+};
+
+function linkedReservationIds(
+  db: DatabaseSync,
+  targets: V021ForgetTarget[],
+): number[] {
+  const ids = new Set<number>();
+  for (const id of targetIds(targets, "v021_speech_outbox")) {
+    const row = db.prepare(
+      "SELECT nuclear_reservation_id FROM speech_outbox WHERE outbox_id = ?",
+    ).get(Number(id)) as Row | undefined;
+    const reservationId = number(row?.nuclear_reservation_id);
+    if (reservationId > 0) ids.add(reservationId);
+  }
+  for (const id of targetIds(targets, "v021_system_notice")) {
+    const row = db.prepare(
+      "SELECT nuclear_reservation_id FROM system_notice_outbox WHERE notice_id = ?",
+    ).get(Number(id)) as Row | undefined;
+    const reservationId = number(row?.nuclear_reservation_id);
+    if (reservationId > 0) ids.add(reservationId);
+  }
+  return [...ids];
+}
+
+/** Make linked Nuclear delivery terminal before any candidate text is redacted. */
+function cancelLinkedDeliveries(
+  db: DatabaseSync,
+  targets: V021ForgetTarget[],
+  authority: V021ForgetDeliveryAuthority,
+): void {
+  for (const reservationId of linkedReservationIds(db, targets)) {
+    const reservation = getDeliveryReservation(authority.nuclearDb, reservationId);
+    if (!reservation) throw new Error("forget_delivery_reservation_missing");
+    if (isTerminalDeliveryState(reservation.state)) continue;
+    const cancelled = cancelDeliveryReservation(authority.nuclearDb, {
+      reservationId,
+      ownerId: authority.ownerId,
+    });
+    if (!cancelled.ok) throw new Error("forget_delivery_cancel_failed");
+    const finalized = getDeliveryReservation(authority.nuclearDb, reservationId);
+    if (!finalized || !isTerminalDeliveryState(finalized.state)) {
+      throw new Error("forget_delivery_cancel_incomplete");
+    }
+  }
+}
+
 function addChanges(result: { changes?: number | bigint }, counter: { value: number }): void {
   counter.value += number(result.changes);
 }
@@ -515,9 +567,14 @@ function applyV021ForgetTargetsInTransaction(
 export function applyV021ForgetTargets(
   db: DatabaseSync,
   targets: V021ForgetTarget[],
-  options: { nowMs?: number; inTransaction?: boolean } = {},
+  options: {
+    nowMs?: number;
+    inTransaction?: boolean;
+    delivery?: V021ForgetDeliveryAuthority;
+  } = {},
 ): V021ForgetResult {
   const nowMs = options.nowMs ?? Date.now();
+  if (options.delivery) cancelLinkedDeliveries(db, targets, options.delivery);
   if (options.inTransaction === true) return applyV021ForgetTargetsInTransaction(db, targets, nowMs);
   db.exec("BEGIN IMMEDIATE");
   try {

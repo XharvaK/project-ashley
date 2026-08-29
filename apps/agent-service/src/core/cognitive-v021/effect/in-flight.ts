@@ -107,8 +107,16 @@ export function getEffectReceipt(db: DatabaseSync, effectId: string): EffectRece
   return mapReceipt(db.prepare("SELECT * FROM effect_receipts WHERE effect_id = ?").get(effectId));
 }
 
+export function getEffectReceiptByIdempotencyKey(
+  db: DatabaseSync,
+  idempotencyKey: string,
+): EffectReceipt | null {
+  return mapReceipt(db.prepare("SELECT * FROM effect_receipts WHERE idempotency_key = ?").get(idempotencyKey));
+}
+
 export function recordEffectReceipt(db: DatabaseSync, receipt: EffectReceipt): EffectReceipt {
-  const existing = getEffectReceipt(db, receipt.effectId);
+  const existing = getEffectReceipt(db, receipt.effectId)
+    ?? getEffectReceiptByIdempotencyKey(db, receipt.idempotencyKey);
   if (existing) return existing;
   db.prepare(
     `INSERT INTO effect_receipts

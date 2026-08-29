@@ -54,4 +54,26 @@ describe("v0.2.1 cycle fence", () => {
       db.close();
     }
   });
+
+  it("preempts when the current generation already has a delivered outbox", () => {
+    const db = openTestSidecar();
+    try {
+      const cycle = admitCycle(db, {
+        conversationId: "thread-delivered", triggerKind: "owner_message", triggerRef: "first",
+        occupantId: "doc", authorityEpoch: 1, nowMs: 1,
+      });
+      insertOutboxPending(db, {
+        settlementId: "settlement-delivered", cycleId: cycle.cycleId, generation: cycle.generation,
+        conversationId: "thread-delivered", licensedText: "already delivered", origin: "live",
+      });
+      db.prepare("UPDATE speech_outbox SET send_status = 'delivered' WHERE settlement_id = 'settlement-delivered'").run();
+      const result = composeOrPreempt(db, {
+        conversationId: "thread-delivered", triggerRef: "owner-2", occupantId: "doc", authorityEpoch: 1, nowMs: 2,
+      });
+      expect(result.action).toBe("preempt");
+      expect(result.generation).toBe(cycle.generation + 1);
+    } finally {
+      db.close();
+    }
+  });
 });

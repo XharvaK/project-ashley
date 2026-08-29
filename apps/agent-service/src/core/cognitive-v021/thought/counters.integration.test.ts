@@ -1,0 +1,298 @@
+import { DatabaseSync } from "node:sqlite";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it, vi } from "vitest";
+import { admitCycle, appendInboxEvent } from "../cycle/inbox.js";
+import { appendOwnerUtterance } from "../evidence/conversation-log.js";
+import { openCognitiveSidecarDb } from "../sidecar/db.js";
+import { makeThoughtDraft, openTestSidecar } from "../test-support.js";
+import type { CapabilityReality, KernelDeps, Observation, ThoughtInput } from "../types.js";
+import { checkAuthority as deterministicCheckAuthority } from "../authority/check.js";
+import { getThoughtAttemptCounters } from "./counters.js";
+import { runCognitiveCycle } from "./run.js";
+
+const capabilityReality: CapabilityReality = {
+  vision: false,
+  attachmentText: false,
+  conversationalRead: false,
+  webSearch: false,
+  canOfferProjectInspection: false,
+  canOfferWorkspace: false,
+  canOfferVerification: false,
+  canOfferAuthorship: false,
+  canOfferBoundedOperation: false,
+  canOfferPatchExport: false,
+  approvedProjectIds: [],
+};
+
+function packs() {
+  return {
+    epistemic: { allowInferredWorldClaims: false },
+    currentness: { requireObservationForLatest: true },
+    receipt: { receiptsByEffectId: {} },
+    capability: capabilityReality,
+    operational: { sandboxAvailable: false },
+    relational: { withdrawalActive: false, neverMention: [] },
+    stateEpoch: { authorityEpoch: 1 },
+  };
+}
+
+function setup(sidecar = openTestSidecar()) {
+  const cycle = admitCycle(sidecar, {
+    conversationId: "counter-thread",
+    triggerKind: "owner_message",
+    triggerRef: "owner-1",
+    occupantId: "doc",
+    authorityEpoch: 1,
+    nowMs: 1,
+  });
+  const evidence = appendOwnerUtterance(sidecar, {
+    conversationId: cycle.conversationId,
+    text: "hello",
+    discordMessageIds: ["discord-1"],
+    nowMs: 2,
+  });
+  const event = appendInboxEvent(sidecar, {
+    conversationId: cycle.conversationId,
+    kind: "owner_message",
+    payload: { cycleId: cycle.cycleId, evidenceRowId: evidence.rowId, ownerMessage: evidence.text },
+    createdAtMs: 2,
+  });
+  return { sidecar, cycle, event };
+}
+
+function inputFrom(messages: unknown[]): ThoughtInput {
+  const user = (messages as Array<{ role?: string; content?: unknown }>).find((item) => item.role === "user");
+  return JSON.parse(String(user?.content ?? "{}")) as ThoughtInput;
+}
+
+function validCompletion(input: ThoughtInput, text = "hello", overrides: Record<string, unknown> = {}) {
+  return {
+    text: JSON.stringify(makeThoughtDraft({
+      cycleId: input.cycleId,
+      generation: input.generation,
+      authorityEpoch: input.authorityEpoch,
+      occupantId: input.occupantId,
+      triggerRef: input.trigger.ref,
+      speech: {
+        mode: "draft",
+        mustSay: [text],
+        mustNot: [],
+        surfaceDraft: text,
+        acceptableRealizations: [text],
+        presentationDirectives: [],
+      },
+      ...overrides,
+    })),
+    model: "fake",
+    modelAlias: "thought",
+    resolvedModelId: null,
+  };
+}
+
+function deps(
+  sidecar: DatabaseSync,
+  completeChat: KernelDeps["completeChat"],
+  overrides: Partial<KernelDeps> = {},
+): KernelDeps {
+  return {
+    nowMs: () => 10,
+    attentionDb: sidecar,
+    completeChat,
+    runPerception: vi.fn(async (): Promise<Observation[]> => []),
+    executeObservation: vi.fn(),
+    executeEffect: vi.fn(),
+    checkAuthority: () => ({ ok: true }),
+    loadAuthorityPacks: packs,
+    expressionEnabled: false,
+    projectOutbox: vi.fn(async () => undefined),
+    constitution: { constitutional: ["truth first"], stableSelf: ["curious"] },
+    capabilityReality,
+    ...overrides,
+  };
+}
+
+describe("v0.2.1 durable Thought accounting", () => {
+  it("retries malformed output within one semantic pass and persists separate raw and structural counts", async () => {
+    const { sidecar, cycle, event } = setup();
+    let calls = 0;
+    const completeChat = vi.fn(async (messages: unknown[]) => {
+      calls += 1;
+      const input = inputFrom(messages);
+      return calls === 1 ? { text: "not json", model: "fake", modelAlias: "thought", resolvedModelId: null } : validCompletion(input);
+    });
+    const result = await runCognitiveCycle(sidecar, sidecar, event, deps(sidecar, completeChat));
+    expect(result).toMatchObject({ published: true, thoughtModelAttempts: 2, acceptedThoughtPasses: 1 });
+    expect(getThoughtAttemptCounters(sidecar, cycle.cycleId, cycle.generation)).toMatchObject({
+      thoughtModelAttempts: 2,
+      acceptedThoughtPasses: 1,
+      structuralRetries: 1,
+    });
+    sidecar.close();
+  });
+
+  it("stops after the bounded malformed retry budget without publishing speech", async () => {
+    const { sidecar, cycle, event } = setup();
+    const completeChat = vi.fn(async () => ({ text: "not json", model: "fake", modelAlias: "thought", resolvedModelId: null }));
+    const result = await runCognitiveCycle(sidecar, sidecar, event, deps(sidecar, completeChat));
+    expect(result).toMatchObject({ published: false, infrastructureNotice: "[system] Thought did not complete. Please send the message again." });
+    expect(getThoughtAttemptCounters(sidecar, cycle.cycleId, cycle.generation)).toMatchObject({
+      thoughtModelAttempts: 3,
+      acceptedThoughtPasses: 0,
+      structuralRetries: 2,
+    });
+    expect(sidecar.prepare("SELECT COUNT(*) AS count FROM speech_outbox").get()).toMatchObject({ count: 0 });
+    sidecar.close();
+  });
+
+  it("records provider unavailability separately from malformed structural retries", async () => {
+    const { sidecar, cycle, event } = setup();
+    const completeChat = vi.fn(async () => { throw new Error("provider_down"); });
+    const result = await runCognitiveCycle(sidecar, sidecar, event, deps(sidecar, completeChat));
+    expect(result).toMatchObject({ published: false, infrastructureNotice: "[system] Thought did not complete. Please send the message again." });
+    expect(getThoughtAttemptCounters(sidecar, cycle.cycleId, cycle.generation)).toMatchObject({
+      thoughtModelAttempts: 1,
+      acceptedThoughtPasses: 0,
+      structuralRetries: 0,
+    });
+    expect(sidecar.prepare("SELECT json_extract(payload_json, '$.reason') AS reason FROM thought_steps WHERE kind = 'failure'").get()).toMatchObject({ reason: "unavailable" });
+    sidecar.close();
+  });
+
+  it("sends an exact authority objection back into the next Thought input and records one revision", async () => {
+    const { sidecar, cycle, event } = setup();
+    const observedObjections: unknown[] = [];
+    let calls = 0;
+    const completeChat = vi.fn(async (messages: unknown[]) => {
+      const input = inputFrom(messages);
+      observedObjections.push(input.authorityObjections);
+      calls += 1;
+      return validCompletion(input, calls === 1 ? "latest" : "revised", calls === 1 ? {
+        speech: {
+          mode: "draft",
+          mustSay: ["latest"],
+          mustNot: [],
+          surfaceDraft: "latest",
+          acceptableRealizations: ["latest"],
+          presentationDirectives: [],
+        },
+      } : {
+        authority: {
+          objectionsApplied: input.authorityObjections,
+          revisionCount: input.authorityObjections.length,
+        },
+      });
+    });
+    const result = await runCognitiveCycle(sidecar, sidecar, event, deps(sidecar, completeChat, {
+      checkAuthority: deterministicCheckAuthority,
+    }));
+    expect(observedObjections).toEqual([[], ["CURRENTNESS_UNVERIFIED"]]);
+    expect(result).toMatchObject({ published: true, thoughtModelAttempts: 2, acceptedThoughtPasses: 2 });
+    expect(getThoughtAttemptCounters(sidecar, cycle.cycleId, cycle.generation).authorityRevisions).toBe(1);
+    sidecar.close();
+  });
+
+  it("sends a revisable proposal objection back to Thought without dispatching the proposal", async () => {
+    const { sidecar, cycle, event } = setup();
+    let proposalChecks = 0;
+    const objections: unknown[] = [];
+    const completeChat = vi.fn(async (messages: unknown[]) => {
+      const input = inputFrom(messages);
+      objections.push(input.authorityObjections);
+      if (objections.length === 1) {
+        return {
+          text: JSON.stringify({
+            kind: "observation_request",
+            cycleId: input.cycleId,
+            generation: input.generation,
+            occupantId: input.occupantId,
+            observationRequest: {
+              requestId: "proposal-observation",
+              cycleId: input.cycleId,
+              generation: input.generation,
+              kind: "project.read_file",
+              request: { projectId: "project-ashley", path: "README.md" },
+              replaySafe: true,
+            },
+          }),
+          model: "fake",
+          modelAlias: "thought",
+          resolvedModelId: null,
+        };
+      }
+      return validCompletion(input, "proposal revised", {
+        authority: { objectionsApplied: input.authorityObjections, revisionCount: input.authorityObjections.length },
+      });
+    });
+    const executeObservation = vi.fn();
+    const result = await runCognitiveCycle(sidecar, sidecar, event, deps(sidecar, completeChat, {
+      executeObservation,
+      checkAuthority: (stage) => {
+        if (stage === "proposal" && proposalChecks++ === 0) return { ok: false, codes: ["STALE_STATE"] };
+        return { ok: true };
+      },
+    }));
+    expect(objections).toEqual([[], ["STALE_STATE"]]);
+    expect(executeObservation).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ published: true, thoughtModelAttempts: 2, acceptedThoughtPasses: 2 });
+    expect(getThoughtAttemptCounters(sidecar, cycle.cycleId, cycle.generation).authorityRevisions).toBe(1);
+    sidecar.close();
+  });
+
+  it("treats a fidelity conflict as actionable revision input and fails closed after the revision budget", async () => {
+    const { sidecar, cycle, event } = setup();
+    let calls = 0;
+    const objections: unknown[] = [];
+    const completeChat = vi.fn(async (messages: unknown[]) => {
+      const input = inputFrom(messages);
+      objections.push(input.authorityObjections);
+      calls += 1;
+      if (calls === 1) {
+        return validCompletion(input, "wrong", {
+          speech: {
+            mode: "draft",
+            mustSay: ["required"],
+            mustNot: [],
+            surfaceDraft: "wrong",
+            acceptableRealizations: ["wrong"],
+            presentationDirectives: [],
+          },
+        });
+      }
+      return validCompletion(input, "right", {
+        authority: { objectionsApplied: input.authorityObjections, revisionCount: input.authorityObjections.length },
+      });
+    });
+    const result = await runCognitiveCycle(sidecar, sidecar, event, deps(sidecar, completeChat));
+    expect(objections).toEqual([[], ["DRAFT_COMMITMENT_CONFLICT"]]);
+    expect(result.published).toBe(true);
+    expect(getThoughtAttemptCounters(sidecar, cycle.cycleId, cycle.generation).authorityRevisions).toBe(1);
+    sidecar.close();
+
+    const exhausted = setup();
+    const alwaysObjected = vi.fn(async (messages: unknown[]) => validCompletion(inputFrom(messages), "still claimed"));
+    const exhaustedResult = await runCognitiveCycle(exhausted.sidecar, exhausted.sidecar, exhausted.event, deps(exhausted.sidecar, alwaysObjected, {
+      checkAuthority: (stage) => stage === "settlement" ? { ok: false, codes: ["CURRENTNESS_UNVERIFIED"] } : { ok: true },
+    }));
+    expect(exhaustedResult.published).toBe(false);
+    expect(exhausted.sidecar.prepare("SELECT COUNT(*) AS count FROM speech_outbox").get()).toMatchObject({ count: 0 });
+    expect(getThoughtAttemptCounters(exhausted.sidecar, exhausted.cycle.cycleId, exhausted.cycle.generation).authorityRevisions).toBe(2);
+    exhausted.sidecar.close();
+  });
+
+  it("preserves the counters across a sidecar close and reopen", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "ashley-q2-counters-"));
+    const path = join(directory, "sidecar.db");
+    const sidecar = openCognitiveSidecarDb(new DatabaseSync(path), { dataPlane: { kind: "isolated" } });
+    const { cycle, event } = setup(sidecar);
+    const completeChat = vi.fn(async (messages: unknown[]) => validCompletion(inputFrom(messages), "persisted"));
+    await runCognitiveCycle(sidecar, sidecar, event, deps(sidecar, completeChat));
+    const before = getThoughtAttemptCounters(sidecar, cycle.cycleId, cycle.generation);
+    sidecar.close();
+    const reopened = openCognitiveSidecarDb(new DatabaseSync(path), { dataPlane: { kind: "isolated" } });
+    expect(getThoughtAttemptCounters(reopened, cycle.cycleId, cycle.generation)).toEqual(before);
+    reopened.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+});

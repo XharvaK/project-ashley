@@ -18,6 +18,7 @@ export { reservedProductionCognitiveSidecarDbPath } from "../data-plane.js";
 export * from "./evidence/conversation-log.js";
 export * from "./cycle/inbox.js";
 export * from "./cycle/fence.js";
+export * from "./cycle/active.js";
 export * from "./cycle/inbox-consumer.js";
 export * from "./speech/outbox.js";
 export * from "./speech/fidelity.js";
@@ -30,10 +31,12 @@ export { evaluateExternalizationGate } from "./initiative/externalization.js";
 export * from "./effect/in-flight.js";
 export {
   publishSemanticTransaction,
+  getPublishedSettlementIdentity,
 } from "./settlement/publish.js";
 export type {
   PublicationOptions,
   PublicationResult,
+  PublishedSettlementIdentity,
 } from "./settlement/publish.js";
 export { validateThoughtSettlementDraft, assertValidThoughtSettlementDraft } from "./settlement/validate.js";
 export { buildThoughtInput } from "./thought/input.js";
@@ -44,6 +47,7 @@ export {
   runCognitiveCycle,
 } from "./thought/run.js";
 export { getCapabilityReality } from "./thought/capability-reality.js";
+export * from "./thought/counters.js";
 export { adaptPerception, runPerceptionBeforeThought } from "./perception/adapter.js";
 export { retrieveCandidates, tokenizeForDiscovery } from "./retrieval/discover.js";
 export { applyWorkingContextDelta, listWorkingContext } from "./evidence/working-context.js";
@@ -55,6 +59,13 @@ export { checkAuthority } from "./authority/check.js";
 export { claimsCurrentness, claimsUnwitnessedReading } from "./authority/currentness-detectors.js";
 export { classifyOperation, createObservationRequest } from "./observation/request.js";
 export { createEffectProposal, dispatchEffect } from "./effect/proposal.js";
+export {
+  createV021LiveOperationExecutors,
+} from "./dispatch/live-operations.js";
+export type {
+  V021LiveOperationExecutorOptions,
+  V021LiveOperationExecutors,
+} from "./dispatch/live-operations.js";
 export { recoverInFlight } from "./effect/recovery.js";
 export * from "./memory/nomination.js";
 export * from "./memory/admission.js";

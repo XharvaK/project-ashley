@@ -1,4 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import { openNuclearDb } from "../db.js";
 import { openContinuityDb } from "../continuity/db.js";
@@ -7,6 +10,10 @@ import { resolveActiveThread, insertMessage } from "../memory/threads.js";
 import { getAuthoritativeLineageId } from "../continuity/db.js";
 import { getInboxEvent } from "./cycle/inbox.js";
 import { appendOwnerUtterance, appendAshleyEvidence } from "./evidence/conversation-log.js";
+import { applyConcernDelta } from "./concerns/lineage.js";
+import { createObservationSubscription } from "./observation/subscriptions.js";
+import { insertOutboxPending } from "./speech/outbox.js";
+import { sendOutbox } from "./speech/send.js";
 import { upsertMemoryAssertion } from "./memory/assertions.js";
 import { scheduleFutureTrigger } from "./initiative/future-triggers.js";
 import {
@@ -185,6 +192,98 @@ describe("v0.2.1 command wiring", () => {
       sidecar.close();
       nuclear.close();
       continuity.close();
+    }
+  });
+
+  it("cancels Nuclear delivery before forget redaction and remains non-sendable after sidecar restart", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "ashley-v021-forget-"));
+    const sidecarPath = join(directory, "sidecar.db");
+    const continuity = openContinuityDb(new DatabaseSync(":memory:"));
+    const nuclear = openNuclearDb(new DatabaseSync(":memory:"), { continuity });
+    let sidecar = openCognitiveSidecarDb(new DatabaseSync(sidecarPath), {
+      dataPlane: { kind: "isolated" },
+    });
+    try {
+      const threadId = resolveActiveThread(nuclear, OWNER, "discord");
+      applyConcernDelta(sidecar, {
+        op: "upsert",
+        record: {
+          concernId: "concern-forget",
+          conversationId: threadId,
+          statement: "The forgotten topic needs attention.",
+          sourceTurnIds: [],
+          dimensions: { source: "owner_utterance", status: "asserted", time: "current", reliability: "owner_supplied" },
+          assertionKey: null,
+          status: "active",
+        },
+      }, { cycleId: "cycle-forget", generation: 1 });
+      createObservationSubscription(sidecar, {
+        subscriptionId: "subscription-forget",
+        conversationId: threadId,
+        concernId: "concern-forget",
+        source: "test",
+        scope: "forgotten topic",
+        topicKeys: ["forgotten topic"],
+        match: "substring",
+        expiresAtMs: null,
+      });
+      const outbox = insertOutboxPending(sidecar, {
+        settlementId: "settlement-forget-delivery",
+        cycleId: "cycle-forget",
+        generation: 1,
+        conversationId: threadId,
+        licensedText: "forgotten topic must not send",
+        origin: "live",
+        deliveryIntent: {
+          ownerId: OWNER,
+          channel: "discord",
+          threadId,
+          conversationId: threadId,
+          trigger: "owner_message_reactive",
+          deliveryLane: "reactive",
+          purpose: "licensed_speech",
+        },
+      });
+      nuclear.prepare(
+        `INSERT INTO delivery_reservations
+           (owner_id, channel, thread_id, trigger, delivery_lane, state,
+            draft_text, created_at)
+         VALUES (?, 'discord', ?, 'reactive', 'reactive', 'reserved', ?,
+                 '1970-01-01T00:00:01.000Z')`,
+      ).run(OWNER, threadId, "forgotten topic must not send");
+      sidecar.prepare("UPDATE speech_outbox SET nuclear_reservation_id = 1 WHERE outbox_id = ?").run(outbox.outboxId);
+
+      const preview = previewV021Forget(sidecar, nuclear, continuity, {
+        ownerId: OWNER,
+        topic: "forgotten topic",
+        nowMs: 2,
+      });
+      if (!preview.previewId) throw new Error("forget_preview_id_missing");
+      const result = confirmV021Forget(sidecar, nuclear, continuity, {
+        ownerId: OWNER,
+        previewId: preview.previewId,
+        nowMs: 3,
+      });
+      expect(result.tombstoneId).toEqual(expect.any(String));
+      expect(nuclear.prepare("SELECT state FROM delivery_reservations WHERE id = 1").get()).toMatchObject({ state: "cancelled" });
+      expect(sidecar.prepare("SELECT statement FROM concerns WHERE concern_id = 'concern-forget'").get()).toMatchObject({ statement: "" });
+      expect(sidecar.prepare("SELECT cancelled, spec_json FROM observation_subscriptions WHERE subscription_id = 'subscription-forget'").get()).toMatchObject({ cancelled: 1, spec_json: "{}" });
+      expect(sidecar.prepare("SELECT send_status, licensed_text FROM speech_outbox WHERE outbox_id = ?").get(outbox.outboxId)).toMatchObject({ send_status: "suppressed", licensed_text: "[redacted]" });
+
+      sidecar.close();
+      sidecar = openCognitiveSidecarDb(new DatabaseSync(sidecarPath), {
+        dataPlane: { kind: "isolated" },
+      });
+      expect(sidecar.prepare("SELECT statement FROM concerns WHERE concern_id = 'concern-forget'").get()).toMatchObject({ statement: "" });
+      expect(sidecar.prepare("SELECT cancelled, spec_json FROM observation_subscriptions WHERE subscription_id = 'subscription-forget'").get()).toMatchObject({ cancelled: 1, spec_json: "{}" });
+      expect(sidecar.prepare("SELECT licensed_text, send_status FROM speech_outbox WHERE outbox_id = ?").get(outbox.outboxId)).toMatchObject({ licensed_text: "[redacted]", send_status: "suppressed" });
+      const transport = async () => ["must-not-send"];
+      await expect(sendOutbox(sidecar, outbox.outboxId, transport)).rejects.toThrow("speech_outbox_suppressed");
+    } finally {
+      try { sidecar.close(); } catch { /* already closed */ }
+      nuclear.close();
+      continuity.close();
+      rmSync(directory, { recursive: true, force: true });
     }
   });
 });

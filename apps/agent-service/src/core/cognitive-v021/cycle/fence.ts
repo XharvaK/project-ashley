@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { admitCycle, appendCycleLogIds, getCurrentCycle } from "./inbox.js";
 import type { CycleRecord, CycleTriggerKind } from "../types.js";
 import { suppressUndeliveredOutbox } from "../speech/outbox.js";
+import { cancelActiveThought } from "./active.js";
 
 export type ComposeOrPreemptInput = {
   conversationId: string;
@@ -21,11 +22,10 @@ export type ComposeOrPreemptResult = {
   preemptedGeneration: number | null;
 };
 
-function hasPendingOutbox(db: DatabaseSync, conversationId: string, generation: number): boolean {
+function hasPublishedOutbox(db: DatabaseSync, conversationId: string, generation: number): boolean {
   const row = db.prepare(
     `SELECT 1 FROM speech_outbox
      WHERE conversation_id = ? AND generation = ?
-       AND send_status NOT IN ('delivered', 'suppressed', 'suppressed_shadow')
      LIMIT 1`,
   ).get(conversationId, generation);
   return Boolean(row);
@@ -35,6 +35,7 @@ function hasEffectfulInFlight(db: DatabaseSync, cycleId: string, generation: num
   return Boolean(db.prepare(
     `SELECT 1 FROM in_flight_effects
      WHERE cycle_id = ? AND generation = ?
+       AND state IN ('in_flight', 'unknown')
      LIMIT 1`,
   ).get(cycleId, generation));
 }
@@ -61,10 +62,16 @@ export function composeOrPreempt(
     }
 
     const effectful = hasEffectfulInFlight(db, current.cycleId, current.generation);
-    const pending = hasPendingOutbox(db, input.conversationId, current.generation);
-    if (!effectful && !pending) {
+    const published = hasPublishedOutbox(db, input.conversationId, current.generation);
+    if (!effectful && !published) {
       const cycle = appendCycleLogIds(db, current.cycleId, input.evidenceRowIds ?? [], nowMs);
       db.exec("COMMIT");
+      cancelActiveThought({
+        conversationId: input.conversationId,
+        cycleId: cycle.cycleId,
+        generation: cycle.generation,
+        action: "compose",
+      });
       return { action: "compose", cycle, cycleId: cycle.cycleId, generation: cycle.generation, preemptedGeneration: null };
     }
 
@@ -87,6 +94,12 @@ export function composeOrPreempt(
     if ((input.evidenceRowIds ?? []).length > 0) appendCycleLogIds(db, cycle.cycleId, input.evidenceRowIds ?? [], nowMs);
     const finalCycle = (input.evidenceRowIds ?? []).length > 0 ? getCurrentCycle(db, input.conversationId, { includeIdle: false }) ?? cycle : cycle;
     db.exec("COMMIT");
+    cancelActiveThought({
+      conversationId: input.conversationId,
+      cycleId: current.cycleId,
+      generation: current.generation,
+      action: "preempt",
+    });
     return { action: "preempt", cycle: finalCycle, cycleId: finalCycle.cycleId, generation: finalCycle.generation, preemptedGeneration: current.generation };
   } catch (error) {
     try { db.exec("ROLLBACK"); } catch { /* preserve original */ }

@@ -6,8 +6,11 @@ import {
 import type { ChatMessage } from "../../model-routing/types.js";
 import {
   ORDINARY_THOUGHT_BUDGET_MS,
+  MAX_AUTHORITY_REVISIONS,
+  MAX_EFFECT_ROUNDS,
+  MAX_OBSERVATION_ROUNDS,
   MAX_THOUGHT_PASSES,
-  THOUGHT_UNAVAILABLE_NOTICE,
+  MAX_THOUGHT_MODEL_ATTEMPTS,
   type CycleTriggerKind,
   type InboxEvent,
   type KernelDeps,
@@ -20,24 +23,35 @@ import {
   type Observation,
   type DeliveryIntent,
   type RememberDirective,
+  type AuthorityCode,
 } from "../types.js";
 import { getCycle, getCurrentCycle, admitCycle, appendCycleLogIds, updateCycleState } from "../cycle/inbox.js";
 import { getConversationEvidence, listConversationEvidence } from "../evidence/conversation-log.js";
-import { listInFlight, putInFlight, recordEffectReceipt } from "../effect/in-flight.js";
+import { listInFlight } from "../effect/in-flight.js";
+import { dispatchEffect } from "../effect/proposal.js";
+import { registerActiveThought } from "../cycle/active.js";
 import { adaptPerception } from "../perception/adapter.js";
 import { buildThoughtInput } from "./input.js";
 import { parseThoughtStepOutput } from "./parse.js";
 import { validateThoughtSettlementDraft } from "../settlement/validate.js";
-import { publishSemanticTransaction } from "../settlement/publish.js";
+import { getPublishedSettlementIdentity, publishSemanticTransaction } from "../settlement/publish.js";
 import { admitOwnerSuppliedClaim } from "../memory/admission.js";
 import { fidelityCheck } from "../speech/fidelity.js";
 import { emitInfrastructureNotice } from "../speech/infrastructure-notice.js";
 import { renderForTransport } from "../../conversation/rendering.js";
+import {
+  getThoughtAttemptCounters,
+  incrementThoughtAttemptCounter,
+  type ThoughtAttemptCounters,
+} from "./counters.js";
 
 export type ThoughtInvocation = {
   output: ThoughtStepOutput;
   attempts: number;
   requestId: string;
+  malformed?: boolean;
+  unavailable?: boolean;
+  cancelled?: boolean;
 };
 
 export type ThoughtCompleteInvoker = (
@@ -73,7 +87,7 @@ function thoughtMessages(input: ThoughtInput): ChatMessage[] {
 export async function runThoughtModel(
   input: ThoughtInput,
   deps: KernelDeps,
-  options: { pass?: number; requestId?: string } = {},
+  options: { pass?: number; requestId?: string; signal?: AbortSignal } = {},
 ): Promise<ThoughtInvocation> {
   const pass = options.pass ?? 1;
   const requestId = options.requestId ?? randomUUID();
@@ -87,6 +101,7 @@ export async function runThoughtModel(
     deadlineAtMs: deps.nowMs() + ORDINARY_THOUGHT_BUDGET_MS,
     maxTokens: 6000,
     temperature: 0.15,
+    signal: options.signal,
   };
   try {
     const completion = await invokeThoughtComplete(
@@ -94,6 +109,22 @@ export async function runThoughtModel(
       dispatchOptions,
       deps.completeChat,
     );
+    if (options.signal?.aborted) {
+      return {
+        output: {
+          kind: "failure",
+          cycleId: input.cycleId,
+          generation: input.generation,
+          pass,
+          requestId,
+          occupantId: input.occupantId,
+          reason: "cancelled",
+        },
+        attempts: 1,
+        requestId,
+        cancelled: true,
+      };
+    }
     const output = parseThoughtStepOutput(completion.text, {
       cycleId: input.cycleId,
       generation: input.generation,
@@ -103,8 +134,15 @@ export async function runThoughtModel(
       authorityEpoch: input.authorityEpoch,
       consumedEffectIds: input.inFlight.filter((item) => item.status === "receipted").map((item) => item.effectId),
     });
-    return { output, attempts: 1, requestId };
-  } catch {
+    return {
+      output,
+      attempts: 1,
+      requestId,
+      malformed: output.kind === "failure" && output.reason === "malformed",
+    };
+  } catch (error) {
+    const cancelled = options.signal?.aborted === true
+      || (error instanceof Error && error.name === "AbortError");
     return {
       output: {
         kind: "failure",
@@ -113,10 +151,12 @@ export async function runThoughtModel(
         pass,
         requestId,
         occupantId: input.occupantId,
-        reason: "unavailable",
+        reason: cancelled ? "cancelled" : "unavailable",
       },
       attempts: 1,
       requestId,
+      unavailable: !cancelled,
+      cancelled,
     };
   }
 }
@@ -280,6 +320,28 @@ function storeThoughtStep(
   );
 }
 
+function persistedMalformedRetries(
+  db: DatabaseSync,
+  cycleId: string,
+  generation: number,
+  pass: number,
+): number {
+  let count = 0;
+  for (const row of db.prepare(
+    `SELECT payload_json
+       FROM thought_steps
+      WHERE cycle_id = ? AND generation = ? AND pass = ? AND kind = 'failure'`,
+  ).all(cycleId, generation, pass) as Array<Record<string, unknown>>) {
+    try {
+      const payload = JSON.parse(String(row.payload_json ?? "")) as { reason?: unknown };
+      if (payload.reason === "malformed") count += 1;
+    } catch {
+      /* A malformed failure row is not evidence of a structural retry. */
+    }
+  }
+  return count;
+}
+
 function publishedSettlement(
   draft: ThoughtSettlementDraft,
   settlementId: string,
@@ -296,18 +358,51 @@ function publishedSettlement(
   } as PublishedCognitiveSettlement;
 }
 
-function emptyResult(cycleId: string, generation: number, notice: string | null, attempts = 0): KernelRunResult {
+function resultWithCounters(
+  cycleId: string,
+  generation: number,
+  notice: string | null,
+  counters: ThoughtAttemptCounters,
+): KernelRunResult {
   return {
     cycleId,
     generation,
     published: false,
     outboxId: null,
     infrastructureNotice: notice,
-    thoughtModelAttempts: attempts,
-    acceptedThoughtPasses: 0,
-    composeCancelledAttempts: 0,
+    thoughtModelAttempts: counters.thoughtModelAttempts,
+    acceptedThoughtPasses: counters.acceptedThoughtPasses,
+    composeCancelledAttempts: counters.composeCancelledAttempts,
     acceptedSettlements: 0,
   };
+}
+
+function currentGenerationIs(
+  db: DatabaseSync,
+  cycle: { cycleId: string; conversationId: string; generation: number },
+): boolean {
+  const current = getCurrentCycle(db, cycle.conversationId, { includeIdle: true });
+  return current?.cycleId === cycle.cycleId && current.generation === cycle.generation;
+}
+
+const REVISABLE_AUTHORITY_CODES = new Set<AuthorityCode>([
+  "CURRENTNESS_UNVERIFIED",
+  "RECEIPT_REQUIRED",
+  "RECEIPT_CONTRADICTS_CLAIM",
+  "IN_FLIGHT_UNKNOWN",
+  "STALE_STATE",
+  "DRAFT_COMMITMENT_CONFLICT",
+  "EMPTY_COMMITMENTS_WITH_DRAFT",
+]);
+
+function revisable(codes: readonly string[]): boolean {
+  return codes.length > 0 && codes.every((code) => REVISABLE_AUTHORITY_CODES.has(code as AuthorityCode));
+}
+
+function uniqueAuthorityCodes(codes: readonly string[]): AuthorityCode[] {
+  return [...new Set(codes)].filter((code): code is AuthorityCode =>
+    REVISABLE_AUTHORITY_CODES.has(code as AuthorityCode),
+  );
 }
 
 /** Phase 02 kernel slice: assemble, perceive, run one Thought pass, validate, publish. */
@@ -320,9 +415,8 @@ export async function runCognitiveCycle(
   const payload = payloadRecord(event);
   const directive = rememberDirective(payload);
   const requestedCycleId = typeof payload.cycleId === "string" ? payload.cycleId : null;
-  let cycle = requestedCycleId ? getCycle(sidecar, requestedCycleId) : getCurrentCycle(sidecar, event.conversationId);
-  if (!cycle) {
-    cycle = admitCycle(sidecar, {
+  const existingCycle = requestedCycleId ? getCycle(sidecar, requestedCycleId) : getCurrentCycle(sidecar, event.conversationId);
+  let cycle = existingCycle ?? admitCycle(sidecar, {
       conversationId: event.conversationId,
       triggerKind: triggerKind(event.kind),
       triggerRef: typeof payload.triggerRef === "string" ? payload.triggerRef : event.id,
@@ -330,19 +424,34 @@ export async function runCognitiveCycle(
       authorityEpoch: typeof payload.authorityEpoch === "number" ? payload.authorityEpoch : 1,
       nowMs: deps.nowMs(),
     });
-  }
-  const triggerEvidence = typeof payload.evidenceRowId === "string"
+  let triggerEvidence = typeof payload.evidenceRowId === "string"
     ? getConversationEvidence(sidecar, payload.evidenceRowId)
     : null;
   if (triggerEvidence) cycle = appendCycleLogIds(sidecar, cycle.cycleId, [triggerEvidence.rowId], deps.nowMs());
   cycle = updateCycleState(sidecar, cycle.cycleId, "assembling", deps.nowMs());
   const admittedCycle = cycle;
-
-  const emitFailure = async (
-    reason: string,
-    attempts: number,
-    acceptedThoughtPasses: number,
-  ): Promise<KernelRunResult> => {
+  const existingPublication = getPublishedSettlementIdentity(
+    sidecar,
+    admittedCycle.cycleId,
+    admittedCycle.generation,
+  );
+  if (existingPublication) {
+    const counters = getThoughtAttemptCounters(sidecar, admittedCycle.cycleId, admittedCycle.generation);
+    return {
+      cycleId: admittedCycle.cycleId,
+      generation: admittedCycle.generation,
+      published: true,
+      outboxId: existingPublication.outboxId,
+      infrastructureNotice: null,
+      thoughtModelAttempts: counters.thoughtModelAttempts,
+      acceptedThoughtPasses: counters.acceptedThoughtPasses,
+      composeCancelledAttempts: counters.composeCancelledAttempts,
+      acceptedSettlements: 0,
+    };
+  }
+  const emitFailure = async (reason: string): Promise<KernelRunResult> => {
+    const counters = getThoughtAttemptCounters(sidecar, admittedCycle.cycleId, admittedCycle.generation);
+    if (!currentGenerationIs(sidecar, admittedCycle)) return resultWithCounters(admittedCycle.cycleId, admittedCycle.generation, null, counters);
     const notice = emitInfrastructureNotice(sidecar, {
       ownerId: typeof payload.ownerId === "string" ? payload.ownerId : admittedCycle.occupantId,
       channel: typeof payload.channel === "string" ? payload.channel : "discord",
@@ -357,33 +466,39 @@ export async function runCognitiveCycle(
     });
     if (deps.projectSystemNotice) await deps.projectSystemNotice(notice.noticeId);
     updateCycleState(sidecar, admittedCycle.cycleId, "silent", deps.nowMs());
-    return {
-      ...emptyResult(admittedCycle.cycleId, admittedCycle.generation, notice.noticeText, attempts),
-      acceptedThoughtPasses,
-    };
+    return resultWithCounters(admittedCycle.cycleId, admittedCycle.generation, notice.noticeText, counters);
   };
 
-  const ownerMessage = typeof payload.ownerMessage === "string"
+  let ownerMessage = typeof payload.ownerMessage === "string"
     ? payload.ownerMessage
     : triggerEvidence?.text ?? listConversationEvidence(sidecar, cycle.conversationId, { limit: 1 }).at(-1)?.text ?? "";
-  let observations: Observation[];
-  try {
-    const perceived = await adaptPerception({
-      cycleId: cycle.cycleId,
-      generation: cycle.generation,
-      ownerMessage,
-      runPerception: deps.runPerception,
-    });
-    observations = [...suppliedObservations(payload, cycle), ...perceived];
-  } catch {
-    observations = suppliedObservations(payload, cycle);
-  }
-  let totalAttempts = 0;
-  let acceptedThoughtPasses = 0;
-  let observationsForThought = observations;
+  const perceive = async (): Promise<Observation[]> => {
+    try {
+      const perceived = await adaptPerception({
+        cycleId: cycle.cycleId,
+        generation: cycle.generation,
+        ownerMessage,
+        runPerception: deps.runPerception,
+      });
+      return [...suppliedObservations(payload, cycle), ...perceived];
+    } catch {
+      return suppliedObservations(payload, cycle);
+    }
+  };
+  let observationsForThought = await perceive();
   let inFlight = listInFlight(sidecar, cycle.cycleId);
+  let counters = getThoughtAttemptCounters(sidecar, cycle.cycleId, cycle.generation);
+  let pass = counters.acceptedThoughtPasses + 1;
+  let structuralRetriesForPass = persistedMalformedRetries(sidecar, cycle.cycleId, cycle.generation, pass);
+  let authorityObjections: AuthorityCode[] = [];
 
-  for (let pass = 1; pass <= MAX_THOUGHT_PASSES; pass++) {
+  for (;;) {
+    counters = getThoughtAttemptCounters(sidecar, cycle.cycleId, cycle.generation);
+    structuralRetriesForPass = persistedMalformedRetries(sidecar, cycle.cycleId, cycle.generation, pass);
+    if (!currentGenerationIs(sidecar, cycle)) return resultWithCounters(cycle.cycleId, cycle.generation, null, counters);
+    if (counters.acceptedThoughtPasses >= MAX_THOUGHT_PASSES || counters.thoughtModelAttempts >= MAX_THOUGHT_MODEL_ATTEMPTS) {
+      return emitFailure("pass_exhausted");
+    }
     const input = buildThoughtInput({
       sidecar,
       cycle,
@@ -395,15 +510,52 @@ export async function runCognitiveCycle(
       inFlight,
       runtimeCondition: { thoughtUnavailable: false },
       rememberDirective: directive,
+      authorityObjections,
     });
     storeObservations(sidecar, input, deps.nowMs());
     cycle = updateCycleState(sidecar, cycle.cycleId, "thinking", deps.nowMs());
-    const invocation = await runThoughtModel(input, deps, { pass });
-    totalAttempts += invocation.attempts;
+    if (counters.thoughtModelAttempts >= MAX_THOUGHT_MODEL_ATTEMPTS) return emitFailure("pass_exhausted");
+    const controller = new AbortController();
+    const activeThought = registerActiveThought(cycle.conversationId, cycle.cycleId, cycle.generation, controller);
+    incrementThoughtAttemptCounter(sidecar, cycle.cycleId, cycle.generation, "thoughtModelAttempts");
+    const invocation = await runThoughtModel(input, deps, { pass, signal: activeThought.signal });
+    const cancellationReason = activeThought.cancellationReason;
+    activeThought.unregister();
     storeThoughtStep(sidecar, invocation.output, deps.nowMs());
 
+    if (cancellationReason || invocation.cancelled) {
+      if (cancellationReason === "compose" && currentGenerationIs(sidecar, cycle)) {
+        incrementThoughtAttemptCounter(sidecar, cycle.cycleId, cycle.generation, "composeCancelledAttempts");
+        cycle = getCycle(sidecar, cycle.cycleId) ?? cycle;
+        const latest = listConversationEvidence(sidecar, cycle.conversationId, { limit: 1000 }).at(-1);
+        triggerEvidence = latest ?? triggerEvidence;
+        ownerMessage = latest?.text ?? ownerMessage;
+        observationsForThought = await perceive();
+        inFlight = listInFlight(sidecar, cycle.cycleId);
+        authorityObjections = [];
+        counters = getThoughtAttemptCounters(sidecar, cycle.cycleId, cycle.generation);
+        pass = counters.acceptedThoughtPasses + 1;
+        structuralRetriesForPass = persistedMalformedRetries(sidecar, cycle.cycleId, cycle.generation, pass);
+        continue;
+      }
+      counters = getThoughtAttemptCounters(sidecar, cycle.cycleId, cycle.generation);
+      return resultWithCounters(cycle.cycleId, cycle.generation, null, counters);
+    }
+
+    if (invocation.malformed) {
+      if (structuralRetriesForPass < 2 && counters.thoughtModelAttempts < MAX_THOUGHT_MODEL_ATTEMPTS) {
+        structuralRetriesForPass += 1;
+        incrementThoughtAttemptCounter(sidecar, cycle.cycleId, cycle.generation, "structuralRetries");
+        continue;
+      }
+      return emitFailure("malformed");
+    }
+    if (invocation.unavailable) return emitFailure("unavailable");
+
+    incrementThoughtAttemptCounter(sidecar, cycle.cycleId, cycle.generation, "acceptedThoughtPasses");
+    counters = getThoughtAttemptCounters(sidecar, cycle.cycleId, cycle.generation);
+
     if (invocation.output.kind === "observation_request") {
-      acceptedThoughtPasses++;
       const packs = deps.loadAuthorityPacks();
       const verdict = deps.checkAuthority("proposal", {
         proposal: invocation.output.observationRequest,
@@ -411,8 +563,18 @@ export async function runCognitiveCycle(
         authorityEpoch: cycle.authorityEpoch,
       });
       if (!verdict.ok) {
-        return emitFailure(verdict.codes.join(",") || "authority_rejected", totalAttempts, acceptedThoughtPasses);
+        if (revisable(verdict.codes)) {
+          if (counters.authorityRevisions >= MAX_AUTHORITY_REVISIONS) return emitFailure("revision_exhausted");
+          authorityObjections = uniqueAuthorityCodes(verdict.codes);
+          incrementThoughtAttemptCounter(sidecar, cycle.cycleId, cycle.generation, "authorityRevisions");
+          pass += 1;
+          structuralRetriesForPass = persistedMalformedRetries(sidecar, cycle.cycleId, cycle.generation, pass);
+          continue;
+        }
+        return emitFailure(verdict.codes.join(",") || "authority_rejected");
       }
+      if (counters.observationRounds >= MAX_OBSERVATION_ROUNDS) return emitFailure("pass_exhausted");
+      incrementThoughtAttemptCounter(sidecar, cycle.cycleId, cycle.generation, "observationRounds");
       updateCycleState(sidecar, cycle.cycleId, "awaiting_operation", deps.nowMs());
       try {
         const observed = await deps.executeObservation(invocation.output.observationRequest);
@@ -431,13 +593,14 @@ export async function runCognitiveCycle(
           observations: [normalized],
         }, deps.nowMs());
       } catch {
-        return emitFailure("observation_unavailable", totalAttempts, acceptedThoughtPasses);
+        return emitFailure("observation_unavailable");
       }
+      pass += 1;
+      structuralRetriesForPass = persistedMalformedRetries(sidecar, cycle.cycleId, cycle.generation, pass);
       continue;
     }
 
     if (invocation.output.kind === "effect_proposal") {
-      acceptedThoughtPasses++;
       const packs = deps.loadAuthorityPacks();
       const verdict = deps.checkAuthority("proposal", {
         proposal: invocation.output.effectProposal,
@@ -445,31 +608,50 @@ export async function runCognitiveCycle(
         authorityEpoch: cycle.authorityEpoch,
       });
       if (!verdict.ok) {
-        return emitFailure(verdict.codes.join(",") || "effect_not_authorized", totalAttempts, acceptedThoughtPasses);
+        if (revisable(verdict.codes)) {
+          if (counters.authorityRevisions >= MAX_AUTHORITY_REVISIONS) return emitFailure("revision_exhausted");
+          authorityObjections = uniqueAuthorityCodes(verdict.codes);
+          incrementThoughtAttemptCounter(sidecar, cycle.cycleId, cycle.generation, "authorityRevisions");
+          pass += 1;
+          structuralRetriesForPass = persistedMalformedRetries(sidecar, cycle.cycleId, cycle.generation, pass);
+          continue;
+        }
+        return emitFailure(verdict.codes.join(",") || "effect_not_authorized");
       }
+      if (counters.effectRounds >= MAX_EFFECT_ROUNDS) return emitFailure("pass_exhausted");
+      incrementThoughtAttemptCounter(sidecar, cycle.cycleId, cycle.generation, "effectRounds");
       updateCycleState(sidecar, cycle.cycleId, "awaiting_operation", deps.nowMs());
       const proposal = invocation.output.effectProposal;
-      putInFlight(sidecar, {
-        effectId: proposal.effectId,
-        cycleId: proposal.cycleId,
-        generation: proposal.generation,
-        correlationId: invocation.output.correlationId,
-        idempotencyKey: proposal.idempotencyKey,
-        dispatchedAtMs: deps.nowMs(),
-        payload: proposal.request,
-      });
-      try {
-        const receipt = await deps.executeEffect(proposal);
-        recordEffectReceipt(sidecar, receipt);
-        inFlight = listInFlight(sidecar, cycle.cycleId);
-      } catch {
-        return emitFailure("effect_unavailable", totalAttempts, acceptedThoughtPasses);
+      const reloadDispatchState = () => {
+        const currentPacks = deps.loadAuthorityPacks();
+        const current = getCurrentCycle(sidecar, cycle.conversationId, { includeIdle: true });
+        return {
+          authorityEpoch: currentPacks.stateEpoch.authorityEpoch,
+          generation: current?.generation,
+          packs: currentPacks,
+        };
+      };
+      const dispatch = await dispatchEffect(
+        sidecar,
+        proposal,
+        { ...reloadDispatchState(), reload: reloadDispatchState },
+        deps.executeEffect,
+      );
+      if (!dispatch.dispatched) {
+        if (dispatch.codes.includes("STALE_GENERATION")) {
+          counters = getThoughtAttemptCounters(sidecar, cycle.cycleId, cycle.generation);
+          return resultWithCounters(cycle.cycleId, cycle.generation, null, counters);
+        }
+        return emitFailure(dispatch.codes.join(",") || "effect_unavailable");
       }
+      inFlight = listInFlight(sidecar, cycle.cycleId);
+      pass += 1;
+      structuralRetriesForPass = persistedMalformedRetries(sidecar, cycle.cycleId, cycle.generation, pass);
       continue;
     }
 
     if (invocation.output.kind !== "settlement") {
-      return emitFailure(invocation.output.reason, totalAttempts, acceptedThoughtPasses);
+      return emitFailure(invocation.output.reason);
     }
     const validation = validateThoughtSettlementDraft(invocation.output.settlement, {
       cycleId: cycle.cycleId,
@@ -479,7 +661,19 @@ export async function runCognitiveCycle(
       consumedEffectIds: inFlight.filter((item) => item.status === "receipted").map((item) => item.effectId),
     });
     if (!validation.ok) {
-      return emitFailure(validation.error, totalAttempts, acceptedThoughtPasses);
+      if (validation.kind === "stale") {
+        counters = getThoughtAttemptCounters(sidecar, cycle.cycleId, cycle.generation);
+        return resultWithCounters(cycle.cycleId, cycle.generation, null, counters);
+      }
+      if (validation.kind === "conflict" && revisable(validation.codes)) {
+        if (counters.authorityRevisions >= MAX_AUTHORITY_REVISIONS) return emitFailure("revision_exhausted");
+        authorityObjections = uniqueAuthorityCodes(validation.codes);
+        incrementThoughtAttemptCounter(sidecar, cycle.cycleId, cycle.generation, "authorityRevisions");
+        pass += 1;
+        structuralRetriesForPass = persistedMalformedRetries(sidecar, cycle.cycleId, cycle.generation, pass);
+        continue;
+      }
+      return emitFailure("malformed");
     }
     const packs = deps.loadAuthorityPacks();
     const authority = deps.checkAuthority("settlement", {
@@ -494,7 +688,15 @@ export async function runCognitiveCycle(
       authorityEpoch: cycle.authorityEpoch,
     });
     if (!authority.ok) {
-      return emitFailure(authority.codes.join(",") || "authority_rejected", totalAttempts, acceptedThoughtPasses);
+      if (revisable(authority.codes)) {
+        if (counters.authorityRevisions >= MAX_AUTHORITY_REVISIONS) return emitFailure("revision_exhausted");
+        authorityObjections = uniqueAuthorityCodes(authority.codes);
+        incrementThoughtAttemptCounter(sidecar, cycle.cycleId, cycle.generation, "authorityRevisions");
+        pass += 1;
+        structuralRetriesForPass = persistedMalformedRetries(sidecar, cycle.cycleId, cycle.generation, pass);
+        continue;
+      }
+      return emitFailure(authority.codes.join(",") || "authority_rejected");
     }
 
     let speechText = validation.draft.speech.surfaceDraft;
@@ -527,8 +729,18 @@ export async function runCognitiveCycle(
       observations: observationsForThought,
     });
     if (!fidelity.ok) {
-      if (pass < MAX_THOUGHT_PASSES && validation.draft.authority.revisionCount < 2) continue;
-      return emitFailure(fidelity.code, totalAttempts, acceptedThoughtPasses);
+      if (REVISABLE_AUTHORITY_CODES.has(fidelity.code as AuthorityCode)) {
+        if (counters.authorityRevisions >= MAX_AUTHORITY_REVISIONS) return emitFailure("revision_exhausted");
+        authorityObjections = uniqueAuthorityCodes([fidelity.code]);
+        incrementThoughtAttemptCounter(sidecar, cycle.cycleId, cycle.generation, "authorityRevisions");
+        pass += 1;
+        continue;
+      }
+      return emitFailure(fidelity.code);
+    }
+    if (!currentGenerationIs(sidecar, cycle)) {
+      counters = getThoughtAttemptCounters(sidecar, cycle.cycleId, cycle.generation);
+      return resultWithCounters(cycle.cycleId, cycle.generation, null, counters);
     }
     const finalText = validation.draft.speech.mode === "draft"
       ? renderForTransport(speechText ?? "")
@@ -537,7 +749,6 @@ export async function runCognitiveCycle(
       ...validation.draft,
       speech: { ...validation.draft.speech, surfaceDraft: speechText },
     }, randomUUID(), finalText);
-    acceptedThoughtPasses++;
     const publication = publishSemanticTransaction(sidecar, settlement, {
       nowMs: deps.nowMs(),
       triggerKind: cycle.triggerKind,
@@ -546,7 +757,8 @@ export async function runCognitiveCycle(
       deliveryIntent: deliveryIntentFor(cycle, payload, "licensed_speech"),
     });
     if (!publication.published) {
-      return { ...emptyResult(cycle.cycleId, cycle.generation, null, totalAttempts), acceptedThoughtPasses };
+      counters = getThoughtAttemptCounters(sidecar, cycle.cycleId, cycle.generation);
+      return resultWithCounters(cycle.cycleId, cycle.generation, null, counters);
     }
     if (publication.outboxId !== null) await deps.projectOutbox(publication.outboxId);
     if (directive && deps.origin !== "shadow") {
@@ -569,11 +781,10 @@ export async function runCognitiveCycle(
       published: true,
       outboxId: publication.outboxId,
       infrastructureNotice: null,
-      thoughtModelAttempts: totalAttempts,
-      acceptedThoughtPasses,
-      composeCancelledAttempts: 0,
+      thoughtModelAttempts: counters.thoughtModelAttempts,
+      acceptedThoughtPasses: counters.acceptedThoughtPasses,
+      composeCancelledAttempts: counters.composeCancelledAttempts,
       acceptedSettlements: publication.replayed ? 0 : 1,
     };
   }
-  return emitFailure("pass_exhausted", totalAttempts, acceptedThoughtPasses);
 }

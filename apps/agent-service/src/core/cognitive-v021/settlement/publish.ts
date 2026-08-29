@@ -33,6 +33,11 @@ export type PublicationResult = {
   outboxId: number | null;
 };
 
+export type PublishedSettlementIdentity = {
+  settlementId: string;
+  outboxId: number | null;
+};
+
 type DbRow = Record<string, unknown>;
 function stringValue(value: unknown, fallback = ""): string { return typeof value === "string" ? value : fallback; }
 function numberValue(value: unknown, fallback = 0): number { const n = typeof value === "number" ? value : Number(value); return Number.isFinite(n) ? n : fallback; }
@@ -77,8 +82,17 @@ function applyNomination(db: DatabaseSync, nomination: DurableNomination): void 
   enqueueDurableNomination(db, nomination);
 }
 
-function existingSettlement(db: DatabaseSync, settlementId: string): DbRow | undefined {
-  return db.prepare("SELECT settlement_id, cycle_id, generation FROM settlements WHERE settlement_id = ?").get(settlementId) as DbRow | undefined;
+function existingSettlementForCycleGeneration(
+  db: DatabaseSync,
+  cycleId: string,
+  generation: number,
+): DbRow | undefined {
+  return db.prepare(
+    `SELECT settlement_id, cycle_id, generation
+       FROM settlements
+      WHERE cycle_id = ? AND generation = ?
+      LIMIT 1`,
+  ).get(cycleId, generation) as DbRow | undefined;
 }
 
 export function publishSemanticTransaction(
@@ -89,11 +103,16 @@ export function publishSemanticTransaction(
   const nowMs = options.nowMs ?? Date.now();
   db.exec("BEGIN IMMEDIATE");
   try {
-    const existing = existingSettlement(db, settlement.settlementId);
+    const existing = existingSettlementForCycleGeneration(
+      db,
+      settlement.cycleId,
+      settlement.generation,
+    );
     if (existing) {
-      const outbox = getSpeechOutboxBySettlementUnsafe(db, settlement.settlementId);
+      const existingSettlementId = stringValue(existing.settlement_id, settlement.settlementId);
+      const outbox = getSpeechOutboxBySettlementUnsafe(db, existingSettlementId);
       db.exec("COMMIT");
-      return { published: true, replayed: true, settlementId: settlement.settlementId, outboxId: outbox };
+      return { published: true, replayed: true, settlementId: existingSettlementId, outboxId: outbox };
     }
     const conversationId = awaitlessConversation(settlement, db);
     const current = currentGeneration(db, conversationId);
@@ -168,4 +187,20 @@ function awaitlessConversation(settlement: PublishedCognitiveSettlement, db: Dat
 function getSpeechOutboxBySettlementUnsafe(db: DatabaseSync, settlementId: string): number | null {
   const row = db.prepare("SELECT outbox_id FROM speech_outbox WHERE settlement_id = ?").get(settlementId) as DbRow | undefined;
   return row?.outbox_id == null ? null : numberValue(row.outbox_id);
+}
+
+/** Read the durable publication identity without applying any semantic delta. */
+export function getPublishedSettlementIdentity(
+  db: DatabaseSync,
+  cycleId: string,
+  generation: number,
+): PublishedSettlementIdentity | null {
+  const row = existingSettlementForCycleGeneration(db, cycleId, generation);
+  if (!row) return null;
+  const settlementId = stringValue(row.settlement_id);
+  if (!settlementId) return null;
+  return {
+    settlementId,
+    outboxId: getSpeechOutboxBySettlementUnsafe(db, settlementId),
+  };
 }

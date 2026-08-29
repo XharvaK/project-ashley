@@ -35,6 +35,7 @@ import {
   evaluateProactiveEligibility,
 } from "./core/agency/proactive-eligibility.js";
 import type { KernelDeps, Observation } from "./core/cognitive-v021/types.js";
+import { createV021LiveOperationExecutors } from "./core/cognitive-v021/dispatch/live-operations.js";
 
 export async function serveAgent(manager: AgentManager): Promise<void> {
   await manager.init();
@@ -47,6 +48,10 @@ export async function serveAgent(manager: AgentManager): Promise<void> {
     const nuclear = manager.core.getDatabase();
     const ownerId = env.memoryOwnerId || env.discordOwnerId || "default";
     const capabilityReality = getCapabilityReality(nuclear);
+    const liveOperationExecutors = createV021LiveOperationExecutors({
+      nuclear,
+      ownerId,
+    });
     const projector = createOutboxProjector(cognitiveSidecar, nuclear, {
       gate: (deliveryIntent) => {
         if (deliveryIntent.deliveryLane !== "proactive") return { ok: true };
@@ -73,8 +78,8 @@ export async function serveAgent(manager: AgentManager): Promise<void> {
         ...input,
         runPerception: async () => [],
       }),
-      executeObservation: async () => { throw new Error("observation_unavailable"); },
-      executeEffect: async () => { throw new Error("effect_unavailable"); },
+      executeObservation: liveOperationExecutors.executeObservation,
+      executeEffect: liveOperationExecutors.executeEffect,
       checkAuthority,
       loadAuthorityPacks: () => loadAuthorityPacks(cognitiveSidecar, { capability: getCapabilityReality(nuclear) }),
       expressionEnabled: false,

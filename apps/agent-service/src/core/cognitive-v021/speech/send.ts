@@ -18,6 +18,9 @@ export async function sendOutbox(
 ): Promise<string[]> {
   const row = getSpeechOutbox(db, outboxId);
   if (!row) throw new Error("speech_outbox_missing");
+  if (row.suppressed || row.sendStatus === "suppressed" || row.sendStatus === "suppressed_shadow") {
+    throw new Error("speech_outbox_suppressed");
+  }
   if (row.discordMessageIds.length > 0 || row.sendStatus === "delivered") return row.discordMessageIds;
   if (row.nuclearReservationId == null) throw new Error("speech_outbox_not_projected");
   updateOutboxStatus(db, outboxId, "sending");
@@ -40,6 +43,9 @@ export async function sendSystemOutbox(
 ): Promise<string> {
   const notice = getSystemNotice(db, noticeId);
   if (!notice) throw new Error("system_notice_missing");
+  if (notice.sendStatus === "suppressed" || notice.sendStatus === "suppressed_shadow") {
+    throw new Error("system_notice_suppressed");
+  }
   if (notice.discordMessageId) return notice.discordMessageId;
   if (notice.nuclearReservationId == null) throw new Error("system_notice_not_projected");
   updateSystemNoticeStatus(db, noticeId, "sending");

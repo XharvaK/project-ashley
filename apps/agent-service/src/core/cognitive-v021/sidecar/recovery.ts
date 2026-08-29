@@ -1,4 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
+import { appendInboxEvent } from "../cycle/inbox.js";
+import { recoverInFlight } from "../effect/recovery.js";
 
 export type CognitiveSidecarRecoveryResult = {
   inboxClaimsRecovered: number;
@@ -42,6 +44,33 @@ export function recoverCognitiveSidecar(
           AND nuclear_reservation_id IS NULL`,
     ).run();
     result.noticeProjectionsRequeued = Number(notices.changes);
+
+    // An external effect may have crossed its process boundary before the
+    // crash. Mark it unknown and leave a durable, reference-only recovery
+    // event for Thought. The deterministic event id makes reopen idempotent;
+    // the effect is never redispatched merely because the process restarted.
+    for (const effect of recoverInFlight(db, nowMs)) {
+      if (effect.status !== "unknown") continue;
+      const cycle = db.prepare(
+        "SELECT conversation_id FROM cycle_records WHERE cycle_id = ? LIMIT 1",
+      ).get(effect.cycleId) as { conversation_id?: unknown } | undefined;
+      if (typeof cycle?.conversation_id !== "string" || !cycle.conversation_id) continue;
+      appendInboxEvent(db, {
+        id: `recovery:${effect.effectId}`,
+        conversationId: cycle.conversation_id,
+        kind: "recovery",
+        payload: {
+          cycleId: effect.cycleId,
+          generation: effect.generation,
+          triggerRef: effect.effectId,
+          effectId: effect.effectId,
+          recoveryEffectId: effect.effectId,
+          correlationId: effect.correlationId,
+          idempotencyKey: effect.idempotencyKey,
+        },
+        createdAtMs: nowMs,
+      });
+    }
     db.exec("COMMIT");
     return result;
   } catch (error) {

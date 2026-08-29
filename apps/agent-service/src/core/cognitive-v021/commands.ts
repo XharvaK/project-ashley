@@ -413,6 +413,7 @@ export function confirmV021Forget(
   );
   const sidecarResult = applyV021ForgetTargets(sidecar, sidecarTargets, {
     nowMs: input.nowMs,
+    delivery: { nuclearDb: nuclear, ownerId },
   });
   const nuclearResult = compatibilityTargets.length > 0
     ? applyForgetTargets(nuclear, ownerId, compatibilityTargets, {
