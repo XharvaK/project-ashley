@@ -1,6 +1,6 @@
 # 04 — Sidecar v1 storage and dispatch contract
 
-**Packet R3.** Sidecar schema version is **1** through candidate freeze. Phase 00 applies this entire DDL. Later phases **use** tables; they do not add unversioned tables.
+**Packet R4.** Sidecar schema version is **1** through candidate freeze. Phase 00 applies this entire DDL. Later phases **use** tables; they do not add unversioned tables.
 
 Canonical types: [02_IMPLEMENTATION_SPECIFICATION.md](02_IMPLEMENTATION_SPECIFICATION.md). If this file and §W.1 disagree, that is a HARD BLOCKER — they must be identical SQL.
 
@@ -42,9 +42,15 @@ CREATE TABLE IF NOT EXISTS conversation_evidence_log (
 );
 CREATE INDEX IF NOT EXISTS idx_evidence_conversation_created
   ON conversation_evidence_log (conversation_id, created_at_ms);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_evidence_discord_id
-  ON conversation_evidence_log (conversation_id, json_extract(discord_message_ids_json, '$[0]'))
-  WHERE json_array_length(discord_message_ids_json) >= 1;
+
+CREATE TABLE IF NOT EXISTS conversation_evidence_discord_ids (
+  discord_message_id TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL,
+  lineage_id TEXT NOT NULL,
+  ordinal INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_evidence_discord_lineage
+  ON conversation_evidence_discord_ids (lineage_id);
 
 CREATE TABLE IF NOT EXISTS inbox_events (
   id TEXT PRIMARY KEY,
@@ -174,7 +180,8 @@ CREATE TABLE IF NOT EXISTS system_notice_outbox (
   send_status TEXT NOT NULL,
   nuclear_reservation_id INTEGER,
   discord_message_id TEXT,
-  origin TEXT NOT NULL
+  origin TEXT NOT NULL,
+  delivery_intent_json TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS in_flight_effects (
@@ -186,10 +193,26 @@ CREATE TABLE IF NOT EXISTS in_flight_effects (
   replay_safe INTEGER NOT NULL,
   state TEXT NOT NULL,
   payload_json TEXT NOT NULL,
-  dispatched_at_ms INTEGER
+  dispatched_at_ms INTEGER,
+  origin_job_id TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_in_flight_idempotency
   ON in_flight_effects (idempotency_key);
+
+CREATE TABLE IF NOT EXISTS effect_receipts (
+  receipt_id TEXT PRIMARY KEY,
+  effect_id TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  outcome TEXT NOT NULL,
+  claims_json TEXT NOT NULL,
+  at_ms INTEGER NOT NULL,
+  data_classification TEXT NOT NULL,
+  secret_omitted INTEGER NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_effect_receipts_effect
+  ON effect_receipts (effect_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_effect_receipts_idempotency
+  ON effect_receipts (idempotency_key);
 
 CREATE TABLE IF NOT EXISTS durable_nominations (
   nomination_id TEXT PRIMARY KEY,
@@ -219,6 +242,9 @@ CREATE TABLE IF NOT EXISTS sidecar_memory_supports (
   support_id TEXT PRIMARY KEY,
   assertion_key TEXT NOT NULL,
   source TEXT NOT NULL,
+  provenance TEXT NOT NULL,
+  source_architecture_epoch TEXT NOT NULL,
+  source_ref TEXT,
   settlement_id TEXT,
   evidence_lineage_id TEXT,
   observation_id TEXT,
@@ -249,7 +275,8 @@ CREATE TABLE IF NOT EXISTS causal_ledger (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   cycle_id TEXT NOT NULL,
   generation INTEGER NOT NULL,
-  payload_json TEXT NOT NULL
+  payload_json TEXT NOT NULL,
+  thought_unavailable INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS thought_attempt_counters (
@@ -266,15 +293,15 @@ CREATE TABLE IF NOT EXISTS thought_attempt_counters (
 );
 ```
 
-Meta insert on first open: `schema_version=1`, `architecture_epoch='v0.2.1'`, `implementation_spec_version='0.2.1.r3'`, `thought_contract_version=1`, `authority_epoch=1`.
+Meta insert on first open: `schema_version=1`, `architecture_epoch='v0.2.1'`, `implementation_spec_version='0.2.1.r4'`, `thought_contract_version=1`, `authority_epoch=1`.
 
 `authority_epoch` advances in the same sidecar transaction that mutates a mutable Authority pack (withdrawal, capability snapshot used for dispatch). Reader: `loadAuthorityPacks` reads meta. No separate table.
 
-There is **no** LearnedSelf write table in v1. Option B: compact slice is injected/read-only; automatic accumulation is post-cutover.
+There is **no** LearnedSelf write table in v1. Option B: slice is empty or already-admitted (`live=true`) only; quarantined rows are not Thought-influential; automatic accumulation is post-cutover.
 
 ### V1 table inventory (all created in Phase 00)
 
-`cognitive_sidecar_meta`, `conversation_evidence_log`, `inbox_events`, `cycle_records`, `thought_steps`, `working_context_items`, `concerns`, `mind_occupancy`, `future_triggers`, `observation_subscriptions`, `observations`, `speech_outbox`, `system_notice_outbox`, `in_flight_effects`, `durable_nominations`, `sidecar_memory_assertions`, `sidecar_memory_supports`, `admission_log`, `settlements`, `causal_ledger`, `thought_attempt_counters`.
+`cognitive_sidecar_meta`, `conversation_evidence_log`, `conversation_evidence_discord_ids`, `inbox_events`, `cycle_records`, `thought_steps`, `working_context_items`, `concerns`, `mind_occupancy`, `future_triggers`, `observation_subscriptions`, `observations`, `speech_outbox`, `system_notice_outbox`, `in_flight_effects`, `effect_receipts`, `durable_nominations`, `sidecar_memory_assertions`, `sidecar_memory_supports`, `admission_log`, `settlements`, `causal_ledger`, `thought_attempt_counters`.
 
 Later phases use these tables. They must not add unversioned tables. Sidecar schema version stays 1 through candidate freeze.
 
@@ -286,7 +313,8 @@ Later phases use these tables. They must not add unversioned tables. Sidecar sch
 |---|---|---|---|---|---|---|---|---|---|---|
 | CycleRecord | cycleId | no | cycle_records.cycle_id | fence | kernel | 00 DDL / 01 writer | 01 | yes | new cycle row | 1.x fence |
 | ConversationEvidenceRecord | lineageId+version | no | conversation_evidence_log.lineage_id, version | appendOwnerUtterance / delivery-truth / shadow legacy mirror | ThoughtInput | 00/01 | 01 | yes | version+1 same lineage | 1.x edit |
-| ConversationEvidenceRecord | dataClassification | no | data_classification | ingress privacy | Thought (sees placeholder) | 01 | 01 | yes | n/a | privacy tests |
+| ConversationEvidenceDiscordId | discordMessageId | no | conversation_evidence_discord_ids PK | same writers | ingress idempotency | 00/01 | 01 | yes | mapping stays on edit | 1.8+ |
+| ConversationEvidenceRecord | dataClassification | no | data_classification (`ordinary`\|`sensitive`\|`never_public`\|`secret`) | ingress privacy | Thought (sees placeholder) | 01 | 01 | yes | n/a | 4-class round-trip |
 | InboxEvent | status | no | inbox_events.status | ingress / consumer | consumer | 01 | 01, 08 loop | yes | n/a | restart claim |
 | ThoughtSettlementDraft | (JSON, not stored as published) | n/a | thought_steps.payload_json | parse | kernel | 02 | 02 | yes | stale ignored | parse tests |
 | PublishedCognitiveSettlement | finalLicensedText | yes if mode none | settlements.payload_json | publish txn | ledger/harness | 02 | 02 | yes | new generation | C.2 |
@@ -298,15 +326,16 @@ Later phases use these tables. They must not add unversioned tables. Sidecar sch
 | Observation | observationId | no | observations.observation_id | perception/exec | Thought | 02/04 | 04 | yes | n/a | 4.x |
 | EffectProposal | generation | no | in_flight payload + thought_steps | Thought step | dispatch | 04 | 04 | yes | STALE_GENERATION | 4.race |
 | InFlightRecord | idempotencyKey | no | in_flight_effects.idempotency_key UNIQUE | dispatch | recovery | 04 | 04 | yes | unique no-op | 4.x |
-| EffectReceipt | secret-filtered payload | n/a | observations or payload_json | executor | Thought | 04 | 04 | yes | n/a | privacy |
+| InFlightRecord | originJobId | yes | in_flight_effects.origin_job_id | dispatch | recovery | 04 | 04 | yes | n/a | 4.x |
+| EffectReceipt | receiptId | no | effect_receipts.receipt_id | executor | AuthorityPacks.receipt | 04 | 04 | yes | unique effect_id | 4.receipt restart |
 | DurableNomination | supersedesAssertionKey, concernId, memoryKind | yes / yes / no | durable_nominations.* | publish | admission | 06 | 06 | yes | fence | 6.2 |
 | MemoryAssertion | memoryKind | no | sidecar_memory_assertions.memory_kind | admission | views | 06 | 06 | yes | lineage parent | 6.x |
-| MemorySupport | supportId | no | sidecar_memory_supports.support_id | admission | views | 06 | 06 | yes | accumulate | 6.x |
-| LearnedSelf | — | — | **none in v1** | none | injected slice | — | tests inject | n/a | post-cutover | 6.7 Option B |
+| MemorySupport | provenance | no | sidecar_memory_supports.provenance | admission / import | views | 06 | 06 | yes | accumulate | 6.x |
+| LearnedSelf | — | — | **none in v1** | none | empty or live=true only | — | tests inject admitted | n/a | post-cutover | 6.7 Option B |
 | SpeechOutboxRow | nuclearReservationId | yes until project | speech_outbox.nuclear_reservation_id | projector | reconcile | 05 | 05 | yes | suppress | 5.x |
-| DeliveryIntent | JSON | no | speech_outbox.delivery_intent_json | publish | projector/gate | 05 | 05 | yes | n/a | 5.proactive |
-| CausalLedgerEntry | payload | no | causal_ledger.payload_json | publish | observe | 02 | 02 | yes | n/a | harness |
-| SystemNoticeOutbox | notice_id | no | system_notice_outbox | emit | projector | 05 | 05 | yes | idempotent | 5.notice |
+| DeliveryIntent | JSON | no | speech_outbox.delivery_intent_json / system_notice_outbox.delivery_intent_json | publish / notice | projector/gate | 05 | 05 | yes | n/a | 5.proactive |
+| CausalLedgerEntry | thoughtUnavailable | no | causal_ledger.thought_unavailable | notice path | observe | 02/05 | 05 | yes | n/a | 5.notice |
+| SystemNoticeOutbox | deliveryIntent | no | system_notice_outbox.delivery_intent_json | emit | projector | 05 | 05 | yes | idempotent | 5.notice |
 
 No type field may lack a column. No prose state name may be absent from its union.
 

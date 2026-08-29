@@ -53,7 +53,7 @@ Sandbox executors injected as `KernelDeps`: `executeProjectInspectionV2`, `execu
 
 ## DATABASE / MIGRATION CHANGES
 
-`authority_epoch` integer on sidecar meta, bump on pack mutation in tests.
+`authority_epoch` integer on sidecar meta, bump on pack mutation in tests. Writers for `effect_receipts` and `in_flight_effects.origin_job_id` (tables already in v1 DDL).
 
 ## LEGACY COMPATIBILITY
 
@@ -132,6 +132,13 @@ Live honesty surgery remains on production.
 - [ ] Generation N proposes effect; owner correction preempts; executor must not run N (`STALE_GENERATION`)
 - [ ] Nested EffectProposal generation mismatch vs envelope → no dispatch
 - [ ] Commit: `feat(cognitive-v021): stale generation cannot dispatch effects`
+
+### Task 4.13 Durable EffectReceipt store
+
+- [ ] Receipt written to `effect_receipts` (not observations)
+- [ ] Restart: `loadAuthorityPacks().receipt.receiptsByEffectId` returns the same row; duplicate dispatch no-ops
+- [ ] `originJobId` nullable on in_flight; sandbox job linked when applicable
+- [ ] Commit: `feat(cognitive-v021): persist EffectReceipt for Authority and recovery`
 
 ## CAUSAL ACCEPTANCE TESTS
 

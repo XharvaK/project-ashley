@@ -2,7 +2,7 @@
 
 **When:** After Phase 08 candidate freeze. Phase 09 executes this file. **No source changes.**
 
-**Protocol revision:** `r3` (R3 contracts + quota-aware shadow). Architecture laws are unchanged.
+**Protocol revision:** `r4` (R4 data-plane contracts). Architecture laws are unchanged.
 
 **Result vocabulary:** `PASS` or `FAIL`. There is no `PASS_WITH_NOTES` that bypasses a hard cognitive invariant.
 
@@ -43,8 +43,8 @@ Every artifact binds:
 | `candidateSha` | freeze source commit; runtime freeze file **points to** it |
 | `selectedBaselineSha` | OWNER_BASELINE_GATE |
 | `architectureVersion` | `v0.2.1` |
-| `implementationSpecVersion` | `0.2.1.r3` |
-| `qualificationProtocolRevision` | `r3` |
+| `implementationSpecVersion` | `0.2.1.r4` |
+| `qualificationProtocolRevision` | `r4` |
 | `sidecarSchemaVersion` | `1` |
 | `thoughtContractVersion` | `1` |
 | `modelRoute` / occupant | live `thought` route + resolved occupant id (no secrets) |
@@ -345,7 +345,7 @@ RESULT: PASS | FAIL
 QUALIFIED_SHA: <sha>
 CANDIDATE_SHA: <sha>
 selectedBaselineSha: <sha>
-qualificationProtocolRevision: r3
+qualificationProtocolRevision: r4
 ...identity table...
 
 ARCHITECTURE_CORPUS_RESULT: PASS | FAIL

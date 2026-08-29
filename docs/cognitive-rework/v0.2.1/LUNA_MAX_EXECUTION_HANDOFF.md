@@ -4,13 +4,14 @@ You are implementing Project Ashley Cognitive Architecture v0.2.1 using this pac
 
 ## Read order
 
-Follow [README.md](README.md). **STOP** if R3 independent review has not PASSed. **STOP** if [OWNER_BASELINE_GATE.md](OWNER_BASELINE_GATE.md) is unset.
+Follow [README.md](README.md). **STOP** if R4 independent review has not PASSed. **STOP** if [OWNER_BASELINE_GATE.md](OWNER_BASELINE_GATE.md) `OWNER_SELECTED_SOURCE_BASELINE_SHA` is unset. **STOP** if `IMPLEMENTATION_START_SHA` is unset (perform packet bind first).
 
 ## Repository / baseline
 
 - Architecture-reference inspection SHA: `c7c81c4f5ebcf9e6d67d10990d76cfda4e21c28a` (may be detached).
-- Implementation SHA: **owner-selected only**. Do not implement from a detached historical SHA.
-- After selection: revalidate the source map. HARD BLOCKER 4 on material seam drift.
+- `OWNER_SELECTED_SOURCE_BASELINE_SHA`: **owner-selected only**.
+- `IMPLEMENTATION_START_SHA`: docs-only bind of `APPROVED_PACKET_REVIEW_SHA` onto that baseline ([OWNER_BASELINE_GATE.md](OWNER_BASELINE_GATE.md)). Do not cherry-pick. Do not implement from a detached historical SHA that lacks the packet.
+- After bind: revalidate production source against the **source baseline**. HARD BLOCKER 4 on material seam drift.
 - Do not commit untracked junk at repo root.
 
 ## Target architecture
@@ -52,6 +53,8 @@ Master plan list 1–23. Preserve evidence. Do not improvise architecture.
 - Rapid messages: `thoughtModelAttempts` may exceed 1; only accepted generation publishes.
 - Published speech is `finalLicensedText` / outbox `licensedText`.
 - Sidecar schema version is 1. Authority field is `relational.withdrawalActive`.
+- `DataClassification` is imported from `privacy/classification.ts` (`ordinary` \| `sensitive` \| `never_public` \| `secret`).
+- Durable Memory authority is sidecar assertions+supports. `/forget` must mutate that plane.
 
 ## Qualification identity
 

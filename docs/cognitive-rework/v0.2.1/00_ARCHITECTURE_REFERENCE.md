@@ -701,7 +701,7 @@ Prior v0.2 suite (HY4, I meant HY3, teaching, what did you just say, the second 
 **S21.** Unlicensed substantive commitments may not appear in speech. Draft/commitment conflict: no delivery. Empty commitments + plausible prose is failure.  
 **S22.** One semantic fact or concern key, one lineage. Occupancy, triggers, and subscriptions **point**; they do not copy meaning.  
 **S23.** No downstream layer may receive richer semantic evidence than Thought and reinterpret it.  
-**S24.** No hybrid cognitive turn. No dual-write of **production** meaning. Shadow sidecar is not production authority.  
+**S24.** No hybrid cognitive turn. No dual-write of **production** meaning. Shadow sidecar is not production authority. Nuclear `resolveActiveThread` is a narrow evidence/executive conversation-identity write, not a Memory/settlement writer.  
 **S25.** Database existence is not continuity entitlement.  
 **S26.** Right text through the wrong owner is failure.  
 **S27.** Cycles are fenced: inbox, one active generation, compose/preempt, atomic semantic transaction, OCC, authorityEpoch, dispatch-time recheck, idempotent in_flight effects, orphan recovery, nomination fence, speech outbox, delivery reservation, recovery suppression.  

@@ -1,43 +1,47 @@
 # Owner Gate A — Implementation baseline selection
 
-**Status:** `UNSET` — still a later human gate. Packet R3 must pass independent review **before** Doc fills this file.
+**Status:** `UNSET` — still a later human gate. Packet R4 must pass independent review **before** Doc fills this file.
 
-Quota-aware Q3/Q5 and R3 contract fixes do **not** fill this gate and do **not** choose M / C / Other.
+R4 contract fixes do **not** fill this gate and do **not** choose M / C / Other.
 
-**Luna must not begin Phase 00 implementation until this file records an owner-selected SHA.** Filling this file is an owner act. Luna must not guess.
+**Luna must not begin Phase 00 kernel code until:**
 
-After selection, Luna revalidates [`01_SOURCE_BASELINE_AND_MIGRATION_MAP.md`](01_SOURCE_BASELINE_AND_MIGRATION_MAP.md) against that exact SHA before writing kernel code. Material seam drift is HARD BLOCKER 4 until the map is reconciled.
+1. This file records `OWNER_SELECTED_SOURCE_BASELINE_SHA` (owner act).
+2. Luna has performed the **mechanical packet-binding** step below and recorded `IMPLEMENTATION_START_SHA`.
+
+Luna must not guess the source baseline. Luna **may** perform packet-binding only after Doc records the source baseline.
+
+---
+
+## Three identities (never collapse)
+
+| Identity | Owner | Meaning |
+|---|---|---|
+| `APPROVED_PACKET_REVIEW_SHA` | Independent review PASS, then recorded here | Exact packet/governance tree that passed review |
+| `OWNER_SELECTED_SOURCE_BASELINE_SHA` | Doc (Gate A) | Exact production-line source SHA to implement on |
+| `IMPLEMENTATION_START_SHA` | Luna mechanical bind after Gate A | Docs-only commit that places the approved packet onto a branch created from the source baseline |
+
+Later identities (`CANDIDATE_SHA`, `QUALIFIED_SHA`, `DEPLOYED_SHA`) are not this gate.
+
+If Doc selects `9d50740` and Luna checks out **only** that SHA, the accepted packet is **not** in that tree. Do not invent a merge. Follow **Packet binding** below.
 
 ---
 
 ## Observed git facts (verified 2026-08-29)
 
-Worktree at inspection:
+Worktree at architecture inspection / packet-branch parent:
 
 | Fact | Value |
 |---|---|
-| `git rev-parse HEAD` | `c7c81c4f5ebcf9e6d67d10990d76cfda4e21c28a` |
-| Symbolic HEAD | **detached** at `c7c81c4` |
-| `origin/master` | `9d50740fb2709d6870e8d521cc8bff0d080cabf4` |
-| Merge-base(HEAD, origin/master) | `c7c81c4f5ebcf9e6d67d10990d76cfda4e21c28a` |
-| Ancestry | `c7c81c4` **is an ancestor of** `origin/master` |
-| Local `master` | `9d50740` tracking `origin/master` |
-| Worktree | dirty / many untracked files (not source) |
+| Architecture-reference SHA | `c7c81c4f5ebcf9e6d67d10990d76cfda4e21c28a` |
+| Packet R3 (superseded) | `de1f0fab20fd2faa56609ef07630075bf78fad7f` on `review/cognitive-v021-packet-r2` |
+| Recommended production-line tip | `9d50740fb2709d6870e8d521cc8bff0d080cabf4` (`origin/master`) |
+| Merge-base (packet parent, master) | `c7c81c4f5ebcf9e6d67d10990d76cfda4e21c28a` |
+| Divergence | packet review branch ahead by packet-only docs commits; production line ahead by six observer/docs commits |
 
-### Commits on `origin/master` not in `c7c81c4` (six)
+Cognitive Discord / Thought / delivery / runtime seams (`apps/discord-bot/src/**` chat path, `runtime.ts`, `thought.ts`, `delivery/store.ts`, `mistral-client.ts`) are **unchanged** between `c7c81c4` and `9d50740` except `privacy/secrets.ts`.
 
-| SHA | Subject | Touch |
-|---|---|---|
-| `7bca445cb66b8735c2ca303df6be1500ccc680ad` | docs(observer): canonicalize field observation protocol | docs |
-| `ea3673dc8332700bd241cff36ed052aaff8311e7` | docs(observer): canonicalize field observation protocol | `Ashley_Field_Observation_Protocol.md` |
-| `a93471f911cf762d61c0355b7eda6f0e3615890a` | docs(observer): canonicalize field observation protocol | architecture index |
-| `3d788f85b661c5b7649a5d88acdfd6a3e6c74693` | feat(observer): add read-only field observation pipeline | `apps/observer-exporter/**`, `packages/privacy-core/**`, `apps/agent-service/src/core/privacy/secrets.ts` (+ test), `package.json` |
-| `678758841ec574dc35596b78c050760b611db43a` | fix(observer): run exporter from observer tools checkout | observer systemd + test |
-| `9d50740fb2709d6870e8d521cc8bff0d080cabf4` | fix(observer): enforce read-only service custody | observer systemd + test |
-
-Cognitive Discord / Thought / delivery / runtime seams (`apps/discord-bot/src/**` chat path, `runtime.ts`, `thought.ts`, `delivery/store.ts`, `mistral-client.ts`) are **unchanged** between these two SHAs except `privacy/secrets.ts` (credential-shape helper used by delivery claim).
-
-Architecture-reference SHA `c7c81c4` remains the packet’s **inspected** source map SHA until revalidation.
+Architecture-reference SHA `c7c81c4` remains the packet’s **inspected** source map SHA until revalidation against `OWNER_SELECTED_SOURCE_BASELINE_SHA`.
 
 ---
 
@@ -47,27 +51,67 @@ Architecture-reference SHA `c7c81c4` remains the packet’s **inspected** source
 
 **Relationship to `c7c81c4`:** verified descendant; six observer/docs commits.
 
-**Risk of selecting:** production-line history includes the observer exporter and a `secrets.ts` refactor. Source map must be revalidated against `secrets.ts` and any new reserved paths. Lowest risk of implementing from a detached historical SHA and then fighting merge onto master.
+**Risk of selecting:** production-line history includes the observer exporter and a `secrets.ts` refactor. Source map must be revalidated against `secrets.ts` and any new reserved paths. Lowest risk of implementing off a detached historical SHA.
 
-**Risk of not selecting:** Luna implements from detached `c7c81c4`, then origin/master observer work must be merged later.
+**Packet note:** R2–R4 packet files are **not** on this SHA. Binding (below) is required.
 
 ### Choice C — detached architecture SHA `c7c81c4f5ebcf9e6d67d10990d76cfda4e21c28a`
 
-**Relationship:** this is the architecture-reference inspection SHA. Not current `origin/master`.
+**Relationship:** architecture-reference inspection SHA. Not current `origin/master`.
 
 **Risk of selecting:** implementing off the production-line tip. Observer pipeline and `secrets.ts` changes are absent. Later merge onto master is required. Forbidden as a silent default.
 
+Binding is still required (packet commits are not *inside* `c7c81c4` either).
+
 ### Choice Other
 
-Owner names a different SHA that **must** be a verified descendant of production-line history (HARD BLOCKER 3 if not). Luna records ancestry before Phase 00.
+Owner names a different SHA that **must** be a verified descendant of production-line history (HARD BLOCKER 3 if not). Luna records ancestry before binding.
 
 ---
 
-## Owner record (fill before Luna implementation)
+## Packet binding (mechanical; after Gate A; docs-only)
+
+Do **not** cherry-pick packet commits onto the source baseline. Packet history is not guaranteed to apply as a patch series on `9d50740`.
+
+After Doc records `OWNER_SELECTED_SOURCE_BASELINE_SHA` and (after R4 PASS) `APPROVED_PACKET_REVIEW_SHA`:
+
+```powershell
+git fetch origin
+git checkout -B feat/cognitive-v021-implementation OWNER_SELECTED_SOURCE_BASELINE_SHA
+git checkout APPROVED_PACKET_REVIEW_SHA -- `
+  docs/cognitive-rework/v0.2.1 `
+  docs/architecture/Ashley_Architecture_Document_Index.md `
+  docs/superpowers/plans/2026-08-29-cognitive-v021-implementation.md `
+  .gitignore
+# Stage only those paths. Commit docs-only:
+#   docs(cognitive-v021): bind approved packet onto selected source baseline
+```
+
+Verify:
+
+```powershell
+git diff --name-only OWNER_SELECTED_SOURCE_BASELINE_SHA
+# Must be a subset of the paths above. No apps/, packages/, SQL, deploy scripts.
+git merge-base --is-ancestor OWNER_SELECTED_SOURCE_BASELINE_SHA HEAD
+git rev-parse HEAD   # this is IMPLEMENTATION_START_SHA
+```
+
+Record `IMPLEMENTATION_START_SHA` and `IMPLEMENTATION_BRANCH` in the owner record below (Luna fills these two fields; Doc filled the source baseline).
+
+**Phase 00 starts at `IMPLEMENTATION_START_SHA`.** Do not require `HEAD == OWNER_SELECTED_SOURCE_BASELINE_SHA` after binding. Candidate ancestry must descend from `IMPLEMENTATION_START_SHA` and therefore from `OWNER_SELECTED_SOURCE_BASELINE_SHA`.
+
+Source-map revalidation diffs **production source** against `OWNER_SELECTED_SOURCE_BASELINE_SHA` (must be empty for TypeScript/SQL/runtime; packet docs are expected to differ).
+
+---
+
+## Owner record (fill after R4 PASS)
 
 ```text
-OWNER_SELECTED_IMPLEMENTATION_BASELINE_SHA=<unset>
+APPROVED_PACKET_REVIEW_SHA=<unset>
+OWNER_SELECTED_SOURCE_BASELINE_SHA=<unset>
 OWNER_SELECTED_IMPLEMENTATION_BRANCH=<unset>
+IMPLEMENTATION_START_SHA=<unset>
+IMPLEMENTATION_BRANCH=<unset>
 SELECTED_AT=<unset>
 SELECTED_BY=Doc
 ANCESTRY_TO_c7c81c4=<unset>
@@ -75,12 +119,13 @@ CLEAN_STATUS_REQUIRED=yes (implementation worktree; untracked junk must not be c
 REMOTE_STATUS=<unset>
 SOURCE_MAP_REVALIDATED_AT=<unset>
 SOURCE_MAP_REVALIDATION_RESULT=<unset>
+PACKET_BIND_DIFF_OK=<unset>
 ```
 
-This file remains **UNSET**. Filling it is a later owner act **after** packet R3 passes independent review.
+This file remains **UNSET**. Filling `OWNER_SELECTED_SOURCE_BASELINE_SHA` is a later owner act **after** packet R4 passes independent review.
 
-Until then, packet **execution** status is `BLOCKED — PACKET R3 AWAITING INDEPENDENT REVIEW` (contract reconciliation), not “blocked only by baseline selection.”
+Until then, packet **execution** status is `BLOCKED — PACKET R4 AWAITING INDEPENDENT REVIEW`.
 
-After R3 PASSES, if this file is still empty, execution is `BLOCKED_PENDING_OWNER_BASELINE_SELECTION`. Once Doc records the SHA and Luna revalidates the source map, implementation may begin.
+After R4 PASSES, if source baseline is still empty, execution is `BLOCKED_PENDING_OWNER_BASELINE_SELECTION`. After Doc fills the source baseline, Luna binds the packet; until `IMPLEMENTATION_START_SHA` is recorded and verified, execution is `BLOCKED_PENDING_PACKET_BIND`. Then Phase 00 may start.
 
-Quota-aware Q3 (packet R2.1) and R3 contract fixes do **not** fill this gate and do **not** choose M / C / Other.
+R4 contract fixes do **not** fill this gate and do **not** choose M / C / Other.

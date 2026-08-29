@@ -2,15 +2,15 @@
 
 **Status:** `ACCEPTED ARCHITECTURE / IMPLEMENTATION PLANNED`
 
-**Execution status:** `BLOCKED — PACKET R3 AWAITING INDEPENDENT REVIEW`. Owner Gate A remains `UNSET` (do not select M / C / Other until R3 review PASSES). After that, Luna revalidates the source map on the selected SHA. This packet still does not authorize production cutover or `PRODUCTION_ACCEPTED`.
+**Execution status:** `BLOCKED — PACKET R4 AWAITING INDEPENDENT REVIEW`. Owner Gate A remains `UNSET` (do not select M / C / Other until R4 review PASSES). After that, Doc records `OWNER_SELECTED_SOURCE_BASELINE_SHA`; Luna binds the approved packet onto that SHA and records `IMPLEMENTATION_START_SHA`; then revalidates production source against the source baseline. This packet still does not authorize production cutover or `PRODUCTION_ACCEPTED`.
 
-**Packet revision:** R3. Changelog: [`PACKET_CORRECTION_R3.md`](PACKET_CORRECTION_R3.md). Prior R2 notes: [`PACKET_CORRECTION_R2.md`](PACKET_CORRECTION_R2.md).
+**Packet revision:** R4. Changelog: [`PACKET_CORRECTION_R4.md`](PACKET_CORRECTION_R4.md). Prior: [`PACKET_CORRECTION_R3.md`](PACKET_CORRECTION_R3.md), [`PACKET_CORRECTION_R2.md`](PACKET_CORRECTION_R2.md).
 
 **Architecture-reference inspection SHA:** `c7c81c4f5ebcf9e6d67d10990d76cfda4e21c28a`. **Do not implement from a detached historical SHA.**
 
 **Canonical architecture:** [00_ARCHITECTURE_REFERENCE.md](00_ARCHITECTURE_REFERENCE.md) and focused contract [`docs/architecture/cognitive/Ashley_Cognitive_Architecture_v0.2.1.md`](../../architecture/cognitive/Ashley_Cognitive_Architecture_v0.2.1.md).
 
-**Software contracts:** [02_IMPLEMENTATION_SPECIFICATION.md](02_IMPLEMENTATION_SPECIFICATION.md) (`IMPLEMENTATION_SPEC_VERSION = "0.2.1.r3"`) and [04_STORAGE_AND_DISPATCH_CONTRACT.md](04_STORAGE_AND_DISPATCH_CONTRACT.md).
+**Software contracts:** [02_IMPLEMENTATION_SPECIFICATION.md](02_IMPLEMENTATION_SPECIFICATION.md) (`IMPLEMENTATION_SPEC_VERSION = "0.2.1.r4"`) and [04_STORAGE_AND_DISPATCH_CONTRACT.md](04_STORAGE_AND_DISPATCH_CONTRACT.md).
 
 **Do not reinterpret the architecture.** If a phase document and the specification disagree, the specification wins for types/names; the architecture reference wins for laws. If those two disagree, **HARD BLOCKER**.
 
@@ -22,10 +22,10 @@ Read in this exact order before any code:
 
 1. This README
 2. [LUNA_MAX_EXECUTION_HANDOFF.md](LUNA_MAX_EXECUTION_HANDOFF.md)
-3. [OWNER_BASELINE_GATE.md](OWNER_BASELINE_GATE.md) — **STOP if UNSET**
+3. [OWNER_BASELINE_GATE.md](OWNER_BASELINE_GATE.md) — **STOP if source baseline UNSET or packet not bound**
 4. [OWNER_ACCEPTANCE_RECORD.md](OWNER_ACCEPTANCE_RECORD.md)
 5. [00_ARCHITECTURE_REFERENCE.md](00_ARCHITECTURE_REFERENCE.md)
-6. [01_SOURCE_BASELINE_AND_MIGRATION_MAP.md](01_SOURCE_BASELINE_AND_MIGRATION_MAP.md) — revalidate on the selected SHA
+6. [01_SOURCE_BASELINE_AND_MIGRATION_MAP.md](01_SOURCE_BASELINE_AND_MIGRATION_MAP.md) — revalidate production source against `OWNER_SELECTED_SOURCE_BASELINE_SHA`
 7. [02_IMPLEMENTATION_SPECIFICATION.md](02_IMPLEMENTATION_SPECIFICATION.md)
 8. [04_STORAGE_AND_DISPATCH_CONTRACT.md](04_STORAGE_AND_DISPATCH_CONTRACT.md)
 9. [03_MASTER_IMPLEMENTATION_PLAN.md](03_MASTER_IMPLEMENTATION_PLAN.md)
@@ -43,8 +43,8 @@ Do not skip 3–9. Do not begin Phase N+1 until Phase N’s gate report exists a
 | File | Purpose |
 |---|---|
 | [OWNER_ACCEPTANCE_RECORD.md](OWNER_ACCEPTANCE_RECORD.md) | Owner accepted v0.2.1 as target architecture |
-| [OWNER_BASELINE_GATE.md](OWNER_BASELINE_GATE.md) | Owner Gate A — implementation SHA |
-| [PACKET_CORRECTION_R3.md](PACKET_CORRECTION_R3.md) | R3 contract reconciliation after second independent NO-GO |
+| [OWNER_BASELINE_GATE.md](OWNER_BASELINE_GATE.md) | Owner Gate A — three identities: packet SHA, source baseline SHA, implementation-start SHA |
+| [PACKET_CORRECTION_R4.md](PACKET_CORRECTION_R4.md) | R4 data-plane reconciliation after third independent NO-GO |
 | [04_STORAGE_AND_DISPATCH_CONTRACT.md](04_STORAGE_AND_DISPATCH_CONTRACT.md) | Complete sidecar v1 DDL + type/store matrix |
 | [00_ARCHITECTURE_REFERENCE.md](00_ARCHITECTURE_REFERENCE.md) | Frozen v0.2.1 architecture (laws S1–S31) |
 | [01_SOURCE_BASELINE_AND_MIGRATION_MAP.md](01_SOURCE_BASELINE_AND_MIGRATION_MAP.md) | Live source mapped KEEP/REHOME/REDESIGN/RETIRE |

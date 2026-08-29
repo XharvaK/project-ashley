@@ -25,7 +25,7 @@ Source (flag-gated, default legacy):
 - `cognitive-v021/dispatch/live.ts` maps ingress → kernel → projector
 - `runtime.ts` / `agent.ts`: if `v021` use live dispatch; if `shadow` run kernel capture-only **in parallel with** legacy `/chat/text` path without blocking ingress; if `legacy` skip kernel
 - `getHealth` / snapshot include `cognitiveKernel`, sidecar schema version, sidecar path (no secrets)
-- Shadow: candidate never calls Discord send; never writes nuclear semantic stores (outbox projector **off** in shadow)
+- Shadow: candidate never calls Discord send; never writes nuclear **semantic** stores (outbox projector **off** in shadow). **Exception:** `resolveActiveThread` may UPDATE/INSERT `mem_threads` (conversation identity only).
 - Recovery hooks on sidecar open
 - Import CLI and cutover rehearsal script exist
 - Deploy scripts unchanged except they already honor env (no SHA rewrite)
@@ -120,9 +120,12 @@ Default `legacy`. Doc still hears Expression/decide path. Candidate speech impos
 
 ### Task 8.7 Slash + scheduler live wiring
 
-- [ ] `/remember` maps to `admitOwnerSuppliedClaim` when kernel `v021` (flag-gated)
+- [ ] `/remember` → `admitOwnerSuppliedClaim` when kernel `v021` (flag-gated)
+- [ ] `/memory` summary → sidecar Memory views + mechanical evidence narrative when `v021`
+- [ ] `/forget` → sidecar evidence+Memory redact/retract + compatibility cleanup + continuity tombstones when `v021`
+- [ ] `/new` → nuclear archive+resolve; next ingress uses new ConversationId
 - [ ] Idle scheduler ticks kernel when `shadow`|`v021` without sending in shadow
-- [ ] Commit: `feat(cognitive-v021): remember and idle scheduler flag-gated wiring`
+- [ ] Commit: `feat(cognitive-v021): remember memory forget new and idle scheduler flag-gated wiring`
 
 ### Task 8.8 CANDIDATE FREEZE
 

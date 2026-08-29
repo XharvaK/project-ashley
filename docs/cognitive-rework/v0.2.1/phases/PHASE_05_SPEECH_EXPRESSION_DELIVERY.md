@@ -99,7 +99,9 @@ Production still uses expressSpeak.
 
 ### Task 5.7 Thought outage notice (U)
 
-- [ ] completeChat throws → `SystemNoticeOutbox` with `THOUGHT_UNAVAILABLE_NOTICE`; not Ashley first-person; no expressSpeak; no decide()
+- [ ] completeChat throws → typed `SystemNoticeOutbox` with persisted `deliveryIntent` (ownerId/channel/threadId); `THOUGHT_UNAVAILABLE_NOTICE`; not Ashley first-person; no expressSpeak; no decide()
+- [ ] Ledger `thoughtUnavailable=true`
+- [ ] Restart: projector still knows where to send
 - [ ] Commit: `feat(cognitive-v021): Thought outage uses system notice outbox`
 
 ### Task 5.8 High-risk detector reject-only
@@ -128,6 +130,13 @@ Production still uses expressSpeak.
 - [ ] Dest already committed: sidecar marked delivered; no Discord send
 - [ ] Superseded generation: outbox suppressed; not projected
 - [ ] Commit: `feat(cognitive-v021): idempotent outbox to nuclear delivery projector`
+
+### Task 5.12 Deferred proactive revalidation
+
+- [ ] `daily_cap` leaves proactive outbox `pending`
+- [ ] Cap resets but concern resolved / generation superseded / withdrawal active / paused → `suppressed`, not delivered
+- [ ] `recovery` / `operation_completion` DeliveryIntent triggers are representable; lane inherit rules in spec O.1
+- [ ] Commit: `feat(cognitive-v021): deferred proactive outbox revalidates before send`
 
 ## CAUSAL ACCEPTANCE TESTS
 

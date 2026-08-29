@@ -23,7 +23,7 @@ Phase 05 PASS.
 
 ## TARGET SOURCE STATE
 
-Sidecar Memory tables. Admission worker reads nominations, applies fence. `/remember` in **tests** maps to OwnerSuppliedClaim immediate admission if generation still current. Cognition worker **must not** be called from sidecar tests. LearnedSelf slice from dispositions, **not** `addLearnedInterestMotivations`.
+Sidecar Memory tables are the **only** v021 Memory authority. Admission worker reads nominations, applies fence. `/remember` in **tests** maps to OwnerSuppliedClaim immediate admission if generation still current. Cognition worker **must not** be called from sidecar tests. LearnedSelf slice is empty or already-admitted (`live=true`) only — never quarantined.
 
 Shadow: do not write production `memory_assertions`.
 
@@ -107,6 +107,7 @@ Live `/remember` still pins facts.
 
 - [ ] Ingesting “HY3 is an LLM” into LearnedSelf slice rejected; belongs in Memory
 - [ ] No `LearnedSelfCandidate` writer; slice may be empty
+- [ ] Quarantined (`live=false`) historical rows must **not** appear in `ThoughtInput.learnedSelfSlice`
 - [ ] Commit: `feat(cognitive-v021): LearnedSelf cannot hold world claims (no accumulation writer)`
 
 ### Task 6.8 C4 occupant calibration
@@ -130,9 +131,17 @@ Live `/remember` still pins facts.
 - [ ] Isolated nuclear+continuity fixtures → `--mode dry-run` report JSON, no sidecar writes
 - [ ] `--mode apply` idempotent; second run `duplicateCount` increases, hashes stable
 - [ ] `--mode verify` COUNT_MISMATCH / HASH_MISMATCH exits nonzero on tamper
-- [ ] Quarantine classes not `live=true`
+- [ ] Quarantine classes not `live=true`; supports have `provenance=legacy_import` and epistemic `source` unchanged
+- [ ] Conversation evidence dedupe: preserved shadow A/B + import of same A/B → exactly one lineage each (Discord id / entity_uuid)
 - [ ] Reserved production path refused (`RESERVED_PATH_REFUSED`)
 - [ ] Commit: `feat(cognitive-v021): idempotent legacy semantic import tool`
+
+### Task 6.12 v021 forget / memory read (library)
+
+- [ ] Forget topic redacts sidecar Conversation Evidence + Memory assertions (not only a `mem_messages` copy)
+- [ ] Compatibility copies cleaned when present; continuity tombstone KEEP
+- [ ] Memory view for `/memory` reads sidecar `OwnerKnowledgeView`, not `mem_facts` as authority
+- [ ] Commit: `feat(cognitive-v021): forget and memory summary use sidecar authority`
 
 ## CAUSAL ACCEPTANCE TESTS
 

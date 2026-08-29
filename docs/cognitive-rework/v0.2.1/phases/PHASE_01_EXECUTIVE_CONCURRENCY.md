@@ -115,7 +115,11 @@ Production still throws `chat_in_progress` on `/chat/text`. Ingress endpoint exi
 
 ### Task 1.8 Duplicate inbound Discord ids
 
-- [ ] Failing test: same `discordMessageIds` append twice → second is no-op (same evidence id), like `findReservationByInboundIds`
+- [ ] Failing test: same first `discordMessageId` append twice → second is no-op (same lineage), like `findReservationByInboundIds`
+- [ ] Duplicate **second** id of a three-id merge → same lineage, no second row
+- [ ] Three-fragment merged turn: three mapping rows, one lineage, version 1
+- [ ] Edit version 2 with the **same** Discord id: mapping remains; unique PK does not reject
+- [ ] Restart: mapping table survives; duplicate ingress still no-op
 - [ ] PASS
 - [ ] Commit: `feat(cognitive-v021): idempotent inbound discord evidence ids`
 
@@ -125,6 +129,19 @@ Production still throws `chat_in_progress` on `/chat/text`. Ingress endpoint exi
 - [ ] Implement `POST /chat/ingress` in `server.ts` calling sidecar append+inbox only
 - [ ] Must not call `handleReactiveChat` / `completeChat`
 - [ ] Commit: `feat(cognitive-v021): durable chat ingress without waiting for Thought`
+
+### Task 1.10 Conversation identity (`resolveActiveThread`)
+
+- [ ] First-ever owner ingress with empty `mem_threads` creates one active nuclear thread; sidecar `conversationId` equals that id
+- [ ] `/new` (`archiveActiveThread` + `resolveActiveThread`) then ingress binds the **new** id
+- [ ] Shadow-mode test: `resolveActiveThread` may UPDATE/INSERT thread rows; WC/Memory nuclear writes still forbidden
+- [ ] Commit: `feat(cognitive-v021): conversation id uses nuclear active thread`
+
+### Task 1.11 DataClassification round-trip
+
+- [ ] Persist and read back `ordinary`, `sensitive`, `never_public`, `secret` on Conversation Evidence
+- [ ] Credential-shaped text → `secret` + placeholder; never raw
+- [ ] Commit: `feat(cognitive-v021): sidecar evidence uses source DataClassification`
 
 ## CAUSAL ACCEPTANCE TESTS
 

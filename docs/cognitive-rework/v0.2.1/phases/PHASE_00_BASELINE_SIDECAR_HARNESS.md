@@ -10,7 +10,9 @@ S25 (reserved path / data plane), S26 (harness exists), S24 (sidecar is not prod
 
 ## DEPENDENCIES
 
-[`OWNER_BASELINE_GATE.md`](../OWNER_BASELINE_GATE.md) filled by Doc. Governing docs show v0.2.1 `ACCEPTED ARCHITECTURE / IMPLEMENTATION PLANNED` (HARD BLOCKER 1 if not).
+[`OWNER_BASELINE_GATE.md`](../OWNER_BASELINE_GATE.md): `OWNER_SELECTED_SOURCE_BASELINE_SHA` filled by Doc; `IMPLEMENTATION_START_SHA` recorded after packet bind. Governing docs show v0.2.1 `ACCEPTED ARCHITECTURE / IMPLEMENTATION PLANNED` (HARD BLOCKER 1 if not).
+
+## CURRENT SOURCE STATE
 
 ## CURRENT SOURCE STATE
 
@@ -18,7 +20,7 @@ S25 (reserved path / data plane), S26 (harness exists), S24 (sidecar is not prod
 - Continuity sidecar pattern: `continuity/db.ts` `openContinuityDb`
 - Reserved paths: `data-plane.ts` `reservedProductionNuclearDbPath`, `reservedProductionContinuityDbPath`
 - Env: `env.ts` has `cognitionMode`, no `ASHLEY_COGNITIVE_KERNEL`
-- HEAD at packet authoring: `c7c81c4f5ebcf9e6d67d10990d76cfda4e21c28a`
+- HEAD at packet authoring: packet review branch (not a production checkout). After bind, Phase 00 `HEAD` = `IMPLEMENTATION_START_SHA`.
 
 ## TARGET SOURCE STATE
 
@@ -75,21 +77,32 @@ Default kernel `legacy`. Production Discord unchanged. Opening sidecar is not do
 
 ## TEST-FIRST TASK SEQUENCE
 
-### Task 0.1 Git handoff and owner baseline
+### Task 0.0 Packet bind (docs-only; after Gate A)
 
-- [ ] **STOP** if [`OWNER_BASELINE_GATE.md`](../OWNER_BASELINE_GATE.md) `OWNER_SELECTED_IMPLEMENTATION_BASELINE_SHA` is unset (HARD BLOCKER 2).
-- [ ] Checkout/work on that SHA’s branch. Record `git rev-parse HEAD` — must equal the selected SHA (HARD BLOCKER 3 if not a verified descendant of production-line history).
-- [ ] Revalidate [01_SOURCE_BASELINE_AND_MIGRATION_MAP.md](../01_SOURCE_BASELINE_AND_MIGRATION_MAP.md) against `git diff --name-only <inspection-c7c81c4>...HEAD` plus `secrets.ts` if Choice M.
+- [ ] **STOP** if [`OWNER_BASELINE_GATE.md`](../OWNER_BASELINE_GATE.md) `OWNER_SELECTED_SOURCE_BASELINE_SHA` is unset (HARD BLOCKER 2).
+- [ ] **STOP** if R4 independent review has not PASSed and `APPROVED_PACKET_REVIEW_SHA` is unset.
+- [ ] Follow OWNER_BASELINE_GATE **Packet binding**: new branch from source baseline; `git checkout APPROVED_PACKET_REVIEW_SHA --` the listed packet paths; docs-only commit; **do not cherry-pick**.
+- [ ] `git diff --name-only OWNER_SELECTED_SOURCE_BASELINE_SHA` is a subset of those packet/governance/`.gitignore` paths (HARD BLOCKER 3b if `apps/` or SQL/runtime differs).
+- [ ] `git merge-base --is-ancestor OWNER_SELECTED_SOURCE_BASELINE_SHA HEAD`
+- [ ] Record `IMPLEMENTATION_START_SHA = git rev-parse HEAD` and `IMPLEMENTATION_BRANCH` in OWNER_BASELINE_GATE (Luna fills these two; does not choose M/C/Other).
+- Commit boundary: the bind commit itself.
+
+### Task 0.1 Git handoff on IMPLEMENTATION_START_SHA
+
+- [ ] **STOP** if `IMPLEMENTATION_START_SHA` is unset.
+- [ ] Work on `IMPLEMENTATION_BRANCH`. `git rev-parse HEAD` must equal `IMPLEMENTATION_START_SHA` at the start of this task (later tasks add kernel commits). Do **not** require `HEAD == OWNER_SELECTED_SOURCE_BASELINE_SHA`.
+- [ ] Revalidate [01_SOURCE_BASELINE_AND_MIGRATION_MAP.md](../01_SOURCE_BASELINE_AND_MIGRATION_MAP.md) against production files on `OWNER_SELECTED_SOURCE_BASELINE_SHA` (`git diff --name-only <inspection-c7c81c4>...OWNER_SELECTED_SOURCE_BASELINE_SHA` plus `secrets.ts` if Choice M).
 - [ ] If named seams (`messageCreate.ts`, `channel-queue.ts`, `runtime.ts`, `thought.ts`, `mistral-client.ts`, `delivery/store.ts`) drifted in a way that invalidates the map: **HARD BLOCKER 4**. Reconcile the packet; do not invent architecture.
 - [ ] Do not `git reset` to `c7c81c4` to “match the packet.”
 - Commit boundary: none.
 
 ### Task 0.1b Nuclear schema current-pins
 
-- [ ] Update the 20 `NUCLEAR_SUPPORTED_VERSION.toBe(35)` current-pins listed in source map §7.1 to `41` or `toBe(NUCLEAR_SUPPORTED_VERSION)`.
+- [ ] Update the 20 `NUCLEAR_SUPPORTED_VERSION.toBe(35)` **current-pins** listed in source map §7.1 to `toBe(NUCLEAR_SUPPORTED_VERSION)` (the live constant on the selected baseline / after later additive migration).
 - [ ] Keep `migration-35.test.ts` waypoint `pending?.to === 35`.
+- [ ] Do **not** write a timeless literal `41` in current-pin assertions or commit messages.
 - [ ] `npx vitest run` those files PASS
-- [ ] Commit: `test(db): pin nuclear schema current-version assertions to 41`
+- [ ] Commit: `test(db): use nuclear supported version for current schema assertions`
 
 ### Task 0.2 Kernel env flag
 

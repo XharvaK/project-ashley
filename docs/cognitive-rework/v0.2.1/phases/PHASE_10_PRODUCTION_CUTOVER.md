@@ -38,7 +38,7 @@ Runbook. Existing `dispatch/live.ts` from freeze.
 
 ## DATABASE / MIGRATION CHANGES
 
-Import tool `--mode apply` then `--mode verify` as runbook. Count/hash mismatch HARD BLOCKER 15.
+Import `--mode apply` / `--mode verify` **only** inside the runbook maintenance fence (services stopped). Count/hash/dedupe mismatch HARD BLOCKER 15.
 
 ## LEGACY COMPATIBILITY
 

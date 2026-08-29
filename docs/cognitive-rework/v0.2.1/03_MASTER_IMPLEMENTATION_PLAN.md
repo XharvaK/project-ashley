@@ -4,7 +4,7 @@
 
 **For agentic workers:** Execute phases in order using the phase files. Do not implement from this master file alone.
 
-**Execution status until R3 independent review PASSES:** `BLOCKED — PACKET R3 AWAITING INDEPENDENT REVIEW`. Gate A remains UNSET.
+**Execution status until R4 independent review PASSES:** `BLOCKED — PACKET R4 AWAITING INDEPENDENT REVIEW`. Gate A remains UNSET.
 
 ---
 
@@ -12,14 +12,15 @@
 
 The live cognitive inversion is concentrated in `runtime.ts` `handleReactiveChat` **and** in Discord `drainTurn`, which waits on `POST /chat/text` inside `ChannelQueue`. Rewriting runtime in place, or assuming compose/preempt after only removing `activeOwners`, would leave inbound cognition serialized at the bot. Therefore:
 
-1. Owner architecture acceptance (done) and **owner baseline selection** (Gate A).
-2. Revalidate the source map on the selected SHA.
-3. Build the sidecar kernel (Phases 00–07).
-4. Complete **all live-capable source** while still flag-gated (Phase 08): ingress split, live dispatcher, health, import tool, outbox projector, shadow/live modes, recovery, deploy hooks.
-5. **Candidate freeze.** Clean commit. Record `CANDIDATE_SHA`.
-6. Qualification Q1–Q6 on **that unchanged SHA** (Phase 09 operations).
-7. Configuration-only cutover of `QUALIFIED_SHA` (Phase 10).
-8. Live witness (Phase 11). Luna does not declare `PRODUCTION_ACCEPTED`.
+1. Owner architecture acceptance (done) and **owner source-baseline selection** (Gate A).
+2. **Packet bind:** materialize `APPROVED_PACKET_REVIEW_SHA` onto a branch from `OWNER_SELECTED_SOURCE_BASELINE_SHA` → `IMPLEMENTATION_START_SHA` ([OWNER_BASELINE_GATE.md](OWNER_BASELINE_GATE.md)).
+3. Revalidate the source map on the **source baseline** (production TypeScript/SQL must match that SHA).
+4. Build the sidecar kernel (Phases 00–07) starting at `IMPLEMENTATION_START_SHA`.
+5. Complete **all live-capable source** while still flag-gated (Phase 08): ingress split, live dispatcher, health, import tool, outbox projector, shadow/live modes, recovery, deploy hooks.
+6. **Candidate freeze.** Clean commit. Record `CANDIDATE_SHA`.
+7. Qualification Q1–Q6 on **that unchanged SHA** (Phase 09 operations).
+8. Configuration-only cutover of `QUALIFIED_SHA` (Phase 10).
+9. Live witness (Phase 11). Luna does not declare `PRODUCTION_ACCEPTED`.
 
 No functional source change is permitted between candidate freeze and production cutover without invalidating qualification.
 
@@ -30,11 +31,13 @@ No functional source change is permitted between candidate freeze and production
 ```
 OWNER ARCHITECTURE ACCEPTANCE (done; OWNER_ACCEPTANCE_RECORD.md)
         ↓
-OWNER IMPLEMENTATION BASELINE SELECTION (Gate A)
+OWNER SOURCE BASELINE SELECTION (Gate A)
         ↓
-SOURCE MAP REVALIDATION ON SELECTED BRANCH/SHA
+PACKET BIND → IMPLEMENTATION_START_SHA
         ↓
-PHASES 00–07
+SOURCE MAP REVALIDATION ON OWNER_SELECTED_SOURCE_BASELINE_SHA
+        ↓
+PHASES 00–07 (HEAD = IMPLEMENTATION_START_SHA, then implementation commits)
         ↓
 PHASE 08 — ALL LIVE-CAPABLE SOURCE, THEN CANDIDATE FREEZE
         ↓
@@ -108,9 +111,10 @@ Do not ask Doc for routine coding choices.
 ### HARD BLOCKER (stop, preserve evidence)
 
 1. v0.2.1 not authoritatively reconciled into governing architecture docs.
-2. No owner-selected implementation baseline.
+2. No owner-selected source baseline.
 3. Selected baseline is not a verified descendant / legitimate production-line source.
-4. Source map materially invalid on selected baseline.
+3b. Packet bind missing or `git diff SOURCE_BASELINE..IMPLEMENTATION_START` includes production TypeScript/SQL/runtime.
+4. Source map materially invalid on selected **source baseline**.
 5. Candidate git tree dirty at freeze.
 6. Deployed SHA != qualified SHA.
 7. Code modification after candidate freeze without qualification reset.
@@ -252,7 +256,7 @@ docs/cognitive-rework/v0.2.1/artifacts/
   runtime/                 # gitignored outputs; freeze file POINTS TO candidate SHA
 ```
 
-Every qualification artifact binds: `candidateSha`, `selectedBaselineSha`, `architectureVersion=v0.2.1`, `implementationSpecVersion=0.2.1.r3`, `qualificationProtocolRevision=r3`, `sidecarSchemaVersion=1`, `thoughtContractVersion=1`, Thought route/occupant, Mint host identity, timestamp, shadow mode config hash, `legacyImportToolVersion=1`, `outboxBridgeVersion=1`, recorded quota ceilings including shadow real-Thought caps.
+Every qualification artifact binds: `candidateSha`, `selectedBaselineSha`, `architectureVersion=v0.2.1`, `implementationSpecVersion=0.2.1.r4`, `qualificationProtocolRevision=r4`, `sidecarSchemaVersion=1`, `thoughtContractVersion=1`, Thought route/occupant, Mint host identity, timestamp, shadow mode config hash, `legacyImportToolVersion=1`, `outboxBridgeVersion=1`, recorded quota ceilings including shadow real-Thought caps.
 
 ---
 

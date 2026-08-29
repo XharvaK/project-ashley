@@ -79,10 +79,12 @@ Legacy Thought JSON remains on production path.
 
 ### Task 2.2 parseThoughtStepOutput
 
-- [ ] JSON `{ kind: "settlement", settlement: {...} }` and settlement-shaped JSON without kind both parse as settlement
+- [ ] JSON `{ kind: "settlement", settlement: <ThoughtSettlementDraft> }` parses
+- [ ] Flat JSON without `kind` that is a valid **`ThoughtSettlementDraft`** (no `finalLicensedText`, no `settlementId`, no delivery fields) wraps as `kind: "settlement"`
+- [ ] Blob with `finalLicensedText` or published-only fields → `malformed` / `kind: "failure"`
 - [ ] `{ kind: "observation_request", observationRequest, correlationId, deadlineAtMs }` parses
 - [ ] `{ kind: "effect_proposal", ... }` parses
-- [ ] `not json` / missing kind+settlement → `kind: "failure"`, `reason: "malformed"`
+- [ ] `not json` / missing kind+draft → `kind: "failure"`, `reason: "malformed"`
 - [ ] Commit: `feat(cognitive-v021): parse ThoughtStepOutput discriminated union`
 
 ### Task 2.3 buildThoughtInput always-on set

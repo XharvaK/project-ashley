@@ -1,12 +1,12 @@
 # 01 — Source Baseline and Migration Map
 
-**Status:** Planning evidence. Architecture-reference inspection SHA `c7c81c4f5ebcf9e6d67d10990d76cfda4e21c28a`. Implementation baseline is **owner-selected** in [OWNER_BASELINE_GATE.md](OWNER_BASELINE_GATE.md). After selection, Luna diffs this map against that SHA before Phase 00 code.
+**Status:** Planning evidence. Architecture-reference inspection SHA `c7c81c4f5ebcf9e6d67d10990d76cfda4e21c28a`. Implementation **source baseline** is **owner-selected** in [OWNER_BASELINE_GATE.md](OWNER_BASELINE_GATE.md). After selection and packet bind, Luna diffs this map against `OWNER_SELECTED_SOURCE_BASELINE_SHA` before Phase 00 code. Phase 00 `HEAD` is `IMPLEMENTATION_START_SHA`, not the bare source baseline.
 
 **Inspected at packet R2:** detached HEAD `c7c81c4`; `origin/master` `9d50740` is a verified descendant (six observer/docs commits; `privacy/secrets.ts` changed). Untracked files exist; they are not source.
 
 **Nuclear schema authority:** `NUCLEAR_SUPPORTED_VERSION = 41` in `apps/agent-service/src/core/db.ts`.
 
-**If selected HEAD differs:** revalidate every named seam. STOP (HARD BLOCKER 4) if a delta invalidates a mapping below.
+**If selected HEAD differs:** revalidate every named seam on `OWNER_SELECTED_SOURCE_BASELINE_SHA`. STOP (HARD BLOCKER 4) if a delta invalidates a mapping below.
 
 ---
 
@@ -55,7 +55,7 @@ Legend: **KEEP** reuse as-is on new kernel; **REHOME** keep mechanism, new owner
 | Send bubbles | `chat/send-bubbles.ts` `sendBubbles` | Sequential Discord send + receipt callback | After projector | KEEP | 5, 8 | never |
 | Channel queue / pacing | `chat/channel-queue.ts`, `chat/pacing.ts` | Serial cognition+send; abort does not cancel `chatText` | Serial **send only**; abort KEEP for pacing | REDESIGN | 1, 8 | inbound wait on Thought: 8/10 |
 | Fulfillment pump | `initiative/fulfillment-pump.ts` | Claims operational/weekly_review and sends | Pattern for v021 reactive outbox | REHOME | 5, 8 | never |
-| Slash commands | `handlers/interactionCreate.ts`, `commands/*.ts` | `/remember` `/memory` `/new` `/forget` `/proactive` `/identity` `/commitments` `/continuity` `/status` | `/remember` = OwnerSuppliedClaim; others KEEP via evidence projection | REHOME remember Discord wiring | 6 tests, **8 live wiring** | never |
+| Slash commands | `handlers/interactionCreate.ts`, `commands/*.ts` | `/remember` `/memory` `/new` `/forget` `/proactive` `/identity` `/commitments` `/continuity` `/status` | Spec §E.3: remember/memory/forget/new **REHOME/REDESIGN** onto sidecar Memory + evidence; others KEEP nuclear/continuity | **REDESIGN** memory/forget; **REHOME** remember/new | 6 tests, **8 live wiring** | nuclear facts as live Memory: 10 |
 | Presence payload | `agent-client.ts` sends `discordPresence`; `server.ts` types it `string` and ignores | Unused | Out of scope | KEEP unused | none | never |
 | Preflight | `POST /chat/preflight` always `{ lookup: false }` | Dead | Unused | RETIRE on new path | 8 | 10 |
 
@@ -128,9 +128,9 @@ Legend: **KEEP** reuse as-is on new kernel; **REHOME** keep mechanism, new owner
 | Facts | `memory/facts.ts` `upsertFact`, `listActiveFacts` | mem_facts / assertion projection | Durable Memory via admission only | REHOME writers behind fence | 6 | cognition worker inventing facts as live influence without nomination: 10 |
 | Episodes | `memory/episodes.ts` `retrieveEpisodes` FTS | Diagnostic/consolidator | SharedEpisode evidence, not world belief | REHOME | 6 | 10 |
 | Tokenize filter | `motivations.ts` `tokenize` ≥4, 2 shared tokens | Drops HY3/LLM/API | Lexical fallback must include short tokens | REDESIGN | 3 | HY3 miss: 3 |
-| C1 assertions | `memory/assertions.ts`, `eligibility.ts`, `corrections.ts`, `cutover.ts`, `context-role.ts` | Lineage, currentness, sticky cutover | KEEP lineage; dimensional tags; retire prompt currentness | KEEP/REHOME | 6 | prompt currentness as authority: 10 |
+| C1 assertions | `memory/assertions.ts`, `eligibility.ts`, `corrections.ts`, `cutover.ts`, `context-role.ts` | Lineage, currentness, sticky cutover | Salvage lineage/corrections/currentness/supports into **sidecar** Memory; nuclear C1 is not a second live v021 authority | KEEP concepts / REHOME store | 6 | nuclear C1 as live v021 Memory: 10 |
 | C1 contract state | `memory/contract-state.ts` `currentnessAuthority` | mem_facts \| memory_assertions | Sidecar Memory is assertion-native | REHOME | 6 | never |
-| Forget | `memory/forget.ts` + continuity tombstones | Preview/tombstone | Same mechanical forget; settlement cancels occupancy/triggers | KEEP | 6 | never |
+| Forget | `memory/forget.ts` + continuity tombstones | Preview/tombstone; mutates messages/episodes/facts/revisions | **REDESIGN** v021 path: sidecar evidence+Memory authority + compatibility cleanup + KEEP continuity tombstones | REDESIGN | 6, 8 | forget-only-mem_messages: 10 |
 | Cognition worker | `cognition/worker.ts` `processNextCognitiveJob` | consolidate_thread → facts/episodes/mind/revisions | Must not write live Memory without fenced nomination | REDESIGN | 6, 10 | auto-fact as owner-explicit: 10 |
 
 ### 2.8 Identity / mind / relationship / C2–C5
