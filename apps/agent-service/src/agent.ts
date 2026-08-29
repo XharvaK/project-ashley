@@ -14,6 +14,7 @@ import {
 import {
   runLiveCognitiveTurn,
 } from "./core/cognitive-v021/dispatch/live.js";
+import { runShadowCognitiveTurn } from "./core/cognitive-v021/shadow/runner.js";
 import type {
   InboxEvent,
   KernelDeps,
@@ -102,7 +103,16 @@ export class AgentManager {
   }): void {
     this.cognitiveDeps = input.deps;
     this.cognitiveProjector = input.projector;
-    this.cognitiveShadowDispatch = input.shadowDispatch ?? null;
+    this.cognitiveShadowDispatch = input.shadowDispatch ?? (async (event) => {
+      const sidecar = this.openCognitiveSidecar();
+      if (!sidecar) throw new AppError("agent_not_ready", "Cognitive sidecar unavailable", 503);
+      return runShadowCognitiveTurn({
+        sidecar,
+        nuclear: this.core.getDatabase(),
+        event,
+        deps: input.deps,
+      });
+    });
   }
 
   /** Flag-gated event dispatch. Legacy returns null and keeps `/chat/text` authoritative. */

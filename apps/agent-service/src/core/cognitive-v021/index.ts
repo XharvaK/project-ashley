@@ -70,6 +70,8 @@ export * from "./initiative/idle.js";
 export * from "./initiative/future-triggers.js";
 export * from "./observation/subscriptions.js";
 export * from "./dispatch/live.js";
+export * from "./shadow/runner.js";
+export * from "./shadow/replicator.js";
 
 export function speechProjectionKey(outboxId: number): `speech:${number}` {
   return `speech:${outboxId}`;
