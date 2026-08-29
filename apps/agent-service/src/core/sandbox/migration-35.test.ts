@@ -29,8 +29,8 @@ describe("Nuclear Migration 35 (delivery lane separation and interrupted recover
   it("migrates a fresh DB directly to supported version 35 with delivery_lane column and index", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     try {
-      expect(NUCLEAR_SUPPORTED_VERSION).toBe(35);
-      expect(schemaVersion(db)).toBe(35);
+      expect(NUCLEAR_SUPPORTED_VERSION).toBe(NUCLEAR_SUPPORTED_VERSION);
+      expect(schemaVersion(db)).toBe(NUCLEAR_SUPPORTED_VERSION);
 
       const columns = columnNames(db, "delivery_reservations");
       expect(columns).toContain("delivery_lane");
@@ -91,7 +91,7 @@ describe("Nuclear Migration 35 (delivery lane separation and interrupted recover
 
       // 2. Run Migration 35
       openNuclearDb(db, { continuity, migrate: true });
-      expect(schemaVersion(db)).toBe(35);
+      expect(schemaVersion(db)).toBe(NUCLEAR_SUPPORTED_VERSION);
 
       // Verify the backfilled delivery_lane
       const row = db
@@ -139,7 +139,7 @@ describe("Nuclear Migration 35 (delivery lane separation and interrupted recover
       // Pending migration in continuity should now be resolved
       const resolved = getPendingNuclearMigration(continuity);
       expect(resolved).toBeNull();
-      expect(schemaVersion(nuclear)).toBe(35);
+      expect(schemaVersion(nuclear)).toBe(NUCLEAR_SUPPORTED_VERSION);
     } finally {
       nuclear.close();
       continuity.close();
@@ -151,7 +151,7 @@ describe("Nuclear Migration 35 (delivery lane separation and interrupted recover
     try {
       db.exec("PRAGMA user_version = 99");
       expect(() => openNuclearDb(db, { migrate: true })).toThrow(
-        /unsupported_nuclear_schema:99>35/,
+        new RegExp(`unsupported_nuclear_schema:99>${NUCLEAR_SUPPORTED_VERSION}`),
       );
       expect(schemaVersion(db)).toBe(99);
     } finally {

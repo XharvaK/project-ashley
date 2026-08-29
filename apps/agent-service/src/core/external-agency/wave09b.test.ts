@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
-import { openNuclearDb } from "../db.js";
+import { NUCLEAR_SUPPORTED_VERSION, openNuclearDb } from "../db.js";
 import { openContinuityDb } from "../continuity/db.js";
 import { TARGETABLE_TABLES } from "../continuity/nuclear-targetable.js";
 import { listCapabilityStatuses } from "../rollout/capabilities.js";
@@ -40,7 +40,7 @@ function schemaVersion(db: DatabaseSync): number {
 describe("wave09b external agency", () => {
   it("migrates fresh database to v17 with external agency tables", () => {
     const db = openTestDb();
-      expect(schemaVersion(db)).toBe(35);
+      expect(schemaVersion(db)).toBe(NUCLEAR_SUPPORTED_VERSION);
     const tables = db
       .prepare(
         `SELECT name FROM sqlite_master

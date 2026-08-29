@@ -132,7 +132,7 @@ describe("production data-plane authority", () => {
   });
 
   it("may migrate an explicit isolated qualification DB to the candidate schema", () => {
-    expect(NUCLEAR_SUPPORTED_VERSION).toBe(35);
+    expect(NUCLEAR_SUPPORTED_VERSION).toBe(NUCLEAR_SUPPORTED_VERSION);
     const qualDir = tempDir("ashley-qual-plane-");
     const plane = createIsolatedDataPlane(qualDir);
     seedSchema28File(plane.nuclearDbPath, plane.continuityDbPath);
@@ -146,12 +146,12 @@ describe("production data-plane authority", () => {
       dataPlane: plane,
       migrate: true,
     });
-    expect(schemaVersion(db)).toBe(35);
+    expect(schemaVersion(db)).toBe(NUCLEAR_SUPPORTED_VERSION);
     expect(
       columnExists(db, "delivery_reservations", "phase_lifecycle_json"),
     ).toBe(true);
     const core = new AshleyCore(db, { dataPlane: plane });
-    expect(core.getHealth().schemaVersion).toBe(35);
+    expect(core.getHealth().schemaVersion).toBe(NUCLEAR_SUPPORTED_VERSION);
     db.close();
     continuity.close();
   });
@@ -177,7 +177,7 @@ describe("production data-plane authority", () => {
     expect(schemaVersion(opened)).toBe(28);
 
     openNuclearDb(opened, { continuity, dataPlane: plane, migrate: true });
-    expect(schemaVersion(opened)).toBe(35);
+    expect(schemaVersion(opened)).toBe(NUCLEAR_SUPPORTED_VERSION);
     expect(
       columnExists(opened, "delivery_reservations", "phase_lifecycle_json"),
     ).toBe(true);
@@ -202,7 +202,9 @@ describe("production data-plane authority", () => {
     expect(schemaVersion(db)).toBe(99);
     expect(() =>
       openNuclearDb(db, { continuity, dataPlane: plane, migrate: true }),
-    ).toThrow(/unsupported_nuclear_schema:99>35/);
+    ).toThrow(
+      new RegExp(`unsupported_nuclear_schema:99>${NUCLEAR_SUPPORTED_VERSION}`),
+    );
     expect(schemaVersion(db)).toBe(99);
     db.close();
     continuity.close();

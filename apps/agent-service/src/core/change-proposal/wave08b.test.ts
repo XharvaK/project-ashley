@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
-import { openNuclearDb } from "../db.js";
+import { NUCLEAR_SUPPORTED_VERSION, openNuclearDb } from "../db.js";
 import { openContinuityDb } from "../continuity/db.js";
 
 function openTestDb(): DatabaseSync {
@@ -38,7 +38,7 @@ function schemaVersion(db: DatabaseSync): number {
 describe("wave08b change proposals", () => {
   it("migrates fresh database to v16 with proposal tables", () => {
     const db = openTestDb();
-    expect(schemaVersion(db)).toBe(35);
+    expect(schemaVersion(db)).toBe(NUCLEAR_SUPPORTED_VERSION);
     const tables = db
       .prepare(
         `SELECT name FROM sqlite_master

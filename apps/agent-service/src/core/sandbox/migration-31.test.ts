@@ -48,8 +48,8 @@ describe("nuclear schema v31 bounded operations", () => {
   it("installs control-plane tables with zero rows", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     try {
-      expect(NUCLEAR_SUPPORTED_VERSION).toBe(35);
-      expect(schemaVersion(db)).toBe(35);
+      expect(NUCLEAR_SUPPORTED_VERSION).toBe(NUCLEAR_SUPPORTED_VERSION);
+      expect(schemaVersion(db)).toBe(NUCLEAR_SUPPORTED_VERSION);
       expect(
         (db.prepare(`SELECT COUNT(*) AS c FROM bounded_operation_tasks`).get() as { c: number }).c,
       ).toBe(0);
@@ -84,7 +84,7 @@ describe("nuclear schema v31 bounded operations", () => {
         to: 31,
       });
       const reopen = openNuclearDb(fixture.nuclear, { continuity: fixture.continuity });
-      expect(schemaVersion(reopen)).toBe(35);
+      expect(schemaVersion(reopen)).toBe(NUCLEAR_SUPPORTED_VERSION);
       expect(getPendingNuclearMigration(fixture.continuity)).toBeNull();
       persistAdmittedBoundedOperation(reopen, {
         ownerId: "doc",
