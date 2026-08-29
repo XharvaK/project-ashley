@@ -1,4 +1,5 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, existsSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -30,6 +31,44 @@ import {
 import { AgentManager } from "../agent.js";
 
 const temps: string[] = [];
+const APP_ROOT = fileURLToPath(new URL("../..", import.meta.url));
+
+function isolatedBootProcess(dataDir: string) {
+  return spawnSync(
+    process.execPath,
+    [
+      "--import",
+      "tsx",
+      "--input-type=module",
+      "--eval",
+      [
+        'import { existsSync, mkdirSync } from "node:fs";',
+        'import { DatabaseSync } from "node:sqlite";',
+        'import { createIsolatedDataPlane } from "./src/core/data-plane.ts";',
+        'import { openNuclearDb } from "./src/core/db.ts";',
+        'const dataDir = process.env.ASHLEY_Q4_DATA_DIR;',
+        'if (!dataDir) throw new Error("isolated_test_data_dir_missing");',
+        'const plane = createIsolatedDataPlane(dataDir);',
+        'mkdirSync(plane.conversationsDir, { recursive: true });',
+        'const nuclear = openNuclearDb(new DatabaseSync(plane.nuclearDbPath), { dataPlane: plane, migrate: true });',
+        'const mirror = nuclear.prepare("SELECT lineage_id FROM lineage_mirror WHERE id = 1").get();',
+        'if (existsSync(plane.continuityDbPath) === false) throw new Error("isolated_continuity_file_missing");',
+        'const continuity = new DatabaseSync(plane.continuityDbPath);',
+        'const state = continuity.prepare("SELECT lineage_id FROM lineage_state WHERE id = 1").get();',
+        'const adoptions = continuity.prepare("SELECT COUNT(*) AS count FROM continuity_events WHERE json_extract(detail_json, \'$.event\') = \'lineage_adoption\'").get();',
+        'if (!mirror?.lineage_id || mirror.lineage_id !== state?.lineage_id) throw new Error("isolated_lineage_mismatch");',
+        'console.log(JSON.stringify({ lineageId: mirror.lineage_id, continuityPath: plane.continuityDbPath, adoptions: Number(adoptions?.count ?? 0) }));',
+        'continuity.close();',
+        'nuclear.close();',
+      ].join(" "),
+    ],
+    {
+      cwd: APP_ROOT,
+      encoding: "utf8",
+      env: { ...process.env, ASHLEY_Q4_DATA_DIR: dataDir },
+    },
+  );
+}
 
 afterEach(() => {
   while (temps.length > 0) {
@@ -168,6 +207,36 @@ describe("production data-plane authority", () => {
     expect(core.getHealth().schemaVersion).toBe(NUCLEAR_SUPPORTED_VERSION);
     db.close();
     continuity.close();
+  });
+
+  it("persists isolated continuity across fresh process restarts", () => {
+    const dir = tempDir("ashley-isolated-process-restart-");
+    const plane = createIsolatedDataPlane(dir);
+
+    const first = isolatedBootProcess(dir);
+    expect(`${first.stdout}\n${first.stderr}`).not.toContain("isolated_continuity_file_missing");
+    expect(first.status, `${first.stdout}\n${first.stderr}`).toBe(0);
+    expect(existsSync(plane.continuityDbPath)).toBe(true);
+    const firstResult = JSON.parse(first.stdout.trim()) as {
+      lineageId: string;
+      continuityPath: string;
+      adoptions: number;
+    };
+    expect(firstResult.continuityPath).toBe(plane.continuityDbPath);
+    expect(firstResult.lineageId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(firstResult.adoptions).toBe(1);
+
+    const second = isolatedBootProcess(dir);
+    expect(second.status, `${second.stdout}\n${second.stderr}`).toBe(0);
+    const secondResult = JSON.parse(second.stdout.trim()) as typeof firstResult;
+    expect(secondResult.lineageId).toBe(firstResult.lineageId);
+    expect(secondResult.adoptions).toBe(1);
+
+    const third = isolatedBootProcess(dir);
+    expect(third.status, `${third.stdout}\n${third.stderr}`).toBe(0);
+    const thirdResult = JSON.parse(third.stdout.trim()) as typeof firstResult;
+    expect(thirdResult.lineageId).toBe(firstResult.lineageId);
+    expect(thirdResult.adoptions).toBe(1);
   });
 
   it("treats opening an existing DB as distinct from migrating it", () => {

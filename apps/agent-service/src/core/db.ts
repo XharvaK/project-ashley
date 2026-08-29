@@ -3194,9 +3194,17 @@ function assertNuclearOpenAllowed(
 
 function openDefaultContinuity(
   plane: DataPlaneContext | undefined,
+  nuclearFilePath: string | null,
   migrate: boolean | undefined,
 ): DatabaseSync {
   const shouldMigrate = migrate !== false;
+  if (plane?.kind === "isolated" && nuclearFilePath) {
+    mkdirSync(dirname(plane.continuityDbPath), { recursive: true });
+    return openContinuityDb(new DatabaseSync(plane.continuityDbPath), {
+      dataPlane: plane,
+      migrate: shouldMigrate,
+    });
+  }
   if (plane?.kind !== "production") {
     return openContinuityDb(new DatabaseSync(":memory:"), {
       dataPlane: plane,
@@ -3255,7 +3263,7 @@ export function openNuclearDb(
     (mainFile ? getContinuityForNuclearPath(mainFile) : undefined) ??
     (resolved.continuityOptional
       ? undefined
-      : openDefaultContinuity(resolved.dataPlane, resolved.migrate));
+      : openDefaultContinuity(resolved.dataPlane, mainFile, resolved.migrate));
   migrate(existing, {
     continuity,
     skipContinuityRequirement: resolved.continuityOptional && !continuity,

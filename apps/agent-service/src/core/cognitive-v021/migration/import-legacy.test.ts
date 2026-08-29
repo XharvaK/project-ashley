@@ -1,6 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { openNuclearDb } from "../../db.js";
+import { reservedProductionCognitiveSidecarDbPath } from "../../data-plane.js";
 import { openTestSidecar } from "../test-support.js";
 import { importLegacySemanticState, LegacyImportError } from "./import-legacy.js";
 
@@ -46,7 +47,7 @@ describe("v0.2.1 legacy semantic import", () => {
       importLegacySemanticState({ nuclear, sidecar, mode: "apply" });
       nuclear.prepare("UPDATE mem_messages SET text = 'tampered' WHERE id = 1").run();
       expect(() => importLegacySemanticState({ nuclear, sidecar, mode: "verify" })).toThrowError(expect.objectContaining({ code: "HASH_MISMATCH" }));
-      expect(() => importLegacySemanticState({ nuclear, sidecar, mode: "dry-run", sidecarPath: "C:/Users/Xharv/.composer-assistant/cognitive-v021.db" })).toThrowError(expect.objectContaining({ code: "RESERVED_PATH_REFUSED" }));
+      expect(() => importLegacySemanticState({ nuclear, sidecar, mode: "dry-run", sidecarPath: reservedProductionCognitiveSidecarDbPath() })).toThrowError(expect.objectContaining({ code: "RESERVED_PATH_REFUSED" }));
     } finally {
       nuclear.close();
       sidecar.close();
