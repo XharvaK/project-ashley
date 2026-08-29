@@ -55,6 +55,17 @@ export { claimsCurrentness, claimsUnwitnessedReading } from "./authority/current
 export { classifyOperation, createObservationRequest } from "./observation/request.js";
 export { createEffectProposal, dispatchEffect } from "./effect/proposal.js";
 export { recoverInFlight } from "./effect/recovery.js";
+export * from "./memory/nomination.js";
+export * from "./memory/admission.js";
+export * from "./memory/assertions.js";
+export * from "./memory/supports.js";
+export * from "./memory/views.js";
+export * from "./memory/forget.js";
+export * from "./identity/learned-self.js";
+export * from "./identity/constitution.js";
+export * from "./calibration/occupant.js";
+export * from "./relationship/constraints.js";
+export * from "./migration/import-legacy.js";
 
 export function speechProjectionKey(outboxId: number): `speech:${number}` {
   return `speech:${outboxId}`;

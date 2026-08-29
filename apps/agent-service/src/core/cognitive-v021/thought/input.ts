@@ -21,6 +21,7 @@ import { listConversationEvidence } from "../evidence/conversation-log.js";
 import { listInFlight } from "../effect/in-flight.js";
 import { listWorkingContext } from "../evidence/working-context.js";
 import { retrieveCandidates } from "../retrieval/discover.js";
+import { buildLearnedSelfSlice } from "../identity/learned-self.js";
 
 export type BuildThoughtInputOptions = {
   sidecar: DatabaseSync;
@@ -187,7 +188,7 @@ export function buildThoughtInput(options: BuildThoughtInputOptions): ThoughtInp
     workingContext,
     occupancy,
     constitution: options.constitution,
-    learnedSelfSlice: options.learnedSelfSlice ?? { dispositions: [], interests: [] },
+    learnedSelfSlice: options.learnedSelfSlice ?? buildLearnedSelfSlice(options.sidecar),
     capabilityReality: options.capabilityReality,
     observations: options.observations ?? [],
     retrieval,

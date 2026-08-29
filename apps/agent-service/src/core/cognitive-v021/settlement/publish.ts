@@ -12,6 +12,7 @@ import type {
 import { applyWorkingContextDelta } from "../evidence/working-context.js";
 import { applyConcernDelta } from "../concerns/lineage.js";
 import { applyOccupancyDelta } from "../concerns/occupancy.js";
+import { enqueueDurableNomination } from "../memory/nomination.js";
 
 export type PublicationOptions = {
   origin?: OutboxOrigin;
@@ -71,12 +72,7 @@ function applySubscriptionDelta(db: DatabaseSync, delta: SubscriptionDelta): voi
 }
 
 function applyNomination(db: DatabaseSync, nomination: DurableNomination): void {
-  db.prepare(
-    `INSERT OR IGNORE INTO durable_nominations
-       (nomination_id, cycle_id, generation, assertion_key, statement, memory_kind,
-        dimensions_json, data_classification, supersedes_assertion_key, concern_id, admitted)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
-  ).run(nomination.nominationId, nomination.cycleId, nomination.generation, nomination.assertionKey, nomination.statement, nomination.memoryKind, json(nomination.dimensions), nomination.dataClassification, nomination.supersedesAssertionKey, nomination.concernId);
+  enqueueDurableNomination(db, nomination);
 }
 
 function existingSettlement(db: DatabaseSync, settlementId: string): DbRow | undefined {

@@ -1,6 +1,9 @@
 import type { DatabaseSync } from "node:sqlite";
 import { defaultUnclassifiedConversational, type DataClassification } from "../../privacy/classification.js";
 import { listConversationEvidence } from "../evidence/conversation-log.js";
+import { listMemoryAssertions } from "../memory/assertions.js";
+import { REDACTED_MEMORY_STATEMENT } from "../memory/assertions.js";
+import { listMemorySupports } from "../memory/supports.js";
 import type { RetrievalHit, RetrievalRequest, RetrievalResult } from "../types.js";
 
 export type RetrieveCandidatesInput = {
@@ -53,29 +56,30 @@ function logHits(db: DatabaseSync, input: RetrieveCandidatesInput): RetrievalHit
 
 function memoryHits(db: DatabaseSync, input: RetrieveCandidatesInput): RetrievalHit[] {
   const keys = unique(input.request.assertionKeys);
-  if (keys.length === 0) return [];
-  const placeholders = keys.map(() => "?").join(",");
-  return db.prepare(
-    `SELECT assertion_key, statement, memory_kind, dimensions_json,
-            data_classification, live
-       FROM sidecar_memory_assertions
-      WHERE assertion_key IN (${placeholders})`,
-  ).all(...keys).flatMap((row) => {
-    if (typeof row !== "object" || row === null) return [];
-    const value = row as Record<string, unknown>;
-    const live = Number(value.live ?? 0) === 1;
+  const terms = unique(input.request.triggerTerms.concat(input.request.workingContextTopics));
+  if (keys.length === 0 && terms.length === 0) return [];
+  const requestedKeys = new Set(keys);
+  return listMemoryAssertions(db, { modelContext: true }).flatMap((assertion) => {
+    if (assertion.statement === REDACTED_MEMORY_STATEMENT) return [];
+    const lower = assertion.statement.toLowerCase();
+    const matchedTerms = terms.filter((term) => lower.includes(term.toLowerCase()));
+    const keyMatch = requestedKeys.has(assertion.assertionKey);
+    if (!keyMatch && matchedTerms.length === 0) return [];
+    const live = assertion.live;
+    const supportRefs = listMemorySupports(db, assertion.assertionKey)
+      .map((support) => support.sourceRef ?? support.supportId);
     return [{
-      kind: "key",
+      kind: keyMatch ? "key" : "lexical",
       sourceStore: live ? "live_memory" : "quarantined_memory",
-      ref: String(value.assertion_key ?? ""),
-      snippet: String(value.statement ?? "").slice(0, 500),
-      score: 1,
-      assertionKey: String(value.assertion_key ?? ""),
-      memoryKind: typeof value.memory_kind === "string" ? value.memory_kind as RetrievalHit["memoryKind"] : null,
-      dimensions: null,
-      dataClassification: classification(value.data_classification),
+      ref: assertion.assertionKey,
+      snippet: assertion.statement.slice(0, 500),
+      score: (keyMatch ? 1 : 0) + matchedTerms.length / Math.max(1, terms.length),
+      assertionKey: assertion.assertionKey,
+      memoryKind: assertion.memoryKind,
+      dimensions: assertion.dimensions,
+      dataClassification: assertion.dataClassification,
       live,
-      supportRefs: [],
+      supportRefs,
     } satisfies RetrievalHit];
   });
 }
