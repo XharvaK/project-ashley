@@ -121,7 +121,7 @@ Default `legacy`. Doc still hears Expression/decide path. Candidate speech impos
 
 ### Task 8.7 Slash + scheduler live wiring
 
-- [ ] `/remember` → owner evidence + `RememberDirective`; Thought authors kind; then immediate admission when kernel `v021` (flag-gated)
+- [ ] `/remember` → owner evidence + reference-only `RememberDirective` (no owner prose in inbox); Thought authors kind; then immediate admission when kernel `v021` and referenced evidence is not secret (flag-gated)
 - [ ] `/memory` summary → sidecar Memory views + mechanical evidence narrative when `v021`
 - [ ] `/forget` → `V021_FORGET_TARGET_MATRIX` apply + compatibility cleanup + continuity tombstones when `v021`
 - [ ] `/new` → nuclear archive+resolve; next ingress uses new ConversationId

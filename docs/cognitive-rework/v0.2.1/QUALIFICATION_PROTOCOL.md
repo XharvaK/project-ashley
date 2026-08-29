@@ -122,8 +122,8 @@ Q1 **must** cover with **no live Thought API requirement**:
 - outbox / projector idempotency including global `DeliveryProjectionKey` (`speech:` vs `system:`)
 - retrieval and trigger-term discovery (HY3 + perturbed entities as **fixtures**); live vs quarantined Memory tagging
 - correction lineage
-- admission fencing; `/remember` directive vs Thought-authored kind
-- forget matrix restart (forgotten source cannot re-enter)
+- admission fencing; `/remember` reference-only directive vs Thought-authored kind; credential-shaped `/remember` stores placeholder, inbox has no owner prose, remain non-admitted
+- forget matrix restart (forgotten source cannot re-enter; concern statement redacted; subscription topic keys absent; pending speech cannot deliver)
 - crash / recovery injection
 - migration / import dry-run on isolated copies
 - bot ingress integration test (real ChannelQueue)

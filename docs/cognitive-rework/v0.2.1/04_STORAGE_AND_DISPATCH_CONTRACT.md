@@ -385,7 +385,7 @@ Later phases use these tables. They must not add unversioned tables. Sidecar sch
 | SystemNoticeOutbox | projectionKey | no | system_notice_outbox.projection_key UNIQUE | emit (`system:<id>`) | nuclear projector | 05 | 05 | yes | n/a | 5.proj-key |
 | SystemNoticeOutbox | deliveryIntent | no | system_notice_outbox.delivery_intent_json | emit | projector | 05 | 05 | yes | idempotent | 5.notice |
 | RetrievalHit | sourceStore | no | computed from conversation_evidence_log / sidecar_memory_* | retrieveCandidates | Thought | 03/06 | 03/06 | n/a | n/a | 3.retr 6.q |
-| RememberDirective | rememberRequested | n/a | inbox_events.payload_json | /remember ingress | ThoughtInput | 06/08 | 06 | yes | n/a | 6.remember |
+| RememberDirective | rememberRequested, evidenceLineageId, evidenceRowId, dataClassification | n/a | inbox_events.payload_json (references only; **no owner prose**) | /remember ingress | ThoughtInput | 06/08 | 06 | yes | n/a | 6.remember |
 | V021ForgetTarget | entityType+action | no | continuity forget_preview_targets (+ sidecar apply) | preview | apply | 06 | 06/08 | yes | n/a | 6.forget restart |
 
 No type field may lack a column or exact payload schema. No prose state name may be absent from its union. No critical uniqueness constraint may exist only in runtime code.
@@ -398,34 +398,38 @@ Disposition vocabulary: `REDACT` | `DELETE` | `DETACH` | `CANCEL` | `KEEP_METADA
 
 Maps into continuity `forget_preview_targets.action` as `redact` | `delete` | `detach` plus v021 extensions recorded on the target row (`cancel`, `keep_metadata_only`). `NO_CONTENT` / `NO_ACTION` are not preview targets.
 
+**Two independent dimensions.** `CANCEL` / `DETACH` / suppress control future behavior. `REDACT` removes local semantic content. They are not substitutes. For every content-bearing row, apply both as specified. A cancelled subscription that still stores `topicKeys` is a privacy miss. Redacting `licensed_text` without suppressing an undelivered outbox can still deliver `[redacted]` or the original draft.
+
 | Table | Disposition | forget_preview_targets entityType |
 |---|---|---|
 | conversation_evidence_log | REDACT matching topic (`text` null, `source_status=redacted`) | `v021_conversation_evidence` |
 | conversation_evidence_discord_ids | KEEP_METADATA_ONLY (identity for idempotency; not utterance text) | (no content target) |
 | thought_steps | REDACT forgotten plaintext in `payload_json` | `v021_thought_step` |
 | working_context_items | DETACH/abandon items derived from forgotten source; REDACT payload | `v021_working_context` |
-| concerns | DETACH/resolve if sourced from forgotten material | `v021_concern` |
-| mind_occupancy | DETACH/withdraw related occupancy | `v021_occupancy` |
-| future_triggers | CANCEL if tied to forgotten concern | `v021_future_trigger` |
-| observation_subscriptions | CANCEL if tied to forgotten concern/topic | `v021_subscription` |
+| concerns | DETACH/resolve; REDACT `statement`. Retain only minimal structural metadata (`concern_id`, `status`, `snapshot_hash`) required for lineage/tombstone. | `v021_concern` |
+| mind_occupancy | DETACH/withdraw related occupancy (ids/status only; no statement copy) | `v021_occupancy` |
+| future_triggers | CANCEL; REDACT `payload_json` if it contains forgotten semantic material. Retain trigger_id / status / snapshot_hash as metadata. | `v021_future_trigger` |
+| observation_subscriptions | CANCEL; REDACT semantic `spec_json` (including `scope` and `topicKeys`). Retain subscription_id / cancelled / conversation_id only. A forgotten topic must not remain in a cancelled subscription. | `v021_subscription` |
 | observations | REDACT payload containing forgotten local material | `v021_observation` |
 | effect_receipts | REDACT claims containing forgotten local material | `v021_effect_receipt` |
-| durable_nominations | REDACT/retract | `v021_nomination` |
-| sidecar_memory_assertions | REDACT/retract (`live=0`; statement redacted) | `v021_memory_assertion` |
+| durable_nominations | Retract (do not admit); REDACT `statement` | `v021_nomination` |
+| sidecar_memory_assertions | Retract (`live=0`); REDACT `statement` | `v021_memory_assertion` |
 | sidecar_memory_supports | REDACT | `v021_memory_support` |
 | settlements | REDACT forgotten plaintext in `payload_json` | `v021_settlement` |
-| speech_outbox | REDACT local `licensed_text` (Discord may remain; local-forget honesty) | `v021_speech_outbox` |
-| system_notice_outbox | REDACT `notice_text` if it quoted forgotten content; else KEEP_METADATA_ONLY | `v021_system_notice` |
+| speech_outbox | If `sendStatus` is `pending` / `projecting` / `projected` / `sending` and forgotten content matches: suppress/cancel future delivery. If `nuclearReservationId` is set and not yet delivered, cancel/finalize that reservation through the existing delivery mechanism. Then REDACT local `licensed_text` per local-forget law. Delivered Discord text is not retroactively erased; the local copy may be redacted. Must never later deliver `[redacted]` or the original forgotten draft. | `v021_speech_outbox` |
+| system_notice_outbox | If undelivered and `notice_text` quoted forgotten content: suppress/cancel delivery (same sendable-status rule as speech_outbox), then REDACT `notice_text`. If already delivered: REDACT local text only. Else KEEP_METADATA_ONLY. | `v021_system_notice` |
 | causal_ledger | KEEP_METADATA_ONLY (structural ids; no forgotten content) | `v021_causal_ledger` |
-| inbox_events | REDACT `payload_json` if it contains forgotten text | `v021_inbox_event` |
+| inbox_events | REDACT `payload_json` if it contains forgotten text. RememberDirective payloads are references only and must not reintroduce owner prose. | `v021_inbox_event` |
 | cycle_records | KEEP_METADATA_ONLY | (no content target) |
-| in_flight_effects | REDACT `payload_json` if it contains forgotten material | `v021_in_flight` |
+| in_flight_effects | If still in-flight: do not execute remaining work for forgotten payload; then REDACT `payload_json`. | `v021_in_flight` |
 | admission_log | KEEP_METADATA_ONLY | (no content target) |
 | thought_attempt_counters | NO_CONTENT / NO_ACTION | — |
 | cognitive_sidecar_meta | NO_ACTION | — |
 | nuclear `mem_messages` compatibility copy | REDACT/DELETE per existing forget | existing `mem_messages` |
 
 Continuity preview/tombstone remains authoritative evidence of the forget operation. Backup/provider non-erasure honesty remains. Discovery is mechanical/source-grounded (existing topic targeting extended deterministically). Not an LLM classifier.
+
+Restart test: topic forgotten while a concern is active, a subscription is active, and proactive speech is pending → apply + restart → concern `statement` absent, subscription topic keys absent, matching outbox cannot deliver, forgotten content cannot re-enter Thought.
 
 ---
 

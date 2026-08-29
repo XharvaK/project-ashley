@@ -23,7 +23,7 @@ Phase 05 PASS.
 
 ## TARGET SOURCE STATE
 
-Sidecar Memory tables are the **only** v021 Memory authority. Admission worker reads nominations, applies fence. `/remember` is a mechanical persist directive; Thought authors `MemoryKind`; `admitOwnerSuppliedClaim` runs only after that settlement and must not invent kind. Cognition worker **must not** be called from sidecar tests. LearnedSelf slice is empty or already-admitted (`live=true`) only — never quarantined. IdentitySlice reads nuclear identity; import does not copy identity into sidecar.
+Sidecar Memory tables are the **only** v021 Memory authority. Admission worker reads nominations, applies fence. `/remember` is a mechanical persist directive (reference-only `RememberDirective`; no owner prose in inbox); Thought authors `MemoryKind`; `admitOwnerSuppliedClaim` runs only after that settlement and must not invent kind. Cognition worker **must not** be called from sidecar tests. LearnedSelf slice is empty or already-admitted (`live=true`) only — never quarantined. IdentitySlice reads nuclear identity; import does not copy identity into sidecar.
 
 Shadow: do not write production `memory_assertions`.
 
@@ -89,9 +89,11 @@ Live `/remember` still pins facts.
 
 ### Task 6.4 Explicit `/remember` immediate
 
-- [ ] `/remember` appends owner evidence + `RememberDirective` (`rememberRequested=true`). Thought authors `DurableNomination.memoryKind`. Helper `admitOwnerSuppliedClaim` runs **after** that published settlement and does **not** choose kind.
+- [ ] `/remember` appends owner evidence + reference-only `RememberDirective` (`rememberRequested=true`, `evidenceLineageId`, `evidenceRowId`, `dataClassification`). No `ownerText`. Inbox payload contains no owner prose.
+- [ ] Thought obtains the owner statement from Conversation Evidence via `canEnterModelContext`. Thought authors `DurableNomination.memoryKind`. Helper `admitOwnerSuppliedClaim` runs **after** that published settlement and does **not** choose kind.
+- [ ] Credential-shaped `/remember`: evidence stores placeholder + `secret`; inbox directive is references only; grep/raw sidecar DB shows the secret value absent; no DurableNomination containing the raw secret; remain non-admitted.
 - [ ] Discord `/remember` wiring is **Phase 08** (flag-gated; not Phase 10).
-- [ ] Immediate admission if generation current
+- [ ] Immediate admission if generation current and referenced evidence is not `secret` / `secretOmitted`
 - [ ] Commit: `feat(cognitive-v021): remember directive then Thought-authored nomination`
 
 ### Task 6.5 Correction retraction
@@ -142,10 +144,10 @@ Live `/remember` still pins facts.
 
 ### Task 6.12 v021 forget / memory read (library)
 
-- [ ] Forget topic applies `V021_FORGET_TARGET_MATRIX` (spec §E.4 / 04): evidence, Memory, WC, concerns, occupancy, triggers, subscriptions, thought_steps, settlements, observations, receipts, outbox local text, compatibility `mem_messages`
+- [ ] Forget topic applies `V021_FORGET_TARGET_MATRIX` (spec §E.4 / 04): both behavior (CANCEL/DETACH/suppress) and content (REDACT) on every content-bearing table, including concern `statement`, subscription `spec_json`, and undelivered speech_outbox suppress-then-redact
 - [ ] Continuity preview/tombstone KEEP; uses `v021_*` entity types
 - [ ] Memory view for `/memory` reads sidecar `OwnerKnowledgeView`, not `mem_facts` as authority
-- [ ] Restart after apply: forgotten source cannot re-enter Thought via log, Memory, WC, concern, observation, settlement payload, compatibility, or quarantine retrieval
+- [ ] Restart after apply with active concern + active subscription + pending proactive speech: concern statement absent, subscription topic keys absent, outbox cannot deliver, forgotten content cannot re-enter Thought via log, Memory, WC, observation, settlement payload, compatibility, or quarantine retrieval
 - [ ] Commit: `feat(cognitive-v021): forget and memory summary use sidecar authority`
 
 ### Task 6.13 Retrieval live vs quarantine

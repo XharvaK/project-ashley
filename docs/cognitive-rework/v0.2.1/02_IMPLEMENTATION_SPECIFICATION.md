@@ -111,8 +111,8 @@ export type CycleRecord = {
 
 1. One **active publisher generation** per `conversationId`.
 2. Owner inbound **always appends** to the evidence log first (inbox), even if a cycle is `thinking`.
-3. **Compose** (default): no speech outbox **published** for this generation AND no irreversible effect `in_flight` → attach new log ids; Thought continues or restarts interpret; Workspace drafts discarded; generation unchanged.
-4. **Preempt:** outbox published OR irreversible in_flight → `generation += 1`; suppress **undelivered** outbox of old generation; keep in_flight receipts for the new generation; do not unsend delivered Discord.
+3. **Compose** (default): no speech outbox **published** for this generation AND no in-flight Effect → attach new log ids; Thought continues or restarts interpret; Workspace drafts discarded; generation unchanged. Every `in_flight_effects` row is an Effect and is treated as effectful. There is no `replaySafe` flag on effects.
+4. **Preempt:** outbox published OR any in-flight Effect → `generation += 1`; suppress **undelivered** outbox of old generation; keep in_flight receipts for the new generation; do not unsend delivered Discord.
 5. Result for wrong `generation` → ignore (no publish, no outbox send).
 6. Cancellation: abort of Discord turn maps to: if unpublished, drop Workspace and mark cycle `idle` without settlement; if published, outbox still sends.
 7. Late provider result: ignore if `generation` mismatch; if match and not yet published, Thought may integrate.
@@ -501,7 +501,7 @@ Cancellation: abort `completeChat` `signal` when generation is preempted. **Iden
 
 **Malformed model result:** same pass, bounded structural retry; then `failure.reason=malformed`. No publish.
 
-**Compose while thinking:** cancel in-flight model via `signal`; bump is **not** required if no published outbox and no irreversible in_flight — restart interpret as **new pass, same generation** with fuller log. Preempt if outbox published or irreversible in_flight — new generation; stale results ignored.
+**Compose while thinking:** cancel in-flight model via `signal`; bump is **not** required if no published outbox and no in-flight Effect — restart interpret as **new pass, same generation** with fuller log. Preempt if outbox published or any in-flight Effect — new generation; stale results ignored. Every `in_flight_effects` row is an Effect. Do not use `replaySafe` on effects.
 
 **Invariant:** only the current **accepted generation** may publish meaning/speech. Raw model call attempts may be > 1. Tests must not require `thoughtModelAttempts === 1` for rapid-message scenarios. Tests must require `acceptedSettlements === 1` and stale drafts not delivered.
 
@@ -735,21 +735,30 @@ Admission must not semantically decide `owner_preference` vs `owner_goal` vs `ow
 ```ts
 export type RememberDirective = {
   rememberRequested: true;
-  ownerText: string;
+  evidenceLineageId: string;
+  evidenceRowId: string;
   dataClassification: DataClassification;
 };
 ```
 
+The directive is **reference-based**. It must not contain owner prose. `inbox_events.payload_json` must not contain a second copy of owner text.
+
 Frozen flow:
 
 1. `/remember` text is explicit **owner intent to persist**.
-2. Durable owner evidence is appended (same privacy rules as ingress). Inbox/cycle is `owner_message` with mechanical `rememberRequested=true` in payload (`RememberDirective`).
+2. Durable owner evidence is appended (same privacy rules as ingress). On `detectCredentialShape` hit: persist `CREDENTIAL_OMITTED_PLACEHOLDER`, `dataClassification="secret"`, `secretOmitted=true`. Inbox/cycle is `owner_message` with mechanical `RememberDirective` in payload: `rememberRequested=true`, `evidenceLineageId`, `evidenceRowId`, `dataClassification`. **No `ownerText` field. No raw owner prose in the inbox payload.**
 3. Sensitivity `none`/`private` maps through KEEP `mapLegacySensitivity`. `null`/absent → `defaultUnclassifiedConversational()` (`never_public`). Never silently `ordinary`.
-4. Thought sees the exact owner text plus `rememberDirective`. Thought authors `DurableNomination` including `MemoryKind` and epistemic dimensions.
-5. Because the request was explicit, deterministic admission **may run immediately after** the published settlement for that generation. Admission copies the nomination; it does **not** reinterpret the statement or change `MemoryKind`.
-6. Resulting assertion remains owner-sourced (`source=owner_utterance`, `reliability=owner_supplied`) when Thought tagged it that way.
+4. Thought obtains the owner statement from the already privacy-governed Conversation Evidence record (`rowId` / `lineageId`):
+   - `ordinary` / `sensitive` / `never_public`: Thought receives only what `canEnterModelContext` permits;
+   - `secret` / credential-shaped text: raw text is never persisted in inbox payload and never supplied to Thought.
+5. Thought authors `DurableNomination` including `MemoryKind` and epistemic dimensions from the permitted evidence text.
+6. Because the request was explicit, deterministic admission **may run immediately after** the published settlement for that generation. Admission copies the nomination; it does **not** reinterpret the statement or change `MemoryKind`.
+7. Resulting assertion remains owner-sourced (`source=owner_utterance`, `reliability=owner_supplied`) when Thought tagged it that way.
+8. Explicit `/remember` on secret / credential-shaped material **fails safely**: remain non-admitted. No DurableNomination containing the raw secret. No secret Memory assertion.
 
-Helper `admitOwnerSuppliedClaim` is the immediate-admission runner **after** a settlement that already contains the nomination. Tests must not let the helper invent `MemoryKind`.
+Helper `admitOwnerSuppliedClaim` is the immediate-admission runner **after** a settlement that already contains the nomination. Tests must not let the helper invent `MemoryKind`. Immediate admission does not run when the referenced evidence is `secret` or `secretOmitted`.
+
+Required test: credential-shaped `/remember` → evidence stores placeholder + `secret` classification → inbox directive contains references only → grep/raw sidecar DB inspection shows the secret value absent → no DurableNomination containing the raw secret.
 
 ### E.4 `V021_FORGET_TARGET_MATRIX`
 
@@ -794,7 +803,7 @@ export type V021ForgetTarget = {
 
 Two-phase: preview → owner confirmation → apply → receipt/tombstone. Continuity `forget_preview_targets` / `forget_tombstone_targets` store these entity types. Topic discovery is the existing mechanical source-grounded matcher, extended deterministically to sidecar stores. Not an LLM classifier.
 
-Restart test: forget applied → process restart → forgotten source cannot re-enter Thought through log, live Memory, WC, concern, observation, old settlement payload, compatibility projection, or quarantine retrieval.
+Restart test: forget applied while a concern is active, a subscription is active, and proactive speech is pending → process restart → forgotten source cannot re-enter Thought through log, live Memory, WC, concern statement, observation, old settlement payload, compatibility projection, or quarantine retrieval. Concern `statement` absent. Subscription `spec_json` topic keys absent. Matching undelivered `speech_outbox` cannot deliver (suppressed/cancelled, then local `licensed_text` redacted). Forgotten content cannot re-enter Thought.
 
 ---
 

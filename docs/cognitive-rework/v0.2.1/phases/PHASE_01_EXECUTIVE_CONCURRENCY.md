@@ -73,7 +73,7 @@ Production still throws `chat_in_progress` on `/chat/text`. Ingress endpoint exi
 
 ### Task 1.2 Inbox never drops during thinking
 
-- [ ] Failing test: cycle state `thinking`; append owner message; log count +1; `composeOrPreempt` returns `compose` when no published outbox and no in_flight irreversible
+- [ ] Failing test: cycle state `thinking`; append owner message; log count +1; `composeOrPreempt` returns `compose` when no published outbox and no in-flight Effect
 - [ ] Expected failure: fence missing
 - [ ] Implement `admitCycle`, `composeOrPreempt`
 - [ ] PASS
@@ -82,7 +82,7 @@ Production still throws `chat_in_progress` on `/chat/text`. Ingress endpoint exi
 ### Task 1.3 Preempt suppresses undelivered outbox
 
 - [ ] Failing test: publish outbox pending; new owner message → `preempt`, generation 2, old outbox `suppressed`, new generation active
-- [ ] Irreversible in_flight (flag `replaySafe=false`) also preempts
+- [ ] Any in-flight Effect is treated as effectful for compose/preempt according to the frozen Effect contract (every `in_flight_effects` row is an Effect; no `replaySafe` on InFlightRecord or DDL)
 - [ ] Delivered outbox (`sendStatus=delivered`) is **not** unsent
 - [ ] PASS
 - [ ] Commit: `feat(cognitive-v021): preempt generation and suppress stale outbox`
