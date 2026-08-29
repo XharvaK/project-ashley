@@ -43,7 +43,7 @@ export function assertCausalInvariants(bundle: CausalBundle): void {
       triggerKind?: string;
     };
     if (
-      candidate.triggerKind === "idle" &&
+      candidate.triggerKind === "idle_opportunity" &&
       bundle.evidenceShownToThought.length === 0 &&
       bundle.thoughtModelAttempts !== 0
     ) {
@@ -54,13 +54,13 @@ export function assertCausalInvariants(bundle: CausalBundle): void {
 
   const currentSpeech = speech(settlement);
   const commitments = [
-    ...currentSpeech.epistemicCommitments,
-    ...currentSpeech.conversationalCommitments,
+    ...settlement.commitments.epistemic,
+    ...settlement.commitments.conversational,
   ];
   if (
     currentSpeech.mode === "draft" &&
     commitments.length === 0 &&
-    currentSpeech.surfaceDraft.trim().length > 0
+    (currentSpeech.surfaceDraft?.trim().length ?? 0) > 0
   ) {
     fail("empty_commitments_with_draft");
   }

@@ -23,19 +23,66 @@ function bundle(overrides: Partial<CausalBundle> = {}): CausalBundle {
   };
 }
 
-const draftSettlement = {
-  settlementId: "settlement-1",
-  cycleId: "cycle-1",
-  generation: 1,
-  speech: {
-    mode: "draft",
-    epistemicCommitments: ["The source says hello."],
-    conversationalCommitments: [],
-    surfaceDraft: "hello",
-    finalLicensedText: "hello",
-    mustNot: [],
-  },
-} as CausalBundle["settlement"];
+function draftSettlement(): NonNullable<CausalBundle["settlement"]> {
+  return {
+    settlementId: "settlement-1",
+    schemaVersion: 1,
+    cycleId: "cycle-1",
+    generation: 1,
+    authorityEpoch: 1,
+    occupantId: "occupant-1",
+    architectureEpoch: "v0.2.1",
+    triggerRef: "evidence-1",
+    interpretation: {
+      discourseActs: ["inform"],
+      referentBindings: [],
+      corrections: [],
+      unresolvedAmbiguities: [],
+      topics: ["greeting"],
+    },
+    commitments: {
+      epistemic: [
+        {
+          dimensions: {
+            source: "owner_utterance",
+            status: "asserted",
+            time: "current",
+            reliability: "owner_supplied",
+          },
+          statement: "The source says hello.",
+        },
+      ],
+      conversational: ["answer"],
+      stance: {
+        warmth: "medium",
+        humorAllowed: false,
+        disagreement: false,
+        uncertaintyDisplay: true,
+      },
+    },
+    speech: {
+      mode: "draft",
+      mustSay: [],
+      mustNot: [],
+      surfaceDraft: "hello",
+      acceptableRealizations: ["hello"],
+      presentationDirectives: [],
+      finalLicensedText: "hello",
+    },
+    workingContextDelta: [],
+    concernDeltas: [],
+    occupancyDelta: [],
+    futureTriggers: [],
+    subscriptions: [],
+    durableNominations: [],
+    operations: {
+      observationsConsumed: [],
+      effectsCompleted: [],
+      intentsStillInFlight: [],
+    },
+    authority: { objectionsApplied: [], revisionCount: 0 },
+  };
+}
 
 describe("cognitive v0.2.1 causal acceptance harness", () => {
   it("rejects delivered Ashley text without a published settlement", () => {
@@ -46,11 +93,14 @@ describe("cognitive v0.2.1 causal acceptance harness", () => {
 
   it("rejects a non-empty draft with no epistemic or conversational commitments", () => {
     const settlement = {
-      ...draftSettlement,
+      ...draftSettlement(),
+      commitments: {
+        ...draftSettlement().commitments,
+        epistemic: [],
+        conversational: [],
+      },
       speech: {
-        ...draftSettlement!.speech,
-        epistemicCommitments: [],
-        conversationalCommitments: [],
+        ...draftSettlement().speech,
         surfaceDraft: "unsupported draft",
       },
     } as CausalBundle["settlement"];
@@ -73,7 +123,7 @@ describe("cognitive v0.2.1 causal acceptance harness", () => {
     expect(() =>
       assertCausalInvariants(
         bundle({
-          settlement: draftSettlement,
+          settlement: draftSettlement(),
           outboxText: "hello",
           thoughtModelAttempts: 1,
           acceptedSettlements: 1,
