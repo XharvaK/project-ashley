@@ -21,6 +21,7 @@ import type {
   KernelRunResult,
   OutboxDeliveryProjector,
 } from "./core/cognitive-v021/types.js";
+import { replicateLegacyDeliveredAshley } from "./core/cognitive-v021/shadow/replicator.js";
 
 export type CognitiveDispatchResult = KernelRunResult | null;
 
@@ -251,6 +252,34 @@ export class AgentManager {
     const id = randomBytes(8).toString("hex");
     this.saveState({ activeSessionId: id });
     return id;
+  }
+
+  finalizeDeliveryReservation(
+    ownerId: string,
+    reservationId: number,
+    cause: "complete" | "cancel" | "send_failure" | "first_bubble_deadline" | "delivery_lease" = "complete",
+    onArchivalAssistant?: (text: string) => void,
+  ) {
+    const before = env.cognitiveKernel === "shadow"
+      ? this.core.getDeliveryStatus(ownerId, reservationId)
+      : null;
+    const result = this.core.finalizeDeliveryReservation(ownerId, reservationId, cause, onArchivalAssistant);
+    if (env.cognitiveKernel === "shadow" && before?.reservation && result.receiptCount > 0 && result.deliveredText) {
+      const sidecar = this.openCognitiveSidecar();
+      if (sidecar) {
+        replicateLegacyDeliveredAshley(sidecar, {
+          ownerId,
+          conversationId: before.reservation.threadId,
+          threadId: before.reservation.threadId,
+          reservationId,
+          text: result.deliveredText,
+          discordMessageIds: before.bubbles
+            .filter((bubble) => bubble.discordMessageId)
+            .map((bubble) => bubble.discordMessageId!),
+        });
+      }
+    }
+    return result;
   }
 
   async handleTextChat(

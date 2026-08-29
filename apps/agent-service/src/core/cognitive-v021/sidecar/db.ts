@@ -12,6 +12,7 @@ import {
 import {
   COGNITIVE_SIDECAR_SCHEMA_V1,
 } from "./schema.js";
+import { recoverCognitiveSidecar } from "./recovery.js";
 
 export type CognitiveSidecarDataPlane = Pick<DataPlaneContext, "kind">;
 
@@ -111,6 +112,7 @@ export function openCognitiveSidecarDb(
     existing.exec(`PRAGMA user_version = ${COGNITIVE_SIDECAR_SCHEMA_VERSION}`);
     ensureMeta(existing);
     existing.exec("COMMIT");
+    recoverCognitiveSidecar(existing);
   } catch (error) {
     try {
       existing.exec("ROLLBACK");

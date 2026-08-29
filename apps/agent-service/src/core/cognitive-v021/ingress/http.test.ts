@@ -1,7 +1,7 @@
 import express from "express";
 import { describe, expect, it } from "vitest";
 import { DatabaseSync } from "node:sqlite";
-import { createCognitiveIngressHandler } from "./http.js";
+import { admitCognitiveIngress, createCognitiveIngressHandler } from "./http.js";
 import { openTestSidecar } from "../test-support.js";
 import { openNuclearDb } from "../../db.js";
 import { createIsolatedDataPlane } from "../../data-plane.js";
@@ -35,4 +35,28 @@ describe("v0.2.1 durable ingress", () => {
       sidecar.close();
     }
   });
+
+  it("replays duplicate Discord ingress without creating a second evidence lineage or inbox event", () => {
+    const sidecar = openTestSidecar();
+    const nuclear = openNuclearDb(new DatabaseSync(":memory:"));
+    const first = admitDirect(sidecar, nuclear, "d-duplicate", "first");
+    const replay = admitDirect(sidecar, nuclear, "d-duplicate", "changed text");
+    expect(first.duplicate).toBeUndefined();
+    expect(replay.duplicate).toBe(true);
+    expect(replay.evidenceRowId).toBe(first.evidenceRowId);
+    expect(sidecar.prepare("SELECT COUNT(*) AS count FROM conversation_evidence_log").get()).toMatchObject({ count: 1 });
+    expect(sidecar.prepare("SELECT COUNT(*) AS count FROM inbox_events").get()).toMatchObject({ count: 1 });
+    expect(sidecar.prepare("SELECT COUNT(*) AS count FROM cycle_records").get()).toMatchObject({ count: 1 });
+    nuclear.close(); sidecar.close();
+  });
 });
+
+function admitDirect(sidecar: ReturnType<typeof openTestSidecar>, nuclear: DatabaseSync, id: string, message: string) {
+  return admitCognitiveIngress(sidecar, nuclear, {
+    userId: "doc",
+    message,
+    channel: "discord",
+    inboundDiscordMessageIds: [id],
+    finalFragmentReceivedAtMs: 1,
+  }, { nowMs: 1 });
+}

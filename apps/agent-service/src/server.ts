@@ -1984,7 +1984,7 @@ export function createServer(
       if (!Number.isFinite(id)) {
         throw new AppError("not_found", "reservation not found", 404);
       }
-      const result = manager.core.finalizeDeliveryReservation(
+      const result = manager.finalizeDeliveryReservation(
         owner,
         id,
         cause ?? "complete",

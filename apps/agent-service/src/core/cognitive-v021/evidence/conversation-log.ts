@@ -243,7 +243,26 @@ export function appendOwnerUtterance(
   db: DatabaseSync,
   input: AppendEvidenceInput,
 ): ConversationEvidenceRecord {
-  return appendEvidence(db, "owner", input);
+  return appendOwnerUtteranceWithStatus(db, input).evidence;
+}
+
+export type AppendOwnerUtteranceResult = {
+  evidence: ConversationEvidenceRecord;
+  duplicate: boolean;
+};
+
+/** Admit owner evidence while exposing the Discord-id replay bit to ingress. */
+export function appendOwnerUtteranceWithStatus(
+  db: DatabaseSync,
+  input: AppendEvidenceInput,
+): AppendOwnerUtteranceResult {
+  if (!input.editOfRowId) {
+    for (const id of uniqueIds(input.discordMessageIds)) {
+      const existing = existingByDiscordId(db, id);
+      if (existing) return { evidence: existing, duplicate: true };
+    }
+  }
+  return { evidence: appendEvidence(db, "owner", input), duplicate: false };
 }
 
 export function appendSystemEvent(

@@ -13,6 +13,7 @@ export {
   readCognitiveSidecarMeta,
   updateCognitiveAuthorityEpoch,
 } from "./sidecar/db.js";
+export * from "./sidecar/recovery.js";
 export { reservedProductionCognitiveSidecarDbPath } from "../data-plane.js";
 export * from "./evidence/conversation-log.js";
 export * from "./cycle/inbox.js";
@@ -73,6 +74,7 @@ export * from "./dispatch/live.js";
 export * from "./dispatch/health.js";
 export * from "./shadow/runner.js";
 export * from "./shadow/replicator.js";
+export * from "./evidence/compatibility-projector.js";
 
 export function speechProjectionKey(outboxId: number): `speech:${number}` {
   return `speech:${outboxId}`;

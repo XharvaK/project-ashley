@@ -22,11 +22,56 @@ import {
 } from "./core/sandbox/durable-job-runner.js";
 import { runProductionDurableThought } from "./core/sandbox/durable-thought-production.js";
 import { claimWeeklyReviewDelivery } from "./core/sandbox/weekly-review-delivery.js";
+import { completeChat } from "./mistral-client.js";
+import { checkAuthority } from "./core/cognitive-v021/authority/check.js";
+import { loadAuthorityPacks } from "./core/cognitive-v021/authority/packs.js";
+import { getCapabilityReality } from "./core/cognitive-v021/thought/capability-reality.js";
+import { readIdentitySlice } from "./core/cognitive-v021/identity/constitution.js";
+import { runPerceptionBeforeThought } from "./core/cognitive-v021/perception/adapter.js";
+import { createOutboxProjector } from "./core/cognitive-v021/delivery/outbox-projector.js";
+import { startInboxConsumer, type InboxConsumerHandle } from "./core/cognitive-v021/cycle/inbox-consumer.js";
+import type { KernelDeps, Observation } from "./core/cognitive-v021/types.js";
 
 export async function serveAgent(manager: AgentManager): Promise<void> {
   await manager.init();
   const sandboxBrokerClient = createConfiguredUnixSandboxClient();
-  const app = createServer(manager, { sandboxBrokerClient });
+  const cognitiveSidecar = env.cognitiveKernel === "legacy"
+    ? null
+    : manager.openCognitiveSidecar();
+  let cognitiveConsumer: InboxConsumerHandle | null = null;
+  if (cognitiveSidecar) {
+    const nuclear = manager.core.getDatabase();
+    const ownerId = env.memoryOwnerId || env.discordOwnerId || "default";
+    const capabilityReality = getCapabilityReality(nuclear);
+    const projector = createOutboxProjector(cognitiveSidecar, nuclear);
+    const deps: KernelDeps = {
+      nowMs: () => Date.now(),
+      attentionDb: nuclear,
+      completeChat,
+      runPerception: async (input): Promise<Observation[]> => runPerceptionBeforeThought({
+        ...input,
+        runPerception: async () => [],
+      }),
+      executeObservation: async () => { throw new Error("observation_unavailable"); },
+      executeEffect: async () => { throw new Error("effect_unavailable"); },
+      checkAuthority,
+      loadAuthorityPacks: () => loadAuthorityPacks(cognitiveSidecar, { capability: getCapabilityReality(nuclear) }),
+      expressionEnabled: false,
+      projectOutbox: (outboxId) => projector.project(outboxId),
+      projectSystemNotice: (noticeId) => projector.projectSystem(noticeId),
+      constitution: readIdentitySlice(nuclear, ownerId),
+      capabilityReality,
+    };
+    manager.configureCognitiveDispatch({ deps, projector });
+    cognitiveConsumer = startInboxConsumer(cognitiveSidecar, {
+      workerId: `agent-service:${process.pid}`,
+      handler: async (event) => {
+        await manager.dispatchCognitiveEvent(event);
+      },
+      onError: (error, event) => console.error(`[cognitive-v021] event failed id=${event?.id ?? "?"}`, error),
+    });
+  }
+  const app = createServer(manager, { sandboxBrokerClient, cognitiveSidecar });
   const server = listen(app);
 
   startNuclearCuriosityLoop(
@@ -96,7 +141,9 @@ export async function serveAgent(manager: AgentManager): Promise<void> {
     stopNuclearCuriosityLoop();
     stopCognitionLoop();
     stopEngineeringAutonomyLoops();
-  await stopDurableOperationalJobRunner();
+    cognitiveConsumer?.stop();
+    if (cognitiveConsumer) await cognitiveConsumer.done;
+    await stopDurableOperationalJobRunner();
     sandboxBrokerClient?.close();
     await manager.shutdown();
     server.close();
