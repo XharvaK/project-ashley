@@ -1,4 +1,3 @@
-import type { ChatMessage } from "../model-routing/types.js";
 import type {
   AuthorityEpoch,
   AuthorityPacks,
@@ -7,7 +6,6 @@ import type {
   EffectProposal,
   ObservationRequest,
   PublishedCognitiveSettlement,
-  ThoughtCompleteOptions,
   ThoughtSettlementDraft,
 } from "./types.js";
 import { assertCausalInvariants } from "./acceptance/causal-harness.js";
@@ -39,6 +37,16 @@ export type {
   PublicationOptions,
   PublicationResult,
 } from "./settlement/publish.js";
+export { validateThoughtSettlementDraft, assertValidThoughtSettlementDraft } from "./settlement/validate.js";
+export { buildThoughtInput } from "./thought/input.js";
+export { parseThoughtStepOutput } from "./thought/parse.js";
+export {
+  invokeThoughtComplete,
+  runThoughtModel,
+  runCognitiveCycle,
+} from "./thought/run.js";
+export { getCapabilityReality } from "./thought/capability-reality.js";
+export { adaptPerception, runPerceptionBeforeThought } from "./perception/adapter.js";
 
 export function tokenizeForDiscovery(text: string): string[] {
   return text
@@ -54,29 +62,6 @@ export function speechProjectionKey(outboxId: number): `speech:${number}` {
 
 export function systemProjectionKey(noticeId: number): `system:${number}` {
   return `system:${noticeId}`;
-}
-
-export function invokeThoughtComplete(
-  _messages: ChatMessage[],
-  _options: ThoughtCompleteOptions,
-): never {
-  throw new Error("not_implemented_until_phase_2");
-}
-
-export function runCognitiveCycle(..._args: never[]): never {
-  throw new Error("not_implemented_until_phase_2");
-}
-
-export function validateThoughtSettlementDraft(
-  _draft: unknown,
-  _active?: {
-    cycleId: string;
-    generation: number;
-    occupantId: string;
-    authorityEpoch: AuthorityEpoch;
-  },
-): never {
-  throw new Error("not_implemented_until_phase_2");
 }
 
 export function checkAuthority(

@@ -144,18 +144,16 @@ type FrozenTypeNames = [
 void (null as unknown as FrozenTypeNames);
 
 describe("cognitive v0.2.1 frozen exports", () => {
-  it("keeps phase stubs explicit until their implementation phase", () => {
+  it("keeps later-phase stubs explicit while Phase 02 contracts are live", () => {
     for (const stub of [
-      invokeThoughtComplete,
-      publishSemanticTransaction,
-      runCognitiveCycle,
-      validateThoughtSettlementDraft,
       checkAuthority,
       evaluateExternalizationGate,
     ]) {
-      expect(() => stub(undefined as never, undefined as never)).toThrow(
-        /not_implemented_until_phase_/,
-      );
+      expect(stub).toBeTypeOf("function");
     }
+    expect(invokeThoughtComplete).toBeTypeOf("function");
+    expect(publishSemanticTransaction).toBeTypeOf("function");
+    expect(runCognitiveCycle).toBeTypeOf("function");
+    expect(validateThoughtSettlementDraft).toBeTypeOf("function");
   });
 });
