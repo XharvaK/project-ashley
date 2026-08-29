@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import type { Server } from "node:http";
+import { DatabaseSync } from "node:sqlite";
 import { AgentManager } from "./agent.js";
 import { env } from "./env.js";
 import { toErrorResponse, AppError } from "./errors.js";
@@ -14,6 +15,8 @@ import type { SandboxBrokerClient } from "./core/sandbox/broker-client.js";
 import type { SandboxApprovalPathTarget, SandboxApprovalProposalSource, SandboxApprovalProposalStatus } from "./core/sandbox/approval-proposal.js";
 import type { SandboxCapabilityId, SandboxRiskClass } from "@composer-assistant/sandbox-policy";
 import type { ErrorCode } from "./errors.js";
+import { openCognitiveSidecarDb } from "./core/cognitive-v021/sidecar/db.js";
+import { createCognitiveIngressHandler } from "./core/cognitive-v021/ingress/http.js";
 import {
   admitOwnerCorrection,
   type AdmissionPath,
@@ -285,11 +288,26 @@ function gone(_req: express.Request, res: express.Response): void {
 
 export function createServer(
   manager: AgentManager,
-  options: { sandboxBrokerClient?: SandboxBrokerClient | null } = {},
+  options: {
+    sandboxBrokerClient?: SandboxBrokerClient | null;
+    cognitiveSidecar?: DatabaseSync | null;
+  } = {},
 ): express.Express {
   const app = express();
   app.use(cors());
   app.use(express.json({ limit: "2mb" }));
+
+  let cognitiveSidecar = options.cognitiveSidecar ?? null;
+  function getCognitiveSidecar(): DatabaseSync {
+    if (cognitiveSidecar) return cognitiveSidecar;
+    const dataPlane = manager.dataPlane;
+    if (!dataPlane) throw new AppError("agent_not_ready", "Cognitive sidecar unavailable", 503);
+    cognitiveSidecar = openCognitiveSidecarDb(
+      new DatabaseSync(dataPlane.cognitiveSidecarDbPath),
+      { dataPlane },
+    );
+    return cognitiveSidecar;
+  }
 
   function approvalService(ownerId: string): SandboxApprovalService {
     return new SandboxApprovalService({
@@ -1729,6 +1747,23 @@ export function createServer(
   });
 
   app.post("/chat", gone);
+
+  app.post(
+    "/chat/ingress",
+    (req, res, next) => {
+      try {
+        createCognitiveIngressHandler({
+          sidecar: getCognitiveSidecar(),
+          nuclearDb: manager.core.getDatabase(),
+          authorizeOwner: (userId) => { requireOwner(userId); },
+          maxMessageLength: MAX_DISCORD_MESSAGE,
+        })(req, res, next);
+      } catch (err) {
+        const { status, body } = toErrorResponse(err);
+        res.status(status).json(body);
+      }
+    },
+  );
 
   app.post("/chat/text", async (req, res) => {
     try {

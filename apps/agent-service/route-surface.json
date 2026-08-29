@@ -69,6 +69,7 @@
     { "method": "GET", "path": "/events", "ownerScope": "internal", "lifecycle": "active" },
     { "method": "POST", "path": "/session/start", "ownerScope": "internal", "lifecycle": "active" },
     { "method": "POST", "path": "/chat", "ownerScope": "internal", "lifecycle": "retired" },
+    { "method": "POST", "path": "/chat/ingress", "ownerScope": "owner_required", "lifecycle": "active" },
     { "method": "POST", "path": "/chat/text", "ownerScope": "owner_required", "lifecycle": "active" },
     { "method": "GET", "path": "/delivery/:id", "ownerScope": "owner_required", "lifecycle": "active" },
     { "method": "GET", "path": "/delivery/pending", "ownerScope": "owner_required", "lifecycle": "active" },

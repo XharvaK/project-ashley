@@ -26,6 +26,19 @@ export {
   updateCognitiveAuthorityEpoch,
 } from "./sidecar/db.js";
 export { reservedProductionCognitiveSidecarDbPath } from "../data-plane.js";
+export * from "./evidence/conversation-log.js";
+export * from "./cycle/inbox.js";
+export * from "./cycle/fence.js";
+export * from "./cycle/inbox-consumer.js";
+export * from "./speech/outbox.js";
+export * from "./effect/in-flight.js";
+export {
+  publishSemanticTransaction,
+} from "./settlement/publish.js";
+export type {
+  PublicationOptions,
+  PublicationResult,
+} from "./settlement/publish.js";
 
 export function tokenizeForDiscovery(text: string): string[] {
   return text
@@ -48,10 +61,6 @@ export function invokeThoughtComplete(
   _options: ThoughtCompleteOptions,
 ): never {
   throw new Error("not_implemented_until_phase_2");
-}
-
-export function publishSemanticTransaction(..._args: never[]): never {
-  throw new Error("not_implemented_until_phase_1");
 }
 
 export function runCognitiveCycle(..._args: never[]): never {
