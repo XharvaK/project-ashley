@@ -6,6 +6,15 @@ import {
   DELEGATED_RUNTIME_KEY_ID,
 } from "@composer-assistant/sandbox-broker";
 import { SANDBOX_AUTONOMY_LIFECYCLE_VALUES } from "./core/sandbox/lifecycle.js";
+import type { KernelMode } from "./core/cognitive-v021/types.js";
+
+export function parseCognitiveKernel(raw: string | undefined): KernelMode {
+  const value = raw?.trim() ?? "";
+  if (value === "" || value === "legacy") return "legacy";
+  if (value === "shadow") return "shadow";
+  if (value === "v021") return "v021";
+  throw new Error("invalid_ASHLEY_COGNITIVE_KERNEL");
+}
 
 function applyDotEnvFile(envPath: string): void {
   if (!existsSync(envPath)) return;
@@ -156,6 +165,7 @@ function createEnv() {
     process.env.ASHLEY_COGNITION_MODE === "apply"
       ? ("apply" as const)
       : ("observe" as const),
+  cognitiveKernel: parseCognitiveKernel(process.env.ASHLEY_COGNITIVE_KERNEL),
   cognitionDispatchIntervalSec: numericEnv(
     "COGNITION_DISPATCH_INTERVAL_SEC",
     30,
