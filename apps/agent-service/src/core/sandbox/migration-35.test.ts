@@ -9,6 +9,7 @@ import {
   openContinuityDb,
   getPendingNuclearMigration,
 } from "../continuity/db.js";
+import { C1_INDEXES, C1_TABLES } from "../memory/migration.js";
 import { ensureNuclearV34Schema } from "./migration-34.js";
 
 function columnNames(db: DatabaseSync, table: string): string[] {
@@ -23,6 +24,19 @@ function schemaVersion(db: DatabaseSync): number {
     | { user_version?: number }
     | undefined;
   return Number(row?.user_version ?? 0);
+}
+
+function removeCurrentC1Objects(db: DatabaseSync): void {
+  // The fixture is initialized from the current schema, then rewound to v34.
+  // Remove only the additive C1 objects so v35 sees a genuine pre-C1 database.
+  db.exec("PRAGMA foreign_keys = OFF");
+  for (const index of C1_INDEXES) {
+    db.exec(`DROP INDEX IF EXISTS ${index}`);
+  }
+  for (const table of [...C1_TABLES].reverse()) {
+    db.exec(`DROP TABLE IF EXISTS ${table}`);
+  }
+  db.exec("PRAGMA foreign_keys = ON");
 }
 
 describe("Nuclear Migration 35 (delivery lane separation and interrupted recovery)", () => {
@@ -110,6 +124,7 @@ describe("Nuclear Migration 35 (delivery lane separation and interrupted recover
     try {
       // Initialize up to v34 with continuity
       openNuclearDb(nuclear, { continuity, migrate: true });
+      removeCurrentC1Objects(nuclear);
       nuclear.exec(`PRAGMA user_version = 34;`);
       continuity
         .prepare("UPDATE lineage_state SET nuclear_schema_version = 34 WHERE id = 1")
