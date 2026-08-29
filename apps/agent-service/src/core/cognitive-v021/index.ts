@@ -47,14 +47,10 @@ export {
 } from "./thought/run.js";
 export { getCapabilityReality } from "./thought/capability-reality.js";
 export { adaptPerception, runPerceptionBeforeThought } from "./perception/adapter.js";
-
-export function tokenizeForDiscovery(text: string): string[] {
-  return text
-    .toLowerCase()
-    .split(/[^a-z0-9à-ÿ]+/i)
-    .map((token) => token.trim())
-    .filter((token) => token.length >= 1);
-}
+export { retrieveCandidates, tokenizeForDiscovery } from "./retrieval/discover.js";
+export { applyWorkingContextDelta, listWorkingContext } from "./evidence/working-context.js";
+export { applyConcernDelta, getConcern, listConcerns } from "./concerns/lineage.js";
+export { applyOccupancyDelta, listOccupancy } from "./concerns/occupancy.js";
 
 export function speechProjectionKey(outboxId: number): `speech:${number}` {
   return `speech:${outboxId}`;

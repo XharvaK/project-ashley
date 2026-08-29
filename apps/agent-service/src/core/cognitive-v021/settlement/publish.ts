@@ -1,19 +1,16 @@
-import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { insertOutboxPending } from "../speech/outbox.js";
 import type {
-  ConcernDelta,
   DeliveryIntent,
   DurableNomination,
   FutureTriggerDelta,
-  MindOccupancy,
-  OccupancyDelta,
   OutboxOrigin,
   PublishedCognitiveSettlement,
   SubscriptionDelta,
-  WorkingContextDelta,
-  WorkingContextItem,
 } from "../types.js";
+import { applyWorkingContextDelta } from "../evidence/working-context.js";
+import { applyConcernDelta } from "../concerns/lineage.js";
+import { applyOccupancyDelta } from "../concerns/occupancy.js";
 
 export type PublicationOptions = {
   origin?: OutboxOrigin;
@@ -32,67 +29,12 @@ export type PublicationResult = {
 type DbRow = Record<string, unknown>;
 function stringValue(value: unknown, fallback = ""): string { return typeof value === "string" ? value : fallback; }
 function numberValue(value: unknown, fallback = 0): number { const n = typeof value === "number" ? value : Number(value); return Number.isFinite(n) ? n : fallback; }
-function hash(value: unknown): string { return createHash("sha256").update(JSON.stringify(value), "utf8").digest("hex"); }
 function json(value: unknown): string { return JSON.stringify(value ?? null); }
-function parseJson(value: unknown, fallback: unknown): unknown { try { return JSON.parse(stringValue(value)); } catch { return fallback; } }
 
 function currentGeneration(db: DatabaseSync, conversationId: string): number | null {
   const row = db.prepare("SELECT MAX(generation) AS generation FROM cycle_records WHERE conversation_id = ?").get(conversationId) as DbRow | undefined;
   if (!row || row.generation == null) return null;
   return numberValue(row.generation);
-}
-
-function applyWorkingContextDelta(db: DatabaseSync, delta: WorkingContextDelta, settlement: PublishedCognitiveSettlement): void {
-  const put = (item: Omit<WorkingContextItem, "updatedGeneration">) => {
-    db.prepare(
-      `INSERT INTO working_context_items
-         (id, conversation_id, type, payload_json, superseded, updated_cycle, updated_generation)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET conversation_id=excluded.conversation_id,
-         type=excluded.type, payload_json=excluded.payload_json, superseded=excluded.superseded,
-         updated_cycle=excluded.updated_cycle, updated_generation=excluded.updated_generation`,
-    ).run(item.id, item.conversationId, item.type, json(item), item.status === "superseded" ? 1 : 0, settlement.cycleId, settlement.generation);
-  };
-  switch (delta.op) {
-    case "upsert": put(delta.item); break;
-    case "supersede":
-      db.prepare("UPDATE working_context_items SET superseded = 1, updated_cycle = ?, updated_generation = ? WHERE id = ?").run(settlement.cycleId, settlement.generation, delta.id);
-      put(delta.replacement);
-      break;
-    case "abandon":
-      db.prepare("UPDATE working_context_items SET superseded = 1, updated_cycle = ?, updated_generation = ? WHERE id = ?").run(settlement.cycleId, settlement.generation, delta.id);
-      break;
-  }
-}
-
-function applyConcernDelta(db: DatabaseSync, delta: ConcernDelta, settlement: PublishedCognitiveSettlement): void {
-  if (delta.op === "resolve") {
-    db.prepare("UPDATE concerns SET status = 'resolved', updated_cycle = ? WHERE concern_id = ?").run(settlement.cycleId, delta.concernId);
-    return;
-  }
-  const record = delta.record;
-  db.prepare(
-    `INSERT INTO concerns
-       (concern_id, conversation_id, statement, source_refs_json, dimensions_json,
-        assertion_key, status, snapshot_hash, updated_cycle)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(concern_id) DO UPDATE SET conversation_id=excluded.conversation_id,
-       statement=excluded.statement, source_refs_json=excluded.source_refs_json,
-       dimensions_json=excluded.dimensions_json, assertion_key=excluded.assertion_key,
-       status=excluded.status, snapshot_hash=excluded.snapshot_hash, updated_cycle=excluded.updated_cycle`,
-  ).run(record.concernId, record.conversationId, record.statement, json(record.sourceTurnIds), json(record.dimensions), record.assertionKey, record.status, hash(record), settlement.cycleId);
-}
-
-function applyOccupancyDelta(db: DatabaseSync, delta: OccupancyDelta, settlement: PublishedCognitiveSettlement): void {
-  const occupancy: Omit<MindOccupancy, "updatedCycle"> = delta.occupancy;
-  db.prepare(
-    `INSERT INTO mind_occupancy
-       (conversation_id, concern_id, status, priority, updated_cycle, updated_generation)
-     VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT(conversation_id, concern_id) DO UPDATE SET status=excluded.status,
-       priority=excluded.priority, updated_cycle=excluded.updated_cycle,
-       updated_generation=excluded.updated_generation`,
-  ).run(occupancy.conversationId, occupancy.concernId, occupancy.status, occupancy.priority, settlement.cycleId, occupancy.updatedGeneration);
 }
 
 function applyFutureTriggerDelta(db: DatabaseSync, delta: FutureTriggerDelta): void {
