@@ -18,8 +18,10 @@ describe("C2 additive schema", () => {
   it("creates policy, receipt, summary, and shared contract-state tables", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     try {
-      expect(NUCLEAR_SUPPORTED_VERSION).toBe(41);
-      expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: 41 });
+      expect(NUCLEAR_SUPPORTED_VERSION).toBe(42);
+      expect(db.prepare("PRAGMA user_version").get()).toEqual({
+        user_version: NUCLEAR_SUPPORTED_VERSION,
+      });
       for (const table of REQUIRED_TABLES) {
         expect(db.prepare(
           "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
@@ -101,9 +103,9 @@ describe("C2 additive schema", () => {
   it("fails closed when a persisted schema is newer than the candidate", () => {
     const db = new DatabaseSync(":memory:");
     try {
-      db.exec("PRAGMA user_version = 42");
+      db.exec("PRAGMA user_version = 43");
       expect(() => openNuclearDb(db, { continuityOptional: true })).toThrow(
-        "unsupported_nuclear_schema:42>41",
+        "unsupported_nuclear_schema:43>42",
       );
     } finally {
       db.close();

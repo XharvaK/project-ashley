@@ -18,6 +18,7 @@ import {
   type ThoughtStepOutput,
   type ThoughtSettlementDraft,
   type Observation,
+  type DeliveryIntent,
 } from "../types.js";
 import { getCycle, getCurrentCycle, admitCycle, appendCycleLogIds, updateCycleState } from "../cycle/inbox.js";
 import { getConversationEvidence, listConversationEvidence } from "../evidence/conversation-log.js";
@@ -27,6 +28,9 @@ import { buildThoughtInput } from "./input.js";
 import { parseThoughtStepOutput } from "./parse.js";
 import { validateThoughtSettlementDraft } from "../settlement/validate.js";
 import { publishSemanticTransaction } from "../settlement/publish.js";
+import { fidelityCheck } from "../speech/fidelity.js";
+import { emitInfrastructureNotice } from "../speech/infrastructure-notice.js";
+import { renderForTransport } from "../../conversation/rendering.js";
 
 export type ThoughtInvocation = {
   output: ThoughtStepOutput;
@@ -135,6 +139,38 @@ function triggerKind(value: unknown): CycleTriggerKind {
   }
 }
 
+function deliveryIntentFor(
+  cycle: { conversationId: string; triggerKind: CycleTriggerKind },
+  payload: Record<string, unknown>,
+  purpose: DeliveryIntent["purpose"],
+): DeliveryIntent {
+  const trigger: DeliveryIntent["trigger"] =
+    cycle.triggerKind === "idle_opportunity" ? "idle" :
+      cycle.triggerKind === "subscription_item" ? "subscription" :
+        cycle.triggerKind === "future_trigger_due" ? "future_trigger" :
+          cycle.triggerKind === "recovery" ? "recovery" :
+            cycle.triggerKind === "observation_or_receipt" ? "operation_completion" :
+              "owner_message_reactive";
+  const ownerId = typeof payload.ownerId === "string" && payload.ownerId.trim()
+    ? payload.ownerId
+    : cycle.conversationId;
+  const channel = typeof payload.channel === "string" && payload.channel.trim()
+    ? payload.channel
+    : "discord";
+  const threadId = typeof payload.threadId === "string" && payload.threadId.trim()
+    ? payload.threadId
+    : cycle.conversationId;
+  return {
+    ownerId,
+    channel,
+    threadId,
+    conversationId: cycle.conversationId,
+    trigger,
+    deliveryLane: trigger === "owner_message_reactive" ? "reactive" : "proactive",
+    purpose,
+  };
+}
+
 function storeObservations(db: DatabaseSync, input: ThoughtInput, nowMs: number): void {
   const statement = db.prepare(
     `INSERT OR IGNORE INTO observations
@@ -184,6 +220,7 @@ function storeThoughtStep(
 function publishedSettlement(
   draft: ThoughtSettlementDraft,
   settlementId: string,
+  finalLicensedText: string | null,
 ): PublishedCognitiveSettlement {
   const speech = draft.speech;
   return {
@@ -191,7 +228,7 @@ function publishedSettlement(
     settlementId,
     speech: {
       ...speech,
-      finalLicensedText: speech.mode === "draft" ? speech.surfaceDraft?.trim() ?? "" : null,
+      finalLicensedText,
     },
   } as PublishedCognitiveSettlement;
 }
@@ -235,6 +272,31 @@ export async function runCognitiveCycle(
     : null;
   if (triggerEvidence) cycle = appendCycleLogIds(sidecar, cycle.cycleId, [triggerEvidence.rowId], deps.nowMs());
   cycle = updateCycleState(sidecar, cycle.cycleId, "assembling", deps.nowMs());
+  const admittedCycle = cycle;
+
+  const emitFailure = async (
+    reason: string,
+    attempts: number,
+    acceptedThoughtPasses: number,
+  ): Promise<KernelRunResult> => {
+    const notice = emitInfrastructureNotice(sidecar, {
+      ownerId: typeof payload.ownerId === "string" ? payload.ownerId : admittedCycle.occupantId,
+      channel: typeof payload.channel === "string" ? payload.channel : "discord",
+      threadId: typeof payload.threadId === "string" ? payload.threadId : admittedCycle.conversationId,
+      conversationId: admittedCycle.conversationId,
+      cycleId: admittedCycle.cycleId,
+      generation: admittedCycle.generation,
+      reason,
+      trigger: deliveryIntentFor(admittedCycle, payload, "system_notice").trigger,
+      deliveryLane: deliveryIntentFor(admittedCycle, payload, "system_notice").deliveryLane,
+    });
+    if (deps.projectSystemNotice) await deps.projectSystemNotice(notice.noticeId);
+    updateCycleState(sidecar, admittedCycle.cycleId, "silent", deps.nowMs());
+    return {
+      ...emptyResult(admittedCycle.cycleId, admittedCycle.generation, notice.noticeText, attempts),
+      acceptedThoughtPasses,
+    };
+  };
 
   const ownerMessage = typeof payload.ownerMessage === "string"
     ? payload.ownerMessage
@@ -282,8 +344,7 @@ export async function runCognitiveCycle(
         authorityEpoch: cycle.authorityEpoch,
       });
       if (!verdict.ok) {
-        updateCycleState(sidecar, cycle.cycleId, "silent", deps.nowMs());
-        return emptyResult(cycle.cycleId, cycle.generation, THOUGHT_UNAVAILABLE_NOTICE, totalAttempts);
+        return emitFailure(verdict.codes.join(",") || "authority_rejected", totalAttempts, acceptedThoughtPasses);
       }
       updateCycleState(sidecar, cycle.cycleId, "awaiting_operation", deps.nowMs());
       try {
@@ -303,8 +364,7 @@ export async function runCognitiveCycle(
           observations: [normalized],
         }, deps.nowMs());
       } catch {
-        updateCycleState(sidecar, cycle.cycleId, "silent", deps.nowMs());
-        return emptyResult(cycle.cycleId, cycle.generation, THOUGHT_UNAVAILABLE_NOTICE, totalAttempts);
+        return emitFailure("observation_unavailable", totalAttempts, acceptedThoughtPasses);
       }
       continue;
     }
@@ -318,8 +378,7 @@ export async function runCognitiveCycle(
         authorityEpoch: cycle.authorityEpoch,
       });
       if (!verdict.ok) {
-        updateCycleState(sidecar, cycle.cycleId, "silent", deps.nowMs());
-        return emptyResult(cycle.cycleId, cycle.generation, THOUGHT_UNAVAILABLE_NOTICE, totalAttempts);
+        return emitFailure(verdict.codes.join(",") || "effect_not_authorized", totalAttempts, acceptedThoughtPasses);
       }
       updateCycleState(sidecar, cycle.cycleId, "awaiting_operation", deps.nowMs());
       const proposal = invocation.output.effectProposal;
@@ -337,20 +396,14 @@ export async function runCognitiveCycle(
         recordEffectReceipt(sidecar, receipt);
         inFlight = listInFlight(sidecar, cycle.cycleId);
       } catch {
-        updateCycleState(sidecar, cycle.cycleId, "silent", deps.nowMs());
-        return emptyResult(cycle.cycleId, cycle.generation, THOUGHT_UNAVAILABLE_NOTICE, totalAttempts);
+        return emitFailure("effect_unavailable", totalAttempts, acceptedThoughtPasses);
       }
       continue;
     }
 
     if (invocation.output.kind !== "settlement") {
-      updateCycleState(sidecar, cycle.cycleId, "silent", deps.nowMs());
-      return {
-        ...emptyResult(cycle.cycleId, cycle.generation, THOUGHT_UNAVAILABLE_NOTICE, totalAttempts),
-        acceptedThoughtPasses,
-      };
+      return emitFailure(invocation.output.reason, totalAttempts, acceptedThoughtPasses);
     }
-    acceptedThoughtPasses++;
     const validation = validateThoughtSettlementDraft(invocation.output.settlement, {
       cycleId: cycle.cycleId,
       generation: cycle.generation,
@@ -359,8 +412,7 @@ export async function runCognitiveCycle(
       consumedEffectIds: inFlight.filter((item) => item.status === "receipted").map((item) => item.effectId),
     });
     if (!validation.ok) {
-      updateCycleState(sidecar, cycle.cycleId, "silent", deps.nowMs());
-      return { ...emptyResult(cycle.cycleId, cycle.generation, THOUGHT_UNAVAILABLE_NOTICE, totalAttempts), acceptedThoughtPasses };
+      return emitFailure(validation.error, totalAttempts, acceptedThoughtPasses);
     }
     const packs = deps.loadAuthorityPacks();
     const authority = deps.checkAuthority("settlement", {
@@ -375,11 +427,56 @@ export async function runCognitiveCycle(
       authorityEpoch: cycle.authorityEpoch,
     });
     if (!authority.ok) {
-      updateCycleState(sidecar, cycle.cycleId, "silent", deps.nowMs());
-      return { ...emptyResult(cycle.cycleId, cycle.generation, THOUGHT_UNAVAILABLE_NOTICE, totalAttempts), acceptedThoughtPasses };
+      return emitFailure(authority.codes.join(",") || "authority_rejected", totalAttempts, acceptedThoughtPasses);
     }
-    const settlement = publishedSettlement(validation.draft, randomUUID());
-    const publication = publishSemanticTransaction(sidecar, settlement, { nowMs: deps.nowMs() });
+
+    let speechText = validation.draft.speech.surfaceDraft;
+    if (
+      deps.expressionEnabled &&
+      deps.adaptExpression &&
+      validation.draft.speech.mode === "draft" &&
+      speechText !== null
+    ) {
+      try {
+        speechText = await deps.adaptExpression({
+          draft: speechText,
+          commitments: validation.draft.commitments,
+          stance: validation.draft.commitments.stance,
+          directives: validation.draft.speech.presentationDirectives,
+          profile: "default",
+          medium: "discord",
+        });
+      } catch {
+        speechText = validation.draft.speech.surfaceDraft;
+      }
+    }
+    const fidelity = fidelityCheck({
+      mode: validation.draft.speech.mode,
+      draft: speechText,
+      mustSay: validation.draft.speech.mustSay,
+      mustNot: validation.draft.speech.mustNot,
+      acceptableRealizations: validation.draft.speech.acceptableRealizations,
+      commitments: validation.draft.commitments,
+      observations: observationsForThought,
+    });
+    if (!fidelity.ok) {
+      if (pass < MAX_THOUGHT_PASSES && validation.draft.authority.revisionCount < 2) continue;
+      return emitFailure(fidelity.code, totalAttempts, acceptedThoughtPasses);
+    }
+    const finalText = validation.draft.speech.mode === "draft"
+      ? renderForTransport(speechText ?? "")
+      : null;
+    const settlement = publishedSettlement({
+      ...validation.draft,
+      speech: { ...validation.draft.speech, surfaceDraft: speechText },
+    }, randomUUID(), finalText);
+    acceptedThoughtPasses++;
+    const publication = publishSemanticTransaction(sidecar, settlement, {
+      nowMs: deps.nowMs(),
+      triggerKind: cycle.triggerKind,
+      fidelity: validation.draft.speech.mode === "draft" ? "passed" : "skipped",
+      deliveryIntent: deliveryIntentFor(cycle, payload, "licensed_speech"),
+    });
     if (!publication.published) {
       return { ...emptyResult(cycle.cycleId, cycle.generation, null, totalAttempts), acceptedThoughtPasses };
     }
@@ -396,9 +493,5 @@ export async function runCognitiveCycle(
       acceptedSettlements: publication.replayed ? 0 : 1,
     };
   }
-  updateCycleState(sidecar, cycle.cycleId, "silent", deps.nowMs());
-  return {
-    ...emptyResult(cycle.cycleId, cycle.generation, THOUGHT_UNAVAILABLE_NOTICE, totalAttempts),
-    acceptedThoughtPasses,
-  };
+  return emitFailure("pass_exhausted", totalAttempts, acceptedThoughtPasses);
 }

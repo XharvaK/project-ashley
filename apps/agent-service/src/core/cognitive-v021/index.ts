@@ -19,6 +19,13 @@ export * from "./cycle/inbox.js";
 export * from "./cycle/fence.js";
 export * from "./cycle/inbox-consumer.js";
 export * from "./speech/outbox.js";
+export * from "./speech/fidelity.js";
+export * from "./speech/expression-adapter.js";
+export * from "./speech/send.js";
+export * from "./speech/infrastructure-notice.js";
+export { OutboxDeliveryProjector, createOutboxProjector } from "./delivery/outbox-projector.js";
+export type { OutboxDeliveryProjectorOptions, ProjectionGate } from "./delivery/outbox-projector.js";
+export { evaluateExternalizationGate } from "./initiative/externalization.js";
 export * from "./effect/in-flight.js";
 export {
   publishSemanticTransaction,
@@ -55,10 +62,6 @@ export function speechProjectionKey(outboxId: number): `speech:${number}` {
 
 export function systemProjectionKey(noticeId: number): `system:${number}` {
   return `system:${noticeId}`;
-}
-
-export function evaluateExternalizationGate(..._args: never[]): never {
-  throw new Error("not_implemented_until_phase_5");
 }
 
 void assertCausalInvariants;

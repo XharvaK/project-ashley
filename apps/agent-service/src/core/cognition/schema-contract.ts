@@ -31,6 +31,7 @@ import {
   C1_QUALIFICATION_TABLES,
   validateNuclearV41Schema,
 } from "../rollout/migration-41.js";
+import { validateNuclearV42Schema } from "../delivery/migration-42.js";
 
 type TableInfoRow = {
   name?: string;
@@ -1041,9 +1042,18 @@ function requireNoV41Objects(db: DatabaseSync, version: number): void {
   }
 }
 
+function requireNoV42Columns(db: DatabaseSync, version: number): void {
+  if (tableInfo(db, "delivery_reservations").some((row) => row.name === "cognitive_v021_projection_key")) {
+    fail(version, "unexpected_v42_column:delivery_reservations.cognitive_v021_projection_key");
+  }
+  if (masterRow(db, "index", "delivery_reservations_v021_projection_key")) {
+    fail(version, "unexpected_v42_index:delivery_reservations_v021_projection_key");
+  }
+}
+
 export function validateNuclearSchemaContent(
   db: DatabaseSync,
-  version: 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37 | 38 | 39 | 40 | 41,
+  version: 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37 | 38 | 39 | 40 | 41 | 42,
   options: { rejectNewerContent?: boolean } = {},
 ): void {
   if (version === 22) {
@@ -1210,6 +1220,12 @@ export function validateNuclearSchemaContent(
   }
   if (version === 40) return;
   validateNuclearV41Schema(db, version);
+  if (version === 41 && options.rejectNewerContent === true) {
+    requireNoV42Columns(db, version);
+    return;
+  }
+  if (version === 41) return;
+  validateNuclearV42Schema(db, version);
 }
 
 function addColumnIfMissing(

@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { insertOutboxPending } from "../speech/outbox.js";
 import type {
+  CycleTriggerKind,
   DeliveryIntent,
   DurableNomination,
   FutureTriggerDelta,
@@ -16,6 +17,9 @@ export type PublicationOptions = {
   origin?: OutboxOrigin;
   deliveryIntent?: DeliveryIntent;
   nowMs?: number;
+  triggerKind?: CycleTriggerKind;
+  fidelity?: "passed" | "rejected" | "skipped";
+  thoughtUnavailable?: boolean;
 };
 
 export type PublicationResult = {
@@ -127,7 +131,7 @@ export function publishSemanticTransaction(
     const ledgerPayload = {
       cycleId: settlement.cycleId,
       generation: settlement.generation,
-      triggerKind: "owner_message",
+      triggerKind: options.triggerKind ?? "owner_message",
       occupantId: settlement.occupantId,
       authorityEpoch: settlement.authorityEpoch,
       settlementId: settlement.settlementId,
@@ -136,8 +140,8 @@ export function publishSemanticTransaction(
       authorityCodes: settlement.authority.objectionsApplied,
       nominationIds: settlement.durableNominations.map((item) => item.nominationId),
       outboxId,
-      fidelity: "skipped",
-      thoughtUnavailable: false,
+      fidelity: options.fidelity ?? "skipped",
+      thoughtUnavailable: options.thoughtUnavailable ?? false,
       architectureEpoch: settlement.architectureEpoch,
     };
     db.prepare(

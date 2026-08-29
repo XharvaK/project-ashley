@@ -18,6 +18,8 @@ function databaseAtVersion40(): MigrationFixture {
   const continuity = openContinuityDb(new DatabaseSync(":memory:"));
   const db = openNuclearDb(new DatabaseSync(":memory:"), { continuity });
   db.exec(`
+    DROP INDEX IF EXISTS delivery_reservations_v021_projection_key;
+    ALTER TABLE delivery_reservations DROP COLUMN cognitive_v021_projection_key;
     DROP INDEX IF EXISTS memory_evidence_events_by_epoch_kind_time;
     DROP INDEX IF EXISTS memory_evidence_one_current_epoch;
     DROP TABLE IF EXISTS ${EVENT_TABLE};
@@ -33,6 +35,16 @@ function databaseAtVersion40(): MigrationFixture {
 function migrateToVersion41(): MigrationFixture {
   const fixture = databaseAtVersion40();
   openNuclearDb(fixture.db, { continuity: fixture.continuity, migrate: true });
+  // Keep this helper at the historical v41 waypoint even though the current
+  // opener continues through the additive v42 migration.
+  fixture.db.exec(`
+    DROP INDEX IF EXISTS delivery_reservations_v021_projection_key;
+    ALTER TABLE delivery_reservations DROP COLUMN cognitive_v021_projection_key;
+    PRAGMA user_version = 41;
+  `);
+  fixture.continuity
+    .prepare("UPDATE lineage_state SET nuclear_schema_version = 41 WHERE id = 1")
+    .run();
   return fixture;
 }
 
@@ -104,7 +116,7 @@ describe("nuclear schema v41 C1 qualification bootstrap", () => {
   it("migrates v40 to v41 with both control-plane tables and indexes", () => {
     const { db, continuity } = migrateToVersion41();
     try {
-      expect(NUCLEAR_SUPPORTED_VERSION).toBe(41);
+      expect(NUCLEAR_SUPPORTED_VERSION).toBe(42);
       expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: 41 });
       expect(db.prepare(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
@@ -273,9 +285,9 @@ describe("nuclear schema v41 pending migration recovery", () => {
       expect(sidecarNuclearVersion(fixture.continuity)).toBe(40);
 
       openNuclearDb(fixture.db, { continuity: fixture.continuity, migrate: true });
-      expect(nuclearUserVersion(fixture.db)).toBe(41);
+      expect(nuclearUserVersion(fixture.db)).toBe(NUCLEAR_SUPPORTED_VERSION);
       expect(getPendingNuclearMigration(fixture.continuity)).toBeNull();
-      expect(sidecarNuclearVersion(fixture.continuity)).toBe(41);
+      expect(sidecarNuclearVersion(fixture.continuity)).toBe(NUCLEAR_SUPPORTED_VERSION);
       expect(fixture.db.prepare(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
       ).get(EPOCH_TABLE)).toEqual({ 1: 1 });
@@ -303,9 +315,9 @@ describe("nuclear schema v41 pending migration recovery", () => {
       expect(sidecarNuclearVersion(fixture.continuity)).toBe(40);
 
       openNuclearDb(fixture.db, { continuity: fixture.continuity, migrate: true });
-      expect(nuclearUserVersion(fixture.db)).toBe(41);
+      expect(nuclearUserVersion(fixture.db)).toBe(NUCLEAR_SUPPORTED_VERSION);
       expect(getPendingNuclearMigration(fixture.continuity)).toBeNull();
-      expect(sidecarNuclearVersion(fixture.continuity)).toBe(41);
+      expect(sidecarNuclearVersion(fixture.continuity)).toBe(NUCLEAR_SUPPORTED_VERSION);
     } finally {
       closeFixture(fixture);
     }
@@ -362,12 +374,12 @@ describe("nuclear schema v41 pending migration recovery", () => {
   it("fails closed when nuclear schema is newer than supported", () => {
     const fixture = migrateToVersion41();
     try {
-      fixture.db.exec("PRAGMA user_version = 42");
+      fixture.db.exec("PRAGMA user_version = 43");
       expect(() => openNuclearDb(fixture.db, {
         continuity: fixture.continuity,
         migrate: true,
-      })).toThrow("unsupported_nuclear_schema:42>41");
-      expect(nuclearUserVersion(fixture.db)).toBe(42);
+      })).toThrow("unsupported_nuclear_schema:43>42");
+      expect(nuclearUserVersion(fixture.db)).toBe(43);
     } finally {
       closeFixture(fixture);
     }

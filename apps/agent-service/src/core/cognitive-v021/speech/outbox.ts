@@ -125,18 +125,24 @@ export function updateOutboxStatus(
   db: DatabaseSync,
   outboxId: number,
   status: OutboxSendStatus,
-  options: { discordMessageIds?: string[]; finalizationReason?: string | null } = {},
+  options: {
+    discordMessageIds?: string[];
+    finalizationReason?: string | null;
+    nuclearReservationId?: number | null;
+  } = {},
 ): SpeechOutboxRow {
   db.prepare(
     `UPDATE speech_outbox
      SET send_status = ?, suppressed = CASE WHEN ? IN ('suppressed', 'suppressed_shadow') THEN 1 ELSE suppressed END,
          discord_message_ids_json = COALESCE(?, discord_message_ids_json),
+         nuclear_reservation_id = COALESCE(?, nuclear_reservation_id),
          nuclear_finalization_reason = COALESCE(?, nuclear_finalization_reason)
      WHERE outbox_id = ?`,
   ).run(
     status,
     status,
     options.discordMessageIds ? JSON.stringify(options.discordMessageIds) : null,
+    options.nuclearReservationId ?? null,
     options.finalizationReason ?? null,
     outboxId,
   );

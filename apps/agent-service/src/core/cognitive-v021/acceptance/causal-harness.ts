@@ -2,6 +2,7 @@ import type {
   CausalBundle as FrozenCausalBundle,
   PublishedCognitiveSettlement,
 } from "../types.js";
+import { renderForTransport } from "../../conversation/rendering.js";
 
 export type CausalBundle = FrozenCausalBundle;
 
@@ -89,7 +90,7 @@ export function assertCausalInvariants(bundle: CausalBundle): void {
 
   if (currentSpeech.mode === "draft") {
     if (bundle.expressionInput === null) {
-      if (bundle.outboxText !== currentSpeech.surfaceDraft) {
+      if (bundle.outboxText !== renderForTransport(currentSpeech.surfaceDraft ?? "")) {
         fail("outbox_text_does_not_match_licensed_draft");
       }
     } else {

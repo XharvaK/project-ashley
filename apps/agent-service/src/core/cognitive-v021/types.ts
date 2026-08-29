@@ -796,6 +796,7 @@ export type KernelDeps = {
     medium: "discord";
   }) => Promise<string>;
   projectOutbox: (outboxId: OutboxId) => Promise<void>;
+  projectSystemNotice?: (noticeId: NoticeId) => Promise<void>;
   constitution: IdentitySlice;
   capabilityReality: CapabilityReality;
 };
