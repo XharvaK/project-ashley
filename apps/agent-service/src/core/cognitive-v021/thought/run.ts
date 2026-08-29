@@ -6,6 +6,7 @@ import {
 import type { ChatMessage } from "../../model-routing/types.js";
 import {
   ORDINARY_THOUGHT_BUDGET_MS,
+  MAX_THOUGHT_PASSES,
   THOUGHT_UNAVAILABLE_NOTICE,
   type CycleTriggerKind,
   type InboxEvent,
@@ -20,6 +21,7 @@ import {
 } from "../types.js";
 import { getCycle, getCurrentCycle, admitCycle, appendCycleLogIds, updateCycleState } from "../cycle/inbox.js";
 import { getConversationEvidence, listConversationEvidence } from "../evidence/conversation-log.js";
+import { listInFlight, putInFlight, recordEffectReceipt } from "../effect/in-flight.js";
 import { adaptPerception } from "../perception/adapter.js";
 import { buildThoughtInput } from "./input.js";
 import { parseThoughtStepOutput } from "./parse.js";
@@ -78,7 +80,7 @@ export async function runThoughtModel(
     ownerId: input.occupantId,
     deadlineAtMs: deps.nowMs() + ORDINARY_THOUGHT_BUDGET_MS,
     maxTokens: 6000,
-    temperature: 0,
+    temperature: 0.15,
   };
   try {
     const completion = await invokeThoughtComplete(
@@ -248,61 +250,155 @@ export async function runCognitiveCycle(
   } catch {
     observations = [];
   }
-  const input = buildThoughtInput({
-    sidecar,
-    cycle,
-    triggerText: ownerMessage,
-    triggerEvidence,
-    constitution: deps.constitution,
-    capabilityReality: deps.capabilityReality,
-    observations,
-    inFlight: [],
-    runtimeCondition: { thoughtUnavailable: false },
-  });
-  storeObservations(sidecar, input, deps.nowMs());
-  cycle = updateCycleState(sidecar, cycle.cycleId, "thinking", deps.nowMs());
+  let totalAttempts = 0;
+  let acceptedThoughtPasses = 0;
+  let observationsForThought = observations;
+  let inFlight = listInFlight(sidecar, cycle.cycleId);
 
-  const invocation = await runThoughtModel(input, deps);
-  storeThoughtStep(sidecar, invocation.output, deps.nowMs());
-  if (invocation.output.kind !== "settlement") {
-    updateCycleState(sidecar, cycle.cycleId, "silent", deps.nowMs());
-    return emptyResult(cycle.cycleId, cycle.generation, THOUGHT_UNAVAILABLE_NOTICE, invocation.attempts);
+  for (let pass = 1; pass <= MAX_THOUGHT_PASSES; pass++) {
+    const input = buildThoughtInput({
+      sidecar,
+      cycle,
+      triggerText: ownerMessage,
+      triggerEvidence,
+      constitution: deps.constitution,
+      capabilityReality: deps.capabilityReality,
+      observations: observationsForThought,
+      inFlight,
+      runtimeCondition: { thoughtUnavailable: false },
+    });
+    storeObservations(sidecar, input, deps.nowMs());
+    cycle = updateCycleState(sidecar, cycle.cycleId, "thinking", deps.nowMs());
+    const invocation = await runThoughtModel(input, deps, { pass });
+    totalAttempts += invocation.attempts;
+    storeThoughtStep(sidecar, invocation.output, deps.nowMs());
+
+    if (invocation.output.kind === "observation_request") {
+      acceptedThoughtPasses++;
+      const packs = deps.loadAuthorityPacks();
+      const verdict = deps.checkAuthority("proposal", {
+        proposal: invocation.output.observationRequest,
+        packs,
+        authorityEpoch: cycle.authorityEpoch,
+      });
+      if (!verdict.ok) {
+        updateCycleState(sidecar, cycle.cycleId, "silent", deps.nowMs());
+        return emptyResult(cycle.cycleId, cycle.generation, THOUGHT_UNAVAILABLE_NOTICE, totalAttempts);
+      }
+      updateCycleState(sidecar, cycle.cycleId, "awaiting_operation", deps.nowMs());
+      try {
+        const observed = await deps.executeObservation(invocation.output.observationRequest);
+        const normalized: Observation = {
+          ...observed,
+          cycleId: cycle.cycleId,
+          generation: cycle.generation,
+          derived: observed.derived === true,
+          replaySafe: observed.replaySafe === true,
+          dataClassification: observed.dataClassification ?? "never_public",
+          secretOmitted: observed.secretOmitted === true,
+        };
+        observationsForThought = [...observationsForThought, normalized];
+        storeObservations(sidecar, {
+          ...input,
+          observations: [normalized],
+        }, deps.nowMs());
+      } catch {
+        updateCycleState(sidecar, cycle.cycleId, "silent", deps.nowMs());
+        return emptyResult(cycle.cycleId, cycle.generation, THOUGHT_UNAVAILABLE_NOTICE, totalAttempts);
+      }
+      continue;
+    }
+
+    if (invocation.output.kind === "effect_proposal") {
+      acceptedThoughtPasses++;
+      const packs = deps.loadAuthorityPacks();
+      const verdict = deps.checkAuthority("proposal", {
+        proposal: invocation.output.effectProposal,
+        packs,
+        authorityEpoch: cycle.authorityEpoch,
+      });
+      if (!verdict.ok) {
+        updateCycleState(sidecar, cycle.cycleId, "silent", deps.nowMs());
+        return emptyResult(cycle.cycleId, cycle.generation, THOUGHT_UNAVAILABLE_NOTICE, totalAttempts);
+      }
+      updateCycleState(sidecar, cycle.cycleId, "awaiting_operation", deps.nowMs());
+      const proposal = invocation.output.effectProposal;
+      putInFlight(sidecar, {
+        effectId: proposal.effectId,
+        cycleId: proposal.cycleId,
+        generation: proposal.generation,
+        correlationId: invocation.output.correlationId,
+        idempotencyKey: proposal.idempotencyKey,
+        dispatchedAtMs: deps.nowMs(),
+        payload: proposal.request,
+      });
+      try {
+        const receipt = await deps.executeEffect(proposal);
+        recordEffectReceipt(sidecar, receipt);
+        inFlight = listInFlight(sidecar, cycle.cycleId);
+      } catch {
+        updateCycleState(sidecar, cycle.cycleId, "silent", deps.nowMs());
+        return emptyResult(cycle.cycleId, cycle.generation, THOUGHT_UNAVAILABLE_NOTICE, totalAttempts);
+      }
+      continue;
+    }
+
+    if (invocation.output.kind !== "settlement") {
+      updateCycleState(sidecar, cycle.cycleId, "silent", deps.nowMs());
+      return {
+        ...emptyResult(cycle.cycleId, cycle.generation, THOUGHT_UNAVAILABLE_NOTICE, totalAttempts),
+        acceptedThoughtPasses,
+      };
+    }
+    acceptedThoughtPasses++;
+    const validation = validateThoughtSettlementDraft(invocation.output.settlement, {
+      cycleId: cycle.cycleId,
+      generation: cycle.generation,
+      occupantId: cycle.occupantId,
+      authorityEpoch: cycle.authorityEpoch,
+      consumedEffectIds: inFlight.filter((item) => item.status === "receipted").map((item) => item.effectId),
+    });
+    if (!validation.ok) {
+      updateCycleState(sidecar, cycle.cycleId, "silent", deps.nowMs());
+      return { ...emptyResult(cycle.cycleId, cycle.generation, THOUGHT_UNAVAILABLE_NOTICE, totalAttempts), acceptedThoughtPasses };
+    }
+    const packs = deps.loadAuthorityPacks();
+    const authority = deps.checkAuthority("settlement", {
+      settlement: validation.draft,
+      packs: {
+        ...packs,
+        currentness: {
+          ...packs.currentness,
+          observedObservationIds: observationsForThought.map((item) => item.observationId),
+        },
+      },
+      authorityEpoch: cycle.authorityEpoch,
+    });
+    if (!authority.ok) {
+      updateCycleState(sidecar, cycle.cycleId, "silent", deps.nowMs());
+      return { ...emptyResult(cycle.cycleId, cycle.generation, THOUGHT_UNAVAILABLE_NOTICE, totalAttempts), acceptedThoughtPasses };
+    }
+    const settlement = publishedSettlement(validation.draft, randomUUID());
+    const publication = publishSemanticTransaction(sidecar, settlement, { nowMs: deps.nowMs() });
+    if (!publication.published) {
+      return { ...emptyResult(cycle.cycleId, cycle.generation, null, totalAttempts), acceptedThoughtPasses };
+    }
+    if (publication.outboxId !== null) await deps.projectOutbox(publication.outboxId);
+    return {
+      cycleId: cycle.cycleId,
+      generation: cycle.generation,
+      published: true,
+      outboxId: publication.outboxId,
+      infrastructureNotice: null,
+      thoughtModelAttempts: totalAttempts,
+      acceptedThoughtPasses,
+      composeCancelledAttempts: 0,
+      acceptedSettlements: publication.replayed ? 0 : 1,
+    };
   }
-  const validation = validateThoughtSettlementDraft(invocation.output.settlement, {
-    cycleId: cycle.cycleId,
-    generation: cycle.generation,
-    occupantId: cycle.occupantId,
-    authorityEpoch: cycle.authorityEpoch,
-  });
-  if (!validation.ok) {
-    updateCycleState(sidecar, cycle.cycleId, "silent", deps.nowMs());
-    return emptyResult(cycle.cycleId, cycle.generation, THOUGHT_UNAVAILABLE_NOTICE, invocation.attempts);
-  }
-  const packs = deps.loadAuthorityPacks();
-  const authority = deps.checkAuthority("settlement", {
-    settlement: validation.draft,
-    packs,
-    authorityEpoch: cycle.authorityEpoch,
-  });
-  if (!authority.ok) {
-    updateCycleState(sidecar, cycle.cycleId, "silent", deps.nowMs());
-    return emptyResult(cycle.cycleId, cycle.generation, THOUGHT_UNAVAILABLE_NOTICE, invocation.attempts);
-  }
-  const settlement = publishedSettlement(validation.draft, randomUUID());
-  const publication = publishSemanticTransaction(sidecar, settlement, { nowMs: deps.nowMs() });
-  if (!publication.published) {
-    return { ...emptyResult(cycle.cycleId, cycle.generation, null, invocation.attempts), acceptedThoughtPasses: 1 };
-  }
-  if (publication.outboxId !== null) await deps.projectOutbox(publication.outboxId);
+  updateCycleState(sidecar, cycle.cycleId, "silent", deps.nowMs());
   return {
-    cycleId: cycle.cycleId,
-    generation: cycle.generation,
-    published: true,
-    outboxId: publication.outboxId,
-    infrastructureNotice: null,
-    thoughtModelAttempts: invocation.attempts,
-    acceptedThoughtPasses: 1,
-    composeCancelledAttempts: 0,
-    acceptedSettlements: publication.replayed ? 0 : 1,
+    ...emptyResult(cycle.cycleId, cycle.generation, THOUGHT_UNAVAILABLE_NOTICE, totalAttempts),
+    acceptedThoughtPasses,
   };
 }

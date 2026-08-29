@@ -1,13 +1,3 @@
-import type {
-  AuthorityEpoch,
-  AuthorityPacks,
-  AuthorityStage,
-  AuthorityVerdict,
-  EffectProposal,
-  ObservationRequest,
-  PublishedCognitiveSettlement,
-  ThoughtSettlementDraft,
-} from "./types.js";
 import { assertCausalInvariants } from "./acceptance/causal-harness.js";
 import {
   openCognitiveSidecarDb,
@@ -51,6 +41,13 @@ export { retrieveCandidates, tokenizeForDiscovery } from "./retrieval/discover.j
 export { applyWorkingContextDelta, listWorkingContext } from "./evidence/working-context.js";
 export { applyConcernDelta, getConcern, listConcerns } from "./concerns/lineage.js";
 export { applyOccupancyDelta, listOccupancy } from "./concerns/occupancy.js";
+export { AUTHORITY_CODES, describeAuthorityCode } from "./authority/codes.js";
+export { loadAuthorityPacks, loadEffectReceipts, bumpAuthorityEpoch } from "./authority/packs.js";
+export { checkAuthority } from "./authority/check.js";
+export { claimsCurrentness, claimsUnwitnessedReading } from "./authority/currentness-detectors.js";
+export { classifyOperation, createObservationRequest } from "./observation/request.js";
+export { createEffectProposal, dispatchEffect } from "./effect/proposal.js";
+export { recoverInFlight } from "./effect/recovery.js";
 
 export function speechProjectionKey(outboxId: number): `speech:${number}` {
   return `speech:${outboxId}`;
@@ -58,18 +55,6 @@ export function speechProjectionKey(outboxId: number): `speech:${number}` {
 
 export function systemProjectionKey(noticeId: number): `system:${number}` {
   return `system:${noticeId}`;
-}
-
-export function checkAuthority(
-  _stage: AuthorityStage,
-  _input: {
-    settlement?: ThoughtSettlementDraft | PublishedCognitiveSettlement;
-    proposal?: EffectProposal | ObservationRequest;
-    packs: AuthorityPacks;
-    authorityEpoch: AuthorityEpoch;
-  },
-): AuthorityVerdict {
-  throw new Error("not_implemented_until_phase_4");
 }
 
 export function evaluateExternalizationGate(..._args: never[]): never {
