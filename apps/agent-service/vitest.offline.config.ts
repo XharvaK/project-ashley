@@ -12,6 +12,7 @@ export default defineConfig({
     exclude: [...configDefaults.exclude, ...HOST_SCRIPT_TESTS],
     environment: "node",
     testTimeout: 20_000,
+    fileParallelism: false,
     maxWorkers: 1,
     minWorkers: 1,
     setupFiles: ["src/core/qualification/offline-network-guard.ts"],
