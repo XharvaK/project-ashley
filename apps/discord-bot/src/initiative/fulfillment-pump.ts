@@ -5,14 +5,19 @@ import { config } from "../config.js";
 import { channelQueue } from "../chat/channel-queue.js";
 import { splitMessage } from "../chat/split-message.js";
 import {
+  claimPendingCognitiveDeliveries,
   claimPendingOperationalDeliveries,
   finalizeDelivery,
   receiptDeliveryBubble,
 } from "../agent-client.js";
 import { DeliverySendError, sendBubbles } from "../chat/send-bubbles.js";
 
+type FulfillmentDelivery = Awaited<
+  ReturnType<typeof claimPendingOperationalDeliveries>
+>["deliveries"][number];
+
 export type FulfillmentPumpDependencies = {
-  claim: typeof claimPendingOperationalDeliveries;
+  claim: () => Promise<{ deliveries: FulfillmentDelivery[] }>;
   receipt: typeof receiptDeliveryBubble;
   finalize: typeof finalizeDelivery;
   send: typeof sendBubbles;
@@ -44,14 +49,10 @@ async function persistReceiptWithRetry(
   throw lastError;
 }
 
-export async function drainPendingOperationalDeliveries(
+async function drainPendingDeliveries(
   client: Client,
-  deps: FulfillmentPumpDependencies = {
-    claim: claimPendingOperationalDeliveries,
-    receipt: receiptDeliveryBubble,
-    finalize: finalizeDelivery,
-    send: sendBubbles,
-  },
+  deps: FulfillmentPumpDependencies,
+  label: "operational" | "cognitive",
 ): Promise<number> {
   const { deliveries } = await deps.claim();
   if (!deliveries || deliveries.length === 0) return 0;
@@ -192,7 +193,7 @@ export async function drainPendingOperationalDeliveries(
       await deps.finalize(delivery.reservationId, "complete").catch(() => {});
       deliveredCount += 1;
       console.log(
-        `[discord-bot] operational fulfillment delivered reservation=${delivery.reservationId} bubbles=${successfulReceipts}/${bubbles.length}`,
+        `[discord-bot] ${label} fulfillment delivered reservation=${delivery.reservationId} bubbles=${successfulReceipts}/${bubbles.length}`,
       );
     } catch (error) {
       console.error(
@@ -210,6 +211,30 @@ export async function drainPendingOperationalDeliveries(
   }
 
   return deliveredCount;
+}
+
+export async function drainPendingOperationalDeliveries(
+  client: Client,
+  deps: FulfillmentPumpDependencies = {
+    claim: claimPendingOperationalDeliveries,
+    receipt: receiptDeliveryBubble,
+    finalize: finalizeDelivery,
+    send: sendBubbles,
+  },
+): Promise<number> {
+  return drainPendingDeliveries(client, deps, "operational");
+}
+
+export async function drainPendingCognitiveDeliveries(
+  client: Client,
+  deps: FulfillmentPumpDependencies = {
+    claim: claimPendingCognitiveDeliveries,
+    receipt: receiptDeliveryBubble,
+    finalize: finalizeDelivery,
+    send: sendBubbles,
+  },
+): Promise<number> {
+  return drainPendingDeliveries(client, deps, "cognitive");
 }
 
 let pumpTimer: NodeJS.Timeout | null = null;
@@ -240,6 +265,9 @@ export function startFulfillmentPump(
     pumpRunning = true;
     try {
       await drainPendingOperationalDeliveries(client, deps);
+      if (config.cognitiveKernel === "v021") {
+        await drainPendingCognitiveDeliveries(client);
+      }
     } catch (err) {
       console.error("[discord-bot] error in fulfillment pump poll:", err);
     } finally {

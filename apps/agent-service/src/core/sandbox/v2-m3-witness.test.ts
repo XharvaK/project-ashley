@@ -757,7 +757,7 @@ describe("Sandbox V2 M3 Root-A Closure & Full Cognition Witness", () => {
     });
 
     const reactiveResult = await core.handleReactiveChat({
-      message: "run reactive check",
+      message: "please write unpoisoned.txt in the candidate workspace",
       ownerId: "doc",
       channel: "discord",
       turnDeadlinePolicy: M3_TEST_DEADLINE_POLICY,

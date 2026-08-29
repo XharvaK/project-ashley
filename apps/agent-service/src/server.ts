@@ -18,6 +18,15 @@ import type { ErrorCode } from "./errors.js";
 import { openCognitiveSidecarDb } from "./core/cognitive-v021/sidecar/db.js";
 import { createCognitiveIngressHandler } from "./core/cognitive-v021/ingress/http.js";
 import { getCognitiveHealthSnapshot } from "./core/cognitive-v021/dispatch/health.js";
+import { markProjectedDeliverySending } from "./core/cognitive-v021/delivery/outbox-projector.js";
+import { getContinuityFor } from "./core/continuity/registry.js";
+import {
+  admitV021RememberCommand,
+  cancelV021Forget,
+  confirmV021Forget,
+  getV021MemorySummary,
+  previewV021Forget,
+} from "./core/cognitive-v021/commands.js";
 import {
   admitOwnerCorrection,
   type AdmissionPath,
@@ -320,6 +329,16 @@ export function createServer(
       sidecar: managerWithCognitive.getCognitiveSidecar?.() ?? cognitiveSidecar,
       sidecarPath: manager.dataPlane?.cognitiveSidecarDbPath ?? null,
     });
+  }
+
+  function cognitiveKernel(): "legacy" | "shadow" | "v021" {
+    return manager.getCognitiveKernel();
+  }
+
+  function cognitiveContinuity(): DatabaseSync {
+    const continuity = getContinuityFor(manager.core.getDatabase());
+    if (!continuity) throw new AppError("agent_not_ready", "Cognitive continuity unavailable", 503);
+    return continuity;
   }
 
   function approvalService(ownerId: string): SandboxApprovalService {
@@ -1879,6 +1898,16 @@ export function createServer(
       const claimed = manager.core.claimPendingDeliveries(owner, {
         lane,
       });
+      if (lane === "cognitive_v021" && cognitiveKernel() === "v021") {
+        const sidecar = getCognitiveSidecar();
+        for (const delivery of claimed) {
+          markProjectedDeliverySending(
+            sidecar,
+            manager.core.getDatabase(),
+            delivery.reservationId,
+          );
+        }
+      }
       res.json({ deliveries: claimed });
     } catch (err) {
       const { status, body } = toErrorResponse(err);
@@ -2104,14 +2133,30 @@ export function createServer(
 
   app.post("/memory/pin", (req, res) => {
     try {
-      const { userId, text, sensitivity } = req.body as {
+      const { userId, text, sensitivity, discordMessageId } = req.body as {
         userId?: string;
         text?: string;
         sensitivity?: "none" | "private";
+        discordMessageId?: string;
       };
       const owner = requireOwner(userId);
       if (!text?.trim()) {
         throw new AppError("message_required", "text required", 400);
+      }
+      if (cognitiveKernel() !== "legacy") {
+        res.status(202).json(
+          admitV021RememberCommand(
+            getCognitiveSidecar(),
+            manager.core.getDatabase(),
+            {
+              ownerId: owner,
+              text: text.trim(),
+              sensitivity: sensitivity ?? "none",
+              discordMessageId: discordMessageId?.trim() || null,
+            },
+          ),
+        );
+        return;
       }
       const fact = manager.core.pinMemory(
         owner,
@@ -2129,6 +2174,17 @@ export function createServer(
     try {
       const ownerId = String(req.query.owner_id ?? "");
       requireOwner(ownerId || undefined);
+      if (cognitiveKernel() !== "legacy") {
+        res.json(
+          getV021MemorySummary(
+            getCognitiveSidecar(),
+            manager.core.getDatabase(),
+            ownerId,
+            req.query.include_private === "true",
+          ),
+        );
+        return;
+      }
       res.json(
         manager.core.getMemorySummary(
           ownerId,
@@ -2174,20 +2230,23 @@ export function createServer(
         if (!previewId?.trim()) {
           throw new AppError("message_required", "previewId required", 400);
         }
-        res.json(
-          manager.core.forget(owner, topic?.trim() ?? "", false, {
-            previewId: previewId.trim(),
-            cancel: true,
-          }),
-        );
+        res.json(cognitiveKernel() !== "legacy"
+          ? cancelV021Forget(cognitiveContinuity(), { ownerId: owner, previewId: previewId.trim() })
+          : manager.core.forget(owner, topic?.trim() ?? "", false, {
+              previewId: previewId.trim(),
+              cancel: true,
+            }));
         return;
       }
       if (confirmed === true && previewId?.trim()) {
-        res.json(
-          manager.core.forget(owner, topic?.trim() ?? "", true, {
-            previewId: previewId.trim(),
-          }),
-        );
+        res.json(cognitiveKernel() !== "legacy"
+          ? confirmV021Forget(getCognitiveSidecar(), manager.core.getDatabase(), cognitiveContinuity(), {
+              ownerId: owner,
+              previewId: previewId.trim(),
+            })
+          : manager.core.forget(owner, topic?.trim() ?? "", true, {
+              previewId: previewId.trim(),
+            }));
         return;
       }
       if (confirmed === true) {
@@ -2200,13 +2259,19 @@ export function createServer(
       if (!topic?.trim() && !previewId?.trim()) {
         throw new AppError("message_required", "topic required", 400);
       }
-      res.json(
-        manager.core.forget(owner, topic?.trim() ?? "", false, {
-          previewId: previewId?.trim(),
-          confirmationDiscordMessageId:
-            confirmationDiscordMessageId?.trim() ?? null,
-        }),
-      );
+      if (cognitiveKernel() !== "legacy") {
+        res.json(previewV021Forget(
+          getCognitiveSidecar(),
+          manager.core.getDatabase(),
+          cognitiveContinuity(),
+          { ownerId: owner, topic: topic!.trim() },
+        ));
+        return;
+      }
+      res.json(manager.core.forget(owner, topic?.trim() ?? "", false, {
+        previewId: previewId?.trim(),
+        confirmationDiscordMessageId: confirmationDiscordMessageId?.trim() ?? null,
+      }));
     } catch (err) {
       const { status, body } = toErrorResponse(err);
       res.status(status).json(body);
@@ -2335,6 +2400,36 @@ export function createServer(
         throw new AppError("agent_not_ready", "Agent not ready", 503);
       }
       res.json(await manager.core.tickProactive(owner));
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/initiative/idle", async (req, res) => {
+    try {
+      const { userId } = req.body as { userId?: string };
+      const owner = requireOwner(userId);
+      if (cognitiveKernel() === "legacy") {
+        res.json({
+          conversationId: null,
+          eligible: false,
+          reason: "empty_house",
+          thoughtModelAttempts: 0,
+          acceptedSettlements: 0,
+          thoughtCalls: 0,
+          cycleId: null,
+          observations: [],
+          firedTriggers: [],
+          suppressedTriggers: [],
+          dormant: false,
+        });
+        return;
+      }
+      if (manager.isPaused()) {
+        throw new AppError("agent_not_ready", "Agent not ready", 503);
+      }
+      res.json(await manager.tickCognitiveIdle(owner));
     } catch (err) {
       const { status, body } = toErrorResponse(err);
       res.status(status).json(body);

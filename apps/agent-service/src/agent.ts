@@ -15,6 +15,15 @@ import {
   runLiveCognitiveTurn,
 } from "./core/cognitive-v021/dispatch/live.js";
 import { runShadowCognitiveTurn } from "./core/cognitive-v021/shadow/runner.js";
+import { reconcileProjectedDelivery } from "./core/cognitive-v021/delivery/outbox-projector.js";
+import { readCognitiveSidecarMeta } from "./core/cognitive-v021/sidecar/db.js";
+import { appendInboxEvent, claimInboxEvent } from "./core/cognitive-v021/cycle/inbox.js";
+import { consumeInboxEvent } from "./core/cognitive-v021/cycle/inbox-consumer.js";
+import {
+  tickIdleOpportunity,
+  type IdleTickResult,
+} from "./core/cognitive-v021/initiative/idle.js";
+import { resolveActiveThread } from "./core/memory/threads.js";
 import type {
   InboxEvent,
   KernelDeps,
@@ -133,6 +142,72 @@ export class AgentManager {
     }
     if (!this.cognitiveShadowDispatch) throw new AppError("agent_not_ready", "Shadow dispatcher unavailable", 503);
     return this.cognitiveShadowDispatch(event);
+  }
+
+  /** Run one private idle opportunity through the same durable inbox/kernel path. */
+  async tickCognitiveIdle(ownerId: string): Promise<IdleTickResult> {
+    if (env.cognitiveKernel === "legacy") {
+      return {
+        conversationId: null,
+        eligible: false,
+        reason: "empty_house",
+        thoughtModelAttempts: 0,
+        acceptedSettlements: 0,
+        thoughtCalls: 0,
+        cycleId: null,
+        observations: [],
+        firedTriggers: [],
+        suppressedTriggers: [],
+        dormant: false,
+      };
+    }
+    const sidecar = this.openCognitiveSidecar();
+    if (!sidecar || !this.cognitiveDeps) {
+      throw new AppError("agent_not_ready", "Cognitive dispatcher unavailable", 503);
+    }
+    const nuclear = this.core.getDatabase();
+    const conversationId = resolveActiveThread(nuclear, ownerId, "discord");
+    const authorityEpoch = readCognitiveSidecarMeta(sidecar).authority_epoch;
+    return tickIdleOpportunity(sidecar, {
+      conversationId,
+      occupantId: ownerId,
+      authorityEpoch,
+      runThought: async (input) => {
+        const event = appendInboxEvent(sidecar, {
+          id: `idle:${input.cycle.cycleId}`,
+          conversationId: input.cycle.conversationId,
+          kind: input.trigger.kind,
+          payload: {
+            ownerId,
+            channel: "discord",
+            threadId: input.cycle.conversationId,
+            triggerRef: input.trigger.ref,
+            cycleId: input.cycle.cycleId,
+            generation: input.cycle.generation,
+            occupantId: ownerId,
+            observations: input.observations,
+            dueTriggers: input.dueTriggers.map((trigger) => trigger.triggerId),
+          },
+          createdAtMs: Date.now(),
+        });
+        const claimed = claimInboxEvent(sidecar, {
+          eventId: event.id,
+          workerId: `idle:${process.pid}:${ownerId}`,
+          nowMs: Date.now(),
+          leaseMs: 120_000,
+        });
+        if (!claimed) throw new Error("idle_inbox_claim_failed");
+        let result: CognitiveDispatchResult = null;
+        await consumeInboxEvent(sidecar, claimed, async () => {
+          result = await this.dispatchCognitiveEvent(claimed);
+        });
+        const dispatched = result as CognitiveDispatchResult;
+        return {
+          ...(dispatched ?? {}),
+          speechMode: dispatched === null || dispatched.outboxId == null ? "none" as const : "draft" as const,
+        };
+      },
+    });
   }
 
   /** Trusted host state used by guarded C1 currentness activation. */
@@ -264,6 +339,16 @@ export class AgentManager {
       ? this.core.getDeliveryStatus(ownerId, reservationId)
       : null;
     const result = this.core.finalizeDeliveryReservation(ownerId, reservationId, cause, onArchivalAssistant);
+    if (env.cognitiveKernel === "v021") {
+      const sidecar = this.openCognitiveSidecar();
+      if (sidecar) {
+        try {
+          reconcileProjectedDelivery(sidecar, this.core.getDatabase(), reservationId);
+        } catch (error) {
+          console.error("[cognitive-v021] delivery reconciliation failed", error);
+        }
+      }
+    }
     if (env.cognitiveKernel === "shadow" && before?.reservation && result.receiptCount > 0 && result.deliveredText) {
       const sidecar = this.openCognitiveSidecar();
       if (sidecar) {

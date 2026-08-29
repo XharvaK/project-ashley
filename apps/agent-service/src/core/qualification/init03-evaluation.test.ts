@@ -161,8 +161,8 @@ function relationshipSource(
       `INSERT INTO ashley_self_commitments
          (owner_id, entity_uuid, data_classification, text, status, due_at,
           source_entity_type, source_entity_uuid, evidence_json, text_hash,
-          created_at, updated_at)
-       VALUES (?, ?, 'ordinary', ?, ?, NULL, 'evaluation', ?, NULL, ?, ?, ?)`,
+          created_at, updated_at, provenance)
+       VALUES (?, ?, 'ordinary', ?, ?, NULL, 'evaluation', ?, NULL, ?, ?, ?, 'live')`,
     ).run(OWNER_ID, entityUuid, text, status, `${entityUuid}-source`, `${entityUuid}-hash`, now, now);
   } else if (type === "mutual_commitment") {
     db.prepare(
@@ -170,8 +170,8 @@ function relationshipSource(
          (owner_id, entity_uuid, data_classification, text, status,
           doc_confirmed_at, ashley_confirmed_at, doc_evidence_entity_uuid,
           ashley_delivery_entity_uuid, source_entity_type, source_entity_uuid,
-          evidence_json, text_hash, created_at, updated_at)
-       VALUES (?, ?, 'ordinary', ?, ?, ?, ?, ?, ?, 'evaluation', ?, NULL, ?, ?, ?)`,
+          evidence_json, text_hash, created_at, updated_at, provenance)
+       VALUES (?, ?, 'ordinary', ?, ?, ?, ?, ?, ?, 'evaluation', ?, NULL, ?, ?, ?, 'live')`,
     ).run(
       OWNER_ID,
       entityUuid,
@@ -192,8 +192,8 @@ function relationshipSource(
          (owner_id, entity_uuid, data_classification, text, status, repair_status,
           linked_withdrawal_entity_uuid, last_repair_decision_id,
           source_entity_type, source_entity_uuid, evidence_json, text_hash,
-          created_at, updated_at)
-       VALUES (?, ?, 'ordinary', ?, ?, 'open', NULL, NULL, 'evaluation', ?, NULL, ?, ?, ?)`,
+          created_at, updated_at, provenance)
+       VALUES (?, ?, 'ordinary', ?, ?, 'open', NULL, NULL, 'evaluation', ?, NULL, ?, ?, ?, 'live')`,
     ).run(OWNER_ID, entityUuid, text, status, `${entityUuid}-source`, `${entityUuid}-hash`, now, now);
   }
   const row = db.prepare(

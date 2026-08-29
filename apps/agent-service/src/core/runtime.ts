@@ -255,6 +255,10 @@ import {
   listPendingOperationalCompletionDeliveries,
 } from "./sandbox/durable-job-completion.js";
 import {
+  claimPendingCognitiveDeliveries,
+  listPendingCognitiveDeliveries,
+} from "./cognitive-v021/delivery/pending.js";
+import {
   listOperationalJobsForOwner,
   requestOperationalJobCancel,
   getOperationalJob,
@@ -2250,6 +2254,11 @@ export class AshleyCore {
 
   getPendingDeliveries(ownerId: string, options: { lane?: string } = {}) {
     const lane = options.lane?.trim();
+    if (lane === "cognitive_v021") {
+      return env.cognitiveKernel === "v021"
+        ? listPendingCognitiveDeliveries(this.db, ownerId)
+        : [];
+    }
     if (lane === "operational_fulfillment") {
       return listPendingOperationalCompletionDeliveries(this.db, ownerId);
     }
@@ -2267,6 +2276,11 @@ export class AshleyCore {
     options: { lane?: string } = {},
   ) {
     const lane = options.lane?.trim();
+    if (lane === "cognitive_v021") {
+      return env.cognitiveKernel === "v021"
+        ? claimPendingCognitiveDeliveries(this.db, { ownerId })
+        : [];
+    }
     if (lane === "operational_fulfillment") {
       return claimPendingOperationalCompletionDeliveries(this.db, {
         ownerId,

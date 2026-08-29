@@ -10,6 +10,7 @@
  */
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { isAbsolute, relative } from "node:path";
 import { isCanonicalForm, isPatchExportAllowed, isWithin } from "@composer-assistant/sandbox-policy";
 import type { V2ProjectReadRegistry } from "../registry.js";
 import type { SandboxV2PatchExportRequest, SandboxV2Result } from "../v2-types.js";
@@ -115,8 +116,8 @@ export function executePatchExport(
   try {
     const resolvedRoot = realpathSync(destRoot);
     const resolvedDest = realpathSync(destPath);
-    const prefix = resolvedRoot.endsWith("/") ? resolvedRoot : `${resolvedRoot}/`;
-    if (resolvedDest !== resolvedRoot && !resolvedDest.startsWith(prefix)) {
+    const resolvedRelative = relative(resolvedRoot, resolvedDest);
+    if (resolvedDest !== resolvedRoot && (resolvedRelative.startsWith("..") || isAbsolute(resolvedRelative))) {
       return fail("destination_escape");
     }
   } catch {

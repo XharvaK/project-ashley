@@ -50,6 +50,12 @@ const FORBIDDEN_EXPRESSION = [
   "the change should be merged",
 ] as const;
 
+function canonicalTestRoot(path: string): string {
+  const normalized = path.replace(/\\/g, "/");
+  const withoutDrive = normalized.replace(/^[A-Za-z]:/, "");
+  return withoutDrive.startsWith("/") ? withoutDrive : `/${withoutDrive}`;
+}
+
 const M5_F_POLICY: TurnDeadlinePolicy = {
   version: "phase-budget-m5-witness-test-v1",
   qualification: "test_only",
@@ -213,7 +219,7 @@ describe("M5 Phase F end-to-end authorship witness", () => {
       JSON.stringify([
         {
           projectId: PROJECT,
-          canonicalRoot: "/srv/projects/m5-fixture",
+          canonicalRoot: canonicalTestRoot(liveRepoDir),
           displayName: "M5 fixture",
           enabled: true,
           readAllowed: true,

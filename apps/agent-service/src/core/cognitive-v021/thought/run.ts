@@ -19,6 +19,7 @@ import {
   type ThoughtSettlementDraft,
   type Observation,
   type DeliveryIntent,
+  type RememberDirective,
 } from "../types.js";
 import { getCycle, getCurrentCycle, admitCycle, appendCycleLogIds, updateCycleState } from "../cycle/inbox.js";
 import { getConversationEvidence, listConversationEvidence } from "../evidence/conversation-log.js";
@@ -28,6 +29,7 @@ import { buildThoughtInput } from "./input.js";
 import { parseThoughtStepOutput } from "./parse.js";
 import { validateThoughtSettlementDraft } from "../settlement/validate.js";
 import { publishSemanticTransaction } from "../settlement/publish.js";
+import { admitOwnerSuppliedClaim } from "../memory/admission.js";
 import { fidelityCheck } from "../speech/fidelity.js";
 import { emitInfrastructureNotice } from "../speech/infrastructure-notice.js";
 import { renderForTransport } from "../../conversation/rendering.js";
@@ -123,6 +125,67 @@ function payloadRecord(event: InboxEvent): Record<string, unknown> {
   return typeof event.payload === "object" && event.payload !== null && !Array.isArray(event.payload)
     ? event.payload as Record<string, unknown>
     : {};
+}
+
+function rememberDirective(payload: Record<string, unknown>): RememberDirective | null {
+  if (
+    payload.rememberRequested !== true ||
+    typeof payload.evidenceLineageId !== "string" ||
+    typeof payload.evidenceRowId !== "string"
+  ) return null;
+  const classification = payload.dataClassification;
+  if (
+    classification !== "ordinary" &&
+    classification !== "sensitive" &&
+    classification !== "never_public" &&
+    classification !== "secret"
+  ) return null;
+  return {
+    rememberRequested: true,
+    evidenceLineageId: payload.evidenceLineageId,
+    evidenceRowId: payload.evidenceRowId,
+    dataClassification: classification,
+  };
+}
+
+function suppliedObservations(
+  payload: Record<string, unknown>,
+  cycle: { cycleId: string; generation: number },
+): Observation[] {
+  if (!Array.isArray(payload.observations)) return [];
+  const modalities = new Set<Observation["modality"]>([
+    "text", "image", "page", "tool", "subscription", "receipt",
+  ]);
+  return payload.observations.flatMap((value): Observation[] => {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return [];
+    const item = value as Record<string, unknown>;
+    const observationId = typeof item.observationId === "string" ? item.observationId : "";
+    const provenance = typeof item.provenance === "string" ? item.provenance : "";
+    const modality = item.modality;
+    if (!observationId || !provenance || !modalities.has(modality as Observation["modality"])) return [];
+    const classification = item.dataClassification;
+    if (
+      classification !== "ordinary" &&
+      classification !== "sensitive" &&
+      classification !== "never_public" &&
+      classification !== "secret"
+    ) return [];
+    return [{
+      observationId,
+      cycleId: cycle.cycleId,
+      generation: cycle.generation,
+      derived: item.derived === true,
+      replaySafe: item.replaySafe === true,
+      modality: modality as Observation["modality"],
+      payload: item.payload,
+      provenance,
+      ...(typeof item.rawOutranksDerivedOf === "string"
+        ? { rawOutranksDerivedOf: item.rawOutranksDerivedOf }
+        : {}),
+      dataClassification: classification,
+      secretOmitted: item.secretOmitted === true,
+    }];
+  });
 }
 
 function triggerKind(value: unknown): CycleTriggerKind {
@@ -255,6 +318,7 @@ export async function runCognitiveCycle(
   deps: KernelDeps,
 ): Promise<KernelRunResult> {
   const payload = payloadRecord(event);
+  const directive = rememberDirective(payload);
   const requestedCycleId = typeof payload.cycleId === "string" ? payload.cycleId : null;
   let cycle = requestedCycleId ? getCycle(sidecar, requestedCycleId) : getCurrentCycle(sidecar, event.conversationId);
   if (!cycle) {
@@ -304,14 +368,15 @@ export async function runCognitiveCycle(
     : triggerEvidence?.text ?? listConversationEvidence(sidecar, cycle.conversationId, { limit: 1 }).at(-1)?.text ?? "";
   let observations: Observation[];
   try {
-    observations = await adaptPerception({
+    const perceived = await adaptPerception({
       cycleId: cycle.cycleId,
       generation: cycle.generation,
       ownerMessage,
       runPerception: deps.runPerception,
     });
+    observations = [...suppliedObservations(payload, cycle), ...perceived];
   } catch {
-    observations = [];
+    observations = suppliedObservations(payload, cycle);
   }
   let totalAttempts = 0;
   let acceptedThoughtPasses = 0;
@@ -329,6 +394,7 @@ export async function runCognitiveCycle(
       observations: observationsForThought,
       inFlight,
       runtimeCondition: { thoughtUnavailable: false },
+      rememberDirective: directive,
     });
     storeObservations(sidecar, input, deps.nowMs());
     cycle = updateCycleState(sidecar, cycle.cycleId, "thinking", deps.nowMs());
@@ -483,6 +549,20 @@ export async function runCognitiveCycle(
       return { ...emptyResult(cycle.cycleId, cycle.generation, null, totalAttempts), acceptedThoughtPasses };
     }
     if (publication.outboxId !== null) await deps.projectOutbox(publication.outboxId);
+    if (directive && deps.origin !== "shadow") {
+      const evidence = getConversationEvidence(sidecar, directive.evidenceRowId);
+      if (evidence && evidence.lineageId === directive.evidenceLineageId) {
+        for (const nomination of settlement.durableNominations) {
+          admitOwnerSuppliedClaim(sidecar, {
+            settlementId: settlement.settlementId,
+            nominationId: nomination.nominationId,
+            evidence,
+            evidenceRowId: directive.evidenceRowId,
+            nowMs: deps.nowMs(),
+          });
+        }
+      }
+    }
     return {
       cycleId: cycle.cycleId,
       generation: cycle.generation,

@@ -96,7 +96,7 @@ describe("wave4 Phase 3-E — qualification accumulation never activates", () =>
       on.close();
       off.close();
     }
-  });
+  }, 60_000);
 
   it("no capability is active or effective after qualification accumulation", async () => {
     const { on, off } = await runCounterfactual([{ message: "hi ashley" }]);

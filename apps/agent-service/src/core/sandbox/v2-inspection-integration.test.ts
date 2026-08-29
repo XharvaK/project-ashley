@@ -118,7 +118,7 @@ describe("Sandbox V2 M2 Runtime Integration & Two-Pass Cognition Loop", () => {
         id: 1,
         kind: "user_message",
         score: 0.9,
-        summary: "What is the SPECIAL_MARKER in src/constants.ts?",
+        summary: "Please inspect src/constants.ts and tell me the SPECIAL_MARKER.",
       },
     ];
 

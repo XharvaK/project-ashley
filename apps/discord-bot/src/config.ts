@@ -31,28 +31,31 @@ loadDotEnv();
 /** Windows User env — Cursor shells may not inherit tokens saved via setup-api-key.ps1 */
 function loadWindowsUserEnvFallback(): void {
   if (process.platform !== "win32") return;
-  for (const key of [
+  const keys = [
     "DISCORD_BOT_TOKEN",
     "DISCORD_OWNER_ID",
     "DISCORD_GUILD_ID",
     "DISCORD_ALLOWED_CHANNELS",
-  ]) {
-    if (process.env[key]) continue;
-    try {
-      const value = execFileSync(
-        "powershell.exe",
-        [
-          "-NoProfile",
-          "-NonInteractive",
-          "-Command",
-          `[Environment]::GetEnvironmentVariable('${key}', 'User')`,
-        ],
-        { encoding: "utf-8", timeout: 5000 },
-      ).trim();
+  ] as const;
+  const missingKeys = keys.filter((key) => !process.env[key]);
+  if (missingKeys.length === 0) return;
+  try {
+    const values = execFileSync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `$keys = @(${missingKeys.map((key) => `'${key}'`).join(",")}); $keys | ForEach-Object { [Environment]::GetEnvironmentVariable($_, 'User') }`,
+      ],
+      { encoding: "utf-8", timeout: 5000 },
+    ).split(/\r?\n/);
+    for (const [index, key] of missingKeys.entries()) {
+      const value = values[index]?.trim();
       if (value) process.env[key] = value;
-    } catch {
-      // ignore — validateConfig will surface missing required keys
     }
+  } catch {
+    // ignore — validateConfig will surface missing required keys
   }
 }
 

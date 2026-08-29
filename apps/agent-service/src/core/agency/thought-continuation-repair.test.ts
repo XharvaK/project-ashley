@@ -15,6 +15,7 @@ import {
 import {
   deliberateThoughtContinuation,
   runThoughtModel,
+  THOUGHT_MAX_OUTPUT_TOKENS,
   type Complete,
 } from "./thought.js";
 import type {
@@ -454,8 +455,8 @@ describe("M4 post-operation cognition repair: continuation reliability", () => {
               ? continuationText({ inspectionCognitiveResult: undefined })
               : continuationText(),
           model: "mistral-large",
-          usage: { promptTokens: 500, completionTokens: 1000 },
-          maxTokens: 1000,
+          usage: { promptTokens: 500, completionTokens: THOUGHT_MAX_OUTPUT_TOKENS },
+          maxTokens: THOUGHT_MAX_OUTPUT_TOKENS,
         };
       },
     );

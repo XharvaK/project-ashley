@@ -46,7 +46,7 @@ const base: Decision = {
 };
 
 describe("Thought delay contract", () => {
-  it("rejects a delay class attached to a non-delay decision", async () => {
+  it("normalizes a delay class attached to a non-delay decision", async () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     try {
       const result = await runThoughtModel(
@@ -61,6 +61,7 @@ describe("Thought delay contract", () => {
             shouldSpeak: true,
             effort: "medium",
             completion: "complete",
+            evidenceDisposition: "sufficient",
             uncertainty: 0,
             urgency: 0,
             objective: "ask",
@@ -69,7 +70,7 @@ describe("Thought delay contract", () => {
           }),
         }),
       );
-      expect(result).toMatchObject({ ok: false, error: "payload_invalid" });
+      expect(result).toMatchObject({ ok: true, proposal: { delayClass: null } });
     } finally {
       db.close();
     }
@@ -175,7 +176,7 @@ describe("Thought hold semantics", () => {
     }
   });
 
-  it("still rejects a delay class attached to a non-delay decision with hold", async () => {
+  it("still normalizes a delay class attached to a non-delay decision with hold", async () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     try {
       const result = await runThoughtModel(
@@ -190,6 +191,7 @@ describe("Thought hold semantics", () => {
             shouldSpeak: false,
             effort: "medium",
             completion: "hold",
+            evidenceDisposition: "defer",
             uncertainty: 0.2,
             urgency: 0.1,
             objective: "ask",
@@ -198,7 +200,7 @@ describe("Thought hold semantics", () => {
           }),
         }),
       );
-      expect(result).toMatchObject({ ok: false, error: "payload_invalid" });
+      expect(result).toMatchObject({ ok: true, proposal: { delayClass: null } });
     } finally {
       db.close();
     }

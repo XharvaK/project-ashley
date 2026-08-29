@@ -134,11 +134,11 @@ function seedTension(db: DatabaseSync): Source {
   db.prepare(
     `INSERT INTO relational_tensions
        (owner_id, entity_uuid, data_classification, text, status, repair_status,
-        linked_withdrawal_entity_uuid, last_repair_decision_id,
-        source_entity_type, source_entity_uuid, evidence_json, text_hash,
-        created_at, updated_at)
+       linked_withdrawal_entity_uuid, last_repair_decision_id,
+       source_entity_type, source_entity_uuid, evidence_json, text_hash,
+        created_at, updated_at, provenance)
      VALUES (?, ?, 'ordinary', 'unfinished pacing disagreement', 'open',
-             'open', NULL, NULL, 'evaluation', ?, NULL, ?, ?, ?)`,
+             'open', NULL, NULL, 'evaluation', ?, NULL, ?, ?, ?, 'live')`,
   ).run(OWNER_ID, entityUuid, `${entityUuid}-source`, `${entityUuid}-hash`, now, now);
   const row = db.prepare(
     "SELECT id, entity_uuid FROM relational_tensions WHERE entity_uuid = ?",

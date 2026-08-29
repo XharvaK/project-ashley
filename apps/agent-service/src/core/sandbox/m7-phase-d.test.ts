@@ -34,7 +34,11 @@ afterEach(() => {
 
 function tmp(prefix: string): string {
   const dir = mkdtempSync(join(tmpdir(), prefix));
-  const canonical = canonicalizePath(realpathSync(dir));
+  const nativePath = realpathSync(dir).replace(/\\/g, "/");
+  const canonicalInput = nativePath.replace(/^[A-Za-z]:/, "");
+  const canonical = canonicalizePath(
+    canonicalInput.startsWith("/") ? canonicalInput : `/${canonicalInput}`,
+  );
   if (!canonical.ok) throw new Error("tmp_not_canonical");
   tempDirs.push(canonical.value);
   return canonical.value;

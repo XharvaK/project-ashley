@@ -6,8 +6,9 @@ import { join } from "node:path";
  * Phase 1 guard (plan §4 justification): `cognitive_jobs` volatile columns
  * (status/attempts/updated_at/last_error) are excluded from the live
  * projection under the claim that NO live-behavior reader consumes them — only
- * the executor, the prune routine, and two owner-only diagnostic endpoints
- * (`/nuclear/cognition`, `/nuclear/health`) read them. This test fails loudly
+ * the executor, the prune routine, two owner-only diagnostic endpoints
+ * (`/nuclear/cognition`, `/nuclear/health`), and the gated C4 experience-link
+ * reader read them. This test fails loudly
  * if a future production file starts reading `cognitive_jobs`, so the
  * classification cannot silently become wrong.
  */
@@ -36,6 +37,7 @@ const ALLOWED_PRODUCTION_READERS = new Set([
   join(SRC, "core", "db.ts"), // schema definition only
   join(SRC, "core", "continuity", "nuclear-targetable.ts"), // classification metadata only
   join(SRC, "core", "agency", "own-time-report.ts"), // join on cognitive_jobs BUT filters r.provenance='live' only; gated own_time_report (inactive pre-promotion)
+  join(SRC, "core", "cognitive-graduation", "experience-links.ts"), // gated C4 operational-reference resolution
 ]);
 
 describe("cognitive_jobs reader guard", () => {

@@ -62,6 +62,7 @@ export * from "./memory/assertions.js";
 export * from "./memory/supports.js";
 export * from "./memory/views.js";
 export * from "./memory/forget.js";
+export * from "./commands.js";
 export * from "./identity/learned-self.js";
 export * from "./identity/constitution.js";
 export * from "./calibration/occupant.js";
@@ -75,6 +76,7 @@ export * from "./dispatch/health.js";
 export * from "./shadow/runner.js";
 export * from "./shadow/replicator.js";
 export * from "./evidence/compatibility-projector.js";
+export * from "./delivery/pending.js";
 
 export function speechProjectionKey(outboxId: number): `speech:${number}` {
   return `speech:${outboxId}`;

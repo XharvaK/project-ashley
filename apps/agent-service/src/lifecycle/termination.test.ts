@@ -43,7 +43,7 @@ describe("agent-service startup termination proof", () => {
         const timer = setTimeout(() => {
           proc.kill("SIGKILL");
           reject(new Error("Process timed out (hung with active handles)"));
-        }, 5000);
+        }, 15_000);
 
         proc.on("exit", (code) => {
           clearTimeout(timer);

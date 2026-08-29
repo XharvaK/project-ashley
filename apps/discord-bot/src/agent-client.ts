@@ -194,7 +194,7 @@ export async function listPendingOperationalDeliveries() {
 }
 
 export async function claimPendingDeliveries(options?: {
-  lane?: "operational_fulfillment" | "weekly_review";
+  lane?: "operational_fulfillment" | "weekly_review" | "cognitive_v021";
 }) {
   return agentFetch<{ deliveries: PendingWeeklyReviewDelivery[] }>(
     `/delivery/claim`,
@@ -218,6 +218,10 @@ export async function claimPendingOperationalDeliveries() {
   return claimPendingDeliveries({
     lane: "operational_fulfillment",
   });
+}
+
+export async function claimPendingCognitiveDeliveries() {
+  return claimPendingDeliveries({ lane: "cognitive_v021" });
 }
 
 export async function getDeliveryStatus(reservationId: number) {  const q = new URLSearchParams({ owner_id: config.ownerId });
@@ -449,8 +453,19 @@ export async function lookupPreflight(message: string): Promise<boolean> {
   }
 }
 
-export async function pinMemory(text: string, sensitivity: "none" | "private" = "none") {
-  return agentFetch<{ ok: boolean; fact: { key: string; value: string } }>(
+export async function pinMemory(
+  text: string,
+  sensitivity: "none" | "private" = "none",
+  discordMessageId?: string,
+) {
+  return agentFetch<{
+    ok: boolean;
+    queued?: boolean;
+    duplicate?: boolean;
+    fact?: { key: string; value: string } | null;
+    evidenceRowId?: string;
+    cycleId?: string;
+  }>(
     "/memory/pin",
     {
       method: "POST",
@@ -458,6 +473,7 @@ export async function pinMemory(text: string, sensitivity: "none" | "private" = 
         userId: config.ownerId,
         text,
         sensitivity,
+        ...(discordMessageId ? { discordMessageId } : {}),
       }),
     },
   );
@@ -602,6 +618,22 @@ export async function tickInitiative() {
         plannedBubbles?: Array<{ ordinal: number; text: string }>;
       }
   >("/initiative/tick", {
+    method: "POST",
+    body: JSON.stringify({ userId: config.ownerId }),
+  });
+}
+
+export async function tickCognitiveIdle() {
+  return agentFetch<{
+    conversationId: string | null;
+    eligible: boolean;
+    reason: string | null;
+    thoughtModelAttempts: number;
+    acceptedSettlements: number;
+    thoughtCalls: number;
+    cycleId: string | null;
+    dormant: boolean;
+  }>("/initiative/idle", {
     method: "POST",
     body: JSON.stringify({ userId: config.ownerId }),
   });

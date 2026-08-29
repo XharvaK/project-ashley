@@ -1026,7 +1026,7 @@ describe("Sandbox V2 M2 AshleyCore Runtime Integration", () => {
     // Message contains keywords that might trigger M1 reactive admission ("sandbox test file roundtrip")
     // but Thought explicitly requests M2 inspection. M2 takes strict precedence.
     const result = await core.handleReactiveChat({
-      message: "debug: sandbox test file roundtrip check",
+      message: "debug: please inspect src/index.ts in project-ashley, then check the sandbox test file roundtrip",
       ownerId: "doc",
       channel: "discord",
     });

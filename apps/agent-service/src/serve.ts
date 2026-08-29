@@ -30,6 +30,10 @@ import { readIdentitySlice } from "./core/cognitive-v021/identity/constitution.j
 import { runPerceptionBeforeThought } from "./core/cognitive-v021/perception/adapter.js";
 import { createOutboxProjector } from "./core/cognitive-v021/delivery/outbox-projector.js";
 import { startInboxConsumer, type InboxConsumerHandle } from "./core/cognitive-v021/cycle/inbox-consumer.js";
+import {
+  classifyInitiativeClass,
+  evaluateProactiveEligibility,
+} from "./core/agency/proactive-eligibility.js";
 import type { KernelDeps, Observation } from "./core/cognitive-v021/types.js";
 
 export async function serveAgent(manager: AgentManager): Promise<void> {
@@ -43,7 +47,24 @@ export async function serveAgent(manager: AgentManager): Promise<void> {
     const nuclear = manager.core.getDatabase();
     const ownerId = env.memoryOwnerId || env.discordOwnerId || "default";
     const capabilityReality = getCapabilityReality(nuclear);
-    const projector = createOutboxProjector(cognitiveSidecar, nuclear);
+    const projector = createOutboxProjector(cognitiveSidecar, nuclear, {
+      gate: (deliveryIntent) => {
+        if (deliveryIntent.deliveryLane !== "proactive") return { ok: true };
+        const status = manager.core.getProactiveOperationalStatus(deliveryIntent.ownerId);
+        const eligibility = evaluateProactiveEligibility(nuclear, {
+          ownerId: deliveryIntent.ownerId,
+          chatInProgress: !manager.core.isExpressionQuiesced(deliveryIntent.ownerId),
+          paused: status.paused,
+          enabled: status.enabled,
+          sentToday: status.sentToday,
+          maxPerDay: status.maxPerDay,
+          lastUserMessageAt: status.lastUserMessageAt,
+          minIdleHours: status.minIdleHours,
+          hasUrgent: classifyInitiativeClass(nuclear, deliveryIntent.ownerId) === "urgent_grounded",
+        });
+        return eligibility.ok ? { ok: true } : { ok: false, reason: eligibility.reason };
+      },
+    });
     const deps: KernelDeps = {
       nowMs: () => Date.now(),
       attentionDb: nuclear,

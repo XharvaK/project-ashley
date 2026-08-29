@@ -120,6 +120,7 @@ async function runLocalSchedulerFixture(
   const manager = {
     core,
     getState: () => "ready",
+    isPaused: () => false,
     getUptimeSec: () => 0,
     getProviderState: () => "unavailable",
   } as unknown as AgentManager;

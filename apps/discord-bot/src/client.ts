@@ -10,7 +10,7 @@ import { isAllowedMessage, isOwner } from "./security/gate.js";
 import { handleSlash } from "./handlers/interactionCreate.js";
 import { handleMessage } from "./handlers/messageCreate.js";
 import { handleReaction } from "./handlers/reactionAdd.js";
-import { startProactiveScheduler } from "./initiative/scheduler.js";
+import { startCognitiveIdleScheduler, startProactiveScheduler } from "./initiative/scheduler.js";
 import { startFulfillmentPump } from "./initiative/fulfillment-pump.js";
 import { startPresence } from "./presence.js";
 
@@ -32,6 +32,7 @@ export function createClient(): Client {
   client.once(Events.ClientReady, (c) => {
     console.log(`[discord-bot] logged in as ${c.user.tag}`);
     startProactiveScheduler(client);
+    startCognitiveIdleScheduler();
     startFulfillmentPump(client);
     startPresence(client);
   });

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Client, DMChannel, Message, User } from "discord.js";
 import {
+  drainPendingCognitiveDeliveries,
   drainPendingOperationalDeliveries,
   startFulfillmentPump,
   stopFulfillmentPump,
@@ -88,6 +89,46 @@ test("fulfillment pump drains, receipts and finalizes pending operational delive
   assert.equal(finalizations.length, 2);
   assert.equal(finalizations[0].cause, "complete");
   assert.equal(finalizations[1].cause, "complete");
+});
+
+test("fulfillment pump uses the same receipt/finalize flow for cognitive deliveries", async () => {
+  const events: string[] = [];
+  const pending: PendingWeeklyReviewDelivery[] = [{
+    reservationId: 151,
+    draftText: "cognitive draft",
+    bubbles: [{ ordinal: 0, text: "cognitive draft", discordMessageId: null }],
+    statusUrl: "/delivery/151",
+  }];
+  const deps: FulfillmentPumpDependencies = {
+    claim: async () => ({ deliveries: pending }),
+    receipt: async () => {
+      events.push("receipt");
+      return { ok: true };
+    },
+    finalize: async (_reservationId, cause) => {
+      events.push(`finalize:${cause}`);
+      return {
+        state: "committed",
+        finalizationReason: "all_bubbles_delivered",
+        deliveredText: "cognitive draft",
+      };
+    },
+    send: async () => ({
+      reservationId: null,
+      attemptedOrdinal: null,
+      receiptedOrdinals: [0],
+      failureCategory: null,
+      anySubstantiveContentVisible: true,
+      messages: [{ id: "cognitive-msg" } as Message],
+    }),
+  };
+
+  const count = await drainPendingCognitiveDeliveries(
+    makeFakeClient({ id: "dm-cognitive" }),
+    deps,
+  );
+  assert.equal(count, 1);
+  assert.deepEqual(events, ["receipt", "finalize:complete"]);
 });
 
 test("fulfillment pump records send_failure when Discord send has no visible content", async () => {

@@ -152,8 +152,13 @@ export function routeForBucket(bucket: QuotaBucket): RouteRecord | undefined {
 
 export function quotaContractFor(bucket: QuotaBucket): QuotaContract {
   const record = routeForBucket(bucket);
-  if (record && record.quotaContract !== "env") {
+  if (record?.enabled && record.quotaContract !== "env") {
     return record.quotaContract;
+  }
+  if (!record || !record.enabled) {
+    const provider = bucket.split(":", 1)[0] as ProviderId | undefined;
+    const providerContract = provider ? contractForProvider(provider) : "env";
+    if (providerContract !== "env") return providerContract;
   }
   // Mistral (and any env-driven bucket) derive limits from env.
   const rps = env.mistralRequestsPerSecond;

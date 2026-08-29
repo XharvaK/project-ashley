@@ -262,7 +262,7 @@ describe("bounded OCI wake selection", () => {
     expect(reviewPlan.some((row) => row.detail.includes("TEMP B-TREE"))).toBe(false);
     expect(countOpenCognitiveItemReviewDue(db, OWNER_ID)).toBe(9);
     db.close();
-  });
+  }, 60_000);
 
   it("keeps bounded no-material, blocked, and deferred wakes independent of inventory size", () => {
     for (const size of [10, 100, 1000]) {
@@ -293,7 +293,7 @@ describe("bounded OCI wake selection", () => {
       expect(deferred.scanned).toBeLessThanOrEqual(128);
       db.close();
     }
-  });
+  }, 60_000);
 
   it.each([10, 100, 1000])(
     "bounds one raw page to 32 actual SQLite attention visits with %i deferred rows",

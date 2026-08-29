@@ -93,6 +93,7 @@
     { "method": "POST", "path": "/curiosity/tick", "ownerScope": "internal", "lifecycle": "active" },
     { "method": "GET", "path": "/curiosity/status", "ownerScope": "internal", "lifecycle": "active" },
     { "method": "POST", "path": "/initiative/tick", "ownerScope": "owner_required", "lifecycle": "active" },
+    { "method": "POST", "path": "/initiative/idle", "ownerScope": "owner_required", "lifecycle": "active" },
     { "method": "POST", "path": "/initiative/commit", "ownerScope": "owner_required", "lifecycle": "active" },
     { "method": "POST", "path": "/initiative/abort", "ownerScope": "owner_required", "lifecycle": "active" },
     { "method": "POST", "path": "/initiative/pause", "ownerScope": "owner_required", "lifecycle": "active" },

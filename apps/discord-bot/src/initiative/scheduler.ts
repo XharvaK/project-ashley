@@ -14,6 +14,7 @@ import {
   listPendingWeeklyReviewDeliveries,
   receiptDeliveryBubble,
   tickInitiative,
+  tickCognitiveIdle,
   urgentInitiativeStatus,
 } from "../agent-client.js";
 import {
@@ -27,7 +28,9 @@ import {
 
 let timer: ReturnType<typeof setTimeout> | null = null;
 let urgentTimer: ReturnType<typeof setInterval> | null = null;
+let cognitiveIdleTimer: ReturnType<typeof setInterval> | null = null;
 let tickRunning = false;
+let cognitiveIdleRunning = false;
 
 export type ProactiveSchedulerPreflightDependencies = {
   checkHealth: typeof checkHealth;
@@ -72,6 +75,23 @@ export async function runProactiveSchedulerCycle(
     return { outcome: "preflight_skip", reason: preflight.reason };
   }
   return { outcome: "tick", result: await dependencies.tickInitiative() };
+}
+
+export type CognitiveIdleSchedulerCycleResult = {
+  outcome: "legacy_skip" | "tick" | "error";
+  result?: Awaited<ReturnType<typeof tickCognitiveIdle>>;
+};
+
+/** One private cognition tick. It never sends a Discord message. */
+export async function runCognitiveIdleSchedulerCycle(
+  tick: typeof tickCognitiveIdle = tickCognitiveIdle,
+): Promise<CognitiveIdleSchedulerCycleResult> {
+  if (config.cognitiveKernel === "legacy") return { outcome: "legacy_skip" };
+  try {
+    return { outcome: "tick", result: await tick() };
+  } catch {
+    return { outcome: "error" };
+  }
 }
 
 export type WeeklyReviewDrainDependencies = {
@@ -406,6 +426,32 @@ export function startProactiveScheduler(client: Client): void {
   }, 15_000);
 }
 
+export function startCognitiveIdleScheduler(): void {
+  if (config.cognitiveKernel === "legacy") {
+    console.log("[discord-bot] cognitive idle scheduler disabled (legacy kernel)");
+    return;
+  }
+  if (cognitiveIdleTimer) return;
+  const intervalMs = config.proactiveCheckIntervalMin * 60 * 1000;
+  const tick = async (): Promise<void> => {
+    if (cognitiveIdleRunning) return;
+    cognitiveIdleRunning = true;
+    try {
+      const cycle = await runCognitiveIdleSchedulerCycle();
+      if (cycle.outcome === "tick" && cycle.result?.reason) {
+        console.log(`[discord-bot] cognitive idle: ${cycle.result.reason}`);
+      } else if (cycle.outcome === "error") {
+        console.warn("[discord-bot] cognitive idle tick failed");
+      }
+    } finally {
+      cognitiveIdleRunning = false;
+    }
+  };
+  console.log(`[discord-bot] cognitive idle scheduler every ~${config.proactiveCheckIntervalMin}m`);
+  void tick();
+  cognitiveIdleTimer = setInterval(() => { void tick(); }, intervalMs);
+}
+
 export function stopProactiveScheduler(): void {
   if (timer) {
     clearTimeout(timer);
@@ -414,6 +460,9 @@ export function stopProactiveScheduler(): void {
   if (urgentTimer) clearInterval(urgentTimer);
   urgentTimer = null;
   tickRunning = false;
+  if (cognitiveIdleTimer) clearInterval(cognitiveIdleTimer);
+  cognitiveIdleTimer = null;
+  cognitiveIdleRunning = false;
 }
 
 export async function pauseProactive(): Promise<void> {

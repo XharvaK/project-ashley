@@ -1,6 +1,14 @@
 import type { DatabaseSync } from "node:sqlite";
 import { planContentBubbles } from "../../delivery/bubble-plan.js";
 import {
+  getDeliveryReservation,
+  listDeliveryBubbles,
+} from "../../delivery/store.js";
+import {
+  appendAshleyEvidence,
+  appendSystemEvent,
+} from "../evidence/conversation-log.js";
+import {
   getSpeechOutbox,
   updateOutboxStatus,
 } from "../speech/outbox.js";
@@ -69,11 +77,107 @@ function markTerminalFromDestination(
     const status: OutboxSendStatus = state === "cancelled" ? "suppressed" : "send_failure";
     if ("outboxId" in row) updateOutboxStatus(sidecar, row.outboxId, status, { nuclearReservationId: reservationId, finalizationReason: text(destination.finalization_reason) || null });
     else updateSystemNoticeStatus(sidecar, row.noticeId, status, { nuclearReservationId: reservationId });
+  } else if (state === "partially_delivered") {
+    if ("outboxId" in row) updateOutboxStatus(sidecar, row.outboxId, "partially_delivered", { nuclearReservationId: reservationId, finalizationReason: text(destination.finalization_reason) || null });
+    else updateSystemNoticeStatus(sidecar, row.noticeId, "partially_delivered", { nuclearReservationId: reservationId });
+  } else if (state === "sending") {
+    if ("outboxId" in row) updateOutboxStatus(sidecar, row.outboxId, "sending", { nuclearReservationId: reservationId });
+    else updateSystemNoticeStatus(sidecar, row.noticeId, "sending", { nuclearReservationId: reservationId });
   } else if ("outboxId" in row) {
     updateOutboxStatus(sidecar, row.outboxId, "projected", { nuclearReservationId: reservationId, finalizationReason: null });
   } else {
     updateSystemNoticeStatus(sidecar, row.noticeId, "projected", { nuclearReservationId: reservationId });
   }
+}
+
+function projectedRow(
+  sidecar: DatabaseSync,
+  nuclear: DatabaseSync,
+  reservationId: number,
+): SpeechOutboxRow | SystemNoticeOutbox | null {
+  const destination = nuclear.prepare(
+    "SELECT cognitive_v021_projection_key FROM delivery_reservations WHERE id = ?",
+  ).get(reservationId) as Row | undefined;
+  const key = text(destination?.cognitive_v021_projection_key);
+  if (key.startsWith("speech:")) {
+    const id = Number(key.slice("speech:".length));
+    return Number.isFinite(id) ? getSpeechOutbox(sidecar, id) : null;
+  }
+  if (key.startsWith("system:")) {
+    const id = Number(key.slice("system:".length));
+    return Number.isFinite(id) ? getSystemNotice(sidecar, id) : null;
+  }
+  return null;
+}
+
+function markDeliveredEvidence(
+  sidecar: DatabaseSync,
+  nuclear: DatabaseSync,
+  reservationId: number,
+  row: SpeechOutboxRow | SystemNoticeOutbox,
+): void {
+  const destination = getDeliveryReservation(nuclear, reservationId);
+  if (
+    !destination ||
+    (destination.state !== "committed" && destination.state !== "partially_delivered")
+  ) return;
+  const delivered = listDeliveryBubbles(nuclear, reservationId)
+    .filter((bubble) => bubble.discordMessageId);
+  if (delivered.length === 0) return;
+  const role = "outboxId" in row ? "ashley" : "system";
+  const existing = sidecar.prepare(
+    `SELECT row_id FROM conversation_evidence_log
+      WHERE reservation_id = ? AND role = ? LIMIT 1`,
+  ).get(reservationId, role);
+  if (existing) return;
+  const input = {
+    conversationId: row.conversationId,
+    text: delivered.map((bubble) => bubble.text).join("\n\n"),
+    discordMessageIds: delivered.map((bubble) => bubble.discordMessageId!),
+    reservationId,
+    producingCycleId: row.cycleId,
+    delivered: true,
+    dataClassification: "never_public" as const,
+  };
+  if ("outboxId" in row) appendAshleyEvidence(sidecar, input);
+  else appendSystemEvent(sidecar, input);
+}
+
+/** Mark a claimed nuclear projection as sending in its source sidecar. */
+export function markProjectedDeliverySending(
+  sidecar: DatabaseSync,
+  nuclear: DatabaseSync,
+  reservationId: number,
+): boolean {
+  const row = projectedRow(sidecar, nuclear, reservationId);
+  if (!row) return false;
+  if ("outboxId" in row) {
+    updateOutboxStatus(sidecar, row.outboxId, "sending", {
+      nuclearReservationId: reservationId,
+    });
+  } else {
+    updateSystemNoticeStatus(sidecar, row.noticeId, "sending", {
+      nuclearReservationId: reservationId,
+    });
+  }
+  return true;
+}
+
+/** Reconcile nuclear receipt/finalization truth back to the v0.2.1 outbox. */
+export function reconcileProjectedDelivery(
+  sidecar: DatabaseSync,
+  nuclear: DatabaseSync,
+  reservationId: number,
+): boolean {
+  const row = projectedRow(sidecar, nuclear, reservationId);
+  if (!row) return false;
+  const destination = nuclear.prepare(
+    "SELECT * FROM delivery_reservations WHERE id = ?",
+  ).get(reservationId) as Row | undefined;
+  if (!destination) return false;
+  markTerminalFromDestination(sidecar, nuclear, row, destination);
+  markDeliveredEvidence(sidecar, nuclear, reservationId, row);
+  return true;
 }
 
 function shouldProject(
