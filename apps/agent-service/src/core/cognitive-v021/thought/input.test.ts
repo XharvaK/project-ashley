@@ -51,7 +51,9 @@ describe("v0.2.1 ThoughtInput assembly", () => {
       expect(input.occupancy).toHaveLength(8);
       expect(input.occupancy[0]?.concernId).toBe("concern-11");
       expect(input.retrieval.request.triggerTerms).toEqual(expect.arrayContaining(["explain", "hy19", "carefully"]));
-      expect(input.retrieval.miss).toBe(true);
+      expect(input.retrieval.hits).toEqual(expect.arrayContaining([
+        expect.objectContaining({ sourceStore: "conversation_log" }),
+      ]));
     } finally {
       db.close();
     }

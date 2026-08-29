@@ -19,6 +19,8 @@ import {
 } from "../types.js";
 import { listConversationEvidence } from "../evidence/conversation-log.js";
 import { listInFlight } from "../effect/in-flight.js";
+import { listWorkingContext } from "../evidence/working-context.js";
+import { retrieveCandidates } from "../retrieval/discover.js";
 
 export type BuildThoughtInputOptions = {
   sidecar: DatabaseSync;
@@ -148,7 +150,7 @@ export function buildThoughtInput(options: BuildThoughtInputOptions): ThoughtInp
     options.triggerEvidence,
     options.rawConversation,
   );
-  const workingContext = options.workingContext ?? loadWorkingContext(options.sidecar, options.cycle.conversationId);
+  const workingContext = options.workingContext ?? listWorkingContext(options.sidecar, options.cycle.conversationId);
   const occupancy = (options.occupancy ?? loadOccupancy(options.sidecar, options.cycle.conversationId, occupancyK))
     .slice()
     .sort((left, right) => right.priority - left.priority || right.updatedGeneration - left.updatedGeneration)
@@ -161,6 +163,16 @@ export function buildThoughtInput(options: BuildThoughtInputOptions): ThoughtInp
   const assertionKeys = workingContext
     .map((item) => item.concernId)
     .filter((key): key is string => Boolean(key));
+
+  const retrieval = retrieveCandidates(options.sidecar, {
+    conversationId: options.cycle.conversationId,
+    request: {
+      triggerTerms,
+      workingContextTopics: [...new Set(workingContextTopics)],
+      assertionKeys: [...new Set(assertionKeys)],
+      includeLogSearch: true,
+    },
+  });
 
   return {
     cycleId: options.cycle.cycleId,
@@ -178,16 +190,7 @@ export function buildThoughtInput(options: BuildThoughtInputOptions): ThoughtInp
     learnedSelfSlice: options.learnedSelfSlice ?? { dispositions: [], interests: [] },
     capabilityReality: options.capabilityReality,
     observations: options.observations ?? [],
-    retrieval: {
-      request: {
-        triggerTerms,
-        workingContextTopics: [...new Set(workingContextTopics)],
-        assertionKeys: [...new Set(assertionKeys)],
-        includeLogSearch: true,
-      },
-      hits: [],
-      miss: true,
-    },
+    retrieval,
     inFlight: options.inFlight ?? listInFlight(options.sidecar, options.cycle.cycleId),
     authorityObjections: options.authorityObjections ?? [],
     runtimeCondition: emptyRuntimeCondition(options.runtimeCondition),
