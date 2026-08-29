@@ -17,6 +17,7 @@ import {
   mayMigrateStorage,
   reservedProductionDataDir,
   reservedProductionNuclearDbPath,
+  reservedProductionCognitiveSidecarDbPath,
   canonicalPathIdentity,
   isCanonicalInside,
 } from "./data-plane.js";
@@ -86,6 +87,19 @@ function seedSchema28File(nuclearPath: string, continuityPath: string): void {
 }
 
 describe("production data-plane authority", () => {
+  it("reserves the cognitive v0.2.1 sidecar beside production continuity", () => {
+    const isolatedDir = tempDir("ashley-cognitive-sidecar-plane-");
+    const isolated = createIsolatedDataPlane(isolatedDir);
+    const reserved = reservedProductionCognitiveSidecarDbPath();
+
+    expect(reserved).toBe(
+      join(reservedProductionDataDir(), "cognitive-v021.db"),
+    );
+    expect(isolated.cognitiveSidecarDbPath).toBe(
+      join(isolatedDir, "cognitive-v021.db"),
+    );
+  });
+
   it("does not grant production authority by import or no-arg construction", () => {
     expect(() => openNuclearDb()).toThrow(/data_plane_required/);
     expect(() => new AshleyCore()).toThrow(/data_plane_required/);

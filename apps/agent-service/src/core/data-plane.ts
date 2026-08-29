@@ -11,6 +11,7 @@ export type DataPlaneContext = {
   readonly sessionsDir: string;
   readonly nuclearDbPath: string;
   readonly continuityDbPath: string;
+  readonly cognitiveSidecarDbPath: string;
   readonly migrationBackupsDir: string;
   readonly statePath: string;
   readonly configPath: string;
@@ -64,6 +65,10 @@ export function reservedProductionContinuityDbPath(): string {
   return join(reservedProductionDataDir(), "continuity.db");
 }
 
+export function reservedProductionCognitiveSidecarDbPath(): string {
+  return join(reservedProductionDataDir(), "cognitive-v021.db");
+}
+
 export function isCanonicalInside(parent: string, child: string): boolean {
   const parentN = canonicalPathIdentity(parent).replace(/\/+$/, "");
   const childN = canonicalPathIdentity(child);
@@ -95,6 +100,7 @@ function pathsFromDataDir(dataDir: string): Omit<
     sessionsDir: join(conversationsDir, "sessions"),
     nuclearDbPath: join(conversationsDir, "nuclear.db"),
     continuityDbPath: join(resolved, "continuity.db"),
+    cognitiveSidecarDbPath: join(resolved, "cognitive-v021.db"),
     migrationBackupsDir: join(resolved, "migration-backups"),
     statePath: join(resolved, "state.json"),
     configPath: join(resolved, "config.json"),
@@ -114,6 +120,7 @@ function assertIsolatedPathsOutsideProduction(
     paths.sessionsDir,
     paths.nuclearDbPath,
     paths.continuityDbPath,
+    paths.cognitiveSidecarDbPath,
     paths.migrationBackupsDir,
     paths.statePath,
     paths.configPath,
