@@ -34,6 +34,75 @@ const turns = new TurnBuffer<Intake, Message>((channelId) => {
   void drainTurn(channelId);
 });
 
+export type MessageIngressChat = (
+  message: string,
+  options?: {
+    attachments?: Intake["attachments"];
+    inboundDiscordMessageIds?: string[];
+    finalFragmentReceivedAtMs?: number;
+  },
+) => Promise<unknown>;
+
+export type MessageCreateHandler = {
+  handleMessage: (message: Message) => Promise<void>;
+  flushForTest: (channelId: string) => Promise<void>;
+};
+
+/**
+ * Ingress-only handler seam. TurnBuffer still coalesces fragments and the
+ * ChannelQueue may abort delivery pacing, but the durable agent admission is
+ * deliberately outside ChannelQueue so a new owner message is not serialized
+ * behind an older Thought request.
+ */
+export function createMessageCreateHandler(options: {
+  ingressChat: MessageIngressChat;
+  channelQueue?: { abort(channelId: string): void };
+  quietMs?: number;
+  hardCapMs?: number;
+}): MessageCreateHandler {
+  let lastReadyPromise = Promise.resolve();
+  let drain: (channelId: string) => Promise<void>;
+  const localTurns = new TurnBuffer<Intake, Message>(
+    (channelId) => {
+      lastReadyPromise = drain(channelId);
+      void lastReadyPromise.catch(() => {});
+    },
+    options.quietMs,
+    options.hardCapMs,
+  );
+  drain = async (channelId: string) => {
+    const buffered = localTurns.take(channelId);
+    if (!buffered) return;
+    const turn = {
+      text: buffered.fragments.map((fragment) => fragment.text).join("\n"),
+      attachments: buffered.fragments.flatMap((fragment) => fragment.attachments).slice(0, MAX_IMAGES),
+      inboundDiscordMessageIds: buffered.fragments.map((fragment) => fragment.messageId),
+    };
+    await options.ingressChat(turn.text, {
+      attachments: turn.attachments,
+      inboundDiscordMessageIds: turn.inboundDiscordMessageIds,
+      finalFragmentReceivedAtMs: buffered.finalFragmentReceivedAt,
+    });
+  };
+
+  return {
+    async handleMessage(message: Message): Promise<void> {
+      if (message.content.trim().startsWith("/")) return;
+      const intake = describeIntake(message);
+      if (!intake.text) return;
+      const channelId = message.channel.id;
+      const first = localTurns.push(channelId, intake, message);
+      if (first) options.channelQueue?.abort(channelId);
+    },
+    async flushForTest(channelId: string): Promise<void> {
+      const previous = lastReadyPromise;
+      localTurns.flushForTest(channelId);
+      if (lastReadyPromise === previous) return;
+      await lastReadyPromise;
+    },
+  };
+}
+
 async function drainTurn(channelId: string): Promise<void> {
   await channelQueue.enqueue(channelId, async ({ signal }) => {
     const buffered = turns.take(channelId);
