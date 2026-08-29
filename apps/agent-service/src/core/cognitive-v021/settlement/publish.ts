@@ -13,6 +13,8 @@ import { applyWorkingContextDelta } from "../evidence/working-context.js";
 import { applyConcernDelta } from "../concerns/lineage.js";
 import { applyOccupancyDelta } from "../concerns/occupancy.js";
 import { enqueueDurableNomination } from "../memory/nomination.js";
+import { assertSubscriptionCapacity } from "../observation/subscriptions.js";
+import { sanitizeFutureTriggerPayload } from "../initiative/future-triggers.js";
 
 export type PublicationOptions = {
   origin?: OutboxOrigin;
@@ -54,7 +56,7 @@ function applyFutureTriggerDelta(db: DatabaseSync, delta: FutureTriggerDelta): v
      VALUES (?, ?, ?, ?, ?, 'scheduled', ?)
      ON CONFLICT(trigger_id) DO UPDATE SET due_at_ms=excluded.due_at_ms,
        snapshot_hash=excluded.snapshot_hash, status='scheduled', payload_json=excluded.payload_json`,
-  ).run(trigger.triggerId, trigger.conversationId, trigger.concernId, trigger.dueAtMs, trigger.snapshotHash, json(trigger.payload ?? {}));
+  ).run(trigger.triggerId, trigger.conversationId, trigger.concernId, trigger.dueAtMs, trigger.snapshotHash, json(sanitizeFutureTriggerPayload(trigger.payload ?? {})));
 }
 
 function applySubscriptionDelta(db: DatabaseSync, delta: SubscriptionDelta): void {
@@ -93,7 +95,8 @@ export function publishSemanticTransaction(
       db.exec("COMMIT");
       return { published: true, replayed: true, settlementId: settlement.settlementId, outboxId: outbox };
     }
-    const current = currentGeneration(db, awaitlessConversation(settlement, db));
+    const conversationId = awaitlessConversation(settlement, db);
+    const current = currentGeneration(db, conversationId);
     if (current !== null && current !== settlement.generation) {
       db.exec("COMMIT");
       return { published: false, replayed: false, reason: "stale_generation", settlementId: null, outboxId: null };
@@ -102,6 +105,7 @@ export function publishSemanticTransaction(
     for (const delta of settlement.workingContextDelta) applyWorkingContextDelta(db, delta, settlement);
     for (const delta of settlement.concernDeltas) applyConcernDelta(db, delta, settlement);
     for (const delta of settlement.occupancyDelta) applyOccupancyDelta(db, delta, settlement);
+    assertSubscriptionCapacity(db, conversationId, settlement.subscriptions);
     for (const delta of settlement.futureTriggers) applyFutureTriggerDelta(db, delta);
     for (const delta of settlement.subscriptions) applySubscriptionDelta(db, delta);
     for (const nomination of settlement.durableNominations) applyNomination(db, nomination);
@@ -117,7 +121,7 @@ export function publishSemanticTransaction(
         settlementId: settlement.settlementId,
         cycleId: settlement.cycleId,
         generation: settlement.generation,
-        conversationId: awaitlessConversation(settlement, db),
+        conversationId,
         licensedText: settlement.speech.finalLicensedText ?? settlement.speech.surfaceDraft ?? "",
         origin: options.origin ?? "live",
         deliveryIntent: options.deliveryIntent,
