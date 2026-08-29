@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import type { InFlightRecord } from "../types.js";
+import type { EffectReceipt } from "../types.js";
 
 export type PutInFlightInput = {
   effectId?: string;
@@ -80,4 +81,56 @@ export function listInFlight(db: DatabaseSync, cycleId?: string): InFlightRecord
     ? db.prepare("SELECT * FROM in_flight_effects WHERE cycle_id = ? ORDER BY dispatched_at_ms ASC").all(cycleId)
     : db.prepare("SELECT * FROM in_flight_effects ORDER BY dispatched_at_ms ASC").all();
   return rows.map(mapInFlight).filter((row): row is InFlightRecord => row !== null);
+}
+
+function mapReceipt(row: unknown): EffectReceipt | null {
+  if (typeof row !== "object" || row === null) return null;
+  const value = row as DbRow;
+  let claims: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(stringValue(value.claims_json, "{}"));
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) claims = parsed as Record<string, unknown>;
+  } catch { /* preserve an empty safe claims object */ }
+  return {
+    receiptId: stringValue(value.receipt_id),
+    effectId: stringValue(value.effect_id),
+    idempotencyKey: stringValue(value.idempotency_key),
+    outcome: stringValue(value.outcome, "unknown") as EffectReceipt["outcome"],
+    claims,
+    atMs: numberValue(value.at_ms),
+    dataClassification: stringValue(value.data_classification, "never_public") as EffectReceipt["dataClassification"],
+    secretOmitted: numberValue(value.secret_omitted) === 1,
+  };
+}
+
+export function getEffectReceipt(db: DatabaseSync, effectId: string): EffectReceipt | null {
+  return mapReceipt(db.prepare("SELECT * FROM effect_receipts WHERE effect_id = ?").get(effectId));
+}
+
+export function recordEffectReceipt(db: DatabaseSync, receipt: EffectReceipt): EffectReceipt {
+  const existing = getEffectReceipt(db, receipt.effectId);
+  if (existing) return existing;
+  db.prepare(
+    `INSERT INTO effect_receipts
+       (receipt_id, effect_id, idempotency_key, outcome, claims_json, at_ms,
+        data_classification, secret_omitted)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    receipt.receiptId,
+    receipt.effectId,
+    receipt.idempotencyKey,
+    receipt.outcome,
+    JSON.stringify(receipt.claims),
+    receipt.atMs,
+    receipt.dataClassification,
+    receipt.secretOmitted ? 1 : 0,
+  );
+  db.prepare("UPDATE in_flight_effects SET state = 'receipted' WHERE effect_id = ?").run(receipt.effectId);
+  return getEffectReceipt(db, receipt.effectId) ?? receipt;
+}
+
+export function listEffectReceipts(db: DatabaseSync): EffectReceipt[] {
+  return db.prepare("SELECT * FROM effect_receipts ORDER BY at_ms ASC").all()
+    .map(mapReceipt)
+    .filter((row): row is EffectReceipt => row !== null);
 }
