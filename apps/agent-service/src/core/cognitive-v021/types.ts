@@ -430,7 +430,7 @@ export type AuthorityCode =
 export type AuthorityStage = "proposal" | "settlement" | "dispatch";
 export type AuthorityPacks = {
   epistemic: { allowInferredWorldClaims: boolean };
-  currentness: { requireObservationForLatest: boolean };
+  currentness: { requireObservationForLatest: boolean; observedObservationIds?: string[] };
   receipt: { receiptsByEffectId: Record<string, EffectReceipt> };
   capability: CapabilityReality;
   operational: { sandboxAvailable: boolean };
