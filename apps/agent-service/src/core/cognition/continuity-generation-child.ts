@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
+import { getContinuityFor } from "../continuity/registry.js";
 import { openNuclearDb } from "../db.js";
 import { materializeOpenCognitiveItem } from "./open-items.js";
 
@@ -19,6 +20,7 @@ if (!dbPath || !proposalPath || !readyPath || !gatePath || !resultPath) {
 }
 
 const db = openNuclearDb(new DatabaseSync(dbPath), { continuityOptional: true });
+const continuity = getContinuityFor(db);
 db.exec("PRAGMA busy_timeout = 5000");
 writeFileSync(readyPath, "ready", "utf8");
 
@@ -56,5 +58,9 @@ try {
     "utf8",
   );
 } finally {
-  db.close();
+  try {
+    db.close();
+  } finally {
+    continuity?.close();
+  }
 }

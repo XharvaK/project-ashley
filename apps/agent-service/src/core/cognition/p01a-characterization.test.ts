@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -7,6 +7,7 @@ import { env } from "../../env.js";
 import { applyModelContinuity } from "../attention/continuity.js";
 import { MODEL_SENSITIVE_SET_FOR_CONTRACT } from "../attention/contract-material.js";
 import { openNuclearDb } from "../db.js";
+import { getContinuityFor } from "../continuity/registry.js";
 import { applyEligibleRevisions } from "../learning/revisions.js";
 import { insertMessage } from "../memory/threads.js";
 import {
@@ -68,6 +69,7 @@ const fixedAnalysis: CognitionAnalysis = {
 
 const allCapabilitiesActive = () => true;
 const openDbs = new Set<DatabaseSync>();
+const openContinuities = new Set<DatabaseSync>();
 const tempDirectories = new Set<string>();
 
 type Fixture = {
@@ -82,6 +84,8 @@ type Fixture = {
 function openTracked(path = ":memory:"): DatabaseSync {
   const db = openNuclearDb(new DatabaseSync(path));
   openDbs.add(db);
+  const continuity = getContinuityFor(db);
+  if (continuity) openContinuities.add(continuity);
   return db;
 }
 
@@ -216,8 +220,17 @@ afterEach(() => {
     }
   }
   openDbs.clear();
+  for (const continuity of openContinuities) {
+    try {
+      continuity.close();
+    } catch {
+      // Some fixtures may have closed the shared sidecar explicitly.
+    }
+  }
+  openContinuities.clear();
   for (const directory of tempDirectories) {
     rmSync(directory, { recursive: true, force: true });
+    expect(existsSync(directory)).toBe(false);
   }
   tempDirectories.clear();
   vi.useRealTimers();

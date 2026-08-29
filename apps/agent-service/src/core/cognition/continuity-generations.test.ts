@@ -10,9 +10,10 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { env } from "../../env.js";
-import { openNuclearDb } from "../db.js";
+import { getContinuityFor } from "../continuity/registry.js";
+import { openNuclearDb, type OpenNuclearOptions } from "../db.js";
 import { runAttentiveDispatch } from "../attention/governor.js";
 import { currentContractId } from "../rollout/capabilities.js";
 import { enqueueCognitiveJob } from "./jobs.js";
@@ -22,6 +23,41 @@ import {
   materializeOpenCognitiveItem,
   type OpenCognitiveItemProposal,
 } from "./open-items.js";
+
+const openDbs = new Set<DatabaseSync>();
+const openContinuities = new Set<DatabaseSync>();
+
+function openTrackedDb(
+  existing: DatabaseSync,
+  options: OpenNuclearOptions = {},
+): DatabaseSync {
+  const db = openNuclearDb(existing, options);
+  openDbs.add(db);
+  const continuity = getContinuityFor(db);
+  if (continuity) openContinuities.add(continuity);
+  return db;
+}
+
+function closeTrackedResources(): void {
+  for (const db of openDbs) {
+    try {
+      db.close();
+    } catch {
+      // Some scenarios close the Nuclear handle before child contention.
+    }
+  }
+  openDbs.clear();
+  for (const continuity of openContinuities) {
+    try {
+      continuity.close();
+    } catch {
+      // Some scenarios close the shared sidecar explicitly.
+    }
+  }
+  openContinuities.clear();
+}
+
+afterEach(closeTrackedResources);
 
 async function acceptedDispatch(
   db: DatabaseSync,
@@ -146,7 +182,7 @@ describe("OCI continuity generations", () => {
   it("keeps A/E3 current when an earlier accepted A/E1 materializes late", async () => {
     const originalGroqKey = env.groqApiKey;
     env.groqApiKey = "test-key";
-    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const db = openTrackedDb(new DatabaseSync(":memory:"));
     const jobId = enqueueCognitiveJob(db, {
       ownerId: "doc",
       kind: "consolidate_thread",
@@ -176,7 +212,7 @@ describe("OCI continuity generations", () => {
   it("creates one current successor for A/E1 -> B/E2 -> A/E3 and converges retries", async () => {
     const originalGroqKey = env.groqApiKey;
     env.groqApiKey = "test-key";
-    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const db = openTrackedDb(new DatabaseSync(":memory:"));
     const jobId = enqueueCognitiveJob(db, {
       ownerId: "doc",
       kind: "consolidate_thread",
@@ -251,7 +287,7 @@ describe("OCI continuity generations", () => {
     const originalGroqKey = env.groqApiKey;
     const originalBuild = env.ashleyReleaseId;
     env.groqApiKey = "test-key";
-    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const db = openTrackedDb(new DatabaseSync(":memory:"));
     const jobId = enqueueCognitiveJob(db, {
       ownerId: "doc",
       kind: "consolidate_thread",
@@ -289,7 +325,7 @@ describe("OCI continuity generations", () => {
     env.groqApiKey = "test-key";
     const directory = mkdtempSync(join(tmpdir(), "ashley-ordered-continuity-"));
     const dbPath = join(directory, "nuclear.db");
-    const db = openNuclearDb(new DatabaseSync(dbPath));
+    const db = openTrackedDb(new DatabaseSync(dbPath));
     const jobId = enqueueCognitiveJob(db, {
       ownerId: "doc",
       kind: "consolidate_thread",
@@ -366,7 +402,7 @@ describe("OCI continuity generations", () => {
       const olderExit = await older.done;
 
       expect([newerExit, olderExit].every((exit) => exit.code === 0)).toBe(true);
-      const check = openNuclearDb(new DatabaseSync(dbPath), {
+      const check = openTrackedDb(new DatabaseSync(dbPath), {
         continuityOptional: true,
       });
       const current = listOpenCognitiveItems(check, "doc", { status: "OPEN" });
@@ -391,7 +427,9 @@ describe("OCI continuity generations", () => {
       } catch {
         // The parent connection is already closed before child contention.
       }
+      closeTrackedResources();
       rmSync(directory, { recursive: true, force: true });
+      expect(existsSync(directory)).toBe(false);
     }
   });
 
@@ -403,7 +441,7 @@ describe("OCI continuity generations", () => {
     const proposalPath = join(directory, "proposal.json");
     const gatePath = join(directory, "gate");
     const sourceReady = makeQuestion;
-    const db = openNuclearDb(new DatabaseSync(dbPath));
+    const db = openTrackedDb(new DatabaseSync(dbPath));
     const jobId = enqueueCognitiveJob(db, {
       ownerId: "doc",
       kind: "consolidate_thread",
@@ -441,7 +479,7 @@ describe("OCI continuity generations", () => {
       ]);
       expect(outcomes.filter((outcome) => outcome.created)).toHaveLength(1);
 
-      const check = openNuclearDb(new DatabaseSync(dbPath), { continuityOptional: true });
+      const check = openTrackedDb(new DatabaseSync(dbPath), { continuityOptional: true });
       expect(listOpenCognitiveItems(check, "doc", { status: "OPEN" })).toHaveLength(1);
       expect(
         check.prepare(
@@ -457,7 +495,9 @@ describe("OCI continuity generations", () => {
       } catch {
         // The connection is already closed after the child handoff.
       }
+      closeTrackedResources();
       rmSync(directory, { recursive: true, force: true });
+      expect(existsSync(directory)).toBe(false);
     }
   });
 });
