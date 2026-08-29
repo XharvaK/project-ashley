@@ -70,6 +70,7 @@ export * from "./initiative/idle.js";
 export * from "./initiative/future-triggers.js";
 export * from "./observation/subscriptions.js";
 export * from "./dispatch/live.js";
+export * from "./dispatch/health.js";
 export * from "./shadow/runner.js";
 export * from "./shadow/replicator.js";
 

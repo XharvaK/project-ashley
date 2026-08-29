@@ -17,6 +17,7 @@ import type { SandboxCapabilityId, SandboxRiskClass } from "@composer-assistant/
 import type { ErrorCode } from "./errors.js";
 import { openCognitiveSidecarDb } from "./core/cognitive-v021/sidecar/db.js";
 import { createCognitiveIngressHandler } from "./core/cognitive-v021/ingress/http.js";
+import { getCognitiveHealthSnapshot } from "./core/cognitive-v021/dispatch/health.js";
 import {
   admitOwnerCorrection,
   type AdmissionPath,
@@ -309,6 +310,18 @@ export function createServer(
     return cognitiveSidecar;
   }
 
+  function cognitiveHealth() {
+    const managerWithCognitive = manager as AgentManager & {
+      getCognitiveKernel?: () => "legacy" | "shadow" | "v021";
+      getCognitiveSidecar?: () => DatabaseSync | null;
+    };
+    return getCognitiveHealthSnapshot({
+      mode: managerWithCognitive.getCognitiveKernel?.() ?? env.cognitiveKernel,
+      sidecar: managerWithCognitive.getCognitiveSidecar?.() ?? cognitiveSidecar,
+      sidecarPath: manager.dataPlane?.cognitiveSidecarDbPath ?? null,
+    });
+  }
+
   function approvalService(ownerId: string): SandboxApprovalService {
     return new SandboxApprovalService({
       db: manager.core.getDatabase(),
@@ -318,12 +331,14 @@ export function createServer(
   }
 
   app.get("/health", (_req, res) => {
+    const cognitive = cognitiveHealth();
     res.json({
       ok: true,
       ready: manager.getState() === "ready" || manager.getState() === "busy",
       state: manager.getState(),
       uptimeSec: manager.getUptimeSec(),
       providerState: manager.getProviderState(),
+      ...cognitive,
     });
   });
 
@@ -331,10 +346,13 @@ export function createServer(
     try {
       const ownerId = String(req.query.owner_id ?? "");
       requireOwner(ownerId || undefined);
-      res.json(manager.core.getHealthSnapshot({
+      res.json({
+        ...manager.core.getHealthSnapshot({
         ready: manager.getState() === "ready" || manager.getState() === "busy",
         providerState: manager.getProviderState(),
-      }));
+        }),
+        ...cognitiveHealth(),
+      });
     } catch (err) {
       const { status, body } = toErrorResponse(err);
       res.status(status).json(body);
