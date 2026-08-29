@@ -17,6 +17,7 @@
     "dev": "tsx watch src/index.ts",
 
     "test": "vitest run",
+    "test:cognitive-v021": "vitest run src/core/cognitive-v021",
     "test:offline": "vitest run --config vitest.offline.config.ts",
     "test:host": "vitest run --config vitest.host.config.ts",
     "test:watch": "vitest"
