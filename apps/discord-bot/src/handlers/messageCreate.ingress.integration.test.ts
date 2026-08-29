@@ -43,3 +43,49 @@ test("Discord ingress admits B while the first Thought/agent request is pending"
     releaseA();
     await aFinished;
 });
+
+test("legacy mode keeps the legacy delivery lane when durable ingress fails", async () => {
+  const legacy: string[] = [];
+  const handler = createMessageCreateHandler({
+    kernelMode: "legacy",
+    quietMs: 1,
+    hardCapMs: 10,
+    ingressChat: async () => {
+      throw new Error("sidecar_unavailable");
+    },
+    legacyChat: async (_target, turn) => {
+      legacy.push(turn.text);
+    },
+  });
+
+  await handler.handleMessage(message("d3", "legacy fallback"));
+  await handler.flushForTest("channel-1");
+  assert.deepEqual(legacy, ["legacy fallback"]);
+});
+
+test("v021 mode fails closed when durable ingress fails", async () => {
+  const legacy: string[] = [];
+  const replies: string[] = [];
+  const target = message("d4", "must not reach legacy") as {
+    reply?: (content: string) => Promise<unknown>;
+  };
+  target.reply = async (content: string) => {
+    replies.push(content);
+  };
+  const handler = createMessageCreateHandler({
+    kernelMode: "v021",
+    quietMs: 1,
+    hardCapMs: 10,
+    ingressChat: async () => {
+      throw new Error("sidecar_unavailable");
+    },
+    legacyChat: async (_target, turn) => {
+      legacy.push(turn.text);
+    },
+  });
+
+  await handler.handleMessage(target as never);
+  await handler.flushForTest("channel-1");
+  assert.deepEqual(legacy, []);
+  assert.equal(replies.length, 1);
+});

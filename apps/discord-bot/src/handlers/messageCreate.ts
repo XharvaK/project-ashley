@@ -1,5 +1,6 @@
 import type { Message } from "discord.js";
 import {
+  ingressChat,
   chatText,
   AGENT_TRANSPORT_HARD_MS,
   checkHealth,
@@ -30,18 +31,23 @@ import {
 import { TurnBuffer } from "../chat/turn-buffer.js";
 import { runTypingLoop } from "../chat/typing-loop.js";
 
-const turns = new TurnBuffer<Intake, Message>((channelId) => {
-  void drainTurn(channelId);
-});
-
 export type MessageIngressChat = (
   message: string,
   options?: {
+    threadId?: string;
     attachments?: Intake["attachments"];
+    discordPresence?: ReturnType<typeof getDiscordPresence>;
     inboundDiscordMessageIds?: string[];
     finalFragmentReceivedAtMs?: number;
   },
 ) => Promise<unknown>;
+
+export type BufferedMessageTurn = {
+  text: string;
+  attachments: Intake["attachments"];
+  inboundDiscordMessageIds: string[];
+  finalFragmentReceivedAtMs: number;
+};
 
 export type MessageCreateHandler = {
   handleMessage: (message: Message) => Promise<void>;
@@ -57,9 +63,13 @@ export type MessageCreateHandler = {
 export function createMessageCreateHandler(options: {
   ingressChat: MessageIngressChat;
   channelQueue?: { abort(channelId: string): void };
+  kernelMode?: "legacy" | "shadow" | "v021";
+  legacyChat?: (target: Message, turn: BufferedMessageTurn) => Promise<void>;
+  onFirstFragment?: (channelId: string) => void;
   quietMs?: number;
   hardCapMs?: number;
 }): MessageCreateHandler {
+  const kernelMode = options.kernelMode ?? "legacy";
   let lastReadyPromise = Promise.resolve();
   let drain: (channelId: string) => Promise<void>;
   const localTurns = new TurnBuffer<Intake, Message>(
@@ -77,12 +87,30 @@ export function createMessageCreateHandler(options: {
       text: buffered.fragments.map((fragment) => fragment.text).join("\n"),
       attachments: buffered.fragments.flatMap((fragment) => fragment.attachments).slice(0, MAX_IMAGES),
       inboundDiscordMessageIds: buffered.fragments.map((fragment) => fragment.messageId),
-    };
-    await options.ingressChat(turn.text, {
-      attachments: turn.attachments,
-      inboundDiscordMessageIds: turn.inboundDiscordMessageIds,
       finalFragmentReceivedAtMs: buffered.finalFragmentReceivedAt,
-    });
+    };
+    try {
+      await options.ingressChat(turn.text, {
+        attachments: turn.attachments,
+        discordPresence: getDiscordPresence(),
+        inboundDiscordMessageIds: turn.inboundDiscordMessageIds,
+        finalFragmentReceivedAtMs: turn.finalFragmentReceivedAtMs,
+      });
+    } catch (error) {
+      if (kernelMode === "v021") {
+        const code = (error as Error & { code?: string }).code;
+        const retryAfterSec = (error as Error & { retryAfterSec?: number }).retryAfterSec;
+        console.error("[discord-bot] cognitive ingress failed closed:", error);
+        if (typeof buffered.target.reply === "function") {
+          await buffered.target.reply(agentErrorMessage(code, retryAfterSec)).catch(() => {});
+        }
+        return;
+      }
+      console.warn("[discord-bot] cognitive ingress unavailable; using legacy delivery:", error);
+    }
+    if (kernelMode !== "v021" && options.legacyChat) {
+      await options.legacyChat(buffered.target, turn);
+    }
   };
 
   return {
@@ -92,7 +120,10 @@ export function createMessageCreateHandler(options: {
       if (!intake.text) return;
       const channelId = message.channel.id;
       const first = localTurns.push(channelId, intake, message);
-      if (first) options.channelQueue?.abort(channelId);
+      if (first) {
+        options.onFirstFragment?.(channelId);
+        options.channelQueue?.abort(channelId);
+      }
     },
     async flushForTest(channelId: string): Promise<void> {
       const previous = lastReadyPromise;
@@ -103,22 +134,13 @@ export function createMessageCreateHandler(options: {
   };
 }
 
-async function drainTurn(channelId: string): Promise<void> {
+async function deliverLegacyTurn(target: Message, turn: BufferedMessageTurn): Promise<void> {
+  const channelId = target.channel.id;
   await channelQueue.enqueue(channelId, async ({ signal }) => {
-    const buffered = turns.take(channelId);
-    if (!buffered) return;
-    const target = buffered.target;
     const tempoGapMs = tempoTracker.lastGapMs(channelId);
-    const finalFragmentReceivedAtMs = buffered.finalFragmentReceivedAt;
+    const finalFragmentReceivedAtMs = turn.finalFragmentReceivedAtMs;
     const externalTransportHardDeadlineAtMs =
       finalFragmentReceivedAtMs + AGENT_TRANSPORT_HARD_MS;
-    const turn = {
-      text: buffered.fragments.map((f) => f.text).join("\n"),
-      attachments: buffered.fragments
-        .flatMap((f) => f.attachments)
-        .slice(0, MAX_IMAGES),
-      inboundDiscordMessageIds: buffered.fragments.map((f) => f.messageId),
-    };
 
     let stopTyping: (() => void) | undefined;
     let done = false;
@@ -326,6 +348,14 @@ async function drainTurn(channelId: string): Promise<void> {
   });
 }
 
+const messageCreateHandler = createMessageCreateHandler({
+  ingressChat,
+  kernelMode: config.cognitiveKernel,
+  channelQueue,
+  onFirstFragment: (channelId) => tempoTracker.mark(channelId),
+  legacyChat: deliverLegacyTurn,
+});
+
 async function handleKillSwitch(message: Message): Promise<boolean> {
   const switched = readKillSwitch(message.content);
   if (!switched) return false;
@@ -348,18 +378,6 @@ async function handleKillSwitch(message: Message): Promise<boolean> {
 }
 
 export async function handleMessage(message: Message): Promise<void> {
-  if (message.content.trim().startsWith("/")) return;
-
   if (await handleKillSwitch(message)) return;
-
-  const intake = describeIntake(message);
-  if (!intake.text) return;
-
-  const channelId = message.channel.id;
-
-  const isFirst = turns.push(channelId, intake, message);
-  if (isFirst) {
-    tempoTracker.mark(channelId);
-    channelQueue.abort(channelId);
-  }
+  await messageCreateHandler.handleMessage(message);
 }

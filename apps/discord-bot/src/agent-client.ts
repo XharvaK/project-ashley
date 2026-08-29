@@ -74,6 +74,54 @@ export type ChatTextResult = {
   __httpStatus?: number;
 };
 
+export type CognitiveIngressResult = {
+  accepted: true;
+  evidenceRowId: string;
+  inboxEventId: string;
+  conversationId: string;
+  cycleId: string;
+  generation: number;
+  action: "compose" | "preempt";
+  duplicate?: boolean;
+  evidenceRecordId?: string;
+  admittedAtMs?: number;
+};
+
+/** Durable cognitive admission. The response is only an admission receipt. */
+export async function ingressChat(
+  message: string,
+  options?: {
+    threadId?: string;
+    attachments?: Array<{
+      discordAttachmentId: string;
+      declaredMime: string;
+      fileName: string;
+      declaredByteSize?: number;
+      sourceUrl: string;
+    }>;
+    discordPresence?: DiscordPresencePayload;
+    inboundDiscordMessageIds?: string[];
+    finalFragmentReceivedAtMs?: number;
+  },
+): Promise<CognitiveIngressResult> {
+  return agentFetch<CognitiveIngressResult>(
+    "/chat/ingress",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        message,
+        userId: config.ownerId,
+        channel: "discord",
+        threadId: options?.threadId,
+        attachments: options?.attachments?.length ? options.attachments : undefined,
+        discordPresence: options?.discordPresence,
+        inboundDiscordMessageIds: options?.inboundDiscordMessageIds,
+        finalFragmentReceivedAtMs: options?.finalFragmentReceivedAtMs,
+      }),
+    },
+  );
+}
+
 export async function chatText(
   message: string,
   options?: {
