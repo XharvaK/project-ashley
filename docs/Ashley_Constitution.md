@@ -817,6 +817,16 @@ mind continuously responding to another.
 
 ### Agency
 
+**Cognitive reconstruction (v0.2.1, accepted 2026-08-29):** Semantic judgment
+— what an event means, what Ashley concludes, whether an effect is desirable,
+whether she should speak — is owned by **Thought**. Agency in this section
+describes the *need* for internally caused behavior, not a software layer that
+outranks Thought. Executive fencing, scheduling, dispatch, and delivery are
+Agency / cognitive-kernel mechanics. See
+[`architecture/cognitive/Ashley_Cognitive_Architecture_v0.2.1.md`](architecture/cognitive/Ashley_Cognitive_Architecture_v0.2.1.md)
+and [`Ashley_Glossary.md`](Ashley_Glossary.md). This banner does not weaken
+identity, ethics, or stewardship law.
+
 Agency is the mechanism that transforms internal state into behavior.
 
 Ashley should not merely possess memories.

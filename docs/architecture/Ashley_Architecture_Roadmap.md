@@ -384,6 +384,16 @@ started a C1 qualification campaign. Exact evidence:
 The rows below remain architectural closing-evidence definitions. They do not
 authorize promotion.
 
+**Cognitive reconstruction v0.2.1 (accepted 2026-08-29):** Owner-accepted
+target architecture for reconstructing Thought (semantic author) and Agency
+(executive kernel). Status: `ACCEPTED ARCHITECTURE / IMPLEMENTATION PLANNED`.
+Not a new freeze-map owner. Not implemented, qualified, deployed, or
+production accepted. Does not promote C1–C5. Implementation packet:
+[`docs/cognitive-rework/v0.2.1/README.md`](../cognitive-rework/v0.2.1/README.md).
+Focused contract:
+[`cognitive/Ashley_Cognitive_Architecture_v0.2.1.md`](cognitive/Ashley_Cognitive_Architecture_v0.2.1.md).
+Luna execution additionally requires the owner baseline gate in that packet.
+
 Metacognition is not a milestone in this
 table. It is a named policy profile distributed across these owners. The first
 visible metacognitive proof belongs to C1. Later recommendations are in §11

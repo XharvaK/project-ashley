@@ -12,9 +12,14 @@ defined here.
 
 Owner-map and event-term freeze:
 [`architecture/Ashley_Architecture_Freeze.md`](architecture/Ashley_Architecture_Freeze.md).
-The freeze does not redefine these glossary entries. It classifies owners and
-splits historical “Event Fabric” into the Operational Continuity inbox and a
-future Event Spine.
+The freeze classifies owners and splits historical “Event Fabric” into the
+Operational Continuity inbox and a future Event Spine.
+
+Cognitive reconstruction (owner-accepted 2026-08-29):
+[`architecture/cognitive/Ashley_Cognitive_Architecture_v0.2.1.md`](architecture/cognitive/Ashley_Cognitive_Architecture_v0.2.1.md).
+That contract is `ACCEPTED ARCHITECTURE / IMPLEMENTATION PLANNED`. It owns the
+Thought / Agency split below. It is not implemented, qualified, deployed, or
+production accepted.
 
 ---
 
@@ -24,21 +29,22 @@ future Event Spine.
 
 **Definition**
 
-Agency is Ashley's internal decision-making process.
+Agency is Ashley's **executive** mechanics: whether a valid cognitive cycle can
+run, resource scheduling, fencing, dispatch, retries, delivery, and commit
+orchestration.
 
-Agency transforms internal state into behavior by deciding whether, when and how
-Ashley should act.
-
-Agency is responsible for choice, not expression.
+Agency may block or defer mechanically. Agency does not originate semantic
+intent.
 
 **Why it matters**
 
-Without agency, Ashley only reacts.
-
-With agency, Ashley can initiate, wait, disagree, prioritize, or remain silent
-for coherent reasons.
+Without executive Agency, Thought cannot be fenced, scheduled, or delivered
+safely. With only Agency and no Thought, Ashley would have plumbing and no
+judgment.
 
 **Distinctions**
+
+Agency is not Thought. Thought owns semantic judgment.
 
 Agency is not personality.
 
@@ -46,13 +52,21 @@ Agency is not autonomy.
 
 Agency is not randomness.
 
-Agency explains decisions.
-
-Personality explains expression.
+Agency is not the process that decides what an event means, whether an effect
+is desirable, or whether Ashley should speak. Those are Thought.
 
 **Design implication**
 
-Behavior should emerge from agency rather than directly from prompts.
+Do not implement “decide whether, when, and how Ashley acts” as a pre-Thought
+score, easy-turn bypass, or `decide()` meaning owner. Executive admission is
+not semantic authorship.
+
+**Supersession**
+
+Before 2026-08-29 this entry defined Agency as the internal decision-making
+process that decides whether, when, and how Ashley should act. That wording is
+**SUPERSEDED** for cognitive reconstruction. Historical documents that still
+use it are provenance, not superior law. See Thought.
 
 ---
 
@@ -447,6 +461,39 @@ Principles rarely change.
 
 # T
 
+## Thought
+
+**Definition**
+
+Thought is Ashley's sole semantic author for the active cognitive
+cycle/generation. Thought interprets events, forms conclusions and intentions,
+decides whether an effect is desirable, and decides whether Ashley should
+speak. Cognitive Settlement publishes that meaning.
+
+**Why it matters**
+
+Without Thought as semantic owner, speech and memory are authored by Expression,
+`decide()`, prompts, or scores. That is the legacy inversion v0.2.1 replaces.
+
+**Distinctions**
+
+Thought is not Agency. Agency is executive.
+
+Thought is not Expression. Expression, if used, only adapts an already-licensed
+draft and is evidence-starved.
+
+Thought is not Authority. Authority returns codes; it does not author prose.
+
+Thought is fallible. Receipts and observations outrank narration.
+
+**Design implication**
+
+Every licensed Discord utterance and every durable nomination on the new kernel
+must be traceable to a Thought-authored settlement (or to an infrastructure
+notice that is not Ashley voice).
+
+---
+
 ## Trust
 
 **Definition**
@@ -487,14 +534,13 @@ Values
 
 ↓
 Identity
-
 ↓
-State
-
+Mind State
 ↓
-Agency
+Thought (semantic judgment)
 ↓
-
+Agency / cognitive kernel (executive mechanics)
+↓
 Behavior
 ↓
 Conversation
