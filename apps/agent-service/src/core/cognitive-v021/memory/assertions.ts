@@ -158,11 +158,6 @@ export function upsertMemoryAssertion(
   );
   const result = getMemoryAssertion(db, effective.assertionKey);
   if (!result) throw new Error("memory_assertion_upsert_lost");
-  try {
-    notifySidecarPostCommit(db, { changedAssertionKeys: [effective.assertionKey] });
-  } catch {
-    // Derived sync failures must never disturb authoritative sidecar commit
-  }
   return result;
 }
 

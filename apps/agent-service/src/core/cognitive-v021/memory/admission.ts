@@ -218,11 +218,6 @@ function admitOne(
     db.prepare(
       "UPDATE sidecar_memory_assertions SET live = 0, admitted_generation = NULL WHERE assertion_key = ?",
     ).run(nomination.supersedesAssertionKey);
-    try {
-      notifySidecarPostCommit(db, { changedAssertionKeys: [nomination.supersedesAssertionKey] });
-    } catch {
-      // ignore
-    }
   }
   appendMemorySupport(db, {
     supportId: `native:${nomination.nominationId}`,
@@ -262,13 +257,22 @@ export function tickAdmission(
     skippedRetracted: 0,
     results: [],
   };
+  const changedAssertionKeys = new Set<string>();
   db.exec("BEGIN IMMEDIATE");
   try {
     for (const nomination of selected) {
       const admitted = admitOne(db, nomination, nowMs);
       result.results.push(admitted);
       switch (admitted.result) {
-        case "admitted": result.admitted += 1; break;
+        case "admitted":
+          result.admitted += 1;
+          if (admitted.assertion) {
+            changedAssertionKeys.add(admitted.assertion.assertionKey);
+            if (nomination.supersedesAssertionKey && nomination.supersedesAssertionKey !== nomination.assertionKey) {
+              changedAssertionKeys.add(nomination.supersedesAssertionKey);
+            }
+          }
+          break;
         case "admission_skipped_superseded": result.skippedSuperseded += 1; break;
         case "admission_skipped_secret": result.skippedSecret += 1; break;
         case "admission_skipped_unpublished": result.skippedUnpublished += 1; break;
@@ -280,6 +284,13 @@ export function tickAdmission(
   } catch (error) {
     try { db.exec("ROLLBACK"); } catch { /* preserve original */ }
     throw error;
+  }
+  try {
+    if (changedAssertionKeys.size > 0) {
+      notifySidecarPostCommit(db, { changedAssertionKeys: Array.from(changedAssertionKeys) });
+    }
+  } catch {
+    // Derived sync failures must never disturb authoritative sidecar commit
   }
   return result;
 }
@@ -331,13 +342,25 @@ export function admitOwnerSuppliedClaim(
   if (nomination.dimensions.source !== "owner_utterance" || nomination.dimensions.reliability !== "owner_supplied") {
     return null;
   }
+  let result: AdmissionResult | null = null;
   db.exec("BEGIN IMMEDIATE");
   try {
-    const result = admitOne(db, nomination, input.nowMs ?? Date.now(), { requireCurrentGeneration: nomination.generation });
+    result = admitOne(db, nomination, input.nowMs ?? Date.now(), { requireCurrentGeneration: nomination.generation });
     db.exec("COMMIT");
-    return result;
   } catch (error) {
     try { db.exec("ROLLBACK"); } catch { /* preserve original */ }
     throw error;
   }
+  try {
+    if (result && result.result === "admitted" && result.assertion) {
+      const changed = [nomination.assertionKey];
+      if (nomination.supersedesAssertionKey && nomination.supersedesAssertionKey !== nomination.assertionKey) {
+        changed.push(nomination.supersedesAssertionKey);
+      }
+      notifySidecarPostCommit(db, { changedAssertionKeys: changed });
+    }
+  } catch {
+    // Derived sync failures must never disturb authoritative sidecar commit
+  }
+  return result;
 }
