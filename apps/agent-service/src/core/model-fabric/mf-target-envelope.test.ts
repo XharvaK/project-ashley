@@ -31,7 +31,7 @@ describe("TARGET portfolio + token envelope reconciliation", () => {
     expect(current.kind).toBe("current_compatibility");
   });
 
-  it("keeps CURRENT Thought and Expression model identities and raises only ceilings", () => {
+  it("keeps CURRENT Thought and Expression model identities with owner-approved ceilings", () => {
     const thought = current.rows.find((row) => row.policyRowId === "mfr_thought_interactive_compat_v1")!;
     const durable = current.rows.find((row) => row.policyRowId === "mfr_thought_durable_proactive_compat_v1")!;
     const expression = current.rows.find((row) => row.policyRowId === "mfr_expression_compat_v1")!;
@@ -41,11 +41,11 @@ describe("TARGET portfolio + token envelope reconciliation", () => {
       reasoningPolicy: "economical",
       effectiveReasoning: "low",
     });
-    expect(thought.deadlineMs).toBe(6000);
-    expect(thought.maxOutputTokens).toBe(2048);
-    expect(durable.maxOutputTokens).toBe(2048);
+    expect(thought.deadlineMs).toBe(10000);
+    expect(thought.maxOutputTokens).toBe(4096);
+    expect(durable.maxOutputTokens).toBe(4096);
     expect(THOUGHT_MAX_OUTPUT_TOKENS).toBe(2048);
-    expect(THOUGHT_MAX_OUTPUT_TOKENS).toBe(thought.maxOutputTokens);
+    expect(THOUGHT_MAX_OUTPUT_TOKENS).toBeLessThanOrEqual(4096);
     expect(expression.occupants[0]).toMatchObject({
       provider: "mistral",
       configuredModelId: "mistral-medium-latest",
@@ -68,10 +68,10 @@ describe("TARGET portfolio + token envelope reconciliation", () => {
     });
   });
 
-  it("does not raise CURRENT deadlines, observation CURRENT envelope, or adapter profile default as authority", () => {
+  it("keeps the target envelope separate from the owner-approved CURRENT deadline", () => {
     const observation = current.rows.find((row) => row.policyRowId === "mfr_thought_observation_compat_v1")!;
     expect(observation.maxOutputTokens).toBe(450);
-    expect(current.rows.find((row) => row.policyRowId === "mfr_thought_interactive_compat_v1")!.deadlineMs).toBe(6000);
+    expect(current.rows.find((row) => row.policyRowId === "mfr_thought_interactive_compat_v1")!.deadlineMs).toBe(10000);
     expect(target.rows.find((row) => row.policyRowId === "mfr_thought_interactive_target_v1")!.deadlineMs).toBe(6000);
     expect(target.rows.find((row) => row.policyRowId === "mfr_thought_observation_target_v1")!.deadlineMs).toBeNull();
   });

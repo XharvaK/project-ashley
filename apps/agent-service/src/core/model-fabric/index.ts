@@ -8,3 +8,4 @@ export * from "./catalog.js";
 export * from "./health.js";
 export * from "./specialist.js";
 export * from "./activation.js";
+export * from "./dispatch-contract.js";

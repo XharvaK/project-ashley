@@ -18,6 +18,7 @@ import {
   type PublishedCognitiveSettlement,
   type ThoughtCompleteOptions,
   type ThoughtInput,
+  type ThoughtParserFailureCode,
   type ThoughtStepOutput,
   type ThoughtSettlementDraft,
   type Observation,
@@ -33,6 +34,7 @@ import { registerActiveThought } from "../cycle/active.js";
 import { adaptPerception } from "../perception/adapter.js";
 import { buildThoughtInput } from "./input.js";
 import { parseThoughtStepOutput } from "./parse.js";
+import { thoughtOutputStructuredRequest } from "./output-contract.js";
 import { validateThoughtSettlementDraft } from "../settlement/validate.js";
 import { getPublishedSettlementIdentity, publishSemanticTransaction } from "../settlement/publish.js";
 import { admitOwnerSuppliedClaim } from "../memory/admission.js";
@@ -69,15 +71,41 @@ export async function invokeThoughtComplete(
   return invoker(messages, options);
 }
 
-function thoughtMessages(input: ThoughtInput): ChatMessage[] {
+const STRUCTURAL_FEEDBACK: Readonly<Record<ThoughtParserFailureCode, string>> = {
+  invalid_json: "Return exactly one JSON object.",
+  root_not_object: "Return a JSON object at the root.",
+  wrong_kind: "Use one permitted ThoughtStepOutput kind.",
+  identity_missing: "Include every required Thought identity field.",
+  identity_mismatch: "Preserve the active Thought identity fields.",
+  missing_settlement_fields: "Include all required settlement sections.",
+  speech_contract_failure: "Emit the required speech object shape.",
+  commitment_contract_failure: "Emit the required commitments object shape.",
+  operations_contract_failure: "Emit the required operations object shape.",
+  authority_contract_failure: "Emit the required authority object shape.",
+  observation_contract_failure: "Emit the required observation request shape.",
+  effect_contract_failure: "Emit the required effect proposal shape.",
+  forbidden_fields: "Omit publication and delivery fields.",
+  schema_version_mismatch: "Use the active Thought schema version.",
+  other: "Match the ThoughtStepOutput contract exactly.",
+};
+
+function thoughtMessages(
+  input: ThoughtInput,
+  structuralFeedback?: ThoughtParserFailureCode,
+): ChatMessage[] {
+  const feedback = structuralFeedback
+    ? `The previous response failed bounded structural validation (${structuralFeedback}). ${STRUCTURAL_FEEDBACK[structuralFeedback]} Do not change the semantic answer or invent authority.`
+    : null;
   return [
     {
       role: "system",
       content: [
         "You are Ashley's Thought layer.",
         "Return exactly one JSON ThoughtStepOutput or a flat ThoughtSettlementDraft.",
+        "Match the code-owned ThoughtStepOutput contract exactly.",
         "Code validates identity, authority, speech licensing, and publication.",
         "Do not return finalLicensedText, settlementId, delivery, outbox, reservation, or workspace state.",
+        ...(feedback ? [feedback] : []),
       ].join(" "),
     },
     { role: "user", content: JSON.stringify(input) },
@@ -87,25 +115,31 @@ function thoughtMessages(input: ThoughtInput): ChatMessage[] {
 export async function runThoughtModel(
   input: ThoughtInput,
   deps: KernelDeps,
-  options: { pass?: number; requestId?: string; signal?: AbortSignal } = {},
+  options: {
+    pass?: number;
+    requestId?: string;
+    signal?: AbortSignal;
+    deadlineAtMs: number;
+    structuralFeedback?: ThoughtParserFailureCode;
+  },
 ): Promise<ThoughtInvocation> {
   const pass = options.pass ?? 1;
   const requestId = options.requestId ?? randomUUID();
   const dispatchOptions: ThoughtCompleteOptions = {
     attentionDb: deps.attentionDb,
     route: "thought",
-    responseFormat: "json_object",
+    responseFormat: "json_schema",
+    structuredOutput: thoughtOutputStructuredRequest(),
     purpose: "thought",
     lane: "urgent_grounded",
     ownerId: input.occupantId,
-    deadlineAtMs: deps.nowMs() + ORDINARY_THOUGHT_BUDGET_MS,
-    maxTokens: 6000,
+    deadlineAtMs: options.deadlineAtMs,
     temperature: 0.15,
     signal: options.signal,
   };
   try {
     const completion = await invokeThoughtComplete(
-      thoughtMessages(input),
+      thoughtMessages(input, options.structuralFeedback),
       dispatchOptions,
       deps.completeChat,
     );
@@ -491,11 +525,14 @@ export async function runCognitiveCycle(
   let pass = counters.acceptedThoughtPasses + 1;
   let structuralRetriesForPass = persistedMalformedRetries(sidecar, cycle.cycleId, cycle.generation, pass);
   let authorityObjections: AuthorityCode[] = [];
+  const thoughtDeadlineAtMs = deps.nowMs() + ORDINARY_THOUGHT_BUDGET_MS;
+  let structuralFeedback: ThoughtParserFailureCode | null = null;
 
   for (;;) {
     counters = getThoughtAttemptCounters(sidecar, cycle.cycleId, cycle.generation);
     structuralRetriesForPass = persistedMalformedRetries(sidecar, cycle.cycleId, cycle.generation, pass);
     if (!currentGenerationIs(sidecar, cycle)) return resultWithCounters(cycle.cycleId, cycle.generation, null, counters);
+    if (deps.nowMs() >= thoughtDeadlineAtMs) return emitFailure("thought_deadline");
     if (counters.acceptedThoughtPasses >= MAX_THOUGHT_PASSES || counters.thoughtModelAttempts >= MAX_THOUGHT_MODEL_ATTEMPTS) {
       return emitFailure("pass_exhausted");
     }
@@ -518,7 +555,12 @@ export async function runCognitiveCycle(
     const controller = new AbortController();
     const activeThought = registerActiveThought(cycle.conversationId, cycle.cycleId, cycle.generation, controller);
     incrementThoughtAttemptCounter(sidecar, cycle.cycleId, cycle.generation, "thoughtModelAttempts");
-    const invocation = await runThoughtModel(input, deps, { pass, signal: activeThought.signal });
+    const invocation = await runThoughtModel(input, deps, {
+      pass,
+      signal: activeThought.signal,
+      deadlineAtMs: thoughtDeadlineAtMs,
+      structuralFeedback: structuralFeedback ?? undefined,
+    });
     const cancellationReason = activeThought.cancellationReason;
     activeThought.unregister();
     storeThoughtStep(sidecar, invocation.output, deps.nowMs());
@@ -533,6 +575,7 @@ export async function runCognitiveCycle(
         observationsForThought = await perceive();
         inFlight = listInFlight(sidecar, cycle.cycleId);
         authorityObjections = [];
+        structuralFeedback = null;
         counters = getThoughtAttemptCounters(sidecar, cycle.cycleId, cycle.generation);
         pass = counters.acceptedThoughtPasses + 1;
         structuralRetriesForPass = persistedMalformedRetries(sidecar, cycle.cycleId, cycle.generation, pass);
@@ -543,6 +586,9 @@ export async function runCognitiveCycle(
     }
 
     if (invocation.malformed) {
+      structuralFeedback = invocation.output.kind === "failure"
+        ? invocation.output.diagnosticCode ?? "other"
+        : "other";
       if (structuralRetriesForPass < 2 && counters.thoughtModelAttempts < MAX_THOUGHT_MODEL_ATTEMPTS) {
         structuralRetriesForPass += 1;
         incrementThoughtAttemptCounter(sidecar, cycle.cycleId, cycle.generation, "structuralRetries");
@@ -551,6 +597,8 @@ export async function runCognitiveCycle(
       return emitFailure("malformed");
     }
     if (invocation.unavailable) return emitFailure("unavailable");
+
+    structuralFeedback = null;
 
     incrementThoughtAttemptCounter(sidecar, cycle.cycleId, cycle.generation, "acceptedThoughtPasses");
     counters = getThoughtAttemptCounters(sidecar, cycle.cycleId, cycle.generation);

@@ -3,6 +3,7 @@ import {
   type AuthorityEpoch,
   type EffectProposal,
   type ObservationRequest,
+  type ThoughtParserFailureCode,
   type ThoughtStepOutput,
   type ThoughtSettlementDraft,
 } from "../types.js";
@@ -61,44 +62,88 @@ function containsForbiddenKey(value: unknown): string | null {
   return null;
 }
 
-function parseJson(raw: string | unknown): unknown {
-  if (typeof raw !== "string") return raw;
+function parseJson(raw: string | unknown): { ok: true; value: unknown } | { ok: false } {
+  if (typeof raw !== "string") return { ok: true, value: raw };
   try {
-    return JSON.parse(raw);
+    return { ok: true, value: JSON.parse(raw) };
   } catch {
-    return null;
+    return { ok: false };
   }
 }
 
-function base(active: ThoughtParseActiveIdentity, value?: RecordValue) {
+function failureBase(active: ThoughtParseActiveIdentity) {
   return {
-    cycleId: stringValue(value?.cycleId, active.cycleId),
-    generation: numberValue(value?.generation, active.generation),
-    pass: numberValue(value?.pass, active.pass),
-    requestId: stringValue(value?.requestId, active.requestId),
-    occupantId: stringValue(value?.occupantId, active.occupantId),
+    cycleId: active.cycleId,
+    generation: active.generation,
+    pass: active.pass,
+    requestId: active.requestId,
+    occupantId: active.occupantId,
   } as const;
 }
 
-function identityMatches(
+function assertedBase(value: RecordValue) {
+  return {
+    cycleId: value.cycleId as string,
+    generation: value.generation as number,
+    pass: value.pass as number,
+    requestId: value.requestId as string,
+    occupantId: value.occupantId as string,
+  } as const;
+}
+
+function flatDraftBase(
+  active: ThoughtParseActiveIdentity,
+  draft: RecordValue,
+) {
+  return {
+    cycleId: draft.cycleId as string,
+    generation: draft.generation as number,
+    pass: active.pass,
+    requestId: active.requestId,
+    occupantId: draft.occupantId as string,
+  } as const;
+}
+
+function identityDiagnostic(
   value: RecordValue,
   active: ThoughtParseActiveIdentity,
-): boolean {
-  const current = base(active, value);
-  return (
-    current.cycleId === active.cycleId &&
-    current.generation === active.generation &&
-    current.occupantId === active.occupantId &&
-    current.requestId === active.requestId &&
-    current.pass === active.pass
-  );
+): ThoughtParserFailureCode | null {
+  const required = ["cycleId", "generation", "pass", "requestId", "occupantId"] as const;
+  if (required.some((key) => !Object.prototype.hasOwnProperty.call(value, key))) {
+    return "identity_missing";
+  }
+  if (
+    typeof value.cycleId !== "string" ||
+    !Number.isInteger(value.generation) ||
+    !Number.isInteger(value.pass) ||
+    typeof value.requestId !== "string" ||
+    typeof value.occupantId !== "string"
+  ) {
+    return "identity_missing";
+  }
+  if (
+    value.cycleId !== active.cycleId ||
+    value.generation !== active.generation ||
+    value.occupantId !== active.occupantId ||
+    value.requestId !== active.requestId ||
+    value.pass !== active.pass
+  ) {
+    return "identity_mismatch";
+  }
+  return null;
 }
 
 function failure(
   active: ThoughtParseActiveIdentity,
   reason: "malformed" | "unavailable" | "revision_exhausted" | "pass_exhausted" | "cancelled" = "malformed",
+  diagnosticCode: ThoughtParserFailureCode = "other",
 ): ThoughtStepOutput {
-  return { kind: "failure", ...base(active), reason };
+  return {
+    kind: "failure",
+    ...failureBase(active),
+    reason,
+    ...(reason === "malformed" ? { diagnosticCode } : {}),
+  };
 }
 
 const DRAFT_KEYS = [
@@ -134,21 +179,32 @@ function parseSettlement(
   root: RecordValue,
   draftValue: unknown,
   active: ThoughtParseActiveIdentity,
+  explicitEnvelope: boolean,
 ): ThoughtStepOutput {
-  if (!isRecord(draftValue) || !identityMatches(root, active)) return failure(active);
+  if (!isRecord(draftValue)) return failure(active, "malformed", "missing_settlement_fields");
+  if (explicitEnvelope) {
+    const diagnostic = identityDiagnostic(root, active);
+    if (diagnostic) return failure(active, "malformed", diagnostic);
+  }
   const draft = pickDraft(draftValue);
   const result = validateThoughtSettlementDraft(draft, active);
   if (!result.ok) {
-    return failure(active);
+    return failure(active, "malformed", diagnosticCodeForValidation(result.codes, draft));
   }
-  return { kind: "settlement", ...base(active, root), settlement: result.draft };
+  return {
+    kind: "settlement",
+    ...(explicitEnvelope ? assertedBase(root) : flatDraftBase(active, draft)),
+    settlement: result.draft,
+  };
 }
 
 function parseObservation(
   root: RecordValue,
   active: ThoughtParseActiveIdentity,
 ): ThoughtStepOutput {
-  if (!identityMatches(root, active) || !isRecord(root.observationRequest)) return failure(active);
+  const identity = identityDiagnostic(root, active);
+  if (identity) return failure(active, "malformed", identity);
+  if (!isRecord(root.observationRequest)) return failure(active, "malformed", "observation_contract_failure");
   const request = root.observationRequest;
   if (
     typeof request.requestId !== "string" ||
@@ -156,11 +212,11 @@ function parseObservation(
     request.generation !== active.generation ||
     request.replaySafe !== true ||
     typeof request.kind !== "string"
-  ) return failure(active);
+  ) return failure(active, "malformed", "observation_contract_failure");
   const observationRequest = request as unknown as ObservationRequest;
   return {
     kind: "observation_request",
-    ...base(active, root),
+    ...assertedBase(root),
     observationRequest,
     correlationId: stringValue(root.correlationId, observationRequest.requestId),
     expectedResultType: "observation",
@@ -172,7 +228,9 @@ function parseEffect(
   root: RecordValue,
   active: ThoughtParseActiveIdentity,
 ): ThoughtStepOutput {
-  if (!identityMatches(root, active) || !isRecord(root.effectProposal)) return failure(active);
+  const identity = identityDiagnostic(root, active);
+  if (identity) return failure(active, "malformed", identity);
+  if (!isRecord(root.effectProposal)) return failure(active, "malformed", "effect_contract_failure");
   const proposal = root.effectProposal;
   if (
     typeof proposal.effectId !== "string" ||
@@ -181,11 +239,11 @@ function parseEffect(
     proposal.cycleId !== active.cycleId ||
     proposal.generation !== active.generation ||
     proposal.authorityEpoch !== active.authorityEpoch
-  ) return failure(active);
+  ) return failure(active, "malformed", "effect_contract_failure");
   const effectProposal = proposal as unknown as EffectProposal;
   return {
     kind: "effect_proposal",
-    ...base(active, root),
+    ...assertedBase(root),
     effectProposal,
     correlationId: stringValue(root.correlationId, effectProposal.effectId),
     expectedResultType: "effect_receipt",
@@ -198,28 +256,65 @@ export function parseThoughtStepOutput(
   raw: string | unknown,
   active: ThoughtParseActiveIdentity,
 ): ThoughtStepOutput {
-  const parsed = parseJson(raw);
-  if (!isRecord(parsed)) return failure(active);
+  const parsedResult = parseJson(raw);
+  if (!parsedResult.ok) return failure(active, "malformed", "invalid_json");
+  const parsed = parsedResult.value;
+  if (!isRecord(parsed)) return failure(active, "malformed", "root_not_object");
   const forbidden = containsForbiddenKey(parsed);
-  if (forbidden) return failure(active);
+  if (forbidden) return failure(active, "malformed", "forbidden_fields");
 
   const kind = parsed.kind;
-  if (kind === "settlement") return parseSettlement(parsed, parsed.settlement, active);
+  if (kind === "settlement") return parseSettlement(parsed, parsed.settlement, active, true);
   if (kind === "observation_request") return parseObservation(parsed, active);
   if (kind === "effect_proposal") return parseEffect(parsed, active);
   if (kind === "failure") {
-    if (!identityMatches(parsed, active)) return failure(active);
+    const identity = identityDiagnostic(parsed, active);
+    if (identity) return failure(active, "malformed", identity);
     const reason = parsed.reason;
     if (
       reason === "malformed" || reason === "unavailable" || reason === "revision_exhausted" ||
       reason === "pass_exhausted" || reason === "cancelled"
-    ) return { kind: "failure", ...base(active, parsed), reason };
-    return failure(active);
+    ) return { kind: "failure", ...assertedBase(parsed), reason };
+    return failure(active, "malformed", "wrong_kind");
   }
-  if (kind !== undefined) return failure(active);
+  if (kind !== undefined) return failure(active, "malformed", "wrong_kind");
 
   // The compact flat form is accepted only when it is itself a valid draft.
-  return parseSettlement(parsed, parsed, active);
+  return parseSettlement(parsed, parsed, active, false);
+}
+
+function diagnosticCodeForValidation(
+  codes: readonly string[],
+  draft?: RecordValue,
+): ThoughtParserFailureCode {
+  const code = codes[0] ?? "";
+  if (code === "IDENTITY_MISSING") return "identity_missing";
+  if (code === "ACTIVE_IDENTITY_MISMATCH" || code === "STALE_GENERATION") return "identity_mismatch";
+  if (code === "SCHEMA_VERSION_INVALID") {
+    return Object.prototype.hasOwnProperty.call(draft ?? {}, "schemaVersion")
+      ? "schema_version_mismatch"
+      : "missing_settlement_fields";
+  }
+  if (code.startsWith("PUBLISHED_FIELD_FORBIDDEN:")) return "forbidden_fields";
+  if (code.startsWith("SPEECH_") || code === "DRAFT_SURFACE_REQUIRED" || code === "NONE_SURFACE_FORBIDDEN") {
+    return "speech_contract_failure";
+  }
+  if (code.startsWith("COMMITMENTS_") || code.startsWith("STANCE_") || code === "EMPTY_COMMITMENTS_WITH_DRAFT" || code === "DRAFT_COMMITMENT_CONFLICT") {
+    return "commitment_contract_failure";
+  }
+  if (code.startsWith("OPERATIONS_") || code === "EFFECT_RECEIPT_REQUIRED") {
+    return "operations_contract_failure";
+  }
+  if (code.startsWith("AUTHORITY_") || code === "REVISION_BUDGET_EXCEEDED") {
+    return "authority_contract_failure";
+  }
+  if (
+    code === "DRAFT_OBJECT_REQUIRED" ||
+    code === "TRIGGER_REF_MISSING" ||
+    code.endsWith("_MISSING") ||
+    code.startsWith("INTERPRETATION_")
+  ) return "missing_settlement_fields";
+  return "other";
 }
 
 export function thoughtStepBaseFor(

@@ -146,6 +146,9 @@ export type InferencePolicyInput = {
   maxTokens?: number | null;
   presencePenalty?: number | null;
   responseFormat?: string | null;
+  structuredOutputContractId?: string | null;
+  structuredOutputMode?: string | null;
+  structuredOutputBindingId?: string | null;
   toolCount?: number;
   toolNames?: readonly string[];
 };
@@ -163,6 +166,15 @@ export function createInferencePolicyFingerprint(
     maxTokens: input.maxTokens ?? null,
     presencePenalty: input.presencePenalty ?? null,
     responseFormat: input.responseFormat ?? null,
+    ...(input.structuredOutputContractId !== undefined
+      ? { structuredOutputContractId: input.structuredOutputContractId }
+      : {}),
+    ...(input.structuredOutputMode !== undefined
+      ? { structuredOutputMode: input.structuredOutputMode }
+      : {}),
+    ...(input.structuredOutputBindingId !== undefined
+      ? { structuredOutputBindingId: input.structuredOutputBindingId }
+      : {}),
     toolCount: input.toolCount ?? 0,
     toolNames: input.toolNames ? [...input.toolNames].sort() : [],
     ...(input.translatedWireControl

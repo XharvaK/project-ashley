@@ -4,6 +4,8 @@ import type {
   ModelFallbackChain,
   ProjectionClassification,
   SpecialistRequirement,
+  StructuredOutputRequest,
+  TrustedStructuredOutputControl,
 } from "../model-fabric/types.js";
 
 /**
@@ -87,8 +89,10 @@ export type CompletionOptions = {
   temperature?: number;
   presencePenalty?: number;
   reasoningEffort?: "none" | "low" | "medium" | "high";
-  /** Enforce a JSON object completion. Thought uses this; adapters ignore if unsupported. */
-  responseFormat?: "json_object";
+  /** Provider wire format after Model Fabric resolution. */
+  responseFormat?: "json_object" | "json_schema";
+  /** Code-owned shape request; adapters use only the trusted control below. */
+  structuredOutput?: StructuredOutputRequest;
   tools?: ToolDefinition[];
   toolChoice?: string | Record<string, unknown>;
   signal?: AbortSignal;
@@ -137,6 +141,8 @@ export type ProviderDispatchArgs = {
   options: CompletionOptions;
   /** Originates from Model Fabric translation, never from cognition callers. */
   fabricReasoning?: TrustedReasoningControl;
+  /** Originates from Model Fabric translation, never from cognition callers. */
+  fabricStructuredOutput?: TrustedStructuredOutputControl;
   signal?: AbortSignal;
 };
 

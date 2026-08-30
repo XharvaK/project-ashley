@@ -181,6 +181,44 @@ describe("nim-adapter fixtures", () => {
     expect(capturedBody?.response_format).toEqual({ type: "json_object" });
   });
 
+  it("uses only the trusted Model Fabric compatibility binding for Thought schema requests", async () => {
+    env.nimApiKey = "test";
+    let capturedBody: Record<string, unknown> | undefined;
+    const adapter = createNimAdapter(async (_url, init) => {
+      capturedBody = JSON.parse(init?.body as string);
+      return fakeResponse({
+        choices: [{ message: { content: "{}" } }],
+        usage: { prompt_tokens: 5, completion_tokens: 1 },
+      });
+    });
+    await adapter.dispatch({
+      messages,
+      modelId: "openai/gpt-oss-20b",
+      options: { responseFormat: "json_schema" },
+      fabricStructuredOutput: {
+        kind: "json_object_compatibility",
+        contractId: "ashley.thought.step.v1",
+        schemaId: "ashley.thought.step.v1.schema",
+        bindingId: "compat_thought_nim_gpt_oss_20b_json_object_v1",
+      },
+    });
+    expect(capturedBody?.response_format).toEqual({ type: "json_object" });
+    expect(capturedBody).not.toHaveProperty("guided_json");
+    expect(capturedBody).not.toHaveProperty("json_schema");
+  });
+
+  it("fails closed when json_schema has no trusted provider binding", async () => {
+    env.nimApiKey = "test";
+    const adapter = createNimAdapter(async () => fakeResponse({}));
+    await expect(
+      adapter.dispatch({
+        messages,
+        modelId: "openai/gpt-oss-20b",
+        options: { responseFormat: "json_schema" },
+      }),
+    ).rejects.toMatchObject({ code: "structured_output_untrusted" });
+  });
+
   it("uses message.content only and captures reasoning tokens in usage", async () => {
     env.nimApiKey = "test";
     const adapter = createNimAdapter(async () =>

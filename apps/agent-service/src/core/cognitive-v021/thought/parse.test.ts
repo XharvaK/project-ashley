@@ -72,9 +72,54 @@ describe("v0.2.1 ThoughtStepOutput parser", () => {
   });
 
   it("fails closed for malformed JSON, missing draft identity, and published fields", () => {
-    expect(parseThoughtStepOutput("not json", active)).toMatchObject({ kind: "failure", reason: "malformed" });
-    expect(parseThoughtStepOutput(JSON.stringify({ answer: "not a draft" }), active)).toMatchObject({ kind: "failure", reason: "malformed" });
-    expect(parseThoughtStepOutput(JSON.stringify({ ...makeThoughtDraft(), finalLicensedText: "bad" }), active)).toMatchObject({ kind: "failure", reason: "malformed" });
+    expect(parseThoughtStepOutput("not json", active)).toMatchObject({
+      kind: "failure",
+      reason: "malformed",
+      diagnosticCode: "invalid_json",
+    });
+    expect(parseThoughtStepOutput(JSON.stringify({ answer: "not a draft" }), active)).toMatchObject({
+      kind: "failure",
+      reason: "malformed",
+      diagnosticCode: "missing_settlement_fields",
+    });
+    expect(parseThoughtStepOutput(JSON.stringify({ ...makeThoughtDraft(), finalLicensedText: "bad" }), active)).toMatchObject({
+      kind: "failure",
+      reason: "malformed",
+      diagnosticCode: "forbidden_fields",
+    });
+  });
+
+  it("distinguishes omitted Thought identity from an identity mismatch", () => {
+    const { cycleId: _cycleId, ...withoutCycleId } = makeThoughtDraft();
+    expect(parseThoughtStepOutput(JSON.stringify(withoutCycleId), active)).toMatchObject({
+      kind: "failure",
+      diagnosticCode: "identity_missing",
+    });
+    expect(parseThoughtStepOutput(JSON.stringify(makeThoughtDraft({ cycleId: "other-cycle" })), active)).toMatchObject({
+      kind: "failure",
+      diagnosticCode: "identity_mismatch",
+    });
+  });
+
+  it("reports contract-specific categories while keeping validation strict", () => {
+    const speechFailure = makeThoughtDraft({
+      speech: {
+        mode: "draft",
+        mustSay: [],
+        mustNot: [],
+        surfaceDraft: null,
+        acceptableRealizations: [],
+        presentationDirectives: [],
+      },
+    });
+    expect(parseThoughtStepOutput(JSON.stringify(speechFailure), active)).toMatchObject({
+      kind: "failure",
+      diagnosticCode: "speech_contract_failure",
+    });
+    expect(parseThoughtStepOutput(JSON.stringify(makeThoughtDraft({ schemaVersion: 99 as 1 })), active)).toMatchObject({
+      kind: "failure",
+      diagnosticCode: "schema_version_mismatch",
+    });
   });
 
   it("discards an unrecognized workspace field at the Thought boundary", () => {

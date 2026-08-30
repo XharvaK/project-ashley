@@ -41,6 +41,7 @@ import {
   translateReasoningPolicy,
   formatTranslatedWireControl,
   resolveOccupantSemanticPolicy,
+  resolveDispatchContract,
   toTrustedReasoningControl,
   wireReasoningFor,
   type ControlRootMode,
@@ -447,6 +448,7 @@ export async function completeChat(
     targetModel: string,
     fallbackFromAttemptId: string | null,
     fallbackClass: ModelFallbackClass,
+    dispatchContract: ReturnType<typeof resolveDispatchContract>,
   ) => {
     const occupant = currentPolicy.occupant;
     const occupantWire = occupant.effectiveReasoning ?? null;
@@ -535,9 +537,14 @@ export async function completeChat(
       reasoningEffort: fingerprintReasoning,
       translatedWireControl: fingerprintTranslated,
       temperature: options.temperature ?? null,
-      maxTokens: options.maxTokens ?? null,
+      maxTokens: dispatchContract.maxTokens,
       presencePenalty: options.presencePenalty ?? null,
-      responseFormat: options.responseFormat ?? null,
+      responseFormat: dispatchContract.responseFormat ?? null,
+      structuredOutputContractId:
+        dispatchContract.structuredOutputContractId ?? undefined,
+      structuredOutputMode: dispatchContract.structuredOutputMode ?? undefined,
+      structuredOutputBindingId:
+        dispatchContract.structuredOutputBindingId ?? undefined,
       toolCount: options.tools?.length ?? 0,
       toolNames: options.tools?.map((tool) => tool.function.name) ?? [],
     });
@@ -638,11 +645,20 @@ export async function completeChat(
       targetProvider === provider ? "none" : "transport_failover";
     const fallbackFromAttemptId =
       fallbackClass === "none" ? null : previousAttemptId;
+    const dispatchContract = resolveDispatchContract({
+      policy: currentPolicy,
+      provider: targetProvider,
+      configuredModelId: targetModel,
+      requestedMaxTokens: options.maxTokens,
+      responseFormat: options.responseFormat,
+      structuredOutput: options.structuredOutput,
+    });
     const attemptContext = beginAttempt(
       targetProvider,
       targetModel,
       fallbackFromAttemptId,
       fallbackClass,
+      dispatchContract,
     );
     const attempt = attemptContext.attempt;
     assertOutboundAllowed(targetProvider);
@@ -669,7 +685,7 @@ export async function completeChat(
         quotaBucket: targetBucket,
         routeAlias: routeId ?? null,
         modelAlias: targetModel,
-        maxTokens: options.maxTokens,
+        maxTokens: dispatchContract.maxTokens,
         toolsJson,
         signal: options.signal,
         deadlineAtMs: options.deadlineAtMs,
@@ -689,6 +705,8 @@ export async function completeChat(
               options: {
                 ...options,
                 model: alias,
+                maxTokens: dispatchContract.maxTokens,
+                responseFormat: dispatchContract.responseFormat,
                 reasoningEffort: attemptContext.fabricReasoning
                   ? undefined
                   : completionReasoning(
@@ -697,6 +715,7 @@ export async function completeChat(
                     ),
               },
               fabricReasoning: attemptContext.fabricReasoning,
+              fabricStructuredOutput: dispatchContract.structuredOutput ?? undefined,
               signal: merged,
             });
             attempt.markProviderResponse({

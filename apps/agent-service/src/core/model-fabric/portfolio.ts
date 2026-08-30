@@ -7,6 +7,7 @@ import type {
   ModelFallbackClass,
   ModelPurposeId,
   ReasoningPolicy,
+  StructuredOutputCapabilityBinding,
   SpecialistRequirement,
 } from "./types.js";
 
@@ -39,6 +40,7 @@ export type ModelFabricOccupant = Readonly<{
   reasoningPolicy?: ReasoningPolicy;
   effectiveReasoning?: string | null;
   adapterSemanticRevision?: string;
+  structuredOutputBinding?: StructuredOutputCapabilityBinding;
   privacyEligibility?: readonly string[];
   admissionBasis?: Readonly<Record<string, unknown>>;
   fallbackClassFromPrevious?: ModelFallbackClass;

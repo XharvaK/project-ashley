@@ -11,6 +11,7 @@ import type {
   ProviderDispatchArgs,
   TrustedReasoningControl,
 } from "../types.js";
+import type { TrustedStructuredOutputControl } from "../../model-fabric/types.js";
 
 type NimErrorResponse = {
   error?: { type?: string; message?: string; code?: string | number };
@@ -74,6 +75,7 @@ function buildRequestBody(
   options: CompletionOptions,
   model: string,
   fabricReasoning?: TrustedReasoningControl,
+  fabricStructuredOutput?: TrustedStructuredOutputControl,
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {
     model,
@@ -106,8 +108,27 @@ function buildRequestBody(
       body.reasoning_effort = effort;
     }
   }
-  if (options.responseFormat === "json_object") {
+  if (fabricStructuredOutput) {
+    if (fabricStructuredOutput.kind === "json_object_compatibility") {
+      body.response_format = { type: "json_object" };
+    } else if (fabricStructuredOutput.wireFormat === "nim_guided_json") {
+      body.guided_json = fabricStructuredOutput.schema;
+    } else if (fabricStructuredOutput.wireFormat === "nim_response_format_json_schema") {
+      body.response_format = {
+        type: "json_schema",
+        json_schema: {
+          name: fabricStructuredOutput.schemaId,
+          strict: true,
+          schema: fabricStructuredOutput.schema,
+        },
+      };
+    }
+  } else if (options.responseFormat === "json_object") {
     body.response_format = { type: "json_object" };
+  } else if (options.responseFormat === "json_schema") {
+    throw Object.assign(new Error("structured_output_untrusted"), {
+      code: "structured_output_untrusted",
+    });
   }
   return body;
 }
@@ -117,8 +138,15 @@ export function buildNimRequestBody(
   options: CompletionOptions,
   model: string,
   fabricReasoning?: TrustedReasoningControl,
+  fabricStructuredOutput?: TrustedStructuredOutputControl,
 ): Record<string, unknown> {
-  return buildRequestBody(messages, options, model, fabricReasoning);
+  return buildRequestBody(
+    messages,
+    options,
+    model,
+    fabricReasoning,
+    fabricStructuredOutput,
+  );
 }
 
 function parseRetryAfterSec(err: unknown): number | undefined {
@@ -267,6 +295,7 @@ export function createNimAdapter(
         args.options,
         args.modelId,
         args.fabricReasoning,
+        args.fabricStructuredOutput,
       );
       const res = await fetchFn(`${env.nimBaseUrl}/chat/completions`, {
         method: "POST",

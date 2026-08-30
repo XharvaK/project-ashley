@@ -161,6 +161,30 @@ describe("groq-adapter fixtures", () => {
     expect(capturedBody?.response_format).toEqual({ type: "json_object" });
   });
 
+  it("uses the trusted compatibility binding for Thought schema requests", async () => {
+    env.groqApiKey = "test";
+    let capturedBody: Record<string, unknown> | undefined;
+    const adapter = createGroqAdapter(async (_url, init) => {
+      capturedBody = JSON.parse(init?.body as string);
+      return fakeResponse({
+        choices: [{ message: { content: "{}" } }],
+        usage: { prompt_tokens: 5, completion_tokens: 1 },
+      });
+    });
+    await adapter.dispatch({
+      messages,
+      modelId: "openai/gpt-oss-20b",
+      options: { responseFormat: "json_schema" },
+      fabricStructuredOutput: {
+        kind: "json_object_compatibility",
+        contractId: "ashley.thought.step.v1",
+        schemaId: "ashley.thought.step.v1.schema",
+        bindingId: "compat_thought_groq_gpt_oss_20b_json_object_v1",
+      },
+    });
+    expect(capturedBody?.response_format).toEqual({ type: "json_object" });
+  });
+
   it("uses message.content only and ignores gpt-oss reasoning fields", async () => {
     env.groqApiKey = "test";
     const adapter = createGroqAdapter(async () =>

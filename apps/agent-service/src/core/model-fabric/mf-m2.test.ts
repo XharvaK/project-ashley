@@ -5,6 +5,7 @@ import { openNuclearDb } from "../db.js";
 import { completeChat, resetAdapterCache, MISTRAL_RETRY_CONFIG } from "../../mistral-client.js";
 import * as nimAdapterModule from "../model-routing/adapters/nim-adapter.js";
 import { routingStatus } from "../model-routing/status.js";
+import { thoughtOutputStructuredRequest } from "../cognitive-v021/thought/output-contract.js";
 import {
   currentPortfolio,
   resetCurrentPortfolioForTests,
@@ -135,6 +136,110 @@ describe("MF-M2 CURRENT portfolio", () => {
       policyRowId: "mfr_thought_interactive_compat_v1",
       occupantId: "mfo_nim_openai_gpt_oss_20b_low",
     });
+    database.close();
+  });
+
+  it("uses the CURRENT Thought policy ceiling when the caller omits maxTokens", async () => {
+    env.nimApiKey = "test";
+    const dispatch = vi.fn().mockResolvedValue({
+      text: "{}",
+      providerModel: "openai/gpt-oss-20b",
+      usage: { promptTokens: 1, completionTokens: 1 },
+      finishReason: "stop",
+    });
+    vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
+      provider: "nim",
+      dispatch,
+    });
+    const database = openNuclearDb(new DatabaseSync(":memory:"));
+    await completeChat([{ role: "user", content: "think" }], {
+      attentionDb: database,
+      purpose: "thought",
+      lane: "interactive",
+      responseFormat: "json_object",
+    });
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
+      options: expect.objectContaining({ maxTokens: 4096 }),
+    }));
+    database.close();
+  });
+
+  it("uses the resolved Thought ceiling for structured-output admission and provider dispatch", async () => {
+    env.nimApiKey = "test";
+    const dispatch = vi.fn().mockResolvedValue({
+      text: "{}",
+      providerModel: "openai/gpt-oss-20b",
+      usage: { promptTokens: 1, completionTokens: 1 },
+      finishReason: "stop",
+    });
+    vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
+      provider: "nim",
+      dispatch,
+    });
+    const database = openNuclearDb(new DatabaseSync(":memory:"));
+    const structuredOutput = thoughtOutputStructuredRequest();
+    await completeChat([{ role: "user", content: "think" }], {
+      attentionDb: database,
+      purpose: "thought",
+      lane: "interactive",
+      responseFormat: "json_schema",
+      structuredOutput,
+    });
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
+      options: expect.objectContaining({
+        maxTokens: 4096,
+        responseFormat: "json_object",
+        structuredOutput,
+      }),
+      fabricStructuredOutput: expect.objectContaining({
+        kind: "json_object_compatibility",
+        contractId: "ashley.thought.step.v1",
+        schemaId: "ashley.thought.step.v1.schema",
+      }),
+    }));
+    expect(database.prepare(
+      "SELECT estimated_output_tokens AS estimatedOutputTokens FROM attention_requests ORDER BY id DESC LIMIT 1",
+    ).get()).toMatchObject({ estimatedOutputTokens: 4096 });
+    database.close();
+  });
+
+  it("keeps the durable Thought ceiling separate from interactive policy", () => {
+    const durable = resolveCurrentPolicy({
+      logicalRole: "thought",
+      purpose: "thought",
+      lane: "background",
+    });
+    const interactive = resolveCurrentPolicy({
+      logicalRole: "thought",
+      purpose: "thought",
+      lane: "interactive",
+    });
+
+    expect(interactive.policyRow.maxOutputTokens).toBe(4096);
+    expect(interactive.policyRow.deadlineMs).toBe(10000);
+    expect(durable.policyRow.maxOutputTokens).toBe(4096);
+    expect(durable.policyRow.deadlineMs).toBeNull();
+  });
+
+  it("rejects a Thought caller ceiling above policy before attention/provider dispatch", async () => {
+    env.nimApiKey = "test";
+    const dispatch = vi.fn();
+    vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
+      provider: "nim",
+      dispatch,
+    });
+    const database = openNuclearDb(new DatabaseSync(":memory:"));
+    await expect(
+      completeChat([{ role: "user", content: "think" }], {
+        attentionDb: database,
+        purpose: "thought",
+        lane: "interactive",
+        responseFormat: "json_object",
+        maxTokens: 6000,
+      }),
+    ).rejects.toMatchObject({ code: "model_fabric_output_budget_exceeded" });
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(database.prepare("SELECT COUNT(*) AS count FROM attention_requests").get()).toMatchObject({ count: 0 });
     database.close();
   });
 

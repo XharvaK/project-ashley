@@ -75,6 +75,44 @@ export type ModelOutputCapabilities = {
   streaming: boolean;
 };
 
+/** A code-owned structured-output request. The schema constrains shape only. */
+export type StructuredOutputRequest = Readonly<{
+  contractId: string;
+  schemaId: string;
+  schema: Readonly<Record<string, unknown>>;
+}>;
+
+/** Exact provider wire binding selected by Model Fabric evidence. */
+export type StructuredOutputCapabilityBinding = Readonly<
+  | {
+      bindingId: string;
+      mode: "json_object_compatibility";
+    }
+  | {
+      bindingId: string;
+      mode: "native_json_schema";
+      wireFormat: "nim_guided_json" | "nim_response_format_json_schema";
+    }
+>;
+
+/** Trusted translation from a resolved Model Fabric binding to an adapter. */
+export type TrustedStructuredOutputControl = Readonly<
+  | {
+      kind: "json_object_compatibility";
+      contractId: string;
+      schemaId: string;
+      bindingId: string;
+    }
+  | {
+      kind: "native_json_schema";
+      contractId: string;
+      schemaId: string;
+      bindingId: string;
+      wireFormat: "nim_guided_json" | "nim_response_format_json_schema";
+      schema: Readonly<Record<string, unknown>>;
+    }
+>;
+
 export type ModelReasoningCapabilities =
   | { mode: "none" }
   | { mode: "fixed" }

@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import type { StructuredOutputRequest } from "../model-fabric/types.js";
 import type { ChatMessage, CompletionOptions } from "../model-routing/types.js";
 import type {
   CognitiveDispatchOptions,
@@ -29,7 +30,7 @@ export const DEFAULT_IDLE_TICK_MS = 60_000 as const;
 export const DEFAULT_MAX_SUBSCRIPTIONS = 16 as const;
 export const DEFAULT_MISS_ROUND_CAP = 1 as const;
 export const DEFAULT_TOOL_CYCLE_LEASE_MS = 120_000 as const;
-export const ORDINARY_THOUGHT_BUDGET_MS = 6_000 as const;
+export const ORDINARY_THOUGHT_BUDGET_MS = 10_000 as const;
 export const THOUGHT_UNAVAILABLE_NOTICE =
   "[system] Thought did not complete. Please send the message again." as const;
 
@@ -492,6 +493,22 @@ export type ThoughtStepKind =
   | "effect_proposal"
   | "settlement"
   | "failure";
+export type ThoughtParserFailureCode =
+  | "invalid_json"
+  | "root_not_object"
+  | "wrong_kind"
+  | "identity_missing"
+  | "identity_mismatch"
+  | "missing_settlement_fields"
+  | "speech_contract_failure"
+  | "commitment_contract_failure"
+  | "operations_contract_failure"
+  | "authority_contract_failure"
+  | "observation_contract_failure"
+  | "effect_contract_failure"
+  | "forbidden_fields"
+  | "schema_version_mismatch"
+  | "other";
 export type ThoughtPassIndex = number;
 export type ThoughtStepBase = {
   kind: ThoughtStepKind;
@@ -527,6 +544,8 @@ export type ThoughtFailureStep = ThoughtStepBase & {
     | "revision_exhausted"
     | "pass_exhausted"
     | "cancelled";
+  /** Bounded parser category. Raw provider output is never persisted. */
+  diagnosticCode?: ThoughtParserFailureCode;
 };
 export type ThoughtStepOutput =
   | ThoughtObservationRequestStep
@@ -589,7 +608,8 @@ export type ThoughtInput = {
 export type ThoughtCompleteOptions = CognitiveDispatchOptions & {
   attentionDb: DatabaseSync;
   route: "thought";
-  responseFormat: "json_object";
+  responseFormat: "json_schema";
+  structuredOutput: StructuredOutputRequest;
 };
 
 export type DurableNomination = {

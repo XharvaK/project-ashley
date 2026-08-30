@@ -9,6 +9,7 @@ import type {
   ToolCallResult,
   ProviderDispatchArgs,
 } from "../types.js";
+import type { TrustedStructuredOutputControl } from "../../model-fabric/types.js";
 
 type GroqErrorResponse = {
   error?: { type?: string; message?: string };
@@ -68,6 +69,7 @@ function buildRequestBody(
   messages: ChatMessage[],
   options: CompletionOptions,
   model: string,
+  fabricStructuredOutput?: TrustedStructuredOutputControl,
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {
     model,
@@ -98,8 +100,20 @@ function buildRequestBody(
       body.reasoning_effort = effort;
     }
   }
-  if (options.responseFormat === "json_object") {
+  if (fabricStructuredOutput) {
+    if (fabricStructuredOutput.kind === "json_object_compatibility") {
+      body.response_format = { type: "json_object" };
+    } else {
+      throw Object.assign(new Error("structured_output_native_unsupported"), {
+        code: "structured_output_native_unsupported",
+      });
+    }
+  } else if (options.responseFormat === "json_object") {
     body.response_format = { type: "json_object" };
+  } else if (options.responseFormat === "json_schema") {
+    throw Object.assign(new Error("structured_output_untrusted"), {
+      code: "structured_output_untrusted",
+    });
   }
   return body;
 }
@@ -246,7 +260,12 @@ export function createGroqAdapter(
       if (!env.groqApiKey) {
         throw new AppError("agent_not_ready", "Groq API key not configured", 503);
       }
-      const body = buildRequestBody(args.messages, args.options, args.modelId);
+      const body = buildRequestBody(
+        args.messages,
+        args.options,
+        args.modelId,
+        args.fabricStructuredOutput,
+      );
       const res = await fetchFn(`${env.groqBaseUrl}/chat/completions`, {
         method: "POST",
         headers: {
