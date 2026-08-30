@@ -127,12 +127,7 @@ describe("Thought Context Optimization — Coherent Candidate Qualification", ()
         createdAtMs: 1002,
       });
 
-      // Relevant items are those matching sleep terms
-      const relevantKeys = fixture
-        .filter((i) => i.statement.toLowerCase().includes("sleep"))
-        .map((i) => i.assertionKey);
-
-      // 3. Perform retrieval
+      // 3. Perform natural lexical retrieval over trigger terms (no circular exact-key injection)
       const retrievalResult = retrieveCandidates(
         sidecar,
         {
@@ -140,7 +135,7 @@ describe("Thought Context Optimization — Coherent Candidate Qualification", ()
           request: {
             triggerTerms: ["sleep", "soon", "tomorrow"],
             workingContextTopics: [],
-            assertionKeys: relevantKeys.slice(0, 3),
+            assertionKeys: [],
             includeLogSearch: true,
           },
         },
@@ -164,6 +159,7 @@ describe("Thought Context Optimization — Coherent Candidate Qualification", ()
         runtimeCondition: { thoughtUnavailable: false },
         rememberDirective: null,
         authorityObjections: [],
+        derivedStore: derived,
       });
 
       const nimAllocation = allocateThoughtProjection({
@@ -181,7 +177,7 @@ describe("Thought Context Optimization — Coherent Candidate Qualification", ()
       const groqAllocation = allocateThoughtProjection({
         sidecar,
         thoughtInput,
-        quotaBucket: "groq:llama-3.3-70b-versatile",
+        quotaBucket: "groq:openai/gpt-oss-20b",
         requestId: "req-groq-qual",
       });
 

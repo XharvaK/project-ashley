@@ -338,3 +338,13 @@ export class ObservabilityStore {
 export function openObservabilityStore(dbOrPath?: string | DatabaseSync): ObservabilityStore {
   return new ObservabilityStore(dbOrPath);
 }
+
+export function recordAllocationReceipt(db: DatabaseSync, receipt: AllocationReceipt, nowMs = Date.now()): void {
+  const store = new ObservabilityStore(db);
+  store.recordReceipt(receipt, nowMs);
+}
+
+export function recordDiagnostic(db: DatabaseSync, diag: ThoughtDispatchDiagnostic, nowMs = Date.now()): void {
+  const store = new ObservabilityStore(db);
+  store.recordDiagnostic(diag, nowMs);
+}

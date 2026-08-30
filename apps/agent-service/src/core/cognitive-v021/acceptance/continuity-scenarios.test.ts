@@ -4,6 +4,7 @@ import { appendAshleyEvidence, appendOwnerUtterance } from "../evidence/conversa
 import { buildThoughtInput } from "../thought/input.js";
 import { listWorkingContext } from "../evidence/working-context.js";
 import { openTestSidecar } from "../test-support.js";
+import { openDerivedStore } from "../retrieval/derived-store.js";
 import type { CapabilityReality, IdentitySlice } from "../types.js";
 import { publishSemanticTransaction } from "../settlement/publish.js";
 import { continuitySettlement, perturbedContinuitySettlement } from "./continuity-fixtures.js";
@@ -76,12 +77,15 @@ describe("v0.2.1 causal continuity scenarios", () => {
 
   it("does not invent a missing historical fact after retrieval miss", () => {
     const db = openTestSidecar();
+    const derived = openDerivedStore(":memory:");
     try {
       const cycle = admitCycle(db, { conversationId: "thread-1", triggerKind: "owner_message", triggerRef: "month-ago", occupantId: "doc", nowMs: 1 });
-      const input = buildThoughtInput({ sidecar: db, cycle, triggerText: "what happened last month?", constitution, capabilityReality, learnedSelfSlice: { dispositions: [], interests: [] } });
+      derived.reconcile(db);
+      const input = buildThoughtInput({ sidecar: db, cycle, triggerText: "what happened last month?", constitution, capabilityReality, learnedSelfSlice: { dispositions: [], interests: [] }, derivedStore: derived });
       expect(input.retrieval.miss).toBe(true);
       expect(input.retrieval.hits).toEqual([]);
     } finally {
+      derived.close();
       db.close();
     }
   });

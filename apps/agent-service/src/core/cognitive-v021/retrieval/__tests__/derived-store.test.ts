@@ -257,4 +257,86 @@ describe("Derived FTS Store & Index Synchronization", () => {
       sidecar.close();
     }
   });
+
+  it("proves VALID_DERIVED_STORE_SEARCH_FULL_SOURCE_SCANS = 0 during search on valid derived store", () => {
+    const sidecar = openTestSidecar();
+    const derived = openDerivedStore(":memory:");
+
+    try {
+      const dimensions = {
+        source: "owner_utterance" as const,
+        status: "asserted" as const,
+        time: "current" as const,
+        reliability: "owner_supplied" as const,
+      };
+
+      for (let i = 0; i < 100; i++) {
+        upsertMemoryAssertion(sidecar, {
+          assertionKey: `scale:item:${i}`,
+          statement: `Item ${i} memory assertion for zero-scan validation`,
+          memoryKind: "owner_world_claim",
+          dimensions,
+          dataClassification: "ordinary",
+          lineageParentKey: null,
+          admittedGeneration: 1,
+          live: true,
+        });
+      }
+
+      // Initial reconciliation
+      derived.reconcile(sidecar);
+      expect(derived.getIndexState()?.status).toBe("valid");
+
+      // Spy on full-table scan query preparation in sidecar
+      let fullSourceScans = 0;
+      const originalPrepare = sidecar.prepare.bind(sidecar);
+      sidecar.prepare = (sql: string) => {
+        if (sql.includes("SELECT assertion_key, content_hash FROM sidecar_memory_assertions") ||
+            sql.includes("SELECT row_id, content_hash, version FROM conversation_evidence_log")) {
+          fullSourceScans += 1;
+        }
+        return originalPrepare(sql);
+      };
+
+      // Perform 10 searches on the valid store
+      for (let i = 0; i < 10; i++) {
+        const result = searchMemoryFts(derived, sidecar, "validation");
+        expect(result.state).toBe("ready");
+        expect(result.rows.length).toBe(100);
+      }
+
+      // Assert zero full source scans occurred during valid-store searches
+      expect(fullSourceScans).toBe(0);
+    } finally {
+      derived.close();
+      sidecar.close();
+    }
+  });
+
+  it("fails closed on orphaned FTS row missing from authoritative sidecar", () => {
+    const sidecar = openTestSidecar();
+    const derived = openDerivedStore(":memory:");
+
+    try {
+      // Reconcile clean store first to establish valid state
+      derived.reconcile(sidecar);
+      expect(derived.getIndexState()?.status).toBe("valid");
+
+      // Direct insertion of orphan entry into FTS table (simulating store corruption / orphan row)
+      derived.db.prepare("INSERT INTO memory_fts (assertion_key, statement, memory_kind) VALUES (?, ?, ?)").run(
+        "orphan:key:1",
+        "Orphaned assertion statement",
+        "owner_world_claim",
+      );
+
+      const result = searchMemoryFts(derived, sidecar, "Orphaned");
+      // Must fail closed with unavailable, not return ordinary / unclassified row
+      expect(result.state).toBe("unavailable");
+      expect(result.rows).toEqual([]);
+      expect(derived.getIndexState()?.status).toBe("invalid");
+    } finally {
+      derived.close();
+      sidecar.close();
+    }
+  });
 });

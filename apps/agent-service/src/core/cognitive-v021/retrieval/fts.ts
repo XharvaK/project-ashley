@@ -36,6 +36,8 @@ export type FtsSearchResult<T> = {
   rows: T[];
 };
 
+const VALID_CLASSIFICATIONS = new Set<DataClassification>(["ordinary", "sensitive", "never_public"]);
+
 export function searchMemoryFts(
   derivedStore: DerivedStore,
   sidecarDb: DatabaseSync,
@@ -46,8 +48,8 @@ export function searchMemoryFts(
     return { state: "ready", rows: [] };
   }
 
-  // Ensure derived index is reconciled and valid
-  const ready = derivedStore.reconcileIfNeeded(sidecarDb);
+  // Ensure derived index is ready and valid (O(1) when valid, reconciles when invalid)
+  const ready = derivedStore.isReady(sidecarDb);
   if (!ready) {
     return { state: "unavailable", rows: [] };
   }
@@ -90,15 +92,21 @@ export function searchMemoryFts(
     const resultRows: RawFtsMemoryRow[] = [];
     for (const ftsRow of ftsRows) {
       const sidecar = sidecarMap.get(ftsRow.assertion_key);
-      const dataClassification = (sidecar?.data_classification ?? "ordinary") as DataClassification;
-
-      // Defense-in-depth: Secret rows must NEVER enter private model context
-      if (dataClassification === "secret") {
-        continue;
+      if (!sidecar) {
+        // Orphan FTS row: missing from authoritative sidecar. Fail closed.
+        derivedStore.markInvalid();
+        return { state: "unavailable", rows: [] };
       }
 
-      const live = Boolean(sidecar?.live ?? 1);
-      const dimensions = sidecar?.dimensions_json
+      const rawClassification = sidecar.data_classification as DataClassification;
+      if (!VALID_CLASSIFICATIONS.has(rawClassification)) {
+        // Unknown, secret, or malformed classification. Fail closed.
+        derivedStore.markInvalid();
+        return { state: "unavailable", rows: [] };
+      }
+
+      const live = Boolean(sidecar.live === 1);
+      const dimensions = sidecar.dimensions_json
         ? (JSON.parse(sidecar.dimensions_json) as EpistemicDimensions)
         : null;
 
@@ -109,13 +117,13 @@ export function searchMemoryFts(
         rank: Number(ftsRow.rank),
         dimensions,
         live,
-        dataClassification,
+        dataClassification: rawClassification,
         sourceStore: live ? "live_memory" : "quarantined_memory",
       });
     }
 
     return { state: "ready", rows: resultRows };
-  } catch (err) {
+  } catch {
     return { state: "unavailable", rows: [] };
   }
 }
@@ -131,7 +139,7 @@ export function searchConversationFts(
     return { state: "ready", rows: [] };
   }
 
-  const ready = derivedStore.reconcileIfNeeded(sidecarDb);
+  const ready = derivedStore.isReady(sidecarDb);
   if (!ready) {
     return { state: "unavailable", rows: [] };
   }
@@ -183,10 +191,17 @@ export function searchConversationFts(
     const resultRows: LogFtsRow[] = [];
     for (const ftsRow of filteredFts) {
       const sidecar = sidecarMap.get(ftsRow.row_id);
-      const dataClassification = (sidecar?.data_classification ?? "ordinary") as DataClassification;
+      if (!sidecar) {
+        // Orphan FTS row: missing from authoritative sidecar. Fail closed.
+        derivedStore.markInvalid();
+        return { state: "unavailable", rows: [] };
+      }
 
-      if (dataClassification === "secret") {
-        continue;
+      const rawClassification = sidecar.data_classification as DataClassification;
+      if (!VALID_CLASSIFICATIONS.has(rawClassification)) {
+        // Unknown, secret, or malformed classification. Fail closed.
+        derivedStore.markInvalid();
+        return { state: "unavailable", rows: [] };
       }
 
       resultRows.push({
@@ -194,16 +209,16 @@ export function searchConversationFts(
         conversationId: ftsRow.conversation_id,
         text: ftsRow.text,
         rank: Number(ftsRow.rank),
-        role: (sidecar?.role ?? "owner") as "owner" | "ashley" | "system",
-        dataClassification,
-        lineageId: sidecar?.lineage_id ?? null,
-        version: sidecar?.version ?? null,
+        role: (sidecar.role ?? "owner") as "owner" | "ashley" | "system",
+        dataClassification: rawClassification,
+        lineageId: sidecar.lineage_id ?? null,
+        version: sidecar.version ?? null,
         sourceStore: "conversation_log",
       });
     }
 
     return { state: "ready", rows: resultRows };
-  } catch (err) {
+  } catch {
     return { state: "unavailable", rows: [] };
   }
 }

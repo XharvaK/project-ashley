@@ -57,6 +57,7 @@ import {
 import { validateThoughtSettlementDraft } from "../settlement/validate.js";
 import { getPublishedSettlementIdentity, publishSemanticTransaction } from "../settlement/publish.js";
 import { admitOwnerSuppliedClaim } from "../memory/admission.js";
+import { recordDiagnostic } from "./diagnostics.js";
 import { fidelityCheck } from "../speech/fidelity.js";
 import { emitInfrastructureNotice } from "../speech/infrastructure-notice.js";
 import { renderForTransport } from "../../conversation/rendering.js";
@@ -598,21 +599,7 @@ export async function runCognitiveCycle(
     if (counters.acceptedThoughtPasses >= MAX_THOUGHT_PASSES || counters.thoughtModelAttempts >= MAX_THOUGHT_MODEL_ATTEMPTS) {
       return emitFailure("pass_exhausted");
     }
-    const input = buildThoughtInput({
-      sidecar,
-      cycle,
-      triggerText: ownerMessage,
-      triggerEvidence,
-      constitution: deps.constitution,
-      capabilityReality: deps.capabilityReality,
-      observations: observationsForThought,
-      inFlight,
-      runtimeCondition: { thoughtUnavailable: false },
-      rememberDirective: directive,
-      authorityObjections,
-    });
-    storeObservations(sidecar, input, deps.nowMs());
-
+    const rawConversationIds = listConversationEvidence(sidecar, cycle.conversationId, { limit: 12 }).map((r) => r.rowId);
     const passKey = semanticPassKey({
       cycleId: cycle.cycleId,
       generation: cycle.generation,
@@ -620,7 +607,7 @@ export async function runCognitiveCycle(
       observationsCount: observationsForThought.length,
       inFlightCount: inFlight.length,
       authorityObjectionsHash: hashAuthorityObjections(authorityObjections),
-      composeLogIds: input.rawConversation.map((r) => r.rowId),
+      composeLogIds: rawConversationIds,
       rememberDirectivePresent: Boolean(directive),
     });
 
@@ -634,16 +621,48 @@ export async function runCognitiveCycle(
           messages,
         };
       } else {
+        const input = buildThoughtInput({
+          sidecar,
+          cycle,
+          triggerText: ownerMessage,
+          triggerEvidence,
+          constitution: deps.constitution,
+          capabilityReality: deps.capabilityReality,
+          observations: observationsForThought,
+          inFlight,
+          runtimeCondition: { thoughtUnavailable: false },
+          rememberDirective: directive,
+          authorityObjections,
+          derivedStore: deps.derivedStore,
+        });
+        storeObservations(sidecar, input, deps.nowMs());
         allocated = allocateThoughtProjection({
           sidecar,
           thoughtInput: input,
           requestId: randomUUID(),
           structuralFeedback: structuralFeedback ?? undefined,
+          observabilityDb: deps.observabilityDb,
         });
         projectionCache.set(passKey, allocated);
       }
     } catch (err) {
       if (err instanceof RequiredOverflowError) {
+        if (deps.observabilityDb) {
+          try {
+            recordDiagnostic(deps.observabilityDb, {
+              cycleId: cycle.cycleId,
+              generation: cycle.generation,
+              requestId: randomUUID(),
+              pass,
+              code: "context_allocation_required_overflow",
+              stage: "allocation",
+              dispatchTruth: "not_sent",
+              createdAtMs: deps.nowMs(),
+            });
+          } catch {
+            // ignore
+          }
+        }
         return emitFailure("context_allocation_required_overflow");
       }
       throw err;
@@ -691,6 +710,24 @@ export async function runCognitiveCycle(
       structuralFeedback = invocation.output.kind === "failure"
         ? invocation.output.diagnosticCode ?? "other"
         : "other";
+      if (deps.observabilityDb) {
+        try {
+          recordDiagnostic(deps.observabilityDb, {
+            cycleId: cycle.cycleId,
+            generation: cycle.generation,
+            requestId: allocated.projected.requestId ?? randomUUID(),
+            pass,
+            code: "parser_malformed",
+            stage: "parser",
+            dispatchTruth: "not_sent",
+            semanticProjectionHash: allocated.hashes.semanticProjectionHash,
+            dispatchMessagesHash: allocated.hashes.dispatchMessagesHash,
+            createdAtMs: deps.nowMs(),
+          });
+        } catch {
+          // ignore
+        }
+      }
       if (structuralRetriesForPass < 2 && counters.thoughtModelAttempts < MAX_THOUGHT_MODEL_ATTEMPTS) {
         structuralRetriesForPass += 1;
         incrementThoughtAttemptCounter(sidecar, cycle.cycleId, cycle.generation, "structuralRetries");

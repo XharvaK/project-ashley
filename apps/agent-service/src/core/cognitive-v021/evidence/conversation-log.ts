@@ -13,6 +13,7 @@ import {
   CREDENTIAL_OMITTED_PLACEHOLDER,
   detectCredentialShape,
 } from "../../privacy/secrets.js";
+import { notifySidecarPostCommit } from "../retrieval/derived-store.js";
 
 export type AppendEvidenceInput = {
   conversationId: string;
@@ -228,6 +229,11 @@ function appendEvidence(
     db.exec("COMMIT");
     const result = byId(db, rowId);
     if (!result) throw new Error("evidence_append_lost");
+    try {
+      notifySidecarPostCommit(db, { changedRowIds: [rowId] });
+    } catch {
+      // Derived sync failures must never disturb authoritative sidecar commit
+    }
     return result;
   } catch (error) {
     try {

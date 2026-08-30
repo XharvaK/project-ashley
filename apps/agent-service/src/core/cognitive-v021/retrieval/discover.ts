@@ -73,19 +73,37 @@ export function retrieveCandidates(
   derivedStore?: DerivedStore,
 ): RetrievalResult {
   const request: RetrievalRequest = { ...input.request, includeLogSearch: true };
-  const store = derivedStore ?? openDerivedStore(":memory:");
-  store.reconcileIfNeeded(sidecarDb);
-  let infrastructureState: RetrievalInfrastructureState = "ready";
 
-  // Tier 1: Exact-key hits from sidecar memory assertions
+  // Tier 1: Exact-key hits from sidecar memory assertions (authoritative sidecar query)
   const exactKeyHits = fetchExactKeyHits(sidecarDb, request.assertionKeys ?? []);
+
+  // Fail closed if persistent derived store is unavailable: lexical infrastructure cannot run
+  if (!derivedStore) {
+    const ranked = rankCandidates({
+      exactKeyHits,
+      rawTriggerFtsHits: [],
+      concernFtsHits: [],
+      logHits: [],
+    });
+    const deduped = deduplicateCandidates(ranked, {
+      rawConversationRowIds: input.rawConversationRowIds,
+    });
+    return {
+      request,
+      hits: deduped.survivors,
+      state: "unavailable",
+      miss: false,
+    };
+  }
+
+  let infrastructureState: RetrievalInfrastructureState = "ready";
 
   // FTS query formation
   const rawTriggerQuery = buildFtsQueryString(request.triggerTerms ?? []);
   const concernQuery = buildFtsQueryString(request.workingContextTopics ?? []);
 
   // Tier 2: Raw owner trigger BM25 over memory_fts
-  const rawTriggerResult = searchMemoryFts(store, sidecarDb, rawTriggerQuery);
+  const rawTriggerResult = searchMemoryFts(derivedStore, sidecarDb, rawTriggerQuery);
   if (rawTriggerResult.state === "unavailable") {
     infrastructureState = "unavailable";
   }
@@ -106,7 +124,7 @@ export function retrieveCandidates(
   }));
 
   // Tier 3: Derived Working-Context BM25 over memory_fts
-  const concernResult = searchMemoryFts(store, sidecarDb, concernQuery);
+  const concernResult = searchMemoryFts(derivedStore, sidecarDb, concernQuery);
   if (concernResult.state === "unavailable") {
     infrastructureState = "unavailable";
   }
@@ -130,7 +148,7 @@ export function retrieveCandidates(
   let logHits: RetrievalHit[] = [];
   if (request.includeLogSearch) {
     const combinedLogQuery = rawTriggerQuery || concernQuery;
-    const logResult = searchConversationFts(store, sidecarDb, input.conversationId, combinedLogQuery, {
+    const logResult = searchConversationFts(derivedStore, sidecarDb, input.conversationId, combinedLogQuery, {
       excludeRowIds: input.rawConversationRowIds,
     });
     if (logResult.state === "unavailable") {

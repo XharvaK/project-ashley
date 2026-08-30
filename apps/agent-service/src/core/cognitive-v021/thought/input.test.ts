@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { makeThoughtDraft, openTestSidecar } from "../test-support.js";
+import { openTestSidecar, makeThoughtDraft } from "../test-support.js";
+import { openDerivedStore } from "../retrieval/derived-store.js";
 import { appendOwnerUtterance } from "../evidence/conversation-log.js";
 import { admitCycle } from "../cycle/inbox.js";
 import type { CapabilityReality, IdentitySlice, MindOccupancy, WorkingContextItem } from "../types.js";
@@ -35,6 +36,8 @@ describe("v0.2.1 ThoughtInput assembly", () => {
         conversationId: "thread-1", concernId: `concern-${index}`, status: "active", priority: index,
         updatedCycle: cycle.cycleId, updatedGeneration: 1,
       }));
+      const derived = openDerivedStore(":memory:");
+      derived.reconcile(db);
       const input = buildThoughtInput({
         sidecar: db,
         cycle,
@@ -44,6 +47,7 @@ describe("v0.2.1 ThoughtInput assembly", () => {
         workingContext,
         occupancy,
         learnedSelfSlice: { dispositions: [], interests: [] },
+        derivedStore: derived,
       });
       expect(input.rawConversation).toHaveLength(12);
       expect(input.rawConversation.at(-1)?.text).toBe("turn 19 HY19");
@@ -54,6 +58,7 @@ describe("v0.2.1 ThoughtInput assembly", () => {
       expect(input.retrieval.hits).toEqual(expect.arrayContaining([
         expect.objectContaining({ sourceStore: "conversation_log" }),
       ]));
+      derived.close();
     } finally {
       db.close();
     }

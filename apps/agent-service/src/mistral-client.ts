@@ -650,14 +650,16 @@ export async function completeChat(
       targetProvider === provider ? "none" : "transport_failover";
     const fallbackFromAttemptId =
       fallbackClass === "none" ? null : previousAttemptId;
-    const dispatchContract = resolveDispatchContract({
-      policy: currentPolicy,
-      provider: targetProvider,
-      configuredModelId: targetModel,
-      requestedMaxTokens: options.maxTokens,
-      responseFormat: options.responseFormat,
-      structuredOutput: options.structuredOutput,
-    });
+    const dispatchContract = resolveAttemptDispatchContract(
+      targetProvider,
+      targetModel,
+      {
+        policy: currentPolicy,
+        maxTokens: options.maxTokens,
+        responseFormat: options.responseFormat,
+        structuredOutput: options.structuredOutput,
+      },
+    );
     const attemptContext = beginAttempt(
       targetProvider,
       targetModel,

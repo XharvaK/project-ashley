@@ -33,9 +33,19 @@ import { startInboxConsumer, type InboxConsumerHandle } from "./core/cognitive-v
 import {
   classifyInitiativeClass,
   evaluateProactiveEligibility,
-} from "./core/agency/proactive-eligibility.js";
 import type { KernelDeps, Observation } from "./core/cognitive-v021/types.js";
 import { createV021LiveOperationExecutors } from "./core/cognitive-v021/dispatch/live-operations.js";
+import {
+  openDerivedStore,
+  defaultDerivedIndexDbPath,
+  registerDerivedStoreForSidecar,
+  type DerivedStore,
+} from "./core/cognitive-v021/retrieval/derived-store.js";
+import {
+  defaultObservabilityDbPath,
+  initObservabilitySchema,
+} from "./core/cognitive-v021/thought/diagnostics.js";
+import { DatabaseSync } from "node:sqlite";
 
 export async function serveAgent(manager: AgentManager): Promise<void> {
   await manager.init();
@@ -44,6 +54,8 @@ export async function serveAgent(manager: AgentManager): Promise<void> {
     ? null
     : manager.openCognitiveSidecar();
   let cognitiveConsumer: InboxConsumerHandle | null = null;
+  let derivedStore: DerivedStore | null = null;
+  let observabilityDb: DatabaseSync | null = null;
   if (cognitiveSidecar) {
     const nuclear = manager.core.getDatabase();
     const ownerId = env.memoryOwnerId || env.discordOwnerId || "default";
@@ -70,6 +82,11 @@ export async function serveAgent(manager: AgentManager): Promise<void> {
         return eligibility.ok ? { ok: true } : { ok: false, reason: eligibility.reason };
       },
     });
+    derivedStore = openDerivedStore(defaultDerivedIndexDbPath());
+    observabilityDb = new DatabaseSync(defaultObservabilityDbPath());
+    initObservabilitySchema(observabilityDb);
+    registerDerivedStoreForSidecar(cognitiveSidecar, derivedStore);
+
     const deps: KernelDeps = {
       nowMs: () => Date.now(),
       attentionDb: nuclear,
@@ -87,6 +104,8 @@ export async function serveAgent(manager: AgentManager): Promise<void> {
       projectSystemNotice: (noticeId) => projector.projectSystem(noticeId),
       constitution: readIdentitySlice(nuclear, ownerId),
       capabilityReality,
+      derivedStore,
+      observabilityDb,
     };
     manager.configureCognitiveDispatch({ deps, projector });
     cognitiveConsumer = startInboxConsumer(cognitiveSidecar, {
@@ -172,6 +191,8 @@ export async function serveAgent(manager: AgentManager): Promise<void> {
     stopEngineeringAutonomyLoops();
     cognitiveConsumer?.stop();
     if (cognitiveConsumer) await cognitiveConsumer.done;
+    derivedStore?.close();
+    try { observabilityDb?.close(); } catch { /* ignore */ }
     await stopDurableOperationalJobRunner();
     sandboxBrokerClient?.close();
     await manager.shutdown();

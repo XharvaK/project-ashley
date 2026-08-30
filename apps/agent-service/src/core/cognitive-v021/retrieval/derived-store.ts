@@ -165,7 +165,29 @@ export class DerivedStore {
     return { ok, pragma, memoryFts, conversationFts };
   }
 
-  reconcileIfNeeded(sidecarDb: DatabaseSync): boolean {
+  /**
+   * Fast readiness check.
+   * If the index status is valid, returns true without scanning the sidecar source tables (O(1)).
+   * If the index is missing or marked invalid, performs synchronous reconciliation/rebuild.
+   */
+  isReady(sidecarDb: DatabaseSync): boolean {
+    try {
+      const state = this.getIndexState();
+      if (state && state.status === "valid") {
+        return true;
+      }
+      return this.reconcile(sidecarDb);
+    } catch {
+      this.markInvalid();
+      return false;
+    }
+  }
+
+  /**
+   * Full source-fingerprint reconciliation.
+   * Used for startup, recovery, and invalid-state detection.
+   */
+  reconcile(sidecarDb: DatabaseSync): boolean {
     try {
       const state = this.getIndexState();
       const mem = computeMemorySourceHash(sidecarDb);
@@ -184,10 +206,14 @@ export class DerivedStore {
 
       this.rebuild(sidecarDb, mem, conv);
       return true;
-    } catch (err) {
+    } catch {
       this.markInvalid();
       return false;
     }
+  }
+
+  reconcileIfNeeded(sidecarDb: DatabaseSync): boolean {
+    return this.reconcile(sidecarDb);
   }
 
   rebuild(
@@ -251,7 +277,11 @@ export class DerivedStore {
 
       this.db.exec("COMMIT;");
     } catch (err) {
-      this.db.exec("ROLLBACK;");
+      try {
+        this.db.exec("ROLLBACK;");
+      } catch {
+        // preserve write error
+      }
       this.markInvalid();
       throw err;
     }
@@ -259,13 +289,10 @@ export class DerivedStore {
 
   syncAfterCommit(
     sidecarDb: DatabaseSync,
-    changes: {
-      changedAssertionKeys?: Iterable<string>;
-      changedConversationRowIds?: Iterable<string>;
-    },
+    changes: { changedAssertionKeys?: string[]; changedRowIds?: string[] },
   ): void {
-    const changedKeys = changes.changedAssertionKeys ? [...changes.changedAssertionKeys] : [];
-    const changedRowIds = changes.changedConversationRowIds ? [...changes.changedConversationRowIds] : [];
+    const changedKeys = changes.changedAssertionKeys ?? [];
+    const changedRowIds = changes.changedRowIds ?? [];
 
     if (changedKeys.length === 0 && changedRowIds.length === 0) {
       return;
@@ -336,8 +363,6 @@ export class DerivedStore {
         }
       }
 
-      const mem = computeMemorySourceHash(sidecarDb);
-      const conv = computeConversationSourceHash(sidecarDb);
       const priorState = this.getIndexState();
       const nextGen = (priorState?.generation ?? 0) + 1;
       const now = Date.now();
@@ -347,16 +372,12 @@ export class DerivedStore {
         VALUES (1, ?, ?, ?, ?, ?, 'valid', ?)
         ON CONFLICT(id) DO UPDATE SET
           generation = excluded.generation,
-          sidecar_assertion_count = excluded.sidecar_assertion_count,
-          sidecar_conversation_count = excluded.sidecar_conversation_count,
-          memory_source_hash = excluded.memory_source_hash,
-          conversation_source_hash = excluded.conversation_source_hash,
           status = 'valid',
           updated_at_ms = excluded.updated_at_ms
-      `).run(nextGen, mem.count, conv.count, mem.hash, conv.hash, now);
+      `).run(nextGen, priorState?.sidecarAssertionCount ?? 0, priorState?.sidecarConversationCount ?? 0, priorState?.memorySourceHash ?? "", priorState?.conversationSourceHash ?? "", now);
 
       this.db.exec("COMMIT;");
-    } catch (err) {
+    } catch {
       try {
         this.db.exec("ROLLBACK;");
       } catch {
@@ -371,6 +392,38 @@ export class DerivedStore {
       this.db.close();
     } catch {
       // Ignore close errors
+    }
+  }
+}
+
+const syncSubscribers = new WeakMap<DatabaseSync, Set<DerivedStore>>();
+
+export function registerDerivedStoreForSidecar(
+  sidecarDb: DatabaseSync,
+  derivedStore: DerivedStore,
+): () => void {
+  let set = syncSubscribers.get(sidecarDb);
+  if (!set) {
+    set = new Set();
+    syncSubscribers.set(sidecarDb, set);
+  }
+  set.add(derivedStore);
+  return () => {
+    set?.delete(derivedStore);
+  };
+}
+
+export function notifySidecarPostCommit(
+  sidecarDb: DatabaseSync,
+  changes: { changedAssertionKeys?: string[]; changedRowIds?: string[] },
+): void {
+  const stores = syncSubscribers.get(sidecarDb);
+  if (!stores || stores.size === 0) return;
+  for (const store of stores) {
+    try {
+      store.syncAfterCommit(sidecarDb, changes);
+    } catch {
+      store.markInvalid();
     }
   }
 }

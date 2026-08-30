@@ -1,8 +1,16 @@
-import { describe, it, expect } from "vitest";
-import { openObservabilityStore, type ThoughtDispatchDiagnostic } from "../diagnostics.js";
+import { describe, it, expect, vi } from "vitest";
+import {
+  openObservabilityStore,
+  initObservabilitySchema,
+  type ThoughtDispatchDiagnostic,
+} from "../diagnostics.js";
 import { openDerivedStore } from "../../retrieval/derived-store.js";
-import { openTestSidecar } from "../../test-support.js";
+import { openTestSidecar, makeThoughtDraft } from "../../test-support.js";
 import type { AllocationReceipt } from "../projection-allocator/receipt.js";
+import { DatabaseSync } from "node:sqlite";
+import { admitCycle, appendInboxEvent } from "../../cycle/inbox.js";
+import { appendOwnerUtterance } from "../../evidence/conversation-log.js";
+import { runCognitiveCycle } from "../run.js";
 
 describe("Thought Diagnostics & Observability DB", () => {
   it("persists allocation receipts and dispatch diagnostics in dedicated forensic store", () => {
@@ -124,6 +132,127 @@ describe("Thought Diagnostics & Observability DB", () => {
       obs.close();
       derived.close();
       sidecar.close();
+    }
+  });
+
+  it("persists real allocation receipt and malformed diagnostic during runCognitiveCycle", async () => {
+    const sidecar = openTestSidecar();
+    const attentionDb = openTestSidecar();
+    const obsDb = new DatabaseSync(":memory:");
+    initObservabilitySchema(obsDb);
+
+    const cycle = admitCycle(sidecar, {
+      cycleId: "cycle-obs-real",
+      conversationId: "thread-obs-real",
+      triggerKind: "owner_message",
+      triggerRef: "ref-obs-1",
+      occupantId: "doc",
+      nowMs: 1,
+    });
+
+    const utterance = appendOwnerUtterance(sidecar, {
+      conversationId: "thread-obs-real",
+      text: "test observability integration",
+      discordMessageIds: ["msg-obs-1"],
+      nowMs: 2,
+    });
+
+    const event = appendInboxEvent(sidecar, {
+      conversationId: "thread-obs-real",
+      kind: "owner_message",
+      payload: {
+        cycleId: cycle.cycleId,
+        evidenceRowId: utterance.rowId,
+        ownerMessage: utterance.text,
+      },
+      createdAtMs: 2,
+    });
+
+    let calls = 0;
+    const completeChat = vi.fn(async (_messages) => {
+      calls++;
+      if (calls === 1) {
+        return { text: "malformed", model: "fake", modelAlias: "thought", resolvedModelId: null };
+      }
+      return {
+        text: JSON.stringify(makeThoughtDraft({
+          cycleId: cycle.cycleId,
+          generation: cycle.generation,
+          authorityEpoch: cycle.authorityEpoch,
+          occupantId: cycle.occupantId,
+          triggerRef: cycle.triggerRef,
+        })),
+        model: "fake",
+        modelAlias: "thought",
+        resolvedModelId: null,
+      };
+    });
+
+    const deps = {
+      nowMs: () => 10,
+      attentionDb,
+      completeChat,
+      runPerception: vi.fn(async () => []),
+      executeObservation: vi.fn(),
+      executeEffect: vi.fn(),
+      checkAuthority: () => ({ ok: true as const }),
+      loadAuthorityPacks: () => ({
+        epistemic: { allowInferredWorldClaims: false },
+        currentness: { requireObservationForLatest: true },
+        receipt: { receiptsByEffectId: {} },
+        capability: {
+          vision: false,
+          attachmentText: false,
+          conversationalRead: false,
+          webSearch: false,
+          canOfferProjectInspection: false,
+          canOfferWorkspace: false,
+          canOfferVerification: false,
+          canOfferAuthorship: false,
+          canOfferBoundedOperation: false,
+          canOfferPatchExport: false,
+          approvedProjectIds: [],
+        },
+        operational: { sandboxAvailable: false },
+        relational: { withdrawalActive: false, neverMention: [] },
+        stateEpoch: { authorityEpoch: 1 },
+      }),
+      expressionEnabled: false,
+      projectOutbox: vi.fn(async () => undefined),
+      constitution: { constitutional: ["truth first"], stableSelf: [] },
+      capabilityReality: {
+        vision: false,
+        attachmentText: false,
+        conversationalRead: false,
+        webSearch: false,
+        canOfferProjectInspection: false,
+        canOfferWorkspace: false,
+        canOfferVerification: false,
+        canOfferAuthorship: false,
+        canOfferBoundedOperation: false,
+        canOfferPatchExport: false,
+        approvedProjectIds: [],
+      },
+      observabilityDb: obsDb,
+    };
+
+    try {
+      const result = await runCognitiveCycle(sidecar, attentionDb, event, deps as any);
+      expect(result.published).toBe(true);
+
+      const store = openObservabilityStore(obsDb);
+      const receipts = store.listReceipts();
+      expect(receipts.length).toBeGreaterThanOrEqual(1);
+      expect(receipts[0].cycleId).toBe("cycle-obs-real");
+
+      const diagnostics = store.listDiagnostics();
+      expect(diagnostics.length).toBe(1);
+      expect(diagnostics[0].code).toBe("parser_malformed");
+      expect(diagnostics[0].cycleId).toBe("cycle-obs-real");
+    } finally {
+      obsDb.close();
+      sidecar.close();
+      attentionDb.close();
     }
   });
 });

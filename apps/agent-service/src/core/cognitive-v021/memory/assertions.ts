@@ -13,6 +13,7 @@ import type {
   MemoryKind,
 } from "../types.js";
 import { CREDENTIAL_OMITTED_PLACEHOLDER } from "../../privacy/secrets.js";
+import { notifySidecarPostCommit } from "../retrieval/derived-store.js";
 
 type DbRow = Record<string, unknown>;
 
@@ -157,6 +158,11 @@ export function upsertMemoryAssertion(
   );
   const result = getMemoryAssertion(db, effective.assertionKey);
   if (!result) throw new Error("memory_assertion_upsert_lost");
+  try {
+    notifySidecarPostCommit(db, { changedAssertionKeys: [effective.assertionKey] });
+  } catch {
+    // Derived sync failures must never disturb authoritative sidecar commit
+  }
   return result;
 }
 
@@ -212,7 +218,15 @@ export function retractMemoryAssertion(db: DatabaseSync, assertionKey: Assertion
     admittedGeneration: null,
     live: false,
   }), assertionKey);
-  return Number(result.changes) === 1;
+  const changed = Number(result.changes) === 1;
+  if (changed) {
+    try {
+      notifySidecarPostCommit(db, { changedAssertionKeys: [assertionKey] });
+    } catch {
+      // Derived sync failures must never disturb authoritative sidecar commit
+    }
+  }
+  return changed;
 }
 
 export const listAssertions = listMemoryAssertions;

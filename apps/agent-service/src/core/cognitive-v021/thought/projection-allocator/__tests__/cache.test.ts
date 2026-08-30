@@ -1,9 +1,15 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   semanticPassKey,
   hashAuthorityObjections,
   ProjectionCache,
 } from "../cache.js";
+import { admitCycle, appendInboxEvent } from "../../../cycle/inbox.js";
+import { appendOwnerUtterance } from "../../../evidence/conversation-log.js";
+import { openTestSidecar, makeThoughtDraft } from "../../../test-support.js";
+import { runCognitiveCycle } from "../../run.js";
+import * as discoverModule from "../../../retrieval/discover.js";
+import * as allocatorModule from "../allocator.js";
 
 describe("Projection Cache & Semantic Pass Keys", () => {
   it("produces identical key for identical semantic pass state across structural retries", () => {
@@ -65,5 +71,131 @@ describe("Projection Cache & Semantic Pass Keys", () => {
     cache.clear();
     expect(cache.size).toBe(0);
     expect(cache.has("k1")).toBe(false);
+  });
+
+  it("proves structural retry reuses cached projection without rerunning retrieval or allocator (RETRIEVAL=1, ALLOCATOR=1, PROVIDER=2)", async () => {
+    const sidecar = openTestSidecar();
+    const attentionDb = openTestSidecar();
+
+    const retrieveSpy = vi.spyOn(discoverModule, "retrieveCandidates");
+    const allocateSpy = vi.spyOn(allocatorModule, "allocateThoughtProjection");
+
+    retrieveSpy.mockClear();
+    allocateSpy.mockClear();
+
+    const cycle = admitCycle(sidecar, {
+      cycleId: "cycle-cache-test",
+      conversationId: "thread-cache-test",
+      triggerKind: "owner_message",
+      triggerRef: "owner-ref-1",
+      occupantId: "doc",
+      nowMs: 1,
+    });
+
+    const utterance = appendOwnerUtterance(sidecar, {
+      conversationId: "thread-cache-test",
+      text: "hello ashley",
+      discordMessageIds: ["msg-1"],
+      nowMs: 2,
+    });
+
+    const event = appendInboxEvent(sidecar, {
+      conversationId: "thread-cache-test",
+      kind: "owner_message",
+      payload: {
+        cycleId: cycle.cycleId,
+        evidenceRowId: utterance.rowId,
+        ownerMessage: utterance.text,
+      },
+      createdAtMs: 2,
+    });
+
+    let dispatchCount = 0;
+    const completeChat = vi.fn(async (_messages) => {
+      dispatchCount++;
+      if (dispatchCount === 1) {
+        // Attempt 1: Malformed response (invalid JSON) triggering structural retry
+        return {
+          text: "{ malformed json",
+          model: "fake",
+          modelAlias: "thought",
+          resolvedModelId: null,
+        };
+      }
+      // Attempt 2: Valid settlement draft
+      return {
+        text: JSON.stringify(makeThoughtDraft({
+          cycleId: cycle.cycleId,
+          generation: cycle.generation,
+          authorityEpoch: cycle.authorityEpoch,
+          occupantId: cycle.occupantId,
+          triggerRef: cycle.triggerRef,
+        })),
+        model: "fake",
+        modelAlias: "thought",
+        resolvedModelId: null,
+      };
+    });
+
+    const deps = {
+      nowMs: () => 10,
+      attentionDb,
+      completeChat,
+      runPerception: vi.fn(async () => []),
+      executeObservation: vi.fn(),
+      executeEffect: vi.fn(),
+      checkAuthority: () => ({ ok: true as const }),
+      loadAuthorityPacks: () => ({
+        epistemic: { allowInferredWorldClaims: false },
+        currentness: { requireObservationForLatest: true },
+        receipt: { receiptsByEffectId: {} },
+        capability: {
+          vision: false,
+          attachmentText: false,
+          conversationalRead: false,
+          webSearch: false,
+          canOfferProjectInspection: false,
+          canOfferWorkspace: false,
+          canOfferVerification: false,
+          canOfferAuthorship: false,
+          canOfferBoundedOperation: false,
+          canOfferPatchExport: false,
+          approvedProjectIds: [],
+        },
+        operational: { sandboxAvailable: false },
+        relational: { withdrawalActive: false, neverMention: [] },
+        stateEpoch: { authorityEpoch: 1 },
+      }),
+      expressionEnabled: false,
+      projectOutbox: vi.fn(async () => undefined),
+      constitution: { constitutional: ["truth first"], stableSelf: [] },
+      capabilityReality: {
+        vision: false,
+        attachmentText: false,
+        conversationalRead: false,
+        webSearch: false,
+        canOfferProjectInspection: false,
+        canOfferWorkspace: false,
+        canOfferVerification: false,
+        canOfferAuthorship: false,
+        canOfferBoundedOperation: false,
+        canOfferPatchExport: false,
+        approvedProjectIds: [],
+      },
+    };
+
+    try {
+      const result = await runCognitiveCycle(sidecar, attentionDb, event, deps as any);
+
+      expect(result.published).toBe(true);
+      expect(retrieveSpy).toHaveBeenCalledTimes(1); // RETRIEVAL_CALLS = 1
+      expect(allocateSpy).toHaveBeenCalledTimes(1); // ALLOCATION_CALLS = 1
+      expect(completeChat).toHaveBeenCalledTimes(2); // PROVIDER_ATTEMPTS = 2
+    } finally {
+      retrieveSpy.mockRestore();
+      allocateSpy.mockRestore();
+      sidecar.close();
+      attentionDb.close();
+    }
   });
 });

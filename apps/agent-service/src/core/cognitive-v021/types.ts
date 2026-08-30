@@ -357,7 +357,7 @@ export type RetrievalInfrastructureState = "ready" | "unavailable";
 export type RetrievalResult<H = RetrievalHit> = {
   request: RetrievalRequest;
   hits: H[];
-  state?: RetrievalInfrastructureState;
+  state: RetrievalInfrastructureState;
   miss: boolean;
 };
 
@@ -824,6 +824,8 @@ export type KernelDeps = {
   origin?: OutboxOrigin;
   constitution: IdentitySlice;
   capabilityReality: CapabilityReality;
+  derivedStore?: import("../retrieval/derived-store.js").DerivedStore;
+  observabilityDb?: DatabaseSync;
 };
 export type KernelRunResult = {
   cycleId: CycleId;

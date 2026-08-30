@@ -18,6 +18,7 @@ import { thoughtOutputCompatibilityInstruction } from "../output-contract.js";
 import { deriveThoughtBudget, estimateRequestTokens } from "./budget.js";
 import { buildAllocationCandidates, type AllocationCandidate } from "./sections.js";
 import type { AllocationReceipt } from "./receipt.js";
+import { recordAllocationReceipt, recordDiagnostic } from "../diagnostics.js";
 
 export class RequiredOverflowError extends AppError {
   constructor(message: string) {
@@ -73,6 +74,7 @@ export type AllocateThoughtProjectionOptions = {
   maxOutputTokens?: number;
   requestId: string;
   structuralFeedback?: ThoughtParserFailureCode;
+  observabilityDb?: DatabaseSync;
 };
 
 export type AllocatedThoughtProjection = {
@@ -116,7 +118,7 @@ export function allocateThoughtProjection(
     wc: WorkingContextItem[],
     retrieval: CompactRetrievalEvidence[],
   ): ProjectedThoughtInput {
-    const isMiss = (input.retrieval.state ?? "ready") === "ready" && retrieval.length === 0;
+    const isMiss = input.retrieval.state === "ready" && retrieval.length === 0;
     return {
       cycleId: input.cycleId,
       generation: input.generation,
@@ -133,7 +135,7 @@ export function allocateThoughtProjection(
       retrieval: {
         request: input.retrieval.request,
         hits: retrieval,
-        state: input.retrieval.state ?? "ready",
+        state: input.retrieval.state,
         miss: isMiss,
       },
       inFlight: input.inFlight,
@@ -233,6 +235,30 @@ export function allocateThoughtProjection(
     semanticProjectionHash,
     dispatchMessagesHash,
   };
+
+  if (opts.observabilityDb) {
+    try {
+      recordAllocationReceipt(opts.observabilityDb, receipt);
+      if (compression || omittedCandidates.length > 0) {
+        recordDiagnostic(opts.observabilityDb, {
+          cycleId: receipt.cycleId,
+          generation: receipt.generation,
+          requestId: receipt.requestId,
+          pass: 1,
+          code: "context_allocation_optional_degradation",
+          stage: "allocation",
+          dispatchTruth: "not_sent",
+          semanticProjectionHash,
+          dispatchMessagesHash,
+          estimatedInputTokens: receipt.estimatedInputTokens,
+          totalDemandTokens: receipt.totalDemandTokens,
+          createdAtMs: Date.now(),
+        });
+      }
+    } catch {
+      // Observability persistence failures must not block thought allocation
+    }
+  }
 
   return {
     messages: finalMessages,

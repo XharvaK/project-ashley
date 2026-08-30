@@ -95,6 +95,7 @@ function makeThoughtInput(overrides: Partial<ThoughtInput> = {}): ThoughtInput {
           supportRefs: ["supp-1"],
         },
       ],
+      state: "ready",
       miss: false,
     },
     inFlight: [],
@@ -115,7 +116,7 @@ describe("Whole-Thought Projection Allocator", () => {
     const input = makeThoughtInput();
     const allocated = allocateThoughtProjection({
       thoughtInput: input,
-      quotaBucket: "groq:llama-3.3-70b-versatile", // 8,000 TPM
+      quotaBucket: "groq:openai/gpt-oss-20b", // 8,000 TPM
       requestId: "req-1",
     });
 
@@ -150,13 +151,14 @@ describe("Whole-Thought Projection Allocator", () => {
       retrieval: {
         request: { triggerTerms: ["test"], workingContextTopics: [], assertionKeys: [], includeLogSearch: true },
         hits: manyHits,
+        state: "ready",
         miss: false,
       },
     });
 
     const allocated = allocateThoughtProjection({
       thoughtInput: input,
-      quotaBucket: "groq:llama-3.3-70b-versatile",
+      quotaBucket: "groq:openai/gpt-oss-20b",
       requestId: "req-compressed",
     });
 
@@ -180,7 +182,7 @@ describe("Whole-Thought Projection Allocator", () => {
       discordMessageIds: [],
       reservationId: null,
       producingCycleId: null,
-      architectureEpoch: "v0.2.1",
+      architectureEpoch: "v0.2.1" as const,
       contentHash: `hash-${i}`,
       sourceStatus: "delivered" as const,
       dataClassification: "ordinary" as const,
@@ -195,7 +197,7 @@ describe("Whole-Thought Projection Allocator", () => {
     expect(() =>
       allocateThoughtProjection({
         thoughtInput: input,
-        quotaBucket: "groq-llama-3.3-70b-versatile",
+        quotaBucket: "groq:openai/gpt-oss-20b",
         requestId: "req-overflow",
       }),
     ).toThrowError(RequiredOverflowError);

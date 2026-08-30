@@ -15,6 +15,7 @@ import {
 } from "./nomination.js";
 import { appendMemorySupport } from "./supports.js";
 import { REDACTED_MEMORY_STATEMENT, upsertMemoryAssertion } from "./assertions.js";
+import { notifySidecarPostCommit } from "../retrieval/derived-store.js";
 
 type DbRow = Record<string, unknown>;
 
@@ -217,6 +218,11 @@ function admitOne(
     db.prepare(
       "UPDATE sidecar_memory_assertions SET live = 0, admitted_generation = NULL WHERE assertion_key = ?",
     ).run(nomination.supersedesAssertionKey);
+    try {
+      notifySidecarPostCommit(db, { changedAssertionKeys: [nomination.supersedesAssertionKey] });
+    } catch {
+      // ignore
+    }
   }
   appendMemorySupport(db, {
     supportId: `native:${nomination.nominationId}`,

@@ -431,4 +431,122 @@ describe("MF-ACT dispatch authority", () => {
     });
     expect(resolved.source).toBe("current_compatibility");
   });
+
+  it("dispatches identical ChatMessage[] and resolves identical contract to secondary on failover", async () => {
+    const root = controlRoot();
+    env.nimApiKey = "test";
+    env.groqApiKey = "test";
+    const thoughtDb = db();
+
+    let primaryMessages: unknown = null;
+    let secondaryMessages: unknown = null;
+
+    const nimDispatch = vi.fn(async (args: { messages: unknown[] }) => {
+      primaryMessages = args.messages;
+      const error = new Error("NIM 503 service unavailable");
+      (error as any).status = 503;
+      throw error;
+    });
+
+    const groqDispatch = vi.fn(async (args: { messages: unknown[]; modelId: string }) => {
+      secondaryMessages = args.messages;
+      return {
+        text: '{"draft":"ok"}',
+        providerModel: "openai/gpt-oss-20b",
+        usage: { promptTokens: 100, completionTokens: 50 },
+        finishReason: "stop",
+      };
+    });
+
+    vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
+      provider: "nim",
+      dispatch: nimDispatch,
+    });
+    vi.spyOn(groqAdapterModule, "createGroqAdapter").mockReturnValue({
+      provider: "groq",
+      dispatch: groqDispatch,
+    });
+
+    const testMessages = [
+      { role: "system" as const, content: "You are Thought layer." },
+      { role: "user" as const, content: '{"cycleId":"cycle-1","generation":1}' },
+    ];
+
+    const result = await completeChat(testMessages, {
+      attentionDb: thoughtDb,
+      purpose: "thought",
+      logicalRole: "thought",
+      lane: "interactive",
+      route: "thought",
+      model: "openai/gpt-oss-20b",
+      maxTokens: 2048,
+      modelFabricControlDir: root,
+      modelFabricControlRootMode: "fixture",
+    });
+
+    expect(nimDispatch).toHaveBeenCalledTimes(1);
+    expect(groqDispatch).toHaveBeenCalledTimes(1);
+    expect(primaryMessages).toEqual(secondaryMessages);
+    expect(result.text).toBe('{"draft":"ok"}');
+    expect(result.modelFabric?.receipt.fallbackClass).toBe("transport_failover");
+
+    thoughtDb.close();
+  });
+
+  it("suppresses secondary Groq failover before send when request exceeds 8000 TPM", async () => {
+    const root = controlRoot();
+    env.nimApiKey = "test";
+    env.groqApiKey = "test";
+    const thoughtDb = db();
+
+    const nimDispatch = vi.fn(async () => {
+      const error = new Error("NIM 503 service unavailable");
+      (error as any).status = 503;
+      throw error;
+    });
+
+    const groqDispatch = vi.fn(async () => {
+      return {
+        text: '{"draft":"ok"}',
+        providerModel: "openai/gpt-oss-20b",
+        usage: { promptTokens: 10, completionTokens: 10 },
+        finishReason: "stop",
+      };
+    });
+
+    vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
+      provider: "nim",
+      dispatch: nimDispatch,
+    });
+    vi.spyOn(groqAdapterModule, "createGroqAdapter").mockReturnValue({
+      provider: "groq",
+      dispatch: groqDispatch,
+    });
+
+    // Message demand: ~4300 input tokens + 4096 maxTokens = ~8396 total demand.
+    // Fits NIM (16,000 TPM), but exceeds Groq (8,000 TPM).
+    const largeMessages = [
+      { role: "system" as const, content: "You are Thought layer." },
+      { role: "user" as const, content: "word ".repeat(4300) },
+    ];
+
+    await expect(
+      completeChat(largeMessages, {
+        attentionDb: thoughtDb,
+        purpose: "thought",
+        logicalRole: "thought",
+        lane: "interactive",
+        route: "thought",
+        model: "openai/gpt-oss-20b",
+        maxTokens: 4096,
+        modelFabricControlDir: root,
+        modelFabricControlRootMode: "fixture",
+      }),
+    ).rejects.toThrow("NVIDIA NIM unavailable");
+
+    expect(nimDispatch).toHaveBeenCalledTimes(1);
+    expect(groqDispatch).not.toHaveBeenCalled(); // Suppressed before send!
+
+    thoughtDb.close();
+  });
 });
