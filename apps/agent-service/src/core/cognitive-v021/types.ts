@@ -352,9 +352,12 @@ export type RetrievalHit = {
   live: boolean | null;
   supportRefs: string[];
 };
-export type RetrievalResult = {
+export type RetrievalInfrastructureState = "ready" | "unavailable";
+
+export type RetrievalResult<H = RetrievalHit> = {
   request: RetrievalRequest;
-  hits: RetrievalHit[];
+  hits: H[];
+  state?: RetrievalInfrastructureState;
   miss: boolean;
 };
 
