@@ -18,6 +18,7 @@
     "phase0:agent": "powershell -ExecutionPolicy Bypass -File scripts/phase0/run-all.ps1 -Tier agent",
     "phase0:mistral": "node scripts/phase0/test-mistral.mjs",
     "test": "npm test --prefix apps/agent-service",
+    "test:scale": "npm run test:scale --prefix apps/agent-service",
     "test:observer": "npm test --prefix apps/observer-exporter",
     "test:recall": "powershell -ExecutionPolicy Bypass -File scripts/phase0/run-all.ps1 -Tier agent",
     "config": "powershell -ExecutionPolicy Bypass -File scripts/install-config.ps1",
