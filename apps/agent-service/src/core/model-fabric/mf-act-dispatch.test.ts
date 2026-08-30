@@ -9,6 +9,7 @@ import { completeChat, resetAdapterCache } from "../../mistral-client.js";
 import * as groqAdapterModule from "../model-routing/adapters/groq-adapter.js";
 import * as nimAdapterModule from "../model-routing/adapters/nim-adapter.js";
 import * as mistralAdapterModule from "../model-routing/adapters/mistral-adapter.js";
+import { metadataFromError } from "./receipts.js";
 import { currentPortfolio } from "./portfolio.js";
 import {
   createCouplingPreflight,
@@ -488,7 +489,8 @@ describe("MF-ACT dispatch authority", () => {
     expect(groqDispatch).toHaveBeenCalledTimes(1);
     expect(primaryMessages).toEqual(secondaryMessages);
     expect(result.text).toBe('{"draft":"ok"}');
-    expect((result.modelFabric?.receipt as any)?.fallbackClass).toBe("transport_failover");
+    const receipt = result.modelFabric?.receipt;
+    expect(receipt && receipt.receiptStage === "resolved" ? receipt.fallbackClass : null).toBe("transport_failover");
 
     thoughtDb.close();
   });
@@ -530,8 +532,9 @@ describe("MF-ACT dispatch authority", () => {
       { role: "user" as const, content: "word ".repeat(4300) },
     ];
 
-    await expect(
-      completeChat(largeMessages, {
+    let caughtError: unknown = null;
+    try {
+      await completeChat(largeMessages, {
         attentionDb: thoughtDb,
         purpose: "thought",
         logicalRole: "thought",
@@ -541,11 +544,27 @@ describe("MF-ACT dispatch authority", () => {
         maxTokens: 4096,
         modelFabricControlDir: root,
         modelFabricControlRootMode: "fixture",
-      }),
-    ).rejects.toThrow("NVIDIA NIM unavailable");
+      });
+    } catch (err) {
+      caughtError = err;
+    }
 
+    expect(caughtError).toBeInstanceOf(Error);
+    expect((caughtError as Error).message).toContain("NVIDIA NIM unavailable");
     expect(nimDispatch).toHaveBeenCalledTimes(1);
     expect(groqDispatch).not.toHaveBeenCalled(); // Suppressed before send!
+
+    const mfMeta = metadataFromError(caughtError);
+    expect(mfMeta).not.toBeNull();
+    expect(mfMeta?.failoverSuppressed).toBe("transport_failover_unavailable_for_projection");
+    expect(mfMeta?.suppressedProvider).toBe("groq");
+    expect(mfMeta?.suppressedBucket).toBe("groq:openai/gpt-oss-20b");
+    expect(mfMeta?.receipt.receiptStage).toBe("resolved");
+    if (mfMeta?.receipt.receiptStage === "resolved") {
+      expect(mfMeta.receipt.attempts.length).toBe(1);
+      expect(mfMeta.receipt.attempts[0].provider).toBe("nim");
+      expect(["response_received", "sent_outcome_unknown"]).toContain(mfMeta.receipt.attempts[0].dispatchTruth);
+    }
 
     thoughtDb.close();
   });

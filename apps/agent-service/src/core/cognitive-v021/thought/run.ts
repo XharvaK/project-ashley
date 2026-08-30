@@ -167,6 +167,7 @@ export async function runThoughtModel(
     maxTokens: options.maxTokens,
     temperature: 0.15,
     signal: options.signal,
+    requestId,
   };
   let messages: ChatMessage[] | undefined;
   let semanticProjectionHash: string | undefined;
@@ -247,16 +248,8 @@ export async function runThoughtModel(
           const receipt = mfMeta.receipt;
           const resolvedReceipt = receipt && receipt.receiptStage === "resolved" ? receipt : null;
           const primaryAttempt = resolvedReceipt && resolvedReceipt.attempts.length > 0 ? resolvedReceipt.attempts[0] : null;
-          const primaryAttemptId =
-            resolvedReceipt?.finalAttemptId ??
-            (primaryAttempt as any)?.attemptId ??
-            (receipt as any)?.attemptId ??
-            null;
-          const primaryProvider =
-            mfMeta.resolvedRoute?.provider ??
-            (primaryAttempt && "facts" in primaryAttempt ? (primaryAttempt as any).facts?.provider : null) ??
-            (receipt as any)?.provider ??
-            null;
+          const primaryAttemptId = resolvedReceipt ? resolvedReceipt.finalAttemptId : (primaryAttempt ? primaryAttempt.attemptId : null);
+          const primaryProvider = mfMeta.resolvedRoute?.provider ?? (primaryAttempt ? primaryAttempt.provider : null);
           recordDiagnostic(deps.observabilityDb, {
             cycleId: input.cycleId,
             generation: input.generation,
@@ -426,7 +419,13 @@ function deliveryIntentFor(
   };
 }
 
-function storeObservations(db: DatabaseSync, input: ThoughtInput, nowMs: number): void {
+type ObservationPersistenceInput = {
+  cycleId: string;
+  generation: number;
+  observations: Observation[];
+};
+
+function storeObservations(db: DatabaseSync, input: ObservationPersistenceInput, nowMs: number): void {
   const statement = db.prepare(
     `INSERT OR IGNORE INTO observations
        (observation_id, cycle_id, generation, derived, replay_safe, modality,
@@ -731,6 +730,7 @@ export async function runCognitiveCycle(
     incrementThoughtAttemptCounter(sidecar, cycle.cycleId, cycle.generation, "thoughtModelAttempts");
     const invocation = await runThoughtModel(allocated.projected, deps, {
       pass,
+      requestId: allocated.receipt.requestId,
       signal: activeThought.signal,
       deadlineAtMs: thoughtDeadlineAtMs,
       structuralFeedback: structuralFeedback ?? undefined,
@@ -831,7 +831,11 @@ export async function runCognitiveCycle(
           secretOmitted: observed.secretOmitted === true,
         };
         observationsForThought = [...observationsForThought, normalized];
-        storeObservations(sidecar, { observations: [normalized] } as any, deps.nowMs());
+        storeObservations(sidecar, {
+          cycleId: cycle.cycleId,
+          generation: cycle.generation,
+          observations: [normalized],
+        }, deps.nowMs());
       } catch {
         return emitFailure("observation_unavailable");
       }

@@ -151,6 +151,7 @@ describe("Thought Context Scale Qualification Harness (1K, 10K, 100K)", () => {
         expect(receipt.totalDemandTokens).toBeLessThanOrEqual(receipt.hardTpm);
         expect(receipt.headroomTokens).toBeGreaterThanOrEqual(0);
         expect(receipt.requiredOverflow).toBe(false);
+        expect(fullSourceScans).toBe(0);
 
         // Record metrics
         console.log(

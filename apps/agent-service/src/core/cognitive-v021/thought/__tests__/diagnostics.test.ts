@@ -11,6 +11,8 @@ import { DatabaseSync } from "node:sqlite";
 import { admitCycle, appendInboxEvent } from "../../cycle/inbox.js";
 import { appendOwnerUtterance } from "../../evidence/conversation-log.js";
 import { runCognitiveCycle } from "../run.js";
+import { attachModelFabricMetadata } from "../../../model-fabric/receipts.js";
+import type { ModelFabricDispatchMetadata } from "../../../model-fabric/types.js";
 
 describe("Thought Diagnostics & Observability DB", () => {
   it("persists allocation receipts and dispatch diagnostics in dedicated forensic store", () => {
@@ -256,7 +258,7 @@ describe("Thought Diagnostics & Observability DB", () => {
     }
   });
 
-  it("persists transport_failover_unavailable_for_projection diagnostic end to end when secondary failover is suppressed", async () => {
+  it("persists transport_failover_unavailable_for_projection diagnostic from typed Model Fabric metadata when secondary failover is suppressed", async () => {
     const sidecar = openTestSidecar();
     const attentionDb = new DatabaseSync(":memory:");
     const obsDb = new DatabaseSync(":memory:");
@@ -270,31 +272,76 @@ describe("Thought Diagnostics & Observability DB", () => {
     });
 
     const errorWithMf = new Error("Transport error on primary provider");
-    const mfMeta = {
+    const mfMeta: ModelFabricDispatchMetadata = {
       receipt: {
-        attemptId: "att-primary-123",
-        provider: "nim" as const,
-        modelAlias: "thought",
-        modelId: "meta/llama-3.3-70b-instruct",
-        transportOutcome: "failed" as const,
-        errorClass: "transport_error" as const,
-        httpStatus: 503,
-        durationMs: 45,
-        quotaBucket: "nim:thought",
+        receiptStage: "resolved",
+        configuredRouteId: "thought" as any,
+        finalDispatchedRouteId: "thought" as any,
+        finalAttemptId: "att-primary-123",
+        fallbackClass: "none",
+        invocationId: "inv-suppress-1",
+        sessionId: "sess-1" as any,
+        logicalRole: "thought",
+        requestedPurpose: "thought",
+        specialistRequirement: null,
+        latencyMs: 10,
+        attentionRequestId: null,
+        traceId: null,
+        projectionId: null,
+        projectionContentBinding: null,
+        projectionTelemetryFingerprint: null,
+        fallbackChain: null,
+        attempts: [
+          {
+            receiptStage: "dispatch_attempted",
+            invocationId: "inv-suppress-1",
+            attemptId: "att-primary-123",
+            attemptOrdinal: 1,
+            fallbackFromAttemptId: null,
+            fallbackClass: "none",
+            providerRequestCount: 1,
+            latencyMs: 10,
+            projectionId: "proj-1" as any,
+            projectionContentBinding: { canonicalization: "context_projection_content_v1", algorithm: "sha256", value: "sha256:abc", privacyPolicyId: "priv-1" },
+            projectionTelemetryFingerprint: "projection_structure_v1:abc" as any,
+            requestedReasoningPolicy: null,
+            effectiveReasoningSent: null,
+            translatedWireControl: null,
+            observedReasoning: { status: "unavailable" },
+            backend: "nim",
+            dispatchedRouteId: "thought" as any,
+            registryVersion: "1",
+            profileId: "profile-1" as any,
+            profileVersion: 1 as any,
+            profileFingerprint: "fp-1" as any,
+            provider: "nim" as any,
+            configuredModelId: "meta/llama-3.3-70b-instruct",
+            contextPolicyId: "thought_context_v1" as any,
+            admissionBasis: "primary_direct" as any,
+            effectiveReasoning: null,
+            inferencePolicyFingerprint: null,
+            structuredOutputSchemaFingerprint: null,
+            dispatchTruth: "sent_outcome_unknown",
+          },
+        ],
       },
-      failoverSuppressed: "transport_failover_unavailable_for_projection" as const,
-      suppressedProvider: "groq" as const,
+      failure: {
+        code: "provider_unavailable",
+        stage: "provider_dispatch",
+        retryability: "policy_may_fallback",
+        dispatchTruth: "sent_outcome_unknown",
+        retryAfterMs: null,
+        sanitizedCauseClass: "transport_error",
+      },
+      resolvedRoute: null,
+      failoverSuppressed: "transport_failover_unavailable_for_projection",
+      suppressedProvider: "groq",
       suppressedBucket: "groq:openai/gpt-oss-20b",
       semanticProjectionHash: "test-sem-hash-123",
       dispatchMessagesHash: "test-msg-hash-123",
     };
 
-    Object.defineProperty(errorWithMf, "modelFabric", {
-      configurable: true,
-      enumerable: false,
-      value: mfMeta,
-      writable: true,
-    });
+    attachModelFabricMetadata(errorWithMf, mfMeta);
 
     let primaryAttempts = 0;
     const completeChat = vi.fn(async () => {

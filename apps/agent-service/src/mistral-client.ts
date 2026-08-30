@@ -43,6 +43,7 @@ import {
 } from "./core/model-routing/types.js";
 import {
   attachModelFabricMetadata,
+  metadataFromError,
   createCompatibilityBindingId,
   createContextProjection,
   createInferencePolicyFingerprint,
@@ -883,9 +884,11 @@ export async function completeChat(
       dispatchTruth === "not_sent" ? "attention_admission" : "provider_dispatch",
       dispatchTruth,
     );
+    const existingMeta = metadataFromError(error);
     const metadata: ModelFabricDispatchMetadata = {
       ...last,
-      failure,
+      ...existingMeta,
+      failure: existingMeta?.failure ?? failure,
     };
     attachModelFabricMetadata(error, metadata);
     throw error;

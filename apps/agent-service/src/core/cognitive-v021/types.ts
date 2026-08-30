@@ -613,6 +613,7 @@ export type ThoughtCompleteOptions = CognitiveDispatchOptions & {
   route: "thought";
   responseFormat: "json_schema";
   structuredOutput: StructuredOutputRequest;
+  requestId?: string;
 };
 
 export type DurableNomination = {
