@@ -44,6 +44,7 @@ function makeManager(
 ): AgentManager {
   const core = new AshleyCore(db);
   return {
+    getCognitiveKernel: () => env.cognitiveKernel,
     getState: () => options.state ?? "ready",
     isPaused: () => (options.state ?? "ready") === "paused",
     getUptimeSec: () => 0,
