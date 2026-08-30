@@ -74,6 +74,7 @@ export function retrieveCandidates(
 ): RetrievalResult {
   const request: RetrievalRequest = { ...input.request, includeLogSearch: true };
   const store = derivedStore ?? openDerivedStore(":memory:");
+  store.reconcileIfNeeded(sidecarDb);
   let infrastructureState: RetrievalInfrastructureState = "ready";
 
   // Tier 1: Exact-key hits from sidecar memory assertions

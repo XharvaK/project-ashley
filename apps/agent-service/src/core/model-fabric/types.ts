@@ -491,4 +491,9 @@ export type ModelFabricDispatchMetadata = {
   receipt: ModelInvocationReceipt;
   failure: ModelFailure | null;
   resolvedRoute: ResolvedModelRoute | null;
+  failoverSuppressed?: string;
+  semanticProjectionHash?: string;
+  dispatchMessagesHash?: string;
+  suppressedProvider?: string;
+  suppressedBucket?: string;
 };

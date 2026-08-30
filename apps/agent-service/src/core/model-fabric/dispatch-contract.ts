@@ -233,3 +233,23 @@ export function resolveDispatchContract(input: {
     structuredOutputSchemaFingerprint: null,
   };
 }
+
+export function resolveAttemptDispatchContract(
+  targetProvider: import("../model-routing/types.js").ProviderId,
+  targetModel: string,
+  input: {
+    policy: CurrentPolicyResolution;
+    maxTokens?: number;
+    responseFormat?: "json_object" | "json_schema";
+    structuredOutput?: StructuredOutputRequest | null;
+  },
+): ResolvedDispatchContract {
+  return resolveDispatchContract({
+    policy: input.policy,
+    provider: targetProvider,
+    configuredModelId: targetModel,
+    requestedMaxTokens: input.maxTokens,
+    responseFormat: input.responseFormat,
+    structuredOutput: input.structuredOutput ?? undefined,
+  });
+}

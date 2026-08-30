@@ -115,6 +115,13 @@ export type CompletionOptions = {
   cognitiveJobId?: number | null;
   ownerId?: string | null;
   ageOriginAtMs?: number;
+  providerModel?: string | null;
+  /** Provider finish_reason when supplied (stop, length, …). Never a secret. */
+  finishReason?: string | null;
+  projectionIdentity?: {
+    semanticProjectionHash: string;
+    dispatchMessagesHash: string;
+  };
 };
 
 export type ProviderCompletion = {

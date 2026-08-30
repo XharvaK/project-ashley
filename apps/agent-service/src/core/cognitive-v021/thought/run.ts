@@ -49,7 +49,11 @@ import {
   thoughtMessagesForProjection,
   type AllocatedThoughtProjection,
 } from "./projection-allocator/allocator.js";
-import type { ProjectedThoughtInput } from "./projection.js";
+import {
+  type ProjectedThoughtInput,
+  computeSemanticProjectionHash,
+  computeDispatchMessagesHash,
+} from "./projection.js";
 import { validateThoughtSettlementDraft } from "../settlement/validate.js";
 import { getPublishedSettlementIdentity, publishSemanticTransaction } from "../settlement/publish.js";
 import { admitOwnerSuppliedClaim } from "../memory/admission.js";
@@ -164,10 +168,15 @@ export async function runThoughtModel(
   };
   try {
     let messages: ChatMessage[];
+    let semanticProjectionHash: string | undefined;
+    let dispatchMessagesHash: string | undefined;
+
     if ("rawConversation" in input && input.retrieval && Array.isArray(input.retrieval.hits)) {
       const firstHit = input.retrieval.hits[0];
       if (!firstHit || !("supportRefs" in (firstHit as object))) {
         messages = thoughtMessagesForProjection(input as ProjectedThoughtInput, options.structuralFeedback);
+        semanticProjectionHash = computeSemanticProjectionHash(input as ProjectedThoughtInput);
+        dispatchMessagesHash = computeDispatchMessagesHash(messages);
       } else {
         const allocated = allocateThoughtProjection({
           thoughtInput: input as ThoughtInput,
@@ -175,9 +184,19 @@ export async function runThoughtModel(
           structuralFeedback: options.structuralFeedback,
         });
         messages = allocated.messages;
+        semanticProjectionHash = allocated.hashes.semanticProjectionHash;
+        dispatchMessagesHash = allocated.hashes.dispatchMessagesHash;
       }
     } else {
       messages = thoughtMessages(input as ThoughtInput, options.structuralFeedback);
+      dispatchMessagesHash = computeDispatchMessagesHash(messages);
+    }
+
+    if (semanticProjectionHash && dispatchMessagesHash) {
+      dispatchOptions.projectionIdentity = {
+        semanticProjectionHash,
+        dispatchMessagesHash,
+      };
     }
 
     const completion = await invokeThoughtComplete(

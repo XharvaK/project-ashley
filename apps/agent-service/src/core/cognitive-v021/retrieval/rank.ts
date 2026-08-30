@@ -4,8 +4,11 @@ export type TieredCandidate = RetrievalHit & {
   tier: 1 | 2 | 3 | 4;
 };
 
-export const DEFENSE_FUSE_MAX_CANDIDATES = 64;
-export const DEFENSE_FUSE_MAX_UTF8_BYTES = 32_000;
+// Defense-in-depth fuse only (§8, §21). Normal operating size is governed by
+// whole-Thought projection allocator packing and BM25 tier/rank order.
+// Tier 1 exact-key hits always bypass this fuse.
+export const DEFENSE_FUSE_MAX_CANDIDATES = 16;
+export const DEFENSE_FUSE_MAX_UTF8_BYTES = 12_000;
 
 export function compareTieredCandidates(left: TieredCandidate, right: TieredCandidate): number {
   // 1. Primary: tier ordinal (1 < 2 < 3 < 4)

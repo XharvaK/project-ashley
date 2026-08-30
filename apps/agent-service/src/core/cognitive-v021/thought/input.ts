@@ -21,6 +21,8 @@ import { listConversationEvidence } from "../evidence/conversation-log.js";
 import { listInFlight } from "../effect/in-flight.js";
 import { listWorkingContext } from "../evidence/working-context.js";
 import { retrieveCandidates } from "../retrieval/discover.js";
+import { buildRetrievalQuery, tokenizeForQuery } from "../retrieval/query.js";
+import type { DerivedStore } from "../retrieval/derived-store.js";
 import { buildLearnedSelfSlice } from "../identity/learned-self.js";
 
 export type BuildThoughtInputOptions = {
@@ -41,6 +43,7 @@ export type BuildThoughtInputOptions = {
   rememberDirective?: RememberDirective | null;
   lastNTurns?: number;
   occupancyK?: number;
+  derivedStore?: DerivedStore;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -53,12 +56,7 @@ function jsonValue(value: unknown): unknown {
 }
 
 function tokenize(text: string): string[] {
-  return [...new Set(
-    text.toLowerCase()
-      .split(/[^a-z0-9à-ÿ]+/i)
-      .map((token) => token.trim())
-      .filter((token) => token.length > 0),
-  )];
+  return tokenizeForQuery(text);
 }
 
 function loadWorkingContext(db: DatabaseSync, conversationId: string): WorkingContextItem[] {
@@ -157,23 +155,29 @@ export function buildThoughtInput(options: BuildThoughtInputOptions): ThoughtInp
     .sort((left, right) => right.priority - left.priority || right.updatedGeneration - left.updatedGeneration)
     .slice(0, occupancyK);
   const triggerText = options.triggerText ?? options.cycle.triggerRef;
-  const triggerTerms = tokenize(triggerText);
-  const workingContextTopics = workingContext
-    .filter((item) => item.status === "active")
-    .flatMap((item) => tokenize(item.text));
-  const assertionKeys = workingContext
-    .map((item) => item.concernId)
-    .filter((key): key is string => Boolean(key));
-
-  const retrieval = retrieveCandidates(options.sidecar, {
-    conversationId: options.cycle.conversationId,
-    request: {
-      triggerTerms,
-      workingContextTopics: [...new Set(workingContextTopics)],
-      assertionKeys: [...new Set(assertionKeys)],
-      includeLogSearch: true,
-    },
+  const query = buildRetrievalQuery({
+    triggerText,
+    workingContext,
+    occupancy,
+    db: options.sidecar,
   });
+
+  const rawConversationRowIds = new Set(rawConversation.map((r) => r.rowId));
+
+  const retrieval = retrieveCandidates(
+    options.sidecar,
+    {
+      conversationId: options.cycle.conversationId,
+      request: {
+        triggerTerms: query.rawTriggerTerms,
+        workingContextTopics: query.concernTerms,
+        assertionKeys: query.exactKeys,
+        includeLogSearch: true,
+      },
+      rawConversationRowIds,
+    },
+    options.derivedStore,
+  );
 
   return {
     cycleId: options.cycle.cycleId,

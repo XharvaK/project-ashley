@@ -1134,11 +1134,15 @@ function userVersion(db: DatabaseSync): number {
 }
 
 function nuclearLineageMirrorId(db: DatabaseSync): string | null {
-  const row = db
-    .prepare(`SELECT lineage_id FROM lineage_mirror WHERE id = 1`)
-    .get() as { lineage_id?: string } | undefined;
-  const lineageId = row?.lineage_id?.trim() ?? "";
-  return lineageId.length > 0 ? lineageId : null;
+  try {
+    const row = db
+      .prepare(`SELECT lineage_id FROM lineage_mirror WHERE id = 1`)
+      .get() as { lineage_id?: string } | undefined;
+    const lineageId = row?.lineage_id?.trim() ?? "";
+    return lineageId.length > 0 ? lineageId : null;
+  } catch {
+    return null;
+  }
 }
 
 function reconcilePendingNuclearMigration(

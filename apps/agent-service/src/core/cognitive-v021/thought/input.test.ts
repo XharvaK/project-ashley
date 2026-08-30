@@ -23,7 +23,7 @@ describe("v0.2.1 ThoughtInput assembly", () => {
       });
       for (let index = 0; index < 20; index++) {
         appendOwnerUtterance(db, {
-          conversationId: "thread-1", text: `turn ${index} HY${index}`,
+          conversationId: "thread-1", text: index === 0 ? "turn 0 HY19 background discussion" : `turn ${index} HY${index}`,
           discordMessageIds: [`discord-${index}`], nowMs: index + 1,
         });
       }

@@ -113,6 +113,23 @@ describe("Retrieval Query Formation", () => {
     }
   });
 
+  it("does not suppress common English words with any hardcoded stopword list", () => {
+    const text = "The need for sleep and talk about tomorrow with you";
+    const tokens = tokenizeForQuery(text);
+
+    // Common words with length >= 2 MUST be preserved for BM25 IDF weighting
+    expect(tokens).toContain("the");
+    expect(tokens).toContain("need");
+    expect(tokens).toContain("for");
+    expect(tokens).toContain("sleep");
+    expect(tokens).toContain("and");
+    expect(tokens).toContain("talk");
+    expect(tokens).toContain("about");
+    expect(tokens).toContain("tomorrow");
+    expect(tokens).toContain("with");
+    expect(tokens).toContain("you");
+  });
+
   it("handles empty query cleanly with emptyReason", () => {
     const query = buildRetrievalQuery({
       triggerText: "   ",

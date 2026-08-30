@@ -26,8 +26,21 @@ import {
   createZenAdapter,
   mapZenError,
 } from "./core/model-routing/adapters/zen-adapter.js";
-import { requireRouteEnabled } from "./core/model-routing/router.js";
-import { quotaBucketFor } from "./core/model-routing/types.js";
+import { quotaContractFor, requireRouteEnabled } from "./core/model-routing/router.js";
+import { estimateRequestTokens } from "./core/attention/estimate.js";
+import {
+  quotaBucketFor,
+  type ProviderId,
+  type RouteId,
+  type ContextProfile,
+  type ModelProviderAdapter,
+  type ChatMessage,
+  type TokenUsage,
+  type ToolDefinition,
+  type ToolCallResult,
+  type Lane,
+  type CompletionOptions,
+} from "./core/model-routing/types.js";
 import {
   attachModelFabricMetadata,
   createCompatibilityBindingId,
@@ -42,31 +55,19 @@ import {
   formatTranslatedWireControl,
   resolveOccupantSemanticPolicy,
   resolveDispatchContract,
+  resolveAttemptDispatchContract,
   toTrustedReasoningControl,
   wireReasoningFor,
   type ControlRootMode,
+  type ContextProjection,
+  type EvidenceRef,
   type LogicalModelRole,
-  type ModelFabricDispatchMetadata,
-  type ModelFallbackClass,
   type ModelPurposeId,
   type SpecialistRequirement,
+  type ModelFallbackClass,
+  type ModelFabricDispatchMetadata,
 } from "./core/model-fabric/index.js";
-import type { ContextProjection } from "./core/model-fabric/projection.js";
-import type { EvidenceRef as CoreEvidenceRef } from "./core/types.js";
 import type { ContextBudgetMode } from "./core/context-budget/types.js";
-
-import type {
-  ChatMessage,
-  TokenUsage,
-  ToolDefinition,
-  ToolCallResult,
-  Lane,
-  CompletionOptions,
-  ProviderId,
-  ModelProviderAdapter,
-  RouteId,
-  ContextProfile,
-} from "./core/model-routing/types.js";
 export type {
   ChatMessage,
   TokenUsage,
@@ -87,7 +88,7 @@ export type CognitiveDispatchOptions = CompletionOptions & {
   /** Optional caller-built C2 projection. It never changes route selection. */
   contextProjection?: ContextProjection;
   /** Optional C2 evidence refs for the minimal projection extension. */
-  contextProjectionEvidenceRefs?: readonly CoreEvidenceRef[];
+  contextProjectionEvidenceRefs?: readonly EvidenceRef[];
   contextPolicyId?: string;
   contextBudgetMode?: ContextBudgetMode;
   contextBudgetPolicyId?: string;
@@ -809,6 +810,31 @@ export async function completeChat(
         // Existing compatibility failover: secondary Groq for the same model.
         const secondaryProvider: ProviderId = "groq";
         const secondaryBucket = quotaBucketFor(secondaryProvider, modelAlias);
+
+        const secondaryContract = resolveAttemptDispatchContract(secondaryProvider, modelAlias, {
+          policy: currentPolicy,
+          maxTokens: options.maxTokens,
+          responseFormat: options.responseFormat,
+          structuredOutput: options.structuredOutput,
+        });
+        const est = estimateRequestTokens(messages, { maxTokens: secondaryContract.maxTokens });
+        const secondaryBudgetFits =
+          est.estimatedInputTokens + secondaryContract.maxTokens <=
+          quotaContractFor(secondaryBucket).tpm;
+
+        if (!secondaryBudgetFits) {
+          const primaryMeta = fabric.finalize("none");
+          attachModelFabricMetadata(primaryErr, {
+            ...primaryMeta,
+            failoverSuppressed: "transport_failover_unavailable_for_projection",
+            semanticProjectionHash: options.projectionIdentity?.semanticProjectionHash,
+            dispatchMessagesHash: options.projectionIdentity?.dispatchMessagesHash,
+            suppressedProvider: secondaryProvider,
+            suppressedBucket: secondaryBucket,
+          });
+          throw primaryErr;
+        }
+
         transportFailoverUsed = true;
         attentive = await singleDispatch(
           secondaryProvider,
