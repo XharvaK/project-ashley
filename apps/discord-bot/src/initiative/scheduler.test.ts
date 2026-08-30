@@ -14,6 +14,7 @@ import {
   runProactiveSchedulerCycle,
   runProactiveSchedulerPreflight,
 } from "./scheduler.js";
+import { config } from "../config.js";
 
 const OWNER_ID = "doc";
 
@@ -119,6 +120,7 @@ async function runLocalSchedulerFixture(
   const metrics = instrumentSchedulerQueries(db);
   const manager = {
     core,
+    getCognitiveKernel: () => "legacy" as const,
     getState: () => "ready",
     isPaused: () => false,
     getUptimeSec: () => 0,
@@ -197,6 +199,25 @@ test("scheduler preflight uses the bounded operational status surface", async ()
     assert.doesNotMatch(paths[0]!, /\/initiative\/status\?/);
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+test("v021 blocks the legacy proactive scheduler cycle", async () => {
+  const originalKernel = config.cognitiveKernel;
+  let tickCalled = false;
+  config.cognitiveKernel = "v021";
+  try {
+    const cycle = await runProactiveSchedulerCycle({
+      preflight: async () => ({ ok: false, reason: "agent_unhealthy" }),
+      tickInitiative: async () => {
+        tickCalled = true;
+        return { shouldSend: false, reason: "legacy_tick" };
+      },
+    });
+    assert.deepEqual(cycle, { outcome: "kernel_skip", reason: "v021_kernel" });
+    assert.equal(tickCalled, false);
+  } finally {
+    config.cognitiveKernel = originalKernel;
   }
 });
 

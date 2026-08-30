@@ -100,15 +100,18 @@ export async function serveAgent(manager: AgentManager): Promise<void> {
   const app = createServer(manager, { sandboxBrokerClient, cognitiveSidecar });
   const server = listen(app);
 
-  startNuclearCuriosityLoop(
-    manager.core.getDatabase(),
-    env.memoryOwnerId || env.discordOwnerId || "default",
-  );
-  startCognitionLoop(
-    manager.core.getDatabase(),
-    env.memoryOwnerId || env.discordOwnerId || "default",
-  );
-  startEngineeringAutonomyLoops({
+  const legacyRuntimeAllowed = env.cognitiveKernel !== "v021";
+  if (legacyRuntimeAllowed) {
+    startNuclearCuriosityLoop(
+      manager.core.getDatabase(),
+      env.memoryOwnerId || env.discordOwnerId || "default",
+    );
+    startCognitionLoop(
+      manager.core.getDatabase(),
+      env.memoryOwnerId || env.discordOwnerId || "default",
+    );
+  }
+  if (legacyRuntimeAllowed) startEngineeringAutonomyLoops({
     db: manager.core.getDatabase(),
     ownerId: env.memoryOwnerId || env.discordOwnerId || "default",
     brokerClient: sandboxBrokerClient,
@@ -149,7 +152,7 @@ export async function serveAgent(manager: AgentManager): Promise<void> {
     },
     onRefused: (reason) => console.log(`[engineering] refused: ${reason}`),
   });
-  if (env.durableBoundedOperationEnabled) {
+  if (legacyRuntimeAllowed && env.durableBoundedOperationEnabled) {
     startDurableOperationalJobRunner({
       db: manager.core.getDatabase(),
       nowMs: () => Date.now(),

@@ -60,6 +60,7 @@ export type ProactiveSchedulerCycleDependencies = {
 };
 
 export type ProactiveSchedulerCycleResult =
+  | { outcome: "kernel_skip"; reason: "v021_kernel" }
   | { outcome: "preflight_skip"; reason: "agent_unhealthy" | "paused" }
   | { outcome: "tick"; result: Awaited<ReturnType<typeof tickInitiative>> };
 
@@ -70,6 +71,9 @@ export async function runProactiveSchedulerCycle(
     tickInitiative,
   },
 ): Promise<ProactiveSchedulerCycleResult> {
+  if (config.cognitiveKernel === "v021") {
+    return { outcome: "kernel_skip", reason: "v021_kernel" };
+  }
   const preflight = await dependencies.preflight();
   if (!preflight.ok) {
     return { outcome: "preflight_skip", reason: preflight.reason };
@@ -261,6 +265,10 @@ export async function drainPendingWeeklyReviewDeliveries(
 }
 
 export function startProactiveScheduler(client: Client): void {
+  if (config.cognitiveKernel === "v021") {
+    console.log("[discord-bot] legacy proactive scheduler disabled (v021 kernel)");
+    return;
+  }
   if (!config.proactiveEnabled) {
     console.log(
       "[discord-bot] proactive scheduler disabled (PROACTIVE_ENABLED=false)",
@@ -286,6 +294,9 @@ export function startProactiveScheduler(client: Client): void {
     tickRunning = true;
     try {
       const cycle = await runProactiveSchedulerCycle();
+      if (cycle.outcome === "kernel_skip") {
+        return;
+      }
       if (cycle.outcome === "preflight_skip") {
         console.log(`[discord-bot] proactive skip: ${cycle.reason}`);
         return;

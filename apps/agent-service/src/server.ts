@@ -335,6 +335,12 @@ export function createServer(
     return manager.getCognitiveKernel();
   }
 
+  function assertLegacyRuntimeRoute(route: string): void {
+    if (cognitiveKernel() === "v021") {
+      throw new AppError("route_disabled", `${route} is disabled under the v0.2.1 kernel`, 404);
+    }
+  }
+
   function cognitiveContinuity(): DatabaseSync {
     const continuity = getContinuityFor(manager.core.getDatabase());
     if (!continuity) throw new AppError("agent_not_ready", "Cognitive continuity unavailable", 503);
@@ -1804,6 +1810,7 @@ export function createServer(
 
   app.post("/chat/text", async (req, res) => {
     try {
+      assertLegacyRuntimeRoute("/chat/text");
       const {
         message,
         userId,
@@ -2370,6 +2377,7 @@ export function createServer(
 
   app.post("/curiosity/tick", async (_req, res) => {
     try {
+      assertLegacyRuntimeRoute("/curiosity/tick");
       const ownerId = env.memoryOwnerId || env.discordOwnerId || "default";
       const result = await manager.core.runCuriosityTick(ownerId);
       res.json(result);
@@ -2394,6 +2402,7 @@ export function createServer(
 
   app.post("/initiative/tick", async (req, res) => {
     try {
+      assertLegacyRuntimeRoute("/initiative/tick");
       const { userId } = req.body as { userId?: string };
       const owner = requireOwner(userId);
       if (manager.isPaused()) {
@@ -2521,6 +2530,7 @@ export function createServer(
 
   app.post("/initiative/evaluate", async (req, res) => {
     try {
+      assertLegacyRuntimeRoute("/initiative/evaluate");
       const { userId } = req.body as { userId?: string };
       const owner = requireOwner(userId);
       const result = await manager.core.evaluateProactive(owner);
@@ -2533,6 +2543,7 @@ export function createServer(
 
   app.post("/initiative/generate", async (req, res) => {
     try {
+      assertLegacyRuntimeRoute("/initiative/generate");
       const { userId } = req.body as { userId?: string };
       const owner = requireOwner(userId);
       const result = await manager.core.generateProactive(owner);

@@ -1,5 +1,5 @@
 import express from "express";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { AgentManager } from "./agent.js";
 import { assertRegisteredRoutes, routeSurface } from "./route-surface.js";
 import { createServer } from "./server.js";
@@ -108,6 +108,53 @@ describe("route surface registry", () => {
       expect(captured).not.toHaveProperty("capabilityMode");
     } finally {
       await stopTestServer(server);
+    }
+  });
+
+  it("blocks legacy chat, curiosity, and proactive entry points under v021", async () => {
+    const originalDiscordOwnerId = env.discordOwnerId;
+    const originalMemoryOwnerId = env.memoryOwnerId;
+    const legacyTick = vi.fn(async () => ({ shouldSend: false, reason: "legacy" }));
+    const legacyChat = vi.fn(async () => ({ text: "legacy", threadId: "thread", model: "legacy" }));
+    const legacyCuriosity = vi.fn(async () => ({ ok: true }));
+    const manager = {
+      getCognitiveKernel: () => "v021" as const,
+      getState: () => "ready" as const,
+      isPaused: () => false,
+      core: {
+        tickProactive: legacyTick,
+        runCuriosityTick: legacyCuriosity,
+      },
+      handleTextChat: legacyChat,
+    } as unknown as AgentManager;
+    env.discordOwnerId = "doc";
+    env.memoryOwnerId = "doc";
+    const { server, url } = await startTestServer(createServer(manager));
+    try {
+      const requests = await Promise.all([
+        fetch(`${url}/chat/text`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: "doc", message: "must use ingress" }),
+        }),
+        fetch(`${url}/curiosity/tick`, { method: "POST" }),
+        fetch(`${url}/initiative/tick`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: "doc" }),
+        }),
+      ]);
+      for (const response of requests) {
+        expect(response.status).toBe(404);
+        expect(await response.json()).toMatchObject({ code: "route_disabled" });
+      }
+      expect(legacyChat).not.toHaveBeenCalled();
+      expect(legacyCuriosity).not.toHaveBeenCalled();
+      expect(legacyTick).not.toHaveBeenCalled();
+    } finally {
+      await stopTestServer(server);
+      env.discordOwnerId = originalDiscordOwnerId;
+      env.memoryOwnerId = originalMemoryOwnerId;
     }
   });
 });
