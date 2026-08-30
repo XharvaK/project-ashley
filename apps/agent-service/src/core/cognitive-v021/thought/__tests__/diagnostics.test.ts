@@ -255,4 +255,210 @@ describe("Thought Diagnostics & Observability DB", () => {
       attentionDb.close();
     }
   });
+
+  it("persists transport_failover_unavailable_for_projection diagnostic end to end when secondary failover is suppressed", async () => {
+    const sidecar = openTestSidecar();
+    const attentionDb = new DatabaseSync(":memory:");
+    const obsDb = new DatabaseSync(":memory:");
+    initObservabilitySchema(obsDb);
+
+    const event = appendInboxEvent(sidecar, {
+      conversationId: "thread-failover-suppressed",
+      kind: "owner_message",
+      payload: { text: "Hello, triggering failover suppression test" },
+      id: "evt-failover-suppressed",
+      nowMs: 1,
+    });
+
+    const errorWithMf = new Error("Transport error on primary provider");
+    const mfMeta = {
+      receipt: {
+        attemptId: "att-primary-123",
+        provider: "nim" as const,
+        modelAlias: "thought",
+        modelId: "meta/llama-3.3-70b-instruct",
+        transportOutcome: "failed" as const,
+        errorClass: "transport_error" as const,
+        httpStatus: 503,
+        durationMs: 45,
+        quotaBucket: "nim:thought",
+      },
+      failoverSuppressed: "transport_failover_unavailable_for_projection" as const,
+      suppressedProvider: "groq" as const,
+      suppressedBucket: "groq:openai/gpt-oss-20b",
+      semanticProjectionHash: "test-sem-hash-123",
+      dispatchMessagesHash: "test-msg-hash-123",
+    };
+
+    Object.defineProperty(errorWithMf, "modelFabric", {
+      configurable: true,
+      enumerable: false,
+      value: mfMeta,
+      writable: true,
+    });
+
+    let primaryAttempts = 0;
+    const completeChat = vi.fn(async () => {
+      primaryAttempts += 1;
+      throw errorWithMf;
+    });
+
+    const deps = {
+      nowMs: () => 10,
+      attentionDb,
+      completeChat,
+      runPerception: vi.fn(async () => []),
+      executeObservation: vi.fn(),
+      executeEffect: vi.fn(),
+      checkAuthority: () => ({ ok: true as const }),
+      loadAuthorityPacks: () => ({
+        epistemic: { allowInferredWorldClaims: false },
+        currentness: { requireObservationForLatest: true },
+        receipt: { receiptsByEffectId: {} },
+        capability: {
+          vision: false,
+          attachmentText: false,
+          conversationalRead: false,
+          webSearch: false,
+          canOfferProjectInspection: false,
+          canOfferWorkspace: false,
+          canOfferVerification: false,
+          canOfferAuthorship: false,
+          canOfferBoundedOperation: false,
+          canOfferPatchExport: false,
+          approvedProjectIds: [],
+        },
+        operational: { sandboxAvailable: false },
+        relational: { withdrawalActive: false, neverMention: [] },
+        stateEpoch: { authorityEpoch: 1 },
+      }),
+      expressionEnabled: false,
+      projectOutbox: vi.fn(async () => undefined),
+      constitution: { constitutional: ["truth first"], stableSelf: [] },
+      capabilityReality: {
+        vision: false,
+        attachmentText: false,
+        conversationalRead: false,
+        webSearch: false,
+        canOfferProjectInspection: false,
+        canOfferWorkspace: false,
+        canOfferVerification: false,
+        canOfferAuthorship: false,
+        canOfferBoundedOperation: false,
+        canOfferPatchExport: false,
+        approvedProjectIds: [],
+      },
+      observabilityDb: obsDb,
+    };
+
+    try {
+      const result = await runCognitiveCycle(sidecar, attentionDb, event, deps as any);
+      expect(result.published).toBe(false);
+      expect(primaryAttempts).toBe(1);
+
+      const store = openObservabilityStore(obsDb);
+      const diagnostics = store.listDiagnostics();
+      const suppressedDiag = diagnostics.find(
+        (d) => d.code === "transport_failover_unavailable_for_projection",
+      );
+
+      expect(suppressedDiag).toBeDefined();
+      expect(suppressedDiag?.stage).toBe("provider_dispatch");
+      expect(suppressedDiag?.primaryDispatchTruth).toBe("sent");
+      expect(suppressedDiag?.primaryProvider).toBe("nim");
+      expect(suppressedDiag?.primaryAttemptId).toBe("att-primary-123");
+      expect(suppressedDiag?.suppressedProvider).toBe("groq");
+      expect(suppressedDiag?.secondaryDispatchTruth).toBe("not_sent");
+      expect(suppressedDiag?.fallbackAttemptOrdinal).toBe(2);
+      expect(suppressedDiag?.fallbackFromAttemptId).toBe("att-primary-123");
+      expect(suppressedDiag?.quotaBucket).toBe("groq:openai/gpt-oss-20b");
+      expect(suppressedDiag?.semanticProjectionHash).toBe("test-sem-hash-123");
+      expect(suppressedDiag?.dispatchMessagesHash).toBe("test-msg-hash-123");
+    } finally {
+      obsDb.close();
+      sidecar.close();
+      attentionDb.close();
+    }
+  });
+
+  it("observability DB write failure does not alter or block cognitive cycle execution", async () => {
+    const sidecar = openTestSidecar();
+    const attentionDb = new DatabaseSync(":memory:");
+    const obsDb = new DatabaseSync(":memory:");
+    initObservabilitySchema(obsDb);
+
+    const event = appendInboxEvent(sidecar, {
+      conversationId: "thread-obs-failure",
+      kind: "owner_message",
+      payload: { text: "Hello with failing observability db" },
+      id: "evt-obs-failure",
+      nowMs: 1,
+    });
+
+    // Make observability DB throw on prepare / write
+    obsDb.prepare = () => {
+      throw new Error("disk_full_or_io_error_in_observability_db");
+    };
+
+    const completeChat = vi.fn(async () => {
+      throw new Error("generic_transport_unavailable");
+    });
+
+    const deps = {
+      nowMs: () => 10,
+      attentionDb,
+      completeChat,
+      runPerception: vi.fn(async () => []),
+      executeObservation: vi.fn(),
+      executeEffect: vi.fn(),
+      checkAuthority: () => ({ ok: true as const }),
+      loadAuthorityPacks: () => ({
+        epistemic: { allowInferredWorldClaims: false },
+        currentness: { requireObservationForLatest: true },
+        receipt: { receiptsByEffectId: {} },
+        capability: {
+          vision: false,
+          attachmentText: false,
+          conversationalRead: false,
+          webSearch: false,
+          canOfferProjectInspection: false,
+          canOfferWorkspace: false,
+          canOfferVerification: false,
+          canOfferAuthorship: false,
+          canOfferBoundedOperation: false,
+          canOfferPatchExport: false,
+          approvedProjectIds: [],
+        },
+        operational: { sandboxAvailable: false },
+        relational: { withdrawalActive: false, neverMention: [] },
+        stateEpoch: { authorityEpoch: 1 },
+      }),
+      expressionEnabled: false,
+      projectOutbox: vi.fn(async () => undefined),
+      constitution: { constitutional: ["truth first"], stableSelf: [] },
+      capabilityReality: {
+        vision: false,
+        attachmentText: false,
+        conversationalRead: false,
+        webSearch: false,
+        canOfferProjectInspection: false,
+        canOfferWorkspace: false,
+        canOfferVerification: false,
+        canOfferAuthorship: false,
+        canOfferBoundedOperation: false,
+        canOfferPatchExport: false,
+        approvedProjectIds: [],
+      },
+      observabilityDb: obsDb,
+    };
+
+    try {
+      // Cycle must handle observability DB error gracefully without throwing
+      const result = await runCognitiveCycle(sidecar, attentionDb, event, deps as any);
+      expect(result.published).toBe(false);
+    } finally {
+      sidecar.close();
+      attentionDb.close();
+    }
+  });
 });

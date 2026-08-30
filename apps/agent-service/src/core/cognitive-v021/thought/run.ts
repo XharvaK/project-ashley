@@ -58,6 +58,7 @@ import { validateThoughtSettlementDraft } from "../settlement/validate.js";
 import { getPublishedSettlementIdentity, publishSemanticTransaction } from "../settlement/publish.js";
 import { admitOwnerSuppliedClaim } from "../memory/admission.js";
 import { recordDiagnostic } from "./diagnostics.js";
+import { metadataFromError } from "../../model-fabric/receipts.js";
 import { fidelityCheck } from "../speech/fidelity.js";
 import { emitInfrastructureNotice } from "../speech/infrastructure-notice.js";
 import { renderForTransport } from "../../conversation/rendering.js";
@@ -239,6 +240,48 @@ export async function runThoughtModel(
   } catch (error) {
     const cancelled = options.signal?.aborted === true
       || (error instanceof Error && error.name === "AbortError");
+    if (!cancelled && deps.observabilityDb) {
+      try {
+        const mfMeta = metadataFromError(error);
+        if (mfMeta && mfMeta.failoverSuppressed === "transport_failover_unavailable_for_projection") {
+          recordDiagnostic(deps.observabilityDb, {
+            cycleId: input.cycleId,
+            generation: input.generation,
+            requestId,
+            pass,
+            code: "transport_failover_unavailable_for_projection",
+            stage: "provider_dispatch",
+            dispatchTruth: "not_sent",
+            quotaBucket: mfMeta.suppressedBucket ?? (mfMeta.receipt?.quotaBucket ? String(mfMeta.receipt.quotaBucket) : null),
+            semanticProjectionHash: mfMeta.semanticProjectionHash ?? semanticProjectionHash,
+            dispatchMessagesHash: mfMeta.dispatchMessagesHash ?? dispatchMessagesHash,
+            primaryProvider: mfMeta.receipt?.provider ?? null,
+            primaryAttemptId: mfMeta.receipt?.attemptId ?? null,
+            primaryDispatchTruth: "sent",
+            suppressedProvider: mfMeta.suppressedProvider ?? "groq",
+            fallbackAttemptOrdinal: 2,
+            fallbackFromAttemptId: mfMeta.receipt?.attemptId ?? null,
+            secondaryDispatchTruth: "not_sent",
+            createdAtMs: deps.nowMs(),
+          });
+        } else if ((error as { code?: string })?.code === "request_exceeds_tpm_budget") {
+          recordDiagnostic(deps.observabilityDb, {
+            cycleId: input.cycleId,
+            generation: input.generation,
+            requestId,
+            pass,
+            code: "request_exceeds_tpm_budget",
+            stage: "attention_admission",
+            dispatchTruth: "not_sent",
+            semanticProjectionHash,
+            dispatchMessagesHash,
+            createdAtMs: deps.nowMs(),
+          });
+        }
+      } catch {
+        // Observability DB persistence failures must not block thought execution
+      }
+    }
     return {
       output: {
         kind: "failure",
