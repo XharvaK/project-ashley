@@ -730,7 +730,6 @@ export async function runCognitiveCycle(
     incrementThoughtAttemptCounter(sidecar, cycle.cycleId, cycle.generation, "thoughtModelAttempts");
     const invocation = await runThoughtModel(allocated.projected, deps, {
       pass,
-      requestId: allocated.receipt.requestId,
       signal: activeThought.signal,
       deadlineAtMs: thoughtDeadlineAtMs,
       structuralFeedback: structuralFeedback ?? undefined,
@@ -771,7 +770,7 @@ export async function runCognitiveCycle(
           recordDiagnostic(deps.observabilityDb, {
             cycleId: cycle.cycleId,
             generation: cycle.generation,
-            requestId: allocated.receipt.requestId ?? randomUUID(),
+            requestId: invocation.output.requestId,
             pass,
             code: "parser_malformed",
             stage: "parser",
