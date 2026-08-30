@@ -33,6 +33,7 @@ import { startInboxConsumer, type InboxConsumerHandle } from "./core/cognitive-v
 import {
   classifyInitiativeClass,
   evaluateProactiveEligibility,
+} from "./core/agency/proactive-eligibility.js";
 import type { KernelDeps, Observation } from "./core/cognitive-v021/types.js";
 import { createV021LiveOperationExecutors } from "./core/cognitive-v021/dispatch/live-operations.js";
 import {

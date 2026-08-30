@@ -488,7 +488,7 @@ describe("MF-ACT dispatch authority", () => {
     expect(groqDispatch).toHaveBeenCalledTimes(1);
     expect(primaryMessages).toEqual(secondaryMessages);
     expect(result.text).toBe('{"draft":"ok"}');
-    expect(result.modelFabric?.receipt.fallbackClass).toBe("transport_failover");
+    expect((result.modelFabric?.receipt as any)?.fallbackClass).toBe("transport_failover");
 
     thoughtDb.close();
   });

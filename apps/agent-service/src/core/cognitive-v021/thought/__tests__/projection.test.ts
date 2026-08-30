@@ -99,6 +99,7 @@ describe("Model-Visible Thought Projection", () => {
           includeLogSearch: true,
         },
         hits: [],
+        state: "ready",
         miss: false,
       },
       inFlight: [],

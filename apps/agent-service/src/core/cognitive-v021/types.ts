@@ -824,7 +824,7 @@ export type KernelDeps = {
   origin?: OutboxOrigin;
   constitution: IdentitySlice;
   capabilityReality: CapabilityReality;
-  derivedStore?: import("../retrieval/derived-store.js").DerivedStore;
+  derivedStore?: import("./retrieval/derived-store.js").DerivedStore;
   observabilityDb?: DatabaseSync;
 };
 export type KernelRunResult = {

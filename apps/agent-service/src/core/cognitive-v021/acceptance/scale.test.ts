@@ -90,6 +90,7 @@ describe("Thought Context Scale Qualification Harness (1K, 10K, 100K)", () => {
               triggerTerms,
               assertionKeys: [],
               workingContextTopics: [],
+              includeLogSearch: true,
             },
           },
           derived,

@@ -267,7 +267,6 @@ describe("Thought Diagnostics & Observability DB", () => {
       kind: "owner_message",
       payload: { text: "Hello, triggering failover suppression test" },
       id: "evt-failover-suppressed",
-      nowMs: 1,
     });
 
     const errorWithMf = new Error("Transport error on primary provider");
@@ -392,7 +391,6 @@ describe("Thought Diagnostics & Observability DB", () => {
       kind: "owner_message",
       payload: { text: "Hello with failing observability db" },
       id: "evt-obs-failure",
-      nowMs: 1,
     });
 
     // Make observability DB throw on prepare / write

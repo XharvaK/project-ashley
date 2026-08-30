@@ -168,11 +168,11 @@ export async function runThoughtModel(
     temperature: 0.15,
     signal: options.signal,
   };
-  try {
-    let messages: ChatMessage[];
-    let semanticProjectionHash: string | undefined;
-    let dispatchMessagesHash: string | undefined;
+  let messages: ChatMessage[] | undefined;
+  let semanticProjectionHash: string | undefined;
+  let dispatchMessagesHash: string | undefined;
 
+  try {
     if ("rawConversation" in input && input.retrieval && Array.isArray(input.retrieval.hits)) {
       const firstHit = input.retrieval.hits[0];
       if (!firstHit || !("supportRefs" in (firstHit as object))) {
@@ -244,6 +244,19 @@ export async function runThoughtModel(
       try {
         const mfMeta = metadataFromError(error);
         if (mfMeta && mfMeta.failoverSuppressed === "transport_failover_unavailable_for_projection") {
+          const receipt = mfMeta.receipt;
+          const resolvedReceipt = receipt && receipt.receiptStage === "resolved" ? receipt : null;
+          const primaryAttempt = resolvedReceipt && resolvedReceipt.attempts.length > 0 ? resolvedReceipt.attempts[0] : null;
+          const primaryAttemptId =
+            resolvedReceipt?.finalAttemptId ??
+            (primaryAttempt as any)?.attemptId ??
+            (receipt as any)?.attemptId ??
+            null;
+          const primaryProvider =
+            mfMeta.resolvedRoute?.provider ??
+            (primaryAttempt && "facts" in primaryAttempt ? (primaryAttempt as any).facts?.provider : null) ??
+            (receipt as any)?.provider ??
+            null;
           recordDiagnostic(deps.observabilityDb, {
             cycleId: input.cycleId,
             generation: input.generation,
@@ -252,15 +265,15 @@ export async function runThoughtModel(
             code: "transport_failover_unavailable_for_projection",
             stage: "provider_dispatch",
             dispatchTruth: "not_sent",
-            quotaBucket: mfMeta.suppressedBucket ?? (mfMeta.receipt?.quotaBucket ? String(mfMeta.receipt.quotaBucket) : null),
+            quotaBucket: mfMeta.suppressedBucket ?? (mfMeta.resolvedRoute ? mfMeta.resolvedRoute.quotaClass : null),
             semanticProjectionHash: mfMeta.semanticProjectionHash ?? semanticProjectionHash,
             dispatchMessagesHash: mfMeta.dispatchMessagesHash ?? dispatchMessagesHash,
-            primaryProvider: mfMeta.receipt?.provider ?? null,
-            primaryAttemptId: mfMeta.receipt?.attemptId ?? null,
+            primaryProvider,
+            primaryAttemptId,
             primaryDispatchTruth: "sent",
             suppressedProvider: mfMeta.suppressedProvider ?? "groq",
             fallbackAttemptOrdinal: 2,
-            fallbackFromAttemptId: mfMeta.receipt?.attemptId ?? null,
+            fallbackFromAttemptId: primaryAttemptId,
             secondaryDispatchTruth: "not_sent",
             createdAtMs: deps.nowMs(),
           });
@@ -758,7 +771,7 @@ export async function runCognitiveCycle(
           recordDiagnostic(deps.observabilityDb, {
             cycleId: cycle.cycleId,
             generation: cycle.generation,
-            requestId: allocated.projected.requestId ?? randomUUID(),
+            requestId: allocated.receipt.requestId ?? randomUUID(),
             pass,
             code: "parser_malformed",
             stage: "parser",
@@ -818,10 +831,7 @@ export async function runCognitiveCycle(
           secretOmitted: observed.secretOmitted === true,
         };
         observationsForThought = [...observationsForThought, normalized];
-        storeObservations(sidecar, {
-          ...input,
-          observations: [normalized],
-        }, deps.nowMs());
+        storeObservations(sidecar, { observations: [normalized] } as any, deps.nowMs());
       } catch {
         return emitFailure("observation_unavailable");
       }
