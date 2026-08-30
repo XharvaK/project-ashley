@@ -41,7 +41,8 @@ export type ErrorCode =
   | "broker_client_unavailable"
   | "policy_unavailable"
   | "unknown_session"
-  | "session_not_awaiting_owner";
+  | "session_not_awaiting_owner"
+  | "context_allocation_required_overflow";
 
 export class AppError extends Error {
   readonly code: ErrorCode;

@@ -60,6 +60,19 @@ function parseJson(raw: string | unknown): { ok: true; value: unknown } | { ok: 
   }
 }
 
+function assertedBase(
+  value: RecordValue,
+  active: ThoughtParseActiveIdentity,
+) {
+  return {
+    cycleId: value.cycleId as string,
+    generation: value.generation as number,
+    pass: typeof value.pass === "number" ? (value.pass as number) : active.pass,
+    requestId: typeof value.requestId === "string" ? (value.requestId as string) : active.requestId,
+    occupantId: value.occupantId as string,
+  } as const;
+}
+
 function failureBase(active: ThoughtParseActiveIdentity) {
   return {
     cycleId: active.cycleId,
@@ -67,16 +80,6 @@ function failureBase(active: ThoughtParseActiveIdentity) {
     pass: active.pass,
     requestId: active.requestId,
     occupantId: active.occupantId,
-  } as const;
-}
-
-function assertedBase(value: RecordValue) {
-  return {
-    cycleId: value.cycleId as string,
-    generation: value.generation as number,
-    pass: value.pass as number,
-    requestId: value.requestId as string,
-    occupantId: value.occupantId as string,
   } as const;
 }
 
@@ -97,16 +100,16 @@ function identityDiagnostic(
   value: RecordValue,
   active: ThoughtParseActiveIdentity,
 ): ThoughtParserFailureCode | null {
-  const required = ["cycleId", "generation", "pass", "requestId", "occupantId"] as const;
+  const required = ["cycleId", "generation", "occupantId"] as const;
   if (required.some((key) => !Object.prototype.hasOwnProperty.call(value, key))) {
     return "identity_missing";
   }
   if (
     typeof value.cycleId !== "string" ||
     !Number.isInteger(value.generation) ||
-    !Number.isInteger(value.pass) ||
-    typeof value.requestId !== "string" ||
-    typeof value.occupantId !== "string"
+    typeof value.occupantId !== "string" ||
+    (value.pass !== undefined && !Number.isInteger(value.pass)) ||
+    (value.requestId !== undefined && typeof value.requestId !== "string")
   ) {
     return "identity_missing";
   }
@@ -114,8 +117,8 @@ function identityDiagnostic(
     value.cycleId !== active.cycleId ||
     value.generation !== active.generation ||
     value.occupantId !== active.occupantId ||
-    value.requestId !== active.requestId ||
-    value.pass !== active.pass
+    (value.requestId !== undefined && value.requestId !== active.requestId) ||
+    (value.pass !== undefined && value.pass !== active.pass)
   ) {
     return "identity_mismatch";
   }
@@ -182,7 +185,7 @@ function parseSettlement(
   }
   return {
     kind: "settlement",
-    ...(explicitEnvelope ? assertedBase(root) : flatDraftBase(active, draft)),
+    ...(explicitEnvelope ? assertedBase(root, active) : flatDraftBase(active, draft)),
     settlement: result.draft,
   };
 }
@@ -205,7 +208,7 @@ function parseObservation(
   const observationRequest = request as unknown as ObservationRequest;
   return {
     kind: "observation_request",
-    ...assertedBase(root),
+    ...assertedBase(root, active),
     observationRequest,
     correlationId: stringValue(root.correlationId, observationRequest.requestId),
     expectedResultType: "observation",
@@ -232,7 +235,7 @@ function parseEffect(
   const effectProposal = proposal as unknown as EffectProposal;
   return {
     kind: "effect_proposal",
-    ...assertedBase(root),
+    ...assertedBase(root, active),
     effectProposal,
     correlationId: stringValue(root.correlationId, effectProposal.effectId),
     expectedResultType: "effect_receipt",
@@ -263,7 +266,7 @@ export function parseThoughtStepOutput(
     if (
       reason === "malformed" || reason === "unavailable" || reason === "revision_exhausted" ||
       reason === "pass_exhausted" || reason === "cancelled"
-    ) return { kind: "failure", ...assertedBase(parsed), reason };
+    ) return { kind: "failure", ...assertedBase(parsed, active), reason };
     return failure(active, "malformed", "wrong_kind");
   }
   if (kind !== undefined) return failure(active, "malformed", "wrong_kind");

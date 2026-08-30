@@ -38,6 +38,18 @@ import {
   thoughtOutputCompatibilityInstruction,
   thoughtOutputStructuredRequest,
 } from "./output-contract.js";
+import {
+  ProjectionCache,
+  semanticPassKey,
+  hashAuthorityObjections,
+} from "./projection-allocator/cache.js";
+import {
+  allocateThoughtProjection,
+  RequiredOverflowError,
+  thoughtMessagesForProjection,
+  type AllocatedThoughtProjection,
+} from "./projection-allocator/allocator.js";
+import type { ProjectedThoughtInput } from "./projection.js";
 import { validateThoughtSettlementDraft } from "../settlement/validate.js";
 import { getPublishedSettlementIdentity, publishSemanticTransaction } from "../settlement/publish.js";
 import { admitOwnerSuppliedClaim } from "../memory/admission.js";
@@ -123,7 +135,7 @@ function thoughtMessages(
 }
 
 export async function runThoughtModel(
-  input: ThoughtInput,
+  input: ThoughtInput | ProjectedThoughtInput,
   deps: KernelDeps,
   options: {
     pass?: number;
@@ -151,8 +163,25 @@ export async function runThoughtModel(
     signal: options.signal,
   };
   try {
+    let messages: ChatMessage[];
+    if ("rawConversation" in input && input.retrieval && Array.isArray(input.retrieval.hits)) {
+      const firstHit = input.retrieval.hits[0];
+      if (!firstHit || !("supportRefs" in (firstHit as object))) {
+        messages = thoughtMessagesForProjection(input as ProjectedThoughtInput, options.structuralFeedback);
+      } else {
+        const allocated = allocateThoughtProjection({
+          thoughtInput: input as ThoughtInput,
+          requestId,
+          structuralFeedback: options.structuralFeedback,
+        });
+        messages = allocated.messages;
+      }
+    } else {
+      messages = thoughtMessages(input as ThoughtInput, options.structuralFeedback);
+    }
+
     const completion = await invokeThoughtComplete(
-      thoughtMessages(input, options.structuralFeedback),
+      messages,
       dispatchOptions,
       deps.completeChat,
     );
@@ -540,6 +569,7 @@ export async function runCognitiveCycle(
   let authorityObjections: AuthorityCode[] = [];
   const thoughtDeadlineAtMs = deps.nowMs() + ORDINARY_THOUGHT_BUDGET_MS;
   let structuralFeedback: ThoughtParserFailureCode | null = null;
+  const projectionCache = new ProjectionCache<AllocatedThoughtProjection>();
 
   for (;;) {
     counters = getThoughtAttemptCounters(sidecar, cycle.cycleId, cycle.generation);
@@ -563,12 +593,49 @@ export async function runCognitiveCycle(
       authorityObjections,
     });
     storeObservations(sidecar, input, deps.nowMs());
+
+    const passKey = semanticPassKey({
+      cycleId: cycle.cycleId,
+      generation: cycle.generation,
+      pass,
+      observationsCount: observationsForThought.length,
+      inFlightCount: inFlight.length,
+      authorityObjectionsHash: hashAuthorityObjections(authorityObjections),
+      composeLogIds: input.rawConversation.map((r) => r.rowId),
+      rememberDirectivePresent: Boolean(directive),
+    });
+
+    let allocated: AllocatedThoughtProjection;
+    try {
+      if (structuralFeedback && projectionCache.has(passKey)) {
+        const cached = projectionCache.get(passKey)!;
+        const messages = thoughtMessagesForProjection(cached.projected, structuralFeedback);
+        allocated = {
+          ...cached,
+          messages,
+        };
+      } else {
+        allocated = allocateThoughtProjection({
+          sidecar,
+          thoughtInput: input,
+          requestId: randomUUID(),
+          structuralFeedback: structuralFeedback ?? undefined,
+        });
+        projectionCache.set(passKey, allocated);
+      }
+    } catch (err) {
+      if (err instanceof RequiredOverflowError) {
+        return emitFailure("context_allocation_required_overflow");
+      }
+      throw err;
+    }
+
     cycle = updateCycleState(sidecar, cycle.cycleId, "thinking", deps.nowMs());
     if (counters.thoughtModelAttempts >= MAX_THOUGHT_MODEL_ATTEMPTS) return emitFailure("pass_exhausted");
     const controller = new AbortController();
     const activeThought = registerActiveThought(cycle.conversationId, cycle.cycleId, cycle.generation, controller);
     incrementThoughtAttemptCounter(sidecar, cycle.cycleId, cycle.generation, "thoughtModelAttempts");
-    const invocation = await runThoughtModel(input, deps, {
+    const invocation = await runThoughtModel(allocated.projected, deps, {
       pass,
       signal: activeThought.signal,
       deadlineAtMs: thoughtDeadlineAtMs,

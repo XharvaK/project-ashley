@@ -1,0 +1,236 @@
+import type {
+  CompactRetrievalEvidence,
+  ProjectedThoughtInput,
+} from "../projection.js";
+import type {
+  EpistemicDimensions,
+  InFlightRecord,
+  MindOccupancy,
+  Observation,
+  ThoughtInput,
+  WorkingContextItem,
+} from "../../types.js";
+
+export type AllocationSectionId =
+  | "trigger_evidence"
+  | "recent_raw"
+  | "working_context_correction"
+  | "working_context_referent"
+  | "working_context_repair"
+  | "working_context_commitment"
+  | "working_context_topic"
+  | "working_context_other"
+  | "occupancy_compact"
+  | "constitution"
+  | "learned_self"
+  | "capability"
+  | "observations"
+  | "retrieval_compact"
+  | "in_flight_receipt"
+  | "authority_objections"
+  | "remember_directive";
+
+export type AllocationCandidate = {
+  id: string;
+  section: AllocationSectionId;
+  required: boolean;
+  priority: number;
+  ref?: string;
+  data: unknown;
+};
+
+export function buildAllocationCandidates(
+  input: ThoughtInput,
+  compactRetrievalHits: CompactRetrievalEvidence[],
+): AllocationCandidate[] {
+  const candidates: AllocationCandidate[] = [];
+
+  // 1. Trigger Evidence (required)
+  candidates.push({
+    id: "trigger_evidence",
+    section: "trigger_evidence",
+    required: true,
+    priority: 1,
+    data: input.trigger,
+  });
+
+  // 2. Constitution (required)
+  candidates.push({
+    id: "constitution",
+    section: "constitution",
+    required: true,
+    priority: 2,
+    data: input.constitution,
+  });
+
+  // 3. Capability Reality (required)
+  candidates.push({
+    id: "capability",
+    section: "capability",
+    required: true,
+    priority: 3,
+    data: input.capabilityReality,
+  });
+
+  // 4. Recent Raw Window (required, all 12 turns)
+  candidates.push({
+    id: "recent_raw",
+    section: "recent_raw",
+    required: true,
+    priority: 4,
+    data: input.rawConversation,
+  });
+
+  // 5. Learned Self Slice (required)
+  candidates.push({
+    id: "learned_self",
+    section: "learned_self",
+    required: true,
+    priority: 5,
+    data: input.learnedSelfSlice,
+  });
+
+  // 6. Observations (required if non-empty)
+  if (input.observations && input.observations.length > 0) {
+    candidates.push({
+      id: "observations",
+      section: "observations",
+      required: true,
+      priority: 6,
+      data: input.observations,
+    });
+  }
+
+  // 7. In Flight (required if non-empty)
+  if (input.inFlight && input.inFlight.length > 0) {
+    candidates.push({
+      id: "in_flight_receipt",
+      section: "in_flight_receipt",
+      required: true,
+      priority: 7,
+      data: input.inFlight,
+    });
+  }
+
+  // 8. Authority Objections (required if non-empty)
+  if (input.authorityObjections && input.authorityObjections.length > 0) {
+    candidates.push({
+      id: "authority_objections",
+      section: "authority_objections",
+      required: true,
+      priority: 8,
+      data: input.authorityObjections,
+    });
+  }
+
+  // 9. Remember Directive (required if present)
+  if (input.rememberDirective) {
+    candidates.push({
+      id: "remember_directive",
+      section: "remember_directive",
+      required: true,
+      priority: 9,
+      data: input.rememberDirective,
+    });
+  }
+
+  // 10. Occupancy Compact (required if non-empty)
+  if (input.occupancy && input.occupancy.length > 0) {
+    candidates.push({
+      id: "occupancy_compact",
+      section: "occupancy_compact",
+      required: true,
+      priority: 10,
+      data: input.occupancy,
+    });
+  }
+
+  // 11-14. Type-Aware Working Context: Essential subtypes are REQUIRED
+  const wcItems = input.workingContext ?? [];
+  for (const item of wcItems) {
+    if (item.type === "correction") {
+      candidates.push({
+        id: `wc:${item.id}`,
+        section: "working_context_correction",
+        required: true,
+        priority: 11,
+        ref: item.id,
+        data: item,
+      });
+    } else if (item.type === "referent") {
+      candidates.push({
+        id: `wc:${item.id}`,
+        section: "working_context_referent",
+        required: true,
+        priority: 12,
+        ref: item.id,
+        data: item,
+      });
+    } else if (item.type === "repair") {
+      candidates.push({
+        id: `wc:${item.id}`,
+        section: "working_context_repair",
+        required: true,
+        priority: 13,
+        ref: item.id,
+        data: item,
+      });
+    } else if (item.type === "commitment_temp") {
+      candidates.push({
+        id: `wc:${item.id}`,
+        section: "working_context_commitment",
+        required: true,
+        priority: 14,
+        ref: item.id,
+        data: item,
+      });
+    }
+  }
+
+  // 15-16. Optional Working Context: Topic and Other (ordered by updatedGeneration desc)
+  const optionalWc = wcItems.filter(
+    (item) =>
+      item.type !== "correction" &&
+      item.type !== "referent" &&
+      item.type !== "repair" &&
+      item.type !== "commitment_temp",
+  );
+  optionalWc.sort((a, b) => (b.updatedGeneration ?? 0) - (a.updatedGeneration ?? 0));
+
+  for (const item of optionalWc) {
+    if (item.type === "topic") {
+      candidates.push({
+        id: `wc:${item.id}`,
+        section: "working_context_topic",
+        required: false,
+        priority: 15,
+        ref: item.id,
+        data: item,
+      });
+    } else {
+      candidates.push({
+        id: `wc:${item.id}`,
+        section: "working_context_other",
+        required: false,
+        priority: 16,
+        ref: item.id,
+        data: item,
+      });
+    }
+  }
+
+  // 17. Compact Retrieval Candidates (optional, tier/rank ordered)
+  for (let idx = 0; idx < compactRetrievalHits.length; idx++) {
+    const hit = compactRetrievalHits[idx];
+    candidates.push({
+      id: `retrieval:${hit.ref}:${idx}`,
+      section: "retrieval_compact",
+      required: false,
+      priority: 17,
+      ref: hit.ref,
+      data: hit,
+    });
+  }
+
+  return candidates;
+}
