@@ -1,8 +1,9 @@
 import { describe, expect, it, afterEach, vi } from "vitest";
 import { env } from "../../../env.js";
 import { AppError } from "../../../errors.js";
-import { createNimAdapter, mapNimError } from "./nim-adapter.js";
+import { buildNimRequestBody, createNimAdapter, mapNimError } from "./nim-adapter.js";
 import type { ChatMessage } from "../types.js";
+import type { StructuredOutputSchemaFingerprint } from "../../model-fabric/types.js";
 
 const originalKey = env.nimApiKey;
 
@@ -199,12 +200,38 @@ describe("nim-adapter fixtures", () => {
         kind: "json_object_compatibility",
         contractId: "ashley.thought.step.v1",
         schemaId: "ashley.thought.step.v1.schema",
+        schemaFingerprint: `sha256:${"a".repeat(64)}` as StructuredOutputSchemaFingerprint,
         bindingId: "compat_thought_nim_gpt_oss_20b_json_object_v1",
       },
     });
     expect(capturedBody?.response_format).toEqual({ type: "json_object" });
     expect(capturedBody).not.toHaveProperty("guided_json");
     expect(capturedBody).not.toHaveProperty("json_schema");
+  });
+
+  it("maps a trusted native Thought schema to the selected NIM wire format", () => {
+    const schema = {
+      type: "object",
+      properties: { answer: { type: "string" } },
+      required: ["answer"],
+    };
+    const body = buildNimRequestBody(
+      messages,
+      { responseFormat: "json_schema" },
+      "openai/gpt-oss-20b",
+      undefined,
+      {
+        kind: "native_json_schema",
+        contractId: "ashley.thought.step.v1",
+        schemaId: "ashley.thought.step.v1.schema",
+        schemaFingerprint: `sha256:${"a".repeat(64)}` as StructuredOutputSchemaFingerprint,
+        bindingId: "nim-native-fixture",
+        wireFormat: "nim_guided_json",
+        schema,
+      },
+    );
+    expect(body.guided_json).toEqual(schema);
+    expect(body).not.toHaveProperty("response_format");
   });
 
   it("fails closed when json_schema has no trusted provider binding", async () => {

@@ -17,9 +17,19 @@ import type {
   RouteAdmissionBasis,
   SpecialistRequirement,
   ReasoningPolicy,
+  StructuredOutputSchemaFingerprint,
 } from "./types.js";
 
 const PROFILE_VERSION = 1 as ModelProfileVersion;
+
+const MODEL_OUTPUT_CEILINGS: Readonly<Record<string, number>> = {
+  "nim:openai/gpt-oss-20b": 4096,
+  "groq:openai/gpt-oss-20b": 4096,
+};
+
+function maxOutputTokensFor(provider: string, configuredModelId: string): number {
+  return MODEL_OUTPUT_CEILINGS[`${provider}:${configuredModelId}`] ?? 2048;
+}
 
 function profileIdFor(provider: string, model: string): ModelProfileId {
   const safeModel = model.replace(/[^a-zA-Z0-9._-]+/g, "_");
@@ -57,7 +67,7 @@ function mechanicalDefinition(
       // These are the current adapter's bounded request defaults, not a
       // provider entitlement or qualification claim.
       contextTokens: 0,
-      maxOutputTokens: 2048,
+      maxOutputTokens: maxOutputTokensFor(provider, configuredModelId),
       maxMediaBytes: null,
       maxMediaParts: null,
     },
@@ -149,6 +159,7 @@ export type InferencePolicyInput = {
   structuredOutputContractId?: string | null;
   structuredOutputMode?: string | null;
   structuredOutputBindingId?: string | null;
+  structuredOutputSchemaFingerprint?: StructuredOutputSchemaFingerprint | null;
   toolCount?: number;
   toolNames?: readonly string[];
 };
@@ -174,6 +185,9 @@ export function createInferencePolicyFingerprint(
       : {}),
     ...(input.structuredOutputBindingId !== undefined
       ? { structuredOutputBindingId: input.structuredOutputBindingId }
+      : {}),
+    ...(input.structuredOutputSchemaFingerprint !== undefined
+      ? { structuredOutputSchemaFingerprint: input.structuredOutputSchemaFingerprint }
       : {}),
     toolCount: input.toolCount ?? 0,
     toolNames: input.toolNames ? [...input.toolNames].sort() : [],

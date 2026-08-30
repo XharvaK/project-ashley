@@ -2,7 +2,25 @@ import {
   THOUGHT_OUTPUT_CONTRACT_ID,
   THOUGHT_OUTPUT_SCHEMA_ID,
 } from "../../model-fabric/dispatch-contract.js";
-import type { StructuredOutputRequest } from "../../model-fabric/types.js";
+import { sha256 } from "../../model-fabric/hash.js";
+import type {
+  StructuredOutputRequest,
+  StructuredOutputSchemaFingerprint,
+} from "../../model-fabric/types.js";
+
+export const THOUGHT_FORBIDDEN_OUTPUT_FIELDS = [
+  "finalLicensedText",
+  "settlementId",
+  "outboxId",
+  "nuclearReservationId",
+  "deliveryState",
+  "sendStatus",
+  "discordMessageIds",
+  "deliveryIntent",
+  "projectionKey",
+  "suppressed",
+  "origin",
+] as const;
 
 /**
  * Structural contract only. Semantic authority remains in the Ashley
@@ -201,10 +219,87 @@ export const THOUGHT_OUTPUT_SCHEMA: Readonly<Record<string, unknown>> = {
   },
 };
 
+export const THOUGHT_OUTPUT_SCHEMA_FINGERPRINT = `sha256:${sha256(
+  THOUGHT_OUTPUT_SCHEMA,
+)}` as StructuredOutputSchemaFingerprint;
+
+type SchemaRecord = Record<string, unknown>;
+
+function record(value: unknown): SchemaRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as SchemaRecord
+    : {};
+}
+
+function requiredFields(value: unknown): string[] {
+  const required = record(value).required;
+  return Array.isArray(required)
+    ? required.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+function property(value: unknown, key: string): SchemaRecord {
+  return record(record(value).properties)[key] as SchemaRecord ?? {};
+}
+
+function valueDescription(value: unknown): string {
+  const shape = record(value);
+  if (Object.prototype.hasOwnProperty.call(shape, "const")) {
+    return JSON.stringify(shape.const);
+  }
+  if (typeof shape.type === "string") return shape.type;
+  if (typeof shape.$ref === "string") return shape.$ref;
+  return "value";
+}
+
+function rootForms(): string[] {
+  const branches = record(THOUGHT_OUTPUT_SCHEMA).oneOf;
+  if (!Array.isArray(branches)) return [];
+  return branches.map((branch) => {
+    const shape = record(branch);
+    if (shape.$ref === "#/$defs/settlement") {
+      return `flat settlement draft required=${requiredFields(record(record(THOUGHT_OUTPUT_SCHEMA).$defs).settlement).join(",")}`;
+    }
+    const kind = valueDescription(property(shape, "kind"));
+    return `${kind} required=${requiredFields(shape).join(",")}`;
+  });
+}
+
+function speechForms(settlement: SchemaRecord): string[] {
+  const forms = record(property(settlement, "speech")).oneOf;
+  if (!Array.isArray(forms)) return [];
+  return forms.map((form) => {
+    const shape = record(form);
+    return `mode=${valueDescription(property(shape, "mode"))}, required=${requiredFields(shape).join(",")}, surfaceDraft=${valueDescription(property(shape, "surfaceDraft"))}`;
+  });
+}
+
+/** Compact compatibility guidance derived from the same code-owned schema. */
+export function thoughtOutputCompatibilityInstruction(): string {
+  const defs = record(record(THOUGHT_OUTPUT_SCHEMA).$defs);
+  const settlement = record(defs.settlement);
+  const commitments = property(settlement, "commitments");
+  const operations = property(settlement, "operations");
+  const authority = property(settlement, "authority");
+  return [
+    `Code-owned Thought contract contractId=${THOUGHT_OUTPUT_CONTRACT_ID} schemaId=${THOUGHT_OUTPUT_SCHEMA_ID} schemaFingerprint=${THOUGHT_OUTPUT_SCHEMA_FINGERPRINT}.`,
+    `Return exactly one JSON object in one of these permitted kinds/forms: ${rootForms().join("; ")}.`,
+    "For envelope forms, set cycleId, generation, pass, requestId, and occupantId to the active identity supplied in the input; do not invent or change those values.",
+    `A settlement must include these required sections: ${requiredFields(settlement).join(", ")}.`,
+    `Speech shape: ${speechForms(settlement).join("; ")}.`,
+    `Commitments required fields: ${requiredFields(commitments).join(", ")}.`,
+    `Operations required fields: ${requiredFields(operations).join(", ")}.`,
+    `Authority required fields: ${requiredFields(authority).join(", ")}.`,
+    `Forbidden publication/delivery fields: ${THOUGHT_FORBIDDEN_OUTPUT_FIELDS.join(", ")}.`,
+    "This contract describes output shape only; Ashley code remains authoritative for semantics, authority, licensing, and publication.",
+  ].join(" ");
+}
+
 export function thoughtOutputStructuredRequest(): StructuredOutputRequest {
   return {
     contractId: THOUGHT_OUTPUT_CONTRACT_ID,
     schemaId: THOUGHT_OUTPUT_SCHEMA_ID,
+    schemaFingerprint: THOUGHT_OUTPUT_SCHEMA_FINGERPRINT,
     schema: THOUGHT_OUTPUT_SCHEMA,
   };
 }

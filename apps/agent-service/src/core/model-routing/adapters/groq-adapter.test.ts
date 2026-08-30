@@ -3,6 +3,7 @@ import { env } from "../../../env.js";
 import { AppError } from "../../../errors.js";
 import { createGroqAdapter, mapGroqError } from "./groq-adapter.js";
 import type { ChatMessage } from "../types.js";
+import type { StructuredOutputSchemaFingerprint } from "../../model-fabric/types.js";
 
 const originalKey = env.groqApiKey;
 
@@ -179,6 +180,7 @@ describe("groq-adapter fixtures", () => {
         kind: "json_object_compatibility",
         contractId: "ashley.thought.step.v1",
         schemaId: "ashley.thought.step.v1.schema",
+        schemaFingerprint: `sha256:${"a".repeat(64)}` as StructuredOutputSchemaFingerprint,
         bindingId: "compat_thought_groq_gpt_oss_20b_json_object_v1",
       },
     });

@@ -60,6 +60,9 @@ export type SpecialistSessionId = string & {
 export type InferencePolicyFingerprint = `sha256:${string}` & {
   readonly __brand: "InferencePolicyFingerprint";
 };
+export type StructuredOutputSchemaFingerprint = `sha256:${string}` & {
+  readonly __brand: "StructuredOutputSchemaFingerprint";
+};
 
 export type ModelInputCapabilities = {
   text: true;
@@ -79,6 +82,7 @@ export type ModelOutputCapabilities = {
 export type StructuredOutputRequest = Readonly<{
   contractId: string;
   schemaId: string;
+  schemaFingerprint: StructuredOutputSchemaFingerprint;
   schema: Readonly<Record<string, unknown>>;
 }>;
 
@@ -101,12 +105,14 @@ export type TrustedStructuredOutputControl = Readonly<
       kind: "json_object_compatibility";
       contractId: string;
       schemaId: string;
+      schemaFingerprint: StructuredOutputSchemaFingerprint;
       bindingId: string;
     }
   | {
       kind: "native_json_schema";
       contractId: string;
       schemaId: string;
+      schemaFingerprint: StructuredOutputSchemaFingerprint;
       bindingId: string;
       wireFormat: "nim_guided_json" | "nim_response_format_json_schema";
       schema: Readonly<Record<string, unknown>>;
@@ -375,6 +381,7 @@ export type ModelResolvedDispatchFacts = {
   effectiveReasoning: string | null;
   translatedWireControl: string | null;
   inferencePolicyFingerprint: InferencePolicyFingerprint | null;
+  structuredOutputSchemaFingerprint: StructuredOutputSchemaFingerprint | null;
 };
 
 export type ModelAttemptReceiptBase = {

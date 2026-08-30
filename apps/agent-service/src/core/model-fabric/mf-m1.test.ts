@@ -20,6 +20,7 @@ import {
   type ModelFabricDispatchMetadata,
   type ModelProviderResponseReceipt,
 } from "./index.js";
+import { thoughtOutputStructuredRequest } from "../cognitive-v021/thought/output-contract.js";
 
 const savedKeys = {
   mistral: env.mistralApiKey,
@@ -92,6 +93,29 @@ describe("MF-M1 pure contract seam", () => {
 
     expect(baseline).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(changed).not.toBe(baseline);
+  });
+
+  it("binds structured schema content to the inference-policy fingerprint", () => {
+    const request = thoughtOutputStructuredRequest() as unknown as Record<string, unknown>;
+    expect(request.schemaFingerprint).toMatch(/^sha256:[0-9a-f]{64}$/);
+    const base = {
+      provider: "nim",
+      configuredModelId: "openai/gpt-oss-20b",
+      reasoningEffort: "low",
+      maxTokens: 4096,
+      responseFormat: "json_object",
+      structuredOutputContractId: "ashley.thought.step.v1",
+      structuredOutputMode: "json_object_compatibility",
+      structuredOutputBindingId: "compat_thought_nim_gpt_oss_20b_json_object_v1",
+      structuredOutputSchemaFingerprint: request.schemaFingerprint,
+    } as Parameters<typeof createInferencePolicyFingerprint>[0];
+    const mutated = {
+      ...base,
+      structuredOutputSchemaFingerprint: `sha256:${"f".repeat(64)}`,
+    } as Parameters<typeof createInferencePolicyFingerprint>[0];
+    expect(createInferencePolicyFingerprint(mutated)).not.toBe(
+      createInferencePolicyFingerprint(base),
+    );
   });
 
   it("builds a frozen bounded projection with separate content and telemetry bindings", () => {

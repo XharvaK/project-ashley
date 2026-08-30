@@ -4,8 +4,11 @@ import type {
 } from "./portfolio.js";
 import type {
   StructuredOutputRequest,
+  StructuredOutputSchemaFingerprint,
   TrustedStructuredOutputControl,
 } from "./types.js";
+import { sha256 } from "./hash.js";
+import { capabilityProfileFor } from "./profiles.js";
 
 export const THOUGHT_OUTPUT_CONTRACT_ID = "ashley.thought.step.v1";
 export const THOUGHT_OUTPUT_SCHEMA_ID = "ashley.thought.step.v1.schema";
@@ -17,6 +20,7 @@ export type ResolvedDispatchContract = Readonly<{
   structuredOutputContractId: string | null;
   structuredOutputMode: "json_object_compatibility" | "native_json_schema" | null;
   structuredOutputBindingId: string | null;
+  structuredOutputSchemaFingerprint: StructuredOutputSchemaFingerprint | null;
 }>;
 
 export type DispatchContractErrorCode =
@@ -25,7 +29,8 @@ export type DispatchContractErrorCode =
   | "model_fabric_output_budget_exceeded"
   | "model_fabric_structured_output_missing"
   | "model_fabric_structured_output_mismatch"
-  | "model_fabric_structured_output_binding_invalid";
+  | "model_fabric_structured_output_binding_invalid"
+  | "model_fabric_capability_output_budget_exceeded";
 
 export class ModelFabricDispatchContractError extends Error {
   readonly code: DispatchContractErrorCode;
@@ -89,6 +94,7 @@ function structuredControlFor(input: {
           kind: "native_json_schema",
           contractId: input.request.contractId,
           schemaId: input.request.schemaId,
+          schemaFingerprint: input.request.schemaFingerprint,
           bindingId: binding.bindingId,
           wireFormat: binding.wireFormat,
           schema: input.request.schema,
@@ -107,6 +113,7 @@ function structuredControlFor(input: {
         kind: "json_object_compatibility",
         contractId: input.request.contractId,
         schemaId: input.request.schemaId,
+        schemaFingerprint: input.request.schemaFingerprint,
         bindingId: binding.bindingId,
       },
       mode: "json_object_compatibility",
@@ -120,6 +127,7 @@ function structuredControlFor(input: {
       kind: "json_object_compatibility",
       contractId: input.request.contractId,
       schemaId: input.request.schemaId,
+      schemaFingerprint: input.request.schemaFingerprint,
       bindingId,
     },
     mode: "json_object_compatibility",
@@ -147,6 +155,16 @@ export function resolveDispatchContract(input: {
   ) {
     throw new ModelFabricDispatchContractError(
       "model_fabric_output_budget_missing",
+    );
+  }
+
+  const capabilityMax = capabilityProfileFor(
+    input.provider,
+    input.configuredModelId,
+  ).limits.maxOutputTokens;
+  if (policyMax > capabilityMax) {
+    throw new ModelFabricDispatchContractError(
+      "model_fabric_capability_output_budget_exceeded",
     );
   }
 
@@ -178,7 +196,10 @@ export function resolveDispatchContract(input: {
       input.structuredOutput.schemaId !== THOUGHT_OUTPUT_SCHEMA_ID ||
       !input.structuredOutput.schema ||
       typeof input.structuredOutput.schema !== "object" ||
-      Array.isArray(input.structuredOutput.schema)
+      Array.isArray(input.structuredOutput.schema) ||
+      !/^sha256:[0-9a-f]{64}$/.test(input.structuredOutput.schemaFingerprint) ||
+      input.structuredOutput.schemaFingerprint !==
+        (`sha256:${sha256(input.structuredOutput.schema)}` as StructuredOutputSchemaFingerprint)
     ) {
       throw new ModelFabricDispatchContractError(
         "model_fabric_structured_output_mismatch",
@@ -198,6 +219,7 @@ export function resolveDispatchContract(input: {
       structuredOutputContractId: input.structuredOutput.contractId,
       structuredOutputMode: structured.mode,
       structuredOutputBindingId: structured.bindingId,
+      structuredOutputSchemaFingerprint: input.structuredOutput.schemaFingerprint,
     };
   }
 
@@ -208,5 +230,6 @@ export function resolveDispatchContract(input: {
     structuredOutputContractId: null,
     structuredOutputMode: null,
     structuredOutputBindingId: null,
+    structuredOutputSchemaFingerprint: null,
   };
 }

@@ -12,6 +12,8 @@ import {
   resolveCurrentPolicy,
   routeRecordsFromCurrentPortfolio,
 } from "./portfolio.js";
+import { resolveDispatchContract } from "./dispatch-contract.js";
+import { capabilityProfileFor } from "./profiles.js";
 
 const originalNimKey = env.nimApiKey;
 
@@ -178,7 +180,8 @@ describe("MF-M2 CURRENT portfolio", () => {
     });
     const database = openNuclearDb(new DatabaseSync(":memory:"));
     const structuredOutput = thoughtOutputStructuredRequest();
-    await completeChat([{ role: "user", content: "think" }], {
+    const schemaFingerprint = (structuredOutput as unknown as { schemaFingerprint?: string }).schemaFingerprint;
+    const result = await completeChat([{ role: "user", content: "think" }], {
       attentionDb: database,
       purpose: "thought",
       lane: "interactive",
@@ -195,8 +198,13 @@ describe("MF-M2 CURRENT portfolio", () => {
         kind: "json_object_compatibility",
         contractId: "ashley.thought.step.v1",
         schemaId: "ashley.thought.step.v1.schema",
+        schemaFingerprint,
       }),
     }));
+    expect(schemaFingerprint).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(result.modelFabric?.receipt.attempts[0]).toMatchObject({
+      structuredOutputSchemaFingerprint: schemaFingerprint,
+    });
     expect(database.prepare(
       "SELECT estimated_output_tokens AS estimatedOutputTokens FROM attention_requests ORDER BY id DESC LIMIT 1",
     ).get()).toMatchObject({ estimatedOutputTokens: 4096 });
@@ -241,6 +249,33 @@ describe("MF-M2 CURRENT portfolio", () => {
     expect(dispatch).not.toHaveBeenCalled();
     expect(database.prepare("SELECT COUNT(*) AS count FROM attention_requests").get()).toMatchObject({ count: 0 });
     database.close();
+  });
+
+  it("reconciles Thought policy with provider capability ceilings without widening unrelated routes", () => {
+    expect(capabilityProfileFor("nim", "openai/gpt-oss-20b").limits.maxOutputTokens).toBeGreaterThanOrEqual(4096);
+    expect(capabilityProfileFor("groq", "openai/gpt-oss-20b").limits.maxOutputTokens).toBeGreaterThanOrEqual(4096);
+    expect(capabilityProfileFor("mistral", "mistral-medium-latest").limits.maxOutputTokens).toBe(2048);
+
+    const interactive = resolveCurrentPolicy({
+      logicalRole: "thought",
+      purpose: "thought",
+      lane: "interactive",
+    });
+    expect(resolveDispatchContract({
+      policy: interactive,
+      provider: "nim",
+      configuredModelId: "openai/gpt-oss-20b",
+    }).maxTokens).toBe(4096);
+
+    const policyAboveProfile = {
+      ...interactive,
+      policyRow: { ...interactive.policyRow, maxOutputTokens: 4096 },
+    };
+    expect(() => resolveDispatchContract({
+      policy: policyAboveProfile,
+      provider: "mistral",
+      configuredModelId: "mistral-medium-latest",
+    })).toThrow("model_fabric_capability_output_budget_exceeded");
   });
 
   it("pins Mistral SDK retries off", () => {

@@ -34,7 +34,10 @@ import { registerActiveThought } from "../cycle/active.js";
 import { adaptPerception } from "../perception/adapter.js";
 import { buildThoughtInput } from "./input.js";
 import { parseThoughtStepOutput } from "./parse.js";
-import { thoughtOutputStructuredRequest } from "./output-contract.js";
+import {
+  thoughtOutputCompatibilityInstruction,
+  thoughtOutputStructuredRequest,
+} from "./output-contract.js";
 import { validateThoughtSettlementDraft } from "../settlement/validate.js";
 import { getPublishedSettlementIdentity, publishSemanticTransaction } from "../settlement/publish.js";
 import { admitOwnerSuppliedClaim } from "../memory/admission.js";
@@ -102,7 +105,7 @@ function thoughtMessages(
       content: [
         "You are Ashley's Thought layer.",
         "Return exactly one JSON ThoughtStepOutput or a flat ThoughtSettlementDraft.",
-        "Match the code-owned ThoughtStepOutput contract exactly.",
+        thoughtOutputCompatibilityInstruction(),
         "Code validates identity, authority, speech licensing, and publication.",
         "Do not return finalLicensedText, settlementId, delivery, outbox, reservation, or workspace state.",
         ...(feedback ? [feedback] : []),

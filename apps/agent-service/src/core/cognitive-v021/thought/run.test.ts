@@ -180,6 +180,13 @@ describe("v0.2.1 Thought run", () => {
     expect(deadlines).toEqual([11_000, 11_000]);
     expect(structuredContractIds).toEqual(["ashley.thought.step.v1", "ashley.thought.step.v1"]);
     expect(userInputs[1]).toBe(userInputs[0]);
+    expect(systemMessages[0]).toContain("schemaId=ashley.thought.step.v1.schema");
+    expect(systemMessages[0]).toContain("permitted kinds");
+    expect(systemMessages[0]).toContain("mustSay");
+    expect(systemMessages[0]).toContain("commitments");
+    expect(systemMessages[0]).toContain("operations");
+    expect(systemMessages[0]).toContain("authority");
+    expect(systemMessages[0]).toContain("finalLicensedText");
     expect(systemMessages[1]).toContain("invalid_json");
     expect(systemMessages[1]).toContain("structural validation");
     sidecar.close();

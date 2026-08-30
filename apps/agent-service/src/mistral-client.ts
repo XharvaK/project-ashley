@@ -545,6 +545,8 @@ export async function completeChat(
       structuredOutputMode: dispatchContract.structuredOutputMode ?? undefined,
       structuredOutputBindingId:
         dispatchContract.structuredOutputBindingId ?? undefined,
+      structuredOutputSchemaFingerprint:
+        dispatchContract.structuredOutputSchemaFingerprint ?? undefined,
       toolCount: options.tools?.length ?? 0,
       toolNames: options.tools?.map((tool) => tool.function.name) ?? [],
     });
@@ -616,6 +618,8 @@ export async function completeChat(
         effectiveReasoning,
         translatedWireControl,
         inferencePolicyFingerprint,
+        structuredOutputSchemaFingerprint:
+          dispatchContract.structuredOutputSchemaFingerprint,
       },
       projection,
       backend: resolvedRoute.provider === "mistral"

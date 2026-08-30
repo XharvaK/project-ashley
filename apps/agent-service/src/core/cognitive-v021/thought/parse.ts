@@ -11,6 +11,7 @@ import {
   validateThoughtSettlementDraft,
   type SettlementValidationActiveIdentity,
 } from "../settlement/validate.js";
+import { THOUGHT_FORBIDDEN_OUTPUT_FIELDS } from "./output-contract.js";
 
 export type ThoughtParseActiveIdentity = SettlementValidationActiveIdentity & {
   pass: number;
@@ -31,19 +32,7 @@ function numberValue(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
-const FORBIDDEN_KEYS = new Set([
-  "finalLicensedText",
-  "settlementId",
-  "outboxId",
-  "nuclearReservationId",
-  "deliveryState",
-  "sendStatus",
-  "discordMessageIds",
-  "deliveryIntent",
-  "projectionKey",
-  "suppressed",
-  "origin",
-]);
+const FORBIDDEN_KEYS = new Set<string>(THOUGHT_FORBIDDEN_OUTPUT_FIELDS);
 
 function containsForbiddenKey(value: unknown): string | null {
   if (Array.isArray(value)) {
