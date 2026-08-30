@@ -135,14 +135,22 @@ function helloInput(): { sidecar: DatabaseSync; input: ThoughtInput } {
   return { sidecar, input };
 }
 
+const savedOfflineEnv = process.env.ASHLEY_PHASE0_OFFLINE;
+
 afterEach(() => {
   nimState.dispatch.mockReset();
   resetAdapterCache();
   env.nimApiKey = savedNimKey;
+  if (savedOfflineEnv === undefined) {
+    delete process.env.ASHLEY_PHASE0_OFFLINE;
+  } else {
+    process.env.ASHLEY_PHASE0_OFFLINE = savedOfflineEnv;
+  }
 });
 
 describe("v0.2.1 structural Thought retry admission", () => {
   it("keeps the primary at 4096 and admits a corrective retry at 2048 under real rolling TPM accounting", async () => {
+    delete process.env.ASHLEY_PHASE0_OFFLINE;
     env.nimApiKey = "test-nim-key";
     resetAdapterCache();
     const { sidecar, input } = helloInput();

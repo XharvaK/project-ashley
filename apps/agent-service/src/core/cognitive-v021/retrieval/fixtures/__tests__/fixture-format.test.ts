@@ -2,17 +2,10 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
+import { fileURLToPath } from "node:url";
+
 describe("Incident C Synthetic Fixture Format", () => {
-  const fixturesDir = join(
-    process.cwd(),
-    "apps",
-    "agent-service",
-    "src",
-    "core",
-    "cognitive-v021",
-    "retrieval",
-    "fixtures"
-  );
+  const fixturesDir = fileURLToPath(new URL("..", import.meta.url));
 
   it("loads synthetic items with required schema", () => {
     const synthFile = join(fixturesDir, "incident-c-synthetic.json");
