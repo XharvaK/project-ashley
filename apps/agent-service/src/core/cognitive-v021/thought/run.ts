@@ -64,6 +64,13 @@ export type ThoughtCompleteInvoker = (
   options: ThoughtCompleteOptions,
 ) => ReturnType<typeof completeChat>;
 
+/**
+ * Caller-owned structural retry narrowing. The Model Fabric policy remains
+ * authoritative at 4096 for the primary Thought request; this bound only
+ * keeps a corrective retry admissible under the shared rolling TPM contract.
+ */
+export const STRUCTURAL_RETRY_MAX_OUTPUT_TOKENS = 2_048;
+
 /** The single adapter boundary for Thought dispatch. attentionDb is mandatory. */
 export async function invokeThoughtComplete(
   messages: ChatMessage[],
@@ -124,6 +131,8 @@ export async function runThoughtModel(
     signal?: AbortSignal;
     deadlineAtMs: number;
     structuralFeedback?: ThoughtParserFailureCode;
+    /** Optional caller narrowing; it may never widen the Model Fabric policy. */
+    maxTokens?: number;
   },
 ): Promise<ThoughtInvocation> {
   const pass = options.pass ?? 1;
@@ -137,6 +146,7 @@ export async function runThoughtModel(
     lane: "urgent_grounded",
     ownerId: input.occupantId,
     deadlineAtMs: options.deadlineAtMs,
+    maxTokens: options.maxTokens,
     temperature: 0.15,
     signal: options.signal,
   };
@@ -563,6 +573,9 @@ export async function runCognitiveCycle(
       signal: activeThought.signal,
       deadlineAtMs: thoughtDeadlineAtMs,
       structuralFeedback: structuralFeedback ?? undefined,
+      maxTokens: structuralFeedback
+        ? STRUCTURAL_RETRY_MAX_OUTPUT_TOKENS
+        : undefined,
     });
     const cancellationReason = activeThought.cancellationReason;
     activeThought.unregister();

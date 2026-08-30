@@ -45,6 +45,7 @@ export {
   invokeThoughtComplete,
   runThoughtModel,
   runCognitiveCycle,
+  STRUCTURAL_RETRY_MAX_OUTPUT_TOKENS,
 } from "./thought/run.js";
 export { getCapabilityReality } from "./thought/capability-reality.js";
 export * from "./thought/counters.js";

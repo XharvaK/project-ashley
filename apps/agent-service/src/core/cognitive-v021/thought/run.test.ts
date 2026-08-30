@@ -138,17 +138,20 @@ describe("v0.2.1 Thought run", () => {
     const userInputs: string[] = [];
     const systemMessages: string[] = [];
     const structuredContractIds: string[] = [];
+    const maxTokens: Array<number | undefined> = [];
     let calls = 0;
     const completeChat = vi.fn(async (
       messages: Array<{ role: string; content: string }>,
       options: {
         deadlineAtMs?: number | null;
+        maxTokens?: number;
         responseFormat?: string;
         structuredOutput?: { contractId?: string };
       },
     ) => {
       calls += 1;
       deadlines.push(options.deadlineAtMs ?? -1);
+      maxTokens.push(options.maxTokens);
       expect(options.responseFormat).toBe("json_schema");
       structuredContractIds.push(options.structuredOutput?.contractId ?? "");
       systemMessages.push(messages[0]?.content ?? "");
@@ -178,6 +181,7 @@ describe("v0.2.1 Thought run", () => {
     }));
     expect(result.published).toBe(true);
     expect(deadlines).toEqual([11_000, 11_000]);
+    expect(maxTokens).toEqual([undefined, 2_048]);
     expect(structuredContractIds).toEqual(["ashley.thought.step.v1", "ashley.thought.step.v1"]);
     expect(userInputs[1]).toBe(userInputs[0]);
     expect(systemMessages[0]).toContain("schemaId=ashley.thought.step.v1.schema");
