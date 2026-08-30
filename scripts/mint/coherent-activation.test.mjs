@@ -283,6 +283,25 @@ test("canonical activation copies policy and reloads before start", () => {
   assert.match(installed, /RestartPreventExitStatus=75 78/);
 });
 
+test("canonical activation builds local packages in dependency order", () => {
+  const fixture = createFixture();
+  const result = runUpdate(fixture);
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+
+  const buildPackages = commands(fixture)
+    .filter((line) => line.startsWith("npm run build --prefix "))
+    .map((line) => path.basename(line.slice("npm run build --prefix ".length)));
+  assert.deepEqual(buildPackages, [
+    "sandbox-policy",
+    "sandbox-m1",
+    "sandbox-tree",
+    "sandbox-broker",
+    "sandbox-v2",
+    "agent-service",
+    "discord-bot",
+  ]);
+});
+
 test("build is refused while a unit stays active", () => {
   const fixture = createFixture();
   const result = runUpdate(fixture, { ASHLEY_FAKE_STOP_STICKY: "1" });

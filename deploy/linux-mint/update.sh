@@ -125,14 +125,17 @@ assert_inactive ashley-discord.service
 assert_inactive ashley-agent.service
 
 maybe_fail build
+npm ci --prefix "${ROOT}/apps/sandbox-policy"
+npm run build --prefix "${ROOT}/apps/sandbox-policy"
+
+npm ci --prefix "${ROOT}/apps/sandbox-m1"
+npm run build --prefix "${ROOT}/apps/sandbox-m1"
+
 npm ci --prefix "${ROOT}/apps/sandbox-tree"
 npm run build --prefix "${ROOT}/apps/sandbox-tree"
 
 npm ci --prefix "${ROOT}/apps/sandbox-broker"
 npm run build --prefix "${ROOT}/apps/sandbox-broker"
-
-npm ci --prefix "${ROOT}/apps/sandbox-policy"
-npm run build --prefix "${ROOT}/apps/sandbox-policy"
 
 npm ci --prefix "${ROOT}/apps/sandbox-v2"
 npm run build --prefix "${ROOT}/apps/sandbox-v2"
