@@ -86,6 +86,11 @@ export async function serveAgent(manager: AgentManager): Promise<void> {
     observabilityDb = new DatabaseSync(defaultObservabilityDbPath());
     initObservabilitySchema(observabilityDb);
     registerDerivedStoreForSidecar(cognitiveSidecar, derivedStore);
+    try {
+      derivedStore.reconcileAtStartup(cognitiveSidecar);
+    } catch {
+      derivedStore.markInvalid();
+    }
 
     const deps: KernelDeps = {
       nowMs: () => Date.now(),

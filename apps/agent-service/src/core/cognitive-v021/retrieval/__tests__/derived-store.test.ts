@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { openTestSidecar } from "../../test-support.js";
+import { openCognitiveSidecarDb } from "../../sidecar/db.js";
 import { upsertMemoryAssertion } from "../../memory/assertions.js";
 import { DerivedStore, openDerivedStore } from "../derived-store.js";
 import { searchMemoryFts, searchConversationFts } from "../fts.js";
@@ -337,6 +342,102 @@ describe("Derived FTS Store & Index Synchronization", () => {
     } finally {
       derived.close();
       sidecar.close();
+    }
+  });
+
+  it("detects commit->crash gap on startup, rebuilds derived store, and restores zero-scan valid reads", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "ashley-crash-gap-"));
+    const sidecarPath = join(tmpDir, "sidecar.db");
+    const derivedPath = join(tmpDir, "derived.db");
+
+    try {
+      const dimensions = {
+        source: "owner_utterance" as const,
+        status: "asserted" as const,
+        time: "current" as const,
+        reliability: "owner_supplied" as const,
+      };
+
+      // 1. First process lifecycle: initialize and reconcile
+      let sidecar = openCognitiveSidecarDb(new DatabaseSync(sidecarPath), { dataPlane: { kind: "isolated" } });
+      let derived = openDerivedStore(derivedPath);
+
+      for (let i = 0; i < 5; i++) {
+        upsertMemoryAssertion(sidecar, {
+          assertionKey: `gap:key:${i}`,
+          statement: `Statement ${i} before crash`,
+          memoryKind: "owner_world_claim",
+          dimensions,
+          dataClassification: "ordinary",
+          lineageParentKey: null,
+          admittedGeneration: 1,
+          live: true,
+        });
+      }
+
+      derived.reconcile(sidecar);
+      expect(derived.getIndexState()?.status).toBe("valid");
+
+      // 2. Authoritative COMMIT succeeds, but process crashes before derived sync
+      upsertMemoryAssertion(sidecar, {
+        assertionKey: "gap:key:crash_target",
+        statement: "UniqueCrashTargetStatement committed before crash",
+        memoryKind: "owner_world_claim",
+        dimensions,
+        dataClassification: "ordinary",
+        lineageParentKey: null,
+        admittedGeneration: 1,
+        live: true,
+      });
+
+      // Intentionally DO NOT sync derived store. Close both DB handles simulating crash.
+      derived.close();
+      sidecar.close();
+
+      // 3. New process lifecycle: reopen both database files
+      sidecar = openCognitiveSidecarDb(new DatabaseSync(sidecarPath), { dataPlane: { kind: "isolated" } });
+      derived = openDerivedStore(derivedPath);
+
+      // Pre-startup check: derived store file still has status 'valid', but is out of sync with sidecar
+      const preState = derived.getIndexState();
+      expect(preState?.status).toBe("valid");
+      expect(preState?.sidecarAssertionCount).toBe(5); // Stale count before startup reconciliation
+
+      // 4. Run authoritative startup reconciliation
+      const reconciled = derived.reconcileAtStartup(sidecar);
+      expect(reconciled).toBe(true);
+
+      const postState = derived.getIndexState();
+      expect(postState?.status).toBe("valid");
+      expect(postState?.sidecarAssertionCount).toBe(6); // Accurately reflects 6 sidecar rows
+
+      // 5. Prove new source row is now lexically retrievable
+      const search = searchMemoryFts(derived, sidecar, "UniqueCrashTargetStatement");
+      expect(search.state).toBe("ready");
+      expect(search.rows.length).toBe(1);
+      expect(search.rows[0].assertionKey).toBe("gap:key:crash_target");
+
+      // 6. Prove zero full source scans on subsequent normal queries
+      let fullSourceScans = 0;
+      const originalPrepare = sidecar.prepare.bind(sidecar);
+      sidecar.prepare = (sql: string) => {
+        if (sql.includes("SELECT assertion_key, content_hash FROM sidecar_memory_assertions") ||
+            sql.includes("SELECT row_id, content_hash, version FROM conversation_evidence_log")) {
+          fullSourceScans += 1;
+        }
+        return originalPrepare(sql);
+      };
+
+      for (let i = 0; i < 5; i++) {
+        const query = searchMemoryFts(derived, sidecar, "UniqueCrashTargetStatement");
+        expect(query.state).toBe("ready");
+      }
+      expect(fullSourceScans).toBe(0);
+
+      derived.close();
+      sidecar.close();
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
     }
   });
 });

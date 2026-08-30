@@ -212,6 +212,15 @@ export class DerivedStore {
     }
   }
 
+  /**
+   * Explicit startup and crash-gap recovery reconciliation.
+   * Compares authoritative sidecar source fingerprints against persisted derived fingerprints.
+   * Rebuilds if fingerprints differ or status is invalid.
+   */
+  reconcileAtStartup(sidecarDb: DatabaseSync): boolean {
+    return this.reconcile(sidecarDb);
+  }
+
   reconcileIfNeeded(sidecarDb: DatabaseSync): boolean {
     return this.reconcile(sidecarDb);
   }
