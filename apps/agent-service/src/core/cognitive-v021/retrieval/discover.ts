@@ -1,95 +1,175 @@
 import type { DatabaseSync } from "node:sqlite";
-import { defaultUnclassifiedConversational, type DataClassification } from "../../privacy/classification.js";
-import { listConversationEvidence } from "../evidence/conversation-log.js";
-import { listMemoryAssertions } from "../memory/assertions.js";
-import { REDACTED_MEMORY_STATEMENT } from "../memory/assertions.js";
+import type {
+  AssertionKey,
+  DataClassification,
+  EpistemicDimensions,
+  MemoryKind,
+  RetrievalHit,
+  RetrievalInfrastructureState,
+  RetrievalRequest,
+  RetrievalResult,
+} from "../types.js";
+import { getMemoryAssertion, REDACTED_MEMORY_STATEMENT } from "../memory/assertions.js";
 import { listMemorySupports } from "../memory/supports.js";
-import type { RetrievalHit, RetrievalRequest, RetrievalResult } from "../types.js";
+import { DerivedStore, openDerivedStore } from "./derived-store.js";
+import { buildFtsQueryString, tokenizeForQuery } from "./query.js";
+import { searchConversationFts, searchMemoryFts } from "./fts.js";
+import { rankCandidates } from "./rank.js";
+import { deduplicateCandidates } from "./dedup.js";
 
 export type RetrieveCandidatesInput = {
   conversationId: string;
   request: RetrievalRequest;
+  rawConversationRowIds?: Set<string>;
 };
 
-function unique(values: string[]): string[] { return [...new Set(values.filter(Boolean))]; }
-
 export function tokenizeForDiscovery(text: string): string[] {
-  return unique(
-    text.toLowerCase()
-      .split(/[^a-z0-9à-ÿ]+/i)
-      .map((token) => token.trim())
-      .filter((token) => token.length >= 1),
-  );
+  return tokenizeForQuery(text);
 }
 
-function classification(value: unknown): DataClassification {
-  return value === "ordinary" || value === "sensitive" || value === "never_public" || value === "secret"
-    ? value
-    : defaultUnclassifiedConversational();
-}
+function fetchExactKeyHits(
+  sidecarDb: DatabaseSync,
+  assertionKeys: string[],
+): RetrievalHit[] {
+  const uniqueKeys = [...new Set(assertionKeys.filter(Boolean))];
+  const hits: RetrievalHit[] = [];
 
-function logHits(db: DatabaseSync, input: RetrieveCandidatesInput): RetrievalHit[] {
-  if (!input.request.includeLogSearch) return [];
-  const terms = unique(input.request.triggerTerms.concat(input.request.workingContextTopics));
-  if (terms.length === 0) return [];
-  return listConversationEvidence(db, input.conversationId, { limit: 1000, includeOlderVersions: false })
-    .flatMap((row) => {
-      const text = row.text ?? "";
-      const lower = text.toLowerCase();
-      const matched = terms.filter((term) => lower.includes(term.toLowerCase()));
-      if (matched.length === 0) return [];
-      return [{
-        kind: "lexical",
-        sourceStore: "conversation_log",
-        ref: row.rowId,
-        snippet: text.slice(0, 500),
-        score: matched.length / Math.max(1, terms.length),
-        assertionKey: null,
-        memoryKind: null,
-        dimensions: null,
-        dataClassification: row.dataClassification,
-        live: null,
-        supportRefs: [row.lineageId],
-      } satisfies RetrievalHit];
-    });
-}
+  for (const key of uniqueKeys) {
+    const assertion = getMemoryAssertion(sidecarDb, key);
+    if (!assertion) continue;
+    if (assertion.dataClassification === "secret") continue;
+    if (assertion.statement === REDACTED_MEMORY_STATEMENT) continue;
 
-function memoryHits(db: DatabaseSync, input: RetrieveCandidatesInput): RetrievalHit[] {
-  const keys = unique(input.request.assertionKeys);
-  const terms = unique(input.request.triggerTerms.concat(input.request.workingContextTopics));
-  if (keys.length === 0 && terms.length === 0) return [];
-  const requestedKeys = new Set(keys);
-  return listMemoryAssertions(db, { modelContext: true }).flatMap((assertion) => {
-    if (assertion.statement === REDACTED_MEMORY_STATEMENT) return [];
-    const lower = assertion.statement.toLowerCase();
-    const matchedTerms = terms.filter((term) => lower.includes(term.toLowerCase()));
-    const keyMatch = requestedKeys.has(assertion.assertionKey);
-    if (!keyMatch && matchedTerms.length === 0) return [];
-    const live = assertion.live;
-    const supportRefs = listMemorySupports(db, assertion.assertionKey)
-      .map((support) => support.sourceRef ?? support.supportId);
-    return [{
-      kind: keyMatch ? "key" : "lexical",
-      sourceStore: live ? "live_memory" : "quarantined_memory",
+    const supportRefs = listMemorySupports(sidecarDb, assertion.assertionKey).map(
+      (support) => support.sourceRef ?? support.supportId,
+    );
+
+    hits.push({
+      kind: "key",
+      sourceStore: assertion.live ? "live_memory" : "quarantined_memory",
       ref: assertion.assertionKey,
       snippet: assertion.statement.slice(0, 500),
-      score: (keyMatch ? 1 : 0) + matchedTerms.length / Math.max(1, terms.length),
+      score: -100, // Top deterministic tier
       assertionKey: assertion.assertionKey,
       memoryKind: assertion.memoryKind,
       dimensions: assertion.dimensions,
       dataClassification: assertion.dataClassification,
-      live,
+      live: assertion.live,
       supportRefs,
-    } satisfies RetrievalHit];
-  });
+    });
+  }
+
+  return hits;
 }
 
-/** Retrieval keys are hints. Lexical trigger terms remain an independent fallback. */
+/**
+ * Deterministic tiered indexed retrieval.
+ * Composes exact-key fetch, FTS5 BM25 memory and conversation search,
+ * strict tier ranking, and safe narrow deduplication.
+ */
 export function retrieveCandidates(
-  db: DatabaseSync,
+  sidecarDb: DatabaseSync,
   input: RetrieveCandidatesInput,
+  derivedStore?: DerivedStore,
 ): RetrievalResult {
   const request: RetrievalRequest = { ...input.request, includeLogSearch: true };
-  const hits = [...logHits(db, { ...input, request }), ...memoryHits(db, { ...input, request })];
-  return { request, hits, miss: hits.length === 0 };
+  const store = derivedStore ?? openDerivedStore(":memory:");
+  let infrastructureState: RetrievalInfrastructureState = "ready";
+
+  // Tier 1: Exact-key hits from sidecar memory assertions
+  const exactKeyHits = fetchExactKeyHits(sidecarDb, request.assertionKeys ?? []);
+
+  // FTS query formation
+  const rawTriggerQuery = buildFtsQueryString(request.triggerTerms ?? []);
+  const concernQuery = buildFtsQueryString(request.workingContextTopics ?? []);
+
+  // Tier 2: Raw owner trigger BM25 over memory_fts
+  const rawTriggerResult = searchMemoryFts(store, sidecarDb, rawTriggerQuery);
+  if (rawTriggerResult.state === "unavailable") {
+    infrastructureState = "unavailable";
+  }
+  const rawTriggerHits: RetrievalHit[] = rawTriggerResult.rows.map((row) => ({
+    kind: "lexical",
+    sourceStore: row.sourceStore,
+    ref: row.assertionKey,
+    snippet: row.statement.slice(0, 500),
+    score: row.rank,
+    assertionKey: row.assertionKey,
+    memoryKind: row.memoryKind,
+    dimensions: row.dimensions,
+    dataClassification: row.dataClassification,
+    live: row.live,
+    supportRefs: listMemorySupports(sidecarDb, row.assertionKey).map(
+      (s) => s.sourceRef ?? s.supportId,
+    ),
+  }));
+
+  // Tier 3: Derived Working-Context BM25 over memory_fts
+  const concernResult = searchMemoryFts(store, sidecarDb, concernQuery);
+  if (concernResult.state === "unavailable") {
+    infrastructureState = "unavailable";
+  }
+  const concernHits: RetrievalHit[] = concernResult.rows.map((row) => ({
+    kind: "lexical",
+    sourceStore: row.sourceStore,
+    ref: row.assertionKey,
+    snippet: row.statement.slice(0, 500),
+    score: row.rank,
+    assertionKey: row.assertionKey,
+    memoryKind: row.memoryKind,
+    dimensions: row.dimensions,
+    dataClassification: row.dataClassification,
+    live: row.live,
+    supportRefs: listMemorySupports(sidecarDb, row.assertionKey).map(
+      (s) => s.sourceRef ?? s.supportId,
+    ),
+  }));
+
+  // Tier 4: Historical conversation-log BM25 over conversation_fts
+  let logHits: RetrievalHit[] = [];
+  if (request.includeLogSearch) {
+    const combinedLogQuery = rawTriggerQuery || concernQuery;
+    const logResult = searchConversationFts(store, sidecarDb, input.conversationId, combinedLogQuery, {
+      excludeRowIds: input.rawConversationRowIds,
+    });
+    if (logResult.state === "unavailable") {
+      infrastructureState = "unavailable";
+    }
+    logHits = logResult.rows.map((row) => ({
+      kind: "log",
+      sourceStore: "conversation_log",
+      ref: row.rowId,
+      snippet: row.text.slice(0, 500),
+      score: row.rank,
+      assertionKey: null,
+      memoryKind: null,
+      dimensions: null,
+      dataClassification: row.dataClassification,
+      live: null,
+      supportRefs: [row.lineageId ?? row.rowId],
+    }));
+  }
+
+  // Tiered deterministic ranking with defense-in-depth fuse
+  const ranked = rankCandidates({
+    exactKeyHits,
+    rawTriggerFtsHits: rawTriggerHits,
+    concernFtsHits: concernHits,
+    logHits,
+  });
+
+  // Narrow safe deduplication
+  const deduped = deduplicateCandidates(ranked, {
+    rawConversationRowIds: input.rawConversationRowIds,
+  });
+
+  const hits = deduped.survivors;
+  const isMiss = infrastructureState === "ready" && hits.length === 0;
+
+  return {
+    request,
+    hits,
+    state: infrastructureState,
+    miss: isMiss,
+  };
 }
