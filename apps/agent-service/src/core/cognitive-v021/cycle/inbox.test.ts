@@ -1,12 +1,28 @@
 import { describe, expect, it } from "vitest";
 import { admitCycle, getCycle, appendInboxEvent } from "./inbox.js";
-import { openTestSidecar } from "../test-support.js";
+import { admitTestCycle, openTestSidecar } from "../test-support.js";
 
 describe("v0.2.1 cycle and inbox admission", () => {
+  it("refuses direct cycle admission without a durable wake", () => {
+    const db = openTestSidecar();
+    try {
+      expect(() => admitCycle(db, {
+        cycleId: "unbound-cycle",
+        conversationId: "thread-unbound",
+        generation: 1,
+        triggerKind: "owner_message",
+        triggerRef: "unbound",
+        nowMs: 1,
+      })).toThrow("wake_required");
+    } finally {
+      db.close();
+    }
+  });
+
   it("allocates a durable generation and inbox events", () => {
     const db = openTestSidecar();
     try {
-      const cycle = admitCycle(db, {
+      const cycle = admitTestCycle(db, {
         conversationId: "thread-1",
         triggerKind: "owner_message",
         triggerRef: "evidence-1",

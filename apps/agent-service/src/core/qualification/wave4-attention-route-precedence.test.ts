@@ -22,6 +22,19 @@ vi.mock("../attention/index.js", () => ({
       modelAlias: input.routeAlias ?? "unknown",
       resolvedModelId: "x",
       requestId: 1,
+      acceptedDispatchIdentity: {
+        requestId: 1,
+        dispatchSequence: 1,
+        routeAlias: input.routeAlias ?? null,
+        modelAlias: input.routeAlias ?? "unknown",
+        resolvedModelId: "x",
+        modelEpoch: 0,
+        modelIdentity: "test-model-identity",
+        contractId: "phase5-test-contract",
+        buildIdentity: "phase5-test-build",
+        ownerId: null,
+        cognitiveJobId: null,
+      },
     };
   }),
 }));

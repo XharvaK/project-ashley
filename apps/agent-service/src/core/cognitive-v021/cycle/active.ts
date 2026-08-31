@@ -1,3 +1,6 @@
+import type { DatabaseSync } from "node:sqlite";
+import { recordWakeCancellation } from "../wake/ledger.js";
+
 export type ActiveThoughtCancellationReason = "compose" | "preempt";
 
 type ActiveThoughtEntry = {
@@ -56,4 +59,20 @@ export function cancelActiveThought(input: {
   entry.reason = input.action;
   if (!entry.controller.signal.aborted) entry.controller.abort(input.action);
   return true;
+}
+
+/** Persist the cancellation fence before issuing the best-effort process-local abort. */
+export function cancelActiveThoughtDurable(
+  db: DatabaseSync,
+  input: {
+    conversationId: string;
+    cycleId: string;
+    generation: number;
+    wakeId: string;
+    action: ActiveThoughtCancellationReason;
+    nowMs?: number;
+  },
+): boolean {
+  recordWakeCancellation(db, { wakeId: input.wakeId, nowMs: input.nowMs ?? Date.now() });
+  return cancelActiveThought(input);
 }

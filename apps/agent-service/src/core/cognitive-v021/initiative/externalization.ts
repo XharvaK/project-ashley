@@ -1,4 +1,10 @@
 import type { DeliveryIntent, ExternalizationGateReason } from "../types.js";
+import type { PrivateBudgetProjection } from "../private-budget/ledger.js";
+
+type AuthoritativePrivateBudget = Pick<
+  PrivateBudgetProjection,
+  "source" | "policyId" | "policyTimeMs" | "clockState" | "consumingCount" | "remaining"
+>;
 
 export type ExternalizationGateInput = {
   deliveryIntent: DeliveryIntent;
@@ -9,7 +15,7 @@ export type ExternalizationGateInput = {
   chatInProgress: boolean;
   availabilityOk: boolean;
   idleFloorRemainingSec: number;
-  privateBudgetRemaining: number;
+  privateBudget: AuthoritativePrivateBudget;
 };
 
 export type ExternalizationGateResult =
@@ -24,7 +30,9 @@ export function evaluateExternalizationGate(input: ExternalizationGateInput): Ex
   if (input.chatInProgress) return { ok: false, reason: "chat_in_progress" };
   if (!input.availabilityOk) return { ok: false, reason: "unavailable" };
   if (input.idleFloorRemainingSec > 0) return { ok: false, reason: "idle_floor" };
-  if (input.privateBudgetRemaining <= 0) return { ok: false, reason: "private_compute_budget" };
+  if (input.privateBudget.source !== "private_budget_ledger" || input.privateBudget.clockState !== "stable" || input.privateBudget.remaining <= 0) {
+    return { ok: false, reason: "private_compute_budget" };
+  }
   if (input.sentToday >= input.maxPerDay) return { ok: false, reason: "daily_cap" };
   return { ok: true, reason: "ok" };
 }

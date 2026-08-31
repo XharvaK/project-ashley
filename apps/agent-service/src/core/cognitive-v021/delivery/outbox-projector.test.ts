@@ -1,8 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { openNuclearDb, nuclearSchemaVersion, NUCLEAR_SUPPORTED_VERSION } from "../../db.js";
-import { openTestSidecar } from "../test-support.js";
-import { admitCycle } from "../cycle/inbox.js";
+import { admitTestCycle, openTestSidecar } from "../test-support.js";
 import { insertOutboxPending } from "../speech/outbox.js";
 import { emitInfrastructureNotice } from "../speech/infrastructure-notice.js";
 import { OutboxDeliveryProjector } from "./outbox-projector.js";
@@ -14,7 +13,7 @@ describe("v0.2.1 cross-database outbox projection", () => {
     try {
       expect(nuclearSchemaVersion(nuclear)).toBe(NUCLEAR_SUPPORTED_VERSION);
       expect(nuclear.prepare("PRAGMA table_info(delivery_reservations)").all()).toEqual(expect.arrayContaining([expect.objectContaining({ name: "cognitive_v021_projection_key" })]));
-      admitCycle(sidecar, { cycleId: "cycle-project", conversationId: "thread-project", triggerKind: "owner_message", occupantId: "doc", nowMs: 1 });
+      admitTestCycle(sidecar, { cycleId: "cycle-project", conversationId: "thread-project", triggerKind: "owner_message", occupantId: "doc", nowMs: 1 });
       const speech = insertOutboxPending(sidecar, { settlementId: "settlement-project", cycleId: "cycle-project", generation: 1, conversationId: "thread-project", licensedText: "hello" });
       const notice = emitInfrastructureNotice(sidecar, { ownerId: "doc", channel: "discord", threadId: "thread-project", conversationId: "thread-project", cycleId: "cycle-project", generation: 1, reason: "unavailable" });
       const projector = new OutboxDeliveryProjector(sidecar, nuclear, { nowMs: () => 1_000 });
@@ -36,7 +35,7 @@ describe("v0.2.1 cross-database outbox projection", () => {
     const sidecar = openTestSidecar();
     const nuclear = openNuclearDb(new DatabaseSync(":memory:"));
     try {
-      admitCycle(sidecar, { cycleId: "cycle-commit", conversationId: "thread-commit", triggerKind: "owner_message", occupantId: "doc", nowMs: 1 });
+      admitTestCycle(sidecar, { cycleId: "cycle-commit", conversationId: "thread-commit", triggerKind: "owner_message", occupantId: "doc", nowMs: 1 });
       const speech = insertOutboxPending(sidecar, { settlementId: "settlement-commit", cycleId: "cycle-commit", generation: 1, conversationId: "thread-commit", licensedText: "already sent" });
       nuclear.prepare(`INSERT INTO delivery_reservations (owner_id, channel, thread_id, trigger, delivery_lane, state, draft_text, created_at, cognitive_v021_projection_key) VALUES ('doc', 'discord', 'thread-commit', 'reactive', 'reactive', 'committed', 'already sent', '1970-01-01T00:00:01.000Z', ?)`).run("speech:" + speech.outboxId);
       const projector = new OutboxDeliveryProjector(sidecar, nuclear, { nowMs: () => 1_000 });

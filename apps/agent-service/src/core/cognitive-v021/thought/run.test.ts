@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { admitCycle, appendInboxEvent } from "../cycle/inbox.js";
+import { appendInboxEvent } from "../cycle/inbox.js";
 import { appendOwnerUtterance } from "../evidence/conversation-log.js";
-import { openTestSidecar } from "../test-support.js";
+import { admitTestCycle, openTestSidecar } from "../test-support.js";
 import type { CapabilityReality, IdentitySlice, KernelDeps, Observation, ThoughtInput } from "../types.js";
-import { makeThoughtDraft } from "../test-support.js";
+import { makeSemanticSettlement } from "../test-support.js";
 import { runCognitiveCycle } from "./run.js";
 
 const constitution: IdentitySlice = { constitutional: ["truth first"], stableSelf: ["curious"] };
@@ -41,7 +41,7 @@ describe("v0.2.1 Thought run", () => {
   it("runs perception before Thought, includes observations, and passes attentionDb", async () => {
     const sidecar = openTestSidecar();
     const attentionDb = openTestSidecar();
-    const cycle = admitCycle(sidecar, {
+    const cycle = admitTestCycle(sidecar, {
       cycleId: "cycle-1", conversationId: "thread-1", triggerKind: "owner_message",
       triggerRef: "owner-1", occupantId: "doc", authorityEpoch: 1, nowMs: 1,
     });
@@ -49,6 +49,7 @@ describe("v0.2.1 Thought run", () => {
       conversationId: "thread-1", text: "hello", discordMessageIds: ["d1"], nowMs: 2,
     });
     const event = appendInboxEvent(sidecar, {
+      wakeId: cycle.wakeId,
       conversationId: "thread-1", kind: "owner_message",
       payload: { cycleId: cycle.cycleId, evidenceRowId: evidence.rowId, ownerMessage: "hello" }, createdAtMs: 2,
     });
@@ -64,13 +65,7 @@ describe("v0.2.1 Thought run", () => {
       return {
         text: JSON.stringify({
           ...({
-            schemaVersion: 1, cycleId: "cycle-1", generation: 1, authorityEpoch: 1,
-            occupantId: "doc", architectureEpoch: "v0.2.1", triggerRef: "owner-1",
-            interpretation: { discourseActs: ["inform"], referentBindings: [], corrections: [], unresolvedAmbiguities: [], topics: ["hello"] },
-            commitments: { epistemic: [{ dimensions: { source: "owner_utterance", status: "asserted", time: "current", reliability: "owner_supplied" }, statement: "hello" }], conversational: ["answer"], stance: { warmth: "medium", humorAllowed: false, disagreement: false, uncertaintyDisplay: true } },
-            speech: { mode: "draft", mustSay: ["hello"], mustNot: [], surfaceDraft: "hello", acceptableRealizations: ["hello"], presentationDirectives: [] },
-            workingContextDelta: [], concernDeltas: [], occupancyDelta: [], futureTriggers: [], subscriptions: [], durableNominations: [],
-            operations: { observationsConsumed: ["observation-1"], effectsCompleted: [], intentsStillInFlight: [] }, authority: { objectionsApplied: [], revisionCount: 0 },
+            ...makeSemanticSettlement({ interpretation: { discourseActs: ["inform"], referentBindings: [], corrections: [], unresolvedAmbiguities: [], topics: ["hello"] }, evidenceUse: { observationRefsUsed: ["observation-1"], retrievalRefsUsed: [], sourceRefsUsed: [], openIntentRefs: [] } }),
           }),
         }),
         model: "fake", modelAlias: "fake", resolvedModelId: null,
@@ -90,13 +85,26 @@ describe("v0.2.1 Thought run", () => {
     attentionDb.close();
   });
 
-  it("fails closed on malformed Thought output and does not publish speech", async () => {
+  it("fails closed on a predecessor Thought output envelope and does not publish speech", async () => {
     const sidecar = openTestSidecar();
     const attentionDb = openTestSidecar();
-    const cycle = admitCycle(sidecar, { conversationId: "thread-1", triggerKind: "owner_message", triggerRef: "owner-1", nowMs: 1 });
+    const cycle = admitTestCycle(sidecar, { conversationId: "thread-1", triggerKind: "owner_message", triggerRef: "owner-1", nowMs: 1 });
     const evidence = appendOwnerUtterance(sidecar, { conversationId: "thread-1", text: "hello", discordMessageIds: ["d1"], nowMs: 2 });
-    const event = appendInboxEvent(sidecar, { conversationId: "thread-1", kind: "owner_message", payload: { cycleId: cycle.cycleId, evidenceRowId: evidence.rowId, ownerMessage: "hello" }, createdAtMs: 2 });
-    const completeChat = vi.fn(async () => ({ text: "not json", model: "fake", modelAlias: "fake", resolvedModelId: null }));
+    const event = appendInboxEvent(sidecar, { wakeId: cycle.wakeId, conversationId: "thread-1", kind: "owner_message", payload: { cycleId: cycle.cycleId, evidenceRowId: evidence.rowId, ownerMessage: "hello" }, createdAtMs: 2 });
+    const completeChat = vi.fn(async () => ({
+      text: JSON.stringify({
+        kind: "settlement",
+        cycleId: cycle.cycleId,
+        generation: 1,
+        pass: 1,
+        requestId: "model-authored-request",
+        occupantId: "model-authored-occupant",
+        settlement: makeSemanticSettlement(),
+      }),
+      model: "fake",
+      modelAlias: "fake",
+      resolvedModelId: null,
+    }));
     const result = await runCognitiveCycle(sidecar, attentionDb, event, deps({ completeChat }));
     expect(result).toMatchObject({ published: false, acceptedSettlements: 0, infrastructureNotice: "[system] Thought did not complete. Please send the message again." });
     expect(sidecar.prepare("SELECT COUNT(*) AS count FROM settlements").get()).toMatchObject({ count: 0 });
@@ -108,7 +116,7 @@ describe("v0.2.1 Thought run", () => {
   it("reuses one absolute deadline and gives a bounded corrective structural retry", async () => {
     const sidecar = openTestSidecar();
     const attentionDb = openTestSidecar();
-    const cycle = admitCycle(sidecar, {
+    const cycle = admitTestCycle(sidecar, {
       cycleId: "cycle-deadline",
       conversationId: "thread-deadline",
       triggerKind: "owner_message",
@@ -124,6 +132,7 @@ describe("v0.2.1 Thought run", () => {
       nowMs: 2,
     });
     const event = appendInboxEvent(sidecar, {
+      wakeId: cycle.wakeId,
       conversationId: "thread-deadline",
       kind: "owner_message",
       payload: {
@@ -162,13 +171,7 @@ describe("v0.2.1 Thought run", () => {
         return { text: "not json", model: "fake", modelAlias: "thought", resolvedModelId: null };
       }
       return {
-        text: JSON.stringify(makeThoughtDraft({
-          cycleId: input.cycleId,
-          generation: input.generation,
-          authorityEpoch: input.authorityEpoch,
-          occupantId: input.occupantId,
-          triggerRef: input.trigger.ref,
-        })),
+        text: JSON.stringify(makeSemanticSettlement()),
         model: "fake",
         modelAlias: "thought",
         resolvedModelId: null,
@@ -180,16 +183,15 @@ describe("v0.2.1 Thought run", () => {
       nowMs: () => now,
     }));
     expect(result.published).toBe(true);
-    expect(deadlines).toEqual([11_000, 11_000]);
+    expect(deadlines).toEqual([31_000, 31_000]);
     expect(maxTokens).toEqual([undefined, 2_048]);
-    expect(structuredContractIds).toEqual(["ashley.thought.step.v1", "ashley.thought.step.v1"]);
+    expect(structuredContractIds).toEqual(["ashley.thought.semantic.v1", "ashley.thought.semantic.v1"]);
     expect(userInputs[1]).toBe(userInputs[0]);
-    expect(systemMessages[0]).toContain("schemaId=ashley.thought.step.v1.schema");
+    expect(systemMessages[0]).toContain("schemaId=ashley.thought.semantic.v1.schema");
     expect(systemMessages[0]).toContain("permitted kinds");
     expect(systemMessages[0]).toContain("mustSay");
     expect(systemMessages[0]).toContain("commitments");
-    expect(systemMessages[0]).toContain("operations");
-    expect(systemMessages[0]).toContain("authority");
+    expect(systemMessages[0]).toContain("evidenceUse");
     expect(systemMessages[0]).toContain("finalLicensedText");
     expect(systemMessages[1]).toContain("invalid_json");
     expect(systemMessages[1]).toContain("structural validation");

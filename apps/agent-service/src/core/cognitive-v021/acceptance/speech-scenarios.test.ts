@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { admitCycle, appendInboxEvent } from "../cycle/inbox.js";
+import { appendInboxEvent } from "../cycle/inbox.js";
 import { appendOwnerUtterance } from "../evidence/conversation-log.js";
-import { openTestSidecar } from "../test-support.js";
+import { admitTestCycle, makeSemanticSettlement, openTestSidecar } from "../test-support.js";
 import { runCognitiveCycle } from "../thought/run.js";
 import type { CapabilityReality, IdentitySlice, KernelDeps, Observation } from "../types.js";
 
@@ -41,7 +41,7 @@ function baseDeps(overrides: Partial<KernelDeps> = {}): KernelDeps {
 }
 
 function eventFixture(sidecar: ReturnType<typeof openTestSidecar>) {
-  const cycle = admitCycle(sidecar, {
+  const cycle = admitTestCycle(sidecar, {
     cycleId: "cycle-speech",
     conversationId: "thread-speech",
     triggerKind: "owner_message",
@@ -73,18 +73,14 @@ function eventFixture(sidecar: ReturnType<typeof openTestSidecar>) {
 }
 
 function validThought(surfaceDraft: string) {
-  return {
-    schemaVersion: 1, cycleId: "cycle-speech", generation: 1, authorityEpoch: 1,
-    occupantId: "doc", architectureEpoch: "v0.2.1", triggerRef: "owner-1",
+  return makeSemanticSettlement({
     interpretation: { discourseActs: ["inform"], referentBindings: [], corrections: [], unresolvedAmbiguities: [], topics: ["hello"] },
     commitments: {
       epistemic: [{ dimensions: { source: "owner_utterance", status: "asserted", time: "current", reliability: "owner_supplied" }, statement: "hello" }],
       conversational: ["answer"], stance: { warmth: "medium", humorAllowed: false, disagreement: false, uncertaintyDisplay: true },
     },
-    speech: { mode: "draft", mustSay: ["hello"], mustNot: [], surfaceDraft, acceptableRealizations: [surfaceDraft], presentationDirectives: [] },
-    workingContextDelta: [], concernDeltas: [], occupancyDelta: [], futureTriggers: [], subscriptions: [], durableNominations: [],
-    operations: { observationsConsumed: [], effectsCompleted: [], intentsStillInFlight: [] }, authority: { objectionsApplied: [], revisionCount: 0 },
-  };
+    speech: { mode: "draft", mustSay: ["hello"], mustNotSay: [], surfaceDraft, acceptableRealizations: [surfaceDraft], presentationDirectives: [] },
+  });
 }
 
 describe("v0.2.1 speech and failure scenarios", () => {

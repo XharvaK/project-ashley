@@ -4,13 +4,20 @@ import { env } from "./env.js";
 import { completeChat, mapMistralError } from "./mistral-client.js";
 import { openNuclearDb } from "./core/db.js";
 import { withOfflineAppGateDisabled } from "./core/qualification/offline-test-helpers.js";
+import { openCognitiveSidecarDb } from "./core/cognitive-v021/sidecar/db.js";
+import { admitWake } from "./core/cognitive-v021/wake/ledger.js";
+import { reconcilePolicyClock } from "./core/cognitive-v021/private-budget/policy-time-ledger.js";
+import { reservePrivateThought } from "./core/cognitive-v021/private-budget/ledger.js";
+import * as nimAdapterModule from "./core/model-routing/adapters/nim-adapter.js";
 
 const originalApiKey = env.mistralApiKey;
 const originalGroqKey = env.groqApiKey;
+const originalNimKey = env.nimApiKey;
 
 afterEach(() => {
   env.mistralApiKey = originalApiKey;
   env.groqApiKey = originalGroqKey;
+  env.nimApiKey = originalNimKey;
   vi.restoreAllMocks();
 });
 
@@ -87,5 +94,55 @@ it("creates no attention reservation when API key is missing", async () => {
       db.prepare(`SELECT COUNT(*) AS c FROM attention_requests`).get(),
     ).toEqual({ c: 0 });
     db.close();
+  });
+
+  it("binds and commits the durable private reservation at the exact W0 attempt boundary", async () => {
+    env.nimApiKey = "test-nim-key";
+    const attentionDb = openNuclearDb(new DatabaseSync(":memory:"));
+    const sidecar = openCognitiveSidecarDb(new DatabaseSync(":memory:"), { dataPlane: { kind: "isolated" } });
+    const nowMs = 4_000_000;
+    reconcilePolicyClock(sidecar, { policyId: "private-v1", wallClockNowMs: nowMs, authorizationRef: "owner:w7-test-epoch" });
+    const wake = admitWake(sidecar, {
+      occurrenceId: "occurrence:w7-client",
+      triggerRef: "trigger:w7-client",
+      sourceKind: "idle",
+      conversationId: "conversation:w7-client",
+      cycleId: "cycle:w7-client",
+      capturedAuthorityRevision: 1,
+      nowMs,
+    });
+    const reserved = reservePrivateThought(sidecar, {
+      admissionId: "admission:w7-client",
+      wakeId: wake.wake.wakeId,
+      conversationId: "conversation:w7-client",
+      policyId: "private-v1",
+      wallClockNowMs: nowMs,
+    });
+    if (reserved.kind !== "reserved") throw new Error("w7_test_reservation_missing");
+    const dispatch = vi.fn().mockResolvedValue({
+      text: "{}",
+      providerModel: "openai/gpt-oss-20b",
+      usage: { promptTokens: 2, completionTokens: 1 },
+      finishReason: "stop",
+    });
+    vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({ provider: "nim", dispatch });
+
+    try {
+      const result = await completeChat([{ role: "user", content: "private thought" }], {
+        attentionDb,
+        purpose: "thought",
+        route: "thought",
+        logicalRole: "thought",
+        reasoningEffort: "low",
+        deadlineAtMs: Date.now() + 6_000,
+        privateBudgetBinding: { sidecar, reservationId: reserved.reservation.reservationId },
+      });
+      const row = sidecar.prepare("SELECT state, dispatch_truth, invocation_id, attempt_id FROM private_budget_reservations WHERE reservation_id = ?").get(reserved.reservation.reservationId) as Record<string, unknown>;
+      expect(row).toMatchObject({ state: "committed", dispatch_truth: "responded", invocation_id: result.capturedAttemptIdentity?.modelFabricInvocationId, attempt_id: result.capturedAttemptIdentity?.modelFabricAttemptId });
+      expect(dispatch).toHaveBeenCalledTimes(1);
+    } finally {
+      attentionDb.close();
+      sidecar.close();
+    }
   });
 });

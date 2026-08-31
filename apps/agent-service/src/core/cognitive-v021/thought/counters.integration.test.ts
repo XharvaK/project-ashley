@@ -3,10 +3,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { admitCycle, appendInboxEvent } from "../cycle/inbox.js";
+import { appendInboxEvent } from "../cycle/inbox.js";
 import { appendOwnerUtterance } from "../evidence/conversation-log.js";
 import { openCognitiveSidecarDb } from "../sidecar/db.js";
-import { makeThoughtDraft, openTestSidecar } from "../test-support.js";
+import { admitTestCycle, makeSemanticSettlement, openTestSidecar } from "../test-support.js";
 import type { CapabilityReality, KernelDeps, Observation, ThoughtInput } from "../types.js";
 import { checkAuthority as deterministicCheckAuthority } from "../authority/check.js";
 import { getThoughtAttemptCounters } from "./counters.js";
@@ -39,7 +39,7 @@ function packs() {
 }
 
 function setup(sidecar = openTestSidecar()) {
-  const cycle = admitCycle(sidecar, {
+  const cycle = admitTestCycle(sidecar, {
     conversationId: "counter-thread",
     triggerKind: "owner_message",
     triggerRef: "owner-1",
@@ -68,23 +68,34 @@ function inputFrom(messages: unknown[]): ThoughtInput {
 }
 
 function validCompletion(input: ThoughtInput, text = "hello", overrides: Record<string, unknown> = {}) {
-  return {
-    text: JSON.stringify(makeThoughtDraft({
-      cycleId: input.cycleId,
-      generation: input.generation,
-      authorityEpoch: input.authorityEpoch,
-      occupantId: input.occupantId,
-      triggerRef: input.trigger.ref,
-      speech: {
-        mode: "draft",
+  const legacySpeech = overrides.speech as Record<string, unknown> | undefined;
+  const speech = legacySpeech
+    ? {
+        mode: legacySpeech.mode === "none" ? "none" as const : "draft" as const,
+        mustSay: Array.isArray(legacySpeech.mustSay) ? legacySpeech.mustSay as string[] : [text],
+        mustNotSay: Array.isArray(legacySpeech.mustNotSay)
+          ? legacySpeech.mustNotSay as string[]
+          : Array.isArray(legacySpeech.mustNot)
+            ? legacySpeech.mustNot as string[]
+            : [],
+        ...(legacySpeech.mode === "none" ? {} : { surfaceDraft: typeof legacySpeech.surfaceDraft === "string" ? legacySpeech.surfaceDraft : text }),
+        acceptableRealizations: Array.isArray(legacySpeech.acceptableRealizations)
+          ? legacySpeech.acceptableRealizations as string[]
+          : [text],
+        presentationDirectives: Array.isArray(legacySpeech.presentationDirectives)
+          ? legacySpeech.presentationDirectives as string[]
+          : [],
+      }
+    : {
+        mode: "draft" as const,
         mustSay: [text],
-        mustNot: [],
+        mustNotSay: [],
         surfaceDraft: text,
         acceptableRealizations: [text],
         presentationDirectives: [],
-      },
-      ...overrides,
-    })),
+      };
+  return {
+    text: JSON.stringify(makeSemanticSettlement({ speech })),
     model: "fake",
     modelAlias: "thought",
     resolvedModelId: null,
@@ -203,18 +214,12 @@ describe("v0.2.1 durable Thought accounting", () => {
       if (objections.length === 1) {
         return {
           text: JSON.stringify({
-            kind: "observation_request",
-            cycleId: input.cycleId,
-            generation: input.generation,
-            occupantId: input.occupantId,
-            observationRequest: {
-              requestId: "proposal-observation",
-              cycleId: input.cycleId,
-              generation: input.generation,
-              kind: "project.read_file",
-              request: { projectId: "project-ashley", path: "README.md" },
-              replaySafe: true,
-            },
+            kind: "observation_intent",
+            operationKind: "project.read_file",
+            request: { projectId: "project-ashley", path: "README.md" },
+            purpose: "inspect the project file",
+            evidenceNeed: "current file contents",
+            existingRefs: [],
           }),
           model: "fake",
           modelAlias: "thought",

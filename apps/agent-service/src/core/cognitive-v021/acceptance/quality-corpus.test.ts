@@ -1,8 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { openTestSidecar } from "../test-support.js";
+import { admitTestCycle, openTestSidecar } from "../test-support.js";
 import { openDerivedStore } from "../retrieval/derived-store.js";
 import { upsertMemoryAssertion } from "../memory/assertions.js";
-import { admitCycle } from "../cycle/inbox.js";
 import { appendOwnerUtterance } from "../evidence/conversation-log.js";
 import { buildThoughtInput } from "../thought/input.js";
 import { retrieveCandidates } from "../retrieval/discover.js";
@@ -88,7 +87,7 @@ describe("Quality Corpus 18-Scenario Acceptance Qualification (§17.4, §18)", (
         derived.reconcileIfNeeded(sidecar);
 
         // 4. Setup conversation and cycle
-        const cycle = admitCycle(sidecar, {
+        const cycle = admitTestCycle(sidecar, {
           conversationId: "conv-1",
           triggerKind: "owner_message",
           triggerRef: "ev-trigger",

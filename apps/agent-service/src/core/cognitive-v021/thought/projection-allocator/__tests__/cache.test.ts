@@ -4,9 +4,9 @@ import {
   hashAuthorityObjections,
   ProjectionCache,
 } from "../cache.js";
-import { admitCycle, appendInboxEvent } from "../../../cycle/inbox.js";
+import { appendInboxEvent } from "../../../cycle/inbox.js";
 import { appendOwnerUtterance } from "../../../evidence/conversation-log.js";
-import { openTestSidecar, makeThoughtDraft } from "../../../test-support.js";
+import { admitTestCycle, makeSemanticSettlement, openTestSidecar } from "../../../test-support.js";
 import { runCognitiveCycle } from "../../run.js";
 import * as discoverModule from "../../../retrieval/discover.js";
 import * as allocatorModule from "../allocator.js";
@@ -83,7 +83,7 @@ describe("Projection Cache & Semantic Pass Keys", () => {
     retrieveSpy.mockClear();
     allocateSpy.mockClear();
 
-    const cycle = admitCycle(sidecar, {
+    const cycle = admitTestCycle(sidecar, {
       cycleId: "cycle-cache-test",
       conversationId: "thread-cache-test",
       triggerKind: "owner_message",
@@ -124,13 +124,7 @@ describe("Projection Cache & Semantic Pass Keys", () => {
       }
       // Attempt 2: Valid settlement draft
       return {
-        text: JSON.stringify(makeThoughtDraft({
-          cycleId: cycle.cycleId,
-          generation: cycle.generation,
-          authorityEpoch: cycle.authorityEpoch,
-          occupantId: cycle.occupantId,
-          triggerRef: cycle.triggerRef,
-        })),
+        text: JSON.stringify(makeSemanticSettlement()),
         model: "fake",
         modelAlias: "thought",
         resolvedModelId: null,

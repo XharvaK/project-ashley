@@ -1,0 +1,11 @@
+{
+  "schema": "ashley.f011.dataset.v1",
+  "datasetId": "incident-c-synthetic",
+  "sourceSchemaIdentity": "sidecar_memory_assertions.v1",
+  "generatorIdentity": "scripts/snapshot-incident-c.mjs.v2",
+  "itemCount": 92,
+  "queryCount": 1,
+  "labelPolicy": "frozen adjudicated relevant or irrelevant labels; no post-result tuning",
+  "labelsDigest": "sha256:96078374e735120fdf3054975806221406ede51f274bc040b40863966cfce7f6",
+  "corpusDigest": "sha256:0aeb44e6f5a3556a2518594e0ae909c0693c97e6e69b0eb6be9ffc1b93503499"
+}

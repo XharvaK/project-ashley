@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { readCognitiveSidecarMeta, updateCognitiveAuthorityEpoch } from "../sidecar/db.js";
 import type { AuthorityPacks, CapabilityReality, EffectReceipt } from "../types.js";
+import { captureAuthorityCurrentness } from "./barrier.js";
 
 type Row = Record<string, unknown>;
 const noCapability: CapabilityReality = {
@@ -14,9 +15,24 @@ function json(value: unknown): unknown {
   try { return JSON.parse(typeof value === "string" ? value : "null"); } catch { return {}; }
 }
 
-export function loadEffectReceipts(db: DatabaseSync): Record<string, EffectReceipt> {
+export function loadEffectReceipts(
+  db: DatabaseSync,
+  options: { limit?: number; effectIds?: readonly string[] } = {},
+): Record<string, EffectReceipt> {
   const result: Record<string, EffectReceipt> = {};
-  for (const row of db.prepare("SELECT * FROM effect_receipts ORDER BY at_ms ASC").all()) {
+  const effectIds = [...new Set(options.effectIds ?? [])].filter(Boolean);
+  const rows = effectIds.length > 0
+    ? db.prepare(
+      `SELECT * FROM effect_receipts
+        WHERE effect_id IN (${effectIds.map(() => "?").join(",")})
+        ORDER BY at_ms DESC`,
+    ).all(...effectIds)
+    : options.limit == null
+      ? db.prepare("SELECT * FROM effect_receipts ORDER BY at_ms ASC").all()
+      : db.prepare("SELECT * FROM effect_receipts ORDER BY at_ms DESC, effect_id DESC LIMIT ?").all(
+        Math.max(1, Math.min(512, Math.floor(options.limit))),
+      );
+  for (const row of rows) {
     if (typeof row !== "object" || row === null) continue;
     const value = row as Row;
     const claims = json(value.claims_json);
@@ -38,16 +54,31 @@ export function loadAuthorityPacks(
   db: DatabaseSync,
   options: Partial<Pick<AuthorityPacks, "capability" | "operational" | "relational">> & {
     observedObservationIds?: string[];
+    authorityDb?: DatabaseSync;
+    receiptLimit?: number;
+    effectIds?: readonly string[];
   } = {},
 ): AuthorityPacks {
   const meta = readCognitiveSidecarMeta(db);
+  const binding = options.authorityDb ? captureAuthorityCurrentness(options.authorityDb) : undefined;
+  const receiptLimit = options.receiptLimit == null
+    ? undefined
+    : Math.max(1, Math.min(512, Math.floor(options.receiptLimit)));
+  const receiptsByEffectId = loadEffectReceipts(db, {
+    limit: receiptLimit,
+    effectIds: options.effectIds,
+  });
   return {
     epistemic: { allowInferredWorldClaims: false },
     currentness: {
       requireObservationForLatest: true,
       observedObservationIds: options.observedObservationIds ?? [],
+      binding,
+      complete: binding != null,
+      receiptLimit,
+      receiptsTruncated: receiptLimit != null && Object.keys(receiptsByEffectId).length >= receiptLimit,
     },
-    receipt: { receiptsByEffectId: loadEffectReceipts(db) },
+    receipt: { receiptsByEffectId, bounded: receiptLimit != null },
     capability: options.capability ?? noCapability,
     operational: options.operational ?? { sandboxAvailable: false },
     relational: options.relational ?? { withdrawalActive: false, neverMention: [] },

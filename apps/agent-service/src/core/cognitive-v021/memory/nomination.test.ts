@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { appendOwnerUtterance } from "../evidence/conversation-log.js";
-import { admitCycle } from "../cycle/inbox.js";
-import { openTestSidecar, makeThoughtDraft } from "../test-support.js";
+import { admitTestCycle, openTestSidecar, makeThoughtDraft } from "../test-support.js";
 import { publishSemanticTransaction } from "../settlement/publish.js";
 import {
   createRememberDirective,
@@ -35,7 +34,7 @@ describe("v0.2.1 durable nominations", () => {
   it("stores a nomination at publication but does not create live Memory", () => {
     const db = openTestSidecar();
     try {
-      const cycle = admitCycle(db, {
+      const cycle = admitTestCycle(db, {
         cycleId: "cycle-1",
         conversationId: "thread-1",
         generation: 1,

@@ -1,0 +1,439 @@
+{
+  "schema": "ashley.f011.qualification.v1",
+  "capabilityFingerprint": "sha256:16de55bc39463045e34d0952ed4b165e0a9b9c57858cf85ecc0dcededcdc0cf5",
+  "candidate": {
+    "buildIdentity": "573393c3fdb2392a45137d4625635658eb4b5d88",
+    "w1ThoughtCapabilityFingerprint": "sha256:16de55bc39463045e34d0952ed4b165e0a9b9c57858cf85ecc0dcededcdc0cf5",
+    "retrievalContract": "ashley.f011.derived-retrieval.v1",
+    "harnessIdentity": "scripts/cognitive-v021/f011-evidence.mjs.v1"
+  },
+  "dataset": {
+    "schema": "ashley.f011.dataset.v1",
+    "datasetId": "incident-c-synthetic",
+    "sourceSchemaIdentity": "sidecar_memory_assertions.v1",
+    "generatorIdentity": "scripts/snapshot-incident-c.mjs.v2",
+    "itemCount": 92,
+    "queryCount": 1,
+    "labelPolicy": "frozen adjudicated relevant or irrelevant labels; no post-result tuning",
+    "labelsDigest": "sha256:96078374e735120fdf3054975806221406ede51f274bc040b40863966cfce7f6",
+    "corpusDigest": "sha256:0aeb44e6f5a3556a2518594e0ae909c0693c97e6e69b0eb6be9ffc1b93503499"
+  },
+  "querySet": [
+    {
+      "queryId": "incident-c-primary",
+      "terms": [
+        "sleep",
+        "soon",
+        "tomorrow"
+      ],
+      "k": 16,
+      "relevanceLabel": "relevant"
+    }
+  ],
+  "stageA": {
+    "thresholds": {
+      "precisionAtK": 0.5,
+      "recallAtK": 0.5,
+      "mrr": 0.5,
+      "requiredQueryCoverage": 1,
+      "falseCurrentEvidenceCount": 0
+    },
+    "observed": {
+      "precisionAtK": 0,
+      "recallAtK": null,
+      "mrr": null,
+      "requiredQueryCoverage": 0,
+      "falseCurrentEvidenceCount": 0
+    },
+    "pass": false,
+    "perQuery": [
+      {
+        "queryId": "incident-c-primary",
+        "terms": [
+          "sleep",
+          "soon",
+          "tomorrow"
+        ],
+        "k": 16,
+        "rankedKeys": [
+          "synthetic:000:legacy_assertion_07f1896c-72c4-436e-976a-213760adfb8b",
+          "synthetic:020:legacy_assertion_31c9be6f-4155-4ae1-ab76-30d46c9069f7",
+          "synthetic:088:legacy_assertion_648d45bb-9df4-458a-bc7a-a14d16bf0069",
+          "synthetic:019:legacy_assertion_4520ba35-0e11-4a91-b00d-8ef57f46b018",
+          "synthetic:009:legacy_assertion_3e181537-62ba-4424-b034-1817b6b095bb",
+          "synthetic:006:legacy_assertion_cc8b5f99-4b86-4468-ba88-7c1403dc6bb7",
+          "synthetic:087:legacy_assertion_bf233c80-8513-493f-94b3-3862c98ee99f"
+        ],
+        "relevantKeys": [],
+        "relevantRetrieved": 0,
+        "precisionAtK": 0,
+        "recallAtK": null,
+        "mrr": 0,
+        "requiredQuerySatisfied": false,
+        "falseCurrentEvidenceCount": 0,
+        "unknownRankedKeys": []
+      }
+    ],
+    "failureCodes": [
+      "no_relevant_labels",
+      "query_relevance_set_empty",
+      "threshold_precision_at_k",
+      "threshold_recall_at_k",
+      "threshold_mrr",
+      "threshold_required_query_coverage"
+    ],
+    "runtime": {
+      "rankings": [
+        {
+          "queryId": "incident-c-primary",
+          "state": "ready",
+          "miss": false,
+          "rankedKeys": [
+            "synthetic:000:legacy_assertion_07f1896c-72c4-436e-976a-213760adfb8b",
+            "synthetic:020:legacy_assertion_31c9be6f-4155-4ae1-ab76-30d46c9069f7",
+            "synthetic:088:legacy_assertion_648d45bb-9df4-458a-bc7a-a14d16bf0069",
+            "synthetic:019:legacy_assertion_4520ba35-0e11-4a91-b00d-8ef57f46b018",
+            "synthetic:009:legacy_assertion_3e181537-62ba-4424-b034-1817b6b095bb",
+            "synthetic:006:legacy_assertion_cc8b5f99-4b86-4468-ba88-7c1403dc6bb7",
+            "synthetic:087:legacy_assertion_bf233c80-8513-493f-94b3-3862c98ee99f"
+          ]
+        }
+      ],
+      "retrievalFailures": []
+    }
+  },
+  "fuseGate": {
+    "needed": true,
+    "package": null,
+    "version": null,
+    "license": null,
+    "decision": "OWNER_DECISION_REQUIRED"
+  },
+  "stageH": {
+    "schema": "ashley.f011.stage-h.v1",
+    "runId": "f011-stage-h-9be262da-5db6-42e4-a718-fbb6e445c2b5",
+    "candidateSha": "573393c3fdb2392a45137d4625635658eb4b5d88",
+    "environment": "linux",
+    "thresholds": {
+      "maxRebuildMs": 2000,
+      "maxQueryP95Ms": 250,
+      "maxProjectionMs": 100,
+      "maxRssBytes": 1610612736,
+      "maxValidReadSourceScans": 0
+    },
+    "checks": [
+      {
+        "id": "candidate_build_identity",
+        "pass": true,
+        "observed": "573393c3fdb2392a45137d4625635658eb4b5d88",
+        "threshold": "573393c3fdb2392a45137d4625635658eb4b5d88",
+        "evidence": {}
+      },
+      {
+        "id": "linux_environment",
+        "pass": true,
+        "observed": "linux",
+        "threshold": "linux",
+        "evidence": {}
+      },
+      {
+        "id": "fts5",
+        "pass": true,
+        "observed": {
+          "sqliteVersion": "3.51.3",
+          "error": null
+        },
+        "threshold": "available",
+        "evidence": {}
+      },
+      {
+        "id": "startup_crash_gap_reconciliation",
+        "pass": true,
+        "observed": {
+          "startupReconciled": true,
+          "crashSearchState": "ready",
+          "crashSearchRows": 1,
+          "startupBefore": {
+            "generation": 1,
+            "sidecarAssertionCount": 5,
+            "sidecarConversationCount": 0,
+            "memorySourceHash": "80e2615bfd19869458b0b63e40de6c62cddede2052a2f8935b11c5ee3b571ddb",
+            "conversationSourceHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "status": "valid",
+            "updatedAtMs": 1788183644660
+          },
+          "startupAfter": {
+            "generation": 2,
+            "sidecarAssertionCount": 6,
+            "sidecarConversationCount": 0,
+            "memorySourceHash": "df202f3d70d2f49e373b5259afa7f383c98dd7b2d5918651ec84466cf0598349",
+            "conversationSourceHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "status": "valid",
+            "updatedAtMs": 1788183644676
+          }
+        },
+        "threshold": "new authoritative row retrievable after restart",
+        "evidence": {}
+      },
+      {
+        "id": "derived_rebuild_bound",
+        "pass": true,
+        "observed": {
+          "rebuilt": true,
+          "rebuildMs": 22.741457000000082
+        },
+        "threshold": "<=2000ms",
+        "evidence": {}
+      },
+      {
+        "id": "valid_read_zero_source_scans",
+        "pass": true,
+        "observed": {
+          "validReadSourceScans": 0
+        },
+        "threshold": "0",
+        "evidence": {}
+      },
+      {
+        "id": "query_latency_p95",
+        "pass": true,
+        "observed": {
+          "querySamples": [
+            4.605518000000302,
+            3.9283379999997123,
+            4.136677000000418,
+            4.56523500000003,
+            3.899930999999924,
+            3.8750819999995656,
+            3.8182690000003277,
+            3.8177310000000944,
+            3.8559690000001865,
+            4.632944999999381,
+            3.8652609999999186,
+            3.8493560000006255,
+            3.8065969999997833,
+            3.8123100000002523,
+            3.8604000000004817,
+            4.462746999999581,
+            3.895962999999938,
+            3.8460669999994934,
+            3.8166739999996935,
+            3.8431510000000344
+          ],
+          "queryP95Ms": 4.605518000000302
+        },
+        "threshold": "<=250ms",
+        "evidence": {}
+      },
+      {
+        "id": "bounded_projection",
+        "pass": true,
+        "observed": {
+          "projectionMs": 9.6072979999999,
+          "totalDemandTokens": 8716,
+          "hardTpm": 16000,
+          "requiredOverflow": false
+        },
+        "threshold": "<=100ms and within hard TPM",
+        "evidence": {}
+      },
+      {
+        "id": "process_memory_bound",
+        "pass": true,
+        "observed": {
+          "rssBytes": 88895488,
+          "maxRssBytes": 88895488
+        },
+        "threshold": "<=1610612736 bytes",
+        "evidence": {}
+      }
+    ],
+    "raw": {
+      "actualHead": "573393c3fdb2392a45137d4625635658eb4b5d88",
+      "candidateSha": "573393c3fdb2392a45137d4625635658eb4b5d88",
+      "datasetManifestPath": "/tmp/ashley-phase5-w3-20260831/f011-dataset-manifest.json",
+      "datasetManifestDigest": "sha256:a5fd7aa02cf6b98e64df9f18a447845bd0e278593cc41ca406c71ec4f4c7c5a5",
+      "datasetPath": "/home/xarvak/project-ashley/apps/agent-service/src/core/cognitive-v021/retrieval/fixtures/incident-c-synthetic.json",
+      "environment": {
+        "platform": "linux",
+        "arch": "x64",
+        "release": "6.17.0-29-generic",
+        "node": "v22.23.2",
+        "cpu": "AMD A6-9220 RADEON R4, 5 COMPUTE CORES 2C+3G",
+        "totalMemoryBytes": 3976802304,
+        "uname": "Linux QXY 6.17.0-29-generic #29~24.04.1-Ubuntu SMP PREEMPT_DYNAMIC Mon May 11 10:30:58 UTC 2 x86_64 x86_64 x86_64 GNU/Linux",
+        "osRelease": "NAME=\"Linux Mint\"\nVERSION=\"22.3 (Zena)\"\nID=linuxmint\nID_LIKE=\"ubuntu debian\"\nPRETTY_NAME=\"Linux Mint 22.3\"\nVERSION_ID=\"22.3\"\nHOME_URL=\"https://www.linuxmint.com/\"\nSUPPORT_URL=\"https://forums.linuxmint.com/\"\nBUG_REPORT_URL=\"http://linuxmint-troubleshooting-guide.readthedocs.io/en/latest/\"\nPRIVACY_POLICY_URL=\"https://www.linuxmint.com/\"\nVERSION_CODENAME=zena\nUBUNTU_CODENAME=noble"
+      },
+      "sqliteVersion": "3.51.3",
+      "derivedIndexSchemaVersion": 1,
+      "sidecarSchema": {
+        "userVersion": 1,
+        "objects": [
+          {
+            "name": "idx_effect_receipts_effect",
+            "type": "index"
+          },
+          {
+            "name": "idx_effect_receipts_idempotency",
+            "type": "index"
+          },
+          {
+            "name": "idx_evidence_conversation_created",
+            "type": "index"
+          },
+          {
+            "name": "idx_evidence_discord_lineage",
+            "type": "index"
+          },
+          {
+            "name": "idx_in_flight_idempotency",
+            "type": "index"
+          },
+          {
+            "name": "idx_inbox_pending",
+            "type": "index"
+          },
+          {
+            "name": "idx_memory_supports_key",
+            "type": "index"
+          },
+          {
+            "name": "idx_speech_outbox_nuclear_res",
+            "type": "index"
+          },
+          {
+            "name": "admission_log",
+            "type": "table"
+          },
+          {
+            "name": "causal_ledger",
+            "type": "table"
+          },
+          {
+            "name": "cognitive_sidecar_meta",
+            "type": "table"
+          },
+          {
+            "name": "concerns",
+            "type": "table"
+          },
+          {
+            "name": "conversation_evidence_discord_ids",
+            "type": "table"
+          },
+          {
+            "name": "conversation_evidence_log",
+            "type": "table"
+          },
+          {
+            "name": "cycle_records",
+            "type": "table"
+          },
+          {
+            "name": "durable_nominations",
+            "type": "table"
+          },
+          {
+            "name": "effect_receipts",
+            "type": "table"
+          },
+          {
+            "name": "future_triggers",
+            "type": "table"
+          },
+          {
+            "name": "in_flight_effects",
+            "type": "table"
+          },
+          {
+            "name": "inbox_events",
+            "type": "table"
+          },
+          {
+            "name": "mind_occupancy",
+            "type": "table"
+          },
+          {
+            "name": "observation_subscriptions",
+            "type": "table"
+          },
+          {
+            "name": "observations",
+            "type": "table"
+          },
+          {
+            "name": "settlements",
+            "type": "table"
+          },
+          {
+            "name": "sidecar_memory_assertions",
+            "type": "table"
+          },
+          {
+            "name": "sidecar_memory_supports",
+            "type": "table"
+          },
+          {
+            "name": "speech_outbox",
+            "type": "table"
+          },
+          {
+            "name": "system_notice_outbox",
+            "type": "table"
+          },
+          {
+            "name": "thought_attempt_counters",
+            "type": "table"
+          },
+          {
+            "name": "thought_steps",
+            "type": "table"
+          },
+          {
+            "name": "working_context_items",
+            "type": "table"
+          }
+        ]
+      },
+      "datasetItemCount": 92,
+      "rebuildMs": 22.741457000000082,
+      "querySamples": [
+        4.605518000000302,
+        3.9283379999997123,
+        4.136677000000418,
+        4.56523500000003,
+        3.899930999999924,
+        3.8750819999995656,
+        3.8182690000003277,
+        3.8177310000000944,
+        3.8559690000001865,
+        4.632944999999381,
+        3.8652609999999186,
+        3.8493560000006255,
+        3.8065969999997833,
+        3.8123100000002523,
+        3.8604000000004817,
+        4.462746999999581,
+        3.895962999999938,
+        3.8460669999994934,
+        3.8166739999996935,
+        3.8431510000000344
+      ],
+      "queryP95Ms": 4.605518000000302,
+      "validReadSourceScans": 0,
+      "projectionMs": 9.6072979999999,
+      "rssBytes": 88895488,
+      "maxRssBytes": 88895488,
+      "crashGapPass": true,
+      "stageHThresholds": {
+        "maxRebuildMs": 2000,
+        "maxQueryP95Ms": 250,
+        "maxProjectionMs": 100,
+        "maxRssBytes": 1610612736,
+        "maxValidReadSourceScans": 0
+      }
+    },
+    "pass": true
+  },
+  "verdict": "FAIL"
+}

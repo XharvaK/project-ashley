@@ -41,7 +41,7 @@ const STRUCTURAL_FEEDBACK: Readonly<Record<ThoughtParserFailureCode, string>> = 
   effect_contract_failure: "Emit the required effect proposal shape.",
   forbidden_fields: "Omit publication and delivery fields.",
   schema_version_mismatch: "Use the active Thought schema version.",
-  other: "Match the ThoughtStepOutput contract exactly.",
+  other: "Match the semantic Thought contract exactly.",
 };
 
 export function thoughtMessagesForProjection(
@@ -56,7 +56,7 @@ export function thoughtMessagesForProjection(
       role: "system",
       content: [
         "You are Ashley's Thought layer.",
-        "Return exactly one JSON ThoughtStepOutput or a flat ThoughtSettlementDraft.",
+        "Return exactly one JSON semantic Thought output.",
         thoughtOutputCompatibilityInstruction(),
         "Code validates identity, authority, speech licensing, and publication.",
         "Do not return finalLicensedText, settlementId, delivery, outbox, reservation, or workspace state.",

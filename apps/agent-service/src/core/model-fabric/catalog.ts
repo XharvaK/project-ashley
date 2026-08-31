@@ -8,6 +8,34 @@ import type {
   ModelFabricPolicyRow,
 } from "./portfolio.js";
 import type { LogicalModelRole, ModelCapabilityProfile } from "./types.js";
+import type { ThoughtCapabilityIdentity } from "./capability-identity.js";
+
+export const THOUGHT_QUALIFICATION_RESULT_SCHEMA =
+  "ashley.evaluation.qualification_result.v2" as const;
+export type QualificationResultSchema =
+  | "ashley.evaluation.qualification_result.v1"
+  | typeof THOUGHT_QUALIFICATION_RESULT_SCHEMA;
+
+export type ThoughtLogicalQualificationEvidence = Readonly<{
+  contractId: string;
+  schemaFingerprint: string;
+  bindingId: string;
+}>;
+
+export type ThoughtWireQualificationEvidence = Readonly<{
+  adapterId: string;
+  wireFormat: string;
+  sanitizedBodyDigest: string;
+  emittedEnforcementMode: string;
+  providerDeclaredEnforcement: string | "unavailable";
+  bindingId?: string | null;
+}>;
+
+export type ThoughtResourceQualificationEvidence = Readonly<{
+  deadlineMs: number;
+  maxOutputTokens: number;
+  attempts: number;
+}>;
 
 export type CatalogLifecycle =
   | "discovered"
@@ -48,7 +76,7 @@ export type FabricCatalog = Readonly<{
 }>;
 
 export type QualificationResultRecord = {
-  schema: "ashley.evaluation.qualification_result.v1";
+  schema: QualificationResultSchema;
   qualificationResultId: string;
   status: "PASS" | "FAIL" | "BLOCKED" | "INCONCLUSIVE" | "NOT_RUN";
   policyRowId: string;
@@ -70,7 +98,56 @@ export type QualificationResultRecord = {
   limitations: readonly string[];
   invalidated: boolean;
   invalidatedBy: string | null;
+  /** Present only on W1 Thought qualification records; old records remain audit-readable. */
+  capability?: ThoughtCapabilityIdentity;
+  logicalEvidence?: ThoughtLogicalQualificationEvidence;
+  wireEvidence?: ThoughtWireQualificationEvidence;
+  resourceEvidence?: ThoughtResourceQualificationEvidence;
 };
+
+export type ThoughtQualificationResultRecord = Omit<
+  QualificationResultRecord,
+  "schema" | "capability" | "logicalEvidence" | "wireEvidence" | "resourceEvidence"
+> & {
+  schema: typeof THOUGHT_QUALIFICATION_RESULT_SCHEMA;
+  capability: ThoughtCapabilityIdentity;
+  logicalEvidence: ThoughtLogicalQualificationEvidence;
+  wireEvidence: ThoughtWireQualificationEvidence;
+  resourceEvidence: ThoughtResourceQualificationEvidence;
+};
+
+function nonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+/** Structural W1 gate. Full canonical validation belongs to the ledger writer/reader. */
+export function hasThoughtQualificationEvidence(
+  result: QualificationResultRecord,
+): result is ThoughtQualificationResultRecord {
+  const capability = result.capability;
+  const logical = result.logicalEvidence;
+  const wire = result.wireEvidence;
+  const resource = result.resourceEvidence;
+  return (
+    result.schema === THOUGHT_QUALIFICATION_RESULT_SCHEMA &&
+    capability !== undefined &&
+    nonEmptyString(capability.fingerprint) &&
+    logical !== undefined &&
+    nonEmptyString(logical.contractId) &&
+    nonEmptyString(logical.schemaFingerprint) &&
+    nonEmptyString(logical.bindingId) &&
+    wire !== undefined &&
+    nonEmptyString(wire.adapterId) &&
+    nonEmptyString(wire.wireFormat) &&
+    nonEmptyString(wire.sanitizedBodyDigest) &&
+    nonEmptyString(wire.emittedEnforcementMode) &&
+    nonEmptyString(wire.providerDeclaredEnforcement) &&
+    resource !== undefined &&
+    Number.isInteger(resource.deadlineMs) &&
+    Number.isInteger(resource.maxOutputTokens) &&
+    Number.isInteger(resource.attempts)
+  );
+}
 
 export type QualificationBinding = Readonly<{
   qualificationResultId: string;
@@ -286,9 +363,13 @@ export function createQualificationBinding(input: {
   occupant: ModelFabricOccupant;
   profile: ModelCapabilityProfile;
   materialInferenceFingerprint?: string;
+  expectedCapability?: ThoughtCapabilityIdentity;
 }): QualificationBinding {
   const result = input.qualificationResult;
-  if (result.schema !== "ashley.evaluation.qualification_result.v1") {
+  if (
+    result.schema !== "ashley.evaluation.qualification_result.v1" &&
+    result.schema !== THOUGHT_QUALIFICATION_RESULT_SCHEMA
+  ) {
     throw new Error("qualification_result_schema_invalid");
   }
   if (input.occupant.admissionBasis?.kind === "existing_compatibility") {
@@ -311,6 +392,14 @@ export function createQualificationBinding(input: {
   if (input.materialInferenceFingerprint &&
       result.subject.materialInferenceFingerprint !== input.materialInferenceFingerprint) {
     throw new Error("qualification_inference_fingerprint_mismatch");
+  }
+  if (input.expectedCapability) {
+    if (!hasThoughtQualificationEvidence(result)) {
+      throw new Error("qualification_capability_missing");
+    }
+    if (result.capability.fingerprint !== input.expectedCapability.fingerprint) {
+      throw new Error("qualification_capability_mismatch");
+    }
   }
   const binding = result.profileBinding;
   if (
@@ -342,17 +431,22 @@ export function qualificationResultUsable(input: {
   occupantId: string;
   materialInferenceFingerprint: string;
   identityContinuityEpoch?: string | number | null;
+  expectedCapability?: ThoughtCapabilityIdentity;
 }): boolean {
   const { result } = input;
   return (
-    result.schema === "ashley.evaluation.qualification_result.v1" &&
+    (result.schema === "ashley.evaluation.qualification_result.v1" ||
+      result.schema === THOUGHT_QUALIFICATION_RESULT_SCHEMA) &&
     result.status === "PASS" &&
     result.invalidated === false &&
     result.policyRowId === input.policyRowId &&
     result.occupantId === input.occupantId &&
     result.subject.materialInferenceFingerprint === input.materialInferenceFingerprint &&
     (input.identityContinuityEpoch === undefined ||
-      result.identityContinuityEpoch === input.identityContinuityEpoch)
+      result.identityContinuityEpoch === input.identityContinuityEpoch) &&
+    (!input.expectedCapability ||
+      (hasThoughtQualificationEvidence(result) &&
+        result.capability.fingerprint === input.expectedCapability.fingerprint))
   );
 }
 

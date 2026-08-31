@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { openTestSidecar, makeThoughtDraft } from "../../test-support.js";
-import { admitCycle } from "../../cycle/inbox.js";
+import { admitTestCycle, openTestSidecar, makeThoughtDraft } from "../../test-support.js";
 import { publishSemanticTransaction } from "../../settlement/publish.js";
 import { openDerivedStore, registerDerivedStoreForSidecar } from "../../retrieval/derived-store.js";
 import { searchMemoryFts } from "../../retrieval/fts.js";
@@ -85,7 +84,7 @@ describe("Memory Transaction Ordering & Post-Commit Synchronization", () => {
       return originalSync(db, changes);
     };
 
-    admitCycle(sidecar, {
+    admitTestCycle(sidecar, {
       cycleId: "c1",
       conversationId: "thread-1",
       generation: 1,
@@ -190,7 +189,7 @@ describe("Memory Transaction Ordering & Post-Commit Synchronization", () => {
     });
     derived.reconcile(sidecar);
 
-    admitCycle(sidecar, {
+    admitTestCycle(sidecar, {
       cycleId: "c-tick",
       conversationId: "thread-1",
       generation: 1,
@@ -242,7 +241,7 @@ describe("Memory Transaction Ordering & Post-Commit Synchronization", () => {
     registerDerivedStoreForSidecar(sidecar, derived);
     derived.reconcile(sidecar);
 
-    admitCycle(sidecar, {
+    admitTestCycle(sidecar, {
       cycleId: "c-owner",
       conversationId: "thread-1",
       generation: 1,
@@ -319,7 +318,7 @@ describe("Memory Transaction Ordering & Post-Commit Synchronization", () => {
     registerDerivedStoreForSidecar(sidecar, derived);
     derived.reconcile(sidecar);
 
-    admitCycle(sidecar, {
+    admitTestCycle(sidecar, {
       cycleId: "c-fail",
       conversationId: "thread-1",
       generation: 1,

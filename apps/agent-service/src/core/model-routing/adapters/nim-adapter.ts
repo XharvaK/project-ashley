@@ -12,6 +12,7 @@ import type {
   TrustedReasoningControl,
 } from "../types.js";
 import type { TrustedStructuredOutputControl } from "../../model-fabric/types.js";
+import { wireEvidenceFor } from "../../model-fabric/wire-evidence.js";
 
 type NimErrorResponse = {
   error?: { type?: string; message?: string; code?: string | number };
@@ -297,6 +298,11 @@ export function createNimAdapter(
         args.fabricReasoning,
         args.fabricStructuredOutput,
       );
+      const wireEvidence = wireEvidenceFor({
+        adapterId: "ashley.adapter.nim.v1",
+        body,
+        structuredOutput: args.fabricStructuredOutput,
+      });
       const res = await fetchFn(`${env.nimBaseUrl}/chat/completions`, {
         method: "POST",
         headers: {
@@ -337,6 +343,7 @@ export function createNimAdapter(
         providerModel:
           typeof json.model === "string" ? json.model : null,
         finishReason: toFinishReason(choice?.finish_reason),
+        wireEvidence,
       };
       return completion;
     },

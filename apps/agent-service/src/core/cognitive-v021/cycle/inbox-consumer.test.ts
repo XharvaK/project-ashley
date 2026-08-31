@@ -21,7 +21,7 @@ describe("durable cognitive inbox consumer", () => {
     db.close();
   });
 
-  it("replays publication work after a crash without duplicating the handler's durable result", async () => {
+  it("holds publication work for reconciliation after a crash instead of replaying it", async () => {
     const db = openTestSidecar();
     appendInboxEvent(db, { id: "event-replay", conversationId: "thread-replay", kind: "owner_message", payload: {}, createdAtMs: 1 });
     let calls = 0;
@@ -37,10 +37,10 @@ describe("durable cognitive inbox consumer", () => {
       db.prepare("INSERT OR IGNORE INTO settlements (settlement_id, cycle_id, generation, payload_json) VALUES (?, ?, ?, ?)").run("settlement-replay", "cycle-replay", 1, "{}");
     } });
     expect(first).toMatchObject({ outcome: "failed" });
-    expect(second).toMatchObject({ outcome: "consumed" });
+    expect(second).toMatchObject({ outcome: "idle" });
     expect(calls).toBe(1);
     expect(db.prepare("SELECT COUNT(*) AS count FROM settlements").get()).toMatchObject({ count: 1 });
-    expect(db.prepare("SELECT status FROM inbox_events WHERE id = 'event-replay'").get()).toMatchObject({ status: "consumed" });
+    expect(db.prepare("SELECT status, state FROM inbox_events WHERE id = 'event-replay'").get()).toMatchObject({ status: "claimed", state: "reconciling" });
     db.close();
   });
 

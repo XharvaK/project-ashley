@@ -53,9 +53,17 @@ export function extractIncidentCSnapshot(dbPath) {
 export function generateSyntheticIncidentC(snapshot) {
   const syntheticItems = [];
   const labels = {};
+  let excludedSecretCount = 0;
 
   for (let idx = 0; idx < snapshot.matched.length; idx++) {
     const item = snapshot.matched[idx];
+    // Synthetic qualification fixtures must never carry secret-classified
+    // source content. The exact snapshot remains a private, ignored artifact;
+    // the checked-in surrogate is privacy-safe by construction.
+    if (item.dataClassification === "secret") {
+      excludedSecretCount += 1;
+      continue;
+    }
     const statementLen = item.statement.length;
     const matchedTerms = item.matchedTerms;
 
@@ -91,6 +99,7 @@ export function generateSyntheticIncidentC(snapshot) {
     labels,
     fidelity: {
       matchedCount: syntheticItems.length,
+      excludedSecretCount,
       lengthPreserved: syntheticItems.every((i) => i.syntheticLength === i.originalLength),
       dfPreserved: true,
     },

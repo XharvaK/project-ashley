@@ -1,5 +1,5 @@
 /** Complete sidecar schema v1. Keep this in sync with schema-v1.sql. */
-export const COGNITIVE_SIDECAR_SCHEMA_VERSION = 1 as const;
+export const COGNITIVE_SIDECAR_SCHEMA_V1_VERSION = 1 as const;
 
 export const COGNITIVE_SIDECAR_SCHEMA_V1 = String.raw`
 CREATE TABLE IF NOT EXISTS cognitive_sidecar_meta (
@@ -298,3 +298,182 @@ CREATE TABLE IF NOT EXISTS thought_attempt_counters (
 `;
 
 export const COGNITIVE_SIDECAR_SCHEMA = COGNITIVE_SIDECAR_SCHEMA_V1;
+
+export const COGNITIVE_SIDECAR_SCHEMA_VERSION = 5 as const;
+export const COGNITIVE_SIDECAR_SCHEMA_V2 = String.raw`
+ALTER TABLE cognitive_sidecar_meta ADD COLUMN projection_barrier_revision INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE cognitive_sidecar_meta ADD COLUMN projection_vector_json TEXT NOT NULL DEFAULT '{"nuclear":0,"continuity":0,"cognitive_sidecar":0}';
+ALTER TABLE cognitive_sidecar_meta ADD COLUMN projection_state TEXT NOT NULL DEFAULT 'reconciling'
+  CHECK (projection_state IN ('current', 'reconciling'));
+UPDATE cognitive_sidecar_meta
+   SET schema_version = 2,
+       projection_vector_json = '{"nuclear":0,"continuity":0,"cognitive_sidecar":0}',
+       projection_state = 'reconciling'
+ WHERE id = 1;
+`;
+
+export const COGNITIVE_SIDECAR_SCHEMA_V3 = String.raw`
+CREATE TABLE wakes (
+  wake_id TEXT PRIMARY KEY,
+  occurrence_id TEXT NOT NULL UNIQUE,
+  trigger_ref TEXT NOT NULL,
+  source_kind TEXT NOT NULL CHECK (source_kind IN ('inbox','future_trigger','idle','subscription')),
+  conversation_id TEXT NOT NULL,
+  cycle_id TEXT NOT NULL UNIQUE,
+  state TEXT NOT NULL CHECK (state IN ('pending','claimed','authorized','consequence_pending','reconciling','terminal')),
+  terminal_reason TEXT CHECK (terminal_reason IS NULL OR terminal_reason IN ('completed','no_action','refused','cancelled','expired','quarantined')),
+  captured_trigger_generation INTEGER,
+  captured_authority_revision INTEGER NOT NULL,
+  consequence_chain_id TEXT UNIQUE,
+  lease_owner TEXT, lease_token TEXT UNIQUE, lease_expires_at_ms INTEGER,
+  cancellation_id TEXT,
+  created_at_ms INTEGER NOT NULL, updated_at_ms INTEGER NOT NULL,
+  CHECK ((state = 'terminal') = (terminal_reason IS NOT NULL))
+);
+CREATE INDEX idx_wakes_claim ON wakes(state, lease_expires_at_ms, created_at_ms, wake_id);
+CREATE INDEX idx_wakes_conversation ON wakes(conversation_id, state, created_at_ms);
+CREATE TABLE wake_legacy_quarantine (
+  quarantine_id TEXT PRIMARY KEY,
+  table_name TEXT NOT NULL,
+  row_key TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  quarantined_at_ms INTEGER NOT NULL,
+  UNIQUE(table_name, row_key)
+);
+ALTER TABLE future_triggers ADD COLUMN wake_id TEXT REFERENCES wakes(wake_id);
+ALTER TABLE inbox_events ADD COLUMN wake_id TEXT REFERENCES wakes(wake_id);
+ALTER TABLE cycle_records ADD COLUMN wake_id TEXT REFERENCES wakes(wake_id);
+ALTER TABLE settlements ADD COLUMN wake_id TEXT REFERENCES wakes(wake_id);
+ALTER TABLE settlements ADD COLUMN semantic_pass INTEGER;
+ALTER TABLE in_flight_effects ADD COLUMN wake_id TEXT REFERENCES wakes(wake_id);
+CREATE UNIQUE INDEX idx_future_triggers_wake ON future_triggers(wake_id) WHERE wake_id IS NOT NULL;
+CREATE UNIQUE INDEX idx_cycle_records_wake ON cycle_records(wake_id) WHERE wake_id IS NOT NULL;
+CREATE UNIQUE INDEX idx_settlements_wake_pass ON settlements(wake_id, semantic_pass) WHERE wake_id IS NOT NULL AND semantic_pass IS NOT NULL;
+CREATE UNIQUE INDEX idx_in_flight_effects_wake ON in_flight_effects(wake_id) WHERE wake_id IS NOT NULL;
+CREATE INDEX idx_wake_legacy_quarantine_table ON wake_legacy_quarantine(table_name, quarantined_at_ms, quarantine_id);
+UPDATE cognitive_sidecar_meta SET schema_version = 3, projection_state = 'reconciling' WHERE id = 1;
+`;
+
+export const COGNITIVE_SIDECAR_SCHEMA_V4 = String.raw`
+ALTER TABLE inbox_events ADD COLUMN lane TEXT NOT NULL DEFAULT 'interactive';
+ALTER TABLE inbox_events ADD COLUMN priority INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE inbox_events ADD COLUMN state TEXT NOT NULL DEFAULT 'pending';
+ALTER TABLE inbox_events ADD COLUMN first_attempt_at_ms INTEGER;
+ALTER TABLE inbox_events ADD COLUMN next_eligible_at_ms INTEGER;
+ALTER TABLE inbox_events ADD COLUMN last_failure_class TEXT;
+ALTER TABLE inbox_events ADD COLUMN terminal_reason TEXT;
+ALTER TABLE inbox_events ADD COLUMN quarantine_reason TEXT;
+ALTER TABLE inbox_events ADD COLUMN repair_of_event_id TEXT;
+ALTER TABLE inbox_events ADD COLUMN payload_hash TEXT;
+CREATE TABLE durable_work_attempts (
+  attempt_id TEXT PRIMARY KEY,
+  event_id TEXT NOT NULL REFERENCES inbox_events(id),
+  wake_id TEXT REFERENCES wakes(wake_id),
+  ordinal INTEGER NOT NULL CHECK (ordinal BETWEEN 1 AND 5),
+  worker_id TEXT NOT NULL,
+  started_at_ms INTEGER NOT NULL,
+  finished_at_ms INTEGER,
+  dispatch_truth TEXT NOT NULL CHECK (dispatch_truth IN ('not_started','attempted','provider_responded','unknown')),
+  failure_class TEXT,
+  error_code TEXT,
+  UNIQUE(event_id, ordinal)
+);
+CREATE TABLE retry_lane_fairness (
+  lane TEXT NOT NULL,
+  conversation_id TEXT NOT NULL,
+  last_served_at_ms INTEGER NOT NULL,
+  PRIMARY KEY(lane, conversation_id)
+);
+CREATE TABLE durable_work_repairs (
+  repair_event_id TEXT PRIMARY KEY REFERENCES inbox_events(id),
+  predecessor_event_id TEXT NOT NULL REFERENCES inbox_events(id),
+  authorization_ref TEXT NOT NULL,
+  created_at_ms INTEGER NOT NULL
+);
+CREATE INDEX idx_work_eligible ON inbox_events(lane, state, next_eligible_at_ms, created_at_ms, id);
+CREATE UNIQUE INDEX idx_one_active_conversation_lane ON inbox_events(conversation_id, lane) WHERE state='leased';
+CREATE UNIQUE INDEX idx_durable_work_repairs_predecessor_authorization
+  ON durable_work_repairs(predecessor_event_id, authorization_ref);
+
+-- W6 migration is conservative. Existing attempt history is not reset and
+-- rows whose external-dispatch truth cannot be reconstructed do not become
+-- directly replayable work.
+UPDATE inbox_events
+   SET first_attempt_at_ms = COALESCE(first_attempt_at_ms, claimed_at_ms, created_at_ms)
+ WHERE attempt_count > 0 OR claimed_at_ms IS NOT NULL;
+UPDATE inbox_events
+   SET state = CASE status
+         WHEN 'consumed' THEN 'terminal'
+         WHEN 'failed_terminal' THEN 'quarantined'
+         WHEN 'claimed' THEN 'reconciling'
+         WHEN 'failed_retryable' THEN 'reconciling'
+         ELSE 'pending'
+       END,
+       status = CASE status
+         WHEN 'claimed' THEN 'claimed'
+         WHEN 'failed_retryable' THEN 'claimed'
+         ELSE status
+       END,
+       terminal_reason = CASE status
+         WHEN 'consumed' THEN 'completed'
+         WHEN 'failed_terminal' THEN 'permanent_failure'
+         ELSE terminal_reason
+       END,
+       quarantine_reason = CASE status
+         WHEN 'failed_terminal' THEN 'legacy_terminal'
+         WHEN 'claimed' THEN 'legacy_attempt_history_unverifiable'
+         WHEN 'failed_retryable' THEN 'legacy_attempt_history_unverifiable'
+         ELSE quarantine_reason
+       END,
+       last_failure_class = CASE status
+         WHEN 'claimed' THEN 'outcome_unknown_reconcile'
+         WHEN 'failed_retryable' THEN 'outcome_unknown_reconcile'
+         ELSE last_failure_class
+       END,
+       claim_token = CASE WHEN status IN ('claimed', 'failed_retryable', 'consumed', 'failed_terminal') THEN NULL ELSE claim_token END,
+       worker_id = CASE WHEN status IN ('claimed', 'failed_retryable', 'consumed', 'failed_terminal') THEN NULL ELSE worker_id END,
+       lease_expires_at_ms = CASE WHEN status IN ('claimed', 'failed_retryable', 'consumed', 'failed_terminal') THEN NULL ELSE lease_expires_at_ms END;
+UPDATE inbox_events
+   SET state = 'quarantined',
+       status = 'failed_terminal',
+       terminal_reason = 'permanent_failure',
+       quarantine_reason = 'legacy_wake_missing',
+       last_error = COALESCE(last_error, 'legacy_wake_missing'),
+       claim_token = NULL,
+       worker_id = NULL,
+       lease_expires_at_ms = NULL
+ WHERE wake_id IS NULL AND state NOT IN ('terminal', 'quarantined');
+UPDATE cognitive_sidecar_meta SET schema_version = 4, projection_state = 'reconciling' WHERE id = 1;
+`;
+
+export const COGNITIVE_SIDECAR_SCHEMA_V5 = String.raw`
+CREATE TABLE private_budget_policy_clock (
+  policy_id TEXT PRIMARY KEY,
+  last_policy_now_ms INTEGER NOT NULL CHECK(last_policy_now_ms >= 0),
+  clock_state TEXT NOT NULL CHECK(clock_state IN ('stable','clock_reconciliation')),
+  discrepancy_ms INTEGER NOT NULL DEFAULT 0,
+  reconciled_at_ms INTEGER,
+  reconciliation_ref TEXT
+);
+CREATE TABLE private_budget_reservations (
+  reservation_id TEXT PRIMARY KEY,
+  admission_id TEXT NOT NULL UNIQUE,
+  wake_id TEXT NOT NULL REFERENCES wakes(wake_id),
+  conversation_id TEXT NOT NULL,
+  policy_id TEXT NOT NULL,
+  state TEXT NOT NULL CHECK(state IN ('held','committed','released','reconcile_required','expired')),
+  policy_time_ms INTEGER NOT NULL,
+  invocation_id TEXT,
+  attempt_id TEXT,
+  dispatch_truth TEXT NOT NULL CHECK(dispatch_truth IN ('not_bound','not_started','attempted','responded','unknown')),
+  release_proof_ref TEXT,
+  created_at_ms INTEGER NOT NULL,
+  updated_at_ms INTEGER NOT NULL,
+  CHECK(state != 'released' OR release_proof_ref IS NOT NULL),
+  CHECK(state != 'committed' OR invocation_id IS NOT NULL)
+);
+CREATE INDEX idx_private_budget_consuming ON private_budget_reservations(conversation_id, policy_id, policy_time_ms, state);
+CREATE UNIQUE INDEX idx_private_budget_invocation ON private_budget_reservations(invocation_id) WHERE invocation_id IS NOT NULL;
+UPDATE cognitive_sidecar_meta SET schema_version = 5, projection_state = 'reconciling' WHERE id = 1;
+`;

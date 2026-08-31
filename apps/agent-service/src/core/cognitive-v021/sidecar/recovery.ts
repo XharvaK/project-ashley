@@ -1,6 +1,9 @@
 import type { DatabaseSync } from "node:sqlite";
-import { appendInboxEvent } from "../cycle/inbox.js";
+import { appendInboxEventInTransaction } from "../cycle/inbox.js";
 import { recoverInFlight } from "../effect/recovery.js";
+import { recoverDurableWork } from "../retry/ledger.js";
+import { recoverWakes } from "../wake/ledger.js";
+import { recoverPrivateBudget } from "../private-budget/recovery.js";
 
 export type CognitiveSidecarRecoveryResult = {
   inboxClaimsRecovered: number;
@@ -8,7 +11,7 @@ export type CognitiveSidecarRecoveryResult = {
   noticeProjectionsRequeued: number;
 };
 
-/** Reopen-time recovery is conservative: only expired leases are made retryable. */
+/** Reopen-time recovery preserves dispatch truth before any work can be claimed again. */
 export function recoverCognitiveSidecar(
   db: DatabaseSync,
   nowMs = Date.now(),
@@ -18,17 +21,17 @@ export function recoverCognitiveSidecar(
     speechProjectionsRequeued: 0,
     noticeProjectionsRequeued: 0,
   };
+  const recoveredEffects = recoverInFlight(db, nowMs);
+  // Recover wake state before the transaction that emits reference-only
+  // recovery inbox events. Each wake recovery is its own immediate CAS.
+  recoverWakes(db, nowMs);
+  const recoveredDurableWork = recoverDurableWork(db, nowMs);
+  recoverPrivateBudget(db, { wallClockNowMs: nowMs });
+  result.inboxClaimsRecovered = recoveredDurableWork.reclaimed
+    + recoveredDurableWork.reconciling
+    + recoveredDurableWork.quarantined;
   db.exec("BEGIN IMMEDIATE");
   try {
-    const inbox = db.prepare(
-      `UPDATE inbox_events
-          SET status = 'failed_retryable', claim_token = NULL, worker_id = NULL,
-              lease_expires_at_ms = NULL, last_error = 'recovered_after_lease_expiry'
-        WHERE status = 'claimed' AND lease_expires_at_ms IS NOT NULL
-          AND lease_expires_at_ms <= ?`,
-    ).run(nowMs);
-    result.inboxClaimsRecovered = Number(inbox.changes);
-
     const speech = db.prepare(
       `UPDATE speech_outbox
           SET send_status = 'pending', suppressed = 0
@@ -49,13 +52,13 @@ export function recoverCognitiveSidecar(
     // crash. Mark it unknown and leave a durable, reference-only recovery
     // event for Thought. The deterministic event id makes reopen idempotent;
     // the effect is never redispatched merely because the process restarted.
-    for (const effect of recoverInFlight(db, nowMs)) {
+    for (const effect of recoveredEffects) {
       if (effect.status !== "unknown") continue;
       const cycle = db.prepare(
         "SELECT conversation_id FROM cycle_records WHERE cycle_id = ? LIMIT 1",
       ).get(effect.cycleId) as { conversation_id?: unknown } | undefined;
       if (typeof cycle?.conversation_id !== "string" || !cycle.conversation_id) continue;
-      appendInboxEvent(db, {
+      appendInboxEventInTransaction(db, {
         id: `recovery:${effect.effectId}`,
         conversationId: cycle.conversation_id,
         kind: "recovery",
@@ -69,7 +72,7 @@ export function recoverCognitiveSidecar(
           idempotencyKey: effect.idempotencyKey,
         },
         createdAtMs: nowMs,
-      });
+      }, `recovery:${effect.effectId}`);
     }
     db.exec("COMMIT");
     return result;

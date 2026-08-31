@@ -9,10 +9,17 @@ import {
   IMPLEMENTATION_SPEC_VERSION,
   THOUGHT_CONTRACT_VERSION,
 } from "../types.js";
+import { stableJson } from "../../model-fabric/hash.js";
+import type { AuthorityVersionVector } from "../types.js";
 import {
   COGNITIVE_SIDECAR_SCHEMA_V1,
+  COGNITIVE_SIDECAR_SCHEMA_V2,
+  COGNITIVE_SIDECAR_SCHEMA_V3,
+  COGNITIVE_SIDECAR_SCHEMA_V4,
+  COGNITIVE_SIDECAR_SCHEMA_V5,
 } from "./schema.js";
 import { recoverCognitiveSidecar } from "./recovery.js";
+import { cycleIdFor, occurrenceIdFor, wakeIdFor } from "../wake/identity.js";
 
 export type CognitiveSidecarDataPlane = Pick<DataPlaneContext, "kind">;
 
@@ -28,6 +35,9 @@ export type CognitiveSidecarMeta = {
   implementation_spec_version: string;
   thought_contract_version: number;
   authority_epoch: number;
+  projection_barrier_revision?: number;
+  projection_vector_json?: string;
+  projection_state?: "current" | "reconciling";
 };
 
 function sidecarError(code: string, message = code): Error {
@@ -81,6 +91,164 @@ function ensureMeta(existing: DatabaseSync): void {
   }
 }
 
+type LegacyRow = Record<string, unknown>;
+
+function legacyText(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function legacyNumber(value: unknown, fallback = 0): number {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function legacySourceKind(triggerKind: string): "inbox" | "future_trigger" | "idle" | "subscription" {
+  if (triggerKind === "future_trigger_due") return "future_trigger";
+  if (triggerKind === "idle_opportunity") return "idle";
+  if (triggerKind === "subscription_item") return "subscription";
+  return "inbox";
+}
+
+function quarantineLegacyRow(
+  db: DatabaseSync,
+  tableName: string,
+  rowKey: string,
+  reason: string,
+  nowMs: number,
+): void {
+  db.prepare(
+    `INSERT OR IGNORE INTO wake_legacy_quarantine
+       (quarantine_id, table_name, row_key, reason, payload_json, quarantined_at_ms)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).run(
+    `legacy-quarantine:${tableName}:${rowKey}`,
+    tableName,
+    rowKey,
+    reason,
+    JSON.stringify({ tableName, rowKey, reason }),
+    nowMs,
+  );
+}
+
+function insertLegacyWakeForCycle(db: DatabaseSync, row: LegacyRow, nowMs: number): string | null {
+  const cycleId = legacyText(row.cycle_id);
+  const conversationId = legacyText(row.conversation_id);
+  if (!cycleId || !conversationId) return null;
+  const triggerKind = legacyText(row.trigger_kind) || "owner_message";
+  const triggerRef = legacyText(row.trigger_ref) || `legacy-cycle:${cycleId}`;
+  const sourceKind = legacySourceKind(triggerKind);
+  const occurrenceId = occurrenceIdFor({
+    sourceKind,
+    triggerRef: `legacy-cycle:${cycleId}:${triggerRef}`,
+    conversationId,
+  });
+  const wakeId = wakeIdFor(occurrenceId);
+  db.prepare(
+    `INSERT OR IGNORE INTO wakes
+       (wake_id, occurrence_id, trigger_ref, source_kind, conversation_id, cycle_id,
+        state, terminal_reason, captured_trigger_generation, captured_authority_revision,
+        created_at_ms, updated_at_ms)
+     VALUES (?, ?, ?, ?, ?, ?, 'pending', NULL, ?, ?, ?, ?)`,
+  ).run(
+    wakeId,
+    occurrenceId,
+    triggerRef,
+    sourceKind,
+    conversationId,
+    cycleId,
+    row.generation == null ? null : legacyNumber(row.generation),
+    0,
+    nowMs,
+    nowMs,
+  );
+  db.prepare("UPDATE cycle_records SET wake_id = ? WHERE cycle_id = ? AND wake_id IS NULL").run(wakeId, cycleId);
+  return wakeId;
+}
+
+function classifyLegacySidecarRows(db: DatabaseSync): void {
+  const nowMs = Date.now();
+  const cycles = db.prepare("SELECT * FROM cycle_records WHERE wake_id IS NULL ORDER BY admitted_at_ms ASC, cycle_id ASC").all() as LegacyRow[];
+  for (const cycle of cycles) {
+    const wakeId = insertLegacyWakeForCycle(db, cycle, nowMs);
+    if (!wakeId) quarantineLegacyRow(db, "cycle_records", legacyText(cycle.cycle_id), "legacy_ambiguous", nowMs);
+  }
+
+  const firedTriggers = db.prepare("SELECT * FROM future_triggers WHERE status = 'fired' AND wake_id IS NULL ORDER BY due_at_ms ASC, trigger_id ASC").all() as LegacyRow[];
+  for (const trigger of firedTriggers) {
+    const triggerId = legacyText(trigger.trigger_id);
+    const conversationId = legacyText(trigger.conversation_id);
+    if (!triggerId || !conversationId) {
+      quarantineLegacyRow(db, "future_triggers", triggerId || "unknown", "legacy_ambiguous", nowMs);
+      continue;
+    }
+    const occurrenceId = occurrenceIdFor({ sourceKind: "future_trigger", triggerRef: triggerId, conversationId });
+    const wakeId = wakeIdFor(occurrenceId);
+    const cycleId = cycleIdFor(wakeId);
+    db.prepare(
+      `INSERT OR IGNORE INTO wakes
+         (wake_id, occurrence_id, trigger_ref, source_kind, conversation_id, cycle_id,
+          state, terminal_reason, captured_trigger_generation, captured_authority_revision,
+          created_at_ms, updated_at_ms)
+       VALUES (?, ?, ?, 'future_trigger', ?, ?, 'pending', NULL, NULL, 0, ?, ?)`,
+    ).run(wakeId, occurrenceId, triggerId, conversationId, cycleId, nowMs, nowMs);
+    const maxGeneration = db.prepare(
+      "SELECT MAX(generation) AS generation FROM cycle_records WHERE conversation_id = ?",
+    ).get(conversationId) as LegacyRow | undefined;
+    db.prepare(
+      `INSERT OR IGNORE INTO cycle_records
+         (cycle_id, conversation_id, generation, wake_id, state, trigger_kind, trigger_ref,
+          occupant_id, authority_epoch, architecture_epoch, admitted_at_ms, updated_at_ms,
+          compose_log_ids_json, preempted_generation)
+       VALUES (?, ?, ?, ?, 'admitted', 'future_trigger_due', ?, NULL, 1, ?, ?, ?, '[]', NULL)`,
+    ).run(
+      cycleId,
+      conversationId,
+      legacyNumber(maxGeneration?.generation) + 1,
+      wakeId,
+      triggerId,
+      ARCHITECTURE_EPOCH,
+      nowMs,
+      nowMs,
+    );
+    db.prepare("UPDATE future_triggers SET wake_id = ? WHERE trigger_id = ? AND wake_id IS NULL").run(wakeId, triggerId);
+  }
+
+  const inboxRows = db.prepare("SELECT id, payload_json FROM inbox_events WHERE wake_id IS NULL ORDER BY created_at_ms ASC, id ASC").all() as LegacyRow[];
+  for (const row of inboxRows) {
+    const eventId = legacyText(row.id);
+    let payload: LegacyRow = {};
+    try {
+      const parsed = JSON.parse(legacyText(row.payload_json));
+      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) payload = parsed as LegacyRow;
+    } catch { /* classify as ambiguous below */ }
+    const cycleId = legacyText(payload.cycleId);
+    const cycle = cycleId ? db.prepare("SELECT wake_id FROM cycle_records WHERE cycle_id = ?").get(cycleId) as LegacyRow | undefined : undefined;
+    const wakeId = legacyText(cycle?.wake_id);
+    if (wakeId) {
+      db.prepare("UPDATE inbox_events SET wake_id = ? WHERE id = ? AND wake_id IS NULL").run(wakeId, eventId);
+    } else {
+      quarantineLegacyRow(db, "inbox_events", eventId, "legacy_ambiguous", nowMs);
+      db.prepare("UPDATE inbox_events SET status = 'failed_terminal', last_error = 'legacy_ambiguous' WHERE id = ? AND wake_id IS NULL").run(eventId);
+    }
+  }
+
+  for (const table of ["settlements", "in_flight_effects"] as const) {
+    const key = table === "settlements" ? "settlement_id" : "effect_id";
+    const rows = db.prepare(`SELECT ${key}, cycle_id FROM ${table} WHERE wake_id IS NULL`).all() as LegacyRow[];
+    for (const row of rows) {
+      const rowKey = legacyText(row[key]);
+      const cycle = db.prepare("SELECT wake_id FROM cycle_records WHERE cycle_id = ?").get(legacyText(row.cycle_id)) as LegacyRow | undefined;
+      const wakeId = legacyText(cycle?.wake_id);
+      if (wakeId) {
+        db.prepare(`UPDATE ${table} SET wake_id = ? WHERE ${key} = ? AND wake_id IS NULL`).run(wakeId, rowKey);
+      } else {
+        quarantineLegacyRow(db, table, rowKey, "legacy_ambiguous", nowMs);
+        if (table === "in_flight_effects") db.prepare("UPDATE in_flight_effects SET state = 'unknown' WHERE effect_id = ?").run(rowKey);
+      }
+    }
+  }
+}
+
 /**
  * Open an already-created SQLite handle on the explicitly selected data
  * plane. Sidecar schema application is isolated from nuclear migrations.
@@ -109,6 +277,13 @@ export function openCognitiveSidecarDb(
   existing.exec("BEGIN IMMEDIATE");
   try {
     existing.exec(COGNITIVE_SIDECAR_SCHEMA_V1);
+    if (version < 2) existing.exec(COGNITIVE_SIDECAR_SCHEMA_V2);
+    if (version < 3) {
+      existing.exec(COGNITIVE_SIDECAR_SCHEMA_V3);
+      classifyLegacySidecarRows(existing);
+    }
+    if (version < 4) existing.exec(COGNITIVE_SIDECAR_SCHEMA_V4);
+    if (version < 5) existing.exec(COGNITIVE_SIDECAR_SCHEMA_V5);
     existing.exec(`PRAGMA user_version = ${COGNITIVE_SIDECAR_SCHEMA_VERSION}`);
     ensureMeta(existing);
     existing.exec("COMMIT");
@@ -146,4 +321,67 @@ export function updateCognitiveAuthorityEpoch(
   if (Number(result.changes) !== 1) {
     throw sidecarError("cognitive_sidecar_meta_missing");
   }
+}
+
+export type CognitiveSidecarProjectionState = Readonly<{
+  barrierRevision: number;
+  ownerVersions: AuthorityVersionVector;
+  state: "current" | "reconciling";
+}>;
+
+export function readCognitiveProjectionState(
+  sidecar: DatabaseSync,
+): CognitiveSidecarProjectionState {
+  const row = sidecar.prepare(
+    `SELECT projection_barrier_revision, projection_vector_json, projection_state
+       FROM cognitive_sidecar_meta WHERE id = 1`,
+  ).get() as {
+    projection_barrier_revision?: unknown;
+    projection_vector_json?: unknown;
+    projection_state?: unknown;
+  } | undefined;
+  if (!row) throw sidecarError("cognitive_sidecar_meta_missing");
+  const state = row.projection_state === "current" || row.projection_state === "reconciling"
+    ? row.projection_state
+    : null;
+  if (!state) throw sidecarError("cognitive_sidecar_projection_state_invalid");
+  let vector: AuthorityVersionVector;
+  try {
+    const parsed = JSON.parse(String(row.projection_vector_json ?? "{}"));
+    const values = parsed as Record<string, unknown>;
+    if (!values || typeof values !== "object" || Array.isArray(values)) throw new Error("invalid");
+    const owners = ["nuclear", "continuity", "cognitive_sidecar"] as const;
+    if (state === "reconciling" && Object.keys(values).length === 0) {
+      vector = { nuclear: 0, continuity: 0, cognitive_sidecar: 0 };
+    } else if (owners.some((owner) => !Number.isInteger(Number(values[owner])) || Number(values[owner]) < 0)) {
+      throw new Error("invalid");
+    } else {
+      vector = { nuclear: Number(values.nuclear), continuity: Number(values.continuity), cognitive_sidecar: Number(values.cognitive_sidecar) };
+    }
+  } catch {
+    throw sidecarError("cognitive_sidecar_projection_vector_invalid");
+  }
+  return {
+    barrierRevision: Number(row.projection_barrier_revision ?? 0),
+    ownerVersions: vector,
+    state,
+  };
+}
+
+export function updateCognitiveProjectionState(
+  sidecar: DatabaseSync,
+  barrierRevision: number,
+  ownerVersions: AuthorityVersionVector,
+  state: "current" | "reconciling",
+): void {
+  if (!Number.isInteger(barrierRevision) || barrierRevision < 0) {
+    throw sidecarError("cognitive_sidecar_projection_revision_invalid");
+  }
+  const result = sidecar.prepare(
+    `UPDATE cognitive_sidecar_meta
+        SET projection_barrier_revision = ?, projection_vector_json = ?,
+            projection_state = ?
+      WHERE id = 1`,
+  ).run(barrierRevision, stableJson(ownerVersions), state);
+  if (Number(result.changes) !== 1) throw sidecarError("cognitive_sidecar_meta_missing");
 }

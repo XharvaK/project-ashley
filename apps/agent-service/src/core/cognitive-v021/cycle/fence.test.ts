@@ -1,15 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { appendOwnerUtterance } from "../evidence/conversation-log.js";
-import { admitCycle, updateCycleState } from "./inbox.js";
+import { updateCycleState } from "./inbox.js";
 import { composeOrPreempt } from "./fence.js";
 import { insertOutboxPending } from "../speech/outbox.js";
-import { openTestSidecar } from "../test-support.js";
+import { admitTestCycle, openTestSidecar } from "../test-support.js";
 
 describe("v0.2.1 cycle fence", () => {
   it("keeps an owner append composable while the cycle is thinking", () => {
     const db = openTestSidecar();
     try {
-      const cycle = admitCycle(db, {
+      const cycle = admitTestCycle(db, {
         conversationId: "thread-1", triggerKind: "owner_message", triggerRef: "first",
         occupantId: "doc", authorityEpoch: 1, nowMs: 1,
       });
@@ -31,7 +31,7 @@ describe("v0.2.1 cycle fence", () => {
   it("preempts an unsent outbox and treats every in-flight effect as effectful", () => {
     const db = openTestSidecar();
     try {
-      const cycle = admitCycle(db, {
+      const cycle = admitTestCycle(db, {
         conversationId: "thread-1", triggerKind: "owner_message", triggerRef: "first",
         occupantId: "doc", authorityEpoch: 1, nowMs: 1,
       });
@@ -50,6 +50,7 @@ describe("v0.2.1 cycle fence", () => {
       expect(result.action).toBe("preempt");
       expect(result.generation).toBe(2);
       expect(db.prepare("SELECT send_status FROM speech_outbox").get()).toMatchObject({ send_status: "suppressed" });
+      expect(db.prepare("SELECT state FROM wakes WHERE cycle_id = ?").get(cycle.cycleId)).toMatchObject({ state: "reconciling" });
     } finally {
       db.close();
     }
@@ -58,7 +59,7 @@ describe("v0.2.1 cycle fence", () => {
   it("preempts when the current generation already has a delivered outbox", () => {
     const db = openTestSidecar();
     try {
-      const cycle = admitCycle(db, {
+      const cycle = admitTestCycle(db, {
         conversationId: "thread-delivered", triggerKind: "owner_message", triggerRef: "first",
         occupantId: "doc", authorityEpoch: 1, nowMs: 1,
       });

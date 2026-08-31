@@ -9,6 +9,8 @@ import type {
   TokenUsage,
   ToolCallResult,
 } from "../types.js";
+import type { TrustedStructuredOutputControl } from "../../model-fabric/types.js";
+import { wireEvidenceFor } from "../../model-fabric/wire-evidence.js";
 
 export type MistralClientFactory = () => Mistral;
 
@@ -48,6 +50,7 @@ function buildChatBody(
   options: CompletionOptions,
   model: string,
   stream: boolean,
+  fabricStructuredOutput?: TrustedStructuredOutputControl,
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {
     model,
@@ -76,6 +79,14 @@ function buildChatBody(
   const effort = options.reasoningEffort ?? env.mistralReasoningEffort;
   if (effort) {
     body.reasoning_effort = effort;
+  }
+  if (fabricStructuredOutput) {
+    if (fabricStructuredOutput.kind !== "json_object_compatibility") {
+      throw Object.assign(new Error("structured_output_native_unsupported"), {
+        code: "structured_output_native_unsupported",
+      });
+    }
+    body.responseFormat = { type: "json_object" };
   }
   return body;
 }
@@ -158,7 +169,7 @@ export function createMistralAdapter(
 ): ModelProviderAdapter {
   return {
     provider: "mistral",
-    async dispatch({ messages, modelId, options, signal }) {
+    async dispatch({ messages, modelId, options, signal, fabricStructuredOutput }) {
       const mistral = getClient();
       const res = await mistral.chat.complete(
         buildChatBody(
@@ -166,6 +177,7 @@ export function createMistralAdapter(
           options,
           modelId,
           false,
+          fabricStructuredOutput,
         ) as Parameters<typeof mistral.chat.complete>[0],
         { fetchOptions: { signal } },
       );
@@ -208,6 +220,11 @@ export function createMistralAdapter(
         toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
         usage,
         providerModel,
+        wireEvidence: wireEvidenceFor({
+          adapterId: "ashley.adapter.mistral.v1",
+          body: buildChatBody(messages, options, modelId, false, fabricStructuredOutput),
+          structuredOutput: fabricStructuredOutput,
+        }),
       };
       return completion;
     },

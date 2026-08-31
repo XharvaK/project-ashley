@@ -7,12 +7,12 @@ import { openNuclearDb } from "../../db.js";
 import { admitCognitiveIngress } from "../ingress/http.js";
 import { runCognitiveCycle } from "../thought/run.js";
 import { runLiveCognitiveTurn } from "../dispatch/live.js";
-import { admitCycle, appendInboxEvent, claimInboxEvent } from "../cycle/inbox.js";
+import { appendInboxEvent, claimInboxEvent } from "../cycle/inbox.js";
 import { consumeInboxEvent } from "../cycle/inbox-consumer.js";
 import { appendOwnerUtterance } from "../evidence/conversation-log.js";
 import { insertOutboxPending, updateOutboxStatus } from "../speech/outbox.js";
 import { openCognitiveSidecarDb } from "../sidecar/db.js";
-import { openTestSidecar, makeThoughtDraft } from "../test-support.js";
+import { admitTestCycle, makeSemanticSettlement, openTestSidecar } from "../test-support.js";
 import type { KernelDeps, Observation, ThoughtInput } from "../types.js";
 
 const capabilityReality = {
@@ -43,16 +43,11 @@ function packs() {
 
 function thoughtCompletion(input: ThoughtInput, text = "hello") {
   return {
-    text: JSON.stringify(makeThoughtDraft({
-      cycleId: input.cycleId,
-      generation: input.generation,
-      authorityEpoch: input.authorityEpoch,
-      occupantId: input.occupantId,
-      triggerRef: input.trigger.ref,
+    text: JSON.stringify(makeSemanticSettlement({
       speech: {
         mode: "draft",
         mustSay: [text],
-        mustNot: [],
+        mustNotSay: [],
         surfaceDraft: text,
         acceptableRealizations: [text],
         presentationDirectives: [],
@@ -120,7 +115,10 @@ describe("Q2 repair integrated lifecycle", () => {
     const first = admitCognitiveIngress(sidecar, nuclear, { userId: "doc", message: "first" }, { nowMs: 1 });
     const firstEvent = claimInboxEvent(sidecar, { workerId: "test", eventId: first.inboxEventId, nowMs: 2 });
     if (!firstEvent) throw new Error("first_event_not_claimed");
-    const run = runCognitiveCycle(sidecar, nuclear, firstEvent, baseDeps(sidecar, completeChat));
+    let firstResult: Awaited<ReturnType<typeof runCognitiveCycle>> | undefined;
+    const run = consumeInboxEvent(sidecar, firstEvent, async () => {
+      firstResult = await runCognitiveCycle(sidecar, nuclear, firstEvent, baseDeps(sidecar, completeChat));
+    }, 10);
     await started;
 
     const second = admitCognitiveIngress(sidecar, nuclear, { userId: "doc", message: "second" }, { nowMs: 3 });
@@ -128,7 +126,9 @@ describe("Q2 repair integrated lifecycle", () => {
     expect(second.generation).toBe(first.generation);
     expect(firstSignal?.aborted).toBe(true);
 
-    const result = await run;
+    await run;
+    if (!firstResult) throw new Error("first_result_missing");
+    const result = firstResult;
     expect(result).toMatchObject({ published: true, generation: first.generation, thoughtModelAttempts: 2, acceptedThoughtPasses: 1, composeCancelledAttempts: 1 });
     expect(sidecar.prepare("SELECT COUNT(*) AS count FROM speech_outbox WHERE generation = 1").get()).toMatchObject({ count: 1 });
     nuclear.close();
@@ -142,12 +142,16 @@ describe("Q2 repair integrated lifecycle", () => {
     const first = admitCognitiveIngress(sidecar, nuclear, { userId: "doc", message: "first" }, { nowMs: 1 });
     const firstEvent = claimInboxEvent(sidecar, { workerId: "test", eventId: first.inboxEventId, nowMs: 2 });
     if (!firstEvent) throw new Error("first_event_not_claimed");
-    const firstResult = await runLiveCognitiveTurn({
-      sidecar,
-      nuclear,
-      event: firstEvent,
-      deps: baseDeps(sidecar, completeChat),
-    });
+    let firstResult: Awaited<ReturnType<typeof runLiveCognitiveTurn>> | undefined;
+    await consumeInboxEvent(sidecar, firstEvent, async () => {
+      firstResult = await runLiveCognitiveTurn({
+        sidecar,
+        nuclear,
+        event: firstEvent,
+        deps: baseDeps(sidecar, completeChat),
+      });
+    }, 10);
+    if (!firstResult) throw new Error("first_result_missing");
     if (firstResult.outboxId === null) throw new Error("first_outbox_missing");
     updateOutboxStatus(sidecar, firstResult.outboxId, "delivered", { discordMessageIds: ["discord-1"] });
 
@@ -177,19 +181,12 @@ describe("Q2 repair integrated lifecycle", () => {
       const input = thoughtInput(messages);
       return {
         text: JSON.stringify({
-          kind: "effect_proposal",
-          cycleId: input.cycleId,
-          generation: input.generation,
-          occupantId: input.occupantId,
-          effectProposal: {
-            effectId: "effect-pending",
-            cycleId: input.cycleId,
-            generation: input.generation,
-            idempotencyKey: "idempotency-pending",
-            kind: "workspace.write_file",
-            authorityEpoch: input.authorityEpoch,
-            request: { projectId: "project-ashley", path: "src/pending.ts" },
-          },
+          kind: "effect_intent",
+          operationKind: "workspace.write_file",
+          request: { projectId: "project-ashley", path: "src/pending.ts" },
+          purpose: "write the pending file",
+          expectedOutcome: "the file is written",
+          existingRefs: [],
         }),
         model: "fake",
         modelAlias: "thought",
@@ -219,6 +216,7 @@ describe("Q2 repair integrated lifecycle", () => {
     const second = admitCognitiveIngress(sidecar, nuclear, { userId: "doc", message: "preempt operation" }, { nowMs: 3 });
     expect(second.action).toBe("preempt");
     expect(second.generation).toBe(first.generation + 1);
+    expect(sidecar.prepare("SELECT state FROM wakes WHERE cycle_id = ?").get(first.cycleId)).toMatchObject({ state: "reconciling" });
     releaseEffect();
 
     const result = await run;
@@ -234,7 +232,7 @@ describe("Q2 repair integrated lifecycle", () => {
     const directory = mkdtempSync(join(tmpdir(), "ashley-q2-replay-"));
     const databasePath = join(directory, "sidecar.db");
     let sidecar = openCognitiveSidecarDb(new DatabaseSync(databasePath), { dataPlane: { kind: "isolated" } });
-    const cycle = admitCycle(sidecar, {
+    const cycle = admitTestCycle(sidecar, {
       cycleId: "cycle-reclaim",
       conversationId: "thread-reclaim",
       triggerKind: "owner_message",
@@ -268,13 +266,13 @@ describe("Q2 repair integrated lifecycle", () => {
     sidecar.close();
 
     sidecar = openCognitiveSidecarDb(new DatabaseSync(databasePath), { dataPlane: { kind: "isolated" } });
-    const reclaimed = claimInboxEvent(sidecar, { workerId: "second", eventId: event.id, nowMs: Date.now() + 1 });
+    const reclaimed = claimInboxEvent(sidecar, { workerId: "second", eventId: event.id, nowMs: 120_004 });
     if (!reclaimed) throw new Error("event_not_reclaimed");
     const completeChat = vi.fn(async () => { throw new Error("thought_must_not_run_on_replay"); });
     let replay: Awaited<ReturnType<typeof runCognitiveCycle>> | undefined;
     await consumeInboxEvent(sidecar, reclaimed, async () => {
       replay = await runCognitiveCycle(sidecar, sidecar, reclaimed, baseDeps(sidecar, completeChat));
-    });
+    }, 120_005);
     if (!replay) throw new Error("replay_result_missing");
     expect(replay).toMatchObject({ published: true, cycleId: cycle.cycleId, generation: cycle.generation, outboxId: first.outboxId });
     expect(completeChat).not.toHaveBeenCalled();

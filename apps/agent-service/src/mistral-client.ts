@@ -9,6 +9,7 @@ import {
   type AttentionPurpose,
 } from "./core/attention/index.js";
 import type { AcceptedDispatchIdentity } from "./core/attention/types.js";
+import { currentModelEpoch } from "./core/attention/continuity.js";
 import { assertOutboundAllowed } from "./core/continuity/process-guards.js";
 import {
   createMistralAdapter,
@@ -68,6 +69,23 @@ import {
   type ModelFallbackClass,
   type ModelFabricDispatchMetadata,
 } from "./core/model-fabric/index.js";
+import type { WireDispatchEvidence } from "./core/model-routing/types.js";
+import {
+  buildThoughtCapabilityIdentity,
+  thoughtResourcePolicyIdentity,
+  type ThoughtCapabilityIdentity,
+} from "./core/model-fabric/capability-identity.js";
+import {
+  bindPrivateReservationInvocation,
+  commitPrivateDispatch,
+  markPrivateReservationUnknown,
+  recordPrivateProviderResponse,
+  releasePrivateReservation,
+  type PrivateBudgetDispatchBinding,
+} from "./core/cognitive-v021/private-budget/ledger.js";
+import { sha256Text, stableJson } from "./core/model-fabric/hash.js";
+import { THOUGHT_KERNEL_ENVELOPE_VERSION } from "./core/cognitive-v021/thought/kernel-envelope.js";
+import { THOUGHT_SEMANTIC_PARSER_ID } from "./core/cognitive-v021/thought/parse.js";
 import type { ContextBudgetMode } from "./core/context-budget/types.js";
 export type {
   ChatMessage,
@@ -95,6 +113,8 @@ export type CognitiveDispatchOptions = CompletionOptions & {
   contextBudgetPolicyId?: string;
   contextBudgetMaxUtf8Bytes?: number;
   contextBudgetSectionBudgets?: Record<string, number>;
+  /** W7 private Thought reservation bound to this exact Model Fabric invocation. */
+  privateBudgetBinding?: PrivateBudgetDispatchBinding;
 };
 
 export class DispatchDataPlaneMissingError extends Error {
@@ -108,6 +128,26 @@ export class DispatchDataPlaneMissingError extends Error {
 let client: Mistral | null = null;
 
 export const MISTRAL_RETRY_CONFIG = { strategy: "none" } as const;
+
+export type CapturedThoughtAttemptIdentity = {
+  allocationId: number;
+  modelFabricInvocationId: string;
+  modelFabricAttemptId: string;
+  attemptOrdinal: number;
+  dispatchSequence: number;
+  routeAlias: string | null;
+  provider: ProviderId;
+  configuredModelId: string;
+  occupantId: string;
+  modelEpoch: number;
+  contractId: string;
+  buildIdentity: string;
+  logicalStructuredOutputId: string;
+  semanticSchemaFingerprint: string;
+  actualWireBindingId: string;
+  schemaEnforcementMode: string;
+  resourcePolicyFingerprint: string;
+};
 
 function getClient(): Mistral {
   if (!env.mistralApiKey) {
@@ -330,7 +370,11 @@ export async function completeChat(
   finishReason?: string | null;
   attentionRequestId?: number;
   acceptedDispatchIdentity?: AcceptedDispatchIdentity;
+  /** Exact Thought attempt identity returned by the Attention/Model Fabric bind. */
+  capturedAttemptIdentity?: CapturedThoughtAttemptIdentity;
   modelFabric?: ModelFabricDispatchMetadata;
+  wireEvidence?: WireDispatchEvidence;
+  capabilityIdentity?: ThoughtCapabilityIdentity;
   contextProjection?: ContextProjection;
 }> {
   if (!options?.attentionDb) {
@@ -444,6 +488,9 @@ export async function completeChat(
   let attemptOrdinal = 0;
   let previousAttemptId: string | null = null;
   let transportFailoverUsed = false;
+  const privateBudgetBinding = options.privateBudgetBinding;
+  let privateBudgetBound = false;
+  let privateBudgetCommitted = false;
 
   const beginAttempt = (
     targetProvider: ProviderId,
@@ -632,7 +679,7 @@ export async function completeChat(
       translatedWireControl,
     });
     previousAttemptId = attemptId;
-    return {
+      return {
       attempt,
       resolvedRoute,
       requestedWireReasoning,
@@ -669,6 +716,15 @@ export async function completeChat(
       dispatchContract,
     );
     const attempt = attemptContext.attempt;
+    if (privateBudgetBinding && !privateBudgetBound) {
+      bindPrivateReservationInvocation(privateBudgetBinding.sidecar, {
+        reservationId: privateBudgetBinding.reservationId,
+        invocationId: attempt.receipt().invocationId,
+        attemptId: attempt.receipt().attemptId,
+        nowMs: Date.now(),
+      });
+      privateBudgetBound = true;
+    }
     assertOutboundAllowed(targetProvider);
     if (attemptContext.translationError) {
       attempt.markFailure("capability_mismatch");
@@ -685,6 +741,7 @@ export async function completeChat(
         usage?: TokenUsage;
         providerModel?: string | null;
         finishReason?: string | null;
+        wireEvidence?: WireDispatchEvidence;
       }>(attentionDb, {
         messages,
         purpose: mapped.purpose,
@@ -702,10 +759,44 @@ export async function completeChat(
         cognitiveJobId: options.cognitiveJobId,
         ownerId: options.ownerId,
         ageOriginAtMs: options.ageOriginAtMs,
+        ...(options.thoughtInvocationContext && purpose === "thought"
+          ? {
+              thoughtAttemptBinding: {
+                thoughtInvocationId: options.thoughtInvocationContext.invocationId,
+                thoughtCycleId: options.thoughtInvocationContext.cycleId,
+                thoughtGeneration: options.thoughtInvocationContext.generation,
+                thoughtSemanticPass: options.thoughtInvocationContext.semanticPass,
+                thoughtStructuralAttempt: options.thoughtInvocationContext.structuralAttemptOrdinal,
+                thoughtAuthorityEpoch: options.thoughtInvocationContext.authorityEpoch,
+                thoughtAuthorityVectorJson: JSON.stringify(options.thoughtInvocationContext.authorityVersionVector),
+                thoughtTriggerRef: options.thoughtInvocationContext.triggerRef,
+                semanticProjectionHash: options.thoughtInvocationContext.semanticProjectionHash,
+                dispatchMessagesHash: options.thoughtInvocationContext.dispatchMessagesHash,
+                allowlistFingerprint: options.thoughtInvocationContext.allowlistFingerprint,
+                mfInvocationId: attempt.receipt().invocationId,
+                mfAttemptId: attempt.receipt().attemptId,
+                actualProvider: targetProvider,
+                actualOccupantId: currentPolicy.occupant.occupantId,
+                actualWireBindingId: dispatchContract.structuredOutputBindingId ?? "none",
+                schemaEnforcementMode: dispatchContract.structuredOutputMode ?? "none",
+                resourcePolicyFingerprint: thoughtResourcePolicyIdentity().fingerprint,
+                absoluteDeadlineAtMs: options.thoughtInvocationContext.absoluteDeadlineAtMs,
+              },
+            }
+          : {}),
         dispatch: async ({ modelAlias: alias, signal }) => {
           const merged = combineSignals(signal, options.deadlineAtMs);
           const adapter = adapterFor(targetProvider);
           attempt.markDispatchAttempted();
+          if (privateBudgetBinding && !privateBudgetCommitted) {
+            commitPrivateDispatch(privateBudgetBinding.sidecar, {
+              reservationId: privateBudgetBinding.reservationId,
+              invocationId: attempt.receipt().invocationId,
+              attemptId: attempt.receipt().attemptId,
+              nowMs: Date.now(),
+            });
+            privateBudgetCommitted = true;
+          }
           try {
             const completion = await adapter.dispatch({
               messages,
@@ -731,6 +822,14 @@ export async function completeChat(
               finishReason: completion.finishReason ?? null,
               usage: completion.usage,
             });
+            if (privateBudgetBinding && privateBudgetCommitted) {
+              recordPrivateProviderResponse(privateBudgetBinding.sidecar, {
+                reservationId: privateBudgetBinding.reservationId,
+                invocationId: attempt.receipt().invocationId,
+                attemptId: attempt.receipt().attemptId,
+                nowMs: Date.now(),
+              });
+            }
             return {
               providerModel: completion.providerModel,
               usage: completion.usage,
@@ -740,6 +839,7 @@ export async function completeChat(
                 usage: completion.usage,
                 providerModel: completion.providerModel,
                 finishReason: completion.finishReason ?? null,
+                wireEvidence: completion.wireEvidence,
               },
             };
           } catch (err) {
@@ -784,7 +884,71 @@ export async function completeChat(
         },
       });
       fabric.setAttentionRequestId(result.requestId);
-      return result;
+      const capturedAttemptIdentity =
+        purpose === "thought"
+          ? {
+              allocationId: result.requestId,
+              modelFabricInvocationId: attempt.receipt().invocationId,
+              modelFabricAttemptId: attempt.receipt().attemptId,
+              attemptOrdinal: attempt.receipt().attemptOrdinal,
+              dispatchSequence: result.acceptedDispatchIdentity.dispatchSequence,
+              routeAlias: result.acceptedDispatchIdentity.routeAlias,
+              provider: attempt.receipt().provider,
+              configuredModelId: attempt.receipt().configuredModelId,
+              occupantId: attemptContext.resolvedRoute.occupantId,
+              modelEpoch: result.acceptedDispatchIdentity.modelEpoch,
+              contractId: result.acceptedDispatchIdentity.contractId,
+              buildIdentity: result.acceptedDispatchIdentity.buildIdentity,
+              logicalStructuredOutputId:
+                dispatchContract.structuredOutputContractId ?? "none",
+              semanticSchemaFingerprint:
+                dispatchContract.structuredOutputSchemaFingerprint ?? "none",
+              actualWireBindingId:
+                dispatchContract.structuredOutputBindingId ?? "none",
+              schemaEnforcementMode:
+                dispatchContract.structuredOutputMode ?? "none",
+              resourcePolicyFingerprint:
+                thoughtResourcePolicyIdentity().fingerprint,
+            }
+          : undefined;
+      const wireEvidence = result.result.wireEvidence;
+      const capabilityIdentity =
+        purpose === "thought" && capturedAttemptIdentity && wireEvidence
+          ? buildThoughtCapabilityIdentity({
+              executableBuildIdentity: capturedAttemptIdentity.buildIdentity,
+              semanticContractFingerprint:
+                capturedAttemptIdentity.semanticSchemaFingerprint,
+              kernelEnvelopeContractVersion: THOUGHT_KERNEL_ENVELOPE_VERSION,
+              parserValidatorFingerprint:
+                `sha256:${sha256Text(THOUGHT_SEMANTIC_PARSER_ID)}`,
+              provider: capturedAttemptIdentity.provider,
+              configuredModelId: capturedAttemptIdentity.configuredModelId,
+              occupantId: capturedAttemptIdentity.occupantId,
+              logicalBindingId: capturedAttemptIdentity.logicalStructuredOutputId,
+              wireBindingId:
+                wireEvidence.bindingId ?? capturedAttemptIdentity.actualWireBindingId,
+              schemaEnforcementMode:
+                capturedAttemptIdentity.schemaEnforcementMode as
+                  | "native_json_schema"
+                  | "guided_json"
+                  | "json_object_compatibility",
+              resourcePolicyFingerprint:
+                capturedAttemptIdentity.resourcePolicyFingerprint,
+              adapterCompatibilityFingerprint:
+                `sha256:${sha256Text(stableJson({
+                  adapterId: wireEvidence.adapterId,
+                  wireFormat: wireEvidence.wireFormat,
+                  emittedEnforcementMode: wireEvidence.emittedEnforcementMode,
+                }))}`,
+            })
+          : undefined;
+      if (wireEvidence) attempt.setWireEvidence(wireEvidence);
+      if (capabilityIdentity) attempt.setCapabilityIdentity(capabilityIdentity);
+      return {
+        ...result,
+        ...(capturedAttemptIdentity ? { capturedAttemptIdentity } : {}),
+        ...(capabilityIdentity ? { capabilityIdentity } : {}),
+      };
     } catch (error) {
       attempt.markFailure(errorClassFor(error));
       throw error;
@@ -798,7 +962,7 @@ export async function completeChat(
       (routeId === "thought" || purpose === "thought") &&
       provider === "nim";
 
-    if (isThoughtRoute) {
+    if (isThoughtRoute && !options.disableThoughtTransportFailover) {
       try {
         attentive = await singleDispatch(provider, modelAlias, quotaBucket);
       } catch (primaryErr) {
@@ -850,11 +1014,21 @@ export async function completeChat(
     }
 
     const inner = attentive.result;
-    const modelFabric = fabric.finalize(
-      transportFailoverUsed
-        ? "transport_failover"
-        : options.modelFallbackChain?.fallbackClass ?? "none",
-    );
+    const capturedAttemptIdentity = (attentive as {
+      capturedAttemptIdentity?: CapturedThoughtAttemptIdentity;
+    }).capturedAttemptIdentity;
+    const capabilityIdentity = (attentive as {
+      capabilityIdentity?: ThoughtCapabilityIdentity;
+    }).capabilityIdentity;
+    const modelFabric = {
+      ...fabric.finalize(
+        transportFailoverUsed
+          ? "transport_failover"
+          : options.modelFallbackChain?.fallbackClass ?? "none",
+      ),
+      ...(inner.wireEvidence ? { wireEvidence: inner.wireEvidence } : {}),
+      ...(capabilityIdentity ? { capabilityIdentity } : {}),
+    };
     return {
       text: inner.text,
       model: attentive.modelAlias,
@@ -865,6 +1039,9 @@ export async function completeChat(
       finishReason: inner.finishReason ?? null,
       attentionRequestId: attentive.requestId,
       acceptedDispatchIdentity: attentive.acceptedDispatchIdentity,
+      capturedAttemptIdentity,
+      wireEvidence: inner.wireEvidence,
+      capabilityIdentity,
       modelFabric,
       contextProjection,
     };
@@ -890,6 +1067,30 @@ export async function completeChat(
       ...existingMeta,
       failure: existingMeta?.failure ?? failure,
     };
+    if (privateBudgetBinding) {
+      try {
+        const terminalAttempt =
+          last.receipt.receiptStage === "resolved"
+            ? last.receipt.attempts[last.receipt.attempts.length - 1]
+            : null;
+        const dispatchTruth = terminalAttempt?.dispatchTruth ?? "not_sent";
+        if (dispatchTruth === "not_sent" && (privateBudgetBound || !terminalAttempt)) {
+          releasePrivateReservation(privateBudgetBinding.sidecar, {
+            reservationId: privateBudgetBinding.reservationId,
+            proofRef: `model-fabric:${fabric.invocationId}:${terminalAttempt?.attemptId ?? "pre-resolution"}:not-sent`,
+            dispatchTruth: "not_started",
+            invocationId: fabric.invocationId,
+            attemptId: terminalAttempt?.attemptId,
+            nowMs: Date.now(),
+          });
+        } else if (!privateBudgetCommitted && privateBudgetBound) {
+          markPrivateReservationUnknown(privateBudgetBinding.sidecar, privateBudgetBinding.reservationId, { nowMs: Date.now() });
+        }
+      } catch {
+        // Preserve the original provider/model error. Startup recovery will
+        // conservatively reconcile an unsettled private reservation.
+      }
+    }
     attachModelFabricMetadata(error, metadata);
     throw error;
   }

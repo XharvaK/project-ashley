@@ -18,6 +18,8 @@ import {
   markRunning,
   setRequestModelEpoch,
   tryAdmitRequest,
+  bindThoughtAttempt,
+  type ThoughtAttemptBinding,
 } from "./ledger.js";
 import { monthlyUsageSummary } from "./daily.js";
 import { quotaContractFor } from "../model-routing/router.js";
@@ -64,6 +66,8 @@ export type AttentionDispatchInput = {
     result: unknown;
   }>;
   demoteActiveSensitive?: (db: DatabaseSync) => void;
+  /** Persist exact Thought/MF attempt facts before the provider adapter call. */
+  thoughtAttemptBinding?: Omit<ThoughtAttemptBinding, "allocationId">;
 };
 
 export type AttentionDispatchResult<T> = {
@@ -228,6 +232,12 @@ export async function runAttentiveDispatch<T>(
             : input.signal;
 
         try {
+          if (input.thoughtAttemptBinding) {
+            bindThoughtAttempt(db, {
+              ...input.thoughtAttemptBinding,
+              allocationId: requestId,
+            });
+          }
           const dispatched = await input.dispatch({
             modelAlias,
             signal: deadlineSignal,

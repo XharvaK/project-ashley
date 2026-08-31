@@ -22,7 +22,7 @@ export type Budget = {
   stableReserveTokens: number;
 };
 
-export const ORDINARY_THOUGHT_BUDGET_MS = 10_000;
+export const ORDINARY_THOUGHT_BUDGET_MS = 30_000;
 export const INTERACTIVE_THOUGHT_MAX_OUTPUT = 4_096;
 export const STRUCTURAL_RETRY_MAX_OUTPUT = 2_048;
 export const STABLE_RESERVE_TOKENS = 0;

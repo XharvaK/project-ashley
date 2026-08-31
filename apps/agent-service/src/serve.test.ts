@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentManager } from "./agent.js";
 import { env } from "./env.js";
 import { serveAgent } from "./serve.js";
+import { openNuclearDb } from "./core/db.js";
 import { startNuclearCuriosityLoop } from "./core/curiosity/tick.js";
 import { startCognitionLoop } from "./core/cognition/worker.js";
 import { startEngineeringAutonomyLoops } from "./core/sandbox/engineering-runtime.js";
@@ -92,7 +93,9 @@ const originalDurable = env.durableBoundedOperationEnabled;
 const originalDurableThought = env.durableOperationalThoughtEnabled;
 
 function fakeManager(sidecar: DatabaseSync | null): AgentManager {
-  const nuclear = new DatabaseSync(":memory:");
+  const nuclear = sidecar
+    ? openNuclearDb(new DatabaseSync(":memory:"))
+    : new DatabaseSync(":memory:");
   return {
     init: vi.fn(async () => undefined),
     core: {

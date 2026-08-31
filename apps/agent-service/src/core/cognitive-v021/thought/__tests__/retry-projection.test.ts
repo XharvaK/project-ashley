@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import { openTestSidecar, makeThoughtDraft } from "../../test-support.js";
-import { admitCycle, appendInboxEvent } from "../../cycle/inbox.js";
+import { admitTestCycle, openTestSidecar, makeThoughtDraft } from "../../test-support.js";
+import { appendInboxEvent } from "../../cycle/inbox.js";
 import { appendOwnerUtterance } from "../../evidence/conversation-log.js";
 import { buildThoughtInput } from "../input.js";
 import { allocateThoughtProjection, thoughtMessagesForProjection } from "../projection-allocator/allocator.js";
@@ -32,7 +32,7 @@ describe("Structural Retry Projection Invariants (§14, §17.8)", () => {
   it("reuses identical semantic projection and hashes on malformed retry without re-retrieval", () => {
     const sidecar = openTestSidecar();
     try {
-      const cycle = admitCycle(sidecar, {
+      const cycle = admitTestCycle(sidecar, {
         conversationId: "conv-retry-1",
         triggerKind: "owner_message",
         triggerRef: "ev-1",
@@ -137,7 +137,7 @@ describe("Structural Retry Projection Invariants (§14, §17.8)", () => {
     const attentionDb = openTestSidecar();
 
     try {
-      const cycle = admitCycle(sidecar, {
+      const cycle = admitTestCycle(sidecar, {
         cycleId: "cycle-retry-ident",
         conversationId: "thread-retry-ident",
         triggerKind: "owner_message",
@@ -247,7 +247,7 @@ describe("Structural Retry Projection Invariants (§14, §17.8)", () => {
     const attentionDb = openTestSidecar();
 
     try {
-      const cycle = admitCycle(sidecar, {
+      const cycle = admitTestCycle(sidecar, {
         cycleId: "cycle-dur-1",
         conversationId: "thread-dur-1",
         triggerKind: "owner_message",

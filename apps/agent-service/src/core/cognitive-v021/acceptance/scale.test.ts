@@ -9,7 +9,7 @@ import { openDerivedStore } from "../retrieval/derived-store.js";
 import { retrieveCandidates, tokenizeForDiscovery } from "../retrieval/discover.js";
 import { buildThoughtInput } from "../thought/input.js";
 import { allocateThoughtProjection } from "../thought/projection-allocator/allocator.js";
-import { admitCycle } from "../cycle/inbox.js";
+import { admitTestCycle } from "../test-support.js";
 
 describe("Thought Context Scale Qualification Harness (1K, 10K, 100K)", () => {
   const scales = [1_000, 10_000, 100_000];
@@ -102,7 +102,7 @@ describe("Thought Context Scale Qualification Harness (1K, 10K, 100K)", () => {
         expect(fullSourceScans).toBe(0); // HARD INVARIANT: zero full source scans on valid queries
 
         // 4. Build Thought Input and Allocate Projection
-        const cycle = admitCycle(sidecar, {
+        const cycle = admitTestCycle(sidecar, {
           cycleId: `cycle-scale-${count}`,
           conversationId: "thread-scale",
           generation: 1,

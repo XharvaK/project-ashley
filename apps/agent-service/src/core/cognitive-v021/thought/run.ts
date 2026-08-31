@@ -21,11 +21,18 @@ import {
   type ThoughtParserFailureCode,
   type ThoughtStepOutput,
   type ThoughtSettlementDraft,
+  type ThoughtSemanticOutput,
+  type KernelEnvelope,
+  type SettlementSemanticOutput,
+  type ObservationIntentSemanticOutput,
+  type EffectIntentSemanticOutput,
+  type SemanticRef,
   type Observation,
   type DeliveryIntent,
   type RememberDirective,
   type AuthorityCode,
 } from "../types.js";
+import type { PrivateBudgetDispatchBinding } from "../private-budget/ledger.js";
 import { getCycle, getCurrentCycle, admitCycle, appendCycleLogIds, updateCycleState } from "../cycle/inbox.js";
 import { getConversationEvidence, listConversationEvidence } from "../evidence/conversation-log.js";
 import { listInFlight } from "../effect/in-flight.js";
@@ -33,7 +40,9 @@ import { dispatchEffect } from "../effect/proposal.js";
 import { registerActiveThought } from "../cycle/active.js";
 import { adaptPerception } from "../perception/adapter.js";
 import { buildThoughtInput } from "./input.js";
-import { parseThoughtStepOutput } from "./parse.js";
+import { parseThoughtSemanticOutput, THOUGHT_SEMANTIC_PARSER_ID } from "./parse.js";
+import { buildReferenceAllowlist } from "./reference-allowlist.js";
+import { bindEffectIntent, bindObservationIntent } from "./operation-binding.js";
 import {
   thoughtOutputCompatibilityInstruction,
   thoughtOutputStructuredRequest,
@@ -56,6 +65,7 @@ import {
 } from "./projection.js";
 import { validateThoughtSettlementDraft } from "../settlement/validate.js";
 import { getPublishedSettlementIdentity, publishSemanticTransaction } from "../settlement/publish.js";
+import { getWake } from "../wake/ledger.js";
 import { admitOwnerSuppliedClaim } from "../memory/admission.js";
 import { recordDiagnostic } from "./diagnostics.js";
 import { metadataFromError } from "../../model-fabric/receipts.js";
@@ -67,14 +77,19 @@ import {
   incrementThoughtAttemptCounter,
   type ThoughtAttemptCounters,
 } from "./counters.js";
+import { buildKernelEnvelope } from "./kernel-envelope.js";
+import { THOUGHT_OUTPUT_SCHEMA_FINGERPRINT } from "./output-contract.js";
+import { captureAuthorityCurrentness, hasAuthorityBarrier } from "../authority/barrier.js";
 
 export type ThoughtInvocation = {
   output: ThoughtStepOutput;
+  semantic?: ThoughtSemanticOutput;
   attempts: number;
   requestId: string;
   malformed?: boolean;
   unavailable?: boolean;
   cancelled?: boolean;
+  kernelEnvelope?: KernelEnvelope;
 };
 
 export type ThoughtCompleteInvoker = (
@@ -102,19 +117,19 @@ export async function invokeThoughtComplete(
 const STRUCTURAL_FEEDBACK: Readonly<Record<ThoughtParserFailureCode, string>> = {
   invalid_json: "Return exactly one JSON object.",
   root_not_object: "Return a JSON object at the root.",
-  wrong_kind: "Use one permitted ThoughtStepOutput kind.",
+  wrong_kind: "Use one permitted semantic Thought kind.",
   identity_missing: "Include every required Thought identity field.",
   identity_mismatch: "Preserve the active Thought identity fields.",
   missing_settlement_fields: "Include all required settlement sections.",
   speech_contract_failure: "Emit the required speech object shape.",
   commitment_contract_failure: "Emit the required commitments object shape.",
-  operations_contract_failure: "Emit the required operations object shape.",
-  authority_contract_failure: "Emit the required authority object shape.",
+  operations_contract_failure: "Use the semantic evidenceUse object shape.",
+  authority_contract_failure: "Do not emit kernel-owned authority fields.",
   observation_contract_failure: "Emit the required observation request shape.",
   effect_contract_failure: "Emit the required effect proposal shape.",
   forbidden_fields: "Omit publication and delivery fields.",
   schema_version_mismatch: "Use the active Thought schema version.",
-  other: "Match the ThoughtStepOutput contract exactly.",
+  other: "Match the semantic Thought contract exactly.",
 };
 
 function thoughtMessages(
@@ -129,14 +144,180 @@ function thoughtMessages(
       role: "system",
       content: [
         "You are Ashley's Thought layer.",
-        "Return exactly one JSON ThoughtStepOutput or a flat ThoughtSettlementDraft.",
+        "Return exactly one JSON semantic Thought output.",
         thoughtOutputCompatibilityInstruction(),
-        "Code validates identity, authority, speech licensing, and publication.",
+        "Code validates semantics, authority, speech licensing, and publication.",
         "Do not return finalLicensedText, settlementId, delivery, outbox, reservation, or workspace state.",
         ...(feedback ? [feedback] : []),
       ].join(" "),
     },
     { role: "user", content: JSON.stringify(input) },
+  ];
+}
+
+function semanticReferenceValue(
+  value: SemanticRef | string | null,
+  localAliases: Map<string, string>,
+): string | null {
+  if (!value) return null;
+  if (typeof value === "string") return value;
+  if (value.kind === "existing") return value.ref;
+  const existing = localAliases.get(value.alias);
+  if (existing) return existing;
+  const allocated = randomUUID();
+  localAliases.set(value.alias, allocated);
+  return allocated;
+}
+
+function materializeSemanticSettlement(
+  semantic: SettlementSemanticOutput,
+  input: ThoughtInput | ProjectedThoughtInput,
+): ThoughtSettlementDraft {
+  // Local semantic aliases are resolved to ordinary durable IDs in this
+  // kernel projection. The aliases themselves never become a lookup namespace.
+  const localAliases = new Map<string, string>();
+  const conversationId = input.rawConversation[0]?.conversationId
+    ?? input.occupancy[0]?.conversationId
+    ?? input.cycleId;
+  return {
+    schemaVersion: 1,
+    cycleId: input.cycleId,
+    generation: input.generation,
+    authorityEpoch: input.authorityEpoch,
+    occupantId: input.occupantId,
+    architectureEpoch: "v0.2.1",
+    triggerRef: input.trigger.ref,
+    interpretation: {
+      discourseActs: [...semantic.interpretation.discourseActs],
+      referentBindings: semantic.interpretation.referentBindings.map((binding) => ({
+        span: binding.span,
+        ...(binding.concernRef ? { concernId: semanticReferenceValue(binding.concernRef, localAliases) } : {}),
+        ...(binding.entityRef ? { entityKey: semanticReferenceValue(binding.entityRef, localAliases) } : {}),
+        sourceTurnIds: [...binding.sourceTurnRefs],
+      })),
+      corrections: semantic.interpretation.corrections.map((correction) => ({
+        correctedTurnIds: [...correction.correctedTurnRefs],
+        fromSpan: correction.fromSpan,
+        toSpan: correction.toSpan,
+        ...(correction.concernRef ? { concernId: semanticReferenceValue(correction.concernRef, localAliases) } : {}),
+      })),
+      unresolvedAmbiguities: [...semantic.interpretation.unresolvedAmbiguities],
+      topics: [...semantic.interpretation.topics],
+    },
+    commitments: {
+      epistemic: semantic.commitments.epistemic.map((item) => ({ ...item })),
+      conversational: [...semantic.commitments.conversational],
+      stance: { ...semantic.commitments.stance },
+    },
+    speech: {
+      mode: semantic.speech.mode,
+      mustSay: [...semantic.speech.mustSay],
+      mustNot: [...semantic.speech.mustNotSay],
+      surfaceDraft: semantic.speech.mode === "draft" ? semantic.speech.surfaceDraft ?? null : null,
+      acceptableRealizations: [...semantic.speech.acceptableRealizations],
+      presentationDirectives: [...semantic.speech.presentationDirectives],
+    },
+    workingContextDelta: semantic.workingContextDeltas.map((delta) => {
+      if (delta.op === "abandon") return { op: "abandon", id: delta.target };
+      const item = delta.op === "upsert" ? delta.item : delta.replacement;
+      const legacyItem = {
+        id: semanticReferenceValue(item.identity, localAliases) ?? randomUUID(),
+        conversationId,
+        type: item.type,
+        text: item.text,
+        concernId: semanticReferenceValue(item.concernRef, localAliases),
+        sourceTurnIds: [...item.sourceTurnRefs],
+        status: item.status,
+        supersedesId: semanticReferenceValue(item.supersedesRef, localAliases),
+      };
+      return delta.op === "upsert"
+        ? { op: "upsert", item: legacyItem }
+        : { op: "supersede", id: delta.target, replacement: legacyItem };
+    }),
+    concernDeltas: semantic.concernDeltas.map((delta) => delta.op === "resolve"
+      ? { op: "resolve", concernId: delta.target }
+      : {
+          op: "upsert",
+          record: {
+          concernId: semanticReferenceValue(delta.record.identity, localAliases) ?? randomUUID(),
+            conversationId,
+            statement: delta.record.statement,
+            sourceTurnIds: [...delta.record.sourceTurnRefs],
+            dimensions: { ...delta.record.dimensions },
+            assertionKey: null,
+            status: delta.record.status,
+          },
+        }),
+    occupancyDelta: semantic.occupancyDeltas.map((delta) => ({
+      op: "set",
+      occupancy: {
+        conversationId,
+        concernId: semanticReferenceValue(delta.concernRef, localAliases) ?? randomUUID(),
+        status: delta.status,
+        priority: delta.priority,
+        updatedGeneration: input.generation,
+      },
+    })),
+    futureTriggers: semantic.futureTriggerDeltas.map((delta) => delta.op === "cancel"
+      ? { op: "cancel", triggerId: delta.target }
+      : {
+          op: "create",
+          trigger: {
+            triggerId: randomUUID(),
+            conversationId,
+            concernId: semanticReferenceValue(delta.concernRef, localAliases) ?? randomUUID(),
+            snapshotHash: "semantic-proposal",
+            dueAtMs: delta.dueAtMs,
+            payload: { purpose: delta.purpose, ...delta.payload },
+          },
+        }),
+    subscriptions: semantic.subscriptionDeltas.map((delta) => delta.op === "cancel"
+      ? { op: "cancel", subscriptionId: delta.target }
+      : {
+          op: "create",
+          subscription: {
+            subscriptionId: randomUUID(),
+            conversationId,
+            concernId: semanticReferenceValue(delta.subscription.concernRef, localAliases),
+            source: delta.subscription.source,
+            scope: delta.subscription.scope,
+            topicKeys: [...delta.subscription.topicKeys],
+            match: delta.subscription.match,
+            expiresAtMs: delta.subscription.expiresAtMs,
+          },
+        }),
+    durableNominations: semantic.durableNominations.map((nomination) => ({
+      nominationId: randomUUID(),
+      cycleId: input.cycleId,
+      generation: input.generation,
+      assertionKey: randomUUID(),
+      statement: nomination.statement,
+      memoryKind: nomination.memoryKind,
+      dimensions: { ...nomination.dimensions },
+      dataClassification: nomination.dataClassification,
+      supersedesAssertionKey: nomination.supersedesRef,
+      concernId: semanticReferenceValue(nomination.concernRef, localAliases),
+    })),
+    operations: {
+      observationsConsumed: [...semantic.evidenceUse.observationRefsUsed],
+      // Effect completion is receipt/Authority truth. The model cannot emit a
+      // completion list or turn an in-flight effect into a success claim.
+      effectsCompleted: [],
+      intentsStillInFlight: [...semantic.evidenceUse.openIntentRefs],
+    },
+    authority: { objectionsApplied: [], revisionCount: 0 },
+  } as ThoughtSettlementDraft;
+}
+
+function semanticReferencesForInput(input: ThoughtInput | ProjectedThoughtInput): string[] {
+  return [
+    ...input.rawConversation.map((row) => row.rowId),
+    ...input.workingContext.map((item) => item.id),
+    ...input.occupancy.map((item) => item.concernId),
+    ...input.observations.map((item) => item.observationId),
+    ...input.inFlight.map((item) => item.effectId),
+    ...input.retrieval.hits.flatMap((hit) => "supportRefs" in hit ? [hit.ref, ...hit.supportRefs] : [hit.ref]),
+    input.trigger.ref,
   ];
 }
 
@@ -151,6 +332,11 @@ export async function runThoughtModel(
     structuralFeedback?: ThoughtParserFailureCode;
     /** Optional caller narrowing; it may never widen the Model Fabric policy. */
     maxTokens?: number;
+    /** Qualification-only seam for the exact NIM candidate; no fallback is allowed. */
+    disableThoughtTransportFailover?: boolean;
+    /** W7 exact private-budget reservation bridge for this Thought invocation. */
+    privateBudgetBinding?: PrivateBudgetDispatchBinding;
+    nowMs?: number;
   },
 ): Promise<ThoughtInvocation> {
   const pass = options.pass ?? 1;
@@ -165,6 +351,8 @@ export async function runThoughtModel(
     ownerId: input.occupantId,
     deadlineAtMs: options.deadlineAtMs,
     maxTokens: options.maxTokens,
+    disableThoughtTransportFailover: options.disableThoughtTransportFailover || Boolean(options.privateBudgetBinding),
+    privateBudgetBinding: options.privateBudgetBinding,
     temperature: 0.15,
     signal: options.signal,
     requestId,
@@ -201,6 +389,31 @@ export async function runThoughtModel(
         dispatchMessagesHash,
       };
     }
+    semanticProjectionHash ??= dispatchMessagesHash ?? "sha256:unavailable";
+    dispatchMessagesHash ??= "sha256:unavailable";
+    const authorityCurrentness = hasAuthorityBarrier(deps.attentionDb)
+      ? captureAuthorityCurrentness(deps.attentionDb)
+      : undefined;
+    const thoughtInvocationContext = {
+      invocationId: requestId,
+      // Attention assigns the durable allocation immediately before binding.
+      // The completed envelope replaces this provisional value with the exact
+      // returned allocation ID.
+      allocationId: 0,
+      cycleId: input.cycleId,
+      generation: input.generation,
+      semanticPass: pass,
+      structuralAttemptOrdinal: options.structuralFeedback ? 1 : 0,
+      authorityEpoch: input.authorityEpoch,
+      authorityVersionVector: authorityCurrentness?.ownerVersions ?? { authorityEpoch: input.authorityEpoch },
+      authorityCurrentness,
+      triggerRef: input.trigger.ref,
+      semanticProjectionHash,
+      dispatchMessagesHash,
+      allowlistFingerprint: buildReferenceAllowlist(semanticReferencesForInput(input)).fingerprint,
+      absoluteDeadlineAtMs: options.deadlineAtMs,
+    };
+    dispatchOptions.thoughtInvocationContext = thoughtInvocationContext;
 
     const completion = await invokeThoughtComplete(
       messages,
@@ -223,20 +436,134 @@ export async function runThoughtModel(
         cancelled: true,
       };
     }
-    const output = parseThoughtStepOutput(completion.text, {
-      cycleId: input.cycleId,
-      generation: input.generation,
-      pass,
-      requestId,
-      occupantId: input.occupantId,
-      authorityEpoch: input.authorityEpoch,
-      consumedEffectIds: input.inFlight.filter((item) => item.status === "receipted").map((item) => item.effectId),
-    });
+    const semanticResult = parseThoughtSemanticOutput(
+      completion.text,
+      new Set(semanticReferencesForInput(input)),
+    );
+    if (!semanticResult.ok) {
+      const diagnosticCode: ThoughtParserFailureCode = ["invalid_json", "root_not_object", "wrong_kind"].includes(semanticResult.code)
+        ? semanticResult.code as ThoughtParserFailureCode
+        : "other";
+      const output: ThoughtStepOutput = {
+        kind: "failure",
+        cycleId: input.cycleId,
+        generation: input.generation,
+        pass,
+        requestId,
+        occupantId: input.occupantId,
+        reason: "malformed",
+        diagnosticCode,
+      };
+      return {
+        output,
+        attempts: 1,
+        requestId,
+        malformed: true,
+      };
+    }
+    const semantic = semanticResult.value;
+    const kernelEnvelope = completion.capturedAttemptIdentity
+      ? buildKernelEnvelope({
+          context: {
+            ...thoughtInvocationContext,
+            allocationId: completion.capturedAttemptIdentity.allocationId,
+          },
+          attempt: completion.capturedAttemptIdentity,
+          response: semantic,
+          parserValidatorIdentity: THOUGHT_SEMANTIC_PARSER_ID,
+          runtimeArtifactIdentity: THOUGHT_OUTPUT_SCHEMA_FINGERPRINT,
+        })
+      : undefined;
+    const output: ThoughtStepOutput = semantic.kind === "settlement"
+      ? {
+          kind: "settlement",
+          cycleId: input.cycleId,
+          generation: input.generation,
+          pass,
+          requestId,
+          occupantId: input.occupantId,
+          settlement: materializeSemanticSettlement(semantic, input),
+        }
+      : semantic.kind === "observation_intent"
+        ? (() => {
+            const bound = bindObservationIntent({
+              intent: semantic,
+              cycleId: input.cycleId,
+              generation: input.generation,
+              parentDeadlineAtMs: options.deadlineAtMs,
+              nowMs: options.nowMs ?? Date.now(),
+              authorityCurrentness,
+            });
+            return {
+              kind: "observation_request" as const,
+              cycleId: input.cycleId,
+              generation: input.generation,
+              pass,
+              requestId,
+              occupantId: input.occupantId,
+              observationRequest: {
+                requestId: bound.requestId,
+                cycleId: bound.cycleId,
+                generation: bound.generation,
+                kind: bound.kind,
+                 request: bound.request,
+                 replaySafe: true as const,
+                 authorityCurrentness: bound.authorityCurrentness,
+              },
+              correlationId: bound.correlationId,
+              expectedResultType: "observation" as const,
+              deadlineAtMs: bound.deadlineAtMs,
+            };
+          })()
+        : semantic.kind === "effect_intent"
+          ? (() => {
+              const bound = bindEffectIntent({
+                intent: semantic,
+                cycleId: input.cycleId,
+                generation: input.generation,
+                authorityEpoch: input.authorityEpoch,
+                parentDeadlineAtMs: options.deadlineAtMs,
+                nowMs: options.nowMs ?? Date.now(),
+                authorityCurrentness,
+              });
+              return {
+                kind: "effect_proposal" as const,
+                cycleId: input.cycleId,
+                generation: input.generation,
+                pass,
+                requestId,
+                occupantId: input.occupantId,
+                effectProposal: {
+                  effectId: bound.effectId,
+                  cycleId: bound.cycleId,
+                  generation: bound.generation,
+                  idempotencyKey: bound.idempotencyKey,
+                  kind: bound.kind,
+                   request: bound.request,
+                   authorityEpoch: bound.authorityEpoch,
+                   authorityCurrentness: bound.authorityCurrentness,
+                },
+                correlationId: bound.correlationId,
+                expectedResultType: "effect_receipt" as const,
+                deadlineAtMs: bound.deadlineAtMs,
+              };
+            })()
+          : {
+              kind: "abstain" as const,
+              cycleId: input.cycleId,
+              generation: input.generation,
+              pass,
+              requestId,
+              occupantId: input.occupantId,
+              abstain: semantic,
+            };
     return {
       output,
+      semantic,
       attempts: 1,
       requestId,
-      malformed: output.kind === "failure" && output.reason === "malformed",
+      malformed: false,
+      ...(kernelEnvelope ? { kernelEnvelope } : {}),
     };
   } catch (error) {
     const cancelled = options.signal?.aborted === true
@@ -536,6 +863,13 @@ function currentGenerationIs(
   return current?.cycleId === cycle.cycleId && current.generation === cycle.generation;
 }
 
+function authorityDbForPacks(
+  deps: KernelDeps,
+  packs: import("../types.js").AuthorityPacks,
+): DatabaseSync | undefined {
+  return packs.currentness.binding ? deps.attentionDb : undefined;
+}
+
 const REVISABLE_AUTHORITY_CODES = new Set<AuthorityCode>([
   "CURRENTNESS_UNVERIFIED",
   "RECEIPT_REQUIRED",
@@ -562,12 +896,17 @@ export async function runCognitiveCycle(
   _nuclear: DatabaseSync,
   event: InboxEvent,
   deps: KernelDeps,
+  options: { privateBudgetBinding?: PrivateBudgetDispatchBinding } = {},
 ): Promise<KernelRunResult> {
   const payload = payloadRecord(event);
   const directive = rememberDirective(payload);
   const requestedCycleId = typeof payload.cycleId === "string" ? payload.cycleId : null;
-  const existingCycle = requestedCycleId ? getCycle(sidecar, requestedCycleId) : getCurrentCycle(sidecar, event.conversationId);
+  const wake = getWake(sidecar, event.wakeId);
+  if (!wake) throw new Error("wake_missing");
+  const existingCycle = requestedCycleId ? getCycle(sidecar, requestedCycleId) : getCycle(sidecar, wake.cycleId) ?? getCurrentCycle(sidecar, event.conversationId);
+  if (existingCycle && existingCycle.wakeId !== wake.wakeId) throw new Error("wake_cycle_conflict");
   let cycle = existingCycle ?? admitCycle(sidecar, {
+      wakeId: wake.wakeId,
       conversationId: event.conversationId,
       triggerKind: triggerKind(event.kind),
       triggerRef: typeof payload.triggerRef === "string" ? payload.triggerRef : event.id,
@@ -689,6 +1028,7 @@ export async function runCognitiveCycle(
           rememberDirective: directive,
           authorityObjections,
           derivedStore: deps.derivedStore,
+          authorityDb: deps.attentionDb,
         });
         storeObservations(sidecar, input, deps.nowMs());
         allocated = allocateThoughtProjection({
@@ -736,6 +1076,8 @@ export async function runCognitiveCycle(
       maxTokens: structuralFeedback
         ? STRUCTURAL_RETRY_MAX_OUTPUT_TOKENS
         : undefined,
+      nowMs: deps.nowMs(),
+      privateBudgetBinding: options.privateBudgetBinding,
     });
     const cancellationReason = activeThought.cancellationReason;
     activeThought.unregister();
@@ -803,6 +1145,8 @@ export async function runCognitiveCycle(
         proposal: invocation.output.observationRequest,
         packs,
         authorityEpoch: cycle.authorityEpoch,
+        authorityDb: authorityDbForPacks(deps, packs),
+        expectedCurrentness: invocation.kernelEnvelope?.authorityCurrentness,
       });
       if (!verdict.ok) {
         if (revisable(verdict.codes)) {
@@ -849,6 +1193,8 @@ export async function runCognitiveCycle(
         proposal: invocation.output.effectProposal,
         packs,
         authorityEpoch: cycle.authorityEpoch,
+        authorityDb: authorityDbForPacks(deps, packs),
+        expectedCurrentness: invocation.kernelEnvelope?.authorityCurrentness,
       });
       if (!verdict.ok) {
         if (revisable(verdict.codes)) {
@@ -872,6 +1218,7 @@ export async function runCognitiveCycle(
           authorityEpoch: currentPacks.stateEpoch.authorityEpoch,
           generation: current?.generation,
           packs: currentPacks,
+          authorityDb: authorityDbForPacks(deps, currentPacks),
         };
       };
       const dispatch = await dispatchEffect(
@@ -893,6 +1240,10 @@ export async function runCognitiveCycle(
       continue;
     }
 
+    if (invocation.output.kind === "abstain") {
+      updateCycleState(sidecar, cycle.cycleId, "silent", deps.nowMs());
+      return resultWithCounters(cycle.cycleId, cycle.generation, null, counters);
+    }
     if (invocation.output.kind !== "settlement") {
       return emitFailure(invocation.output.reason);
     }
@@ -929,6 +1280,8 @@ export async function runCognitiveCycle(
         },
       },
       authorityEpoch: cycle.authorityEpoch,
+      authorityDb: authorityDbForPacks(deps, packs),
+      expectedCurrentness: invocation.kernelEnvelope?.authorityCurrentness,
     });
     if (!authority.ok) {
       if (revisable(authority.codes)) {
@@ -998,6 +1351,11 @@ export async function runCognitiveCycle(
       fidelity: validation.draft.speech.mode === "draft" ? "passed" : "skipped",
       origin: deps.origin,
       deliveryIntent: deliveryIntentFor(cycle, payload, "licensed_speech"),
+      authorityDb: authorityDbForPacks(deps, packs),
+      expectedCurrentness: invocation.kernelEnvelope?.authorityCurrentness ?? packs.currentness.binding,
+      wakeId: cycle.wakeId,
+      wakeLeaseToken: event.claimToken,
+      semanticPass: pass,
     });
     if (!publication.published) {
       counters = getThoughtAttemptCounters(sidecar, cycle.cycleId, cycle.generation);

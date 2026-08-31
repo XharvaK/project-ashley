@@ -8,7 +8,9 @@ describe("C3 additive schema", () => {
   it("creates typed influence, evidence, receipt, and seed-lineage tables", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     try {
-      expect(NUCLEAR_SUPPORTED_VERSION).toBe(42);
+      // The historical C3 packet recorded v42. Current source also includes
+      // W4 migrations v43 and v44; db.ts is the live schema authority.
+      expect(NUCLEAR_SUPPORTED_VERSION).toBe(44);
       expect(db.prepare("PRAGMA user_version").get()).toEqual({
         user_version: NUCLEAR_SUPPORTED_VERSION,
       });

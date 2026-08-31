@@ -18,6 +18,11 @@ export const AUTHORITY_CODES = [
   "STALE_GENERATION",
   "DRAFT_COMMITMENT_CONFLICT",
   "EMPTY_COMMITMENTS_WITH_DRAFT",
+  "AUTHORITY_TRANSITION_ACTIVE",
+  "AUTHORITY_PACK_INCOMPLETE",
+  "AUTHORITY_VECTOR_STALE",
+  "DERIVED_SCOPE_INVALIDATED",
+  "DERIVED_SCOPE_UNAVAILABLE",
 ] as const satisfies readonly AuthorityCode[];
 
 export function describeAuthorityCode(code: AuthorityCode): string {
@@ -39,6 +44,11 @@ export function describeAuthorityCode(code: AuthorityCode): string {
     case "STALE_GENERATION": return "the cycle generation is stale";
     case "DRAFT_COMMITMENT_CONFLICT": return "the draft conflicts with its commitments";
     case "EMPTY_COMMITMENTS_WITH_DRAFT": return "draft speech has no commitments";
+    case "AUTHORITY_TRANSITION_ACTIVE": return "an Authority transition is active";
+    case "AUTHORITY_PACK_INCOMPLETE": return "the Authority pack is incomplete";
+    case "AUTHORITY_VECTOR_STALE": return "the Authority version vector is stale";
+    case "DERIVED_SCOPE_INVALIDATED": return "the derived retrieval scope is invalidated";
+    case "DERIVED_SCOPE_UNAVAILABLE": return "the derived retrieval scope is unavailable";
     default: {
       const exhaustive: never = code;
       return exhaustive;

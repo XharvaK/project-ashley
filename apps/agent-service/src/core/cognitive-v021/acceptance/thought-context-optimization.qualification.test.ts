@@ -1,13 +1,13 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it, expect } from "vitest";
-import { openTestSidecar } from "../test-support.js";
+import { admitTestCycle, openTestSidecar } from "../test-support.js";
 import { upsertMemoryAssertion } from "../memory/assertions.js";
 import { openDerivedStore } from "../retrieval/derived-store.js";
 import { retrieveCandidates } from "../retrieval/discover.js";
 import { allocateThoughtProjection } from "../thought/projection-allocator/allocator.js";
 import { buildThoughtInput } from "../thought/input.js";
-import { admitCycle, appendInboxEvent } from "../cycle/inbox.js";
+import { appendInboxEvent } from "../cycle/inbox.js";
 import { appendOwnerUtterance } from "../evidence/conversation-log.js";
 import type { CapabilityReality, EpistemicDimensions, IdentitySlice, ThoughtInput } from "../types.js";
 
@@ -99,7 +99,7 @@ describe("Thought Context Optimization — Coherent Candidate Qualification", ()
       expect(integrity.ok).toBe(true);
 
       // 2. Set up conversation cycle
-      const cycle = admitCycle(sidecar, {
+      const cycle = admitTestCycle(sidecar, {
         cycleId: "cycle-incident-c-qual",
         conversationId: "thread-c-qual",
         triggerKind: "owner_message",

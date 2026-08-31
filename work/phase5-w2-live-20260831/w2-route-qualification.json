@@ -1,0 +1,71 @@
+{
+  "schema": "ashley.thought.route_qualification.v1",
+  "candidate": {
+    "provider": "nim",
+    "model": "openai/gpt-oss-20b",
+    "occupantId": "mfo_nim_openai_gpt_oss_20b_low"
+  },
+  "capabilityFingerprint": "sha256:16de55bc39463045e34d0952ed4b165e0a9b9c57858cf85ecc0dcededcdc0cf5",
+  "runId": "w2-20260831T130014690Z-e8435de7-1de1-4532-8294-e7c9171830f5",
+  "environment": "isolated_live",
+  "cases": [
+    {
+      "caseId": "settlement",
+      "invocationIds": [
+        "w2-20260831T130014690Z-e8435de7-1de1-4532-8294-e7c9171830f5:sample:0:settlement:0"
+      ],
+      "providerAttemptIds": [],
+      "transport": "failure",
+      "rawContentBytes": 0,
+      "rawContentDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "jsonSyntax": "fail",
+      "closedSchemaConformance": "fail",
+      "strictParser": "fail",
+      "kernelBinding": "fail",
+      "fencing": "fail",
+      "authorityReachability": "fail",
+      "semanticValidity": "fail",
+      "resourcePolicy": "fail",
+      "elapsedMs": 30015,
+      "outputTokens": null,
+      "wireMode": null,
+      "wireBindingId": null,
+      "providerDeclaredEnforcement": null,
+      "capabilityFingerprint": null,
+      "failureCodes": [
+        "invalid_json",
+        "strict_parser_rejected",
+        "transport_failure",
+        "empty_raw_content",
+        "provider_evidence_missing",
+        "model_evidence_missing",
+        "kernelBinding_failed",
+        "fencing_failed",
+        "authorityReachability_failed",
+        "semantic_invalid",
+        "resource_policy_mismatch",
+        "wire_evidence_missing",
+        "capability_evidence_missing"
+      ],
+      "verdict": "NOT_QUALIFIED"
+    }
+  ],
+  "preflight": {
+    "portfolioRevisionId": "mfp_current_compatibility_v1",
+    "registryVersion": "sha256:5f3012000454afea7cf3409ff4d72cf0ccca150a4499656f1786300c4d160300",
+    "policyRowId": "mfr_thought_interactive_compat_v1",
+    "occupantId": "mfo_nim_openai_gpt_oss_20b_low",
+    "provider": "nim",
+    "model": "openai/gpt-oss-20b",
+    "logicalBindingId": "ashley.thought.semantic.v1",
+    "schemaFingerprint": "sha256:9bf27fc16755f26917ab2eeae55010b7a94212c593847aa37e5e4a634563fb9b",
+    "wireBindingId": "compat_thought_nim_gpt_oss_20b_json_object_v1",
+    "wireMode": "json_object_compatibility",
+    "wireFormat": "json_object",
+    "buildIdentity": "573393c3fdb2392a45137d4625635658eb4b5d88",
+    "credentialPresent": true
+  },
+  "outputDirectory": "C:\\Users\\Xharv\\Projects\\composer-assistant-audit-573393c\\work\\phase5-w2-live-20260831",
+  "qualificationResultPath": null,
+  "verdict": "OUTCOME_UNKNOWN"
+}

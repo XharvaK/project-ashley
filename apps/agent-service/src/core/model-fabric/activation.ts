@@ -13,8 +13,10 @@ import { dirname, join } from "node:path";
 import {
   loadFabricCatalog,
   loadTargetPortfolio,
+  hasThoughtQualificationEvidence,
   type TargetPortfolio,
 } from "./catalog.js";
+import { assertThoughtCapabilityEvidence } from "./capability-identity.js";
 import { capabilityProfileFor } from "./profiles.js";
 import {
   currentPortfolio,
@@ -187,17 +189,26 @@ function writeJsonImmutable(
   path: string,
   value: ArtifactValue,
 ): void {
-  if (existsSync(path)) throw new Error("artifact_immutable");
-  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, {
-    encoding: "utf8",
-    flag: "wx",
-    mode: 0o600,
-  });
+  const serialized = `${JSON.stringify(value, null, 2)}\n`;
+  try {
+    writeFileSync(path, serialized, {
+      encoding: "utf8",
+      flag: "wx",
+      mode: 0o600,
+    });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    // Repeating the exact immutable publication is idempotent. A different
+    // byte sequence under the same identity remains a hard immutability
+    // violation.
+    if (readFileSync(path, "utf8") === serialized) return;
+    throw new Error("artifact_immutable");
+  }
 }
 
 export function writeImmutableArtifact<T extends ArtifactValue>(input: {
   controlDir: string;
-  directory: "qualifications" | "consultations" | "preflights";
+  directory: "qualifications" | "consultations" | "preflights" | "release-truth";
   id: string;
   artifact: T;
   controlRootMode: ControlRootMode;
@@ -570,7 +581,8 @@ export function validateActivation(input: {
     );
     if (!result) throw new Error("activation_qualification_missing");
     if (
-      result.schema !== "ashley.evaluation.qualification_result.v1" ||
+      (result.schema !== "ashley.evaluation.qualification_result.v1" &&
+        result.schema !== "ashley.evaluation.qualification_result.v2") ||
       result.status !== "PASS" ||
       result.invalidated
     ) {
@@ -596,6 +608,12 @@ export function validateActivation(input: {
       result.profileBinding.configuredModelId !== expectedProfile.configuredModelId
     ) {
       throw new Error("activation_profile_binding_mismatch");
+    }
+    if (row.logicalRole === "thought") {
+      if (!hasThoughtQualificationEvidence(result)) {
+        throw new Error("activation_qualification_capability_missing");
+      }
+      assertThoughtCapabilityEvidence(result);
     }
     if (isNewFamily(occupant)) {
       const consultation = input.consultations.find(
@@ -681,7 +699,8 @@ function loadQualification(
   );
   if (!raw) return null;
   if (
-    raw.schema !== "ashley.evaluation.qualification_result.v1" ||
+    (raw.schema !== "ashley.evaluation.qualification_result.v1" &&
+      raw.schema !== "ashley.evaluation.qualification_result.v2") ||
     raw.qualificationResultId !== qualificationResultId
   ) {
     throw new Error("qualification_artifact_invalid");

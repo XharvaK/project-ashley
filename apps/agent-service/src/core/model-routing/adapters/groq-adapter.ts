@@ -10,6 +10,7 @@ import type {
   ProviderDispatchArgs,
 } from "../types.js";
 import type { TrustedStructuredOutputControl } from "../../model-fabric/types.js";
+import { wireEvidenceFor } from "../../model-fabric/wire-evidence.js";
 
 type GroqErrorResponse = {
   error?: { type?: string; message?: string };
@@ -266,6 +267,11 @@ export function createGroqAdapter(
         args.modelId,
         args.fabricStructuredOutput,
       );
+      const wireEvidence = wireEvidenceFor({
+        adapterId: "ashley.adapter.groq.v1",
+        body,
+        structuredOutput: args.fabricStructuredOutput,
+      });
       const res = await fetchFn(`${env.groqBaseUrl}/chat/completions`, {
         method: "POST",
         headers: {
@@ -303,6 +309,7 @@ export function createGroqAdapter(
         providerModel:
           typeof json.model === "string" ? json.model : null,
         finishReason: toFinishReason(choice?.finish_reason),
+        wireEvidence,
       };
       return completion;
     },

@@ -39,6 +39,7 @@ type DispatchSnapshot = {
   authorityEpoch: number;
   generation?: number;
   packs?: AuthorityPacks;
+  authorityDb?: DatabaseSync;
 };
 
 export async function dispatchEffect(
@@ -47,10 +48,12 @@ export async function dispatchEffect(
   current: {
     authorityEpoch: number;
     generation?: number;
+    authorityDb?: DatabaseSync;
     reload?: () => {
       authorityEpoch: number;
       generation?: number;
       packs?: AuthorityPacks;
+      authorityDb?: DatabaseSync;
     };
   },
   execute: (proposal: EffectProposal) => Promise<unknown>,
@@ -59,6 +62,7 @@ export async function dispatchEffect(
   const initial: DispatchSnapshot = current.reload?.() ?? {
     authorityEpoch: current.authorityEpoch,
     generation: current.generation,
+    authorityDb: current.authorityDb,
   };
   const authorityPacks = typeof packs === "function" ? packs() : packs ?? initial.packs ?? {
     epistemic: { allowInferredWorldClaims: false },
@@ -74,7 +78,12 @@ export async function dispatchEffect(
     relational: { withdrawalActive: false, neverMention: [] },
     stateEpoch: { authorityEpoch: initial.authorityEpoch },
   } satisfies AuthorityPacks;
-  const verdict = checkAuthority("dispatch", { proposal, packs: authorityPacks, authorityEpoch: initial.authorityEpoch });
+  const verdict = checkAuthority("dispatch", {
+    proposal,
+    packs: authorityPacks,
+    authorityEpoch: initial.authorityEpoch,
+    authorityDb: initial.authorityDb,
+  });
   if (!verdict.ok) return { dispatched: false, codes: verdict.codes };
   if (initial.generation !== undefined && proposal.generation !== initial.generation) {
     return { dispatched: false, codes: ["STALE_GENERATION"] };
@@ -95,12 +104,14 @@ export async function dispatchEffect(
   const beforeExecute: DispatchSnapshot = current.reload?.() ?? {
     authorityEpoch: current.authorityEpoch,
     generation: current.generation,
+    authorityDb: current.authorityDb,
   };
   const dispatchPacks = typeof packs === "function" ? packs() : packs ?? beforeExecute.packs ?? authorityPacks;
   const dispatchVerdict = checkAuthority("dispatch", {
     proposal,
     packs: dispatchPacks,
     authorityEpoch: beforeExecute.authorityEpoch,
+    authorityDb: beforeExecute.authorityDb,
   });
   if (!dispatchVerdict.ok) {
     markInFlightUnknown(db, inFlight.effectId);

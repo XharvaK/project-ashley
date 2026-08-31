@@ -9,3 +9,7 @@ export * from "./health.js";
 export * from "./specialist.js";
 export * from "./activation.js";
 export * from "./dispatch-contract.js";
+export * from "./wire-evidence.js";
+export * from "./capability-identity.js";
+export * from "./release-truth.js";
+export * from "./qualification-ledger.js";

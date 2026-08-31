@@ -16,11 +16,18 @@ import { buildFtsQueryString, tokenizeForQuery } from "./query.js";
 import { searchConversationFts, searchMemoryFts } from "./fts.js";
 import { rankCandidates } from "./rank.js";
 import { deduplicateCandidates } from "./dedup.js";
+import { hasAuthorityBarrier } from "../authority/barrier.js";
+import { hasPendingDerivedInvalidation } from "../authority/journal.js";
 
 export type RetrieveCandidatesInput = {
   conversationId: string;
   request: RetrievalRequest;
   rawConversationRowIds?: Set<string>;
+  authorityDb?: DatabaseSync;
+};
+
+export type RetrieveCandidatesOptions = {
+  authorityDb?: DatabaseSync;
 };
 
 export function tokenizeForDiscovery(text: string): string[] {
@@ -30,11 +37,13 @@ export function tokenizeForDiscovery(text: string): string[] {
 function fetchExactKeyHits(
   sidecarDb: DatabaseSync,
   assertionKeys: string[],
+  authorityDb?: DatabaseSync,
 ): RetrievalHit[] {
   const uniqueKeys = [...new Set(assertionKeys.filter(Boolean))];
   const hits: RetrievalHit[] = [];
 
   for (const key of uniqueKeys) {
+    if (authorityDb && hasAuthorityBarrier(authorityDb) && hasPendingDerivedInvalidation(authorityDb, key)) continue;
     const assertion = getMemoryAssertion(sidecarDb, key);
     if (!assertion) continue;
     if (assertion.dataClassification === "secret") continue;
@@ -71,11 +80,13 @@ export function retrieveCandidates(
   sidecarDb: DatabaseSync,
   input: RetrieveCandidatesInput,
   derivedStore?: DerivedStore,
+  options: RetrieveCandidatesOptions = {},
 ): RetrievalResult {
   const request: RetrievalRequest = { ...input.request, includeLogSearch: true };
+  const authorityDb = options.authorityDb ?? input.authorityDb;
 
   // Tier 1: Exact-key hits from sidecar memory assertions (authoritative sidecar query)
-  const exactKeyHits = fetchExactKeyHits(sidecarDb, request.assertionKeys ?? []);
+  const exactKeyHits = fetchExactKeyHits(sidecarDb, request.assertionKeys ?? [], authorityDb);
 
   // Fail closed if persistent derived store is unavailable: lexical infrastructure cannot run
   if (!derivedStore) {
@@ -103,7 +114,7 @@ export function retrieveCandidates(
   const concernQuery = buildFtsQueryString(request.workingContextTopics ?? []);
 
   // Tier 2: Raw owner trigger BM25 over memory_fts
-  const rawTriggerResult = searchMemoryFts(derivedStore, sidecarDb, rawTriggerQuery);
+  const rawTriggerResult = searchMemoryFts(derivedStore, sidecarDb, rawTriggerQuery, { authorityDb });
   if (rawTriggerResult.state === "unavailable") {
     infrastructureState = "unavailable";
   }
@@ -124,7 +135,7 @@ export function retrieveCandidates(
   }));
 
   // Tier 3: Derived Working-Context BM25 over memory_fts
-  const concernResult = searchMemoryFts(derivedStore, sidecarDb, concernQuery);
+  const concernResult = searchMemoryFts(derivedStore, sidecarDb, concernQuery, { authorityDb });
   if (concernResult.state === "unavailable") {
     infrastructureState = "unavailable";
   }
@@ -150,6 +161,7 @@ export function retrieveCandidates(
     const combinedLogQuery = rawTriggerQuery || concernQuery;
     const logResult = searchConversationFts(derivedStore, sidecarDb, input.conversationId, combinedLogQuery, {
       excludeRowIds: input.rawConversationRowIds,
+      authorityDb,
     });
     if (logResult.state === "unavailable") {
       infrastructureState = "unavailable";

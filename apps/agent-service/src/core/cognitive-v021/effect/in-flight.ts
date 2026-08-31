@@ -7,6 +7,7 @@ export type PutInFlightInput = {
   effectId?: string;
   cycleId: string;
   generation: number;
+  wakeId?: string | null;
   correlationId: string;
   idempotencyKey: string;
   dispatchedAtMs?: number;
@@ -24,6 +25,7 @@ function mapInFlight(row: unknown): InFlightRecord | null {
     effectId: stringValue(value.effect_id),
     cycleId: stringValue(value.cycle_id),
     generation: numberValue(value.generation),
+    wakeId: value.wake_id == null ? null : stringValue(value.wake_id),
     correlationId: stringValue(value.correlation_id),
     idempotencyKey: stringValue(value.idempotency_key),
     status: stringValue(value.state) as InFlightRecord["status"],
@@ -41,12 +43,15 @@ export function getInFlight(db: DatabaseSync, effectOrIdempotencyKey: string): I
 export function putInFlight(db: DatabaseSync, input: PutInFlightInput): InFlightRecord {
   const existing = getInFlight(db, input.idempotencyKey);
   if (existing) return existing;
+  const cycle = db.prepare("SELECT wake_id FROM cycle_records WHERE cycle_id = ? LIMIT 1").get(input.cycleId) as DbRow | undefined;
+  const wakeId = input.wakeId ?? (typeof cycle?.wake_id === "string" ? cycle.wake_id : null);
+  if (!wakeId) throw new Error("wake_required");
   const effectId = input.effectId ?? randomUUID();
   db.prepare(
     `INSERT INTO in_flight_effects
        (effect_id, cycle_id, generation, correlation_id, idempotency_key,
-        state, payload_json, dispatched_at_ms, origin_job_id)
-     VALUES (?, ?, ?, ?, ?, 'in_flight', ?, ?, ?)`,
+        state, payload_json, dispatched_at_ms, origin_job_id, wake_id)
+     VALUES (?, ?, ?, ?, ?, 'in_flight', ?, ?, ?, ?)`,
   ).run(
     effectId,
     input.cycleId,
@@ -56,6 +61,7 @@ export function putInFlight(db: DatabaseSync, input: PutInFlightInput): InFlight
     JSON.stringify(input.payload ?? {}),
     input.dispatchedAtMs ?? Date.now(),
     input.originJobId ?? null,
+    wakeId,
   );
   const row = getInFlight(db, effectId);
   if (!row) throw new Error("in_flight_insert_lost");

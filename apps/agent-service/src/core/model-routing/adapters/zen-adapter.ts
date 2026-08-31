@@ -8,6 +8,7 @@ import type {
   ProviderDispatchArgs,
   TokenUsage,
 } from "../types.js";
+import { wireEvidenceFor } from "../../model-fabric/wire-evidence.js";
 
 type ZenErrorResponse = {
   error?: { message?: string; type?: string };
@@ -217,6 +218,13 @@ export function createZenAdapter(
           400,
         );
       }
+      if (args.fabricStructuredOutput) {
+        throw new AppError(
+          "capability_mismatch",
+          "OpenCode Zen adapter does not support the Thought structured-output contract",
+          400,
+        );
+      }
       if (
         args.options.projectionClassification === "owner_private" &&
         config.privacyMode !== "qualified_owner_private"
@@ -238,9 +246,7 @@ export function createZenAdapter(
               "Content-Type": "application/json",
               Authorization: `Bearer ${env.opencodeZenApiKey}`,
             },
-            body: JSON.stringify(
-              buildRequestBody(args.messages, args.options, args.modelId),
-            ),
+            body: JSON.stringify(buildRequestBody(args.messages, args.options, args.modelId)),
             signal: args.signal,
           },
         );
@@ -276,12 +282,17 @@ export function createZenAdapter(
         );
       }
       const choice = json.choices?.[0];
+      const body = buildRequestBody(args.messages, args.options, args.modelId);
       return {
         text: extractText(choice?.message?.content),
         usage: toTokenUsage(json.usage),
         providerModel: typeof json.model === "string" ? json.model : null,
         finishReason: finishReason(choice?.finish_reason),
         toolCalls: undefined,
+        wireEvidence: wireEvidenceFor({
+          adapterId: "ashley.adapter.opencode-zen.v1",
+          body,
+        }),
       };
     },
   };

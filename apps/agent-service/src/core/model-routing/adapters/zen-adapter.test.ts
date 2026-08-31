@@ -75,12 +75,18 @@ describe("MF-M4 OpenCode Zen adapter", () => {
       Authorization: "Bearer zen-test",
       "Content-Type": "application/json",
     });
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       text: "utility answer",
       usage: { promptTokens: 7, completionTokens: 3 },
       providerModel: "minimax/minimax-m2",
       finishReason: "stop",
       toolCalls: undefined,
+      wireEvidence: {
+        adapterId: "ashley.adapter.opencode-zen.v1",
+        wireFormat: "provider_default",
+        emittedEnforcementMode: "none",
+        providerDeclaredEnforcement: "unavailable",
+      },
     });
   });
 

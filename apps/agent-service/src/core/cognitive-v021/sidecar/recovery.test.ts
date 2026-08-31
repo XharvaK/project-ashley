@@ -4,11 +4,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import { appendInboxEvent, claimInboxEvent } from "../cycle/inbox.js";
-import { openTestSidecar } from "../test-support.js";
+import { admitTestCycle, openTestSidecar } from "../test-support.js";
 import { openCognitiveSidecarDb } from "./db.js";
 import { recoverCognitiveSidecar } from "./recovery.js";
 import { putInFlight } from "../effect/in-flight.js";
-import { admitCycle } from "../cycle/inbox.js";
 
 describe("cognitive sidecar reopen recovery", () => {
   it("returns expired inbox claims and orphaned live projections to retryable states", () => {
@@ -24,7 +23,7 @@ describe("cognitive sidecar reopen recovery", () => {
     ).run();
     const result = recoverCognitiveSidecar(db, 20);
     expect(result).toEqual({ inboxClaimsRecovered: 1, speechProjectionsRequeued: 1, noticeProjectionsRequeued: 0 });
-    expect(db.prepare("SELECT status, last_error FROM inbox_events").get()).toMatchObject({ status: "failed_retryable", last_error: "recovered_after_lease_expiry" });
+    expect(db.prepare("SELECT status, state, last_error FROM inbox_events").get()).toMatchObject({ status: "pending", state: "pending", last_error: "recovered_before_dispatch" });
     expect(db.prepare("SELECT send_status FROM speech_outbox").get()).toMatchObject({ send_status: "pending" });
     db.close();
   });
@@ -35,7 +34,7 @@ describe("cognitive sidecar reopen recovery", () => {
     let db = openCognitiveSidecarDb(new DatabaseSync(databasePath), {
       dataPlane: { kind: "isolated" },
     });
-    admitCycle(db, {
+    admitTestCycle(db, {
       cycleId: "cycle-restart",
       conversationId: "conversation-restart",
       generation: 3,

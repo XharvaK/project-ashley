@@ -25,7 +25,7 @@ describe("Shared Estimator Authority", () => {
     expect(STABLE_RESERVE_TOKENS).toBe(0);
     expect(INTERACTIVE_THOUGHT_MAX_OUTPUT).toBe(4096);
     expect(STRUCTURAL_RETRY_MAX_OUTPUT).toBe(2048);
-    expect(ORDINARY_THOUGHT_BUDGET_MS).toBe(10000);
+    expect(ORDINARY_THOUGHT_BUDGET_MS).toBe(30000);
   });
 
   it("proves identical calculation between allocator and attention estimator", () => {

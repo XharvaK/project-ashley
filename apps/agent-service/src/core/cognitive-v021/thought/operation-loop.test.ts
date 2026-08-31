@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { admitCycle, appendInboxEvent } from "../cycle/inbox.js";
+import { appendInboxEvent } from "../cycle/inbox.js";
 import { appendOwnerUtterance } from "../evidence/conversation-log.js";
-import { makeThoughtDraft, openTestSidecar } from "../test-support.js";
+import { admitTestCycle, makeSemanticSettlement, openTestSidecar } from "../test-support.js";
 import type { CapabilityReality, IdentitySlice, KernelDeps, Observation } from "../types.js";
 import { checkAuthority as deterministicCheckAuthority } from "../authority/check.js";
 import { loadAuthorityPacks as loadDeterministicAuthorityPacks } from "../authority/packs.js";
@@ -45,15 +45,15 @@ describe("v0.2.1 Thought operation loop", () => {
   it("reinjects a pure observation before the settlement pass", async () => {
     const sidecar = openTestSidecar();
     const attentionDb = openTestSidecar();
-    const cycle = admitCycle(sidecar, { cycleId: "cycle-1", conversationId: "thread-1", triggerKind: "owner_message", triggerRef: "owner-1", occupantId: "doc", nowMs: 1 });
+    const cycle = admitTestCycle(sidecar, { cycleId: "cycle-1", conversationId: "thread-1", triggerKind: "owner_message", triggerRef: "owner-1", occupantId: "doc", nowMs: 1 });
     const evidence = appendOwnerUtterance(sidecar, { conversationId: "thread-1", text: "inspect this", discordMessageIds: ["d1"], nowMs: 2 });
     const event = appendInboxEvent(sidecar, { conversationId: "thread-1", kind: "owner_message", payload: { cycleId: cycle.cycleId, evidenceRowId: evidence.rowId, ownerMessage: "inspect this" }, createdAtMs: 2 });
     let call = 0;
     const completeChat = vi.fn(async (messages) => {
       call++;
-      if (call === 1) return { text: JSON.stringify({ kind: "observation_request", cycleId: "cycle-1", generation: 1, occupantId: "doc", correlationId: "corr-1", observationRequest: { requestId: "observation-request-1", cycleId: "cycle-1", generation: 1, kind: "project.read_file", request: { path: "README.md" }, replaySafe: true } }), model: "fake", modelAlias: "fake", resolvedModelId: null };
+      if (call === 1) return { text: JSON.stringify({ kind: "observation_intent", operationKind: "project.read_file", request: { path: "README.md" }, purpose: "inspect the file", evidenceNeed: "the file contents", existingRefs: ["owner-1"] }), model: "fake", modelAlias: "fake", resolvedModelId: null };
       expect(JSON.stringify(messages)).toContain("observation-1");
-      return { text: JSON.stringify({ schemaVersion: 1, cycleId: "cycle-1", generation: 1, authorityEpoch: 1, occupantId: "doc", architectureEpoch: "v0.2.1", triggerRef: "owner-1", interpretation: { discourseActs: ["inform"], referentBindings: [], corrections: [], unresolvedAmbiguities: [], topics: ["inspection"] }, commitments: { epistemic: [{ dimensions: { source: "perception", status: "asserted", time: "current", reliability: "fallible_observation" }, statement: "the file was observed" }], conversational: ["answer"], stance: { warmth: "medium", humorAllowed: false, disagreement: false, uncertaintyDisplay: true } }, speech: { mode: "draft", mustSay: ["observed"], mustNot: [], surfaceDraft: "observed", acceptableRealizations: ["observed"], presentationDirectives: [] }, workingContextDelta: [], concernDeltas: [], occupancyDelta: [], futureTriggers: [], subscriptions: [], durableNominations: [], operations: { observationsConsumed: ["observation-1"], effectsCompleted: [], intentsStillInFlight: [] }, authority: { objectionsApplied: [], revisionCount: 0 } }), model: "fake", modelAlias: "fake", resolvedModelId: null };
+      return { text: JSON.stringify(makeSemanticSettlement({ interpretation: { discourseActs: ["inform"], referentBindings: [], corrections: [], unresolvedAmbiguities: [], topics: ["inspection"] }, commitments: { epistemic: [{ dimensions: { source: "perception", status: "asserted", time: "current", reliability: "fallible_observation" }, statement: "the file was observed" }], conversational: ["answer"], stance: { warmth: "medium", humorAllowed: false, disagreement: false, uncertaintyDisplay: true } }, speech: { mode: "draft", mustSay: ["observed"], mustNotSay: [], surfaceDraft: "observed", acceptableRealizations: [], presentationDirectives: [] }, evidenceUse: { observationRefsUsed: ["observation-1"], retrievalRefsUsed: [], sourceRefsUsed: [], openIntentRefs: [] } })), model: "fake", modelAlias: "fake", resolvedModelId: null };
     });
     const observed: Observation = { observationId: "observation-1", cycleId: "cycle-1", generation: 1, derived: false, replaySafe: true, modality: "text", payload: { text: "raw" }, provenance: "fake-read", dataClassification: "ordinary", secretOmitted: false };
     const executeObservation = vi.fn(async () => observed);
@@ -69,7 +69,7 @@ describe("v0.2.1 Thought operation loop", () => {
   it("persists a failed effect receipt and prevents a success claim from publishing", async () => {
     const sidecar = openTestSidecar();
     const attentionDb = openTestSidecar();
-    const cycle = admitCycle(sidecar, { cycleId: "cycle-1", conversationId: "thread-1", triggerKind: "owner_message", triggerRef: "owner-1", occupantId: "doc", nowMs: 1 });
+    const cycle = admitTestCycle(sidecar, { cycleId: "cycle-1", conversationId: "thread-1", triggerKind: "owner_message", triggerRef: "owner-1", occupantId: "doc", nowMs: 1 });
     const evidence = appendOwnerUtterance(sidecar, { conversationId: "thread-1", text: "try the operation", discordMessageIds: ["d-effect"], nowMs: 2 });
     const event = appendInboxEvent(sidecar, { conversationId: "thread-1", kind: "owner_message", payload: { cycleId: cycle.cycleId, evidenceRowId: evidence.rowId, ownerMessage: evidence.text }, createdAtMs: 2 });
     let call = 0;
@@ -81,49 +81,19 @@ describe("v0.2.1 Thought operation loop", () => {
       if (call === 1) {
         return {
           text: JSON.stringify({
-            kind: "effect_proposal",
-            cycleId: input.cycleId,
-            generation: input.generation,
-            occupantId: input.occupantId,
-            effectProposal: {
-              effectId: "effect-failed",
-              cycleId: input.cycleId,
-              generation: input.generation,
-              idempotencyKey: "idem-failed",
-              kind: "workspace.write_file",
-              authorityEpoch: input.authorityEpoch,
-              request: { projectId: "project-ashley", path: "src/fail.ts" },
-            },
+            kind: "effect_intent",
+            operationKind: "workspace.write_file",
+            request: { projectId: "project-ashley", path: "src/fail.ts" },
+            purpose: "try the operation",
+            expectedOutcome: "the file is written",
+            existingRefs: ["owner-1"],
           }),
           model: "fake", modelAlias: "thought", resolvedModelId: null,
         };
       }
       const successClaim = call === 2;
       return {
-        text: JSON.stringify(makeThoughtDraft({
-          cycleId: input.cycleId,
-          generation: input.generation,
-          authorityEpoch: input.authorityEpoch,
-          occupantId: input.occupantId,
-          triggerRef: input.trigger.ref,
-          speech: {
-            mode: "draft",
-            mustSay: [successClaim ? "the operation worked" : "the operation did not complete"],
-            mustNot: [],
-            surfaceDraft: successClaim ? "the operation worked" : "the operation did not complete",
-            acceptableRealizations: [successClaim ? "the operation worked" : "the operation did not complete"],
-            presentationDirectives: [],
-          },
-          operations: {
-            observationsConsumed: [],
-            effectsCompleted: successClaim ? ["effect-failed"] : [],
-            intentsStillInFlight: successClaim ? [] : ["effect-failed"],
-          },
-          authority: {
-            objectionsApplied: input.authorityObjections,
-            revisionCount: input.authorityObjections.length,
-          },
-        })),
+        text: JSON.stringify(makeSemanticSettlement({ speech: { mode: "draft", mustSay: [successClaim ? "the operation worked" : "the operation did not complete"], mustNotSay: [], surfaceDraft: successClaim ? "the operation worked" : "the operation did not complete", acceptableRealizations: [], presentationDirectives: [] } })),
         model: "fake", modelAlias: "thought", resolvedModelId: null,
       };
     });
@@ -149,10 +119,10 @@ describe("v0.2.1 Thought operation loop", () => {
         loadAuthorityPacks: () => loadDeterministicAuthorityPacks(sidecar, { capability: capabilityReality }),
       },
     ));
-    expect(objections).toEqual([[], [], ["RECEIPT_CONTRADICTS_CLAIM"]]);
+    expect(objections).toEqual([[], []]);
     expect(executeEffect).toHaveBeenCalledTimes(1);
-    expect(sidecar.prepare("SELECT outcome FROM effect_receipts WHERE effect_id = 'effect-failed'").get()).toMatchObject({ outcome: "failed" });
-    expect(result).toMatchObject({ published: true, thoughtModelAttempts: 3, acceptedThoughtPasses: 3 });
+    expect(sidecar.prepare("SELECT outcome FROM effect_receipts").get()).toMatchObject({ outcome: "failed" });
+    expect(result).toMatchObject({ published: true, thoughtModelAttempts: 2, acceptedThoughtPasses: 2 });
     sidecar.close();
     attentionDb.close();
   });

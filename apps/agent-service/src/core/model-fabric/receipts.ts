@@ -27,6 +27,8 @@ import type {
   ReasoningPolicy,
 } from "./types.js";
 import { observedReasoningFromUsage } from "./reasoning-translation.js";
+import type { ThoughtCapabilityIdentity } from "./capability-identity.js";
+import type { WireDispatchEvidence } from "../model-routing/types.js";
 
 type AttemptInput = {
   invocationId: string;
@@ -70,6 +72,8 @@ type AttemptBuilder = AttemptInput & {
   observedReasoning: ObservedReasoning;
   errorClass: string | null;
   outcome: string | null;
+  capabilityIdentity?: ThoughtCapabilityIdentity;
+  wireEvidence?: WireDispatchEvidence;
 };
 
 export type ModelFabricInvocationRecorder = {
@@ -91,6 +95,8 @@ export type AttemptHandle = {
     finishReason?: string | null;
     usage?: TokenUsage;
   }): void;
+  setCapabilityIdentity(identity: ThoughtCapabilityIdentity): void;
+  setWireEvidence(evidence: WireDispatchEvidence): void;
   markFailure(errorClass: string, outcome?: string | null): void;
   receipt(): ModelAttemptReceipt;
 };
@@ -134,6 +140,10 @@ function attemptReceipt(builder: AttemptBuilder): ModelAttemptReceipt {
     translatedWireControl:
       builder.translatedWireControl ?? builder.facts.translatedWireControl ?? null,
     observedReasoning: builder.observedReasoning,
+    ...(builder.capabilityIdentity
+      ? { capabilityFingerprint: builder.capabilityIdentity.fingerprint }
+      : {}),
+    ...(builder.wireEvidence ? { wireEvidence: builder.wireEvidence } : {}),
   };
   if (builder.stage === "resolved_not_sent") {
     const receipt: ModelResolvedNotSentReceipt = {
@@ -305,6 +315,12 @@ export function createModelFabricInvocation(input: {
           builder.finishReason = response.finishReason ?? null;
           builder.usage = usageFor(response.usage);
           builder.observedReasoning = observedReasoningFromUsage(response.usage);
+        },
+        setCapabilityIdentity(identity) {
+          builder.capabilityIdentity = identity;
+        },
+        setWireEvidence(evidence) {
+          builder.wireEvidence = evidence;
         },
         markFailure(errorClass, outcome = null) {
           builder.errorClass = errorClass.slice(0, 64);

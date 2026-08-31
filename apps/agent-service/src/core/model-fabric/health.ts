@@ -12,6 +12,31 @@ export type HealthPredicates = Readonly<{
   ready: boolean;
 }>;
 
+export type Phase5HealthPredicates = Readonly<{
+  transportRouteReady: boolean;
+  thoughtContractQualified: boolean;
+  releaseTruthMatched: boolean;
+  productionAccepted: boolean;
+  mismatchReasons: readonly string[];
+}>;
+
+/** W1 lifecycle predicates. Each remains independent from legacy route health. */
+export function phase5HealthPredicates(input: {
+  transportRouteReady: boolean;
+  thoughtContractQualified: boolean;
+  releaseTruthMatched: boolean;
+  productionAccepted: boolean;
+  mismatchReasons?: readonly string[];
+}): Phase5HealthPredicates {
+  return Object.freeze({
+    transportRouteReady: input.transportRouteReady,
+    thoughtContractQualified: input.thoughtContractQualified,
+    releaseTruthMatched: input.releaseTruthMatched,
+    productionAccepted: input.productionAccepted,
+    mismatchReasons: Object.freeze([...(input.mismatchReasons ?? [])]),
+  });
+}
+
 export type HealthPredicateInput = {
   configured: boolean;
   available?: boolean;

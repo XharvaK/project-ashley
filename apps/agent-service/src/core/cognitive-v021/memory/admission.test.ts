@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { admitCycle } from "../cycle/inbox.js";
-import { openTestSidecar, makeThoughtDraft } from "../test-support.js";
+import { admitTestCycle, openTestSidecar, makeThoughtDraft } from "../test-support.js";
 import { publishSemanticTransaction } from "../settlement/publish.js";
 import { tickAdmission } from "./admission.js";
 import { admitOwnerSuppliedClaim } from "./admission.js";
@@ -57,7 +56,7 @@ describe("v0.2.1 fenced Memory admission", () => {
   it("admits queued nominations only when the admission worker runs", () => {
     const db = openTestSidecar();
     try {
-      admitCycle(db, {
+      admitTestCycle(db, {
         cycleId: "cycle-1",
         conversationId: "thread-1",
         generation: 1,
@@ -86,9 +85,9 @@ describe("v0.2.1 fenced Memory admission", () => {
   it("skips an older nomination when a later published generation supersedes it", () => {
     const db = openTestSidecar();
     try {
-      admitCycle(db, { cycleId: "cycle-1", conversationId: "thread-1", generation: 1, triggerKind: "owner_message", triggerRef: "one", occupantId: "doc", nowMs: 1 });
+      admitTestCycle(db, { cycleId: "cycle-1", conversationId: "thread-1", generation: 1, triggerKind: "owner_message", triggerRef: "one", occupantId: "doc", nowMs: 1 });
       publishNomination(db, nomination({ nominationId: "nomination-old", cycleId: "cycle-1", generation: 1, statement: "The old claim." }), "settlement-old");
-      admitCycle(db, { cycleId: "cycle-2", conversationId: "thread-1", generation: 2, triggerKind: "owner_message", triggerRef: "two", occupantId: "doc", nowMs: 2 });
+      admitTestCycle(db, { cycleId: "cycle-2", conversationId: "thread-1", generation: 2, triggerKind: "owner_message", triggerRef: "two", occupantId: "doc", nowMs: 2 });
       publishNomination(db, nomination({ nominationId: "nomination-new", cycleId: "cycle-2", generation: 2, statement: "The corrected claim.", supersedesAssertionKey: "owner:subject" }), "settlement-new");
 
       const result = tickAdmission(db, { nowMs: 3 });
@@ -105,13 +104,13 @@ describe("v0.2.1 fenced Memory admission", () => {
   it("does not promote repeated inferred support to owner supplied", () => {
     const db = openTestSidecar();
     try {
-      admitCycle(db, { cycleId: "cycle-1", conversationId: "thread-1", generation: 1, triggerKind: "owner_message", triggerRef: "one", occupantId: "doc", nowMs: 1 });
+      admitTestCycle(db, { cycleId: "cycle-1", conversationId: "thread-1", generation: 1, triggerKind: "owner_message", triggerRef: "one", occupantId: "doc", nowMs: 1 });
       const inferred = nomination({
         memoryKind: "ashley_interpretation",
         dimensions: { source: "ashley_interpretation", status: "interpreted", time: "current", reliability: "inferred" },
       });
       publishNomination(db, inferred, "settlement-1");
-      admitCycle(db, { cycleId: "cycle-2", conversationId: "thread-1", generation: 2, triggerKind: "owner_message", triggerRef: "two", occupantId: "doc", nowMs: 2 });
+      admitTestCycle(db, { cycleId: "cycle-2", conversationId: "thread-1", generation: 2, triggerKind: "owner_message", triggerRef: "two", occupantId: "doc", nowMs: 2 });
       publishNomination(db, { ...inferred, nominationId: "nomination-2", cycleId: "cycle-2", generation: 2 }, "settlement-2");
       tickAdmission(db, { nowMs: 3 });
       expect(db.prepare("SELECT json_extract(dimensions_json, '$.reliability') AS reliability FROM sidecar_memory_assertions").get()).toMatchObject({ reliability: "inferred" });
@@ -124,11 +123,14 @@ describe("v0.2.1 fenced Memory admission", () => {
   it("admits an explicit owner claim only after its published Thought nomination", () => {
     const db = openTestSidecar();
     try {
-      const cycle = admitCycle(db, { cycleId: "cycle-remember", conversationId: "thread-1", generation: 1, triggerKind: "owner_message", triggerRef: "remember", occupantId: "doc", nowMs: 1 });
       const request = appendRememberRequest(db, { conversationId: "thread-1", text: "Remember that I prefer careful systems.", discordMessageIds: ["remember-1"], nowMs: 2 });
+      const cycle = db.prepare(
+        "SELECT cycle_id, generation FROM cycle_records WHERE wake_id = ?",
+      ).get(request.inbox.wakeId) as { cycle_id: string; generation: number };
       const remembered = nomination({
         nominationId: "nomination-remember",
-        cycleId: cycle.cycleId,
+        cycleId: cycle.cycle_id,
+        generation: cycle.generation,
         assertionKey: "owner:careful-systems",
         statement: "The owner prefers careful systems.",
         memoryKind: "owner_preference",

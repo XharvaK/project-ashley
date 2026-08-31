@@ -7,6 +7,7 @@ import type {
   StructuredOutputRequest,
   TrustedStructuredOutputControl,
 } from "../model-fabric/types.js";
+import type { ThoughtInvocationContext } from "../cognitive-v021/types.js";
 
 /**
  * Multi-provider model routing types (Wave 1).
@@ -107,6 +108,8 @@ export type CompletionOptions = {
   specialistRequirement?: SpecialistRequirement | null;
   /** Caller-owned chain for an explicit multi-invocation fallback. */
   modelFallbackChain?: ModelFallbackChain | null;
+  /** Qualification-only guard: do not invoke the compatibility Thought fallback. */
+  disableThoughtTransportFailover?: boolean;
   /** Explicit route selection; resolved by the router when absent. */
   route?: RouteId;
   deadlineAtMs?: number | null;
@@ -122,6 +125,8 @@ export type CompletionOptions = {
     semanticProjectionHash: string;
     dispatchMessagesHash: string;
   };
+  /** Trusted kernel-owned Thought context; never populated from model output. */
+  thoughtInvocationContext?: Omit<ThoughtInvocationContext, "allocationId">;
 };
 
 export type ProviderCompletion = {
@@ -131,7 +136,19 @@ export type ProviderCompletion = {
   providerModel?: string | null;
   /** Provider finish_reason when supplied (stop, length, …). Never a secret. */
   finishReason?: string | null;
+  /** Sanitized evidence of the request emitted by the provider adapter. */
+  wireEvidence?: WireDispatchEvidence;
 };
+
+export type WireDispatchEvidence = Readonly<{
+  adapterId: string;
+  wireFormat: string;
+  sanitizedBodyDigest: `sha256:${string}`;
+  emittedEnforcementMode: string;
+  providerDeclaredEnforcement: string | "unavailable";
+  /** Exact Model Fabric binding used by the adapter, when structured output is active. */
+  bindingId?: string | null;
+}>;
 
 /**
  * Trusted Model Fabric translation only. Callers must not populate this with

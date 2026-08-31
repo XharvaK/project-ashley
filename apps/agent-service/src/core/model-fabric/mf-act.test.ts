@@ -27,6 +27,11 @@ import {
   type StewardshipConsultationRecord,
 } from "./activation.js";
 import { loadTargetPortfolio } from "./catalog.js";
+import { buildThoughtCapabilityIdentity, thoughtResourcePolicyIdentity } from "./capability-identity.js";
+import { THOUGHT_KERNEL_ENVELOPE_VERSION } from "../cognitive-v021/thought/kernel-envelope.js";
+import { THOUGHT_SEMANTIC_PARSER_ID } from "../cognitive-v021/thought/parse.js";
+import { THOUGHT_OUTPUT_SCHEMA_FINGERPRINT } from "../cognitive-v021/thought/output-contract.js";
+import { sha256Text } from "./hash.js";
 
 const targetPortfolio = loadTargetPortfolio();
 const targetRow = targetPortfolio.rows.find(
@@ -38,6 +43,20 @@ const profile = capabilityProfileFor(
   targetOccupant.configuredModelId,
 );
 const inferenceFingerprint = `sha256:${"a".repeat(64)}`;
+const fixtureCapability = buildThoughtCapabilityIdentity({
+  executableBuildIdentity: "build:fixture",
+  semanticContractFingerprint: THOUGHT_OUTPUT_SCHEMA_FINGERPRINT,
+  kernelEnvelopeContractVersion: THOUGHT_KERNEL_ENVELOPE_VERSION,
+  parserValidatorFingerprint: `sha256:${sha256Text(THOUGHT_SEMANTIC_PARSER_ID)}`,
+  provider: targetOccupant.provider,
+  configuredModelId: targetOccupant.configuredModelId,
+  occupantId: targetOccupant.occupantId,
+  logicalBindingId: "ashley.thought.semantic.v1",
+  wireBindingId: "wire:fixture",
+  schemaEnforcementMode: "json_object_compatibility",
+  resourcePolicyFingerprint: thoughtResourcePolicyIdentity().fingerprint,
+  adapterCompatibilityFingerprint: `sha256:${"d".repeat(64)}`,
+});
 const roots: string[] = [];
 
 afterEach(() => {
@@ -54,7 +73,7 @@ function controlRoot(): string {
 
 function qualification(overrides: Record<string, unknown> = {}) {
   return {
-    schema: "ashley.evaluation.qualification_result.v1" as const,
+    schema: "ashley.evaluation.qualification_result.v2" as const,
     qualificationResultId: "qres_target_thought_interactive_fixture",
     status: "PASS" as const,
     policyRowId: targetRow.policyRowId,
@@ -76,6 +95,25 @@ function qualification(overrides: Record<string, unknown> = {}) {
     limitations: [],
     invalidated: false,
     invalidatedBy: null,
+    capability: fixtureCapability,
+    logicalEvidence: {
+      contractId: fixtureCapability.components.logicalBindingId,
+      schemaFingerprint: THOUGHT_OUTPUT_SCHEMA_FINGERPRINT,
+      bindingId: fixtureCapability.components.logicalBindingId,
+    },
+    wireEvidence: {
+      adapterId: "ashley.adapter.groq.v1",
+      wireFormat: "json_object",
+      sanitizedBodyDigest: `sha256:${"f".repeat(64)}`,
+      emittedEnforcementMode: fixtureCapability.components.schemaEnforcementMode,
+      providerDeclaredEnforcement: "unavailable",
+      bindingId: fixtureCapability.components.wireBindingId,
+    },
+    resourceEvidence: {
+      deadlineMs: 30_000,
+      maxOutputTokens: 4_096,
+      attempts: 1,
+    },
     ...overrides,
   };
 }
@@ -322,6 +360,20 @@ describe("MF-ACT activation mechanics", () => {
         preflights: [preflight()],
       }),
     ).toThrow("activation_qualification_invalid");
+  });
+
+  it("rejects a legacy profile-only Thought qualification", () => {
+    const legacy = { ...qualification(), schema: "ashley.evaluation.qualification_result.v1" as const };
+    expect(() =>
+      validateActivation({
+        activation: activation(),
+        targetPortfolio,
+        qualifications: [legacy],
+        approvals: [approval()],
+        consultations: [consultation()],
+        preflights: [preflight()],
+      }),
+    ).toThrow("activation_qualification_capability_missing");
   });
 
   it("rejects an unqualified fallback occupant instead of adding it to the chain", () => {

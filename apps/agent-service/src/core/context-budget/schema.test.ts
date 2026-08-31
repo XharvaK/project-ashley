@@ -18,7 +18,9 @@ describe("C2 additive schema", () => {
   it("creates policy, receipt, summary, and shared contract-state tables", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     try {
-      expect(NUCLEAR_SUPPORTED_VERSION).toBe(42);
+      // The historical C2 packet recorded v42. Current source also includes
+      // W4 migrations v43 and v44; db.ts is the live schema authority.
+      expect(NUCLEAR_SUPPORTED_VERSION).toBe(44);
       expect(db.prepare("PRAGMA user_version").get()).toEqual({
         user_version: NUCLEAR_SUPPORTED_VERSION,
       });
@@ -103,9 +105,10 @@ describe("C2 additive schema", () => {
   it("fails closed when a persisted schema is newer than the candidate", () => {
     const db = new DatabaseSync(":memory:");
     try {
-      db.exec("PRAGMA user_version = 43");
+      const newerVersion = NUCLEAR_SUPPORTED_VERSION + 1;
+      db.exec(`PRAGMA user_version = ${newerVersion}`);
       expect(() => openNuclearDb(db, { continuityOptional: true })).toThrow(
-        "unsupported_nuclear_schema:43>42",
+        `unsupported_nuclear_schema:${newerVersion}>${NUCLEAR_SUPPORTED_VERSION}`,
       );
     } finally {
       db.close();

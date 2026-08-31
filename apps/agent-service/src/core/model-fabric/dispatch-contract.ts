@@ -10,8 +10,8 @@ import type {
 import { sha256 } from "./hash.js";
 import { capabilityProfileFor } from "./profiles.js";
 
-export const THOUGHT_OUTPUT_CONTRACT_ID = "ashley.thought.step.v1";
-export const THOUGHT_OUTPUT_SCHEMA_ID = "ashley.thought.step.v1.schema";
+export const THOUGHT_OUTPUT_CONTRACT_ID = "ashley.thought.semantic.v1";
+export const THOUGHT_OUTPUT_SCHEMA_ID = "ashley.thought.semantic.v1.schema";
 
 export type ResolvedDispatchContract = Readonly<{
   maxTokens: number;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { openTestSidecar } from "../test-support.js";
-import { fireDueTriggers, listFutureTriggers, scheduleFutureTrigger } from "./future-triggers.js";
+import { fireDueTriggers, listFutureTriggers, matureFutureTriggerToWake, scheduleFutureTrigger } from "./future-triggers.js";
 
 function seedConcern(db: ReturnType<typeof openTestSidecar>, status: "active" | "resolved" = "active", snapshotHash = "snapshot-1"): void {
   db.prepare(
@@ -26,6 +26,8 @@ describe("v0.2.1 FutureTrigger fence", () => {
       expect(result.thoughtModelAttempts).toBe(0);
       expect(result.suppressedStale).toHaveLength(1);
       expect(db.prepare("SELECT status FROM future_triggers WHERE trigger_id = 'future-resolved'").get()).toMatchObject({ status: "suppressed_stale" });
+      const wake = db.prepare("SELECT wake_id FROM future_triggers WHERE trigger_id = 'future-resolved'").get() as { wake_id: string };
+      expect(db.prepare("SELECT state, terminal_reason FROM wakes WHERE wake_id = ?").get(wake.wake_id)).toMatchObject({ state: "terminal", terminal_reason: "no_action" });
       expect(db.prepare("SELECT payload_json FROM causal_ledger WHERE cycle_id = 'future-trigger:future-resolved'").get()).toMatchObject({ payload_json: expect.stringContaining("suppressed_stale") });
     } finally {
       db.close();
@@ -67,6 +69,29 @@ describe("v0.2.1 FutureTrigger fence", () => {
       expect(event.payload_json).not.toContain("inspect HY3");
       await expect(fireDueTriggers(db, { nowMs: 11 })).resolves.toMatchObject({ fired: [], thoughtModelAttempts: 0 });
       expect(listFutureTriggers(db, "thread-trigger")).toEqual([expect.objectContaining({ status: "fired" })]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("converges repeated maturity after a restart onto one wake, cycle, and inbox event", () => {
+    const db = openTestSidecar();
+    try {
+      seedConcern(db);
+      scheduleFutureTrigger(db, { triggerId: "future-replay", conversationId: "thread-trigger", concernId: "concern-1", snapshotHash: "snapshot-1", dueAtMs: 10 });
+
+      const first = matureFutureTriggerToWake(db, "future-replay", { nowMs: 10, capturedAuthorityRevision: 4 });
+      const second = matureFutureTriggerToWake(db, "future-replay", { nowMs: 10_000, capturedAuthorityRevision: 99 });
+
+      expect(first).toMatchObject({ kind: "created" });
+      expect(second).toMatchObject({ kind: "existing" });
+      expect(second?.wake.wakeId).toBe(first?.wake.wakeId);
+      expect(second?.wake.cycleId).toBe(first?.wake.cycleId);
+      expect(second?.event?.id).toBe(first?.event?.id);
+      expect((db.prepare("SELECT COUNT(*) AS count FROM wakes").get() as { count: number }).count).toBe(1);
+      expect((db.prepare("SELECT COUNT(*) AS count FROM cycle_records").get() as { count: number }).count).toBe(1);
+      expect((db.prepare("SELECT COUNT(*) AS count FROM inbox_events").get() as { count: number }).count).toBe(1);
+      expect(db.prepare("SELECT wake_id FROM future_triggers WHERE trigger_id = 'future-replay'").get()).toMatchObject({ wake_id: first?.wake.wakeId });
     } finally {
       db.close();
     }

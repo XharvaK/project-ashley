@@ -40,7 +40,6 @@ export type {
 } from "./settlement/publish.js";
 export { validateThoughtSettlementDraft, assertValidThoughtSettlementDraft } from "./settlement/validate.js";
 export { buildThoughtInput } from "./thought/input.js";
-export { parseThoughtStepOutput } from "./thought/parse.js";
 export {
   invokeThoughtComplete,
   runThoughtModel,
@@ -82,6 +81,9 @@ export * from "./relationship/constraints.js";
 export * from "./migration/import-legacy.js";
 export * from "./initiative/idle.js";
 export * from "./initiative/future-triggers.js";
+export * from "./private-budget/ledger.js";
+export * from "./private-budget/policy-time-ledger.js";
+export * from "./private-budget/recovery.js";
 export * from "./observation/subscriptions.js";
 export * from "./dispatch/live.js";
 export * from "./dispatch/health.js";

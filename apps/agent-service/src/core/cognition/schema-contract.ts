@@ -32,6 +32,8 @@ import {
   validateNuclearV41Schema,
 } from "../rollout/migration-41.js";
 import { validateNuclearV42Schema } from "../delivery/migration-42.js";
+import { validateNuclearV43Schema } from "../cognitive-v021/migration-43.js";
+import { validateNuclearV44Schema } from "../cognitive-v021/migration-44.js";
 
 type TableInfoRow = {
   name?: string;
@@ -1051,9 +1053,62 @@ function requireNoV42Columns(db: DatabaseSync, version: number): void {
   }
 }
 
+const V43_COLUMNS = [
+  "thought_invocation_id",
+  "thought_cycle_id",
+  "thought_generation",
+  "thought_semantic_pass",
+  "thought_structural_attempt",
+  "thought_authority_epoch",
+  "thought_authority_vector_json",
+  "thought_trigger_ref",
+  "semantic_projection_hash",
+  "dispatch_messages_hash",
+  "allowlist_fingerprint",
+  "mf_invocation_id",
+  "mf_attempt_id",
+  "actual_provider",
+  "actual_occupant_id",
+  "actual_wire_binding_id",
+  "schema_enforcement_mode",
+  "resource_policy_fingerprint",
+  "absolute_deadline_at_ms",
+] as const;
+
+function requireNoV43Content(db: DatabaseSync, version: number): void {
+  for (const column of V43_COLUMNS) {
+    if (tableInfo(db, "attention_requests").some((row) => row.name === column)) {
+      fail(version, `unexpected_v43_column:attention_requests.${column}`);
+    }
+  }
+  for (const name of [
+    "attention_requests_thought_invocation",
+    "attention_requests_mf_attempt",
+  ]) {
+    if (masterRow(db, "index", name)) fail(version, `unexpected_v43_object:${name}`);
+  }
+  for (const name of [
+    "attention_requests_thought_context_complete_insert",
+    "attention_requests_thought_context_complete_update",
+  ]) {
+    if (db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND name = ?").get(name)) {
+      fail(version, `unexpected_v43_object:${name}`);
+    }
+  }
+}
+
+function requireNoV44Content(db: DatabaseSync, version: number): void {
+  for (const table of ["authority_transition_barrier", "canonical_owner_versions", "derived_invalidation_journal"]) {
+    if (masterRow(db, "table", table)) fail(version, `unexpected_v44_table:${table}`);
+  }
+  for (const index of ["idx_derived_journal_pending", "idx_derived_journal_scope"]) {
+    if (masterRow(db, "index", index)) fail(version, `unexpected_v44_index:${index}`);
+  }
+}
+
 export function validateNuclearSchemaContent(
   db: DatabaseSync,
-  version: 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37 | 38 | 39 | 40 | 41 | 42,
+  version: 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37 | 38 | 39 | 40 | 41 | 42 | 43 | 44,
   options: { rejectNewerContent?: boolean } = {},
 ): void {
   if (version === 22) {
@@ -1226,6 +1281,18 @@ export function validateNuclearSchemaContent(
   }
   if (version === 41) return;
   validateNuclearV42Schema(db, version);
+  if (version === 42 && options.rejectNewerContent === true) {
+    requireNoV43Content(db, version);
+    return;
+  }
+  if (version === 42) return;
+  validateNuclearV43Schema(db, version);
+  if (version === 43 && options.rejectNewerContent === true) {
+    requireNoV44Content(db, version);
+    return;
+  }
+  if (version === 43) return;
+  validateNuclearV44Schema(db, version);
 }
 
 function addColumnIfMissing(

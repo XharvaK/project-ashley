@@ -173,8 +173,9 @@ export class AgentManager {
       occupantId: ownerId,
       authorityEpoch,
       runThought: async (input) => {
-        const event = appendInboxEvent(sidecar, {
-          id: `idle:${input.cycle.cycleId}`,
+        const event = input.event ?? appendInboxEvent(sidecar, {
+          id: `idle:${input.wakeId}`,
+          wakeId: input.wakeId,
           conversationId: input.cycle.conversationId,
           kind: input.trigger.kind,
           payload: {
@@ -184,6 +185,7 @@ export class AgentManager {
             triggerRef: input.trigger.ref,
             cycleId: input.cycle.cycleId,
             generation: input.cycle.generation,
+            privateBudgetReservationId: input.privateBudgetReservation.reservationId,
             occupantId: ownerId,
             observations: input.observations,
             dueTriggers: input.dueTriggers.map((trigger) => trigger.triggerId),

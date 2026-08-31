@@ -1,44 +1,81 @@
 import type { DatabaseSync } from "node:sqlite";
 import {
   claimInboxEvent,
-  markInboxConsumed,
-  markInboxFailed,
+  getInboxEvent,
 } from "./inbox.js";
-import type { InboxEvent } from "../types.js";
+import {
+  getOpenDurableAttempt,
+  settleDurableAttempt,
+  type DurableSettlementOutcome,
+} from "../retry/ledger.js";
+import type { HandlerResult, InboxEvent } from "../types.js";
+
+export type InboxConsumerHandler = (event: InboxEvent) => void | HandlerResult | Promise<void | HandlerResult>;
 
 export function claimNextInboxEvent(
   db: DatabaseSync,
-  input: { workerId: string; conversationId?: string; nowMs?: number; leaseMs?: number } ,
+  input: { workerId: string; conversationId?: string; nowMs?: number; leaseMs?: number },
 ): InboxEvent | null {
   return claimInboxEvent(db, input);
 }
 
-export function consumeInboxEvent(
-  db: DatabaseSync,
-  event: InboxEvent,
-  handler: (event: InboxEvent) => void | Promise<void>,
-): void | Promise<void> {
-  const result = handler(event);
-  if (result && typeof (result as Promise<void>).then === "function") {
-    return (async () => {
-      try {
-        await result;
-        if (!markInboxConsumed(db, event.id, event.claimToken ?? undefined)) {
-          throw new Error("inbox_consume_claim_lost");
-        }
-      } catch (error) {
-        markInboxFailed(db, event.id, error instanceof Error ? error.message : String(error), {
-          retryable: true,
-          claimToken: event.claimToken ?? undefined,
-        });
-        throw error;
-      }
-    })();
-  }
-  if (!markInboxConsumed(db, event.id, event.claimToken ?? undefined)) throw new Error("inbox_consume_claim_lost");
+function errorCode(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
-export type InboxConsumerHandler = (event: InboxEvent) => void | Promise<void>;
+function settledOutcomeOrThrow(
+  db: DatabaseSync,
+  event: InboxEvent,
+  result: HandlerResult,
+  nowMs: number,
+): DurableSettlementOutcome {
+  const attempt = event.durableAttemptId
+    ? getOpenDurableAttempt(db, event.id)
+    : getOpenDurableAttempt(db, event.id);
+  if (!attempt || (event.durableAttemptId && attempt.attemptId !== event.durableAttemptId)) {
+    throw new Error("inbox_durable_attempt_missing");
+  }
+  return settleDurableAttempt(db, {
+    eventId: event.id,
+    attemptId: attempt.attemptId,
+    claimToken: event.claimToken ?? attempt.claimToken,
+    result,
+    nowMs,
+  });
+}
+
+/** Run a handler and settle the durable attempt. Exceptions are outcome-unknown. */
+export async function consumeInboxEvent(
+  db: DatabaseSync,
+  event: InboxEvent,
+  handler: InboxConsumerHandler,
+  nowMs = Date.now(),
+): Promise<DurableSettlementOutcome> {
+  const attempt = getOpenDurableAttempt(db, event.id);
+  if (!attempt || (event.durableAttemptId && attempt.attemptId !== event.durableAttemptId)) {
+    throw new Error("inbox_durable_attempt_missing");
+  }
+  try {
+    const result = await handler(event);
+    return settledOutcomeOrThrow(db, event, result ?? { kind: "completed" }, nowMs);
+  } catch (error) {
+    const currentAttempt = getOpenDurableAttempt(db, event.id);
+    if (currentAttempt) {
+      settleDurableAttempt(db, {
+        eventId: event.id,
+        attemptId: currentAttempt.attemptId,
+        claimToken: event.claimToken ?? currentAttempt.claimToken,
+        result: {
+          kind: "outcome_unknown",
+          operationId: event.id,
+          errorCode: errorCode(error),
+        },
+        nowMs,
+      });
+    }
+    throw error;
+  }
+}
 
 export type InboxConsumerOptions = {
   workerId: string;
@@ -56,27 +93,29 @@ export type InboxConsumerTick = {
   error?: string;
 };
 
-/** Claim one pending, retryable, or expired event and settle its lease. */
+/** Claim one fair eligible event and settle its durable attempt. */
 export async function consumeNextInboxEvent(
   db: DatabaseSync,
   options: InboxConsumerOptions,
 ): Promise<InboxConsumerTick> {
+  const nowMs = options.nowMs?.() ?? Date.now();
   const event = claimNextInboxEvent(db, {
     workerId: options.workerId,
     conversationId: options.conversationId,
-    nowMs: options.nowMs?.(),
+    nowMs,
     leaseMs: options.leaseMs,
   });
   if (!event) return { outcome: "idle" };
   try {
-    await consumeInboxEvent(db, event, options.handler);
-    return { outcome: "consumed", eventId: event.id };
+    const settled = await consumeInboxEvent(db, event, options.handler, nowMs);
+    if (settled.kind === "completed") return { outcome: "consumed", eventId: event.id };
+    return { outcome: "failed", eventId: event.id, error: settled.kind === "terminal" ? settled.reason : settled.kind };
   } catch (error) {
-    options.onError?.(error, event);
+    options.onError?.(error, getInboxEvent(db, event.id) ?? event);
     return {
       outcome: "failed",
       eventId: event.id,
-      error: error instanceof Error ? error.message : String(error),
+      error: errorCode(error),
     };
   }
 }
@@ -86,7 +125,7 @@ export type InboxConsumerHandle = {
   done: Promise<void>;
 };
 
-/** Start a bounded polling loop. Startup recovery is provided by claimNextInboxEvent's lease query. */
+/** Start a bounded polling loop. Retry timing remains in the durable ledger. */
 export function startInboxConsumer(
   db: DatabaseSync,
   options: InboxConsumerOptions,

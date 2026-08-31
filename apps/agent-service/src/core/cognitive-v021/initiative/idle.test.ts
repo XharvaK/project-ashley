@@ -3,6 +3,8 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { PRIVATE_THOUGHT_MAX_CALLS_PER_HOUR } from "../types.js";
 import { openTestSidecar } from "../test-support.js";
+import { PRIVATE_THOUGHT_POLICY_ID } from "../private-budget/ledger.js";
+import { reconcilePolicyClock } from "../private-budget/policy-time-ledger.js";
 import { tickIdleOpportunity } from "./idle.js";
 
 function seedActiveOccupancy(db: ReturnType<typeof openTestSidecar>, conversationId = "thread-idle"): void {
@@ -17,6 +19,10 @@ function seedActiveOccupancy(db: ReturnType<typeof openTestSidecar>, conversatio
        (conversation_id, concern_id, status, priority, updated_cycle, updated_generation)
      VALUES (?, 'concern-idle', 'active', 20, 'cycle-seed', 1)`,
   ).run(conversationId);
+}
+
+function establishEpoch(db: ReturnType<typeof openTestSidecar>, nowMs: number): void {
+  reconcilePolicyClock(db, { policyId: PRIVATE_THOUGHT_POLICY_ID, wallClockNowMs: nowMs, authorizationRef: "owner:test-epoch" });
 }
 
 describe("v0.2.1 idle executive", () => {
@@ -45,6 +51,7 @@ describe("v0.2.1 idle executive", () => {
     const db = openTestSidecar();
     try {
       seedActiveOccupancy(db);
+      establishEpoch(db, 100);
       let calls = 0;
       const result = await tickIdleOpportunity(db, {
         conversationId: "thread-idle",
@@ -68,10 +75,11 @@ describe("v0.2.1 idle executive", () => {
     expect(source).not.toContain("decide(");
   });
 
-  it("makes a concern dormant after three unchanged private no-op idles", async () => {
+  it("does not write dormancy after unchanged private no-op idles", async () => {
     const db = openTestSidecar();
     try {
       seedActiveOccupancy(db, "thread-dormant");
+      establishEpoch(db, 1000);
       let calls = 0;
       for (let index = 0; index < 4; index += 1) {
         const result = await tickIdleOpportunity(db, {
@@ -82,10 +90,11 @@ describe("v0.2.1 idle executive", () => {
             return { published: true, outboxId: null, thoughtModelAttempts: 1, speechMode: "none" as const };
           },
         });
-        if (index === 3) expect(result.thoughtModelAttempts).toBe(0);
+        expect(result.dormant).toBe(false);
       }
-      expect(calls).toBe(3);
-      expect(db.prepare("SELECT status FROM mind_occupancy WHERE conversation_id = 'thread-dormant'").get()).toMatchObject({ status: "dormant_but_revisitable" });
+      expect(calls).toBe(4);
+      expect(db.prepare("SELECT status FROM mind_occupancy WHERE conversation_id = 'thread-dormant'").get()).toMatchObject({ status: "active" });
+      expect(db.prepare("SELECT status FROM concerns WHERE conversation_id = 'thread-dormant'").get()).toMatchObject({ status: "active" });
     } finally {
       db.close();
     }
@@ -116,6 +125,7 @@ describe("v0.2.1 idle executive", () => {
     const db = openTestSidecar();
     try {
       seedActiveOccupancy(db, "thread-budget");
+      establishEpoch(db, 10_000);
       let calls = 0;
       for (let index = 0; index < PRIVATE_THOUGHT_MAX_CALLS_PER_HOUR + 1; index += 1) {
         await tickIdleOpportunity(db, {

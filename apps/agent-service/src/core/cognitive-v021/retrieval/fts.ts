@@ -7,6 +7,8 @@ import type {
   RetrievalInfrastructureState,
 } from "../types.js";
 import { DerivedStore } from "./derived-store.js";
+import { hasAuthorityBarrier, requireStableAuthorityBarrier } from "../authority/barrier.js";
+import { hasPendingDerivedInvalidation } from "../authority/journal.js";
 
 export type RawFtsMemoryRow = {
   assertionKey: AssertionKey;
@@ -42,14 +44,23 @@ export function searchMemoryFts(
   derivedStore: DerivedStore,
   sidecarDb: DatabaseSync,
   ftsQuery: string | null,
-  options: { limit?: number } = {},
+  options: { limit?: number; authorityDb?: DatabaseSync } = {},
 ): FtsSearchResult<RawFtsMemoryRow> {
   if (!ftsQuery || !ftsQuery.trim()) {
     return { state: "ready", rows: [] };
   }
 
+  let authoritySnapshot: ReturnType<typeof requireStableAuthorityBarrier> | null = null;
+  if (options.authorityDb && hasAuthorityBarrier(options.authorityDb)) {
+    try {
+      authoritySnapshot = requireStableAuthorityBarrier(options.authorityDb);
+    } catch {
+      return { state: "unavailable", rows: [] };
+    }
+  }
+
   // Ensure derived index is ready and valid (O(1) when valid, reconciles when invalid)
-  const ready = derivedStore.isReady(sidecarDb);
+  const ready = derivedStore.isReady(sidecarDb, { authorityDb: options.authorityDb });
   if (!ready) {
     return { state: "unavailable", rows: [] };
   }
@@ -71,6 +82,14 @@ export function searchMemoryFts(
     }>;
 
     if (ftsRows.length === 0) {
+      if (authoritySnapshot) {
+        try {
+          requireStableAuthorityBarrier(options.authorityDb!, authoritySnapshot);
+        } catch {
+          derivedStore.markInvalid();
+          return { state: "unavailable", rows: [] };
+        }
+      }
       return { state: "ready", rows: [] };
     }
 
@@ -91,6 +110,10 @@ export function searchMemoryFts(
 
     const resultRows: RawFtsMemoryRow[] = [];
     for (const ftsRow of ftsRows) {
+      if (options.authorityDb && hasPendingDerivedInvalidation(options.authorityDb, ftsRow.assertion_key)) {
+        derivedStore.markInvalid();
+        return { state: "unavailable", rows: [] };
+      }
       const sidecar = sidecarMap.get(ftsRow.assertion_key);
       if (!sidecar) {
         // Orphan FTS row: missing from authoritative sidecar. Fail closed.
@@ -122,6 +145,15 @@ export function searchMemoryFts(
       });
     }
 
+    if (authoritySnapshot) {
+      try {
+        requireStableAuthorityBarrier(options.authorityDb!, authoritySnapshot);
+      } catch {
+        derivedStore.markInvalid();
+        return { state: "unavailable", rows: [] };
+      }
+    }
+
     return { state: "ready", rows: resultRows };
   } catch {
     return { state: "unavailable", rows: [] };
@@ -133,13 +165,25 @@ export function searchConversationFts(
   sidecarDb: DatabaseSync,
   conversationId: string,
   ftsQuery: string | null,
-  options: { limit?: number; excludeRowIds?: Set<string> } = {},
+  options: { limit?: number; excludeRowIds?: Set<string>; authorityDb?: DatabaseSync } = {},
 ): FtsSearchResult<LogFtsRow> {
   if (!ftsQuery || !ftsQuery.trim()) {
     return { state: "ready", rows: [] };
   }
 
-  const ready = derivedStore.isReady(sidecarDb);
+  let authoritySnapshot: ReturnType<typeof requireStableAuthorityBarrier> | null = null;
+  if (options.authorityDb && hasAuthorityBarrier(options.authorityDb)) {
+    try {
+      authoritySnapshot = requireStableAuthorityBarrier(options.authorityDb);
+    } catch {
+      return { state: "unavailable", rows: [] };
+    }
+  }
+
+  const ready = derivedStore.isReady(sidecarDb, {
+    authorityDb: options.authorityDb,
+    conversationId,
+  });
   if (!ready) {
     return { state: "unavailable", rows: [] };
   }
@@ -161,6 +205,14 @@ export function searchConversationFts(
     }>;
 
     if (ftsRows.length === 0) {
+      if (authoritySnapshot) {
+        try {
+          requireStableAuthorityBarrier(options.authorityDb!, authoritySnapshot);
+        } catch {
+          derivedStore.markInvalid();
+          return { state: "unavailable", rows: [] };
+        }
+      }
       return { state: "ready", rows: [] };
     }
 
@@ -190,6 +242,10 @@ export function searchConversationFts(
 
     const resultRows: LogFtsRow[] = [];
     for (const ftsRow of filteredFts) {
+      if (options.authorityDb && hasPendingDerivedInvalidation(options.authorityDb, ftsRow.row_id, conversationId)) {
+        derivedStore.markInvalid();
+        return { state: "unavailable", rows: [] };
+      }
       const sidecar = sidecarMap.get(ftsRow.row_id);
       if (!sidecar) {
         // Orphan FTS row: missing from authoritative sidecar. Fail closed.
@@ -215,6 +271,15 @@ export function searchConversationFts(
         version: sidecar.version ?? null,
         sourceStore: "conversation_log",
       });
+    }
+
+    if (authoritySnapshot) {
+      try {
+        requireStableAuthorityBarrier(options.authorityDb!, authoritySnapshot);
+      } catch {
+        derivedStore.markInvalid();
+        return { state: "unavailable", rows: [] };
+      }
     }
 
     return { state: "ready", rows: resultRows };

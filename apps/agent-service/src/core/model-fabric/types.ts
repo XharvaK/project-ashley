@@ -405,6 +405,10 @@ export type ModelAttemptReceiptBase = {
   errorClass?: string | null;
   /** Existing attention outcome when it is available without raw content. */
   outcome?: string | null;
+  /** W1 capability identity captured for this exact attempt, when available. */
+  capabilityFingerprint?: string | null;
+  /** W1 sanitized evidence of the exact emitted provider wire. */
+  wireEvidence?: import("../model-routing/types.js").WireDispatchEvidence | null;
 };
 
 export type ModelResolvedNotSentReceipt = ModelAttemptReceiptBase &
@@ -496,4 +500,6 @@ export type ModelFabricDispatchMetadata = {
   dispatchMessagesHash?: string;
   suppressedProvider?: string;
   suppressedBucket?: string;
+  wireEvidence?: import("../model-routing/types.js").WireDispatchEvidence;
+  capabilityIdentity?: import("./capability-identity.js").ThoughtCapabilityIdentity;
 };

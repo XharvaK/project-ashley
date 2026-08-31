@@ -90,10 +90,21 @@ export function admitCognitiveIngress(
       };
     }
   }
+  const fence = composeOrPreempt(sidecar, {
+    conversationId,
+    evidenceRowIds: [evidence.rowId],
+    triggerKind: "owner_message",
+    triggerRef: evidence.rowId,
+    occupantId: options.occupantId ?? input.userId,
+    authorityEpoch: options.authorityEpoch ?? 1,
+    nowMs: admittedAtMs,
+  });
   const inbox = appendInboxEvent(sidecar, {
     conversationId,
+    wakeId: fence.cycle.wakeId,
     kind: "owner_utterance",
     payload: {
+      cycleId: fence.cycleId,
       evidenceRowId: evidence.rowId,
       discordMessageIds: evidence.discordMessageIds,
       ownerId: input.userId,
@@ -103,15 +114,6 @@ export function admitCognitiveIngress(
       discordPresence: input.discordPresence ?? null,
     },
     createdAtMs: admittedAtMs,
-  });
-  const fence = composeOrPreempt(sidecar, {
-    conversationId,
-    evidenceRowIds: [evidence.rowId],
-    triggerKind: "owner_message",
-    triggerRef: evidence.rowId,
-    occupantId: options.occupantId ?? input.userId,
-    authorityEpoch: options.authorityEpoch ?? 1,
-    nowMs: admittedAtMs,
   });
   return {
     accepted: true,

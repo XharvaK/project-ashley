@@ -48,6 +48,29 @@ export type EnqueueInput = {
   ownerId?: string | null;
 };
 
+export type ThoughtAttemptBinding = {
+  allocationId: number;
+  thoughtInvocationId: string;
+  thoughtCycleId: string;
+  thoughtGeneration: number;
+  thoughtSemanticPass: number;
+  thoughtStructuralAttempt: number;
+  thoughtAuthorityEpoch: number;
+  thoughtAuthorityVectorJson: string;
+  thoughtTriggerRef: string;
+  semanticProjectionHash: string;
+  dispatchMessagesHash: string;
+  allowlistFingerprint: string;
+  mfInvocationId: string;
+  mfAttemptId: string;
+  actualProvider: string;
+  actualOccupantId: string;
+  actualWireBindingId: string;
+  schemaEnforcementMode: string;
+  resourcePolicyFingerprint: string;
+  absoluteDeadlineAtMs: number;
+};
+
 /** Default bucket for legacy callers until the router supplies routes. */
 export function defaultQuotaBucket(): string {
   return `mistral:${env.mistralModel}`;
@@ -509,6 +532,64 @@ export function markRunning(
     acceptedProvenance?.buildIdentity ?? null,
     requestId,
   );
+}
+
+export function bindThoughtAttempt(
+  db: DatabaseSync,
+  input: ThoughtAttemptBinding,
+): void {
+  if (!Number.isInteger(input.allocationId) || input.allocationId <= 0) {
+    throw new Error("thought_attempt_context_incomplete");
+  }
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const result = db.prepare(
+      `UPDATE attention_requests
+          SET thought_invocation_id = ?, thought_cycle_id = ?, thought_generation = ?,
+              thought_semantic_pass = ?, thought_structural_attempt = ?,
+              thought_authority_epoch = ?, thought_authority_vector_json = ?,
+              thought_trigger_ref = ?, semantic_projection_hash = ?,
+              dispatch_messages_hash = ?, allowlist_fingerprint = ?,
+              mf_invocation_id = ?, mf_attempt_id = ?, actual_provider = ?,
+              actual_occupant_id = ?, actual_wire_binding_id = ?,
+              schema_enforcement_mode = ?, resource_policy_fingerprint = ?,
+              absolute_deadline_at_ms = ?
+        WHERE id = ? AND mf_attempt_id IS NULL AND thought_invocation_id IS NULL`,
+    ).run(
+      input.thoughtInvocationId, input.thoughtCycleId, input.thoughtGeneration,
+      input.thoughtSemanticPass, input.thoughtStructuralAttempt, input.thoughtAuthorityEpoch,
+      input.thoughtAuthorityVectorJson, input.thoughtTriggerRef, input.semanticProjectionHash,
+      input.dispatchMessagesHash, input.allowlistFingerprint, input.mfInvocationId,
+      input.mfAttemptId, input.actualProvider, input.actualOccupantId, input.actualWireBindingId,
+      input.schemaEnforcementMode, input.resourcePolicyFingerprint, input.absoluteDeadlineAtMs,
+      input.allocationId,
+    );
+    if (result.changes !== 1) {
+      const row = db.prepare(
+        "SELECT id, state, thought_invocation_id, mf_attempt_id FROM attention_requests WHERE id = ?",
+      ).get(input.allocationId) as Row | undefined;
+      if (row && (row.thought_invocation_id != null || row.mf_attempt_id != null)) {
+        throw new Error("thought_attempt_already_bound");
+      }
+      throw new Error("stale_attention_state");
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    try { db.exec("ROLLBACK"); } catch { /* preserve binding error */ }
+    throw error;
+  }
+}
+
+export function getThoughtAttempt(db: DatabaseSync, allocationId: number): Row | undefined {
+  return db.prepare(
+    `SELECT id, thought_invocation_id, thought_cycle_id, thought_generation,
+            thought_semantic_pass, thought_structural_attempt, thought_authority_epoch,
+            thought_authority_vector_json, thought_trigger_ref, semantic_projection_hash,
+            dispatch_messages_hash, allowlist_fingerprint, mf_invocation_id, mf_attempt_id,
+            actual_provider, actual_occupant_id, actual_wire_binding_id,
+            schema_enforcement_mode, resource_policy_fingerprint, absolute_deadline_at_ms
+       FROM attention_requests WHERE id = ?`,
+  ).get(allocationId) as Row | undefined;
 }
 
 export function completeRequest(

@@ -1,35 +1,43 @@
 import type { DatabaseSync } from "node:sqlite";
-import { admitCycle } from "../cycle/inbox.js";
+import { getCycle } from "../cycle/inbox.js";
 import { listOccupancy } from "../concerns/occupancy.js";
 import { fireDueTriggers } from "./future-triggers.js";
 import { collectSubscriptionObservations, listObservationSubscriptions, type SubscriptionItem } from "../observation/subscriptions.js";
 import {
-  PRIVATE_THOUGHT_MAX_CALLS_PER_HOUR,
-  PRIVATE_THOUGHT_MAX_CONCURRENT,
   type CycleRecord,
   type FutureTrigger,
+  type InboxEvent,
   type KernelRunResult,
   type LearnedSelfSlice,
   type MindOccupancy,
   type Observation,
 } from "../types.js";
+import { admitWake, getWake } from "../wake/ledger.js";
+import { occurrenceIdFor } from "../wake/identity.js";
+import {
+  PRIVATE_THOUGHT_POLICY_ID,
+  getPrivateReservation,
+  markPrivateReservationUnknown,
+  reservePrivateThought,
+} from "../private-budget/ledger.js";
 
 const GROUNDED_STATUSES = new Set(["active", "investigating", "waiting_for_evidence"]);
-const HOUR_MS = 60 * 60 * 1000;
-const IDLE_NOOP_BEFORE_DORMANT = 3;
-
 type IdleRunnerResult = Partial<KernelRunResult> & {
   speechMode?: "none" | "draft";
   settlement?: { speech?: { mode?: "none" | "draft" } };
+  dormant?: boolean;
 };
 
 export type IdleThoughtContext = {
   sidecar: DatabaseSync;
   cycle: CycleRecord;
+  wakeId: string;
+  event: InboxEvent | null;
   trigger: { kind: "idle_opportunity" | "subscription_item" | "future_trigger_due"; ref: string };
   occupancy: MindOccupancy[];
   observations: Observation[];
   dueTriggers: FutureTrigger[];
+  privateBudgetReservation: import("../types.js").PrivateBudgetReservation;
 };
 
 export type IdleThoughtRunner = (input: IdleThoughtContext) => Promise<IdleRunnerResult> | IdleRunnerResult;
@@ -46,13 +54,14 @@ export type IdleTickOptions = {
   runThought?: IdleThoughtRunner;
   thought?: IdleThoughtRunner;
   thoughtRunner?: IdleThoughtRunner;
-  privateBudgetRemaining?: number;
-  maxPrivateCallsPerHour?: number;
+  /** Policy identity is configuration; capacity remains ledger-owned. */
+  privateBudgetPolicyId?: string;
 };
 
 export type IdleTickReason =
   | "empty_house"
   | "private_compute_budget"
+  | "private_compute_clock_reconciliation"
   | "private_compute_concurrent"
   | "thought_runner_missing"
   | "thought_failed";
@@ -71,9 +80,8 @@ export type IdleTickResult = {
   dormant: boolean;
 };
 
-const privateCallHistory = new Map<string, number[]>();
+/** Scheduler-only overlap guard. It is not a budget counter or capacity source. */
 const activePrivateCalls = new Set<string>();
-const idleNoopState = new Map<string, { fingerprint: string; count: number }>();
 
 function number(value: unknown, fallback = 0): number {
   const parsed = typeof value === "number" ? value : Number(value);
@@ -82,10 +90,6 @@ function number(value: unknown, fallback = 0): number {
 
 function groundedOccupancy(db: DatabaseSync, conversationId: string): MindOccupancy[] {
   return listOccupancy(db, conversationId).filter((item) => GROUNDED_STATUSES.has(item.status));
-}
-
-function occupancyFingerprint(items: MindOccupancy[]): string {
-  return JSON.stringify(items.map((item) => [item.concernId, item.status, item.priority, item.updatedGeneration]));
 }
 
 function runner(options: IdleTickOptions): IdleThoughtRunner | undefined {
@@ -119,43 +123,6 @@ function remapObservation(observation: Observation, cycle: CycleRecord): Observa
   return { ...observation, cycleId: cycle.cycleId, generation: cycle.generation };
 }
 
-function isPrivateNoop(result: IdleRunnerResult): boolean {
-  if (result.speechMode === "none") return true;
-  if (result.speechMode === "draft") return false;
-  if (result.settlement?.speech?.mode === "none") return true;
-  if (result.settlement?.speech?.mode === "draft") return false;
-  return result.published === true && (result.outboxId == null);
-}
-
-function markDormantIfUnchanged(
-  db: DatabaseSync,
-  conversationId: string,
-  cycle: CycleRecord,
-  before: string,
-  result: IdleRunnerResult,
-): boolean {
-  const afterItems = groundedOccupancy(db, conversationId);
-  const after = occupancyFingerprint(afterItems);
-  if (!isPrivateNoop(result) || before !== after) {
-    idleNoopState.set(conversationId, { fingerprint: after, count: 0 });
-    return false;
-  }
-  const previous = idleNoopState.get(conversationId);
-  const count = previous && previous.fingerprint === before ? previous.count + 1 : 1;
-  idleNoopState.set(conversationId, { fingerprint: after, count });
-  if (count < IDLE_NOOP_BEFORE_DORMANT) return false;
-  db.prepare(
-    `UPDATE mind_occupancy
-        SET status = 'dormant_but_revisitable', updated_cycle = ?, updated_generation = ?
-      WHERE conversation_id = ? AND status IN ('active', 'investigating', 'waiting_for_evidence')`,
-  ).run(cycle.cycleId, cycle.generation, conversationId);
-  db.prepare(
-    `UPDATE concerns SET status = 'dormant_but_revisitable', updated_cycle = ?
-      WHERE conversation_id = ? AND status IN ('active', 'investigating', 'waiting_for_evidence')`,
-  ).run(cycle.cycleId, conversationId);
-  return true;
-}
-
 function emptyResult(
   conversationId: string | null,
   reason: IdleTickReason,
@@ -177,6 +144,11 @@ function emptyResult(
   };
 }
 
+function settleUnsettledPrivateReservation(db: DatabaseSync, reservationId: string, nowMs: number): void {
+  const current = getPrivateReservation(db, reservationId);
+  if (current?.state === "held") markPrivateReservationUnknown(db, reservationId, { nowMs });
+}
+
 async function tickConversation(
   db: DatabaseSync,
   conversationId: string,
@@ -184,6 +156,7 @@ async function tickConversation(
   firedTriggers: FutureTrigger[],
   suppressedTriggers: FutureTrigger[],
   items: Array<SubscriptionItem | string>,
+  dueEvents: InboxEvent[],
 ): Promise<IdleTickResult> {
   const occupancy = groundedOccupancy(db, conversationId);
   const dueTriggers = firedTriggers.filter((trigger) => trigger.conversationId === conversationId);
@@ -203,13 +176,6 @@ async function tickConversation(
   if (activePrivateCalls.has(conversationId)) return emptyResult(conversationId, "private_compute_concurrent", dueTriggers, []);
 
   const nowMs = options.nowMs ?? Date.now();
-  const previousCalls = (privateCallHistory.get(conversationId) ?? []).filter((at) => at <= nowMs && nowMs - at < HOUR_MS);
-  privateCallHistory.set(conversationId, previousCalls);
-  const maxCalls = Math.max(0, Math.floor(options.maxPrivateCallsPerHour ?? PRIVATE_THOUGHT_MAX_CALLS_PER_HOUR));
-  if (options.privateBudgetRemaining != null && options.privateBudgetRemaining <= 0) {
-    return emptyResult(conversationId, "private_compute_budget", dueTriggers, []);
-  }
-  if (previousCalls.length >= maxCalls) return emptyResult(conversationId, "private_compute_budget", dueTriggers, []);
 
   const triggerKind = dueTriggers.length > 0
     ? "future_trigger_due" as const
@@ -220,31 +186,66 @@ async function tickConversation(
     ? dueTriggers.map((trigger) => trigger.triggerId).join(",")
     : matched.length > 0
       ? matched.map((observation) => observation.observationId).join(",")
-      : occupancy.map((item) => item.concernId).join(",");
-  const cycle = admitCycle(db, {
-    conversationId,
-    triggerKind,
-    triggerRef,
-    occupantId: options.occupantId ?? "private",
-    authorityEpoch: options.authorityEpoch ?? 1,
-    nowMs,
-  });
+      : `${occupancy.map((item) => item.concernId).join(",")}:tick:${nowMs}`;
+  const dueWake = dueTriggers[0]?.wakeId ? getWake(db, dueTriggers[0].wakeId) : null;
+  const admission = dueWake
+    ? { kind: "existing" as const, wake: dueWake }
+    : admitWake(db, {
+      occurrenceId: occurrenceIdFor({
+        sourceKind: triggerKind === "future_trigger_due" ? "future_trigger" : triggerKind === "subscription_item" ? "subscription" : "idle",
+        triggerRef,
+        conversationId,
+      }),
+      triggerRef,
+      sourceKind: triggerKind === "future_trigger_due" ? "future_trigger" : triggerKind === "subscription_item" ? "subscription" : "idle",
+      conversationId,
+      triggerKind,
+      occupantId: options.occupantId ?? "private",
+      authorityEpoch: options.authorityEpoch ?? 1,
+      capturedAuthorityRevision: 0,
+      nowMs,
+    });
+  if (admission.kind === "cancelled" || admission.kind === "stale") return emptyResult(conversationId, "empty_house", dueTriggers, suppressedTriggers);
+  const cycle = getCycle(db, admission.wake.cycleId);
+  if (!cycle) throw new Error("idle_cycle_missing");
+  const wakeId = cycle.wakeId;
+  const event = dueEvents.find((candidate) => candidate.wakeId === wakeId) ?? null;
   const observations = matched.map((observation) => remapObservation(observation, cycle));
-  const before = occupancyFingerprint(occupancy);
+  const budget = reservePrivateThought(db, {
+    admissionId: `private-thought:${wakeId}`,
+    wakeId,
+    conversationId,
+    policyId: options.privateBudgetPolicyId ?? PRIVATE_THOUGHT_POLICY_ID,
+    wallClockNowMs: nowMs,
+  });
+  if (budget.kind === "refused") {
+    return emptyResult(
+      conversationId,
+      budget.reason === "clock_reconciliation" ? "private_compute_clock_reconciliation" : "private_compute_budget",
+      dueTriggers,
+      [],
+    );
+  }
+  if (budget.reservation.state !== "held") return emptyResult(conversationId, "private_compute_budget", dueTriggers, []);
   activePrivateCalls.add(conversationId);
-  privateCallHistory.set(conversationId, [...previousCalls, nowMs]);
   try {
     const result = await thought({
       sidecar: db,
       cycle,
+      wakeId,
+      event,
       trigger: { kind: triggerKind, ref: triggerRef },
       occupancy,
       observations,
       dueTriggers,
+      privateBudgetReservation: budget.reservation,
     });
+    settleUnsettledPrivateReservation(db, budget.reservation.reservationId, nowMs);
     const thoughtModelAttempts = number(result.thoughtModelAttempts, 1);
     const acceptedSettlements = number(result.acceptedSettlements, result.published === true ? 1 : 0);
-    const dormant = markDormantIfUnchanged(db, conversationId, cycle, before, result);
+    // Dormancy is semantic state. Only the Thought settlement may publish it;
+    // the idle scheduler reports an explicit result without writing state.
+    const dormant = result.dormant === true;
     return {
       conversationId,
       eligible: true,
@@ -259,6 +260,7 @@ async function tickConversation(
       dormant,
     };
   } catch {
+    try { settleUnsettledPrivateReservation(db, budget.reservation.reservationId, nowMs); } catch { /* preserve the idle failure result */ }
     return {
       conversationId,
       eligible: true,
@@ -289,7 +291,7 @@ export async function tickIdleOpportunity(
   if (conversations.length === 0) return emptyResult(options.conversationId ?? null, "empty_house", due.fired, due.suppressedStale);
   const results: IdleTickResult[] = [];
   for (const conversationId of conversations) {
-    results.push(await tickConversation(db, conversationId, { ...options, nowMs }, due.fired, due.suppressedStale, items));
+    results.push(await tickConversation(db, conversationId, { ...options, nowMs }, due.fired, due.suppressedStale, items, due.events));
   }
   return {
     conversationId: options.conversationId ?? (results.length === 1 ? results[0]!.conversationId : null),

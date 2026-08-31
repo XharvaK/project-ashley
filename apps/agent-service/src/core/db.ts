@@ -120,6 +120,15 @@ import {
   ensureNuclearV42Schema,
   MIGRATION_42_COGNITIVE_PROJECTION_KEY_DDL,
 } from "./delivery/migration-42.js";
+import {
+  ensureNuclearV43Schema,
+  MIGRATION_43_THOUGHT_ATTEMPT_DDL,
+} from "./cognitive-v021/migration-43.js";
+import {
+  ensureNuclearV44Schema,
+  MIGRATION_44_AUTHORITY_BARRIER_DDL,
+} from "./cognitive-v021/migration-44.js";
+import { reconcileAuthorityBarrierOnStartup } from "./cognitive-v021/authority/barrier.js";
 import { repairMemoryProjectionOnStartup } from "./memory/cutover.js";
 import {
   continuityGeneration,
@@ -131,7 +140,7 @@ import { currentBuildIdentity } from "./rollout/capabilities.js";
 
 export { reservedProductionNuclearDbPath as NUCLEAR_DB_PATH };
 
-const OBSERVED_NUCLEAR_BASELINE_VERSION = 41 as const;
+const OBSERVED_NUCLEAR_BASELINE_VERSION = 43 as const;
 export const NUCLEAR_SUPPORTED_VERSION = OBSERVED_NUCLEAR_BASELINE_VERSION + 1;
 
 export type NuclearMigrationTestFault =
@@ -1187,14 +1196,14 @@ function reconcilePendingNuclearMigration(
     buildIdentity: pending.buildIdentity,
   };
   if (actualVersion === pending.from) {
-    validateNuclearSchemaContent(db, pending.from as 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37 | 38 | 39 | 40 | 41 | 42, {
+    validateNuclearSchemaContent(db, pending.from as 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37 | 38 | 39 | 40 | 41 | 42 | 43 | 44, {
       rejectNewerContent: true,
     });
     rollbackNuclearMigration(continuity, descriptor);
     return;
   }
   if (actualVersion === pending.to) {
-    validateNuclearSchemaContent(db, pending.to as 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37 | 38 | 39 | 40 | 41 | 42, {
+    validateNuclearSchemaContent(db, pending.to as 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37 | 38 | 39 | 40 | 41 | 42 | 43 | 44, {
       rejectNewerContent: true,
     });
     finalizeNuclearMigration(continuity, descriptor, "recovered");
@@ -1322,13 +1331,17 @@ function migrateNuclearSchemaWithProtocol(input: {
       ensureNuclearV41Schema(db);
     } else if (targetVersion === 42) {
       ensureNuclearV42Schema(db);
+    } else if (targetVersion === 43) {
+      ensureNuclearV43Schema(db);
+    } else if (targetVersion === 44) {
+      ensureNuclearV44Schema(db);
     } else {
       db.exec(ddl);
     }
     db.exec(`PRAGMA user_version = ${targetVersion}`);
     validateNuclearSchemaContent(
       db,
-      targetVersion as 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37 | 38 | 39 | 40 | 41 | 42,
+      targetVersion as 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37 | 38 | 39 | 40 | 41 | 42 | 43 | 44,
     );
     const fk = db.prepare("PRAGMA foreign_key_check").all();
     if (fk.length > 0) throw new Error("nuclear_fk_check_failed");
@@ -1427,7 +1440,7 @@ export function migrate(
       throw err;
     }
     if (version >= 25 && version <= NUCLEAR_SUPPORTED_VERSION) {
-      validateNuclearSchemaContent(db, version as 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37 | 38 | 39 | 40 | 41 | 42);
+      validateNuclearSchemaContent(db, version as 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37 | 38 | 39 | 40 | 41 | 42 | 43 | 44);
     }
     return;
   }
@@ -3105,10 +3118,62 @@ export function migrate(
         options.testFailAfterNuclearCommitBeforeContinuityFinalization,
     });
   }
+  if (userVersion(db) < 43) {
+    const continuity = options.continuity;
+    const priorVersion = userVersion(db);
+    const lineageId = nuclearLineageMirrorId(db);
+    if (!continuity && !options.skipContinuityRequirement) {
+      throw new Error("continuity_unavailable");
+    }
+    migrateNuclearSchemaWithProtocol({
+      db,
+      continuity: continuity && lineageId ? continuity : undefined,
+      targetVersion: 43,
+      descriptor:
+        continuity && lineageId
+          ? {
+              from: priorVersion,
+              to: 43,
+              lineageId,
+              buildIdentity: currentBuildIdentity(),
+            }
+          : undefined,
+      ddl: MIGRATION_43_THOUGHT_ATTEMPT_DDL,
+      testMigrationFault: options.testMigrationFault,
+      testFailAfterNuclearCommitBeforeContinuityFinalization:
+        options.testFailAfterNuclearCommitBeforeContinuityFinalization,
+    });
+  }
+  if (userVersion(db) < 44) {
+    const continuity = options.continuity;
+    const priorVersion = userVersion(db);
+    const lineageId = nuclearLineageMirrorId(db);
+    if (!continuity && !options.skipContinuityRequirement) {
+      throw new Error("continuity_unavailable");
+    }
+    migrateNuclearSchemaWithProtocol({
+      db,
+      continuity: continuity && lineageId ? continuity : undefined,
+      targetVersion: 44,
+      descriptor:
+        continuity && lineageId
+          ? {
+              from: priorVersion,
+              to: 44,
+              lineageId,
+              buildIdentity: currentBuildIdentity(),
+            }
+          : undefined,
+      ddl: MIGRATION_44_AUTHORITY_BARRIER_DDL,
+      testMigrationFault: options.testMigrationFault,
+      testFailAfterNuclearCommitBeforeContinuityFinalization:
+        options.testFailAfterNuclearCommitBeforeContinuityFinalization,
+    });
+  }
   if (userVersion(db) >= 25) {
     validateNuclearSchemaContent(
       db,
-      userVersion(db) as 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37 | 38 | 39 | 40 | 41 | 42,
+      userVersion(db) as 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37 | 38 | 39 | 40 | 41 | 42 | 43 | 44,
     );
   }
   if (!options.skipContinuityRequirement && userVersion(db) >= 15) {
@@ -3278,5 +3343,6 @@ export function openNuclearDb(
   }
   reconcileSandboxApprovals(existing);
   if (continuity) registerContinuityFor(existing, continuity, mainFile);
+  if (userVersion(existing) >= 44) reconcileAuthorityBarrierOnStartup(existing);
   return existing;
 }

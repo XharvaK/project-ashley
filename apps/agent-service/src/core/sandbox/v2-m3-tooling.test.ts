@@ -3,15 +3,15 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { mkdtempSync, rmSync } from "node:fs";
+import { V2ProjectReadRegistry } from "@composer-assistant/sandbox-v2";
+import { executeWorkspaceExperimentV2 } from "./v2-execution.js";
 import {
   CANONICAL_WITNESS_BYTES,
   CANONICAL_WITNESS_LENGTH,
   CANONICAL_WITNESS_SHA256,
   assertSafePath,
   verifyCanonicalWitnessHash,
-} from "../../../../../scripts/mint/m3-substrate-qualification.mjs";
-import { V2ProjectReadRegistry } from "@composer-assistant/sandbox-v2";
-import { executeWorkspaceExperimentV2 } from "./v2-execution.js";
+} from "../../../../../scripts/mint/m3-qualification-contract.mjs";
 
 describe("M3 Qualification Tooling Integrity & Production-Safety Tests", () => {
   // 1. Canonical Witness Hash & Length

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { openTestSidecar } from "../test-support.js";
+import { COGNITIVE_SIDECAR_SCHEMA_VERSION } from "../types.js";
 import { getCognitiveHealthSnapshot } from "./health.js";
 
 describe("cognitive health projection", () => {
@@ -12,8 +13,8 @@ describe("cognitive health projection", () => {
     });
     expect(health).toEqual({
       cognitiveKernel: "shadow",
-      cognitiveSidecar: { open: true, schemaVersion: 1, path: "cognitive-v021.db" },
-      cognitiveSidecarSchemaVersion: 1,
+      cognitiveSidecar: { open: true, schemaVersion: COGNITIVE_SIDECAR_SCHEMA_VERSION, path: "cognitive-v021.db" },
+      cognitiveSidecarSchemaVersion: COGNITIVE_SIDECAR_SCHEMA_VERSION,
       cognitiveSidecarPath: "cognitive-v021.db",
     });
     expect(JSON.stringify(health)).not.toContain(".composer-assistant");

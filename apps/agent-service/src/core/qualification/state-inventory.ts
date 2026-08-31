@@ -275,6 +275,18 @@ const NON_LIVE: Record<string, NonLiveRule> = {
     reason: "Track R — review state for foundational revisions; never reaches live behavior; requires dual owner approval to apply",
   },
   lineage_mirror: { cls: "CONTROL_PLANE", reason: "continuity lineage ledger; not written by shadow; in-memory sidecar in tests" },
+  authority_transition_barrier: {
+    cls: "CONTROL_PLANE",
+    reason: "W4 cross-owner currentness barrier; coordination state, not live semantic state",
+  },
+  canonical_owner_versions: {
+    cls: "CONTROL_PLANE",
+    reason: "W4 canonical-owner version vector; coordination state, not live semantic state",
+  },
+  derived_invalidation_journal: {
+    cls: "CONTROL_PLANE",
+    reason: "W4 derived projection invalidation/reconciliation journal; no semantic authority",
+  },
   sandbox_approval_events: { cls: "CONTROL_PLANE", reason: "sandbox broker ledger; not written by shadow" },
   sandbox_approval_proposals: { cls: "CONTROL_PLANE", reason: "sandbox broker ledger; not written by shadow" },
   sandbox_task_admissions: {

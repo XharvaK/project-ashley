@@ -15,7 +15,9 @@ describe("C4 additive schema", () => {
   it("creates append-only prediction, outcome, link, and calibration tables", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     try {
-      expect(NUCLEAR_SUPPORTED_VERSION).toBe(42);
+      // The historical C4 packet recorded v42. Current source also includes
+      // W4 migrations v43 and v44; db.ts is the live schema authority.
+      expect(NUCLEAR_SUPPORTED_VERSION).toBe(44);
       expect(db.prepare("PRAGMA user_version").get()).toEqual({
         user_version: NUCLEAR_SUPPORTED_VERSION,
       });

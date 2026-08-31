@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { openTestSidecar, makeThoughtDraft } from "../test-support.js";
+import { admitTestCycle, openTestSidecar, makeThoughtDraft } from "../test-support.js";
 import { openDerivedStore } from "../retrieval/derived-store.js";
 import { appendOwnerUtterance } from "../evidence/conversation-log.js";
-import { admitCycle } from "../cycle/inbox.js";
 import type { CapabilityReality, IdentitySlice, MindOccupancy, WorkingContextItem } from "../types.js";
 import { buildThoughtInput } from "./input.js";
 
@@ -18,7 +17,7 @@ describe("v0.2.1 ThoughtInput assembly", () => {
   it("keeps the always-on last twelve turns, compact occupancy, and trigger terms", () => {
     const db = openTestSidecar();
     try {
-      const cycle = admitCycle(db, {
+      const cycle = admitTestCycle(db, {
         cycleId: "cycle-1", conversationId: "thread-1", triggerKind: "owner_message",
         triggerRef: "owner-20", occupantId: "doc", authorityEpoch: 1, nowMs: 1,
       });
@@ -67,7 +66,7 @@ describe("v0.2.1 ThoughtInput assembly", () => {
   it("does not treat an ephemeral workspace note as a persisted Thought input field", () => {
     const db = openTestSidecar();
     try {
-      const cycle = admitCycle(db, { conversationId: "thread-1", triggerKind: "owner_message", triggerRef: "x", nowMs: 1 });
+      const cycle = admitTestCycle(db, { conversationId: "thread-1", triggerKind: "owner_message", triggerRef: "x", nowMs: 1 });
       const input = buildThoughtInput({
         sidecar: db, cycle, constitution: identity, capabilityReality: capability,
         workingContext: [], occupancy: [], learnedSelfSlice: { dispositions: [], interests: [] },

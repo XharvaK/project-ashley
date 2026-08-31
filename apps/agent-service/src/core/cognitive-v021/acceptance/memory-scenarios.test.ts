@@ -8,8 +8,8 @@ import { openCognitiveSidecarDb } from "../sidecar/db.js";
 import { upsertMemoryAssertion } from "../memory/assertions.js";
 import { buildOwnerKnowledgeView } from "../memory/views.js";
 import { buildLearnedSelfSlice } from "../identity/learned-self.js";
-import { admitCycle } from "../cycle/inbox.js";
 import { appendOwnerUtterance } from "../evidence/conversation-log.js";
+import { admitTestCycle } from "../test-support.js";
 import { applyWorkingContextDelta, listWorkingContext } from "../evidence/working-context.js";
 import { applyV021Forget } from "../memory/forget.js";
 
@@ -22,7 +22,7 @@ describe("v0.2.1 memory causal acceptance", () => {
   it("preserves corrected owner evidence and admits only the Thought-authored claim", () => {
     const db = openCognitiveSidecarDb(new DatabaseSync(":memory:"), { dataPlane: { kind: "isolated" } });
     try {
-      const cycle = admitCycle(db, { cycleId: "cycle-1", conversationId: "thread-1", generation: 1, triggerKind: "owner_message", triggerRef: "HY4", occupantId: "doc", nowMs: 1 });
+      const cycle = admitTestCycle(db, { cycleId: "cycle-1", conversationId: "thread-1", generation: 1, triggerKind: "owner_message", triggerRef: "HY4", occupantId: "doc", nowMs: 1 });
       const first = appendOwnerUtterance(db, { conversationId: "thread-1", text: "HY4", discordMessageIds: ["m1"], nowMs: 2 });
       const correction = appendOwnerUtterance(db, { conversationId: "thread-1", text: "I meant HY3", discordMessageIds: ["m2"], nowMs: 3 });
       applyWorkingContextDelta(db, { op: "upsert", item: { id: "wc-old", conversationId: "thread-1", type: "referent", text: "HY4", concernId: "concern-1", sourceTurnIds: [first.rowId], status: "active", supersedesId: null } }, { cycleId: cycle.cycleId, generation: 1 });
@@ -41,7 +41,7 @@ describe("v0.2.1 memory causal acceptance", () => {
     const path = join(directory, "sidecar.db");
     try {
       const first = openCognitiveSidecarDb(new DatabaseSync(path), { dataPlane: { kind: "isolated" } });
-      const cycle = admitCycle(first, { cycleId: "cycle-persist", conversationId: "thread-persist", generation: 1, triggerKind: "owner_message", triggerRef: "topic", occupantId: "doc", nowMs: 1 });
+      const cycle = admitTestCycle(first, { cycleId: "cycle-persist", conversationId: "thread-persist", generation: 1, triggerKind: "owner_message", triggerRef: "topic", occupantId: "doc", nowMs: 1 });
       const evidence = appendOwnerUtterance(first, { conversationId: "thread-persist", text: "persisted topic", discordMessageIds: ["persisted-1"], nowMs: 2 });
       applyWorkingContextDelta(first, { op: "upsert", item: { id: "wc-persist", conversationId: "thread-persist", type: "topic", text: "persisted topic", concernId: null, sourceTurnIds: [evidence.rowId], status: "active", supersedesId: null } }, { cycleId: cycle.cycleId, generation: cycle.generation });
       upsertMemoryAssertion(first, { assertionKey: "memory:persisted", statement: "persisted topic", memoryKind: "owner_world_claim", dimensions: { source: "owner_utterance", status: "asserted", time: "current", reliability: "owner_supplied" }, dataClassification: "never_public", lineageParentKey: null, admittedGeneration: 1, live: true });

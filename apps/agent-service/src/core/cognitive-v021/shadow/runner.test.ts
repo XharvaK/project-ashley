@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { admitCycle, appendInboxEvent } from "../cycle/inbox.js";
+import { appendInboxEvent } from "../cycle/inbox.js";
 import { appendOwnerUtterance } from "../evidence/conversation-log.js";
-import { makeThoughtDraft, openTestSidecar } from "../test-support.js";
+import { admitTestCycle, makeSemanticSettlement, openTestSidecar } from "../test-support.js";
 import type { CapabilityReality, IdentitySlice, KernelDeps, Observation } from "../types.js";
 import { runShadowCognitiveTurn } from "./runner.js";
 
@@ -14,7 +14,7 @@ const capabilityReality: CapabilityReality = {
 };
 
 function event(sidecar: ReturnType<typeof openTestSidecar>) {
-  const cycle = admitCycle(sidecar, {
+  const cycle = admitTestCycle(sidecar, {
     cycleId: "cycle-shadow", conversationId: "thread-shadow", triggerKind: "owner_message",
     triggerRef: "owner-shadow", occupantId: "doc", nowMs: 1,
   });
@@ -33,7 +33,7 @@ function deps(overrides: Partial<KernelDeps> = {}): KernelDeps {
     nowMs: () => 10,
     attentionDb: openTestSidecar(),
     completeChat: vi.fn(async () => ({
-      text: JSON.stringify(makeThoughtDraft({ cycleId: "cycle-shadow", triggerRef: "owner-shadow" })),
+      text: JSON.stringify(makeSemanticSettlement()),
       model: "fake", modelAlias: "fake", resolvedModelId: null,
     })),
     runPerception: vi.fn(async (): Promise<Observation[]> => []),

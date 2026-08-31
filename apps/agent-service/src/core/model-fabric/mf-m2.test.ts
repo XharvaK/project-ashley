@@ -196,8 +196,8 @@ describe("MF-M2 CURRENT portfolio", () => {
       }),
       fabricStructuredOutput: expect.objectContaining({
         kind: "json_object_compatibility",
-        contractId: "ashley.thought.step.v1",
-        schemaId: "ashley.thought.step.v1.schema",
+        contractId: "ashley.thought.semantic.v1",
+        schemaId: "ashley.thought.semantic.v1.schema",
         schemaFingerprint,
       }),
     }));

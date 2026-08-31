@@ -44,6 +44,7 @@ export type BuildThoughtInputOptions = {
   lastNTurns?: number;
   occupancyK?: number;
   derivedStore?: DerivedStore;
+  authorityDb?: DatabaseSync;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -177,6 +178,7 @@ export function buildThoughtInput(options: BuildThoughtInputOptions): ThoughtInp
       rawConversationRowIds,
     },
     options.derivedStore,
+    { authorityDb: options.authorityDb },
   );
 
   return {

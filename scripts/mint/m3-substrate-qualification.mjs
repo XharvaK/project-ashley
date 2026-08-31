@@ -15,6 +15,14 @@ import { randomBytes, createHash, randomUUID } from "node:crypto";
 import { createServer, connect as netConnect } from "node:net";
 import { execSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import {
+  CANONICAL_WITNESS_BYTES,
+  CANONICAL_WITNESS_LENGTH,
+  CANONICAL_WITNESS_SHA256,
+  assertSafePath,
+  toCanonicalPosixRoot,
+  verifyCanonicalWitnessHash,
+} from "./m3-qualification-contract.mjs";
 
 // Resolving compiled dependencies relative to repo root
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
@@ -26,73 +34,6 @@ import { SandboxV2Dispatcher } from "../../apps/sandbox-v2/dist/dispatch.js";
 import { executeWorkspaceExperiment } from "../../apps/sandbox-v2/dist/workspace/executor.js";
 import { V2_HOST_FACTS, V2_LIMITS, V2_SECRET_ENV_KEY } from "../../apps/sandbox-v2/dist/limits.js";
 import { executeWorkspaceExperimentV2, isSandboxV2Available } from "../../apps/agent-service/dist/core/sandbox/v2-execution.js";
-
-// Exact canonical witness specification
-export const CANONICAL_WITNESS_BYTES = "m3-witness-ok";
-export const CANONICAL_WITNESS_LENGTH = 13;
-export const CANONICAL_WITNESS_SHA256 = "cf638cbb32331a0d99110697fb5f9ff790a11c15749bbc287a132bcc0bcc708e";
-
-export function toCanonicalPosixRoot(p) {
-  let norm = p.replace(/\\/g, "/");
-  if (/^[a-zA-Z]:/.test(norm)) {
-    norm = norm.slice(2);
-  }
-  if (!norm.startsWith("/")) {
-    norm = "/" + norm;
-  }
-  return norm.replace(/\/+/g, "/");
-}
-
-/**
- * Validates that a path is safe and does not match or nest inside protected production state.
- * Uses canonical path resolution and strict containment checks.
- */
-export function assertSafePath(targetPath, description) {
-  if (!targetPath || typeof targetPath !== "string") {
-    throw new Error(`Invalid path provided for ${description}`);
-  }
-  const resolvedTarget = resolve(targetPath);
-  const canonicalTarget = existsSync(resolvedTarget) ? realpathSync(resolvedTarget) : resolvedTarget;
-
-  const home = homedir();
-  const protectedLocations = [
-    "/home/xarvak/project-ashley",
-    join(home, ".composer-assistant", "project-roots.json"),
-    join(home, ".composer-assistant", "conversations", "nuclear.db"),
-    join(home, ".composer-assistant", "continuity.db"),
-    join(home, ".composer-assistant", "index.db"),
-    join(home, ".composer-assistant"),
-  ];
-
-  for (const prot of protectedLocations) {
-    const resolvedProt = resolve(prot);
-    const canonicalProt = existsSync(resolvedProt) ? realpathSync(resolvedProt) : resolvedProt;
-
-    if (canonicalTarget === canonicalProt) {
-      throw new Error(`ProductionPathViolation: ${description} (${targetPath}) directly matches protected production location (${prot})`);
-    }
-
-    const rel = relative(canonicalProt, canonicalTarget);
-    if (rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))) {
-      throw new Error(`ProductionPathViolation: ${description} (${targetPath}) is contained within protected production location (${prot})`);
-    }
-  }
-}
-
-/**
- * Independent verification of canonical witness hash.
- */
-export function verifyCanonicalWitnessHash() {
-  const buf = Buffer.from(CANONICAL_WITNESS_BYTES, "utf8");
-  if (buf.length !== CANONICAL_WITNESS_LENGTH) {
-    throw new Error(`Canonical witness length mismatch: expected ${CANONICAL_WITNESS_LENGTH}, got ${buf.length}`);
-  }
-  const hash = createHash("sha256").update(buf).digest("hex");
-  if (hash !== CANONICAL_WITNESS_SHA256) {
-    throw new Error(`Canonical witness hash mismatch: expected ${CANONICAL_WITNESS_SHA256}, got ${hash}`);
-  }
-  return { length: buf.length, sha256: hash };
-}
 
 function tryConnect(port) {
   return new Promise((resolve) => {

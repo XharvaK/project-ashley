@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { requireCurrentAuthorityBinding } from "../authority/barrier.js";
 import { insertOutboxPending } from "../speech/outbox.js";
 import type {
   CycleTriggerKind,
@@ -15,6 +16,7 @@ import { applyOccupancyDelta } from "../concerns/occupancy.js";
 import { enqueueDurableNomination } from "../memory/nomination.js";
 import { assertSubscriptionCapacity } from "../observation/subscriptions.js";
 import { sanitizeFutureTriggerPayload } from "../initiative/future-triggers.js";
+import { beginConsequenceInTransaction, getWakeForCycle, getWake } from "../wake/ledger.js";
 
 export type PublicationOptions = {
   origin?: OutboxOrigin;
@@ -23,12 +25,17 @@ export type PublicationOptions = {
   triggerKind?: CycleTriggerKind;
   fidelity?: "passed" | "rejected" | "skipped";
   thoughtUnavailable?: boolean;
+  authorityDb?: DatabaseSync;
+  expectedCurrentness?: import("../types.js").AuthorityCurrentnessBinding;
+  wakeId?: string;
+  wakeLeaseToken?: string | null;
+  semanticPass?: number;
 };
 
 export type PublicationResult = {
   published: boolean;
   replayed: boolean;
-  reason?: "stale_generation";
+  reason?: "stale_generation" | "authority_transition" | "authority_vector_stale" | "wake_missing" | "wake_terminal" | "wake_reconciliation_required" | "consequence_exists";
   settlementId: string | null;
   outboxId: number | null;
 };
@@ -47,6 +54,35 @@ function currentGeneration(db: DatabaseSync, conversationId: string): number | n
   const row = db.prepare("SELECT MAX(generation) AS generation FROM cycle_records WHERE conversation_id = ?").get(conversationId) as DbRow | undefined;
   if (!row || row.generation == null) return null;
   return numberValue(row.generation);
+}
+
+function authorityFenceReason(options: PublicationOptions): PublicationResult["reason"] | null {
+  if (!options.authorityDb && !options.expectedCurrentness) return null;
+  if (!options.authorityDb || !options.expectedCurrentness) return "authority_vector_stale";
+  try {
+    requireCurrentAuthorityBinding(options.authorityDb, options.expectedCurrentness);
+    return null;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "authority_vector_stale";
+    return message === "authority_barrier_not_stable"
+      ? "authority_transition"
+      : "authority_vector_stale";
+  }
+}
+
+function publicationFence(
+  db: DatabaseSync,
+  settlement: PublishedCognitiveSettlement,
+  conversationId: string,
+): boolean {
+  const cycle = db.prepare(
+    "SELECT generation, authority_epoch, wake_id FROM cycle_records WHERE cycle_id = ? LIMIT 1",
+  ).get(settlement.cycleId) as DbRow | undefined;
+  return cycle != null
+    && numberValue(cycle.generation, -1) === settlement.generation
+    && numberValue(cycle.authority_epoch, -1) === settlement.authorityEpoch
+    && (!settlement.wakeId || String(cycle.wake_id ?? "") === settlement.wakeId)
+    && currentGeneration(db, conversationId) === settlement.generation;
 }
 
 function applyFutureTriggerDelta(db: DatabaseSync, delta: FutureTriggerDelta): void {
@@ -101,6 +137,16 @@ export function publishSemanticTransaction(
   options: PublicationOptions = {},
 ): PublicationResult {
   const nowMs = options.nowMs ?? Date.now();
+  const wake = getWakeForCycle(db, settlement.cycleId);
+  const wakeId = options.wakeId ?? settlement.wakeId ?? wake?.wakeId;
+  if (!wakeId) return { published: false, replayed: false, reason: "wake_missing", settlementId: null, outboxId: null };
+  if (!wake || wake.wakeId !== wakeId) return { published: false, replayed: false, reason: "wake_missing", settlementId: null, outboxId: null };
+  if (wake.state === "terminal") return { published: false, replayed: false, reason: "wake_terminal", settlementId: null, outboxId: null };
+  if (wake.state === "reconciling") return { published: false, replayed: false, reason: "wake_reconciliation_required", settlementId: null, outboxId: null };
+  const initialAuthorityFailure = authorityFenceReason(options);
+  if (initialAuthorityFailure) {
+    return { published: false, replayed: false, reason: initialAuthorityFailure, settlementId: null, outboxId: null };
+  }
   db.exec("BEGIN IMMEDIATE");
   try {
     const existing = existingSettlementForCycleGeneration(
@@ -114,9 +160,24 @@ export function publishSemanticTransaction(
       db.exec("COMMIT");
       return { published: true, replayed: true, settlementId: existingSettlementId, outboxId: outbox };
     }
+    const semanticPass = options.semanticPass ?? 1;
+    if (!Number.isInteger(semanticPass) || semanticPass < 1) {
+      db.exec("ROLLBACK");
+      return { published: false, replayed: false, reason: "consequence_exists", settlementId: null, outboxId: null };
+    }
+    const currentWake = getWake(db, wakeId);
+    if (!currentWake || currentWake.state === "terminal") {
+      db.exec("ROLLBACK");
+      return { published: false, replayed: false, reason: "wake_terminal", settlementId: null, outboxId: null };
+    }
+    if (options.wakeLeaseToken && (currentWake.state === "authorized" || currentWake.state === "consequence_pending")) {
+      beginConsequenceInTransaction(db, wakeId, options.wakeLeaseToken, semanticPass, nowMs);
+    } else if (currentWake.state === "consequence_pending") {
+      db.exec("ROLLBACK");
+      return { published: false, replayed: false, reason: "consequence_exists", settlementId: null, outboxId: null };
+    }
     const conversationId = awaitlessConversation(settlement, db);
-    const current = currentGeneration(db, conversationId);
-    if (current !== null && current !== settlement.generation) {
+    if (!publicationFence(db, settlement, conversationId)) {
       db.exec("COMMIT");
       return { published: false, replayed: false, reason: "stale_generation", settlementId: null, outboxId: null };
     }
@@ -129,10 +190,24 @@ export function publishSemanticTransaction(
     for (const delta of settlement.subscriptions) applySubscriptionDelta(db, delta);
     for (const nomination of settlement.durableNominations) applyNomination(db, nomination);
 
+    // Second fence: semantic deltas were prepared, but no publication row or
+    // speech projection may be written after the cycle/authority changed.
+    const secondAuthorityFailure = authorityFenceReason(options);
+    if (secondAuthorityFailure) {
+      db.exec("ROLLBACK");
+      return { published: false, replayed: false, reason: secondAuthorityFailure, settlementId: null, outboxId: null };
+    }
+    if (!publicationFence(db, settlement, conversationId)) {
+      // The semantic deltas above are provisional. A stale second fence must
+      // roll back those writes together with the refused publication.
+      db.exec("ROLLBACK");
+      return { published: false, replayed: false, reason: "stale_generation", settlementId: null, outboxId: null };
+    }
+
     db.prepare(
-      `INSERT INTO settlements (settlement_id, cycle_id, generation, payload_json)
-       VALUES (?, ?, ?, ?)`,
-    ).run(settlement.settlementId, settlement.cycleId, settlement.generation, json(settlement));
+      `INSERT INTO settlements (settlement_id, cycle_id, generation, wake_id, semantic_pass, payload_json)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(settlement.settlementId, settlement.cycleId, settlement.generation, wakeId, semanticPass, json({ ...settlement, wakeId }));
 
     let outboxId: number | null = null;
     if (settlement.speech.mode === "draft") {

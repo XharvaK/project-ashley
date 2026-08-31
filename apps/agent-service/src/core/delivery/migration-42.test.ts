@@ -6,7 +6,9 @@ describe("nuclear v42 cognitive projection migration", () => {
   it("is additive, versioned, and idempotently exposes the global key", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     try {
-      expect(NUCLEAR_SUPPORTED_VERSION).toBe(42);
+      // This migration remains v42; the current candidate continues through
+      // the source-authoritative W4 migrations v43 and v44.
+      expect(NUCLEAR_SUPPORTED_VERSION).toBe(44);
       expect(nuclearSchemaVersion(db)).toBe(NUCLEAR_SUPPORTED_VERSION);
       expect(db.prepare("PRAGMA table_info(delivery_reservations)").all()).toEqual(expect.arrayContaining([
         expect.objectContaining({ name: "cognitive_v021_projection_key" }),

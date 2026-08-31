@@ -8,8 +8,10 @@ import type {
   ObservationRequest,
   PublishedCognitiveSettlement,
   ThoughtSettlementDraft,
+  AuthorityCurrentnessBinding,
 } from "../types.js";
 import { claimsCurrentness } from "./currentness-detectors.js";
+import { requireCurrentAuthorityBinding } from "./barrier.js";
 
 function unique(codes: AuthorityCode[]): AuthorityCode[] {
   return [...new Set(codes)];
@@ -72,6 +74,36 @@ function checkSettlement(
   return codes.length === 0 ? { ok: true } : { ok: false, codes: unique(codes) };
 }
 
+function currentnessCodes(
+  packs: AuthorityPacks,
+  authorityDb?: import("node:sqlite").DatabaseSync,
+  expected?: AuthorityCurrentnessBinding,
+): AuthorityCode[] {
+  const binding = packs.currentness.binding;
+  if (!authorityDb && !binding) return [];
+  if (!binding || packs.currentness.complete !== true) {
+    return ["AUTHORITY_PACK_INCOMPLETE"];
+  }
+  if (expected && (
+    binding.barrierId !== expected.barrierId ||
+    binding.barrierEpoch !== expected.barrierEpoch ||
+    binding.barrierRevision !== expected.barrierRevision ||
+    JSON.stringify(binding.ownerVersions) !== JSON.stringify(expected.ownerVersions)
+  )) {
+    return ["AUTHORITY_VECTOR_STALE"];
+  }
+  if (!authorityDb) return [];
+  try {
+    requireCurrentAuthorityBinding(authorityDb, binding);
+    return [];
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "authority_vector_stale";
+    return message === "authority_barrier_not_stable"
+      ? ["AUTHORITY_TRANSITION_ACTIVE"]
+      : ["AUTHORITY_VECTOR_STALE"];
+  }
+}
+
 function checkDispatch(
   proposal: EffectProposal | ObservationRequest,
   packs: AuthorityPacks,
@@ -93,9 +125,30 @@ export function checkAuthority(
     proposal?: EffectProposal | ObservationRequest;
     packs: AuthorityPacks;
     authorityEpoch: number;
+    authorityDb?: import("node:sqlite").DatabaseSync;
+    expectedCurrentness?: AuthorityCurrentnessBinding;
   },
 ): AuthorityVerdict {
-  if (stage === "settlement" && input.settlement) return checkSettlement(input.settlement, input.packs, input.authorityEpoch);
-  if ((stage === "dispatch" || stage === "proposal") && input.proposal) return checkDispatch(input.proposal, input.packs, input.authorityEpoch);
+  const proposalCurrentness = input.proposal && "authorityCurrentness" in input.proposal
+    ? input.proposal.authorityCurrentness
+    : undefined;
+  const currentness = currentnessCodes(
+    input.packs,
+    input.authorityDb,
+    input.expectedCurrentness ?? proposalCurrentness,
+  );
+  if (stage === "settlement" && input.settlement) {
+    const result = checkSettlement(input.settlement, input.packs, input.authorityEpoch);
+    return result.ok && currentness.length === 0
+      ? result
+      : { ok: false, codes: unique([...currentness, ...(result.ok ? [] : result.codes)]) };
+  }
+  if ((stage === "dispatch" || stage === "proposal") && input.proposal) {
+    const result = checkDispatch(input.proposal, input.packs, input.authorityEpoch);
+    return result.ok && currentness.length === 0
+      ? result
+      : { ok: false, codes: unique([...currentness, ...(result.ok ? [] : result.codes)]) };
+  }
+  if (currentness.length > 0) return { ok: false, codes: currentness };
   return { ok: false, codes: ["STALE_STATE"] };
 }

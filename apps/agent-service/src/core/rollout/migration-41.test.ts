@@ -116,7 +116,9 @@ describe("nuclear schema v41 C1 qualification bootstrap", () => {
   it("migrates v40 to v41 with both control-plane tables and indexes", () => {
     const { db, continuity } = migrateToVersion41();
     try {
-      expect(NUCLEAR_SUPPORTED_VERSION).toBe(42);
+      // The historical W1 qualification packet recorded v42. Current source
+      // also includes W4 migrations v43 and v44; db.ts is authoritative.
+      expect(NUCLEAR_SUPPORTED_VERSION).toBe(44);
       expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: 41 });
       expect(db.prepare(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
@@ -374,12 +376,13 @@ describe("nuclear schema v41 pending migration recovery", () => {
   it("fails closed when nuclear schema is newer than supported", () => {
     const fixture = migrateToVersion41();
     try {
-      fixture.db.exec("PRAGMA user_version = 43");
+      const newerVersion = NUCLEAR_SUPPORTED_VERSION + 1;
+      fixture.db.exec(`PRAGMA user_version = ${newerVersion}`);
       expect(() => openNuclearDb(fixture.db, {
         continuity: fixture.continuity,
         migrate: true,
-      })).toThrow("unsupported_nuclear_schema:43>42");
-      expect(nuclearUserVersion(fixture.db)).toBe(43);
+      })).toThrow(`unsupported_nuclear_schema:${newerVersion}>${NUCLEAR_SUPPORTED_VERSION}`);
+      expect(nuclearUserVersion(fixture.db)).toBe(newerVersion);
     } finally {
       closeFixture(fixture);
     }

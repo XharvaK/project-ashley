@@ -37,10 +37,10 @@ import type {
   Observation,
   ThoughtInput,
 } from "../types.js";
-import { admitCycle, appendInboxEvent } from "../cycle/inbox.js";
+import { appendInboxEvent } from "../cycle/inbox.js";
 import { appendOwnerUtterance } from "../evidence/conversation-log.js";
 import { buildThoughtInput } from "./input.js";
-import { makeThoughtDraft, openTestSidecar } from "../test-support.js";
+import { admitTestCycle, makeSemanticSettlement, openTestSidecar } from "../test-support.js";
 import {
   runThoughtModel,
   STRUCTURAL_RETRY_MAX_OUTPUT_TOKENS,
@@ -97,7 +97,7 @@ function deps(attentionDb: DatabaseSync): KernelDeps {
 
 function helloInput(): { sidecar: DatabaseSync; input: ThoughtInput } {
   const sidecar = openTestSidecar();
-  const cycle = admitCycle(sidecar, {
+  const cycle = admitTestCycle(sidecar, {
     cycleId: "cycle-retry-admission",
     conversationId: "thread-retry-admission",
     triggerKind: "owner_message",
@@ -185,13 +185,7 @@ describe("v0.2.1 structural Thought retry admission", () => {
             usage: { promptTokens: 4_772, completionTokens: 55 },
           }
         : {
-            text: JSON.stringify(makeThoughtDraft({
-              cycleId: parsed.cycleId,
-              generation: parsed.generation,
-              authorityEpoch: parsed.authorityEpoch,
-              occupantId: parsed.occupantId,
-              triggerRef: parsed.trigger.ref,
-            })),
+            text: JSON.stringify(makeSemanticSettlement()),
             providerModel: "openai/gpt-oss-20b",
             usage: { promptTokens: 1, completionTokens: 1 },
           };
@@ -254,7 +248,7 @@ describe("v0.2.1 structural Thought retry admission", () => {
     expect(captured[1]?.options.responseFormat).toBe("json_object");
     expect(captured[1]?.messages[1]?.content).toBe(captured[0]?.messages[1]?.content);
     expect(captured[1]?.messages[0]?.content).toContain("invalid_json");
-    expect(captured[1]?.messages[0]?.content).toContain("schemaId=ashley.thought.step.v1.schema");
+    expect(captured[1]?.messages[0]?.content).toContain("schemaId=ashley.thought.semantic.v1.schema");
     expect(captureAdmission).not.toBeNull();
 
     const retryInput = Number(captureAdmission?.estimated_input_tokens);

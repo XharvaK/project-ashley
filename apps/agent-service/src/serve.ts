@@ -42,11 +42,13 @@ import {
   registerDerivedStoreForSidecar,
   type DerivedStore,
 } from "./core/cognitive-v021/retrieval/derived-store.js";
+import { reconcileDerivedInvalidationJournal } from "./core/cognitive-v021/retrieval/derived-retraction.js";
 import {
   defaultObservabilityDbPath,
   initObservabilitySchema,
 } from "./core/cognitive-v021/thought/diagnostics.js";
 import { DatabaseSync } from "node:sqlite";
+import { reconcileAuthorityBarrierOnStartup } from "./core/cognitive-v021/authority/barrier.js";
 
 export async function serveAgent(manager: AgentManager): Promise<void> {
   await manager.init();
@@ -86,12 +88,15 @@ export async function serveAgent(manager: AgentManager): Promise<void> {
     derivedStore = openDerivedStore(defaultDerivedIndexDbPath());
     observabilityDb = new DatabaseSync(defaultObservabilityDbPath());
     initObservabilitySchema(observabilityDb);
-    registerDerivedStoreForSidecar(cognitiveSidecar, derivedStore);
+    registerDerivedStoreForSidecar(cognitiveSidecar, derivedStore, nuclear);
+    let derivedReady = false;
     try {
-      derivedStore.reconcileAtStartup(cognitiveSidecar);
+      reconcileDerivedInvalidationJournal(nuclear, cognitiveSidecar, derivedStore);
+      derivedReady = derivedStore.reconcileAtStartup(cognitiveSidecar, { authorityDb: nuclear });
     } catch {
       derivedStore.markInvalid();
     }
+    reconcileAuthorityBarrierOnStartup(nuclear, { projectionReady: derivedReady });
 
     const deps: KernelDeps = {
       nowMs: () => Date.now(),
@@ -104,7 +109,11 @@ export async function serveAgent(manager: AgentManager): Promise<void> {
       executeObservation: liveOperationExecutors.executeObservation,
       executeEffect: liveOperationExecutors.executeEffect,
       checkAuthority,
-      loadAuthorityPacks: () => loadAuthorityPacks(cognitiveSidecar, { capability: getCapabilityReality(nuclear) }),
+    loadAuthorityPacks: () => loadAuthorityPacks(cognitiveSidecar, {
+      capability: getCapabilityReality(nuclear),
+      authorityDb: nuclear,
+      receiptLimit: 256,
+    }),
       expressionEnabled: false,
       projectOutbox: (outboxId) => projector.project(outboxId),
       projectSystemNotice: (noticeId) => projector.projectSystem(noticeId),

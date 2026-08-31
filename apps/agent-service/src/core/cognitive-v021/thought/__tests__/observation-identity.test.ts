@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { DatabaseSync } from "node:sqlite";
-import { openTestSidecar } from "../../test-support.js";
-import { admitCycle, appendInboxEvent } from "../../cycle/inbox.js";
+import { admitTestCycle, openTestSidecar } from "../../test-support.js";
+import { appendInboxEvent } from "../../cycle/inbox.js";
 import { appendOwnerUtterance } from "../../evidence/conversation-log.js";
 import type { Observation, KernelDeps } from "../../types.js";
 import { runCognitiveCycle } from "../run.js";
@@ -15,7 +15,7 @@ describe("Observation Persistence Identity & Reinjection", () => {
     const activeGeneration = 1;
     const occupantId = "doc";
 
-    const cycle = admitCycle(sidecar, {
+    const cycle = admitTestCycle(sidecar, {
       cycleId: activeCycleId,
       conversationId: "thread-obs-test",
       generation: activeGeneration,
@@ -51,22 +51,12 @@ describe("Observation Persistence Identity & Reinjection", () => {
         // Pass 1: Thought requests an observation
         return {
           text: JSON.stringify({
-            kind: "observation_request",
-            cycleId: activeCycleId,
-            generation: activeGeneration,
-            pass: 1,
-            requestId: options?.requestId ?? "req-1",
-            occupantId,
-            correlationId: "corr-obs-1",
-            deadlineAtMs: 200,
-            observationRequest: {
-              requestId: "obs-req-1",
-              cycleId: activeCycleId,
-              generation: activeGeneration,
-              kind: "project.read_file",
-              request: { path: "config.json" },
-              replaySafe: true,
-            },
+            kind: "observation_intent",
+            operationKind: "project.read_file",
+            request: { path: "config.json" },
+            purpose: "inspect the system configuration",
+            evidenceNeed: "the current configuration contents",
+            existingRefs: ["owner-ref-42"],
           }),
           model: "fake",
           modelAlias: "fake",

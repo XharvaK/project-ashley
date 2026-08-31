@@ -35,6 +35,16 @@ import {
   redactMessages,
 } from "./threads.js";
 import { newEntityUuid } from "../continuity/entity-uuid.js";
+import {
+  beginAuthorityTransition,
+  beginAuthorityTransitionInExistingTransaction,
+  stabilizeAuthorityBarrier,
+  stabilizeAuthorityBarrierInExistingTransaction,
+  markAuthorityBarrierReconciling,
+  hasAuthorityBarrier,
+  type AuthorityTransitionToken,
+} from "../cognitive-v021/authority/barrier.js";
+import { recordDerivedInvalidationInTransaction } from "../cognitive-v021/authority/journal.js";
 
 export type ForgetCounts = {
   messagesRedacted: number;
@@ -919,6 +929,41 @@ function resolveIdsFromTargets(
   };
 }
 
+function forgetConversationId(
+  db: DatabaseSync,
+  ownerId: string,
+  messageIds: readonly number[],
+  episodeIds: readonly number[],
+): string | null {
+  const values = new Set<string>();
+  if (messageIds.length > 0) {
+    for (const row of db.prepare(
+      `SELECT DISTINCT thread_id FROM mem_messages
+        WHERE owner_id = ? AND id IN (${placeholders(messageIds)})`,
+    ).all(ownerId, ...messageIds) as Array<{ thread_id?: unknown }>) {
+      if (typeof row.thread_id === "string" && row.thread_id) values.add(row.thread_id);
+    }
+  }
+  if (episodeIds.length > 0) {
+    for (const row of db.prepare(
+      `SELECT DISTINCT thread_id FROM episodes
+        WHERE owner_id = ? AND id IN (${placeholders(episodeIds)})`,
+    ).all(ownerId, ...episodeIds) as Array<{ thread_id?: unknown }>) {
+      if (typeof row.thread_id === "string" && row.thread_id) values.add(row.thread_id);
+    }
+  }
+  return values.size === 1 ? [...values][0]! : null;
+}
+
+function forgetTargetGeneration(db: DatabaseSync, conversationId: string | null): number {
+  if (!conversationId || !tableExists(db, "cycle_records")) return 0;
+  const row = db.prepare(
+    "SELECT MAX(generation) AS generation FROM cycle_records WHERE conversation_id = ?",
+  ).get(conversationId) as { generation?: unknown } | undefined;
+  const generation = Number(row?.generation ?? 0);
+  return Number.isInteger(generation) && generation >= 0 ? generation : 0;
+}
+
 function redactDeliveryTargets(
   db: DatabaseSync,
   ownerId: string,
@@ -957,7 +1002,7 @@ function applyForgetTargetsInTransaction(
   db: DatabaseSync,
   ownerId: string,
   targets: ForgetTarget[],
-  options: { tombstoneId?: string | null } = {},
+  options: { tombstoneId?: string | null; journalChangeId?: string } = {},
 ): ForgetResult {
   const effectiveTargets = addOpenCognitiveItemForgetTargets(
     db,
@@ -1138,6 +1183,20 @@ function applyForgetTargetsInTransaction(
     questionIds,
     openCognitiveItemUuids,
   );
+  if (options.journalChangeId && effectiveTargets.length > 0 && hasAuthorityBarrier(db)) {
+    const conversationId = forgetConversationId(db, ownerId, messageIds, episodeIds);
+    recordDerivedInvalidationInTransaction({
+      db,
+      changeId: options.journalChangeId,
+      ownerId,
+      conversationId,
+      sourceRefs: effectiveTargets.map((target) => `${target.entityType}:${target.entityUuid}`),
+      invalidationKind: "forget",
+      canonicalOwner: "nuclear",
+      targetGeneration: forgetTargetGeneration(db, conversationId),
+      nowMs: Date.now(),
+    });
+  }
   return {
     preview: [],
     deleted: messagesRedacted + episodesForgotten + factsForgotten,
@@ -1156,15 +1215,46 @@ export function applyForgetTargets(
   options: { tombstoneId?: string | null; inTransaction?: boolean } = {},
 ): ForgetResult {
   if (options.inTransaction === true) {
-    return applyForgetTargetsInTransaction(db, ownerId, targets, options);
+    if (!hasAuthorityBarrier(db)) return applyForgetTargetsInTransaction(db, ownerId, targets, options);
+    const transition = beginAuthorityTransitionInExistingTransaction(db, "forget", Date.now());
+    try {
+      const result = applyForgetTargetsInTransaction(db, ownerId, targets, {
+        ...options,
+        journalChangeId: options.tombstoneId ? `forget:${options.tombstoneId}` : `forget:${randomUUID()}`,
+      });
+      stabilizeAuthorityBarrierInExistingTransaction(
+        db,
+        (db.prepare("SELECT owner_name, version FROM canonical_owner_versions").all() as Array<{ owner_name: string; version: number }>)
+          .reduce((vector, row) => ({ ...vector, [row.owner_name]: Number(row.version) }), { nuclear: 0, continuity: 0, cognitive_sidecar: 0 } as { nuclear: number; continuity: number; cognitive_sidecar: number }),
+        Date.now(),
+        transition.transitionId,
+      );
+      return result;
+    } catch (error) {
+      throw error;
+    }
   }
+  const transition: AuthorityTransitionToken | null = hasAuthorityBarrier(db)
+    ? beginAuthorityTransition(db, "forget", Date.now())
+    : null;
+  const journalChangeId = transition
+    ? options.tombstoneId ? `forget:${options.tombstoneId}` : `forget:${randomUUID()}`
+    : undefined;
   db.exec("BEGIN IMMEDIATE");
   try {
-    const result = applyForgetTargetsInTransaction(db, ownerId, targets, options);
+    const result = applyForgetTargetsInTransaction(db, ownerId, targets, { ...options, journalChangeId });
     db.exec("COMMIT");
+    if (transition) {
+      const rows = db.prepare("SELECT owner_name, version FROM canonical_owner_versions").all() as Array<{ owner_name: string; version: number }>;
+      const vector = rows.reduce((value, row) => ({ ...value, [row.owner_name]: Number(row.version) }), { nuclear: 0, continuity: 0, cognitive_sidecar: 0 } as { nuclear: number; continuity: number; cognitive_sidecar: number });
+      stabilizeAuthorityBarrier(db, vector, Date.now(), transition.transitionId);
+    }
     return result;
   } catch (error) {
-    db.exec("ROLLBACK");
+    try { db.exec("ROLLBACK"); } catch { /* preserve canonical failure */ }
+    if (transition) {
+      try { markAuthorityBarrierReconciling(db, "forget_commit_failed", Date.now()); } catch { /* preserve original */ }
+    }
     throw error;
   }
 }

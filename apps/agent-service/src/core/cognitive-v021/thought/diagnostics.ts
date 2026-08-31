@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import type { AllocationReceipt } from "./projection-allocator/receipt.js";
 import type { RetrievalQuery } from "../retrieval/query.js";
 import type { RetrievalInfrastructureState } from "../types.js";
+import { getPrivateBudgetProjection, type PrivateBudgetProjection } from "../private-budget/ledger.js";
 
 export type ThoughtDispatchDiagnosticCode =
   | "request_exceeds_tpm_budget"
@@ -347,4 +348,12 @@ export function recordAllocationReceipt(db: DatabaseSync, receipt: AllocationRec
 export function recordDiagnostic(db: DatabaseSync, diag: ThoughtDispatchDiagnostic, nowMs = Date.now()): void {
   const store = new ObservabilityStore(db);
   store.recordDiagnostic(diag, nowMs);
+}
+
+/** Authoritative W7 budget diagnostic. This is a read-only sidecar projection. */
+export function getPrivateBudgetDiagnostics(
+  sidecar: DatabaseSync,
+  input: { conversationId: string; policyId: string; wallClockNowMs?: number },
+): PrivateBudgetProjection {
+  return getPrivateBudgetProjection(sidecar, input);
 }

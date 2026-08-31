@@ -1,8 +1,10 @@
-import { appendInboxEvent } from "../cycle/inbox.js";
+import { appendInboxEventInTransaction, getInboxEvent } from "../cycle/inbox.js";
 import { getConcern } from "../concerns/lineage.js";
 import { listOccupancy } from "../concerns/occupancy.js";
 import type { DatabaseSync } from "node:sqlite";
-import type { FutureTrigger, InboxEvent } from "../types.js";
+import type { FutureTrigger, InboxEvent, WakeRecord } from "../types.js";
+import { occurrenceIdFor } from "../wake/identity.js";
+import { admitWakeInTransaction, finishWakeInTransaction, getWake, recordWakeCancellationInTransaction } from "../wake/ledger.js";
 
 type Row = Record<string, unknown>;
 
@@ -58,6 +60,7 @@ function mapTrigger(value: unknown): FutureTrigger | null {
     snapshotHash: text(value.snapshot_hash),
     dueAtMs: number(value.due_at_ms),
     status,
+    wakeId: value.wake_id == null ? null : text(value.wake_id),
     payload: parsePayload(value.payload_json),
   };
 }
@@ -87,6 +90,16 @@ function validateTrigger(input: ScheduleFutureTriggerInput): void {
 
 export function scheduleFutureTrigger(db: DatabaseSync, input: ScheduleFutureTriggerInput): FutureTrigger {
   validateTrigger(input);
+  const existing = getFutureTrigger(db, input.triggerId);
+  if (existing && existing.status !== "scheduled") {
+    if (
+      existing.conversationId !== input.conversationId
+      || existing.concernId !== input.concernId
+      || existing.snapshotHash !== input.snapshotHash
+      || existing.dueAtMs !== input.dueAtMs
+    ) throw new Error("future_trigger_terminal");
+    return existing;
+  }
   db.prepare(
     `INSERT INTO future_triggers
        (trigger_id, conversation_id, concern_id, due_at_ms, snapshot_hash, status, payload_json)
@@ -94,7 +107,7 @@ export function scheduleFutureTrigger(db: DatabaseSync, input: ScheduleFutureTri
      ON CONFLICT(trigger_id) DO UPDATE SET conversation_id=excluded.conversation_id,
        concern_id=excluded.concern_id, due_at_ms=excluded.due_at_ms,
        snapshot_hash=excluded.snapshot_hash, status=excluded.status,
-       payload_json=excluded.payload_json`,
+        payload_json=excluded.payload_json`,
   ).run(
     input.triggerId,
     input.conversationId,
@@ -131,8 +144,30 @@ export function listFutureTriggers(db: DatabaseSync, conversationId?: string, op
 }
 
 export function cancelFutureTrigger(db: DatabaseSync, triggerId: string): boolean {
-  const result = db.prepare("UPDATE future_triggers SET status = 'cancelled' WHERE trigger_id = ? AND status = 'scheduled'").run(triggerId);
-  return number(result.changes) === 1;
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const trigger = getFutureTrigger(db, triggerId);
+    if (!trigger || trigger.status !== "scheduled") {
+      db.exec("COMMIT");
+      return false;
+    }
+    const result = db.prepare("UPDATE future_triggers SET status = 'cancelled' WHERE trigger_id = ? AND status = 'scheduled'").run(triggerId);
+    if (number(result.changes) !== 1) throw new Error("future_trigger_cancel_lost");
+    if (trigger.wakeId) {
+      const wake = getWake(db, trigger.wakeId);
+      if (wake && wake.state !== "terminal") {
+        recordWakeCancellationInTransaction(db, { wakeId: trigger.wakeId, nowMs: Date.now() });
+        if (wake.state !== "consequence_pending" && wake.state !== "reconciling") {
+          try { finishWakeInTransaction(db, trigger.wakeId, wake.leaseToken, "cancelled", Date.now()); } catch { /* preserve reconciliation for an owned lease */ }
+        }
+      }
+    }
+    db.exec("COMMIT");
+    return true;
+  } catch (error) {
+    try { db.exec("ROLLBACK"); } catch { /* preserve the original error */ }
+    throw error;
+  }
 }
 
 function staleReason(db: DatabaseSync, trigger: FutureTrigger): string | null {
@@ -178,32 +213,17 @@ export async function fireDueTriggers(
   const suppressedStale: FutureTrigger[] = [];
   const events: InboxEvent[] = [];
 
-  db.exec("BEGIN IMMEDIATE");
-  try {
-    for (const candidate of candidates) {
-      const current = getFutureTrigger(db, candidate.triggerId);
-      if (!current || current.status !== "scheduled") continue;
-      const reason = staleReason(db, current);
-      if (reason) {
-        recordStale(db, current, reason, nowMs);
-        suppressedStale.push({ ...current, status: "suppressed_stale" });
-        continue;
-      }
-      db.prepare("UPDATE future_triggers SET status = 'fired' WHERE trigger_id = ? AND status = 'scheduled'").run(current.triggerId);
-      const event = appendInboxEvent(db, {
-        id: `future-trigger:${current.triggerId}`,
-        conversationId: current.conversationId,
-        kind: "future_trigger_due",
-        payload: { triggerId: current.triggerId, concernId: current.concernId, snapshotHash: current.snapshotHash },
-        createdAtMs: nowMs,
-      });
-      fired.push({ ...current, status: "fired" });
-      events.push(event);
+  for (const candidate of candidates) {
+    const result = matureFutureTriggerToWake(db, candidate.triggerId, { nowMs });
+    if (!result) continue;
+    if (result.kind === "stale") {
+      const trigger = getFutureTrigger(db, candidate.triggerId);
+      if (trigger) suppressedStale.push(trigger);
+    } else if (result.wake && result.event) {
+      const trigger = getFutureTrigger(db, candidate.triggerId);
+      if (trigger) fired.push(trigger);
+      events.push(result.event);
     }
-    db.exec("COMMIT");
-  } catch (error) {
-    try { db.exec("ROLLBACK"); } catch { /* preserve original */ }
-    throw error;
   }
 
   let thoughtModelAttempts = 0;
@@ -214,4 +234,74 @@ export async function fireDueTriggers(
     }
   }
   return { fired, suppressedStale, events, thoughtModelAttempts };
+}
+
+export type FutureTriggerMaturityResult = {
+  kind: "created" | "existing" | "stale" | "cancelled";
+  wake: WakeRecord;
+  event: InboxEvent | null;
+};
+
+/** Claim, validate, and bind one due trigger in one sidecar transaction. */
+export function matureFutureTriggerToWake(
+  db: DatabaseSync,
+  triggerId: string,
+  options: { nowMs?: number; capturedAuthorityRevision?: number } = {},
+): FutureTriggerMaturityResult | null {
+  const nowMs = options.nowMs ?? Date.now();
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const current = getFutureTrigger(db, triggerId);
+    if (!current || current.status === "cancelled" || (current.status === "scheduled" && current.dueAtMs > nowMs)) {
+      db.exec("COMMIT");
+      return null;
+    }
+    const occurrenceId = occurrenceIdFor({ sourceKind: "future_trigger", triggerRef: current.triggerId, conversationId: current.conversationId });
+    const admission = admitWakeInTransaction(db, {
+      occurrenceId,
+      triggerRef: current.triggerId,
+      sourceKind: "future_trigger",
+      conversationId: current.conversationId,
+      triggerKind: "future_trigger_due",
+      capturedTriggerGeneration: listOccupancy(db, current.conversationId).find((item) => item.concernId === current.concernId)?.updatedGeneration ?? null,
+      capturedAuthorityRevision: options.capturedAuthorityRevision ?? 0,
+      nowMs,
+    });
+    if (admission.kind === "cancelled" || admission.kind === "stale") {
+      db.exec("COMMIT");
+      return { kind: admission.kind, wake: admission.terminalWake, event: null };
+    }
+    const wake = admission.wake;
+    const existingEvent = getInboxEvent(db, `future-trigger:${current.triggerId}`);
+    if (current.status === "fired" && current.wakeId && existingEvent) {
+      db.exec("COMMIT");
+      return { kind: "existing", wake, event: existingEvent };
+    }
+    const reason = current.status === "scheduled" ? staleReason(db, current) : null;
+    if (reason) {
+      db.prepare("UPDATE future_triggers SET status = 'suppressed_stale', wake_id = ? WHERE trigger_id = ? AND status = 'scheduled'").run(wake.wakeId, current.triggerId);
+      recordStale(db, current, reason, nowMs);
+      if (wake.state !== "terminal") finishWakeInTransaction(db, wake.wakeId, null, "no_action", nowMs);
+      const terminal = getWake(db, wake.wakeId);
+      if (!terminal) throw new Error("wake_missing");
+      db.exec("COMMIT");
+      return { kind: "stale", wake: terminal, event: null };
+    }
+    db.prepare(
+      "UPDATE future_triggers SET status = 'fired', wake_id = ? WHERE trigger_id = ? AND status IN ('scheduled', 'fired')",
+    ).run(wake.wakeId, current.triggerId);
+    const event = existingEvent ?? appendInboxEventInTransaction(db, {
+      id: `future-trigger:${current.triggerId}`,
+      wakeId: wake.wakeId,
+      conversationId: current.conversationId,
+      kind: "future_trigger_due",
+      payload: { triggerId: current.triggerId, concernId: current.concernId, snapshotHash: current.snapshotHash },
+      createdAtMs: nowMs,
+    }, `future-trigger:${current.triggerId}`);
+    db.exec("COMMIT");
+    return { kind: admission.kind === "created" ? "created" : "existing", wake, event };
+  } catch (error) {
+    try { db.exec("ROLLBACK"); } catch { /* preserve the original error */ }
+    throw error;
+  }
 }

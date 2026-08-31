@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { admitCycle } from "../cycle/inbox.js";
 import { appendAshleyEvidence, appendOwnerUtterance } from "../evidence/conversation-log.js";
 import { buildThoughtInput } from "../thought/input.js";
 import { listWorkingContext } from "../evidence/working-context.js";
-import { openTestSidecar } from "../test-support.js";
+import { admitTestCycle, openTestSidecar } from "../test-support.js";
 import { openDerivedStore } from "../retrieval/derived-store.js";
 import type { CapabilityReality, IdentitySlice } from "../types.js";
 import { publishSemanticTransaction } from "../settlement/publish.js";
@@ -21,14 +20,14 @@ describe("v0.2.1 causal continuity scenarios", () => {
   it.each(["HY3", "Qwen"]) ("preserves %s corrections and owner teaching in WC", (entity) => {
     const db = openTestSidecar();
     try {
-      const first = admitCycle(db, { cycleId: `cycle-${entity}-1`, conversationId: "thread-1", triggerKind: "owner_message", triggerRef: "turn-1", occupantId: "doc", nowMs: 1 });
+      const first = admitTestCycle(db, { cycleId: `cycle-${entity}-1`, conversationId: "thread-1", triggerKind: "owner_message", triggerRef: "turn-1", occupantId: "doc", nowMs: 1 });
       const mention = appendOwnerUtterance(db, { conversationId: "thread-1", text: entity === "HY3" ? "HY4" : "Alpha", discordMessageIds: [`${entity}-1`], nowMs: 2 });
       expect(publishSemanticTransaction(db, continuitySettlement({
         settlementId: `settlement-${entity}-1`, cycleId: first.cycleId, generation: first.generation,
         triggerRef: mention.rowId,
         interpretation: { ...continuitySettlement().interpretation, referentBindings: [{ span: entity === "HY3" ? "HY4" : "Alpha", entityKey: entity, sourceTurnIds: [mention.rowId] }] },
       }))).toMatchObject({ published: true });
-      const second = admitCycle(db, { cycleId: `cycle-${entity}-2`, conversationId: "thread-1", generation: 2, triggerKind: "owner_message", triggerRef: "turn-2", occupantId: "doc", nowMs: 3 });
+      const second = admitTestCycle(db, { cycleId: `cycle-${entity}-2`, conversationId: "thread-1", generation: 2, triggerKind: "owner_message", triggerRef: "turn-2", occupantId: "doc", nowMs: 3 });
       const correction = appendOwnerUtterance(db, { conversationId: "thread-1", text: entity === "HY3" ? "I meant HY3" : "I meant Beta", discordMessageIds: [`${entity}-2`], nowMs: 4 });
       const oldId = entity === "HY3" ? `wc-${entity}-old` : "wc-Qwen-old";
       const newEntity = entity === "HY3" ? "HY3" : "Beta";
@@ -54,7 +53,7 @@ describe("v0.2.1 causal continuity scenarios", () => {
     const db = openTestSidecar();
     try {
       const speech = appendAshleyEvidence(db, { conversationId: "thread-1", text: "because it is a small model", delivered: true, discordMessageIds: ["ashley-1"], nowMs: 1 });
-      const cycle = admitCycle(db, { conversationId: "thread-1", triggerKind: "owner_message", triggerRef: "what-did-you-say", occupantId: "doc", nowMs: 2 });
+      const cycle = admitTestCycle(db, { conversationId: "thread-1", triggerKind: "owner_message", triggerRef: "what-did-you-say", occupantId: "doc", nowMs: 2 });
       const owner = appendOwnerUtterance(db, { conversationId: "thread-1", text: "what did you just say?", discordMessageIds: ["owner-1"], nowMs: 3 });
       const input = buildThoughtInput({ sidecar: db, cycle, triggerText: owner.text ?? "", triggerEvidence: owner, constitution, capabilityReality, learnedSelfSlice: { dispositions: [], interests: [] } });
       expect(input.rawConversation).toEqual(expect.arrayContaining([expect.objectContaining({ rowId: speech.rowId, role: "ashley", delivered: true })]));
@@ -67,7 +66,7 @@ describe("v0.2.1 causal continuity scenarios", () => {
   it("keeps an unanswered concern in compact occupancy", () => {
     const db = openTestSidecar();
     try {
-      const cycle = admitCycle(db, { conversationId: "thread-1", triggerKind: "owner_message", triggerRef: "question", occupantId: "doc", nowMs: 1 });
+      const cycle = admitTestCycle(db, { conversationId: "thread-1", triggerKind: "owner_message", triggerRef: "question", occupantId: "doc", nowMs: 1 });
       const input = buildThoughtInput({ sidecar: db, cycle, constitution, capabilityReality, learnedSelfSlice: { dispositions: [], interests: [] }, occupancy: [{ conversationId: "thread-1", concernId: "unanswered-question", status: "active", priority: 8, updatedCycle: cycle.cycleId, updatedGeneration: 1 }] });
       expect(input.occupancy).toEqual(expect.arrayContaining([expect.objectContaining({ concernId: "unanswered-question", status: "active" })]));
     } finally {
@@ -79,7 +78,7 @@ describe("v0.2.1 causal continuity scenarios", () => {
     const db = openTestSidecar();
     const derived = openDerivedStore(":memory:");
     try {
-      const cycle = admitCycle(db, { conversationId: "thread-1", triggerKind: "owner_message", triggerRef: "month-ago", occupantId: "doc", nowMs: 1 });
+      const cycle = admitTestCycle(db, { conversationId: "thread-1", triggerKind: "owner_message", triggerRef: "month-ago", occupantId: "doc", nowMs: 1 });
       derived.reconcile(db);
       const input = buildThoughtInput({ sidecar: db, cycle, triggerText: "what happened last month?", constitution, capabilityReality, learnedSelfSlice: { dispositions: [], interests: [] }, derivedStore: derived });
       expect(input.retrieval.miss).toBe(true);

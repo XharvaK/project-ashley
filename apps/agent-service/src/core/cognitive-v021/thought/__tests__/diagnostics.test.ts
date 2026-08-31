@@ -5,10 +5,10 @@ import {
   type ThoughtDispatchDiagnostic,
 } from "../diagnostics.js";
 import { openDerivedStore } from "../../retrieval/derived-store.js";
-import { openTestSidecar, makeThoughtDraft } from "../../test-support.js";
+import { admitTestCycle, openTestSidecar, makeSemanticSettlement } from "../../test-support.js";
 import type { AllocationReceipt } from "../projection-allocator/receipt.js";
 import { DatabaseSync } from "node:sqlite";
-import { admitCycle, appendInboxEvent } from "../../cycle/inbox.js";
+import { appendInboxEvent } from "../../cycle/inbox.js";
 import { appendOwnerUtterance } from "../../evidence/conversation-log.js";
 import { runCognitiveCycle } from "../run.js";
 import { attachModelFabricMetadata } from "../../../model-fabric/receipts.js";
@@ -143,7 +143,7 @@ describe("Thought Diagnostics & Observability DB", () => {
     const obsDb = new DatabaseSync(":memory:");
     initObservabilitySchema(obsDb);
 
-    const cycle = admitCycle(sidecar, {
+    const cycle = admitTestCycle(sidecar, {
       cycleId: "cycle-obs-real",
       conversationId: "thread-obs-real",
       triggerKind: "owner_message",
@@ -177,13 +177,7 @@ describe("Thought Diagnostics & Observability DB", () => {
         return { text: "malformed", model: "fake", modelAlias: "thought", resolvedModelId: null };
       }
       return {
-        text: JSON.stringify(makeThoughtDraft({
-          cycleId: cycle.cycleId,
-          generation: cycle.generation,
-          authorityEpoch: cycle.authorityEpoch,
-          occupantId: cycle.occupantId,
-          triggerRef: cycle.triggerRef,
-        })),
+        text: JSON.stringify(makeSemanticSettlement()),
         model: "fake",
         modelAlias: "thought",
         resolvedModelId: null,
