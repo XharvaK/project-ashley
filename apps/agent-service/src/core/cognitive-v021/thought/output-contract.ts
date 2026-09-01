@@ -131,7 +131,7 @@ const semanticOutputSettlementSchema = strictObject({
   }, ["epistemic", "conversational", "stance"]),
   speech: { oneOf: [
     strictObject({ mode: { const: "none" }, mustSay: { type: "array", maxItems: 0 }, mustNotSay: stringArraySchema, acceptableRealizations: { type: "array", maxItems: 0 }, presentationDirectives: stringArraySchema }, ["mode", "mustSay", "mustNotSay", "acceptableRealizations", "presentationDirectives"]),
-    strictObject({ mode: { const: "draft" }, mustSay: stringArraySchema, mustNotSay: stringArraySchema, surfaceDraft: { type: "string" }, acceptableRealizations: stringArraySchema, presentationDirectives: stringArraySchema }, ["mode", "mustSay", "mustNotSay", "acceptableRealizations", "presentationDirectives"]),
+    strictObject({ mode: { const: "draft" }, mustSay: stringArraySchema, mustNotSay: stringArraySchema, surfaceDraft: { type: "string", minLength: 1 }, acceptableRealizations: stringArraySchema, presentationDirectives: stringArraySchema }, ["mode", "mustSay", "mustNotSay", "surfaceDraft", "acceptableRealizations", "presentationDirectives"]),
   ] },
   workingContextDeltas: { type: "array", items: workingContextDeltaSchema },
   concernDeltas: { type: "array", items: concernDeltaSchema },
@@ -247,6 +247,7 @@ export function thoughtOutputCompatibilityInstruction(): string {
     "Semantic selection rules: choose settlement only when the current supplied evidence and context are sufficient to author the semantic answer without first acquiring additional evidence or performing a governed effect; choose observation_intent when the answer requires additional read-only evidence acquisition through a registered observation capability; choose effect_intent when the requested outcome requires a governed mechanical effect through a registered effect capability; choose abstain when required evidence, capability, or an admissible basis is absent or unresolved.",
     "Do not use settlement as a placeholder for an unperformed observation or effect. If a required observation or effect cannot be truthfully authored from the current admissible context, use abstain rather than claim completion.",
     "Capability reality is host-owned input: operationCapabilities identify available operations, their observation/effect class, request fields, operator-bound fields, and authorized project IDs. Use only available operations and authorized IDs; operation metadata does not choose the semantic branch for you.",
+    "CapabilityReality field semantics: conversationalRead reports only whether an additional authorized user-requested URL/page read may be performed; it does not report whether supplied conversation content is visible. Every rawConversation entry included in this request is directly readable current context regardless of conversationalRead.",
     "Do not emit kernel identity, lifecycle, delivery, or publication fields; Ashley code binds those values.",
     `A settlement must include these required sections: ${requiredFields(settlement).join(", ")}.`,
     `Speech shape: ${speechForms(settlement).join("; ")}.`,

@@ -207,7 +207,7 @@ function materializeSemanticSettlement(
       mode: semantic.speech.mode,
       mustSay: [...semantic.speech.mustSay],
       mustNot: [...semantic.speech.mustNotSay],
-      surfaceDraft: semantic.speech.mode === "draft" ? semantic.speech.surfaceDraft ?? null : null,
+      surfaceDraft: semantic.speech.mode === "draft" ? semantic.speech.surfaceDraft : null,
       acceptableRealizations: [...semantic.speech.acceptableRealizations],
       presentationDirectives: [...semantic.speech.presentationDirectives],
     },

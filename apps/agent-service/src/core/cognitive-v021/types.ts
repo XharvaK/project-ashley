@@ -570,7 +570,7 @@ export type ThoughtSpeechIntent =
       mode: "draft";
       mustSay: readonly string[];
       mustNotSay: readonly string[];
-      surfaceDraft?: string;
+      surfaceDraft: string;
       acceptableRealizations: readonly string[];
       presentationDirectives: readonly string[];
     };
@@ -952,6 +952,7 @@ export type OccupantCalibration = {
 export type CapabilityReality = {
   vision: boolean;
   attachmentText: boolean;
+  /** Additional authorized user-requested URL/page reads; does not gate already projected rawConversation. */
   conversationalRead: boolean;
   webSearch: boolean;
   canOfferProjectInspection: boolean;

@@ -30,6 +30,7 @@ const settlement = {
     mode: "draft",
     mustSay: ["I can verify that."],
     mustNotSay: [],
+    surfaceDraft: "I can verify that.",
     acceptableRealizations: [],
     presentationDirectives: [],
   },
@@ -72,6 +73,37 @@ describe("Thought semantic output contract", () => {
       explanation: "The current evidence is not enough.",
       evidenceRefs: ["turn-1"],
     }, refs)).toMatchObject({ ok: true, value: { kind: "abstain" } });
+  });
+
+  it("requires a non-empty surfaceDraft for draft speech across the parser and schema", () => {
+    const missingSurfaceDraft = {
+      ...settlement,
+      speech: { ...settlement.speech },
+    };
+    delete (missingSurfaceDraft.speech as { surfaceDraft?: unknown }).surfaceDraft;
+
+    expect(parseThoughtSemanticOutput(missingSurfaceDraft, refs)).toMatchObject({ ok: false });
+    expect(parseThoughtSemanticOutput({
+      ...settlement,
+      speech: { ...settlement.speech, surfaceDraft: "" },
+    }, refs)).toMatchObject({ ok: false });
+
+    const request = thoughtOutputStructuredRequest();
+    const schema = request.schema as {
+      oneOf: Array<{
+        properties?: {
+          kind?: { const?: string };
+          speech?: { oneOf?: Array<{ required?: string[]; properties?: Record<string, unknown> }> };
+        };
+      }>;
+    };
+    const settlementSchema = schema.oneOf.find((branch) => branch.properties?.kind?.const === "settlement");
+    const draftSpeechSchema = settlementSchema?.properties?.speech?.oneOf?.find(
+      (branch) => branch.properties?.mode && (branch.properties.mode as { const?: string }).const === "draft",
+    );
+
+    expect(draftSpeechSchema?.required).toContain("surfaceDraft");
+    expect(draftSpeechSchema?.properties?.surfaceDraft).toMatchObject({ type: "string", minLength: 1 });
   });
 
   it("rejects model-authored mechanics, coercions, loose enums, and unknown fields", () => {

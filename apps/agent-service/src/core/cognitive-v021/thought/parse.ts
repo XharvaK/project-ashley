@@ -181,13 +181,13 @@ function validSpeech(value: unknown): value is ThoughtSpeechIntent {
   const record = semanticRecord(value);
   if (!record || (record.mode !== "none" && record.mode !== "draft")) return false;
   const required = record.mode === "draft"
-    ? ["mode", "mustSay", "mustNotSay", "acceptableRealizations", "presentationDirectives"]
+    ? ["mode", "mustSay", "mustNotSay", "surfaceDraft", "acceptableRealizations", "presentationDirectives"]
     : ["mode", "mustSay", "mustNotSay", "acceptableRealizations", "presentationDirectives"];
-  const shape = exactRecord(record, required, record.mode === "draft" ? ["surfaceDraft"] : []);
+  const shape = exactRecord(record, required);
   if (!shape || !stringArray(shape.mustSay) || !stringArray(shape.mustNotSay)
     || !stringArray(shape.acceptableRealizations) || !stringArray(shape.presentationDirectives)) return false;
   if (record.mode === "none") return shape.mustSay.length === 0 && shape.acceptableRealizations.length === 0;
-  return shape.surfaceDraft === undefined || typeof shape.surfaceDraft === "string";
+  return nonEmptyString(shape.surfaceDraft);
 }
 
 function validWorkingContextItem(value: unknown, allowlist: ReadonlySet<string>): value is WorkingContextItemSemantic {
