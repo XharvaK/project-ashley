@@ -875,6 +875,7 @@ export type ThoughtParserFailureCode =
   | "forbidden_fields"
   | "schema_version_mismatch"
   | "other";
+export type ThoughtCorrectionFailureCode = "structural_correction_scope_violation";
 export type ThoughtPassIndex = number;
 export type ThoughtStepBase = {
   kind: ThoughtStepKind;
@@ -914,6 +915,8 @@ export type ThoughtFailureStep = ThoughtStepBase & {
   diagnosticCode?: ThoughtParserFailureCode;
   /** Parser-owned field/path metadata; raw provider output is never persisted. */
   diagnosticField?: string;
+  /** Host-owned rejection when a localized correction changes data outside its scope. */
+  correctionFailureCode?: ThoughtCorrectionFailureCode;
 };
 export type ThoughtAbstainStep = ThoughtStepBase & {
   kind: "abstain";

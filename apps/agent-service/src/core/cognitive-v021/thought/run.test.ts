@@ -199,7 +199,7 @@ describe("v0.2.1 Thought run", () => {
     attentionDb.close();
   });
 
-  it("carries parser code, field, and host allowlist into a contextual correction without changing the pass", async () => {
+  it("carries the prior model-authored candidate into a localized correction without changing the pass", async () => {
     const sidecar = openTestSidecar();
     const attentionDb = openTestSidecar();
     const cycle = admitTestCycle(sidecar, {
@@ -228,15 +228,13 @@ describe("v0.2.1 Thought run", () => {
       },
       createdAtMs: 2,
     });
-    const systemMessages: string[] = [];
-    const userInputs: string[] = [];
+    const messagesByCall: string[][] = [];
     let calls = 0;
     const completeChat = vi.fn(async (
       messages: Array<{ role: string; content: string }>,
     ) => {
       calls += 1;
-      systemMessages.push(messages[0]?.content ?? "");
-      userInputs.push(messages[1]?.content ?? "");
+      messagesByCall.push(messages.map((message) => message.content));
       return {
         text: calls === 1
           ? JSON.stringify({
@@ -244,6 +242,106 @@ describe("v0.2.1 Thought run", () => {
               reason: "insufficient_evidence",
               explanation: "The supplied evidence is not enough.",
               evidenceRefs: ["not-allowlisted"],
+            })
+          : JSON.stringify({
+              kind: "abstain",
+              reason: "insufficient_evidence",
+              explanation: "The supplied evidence is not enough.",
+              evidenceRefs: [evidence.rowId],
+            }),
+        model: "fake",
+        modelAlias: "thought",
+        resolvedModelId: null,
+      };
+    });
+
+    try {
+      const result = await runCognitiveCycle(sidecar, attentionDb, event, deps({
+        attentionDb,
+        completeChat,
+      }));
+
+      expect(result.published).toBe(false);
+      expect(calls).toBe(2);
+      expect(messagesByCall[1][0]).toContain("reference_not_allowlisted");
+      expect(messagesByCall[1][0]).toContain("evidenceRefs");
+      expect(messagesByCall[1][0]).toContain("host allowlisted reference IDs");
+      expect(messagesByCall[1][0]).toContain(evidence.rowId);
+      expect(messagesByCall[1][1]).toBe(messagesByCall[0][1]);
+      const correctionData = JSON.parse(messagesByCall[1][2] ?? "null") as {
+        structuralCorrection: {
+          candidateRole: string;
+          previousCandidate: Record<string, unknown>;
+          failureCode: string;
+          failingPath: string;
+          allowedRepairScope: { kind: string; path: string };
+          hostAllowlistedReferenceIds: string[];
+        };
+      };
+      expect(correctionData.structuralCorrection).toMatchObject({
+        candidateRole: "model_authored_data",
+        previousCandidate: {
+          kind: "abstain",
+          evidenceRefs: ["not-allowlisted"],
+        },
+        failureCode: "reference_not_allowlisted",
+        failingPath: "evidenceRefs",
+        allowedRepairScope: { kind: "localized", path: "evidenceRefs" },
+        hostAllowlistedReferenceIds: expect.arrayContaining([evidence.rowId]),
+      });
+    } finally {
+      sidecar.close();
+      attentionDb.close();
+    }
+  });
+
+  it("rejects structural correction branch drift with a typed scope failure", async () => {
+    const sidecar = openTestSidecar();
+    const attentionDb = openTestSidecar();
+    const cycle = admitTestCycle(sidecar, {
+      cycleId: "cycle-correction-drift",
+      conversationId: "thread-correction-drift",
+      triggerKind: "owner_message",
+      triggerRef: "owner-correction-drift",
+      occupantId: "doc",
+      authorityEpoch: 1,
+      nowMs: 1,
+    });
+    const evidence = appendOwnerUtterance(sidecar, {
+      conversationId: "thread-correction-drift",
+      text: "Please answer from the supplied evidence.",
+      discordMessageIds: ["correction-drift-message"],
+      nowMs: 2,
+    });
+    const event = appendInboxEvent(sidecar, {
+      wakeId: cycle.wakeId,
+      conversationId: "thread-correction-drift",
+      kind: "owner_message",
+      payload: {
+        cycleId: cycle.cycleId,
+        evidenceRowId: evidence.rowId,
+        ownerMessage: evidence.text,
+      },
+      createdAtMs: 2,
+    });
+    let calls = 0;
+    const completeChat = vi.fn(async () => {
+      calls += 1;
+      return {
+        text: calls === 1
+          ? JSON.stringify({
+              kind: "effect_intent",
+              operationKind: "workspace.verify",
+              request: {
+                version: 2,
+                operation: "workspace.verify",
+                projectId: "qualification-fixture",
+                workspaceId: "qualification-fixture-workspace",
+                recipeId: "typescript_fixture_compile_v1",
+              },
+              purpose: "run the approved read-only workspace verification",
+              expectedOutcome: "the mechanical verification result is reported without changing files",
+              existingRefs: ["not-allowlisted"],
             })
           : JSON.stringify(makeSemanticSettlement()),
         model: "fake",
@@ -258,13 +356,67 @@ describe("v0.2.1 Thought run", () => {
         completeChat,
       }));
 
-      expect(result.published).toBe(true);
+      expect(result.published).toBe(false);
       expect(calls).toBe(2);
-      expect(systemMessages[1]).toContain("reference_not_allowlisted");
-      expect(systemMessages[1]).toContain("evidenceRefs");
-      expect(systemMessages[1]).toContain("host allowlisted reference IDs");
-      expect(systemMessages[1]).toContain(evidence.rowId);
-      expect(userInputs[1]).toBe(userInputs[0]);
+      const rows = sidecar.prepare(
+        "SELECT payload_json FROM thought_steps WHERE kind = 'failure' ORDER BY created_at_ms, request_id",
+      ).all() as Array<{ payload_json: string }>;
+      expect(rows.map((row) => JSON.parse(row.payload_json))).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            correctionFailureCode: "structural_correction_scope_violation",
+          }),
+        ]),
+      );
+    } finally {
+      sidecar.close();
+      attentionDb.close();
+    }
+  });
+
+  it.each([
+    ["effect", "Show me / explain what an effect_intent semantic object looks like."],
+    ["observation", "Analyze what an observation_intent semantic object would contain."],
+  ])("does not infer a semantic branch from an internal-branch mention (%s)", async (_label, ownerMessage) => {
+    const sidecar = openTestSidecar();
+    const attentionDb = openTestSidecar();
+    const cycle = admitTestCycle(sidecar, {
+      cycleId: "cycle-negative-branch-" + _label,
+      conversationId: "thread-negative-branch-" + _label,
+      triggerKind: "owner_message",
+      triggerRef: "owner-negative-branch-" + _label,
+      occupantId: "doc",
+      authorityEpoch: 1,
+      nowMs: 1,
+    });
+    const evidence = appendOwnerUtterance(sidecar, {
+      conversationId: cycle.conversationId,
+      text: ownerMessage,
+      discordMessageIds: ["negative-branch-" + _label],
+      nowMs: 2,
+    });
+    const event = appendInboxEvent(sidecar, {
+      wakeId: cycle.wakeId,
+      conversationId: cycle.conversationId,
+      kind: "owner_message",
+      payload: {
+        cycleId: cycle.cycleId,
+        evidenceRowId: evidence.rowId,
+        ownerMessage: evidence.text,
+      },
+      createdAtMs: 2,
+    });
+    try {
+      const result = await runCognitiveCycle(sidecar, attentionDb, event, deps({
+        attentionDb,
+        completeChat: vi.fn(async () => ({
+          text: JSON.stringify(makeSemanticSettlement()),
+          model: "fake",
+          modelAlias: "thought",
+          resolvedModelId: null,
+        })),
+      }));
+      expect(result.published).toBe(true);
     } finally {
       sidecar.close();
       attentionDb.close();

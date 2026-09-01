@@ -19,6 +19,7 @@ import { buildAllocationCandidates, type AllocationCandidate } from "./sections.
 import type { AllocationReceipt } from "./receipt.js";
 import { recordAllocationReceipt, recordDiagnostic } from "../diagnostics.js";
 import {
+  formatThoughtStructuralCorrectionData,
   formatThoughtStructuralFeedback,
   type StructuralFeedbackInput,
 } from "../structural-feedback.js";
@@ -34,6 +35,7 @@ export function thoughtMessagesForProjection(
   structuralFeedback?: StructuralFeedbackInput,
 ): ChatMessage[] {
   const feedback = formatThoughtStructuralFeedback(structuralFeedback);
+  const correctionData = formatThoughtStructuralCorrectionData(structuralFeedback);
   return [
     {
       role: "system",
@@ -47,6 +49,7 @@ export function thoughtMessagesForProjection(
       ].join(" "),
     },
     { role: "user", content: JSON.stringify(projected) },
+    ...(correctionData ? [{ role: "user" as const, content: correctionData }] : []),
   ];
 }
 

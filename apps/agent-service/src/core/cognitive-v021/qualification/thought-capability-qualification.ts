@@ -1185,9 +1185,14 @@ function fixtureFor(caseId: ThoughtQualificationCaseId): unknown {
     return {
       kind: "observation_intent",
       operationKind: "project.read_file",
-      request: { path: "README.md" },
-      purpose: "verify the candidate",
-      evidenceNeed: "the bounded file contents",
+      request: {
+        version: 2,
+        operation: "project.read_file",
+        projectId: "qualification-fixture",
+        path: "README.md",
+      },
+      purpose: "read the approved project file",
+      evidenceNeed: "the current file contents",
       existingRefs: ["turn-1"],
     };
   }
@@ -1195,9 +1200,15 @@ function fixtureFor(caseId: ThoughtQualificationCaseId): unknown {
     return {
       kind: "effect_intent",
       operationKind: "workspace.verify",
-      request: { path: "README.md" },
-      purpose: "verify the candidate without a write",
-      expectedOutcome: "verification is reported without product mutation",
+      request: {
+        version: 2,
+        operation: "workspace.verify",
+        projectId: "qualification-fixture",
+        workspaceId: "qualification-fixture-workspace",
+        recipeId: "typescript_fixture_compile_v1",
+      },
+      purpose: "run the approved read-only workspace verification",
+      expectedOutcome: "the mechanical verification result is reported without changing files",
       existingRefs: ["turn-1"],
     };
   }
@@ -1213,6 +1224,28 @@ function fixtureRawFor(caseId: ThoughtQualificationCaseId): string {
   return JSON.stringify(fixtureFor(caseId));
 }
 
+function fixtureStructuralCorrectionHints(): readonly [string, string] {
+  const invalidReferenceCandidate = {
+    ...(fixtureFor("abstain") as Record<string, unknown>),
+    evidenceRefs: ["not-allowlisted"],
+  };
+  return [JSON.stringify(invalidReferenceCandidate), fixtureRawFor("abstain")];
+}
+
+const FIXTURE_OWNER_MESSAGES: Readonly<Record<ThoughtQualificationCaseId, string>> = Object.freeze({
+  settlement: "Please acknowledge the supplied qualification message using only the evidence already present.",
+  observation_intent: "Please read README.md from the approved qualification-fixture project and report its current contents.",
+  effect_intent: "Please run the approved read-only verification for the qualification-fixture workspace and report the result without changing any files.",
+  abstain: "Please tell me what is in the private attachment; no attachment content is available in this qualification context.",
+  structural_correction: "Please answer only from the supplied evidence; no additional evidence is available.",
+  stale_before_publish: "Please acknowledge the supplied qualification message using only the evidence already present.",
+  authority_revision: "Please acknowledge the supplied qualification message using only the evidence already present.",
+});
+
+export function qualificationFixtureOwnerMessage(caseId: ThoughtQualificationCaseId): string {
+  return FIXTURE_OWNER_MESSAGES[caseId];
+}
+
 function fixtureInput(
   runId: string,
   caseId: ThoughtQualificationCaseId,
@@ -1220,13 +1253,6 @@ function fixtureInput(
   occupantId: string,
   hostContext?: QualificationFailureEvidence["hostContext"],
 ): ThoughtInput {
-  const promptByCase: Record<string, string> = {
-    settlement: "Return the settlement semantic branch for the bounded qualification case.",
-    observation_intent: "Return the observation intent semantic branch for the bounded qualification case.",
-    effect_intent: "Return the effect intent semantic branch without executing any effect.",
-    abstain: "Return the abstain semantic branch because the fixture has insufficient evidence.",
-    structural_correction: "Return the abstain semantic branch after the bounded structural correction.",
-  };
   const context = hostContext ?? {
     cycleId: runId + ":cycle",
     generation: 1,
@@ -1246,7 +1272,7 @@ function fixtureInput(
       version: 1,
       conversationId: "qualification-conversation",
       role: "owner",
-      text: promptByCase[caseId] ?? "Run the bounded qualification case.",
+      text: qualificationFixtureOwnerMessage(caseId),
       createdAtMs: nowMs,
       discordMessageIds: [],
       reservationId: null,
@@ -1613,6 +1639,7 @@ async function runW0Sequence(input: {
       },
     );
     invocations.push(invocation);
+    if (invocation.correctionScopeViolation) break;
     if (!invocation.malformed) break;
     structuralFeedback = invocation.structuralFeedback
       ?? createThoughtStructuralFeedback({
@@ -1928,6 +1955,9 @@ function gateEvidenceForSequence(input: {
         : []),
       ...(wireEvidence && wireEvidence.bindingId !== input.expectedWireBindingId
         ? ["wire_binding_mismatch"]
+        : []),
+      ...(finalInvocation?.correctionScopeViolation
+        ? [finalInvocation.correctionScopeViolation.code]
         : []),
     ],
   };
@@ -2352,7 +2382,7 @@ async function runFixtureQualification(
       runId,
       caseId: "structural_correction",
       caseInput: structuralCaseInput,
-      rawHints: ["{", fixtureRawFor("abstain")],
+      rawHints: fixtureStructuralCorrectionHints(),
       preflight,
       environment: "fixture",
       nowMs,

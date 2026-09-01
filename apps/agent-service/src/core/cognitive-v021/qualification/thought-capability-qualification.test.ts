@@ -5,6 +5,7 @@ import {
   diagnoseEffectIntentSemanticOutput,
   replayCapturedQualificationFailure,
   runThoughtCapabilityQualification,
+  qualificationFixtureOwnerMessage,
   thoughtSchemaKeywordInventory,
   validateQualificationSchema,
   validateThoughtOutputSchema,
@@ -97,13 +98,21 @@ describe("successor Thought qualification", () => {
       .toMatchObject([{
         attemptOrdinal: 2,
         attemptKind: "structural_correction",
-        systemMessage: expect.stringContaining("invalid_json"),
+        systemMessage: expect.stringContaining("reference_not_allowlisted"),
       }]);
     expect(result.cases.filter((item) => item.caseId !== "structural_correction")
       .every((item) => item.invocationIds.length === 1)).toBe(true);
     expect(result.negativeWitnesses?.map((item) => item.witness)).toContain(
       "provider-accepted structural value rejected by the W0 semantic parser",
     );
+  });
+
+  it("uses natural owner situations without leaking internal semantic branch names", () => {
+    for (const caseId of ["settlement", "observation_intent", "effect_intent", "abstain"] as const) {
+      const message = qualificationFixtureOwnerMessage(caseId);
+      expect(message).not.toMatch(/settlement|observation_intent|effect_intent|abstain/i);
+      expect(message).not.toMatch(/semantic branch/i);
+    }
   });
 
   it("proves default fixture mode performs no network call", async () => {

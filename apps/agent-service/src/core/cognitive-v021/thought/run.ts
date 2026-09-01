@@ -34,8 +34,12 @@ import {
 } from "../types.js";
 import {
   createThoughtStructuralFeedback,
+  formatThoughtStructuralCorrectionData,
   formatThoughtStructuralFeedback,
+  validateThoughtStructuralCorrectionScope,
+  parseThoughtStructuralCandidate,
   type StructuralFeedbackInput,
+  type ThoughtStructuralCorrectionScopeViolation,
   type ThoughtStructuralFeedback,
 } from "./structural-feedback.js";
 import type { PrivateBudgetDispatchBinding } from "../private-budget/ledger.js";
@@ -91,6 +95,7 @@ export type ThoughtInvocation = {
   output: ThoughtStepOutput;
   semantic?: ThoughtSemanticOutput;
   structuralFeedback?: ThoughtStructuralFeedback;
+  correctionScopeViolation?: ThoughtStructuralCorrectionScopeViolation;
   attempts: number;
   requestId: string;
   malformed?: boolean;
@@ -126,6 +131,7 @@ function thoughtMessages(
   structuralFeedback?: StructuralFeedbackInput,
 ): ChatMessage[] {
   const feedback = formatThoughtStructuralFeedback(structuralFeedback);
+  const correctionData = formatThoughtStructuralCorrectionData(structuralFeedback);
   return [
     {
       role: "system",
@@ -139,6 +145,7 @@ function thoughtMessages(
       ].join(" "),
     },
     { role: "user", content: JSON.stringify(input) },
+    ...(correctionData ? [{ role: "user" as const, content: correctionData }] : []),
   ];
 }
 
@@ -429,10 +436,15 @@ export async function runThoughtModel(
     );
     if (!semanticResult.ok) {
       const diagnosticCode = semanticResult.code as ThoughtParserFailureCode;
+      const previousFeedback = typeof options.structuralFeedback === "string"
+        ? null
+        : options.structuralFeedback;
       const structuralFeedback = createThoughtStructuralFeedback({
         code: diagnosticCode,
         field: semanticResult.field,
         allowlistedReferences: semanticReferencesForInput(input),
+        previousCandidate: previousFeedback?.previousCandidate
+          ?? parseThoughtStructuralCandidate(completion.text),
       });
       const output: ThoughtStepOutput = {
         kind: "failure",
@@ -454,6 +466,27 @@ export async function runThoughtModel(
       };
     }
     const semantic = semanticResult.value;
+    const correctionValidation = options.structuralFeedback
+      ? validateThoughtStructuralCorrectionScope(options.structuralFeedback, completion.text)
+      : { ok: true as const };
+    if (!correctionValidation.ok) {
+      const output: ThoughtStepOutput = {
+        kind: "failure",
+        cycleId: input.cycleId,
+        generation: input.generation,
+        pass,
+        requestId,
+        occupantId: input.occupantId,
+        reason: "malformed",
+        correctionFailureCode: correctionValidation.violation.code,
+      };
+      return {
+        output,
+        attempts: 1,
+        requestId,
+        correctionScopeViolation: correctionValidation.violation,
+      };
+    }
     const kernelEnvelope = completion.capturedAttemptIdentity
       ? buildKernelEnvelope({
           context: {
@@ -1093,6 +1126,10 @@ export async function runCognitiveCycle(
       }
       counters = getThoughtAttemptCounters(sidecar, cycle.cycleId, cycle.generation);
       return resultWithCounters(cycle.cycleId, cycle.generation, null, counters);
+    }
+
+    if (invocation.correctionScopeViolation) {
+      return emitFailure(invocation.correctionScopeViolation.code);
     }
 
     if (invocation.malformed) {
