@@ -1042,3 +1042,243 @@ ARTIFACT=work/phase5-w2-semantics-structural-closure/w2-route-qualification-8406
 No W3 Stage H, release-truth activation evaluation, production checkout
 mutation, service restart, deployment, or production acceptance was attempted
 because the exact W2 gate remained `NOT_QUALIFIED`.
+
+## N. Three-auditor settlement-oracle adjudication and corrected-fixture W2
+
+This section is the current closure after the three independent auditor
+adjudication. Sections A–M remain preserved historical evidence. In particular,
+the `G_MODEL_SEMANTIC_NONCOMPLIANCE=PROVEN` field in section M is superseded for
+its three settlement rows by the adjudication below; the earlier artifact and
+report text are not rewritten.
+
+### N.1 Frozen adjudication and surgical repair
+
+```text
+THREE_INDEPENDENT_AUDITS_COMPLETE=yes
+THREE_AUDITOR_SETTLEMENT_ORACLE_ADJUDICATION=ACCEPTED
+SETTLEMENT_FIXTURE_EVIDENCE_DEFECT=PROVEN_AND_REPAIRED
+SETTLEMENT_EXPECTED_KIND_ORACLE_DEFECT=PROVEN_AND_REPAIRED
+PREVIOUS_G_MODEL_SEMANTIC_NONCOMPLIANCE=RETRACTED_FOR_DEFECTIVE_SETTLEMENT_ROWS
+CURRENT_SETTLEMENT_MODEL_SEMANTIC_NONCOMPLIANCE=DISPROVEN_FOR_PREVIOUS_DEFECTIVE_FIXTURE
+MODEL_FUNDAMENTALLY_INCAPABLE=NOT_PROVEN
+CURRENT_MISTRAL_NATIVE_BINDING_DEFECT=NOT_PROVEN
+MODEL_SUBSTITUTION_AUTHORIZED=no
+```
+
+The previous settlement fixture asked for acknowledgement of a nonexistent
+separate qualification message while its hidden oracle required the unsupported
+assertion `The fixture is verified.`. The fixture was repaired to use the
+self-contained owner turn:
+
+```text
+Please acknowledge that you received this message.
+```
+
+The expected speech is the ordinary acknowledgement:
+
+```text
+Got it.
+```
+
+The owner turn remains the only source reference:
+
+```text
+sourceRefsUsed=["turn-1"]
+```
+
+The owning regression mechanically establishes:
+
+```text
+SETTLEMENT_FIXTURE_SELF_CONTAINED=yes
+SETTLEMENT_FIXTURE_HIDDEN_FACT_REQUIRED=no
+SETTLEMENT_FIXTURE_REQUIRES_OBSERVATION=no
+SETTLEMENT_FIXTURE_REQUIRES_EFFECT=no
+SETTLEMENT_FIXTURE_REQUIRES_UNAVAILABLE_CAPABILITY=no
+SETTLEMENT_EXPECTED_SPEECH_SUPPORTED_BY_MODEL_VISIBLE_CONTEXT=yes
+```
+
+No model-facing branch-selection wording, provider, model, reasoning effort,
+wire binding, schema semantics, strict parser, structural-correction policy,
+host authority, deadline, token budget, fallback, or runtime settlement
+boundary changed. The current source candidate was based on the approved
+`8406ba405ab98a31620493ca6f0e53922d4d2103` repairs and changed only these
+qualification files:
+
+```text
+apps/agent-service/src/core/cognitive-v021/qualification/thought-capability-qualification.ts
+apps/agent-service/src/core/cognitive-v021/qualification/thought-capability-qualification.test.ts
+```
+
+```text
+PARENT_SOURCE_CANDIDATE_SHA=8406ba405ab98a31620493ca6f0e53922d4d2103
+EXACT_NEW_CANDIDATE_SHA=41e890a5c8ce83fba26f6ce8777a4fd631cd19fc
+RUNTIME_SEMANTIC_CONTRACT_CHANGED=no
+QUALIFICATION_FIXTURE_CHANGED=yes
+```
+
+### N.2 Offline and isolated Mint verification
+
+The test-first repair was verified as follows:
+
+```text
+RED_FIXTURE_COHERENCE_TEST=1 failed / 20 passed
+REPAIRED_OWNING_QUALIFICATION_SUITE=PASS — 1 file / 21 tests
+FOCUSED_AFFECTED_SUITES=PASS — 7 files / 48 tests
+COMPLETE_COGNITIVE_V021_SUBTREE=PASS — 106 files / 353 tests
+AGENT_SERVICE_BUILD=PASS
+GIT_DIFF_CHECK=PASS
+```
+
+The exact candidate was pushed before isolated preparation. A fresh Mint
+checkout at the exact SHA was clean. These packages were installed and built
+in dependency order:
+
+```text
+apps/sandbox-policy: PASS
+apps/sandbox-m1: PASS
+apps/sandbox-tree: PASS
+apps/sandbox-broker: PASS
+apps/sandbox-v2: PASS
+apps/agent-service: PASS
+```
+
+The active Mint production checkout was not updated. No service restart,
+deployment, or production mutation occurred.
+
+### N.3 One exact corrected-candidate W2
+
+Exactly one new live W2 was run from the isolated Mint checkout. No unchanged
+extra run was performed. The frozen settings were:
+
+```text
+provider=mistral
+model=mistral-small-2603
+reasoning=high
+fallback=none
+wire_mode=native_json_schema
+wire_format=mistral_response_format_json_schema
+interactive_thought_output_tokens=4096
+durable_proactive_thought_output_tokens=4096
+structural_correction_output_tokens=2048
+thought_wall_clock=30s
+max_structural_corrections=2
+samples=3 per semantic family
+```
+
+The durable artifact is:
+
+```text
+LIVE_RUN_ID=w2-20260901T163931392Z-07d0d967-01e1-4dd1-9670-280228c0b7c2
+LIVE_ARTIFACT=work/phase5-w2-semantics-structural-closure/w2-route-qualification-41e890a.json
+LIVE_ARTIFACT_SHA256=sha256:a3ef5ab27d4d22ec355809da6b4afc558abc2b18015cb102d8d40652ee394a6e
+ARTIFACT_BUILD_ID=41e890a5c8ce83fba26f6ce8777a4fd631cd19fc
+```
+
+The artifact confirms the exact candidate and current Mistral native binding:
+
+```text
+buildIdentity=41e890a5c8ce83fba26f6ce8777a4fd631cd19fc
+wireMode=native_json_schema
+wireBindingId=compat_thought_mistral_small_2603_native_json_schema_v2
+wireFormat=mistral_response_format_json_schema
+capabilityFingerprint=sha256:01acdf5a2fd25ae55bd599c159e06b55833962e747ce7ed48749068b51eefe46
+```
+
+The result is:
+
+```text
+W2_PHYSICAL_QUALIFICATION=NOT_QUALIFIED
+CASES=12
+PROVIDER_ATTEMPTS=13
+PASS=9
+NOT_QUALIFIED=3
+CORRECTION_PACKETS=1
+
+settlement=0/3 PASS
+observation_intent=3/3 PASS
+effect_intent=3/3 PASS
+abstain=3/3 PASS
+```
+
+All three settlement requests reached the real provider and passed transport,
+native wire binding, JSON syntax, closed-schema conformance, strict parsing,
+and Kernel binding. All three stopped at:
+
+```text
+firstFailureBoundary=SEMANTIC_VALIDITY_REJECTION
+semanticValidity=FAIL
+fencing=NOT_REACHED
+authorityReachability=NOT_REACHED
+```
+
+The settlement samples were materially different:
+
+```text
+settlement sample 0:
+  provider response kind=settlement
+  semantic failure=semantic_shape_invalid
+  stored normalized output omits speech.surfaceDraft for speech.mode=draft
+
+settlement samples 1 and 2:
+  provider response kind=abstain
+  reason=insufficient_evidence
+  semantic failure=semantic_branch_mismatch
+```
+
+The two abstain outputs explicitly treated conversational acknowledgement as
+unavailable or unobservable. This is new evidence that the repaired
+self-contained conversational fixture still drives abstention in the live
+model path. Therefore:
+
+```text
+MODEL_FACING_CONTRACT_OVER_CORRECTION=SUPPORTED_OR_PROVEN_BY_NEW_EVIDENCE
+CURRENT_W2_SETTLEMENT_SEMANTIC_RESULT=0/3
+CURRENT_W2_MODEL_FUNDAMENTAL_INCAPABILITY=NOT_PROVEN
+```
+
+The observation, effect, and unavailable-evidence abstain families passed. The
+new run had no provider availability failure. The previous
+`mistral_unavailable` row remains a real, separate provider-availability fact
+from the earlier artifact and is not semantic evidence.
+
+```text
+CURRENT_MISTRAL_SEMANTIC_STATUS=settlement 0/3; observation_intent 3/3; effect_intent 3/3; abstain 3/3; settlement stopped at semantic validity
+CURRENT_PROVIDER_AVAILABILITY_STATUS=no availability failure in corrected W2; prior mistral_unavailable remains separate and real
+CURRENT_MISTRAL_NATIVE_BINDING_STATUS=native_json_schema observed; defect not proven
+```
+
+The corrected artifact contains raw byte counts and SHA-256 digests, normalized
+semantic text for failed cases, and diagnostics. It contains no raw provider
+response bodies. The isolated run directory contained no companion response
+log. No response body was reconstructed or recovered.
+
+```text
+RAW_PROVIDER_RESPONSE=NOT_DURABLY_RETAINED
+QUALIFICATION_OBSERVABILITY_LIMITATION=PROVEN_FOR_EXACT_RAW_PROVIDER_BODIES
+NORMALIZED_SEMANTIC_DIAGNOSTICS=RETAINED
+```
+
+### N.4 Conditional release stop
+
+The corrected candidate did not satisfy the conjunctive W2 gate. The packet's
+first-boundary rule therefore requires a stop and architecture adjudication;
+no further model-facing wording change or live W2 is authorized by this pass.
+
+```text
+THOUGHT_CONTRACT_QUALIFIED=no
+READY_FOR_W3_STAGE_H=no
+RELEASE_TRUTH_MATCHED=no
+MODEL_EXPANSION_SELECTION_GATE=NOT_REACHED_PENDING_ARCHITECTURE_ADJUDICATION
+W3_STAGE_H=NOT_REACHED
+DOWNSTREAM_RELEASE_GATES=NOT_REACHED
+DEPLOYMENT_PERFORMED=no
+PRODUCTION_ACCEPTED=no
+PRODUCTION_MUTATION=no
+SERVICE_RESTART=no
+W9_STARTED=no
+```
+
+The historical W2 artifacts remain unchanged. The current exact verdict is
+preserved as `W2_PHYSICAL_QUALIFICATION=NOT_QUALIFIED`; the new evidence
+explains why the repaired fixture still fails without converting that result
+into a claim of fundamental model incapability.
