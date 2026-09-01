@@ -1,0 +1,1429 @@
+{
+  "schema": "ashley.thought.route_qualification.v1",
+  "candidate": {
+    "provider": "mistral",
+    "model": "mistral-small-2603",
+    "occupantId": "mfo_mistral_small_2603_high"
+  },
+  "capabilityFingerprint": "sha256:57c2c88b32baea5182548dd73728688d36016722ab135a73020b700268034062",
+  "runId": "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f",
+  "environment": "isolated_live",
+  "cases": [
+    {
+      "caseId": "settlement",
+      "invocationIds": [
+        "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:0:settlement:0"
+      ],
+      "providerAttemptIds": [
+        "799da806-9f20-425a-863b-63ce05d88f3b:attempt:1"
+      ],
+      "transport": "success",
+      "rawContentBytes": 2918,
+      "rawContentDigest": "sha256:3516da862eb33a629255d26806b1990c9f1ae491e36e049ea312926d39923866",
+      "jsonSyntax": "PASS",
+      "closedSchemaConformance": "PASS",
+      "strictParser": "PASS",
+      "kernelBinding": "PASS",
+      "fencing": "PASS",
+      "authorityReachability": "PASS",
+      "semanticValidity": "PASS",
+      "resourcePolicy": "PASS",
+      "elapsedMs": 7089,
+      "outputTokens": 965,
+      "wireMode": "native_json_schema",
+      "wireBindingId": "compat_thought_mistral_small_2603_native_json_schema_v2",
+      "providerDeclaredEnforcement": "unavailable",
+      "capabilityFingerprint": "sha256:57c2c88b32baea5182548dd73728688d36016722ab135a73020b700268034062",
+      "diagnostics": {
+        "firstFailureBoundary": "PROVIDER_CONTENT_RECEIVED",
+        "closedSchemaFailureKeyword": null,
+        "closedSchemaFailureInstancePath": null,
+        "closedSchemaFailureSchemaPath": null,
+        "closedSchemaFailureBranch": null,
+        "errorCode": null,
+        "dispatchTruth": "response_received",
+        "dispatchStage": "provider_dispatch",
+        "providerRequestStarted": true,
+        "providerResponseReceived": true,
+        "attemptId": "799da806-9f20-425a-863b-63ce05d88f3b:attempt:1",
+        "reachability": {
+          "kernelBinding": "PASS",
+          "fencing": "PASS",
+          "authorityReachability": "PASS",
+          "semanticValidity": "PASS"
+        }
+      },
+      "firstFailureBoundary": "PROVIDER_CONTENT_RECEIVED",
+      "independentFailureCodes": [],
+      "dependentNotReachedGates": [],
+      "correctionPackets": [],
+      "failureEvidence": null,
+      "failureCodes": [],
+      "verdict": "PASS"
+    },
+    {
+      "caseId": "settlement",
+      "invocationIds": [
+        "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:1:settlement:0"
+      ],
+      "providerAttemptIds": [
+        "72e1ca2f-c32a-4e06-875e-0abe646154b7:attempt:1"
+      ],
+      "transport": "success",
+      "rawContentBytes": 2848,
+      "rawContentDigest": "sha256:1b7b56c9aa765f621e8adeed78931a4782d5e7cd202201cf70f11ac1d368d755",
+      "jsonSyntax": "PASS",
+      "closedSchemaConformance": "PASS",
+      "strictParser": "PASS",
+      "kernelBinding": "PASS",
+      "fencing": "PASS",
+      "authorityReachability": "PASS",
+      "semanticValidity": "PASS",
+      "resourcePolicy": "PASS",
+      "elapsedMs": 9943,
+      "outputTokens": 1370,
+      "wireMode": "native_json_schema",
+      "wireBindingId": "compat_thought_mistral_small_2603_native_json_schema_v2",
+      "providerDeclaredEnforcement": "unavailable",
+      "capabilityFingerprint": "sha256:57c2c88b32baea5182548dd73728688d36016722ab135a73020b700268034062",
+      "diagnostics": {
+        "firstFailureBoundary": "PROVIDER_CONTENT_RECEIVED",
+        "closedSchemaFailureKeyword": null,
+        "closedSchemaFailureInstancePath": null,
+        "closedSchemaFailureSchemaPath": null,
+        "closedSchemaFailureBranch": null,
+        "errorCode": null,
+        "dispatchTruth": "response_received",
+        "dispatchStage": "provider_dispatch",
+        "providerRequestStarted": true,
+        "providerResponseReceived": true,
+        "attemptId": "72e1ca2f-c32a-4e06-875e-0abe646154b7:attempt:1",
+        "reachability": {
+          "kernelBinding": "PASS",
+          "fencing": "PASS",
+          "authorityReachability": "PASS",
+          "semanticValidity": "PASS"
+        }
+      },
+      "firstFailureBoundary": "PROVIDER_CONTENT_RECEIVED",
+      "independentFailureCodes": [],
+      "dependentNotReachedGates": [],
+      "correctionPackets": [],
+      "failureEvidence": null,
+      "failureCodes": [],
+      "verdict": "PASS"
+    },
+    {
+      "caseId": "settlement",
+      "invocationIds": [
+        "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:2:settlement:0"
+      ],
+      "providerAttemptIds": [
+        "67b04d03-ae84-4ac2-9d38-e0d21e4a5d63:attempt:1"
+      ],
+      "transport": "success",
+      "rawContentBytes": 3329,
+      "rawContentDigest": "sha256:9774e4fecd47e4b9f8acb08860ed9ce412e370ab73d4b855969cbc8d12cbeda9",
+      "jsonSyntax": "PASS",
+      "closedSchemaConformance": "PASS",
+      "strictParser": "PASS",
+      "kernelBinding": "PASS",
+      "fencing": "PASS",
+      "authorityReachability": "PASS",
+      "semanticValidity": "PASS",
+      "resourcePolicy": "PASS",
+      "elapsedMs": 8005,
+      "outputTokens": 1152,
+      "wireMode": "native_json_schema",
+      "wireBindingId": "compat_thought_mistral_small_2603_native_json_schema_v2",
+      "providerDeclaredEnforcement": "unavailable",
+      "capabilityFingerprint": "sha256:57c2c88b32baea5182548dd73728688d36016722ab135a73020b700268034062",
+      "diagnostics": {
+        "firstFailureBoundary": "PROVIDER_CONTENT_RECEIVED",
+        "closedSchemaFailureKeyword": null,
+        "closedSchemaFailureInstancePath": null,
+        "closedSchemaFailureSchemaPath": null,
+        "closedSchemaFailureBranch": null,
+        "errorCode": null,
+        "dispatchTruth": "response_received",
+        "dispatchStage": "provider_dispatch",
+        "providerRequestStarted": true,
+        "providerResponseReceived": true,
+        "attemptId": "67b04d03-ae84-4ac2-9d38-e0d21e4a5d63:attempt:1",
+        "reachability": {
+          "kernelBinding": "PASS",
+          "fencing": "PASS",
+          "authorityReachability": "PASS",
+          "semanticValidity": "PASS"
+        }
+      },
+      "firstFailureBoundary": "PROVIDER_CONTENT_RECEIVED",
+      "independentFailureCodes": [],
+      "dependentNotReachedGates": [],
+      "correctionPackets": [],
+      "failureEvidence": null,
+      "failureCodes": [],
+      "verdict": "PASS"
+    },
+    {
+      "caseId": "observation_intent",
+      "invocationIds": [
+        "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:0:observation_intent:0",
+        "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:0:observation_intent:1",
+        "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:0:observation_intent:2"
+      ],
+      "providerAttemptIds": [
+        "70ab4b30-029d-42c7-b6a5-7f8ac22c8d57:attempt:1",
+        "fd66b286-156e-479e-9ea9-33c908a94b82:attempt:1",
+        "7c879dab-b283-4c1d-bc88-c2446ede4246:attempt:1"
+      ],
+      "transport": "success",
+      "rawContentBytes": 4112,
+      "rawContentDigest": "sha256:6de3bfe17fdae295381f370467be9876bca91e827f640b6e6bcbba98a53c69b6",
+      "jsonSyntax": "PASS",
+      "closedSchemaConformance": "PASS",
+      "strictParser": "FAIL",
+      "kernelBinding": "NOT_REACHED",
+      "fencing": "NOT_REACHED",
+      "authorityReachability": "NOT_REACHED",
+      "semanticValidity": "NOT_REACHED",
+      "resourcePolicy": "PASS",
+      "elapsedMs": 6758,
+      "outputTokens": 1179,
+      "wireMode": "native_json_schema",
+      "wireBindingId": "compat_thought_mistral_small_2603_native_json_schema_v2",
+      "providerDeclaredEnforcement": "unavailable",
+      "capabilityFingerprint": "sha256:57c2c88b32baea5182548dd73728688d36016722ab135a73020b700268034062",
+      "diagnostics": {
+        "firstFailureBoundary": "STRICT_PARSER_REJECTION",
+        "closedSchemaFailureKeyword": null,
+        "closedSchemaFailureInstancePath": null,
+        "closedSchemaFailureSchemaPath": null,
+        "closedSchemaFailureBranch": null,
+        "errorCode": null,
+        "dispatchTruth": "response_received",
+        "dispatchStage": "provider_dispatch",
+        "providerRequestStarted": true,
+        "providerResponseReceived": true,
+        "attemptId": "7c879dab-b283-4c1d-bc88-c2446ede4246:attempt:1",
+        "reachability": {
+          "kernelBinding": "NOT_REACHED",
+          "fencing": "NOT_REACHED",
+          "authorityReachability": "NOT_REACHED",
+          "semanticValidity": "NOT_REACHED"
+        }
+      },
+      "firstFailureBoundary": "STRICT_PARSER_REJECTION",
+      "independentFailureCodes": [
+        "PROVIDER_ACCEPTED_PARSER_REJECTED"
+      ],
+      "dependentNotReachedGates": [
+        "kernelBinding",
+        "semanticValidity",
+        "fencing",
+        "authorityReachability"
+      ],
+      "correctionPackets": [
+        {
+          "attemptOrdinal": 2,
+          "attemptKind": "structural_correction",
+          "invocationId": "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:0:observation_intent:1",
+          "providerAttemptId": "fd66b286-156e-479e-9ea9-33c908a94b82:attempt:1",
+          "systemMessage": "You are Ashley's Thought layer. Return exactly one JSON semantic Thought output. Code-owned Thought contract contractId=ashley.thought.semantic.v1 schemaId=ashley.thought.semantic.v1.schema schemaFingerprint=sha256:9bf27fc16755f26917ab2eeae55010b7a94212c593847aa37e5e4a634563fb9b. Return exactly one JSON object in one of these permitted kinds/forms: \"settlement\" required=kind,interpretation,commitments,speech,workingContextDeltas,concernDeltas,occupancyDeltas,futureTriggerDeltas,subscriptionDeltas,durableNominations,evidenceUse; \"observation_intent\" required=kind,operationKind,request,purpose,evidenceNeed,existingRefs; \"effect_intent\" required=kind,operationKind,request,purpose,expectedOutcome,existingRefs; \"abstain\" required=kind,reason,explanation,evidenceRefs. Do not emit kernel identity, lifecycle, delivery, or publication fields; Ashley code binds those values. A settlement must include these required sections: kind, interpretation, commitments, speech, workingContextDeltas, concernDeltas, occupancyDeltas, futureTriggerDeltas, subscriptionDeltas, durableNominations, evidenceUse. Speech shape: mode=\"none\", required=mode,mustSay,mustNotSay,acceptableRealizations,presentationDirectives, surfaceDraft=value; mode=\"draft\", required=mode,mustSay,mustNotSay,acceptableRealizations,presentationDirectives, surfaceDraft=string. Commitments required fields: epistemic, conversational, stance. Forbidden publication/delivery fields: finalLicensedText, settlementId, outboxId, nuclearReservationId, deliveryState, sendStatus, discordMessageIds, deliveryIntent, projectionKey, suppressed, origin. This contract describes output shape only; Ashley code remains authoritative for semantics, authority, licensing, and publication. Code validates identity, authority, speech licensing, and publication. Do not return finalLicensedText, settlementId, delivery, outbox, reservation, or workspace state. The previous response failed bounded structural validation (wrong_type). Failing field/path: evidenceUse. Use the required semantic field types without coercion. Only evidenceUse may change; preserve the semantic kind and every other field exactly. Do not change the semantic answer or invent authority."
+        },
+        {
+          "attemptOrdinal": 3,
+          "attemptKind": "structural_correction",
+          "invocationId": "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:0:observation_intent:2",
+          "providerAttemptId": "7c879dab-b283-4c1d-bc88-c2446ede4246:attempt:1",
+          "systemMessage": "You are Ashley's Thought layer. Return exactly one JSON semantic Thought output. Code-owned Thought contract contractId=ashley.thought.semantic.v1 schemaId=ashley.thought.semantic.v1.schema schemaFingerprint=sha256:9bf27fc16755f26917ab2eeae55010b7a94212c593847aa37e5e4a634563fb9b. Return exactly one JSON object in one of these permitted kinds/forms: \"settlement\" required=kind,interpretation,commitments,speech,workingContextDeltas,concernDeltas,occupancyDeltas,futureTriggerDeltas,subscriptionDeltas,durableNominations,evidenceUse; \"observation_intent\" required=kind,operationKind,request,purpose,evidenceNeed,existingRefs; \"effect_intent\" required=kind,operationKind,request,purpose,expectedOutcome,existingRefs; \"abstain\" required=kind,reason,explanation,evidenceRefs. Do not emit kernel identity, lifecycle, delivery, or publication fields; Ashley code binds those values. A settlement must include these required sections: kind, interpretation, commitments, speech, workingContextDeltas, concernDeltas, occupancyDeltas, futureTriggerDeltas, subscriptionDeltas, durableNominations, evidenceUse. Speech shape: mode=\"none\", required=mode,mustSay,mustNotSay,acceptableRealizations,presentationDirectives, surfaceDraft=value; mode=\"draft\", required=mode,mustSay,mustNotSay,acceptableRealizations,presentationDirectives, surfaceDraft=string. Commitments required fields: epistemic, conversational, stance. Forbidden publication/delivery fields: finalLicensedText, settlementId, outboxId, nuclearReservationId, deliveryState, sendStatus, discordMessageIds, deliveryIntent, projectionKey, suppressed, origin. This contract describes output shape only; Ashley code remains authoritative for semantics, authority, licensing, and publication. Code validates identity, authority, speech licensing, and publication. Do not return finalLicensedText, settlementId, delivery, outbox, reservation, or workspace state. The previous response failed bounded structural validation (wrong_type). Failing field/path: evidenceUse. Use the required semantic field types without coercion. Only evidenceUse may change; preserve the semantic kind and every other field exactly. Do not change the semantic answer or invent authority."
+        }
+      ],
+      "failureEvidence": {
+        "captureStatus": "captured",
+        "allowlistedReferences": [
+          "turn-1"
+        ],
+        "providerContentChunkMetadata": {
+          "contentContainerType": "array",
+          "contentChunkTypes": [
+            "thinking",
+            "text"
+          ],
+          "textChunkCount": 1,
+          "thinkingChunkCount": 1,
+          "finalTextBytes": 4112,
+          "finishReason": "stop",
+          "finishReasonClass": "STOP",
+          "outputTokenLimit": 2048,
+          "outputTokens": 1179,
+          "reasoningTokens": null,
+          "extractionFailure": "none"
+        },
+        "normalizedSemanticText": "{\n  \"kind\": \"settlement\",\n  \"interpretation\": {\n    \"discourseActs\": [\"ask\"],\n    \"referentBindings\": [\n      {\n        \"span\": \"README.md from the approved qualification-fixture project\",\n        \"sourceTurnRefs\": [\"turn-1\"]\n      }\n    ],\n    \"corrections\": [],\n    \"unresolvedAmbiguities\": [],\n    \"topics\": [\"file inspection\", \"project qualification\"]\n  },\n  \"commitments\": {\n    \"epistemic\": [\n      {\n        \"dimensions\": {\n          \"source\": \"owner_utterance\",\n          \"status\": \"asserted\",\n          \"time\": \"current\",\n          \"reliability\": \"owner_supplied\"\n        },\n        \"statement\": \"The owner has requested reading README.md from the qualification-fixture project\"\n      }\n    ],\n    \"conversational\": [\"answer\"],\n    \"stance\": {\n      \"warmth\": \"medium\",\n      \"humorAllowed\": false,\n      \"disagreement\": false,\n      \"uncertaintyDisplay\": false\n    }\n  },\n  \"speech\": {\n    \"mode\": \"draft\",\n    \"mustSay\": [\n      \"I'll read the README.md file from the qualification-fixture project and report its contents.\"\n    ],\n    \"mustNotSay\": [],\n    \"surfaceDraft\": \"I've read the README.md file from the qualification-fixture project. Its contents are:\\n\\n[File contents will be displayed here after reading the file]\",\n    \"acceptableRealizations\": [\n      \"I have retrieved and will now display the README.md file contents from the qualification-fixture project.\",\n      \"Here are the contents of README.md from the qualification-fixture project:\",\n      \"The README.md file from qualification-fixture contains:\"\n    ],\n    \"presentationDirectives\": [\n      \"Ensure the response includes the complete contents of the README.md file\",\n      \"Present the file contents in a clear, readable format\",\n      \"Do not summarize or omit any part of the file contents\"\n    ]\n  },\n  \"workingContextDeltas\": [\n    {\n      \"op\": \"upsert\",\n      \"item\": {\n        \"identity\": {\n          \"kind\": \"local\",\n          \"alias\": \"readme_file_ref\"\n        },\n        \"type\": \"referent\",\n        \"text\": \"README.md file from qualification-fixture project\",\n        \"concernRef\": null,\n        \"sourceTurnRefs\": [\"turn-1\"],\n        \"status\": \"active\",\n        \"supersedesRef\": null\n      }\n    },\n    {\n      \"op\": \"upsert\",\n      \"item\": {\n        \"identity\": {\n          \"kind\": \"local\",\n          \"alias\": \"read_readme_question\"\n        },\n        \"type\": \"question\",\n        \"text\": \"Read README.md from qualification-fixture project\",\n        \"concernRef\": {\n          \"kind\": \"local\",\n          \"alias\": \"read_readme_concern\"\n        },\n        \"sourceTurnRefs\": [\"turn-1\"],\n        \"status\": \"active\",\n        \"supersedesRef\": null\n      }\n    },\n    {\n      \"op\": \"upsert\",\n      \"item\": {\n        \"identity\": {\n          \"kind\": \"local\",\n          \"alias\": \"read_readme_commitment\"\n        },\n        \"type\": \"commitment_temp\",\n        \"text\": \"Read README.md from qualification-fixture project and report contents\",\n        \"concernRef\": {\n          \"kind\": \"local\",\n          \"alias\": \"read_readme_concern\"\n        },\n        \"sourceTurnRefs\": [\"turn-1\"],\n        \"status\": \"active\",\n        \"supersedesRef\": null\n      }\n    }\n  ],\n  \"concernDeltas\": [\n    {\n      \"op\": \"upsert\",\n      \"record\": {\n        \"identity\": {\n          \"kind\": \"local\",\n          \"alias\": \"read_readme_concern\"\n        },\n        \"statement\": \"Read README.md from qualification-fixture project and report its contents\",\n        \"sourceTurnRefs\": [\"turn-1\"],\n        \"dimensions\": {\n          \"source\": \"owner_utterance\",\n          \"status\": \"asserted\",\n          \"time\": \"current\",\n          \"reliability\": \"owner_supplied\"\n        },\n        \"status\": \"active\"\n      }\n    }\n  ],\n  \"occupancyDeltas\": [\n    {\n      \"op\": \"set\",\n      \"concernRef\": {\n        \"kind\": \"local\",\n        \"alias\": \"read_readme_concern\"\n      },\n      \"status\": \"active\",\n      \"priority\": 1\n    }\n  ],\n  \"futureTriggerDeltas\": [],\n  \"subscriptionDeltas\": [],\n  \"durableNominations\": [],\n  \"evidenceUse\": {\n    \"observationRefsUsed\": [],\n    \"retrievalRefsUsed\": [],\n    \"sourceRefsUsed\": [],\n    \"openIntentRefs\": [\"read_readme_concern\"]\n  }\n}",
+        "normalizedSemanticBytes": 4112,
+        "normalizedSemanticSHA256": "sha256:6de3bfe17fdae295381f370467be9876bca91e827f640b6e6bcbba98a53c69b6",
+        "jsonSyntaxDiagnostic": null,
+        "closedSchemaDiagnostic": null,
+        "strictParserDiagnostic": {
+          "parserErrorCode": "wrong_type",
+          "parserErrorMessage": "parseThoughtSemanticOutput:wrong_type",
+          "parserPath": "evidenceUse",
+          "expectedShape": "observation_intent",
+          "observedShapeSummary": {
+            "rootType": "object",
+            "kind": "settlement",
+            "topLevelKeys": [
+              "commitments",
+              "concernDeltas",
+              "durableNominations",
+              "evidenceUse",
+              "futureTriggerDeltas",
+              "interpretation",
+              "kind",
+              "occupancyDeltas",
+              "speech",
+              "subscriptionDeltas",
+              "workingContextDeltas"
+            ]
+          }
+        },
+        "semanticValidityDiagnostic": null,
+        "kernelBindingDiagnostic": {
+          "status": "NOT_REACHED",
+          "reasonCodes": [],
+          "expected": null,
+          "actual": null
+        },
+        "fencingDiagnostic": {
+          "status": "NOT_REACHED",
+          "reasonCodes": [],
+          "expected": null,
+          "actual": null
+        },
+        "authorityReachabilityDiagnostic": {
+          "status": "NOT_REACHED",
+          "reasonCodes": [],
+          "expected": null,
+          "actual": null
+        },
+        "hostContext": {
+          "cycleId": "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:0:cycle",
+          "generation": 1,
+          "occupantId": "mfo_mistral_small_2603_high",
+          "authorityEpoch": 1,
+          "triggerRef": "turn-1"
+        }
+      },
+      "failureCodes": [
+        "PROVIDER_ACCEPTED_PARSER_REJECTED"
+      ],
+      "verdict": "NOT_QUALIFIED"
+    },
+    {
+      "caseId": "observation_intent",
+      "invocationIds": [
+        "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:1:observation_intent:0"
+      ],
+      "providerAttemptIds": [
+        "6a364bc8-ba80-4d35-a3c2-2e9c1d342197:attempt:1"
+      ],
+      "transport": "success",
+      "rawContentBytes": 385,
+      "rawContentDigest": "sha256:b77d5a6a0ce3a862ce535279cd8223fef27ba9fc26c8615da8c799c54d8c8f57",
+      "jsonSyntax": "PASS",
+      "closedSchemaConformance": "PASS",
+      "strictParser": "PASS",
+      "kernelBinding": "PASS",
+      "fencing": "NOT_REACHED",
+      "authorityReachability": "NOT_REACHED",
+      "semanticValidity": "FAIL",
+      "resourcePolicy": "PASS",
+      "elapsedMs": 5589,
+      "outputTokens": 730,
+      "wireMode": "native_json_schema",
+      "wireBindingId": "compat_thought_mistral_small_2603_native_json_schema_v2",
+      "providerDeclaredEnforcement": "unavailable",
+      "capabilityFingerprint": "sha256:57c2c88b32baea5182548dd73728688d36016722ab135a73020b700268034062",
+      "diagnostics": {
+        "firstFailureBoundary": "SEMANTIC_VALIDITY_REJECTION",
+        "closedSchemaFailureKeyword": null,
+        "closedSchemaFailureInstancePath": null,
+        "closedSchemaFailureSchemaPath": null,
+        "closedSchemaFailureBranch": null,
+        "errorCode": null,
+        "dispatchTruth": "response_received",
+        "dispatchStage": "provider_dispatch",
+        "providerRequestStarted": true,
+        "providerResponseReceived": true,
+        "attemptId": "6a364bc8-ba80-4d35-a3c2-2e9c1d342197:attempt:1",
+        "reachability": {
+          "kernelBinding": "PASS",
+          "fencing": "NOT_REACHED",
+          "authorityReachability": "NOT_REACHED",
+          "semanticValidity": "FAIL"
+        }
+      },
+      "firstFailureBoundary": "SEMANTIC_VALIDITY_REJECTION",
+      "independentFailureCodes": [
+        "semantic_branch_mismatch",
+        "semantic_invalid"
+      ],
+      "dependentNotReachedGates": [
+        "fencing",
+        "authorityReachability"
+      ],
+      "correctionPackets": [],
+      "failureEvidence": {
+        "captureStatus": "captured",
+        "allowlistedReferences": [
+          "turn-1"
+        ],
+        "providerContentChunkMetadata": {
+          "contentContainerType": "array",
+          "contentChunkTypes": [
+            "thinking",
+            "text"
+          ],
+          "textChunkCount": 1,
+          "thinkingChunkCount": 1,
+          "finalTextBytes": 385,
+          "finishReason": "stop",
+          "finishReasonClass": "STOP",
+          "outputTokenLimit": 4096,
+          "outputTokens": 730,
+          "reasoningTokens": null,
+          "extractionFailure": "none"
+        },
+        "normalizedSemanticText": "{\n  \"kind\": \"effect_intent\",\n  \"operationKind\": \"project.read_file\",\n  \"request\": {\n    \"projectId\": \"qualification-fixture\",\n    \"filePath\": \"README.md\"\n  },\n  \"purpose\": \"Read README.md from the approved qualification-fixture project as requested by owner in turn-1\",\n  \"expectedOutcome\": \"The contents of README.md from qualification-fixture project\",\n  \"existingRefs\": [\"turn-1\"]\n}",
+        "normalizedSemanticBytes": 385,
+        "normalizedSemanticSHA256": "sha256:b77d5a6a0ce3a862ce535279cd8223fef27ba9fc26c8615da8c799c54d8c8f57",
+        "jsonSyntaxDiagnostic": null,
+        "closedSchemaDiagnostic": null,
+        "strictParserDiagnostic": null,
+        "semanticValidityDiagnostic": {
+          "reasonCodes": [
+            "semantic_branch_mismatch"
+          ],
+          "offendingFieldPaths": [],
+          "evidenceRefDiagnostics": []
+        },
+        "kernelBindingDiagnostic": {
+          "status": "PASS",
+          "reasonCodes": [],
+          "expected": {
+            "invocationId": "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:1:observation_intent:0",
+            "cycleId": "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:1:cycle",
+            "generation": 1,
+            "authorityEpoch": 1,
+            "provider": "mistral",
+            "model": "mistral-small-2603",
+            "attemptId": "6a364bc8-ba80-4d35-a3c2-2e9c1d342197:attempt:1",
+            "allocationId": 7
+          },
+          "actual": {
+            "invocationId": "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:1:observation_intent:0",
+            "cycleId": "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:1:cycle",
+            "generation": 1,
+            "authorityEpoch": 1,
+            "provider": "mistral",
+            "model": "mistral-small-2603",
+            "attemptId": "6a364bc8-ba80-4d35-a3c2-2e9c1d342197:attempt:1",
+            "allocationId": 7
+          }
+        },
+        "fencingDiagnostic": {
+          "status": "NOT_REACHED",
+          "reasonCodes": [],
+          "expected": null,
+          "actual": null
+        },
+        "authorityReachabilityDiagnostic": {
+          "status": "NOT_REACHED",
+          "reasonCodes": [],
+          "expected": null,
+          "actual": null
+        },
+        "hostContext": {
+          "cycleId": "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:1:cycle",
+          "generation": 1,
+          "occupantId": "mfo_mistral_small_2603_high",
+          "authorityEpoch": 1,
+          "triggerRef": "turn-1"
+        }
+      },
+      "failureCodes": [
+        "semantic_branch_mismatch",
+        "semantic_invalid"
+      ],
+      "verdict": "NOT_QUALIFIED"
+    },
+    {
+      "caseId": "observation_intent",
+      "invocationIds": [
+        "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:2:observation_intent:0",
+        "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:2:observation_intent:1",
+        "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:2:observation_intent:2"
+      ],
+      "providerAttemptIds": [
+        "2afff99e-0c80-4175-81df-e7a9893431ef:attempt:1",
+        "b697afcd-6fa9-4c5e-ab72-d2fa2d8b3959:attempt:1",
+        "5b1163ff-d379-4bfc-96c6-e5b50a76bae2:attempt:1"
+      ],
+      "transport": "success",
+      "rawContentBytes": 2972,
+      "rawContentDigest": "sha256:99b9dea85775d7d8a223fe1da174ed3d4997bf6fabcc9f986ff7384f52562cdc",
+      "jsonSyntax": "PASS",
+      "closedSchemaConformance": "PASS",
+      "strictParser": "FAIL",
+      "kernelBinding": "NOT_REACHED",
+      "fencing": "NOT_REACHED",
+      "authorityReachability": "NOT_REACHED",
+      "semanticValidity": "NOT_REACHED",
+      "resourcePolicy": "PASS",
+      "elapsedMs": 10647,
+      "outputTokens": 1803,
+      "wireMode": "native_json_schema",
+      "wireBindingId": "compat_thought_mistral_small_2603_native_json_schema_v2",
+      "providerDeclaredEnforcement": "unavailable",
+      "capabilityFingerprint": "sha256:57c2c88b32baea5182548dd73728688d36016722ab135a73020b700268034062",
+      "diagnostics": {
+        "firstFailureBoundary": "STRICT_PARSER_REJECTION",
+        "closedSchemaFailureKeyword": null,
+        "closedSchemaFailureInstancePath": null,
+        "closedSchemaFailureSchemaPath": null,
+        "closedSchemaFailureBranch": null,
+        "errorCode": null,
+        "dispatchTruth": "response_received",
+        "dispatchStage": "provider_dispatch",
+        "providerRequestStarted": true,
+        "providerResponseReceived": true,
+        "attemptId": "5b1163ff-d379-4bfc-96c6-e5b50a76bae2:attempt:1",
+        "reachability": {
+          "kernelBinding": "NOT_REACHED",
+          "fencing": "NOT_REACHED",
+          "authorityReachability": "NOT_REACHED",
+          "semanticValidity": "NOT_REACHED"
+        }
+      },
+      "firstFailureBoundary": "STRICT_PARSER_REJECTION",
+      "independentFailureCodes": [
+        "PROVIDER_ACCEPTED_PARSER_REJECTED"
+      ],
+      "dependentNotReachedGates": [
+        "kernelBinding",
+        "semanticValidity",
+        "fencing",
+        "authorityReachability"
+      ],
+      "correctionPackets": [
+        {
+          "attemptOrdinal": 2,
+          "attemptKind": "structural_correction",
+          "invocationId": "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:2:observation_intent:1",
+          "providerAttemptId": "b697afcd-6fa9-4c5e-ab72-d2fa2d8b3959:attempt:1",
+          "systemMessage": "You are Ashley's Thought layer. Return exactly one JSON semantic Thought output. Code-owned Thought contract contractId=ashley.thought.semantic.v1 schemaId=ashley.thought.semantic.v1.schema schemaFingerprint=sha256:9bf27fc16755f26917ab2eeae55010b7a94212c593847aa37e5e4a634563fb9b. Return exactly one JSON object in one of these permitted kinds/forms: \"settlement\" required=kind,interpretation,commitments,speech,workingContextDeltas,concernDeltas,occupancyDeltas,futureTriggerDeltas,subscriptionDeltas,durableNominations,evidenceUse; \"observation_intent\" required=kind,operationKind,request,purpose,evidenceNeed,existingRefs; \"effect_intent\" required=kind,operationKind,request,purpose,expectedOutcome,existingRefs; \"abstain\" required=kind,reason,explanation,evidenceRefs. Do not emit kernel identity, lifecycle, delivery, or publication fields; Ashley code binds those values. A settlement must include these required sections: kind, interpretation, commitments, speech, workingContextDeltas, concernDeltas, occupancyDeltas, futureTriggerDeltas, subscriptionDeltas, durableNominations, evidenceUse. Speech shape: mode=\"none\", required=mode,mustSay,mustNotSay,acceptableRealizations,presentationDirectives, surfaceDraft=value; mode=\"draft\", required=mode,mustSay,mustNotSay,acceptableRealizations,presentationDirectives, surfaceDraft=string. Commitments required fields: epistemic, conversational, stance. Forbidden publication/delivery fields: finalLicensedText, settlementId, outboxId, nuclearReservationId, deliveryState, sendStatus, discordMessageIds, deliveryIntent, projectionKey, suppressed, origin. This contract describes output shape only; Ashley code remains authoritative for semantics, authority, licensing, and publication. Code validates identity, authority, speech licensing, and publication. Do not return finalLicensedText, settlementId, delivery, outbox, reservation, or workspace state. The previous response failed bounded structural validation (wrong_type). Failing field/path: evidenceUse. Use the required semantic field types without coercion. Only evidenceUse may change; preserve the semantic kind and every other field exactly. Do not change the semantic answer or invent authority."
+        },
+        {
+          "attemptOrdinal": 3,
+          "attemptKind": "structural_correction",
+          "invocationId": "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:2:observation_intent:2",
+          "providerAttemptId": "5b1163ff-d379-4bfc-96c6-e5b50a76bae2:attempt:1",
+          "systemMessage": "You are Ashley's Thought layer. Return exactly one JSON semantic Thought output. Code-owned Thought contract contractId=ashley.thought.semantic.v1 schemaId=ashley.thought.semantic.v1.schema schemaFingerprint=sha256:9bf27fc16755f26917ab2eeae55010b7a94212c593847aa37e5e4a634563fb9b. Return exactly one JSON object in one of these permitted kinds/forms: \"settlement\" required=kind,interpretation,commitments,speech,workingContextDeltas,concernDeltas,occupancyDeltas,futureTriggerDeltas,subscriptionDeltas,durableNominations,evidenceUse; \"observation_intent\" required=kind,operationKind,request,purpose,evidenceNeed,existingRefs; \"effect_intent\" required=kind,operationKind,request,purpose,expectedOutcome,existingRefs; \"abstain\" required=kind,reason,explanation,evidenceRefs. Do not emit kernel identity, lifecycle, delivery, or publication fields; Ashley code binds those values. A settlement must include these required sections: kind, interpretation, commitments, speech, workingContextDeltas, concernDeltas, occupancyDeltas, futureTriggerDeltas, subscriptionDeltas, durableNominations, evidenceUse. Speech shape: mode=\"none\", required=mode,mustSay,mustNotSay,acceptableRealizations,presentationDirectives, surfaceDraft=value; mode=\"draft\", required=mode,mustSay,mustNotSay,acceptableRealizations,presentationDirectives, surfaceDraft=string. Commitments required fields: epistemic, conversational, stance. Forbidden publication/delivery fields: finalLicensedText, settlementId, outboxId, nuclearReservationId, deliveryState, sendStatus, discordMessageIds, deliveryIntent, projectionKey, suppressed, origin. This contract describes output shape only; Ashley code remains authoritative for semantics, authority, licensing, and publication. Code validates identity, authority, speech licensing, and publication. Do not return finalLicensedText, settlementId, delivery, outbox, reservation, or workspace state. The previous response failed bounded structural validation (wrong_type). Failing field/path: evidenceUse. Use the required semantic field types without coercion. Only evidenceUse may change; preserve the semantic kind and every other field exactly. Do not change the semantic answer or invent authority."
+        }
+      ],
+      "failureEvidence": {
+        "captureStatus": "captured",
+        "allowlistedReferences": [
+          "turn-1"
+        ],
+        "providerContentChunkMetadata": {
+          "contentContainerType": "array",
+          "contentChunkTypes": [
+            "thinking",
+            "text"
+          ],
+          "textChunkCount": 1,
+          "thinkingChunkCount": 1,
+          "finalTextBytes": 2972,
+          "finishReason": "stop",
+          "finishReasonClass": "STOP",
+          "outputTokenLimit": 2048,
+          "outputTokens": 1803,
+          "reasoningTokens": null,
+          "extractionFailure": "none"
+        },
+        "normalizedSemanticText": "{\n  \"kind\": \"settlement\",\n  \"interpretation\": {\n    \"discourseActs\": [\"ask\"],\n    \"referentBindings\": [\n      {\n        \"span\": \"qualification-fixture\",\n        \"sourceTurnRefs\": [\"turn-1\"]\n      },\n      {\n        \"span\": \"README.md\",\n        \"sourceTurnRefs\": [\"turn-1\"]\n      }\n    ],\n    \"corrections\": [],\n    \"unresolvedAmbiguities\": [],\n    \"topics\": [\"read file\", \"qualification-fixture project\", \"README.md\"]\n  },\n  \"commitments\": {\n    \"epistemic\": [\n      {\n        \"dimensions\": {\n          \"source\": \"owner_utterance\",\n          \"status\": \"asserted\",\n          \"time\": \"current\",\n          \"reliability\": \"owner_supplied\"\n        },\n        \"statement\": \"I will read README.md from the qualification-fixture project and report its contents.\"\n      }\n    ],\n    \"conversational\": [\"answer\"],\n    \"stance\": {\n      \"warmth\": \"medium\",\n      \"humorAllowed\": false,\n      \"disagreement\": false,\n      \"uncertaintyDisplay\": false\n    }\n  },\n  \"speech\": {\n    \"mode\": \"draft\",\n    \"mustSay\": [\"I'll read the README.md file from the qualification-fixture project and report its contents.\"],\n    \"mustNotSay\": [],\n    \"surfaceDraft\": \"I'll read the README.md file from the qualification-fixture project and report its contents.\",\n    \"acceptableRealizations\": [\"I'll read the README.md file from the qualification-fixture project and report its contents.\"],\n    \"presentationDirectives\": [\"professional\", \"concise\"]\n  },\n  \"workingContextDeltas\": [\n    {\n      \"op\": \"upsert\",\n      \"item\": {\n        \"identity\": {\n          \"kind\": \"local\",\n          \"alias\": \"read_qualification_readme_task\"\n        },\n        \"type\": \"question\",\n        \"text\": \"Read README.md from qualification-fixture project and report contents\",\n        \"concernRef\": {\n          \"kind\": \"local\",\n          \"alias\": \"read_qualification_readme_concern\"\n        },\n        \"sourceTurnRefs\": [\"turn-1\"],\n        \"status\": \"active\",\n        \"supersedesRef\": null\n      }\n    }\n  ],\n  \"concernDeltas\": [\n    {\n      \"op\": \"upsert\",\n      \"record\": {\n        \"identity\": {\n          \"kind\": \"local\",\n          \"alias\": \"read_qualification_readme_concern\"\n        },\n        \"statement\": \"Read README.md from qualification-fixture project and report contents\",\n        \"sourceTurnRefs\": [\"turn-1\"],\n        \"dimensions\": {\n          \"source\": \"owner_utterance\",\n          \"status\": \"asserted\",\n          \"time\": \"current\",\n          \"reliability\": \"owner_supplied\"\n        },\n        \"status\": \"active\"\n      }\n    }\n  ],\n  \"occupancyDeltas\": [\n    {\n      \"op\": \"set\",\n      \"concernRef\": {\n        \"kind\": \"local\",\n        \"alias\": \"read_qualification_readme_concern\"\n      },\n      \"status\": \"active\",\n      \"priority\": 5\n    }\n  ],\n  \"futureTriggerDeltas\": [],\n  \"subscriptionDeltas\": [],\n  \"durableNominations\": [],\n  \"evidenceUse\": {\n    \"observationRefsUsed\": [],\n    \"retrievalRefsUsed\": [],\n    \"sourceRefsUsed\": [\"turn-1\"],\n    \"openIntentRefs\": [\"read_qualification_readme_intent\"]\n  }\n}",
+        "normalizedSemanticBytes": 2972,
+        "normalizedSemanticSHA256": "sha256:99b9dea85775d7d8a223fe1da174ed3d4997bf6fabcc9f986ff7384f52562cdc",
+        "jsonSyntaxDiagnostic": null,
+        "closedSchemaDiagnostic": null,
+        "strictParserDiagnostic": {
+          "parserErrorCode": "wrong_type",
+          "parserErrorMessage": "parseThoughtSemanticOutput:wrong_type",
+          "parserPath": "evidenceUse",
+          "expectedShape": "observation_intent",
+          "observedShapeSummary": {
+            "rootType": "object",
+            "kind": "settlement",
+            "topLevelKeys": [
+              "commitments",
+              "concernDeltas",
+              "durableNominations",
+              "evidenceUse",
+              "futureTriggerDeltas",
+              "interpretation",
+              "kind",
+              "occupancyDeltas",
+              "speech",
+              "subscriptionDeltas",
+              "workingContextDeltas"
+            ]
+          }
+        },
+        "semanticValidityDiagnostic": null,
+        "kernelBindingDiagnostic": {
+          "status": "NOT_REACHED",
+          "reasonCodes": [],
+          "expected": null,
+          "actual": null
+        },
+        "fencingDiagnostic": {
+          "status": "NOT_REACHED",
+          "reasonCodes": [],
+          "expected": null,
+          "actual": null
+        },
+        "authorityReachabilityDiagnostic": {
+          "status": "NOT_REACHED",
+          "reasonCodes": [],
+          "expected": null,
+          "actual": null
+        },
+        "hostContext": {
+          "cycleId": "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:2:cycle",
+          "generation": 1,
+          "occupantId": "mfo_mistral_small_2603_high",
+          "authorityEpoch": 1,
+          "triggerRef": "turn-1"
+        }
+      },
+      "failureCodes": [
+        "PROVIDER_ACCEPTED_PARSER_REJECTED"
+      ],
+      "verdict": "NOT_QUALIFIED"
+    },
+    {
+      "caseId": "effect_intent",
+      "invocationIds": [
+        "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:0:effect_intent:0"
+      ],
+      "providerAttemptIds": [
+        "a3490df5-2cdf-402c-bf99-34def5b9a989:attempt:1"
+      ],
+      "transport": "success",
+      "rawContentBytes": 3613,
+      "rawContentDigest": "sha256:eb21900260f1751cdbdbdd717b60c1a5cd9fc62b60db993d2eea20c1402559d7",
+      "jsonSyntax": "PASS",
+      "closedSchemaConformance": "PASS",
+      "strictParser": "PASS",
+      "kernelBinding": "PASS",
+      "fencing": "NOT_REACHED",
+      "authorityReachability": "NOT_REACHED",
+      "semanticValidity": "FAIL",
+      "resourcePolicy": "PASS",
+      "elapsedMs": 11259,
+      "outputTokens": 1520,
+      "wireMode": "native_json_schema",
+      "wireBindingId": "compat_thought_mistral_small_2603_native_json_schema_v2",
+      "providerDeclaredEnforcement": "unavailable",
+      "capabilityFingerprint": "sha256:57c2c88b32baea5182548dd73728688d36016722ab135a73020b700268034062",
+      "diagnostics": {
+        "firstFailureBoundary": "SEMANTIC_VALIDITY_REJECTION",
+        "closedSchemaFailureKeyword": null,
+        "closedSchemaFailureInstancePath": null,
+        "closedSchemaFailureSchemaPath": null,
+        "closedSchemaFailureBranch": null,
+        "errorCode": null,
+        "dispatchTruth": "response_received",
+        "dispatchStage": "provider_dispatch",
+        "providerRequestStarted": true,
+        "providerResponseReceived": true,
+        "attemptId": "a3490df5-2cdf-402c-bf99-34def5b9a989:attempt:1",
+        "reachability": {
+          "kernelBinding": "PASS",
+          "fencing": "NOT_REACHED",
+          "authorityReachability": "NOT_REACHED",
+          "semanticValidity": "FAIL"
+        }
+      },
+      "firstFailureBoundary": "SEMANTIC_VALIDITY_REJECTION",
+      "independentFailureCodes": [
+        "semantic_branch_mismatch",
+        "semantic_invalid"
+      ],
+      "dependentNotReachedGates": [
+        "fencing",
+        "authorityReachability"
+      ],
+      "correctionPackets": [],
+      "failureEvidence": {
+        "captureStatus": "captured",
+        "allowlistedReferences": [
+          "turn-1"
+        ],
+        "providerContentChunkMetadata": {
+          "contentContainerType": "array",
+          "contentChunkTypes": [
+            "thinking",
+            "text"
+          ],
+          "textChunkCount": 1,
+          "thinkingChunkCount": 1,
+          "finalTextBytes": 3613,
+          "finishReason": "stop",
+          "finishReasonClass": "STOP",
+          "outputTokenLimit": 4096,
+          "outputTokens": 1520,
+          "reasoningTokens": null,
+          "extractionFailure": "none"
+        },
+        "normalizedSemanticText": "{\n  \"kind\": \"settlement\",\n  \"interpretation\": {\n    \"discourseActs\": [\"acknowledge\"],\n    \"referentBindings\": [\n      {\n        \"span\": \"qualification-fixture\",\n        \"sourceTurnRefs\": [\"turn-1\"]\n      }\n    ],\n    \"corrections\": [],\n    \"unresolvedAmbiguities\": [],\n    \"topics\": [\"workspace verification\", \"qualification-fixture\", \"read-only operation\"]\n  },\n  \"commitments\": {\n    \"epistemic\": [\n      {\n        \"dimensions\": {\n          \"source\": \"owner_utterance\",\n          \"status\": \"asserted\",\n          \"time\": \"current\",\n          \"reliability\": \"owner_supplied\"\n        },\n        \"statement\": \"The owner has requested a read-only verification of the qualification-fixture workspace.\"\n      }\n    ],\n    \"conversational\": [\"acknowledge\", \"answer\"],\n    \"stance\": {\n      \"warmth\": \"medium\",\n      \"humorAllowed\": false,\n      \"disagreement\": false,\n      \"uncertaintyDisplay\": true\n    }\n  },\n  \"speech\": {\n    \"mode\": \"draft\",\n    \"mustSay\": [\n      \"I'll perform a read-only verification of the qualification-fixture workspace and report the result.\"\n    ],\n    \"mustNotSay\": [],\n    \"acceptableRealizations\": [\n      \"Starting read-only verification of qualification-fixture workspace...\",\n      \"Running verification now and will share results shortly.\",\n      \"Acknowledged. Performing read-only verification of qualification-fixture.\"\n    ],\n    \"presentationDirectives\": [\"professional\", \"concise\", \"action-oriented\", \"no file changes permitted\"]\n  },\n  \"workingContextDeltas\": [\n    {\n      \"op\": \"upsert\",\n      \"item\": {\n        \"identity\": {\n          \"kind\": \"local\",\n          \"alias\": \"verification_task_qualification_fixture\"\n        },\n        \"type\": \"repair\",\n        \"text\": \"Perform read-only verification of qualification-fixture workspace\",\n        \"concernRef\": {\n          \"kind\": \"local\",\n          \"alias\": \"verification_concern_qualification_fixture\"\n        },\n        \"sourceTurnRefs\": [\"turn-1\"],\n        \"status\": \"active\",\n        \"supersedesRef\": null\n      }\n    }\n  ],\n  \"concernDeltas\": [\n    {\n      \"op\": \"upsert\",\n      \"record\": {\n        \"identity\": {\n          \"kind\": \"local\",\n          \"alias\": \"verification_concern_qualification_fixture\"\n        },\n        \"statement\": \"Verify qualification-fixture workspace in read-only mode per owner request\",\n        \"sourceTurnRefs\": [\"turn-1\"],\n        \"dimensions\": {\n          \"source\": \"owner_utterance\",\n          \"status\": \"asserted\",\n          \"time\": \"current\",\n          \"reliability\": \"owner_supplied\"\n        },\n        \"status\": \"active\"\n      }\n    }\n  ],\n  \"occupancyDeltas\": [\n    {\n      \"op\": \"set\",\n      \"concernRef\": {\n        \"kind\": \"local\",\n        \"alias\": \"verification_concern_qualification_fixture\"\n      },\n      \"status\": \"active\",\n      \"priority\": 1\n    }\n  ],\n  \"futureTriggerDeltas\": [\n    {\n      \"op\": \"create\",\n      \"identity\": {\n        \"kind\": \"local\",\n        \"alias\": \"perform_verification_trigger\"\n      },\n      \"concernRef\": {\n        \"kind\": \"local\",\n        \"alias\": \"verification_concern_qualification_fixture\"\n      },\n      \"dueAtMs\": 1788271711800,\n      \"purpose\": \"Execute the read-only verification of qualification-fixture workspace\",\n      \"payload\": {\n        \"operationKind\": \"workspace.verify\",\n        \"request\": {\n          \"workspaceId\": \"qualification-fixture\",\n          \"mode\": \"read-only\",\n          \"reportResult\": true\n        }\n      }\n    }\n  ],\n  \"subscriptionDeltas\": [],\n  \"durableNominations\": [],\n  \"evidenceUse\": {\n    \"observationRefsUsed\": [],\n    \"retrievalRefsUsed\": [],\n    \"sourceRefsUsed\": [\"turn-1\"],\n    \"openIntentRefs\": []\n  }\n}",
+        "normalizedSemanticBytes": 3613,
+        "normalizedSemanticSHA256": "sha256:eb21900260f1751cdbdbdd717b60c1a5cd9fc62b60db993d2eea20c1402559d7",
+        "jsonSyntaxDiagnostic": null,
+        "closedSchemaDiagnostic": null,
+        "strictParserDiagnostic": null,
+        "semanticValidityDiagnostic": {
+          "reasonCodes": [
+            "semantic_branch_mismatch",
+            "semantic_shape_invalid"
+          ],
+          "offendingFieldPaths": [],
+          "evidenceRefDiagnostics": []
+        },
+        "kernelBindingDiagnostic": {
+          "status": "PASS",
+          "reasonCodes": [],
+          "expected": {
+            "invocationId": "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:0:effect_intent:0",
+            "cycleId": "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:0:cycle",
+            "generation": 1,
+            "authorityEpoch": 1,
+            "provider": "mistral",
+            "model": "mistral-small-2603",
+            "attemptId": "a3490df5-2cdf-402c-bf99-34def5b9a989:attempt:1",
+            "allocationId": 11
+          },
+          "actual": {
+            "invocationId": "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:0:effect_intent:0",
+            "cycleId": "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:0:cycle",
+            "generation": 1,
+            "authorityEpoch": 1,
+            "provider": "mistral",
+            "model": "mistral-small-2603",
+            "attemptId": "a3490df5-2cdf-402c-bf99-34def5b9a989:attempt:1",
+            "allocationId": 11
+          }
+        },
+        "fencingDiagnostic": {
+          "status": "NOT_REACHED",
+          "reasonCodes": [],
+          "expected": null,
+          "actual": null
+        },
+        "authorityReachabilityDiagnostic": {
+          "status": "NOT_REACHED",
+          "reasonCodes": [],
+          "expected": null,
+          "actual": null
+        },
+        "hostContext": {
+          "cycleId": "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:0:cycle",
+          "generation": 1,
+          "occupantId": "mfo_mistral_small_2603_high",
+          "authorityEpoch": 1,
+          "triggerRef": "turn-1"
+        }
+      },
+      "failureCodes": [
+        "semantic_branch_mismatch",
+        "semantic_invalid"
+      ],
+      "verdict": "NOT_QUALIFIED"
+    },
+    {
+      "caseId": "effect_intent",
+      "invocationIds": [
+        "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:1:effect_intent:0"
+      ],
+      "providerAttemptIds": [
+        "aa9849a2-3f0c-4fdd-aca7-b922fcb636d0:attempt:1"
+      ],
+      "transport": "success",
+      "rawContentBytes": 3061,
+      "rawContentDigest": "sha256:665a5113b2db9add142a566401eb377b27d9b651a148b7064d607f704695d783",
+      "jsonSyntax": "PASS",
+      "closedSchemaConformance": "PASS",
+      "strictParser": "PASS",
+      "kernelBinding": "PASS",
+      "fencing": "NOT_REACHED",
+      "authorityReachability": "NOT_REACHED",
+      "semanticValidity": "FAIL",
+      "resourcePolicy": "PASS",
+      "elapsedMs": 7982,
+      "outputTokens": 1247,
+      "wireMode": "native_json_schema",
+      "wireBindingId": "compat_thought_mistral_small_2603_native_json_schema_v2",
+      "providerDeclaredEnforcement": "unavailable",
+      "capabilityFingerprint": "sha256:57c2c88b32baea5182548dd73728688d36016722ab135a73020b700268034062",
+      "diagnostics": {
+        "firstFailureBoundary": "SEMANTIC_VALIDITY_REJECTION",
+        "closedSchemaFailureKeyword": null,
+        "closedSchemaFailureInstancePath": null,
+        "closedSchemaFailureSchemaPath": null,
+        "closedSchemaFailureBranch": null,
+        "errorCode": null,
+        "dispatchTruth": "response_received",
+        "dispatchStage": "provider_dispatch",
+        "providerRequestStarted": true,
+        "providerResponseReceived": true,
+        "attemptId": "aa9849a2-3f0c-4fdd-aca7-b922fcb636d0:attempt:1",
+        "reachability": {
+          "kernelBinding": "PASS",
+          "fencing": "NOT_REACHED",
+          "authorityReachability": "NOT_REACHED",
+          "semanticValidity": "FAIL"
+        }
+      },
+      "firstFailureBoundary": "SEMANTIC_VALIDITY_REJECTION",
+      "independentFailureCodes": [
+        "semantic_branch_mismatch",
+        "semantic_invalid"
+      ],
+      "dependentNotReachedGates": [
+        "fencing",
+        "authorityReachability"
+      ],
+      "correctionPackets": [],
+      "failureEvidence": {
+        "captureStatus": "captured",
+        "allowlistedReferences": [
+          "turn-1"
+        ],
+        "providerContentChunkMetadata": {
+          "contentContainerType": "array",
+          "contentChunkTypes": [
+            "thinking",
+            "text"
+          ],
+          "textChunkCount": 1,
+          "thinkingChunkCount": 1,
+          "finalTextBytes": 3061,
+          "finishReason": "stop",
+          "finishReasonClass": "STOP",
+          "outputTokenLimit": 4096,
+          "outputTokens": 1247,
+          "reasoningTokens": null,
+          "extractionFailure": "none"
+        },
+        "normalizedSemanticText": "{\n  \"kind\": \"settlement\",\n  \"interpretation\": {\n    \"discourseActs\": [\"ask\"],\n    \"referentBindings\": [\n      {\n        \"span\": \"qualification-fixture\",\n        \"sourceTurnRefs\": [\"turn-1\"]\n      }\n    ],\n    \"corrections\": [],\n    \"unresolvedAmbiguities\": [],\n    \"topics\": [\"workspace verification\", \"qualification-fixture\", \"read-only operation\"]\n  },\n  \"commitments\": {\n    \"epistemic\": [\n      {\n        \"dimensions\": {\n          \"source\": \"owner_utterance\",\n          \"status\": \"asserted\",\n          \"time\": \"current\",\n          \"reliability\": \"owner_supplied\"\n        },\n        \"statement\": \"The owner has requested a read-only verification of the qualification-fixture workspace.\"\n      }\n    ],\n    \"conversational\": [\"answer\", \"acknowledge\"],\n    \"stance\": {\n      \"warmth\": \"medium\",\n      \"humorAllowed\": false,\n      \"disagreement\": false,\n      \"uncertaintyDisplay\": true\n    }\n  },\n  \"speech\": {\n    \"mode\": \"draft\",\n    \"mustSay\": [\n      \"I'll perform a read-only verification of the qualification-fixture workspace and report the results.\"\n    ],\n    \"mustNotSay\": [\n      \"I'll modify any files in the workspace.\",\n      \"I'll make changes to the qualification-fixture workspace.\"\n    ],\n    \"acceptableRealizations\": [\n      \"Running verification on qualification-fixture workspace...\",\n      \"Verifying qualification-fixture workspace (read-only)...\",\n      \"Starting read-only verification for qualification-fixture...\"\n    ],\n    \"presentationDirectives\": [\n      \"Maintain professional tone\",\n      \"Emphasize read-only nature of operation\",\n      \"Focus on reporting results\"\n    ]\n  },\n  \"workingContextDeltas\": [\n    {\n      \"op\": \"upsert\",\n      \"item\": {\n        \"identity\": {\n          \"kind\": \"local\",\n          \"alias\": \"qualification_verification_task\"\n        },\n        \"type\": \"question\",\n        \"text\": \"Perform read-only verification of qualification-fixture workspace and report results\",\n        \"concernRef\": null,\n        \"sourceTurnRefs\": [\"turn-1\"],\n        \"status\": \"active\",\n        \"supersedesRef\": null\n      }\n    }\n  ],\n  \"concernDeltas\": [\n    {\n      \"op\": \"upsert\",\n      \"record\": {\n        \"identity\": {\n          \"kind\": \"local\",\n          \"alias\": \"qualification_verification_concern\"\n        },\n        \"statement\": \"Verify qualification-fixture workspace in read-only mode and report findings\",\n        \"sourceTurnRefs\": [\"turn-1\"],\n        \"dimensions\": {\n          \"source\": \"owner_utterance\",\n          \"status\": \"asserted\",\n          \"time\": \"current\",\n          \"reliability\": \"owner_supplied\"\n        },\n        \"status\": \"active\"\n      }\n    }\n  ],\n  \"occupancyDeltas\": [\n    {\n      \"op\": \"set\",\n      \"concernRef\": {\n        \"kind\": \"local\",\n        \"alias\": \"qualification_verification_concern\"\n      },\n      \"status\": \"active\",\n      \"priority\": 5\n    }\n  ],\n  \"futureTriggerDeltas\": [],\n  \"subscriptionDeltas\": [],\n  \"durableNominations\": [],\n  \"evidenceUse\": {\n    \"observationRefsUsed\": [],\n    \"retrievalRefsUsed\": [],\n    \"sourceRefsUsed\": [\"turn-1\"],\n    \"openIntentRefs\": []\n  }\n}",
+        "normalizedSemanticBytes": 3061,
+        "normalizedSemanticSHA256": "sha256:665a5113b2db9add142a566401eb377b27d9b651a148b7064d607f704695d783",
+        "jsonSyntaxDiagnostic": null,
+        "closedSchemaDiagnostic": null,
+        "strictParserDiagnostic": null,
+        "semanticValidityDiagnostic": {
+          "reasonCodes": [
+            "semantic_branch_mismatch",
+            "semantic_shape_invalid"
+          ],
+          "offendingFieldPaths": [],
+          "evidenceRefDiagnostics": []
+        },
+        "kernelBindingDiagnostic": {
+          "status": "PASS",
+          "reasonCodes": [],
+          "expected": {
+            "invocationId": "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:1:effect_intent:0",
+            "cycleId": "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:1:cycle",
+            "generation": 1,
+            "authorityEpoch": 1,
+            "provider": "mistral",
+            "model": "mistral-small-2603",
+            "attemptId": "aa9849a2-3f0c-4fdd-aca7-b922fcb636d0:attempt:1",
+            "allocationId": 12
+          },
+          "actual": {
+            "invocationId": "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:1:effect_intent:0",
+            "cycleId": "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:1:cycle",
+            "generation": 1,
+            "authorityEpoch": 1,
+            "provider": "mistral",
+            "model": "mistral-small-2603",
+            "attemptId": "aa9849a2-3f0c-4fdd-aca7-b922fcb636d0:attempt:1",
+            "allocationId": 12
+          }
+        },
+        "fencingDiagnostic": {
+          "status": "NOT_REACHED",
+          "reasonCodes": [],
+          "expected": null,
+          "actual": null
+        },
+        "authorityReachabilityDiagnostic": {
+          "status": "NOT_REACHED",
+          "reasonCodes": [],
+          "expected": null,
+          "actual": null
+        },
+        "hostContext": {
+          "cycleId": "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:1:cycle",
+          "generation": 1,
+          "occupantId": "mfo_mistral_small_2603_high",
+          "authorityEpoch": 1,
+          "triggerRef": "turn-1"
+        }
+      },
+      "failureCodes": [
+        "semantic_branch_mismatch",
+        "semantic_invalid"
+      ],
+      "verdict": "NOT_QUALIFIED"
+    },
+    {
+      "caseId": "effect_intent",
+      "invocationIds": [
+        "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:2:effect_intent:0"
+      ],
+      "providerAttemptIds": [
+        "ca5b1986-5fcb-4959-8c20-a7243cfde4e4:attempt:1"
+      ],
+      "transport": "success",
+      "rawContentBytes": 4865,
+      "rawContentDigest": "sha256:004ed8c95bcecba1dffe3427fa8319b4570e9b65fa9fe6ea4bb3ad29b1c468a2",
+      "jsonSyntax": "PASS",
+      "closedSchemaConformance": "PASS",
+      "strictParser": "PASS",
+      "kernelBinding": "PASS",
+      "fencing": "NOT_REACHED",
+      "authorityReachability": "NOT_REACHED",
+      "semanticValidity": "FAIL",
+      "resourcePolicy": "PASS",
+      "elapsedMs": 25598,
+      "outputTokens": 1955,
+      "wireMode": "native_json_schema",
+      "wireBindingId": "compat_thought_mistral_small_2603_native_json_schema_v2",
+      "providerDeclaredEnforcement": "unavailable",
+      "capabilityFingerprint": "sha256:57c2c88b32baea5182548dd73728688d36016722ab135a73020b700268034062",
+      "diagnostics": {
+        "firstFailureBoundary": "SEMANTIC_VALIDITY_REJECTION",
+        "closedSchemaFailureKeyword": null,
+        "closedSchemaFailureInstancePath": null,
+        "closedSchemaFailureSchemaPath": null,
+        "closedSchemaFailureBranch": null,
+        "errorCode": null,
+        "dispatchTruth": "response_received",
+        "dispatchStage": "provider_dispatch",
+        "providerRequestStarted": true,
+        "providerResponseReceived": true,
+        "attemptId": "ca5b1986-5fcb-4959-8c20-a7243cfde4e4:attempt:1",
+        "reachability": {
+          "kernelBinding": "PASS",
+          "fencing": "NOT_REACHED",
+          "authorityReachability": "NOT_REACHED",
+          "semanticValidity": "FAIL"
+        }
+      },
+      "firstFailureBoundary": "SEMANTIC_VALIDITY_REJECTION",
+      "independentFailureCodes": [
+        "semantic_branch_mismatch",
+        "semantic_invalid"
+      ],
+      "dependentNotReachedGates": [
+        "fencing",
+        "authorityReachability"
+      ],
+      "correctionPackets": [],
+      "failureEvidence": {
+        "captureStatus": "captured",
+        "allowlistedReferences": [
+          "turn-1"
+        ],
+        "providerContentChunkMetadata": {
+          "contentContainerType": "array",
+          "contentChunkTypes": [
+            "thinking",
+            "text"
+          ],
+          "textChunkCount": 1,
+          "thinkingChunkCount": 1,
+          "finalTextBytes": 4865,
+          "finishReason": "stop",
+          "finishReasonClass": "STOP",
+          "outputTokenLimit": 4096,
+          "outputTokens": 1955,
+          "reasoningTokens": null,
+          "extractionFailure": "none"
+        },
+        "normalizedSemanticText": "{\n  \"kind\": \"settlement\",\n  \"interpretation\": {\n    \"discourseActs\": [\"ask\"],\n    \"referentBindings\": [\n      {\n        \"span\": \"qualification-fixture\",\n        \"sourceTurnRefs\": [\"turn-1\"]\n      },\n      {\n        \"span\": \"approved read-only verification\",\n        \"sourceTurnRefs\": [\"turn-1\"]\n      },\n      {\n        \"span\": \"result\",\n        \"sourceTurnRefs\": [\"turn-1\"]\n      }\n    ],\n    \"corrections\": [],\n    \"unresolvedAmbiguities\": [\n      \"Which specific verification procedure is 'approved' for the qualification-fixture workspace?\",\n      \"What format should the result be reported in?\",\n      \"Are there any constraints on the verification output format?\"\n    ],\n    \"topics\": [\n      \"workspace verification\",\n      \"read-only operations\",\n      \"qualification testing\",\n      \"capability execution\"\n    ]\n  },\n  \"commitments\": {\n    \"epistemic\": [\n      {\n        \"dimensions\": {\n          \"source\": \"owner_utterance\",\n          \"status\": \"asserted\",\n          \"time\": \"current\",\n          \"reliability\": \"owner_supplied\"\n        },\n        \"statement\": \"The owner has requested execution of a read-only verification on the qualification-fixture workspace using an approved procedure.\"\n      },\n      {\n        \"dimensions\": {\n          \"source\": \"ashley_interpretation\",\n          \"status\": \"interpreted\",\n          \"time\": \"current\",\n          \"reliability\": \"inferred\"\n        },\n        \"statement\": \"I must verify my capability to perform read-only workspace verification before proceeding.\"\n      }\n    ],\n    \"conversational\": [\"answer\", \"acknowledge\"],\n    \"stance\": {\n      \"warmth\": \"medium\",\n      \"humorAllowed\": false,\n      \"disagreement\": false,\n      \"uncertaintyDisplay\": true\n    }\n  },\n  \"speech\": {\n    \"mode\": \"draft\",\n    \"mustSay\": [\n      \"I'll perform a read-only verification on the qualification-fixture workspace using the approved procedure and report the result.\"\n    ],\n    \"mustNotSay\": [\n      \"I have completed the verification\",\n      \"The verification shows...\",\n      \"Files have been modified\",\n      \"Verification failed\"\n    ],\n    \"surfaceDraft\": \"Running verification on qualification-fixture workspace...\",\n    \"acceptableRealizations\": [\n      \"Starting read-only verification of qualification-fixture workspace\",\n      \"Executing approved verification procedure on qualification-fixture\",\n      \"Initiating qualification workspace verification\"\n    ],\n    \"presentationDirectives\": [\n      \"Be concise and professional\",\n      \"Acknowledge the request explicitly\",\n      \"Do not fabricate any verification results\",\n      \"Maintain read-only constraint in description\"\n    ]\n  },\n  \"workingContextDeltas\": [\n    {\n      \"op\": \"upsert\",\n      \"item\": {\n        \"identity\": {\n          \"kind\": \"local\",\n          \"alias\": \"verification_task_qualification_fixture\"\n        },\n        \"type\": \"repair\",\n        \"text\": \"Perform read-only verification on qualification-fixture workspace using approved procedure and report result without modifying any files\",\n        \"concernRef\": {\n          \"kind\": \"local\",\n          \"alias\": \"verification_concern_qualification_fixture\"\n        },\n        \"sourceTurnRefs\": [\"turn-1\"],\n        \"status\": \"active\",\n        \"supersedesRef\": null\n      }\n    }\n  ],\n  \"concernDeltas\": [\n    {\n      \"op\": \"upsert\",\n      \"record\": {\n        \"identity\": {\n          \"kind\": \"local\",\n          \"alias\": \"verification_concern_qualification_fixture\"\n        },\n        \"statement\": \"Execute approved read-only verification on qualification-fixture workspace and report result\",\n        \"sourceTurnRefs\": [\"turn-1\"],\n        \"dimensions\": {\n          \"source\": \"owner_utterance\",\n          \"status\": \"asserted\",\n          \"time\": \"current\",\n          \"reliability\": \"owner_supplied\"\n        },\n        \"status\": \"active\"\n      }\n    }\n  ],\n  \"occupancyDeltas\": [\n    {\n      \"op\": \"set\",\n      \"concernRef\": {\n        \"kind\": \"local\",\n        \"alias\": \"verification_concern_qualification_fixture\"\n      },\n      \"status\": \"active\",\n      \"priority\": 90\n    }\n  ],\n  \"futureTriggerDeltas\": [\n    {\n      \"op\": \"create\",\n      \"identity\": {\n        \"kind\": \"local\",\n        \"alias\": \"verify_qualification_fixture_capability\"\n      },\n      \"concernRef\": {\n        \"kind\": \"local\",\n        \"alias\": \"verification_concern_qualification_fixture\"\n      },\n      \"dueAtMs\": 1788271735049,\n      \"purpose\": \"Verify capability to perform read-only workspace verification on qualification-fixture\",\n      \"payload\": {\n        \"operationKind\": \"workspace.verify\",\n        \"workspaceId\": \"qualification-fixture\",\n        \"readOnly\": true,\n        \"sourceTurnRef\": \"turn-1\"\n      }\n    }\n  ],\n  \"subscriptionDeltas\": [],\n  \"durableNominations\": [],\n  \"evidenceUse\": {\n    \"observationRefsUsed\": [],\n    \"retrievalRefsUsed\": [],\n    \"sourceRefsUsed\": [\"turn-1\"],\n    \"openIntentRefs\": []\n  }\n}",
+        "normalizedSemanticBytes": 4865,
+        "normalizedSemanticSHA256": "sha256:004ed8c95bcecba1dffe3427fa8319b4570e9b65fa9fe6ea4bb3ad29b1c468a2",
+        "jsonSyntaxDiagnostic": null,
+        "closedSchemaDiagnostic": null,
+        "strictParserDiagnostic": null,
+        "semanticValidityDiagnostic": {
+          "reasonCodes": [
+            "semantic_branch_mismatch"
+          ],
+          "offendingFieldPaths": [],
+          "evidenceRefDiagnostics": []
+        },
+        "kernelBindingDiagnostic": {
+          "status": "PASS",
+          "reasonCodes": [],
+          "expected": {
+            "invocationId": "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:2:effect_intent:0",
+            "cycleId": "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:2:cycle",
+            "generation": 1,
+            "authorityEpoch": 1,
+            "provider": "mistral",
+            "model": "mistral-small-2603",
+            "attemptId": "ca5b1986-5fcb-4959-8c20-a7243cfde4e4:attempt:1",
+            "allocationId": 13
+          },
+          "actual": {
+            "invocationId": "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:2:effect_intent:0",
+            "cycleId": "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:2:cycle",
+            "generation": 1,
+            "authorityEpoch": 1,
+            "provider": "mistral",
+            "model": "mistral-small-2603",
+            "attemptId": "ca5b1986-5fcb-4959-8c20-a7243cfde4e4:attempt:1",
+            "allocationId": 13
+          }
+        },
+        "fencingDiagnostic": {
+          "status": "NOT_REACHED",
+          "reasonCodes": [],
+          "expected": null,
+          "actual": null
+        },
+        "authorityReachabilityDiagnostic": {
+          "status": "NOT_REACHED",
+          "reasonCodes": [],
+          "expected": null,
+          "actual": null
+        },
+        "hostContext": {
+          "cycleId": "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:2:cycle",
+          "generation": 1,
+          "occupantId": "mfo_mistral_small_2603_high",
+          "authorityEpoch": 1,
+          "triggerRef": "turn-1"
+        }
+      },
+      "failureCodes": [
+        "semantic_branch_mismatch",
+        "semantic_invalid"
+      ],
+      "verdict": "NOT_QUALIFIED"
+    },
+    {
+      "caseId": "abstain",
+      "invocationIds": [
+        "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:0:abstain:0"
+      ],
+      "providerAttemptIds": [
+        "e08f83fc-f65b-496b-bc8a-4d371fb64716:attempt:1"
+      ],
+      "transport": "failure",
+      "rawContentBytes": 0,
+      "rawContentDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "jsonSyntax": "NOT_REACHED",
+      "closedSchemaConformance": "NOT_REACHED",
+      "strictParser": "NOT_REACHED",
+      "kernelBinding": "NOT_REACHED",
+      "fencing": "NOT_REACHED",
+      "authorityReachability": "NOT_REACHED",
+      "semanticValidity": "NOT_REACHED",
+      "resourcePolicy": "NOT_REACHED",
+      "elapsedMs": 30009,
+      "outputTokens": null,
+      "wireMode": null,
+      "wireBindingId": null,
+      "providerDeclaredEnforcement": null,
+      "capabilityFingerprint": null,
+      "diagnostics": {
+        "firstFailureBoundary": "PROVIDER_ERROR_RESPONSE",
+        "closedSchemaFailureKeyword": null,
+        "closedSchemaFailureInstancePath": "$",
+        "closedSchemaFailureSchemaPath": "#",
+        "closedSchemaFailureBranch": null,
+        "errorCode": "mistral_unavailable",
+        "dispatchTruth": "response_received",
+        "dispatchStage": "provider_dispatch",
+        "providerRequestStarted": true,
+        "providerResponseReceived": true,
+        "attemptId": "e08f83fc-f65b-496b-bc8a-4d371fb64716:attempt:1",
+        "reachability": {
+          "kernelBinding": "NOT_REACHED",
+          "fencing": "NOT_REACHED",
+          "authorityReachability": "NOT_REACHED",
+          "semanticValidity": "NOT_REACHED"
+        }
+      },
+      "firstFailureBoundary": "PROVIDER_ERROR_RESPONSE",
+      "independentFailureCodes": [
+        "transport_failure",
+        "empty_raw_content",
+        "wire_evidence_missing",
+        "capability_evidence_missing"
+      ],
+      "dependentNotReachedGates": [],
+      "correctionPackets": [],
+      "failureEvidence": {
+        "captureStatus": "not_applicable",
+        "allowlistedReferences": [
+          "turn-1"
+        ],
+        "providerContentChunkMetadata": null,
+        "normalizedSemanticText": null,
+        "normalizedSemanticBytes": 0,
+        "normalizedSemanticSHA256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "jsonSyntaxDiagnostic": null,
+        "closedSchemaDiagnostic": null,
+        "strictParserDiagnostic": null,
+        "semanticValidityDiagnostic": null,
+        "kernelBindingDiagnostic": {
+          "status": "NOT_REACHED",
+          "reasonCodes": [],
+          "expected": null,
+          "actual": null
+        },
+        "fencingDiagnostic": {
+          "status": "NOT_REACHED",
+          "reasonCodes": [],
+          "expected": null,
+          "actual": null
+        },
+        "authorityReachabilityDiagnostic": {
+          "status": "NOT_REACHED",
+          "reasonCodes": [],
+          "expected": null,
+          "actual": null
+        },
+        "hostContext": {
+          "cycleId": "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:0:cycle",
+          "generation": 1,
+          "occupantId": "mfo_mistral_small_2603_high",
+          "authorityEpoch": 1,
+          "triggerRef": "turn-1"
+        }
+      },
+      "failureCodes": [
+        "transport_failure",
+        "empty_raw_content",
+        "wire_evidence_missing",
+        "capability_evidence_missing"
+      ],
+      "verdict": "NOT_QUALIFIED"
+    },
+    {
+      "caseId": "abstain",
+      "invocationIds": [
+        "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:1:abstain:0"
+      ],
+      "providerAttemptIds": [
+        "1fc99833-c9cc-4aa3-b792-f64e0c060a33:attempt:1"
+      ],
+      "transport": "success",
+      "rawContentBytes": 3835,
+      "rawContentDigest": "sha256:74c44b4302f445e997e725bbef46acd698e0bc41ff7ed085a54e5b67917f3844",
+      "jsonSyntax": "PASS",
+      "closedSchemaConformance": "PASS",
+      "strictParser": "PASS",
+      "kernelBinding": "PASS",
+      "fencing": "NOT_REACHED",
+      "authorityReachability": "NOT_REACHED",
+      "semanticValidity": "FAIL",
+      "resourcePolicy": "PASS",
+      "elapsedMs": 21294,
+      "outputTokens": 1334,
+      "wireMode": "native_json_schema",
+      "wireBindingId": "compat_thought_mistral_small_2603_native_json_schema_v2",
+      "providerDeclaredEnforcement": "unavailable",
+      "capabilityFingerprint": "sha256:57c2c88b32baea5182548dd73728688d36016722ab135a73020b700268034062",
+      "diagnostics": {
+        "firstFailureBoundary": "SEMANTIC_VALIDITY_REJECTION",
+        "closedSchemaFailureKeyword": null,
+        "closedSchemaFailureInstancePath": null,
+        "closedSchemaFailureSchemaPath": null,
+        "closedSchemaFailureBranch": null,
+        "errorCode": null,
+        "dispatchTruth": "response_received",
+        "dispatchStage": "provider_dispatch",
+        "providerRequestStarted": true,
+        "providerResponseReceived": true,
+        "attemptId": "1fc99833-c9cc-4aa3-b792-f64e0c060a33:attempt:1",
+        "reachability": {
+          "kernelBinding": "PASS",
+          "fencing": "NOT_REACHED",
+          "authorityReachability": "NOT_REACHED",
+          "semanticValidity": "FAIL"
+        }
+      },
+      "firstFailureBoundary": "SEMANTIC_VALIDITY_REJECTION",
+      "independentFailureCodes": [
+        "semantic_branch_mismatch",
+        "semantic_invalid"
+      ],
+      "dependentNotReachedGates": [
+        "fencing",
+        "authorityReachability"
+      ],
+      "correctionPackets": [],
+      "failureEvidence": {
+        "captureStatus": "captured",
+        "allowlistedReferences": [
+          "turn-1"
+        ],
+        "providerContentChunkMetadata": {
+          "contentContainerType": "array",
+          "contentChunkTypes": [
+            "thinking",
+            "text"
+          ],
+          "textChunkCount": 1,
+          "thinkingChunkCount": 1,
+          "finalTextBytes": 3835,
+          "finishReason": "stop",
+          "finishReasonClass": "STOP",
+          "outputTokenLimit": 4096,
+          "outputTokens": 1334,
+          "reasoningTokens": null,
+          "extractionFailure": "none"
+        },
+        "normalizedSemanticText": "{\n  \"kind\": \"settlement\",\n  \"interpretation\": {\n    \"discourseActs\": [\"inform\", \"ask\"],\n    \"referentBindings\": [\n      {\n        \"span\": \"private attachment\",\n        \"sourceTurnRefs\": [\"turn-1\"]\n      }\n    ],\n    \"corrections\": [],\n    \"unresolvedAmbiguities\": [\"Whether the private attachment content can be shared in this conversation context\"],\n    \"topics\": [\"private attachment access\", \"content sharing limitations\"]\n  },\n  \"commitments\": {\n    \"epistemic\": [\n      {\n        \"dimensions\": {\n          \"source\": \"ashley_interpretation\",\n          \"status\": \"asserted\",\n          \"time\": \"current\",\n          \"reliability\": \"inferred\"\n        },\n        \"statement\": \"Ashley cannot access private attachment content due to system limitations\"\n      }\n    ],\n    \"conversational\": [\"answer\", \"ask\"],\n    \"stance\": {\n      \"warmth\": \"medium\",\n      \"humorAllowed\": false,\n      \"disagreement\": false,\n      \"uncertaintyDisplay\": true\n    }\n  },\n  \"speech\": {\n    \"mode\": \"draft\",\n    \"mustSay\": [\n      \"I cannot access private attachment content directly in this environment.\",\n      \"Could you please paste the relevant content from the private attachment into our conversation so I can assist you?\"\n    ],\n    \"mustNotSay\": [\n      \"I can see the private attachment content\",\n      \"The private attachment contains...\",\n      \"I have access to the attachment\"\n    ],\n    \"acceptableRealizations\": [\n      \"I'm unable to view private attachments here. Please share the content in chat.\",\n      \"Since I can't access attachments, could you copy-paste the content you'd like me to review?\",\n      \"My attachment access is limited in this context. Please provide the text directly.\"\n    ],\n    \"presentationDirectives\": [\n      \"Be helpful and clear about limitations\",\n      \"Maintain polite and professional tone\",\n      \"Acknowledge the user's request while explaining constraints\"\n    ]\n  },\n  \"workingContextDeltas\": [\n    {\n      \"op\": \"upsert\",\n      \"item\": {\n        \"identity\": {\n          \"kind\": \"local\",\n          \"alias\": \"private_attachment_limitation\"\n        },\n        \"type\": \"topic\",\n        \"text\": \"Ashley cannot access private attachment content due to system constraints\",\n        \"concernRef\": null,\n        \"sourceTurnRefs\": [\"turn-1\"],\n        \"status\": \"active\",\n        \"supersedesRef\": null\n      }\n    },\n    {\n      \"op\": \"upsert\",\n      \"item\": {\n        \"identity\": {\n          \"kind\": \"local\",\n          \"alias\": \"request_content_sharing\"\n        },\n        \"type\": \"question\",\n        \"text\": \"Please provide the private attachment content by pasting it into the conversation\",\n        \"concernRef\": {\n          \"kind\": \"local\",\n          \"alias\": \"private_attachment_concern\"\n        },\n        \"sourceTurnRefs\": [\"turn-1\"],\n        \"status\": \"active\",\n        \"supersedesRef\": null\n      }\n    }\n  ],\n  \"concernDeltas\": [\n    {\n      \"op\": \"upsert\",\n      \"record\": {\n        \"identity\": {\n          \"kind\": \"local\",\n          \"alias\": \"private_attachment_concern\"\n        },\n        \"statement\": \"User needs assistance with content from a private attachment that Ashley cannot access directly\",\n        \"sourceTurnRefs\": [\"turn-1\"],\n        \"dimensions\": {\n          \"source\": \"owner_utterance\",\n          \"status\": \"asserted\",\n          \"time\": \"current\",\n          \"reliability\": \"owner_supplied\"\n        },\n        \"status\": \"active\"\n      }\n    }\n  ],\n  \"occupancyDeltas\": [\n    {\n      \"op\": \"set\",\n      \"concernRef\": {\n        \"kind\": \"local\",\n        \"alias\": \"private_attachment_concern\"\n      },\n      \"status\": \"active\",\n      \"priority\": 5\n    }\n  ],\n  \"futureTriggerDeltas\": [],\n  \"subscriptionDeltas\": [],\n  \"durableNominations\": [],\n  \"evidenceUse\": {\n    \"observationRefsUsed\": [],\n    \"retrievalRefsUsed\": [],\n    \"sourceRefsUsed\": [\"turn-1\"],\n    \"openIntentRefs\": []\n  }\n}",
+        "normalizedSemanticBytes": 3835,
+        "normalizedSemanticSHA256": "sha256:74c44b4302f445e997e725bbef46acd698e0bc41ff7ed085a54e5b67917f3844",
+        "jsonSyntaxDiagnostic": null,
+        "closedSchemaDiagnostic": null,
+        "strictParserDiagnostic": null,
+        "semanticValidityDiagnostic": {
+          "reasonCodes": [
+            "semantic_branch_mismatch",
+            "semantic_shape_invalid"
+          ],
+          "offendingFieldPaths": [],
+          "evidenceRefDiagnostics": []
+        },
+        "kernelBindingDiagnostic": {
+          "status": "PASS",
+          "reasonCodes": [],
+          "expected": {
+            "invocationId": "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:1:abstain:0",
+            "cycleId": "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:1:cycle",
+            "generation": 1,
+            "authorityEpoch": 1,
+            "provider": "mistral",
+            "model": "mistral-small-2603",
+            "attemptId": "1fc99833-c9cc-4aa3-b792-f64e0c060a33:attempt:1",
+            "allocationId": 15
+          },
+          "actual": {
+            "invocationId": "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:1:abstain:0",
+            "cycleId": "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:1:cycle",
+            "generation": 1,
+            "authorityEpoch": 1,
+            "provider": "mistral",
+            "model": "mistral-small-2603",
+            "attemptId": "1fc99833-c9cc-4aa3-b792-f64e0c060a33:attempt:1",
+            "allocationId": 15
+          }
+        },
+        "fencingDiagnostic": {
+          "status": "NOT_REACHED",
+          "reasonCodes": [],
+          "expected": null,
+          "actual": null
+        },
+        "authorityReachabilityDiagnostic": {
+          "status": "NOT_REACHED",
+          "reasonCodes": [],
+          "expected": null,
+          "actual": null
+        },
+        "hostContext": {
+          "cycleId": "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:1:cycle",
+          "generation": 1,
+          "occupantId": "mfo_mistral_small_2603_high",
+          "authorityEpoch": 1,
+          "triggerRef": "turn-1"
+        }
+      },
+      "failureCodes": [
+        "semantic_branch_mismatch",
+        "semantic_invalid"
+      ],
+      "verdict": "NOT_QUALIFIED"
+    },
+    {
+      "caseId": "abstain",
+      "invocationIds": [
+        "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:2:abstain:0"
+      ],
+      "providerAttemptIds": [
+        "3aa35739-6bad-4a17-ad8d-64822d449721:attempt:1"
+      ],
+      "transport": "success",
+      "rawContentBytes": 2056,
+      "rawContentDigest": "sha256:1e2155c5f6bf16a0cedc5e59d92d229e127cffc5aeb391a6ac7f697d964bbdbc",
+      "jsonSyntax": "PASS",
+      "closedSchemaConformance": "PASS",
+      "strictParser": "PASS",
+      "kernelBinding": "PASS",
+      "fencing": "NOT_REACHED",
+      "authorityReachability": "NOT_REACHED",
+      "semanticValidity": "FAIL",
+      "resourcePolicy": "PASS",
+      "elapsedMs": 7570,
+      "outputTokens": 1130,
+      "wireMode": "native_json_schema",
+      "wireBindingId": "compat_thought_mistral_small_2603_native_json_schema_v2",
+      "providerDeclaredEnforcement": "unavailable",
+      "capabilityFingerprint": "sha256:57c2c88b32baea5182548dd73728688d36016722ab135a73020b700268034062",
+      "diagnostics": {
+        "firstFailureBoundary": "SEMANTIC_VALIDITY_REJECTION",
+        "closedSchemaFailureKeyword": null,
+        "closedSchemaFailureInstancePath": null,
+        "closedSchemaFailureSchemaPath": null,
+        "closedSchemaFailureBranch": null,
+        "errorCode": null,
+        "dispatchTruth": "response_received",
+        "dispatchStage": "provider_dispatch",
+        "providerRequestStarted": true,
+        "providerResponseReceived": true,
+        "attemptId": "3aa35739-6bad-4a17-ad8d-64822d449721:attempt:1",
+        "reachability": {
+          "kernelBinding": "PASS",
+          "fencing": "NOT_REACHED",
+          "authorityReachability": "NOT_REACHED",
+          "semanticValidity": "FAIL"
+        }
+      },
+      "firstFailureBoundary": "SEMANTIC_VALIDITY_REJECTION",
+      "independentFailureCodes": [
+        "semantic_branch_mismatch",
+        "semantic_invalid"
+      ],
+      "dependentNotReachedGates": [
+        "fencing",
+        "authorityReachability"
+      ],
+      "correctionPackets": [],
+      "failureEvidence": {
+        "captureStatus": "captured",
+        "allowlistedReferences": [
+          "turn-1"
+        ],
+        "providerContentChunkMetadata": {
+          "contentContainerType": "array",
+          "contentChunkTypes": [
+            "thinking",
+            "text"
+          ],
+          "textChunkCount": 1,
+          "thinkingChunkCount": 1,
+          "finalTextBytes": 2056,
+          "finishReason": "stop",
+          "finishReasonClass": "STOP",
+          "outputTokenLimit": 4096,
+          "outputTokens": 1130,
+          "reasoningTokens": null,
+          "extractionFailure": "none"
+        },
+        "normalizedSemanticText": "{\n  \"kind\": \"settlement\",\n  \"interpretation\": {\n    \"discourseActs\": [\"inform\"],\n    \"referentBindings\": [],\n    \"corrections\": [],\n    \"unresolvedAmbiguities\": [\"private attachment content unavailable in qualification context\"],\n    \"topics\": [\"attachment access\", \"qualification context limitations\"]\n  },\n  \"commitments\": {\n    \"epistemic\": [\n      {\n        \"dimensions\": {\n          \"source\": \"owner_utterance\",\n          \"status\": \"asserted\",\n          \"time\": \"current\",\n          \"reliability\": \"owner_supplied\"\n        },\n        \"statement\": \"The private attachment content is not accessible in this qualification context.\"\n      }\n    ],\n    \"conversational\": [\"answer\"],\n    \"stance\": {\n      \"warmth\": \"medium\",\n      \"humorAllowed\": false,\n      \"disagreement\": false,\n      \"uncertaintyDisplay\": true\n    }\n  },\n  \"speech\": {\n    \"mode\": \"draft\",\n    \"mustSay\": [\n      \"I cannot access the private attachment content in this qualification context.\"\n    ],\n    \"mustNotSay\": [],\n    \"acceptableRealizations\": [\n      \"I cannot access the private attachment content in this qualification context.\"\n    ],\n    \"presentationDirectives\": [\n      \"acknowledge the limitation of the qualification context\",\n      \"offer inspection of project files as alternative\",\n      \"maintain helpful tone despite technical constraints\"\n    ]\n  },\n  \"workingContextDeltas\": [\n    {\n      \"op\": \"upsert\",\n      \"item\": {\n        \"identity\": {\n          \"kind\": \"local\",\n          \"alias\": \"qualification_context_limitation\"\n        },\n        \"type\": \"topic\",\n        \"text\": \"Private attachment content is not accessible in qualification context\",\n        \"concernRef\": null,\n        \"sourceTurnRefs\": [\"turn-1\"],\n        \"status\": \"active\",\n        \"supersedesRef\": null\n      }\n    }\n  ],\n  \"concernDeltas\": [],\n  \"occupancyDeltas\": [],\n  \"futureTriggerDeltas\": [],\n  \"subscriptionDeltas\": [],\n  \"durableNominations\": [],\n  \"evidenceUse\": {\n    \"observationRefsUsed\": [],\n    \"retrievalRefsUsed\": [],\n    \"sourceRefsUsed\": [],\n    \"openIntentRefs\": []\n  }\n}",
+        "normalizedSemanticBytes": 2056,
+        "normalizedSemanticSHA256": "sha256:1e2155c5f6bf16a0cedc5e59d92d229e127cffc5aeb391a6ac7f697d964bbdbc",
+        "jsonSyntaxDiagnostic": null,
+        "closedSchemaDiagnostic": null,
+        "strictParserDiagnostic": null,
+        "semanticValidityDiagnostic": {
+          "reasonCodes": [
+            "semantic_branch_mismatch",
+            "semantic_shape_invalid"
+          ],
+          "offendingFieldPaths": [],
+          "evidenceRefDiagnostics": []
+        },
+        "kernelBindingDiagnostic": {
+          "status": "PASS",
+          "reasonCodes": [],
+          "expected": {
+            "invocationId": "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:2:abstain:0",
+            "cycleId": "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:2:cycle",
+            "generation": 1,
+            "authorityEpoch": 1,
+            "provider": "mistral",
+            "model": "mistral-small-2603",
+            "attemptId": "3aa35739-6bad-4a17-ad8d-64822d449721:attempt:1",
+            "allocationId": 16
+          },
+          "actual": {
+            "invocationId": "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:2:abstain:0",
+            "cycleId": "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:2:cycle",
+            "generation": 1,
+            "authorityEpoch": 1,
+            "provider": "mistral",
+            "model": "mistral-small-2603",
+            "attemptId": "3aa35739-6bad-4a17-ad8d-64822d449721:attempt:1",
+            "allocationId": 16
+          }
+        },
+        "fencingDiagnostic": {
+          "status": "NOT_REACHED",
+          "reasonCodes": [],
+          "expected": null,
+          "actual": null
+        },
+        "authorityReachabilityDiagnostic": {
+          "status": "NOT_REACHED",
+          "reasonCodes": [],
+          "expected": null,
+          "actual": null
+        },
+        "hostContext": {
+          "cycleId": "w2-20260901T140705421Z-fb602290-d0e8-4e7c-a30f-28c73c35b45f:sample:2:cycle",
+          "generation": 1,
+          "occupantId": "mfo_mistral_small_2603_high",
+          "authorityEpoch": 1,
+          "triggerRef": "turn-1"
+        }
+      },
+      "failureCodes": [
+        "semantic_branch_mismatch",
+        "semantic_invalid"
+      ],
+      "verdict": "NOT_QUALIFIED"
+    }
+  ],
+  "preflight": {
+    "portfolioRevisionId": "mfp_current_compatibility_v2",
+    "registryVersion": "sha256:1268a8de9745abe0b872bd4f801d0440c2567055cd9f811a639db45f93d2934e",
+    "policyRowId": "mfr_thought_interactive_compat_v1",
+    "occupantId": "mfo_mistral_small_2603_high",
+    "provider": "mistral",
+    "model": "mistral-small-2603",
+    "logicalBindingId": "ashley.thought.semantic.v1",
+    "schemaFingerprint": "sha256:9bf27fc16755f26917ab2eeae55010b7a94212c593847aa37e5e4a634563fb9b",
+    "wireBindingId": "compat_thought_mistral_small_2603_native_json_schema_v2",
+    "wireMode": "native_json_schema",
+    "wireFormat": "mistral_response_format_json_schema",
+    "buildIdentity": "fe7c923888e16b06fa58c7b1469e553a587661b4",
+    "credentialPresent": true
+  },
+  "outputDirectory": "/tmp/ashley-phase5-w2-fe7c923-run-20260901",
+  "qualificationResultPath": null,
+  "verdict": "NOT_QUALIFIED"
+}
