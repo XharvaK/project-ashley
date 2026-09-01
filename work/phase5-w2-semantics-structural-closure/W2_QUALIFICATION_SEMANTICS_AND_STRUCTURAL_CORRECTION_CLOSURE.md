@@ -1518,3 +1518,234 @@ W9_STARTED=no
 
 No live production checkout was updated, activated, restarted, deployed, or
 promoted. The exact verdict remains `W2_PHYSICAL_QUALIFICATION=NOT_QUALIFIED`.
+
+### P. Final effect-intent termination audit
+
+This section records the final bounded audit required after the exact
+`76562f6dc325b2d1ca8c62f0f907276352d9ef4c` W2 result. Sections A–O are
+historical evidence and are not rewritten.
+
+#### P.1 Frozen starting evidence
+
+The starting W2 failure was the `effect_intent` sample whose provider returned
+`observation_intent` for `workspace.verify`. The stored result proved:
+
+```text
+CURRENT_EFFECT_SAMPLE_SEMANTIC_MISCLASSIFICATION=PROVEN
+GENERIC_BRANCH_SELECTION_LAW_DEFECT=NOT_PROVEN
+MISTRAL_FUNDAMENTAL_INCAPABILITY=NOT_PROVEN
+```
+
+The failure was not a provider-availability failure. The provider request
+started, a response was received, JSON syntax passed, closed-schema
+conformance passed, strict parsing passed, Kernel binding passed, and semantic
+validity rejected the selected branch. The durable artifact stores byte counts
+and SHA-256 digests, not raw response bodies:
+
+```text
+RAW_PROVIDER_RESPONSE=NOT_DURABLY_RETAINED
+```
+
+#### P.2 Q10 — canonical capability semantics
+
+The canonical operation registry is `apps/sandbox-v2/src/v2-types.ts`.
+`v2CapabilitySpec("project.read_file")` resolves to family
+`project_inspection`, `readOnly=true`, and `requiresProject=true`.
+`v2CapabilitySpec("workspace.verify")` resolves to family
+`project_verification`, `readOnly=true`, and `requiresProject=true`.
+
+`apps/agent-service/src/core/sandbox/verification-binding.ts` provides
+human-readable grounded verification semantics, but that helper is called by
+legacy `apps/agent-service/src/core/agency/thought.ts`; it is not called by the
+successor `cognitive-v021` Thought projection. The successor
+`ThoughtOperationCapability` records originally exposed only operation kind,
+`semanticClass`, availability, request fields, operator-bound fields, and
+authorized project IDs. They omitted the canonical registry family and
+read-only/project-binding facts. The qualification fixture repeated the same
+omission.
+
+```text
+Q10.1_CANONICAL_OPERATION_DESCRIPTION_EXISTS=yes — canonical structured operation-purpose metadata exists; no single prose description field exists
+Q10.2_WORKSPACE_VERIFY_CANONICAL_DESCRIPTION=project_verification operation; binds an operator-owned candidate workspace and recipe, runs the catalog-controlled mechanical verification, returns a verification receipt, writes only ephemeral /output, and requires the candidate tree to remain unchanged
+Q10.3_PROJECT_READ_FILE_CANONICAL_DESCRIPTION=project_inspection operation; performs bounded read-only project evidence acquisition and returns file content as an observation
+Q10.4_DESCRIPTION_CURRENTLY_PROJECTED_TO_THOUGHT=no — family, readOnly, and requiresProject were omitted before this repair, and the legacy grounding prose was not on the successor projection path
+Q10.5_MODEL_CURRENTLY_EXPECTED_TO_MAP_NATURAL_LANGUAGE_TO_OPERATION_KIND_BY_IDENTIFIER_ALONE=yes — the model received operation identifiers, class, fields, and IDs without the canonical family/read-only meaning
+Q10_CAPABILITY_PURPOSE_PROJECTION_DEFECT=PROVEN
+```
+
+#### P.3 Q11 — semantic class authority
+
+`semanticClass` is constructed by host code in
+`apps/agent-service/src/core/cognitive-v021/thought/capability-reality.ts`.
+It is a normative host-owned classification of the registered capability. It
+does not decide what the owner means, whether an operation is required, which
+operation satisfies the request, or whether Thought should abstain.
+
+The source-derived form relation is:
+
+```text
+semanticClass="observation" -> observation_intent
+semanticClass="effect" -> effect_intent
+```
+
+Before this repair, the relation was not explicitly communicated at the
+successor model boundary. The class was projected without stating what it
+required for output-form selection. The repair states that relation while
+leaving semantic selection with Thought.
+
+```text
+Q11.1_SEMANTIC_CLASS_NORMATIVE_HOST_OWNED=yes
+Q11.2_EFFECT_CLASS_REQUIRES_EFFECT_INTENT=yes
+Q11.3_OBSERVATION_CLASS_REQUIRES_OBSERVATION_INTENT=yes
+Q11.4_SEMANTIC_CLASS_TO_FORM_RELATION_EXPLICIT_BEFORE_REPAIR=no
+Q11.5_SEMANTIC_CLASS_PROJECTED_WITHOUT_FORM_EXPLANATION_BEFORE_REPAIR=yes
+Q11_SEMANTIC_CLASS_MODEL_FACING_SUFFICIENCY=INSUFFICIENT_BEFORE_REPAIR; EXPLICIT_AFTER_REPAIR
+```
+
+#### P.4 Q12 — read-only verification is still an effect
+
+`apps/sandbox-v2/src/verification/executor.ts` validates the named recipe,
+resolves the operator registry entry, binds a candidate snapshot, executes the
+catalog recipe with the candidate mounted read-only and ephemeral `/output`
+writable, hashes the candidate afterward, discards `/output`, and records
+`candidateUnchanged`. The result is a governed mechanical verification receipt
+with a separate protocol state and verification outcome. It is not a pure
+file-read observation.
+
+```text
+WORKSPACE_VERIFY_MUTATES_WORKSPACE=no
+WORKSPACE_VERIFY_IS_GOVERNED_MECHANICAL_EXECUTION=yes
+WORKSPACE_VERIFY_SEMANTIC_CLASS=effect
+Q12_READ_ONLY_EFFECT_DISTINCTION=MODEL_FACING_AMBIGUOUS_BEFORE_REPAIR; EXPLICIT_AFTER_REPAIR
+```
+
+Therefore read-only/non-mutating does not imply `observation_intent`.
+`workspace.verify` remains `effect_intent` because it performs a governed
+mechanical operation. `project.read_file` remains `observation_intent` because
+it acquires file evidence. The owner’s effect fixture explicitly requests the
+approved verification to be run and its result reported; it does not merely
+ask for README contents.
+
+```text
+EFFECT_FIXTURE_VALID=yes
+PROJECT_READ_FILE_VALID_SUBSTITUTE=no — project.read_file cannot execute the bound recipe or produce the verification receipt
+```
+
+#### P.5 Outcome A — bounded source repair
+
+The audit proved an Ashley successor model-boundary defect. The repair was
+test-first:
+
+```text
+RED=confirmed — capability-reality and semantic-output-contract regressions failed for the missing projection and missing form law
+GREEN=confirmed — affected tests passed 11/11
+```
+
+The repair:
+
+* derives `family`, `readOnly`, and `requiresProject` from the canonical
+  Sandbox V2 registry in live capability reality;
+* carries the same canonical facts into the exact W2 qualification projection;
+* states the observation/effect form relation and the read-only verification
+  distinction in the generated successor Thought instruction;
+* does not add `expectedKind`, fixture-specific prose, model-answer injection,
+  host operation selection, parser coercion, qualification loosening, or model
+  substitution.
+
+```text
+ASHLEY_EFFECT_PROJECTION_DEFECT=PROVEN
+TERMINATION_OUTCOME=A_BOUNDED_ASHLEY_REPAIR
+REPAIR_CANDIDATE_SHA=efff4c7927600f28f462df55fcbdfe69e0af072c
+```
+
+#### P.6 Verification and one final exact W2
+
+```text
+FILES_CHANGED=
+apps/agent-service/src/core/cognitive-v021/types.ts
+apps/agent-service/src/core/cognitive-v021/thought/capability-reality.ts
+apps/agent-service/src/core/cognitive-v021/thought/capability-reality.test.ts
+apps/agent-service/src/core/cognitive-v021/thought/output-contract.ts
+apps/agent-service/src/core/cognitive-v021/thought/semantic-output-contract.test.ts
+apps/agent-service/src/core/cognitive-v021/qualification/thought-capability-qualification.ts
+```
+
+```text
+OFFLINE_VERIFICATION=PASS — affected contract tests 11/11; complete cognitive-v021 subtree 106 files / 355 tests; agent-service build PASS; git diff --check PASS; exact isolated Mint build PASS for sandbox-policy, sandbox-m1, sandbox-tree, sandbox-broker, sandbox-v2, and agent-service
+ISOLATED_MINT_CHECKOUT=/home/xarvak/ashley-phase5-w2-efff4c7
+ISOLATED_MINT_SHA=efff4c7927600f28f462df55fcbdfe69e0af072c
+```
+
+The final W2 was the only W2 run after this repair. It used the frozen
+provider, model, reasoning, no-fallback, native-schema, sample, output-budget,
+correction, and 30-second rules. No unchanged rerun or additional tuning was
+performed.
+
+```text
+FINAL_MISTRAL_W2_PERFORMED=yes
+FINAL_W2_RUN_ID=w2-20260901T174249254Z-bf991d18-098b-47eb-ac14-a394b3b97d20
+FINAL_W2_ARTIFACT=work/phase5-w2-semantics-structural-closure/w2-route-qualification-efff4c7.json
+FINAL_W2_ARTIFACT_SHA256=sha256:9d2fa9b4fb80d38cb428f54775a323618dbf3fe47fbeb36360d1983d4106a1eb
+FINAL_W2_BUILD_IDENTITY=efff4c7927600f28f462df55fcbdfe69e0af072c
+FINAL_W2_PROVIDER=mistral
+FINAL_W2_MODEL=mistral-small-2603
+FINAL_W2_OCCUPANT=mfo_mistral_small_2603_high
+FINAL_W2_REASONING=high
+FINAL_W2_FALLBACK=none
+FINAL_W2_WIRE=native_json_schema
+FINAL_W2_SAMPLES=3 per semantic family
+FINAL_W2_INTERACTIVE_THOUGHT=4096
+FINAL_W2_DURABLE_PROACTIVE_THOUGHT=4096
+FINAL_W2_STRUCTURAL_CORRECTION=2048
+FINAL_W2_WALL_CLOCK=30s
+FINAL_W2_MAX_CORRECTIONS=2
+FINAL_W2_PROVIDER_AVAILABILITY_FAILURES=0
+FINAL_W2_PROVIDER_ATTEMPTS=12
+FINAL_W2_CASES=12
+FINAL_W2_SETTLEMENT=3/3
+FINAL_W2_OBSERVATION_INTENT=3/3
+FINAL_W2_EFFECT_INTENT=3/3
+FINAL_W2_ABSTAIN=2/3
+FINAL_W2_FIRST_FAILURE_BOUNDARY=SEMANTIC_VALIDITY_REJECTION
+FINAL_W2_FAILURE_CODES=semantic_branch_mismatch, semantic_invalid
+FINAL_W2_FAILURE_CASE=abstain sample=2
+FINAL_W2_NORMALIZED_OUTPUT={"kind": "observation_intent", "operationKind": "project.list_directory", "request": {"projectId": "qualification-fixture"}, "purpose": "Discover files in the qualification-fixture project that may contain information about the private attachment referenced in the owner's message.", "evidenceNeed": "Directory listing of qualification-fixture project to identify relevant files that could describe or contain the private attachment.", "existingRefs": ["turn-1"]}
+RAW_PROVIDER_RESPONSE=NOT_DURABLY_RETAINED
+```
+
+The new final failure is also a real provider response, not an availability
+failure. It is not a basis for another semantic-contract investigation or a
+fundamental model-capability conclusion. The packet requires termination after
+this failed final W2.
+
+#### P.7 Required terminal return
+
+```text
+Q10_CANONICAL_OPERATION_PURPOSE_EXISTS=yes — structured canonical metadata exists; no dedicated prose descriptor
+Q10_CAPABILITY_PURPOSE_PROJECTION_DEFECT=PROVEN
+Q11_SEMANTIC_CLASS_CANONICAL_MEANING=normative host-owned capability classification; it constrains the semantic form after Thought selects an operation
+Q11_SEMANTIC_CLASS_MODEL_FACING_SUFFICIENCY=INSUFFICIENT_BEFORE_REPAIR; EXPLICIT_AFTER_REPAIR
+Q12_READ_ONLY_EFFECT_DISTINCTION=MODEL_FACING_AMBIGUOUS_BEFORE_REPAIR; EXPLICIT_AFTER_REPAIR
+EFFECT_FIXTURE_VALID=yes
+PROJECT_READ_FILE_VALID_SUBSTITUTE=no
+ASHLEY_EFFECT_PROJECTION_DEFECT=PROVEN
+TERMINATION_OUTCOME=A_BOUNDED_ASHLEY_REPAIR
+FILES_CHANGED=6 source/test files listed in P.6
+OFFLINE_VERIFICATION=PASS
+FINAL_MISTRAL_W2_PERFORMED=yes
+W2=NOT_QUALIFIED
+THOUGHT_CONTRACT_QUALIFIED=no
+MODEL_EXPANSION_SELECTION_GATE=NOT_REACHED
+DOWNSTREAM_RELEASE=NOT_REACHED
+DEPLOYMENT=NOT_PERFORMED
+PRODUCTION_ACCEPTED=no
+```
+
+The final exact W2 verdict remains:
+
+```text
+W2_PHYSICAL_QUALIFICATION=NOT_QUALIFIED
+MISTRAL_EXACT_OCCUPANT_W2_RELIABILITY=NOT_QUALIFIED
+MISTRAL_FUNDAMENTAL_INCAPABILITY=NOT_PROVEN
+PRODUCTION_MUTATION=no
+```
