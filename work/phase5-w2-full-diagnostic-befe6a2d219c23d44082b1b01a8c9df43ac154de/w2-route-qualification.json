@@ -1,0 +1,838 @@
+{
+  "schema": "ashley.thought.route_qualification.v1",
+  "candidate": {
+    "provider": "mistral",
+    "model": "mistral-small-2603",
+    "occupantId": "mfo_mistral_small_2603_high"
+  },
+  "capabilityFingerprint": "sha256:bec0ffdf9e6d4ee3c0db7af4fb6a344350e4257aaab7307b5f25eb187831688c",
+  "runId": "w2-20260901T115612025Z-733197a0-c366-4c5a-a92c-4885deea2bb6",
+  "environment": "isolated_live",
+  "cases": [
+    {
+      "caseId": "settlement",
+      "invocationIds": [
+        "w2-20260901T115612025Z-733197a0-c366-4c5a-a92c-4885deea2bb6:sample:0:settlement:0"
+      ],
+      "providerAttemptIds": [
+        "3dc9892f-2ba6-4e25-92b2-0da2965a01f4:attempt:1"
+      ],
+      "transport": "success",
+      "rawContentBytes": 904,
+      "rawContentDigest": "sha256:bd0bd38f1640aeef38fca4870bdf10f3724f39b81c5afb41d98dd0845abe43b3",
+      "jsonSyntax": "PASS",
+      "closedSchemaConformance": "PASS",
+      "strictParser": "PASS",
+      "kernelBinding": "PASS",
+      "fencing": "PASS",
+      "authorityReachability": "PASS",
+      "semanticValidity": "PASS",
+      "resourcePolicy": "PASS",
+      "elapsedMs": 4486,
+      "outputTokens": 528,
+      "wireMode": "native_json_schema",
+      "wireBindingId": "compat_thought_mistral_small_2603_native_json_schema_v2",
+      "providerDeclaredEnforcement": "unavailable",
+      "capabilityFingerprint": "sha256:bec0ffdf9e6d4ee3c0db7af4fb6a344350e4257aaab7307b5f25eb187831688c",
+      "diagnostics": {
+        "firstFailureBoundary": "PROVIDER_CONTENT_RECEIVED",
+        "closedSchemaFailureKeyword": null,
+        "closedSchemaFailureInstancePath": null,
+        "closedSchemaFailureSchemaPath": null,
+        "closedSchemaFailureBranch": null,
+        "errorCode": null,
+        "dispatchTruth": "response_received",
+        "dispatchStage": "provider_dispatch",
+        "providerRequestStarted": true,
+        "providerResponseReceived": true,
+        "attemptId": "3dc9892f-2ba6-4e25-92b2-0da2965a01f4:attempt:1",
+        "reachability": {
+          "kernelBinding": "PASS",
+          "fencing": "PASS",
+          "authorityReachability": "PASS",
+          "semanticValidity": "PASS"
+        }
+      },
+      "firstFailureBoundary": "PROVIDER_CONTENT_RECEIVED",
+      "independentFailureCodes": [],
+      "dependentNotReachedGates": [],
+      "correctionPackets": [],
+      "failureEvidence": null,
+      "failureCodes": [],
+      "verdict": "PASS"
+    },
+    {
+      "caseId": "settlement",
+      "invocationIds": [
+        "w2-20260901T115612025Z-733197a0-c366-4c5a-a92c-4885deea2bb6:sample:1:settlement:0"
+      ],
+      "providerAttemptIds": [
+        "c6b48f1a-444e-4899-9d6f-db581be62599:attempt:1"
+      ],
+      "transport": "success",
+      "rawContentBytes": 1769,
+      "rawContentDigest": "sha256:03b265398d87b31f524d64bd882202d194f79ae2838407870367de51156e0ea5",
+      "jsonSyntax": "PASS",
+      "closedSchemaConformance": "PASS",
+      "strictParser": "PASS",
+      "kernelBinding": "PASS",
+      "fencing": "PASS",
+      "authorityReachability": "PASS",
+      "semanticValidity": "PASS",
+      "resourcePolicy": "PASS",
+      "elapsedMs": 5385,
+      "outputTokens": 802,
+      "wireMode": "native_json_schema",
+      "wireBindingId": "compat_thought_mistral_small_2603_native_json_schema_v2",
+      "providerDeclaredEnforcement": "unavailable",
+      "capabilityFingerprint": "sha256:bec0ffdf9e6d4ee3c0db7af4fb6a344350e4257aaab7307b5f25eb187831688c",
+      "diagnostics": {
+        "firstFailureBoundary": "PROVIDER_CONTENT_RECEIVED",
+        "closedSchemaFailureKeyword": null,
+        "closedSchemaFailureInstancePath": null,
+        "closedSchemaFailureSchemaPath": null,
+        "closedSchemaFailureBranch": null,
+        "errorCode": null,
+        "dispatchTruth": "response_received",
+        "dispatchStage": "provider_dispatch",
+        "providerRequestStarted": true,
+        "providerResponseReceived": true,
+        "attemptId": "c6b48f1a-444e-4899-9d6f-db581be62599:attempt:1",
+        "reachability": {
+          "kernelBinding": "PASS",
+          "fencing": "PASS",
+          "authorityReachability": "PASS",
+          "semanticValidity": "PASS"
+        }
+      },
+      "firstFailureBoundary": "PROVIDER_CONTENT_RECEIVED",
+      "independentFailureCodes": [],
+      "dependentNotReachedGates": [],
+      "correctionPackets": [],
+      "failureEvidence": null,
+      "failureCodes": [],
+      "verdict": "PASS"
+    },
+    {
+      "caseId": "settlement",
+      "invocationIds": [
+        "w2-20260901T115612025Z-733197a0-c366-4c5a-a92c-4885deea2bb6:sample:2:settlement:0"
+      ],
+      "providerAttemptIds": [
+        "d41ed7d6-4fc7-4660-bc6f-a8d2dce84b75:attempt:1"
+      ],
+      "transport": "success",
+      "rawContentBytes": 1643,
+      "rawContentDigest": "sha256:cc5b57d1da39293249f19c779134036be61042347d9fc10439de13bd11ffcdef",
+      "jsonSyntax": "PASS",
+      "closedSchemaConformance": "PASS",
+      "strictParser": "PASS",
+      "kernelBinding": "PASS",
+      "fencing": "PASS",
+      "authorityReachability": "PASS",
+      "semanticValidity": "PASS",
+      "resourcePolicy": "PASS",
+      "elapsedMs": 6023,
+      "outputTokens": 759,
+      "wireMode": "native_json_schema",
+      "wireBindingId": "compat_thought_mistral_small_2603_native_json_schema_v2",
+      "providerDeclaredEnforcement": "unavailable",
+      "capabilityFingerprint": "sha256:bec0ffdf9e6d4ee3c0db7af4fb6a344350e4257aaab7307b5f25eb187831688c",
+      "diagnostics": {
+        "firstFailureBoundary": "PROVIDER_CONTENT_RECEIVED",
+        "closedSchemaFailureKeyword": null,
+        "closedSchemaFailureInstancePath": null,
+        "closedSchemaFailureSchemaPath": null,
+        "closedSchemaFailureBranch": null,
+        "errorCode": null,
+        "dispatchTruth": "response_received",
+        "dispatchStage": "provider_dispatch",
+        "providerRequestStarted": true,
+        "providerResponseReceived": true,
+        "attemptId": "d41ed7d6-4fc7-4660-bc6f-a8d2dce84b75:attempt:1",
+        "reachability": {
+          "kernelBinding": "PASS",
+          "fencing": "PASS",
+          "authorityReachability": "PASS",
+          "semanticValidity": "PASS"
+        }
+      },
+      "firstFailureBoundary": "PROVIDER_CONTENT_RECEIVED",
+      "independentFailureCodes": [],
+      "dependentNotReachedGates": [],
+      "correctionPackets": [],
+      "failureEvidence": null,
+      "failureCodes": [],
+      "verdict": "PASS"
+    },
+    {
+      "caseId": "observation_intent",
+      "invocationIds": [
+        "w2-20260901T115612025Z-733197a0-c366-4c5a-a92c-4885deea2bb6:sample:0:observation_intent:0"
+      ],
+      "providerAttemptIds": [
+        "56355524-158a-4ad0-a552-748f9aabad0a:attempt:1"
+      ],
+      "transport": "success",
+      "rawContentBytes": 3267,
+      "rawContentDigest": "sha256:d7495a92f350d8670b0ce302e36603d8a89d4117b5b7ca57c5094891e6d7c98d",
+      "jsonSyntax": "PASS",
+      "closedSchemaConformance": "PASS",
+      "strictParser": "PASS",
+      "kernelBinding": "PASS",
+      "fencing": "NOT_REACHED",
+      "authorityReachability": "NOT_REACHED",
+      "semanticValidity": "FAIL",
+      "resourcePolicy": "PASS",
+      "elapsedMs": 22540,
+      "outputTokens": 3421,
+      "wireMode": "native_json_schema",
+      "wireBindingId": "compat_thought_mistral_small_2603_native_json_schema_v2",
+      "providerDeclaredEnforcement": "unavailable",
+      "capabilityFingerprint": "sha256:bec0ffdf9e6d4ee3c0db7af4fb6a344350e4257aaab7307b5f25eb187831688c",
+      "diagnostics": {
+        "firstFailureBoundary": "SEMANTIC_VALIDITY_REJECTION",
+        "closedSchemaFailureKeyword": null,
+        "closedSchemaFailureInstancePath": null,
+        "closedSchemaFailureSchemaPath": null,
+        "closedSchemaFailureBranch": null,
+        "errorCode": null,
+        "dispatchTruth": "response_received",
+        "dispatchStage": "provider_dispatch",
+        "providerRequestStarted": true,
+        "providerResponseReceived": true,
+        "attemptId": "56355524-158a-4ad0-a552-748f9aabad0a:attempt:1",
+        "reachability": {
+          "kernelBinding": "PASS",
+          "fencing": "NOT_REACHED",
+          "authorityReachability": "NOT_REACHED",
+          "semanticValidity": "FAIL"
+        }
+      },
+      "firstFailureBoundary": "SEMANTIC_VALIDITY_REJECTION",
+      "independentFailureCodes": [
+        "semantic_branch_mismatch",
+        "semantic_invalid"
+      ],
+      "dependentNotReachedGates": [
+        "fencing",
+        "authorityReachability"
+      ],
+      "correctionPackets": [],
+      "failureEvidence": {
+        "captureStatus": "captured",
+        "allowlistedReferences": [
+          "turn-1"
+        ],
+        "providerContentChunkMetadata": {
+          "contentContainerType": "array",
+          "contentChunkTypes": [
+            "thinking",
+            "text"
+          ],
+          "textChunkCount": 1,
+          "thinkingChunkCount": 1,
+          "finalTextBytes": 3267,
+          "finishReason": "stop",
+          "finishReasonClass": "STOP",
+          "outputTokenLimit": 4096,
+          "outputTokens": 3421,
+          "reasoningTokens": null,
+          "extractionFailure": "none"
+        },
+        "normalizedSemanticText": "{\n  \"kind\": \"settlement\",\n  \"interpretation\": {\n    \"discourseActs\": [\"inform\"],\n    \"referentBindings\": [],\n    \"corrections\": [],\n    \"unresolvedAmbiguities\": [],\n    \"topics\": [\"qualification_case\", \"observation_intent\", \"bounded_operation\", \"project_inspection\"]\n  },\n  \"commitments\": {\n    \"epistemic\": [],\n    \"conversational\": [\"answer\"],\n    \"stance\": {\n      \"warmth\": \"medium\",\n      \"humorAllowed\": false,\n      \"disagreement\": false,\n      \"uncertaintyDisplay\": false\n    }\n  },\n  \"speech\": {\n    \"mode\": \"draft\",\n    \"mustSay\": [\"Return the observation intent semantic branch for the bounded qualification case.\"],\n    \"mustNotSay\": [],\n    \"acceptableRealizations\": [\n      \"The observation intent semantic branch for the bounded qualification case is: inspect the 'qualification-fixture' project using project.inspect operation with purpose 'qualification verification'.\"\n    ],\n    \"presentationDirectives\": [\"formal\", \"technical\", \"concise\", \"qualification_response\", \"bounded_case_focused\", \"project_inspection_oriented\", \"no_extraneous_content\", \"direct_answer_required\", \"semantic_branch_precision\", \"operation_kind_specification\", \"capability_boundary_respected\", \"qualification_fixture_project_id_used\", \"project_inspection_as_primary_tool\", \"workspace_operations_not_invoked\", \"verification_operation_not_invoked\", \"authorship_operation_not_invoked\", \"patch_export_operation_not_invoked\", \"bounded_operation_capability_exercised\", \"project_inspection_capability_exercised\", \"workspace_capability_not_exercised\", \"verification_capability_not_exercised\", \"authorship_capability_not_exercised\", \"patch_export_capability_not_exercised\", \"approved_project_id_used\", \"no_unapproved_projects_accessed\", \"qualification_case_boundary_honored\", \"observation_intent_structure_provided\", \"semantic_branch_returned\"]\n  },\n  \"workingContextDeltas\": [\n    {\n      \"op\": \"upsert\",\n      \"item\": {\n        \"identity\": {\n          \"kind\": \"local\",\n          \"alias\": \"qualification_observation_intent\"\n        },\n        \"type\": \"question\",\n        \"text\": \"What is the observation intent semantic branch required to satisfy the bounded qualification case requesting project inspection capability?\",\n        \"concernRef\": null,\n        \"sourceTurnRefs\": [\"turn-1\"],\n        \"status\": \"active\",\n        \"supersedesRef\": null\n      }\n    },\n    {\n      \"op\": \"upsert\",\n      \"item\": {\n        \"identity\": {\n          \"kind\": \"local\",\n          \"alias\": \"qualification_observation_intent_branch\"\n        },\n        \"type\": \"commitment_temp\",\n        \"text\": \"The observation intent semantic branch is: perform a project inspection on the 'qualification-fixture' project using the project.inspect operation with the purpose 'qualification verification' and evidence need 'verify project inspection capability within bounded qualification case'.\",\n        \"concernRef\": null,\n        \"sourceTurnRefs\": [\"turn-1\"],\n        \"status\": \"active\",\n        \"supersedesRef\": null\n      }\n    }\n  ],\n  \"concernDeltas\": [],\n  \"occupancyDeltas\": [],\n  \"futureTriggerDeltas\": [],\n  \"subscriptionDeltas\": [],\n  \"durableNominations\": [],\n  \"evidenceUse\": {\n    \"observationRefsUsed\": [],\n    \"retrievalRefsUsed\": [],\n    \"sourceRefsUsed\": [\"turn-1\"],\n    \"openIntentRefs\": []\n  }\n}",
+        "normalizedSemanticBytes": 3267,
+        "normalizedSemanticSHA256": "sha256:d7495a92f350d8670b0ce302e36603d8a89d4117b5b7ca57c5094891e6d7c98d",
+        "jsonSyntaxDiagnostic": null,
+        "closedSchemaDiagnostic": null,
+        "strictParserDiagnostic": null,
+        "semanticValidityDiagnostic": {
+          "reasonCodes": [
+            "semantic_branch_mismatch",
+            "semantic_shape_invalid"
+          ],
+          "offendingFieldPaths": [],
+          "evidenceRefDiagnostics": []
+        },
+        "kernelBindingDiagnostic": {
+          "status": "PASS",
+          "reasonCodes": [],
+          "expected": {
+            "invocationId": "w2-20260901T115612025Z-733197a0-c366-4c5a-a92c-4885deea2bb6:sample:0:observation_intent:0",
+            "cycleId": "w2-20260901T115612025Z-733197a0-c366-4c5a-a92c-4885deea2bb6:sample:0:cycle",
+            "generation": 1,
+            "authorityEpoch": 1,
+            "provider": "mistral",
+            "model": "mistral-small-2603",
+            "attemptId": "56355524-158a-4ad0-a552-748f9aabad0a:attempt:1",
+            "allocationId": 4
+          },
+          "actual": {
+            "invocationId": "w2-20260901T115612025Z-733197a0-c366-4c5a-a92c-4885deea2bb6:sample:0:observation_intent:0",
+            "cycleId": "w2-20260901T115612025Z-733197a0-c366-4c5a-a92c-4885deea2bb6:sample:0:cycle",
+            "generation": 1,
+            "authorityEpoch": 1,
+            "provider": "mistral",
+            "model": "mistral-small-2603",
+            "attemptId": "56355524-158a-4ad0-a552-748f9aabad0a:attempt:1",
+            "allocationId": 4
+          }
+        },
+        "fencingDiagnostic": {
+          "status": "NOT_REACHED",
+          "reasonCodes": [],
+          "expected": null,
+          "actual": null
+        },
+        "authorityReachabilityDiagnostic": {
+          "status": "NOT_REACHED",
+          "reasonCodes": [],
+          "expected": null,
+          "actual": null
+        },
+        "hostContext": {
+          "cycleId": "w2-20260901T115612025Z-733197a0-c366-4c5a-a92c-4885deea2bb6:sample:0:cycle",
+          "generation": 1,
+          "occupantId": "mfo_mistral_small_2603_high",
+          "authorityEpoch": 1,
+          "triggerRef": "turn-1"
+        }
+      },
+      "failureCodes": [
+        "semantic_branch_mismatch",
+        "semantic_invalid"
+      ],
+      "verdict": "NOT_QUALIFIED"
+    },
+    {
+      "caseId": "observation_intent",
+      "invocationIds": [
+        "w2-20260901T115612025Z-733197a0-c366-4c5a-a92c-4885deea2bb6:sample:1:observation_intent:0"
+      ],
+      "providerAttemptIds": [
+        "a441b399-05fd-400e-b448-5e9c06d800ed:attempt:1"
+      ],
+      "transport": "success",
+      "rawContentBytes": 563,
+      "rawContentDigest": "sha256:4869c03c7701de88f397691d60efb6273b4aa10543d2972f748b37c0c1516c6d",
+      "jsonSyntax": "PASS",
+      "closedSchemaConformance": "PASS",
+      "strictParser": "PASS",
+      "kernelBinding": "PASS",
+      "fencing": "PASS",
+      "authorityReachability": "PASS",
+      "semanticValidity": "PASS",
+      "resourcePolicy": "PASS",
+      "elapsedMs": 4192,
+      "outputTokens": 442,
+      "wireMode": "native_json_schema",
+      "wireBindingId": "compat_thought_mistral_small_2603_native_json_schema_v2",
+      "providerDeclaredEnforcement": "unavailable",
+      "capabilityFingerprint": "sha256:bec0ffdf9e6d4ee3c0db7af4fb6a344350e4257aaab7307b5f25eb187831688c",
+      "diagnostics": {
+        "firstFailureBoundary": "PROVIDER_CONTENT_RECEIVED",
+        "closedSchemaFailureKeyword": null,
+        "closedSchemaFailureInstancePath": null,
+        "closedSchemaFailureSchemaPath": null,
+        "closedSchemaFailureBranch": null,
+        "errorCode": null,
+        "dispatchTruth": "response_received",
+        "dispatchStage": "provider_dispatch",
+        "providerRequestStarted": true,
+        "providerResponseReceived": true,
+        "attemptId": "a441b399-05fd-400e-b448-5e9c06d800ed:attempt:1",
+        "reachability": {
+          "kernelBinding": "PASS",
+          "fencing": "PASS",
+          "authorityReachability": "PASS",
+          "semanticValidity": "PASS"
+        }
+      },
+      "firstFailureBoundary": "PROVIDER_CONTENT_RECEIVED",
+      "independentFailureCodes": [],
+      "dependentNotReachedGates": [],
+      "correctionPackets": [],
+      "failureEvidence": null,
+      "failureCodes": [],
+      "verdict": "PASS"
+    },
+    {
+      "caseId": "observation_intent",
+      "invocationIds": [
+        "w2-20260901T115612025Z-733197a0-c366-4c5a-a92c-4885deea2bb6:sample:2:observation_intent:0"
+      ],
+      "providerAttemptIds": [
+        "a19ff00d-5167-400c-a478-e5253f90debc:attempt:1"
+      ],
+      "transport": "success",
+      "rawContentBytes": 503,
+      "rawContentDigest": "sha256:2cba7d251d67c0696d0f1c86d907dcac3572a22c8ca1701cb30fab7da30f73cc",
+      "jsonSyntax": "PASS",
+      "closedSchemaConformance": "PASS",
+      "strictParser": "PASS",
+      "kernelBinding": "PASS",
+      "fencing": "PASS",
+      "authorityReachability": "PASS",
+      "semanticValidity": "PASS",
+      "resourcePolicy": "PASS",
+      "elapsedMs": 6749,
+      "outputTokens": 859,
+      "wireMode": "native_json_schema",
+      "wireBindingId": "compat_thought_mistral_small_2603_native_json_schema_v2",
+      "providerDeclaredEnforcement": "unavailable",
+      "capabilityFingerprint": "sha256:bec0ffdf9e6d4ee3c0db7af4fb6a344350e4257aaab7307b5f25eb187831688c",
+      "diagnostics": {
+        "firstFailureBoundary": "PROVIDER_CONTENT_RECEIVED",
+        "closedSchemaFailureKeyword": null,
+        "closedSchemaFailureInstancePath": null,
+        "closedSchemaFailureSchemaPath": null,
+        "closedSchemaFailureBranch": null,
+        "errorCode": null,
+        "dispatchTruth": "response_received",
+        "dispatchStage": "provider_dispatch",
+        "providerRequestStarted": true,
+        "providerResponseReceived": true,
+        "attemptId": "a19ff00d-5167-400c-a478-e5253f90debc:attempt:1",
+        "reachability": {
+          "kernelBinding": "PASS",
+          "fencing": "PASS",
+          "authorityReachability": "PASS",
+          "semanticValidity": "PASS"
+        }
+      },
+      "firstFailureBoundary": "PROVIDER_CONTENT_RECEIVED",
+      "independentFailureCodes": [],
+      "dependentNotReachedGates": [],
+      "correctionPackets": [],
+      "failureEvidence": null,
+      "failureCodes": [],
+      "verdict": "PASS"
+    },
+    {
+      "caseId": "effect_intent",
+      "invocationIds": [
+        "w2-20260901T115612025Z-733197a0-c366-4c5a-a92c-4885deea2bb6:sample:0:effect_intent:0"
+      ],
+      "providerAttemptIds": [
+        "2d519866-67bf-4ab2-beb6-57813398eb04:attempt:1"
+      ],
+      "transport": "success",
+      "rawContentBytes": 666,
+      "rawContentDigest": "sha256:12348091f667963ced00cf01fbf46928dc9457f7498977e90ff05d8ceaaaaa9d",
+      "jsonSyntax": "PASS",
+      "closedSchemaConformance": "PASS",
+      "strictParser": "PASS",
+      "kernelBinding": "PASS",
+      "fencing": "PASS",
+      "authorityReachability": "PASS",
+      "semanticValidity": "PASS",
+      "resourcePolicy": "PASS",
+      "elapsedMs": 9623,
+      "outputTokens": 1143,
+      "wireMode": "native_json_schema",
+      "wireBindingId": "compat_thought_mistral_small_2603_native_json_schema_v2",
+      "providerDeclaredEnforcement": "unavailable",
+      "capabilityFingerprint": "sha256:bec0ffdf9e6d4ee3c0db7af4fb6a344350e4257aaab7307b5f25eb187831688c",
+      "diagnostics": {
+        "firstFailureBoundary": "PROVIDER_CONTENT_RECEIVED",
+        "closedSchemaFailureKeyword": null,
+        "closedSchemaFailureInstancePath": null,
+        "closedSchemaFailureSchemaPath": null,
+        "closedSchemaFailureBranch": null,
+        "errorCode": null,
+        "dispatchTruth": "response_received",
+        "dispatchStage": "provider_dispatch",
+        "providerRequestStarted": true,
+        "providerResponseReceived": true,
+        "attemptId": "2d519866-67bf-4ab2-beb6-57813398eb04:attempt:1",
+        "reachability": {
+          "kernelBinding": "PASS",
+          "fencing": "PASS",
+          "authorityReachability": "PASS",
+          "semanticValidity": "PASS"
+        }
+      },
+      "firstFailureBoundary": "PROVIDER_CONTENT_RECEIVED",
+      "independentFailureCodes": [],
+      "dependentNotReachedGates": [],
+      "correctionPackets": [],
+      "failureEvidence": null,
+      "failureCodes": [],
+      "verdict": "PASS"
+    },
+    {
+      "caseId": "effect_intent",
+      "invocationIds": [
+        "w2-20260901T115612025Z-733197a0-c366-4c5a-a92c-4885deea2bb6:sample:1:effect_intent:0"
+      ],
+      "providerAttemptIds": [
+        "2f26d3a5-37ca-463d-a566-922a99efbbc6:attempt:1"
+      ],
+      "transport": "success",
+      "rawContentBytes": 431,
+      "rawContentDigest": "sha256:27b139bb896a56058b43d7a79552e877193669a5f3407e81c47f017b51caaadb",
+      "jsonSyntax": "PASS",
+      "closedSchemaConformance": "PASS",
+      "strictParser": "PASS",
+      "kernelBinding": "PASS",
+      "fencing": "PASS",
+      "authorityReachability": "PASS",
+      "semanticValidity": "PASS",
+      "resourcePolicy": "PASS",
+      "elapsedMs": 5937,
+      "outputTokens": 615,
+      "wireMode": "native_json_schema",
+      "wireBindingId": "compat_thought_mistral_small_2603_native_json_schema_v2",
+      "providerDeclaredEnforcement": "unavailable",
+      "capabilityFingerprint": "sha256:bec0ffdf9e6d4ee3c0db7af4fb6a344350e4257aaab7307b5f25eb187831688c",
+      "diagnostics": {
+        "firstFailureBoundary": "PROVIDER_CONTENT_RECEIVED",
+        "closedSchemaFailureKeyword": null,
+        "closedSchemaFailureInstancePath": null,
+        "closedSchemaFailureSchemaPath": null,
+        "closedSchemaFailureBranch": null,
+        "errorCode": null,
+        "dispatchTruth": "response_received",
+        "dispatchStage": "provider_dispatch",
+        "providerRequestStarted": true,
+        "providerResponseReceived": true,
+        "attemptId": "2f26d3a5-37ca-463d-a566-922a99efbbc6:attempt:1",
+        "reachability": {
+          "kernelBinding": "PASS",
+          "fencing": "PASS",
+          "authorityReachability": "PASS",
+          "semanticValidity": "PASS"
+        }
+      },
+      "firstFailureBoundary": "PROVIDER_CONTENT_RECEIVED",
+      "independentFailureCodes": [],
+      "dependentNotReachedGates": [],
+      "correctionPackets": [],
+      "failureEvidence": null,
+      "failureCodes": [],
+      "verdict": "PASS"
+    },
+    {
+      "caseId": "effect_intent",
+      "invocationIds": [
+        "w2-20260901T115612025Z-733197a0-c366-4c5a-a92c-4885deea2bb6:sample:2:effect_intent:0",
+        "w2-20260901T115612025Z-733197a0-c366-4c5a-a92c-4885deea2bb6:sample:2:effect_intent:1"
+      ],
+      "providerAttemptIds": [
+        "742f176a-4bfe-4339-9f55-d54dff76bf3e:attempt:1",
+        "c9563e12-87a5-4ab7-9d73-2439df188e55:attempt:1"
+      ],
+      "transport": "success",
+      "rawContentBytes": 3385,
+      "rawContentDigest": "sha256:c2d3c627858231479aa9a37df2e68647802102554808791e34e169f54f858015",
+      "jsonSyntax": "PASS",
+      "closedSchemaConformance": "PASS",
+      "strictParser": "PASS",
+      "kernelBinding": "PASS",
+      "fencing": "NOT_REACHED",
+      "authorityReachability": "NOT_REACHED",
+      "semanticValidity": "FAIL",
+      "resourcePolicy": "PASS",
+      "elapsedMs": 9944,
+      "outputTokens": 1458,
+      "wireMode": "native_json_schema",
+      "wireBindingId": "compat_thought_mistral_small_2603_native_json_schema_v2",
+      "providerDeclaredEnforcement": "unavailable",
+      "capabilityFingerprint": "sha256:bec0ffdf9e6d4ee3c0db7af4fb6a344350e4257aaab7307b5f25eb187831688c",
+      "diagnostics": {
+        "firstFailureBoundary": "SEMANTIC_VALIDITY_REJECTION",
+        "closedSchemaFailureKeyword": null,
+        "closedSchemaFailureInstancePath": null,
+        "closedSchemaFailureSchemaPath": null,
+        "closedSchemaFailureBranch": null,
+        "errorCode": null,
+        "dispatchTruth": "response_received",
+        "dispatchStage": "provider_dispatch",
+        "providerRequestStarted": true,
+        "providerResponseReceived": true,
+        "attemptId": "c9563e12-87a5-4ab7-9d73-2439df188e55:attempt:1",
+        "reachability": {
+          "kernelBinding": "PASS",
+          "fencing": "NOT_REACHED",
+          "authorityReachability": "NOT_REACHED",
+          "semanticValidity": "FAIL"
+        }
+      },
+      "firstFailureBoundary": "SEMANTIC_VALIDITY_REJECTION",
+      "independentFailureCodes": [
+        "semantic_branch_mismatch",
+        "semantic_invalid"
+      ],
+      "dependentNotReachedGates": [
+        "fencing",
+        "authorityReachability"
+      ],
+      "correctionPackets": [
+        {
+          "attemptOrdinal": 2,
+          "attemptKind": "structural_correction",
+          "invocationId": "w2-20260901T115612025Z-733197a0-c366-4c5a-a92c-4885deea2bb6:sample:2:effect_intent:1",
+          "providerAttemptId": "c9563e12-87a5-4ab7-9d73-2439df188e55:attempt:1",
+          "systemMessage": "You are Ashley's Thought layer. Return exactly one JSON semantic Thought output. Code-owned Thought contract contractId=ashley.thought.semantic.v1 schemaId=ashley.thought.semantic.v1.schema schemaFingerprint=sha256:9bf27fc16755f26917ab2eeae55010b7a94212c593847aa37e5e4a634563fb9b. Return exactly one JSON object in one of these permitted kinds/forms: \"settlement\" required=kind,interpretation,commitments,speech,workingContextDeltas,concernDeltas,occupancyDeltas,futureTriggerDeltas,subscriptionDeltas,durableNominations,evidenceUse; \"observation_intent\" required=kind,operationKind,request,purpose,evidenceNeed,existingRefs; \"effect_intent\" required=kind,operationKind,request,purpose,expectedOutcome,existingRefs; \"abstain\" required=kind,reason,explanation,evidenceRefs. Do not emit kernel identity, lifecycle, delivery, or publication fields; Ashley code binds those values. A settlement must include these required sections: kind, interpretation, commitments, speech, workingContextDeltas, concernDeltas, occupancyDeltas, futureTriggerDeltas, subscriptionDeltas, durableNominations, evidenceUse. Speech shape: mode=\"none\", required=mode,mustSay,mustNotSay,acceptableRealizations,presentationDirectives, surfaceDraft=value; mode=\"draft\", required=mode,mustSay,mustNotSay,acceptableRealizations,presentationDirectives, surfaceDraft=string. Commitments required fields: epistemic, conversational, stance. Forbidden publication/delivery fields: finalLicensedText, settlementId, outboxId, nuclearReservationId, deliveryState, sendStatus, discordMessageIds, deliveryIntent, projectionKey, suppressed, origin. This contract describes output shape only; Ashley code remains authoritative for semantics, authority, licensing, and publication. Code validates identity, authority, speech licensing, and publication. Do not return finalLicensedText, settlementId, delivery, outbox, reservation, or workspace state. The previous response failed bounded structural validation (reference_not_allowlisted). Failing field/path: existingRefs. Use only host allowlisted reference IDs for the reported reference field; do not invent, transform, or namespace references. Host allowlisted reference IDs: [\"turn-1\"]. Do not change the semantic answer or invent authority."
+        }
+      ],
+      "failureEvidence": {
+        "captureStatus": "captured",
+        "allowlistedReferences": [
+          "turn-1"
+        ],
+        "providerContentChunkMetadata": {
+          "contentContainerType": "array",
+          "contentChunkTypes": [
+            "thinking",
+            "text"
+          ],
+          "textChunkCount": 1,
+          "thinkingChunkCount": 1,
+          "finalTextBytes": 3385,
+          "finishReason": "stop",
+          "finishReasonClass": "STOP",
+          "outputTokenLimit": 2048,
+          "outputTokens": 1458,
+          "reasoningTokens": null,
+          "extractionFailure": "none"
+        },
+        "normalizedSemanticText": "{\n  \"kind\": \"settlement\",\n  \"interpretation\": {\n    \"discourseActs\": [\"ask\"],\n    \"referentBindings\": [],\n    \"corrections\": [],\n    \"unresolvedAmbiguities\": [],\n    \"topics\": [\"qualification\", \"effect intent semantic branch\"]\n  },\n  \"commitments\": {\n    \"epistemic\": [\n      {\n        \"dimensions\": {\n          \"source\": \"owner_utterance\",\n          \"status\": \"asserted\",\n          \"time\": \"current\",\n          \"reliability\": \"owner_supplied\"\n        },\n        \"statement\": \"Providing the requested effect intent semantic branch structure without executing any side effects.\"\n      }\n    ],\n    \"conversational\": [\"answer\"],\n    \"stance\": {\n      \"warmth\": \"medium\",\n      \"humorAllowed\": false,\n      \"disagreement\": false,\n      \"uncertaintyDisplay\": false\n    }\n  },\n  \"speech\": {\n    \"mode\": \"draft\",\n    \"mustSay\": [\n      \"The effect intent semantic branch requested by the owner would be structured as follows, but no actual effects will be executed:\"\n    ],\n    \"mustNotSay\": [],\n    \"surfaceDraft\": \"```json\\n{\\n  \\\"kind\\\": \\\"effect_intent\\\",\\n  \\\"operationKind\\\": \\\"project.inspect\\\",\\n  \\\"request\\\": {\\n    \\\"projectId\\\": \\\"qualification-fixture\\\",\\n    \\\"inspectionTarget\\\": \\\"semantic_branch\\\"\\n  },\\n  \\\"purpose\\\": \\\"Provide semantic structure of effect intent for qualification purposes\\\",\\n  \\\"expectedOutcome\\\": \\\"Structured representation of the effect intent without execution\\\",\\n  \\\"existingRefs\\\": [\\\"turn-1\\\"]\\n}\\n```\",\n    \"acceptableRealizations\": [\n      \"A clear statement that no effects will be executed\",\n      \"A structured representation of what the effect intent would contain if executed\",\n      \"Explicit mention that this is for qualification/observation purposes only\"\n    ],\n    \"presentationDirectives\": [\n      \"Do not execute any actual operations\",\n      \"Present the structure as a template or example only\",\n      \"Maintain semantic fidelity to the requested intent type\"\n    ]\n  },\n  \"workingContextDeltas\": [\n    {\n      \"op\": \"upsert\",\n      \"item\": {\n        \"identity\": {\n          \"kind\": \"local\",\n          \"alias\": \"effect_intent_qualification\"\n        },\n        \"type\": \"topic\",\n        \"text\": \"Request to provide effect intent semantic branch structure without execution for qualification purposes\",\n        \"concernRef\": null,\n        \"sourceTurnRefs\": [\"turn-1\"],\n        \"status\": \"active\",\n        \"supersedesRef\": null\n      }\n    }\n  ],\n  \"concernDeltas\": [\n    {\n      \"op\": \"upsert\",\n      \"record\": {\n        \"identity\": {\n          \"kind\": \"local\",\n          \"alias\": \"effect_intent_provision\"\n        },\n        \"statement\": \"Provide the semantic structure of an effect intent branch without executing any actual effects\",\n        \"sourceTurnRefs\": [\"turn-1\"],\n        \"dimensions\": {\n          \"source\": \"owner_utterance\",\n          \"status\": \"asserted\",\n          \"time\": \"current\",\n          \"reliability\": \"owner_supplied\"\n        },\n        \"status\": \"active\"\n      }\n    }\n  ],\n  \"occupancyDeltas\": [\n    {\n      \"op\": \"set\",\n      \"concernRef\": {\n        \"kind\": \"local\",\n        \"alias\": \"effect_intent_provision\"\n      },\n      \"status\": \"active\",\n      \"priority\": 1\n    }\n  ],\n  \"futureTriggerDeltas\": [],\n  \"subscriptionDeltas\": [],\n  \"durableNominations\": [],\n  \"evidenceUse\": {\n    \"observationRefsUsed\": [],\n    \"retrievalRefsUsed\": [],\n    \"sourceRefsUsed\": [\"turn-1\"],\n    \"openIntentRefs\": []\n  }\n}",
+        "normalizedSemanticBytes": 3385,
+        "normalizedSemanticSHA256": "sha256:c2d3c627858231479aa9a37df2e68647802102554808791e34e169f54f858015",
+        "jsonSyntaxDiagnostic": null,
+        "closedSchemaDiagnostic": null,
+        "strictParserDiagnostic": null,
+        "semanticValidityDiagnostic": {
+          "reasonCodes": [
+            "semantic_branch_mismatch"
+          ],
+          "offendingFieldPaths": [],
+          "evidenceRefDiagnostics": []
+        },
+        "kernelBindingDiagnostic": {
+          "status": "PASS",
+          "reasonCodes": [],
+          "expected": {
+            "invocationId": "w2-20260901T115612025Z-733197a0-c366-4c5a-a92c-4885deea2bb6:sample:2:effect_intent:1",
+            "cycleId": "w2-20260901T115612025Z-733197a0-c366-4c5a-a92c-4885deea2bb6:sample:2:cycle",
+            "generation": 1,
+            "authorityEpoch": 1,
+            "provider": "mistral",
+            "model": "mistral-small-2603",
+            "attemptId": "c9563e12-87a5-4ab7-9d73-2439df188e55:attempt:1",
+            "allocationId": 10
+          },
+          "actual": {
+            "invocationId": "w2-20260901T115612025Z-733197a0-c366-4c5a-a92c-4885deea2bb6:sample:2:effect_intent:1",
+            "cycleId": "w2-20260901T115612025Z-733197a0-c366-4c5a-a92c-4885deea2bb6:sample:2:cycle",
+            "generation": 1,
+            "authorityEpoch": 1,
+            "provider": "mistral",
+            "model": "mistral-small-2603",
+            "attemptId": "c9563e12-87a5-4ab7-9d73-2439df188e55:attempt:1",
+            "allocationId": 10
+          }
+        },
+        "fencingDiagnostic": {
+          "status": "NOT_REACHED",
+          "reasonCodes": [],
+          "expected": null,
+          "actual": null
+        },
+        "authorityReachabilityDiagnostic": {
+          "status": "NOT_REACHED",
+          "reasonCodes": [],
+          "expected": null,
+          "actual": null
+        },
+        "hostContext": {
+          "cycleId": "w2-20260901T115612025Z-733197a0-c366-4c5a-a92c-4885deea2bb6:sample:2:cycle",
+          "generation": 1,
+          "occupantId": "mfo_mistral_small_2603_high",
+          "authorityEpoch": 1,
+          "triggerRef": "turn-1"
+        }
+      },
+      "failureCodes": [
+        "semantic_branch_mismatch",
+        "semantic_invalid"
+      ],
+      "verdict": "NOT_QUALIFIED"
+    },
+    {
+      "caseId": "abstain",
+      "invocationIds": [
+        "w2-20260901T115612025Z-733197a0-c366-4c5a-a92c-4885deea2bb6:sample:0:abstain:0"
+      ],
+      "providerAttemptIds": [
+        "70478a65-271c-4f8f-9bed-f9513d5823b3:attempt:1"
+      ],
+      "transport": "success",
+      "rawContentBytes": 224,
+      "rawContentDigest": "sha256:e6912ad1750ec66f196528a91e673ae9646a35368355e1e2ad69235c16159443",
+      "jsonSyntax": "PASS",
+      "closedSchemaConformance": "PASS",
+      "strictParser": "PASS",
+      "kernelBinding": "PASS",
+      "fencing": "PASS",
+      "authorityReachability": "PASS",
+      "semanticValidity": "PASS",
+      "resourcePolicy": "PASS",
+      "elapsedMs": 3067,
+      "outputTokens": 310,
+      "wireMode": "native_json_schema",
+      "wireBindingId": "compat_thought_mistral_small_2603_native_json_schema_v2",
+      "providerDeclaredEnforcement": "unavailable",
+      "capabilityFingerprint": "sha256:bec0ffdf9e6d4ee3c0db7af4fb6a344350e4257aaab7307b5f25eb187831688c",
+      "diagnostics": {
+        "firstFailureBoundary": "PROVIDER_CONTENT_RECEIVED",
+        "closedSchemaFailureKeyword": null,
+        "closedSchemaFailureInstancePath": null,
+        "closedSchemaFailureSchemaPath": null,
+        "closedSchemaFailureBranch": null,
+        "errorCode": null,
+        "dispatchTruth": "response_received",
+        "dispatchStage": "provider_dispatch",
+        "providerRequestStarted": true,
+        "providerResponseReceived": true,
+        "attemptId": "70478a65-271c-4f8f-9bed-f9513d5823b3:attempt:1",
+        "reachability": {
+          "kernelBinding": "PASS",
+          "fencing": "PASS",
+          "authorityReachability": "PASS",
+          "semanticValidity": "PASS"
+        }
+      },
+      "firstFailureBoundary": "PROVIDER_CONTENT_RECEIVED",
+      "independentFailureCodes": [],
+      "dependentNotReachedGates": [],
+      "correctionPackets": [],
+      "failureEvidence": null,
+      "failureCodes": [],
+      "verdict": "PASS"
+    },
+    {
+      "caseId": "abstain",
+      "invocationIds": [
+        "w2-20260901T115612025Z-733197a0-c366-4c5a-a92c-4885deea2bb6:sample:1:abstain:0"
+      ],
+      "providerAttemptIds": [
+        "67a720d2-67d4-492c-aca7-0baf881328ad:attempt:1"
+      ],
+      "transport": "success",
+      "rawContentBytes": 303,
+      "rawContentDigest": "sha256:a119e830b635e6103e617b3b90ac79c844cef7ea6f0010c37e81714a5ad55bdf",
+      "jsonSyntax": "PASS",
+      "closedSchemaConformance": "PASS",
+      "strictParser": "PASS",
+      "kernelBinding": "PASS",
+      "fencing": "PASS",
+      "authorityReachability": "PASS",
+      "semanticValidity": "PASS",
+      "resourcePolicy": "PASS",
+      "elapsedMs": 2555,
+      "outputTokens": 262,
+      "wireMode": "native_json_schema",
+      "wireBindingId": "compat_thought_mistral_small_2603_native_json_schema_v2",
+      "providerDeclaredEnforcement": "unavailable",
+      "capabilityFingerprint": "sha256:bec0ffdf9e6d4ee3c0db7af4fb6a344350e4257aaab7307b5f25eb187831688c",
+      "diagnostics": {
+        "firstFailureBoundary": "PROVIDER_CONTENT_RECEIVED",
+        "closedSchemaFailureKeyword": null,
+        "closedSchemaFailureInstancePath": null,
+        "closedSchemaFailureSchemaPath": null,
+        "closedSchemaFailureBranch": null,
+        "errorCode": null,
+        "dispatchTruth": "response_received",
+        "dispatchStage": "provider_dispatch",
+        "providerRequestStarted": true,
+        "providerResponseReceived": true,
+        "attemptId": "67a720d2-67d4-492c-aca7-0baf881328ad:attempt:1",
+        "reachability": {
+          "kernelBinding": "PASS",
+          "fencing": "PASS",
+          "authorityReachability": "PASS",
+          "semanticValidity": "PASS"
+        }
+      },
+      "firstFailureBoundary": "PROVIDER_CONTENT_RECEIVED",
+      "independentFailureCodes": [],
+      "dependentNotReachedGates": [],
+      "correctionPackets": [],
+      "failureEvidence": null,
+      "failureCodes": [],
+      "verdict": "PASS"
+    },
+    {
+      "caseId": "abstain",
+      "invocationIds": [
+        "w2-20260901T115612025Z-733197a0-c366-4c5a-a92c-4885deea2bb6:sample:2:abstain:0"
+      ],
+      "providerAttemptIds": [
+        "d462a17e-114b-440f-9f97-7e6dc02ae236:attempt:1"
+      ],
+      "transport": "success",
+      "rawContentBytes": 269,
+      "rawContentDigest": "sha256:b89749fca1d7c148e66e75c8f5e3a93d7245b08a779a667f0feb7088cc319026",
+      "jsonSyntax": "PASS",
+      "closedSchemaConformance": "PASS",
+      "strictParser": "PASS",
+      "kernelBinding": "PASS",
+      "fencing": "PASS",
+      "authorityReachability": "PASS",
+      "semanticValidity": "PASS",
+      "resourcePolicy": "PASS",
+      "elapsedMs": 2865,
+      "outputTokens": 312,
+      "wireMode": "native_json_schema",
+      "wireBindingId": "compat_thought_mistral_small_2603_native_json_schema_v2",
+      "providerDeclaredEnforcement": "unavailable",
+      "capabilityFingerprint": "sha256:bec0ffdf9e6d4ee3c0db7af4fb6a344350e4257aaab7307b5f25eb187831688c",
+      "diagnostics": {
+        "firstFailureBoundary": "PROVIDER_CONTENT_RECEIVED",
+        "closedSchemaFailureKeyword": null,
+        "closedSchemaFailureInstancePath": null,
+        "closedSchemaFailureSchemaPath": null,
+        "closedSchemaFailureBranch": null,
+        "errorCode": null,
+        "dispatchTruth": "response_received",
+        "dispatchStage": "provider_dispatch",
+        "providerRequestStarted": true,
+        "providerResponseReceived": true,
+        "attemptId": "d462a17e-114b-440f-9f97-7e6dc02ae236:attempt:1",
+        "reachability": {
+          "kernelBinding": "PASS",
+          "fencing": "PASS",
+          "authorityReachability": "PASS",
+          "semanticValidity": "PASS"
+        }
+      },
+      "firstFailureBoundary": "PROVIDER_CONTENT_RECEIVED",
+      "independentFailureCodes": [],
+      "dependentNotReachedGates": [],
+      "correctionPackets": [],
+      "failureEvidence": null,
+      "failureCodes": [],
+      "verdict": "PASS"
+    }
+  ],
+  "preflight": {
+    "portfolioRevisionId": "mfp_current_compatibility_v2",
+    "registryVersion": "sha256:1268a8de9745abe0b872bd4f801d0440c2567055cd9f811a639db45f93d2934e",
+    "policyRowId": "mfr_thought_interactive_compat_v1",
+    "occupantId": "mfo_mistral_small_2603_high",
+    "provider": "mistral",
+    "model": "mistral-small-2603",
+    "logicalBindingId": "ashley.thought.semantic.v1",
+    "schemaFingerprint": "sha256:9bf27fc16755f26917ab2eeae55010b7a94212c593847aa37e5e4a634563fb9b",
+    "wireBindingId": "compat_thought_mistral_small_2603_native_json_schema_v2",
+    "wireMode": "native_json_schema",
+    "wireFormat": "mistral_response_format_json_schema",
+    "buildIdentity": "befe6a2d219c23d44082b1b01a8c9df43ac154de",
+    "credentialPresent": true
+  },
+  "outputDirectory": "/tmp/ashley-phase5-w2-befe6a2-run-20260901",
+  "qualificationResultPath": null,
+  "verdict": "NOT_QUALIFIED"
+}
