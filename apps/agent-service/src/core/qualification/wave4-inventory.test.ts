@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DatabaseSync } from "node:sqlite";
 import { openNuclearDb } from "../db.js";
+import { openContinuityDb } from "../continuity/db.js";
 import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,7 +20,9 @@ describe("wave4 state inventory enumeration", () => {
 
   beforeEach(() => {
     dbPath = join(tmpdir(), `ashley-nuclear-${randomUUID()}.db`);
-    db = openNuclearDb(new DatabaseSync(dbPath));
+    db = openNuclearDb(new DatabaseSync(dbPath), {
+      continuity: openContinuityDb(new DatabaseSync(":memory:")),
+    });
   });
   afterEach(() => {
     try {

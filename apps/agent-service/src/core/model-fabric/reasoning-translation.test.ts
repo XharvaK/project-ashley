@@ -17,6 +17,7 @@ const ULTRA = "nvidia/nemotron-3-ultra-550b-a55b";
 const SUPER = "nvidia/nemotron-3-super-120b-a12b";
 const LIGHTNING = "nvidia/nemotron-3.5-lightning-30b-a3b";
 const GPT_OSS = "openai/gpt-oss-20b";
+const MISTRAL_SMALL = "mistral-small-2603";
 
 describe("Nemotron reasoning maps", () => {
   it("loads v2 maps as runtime configuration", () => {
@@ -26,7 +27,51 @@ describe("Nemotron reasoning maps", () => {
       "nim_nemotron_lightning",
       "nim_nemotron_super",
       "nim_nemotron_ultra",
-    ]);
+      "mistral_small",
+    ].sort());
+  });
+});
+
+describe("Mistral Small translation", () => {
+  it("maps every Ashley semantic policy to the exact Mistral reasoning_effort wire value", () => {
+    const expected = {
+      disabled: "none",
+      economical: "none",
+      high: "high",
+      max_supported: "high",
+    } as const;
+
+    for (const [semanticPolicy, wireValue] of Object.entries(expected)) {
+      const translated = translateReasoningPolicy({
+        provider: "mistral",
+        configuredModelId: MISTRAL_SMALL,
+        semanticPolicy: semanticPolicy as keyof typeof expected,
+      });
+      expect(translated).toEqual({
+        status: "translated",
+        familyId: "mistral_small",
+        control: { kind: "reasoning_effort", value: wireValue },
+      });
+    }
+
+    expect(translateReasoningPolicy({
+      provider: "mistral",
+      configuredModelId: MISTRAL_SMALL,
+      semanticPolicy: "standard",
+    })).toEqual({
+      status: "unsupported",
+      code: "unsupported_reasoning_mapping",
+    });
+  });
+
+  it("fails closed for a Mistral model that is not the exact Thought occupant", () => {
+    expect(
+      translateReasoningPolicy({
+        provider: "mistral",
+        configuredModelId: "mistral-medium-latest",
+        semanticPolicy: "economical",
+      }),
+    ).toEqual({ status: "unmapped_family" });
   });
 });
 

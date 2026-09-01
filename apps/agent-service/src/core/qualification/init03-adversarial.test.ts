@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { env } from "../../env.js";
 import { openNuclearDb } from "../db.js";
+import { openContinuityDb } from "../continuity/db.js";
 import {
   currentBuildIdentity,
   currentContractId,
@@ -322,8 +323,9 @@ describe("INIT-03 adversarial self-audit", () => {
 
   it("materializes exactly once across retry connections while allowing distinct meanings", () => {
     const path = join(tmpdir(), `ashley-init03-retry-${randomUUID()}.db`);
-    let first = openNuclearDb(new DatabaseSync(path));
-    let second = openNuclearDb(new DatabaseSync(path));
+    const continuity = openContinuityDb(new DatabaseSync(":memory:"));
+    let first = openNuclearDb(new DatabaseSync(path), { continuity });
+    let second = openNuclearDb(new DatabaseSync(path), { continuity });
     try {
       activate(first, ["reading"]);
       const question = seedQuestion(first);
@@ -369,13 +371,15 @@ describe("INIT-03 adversarial self-audit", () => {
     } finally {
       closeDb(first);
       closeDb(second);
+      continuity.close();
       rmSync(path, { force: true });
     }
   });
 
   it("survives restart, then fails closed on source mutation, demotion, shadow provenance, and wrong owner", () => {
     const path = join(tmpdir(), `ashley-init03-restart-${randomUUID()}.db`);
-    let db = openNuclearDb(new DatabaseSync(path));
+    const continuity = openContinuityDb(new DatabaseSync(":memory:"));
+    let db = openNuclearDb(new DatabaseSync(path), { continuity });
     try {
       activate(db, ["reading"]);
       const question = seedQuestion(db, OWNER_ID, "restart-live-question");
@@ -392,7 +396,7 @@ describe("INIT-03 adversarial self-audit", () => {
       ).toEqual([candidate]);
 
       db.close();
-      db = openNuclearDb(new DatabaseSync(path));
+      db = openNuclearDb(new DatabaseSync(path), { continuity });
       expect(
         selectMotivationCandidates(db, OWNER_ID, "proactive", [candidate], NOW),
       ).toEqual([candidate]);
@@ -429,6 +433,7 @@ describe("INIT-03 adversarial self-audit", () => {
       ).toEqual([]);
     } finally {
       closeDb(db);
+      continuity.close();
       rmSync(path, { force: true });
     }
   });

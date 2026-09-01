@@ -1,6 +1,6 @@
 import { vi } from "vitest";
 
-const groqDispatch = vi.fn(async () => ({
+const mistralDispatch = vi.fn(async () => ({
   text: JSON.stringify({
     kind: "ask",
     delayClass: null,
@@ -14,19 +14,19 @@ const groqDispatch = vi.fn(async () => ({
     motivationIds: [1],
     evidenceDisposition: "sufficient",
   }),
-  providerModel: "openai/gpt-oss-120b",
+  providerModel: "mistral-small-2603",
   usage: { promptTokens: 10, completionTokens: 20 },
 }));
 
-vi.mock("../model-routing/adapters/groq-adapter.js", async (importOriginal) => {
+vi.mock("../model-routing/adapters/mistral-adapter.js", async (importOriginal) => {
   const actual = await importOriginal<
-    typeof import("../model-routing/adapters/groq-adapter.js")
+    typeof import("../model-routing/adapters/mistral-adapter.js")
   >();
   return {
     ...actual,
-    createGroqAdapter: () => ({
-      provider: "groq" as const,
-      dispatch: groqDispatch,
+    createMistralAdapter: () => ({
+      provider: "mistral" as const,
+      dispatch: mistralDispatch,
     }),
   };
 });
@@ -85,7 +85,7 @@ const SAVED = { groq: env.groqApiKey, mistral: env.mistralApiKey };
 
 describe("T1 Thought reaches provider on the caller-owned data plane", () => {
   beforeEach(() => {
-    groqDispatch.mockClear();
+    mistralDispatch.mockClear();
     env.groqApiKey = "t1-fake-groq";
     env.mistralApiKey = "t1-fake-mistral";
   });
@@ -94,13 +94,13 @@ describe("T1 Thought reaches provider on the caller-owned data plane", () => {
     env.mistralApiKey = SAVED.mistral;
   });
 
-  it("runThoughtModel with real completeChat writes attention_requests on the injected DB and reaches Groq", async () => {
+  it("runThoughtModel with real completeChat writes attention_requests on the injected DB and reaches Mistral", async () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     try {
       await withOfflineAppGateDisabled(() =>
         runThoughtModel(db, base, [motivation], "reactive", completeChat),
       );
-      expect(groqDispatch).toHaveBeenCalled();
+      expect(mistralDispatch).toHaveBeenCalled();
       const rows = db
         .prepare(`SELECT COUNT(*) AS n FROM attention_requests`)
         .get() as { n: number };

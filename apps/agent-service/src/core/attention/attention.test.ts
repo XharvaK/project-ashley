@@ -716,7 +716,7 @@ describe("contract fail-closed and daily fold", () => {
       .prepare(`SELECT * FROM attention_daily_usage`)
       .get() as Record<string, unknown>;
     expect(second).toEqual(first);
-    const monthly = monthlyUsageSummary(db, 30);
+    const monthly = monthlyUsageSummary(db, 30, clock);
     expect(monthly.actualInputTokens).toBe(8);
     expect(monthly.actualOutputTokens).toBe(4);
     expect(monthly.requests).toBe(1);

@@ -206,7 +206,7 @@ describe("Wave 01 Thought call gating", () => {
 
   it("hard+effective makes exactly one influencing Thought call", async () => {
     env.cognitionMode = "apply";
-    env.groqApiKey = "test-key";
+    env.mistralApiKey = "test-key";
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     const motivations = [
       mot("user_message", 100, "urgent crisis debug the deadlock now", {
@@ -253,7 +253,7 @@ describe("Wave 01 Thought call gating", () => {
 
   it("unavailable/no-key stays on deterministic floor with zero calls", async () => {
     env.cognitionMode = "apply";
-    env.groqApiKey = "";
+    env.mistralApiKey = "";
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     const motivations = [
       mot("user_message", 100, "delete my identity foundational change", { id: 1 }),

@@ -14,11 +14,13 @@ import {
 
 const originalKey = env.mistralApiKey;
 const originalGroqKey = env.groqApiKey;
+const originalNimKey = env.nimApiKey;
 const originalCognitionMode = env.cognitionMode;
 
 afterEach(() => {
   env.mistralApiKey = originalKey;
   env.groqApiKey = originalGroqKey;
+  env.nimApiKey = originalNimKey;
   env.cognitionMode = originalCognitionMode;
   clearCurrentActivity();
 });
@@ -81,8 +83,44 @@ function seededRead(db: DatabaseSync): number {
 }
 
 describe("curiosity consolidation", () => {
+  it("uses the NIM utility credential when Groq is absent", async () => {
+    env.groqApiKey = "";
+    env.nimApiKey = "nim-test-key";
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const readId = seededRead(db);
+    const complete = vi.fn(async (
+      _messages: Array<{ role: string; content: unknown }>,
+      options: { route?: string; provider?: string } | undefined,
+    ) => {
+      expect(options?.route).toBe("utility_bulk");
+      return {
+        model: "nvidia/nemotron-3.5-lightning-30b-a3b",
+        text: JSON.stringify({
+          take: "A grounded take.",
+          interest: null,
+          questions: [],
+          opinions: [],
+          sourceProposals: [],
+        }),
+      };
+    });
+    try {
+      const result = await consolidateCuriosityRead(
+        db,
+        "doc",
+        readId,
+        false,
+        complete as never,
+      );
+      expect(result.model).toBe("nvidia/nemotron-3.5-lightning-30b-a3b");
+      expect(complete).toHaveBeenCalledTimes(1);
+    } finally {
+      db.close();
+    }
+  });
+
   it("treats article text as untrusted and links every derived claim to the read", async () => {
-    env.groqApiKey = "test";
+    env.nimApiKey = "test";
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     const readId = seededRead(db);
     const item = db.prepare("SELECT item_id FROM cur_reads WHERE id = ?").get(readId) as { item_id: number };
@@ -183,7 +221,7 @@ describe("curiosity consolidation", () => {
   });
 
   it("labels candidates live only when reading and source_discovery held authority at write time", async () => {
-    env.groqApiKey = "test";
+    env.nimApiKey = "test";
     env.cognitionMode = "apply";
     const db = openNuclearDb(new DatabaseSync(":memory:"));
 
@@ -213,7 +251,7 @@ describe("curiosity consolidation", () => {
   });
 
   it("is currently reading only while consolidation is running, then none", async () => {
-    env.groqApiKey = "test";
+    env.nimApiKey = "test";
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     const readId = seededRead(db);
     const complete = vi.fn(async () => {
@@ -242,7 +280,7 @@ describe("curiosity consolidation", () => {
   });
 
   it("clears currently reading when consolidation throws", async () => {
-    env.groqApiKey = "test";
+    env.nimApiKey = "test";
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     const readId = seededRead(db);
     const complete = vi.fn(async () => {

@@ -1,18 +1,18 @@
 import { vi } from "vitest";
 
-const nimState = vi.hoisted(() => ({
+const mistralState = vi.hoisted(() => ({
   dispatch: vi.fn(),
 }));
 
-vi.mock("../../model-routing/adapters/nim-adapter.js", async (importOriginal) => {
+vi.mock("../../model-routing/adapters/mistral-adapter.js", async (importOriginal) => {
   const actual = await importOriginal<
-    typeof import("../../model-routing/adapters/nim-adapter.js")
+    typeof import("../../model-routing/adapters/mistral-adapter.js")
   >();
   return {
     ...actual,
-    createNimAdapter: () => ({
-      provider: "nim" as const,
-      dispatch: nimState.dispatch,
+    createMistralAdapter: () => ({
+      provider: "mistral" as const,
+      dispatch: mistralState.dispatch,
     }),
   };
 });
@@ -64,11 +64,12 @@ const capabilityReality: CapabilityReality = {
   approvedProjectIds: [],
 };
 
-const NIM_BUCKET = "nim:openai/gpt-oss-20b";
-const SEEDED_CURRENT_TPM_USAGE = 4_827;
-const TPM_LIMIT = 16_000;
+const MISTRAL_MODEL = "mistral-small-2603";
+const MISTRAL_BUCKET = `mistral:${MISTRAL_MODEL}`;
+const SEEDED_CURRENT_TPM_USAGE = 14_000;
+const TPM_LIMIT = 25_000;
 const EXPECTED_RETRY_OUTPUT = STRUCTURAL_RETRY_MAX_OUTPUT_TOKENS;
-const savedNimKey = env.nimApiKey;
+const savedMistralKey = env.mistralApiKey;
 
 function deps(attentionDb: DatabaseSync): KernelDeps {
   return {
@@ -138,9 +139,9 @@ function helloInput(): { sidecar: DatabaseSync; input: ThoughtInput } {
 const savedOfflineEnv = process.env.ASHLEY_PHASE0_OFFLINE;
 
 afterEach(() => {
-  nimState.dispatch.mockReset();
+  mistralState.dispatch.mockReset();
   resetAdapterCache();
-  env.nimApiKey = savedNimKey;
+  env.mistralApiKey = savedMistralKey;
   if (savedOfflineEnv === undefined) {
     delete process.env.ASHLEY_PHASE0_OFFLINE;
   } else {
@@ -151,7 +152,7 @@ afterEach(() => {
 describe("v0.2.1 structural Thought retry admission", () => {
   it("keeps the primary at 4096 and admits a corrective retry at 2048 under real rolling TPM accounting", async () => {
     delete process.env.ASHLEY_PHASE0_OFFLINE;
-    env.nimApiKey = "test-nim-key";
+    env.mistralApiKey = "test-mistral-key";
     resetAdapterCache();
     const { sidecar, input } = helloInput();
     const primaryDb = openNuclearDb(new DatabaseSync(":memory:"));
@@ -162,7 +163,7 @@ describe("v0.2.1 structural Thought retry admission", () => {
     }> = [];
     let captureAdmission: Record<string, unknown> | null = null;
 
-    nimState.dispatch.mockImplementation(async (args: {
+    mistralState.dispatch.mockImplementation(async (args: {
       messages: Array<{ role: string; content: string }>;
       options: { maxTokens?: number; responseFormat?: string };
     }) => {
@@ -175,18 +176,18 @@ describe("v0.2.1 structural Thought retry admission", () => {
              FROM attention_requests
             WHERE quota_bucket = ?
             ORDER BY id DESC LIMIT 1`,
-        ).get(NIM_BUCKET) as Record<string, unknown>;
+        ).get(MISTRAL_BUCKET) as Record<string, unknown>;
       }
       const parsed = JSON.parse(args.messages[1]?.content ?? "{}") as ThoughtInput;
       const response = captured.length === 1
         ? {
             text: "not json",
-            providerModel: "openai/gpt-oss-20b",
+            providerModel: MISTRAL_MODEL,
             usage: { promptTokens: 4_772, completionTokens: 55 },
           }
         : {
             text: JSON.stringify(makeSemanticSettlement()),
-            providerModel: "openai/gpt-oss-20b",
+            providerModel: MISTRAL_MODEL,
             usage: { promptTokens: 1, completionTokens: 1 },
           };
       return response;
@@ -199,7 +200,7 @@ describe("v0.2.1 structural Thought retry admission", () => {
       routeId: "thought",
     });
     expect(currentPolicy.policyRow.maxOutputTokens).toBe(4_096);
-    expect(quotaContractFor(NIM_BUCKET).tpm).toBe(TPM_LIMIT);
+    expect(quotaContractFor(MISTRAL_BUCKET).tpm).toBe(TPM_LIMIT);
 
     const primary = await runThoughtModel(input, deps(primaryDb), {
       deadlineAtMs: Date.now() + 10_000,
@@ -211,7 +212,7 @@ describe("v0.2.1 structural Thought retry admission", () => {
          FROM attention_requests
         WHERE quota_bucket = ?
         ORDER BY id DESC LIMIT 1`,
-    ).get(NIM_BUCKET) as Record<string, unknown>;
+    ).get(MISTRAL_BUCKET) as Record<string, unknown>;
     const currentPrimaryEstimatedInput = Number(primaryRow.estimated_input_tokens);
     expect(Number(primaryRow.estimated_output_tokens)).toBe(4_096);
     expect(Number(primaryRow.actual_input_tokens)).toBe(4_772);
@@ -221,19 +222,19 @@ describe("v0.2.1 structural Thought retry admission", () => {
       messages: [{ role: "user", content: "seeded primary" }],
       purpose: "thought",
       lane: "urgent_grounded",
-      providerId: "nim",
-      quotaBucket: NIM_BUCKET,
-      modelAlias: "openai/gpt-oss-20b",
+      providerId: "mistral",
+      quotaBucket: MISTRAL_BUCKET,
+      modelAlias: MISTRAL_MODEL,
       maxTokens: 4_096,
       deadlineAtMs: Date.now() + 10_000,
       ownerId: "doc",
       dispatch: async () => ({
-        providerModel: "openai/gpt-oss-20b",
-        usage: { promptTokens: 4_772, completionTokens: 55 },
+        providerModel: MISTRAL_MODEL,
+        usage: { promptTokens: 12_000, completionTokens: 2_000 },
         result: { text: "seeded" },
       }),
     });
-    expect(currentTpmUsage(retryDb, realClock, NIM_BUCKET)).toBe(SEEDED_CURRENT_TPM_USAGE);
+    expect(currentTpmUsage(retryDb, realClock, MISTRAL_BUCKET)).toBe(SEEDED_CURRENT_TPM_USAGE);
 
     captureAdmission = {};
     const retry = await runThoughtModel(input, deps(retryDb), {
@@ -245,7 +246,7 @@ describe("v0.2.1 structural Thought retry admission", () => {
     expect(captured).toHaveLength(2);
     expect(captured[0]?.options.maxTokens).toBe(4_096);
     expect(captured[1]?.options.maxTokens).toBe(EXPECTED_RETRY_OUTPUT);
-    expect(captured[1]?.options.responseFormat).toBe("json_object");
+    expect(captured[1]?.options.responseFormat).toBe("json_schema");
     expect(captured[1]?.messages[1]?.content).toBe(captured[0]?.messages[1]?.content);
     expect(captured[1]?.messages[0]?.content).toContain("invalid_json");
     expect(captured[1]?.messages[0]?.content).toContain("schemaId=ashley.thought.semantic.v1.schema");
@@ -282,9 +283,9 @@ describe("v0.2.1 structural Thought retry admission", () => {
       `TPM_LIMIT=${TPM_LIMIT}`,
       `HEADROOM=${headroom}`,
       "RETRY_ADMISSION=PASS",
-      `GROQ_THOUGHT_TPM=${quotaContractFor("groq:openai/gpt-oss-20b").tpm}`,
+      `MISTRAL_THOUGHT_TPM=${quotaContractFor(MISTRAL_BUCKET).tpm}`,
       `PRIMARY_4096_TOTAL=${currentPrimaryEstimatedInput + 4_096}`,
-      `GROQ_SINGLE_REQUEST_ADMISSIBLE=${currentPrimaryEstimatedInput + 4_096 <= quotaContractFor("groq:openai/gpt-oss-20b").tpm ? "yes" : "no"}`,
+      `MISTRAL_SINGLE_REQUEST_ADMISSIBLE=${currentPrimaryEstimatedInput + 4_096 <= quotaContractFor(MISTRAL_BUCKET).tpm ? "yes" : "no"}`,
     ].join("\n"));
 
     sidecar.close();

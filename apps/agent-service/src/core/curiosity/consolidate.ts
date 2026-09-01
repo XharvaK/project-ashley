@@ -113,7 +113,7 @@ export async function consolidateCuriosityRead(
 ): Promise<{ analysis: CuriosityConsolidation; model: string; raw: string }> {
   const read = listRecentReads(db, 100).find((record) => record.id === readId);
   if (!read) throw new Error("read_not_found");
-  if (!env.groqApiKey) {
+  if (!env.nimApiKey) {
     return { analysis: normalize({}), model: "offline", raw: "{}" };
   }
   const activityId = `read:${read.id}`;

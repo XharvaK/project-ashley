@@ -130,7 +130,7 @@ describe("C2 eligibility and route trust", () => {
     expect(deriveContextRoute(request([]))).toMatchObject({
       routeId: "thought",
       routeClass: "remote_companion",
-      adapterClass: "nim-adapter",
+      adapterClass: "mistral-adapter",
       profileId: "thought_summary",
       profileVersion: 1,
     });

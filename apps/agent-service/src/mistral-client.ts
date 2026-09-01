@@ -27,8 +27,7 @@ import {
   createZenAdapter,
   mapZenError,
 } from "./core/model-routing/adapters/zen-adapter.js";
-import { quotaContractFor, requireRouteEnabled } from "./core/model-routing/router.js";
-import { estimateRequestTokens } from "./core/attention/estimate.js";
+import { requireRouteEnabled } from "./core/model-routing/router.js";
 import {
   quotaBucketFor,
   type ProviderId,
@@ -41,6 +40,8 @@ import {
   type ToolCallResult,
   type Lane,
   type CompletionOptions,
+  type MistralCredentialSeat,
+  type ProviderResponseDiagnostics,
 } from "./core/model-routing/types.js";
 import {
   attachModelFabricMetadata,
@@ -67,6 +68,7 @@ import {
   type ModelPurposeId,
   type SpecialistRequirement,
   type ModelFallbackClass,
+  type DispatchTruth,
   type ModelFabricDispatchMetadata,
 } from "./core/model-fabric/index.js";
 import type { WireDispatchEvidence } from "./core/model-routing/types.js";
@@ -125,7 +127,7 @@ export class DispatchDataPlaneMissingError extends Error {
   }
 }
 
-let client: Mistral | null = null;
+const clients = new Map<MistralCredentialSeat, Mistral>();
 
 export const MISTRAL_RETRY_CONFIG = { strategy: "none" } as const;
 
@@ -149,21 +151,29 @@ export type CapturedThoughtAttemptIdentity = {
   resourcePolicyFingerprint: string;
 };
 
-function getClient(): Mistral {
-  if (!env.mistralApiKey) {
+function mistralKeyForSeat(seat: MistralCredentialSeat): string {
+  return seat === "mistral_secondary"
+    ? env.mistralApiKeySecondary
+    : env.mistralApiKey;
+}
+
+function getClient(seat: MistralCredentialSeat = "mistral_primary"): Mistral {
+  const apiKey = mistralKeyForSeat(seat);
+  if (!apiKey) {
     throw new AppError(
       "agent_not_ready",
-      "Mistral API key not configured",
+      `Mistral ${seat} API key not configured`,
       503,
     );
   }
-  if (!client) {
-    client = new Mistral({
-      apiKey: env.mistralApiKey,
+  const existing = clients.get(seat);
+  if (existing) return existing;
+  const created = new Mistral({
+      apiKey,
       retryConfig: MISTRAL_RETRY_CONFIG,
     });
-  }
-  return client;
+  clients.set(seat, created);
+  return created;
 }
 
 const adapterCache = new Map<ProviderId, ModelProviderAdapter>();
@@ -193,31 +203,33 @@ function adapterFor(provider: ProviderId): ModelProviderAdapter {
 
 export function resetAdapterCache(): void {
   adapterCache.clear();
+  clients.clear();
 }
 
 export { mapMistralError, mapGroqError, mapNimError, mapZenError, adapterFor };
 
-const ELIGIBLE_THOUGHT_FAILOVER_CODES = new Set([
+const ELIGIBLE_MISTRAL_CREDENTIAL_FAILURE_CODES = new Set([
+  "credential_invalid",
+  "quota_exhausted",
   "rate_limited",
-  "provider_unavailable",
-  "agent_not_ready",
-  "request_exceeds_tpm_budget",
 ]);
 
-function isEligibleThoughtFailover(err: unknown): boolean {
-  if (err instanceof Error && err.name === "AbortError") {
-    return false;
-  }
-  if (err instanceof AppError) {
-    return ELIGIBLE_THOUGHT_FAILOVER_CODES.has(err.code);
-  }
-  if (err && typeof err === "object" && "code" in err) {
-    const code = (err as { code?: unknown }).code;
-    if (typeof code === "string" && ELIGIBLE_THOUGHT_FAILOVER_CODES.has(code)) {
-      return true;
-    }
-  }
-  return false;
+/**
+ * Credential failover is narrower than provider/model failover. It requires
+ * a definitive provider response classified to the Mistral account, and it
+ * never treats an ambiguous dispatch or a provider-wide failure as evidence
+ * that another account should receive the request.
+ */
+export function isEligibleMistralCredentialFailover(
+  error: unknown,
+  dispatchTruth: DispatchTruth,
+): boolean {
+  if (dispatchTruth !== "response_received") return false;
+  if (!(error instanceof AppError)) return false;
+  return (
+    error.credentialFailureDomain === "account" &&
+    ELIGIBLE_MISTRAL_CREDENTIAL_FAILURE_CODES.has(error.code)
+  );
 }
 
 function mapLegacyLane(
@@ -273,6 +285,17 @@ function logicalRoleFor(purpose: AttentionPurpose): LogicalModelRole {
   }
 }
 
+function isThoughtOwnedPurpose(
+  purpose: AttentionPurpose,
+  logicalRole: LogicalModelRole,
+): boolean {
+  return purpose === "thought"
+    || purpose === "thought_observation"
+    || logicalRole === "thought"
+    || logicalRole === "thought_observation"
+    || logicalRole === "reflection_initiative";
+}
+
 function fallbackTopologyFor(
   purpose: AttentionPurpose,
   routeId: RouteId,
@@ -281,7 +304,7 @@ function fallbackTopologyFor(
     return "expression_mistral_to_qwen_caller_fallback";
   }
   if (purpose === "thought" || routeId === "thought") {
-    return "thought_nim_to_groq_same_model_transport_failover";
+    return "thought_mistral_primary_to_secondary_credential_failover";
   }
   return "none";
 }
@@ -368,6 +391,7 @@ export async function completeChat(
   toolCalls?: ToolCallResult[];
   usage?: TokenUsage;
   finishReason?: string | null;
+  responseDiagnostics?: ProviderResponseDiagnostics;
   attentionRequestId?: number;
   acceptedDispatchIdentity?: AcceptedDispatchIdentity;
   /** Exact Thought attempt identity returned by the Attention/Model Fabric bind. */
@@ -413,6 +437,19 @@ export async function completeChat(
       controlDir: options.modelFabricControlDir,
       controlRootMode: options.modelFabricControlRootMode,
     });
+    if (
+      currentPolicy.source !== "activated" &&
+      currentPolicy.occupant.provider === "mistral" &&
+      isThoughtOwnedPurpose(purpose, logicalRole) &&
+      options.model !== undefined &&
+      options.model !== currentPolicy.occupant.configuredModelId
+    ) {
+      throw new AppError(
+        "capability_mismatch",
+        "mistral_thought_model_substitution_forbidden",
+        400,
+      );
+    }
     if (currentPolicy.source === "activated") {
       const occupantProvider = currentPolicy.occupant.provider as ProviderId;
       configuredBinding = {
@@ -488,6 +525,7 @@ export async function completeChat(
   let attemptOrdinal = 0;
   let previousAttemptId: string | null = null;
   let transportFailoverUsed = false;
+  let credentialFailoverUsed = false;
   const privateBudgetBinding = options.privateBudgetBinding;
   let privateBudgetBound = false;
   let privateBudgetCommitted = false;
@@ -498,6 +536,7 @@ export async function completeChat(
     fallbackFromAttemptId: string | null,
     fallbackClass: ModelFallbackClass,
     dispatchContract: ReturnType<typeof resolveDispatchContract>,
+    credentialSeat?: MistralCredentialSeat,
   ) => {
     const occupant = currentPolicy.occupant;
     const occupantWire = occupant.effectiveReasoning ?? null;
@@ -510,60 +549,47 @@ export async function completeChat(
     let fingerprintReasoning: string | null | undefined;
     let fingerprintTranslated: string | undefined;
 
-    if (currentPolicy.source === "activated") {
-      const semantic = resolveOccupantSemanticPolicy({
+    const semantic = resolveOccupantSemanticPolicy({
+      provider: targetProvider,
+      configuredModelId: targetModel,
+      reasoningPolicy: occupant.reasoningPolicy ?? null,
+      effectiveReasoning: occupantWire,
+    });
+    if (semantic.ok) {
+      requestedReasoningPolicy = semantic.policy;
+      const translated = translateReasoningPolicy({
         provider: targetProvider,
         configuredModelId: targetModel,
-        reasoningPolicy: occupant.reasoningPolicy ?? null,
-        effectiveReasoning: occupantWire,
+        semanticPolicy: semantic.policy,
       });
-      if (!semantic.ok) {
-        requestedReasoningPolicy = null;
+      if (translated.status === "translated") {
+        fabricReasoning = toTrustedReasoningControl(translated.control);
+        translatedWireControl = formatTranslatedWireControl(translated.control);
+        effectiveReasoning = translatedWireControl;
+        requestedWireReasoning = occupantWire;
+        fingerprintTranslated = translatedWireControl ?? undefined;
+        fingerprintReasoning =
+          translated.control.kind === "reasoning_effort"
+            ? translated.control.value
+            : null;
+      } else if (translated.status === "unsupported") {
         requestedWireReasoning = occupantWire;
         effectiveReasoning = null;
         translationError = {
-          code: semantic.code,
-          message: semantic.code,
+          code: translated.code,
+          message: translated.code,
         };
       } else {
-        requestedReasoningPolicy = semantic.policy;
-        const translated = translateReasoningPolicy({
-          provider: targetProvider,
-          configuredModelId: targetModel,
-          semanticPolicy: semantic.policy,
-        });
-        if (translated.status === "translated") {
-          fabricReasoning = toTrustedReasoningControl(translated.control);
-          translatedWireControl = formatTranslatedWireControl(translated.control);
-          effectiveReasoning = translatedWireControl;
-          requestedWireReasoning = occupantWire;
-          fingerprintTranslated = translatedWireControl ?? undefined;
-          fingerprintReasoning =
-            translated.control.kind === "reasoning_effort"
-              ? translated.control.value
-              : null;
-        } else if (translated.status === "unsupported") {
-          requestedWireReasoning = occupantWire;
-          effectiveReasoning = null;
-          translationError = {
-            code: translated.code,
-            message: translated.code,
-          };
-        } else {
-          requestedWireReasoning =
-            occupantWire ??
-            options.reasoningEffort ??
-            (targetProvider === "mistral" ? env.mistralReasoningEffort : null);
-          requestedReasoningPolicy = requestedWireReasoning
-            ? normalizeReasoningPolicy(requestedWireReasoning)
-            : semantic.policy;
-          effectiveReasoning = wireReasoningFor(
-            targetProvider,
-            targetModel,
-            requestedWireReasoning,
-          );
-          fingerprintReasoning = requestedWireReasoning;
-        }
+        requestedWireReasoning =
+          occupantWire ??
+          options.reasoningEffort ??
+          (targetProvider === "mistral" ? env.mistralReasoningEffort : null);
+        effectiveReasoning = wireReasoningFor(
+          targetProvider,
+          targetModel,
+          requestedWireReasoning,
+        );
+        fingerprintReasoning = requestedWireReasoning;
       }
     } else {
       requestedWireReasoning =
@@ -579,6 +605,14 @@ export async function completeChat(
         requestedWireReasoning,
       );
       fingerprintReasoning = requestedWireReasoning;
+      if (currentPolicy.source === "activated") {
+        requestedReasoningPolicy = null;
+        effectiveReasoning = null;
+        translationError = {
+          code: semantic.code,
+          message: semantic.code,
+        };
+      }
     }
     const inferencePolicyFingerprint = createInferencePolicyFingerprint({
       provider: targetProvider,
@@ -669,6 +703,7 @@ export async function completeChat(
         inferencePolicyFingerprint,
         structuredOutputSchemaFingerprint:
           dispatchContract.structuredOutputSchemaFingerprint,
+        credentialSeat: credentialSeat ?? null,
       },
       projection,
       backend: resolvedRoute.provider === "mistral"
@@ -693,9 +728,12 @@ export async function completeChat(
     targetProvider: ProviderId,
     targetModel: string,
     targetBucket: string,
+    credentialSeat?: MistralCredentialSeat,
+    fallbackClassOverride?: ModelFallbackClass,
   ) => {
     const fallbackClass: ModelFallbackClass =
-      targetProvider === provider ? "none" : "transport_failover";
+      fallbackClassOverride ??
+      (targetProvider === provider ? "none" : "transport_failover");
     const fallbackFromAttemptId =
       fallbackClass === "none" ? null : previousAttemptId;
     const dispatchContract = resolveAttemptDispatchContract(
@@ -714,6 +752,7 @@ export async function completeChat(
       fallbackFromAttemptId,
       fallbackClass,
       dispatchContract,
+      credentialSeat,
     );
     const attempt = attemptContext.attempt;
     if (privateBudgetBinding && !privateBudgetBound) {
@@ -741,6 +780,7 @@ export async function completeChat(
         usage?: TokenUsage;
         providerModel?: string | null;
         finishReason?: string | null;
+        responseDiagnostics?: ProviderResponseDiagnostics;
         wireEvidence?: WireDispatchEvidence;
       }>(attentionDb, {
         messages,
@@ -815,6 +855,7 @@ export async function completeChat(
               },
               fabricReasoning: attemptContext.fabricReasoning,
               fabricStructuredOutput: dispatchContract.structuredOutput ?? undefined,
+              credentialSeat,
               signal: merged,
             });
             attempt.markProviderResponse({
@@ -839,6 +880,7 @@ export async function completeChat(
                 usage: completion.usage,
                 providerModel: completion.providerModel,
                 finishReason: completion.finishReason ?? null,
+                responseDiagnostics: completion.responseDiagnostics,
                 wireEvidence: completion.wireEvidence,
               },
             };
@@ -883,6 +925,23 @@ export async function completeChat(
           }
         },
       });
+      const returnedModel = result.result.providerModel?.trim() || null;
+      if (
+        currentPolicy.source !== "activated" &&
+        targetProvider === "mistral" &&
+        isThoughtOwnedPurpose(purpose, logicalRole) &&
+        targetModel === currentPolicy.occupant.configuredModelId &&
+        returnedModel !== null &&
+        returnedModel !== targetModel
+      ) {
+        const identityError = new AppError(
+          "capability_mismatch",
+          "mistral_model_identity_mismatch",
+          502,
+        );
+        attempt.markFailure(identityError.code);
+        throw identityError;
+      }
       fabric.setAttentionRequestId(result.requestId);
       const capturedAttemptIdentity =
         purpose === "thought"
@@ -959,14 +1018,35 @@ export async function completeChat(
     let attentive;
     const isThoughtRoute =
       currentPolicy.source !== "activated" &&
-      (routeId === "thought" || purpose === "thought") &&
-      provider === "nim";
+      provider === "mistral" &&
+      (purpose === "thought" ||
+        logicalRole === "thought" ||
+        logicalRole === "thought_observation" ||
+        logicalRole === "reflection_initiative");
 
     if (isThoughtRoute && !options.disableThoughtTransportFailover) {
       try {
-        attentive = await singleDispatch(provider, modelAlias, quotaBucket);
+        attentive = await singleDispatch(
+          provider,
+          modelAlias,
+          quotaBucket,
+          "mistral_primary",
+        );
       } catch (primaryErr) {
-        if (!isEligibleThoughtFailover(primaryErr)) {
+        const primaryMetadata = fabric.finalize("none");
+        const primaryReceipt = primaryMetadata.receipt;
+        const primaryAttempt =
+          primaryReceipt.receiptStage === "resolved"
+            ? primaryReceipt.attempts[primaryReceipt.attempts.length - 1]
+            : null;
+        const primaryDispatchTruth =
+          primaryAttempt?.dispatchTruth ?? "not_sent";
+        if (
+          !isEligibleMistralCredentialFailover(
+            primaryErr,
+            primaryDispatchTruth,
+          )
+        ) {
           throw primaryErr;
         }
         const remainingMs =
@@ -974,39 +1054,25 @@ export async function completeChat(
         if (remainingMs < 2500) {
           throw primaryErr;
         }
-        // Existing compatibility failover: secondary Groq for the same model.
-        const secondaryProvider: ProviderId = "groq";
-        const secondaryBucket = quotaBucketFor(secondaryProvider, modelAlias);
-
-        const secondaryContract = resolveAttemptDispatchContract(secondaryProvider, modelAlias, {
-          policy: currentPolicy,
-          maxTokens: options.maxTokens,
-          responseFormat: options.responseFormat,
-          structuredOutput: options.structuredOutput,
-        });
-        const est = estimateRequestTokens(messages, { maxTokens: secondaryContract.maxTokens });
-        const secondaryBudgetFits =
-          est.estimatedInputTokens + secondaryContract.maxTokens <=
-          quotaContractFor(secondaryBucket).tpm;
-
-        if (!secondaryBudgetFits) {
-          const primaryMeta = fabric.finalize("none");
+        if (!env.mistralApiKeySecondary) {
           attachModelFabricMetadata(primaryErr, {
-            ...primaryMeta,
-            failoverSuppressed: "transport_failover_unavailable_for_projection",
+            ...primaryMetadata,
+            failoverSuppressed: "mistral_secondary_credential_unavailable",
             semanticProjectionHash: options.projectionIdentity?.semanticProjectionHash,
             dispatchMessagesHash: options.projectionIdentity?.dispatchMessagesHash,
-            suppressedProvider: secondaryProvider,
-            suppressedBucket: secondaryBucket,
+            suppressedProvider: "mistral",
+            suppressedBucket: quotaBucket,
           });
           throw primaryErr;
         }
 
-        transportFailoverUsed = true;
+        credentialFailoverUsed = true;
         attentive = await singleDispatch(
-          secondaryProvider,
+          provider,
           modelAlias,
-          secondaryBucket,
+          quotaBucket,
+          "mistral_secondary",
+          "credential_failover",
         );
       }
     } else {
@@ -1022,8 +1088,10 @@ export async function completeChat(
     }).capabilityIdentity;
     const modelFabric = {
       ...fabric.finalize(
-        transportFailoverUsed
-          ? "transport_failover"
+        credentialFailoverUsed
+          ? "credential_failover"
+          : transportFailoverUsed
+            ? "transport_failover"
           : options.modelFallbackChain?.fallbackClass ?? "none",
       ),
       ...(inner.wireEvidence ? { wireEvidence: inner.wireEvidence } : {}),
@@ -1037,6 +1105,7 @@ export async function completeChat(
       toolCalls: inner.toolCalls,
       usage: attentive.usage ?? inner.usage,
       finishReason: inner.finishReason ?? null,
+      responseDiagnostics: inner.responseDiagnostics,
       attentionRequestId: attentive.requestId,
       acceptedDispatchIdentity: attentive.acceptedDispatchIdentity,
       capturedAttemptIdentity,
@@ -1047,8 +1116,10 @@ export async function completeChat(
     };
   } catch (error) {
     const last = fabric.finalize(
-      transportFailoverUsed
-        ? "transport_failover"
+      credentialFailoverUsed
+        ? "credential_failover"
+        : transportFailoverUsed
+          ? "transport_failover"
         : options.modelFallbackChain?.fallbackClass ?? "none",
     );
     const terminalAttempt =

@@ -8,6 +8,7 @@ export type ErrorCode =
   | "message_too_long"
   | "rate_limited"
   | "quota_exhausted"
+  | "credential_invalid"
   | "mistral_unavailable"
   | "provider_unavailable"
   | "capability_mismatch"
@@ -48,18 +49,22 @@ export class AppError extends Error {
   readonly code: ErrorCode;
   readonly httpStatus: number;
   readonly retryAfterSec?: number;
+  /** Provider-account versus provider-wide failure classification. */
+  readonly credentialFailureDomain?: "account" | "provider";
 
   constructor(
     code: ErrorCode,
     message: string,
     httpStatus: number,
     retryAfterSec?: number,
+    credentialFailureDomain?: "account" | "provider",
   ) {
     super(message);
     this.name = "AppError";
     this.code = code;
     this.httpStatus = httpStatus;
     this.retryAfterSec = retryAfterSec;
+    this.credentialFailureDomain = credentialFailureDomain;
   }
 }
 

@@ -83,7 +83,8 @@ function structuredControlFor(input: {
     if (binding.mode === "native_json_schema") {
       if (
         binding.wireFormat !== "nim_guided_json" &&
-        binding.wireFormat !== "nim_response_format_json_schema"
+        binding.wireFormat !== "nim_response_format_json_schema" &&
+        binding.wireFormat !== "mistral_response_format_json_schema"
       ) {
         throw new ModelFabricDispatchContractError(
           "model_fabric_structured_output_binding_invalid",

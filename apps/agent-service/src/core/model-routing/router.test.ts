@@ -23,14 +23,35 @@ afterEach(() => {
 
 describe("model-routing router", () => {
   it("resolves expression and maintenance purposes to their routes", () => {
-    expect(resolveRoute("expression").route).toBe("ashley_expression");
-    expect(resolveRoute("maintenance").route).toBe("utility_bulk");
+    expect(resolveRoute("expression")).toMatchObject({
+      route: "ashley_expression",
+      provider: "nim",
+      configuredModelId: "nvidia/nemotron-3.5-lightning-30b-a3b",
+    });
+    expect(resolveRoute("maintenance")).toMatchObject({
+      route: "utility_bulk",
+      provider: "nim",
+      configuredModelId: "nvidia/nemotron-3.5-lightning-30b-a3b",
+    });
+  });
+
+  it("resolves Thought-owned observation and reflection to the Thought route", () => {
+    expect(resolveRoute("thought_observation")).toMatchObject({
+      route: "thought",
+      provider: "mistral",
+      configuredModelId: "mistral-small-2603",
+    });
+    expect(resolveRoute("reflection_initiative")).toMatchObject({
+      route: "thought",
+      provider: "mistral",
+      configuredModelId: "mistral-small-2603",
+    });
   });
 
   it("derives mistral bucket limits from env", () => {
     env.mistralRequestsPerSecond = 3;
     env.mistralTokensPerMinute = 12_345;
-    const c = quotaContractFor("mistral:mistral-medium-latest");
+    const c = quotaContractFor("mistral:mistral-small-2603");
     expect(c.rps).toBe(3);
     expect(c.tpm).toBe(12_345);
     expect(c.rpm).toBe(180);
@@ -77,8 +98,8 @@ describe("model-routing router", () => {
     expect(cols).toEqual(
       expect.arrayContaining(["provider_id", "route_alias", "quota_bucket"]),
     );
-    expect(routeBinding("thought").provider).toBe("nim");
-    expect(routeBinding("thought").configuredModelId).toBe("openai/gpt-oss-20b");
+    expect(routeBinding("thought").provider).toBe("mistral");
+    expect(routeBinding("thought").configuredModelId).toBe("mistral-small-2603");
     db.close();
     continuity.close();
   });

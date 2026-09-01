@@ -30,7 +30,7 @@ export function enqueueThoughtObservation(input: {
   complete?: Complete;
   options?: ThoughtModelOptions;
 }): void {
-  if (!env.groqApiKey) return;
+  if (!env.mistralApiKey) return;
   if (
     !capabilityCanExecuteShadow(input.db, "thought") ||
     !capabilityShadowDependenciesReady(input.db, "thought")

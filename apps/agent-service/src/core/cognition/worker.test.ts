@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { env } from "../../env.js";
 import { openNuclearDb } from "../db.js";
 import { applyModelContinuity, currentModelContinuityIdentity } from "../attention/continuity.js";
@@ -18,6 +18,7 @@ import { currentBuildIdentity } from "../rollout/capabilities.js";
 import { listOpenCognitiveItems } from "./open-items.js";
 import { enqueueCognitiveJob, recoverCognitiveJobs } from "./jobs.js";
 import { processNextCognitiveJob, type CognitionAnalysis } from "./worker.js";
+import * as mistral from "../../mistral-client.js";
 
 const analysis: CognitionAnalysis = {
   summary: "Doc is preparing a modular synth performance; Ashley wants to follow up after it.",
@@ -72,6 +73,113 @@ function setup() {
 }
 
 describe("continuous cognition worker", () => {
+  it("uses the NIM utility route when the Groq credential is absent", async () => {
+    const { db } = setup();
+    const originalGroqKey = env.groqApiKey;
+    const originalNimKey = env.nimApiKey;
+    env.groqApiKey = "";
+    env.nimApiKey = "nim-test-key";
+    const complete = vi.spyOn(mistral, "completeChat").mockResolvedValue({
+      text: JSON.stringify({
+        summary: "NIM utility analysis",
+        entities: [],
+        salience: 0.5,
+        unresolved: false,
+        stateItems: [],
+        affect: {
+          valenceDelta: 0,
+          activationDelta: 0,
+          opennessDelta: 0,
+          tensionDelta: 0,
+          reason: "none",
+        },
+        revisions: [],
+        facts: [],
+      }),
+      model: "nvidia/nemotron-3.5-lightning-30b-a3b",
+      modelAlias: "nvidia/nemotron-3.5-lightning-30b-a3b",
+      resolvedModelId: "nvidia/nemotron-3.5-lightning-30b-a3b",
+    });
+    try {
+      expect(await processNextCognitiveJob(db, "observe")).toBe(true);
+      expect(complete).toHaveBeenCalledTimes(1);
+      expect(complete.mock.calls[0]?.[1]).toMatchObject({
+        route: "utility_bulk",
+        purpose: "exchange_cognition",
+        logicalRole: "exchange_cognition",
+      });
+    } finally {
+      env.groqApiKey = originalGroqKey;
+      env.nimApiKey = originalNimKey;
+      vi.restoreAllMocks();
+      db.close();
+    }
+  });
+
+  it("binds cognition item continuity to the dispatched utility model alias", async () => {
+    const { db, userMessageId } = setup();
+    const originalNimKey = env.nimApiKey;
+    env.nimApiKey = "nim-test-key";
+    const job = db
+      .prepare("SELECT id FROM cognitive_jobs WHERE owner_id = 'doc' LIMIT 1")
+      .get() as { id: number };
+    const source = db
+      .prepare("SELECT entity_uuid FROM mem_messages WHERE id = ?")
+      .get(userMessageId) as { entity_uuid: string };
+    db.prepare(
+      `INSERT INTO capability_releases (capability, release_id, state, updated_at)
+       VALUES ('recall', ?, 'active', 'now')
+       ON CONFLICT(capability, release_id) DO UPDATE SET state = 'active', updated_at = 'now'`,
+    ).run(currentContractId());
+    const analysisWithOpenItem: CognitionAnalysis = {
+      ...analysis,
+      openItems: [{
+        kind: "question",
+        semanticSummary: "Whether the utility-derived follow-up remains unresolved.",
+        sourceMessageId: userMessageId,
+      }],
+    };
+    try {
+      const analyze = async () => {
+        const dispatch = await runAttentiveDispatch<{ text: string }>(db, {
+          messages: [{ role: "user", content: "bounded utility cognition" }],
+          purpose: "exchange_cognition",
+          lane: "exchange_cognition",
+          modelAlias: "nvidia/nemotron-3.5-lightning-30b-a3b",
+          providerId: "nim",
+          quotaBucket: "nim:nvidia/nemotron-3.5-lightning-30b-a3b",
+          ownerId: "doc",
+          cognitiveJobId: job.id,
+          dispatch: async () => ({
+            providerModel: "nvidia/nemotron-3.5-lightning-30b-a3b-resolved",
+            usage: { promptTokens: 2, completionTokens: 2 },
+            result: { text: "accepted" },
+          }),
+        });
+        return {
+          analysis: analysisWithOpenItem,
+          model: dispatch.modelAlias,
+          modelAlias: dispatch.modelAlias,
+          resolvedModelId: dispatch.resolvedModelId,
+          dispatchIdentity: dispatch.acceptedDispatchIdentity,
+          raw: "{}",
+        };
+      };
+
+      await processNextCognitiveJob(db, "apply", analyze, allCapabilitiesActive);
+      expect(
+        db
+          .prepare(
+            "SELECT provenance FROM open_cognitive_items WHERE source_entity_uuid = ?",
+          )
+          .get(source.entity_uuid),
+      ).toMatchObject({ provenance: "live" });
+    } finally {
+      env.nimApiKey = originalNimKey;
+      db.close();
+    }
+  });
+
   it("persists the exact accepted dispatch provenance when continuity changes before materialization", async () => {
     const { db, userMessageId } = setup();
     const originalGroqKey = env.groqApiKey;

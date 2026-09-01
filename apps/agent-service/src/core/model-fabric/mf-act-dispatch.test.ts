@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DatabaseSync } from "node:sqlite";
 import { env } from "../../env.js";
+import { AppError } from "../../errors.js";
 import { openNuclearDb } from "../db.js";
 import { completeChat, resetAdapterCache } from "../../mistral-client.js";
 import * as groqAdapterModule from "../model-routing/adapters/groq-adapter.js";
@@ -58,12 +59,14 @@ const fixtureCapability = buildThoughtCapabilityIdentity({
 const roots: string[] = [];
 const saved = {
   mistral: env.mistralApiKey,
+  mistralSecondary: env.mistralApiKeySecondary,
   groq: env.groqApiKey,
   nim: env.nimApiKey,
 };
 
 afterEach(() => {
   env.mistralApiKey = saved.mistral;
+  env.mistralApiKeySecondary = saved.mistralSecondary;
   env.groqApiKey = saved.groq;
   env.nimApiKey = saved.nim;
   resetAdapterCache();
@@ -264,9 +267,9 @@ describe("MF-ACT dispatch authority", () => {
     expect(resolved.policyRow.policyRowId).toBe(
       "mfr_thought_interactive_compat_v1",
     );
-    expect(resolved.occupant.configuredModelId).toBe("openai/gpt-oss-20b");
-    expect(resolved.occupant.provider).toBe("nim");
-    expect(resolved.occupant.effectiveReasoning).toBe("low");
+    expect(resolved.occupant.configuredModelId).toBe("mistral-small-2603");
+    expect(resolved.occupant.provider).toBe("mistral");
+    expect(resolved.occupant.effectiveReasoning).toBe("high");
     expect(resolved.activationRefId).toBeNull();
   });
 
@@ -299,7 +302,9 @@ describe("MF-ACT dispatch authority", () => {
     });
     expect(expression.source).toBe("current_compatibility");
     expect(expression.policyRow.policyRowId).toBe("mfr_expression_compat_v1");
-    expect(expression.occupant.configuredModelId).toBe("mistral-medium-latest");
+    expect(expression.occupant.configuredModelId).toBe(
+      "nvidia/nemotron-3.5-lightning-30b-a3b",
+    );
   });
 
   it("D: stale pointer falls back to CURRENT compatibility", () => {
@@ -333,7 +338,7 @@ describe("MF-ACT dispatch authority", () => {
       controlRootMode: "production",
     });
     expect(resolved.source).toBe("current_compatibility");
-    expect(resolved.occupant.configuredModelId).toBe("openai/gpt-oss-20b");
+    expect(resolved.occupant.configuredModelId).toBe("mistral-small-2603");
   });
 
   it("E/F: caller model and reasoning pins lose to an activated occupant", async () => {
@@ -388,47 +393,19 @@ describe("MF-ACT dispatch authority", () => {
 
   it("G: no activation keeps CURRENT thought failover and Expression fallback pins", async () => {
     const root = controlRoot();
-    env.nimApiKey = "test";
     env.mistralApiKey = "test";
-    const nimDispatch = vi.fn(async (args: { modelId: string; options: { reasoningEffort?: string } }) => {
-      expect(args.modelId).toBe("openai/gpt-oss-20b");
-      expect(args.options.reasoningEffort).toBe("low");
+    const mistralDispatch = vi.fn(async (args: {
+      modelId: string;
+      fabricReasoning?: { kind: string; value?: string };
+    }) => {
+      expect(args.modelId).toBe("mistral-small-2603");
+      expect(args.fabricReasoning).toEqual({
+        kind: "reasoning_effort",
+        value: "high",
+      });
       return {
         text: "{\"kind\":\"speak\"}",
-        providerModel: "openai/gpt-oss-20b",
-        usage: { promptTokens: 1, completionTokens: 1 },
-        finishReason: "stop",
-      };
-    });
-    vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
-      provider: "nim",
-      dispatch: nimDispatch,
-    });
-    const thoughtDb = db();
-    const thought = await completeChat([{ role: "user", content: "think" }], {
-      attentionDb: thoughtDb,
-      purpose: "thought",
-      logicalRole: "thought",
-      lane: "interactive",
-      route: "thought",
-      responseFormat: "json_object",
-      modelFabricControlDir: root,
-      modelFabricControlRootMode: "fixture",
-    });
-    expect(thought.modelAlias).toBe("openai/gpt-oss-20b");
-    expect(thought.modelFabric?.resolvedRoute).toMatchObject({
-      policyRowId: "mfr_thought_interactive_compat_v1",
-      occupantId: "mfo_nim_openai_gpt_oss_20b_low",
-      provider: "nim",
-      effectiveReasoning: "low",
-    });
-    thoughtDb.close();
-
-    const mistralDispatch = vi.fn(async (args: { modelId: string }) => {
-      expect(args.modelId).toBe("mistral-medium-latest");
-      return {
-        text: "hi",
-        providerModel: "mistral-medium-latest",
+        providerModel: "mistral-small-2603",
         usage: { promptTokens: 1, completionTokens: 1 },
         finishReason: "stop",
       };
@@ -437,20 +414,55 @@ describe("MF-ACT dispatch authority", () => {
       provider: "mistral",
       dispatch: mistralDispatch,
     });
+    const thoughtDb = db();
+    const thought = await completeChat([{ role: "user", content: "think" }], {
+      attentionDb: thoughtDb,
+      purpose: "thought",
+      logicalRole: "thought",
+      lane: "interactive",
+      route: "thought",
+      modelFabricControlDir: root,
+      modelFabricControlRootMode: "fixture",
+    });
+    expect(thought.modelAlias).toBe("mistral-small-2603");
+    expect(thought.modelFabric?.resolvedRoute).toMatchObject({
+      policyRowId: "mfr_thought_interactive_compat_v1",
+      occupantId: "mfo_mistral_small_2603_high",
+      provider: "mistral",
+      effectiveReasoning: "reasoning_effort=high",
+    });
+    thoughtDb.close();
+
+    env.nimApiKey = "test";
+    const nimDispatch = vi.fn(async (args: { modelId: string }) => {
+      expect(args.modelId).toBe("nvidia/nemotron-3.5-lightning-30b-a3b");
+      return {
+        text: "hi",
+        providerModel: "nvidia/nemotron-3.5-lightning-30b-a3b",
+        usage: { promptTokens: 1, completionTokens: 1 },
+        finishReason: "stop",
+      };
+    });
+    vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
+      provider: "nim",
+      dispatch: nimDispatch,
+    });
     const expressionDb = db();
     const expression = await completeChat([{ role: "user", content: "hi" }], {
       attentionDb: expressionDb,
       purpose: "expression",
       logicalRole: "expression",
       route: "ashley_expression",
-      model: env.mistralModel,
       modelFabricControlDir: root,
       modelFabricControlRootMode: "fixture",
     });
-    expect(expression.modelAlias).toBe("mistral-medium-latest");
+    expect(expression.modelAlias).toBe(
+      "nvidia/nemotron-3.5-lightning-30b-a3b",
+    );
     expect(expression.modelFabric?.resolvedRoute).toMatchObject({
       policyRowId: "mfr_expression_compat_v1",
-      occupantId: "mfo_mistral_medium_compat",
+      occupantId: "mfo_nim_nemotron_3_5_lightning",
+      provider: "nim",
     });
     expressionDb.close();
   });
@@ -471,39 +483,53 @@ describe("MF-ACT dispatch authority", () => {
     expect(resolved.source).toBe("current_compatibility");
   });
 
-  it("dispatches identical ChatMessage[] and resolves identical contract to secondary on failover", async () => {
+  it("dispatches identical ChatMessage[] and resolves the same Mistral contract on credential failover", async () => {
     const root = controlRoot();
-    env.nimApiKey = "test";
-    env.groqApiKey = "test";
+    env.mistralApiKey = "test-primary";
+    env.mistralApiKeySecondary = "test-secondary";
     const thoughtDb = db();
 
     let primaryMessages: unknown = null;
     let secondaryMessages: unknown = null;
+    let primaryContract: unknown = null;
+    let secondaryContract: unknown = null;
 
-    const nimDispatch = vi.fn(async (args: { messages: unknown[] }) => {
+    const mistralDispatch = vi.fn(async (args: {
+      messages: unknown[];
+      credentialSeat?: string;
+      fabricStructuredOutput?: unknown;
+      fabricReasoning?: unknown;
+    }) => {
       primaryMessages = args.messages;
-      const error = new Error("NIM 503 service unavailable");
-      (error as any).status = 503;
-      throw error;
-    });
-
-    const groqDispatch = vi.fn(async (args: { messages: unknown[]; modelId: string }) => {
+      primaryContract = {
+        structured: args.fabricStructuredOutput,
+        reasoning: args.fabricReasoning,
+      };
+      if (args.credentialSeat === "mistral_primary") {
+        throw new AppError(
+          "rate_limited",
+          "Mistral account rate limited",
+          429,
+          undefined,
+          "account",
+        );
+      }
       secondaryMessages = args.messages;
+      secondaryContract = {
+        structured: args.fabricStructuredOutput,
+        reasoning: args.fabricReasoning,
+      };
       return {
         text: '{"draft":"ok"}',
-        providerModel: "openai/gpt-oss-20b",
+        providerModel: "mistral-small-2603",
         usage: { promptTokens: 100, completionTokens: 50 },
         finishReason: "stop",
       };
     });
 
-    vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
-      provider: "nim",
-      dispatch: nimDispatch,
-    });
-    vi.spyOn(groqAdapterModule, "createGroqAdapter").mockReturnValue({
-      provider: "groq",
-      dispatch: groqDispatch,
+    vi.spyOn(mistralAdapterModule, "createMistralAdapter").mockReturnValue({
+      provider: "mistral",
+      dispatch: mistralDispatch,
     });
 
     const testMessages = [
@@ -517,68 +543,52 @@ describe("MF-ACT dispatch authority", () => {
       logicalRole: "thought",
       lane: "interactive",
       route: "thought",
-      model: "openai/gpt-oss-20b",
+      model: "mistral-small-2603",
       maxTokens: 2048,
       modelFabricControlDir: root,
       modelFabricControlRootMode: "fixture",
     });
 
-    expect(nimDispatch).toHaveBeenCalledTimes(1);
-    expect(groqDispatch).toHaveBeenCalledTimes(1);
+    expect(mistralDispatch).toHaveBeenCalledTimes(2);
     expect(primaryMessages).toEqual(secondaryMessages);
+    expect(primaryContract).toEqual(secondaryContract);
     expect(result.text).toBe('{"draft":"ok"}');
     const receipt = result.modelFabric?.receipt;
-    expect(receipt && receipt.receiptStage === "resolved" ? receipt.fallbackClass : null).toBe("transport_failover");
+    expect(receipt && receipt.receiptStage === "resolved" ? receipt.fallbackClass : null).toBe("credential_failover");
 
     thoughtDb.close();
   });
 
-  it("suppresses secondary Groq failover before send when request exceeds 8000 TPM", async () => {
+  it("suppresses credential failover when no secondary Mistral credential is configured", async () => {
     const root = controlRoot();
-    env.nimApiKey = "test";
-    env.groqApiKey = "test";
+    env.mistralApiKey = "test-primary";
+    env.mistralApiKeySecondary = "";
     const thoughtDb = db();
 
-    const nimDispatch = vi.fn(async () => {
-      const error = new Error("NIM 503 service unavailable");
-      (error as any).status = 503;
-      throw error;
+    const mistralDispatch = vi.fn(async () => {
+      throw new AppError(
+        "credential_invalid",
+        "Mistral credential rejected",
+        401,
+        undefined,
+        "account",
+      );
     });
 
-    const groqDispatch = vi.fn(async () => {
-      return {
-        text: '{"draft":"ok"}',
-        providerModel: "openai/gpt-oss-20b",
-        usage: { promptTokens: 10, completionTokens: 10 },
-        finishReason: "stop",
-      };
+    vi.spyOn(mistralAdapterModule, "createMistralAdapter").mockReturnValue({
+      provider: "mistral",
+      dispatch: mistralDispatch,
     });
-
-    vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
-      provider: "nim",
-      dispatch: nimDispatch,
-    });
-    vi.spyOn(groqAdapterModule, "createGroqAdapter").mockReturnValue({
-      provider: "groq",
-      dispatch: groqDispatch,
-    });
-
-    // Message demand: ~4300 input tokens + 4096 maxTokens = ~8396 total demand.
-    // Fits NIM (16,000 TPM), but exceeds Groq (8,000 TPM).
-    const largeMessages = [
-      { role: "system" as const, content: "You are Thought layer." },
-      { role: "user" as const, content: "word ".repeat(4300) },
-    ];
 
     let caughtError: unknown = null;
     try {
-      await completeChat(largeMessages, {
+      await completeChat([{ role: "user", content: "think" }], {
         attentionDb: thoughtDb,
         purpose: "thought",
         logicalRole: "thought",
         lane: "interactive",
         route: "thought",
-        model: "openai/gpt-oss-20b",
+        model: "mistral-small-2603",
         maxTokens: 4096,
         modelFabricControlDir: root,
         modelFabricControlRootMode: "fixture",
@@ -588,20 +598,19 @@ describe("MF-ACT dispatch authority", () => {
     }
 
     expect(caughtError).toBeInstanceOf(Error);
-    expect((caughtError as Error).message).toContain("NVIDIA NIM unavailable");
-    expect(nimDispatch).toHaveBeenCalledTimes(1);
-    expect(groqDispatch).not.toHaveBeenCalled(); // Suppressed before send!
+    expect((caughtError as Error).message).toContain("Mistral credential rejected");
+    expect(mistralDispatch).toHaveBeenCalledTimes(1);
 
     const mfMeta = metadataFromError(caughtError);
     expect(mfMeta).not.toBeNull();
-    expect(mfMeta?.failoverSuppressed).toBe("transport_failover_unavailable_for_projection");
-    expect(mfMeta?.suppressedProvider).toBe("groq");
-    expect(mfMeta?.suppressedBucket).toBe("groq:openai/gpt-oss-20b");
+    expect(mfMeta?.failoverSuppressed).toBe("mistral_secondary_credential_unavailable");
+    expect(mfMeta?.suppressedProvider).toBe("mistral");
+    expect(mfMeta?.suppressedBucket).toBe("mistral:mistral-small-2603");
     expect(mfMeta?.receipt.receiptStage).toBe("resolved");
     if (mfMeta?.receipt.receiptStage === "resolved") {
       expect(mfMeta.receipt.attempts.length).toBe(1);
-      expect(mfMeta.receipt.attempts[0].provider).toBe("nim");
-      expect(["response_received", "sent_outcome_unknown"]).toContain(mfMeta.receipt.attempts[0].dispatchTruth);
+      expect(mfMeta.receipt.attempts[0].provider).toBe("mistral");
+      expect(mfMeta.receipt.attempts[0].dispatchTruth).toBe("response_received");
     }
 
     thoughtDb.close();

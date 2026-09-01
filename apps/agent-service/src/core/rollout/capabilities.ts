@@ -251,6 +251,62 @@ function readGitRelease(): string {
   }
 }
 
+function normalizeQualificationSha(value: string, invalidCode: string): string {
+  const normalized = value.trim().toLowerCase();
+  if (!/^[0-9a-f]{40}$/.test(normalized)) {
+    const error = new Error(invalidCode) as Error & { code: string };
+    error.code = invalidCode;
+    throw error;
+  }
+  return normalized;
+}
+
+/** The checkout-derived identity used by isolated candidate qualification. */
+export function qualificationCheckoutIdentity(): string {
+  return readGitRelease();
+}
+
+/**
+ * Resolve candidate identity without allowing credentials or a production
+ * environment's release label to stand in for the checked-out source.
+ *
+ * An empty qualification release label is allowed because credentials may be
+ * inherited without an identity label. A non-empty label must agree exactly.
+ */
+export function resolveQualificationBuildIdentity(input: {
+  expectedCandidateSha: string;
+  actualCheckoutIdentity: string;
+  qualificationReleaseIdentity: string;
+}): string {
+  const expected = normalizeQualificationSha(
+    input.expectedCandidateSha,
+    "qualification_candidate_sha_invalid",
+  );
+  const actual = normalizeQualificationSha(
+    input.actualCheckoutIdentity,
+    "qualification_checkout_identity_invalid",
+  );
+  if (actual !== expected) {
+    const error = new Error("qualification_checkout_identity_mismatch") as Error & { code: string };
+    error.code = "qualification_checkout_identity_mismatch";
+    throw error;
+  }
+
+  const release = input.qualificationReleaseIdentity.trim();
+  if (release.length > 0) {
+    const normalizedRelease = normalizeQualificationSha(
+      release,
+      "qualification_release_identity_invalid",
+    );
+    if (normalizedRelease !== expected) {
+      const error = new Error("qualification_release_identity_mismatch") as Error & { code: string };
+      error.code = "qualification_release_identity_mismatch";
+      throw error;
+    }
+  }
+  return expected;
+}
+
 /** Observability only — never keys capability evidence. */
 export function currentBuildIdentity(): string {
   return env.ashleyReleaseId.trim() || readGitRelease();

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { openNuclearDb } from "../db.js";
+import { openContinuityDb } from "../continuity/db.js";
 import {
   currentBuildIdentity,
   currentContractId,
@@ -125,7 +126,10 @@ describe("Reflection OCI adjudication", () => {
 
   it("keeps invalid resolutions open, records disposition, and reaches the valid ninth request", async () => {
     const path = join(tmpdir(), `ashley-reflection-fairness-${randomUUID()}.db`);
-    let db = openNuclearDb(new DatabaseSync(path));
+    const continuity = openContinuityDb(new DatabaseSync(":memory:"));
+    let db = openNuclearDb(new DatabaseSync(path), {
+      continuity,
+    });
     activateReading(db);
     const valid = seedReviewItem(db, "valid-ninth");
     const invalid = Array.from({ length: 8 }, (_, index) => seedReviewItem(db, `invalid-${index}`));
@@ -161,7 +165,9 @@ describe("Reflection OCI adjudication", () => {
       const firstAttemptIds = [...attemptedIds];
 
       db.close();
-      db = openNuclearDb(new DatabaseSync(path));
+      db = openNuclearDb(new DatabaseSync(path), {
+        continuity,
+      });
 
       const second = await processPendingOpenCognitiveReviewsAsync(db, OWNER_ID, adjudicator);
       expect(second).toEqual({ processed: 1, skipped: 0 });
@@ -174,6 +180,7 @@ describe("Reflection OCI adjudication", () => {
       } catch {
         // The connection was already closed before the restart assertion.
       }
+      continuity.close();
       unlinkSync(path);
     }
   });

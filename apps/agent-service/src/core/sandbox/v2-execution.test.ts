@@ -20,6 +20,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { openNuclearDb } from "../db.js";
+import { openContinuityDb } from "../continuity/db.js";
 import {
   currentReleaseId,
   currentContractId,
@@ -95,7 +96,9 @@ describe("Sandbox V2 Execution Adapter & Operator Registry", () => {
 
     it("evaluates canOfferProjectInspection across capability, lifecycle, substrate, and registry", () => {
       const path = join(tmpdir(), `ashley-offer-gate-${Date.now()}.db`);
-      const db = openNuclearDb(new DatabaseSync(path));
+      const db = openNuclearDb(new DatabaseSync(path), {
+        continuity: openContinuityDb(new DatabaseSync(":memory:")),
+      });
       const registry = new V2ProjectReadRegistry([
         {
           projectId: "project-ashley",
@@ -201,7 +204,9 @@ describe("Sandbox V2 Execution Adapter & Operator Registry", () => {
 
     it("fails closed with project_inspection_gate_denied when capability is in observe mode", async () => {
       const path = join(tmpdir(), `ashley-cap-gate-${Date.now()}.db`);
-      const db = openNuclearDb(new DatabaseSync(path));
+      const db = openNuclearDb(new DatabaseSync(path), {
+        continuity: openContinuityDb(new DatabaseSync(":memory:")),
+      });
 
       try {
         const res = await executeProjectInspectionV2({
@@ -690,7 +695,9 @@ describe("Sandbox V2 Execution Adapter & Operator Registry", () => {
   describe("executeWorkspaceExperimentV2 & Candidate Workspace", () => {
     it("evaluates canOfferCandidateWorkspace requiring project_experimentation and candidateWorkspaceAllowed", () => {
       const path = join(tmpdir(), `ashley-ws-gate-${Date.now()}.db`);
-      const db = openNuclearDb(new DatabaseSync(path));
+      const db = openNuclearDb(new DatabaseSync(path), {
+        continuity: openContinuityDb(new DatabaseSync(":memory:")),
+      });
       const regAllowed = new V2ProjectReadRegistry([
         {
           projectId: "project-ashley",

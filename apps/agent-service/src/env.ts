@@ -127,7 +127,10 @@ function createEnv() {
   return {
   ashleyReleaseId: process.env.ASHLEY_RELEASE_ID ?? "",
   mistralApiKey: process.env.MISTRAL_API_KEY ?? "",
-  mistralModel: process.env.MISTRAL_MODEL ?? "mistral-medium-latest",
+  mistralApiKeySecondary: process.env.MISTRAL_API_KEY_SECONDARY ?? "",
+  mistralBaseUrl:
+    process.env.MISTRAL_BASE_URL ?? "https://api.mistral.ai/v1",
+  mistralModel: process.env.MISTRAL_MODEL ?? "mistral-small-2603",
   mistralReasoningEffort:
     (process.env.MISTRAL_REASONING_EFFORT as
       | "low"

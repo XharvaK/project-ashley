@@ -21,12 +21,14 @@ type ResolvedFabricMetadata = ModelFabricDispatchMetadata & {
 
 const savedKeys = {
   mistral: env.mistralApiKey,
+  mistralSecondary: env.mistralApiKeySecondary,
   groq: env.groqApiKey,
   nim: env.nimApiKey,
 };
 
 afterEach(() => {
   env.mistralApiKey = savedKeys.mistral;
+  env.mistralApiKeySecondary = savedKeys.mistralSecondary;
   env.groqApiKey = savedKeys.groq;
   env.nimApiKey = savedKeys.nim;
   resetAdapterCache();
@@ -52,20 +54,21 @@ function resolvedMetadata(value: unknown): ResolvedFabricMetadata {
 }
 
 describe("SLICE 0 receipt truth", () => {
-  it("keeps transport_failover on a failed two-attempt Thought invocation", async () => {
-    env.nimApiKey = "test";
-    env.groqApiKey = "test";
-    vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
-      provider: "nim",
-      dispatch: vi.fn().mockRejectedValue(
-        new AppError("provider_unavailable", "NIM unavailable", 503),
+  it("keeps credential_failover on a failed two-attempt Thought invocation", async () => {
+    env.mistralApiKey = "test-primary";
+    env.mistralApiKeySecondary = "test-secondary";
+    const dispatch = vi.fn().mockRejectedValue(
+      new AppError(
+        "credential_invalid",
+        "Mistral credential rejected",
+        401,
+        undefined,
+        "account",
       ),
-    });
-    vi.spyOn(groqAdapterModule, "createGroqAdapter").mockReturnValue({
-      provider: "groq",
-      dispatch: vi.fn().mockRejectedValue(
-        new AppError("provider_unavailable", "Groq unavailable", 503),
-      ),
+    );
+    vi.spyOn(mistralAdapterModule, "createMistralAdapter").mockReturnValue({
+      provider: "mistral",
+      dispatch,
     });
     const database = db();
     let thrown: unknown;
@@ -83,27 +86,23 @@ describe("SLICE 0 receipt truth", () => {
 
     const fabric = resolvedMetadata(thrown);
     expect(fabric.receipt.receiptStage).toBe("resolved");
-    expect(fabric.receipt.fallbackClass).toBe("transport_failover");
+    expect(fabric.receipt.fallbackClass).toBe("credential_failover");
     expect(fabric.receipt.attempts).toHaveLength(2);
+    expect(dispatch).toHaveBeenCalledTimes(2);
     database.close();
   });
 
-  it("does not classify an ineligible Thought abort as transport failover", async () => {
-    env.nimApiKey = "test";
-    env.groqApiKey = "test";
-    const nimDispatch = vi.fn().mockImplementation(async () => {
+  it("does not classify an ineligible Thought abort as credential failover", async () => {
+    env.mistralApiKey = "test-primary";
+    env.mistralApiKeySecondary = "test-secondary";
+    const dispatch = vi.fn().mockImplementation(async () => {
       const error = new Error("aborted");
       error.name = "AbortError";
       throw error;
     });
-    const groqDispatch = vi.fn();
-    vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
-      provider: "nim",
-      dispatch: nimDispatch,
-    });
-    vi.spyOn(groqAdapterModule, "createGroqAdapter").mockReturnValue({
-      provider: "groq",
-      dispatch: groqDispatch,
+    vi.spyOn(mistralAdapterModule, "createMistralAdapter").mockReturnValue({
+      provider: "mistral",
+      dispatch,
     });
     const database = db();
     let thrown: unknown;
@@ -122,23 +121,25 @@ describe("SLICE 0 receipt truth", () => {
     const fabric = resolvedMetadata(thrown);
     expect(fabric.receipt.fallbackClass).toBe("none");
     expect(fabric.receipt.attempts).toHaveLength(1);
-    expect(groqDispatch).not.toHaveBeenCalled();
+    expect(dispatch).toHaveBeenCalledTimes(1);
     database.close();
   });
 
-  it("does not classify a deadline-blocked Thought fallback as transport failover", async () => {
-    env.nimApiKey = "test";
-    env.groqApiKey = "test";
-    vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
-      provider: "nim",
-      dispatch: vi.fn().mockRejectedValue(
-        new AppError("rate_limited", "NIM rate limited", 429),
+  it("does not classify a deadline-blocked Thought credential hop as credential failover", async () => {
+    env.mistralApiKey = "test-primary";
+    env.mistralApiKeySecondary = "test-secondary";
+    const dispatch = vi.fn().mockRejectedValue(
+      new AppError(
+        "rate_limited",
+        "Mistral account rate limited",
+        429,
+        undefined,
+        "account",
       ),
-    });
-    const groqDispatch = vi.fn();
-    vi.spyOn(groqAdapterModule, "createGroqAdapter").mockReturnValue({
-      provider: "groq",
-      dispatch: groqDispatch,
+    );
+    vi.spyOn(mistralAdapterModule, "createMistralAdapter").mockReturnValue({
+      provider: "mistral",
+      dispatch,
     });
     const database = db();
     let thrown: unknown;
@@ -157,17 +158,17 @@ describe("SLICE 0 receipt truth", () => {
     const fabric = resolvedMetadata(thrown);
     expect(fabric.receipt.fallbackClass).toBe("none");
     expect(fabric.receipt.attempts).toHaveLength(1);
-    expect(groqDispatch).not.toHaveBeenCalled();
+    expect(dispatch).toHaveBeenCalledTimes(1);
     database.close();
   });
 
-  it("does not classify Expression failure as Thought transport failover", async () => {
-    env.mistralApiKey = "test";
+  it("does not classify Expression failure as Thought credential failover", async () => {
+    env.nimApiKey = "test-nim";
     const dispatch = vi.fn().mockRejectedValue(
-      new AppError("rate_limited", "Mistral rate limited", 429),
+      new AppError("rate_limited", "NIM rate limited", 429),
     );
-    vi.spyOn(mistralAdapterModule, "createMistralAdapter").mockReturnValue({
-      provider: "mistral",
+    vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
+      provider: "nim",
       dispatch,
     });
     const database = db();
@@ -184,14 +185,15 @@ describe("SLICE 0 receipt truth", () => {
     }
 
     expect(resolvedMetadata(thrown).receipt.fallbackClass).toBe("none");
+    expect(dispatch).toHaveBeenCalledTimes(1);
     database.close();
   });
 
   it("records an SDK-shaped HTTP status as response_received", async () => {
-    env.mistralApiKey = "test";
+    env.nimApiKey = "test-nim";
     const sdkError = Object.assign(new Error("429 from SDK"), { status: 429 });
-    vi.spyOn(mistralAdapterModule, "createMistralAdapter").mockReturnValue({
-      provider: "mistral",
+    vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
+      provider: "nim",
       dispatch: vi.fn().mockRejectedValue(sdkError),
     });
     const database = db();
@@ -216,11 +218,11 @@ describe("SLICE 0 receipt truth", () => {
   });
 
   it.each([
-    ["groq", createGroqAdapter],
-    ["nim", createNimAdapter],
+    ["groq", createGroqAdapter, "ashley_expression_fallback", "expression"],
+    ["nim", createNimAdapter, "utility_bulk", "exchange_cognition"],
   ] as const)(
     "keeps %s connection failure as sent_outcome_unknown",
-    async (provider, createAdapter) => {
+    async (provider, createAdapter, route, purpose) => {
       if (provider === "groq") env.groqApiKey = "test";
       else env.nimApiKey = "test";
       const adapter = createAdapter(async () => {
@@ -238,8 +240,8 @@ describe("SLICE 0 receipt truth", () => {
         await withOfflineAppGateDisabled(() =>
           completeChat([{ role: "user", content: "utility" }], {
             attentionDb: database,
-            purpose: provider === "groq" ? "exchange_cognition" : "thought",
-            route: provider === "groq" ? "utility_bulk" : "thought",
+            purpose,
+            route,
             deadlineAtMs: Date.now() + 10_000,
           }),
         );

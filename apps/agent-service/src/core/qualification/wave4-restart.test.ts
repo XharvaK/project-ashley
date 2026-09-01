@@ -17,6 +17,7 @@ import { armGroqKey, fakeAnalyze, restoreGroqKey } from "./counterfactual-harnes
 import { clearCaptures } from "./mistral-client-mock-state.js";
 import { expectLiveEquivalent, snapshotLive } from "./state-inventory.js";
 import { openNuclearDb } from "../db.js";
+import { openContinuityDb } from "../continuity/db.js";
 import { AshleyCore } from "../runtime.js";
 import { processNextCognitiveJob } from "../cognition/worker.js";
 
@@ -28,10 +29,11 @@ import { processNextCognitiveJob } from "../cognition/worker.js";
  * conversation continues. Shadow ON and shadow OFF clones use independent DB
  * paths (a true A/B) and are restarted at the same point in the script.
  *
- * Known limitation: only nuclear.db persistence is asserted. The continuity
- * sidecar is an in-memory DB in this harness, so lineage/session rows are NOT
- * carried across the restart; `lineage_mirror` and the continuity DB are
- * CONTROL_PLANE and outside the live behavioral projection anyway.
+ * Known limitation: only nuclear.db persistence is asserted. The in-memory
+ * continuity sidecar is reused across the simulated restart so the current
+ * lineage contract can be satisfied, but its independent persistence is not
+ * under test; `lineage_mirror` and continuity are CONTROL_PLANE and outside
+ * the live behavioral projection anyway.
  */
 
 const OWNER = "doc";
@@ -40,13 +42,17 @@ const OWNER = "doc";
 class RestartableFixture {
   readonly dbPath: string;
   readonly shadow: boolean;
+  readonly continuity: DatabaseSync;
   db: DatabaseSync;
   core: AshleyCore;
 
   constructor(shadow: boolean) {
     this.shadow = shadow;
     this.dbPath = join(tmpdir(), `ashley-nuclear-restart-${randomUUID()}.db`);
-    this.db = openNuclearDb(new DatabaseSync(this.dbPath));
+    this.continuity = openContinuityDb(new DatabaseSync(":memory:"));
+    this.db = openNuclearDb(new DatabaseSync(this.dbPath), {
+      continuity: this.continuity,
+    });
     this.core = new AshleyCore(this.db);
   }
 
@@ -78,7 +84,9 @@ class RestartableFixture {
   /** Simulated process restart: same file, brand-new handles. */
   restart(): void {
     this.db.close();
-    this.db = openNuclearDb(new DatabaseSync(this.dbPath));
+    this.db = openNuclearDb(new DatabaseSync(this.dbPath), {
+      continuity: this.continuity,
+    });
     this.core = new AshleyCore(this.db);
   }
 
@@ -95,6 +103,11 @@ class RestartableFixture {
   close(): void {
     try {
       this.db.close();
+    } catch {
+      /* noop */
+    }
+    try {
+      this.continuity.close();
     } catch {
       /* noop */
     }

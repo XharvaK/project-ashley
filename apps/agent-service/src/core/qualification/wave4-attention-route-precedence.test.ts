@@ -18,16 +18,16 @@ vi.mock("../attention/index.js", () => ({
       providerId: input.providerId,
     });
     return {
-      result: { text: "x", providerModel: "x" },
+      result: { text: "x", providerModel: "mistral-small-2603" },
       modelAlias: input.routeAlias ?? "unknown",
-      resolvedModelId: "x",
+      resolvedModelId: "mistral-small-2603",
       requestId: 1,
       acceptedDispatchIdentity: {
         requestId: 1,
         dispatchSequence: 1,
         routeAlias: input.routeAlias ?? null,
         modelAlias: input.routeAlias ?? "unknown",
-        resolvedModelId: "x",
+        resolvedModelId: "mistral-small-2603",
         modelEpoch: 0,
         modelIdentity: "test-model-identity",
         contractId: "phase5-test-contract",
@@ -42,6 +42,7 @@ vi.mock("../attention/index.js", () => ({
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { completeChat } from "../../mistral-client.js";
 import { openNuclearDb } from "../db.js";
+import { openContinuityDb } from "../continuity/db.js";
 import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -73,7 +74,9 @@ describe("wave4 Track M — route precedence for thought_observation", () => {
     env.groqApiKey = "wave4-fake-groq";
     env.mistralApiKey = "wave4-fake-mistral";
     dbPath = join(tmpdir(), `ashley-nuclear-${randomUUID()}.db`);
-    db = openNuclearDb(new DatabaseSync(dbPath));
+    db = openNuclearDb(new DatabaseSync(dbPath), {
+      continuity: openContinuityDb(new DatabaseSync(":memory:")),
+    });
     dispatchCalls.length = 0;
   });
   afterEach(() => {

@@ -16,6 +16,7 @@ import { DatabaseSync } from "node:sqlite";
 import { env } from "../../env.js";
 import { completeChat } from "../../mistral-client.js";
 import { openNuclearDb } from "../db.js";
+import { openContinuityDb } from "../continuity/db.js";
 import { Fixture, armGroqKey, restoreGroqKey } from "./counterfactual-harness.js";
 import { installFakeClock, uninstallFakeClock } from "./fake-clock.js";
 import { thoughtCapture, clearCaptures } from "./mistral-client-mock-state.js";
@@ -53,7 +54,7 @@ import {
 
 const EXPRESSION_ROUTE = routeBinding("ashley_expression");
 const THOUGHT_ROUTE = routeBinding("thought");
-const MISTRAL_BUCKET = bucketForRoute("ashley_expression");
+const EXPRESSION_BUCKET = bucketForRoute("ashley_expression");
 const THOUGHT_BUCKET = bucketForRoute("thought");
 
 const SAVED = { groq: env.groqApiKey, mistral: env.mistralApiKey, nim: env.nimApiKey };
@@ -62,7 +63,9 @@ const temps: Array<{ db: DatabaseSync; path: string }> = [];
 
 function tempDb(): DatabaseSync {
   const path = join(tmpdir(), `ashley-nuclear-${randomUUID()}.db`);
-  const db = openNuclearDb(new DatabaseSync(path));
+  const db = openNuclearDb(new DatabaseSync(path), {
+    continuity: openContinuityDb(new DatabaseSync(":memory:")),
+  });
   temps.push({ db, path });
   return db;
 }
@@ -92,7 +95,7 @@ function enqueueLiveExpression(
       purpose: "expression",
       modelAlias: EXPRESSION_ROUTE.configuredModelId,
       providerId: EXPRESSION_ROUTE.provider,
-      quotaBucket: MISTRAL_BUCKET,
+      quotaBucket: EXPRESSION_BUCKET,
       routeAlias: "ashley_expression",
       estimatedInputTokens: 200,
       estimatedOutputTokens: 200,
@@ -179,9 +182,9 @@ describe("wave4 Track M1 — shadow Thought dispatch wiring (no network)", () =>
     }
   });
 
-  it("route='thought' resolves to the production-equivalent nim 20B binding", () => {
-    expect(THOUGHT_ROUTE.provider).toBe("nim");
-    expect(THOUGHT_ROUTE.configuredModelId).toBe("openai/gpt-oss-20b");
+  it("route='thought' resolves to the current Mistral Small binding", () => {
+    expect(THOUGHT_ROUTE.provider).toBe("mistral");
+    expect(THOUGHT_ROUTE.configuredModelId).toBe("mistral-small-2603");
     expect(THOUGHT_ROUTE.enabled).toBe(true);
   });
 });
@@ -270,7 +273,7 @@ describe("wave4 Track M2 — ledger A/B: shadow Thought vs live Expression admis
         purpose: "expression",
         lane: "interactive",
         providerId: EXPRESSION_ROUTE.provider,
-        quotaBucket: MISTRAL_BUCKET,
+        quotaBucket: EXPRESSION_BUCKET,
         routeAlias: "ashley_expression",
         modelAlias: EXPRESSION_ROUTE.configuredModelId,
         maxTokens: 64,
@@ -340,14 +343,14 @@ describe("wave4 Track M4 — quota bucket isolation (NO DEFECT)", () => {
     closeTempDbs();
   });
 
-  it("groq-thought and mistral-expression resolve to different quota buckets", () => {
-    expect(THOUGHT_BUCKET).toBe("nim:openai/gpt-oss-20b");
-    expect(MISTRAL_BUCKET).toBe("mistral:mistral-medium-latest");
-    expect(THOUGHT_BUCKET).not.toBe(MISTRAL_BUCKET);
+  it("Thought and Expression resolve to different quota buckets", () => {
+    expect(THOUGHT_BUCKET).toBe("mistral:mistral-small-2603");
+    expect(EXPRESSION_BUCKET).toBe("nim:nvidia/nemotron-3.5-lightning-30b-a3b");
+    expect(THOUGHT_BUCKET).not.toBe(EXPRESSION_BUCKET);
     expect(THOUGHT_ROUTE.provider).not.toBe(EXPRESSION_ROUTE.provider);
   });
 
-  it("saturating the groq-thought TPM window leaves the mistral-expression bucket dispatchable now", () => {
+  it("saturating the Thought TPM window leaves the Expression bucket dispatchable now", () => {
     const clock = createFakeClock(Date.parse("2026-02-01T00:00:00.000Z"));
     const db = tempDb();
     const thoughtTpm = quotaContractFor(THOUGHT_BUCKET).tpm;
@@ -371,7 +374,7 @@ describe("wave4 Track M4 — quota bucket isolation (NO DEFECT)", () => {
     expect(
       earliestLegalDispatchMs(db, 100, clock, THOUGHT_BUCKET),
     ).toBeGreaterThan(clock.nowMs());
-    expect(earliestLegalDispatchMs(db, 100, clock, MISTRAL_BUCKET)).toBe(
+    expect(earliestLegalDispatchMs(db, 100, clock, EXPRESSION_BUCKET)).toBe(
       clock.nowMs(),
     );
   });

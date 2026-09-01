@@ -55,6 +55,44 @@ function baseDecision(overrides: Partial<Decision> = {}): Decision {
 }
 
 describe("Thought sub-deadline and observation", () => {
+  it("uses the Mistral credential for Thought observation when Groq is absent", async () => {
+    env.groqApiKey = "";
+    env.mistralApiKey = "mistral-test-key";
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const complete = vi.spyOn(mistral, "completeChat").mockResolvedValue({
+      text: JSON.stringify({
+        kind: "speak",
+        shouldSpeak: true,
+        effort: "medium",
+        completion: "answer",
+        evidenceDisposition: "sufficient",
+        uncertainty: 0.2,
+        urgency: 0.1,
+        objective: "reply",
+        reason: "ok",
+        motivationIds: [1],
+      }),
+      model: "mistral-small-2603",
+      modelAlias: "mistral-small-2603",
+      resolvedModelId: "mistral-small-2603",
+    });
+    try {
+      enqueueThoughtObservation({
+        db,
+        decision: baseDecision(),
+        motivations: [
+          { id: 1, kind: "user_message", score: 40, summary: "hi" } as Motivation,
+        ],
+        trigger: "reactive",
+        decisionId: 41,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(complete).toHaveBeenCalledTimes(1);
+    } finally {
+      db.close();
+    }
+  });
+
   it("skips model Thought when sub-deadline has already passed", async () => {
     env.groqApiKey = "test";
     const db = openNuclearDb(new DatabaseSync(":memory:"));

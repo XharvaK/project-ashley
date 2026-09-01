@@ -56,7 +56,8 @@ function contractForProvider(provider: ProviderId): QuotaContract | "env" {
 const PURPOSE_TO_ROUTE: Partial<Record<string, RouteId>> = {
   expression: "ashley_expression",
   thought: "thought",
-  thought_observation: "utility_bulk",
+  thought_observation: "thought",
+  reflection_initiative: "thought",
   exchange_cognition: "utility_bulk",
   curiosity_consolidation: "utility_bulk",
   maintenance: "utility_bulk",
@@ -130,9 +131,6 @@ export function routeReady(route: RouteId): boolean {
     if (!enabled) return false;
     const provider = matched ? matched.provider : binding.provider;
     if (providerKeyPresent(provider)) return true;
-    if (route === "thought" && provider === "nim" && providerKeyPresent("groq")) {
-      return true;
-    }
     return false;
   } catch {
     return false;

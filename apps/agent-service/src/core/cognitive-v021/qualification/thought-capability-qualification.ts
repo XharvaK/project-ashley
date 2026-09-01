@@ -54,7 +54,11 @@ import { THOUGHT_QUALIFICATION_RESULT_SCHEMA } from "../../model-fabric/catalog.
 import { capabilityProfileFor } from "../../model-fabric/profiles.js";
 import { currentPortfolio, resolveCurrentPolicy } from "../../model-fabric/portfolio.js";
 import { THOUGHT_KERNEL_ENVELOPE_VERSION } from "../thought/kernel-envelope.js";
-import { currentBuildIdentity } from "../../rollout/capabilities.js";
+import {
+  currentBuildIdentity,
+  qualificationCheckoutIdentity,
+  resolveQualificationBuildIdentity,
+} from "../../rollout/capabilities.js";
 import { metadataFromError } from "../../model-fabric/receipts.js";
 import { sha256Text, stableJson } from "../../model-fabric/hash.js";
 import type {
@@ -62,7 +66,14 @@ import type {
   CompletionOptions,
 } from "../../model-routing/types.js";
 import type {
+  DispatchTruth,
+  ModelFailure,
+} from "../../model-fabric/types.js";
+import type {
+  QualificationDiagnostics,
   QualificationGateStatus,
+  QualificationFirstFailureBoundary,
+  QualificationReachability,
   ThoughtQualificationCaseId,
   ThoughtQualificationCaseResult,
   ThoughtQualificationEnvironment,
@@ -87,6 +98,12 @@ export type QualificationGateEvidence = Readonly<{
   wireBindingId?: string | null;
   providerDeclaredEnforcement?: string | null;
   capabilityFingerprint?: string | null;
+  dispatchTruth?: DispatchTruth | null;
+  dispatchStage?: ModelFailure["stage"] | null;
+  providerRequestStarted?: boolean;
+  providerResponseReceived?: boolean;
+  attemptId?: string | null;
+  errorCode?: string | null;
   extraFailureCodes?: readonly string[];
 }>;
 
@@ -95,6 +112,7 @@ export type ThoughtCapabilityQualificationInput = Readonly<{
   provider: string;
   model: string;
   allowlistedReferences: readonly string[];
+  candidateSha?: string;
   runId?: string;
   outputDir?: string;
   samples?: number;
@@ -108,8 +126,8 @@ type SchemaMode = ThoughtCapabilityComponents["schemaEnforcementMode"];
 type Digest = ThoughtQualificationCaseResult["rawContentDigest"];
 
 const CANDIDATE = {
-  provider: "nim" as const,
-  model: "openai/gpt-oss-20b" as const,
+  provider: "mistral" as const,
+  model: "mistral-small-2603" as const,
 };
 const ROUTE_ID = "thought";
 const MAX_THOUGHT_OUTPUT_TOKENS = 4_096;
@@ -142,8 +160,8 @@ type CandidatePreflight = Readonly<{
   registryVersion: string;
   policyRowId: string;
   occupantId: string;
-  provider: "nim";
-  model: "openai/gpt-oss-20b";
+  provider: "mistral";
+  model: "mistral-small-2603";
   logicalBindingId: string;
   schemaFingerprint: string;
   wireBindingId: string;
@@ -161,6 +179,15 @@ type CompletionCapture = {
   endedAtMs: number;
   errorCode: string | null;
   outcomeUnknown: boolean;
+  dispatchTruth: DispatchTruth | null;
+  dispatchStage: ModelFailure["stage"] | null;
+  providerRequestStarted: boolean;
+  providerResponseReceived: boolean;
+  attemptId: string | null;
+  provider: string | null;
+  model: string | null;
+  wireEvidence: WireDispatchEvidence | null;
+  capabilityFingerprint: string | null;
 };
 
 type W0Sequence = Readonly<{
@@ -170,7 +197,16 @@ type W0Sequence = Readonly<{
 }>;
 
 type SchemaRecord = Record<string, unknown>;
-type OracleResult = { ok: true } | { ok: false; code: string };
+type OracleResult =
+  | { ok: true }
+  | {
+      ok: false;
+      code: string;
+      keyword: string | null;
+      instancePath: string;
+      schemaPath: string;
+      branch: string | null;
+    };
 
 const SCHEMA_METADATA_KEYS = new Set(["$schema", "$id", "title", "$defs"]);
 const SUPPORTED_SCHEMA_KEYWORDS = new Set([
@@ -268,58 +304,113 @@ function schemaTypeMatches(value: unknown, type: unknown): boolean {
   });
 }
 
+function oracleFailure(
+  code: string,
+  keyword: string | null,
+  instancePath: string,
+  schemaPath: string,
+  branch: string | null = null,
+): OracleResult {
+  return { ok: false, code, keyword, instancePath, schemaPath, branch };
+}
+
+function escapeJsonPointerSegment(value: string): string {
+  return value.replaceAll("~", "~0").replaceAll("/", "~1");
+}
+
+function schemaBranchIdentity(schema: unknown, index: number): string {
+  if (isRecord(schema) && isRecord(schema.properties)) {
+    const kind = schema.properties.kind;
+    if (isRecord(kind) && Object.prototype.hasOwnProperty.call(kind, "const")) {
+      return `kind=${String(kind.const)}`;
+    }
+  }
+  return `index=${index}`;
+}
+
 function validateSchemaNode(
   value: unknown,
   schema: unknown,
   root: SchemaRecord,
   path: string,
+  schemaPath: string,
 ): OracleResult {
-  if (!isRecord(schema)) return { ok: false, code: "schema_node_invalid:" + path };
+  if (!isRecord(schema)) {
+    return oracleFailure("schema_node_invalid:" + path, null, path, schemaPath);
+  }
   for (const key of Object.keys(schema)) {
     if (!SCHEMA_METADATA_KEYS.has(key) && !SUPPORTED_SCHEMA_KEYWORDS.has(key)) {
-      return { ok: false, code: "thought_schema_oracle_unsupported_keyword:" + key };
+      return oracleFailure(
+        "thought_schema_oracle_unsupported_keyword:" + key,
+        key,
+        path,
+        `${schemaPath}/${escapeJsonPointerSegment(key)}`,
+      );
     }
   }
   if (Object.prototype.hasOwnProperty.call(schema, "oneOf")) {
     const branches = schema.oneOf;
-    if (!Array.isArray(branches)) return { ok: false, code: "schema_oneOf_invalid:" + path };
-    const matches = branches.filter((branch) => validateSchemaNode(value, branch, root, path).ok);
-    if (matches.length !== 1) return { ok: false, code: "oneOf_mismatch:" + path };
+    if (!Array.isArray(branches)) {
+      return oracleFailure("schema_oneOf_invalid:" + path, "oneOf", path, `${schemaPath}/oneOf`);
+    }
+    const branchResults = branches.map((branch, index) =>
+      validateSchemaNode(value, branch, root, path, `${schemaPath}/oneOf/${index}`),
+    );
+    const matches = branchResults.filter((result) => result.ok);
+    if (matches.length !== 1) {
+      return oracleFailure(
+        "oneOf_mismatch:" + path,
+        "oneOf",
+        path,
+        `${schemaPath}/oneOf`,
+        matches.length === 0
+          ? branches.map((branch, index) => schemaBranchIdentity(branch, index)).join("|")
+          : "multiple",
+      );
+    }
   }
   if (Object.prototype.hasOwnProperty.call(schema, "const")
     && !Object.is(value, schema.const)) {
-    return { ok: false, code: "const_mismatch:" + path };
+    return oracleFailure("const_mismatch:" + path, "const", path, `${schemaPath}/const`);
   }
   if (Object.prototype.hasOwnProperty.call(schema, "enum")) {
     if (!Array.isArray(schema.enum) || !schema.enum.some((item) => Object.is(item, value))) {
-      return { ok: false, code: "enum_mismatch:" + path };
+      return oracleFailure("enum_mismatch:" + path, "enum", path, `${schemaPath}/enum`);
     }
   }
   if (Object.prototype.hasOwnProperty.call(schema, "type")
     && !schemaTypeMatches(value, schema.type)) {
-    return { ok: false, code: "type_mismatch:" + path };
+    return oracleFailure("type_mismatch:" + path, "type", path, `${schemaPath}/type`);
   }
   if (typeof value === "string") {
     if (typeof schema.minLength === "number" && [...value].length < schema.minLength) {
-      return { ok: false, code: "minLength_mismatch:" + path };
+      return oracleFailure("minLength_mismatch:" + path, "minLength", path, `${schemaPath}/minLength`);
     }
     if (typeof schema.pattern === "string") {
       let pattern: RegExp;
       try {
         pattern = new RegExp(schema.pattern);
       } catch {
-        return { ok: false, code: "schema_pattern_invalid:" + path };
+        return oracleFailure("schema_pattern_invalid:" + path, "pattern", path, `${schemaPath}/pattern`);
       }
-      if (!pattern.test(value)) return { ok: false, code: "pattern_mismatch:" + path };
+      if (!pattern.test(value)) {
+        return oracleFailure("pattern_mismatch:" + path, "pattern", path, `${schemaPath}/pattern`);
+      }
     }
   }
   if (Array.isArray(value)) {
     if (typeof schema.maxItems === "number" && value.length > schema.maxItems) {
-      return { ok: false, code: "maxItems_mismatch:" + path };
+      return oracleFailure("maxItems_mismatch:" + path, "maxItems", path, `${schemaPath}/maxItems`);
     }
     if (schema.items !== undefined) {
       for (let index = 0; index < value.length; index += 1) {
-        const result = validateSchemaNode(value[index], schema.items, root, path + "[" + index + "]");
+        const result = validateSchemaNode(
+          value[index],
+          schema.items,
+          root,
+          path + "[" + index + "]",
+          `${schemaPath}/items`,
+        );
         if (!result.ok) return result;
       }
     }
@@ -327,10 +418,12 @@ function validateSchemaNode(
   if (isRecord(value)) {
     const required = schema.required;
     if (required !== undefined) {
-      if (!Array.isArray(required)) return { ok: false, code: "schema_required_invalid:" + path };
+      if (!Array.isArray(required)) {
+        return oracleFailure("schema_required_invalid:" + path, "required", path, `${schemaPath}/required`);
+      }
       for (const key of required) {
         if (typeof key !== "string" || !Object.prototype.hasOwnProperty.call(value, key)) {
-          return { ok: false, code: "required_field_missing:" + path };
+          return oracleFailure("required_field_missing:" + path, "required", path, `${schemaPath}/required`);
         }
       }
     }
@@ -338,13 +431,24 @@ function validateSchemaNode(
     if (schema.additionalProperties === false) {
       for (const key of Object.keys(value)) {
         if (!Object.prototype.hasOwnProperty.call(properties, key)) {
-          return { ok: false, code: "unknown_field:" + path + "." + key };
+          return oracleFailure(
+            "unknown_field:" + path + "." + key,
+            "additionalProperties",
+            path + "." + key,
+            `${schemaPath}/additionalProperties`,
+          );
         }
       }
     }
     for (const [key, propertySchema] of Object.entries(properties)) {
       if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
-      const result = validateSchemaNode(value[key], propertySchema, root, path + "." + key);
+      const result = validateSchemaNode(
+        value[key],
+        propertySchema,
+        root,
+        path + "." + key,
+        `${schemaPath}/properties/${escapeJsonPointerSegment(key)}`,
+      );
       if (!result.ok) return result;
     }
   }
@@ -365,7 +469,7 @@ export function validateQualificationSchema(
   schema: Readonly<Record<string, unknown>>,
 ): OracleResult {
   assertSupportedSchemaKeywords(schema);
-  return validateSchemaNode(value, schema, schema, "$");
+  return validateSchemaNode(value, schema, schema, "$", "#");
 }
 
 function semanticCaseKind(caseId: ThoughtQualificationCaseId): string | null {
@@ -402,6 +506,50 @@ function gateStatus(
   return "fail";
 }
 
+function gateFieldPresent(
+  gate: QualificationGateEvidence | undefined,
+  key: keyof QualificationGateEvidence,
+): boolean {
+  return gate !== undefined && Object.prototype.hasOwnProperty.call(gate, key);
+}
+
+function dispatchTruthForCase(
+  gate: QualificationGateEvidence | undefined,
+  rawContentBytes: number,
+): DispatchTruth | null {
+  if (gateFieldPresent(gate, "dispatchTruth")) return gate?.dispatchTruth ?? null;
+  return rawContentBytes > 0 ? "response_received" : null;
+}
+
+function firstFailureBoundaryForCase(input: {
+  rawContentBytes: number;
+  closedSchemaConformance: "pass" | "fail";
+  jsonSyntax: "pass" | "fail";
+  strictParser: "pass" | "fail";
+  dispatchTruth: DispatchTruth | null;
+}): QualificationFirstFailureBoundary {
+  if (input.rawContentBytes === 0) {
+    if (input.dispatchTruth === "not_sent") return "PRE_DISPATCH_LOCAL_FAILURE";
+    if (input.dispatchTruth === "sent_outcome_unknown") return "REQUEST_DISPATCHED_NO_RESPONSE";
+    if (input.dispatchTruth === "response_received") return "PROVIDER_ERROR_RESPONSE";
+    return "NOT_REACHED";
+  }
+  if (input.jsonSyntax === "pass" && input.closedSchemaConformance === "fail") {
+    return "LOCAL_SCHEMA_REJECTION";
+  }
+  if (input.strictParser === "fail") return "STRICT_PARSER_REJECTION";
+  if (input.dispatchTruth === "response_received") return "PROVIDER_CONTENT_RECEIVED";
+  return "NOT_REACHED";
+}
+
+function downstreamReachability(
+  status: QualificationGateStatus,
+  reached: boolean,
+): QualificationReachability {
+  if (!reached) return "NOT_REACHED";
+  return status === "pass" ? "PASS" : "FAIL";
+}
+
 export function evaluateQualificationCase(input: {
   caseId: ThoughtQualificationCaseId;
   rawContent: string;
@@ -419,7 +567,7 @@ export function evaluateQualificationCase(input: {
   const jsonSyntax = failures.includes("invalid_json") ? "fail" : "pass";
   const schemaResult = jsonSyntax === "pass"
     ? validateThoughtOutputSchema(parsed)
-    : { ok: false as const, code: "schema_not_checked" };
+    : oracleFailure("schema_not_checked", null, "$", "#");
   const closedSchemaConformance = schemaResult.ok ? "pass" : "fail";
   if (!schemaResult.ok && jsonSyntax === "pass") {
     failures.push("closed_schema_rejected", schemaResult.code);
@@ -520,11 +668,49 @@ export function evaluateQualificationCase(input: {
     && resourcePolicy === "pass"
     && failureCodes.length === 0
       ? "PASS"
-      : "NOT_QUALIFIED";
+    : "NOT_QUALIFIED";
+  const dispatchTruth = dispatchTruthForCase(gate, rawContentBytes);
+  const providerRequestStarted = gateFieldPresent(gate, "providerRequestStarted")
+    ? gate?.providerRequestStarted === true
+    : rawContentBytes > 0
+      || dispatchTruth === "sent_outcome_unknown"
+      || dispatchTruth === "response_received";
+  const providerResponseReceived = gateFieldPresent(gate, "providerResponseReceived")
+    ? gate?.providerResponseReceived === true
+    : dispatchTruth === "response_received";
+  const downstreamReached =
+    jsonSyntax === "pass"
+    && closedSchemaConformance === "pass"
+    && strictParser === "pass";
+  const diagnostics: QualificationDiagnostics = Object.freeze({
+    firstFailureBoundary: firstFailureBoundaryForCase({
+      rawContentBytes,
+      closedSchemaConformance,
+      jsonSyntax,
+      strictParser,
+      dispatchTruth,
+    }),
+    closedSchemaFailureKeyword: schemaResult.ok ? null : schemaResult.keyword,
+    closedSchemaFailureInstancePath: schemaResult.ok ? null : schemaResult.instancePath,
+    closedSchemaFailureSchemaPath: schemaResult.ok ? null : schemaResult.schemaPath,
+    closedSchemaFailureBranch: schemaResult.ok ? null : schemaResult.branch,
+    errorCode: gate?.errorCode ?? null,
+    dispatchTruth,
+    dispatchStage: gate?.dispatchStage ?? null,
+    providerRequestStarted,
+    providerResponseReceived,
+    attemptId: gate?.attemptId ?? null,
+    reachability: Object.freeze({
+      kernelBinding: downstreamReachability(kernelBinding, downstreamReached),
+      fencing: downstreamReachability(fencing, downstreamReached),
+      authorityReachability: downstreamReachability(authorityReachability, downstreamReached),
+      semanticValidity: downstreamReachability(semanticValidity, downstreamReached),
+    }),
+  });
   return Object.freeze({
     caseId: input.caseId,
     invocationIds: Object.freeze([]),
-    providerAttemptIds: Object.freeze([]),
+    providerAttemptIds: Object.freeze(input.gateEvidence?.attemptId ? [input.gateEvidence.attemptId] : []),
     transport,
     rawContentBytes,
     rawContentDigest: digest(input.rawContent),
@@ -542,6 +728,7 @@ export function evaluateQualificationCase(input: {
     wireBindingId,
     providerDeclaredEnforcement,
     capabilityFingerprint,
+    diagnostics,
     failureCodes: Object.freeze(failureCodes),
     verdict,
   });
@@ -717,7 +904,7 @@ function candidateCapability(input: {
   });
 }
 
-function preflightCandidate(): CandidatePreflight {
+function preflightCandidate(buildIdentity = currentBuildIdentity()): CandidatePreflight {
   const portfolio = currentPortfolio();
   const route = portfolio.routeBindings[ROUTE_ID];
   if (!route
@@ -750,13 +937,12 @@ function preflightCandidate(): CandidatePreflight {
     : "wireFormat" in binding && typeof binding.wireFormat === "string"
       ? binding.wireFormat
       : "provider_default";
-  const buildIdentity = currentBuildIdentity();
   const capability = candidateCapability({
     buildIdentity,
     occupantId: policy.occupant.occupantId,
     wireBindingId: binding.bindingId,
     wireMode,
-    adapterId: "ashley.adapter.nim.v1",
+    adapterId: "ashley.adapter.mistral.v1",
     wireFormat,
   });
   return {
@@ -773,7 +959,7 @@ function preflightCandidate(): CandidatePreflight {
     wireFormat,
     buildIdentity,
     capability,
-    credentialPresent: Boolean(env.nimApiKey),
+    credentialPresent: Boolean(env.mistralApiKey),
   };
 }
 
@@ -782,6 +968,72 @@ function captureOutcomeUnknown(error: unknown): boolean {
   const receipt = metadata?.receipt;
   if (!receipt || receipt.receiptStage !== "resolved") return false;
   return receipt.attempts.some((attempt) => attempt.dispatchTruth === "sent_outcome_unknown");
+}
+
+function captureDispatchEvidenceFromError(error: unknown): Pick<
+  CompletionCapture,
+  | "dispatchTruth"
+  | "dispatchStage"
+  | "providerRequestStarted"
+  | "providerResponseReceived"
+  | "attemptId"
+  | "provider"
+  | "model"
+  | "wireEvidence"
+  | "capabilityFingerprint"
+> {
+  const metadata = metadataFromError(error);
+  const receipt = metadata?.receipt;
+  const attempt = receipt?.receiptStage === "resolved"
+    ? receipt.attempts.at(-1)
+    : undefined;
+  const dispatchTruth = attempt?.dispatchTruth
+    ?? metadata?.failure?.dispatchTruth
+    ?? null;
+  return {
+    dispatchTruth,
+    dispatchStage: metadata?.failure?.stage ?? null,
+    providerRequestStarted:
+      dispatchTruth === "sent_outcome_unknown"
+      || dispatchTruth === "response_received",
+    providerResponseReceived: dispatchTruth === "response_received",
+    attemptId: attempt?.attemptId ?? null,
+    provider: attempt?.provider ?? metadata?.resolvedRoute?.provider ?? null,
+    model: attempt?.configuredModelId ?? metadata?.resolvedRoute?.configuredModelId ?? null,
+    wireEvidence: attempt?.wireEvidence ?? metadata?.wireEvidence ?? null,
+    capabilityFingerprint:
+      attempt?.capabilityFingerprint
+      ?? metadata?.capabilityIdentity?.fingerprint
+      ?? null,
+  };
+}
+
+function captureDispatchEvidenceFromCompletion(
+  completion: CompletionValue,
+): Pick<
+  CompletionCapture,
+  | "dispatchTruth"
+  | "dispatchStage"
+  | "providerRequestStarted"
+  | "providerResponseReceived"
+  | "attemptId"
+  | "provider"
+  | "model"
+  | "wireEvidence"
+  | "capabilityFingerprint"
+> {
+  const attempt = completion.capturedAttemptIdentity;
+  return {
+    dispatchTruth: "response_received",
+    dispatchStage: "provider_dispatch",
+    providerRequestStarted: true,
+    providerResponseReceived: true,
+    attemptId: attempt?.modelFabricAttemptId ?? null,
+    provider: attempt?.provider ?? null,
+    model: attempt?.configuredModelId ?? completion.resolvedModelId ?? null,
+    wireEvidence: completion.wireEvidence ?? null,
+    capabilityFingerprint: completion.capabilityIdentity?.fingerprint ?? null,
+  };
 }
 
 function fixtureCompletion(
@@ -813,7 +1065,7 @@ function fixtureCompletion(
     resourcePolicyFingerprint: thoughtResourcePolicyIdentity().fingerprint,
   };
   const wireEvidence: WireDispatchEvidence = {
-    adapterId: "ashley.adapter.nim.v1",
+    adapterId: "ashley.adapter.mistral.v1",
     wireFormat: preflight.wireFormat,
     sanitizedBodyDigest: ("sha256:" + sha256Text("qualification-wire:" + invocationId)) as WireDispatchEvidence["sanitizedBodyDigest"],
     emittedEnforcementMode: preflight.wireMode,
@@ -873,6 +1125,7 @@ async function runW0Sequence(input: {
             ...options,
             disableThoughtTransportFailover: true,
           });
+      const dispatchEvidence = captureDispatchEvidenceFromCompletion(completion);
       captures.push({
         completion,
         rawContent: completion.text,
@@ -880,10 +1133,12 @@ async function runW0Sequence(input: {
         endedAtMs: input.nowMs(),
         errorCode: null,
         outcomeUnknown: false,
+        ...dispatchEvidence,
       });
       callIndex += 1;
       return completion;
     } catch (error) {
+      const dispatchEvidence = captureDispatchEvidenceFromError(error);
       captures.push({
         completion: null,
         rawContent: "",
@@ -891,6 +1146,7 @@ async function runW0Sequence(input: {
         endedAtMs: input.nowMs(),
         errorCode: errorCode(error),
         outcomeUnknown: captureOutcomeUnknown(error),
+        ...dispatchEvidence,
       });
       callIndex += 1;
       throw error;
@@ -1040,7 +1296,7 @@ function gateEvidenceForSequence(input: {
   const output = finalInvocation?.output;
   const semantic = finalInvocation?.semantic;
   const completion = finalCapture?.completion;
-  const wireEvidence = completion?.wireEvidence;
+  const wireEvidence = finalCapture?.wireEvidence ?? completion?.wireEvidence;
   const attempt = completion?.capturedAttemptIdentity;
   const elapsedMs = finalCapture
     ? Math.max(0, finalCapture.endedAtMs - finalCapture.startedAtMs)
@@ -1050,8 +1306,8 @@ function gateEvidenceForSequence(input: {
     && plausibleSemanticOutput(semantic);
   return {
     transport: completion ? "success" : "failure",
-    provider: attempt?.provider,
-    model: attempt?.configuredModelId,
+    provider: finalCapture?.provider ?? attempt?.provider,
+    model: finalCapture?.model ?? attempt?.configuredModelId,
     kernelBinding: finalInvocation && finalCapture
       ? kernelBindingPass(finalInvocation, input.caseInput, finalCapture) ? "pass" : "fail"
       : "fail",
@@ -1072,7 +1328,16 @@ function gateEvidenceForSequence(input: {
     wireMode: wireEvidence?.emittedEnforcementMode ?? null,
     wireBindingId: wireEvidence?.bindingId ?? attempt?.actualWireBindingId ?? null,
     providerDeclaredEnforcement: wireEvidence?.providerDeclaredEnforcement ?? null,
-    capabilityFingerprint: completion?.capabilityIdentity?.fingerprint ?? null,
+    capabilityFingerprint:
+      finalCapture?.capabilityFingerprint
+      ?? completion?.capabilityIdentity?.fingerprint
+      ?? null,
+    dispatchTruth: finalCapture?.dispatchTruth ?? null,
+    dispatchStage: finalCapture?.dispatchStage ?? null,
+    providerRequestStarted: finalCapture?.providerRequestStarted ?? false,
+    providerResponseReceived: finalCapture?.providerResponseReceived ?? false,
+    attemptId: finalCapture?.attemptId ?? null,
+    errorCode: finalCapture?.errorCode ?? null,
     extraFailureCodes: [
       ...(wireEvidence && wireEvidence.emittedEnforcementMode !== input.expectedWireMode
         ? ["wire_mode_mismatch"]
@@ -1126,8 +1391,8 @@ function resultFromSequence(input: {
     invocationIds: Object.freeze(input.sequence.invocations.map((item) => item.requestId)),
     providerAttemptIds: Object.freeze(
       input.sequence.captures.flatMap((capture) =>
-        capture.completion?.capturedAttemptIdentity?.modelFabricAttemptId
-          ? [capture.completion.capturedAttemptIdentity.modelFabricAttemptId]
+        capture.attemptId
+          ? [capture.attemptId]
           : [],
       ),
     ),
@@ -1460,7 +1725,7 @@ async function runFixtureQualification(
       negativeWitness(withIds(authorityRevision, settlementSequence), "authority revision changed before settlement acceptance"),
       negativeWitness(parserRejected, "provider-accepted structural value rejected by the W0 semantic parser"),
       negativeWitness(withIds(semanticUnsupported, settlementSequence), "schema-valid output with unsupported or fabricated semantic claim"),
-      negativeWitness(fallback, "a non-NIM provider cannot answer the NIM qualification candidate"),
+      negativeWitness(fallback, "a non-Mistral provider cannot answer the Mistral qualification candidate"),
     ];
     const verdict = cases.every((item) => item.verdict === "PASS")
       ? "PASS"
@@ -1615,6 +1880,7 @@ function parseCli(argv: readonly string[]): {
   model: string;
   noFallback: boolean;
   samples: number;
+  candidateSha: string | undefined;
   output: string | undefined;
 } {
   let live = false;
@@ -1622,6 +1888,7 @@ function parseCli(argv: readonly string[]): {
   let model = "";
   let noFallback = false;
   let samples = 1;
+  let candidateSha: string | undefined;
   let output: string | undefined;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -1630,13 +1897,14 @@ function parseCli(argv: readonly string[]): {
     else if (arg === "--provider") provider = argv[++index] ?? "";
     else if (arg === "--model") model = argv[++index] ?? "";
     else if (arg === "--samples") samples = Number(argv[++index] ?? "NaN");
+    else if (arg === "--candidate-sha") candidateSha = argv[++index];
     else if (arg === "--output") output = argv[++index];
     else throw new Error("qualification_cli_unknown_argument:" + arg);
   }
   if (!Number.isInteger(samples) || samples < 1 || samples > 3) {
     throw new Error("qualification_cli_samples_out_of_bounds");
   }
-  return { live, provider, model, noFallback, samples, output };
+  return { live, provider, model, noFallback, samples, candidateSha, output };
 }
 
 export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<void> {
@@ -1658,6 +1926,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
       outputDir,
       samples: args.samples,
       noFallback: args.noFallback,
+      candidateSha: args.candidateSha,
     });
     if (outputDir) writeRunReport(outputDir, result);
     process.stdout.write(JSON.stringify(result, null, 2) + "\n");
@@ -1674,9 +1943,24 @@ export async function runThoughtCapabilityQualification(
   if (input.provider !== CANDIDATE.provider || input.model !== CANDIDATE.model) {
     return preflightFailureResult(input, runId, "NOT_QUALIFIED", "candidate_route_mismatch");
   }
+  let qualificationBuildIdentity: string | undefined;
+  if (input.environment === "isolated_live") {
+    if (!input.candidateSha) {
+      return preflightFailureResult(input, runId, "NOT_RUN", "qualification_candidate_sha_required");
+    }
+    try {
+      qualificationBuildIdentity = resolveQualificationBuildIdentity({
+        expectedCandidateSha: input.candidateSha,
+        actualCheckoutIdentity: qualificationCheckoutIdentity(),
+        qualificationReleaseIdentity: env.ashleyReleaseId,
+      });
+    } catch (error) {
+      return preflightFailureResult(input, runId, "NOT_RUN", errorCode(error));
+    }
+  }
   let preflight: CandidatePreflight;
   try {
-    preflight = preflightCandidate();
+    preflight = preflightCandidate(qualificationBuildIdentity);
   } catch {
     return preflightFailureResult(input, runId, "NOT_RUN", "candidate_preflight_failed");
   }

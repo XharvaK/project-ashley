@@ -27,7 +27,7 @@ describe("TARGET portfolio + token envelope reconciliation", () => {
     expect(target.kind).toBe("candidate_target");
     expect(target.sourcePath.replaceAll("\\", "/")).toMatch(/target-12-9\.v2\.json$/);
     expect(existsSync(join(target.sourcePath, "..", "target-12-9.v1.json"))).toBe(true);
-    expect(current.portfolioRevisionId).toBe("mfp_current_compatibility_v1");
+    expect(current.portfolioRevisionId).toBe("mfp_current_compatibility_v2");
     expect(current.kind).toBe("current_compatibility");
   });
 
@@ -36,10 +36,10 @@ describe("TARGET portfolio + token envelope reconciliation", () => {
     const durable = current.rows.find((row) => row.policyRowId === "mfr_thought_durable_proactive_compat_v1")!;
     const expression = current.rows.find((row) => row.policyRowId === "mfr_expression_compat_v1")!;
     expect(thought.occupants[0]).toMatchObject({
-      provider: "nim",
-      configuredModelId: "openai/gpt-oss-20b",
-      reasoningPolicy: "economical",
-      effectiveReasoning: "low",
+      provider: "mistral",
+      configuredModelId: "mistral-small-2603",
+      reasoningPolicy: "high",
+      effectiveReasoning: "high",
     });
     expect(thought.deadlineMs).toBe(10000);
     expect(thought.maxOutputTokens).toBe(4096);
@@ -47,8 +47,8 @@ describe("TARGET portfolio + token envelope reconciliation", () => {
     expect(THOUGHT_MAX_OUTPUT_TOKENS).toBe(2048);
     expect(THOUGHT_MAX_OUTPUT_TOKENS).toBeLessThanOrEqual(4096);
     expect(expression.occupants[0]).toMatchObject({
-      provider: "mistral",
-      configuredModelId: "mistral-medium-latest",
+      provider: "nim",
+      configuredModelId: "nvidia/nemotron-3.5-lightning-30b-a3b",
     });
     expect(expression.occupants[1]).toMatchObject({
       provider: "groq",
@@ -59,12 +59,12 @@ describe("TARGET portfolio + token envelope reconciliation", () => {
     expect(EXPRESSION_MAX_OUTPUT_TOKENS).toBe(2048);
     expect(EXPRESSION_PROACTIVE_MAX_OUTPUT_TOKENS).toBe(500);
     expect(current.routeBindings.thought).toMatchObject({
-      provider: "nim",
-      configuredModelId: "openai/gpt-oss-20b",
+      provider: "mistral",
+      configuredModelId: "mistral-small-2603",
     });
     expect(current.routeBindings.ashley_expression).toMatchObject({
-      provider: "mistral",
-      configuredModelId: "mistral-medium-latest",
+      provider: "nim",
+      configuredModelId: "nvidia/nemotron-3.5-lightning-30b-a3b",
     });
   });
 

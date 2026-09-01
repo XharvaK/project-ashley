@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  admitStageHWakeAndCycle,
   buildStageHResult,
   isSafeIsolatedRoot,
   percentile,
@@ -39,4 +40,57 @@ test("Stage H refuses production roots and validates a complete result", () => {
     () => buildStageHResult({ candidateSha: "a".repeat(40), environment: "linux", checks: [], raw: {} }),
     /stage_h_checks_missing/,
   );
+});
+
+test("Stage H admits the authoritative wake and forwards its durable identity", () => {
+  const wakeInputs = [];
+  const cycleInputs = [];
+  const cycle = admitStageHWakeAndCycle({
+    sidecar: {},
+    occurrenceIdFor: () => "occurrence:stage-h",
+    admitWake: (_sidecar, input) => {
+      wakeInputs.push(input);
+      return { kind: "created", wake: { wakeId: "wake:authoritative" } };
+    },
+    admitCycle: (_sidecar, input) => {
+      cycleInputs.push(input);
+      return { cycleId: input.cycleId, wakeId: input.wakeId };
+    },
+    conversationId: "stage-h-conversation",
+    cycleId: "stage-h-cycle",
+    triggerRef: "stage-h-trigger",
+    occupantId: "mfo_nim_openai_gpt_oss_20b_low",
+    authorityEpoch: 1,
+    nowMs: 1000,
+  });
+
+  assert.equal(wakeInputs.length, 1);
+  assert.equal(cycleInputs.length, 1);
+  assert.equal(cycleInputs[0].wakeId, "wake:authoritative");
+  assert.equal(cycle.wakeId, "wake:authoritative");
+});
+
+test("Stage H refuses to admit a cycle when wake admission is stale or cancelled", () => {
+  let cycleCalls = 0;
+  for (const kind of ["stale", "cancelled"]) {
+    assert.throws(
+      () => admitStageHWakeAndCycle({
+        sidecar: {},
+        occurrenceIdFor: () => "occurrence:stage-h",
+        admitWake: () => ({ kind, wake: { wakeId: "wake:terminal" }, terminalWake: { wakeId: "wake:terminal" } }),
+        admitCycle: () => {
+          cycleCalls += 1;
+          return {};
+        },
+        conversationId: "stage-h-conversation",
+        cycleId: "stage-h-cycle",
+        triggerRef: "stage-h-trigger",
+        occupantId: "mfo_nim_openai_gpt_oss_20b_low",
+        authorityEpoch: 1,
+        nowMs: 1000,
+      }),
+      /stage_h_wake_not_admissible/,
+    );
+  }
+  assert.equal(cycleCalls, 0);
 });

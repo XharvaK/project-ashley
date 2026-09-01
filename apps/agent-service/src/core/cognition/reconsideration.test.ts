@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { unlinkSync } from "node:fs";
 import { env } from "../../env.js";
 import { openNuclearDb } from "../db.js";
+import { openContinuityDb } from "../continuity/db.js";
 import {
   currentBuildIdentity,
   currentContractId,
@@ -127,7 +128,10 @@ describe("durable OCI reconsideration", () => {
   it("maps a delay class to a fixed defer_until and re-enters after expiry", () => {
     const path = join(tmpdir(), `ashley-oci-${randomUUID()}.db`);
     const originalMode = env.cognitionMode;
-    let db = openNuclearDb(new DatabaseSync(path));
+    const continuity = openContinuityDb(new DatabaseSync(":memory:"));
+    let db = openNuclearDb(new DatabaseSync(path), {
+      continuity,
+    });
     try {
       env.cognitionMode = "apply";
       activateReading(db);
@@ -162,7 +166,9 @@ describe("durable OCI reconsideration", () => {
       expect(selectMotivationCandidates(db, OWNER_ID, "proactive", [motivation], now)).toEqual([]);
 
       db.close();
-      db = openNuclearDb(new DatabaseSync(path));
+      db = openNuclearDb(new DatabaseSync(path), {
+        continuity,
+      });
       const afterExpiry = new Date(
         now.getTime() + OPEN_COGNITIVE_ITEM_DELAY_DURATIONS_MS.brief + 1,
       );
@@ -171,7 +177,12 @@ describe("durable OCI reconsideration", () => {
       ).toEqual([motivation]);
     } finally {
       env.cognitionMode = originalMode;
-      db.close();
+      try {
+        db.close();
+      } catch {
+        // The first close may have completed before a later assertion failed.
+      }
+      continuity.close();
       unlinkSync(path);
     }
   });

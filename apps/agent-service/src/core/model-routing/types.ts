@@ -19,6 +19,9 @@ import type { ThoughtInvocationContext } from "../cognitive-v021/types.js";
 
 export type ProviderId = "mistral" | "groq" | "nim" | "opencode_zen";
 
+/** Non-secret Mistral account seat used only for bounded credential failover. */
+export type MistralCredentialSeat = "mistral_primary" | "mistral_secondary";
+
 export type RouteId =
   | "ashley_expression"
   | "ashley_expression_fallback"
@@ -63,6 +66,35 @@ export type TokenUsage = {
   /** Hidden reasoning tokens when the provider reports them separately. */
   reasoningTokens?: number;
 };
+
+export type ProviderFinishReasonClass =
+  | "STOP"
+  | "LENGTH"
+  | "CONTENT_FILTER"
+  | "TOOL"
+  | "OTHER"
+  | "UNKNOWN";
+
+export type ProviderResponseDiagnostics = Readonly<{
+  /** Top-level provider message.content container shape only. */
+  contentContainerType: "string" | "array" | "null" | "unknown";
+  /** Bounded structural chunk types; chunk content is never retained. */
+  contentChunkTypes: readonly string[];
+  textChunkCount: number;
+  thinkingChunkCount: number;
+  finalTextBytes: number;
+  finishReason: string | null;
+  finishReasonClass: ProviderFinishReasonClass;
+  outputTokenLimit: number | null;
+  outputTokens: number | null;
+  reasoningTokens: number | null;
+  extractionFailure:
+    | "none"
+    | "unknown_chunk_type"
+    | "malformed_chunk"
+    | "unsupported_container"
+    | "missing_content";
+}>;
 
 export type ToolDefinition = {
   type: "function";
@@ -136,6 +168,8 @@ export type ProviderCompletion = {
   providerModel?: string | null;
   /** Provider finish_reason when supplied (stop, length, …). Never a secret. */
   finishReason?: string | null;
+  /** Bounded provider response shape and accounting diagnostics. */
+  responseDiagnostics?: ProviderResponseDiagnostics;
   /** Sanitized evidence of the request emitted by the provider adapter. */
   wireEvidence?: WireDispatchEvidence;
 };
@@ -167,6 +201,8 @@ export type ProviderDispatchArgs = {
   fabricReasoning?: TrustedReasoningControl;
   /** Originates from Model Fabric translation, never from cognition callers. */
   fabricStructuredOutput?: TrustedStructuredOutputControl;
+  /** Non-secret account seat; meaningful only for Mistral dispatches. */
+  credentialSeat?: MistralCredentialSeat;
   signal?: AbortSignal;
 };
 

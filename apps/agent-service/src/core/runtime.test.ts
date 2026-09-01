@@ -22,6 +22,7 @@ vi.mock("./conversation/expression.js", () => ({
 }));
 
 import { openNuclearDb } from "./db.js";
+import { openContinuityDb } from "./continuity/db.js";
 import { env } from "../env.js";
 import { logDecision } from "./agency/log.js";
 import { createQuestion } from "./state/questions.js";
@@ -246,7 +247,9 @@ describe("AshleyCore", () => {
 
   it("persists a reactive turn and allows explicit silence", async () => {
     const path = join(tmpdir(), `ashley-nuclear-${randomUUID()}.db`);
-    const db = openNuclearDb(new DatabaseSync(path));
+    const db = openNuclearDb(new DatabaseSync(path), {
+      continuity: openContinuityDb(new DatabaseSync(":memory:")),
+    });
     const core = new AshleyCore(db);
 
     const reply = await core.handleReactiveChat({
@@ -574,7 +577,9 @@ describe("AshleyCore", () => {
 
   it("reserves and commits a proactive message in the legacy shape", async () => {
     const path = join(tmpdir(), `ashley-nuclear-${randomUUID()}.db`);
-    const db = openNuclearDb(new DatabaseSync(path));
+    const db = openNuclearDb(new DatabaseSync(path), {
+      continuity: openContinuityDb(new DatabaseSync(":memory:")),
+    });
     const core = new AshleyCore(db);
     createQuestion(db, {
       ownerId: "doc",
@@ -773,7 +778,9 @@ describe("AshleyCore", () => {
 
   it("rolls back the initiative reservation when the delivery claim fails", async () => {
     const path = join(tmpdir(), `ashley-nuclear-${randomUUID()}.db`);
-    const db = openNuclearDb(new DatabaseSync(path));
+    const db = openNuclearDb(new DatabaseSync(path), {
+      continuity: openContinuityDb(new DatabaseSync(":memory:")),
+    });
     const core = new AshleyCore(db);
     createQuestion(db, {
       ownerId: "doc",
@@ -983,7 +990,9 @@ describe("AshleyCore", () => {
 
   it("snapshots applied Reflection calibration on a future proactive decision", async () => {
     const path = join(tmpdir(), `ashley-nuclear-${randomUUID()}.db`);
-    const db = openNuclearDb(new DatabaseSync(path));
+    const db = openNuclearDb(new DatabaseSync(path), {
+      continuity: openContinuityDb(new DatabaseSync(":memory:")),
+    });
     const core = new AshleyCore(db, { reflectionMode: "apply" });
     addCommittedQuestionInitiative(db, "historical-1");
     addCommittedQuestionInitiative(db, "historical-2");
@@ -1025,7 +1034,9 @@ describe("AshleyCore", () => {
 
   it("keeps urgent wake-ups behind proactive hard gates", () => {
     const path = join(tmpdir(), `ashley-nuclear-${randomUUID()}.db`);
-    const db = openNuclearDb(new DatabaseSync(path));
+    const db = openNuclearDb(new DatabaseSync(path), {
+      continuity: openContinuityDb(new DatabaseSync(":memory:")),
+    });
     const core = new AshleyCore(db);
     const originalMode = env.cognitionMode;
     const originalEnabled = env.proactiveEnabled;
@@ -1065,7 +1076,9 @@ describe("AshleyCore", () => {
 
   it("consumes an urgent edge after Agency records its decision", async () => {
     const path = join(tmpdir(), `ashley-nuclear-${randomUUID()}.db`);
-    const db = openNuclearDb(new DatabaseSync(path));
+    const db = openNuclearDb(new DatabaseSync(path), {
+      continuity: openContinuityDb(new DatabaseSync(":memory:")),
+    });
     const core = new AshleyCore(db);
     const originalMode = env.cognitionMode;
     const originalKey = env.mistralApiKey;

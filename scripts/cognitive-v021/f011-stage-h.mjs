@@ -27,6 +27,55 @@ export function stageHChecksPass(checks) {
   return Array.isArray(checks) && checks.length > 0 && checks.every((check) => check?.pass === true);
 }
 
+/** Stage H must enter the cycle through the authoritative wake owner. */
+export function admitStageHWakeAndCycle({
+  sidecar,
+  admitWake,
+  admitCycle,
+  occurrenceIdFor,
+  conversationId,
+  cycleId,
+  triggerRef,
+  occupantId,
+  authorityEpoch,
+  nowMs,
+  capturedAuthorityRevision = 0,
+}) {
+  const admission = admitWake(sidecar, {
+    occurrenceId: occurrenceIdFor({
+      sourceKind: "inbox",
+      triggerRef,
+      conversationId,
+    }),
+    triggerRef,
+    sourceKind: "inbox",
+    conversationId,
+    cycleId,
+    triggerKind: "owner_message",
+    occupantId,
+    authorityEpoch,
+    capturedAuthorityRevision,
+    nowMs,
+  });
+  if (
+    (admission?.kind !== "created" && admission?.kind !== "existing")
+    || typeof admission?.wake?.wakeId !== "string"
+    || admission.wake.wakeId.trim() === ""
+  ) {
+    throw new Error("stage_h_wake_not_admissible");
+  }
+  return admitCycle(sidecar, {
+    cycleId,
+    conversationId,
+    wakeId: admission.wake.wakeId,
+    triggerKind: "owner_message",
+    triggerRef,
+    occupantId,
+    authorityEpoch,
+    nowMs,
+  });
+}
+
 export function isSafeIsolatedRoot(root) {
   if (typeof root !== "string" || !root.trim()) return false;
   const candidate = resolve(root);
@@ -141,7 +190,7 @@ function seedFixture(sidecar, upsertMemoryAssertion, items) {
 }
 
 async function runPhysicalChecks({ repoRoot, isolatedRoot, datasetItems }) {
-  const [sidecarModule, derivedModule, assertionModule, ftsModule, discoverModule, cycleModule, evidenceModule, inputModule, allocatorModule] =
+  const [sidecarModule, derivedModule, assertionModule, ftsModule, discoverModule, cycleModule, wakeIdentityModule, wakeModule, evidenceModule, inputModule, allocatorModule] =
     await Promise.all([
       import(moduleUrl(repoRoot, ["core", "cognitive-v021", "sidecar", "db.js"])),
       import(moduleUrl(repoRoot, ["core", "cognitive-v021", "retrieval", "derived-store.js"])),
@@ -149,6 +198,8 @@ async function runPhysicalChecks({ repoRoot, isolatedRoot, datasetItems }) {
       import(moduleUrl(repoRoot, ["core", "cognitive-v021", "retrieval", "fts.js"])),
       import(moduleUrl(repoRoot, ["core", "cognitive-v021", "retrieval", "discover.js"])),
       import(moduleUrl(repoRoot, ["core", "cognitive-v021", "cycle", "inbox.js"])),
+      import(moduleUrl(repoRoot, ["core", "cognitive-v021", "wake", "identity.js"])),
+      import(moduleUrl(repoRoot, ["core", "cognitive-v021", "wake", "ledger.js"])),
       import(moduleUrl(repoRoot, ["core", "cognitive-v021", "evidence", "conversation-log.js"])),
       import(moduleUrl(repoRoot, ["core", "cognitive-v021", "thought", "input.js"])),
       import(moduleUrl(repoRoot, ["core", "cognitive-v021", "thought", "projection-allocator", "allocator.js"])),
@@ -159,6 +210,8 @@ async function runPhysicalChecks({ repoRoot, isolatedRoot, datasetItems }) {
   const { searchMemoryFts } = ftsModule;
   const { retrieveCandidates } = discoverModule;
   const { admitCycle } = cycleModule;
+  const { occurrenceIdFor } = wakeIdentityModule;
+  const { admitWake } = wakeModule;
   const { appendOwnerUtterance } = evidenceModule;
   const { buildThoughtInput } = inputModule;
   const { allocateThoughtProjection } = allocatorModule;
@@ -244,10 +297,13 @@ async function runPhysicalChecks({ repoRoot, isolatedRoot, datasetItems }) {
   }
   const queryP95Ms = percentile(querySamples, 0.95);
 
-  const cycle = admitCycle(scaleSidecar, {
+  const cycle = admitStageHWakeAndCycle({
+    sidecar: scaleSidecar,
+    admitWake,
+    admitCycle,
+    occurrenceIdFor,
     cycleId: "f011-stage-h-cycle",
     conversationId: "f011-stage-h-conversation",
-    triggerKind: "owner_message",
     triggerRef: "sleep soon tomorrow",
     occupantId: "mfo_nim_openai_gpt_oss_20b_low",
     authorityEpoch: 1,

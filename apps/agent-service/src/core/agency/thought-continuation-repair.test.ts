@@ -28,6 +28,7 @@ import type {
 
 const originalMode = env.cognitionMode;
 const originalGroqKey = env.groqApiKey;
+const originalMistralKey = env.mistralApiKey;
 const originalLifecycle = env.sandboxEngineeringLifecycleEnabled;
 const originalRegistryPath = env.sandboxProjectRegistryPath;
 
@@ -180,6 +181,7 @@ function run(
 beforeEach(() => {
   env.cognitionMode = "apply";
   env.groqApiKey = "test-key";
+  env.mistralApiKey = "test-key";
   env.sandboxEngineeringLifecycleEnabled = true;
   process.env.SANDBOX_V2_FORCE_AVAILABLE = "true";
   tmpDir = mkdtempSync(join(tmpdir(), "m4-repair-"));
@@ -205,6 +207,7 @@ beforeEach(() => {
 afterEach(() => {
   env.cognitionMode = originalMode;
   env.groqApiKey = originalGroqKey;
+  env.mistralApiKey = originalMistralKey;
   env.sandboxEngineeringLifecycleEnabled = originalLifecycle;
   env.sandboxProjectRegistryPath = originalRegistryPath;
   delete process.env.SANDBOX_V2_FORCE_AVAILABLE;
@@ -653,7 +656,7 @@ describe("M4 post-operation cognition repair: continuation reliability", () => {
   });
 
   it("route unavailability (no bound provider key) skips continuation entirely", async () => {
-    env.groqApiKey = "";
+    env.mistralApiKey = "";
     let calls = 0;
     const result = await run(
       m2Intermediate,

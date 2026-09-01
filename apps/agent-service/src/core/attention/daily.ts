@@ -251,13 +251,14 @@ export function foldAttentionDailyUsage(
 export function monthlyUsageSummary(
   db: DatabaseSync,
   days = 30,
+  clock: AttentionClock = realClock,
 ): {
   actualInputTokens: number;
   actualOutputTokens: number;
   unknownReservedTokens: number;
   requests: number;
 } {
-  const cutoff = new Date(Date.now() - days * 86_400_000)
+  const cutoff = new Date(clock.nowMs() - days * 86_400_000)
     .toISOString()
     .slice(0, 10);
   const folded = db

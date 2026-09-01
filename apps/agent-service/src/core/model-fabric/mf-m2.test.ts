@@ -4,6 +4,7 @@ import { env } from "../../env.js";
 import { openNuclearDb } from "../db.js";
 import { completeChat, resetAdapterCache, MISTRAL_RETRY_CONFIG } from "../../mistral-client.js";
 import * as nimAdapterModule from "../model-routing/adapters/nim-adapter.js";
+import * as mistralAdapterModule from "../model-routing/adapters/mistral-adapter.js";
 import { routingStatus } from "../model-routing/status.js";
 import { thoughtOutputStructuredRequest } from "../cognitive-v021/thought/output-contract.js";
 import {
@@ -16,9 +17,11 @@ import { resolveDispatchContract } from "./dispatch-contract.js";
 import { capabilityProfileFor } from "./profiles.js";
 
 const originalNimKey = env.nimApiKey;
+const originalMistralKey = env.mistralApiKey;
 
 afterEach(() => {
   env.nimApiKey = originalNimKey;
+  env.mistralApiKey = originalMistralKey;
   resetAdapterCache();
   resetCurrentPortfolioForTests();
   vi.restoreAllMocks();
@@ -46,7 +49,7 @@ describe("MF-M2 CURRENT portfolio", () => {
     );
   });
 
-  it("keeps both CURRENT Thought occupants economical with low wire reasoning", () => {
+  it("keeps both CURRENT Thought occupants on high Mistral reasoning", () => {
     const interactive = resolveCurrentPolicy({
       logicalRole: "thought",
       purpose: "thought",
@@ -58,11 +61,11 @@ describe("MF-M2 CURRENT portfolio", () => {
       lane: "exchange_cognition",
     });
 
-    expect(interactive.policyRow.reasoningPolicy).toBe("economical");
-    expect(interactive.occupant.reasoningPolicy).toBe("economical");
-    expect(interactive.occupant.effectiveReasoning).toBe("low");
+    expect(interactive.policyRow.reasoningPolicy).toBe("high");
+    expect(interactive.occupant.reasoningPolicy).toBe("high");
+    expect(interactive.occupant.effectiveReasoning).toBe("high");
     expect(durable.policyRow.occupancyKey).toBe("durable_proactive");
-    expect(durable.occupant.effectiveReasoning).toBe("low");
+    expect(durable.occupant.effectiveReasoning).toBe("high");
     expect(interactive.registryVersion).toBe(currentPortfolio().registryVersion);
   });
 
@@ -98,17 +101,17 @@ describe("MF-M2 CURRENT portfolio", () => {
 
     expect(engineering.policyRow.occupancyKey).toBe("direct_cognition");
     expect(engineering.dispatchedRouteId).toBe("ashley_expression");
-    expect(engineering.occupant.provider).toBe("mistral");
+    expect(engineering.occupant.provider).toBe("nim");
     expect(engineering.specialistRequirement).toEqual({ seat: "complex_orchestration" });
   });
 
   it("projects route enablement and quota contracts from CURRENT rather than models.json", () => {
     const records = routeRecordsFromCurrentPortfolio();
     expect(records.find((record) => record.route === "thought")).toMatchObject({
-      provider: "nim",
-      configuredModelId: "openai/gpt-oss-20b",
+      provider: "mistral",
+      configuredModelId: "mistral-small-2603",
       enabled: true,
-      quotaContract: { tpm: 16000 },
+      quotaContract: "env",
     });
     expect(records.find((record) => record.route === "sandbox_operator_light")).toMatchObject({
       enabled: false,
@@ -116,12 +119,12 @@ describe("MF-M2 CURRENT portfolio", () => {
   });
 
   it("uses the CURRENT resolver in completeChat and records the snapshot identity", async () => {
-    env.nimApiKey = "test";
-    vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
-      provider: "nim",
+    env.mistralApiKey = "test";
+    vi.spyOn(mistralAdapterModule, "createMistralAdapter").mockReturnValue({
+      provider: "mistral",
       dispatch: vi.fn().mockResolvedValue({
         text: "{\"kind\":\"speak\"}",
-        providerModel: "openai/gpt-oss-20b",
+        providerModel: "mistral-small-2603",
         usage: { promptTokens: 1, completionTokens: 1 },
         finishReason: "stop",
       }),
@@ -136,21 +139,21 @@ describe("MF-M2 CURRENT portfolio", () => {
     expect(result.modelFabric?.resolvedRoute).toMatchObject({
       registryVersion: currentPortfolio().registryVersion,
       policyRowId: "mfr_thought_interactive_compat_v1",
-      occupantId: "mfo_nim_openai_gpt_oss_20b_low",
+      occupantId: "mfo_mistral_small_2603_high",
     });
     database.close();
   });
 
   it("uses the CURRENT Thought policy ceiling when the caller omits maxTokens", async () => {
-    env.nimApiKey = "test";
+    env.mistralApiKey = "test";
     const dispatch = vi.fn().mockResolvedValue({
       text: "{}",
-      providerModel: "openai/gpt-oss-20b",
+      providerModel: "mistral-small-2603",
       usage: { promptTokens: 1, completionTokens: 1 },
       finishReason: "stop",
     });
-    vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
-      provider: "nim",
+    vi.spyOn(mistralAdapterModule, "createMistralAdapter").mockReturnValue({
+      provider: "mistral",
       dispatch,
     });
     const database = openNuclearDb(new DatabaseSync(":memory:"));
@@ -167,15 +170,15 @@ describe("MF-M2 CURRENT portfolio", () => {
   });
 
   it("uses the resolved Thought ceiling for structured-output admission and provider dispatch", async () => {
-    env.nimApiKey = "test";
+    env.mistralApiKey = "test";
     const dispatch = vi.fn().mockResolvedValue({
       text: "{}",
-      providerModel: "openai/gpt-oss-20b",
+      providerModel: "mistral-small-2603",
       usage: { promptTokens: 1, completionTokens: 1 },
       finishReason: "stop",
     });
-    vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
-      provider: "nim",
+    vi.spyOn(mistralAdapterModule, "createMistralAdapter").mockReturnValue({
+      provider: "mistral",
       dispatch,
     });
     const database = openNuclearDb(new DatabaseSync(":memory:"));
@@ -191,11 +194,11 @@ describe("MF-M2 CURRENT portfolio", () => {
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
       options: expect.objectContaining({
         maxTokens: 4096,
-        responseFormat: "json_object",
+        responseFormat: "json_schema",
         structuredOutput,
       }),
       fabricStructuredOutput: expect.objectContaining({
-        kind: "json_object_compatibility",
+        kind: "native_json_schema",
         contractId: "ashley.thought.semantic.v1",
         schemaId: "ashley.thought.semantic.v1.schema",
         schemaFingerprint,
@@ -286,14 +289,14 @@ describe("MF-M2 CURRENT portfolio", () => {
     const database = openNuclearDb(new DatabaseSync(":memory:"));
     const thought = routingStatus(database).find((route) => route.route === "thought");
     expect(thought?.fabric).toMatchObject({
-      portfolioRevisionId: "mfp_current_compatibility_v1",
+      portfolioRevisionId: "mfp_current_compatibility_v2",
       registryVersion: currentPortfolio().registryVersion,
     });
     expect(thought?.fabric.policyRows).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           policyRowId: "mfr_thought_interactive_compat_v1",
-          occupantId: "mfo_nim_openai_gpt_oss_20b_low",
+          occupantId: "mfo_mistral_small_2603_high",
           admissionBasis: expect.objectContaining({ kind: "existing_compatibility" }),
           activeActivationRefId: "compatibility_default",
           health: expect.objectContaining({

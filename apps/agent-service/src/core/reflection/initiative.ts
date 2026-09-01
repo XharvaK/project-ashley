@@ -247,7 +247,6 @@ async function modelReflectionAdjudicator(
         purpose: "thought_observation",
         logicalRole: "reflection_initiative",
         lane: "exchange_cognition",
-        model: env.mistralModel,
         maxTokens: 300,
         temperature: 0,
         ownerId: item.ownerId,

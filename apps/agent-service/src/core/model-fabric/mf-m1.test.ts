@@ -10,7 +10,6 @@ import {
 } from "../../mistral-client.js";
 import * as mistralAdapterModule from "../model-routing/adapters/mistral-adapter.js";
 import * as nimAdapterModule from "../model-routing/adapters/nim-adapter.js";
-import * as groqAdapterModule from "../model-routing/adapters/groq-adapter.js";
 import {
   capabilityProfileFor,
   createContextProjection,
@@ -169,16 +168,16 @@ describe("MF-M1 pure contract seam", () => {
 });
 
 describe("MF-M1 completeChat receipts", () => {
-  it("records the live Expression route as an existing-compatibility invocation", async () => {
-    env.mistralApiKey = "test";
+  it("records the live Expression route as an existing-compatibility NIM invocation", async () => {
+    env.nimApiKey = "test";
     const dispatch = vi.fn(async () => ({
       text: "hello",
-      providerModel: "mistral-medium-latest",
+      providerModel: "nvidia/nemotron-3.5-lightning-30b-a3b",
       usage: { promptTokens: 3, completionTokens: 2 },
       finishReason: "stop",
     }));
-    vi.spyOn(mistralAdapterModule, "createMistralAdapter").mockReturnValue({
-      provider: "mistral",
+    vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
+      provider: "nim",
       dispatch,
     });
     const database = db();
@@ -190,7 +189,7 @@ describe("MF-M1 completeChat receipts", () => {
         purpose: "expression",
         route: "ashley_expression",
         logicalRole: "expression",
-        reasoningEffort: "medium",
+        reasoningEffort: "none",
       },
     );
     const metadata = fabricMetadata(result);
@@ -207,9 +206,9 @@ describe("MF-M1 completeChat receipts", () => {
       receiptStage: "provider_response",
       dispatchTruth: "response_received",
       providerRequestCount: 1,
-      provider: "mistral",
-      backend: "mistral_direct",
-      configuredModelId: "mistral-medium-latest",
+      provider: "nim",
+      backend: "nim",
+      configuredModelId: "nvidia/nemotron-3.5-lightning-30b-a3b",
       fallbackClass: "none",
       admissionBasis: { kind: "existing_compatibility" },
     });
@@ -222,25 +221,17 @@ describe("MF-M1 completeChat receipts", () => {
     database.close();
   });
 
-  it("records Thought NIM to Groq same-model transport failover as two attempts in one invocation", async () => {
-    env.nimApiKey = "test";
-    env.groqApiKey = "test";
-    const nimDispatch = vi.fn().mockRejectedValue(
-      Object.assign(new Error("NIM unavailable"), { code: "provider_unavailable" }),
-    );
-    const groqDispatch = vi.fn().mockResolvedValue({
+  it("records the current Thought route as a single Mistral attempt", async () => {
+    env.mistralApiKey = "test";
+    const dispatch = vi.fn().mockResolvedValue({
       text: "thought",
-      providerModel: "openai/gpt-oss-20b",
+      providerModel: "mistral-small-2603",
       usage: { promptTokens: 4, completionTokens: 5 },
       finishReason: "stop",
     });
-    vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
-      provider: "nim",
-      dispatch: nimDispatch,
-    });
-    vi.spyOn(groqAdapterModule, "createGroqAdapter").mockReturnValue({
-      provider: "groq",
-      dispatch: groqDispatch,
+    vi.spyOn(mistralAdapterModule, "createMistralAdapter").mockReturnValue({
+      provider: "mistral",
+      dispatch,
     });
     const database = db();
 
@@ -251,49 +242,38 @@ describe("MF-M1 completeChat receipts", () => {
         purpose: "thought",
         route: "thought",
         logicalRole: "thought",
-        reasoningEffort: "low",
+        reasoningEffort: "high",
         deadlineAtMs: Date.now() + 10_000,
       },
     );
     const receipt = fabricMetadata(result).receipt;
 
-    expect(receipt.attempts).toHaveLength(2);
+    expect(receipt.attempts).toHaveLength(1);
     expect(receipt.finalDispatchedRouteId).toBe("thought");
-    expect(receipt.fallbackClass).toBe("transport_failover");
+    expect(receipt.fallbackClass).toBe("none");
     expect(receipt.attempts[0]).toMatchObject({
-      provider: "nim",
-      configuredModelId: "openai/gpt-oss-20b",
+      provider: "mistral",
+      backend: "mistral_direct",
+      configuredModelId: "mistral-small-2603",
       fallbackClass: "none",
       providerRequestCount: 1,
     });
-    expect(receipt.attempts[1]).toMatchObject({
-      receiptStage: "provider_response",
-      provider: "groq",
-      backend: "groq",
-      configuredModelId: "openai/gpt-oss-20b",
-      fallbackClass: "transport_failover",
-      providerRequestCount: 1,
-      dispatchTruth: "response_received",
-    });
-    expect(receipt.attempts[1]?.fallbackFromAttemptId).toBe(
-      receipt.attempts[0]?.attemptId,
-    );
-    expect(nimDispatch).toHaveBeenCalledTimes(1);
-    expect(groqDispatch).toHaveBeenCalledTimes(1);
+    expect(receipt.attempts[0]?.dispatchTruth).toBe("response_received");
+    expect(dispatch).toHaveBeenCalledTimes(1);
     database.close();
   });
 
   it("records configured utility route versus forced Thought dispatch for observation", async () => {
-    env.nimApiKey = "test";
-    const nimDispatch = vi.fn().mockResolvedValue({
+    env.mistralApiKey = "test";
+    const mistralDispatch = vi.fn().mockResolvedValue({
       text: "observation",
-      providerModel: "openai/gpt-oss-20b",
+      providerModel: "mistral-small-2603",
       usage: { promptTokens: 1, completionTokens: 1 },
       finishReason: "stop",
     });
-    vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
-      provider: "nim",
-      dispatch: nimDispatch,
+    vi.spyOn(mistralAdapterModule, "createMistralAdapter").mockReturnValue({
+      provider: "mistral",
+      dispatch: mistralDispatch,
     });
     const database = db();
 
@@ -304,7 +284,7 @@ describe("MF-M1 completeChat receipts", () => {
         purpose: "thought_observation",
         route: "thought",
         logicalRole: "thought_observation",
-        reasoningEffort: "low",
+        reasoningEffort: "high",
       },
     );
     const receipt = fabricMetadata(result).receipt;
@@ -315,14 +295,14 @@ describe("MF-M1 completeChat receipts", () => {
     expect(receipt.finalDispatchedRouteId).toBe("thought");
     expect(receipt.attempts[0]).toMatchObject({
       dispatchedRouteId: "thought",
-      provider: "nim",
-      configuredModelId: "openai/gpt-oss-20b",
+      provider: "mistral",
+      configuredModelId: "mistral-small-2603",
     });
     database.close();
   });
 
   it("attaches a resolved-not-sent receipt when local provider readiness fails", async () => {
-    env.mistralApiKey = "";
+    env.nimApiKey = "";
     const database = db();
     let thrown: unknown;
 
@@ -350,7 +330,7 @@ describe("MF-M1 completeChat receipts", () => {
       receiptStage: "resolved_not_sent",
       dispatchTruth: "not_sent",
       providerRequestCount: 0,
-      provider: "mistral",
+      provider: "nim",
     });
     expect(metadata.failure).toMatchObject({
       dispatchTruth: "not_sent",
@@ -360,12 +340,12 @@ describe("MF-M1 completeChat receipts", () => {
   });
 
   it("records a definitive provider HTTP failure as response_received", async () => {
-    env.mistralApiKey = "test";
+    env.nimApiKey = "test";
     const dispatch = vi.fn(async () => {
-      throw new AppError("rate_limited", "Mistral rate limited", 429, 30);
+      throw new AppError("rate_limited", "NVIDIA NIM rate limited", 429, 30);
     });
-    vi.spyOn(mistralAdapterModule, "createMistralAdapter").mockReturnValue({
-      provider: "mistral",
+    vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
+      provider: "nim",
       dispatch,
     });
     const database = db();

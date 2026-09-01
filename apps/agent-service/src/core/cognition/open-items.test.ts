@@ -17,6 +17,7 @@ import {
 import {
   currentBuildIdentity,
   currentContractId,
+  currentReleaseId,
 } from "../rollout/capabilities.js";
 import { enqueueCognitiveJob } from "./jobs.js";
 
@@ -337,9 +338,22 @@ describe("open cognitive item store", () => {
 
   it("invalidates cognition-derived Recall OCI when the resolved model changes", async () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
-    const originalGroqKey = env.groqApiKey;
-    env.groqApiKey = "test-key";
+    const originalNimKey = env.nimApiKey;
+    const utilityModelAlias = "nvidia/nemotron-3.5-lightning-30b-a3b";
+    env.nimApiKey = "test-key";
     const now = "2026-08-09T00:00:00.000Z";
+    db.prepare(
+      `INSERT INTO capability_releases
+         (capability, release_id, state, promoted_at, updated_at,
+          contract_id, build_identity, model_epoch)
+       VALUES ('recall', ?, 'active', ?, ?, ?, ?, 0)`,
+    ).run(
+      currentReleaseId(),
+      now,
+      now,
+      currentContractId(),
+      currentBuildIdentity(),
+    );
     db.prepare(
       `INSERT INTO questions
          (owner_id, subject, text, status, priority, created_at, updated_at,
@@ -359,9 +373,9 @@ describe("open cognitive item store", () => {
         messages: [{ role: "user", content: "model continuity fixture" }],
         purpose: "maintenance",
         lane: "curiosity_maintenance",
-        modelAlias: env.mistralModel,
-        providerId: "groq",
-        quotaBucket: "groq:open-items-model-continuity-test",
+        modelAlias: utilityModelAlias,
+        providerId: "nim",
+        quotaBucket: "nim:open-items-model-continuity-test",
         ownerId: "owner-1",
         cognitiveJobId: jobId,
         dispatch: async () => ({
@@ -370,7 +384,7 @@ describe("open cognitive item store", () => {
           result: { text: "accepted" },
         }),
       });
-      const current = currentModelContinuityIdentity(db, env.mistralModel);
+      const current = currentModelContinuityIdentity(db, utilityModelAlias);
       const item = materializeOpenCognitiveItem(db, {
       ownerId: "owner-1",
       kind: "question",
@@ -382,7 +396,7 @@ describe("open cognitive item store", () => {
       },
       origin: "cognition",
       semanticKeyMaterial: "ignored-model-key",
-      provenance: "shadow",
+      provenance: "live",
       sourceCapability: "recall",
       contractId: currentContractId(),
       buildIdentity: currentBuildIdentity(),
@@ -394,10 +408,11 @@ describe("open cognitive item store", () => {
 
       expect(item.modelEpoch).toBe(1);
       expect(item.modelIdentity).toBe(current.identity);
+      expect(openCognitiveItemSourceCurrent(db, item)).toBe(true);
       applyModelContinuity(
         db,
         {
-          alias: env.mistralModel,
+          alias: utilityModelAlias,
           resolvedModelId: "model-b",
           unresolvedAlias: false,
           dispatchSequence: dispatch.acceptedDispatchIdentity.dispatchSequence + 1,
@@ -406,11 +421,11 @@ describe("open cognitive item store", () => {
       );
       expect(
         db.prepare("SELECT model_epoch FROM model_continuity_state WHERE alias = ?")
-          .get(env.mistralModel),
+          .get(utilityModelAlias),
       ).toEqual({ model_epoch: 2 });
       expect(openCognitiveItemSourceCurrent(db, item)).toBe(false);
     } finally {
-      env.groqApiKey = originalGroqKey;
+      env.nimApiKey = originalNimKey;
       db.close();
     }
   });

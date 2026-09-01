@@ -187,7 +187,7 @@ describe("expression fallback (Wave 3)", () => {
     expect(fake.calls.length).toBe(1);
     expect(fake.calls[0].options?.route).toBe("ashley_expression");
     expect(fake.calls[0].options?.attentionDb).toBe(db);
-    expect(result.model).toBe(env.mistralModel);
+    expect(result.model).toBe("model");
   });
 
   it("T2 primary complete hop receives the same attentionDb expressSpeak was given", async () => {

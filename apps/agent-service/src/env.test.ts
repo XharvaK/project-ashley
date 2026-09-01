@@ -3,6 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const TOUCHED_VARS = [
   "COMPOSER_ENV_FILE",
   "COGNITION_DISPATCH_INTERVAL_SEC",
+  "MISTRAL_API_KEY",
+  "MISTRAL_API_KEY_SECONDARY",
+  "MISTRAL_BASE_URL",
+  "MISTRAL_MODEL",
+  "MISTRAL_REASONING_EFFORT",
   "MISTRAL_REQUESTS_PER_SECOND",
   "ASHLEY_SANDBOX_BROKER_ENABLED",
   "ASHLEY_SANDBOX_BROKER_SOCKET",
@@ -71,6 +76,22 @@ describe("numeric environment validation", () => {
       "COGNITION_DISPATCH_INTERVAL_SEC invalid; using 30",
       "MISTRAL_REQUESTS_PER_SECOND invalid; using 1",
     ]));
+  });
+});
+
+describe("Mistral credential seats", () => {
+  it("keeps the secondary credential optional and separate from the primary model setting", async () => {
+    process.env.MISTRAL_API_KEY = "primary-secret";
+    process.env.MISTRAL_API_KEY_SECONDARY = "secondary-secret";
+    process.env.MISTRAL_MODEL = "mistral-small-2603";
+    const { env, validateBoot } = await loadEnv();
+
+    expect(env.mistralApiKey).toBe("primary-secret");
+    expect(env.mistralApiKeySecondary).toBe("secondary-secret");
+    expect(env.mistralModel).toBe("mistral-small-2603");
+    expect(validateBoot().errors).not.toContain(
+      "MISTRAL_API_KEY_SECONDARY is required",
+    );
   });
 });
 

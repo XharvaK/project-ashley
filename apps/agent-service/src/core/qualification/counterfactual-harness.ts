@@ -1,8 +1,10 @@
 import { DatabaseSync } from "node:sqlite";
 import { AshleyCore } from "../runtime.js";
 import { openNuclearDb } from "../db.js";
+import { openContinuityDb } from "../continuity/db.js";
+import { createIsolatedDataPlane } from "../data-plane.js";
 import { processNextCognitiveJob, type CognitionAnalysis } from "../cognition/worker.js";
-import { rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -10,20 +12,23 @@ import { advanceTurn, nowMs } from "./fake-clock.js";
 import { snapshotLive, snapshotClass, type Row } from "./state-inventory.js";
 import { env } from "../../env.js";
 
-// The shadow Thought observation is gated on env.groqApiKey (thought-observation.ts:33).
+// The shadow Thought observation is gated on env.mistralApiKey (thought-observation.ts:33).
 // The Wave 4 plan forbids using that as the PRIMARY suppression (the unpumped
 // executor is). So the harness sets a fake key so the shadow Thought genuinely
 // fires in the ON fixture; the OFF fixture still never fires it because its
 // worker never runs (no correlated shadow episode). Restored per-test.
 const SAVED_GROQ = env.groqApiKey;
 const SAVED_NIM = env.nimApiKey;
+const SAVED_MISTRAL = env.mistralApiKey;
 export function armGroqKey(): void {
   env.groqApiKey = "wave4-fake-groq-key";
   env.nimApiKey = "wave4-fake-nim-key";
+  env.mistralApiKey = "wave4-fake-mistral-key";
 }
 export function restoreGroqKey(): void {
   env.groqApiKey = SAVED_GROQ;
   env.nimApiKey = SAVED_NIM;
+  env.mistralApiKey = SAVED_MISTRAL;
 }
 
 export { expressionCapture, thoughtCapture, clearCaptures } from "./mistral-client-mock-state.js";
@@ -62,15 +67,26 @@ export type TurnResult = {
 
 export class Fixture {
   readonly db: DatabaseSync;
+  readonly continuity: DatabaseSync;
   readonly core: AshleyCore;
   readonly shadow: boolean;
+  readonly dataDir: string;
   readonly dbPath: string;
   lastUserMessageId = 0;
 
   constructor(shadow: boolean) {
     this.shadow = shadow;
-    this.dbPath = join(tmpdir(), `ashley-nuclear-${randomUUID()}.db`);
-    this.db = openNuclearDb(new DatabaseSync(this.dbPath));
+    this.dataDir = mkdtempSync(join(tmpdir(), "ashley-nuclear-"));
+    const plane = createIsolatedDataPlane(this.dataDir);
+    mkdirSync(plane.conversationsDir, { recursive: true });
+    this.dbPath = plane.nuclearDbPath;
+    this.continuity = openContinuityDb(new DatabaseSync(plane.continuityDbPath), {
+      dataPlane: plane,
+    });
+    this.db = openNuclearDb(new DatabaseSync(this.dbPath), {
+      continuity: this.continuity,
+      dataPlane: plane,
+    });
     this.core = new AshleyCore(this.db);
   }
 
@@ -138,7 +154,12 @@ export class Fixture {
     } catch {
       /* noop */
     }
-    rmSync(this.dbPath, { force: true });
+    try {
+      this.continuity.close();
+    } catch {
+      /* noop */
+    }
+    rmSync(this.dataDir, { recursive: true, force: true });
   }
 }
 

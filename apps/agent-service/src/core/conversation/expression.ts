@@ -235,7 +235,7 @@ export async function expressSpeak(
   const dispatch: ExpressionComplete = (messagesToSend, callOptions) =>
     complete(messagesToSend, { ...callOptions, attentionDb });
 
-  // Expression fallback context is assembled below; the primary (Mistral)
+  // Expression fallback context is assembled below; the primary (NIM Lightning)
   // dispatch uses the full turn messages.
   let response: { text: string; model: string; modelFabric?: ModelFabricDispatchMetadata };
   const fallbackChainId = newCorrelationId();
@@ -247,7 +247,6 @@ export async function expressSpeak(
   });
   try {
     response = await dispatch(primaryMessages, {
-      model: env.mistralModel,
       route: "ashley_expression",
       maxTokens: channel === "proactive" ? EXPRESSION_PROACTIVE_MAX_OUTPUT_TOKENS : EXPRESSION_MAX_OUTPUT_TOKENS,
       temperature: env.mistralChatTemperature,

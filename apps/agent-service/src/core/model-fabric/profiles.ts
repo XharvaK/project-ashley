@@ -25,7 +25,10 @@ const PROFILE_VERSION = 1 as ModelProfileVersion;
 const MODEL_OUTPUT_CEILINGS: Readonly<Record<string, number>> = {
   "nim:openai/gpt-oss-20b": 4096,
   "groq:openai/gpt-oss-20b": 4096,
+  "mistral:mistral-small-2603": 4096,
 };
+
+const MISTRAL_SMALL = "mistral-small-2603";
 
 function maxOutputTokensFor(provider: string, configuredModelId: string): number {
   return MODEL_OUTPUT_CEILINGS[`${provider}:${configuredModelId}`] ?? 2048;
@@ -40,7 +43,12 @@ function mechanicalDefinition(
   provider: string,
   configuredModelId: string,
 ): ModelCapabilityProfileDefinition {
-  const structured = provider === "mistral" ? "none" : "json";
+  const structured =
+    provider === "mistral"
+      ? configuredModelId === "mistral-small-2603"
+        ? "json_schema"
+        : "none"
+      : "json";
   return {
     profileId: profileIdFor(provider, configuredModelId),
     profileVersion: PROFILE_VERSION,
@@ -60,7 +68,10 @@ function mechanicalDefinition(
     },
     reasoning: {
       mode: "configurable",
-      efforts: ["low", "medium", "high"],
+      efforts:
+        provider === "mistral" && configuredModelId === MISTRAL_SMALL
+          ? ["none", "high"]
+          : ["low", "medium", "high"],
     },
     cancellation: "abort_signal",
     limits: {

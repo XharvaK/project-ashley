@@ -4,27 +4,28 @@ import { env } from "../../env.js";
 import { AppError } from "../../errors.js";
 import { openNuclearDb } from "../db.js";
 import { completeChat, resetAdapterCache } from "../../mistral-client.js";
-import * as nimAdapterModule from "./adapters/nim-adapter.js";
-import * as groqAdapterModule from "./adapters/groq-adapter.js";
+import * as mistralAdapterModule from "./adapters/mistral-adapter.js";
 import type { ChatMessage } from "./types.js";
 
-describe("thought same-model provider failover", () => {
+const MISTRAL_MODEL = "mistral-small-2603";
+
+describe("Thought same-model Mistral credential failover", () => {
   let db: DatabaseSync;
-  const originalNimKey = env.nimApiKey;
-  const originalGroqKey = env.groqApiKey;
+  const originalMistralKey = env.mistralApiKey;
+  const originalMistralSecondaryKey = env.mistralApiKeySecondary;
 
   beforeEach(() => {
     resetAdapterCache();
     db = openNuclearDb(new DatabaseSync(":memory:"));
-    env.nimApiKey = "test-nim-key";
-    env.groqApiKey = "test-groq-key";
+    env.mistralApiKey = "test-mistral-primary-key";
+    env.mistralApiKeySecondary = "";
   });
 
   afterEach(() => {
     resetAdapterCache();
     db.close();
-    env.nimApiKey = originalNimKey;
-    env.groqApiKey = originalGroqKey;
+    env.mistralApiKey = originalMistralKey;
+    env.mistralApiKeySecondary = originalMistralSecondaryKey;
     vi.restoreAllMocks();
   });
 
@@ -33,189 +34,214 @@ describe("thought same-model provider failover", () => {
     { role: "user", content: "Make a decision." },
   ];
 
-  it("dispatches primary NIM on route thought and does not call Groq on success", async () => {
-    const nimDispatch = vi.fn().mockResolvedValue({
-      text: '{"kind":"speak","reason":"nim primary"}',
+  it("dispatches primary Mistral on route thought and makes no second attempt on success", async () => {
+    const dispatch = vi.fn().mockResolvedValue({
+      text: '{"kind":"speak","reason":"mistral primary"}',
       usage: { promptTokens: 100, completionTokens: 20 },
-      providerModel: "openai/gpt-oss-20b",
+      providerModel: MISTRAL_MODEL,
       finishReason: "stop",
     });
-    const groqDispatch = vi.fn();
 
-    vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
-      provider: "nim",
-      dispatch: nimDispatch,
-    });
-    vi.spyOn(groqAdapterModule, "createGroqAdapter").mockReturnValue({
-      provider: "groq",
-      dispatch: groqDispatch,
+    vi.spyOn(mistralAdapterModule, "createMistralAdapter").mockReturnValue({
+      provider: "mistral",
+      dispatch,
     });
 
     const result = await completeChat(messages, {
       attentionDb: db,
+      purpose: "thought",
+      logicalRole: "thought",
+      lane: "interactive",
       route: "thought",
       maxTokens: 1000,
       deadlineAtMs: Date.now() + 6000,
     });
 
-    expect(nimDispatch).toHaveBeenCalledTimes(1);
-    expect(groqDispatch).not.toHaveBeenCalled();
-    expect(result.text).toBe('{"kind":"speak","reason":"nim primary"}');
-    expect(result.modelAlias).toBe("openai/gpt-oss-20b");
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(dispatch.mock.calls[0]?.[0].credentialSeat).toBe("mistral_primary");
+    expect(result.text).toBe('{"kind":"speak","reason":"mistral primary"}');
+    expect(result.modelAlias).toBe(MISTRAL_MODEL);
   });
 
-  it("fails over to secondary Groq when NIM returns 429 rate limit and deadline permits", async () => {
-    const nimDispatch = vi.fn().mockRejectedValue(
-      new AppError("rate_limited", "NVIDIA NIM rate limited", 429),
-    );
-    const groqDispatch = vi.fn().mockResolvedValue({
-      text: '{"kind":"speak","reason":"groq secondary"}',
-      usage: { promptTokens: 100, completionTokens: 25 },
-      providerModel: "openai/gpt-oss-20b",
-      finishReason: "stop",
+  it("uses one secondary Mistral credential hop after a definitive account failure", async () => {
+    env.mistralApiKeySecondary = "test-mistral-secondary-key";
+    const dispatch = vi.fn().mockImplementation(async (args: { credentialSeat?: string }) => {
+      if (args.credentialSeat === "mistral_primary") {
+        throw new AppError(
+          "rate_limited",
+          "Mistral account rate limited",
+          429,
+          undefined,
+          "account",
+        );
+      }
+      return {
+        text: '{"kind":"speak","reason":"mistral secondary"}',
+        usage: { promptTokens: 100, completionTokens: 25 },
+        providerModel: MISTRAL_MODEL,
+        finishReason: "stop",
+      };
     });
 
-    vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
-      provider: "nim",
-      dispatch: nimDispatch,
-    });
-    vi.spyOn(groqAdapterModule, "createGroqAdapter").mockReturnValue({
-      provider: "groq",
-      dispatch: groqDispatch,
+    vi.spyOn(mistralAdapterModule, "createMistralAdapter").mockReturnValue({
+      provider: "mistral",
+      dispatch,
     });
 
     const result = await completeChat(messages, {
       attentionDb: db,
+      purpose: "thought",
+      logicalRole: "thought",
+      lane: "interactive",
       route: "thought",
       maxTokens: 1000,
       deadlineAtMs: Date.now() + 6000,
     });
 
-    expect(nimDispatch).toHaveBeenCalledTimes(1);
-    expect(groqDispatch).toHaveBeenCalledTimes(1);
-    expect(result.text).toBe('{"kind":"speak","reason":"groq secondary"}');
-    expect(result.modelAlias).toBe("openai/gpt-oss-20b");
+    expect(dispatch).toHaveBeenCalledTimes(2);
+    expect(dispatch.mock.calls.map(([args]) => args.credentialSeat)).toEqual([
+      "mistral_primary",
+      "mistral_secondary",
+    ]);
+    expect(dispatch.mock.calls[0]?.[0].modelId).toBe(MISTRAL_MODEL);
+    expect(dispatch.mock.calls[1]?.[0].modelId).toBe(MISTRAL_MODEL);
+    expect(dispatch.mock.calls[0]?.[0].messages).toEqual(
+      dispatch.mock.calls[1]?.[0].messages,
+    );
+    expect(result.text).toBe('{"kind":"speak","reason":"mistral secondary"}');
+    expect(result.modelAlias).toBe(MISTRAL_MODEL);
+    expect(result.modelFabric?.receipt).toMatchObject({
+      receiptStage: "resolved",
+      fallbackClass: "credential_failover",
+    });
   });
 
-  it("fails over to secondary Groq when NIM returns 503 provider unavailable", async () => {
-    const nimDispatch = vi.fn().mockRejectedValue(
-      new AppError("provider_unavailable", "NVIDIA NIM 503", 503),
+  it("does not use another credential for a provider-wide failure", async () => {
+    env.mistralApiKeySecondary = "test-mistral-secondary-key";
+    const dispatch = vi.fn().mockRejectedValue(
+      new AppError(
+        "mistral_unavailable",
+        "Mistral provider unavailable",
+        503,
+        undefined,
+        "provider",
+      ),
     );
-    const groqDispatch = vi.fn().mockResolvedValue({
-      text: '{"kind":"speak","reason":"groq fallback"}',
-      usage: { promptTokens: 100, completionTokens: 20 },
-      providerModel: "openai/gpt-oss-20b",
-      finishReason: "stop",
+
+    vi.spyOn(mistralAdapterModule, "createMistralAdapter").mockReturnValue({
+      provider: "mistral",
+      dispatch,
     });
 
-    vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
-      provider: "nim",
-      dispatch: nimDispatch,
-    });
-    vi.spyOn(groqAdapterModule, "createGroqAdapter").mockReturnValue({
-      provider: "groq",
-      dispatch: groqDispatch,
-    });
-
-    const result = await completeChat(messages, {
-      attentionDb: db,
-      route: "thought",
-      maxTokens: 1000,
-      deadlineAtMs: Date.now() + 6000,
-    });
-
-    expect(nimDispatch).toHaveBeenCalledTimes(1);
-    expect(groqDispatch).toHaveBeenCalledTimes(1);
-    expect(result.text).toBe('{"kind":"speak","reason":"groq fallback"}');
-  });
-
-  it("fails closed without calling Groq if remaining deadline is insufficient (<2500ms)", async () => {
-    const nimDispatch = vi.fn().mockRejectedValue(
-      new AppError("rate_limited", "NVIDIA NIM rate limited", 429),
-    );
-    const groqDispatch = vi.fn();
-
-    vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
-      provider: "nim",
-      dispatch: nimDispatch,
-    });
-    vi.spyOn(groqAdapterModule, "createGroqAdapter").mockReturnValue({
-      provider: "groq",
-      dispatch: groqDispatch,
-    });
-
-    // Deadline only 1000ms in the future (< 2500ms threshold)
     await expect(
       completeChat(messages, {
         attentionDb: db,
+        purpose: "thought",
+        logicalRole: "thought",
+        lane: "interactive",
+        route: "thought",
+        maxTokens: 1000,
+        deadlineAtMs: Date.now() + 6000,
+      }),
+    ).rejects.toMatchObject({ code: "mistral_unavailable" });
+
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(dispatch.mock.calls[0]?.[0].credentialSeat).toBe("mistral_primary");
+  });
+
+  it("fails closed without the secondary hop when the remaining deadline is below 2500ms", async () => {
+    env.mistralApiKeySecondary = "test-mistral-secondary-key";
+    const dispatch = vi.fn().mockRejectedValue(
+      new AppError(
+        "rate_limited",
+        "Mistral account rate limited",
+        429,
+        undefined,
+        "account",
+      ),
+    );
+
+    vi.spyOn(mistralAdapterModule, "createMistralAdapter").mockReturnValue({
+      provider: "mistral",
+      dispatch,
+    });
+
+    await expect(
+      completeChat(messages, {
+        attentionDb: db,
+        purpose: "thought",
+        logicalRole: "thought",
+        lane: "interactive",
         route: "thought",
         maxTokens: 1000,
         deadlineAtMs: Date.now() + 1000,
       }),
     ).rejects.toMatchObject({ code: "rate_limited" });
 
-    expect(nimDispatch).toHaveBeenCalledTimes(1);
-    expect(groqDispatch).not.toHaveBeenCalled();
+    expect(dispatch).toHaveBeenCalledTimes(1);
   });
 
-  it("fails closed when both NIM and Groq fail (no third fallback)", async () => {
-    const nimDispatch = vi.fn().mockRejectedValue(
-      new AppError("provider_unavailable", "NIM 503", 503),
-    );
-    const groqDispatch = vi.fn().mockRejectedValue(
-      new AppError("rate_limited", "Groq 429", 429),
-    );
-
-    vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
-      provider: "nim",
-      dispatch: nimDispatch,
+  it("does not create a third attempt when both Mistral credentials fail", async () => {
+    env.mistralApiKeySecondary = "test-mistral-secondary-key";
+    const dispatch = vi.fn().mockImplementation(async (args: { credentialSeat?: string }) => {
+      throw new AppError(
+        "credential_invalid",
+        args.credentialSeat === "mistral_primary"
+          ? "Mistral primary credential rejected"
+          : "Mistral secondary credential rejected",
+        401,
+        undefined,
+        "account",
+      );
     });
-    vi.spyOn(groqAdapterModule, "createGroqAdapter").mockReturnValue({
-      provider: "groq",
-      dispatch: groqDispatch,
+
+    vi.spyOn(mistralAdapterModule, "createMistralAdapter").mockReturnValue({
+      provider: "mistral",
+      dispatch,
     });
 
     await expect(
       completeChat(messages, {
         attentionDb: db,
+        purpose: "thought",
+        logicalRole: "thought",
+        lane: "interactive",
         route: "thought",
         maxTokens: 1000,
         deadlineAtMs: Date.now() + 6000,
       }),
-    ).rejects.toMatchObject({ code: "rate_limited" });
+    ).rejects.toMatchObject({ code: "credential_invalid" });
 
-    expect(nimDispatch).toHaveBeenCalledTimes(1);
-    expect(groqDispatch).toHaveBeenCalledTimes(1);
+    expect(dispatch).toHaveBeenCalledTimes(2);
+    expect(dispatch.mock.calls.map(([args]) => args.credentialSeat)).toEqual([
+      "mistral_primary",
+      "mistral_secondary",
+    ]);
   });
 
-  it("does not trigger provider failover on valid completion text (no outcome shopping)", async () => {
-    // NIM returns a valid completion that says speak
-    const nimDispatch = vi.fn().mockResolvedValue({
-      text: '{"kind":"speak","shouldSpeak":true,"completion":"complete","reason":"ordinary speak"}',
-      usage: { promptTokens: 100, completionTokens: 20 },
-      providerModel: "openai/gpt-oss-20b",
-      finishReason: "stop",
-    });
-    const groqDispatch = vi.fn();
+  it("does not trigger credential failover for a schema or semantic failure", async () => {
+    env.mistralApiKeySecondary = "test-mistral-secondary-key";
+    const dispatch = vi.fn().mockRejectedValue(
+      new AppError("capability_mismatch", "schema rejected", 400),
+    );
 
-    vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
-      provider: "nim",
-      dispatch: nimDispatch,
-    });
-    vi.spyOn(groqAdapterModule, "createGroqAdapter").mockReturnValue({
-      provider: "groq",
-      dispatch: groqDispatch,
+    vi.spyOn(mistralAdapterModule, "createMistralAdapter").mockReturnValue({
+      provider: "mistral",
+      dispatch,
     });
 
-    const result = await completeChat(messages, {
-      attentionDb: db,
-      route: "thought",
-      maxTokens: 1000,
-      deadlineAtMs: Date.now() + 6000,
-    });
+    await expect(
+      completeChat(messages, {
+        attentionDb: db,
+        purpose: "thought",
+        logicalRole: "thought",
+        lane: "interactive",
+        route: "thought",
+        maxTokens: 1000,
+        deadlineAtMs: Date.now() + 6000,
+      }),
+    ).rejects.toMatchObject({ code: "capability_mismatch" });
 
-    expect(nimDispatch).toHaveBeenCalledTimes(1);
-    expect(groqDispatch).not.toHaveBeenCalled();
-    expect(result.text).toContain("ordinary speak");
+    expect(dispatch).toHaveBeenCalledTimes(1);
   });
 });

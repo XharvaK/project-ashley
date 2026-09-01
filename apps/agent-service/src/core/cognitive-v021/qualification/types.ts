@@ -1,3 +1,5 @@
+import type { DispatchTruth, ModelFailure } from "../../model-fabric/types.js";
+
 export type ThoughtQualificationCaseId =
   | "settlement"
   | "observation_intent"
@@ -9,6 +11,37 @@ export type ThoughtQualificationCaseId =
 
 export type ThoughtQualificationEnvironment = "fixture" | "isolated_live";
 export type QualificationGateStatus = "pass" | "fail";
+
+export type QualificationFirstFailureBoundary =
+  | "PRE_DISPATCH_LOCAL_FAILURE"
+  | "REQUEST_DISPATCHED_NO_RESPONSE"
+  | "PROVIDER_ERROR_RESPONSE"
+  | "PROVIDER_CONTENT_RECEIVED"
+  | "LOCAL_SCHEMA_REJECTION"
+  | "STRICT_PARSER_REJECTION"
+  | "NOT_REACHED";
+
+export type QualificationReachability = "PASS" | "FAIL" | "NOT_REACHED";
+
+export type QualificationDiagnostics = Readonly<{
+  firstFailureBoundary: QualificationFirstFailureBoundary;
+  closedSchemaFailureKeyword: string | null;
+  closedSchemaFailureInstancePath: string | null;
+  closedSchemaFailureSchemaPath: string | null;
+  closedSchemaFailureBranch: string | null;
+  errorCode: string | null;
+  dispatchTruth: DispatchTruth | null;
+  dispatchStage: ModelFailure["stage"] | null;
+  providerRequestStarted: boolean;
+  providerResponseReceived: boolean;
+  attemptId: string | null;
+  reachability: Readonly<{
+    kernelBinding: QualificationReachability;
+    fencing: QualificationReachability;
+    authorityReachability: QualificationReachability;
+    semanticValidity: QualificationReachability;
+  }>;
+}>;
 
 export type ThoughtQualificationCaseResult = Readonly<{
   caseId: ThoughtQualificationCaseId;
@@ -31,6 +64,7 @@ export type ThoughtQualificationCaseResult = Readonly<{
   wireBindingId: string | null;
   providerDeclaredEnforcement: string | null;
   capabilityFingerprint: string | null;
+  diagnostics: QualificationDiagnostics;
   failureCodes: readonly string[];
   verdict: "PASS" | "NOT_QUALIFIED";
 }>;
@@ -42,8 +76,8 @@ export type ThoughtQualificationNegativeWitness = ThoughtQualificationCaseResult
 export type ThoughtRouteQualification = Readonly<{
   schema: "ashley.thought.route_qualification.v1";
   candidate: {
-    provider: "nim";
-    model: "openai/gpt-oss-20b";
+    provider: "mistral";
+    model: "mistral-small-2603";
     occupantId: string;
   };
   capabilityFingerprint: string;

@@ -65,7 +65,6 @@ export function createEngineeringThinkingModel(attentionDb: DatabaseSync): Think
           { role: "user", content: user },
         ],
         {
-          model: env.mistralModel,
           temperature: env.mistralChatTemperature,
           logicalRole: "engineering",
           specialistRequirement: { seat: "complex_orchestration" },

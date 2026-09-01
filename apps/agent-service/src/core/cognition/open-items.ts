@@ -22,7 +22,6 @@ import {
   durableSemanticKeyHash,
   semanticIdentityHash,
 } from "./identity.js";
-import { env } from "../../env.js";
 import { activeWithdrawal } from "../relationship/repair.js";
 import {
   maxClassification,
@@ -490,6 +489,23 @@ function authoritativeSourceRevision(row: Record<string, unknown>): string {
   return optionalBoundedText(currentSourceRevision(row), 128);
 }
 
+function modelAliasFromIdentity(modelIdentity: string): string | null {
+  const prefix = "model-continuity-v1:";
+  if (!modelIdentity.startsWith(prefix)) return null;
+  const separator = modelIdentity.indexOf("|", prefix.length);
+  if (separator <= prefix.length) return null;
+  const alias = modelIdentity.slice(prefix.length, separator).trim();
+  return alias || null;
+}
+
+function currentModelForCognitionItem(
+  db: DatabaseSync,
+  modelIdentity: string,
+) {
+  const alias = modelAliasFromIdentity(modelIdentity);
+  return alias ? currentModelContinuityIdentity(db, alias) : null;
+}
+
 function validateCapability(
   db: DatabaseSync,
   proposal: OpenCognitiveItemProposal,
@@ -714,9 +730,9 @@ function validateProposal(
   if (!Number.isInteger(proposal.modelEpoch) || proposal.modelEpoch < 0) {
     rejectMaterialization("oci_model_epoch_invalid");
   }
-  const currentModel = currentModelContinuityIdentity(db, env.mistralModel);
   if (origin === "cognition") {
-    if (currentModel.alias.trim() === "") {
+    const currentModel = currentModelForCognitionItem(db, modelIdentity);
+    if (currentModel == null || currentModel.alias.trim() === "") {
       rejectMaterialization("oci_model_continuity_unavailable");
     }
     validateAcceptedDispatchIdentity(
@@ -1129,9 +1145,10 @@ export function openCognitiveItemSourceCurrent(
     return false;
   }
   const capability = item.sourceCapability as CapabilityName;
-  const currentModel = currentModelContinuityIdentity(db, env.mistralModel);
   if (item.origin === "cognition") {
+    const currentModel = currentModelForCognitionItem(db, item.modelIdentity);
     if (
+      currentModel == null ||
       currentModel.identity == null ||
       item.modelIdentity !== currentModel.identity ||
       item.modelEpoch !== currentModel.modelEpoch

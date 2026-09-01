@@ -644,7 +644,10 @@ describe("INIT-03 deterministic behavioral and counterfactual evaluation", () =>
     expect(ownTimeDecision.evidenceRefs).toContainEqual({ type: "take", id: 11 });
 
     const path = join(tmpdir(), `ashley-init03-eval-${randomUUID()}.db`);
-    let db = openNuclearDb(new DatabaseSync(path));
+    const continuity = openContinuityDb(new DatabaseSync(":memory:"));
+    let db = openNuclearDb(new DatabaseSync(path), {
+      continuity,
+    });
     try {
       activateCapabilities(db, ["reading"]);
       const source = questionSource(db, "What happened before the defer test?", 0.9);
@@ -685,7 +688,9 @@ describe("INIT-03 deterministic behavioral and counterfactual evaluation", () =>
       expect(deferred.decisionKind).toBe("silence");
 
       db.close();
-      db = openNuclearDb(new DatabaseSync(path));
+      db = openNuclearDb(new DatabaseSync(path), {
+        continuity,
+      });
       const afterExpiry = new Date(
         FIXTURE_NOW.getTime() + OPEN_COGNITIVE_ITEM_DELAY_DURATIONS_MS.standard + 1,
       );
@@ -702,6 +707,7 @@ describe("INIT-03 deterministic behavioral and counterfactual evaluation", () =>
       expect(row.attention_item_id).toBeTypeOf("number");
     } finally {
       closeDb(db);
+      continuity.close();
       rmSync(path, { force: true });
     }
   });

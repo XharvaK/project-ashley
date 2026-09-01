@@ -39,42 +39,52 @@ function rowCount(db: DatabaseSync, table: string): number {
 }
 
 describe("route-to-provider mapping", () => {
-  it("expression routes to the Mistral primary", () => {
+  it("expression routes to the NIM Lightning primary", () => {
     const b = resolveRoute("expression");
     expect(b.route).toBe("ashley_expression");
-    expect(b.provider).toBe("mistral");
-    expect(b.configuredModelId).toBe("mistral-medium-latest");
+    expect(b.provider).toBe("nim");
+    expect(b.configuredModelId).toBe("nvidia/nemotron-3.5-lightning-30b-a3b");
   });
 
-  it("thought routes to NIM 20B primary", () => {
+  it("thought routes to the Mistral Small primary", () => {
     const b = resolveRoute("thought");
     expect(b.route).toBe("thought");
-    expect(b.provider).toBe("nim");
-    expect(b.configuredModelId).toBe("openai/gpt-oss-20b");
+    expect(b.provider).toBe("mistral");
+    expect(b.configuredModelId).toBe("mistral-small-2603");
   });
 
   it.each([
     "exchange_cognition",
     "curiosity_consolidation",
-    "thought_observation",
     "maintenance",
-  ])("utility purpose %s routes to Groq 20B", (purpose) => {
+  ])("utility purpose %s routes to NIM Lightning", (purpose) => {
     const b = resolveRoute(purpose);
     expect(b.route).toBe("utility_bulk");
-    expect(b.provider).toBe("groq");
-    expect(b.configuredModelId).toBe("openai/gpt-oss-20b");
+    expect(b.provider).toBe("nim");
+    expect(b.configuredModelId).toBe("nvidia/nemotron-3.5-lightning-30b-a3b");
   });
 
-  it("all four utility purposes share one 20B quota bucket", () => {
+  it.each(["thought_observation", "reflection_initiative"])(
+    "Thought-owned purpose %s routes to Mistral Small rather than utility Lightning",
+    (purpose) => {
+      const b = resolveRoute(purpose);
+      expect(b.route).toBe("thought");
+      expect(b.provider).toBe("mistral");
+      expect(b.configuredModelId).toBe("mistral-small-2603");
+    },
+  );
+
+  it("all direct utility purposes share the NIM Lightning quota bucket", () => {
     const buckets = [
       "exchange_cognition",
       "curiosity_consolidation",
-      "thought_observation",
       "maintenance",
-    ].map((p) => quotaBucketFor(resolveRoute(p).provider, "openai/gpt-oss-20b"));
-    expect(new Set(buckets)).toEqual(new Set(["groq:openai/gpt-oss-20b"]));
-    expect(quotaBucketFor("groq", "openai/gpt-oss-120b")).toBe(
-      "groq:openai/gpt-oss-120b",
+    ].map((p) => quotaBucketFor(resolveRoute(p).provider, resolveRoute(p).configuredModelId));
+    expect(new Set(buckets)).toEqual(
+      new Set(["nim:nvidia/nemotron-3.5-lightning-30b-a3b"]),
+    );
+    expect(quotaBucketFor("mistral", "mistral-small-2603")).toBe(
+      "mistral:mistral-small-2603",
     );
   });
 });
@@ -147,10 +157,10 @@ describe("unknown routes fail closed", () => {
 });
 
 describe("provider-aware missing key gating", () => {
-  it("Mistral route fails before reservation when MISTRAL_API_KEY is absent", async () => {
-    env.mistralApiKey = "";
+  it("NIM Expression route fails before reservation when NIM_API_KEY is absent", async () => {
+    env.mistralApiKey = "present";
     env.groqApiKey = "present";
-    env.nimApiKey = "present";
+    env.nimApiKey = "";
     const db = freshDb();
     await expect(
       withOfflineAppGateDisabled(() => completeChat(
@@ -162,8 +172,8 @@ describe("provider-aware missing key gating", () => {
     db.close();
   });
 
-  it("Thought route fails before reservation when both NIM and Groq keys are absent", async () => {
-    env.mistralApiKey = "present";
+  it("Thought route fails before reservation when MISTRAL_API_KEY is absent", async () => {
+    env.mistralApiKey = "";
     env.groqApiKey = "";
     env.nimApiKey = "";
     const db = freshDb();
@@ -178,15 +188,16 @@ describe("provider-aware missing key gating", () => {
   });
 });
 
-describe("shared 20B quota bucket at the dispatch layer", () => {
+describe("shared NIM Lightning quota bucket at the dispatch layer", () => {
   it("two utility purposes consume one shared bucket", async () => {
-    env.mistralApiKey = "";
-    env.groqApiKey = "present";
+    env.mistralApiKey = "present";
+    env.groqApiKey = "";
+    env.nimApiKey = "present";
     const db = freshDb();
 
     const fake = vi.fn(
       async () => ({
-        providerModel: "groq/openai/gpt-oss-20b",
+        providerModel: "nvidia/nemotron-3.5-lightning-30b-a3b",
         usage: { promptTokens: 1, completionTokens: 1 },
         result: { consumed: true },
       }),
@@ -214,36 +225,36 @@ describe("shared 20B quota bucket at the dispatch layer", () => {
     const rowB = db
       .prepare(`SELECT quota_bucket FROM attention_requests WHERE id = ?`)
       .get(idB) as { quota_bucket: string };
-    expect(rowA.quota_bucket).toBe("groq:openai/gpt-oss-20b");
-    expect(rowB.quota_bucket).toBe("groq:openai/gpt-oss-20b");
+    expect(rowA.quota_bucket).toBe("nim:nvidia/nemotron-3.5-lightning-30b-a3b");
+    expect(rowB.quota_bucket).toBe("nim:nvidia/nemotron-3.5-lightning-30b-a3b");
     expect(rowA.quota_bucket).toBe(rowB.quota_bucket);
     expect(fake).toHaveBeenCalledTimes(2);
     db.close();
   });
 
-  describe("Wave 2: Thought failure isolates the Mistral lane", () => {
+  describe("Wave 2: Thought failure isolates the NIM Expression lane", () => {
     it("Thought failure leaves Expression independently dispatchable in its own bucket", async () => {
-      env.mistralApiKey = "test";
+      env.mistralApiKey = "";
       env.groqApiKey = "";
-      env.nimApiKey = "";
+      env.nimApiKey = "test";
       const db = freshDb();
-      // NIM & Groq gates closed -> Thought fails before any reservation/dispatch.
+      // Mistral gate closed -> Thought fails before any reservation/dispatch.
       await expect(
         withOfflineAppGateDisabled(() => completeChat(
           [{ role: "user", content: "x" }],
           { route: "thought", attentionDb: db },
         )),
       ).rejects.toMatchObject({ code: "agent_not_ready" });
-      const nimRows = Number(
+      const thoughtRows = Number(
         (
           db.prepare(
-            `SELECT COUNT(*) AS c FROM attention_requests WHERE quota_bucket LIKE 'nim:%' OR quota_bucket LIKE 'groq:%'`,
+            `SELECT COUNT(*) AS c FROM attention_requests WHERE quota_bucket = 'mistral:mistral-small-2603'`,
           ).get() as { c: number }
         ).c,
       );
-      expect(nimRows).toBe(0);
+      expect(thoughtRows).toBe(0);
 
-      // Expression (Mistral lane) is untouched and still dispatches.
+      // Expression (NIM Lightning lane) is untouched and still dispatches.
       const b = resolveRoute("expression");
       let called = false;
       const res = await runAttentiveDispatch<{ echo: string }>(db, {
@@ -262,14 +273,14 @@ describe("shared 20B quota bucket at the dispatch layer", () => {
         },
       });
       expect(called).toBe(true);
-      const mistralRows = Number(
+      const lightningRows = Number(
         (
           db.prepare(
-            `SELECT COUNT(*) AS c FROM attention_requests WHERE quota_bucket = 'mistral:mistral-medium-latest'`,
+            `SELECT COUNT(*) AS c FROM attention_requests WHERE quota_bucket = 'nim:nvidia/nemotron-3.5-lightning-30b-a3b'`,
           ).get() as { c: number }
         ).c,
       );
-      expect(mistralRows).toBe(1);
+      expect(lightningRows).toBe(1);
       expect(res.result.echo).toBe("ok");
       db.close();
     });

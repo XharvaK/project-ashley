@@ -95,7 +95,10 @@ export type StructuredOutputCapabilityBinding = Readonly<
   | {
       bindingId: string;
       mode: "native_json_schema";
-      wireFormat: "nim_guided_json" | "nim_response_format_json_schema";
+      wireFormat:
+        | "nim_guided_json"
+        | "nim_response_format_json_schema"
+        | "mistral_response_format_json_schema";
     }
 >;
 
@@ -114,7 +117,10 @@ export type TrustedStructuredOutputControl = Readonly<
       schemaId: string;
       schemaFingerprint: StructuredOutputSchemaFingerprint;
       bindingId: string;
-      wireFormat: "nim_guided_json" | "nim_response_format_json_schema";
+      wireFormat:
+        | "nim_guided_json"
+        | "nim_response_format_json_schema"
+        | "mistral_response_format_json_schema";
       schema: Readonly<Record<string, unknown>>;
     }
 >;
@@ -124,7 +130,7 @@ export type ModelReasoningCapabilities =
   | { mode: "fixed" }
   | {
       mode: "configurable";
-      efforts: readonly ("low" | "medium" | "high")[];
+      efforts: readonly ("none" | "low" | "medium" | "high")[];
     };
 
 export type ModelCapabilityProfileDefinition = {
@@ -336,7 +342,8 @@ export type DispatchTruth =
 export type ModelFallbackClass =
   | "none"
   | "transport_failover"
-  | "model_substitution";
+  | "model_substitution"
+  | "credential_failover";
 
 export type ModelFallbackChain = {
   chainId: string;
@@ -382,6 +389,8 @@ export type ModelResolvedDispatchFacts = {
   translatedWireControl: string | null;
   inferencePolicyFingerprint: InferencePolicyFingerprint | null;
   structuredOutputSchemaFingerprint: StructuredOutputSchemaFingerprint | null;
+  /** Non-secret provider account seat, when credential failover is active. */
+  credentialSeat?: string | null;
 };
 
 export type ModelAttemptReceiptBase = {

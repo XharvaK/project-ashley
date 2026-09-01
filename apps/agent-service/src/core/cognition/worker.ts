@@ -242,11 +242,10 @@ async function analyzeWithMistral(
   transcript: string,
   context?: AnalyzeContext,
 ): ReturnType<Analyze> {
-  if (!env.groqApiKey) {
+  if (!env.nimApiKey) {
     return {
       analysis: analysisFrom({}, transcript.replace(/\s+/g, " ").slice(0, 700)),
       model: "offline",
-      modelAlias: env.mistralModel,
       resolvedModelId: null,
       raw: "{}",
     };
@@ -500,10 +499,13 @@ export async function processNextCognitiveJob(
           | undefined;
         if (!source?.entity_uuid) continue;
         try {
-          const modelContinuity = currentModelContinuityIdentity(db, env.mistralModel);
           const dispatchIdentity = result.dispatchIdentity;
+          const modelContinuity = dispatchIdentity
+            ? currentModelContinuityIdentity(db, dispatchIdentity.modelAlias)
+            : null;
           const dispatchIsCurrent =
             dispatchIdentity != null &&
+            modelContinuity != null &&
             dispatchIdentity.modelAlias === modelContinuity.alias &&
             dispatchIdentity.modelIdentity === modelContinuity.identity &&
             dispatchIdentity.modelEpoch === modelContinuity.modelEpoch &&
