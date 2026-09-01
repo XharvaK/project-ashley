@@ -198,6 +198,9 @@ const CAPABILITY_REALITY: CapabilityReality = {
     {
       operationKind: "project.read_file",
       semanticClass: "observation",
+      family: "project_inspection",
+      readOnly: true,
+      requiresProject: true,
       available: true,
       requiredRequestFields: ["projectId", "path"],
       optionalRequestFields: [],
@@ -207,6 +210,9 @@ const CAPABILITY_REALITY: CapabilityReality = {
     {
       operationKind: "workspace.verify",
       semanticClass: "effect",
+      family: "project_verification",
+      readOnly: true,
+      requiresProject: true,
       available: true,
       requiredRequestFields: ["projectId"],
       optionalRequestFields: ["workspaceId", "recipeId"],

@@ -74,6 +74,9 @@ describe("v0.2.1 CapabilityReality live-surface contract", () => {
         {
           operationKind: "project.read_file",
           semanticClass: "observation",
+          family: "project_inspection",
+          readOnly: true,
+          requiresProject: true,
           available: true,
           requiredRequestFields: ["projectId", "path"],
           optionalRequestFields: [],
@@ -83,6 +86,9 @@ describe("v0.2.1 CapabilityReality live-surface contract", () => {
         {
           operationKind: "workspace.verify",
           semanticClass: "effect",
+          family: "project_verification",
+          readOnly: true,
+          requiresProject: true,
           available: true,
           requiredRequestFields: ["projectId"],
           optionalRequestFields: ["workspaceId", "recipeId"],

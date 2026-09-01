@@ -281,6 +281,10 @@ describe("Thought semantic output contract", () => {
     expect(instruction).toContain("effect_intent when the requested outcome requires a governed mechanical effect");
     expect(instruction).toContain("abstain when required evidence, capability, or an admissible basis is absent or unresolved");
     expect(instruction).toContain("Do not use settlement as a placeholder for an unperformed observation or effect");
+    expect(instruction).toContain('semanticClass:"observation" requires observation_intent');
+    expect(instruction).toContain('semanticClass:"effect" requires effect_intent');
+    expect(instruction).toContain("readOnly does not convert an effect-class operation into an observation");
+    expect(instruction).toContain("workspace.verify");
     expect(instruction).toContain("This contract describes output shape only");
   });
 

@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { v2CapabilitySpec } from "@composer-assistant/sandbox-v2";
 import { env } from "../../../env.js";
 import { perceptionCapabilityCanInfluence } from "../../perception/capability-self-model.js";
 import {
@@ -48,6 +49,11 @@ function thoughtOperationCapabilities(input: {
   projectInspectionAvailable: boolean;
   verificationAvailable: boolean;
 }): readonly ThoughtOperationCapability[] {
+  const projectReadFileSpec = v2CapabilitySpec("project.read_file");
+  const workspaceVerifySpec = v2CapabilitySpec("workspace.verify");
+  if (!projectReadFileSpec || !workspaceVerifySpec) {
+    throw new Error("sandbox_v2_operation_capability_spec_missing");
+  }
   const approvedProjectIds = authorizedProjectIds(input.registry, () => true);
   const verificationProjectIds = authorizedProjectIds(
     input.registry,
@@ -57,6 +63,9 @@ function thoughtOperationCapabilities(input: {
     Object.freeze({
       operationKind: "project.read_file",
       semanticClass: "observation" as const,
+      family: projectReadFileSpec.family,
+      readOnly: projectReadFileSpec.readOnly,
+      requiresProject: projectReadFileSpec.requiresProject,
       available: input.projectInspectionAvailable,
       requiredRequestFields: Object.freeze(["projectId", "path"]),
       optionalRequestFields: Object.freeze([]),
@@ -66,6 +75,9 @@ function thoughtOperationCapabilities(input: {
     Object.freeze({
       operationKind: "workspace.verify",
       semanticClass: "effect" as const,
+      family: workspaceVerifySpec.family,
+      readOnly: workspaceVerifySpec.readOnly,
+      requiresProject: workspaceVerifySpec.requiresProject,
       available: input.verificationAvailable,
       requiredRequestFields: Object.freeze(["projectId"]),
       optionalRequestFields: Object.freeze(["workspaceId", "recipeId"]),

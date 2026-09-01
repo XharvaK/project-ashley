@@ -6,6 +6,7 @@ import type {
   completeChat,
 } from "../../mistral-client.js";
 import type { DataClassification } from "../privacy/classification.js";
+import type { SandboxV2CapabilitySpec } from "@composer-assistant/sandbox-v2";
 
 export type { DataClassification } from "../privacy/classification.js";
 
@@ -969,6 +970,12 @@ export type CapabilityReality = {
 export type ThoughtOperationCapability = Readonly<{
   operationKind: string;
   semanticClass: "observation" | "effect";
+  /** Canonical operation-family metadata from the Sandbox V2 registry. */
+  family: SandboxV2CapabilitySpec["family"];
+  /** Canonical mutation property from the Sandbox V2 registry. */
+  readOnly: boolean;
+  /** Canonical project-binding property from the Sandbox V2 registry. */
+  requiresProject: boolean;
   available: boolean;
   requiredRequestFields: readonly string[];
   optionalRequestFields: readonly string[];
