@@ -1282,3 +1282,239 @@ The historical W2 artifacts remain unchanged. The current exact verdict is
 preserved as `W2_PHYSICAL_QUALIFICATION=NOT_QUALIFIED`; the new evidence
 explains why the repaired fixture still fails without converting that result
 into a claim of fundamental model incapability.
+
+## O. Final Q8/Q9 causal prosecution and one conditional W2
+
+Recorded: 2026-09-01.
+
+This section is appended after sections A–N. It records the final source
+prosecution from parent candidate `41e890a5c8ce83fba26f6ce8777a4fd631cd19fc`,
+the repaired exact candidate, and the one conditional live W2. It does not
+rewrite historical evidence.
+
+### O.1 Q8 — surfaceDraft authority
+
+The source-derived canonical rule is:
+
+```text
+IS_SURFACE_DRAFT_REQUIRED_WHEN_MODE_DRAFT=yes
+Q8_SURFACE_DRAFT_CANONICAL_RULE=When speech.mode is draft, surfaceDraft must be present and non-empty before Settlement validation, speech fidelity, or publication.
+```
+
+The pre-repair source was not one coherent contract. The successor semantic
+TypeScript type declared `surfaceDraft?: string`; `validSpeech` allowed the
+field to be absent; the native draft schema exposed the property but did not
+list it as required and had no minimum length; and generated model-facing
+speech guidance therefore omitted it from the required list. In contrast,
+Settlement validation required the field and rejected null or trimmed-empty
+text, speech fidelity rejected a missing or empty draft, and
+`plausibleSemanticOutput` required a trimmed non-empty draft.
+
+The downstream rule is authoritative for safe publication. `run.ts` materializes
+the parsed successor output and validates it before Authority, fidelity, and
+publication. The materialization path no longer inserts `null` for a draft
+whose source semantic output is missing `surfaceDraft`.
+
+```text
+Q8.1_TYPESCRIPT_SEMANTIC_TYPE_BEFORE_REPAIR=no
+Q8.1_TYPESCRIPT_SEMANTIC_TYPE_CURRENT=yes
+Q8.2_STRICT_PARSER_BEFORE_REPAIR=no
+Q8.2_STRICT_PARSER_CURRENT=yes
+Q8.3_NATIVE_SCHEMA_BEFORE_REPAIR=no
+Q8.3_NATIVE_SCHEMA_CURRENT=yes
+Q8.4_GENERATED_MODEL_CONTRACT_BEFORE_REPAIR=no
+Q8.4_GENERATED_MODEL_CONTRACT_CURRENT=yes
+Q8.5_DOWNSTREAM_SETTLEMENT_EXPRESSION_REQUIREMENT=yes
+Q8.6_PLAUSIBLE_SEMANTIC_OUTPUT_CANONICAL_AUTHORITY=no
+Q8.7_PLAUSIBLE_SEMANTIC_OUTPUT_WAS_HIDDEN_STRICT_ORACLE_BEFORE_REPAIR=yes
+SURFACE_DRAFT_ALIGNMENT=MULTIPLE_LAYERS_MISALIGNED
+Q8_ROOT_CAUSE=upstream successor type, strict parser, native schema, and generated model contract were weaker than the downstream publication invariant; plausibleSemanticOutput was source-supported defense-in-depth but was also a hidden stricter qualification oracle at the unaligned boundary
+```
+
+The bounded repair aligned the six named source/test seams. The successor
+draft type now requires `surfaceDraft`; the strict parser requires it and
+rejects an empty value; the native schema lists it as required and sets
+`minLength=1`; generated model-facing speech guidance derives the required
+field from that schema; and the semantic-output regression proves parser and
+schema rejection for both absence and an empty string. No host text is
+fabricated, and no post-parse draft default is used.
+
+### O.2 Q9 — conversationalRead meaning and projection
+
+The source meaning is:
+
+```text
+Q9_CONVERSATIONAL_READ_CANONICAL_MEANING=CapabilityReality.conversationalRead reports whether an additional authorized user-requested URL/page read may be performed; it does not report whether already-projected rawConversation is visible.
+```
+
+`V021_LIVE_PERCEPTION_CAPABILITIES` is empty in this candidate, so
+`getCapabilityReality` truthfully reports `conversationalRead=false`. The
+perception capability registry and URL-read implementation identify this as
+additional conversational page retrieval, not ordinary visibility of current
+conversation evidence. `buildThoughtInput` independently supplies at least
+the current `rawConversation` entry, and `projectThoughtInput` copies it into
+the model-visible projection. The production path is
+`serve.ts` → `getCapabilityReality` → `buildThoughtInput` →
+`projectThoughtInput` → Thought message construction, so the combination
+`rawConversation present + conversationalRead=false` is a real production
+state.
+
+Before repair, the model-facing contract explained operation capabilities but
+did not explain this boolean's retrieval-only meaning. A reasonable model
+could therefore treat `false` as invalidating the owner turn it could visibly
+read. The new general compatibility instruction states the distinction for
+every Thought request. It does not select a semantic branch and does not
+special-case the W2 fixture.
+
+```text
+Q9.1_CONVERSATIONAL_READ_FALSE_MEANS_NO_CONVERSATION_VISIBILITY=no
+Q9.2_CONVERSATIONAL_READ_FALSE_MEANS_NO_ADDITIONAL_URL_PAGE_READ=yes
+Q9.3_RAW_CONVERSATION_INDEPENDENTLY_ADMISSIBLE=yes
+Q9.4_DISTINCTION_EXPLICIT_BEFORE_REPAIR=no
+Q9.4_DISTINCTION_EXPLICIT_CURRENT=yes
+Q9.5_MODEL_COULD_REASONABLY_MISREAD_FALSE_AS_NO_VISIBLE_CONTEXT=yes
+Q9.6_PRODUCTION_PROJECTS_RAW_CONVERSATION_WITH_FALSE=yes
+Q9.7_FIELD_CLASSIFICATION=additional perception/retrieval capability fact, not conversation visibility
+CONVERSATIONAL_READ_PROJECTION=CORRECT_BUT_MODEL_FACING_AMBIGUOUS
+Q9_ROOT_CAUSE=truthful additional-page-read capability was serialized beside visible current conversation without model-facing semantic clarification
+```
+
+### O.3 Test-first repair and exact candidate
+
+The two new regressions were run RED before source changes:
+
+```text
+semantic-output-contract.test.ts=RED; 1 failed, 8 passed
+projection.test.ts=RED; 1 failed, 3 passed
+```
+
+The repaired source candidate is:
+
+```text
+PARENT_SHA=41e890a5c8ce83fba26f6ce8777a4fd631cd19fc
+EXACT_CANDIDATE_SHA=76562f6dc325b2d1ca8c62f0f907276352d9ef4c
+Q8_REPAIR=successor type + strict parser + native schema + generated model-facing contract aligned to required non-empty draft; post-parse draft fallback removed
+Q9_REPAIR=general model-facing CapabilityReality/rawConversation distinction added; truthful conversationalRead=false preserved
+```
+
+Changed source/test files in the exact candidate:
+
+```text
+apps/agent-service/src/core/cognitive-v021/types.ts
+apps/agent-service/src/core/cognitive-v021/thought/parse.ts
+apps/agent-service/src/core/cognitive-v021/thought/output-contract.ts
+apps/agent-service/src/core/cognitive-v021/thought/run.ts
+apps/agent-service/src/core/cognitive-v021/thought/semantic-output-contract.test.ts
+apps/agent-service/src/core/cognitive-v021/thought/__tests__/projection.test.ts
+```
+
+### O.4 Offline and isolated Mint verification
+
+```text
+FOCUSED_AFFECTED_SUITES=PASS — 7 files / 51 tests
+POST_BRIDGE_FOCUSED_TESTS=PASS — 2 files / 16 tests
+COMPLETE_COGNITIVE_V021_SUBTREE=PASS — 106 files / 355 tests
+LOCAL_AGENT_SERVICE_BUILD=PASS
+GIT_DIFF_CHECK=PASS
+REMOTE_DIAGNOSTIC_BRANCH=76562f6dc325b2d1ca8c62f0f907276352d9ef4c
+ISOLATED_MINT_CHECKOUT=/home/xarvak/ashley-phase5-w2-76562f6
+ISOLATED_MINT_CHECKOUT_SHA=76562f6dc325b2d1ca8c62f0f907276352d9ef4c
+ISOLATED_MINT_BUILD=PASS — sandbox-policy, sandbox-m1, sandbox-tree, sandbox-broker, sandbox-v2, agent-service
+PRODUCTION_CHECKOUT_SHA=573393c3fdb2392a45137d4625635658eb4b5d88
+PRODUCTION_CHECKOUT_MUTATED=no
+```
+
+### O.5 One conditional exact W2
+
+Exactly one new live W2 was run. No unchanged rerun was performed.
+
+```text
+W2_RUN_ID=w2-20260901T171208681Z-888b1b11-94f3-4a0d-910b-21a4d3afa08e
+W2_ENVIRONMENT=isolated_live
+W2_PROVIDER=mistral
+W2_MODEL=mistral-small-2603
+W2_REASONING=high
+W2_FALLBACK=none
+W2_WIRE_MODE=native_json_schema
+W2_WIRE_FORMAT=mistral_response_format_json_schema
+W2_WIRE_BINDING=compat_thought_mistral_small_2603_native_json_schema_v2
+W2_SAMPLES=3 per semantic family
+W2_THOUGHT_OUTPUT=4096
+W2_STRUCTURAL_CORRECTION_OUTPUT=2048
+W2_WALL_CLOCK=30s
+W2_MAX_CORRECTIONS=2
+W2_PROVIDER_AVAILABILITY_FAILURES=0
+W2_ARTIFACT=work/phase5-w2-semantics-structural-closure/w2-route-qualification-76562f6.json
+W2_ARTIFACT_SHA256=sha256:bc0890c871243ba8f3e75a91cc1ee97fbf7da7fc9990d50bac836cd155b97114
+RAW_PROVIDER_RESPONSE=NOT_DURABLY_RETAINED
+```
+
+The exact artifact records 12 cases and 14 provider attempts. All cases have
+real provider attempt IDs; no zero-attempt row is counted as a provider
+failure. The result is:
+
+```text
+W2_PHYSICAL_QUALIFICATION=NOT_QUALIFIED
+CASES=12
+PROVIDER_ATTEMPTS=14
+PASS=11
+NOT_QUALIFIED=1
+OUTCOME_UNKNOWN=0
+
+settlement=3/3
+observation_intent=3/3
+effect_intent=2/3
+abstain=3/3
+```
+
+The three settlement cases passed transport, native schema, strict parsing,
+Kernel binding, fencing, Authority reachability, semantic validity, and the
+resource policy. This confirms that the Q8 surface-draft defect and Q9
+conversation-capability ambiguity were causal to the earlier settlement
+failure family and are repaired in this candidate.
+
+The single remaining failure is exact and separate:
+
+```text
+case=effect_intent sample=0
+firstFailureBoundary=SEMANTIC_VALIDITY_REJECTION
+transport=success
+providerRequestStarted=true
+providerResponseReceived=true
+jsonSyntax=PASS
+closedSchemaConformance=PASS
+strictParser=PASS
+kernelBinding=PASS
+semanticValidity=FAIL
+failureCodes=semantic_branch_mismatch, semantic_invalid
+normalizedSemanticText={"kind": "observation_intent", "operationKind": "project.read_file", "request": {"projectId": "qualification-fixture", "path": "README.md"}, "purpose": "Perform read-only verification of qualification-fixture workspace by inspecting documentation to understand its purpose and structure", "evidenceNeed": "Content of README.md to establish baseline understanding of the qualification-fixture workspace contents and verification requirements", "existingRefs": ["turn-1"]}
+```
+
+After Q8 and Q9 are clean, this live effect-branch mismatch supports a
+remaining model-facing branch-selection problem for this exact sample. It
+does not by itself prove a general law over-correction or fundamental model
+incapability, and no further W2 was authorized or performed.
+
+```text
+GENERIC_BRANCH_SELECTION_OVER_CORRECTION=SUPPORTED_FOR_THE_REMAINING_EFFECT_SAMPLE_ONLY; GENERAL_LAW_NOT_PROVEN
+MODEL_FUNDAMENTALLY_INCAPABLE=NOT_PROVEN
+CURRENT_MISTRAL_NATIVE_BINDING_DEFECT=NOT_PROVEN
+```
+
+### O.6 Terminal gates
+
+```text
+THOUGHT_CONTRACT_QUALIFIED=no
+RELEASE_TRUTH_MATCHED=no
+W3_STAGE_H=NOT_REACHED
+DOWNSTREAM_RELEASE=NOT_REACHED
+ACTIVATION=NOT_REACHED
+DEPLOYMENT=NOT_PERFORMED
+PRODUCTION_ACCEPTED=no
+PRODUCTION_MUTATION=no
+SERVICE_RESTART=no
+W9_STARTED=no
+```
+
+No live production checkout was updated, activated, restarted, deployed, or
+promoted. The exact verdict remains `W2_PHYSICAL_QUALIFICATION=NOT_QUALIFIED`.
