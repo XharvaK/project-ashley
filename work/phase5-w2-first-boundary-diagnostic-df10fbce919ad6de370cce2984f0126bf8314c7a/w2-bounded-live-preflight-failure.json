@@ -1,0 +1,19 @@
+{
+  "schema": "ashley.thought.route_qualification.v1",
+  "candidate": {
+    "provider": "mistral",
+    "model": "mistral-small-2603",
+    "occupantId": "unavailable"
+  },
+  "capabilityFingerprint": "unavailable",
+  "runId": "w2-20260901T090051413Z-ae274b91-414e-4964-90dd-374eef6b746f",
+  "environment": "isolated_live",
+  "cases": [],
+  "negativeWitnesses": [],
+  "preflight": {
+    "errorCode": "qualification_release_identity_mismatch"
+  },
+  "outputDirectory": "/tmp/ashley-phase5-w2-first-boundary-Rv442z/live-diagnostic",
+  "qualificationResultPath": null,
+  "verdict": "NOT_RUN"
+}

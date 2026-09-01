@@ -1,0 +1,184 @@
+{
+  "schema": "ashley.thought.route_qualification.v1",
+  "candidate": {
+    "provider": "mistral",
+    "model": "mistral-small-2603",
+    "occupantId": "mfo_mistral_small_2603_high"
+  },
+  "capabilityFingerprint": "sha256:14321c8efb2bd08e9d2f43dd5b0a78d84768e08080f4250ed9e162d46a6f1f4b",
+  "runId": "w2-20260901T090149221Z-f0ffdc64-d9a6-42f7-84a8-9e4637326c06",
+  "environment": "isolated_live",
+  "cases": [
+    {
+      "caseId": "settlement",
+      "invocationIds": [
+        "w2-20260901T090149221Z-f0ffdc64-d9a6-42f7-84a8-9e4637326c06:sample:0:settlement:0"
+      ],
+      "providerAttemptIds": [
+        "6250784f-df3a-4d05-bfc4-2fe69189c8c9:attempt:1"
+      ],
+      "transport": "success",
+      "rawContentBytes": 856,
+      "rawContentDigest": "sha256:ad36aafd07ba4094bf8986482d9b3f51bc266daf3b3c494e457d98c08050715d",
+      "jsonSyntax": "PASS",
+      "closedSchemaConformance": "PASS",
+      "strictParser": "PASS",
+      "kernelBinding": "PASS",
+      "fencing": "PASS",
+      "authorityReachability": "PASS",
+      "semanticValidity": "PASS",
+      "resourcePolicy": "PASS",
+      "elapsedMs": 11994,
+      "outputTokens": 547,
+      "wireMode": "native_json_schema",
+      "wireBindingId": "compat_thought_mistral_small_2603_native_json_schema_v2",
+      "providerDeclaredEnforcement": "unavailable",
+      "capabilityFingerprint": "sha256:14321c8efb2bd08e9d2f43dd5b0a78d84768e08080f4250ed9e162d46a6f1f4b",
+      "diagnostics": {
+        "firstFailureBoundary": "PROVIDER_CONTENT_RECEIVED",
+        "closedSchemaFailureKeyword": null,
+        "closedSchemaFailureInstancePath": null,
+        "closedSchemaFailureSchemaPath": null,
+        "closedSchemaFailureBranch": null,
+        "errorCode": null,
+        "dispatchTruth": "response_received",
+        "dispatchStage": "provider_dispatch",
+        "providerRequestStarted": true,
+        "providerResponseReceived": true,
+        "attemptId": "6250784f-df3a-4d05-bfc4-2fe69189c8c9:attempt:1",
+        "reachability": {
+          "kernelBinding": "PASS",
+          "fencing": "PASS",
+          "authorityReachability": "PASS",
+          "semanticValidity": "PASS"
+        }
+      },
+      "firstFailureBoundary": "PROVIDER_CONTENT_RECEIVED",
+      "independentFailureCodes": [],
+      "dependentNotReachedGates": [],
+      "failureEvidence": null,
+      "failureCodes": [],
+      "verdict": "PASS"
+    },
+    {
+      "caseId": "effect_intent",
+      "invocationIds": [
+        "w2-20260901T090149221Z-f0ffdc64-d9a6-42f7-84a8-9e4637326c06:sample:0:effect_intent:0"
+      ],
+      "providerAttemptIds": [
+        "cd490be8-8908-42d9-bbde-58a29c1f5477:attempt:1"
+      ],
+      "transport": "success",
+      "rawContentBytes": 686,
+      "rawContentDigest": "sha256:0be5d265c1689b677e4767a9623c1ea1fa6f0813a433fa8ea91a38cd87c4243f",
+      "jsonSyntax": "PASS",
+      "closedSchemaConformance": "PASS",
+      "strictParser": "PASS",
+      "kernelBinding": "PASS",
+      "fencing": "PASS",
+      "authorityReachability": "PASS",
+      "semanticValidity": "PASS",
+      "resourcePolicy": "PASS",
+      "elapsedMs": 4664,
+      "outputTokens": 527,
+      "wireMode": "native_json_schema",
+      "wireBindingId": "compat_thought_mistral_small_2603_native_json_schema_v2",
+      "providerDeclaredEnforcement": "unavailable",
+      "capabilityFingerprint": "sha256:14321c8efb2bd08e9d2f43dd5b0a78d84768e08080f4250ed9e162d46a6f1f4b",
+      "diagnostics": {
+        "firstFailureBoundary": "PROVIDER_CONTENT_RECEIVED",
+        "closedSchemaFailureKeyword": null,
+        "closedSchemaFailureInstancePath": null,
+        "closedSchemaFailureSchemaPath": null,
+        "closedSchemaFailureBranch": null,
+        "errorCode": null,
+        "dispatchTruth": "response_received",
+        "dispatchStage": "provider_dispatch",
+        "providerRequestStarted": true,
+        "providerResponseReceived": true,
+        "attemptId": "cd490be8-8908-42d9-bbde-58a29c1f5477:attempt:1",
+        "reachability": {
+          "kernelBinding": "PASS",
+          "fencing": "PASS",
+          "authorityReachability": "PASS",
+          "semanticValidity": "PASS"
+        }
+      },
+      "firstFailureBoundary": "PROVIDER_CONTENT_RECEIVED",
+      "independentFailureCodes": [],
+      "dependentNotReachedGates": [],
+      "failureEvidence": null,
+      "failureCodes": [],
+      "verdict": "PASS"
+    },
+    {
+      "caseId": "abstain",
+      "invocationIds": [
+        "w2-20260901T090149221Z-f0ffdc64-d9a6-42f7-84a8-9e4637326c06:sample:0:abstain:0"
+      ],
+      "providerAttemptIds": [
+        "a4c49007-1074-4190-b6df-3fb88f0fb8de:attempt:1"
+      ],
+      "transport": "success",
+      "rawContentBytes": 227,
+      "rawContentDigest": "sha256:1e39a6df62a2924df32e95b34978c25c7fd2e1f270ceb4127c5af8109ea8f48d",
+      "jsonSyntax": "PASS",
+      "closedSchemaConformance": "PASS",
+      "strictParser": "PASS",
+      "kernelBinding": "PASS",
+      "fencing": "PASS",
+      "authorityReachability": "PASS",
+      "semanticValidity": "PASS",
+      "resourcePolicy": "PASS",
+      "elapsedMs": 3485,
+      "outputTokens": 393,
+      "wireMode": "native_json_schema",
+      "wireBindingId": "compat_thought_mistral_small_2603_native_json_schema_v2",
+      "providerDeclaredEnforcement": "unavailable",
+      "capabilityFingerprint": "sha256:14321c8efb2bd08e9d2f43dd5b0a78d84768e08080f4250ed9e162d46a6f1f4b",
+      "diagnostics": {
+        "firstFailureBoundary": "PROVIDER_CONTENT_RECEIVED",
+        "closedSchemaFailureKeyword": null,
+        "closedSchemaFailureInstancePath": null,
+        "closedSchemaFailureSchemaPath": null,
+        "closedSchemaFailureBranch": null,
+        "errorCode": null,
+        "dispatchTruth": "response_received",
+        "dispatchStage": "provider_dispatch",
+        "providerRequestStarted": true,
+        "providerResponseReceived": true,
+        "attemptId": "a4c49007-1074-4190-b6df-3fb88f0fb8de:attempt:1",
+        "reachability": {
+          "kernelBinding": "PASS",
+          "fencing": "PASS",
+          "authorityReachability": "PASS",
+          "semanticValidity": "PASS"
+        }
+      },
+      "firstFailureBoundary": "PROVIDER_CONTENT_RECEIVED",
+      "independentFailureCodes": [],
+      "dependentNotReachedGates": [],
+      "failureEvidence": null,
+      "failureCodes": [],
+      "verdict": "PASS"
+    }
+  ],
+  "preflight": {
+    "portfolioRevisionId": "mfp_current_compatibility_v2",
+    "registryVersion": "sha256:1268a8de9745abe0b872bd4f801d0440c2567055cd9f811a639db45f93d2934e",
+    "policyRowId": "mfr_thought_interactive_compat_v1",
+    "occupantId": "mfo_mistral_small_2603_high",
+    "provider": "mistral",
+    "model": "mistral-small-2603",
+    "logicalBindingId": "ashley.thought.semantic.v1",
+    "schemaFingerprint": "sha256:9bf27fc16755f26917ab2eeae55010b7a94212c593847aa37e5e4a634563fb9b",
+    "wireBindingId": "compat_thought_mistral_small_2603_native_json_schema_v2",
+    "wireMode": "native_json_schema",
+    "wireFormat": "mistral_response_format_json_schema",
+    "buildIdentity": "df10fbce919ad6de370cce2984f0126bf8314c7a",
+    "credentialPresent": true
+  },
+  "outputDirectory": "/tmp/ashley-phase5-w2-first-boundary-Rv442z/live-diagnostic-exact",
+  "qualificationResultPath": "/tmp/ashley-phase5-w2-first-boundary-Rv442z/live-diagnostic-exact/control/qualifications/w2-mfo_mistral_small_2603_high-d9e162d46a6f1f4b.json",
+  "verdict": "PASS"
+}

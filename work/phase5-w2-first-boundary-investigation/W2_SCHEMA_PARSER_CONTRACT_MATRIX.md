@@ -97,3 +97,39 @@ semantic failure. The W2 harness must use the source-defined bounded
 structural-correction path only for malformed output, and must report the
 final executed attempt with its own attempt identity. Thinking content remains
 metadata-only and cannot be fed into this parser.
+
+## Live evidence adjudication
+
+The bounded diagnostic on candidate
+`df10fbce919ad6de370cce2984f0126bf8314c7a` passed all three selected cases
+through the native schema binding. The complete W2 run then produced 12/12
+JSON-syntax passes and 12/12 closed-schema passes, with 11/12 strict-parser
+passes.
+
+The new strict-parser failure was an `effect_intent` response whose
+`existingRefs` contained `qualification-conversation:turn-1`. The host
+allowlist for that case contained `turn-1`. `parseThoughtSemanticOutput`
+rejects the reference, while the static schema intentionally accepts the
+string-array shape. This is an intentional host-context layering difference,
+not a representable structural mismatch and not a parser relaxation case. The
+current operation parser reports the combined operation predicate as
+`wrong_type` at `purpose`; the captured payload and source predicate identify
+the actual failing condition as the allowlist check on `existingRefs`.
+
+The new settlement semantic failure is separate. The response passed the
+schema and strict parser with `speech.mode=draft` but omitted
+`speech.surfaceDraft`. The successor semantic schema and parser permit that
+optional field, while materialization and the host settlement validator
+require a non-empty draft before publication. The qualification semantic gate
+therefore correctly rejected the provider output. This is semantic/host
+layering, not a parser defect.
+
+The complete W2 evidence therefore supports:
+
+~~~text
+BASE_FIXED_SHAPE_SCHEMA_PARSER_MISMATCH=REPAIRED
+RUNTIME_ALLOWLIST_DIFFERENCE=INTENTIONAL_AND_HOST_CONTEXT_DEPENDENT
+SETTLEMENT_DRAFT_SURFACE_DIFFERENCE=INTENTIONAL_SEMANTIC_HOST_LAYER
+POST_ALIGNMENT_CONTRACT=INTENTIONAL_LAYERING_PROVEN
+MODEL_FUNDAMENTALLY_INCAPABLE=NOT_PROVEN
+~~~

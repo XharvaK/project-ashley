@@ -128,3 +128,120 @@ offline replay tests pass. It must use the frozen Mistral Small primary/high/
 native/no-fallback route and may not change prompts or routing. A newly
 captured failure must be replayed through normalization, schema, parser,
 kernel, semantic, fencing, and Authority before it is assigned to the model.
+
+## Final D3 and full-W2 adjudication
+
+The exact candidate `df10fbce919ad6de370cce2984f0126bf8314c7a` was qualified in
+an isolated Mint checkout. A process-only `ASHLEY_RELEASE_ID` override matched
+the detached candidate, and a process-only `MISTRAL_REASONING_EFFORT=high`
+override selected the frozen reasoning value. No persistent Mint environment,
+active production checkout, service, deployment, or activation was changed.
+
+The first diagnostic invocation stopped before dispatch because Mint's
+inherited non-empty release label was stale. Its artifact records
+`qualification_release_identity_mismatch`, `NOT_RUN`, zero cases, and zero
+provider attempts. This was a local qualification preflight boundary, not a
+provider failure. The corrected process-only identity allowed the bounded
+diagnostic to make three real primary-credential requests. All three passed
+the native schema and every downstream gate.
+
+The complete requalification evaluated 12 cases using 20 provider attempts.
+The eight additional attempts were bounded production structural corrections.
+All 12 transports, JSON parses, closed-schema checks, and resource-policy
+checks passed. Ten cases passed the full qualification path. Two cases were
+not qualified:
+
+~~~text
+settlement sample 0
+  firstFailureBoundary=SEMANTIC_VALIDITY_REJECTION
+  independentFailureCodes=semantic_invalid
+  dependentNotReachedGates=fencing,authorityReachability
+  captured cause=the provider emitted speech.mode=draft without a non-empty speech.surfaceDraft
+
+effect_intent sample 0
+  firstFailureBoundary=STRICT_PARSER_REJECTION
+  independentFailureCodes=PROVIDER_ACCEPTED_PARSER_REJECTED
+  dependentNotReachedGates=kernelBinding,semanticValidity,fencing,authorityReachability
+  captured cause=existingRefs contained qualification-conversation:turn-1 while the host allowlist contained turn-1
+~~~
+
+Both captured failures replayed offline with zero provider calls. Normalization
+matched, and each replay reproduced the same first failure boundary and the
+same dependent `NOT_REACHED` gates.
+
+### Required case adjudication
+
+~~~text
+CASE=effect_intent sample 0
+HISTORICAL_FIRST_BOUNDARY=STRICT_PARSER_REJECTION
+HISTORICAL_BODY_AVAILABLE=no
+STATIC_CONTRACT_FINDING=The static schema accepts a string array; the parser intentionally applies the runtime evidence allowlist.
+NEW_CAPTURE_AVAILABLE=yes
+OFFLINE_REPLAY_RESULT=PASS; same first boundary STRICT_PARSER_REJECTION
+ROOT_CAUSE=MODEL_SEMANTIC_CONTRACT_VIOLATION
+OWNING_LAYER=Thought provider semantic output, rejected by the strict parser's host-context allowlist
+SOURCE_PROOF=parseOperationSemantic requires every existingRefs value to be in the host allowlist; the captured value was qualification-conversation:turn-1 and the allowlist was turn-1.
+TEST_PROOF=The offline replay and strict-parser gate regression reproduce the parser boundary without downstream gate failures.
+FIX=No parser relaxation. Preserve the candidate as NOT_QUALIFIED and retain the captured normalized payload.
+WHY_THIS_IS_NOT_WHACK_A_MOLE=The failure is a deterministic context rule at the shared parser boundary; no branch-specific tolerance was added.
+
+CASE=abstain sample 1
+HISTORICAL_FIRST_BOUNDARY=STRICT_PARSER_REJECTION
+HISTORICAL_BODY_AVAILABLE=no
+STATIC_CONTRACT_FINDING=No necessarily applicable structural schema/parser mismatch was proven.
+NEW_CAPTURE_AVAILABLE=no; the bounded abstain diagnostic and all three new abstain samples passed.
+OFFLINE_REPLAY_RESULT=NOT_AVAILABLE for the historical body
+ROOT_CAUSE=UNKNOWN
+OWNING_LAYER=UNKNOWN; historical digest-only evidence is insufficient
+SOURCE_PROOF=The historical artifact retained no normalized body or parser diagnostic.
+TEST_PROOF=Tri-state, bounded-capture, and replay tests pass; they do not identify an absent historical body.
+FIX=No inference and no rerun for body recovery.
+WHY_THIS_IS_NOT_WHACK_A_MOLE=The case remains explicitly unknown rather than being mapped to an unrelated new failure.
+
+CASE=settlement sample 0
+HISTORICAL_FIRST_BOUNDARY=NOT_RELIABLE_HISTORICAL_FENCING_AUTHORITY_PROJECTION
+HISTORICAL_BODY_AVAILABLE=no
+STATIC_CONTRACT_FINDING=The old evaluator evaluated fencing and Authority with non-production-equivalent context; dependent gate projection was not causal.
+NEW_CAPTURE_AVAILABLE=yes; new sample 0 failed earlier at semantic validity and did not reproduce the historical reachability pair.
+OFFLINE_REPLAY_RESULT=PASS for the new semantic failure; historical body unavailable
+ROOT_CAUSE=QUALIFICATION_HARNESS_DEFECT_REPAIRED; historical provider-controlled cause UNKNOWN
+OWNING_LAYER=W2 reachability context and causal projection
+SOURCE_PROOF=Production-equivalent Authority DB binding and fencing-before-Authority ordering are now used; a semantic failure leaves both downstream gates NOT_REACHED.
+TEST_PROOF=Focused reachability tests, the bounded live diagnostic, and the new failure replay pass.
+FIX=Use the isolated nuclear attention DB for the Authority barrier context and preserve causal gate ordering.
+WHY_THIS_IS_NOT_WHACK_A_MOLE=The repair applies to the shared host-owned reachability graph and does not tolerate a provider settlement.
+
+CASE=settlement sample 2
+HISTORICAL_FIRST_BOUNDARY=NOT_RELIABLE_HISTORICAL_SEMANTIC_FENCING_AUTHORITY_PROJECTION
+HISTORICAL_BODY_AVAILABLE=no
+STATIC_CONTRACT_FINDING=The historical semantic failure could be independent; its recorded fencing and Authority failures were dependent projections and cannot be trusted.
+NEW_CAPTURE_AVAILABLE=no for sample 2; the new sample 2 passed.
+OFFLINE_REPLAY_RESULT=NOT_AVAILABLE for the historical body
+ROOT_CAUSE=UNKNOWN for the historical provider payload; current semantic failure class is separately captured on settlement sample 0.
+OWNING_LAYER=UNKNOWN historically; W2 projection defect repaired
+SOURCE_PROOF=The source now stops at the first semantic failure and records fencing and Authority as NOT_REACHED.
+TEST_PROOF=Tri-state and offline replay regressions pass.
+FIX=No historical payload inference and no parser/schema weakening.
+WHY_THIS_IS_NOT_WHACK_A_MOLE=The historical case remains unknown while the common projection defect is repaired once.
+~~~
+
+### Current contract conclusion
+
+The native binding is no longer the observed failure boundary. The bounded
+diagnostic and the full run show `native_json_schema` reaching Mistral and
+passing the static schema for every case. `providerDeclaredEnforcement` is
+`unavailable`, but that metadata does not negate the adapter's native request
+evidence. The remaining failures are provider semantic-output violations under
+the frozen parser/semantic contract. They do not prove that
+`mistral-small-2603` is fundamentally incapable of the successor Thought
+contract.
+
+The frozen result remains:
+
+~~~text
+W2_PHYSICAL_QUALIFICATION=NOT_QUALIFIED
+THOUGHT_CONTRACT_QUALIFIED=no
+MODEL_FUNDAMENTALLY_INCAPABLE=NOT_PROVEN
+READY_FOR_W3_STAGE_H=no
+PRODUCTION_MUTATION=no
+~~~

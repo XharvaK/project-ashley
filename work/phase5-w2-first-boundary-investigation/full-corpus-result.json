@@ -2,6 +2,7 @@
   "schema": "ashley.phase5.w2.full_corpus_result.v1",
   "recordedAt": "2026-09-01T08:54:21.7487096Z",
   "candidateBaseSha": "9cf777c41e39271c4e2cb2db5ed89503f97ff88f",
+  "candidateSha": "df10fbce919ad6de370cce2984f0126bf8314c7a",
   "command": "npm run test --prefix apps/agent-service -- --no-file-parallelism --reporter=dot",
   "status": "PASS",
   "testFilesPassed": 371,

@@ -353,3 +353,40 @@ nine millisecond elapsed time, empty content, and no wire/capability metadata
 are not counted as provider failures. Their first pre-dispatch boundary is
 `UNKNOWN` because the old artifact omitted the error metadata and the source
 used only a successful completion attempt identity when populating that field.
+
+## D3 and complete-W2 evidence
+
+The exact candidate `df10fbce919ad6de370cce2984f0126bf8314c7a` was detached in
+an isolated Mint checkout. The process-only qualification environment supplied
+the same candidate as `ASHLEY_RELEASE_ID` and set `MISTRAL_REASONING_EFFORT=high`;
+the Mint production checkout and its persistent environment were not changed.
+
+The bounded live diagnostic made one real primary-credential Mistral request
+for each of `settlement`, `effect_intent`, and `abstain`. All three cases used
+`native_json_schema` and passed every executed gate through resource policy.
+This proves that the corrected qualification path reaches the real adapter and
+endpoint with the native schema binding. `providerDeclaredEnforcement` remained
+`unavailable`; that response metadata does not override the observed request
+wire evidence.
+
+The complete W2 run made 12 case evaluations and 20 provider attempts. The
+additional eight attempts were source-defined structural corrections after
+malformed responses. All 12 provider transports, JSON parses, and closed-schema
+checks passed. Eleven final attempts passed the strict parser. Ten cases passed
+all downstream gates. The two non-qualified cases stopped at their first
+independent boundary and recorded dependent gates as `NOT_REACHED`.
+
+The captured settlement failure was parser-valid and kernel-bound, but its
+draft speech omitted `speech.surfaceDraft`. The qualification semantic check
+therefore rejected it before fencing and Authority. The captured effect
+failure passed the static schema but used `existingRefs=["qualification-conversation:turn-1"]`
+while the host allowlist contained `turn-1`; the strict parser rejected that
+context-dependent reference. The static schema cannot encode a runtime
+allowlist. These are provider semantic-output violations, not evidence of
+fundamental model incapability or a native-wire failure.
+
+Both captured failures replayed offline through normalization, schema, parser,
+kernel, semantic, fencing, Authority, and verdict projection with zero provider
+calls and reproduced their first failure boundaries exactly. The original
+digest-only failure bodies remain unrecoverable; the new full-W2 artifact does
+contain bounded normalized semantic text for its failed cases.
