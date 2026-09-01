@@ -3,6 +3,7 @@ import { env } from "../../../env.js";
 import {
   evaluateQualificationCase,
   diagnoseEffectIntentSemanticOutput,
+  qualificationFixtureSettlementExpectation,
   replayCapturedQualificationFailure,
   runThoughtCapabilityQualification,
   qualificationFixtureOwnerMessage,
@@ -115,6 +116,20 @@ describe("successor Thought qualification", () => {
       expect(message).not.toMatch(/settlement|observation_intent|effect_intent|abstain/i);
       expect(message).not.toMatch(/semantic branch/i);
     }
+  });
+
+  it("keeps the settlement fixture self-contained and its oracle supported by visible context", () => {
+    expect(qualificationFixtureSettlementExpectation()).toEqual({
+      ownerMessage: "Please acknowledge that you received this message.",
+      expectedSpeech: "Got it.",
+      sourceRefsUsed: ["turn-1"],
+      selfContained: true,
+      hiddenFactRequired: false,
+      requiresObservation: false,
+      requiresEffect: false,
+      requiresUnavailableCapability: false,
+      expectedSpeechSupportedByModelVisibleContext: true,
+    });
   });
 
   it("proves default fixture mode performs no network call", async () => {

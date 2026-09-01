@@ -1174,6 +1174,34 @@ export function evaluateQualificationCase(input: {
   });
 }
 
+type SettlementFixtureExpectation = Readonly<{
+  ownerMessage: string;
+  expectedSpeech: string;
+  sourceRefsUsed: readonly string[];
+  selfContained: boolean;
+  hiddenFactRequired: boolean;
+  requiresObservation: boolean;
+  requiresEffect: boolean;
+  requiresUnavailableCapability: boolean;
+  expectedSpeechSupportedByModelVisibleContext: boolean;
+}>;
+
+const SETTLEMENT_FIXTURE_EXPECTATION: SettlementFixtureExpectation = Object.freeze({
+  ownerMessage: "Please acknowledge that you received this message.",
+  expectedSpeech: "Got it.",
+  sourceRefsUsed: Object.freeze(["turn-1"]),
+  selfContained: true,
+  hiddenFactRequired: false,
+  requiresObservation: false,
+  requiresEffect: false,
+  requiresUnavailableCapability: false,
+  expectedSpeechSupportedByModelVisibleContext: true,
+});
+
+export function qualificationFixtureSettlementExpectation(): SettlementFixtureExpectation {
+  return SETTLEMENT_FIXTURE_EXPECTATION;
+}
+
 function fixtureFor(caseId: ThoughtQualificationCaseId): unknown {
   if (caseId === "settlement" || caseId === "structural_correction"
     || caseId === "stale_before_publish" || caseId === "authority_revision") {
@@ -1198,9 +1226,9 @@ function fixtureFor(caseId: ThoughtQualificationCaseId): unknown {
       },
       speech: {
         mode: "draft",
-        mustSay: ["The fixture is verified."],
+        mustSay: [SETTLEMENT_FIXTURE_EXPECTATION.expectedSpeech],
         mustNotSay: [],
-        surfaceDraft: "The fixture is verified.",
+        surfaceDraft: SETTLEMENT_FIXTURE_EXPECTATION.expectedSpeech,
         acceptableRealizations: [],
         presentationDirectives: [],
       },
@@ -1213,7 +1241,7 @@ function fixtureFor(caseId: ThoughtQualificationCaseId): unknown {
       evidenceUse: {
         observationRefsUsed: [],
         retrievalRefsUsed: [],
-        sourceRefsUsed: ["turn-1"],
+        sourceRefsUsed: [...SETTLEMENT_FIXTURE_EXPECTATION.sourceRefsUsed],
         openIntentRefs: [],
       },
     };
@@ -1270,13 +1298,13 @@ function fixtureStructuralCorrectionHints(): readonly [string, string] {
 }
 
 const FIXTURE_OWNER_MESSAGES: Readonly<Record<ThoughtQualificationCaseId, string>> = Object.freeze({
-  settlement: "Please acknowledge the supplied qualification message using only the evidence already present.",
+  settlement: SETTLEMENT_FIXTURE_EXPECTATION.ownerMessage,
   observation_intent: "Please read README.md from the approved qualification-fixture project and report its current contents.",
   effect_intent: "Please run the approved read-only verification for the qualification-fixture workspace and report the result without changing any files.",
   abstain: "Please tell me what is in the private attachment; no attachment content is available in this qualification context.",
   structural_correction: "Please answer only from the supplied evidence; no additional evidence is available.",
-  stale_before_publish: "Please acknowledge the supplied qualification message using only the evidence already present.",
-  authority_revision: "Please acknowledge the supplied qualification message using only the evidence already present.",
+  stale_before_publish: SETTLEMENT_FIXTURE_EXPECTATION.ownerMessage,
+  authority_revision: SETTLEMENT_FIXTURE_EXPECTATION.ownerMessage,
 });
 
 export function qualificationFixtureOwnerMessage(caseId: ThoughtQualificationCaseId): string {
