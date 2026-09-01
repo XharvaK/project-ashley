@@ -81,6 +81,8 @@ import type {
   QualificationGateStatus,
   QualificationFirstFailureBoundary,
   QualificationReachability,
+  QualificationSemanticDiagnostic,
+  QualificationSemanticDiagnosticViolation,
   ThoughtQualificationCaseId,
   ThoughtQualificationCaseResult,
   ThoughtQualificationEnvironment,
@@ -497,6 +499,142 @@ function validateSchemaNode(
  */
 export function validateThoughtOutputSchema(value: unknown): OracleResult {
   return validateQualificationSchema(value, THOUGHT_OUTPUT_SCHEMA);
+}
+
+function semanticDiagnosticViolation(
+  code: string,
+  path: string,
+  expected: string,
+  actual: string,
+): QualificationSemanticDiagnosticViolation {
+  return Object.freeze({ code, path, expected, actual });
+}
+
+function semanticDiagnosticActual(value: unknown): string {
+  if (typeof value === "string") return value.length === 0 ? "empty string" : "string";
+  if (Array.isArray(value)) return "array";
+  if (value === null) return "null";
+  if (typeof value === "object") return "object";
+  return typeof value;
+}
+
+function semanticDiagnosticParsedValue(raw: string | unknown): unknown {
+  if (typeof raw !== "string") return raw;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Qualification-only shadow diagnostics for the effect-intent contradiction.
+ * This reports independent observations and never accepts or materializes an
+ * output; `parseThoughtSemanticOutput` remains the sole production parser.
+ */
+export function diagnoseEffectIntentSemanticOutput(
+  raw: string | unknown,
+  allowlistedReferences: readonly string[],
+): QualificationSemanticDiagnostic {
+  const parsed = semanticDiagnosticParsedValue(raw);
+  const staticSchema = validateThoughtOutputSchema(parsed);
+  const productionParser = parseThoughtSemanticOutput(raw, new Set(allowlistedReferences));
+  const structuralViolations: QualificationSemanticDiagnosticViolation[] = [];
+  const contextualReferenceViolations: QualificationSemanticDiagnosticViolation[] = [];
+
+  if (isRecord(parsed) && parsed.kind === "effect_intent") {
+    if (!isRecord(parsed.request)) {
+      structuralViolations.push(semanticDiagnosticViolation(
+        "wrong_type",
+        "request",
+        "JSON object",
+        semanticDiagnosticActual(parsed.request),
+      ));
+    }
+    if (typeof parsed.purpose !== "string" || parsed.purpose.length === 0) {
+      structuralViolations.push(semanticDiagnosticViolation(
+        "wrong_type",
+        "purpose",
+        "non-empty string",
+        semanticDiagnosticActual(parsed.purpose),
+      ));
+    }
+    if (!Array.isArray(parsed.existingRefs)) {
+      structuralViolations.push(semanticDiagnosticViolation(
+        "wrong_type",
+        "existingRefs",
+        "array of strings",
+        semanticDiagnosticActual(parsed.existingRefs),
+      ));
+    } else {
+      parsed.existingRefs.forEach((ref, index) => {
+        const path = `existingRefs[${index}]`;
+        if (typeof ref !== "string" || ref.length === 0) {
+          structuralViolations.push(semanticDiagnosticViolation(
+            "wrong_type",
+            path,
+            "non-empty string",
+            semanticDiagnosticActual(ref),
+          ));
+        } else if (!allowlistedReferences.includes(ref)) {
+          contextualReferenceViolations.push(semanticDiagnosticViolation(
+            "reference_not_allowlisted",
+            path,
+            "one of the host allowlisted reference IDs",
+            ref,
+          ));
+        }
+      });
+    }
+    if (typeof parsed.expectedOutcome !== "string" || parsed.expectedOutcome.length === 0) {
+      structuralViolations.push(semanticDiagnosticViolation(
+        "wrong_type",
+        "expectedOutcome",
+        "non-empty string",
+        semanticDiagnosticActual(parsed.expectedOutcome),
+      ));
+    }
+  }
+
+  const firstRequestStructural = structuralViolations.find((item) => item.path === "request");
+  const firstPurposeStructural = structuralViolations.find((item) => item.path === "purpose");
+  const firstExistingReferenceStructural = structuralViolations.find((item) => item.path === "existingRefs"
+    || item.path.startsWith("existingRefs["));
+  const firstExpectedOutcomeStructural = structuralViolations.find((item) => item.path === "expectedOutcome");
+  const firstCandidate = firstRequestStructural
+    ? { category: "structural" as const, violation: firstRequestStructural }
+    : firstPurposeStructural
+      ? { category: "structural" as const, violation: firstPurposeStructural }
+      : firstExistingReferenceStructural
+        ? { category: "structural" as const, violation: firstExistingReferenceStructural }
+        : contextualReferenceViolations[0]
+          ? { category: "contextual_reference" as const, violation: contextualReferenceViolations[0] }
+          : firstExpectedOutcomeStructural
+            ? { category: "structural" as const, violation: firstExpectedOutcomeStructural }
+            : null;
+  const firstFailingCheck = firstCandidate
+    ? Object.freeze({
+        category: firstCandidate.category,
+        code: firstCandidate.violation.code,
+        path: firstCandidate.violation.path,
+      })
+    : null;
+
+  return Object.freeze({
+    staticSchema: staticSchema.ok ? "PASS" : "FAIL",
+    productionParser: Object.freeze({
+      ok: productionParser.ok,
+      code: productionParser.ok ? null : productionParser.code,
+      field: productionParser.ok ? null : productionParser.field ?? null,
+    }),
+    firstFailingCheck,
+    structuralViolations: Object.freeze(structuralViolations),
+    contextualReferenceViolations: Object.freeze(contextualReferenceViolations),
+    semanticViolationsAfterStructuralAcceptance:
+      structuralViolations.length > 0 || contextualReferenceViolations.length > 0
+        ? "NOT_REACHED"
+        : Object.freeze([]),
+  });
 }
 
 export function validateQualificationSchema(

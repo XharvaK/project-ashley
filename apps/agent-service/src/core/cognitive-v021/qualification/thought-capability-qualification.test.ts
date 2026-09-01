@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { env } from "../../../env.js";
 import {
   evaluateQualificationCase,
+  diagnoseEffectIntentSemanticOutput,
   replayCapturedQualificationFailure,
   runThoughtCapabilityQualification,
   thoughtSchemaKeywordInventory,
@@ -17,6 +18,20 @@ const validAbstain = JSON.stringify({
   explanation: "The fixture contains no more evidence.",
   evidenceRefs: ["turn-1"],
 });
+
+const capturedEffectIntent = {
+  kind: "effect_intent",
+  operationKind: "conversation.read",
+  request: {
+    conversationId: "qualification-conversation",
+    turnId: "turn-1",
+    role: "owner",
+    instruction: "Return the effect intent semantic branch without executing any effect.",
+  },
+  purpose: "To construct and return the effect intent semantic branch that satisfies the owner's qualification request without performing any actual effect operations",
+  expectedOutcome: "A properly formatted effect_intent JSON object containing the semantic representation of the requested effect intent branch, demonstrating correct structural compliance with the semantic contract",
+  existingRefs: ["qualification-conversation:turn-1"],
+} as const;
 
 const baseGate: QualificationGateEvidence = {
   transport: "success",
@@ -167,6 +182,96 @@ describe("successor Thought qualification", () => {
     });
     expect(result.verdict).toBe("NOT_QUALIFIED");
     expect(result.failureCodes).toContain("PROVIDER_ACCEPTED_PARSER_REJECTED");
+  });
+
+  it("closes the captured effect-intent contradiction with an offline multi-fault diagnostic", async () => {
+    const diagnostic = diagnoseEffectIntentSemanticOutput(capturedEffectIntent, ["turn-1"]);
+    expect(diagnostic.staticSchema).toBe("PASS");
+    expect(diagnostic.productionParser).toEqual({
+      ok: false,
+      code: "reference_not_allowlisted",
+      field: "existingRefs",
+    });
+    expect(diagnostic.firstFailingCheck).toMatchObject({
+      category: "contextual_reference",
+      code: "reference_not_allowlisted",
+      path: "existingRefs[0]",
+    });
+    expect(diagnostic.structuralViolations).toEqual([]);
+    expect(diagnostic.contextualReferenceViolations).toEqual([{
+      code: "reference_not_allowlisted",
+      path: "existingRefs[0]",
+      expected: "one of the host allowlisted reference IDs",
+      actual: "qualification-conversation:turn-1",
+    }]);
+    expect(diagnostic.semanticViolationsAfterStructuralAcceptance).toBe("NOT_REACHED");
+
+    const captured = evaluateQualificationCase({
+      caseId: "effect_intent",
+      expectedKind: "effect_intent",
+      rawContent: JSON.stringify(capturedEffectIntent),
+      allowlistedReferences: ["turn-1"],
+      gateEvidence: {
+        ...baseGate,
+        dispatchTruth: "response_received",
+        providerRequestStarted: true,
+        providerResponseReceived: true,
+        attemptId: "attempt:captured-effect-intent",
+        responseDiagnostics: {
+          ...baseGate.responseDiagnostics!,
+          finalTextBytes: Buffer.byteLength(JSON.stringify(capturedEffectIntent), "utf8"),
+        },
+      },
+    });
+    expect(captured.firstFailureBoundary).toBe("STRICT_PARSER_REJECTION");
+    expect(captured.failureEvidence?.strictParserDiagnostic).toMatchObject({
+      parserErrorCode: "reference_not_allowlisted",
+      parserPath: "existingRefs",
+    });
+    const replay = await replayCapturedQualificationFailure({
+      caseId: "effect_intent",
+      expectedKind: "effect_intent",
+      capturedFirstFailureBoundary: captured.firstFailureBoundary,
+      failureEvidence: captured.failureEvidence!,
+      runId: "w2-offline-effect-intent-replay",
+    });
+    expect(replay).toMatchObject({
+      available: true,
+      normalizationMatched: true,
+      sameFirstFailureBoundary: true,
+      replayedFirstFailureBoundary: "STRICT_PARSER_REJECTION",
+    });
+  });
+
+  it("keeps production parsing fail-fast while the diagnostic path reports independent faults", () => {
+    const diagnostic = diagnoseEffectIntentSemanticOutput({
+      ...capturedEffectIntent,
+      purpose: "",
+    }, ["turn-1"]);
+
+    expect(diagnostic.productionParser).toEqual({
+      ok: false,
+      code: "wrong_type",
+      field: "purpose",
+    });
+    expect(diagnostic.firstFailingCheck).toMatchObject({
+      category: "structural",
+      code: "wrong_type",
+      path: "purpose",
+    });
+    expect(diagnostic.structuralViolations).toEqual([{
+      code: "wrong_type",
+      path: "purpose",
+      expected: "non-empty string",
+      actual: "empty string",
+    }]);
+    expect(diagnostic.contextualReferenceViolations).toEqual([{
+      code: "reference_not_allowlisted",
+      path: "existingRefs[0]",
+      expected: "one of the host allowlisted reference IDs",
+      actual: "qualification-conversation:turn-1",
+    }]);
+    expect(diagnostic.semanticViolationsAfterStructuralAcceptance).toBe("NOT_REACHED");
   });
 
   it("does not project parser-dependent gates as failures", () => {

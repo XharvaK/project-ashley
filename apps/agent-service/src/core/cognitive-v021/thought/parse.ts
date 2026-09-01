@@ -305,7 +305,10 @@ function parseOperationSemantic(
   if (!record || record.kind !== kind) return semanticFailure("unknown_field");
   if (typeof record.operationKind !== "string" || !REGISTERED_OPERATION_KINDS.has(record.operationKind)) return semanticFailure("operation_not_registered", "operationKind");
   if (!jsonObject(record.request)) return semanticFailure("wrong_type", "request");
-  if (!nonEmptyString(record.purpose) || !refArray(record.existingRefs, allowlist)) return semanticFailure("wrong_type", "purpose");
+  if (!nonEmptyString(record.purpose)) return semanticFailure("wrong_type", "purpose");
+  if (!stringArray(record.existingRefs)) return semanticFailure("wrong_type", "existingRefs");
+  if (record.existingRefs.some((ref) => ref.length === 0)) return semanticFailure("wrong_type", "existingRefs");
+  if (!refArray(record.existingRefs, allowlist)) return semanticFailure("reference_not_allowlisted", "existingRefs");
   if (kind === "observation_intent") {
     if (!nonEmptyString(record.evidenceNeed)) return semanticFailure("wrong_type", "evidenceNeed");
     return { ok: true, value: record as unknown as ObservationIntentSemanticOutput };

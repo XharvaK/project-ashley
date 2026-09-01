@@ -151,6 +151,37 @@ describe("Thought semantic output contract", () => {
     }, refs)).toMatchObject({ ok: false });
   });
 
+  it("attributes operation purpose and existing-reference failures to their owning fields", () => {
+    const effect = {
+      kind: "effect_intent",
+      operationKind: "conversation.read",
+      request: { conversationId: "qualification-conversation", turnId: "turn-1" },
+      purpose: "read the requested conversation",
+      expectedOutcome: "the requested conversation is available",
+      existingRefs: ["turn-1"],
+    };
+
+    expect(parseThoughtSemanticOutput(effect, refs)).toEqual({
+      ok: true,
+      value: effect,
+    });
+    expect(parseThoughtSemanticOutput({ ...effect, purpose: "" }, refs)).toEqual({
+      ok: false,
+      code: "wrong_type",
+      field: "purpose",
+    });
+    expect(parseThoughtSemanticOutput({ ...effect, existingRefs: ["qualification-conversation:turn-1"] }, refs)).toEqual({
+      ok: false,
+      code: "reference_not_allowlisted",
+      field: "existingRefs",
+    });
+    expect(parseThoughtSemanticOutput({ ...effect, existingRefs: "turn-1" }, refs)).toEqual({
+      ok: false,
+      code: "wrong_type",
+      field: "existingRefs",
+    });
+  });
+
   it("rejects the predecessor envelope and every kernel-owned identity field", () => {
     expect(parseThoughtSemanticOutput({
       kind: "settlement",

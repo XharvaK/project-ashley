@@ -13,6 +13,33 @@ export type ThoughtQualificationCaseId =
 export type ThoughtQualificationEnvironment = "fixture" | "isolated_live";
 export type QualificationGateStatus = "PASS" | "FAIL" | "NOT_REACHED";
 
+export type QualificationSemanticDiagnosticViolation = Readonly<{
+  code: string;
+  path: string;
+  expected: string;
+  actual: string;
+}>;
+
+/** Qualification-only evidence; this is not an alternate production parser. */
+export type QualificationSemanticDiagnostic = Readonly<{
+  staticSchema: "PASS" | "FAIL";
+  productionParser: Readonly<{
+    ok: boolean;
+    code: string | null;
+    field: string | null;
+  }>;
+  firstFailingCheck: Readonly<{
+    category: "structural" | "contextual_reference";
+    code: string;
+    path: string;
+  }> | null;
+  structuralViolations: readonly QualificationSemanticDiagnosticViolation[];
+  contextualReferenceViolations: readonly QualificationSemanticDiagnosticViolation[];
+  semanticViolationsAfterStructuralAcceptance:
+    | readonly QualificationSemanticDiagnosticViolation[]
+    | "NOT_REACHED";
+}>;
+
 export type QualificationGateName =
   | "jsonSyntax"
   | "closedSchemaConformance"
