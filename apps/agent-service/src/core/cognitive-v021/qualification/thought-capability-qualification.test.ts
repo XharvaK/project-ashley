@@ -93,6 +93,12 @@ describe("successor Thought qualification", () => {
     )).toBe(true);
     expect(result.cases.find((item) => item.caseId === "structural_correction")?.invocationIds)
       .toHaveLength(2);
+    expect(result.cases.find((item) => item.caseId === "structural_correction")?.correctionPackets)
+      .toMatchObject([{
+        attemptOrdinal: 2,
+        attemptKind: "structural_correction",
+        systemMessage: expect.stringContaining("invalid_json"),
+      }]);
     expect(result.cases.filter((item) => item.caseId !== "structural_correction")
       .every((item) => item.invocationIds.length === 1)).toBe(true);
     expect(result.negativeWitnesses?.map((item) => item.witness)).toContain(

@@ -3,7 +3,6 @@ import type { ChatMessage } from "../../../model-routing/types.js";
 import type {
   RetrievalHit,
   ThoughtInput,
-  ThoughtParserFailureCode,
   WorkingContextItem,
 } from "../../types.js";
 import { AppError } from "../../../../errors.js";
@@ -19,6 +18,10 @@ import { deriveThoughtBudget, estimateRequestTokens } from "./budget.js";
 import { buildAllocationCandidates, type AllocationCandidate } from "./sections.js";
 import type { AllocationReceipt } from "./receipt.js";
 import { recordAllocationReceipt, recordDiagnostic } from "../diagnostics.js";
+import {
+  formatThoughtStructuralFeedback,
+  type StructuralFeedbackInput,
+} from "../structural-feedback.js";
 
 export class RequiredOverflowError extends AppError {
   constructor(message: string) {
@@ -26,31 +29,11 @@ export class RequiredOverflowError extends AppError {
   }
 }
 
-const STRUCTURAL_FEEDBACK: Readonly<Record<ThoughtParserFailureCode, string>> = {
-  invalid_json: "Return exactly one JSON object.",
-  root_not_object: "Return a JSON object at the root.",
-  wrong_kind: "Use one permitted ThoughtStepOutput kind.",
-  identity_missing: "Include every required Thought identity field.",
-  identity_mismatch: "Preserve the active Thought identity fields.",
-  missing_settlement_fields: "Include all required settlement sections.",
-  speech_contract_failure: "Emit the required speech object shape.",
-  commitment_contract_failure: "Emit the required commitments object shape.",
-  operations_contract_failure: "Emit the required operations object shape.",
-  authority_contract_failure: "Emit the required authority object shape.",
-  observation_contract_failure: "Emit the required observation request shape.",
-  effect_contract_failure: "Emit the required effect proposal shape.",
-  forbidden_fields: "Omit publication and delivery fields.",
-  schema_version_mismatch: "Use the active Thought schema version.",
-  other: "Match the semantic Thought contract exactly.",
-};
-
 export function thoughtMessagesForProjection(
   projected: ProjectedThoughtInput,
-  structuralFeedback?: ThoughtParserFailureCode,
+  structuralFeedback?: StructuralFeedbackInput,
 ): ChatMessage[] {
-  const feedback = structuralFeedback
-    ? `The previous response failed bounded structural validation (${structuralFeedback}). ${STRUCTURAL_FEEDBACK[structuralFeedback]} Do not change the semantic answer or invent authority.`
-    : null;
+  const feedback = formatThoughtStructuralFeedback(structuralFeedback);
   return [
     {
       role: "system",
@@ -73,7 +56,7 @@ export type AllocateThoughtProjectionOptions = {
   quotaBucket?: string;
   maxOutputTokens?: number;
   requestId: string;
-  structuralFeedback?: ThoughtParserFailureCode;
+  structuralFeedback?: StructuralFeedbackInput;
   observabilityDb?: DatabaseSync;
 };
 

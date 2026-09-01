@@ -198,4 +198,76 @@ describe("v0.2.1 Thought run", () => {
     sidecar.close();
     attentionDb.close();
   });
+
+  it("carries parser code, field, and host allowlist into a contextual correction without changing the pass", async () => {
+    const sidecar = openTestSidecar();
+    const attentionDb = openTestSidecar();
+    const cycle = admitTestCycle(sidecar, {
+      cycleId: "cycle-contextual-correction",
+      conversationId: "thread-contextual-correction",
+      triggerKind: "owner_message",
+      triggerRef: "owner-contextual-correction",
+      occupantId: "doc",
+      authorityEpoch: 1,
+      nowMs: 1,
+    });
+    const evidence = appendOwnerUtterance(sidecar, {
+      conversationId: "thread-contextual-correction",
+      text: "Return the effect intent semantic branch.",
+      discordMessageIds: ["contextual-correction-message"],
+      nowMs: 2,
+    });
+    const event = appendInboxEvent(sidecar, {
+      wakeId: cycle.wakeId,
+      conversationId: "thread-contextual-correction",
+      kind: "owner_message",
+      payload: {
+        cycleId: cycle.cycleId,
+        evidenceRowId: evidence.rowId,
+        ownerMessage: evidence.text,
+      },
+      createdAtMs: 2,
+    });
+    const systemMessages: string[] = [];
+    const userInputs: string[] = [];
+    let calls = 0;
+    const completeChat = vi.fn(async (
+      messages: Array<{ role: string; content: string }>,
+    ) => {
+      calls += 1;
+      systemMessages.push(messages[0]?.content ?? "");
+      userInputs.push(messages[1]?.content ?? "");
+      return {
+        text: calls === 1
+          ? JSON.stringify({
+              kind: "abstain",
+              reason: "insufficient_evidence",
+              explanation: "The supplied evidence is not enough.",
+              evidenceRefs: ["not-allowlisted"],
+            })
+          : JSON.stringify(makeSemanticSettlement()),
+        model: "fake",
+        modelAlias: "thought",
+        resolvedModelId: null,
+      };
+    });
+
+    try {
+      const result = await runCognitiveCycle(sidecar, attentionDb, event, deps({
+        attentionDb,
+        completeChat,
+      }));
+
+      expect(result.published).toBe(true);
+      expect(calls).toBe(2);
+      expect(systemMessages[1]).toContain("reference_not_allowlisted");
+      expect(systemMessages[1]).toContain("evidenceRefs");
+      expect(systemMessages[1]).toContain("host allowlisted reference IDs");
+      expect(systemMessages[1]).toContain(evidence.rowId);
+      expect(userInputs[1]).toBe(userInputs[0]);
+    } finally {
+      sidecar.close();
+      attentionDb.close();
+    }
+  });
 });

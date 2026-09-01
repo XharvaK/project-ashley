@@ -32,6 +32,12 @@ import {
   type RememberDirective,
   type AuthorityCode,
 } from "../types.js";
+import {
+  createThoughtStructuralFeedback,
+  formatThoughtStructuralFeedback,
+  type StructuralFeedbackInput,
+  type ThoughtStructuralFeedback,
+} from "./structural-feedback.js";
 import type { PrivateBudgetDispatchBinding } from "../private-budget/ledger.js";
 import { getCycle, getCurrentCycle, admitCycle, appendCycleLogIds, updateCycleState } from "../cycle/inbox.js";
 import { getConversationEvidence, listConversationEvidence } from "../evidence/conversation-log.js";
@@ -84,6 +90,7 @@ import { captureAuthorityCurrentness, hasAuthorityBarrier } from "../authority/b
 export type ThoughtInvocation = {
   output: ThoughtStepOutput;
   semantic?: ThoughtSemanticOutput;
+  structuralFeedback?: ThoughtStructuralFeedback;
   attempts: number;
   requestId: string;
   malformed?: boolean;
@@ -114,31 +121,11 @@ export async function invokeThoughtComplete(
   return invoker(messages, options);
 }
 
-const STRUCTURAL_FEEDBACK: Readonly<Record<ThoughtParserFailureCode, string>> = {
-  invalid_json: "Return exactly one JSON object.",
-  root_not_object: "Return a JSON object at the root.",
-  wrong_kind: "Use one permitted semantic Thought kind.",
-  identity_missing: "Include every required Thought identity field.",
-  identity_mismatch: "Preserve the active Thought identity fields.",
-  missing_settlement_fields: "Include all required settlement sections.",
-  speech_contract_failure: "Emit the required speech object shape.",
-  commitment_contract_failure: "Emit the required commitments object shape.",
-  operations_contract_failure: "Use the semantic evidenceUse object shape.",
-  authority_contract_failure: "Do not emit kernel-owned authority fields.",
-  observation_contract_failure: "Emit the required observation request shape.",
-  effect_contract_failure: "Emit the required effect proposal shape.",
-  forbidden_fields: "Omit publication and delivery fields.",
-  schema_version_mismatch: "Use the active Thought schema version.",
-  other: "Match the semantic Thought contract exactly.",
-};
-
 function thoughtMessages(
   input: ThoughtInput,
-  structuralFeedback?: ThoughtParserFailureCode,
+  structuralFeedback?: StructuralFeedbackInput,
 ): ChatMessage[] {
-  const feedback = structuralFeedback
-    ? `The previous response failed bounded structural validation (${structuralFeedback}). ${STRUCTURAL_FEEDBACK[structuralFeedback]} Do not change the semantic answer or invent authority.`
-    : null;
+  const feedback = formatThoughtStructuralFeedback(structuralFeedback);
   return [
     {
       role: "system",
@@ -329,7 +316,7 @@ export async function runThoughtModel(
     requestId?: string;
     signal?: AbortSignal;
     deadlineAtMs: number;
-    structuralFeedback?: ThoughtParserFailureCode;
+    structuralFeedback?: StructuralFeedbackInput;
     /** Optional caller narrowing; it may never widen the Model Fabric policy. */
     maxTokens?: number;
     /** Qualification-only seam for the exact NIM candidate; no fallback is allowed. */
@@ -441,9 +428,12 @@ export async function runThoughtModel(
       new Set(semanticReferencesForInput(input)),
     );
     if (!semanticResult.ok) {
-      const diagnosticCode: ThoughtParserFailureCode = ["invalid_json", "root_not_object", "wrong_kind"].includes(semanticResult.code)
-        ? semanticResult.code as ThoughtParserFailureCode
-        : "other";
+      const diagnosticCode = semanticResult.code as ThoughtParserFailureCode;
+      const structuralFeedback = createThoughtStructuralFeedback({
+        code: diagnosticCode,
+        field: semanticResult.field,
+        allowlistedReferences: semanticReferencesForInput(input),
+      });
       const output: ThoughtStepOutput = {
         kind: "failure",
         cycleId: input.cycleId,
@@ -453,12 +443,14 @@ export async function runThoughtModel(
         occupantId: input.occupantId,
         reason: "malformed",
         diagnosticCode,
+        diagnosticField: semanticResult.field,
       };
       return {
         output,
         attempts: 1,
         requestId,
         malformed: true,
+        structuralFeedback,
       };
     }
     const semantic = semanticResult.value;
@@ -982,7 +974,7 @@ export async function runCognitiveCycle(
   let structuralRetriesForPass = persistedMalformedRetries(sidecar, cycle.cycleId, cycle.generation, pass);
   let authorityObjections: AuthorityCode[] = [];
   const thoughtDeadlineAtMs = deps.nowMs() + ORDINARY_THOUGHT_BUDGET_MS;
-  let structuralFeedback: ThoughtParserFailureCode | null = null;
+  let structuralFeedback: ThoughtStructuralFeedback | null = null;
   const projectionCache = new ProjectionCache<AllocatedThoughtProjection>();
 
   for (;;) {
@@ -1104,9 +1096,14 @@ export async function runCognitiveCycle(
     }
 
     if (invocation.malformed) {
-      structuralFeedback = invocation.output.kind === "failure"
-        ? invocation.output.diagnosticCode ?? "other"
-        : "other";
+      structuralFeedback = invocation.structuralFeedback
+        ?? createThoughtStructuralFeedback({
+          code: invocation.output.kind === "failure"
+            ? invocation.output.diagnosticCode ?? "other"
+            : "other",
+          field: invocation.output.kind === "failure" ? invocation.output.diagnosticField : undefined,
+          allowlistedReferences: semanticReferencesForInput(allocated.projected),
+        });
       if (deps.observabilityDb) {
         try {
           recordDiagnostic(deps.observabilityDb, {

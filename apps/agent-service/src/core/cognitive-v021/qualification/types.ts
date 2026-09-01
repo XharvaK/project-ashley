@@ -74,6 +74,14 @@ export type QualificationGateDiagnostic = Readonly<{
   actual: Readonly<Record<string, unknown>> | null;
 }>;
 
+export type QualificationCorrectionPacket = Readonly<{
+  attemptOrdinal: number;
+  attemptKind: "initial" | "structural_correction";
+  invocationId: string | null;
+  providerAttemptId: string | null;
+  systemMessage: string;
+}>;
+
 export type QualificationFailureEvidence = Readonly<{
   captureStatus: "captured" | "not_applicable" | "diagnostic_capture_too_large";
   allowlistedReferences: readonly string[];
@@ -161,6 +169,7 @@ export type ThoughtQualificationCaseResult = Readonly<{
   firstFailureBoundary: QualificationFirstFailureBoundary;
   independentFailureCodes: readonly string[];
   dependentNotReachedGates: readonly QualificationGateName[];
+  correctionPackets: readonly QualificationCorrectionPacket[];
   failureEvidence: QualificationFailureEvidence | null;
   failureCodes: readonly string[];
   verdict: "PASS" | "NOT_QUALIFIED";

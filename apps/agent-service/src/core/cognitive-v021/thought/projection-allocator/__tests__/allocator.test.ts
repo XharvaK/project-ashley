@@ -3,7 +3,9 @@ import type { ThoughtInput } from "../../../types.js";
 import {
   allocateThoughtProjection,
   RequiredOverflowError,
+  thoughtMessagesForProjection,
 } from "../allocator.js";
+import { createThoughtStructuralFeedback } from "../../structural-feedback.js";
 
 function makeThoughtInput(overrides: Partial<ThoughtInput> = {}): ThoughtInput {
   return {
@@ -112,6 +114,56 @@ function makeThoughtInput(overrides: Partial<ThoughtInput> = {}): ThoughtInput {
 }
 
 describe("Whole-Thought Projection Allocator", () => {
+  it("does not hide a contextual reference failure behind generic correction guidance", () => {
+    const input = makeThoughtInput({
+      rawConversation: [
+        {
+          rowId: "turn-1",
+          lineageId: "lin-1",
+          version: 1,
+          conversationId: "conv-1",
+          role: "owner",
+          text: "Return the effect intent semantic branch.",
+          createdAtMs: Date.now() - 1000,
+          discordMessageIds: [],
+          reservationId: null,
+          producingCycleId: null,
+          architectureEpoch: "v0.2.1",
+          contentHash: "hash1",
+          sourceStatus: "delivered",
+          dataClassification: "ordinary",
+          secretOmitted: false,
+          delivered: true,
+        },
+      ],
+      trigger: { kind: "owner_message", ref: "turn-1" },
+      retrieval: {
+        request: { triggerTerms: [], workingContextTopics: [], assertionKeys: [], includeLogSearch: true },
+        hits: [],
+        state: "ready",
+        miss: true,
+      },
+    });
+    const allocated = allocateThoughtProjection({
+      thoughtInput: input,
+      requestId: "req-contextual-correction",
+    });
+    const feedback = createThoughtStructuralFeedback({
+      code: "reference_not_allowlisted",
+      field: "existingRefs",
+      allowlistedReferences: ["turn-1"],
+    });
+
+    const systemMessage = thoughtMessagesForProjection(allocated.projected, feedback)[0]?.content ?? "";
+
+    expect(systemMessage).toContain("reference_not_allowlisted");
+    expect(systemMessage).toContain("existingRefs");
+    expect(systemMessage).toContain("host allowlisted reference IDs");
+    expect(systemMessage).toContain('["turn-1"]');
+    expect(systemMessage).toContain("Do not change the semantic answer or invent authority.");
+    expect(systemMessage).not.toContain("Match the semantic Thought contract exactly.");
+  });
+
   it("allocates complete thought context within hard TPM bound", () => {
     const input = makeThoughtInput();
     const allocated = allocateThoughtProjection({

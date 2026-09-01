@@ -26,6 +26,10 @@ import {
   THOUGHT_SEMANTIC_PARSER_ID,
 } from "../thought/parse.js";
 import { runThoughtModel, type ThoughtInvocation } from "../thought/run.js";
+import {
+  createThoughtStructuralFeedback,
+  type ThoughtStructuralFeedback,
+} from "../thought/structural-feedback.js";
 import { validateKernelEnvelope } from "../thought/kernel-envelope.js";
 import { validateThoughtSettlementDraft } from "../settlement/validate.js";
 import { checkAuthority } from "../authority/check.js";
@@ -80,6 +84,7 @@ import type {
   QualificationGateName,
   QualificationGateStatus,
   QualificationFirstFailureBoundary,
+  QualificationCorrectionPacket,
   QualificationReachability,
   QualificationSemanticDiagnostic,
   QualificationSemanticDiagnosticViolation,
@@ -211,6 +216,7 @@ type CandidatePreflight = Readonly<{
 type CompletionCapture = {
   completion: CompletionValue | null;
   rawContent: string;
+  correctionPacket: string | null;
   startedAtMs: number;
   endedAtMs: number;
   errorCode: string | null;
@@ -1124,6 +1130,7 @@ export function evaluateQualificationCase(input: {
     firstFailureBoundary,
     independentFailureCodes: Object.freeze(failureCodes),
     dependentNotReachedGates: dependentGates,
+    correctionPackets: Object.freeze([]),
     failureEvidence: evidence,
     failureCodes: Object.freeze(failureCodes),
     verdict,
@@ -1514,6 +1521,15 @@ function fixtureCompletion(
   };
 }
 
+function correctionPacketForMessages(
+  messages: readonly { role: string; content: string }[],
+): string | null {
+  const systemMessage = messages.find((message) => message.role === "system")?.content;
+  return systemMessage?.includes("The previous response failed bounded structural validation (")
+    ? systemMessage
+    : null;
+}
+
 async function runW0Sequence(input: {
   db: import("node:sqlite").DatabaseSync;
   runId: string;
@@ -1531,6 +1547,7 @@ async function runW0Sequence(input: {
   const invoker: typeof completeChat = async (messages, options) => {
     const currentCall = callIndex;
     const rawHint = input.rawHints[currentCall] ?? null;
+    const correctionPacket = correctionPacketForMessages(messages);
     const startedAtMs = input.nowMs();
     try {
       const completion = input.environment === "fixture"
@@ -1550,6 +1567,7 @@ async function runW0Sequence(input: {
       captures.push({
         completion,
         rawContent: completion.text,
+        correctionPacket,
         startedAtMs,
         endedAtMs: input.nowMs(),
         errorCode: null,
@@ -1563,6 +1581,7 @@ async function runW0Sequence(input: {
       captures.push({
         completion: null,
         rawContent: "",
+        correctionPacket,
         startedAtMs,
         endedAtMs: input.nowMs(),
         errorCode: errorCode(error),
@@ -1574,7 +1593,7 @@ async function runW0Sequence(input: {
     }
   };
   const deadlineAtMs = input.nowMs() + WHOLE_THOUGHT_BUDGET_MS;
-  let structuralFeedback: import("../types.js").ThoughtParserFailureCode | undefined;
+  let structuralFeedback: ThoughtStructuralFeedback | undefined;
   for (let index = 0; index < input.rawHints.length; index += 1) {
     const requestId = input.runId + ":" + input.caseId + ":" + index;
     const invocation = await runThoughtModel(
@@ -1595,9 +1614,13 @@ async function runW0Sequence(input: {
     );
     invocations.push(invocation);
     if (!invocation.malformed) break;
-    structuralFeedback = invocation.output.kind === "failure"
-      ? invocation.output.diagnosticCode ?? "other"
-      : "other";
+    structuralFeedback = invocation.structuralFeedback
+      ?? createThoughtStructuralFeedback({
+        code: invocation.output.kind === "failure"
+          ? invocation.output.diagnosticCode ?? "other"
+          : "other",
+        field: invocation.output.kind === "failure" ? invocation.output.diagnosticField : undefined,
+      });
   }
   return Object.freeze({
     invocations: Object.freeze(invocations),
@@ -1957,6 +1980,19 @@ function resultFromSequence(input: {
     ),
     rawContentDigest: digest(rawContent),
     capabilityFingerprint: gate.capabilityFingerprint ?? null,
+    correctionPackets: Object.freeze(
+      input.sequence.captures.flatMap((capture, index): QualificationCorrectionPacket[] =>
+        capture.correctionPacket
+          ? [{
+              attemptOrdinal: index + 1,
+              attemptKind: index === 0 ? "initial" : "structural_correction",
+              invocationId: input.sequence.invocations[index]?.requestId ?? null,
+              providerAttemptId: capture.attemptId,
+              systemMessage: capture.correctionPacket,
+            }]
+          : [],
+      ),
+    ),
   });
 }
 

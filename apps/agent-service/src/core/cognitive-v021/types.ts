@@ -856,6 +856,13 @@ export type ThoughtParserFailureCode =
   | "invalid_json"
   | "root_not_object"
   | "wrong_kind"
+  | "unknown_field"
+  | "required_field_missing"
+  | "wrong_type"
+  | "invalid_enum"
+  | "reference_not_allowlisted"
+  | "alias_invalid"
+  | "operation_not_registered"
   | "identity_missing"
   | "identity_mismatch"
   | "missing_settlement_fields"
@@ -905,6 +912,8 @@ export type ThoughtFailureStep = ThoughtStepBase & {
     | "cancelled";
   /** Bounded parser category. Raw provider output is never persisted. */
   diagnosticCode?: ThoughtParserFailureCode;
+  /** Parser-owned field/path metadata; raw provider output is never persisted. */
+  diagnosticField?: string;
 };
 export type ThoughtAbstainStep = ThoughtStepBase & {
   kind: "abstain";
