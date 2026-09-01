@@ -281,6 +281,8 @@ W2_MODEL=mistral-small-2603
 
 W2_REASONING=high
 
+W2_MISTRAL_SMALL=NOT_QUALIFIED
+
 W2_FALLBACK=none
 
 W2_OCCUPANT=mfo_mistral_small_2603_high
