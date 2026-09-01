@@ -133,3 +133,29 @@ SETTLEMENT_DRAFT_SURFACE_DIFFERENCE=INTENTIONAL_SEMANTIC_HOST_LAYER
 POST_ALIGNMENT_CONTRACT=INTENTIONAL_LAYERING_PROVEN
 MODEL_FUNDAMENTALLY_INCAPABLE=NOT_PROVEN
 ~~~
+
+## Effect-intent closure
+
+The historical `effect_intent sample 0` body contains a valid non-empty
+`purpose`. Its `existingRefs` value is structurally a non-empty string but is
+not one of the host allowlisted IDs. The old combined parser predicate returned
+`wrong_type` at `purpose` when the allowlist check failed. The parser repair
+split those checks without changing acceptance semantics.
+
+```text
+PURPOSE_SCHEMA_TYPE=string, minLength=1
+PURPOSE_PARSER_EXPECTATION=non-empty string
+PURPOSE_CONTRACT_STATUS=VALID
+EXISTING_REFS_STATIC_SCHEMA_STATUS=VALID_TYPE_ONLY
+EXISTING_REFS_HOST_ALLOWLIST_STATUS=INVALID
+OLD_REPORTED_FAILURE=wrong_type at purpose
+REPAIRED_REPORTED_FAILURE=reference_not_allowlisted at existingRefs
+QUALIFICATION_DIAGNOSTIC_FIRST_CHECK=reference_not_allowlisted at existingRefs[0]
+SCHEMA_PARSER_CONTRACT=INTENTIONAL_LAYERING_PROVEN
+```
+
+The qualification-only diagnostic reports the structural and contextual
+violations independently. It does not accept, repair, or materialize provider
+output. For the exact captured body it reports no structural violations, one
+contextual reference violation at `existingRefs[0]`, and
+`semanticViolationsAfterStructuralAcceptance=NOT_REACHED`.

@@ -1,11 +1,11 @@
 {
   "schema": "ashley.phase5.w2.focused_test_result.v1",
-  "recordedAt": "2026-09-01T08:36:34.6748150Z",
-  "candidateSha": "df10fbce919ad6de370cce2984f0126bf8314c7a",
+  "recordedAt": "2026-09-01T09:53:14.1346555Z",
+  "candidateSha": "51351f86a9e0a930ce58f4b0e59c487d5eaea300",
   "command": "npm test --prefix apps/agent-service -- src/core/cognitive-v021/qualification/thought-capability-qualification.test.ts src/core/cognitive-v021/thought/semantic-output-contract.test.ts src/core/cognitive-v021/thought/run.test.ts src/core/model-routing/adapters/mistral-adapter.test.ts src/core/cognitive-v021/authority/barrier.test.ts",
   "status": "PASS",
   "testFiles": 5,
-  "tests": 41,
+  "tests": 44,
   "failed": 0,
   "verified": [
     "tri-state PASS/FAIL/NOT_REACHED projection",
@@ -13,6 +13,7 @@
     "bounded failed semantic evidence and provider response metadata",
     "offline replay through normalization and the W0 parser path",
     "schema/parser structural alignment without parser weakening",
+    "effect-intent diagnostic attribution for purpose versus existingRefs",
     "production W0 structural correction with two invocations",
     "Mistral native json_schema request construction and response diagnostics",
     "W4 barrier legal/rejected transitions and active transition identity preservation"

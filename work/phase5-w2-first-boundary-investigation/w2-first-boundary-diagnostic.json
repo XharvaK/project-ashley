@@ -1,10 +1,10 @@
 {
   "schema": "ashley.phase5.w2.first_boundary_diagnostic.v1",
-  "recordedAt": "2026-09-01T09:10:20.161Z",
+  "recordedAt": "2026-09-01T09:56:20.000Z",
   "baseCandidateSha": "9cf777c41e39271c4e2cb2db5ed89503f97ff88f",
-  "newCandidateSha": "df10fbce919ad6de370cce2984f0126bf8314c7a",
+  "newCandidateSha": "51351f86a9e0a930ce58f4b0e59c487d5eaea300",
   "productionSha": "573393c3fdb2392a45137d4625635658eb4b5d88",
-  "stage": "D0_D3_COMPLETE_FULL_W2_COMPLETE",
+  "stage": "EFFECT_INTENT_CAUSAL_CLOSURE_COMPLETE_EXACT_CANDIDATE_REQUALIFIED",
   "frozenRoute": {
     "provider": "mistral",
     "model": "mistral-small-2603",
@@ -15,7 +15,7 @@
     "credential": "primary_only"
   },
   "candidate": {
-    "sha": "df10fbce919ad6de370cce2984f0126bf8314c7a",
+    "sha": "51351f86a9e0a930ce58f4b0e59c487d5eaea300",
     "branch": "codex/phase5-w2-first-boundary-diagnostic",
     "pushed": true,
     "isolatedMintBuild": "PASS",
@@ -95,7 +95,7 @@
     "allExecutedGatesPass": true,
     "productionMutation": false
   },
-  "fullW2Requalification": {
+  "priorFullW2Requalification": {
     "artifactPath": "work/phase5-w2-full-diagnostic-df10fbce919ad6de370cce2984f0126bf8314c7a/w2-route-qualification.json",
     "artifactSha256": "98de1667a9cb23cbbbaa4ac6e0f8a371dfc8c0561857df2b6d63054808b72819",
     "runId": "w2-20260901T090307569Z-7443b940-5179-4148-ae15-6f24555c945b",
@@ -159,6 +159,97 @@
     "activationPerformed": false,
     "w3Started": false,
     "w9Started": false
+  },
+  "fullW2Requalification": {
+    "artifactPath": "work/phase5-w2-full-diagnostic-51351f86a9e0a930ce58f4b0e59c487d5eaea300/w2-route-qualification.json",
+    "artifactSha256": "189fa4d0e88a84b1e143f4271c3e721190e94bb0babd4a79f0382ddc47a6b289",
+    "runId": "w2-20260901T095504421Z-bf77b0cb-cd3d-440b-bc9f-cded1716640e",
+    "environment": "isolated_live",
+    "candidateSha": "51351f86a9e0a930ce58f4b0e59c487d5eaea300",
+    "caseEvaluations": 12,
+    "providerAttempts": 14,
+    "verdict": "NOT_QUALIFIED",
+    "caseVerdicts": {
+      "PASS": 10,
+      "NOT_QUALIFIED": 2
+    },
+    "gateCounts": {
+      "transportPass": 12,
+      "jsonSyntaxPass": 12,
+      "closedSchemaPass": 12,
+      "strictParserPass": 11,
+      "kernelBindingPass": 11,
+      "semanticValidityPass": 11,
+      "fencingPass": 10,
+      "authorityReachabilityPass": 10,
+      "resourcePolicyPass": 12
+    },
+    "structuralCorrectionAttempts": 2,
+    "route": {
+      "provider": "mistral",
+      "model": "mistral-small-2603",
+      "reasoning": "high",
+      "wireMode": "native_json_schema",
+      "wireFormat": "mistral_response_format_json_schema",
+      "wireBindingId": "compat_thought_mistral_small_2603_native_json_schema_v2",
+      "fallback": "none",
+      "credential": "primary_only",
+      "occupantId": "mfo_mistral_small_2603_high",
+      "capabilityFingerprint": "sha256:f104f583be5f976c8aae247464ecdae2596ab42e6cd773b2df44c72e30271343",
+      "providerDeclaredEnforcement": "unavailable"
+    },
+    "failureCases": [
+      {
+        "caseId": "effect_intent",
+        "sample": 0,
+        "firstFailureBoundary": "STRICT_PARSER_REJECTION",
+        "independentFailureCodes": [
+          "PROVIDER_ACCEPTED_PARSER_REJECTED"
+        ],
+        "dependentNotReachedGates": [
+          "kernelBinding",
+          "semanticValidity",
+          "fencing",
+          "authorityReachability"
+        ],
+        "capturedNormalizedSemanticPayload": true,
+        "rootCause": "MODEL_SEMANTIC_CONTRACT_VIOLATION",
+        "detail": "current parser correctly identified existingRefs[0]=qualification-fixture as not allowlisted; the host allowlist contained turn-1"
+      },
+      {
+        "caseId": "effect_intent",
+        "sample": 1,
+        "firstFailureBoundary": "SEMANTIC_VALIDITY_REJECTION",
+        "independentFailureCodes": [
+          "semantic_branch_mismatch",
+          "semantic_invalid"
+        ],
+        "dependentNotReachedGates": [
+          "fencing",
+          "authorityReachability"
+        ],
+        "capturedNormalizedSemanticPayload": true,
+        "rootCause": "MODEL_SEMANTIC_CONTRACT_VIOLATION",
+        "detail": "provider returned abstain where effect_intent was required"
+      }
+    ],
+    "productionMutation": false,
+    "deploymentPerformed": false,
+    "activationPerformed": false,
+    "w3Started": false,
+    "w9Started": false
+  },
+  "causalClosure": {
+    "reportPath": "work/phase5-w2-first-boundary-investigation/W2_EFFECT_INTENT_CAUSAL_CLOSURE.md",
+    "reportVsJsonContradiction": "RESOLVED",
+    "primaryRootCause": "PARSER_DIAGNOSTIC_DEFECT",
+    "firstActualFailure": "STRICT_PARSER_REJECTION: reference_not_allowlisted at existingRefs[0]",
+    "purposeContract": "VALID",
+    "existingRefsStaticSchema": "VALID_TYPE_ONLY",
+    "existingRefsHostAllowlist": "INVALID",
+    "schemaParserContract": "INTENTIONAL_LAYERING_PROVEN",
+    "modelFundamentallyIncapable": "NOT_PROVEN",
+    "settlementSample0": "STILL_INDEPENDENT_FAILURE"
   },
   "modelConclusion": {
     "currentWireBinding": "QUALIFIED_FOR_NATIVE_REQUEST_AND_CLOSED_SCHEMA_PATH",

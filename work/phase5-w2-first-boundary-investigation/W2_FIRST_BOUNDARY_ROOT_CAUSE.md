@@ -245,3 +245,132 @@ MODEL_FUNDAMENTALLY_INCAPABLE=NOT_PROVEN
 READY_FOR_W3_STAGE_H=no
 PRODUCTION_MUTATION=no
 ~~~
+
+## Final effect-intent causal closure
+
+The prior D3 attribution of `effect_intent sample 0` as only a model
+semantic-contract violation was provisional and is superseded by this section.
+The exact normalized body retained in the prior full-W2 artifact has a valid
+non-empty `purpose` and one invalid host-context reference:
+
+```text
+purpose=valid string with length > 0
+existingRefs=["qualification-conversation:turn-1"]
+hostAllowlist=["turn-1"]
+```
+
+The static effect-intent schema requires `purpose` to be a string of
+`minLength:1` and `existingRefs` to be an array whose items are strings. It
+does not and cannot encode the per-invocation host allowlist. The parser first
+checks `purpose`, then the array/item shape, then the host allowlist. The old
+combined predicate returned `wrong_type` at `purpose` when the later allowlist
+predicate failed. That was a diagnostic attribution defect, not a purpose
+contract failure.
+
+The qualification-only diagnostic and the repaired parser now establish the
+following without changing production acceptance:
+
+```text
+REPORT_VS_JSON_CONTRADICTION=RESOLVED
+ROOT_CAUSE=PARSER_DIAGNOSTIC_DEFECT
+OWNING_LAYER=parseOperationSemantic diagnostic attribution plus qualification-only multi-fault diagnostics
+FIRST_ACTUAL_FAILURE=STRICT_PARSER_REJECTION
+FIRST_ACTUAL_CHECK=reference_not_allowlisted at existingRefs[0]
+VIOLATION_1=MODEL_SEMANTIC_CONTRACT_VIOLATION: existingRefs[0] was not host allowlisted
+VIOLATION_2=NONE in the exact captured body; purpose was valid
+ALL_DETECTABLE_STRUCTURAL_VIOLATIONS=[]
+ALL_DETECTABLE_CONTEXTUAL_REFERENCE_VIOLATIONS=[reference_not_allowlisted at existingRefs[0]]
+ALL_DETECTABLE_SEMANTIC_VIOLATIONS_AFTER_STRUCTURAL_ACCEPTANCE=NOT_REACHED
+SCHEMA_PARSER_CONTRACT=INTENTIONAL_LAYERING_PROVEN
+PRODUCTION_SEMANTIC_CONTRACT_CHANGED=no
+PARSER_LOOSENED=no
+MODEL_OR_PROVIDER_CHANGED=no
+```
+
+The exact repaired parser result is
+`{ok:false, code:"reference_not_allowlisted", field:"existingRefs"}`. The
+diagnostic result is `path="existingRefs[0]"`, expected one of the host
+allowlisted reference IDs, actual `qualification-conversation:turn-1`.
+
+### Durable attempt boundary
+
+The prior artifact durably retains three provider attempt IDs for this case:
+
+| Attempt | Provider attempt ID | Role | Durable body/diagnostic evidence |
+|---|---|---|---|
+| 1 | `f2991ae5-09ff-4c38-b4bf-1e83b23508b8:attempt:1` | initial semantic attempt | provider dispatch is evidenced; body, normalized text, schema result, parser result, and exact correction packet are `NOT_DURABLY_RETAINED` |
+| 2 | `af2f34f7-8909-4033-9714-93636f86601e:attempt:1` | structural correction 1 | provider dispatch is evidenced; body, normalized text, schema result, parser result, and exact correction packet are `NOT_DURABLY_RETAINED` |
+| 3 | `0fbbce45-3d51-465c-9588-f2f24529beb4:attempt:1` | structural correction 2 / final retained attempt | normalized body is retained; raw provider response is `NOT_DURABLY_RETAINED`; old parser result was `wrong_type` at `purpose`; replay on the repaired parser reports `reference_not_allowlisted` at `existingRefs` |
+
+The final retained normalized body is:
+
+```json
+{
+  "kind": "effect_intent",
+  "operationKind": "conversation.read",
+  "request": {
+    "conversationId": "qualification-conversation",
+    "turnId": "turn-1",
+    "role": "owner",
+    "instruction": "Return the effect intent semantic branch without executing any effect."
+  },
+  "purpose": "To construct and return the effect intent semantic branch that satisfies the owner's qualification request without performing any actual effect operations",
+  "expectedOutcome": "A properly formatted effect_intent JSON object containing the semantic representation of the requested effect intent branch, demonstrating correct structural compliance with the semantic contract",
+  "existingRefs": ["qualification-conversation:turn-1"]
+}
+```
+
+The historical artifact retains byte counts and SHA-256 digests, not raw
+provider response bodies. No missing body is reconstructed. The exact attempt
+1 and attempt 2 bodies and per-attempt diagnostics are not durably retained.
+
+### Structural correction knowledge
+
+The live correction path maps parser codes other than `invalid_json`,
+`root_not_object`, and `wrong_kind` to the generic `other` feedback. The
+correction message therefore says to match the semantic contract exactly, but
+does not include the parser path, expected shape, actual shape, host allowlist,
+or previous rejected output. Because the exact first two bodies are absent, the
+accuracy of those two individual correction exchanges cannot be recovered.
+The correction guidance is classified `partial`: it did not falsely claim
+that `purpose` was invalid after the repaired source, but it was not specific
+enough to expose the hidden host-reference violation.
+
+### Exact-candidate closure verification
+
+The diagnostic-only parser repair was committed and pushed as
+`51351f86a9e0a930ce58f4b0e59c487d5eaea300`. The exact candidate passed the
+focused 5-file/44-test set, the TypeScript build, and the serial deterministic
+corpus (`371` files, `2312` passed, `2` skipped). It was then built in the
+isolated Mint checkout on host `QXY`.
+
+The exact-candidate full W2 artifact is:
+
+```text
+path=work/phase5-w2-full-diagnostic-51351f86a9e0a930ce58f4b0e59c487d5eaea300/w2-route-qualification.json
+sha256=189fa4d0e88a84b1e143f4271c3e721190e94bb0babd4a79f0382ddc47a6b289
+runId=w2-20260901T095504421Z-bf77b0cb-cd3d-440b-bc9f-cded1716640e
+environment=isolated_live
+route=mistral/mistral-small-2603/high/native_json_schema/no-fallback/primary-only
+caseEvaluations=12
+providerAttempts=14
+caseVerdicts=10 PASS, 2 NOT_QUALIFIED
+verdict=NOT_QUALIFIED
+```
+
+In that run, `effect_intent sample 0` again reached the provider, passed JSON
+syntax and closed-schema checks, and failed at the strict parser because
+`existingRefs[0]="qualification-fixture"` was not in the host allowlist
+`["turn-1"]`. The current parser reported the correct field. A separate
+`effect_intent sample 1` failed semantic validity after returning `abstain`
+instead of the expected `effect_intent` branch. `settlement sample 0` passed in
+this stochastic rerun, but the prior captured settlement semantic-invalid
+witness remains an independent qualification failure under the frozen release
+law. The rerun does not qualify Thought and does not erase that prior witness.
+
+The historical two zero-attempt NIM rows remain
+`NOT_DEMONSTRATED_NIM_FAILURE`; they have no dispatch evidence and are excluded
+from provider reliability. The raw-provider-response status remains
+`NOT_DURABLY_RETAINED`. The current wire binding was not changed, and
+`MODEL_FUNDAMENTALLY_INCAPABLE=NOT_PROVEN` remains the only supported model
+conclusion.
