@@ -961,7 +961,19 @@ export type CapabilityReality = {
   canOfferBoundedOperation: boolean;
   canOfferPatchExport: boolean;
   approvedProjectIds: string[];
+  /** Host-owned affordance facts exposed to Thought; never a selected branch. */
+  operationCapabilities?: readonly ThoughtOperationCapability[];
 };
+
+export type ThoughtOperationCapability = Readonly<{
+  operationKind: string;
+  semanticClass: "observation" | "effect";
+  available: boolean;
+  requiredRequestFields: readonly string[];
+  optionalRequestFields: readonly string[];
+  operatorBoundRequestFields: readonly string[];
+  authorizedProjectIds: readonly string[];
+}>;
 export type ThoughtInput = {
   cycleId: CycleId;
   generation: Generation;

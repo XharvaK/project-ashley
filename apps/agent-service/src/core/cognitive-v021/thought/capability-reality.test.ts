@@ -70,6 +70,29 @@ describe("v0.2.1 CapabilityReality live-surface contract", () => {
         canOfferVerification: true,
         canOfferAuthorship: true,
       });
+      expect(reality.operationCapabilities).toEqual([
+        {
+          operationKind: "project.read_file",
+          semanticClass: "observation",
+          available: true,
+          requiredRequestFields: ["projectId", "path"],
+          optionalRequestFields: [],
+          operatorBoundRequestFields: [],
+          authorizedProjectIds: ["project-ashley"],
+        },
+        {
+          operationKind: "workspace.verify",
+          semanticClass: "effect",
+          available: true,
+          requiredRequestFields: ["projectId"],
+          optionalRequestFields: ["workspaceId", "recipeId"],
+          operatorBoundRequestFields: ["workspaceId", "recipeId"],
+          authorizedProjectIds: ["project-ashley"],
+        },
+      ]);
+      expect(reality.operationCapabilities?.some((operation) =>
+        "expectedKind" in operation || "semanticBranch" in operation,
+      )).toBe(false);
     } finally {
       db.close();
     }

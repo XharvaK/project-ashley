@@ -13,7 +13,7 @@ import {
   type V2ProjectReadRegistry,
 } from "../../sandbox/project-registry.js";
 import type { CapabilityName } from "../../rollout/capabilities.js";
-import type { CapabilityReality } from "../types.js";
+import type { CapabilityReality, ThoughtOperationCapability } from "../types.js";
 
 /** Capabilities with an actual v0.2.1 production adapter in this candidate. */
 const V021_LIVE_OPERATION_CAPABILITIES: ReadonlySet<CapabilityName> = new Set([
@@ -33,6 +33,48 @@ export type CapabilityRealityOptions = {
   substrateAvailable?: boolean;
 };
 
+function authorizedProjectIds(
+  registry: V2ProjectReadRegistry,
+  predicate: (entry: ReturnType<V2ProjectReadRegistry["list"]>[number]) => boolean,
+): string[] {
+  return registry.list()
+    .filter((entry) => entry.enabled && entry.readAllowed && predicate(entry))
+    .map((entry) => entry.projectId)
+    .sort();
+}
+
+function thoughtOperationCapabilities(input: {
+  registry: V2ProjectReadRegistry;
+  projectInspectionAvailable: boolean;
+  verificationAvailable: boolean;
+}): readonly ThoughtOperationCapability[] {
+  const approvedProjectIds = authorizedProjectIds(input.registry, () => true);
+  const verificationProjectIds = authorizedProjectIds(
+    input.registry,
+    (entry) => entry.verificationAllowed === true && (entry.allowedRecipeIds?.length ?? 0) > 0,
+  );
+  return Object.freeze([
+    Object.freeze({
+      operationKind: "project.read_file",
+      semanticClass: "observation" as const,
+      available: input.projectInspectionAvailable,
+      requiredRequestFields: Object.freeze(["projectId", "path"]),
+      optionalRequestFields: Object.freeze([]),
+      operatorBoundRequestFields: Object.freeze([]),
+      authorizedProjectIds: Object.freeze(approvedProjectIds),
+    }),
+    Object.freeze({
+      operationKind: "workspace.verify",
+      semanticClass: "effect" as const,
+      available: input.verificationAvailable,
+      requiredRequestFields: Object.freeze(["projectId"]),
+      optionalRequestFields: Object.freeze(["workspaceId", "recipeId"]),
+      operatorBoundRequestFields: Object.freeze(["workspaceId", "recipeId"]),
+      authorizedProjectIds: Object.freeze(verificationProjectIds),
+    }),
+  ]);
+}
+
 /** Read capability facts for Thought. This deliberately bypasses Expression text composition. */
 export function getCapabilityReality(
   db: DatabaseSync,
@@ -46,6 +88,10 @@ export function getCapabilityReality(
     lifecycleEnabled: options.lifecycleEnabled,
     substrateAvailable: options.substrateAvailable,
   };
+  const projectInspectionAvailable = V021_LIVE_OPERATION_CAPABILITIES.has("project_inspection") &&
+    canOfferProjectInspection(db, sandboxOptions);
+  const verificationAvailable = V021_LIVE_OPERATION_CAPABILITIES.has("candidate_verification") &&
+    canOfferCandidateVerification(db, sandboxOptions);
   return {
     vision: V021_LIVE_PERCEPTION_CAPABILITIES.has("vision") &&
       perceptionCapabilityCanInfluence(db, "vision", masterMode),
@@ -55,16 +101,19 @@ export function getCapabilityReality(
       perceptionCapabilityCanInfluence(db, "conversational_read", masterMode),
     webSearch: V021_LIVE_PERCEPTION_CAPABILITIES.has("web_search") &&
       perceptionCapabilityCanInfluence(db, "web_search", masterMode),
-    canOfferProjectInspection: V021_LIVE_OPERATION_CAPABILITIES.has("project_inspection") &&
-      canOfferProjectInspection(db, sandboxOptions),
+    canOfferProjectInspection: projectInspectionAvailable,
     canOfferWorkspace: V021_LIVE_OPERATION_CAPABILITIES.has("project_experimentation") &&
       canOfferCandidateWorkspace(db, sandboxOptions),
-    canOfferVerification: V021_LIVE_OPERATION_CAPABILITIES.has("candidate_verification") &&
-      canOfferCandidateVerification(db, sandboxOptions),
+    canOfferVerification: verificationAvailable,
     canOfferAuthorship: V021_LIVE_OPERATION_CAPABILITIES.has("candidate_authorship") &&
       canOfferCandidateAuthorship(db, sandboxOptions),
     canOfferBoundedOperation: false,
     canOfferPatchExport: false,
     approvedProjectIds: listApprovedReadProjectIds(registry),
+    operationCapabilities: thoughtOperationCapabilities({
+      registry,
+      projectInspectionAvailable,
+      verificationAvailable,
+    }),
   };
 }

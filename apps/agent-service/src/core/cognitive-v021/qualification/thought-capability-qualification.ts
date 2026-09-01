@@ -194,6 +194,26 @@ const CAPABILITY_REALITY: CapabilityReality = {
   canOfferBoundedOperation: true,
   canOfferPatchExport: false,
   approvedProjectIds: ["qualification-fixture"],
+  operationCapabilities: [
+    {
+      operationKind: "project.read_file",
+      semanticClass: "observation",
+      available: true,
+      requiredRequestFields: ["projectId", "path"],
+      optionalRequestFields: [],
+      operatorBoundRequestFields: [],
+      authorizedProjectIds: ["qualification-fixture"],
+    },
+    {
+      operationKind: "workspace.verify",
+      semanticClass: "effect",
+      available: true,
+      requiredRequestFields: ["projectId"],
+      optionalRequestFields: ["workspaceId", "recipeId"],
+      operatorBoundRequestFields: ["workspaceId", "recipeId"],
+      authorizedProjectIds: ["qualification-fixture"],
+    },
+  ],
 };
 
 type CandidatePreflight = Readonly<{
@@ -251,7 +271,7 @@ type OracleResult =
       branch: string | null;
     };
 
-const SCHEMA_METADATA_KEYS = new Set(["$schema", "$id", "title", "$defs"]);
+const SCHEMA_METADATA_KEYS = new Set(["$schema", "$id", "title", "description", "$defs"]);
 const SUPPORTED_SCHEMA_KEYWORDS = new Set([
   "type",
   "const",
@@ -657,6 +677,23 @@ function semanticCaseKind(caseId: ThoughtQualificationCaseId): string | null {
     : caseId === "structural_correction"
       ? "abstain"
       : null;
+}
+
+function semanticExpectedKind(
+  expectedKind: ThoughtQualificationCaseId | ThoughtSemanticOutput["kind"],
+): ThoughtSemanticOutput["kind"] {
+  switch (expectedKind) {
+    case "observation_intent":
+    case "effect_intent":
+    case "abstain":
+    case "settlement":
+      return expectedKind;
+    case "structural_correction":
+      return "abstain";
+    case "stale_before_publish":
+    case "authority_revision":
+      return "settlement";
+  }
 }
 
 function plausibleSemanticOutput(value: ThoughtSemanticOutput): boolean {
@@ -1560,6 +1597,7 @@ async function runW0Sequence(input: {
   db: import("node:sqlite").DatabaseSync;
   runId: string;
   caseId: ThoughtQualificationCaseId;
+  expectedKind: ThoughtSemanticOutput["kind"];
   caseInput: ThoughtInput;
   rawHints: readonly (string | null)[];
   preflight: CandidatePreflight;
@@ -1641,6 +1679,10 @@ async function runW0Sequence(input: {
     invocations.push(invocation);
     if (invocation.correctionScopeViolation) break;
     if (!invocation.malformed) break;
+    if (!shouldAttemptQualificationStructuralCorrection({
+      expectedKind: input.expectedKind,
+      structuralFeedback: invocation.structuralFeedback,
+    })) break;
     structuralFeedback = invocation.structuralFeedback
       ?? createThoughtStructuralFeedback({
         code: invocation.output.kind === "failure"
@@ -1719,6 +1761,15 @@ function kernelBindingDiagnostic(
     expected,
     actual,
   );
+}
+
+/** A qualification expected-kind mismatch is semantic, not a localized field defect. */
+export function shouldAttemptQualificationStructuralCorrection(input: {
+  expectedKind: ThoughtSemanticOutput["kind"];
+  structuralFeedback?: ThoughtStructuralFeedback;
+}): boolean {
+  const candidateKind = input.structuralFeedback?.previousCandidate?.kind;
+  return typeof candidateKind !== "string" || candidateKind === input.expectedKind;
 }
 
 function fencingDiagnostic(
@@ -2136,6 +2187,7 @@ export async function replayCapturedQualificationFailure(
       db,
       runId,
       caseId: input.caseId,
+      expectedKind: semanticExpectedKind(input.expectedKind),
       caseInput,
       rawHints: [content.text],
       preflight,
@@ -2352,6 +2404,7 @@ async function runFixtureQualification(
         db,
         runId,
         caseId,
+        expectedKind: caseId,
         caseInput,
         rawHints: [fixtureRawFor(caseId)],
         preflight,
@@ -2381,6 +2434,7 @@ async function runFixtureQualification(
       db,
       runId,
       caseId: "structural_correction",
+      expectedKind: "abstain",
       caseInput: structuralCaseInput,
       rawHints: fixtureStructuralCorrectionHints(),
       preflight,
@@ -2555,6 +2609,7 @@ async function runLiveQualification(
           db,
           runId: caseRunId,
           caseId,
+          expectedKind: caseId,
           caseInput,
           rawHints: [null, null, null],
           preflight,

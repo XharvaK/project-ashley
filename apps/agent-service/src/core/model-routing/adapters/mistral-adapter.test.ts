@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Mistral } from "@mistralai/mistralai";
 import type { ChatMessage } from "../types.js";
 import type { StructuredOutputSchemaFingerprint } from "../../model-fabric/types.js";
+import { thoughtOutputStructuredRequest } from "../../cognitive-v021/thought/output-contract.js";
 import { createMistralAdapter } from "./mistral-adapter.js";
 
 const nativeThoughtSchema = {
@@ -127,6 +128,7 @@ describe("mistral-adapter W1 wire evidence", () => {
   });
 
   it("emits native Mistral json_schema through the raw API path with trusted controls", async () => {
+    const thoughtRequest = thoughtOutputStructuredRequest();
     const complete = vi.fn();
     const client = { chat: { complete } } as unknown as Mistral;
     const fetchFn = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
@@ -158,17 +160,12 @@ describe("mistral-adapter W1 wire evidence", () => {
       fabricReasoning: { kind: "reasoning_effort", value: "high" },
       fabricStructuredOutput: {
         kind: "native_json_schema",
-        contractId: "ashley.thought.semantic.v1",
-        schemaId: "ashley.thought.semantic.v1.schema",
-        schemaFingerprint: ("sha256:" + "a".repeat(64)) as StructuredOutputSchemaFingerprint,
+        contractId: thoughtRequest.contractId,
+        schemaId: thoughtRequest.schemaId,
+        schemaFingerprint: thoughtRequest.schemaFingerprint,
         bindingId: "wire:mistral-response-format-json-schema",
         wireFormat: "mistral_response_format_json_schema",
-        schema: {
-          type: "object",
-          additionalProperties: false,
-          properties: { kind: { type: "string" } },
-          required: ["kind"],
-        },
+        schema: thoughtRequest.schema,
       },
     });
 
@@ -190,17 +187,12 @@ describe("mistral-adapter W1 wire evidence", () => {
       response_format: {
         type: "json_schema",
         json_schema: {
-          name: "ashley.thought.semantic.v1.schema",
+          name: thoughtRequest.schemaId,
           strict: true,
         },
       },
     });
-    expect(body.response_format.json_schema.schema).toEqual({
-      type: "object",
-      additionalProperties: false,
-      properties: { kind: { type: "string" } },
-      required: ["kind"],
-    });
+    expect(body.response_format.json_schema.schema).toEqual(thoughtRequest.schema);
     expect(body.messages).toEqual([
       { role: "user", content: "private-mistral-content" },
     ]);

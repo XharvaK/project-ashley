@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { thoughtOutputStructuredRequest } from "./output-contract.js";
+import {
+  thoughtOutputCompatibilityInstruction,
+  thoughtOutputStructuredRequest,
+} from "./output-contract.js";
 import { parseThoughtSemanticOutput } from "./parse.js";
 
 const refs = new Set(["turn-1", "observation-1"]);
@@ -235,5 +238,31 @@ describe("Thought semantic output contract", () => {
       expect(branch.properties).not.toHaveProperty("requestId");
       expect(branch.properties).not.toHaveProperty("occupantId");
     }
+  });
+
+  it("teaches Thought the semantic selection law separately from output shape", () => {
+    const instruction = thoughtOutputCompatibilityInstruction();
+
+    expect(instruction).toContain("Semantic selection rules");
+    expect(instruction).toContain("settlement only when the current supplied evidence and context are sufficient");
+    expect(instruction).toContain("observation_intent when the answer requires additional read-only evidence acquisition");
+    expect(instruction).toContain("effect_intent when the requested outcome requires a governed mechanical effect");
+    expect(instruction).toContain("abstain when required evidence, capability, or an admissible basis is absent or unresolved");
+    expect(instruction).toContain("Do not use settlement as a placeholder for an unperformed observation or effect");
+    expect(instruction).toContain("This contract describes output shape only");
+  });
+
+  it("carries semantic branch intent in the native schema without changing branch shape", () => {
+    const request = thoughtOutputStructuredRequest();
+    const schema = request.schema as {
+      oneOf: Array<{ description?: string }>;
+    };
+
+    expect(schema.oneOf.map((branch) => branch.description)).toEqual([
+      expect.stringContaining("current supplied evidence and context are sufficient"),
+      expect.stringContaining("additional read-only evidence acquisition"),
+      expect.stringContaining("governed mechanical effect"),
+      expect.stringContaining("required evidence, capability, or an admissible basis is absent"),
+    ]);
   });
 });

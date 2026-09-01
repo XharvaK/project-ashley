@@ -189,6 +189,9 @@ describe("v0.2.1 Thought run", () => {
     expect(userInputs[1]).toBe(userInputs[0]);
     expect(systemMessages[0]).toContain("schemaId=ashley.thought.semantic.v1.schema");
     expect(systemMessages[0]).toContain("permitted kinds");
+    expect(systemMessages[0]).toContain("Semantic selection rules");
+    expect(systemMessages[0]).toContain("settlement only when the current supplied evidence and context are sufficient");
+    expect(systemMessages[0]).not.toContain("Code validates semantics");
     expect(systemMessages[0]).toContain("mustSay");
     expect(systemMessages[0]).toContain("commitments");
     expect(systemMessages[0]).toContain("evidenceUse");

@@ -143,27 +143,44 @@ const semanticOutputSettlementSchema = strictObject({
     observationRefsUsed: stringArraySchema, retrievalRefsUsed: stringArraySchema,
     sourceRefsUsed: stringArraySchema, openIntentRefs: stringArraySchema,
   }, ["observationRefsUsed", "retrievalRefsUsed", "sourceRefsUsed", "openIntentRefs"]),
-}, ["kind", "interpretation", "commitments", "speech", "workingContextDeltas", "concernDeltas", "occupancyDeltas", "futureTriggerDeltas", "subscriptionDeltas", "durableNominations", "evidenceUse"]);
+  }, ["kind", "interpretation", "commitments", "speech", "workingContextDeltas", "concernDeltas", "occupancyDeltas", "futureTriggerDeltas", "subscriptionDeltas", "durableNominations", "evidenceUse"]);
+
+const semanticOutputSettlementForm = {
+  ...semanticOutputSettlementSchema,
+  description: "Use settlement only when the current supplied evidence and context are sufficient to author the semantic answer without first acquiring additional evidence or performing a governed effect. Do not use settlement as a placeholder for an unperformed observation or effect.",
+};
+const semanticOutputObservationForm = {
+  ...strictObject({
+    kind: { const: "observation_intent" }, operationKind: { enum: REGISTERED_OPERATION_KINDS }, request: jsonObjectSchema,
+    purpose: { type: "string", minLength: 1 }, evidenceNeed: { type: "string", minLength: 1 }, existingRefs: stringArraySchema,
+  }, ["kind", "operationKind", "request", "purpose", "evidenceNeed", "existingRefs"]),
+  description: "Use observation_intent when the answer requires additional read-only evidence acquisition through a registered observation capability.",
+};
+const semanticOutputEffectForm = {
+  ...strictObject({
+    kind: { const: "effect_intent" }, operationKind: { enum: REGISTERED_OPERATION_KINDS }, request: jsonObjectSchema,
+    purpose: { type: "string", minLength: 1 }, expectedOutcome: { type: "string", minLength: 1 }, existingRefs: stringArraySchema,
+  }, ["kind", "operationKind", "request", "purpose", "expectedOutcome", "existingRefs"]),
+  description: "Use effect_intent when the requested outcome requires a governed mechanical effect through a registered effect capability.",
+};
+const semanticOutputAbstainForm = {
+  ...strictObject({
+    kind: { const: "abstain" },
+    reason: { enum: ["insufficient_evidence", "unresolved_ambiguity", "no_responsible_proposal", "no_semantic_change_warranted"] },
+    explanation: { type: "string", minLength: 1 }, evidenceRefs: stringArraySchema,
+  }, ["kind", "reason", "explanation", "evidenceRefs"]),
+  description: "Use abstain when required evidence, capability, or an admissible basis is absent or unresolved; this is a semantic decision, not a provider, parser, or deadline failure.",
+};
 
 export const THOUGHT_OUTPUT_SCHEMA: Readonly<Record<string, unknown>> = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
   $id: "ashley.thought.semantic.v1.schema",
   title: "Ashley Thought semantic output v1",
   oneOf: [
-    semanticOutputSettlementSchema,
-    strictObject({
-      kind: { const: "observation_intent" }, operationKind: { enum: REGISTERED_OPERATION_KINDS }, request: jsonObjectSchema,
-      purpose: { type: "string", minLength: 1 }, evidenceNeed: { type: "string", minLength: 1 }, existingRefs: stringArraySchema,
-    }, ["kind", "operationKind", "request", "purpose", "evidenceNeed", "existingRefs"]),
-    strictObject({
-      kind: { const: "effect_intent" }, operationKind: { enum: REGISTERED_OPERATION_KINDS }, request: jsonObjectSchema,
-      purpose: { type: "string", minLength: 1 }, expectedOutcome: { type: "string", minLength: 1 }, existingRefs: stringArraySchema,
-    }, ["kind", "operationKind", "request", "purpose", "expectedOutcome", "existingRefs"]),
-    strictObject({
-      kind: { const: "abstain" },
-      reason: { enum: ["insufficient_evidence", "unresolved_ambiguity", "no_responsible_proposal", "no_semantic_change_warranted"] },
-      explanation: { type: "string", minLength: 1 }, evidenceRefs: stringArraySchema,
-    }, ["kind", "reason", "explanation", "evidenceRefs"]),
+    semanticOutputSettlementForm,
+    semanticOutputObservationForm,
+    semanticOutputEffectForm,
+    semanticOutputAbstainForm,
   ],
   $defs: { semanticRef: semanticRefSchema, existingRef: { type: "string" }, localAlias: localAliasSchema, jsonObject: jsonObjectSchema },
 };
@@ -227,12 +244,15 @@ export function thoughtOutputCompatibilityInstruction(): string {
   return [
     `Code-owned Thought contract contractId=${THOUGHT_OUTPUT_CONTRACT_ID} schemaId=${THOUGHT_OUTPUT_SCHEMA_ID} schemaFingerprint=${THOUGHT_OUTPUT_SCHEMA_FINGERPRINT}.`,
     `Return exactly one JSON object in one of these permitted kinds/forms: ${rootForms().join("; ")}.`,
+    "Semantic selection rules: choose settlement only when the current supplied evidence and context are sufficient to author the semantic answer without first acquiring additional evidence or performing a governed effect; choose observation_intent when the answer requires additional read-only evidence acquisition through a registered observation capability; choose effect_intent when the requested outcome requires a governed mechanical effect through a registered effect capability; choose abstain when required evidence, capability, or an admissible basis is absent or unresolved.",
+    "Do not use settlement as a placeholder for an unperformed observation or effect. If a required observation or effect cannot be truthfully authored from the current admissible context, use abstain rather than claim completion.",
+    "Capability reality is host-owned input: operationCapabilities identify available operations, their observation/effect class, request fields, operator-bound fields, and authorized project IDs. Use only available operations and authorized IDs; operation metadata does not choose the semantic branch for you.",
     "Do not emit kernel identity, lifecycle, delivery, or publication fields; Ashley code binds those values.",
     `A settlement must include these required sections: ${requiredFields(settlement).join(", ")}.`,
     `Speech shape: ${speechForms(settlement).join("; ")}.`,
     `Commitments required fields: ${requiredFields(commitments).join(", ")}.`,
     `Forbidden publication/delivery fields: ${THOUGHT_FORBIDDEN_OUTPUT_FIELDS.join(", ")}.`,
-    "This contract describes output shape only; Ashley code remains authoritative for semantics, authority, licensing, and publication.",
+    "This contract describes output shape only; branch selection is Thought-owned, while Ashley code remains authoritative for identity, authority, licensing, and publication.",
   ].join(" ");
 }
 

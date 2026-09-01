@@ -139,7 +139,7 @@ function thoughtMessages(
         "You are Ashley's Thought layer.",
         "Return exactly one JSON semantic Thought output.",
         thoughtOutputCompatibilityInstruction(),
-        "Code validates semantics, authority, speech licensing, and publication.",
+        "Code validates identity, authority, speech licensing, and publication.",
         "Do not return finalLicensedText, settlementId, delivery, outbox, reservation, or workspace state.",
         ...(feedback ? [feedback] : []),
       ].join(" "),

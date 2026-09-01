@@ -12,6 +12,8 @@ import {
   type QualificationGateEvidence,
 } from "./thought-capability-qualification.js";
 import { qualificationCheckoutIdentity } from "../../rollout/capabilities.js";
+import { createThoughtStructuralFeedback } from "../thought/structural-feedback.js";
+import { shouldAttemptQualificationStructuralCorrection } from "./thought-capability-qualification.js";
 
 const validAbstain = JSON.stringify({
   kind: "abstain",
@@ -588,6 +590,27 @@ describe("successor Thought qualification", () => {
     expect(providerError.diagnostics.firstFailureBoundary).toBe("PROVIDER_ERROR_RESPONSE");
     expect(noResponse.diagnostics.attemptId).toBe("attempt:no-response");
     expect(providerError.diagnostics.attemptId).toBe("attempt:provider-error");
+  });
+
+  it("does not localize a settlement parser field when qualification expects observation", () => {
+    const feedback = createThoughtStructuralFeedback({
+      code: "wrong_type",
+      field: "evidenceUse",
+      previousCandidate: JSON.stringify({
+        kind: "settlement",
+        evidenceUse: { observationRefsUsed: "not-an-array" },
+      }),
+    });
+
+    expect(feedback.correctionScope).toBe("localized");
+    expect(shouldAttemptQualificationStructuralCorrection({
+      expectedKind: "observation_intent",
+      structuralFeedback: feedback,
+    })).toBe(false);
+    expect(shouldAttemptQualificationStructuralCorrection({
+      expectedKind: "settlement",
+      structuralFeedback: feedback,
+    })).toBe(true);
   });
 
   it("rejects a stale production release label before isolated live dispatch", async () => {
