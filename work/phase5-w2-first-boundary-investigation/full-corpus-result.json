@@ -1,0 +1,22 @@
+{
+  "schema": "ashley.phase5.w2.full_corpus_result.v1",
+  "recordedAt": "2026-09-01T08:54:21.7487096Z",
+  "candidateBaseSha": "9cf777c41e39271c4e2cb2db5ed89503f97ff88f",
+  "command": "npm run test --prefix apps/agent-service -- --no-file-parallelism --reporter=dot",
+  "status": "PASS",
+  "testFilesPassed": 371,
+  "testFilesFailed": 0,
+  "testsPassed": 2309,
+  "testsFailed": 0,
+  "testsSkipped": 2,
+  "durationSeconds": 989.16,
+  "baselineDelta": {
+    "frozenBaselineTests": 2304,
+    "addedTests": 5,
+    "explanation": "The five added W2 first-boundary/schema-parser regressions are included in the 2309 total."
+  },
+  "productionMutation": false,
+  "deploymentPerformed": false,
+  "w3Started": false,
+  "w9Started": false
+}

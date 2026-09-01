@@ -1,0 +1,72 @@
+{
+  "schema": "ashley.phase5.w2.first_boundary_diagnostic.v1",
+  "recordedAt": "2026-09-01T08:36:34.6748150Z",
+  "baseCandidateSha": "9cf777c41e39271c4e2cb2db5ed89503f97ff88f",
+  "productionSha": "573393c3fdb2392a45137d4625635658eb4b5d88",
+  "stage": "D0_D2_COMPLETE_D3_NOT_STARTED",
+  "frozenRoute": {
+    "provider": "mistral",
+    "model": "mistral-small-2603",
+    "reasoning": "high",
+    "wireMode": "native_json_schema",
+    "wireFormat": "mistral_response_format_json_schema",
+    "fallback": "none",
+    "credential": "primary_only"
+  },
+  "historicalEvidence": {
+    "mistralArtifact": {
+      "path": "C:\\Users\\Xharv\\Projects\\composer-assistant-audit-573393c\\work\\phase5-w2-live-candidate-9cf777c\\w2-route-qualification.json",
+      "sha256": "2d8fcc3455e5bf54f51a863d5af7eca25648e04aa3011484a3199924eca752b8",
+      "runId": "w2-20260901T071858609Z-f8f469cf-f341-48bf-a5ce-178b0f2fa257",
+      "providerAttempts": 12,
+      "transportPass": 12,
+      "jsonSyntaxPass": 12,
+      "closedSchemaPass": 12,
+      "strictParserPass": 10,
+      "strictParserFail": 2,
+      "semanticPass": 9,
+      "semanticFail": 3,
+      "verdict": "NOT_QUALIFIED",
+      "rawProviderResponse": "NOT_DURABLY_RETAINED",
+      "rawFailurePayloadRecoverable": false
+    },
+    "nimZeroAttemptRows": {
+      "path": "C:\\Users\\Xharv\\Projects\\composer-assistant-audit-573393c\\work\\phase5-w2-live-candidate-8c3c470\\w2-route-qualification.json",
+      "classification": "NOT_DEMONSTRATED_NIM_FAILURE",
+      "providerAttemptIds": 0,
+      "elapsedMsRange": "approximately 7-9",
+      "firstFailureBoundary": "UNKNOWN",
+      "countedTowardProviderReliability": false
+    }
+  },
+  "sourceFindings": {
+    "triStateProjection": "PROVEN_QUALIFICATION_HARNESS_DEFECT_REPAIRED",
+    "structuralCorrectionPath": "PRODUCTION_CORRECTION_PATH_REQUIRED_AND_NOW_EXERCISED",
+    "settlementReachabilityContext": "PROVEN_QUALIFICATION_HARNESS_CONTEXT_DEFECT_REPAIRED",
+    "w4BarrierTransition": "SOURCE_AND_CALLER_GRAPH_PROVEN_NO_CHANGE_REQUIRED",
+    "schemaParser": "BASE_FIXED_SHAPE_MISMATCH_REPAIRED; REMAINING_DIFFERENCE_INTENTIONAL_LAYERING"
+  },
+  "gateStatus": {
+    "artifactTriStatePassFailNotReached": "PASS",
+    "failedSemanticPayloadCapture": "PASS_FOR_NEW_FAILURES_WITHIN_32768_BYTES",
+    "offlineFailureReplay": "PASS"
+  },
+  "modelConclusion": {
+    "currentWireBindingQualified": "NOT_ESTABLISHED_BY_THIS_ARTIFACT",
+    "modelFundamentallyIncapable": "NOT_PROVEN",
+    "w2PhysicalQualification": "NOT_QUALIFIED"
+  },
+  "boundedLiveDiagnostic": {
+    "status": "NOT_STARTED",
+    "requiredContext": "isolated Mint qualification context at a new exact candidate SHA",
+    "targetCases": [
+      "settlement",
+      "effect_intent",
+      "abstain"
+    ]
+  },
+  "productionMutation": false,
+  "deploymentPerformed": false,
+  "w3Started": false,
+  "w9Started": false
+}

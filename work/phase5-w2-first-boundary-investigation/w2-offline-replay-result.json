@@ -1,0 +1,35 @@
+{
+  "schema": "ashley.phase5.w2.offline_replay_result.v1",
+  "recordedAt": "2026-09-01T08:36:34.6748150Z",
+  "candidateSha": "9cf777c41e39271c4e2cb2db5ed89503f97ff88f",
+  "status": "PASS",
+  "providerCalls": 0,
+  "fixtureOnly": true,
+  "capturedFailure": {
+    "caseId": "abstain",
+    "firstFailureBoundary": "STRICT_PARSER_REJECTION",
+    "jsonSyntax": "PASS",
+    "closedSchemaConformance": "PASS",
+    "strictParser": "FAIL",
+    "kernelBinding": "NOT_REACHED",
+    "semanticValidity": "NOT_REACHED",
+    "fencing": "NOT_REACHED",
+    "authorityReachability": "NOT_REACHED",
+    "resourcePolicy": "PASS",
+    "independentFailureCodes": [
+      "PROVIDER_ACCEPTED_PARSER_REJECTED"
+    ],
+    "dependentNotReachedGates": [
+      "kernelBinding",
+      "semanticValidity",
+      "fencing",
+      "authorityReachability"
+    ]
+  },
+  "replayedFailure": {
+    "firstFailureBoundary": "STRICT_PARSER_REJECTION",
+    "normalizationMatched": true,
+    "sameFirstFailureBoundary": true
+  },
+  "commandEvidence": "The replay regression in thought-capability-qualification.test.ts passed within the 5-file, 41-test focused run."
+}

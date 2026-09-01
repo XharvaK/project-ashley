@@ -91,6 +91,66 @@ describe("Thought semantic output contract", () => {
     }
   });
 
+  it("rejects fixed structural shapes that the native schema rejects", () => {
+    expect(parseThoughtSemanticOutput({
+      kind: "observation_intent",
+      operationKind: "project.read_file",
+      request: { path: "x" },
+      purpose: "",
+      evidenceNeed: "x",
+      existingRefs: ["turn-1"],
+    }, refs)).toMatchObject({ ok: false });
+    expect(parseThoughtSemanticOutput({
+      kind: "effect_intent",
+      operationKind: "workspace.verify",
+      request: { path: "x" },
+      purpose: "x",
+      expectedOutcome: "",
+      existingRefs: ["turn-1"],
+    }, refs)).toMatchObject({ ok: false });
+    expect(parseThoughtSemanticOutput({
+      kind: "abstain",
+      reason: "insufficient_evidence",
+      explanation: "",
+      evidenceRefs: [],
+    }, refs)).toMatchObject({ ok: false });
+    expect(parseThoughtSemanticOutput({
+      ...settlement,
+      occupancyDeltas: [{
+        op: "set",
+        concernRef: { kind: "existing", ref: "turn-1" },
+        status: "active",
+        priority: 1.5,
+      }],
+    }, refs)).toMatchObject({ ok: false });
+    expect(parseThoughtSemanticOutput({
+      ...settlement,
+      futureTriggerDeltas: [{
+        op: "create",
+        identity: { kind: "local", alias: "future-1" },
+        concernRef: { kind: "existing", ref: "turn-1" },
+        dueAtMs: 1.5,
+        purpose: "check",
+        payload: {},
+      }],
+    }, refs)).toMatchObject({ ok: false });
+    expect(parseThoughtSemanticOutput({
+      ...settlement,
+      subscriptionDeltas: [{
+        op: "create",
+        subscription: {
+          identity: { kind: "local", alias: "subscription-1" },
+          concernRef: null,
+          source: "owner",
+          scope: "qualification",
+          topicKeys: [],
+          match: "equality",
+          expiresAtMs: 1.5,
+        },
+      }],
+    }, refs)).toMatchObject({ ok: false });
+  });
+
   it("rejects the predecessor envelope and every kernel-owned identity field", () => {
     expect(parseThoughtSemanticOutput({
       kind: "settlement",

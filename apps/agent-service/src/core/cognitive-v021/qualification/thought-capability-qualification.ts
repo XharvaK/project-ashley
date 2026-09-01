@@ -15,6 +15,7 @@ import { openNuclearDb } from "../../db.js";
 import { openContinuityDb } from "../../continuity/db.js";
 import { openCognitiveSidecarDb } from "../sidecar/db.js";
 import { completeChat, type CapturedThoughtAttemptIdentity } from "../../../mistral-client.js";
+import { normalizeMistralProviderContent } from "../../model-routing/adapters/mistral-adapter.js";
 import {
   THOUGHT_OUTPUT_SCHEMA,
   THOUGHT_OUTPUT_SCHEMA_FINGERPRINT,
@@ -29,7 +30,9 @@ import { validateKernelEnvelope } from "../thought/kernel-envelope.js";
 import { validateThoughtSettlementDraft } from "../settlement/validate.js";
 import { checkAuthority } from "../authority/check.js";
 import { loadAuthorityPacks } from "../authority/packs.js";
+import { hasAuthorityBarrier } from "../authority/barrier.js";
 import type {
+  AuthorityCurrentnessBinding,
   CapabilityReality,
   EffectProposal,
   KernelDeps,
@@ -64,6 +67,7 @@ import { sha256Text, stableJson } from "../../model-fabric/hash.js";
 import type {
   WireDispatchEvidence,
   CompletionOptions,
+  ProviderResponseDiagnostics,
 } from "../../model-routing/types.js";
 import type {
   DispatchTruth,
@@ -71,6 +75,9 @@ import type {
 } from "../../model-fabric/types.js";
 import type {
   QualificationDiagnostics,
+  QualificationFailureEvidence,
+  QualificationGateDiagnostic,
+  QualificationGateName,
   QualificationGateStatus,
   QualificationFirstFailureBoundary,
   QualificationReachability,
@@ -98,6 +105,14 @@ export type QualificationGateEvidence = Readonly<{
   wireBindingId?: string | null;
   providerDeclaredEnforcement?: string | null;
   capabilityFingerprint?: string | null;
+  responseDiagnostics?: ProviderResponseDiagnostics | null;
+  kernelBindingDiagnostic?: QualificationGateDiagnostic;
+  fencingDiagnostic?: QualificationGateDiagnostic;
+  authorityReachabilityDiagnostic?: QualificationGateDiagnostic;
+  semanticValidityReasonCodes?: readonly string[];
+  semanticValidityOffendingFieldPaths?: readonly string[];
+  evidenceRefDiagnostics?: readonly string[];
+  hostContext?: QualificationFailureEvidence["hostContext"];
   dispatchTruth?: DispatchTruth | null;
   dispatchStage?: ModelFailure["stage"] | null;
   providerRequestStarted?: boolean;
@@ -116,9 +131,28 @@ export type ThoughtCapabilityQualificationInput = Readonly<{
   runId?: string;
   outputDir?: string;
   samples?: number;
+  caseIds?: readonly Extract<ThoughtQualificationCaseId, "settlement" | "observation_intent" | "effect_intent" | "abstain">[];
   noFallback?: boolean;
   completeChat?: typeof completeChat;
   nowMs?: () => number;
+}>;
+
+export type QualificationFailureReplayInput = Readonly<{
+  caseId: ThoughtQualificationCaseId;
+  expectedKind: ThoughtQualificationCaseId | "settlement" | "observation_intent" | "effect_intent" | "abstain";
+  capturedFirstFailureBoundary: QualificationFirstFailureBoundary;
+  failureEvidence: QualificationFailureEvidence;
+  runId?: string;
+}>;
+
+export type QualificationFailureReplayResult = Readonly<{
+  available: boolean;
+  normalizationMatched: boolean;
+  sameFirstFailureBoundary: boolean;
+  capturedFirstFailureBoundary: QualificationFirstFailureBoundary;
+  replayedFirstFailureBoundary: QualificationFirstFailureBoundary | null;
+  replayedCase: ThoughtQualificationCaseResult | null;
+  unavailableReason?: string;
 }>;
 
 type CompletionValue = Awaited<ReturnType<typeof completeChat>>;
@@ -188,6 +222,7 @@ type CompletionCapture = {
   model: string | null;
   wireEvidence: WireDispatchEvidence | null;
   capabilityFingerprint: string | null;
+  responseDiagnostics: ProviderResponseDiagnostics | null;
 };
 
 type W0Sequence = Readonly<{
@@ -494,16 +529,27 @@ function plausibleSemanticOutput(value: ThoughtSemanticOutput): boolean {
   }
 }
 
+const MAX_CAPTURED_SEMANTIC_BYTES = 32_768;
+const DEPENDENT_GATE_ORDER: readonly QualificationGateName[] = [
+  "kernelBinding",
+  "semanticValidity",
+  "fencing",
+  "authorityReachability",
+];
+
 function gateStatus(
   input: QualificationGateEvidence | undefined,
-  key: keyof QualificationGateEvidence,
+  key: Exclude<QualificationGateName, "jsonSyntax" | "closedSchemaConformance" | "strictParser">,
   failures: string[],
   missingCode: string,
+  reached: boolean,
 ): QualificationGateStatus {
+  if (!reached) return "NOT_REACHED";
   const value = input?.[key];
-  if (value === "pass") return "pass";
+  if (value === "PASS") return "PASS";
+  if (value === "NOT_REACHED") return "NOT_REACHED";
   failures.push(value === undefined ? missingCode : String(key) + "_failed");
-  return "fail";
+  return "FAIL";
 }
 
 function gateFieldPresent(
@@ -523,9 +569,14 @@ function dispatchTruthForCase(
 
 function firstFailureBoundaryForCase(input: {
   rawContentBytes: number;
-  closedSchemaConformance: "pass" | "fail";
-  jsonSyntax: "pass" | "fail";
-  strictParser: "pass" | "fail";
+  closedSchemaConformance: QualificationGateStatus;
+  jsonSyntax: QualificationGateStatus;
+  strictParser: QualificationGateStatus;
+  kernelBinding: QualificationGateStatus;
+  semanticValidity: QualificationGateStatus;
+  fencing: QualificationGateStatus;
+  authorityReachability: QualificationGateStatus;
+  resourcePolicy: QualificationGateStatus;
   dispatchTruth: DispatchTruth | null;
 }): QualificationFirstFailureBoundary {
   if (input.rawContentBytes === 0) {
@@ -534,20 +585,154 @@ function firstFailureBoundaryForCase(input: {
     if (input.dispatchTruth === "response_received") return "PROVIDER_ERROR_RESPONSE";
     return "NOT_REACHED";
   }
-  if (input.jsonSyntax === "pass" && input.closedSchemaConformance === "fail") {
+  if (input.jsonSyntax === "FAIL") return "LOCAL_JSON_REJECTION";
+  if (input.closedSchemaConformance === "FAIL") {
     return "LOCAL_SCHEMA_REJECTION";
   }
-  if (input.strictParser === "fail") return "STRICT_PARSER_REJECTION";
-  if (input.dispatchTruth === "response_received") return "PROVIDER_CONTENT_RECEIVED";
+  if (input.strictParser === "FAIL") return "STRICT_PARSER_REJECTION";
+  if (input.kernelBinding === "FAIL") return "KERNEL_BINDING_REJECTION";
+  if (input.semanticValidity === "FAIL") return "SEMANTIC_VALIDITY_REJECTION";
+  if (input.fencing === "FAIL") return "FENCING_REJECTION";
+  if (input.authorityReachability === "FAIL") return "AUTHORITY_REACHABILITY_REJECTION";
+  if (input.resourcePolicy === "FAIL") return "RESOURCE_POLICY_REJECTION";
+  if (input.dispatchTruth === "response_received" || input.rawContentBytes > 0) {
+    return "PROVIDER_CONTENT_RECEIVED";
+  }
   return "NOT_REACHED";
 }
 
-function downstreamReachability(
+function gateDiagnostic(
   status: QualificationGateStatus,
-  reached: boolean,
-): QualificationReachability {
-  if (!reached) return "NOT_REACHED";
-  return status === "pass" ? "PASS" : "FAIL";
+  reasonCodes: readonly string[] = [],
+  expected: Readonly<Record<string, unknown>> | null = null,
+  actual: Readonly<Record<string, unknown>> | null = null,
+): QualificationGateDiagnostic {
+  return Object.freeze({
+    status,
+    reasonCodes: Object.freeze([...reasonCodes]),
+    expected,
+    actual,
+  });
+}
+
+function observedShapeSummary(value: unknown): Readonly<Record<string, unknown>> {
+  if (Array.isArray(value)) {
+    return Object.freeze({ rootType: "array", length: value.length });
+  }
+  if (!isRecord(value)) return Object.freeze({ rootType: value === null ? "null" : typeof value });
+  return Object.freeze({
+    rootType: "object",
+    kind: typeof value.kind === "string" ? value.kind : null,
+    topLevelKeys: Object.freeze(Object.keys(value).sort()),
+  });
+}
+
+function dependentNotReachedGates(input: {
+  strictParser: QualificationGateStatus;
+  kernelBinding: QualificationGateStatus;
+  semanticValidity: QualificationGateStatus;
+  fencing: QualificationGateStatus;
+  authorityReachability: QualificationGateStatus;
+}): readonly QualificationGateName[] {
+  const dependent: QualificationGateName[] = [];
+  if (input.strictParser !== "PASS") {
+    if (input.strictParser === "FAIL") dependent.push(...DEPENDENT_GATE_ORDER);
+    return Object.freeze(unique(dependent) as QualificationGateName[]);
+  }
+  if (input.kernelBinding !== "PASS" || input.semanticValidity !== "PASS") {
+    dependent.push("fencing", "authorityReachability");
+  } else if (input.fencing !== "PASS") {
+    dependent.push("authorityReachability");
+  }
+  return Object.freeze(unique(dependent) as QualificationGateName[]);
+}
+
+function parserFailureDiagnostic(
+  strict: ReturnType<typeof parseThoughtSemanticOutput> | null,
+  expectedKind: string | null,
+  parsed: unknown,
+): QualificationFailureEvidence["strictParserDiagnostic"] {
+  if (!strict || strict.ok) return null;
+  return Object.freeze({
+    parserErrorCode: strict.code,
+    parserErrorMessage: "parseThoughtSemanticOutput:" + strict.code,
+    parserPath: strict.field ?? null,
+    expectedShape: expectedKind ?? "one semantic branch",
+    observedShapeSummary: observedShapeSummary(parsed),
+  });
+}
+
+function failureEvidenceForCase(input: {
+  rawContent: string;
+  rawContentBytes: number;
+  allowlistedReferences: readonly string[];
+  gate: QualificationGateEvidence | undefined;
+  verdict: "PASS" | "NOT_QUALIFIED";
+  parsed: unknown;
+  jsonSyntax: QualificationGateStatus;
+  jsonSyntaxMessage: string | null;
+  schemaResult: OracleResult;
+  strict: ReturnType<typeof parseThoughtSemanticOutput> | null;
+  expectedKind: string | null;
+  semanticValidity: QualificationGateStatus;
+  semanticValidityReasonCodes: readonly string[];
+  semanticValidityOffendingFieldPaths: readonly string[];
+  kernelBinding: QualificationGateStatus;
+  fencing: QualificationGateStatus;
+  authorityReachability: QualificationGateStatus;
+  hostContext: QualificationFailureEvidence["hostContext"];
+}): QualificationFailureEvidence | null {
+  if (input.verdict === "PASS") return null;
+  const captureStatus = input.rawContentBytes === 0
+    ? "not_applicable"
+    : input.rawContentBytes > MAX_CAPTURED_SEMANTIC_BYTES
+      ? "diagnostic_capture_too_large"
+      : "captured";
+  const normalizedSemanticText = captureStatus === "captured" ? input.rawContent : null;
+  const jsonSyntaxDiagnostic = input.jsonSyntax === "FAIL"
+    ? Object.freeze({
+        code: "invalid_json",
+        message: input.jsonSyntaxMessage ?? "invalid_json",
+      })
+    : null;
+  const closedSchemaDiagnostic = input.jsonSyntax !== "PASS" || input.schemaResult.ok
+    ? null
+    : Object.freeze({
+        code: input.schemaResult.code,
+        keyword: input.schemaResult.keyword,
+        instancePath: input.schemaResult.instancePath,
+        schemaPath: input.schemaResult.schemaPath,
+        branch: input.schemaResult.branch,
+      });
+  const semanticValidityDiagnostic = input.semanticValidity === "FAIL"
+    ? Object.freeze({
+        reasonCodes: Object.freeze([...input.semanticValidityReasonCodes]),
+        offendingFieldPaths: Object.freeze([...input.semanticValidityOffendingFieldPaths]),
+        evidenceRefDiagnostics: Object.freeze([...(input.gate?.evidenceRefDiagnostics ?? [])]),
+      })
+    : null;
+  return Object.freeze({
+    captureStatus,
+    allowlistedReferences: Object.freeze([...input.allowlistedReferences]),
+    providerContentChunkMetadata: input.gate?.responseDiagnostics ?? null,
+    normalizedSemanticText,
+    normalizedSemanticBytes: input.rawContentBytes,
+    normalizedSemanticSHA256: digest(input.rawContent),
+    jsonSyntaxDiagnostic,
+    closedSchemaDiagnostic,
+    strictParserDiagnostic: parserFailureDiagnostic(input.strict, input.expectedKind, input.parsed),
+    semanticValidityDiagnostic,
+    kernelBindingDiagnostic: input.gate?.kernelBindingDiagnostic
+      ?? gateDiagnostic(input.kernelBinding, input.kernelBinding === "FAIL" ? ["kernelBinding_failed"] : []),
+    fencingDiagnostic: input.gate?.fencingDiagnostic
+      ?? gateDiagnostic(input.fencing, input.fencing === "FAIL" ? ["fencing_failed"] : []),
+    authorityReachabilityDiagnostic: input.gate?.authorityReachabilityDiagnostic
+      ?? gateDiagnostic(
+        input.authorityReachability,
+        input.authorityReachability === "FAIL" ? ["authorityReachability_failed"] : [],
+      ),
+    hostContext: input.hostContext,
+  });
 }
 
 export function evaluateQualificationCase(input: {
@@ -559,38 +744,52 @@ export function evaluateQualificationCase(input: {
 }): ThoughtQualificationCaseResult {
   const failures: string[] = [];
   let parsed: unknown = null;
-  try {
-    parsed = JSON.parse(input.rawContent);
-  } catch {
-    failures.push("invalid_json");
+  let jsonSyntaxMessage: string | null = null;
+  const rawContentBytes = Buffer.byteLength(input.rawContent, "utf8");
+  let jsonSyntax: QualificationGateStatus = "NOT_REACHED";
+  if (rawContentBytes > 0) {
+    try {
+      parsed = JSON.parse(input.rawContent);
+      jsonSyntax = "PASS";
+    } catch (error) {
+      jsonSyntax = "FAIL";
+      jsonSyntaxMessage = error instanceof SyntaxError
+        ? error.message.slice(0, 256)
+        : "invalid_json";
+      failures.push("invalid_json");
+    }
   }
-  const jsonSyntax = failures.includes("invalid_json") ? "fail" : "pass";
-  const schemaResult = jsonSyntax === "pass"
+  const schemaResult = jsonSyntax === "PASS"
     ? validateThoughtOutputSchema(parsed)
     : oracleFailure("schema_not_checked", null, "$", "#");
-  const closedSchemaConformance = schemaResult.ok ? "pass" : "fail";
-  if (!schemaResult.ok && jsonSyntax === "pass") {
+  const closedSchemaConformance: QualificationGateStatus = jsonSyntax !== "PASS"
+    ? "NOT_REACHED"
+    : schemaResult.ok
+      ? "PASS"
+      : "FAIL";
+  if (!schemaResult.ok && jsonSyntax === "PASS") {
     failures.push("closed_schema_rejected", schemaResult.code);
   }
 
   const expectedKind = input.expectedKind ?? semanticCaseKind(input.caseId);
-  const strict = parseThoughtSemanticOutput(input.rawContent, new Set(input.allowlistedReferences));
-  const strictParser =
-    strict.ok && (!expectedKind || strict.value.kind === expectedKind)
-      ? "pass"
-      : "fail";
-  if (strictParser === "fail") {
-    if (jsonSyntax === "pass") failures.push("PROVIDER_ACCEPTED_PARSER_REJECTED");
-    else failures.push("strict_parser_rejected");
+  const strict = closedSchemaConformance === "PASS"
+    ? parseThoughtSemanticOutput(input.rawContent, new Set(input.allowlistedReferences))
+    : null;
+  const strictParser: QualificationGateStatus = closedSchemaConformance !== "PASS"
+    ? "NOT_REACHED"
+    : strict?.ok
+      ? "PASS"
+      : "FAIL";
+  if (strictParser === "FAIL") {
+    failures.push("PROVIDER_ACCEPTED_PARSER_REJECTED");
   }
-  if (strict.ok && expectedKind && strict.value.kind !== expectedKind) {
+  if (strict?.ok && expectedKind && strict.value.kind !== expectedKind) {
     failures.push("semantic_branch_mismatch");
   }
 
   const gate = input.gateEvidence;
   const transport = gate?.transport ?? "failure";
   if (transport !== "success") failures.push("transport_failure");
-  const rawContentBytes = Buffer.byteLength(input.rawContent, "utf8");
   if (rawContentBytes === 0) failures.push("empty_raw_content");
 
   if (gate?.provider !== CANDIDATE.provider) {
@@ -600,32 +799,54 @@ export function evaluateQualificationCase(input: {
     failures.push(gate?.model === undefined ? "model_evidence_missing" : "model_mismatch");
   }
 
-  const kernelBinding = gateStatus(gate, "kernelBinding", failures, "kernel_binding_missing");
-  const fencing = gateStatus(gate, "fencing", failures, "fencing_missing");
+  const parserReached = strictParser === "PASS" && strict?.ok === true;
+  const kernelBinding = gateStatus(
+    gate,
+    "kernelBinding",
+    failures,
+    "kernel_binding_missing",
+    parserReached,
+  );
+  const semanticShape = parserReached && plausibleSemanticOutput(strict.value);
+  const semanticKindMatches = parserReached && (!expectedKind || strict.value.kind === expectedKind);
+  const semanticEvidenceStatus = gate?.semanticValidity;
+  let semanticValidity: QualificationGateStatus;
+  if (!parserReached) {
+    semanticValidity = "NOT_REACHED";
+  } else if (semanticEvidenceStatus === "NOT_REACHED") {
+    semanticValidity = "NOT_REACHED";
+  } else if (semanticEvidenceStatus !== "PASS" || !semanticShape || !semanticKindMatches) {
+    semanticValidity = "FAIL";
+    if (semanticEvidenceStatus === undefined) failures.push("semantic_evidence_missing");
+    if (semanticEvidenceStatus === "FAIL" || semanticEvidenceStatus === "PASS") failures.push("semantic_invalid");
+  } else {
+    semanticValidity = "PASS";
+  }
+  const fencing = gateStatus(
+    gate,
+    "fencing",
+    failures,
+    "fencing_missing",
+    parserReached && kernelBinding === "PASS" && semanticValidity === "PASS",
+  );
   const authorityReachability = gateStatus(
     gate,
     "authorityReachability",
     failures,
     "authority_reachability_missing",
+    fencing === "PASS",
   );
-  const semanticShape = strict.ok && plausibleSemanticOutput(strict.value);
-  const semanticValidity = gate?.semanticValidity === "pass" && semanticShape
-    ? "pass"
-    : "fail";
-  if (semanticValidity === "fail") {
-    failures.push(
-      gate?.semanticValidity === undefined
-        ? "semantic_evidence_missing"
-        : "semantic_invalid",
-    );
-  }
 
   const elapsedMs = gate?.elapsedMs ?? 0;
   const outputTokens = gate?.outputTokens ?? null;
   const attempts = gate?.attempts ?? 0;
   const maxOutputTokens = gate?.maxOutputTokens ?? 0;
-  const resourcePolicy =
-    gate?.resourcePolicy === "pass"
+  const resourceReached = rawContentBytes > 0
+    || gate?.dispatchTruth === "response_received"
+    || gate?.providerRequestStarted === true;
+  const resourcePolicy: QualificationGateStatus = !resourceReached
+    ? "NOT_REACHED"
+    : gate?.resourcePolicy === "PASS"
     && Number.isFinite(elapsedMs)
     && elapsedMs >= 0
     && elapsedMs <= WHOLE_THOUGHT_BUDGET_MS
@@ -638,9 +859,11 @@ export function evaluateQualificationCase(input: {
     && attempts <= MAX_STRUCTURAL_ATTEMPTS
     && maxOutputTokens >= 1
     && maxOutputTokens <= MAX_THOUGHT_OUTPUT_TOKENS
-      ? "pass"
-      : "fail";
-  if (resourcePolicy === "fail") failures.push("resource_policy_mismatch");
+      ? "PASS"
+      : gate?.resourcePolicy === "NOT_REACHED"
+        ? "NOT_REACHED"
+        : "FAIL";
+  if (resourcePolicy === "FAIL") failures.push("resource_policy_mismatch");
 
   const wireMode = gate?.wireMode ?? null;
   const wireBindingId = gate?.wireBindingId ?? null;
@@ -654,18 +877,38 @@ export function evaluateQualificationCase(input: {
   }
   if (gate?.extraFailureCodes) failures.push(...gate.extraFailureCodes);
 
+  if (rawContentBytes > MAX_CAPTURED_SEMANTIC_BYTES) failures.push("diagnostic_capture_too_large");
   const failureCodes = unique(failures);
+  const firstFailureBoundary = firstFailureBoundaryForCase({
+    rawContentBytes,
+    closedSchemaConformance,
+    jsonSyntax,
+    strictParser,
+    kernelBinding,
+    semanticValidity,
+    fencing,
+    authorityReachability,
+    resourcePolicy,
+    dispatchTruth: dispatchTruthForCase(gate, rawContentBytes),
+  });
+  const dependentGates = dependentNotReachedGates({
+    strictParser,
+    kernelBinding,
+    semanticValidity,
+    fencing,
+    authorityReachability,
+  });
   const verdict =
-    jsonSyntax === "pass"
-    && closedSchemaConformance === "pass"
-    && strictParser === "pass"
+    jsonSyntax === "PASS"
+    && closedSchemaConformance === "PASS"
+    && strictParser === "PASS"
     && transport === "success"
     && rawContentBytes > 0
-    && kernelBinding === "pass"
-    && fencing === "pass"
-    && authorityReachability === "pass"
-    && semanticValidity === "pass"
-    && resourcePolicy === "pass"
+    && kernelBinding === "PASS"
+    && fencing === "PASS"
+    && authorityReachability === "PASS"
+    && semanticValidity === "PASS"
+    && resourcePolicy === "PASS"
     && failureCodes.length === 0
       ? "PASS"
     : "NOT_QUALIFIED";
@@ -678,18 +921,8 @@ export function evaluateQualificationCase(input: {
   const providerResponseReceived = gateFieldPresent(gate, "providerResponseReceived")
     ? gate?.providerResponseReceived === true
     : dispatchTruth === "response_received";
-  const downstreamReached =
-    jsonSyntax === "pass"
-    && closedSchemaConformance === "pass"
-    && strictParser === "pass";
   const diagnostics: QualificationDiagnostics = Object.freeze({
-    firstFailureBoundary: firstFailureBoundaryForCase({
-      rawContentBytes,
-      closedSchemaConformance,
-      jsonSyntax,
-      strictParser,
-      dispatchTruth,
-    }),
+    firstFailureBoundary,
     closedSchemaFailureKeyword: schemaResult.ok ? null : schemaResult.keyword,
     closedSchemaFailureInstancePath: schemaResult.ok ? null : schemaResult.instancePath,
     closedSchemaFailureSchemaPath: schemaResult.ok ? null : schemaResult.schemaPath,
@@ -701,11 +934,32 @@ export function evaluateQualificationCase(input: {
     providerResponseReceived,
     attemptId: gate?.attemptId ?? null,
     reachability: Object.freeze({
-      kernelBinding: downstreamReachability(kernelBinding, downstreamReached),
-      fencing: downstreamReachability(fencing, downstreamReached),
-      authorityReachability: downstreamReachability(authorityReachability, downstreamReached),
-      semanticValidity: downstreamReachability(semanticValidity, downstreamReached),
+      kernelBinding,
+      fencing,
+      authorityReachability,
+      semanticValidity,
     }),
+  });
+  const evidence = failureEvidenceForCase({
+    rawContent: input.rawContent,
+    rawContentBytes,
+    allowlistedReferences: input.allowlistedReferences,
+    gate,
+    verdict,
+    parsed,
+    jsonSyntax,
+    jsonSyntaxMessage,
+    schemaResult,
+    strict,
+    expectedKind,
+    semanticValidity,
+    semanticValidityReasonCodes: gate?.semanticValidityReasonCodes
+      ?? (semanticValidity === "FAIL" ? ["semantic_invalid"] : []),
+    semanticValidityOffendingFieldPaths: gate?.semanticValidityOffendingFieldPaths ?? [],
+    kernelBinding,
+    fencing,
+    authorityReachability,
+    hostContext: gate?.hostContext ?? null,
   });
   return Object.freeze({
     caseId: input.caseId,
@@ -729,6 +983,10 @@ export function evaluateQualificationCase(input: {
     providerDeclaredEnforcement,
     capabilityFingerprint,
     diagnostics,
+    firstFailureBoundary,
+    independentFailureCodes: Object.freeze(failureCodes),
+    dependentNotReachedGates: dependentGates,
+    failureEvidence: evidence,
     failureCodes: Object.freeze(failureCodes),
     verdict,
   });
@@ -815,6 +1073,7 @@ function fixtureInput(
   caseId: ThoughtQualificationCaseId,
   nowMs: number,
   occupantId: string,
+  hostContext?: QualificationFailureEvidence["hostContext"],
 ): ThoughtInput {
   const promptByCase: Record<string, string> = {
     settlement: "Return the settlement semantic branch for the bounded qualification case.",
@@ -823,12 +1082,19 @@ function fixtureInput(
     abstain: "Return the abstain semantic branch because the fixture has insufficient evidence.",
     structural_correction: "Return the abstain semantic branch after the bounded structural correction.",
   };
-  return {
+  const context = hostContext ?? {
     cycleId: runId + ":cycle",
     generation: 1,
     occupantId,
     authorityEpoch: 1,
-    trigger: { kind: "owner_message", ref: "turn-1" },
+    triggerRef: "turn-1",
+  };
+  return {
+    cycleId: context.cycleId,
+    generation: context.generation,
+    occupantId: context.occupantId,
+    authorityEpoch: context.authorityEpoch,
+    trigger: { kind: "owner_message", ref: context.triggerRef },
     rawConversation: [{
       rowId: "turn-1",
       lineageId: "qualification-lineage",
@@ -981,6 +1247,7 @@ function captureDispatchEvidenceFromError(error: unknown): Pick<
   | "model"
   | "wireEvidence"
   | "capabilityFingerprint"
+  | "responseDiagnostics"
 > {
   const metadata = metadataFromError(error);
   const receipt = metadata?.receipt;
@@ -1005,6 +1272,7 @@ function captureDispatchEvidenceFromError(error: unknown): Pick<
       attempt?.capabilityFingerprint
       ?? metadata?.capabilityIdentity?.fingerprint
       ?? null,
+    responseDiagnostics: null,
   };
 }
 
@@ -1021,6 +1289,7 @@ function captureDispatchEvidenceFromCompletion(
   | "model"
   | "wireEvidence"
   | "capabilityFingerprint"
+  | "responseDiagnostics"
 > {
   const attempt = completion.capturedAttemptIdentity;
   return {
@@ -1033,6 +1302,7 @@ function captureDispatchEvidenceFromCompletion(
     model: attempt?.configuredModelId ?? completion.resolvedModelId ?? null,
     wireEvidence: completion.wireEvidence ?? null,
     capabilityFingerprint: completion.capabilityIdentity?.fingerprint ?? null,
+    responseDiagnostics: completion.responseDiagnostics ?? null,
   };
 }
 
@@ -1087,6 +1357,19 @@ function fixtureCompletion(
     resolvedModelId: CANDIDATE.model,
     usage: { promptTokens: 128, completionTokens: 64 },
     finishReason: "stop",
+    responseDiagnostics: {
+      contentContainerType: "string",
+      contentChunkTypes: [],
+      textChunkCount: 0,
+      thinkingChunkCount: 0,
+      finalTextBytes: Buffer.byteLength(rawContent, "utf8"),
+      finishReason: "stop",
+      finishReasonClass: "STOP",
+      outputTokenLimit: options.maxTokens ?? MAX_THOUGHT_OUTPUT_TOKENS,
+      outputTokens: 64,
+      reasoningTokens: null,
+      extractionFailure: "none",
+    },
     capturedAttemptIdentity: attempt,
     wireEvidence,
     capabilityIdentity: capability,
@@ -1152,6 +1435,8 @@ async function runW0Sequence(input: {
       throw error;
     }
   };
+  const deadlineAtMs = input.nowMs() + WHOLE_THOUGHT_BUDGET_MS;
+  let structuralFeedback: import("../types.js").ThoughtParserFailureCode | undefined;
   for (let index = 0; index < input.rawHints.length; index += 1) {
     const requestId = input.runId + ":" + input.caseId + ":" + index;
     const invocation = await runThoughtModel(
@@ -1163,12 +1448,18 @@ async function runW0Sequence(input: {
       {
         pass: 1,
         requestId,
-        deadlineAtMs: input.nowMs() + WHOLE_THOUGHT_BUDGET_MS,
+        deadlineAtMs,
         nowMs: input.nowMs(),
+        structuralFeedback,
+        maxTokens: structuralFeedback ? 2_048 : undefined,
         disableThoughtTransportFailover: true,
       },
     );
     invocations.push(invocation);
+    if (!invocation.malformed) break;
+    structuralFeedback = invocation.output.kind === "failure"
+      ? invocation.output.diagnosticCode ?? "other"
+      : "other";
   }
   return Object.freeze({
     invocations: Object.freeze(invocations),
@@ -1188,59 +1479,127 @@ function outputBaseMatches(
     && output.requestId === requestId;
 }
 
-function kernelBindingPass(
+function kernelBindingDiagnostic(
   invocation: ThoughtInvocation,
   input: ThoughtInput,
   capture: CompletionCapture | undefined,
-): boolean {
+): QualificationGateDiagnostic {
   const envelope = invocation.kernelEnvelope;
   const attempt = capture?.completion?.capturedAttemptIdentity;
-  if (!envelope || !attempt || !validateKernelEnvelope(envelope).ok) return false;
-  return envelope.invocationId === invocation.requestId
-    && envelope.cycleId === input.cycleId
-    && envelope.generation === input.generation
-    && envelope.authorityEpoch === input.authorityEpoch
-    && envelope.capturedAttempt.modelFabricAttemptId === attempt.modelFabricAttemptId
-    && envelope.capturedAttempt.allocationId === attempt.allocationId
-    && envelope.capturedAttempt.provider === CANDIDATE.provider
-    && envelope.capturedAttempt.configuredModelId === CANDIDATE.model;
+  const expected = {
+    invocationId: invocation.requestId,
+    cycleId: input.cycleId,
+    generation: input.generation,
+    authorityEpoch: input.authorityEpoch,
+    provider: CANDIDATE.provider,
+    model: CANDIDATE.model,
+    attemptId: attempt?.modelFabricAttemptId ?? null,
+    allocationId: attempt?.allocationId ?? null,
+  };
+  const actual = envelope
+    ? {
+        invocationId: envelope.invocationId,
+        cycleId: envelope.cycleId,
+        generation: envelope.generation,
+        authorityEpoch: envelope.authorityEpoch,
+        provider: envelope.capturedAttempt.provider,
+        model: envelope.capturedAttempt.configuredModelId,
+        attemptId: envelope.capturedAttempt.modelFabricAttemptId,
+        allocationId: envelope.capturedAttempt.allocationId,
+      }
+    : null;
+  const reasons: string[] = [];
+  if (!envelope) reasons.push("kernel_envelope_missing");
+  if (!attempt) reasons.push("provider_attempt_missing");
+  if (envelope) {
+    const validation = validateKernelEnvelope(envelope);
+    if (!validation.ok) reasons.push("envelope_" + validation.code);
+  }
+  if (envelope && attempt) {
+    if (envelope.invocationId !== invocation.requestId) reasons.push("invocation_id_mismatch");
+    if (envelope.cycleId !== input.cycleId) reasons.push("cycle_id_mismatch");
+    if (envelope.generation !== input.generation) reasons.push("generation_mismatch");
+    if (envelope.authorityEpoch !== input.authorityEpoch) reasons.push("authority_epoch_mismatch");
+    if (envelope.capturedAttempt.modelFabricAttemptId !== attempt.modelFabricAttemptId) reasons.push("attempt_id_mismatch");
+    if (envelope.capturedAttempt.allocationId !== attempt.allocationId) reasons.push("allocation_id_mismatch");
+    if (envelope.capturedAttempt.provider !== CANDIDATE.provider) reasons.push("provider_mismatch");
+    if (envelope.capturedAttempt.configuredModelId !== CANDIDATE.model) reasons.push("model_mismatch");
+  }
+  return gateDiagnostic(
+    reasons.length === 0 ? "PASS" : "FAIL",
+    reasons,
+    expected,
+    actual,
+  );
 }
 
-function fencingPass(
+function fencingDiagnostic(
   output: ThoughtStepOutput,
   input: ThoughtInput,
   requestId: string,
-): boolean {
-  if (!outputBaseMatches(output, input, requestId)) return false;
+): QualificationGateDiagnostic {
+  const expected = {
+    cycleId: input.cycleId,
+    generation: input.generation,
+    occupantId: input.occupantId,
+    requestId,
+    authorityEpoch: input.authorityEpoch,
+    outputKind: output.kind,
+  };
+  const actual = {
+    cycleId: output.cycleId,
+    generation: output.generation,
+    occupantId: output.occupantId,
+    requestId: output.requestId,
+    outputKind: output.kind,
+  };
+  const reasons: string[] = [];
+  if (!outputBaseMatches(output, input, requestId)) {
+    if (output.cycleId !== input.cycleId) reasons.push("cycle_id_mismatch");
+    if (output.generation !== input.generation) reasons.push("generation_mismatch");
+    if (output.occupantId !== input.occupantId) reasons.push("occupant_id_mismatch");
+    if (output.requestId !== requestId) reasons.push("request_id_mismatch");
+  }
   if (output.kind === "settlement") {
-    return validateThoughtSettlementDraft(output.settlement, {
+    const result = validateThoughtSettlementDraft(output.settlement, {
       cycleId: input.cycleId,
       generation: input.generation,
       occupantId: input.occupantId,
       authorityEpoch: input.authorityEpoch,
-    }).ok;
+    });
+    if (!result.ok) reasons.push(...result.codes, "settlement_" + result.kind);
   }
   if (output.kind === "observation_request") {
-    return output.observationRequest.cycleId === input.cycleId
-      && output.observationRequest.generation === input.generation
-      && output.observationRequest.replaySafe === true;
+    if (output.observationRequest.cycleId !== input.cycleId) reasons.push("observation_cycle_mismatch");
+    if (output.observationRequest.generation !== input.generation) reasons.push("observation_generation_mismatch");
+    if (output.observationRequest.replaySafe !== true) reasons.push("observation_not_replay_safe");
   }
   if (output.kind === "effect_proposal") {
-    return output.effectProposal.cycleId === input.cycleId
-      && output.effectProposal.generation === input.generation
-      && output.effectProposal.authorityEpoch === input.authorityEpoch;
+    if (output.effectProposal.cycleId !== input.cycleId) reasons.push("effect_cycle_mismatch");
+    if (output.effectProposal.generation !== input.generation) reasons.push("effect_generation_mismatch");
+    if (output.effectProposal.authorityEpoch !== input.authorityEpoch) reasons.push("effect_authority_epoch_mismatch");
   }
-  return output.kind === "abstain";
+  if (output.kind === "failure") reasons.push("failure_output_not_publishable");
+  return gateDiagnostic(
+    reasons.length === 0 && output.kind !== "failure" ? "PASS" : "FAIL",
+    reasons,
+    expected,
+    actual,
+  );
 }
 
-function authorityPass(
-  db: import("node:sqlite").DatabaseSync,
+function authorityDiagnostic(
+  sidecarDb: import("node:sqlite").DatabaseSync,
+  attentionDb: import("node:sqlite").DatabaseSync,
   output: ThoughtStepOutput,
   input: ThoughtInput,
-): boolean {
-  const packs = loadAuthorityPacks(db, {
+  expectedCurrentness?: AuthorityCurrentnessBinding,
+): QualificationGateDiagnostic {
+  const authorityDb = hasAuthorityBarrier(attentionDb) ? attentionDb : undefined;
+  const packs = loadAuthorityPacks(sidecarDb, {
     capability: CAPABILITY_REALITY,
     observedObservationIds: [],
+    authorityDb,
   });
   let verdict;
   if (output.kind === "settlement") {
@@ -1248,18 +1607,24 @@ function authorityPass(
       settlement: output.settlement,
       packs,
       authorityEpoch: input.authorityEpoch,
+      authorityDb,
+      expectedCurrentness,
     });
   } else if (output.kind === "observation_request") {
     verdict = checkAuthority("proposal", {
       proposal: output.observationRequest as ObservationRequest,
       packs,
       authorityEpoch: input.authorityEpoch,
+      authorityDb,
+      expectedCurrentness,
     });
   } else if (output.kind === "effect_proposal") {
     verdict = checkAuthority("proposal", {
       proposal: output.effectProposal as EffectProposal,
       packs,
       authorityEpoch: input.authorityEpoch,
+      authorityDb,
+      expectedCurrentness,
     });
   } else if (output.kind === "abstain") {
     const probe: ObservationRequest = {
@@ -1274,11 +1639,27 @@ function authorityPass(
       proposal: probe,
       packs,
       authorityEpoch: input.authorityEpoch,
+      authorityDb,
+      expectedCurrentness,
     });
   } else {
-    return false;
+    return gateDiagnostic("FAIL", ["authority_output_kind_invalid"]);
   }
-  return verdict.ok;
+  return gateDiagnostic(
+    verdict.ok ? "PASS" : "FAIL",
+    verdict.ok ? [] : verdict.codes,
+    {
+      authorityEpoch: input.authorityEpoch,
+      expectedCurrentness: expectedCurrentness ?? null,
+      authorityDbBound: authorityDb !== undefined,
+    },
+    {
+      stateEpoch: packs.stateEpoch.authorityEpoch,
+      currentnessComplete: packs.currentness.complete === true,
+      currentnessBinding: packs.currentness.binding ?? null,
+      codes: verdict.ok ? [] : verdict.codes,
+    },
+  );
 }
 
 function gateEvidenceForSequence(input: {
@@ -1304,23 +1685,49 @@ function gateEvidenceForSequence(input: {
   const semanticKindPass = semantic !== undefined
     && semantic.kind === input.expectedKind
     && plausibleSemanticOutput(semantic);
+  const semanticValidityReasonCodes = semantic === undefined
+    ? ["semantic_output_missing"]
+    : [
+        ...(semantic.kind !== input.expectedKind ? ["semantic_branch_mismatch"] : []),
+        ...(!plausibleSemanticOutput(semantic) ? ["semantic_shape_invalid"] : []),
+      ];
+  const semanticStatus: QualificationGateStatus = semantic === undefined
+    ? "NOT_REACHED"
+    : semanticKindPass
+      ? "PASS"
+      : "FAIL";
+  const kernelDiagnostic = finalInvocation && finalCapture
+    ? kernelBindingDiagnostic(finalInvocation, input.caseInput, finalCapture)
+    : gateDiagnostic("NOT_REACHED");
+  const fencingDiagnosticValue = output && kernelDiagnostic.status === "PASS" && semanticStatus === "PASS"
+    ? fencingDiagnostic(output, input.caseInput, finalInvocation?.requestId ?? "")
+    : gateDiagnostic("NOT_REACHED");
+  const authorityDiagnosticValue = output && fencingDiagnosticValue.status === "PASS"
+    ? authorityDiagnostic(
+        input.authorityDb,
+        input.db,
+        output,
+        input.caseInput,
+        finalInvocation?.kernelEnvelope?.authorityCurrentness,
+      )
+    : gateDiagnostic("NOT_REACHED");
+  const resourcePolicy: QualificationGateStatus = !finalCapture || !completion
+    ? "NOT_REACHED"
+    : elapsedMs <= WHOLE_THOUGHT_BUDGET_MS
+      && completion.usage?.completionTokens !== undefined
+      && completion.usage.completionTokens <= MAX_THOUGHT_OUTPUT_TOKENS
+      && input.sequence.captures.length <= MAX_STRUCTURAL_ATTEMPTS
+      ? "PASS"
+      : "FAIL";
   return {
     transport: completion ? "success" : "failure",
     provider: finalCapture?.provider ?? attempt?.provider,
     model: finalCapture?.model ?? attempt?.configuredModelId,
-    kernelBinding: finalInvocation && finalCapture
-      ? kernelBindingPass(finalInvocation, input.caseInput, finalCapture) ? "pass" : "fail"
-      : "fail",
-    fencing: output && finalInvocation && fencingPass(output, input.caseInput, finalInvocation.requestId) ? "pass" : "fail",
-    authorityReachability: output && authorityPass(input.authorityDb, output, input.caseInput) ? "pass" : "fail",
-    semanticValidity: semanticKindPass ? "pass" : "fail",
-    resourcePolicy:
-      elapsedMs <= WHOLE_THOUGHT_BUDGET_MS
-      && completion?.usage?.completionTokens !== undefined
-      && completion.usage.completionTokens <= MAX_THOUGHT_OUTPUT_TOKENS
-      && input.sequence.captures.length <= MAX_STRUCTURAL_ATTEMPTS
-      ? "pass"
-      : "fail",
+    kernelBinding: semantic === undefined ? "NOT_REACHED" : kernelDiagnostic.status,
+    fencing: fencingDiagnosticValue.status,
+    authorityReachability: authorityDiagnosticValue.status,
+    semanticValidity: semanticStatus,
+    resourcePolicy,
     elapsedMs,
     outputTokens: completion?.usage?.completionTokens ?? null,
     attempts: input.sequence.captures.length,
@@ -1338,15 +1745,28 @@ function gateEvidenceForSequence(input: {
     providerResponseReceived: finalCapture?.providerResponseReceived ?? false,
     attemptId: finalCapture?.attemptId ?? null,
     errorCode: finalCapture?.errorCode ?? null,
+    responseDiagnostics: finalCapture?.responseDiagnostics ?? null,
+    kernelBindingDiagnostic: semantic === undefined
+      ? gateDiagnostic("NOT_REACHED")
+      : kernelDiagnostic,
+    fencingDiagnostic: fencingDiagnosticValue,
+    authorityReachabilityDiagnostic: authorityDiagnosticValue,
+    semanticValidityReasonCodes,
+    semanticValidityOffendingFieldPaths: [],
+    evidenceRefDiagnostics: [],
+    hostContext: {
+      cycleId: input.caseInput.cycleId,
+      generation: input.caseInput.generation,
+      occupantId: input.caseInput.occupantId,
+      authorityEpoch: input.caseInput.authorityEpoch,
+      triggerRef: input.caseInput.trigger.ref,
+    },
     extraFailureCodes: [
       ...(wireEvidence && wireEvidence.emittedEnforcementMode !== input.expectedWireMode
         ? ["wire_mode_mismatch"]
         : []),
       ...(wireEvidence && wireEvidence.bindingId !== input.expectedWireBindingId
         ? ["wire_binding_mismatch"]
-        : []),
-      ...(semantic && semantic.kind !== input.expectedKind
-        ? ["semantic_branch_mismatch"]
         : []),
     ],
   };
@@ -1362,6 +1782,7 @@ function resultFromSequence(input: {
   preflight: CandidatePreflight;
   expectedWireMode: string;
   expectedWireBindingId: string;
+  allowlistedReferences?: readonly string[];
   gateOverride?: QualificationGateEvidence;
 }): ThoughtQualificationCaseResult {
   const finalCapture = input.sequence.captures.at(-1);
@@ -1383,7 +1804,7 @@ function resultFromSequence(input: {
     caseId: input.caseId,
     expectedKind: input.expectedKind,
     rawContent,
-    allowlistedReferences: FIXTURE_REFERENCES,
+    allowlistedReferences: input.allowlistedReferences ?? FIXTURE_REFERENCES,
     gateEvidence: gate,
   });
   return Object.freeze({
@@ -1399,6 +1820,152 @@ function resultFromSequence(input: {
     rawContentDigest: digest(rawContent),
     capabilityFingerprint: gate.capabilityFingerprint ?? null,
   });
+}
+
+function replayContentForFailureEvidence(
+  evidence: QualificationFailureEvidence,
+): { available: boolean; normalizationMatched: boolean; text: string; reason?: string } {
+  if (evidence.captureStatus !== "captured" || evidence.normalizedSemanticText === null) {
+    return {
+      available: false,
+      normalizationMatched: false,
+      text: "",
+      reason: evidence.captureStatus === "diagnostic_capture_too_large"
+        ? "diagnostic_capture_too_large"
+        : "normalized_semantic_text_unavailable",
+    };
+  }
+  const metadata = evidence.providerContentChunkMetadata;
+  if (!metadata) {
+    return {
+      available: false,
+      normalizationMatched: false,
+      text: "",
+      reason: "provider_content_metadata_unavailable",
+    };
+  }
+  let content: unknown;
+  if (metadata.contentContainerType === "string") {
+    content = evidence.normalizedSemanticText;
+  } else if (metadata.contentContainerType === "array") {
+    const chunkTypes = metadata.contentChunkTypes.length > 0
+      ? metadata.contentChunkTypes
+      : metadata.extractionFailure === "none" && evidence.normalizedSemanticText.length === 0
+        ? []
+        : ["text"];
+    let textAssigned = false;
+    content = chunkTypes.map((type) => {
+      if (metadata.extractionFailure !== "none") {
+        if (type === "<invalid>") return null;
+        if (type === "text") return { type, text: 1 };
+        if (type === "thinking") return { type, thinking: "invalid" };
+        return { type };
+      }
+      if (type === "text") {
+        const text = textAssigned ? "" : evidence.normalizedSemanticText;
+        textAssigned = true;
+        return { type, text };
+      }
+      if (type === "thinking") return { type, thinking: [] };
+      return { type };
+    });
+  } else if (metadata.contentContainerType === "null") {
+    content = null;
+  } else {
+    content = undefined;
+  }
+  const normalized = normalizeMistralProviderContent(content);
+  const normalizationMatched = normalized.contentContainerType === metadata.contentContainerType
+    && JSON.stringify(normalized.contentChunkTypes) === JSON.stringify(metadata.contentChunkTypes)
+    && normalized.textChunkCount === metadata.textChunkCount
+    && normalized.thinkingChunkCount === metadata.thinkingChunkCount
+    && normalized.extractionFailure === metadata.extractionFailure
+    && Buffer.byteLength(normalized.text, "utf8") === metadata.finalTextBytes
+    && normalized.text === evidence.normalizedSemanticText;
+  if (!normalizationMatched) {
+    return {
+      available: false,
+      normalizationMatched: false,
+      text: "",
+      reason: "normalization_replay_mismatch",
+    };
+  }
+  return { available: true, normalizationMatched: true, text: normalized.text };
+}
+
+/** Replay one bounded captured failure without contacting a provider. */
+export async function replayCapturedQualificationFailure(
+  input: QualificationFailureReplayInput,
+): Promise<QualificationFailureReplayResult> {
+  const base = {
+    capturedFirstFailureBoundary: input.capturedFirstFailureBoundary,
+    replayedFirstFailureBoundary: null,
+    replayedCase: null,
+  } as const;
+  const content = replayContentForFailureEvidence(input.failureEvidence);
+  if (!content.available) {
+    return Object.freeze({
+      ...base,
+      available: false,
+      normalizationMatched: content.normalizationMatched,
+      sameFirstFailureBoundary: false,
+      unavailableReason: content.reason,
+    });
+  }
+  const runId = input.runId ?? "w2-offline-replay-" + randomUUID();
+  const preflight = preflightCandidate();
+  const continuity = openContinuityDb(new DatabaseSync(":memory:"));
+  const db = openNuclearDb(new DatabaseSync(":memory:"), { continuity });
+  const sidecar = openCognitiveSidecarDb(new DatabaseSync(":memory:"), {
+    dataPlane: { kind: "isolated" },
+  });
+  const nowMs = Date.now();
+  try {
+    const caseInput = fixtureInput(
+      runId,
+      input.caseId,
+      nowMs,
+      preflight.occupantId,
+      input.failureEvidence.hostContext,
+    );
+    const sequence = await runW0Sequence({
+      db,
+      runId,
+      caseId: input.caseId,
+      caseInput,
+      rawHints: [content.text],
+      preflight,
+      environment: "fixture",
+      nowMs: () => nowMs,
+    });
+    const replayedCase = resultFromSequence({
+      caseId: input.caseId,
+      expectedKind: input.expectedKind,
+      sequence,
+      caseInput,
+      db,
+      authorityDb: sidecar,
+      preflight,
+      expectedWireMode: preflight.wireMode,
+      expectedWireBindingId: preflight.wireBindingId,
+      allowlistedReferences: input.failureEvidence.allowlistedReferences,
+    });
+    const sameFirstFailureBoundary =
+      replayedCase.firstFailureBoundary === input.capturedFirstFailureBoundary;
+    return Object.freeze({
+      ...base,
+      available: true,
+      normalizationMatched: content.normalizationMatched,
+      sameFirstFailureBoundary,
+      replayedFirstFailureBoundary: replayedCase.firstFailureBoundary,
+      replayedCase,
+      ...(sameFirstFailureBoundary ? {} : { unavailableReason: "first_failure_boundary_mismatch" }),
+    });
+  } finally {
+    db.close();
+    sidecar.close();
+    continuity.close();
+  }
 }
 
 function negativeWitness(
@@ -1649,7 +2216,7 @@ async function runFixtureQualification(
       allowlistedReferences: FIXTURE_REFERENCES,
       gateEvidence: {
         ...settlementGate,
-        fencing: "fail",
+        fencing: "FAIL",
         extraFailureCodes: ["stale_generation_before_publish"],
       },
     });
@@ -1660,7 +2227,7 @@ async function runFixtureQualification(
       allowlistedReferences: FIXTURE_REFERENCES,
       gateEvidence: {
         ...settlementGate,
-        authorityReachability: "fail",
+        authorityReachability: "FAIL",
         extraFailureCodes: ["authority_revision_changed"],
       },
     });
@@ -1668,9 +2235,9 @@ async function runFixtureQualification(
       caseId: "abstain",
       rawContent: JSON.stringify({
         kind: "abstain",
-        reason: "INSUFFICIENT_EVIDENCE",
-        explanation: "x",
-        evidenceRefs: [],
+        reason: "insufficient_evidence",
+        explanation: "The reference is not in this allowlist.",
+        evidenceRefs: ["turn-1"],
       }),
       allowlistedReferences: [],
     });
@@ -1681,7 +2248,7 @@ async function runFixtureQualification(
       allowlistedReferences: FIXTURE_REFERENCES,
       gateEvidence: {
         ...settlementGate,
-        semanticValidity: "fail",
+        semanticValidity: "FAIL",
         extraFailureCodes: ["unsupported_or_fabricated_claim"],
       },
     });
@@ -1770,10 +2337,13 @@ async function runLiveQualification(
   });
   const nowMs = input.nowMs ?? (() => Date.now());
   const sampleCount = Math.max(1, Math.min(3, Math.trunc(input.samples ?? 1)));
+  const liveCaseIds = input.caseIds && input.caseIds.length > 0
+    ? [...new Set(input.caseIds)]
+    : [...SEMANTIC_CASES];
   const cases: ThoughtQualificationCaseResult[] = [];
   let outcomeUnknown = false;
   try {
-    for (const caseId of SEMANTIC_CASES) {
+    for (const caseId of liveCaseIds) {
       for (let sample = 0; sample < sampleCount; sample += 1) {
         const caseRunId = runId + ":sample:" + sample;
         const caseInput = fixtureInput(caseRunId, caseId, nowMs(), preflight.occupantId);
@@ -1782,7 +2352,7 @@ async function runLiveQualification(
           runId: caseRunId,
           caseId,
           caseInput,
-          rawHints: [null],
+          rawHints: [null, null, null],
           preflight,
           environment: "isolated_live",
           completeChatFn: input.completeChat ?? completeChat,
@@ -1808,7 +2378,7 @@ async function runLiveQualification(
     }
     const verdict: ThoughtRouteQualification["verdict"] = outcomeUnknown
       ? "OUTCOME_UNKNOWN"
-      : cases.length === SEMANTIC_CASES.length * sampleCount
+      : cases.length === liveCaseIds.length * sampleCount
         && cases.every((item) => item.verdict === "PASS")
         ? "PASS"
         : "NOT_QUALIFIED";
@@ -1880,6 +2450,7 @@ function parseCli(argv: readonly string[]): {
   model: string;
   noFallback: boolean;
   samples: number;
+  caseIds: readonly Extract<ThoughtQualificationCaseId, "settlement" | "observation_intent" | "effect_intent" | "abstain">[] | undefined;
   candidateSha: string | undefined;
   output: string | undefined;
 } {
@@ -1888,6 +2459,7 @@ function parseCli(argv: readonly string[]): {
   let model = "";
   let noFallback = false;
   let samples = 1;
+  const caseIds: Extract<ThoughtQualificationCaseId, "settlement" | "observation_intent" | "effect_intent" | "abstain">[] = [];
   let candidateSha: string | undefined;
   let output: string | undefined;
   for (let index = 0; index < argv.length; index += 1) {
@@ -1897,6 +2469,13 @@ function parseCli(argv: readonly string[]): {
     else if (arg === "--provider") provider = argv[++index] ?? "";
     else if (arg === "--model") model = argv[++index] ?? "";
     else if (arg === "--samples") samples = Number(argv[++index] ?? "NaN");
+    else if (arg === "--case") {
+      const caseId = argv[++index] as Extract<ThoughtQualificationCaseId, "settlement" | "observation_intent" | "effect_intent" | "abstain"> | undefined;
+      if (!caseId || !SEMANTIC_CASES.includes(caseId)) {
+        throw new Error("qualification_cli_case_invalid");
+      }
+      caseIds.push(caseId);
+    }
     else if (arg === "--candidate-sha") candidateSha = argv[++index];
     else if (arg === "--output") output = argv[++index];
     else throw new Error("qualification_cli_unknown_argument:" + arg);
@@ -1904,7 +2483,7 @@ function parseCli(argv: readonly string[]): {
   if (!Number.isInteger(samples) || samples < 1 || samples > 3) {
     throw new Error("qualification_cli_samples_out_of_bounds");
   }
-  return { live, provider, model, noFallback, samples, candidateSha, output };
+  return { live, provider, model, noFallback, samples, caseIds: caseIds.length > 0 ? caseIds : undefined, candidateSha, output };
 }
 
 export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<void> {
@@ -1925,6 +2504,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
       runId,
       outputDir,
       samples: args.samples,
+      caseIds: args.caseIds,
       noFallback: args.noFallback,
       candidateSha: args.candidateSha,
     });

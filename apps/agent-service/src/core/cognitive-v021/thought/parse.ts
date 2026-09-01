@@ -84,6 +84,10 @@ function stringField(record: SemanticRecord, key: string): string | null {
   return typeof record[key] === "string" ? record[key] as string : null;
 }
 
+function nonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
 function stringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
@@ -101,7 +105,7 @@ function jsonObject(value: unknown): value is JsonObject {
 }
 
 function existingRef(value: unknown, allowlist: ReadonlySet<string>): value is ExistingRef {
-  return typeof value === "string" && allowlist.has(value);
+  return nonEmptyString(value) && allowlist.has(value);
 }
 
 function localAlias(value: unknown): value is LocalAlias {
@@ -221,7 +225,7 @@ function validOccupancyDelta(value: unknown, allowlist: ReadonlySet<string>): va
   const record = exactRecord(value, ["op", "concernRef", "status", "priority"]);
   return !!record && record.op === "set" && semanticRef(record.concernRef, allowlist)
     && ["active", "investigating", "waiting_for_evidence", "dormant_but_revisitable", "resolved", "quarantined"].includes(record.status as string)
-    && typeof record.priority === "number" && Number.isFinite(record.priority);
+    && typeof record.priority === "number" && Number.isInteger(record.priority);
 }
 
 function validFutureTriggerDelta(value: unknown, allowlist: ReadonlySet<string>): value is FutureTriggerSemanticDelta {
@@ -231,8 +235,8 @@ function validFutureTriggerDelta(value: unknown, allowlist: ReadonlySet<string>)
   const item = exactRecord(record, ["op", "identity", "concernRef", "dueAtMs", "purpose", "payload"]);
   return !!item && item.op === "create" && exactRecord(item.identity, ["kind", "alias"])?.kind === "local"
     && localAlias((item.identity as SemanticRecord).alias) && semanticRef(item.concernRef, allowlist)
-    && typeof item.dueAtMs === "number" && Number.isFinite(item.dueAtMs)
-    && typeof item.purpose === "string" && jsonObject(item.payload);
+    && typeof item.dueAtMs === "number" && Number.isInteger(item.dueAtMs)
+    && nonEmptyString(item.purpose) && jsonObject(item.payload);
 }
 
 function validSubscriptionDelta(value: unknown, allowlist: ReadonlySet<string>): value is SubscriptionSemanticDelta {
@@ -247,7 +251,7 @@ function validSubscriptionDelta(value: unknown, allowlist: ReadonlySet<string>):
     && validSemanticRefField(subscription.concernRef, allowlist) && typeof subscription.source === "string"
     && typeof subscription.scope === "string" && stringArray(subscription.topicKeys)
     && (subscription.match === "equality" || subscription.match === "substring")
-    && (subscription.expiresAtMs === null || (typeof subscription.expiresAtMs === "number" && Number.isFinite(subscription.expiresAtMs)));
+    && (subscription.expiresAtMs === null || (typeof subscription.expiresAtMs === "number" && Number.isInteger(subscription.expiresAtMs)));
 }
 
 function validNomination(value: unknown, allowlist: ReadonlySet<string>): value is ThoughtDurableNomination {
@@ -301,12 +305,12 @@ function parseOperationSemantic(
   if (!record || record.kind !== kind) return semanticFailure("unknown_field");
   if (typeof record.operationKind !== "string" || !REGISTERED_OPERATION_KINDS.has(record.operationKind)) return semanticFailure("operation_not_registered", "operationKind");
   if (!jsonObject(record.request)) return semanticFailure("wrong_type", "request");
-  if (typeof record.purpose !== "string" || !refArray(record.existingRefs, allowlist)) return semanticFailure("wrong_type");
+  if (!nonEmptyString(record.purpose) || !refArray(record.existingRefs, allowlist)) return semanticFailure("wrong_type", "purpose");
   if (kind === "observation_intent") {
-    if (typeof record.evidenceNeed !== "string") return semanticFailure("wrong_type", "evidenceNeed");
+    if (!nonEmptyString(record.evidenceNeed)) return semanticFailure("wrong_type", "evidenceNeed");
     return { ok: true, value: record as unknown as ObservationIntentSemanticOutput };
   }
-  if (typeof record.expectedOutcome !== "string") return semanticFailure("wrong_type", "expectedOutcome");
+  if (!nonEmptyString(record.expectedOutcome)) return semanticFailure("wrong_type", "expectedOutcome");
   return { ok: true, value: record as unknown as EffectIntentSemanticOutput };
 }
 
@@ -323,8 +327,14 @@ export function parseThoughtSemanticOutput(
   if (record.kind === "effect_intent") return parseOperationSemantic(record, allowlistedReferences, "effect_intent");
   if (record.kind === "abstain") {
     const abstain = exactRecord(record, ["kind", "reason", "explanation", "evidenceRefs"]);
-    if (!abstain || !["insufficient_evidence", "unresolved_ambiguity", "no_responsible_proposal", "no_semantic_change_warranted"].includes(abstain.reason as string)
-      || typeof abstain.explanation !== "string" || !refArray(abstain.evidenceRefs, allowlistedReferences)) return semanticFailure("wrong_type");
+    if (!abstain) return semanticFailure("unknown_field");
+    if (!["insufficient_evidence", "unresolved_ambiguity", "no_responsible_proposal", "no_semantic_change_warranted"].includes(abstain.reason as string)) {
+      return semanticFailure("invalid_enum", "reason");
+    }
+    if (!nonEmptyString(abstain.explanation)) return semanticFailure("wrong_type", "explanation");
+    if (!refArray(abstain.evidenceRefs, allowlistedReferences)) {
+      return semanticFailure("reference_not_allowlisted", "evidenceRefs");
+    }
     return { ok: true, value: abstain as unknown as AbstainSemanticOutput };
   }
   return semanticFailure(record.kind === undefined ? "required_field_missing" : "wrong_kind");

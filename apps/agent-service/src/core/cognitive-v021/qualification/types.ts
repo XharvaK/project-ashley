@@ -1,4 +1,5 @@
 import type { DispatchTruth, ModelFailure } from "../../model-fabric/types.js";
+import type { ProviderResponseDiagnostics } from "../../model-routing/types.js";
 
 export type ThoughtQualificationCaseId =
   | "settlement"
@@ -10,18 +11,83 @@ export type ThoughtQualificationCaseId =
   | "authority_revision";
 
 export type ThoughtQualificationEnvironment = "fixture" | "isolated_live";
-export type QualificationGateStatus = "pass" | "fail";
+export type QualificationGateStatus = "PASS" | "FAIL" | "NOT_REACHED";
+
+export type QualificationGateName =
+  | "jsonSyntax"
+  | "closedSchemaConformance"
+  | "strictParser"
+  | "kernelBinding"
+  | "semanticValidity"
+  | "fencing"
+  | "authorityReachability"
+  | "resourcePolicy";
 
 export type QualificationFirstFailureBoundary =
   | "PRE_DISPATCH_LOCAL_FAILURE"
   | "REQUEST_DISPATCHED_NO_RESPONSE"
   | "PROVIDER_ERROR_RESPONSE"
   | "PROVIDER_CONTENT_RECEIVED"
+  | "LOCAL_JSON_REJECTION"
   | "LOCAL_SCHEMA_REJECTION"
   | "STRICT_PARSER_REJECTION"
+  | "KERNEL_BINDING_REJECTION"
+  | "SEMANTIC_VALIDITY_REJECTION"
+  | "FENCING_REJECTION"
+  | "AUTHORITY_REACHABILITY_REJECTION"
+  | "RESOURCE_POLICY_REJECTION"
   | "NOT_REACHED";
 
 export type QualificationReachability = "PASS" | "FAIL" | "NOT_REACHED";
+
+export type QualificationGateDiagnostic = Readonly<{
+  status: QualificationGateStatus;
+  reasonCodes: readonly string[];
+  expected: Readonly<Record<string, unknown>> | null;
+  actual: Readonly<Record<string, unknown>> | null;
+}>;
+
+export type QualificationFailureEvidence = Readonly<{
+  captureStatus: "captured" | "not_applicable" | "diagnostic_capture_too_large";
+  allowlistedReferences: readonly string[];
+  providerContentChunkMetadata: ProviderResponseDiagnostics | null;
+  normalizedSemanticText: string | null;
+  normalizedSemanticBytes: number;
+  normalizedSemanticSHA256: `sha256:${string}`;
+  jsonSyntaxDiagnostic: Readonly<{
+    code: string;
+    message: string;
+  }> | null;
+  closedSchemaDiagnostic: Readonly<{
+    code: string;
+    keyword: string | null;
+    instancePath: string;
+    schemaPath: string;
+    branch: string | null;
+  }> | null;
+  strictParserDiagnostic: Readonly<{
+    parserErrorCode: string;
+    parserErrorMessage: string;
+    parserPath: string | null;
+    expectedShape: string;
+    observedShapeSummary: Readonly<Record<string, unknown>>;
+  }> | null;
+  semanticValidityDiagnostic: Readonly<{
+    reasonCodes: readonly string[];
+    offendingFieldPaths: readonly string[];
+    evidenceRefDiagnostics: readonly string[];
+  }> | null;
+  kernelBindingDiagnostic: QualificationGateDiagnostic;
+  fencingDiagnostic: QualificationGateDiagnostic;
+  authorityReachabilityDiagnostic: QualificationGateDiagnostic;
+  hostContext: Readonly<{
+    cycleId: string;
+    generation: number;
+    occupantId: string;
+    authorityEpoch: number;
+    triggerRef: string;
+  }> | null;
+}>;
 
 export type QualificationDiagnostics = Readonly<{
   firstFailureBoundary: QualificationFirstFailureBoundary;
@@ -50,9 +116,9 @@ export type ThoughtQualificationCaseResult = Readonly<{
   transport: "success" | "failure";
   rawContentBytes: number;
   rawContentDigest: `sha256:${string}`;
-  closedSchemaConformance: "pass" | "fail";
-  jsonSyntax: "pass" | "fail";
-  strictParser: "pass" | "fail";
+  closedSchemaConformance: QualificationGateStatus;
+  jsonSyntax: QualificationGateStatus;
+  strictParser: QualificationGateStatus;
   kernelBinding: QualificationGateStatus;
   fencing: QualificationGateStatus;
   authorityReachability: QualificationGateStatus;
@@ -65,6 +131,10 @@ export type ThoughtQualificationCaseResult = Readonly<{
   providerDeclaredEnforcement: string | null;
   capabilityFingerprint: string | null;
   diagnostics: QualificationDiagnostics;
+  firstFailureBoundary: QualificationFirstFailureBoundary;
+  independentFailureCodes: readonly string[];
+  dependentNotReachedGates: readonly QualificationGateName[];
+  failureEvidence: QualificationFailureEvidence | null;
   failureCodes: readonly string[];
   verdict: "PASS" | "NOT_QUALIFIED";
 }>;

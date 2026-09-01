@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { env } from "../../../env.js";
 import {
   evaluateQualificationCase,
+  replayCapturedQualificationFailure,
   runThoughtCapabilityQualification,
   thoughtSchemaKeywordInventory,
   validateQualificationSchema,
@@ -21,11 +22,11 @@ const baseGate: QualificationGateEvidence = {
   transport: "success",
   provider: "mistral",
   model: "mistral-small-2603",
-  kernelBinding: "pass",
-  fencing: "pass",
-  authorityReachability: "pass",
-  semanticValidity: "pass",
-  resourcePolicy: "pass",
+  kernelBinding: "PASS",
+  fencing: "PASS",
+  authorityReachability: "PASS",
+  semanticValidity: "PASS",
+  resourcePolicy: "PASS",
   elapsedMs: 1,
   outputTokens: 64,
   attempts: 1,
@@ -34,6 +35,19 @@ const baseGate: QualificationGateEvidence = {
   wireBindingId: "compat_thought_mistral_small_2603_native_json_schema_v2",
   providerDeclaredEnforcement: "unavailable",
   capabilityFingerprint: "sha256:" + "a".repeat(64),
+  responseDiagnostics: {
+    contentContainerType: "string",
+    contentChunkTypes: [],
+    textChunkCount: 0,
+    thinkingChunkCount: 0,
+    finalTextBytes: Buffer.byteLength(validAbstain, "utf8"),
+    finishReason: "stop",
+    finishReasonClass: "STOP",
+    outputTokenLimit: 4096,
+    outputTokens: 64,
+    reasoningTokens: null,
+    extractionFailure: "none",
+  },
 };
 
 describe("successor Thought qualification", () => {
@@ -55,13 +69,17 @@ describe("successor Thought qualification", () => {
     ]);
     expect(result.cases.every((item) =>
       item.transport === "success"
-      && item.strictParser === "pass"
-      && item.kernelBinding === "pass"
-      && item.fencing === "pass"
-      && item.authorityReachability === "pass"
-      && item.semanticValidity === "pass"
-      && item.resourcePolicy === "pass",
+      && item.strictParser === "PASS"
+      && item.kernelBinding === "PASS"
+      && item.fencing === "PASS"
+      && item.authorityReachability === "PASS"
+      && item.semanticValidity === "PASS"
+      && item.resourcePolicy === "PASS",
     )).toBe(true);
+    expect(result.cases.find((item) => item.caseId === "structural_correction")?.invocationIds)
+      .toHaveLength(2);
+    expect(result.cases.filter((item) => item.caseId !== "structural_correction")
+      .every((item) => item.invocationIds.length === 1)).toBe(true);
     expect(result.negativeWitnesses?.map((item) => item.witness)).toContain(
       "provider-accepted structural value rejected by the W0 semantic parser",
     );
@@ -128,7 +146,7 @@ describe("successor Thought qualification", () => {
         allowlistedReferences: ["turn-1"],
         gateEvidence: {
           ...baseGate,
-          [predicate]: "fail",
+          [predicate]: "FAIL",
         },
       });
       expect(result.verdict, predicate).toBe("NOT_QUALIFIED");
@@ -141,14 +159,207 @@ describe("successor Thought qualification", () => {
       caseId: "abstain",
       rawContent: JSON.stringify({
         kind: "abstain",
-        reason: "INSUFFICIENT_EVIDENCE",
-        explanation: "x",
-        evidenceRefs: [],
+        reason: "insufficient_evidence",
+        explanation: "The reference is not in this allowlist.",
+        evidenceRefs: ["turn-1"],
       }),
       allowlistedReferences: [],
     });
     expect(result.verdict).toBe("NOT_QUALIFIED");
     expect(result.failureCodes).toContain("PROVIDER_ACCEPTED_PARSER_REJECTED");
+  });
+
+  it("does not project parser-dependent gates as failures", () => {
+    const rawContent = JSON.stringify({
+      kind: "abstain",
+      reason: "insufficient_evidence",
+      explanation: "The fixture contains no more evidence.",
+      evidenceRefs: ["turn-1"],
+    });
+    const result = evaluateQualificationCase({
+      caseId: "abstain",
+      rawContent,
+      allowlistedReferences: [],
+      gateEvidence: {
+        ...baseGate,
+        dispatchTruth: "response_received",
+        providerRequestStarted: true,
+        providerResponseReceived: true,
+        attemptId: "attempt:parser-boundary",
+      },
+    });
+
+    expect(result.jsonSyntax).toBe("PASS");
+    expect(result.closedSchemaConformance).toBe("PASS");
+    expect(result.strictParser).toBe("FAIL");
+    expect(result.kernelBinding).toBe("NOT_REACHED");
+    expect(result.semanticValidity).toBe("NOT_REACHED");
+    expect(result.fencing).toBe("NOT_REACHED");
+    expect(result.authorityReachability).toBe("NOT_REACHED");
+    expect(result.resourcePolicy).toBe("PASS");
+    expect(result.diagnostics.firstFailureBoundary).toBe("STRICT_PARSER_REJECTION");
+    expect(result.independentFailureCodes).toEqual(["PROVIDER_ACCEPTED_PARSER_REJECTED"]);
+    expect(result.dependentNotReachedGates).toEqual([
+      "kernelBinding",
+      "semanticValidity",
+      "fencing",
+      "authorityReachability",
+    ]);
+    expect(result.failureEvidence?.captureStatus).toBe("captured");
+    expect(result.failureEvidence?.normalizedSemanticText).toBe(rawContent);
+    expect(result.failureEvidence?.strictParserDiagnostic).toMatchObject({
+      parserErrorCode: "reference_not_allowlisted",
+      parserPath: "evidenceRefs",
+    });
+    expect(result.failureCodes).not.toContain("kernelBinding_failed");
+    expect(result.failureCodes).not.toContain("fencing_failed");
+    expect(result.failureCodes).not.toContain("authorityReachability_failed");
+  });
+
+  it("stops causal reachability at semantic validity", () => {
+    const result = evaluateQualificationCase({
+      caseId: "abstain",
+      rawContent: validAbstain,
+      allowlistedReferences: ["turn-1"],
+      gateEvidence: {
+        ...baseGate,
+        semanticValidity: "FAIL",
+      },
+    });
+
+    expect(result.semanticValidity).toBe("FAIL");
+    expect(result.fencing).toBe("NOT_REACHED");
+    expect(result.authorityReachability).toBe("NOT_REACHED");
+    expect(result.diagnostics.firstFailureBoundary).toBe("SEMANTIC_VALIDITY_REJECTION");
+    expect(result.independentFailureCodes).toContain("semantic_invalid");
+    expect(result.failureCodes).not.toContain("fencing_failed");
+    expect(result.failureCodes).not.toContain("authorityReachability_failed");
+  });
+
+  it("stops authority evaluation at a fencing failure", () => {
+    const result = evaluateQualificationCase({
+      caseId: "abstain",
+      rawContent: validAbstain,
+      allowlistedReferences: ["turn-1"],
+      gateEvidence: {
+        ...baseGate,
+        fencing: "FAIL",
+      },
+    });
+
+    expect(result.kernelBinding).toBe("PASS");
+    expect(result.semanticValidity).toBe("PASS");
+    expect(result.fencing).toBe("FAIL");
+    expect(result.authorityReachability).toBe("NOT_REACHED");
+    expect(result.diagnostics.firstFailureBoundary).toBe("FENCING_REJECTION");
+    expect(result.independentFailureCodes).toContain("fencing_failed");
+    expect(result.failureCodes).not.toContain("authorityReachability_failed");
+  });
+
+  it("keeps an empty pre-dispatch capture outside provider reliability", () => {
+    const result = evaluateQualificationCase({
+      caseId: "abstain",
+      rawContent: "",
+      allowlistedReferences: [],
+      gateEvidence: {
+        ...baseGate,
+        transport: "failure",
+        provider: undefined,
+        model: undefined,
+        kernelBinding: "NOT_REACHED",
+        fencing: "NOT_REACHED",
+        authorityReachability: "NOT_REACHED",
+        semanticValidity: "NOT_REACHED",
+        resourcePolicy: "NOT_REACHED",
+        dispatchTruth: "not_sent",
+        dispatchStage: "attention_admission",
+        providerRequestStarted: false,
+        providerResponseReceived: false,
+        attemptId: null,
+        errorCode: "request_exceeds_tpm_budget",
+      },
+    });
+
+    expect(result.diagnostics.firstFailureBoundary).toBe("PRE_DISPATCH_LOCAL_FAILURE");
+    expect(result.jsonSyntax).toBe("NOT_REACHED");
+    expect(result.closedSchemaConformance).toBe("NOT_REACHED");
+    expect(result.strictParser).toBe("NOT_REACHED");
+    expect(result.kernelBinding).toBe("NOT_REACHED");
+    expect(result.semanticValidity).toBe("NOT_REACHED");
+    expect(result.fencing).toBe("NOT_REACHED");
+    expect(result.authorityReachability).toBe("NOT_REACHED");
+    expect(result.resourcePolicy).toBe("NOT_REACHED");
+    expect(result.providerAttemptIds).toEqual([]);
+    expect(result.failureCodes).not.toContain("provider_dispatch_failed");
+    expect(result.failureEvidence?.captureStatus).toBe("not_applicable");
+  });
+
+  it("fails closed when normalized failed content exceeds the evidence ceiling", () => {
+    const rawContent = JSON.stringify({
+      kind: "abstain",
+      reason: "insufficient_evidence",
+      explanation: "x".repeat(33_000),
+      evidenceRefs: [],
+    });
+    const result = evaluateQualificationCase({
+      caseId: "abstain",
+      rawContent,
+      allowlistedReferences: [],
+      gateEvidence: baseGate,
+    });
+
+    expect(result.verdict).toBe("NOT_QUALIFIED");
+    expect(result.failureEvidence?.captureStatus).toBe("diagnostic_capture_too_large");
+    expect(result.failureEvidence?.normalizedSemanticText).toBeNull();
+    expect(result.failureEvidence?.normalizedSemanticBytes).toBeGreaterThan(32_768);
+    expect(result.failureCodes).toContain("diagnostic_capture_too_large");
+  });
+
+  it("replays captured parser failure through the offline W0 path", async () => {
+    const rawContent = JSON.stringify({
+      kind: "abstain",
+      reason: "insufficient_evidence",
+      explanation: "The provider selected a reference that was not supplied.",
+      evidenceRefs: ["unknown-reference"],
+    });
+    const captured = evaluateQualificationCase({
+      caseId: "abstain",
+      expectedKind: "abstain",
+      rawContent,
+      allowlistedReferences: ["turn-1"],
+      gateEvidence: {
+        ...baseGate,
+        dispatchTruth: "response_received",
+        providerRequestStarted: true,
+        providerResponseReceived: true,
+        attemptId: "attempt:offline-replay",
+        responseDiagnostics: {
+          ...baseGate.responseDiagnostics!,
+          finalTextBytes: Buffer.byteLength(rawContent, "utf8"),
+        },
+      },
+    });
+    expect(captured.failureEvidence).not.toBeNull();
+    expect(captured.failureEvidence?.providerContentChunkMetadata).toMatchObject({
+      contentContainerType: "string",
+      finalTextBytes: Buffer.byteLength(rawContent, "utf8"),
+      extractionFailure: "none",
+    });
+    const replay = await replayCapturedQualificationFailure({
+      caseId: "abstain",
+      expectedKind: "abstain",
+      capturedFirstFailureBoundary: captured.firstFailureBoundary,
+      failureEvidence: captured.failureEvidence!,
+      runId: "w2-offline-parser-replay",
+    });
+
+    expect(replay.available).toBe(true);
+    expect(replay.normalizationMatched).toBe(true);
+    expect(replay.sameFirstFailureBoundary).toBe(true);
+    expect(replay.replayedFirstFailureBoundary).toBe("STRICT_PARSER_REJECTION");
+    expect(replay.replayedCase?.kernelBinding).toBe("NOT_REACHED");
+    expect(replay.replayedCase?.fencing).toBe("NOT_REACHED");
+    expect(replay.replayedCase?.authorityReachability).toBe("NOT_REACHED");
   });
 
   it("retains precise closed-schema diagnostics without persisting provider content", () => {
@@ -194,11 +405,11 @@ describe("successor Thought qualification", () => {
         transport: "failure",
         provider: undefined,
         model: undefined,
-        kernelBinding: "fail",
-        fencing: "fail",
-        authorityReachability: "fail",
-        semanticValidity: "fail",
-        resourcePolicy: "fail",
+        kernelBinding: "NOT_REACHED",
+        fencing: "NOT_REACHED",
+        authorityReachability: "NOT_REACHED",
+        semanticValidity: "NOT_REACHED",
+        resourcePolicy: "NOT_REACHED",
         dispatchTruth: "not_sent",
         dispatchStage: "attention_admission",
         providerRequestStarted: false,

@@ -34,7 +34,7 @@ export type MistralApiKeyFactory = (
   seat?: MistralCredentialSeat,
 ) => string;
 
-type ContentExtraction = Pick<
+export type NormalizedMistralProviderContent = Pick<
   ProviderResponseDiagnostics,
   | "contentContainerType"
   | "contentChunkTypes"
@@ -49,7 +49,7 @@ function boundedChunkType(raw: unknown): string {
     : "<invalid>";
 }
 
-function extractContent(content: unknown): ContentExtraction {
+function extractContent(content: unknown): NormalizedMistralProviderContent {
   if (typeof content === "string") {
     return {
       text: content,
@@ -98,7 +98,7 @@ function extractContent(content: unknown): ContentExtraction {
   const textParts: string[] = [];
   let textChunkCount = 0;
   let thinkingChunkCount = 0;
-  let extractionFailure: ContentExtraction["extractionFailure"] = "none";
+  let extractionFailure: NormalizedMistralProviderContent["extractionFailure"] = "none";
 
   for (const chunk of content) {
     if (typeof chunk !== "object" || chunk === null) {
@@ -144,8 +144,19 @@ function extractContent(content: unknown): ContentExtraction {
   };
 }
 
+/**
+ * The same pure content normalizer used by the live Mistral adapter. The W2
+ * replay harness may use it with a safely reconstructed content container;
+ * thinking chunks remain metadata and never become semantic text.
+ */
+export function normalizeMistralProviderContent(
+  content: unknown,
+): NormalizedMistralProviderContent {
+  return extractContent(content);
+}
+
 export function extractTextDelta(delta: unknown): string {
-  return extractContent(delta).text;
+  return normalizeMistralProviderContent(delta).text;
 }
 
 function toTokenUsage(raw: unknown): TokenUsage | undefined {
@@ -488,7 +499,7 @@ function normalizeCompletion(
   const choice = response.choices?.[0];
   const msg = choice?.message;
   const raw = msg?.content;
-  const extracted = extractContent(raw);
+  const extracted = normalizeMistralProviderContent(raw);
   const text = extracted.text;
   const finishRaw = choice?.finish_reason ?? choice?.finishReason;
   const finishReason =

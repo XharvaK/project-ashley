@@ -1,0 +1,26 @@
+{
+  "schema": "ashley.phase5.w2.focused_test_result.v1",
+  "recordedAt": "2026-09-01T08:36:34.6748150Z",
+  "candidateSha": "9cf777c41e39271c4e2cb2db5ed89503f97ff88f",
+  "command": "npm test --prefix apps/agent-service -- src/core/cognitive-v021/qualification/thought-capability-qualification.test.ts src/core/cognitive-v021/thought/semantic-output-contract.test.ts src/core/cognitive-v021/thought/run.test.ts src/core/model-routing/adapters/mistral-adapter.test.ts src/core/cognitive-v021/authority/barrier.test.ts",
+  "status": "PASS",
+  "testFiles": 5,
+  "tests": 41,
+  "failed": 0,
+  "verified": [
+    "tri-state PASS/FAIL/NOT_REACHED projection",
+    "independent failure codes and dependent NOT_REACHED gates",
+    "bounded failed semantic evidence and provider response metadata",
+    "offline replay through normalization and the W0 parser path",
+    "schema/parser structural alignment without parser weakening",
+    "production W0 structural correction with two invocations",
+    "Mistral native json_schema request construction and response diagnostics",
+    "W4 barrier legal/rejected transitions and active transition identity preservation"
+  ],
+  "build": {
+    "command": "npm run build --prefix apps/agent-service",
+    "status": "PASS"
+  },
+  "networkCalls": 0,
+  "productionMutation": false
+}
