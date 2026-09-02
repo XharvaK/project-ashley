@@ -288,6 +288,27 @@ describe("Thought semantic output contract", () => {
     expect(instruction).toContain("This contract describes output shape only");
   });
 
+  it("teaches Thought the governed currentness rule Authority already enforces", () => {
+    const instruction = thoughtOutputCompatibilityInstruction();
+
+    // CURRENT_REQUIRES_GOVERNED_OBSERVATION
+    expect(instruction).toContain("governed evidence status, not ordinary conversational recency");
+    expect(instruction).toContain('Use time:current only for a factual claim whose present truth is supported by a governed observation supplied in the current Thought input');
+    expect(instruction).toContain("evidenceUse.observationRefsUsed");
+    // SOURCE_REF_ALONE_NOT_CURRENT
+    expect(instruction).toContain("a source reference, a retrieval reference");
+    expect(instruction).toContain("does not by itself license");
+    // OWNER_RECENCY_NOT_CURRENT
+    expect(instruction).toContain("the fact that the owner just sent a message does not by itself license");
+    // UNKNOWN_FRESHNESS_DEFINED
+    expect(instruction).toContain('Use time:unknown_freshness when evidence supports a claim but its present truth has not been established by governed current observation');
+    // HISTORICAL_DEFINED
+    expect(instruction).toContain('Use time:historical for a claim about a past state or event that does not assert it is still true now');
+    // EPISTEMIC_COMMITMENT_MAY_BE_OMITTED_FOR_ACK
+    expect(instruction).toContain("omit the epistemic commitment");
+    expect(instruction).toContain("an empty epistemic array is valid");
+  });
+
   it("carries semantic branch intent in the native schema without changing branch shape", () => {
     const request = thoughtOutputStructuredRequest();
     const schema = request.schema as {

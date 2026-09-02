@@ -164,6 +164,22 @@ describe("Whole-Thought Projection Allocator", () => {
     expect(systemMessage).not.toContain("Match the semantic Thought contract exactly.");
   });
 
+  it("delivers the governed currentness rule in the assembled Thought system message", () => {
+    const input = makeThoughtInput();
+    const allocated = allocateThoughtProjection({
+      thoughtInput: input,
+      requestId: "req-currentness-instruction",
+    });
+    const systemMessage = thoughtMessagesForProjection(allocated.projected)[0]?.content ?? "";
+
+    expect(systemMessage).toContain("governed evidence status, not ordinary conversational recency");
+    expect(systemMessage).toContain("does not by itself license");
+    expect(systemMessage).toContain("the owner just sent a message");
+    expect(systemMessage).toContain('Use time:unknown_freshness');
+    expect(systemMessage).toContain('Use time:historical');
+    expect(systemMessage).toContain("omit the epistemic commitment");
+  });
+
   it("allocates complete thought context within hard TPM bound", () => {
     const input = makeThoughtInput();
     const allocated = allocateThoughtProjection({
