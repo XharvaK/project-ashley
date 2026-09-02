@@ -18,6 +18,7 @@ export function continuitySettlement(
     commitments: {
       epistemic: [{ dimensions: { source: "owner_utterance", status: "asserted", time: "current", reliability: "owner_supplied" }, statement: "continuity" }],
       conversational: ["answer"],
+      operational: [],
       stance: { warmth: "medium", humorAllowed: false, disagreement: false, uncertaintyDisplay: true },
     },
     speech: { mode: "draft", mustSay: ["continuity"], mustNot: [], surfaceDraft: "continuity", acceptableRealizations: ["continuity"], presentationDirectives: [], finalLicensedText: "continuity" },

@@ -27,6 +27,7 @@ export type PublicationOptions = {
   thoughtUnavailable?: boolean;
   authorityDb?: DatabaseSync;
   expectedCurrentness?: import("../types.js").AuthorityCurrentnessBinding;
+  currentness?: import("../types.js").AuthorityPacks["currentness"];
   wakeId?: string;
   wakeLeaseToken?: string | null;
   semanticPass?: number;
@@ -204,10 +205,16 @@ export function publishSemanticTransaction(
       return { published: false, replayed: false, reason: "stale_generation", settlementId: null, outboxId: null };
     }
 
+    const currentnessWitness = options.currentness ? {
+      binding: options.currentness.binding ?? { complete: options.currentness.complete === true },
+      complete: options.currentness.complete === true || (options.currentness.binding as any)?.complete === true,
+      observedObservationIds: options.currentness.observedObservationIds ?? [],
+    } : (settlement as any).currentnessWitness ?? (settlement as any).currentness ?? null;
+
     db.prepare(
       `INSERT INTO settlements (settlement_id, cycle_id, generation, wake_id, semantic_pass, payload_json)
        VALUES (?, ?, ?, ?, ?, ?)`,
-    ).run(settlement.settlementId, settlement.cycleId, settlement.generation, wakeId, semanticPass, json({ ...settlement, wakeId }));
+    ).run(settlement.settlementId, settlement.cycleId, settlement.generation, wakeId, semanticPass, json({ ...settlement, wakeId, currentnessWitness }));
 
     let outboxId: number | null = null;
     if (settlement.speech.mode === "draft") {

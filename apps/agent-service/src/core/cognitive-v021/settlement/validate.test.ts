@@ -59,4 +59,53 @@ describe("v0.2.1 ThoughtSettlementDraft validation", () => {
     const published = { ...makeThoughtDraft(), finalLicensedText: "licensed" };
     expect(validateThoughtSettlementDraft(published, active)).toMatchObject({ ok: false, kind: "malformed" });
   });
+
+  it("validates operational state claims and enforces allowlist", () => {
+    const validDraft = makeThoughtDraft({
+      commitments: {
+        ...makeThoughtDraft().commitments,
+        operational: [{ effectRef: "effect:valid", claimedState: "succeeded" }],
+      },
+    });
+    // With allowlist containing effect:valid
+    const activeWithAllowlist = { ...active, effectAllowlist: new Set(["effect:valid"]) };
+    expect(validateThoughtSettlementDraft(validDraft, activeWithAllowlist)).toMatchObject({ ok: true });
+
+    // Unknown effectRef outside allowlist fails closed
+    const unknownDraft = makeThoughtDraft({
+      commitments: {
+        ...makeThoughtDraft().commitments,
+        operational: [{ effectRef: "effect:unknown", claimedState: "succeeded" }],
+      },
+    });
+    expect(validateThoughtSettlementDraft(unknownDraft, activeWithAllowlist)).toMatchObject({
+      ok: false,
+      kind: "conflict",
+      error: "OPERATIONAL_CLAIM_EFFECTREF_UNKNOWN",
+    });
+
+    // All 5 claimedState literals valid
+    for (const state of ["not_attempted", "in_progress", "outcome_unknown", "failed", "succeeded"] as const) {
+      const stateDraft = makeThoughtDraft({
+        commitments: {
+          ...makeThoughtDraft().commitments,
+          operational: [{ effectRef: "effect:valid", claimedState: state }],
+        },
+      });
+      expect(validateThoughtSettlementDraft(stateDraft, activeWithAllowlist)).toMatchObject({ ok: true });
+    }
+
+    // Invalid claimedState rejected
+    const invalidStateDraft = makeThoughtDraft({
+      commitments: {
+        ...makeThoughtDraft().commitments,
+        operational: [{ effectRef: "effect:valid", claimedState: "worked" as any }],
+      },
+    });
+    expect(validateThoughtSettlementDraft(invalidStateDraft, activeWithAllowlist)).toMatchObject({
+      ok: false,
+      kind: "malformed",
+      error: "OPERATIONAL_CLAIMED_STATE_INVALID",
+    });
+  });
 });

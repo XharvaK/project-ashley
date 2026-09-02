@@ -28,6 +28,7 @@ import type {
   ObservationRequest,
 } from "../types.js";
 import type { OperationalClaimLicense } from "../../sandbox/engineering-types.js";
+import { getInFlight } from "../effect/in-flight.js";
 
 const PROJECT_OPERATIONS = new Set([
   "project.read_file",
@@ -59,6 +60,7 @@ type LiveOperationAdapters = {
 
 export type V021LiveOperationExecutorOptions = {
   nuclear: DatabaseSync;
+  sidecar?: DatabaseSync;
   ownerId?: string;
   nowMs?: () => number;
   registry?: V2ProjectReadRegistry;
@@ -199,16 +201,70 @@ function licenseClaims(license: OperationalClaimLicense): Record<string, unknown
   };
 }
 
+function inferDispatchEvidence(
+  license: OperationalClaimLicense,
+  proposal: EffectProposal,
+  db?: DatabaseSync,
+): { provenNotStarted: boolean } {
+  if (
+    license.error === "invalid_request" ||
+    license.error === "unsupported_operation" ||
+    license.error === "missing_project" ||
+    license.error === "missing_path"
+  ) {
+    return { provenNotStarted: true };
+  }
+  if (license.error === "effect_unavailable") {
+    return { provenNotStarted: false };
+  }
+  if (db) {
+    try {
+      const inFlight = getInFlight(db, proposal.effectId) ?? getInFlight(db, proposal.idempotencyKey);
+      if (inFlight?.status === "in_flight" || inFlight?.originAttemptId) {
+        return { provenNotStarted: false };
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return { provenNotStarted: false };
+}
+
+function determineReceiptOutcome(
+  license: OperationalClaimLicense,
+  proposal: EffectProposal,
+  db?: DatabaseSync,
+): EffectReceipt["outcome"] {
+  switch (license.state) {
+    case "succeeded":
+      return "succeeded";
+    case "failed":
+      return "failed";
+    case "running":
+      return "in_progress";
+    case "outcome_unknown":
+      return "outcome_unknown";
+    case "proposed":
+    case "admitted":
+      return "not_attempted";
+    case "none": {
+      const evidence = inferDispatchEvidence(license, proposal, db);
+      return evidence.provenNotStarted ? "not_attempted" : "outcome_unknown";
+    }
+    default: {
+      const exhaustive: never = license.state;
+      return exhaustive;
+    }
+  }
+}
+
 function receiptFromLicense(
   proposal: EffectProposal,
   license: OperationalClaimLicense,
   nowMs: () => number,
+  db?: DatabaseSync,
 ): EffectReceipt {
-  const outcome = license.state === "succeeded"
-    ? "succeeded"
-    : license.state === "outcome_unknown"
-      ? "unknown"
-      : "failed";
+  const outcome = determineReceiptOutcome(license, proposal, db);
   return {
     receiptId: `v021:effect:${proposal.effectId}`,
     effectId: proposal.effectId,
@@ -361,7 +417,7 @@ export function createV021LiveOperationExecutors(
       } catch {
         license = unavailableLicense("cognitive_effect", "effect_unavailable");
       }
-      return receiptFromLicense(proposal, license, nowMs);
+      return receiptFromLicense(proposal, license, nowMs, options.sidecar);
     },
   };
 }

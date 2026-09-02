@@ -3,6 +3,7 @@ import {
   canEnterModelContext,
   maxClassification,
 } from "../../privacy/classification.js";
+import { getConversationEvidence } from "../evidence/conversation-log.js";
 import type {
   ConversationEvidenceRecord,
   MemoryAssertion,
@@ -16,6 +17,7 @@ import {
 import { appendMemorySupport } from "./supports.js";
 import { REDACTED_MEMORY_STATEMENT, upsertMemoryAssertion } from "./assertions.js";
 import { notifySidecarPostCommit } from "../retrieval/derived-store.js";
+import { hasStructuredCurrentnessEntitlement } from "../authority/check.js";
 
 type DbRow = Record<string, unknown>;
 
@@ -28,7 +30,8 @@ export type AdmissionResult = {
     | "admission_skipped_secret"
     | "admission_skipped_unpublished"
     | "admission_skipped_generation"
-    | "admission_skipped_retracted";
+    | "admission_skipped_retracted"
+    | "admission_skipped_provenance";
   assertion: MemoryAssertion | null;
 };
 
@@ -40,6 +43,7 @@ export type AdmissionTickResult = {
   skippedUnpublished: number;
   skippedGeneration: number;
   skippedRetracted: number;
+  skippedProvenance: number;
   results: AdmissionResult[];
 };
 
@@ -69,7 +73,7 @@ function currentConversationGeneration(db: DatabaseSync, cycleId: string): { con
 
 function settlementForNomination(db: DatabaseSync, nomination: DurableNomination): DbRow | null {
   return db.prepare(
-    `SELECT s.settlement_id, s.cycle_id, s.generation
+    `SELECT s.settlement_id, s.cycle_id, s.generation, s.payload_json
        FROM settlements s
       WHERE s.cycle_id = ? AND s.generation = ?
       LIMIT 1`,
@@ -109,55 +113,74 @@ function logAdmission(db: DatabaseSync, result: AdmissionResult, nowMs: number):
   ).run(result.nominationId, result.assertionKey, result.result, result.assertion == null ? 0 : result.assertion.admittedGeneration ?? 0, nowMs);
 }
 
-function evidenceForNomination(
+function resolveNominationSourceRefs(
   db: DatabaseSync,
-  nomination: DurableNomination,
-  settlementId: string,
-): ConversationEvidenceRecord | null {
-  const row = db.prepare(
-    `SELECT e.*
-       FROM conversation_evidence_log e
-       JOIN settlements s ON s.payload_json LIKE '%' || e.row_id || '%'
-      WHERE s.settlement_id = ?
-      ORDER BY e.created_at_ms DESC
-      LIMIT 1`,
-  ).get(settlementId);
-  if (!row || typeof row !== "object") return null;
-  const value = row as DbRow;
-  let ids: string[] = [];
-  try {
-    const parsed = JSON.parse(text(value.discord_message_ids_json, "[]"));
-    if (Array.isArray(parsed)) ids = parsed.filter((item): item is string => typeof item === "string");
-  } catch {
-    ids = [];
+  nomination: DurableNominationRecord | DurableNomination,
+  settlementRow?: DbRow | null,
+): string[] {
+  if (nomination.sourceRefs && Array.isArray(nomination.sourceRefs) && nomination.sourceRefs.length > 0) {
+    return nomination.sourceRefs;
   }
-  const role = text(value.role);
-  if (role !== "owner" && role !== "ashley" && role !== "system") return null;
-  return {
-    rowId: text(value.row_id),
-    lineageId: text(value.lineage_id),
-    version: number(value.version),
-    conversationId: text(value.conversation_id),
-    role,
-    text: value.text == null ? null : text(value.text),
-    createdAtMs: number(value.created_at_ms),
-    discordMessageIds: ids,
-    reservationId: value.reservation_id == null ? null : number(value.reservation_id),
-    producingCycleId: value.producing_cycle_id == null ? null : text(value.producing_cycle_id),
-    architectureEpoch: text(value.architecture_epoch),
-    contentHash: text(value.content_hash),
-    sourceStatus: text(value.source_status),
-    dataClassification: value.data_classification === "ordinary" || value.data_classification === "sensitive" || value.data_classification === "never_public" || value.data_classification === "secret" ? value.data_classification : "never_public",
-    secretOmitted: number(value.secret_omitted) === 1,
-    delivered: number(value.delivered) === 1,
-  };
+  if (settlementRow && typeof settlementRow.payload_json === "string") {
+    try {
+      const payload = JSON.parse(settlementRow.payload_json);
+      const matched = payload?.durableNominations?.find(
+        (n: any) => n.nominationId === nomination.nominationId || n.assertionKey === nomination.assertionKey,
+      );
+      if (matched && Array.isArray(matched.sourceRefs) && matched.sourceRefs.length > 0) {
+        return matched.sourceRefs;
+      }
+    } catch {}
+  }
+  try {
+    const row = db.prepare("SELECT source_refs_json FROM durable_nominations WHERE nomination_id = ?").get(nomination.nominationId) as DbRow | undefined;
+    if (row && typeof row.source_refs_json === "string") {
+      const parsed = JSON.parse(row.source_refs_json);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {}
+  return [];
+}
+
+function findVerifiedOwnerEvidence(
+  db: DatabaseSync,
+  sourceRefs: readonly string[],
+): { rowId: string; conversationId: string } | null {
+  for (const ref of sourceRefs) {
+    if (!ref || typeof ref !== "string") continue;
+    const row = db.prepare(
+      `SELECT row_id, conversation_id, role, text, data_classification, secret_omitted
+         FROM conversation_evidence_log
+        WHERE (row_id = ? OR lineage_id = ?)
+        ORDER BY created_at_ms DESC
+        LIMIT 1`,
+    ).get(ref, ref) as {
+      row_id: string;
+      conversation_id: string;
+      role: string;
+      text: string | null;
+      data_classification: string;
+      secret_omitted: number;
+    } | undefined;
+
+    if (
+      row &&
+      row.role === "owner" &&
+      row.text !== null &&
+      row.data_classification !== "secret" &&
+      Number(row.secret_omitted) === 0
+    ) {
+      return { rowId: row.row_id, conversationId: row.conversation_id };
+    }
+  }
+  return null;
 }
 
 function admitOne(
   db: DatabaseSync,
   nomination: DurableNominationRecord,
   nowMs: number,
-  options: { requireCurrentGeneration?: number } = {},
+  options: { requireCurrentGeneration?: number; currentnessEntitled?: boolean } = {},
 ): AdmissionResult {
   const noAssertion = (result: AdmissionResult["result"]): AdmissionResult => ({ nominationId: nomination.nominationId, assertionKey: nomination.assertionKey, result, assertion: null });
   if (nomination.dataClassification === "secret") {
@@ -192,6 +215,46 @@ function admitOne(
     const result = noAssertion("admission_skipped_superseded");
     logAdmission(db, result, nowMs);
     return result;
+  }
+
+  // 1. Structured provenance validation:
+  // When candidate assertion has: source === "owner_utterance" || reliability === "owner_supplied"
+  const isOwnerOrigin = nomination.dimensions.source === "owner_utterance" || nomination.dimensions.reliability === "owner_supplied";
+  const sourceRefs = resolveNominationSourceRefs(db, nomination, settlement);
+
+  if (isOwnerOrigin) {
+    const verified = findVerifiedOwnerEvidence(db, sourceRefs);
+    if (!verified) {
+      const hasSecretRef = sourceRefs.some((ref) => {
+        const row = db.prepare("SELECT data_classification, secret_omitted FROM conversation_evidence_log WHERE row_id = ? OR lineage_id = ?").get(ref, ref) as DbRow | undefined;
+        return row && (row.data_classification === "secret" || Number(row.secret_omitted) === 1);
+      });
+      const result = noAssertion(hasSecretRef ? "admission_skipped_secret" : "admission_skipped_provenance");
+      logAdmission(db, result, nowMs);
+      return result;
+    }
+  }
+
+  // 2. Currentness entitlement validation:
+  // When candidate assertion has: time === "current"
+  if (nomination.dimensions.time === "current") {
+    let isEntitled = options.currentnessEntitled;
+    if (isEntitled === undefined) {
+      try {
+        const payload = typeof settlement.payload_json === "string" ? JSON.parse(settlement.payload_json) : settlement.payload_json;
+        isEntitled = hasStructuredCurrentnessEntitlement(
+          payload,
+          payload?.currentnessWitness ?? payload?.currentness,
+        );
+      } catch {
+        isEntitled = false;
+      }
+    }
+    if (!isEntitled) {
+      const result = noAssertion("admission_skipped_provenance");
+      logAdmission(db, result, nowMs);
+      return result;
+    }
   }
 
   const existing = db.prepare("SELECT data_classification FROM sidecar_memory_assertions WHERE assertion_key = ?").get(nomination.assertionKey) as DbRow | undefined;
@@ -255,6 +318,7 @@ export function tickAdmission(
     skippedUnpublished: 0,
     skippedGeneration: 0,
     skippedRetracted: 0,
+    skippedProvenance: 0,
     results: [],
   };
   const changedAssertionKeys = new Set<string>();
@@ -278,6 +342,7 @@ export function tickAdmission(
         case "admission_skipped_unpublished": result.skippedUnpublished += 1; break;
         case "admission_skipped_generation": result.skippedGeneration += 1; break;
         case "admission_skipped_retracted": result.skippedRetracted += 1; break;
+        case "admission_skipped_provenance": result.skippedProvenance += 1; break;
       }
     }
     db.exec("COMMIT");
@@ -300,6 +365,7 @@ export type AdmitOwnerSuppliedClaimInput = {
   nominationId: string;
   evidence?: ConversationEvidenceRecord | null;
   evidenceRowId?: string | null;
+  currentnessEntitled?: boolean;
   nowMs?: number;
 };
 
@@ -310,42 +376,53 @@ export function admitOwnerSuppliedClaim(
 ): AdmissionResult | null {
   const nomination = getDurableNomination(db, input.nominationId);
   if (!nomination) return null;
-  const settlement = db.prepare("SELECT settlement_id, cycle_id, generation FROM settlements WHERE settlement_id = ?").get(input.settlementId) as DbRow | undefined;
+  const settlement = db.prepare("SELECT settlement_id, cycle_id, generation, payload_json FROM settlements WHERE settlement_id = ?").get(input.settlementId) as DbRow | undefined;
   if (!settlement || text(settlement.cycle_id) !== nomination.cycleId || number(settlement.generation) !== nomination.generation) return null;
   let evidence = input.evidence ?? null;
   if (!evidence && input.evidenceRowId) {
-    const row = db.prepare("SELECT data_classification, secret_omitted FROM conversation_evidence_log WHERE row_id = ?").get(input.evidenceRowId) as DbRow | undefined;
-    if (row) evidence = {
-      rowId: input.evidenceRowId,
-      lineageId: "",
-      version: 0,
-      conversationId: "",
-      role: "owner",
-      text: null,
-      createdAtMs: 0,
-      discordMessageIds: [],
-      reservationId: null,
-      producingCycleId: null,
-      architectureEpoch: "v0.2.1",
-      contentHash: "",
-      sourceStatus: "",
-      dataClassification: row.data_classification === "secret" ? "secret" : "never_public",
-      secretOmitted: number(row.secret_omitted) === 1,
-      delivered: false,
-    };
+    evidence = getConversationEvidence(db, input.evidenceRowId);
   }
   if (evidence?.dataClassification === "secret" || evidence?.secretOmitted) {
     const result: AdmissionResult = { nominationId: nomination.nominationId, assertionKey: nomination.assertionKey, result: "admission_skipped_secret", assertion: null };
-    db.prepare("INSERT INTO admission_log (nomination_id, assertion_key, result, generation, created_at_ms) VALUES (?, ?, ?, ?, ?)").run(nomination.nominationId, nomination.assertionKey, result.result, nomination.generation, input.nowMs ?? Date.now());
+    logAdmission(db, result, input.nowMs ?? Date.now());
     return result;
   }
-  if (nomination.dimensions.source !== "owner_utterance" || nomination.dimensions.reliability !== "owner_supplied") {
-    return null;
+  if (nomination.dimensions.source === "owner_utterance" || nomination.dimensions.reliability === "owner_supplied") {
+    if (!evidence || evidence.role !== "owner" || evidence.text === null) {
+      const result: AdmissionResult = { nominationId: nomination.nominationId, assertionKey: nomination.assertionKey, result: "admission_skipped_provenance", assertion: null };
+      logAdmission(db, result, input.nowMs ?? Date.now());
+      return result;
+    }
+  }
+  let entitled = input.currentnessEntitled;
+  if (nomination.dimensions.time === "current") {
+    if (entitled === undefined) {
+      try {
+        const payload = typeof settlement.payload_json === "string" ? JSON.parse(settlement.payload_json) : settlement.payload_json;
+        entitled = hasStructuredCurrentnessEntitlement(
+          payload,
+          payload?.currentnessWitness ?? payload?.currentness,
+        );
+      } catch {
+        entitled = false;
+      }
+    }
+    if (!entitled) {
+      const result: AdmissionResult = { nominationId: nomination.nominationId, assertionKey: nomination.assertionKey, result: "admission_skipped_provenance", assertion: null };
+      logAdmission(db, result, input.nowMs ?? Date.now());
+      return result;
+    }
+  }
+  if (evidence && (!nomination.sourceRefs || nomination.sourceRefs.length === 0)) {
+    nomination.sourceRefs = [evidence.rowId];
   }
   let result: AdmissionResult | null = null;
   db.exec("BEGIN IMMEDIATE");
   try {
-    result = admitOne(db, nomination, input.nowMs ?? Date.now(), { requireCurrentGeneration: nomination.generation });
+    result = admitOne(db, nomination, input.nowMs ?? Date.now(), {
+      requireCurrentGeneration: nomination.generation,
+      currentnessEntitled: entitled,
+    });
     db.exec("COMMIT");
   } catch (error) {
     try { db.exec("ROLLBACK"); } catch { /* preserve original */ }

@@ -29,6 +29,7 @@ export { OutboxDeliveryProjector, createOutboxProjector } from "./delivery/outbo
 export type { OutboxDeliveryProjectorOptions, ProjectionGate } from "./delivery/outbox-projector.js";
 export { evaluateExternalizationGate } from "./initiative/externalization.js";
 export * from "./effect/in-flight.js";
+export * from "./effect/effect-ref.js";
 export {
   publishSemanticTransaction,
   getPublishedSettlementIdentity,
@@ -55,7 +56,7 @@ export { applyConcernDelta, getConcern, listConcerns } from "./concerns/lineage.
 export { applyOccupancyDelta, listOccupancy } from "./concerns/occupancy.js";
 export { AUTHORITY_CODES, describeAuthorityCode } from "./authority/codes.js";
 export { loadAuthorityPacks, loadEffectReceipts, bumpAuthorityEpoch } from "./authority/packs.js";
-export { checkAuthority } from "./authority/check.js";
+export { checkAuthority, hasStructuredCurrentnessEntitlement } from "./authority/check.js";
 export { claimsCurrentness, claimsUnwitnessedReading } from "./authority/currentness-detectors.js";
 export { classifyOperation, createObservationRequest } from "./observation/request.js";
 export { createEffectProposal, dispatchEffect } from "./effect/proposal.js";

@@ -40,7 +40,7 @@ export function loadEffectReceipts(
       receiptId: String(value.receipt_id ?? ""),
       effectId: String(value.effect_id ?? ""),
       idempotencyKey: String(value.idempotency_key ?? ""),
-      outcome: String(value.outcome ?? "unknown") as EffectReceipt["outcome"],
+      outcome: (String(value.outcome) === "unknown" ? "outcome_unknown" : String(value.outcome ?? "outcome_unknown")) as EffectReceipt["outcome"],
       claims: typeof claims === "object" && claims !== null && !Array.isArray(claims) ? claims as Record<string, unknown> : {},
       atMs: Number(value.at_ms ?? 0),
       dataClassification: String(value.data_classification ?? "never_public") as EffectReceipt["dataClassification"],

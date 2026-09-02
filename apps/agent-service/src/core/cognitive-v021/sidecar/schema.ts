@@ -477,3 +477,13 @@ CREATE INDEX idx_private_budget_consuming ON private_budget_reservations(convers
 CREATE UNIQUE INDEX idx_private_budget_invocation ON private_budget_reservations(invocation_id) WHERE invocation_id IS NOT NULL;
 UPDATE cognitive_sidecar_meta SET schema_version = 5, projection_state = 'reconciling' WHERE id = 1;
 `;
+
+export const COGNITIVE_SIDECAR_SCHEMA_V6 = String.raw`
+ALTER TABLE in_flight_effects ADD COLUMN origin_event_id TEXT REFERENCES inbox_events(id);
+ALTER TABLE in_flight_effects ADD COLUMN origin_attempt_id TEXT REFERENCES durable_work_attempts(attempt_id);
+ALTER TABLE durable_nominations ADD COLUMN source_refs_json TEXT;
+CREATE INDEX idx_in_flight_origin_event ON in_flight_effects(origin_event_id);
+CREATE INDEX idx_in_flight_origin_attempt ON in_flight_effects(origin_attempt_id);
+UPDATE effect_receipts SET outcome = 'outcome_unknown' WHERE outcome IN ('failed', 'unknown');
+UPDATE cognitive_sidecar_meta SET schema_version = 6, thought_contract_version = 2, projection_state = 'reconciling' WHERE id = 1;
+`;

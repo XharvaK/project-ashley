@@ -95,7 +95,10 @@ function validCompletion(input: ThoughtInput, text = "hello", overrides: Record<
         presentationDirectives: [],
       };
   return {
-    text: JSON.stringify(makeSemanticSettlement({ speech })),
+    text: JSON.stringify(makeSemanticSettlement({
+      speech,
+      ...(overrides.commitments ? { commitments: overrides.commitments } : {}),
+    })),
     model: "fake",
     modelAlias: "thought",
     resolvedModelId: null,
@@ -180,6 +183,18 @@ describe("v0.2.1 durable Thought accounting", () => {
       observedObjections.push(input.authorityObjections);
       calls += 1;
       return validCompletion(input, calls === 1 ? "latest" : "revised", calls === 1 ? {
+        commitments: {
+          ...makeSemanticSettlement().commitments,
+          epistemic: [{
+            statement: "latest",
+            dimensions: {
+              source: "owner_utterance",
+              status: "asserted",
+              time: "current",
+              reliability: "owner_supplied",
+            },
+          }],
+        },
         speech: {
           mode: "draft",
           mustSay: ["latest"],

@@ -39,6 +39,7 @@ describe("cognitive sidecar reopen recovery", () => {
       conversationId: "conversation-restart",
       generation: 3,
       triggerKind: "owner_message",
+      triggerRef: "event-restart",
       occupantId: "doc",
       nowMs: 1,
     });
@@ -50,6 +51,7 @@ describe("cognitive sidecar reopen recovery", () => {
       idempotencyKey: "idempotency-restart",
       payload: { projectId: "project-restart" },
       dispatchedAtMs: 1,
+      originEventId: "event-restart",
     });
     db.close();
 
@@ -58,7 +60,7 @@ describe("cognitive sidecar reopen recovery", () => {
         dataPlane: { kind: "isolated" },
       });
       expect(db.prepare("SELECT state FROM in_flight_effects WHERE effect_id = 'effect-restart'").get()).toMatchObject({ state: "unknown" });
-      expect(db.prepare("SELECT id, kind FROM inbox_events").all()).toEqual([
+      expect(db.prepare("SELECT id, kind FROM inbox_events WHERE kind = 'recovery'").all()).toEqual([
         { id: "recovery:effect-restart", kind: "recovery" },
       ]);
       const payload = db.prepare("SELECT payload_json FROM inbox_events WHERE id = 'recovery:effect-restart'").get() as { payload_json: string };

@@ -82,4 +82,52 @@ describe("v0.2.1 speech fidelity", () => {
       commitments: { ...commitments, conversational: [] },
     })).toMatchObject({ ok: true });
   });
+
+  it("rejects affirmative effect claims without structured operational success commitment", () => {
+    // Surface claims completed/done without operational commitment
+    expect(fidelityCheck({
+      mode: "draft",
+      draft: "I completed the task and it worked.",
+      mustSay: [],
+      mustNot: [],
+      acceptableRealizations: [],
+      commitments: { ...commitments, operational: [] },
+    })).toMatchObject({ ok: false, code: "DRAFT_COMMITMENT_CONFLICT" });
+
+    // Surface claims completed with matching operational success commitment -> ok
+    expect(fidelityCheck({
+      mode: "draft",
+      draft: "I completed the task and it worked.",
+      mustSay: [],
+      mustNot: [],
+      acceptableRealizations: [],
+      commitments: {
+        ...commitments,
+        operational: [{ effectRef: "effect:test", claimedState: "succeeded" }],
+      },
+    })).toMatchObject({ ok: true });
+  });
+
+  it("rejects currentness claims without structured current epistemic commitment", () => {
+    // Surface claims currentness with only historical commitment
+    expect(fidelityCheck({
+      mode: "draft",
+      draft: "Currently, the status is active right now.",
+      mustSay: [],
+      mustNot: [],
+      acceptableRealizations: [],
+      commitments: {
+        ...commitments,
+        epistemic: [{
+          dimensions: {
+            source: "owner_utterance" as const,
+            status: "asserted" as const,
+            time: "historical" as const,
+            reliability: "owner_supplied" as const,
+          },
+          statement: "The status was active",
+        }],
+      },
+    })).toMatchObject({ ok: false, code: "DRAFT_COMMITMENT_CONFLICT" });
+  });
 });

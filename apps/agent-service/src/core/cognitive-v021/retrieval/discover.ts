@@ -177,6 +177,7 @@ export function retrieveCandidates(
       dimensions: null,
       dataClassification: row.dataClassification,
       live: null,
+      role: row.role ?? "unknown",
       supportRefs: [row.lineageId ?? row.rowId],
     }));
   }

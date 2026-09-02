@@ -162,9 +162,18 @@ function validInterpretation(value: unknown, allowlist: ReadonlySet<string>): va
   });
 }
 
+function validOperationalClaim(value: unknown): boolean {
+  const record = exactRecord(value, ["effectRef", "claimedState"]);
+  if (!record || typeof record.effectRef !== "string" || record.effectRef.trim().length === 0) return false;
+  return ["not_attempted", "in_progress", "outcome_unknown", "failed", "succeeded"].includes(record.claimedState as string);
+}
+
 function validCommitments(value: unknown): value is ThoughtCommitments {
-  const record = exactRecord(value, ["epistemic", "conversational", "stance"]);
+  const record = exactRecord(value, ["epistemic", "conversational", "stance"], ["operational"]);
   if (!record || !Array.isArray(record.epistemic) || !Array.isArray(record.conversational)) return false;
+  if (record.operational !== undefined) {
+    if (!Array.isArray(record.operational) || !record.operational.every(validOperationalClaim)) return false;
+  }
   const conversational = ["answer", "ask", "acknowledge", "disagree", "hold", "silence"];
   if (!record.conversational.every((item) => typeof item === "string" && conversational.includes(item))) return false;
   const stance = exactRecord(record.stance, ["warmth", "humorAllowed", "disagreement", "uncertaintyDisplay"]);

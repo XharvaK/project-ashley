@@ -1,6 +1,7 @@
 import type {
   ConversationalCommitment,
   EpistemicCommitment,
+  OperationalStateClaim,
   SpeechMode,
   Stance,
 } from "../types.js";
@@ -9,9 +10,11 @@ import {
   claimsOwnReadingActivity,
   claimsOwnVisionActivity,
 } from "../../honesty/claims.js";
+import { claimsCurrentness } from "../authority/currentness-detectors.js";
 
 export type FidelityCommitments = {
   epistemic: readonly EpistemicCommitment[];
+  operational?: readonly OperationalStateClaim[];
   conversational: readonly ConversationalCommitment[];
   stance?: Stance;
 };
@@ -96,6 +99,25 @@ export function fidelityCheck(input: FidelityInput): FidelityResult {
   const forbidden = input.mustNot.find((value) => value.length > 0 && draft.includes(value));
   if (forbidden) {
     return fail("DRAFT_COMMITMENT_CONFLICT", `mustNot is present: ${forbidden}`);
+  }
+
+  const affirmativeEffectClaim = /\b(?:worked|succeeded|successful|completed|sent|created|updated|done)\b/i.test(draft);
+  if (affirmativeEffectClaim) {
+    const hasSucceededOperationalClaim = input.commitments.operational?.some(
+      (claim) => claim.claimedState === "succeeded",
+    );
+    if (!hasSucceededOperationalClaim) {
+      return fail("DRAFT_COMMITMENT_CONFLICT", "affirmative effect claim on surface without operational success commitment");
+    }
+  }
+
+  if (claimsCurrentness(draft)) {
+    const hasCurrentnessCommitment = input.commitments.epistemic.some(
+      (c) => c.dimensions.time === "current",
+    );
+    if (!hasCurrentnessCommitment) {
+      return fail("DRAFT_COMMITMENT_CONFLICT", "currentness claim on surface without current epistemic commitment");
+    }
   }
 
   return { ok: true, code: "ok", draft };

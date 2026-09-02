@@ -26,7 +26,7 @@ export type LogFtsRow = {
   conversationId: string;
   text: string;
   rank: number;
-  role: "owner" | "ashley" | "system";
+  role: "owner" | "ashley" | "system" | "unknown";
   dataClassification: DataClassification;
   lineageId: string | null;
   version: number | null;
@@ -265,7 +265,9 @@ export function searchConversationFts(
         conversationId: ftsRow.conversation_id,
         text: ftsRow.text,
         rank: Number(ftsRow.rank),
-        role: (sidecar.role ?? "owner") as "owner" | "ashley" | "system",
+        role: (sidecar.role === "owner" || sidecar.role === "ashley" || sidecar.role === "system"
+          ? sidecar.role
+          : "unknown"),
         dataClassification: rawClassification,
         lineageId: sidecar.lineage_id ?? null,
         version: sidecar.version ?? null,

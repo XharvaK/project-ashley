@@ -5,6 +5,7 @@ const input = {
   draft: "I selected HY4.",
   commitments: {
     epistemic: [],
+    operational: [],
     conversational: ["answer" as const],
     stance: { warmth: "medium" as const, humorAllowed: false, disagreement: false, uncertaintyDisplay: true },
   },

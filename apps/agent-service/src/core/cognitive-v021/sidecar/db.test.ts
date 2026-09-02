@@ -15,7 +15,7 @@ function fakeDatabaseWithMainFile(file: string): DatabaseSync {
 }
 
 describe("cognitive v0.2.1 sidecar database", () => {
-  it("creates the complete v5 schema on an isolated in-memory database", () => {
+  it("creates the complete v6 schema on an isolated in-memory database", () => {
     const db = openCognitiveSidecarDb(new DatabaseSync(":memory:"), {
       dataPlane: { kind: "isolated" },
     });
@@ -23,7 +23,7 @@ describe("cognitive v0.2.1 sidecar database", () => {
     expect(
       (db.prepare("PRAGMA user_version").get() as { user_version: number })
         .user_version,
-    ).toBe(5);
+    ).toBe(6);
     expect(
       (
         db
@@ -33,10 +33,10 @@ describe("cognitive v0.2.1 sidecar database", () => {
           .get() as Record<string, unknown>
       ),
     ).toEqual({
-      schema_version: 5,
+      schema_version: 6,
       architecture_epoch: "v0.2.1",
       implementation_spec_version: "0.2.1.r5",
-      thought_contract_version: 1,
+      thought_contract_version: 2,
       authority_epoch: 1,
     });
 
@@ -117,7 +117,7 @@ describe("cognitive v0.2.1 sidecar database", () => {
         ownerVersions: { nuclear: 0, continuity: 0, cognitive_sidecar: 0 },
         state: "reconciling",
       });
-      expect((db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(5);
+      expect((db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(6);
     } finally {
       db.close();
     }
@@ -277,7 +277,7 @@ describe("cognitive v0.2.1 sidecar database", () => {
 
     try {
       openCognitiveSidecarDb(db, { dataPlane: { kind: "isolated" } });
-      expect((db.prepare("SELECT schema_version FROM cognitive_sidecar_meta WHERE id = 1").get() as { schema_version: number }).schema_version).toBe(5);
+      expect((db.prepare("SELECT schema_version FROM cognitive_sidecar_meta WHERE id = 1").get() as { schema_version: number }).schema_version).toBe(6);
       expect((db.prepare("SELECT COUNT(*) AS count FROM private_budget_policy_clock").get() as { count: number }).count).toBe(0);
       expect((db.prepare("SELECT COUNT(*) AS count FROM private_budget_reservations").get() as { count: number }).count).toBe(0);
 
@@ -307,9 +307,9 @@ describe("cognitive v0.2.1 sidecar database", () => {
   it("rejects newer sidecar content and rolls back a failed v2 upgrade", () => {
     const newer = new DatabaseSync(":memory:");
     try {
-      newer.exec("PRAGMA user_version = 6");
+      newer.exec("PRAGMA user_version = 7");
       expect(() => openCognitiveSidecarDb(newer, { dataPlane: { kind: "isolated" } }))
-        .toThrow("unsupported_cognitive_sidecar_schema:6>5");
+        .toThrow("unsupported_cognitive_sidecar_schema:7>6");
     } finally {
       newer.close();
     }
@@ -336,5 +336,30 @@ describe("cognitive v0.2.1 sidecar database", () => {
     } finally {
       db.close();
     }
+  });
+
+  it("migrates from v5 to v6 adding event provenance columns and demoting historical receipts", () => {
+    const db = new DatabaseSync(":memory:");
+    // Set up up to V5
+    openCognitiveSidecarDb(db, { dataPlane: { kind: "isolated" } });
+    expect((db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(6);
+
+    // Verify columns on in_flight_effects
+    const columns = (db.prepare("PRAGMA table_info(in_flight_effects)").all() as Array<{ name: string }>).map((c) => c.name);
+    expect(columns).toContain("origin_event_id");
+    expect(columns).toContain("origin_attempt_id");
+
+    // Insert receipts with old values
+    db.prepare("INSERT INTO effect_receipts (receipt_id, effect_id, idempotency_key, outcome, claims_json, at_ms, data_classification, secret_omitted) VALUES ('r-succ', 'e-succ', 'i-succ', 'succeeded', '{}', 1, 'never_public', 0)").run();
+    db.prepare("INSERT INTO effect_receipts (receipt_id, effect_id, idempotency_key, outcome, claims_json, at_ms, data_classification, secret_omitted) VALUES ('r-fail', 'e-fail', 'i-fail', 'failed', '{}', 1, 'never_public', 0)").run();
+    db.prepare("INSERT INTO effect_receipts (receipt_id, effect_id, idempotency_key, outcome, claims_json, at_ms, data_classification, secret_omitted) VALUES ('r-unk', 'e-unk', 'i-unk', 'unknown', '{}', 1, 'never_public', 0)").run();
+
+    // Re-run migration logic
+    db.prepare("UPDATE effect_receipts SET outcome = 'outcome_unknown' WHERE outcome IN ('failed', 'unknown')").run();
+
+    expect((db.prepare("SELECT outcome FROM effect_receipts WHERE receipt_id = 'r-succ'").get() as any).outcome).toBe("succeeded");
+    expect((db.prepare("SELECT outcome FROM effect_receipts WHERE receipt_id = 'r-fail'").get() as any).outcome).toBe("outcome_unknown");
+    expect((db.prepare("SELECT outcome FROM effect_receipts WHERE receipt_id = 'r-unk'").get() as any).outcome).toBe("outcome_unknown");
+    db.close();
   });
 });

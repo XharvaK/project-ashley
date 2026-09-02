@@ -167,7 +167,41 @@ describe("v0.2.1 live Sandbox V2 operation construction", () => {
       replaySafe: true,
     })).rejects.toThrow("observation_unavailable");
     const receipt = await executors.executeEffect(effectProposal());
-    expect(receipt).toMatchObject({ outcome: "failed", claims: { state: "none", error: "sandbox_unavailable" } });
+    expect(receipt).toMatchObject({ outcome: "outcome_unknown", claims: { state: "none", error: "sandbox_unavailable" } });
+    nuclear.close();
+  });
+
+  it("truthfully produces all five-way receipt outcomes from license states", async () => {
+    const nuclear = new DatabaseSync(":memory:");
+    const makeExecutors = (state: string, error?: string) => createV021LiveOperationExecutors({
+      nuclear,
+      adapters: {
+        executeWorkspaceExperimentV2: vi.fn(async (): Promise<ExecuteWorkspaceExperimentV2Result> => ({
+          license: { state: state as any, profile: "project_experimentation", ...(error ? { error } : {}) },
+          observation: null,
+        })),
+      },
+    });
+
+    // succeeded -> succeeded
+    expect((await makeExecutors("succeeded").executeEffect(effectProposal({ effectId: "e-succ" }))).outcome).toBe("succeeded");
+
+    // failed -> failed
+    expect((await makeExecutors("failed", "tool_error").executeEffect(effectProposal({ effectId: "e-fail" }))).outcome).toBe("failed");
+
+    // running -> in_progress
+    expect((await makeExecutors("running").executeEffect(effectProposal({ effectId: "e-run" }))).outcome).toBe("in_progress");
+
+    // outcome_unknown -> outcome_unknown
+    expect((await makeExecutors("outcome_unknown").executeEffect(effectProposal({ effectId: "e-unk" }))).outcome).toBe("outcome_unknown");
+
+    // proposed / admitted -> not_attempted
+    expect((await makeExecutors("proposed").executeEffect(effectProposal({ effectId: "e-prop" }))).outcome).toBe("not_attempted");
+    expect((await makeExecutors("admitted").executeEffect(effectProposal({ effectId: "e-adm" }))).outcome).toBe("not_attempted");
+
+    // none with invalid_request -> not_attempted
+    expect((await makeExecutors("none", "invalid_request").executeEffect(effectProposal({ effectId: "e-inv" }))).outcome).toBe("not_attempted");
+
     nuclear.close();
   });
 

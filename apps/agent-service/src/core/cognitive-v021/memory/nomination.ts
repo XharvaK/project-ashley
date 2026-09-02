@@ -88,6 +88,13 @@ function mapNomination(value: unknown): DurableNominationRecord | null {
   } catch {
     return null;
   }
+  let sourceRefs: string[] | undefined;
+  if (typeof (value as DbRow).source_refs_json === "string") {
+    try {
+      const parsed = JSON.parse(text((value as DbRow).source_refs_json));
+      if (Array.isArray(parsed)) sourceRefs = parsed.filter((item): item is string => typeof item === "string");
+    } catch {}
+  }
   return {
     nominationId: text(value.nomination_id),
     cycleId: text(value.cycle_id),
@@ -100,6 +107,7 @@ function mapNomination(value: unknown): DurableNominationRecord | null {
     supersedesAssertionKey: value.supersedes_assertion_key == null ? null : text(value.supersedes_assertion_key),
     concernId: value.concern_id == null ? null : text(value.concern_id),
     admitted: number(value.admitted) === 1,
+    sourceRefs,
   };
 }
 
@@ -120,25 +128,50 @@ export function enqueueDurableNomination(
   nomination: DurableNomination,
 ): DurableNominationRecord {
   assertSafeNomination(nomination);
-  db.prepare(
-    `INSERT OR IGNORE INTO durable_nominations
-       (nomination_id, cycle_id, generation, assertion_key, statement, memory_kind,
-        dimensions_json, data_classification, supersedes_assertion_key, concern_id, admitted)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
-  ).run(
-    nomination.nominationId,
-    nomination.cycleId,
-    nomination.generation,
-    nomination.assertionKey,
-    nomination.statement,
-    nomination.memoryKind,
-    JSON.stringify(nomination.dimensions),
-    nomination.dataClassification,
-    nomination.supersedesAssertionKey,
-    nomination.concernId,
-  );
+  const sourceRefsJson = nomination.sourceRefs ? JSON.stringify(nomination.sourceRefs) : null;
+  try {
+    db.prepare(
+      `INSERT OR IGNORE INTO durable_nominations
+         (nomination_id, cycle_id, generation, assertion_key, statement, memory_kind,
+          dimensions_json, data_classification, supersedes_assertion_key, concern_id, admitted, source_refs_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+    ).run(
+      nomination.nominationId,
+      nomination.cycleId,
+      nomination.generation,
+      nomination.assertionKey,
+      nomination.statement,
+      nomination.memoryKind,
+      JSON.stringify(nomination.dimensions),
+      nomination.dataClassification,
+      nomination.supersedesAssertionKey,
+      nomination.concernId,
+      sourceRefsJson,
+    );
+  } catch {
+    db.prepare(
+      `INSERT OR IGNORE INTO durable_nominations
+         (nomination_id, cycle_id, generation, assertion_key, statement, memory_kind,
+          dimensions_json, data_classification, supersedes_assertion_key, concern_id, admitted)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+    ).run(
+      nomination.nominationId,
+      nomination.cycleId,
+      nomination.generation,
+      nomination.assertionKey,
+      nomination.statement,
+      nomination.memoryKind,
+      JSON.stringify(nomination.dimensions),
+      nomination.dataClassification,
+      nomination.supersedesAssertionKey,
+      nomination.concernId,
+    );
+  }
   const result = getDurableNomination(db, nomination.nominationId);
   if (!result) throw new Error("nomination_insert_lost");
+  if (nomination.sourceRefs && !result.sourceRefs) {
+    result.sourceRefs = nomination.sourceRefs;
+  }
   return result;
 }
 

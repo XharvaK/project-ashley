@@ -1,3 +1,4 @@
+import { mintEffectRef } from "../../effect/effect-ref.js";
 import type {
   CompactRetrievalEvidence,
   ProjectedThoughtInput,
@@ -108,7 +109,10 @@ export function buildAllocationCandidates(
       section: "in_flight_receipt",
       required: true,
       priority: 7,
-      data: input.inFlight,
+      data: input.inFlight.map((item) => ({
+        effectRef: mintEffectRef(input.cycleId, input.generation, item.effectId),
+        status: item.status,
+      })),
     });
   }
 

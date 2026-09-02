@@ -4,7 +4,7 @@ import { appendOwnerUtterance } from "../evidence/conversation-log.js";
 import { admitTestCycle, openTestSidecar } from "../test-support.js";
 import type { CapabilityReality, IdentitySlice, KernelDeps, Observation, ThoughtInput } from "../types.js";
 import { makeSemanticSettlement } from "../test-support.js";
-import { runCognitiveCycle } from "./run.js";
+import { materializeEffectsCompleted, runCognitiveCycle } from "./run.js";
 
 const constitution: IdentitySlice = { constitutional: ["truth first"], stableSelf: ["curious"] };
 const capabilityReality: CapabilityReality = {
@@ -424,5 +424,28 @@ describe("v0.2.1 Thought run", () => {
       sidecar.close();
       attentionDb.close();
     }
+  });
+
+  it("materializes effectsCompleted only for terminal physical receipts (succeeded or failed)", () => {
+    const inFlight = [
+      { effectId: "e-succ" },
+      { effectId: "e-fail" },
+      { effectId: "e-unk" },
+      { effectId: "e-prog" },
+      { effectId: "e-notatt" },
+      { effectId: "e-norec" },
+    ] as any;
+
+    const receiptsByEffectId = {
+      "e-succ": { outcome: "succeeded" },
+      "e-fail": { outcome: "failed" },
+      "e-unk": { outcome: "outcome_unknown" },
+      "e-prog": { outcome: "in_progress" },
+      "e-notatt": { outcome: "not_attempted" },
+    } as any;
+
+    const completed = materializeEffectsCompleted(inFlight, receiptsByEffectId);
+    expect(completed).toEqual(["e-succ", "e-fail"]);
+    expect(materializeEffectsCompleted(inFlight, undefined)).toEqual([]);
   });
 });

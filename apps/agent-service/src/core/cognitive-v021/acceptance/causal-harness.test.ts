@@ -53,6 +53,7 @@ function draftSettlement(): NonNullable<CausalBundle["settlement"]> {
         },
       ],
       conversational: ["answer"],
+      operational: [],
       stance: {
         warmth: "medium",
         humorAllowed: false,

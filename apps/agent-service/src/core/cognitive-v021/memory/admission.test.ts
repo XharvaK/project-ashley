@@ -4,7 +4,8 @@ import { publishSemanticTransaction } from "../settlement/publish.js";
 import { tickAdmission } from "./admission.js";
 import { admitOwnerSuppliedClaim } from "./admission.js";
 import { appendRememberRequest } from "./nomination.js";
-import type { DurableNomination } from "../types.js";
+import { appendOwnerUtterance, appendAshleyEvidence } from "../evidence/conversation-log.js";
+import type { DurableNomination, ThoughtSettlementDraft } from "../types.js";
 
 function nomination(overrides: Partial<DurableNomination> = {}): DurableNomination {
   return {
@@ -23,6 +24,7 @@ function nomination(overrides: Partial<DurableNomination> = {}): DurableNominati
     dataClassification: "never_public",
     supersedesAssertionKey: null,
     concernId: null,
+    sourceRefs: ["owner-1"],
     ...overrides,
   };
 }
@@ -31,10 +33,19 @@ function publishNomination(
   db: Parameters<typeof tickAdmission>[0],
   input: DurableNomination,
   settlementId: string,
+  options: {
+    operations?: Partial<ThoughtSettlementDraft["operations"]>;
+    currentness?: import("../types.js").AuthorityPacks["currentness"];
+  } = {},
 ): void {
   const draft = makeThoughtDraft({
     cycleId: input.cycleId,
     generation: input.generation,
+    operations: {
+      ...makeThoughtDraft().operations,
+      observationsConsumed: options.operations?.observationsConsumed ?? ["obs-default"],
+      ...options.operations,
+    },
     speech: {
       mode: "none",
       mustSay: [],
@@ -49,6 +60,18 @@ function publishNomination(
     ...draft,
     settlementId,
     speech: { ...draft.speech, finalLicensedText: null },
+  }, {
+    currentness: options.currentness !== undefined ? options.currentness : {
+      requireObservationForLatest: false,
+      binding: {
+        barrierId: "global",
+        barrierEpoch: 1,
+        barrierRevision: 1,
+        ownerVersions: { nuclear: 1, continuity: 1, cognitive_sidecar: 1 },
+      },
+      complete: true,
+      observedObservationIds: ["obs-default"],
+    },
   });
 }
 
@@ -56,16 +79,17 @@ describe("v0.2.1 fenced Memory admission", () => {
   it("admits queued nominations only when the admission worker runs", () => {
     const db = openTestSidecar();
     try {
+      const ev = appendOwnerUtterance(db, { conversationId: "thread-1", text: "I prefer the first subject", discordMessageIds: ["m1"], nowMs: 1 });
       admitTestCycle(db, {
         cycleId: "cycle-1",
         conversationId: "thread-1",
         generation: 1,
         triggerKind: "owner_message",
-        triggerRef: "owner-1",
+        triggerRef: ev.rowId,
         occupantId: "doc",
         nowMs: 1,
       });
-      publishNomination(db, nomination(), "settlement-1");
+      publishNomination(db, nomination({ sourceRefs: [ev.rowId] }), "settlement-1");
       expect(db.prepare("SELECT COUNT(*) AS count FROM sidecar_memory_assertions").get()).toMatchObject({ count: 0 });
 
       const result = tickAdmission(db, { nowMs: 2 });
@@ -85,10 +109,12 @@ describe("v0.2.1 fenced Memory admission", () => {
   it("skips an older nomination when a later published generation supersedes it", () => {
     const db = openTestSidecar();
     try {
-      admitTestCycle(db, { cycleId: "cycle-1", conversationId: "thread-1", generation: 1, triggerKind: "owner_message", triggerRef: "one", occupantId: "doc", nowMs: 1 });
-      publishNomination(db, nomination({ nominationId: "nomination-old", cycleId: "cycle-1", generation: 1, statement: "The old claim." }), "settlement-old");
-      admitTestCycle(db, { cycleId: "cycle-2", conversationId: "thread-1", generation: 2, triggerKind: "owner_message", triggerRef: "two", occupantId: "doc", nowMs: 2 });
-      publishNomination(db, nomination({ nominationId: "nomination-new", cycleId: "cycle-2", generation: 2, statement: "The corrected claim.", supersedesAssertionKey: "owner:subject" }), "settlement-new");
+      const ev1 = appendOwnerUtterance(db, { conversationId: "thread-1", text: "Old claim", discordMessageIds: ["m1"], nowMs: 1 });
+      admitTestCycle(db, { cycleId: "cycle-1", conversationId: "thread-1", generation: 1, triggerKind: "owner_message", triggerRef: ev1.rowId, occupantId: "doc", nowMs: 1 });
+      publishNomination(db, nomination({ nominationId: "nomination-old", cycleId: "cycle-1", generation: 1, statement: "The old claim.", sourceRefs: [ev1.rowId] }), "settlement-old");
+      const ev2 = appendOwnerUtterance(db, { conversationId: "thread-1", text: "New claim", discordMessageIds: ["m2"], nowMs: 2 });
+      admitTestCycle(db, { cycleId: "cycle-2", conversationId: "thread-1", generation: 2, triggerKind: "owner_message", triggerRef: ev2.rowId, occupantId: "doc", nowMs: 2 });
+      publishNomination(db, nomination({ nominationId: "nomination-new", cycleId: "cycle-2", generation: 2, statement: "The corrected claim.", supersedesAssertionKey: "owner:subject", sourceRefs: [ev2.rowId] }), "settlement-new");
 
       const result = tickAdmission(db, { nowMs: 3 });
       expect(result.skippedSuperseded).toBe(1);
@@ -104,14 +130,17 @@ describe("v0.2.1 fenced Memory admission", () => {
   it("does not promote repeated inferred support to owner supplied", () => {
     const db = openTestSidecar();
     try {
-      admitTestCycle(db, { cycleId: "cycle-1", conversationId: "thread-1", generation: 1, triggerKind: "owner_message", triggerRef: "one", occupantId: "doc", nowMs: 1 });
+      const ev1 = appendOwnerUtterance(db, { conversationId: "thread-1", text: "Claim 1", discordMessageIds: ["m1"], nowMs: 1 });
+      admitTestCycle(db, { cycleId: "cycle-1", conversationId: "thread-1", generation: 1, triggerKind: "owner_message", triggerRef: ev1.rowId, occupantId: "doc", nowMs: 1 });
       const inferred = nomination({
         memoryKind: "ashley_interpretation",
         dimensions: { source: "ashley_interpretation", status: "interpreted", time: "current", reliability: "inferred" },
+        sourceRefs: [ev1.rowId],
       });
       publishNomination(db, inferred, "settlement-1");
-      admitTestCycle(db, { cycleId: "cycle-2", conversationId: "thread-1", generation: 2, triggerKind: "owner_message", triggerRef: "two", occupantId: "doc", nowMs: 2 });
-      publishNomination(db, { ...inferred, nominationId: "nomination-2", cycleId: "cycle-2", generation: 2 }, "settlement-2");
+      const ev2 = appendOwnerUtterance(db, { conversationId: "thread-1", text: "Claim 2", discordMessageIds: ["m2"], nowMs: 2 });
+      admitTestCycle(db, { cycleId: "cycle-2", conversationId: "thread-1", generation: 2, triggerKind: "owner_message", triggerRef: ev2.rowId, occupantId: "doc", nowMs: 2 });
+      publishNomination(db, { ...inferred, nominationId: "nomination-2", cycleId: "cycle-2", generation: 2, sourceRefs: [ev2.rowId] }, "settlement-2");
       tickAdmission(db, { nowMs: 3 });
       expect(db.prepare("SELECT json_extract(dimensions_json, '$.reliability') AS reliability FROM sidecar_memory_assertions").get()).toMatchObject({ reliability: "inferred" });
       expect(db.prepare("SELECT COUNT(*) AS count FROM sidecar_memory_supports").get()).toMatchObject({ count: 2 });
@@ -134,6 +163,7 @@ describe("v0.2.1 fenced Memory admission", () => {
         assertionKey: "owner:careful-systems",
         statement: "The owner prefers careful systems.",
         memoryKind: "owner_preference",
+        sourceRefs: [request.evidence.rowId],
       });
       publishNomination(db, remembered, "settlement-remember");
       expect(admitOwnerSuppliedClaim(db, { settlementId: "settlement-remember", nominationId: remembered.nominationId, evidence: request.evidence, nowMs: 3 })).toMatchObject({ result: "admitted" });
@@ -157,5 +187,190 @@ describe("v0.2.1 fenced Memory admission", () => {
     } finally {
       db.close();
     }
+  });
+
+  describe("v0.2.1 B0 write-side provenance and currentness verification", () => {
+    it("admits candidate when valid owner evidence and structured currentness entitlement exist", () => {
+      const db = openTestSidecar();
+      try {
+        const ev = appendOwnerUtterance(db, { conversationId: "thread-v", text: "I like TypeScript", discordMessageIds: ["m-v"], nowMs: 1 });
+        admitTestCycle(db, { cycleId: "cycle-v", conversationId: "thread-v", generation: 1, triggerKind: "owner_message", triggerRef: ev.rowId, occupantId: "doc", nowMs: 1 });
+        const nom = nomination({ cycleId: "cycle-v", generation: 1, sourceRefs: [ev.rowId] });
+        publishNomination(db, nom, "settlement-v", {
+          operations: { observationsConsumed: ["obs-exact"] },
+          currentness: {
+            requireObservationForLatest: false,
+            binding: { barrierId: "global", barrierEpoch: 1, barrierRevision: 1, ownerVersions: { nuclear: 1, continuity: 1, cognitive_sidecar: 1 } },
+            complete: true,
+            observedObservationIds: ["obs-exact"],
+          },
+        });
+        const result = tickAdmission(db, { nowMs: 2 });
+        expect(result.admitted).toBe(1);
+        expect(result.results[0]?.result).toBe("admitted");
+      } finally { db.close(); }
+    });
+
+    it("refuses admission with admission_skipped_provenance when binding.complete is false", () => {
+      const db = openTestSidecar();
+      try {
+        const ev = appendOwnerUtterance(db, { conversationId: "thread-bcf", text: "I like TypeScript", discordMessageIds: ["m-bcf"], nowMs: 1 });
+        admitTestCycle(db, { cycleId: "cycle-bcf", conversationId: "thread-bcf", generation: 1, triggerKind: "owner_message", triggerRef: ev.rowId, occupantId: "doc", nowMs: 1 });
+        const nom = nomination({ cycleId: "cycle-bcf", generation: 1, dimensions: { source: "owner_utterance", status: "asserted", time: "current", reliability: "owner_supplied" }, sourceRefs: [ev.rowId] });
+        publishNomination(db, nom, "settlement-bcf", {
+          operations: { observationsConsumed: ["obs-1"] },
+          currentness: {
+            requireObservationForLatest: false,
+            binding: { barrierId: "global", barrierEpoch: 1, barrierRevision: 1, ownerVersions: { nuclear: 1, continuity: 1, cognitive_sidecar: 1 } },
+            complete: false,
+            observedObservationIds: ["obs-1"],
+          },
+        });
+        const result = tickAdmission(db, { nowMs: 2 });
+        expect(result.admitted).toBe(0);
+        expect(result.skippedProvenance).toBe(1);
+        expect(result.results[0]?.result).toBe("admission_skipped_provenance");
+        expect(db.prepare("SELECT COUNT(*) AS count FROM sidecar_memory_assertions").get()).toMatchObject({ count: 0 });
+      } finally { db.close(); }
+    });
+
+    it("refuses admission with admission_skipped_provenance when observationsConsumed does not intersect observedObservationIds", () => {
+      const db = openTestSidecar();
+      try {
+        const ev = appendOwnerUtterance(db, { conversationId: "thread-noi", text: "I like TypeScript", discordMessageIds: ["m-noi"], nowMs: 1 });
+        admitTestCycle(db, { cycleId: "cycle-noi", conversationId: "thread-noi", generation: 1, triggerKind: "owner_message", triggerRef: ev.rowId, occupantId: "doc", nowMs: 1 });
+        const nom = nomination({ cycleId: "cycle-noi", generation: 1, dimensions: { source: "owner_utterance", status: "asserted", time: "current", reliability: "owner_supplied" }, sourceRefs: [ev.rowId] });
+        publishNomination(db, nom, "settlement-noi", {
+          operations: { observationsConsumed: ["obs-consumed"] },
+          currentness: {
+            requireObservationForLatest: false,
+            binding: { barrierId: "global", barrierEpoch: 1, barrierRevision: 1, ownerVersions: { nuclear: 1, continuity: 1, cognitive_sidecar: 1 } },
+            complete: true,
+            observedObservationIds: ["obs-different"],
+          },
+        });
+        const result = tickAdmission(db, { nowMs: 2 });
+        expect(result.admitted).toBe(0);
+        expect(result.skippedProvenance).toBe(1);
+        expect(result.results[0]?.result).toBe("admission_skipped_provenance");
+        expect(db.prepare("SELECT COUNT(*) AS count FROM sidecar_memory_assertions").get()).toMatchObject({ count: 0 });
+      } finally { db.close(); }
+    });
+
+    it("refuses admission with admission_skipped_provenance when same cycle / valid owner evidence exists BUT no observation intersection", () => {
+      const db = openTestSidecar();
+      try {
+        const ev = appendOwnerUtterance(db, { conversationId: "thread-sc", text: "active turn", discordMessageIds: ["m-sc"], nowMs: 10 });
+        admitTestCycle(db, { cycleId: "cycle-sc", conversationId: "thread-sc", generation: 1, triggerKind: "owner_message", triggerRef: ev.rowId, occupantId: "doc", nowMs: 10 });
+        const nom = nomination({
+          cycleId: "cycle-sc",
+          generation: 1,
+          dimensions: { source: "owner_utterance", status: "asserted", time: "current", reliability: "owner_supplied" },
+          sourceRefs: [ev.rowId],
+        });
+        // Same cycle, valid owner evidence, but no observation consumed
+        publishNomination(db, nom, "settlement-sc", {
+          operations: { observationsConsumed: [] },
+          currentness: {
+            requireObservationForLatest: false,
+            binding: { barrierId: "global", barrierEpoch: 1, barrierRevision: 1, ownerVersions: { nuclear: 1, continuity: 1, cognitive_sidecar: 1 } },
+            complete: true,
+            observedObservationIds: ["obs-unconsumed"],
+          },
+        });
+        const result = tickAdmission(db, { nowMs: 11 });
+        expect(result.admitted).toBe(0);
+        expect(result.skippedProvenance).toBe(1);
+        expect(result.results[0]?.result).toBe("admission_skipped_provenance");
+        expect(db.prepare("SELECT COUNT(*) AS count FROM sidecar_memory_assertions").get()).toMatchObject({ count: 0 });
+      } finally { db.close(); }
+    });
+
+    it("refuses admission with admission_skipped_provenance when evidence is missing", () => {
+      const db = openTestSidecar();
+      try {
+        admitTestCycle(db, { cycleId: "cycle-m", conversationId: "thread-m", generation: 1, triggerKind: "owner_message", triggerRef: "ev-trigger", occupantId: "doc", nowMs: 1 });
+        const nom = nomination({ cycleId: "cycle-m", generation: 1, sourceRefs: ["ev-nonexistent"] });
+        publishNomination(db, nom, "settlement-m");
+        const result = tickAdmission(db, { nowMs: 2 });
+        expect(result.admitted).toBe(0);
+        expect(result.skippedProvenance).toBe(1);
+        expect(result.results[0]?.result).toBe("admission_skipped_provenance");
+        expect(db.prepare("SELECT COUNT(*) AS count FROM sidecar_memory_assertions").get()).toMatchObject({ count: 0 });
+      } finally { db.close(); }
+    });
+
+    it("refuses admission when evidence role is not owner", () => {
+      const db = openTestSidecar();
+      try {
+        const ev = appendAshleyEvidence(db, { conversationId: "thread-r", text: "I am Ashley", discordMessageIds: ["m-a"], nowMs: 1 });
+        admitTestCycle(db, { cycleId: "cycle-r", conversationId: "thread-r", generation: 1, triggerKind: "owner_message", triggerRef: ev.rowId, occupantId: "doc", nowMs: 1 });
+        const nom = nomination({ cycleId: "cycle-r", generation: 1, sourceRefs: [ev.rowId] });
+        publishNomination(db, nom, "settlement-r");
+        const result = tickAdmission(db, { nowMs: 2 });
+        expect(result.admitted).toBe(0);
+        expect(result.skippedProvenance).toBe(1);
+        expect(result.results[0]?.result).toBe("admission_skipped_provenance");
+        expect(db.prepare("SELECT COUNT(*) AS count FROM sidecar_memory_assertions").get()).toMatchObject({ count: 0 });
+      } finally { db.close(); }
+    });
+
+    it("refuses admission when evidence is classified secret", () => {
+      const db = openTestSidecar();
+      try {
+        const ev = appendOwnerUtterance(db, { conversationId: "thread-s", text: "secret password", discordMessageIds: ["m-s"], dataClassification: "secret", nowMs: 1 });
+        admitTestCycle(db, { cycleId: "cycle-s", conversationId: "thread-s", generation: 1, triggerKind: "owner_message", triggerRef: ev.rowId, occupantId: "doc", nowMs: 1 });
+        const nom = nomination({ cycleId: "cycle-s", generation: 1, sourceRefs: [ev.rowId] });
+        publishNomination(db, nom, "settlement-s");
+        const result = tickAdmission(db, { nowMs: 2 });
+        expect(result.admitted).toBe(0);
+        expect(result.results[0]?.result).toBe("admission_skipped_secret");
+        expect(db.prepare("SELECT COUNT(*) AS count FROM sidecar_memory_assertions").get()).toMatchObject({ count: 0 });
+      } finally { db.close(); }
+    });
+
+    it("preserves admission without currentness entitlement when time is historical", () => {
+      const db = openTestSidecar();
+      try {
+        const ev = appendOwnerUtterance(db, { conversationId: "thread-h", text: "I used to like C++", discordMessageIds: ["m-h"], nowMs: 1 });
+        admitTestCycle(db, { cycleId: "cycle-h", conversationId: "thread-h", generation: 1, triggerKind: "owner_message", triggerRef: ev.rowId, occupantId: "doc", nowMs: 1 });
+        const nom = nomination({
+          cycleId: "cycle-h",
+          generation: 1,
+          dimensions: { source: "owner_utterance", status: "asserted", time: "historical", reliability: "owner_supplied" },
+          sourceRefs: [ev.rowId],
+        });
+        // Publish without any currentness pack or observations consumed
+        publishNomination(db, nom, "settlement-h", {
+          operations: { observationsConsumed: [] },
+          currentness: null as any,
+        });
+        const result = tickAdmission(db, { nowMs: 2 });
+        expect(result.admitted).toBe(1);
+        expect(result.results[0]?.result).toBe("admitted");
+      } finally { db.close(); }
+    });
+
+    it("preserves admission without currentness entitlement when time is unknown_freshness", () => {
+      const db = openTestSidecar();
+      try {
+        const ev = appendOwnerUtterance(db, { conversationId: "thread-u", text: "I may like tea", discordMessageIds: ["m-u"], nowMs: 1 });
+        admitTestCycle(db, { cycleId: "cycle-u", conversationId: "thread-u", generation: 1, triggerKind: "owner_message", triggerRef: ev.rowId, occupantId: "doc", nowMs: 1 });
+        const nom = nomination({
+          cycleId: "cycle-u",
+          generation: 1,
+          dimensions: { source: "owner_utterance", status: "asserted", time: "unknown_freshness", reliability: "owner_supplied" },
+          sourceRefs: [ev.rowId],
+        });
+        // Publish without any currentness pack or observations consumed
+        publishNomination(db, nom, "settlement-u", {
+          operations: { observationsConsumed: [] },
+          currentness: null as any,
+        });
+        const result = tickAdmission(db, { nowMs: 2 });
+        expect(result.admitted).toBe(1);
+        expect(result.results[0]?.result).toBe("admitted");
+      } finally { db.close(); }
+    });
   });
 });

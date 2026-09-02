@@ -8,7 +8,7 @@ describe("v0.2.1 effect proposal", () => {
     const db = openTestSidecar();
     try {
       admitTestCycle(db, { cycleId: "c1", conversationId: "thread-1", generation: 1, triggerKind: "owner_message", triggerRef: "c1", occupantId: "doc", nowMs: 1 });
-      const proposal = createEffectProposal({ cycleId: "c1", generation: 1, authorityEpoch: 1, kind: "workspace.write_file", request: { path: "x" } });
+      const proposal = createEffectProposal({ cycleId: "c1", generation: 1, authorityEpoch: 1, kind: "workspace.write_file", request: { path: "x" }, originEventId: "event-1" });
       let executed = 0;
       const blocked = await dispatchEffect(db, proposal, { authorityEpoch: 2 }, async () => { executed++; return { ok: true }; });
       expect(blocked).toMatchObject({ dispatched: false, codes: ["DISPATCH_EPOCH_CHANGED"] });
@@ -20,8 +20,8 @@ describe("v0.2.1 effect proposal", () => {
     const db = openTestSidecar();
     try {
       admitTestCycle(db, { cycleId: "c1", conversationId: "thread-1", generation: 1, triggerKind: "owner_message", triggerRef: "idem-replay", occupantId: "doc", nowMs: 1 });
-      const first = createEffectProposal({ cycleId: "c1", generation: 1, authorityEpoch: 1, idempotencyKey: "idem-replay", kind: "workspace.read_file", request: { path: "x" } });
-      const second = createEffectProposal({ cycleId: "c1", generation: 1, authorityEpoch: 1, idempotencyKey: "idem-replay", kind: "workspace.read_file", request: { path: "x" } });
+      const first = createEffectProposal({ cycleId: "c1", generation: 1, authorityEpoch: 1, idempotencyKey: "idem-replay", kind: "workspace.read_file", request: { path: "x" }, originEventId: "idem-replay" });
+      const second = createEffectProposal({ cycleId: "c1", generation: 1, authorityEpoch: 1, idempotencyKey: "idem-replay", kind: "workspace.read_file", request: { path: "x" }, originEventId: "idem-replay" });
       let executed = 0;
       const execute = async () => { executed += 1; return { ok: true }; };
       const firstResult = await dispatchEffect(db, first, { authorityEpoch: 1, generation: 1 }, execute);
@@ -40,7 +40,7 @@ describe("v0.2.1 effect proposal", () => {
     const db = openTestSidecar();
     try {
       admitTestCycle(db, { cycleId: "c-epoch", conversationId: "thread-1", generation: 1, triggerKind: "owner_message", triggerRef: "c-epoch", occupantId: "doc", nowMs: 1 });
-      const proposal = createEffectProposal({ cycleId: "c-epoch", generation: 1, authorityEpoch: 1, kind: "workspace.write_file", request: {} });
+      const proposal = createEffectProposal({ cycleId: "c-epoch", generation: 1, authorityEpoch: 1, kind: "workspace.write_file", request: {}, originEventId: "c-epoch" });
       let reloads = 0;
       let executed = 0;
       const result = await dispatchEffect(db, proposal, {
@@ -58,7 +58,7 @@ describe("v0.2.1 effect proposal", () => {
     const db = openTestSidecar();
     try {
       admitTestCycle(db, { cycleId: "c-generation", conversationId: "thread-1", generation: 1, triggerKind: "owner_message", triggerRef: "c-generation", occupantId: "doc", nowMs: 1 });
-      const proposal = createEffectProposal({ cycleId: "c-generation", generation: 1, authorityEpoch: 1, kind: "workspace.write_file", request: {} });
+      const proposal = createEffectProposal({ cycleId: "c-generation", generation: 1, authorityEpoch: 1, kind: "workspace.write_file", request: {}, originEventId: "c-generation" });
       let reloads = 0;
       let executed = 0;
       const result = await dispatchEffect(db, proposal, {
@@ -69,6 +69,35 @@ describe("v0.2.1 effect proposal", () => {
       expect(result).toMatchObject({ dispatched: false, codes: ["STALE_GENERATION"] });
       expect(executed).toBe(0);
       expect(getInFlight(db, proposal.effectId)).toMatchObject({ status: "unknown" });
+    } finally { db.close(); }
+  });
+
+  it("fails closed when exact originEventId is missing or empty", async () => {
+    const db = openTestSidecar();
+    try {
+      admitTestCycle(db, { cycleId: "c-missing-origin", conversationId: "thread-1", generation: 1, triggerKind: "owner_message", triggerRef: "c-missing-origin", occupantId: "doc", nowMs: 1 });
+      const proposal = createEffectProposal({ cycleId: "c-missing-origin", generation: 1, authorityEpoch: 1, kind: "workspace.write_file", request: {} });
+      await expect(dispatchEffect(db, proposal, { authorityEpoch: 1, generation: 1 }, async () => ({ ok: true }))).rejects.toThrow("origin_event_id_required");
+    } finally { db.close(); }
+  });
+
+  it("binds exact originEventId and originAttemptId into in_flight_effects without swapping across events", async () => {
+    const db = openTestSidecar();
+    try {
+      admitTestCycle(db, { cycleId: "c-exact-1", conversationId: "thread-1", generation: 1, triggerKind: "owner_message", triggerRef: "event-A", occupantId: "doc", nowMs: 1 });
+      admitTestCycle(db, { cycleId: "c-exact-2", conversationId: "thread-1", generation: 2, triggerKind: "owner_message", triggerRef: "event-B", occupantId: "doc", nowMs: 2 });
+      db.prepare("INSERT INTO durable_work_attempts (attempt_id, event_id, ordinal, worker_id, started_at_ms, dispatch_truth) VALUES ('attempt-1', 'event-A', 1, 'worker-1', 1, 'not_started')").run();
+
+      const prop1 = createEffectProposal({ cycleId: "c-exact-1", generation: 1, authorityEpoch: 1, kind: "workspace.write_file", request: {}, originEventId: "event-A", originAttemptId: "attempt-1" });
+      const prop2 = createEffectProposal({ cycleId: "c-exact-2", generation: 2, authorityEpoch: 1, kind: "workspace.write_file", request: {}, originEventId: "event-B", originAttemptId: null });
+      await dispatchEffect(db, prop1, { authorityEpoch: 1, generation: 1 }, async () => ({ ok: true }));
+      await dispatchEffect(db, prop2, { authorityEpoch: 1, generation: 2 }, async () => ({ ok: true }));
+
+      const record1 = getInFlight(db, prop1.effectId);
+      const record2 = getInFlight(db, prop2.effectId);
+      expect(record1).toMatchObject({ originEventId: "event-A", originAttemptId: "attempt-1" });
+      expect(record2).toMatchObject({ originEventId: "event-B", originAttemptId: null });
+      expect(record1?.originEventId).not.toBe(record2?.originEventId);
     } finally { db.close(); }
   });
 });

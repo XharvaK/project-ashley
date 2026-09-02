@@ -1222,6 +1222,7 @@ function fixtureFor(caseId: ThoughtQualificationCaseId): unknown {
       },
       commitments: {
         epistemic: [],
+        operational: [],
         conversational: ["answer"],
         stance: {
           warmth: "medium",

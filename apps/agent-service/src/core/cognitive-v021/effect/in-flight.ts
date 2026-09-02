@@ -13,6 +13,8 @@ export type PutInFlightInput = {
   dispatchedAtMs?: number;
   originJobId?: string | null;
   payload?: unknown;
+  originEventId: string;
+  originAttemptId?: string | null;
 };
 
 type DbRow = Record<string, unknown>;
@@ -31,6 +33,8 @@ function mapInFlight(row: unknown): InFlightRecord | null {
     status: stringValue(value.state) as InFlightRecord["status"],
     dispatchedAtMs: numberValue(value.dispatched_at_ms),
     originJobId: value.origin_job_id == null ? null : stringValue(value.origin_job_id),
+    originEventId: value.origin_event_id == null ? null : stringValue(value.origin_event_id),
+    originAttemptId: value.origin_attempt_id == null ? null : stringValue(value.origin_attempt_id),
   };
 }
 
@@ -43,6 +47,9 @@ export function getInFlight(db: DatabaseSync, effectOrIdempotencyKey: string): I
 export function putInFlight(db: DatabaseSync, input: PutInFlightInput): InFlightRecord {
   const existing = getInFlight(db, input.idempotencyKey);
   if (existing) return existing;
+  if (!input.originEventId || typeof input.originEventId !== "string" || input.originEventId.trim().length === 0) {
+    throw new Error("origin_event_id_required");
+  }
   const cycle = db.prepare("SELECT wake_id FROM cycle_records WHERE cycle_id = ? LIMIT 1").get(input.cycleId) as DbRow | undefined;
   const wakeId = input.wakeId ?? (typeof cycle?.wake_id === "string" ? cycle.wake_id : null);
   if (!wakeId) throw new Error("wake_required");
@@ -50,8 +57,9 @@ export function putInFlight(db: DatabaseSync, input: PutInFlightInput): InFlight
   db.prepare(
     `INSERT INTO in_flight_effects
        (effect_id, cycle_id, generation, correlation_id, idempotency_key,
-        state, payload_json, dispatched_at_ms, origin_job_id, wake_id)
-     VALUES (?, ?, ?, ?, ?, 'in_flight', ?, ?, ?, ?)`,
+        state, payload_json, dispatched_at_ms, origin_job_id, wake_id,
+        origin_event_id, origin_attempt_id)
+     VALUES (?, ?, ?, ?, ?, 'in_flight', ?, ?, ?, ?, ?, ?)`,
   ).run(
     effectId,
     input.cycleId,
@@ -62,6 +70,8 @@ export function putInFlight(db: DatabaseSync, input: PutInFlightInput): InFlight
     input.dispatchedAtMs ?? Date.now(),
     input.originJobId ?? null,
     wakeId,
+    input.originEventId,
+    input.originAttemptId ?? null,
   );
   const row = getInFlight(db, effectId);
   if (!row) throw new Error("in_flight_insert_lost");
@@ -101,7 +111,7 @@ function mapReceipt(row: unknown): EffectReceipt | null {
     receiptId: stringValue(value.receipt_id),
     effectId: stringValue(value.effect_id),
     idempotencyKey: stringValue(value.idempotency_key),
-    outcome: stringValue(value.outcome, "unknown") as EffectReceipt["outcome"],
+    outcome: (stringValue(value.outcome) === "unknown" ? "outcome_unknown" : stringValue(value.outcome, "outcome_unknown")) as EffectReceipt["outcome"],
     claims,
     atMs: numberValue(value.at_ms),
     dataClassification: stringValue(value.data_classification, "never_public") as EffectReceipt["dataClassification"],
@@ -120,7 +130,18 @@ export function getEffectReceiptByIdempotencyKey(
   return mapReceipt(db.prepare("SELECT * FROM effect_receipts WHERE idempotency_key = ?").get(idempotencyKey));
 }
 
+const VALID_RECEIPT_OUTCOMES = new Set<string>([
+  "succeeded",
+  "failed",
+  "outcome_unknown",
+  "not_attempted",
+  "in_progress",
+]);
+
 export function recordEffectReceipt(db: DatabaseSync, receipt: EffectReceipt): EffectReceipt {
+  if (!VALID_RECEIPT_OUTCOMES.has(receipt.outcome)) {
+    throw new Error(`invalid_receipt_outcome:${receipt.outcome}`);
+  }
   const existing = getEffectReceipt(db, receipt.effectId)
     ?? getEffectReceiptByIdempotencyKey(db, receipt.idempotencyKey);
   if (existing) return existing;

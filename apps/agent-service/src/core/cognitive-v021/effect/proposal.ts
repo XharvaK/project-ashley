@@ -19,6 +19,8 @@ export function createEffectProposal(input: {
   idempotencyKey?: string;
   kind: string;
   request: unknown;
+  originEventId?: string;
+  originAttemptId?: string | null;
 }): EffectProposal {
   return {
     effectId: input.effectId ?? randomUUID(),
@@ -28,6 +30,8 @@ export function createEffectProposal(input: {
     kind: input.kind,
     request: input.request,
     authorityEpoch: input.authorityEpoch,
+    originEventId: input.originEventId,
+    originAttemptId: input.originAttemptId,
   };
 }
 
@@ -93,6 +97,10 @@ export async function dispatchEffect(
   if (existing) return { dispatched: true, receipt: existing, replayed: true };
   const existingInFlight = getInFlight(db, proposal.idempotencyKey);
   if (existingInFlight) return { dispatched: false, codes: ["IN_FLIGHT_UNKNOWN"] };
+  const originEventId = proposal.originEventId;
+  if (!originEventId || typeof originEventId !== "string" || !originEventId.trim()) {
+    throw new Error("origin_event_id_required");
+  }
   const inFlight = putInFlight(db, {
     effectId: proposal.effectId,
     cycleId: proposal.cycleId,
@@ -100,6 +108,8 @@ export async function dispatchEffect(
     correlationId: proposal.effectId,
     idempotencyKey: proposal.idempotencyKey,
     payload: proposal.request,
+    originEventId,
+    originAttemptId: (proposal as { originAttemptId?: string | null }).originAttemptId ?? null,
   });
   const beforeExecute: DispatchSnapshot = current.reload?.() ?? {
     authorityEpoch: current.authorityEpoch,

@@ -70,6 +70,10 @@ const dimensionsSchema = strictObject({
   time: { enum: ["current", "historical", "unknown_freshness"] },
   reliability: { enum: ["owner_supplied", "fallible_observation", "receipt_backed", "inferred", "unavailable_source"] },
 }, ["source", "status", "time", "reliability"]);
+const operationalClaimSchema = strictObject({
+  effectRef: { type: "string", minLength: 1 },
+  claimedState: { enum: ["not_attempted", "in_progress", "outcome_unknown", "failed", "succeeded"] },
+}, ["effectRef", "claimedState"]);
 const referentBindingSchema = strictObject({
   span: { type: "string" }, concernRef: existingRefSchema, entityRef: existingRefSchema,
   sourceTurnRefs: stringArraySchema,
@@ -123,12 +127,13 @@ const semanticOutputSettlementSchema = strictObject({
   }, ["discourseActs", "referentBindings", "corrections", "unresolvedAmbiguities", "topics"]),
   commitments: strictObject({
     epistemic: { type: "array", items: strictObject({ dimensions: dimensionsSchema, statement: { type: "string" } }, ["dimensions", "statement"]) },
+    operational: { type: "array", items: operationalClaimSchema },
     conversational: { type: "array", items: { enum: ["answer", "ask", "acknowledge", "disagree", "hold", "silence"] } },
     stance: strictObject({
       warmth: { enum: ["low", "medium", "high"] },
       humorAllowed: { type: "boolean" }, disagreement: { type: "boolean" }, uncertaintyDisplay: { type: "boolean" },
     }, ["warmth", "humorAllowed", "disagreement", "uncertaintyDisplay"]),
-  }, ["epistemic", "conversational", "stance"]),
+  }, ["epistemic", "operational", "conversational", "stance"]),
   speech: { oneOf: [
     strictObject({ mode: { const: "none" }, mustSay: { type: "array", maxItems: 0 }, mustNotSay: stringArraySchema, acceptableRealizations: { type: "array", maxItems: 0 }, presentationDirectives: stringArraySchema }, ["mode", "mustSay", "mustNotSay", "acceptableRealizations", "presentationDirectives"]),
     strictObject({ mode: { const: "draft" }, mustSay: stringArraySchema, mustNotSay: stringArraySchema, surfaceDraft: { type: "string", minLength: 1 }, acceptableRealizations: stringArraySchema, presentationDirectives: stringArraySchema }, ["mode", "mustSay", "mustNotSay", "surfaceDraft", "acceptableRealizations", "presentationDirectives"]),

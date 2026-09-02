@@ -34,11 +34,12 @@ export function makeThoughtDraft(
         dimensions: {
           source: "owner_utterance",
           status: "asserted",
-          time: "current",
+          time: "historical",
           reliability: "owner_supplied",
         },
         statement: "topic",
       }],
+      operational: [],
       conversational: ["answer"],
       stance: {
         warmth: "medium",
@@ -93,6 +94,17 @@ export function admitTestCycle(
     nowMs: input.nowMs ?? Date.now(),
   });
   if (admission.kind === "cancelled" || admission.kind === "stale") throw new Error("test_wake_terminal");
+  db.prepare(`
+    INSERT OR IGNORE INTO inbox_events
+      (id, conversation_id, kind, payload_json, created_at_ms, status, wake_id)
+    VALUES (?, ?, ?, '{}', ?, 'claimed', ?)
+  `).run(
+    triggerRef,
+    input.conversationId,
+    input.triggerKind,
+    input.nowMs ?? Date.now(),
+    admission.wake.wakeId,
+  );
   return admitCycle(db, { ...input, wakeId: admission.wake.wakeId });
 }
 
@@ -103,7 +115,8 @@ export function makeSemanticSettlement(
     kind: "settlement",
     interpretation: { discourseActs: ["inform"], referentBindings: [], corrections: [], unresolvedAmbiguities: [], topics: ["topic"] },
     commitments: {
-      epistemic: [{ dimensions: { source: "owner_utterance", status: "asserted", time: "current", reliability: "owner_supplied" }, statement: "topic" }],
+      epistemic: [{ dimensions: { source: "owner_utterance", status: "asserted", time: "historical", reliability: "owner_supplied" }, statement: "topic" }],
+      operational: [],
       conversational: ["answer"], stance: { warmth: "medium", humorAllowed: false, disagreement: false, uncertaintyDisplay: true },
     },
     speech: { mode: "draft", mustSay: ["hello"], mustNotSay: [], surfaceDraft: "hello", acceptableRealizations: ["hello"], presentationDirectives: [] },

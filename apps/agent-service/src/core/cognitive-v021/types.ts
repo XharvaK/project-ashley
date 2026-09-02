@@ -12,8 +12,8 @@ export type { DataClassification } from "../privacy/classification.js";
 
 export const ARCHITECTURE_EPOCH = "v0.2.1" as const;
 export const IMPLEMENTATION_SPEC_VERSION = "0.2.1.r5" as const;
-export const THOUGHT_CONTRACT_VERSION = 1 as const;
-export const COGNITIVE_SIDECAR_SCHEMA_VERSION = 5 as const;
+export const THOUGHT_CONTRACT_VERSION = 2 as const;
+export const COGNITIVE_SIDECAR_SCHEMA_VERSION = 6 as const;
 export const SETTLEMENT_SCHEMA_VERSION = 1 as const;
 export const OUTBOX_BRIDGE_VERSION = 1 as const;
 export const LEGACY_IMPORT_TOOL_VERSION = 1 as const;
@@ -510,6 +510,7 @@ export type RetrievalHit = {
   dimensions: EpistemicDimensions | null;
   dataClassification: DataClassification;
   live: boolean | null;
+  role?: "owner" | "ashley" | "system" | "unknown" | null;
   supportRefs: string[];
 };
 export type RetrievalInfrastructureState = "ready" | "unavailable";
@@ -553,8 +554,21 @@ export type ThoughtInterpretation = {
   topics: readonly string[];
 };
 
+export type OperationalClaimState =
+  | "not_attempted"
+  | "in_progress"
+  | "outcome_unknown"
+  | "failed"
+  | "succeeded";
+
+export type OperationalStateClaim = {
+  effectRef: string;
+  claimedState: OperationalClaimState;
+};
+
 export type ThoughtCommitments = {
   epistemic: readonly { dimensions: EpistemicDimensions; statement: string }[];
+  operational: readonly OperationalStateClaim[];
   conversational: readonly ConversationalCommitment[];
   stance: Stance;
 };
@@ -725,6 +739,8 @@ export type EffectProposal = {
   request: unknown;
   authorityEpoch: AuthorityEpoch;
   authorityCurrentness?: AuthorityCurrentnessBinding;
+  originEventId?: string;
+  originAttemptId?: string | null;
 };
 export type InFlightRecord = {
   effectId: string;
@@ -736,12 +752,14 @@ export type InFlightRecord = {
   status: "in_flight" | "receipted" | "unknown";
   dispatchedAtMs: number;
   originJobId: string | null;
+  originEventId: string | null;
+  originAttemptId: string | null;
 };
 export type EffectReceipt = {
   receiptId: string;
   effectId: string;
   idempotencyKey: IdempotencyKey;
-  outcome: "succeeded" | "failed" | "unknown";
+  outcome: "succeeded" | "failed" | "outcome_unknown" | "not_attempted" | "in_progress";
   claims: Record<string, unknown>;
   atMs: number;
   dataClassification: DataClassification;
@@ -770,7 +788,9 @@ export type AuthorityCode =
   | "AUTHORITY_PACK_INCOMPLETE"
   | "AUTHORITY_VECTOR_STALE"
   | "DERIVED_SCOPE_INVALIDATED"
-  | "DERIVED_SCOPE_UNAVAILABLE";
+  | "DERIVED_SCOPE_UNAVAILABLE"
+  | "OPERATIONAL_CLAIM_STATE_MISMATCH"
+  | "OPERATIONAL_CLAIM_EFFECTREF_UNKNOWN";
 export type AuthorityStage = "proposal" | "settlement" | "dispatch";
 export type CanonicalOwner = "nuclear" | "continuity" | "cognitive_sidecar";
 export type AuthorityVersionVector = Readonly<Record<CanonicalOwner, number>>;
@@ -817,6 +837,7 @@ export type ThoughtSettlementDraft = {
   };
   commitments: {
     epistemic: EpistemicCommitment[];
+    operational: OperationalStateClaim[];
     conversational: ConversationalCommitment[];
     stance: Stance;
   };
@@ -1020,6 +1041,7 @@ export type DurableNomination = {
   dataClassification: DataClassification;
   supersedesAssertionKey: AssertionKey | null;
   concernId: ConcernId | null;
+  sourceRefs?: string[];
 };
 export type MemorySupportProvenance = "native" | "legacy_import";
 export type MemoryAssertion = {

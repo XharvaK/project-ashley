@@ -23,6 +23,8 @@ export const AUTHORITY_CODES = [
   "AUTHORITY_VECTOR_STALE",
   "DERIVED_SCOPE_INVALIDATED",
   "DERIVED_SCOPE_UNAVAILABLE",
+  "OPERATIONAL_CLAIM_STATE_MISMATCH",
+  "OPERATIONAL_CLAIM_EFFECTREF_UNKNOWN",
 ] as const satisfies readonly AuthorityCode[];
 
 export function describeAuthorityCode(code: AuthorityCode): string {
@@ -49,6 +51,8 @@ export function describeAuthorityCode(code: AuthorityCode): string {
     case "AUTHORITY_VECTOR_STALE": return "the Authority version vector is stale";
     case "DERIVED_SCOPE_INVALIDATED": return "the derived retrieval scope is invalidated";
     case "DERIVED_SCOPE_UNAVAILABLE": return "the derived retrieval scope is unavailable";
+    case "OPERATIONAL_CLAIM_STATE_MISMATCH": return "the operational claim state does not match host reality";
+    case "OPERATIONAL_CLAIM_EFFECTREF_UNKNOWN": return "the operational claim references an unknown effect";
     default: {
       const exhaustive: never = code;
       return exhaustive;

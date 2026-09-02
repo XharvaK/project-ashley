@@ -18,6 +18,7 @@ import { deriveThoughtBudget, estimateRequestTokens } from "./budget.js";
 import { buildAllocationCandidates, type AllocationCandidate } from "./sections.js";
 import type { AllocationReceipt } from "./receipt.js";
 import { recordAllocationReceipt, recordDiagnostic } from "../diagnostics.js";
+import { mintEffectRef } from "../../effect/effect-ref.js";
 import {
   formatThoughtStructuralCorrectionData,
   formatThoughtStructuralFeedback,
@@ -124,7 +125,10 @@ export function allocateThoughtProjection(
         state: input.retrieval.state,
         miss: isMiss,
       },
-      inFlight: input.inFlight,
+      inFlight: input.inFlight.map((item) => ({
+        effectRef: mintEffectRef(input.cycleId, input.generation, item.effectId),
+        status: item.status,
+      })),
       authorityObjections: input.authorityObjections,
       runtimeCondition: {
         ...input.runtimeCondition,

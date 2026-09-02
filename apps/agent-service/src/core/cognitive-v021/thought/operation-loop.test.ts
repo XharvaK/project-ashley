@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { appendInboxEvent } from "../cycle/inbox.js";
 import { appendOwnerUtterance } from "../evidence/conversation-log.js";
 import { admitTestCycle, makeSemanticSettlement, openTestSidecar } from "../test-support.js";
+import { mintEffectRef } from "../effect/effect-ref.js";
 import type { CapabilityReality, IdentitySlice, KernelDeps, Observation } from "../types.js";
 import { checkAuthority as deterministicCheckAuthority } from "../authority/check.js";
 import { loadAuthorityPacks as loadDeterministicAuthorityPacks } from "../authority/packs.js";
@@ -92,15 +93,22 @@ describe("v0.2.1 Thought operation loop", () => {
         };
       }
       const successClaim = call === 2;
+      const effectRef = (input as any).inFlight?.[0]?.effectRef ?? mintEffectRef(cycle.cycleId, cycle.generation, "effect-failed");
       return {
-        text: JSON.stringify(makeSemanticSettlement({ speech: { mode: "draft", mustSay: [successClaim ? "the operation worked" : "the operation did not complete"], mustNotSay: [], surfaceDraft: successClaim ? "the operation worked" : "the operation did not complete", acceptableRealizations: [], presentationDirectives: [] } })),
+        text: JSON.stringify(makeSemanticSettlement({
+          commitments: {
+            ...makeSemanticSettlement().commitments,
+            operational: successClaim ? [{ effectRef, claimedState: "succeeded" }] : [],
+          },
+          speech: { mode: "draft", mustSay: [successClaim ? "the operation worked" : "the operation did not complete"], mustNotSay: [], surfaceDraft: successClaim ? "the operation worked" : "the operation did not complete", acceptableRealizations: [], presentationDirectives: [] },
+        })),
         model: "fake", modelAlias: "thought", resolvedModelId: null,
       };
     });
-    const executeEffect = vi.fn(async () => ({
+    const executeEffect = vi.fn(async (proposal: any) => ({
       receiptId: "receipt-failed",
-      effectId: "effect-failed",
-      idempotencyKey: "idem-failed",
+      effectId: proposal.effectId ?? "effect-failed",
+      idempotencyKey: proposal.idempotencyKey ?? "idem-failed",
       outcome: "failed" as const,
       claims: { error: "sandbox_failed" },
       atMs: 3,
@@ -168,7 +176,7 @@ describe("v0.2.1 Thought operation loop", () => {
       receiptId: "receipt-unknown",
       effectId: "effect-unknown",
       idempotencyKey: "idem-unknown",
-      outcome: "unknown" as const,
+      outcome: "outcome_unknown" as const,
       claims: { reason: "no confirmation" },
       atMs: 3,
       dataClassification: "never_public" as const,
@@ -188,7 +196,7 @@ describe("v0.2.1 Thought operation loop", () => {
     ));
     expect(objections).toEqual([[], [], ["IN_FLIGHT_UNKNOWN"]]);
     expect(executeEffect).toHaveBeenCalledTimes(1);
-    expect(sidecar.prepare("SELECT outcome FROM effect_receipts").get()).toMatchObject({ outcome: "unknown" });
+    expect(sidecar.prepare("SELECT outcome FROM effect_receipts").get()).toMatchObject({ outcome: "outcome_unknown" });
     expect(sidecar.prepare("SELECT COUNT(*) AS count FROM settlements").get()).toMatchObject({ count: 0 });
     expect(result).toMatchObject({ published: false, thoughtModelAttempts: 3, acceptedThoughtPasses: 3, acceptedSettlements: 0 });
     sidecar.close();

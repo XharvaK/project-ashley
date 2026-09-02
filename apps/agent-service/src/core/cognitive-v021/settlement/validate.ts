@@ -17,6 +17,7 @@ export type SettlementValidationActiveIdentity = {
   authorityEpoch: AuthorityEpoch;
   consumedEffectIds?: string[];
   effectReceiptIds?: string[];
+  effectAllowlist?: ReadonlySet<string>;
 };
 
 export type ThoughtSettlementValidation =
@@ -134,9 +135,27 @@ function validateSpeech(value: unknown): ThoughtSettlementValidation | null {
   return null;
 }
 
-function validateCommitments(value: unknown): ThoughtSettlementValidation | null {
+function validateCommitments(
+  value: unknown,
+  active?: SettlementValidationActiveIdentity,
+): ThoughtSettlementValidation | null {
   if (!isRecord(value) || !Array.isArray(value.epistemic) || !isStringArray(value.conversational) || !isRecord(value.stance)) {
     return failure("malformed", "COMMITMENTS_MISSING");
+  }
+  const operational = value.operational ?? [];
+  if (!Array.isArray(operational)) {
+    return failure("malformed", "OPERATIONAL_COMMITMENT_INVALID");
+  }
+  for (const item of operational) {
+    if (!isRecord(item) || !isString(item.effectRef) || item.effectRef.trim().length === 0) {
+      return failure("malformed", "OPERATIONAL_COMMITMENT_INVALID");
+    }
+    if (!["not_attempted", "in_progress", "outcome_unknown", "failed", "succeeded"].includes(String(item.claimedState))) {
+      return failure("malformed", "OPERATIONAL_CLAIMED_STATE_INVALID");
+    }
+    if (active?.effectAllowlist && !active.effectAllowlist.has(item.effectRef)) {
+      return failure("conflict", "OPERATIONAL_CLAIM_EFFECTREF_UNKNOWN");
+    }
   }
   if (!value.epistemic.every((item) => {
     if (!isRecord(item)) return false;
@@ -205,7 +224,7 @@ export function validateThoughtSettlementDraft(
   }
   const commitments = draft.commitments as RecordValue;
   const speech = draft.speech as RecordValue;
-  const commitmentFailure = validateCommitments(commitments);
+  const commitmentFailure = validateCommitments(commitments, active);
   if (commitmentFailure) return commitmentFailure;
   const speechFailure = validateSpeech(speech);
   if (speechFailure) return speechFailure;

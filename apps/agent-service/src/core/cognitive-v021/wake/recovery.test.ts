@@ -39,6 +39,10 @@ describe("durable wake recovery", () => {
         capturedAuthorityRevision: 1,
         nowMs: 1,
       });
+      db.prepare(`
+        INSERT INTO inbox_events (id, conversation_id, kind, payload_json, created_at_ms, status, wake_id)
+        VALUES ('event-unknown', 'conversation-unknown', 'test', '{}', 1, 'claimed', ?)
+      `).run(admitted.wake.wakeId);
       const claim = claimWake(db, admitted.wake.wakeId, "worker", 2, 100);
       authorizeWake(db, admitted.wake.wakeId, claim.leaseToken, 3);
       beginConsequence(db, admitted.wake.wakeId, claim.leaseToken, 1, 4);
@@ -51,6 +55,7 @@ describe("durable wake recovery", () => {
         idempotencyKey: "idempotency-unknown",
         payload: { referenceOnly: true },
         dispatchedAtMs: 5,
+        originEventId: "event-unknown",
       });
       markInFlightUnknown(db, effect.effectId, 6);
 

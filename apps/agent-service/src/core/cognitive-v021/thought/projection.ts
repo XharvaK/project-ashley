@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { mintEffectRef } from "../effect/effect-ref.js";
 import type {
   AssertionKey,
   AuthorityCode,
@@ -39,7 +40,7 @@ export type CompactConversationEvidence = {
   kind: "log";
   ref: string;
   sourceStore: "conversation_log";
-  role: "owner" | "ashley" | "system";
+  role: "owner" | "ashley" | "system" | "unknown";
   snippet: string;
   lineageId?: string | null;
   version?: number | null;
@@ -55,6 +56,11 @@ export type ProjectedRetrievalResult = {
   hits: CompactRetrievalEvidence[];
   state: RetrievalInfrastructureState;
   miss: boolean;
+};
+
+export type ProjectedInFlightRecord = {
+  effectRef: string;
+  status: "in_flight" | "receipted" | "unknown";
 };
 
 export type ProjectedThoughtInput = {
@@ -74,7 +80,7 @@ export type ProjectedThoughtInput = {
   capabilityReality: CapabilityReality;
   observations: Observation[];
   retrieval: ProjectedRetrievalResult;
-  inFlight: InFlightRecord[];
+  inFlight: ProjectedInFlightRecord[];
   authorityObjections: AuthorityCode[];
   runtimeCondition: RuntimeCondition;
   rememberDirective: RememberDirective | null;
@@ -105,7 +111,7 @@ export function projectRetrievalHit(hit: RetrievalHit): CompactRetrievalEvidence
       kind: "log",
       ref: hit.ref,
       sourceStore: "conversation_log",
-      role: "owner", // default or mapped from hit
+      role: hit.role ?? "unknown",
       snippet: hit.snippet,
     };
   }
@@ -162,7 +168,10 @@ export function projectThoughtInput(
       state: infrastructureState,
       miss: isMiss,
     },
-    inFlight: fullInput.inFlight,
+    inFlight: fullInput.inFlight.map((item) => ({
+      effectRef: mintEffectRef(fullInput.cycleId, fullInput.generation, item.effectId),
+      status: item.status,
+    })),
     authorityObjections: fullInput.authorityObjections,
     runtimeCondition: fullInput.runtimeCondition,
     rememberDirective: fullInput.rememberDirective,

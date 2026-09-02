@@ -751,38 +751,75 @@ export function reconcileOutcomeUnknown(
       quarantineEvent(db, current, "wake_missing", input.nowMs);
       return { kind: "terminal", reason: "wake_missing", eventId: input.eventId };
     }
-    const receipt = row(db.prepare(
-      `SELECT r.outcome
-         FROM in_flight_effects f
-         LEFT JOIN effect_receipts r ON r.effect_id = f.effect_id
-        WHERE f.wake_id = ? AND r.outcome IS NOT NULL
-        ORDER BY r.at_ms DESC LIMIT 1`,
-    ).get(current.wake_id));
-    const outcome = text(receipt?.outcome);
-    if (outcome === "succeeded" || outcome === "failed") {
-      const reason = outcome === "succeeded" ? "completed" : "permanent_failure";
-      db.prepare(
-        `UPDATE inbox_events SET state = 'terminal', status = ?,
-            terminal_reason = ?, quarantine_reason = NULL,
-            consumed_at_ms = CASE WHEN ? = 'succeeded' THEN ? ELSE consumed_at_ms END,
-            last_error = CASE WHEN ? = 'failed' THEN 'effect_receipt_failed' ELSE last_error END
-          WHERE id = ? AND state = 'reconciling'`,
-      ).run(
-        outcome === "succeeded" ? "consumed" : "failed_terminal",
-        reason,
-        outcome,
-        input.nowMs,
-        outcome,
-        input.eventId,
-      );
-      wakeToTerminal(db, current.wake_id, outcome === "succeeded" ? "completed" : "refused", input.nowMs);
-      return { kind: "terminal", reason, eventId: input.eventId };
+
+    // Collect candidate event IDs: this event plus any predecessor repair lineage
+    const eventIds: string[] = [input.eventId];
+    let cursor: string | null = input.eventId;
+    while (cursor) {
+      const repairRow = db.prepare(
+        "SELECT predecessor_event_id FROM durable_work_repairs WHERE repair_event_id = ?",
+      ).get(cursor) as { predecessor_event_id?: string } | undefined;
+      if (repairRow?.predecessor_event_id && !eventIds.includes(repairRow.predecessor_event_id)) {
+        eventIds.push(repairRow.predecessor_event_id);
+        cursor = repairRow.predecessor_event_id;
+      } else {
+        cursor = null;
+      }
     }
-    const unresolved = Boolean(db.prepare(
-      `SELECT 1 FROM in_flight_effects
-        WHERE wake_id = ? AND state IN ('in_flight', 'unknown') LIMIT 1`,
-    ).get(current.wake_id)) || outcome === "unknown";
-    if (input.noExternalDispatchProof === true && input.proofRef?.trim() && !unresolved) {
+
+    const placeholders = eventIds.map(() => "?").join(",");
+    const boundEffects = db.prepare(
+      `SELECT effect_id, state FROM in_flight_effects WHERE origin_event_id IN (${placeholders})`,
+    ).all(...eventIds) as Array<{ effect_id: string; state: string }>;
+
+    if (boundEffects.length > 0) {
+      const effectReceipts = boundEffects.map((eff) => {
+        const row = db.prepare("SELECT outcome FROM effect_receipts WHERE effect_id = ?").get(eff.effect_id) as { outcome?: string } | undefined;
+        return { effectId: eff.effect_id, inFlightState: eff.state, outcome: row?.outcome ?? null };
+      });
+
+      const hasMissingReceipt = effectReceipts.some((r) => r.outcome === null);
+      const hasUnknown = effectReceipts.some((r) => r.outcome === "outcome_unknown" || r.outcome === "unknown");
+      const hasInProgress = effectReceipts.some((r) => r.outcome === "in_progress");
+      const hasFailed = effectReceipts.some((r) => r.outcome === "failed");
+      const allSucceeded = effectReceipts.length > 0 && effectReceipts.every((r) => r.outcome === "succeeded");
+
+      // §6.2 Multi-effect reconciliation rule:
+      // If ANY bound effect has outcome="outcome_unknown" OR has no receipt -> return pending outcome_still_unknown
+      if (hasMissingReceipt || hasUnknown || hasInProgress) {
+        return { kind: "pending", reason: "outcome_still_unknown", eventId: input.eventId };
+      }
+
+      // Else if ALL bound effects have outcome="succeeded" -> return completed
+      if (allSucceeded) {
+        db.prepare(
+          `UPDATE inbox_events SET state = 'terminal', status = 'consumed',
+              terminal_reason = 'completed', quarantine_reason = NULL,
+              consumed_at_ms = ?
+            WHERE id = ? AND state = 'reconciling'`,
+        ).run(input.nowMs, input.eventId);
+        wakeToTerminal(db, current.wake_id, "completed", input.nowMs);
+        return { kind: "terminal", reason: "completed", eventId: input.eventId };
+      }
+
+      // Else if ANY bound effect has outcome="failed" -> return permanent_failure
+      if (hasFailed) {
+        db.prepare(
+          `UPDATE inbox_events SET state = 'terminal', status = 'failed_terminal',
+              terminal_reason = 'permanent_failure', quarantine_reason = NULL,
+              last_error = 'effect_receipt_failed'
+            WHERE id = ? AND state = 'reconciling'`,
+        ).run(input.eventId);
+        wakeToTerminal(db, current.wake_id, "refused", input.nowMs);
+        return { kind: "terminal", reason: "permanent_failure", eventId: input.eventId };
+      }
+
+      // Else (e.g. not_attempted) -> pending outcome_still_unknown
+      return { kind: "pending", reason: "outcome_still_unknown", eventId: input.eventId };
+    }
+
+    // No bound effects found: check noExternalDispatchProof
+    if (input.noExternalDispatchProof === true && input.proofRef?.trim()) {
       db.prepare(
         `UPDATE inbox_events SET state = 'pending', status = 'pending',
             last_error = ?, next_eligible_at_ms = NULL, claim_token = NULL,
@@ -792,6 +829,7 @@ export function reconcileOutcomeUnknown(
       wakeToPending(db, current.wake_id, input.nowMs);
       return { kind: "pending", reason: "safe_to_retry", eventId: input.eventId };
     }
+
     return { kind: "pending", reason: "outcome_still_unknown", eventId: input.eventId };
   });
 }

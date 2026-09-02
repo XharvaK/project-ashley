@@ -31,6 +31,8 @@ import {
   type DeliveryIntent,
   type RememberDirective,
   type AuthorityCode,
+  type InFlightRecord,
+  type EffectReceipt,
 } from "../types.js";
 import {
   createThoughtStructuralFeedback,
@@ -47,6 +49,7 @@ import { getCycle, getCurrentCycle, admitCycle, appendCycleLogIds, updateCycleSt
 import { getConversationEvidence, listConversationEvidence } from "../evidence/conversation-log.js";
 import { listInFlight } from "../effect/in-flight.js";
 import { dispatchEffect } from "../effect/proposal.js";
+import { mintEffectRef } from "../effect/effect-ref.js";
 import { registerActiveThought } from "../cycle/active.js";
 import { adaptPerception } from "../perception/adapter.js";
 import { buildThoughtInput } from "./input.js";
@@ -70,6 +73,7 @@ import {
 } from "./projection-allocator/allocator.js";
 import {
   type ProjectedThoughtInput,
+  type ProjectedInFlightRecord,
   computeSemanticProjectionHash,
   computeDispatchMessagesHash,
 } from "./projection.js";
@@ -77,6 +81,7 @@ import { validateThoughtSettlementDraft } from "../settlement/validate.js";
 import { getPublishedSettlementIdentity, publishSemanticTransaction } from "../settlement/publish.js";
 import { getWake } from "../wake/ledger.js";
 import { admitOwnerSuppliedClaim } from "../memory/admission.js";
+import { hasStructuredCurrentnessEntitlement } from "../authority/check.js";
 import { recordDiagnostic } from "./diagnostics.js";
 import { metadataFromError } from "../../model-fabric/receipts.js";
 import { fidelityCheck } from "../speech/fidelity.js";
@@ -163,9 +168,33 @@ function semanticReferenceValue(
   return allocated;
 }
 
+export function materializeEffectsCompleted(
+  inFlight: readonly InFlightRecord[] | readonly ProjectedInFlightRecord[],
+  receiptsByEffectId?: Readonly<Record<string, EffectReceipt>>,
+): string[] {
+  if (!receiptsByEffectId) return [];
+  const completed: string[] = [];
+  for (const item of inFlight) {
+    if ("effectId" in item && typeof item.effectId === "string") {
+      const receipt = receiptsByEffectId[item.effectId];
+      if (receipt && (receipt.outcome === "succeeded" || receipt.outcome === "failed")) {
+        completed.push(item.effectId);
+      }
+    } else {
+      for (const [id, receipt] of Object.entries(receiptsByEffectId)) {
+        if (receipt && (receipt.outcome === "succeeded" || receipt.outcome === "failed") && !completed.includes(id)) {
+          completed.push(id);
+        }
+      }
+    }
+  }
+  return completed;
+}
+
 function materializeSemanticSettlement(
-  semantic: SettlementSemanticOutput,
+  semantic: Extract<ThoughtSemanticOutput, { kind: "settlement" }>,
   input: ThoughtInput | ProjectedThoughtInput,
+  receiptsByEffectId?: Readonly<Record<string, EffectReceipt>>,
 ): ThoughtSettlementDraft {
   // Local semantic aliases are resolved to ordinary durable IDs in this
   // kernel projection. The aliases themselves never become a lookup namespace.
@@ -200,6 +229,10 @@ function materializeSemanticSettlement(
     },
     commitments: {
       epistemic: semantic.commitments.epistemic.map((item) => ({ ...item })),
+      operational: (semantic.commitments.operational ?? []).map((item) => ({
+        effectRef: String(item.effectRef),
+        claimedState: item.claimedState,
+      })),
       conversational: [...semantic.commitments.conversational],
       stance: { ...semantic.commitments.stance },
     },
@@ -291,12 +324,13 @@ function materializeSemanticSettlement(
       dataClassification: nomination.dataClassification,
       supersedesAssertionKey: nomination.supersedesRef,
       concernId: semanticReferenceValue(nomination.concernRef, localAliases),
+      sourceRefs: [...nomination.sourceRefs],
     })),
     operations: {
       observationsConsumed: [...semantic.evidenceUse.observationRefsUsed],
       // Effect completion is receipt/Authority truth. The model cannot emit a
       // completion list or turn an in-flight effect into a success claim.
-      effectsCompleted: [],
+      effectsCompleted: materializeEffectsCompleted(input.inFlight, receiptsByEffectId),
       intentsStillInFlight: [...semantic.evidenceUse.openIntentRefs],
     },
     authority: { objectionsApplied: [], revisionCount: 0 },
@@ -304,12 +338,17 @@ function materializeSemanticSettlement(
 }
 
 function semanticReferencesForInput(input: ThoughtInput | ProjectedThoughtInput): string[] {
+  const effectRefs = input.inFlight.map((item) =>
+    "effectRef" in item && typeof (item as any).effectRef === "string"
+      ? (item as any).effectRef
+      : mintEffectRef(input.cycleId, input.generation, (item as any).effectId),
+  );
   return [
     ...input.rawConversation.map((row) => row.rowId),
     ...input.workingContext.map((item) => item.id),
     ...input.occupancy.map((item) => item.concernId),
     ...input.observations.map((item) => item.observationId),
-    ...input.inFlight.map((item) => item.effectId),
+    ...effectRefs,
     ...input.retrieval.hits.flatMap((hit) => "supportRefs" in hit ? [hit.ref, ...hit.supportRefs] : [hit.ref]),
     input.trigger.ref,
   ];
@@ -507,7 +546,11 @@ export async function runThoughtModel(
           pass,
           requestId,
           occupantId: input.occupantId,
-          settlement: materializeSemanticSettlement(semantic, input),
+          settlement: materializeSemanticSettlement(
+            semantic,
+            input,
+            deps?.loadAuthorityPacks ? deps.loadAuthorityPacks().receipt.receiptsByEffectId : undefined,
+          ),
         }
       : semantic.kind === "observation_intent"
         ? (() => {
@@ -1244,7 +1287,11 @@ export async function runCognitiveCycle(
       if (counters.effectRounds >= MAX_EFFECT_ROUNDS) return emitFailure("pass_exhausted");
       incrementThoughtAttemptCounter(sidecar, cycle.cycleId, cycle.generation, "effectRounds");
       updateCycleState(sidecar, cycle.cycleId, "awaiting_operation", deps.nowMs());
-      const proposal = invocation.output.effectProposal;
+      const proposal = {
+        ...invocation.output.effectProposal,
+        originEventId: event.id,
+        originAttemptId: null,
+      };
       const reloadDispatchState = () => {
         const currentPacks = deps.loadAuthorityPacks();
         const current = getCurrentCycle(sidecar, cycle.conversationId, { includeIdle: true });
@@ -1287,6 +1334,7 @@ export async function runCognitiveCycle(
       occupantId: cycle.occupantId,
       authorityEpoch: cycle.authorityEpoch,
       consumedEffectIds: inFlight.filter((item) => item.status === "receipted").map((item) => item.effectId),
+      effectAllowlist: new Set(inFlight.map((item) => mintEffectRef(cycle.cycleId, cycle.generation, item.effectId))),
     });
     if (!validation.ok) {
       if (validation.kind === "stale") {
@@ -1304,14 +1352,15 @@ export async function runCognitiveCycle(
       return emitFailure("malformed");
     }
     const packs = deps.loadAuthorityPacks();
+    const currentnessPack = {
+      ...packs.currentness,
+      observedObservationIds: observationsForThought.map((item) => item.observationId),
+    };
     const authority = deps.checkAuthority("settlement", {
       settlement: validation.draft,
       packs: {
         ...packs,
-        currentness: {
-          ...packs.currentness,
-          observedObservationIds: observationsForThought.map((item) => item.observationId),
-        },
+        currentness: currentnessPack,
       },
       authorityEpoch: cycle.authorityEpoch,
       authorityDb: authorityDbForPacks(deps, packs),
@@ -1388,6 +1437,7 @@ export async function runCognitiveCycle(
       deliveryIntent: deliveryIntentFor(cycle, payload, "licensed_speech"),
       authorityDb: authorityDbForPacks(deps, packs),
       expectedCurrentness: invocation.kernelEnvelope?.authorityCurrentness ?? packs.currentness.binding,
+      currentness: currentnessPack,
       wakeId: cycle.wakeId,
       wakeLeaseToken: event.claimToken,
       semanticPass: pass,
@@ -1398,6 +1448,10 @@ export async function runCognitiveCycle(
     }
     if (publication.outboxId !== null) await deps.projectOutbox(publication.outboxId);
     if (directive && deps.origin !== "shadow") {
+      const currentnessEntitled = hasStructuredCurrentnessEntitlement(
+        settlement,
+        currentnessPack,
+      );
       const evidence = getConversationEvidence(sidecar, directive.evidenceRowId);
       if (evidence && evidence.lineageId === directive.evidenceLineageId) {
         for (const nomination of settlement.durableNominations) {
@@ -1406,6 +1460,7 @@ export async function runCognitiveCycle(
             nominationId: nomination.nominationId,
             evidence,
             evidenceRowId: directive.evidenceRowId,
+            currentnessEntitled,
             nowMs: deps.nowMs(),
           });
         }

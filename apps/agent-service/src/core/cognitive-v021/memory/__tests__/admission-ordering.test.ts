@@ -5,6 +5,7 @@ import { openDerivedStore, registerDerivedStoreForSidecar } from "../../retrieva
 import { searchMemoryFts } from "../../retrieval/fts.js";
 import { upsertMemoryAssertion, retractMemoryAssertion, getMemoryAssertion } from "../assertions.js";
 import { tickAdmission, admitOwnerSuppliedClaim } from "../admission.js";
+import { appendOwnerUtterance } from "../../evidence/conversation-log.js";
 import type { DurableNomination } from "../../types.js";
 
 function makeNomination(overrides: Partial<DurableNomination> = {}): DurableNomination {
@@ -24,6 +25,7 @@ function makeNomination(overrides: Partial<DurableNomination> = {}): DurableNomi
     dataClassification: "never_public",
     supersedesAssertionKey: null,
     concernId: null,
+    sourceRefs: [],
     ...overrides,
   };
 }
@@ -36,6 +38,10 @@ function publishNoms(
   const draft = makeThoughtDraft({
     cycleId: inputs[0].cycleId,
     generation: inputs[0].generation,
+    operations: {
+      ...makeThoughtDraft().operations,
+      observationsConsumed: ["obs-default"],
+    },
     speech: {
       mode: "none",
       mustSay: [],
@@ -50,6 +56,18 @@ function publishNoms(
     ...draft,
     settlementId,
     speech: { ...draft.speech, finalLicensedText: null },
+  }, {
+    currentness: {
+      requireObservationForLatest: false,
+      binding: {
+        barrierId: "global",
+        barrierEpoch: 1,
+        barrierRevision: 1,
+        ownerVersions: { nuclear: 1, continuity: 1, cognitive_sidecar: 1 },
+      },
+      complete: true,
+      observedObservationIds: ["obs-default"],
+    },
   });
 }
 
@@ -84,12 +102,18 @@ describe("Memory Transaction Ordering & Post-Commit Synchronization", () => {
       return originalSync(db, changes);
     };
 
+    const ev = appendOwnerUtterance(sidecar, {
+      conversationId: "thread-1",
+      text: "Batch owner evidence",
+      discordMessageIds: ["m1"],
+      nowMs: 1,
+    });
     admitTestCycle(sidecar, {
       cycleId: "c1",
       conversationId: "thread-1",
       generation: 1,
       triggerKind: "owner_message",
-      triggerRef: "ref-1",
+      triggerRef: ev.rowId,
       occupantId: "doc",
       nowMs: 1,
     });
@@ -100,6 +124,7 @@ describe("Memory Transaction Ordering & Post-Commit Synchronization", () => {
       generation: 1,
       assertionKey: "batch:key:1",
       statement: "Batch assertion one",
+      sourceRefs: [ev.rowId],
     });
     const nom2 = makeNomination({
       nominationId: "nom-batch-2",
@@ -107,6 +132,7 @@ describe("Memory Transaction Ordering & Post-Commit Synchronization", () => {
       generation: 1,
       assertionKey: "batch:key:2",
       statement: "Batch assertion two",
+      sourceRefs: [ev.rowId],
     });
 
     publishNoms(sidecar, [nom1, nom2], "settle-1");
@@ -189,12 +215,18 @@ describe("Memory Transaction Ordering & Post-Commit Synchronization", () => {
     });
     derived.reconcile(sidecar);
 
+    const evC = appendOwnerUtterance(sidecar, {
+      conversationId: "thread-1",
+      text: "New superseding replacement statement",
+      discordMessageIds: ["m-c"],
+      nowMs: 1,
+    });
     admitTestCycle(sidecar, {
       cycleId: "c-tick",
       conversationId: "thread-1",
       generation: 1,
       triggerKind: "owner_message",
-      triggerRef: "ref-1",
+      triggerRef: evC.rowId,
       occupantId: "doc",
       nowMs: 1,
     });
@@ -206,6 +238,7 @@ describe("Memory Transaction Ordering & Post-Commit Synchronization", () => {
       assertionKey: "new:key:superseding",
       statement: "New superseding replacement statement",
       supersedesAssertionKey: "old:key:to_supersede",
+      sourceRefs: [evC.rowId],
     });
 
     publishNoms(sidecar, [nom], "s-tick");
@@ -241,12 +274,18 @@ describe("Memory Transaction Ordering & Post-Commit Synchronization", () => {
     registerDerivedStoreForSidecar(sidecar, derived);
     derived.reconcile(sidecar);
 
+    const evD = appendOwnerUtterance(sidecar, {
+      conversationId: "thread-1",
+      text: "Owner directly remembered topic",
+      discordMessageIds: ["m-d"],
+      nowMs: 1,
+    });
     admitTestCycle(sidecar, {
       cycleId: "c-owner",
       conversationId: "thread-1",
       generation: 1,
       triggerKind: "owner_message",
-      triggerRef: "ref-1",
+      triggerRef: evD.rowId,
       occupantId: "doc",
       nowMs: 1,
     });
@@ -258,6 +297,7 @@ describe("Memory Transaction Ordering & Post-Commit Synchronization", () => {
       assertionKey: "owner:claim:direct",
       statement: "Owner directly remembered topic",
       supersedesAssertionKey: null,
+      sourceRefs: [evD.rowId],
     });
 
     publishNoms(sidecar, [nom], "s-owner");
@@ -267,6 +307,7 @@ describe("Memory Transaction Ordering & Post-Commit Synchronization", () => {
     const admitted = admitOwnerSuppliedClaim(sidecar, {
       settlementId: "s-owner",
       nominationId: nom.nominationId,
+      evidence: evD,
     });
     expect(admitted?.result).toBe("admitted");
     expect(syncSpy).toHaveBeenCalledTimes(1);
@@ -318,12 +359,18 @@ describe("Memory Transaction Ordering & Post-Commit Synchronization", () => {
     registerDerivedStoreForSidecar(sidecar, derived);
     derived.reconcile(sidecar);
 
+    const evF = appendOwnerUtterance(sidecar, {
+      conversationId: "thread-1",
+      text: "Semantic state survives derived failure",
+      discordMessageIds: ["m-f"],
+      nowMs: 1,
+    });
     admitTestCycle(sidecar, {
       cycleId: "c-fail",
       conversationId: "thread-1",
       generation: 1,
       triggerKind: "owner_message",
-      triggerRef: "ref-1",
+      triggerRef: evF.rowId,
       occupantId: "doc",
       nowMs: 1,
     });
@@ -335,6 +382,7 @@ describe("Memory Transaction Ordering & Post-Commit Synchronization", () => {
       assertionKey: "surviving:semantic:key",
       statement: "Semantic state survives derived failure",
       supersedesAssertionKey: null,
+      sourceRefs: [evF.rowId],
     });
 
     publishNoms(sidecar, [nom], "s-fail");
