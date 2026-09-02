@@ -182,7 +182,7 @@ describe("MF-M1 completeChat receipts", () => {
     });
     const database = db();
 
-    const result = await completeChat(
+    const result = await withOfflineAppGateDisabled(() => completeChat(
       [{ role: "user", content: "hello" }],
       {
         attentionDb: database,
@@ -191,7 +191,7 @@ describe("MF-M1 completeChat receipts", () => {
         logicalRole: "expression",
         reasoningEffort: "none",
       },
-    );
+    ));
     const metadata = fabricMetadata(result);
     const receipt = metadata.receipt;
 
@@ -235,7 +235,7 @@ describe("MF-M1 completeChat receipts", () => {
     });
     const database = db();
 
-    const result = await completeChat(
+    const result = await withOfflineAppGateDisabled(() => completeChat(
       [{ role: "user", content: "think" }],
       {
         attentionDb: database,
@@ -245,7 +245,7 @@ describe("MF-M1 completeChat receipts", () => {
         reasoningEffort: "high",
         deadlineAtMs: Date.now() + 10_000,
       },
-    );
+    ));
     const receipt = fabricMetadata(result).receipt;
 
     expect(receipt.attempts).toHaveLength(1);
@@ -277,7 +277,7 @@ describe("MF-M1 completeChat receipts", () => {
     });
     const database = db();
 
-    const result = await completeChat(
+    const result = await withOfflineAppGateDisabled(() => completeChat(
       [{ role: "user", content: "observe" }],
       {
         attentionDb: database,
@@ -286,7 +286,7 @@ describe("MF-M1 completeChat receipts", () => {
         logicalRole: "thought_observation",
         reasoningEffort: "high",
       },
-    );
+    ));
     const receipt = fabricMetadata(result).receipt;
 
     expect(receipt.logicalRole).toBe("thought_observation");
@@ -352,7 +352,7 @@ describe("MF-M1 completeChat receipts", () => {
     let thrown: unknown;
 
     try {
-      await completeChat(
+      await withOfflineAppGateDisabled(() => completeChat(
         [{ role: "user", content: "hello" }],
         {
           attentionDb: database,
@@ -360,7 +360,7 @@ describe("MF-M1 completeChat receipts", () => {
           route: "ashley_expression",
           logicalRole: "expression",
         },
-      );
+      ));
     } catch (error) {
       thrown = error;
     }

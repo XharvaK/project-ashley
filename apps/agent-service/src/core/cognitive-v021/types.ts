@@ -1242,6 +1242,8 @@ export type CheckAuthority = (
     authorityEpoch: AuthorityEpoch;
     authorityDb?: DatabaseSync;
     expectedCurrentness?: AuthorityCurrentnessBinding;
+    /** Host-owned effects active for the cycle being settled. */
+    activeEffects?: readonly InFlightRecord[];
   },
 ) => AuthorityVerdict;
 export type InvokeThoughtComplete = (

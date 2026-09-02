@@ -5,6 +5,7 @@ import type {
   AuthorityStage,
   AuthorityVerdict,
   EffectProposal,
+  InFlightRecord,
   ObservationRequest,
   PublishedCognitiveSettlement,
   ThoughtSettlementDraft,
@@ -29,6 +30,7 @@ function checkSettlement(
   settlement: ThoughtSettlementDraft | PublishedCognitiveSettlement,
   packs: AuthorityPacks,
   authorityEpoch: number,
+  activeEffects: readonly InFlightRecord[] = [],
 ): AuthorityVerdict {
   const codes: AuthorityCode[] = [];
   if (settlement.authorityEpoch !== authorityEpoch) codes.push("DISPATCH_EPOCH_CHANGED");
@@ -51,17 +53,28 @@ function checkSettlement(
       codes.push("CURRENTNESS_UNVERIFIED");
     }
   }
-  for (const effectId of settlement.operations.effectsCompleted) {
+  const activeEffectIds = new Set(activeEffects.map((effect) => effect.effectId));
+  const receiptEffectIds = new Set([
+    ...settlement.operations.effectsCompleted,
+    ...activeEffectIds,
+  ]);
+  const affirmativeEffectClaim = /\b(?:worked|succeeded|successful|completed|sent|created|updated|done)\b/i.test(settlementText(settlement));
+  for (const effectId of receiptEffectIds) {
+    const activeEffect = activeEffects.find((effect) => effect.effectId === effectId);
     const receipt = packs.receipt.receiptsByEffectId[effectId];
     if (!receipt) {
-      codes.push("RECEIPT_REQUIRED");
+      if (activeEffect?.status === "unknown" || activeEffect?.status === "in_flight") {
+        codes.push("IN_FLIGHT_UNKNOWN");
+      } else {
+        codes.push("RECEIPT_REQUIRED");
+      }
       continue;
     }
     if (receipt.outcome === "unknown") {
       codes.push("IN_FLIGHT_UNKNOWN");
       continue;
     }
-    if (receipt.outcome === "failed" && /\b(?:worked|succeeded|successful|completed|sent|created|updated|done)\b/i.test(settlementText(settlement))) {
+    if (receipt.outcome === "failed" && affirmativeEffectClaim) {
       codes.push("RECEIPT_CONTRADICTS_CLAIM");
     }
   }
@@ -127,6 +140,8 @@ export function checkAuthority(
     authorityEpoch: number;
     authorityDb?: import("node:sqlite").DatabaseSync;
     expectedCurrentness?: AuthorityCurrentnessBinding;
+    /** Host-owned effects active for the cycle being settled. */
+    activeEffects?: readonly InFlightRecord[];
   },
 ): AuthorityVerdict {
   const proposalCurrentness = input.proposal && "authorityCurrentness" in input.proposal
@@ -138,7 +153,7 @@ export function checkAuthority(
     input.expectedCurrentness ?? proposalCurrentness,
   );
   if (stage === "settlement" && input.settlement) {
-    const result = checkSettlement(input.settlement, input.packs, input.authorityEpoch);
+    const result = checkSettlement(input.settlement, input.packs, input.authorityEpoch, input.activeEffects);
     return result.ok && currentness.length === 0
       ? result
       : { ok: false, codes: unique([...currentness, ...(result.ok ? [] : result.codes)]) };

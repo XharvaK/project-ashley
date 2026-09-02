@@ -53,6 +53,47 @@ describe("v0.2.1 deterministic Authority", () => {
     expect(checkAuthority("settlement", { settlement: draft, packs: packs({ receipt: { receiptsByEffectId: { "effect-1": { receiptId: "r1", effectId: "effect-1", idempotencyKey: "i1", outcome: "failed", claims: {}, atMs: 1, dataClassification: "ordinary", secretOmitted: false } } } }), authorityEpoch: 1 })).toMatchObject({ ok: false, codes: ["RECEIPT_CONTRADICTS_CLAIM"] });
   });
 
+  it("checks active host-owned receipt outcomes even when effectsCompleted is empty", () => {
+    const draft = makeThoughtDraft({ commitments: {
+      ...makeThoughtDraft().commitments,
+      epistemic: [{ ...makeThoughtDraft().commitments.epistemic[0]!, statement: "it worked" }],
+    }});
+    const activeEffect = {
+      effectId: "effect-1",
+      cycleId: "cycle-1",
+      generation: 1,
+      wakeId: "wake-1",
+      correlationId: "effect-1",
+      idempotencyKey: "idem-1",
+      status: "receipted" as const,
+      dispatchedAtMs: 1,
+      originJobId: null,
+    };
+    const failedReceipt = {
+      receiptId: "r1",
+      effectId: "effect-1",
+      idempotencyKey: "i1",
+      outcome: "failed" as const,
+      claims: {},
+      atMs: 1,
+      dataClassification: "ordinary" as const,
+      secretOmitted: false,
+    };
+    const unknownReceipt = { ...failedReceipt, receiptId: "r2", outcome: "unknown" as const };
+    expect(checkAuthority("settlement", {
+      settlement: draft,
+      packs: packs({ receipt: { receiptsByEffectId: { "effect-1": failedReceipt } } }),
+      authorityEpoch: 1,
+      activeEffects: [activeEffect],
+    })).toEqual({ ok: false, codes: ["RECEIPT_CONTRADICTS_CLAIM"] });
+    expect(checkAuthority("settlement", {
+      settlement: draft,
+      packs: packs({ receipt: { receiptsByEffectId: { "effect-1": unknownReceipt } } }),
+      authorityEpoch: 1,
+      activeEffects: [activeEffect],
+    })).toEqual({ ok: false, codes: ["IN_FLIGHT_UNKNOWN"] });
+  });
+
   it("rechecks dispatch epoch and blocks relational withdrawal", () => {
     const proposal: EffectProposal = { effectId: "effect-1", cycleId: "cycle-1", generation: 1, idempotencyKey: "idem-1", kind: "workspace.write_file", request: {}, authorityEpoch: 1 };
     expect(checkAuthority("dispatch", { proposal, packs: packs({ stateEpoch: { authorityEpoch: 2 } }), authorityEpoch: 2 })).toMatchObject({ ok: false, codes: ["DISPATCH_EPOCH_CHANGED"] });

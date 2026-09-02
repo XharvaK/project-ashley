@@ -1317,6 +1317,52 @@ export function qualificationFixtureOwnerMessage(caseId: ThoughtQualificationCas
   return FIXTURE_OWNER_MESSAGES[caseId];
 }
 
+type AbstainFixtureCoherence = Readonly<{
+  ownerMessage: string;
+  requiredEvidenceAbsent: boolean;
+  attachmentPathAvailable: boolean;
+  attachmentProjectBindingAvailable: boolean;
+  availableAuthorizedObservationKinds: readonly string[];
+  relevantObservationKinds: readonly string[];
+  authorizedObservationCanAcquireRelevantEvidence: boolean;
+}>;
+
+// Qualification fixture authority only. This relevance list is deliberately
+// not consulted by runtime Thought or Authority code.
+const ABSTAIN_FIXTURE_REQUEST_FACTS = Object.freeze({
+  attachmentPath: null as string | null,
+  attachmentProjectId: null as string | null,
+  relevantObservationKinds: Object.freeze([] as readonly string[]),
+});
+
+export function qualificationFixtureAbstainCoherence(): AbstainFixtureCoherence {
+  const input = fixtureInput("abstain-coherence", "abstain", 0, "qualification-occupant");
+  const availableAuthorizedObservationKinds = (input.capabilityReality.operationCapabilities ?? [])
+    .filter((capability) =>
+      capability.semanticClass === "observation"
+      && capability.available
+      && capability.authorizedProjectIds.includes("qualification-fixture"),
+    )
+    .map((capability) => capability.operationKind);
+  const evidencePresent = input.capabilityReality.attachmentText
+    || input.observations.length > 0
+    || input.retrieval.hits.length > 0;
+  const authorizedObservationCanAcquireRelevantEvidence = ABSTAIN_FIXTURE_REQUEST_FACTS.attachmentPath !== null
+    && ABSTAIN_FIXTURE_REQUEST_FACTS.attachmentProjectId !== null
+    && availableAuthorizedObservationKinds.some((operationKind) =>
+      ABSTAIN_FIXTURE_REQUEST_FACTS.relevantObservationKinds.includes(operationKind),
+    );
+  return Object.freeze({
+    ownerMessage: input.rawConversation[0]?.text ?? "",
+    requiredEvidenceAbsent: !evidencePresent,
+    attachmentPathAvailable: ABSTAIN_FIXTURE_REQUEST_FACTS.attachmentPath !== null,
+    attachmentProjectBindingAvailable: ABSTAIN_FIXTURE_REQUEST_FACTS.attachmentProjectId !== null,
+    availableAuthorizedObservationKinds: Object.freeze(availableAuthorizedObservationKinds),
+    relevantObservationKinds: ABSTAIN_FIXTURE_REQUEST_FACTS.relevantObservationKinds,
+    authorizedObservationCanAcquireRelevantEvidence,
+  });
+}
+
 function fixtureInput(
   runId: string,
   caseId: ThoughtQualificationCaseId,

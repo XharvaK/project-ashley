@@ -187,4 +187,46 @@ describe("OFFLINE-HARNESS-01", () => {
       "offline_external_network_blocked:https:",
     );
   });
+
+  it("keeps the transport fence active inside the scoped application-gate seam", () => {
+    const child = spawnSync(
+      process.execPath,
+      [
+        "--import",
+        "tsx/esm",
+        "--input-type=module",
+        "-e",
+        [
+          'await import("./src/core/qualification/offline-network-guard.ts");',
+          'const { withOfflineAppGateDisabled } = await import("./src/core/qualification/offline-test-helpers.ts");',
+          'const { assertOutboundAllowed } = await import("./src/core/continuity/process-guards.ts");',
+          'await withOfflineAppGateDisabled(async () => {',
+          '  assertOutboundAllowed("deterministic-test");',
+          '  console.log("application_guard_suppressed");',
+          '  try { await fetch("https://offline-helper.invalid/probe"); } catch (error) { console.log(String(error)); }',
+          '  for (const [transport, url] of [["http", "http://offline-helper.invalid/probe"], ["https", "https://offline-helper.invalid/probe"]]) {',
+          '    const { request } = await import(`node:${transport}`);',
+          '    try { request(url); } catch (error) { console.log(String(error)); }',
+          '  }',
+          '});',
+        ].join(" "),
+      ],
+      {
+        cwd: APP_ROOT,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          ASHLEY_PHASE0_OFFLINE: "true",
+          COMPOSER_ENV_FILE: `${APP_ROOT}\\config\\env.example`,
+        },
+      },
+    );
+    const output = `${child.stdout}\n${child.stderr}`;
+    expect(child.status).not.toBe(0);
+    expect(output).toContain("application_guard_suppressed");
+    expect(output).toContain("offline_external_network_blocked:fetch:");
+    expect(output).toContain("offline_external_network_blocked:http:");
+    expect(output).toContain("offline_external_network_blocked:https:");
+    expect(output).not.toContain("offline_network_blocked:deterministic-test");
+  });
 });

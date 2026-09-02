@@ -70,6 +70,7 @@ const SEEDED_CURRENT_TPM_USAGE = 14_000;
 const TPM_LIMIT = 25_000;
 const EXPECTED_RETRY_OUTPUT = STRUCTURAL_RETRY_MAX_OUTPUT_TOKENS;
 const savedMistralKey = env.mistralApiKey;
+const savedTpm = env.mistralTokensPerMinute;
 
 function deps(attentionDb: DatabaseSync): KernelDeps {
   return {
@@ -142,6 +143,7 @@ afterEach(() => {
   mistralState.dispatch.mockReset();
   resetAdapterCache();
   env.mistralApiKey = savedMistralKey;
+  env.mistralTokensPerMinute = savedTpm;
   if (savedOfflineEnv === undefined) {
     delete process.env.ASHLEY_PHASE0_OFFLINE;
   } else {
@@ -153,6 +155,7 @@ describe("v0.2.1 structural Thought retry admission", () => {
   it("keeps the primary at 4096 and admits a corrective retry at 2048 under real rolling TPM accounting", async () => {
     delete process.env.ASHLEY_PHASE0_OFFLINE;
     env.mistralApiKey = "test-mistral-key";
+    env.mistralTokensPerMinute = TPM_LIMIT;
     resetAdapterCache();
     const { sidecar, input } = helloInput();
     const primaryDb = openNuclearDb(new DatabaseSync(":memory:"));

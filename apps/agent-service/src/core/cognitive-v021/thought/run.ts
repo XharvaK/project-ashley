@@ -1316,6 +1316,7 @@ export async function runCognitiveCycle(
       authorityEpoch: cycle.authorityEpoch,
       authorityDb: authorityDbForPacks(deps, packs),
       expectedCurrentness: invocation.kernelEnvelope?.authorityCurrentness,
+      activeEffects: inFlight,
     });
     if (!authority.ok) {
       if (revisable(authority.codes)) {

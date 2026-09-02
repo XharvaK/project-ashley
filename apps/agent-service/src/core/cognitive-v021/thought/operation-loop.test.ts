@@ -119,10 +119,78 @@ describe("v0.2.1 Thought operation loop", () => {
         loadAuthorityPacks: () => loadDeterministicAuthorityPacks(sidecar, { capability: capabilityReality }),
       },
     ));
-    expect(objections).toEqual([[], []]);
+    expect(objections).toEqual([[], [], ["RECEIPT_CONTRADICTS_CLAIM"]]);
     expect(executeEffect).toHaveBeenCalledTimes(1);
     expect(sidecar.prepare("SELECT outcome FROM effect_receipts").get()).toMatchObject({ outcome: "failed" });
-    expect(result).toMatchObject({ published: true, thoughtModelAttempts: 2, acceptedThoughtPasses: 2 });
+    expect(sidecar.prepare("SELECT licensed_text FROM speech_outbox").get()).toMatchObject({ licensed_text: "the operation did not complete" });
+    expect(result).toMatchObject({ published: true, thoughtModelAttempts: 3, acceptedThoughtPasses: 3 });
+    sidecar.close();
+    attentionDb.close();
+  });
+
+  it("preserves unknown receipt truth and prevents an affirmative success claim from publishing", async () => {
+    const sidecar = openTestSidecar();
+    const attentionDb = openTestSidecar();
+    const cycle = admitTestCycle(sidecar, { cycleId: "cycle-unknown", conversationId: "thread-unknown", triggerKind: "owner_message", triggerRef: "owner-unknown", occupantId: "doc", nowMs: 1 });
+    const evidence = appendOwnerUtterance(sidecar, { conversationId: "thread-unknown", text: "try the operation", discordMessageIds: ["d-unknown"], nowMs: 2 });
+    const event = appendInboxEvent(sidecar, { conversationId: "thread-unknown", kind: "owner_message", payload: { cycleId: cycle.cycleId, evidenceRowId: evidence.rowId, ownerMessage: evidence.text }, createdAtMs: 2 });
+    let call = 0;
+    const objections: unknown[] = [];
+    const completeChat = vi.fn(async (messages) => {
+      call += 1;
+      const input = JSON.parse(String((messages as Array<{ role?: string; content?: unknown }>).find((item) => item.role === "user")?.content ?? "{}")) as import("../types.js").ThoughtInput;
+      objections.push(input.authorityObjections);
+      if (call === 1) {
+        return {
+          text: JSON.stringify({
+            kind: "effect_intent",
+            operationKind: "workspace.write_file",
+            request: { projectId: "project-ashley", path: "src/unknown.ts" },
+            purpose: "try the operation",
+            expectedOutcome: "the file is written",
+            existingRefs: ["owner-unknown"],
+          }),
+          model: "fake", modelAlias: "thought", resolvedModelId: null,
+        };
+      }
+      if (call === 2) {
+        return {
+          text: JSON.stringify(makeSemanticSettlement({ speech: { mode: "draft", mustSay: ["the operation worked"], mustNotSay: [], surfaceDraft: "the operation worked", acceptableRealizations: [], presentationDirectives: [] } })),
+          model: "fake", modelAlias: "thought", resolvedModelId: null,
+        };
+      }
+      return {
+        text: JSON.stringify({ kind: "abstain", reason: "insufficient_evidence", explanation: "the operation outcome is unknown", evidenceRefs: ["owner-unknown"] }),
+        model: "fake", modelAlias: "thought", resolvedModelId: null,
+      };
+    });
+    const executeEffect = vi.fn(async () => ({
+      receiptId: "receipt-unknown",
+      effectId: "effect-unknown",
+      idempotencyKey: "idem-unknown",
+      outcome: "unknown" as const,
+      claims: { reason: "no confirmation" },
+      atMs: 3,
+      dataClassification: "never_public" as const,
+      secretOmitted: true,
+    }));
+    const result = await runCognitiveCycle(sidecar, attentionDb, event, baseDeps(
+      attentionDb,
+      completeChat,
+      vi.fn(async (): Promise<Observation> => {
+        throw new Error("observation_not_expected");
+      }),
+      {
+        executeEffect,
+        checkAuthority: deterministicCheckAuthority,
+        loadAuthorityPacks: () => loadDeterministicAuthorityPacks(sidecar, { capability: capabilityReality }),
+      },
+    ));
+    expect(objections).toEqual([[], [], ["IN_FLIGHT_UNKNOWN"]]);
+    expect(executeEffect).toHaveBeenCalledTimes(1);
+    expect(sidecar.prepare("SELECT outcome FROM effect_receipts").get()).toMatchObject({ outcome: "unknown" });
+    expect(sidecar.prepare("SELECT COUNT(*) AS count FROM settlements").get()).toMatchObject({ count: 0 });
+    expect(result).toMatchObject({ published: false, thoughtModelAttempts: 3, acceptedThoughtPasses: 3, acceptedSettlements: 0 });
     sidecar.close();
     attentionDb.close();
   });

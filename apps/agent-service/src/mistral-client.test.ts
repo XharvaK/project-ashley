@@ -203,7 +203,7 @@ it("creates no attention reservation when API key is missing", async () => {
     });
 
     try {
-      const result = await completeChat([{ role: "user", content: "private thought" }], {
+      const result = await withOfflineAppGateDisabled(() => completeChat([{ role: "user", content: "private thought" }], {
         attentionDb,
         purpose: "thought",
         route: "thought",
@@ -211,7 +211,7 @@ it("creates no attention reservation when API key is missing", async () => {
         reasoningEffort: "low",
         deadlineAtMs: Date.now() + 6_000,
         privateBudgetBinding: { sidecar, reservationId: reserved.reservation.reservationId },
-      });
+      }));
       const row = sidecar.prepare("SELECT state, dispatch_truth, invocation_id, attempt_id FROM private_budget_reservations WHERE reservation_id = ?").get(reserved.reservation.reservationId) as Record<string, unknown>;
       expect(row).toMatchObject({ state: "committed", dispatch_truth: "responded", invocation_id: result.capturedAttemptIdentity?.modelFabricInvocationId, attempt_id: result.capturedAttemptIdentity?.modelFabricAttemptId });
       expect(dispatch).toHaveBeenCalledTimes(1);
@@ -260,10 +260,10 @@ describe("Mistral credential failover", () => {
       finishReason: "stop",
     }));
     try {
-      const result = await completeChat(
+      const result = await withOfflineAppGateDisabled(() => completeChat(
         [{ role: "user", content: "primary only" }],
         thoughtDispatchOptions(db),
-      );
+      ));
       expect(dispatch).toHaveBeenCalledTimes(1);
       expect(dispatch.mock.calls[0]?.[0]).toMatchObject({
         modelId: MISTRAL_SMALL,
@@ -291,13 +291,13 @@ describe("Mistral credential failover", () => {
     }));
     try {
       await expect(
-        completeChat(
+        withOfflineAppGateDisabled(() => completeChat(
           [{ role: "user", content: "substitution must fail closed" }],
           {
             ...thoughtDispatchOptions(db),
             model: "mistral-medium-latest",
           },
-        ),
+        )),
       ).rejects.toMatchObject({
         code: "capability_mismatch",
         message: "mistral_thought_model_substitution_forbidden",
@@ -319,13 +319,13 @@ describe("Mistral credential failover", () => {
       providerModel: "mistral-small-latest",
       usage: { promptTokens: 2, completionTokens: 1 },
       finishReason: "stop",
-    }));
+      }));
     try {
       await expect(
-        completeChat(
+        withOfflineAppGateDisabled(() => completeChat(
           [{ role: "user", content: "returned identity must be exact" }],
           thoughtDispatchOptions(db),
-        ),
+        )),
       ).rejects.toMatchObject({
         code: "capability_mismatch",
         message: "mistral_model_identity_mismatch",
@@ -359,10 +359,10 @@ describe("Mistral credential failover", () => {
       };
     });
     try {
-      const result = await completeChat(
+      const result = await withOfflineAppGateDisabled(() => completeChat(
         [{ role: "user", content: "credential hop" }],
         thoughtDispatchOptions(db),
-      );
+      ));
       expect(dispatch).toHaveBeenCalledTimes(2);
       expect(dispatch.mock.calls.map(([args]) => ({
         modelId: args.modelId,
@@ -412,10 +412,10 @@ describe("Mistral credential failover", () => {
       );
     });
     try {
-      const error = await completeChat(
+      const error = await withOfflineAppGateDisabled(() => completeChat(
         [{ role: "user", content: "no secondary" }],
         thoughtDispatchOptions(db),
-      ).catch((value: unknown) => value);
+      )).catch((value: unknown) => value);
       expect(error).toMatchObject({ code: "credential_invalid" });
       expect(dispatch).toHaveBeenCalledTimes(1);
       expect((error as { modelFabric?: { failoverSuppressed?: string } }).modelFabric?.failoverSuppressed)
@@ -448,17 +448,17 @@ describe("Mistral credential failover", () => {
     try {
       if (error instanceof AppError) {
         await expect(
-          completeChat(
+          withOfflineAppGateDisabled(() => completeChat(
             [{ role: "user", content: "no hop" }],
             thoughtDispatchOptions(db),
-          ),
+          )),
         ).rejects.toBe(error);
       } else {
         await expect(
-          completeChat(
+          withOfflineAppGateDisabled(() => completeChat(
             [{ role: "user", content: "no hop" }],
             thoughtDispatchOptions(db),
-          ),
+          )),
         ).rejects.toMatchObject({ code: "internal_error" });
       }
       expect(dispatch).toHaveBeenCalledTimes(1);
@@ -493,10 +493,10 @@ describe("Mistral credential failover", () => {
     });
     try {
       await expect(
-        completeChat(
+        withOfflineAppGateDisabled(() => completeChat(
           [{ role: "user", content: "secondary failure" }],
           thoughtDispatchOptions(db),
-        ),
+        )),
       ).rejects.toBe(secondaryError);
       expect(dispatch).toHaveBeenCalledTimes(2);
       expect(dispatch.mock.calls.every(([args]) => args.modelId === MISTRAL_SMALL)).toBe(true);

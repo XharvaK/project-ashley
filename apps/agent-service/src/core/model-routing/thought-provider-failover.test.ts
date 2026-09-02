@@ -4,6 +4,7 @@ import { env } from "../../env.js";
 import { AppError } from "../../errors.js";
 import { openNuclearDb } from "../db.js";
 import { completeChat, resetAdapterCache } from "../../mistral-client.js";
+import { withOfflineAppGateDisabled } from "../qualification/offline-test-helpers.js";
 import * as mistralAdapterModule from "./adapters/mistral-adapter.js";
 import type { ChatMessage } from "./types.js";
 
@@ -47,7 +48,7 @@ describe("Thought same-model Mistral credential failover", () => {
       dispatch,
     });
 
-    const result = await completeChat(messages, {
+    const result = await withOfflineAppGateDisabled(() => completeChat(messages, {
       attentionDb: db,
       purpose: "thought",
       logicalRole: "thought",
@@ -55,7 +56,7 @@ describe("Thought same-model Mistral credential failover", () => {
       route: "thought",
       maxTokens: 1000,
       deadlineAtMs: Date.now() + 6000,
-    });
+    }));
 
     expect(dispatch).toHaveBeenCalledTimes(1);
     expect(dispatch.mock.calls[0]?.[0].credentialSeat).toBe("mistral_primary");
@@ -88,7 +89,7 @@ describe("Thought same-model Mistral credential failover", () => {
       dispatch,
     });
 
-    const result = await completeChat(messages, {
+    const result = await withOfflineAppGateDisabled(() => completeChat(messages, {
       attentionDb: db,
       purpose: "thought",
       logicalRole: "thought",
@@ -96,7 +97,7 @@ describe("Thought same-model Mistral credential failover", () => {
       route: "thought",
       maxTokens: 1000,
       deadlineAtMs: Date.now() + 6000,
-    });
+    }));
 
     expect(dispatch).toHaveBeenCalledTimes(2);
     expect(dispatch.mock.calls.map(([args]) => args.credentialSeat)).toEqual([
@@ -134,7 +135,7 @@ describe("Thought same-model Mistral credential failover", () => {
     });
 
     await expect(
-      completeChat(messages, {
+      withOfflineAppGateDisabled(() => completeChat(messages, {
         attentionDb: db,
         purpose: "thought",
         logicalRole: "thought",
@@ -142,7 +143,7 @@ describe("Thought same-model Mistral credential failover", () => {
         route: "thought",
         maxTokens: 1000,
         deadlineAtMs: Date.now() + 6000,
-      }),
+      })),
     ).rejects.toMatchObject({ code: "mistral_unavailable" });
 
     expect(dispatch).toHaveBeenCalledTimes(1);
@@ -167,7 +168,7 @@ describe("Thought same-model Mistral credential failover", () => {
     });
 
     await expect(
-      completeChat(messages, {
+      withOfflineAppGateDisabled(() => completeChat(messages, {
         attentionDb: db,
         purpose: "thought",
         logicalRole: "thought",
@@ -175,7 +176,7 @@ describe("Thought same-model Mistral credential failover", () => {
         route: "thought",
         maxTokens: 1000,
         deadlineAtMs: Date.now() + 1000,
-      }),
+      })),
     ).rejects.toMatchObject({ code: "rate_limited" });
 
     expect(dispatch).toHaveBeenCalledTimes(1);
@@ -201,7 +202,7 @@ describe("Thought same-model Mistral credential failover", () => {
     });
 
     await expect(
-      completeChat(messages, {
+      withOfflineAppGateDisabled(() => completeChat(messages, {
         attentionDb: db,
         purpose: "thought",
         logicalRole: "thought",
@@ -209,7 +210,7 @@ describe("Thought same-model Mistral credential failover", () => {
         route: "thought",
         maxTokens: 1000,
         deadlineAtMs: Date.now() + 6000,
-      }),
+      })),
     ).rejects.toMatchObject({ code: "credential_invalid" });
 
     expect(dispatch).toHaveBeenCalledTimes(2);
@@ -231,7 +232,7 @@ describe("Thought same-model Mistral credential failover", () => {
     });
 
     await expect(
-      completeChat(messages, {
+      withOfflineAppGateDisabled(() => completeChat(messages, {
         attentionDb: db,
         purpose: "thought",
         logicalRole: "thought",
@@ -239,7 +240,7 @@ describe("Thought same-model Mistral credential failover", () => {
         route: "thought",
         maxTokens: 1000,
         deadlineAtMs: Date.now() + 6000,
-      }),
+      })),
     ).rejects.toMatchObject({ code: "capability_mismatch" });
 
     expect(dispatch).toHaveBeenCalledTimes(1);

@@ -7,6 +7,7 @@ import { env } from "../../env.js";
 import { AppError } from "../../errors.js";
 import { openNuclearDb } from "../db.js";
 import { completeChat, resetAdapterCache } from "../../mistral-client.js";
+import { withOfflineAppGateDisabled } from "../qualification/offline-test-helpers.js";
 import * as groqAdapterModule from "../model-routing/adapters/groq-adapter.js";
 import * as nimAdapterModule from "../model-routing/adapters/nim-adapter.js";
 import * as mistralAdapterModule from "../model-routing/adapters/mistral-adapter.js";
@@ -366,7 +367,7 @@ describe("MF-ACT dispatch authority", () => {
       dispatch: nimDispatch,
     });
     const database = db();
-    const result = await completeChat([{ role: "user", content: "think" }], {
+    const result = await withOfflineAppGateDisabled(() => completeChat([{ role: "user", content: "think" }], {
       attentionDb: database,
       purpose: "thought",
       logicalRole: "thought",
@@ -377,7 +378,7 @@ describe("MF-ACT dispatch authority", () => {
       responseFormat: "json_object",
       modelFabricControlDir: root,
       modelFabricControlRootMode: "fixture",
-    });
+    }));
     expect(groqDispatch).toHaveBeenCalledTimes(1);
     expect(nimDispatch).not.toHaveBeenCalled();
     expect(result.modelAlias).toBe("openai/gpt-oss-120b");
@@ -415,7 +416,7 @@ describe("MF-ACT dispatch authority", () => {
       dispatch: mistralDispatch,
     });
     const thoughtDb = db();
-    const thought = await completeChat([{ role: "user", content: "think" }], {
+    const thought = await withOfflineAppGateDisabled(() => completeChat([{ role: "user", content: "think" }], {
       attentionDb: thoughtDb,
       purpose: "thought",
       logicalRole: "thought",
@@ -423,7 +424,7 @@ describe("MF-ACT dispatch authority", () => {
       route: "thought",
       modelFabricControlDir: root,
       modelFabricControlRootMode: "fixture",
-    });
+    }));
     expect(thought.modelAlias).toBe("mistral-small-2603");
     expect(thought.modelFabric?.resolvedRoute).toMatchObject({
       policyRowId: "mfr_thought_interactive_compat_v1",
@@ -448,14 +449,14 @@ describe("MF-ACT dispatch authority", () => {
       dispatch: nimDispatch,
     });
     const expressionDb = db();
-    const expression = await completeChat([{ role: "user", content: "hi" }], {
+    const expression = await withOfflineAppGateDisabled(() => completeChat([{ role: "user", content: "hi" }], {
       attentionDb: expressionDb,
       purpose: "expression",
       logicalRole: "expression",
       route: "ashley_expression",
       modelFabricControlDir: root,
       modelFabricControlRootMode: "fixture",
-    });
+    }));
     expect(expression.modelAlias).toBe(
       "nvidia/nemotron-3.5-lightning-30b-a3b",
     );
@@ -537,7 +538,7 @@ describe("MF-ACT dispatch authority", () => {
       { role: "user" as const, content: '{"cycleId":"cycle-1","generation":1}' },
     ];
 
-    const result = await completeChat(testMessages, {
+    const result = await withOfflineAppGateDisabled(() => completeChat(testMessages, {
       attentionDb: thoughtDb,
       purpose: "thought",
       logicalRole: "thought",
@@ -547,7 +548,7 @@ describe("MF-ACT dispatch authority", () => {
       maxTokens: 2048,
       modelFabricControlDir: root,
       modelFabricControlRootMode: "fixture",
-    });
+    }));
 
     expect(mistralDispatch).toHaveBeenCalledTimes(2);
     expect(primaryMessages).toEqual(secondaryMessages);
@@ -582,7 +583,7 @@ describe("MF-ACT dispatch authority", () => {
 
     let caughtError: unknown = null;
     try {
-      await completeChat([{ role: "user", content: "think" }], {
+      await withOfflineAppGateDisabled(() => completeChat([{ role: "user", content: "think" }], {
         attentionDb: thoughtDb,
         purpose: "thought",
         logicalRole: "thought",
@@ -592,7 +593,7 @@ describe("MF-ACT dispatch authority", () => {
         maxTokens: 4096,
         modelFabricControlDir: root,
         modelFabricControlRootMode: "fixture",
-      });
+      }));
     } catch (err) {
       caughtError = err;
     }

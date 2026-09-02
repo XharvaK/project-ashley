@@ -74,12 +74,12 @@ describe("SLICE 0 receipt truth", () => {
     let thrown: unknown;
 
     try {
-      await completeChat([{ role: "user", content: "think" }], {
+      await withOfflineAppGateDisabled(() => completeChat([{ role: "user", content: "think" }], {
         attentionDb: database,
         purpose: "thought",
         route: "thought",
         deadlineAtMs: Date.now() + 10_000,
-      });
+      }));
     } catch (error) {
       thrown = error;
     }
@@ -108,12 +108,12 @@ describe("SLICE 0 receipt truth", () => {
     let thrown: unknown;
 
     try {
-      await completeChat([{ role: "user", content: "think" }], {
+      await withOfflineAppGateDisabled(() => completeChat([{ role: "user", content: "think" }], {
         attentionDb: database,
         purpose: "thought",
         route: "thought",
         deadlineAtMs: Date.now() + 10_000,
-      });
+      }));
     } catch (error) {
       thrown = error;
     }
@@ -145,12 +145,12 @@ describe("SLICE 0 receipt truth", () => {
     let thrown: unknown;
 
     try {
-      await completeChat([{ role: "user", content: "think" }], {
+      await withOfflineAppGateDisabled(() => completeChat([{ role: "user", content: "think" }], {
         attentionDb: database,
         purpose: "thought",
         route: "thought",
         deadlineAtMs: Date.now() + 1_000,
-      });
+      }));
     } catch (error) {
       thrown = error;
     }
@@ -175,11 +175,11 @@ describe("SLICE 0 receipt truth", () => {
     let thrown: unknown;
 
     try {
-      await completeChat([{ role: "user", content: "speak" }], {
+      await withOfflineAppGateDisabled(() => completeChat([{ role: "user", content: "speak" }], {
         attentionDb: database,
         purpose: "expression",
         route: "ashley_expression",
-      });
+      }));
     } catch (error) {
       thrown = error;
     }
@@ -200,11 +200,11 @@ describe("SLICE 0 receipt truth", () => {
     let thrown: unknown;
 
     try {
-      await completeChat([{ role: "user", content: "speak" }], {
+      await withOfflineAppGateDisabled(() => completeChat([{ role: "user", content: "speak" }], {
         attentionDb: database,
         purpose: "expression",
         route: "ashley_expression",
-      });
+      }));
     } catch (error) {
       thrown = error;
     }

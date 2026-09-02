@@ -3,6 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import { env } from "../../env.js";
 import { openNuclearDb } from "../db.js";
 import { completeChat, resetAdapterCache, MISTRAL_RETRY_CONFIG } from "../../mistral-client.js";
+import { withOfflineAppGateDisabled } from "../qualification/offline-test-helpers.js";
 import * as nimAdapterModule from "../model-routing/adapters/nim-adapter.js";
 import * as mistralAdapterModule from "../model-routing/adapters/mistral-adapter.js";
 import { routingStatus } from "../model-routing/status.js";
@@ -130,12 +131,12 @@ describe("MF-M2 CURRENT portfolio", () => {
       }),
     });
     const database = openNuclearDb(new DatabaseSync(":memory:"));
-    const result = await completeChat([{ role: "user", content: "think" }], {
+    const result = await withOfflineAppGateDisabled(() => completeChat([{ role: "user", content: "think" }], {
       attentionDb: database,
       purpose: "thought",
       lane: "interactive",
       responseFormat: "json_object",
-    });
+    }));
     expect(result.modelFabric?.resolvedRoute).toMatchObject({
       registryVersion: currentPortfolio().registryVersion,
       policyRowId: "mfr_thought_interactive_compat_v1",
@@ -157,12 +158,12 @@ describe("MF-M2 CURRENT portfolio", () => {
       dispatch,
     });
     const database = openNuclearDb(new DatabaseSync(":memory:"));
-    await completeChat([{ role: "user", content: "think" }], {
+    await withOfflineAppGateDisabled(() => completeChat([{ role: "user", content: "think" }], {
       attentionDb: database,
       purpose: "thought",
       lane: "interactive",
       responseFormat: "json_object",
-    });
+    }));
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
       options: expect.objectContaining({ maxTokens: 4096 }),
     }));
@@ -184,13 +185,13 @@ describe("MF-M2 CURRENT portfolio", () => {
     const database = openNuclearDb(new DatabaseSync(":memory:"));
     const structuredOutput = thoughtOutputStructuredRequest();
     const schemaFingerprint = (structuredOutput as unknown as { schemaFingerprint?: string }).schemaFingerprint;
-    const result = await completeChat([{ role: "user", content: "think" }], {
+    const result = await withOfflineAppGateDisabled(() => completeChat([{ role: "user", content: "think" }], {
       attentionDb: database,
       purpose: "thought",
       lane: "interactive",
       responseFormat: "json_schema",
       structuredOutput,
-    });
+    }));
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
       options: expect.objectContaining({
         maxTokens: 4096,

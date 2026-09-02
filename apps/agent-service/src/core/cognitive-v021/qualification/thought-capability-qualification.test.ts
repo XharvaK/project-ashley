@@ -11,6 +11,7 @@ import {
   validateQualificationSchema,
   validateThoughtOutputSchema,
   type QualificationGateEvidence,
+  qualificationFixtureAbstainCoherence,
 } from "./thought-capability-qualification.js";
 import { qualificationCheckoutIdentity } from "../../rollout/capabilities.js";
 import { createThoughtStructuralFeedback } from "../thought/structural-feedback.js";
@@ -129,6 +130,18 @@ describe("successor Thought qualification", () => {
       requiresEffect: false,
       requiresUnavailableCapability: false,
       expectedSpeechSupportedByModelVisibleContext: true,
+    });
+  });
+
+  it("keeps the abstain fixture coherent when project inspection is exposed", () => {
+    expect(qualificationFixtureAbstainCoherence()).toEqual({
+      ownerMessage: "Please tell me what is in the private attachment; no attachment content is available in this qualification context.",
+      requiredEvidenceAbsent: true,
+      attachmentPathAvailable: false,
+      attachmentProjectBindingAvailable: false,
+      availableAuthorizedObservationKinds: ["project.read_file"],
+      relevantObservationKinds: [],
+      authorizedObservationCanAcquireRelevantEvidence: false,
     });
   });
 
