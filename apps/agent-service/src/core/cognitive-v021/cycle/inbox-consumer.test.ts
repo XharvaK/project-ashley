@@ -13,7 +13,10 @@ describe("durable cognitive inbox consumer", () => {
     const result = await consumeNextInboxEvent(db, {
       workerId: "restarted-worker",
       nowMs: () => 20,
-      handler: async (event) => { seen.push(event.id); },
+      handler: async (event) => {
+        seen.push(event.id);
+        return { kind: "completed" };
+      },
     });
     expect(result).toMatchObject({ outcome: "consumed" });
     expect(seen).toHaveLength(1);
@@ -31,11 +34,16 @@ describe("durable cognitive inbox consumer", () => {
         calls += 1;
         db.prepare("INSERT OR IGNORE INTO settlements (settlement_id, cycle_id, generation, payload_json) VALUES (?, ?, ?, ?)").run("settlement-replay", "cycle-replay", 1, "{}");
         if (calls === 1) throw new Error("crash_after_publication_commit");
+        return { kind: "completed" };
       },
     });
-    const second = await consumeNextInboxEvent(db, { workerId: "worker-b", handler: async () => {
-      db.prepare("INSERT OR IGNORE INTO settlements (settlement_id, cycle_id, generation, payload_json) VALUES (?, ?, ?, ?)").run("settlement-replay", "cycle-replay", 1, "{}");
-    } });
+    const second = await consumeNextInboxEvent(db, {
+      workerId: "worker-b",
+      handler: async () => {
+        db.prepare("INSERT OR IGNORE INTO settlements (settlement_id, cycle_id, generation, payload_json) VALUES (?, ?, ?, ?)").run("settlement-replay", "cycle-replay", 1, "{}");
+        return { kind: "completed" };
+      },
+    });
     expect(first).toMatchObject({ outcome: "failed" });
     expect(second).toMatchObject({ outcome: "idle" });
     expect(calls).toBe(1);
@@ -46,7 +54,7 @@ describe("durable cognitive inbox consumer", () => {
 
   it("stops the polling loop without leaving a timer behind", async () => {
     const db = openTestSidecar();
-    const handler = vi.fn(async () => undefined);
+    const handler = vi.fn(async () => ({ kind: "completed" as const }));
     const loop = startInboxConsumer(db, { workerId: "worker-loop", handler, pollMs: 1 });
     await new Promise((resolve) => setTimeout(resolve, 5));
     loop.stop();

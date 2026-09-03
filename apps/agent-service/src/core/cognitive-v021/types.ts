@@ -1290,6 +1290,8 @@ export type KernelRunResult = {
   latestEvidenceRowId?: string;
 };
 
+export type CognitiveDispatchResult = KernelRunResult | null;
+
 export type CheckAuthority = (
   stage: AuthorityStage,
   input: {

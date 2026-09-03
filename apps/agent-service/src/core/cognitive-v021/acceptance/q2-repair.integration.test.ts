@@ -118,6 +118,7 @@ describe("Q2 repair integrated lifecycle", () => {
     let firstResult: Awaited<ReturnType<typeof runCognitiveCycle>> | undefined;
     const run = consumeInboxEvent(sidecar, firstEvent, async () => {
       firstResult = await runCognitiveCycle(sidecar, nuclear, firstEvent, baseDeps(sidecar, completeChat));
+      return firstResult;
     }, 10);
     await started;
 
@@ -150,6 +151,7 @@ describe("Q2 repair integrated lifecycle", () => {
         event: firstEvent,
         deps: baseDeps(sidecar, completeChat),
       });
+      return firstResult;
     }, 10);
     if (!firstResult) throw new Error("first_result_missing");
     if (firstResult.outboxId === null) throw new Error("first_outbox_missing");
@@ -272,6 +274,7 @@ describe("Q2 repair integrated lifecycle", () => {
     let replay: Awaited<ReturnType<typeof runCognitiveCycle>> | undefined;
     await consumeInboxEvent(sidecar, reclaimed, async () => {
       replay = await runCognitiveCycle(sidecar, sidecar, reclaimed, baseDeps(sidecar, completeChat));
+      return replay;
     }, 120_005);
     if (!replay) throw new Error("replay_result_missing");
     expect(replay).toMatchObject({ published: true, cycleId: cycle.cycleId, generation: cycle.generation, outboxId: first.outboxId });

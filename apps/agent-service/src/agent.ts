@@ -25,6 +25,7 @@ import {
 } from "./core/cognitive-v021/initiative/idle.js";
 import { resolveActiveThread } from "./core/memory/threads.js";
 import type {
+  CognitiveDispatchResult,
   InboxEvent,
   KernelDeps,
   KernelRunResult,
@@ -32,7 +33,7 @@ import type {
 } from "./core/cognitive-v021/types.js";
 import { replicateLegacyDeliveredAshley } from "./core/cognitive-v021/shadow/replicator.js";
 
-export type CognitiveDispatchResult = KernelRunResult | null;
+export type { CognitiveDispatchResult };
 
 export class BootValidationError extends Error {
   readonly code = "boot_validation_failed";
@@ -202,6 +203,7 @@ export class AgentManager {
         let result: CognitiveDispatchResult = null;
         await consumeInboxEvent(sidecar, claimed, async () => {
           result = await this.dispatchCognitiveEvent(claimed);
+          return result;
         });
         const dispatched = result as CognitiveDispatchResult;
         return {

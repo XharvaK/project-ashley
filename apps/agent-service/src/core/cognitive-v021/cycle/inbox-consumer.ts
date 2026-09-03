@@ -8,11 +8,13 @@ import {
   settleDurableAttempt,
   type DurableSettlementOutcome,
 } from "../retry/ledger.js";
-import type { HandlerResult, InboxEvent, KernelRunResult } from "../types.js";
+import type { CognitiveDispatchResult, HandlerResult, InboxEvent, KernelRunResult } from "../types.js";
+
+export type InboxConsumerHandlerResult = HandlerResult | CognitiveDispatchResult;
 
 export type InboxConsumerHandler = (
   event: InboxEvent,
-) => void | HandlerResult | KernelRunResult | Promise<void | HandlerResult | KernelRunResult>;
+) => InboxConsumerHandlerResult | Promise<InboxConsumerHandlerResult>;
 
 export function claimNextInboxEvent(
   db: DatabaseSync,
@@ -23,6 +25,26 @@ export function claimNextInboxEvent(
 
 function errorCode(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function toHandlerResult(result: InboxConsumerHandlerResult, event: InboxEvent): HandlerResult {
+  if (result == null) {
+    return { kind: "completed" };
+  }
+  if ("kind" in result) {
+    return result;
+  }
+  if (result.deferred === true && typeof result.nextEligibleAtMs === "number") {
+    return {
+      kind: "deferred_to_frontier",
+      conversationId: result.conversationId ?? event.conversationId,
+      cycleId: result.cycleId ?? "",
+      generation: result.generation ?? 1,
+      nextEligibleAtMs: result.nextEligibleAtMs,
+      latestEvidenceRowId: result.latestEvidenceRowId ?? event.id,
+    };
+  }
+  return { kind: "completed" };
 }
 
 function settledOutcomeOrThrow(
@@ -59,25 +81,7 @@ export async function consumeInboxEvent(
   }
   try {
     const result = await handler(event);
-    const deferredResult = result as {
-      deferred?: boolean;
-      nextEligibleAtMs?: number;
-      conversationId?: string;
-      cycleId?: string;
-      generation?: number;
-      latestEvidenceRowId?: string;
-    } | undefined;
-    const settlementResult: HandlerResult =
-      deferredResult?.deferred === true && typeof deferredResult.nextEligibleAtMs === "number"
-        ? {
-            kind: "deferred_to_frontier",
-            conversationId: deferredResult.conversationId ?? event.conversationId,
-            cycleId: deferredResult.cycleId ?? "",
-            generation: deferredResult.generation ?? 1,
-            nextEligibleAtMs: deferredResult.nextEligibleAtMs,
-            latestEvidenceRowId: deferredResult.latestEvidenceRowId ?? event.id,
-          }
-        : ((result as HandlerResult) ?? { kind: "completed" });
+    const settlementResult = toHandlerResult(result, event);
     return settledOutcomeOrThrow(db, event, settlementResult, nowMs);
   } catch (error) {
     const currentAttempt = getOpenDurableAttempt(db, event.id);

@@ -29,7 +29,7 @@ import { getCapabilityReality } from "./core/cognitive-v021/thought/capability-r
 import { readIdentitySlice } from "./core/cognitive-v021/identity/constitution.js";
 import { runPerceptionBeforeThought } from "./core/cognitive-v021/perception/adapter.js";
 import { createOutboxProjector } from "./core/cognitive-v021/delivery/outbox-projector.js";
-import { startInboxConsumer, type InboxConsumerHandle } from "./core/cognitive-v021/cycle/inbox-consumer.js";
+import { startInboxConsumer, type InboxConsumerHandle, type InboxConsumerHandler } from "./core/cognitive-v021/cycle/inbox-consumer.js";
 import { startFrontierCoordinator, type FrontierCoordinatorHandle } from "./core/cognitive-v021/frontier/index.js";
 import {
   classifyInitiativeClass,
@@ -50,6 +50,12 @@ import {
 } from "./core/cognitive-v021/thought/diagnostics.js";
 import { DatabaseSync } from "node:sqlite";
 import { reconcileAuthorityBarrierOnStartup } from "./core/cognitive-v021/authority/barrier.js";
+
+export function createAgentInboxConsumerHandler(
+  manager: Pick<AgentManager, "dispatchCognitiveEvent">,
+): InboxConsumerHandler {
+  return (event) => manager.dispatchCognitiveEvent(event);
+}
 
 export async function serveAgent(manager: AgentManager): Promise<void> {
   await manager.init();
@@ -127,9 +133,7 @@ export async function serveAgent(manager: AgentManager): Promise<void> {
     manager.configureCognitiveDispatch({ deps, projector });
     cognitiveConsumer = startInboxConsumer(cognitiveSidecar, {
       workerId: `agent-service:${process.pid}`,
-      handler: async (event) => {
-        await manager.dispatchCognitiveEvent(event);
-      },
+      handler: createAgentInboxConsumerHandler(manager),
       onError: (error, event) => console.error(`[cognitive-v021] event failed id=${event?.id ?? "?"}`, error),
     });
     frontierCoordinator = startFrontierCoordinator(
