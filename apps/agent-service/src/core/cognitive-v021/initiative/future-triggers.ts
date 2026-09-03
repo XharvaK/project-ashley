@@ -5,6 +5,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { FutureTrigger, InboxEvent, WakeRecord } from "../types.js";
 import { occurrenceIdFor } from "../wake/identity.js";
 import { admitWakeInTransaction, finishWakeInTransaction, getWake, recordWakeCancellationInTransaction } from "../wake/ledger.js";
+import { getActiveDeferredFrontier } from "../frontier/ledger.js";
 
 type Row = Record<string, unknown>;
 
@@ -253,6 +254,11 @@ export function matureFutureTriggerToWake(
   try {
     const current = getFutureTrigger(db, triggerId);
     if (!current || current.status === "cancelled" || (current.status === "scheduled" && current.dueAtMs > nowMs)) {
+      db.exec("COMMIT");
+      return null;
+    }
+    const activeFrontier = getActiveDeferredFrontier(db, current.conversationId);
+    if (activeFrontier) {
       db.exec("COMMIT");
       return null;
     }

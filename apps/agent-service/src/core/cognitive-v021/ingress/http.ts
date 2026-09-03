@@ -2,7 +2,11 @@ import { randomUUID } from "node:crypto";
 import type express from "express";
 import type { DatabaseSync } from "node:sqlite";
 import { resolveActiveThread } from "../../memory/threads.js";
-import { appendOwnerUtteranceWithStatus } from "../evidence/conversation-log.js";
+import {
+  appendOwnerUtteranceInTransaction,
+  appendOwnerUtteranceWithStatus,
+} from "../evidence/conversation-log.js";
+import { notifySidecarPostCommit } from "../retrieval/derived-store.js";
 import { appendCycleLogIds, appendInboxEvent, appendInboxEventInTransaction, getCycle, getInboxEvent } from "../cycle/inbox.js";
 import { composeOrPreempt } from "../cycle/fence.js";
 import {
@@ -71,34 +75,36 @@ export function admitCognitiveIngress(
   const conversationId = resolveActiveThread(nuclearDb, input.userId, channel);
   const discordMessageIds = input.discordMessageIds ?? input.inboundDiscordMessageIds ?? [];
   const admittedAtMs = options.nowMs ?? input.finalFragmentReceivedAtMs ?? Date.now();
-  const { evidence, duplicate } = appendOwnerUtteranceWithStatus(sidecar, {
-    conversationId,
-    text,
-    discordMessageIds,
-    nowMs: admittedAtMs,
-  });
-  if (duplicate) {
-    const existingInbox = existingInboxForEvidence(sidecar, conversationId, evidence.rowId);
-    const existingCycle = existingCycleForEvidence(sidecar, conversationId, evidence.rowId);
-    if (existingInbox && existingCycle) {
-      return {
-        accepted: true,
-        evidenceRowId: evidence.rowId,
-        evidenceRecordId: evidence.rowId,
-        inboxEventId: existingInbox.id,
+
+  sidecar.exec("BEGIN IMMEDIATE");
+  try {
+    const activeFrontier = getActiveDeferredFrontier(sidecar, conversationId);
+    if (activeFrontier) {
+      const { evidence, duplicate } = appendOwnerUtteranceInTransaction(sidecar, {
         conversationId,
-        cycleId: existingCycle.cycleId,
-        generation: existingCycle.generation,
-        action: "compose",
-        duplicate: true,
-        admittedAtMs: evidence.createdAtMs,
-      };
-    }
-  }
-  const activeFrontier = getActiveDeferredFrontier(sidecar, conversationId);
-  if (activeFrontier) {
-    sidecar.exec("BEGIN IMMEDIATE");
-    try {
+        text,
+        discordMessageIds,
+        nowMs: admittedAtMs,
+      });
+      if (duplicate) {
+        const existingInbox = existingInboxForEvidence(sidecar, conversationId, evidence.rowId);
+        const existingCycle = existingCycleForEvidence(sidecar, conversationId, evidence.rowId);
+        if (existingInbox && existingCycle) {
+          sidecar.exec("COMMIT");
+          return {
+            accepted: true,
+            evidenceRowId: evidence.rowId,
+            evidenceRecordId: evidence.rowId,
+            inboxEventId: existingInbox.id,
+            conversationId,
+            cycleId: existingCycle.cycleId,
+            generation: existingCycle.generation,
+            action: "compose",
+            duplicate: true,
+            admittedAtMs: evidence.createdAtMs,
+          };
+        }
+      }
       advanceDeferredFrontierEvidence(sidecar, activeFrontier.frontierId, evidence.rowId, admittedAtMs);
       appendCycleLogIds(sidecar, activeFrontier.cycleId, [evidence.rowId], admittedAtMs);
       const inbox = appendInboxEventInTransaction(
@@ -123,7 +129,7 @@ export function admitCognitiveIngress(
         randomUUID(),
       );
       sidecar.exec("COMMIT");
-
+      try { notifySidecarPostCommit(sidecar, { changedRowIds: [evidence.rowId] }); } catch {}
       return {
         accepted: true,
         evidenceRowId: evidence.rowId,
@@ -135,9 +141,36 @@ export function admitCognitiveIngress(
         evidenceRecordId: evidence.rowId,
         admittedAtMs: evidence.createdAtMs,
       };
-    } catch (error) {
-      try { sidecar.exec("ROLLBACK"); } catch { /* ignore rollback error */ }
-      throw error;
+    } else {
+      sidecar.exec("ROLLBACK");
+    }
+  } catch (error) {
+    try { sidecar.exec("ROLLBACK"); } catch {}
+    throw error;
+  }
+
+  const { evidence, duplicate } = appendOwnerUtteranceWithStatus(sidecar, {
+    conversationId,
+    text,
+    discordMessageIds,
+    nowMs: admittedAtMs,
+  });
+  if (duplicate) {
+    const existingInbox = existingInboxForEvidence(sidecar, conversationId, evidence.rowId);
+    const existingCycle = existingCycleForEvidence(sidecar, conversationId, evidence.rowId);
+    if (existingInbox && existingCycle) {
+      return {
+        accepted: true,
+        evidenceRowId: evidence.rowId,
+        evidenceRecordId: evidence.rowId,
+        inboxEventId: existingInbox.id,
+        conversationId,
+        cycleId: existingCycle.cycleId,
+        generation: existingCycle.generation,
+        action: "compose",
+        duplicate: true,
+        admittedAtMs: evidence.createdAtMs,
+      };
     }
   }
   const fence = composeOrPreempt(sidecar, {

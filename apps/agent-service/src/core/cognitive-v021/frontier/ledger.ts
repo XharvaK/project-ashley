@@ -86,14 +86,19 @@ export function getActiveDeferredFrontier(
   db: DatabaseSync,
   conversationId: string,
 ): DeferredReactiveFrontierRecord | null {
-  const row = db
-    .prepare(
-      `SELECT * FROM deferred_reactive_frontiers
-       WHERE conversation_id = ? AND state IN ('waiting', 'running')
-       LIMIT 1`,
-    )
-    .get(conversationId);
-  return mapFrontier(row);
+  try {
+    const row = db
+      .prepare(
+        `SELECT * FROM deferred_reactive_frontiers
+         WHERE conversation_id = ? AND state IN ('waiting', 'running')
+         LIMIT 1`,
+      )
+      .get(conversationId);
+    return mapFrontier(row);
+  } catch (error) {
+    if (String(error).includes("no such table")) return null;
+    throw error;
+  }
 }
 
 export function getDeferredFrontier(

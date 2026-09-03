@@ -3,6 +3,7 @@ import { getCycle } from "../cycle/inbox.js";
 import { listOccupancy } from "../concerns/occupancy.js";
 import { fireDueTriggers } from "./future-triggers.js";
 import { collectSubscriptionObservations, listObservationSubscriptions, type SubscriptionItem } from "../observation/subscriptions.js";
+import { getActiveDeferredFrontier } from "../frontier/ledger.js";
 import {
   type CycleRecord,
   type FutureTrigger,
@@ -158,8 +159,13 @@ async function tickConversation(
   items: Array<SubscriptionItem | string>,
   dueEvents: InboxEvent[],
 ): Promise<IdleTickResult> {
-  const occupancy = groundedOccupancy(db, conversationId);
+  const activeFrontier = getActiveDeferredFrontier(db, conversationId);
   const dueTriggers = firedTriggers.filter((trigger) => trigger.conversationId === conversationId);
+  if (activeFrontier) {
+    return emptyResult(conversationId, "empty_house", [], [...suppressedTriggers.filter((trigger) => trigger.conversationId === conversationId), ...dueTriggers]);
+  }
+
+  const occupancy = groundedOccupancy(db, conversationId);
   const matched = collectSubscriptionObservations(db, conversationId, items, { nowMs: options.nowMs });
   if (occupancy.length === 0 && dueTriggers.length === 0 && matched.length === 0) {
     return emptyResult(conversationId, "empty_house", [], suppressedTriggers.filter((trigger) => trigger.conversationId === conversationId));

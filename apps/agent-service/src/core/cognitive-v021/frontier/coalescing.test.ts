@@ -4,7 +4,9 @@ import { openCognitiveSidecarDb } from "../sidecar/db.js";
 import { openNuclearDb } from "../../db.js";
 import { admitCognitiveIngress } from "../ingress/http.js";
 import { claimNextInboxEvent, consumeInboxEvent, consumeNextInboxEvent } from "../cycle/inbox-consumer.js";
-import { appendInboxEvent, getCycle, getInboxEvent } from "../cycle/inbox.js";
+import { appendInboxEvent, getCycle, getCurrentCycle, getInboxEvent } from "../cycle/inbox.js";
+import { tickIdleOpportunity } from "../initiative/idle.js";
+import { scheduleFutureTrigger, getFutureTrigger, fireDueTriggers } from "../initiative/future-triggers.js";
 import { settleDurableAttempt } from "../retry/ledger.js";
 import { listConversationEvidence } from "../evidence/conversation-log.js";
 import {
@@ -514,15 +516,20 @@ describe("Wave 1C: Deferred Reactive Frontier Coalescing & V021 Integration", ()
     }).toThrow("simulated_subsumption_failure");
 
     // Verify rollback:
+    // - evidence B does not exist in conversation_evidence_log
+    const rolledBackEvidence = sidecar.prepare("SELECT * FROM conversation_evidence_log WHERE text = 'fail_test'").all();
+    expect(rolledBackEvidence).toHaveLength(0);
     // - frontier not advanced to fail_test
     const frontierAfterRollback = getActiveDeferredFrontier(sidecar, conversationId);
     expect(frontierAfterRollback?.latestEvidenceRowId).toBe(ingressA.evidenceRowId);
     // - cycle compose log not updated
     const cycleAfterRollback = getCycle(sidecar, cycleId);
     expect(cycleAfterRollback?.composeLogIds).not.toContain("fail_test");
-    // - only original pending inbox event for A exists
+    // - only original pending inbox event for A exists (no B inbox row exists)
     const pendingInbox = sidecar.prepare("SELECT * FROM inbox_events WHERE status = 'pending'").all();
     expect(pendingInbox).toHaveLength(1);
+    const failInbox = sidecar.prepare("SELECT * FROM inbox_events WHERE conversation_id = ?").all(conversationId);
+    expect(failInbox).toHaveLength(1);
 
     // Remove simulated failure trigger
     sidecar.exec("DROP TRIGGER fail_frontier_advance");
@@ -550,6 +557,9 @@ describe("Wave 1C: Deferred Reactive Frontier Coalescing & V021 Integration", ()
     // - B is terminal subsumed_by_frontier (NOT pending/runnable)
     expect(inboxB?.status).toBe("consumed");
     expect(inboxB?.terminalReason).toBe("subsumed_by_frontier");
+    // - B cannot be claimed by ordinary inbox worker
+    const claimAttempt = claimNextInboxEvent(sidecar, { workerId: "worker-test", nowMs: nowMs + 10_000, leaseMs: 30_000 });
+    expect(claimAttempt?.id).not.toBe(ingressB.inboxEventId);
     // - frontier advanced to B
     const frontierAfterB = getActiveDeferredFrontier(sidecar, conversationId);
     expect(frontierAfterB?.latestEvidenceRowId).toBe(ingressB.evidenceRowId);
@@ -583,5 +593,165 @@ describe("Wave 1C: Deferred Reactive Frontier Coalescing & V021 Integration", ()
     const check = getDeferredFrontier(sidecar, "f-nonfwd");
     expect(check?.state).toBe("exhausted");
     sidecar.close();
+  });
+
+  it("B5: private/idle/subscription triggers cannot supersede active deferred frontier and preserve durable triggers", async () => {
+    const sidecar = createSidecarDb();
+    const nuclear = createNuclearDb();
+    const nowMs = 1_000_000;
+
+    // 1. Establish conversation and active deferred frontier for Generation 10
+    const cycle = admitTestCycle(sidecar, {
+      cycleId: "cycle-b5-active",
+      conversationId: "thread-b5",
+      triggerKind: "owner_message",
+      triggerRef: "ev-b5-1",
+      occupantId: "doc",
+      authorityEpoch: 1,
+      generation: 10,
+      nowMs,
+    });
+
+    const frontier = insertDeferredFrontierRecord(sidecar, {
+      frontierId: "f-b5-waiting",
+      conversationId: cycle.conversationId,
+      cycleId: cycle.cycleId,
+      generation: 10,
+      nextEligibleAtMs: nowMs + 30_000,
+      latestEvidenceRowId: "ev-b5-1",
+      nowMs,
+    });
+    expect(frontier.state).toBe("waiting");
+
+    // Seed active concern in mind_occupancy and concerns table
+    sidecar.prepare(
+      `INSERT INTO concerns
+         (concern_id, conversation_id, statement, source_refs_json, dimensions_json,
+          assertion_key, status, snapshot_hash, updated_cycle)
+       VALUES ('concern-b5', 'thread-b5', 'active topic', '[]', '{}', NULL, 'active', 'snap-b5', 'cycle-b5-active')`,
+    ).run();
+    sidecar.prepare(
+      `INSERT INTO mind_occupancy
+         (conversation_id, concern_id, status, priority, updated_cycle, updated_generation)
+       VALUES ('thread-b5', 'concern-b5', 'active', 20, 'cycle-b5-active', 10)`,
+    ).run();
+
+    // Schedule a durable future trigger due at +10s
+    scheduleFutureTrigger(sidecar, {
+      triggerId: "trig-b5-durable",
+      conversationId: "thread-b5",
+      concernId: "concern-b5",
+      snapshotHash: "snap-b5",
+      dueAtMs: nowMs + 10_000,
+      payload: {},
+    });
+
+    // 2. Invoke idle tick at +15s (when future trigger is due and idle opportunity exists)
+    let idleThoughtCalled = false;
+    const idleResult = await tickIdleOpportunity(sidecar, {
+      conversationId: "thread-b5",
+      nowMs: nowMs + 15_000,
+      runThought: async () => {
+        idleThoughtCalled = true;
+        return { published: true, outboxId: null, thoughtModelAttempts: 1, speechMode: "none" as const };
+      },
+    });
+
+    // Verify:
+    // - Idle thought was NOT called (ephemeral opportunity skipped cleanly)
+    expect(idleThoughtCalled).toBe(false);
+    expect(idleResult.eligible).toBe(false);
+
+    // - Current generation in cycle_records remains 10 (Generation 11 was NOT admitted!)
+    const current = getCurrentCycle(sidecar, "thread-b5", { includeIdle: true });
+    expect(current?.generation).toBe(10);
+    expect(current?.cycleId).toBe("cycle-b5-active");
+
+    // - Frontier remains active in waiting state
+    const frontierCheck = getActiveDeferredFrontier(sidecar, "thread-b5");
+    expect(frontierCheck?.state).toBe("waiting");
+    expect(frontierCheck?.generation).toBe(10);
+
+    // - Durable future trigger was NOT lost and remains scheduled
+    const triggerCheck = getFutureTrigger(sidecar, "trig-b5-durable");
+    expect(triggerCheck?.status).toBe("scheduled");
+
+    sidecar.close();
+    nuclear.close();
+  });
+
+  it("B5: frontier coordinator resumes normally and publishes at T1 without generation staleness", async () => {
+    const sidecar = createSidecarDb();
+    const nuclear = createNuclearDb();
+    const clock = { nowMs: 1_000_000 };
+
+    // 1. Establish conversation and active deferred frontier
+    const ingressA = admitCognitiveIngress(
+      sidecar,
+      nuclear,
+      { userId: "user:owner", message: "Message A from owner" },
+      { nowMs: clock.nowMs },
+    );
+
+    // Mark cycle in capacity_wait
+    sidecar.prepare("UPDATE cycle_records SET state = 'capacity_wait' WHERE cycle_id = ?").run(ingressA.cycleId);
+
+    const frontier = insertDeferredFrontierRecord(sidecar, {
+      frontierId: "f-b5-resumes",
+      conversationId: ingressA.conversationId,
+      cycleId: ingressA.cycleId,
+      generation: ingressA.generation,
+      nextEligibleAtMs: clock.nowMs + 30_000,
+      latestEvidenceRowId: ingressA.evidenceRowId,
+      nowMs: clock.nowMs,
+    });
+
+    const projectorMock = {
+      project: vi.fn(async () => undefined),
+      projectSystem: vi.fn(async () => undefined),
+    };
+
+    // 2. Mock kernel dependencies where Thought publishes a response
+    const deps = mockDeps(clock, async () => ({
+      text: JSON.stringify(makeSemanticSettlement()),
+      model: "mistral-small-2603",
+      modelAlias: "mistral-small-2603",
+      resolvedModelId: "mistral-small-2603",
+    }));
+
+    // 3. Competing idle trigger attempted while waiting -> suppressed
+    clock.nowMs = 1_015_000;
+    await tickIdleOpportunity(sidecar, {
+      conversationId: ingressA.conversationId,
+      nowMs: clock.nowMs,
+      runThought: async () => ({ published: true, outboxId: null, thoughtModelAttempts: 1 }),
+    });
+    expect(getCurrentCycle(sidecar, ingressA.conversationId, { includeIdle: true })?.generation).toBe(ingressA.generation);
+
+    // 4. Advance clock to T1 (+30s)
+    clock.nowMs = 1_030_000;
+    const coordinator = startFrontierCoordinator(sidecar, nuclear, deps, {
+      projector: projectorMock,
+      workerId: "test-b5-worker",
+      pollMs: 100,
+      nowMs: () => clock.nowMs,
+    });
+
+    const processed = await coordinator.pollNow();
+    expect(processed).toBe(1);
+
+    // Verify frontier was resolved (not exhausted due to stale generation!)
+    const resolvedFrontier = getDeferredFrontier(sidecar, frontier.frontierId);
+    expect(resolvedFrontier?.state).toBe("resolved");
+
+    // Verify outbox was published
+    expect(projectorMock.project).toHaveBeenCalledTimes(1);
+    const outbox = sidecar.prepare("SELECT * FROM speech_outbox WHERE conversation_id = ?").all(ingressA.conversationId);
+    expect(outbox).toHaveLength(1);
+    expect((outbox[0] as any).generation).toBe(ingressA.generation);
+
+    coordinator.stop();
+    sidecar.close();
+    nuclear.close();
   });
 });

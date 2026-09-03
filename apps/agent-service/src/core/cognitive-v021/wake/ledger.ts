@@ -8,6 +8,7 @@ import {
   type WakeTerminalReason,
 } from "../types.js";
 import { cycleIdFor, wakeIdFor } from "./identity.js";
+import { getActiveDeferredFrontier } from "../frontier/ledger.js";
 
 type WakeRow = Record<string, unknown>;
 
@@ -114,6 +115,11 @@ function ensureCycleInTransaction(db: DatabaseSync, input: WakeAdmissionInput, w
     if (text(existing.conversation_id) !== input.conversationId) throw wakeError("wake_conversation_conflict");
     if (!existingWakeId) db.prepare("UPDATE cycle_records SET wake_id = ? WHERE cycle_id = ? AND wake_id IS NULL").run(wakeId, cycleId);
     return;
+  }
+
+  const activeFrontier = getActiveDeferredFrontier(db, input.conversationId);
+  if (activeFrontier && activeFrontier.cycleId !== cycleId) {
+    throw wakeError("conversation_occupied_by_frontier");
   }
 
   const maxRow = db.prepare("SELECT MAX(generation) AS generation FROM cycle_records WHERE conversation_id = ?").get(input.conversationId) as WakeRow | undefined;

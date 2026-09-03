@@ -159,7 +159,7 @@ function normalizeClassification(input: AppendEvidenceInput, sourceText: string 
   };
 }
 
-function appendEvidence(
+export function appendEvidenceInTransaction(
   db: DatabaseSync,
   role: EvidenceRole,
   input: AppendEvidenceInput,
@@ -170,67 +170,75 @@ function appendEvidence(
   const normalized = normalizeClassification(input, input.text);
   const explicitEdit = Boolean(input.editOfRowId);
 
-  db.exec("BEGIN IMMEDIATE");
-  try {
-    if (!explicitEdit) {
-      for (const id of ids) {
-        const existing = existingByDiscordId(db, id);
-        if (existing) {
-          db.exec("COMMIT");
-          return existing;
-        }
+  if (!explicitEdit) {
+    for (const id of ids) {
+      const existing = existingByDiscordId(db, id);
+      if (existing) {
+        return existing;
       }
     }
+  }
 
-    const parent = input.editOfRowId ? byId(db, input.editOfRowId) : null;
-    if (input.editOfRowId && !parent) throw new Error("evidence_edit_parent_missing");
-    const lineageId = input.lineageId ?? parent?.lineageId ?? randomUUID();
-    const latest = db
-      .prepare("SELECT MAX(version) AS version FROM conversation_evidence_log WHERE lineage_id = ?")
-      .get(lineageId) as { version?: unknown } | undefined;
-    const version = Math.max(
-      1,
-      input.version ?? 0,
-      asNumber(latest?.version, 0) + (parent || latest?.version != null ? 1 : 0),
-    );
-    const rowId = randomUUID();
-    const storedIds = ids.length > 0 ? ids : parent?.discordMessageIds ?? [];
-    db.prepare(
-      `INSERT INTO conversation_evidence_log
-         (row_id, lineage_id, version, conversation_id, role, text, created_at_ms,
-          discord_message_ids_json, reservation_id, producing_cycle_id, architecture_epoch,
-          content_hash, source_status, data_classification, secret_omitted, delivered)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      rowId,
-      lineageId,
-      version,
-      input.conversationId,
-      role,
-      normalized.text,
-      nowMs,
-      JSON.stringify(storedIds),
-      input.reservationId ?? null,
-      input.producingCycleId ?? null,
-      input.architectureEpoch ?? ARCHITECTURE_EPOCH,
-      hashContent(role, normalized.text),
-      input.sourceStatus ?? (explicitEdit ? "edited" : "received"),
-      normalized.classification,
-      normalized.secretOmitted ? 1 : 0,
-      input.delivered ? 1 : 0,
-    );
+  const parent = input.editOfRowId ? byId(db, input.editOfRowId) : null;
+  if (input.editOfRowId && !parent) throw new Error("evidence_edit_parent_missing");
+  const lineageId = input.lineageId ?? parent?.lineageId ?? randomUUID();
+  const latest = db
+    .prepare("SELECT MAX(version) AS version FROM conversation_evidence_log WHERE lineage_id = ?")
+    .get(lineageId) as { version?: unknown } | undefined;
+  const version = Math.max(
+    1,
+    input.version ?? 0,
+    asNumber(latest?.version, 0) + (parent || latest?.version != null ? 1 : 0),
+  );
+  const rowId = randomUUID();
+  const storedIds = ids.length > 0 ? ids : parent?.discordMessageIds ?? [];
+  db.prepare(
+    `INSERT INTO conversation_evidence_log
+       (row_id, lineage_id, version, conversation_id, role, text, created_at_ms,
+        discord_message_ids_json, reservation_id, producing_cycle_id, architecture_epoch,
+        content_hash, source_status, data_classification, secret_omitted, delivered)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    rowId,
+    lineageId,
+    version,
+    input.conversationId,
+    role,
+    normalized.text,
+    nowMs,
+    JSON.stringify(storedIds),
+    input.reservationId ?? null,
+    input.producingCycleId ?? null,
+    input.architectureEpoch ?? ARCHITECTURE_EPOCH,
+    hashContent(role, normalized.text),
+    input.sourceStatus ?? (explicitEdit ? "edited" : "received"),
+    normalized.classification,
+    normalized.secretOmitted ? 1 : 0,
+    input.delivered ? 1 : 0,
+  );
 
-    const mapping = db.prepare(
-      `INSERT OR IGNORE INTO conversation_evidence_discord_ids
-         (discord_message_id, conversation_id, lineage_id, ordinal)
-       VALUES (?, ?, ?, ?)`,
-    );
-    storedIds.forEach((id, ordinal) => mapping.run(id, input.conversationId, lineageId, ordinal));
+  const mapping = db.prepare(
+    `INSERT OR IGNORE INTO conversation_evidence_discord_ids
+       (discord_message_id, conversation_id, lineage_id, ordinal)
+     VALUES (?, ?, ?, ?)`,
+  );
+  storedIds.forEach((id, ordinal) => mapping.run(id, input.conversationId, lineageId, ordinal));
+  const result = byId(db, rowId);
+  if (!result) throw new Error("evidence_append_lost");
+  return result;
+}
+
+function appendEvidence(
+  db: DatabaseSync,
+  role: EvidenceRole,
+  input: AppendEvidenceInput,
+): ConversationEvidenceRecord {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const result = appendEvidenceInTransaction(db, role, input);
     db.exec("COMMIT");
-    const result = byId(db, rowId);
-    if (!result) throw new Error("evidence_append_lost");
     try {
-      notifySidecarPostCommit(db, { changedRowIds: [rowId] });
+      notifySidecarPostCommit(db, { changedRowIds: [result.rowId] });
     } catch {
       // Derived sync failures must never disturb authoritative sidecar commit
     }
@@ -256,6 +264,20 @@ export type AppendOwnerUtteranceResult = {
   evidence: ConversationEvidenceRecord;
   duplicate: boolean;
 };
+
+/** Admit owner evidence within an existing caller-managed transaction. */
+export function appendOwnerUtteranceInTransaction(
+  db: DatabaseSync,
+  input: AppendEvidenceInput,
+): AppendOwnerUtteranceResult {
+  if (!input.editOfRowId) {
+    for (const id of uniqueIds(input.discordMessageIds)) {
+      const existing = existingByDiscordId(db, id);
+      if (existing) return { evidence: existing, duplicate: true };
+    }
+  }
+  return { evidence: appendEvidenceInTransaction(db, "owner", input), duplicate: false };
+}
 
 /** Admit owner evidence while exposing the Discord-id replay bit to ingress. */
 export function appendOwnerUtteranceWithStatus(

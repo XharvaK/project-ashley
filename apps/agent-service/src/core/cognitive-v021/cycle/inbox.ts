@@ -20,6 +20,7 @@ import {
   settleDurableAttempt,
   type DurableSettlement,
 } from "../retry/ledger.js";
+import { getActiveDeferredFrontier } from "../frontier/ledger.js";
 
 export type AdmitCycleInput = {
   conversationId: ConversationId;
@@ -158,6 +159,11 @@ function admitCycleInTransaction(db: DatabaseSync, input: AdmitCycleInput): Cycl
     if (!result) throw new Error("cycle_corrupt");
     return result;
   }
+  const activeFrontier = getActiveDeferredFrontier(db, input.conversationId);
+  if (activeFrontier && activeFrontier.cycleId !== cycleId) {
+    throw new Error("conversation_occupied_by_frontier");
+  }
+
   const maxRow = db.prepare("SELECT MAX(generation) AS generation FROM cycle_records WHERE conversation_id = ?").get(input.conversationId) as DbRow | undefined;
   const generation = input.generation ?? numberValue(maxRow?.generation) + 1;
   db.prepare(
