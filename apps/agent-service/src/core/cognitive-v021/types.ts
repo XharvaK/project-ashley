@@ -13,7 +13,27 @@ export type { DataClassification } from "../privacy/classification.js";
 export const ARCHITECTURE_EPOCH = "v0.2.1" as const;
 export const IMPLEMENTATION_SPEC_VERSION = "0.2.1.r5" as const;
 export const THOUGHT_CONTRACT_VERSION = 2 as const;
-export const COGNITIVE_SIDECAR_SCHEMA_VERSION = 6 as const;
+export const COGNITIVE_SIDECAR_SCHEMA_VERSION = 7 as const;
+export const CAPACITY_WAIT_MAX_DURATION_MS = 120_000 as const;
+export const MECHANICAL_SPIN_GUARD_LIMIT = 12 as const;
+
+export type DeferredFrontierState = "waiting" | "running" | "resolved" | "exhausted";
+
+export type DeferredReactiveFrontierRecord = {
+  frontierId: string;
+  conversationId: string;
+  cycleId: string;
+  generation: number;
+  state: DeferredFrontierState;
+  nextEligibleAtMs: number;
+  capacityDeadlineAtMs: number;
+  latestEvidenceRowId: string;
+  claimToken: string | null;
+  leaseExpiresAtMs: number | null;
+  attemptCount: number;
+  createdAtMs: number;
+  updatedAtMs: number;
+};
 export const SETTLEMENT_SCHEMA_VERSION = 1 as const;
 export const OUTBOX_BRIDGE_VERSION = 1 as const;
 export const LEGACY_IMPORT_TOOL_VERSION = 1 as const;

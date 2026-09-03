@@ -487,3 +487,31 @@ CREATE INDEX idx_in_flight_origin_attempt ON in_flight_effects(origin_attempt_id
 UPDATE effect_receipts SET outcome = 'outcome_unknown' WHERE outcome IN ('failed', 'unknown');
 UPDATE cognitive_sidecar_meta SET schema_version = 6, thought_contract_version = 2, projection_state = 'reconciling' WHERE id = 1;
 `;
+
+export const COGNITIVE_SIDECAR_SCHEMA_V7 = String.raw`
+CREATE TABLE IF NOT EXISTS deferred_reactive_frontiers (
+  frontier_id TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL,
+  cycle_id TEXT NOT NULL,
+  generation INTEGER NOT NULL,
+  state TEXT NOT NULL CHECK(state IN ('waiting', 'running', 'resolved', 'exhausted')),
+  next_eligible_at_ms INTEGER NOT NULL,
+  capacity_deadline_at_ms INTEGER NOT NULL,
+  latest_evidence_row_id TEXT NOT NULL,
+  claim_token TEXT,
+  lease_expires_at_ms INTEGER,
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  created_at_ms INTEGER NOT NULL,
+  updated_at_ms INTEGER NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_deferred_frontiers_active_conversation
+ON deferred_reactive_frontiers (conversation_id)
+WHERE state IN ('waiting', 'running');
+
+CREATE INDEX IF NOT EXISTS idx_deferred_frontiers_poll
+ON deferred_reactive_frontiers (state, next_eligible_at_ms)
+WHERE state = 'waiting';
+
+UPDATE cognitive_sidecar_meta SET schema_version = 7, projection_state = 'reconciling' WHERE id = 1;
+`;
