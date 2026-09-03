@@ -1,8 +1,9 @@
+import { randomUUID } from "node:crypto";
 import type express from "express";
 import type { DatabaseSync } from "node:sqlite";
 import { resolveActiveThread } from "../../memory/threads.js";
 import { appendOwnerUtteranceWithStatus } from "../evidence/conversation-log.js";
-import { appendCycleLogIds, appendInboxEvent, getCycle, getInboxEvent } from "../cycle/inbox.js";
+import { appendCycleLogIds, appendInboxEvent, appendInboxEventInTransaction, getCycle, getInboxEvent } from "../cycle/inbox.js";
 import { composeOrPreempt } from "../cycle/fence.js";
 import {
   advanceDeferredFrontierEvidence,
@@ -96,43 +97,48 @@ export function admitCognitiveIngress(
   }
   const activeFrontier = getActiveDeferredFrontier(sidecar, conversationId);
   if (activeFrontier) {
-    advanceDeferredFrontierEvidence(sidecar, activeFrontier.frontierId, evidence.rowId, admittedAtMs);
-    appendCycleLogIds(sidecar, activeFrontier.cycleId, [evidence.rowId], admittedAtMs);
-    const inbox = appendInboxEvent(sidecar, {
-      conversationId,
-      kind: "owner_utterance",
-      payload: {
-        cycleId: activeFrontier.cycleId,
-        evidenceRowId: evidence.rowId,
-        discordMessageIds: evidence.discordMessageIds,
-        ownerId: input.userId,
-        channel,
-        threadId: input.threadId ?? conversationId,
-        attachments: input.attachments ?? [],
-        discordPresence: input.discordPresence ?? null,
-        subsumedByFrontierId: activeFrontier.frontierId,
-      },
-      createdAtMs: admittedAtMs,
-    });
-    sidecar
-      .prepare(
-        `UPDATE inbox_events SET state = 'terminal', status = 'consumed',
-            terminal_reason = 'subsumed_by_frontier', consumed_at_ms = ?
-         WHERE id = ?`,
-      )
-      .run(admittedAtMs, inbox.id);
+    sidecar.exec("BEGIN IMMEDIATE");
+    try {
+      advanceDeferredFrontierEvidence(sidecar, activeFrontier.frontierId, evidence.rowId, admittedAtMs);
+      appendCycleLogIds(sidecar, activeFrontier.cycleId, [evidence.rowId], admittedAtMs);
+      const inbox = appendInboxEventInTransaction(
+        sidecar,
+        {
+          conversationId,
+          kind: "owner_utterance",
+          payload: {
+            cycleId: activeFrontier.cycleId,
+            evidenceRowId: evidence.rowId,
+            discordMessageIds: evidence.discordMessageIds,
+            ownerId: input.userId,
+            channel,
+            threadId: input.threadId ?? conversationId,
+            attachments: input.attachments ?? [],
+            discordPresence: input.discordPresence ?? null,
+            subsumedByFrontierId: activeFrontier.frontierId,
+          },
+          createdAtMs: admittedAtMs,
+          initialTerminalReason: "subsumed_by_frontier",
+        },
+        randomUUID(),
+      );
+      sidecar.exec("COMMIT");
 
-    return {
-      accepted: true,
-      evidenceRowId: evidence.rowId,
-      inboxEventId: inbox.id,
-      conversationId,
-      cycleId: activeFrontier.cycleId,
-      generation: activeFrontier.generation,
-      action: "compose",
-      evidenceRecordId: evidence.rowId,
-      admittedAtMs: evidence.createdAtMs,
-    };
+      return {
+        accepted: true,
+        evidenceRowId: evidence.rowId,
+        inboxEventId: inbox.id,
+        conversationId,
+        cycleId: activeFrontier.cycleId,
+        generation: activeFrontier.generation,
+        action: "compose",
+        evidenceRecordId: evidence.rowId,
+        admittedAtMs: evidence.createdAtMs,
+      };
+    } catch (error) {
+      try { sidecar.exec("ROLLBACK"); } catch { /* ignore rollback error */ }
+      throw error;
+    }
   }
   const fence = composeOrPreempt(sidecar, {
     conversationId,

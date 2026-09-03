@@ -59,9 +59,24 @@ export async function consumeInboxEvent(
   }
   try {
     const result = await handler(event);
+    const deferredResult = result as {
+      deferred?: boolean;
+      nextEligibleAtMs?: number;
+      conversationId?: string;
+      cycleId?: string;
+      generation?: number;
+      latestEvidenceRowId?: string;
+    } | undefined;
     const settlementResult: HandlerResult =
-      (result as { deferred?: boolean })?.deferred === true
-        ? { kind: "deferred_to_frontier" }
+      deferredResult?.deferred === true && typeof deferredResult.nextEligibleAtMs === "number"
+        ? {
+            kind: "deferred_to_frontier",
+            conversationId: deferredResult.conversationId ?? event.conversationId,
+            cycleId: deferredResult.cycleId ?? "",
+            generation: deferredResult.generation ?? 1,
+            nextEligibleAtMs: deferredResult.nextEligibleAtMs,
+            latestEvidenceRowId: deferredResult.latestEvidenceRowId ?? event.id,
+          }
         : ((result as HandlerResult) ?? { kind: "completed" });
     return settledOutcomeOrThrow(db, event, settlementResult, nowMs);
   } catch (error) {

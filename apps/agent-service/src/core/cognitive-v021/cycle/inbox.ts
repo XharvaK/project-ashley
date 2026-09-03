@@ -43,6 +43,7 @@ export type AppendInboxEventInput = {
   payload: unknown;
   createdAtMs?: number;
   capturedAuthorityRevision?: number;
+  initialTerminalReason?: string | null;
 };
 
 type DbRow = Record<string, unknown>;
@@ -261,13 +262,28 @@ function appendInboxEventInTransaction(db: DatabaseSync, input: AppendInboxEvent
   const lineagePayload = isRow(input.payload) && !Array.isArray(input.payload)
     ? { ...input.payload as DbRow, cycleId: cycle.cycleId, wakeId }
     : input.payload;
+  const isTerminal = Boolean(input.initialTerminalReason);
+  const status = isTerminal ? "consumed" : "pending";
+  const state = isTerminal ? "terminal" : "pending";
+  const consumedAtMs = isTerminal ? createdAtMs : null;
   db.prepare(
     `INSERT INTO inbox_events
-       (id, conversation_id, kind, payload_json, created_at_ms, status, claim_token,
+       (id, conversation_id, kind, payload_json, created_at_ms, status, state, terminal_reason, claim_token,
         worker_id, lease_expires_at_ms, attempt_count, claimed_at_ms, consumed_at_ms,
         last_error, wake_id)
-     VALUES (?, ?, ?, ?, ?, 'pending', NULL, NULL, NULL, 0, NULL, NULL, NULL, ?)`,
-  ).run(id, input.conversationId, input.kind, JSON.stringify(lineagePayload), createdAtMs, wakeId);
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 0, NULL, ?, NULL, ?)`,
+  ).run(
+    id,
+    input.conversationId,
+    input.kind,
+    JSON.stringify(lineagePayload),
+    createdAtMs,
+    status,
+    state,
+    input.initialTerminalReason ?? null,
+    consumedAtMs,
+    wakeId,
+  );
   const result = getInboxEvent(db, id);
   if (!result) throw new Error("inbox_append_lost");
   return result;

@@ -9,6 +9,7 @@ import { startCognitionLoop } from "./core/cognition/worker.js";
 import { startEngineeringAutonomyLoops } from "./core/sandbox/engineering-runtime.js";
 import { startDurableOperationalJobRunner } from "./core/sandbox/durable-job-runner.js";
 import { startInboxConsumer } from "./core/cognitive-v021/cycle/inbox-consumer.js";
+import { startFrontierCoordinator } from "./core/cognitive-v021/frontier/index.js";
 
 vi.mock("./core/curiosity/tick.js", () => ({
   startNuclearCuriosityLoop: vi.fn(),
@@ -34,6 +35,13 @@ vi.mock("./core/cognitive-v021/cycle/inbox-consumer.js", () => ({
   startInboxConsumer: vi.fn(() => ({
     stop: vi.fn(),
     done: Promise.resolve(),
+  })),
+}));
+
+vi.mock("./core/cognitive-v021/frontier/index.js", () => ({
+  startFrontierCoordinator: vi.fn(() => ({
+    stop: vi.fn(),
+    pollNow: vi.fn(async () => 0),
   })),
 }));
 
@@ -140,6 +148,7 @@ describe("agent-service kernel startup custody", () => {
     await serveAgent(fakeManager(sidecar));
 
     expect(startInboxConsumer).toHaveBeenCalledTimes(1);
+    expect(startFrontierCoordinator).toHaveBeenCalledTimes(1);
     expect(startCognitionLoop).not.toHaveBeenCalled();
     expect(startNuclearCuriosityLoop).not.toHaveBeenCalled();
     expect(startEngineeringAutonomyLoops).not.toHaveBeenCalled();
@@ -154,6 +163,7 @@ describe("agent-service kernel startup custody", () => {
     await serveAgent(fakeManager(null));
 
     expect(startInboxConsumer).not.toHaveBeenCalled();
+    expect(startFrontierCoordinator).not.toHaveBeenCalled();
     expect(startCognitionLoop).toHaveBeenCalledTimes(1);
     expect(startNuclearCuriosityLoop).toHaveBeenCalledTimes(1);
   });

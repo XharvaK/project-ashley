@@ -24,6 +24,12 @@ import {
 } from "../wake/ledger.js";
 import { occurrenceIdFor } from "../wake/identity.js";
 import { sha256 } from "../../model-fabric/hash.js";
+import { updateCycleState } from "../cycle/inbox.js";
+import {
+  getActiveDeferredFrontier,
+  insertDeferredFrontierRecord,
+  rescheduleDeferredFrontier,
+} from "../frontier/ledger.js";
 
 type DbRow = Record<string, unknown>;
 
@@ -678,11 +684,29 @@ export function settleDurableAttempt(
       ).run(terminalReason, input.nowMs, input.eventId, input.claimToken);
       if (input.result.kind === "completed") {
         finishWakeForEvent(db, current, "completed", input.nowMs);
-      } else if (current.wake_id) {
-        db.prepare(
-          `UPDATE wakes SET state = 'pending', lease_owner = NULL, lease_token = NULL, lease_expires_at_ms = NULL, updated_at_ms = ?
-           WHERE wake_id = ? AND state != 'terminal'`,
-        ).run(input.nowMs, current.wake_id);
+      } else {
+        if (current.wake_id) {
+          db.prepare(
+            `UPDATE wakes SET state = 'pending', lease_owner = NULL, lease_token = NULL, lease_expires_at_ms = NULL, updated_at_ms = ?
+             WHERE wake_id = ? AND state != 'terminal'`,
+          ).run(input.nowMs, current.wake_id);
+        }
+        if (input.result.cycleId) {
+          updateCycleState(db, input.result.cycleId, "capacity_wait", input.nowMs);
+        }
+        const existingFrontier = getActiveDeferredFrontier(db, input.result.conversationId);
+        if (existingFrontier) {
+          rescheduleDeferredFrontier(db, existingFrontier.frontierId, input.result.nextEligibleAtMs, input.nowMs);
+        } else {
+          insertDeferredFrontierRecord(db, {
+            conversationId: input.result.conversationId,
+            cycleId: input.result.cycleId,
+            generation: input.result.generation,
+            nextEligibleAtMs: input.result.nextEligibleAtMs,
+            latestEvidenceRowId: input.result.latestEvidenceRowId,
+            nowMs: input.nowMs,
+          });
+        }
       }
       return { kind: "completed" };
     }

@@ -30,6 +30,7 @@ import { readIdentitySlice } from "./core/cognitive-v021/identity/constitution.j
 import { runPerceptionBeforeThought } from "./core/cognitive-v021/perception/adapter.js";
 import { createOutboxProjector } from "./core/cognitive-v021/delivery/outbox-projector.js";
 import { startInboxConsumer, type InboxConsumerHandle } from "./core/cognitive-v021/cycle/inbox-consumer.js";
+import { startFrontierCoordinator, type FrontierCoordinatorHandle } from "./core/cognitive-v021/frontier/index.js";
 import {
   classifyInitiativeClass,
   evaluateProactiveEligibility,
@@ -57,6 +58,7 @@ export async function serveAgent(manager: AgentManager): Promise<void> {
     ? null
     : manager.openCognitiveSidecar();
   let cognitiveConsumer: InboxConsumerHandle | null = null;
+  let frontierCoordinator: FrontierCoordinatorHandle | null = null;
   let derivedStore: DerivedStore | null = null;
   let observabilityDb: DatabaseSync | null = null;
   if (cognitiveSidecar) {
@@ -130,6 +132,15 @@ export async function serveAgent(manager: AgentManager): Promise<void> {
       },
       onError: (error, event) => console.error(`[cognitive-v021] event failed id=${event?.id ?? "?"}`, error),
     });
+    frontierCoordinator = startFrontierCoordinator(
+      cognitiveSidecar,
+      nuclear,
+      deps,
+      {
+        workerId: `agent-service:${process.pid}`,
+        projector,
+      },
+    );
   }
   const app = createServer(manager, { sandboxBrokerClient, cognitiveSidecar });
   const server = listen(app);
@@ -205,6 +216,7 @@ export async function serveAgent(manager: AgentManager): Promise<void> {
     stopCognitionLoop();
     stopEngineeringAutonomyLoops();
     cognitiveConsumer?.stop();
+    frontierCoordinator?.stop();
     if (cognitiveConsumer) await cognitiveConsumer.done;
     derivedStore?.close();
     try { observabilityDb?.close(); } catch { /* ignore */ }

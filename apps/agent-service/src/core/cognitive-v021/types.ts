@@ -488,7 +488,14 @@ export type DurableAttemptReceipt = Readonly<{
 }>;
 export type HandlerResult =
   | { kind: "completed" }
-  | { kind: "deferred_to_frontier" }
+  | {
+      kind: "deferred_to_frontier";
+      conversationId: string;
+      cycleId: string;
+      generation: number;
+      nextEligibleAtMs: number;
+      latestEvidenceRowId: string;
+    }
   | {
       kind: "failed";
       failureClass: Exclude<DurableFailureClass, "outcome_unknown_reconcile">;
@@ -1279,6 +1286,8 @@ export type KernelRunResult = {
   acceptedSettlements: number;
   deferred?: boolean;
   nextEligibleAtMs?: number;
+  conversationId?: string;
+  latestEvidenceRowId?: string;
 };
 
 export type CheckAuthority = (

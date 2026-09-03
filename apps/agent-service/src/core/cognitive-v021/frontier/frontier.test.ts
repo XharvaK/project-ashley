@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { DatabaseSync } from "node:sqlite";
 import {
   COGNITIVE_SIDECAR_SCHEMA_V1,
@@ -267,7 +267,7 @@ describe("Wave 1B: Durable Frontier Lifecycle & Migration 007", () => {
     // Attempt reschedule at 121s (past 120s deadline of 1_120_000)
     const resched2 = rescheduleDeferredFrontier(db, frontier.frontierId, nowMs + 130_000, nowMs + 121_000);
     expect(resched2.outcome).toBe("exhausted");
-    expect(resched2.reason).toBe("capacity_deadline_exceeded");
+    expect(resched2.reason).toBe("capacity_wait_max_duration_exceeded");
 
     const check = getDeferredFrontier(db, frontier.frontierId);
     expect(check?.state).toBe("exhausted");

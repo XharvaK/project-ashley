@@ -1,18 +1,22 @@
 import { describe, expect, it, vi } from "vitest";
 import { DatabaseSync } from "node:sqlite";
 import { openCognitiveSidecarDb } from "../sidecar/db.js";
+import { openNuclearDb } from "../../db.js";
 import { admitCognitiveIngress } from "../ingress/http.js";
-import { consumeInboxEvent, consumeNextInboxEvent } from "../cycle/inbox-consumer.js";
-import { getCycle, getInboxEvent } from "../cycle/inbox.js";
+import { claimNextInboxEvent, consumeInboxEvent, consumeNextInboxEvent } from "../cycle/inbox-consumer.js";
+import { appendInboxEvent, getCycle, getInboxEvent } from "../cycle/inbox.js";
+import { settleDurableAttempt } from "../retry/ledger.js";
 import { listConversationEvidence } from "../evidence/conversation-log.js";
 import {
+  claimDueDeferredFrontier,
   getActiveDeferredFrontier,
   getDeferredFrontier,
+  insertDeferredFrontierRecord,
   rescheduleDeferredFrontier,
 } from "./ledger.js";
 import { startFrontierCoordinator } from "./coordinator.js";
 import { runLiveCognitiveTurn, createLiveCognitiveDispatcher } from "../dispatch/live.js";
-import { makeSemanticSettlement } from "../test-support.js";
+import { admitTestCycle, makeSemanticSettlement } from "../test-support.js";
 import type {
   CapabilityReality,
   IdentitySlice,
@@ -34,8 +38,6 @@ const capabilityReality: CapabilityReality = {
   canOfferPatchExport: false,
   approvedProjectIds: [],
 };
-
-import { openNuclearDb } from "../../db.js";
 
 function createNuclearDb(): DatabaseSync {
   return openNuclearDb(new DatabaseSync(":memory:"));
@@ -339,26 +341,226 @@ describe("Wave 1C: Deferred Reactive Frontier Coalescing & V021 Integration", ()
     nuclear.close();
   });
 
-  it("spin guard: enforces limit of 12 attempts and exhausts frontier", () => {
+  it("B4: allows more than 12 legitimate strictly-forward reschedules before 120s deadline without exhaustion", () => {
     const sidecar = createSidecarDb();
-    const nowMs = 1_000_000;
+    let nowMs = 1_000_000;
 
-    // Insert frontier already at attempt 12
     sidecar.prepare(
       `INSERT INTO deferred_reactive_frontiers
          (frontier_id, conversation_id, cycle_id, generation, state,
           next_eligible_at_ms, capacity_deadline_at_ms, latest_evidence_row_id,
           claim_token, lease_expires_at_ms, attempt_count, created_at_ms, updated_at_ms)
-       VALUES ('f-spin', 'conv:1', 'c:1', 1, 'running', 1010000, 1120000, 'ev:1', 'tok', 1020000, 12, 1000000, 1000000)`,
+       VALUES ('f-multi', 'conv:1', 'c:1', 1, 'waiting', 1000500, 1120000, 'ev:1', NULL, NULL, 0, 1000000, 1000000)`,
     ).run();
 
-    const resched = rescheduleDeferredFrontier(sidecar, "f-spin", nowMs + 10_000, nowMs);
-    expect(resched.outcome).toBe("exhausted");
-    expect(resched.reason).toBe("mechanical_spin_guard_limit_exceeded");
+    // Perform 15 legitimate strictly-forward claims and reschedules in small increments
+    for (let i = 1; i <= 15; i++) {
+      nowMs += 2_000;
+      // Claim
+      expect(claimDueDeferredFrontier(sidecar, "f-multi", `tok:${i}`, 5_000, nowMs).claimed).toBe(true);
+      // Reschedule 1 second forward from nowMs
+      const resched = rescheduleDeferredFrontier(sidecar, "f-multi", nowMs + 1_000, nowMs);
+      expect(resched.outcome).toBe("rescheduled");
+      expect(resched.frontier?.attemptCount).toBe(i);
+      expect(resched.frontier?.state).toBe("waiting");
+    }
 
-    const check = getDeferredFrontier(sidecar, "f-spin");
-    expect(check?.state).toBe("exhausted");
+    const check = getDeferredFrontier(sidecar, "f-multi");
+    expect(check?.state).toBe("waiting");
+    expect(check?.attemptCount).toBe(15);
+
+    // Now attempt to reschedule past the 120s deadline (deadline is 1_120_000)
+    nowMs = 1_121_000;
+    expect(claimDueDeferredFrontier(sidecar, "f-multi", "tok:final", 5_000, nowMs).claimed).toBe(true);
+    const exhausted = rescheduleDeferredFrontier(sidecar, "f-multi", nowMs + 5_000, nowMs);
+    expect(exhausted.outcome).toBe("exhausted");
+    expect(exhausted.reason).toBe("capacity_wait_max_duration_exceeded");
     sidecar.close();
+  });
+
+  it("B2: proves initial inbox -> frontier authority transfer atomicity and crash semantics", async () => {
+    const sidecar = createSidecarDb();
+    const nowMs = 1_000_000;
+
+    // Set up an admitted cycle and an inbox event leased by a worker
+    const inbox = appendInboxEvent(sidecar, {
+      conversationId: "thread-b2",
+      kind: "owner_utterance",
+      payload: { evidenceRowId: "ev-b2" },
+      createdAtMs: nowMs,
+    });
+    const cycle = getCycle(sidecar, (inbox.payload as any).cycleId)!;
+    expect(cycle).toBeDefined();
+
+    // Lease the inbox event for durable processing
+    const leased = claimNextInboxEvent(sidecar, { workerId: "worker-b2", leaseMs: 30_000, nowMs });
+    expect(leased).toBeDefined();
+    expect(leased?.id).toBe(inbox.id);
+    expect(leased?.durableAttemptId).toBeDefined();
+
+    // 1. BEFORE commit: simulate failure during atomic handoff (e.g. invalid non-forward hint throws error)
+    expect(() => {
+      settleDurableAttempt(sidecar, {
+        eventId: inbox.id,
+        attemptId: leased!.durableAttemptId!,
+        claimToken: leased!.claimToken!,
+        result: {
+          kind: "deferred_to_frontier",
+          conversationId: cycle.conversationId,
+          cycleId: cycle.cycleId,
+          generation: cycle.generation,
+          nextEligibleAtMs: nowMs - 1000, // Invalid: non-forward! Throws error!
+          latestEvidenceRowId: "ev-b2",
+        },
+        nowMs: nowMs + 100,
+      });
+    }).toThrow();
+
+    // Verify rollback: NO active frontier survives, original inbox event remains leased, cycle state unchanged
+    expect(getActiveDeferredFrontier(sidecar, cycle.conversationId)).toBeNull();
+    const recheckInbox = getInboxEvent(sidecar, inbox.id);
+    expect(recheckInbox?.status).toBe("claimed");
+    expect(recheckInbox?.claimToken).toBe(leased!.claimToken);
+
+    // 2. AFTER commit: execute valid atomic handoff
+    const settled = settleDurableAttempt(sidecar, {
+      eventId: inbox.id,
+      attemptId: leased!.durableAttemptId!,
+      claimToken: leased!.claimToken!,
+      result: {
+        kind: "deferred_to_frontier",
+        conversationId: cycle.conversationId,
+        cycleId: cycle.cycleId,
+        generation: cycle.generation,
+        nextEligibleAtMs: nowMs + 30_000, // Valid forward hint
+        latestEvidenceRowId: "ev-b2",
+      },
+      nowMs: nowMs + 200,
+    });
+    expect(settled.kind).toBe("completed");
+
+    // Verify post-commit state:
+    // Active frontier exists with sole future work authority
+    const activeFrontier = getActiveDeferredFrontier(sidecar, cycle.conversationId);
+    expect(activeFrontier).toBeDefined();
+    expect(activeFrontier?.state).toBe("waiting");
+    expect(activeFrontier?.nextEligibleAtMs).toBe(nowMs + 30_000);
+
+    // Original inbox event is terminal with deferred_to_frontier
+    const finalInbox = getInboxEvent(sidecar, inbox.id);
+    expect(finalInbox?.status).toBe("consumed");
+    expect(finalInbox?.terminalReason).toBe("deferred_to_frontier");
+
+    // Cycle record is in capacity_wait
+    const finalCycle = getCycle(sidecar, cycle.cycleId);
+    expect(finalCycle?.state).toBe("capacity_wait");
+
+    // No ordinary inbox claim can independently run A
+    const secondClaim = claimNextInboxEvent(sidecar, { workerId: "worker-b2", leaseMs: 30_000, nowMs: nowMs + 300 });
+    expect(secondClaim).toBeNull();
+
+    sidecar.close();
+  });
+
+  it("B3: proves follower subsumption transactionality under rollback and commit", () => {
+    const sidecar = createSidecarDb();
+    const nuclear = createNuclearDb();
+    const nowMs = 1_000_000;
+
+    // 1. Establish conversation and active deferred frontier for A
+    const ingressA = admitCognitiveIngress(
+      sidecar,
+      nuclear,
+      { userId: "user:owner", message: "Message A" },
+      { nowMs },
+    );
+    const conversationId = ingressA.conversationId;
+    const cycleId = ingressA.cycleId;
+    const generation = ingressA.generation;
+
+    insertDeferredFrontierRecord(sidecar, {
+      frontierId: "f-b3-trigger",
+      conversationId,
+      cycleId,
+      generation,
+      nextEligibleAtMs: nowMs + 30_000,
+      latestEvidenceRowId: ingressA.evidenceRowId,
+      nowMs,
+    });
+
+    // 2. Inject failure inside follower ingress transaction:
+    // Fail when active frontier evidence is updated
+    sidecar.exec(`
+      CREATE TRIGGER fail_frontier_advance
+      BEFORE UPDATE ON deferred_reactive_frontiers
+      FOR EACH ROW
+      WHEN NEW.frontier_id = 'f-b3-trigger' AND NEW.latest_evidence_row_id != '${ingressA.evidenceRowId}'
+      BEGIN
+        SELECT RAISE(FAIL, 'simulated_subsumption_failure');
+      END;
+    `);
+
+    expect(() => {
+      admitCognitiveIngress(
+        sidecar,
+        nuclear,
+        {
+          userId: "user:owner",
+          message: "fail_test",
+          finalFragmentReceivedAtMs: nowMs + 5_000,
+        },
+        { nowMs: nowMs + 5_000 },
+      );
+    }).toThrow("simulated_subsumption_failure");
+
+    // Verify rollback:
+    // - frontier not advanced to fail_test
+    const frontierAfterRollback = getActiveDeferredFrontier(sidecar, conversationId);
+    expect(frontierAfterRollback?.latestEvidenceRowId).toBe(ingressA.evidenceRowId);
+    // - cycle compose log not updated
+    const cycleAfterRollback = getCycle(sidecar, cycleId);
+    expect(cycleAfterRollback?.composeLogIds).not.toContain("fail_test");
+    // - only original pending inbox event for A exists
+    const pendingInbox = sidecar.prepare("SELECT * FROM inbox_events WHERE status = 'pending'").all();
+    expect(pendingInbox).toHaveLength(1);
+
+    // Remove simulated failure trigger
+    sidecar.exec("DROP TRIGGER fail_frontier_advance");
+
+    // 3. Normal follower subsumption commit:
+    const ingressB = admitCognitiveIngress(
+      sidecar,
+      nuclear,
+      {
+        userId: "user:owner",
+        message: "Message B",
+        discordMessageIds: ["msg-b-id"],
+        finalFragmentReceivedAtMs: nowMs + 10_000,
+      },
+      { nowMs: nowMs + 10_000 },
+    );
+    expect(ingressB.accepted).toBe(true);
+
+    // Verify successful commit facts:
+    // - B has independent evidence identity
+    expect(ingressB.evidenceRowId).toBeDefined();
+    // - B has independent inbox/audit identity
+    const inboxB = getInboxEvent(sidecar, ingressB.inboxEventId);
+    expect(inboxB).toBeDefined();
+    // - B is terminal subsumed_by_frontier (NOT pending/runnable)
+    expect(inboxB?.status).toBe("consumed");
+    expect(inboxB?.terminalReason).toBe("subsumed_by_frontier");
+    // - frontier advanced to B
+    const frontierAfterB = getActiveDeferredFrontier(sidecar, conversationId);
+    expect(frontierAfterB?.latestEvidenceRowId).toBe(ingressB.evidenceRowId);
+    // - cycle compose log records B
+    const cycleAfterB = getCycle(sidecar, cycleId);
+    expect(cycleAfterB?.composeLogIds).toContain(ingressB.evidenceRowId);
+    // - T1 remains unchanged
+    expect(frontierAfterB?.nextEligibleAtMs).toBe(nowMs + 30_000);
+
+    sidecar.close();
+    nuclear.close();
   });
 
   it("non-forward scheduling hint guard: exhausts frontier if governor returns past or non-forward timestamp", () => {

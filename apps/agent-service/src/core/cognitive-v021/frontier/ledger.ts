@@ -1,8 +1,7 @@
-﻿import { randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import {
   CAPACITY_WAIT_MAX_DURATION_MS,
-  MECHANICAL_SPIN_GUARD_LIMIT,
   type CreateDeferredFrontierInput,
   type ClaimFrontierResult,
   type DeferredFrontierState,
@@ -46,7 +45,7 @@ function mapFrontier(row: unknown): DeferredReactiveFrontierRecord | null {
   };
 }
 
-export function createDeferredFrontierInTransaction(
+export function insertDeferredFrontierRecord(
   db: DatabaseSync,
   input: CreateDeferredFrontierInput,
 ): DeferredReactiveFrontierRecord {
@@ -79,6 +78,9 @@ export function createDeferredFrontierInTransaction(
   if (!frontier) throw new Error("frontier_creation_failed");
   return frontier;
 }
+
+/** Deprecated alias for insertDeferredFrontierRecord */
+export const createDeferredFrontierInTransaction = insertDeferredFrontierRecord;
 
 export function getActiveDeferredFrontier(
   db: DatabaseSync,
@@ -158,18 +160,14 @@ export function rescheduleDeferredFrontier(
 ): RescheduleFrontierResult {
   const current = getDeferredFrontier(db, frontierId);
   if (!current) throw new Error("frontier_not_found");
-  if (current.state !== "running") throw new Error(`frontier_reschedule_invalid_state:${current.state}`);
-
-  if (nowMs >= current.capacityDeadlineAtMs) {
-    exhaustDeferredFrontier(db, frontierId, nowMs);
-    const updated = getDeferredFrontier(db, frontierId);
-    return { outcome: "exhausted", frontier: updated ?? undefined, reason: "capacity_deadline_exceeded" };
+  if (current.state !== "running" && current.state !== "waiting") {
+    throw new Error(`frontier_reschedule_invalid_state:${current.state}`);
   }
 
-  if (current.attemptCount >= MECHANICAL_SPIN_GUARD_LIMIT) {
+  if (nowMs >= current.capacityDeadlineAtMs || nextEligibleAtMs > current.capacityDeadlineAtMs) {
     exhaustDeferredFrontier(db, frontierId, nowMs);
     const updated = getDeferredFrontier(db, frontierId);
-    return { outcome: "exhausted", frontier: updated ?? undefined, reason: "mechanical_spin_guard_limit_exceeded" };
+    return { outcome: "exhausted", frontier: updated ?? undefined, reason: "capacity_wait_max_duration_exceeded" };
   }
 
   if (nextEligibleAtMs <= nowMs) {
@@ -186,7 +184,7 @@ export function rescheduleDeferredFrontier(
            claim_token = NULL,
            lease_expires_at_ms = NULL,
            updated_at_ms = ?
-       WHERE frontier_id = ? AND state = 'running'`,
+       WHERE frontier_id = ? AND state IN ('running', 'waiting')`,
     )
     .run(nextEligibleAtMs, nowMs, frontierId);
 

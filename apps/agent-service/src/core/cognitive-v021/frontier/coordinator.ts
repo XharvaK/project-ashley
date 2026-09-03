@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import type { KernelDeps, OutboxDeliveryProjector } from "../types.js";
-import { getCycle } from "../cycle/inbox.js";
+import { getCycle, updateCycleState } from "../cycle/inbox.js";
 import { runLiveCognitiveTurn } from "../dispatch/live.js";
 import type { InboxEvent } from "../types.js";
 import {
@@ -9,6 +9,7 @@ import {
   exhaustDeferredFrontier,
   getNextDueFrontierDelayMs,
   listDueDeferredFrontiers,
+  rescheduleDeferredFrontier,
   resolveDeferredFrontier,
 } from "./ledger.js";
 
@@ -84,6 +85,11 @@ export function startFrontierCoordinator(
         });
         if (result.published) {
           resolveDeferredFrontier(sidecar, due.frontierId, getNowMs());
+        } else if (result.deferred && typeof result.nextEligibleAtMs === "number") {
+          const resched = rescheduleDeferredFrontier(sidecar, due.frontierId, result.nextEligibleAtMs, getNowMs());
+          if (resched.outcome === "exhausted") {
+            updateCycleState(sidecar, due.cycleId, "silent", getNowMs());
+          }
         } else if (!result.deferred) {
           exhaustDeferredFrontier(sidecar, due.frontierId, getNowMs());
         }
