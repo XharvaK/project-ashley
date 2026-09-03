@@ -127,6 +127,7 @@ function mapInbox(row: unknown): InboxEvent | null {
     claimedAtMs: row.claimed_at_ms == null ? null : numberValue(row.claimed_at_ms),
     consumedAtMs: row.consumed_at_ms == null ? null : numberValue(row.consumed_at_ms),
     lastError: row.last_error == null ? null : stringValue(row.last_error),
+    terminalReason: row.terminal_reason == null ? null : stringValue(row.terminal_reason),
   };
 }
 

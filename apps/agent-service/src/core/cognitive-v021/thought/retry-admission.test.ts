@@ -132,7 +132,7 @@ function helloInput(): { sidecar: DatabaseSync; input: ThoughtInput } {
   // estimator near the live failure's high-context admission boundary.
   input.rawConversation = input.rawConversation.map((row) => ({
     ...row,
-    text: `${row.text} ${"hello ".repeat(1_800)}`,
+    text: `${row.text} ${"hello ".repeat(1_775)}`,
   }));
   return { sidecar, input };
 }

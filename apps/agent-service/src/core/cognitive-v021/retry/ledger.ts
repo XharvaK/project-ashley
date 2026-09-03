@@ -338,8 +338,12 @@ function failureFor(result: DurableSettlement): {
   failureClass: DurableFailureClass | null;
   errorCode: string | null;
 } {
-  if (result.kind === "completed") {
-    return { dispatchTruth: "provider_responded", failureClass: null, errorCode: null };
+  if (result.kind === "completed" || result.kind === "deferred_to_frontier") {
+    return {
+      dispatchTruth: result.kind === "deferred_to_frontier" ? "not_started" : "provider_responded",
+      failureClass: null,
+      errorCode: null,
+    };
   }
   if (result.kind === "outcome_unknown") {
     return { dispatchTruth: "unknown", failureClass: "outcome_unknown_reconcile", errorCode: result.errorCode };
@@ -663,15 +667,23 @@ export function settleDurableAttempt(
         WHERE attempt_id = ? AND event_id = ? AND finished_at_ms IS NULL`,
     ).run(input.nowMs, normalized.dispatchTruth, normalized.failureClass, normalized.errorCode, input.attemptId, input.eventId);
 
-    if (input.result.kind === "completed") {
+    if (input.result.kind === "completed" || input.result.kind === "deferred_to_frontier") {
+      const terminalReason = input.result.kind === "deferred_to_frontier" ? "deferred_to_frontier" : "completed";
       db.prepare(
         `UPDATE inbox_events SET state = 'terminal', status = 'consumed',
-            terminal_reason = 'completed', quarantine_reason = NULL,
+            terminal_reason = ?, quarantine_reason = NULL,
             consumed_at_ms = ?, next_eligible_at_ms = NULL,
             claim_token = NULL, worker_id = NULL, lease_expires_at_ms = NULL
           WHERE id = ? AND state = 'leased' AND claim_token = ?`,
-      ).run(input.nowMs, input.eventId, input.claimToken);
-      finishWakeForEvent(db, current, "completed", input.nowMs);
+      ).run(terminalReason, input.nowMs, input.eventId, input.claimToken);
+      if (input.result.kind === "completed") {
+        finishWakeForEvent(db, current, "completed", input.nowMs);
+      } else if (current.wake_id) {
+        db.prepare(
+          `UPDATE wakes SET state = 'pending', lease_owner = NULL, lease_token = NULL, lease_expires_at_ms = NULL, updated_at_ms = ?
+           WHERE wake_id = ? AND state != 'terminal'`,
+        ).run(input.nowMs, current.wake_id);
+      }
       return { kind: "completed" };
     }
 

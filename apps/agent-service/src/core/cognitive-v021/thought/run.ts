@@ -95,6 +95,12 @@ import {
 import { buildKernelEnvelope } from "./kernel-envelope.js";
 import { THOUGHT_OUTPUT_SCHEMA_FINGERPRINT } from "./output-contract.js";
 import { captureAuthorityCurrentness, hasAuthorityBarrier } from "../authority/barrier.js";
+import {
+  createDeferredFrontierInTransaction,
+  getActiveDeferredFrontier,
+  rescheduleDeferredFrontier,
+  resolveDeferredFrontier,
+} from "../frontier/ledger.js";
 
 export type ThoughtInvocation = {
   output: ThoughtStepOutput;
@@ -106,6 +112,8 @@ export type ThoughtInvocation = {
   malformed?: boolean;
   unavailable?: boolean;
   cancelled?: boolean;
+  deferred?: boolean;
+  nextEligibleAtMs?: number;
   kernelEnvelope?: KernelEnvelope;
 };
 
@@ -683,6 +691,32 @@ export async function runThoughtModel(
         // Observability DB persistence failures must not block thought execution
       }
     }
+    const attentionErr = error as { code?: string; nextEligibleAtMs?: number } | undefined;
+    const isCapacityDeferred =
+      !cancelled &&
+      attentionErr?.code === "attention_deadline" &&
+      typeof attentionErr.nextEligibleAtMs === "number";
+
+    if (isCapacityDeferred) {
+      return {
+        output: {
+          kind: "failure",
+          cycleId: input.cycleId,
+          generation: input.generation,
+          pass,
+          requestId,
+          occupantId: input.occupantId,
+          reason: "capacity_deferred",
+        },
+        attempts: 1,
+        requestId,
+        unavailable: false,
+        cancelled: false,
+        deferred: true,
+        nextEligibleAtMs: attentionErr.nextEligibleAtMs,
+      };
+    }
+
     return {
       output: {
         kind: "failure",
@@ -1225,6 +1259,54 @@ export async function runCognitiveCycle(
       }
       return emitFailure("malformed");
     }
+    if (invocation.deferred && typeof invocation.nextEligibleAtMs === "number") {
+      const nowMs = deps.nowMs();
+      const existingFrontier = getActiveDeferredFrontier(sidecar, cycle.conversationId);
+      if (existingFrontier) {
+        const resched = rescheduleDeferredFrontier(sidecar, existingFrontier.frontierId, invocation.nextEligibleAtMs, nowMs);
+        if (resched.outcome === "exhausted") {
+          return emitFailure(resched.reason ?? "capacity_exhausted");
+        }
+        updateCycleState(sidecar, cycle.cycleId, "capacity_wait", nowMs);
+        return {
+          cycleId: cycle.cycleId,
+          generation: cycle.generation,
+          published: false,
+          outboxId: null,
+          infrastructureNotice: null,
+          thoughtModelAttempts: counters.thoughtModelAttempts,
+          acceptedThoughtPasses: counters.acceptedThoughtPasses,
+          composeCancelledAttempts: counters.composeCancelledAttempts,
+          acceptedSettlements: 0,
+          deferred: true,
+          nextEligibleAtMs: invocation.nextEligibleAtMs,
+        };
+      } else {
+        updateCycleState(sidecar, cycle.cycleId, "capacity_wait", nowMs);
+        const latestRowId = triggerEvidence?.rowId ?? cycle.composeLogIds.at(-1) ?? "unknown";
+        createDeferredFrontierInTransaction(sidecar, {
+          conversationId: cycle.conversationId,
+          cycleId: cycle.cycleId,
+          generation: cycle.generation,
+          nextEligibleAtMs: invocation.nextEligibleAtMs,
+          latestEvidenceRowId: latestRowId,
+          nowMs,
+        });
+        return {
+          cycleId: cycle.cycleId,
+          generation: cycle.generation,
+          published: false,
+          outboxId: null,
+          infrastructureNotice: null,
+          thoughtModelAttempts: counters.thoughtModelAttempts,
+          acceptedThoughtPasses: counters.acceptedThoughtPasses,
+          composeCancelledAttempts: counters.composeCancelledAttempts,
+          acceptedSettlements: 0,
+          deferred: true,
+          nextEligibleAtMs: invocation.nextEligibleAtMs,
+        };
+      }
+    }
     if (invocation.unavailable) return emitFailure("unavailable");
 
     structuralFeedback = null;
@@ -1481,6 +1563,10 @@ export async function runCognitiveCycle(
           });
         }
       }
+    }
+    const activeFrontier = getActiveDeferredFrontier(sidecar, cycle.conversationId);
+    if (activeFrontier) {
+      resolveDeferredFrontier(sidecar, activeFrontier.frontierId, deps.nowMs());
     }
     return {
       cycleId: cycle.cycleId,

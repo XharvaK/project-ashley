@@ -8,9 +8,11 @@ import {
   settleDurableAttempt,
   type DurableSettlementOutcome,
 } from "../retry/ledger.js";
-import type { HandlerResult, InboxEvent } from "../types.js";
+import type { HandlerResult, InboxEvent, KernelRunResult } from "../types.js";
 
-export type InboxConsumerHandler = (event: InboxEvent) => void | HandlerResult | Promise<void | HandlerResult>;
+export type InboxConsumerHandler = (
+  event: InboxEvent,
+) => void | HandlerResult | KernelRunResult | Promise<void | HandlerResult | KernelRunResult>;
 
 export function claimNextInboxEvent(
   db: DatabaseSync,
@@ -57,7 +59,11 @@ export async function consumeInboxEvent(
   }
   try {
     const result = await handler(event);
-    return settledOutcomeOrThrow(db, event, result ?? { kind: "completed" }, nowMs);
+    const settlementResult: HandlerResult =
+      (result as { deferred?: boolean })?.deferred === true
+        ? { kind: "deferred_to_frontier" }
+        : ((result as HandlerResult) ?? { kind: "completed" });
+    return settledOutcomeOrThrow(db, event, settlementResult, nowMs);
   } catch (error) {
     const currentAttempt = getOpenDurableAttempt(db, event.id);
     if (currentAttempt) {

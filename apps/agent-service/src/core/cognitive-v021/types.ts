@@ -206,6 +206,7 @@ export type CycleState =
   | "authority_check"
   | "publishing"
   | "sending"
+  | "capacity_wait"
   | "silent"
   | "idle";
 
@@ -457,6 +458,7 @@ export type InboxEvent = {
   claimedAtMs: number | null;
   consumedAtMs: number | null;
   lastError: string | null;
+  terminalReason?: string | null;
   /** W6 claim metadata attached to a just-leased event. */
   durableAttemptId?: string;
   durableAttemptOrdinal?: number;
@@ -486,6 +488,7 @@ export type DurableAttemptReceipt = Readonly<{
 }>;
 export type HandlerResult =
   | { kind: "completed" }
+  | { kind: "deferred_to_frontier" }
   | {
       kind: "failed";
       failureClass: Exclude<DurableFailureClass, "outcome_unknown_reconcile">;
@@ -952,6 +955,7 @@ export type ThoughtFailureStep = ThoughtStepBase & {
     | "unavailable"
     | "revision_exhausted"
     | "pass_exhausted"
+    | "capacity_deferred"
     | "cancelled";
   /** Bounded parser category. Raw provider output is never persisted. */
   diagnosticCode?: ThoughtParserFailureCode;
@@ -1273,6 +1277,8 @@ export type KernelRunResult = {
   acceptedThoughtPasses: number;
   composeCancelledAttempts: number;
   acceptedSettlements: number;
+  deferred?: boolean;
+  nextEligibleAtMs?: number;
 };
 
 export type CheckAuthority = (
