@@ -142,6 +142,21 @@ export type ThoughtCapabilityQualificationInput = Readonly<{
   noFallback?: boolean;
   completeChat?: typeof completeChat;
   nowMs?: () => number;
+  /**
+   * Qualification-live campaign pacing only (milliseconds). The campaign
+   * waits this long AFTER one live case completes and BEFORE the next live
+   * case begins, so the rolling TPM window expires naturally. Default 0
+   * preserves existing behavior. Never consumed by the fixture path and
+   * never by production Thought or the attention governor.
+   */
+  interLiveCaseDelayMs?: number;
+  /**
+   * Qualification-only injectable wait used solely for inter-live-case
+   * campaign pacing. Defaults to a real timer. Tests inject a fake so no
+   * test ever sleeps the formal pacing value. Never touches production
+   * clock behavior.
+   */
+  sleepMs?: (ms: number) => Promise<void>;
 }>;
 
 export type QualificationFailureReplayInput = Readonly<{
@@ -182,6 +197,37 @@ const SEMANTIC_CASES = [
   "abstain",
 ] as const satisfies readonly ThoughtQualificationCaseId[];
 const FIXTURE_REFERENCES = ["turn-1"] as const;
+/**
+ * Upper bound for qualification-live inter-case pacing. The formal release
+ * value (65_000) is the attention rolling TPM window (TPM_WINDOW_MS = 60_000)
+ * plus a 5s scheduling/timestamp safety margin; the cap keeps a misconfigured
+ * campaign from extending a 12-case run without bound.
+ */
+export const MAX_INTER_LIVE_CASE_DELAY_MS = 300_000;
+/**
+ * Normalize the qualification-live inter-case pacing delay. `undefined`
+ * means "flag absent" and preserves the historical default of 0 (no pacing).
+ * Anything else must be an integer in [0, MAX_INTER_LIVE_CASE_DELAY_MS];
+ * invalid input fails closed. Accepts numeric strings so CLI argv parses
+ * through the same validator as programmatic callers.
+ */
+export function normalizeInterLiveCaseDelayMs(value: unknown): number {
+  if (value === undefined) return 0;
+  if (typeof value !== "number" && typeof value !== "string") {
+    throw new Error("inter_live_case_delay_invalid");
+  }
+  const delayMs = typeof value === "number" ? value : Number(value);
+  if (!Number.isInteger(delayMs) || delayMs < 0 || delayMs > MAX_INTER_LIVE_CASE_DELAY_MS) {
+    throw new Error("inter_live_case_delay_invalid");
+  }
+  return delayMs;
+}
+/** Default qualification-campaign wait. Production clock behavior untouched. */
+function defaultInterLiveCaseSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
 const CAPABILITY_REALITY: CapabilityReality = {
   vision: false,
   attachmentText: false,
@@ -2322,6 +2368,12 @@ function routeResult(input: {
   preflightErrorCode?: string;
   outputDirectory?: string | null;
   qualificationResultPath?: string | null;
+  /**
+   * Qualification-campaign pacing configuration (live path only). Auditable
+   * evidence of WHEN samples were scheduled; never model behavior, never an
+   * input to any case verdict or the W2 PASS oracle.
+   */
+  campaignInterLiveCaseDelayMs?: number;
 }): ThoughtRouteQualification {
   const capabilityFingerprint =
     input.cases.find((item) => item.capabilityFingerprint)?.capabilityFingerprint
@@ -2365,6 +2417,9 @@ function routeResult(input: {
       : {}),
     outputDirectory: input.outputDirectory ?? null,
     qualificationResultPath: input.qualificationResultPath ?? null,
+    ...(input.campaignInterLiveCaseDelayMs !== undefined
+      ? { campaign: Object.freeze({ interLiveCaseDelayMs: input.campaignInterLiveCaseDelayMs }) }
+      : {}),
     verdict: input.verdict,
   });
 }
@@ -2675,15 +2730,28 @@ async function runLiveQualification(
     dataPlane: { kind: "isolated" },
   });
   const nowMs = input.nowMs ?? (() => Date.now());
+  // Validated at runThoughtCapabilityQualification entry; total here.
+  const interLiveCaseDelayMs = normalizeInterLiveCaseDelayMs(input.interLiveCaseDelayMs);
+  const sleepBetweenLiveCases = input.sleepMs ?? defaultInterLiveCaseSleep;
   const sampleCount = Math.max(1, Math.min(3, Math.trunc(input.samples ?? 1)));
   const liveCaseIds = input.caseIds && input.caseIds.length > 0
     ? [...new Set(input.caseIds)]
     : [...SEMANTIC_CASES];
   const cases: ThoughtQualificationCaseResult[] = [];
   let outcomeUnknown = false;
+  let completedLiveCases = 0;
   try {
     for (const caseId of liveCaseIds) {
       for (let sample = 0; sample < sampleCount; sample += 1) {
+        if (completedLiveCases > 0 && interLiveCaseDelayMs > 0) {
+          // Campaign pacing happens OUTSIDE any request: the previous live
+          // case is fully complete and evaluated above, while the next
+          // case's Thought deadline (deadlineAtMs) is only created inside
+          // runW0Sequence below. The wait therefore never consumes a
+          // request deadline, and the next admission succeeds only because
+          // time moved prior consumption outside the rolling TPM window.
+          await sleepBetweenLiveCases(interLiveCaseDelayMs);
+        }
         const caseRunId = runId + ":sample:" + sample;
         const caseInput = fixtureInput(caseRunId, caseId, nowMs(), preflight.occupantId);
         const sequence = await runW0Sequence({
@@ -2709,6 +2777,7 @@ async function runLiveQualification(
           expectedWireMode: preflight.wireMode,
           expectedWireBindingId: preflight.wireBindingId,
         }));
+        completedLiveCases += 1;
         if (sequence.outcomeUnknown) {
           outcomeUnknown = true;
           break;
@@ -2734,6 +2803,7 @@ async function runLiveQualification(
       verdict,
       outputDirectory: input.outputDir,
       qualificationResultPath,
+      campaignInterLiveCaseDelayMs: interLiveCaseDelayMs,
     });
   } finally {
     db.close();
@@ -2793,6 +2863,7 @@ function parseCli(argv: readonly string[]): {
   caseIds: readonly Extract<ThoughtQualificationCaseId, "settlement" | "observation_intent" | "effect_intent" | "abstain">[] | undefined;
   candidateSha: string | undefined;
   output: string | undefined;
+  interLiveCaseDelayMs: number;
 } {
   let live = false;
   let provider = "";
@@ -2802,6 +2873,7 @@ function parseCli(argv: readonly string[]): {
   const caseIds: Extract<ThoughtQualificationCaseId, "settlement" | "observation_intent" | "effect_intent" | "abstain">[] = [];
   let candidateSha: string | undefined;
   let output: string | undefined;
+  let interLiveCaseDelayMs = 0;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--live") live = true;
@@ -2818,12 +2890,19 @@ function parseCli(argv: readonly string[]): {
     }
     else if (arg === "--candidate-sha") candidateSha = argv[++index];
     else if (arg === "--output") output = argv[++index];
+    else if (arg === "--inter-live-case-delay-ms") {
+      try {
+        interLiveCaseDelayMs = normalizeInterLiveCaseDelayMs(argv[++index] ?? "NaN");
+      } catch {
+        throw new Error("qualification_cli_inter_live_case_delay_invalid");
+      }
+    }
     else throw new Error("qualification_cli_unknown_argument:" + arg);
   }
   if (!Number.isInteger(samples) || samples < 1 || samples > 3) {
     throw new Error("qualification_cli_samples_out_of_bounds");
   }
-  return { live, provider, model, noFallback, samples, caseIds: caseIds.length > 0 ? caseIds : undefined, candidateSha, output };
+  return { live, provider, model, noFallback, samples, caseIds: caseIds.length > 0 ? caseIds : undefined, candidateSha, output, interLiveCaseDelayMs };
 }
 
 export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<void> {
@@ -2847,6 +2926,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
       caseIds: args.caseIds,
       noFallback: args.noFallback,
       candidateSha: args.candidateSha,
+      interLiveCaseDelayMs: args.interLiveCaseDelayMs,
     });
     if (outputDir) writeRunReport(outputDir, result);
     process.stdout.write(JSON.stringify(result, null, 2) + "\n");
@@ -2862,6 +2942,11 @@ export async function runThoughtCapabilityQualification(
   const runId = input.runId ?? "w2-" + randomUUID();
   if (input.provider !== CANDIDATE.provider || input.model !== CANDIDATE.model) {
     return preflightFailureResult(input, runId, "NOT_QUALIFIED", "candidate_route_mismatch");
+  }
+  try {
+    normalizeInterLiveCaseDelayMs(input.interLiveCaseDelayMs);
+  } catch {
+    return preflightFailureResult(input, runId, "NOT_RUN", "inter_live_case_delay_invalid");
   }
   let qualificationBuildIdentity: string | undefined;
   if (input.environment === "isolated_live") {

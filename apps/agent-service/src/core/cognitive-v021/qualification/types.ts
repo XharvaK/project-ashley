@@ -194,5 +194,12 @@ export type ThoughtRouteQualification = Readonly<{
   preflight?: Readonly<Record<string, unknown>>;
   outputDirectory?: string | null;
   qualificationResultPath?: string | null;
+  /**
+   * Qualification-campaign scheduling evidence (live path only). Records WHEN
+   * samples were scheduled, never model behavior and never a verdict input.
+   */
+  campaign?: Readonly<{
+    interLiveCaseDelayMs: number;
+  }>;
   verdict: "PASS" | "NOT_QUALIFIED" | "NOT_RUN" | "OUTCOME_UNKNOWN";
 }>;

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+import { rmSync } from "node:fs";
 import { env } from "../../../env.js";
+import type { completeChat as completeChatSignature } from "../../../mistral-client.js";
 import {
   evaluateQualificationCase,
   diagnoseEffectIntentSemanticOutput,
@@ -12,6 +17,8 @@ import {
   validateThoughtOutputSchema,
   type QualificationGateEvidence,
   qualificationFixtureAbstainCoherence,
+  normalizeInterLiveCaseDelayMs,
+  MAX_INTER_LIVE_CASE_DELAY_MS,
 } from "./thought-capability-qualification.js";
 import { qualificationCheckoutIdentity } from "../../rollout/capabilities.js";
 import { createThoughtStructuralFeedback } from "../thought/structural-feedback.js";
@@ -681,5 +688,234 @@ describe("successor Thought qualification", () => {
     });
     expect(result.verdict).toBe("NOT_QUALIFIED");
     expect(result.cases).toHaveLength(0);
+  });
+});
+
+type PacingEvent =
+  | { kind: "now-read"; value: number }
+  | { kind: "sleep"; delayMs: number }
+  | { kind: "provider-call"; atMs: number };
+
+/**
+ * Deterministic W2 campaign-pacing harness. The fake clock advances ONLY
+ * inside the injected sleeper, so every timestamp the qualification code
+ * reads after a sleep (including the next case's Thought deadline seed)
+ * provably postdates the completed delay. No test sleeps real time and no
+ * test calls a live provider.
+ */
+function createPacingHarness() {
+  const events: PacingEvent[] = [];
+  let now = 1_700_000_000_000;
+  const nowMs = () => {
+    events.push({ kind: "now-read", value: now });
+    return now;
+  };
+  const sleepMs = async (ms: number) => {
+    events.push({ kind: "sleep", delayMs: ms });
+    now += ms;
+  };
+  const fakeCompletion = {
+    text: validAbstain,
+    model: "mistral-small-2603",
+    modelAlias: "mistral-small-2603",
+    resolvedModelId: "mistral-small-2603",
+    usage: { promptTokens: 128, completionTokens: 64 },
+    finishReason: "stop",
+    responseDiagnostics: null,
+    capturedAttemptIdentity: null,
+    wireEvidence: null,
+    capabilityIdentity: null,
+  } as unknown as Awaited<ReturnType<typeof completeChatSignature>>;
+  let providerCalls = 0;
+  const completeChat = (async () => {
+    providerCalls += 1;
+    events.push({ kind: "provider-call", atMs: nowMs() });
+    return fakeCompletion;
+  }) as unknown as typeof completeChatSignature;
+  return { events, nowMs, sleepMs, completeChat, providerCallCount: () => providerCalls };
+}
+
+async function runIsolatedLiveForPacing(input: {
+  caseIds?: readonly ("settlement" | "observation_intent" | "effect_intent" | "abstain")[];
+  samples?: number;
+  interLiveCaseDelayMs?: number;
+  harness?: ReturnType<typeof createPacingHarness>;
+  runId?: string;
+}) {
+  const harness = input.harness ?? createPacingHarness();
+  const checkoutIdentity = qualificationCheckoutIdentity();
+  const savedRelease = env.ashleyReleaseId;
+  const savedKey = env.mistralApiKey;
+  env.ashleyReleaseId = checkoutIdentity;
+  env.mistralApiKey = "pacing-test-key";
+  const outputDir = join(tmpdir(), `w2-pacing-${randomUUID()}`);
+  try {
+    const result = await runThoughtCapabilityQualification({
+      environment: "isolated_live",
+      provider: "mistral",
+      model: "mistral-small-2603",
+      candidateSha: checkoutIdentity,
+      allowlistedReferences: ["turn-1"],
+      noFallback: true,
+      runId: input.runId ?? `w2-test-pacing-${randomUUID()}`,
+      outputDir,
+      caseIds: input.caseIds,
+      samples: input.samples,
+      interLiveCaseDelayMs: input.interLiveCaseDelayMs,
+      completeChat: harness.completeChat,
+      nowMs: harness.nowMs,
+      sleepMs: harness.sleepMs,
+    });
+    return { result, harness };
+  } finally {
+    env.ashleyReleaseId = savedRelease;
+    env.mistralApiKey = savedKey;
+    rmSync(outputDir, { recursive: true, force: true });
+  }
+}
+
+function sleepEventsOf(events: readonly PacingEvent[]): number[] {
+  return events.filter((event) => event.kind === "sleep").map((event) => event.delayMs);
+}
+
+describe("w2 campaign pacing repair", () => {
+  it("fails closed on invalid pacing values and defaults an absent value to 0", () => {
+    expect(normalizeInterLiveCaseDelayMs(undefined)).toBe(0);
+    expect(normalizeInterLiveCaseDelayMs(0)).toBe(0);
+    expect(normalizeInterLiveCaseDelayMs(65000)).toBe(65000);
+    expect(normalizeInterLiveCaseDelayMs("65000")).toBe(65000);
+    expect(normalizeInterLiveCaseDelayMs(MAX_INTER_LIVE_CASE_DELAY_MS))
+      .toBe(MAX_INTER_LIVE_CASE_DELAY_MS);
+    for (const invalid of [-1, 1.5, Number.NaN, "pacing", true, false, null, {}, []]) {
+      expect(() => normalizeInterLiveCaseDelayMs(invalid)).toThrow("inter_live_case_delay_invalid");
+    }
+    expect(() => normalizeInterLiveCaseDelayMs(MAX_INTER_LIVE_CASE_DELAY_MS + 1))
+      .toThrow("inter_live_case_delay_invalid");
+  });
+
+  it("rejects an invalid pacing delay before isolated live dispatch", async () => {
+    let completeChatCalls = 0;
+    const result = await runThoughtCapabilityQualification({
+      environment: "isolated_live",
+      provider: "mistral",
+      model: "mistral-small-2603",
+      allowlistedReferences: [],
+      noFallback: true,
+      interLiveCaseDelayMs: -1,
+      completeChat: (async () => {
+        completeChatCalls += 1;
+        throw new Error("network_must_not_start");
+      }) as unknown as typeof completeChatSignature,
+    });
+    expect(result.verdict).toBe("NOT_RUN");
+    expect(result.preflight).toMatchObject({ errorCode: "inter_live_case_delay_invalid" });
+    expect(completeChatCalls).toBe(0);
+  });
+
+  it("waits between live cases only after the previous case completes", async () => {
+    const { result, harness } = await runIsolatedLiveForPacing({
+      caseIds: ["settlement", "abstain"],
+      samples: 1,
+      interLiveCaseDelayMs: 65000,
+    });
+    expect(result.cases).toHaveLength(2);
+    // Exactly one inter-case wait for two cases: the first case runs with no pre-delay.
+    expect(sleepEventsOf(harness.events)).toEqual([65000]);
+    const firstSleepIndex = harness.events.findIndex((event) => event.kind === "sleep");
+    const firstProviderIndex = harness.events.findIndex((event) => event.kind === "provider-call");
+    expect(firstProviderIndex).toBeGreaterThanOrEqual(0);
+    expect(firstSleepIndex).toBeGreaterThan(firstProviderIndex);
+    // The second case's provider call happens only after the wait completes.
+    const providerIndices = harness.events
+      .map((event, index) => (event.kind === "provider-call" ? index : -1))
+      .filter((index) => index >= 0);
+    expect(providerIndices.length).toBeGreaterThanOrEqual(2);
+    expect(providerIndices[providerIndices.length - 1]).toBeGreaterThan(firstSleepIndex);
+    // Pacing configuration is recorded as campaign metadata, not a verdict input.
+    expect(result.campaign).toEqual({ interLiveCaseDelayMs: 65000 });
+    for (const item of result.cases) {
+      expect(["PASS", "NOT_QUALIFIED"]).toContain(item.verdict);
+    }
+  });
+
+  it("proves the next request deadline starts only after the delay completes", async () => {
+    const { result, harness } = await runIsolatedLiveForPacing({
+      caseIds: ["settlement", "observation_intent"],
+      samples: 1,
+      interLiveCaseDelayMs: 65000,
+    });
+    expect(result.cases).toHaveLength(2);
+    // The fake clock advances only inside the injected sleeper, so scanning
+    // the event log in order proves every timestamp read after a sleep —
+    // including the next case's Thought deadline seed — postdates the delay.
+    let expectedNow = 1_700_000_000_000;
+    let sleepsSeen = 0;
+    for (const event of harness.events) {
+      if (event.kind === "sleep") {
+        expect(event.delayMs).toBe(65000);
+        expectedNow += event.delayMs;
+        sleepsSeen += 1;
+      } else if (event.kind === "now-read") {
+        expect(event.value).toBe(expectedNow);
+      } else {
+        expect(event.atMs).toBe(expectedNow);
+      }
+    }
+    expect(sleepsSeen).toBe(1);
+  });
+
+  it("defaults to zero delay and preserves unpaced live behavior", async () => {
+    const { result, harness } = await runIsolatedLiveForPacing({
+      caseIds: ["settlement", "abstain"],
+      samples: 1,
+    });
+    expect(result.cases).toHaveLength(2);
+    expect(sleepEventsOf(harness.events)).toEqual([]);
+    expect(harness.providerCallCount()).toBeGreaterThan(0);
+    expect(result.campaign).toEqual({ interLiveCaseDelayMs: 0 });
+  });
+
+  it("keeps one 12-case campaign with the PASS oracle unchanged", async () => {
+    const runId = `w2-test-pacing-full-${randomUUID()}`;
+    const { result, harness } = await runIsolatedLiveForPacing({
+      samples: 3,
+      interLiveCaseDelayMs: 65000,
+      runId,
+    });
+    expect(result.runId).toBe(runId);
+    expect(result.cases.map((item) => item.caseId)).toEqual([
+      "settlement", "settlement", "settlement",
+      "observation_intent", "observation_intent", "observation_intent",
+      "effect_intent", "effect_intent", "effect_intent",
+      "abstain", "abstain", "abstain",
+    ]);
+    // Eleven inter-case waits for twelve cases in a single campaign artifact.
+    expect(sleepEventsOf(harness.events)).toHaveLength(11);
+    expect(sleepEventsOf(harness.events).every((delayMs) => delayMs === 65000)).toBe(true);
+    // The canned wrong-kind responses still fail the unchanged oracle; pacing
+    // schedules samples but never converts a failure into a PASS.
+    for (const item of result.cases) {
+      expect(["PASS", "NOT_QUALIFIED"]).toContain(item.verdict);
+    }
+    expect(result.cases.some((item) => item.verdict === "NOT_QUALIFIED")).toBe(true);
+    expect(result.verdict).toBe("NOT_QUALIFIED");
+    expect(result.campaign).toEqual({ interLiveCaseDelayMs: 65000 });
+  });
+
+  it("leaves the fixture path unpaced and its artifact shape unchanged", async () => {
+    const harness = createPacingHarness();
+    const result = await runThoughtCapabilityQualification({
+      environment: "fixture",
+      provider: "mistral",
+      model: "mistral-small-2603",
+      allowlistedReferences: ["turn-1"],
+      runId: "w2-test-pacing-fixture",
+      interLiveCaseDelayMs: 65000,
+      nowMs: harness.nowMs,
+      sleepMs: harness.sleepMs,
+    });
+    expect(result.verdict).toBe("PASS");
+    expect(sleepEventsOf(harness.events)).toEqual([]);
+    expect("campaign" in result).toBe(false);
   });
 });
