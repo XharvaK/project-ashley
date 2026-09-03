@@ -958,6 +958,22 @@ function uniqueAuthorityCodes(codes: readonly string[]): AuthorityCode[] {
   );
 }
 
+/**
+ * Production-parity export seam (behavior-identical).
+ * Exposes the existing production Authority-revision policy so qualification
+ * can derive revisability and objection codes from the canonical predicate
+ * instead of duplicating the revisable-code list. No production behavior
+ * changes: both helpers delegate to the exact production predicate/set above.
+ */
+export function isRevisableAuthorityRejection(codes: readonly string[]): boolean {
+  return revisable(codes);
+}
+
+/** Production-parity export seam (behavior-identical): canonical objection projection. */
+export function productionAuthorityObjectionCodes(codes: readonly string[]): AuthorityCode[] {
+  return uniqueAuthorityCodes(codes);
+}
+
 /** Phase 02 kernel slice: assemble, perceive, run one Thought pass, validate, publish. */
 export async function runCognitiveCycle(
   sidecar: DatabaseSync,

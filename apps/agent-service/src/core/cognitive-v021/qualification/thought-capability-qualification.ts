@@ -25,7 +25,7 @@ import {
   parseThoughtSemanticOutput,
   THOUGHT_SEMANTIC_PARSER_ID,
 } from "../thought/parse.js";
-import { runThoughtModel, type ThoughtInvocation } from "../thought/run.js";
+import { runThoughtModel, isRevisableAuthorityRejection, productionAuthorityObjectionCodes, type ThoughtInvocation } from "../thought/run.js";
 import {
   createThoughtStructuralFeedback,
   type ThoughtStructuralFeedback,
@@ -35,7 +35,9 @@ import { validateThoughtSettlementDraft } from "../settlement/validate.js";
 import { checkAuthority } from "../authority/check.js";
 import { loadAuthorityPacks } from "../authority/packs.js";
 import { hasAuthorityBarrier } from "../authority/barrier.js";
+import { MAX_AUTHORITY_REVISIONS } from "../types.js";
 import type {
+  AuthorityCode,
   AuthorityCurrentnessBinding,
   CapabilityReality,
   EffectProposal,
@@ -284,6 +286,8 @@ type CandidatePreflight = Readonly<{
   capability: ThoughtCapabilityIdentity;
   credentialPresent: boolean;
 }>;
+/** Test seam: exported so deterministic tests can stub preflight without production config. */
+export type { CandidatePreflight };
 
 type CompletionCapture = {
   completion: CompletionValue | null;
@@ -305,10 +309,28 @@ type CompletionCapture = {
   responseDiagnostics: ProviderResponseDiagnostics | null;
 };
 
+type AuthorityRevisionPassEvidence = Readonly<{
+  semanticPass: number;
+  authorityCodes: readonly string[];
+  verdict: "PASS" | "REVISION_REQUIRED" | "TERMINAL";
+}>;
+
+type AuthorityRevisionEvidence = Readonly<{
+  attempted: boolean;
+  revisionCount: number;
+  passes: readonly AuthorityRevisionPassEvidence[];
+}>;
+
 type W0Sequence = Readonly<{
   invocations: readonly ThoughtInvocation[];
   captures: readonly CompletionCapture[];
   outcomeUnknown: boolean;
+  /**
+   * Production-parity Authority-revision evidence (live path only).
+   * Every evaluated semantic pass is recorded; the initial rejection is
+   * never overwritten. Absent for fixture sequences (W0 semantics frozen).
+   */
+  authorityRevision?: AuthorityRevisionEvidence;
 }>;
 
 type SchemaRecord = Record<string, unknown>;
@@ -1641,7 +1663,8 @@ function captureDispatchEvidenceFromCompletion(
   };
 }
 
-function fixtureCompletion(
+/** Test seam: deterministic fake-model completion factory, exported for revision tests. */
+export function fixtureCompletion(
   rawContent: string,
   options: CompletionOptions,
   preflight: CandidatePreflight,
@@ -1720,8 +1743,98 @@ function correctionPacketForMessages(
     : null;
 }
 
+export type QualificationAuthorityRevisionDecision =
+  | { readonly kind: "accept" }
+  | { readonly kind: "terminal"; readonly codes: readonly string[] }
+  | { readonly kind: "revise"; readonly codes: readonly AuthorityCode[] };
+
+/**
+ * Production-parity Authority-revision decision for one well-formed W2 semantic pass.
+ *
+ * Mirrors the production `runCognitiveCycle` revision policy exactly:
+ * revisability derives from the canonical production predicate
+ * (`isRevisableAuthorityRejection`), the budget is the production
+ * `MAX_AUTHORITY_REVISIONS`, and only revisable Authority/validation-conflict
+ * objections qualify. Branch mismatches, binding defects, malformed/stale
+ * validation, and nonrevisable Authority codes are terminal. Structural
+ * correction semantics are untouched (this helper never runs on malformed
+ * output and never fabricates structural feedback).
+ */
+export function decideQualificationAuthorityRevision(input: {
+  output: ThoughtStepOutput;
+  semantic: ThoughtSemanticOutput | undefined;
+  expectedKind: ThoughtSemanticOutput["kind"];
+  caseInput: ThoughtInput;
+  requestId: string;
+  sidecarDb: import("node:sqlite").DatabaseSync;
+  attentionDb: import("node:sqlite").DatabaseSync;
+  expectedCurrentness?: AuthorityCurrentnessBinding;
+  authorityRevisionCount: number;
+}): QualificationAuthorityRevisionDecision {
+  const budgetExhausted = input.authorityRevisionCount >= MAX_AUTHORITY_REVISIONS;
+  if (
+    input.semantic === undefined
+    || input.semantic.kind !== input.expectedKind
+    || !plausibleSemanticOutput(input.semantic)
+  ) {
+    return {
+      kind: "terminal",
+      codes: input.semantic === undefined
+        ? ["semantic_output_missing"]
+        : input.semantic.kind !== input.expectedKind
+          ? ["semantic_branch_mismatch"]
+          : ["semantic_shape_invalid"],
+    };
+  }
+  const fencing = fencingDiagnostic(input.output, input.caseInput, input.requestId);
+  if (fencing.status !== "PASS") {
+    if (input.output.kind === "settlement") {
+      const validation = validateThoughtSettlementDraft(input.output.settlement, {
+        cycleId: input.caseInput.cycleId,
+        generation: input.caseInput.generation,
+        occupantId: input.caseInput.occupantId,
+        authorityEpoch: input.caseInput.authorityEpoch,
+      });
+      if (
+        !validation.ok
+        && validation.kind === "conflict"
+        && isRevisableAuthorityRejection(validation.codes)
+      ) {
+        if (budgetExhausted) {
+          return { kind: "terminal", codes: [...validation.codes, "authority_revision_exhausted"] };
+        }
+        return { kind: "revise", codes: productionAuthorityObjectionCodes(validation.codes) };
+      }
+    }
+    return { kind: "terminal", codes: fencing.reasonCodes };
+  }
+  const authority = authorityDiagnostic(
+    input.sidecarDb,
+    input.attentionDb,
+    input.output,
+    input.caseInput,
+    input.expectedCurrentness,
+  );
+  if (authority.status !== "PASS") {
+    const codes = authority.reasonCodes;
+    if (authority.status === "FAIL" && isRevisableAuthorityRejection(codes)) {
+      if (budgetExhausted) {
+        return { kind: "terminal", codes: [...codes, "authority_revision_exhausted"] };
+      }
+      return { kind: "revise", codes: productionAuthorityObjectionCodes(codes) };
+    }
+    return { kind: "terminal", codes };
+  }
+  return { kind: "accept" };
+}
+
 async function runW0Sequence(input: {
   db: import("node:sqlite").DatabaseSync;
+  /**
+   * Sidecar db for in-sequence Authority evaluation. Required for the live
+   * production-parity revision path; unused by fixture sequences.
+   */
+  authorityDb?: import("node:sqlite").DatabaseSync;
   runId: string;
   caseId: ThoughtQualificationCaseId;
   expectedKind: ThoughtSemanticOutput["kind"];
@@ -1784,17 +1897,26 @@ async function runW0Sequence(input: {
     }
   };
   const deadlineAtMs = input.nowMs() + WHOLE_THOUGHT_BUDGET_MS;
+  // Production-parity Authority revision is live-only: each revision consumes
+  // one attempt slot inside the SAME case deadline (total invocations can
+  // never exceed rawHints.length, so the resource-policy bound is preserved).
+  // Fixture (W0) sequences keep exact first-pass-terminal semantics.
+  const revisionAuthorityDb = input.environment === "isolated_live" ? input.authorityDb : undefined;
+  let caseInput = input.caseInput;
+  let semanticPass = 1;
+  let authorityRevisionCount = 0;
+  const authorityRevisionPasses: AuthorityRevisionPassEvidence[] = [];
   let structuralFeedback: ThoughtStructuralFeedback | undefined;
   for (let index = 0; index < input.rawHints.length; index += 1) {
     const requestId = input.runId + ":" + input.caseId + ":" + index;
     const invocation = await runThoughtModel(
-      input.caseInput,
+      caseInput,
       {
         attentionDb: input.db,
         completeChat: invoker,
       } as unknown as KernelDeps,
       {
-        pass: 1,
+        pass: semanticPass,
         requestId,
         deadlineAtMs,
         nowMs: input.nowMs(),
@@ -1805,23 +1927,61 @@ async function runW0Sequence(input: {
     );
     invocations.push(invocation);
     if (invocation.correctionScopeViolation) break;
-    if (!invocation.malformed) break;
-    if (!shouldAttemptQualificationStructuralCorrection({
+    if (invocation.malformed) {
+      if (!shouldAttemptQualificationStructuralCorrection({
+        expectedKind: input.expectedKind,
+        structuralFeedback: invocation.structuralFeedback,
+      })) break;
+      structuralFeedback = invocation.structuralFeedback
+        ?? createThoughtStructuralFeedback({
+          code: invocation.output.kind === "failure" ? invocation.output.diagnosticCode ?? "other" : "other",
+          field: invocation.output.kind === "failure" ? invocation.output.diagnosticField : undefined,
+        });
+      continue;
+    }
+    if (revisionAuthorityDb === undefined) break;
+    const decision = decideQualificationAuthorityRevision({
+      output: invocation.output,
+      semantic: invocation.semantic,
       expectedKind: input.expectedKind,
-      structuralFeedback: invocation.structuralFeedback,
-    })) break;
-    structuralFeedback = invocation.structuralFeedback
-      ?? createThoughtStructuralFeedback({
-        code: invocation.output.kind === "failure"
-          ? invocation.output.diagnosticCode ?? "other"
-          : "other",
-        field: invocation.output.kind === "failure" ? invocation.output.diagnosticField : undefined,
-      });
+      caseInput,
+      requestId,
+      sidecarDb: revisionAuthorityDb,
+      attentionDb: input.db,
+      expectedCurrentness: invocation.kernelEnvelope?.authorityCurrentness,
+      authorityRevisionCount,
+    });
+    if (decision.kind === "accept") {
+      authorityRevisionPasses.push({ semanticPass, authorityCodes: [], verdict: "PASS" });
+      break;
+    }
+    if (decision.kind === "terminal") {
+      authorityRevisionPasses.push({ semanticPass, authorityCodes: [...decision.codes], verdict: "TERMINAL" });
+      break;
+    }
+    authorityRevisionPasses.push({ semanticPass, authorityCodes: [...decision.codes], verdict: "REVISION_REQUIRED" });
+    authorityRevisionCount += 1;
+    semanticPass += 1;
+    // An Authority revision is NOT a structural correction: the next semantic
+    // pass carries only the production authorityObjections signal (exact
+    // revisable codes, same ThoughtInput field production uses). No
+    // structural feedback and no qualification-only coaching are attached.
+    caseInput = { ...caseInput, authorityObjections: [...decision.codes] };
+    structuralFeedback = undefined;
   }
   return Object.freeze({
     invocations: Object.freeze(invocations),
     captures: Object.freeze(captures),
     outcomeUnknown: captures.some((capture) => capture.outcomeUnknown),
+    ...(revisionAuthorityDb === undefined
+      ? {}
+      : {
+          authorityRevision: Object.freeze({
+            attempted: authorityRevisionCount > 0,
+            revisionCount: authorityRevisionCount,
+            passes: Object.freeze([...authorityRevisionPasses]),
+          }),
+        }),
   });
 }
 
@@ -2178,6 +2338,9 @@ function resultFromSequence(input: {
   });
   return Object.freeze({
     ...evaluated,
+    ...(input.sequence.authorityRevision
+      ? { authorityRevision: input.sequence.authorityRevision }
+      : {}),
     invocationIds: Object.freeze(input.sequence.invocations.map((item) => item.requestId)),
     providerAttemptIds: Object.freeze(
       input.sequence.captures.flatMap((capture) =>
@@ -2756,6 +2919,7 @@ async function runLiveQualification(
         const caseInput = fixtureInput(caseRunId, caseId, nowMs(), preflight.occupantId);
         const sequence = await runW0Sequence({
           db,
+          authorityDb: sidecar,
           runId: caseRunId,
           caseId,
           expectedKind: caseId,

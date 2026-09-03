@@ -173,6 +173,21 @@ export type ThoughtQualificationCaseResult = Readonly<{
   failureEvidence: QualificationFailureEvidence | null;
   failureCodes: readonly string[];
   verdict: "PASS" | "NOT_QUALIFIED";
+  /**
+   * Production-parity Authority-revision evidence (live path only).
+   * Additive metadata: records every evaluated semantic pass so the initial
+   * rejection is preserved alongside the final converged verdict. Absent for
+   * fixture (W0) sequences.
+   */
+  authorityRevision?: Readonly<{
+    attempted: boolean;
+    revisionCount: number;
+    passes: readonly Readonly<{
+      semanticPass: number;
+      authorityCodes: readonly string[];
+      verdict: "PASS" | "REVISION_REQUIRED" | "TERMINAL";
+    }>[];
+  }>;
 }>;
 
 export type ThoughtQualificationNegativeWitness = ThoughtQualificationCaseResult & Readonly<{
