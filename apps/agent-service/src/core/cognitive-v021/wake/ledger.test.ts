@@ -29,4 +29,38 @@ describe("durable wake ledger", () => {
     expect(() => claimWake(sidecar, admitted.wake.wakeId, "worker-2", 7, 100)).toThrow("wake_terminal");
     sidecar.close();
   });
+
+  it("rejects wake admission when conversation is occupied by active deferred frontier for another cycle", () => {
+    const sidecar = db();
+    const cycleN = "cycle-n";
+    sidecar.prepare(
+      `INSERT INTO cycle_records
+         (cycle_id, conversation_id, generation, state, trigger_kind, authority_epoch, architecture_epoch, admitted_at_ms, updated_at_ms, compose_log_ids_json)
+       VALUES (?, 'conv-occ', 1, 'capacity_wait', 'owner_message', 1, 'v0.2.1', 100, 100, '[]')`,
+    ).run(cycleN);
+    sidecar.prepare(
+      `INSERT INTO deferred_reactive_frontiers
+         (frontier_id, conversation_id, cycle_id, generation, state,
+            next_eligible_at_ms, capacity_deadline_at_ms, latest_evidence_row_id,
+            attempt_count, created_at_ms, updated_at_ms)
+       VALUES ('f-occ', 'conv-occ', ?, 1, 'waiting', 200, 1000, 'ev-1', 0, 100, 100)`,
+    ).run(cycleN);
+
+    // Attempt admitWake for a different cycle M on same conversation
+    expect(() => {
+      admitWake(sidecar, {
+        occurrenceId: "wake-m",
+        triggerRef: "ev-2",
+        sourceKind: "inbox",
+        conversationId: "conv-occ",
+        cycleId: "cycle-m",
+        capturedAuthorityRevision: 1,
+        nowMs: 150,
+      });
+    }).toThrow("conversation_occupied_by_frontier");
+
+    const maxGen = sidecar.prepare("SELECT MAX(generation) AS maxGen FROM cycle_records WHERE conversation_id = ?").get("conv-occ") as { maxGen: number };
+    expect(maxGen.maxGen).toBe(1);
+    sidecar.close();
+  });
 });

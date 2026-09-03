@@ -306,4 +306,14 @@ describe("Wave 1B: Durable Frontier Lifecycle & Migration 007", () => {
 
     db.close();
   });
+
+  it("B6: missing mandatory deferred_reactive_frontiers table throws/fails closed instead of returning null", () => {
+    const unmigratedV6 = createV6Database();
+    expect(() => getActiveDeferredFrontier(unmigratedV6, "conv:1")).toThrow(/no such table/i);
+    unmigratedV6.close();
+
+    const emptyDb = new DatabaseSync(":memory:");
+    expect(() => getActiveDeferredFrontier(emptyDb, "conv:1")).toThrow(/no such table/i);
+    emptyDb.close();
+  });
 });

@@ -754,4 +754,217 @@ describe("Wave 1C: Deferred Reactive Frontier Coalescing & V021 Integration", ()
     sidecar.close();
     nuclear.close();
   });
+
+  it("B7: duplicate follower replay while frontier is active preserves high-water mark and does not duplicate work", () => {
+    const sidecar = createSidecarDb();
+    const nuclear = createNuclearDb();
+    const nowMs = 1_000_000;
+
+    // 1. Admit A (leader)
+    const ingressA = admitCognitiveIngress(
+      sidecar,
+      nuclear,
+      { userId: "user:owner", message: "Message A", discordMessageIds: ["msg-b7-a"] },
+      { nowMs },
+    );
+    const conversationId = ingressA.conversationId;
+    const cycleId = ingressA.cycleId;
+    const generation = ingressA.generation;
+
+    // Mark cycle in capacity_wait and create active deferred frontier
+    sidecar.prepare("UPDATE cycle_records SET state = 'capacity_wait' WHERE cycle_id = ?").run(cycleId);
+    insertDeferredFrontierRecord(sidecar, {
+      frontierId: "f-b7-active",
+      conversationId,
+      cycleId,
+      generation,
+      nextEligibleAtMs: nowMs + 30_000,
+      latestEvidenceRowId: ingressA.evidenceRowId,
+      nowMs,
+    });
+
+    // 2. Admit B (follower)
+    const ingressB = admitCognitiveIngress(
+      sidecar,
+      nuclear,
+      { userId: "user:owner", message: "Message B", discordMessageIds: ["msg-b7-b"] },
+      { nowMs: nowMs + 5_000 },
+    );
+    expect(ingressB.accepted).toBe(true);
+
+    // 3. Admit C (follower)
+    const ingressC = admitCognitiveIngress(
+      sidecar,
+      nuclear,
+      { userId: "user:owner", message: "Message C", discordMessageIds: ["msg-b7-c"] },
+      { nowMs: nowMs + 10_000 },
+    );
+    expect(ingressC.accepted).toBe(true);
+
+    // Capture state before replay of B
+    const frontierBefore = getActiveDeferredFrontier(sidecar, conversationId);
+    expect(frontierBefore?.latestEvidenceRowId).toBe(ingressC.evidenceRowId);
+    const cycleBefore = getCycle(sidecar, cycleId);
+    const inboxCountBefore = (sidecar.prepare(
+      "SELECT COUNT(*) AS count FROM inbox_events WHERE conversation_id = ? AND json_extract(payload_json, '$.evidenceRowId') = ?",
+    ).get(conversationId, ingressB.evidenceRowId) as { count: number }).count;
+    expect(inboxCountBefore).toBe(1);
+
+    // 4. Replay exact duplicate Discord identity for B
+    const replayB = admitCognitiveIngress(
+      sidecar,
+      nuclear,
+      { userId: "user:owner", message: "Message B (redelivered)", discordMessageIds: ["msg-b7-b"] },
+      { nowMs: nowMs + 15_000 },
+    );
+
+    // Verify duplicate resolution facts:
+    expect(replayB.accepted).toBe(true);
+    expect(replayB.duplicate).toBe(true);
+    expect(replayB.evidenceRowId).toBe(ingressB.evidenceRowId);
+    expect(replayB.inboxEventId).toBe(ingressB.inboxEventId);
+    expect(replayB.cycleId).toBe(cycleId);
+    expect(replayB.generation).toBe(generation);
+
+    // Frontier high-water mark remains C (did NOT regress to B)
+    const frontierAfter = getActiveDeferredFrontier(sidecar, conversationId);
+    expect(frontierAfter?.latestEvidenceRowId).toBe(ingressC.evidenceRowId);
+
+    // Compose log unchanged
+    const cycleAfter = getCycle(sidecar, cycleId);
+    expect(cycleAfter?.composeLogIds).toEqual(cycleBefore?.composeLogIds);
+    expect(cycleAfter?.generation).toBe(generation);
+
+    // Inbox count for B unchanged
+    const inboxCountAfter = (sidecar.prepare(
+      "SELECT COUNT(*) AS count FROM inbox_events WHERE conversation_id = ? AND json_extract(payload_json, '$.evidenceRowId') = ?",
+    ).get(conversationId, ingressB.evidenceRowId) as { count: number }).count;
+    expect(inboxCountAfter).toBe(1);
+
+    sidecar.close();
+    nuclear.close();
+  });
+
+  it("B7: duplicate follower replay after frontier resolution reuses durable disposition and does not create new cycle", async () => {
+    const sidecar = createSidecarDb();
+    const nuclear = createNuclearDb();
+    const clock = { nowMs: 1_000_000 };
+
+    // 1. Admit A (leader)
+    const ingressA = admitCognitiveIngress(
+      sidecar,
+      nuclear,
+      { userId: "user:owner", message: "Message A", discordMessageIds: ["msg-b7-res-a"] },
+      { nowMs: clock.nowMs },
+    );
+    const conversationId = ingressA.conversationId;
+    const cycleId = ingressA.cycleId;
+
+    sidecar.prepare("UPDATE cycle_records SET state = 'capacity_wait' WHERE cycle_id = ?").run(cycleId);
+    const frontier = insertDeferredFrontierRecord(sidecar, {
+      frontierId: "f-b7-res",
+      conversationId,
+      cycleId,
+      generation: ingressA.generation,
+      nextEligibleAtMs: clock.nowMs + 30_000,
+      latestEvidenceRowId: ingressA.evidenceRowId,
+      nowMs: clock.nowMs,
+    });
+
+    // 2. Admit B (follower)
+    clock.nowMs = 1_005_000;
+    const ingressB = admitCognitiveIngress(
+      sidecar,
+      nuclear,
+      { userId: "user:owner", message: "Message B", discordMessageIds: ["msg-b7-res-b"] },
+      { nowMs: clock.nowMs },
+    );
+
+    // 3. Resolve frontier at T1
+    clock.nowMs = 1_030_000;
+    const projectorMock = {
+      project: vi.fn(async () => undefined),
+      projectSystem: vi.fn(async () => undefined),
+    };
+    const deps = mockDeps(clock, async () => ({
+      text: JSON.stringify(makeSemanticSettlement()),
+      model: "mistral-small-2603",
+      modelAlias: "mistral-small-2603",
+      resolvedModelId: "mistral-small-2603",
+    }));
+    const coordinator = startFrontierCoordinator(sidecar, nuclear, deps, {
+      projector: projectorMock,
+      nowMs: () => clock.nowMs,
+      pollMs: 100,
+    });
+    const processed = await coordinator.pollNow();
+    expect(processed).toBe(1);
+    coordinator.stop();
+
+    const resolved = getDeferredFrontier(sidecar, frontier.frontierId);
+    expect(resolved?.state).toBe("resolved");
+
+    const cyclesCountBefore = (sidecar.prepare("SELECT COUNT(*) AS count FROM cycle_records").get() as { count: number }).count;
+    const pendingInboxBefore = (sidecar.prepare("SELECT COUNT(*) AS count FROM inbox_events WHERE status = 'pending'").get() as { count: number }).count;
+
+    // 4. Later Discord redelivers B
+    clock.nowMs = 1_060_000;
+    const replayB = admitCognitiveIngress(
+      sidecar,
+      nuclear,
+      { userId: "user:owner", message: "Message B redelivery", discordMessageIds: ["msg-b7-res-b"] },
+      { nowMs: clock.nowMs },
+    );
+
+    // Expected:
+    expect(replayB.duplicate).toBe(true);
+    expect(replayB.evidenceRowId).toBe(ingressB.evidenceRowId);
+    expect(replayB.inboxEventId).toBe(ingressB.inboxEventId);
+    expect(replayB.cycleId).toBe(cycleId);
+    expect(replayB.generation).toBe(ingressA.generation);
+
+    // No new cycle created
+    const cyclesCountAfter = (sidecar.prepare("SELECT COUNT(*) AS count FROM cycle_records").get() as { count: number }).count;
+    expect(cyclesCountAfter).toBe(cyclesCountBefore);
+
+    // No new pending inbox event
+    const pendingInboxAfter = (sidecar.prepare("SELECT COUNT(*) AS count FROM inbox_events WHERE status = 'pending'").get() as { count: number }).count;
+    expect(pendingInboxAfter).toBe(pendingInboxBefore);
+
+    sidecar.close();
+    nuclear.close();
+  });
+
+  it("B7: corrupt duplicate disposition fails closed without creating new cycle or pending work", () => {
+    const sidecar = createSidecarDb();
+    const nuclear = createNuclearDb();
+    const nowMs = 1_000_000;
+
+    const ingressA = admitCognitiveIngress(
+      sidecar,
+      nuclear,
+      { userId: "user:owner", message: "Message A", discordMessageIds: ["msg-a-corrupt"] },
+      { nowMs },
+    );
+
+    // Simulate corruption: delete the referenced cycle record
+    sidecar.prepare("DELETE FROM cycle_records WHERE cycle_id = ?").run(ingressA.cycleId);
+
+    // Attempt replay of A
+    expect(() => {
+      admitCognitiveIngress(
+        sidecar,
+        nuclear,
+        { userId: "user:owner", message: "Message A replay", discordMessageIds: ["msg-a-corrupt"] },
+        { nowMs: nowMs + 10_000 },
+      );
+    }).toThrow(/corrupt_duplicate_work_disposition/);
+
+    // Verify no new cycle was manufactured
+    const cycles = sidecar.prepare("SELECT * FROM cycle_records").all();
+    expect(cycles).toHaveLength(0);
+
+    sidecar.close();
+    nuclear.close();
+  });
 });

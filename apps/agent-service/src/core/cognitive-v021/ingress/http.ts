@@ -2,10 +2,7 @@ import { randomUUID } from "node:crypto";
 import type express from "express";
 import type { DatabaseSync } from "node:sqlite";
 import { resolveActiveThread } from "../../memory/threads.js";
-import {
-  appendOwnerUtteranceInTransaction,
-  appendOwnerUtteranceWithStatus,
-} from "../evidence/conversation-log.js";
+import { appendOwnerUtteranceInTransaction } from "../evidence/conversation-log.js";
 import { notifySidecarPostCommit } from "../retrieval/derived-store.js";
 import { appendCycleLogIds, appendInboxEvent, appendInboxEventInTransaction, getCycle, getInboxEvent } from "../cycle/inbox.js";
 import { composeOrPreempt } from "../cycle/fence.js";
@@ -13,6 +10,7 @@ import {
   advanceDeferredFrontierEvidence,
   getActiveDeferredFrontier,
 } from "../frontier/ledger.js";
+import type { CycleRecord, InboxEvent } from "../types.js";
 
 export type CognitiveIngressBody = {
   userId: string;
@@ -45,21 +43,63 @@ export type CognitiveIngressResult = {
   admittedAtMs: number;
 };
 
-function existingInboxForEvidence(sidecar: DatabaseSync, conversationId: string, evidenceRowId: string) {
-  const rows = sidecar.prepare("SELECT id FROM inbox_events WHERE conversation_id = ? ORDER BY created_at_ms ASC").all(conversationId);
-  for (const row of rows) {
-    if (typeof row !== "object" || row === null || typeof (row as { id?: unknown }).id !== "string") continue;
-    const event = getInboxEvent(sidecar, (row as { id: string }).id);
-    if (event && typeof event.payload === "object" && event.payload !== null && !Array.isArray(event.payload) && (event.payload as Record<string, unknown>).evidenceRowId === evidenceRowId) return event;
-  }
-  return null;
-}
+function resolveExistingWorkDisposition(
+  sidecar: DatabaseSync,
+  conversationId: string,
+  evidenceRowId: string,
+): { inbox: InboxEvent; cycle: CycleRecord } {
+  const rows = sidecar.prepare(
+    `SELECT id FROM inbox_events
+      WHERE conversation_id = ?
+        AND json_extract(payload_json, '$.evidenceRowId') = ?
+      ORDER BY created_at_ms ASC`,
+  ).all(conversationId, evidenceRowId) as Array<{ id?: unknown }>;
 
-function existingCycleForEvidence(sidecar: DatabaseSync, conversationId: string, evidenceRowId: string) {
-  const row = sidecar.prepare(
-    "SELECT cycle_id FROM cycle_records WHERE conversation_id = ? AND trigger_ref = ? ORDER BY generation ASC LIMIT 1",
-  ).get(conversationId, evidenceRowId) as { cycle_id?: unknown } | undefined;
-  return typeof row?.cycle_id === "string" ? getCycle(sidecar, row.cycle_id) : null;
+  if (rows.length === 0) {
+    throw new Error("corrupt_duplicate_work_disposition_missing_inbox");
+  }
+
+  const matchedEvents: InboxEvent[] = [];
+  for (const r of rows) {
+    if (typeof r?.id === "string") {
+      const ev = getInboxEvent(sidecar, r.id);
+      if (ev) matchedEvents.push(ev);
+    }
+  }
+
+  if (matchedEvents.length === 0) {
+    throw new Error("corrupt_duplicate_work_disposition_missing_inbox");
+  }
+
+  const cycleIds = new Set<string>();
+  for (const ev of matchedEvents) {
+    const payload = (typeof ev.payload === "object" && ev.payload !== null && !Array.isArray(ev.payload))
+      ? (ev.payload as Record<string, unknown>)
+      : {};
+    const cycleId = typeof payload.cycleId === "string" ? payload.cycleId : null;
+    if (cycleId) cycleIds.add(cycleId);
+  }
+
+  if (cycleIds.size === 0) {
+    throw new Error("corrupt_duplicate_work_disposition_missing_cycle");
+  }
+  if (cycleIds.size > 1) {
+    throw new Error("corrupt_duplicate_work_disposition_conflicting_cycles");
+  }
+
+  const [targetCycleId] = Array.from(cycleIds);
+  const cycle = getCycle(sidecar, targetCycleId);
+  if (!cycle) {
+    throw new Error("corrupt_duplicate_work_disposition_cycle_missing");
+  }
+
+  const isLeader = cycle.triggerRef === evidenceRowId;
+  const isFollower = cycle.composeLogIds.includes(evidenceRowId);
+  if (!isLeader && !isFollower) {
+    throw new Error("corrupt_duplicate_work_disposition_cycle_inconsistent");
+  }
+
+  return { inbox: matchedEvents[0], cycle };
 }
 
 export function admitCognitiveIngress(
@@ -77,34 +117,35 @@ export function admitCognitiveIngress(
   const admittedAtMs = options.nowMs ?? input.finalFragmentReceivedAtMs ?? Date.now();
 
   sidecar.exec("BEGIN IMMEDIATE");
+  let evidence: ReturnType<typeof appendOwnerUtteranceInTransaction>["evidence"];
   try {
+    const appendResult = appendOwnerUtteranceInTransaction(sidecar, {
+      conversationId,
+      text,
+      discordMessageIds,
+      nowMs: admittedAtMs,
+    });
+    evidence = appendResult.evidence;
+
+    if (appendResult.duplicate) {
+      const disposition = resolveExistingWorkDisposition(sidecar, conversationId, evidence.rowId);
+      sidecar.exec("COMMIT");
+      return {
+        accepted: true,
+        evidenceRowId: evidence.rowId,
+        evidenceRecordId: evidence.rowId,
+        inboxEventId: disposition.inbox.id,
+        conversationId,
+        cycleId: disposition.cycle.cycleId,
+        generation: disposition.cycle.generation,
+        action: "compose",
+        duplicate: true,
+        admittedAtMs: evidence.createdAtMs,
+      };
+    }
+
     const activeFrontier = getActiveDeferredFrontier(sidecar, conversationId);
     if (activeFrontier) {
-      const { evidence, duplicate } = appendOwnerUtteranceInTransaction(sidecar, {
-        conversationId,
-        text,
-        discordMessageIds,
-        nowMs: admittedAtMs,
-      });
-      if (duplicate) {
-        const existingInbox = existingInboxForEvidence(sidecar, conversationId, evidence.rowId);
-        const existingCycle = existingCycleForEvidence(sidecar, conversationId, evidence.rowId);
-        if (existingInbox && existingCycle) {
-          sidecar.exec("COMMIT");
-          return {
-            accepted: true,
-            evidenceRowId: evidence.rowId,
-            evidenceRecordId: evidence.rowId,
-            inboxEventId: existingInbox.id,
-            conversationId,
-            cycleId: existingCycle.cycleId,
-            generation: existingCycle.generation,
-            action: "compose",
-            duplicate: true,
-            admittedAtMs: evidence.createdAtMs,
-          };
-        }
-      }
       advanceDeferredFrontierEvidence(sidecar, activeFrontier.frontierId, evidence.rowId, admittedAtMs);
       appendCycleLogIds(sidecar, activeFrontier.cycleId, [evidence.rowId], admittedAtMs);
       const inbox = appendInboxEventInTransaction(
@@ -141,37 +182,13 @@ export function admitCognitiveIngress(
         evidenceRecordId: evidence.rowId,
         admittedAtMs: evidence.createdAtMs,
       };
-    } else {
-      sidecar.exec("ROLLBACK");
     }
+
+    sidecar.exec("COMMIT");
+    try { notifySidecarPostCommit(sidecar, { changedRowIds: [evidence.rowId] }); } catch {}
   } catch (error) {
     try { sidecar.exec("ROLLBACK"); } catch {}
     throw error;
-  }
-
-  const { evidence, duplicate } = appendOwnerUtteranceWithStatus(sidecar, {
-    conversationId,
-    text,
-    discordMessageIds,
-    nowMs: admittedAtMs,
-  });
-  if (duplicate) {
-    const existingInbox = existingInboxForEvidence(sidecar, conversationId, evidence.rowId);
-    const existingCycle = existingCycleForEvidence(sidecar, conversationId, evidence.rowId);
-    if (existingInbox && existingCycle) {
-      return {
-        accepted: true,
-        evidenceRowId: evidence.rowId,
-        evidenceRecordId: evidence.rowId,
-        inboxEventId: existingInbox.id,
-        conversationId,
-        cycleId: existingCycle.cycleId,
-        generation: existingCycle.generation,
-        action: "compose",
-        duplicate: true,
-        admittedAtMs: evidence.createdAtMs,
-      };
-    }
   }
   const fence = composeOrPreempt(sidecar, {
     conversationId,
