@@ -49,6 +49,32 @@ describe("v0.2.1 durable ingress", () => {
     expect(sidecar.prepare("SELECT COUNT(*) AS count FROM cycle_records").get()).toMatchObject({ count: 1 });
     nuclear.close(); sidecar.close();
   });
+
+  it("rolls back evidence log row atomically if inbox admission fails downstream", () => {
+    const sidecar = openTestSidecar();
+    const nuclear = openNuclearDb(new DatabaseSync(":memory:"));
+    try {
+      // Install trigger to force a failure during inbox event insertion
+      sidecar.exec("CREATE TRIGGER fail_inbox BEFORE INSERT ON inbox_events BEGIN SELECT RAISE(ABORT, 'forced_inbox_failure'); END;");
+
+      expect(() => {
+        admitCognitiveIngress(sidecar, nuclear, {
+          userId: "doc",
+          message: "should roll back completely",
+          channel: "discord",
+          inboundDiscordMessageIds: ["d-atomic-fail"],
+          finalFragmentReceivedAtMs: 1,
+        }, { nowMs: 1 });
+      }).toThrow("forced_inbox_failure");
+
+      // Verify no evidence or cycle records leaked into the database
+      expect(sidecar.prepare("SELECT COUNT(*) AS count FROM conversation_evidence_log").get()).toMatchObject({ count: 0 });
+      expect(sidecar.prepare("SELECT COUNT(*) AS count FROM cycle_records").get()).toMatchObject({ count: 0 });
+    } finally {
+      nuclear.close();
+      sidecar.close();
+    }
+  });
 });
 
 function admitDirect(sidecar: ReturnType<typeof openTestSidecar>, nuclear: DatabaseSync, id: string, message: string) {

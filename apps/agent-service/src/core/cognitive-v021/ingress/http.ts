@@ -4,8 +4,9 @@ import type { DatabaseSync } from "node:sqlite";
 import { resolveActiveThread } from "../../memory/threads.js";
 import { appendOwnerUtteranceInTransaction } from "../evidence/conversation-log.js";
 import { notifySidecarPostCommit } from "../retrieval/derived-store.js";
-import { appendCycleLogIds, appendInboxEvent, appendInboxEventInTransaction, getCycle, getInboxEvent } from "../cycle/inbox.js";
-import { composeOrPreempt } from "../cycle/fence.js";
+import { appendCycleLogIds, appendInboxEventInTransaction, getCycle, getInboxEvent } from "../cycle/inbox.js";
+import { composeOrPreemptInTransaction } from "../cycle/fence.js";
+import { cancelActiveThought } from "../cycle/active.js";
 import {
   advanceDeferredFrontierEvidence,
   getActiveDeferredFrontier,
@@ -128,14 +129,14 @@ export function admitCognitiveIngress(
     evidence = appendResult.evidence;
 
     if (appendResult.duplicate) {
-      const disposition = resolveExistingWorkDisposition(sidecar, conversationId, evidence.rowId);
+      const disposition = resolveExistingWorkDisposition(sidecar, evidence.conversationId, evidence.rowId);
       sidecar.exec("COMMIT");
       return {
         accepted: true,
         evidenceRowId: evidence.rowId,
         evidenceRecordId: evidence.rowId,
         inboxEventId: disposition.inbox.id,
-        conversationId,
+        conversationId: evidence.conversationId,
         cycleId: disposition.cycle.cycleId,
         generation: disposition.cycle.generation,
         action: "compose",
@@ -184,48 +185,55 @@ export function admitCognitiveIngress(
       };
     }
 
+    const fence = composeOrPreemptInTransaction(sidecar, {
+      conversationId,
+      evidenceRowIds: [evidence.rowId],
+      triggerKind: "owner_message",
+      triggerRef: evidence.rowId,
+      occupantId: options.occupantId ?? input.userId,
+      authorityEpoch: options.authorityEpoch ?? 1,
+      nowMs: admittedAtMs,
+    });
+    const inbox = appendInboxEventInTransaction(
+      sidecar,
+      {
+        conversationId,
+        wakeId: fence.cycle.wakeId,
+        kind: "owner_utterance",
+        payload: {
+          cycleId: fence.cycleId,
+          evidenceRowId: evidence.rowId,
+          discordMessageIds: evidence.discordMessageIds,
+          ownerId: input.userId,
+          channel,
+          threadId: input.threadId ?? conversationId,
+          attachments: input.attachments ?? [],
+          discordPresence: input.discordPresence ?? null,
+        },
+        createdAtMs: admittedAtMs,
+      },
+      randomUUID(),
+    );
     sidecar.exec("COMMIT");
+    if (fence.activeThoughtCancellation) {
+      cancelActiveThought(fence.activeThoughtCancellation);
+    }
     try { notifySidecarPostCommit(sidecar, { changedRowIds: [evidence.rowId] }); } catch {}
+    return {
+      accepted: true,
+      evidenceRowId: evidence.rowId,
+      inboxEventId: inbox.id,
+      conversationId,
+      cycleId: fence.cycleId,
+      generation: fence.generation,
+      action: fence.action,
+      evidenceRecordId: evidence.rowId,
+      admittedAtMs: evidence.createdAtMs,
+    };
   } catch (error) {
     try { sidecar.exec("ROLLBACK"); } catch {}
     throw error;
   }
-  const fence = composeOrPreempt(sidecar, {
-    conversationId,
-    evidenceRowIds: [evidence.rowId],
-    triggerKind: "owner_message",
-    triggerRef: evidence.rowId,
-    occupantId: options.occupantId ?? input.userId,
-    authorityEpoch: options.authorityEpoch ?? 1,
-    nowMs: admittedAtMs,
-  });
-  const inbox = appendInboxEvent(sidecar, {
-    conversationId,
-    wakeId: fence.cycle.wakeId,
-    kind: "owner_utterance",
-    payload: {
-      cycleId: fence.cycleId,
-      evidenceRowId: evidence.rowId,
-      discordMessageIds: evidence.discordMessageIds,
-      ownerId: input.userId,
-      channel,
-      threadId: input.threadId ?? conversationId,
-      attachments: input.attachments ?? [],
-      discordPresence: input.discordPresence ?? null,
-    },
-    createdAtMs: admittedAtMs,
-  });
-  return {
-    accepted: true,
-    evidenceRowId: evidence.rowId,
-    inboxEventId: inbox.id,
-    conversationId,
-    cycleId: fence.cycleId,
-    generation: fence.generation,
-    action: fence.action,
-    evidenceRecordId: evidence.rowId,
-    admittedAtMs: evidence.createdAtMs,
-  };
 }
 
 export function createCognitiveIngressHandler(options: {

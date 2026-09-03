@@ -473,7 +473,7 @@ export type DurableFailureClass =
   | "outcome_unknown_reconcile"
   | "stale_or_cancelled";
 export type DurableWorkState = "pending" | "leased" | "retry_wait" | "reconciling" | "terminal" | "quarantined";
-export type DurableTerminalReason = "completed" | "permanent_failure" | "stale" | "cancelled" | "age_exhausted" | "attempts_exhausted";
+export type DurableTerminalReason = "completed" | "permanent_failure" | "stale" | "cancelled" | "age_exhausted" | "attempts_exhausted" | "historical_partial_ingress_abandoned";
 export type DurableAttemptReceipt = Readonly<{
   attemptId: string;
   eventId: string;

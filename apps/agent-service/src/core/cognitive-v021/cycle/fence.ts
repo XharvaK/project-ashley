@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import { admitCycle, appendCycleLogIds, getCurrentCycle } from "./inbox.js";
+import { admitCycle, appendCycleLogIds, getCurrentCycle, hasValidDurableContinuationOwner } from "./inbox.js";
 import type { CycleRecord, CycleTriggerKind } from "../types.js";
 import { suppressUndeliveredOutbox } from "../speech/outbox.js";
 import { cancelActiveThought } from "./active.js";
@@ -16,12 +16,20 @@ export type ComposeOrPreemptInput = {
   nowMs?: number;
 };
 
+export type ActiveThoughtCancellation = {
+  conversationId: string;
+  cycleId: string;
+  generation: number;
+  action: "compose" | "preempt";
+};
+
 export type ComposeOrPreemptResult = {
   action: "compose" | "preempt";
   cycle: CycleRecord;
   cycleId: string;
   generation: number;
   preemptedGeneration: number | null;
+  activeThoughtCancellation?: ActiveThoughtCancellation | null;
 };
 
 function hasPublishedOutbox(db: DatabaseSync, conversationId: string, generation: number): boolean {
@@ -42,86 +50,25 @@ function hasEffectfulInFlight(db: DatabaseSync, cycleId: string, generation: num
   ).get(cycleId, generation));
 }
 
-export function composeOrPreempt(
+export function composeOrPreemptInTransaction(
   db: DatabaseSync,
   input: ComposeOrPreemptInput,
 ): ComposeOrPreemptResult {
   const nowMs = input.nowMs ?? Date.now();
-  db.exec("BEGIN IMMEDIATE");
-  try {
-    const current = getCurrentCycle(db, input.conversationId, { includeIdle: false });
-    const triggerKind = input.triggerKind ?? "owner_message";
-    const triggerRef = input.triggerRef ?? `${triggerKind}:${nowMs}`;
-    if (!current) {
-      const admission = admitWakeInTransaction(db, {
-        occurrenceId: occurrenceIdFor({ sourceKind: "inbox", triggerRef, conversationId: input.conversationId }),
-        triggerRef,
-        sourceKind: "inbox",
-        conversationId: input.conversationId,
-        triggerKind,
-        occupantId: input.occupantId,
-        authorityEpoch: input.authorityEpoch,
-        capturedAuthorityRevision: 0,
-        nowMs,
-      });
-      if (admission.kind === "cancelled" || admission.kind === "stale") throw new Error("wake_terminal");
-      const cycle = admitCycle(db, {
-        conversationId: input.conversationId,
-        wakeId: admission.wake.wakeId,
-        triggerKind,
-        triggerRef,
-        occupantId: input.occupantId,
-        authorityEpoch: input.authorityEpoch,
-        nowMs,
-      });
-      db.exec("COMMIT");
-      return { action: "compose", cycle, cycleId: cycle.cycleId, generation: cycle.generation, preemptedGeneration: null };
-    }
-
-    const effectful = hasEffectfulInFlight(db, current.cycleId, current.generation);
-    const published = hasPublishedOutbox(db, input.conversationId, current.generation);
-    if (!effectful && !published) {
-      const cycle = appendCycleLogIds(db, current.cycleId, input.evidenceRowIds ?? [], nowMs);
-      if (cycle.wakeId) recordWakeCancellationInTransaction(db, { wakeId: cycle.wakeId, nowMs });
-      db.exec("COMMIT");
-      cancelActiveThought({
-        conversationId: input.conversationId,
-        cycleId: cycle.cycleId,
-        generation: cycle.generation,
-        action: "compose",
-      });
-      return { action: "compose", cycle, cycleId: cycle.cycleId, generation: cycle.generation, preemptedGeneration: null };
-    }
-
-    suppressUndeliveredOutbox(db, {
-      conversationId: input.conversationId,
-      generation: current.generation,
-      reason: "preempted_by_new_generation",
-    });
-    db.prepare("UPDATE cycle_records SET state = 'silent', updated_at_ms = ? WHERE cycle_id = ?").run(nowMs, current.cycleId);
-    if (current.wakeId) {
-      const wake = getWake(db, current.wakeId);
-      if (wake && wake.state !== "terminal") {
-        recordWakeCancellationInTransaction(db, { wakeId: current.wakeId, nowMs });
-        if (effectful) {
-          reconcileWakeInTransaction(db, current.wakeId, nowMs);
-        } else if (wake.state !== "reconciling" && wake.state !== "consequence_pending") {
-          finishWakeInTransaction(db, current.wakeId, wake.leaseToken, "cancelled", nowMs);
-        }
-      }
-    }
+  const current = getCurrentCycle(db, input.conversationId, { includeIdle: false });
+  const triggerKind = input.triggerKind ?? "owner_message";
+  const triggerRef = input.triggerRef ?? `${triggerKind}:${nowMs}`;
+  if (!current) {
     const admission = admitWakeInTransaction(db, {
       occurrenceId: occurrenceIdFor({ sourceKind: "inbox", triggerRef, conversationId: input.conversationId }),
       triggerRef,
       sourceKind: "inbox",
       conversationId: input.conversationId,
-      generation: current.generation + 1,
       triggerKind,
-      occupantId: input.occupantId ?? current.occupantId,
-      authorityEpoch: input.authorityEpoch ?? current.authorityEpoch,
+      occupantId: input.occupantId,
+      authorityEpoch: input.authorityEpoch,
       capturedAuthorityRevision: 0,
       nowMs,
-      preemptedGeneration: current.generation,
     });
     if (admission.kind === "cancelled" || admission.kind === "stale") throw new Error("wake_terminal");
     const cycle = admitCycle(db, {
@@ -129,23 +76,109 @@ export function composeOrPreempt(
       wakeId: admission.wake.wakeId,
       triggerKind,
       triggerRef,
-      occupantId: input.occupantId ?? current.occupantId,
-      authorityEpoch: input.authorityEpoch ?? current.authorityEpoch,
+      occupantId: input.occupantId,
+      authorityEpoch: input.authorityEpoch,
       nowMs,
-      preemptedGeneration: current.generation,
     });
     if ((input.evidenceRowIds ?? []).length > 0) appendCycleLogIds(db, cycle.cycleId, input.evidenceRowIds ?? [], nowMs);
     const finalCycle = (input.evidenceRowIds ?? []).length > 0 ? getCurrentCycle(db, input.conversationId, { includeIdle: false }) ?? cycle : cycle;
-    db.exec("COMMIT");
-    cancelActiveThought({
+    return { action: "compose", cycle: finalCycle, cycleId: finalCycle.cycleId, generation: finalCycle.generation, preemptedGeneration: null, activeThoughtCancellation: null };
+  }
+
+  const isZombie = !hasValidDurableContinuationOwner(db, current);
+  const effectful = !isZombie && hasEffectfulInFlight(db, current.cycleId, current.generation);
+  const published = !isZombie && hasPublishedOutbox(db, input.conversationId, current.generation);
+  if (!isZombie && !effectful && !published) {
+    const cycle = appendCycleLogIds(db, current.cycleId, input.evidenceRowIds ?? [], nowMs);
+    if (cycle.wakeId) recordWakeCancellationInTransaction(db, { wakeId: cycle.wakeId, nowMs });
+    return {
+      action: "compose",
+      cycle,
+      cycleId: cycle.cycleId,
+      generation: cycle.generation,
+      preemptedGeneration: null,
+      activeThoughtCancellation: {
+        conversationId: input.conversationId,
+        cycleId: cycle.cycleId,
+        generation: cycle.generation,
+        action: "compose",
+      },
+    };
+  }
+
+  suppressUndeliveredOutbox(db, {
+    conversationId: input.conversationId,
+    generation: current.generation,
+    reason: isZombie ? "preempted_zombie_cycle" : "preempted_by_new_generation",
+  });
+  db.prepare("UPDATE cycle_records SET state = 'silent', updated_at_ms = ? WHERE cycle_id = ?").run(nowMs, current.cycleId);
+  if (current.wakeId) {
+    const wake = getWake(db, current.wakeId);
+    if (wake && wake.state !== "terminal") {
+      recordWakeCancellationInTransaction(db, { wakeId: current.wakeId, nowMs });
+      if (!isZombie && effectful) {
+        reconcileWakeInTransaction(db, current.wakeId, nowMs);
+      } else if (wake.state !== "reconciling" && wake.state !== "consequence_pending") {
+        finishWakeInTransaction(db, current.wakeId, wake.leaseToken, "cancelled", nowMs);
+      }
+    }
+  }
+  const admission = admitWakeInTransaction(db, {
+    occurrenceId: occurrenceIdFor({ sourceKind: "inbox", triggerRef, conversationId: input.conversationId }),
+    triggerRef,
+    sourceKind: "inbox",
+    conversationId: input.conversationId,
+    generation: current.generation + 1,
+    triggerKind,
+    occupantId: input.occupantId ?? current.occupantId,
+    authorityEpoch: input.authorityEpoch ?? current.authorityEpoch,
+    capturedAuthorityRevision: 0,
+    nowMs,
+    preemptedGeneration: current.generation,
+  });
+  if (admission.kind === "cancelled" || admission.kind === "stale") throw new Error("wake_terminal");
+  const cycle = admitCycle(db, {
+    conversationId: input.conversationId,
+    wakeId: admission.wake.wakeId,
+    triggerKind,
+    triggerRef,
+    occupantId: input.occupantId ?? current.occupantId,
+    authorityEpoch: input.authorityEpoch ?? current.authorityEpoch,
+    nowMs,
+    preemptedGeneration: current.generation,
+  });
+  if ((input.evidenceRowIds ?? []).length > 0) appendCycleLogIds(db, cycle.cycleId, input.evidenceRowIds ?? [], nowMs);
+  const finalCycle = (input.evidenceRowIds ?? []).length > 0 ? getCurrentCycle(db, input.conversationId, { includeIdle: false }) ?? cycle : cycle;
+  return {
+    action: "preempt",
+    cycle: finalCycle,
+    cycleId: finalCycle.cycleId,
+    generation: finalCycle.generation,
+    preemptedGeneration: current.generation,
+    activeThoughtCancellation: {
       conversationId: input.conversationId,
       cycleId: current.cycleId,
       generation: current.generation,
       action: "preempt",
-    });
-    return { action: "preempt", cycle: finalCycle, cycleId: finalCycle.cycleId, generation: finalCycle.generation, preemptedGeneration: current.generation };
+    },
+  };
+}
+
+export function composeOrPreempt(
+  db: DatabaseSync,
+  input: ComposeOrPreemptInput,
+): ComposeOrPreemptResult {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const result = composeOrPreemptInTransaction(db, input);
+    db.exec("COMMIT");
+    if (result.activeThoughtCancellation) {
+      cancelActiveThought(result.activeThoughtCancellation);
+    }
+    return result;
   } catch (error) {
     try { db.exec("ROLLBACK"); } catch { /* preserve original */ }
     throw error;
   }
 }
+

@@ -11,6 +11,7 @@ import {
 } from "../types.js";
 import {
   admitWakeInTransaction,
+  getWake,
   getWakeRequired,
 } from "../wake/ledger.js";
 import { occurrenceIdFor } from "../wake/identity.js";
@@ -198,6 +199,43 @@ export function admitCycle(db: DatabaseSync, input: AdmitCycleInput): CycleRecor
 
 export function getCycle(db: DatabaseSync, cycleId: string): CycleRecord | null {
   return mapCycle(db.prepare("SELECT * FROM cycle_records WHERE cycle_id = ?").get(cycleId));
+}
+
+/**
+ * Authoritative invariant for Campaign-1 durable cognitive occupancy:
+ * A cycle is occupying if state NOT IN ('silent', 'idle').
+ * It has a valid durable continuation owner if:
+ * 1. capacity_wait: deferred_reactive_frontiers has a row for this cycle in ('waiting', 'running')
+ *    (deadline does NOT invalidate ownership; coordinator owns expiry/readmission).
+ * 2. sending: speech_outbox has an undelivered row for this cycle.
+ * 3. normal cognitive phases (admitted, assembling, thinking, awaiting_operation, authority_check, publishing):
+ *    the governing wake exists and is non-terminal.
+ * If occupying and none of these continuation owners exist, the cycle is a zombie.
+ */
+export function hasValidDurableContinuationOwner(db: DatabaseSync, cycle: CycleRecord | null): boolean {
+  if (!cycle) return false;
+  if (cycle.state === "silent" || cycle.state === "idle") return false;
+  if (cycle.state === "capacity_wait") {
+    const row = db.prepare(
+      `SELECT 1 FROM deferred_reactive_frontiers
+       WHERE cycle_id = ? AND state IN ('waiting', 'running')
+       LIMIT 1`,
+    ).get(cycle.cycleId);
+    return Boolean(row);
+  }
+  if (cycle.state === "sending") {
+    const row = db.prepare(
+      `SELECT 1 FROM speech_outbox
+       WHERE cycle_id = ?
+         AND send_status NOT IN ('delivered', 'partially_delivered', 'send_failure', 'suppressed', 'suppressed_shadow')
+         AND suppressed = 0
+       LIMIT 1`,
+    ).get(cycle.cycleId);
+    return Boolean(row);
+  }
+  if (!cycle.wakeId) return false;
+  const wake = getWake(db, cycle.wakeId);
+  return Boolean(wake && wake.state !== "terminal");
 }
 
 export function getCurrentCycle(db: DatabaseSync, conversationId: string, options: { includeIdle?: boolean } = {}): CycleRecord | null {

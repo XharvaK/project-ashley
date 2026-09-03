@@ -30,6 +30,7 @@ import { readIdentitySlice } from "./core/cognitive-v021/identity/constitution.j
 import { runPerceptionBeforeThought } from "./core/cognitive-v021/perception/adapter.js";
 import { createOutboxProjector } from "./core/cognitive-v021/delivery/outbox-projector.js";
 import { startInboxConsumer, type InboxConsumerHandle, type InboxConsumerHandler } from "./core/cognitive-v021/cycle/inbox-consumer.js";
+import { reconcileStartupOwnership } from "./core/cognitive-v021/cycle/reconcile.js";
 import { startFrontierCoordinator, type FrontierCoordinatorHandle } from "./core/cognitive-v021/frontier/index.js";
 import {
   classifyInitiativeClass,
@@ -131,6 +132,7 @@ export async function serveAgent(manager: AgentManager): Promise<void> {
       observabilityDb,
     };
     manager.configureCognitiveDispatch({ deps, projector });
+    reconcileStartupOwnership(cognitiveSidecar);
     cognitiveConsumer = startInboxConsumer(cognitiveSidecar, {
       workerId: `agent-service:${process.pid}`,
       handler: createAgentInboxConsumerHandler(manager),

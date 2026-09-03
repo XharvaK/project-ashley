@@ -77,4 +77,32 @@ describe("v0.2.1 cycle fence", () => {
       db.close();
     }
   });
+
+  it("preempts and retires a zombie cycle (thinking with terminal wake) instead of composing into it", () => {
+    const db = openTestSidecar();
+    try {
+      const cycle = admitTestCycle(db, {
+        conversationId: "thread-zombie", triggerKind: "owner_message", triggerRef: "first",
+        occupantId: "doc", authorityEpoch: 1, nowMs: 1,
+      });
+      updateCycleState(db, cycle.cycleId, "thinking", 2);
+      db.prepare("UPDATE wakes SET state = 'terminal', terminal_reason = 'completed', updated_at_ms = 3 WHERE wake_id = ?").run(cycle.wakeId);
+
+      const evidence = appendOwnerUtterance(db, {
+        conversationId: "thread-zombie", text: "message after zombie", discordMessageIds: ["d-zombie"], nowMs: 4,
+      });
+      const result = composeOrPreempt(db, {
+        conversationId: "thread-zombie", evidenceRowIds: [evidence.rowId], triggerRef: evidence.rowId,
+        occupantId: "doc", authorityEpoch: 1, nowMs: 5,
+      });
+
+      expect(result.action).toBe("preempt");
+      expect(result.generation).toBe(cycle.generation + 1);
+      expect(result.preemptedGeneration).toBe(cycle.generation);
+      // Previous zombie cycle is retired to silent
+      expect(db.prepare("SELECT state FROM cycle_records WHERE cycle_id = ?").get(cycle.cycleId)).toMatchObject({ state: "silent" });
+    } finally {
+      db.close();
+    }
+  });
 });
