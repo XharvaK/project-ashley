@@ -375,6 +375,7 @@ export async function runAttentiveDispatch<T>(
       if (admit.reason === "deadline") {
         throw Object.assign(new Error("attention_deadline"), {
           code: "attention_deadline",
+          nextEligibleAtMs: admit.nextEligibleAtMs,
         });
       }
     } catch (error) {

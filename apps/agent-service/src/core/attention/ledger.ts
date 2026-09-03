@@ -410,7 +410,12 @@ export function tryAdmitRequest(
   db: DatabaseSync,
   requestId: number,
   clock: AttentionClock = realClock,
-): { admitted: boolean; dispatchSequence?: number; reason?: string } {
+): {
+  admitted: boolean;
+  dispatchSequence?: number;
+  reason?: string;
+  nextEligibleAtMs?: number;
+} {
   db.exec("BEGIN IMMEDIATE");
   try {
     const row = db
@@ -459,11 +464,11 @@ export function tryAdmitRequest(
          WHERE id = ?`,
       ).run(ended, requestId);
       db.exec("COMMIT");
-      return { admitted: false, reason: "deadline" };
+      return { admitted: false, reason: "deadline", nextEligibleAtMs: earliest };
     }
     if (earliest > now) {
       db.exec("COMMIT");
-      return { admitted: false, reason: "budget_wait" };
+      return { admitted: false, reason: "budget_wait", nextEligibleAtMs: earliest };
     }
 
     const seqRow = db

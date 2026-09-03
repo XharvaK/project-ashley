@@ -313,7 +313,7 @@ describe("deadlines and priority", () => {
       clock,
     );
     const result = tryAdmitRequest(db, id, clock);
-    expect(result).toEqual({ admitted: false, reason: "deadline" });
+    expect(result).toEqual({ admitted: false, reason: "deadline", nextEligibleAtMs: 3_001_000 });
     expect(getRequest(db, id)).toMatchObject({
       state: "terminal",
       outcome: "timeout",
@@ -361,7 +361,7 @@ describe("deadlines and priority", () => {
       clock,
     );
     const result = tryAdmitRequest(db, id, clock);
-    expect(result).toEqual({ admitted: false, reason: "deadline" });
+    expect(result).toEqual({ admitted: false, reason: "deadline", nextEligibleAtMs: 3_060_000 });
     expect(getRequest(db, id)).toMatchObject({
       state: "terminal",
       outcome: "timeout",
@@ -413,10 +413,66 @@ describe("deadlines and priority", () => {
     expect(tryAdmitRequest(db, id, clock)).toEqual({
       admitted: false,
       reason: "budget_wait",
+      nextEligibleAtMs: 3_003_000,
     });
     clock.advance(3_000);
     expect(tryAdmitRequest(db, id, clock).admitted).toBe(true);
     expect(getRequest(db, id)).toMatchObject({ state: "reserved" });
+    db.close();
+  });
+
+  it("runAttentiveDispatch exposes advisory nextEligibleAtMs when deadline is exceeded", async () => {
+    env.mistralApiKey = "test-key";
+    env.mistralTokensPerMinute = 1_000;
+    const db = openDb();
+    const clock = createFakeClock(5_000_000);
+    const prior = insertQueuedRequest(
+      db,
+      {
+        lane: "interactive",
+        purpose: "thought",
+        modelAlias: "mistral-small-2603",
+        providerId: "mistral",
+        quotaBucket: "mistral:mistral-small-2603",
+        estimatedInputTokens: 400,
+        estimatedOutputTokens: 400,
+      },
+      clock,
+    );
+    expect(tryAdmitRequest(db, prior, clock).admitted).toBe(true);
+    markRunning(db, prior, clock);
+    completeRequest(
+      db,
+      prior,
+      { outcome: "completed", actualInput: 400, actualOutput: 400 },
+      clock,
+    );
+
+    let caught: unknown = null;
+    try {
+      await runAttentiveDispatch(
+        db,
+        {
+          messages: [{ role: "user", content: "hello" }],
+          purpose: "thought",
+          providerId: "mistral",
+          quotaBucket: "mistral:mistral-small-2603",
+          maxTokens: 300,
+          deadlineAtMs: clock.nowMs() + 5_000,
+          dispatch: async () => {
+            throw new Error("should not dispatch");
+          },
+        },
+        clock,
+      );
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toMatchObject({
+      code: "attention_deadline",
+      nextEligibleAtMs: expect.any(Number),
+    });
+    expect((caught as { nextEligibleAtMs: number }).nextEligibleAtMs).toBeGreaterThan(clock.nowMs() + 5_000);
     db.close();
   });
 
