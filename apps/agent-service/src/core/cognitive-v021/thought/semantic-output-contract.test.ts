@@ -288,6 +288,17 @@ describe("Thought semantic output contract", () => {
     expect(instruction).toContain("This contract describes output shape only");
   });
 
+  it("teaches Thought that observation requires need-resolving relevance and abstain takes precedence", () => {
+    const instruction = thoughtOutputCompatibilityInstruction();
+
+    // OBSERVATION_REQUIRES_NEED_RESOLVING_RELEVANCE
+    expect(instruction).toContain("only when an available observation can actually supply evidence capable of resolving the current semantic need");
+    // UNRELATED_AVAILABLE_OBSERVATION_DOES_NOT_JUSTIFY_OBSERVATION
+    expect(instruction).toContain("the availability of an unrelated observation does not justify observation");
+    // ABSTAIN_PRECEDENCE_WHEN_NO_AVAILABLE_OBSERVATION_CAN_SUPPLY_NEEDED_EVIDENCE
+    expect(instruction).toContain("when no available observation can supply the needed evidence, abstain takes precedence over observation");
+  });
+
   it("teaches Thought the governed currentness rule Authority already enforces", () => {
     const instruction = thoughtOutputCompatibilityInstruction();
 

@@ -180,6 +180,19 @@ describe("Whole-Thought Projection Allocator", () => {
     expect(systemMessage).toContain("omit the epistemic commitment");
   });
 
+  it("delivers the observation-relevance and abstain-precedence rule in the assembled Thought system message", () => {
+    const input = makeThoughtInput();
+    const allocated = allocateThoughtProjection({
+      thoughtInput: input,
+      requestId: "req-observation-relevance-instruction",
+    });
+    const systemMessage = thoughtMessagesForProjection(allocated.projected)[0]?.content ?? "";
+
+    expect(systemMessage).toContain("can actually supply evidence capable of resolving the current semantic need");
+    expect(systemMessage).toContain("availability of an unrelated observation does not justify observation");
+    expect(systemMessage).toContain("abstain takes precedence over observation");
+  });
+
   it("allocates complete thought context within hard TPM bound", () => {
     const input = makeThoughtInput();
     const allocated = allocateThoughtProjection({
