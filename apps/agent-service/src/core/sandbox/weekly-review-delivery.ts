@@ -19,6 +19,11 @@ import { claimProactiveDeliveryInTransaction } from "../delivery/store.js";
 import { listDeliveryBubbles } from "../delivery/store.js";
 import { getDeliveryReservation } from "../delivery/store.js";
 import type { CandidateCommitRecord } from "./self-improvement.js";
+import {
+  deriveCommunicationEffectIntent,
+  evaluateAndAuditAuthority,
+  prepareCommitAndAudit,
+} from "../authority/index.js";
 
 export const WEEKLY_REVIEW_MATERIAL_PREFIX = "weekly-review:";
 
@@ -101,6 +106,22 @@ export function claimWeeklyReviewDelivery(
 
   const text = reviewSummaryText(input);
   const bubbles = buildWeeklyReviewBubbles(text);
+  const intent = deriveCommunicationEffectIntent({
+    decision: null,
+    ownerId: input.ownerId,
+    trigger: "proactive",
+    producer: "weekly_review_template",
+    weeklyReportRef: input.reportRef,
+  });
+  const evaluation = evaluateAndAuditAuthority(db, intent);
+  const commit = prepareCommitAndAudit({
+    db,
+    evaluation,
+    payloadText: text,
+  });
+  if (commit.outcome !== "commit") {
+    return null;
+  }
 
   db.exec("BEGIN IMMEDIATE");
   try {
@@ -124,7 +145,7 @@ export function claimWeeklyReviewDelivery(
       .run(
         input.ownerId,
         decisionId,
-        text,
+        commit.prepared.payloadText,
         input.threadId ?? "dm",
         materialKey,
         nowIso,
@@ -137,7 +158,7 @@ export function claimWeeklyReviewDelivery(
       threadId: input.threadId ?? "dm",
       initiativeReservationId,
       decisionId,
-      draftText: text,
+      draftText: commit.prepared.payloadText,
       bubbles,
       nowMs,
     });
