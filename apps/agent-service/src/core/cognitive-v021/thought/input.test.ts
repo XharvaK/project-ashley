@@ -4,6 +4,11 @@ import { openDerivedStore } from "../retrieval/derived-store.js";
 import { appendOwnerUtterance } from "../evidence/conversation-log.js";
 import type { CapabilityReality, IdentitySlice, MindOccupancy, WorkingContextItem } from "../types.js";
 import { buildThoughtInput } from "./input.js";
+import { appendCycleLogIds, getCycle } from "../cycle/inbox.js";
+import {
+  getActiveDeferredFrontier,
+  insertDeferredFrontierRecord,
+} from "../frontier/ledger.js";
 
 const identity: IdentitySlice = { constitutional: ["truth first"], stableSelf: ["curious"] };
 const capability: CapabilityReality = {
@@ -12,6 +17,39 @@ const capability: CapabilityReality = {
   canOfferAuthorship: false, canOfferBoundedOperation: false, canOfferPatchExport: false,
   approvedProjectIds: ["project-ashley"],
 };
+
+function makeInput(db: ReturnType<typeof openTestSidecar>, cycle: ReturnType<typeof admitTestCycle>, overrides: Partial<Parameters<typeof buildThoughtInput>[0]> = {}) {
+  return buildThoughtInput({
+    sidecar: db,
+    cycle,
+    triggerText: "continue the unresolved thread",
+    constitution: identity,
+    capabilityReality: capability,
+    workingContext: [],
+    occupancy: [],
+    learnedSelfSlice: { dispositions: [], interests: [] },
+    ...overrides,
+  });
+}
+
+function openFrontier(
+  db: ReturnType<typeof openTestSidecar>,
+  cycle: ReturnType<typeof admitTestCycle>,
+  latestEvidenceRowId: string,
+  composeLogIds: string[],
+) {
+  const updatedCycle = appendCycleLogIds(db, cycle.cycleId, composeLogIds, 100);
+  insertDeferredFrontierRecord(db, {
+    frontierId: `frontier-${cycle.cycleId}`,
+    conversationId: cycle.conversationId,
+    cycleId: cycle.cycleId,
+    generation: cycle.generation,
+    nextEligibleAtMs: 200,
+    latestEvidenceRowId,
+    nowMs: 100,
+  });
+  return { cycle: updatedCycle, frontier: getActiveDeferredFrontier(db, cycle.conversationId) };
+}
 
 describe("v0.2.1 ThoughtInput assembly", () => {
   it("keeps the always-on last twelve turns, compact occupancy, and trigger terms", () => {
@@ -73,6 +111,161 @@ describe("v0.2.1 ThoughtInput assembly", () => {
       });
       expect(input).not.toHaveProperty("workspace");
       expect(makeThoughtDraft).toBeTypeOf("function");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("includes an active frontier leader outside the ordinary twelve-row window", () => {
+    const db = openTestSidecar();
+    try {
+      const cycle = admitTestCycle(db, { conversationId: "frontier-thread", triggerKind: "owner_message", triggerRef: "leader", nowMs: 1 });
+      const rows = Array.from({ length: 20 }, (_, index) => appendOwnerUtterance(db, {
+        conversationId: "frontier-thread", text: index === 0 ? "frontier leader" : `follower ${index}`,
+        discordMessageIds: [`frontier-${index}`], nowMs: index + 1,
+      }));
+      const { cycle: resumedCycle } = openFrontier(db, cycle, rows[0]!.rowId, [rows[0]!.rowId]);
+
+      const input = makeInput(db, resumedCycle);
+
+      expect(input.rawConversation.map((row) => row.rowId)).toContain(rows[0]!.rowId);
+      expect(input.rawConversation.at(-1)?.text).toBe("follower 19");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("includes the leader and all active frontier followers without concatenating turns", () => {
+    const db = openTestSidecar();
+    try {
+      const cycle = admitTestCycle(db, { conversationId: "frontier-followers", triggerKind: "owner_message", triggerRef: "leader", nowMs: 1 });
+      const rows = Array.from({ length: 30 }, (_, index) => appendOwnerUtterance(db, {
+        conversationId: "frontier-followers", text: `frontier message ${index}`,
+        discordMessageIds: [`frontier-followers-${index}`], nowMs: index + 1,
+      }));
+      const required = rows.slice(0, 4).map((row) => row.rowId);
+      const { cycle: resumedCycle } = openFrontier(db, cycle, rows[3]!.rowId, required);
+
+      const input = makeInput(db, resumedCycle);
+      const selected = new Set(input.rawConversation.map((row) => row.rowId));
+
+      expect(required.every((rowId) => selected.has(rowId))).toBe(true);
+      expect(input.rawConversation.filter((row) => required.includes(row.rowId))).toHaveLength(4);
+      expect(input.rawConversation.map((row) => row.text)).not.toContain(required.join(" "));
+    } finally {
+      db.close();
+    }
+  });
+
+  it("preserves every current identity for a frontier larger than twenty-four turns", () => {
+    const db = openTestSidecar();
+    try {
+      const cycle = admitTestCycle(db, { conversationId: "large-frontier", triggerKind: "owner_message", triggerRef: "large", nowMs: 1 });
+      const rows = Array.from({ length: 40 }, (_, index) => appendOwnerUtterance(db, {
+        conversationId: "large-frontier", text: `large frontier message ${index}`,
+        discordMessageIds: [`large-frontier-${index}`], nowMs: index + 1,
+      }));
+      const required = rows.slice(0, 30).map((row) => row.rowId);
+      const { cycle: resumedCycle } = openFrontier(db, cycle, rows[29]!.rowId, required);
+
+      const input = makeInput(db, resumedCycle);
+
+      expect(input.rawConversation).toHaveLength(40);
+      expect(new Set(input.rawConversation.map((row) => row.rowId)).size).toBe(40);
+      expect(input.rawConversation.map((row) => row.rowId)).toEqual(rows.map((row) => row.rowId));
+    } finally {
+      db.close();
+    }
+  });
+
+  it("resolves an active frontier obligation to the latest edited evidence version", () => {
+    const db = openTestSidecar();
+    try {
+      const cycle = admitTestCycle(db, { conversationId: "edited-frontier", triggerKind: "owner_message", triggerRef: "edited", nowMs: 1 });
+      const original = appendOwnerUtterance(db, {
+        conversationId: "edited-frontier", text: "original leader", discordMessageIds: ["edited-1"], nowMs: 1,
+      });
+      const edited = appendOwnerUtterance(db, {
+        conversationId: "edited-frontier", text: "latest leader", discordMessageIds: ["edited-1"], editOfRowId: original.rowId, nowMs: 2,
+      });
+      const { cycle: resumedCycle } = openFrontier(db, cycle, original.rowId, [original.rowId]);
+
+      const input = makeInput(db, resumedCycle);
+
+      expect(input.rawConversation.map((row) => row.rowId)).toContain(edited.rowId);
+      expect(input.rawConversation.map((row) => row.rowId)).not.toContain(original.rowId);
+      expect(input.rawConversation.map((row) => row.text)).toContain("latest leader");
+      expect(input.rawConversation.map((row) => row.text)).not.toContain("original leader");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("preserves sanitized forgotten evidence rather than inventing replacement text", () => {
+    const db = openTestSidecar();
+    try {
+      const cycle = admitTestCycle(db, { conversationId: "redacted-frontier", triggerKind: "owner_message", triggerRef: "redacted", nowMs: 1 });
+      const redacted = appendOwnerUtterance(db, {
+        conversationId: "redacted-frontier", text: "[redacted]", sourceStatus: "redacted", discordMessageIds: ["redacted-1"], nowMs: 1,
+      });
+      const { cycle: resumedCycle } = openFrontier(db, cycle, redacted.rowId, [redacted.rowId]);
+
+      const input = makeInput(db, resumedCycle);
+
+      expect(input.rawConversation).toContainEqual(expect.objectContaining({ rowId: redacted.rowId, text: "[redacted]" }));
+      expect(input.rawConversation.map((row) => row.text)).not.toContain("forgotten evidence");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("returns to ordinary recency after a frontier is resolved or exhausted", () => {
+    const db = openTestSidecar();
+    try {
+      const cycle = admitTestCycle(db, { conversationId: "terminal-frontier", triggerKind: "owner_message", triggerRef: "terminal", nowMs: 1 });
+      const rows = Array.from({ length: 20 }, (_, index) => appendOwnerUtterance(db, {
+        conversationId: "terminal-frontier", text: `terminal message ${index}`,
+        discordMessageIds: [`terminal-${index}`], nowMs: index + 1,
+      }));
+      const { cycle: resumedCycle, frontier } = openFrontier(db, cycle, rows[0]!.rowId, [rows[0]!.rowId]);
+      db.prepare("UPDATE deferred_reactive_frontiers SET state = 'resolved' WHERE frontier_id = ?").run(frontier?.frontierId ?? "");
+
+      expect(getActiveDeferredFrontier(db, cycle.conversationId)).toBeNull();
+      const input = makeInput(db, getCycle(db, resumedCycle.cycleId)!);
+      expect(input.rawConversation).toHaveLength(12);
+      expect(input.rawConversation.map((row) => row.rowId)).not.toContain(rows[0]!.rowId);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("does not retain exhausted frontier obligations forever", () => {
+    const db = openTestSidecar();
+    try {
+      const cycle = admitTestCycle(db, { conversationId: "exhausted-frontier", triggerKind: "owner_message", triggerRef: "exhausted", nowMs: 1 });
+      const rows = Array.from({ length: 20 }, (_, index) => appendOwnerUtterance(db, {
+        conversationId: "exhausted-frontier", text: `exhausted message ${index}`,
+        discordMessageIds: [`exhausted-${index}`], nowMs: index + 1,
+      }));
+      const { cycle: resumedCycle, frontier } = openFrontier(db, cycle, rows[0]!.rowId, [rows[0]!.rowId]);
+      db.prepare("UPDATE deferred_reactive_frontiers SET state = 'exhausted' WHERE frontier_id = ?").run(frontier?.frontierId ?? "");
+
+      const input = makeInput(db, getCycle(db, resumedCycle.cycleId)!);
+
+      expect(input.rawConversation).toHaveLength(12);
+      expect(input.rawConversation.map((row) => row.rowId)).not.toContain(rows[0]!.rowId);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("fails closed when active frontier evidence cannot be recovered", () => {
+    const db = openTestSidecar();
+    try {
+      const cycle = admitTestCycle(db, { conversationId: "missing-frontier", triggerKind: "owner_message", triggerRef: "missing", nowMs: 1 });
+      const { cycle: resumedCycle } = openFrontier(db, cycle, "missing-evidence", ["missing-evidence"]);
+
+      expect(() => makeInput(db, resumedCycle)).toThrowError("active_frontier_required_evidence_missing:missing-evidence");
     } finally {
       db.close();
     }

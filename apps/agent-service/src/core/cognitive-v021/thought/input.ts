@@ -17,9 +17,14 @@ import {
   type RememberDirective,
   type CycleTriggerKind,
 } from "../types.js";
-import { listConversationEvidence } from "../evidence/conversation-log.js";
+import {
+  getConversationEvidence,
+  listConversationEvidence,
+} from "../evidence/conversation-log.js";
 import { listInFlight } from "../effect/in-flight.js";
 import { listWorkingContext } from "../evidence/working-context.js";
+import { getActiveDeferredFrontier } from "../frontier/ledger.js";
+import type { DeferredReactiveFrontierRecord } from "../frontier/types.js";
 import { retrieveCandidates } from "../retrieval/discover.js";
 import { buildRetrievalQuery, tokenizeForQuery } from "../retrieval/query.js";
 import type { DerivedStore } from "../retrieval/derived-store.js";
@@ -106,28 +111,79 @@ function loadOccupancy(db: DatabaseSync, conversationId: string, limit: number):
   });
 }
 
-function latestEvidence(
+export type ConversationSelectionOptions = {
+  lastNTurns?: number;
+  triggerEvidence?: ConversationEvidenceRecord | null;
+  composeLogIds?: string[];
+  activeFrontier?: DeferredReactiveFrontierRecord | null;
+  /** Test/recovery seam for already loaded evidence; obligations still read the store. */
+  suppliedEvidence?: ConversationEvidenceRecord[];
+};
+
+export type ConversationSelectionResult = {
+  selectedEvidence: ConversationEvidenceRecord[];
+  frontierIncludedIds: string[];
+  omittedEvidenceIds: string[];
+};
+
+function orderedEvidence(rows: ConversationEvidenceRecord[]): ConversationEvidenceRecord[] {
+  return [...rows].sort((left, right) =>
+    left.createdAtMs - right.createdAtMs || left.rowId.localeCompare(right.rowId),
+  );
+}
+
+/**
+ * Select the ordinary recency window plus every active frontier obligation.
+ * Required frontier evidence fails closed when it cannot be recovered.
+ */
+export function frontierAwareEvidenceSelection(
   db: DatabaseSync,
   conversationId: string,
-  lastNTurns: number,
-  triggerEvidence: ConversationEvidenceRecord | null | undefined,
-  supplied?: ConversationEvidenceRecord[],
+  options: ConversationSelectionOptions = {},
 ): ConversationEvidenceRecord[] {
-  const all = supplied ?? listConversationEvidence(db, conversationId, {
+  const lastNTurns = Math.max(1, Math.floor(options.lastNTurns ?? DEFAULT_LAST_N_TURNS));
+  const all = options.suppliedEvidence ?? listConversationEvidence(db, conversationId, {
     limit: 1000,
     includeOlderVersions: false,
   });
-  const ordered = [...all].sort((left, right) =>
-    left.createdAtMs - right.createdAtMs || left.rowId.localeCompare(right.rowId),
-  );
-  const selected = ordered.slice(-lastNTurns);
-  if (triggerEvidence && !selected.some((row) => row.rowId === triggerEvidence.rowId)) {
-    selected.push(triggerEvidence);
-    selected.sort((left, right) =>
-      left.createdAtMs - right.createdAtMs || left.rowId.localeCompare(right.rowId),
-    );
+  const ordered = orderedEvidence(all.filter((row) => row.conversationId === conversationId));
+  const latestByLineage = new Map<string, ConversationEvidenceRecord>();
+  for (const row of ordered) latestByLineage.set(row.lineageId, row);
+  const selectedMap = new Map<string, ConversationEvidenceRecord>();
+  for (const row of ordered.slice(-lastNTurns)) selectedMap.set(row.rowId, row);
+
+  function addCurrentEvidence(row: ConversationEvidenceRecord): void {
+    if (row.conversationId !== conversationId) {
+      throw new Error(`active_frontier_required_evidence_missing:${row.rowId}`);
+    }
+    const current = latestByLineage.get(row.lineageId) ?? row;
+    selectedMap.set(current.rowId, current);
   }
-  return selected;
+
+  if (options.triggerEvidence) addCurrentEvidence(options.triggerEvidence);
+
+  // composeLogIds are obligations only while an active deferred frontier owns
+  // the conversation. Resolved and exhausted frontiers return to recency.
+  const requiredRowIds = new Set<string>();
+  if (options.activeFrontier) {
+    for (const id of options.composeLogIds ?? []) {
+      if (id.trim()) requiredRowIds.add(id);
+    }
+    if (options.activeFrontier.latestEvidenceRowId.trim()) {
+      requiredRowIds.add(options.activeFrontier.latestEvidenceRowId);
+    }
+  }
+
+  for (const requiredId of requiredRowIds) {
+    const supplied = ordered.find((row) => row.rowId === requiredId);
+    const turn = supplied ?? getConversationEvidence(db, requiredId);
+    if (!turn || turn.conversationId !== conversationId) {
+      throw new Error(`active_frontier_required_evidence_missing:${requiredId}`);
+    }
+    addCurrentEvidence(turn);
+  }
+
+  return orderedEvidence([...selectedMap.values()]);
 }
 
 function emptyRuntimeCondition(partial?: Partial<RuntimeCondition>): RuntimeCondition {
@@ -143,12 +199,20 @@ function emptyRuntimeCondition(partial?: Partial<RuntimeCondition>): RuntimeCond
 export function buildThoughtInput(options: BuildThoughtInputOptions): ThoughtInput {
   const lastNTurns = Math.max(1, Math.min(100, options.lastNTurns ?? DEFAULT_LAST_N_TURNS));
   const occupancyK = Math.max(1, Math.min(100, options.occupancyK ?? DEFAULT_OCCUPANCY_COMPACT_K));
-  const rawConversation = latestEvidence(
+  const activeFrontier = getActiveDeferredFrontier(
     options.sidecar,
     options.cycle.conversationId,
-    lastNTurns,
-    options.triggerEvidence,
-    options.rawConversation,
+  );
+  const rawConversation = frontierAwareEvidenceSelection(
+    options.sidecar,
+    options.cycle.conversationId,
+    {
+      lastNTurns,
+      triggerEvidence: options.triggerEvidence,
+      composeLogIds: activeFrontier ? options.cycle.composeLogIds : [],
+      activeFrontier,
+      suppliedEvidence: options.rawConversation,
+    },
   );
   const workingContext = options.workingContext ?? listWorkingContext(options.sidecar, options.cycle.conversationId);
   const occupancy = (options.occupancy ?? loadOccupancy(options.sidecar, options.cycle.conversationId, occupancyK))
