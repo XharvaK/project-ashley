@@ -18,6 +18,7 @@ import { occurrenceIdFor } from "../wake/identity.js";
 import {
   PRIVATE_THOUGHT_POLICY_ID,
   getPrivateReservation,
+  getPrivateBudgetProjection,
   markPrivateReservationUnknown,
   reservePrivateThought,
 } from "../private-budget/ledger.js";
@@ -61,6 +62,10 @@ export type IdleTickOptions = {
 
 export type IdleTickReason =
   | "empty_house"
+  | "active_frontier"
+  | "occupancy_unreachable"
+  | "wake_cancelled"
+  | "wake_stale"
   | "private_compute_budget"
   | "private_compute_clock_reconciliation"
   | "private_compute_concurrent"
@@ -79,6 +84,9 @@ export type IdleTickResult = {
   firedTriggers: FutureTrigger[];
   suppressedTriggers: FutureTrigger[];
   dormant: boolean;
+  /** Compatibility additions for the W9 idle truth boundary. */
+  idleEligible?: boolean;
+  semanticAbsenceClaim?: "yes" | "no";
 };
 
 /** Scheduler-only overlap guard. It is not a budget counter or capacity source. */
@@ -90,7 +98,39 @@ function number(value: unknown, fallback = 0): number {
 }
 
 function groundedOccupancy(db: DatabaseSync, conversationId: string): MindOccupancy[] {
-  return listOccupancy(db, conversationId).filter((item) => GROUNDED_STATUSES.has(item.status));
+  try {
+    return listOccupancy(db, conversationId).filter((item) => GROUNDED_STATUSES.has(item.status));
+  } catch (error) {
+    throw occupancyUnreachable(error);
+  }
+}
+
+function occupancyUnreachable(cause: unknown): Error {
+  const error = new Error("idle_occupancy_unreachable");
+  Object.defineProperty(error, "cause", { value: cause, enumerable: false });
+  return error;
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message.toLocaleLowerCase() : String(error).toLocaleLowerCase();
+}
+
+function isOccupancyUnreachable(error: unknown): boolean {
+  const message = errorText(error);
+  return message === "idle_occupancy_unreachable"
+    || message.includes("mind_occupancy")
+    || message.includes("database is locked")
+    || message.includes("database table is locked")
+    || message.includes("sqlite_busy");
+}
+
+function logOccupancyUnreachable(conversationId: string | null, error: unknown): void {
+  console.warn("[cognitive-v021] idle_occupancy_unreachable", {
+    conversationId,
+    disposition: "UNREACHABLE",
+    canonicalStore: "cognitive-v021.db:mind_occupancy",
+    error: errorText(error),
+  });
 }
 
 function runner(options: IdleTickOptions): IdleThoughtRunner | undefined {
@@ -109,11 +149,15 @@ function conversationCandidates(
 ): string[] {
   if (options.conversationId) return [options.conversationId];
   const ids = new Set<string>(firedTriggers.map((trigger) => trigger.conversationId));
-  db.prepare(
-    "SELECT DISTINCT conversation_id FROM mind_occupancy WHERE status IN ('active', 'investigating', 'waiting_for_evidence')",
-  ).all().forEach((row) => {
-    if (typeof row === "object" && row !== null && typeof (row as { conversation_id?: unknown }).conversation_id === "string") ids.add((row as { conversation_id: string }).conversation_id);
-  });
+  try {
+    db.prepare(
+      "SELECT DISTINCT conversation_id FROM mind_occupancy WHERE status IN ('active', 'investigating', 'waiting_for_evidence')",
+    ).all().forEach((row) => {
+      if (typeof row === "object" && row !== null && typeof (row as { conversation_id?: unknown }).conversation_id === "string") ids.add((row as { conversation_id: string }).conversation_id);
+    });
+  } catch (error) {
+    throw occupancyUnreachable(error);
+  }
   if (items.length > 0) {
     for (const subscription of listObservationSubscriptions(db)) ids.add(subscription.conversationId);
   }
@@ -133,6 +177,7 @@ function emptyResult(
   return {
     conversationId,
     eligible: false,
+    idleEligible: false,
     reason,
     thoughtModelAttempts: 0,
     acceptedSettlements: 0,
@@ -142,6 +187,7 @@ function emptyResult(
     firedTriggers,
     suppressedTriggers,
     dormant: false,
+    semanticAbsenceClaim: reason === "empty_house" ? "yes" : "no",
   };
 }
 
@@ -162,10 +208,17 @@ async function tickConversation(
   const activeFrontier = getActiveDeferredFrontier(db, conversationId);
   const dueTriggers = firedTriggers.filter((trigger) => trigger.conversationId === conversationId);
   if (activeFrontier) {
-    return emptyResult(conversationId, "empty_house", [], [...suppressedTriggers.filter((trigger) => trigger.conversationId === conversationId), ...dueTriggers]);
+    return emptyResult(conversationId, "active_frontier", [], [...suppressedTriggers.filter((trigger) => trigger.conversationId === conversationId), ...dueTriggers]);
   }
 
-  const occupancy = groundedOccupancy(db, conversationId);
+  let occupancy: MindOccupancy[];
+  try {
+    occupancy = groundedOccupancy(db, conversationId);
+  } catch (error) {
+    if (!isOccupancyUnreachable(error)) throw error;
+    logOccupancyUnreachable(conversationId, error);
+    return emptyResult(conversationId, "occupancy_unreachable", [], suppressedTriggers.filter((trigger) => trigger.conversationId === conversationId));
+  }
   const matched = collectSubscriptionObservations(db, conversationId, items, { nowMs: options.nowMs });
   if (occupancy.length === 0 && dueTriggers.length === 0 && matched.length === 0) {
     return emptyResult(conversationId, "empty_house", [], suppressedTriggers.filter((trigger) => trigger.conversationId === conversationId));
@@ -176,6 +229,8 @@ async function tickConversation(
     return {
       ...emptyResult(conversationId, "thought_runner_missing", dueTriggers, suppressedTriggers.filter((trigger) => trigger.conversationId === conversationId)),
       eligible: true,
+      idleEligible: true,
+      semanticAbsenceClaim: "no",
       observations: matched,
     };
   }
@@ -193,25 +248,45 @@ async function tickConversation(
     : matched.length > 0
       ? matched.map((observation) => observation.observationId).join(",")
       : `${occupancy.map((item) => item.concernId).join(",")}:tick:${nowMs}`;
+  const policyId = options.privateBudgetPolicyId ?? PRIVATE_THOUGHT_POLICY_ID;
+  const budgetProjection = getPrivateBudgetProjection(db, {
+    conversationId,
+    policyId,
+    wallClockNowMs: nowMs,
+  });
   const dueWake = dueTriggers[0]?.wakeId ? getWake(db, dueTriggers[0].wakeId) : null;
+  const sourceKind = triggerKind === "future_trigger_due"
+    ? "future_trigger" as const
+    : triggerKind === "subscription_item"
+      ? "subscription" as const
+      : "idle" as const;
+  const occurrenceId = occurrenceIdFor({ sourceKind, triggerRef, conversationId });
+  const existingWakeRow = db.prepare("SELECT wake_id FROM wakes WHERE occurrence_id = ?").get(occurrenceId) as { wake_id?: unknown } | undefined;
+  const existingWake = dueWake ?? (typeof existingWakeRow?.wake_id === "string" ? getWake(db, existingWakeRow.wake_id) : null);
+  const admissionInput = {
+    occurrenceId,
+    triggerRef,
+    sourceKind,
+    conversationId,
+    triggerKind,
+    occupantId: options.occupantId ?? "private",
+    authorityEpoch: options.authorityEpoch ?? 1,
+    capturedAuthorityRevision: 0,
+    nowMs,
+  };
   const admission = dueWake
     ? { kind: "existing" as const, wake: dueWake }
-    : admitWake(db, {
-      occurrenceId: occurrenceIdFor({
-        sourceKind: triggerKind === "future_trigger_due" ? "future_trigger" : triggerKind === "subscription_item" ? "subscription" : "idle",
-        triggerRef,
-        conversationId,
-      }),
-      triggerRef,
-      sourceKind: triggerKind === "future_trigger_due" ? "future_trigger" : triggerKind === "subscription_item" ? "subscription" : "idle",
-      conversationId,
-      triggerKind,
-      occupantId: options.occupantId ?? "private",
-      authorityEpoch: options.authorityEpoch ?? 1,
-      capturedAuthorityRevision: 0,
-      nowMs,
-    });
-  if (admission.kind === "cancelled" || admission.kind === "stale") return emptyResult(conversationId, "empty_house", dueTriggers, suppressedTriggers);
+    : existingWake
+      ? admitWake(db, admissionInput)
+      : budgetProjection.clockState !== "stable"
+        ? { kind: "clock_reconciliation" as const }
+        : budgetProjection.remaining <= 0
+          ? { kind: "budget_exhausted" as const }
+          : admitWake(db, admissionInput);
+  if (admission.kind === "clock_reconciliation") return emptyResult(conversationId, "private_compute_clock_reconciliation", dueTriggers, []);
+  if (admission.kind === "budget_exhausted") return emptyResult(conversationId, "private_compute_budget", dueTriggers, []);
+  if (admission.kind === "cancelled") return emptyResult(conversationId, "wake_cancelled", dueTriggers, suppressedTriggers);
+  if (admission.kind === "stale") return emptyResult(conversationId, "wake_stale", dueTriggers, suppressedTriggers);
   const cycle = getCycle(db, admission.wake.cycleId);
   if (!cycle) throw new Error("idle_cycle_missing");
   const wakeId = cycle.wakeId;
@@ -221,7 +296,7 @@ async function tickConversation(
     admissionId: `private-thought:${wakeId}`,
     wakeId,
     conversationId,
-    policyId: options.privateBudgetPolicyId ?? PRIVATE_THOUGHT_POLICY_ID,
+    policyId,
     wallClockNowMs: nowMs,
   });
   if (budget.kind === "refused") {
@@ -264,6 +339,8 @@ async function tickConversation(
       firedTriggers: dueTriggers,
       suppressedTriggers: suppressedTriggers.filter((trigger) => trigger.conversationId === conversationId),
       dormant,
+      idleEligible: true,
+      semanticAbsenceClaim: "no",
     };
   } catch {
     try { settleUnsettledPrivateReservation(db, budget.reservation.reservationId, nowMs); } catch { /* preserve the idle failure result */ }
@@ -279,6 +356,8 @@ async function tickConversation(
       firedTriggers: dueTriggers,
       suppressedTriggers: suppressedTriggers.filter((trigger) => trigger.conversationId === conversationId),
       dormant: false,
+      idleEligible: true,
+      semanticAbsenceClaim: "no",
     };
   } finally {
     activePrivateCalls.delete(conversationId);
@@ -291,9 +370,27 @@ export async function tickIdleOpportunity(
 ): Promise<IdleTickResult> {
   void options.learnedSelfSlice;
   const nowMs = options.nowMs ?? Date.now();
-  const due = await fireDueTriggers(db, { conversationId: options.conversationId, nowMs });
+  if (options.conversationId && getActiveDeferredFrontier(db, options.conversationId)) {
+    return emptyResult(options.conversationId, "active_frontier", [], []);
+  }
+
+  let due;
+  try {
+    due = await fireDueTriggers(db, { conversationId: options.conversationId, nowMs });
+  } catch (error) {
+    if (!isOccupancyUnreachable(error)) throw error;
+    logOccupancyUnreachable(options.conversationId ?? null, error);
+    return emptyResult(options.conversationId ?? null, "occupancy_unreachable", [], []);
+  }
   const items = inputItems(options);
-  const conversations = conversationCandidates(db, options, due.fired, items);
+  let conversations: string[];
+  try {
+    conversations = conversationCandidates(db, options, due.fired, items);
+  } catch (error) {
+    if (!isOccupancyUnreachable(error)) throw error;
+    logOccupancyUnreachable(options.conversationId ?? null, error);
+    return emptyResult(options.conversationId ?? null, "occupancy_unreachable", due.fired, due.suppressedStale);
+  }
   if (conversations.length === 0) return emptyResult(options.conversationId ?? null, "empty_house", due.fired, due.suppressedStale);
   const results: IdleTickResult[] = [];
   for (const conversationId of conversations) {
@@ -311,5 +408,7 @@ export async function tickIdleOpportunity(
     firedTriggers: due.fired,
     suppressedTriggers: due.suppressedStale,
     dormant: results.some((result) => result.dormant),
+    idleEligible: results.some((result) => result.idleEligible === true),
+    semanticAbsenceClaim: results.some((result) => result.semanticAbsenceClaim === "no") ? "no" : "yes",
   };
 }

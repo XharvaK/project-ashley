@@ -40,6 +40,8 @@ describe("v0.2.1 idle executive", () => {
           },
         });
         expect(result.thoughtModelAttempts).toBe(0);
+        expect(result.idleEligible).toBe(false);
+        expect(result.semanticAbsenceClaim).toBe("yes");
       }
       expect(calls).toBe(0);
     } finally {
@@ -66,6 +68,8 @@ describe("v0.2.1 idle executive", () => {
       expect(calls).toBe(1);
       expect(result.thoughtModelAttempts).toBe(1);
       expect(result.acceptedSettlements).toBe(1);
+      expect(result.idleEligible).toBe(true);
+      expect(result.semanticAbsenceClaim).toBe("no");
     } finally {
       db.close();
     }
@@ -127,8 +131,9 @@ describe("v0.2.1 idle executive", () => {
       seedActiveOccupancy(db, "thread-budget");
       establishEpoch(db, 10_000);
       let calls = 0;
+      let exhaustedResult;
       for (let index = 0; index < PRIVATE_THOUGHT_MAX_CALLS_PER_HOUR + 1; index += 1) {
-        await tickIdleOpportunity(db, {
+        const result = await tickIdleOpportunity(db, {
           conversationId: "thread-budget",
           nowMs: 10_000 + index * 100,
           runThought: async () => {
@@ -136,8 +141,11 @@ describe("v0.2.1 idle executive", () => {
             return { published: true, outboxId: 1, thoughtModelAttempts: 1, speechMode: "draft" as const };
           },
         });
+        if (index === PRIVATE_THOUGHT_MAX_CALLS_PER_HOUR) exhaustedResult = result;
       }
       expect(calls).toBe(PRIVATE_THOUGHT_MAX_CALLS_PER_HOUR);
+      expect(exhaustedResult?.reason).toBe("private_compute_budget");
+      expect(db.prepare("SELECT COUNT(*) AS count FROM wakes WHERE conversation_id = 'thread-budget'").get()).toMatchObject({ count: PRIVATE_THOUGHT_MAX_CALLS_PER_HOUR });
     } finally {
       db.close();
     }
