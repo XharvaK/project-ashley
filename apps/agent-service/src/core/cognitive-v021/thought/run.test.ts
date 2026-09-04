@@ -4,7 +4,12 @@ import { appendOwnerUtterance } from "../evidence/conversation-log.js";
 import { admitTestCycle, openTestSidecar } from "../test-support.js";
 import type { CapabilityReality, IdentitySlice, KernelDeps, Observation, ThoughtInput } from "../types.js";
 import { makeSemanticSettlement } from "../test-support.js";
-import { materializeEffectsCompleted, runCognitiveCycle } from "./run.js";
+import {
+  createThoughtCycleTokenMetrics,
+  materializeEffectsCompleted,
+  observeThoughtCycleInput,
+  runCognitiveCycle,
+} from "./run.js";
 
 const constitution: IdentitySlice = { constitutional: ["truth first"], stableSelf: ["curious"] };
 const capabilityReality: CapabilityReality = {
@@ -38,6 +43,24 @@ function deps(overrides: Partial<KernelDeps> = {}): KernelDeps {
 }
 
 describe("v0.2.1 Thought run", () => {
+  it("tracks first-pass and cumulative retry input without changing per-pass receipts", () => {
+    const first = createThoughtCycleTokenMetrics();
+    const second = observeThoughtCycleInput(first, 1_000);
+    const third = observeThoughtCycleInput(second, 500);
+
+    expect(first).toEqual({
+      first_pass_total_input_tokens: 0,
+      total_cycle_input_tokens_including_retries: 0,
+      retry_amplification_ratio: 0,
+      request_count: 0,
+    });
+    expect(second.first_pass_total_input_tokens).toBe(1_000);
+    expect(second.total_cycle_input_tokens_including_retries).toBe(1_000);
+    expect(third.total_cycle_input_tokens_including_retries).toBe(1_500);
+    expect(third.retry_amplification_ratio).toBe(1.5);
+    expect(second).not.toBe(first);
+  });
+
   it("runs perception before Thought, includes observations, and passes attentionDb", async () => {
     const sidecar = openTestSidecar();
     const attentionDb = openTestSidecar();

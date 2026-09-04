@@ -193,7 +193,7 @@ describe("Whole-Thought Projection Allocator", () => {
     expect(systemMessage).toContain("abstain takes precedence over observation");
   });
 
-  it("allocates complete thought context within hard TPM bound", () => {
+  it("allocates complete thought context within the logical semantic envelope", () => {
     const input = makeThoughtInput();
     const allocated = allocateThoughtProjection({
       thoughtInput: input,
@@ -203,7 +203,8 @@ describe("Whole-Thought Projection Allocator", () => {
 
     expect(allocated.receipt.hardTpm).toBe(8000);
     expect(allocated.receipt.estimatedInputTokens).toBeGreaterThan(0);
-    expect(allocated.receipt.totalDemandTokens).toBeLessThanOrEqual(8000);
+    expect(allocated.receipt.estimatedInputTokens)
+      .toBeLessThanOrEqual(allocated.receipt.semanticProjectionEnvelope.maxInputTokens);
     expect(allocated.receipt.headroomTokens).toBeGreaterThanOrEqual(0);
     expect(allocated.receipt.compression).toBe(false);
     expect(allocated.projected.workingContext.length).toBe(2);
@@ -212,7 +213,7 @@ describe("Whole-Thought Projection Allocator", () => {
     expect(allocated.hashes.dispatchMessagesHash).toBeDefined();
   });
 
-  it("omits optional candidates when TPM budget is restricted, marking compression", () => {
+  it("omits optional candidates when the logical envelope is restricted, marking compression", () => {
     // Generate many optional retrieval hits and topics
     const manyHits = Array.from({ length: 50 }, (_, i) => ({
       kind: "lexical" as const,
@@ -247,7 +248,10 @@ describe("Whole-Thought Projection Allocator", () => {
     expect(allocated.projected.runtimeCondition.compression).toBe(true);
     expect(allocated.receipt.decision.omitted.length).toBeGreaterThan(0);
     expect(allocated.receipt.decision.omitted[0].reason).toBe("budget_omission");
-    expect(allocated.receipt.totalDemandTokens).toBeLessThanOrEqual(8000);
+    expect(allocated.receipt.estimatedInputTokens)
+      .toBeLessThanOrEqual(allocated.receipt.semanticProjectionEnvelope.maxInputTokens);
+    expect(allocated.receipt.tokenBreakdown.omitted_for_budget_count)
+      .toBe(allocated.receipt.decision.omitted.length);
   });
 
   it("fails closed on required section overflow with RequiredOverflowError", () => {
@@ -282,5 +286,27 @@ describe("Whole-Thought Projection Allocator", () => {
         requestId: "req-overflow",
       }),
     ).toThrowError(RequiredOverflowError);
+  });
+
+  it("records provider-independent semantic budget and per-pass component token breakdown", () => {
+    const allocated = allocateThoughtProjection({
+      thoughtInput: makeThoughtInput(),
+      quotaBucket: "groq:openai/gpt-oss-20b",
+      semanticProjectionEnvelope: {
+        id: "test-envelope",
+        version: 1,
+        maxInputTokens: 9500,
+      },
+      requestId: "req-breakdown",
+    });
+
+    expect(allocated.receipt.semanticProjectionEnvelope.maxInputTokens).toBe(9500);
+    expect(allocated.receipt.tokenBreakdown.static_contract_tokens).toBeGreaterThan(0);
+    expect(allocated.receipt.tokenBreakdown.conversation_tokens).toBeGreaterThan(0);
+    expect(allocated.receipt.tokenBreakdown.working_context_tokens).toBeGreaterThan(0);
+    expect(allocated.receipt.tokenBreakdown.learned_self_tokens).toBeGreaterThan(0);
+    expect(allocated.receipt.tokenBreakdown.retrieval_tokens).toBeGreaterThan(0);
+    expect(allocated.receipt.tokenBreakdown.omitted_for_budget_count).toBe(0);
+    expect(allocated.receipt.tokenBreakdown.required_overflow_count).toBe(0);
   });
 });

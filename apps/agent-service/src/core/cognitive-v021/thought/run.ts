@@ -71,6 +71,7 @@ import {
   thoughtMessagesForProjection,
   type AllocatedThoughtProjection,
 } from "./projection-allocator/allocator.js";
+import { estimateRequestTokens } from "./projection-allocator/budget.js";
 import {
   type ProjectedThoughtInput,
   type ProjectedInFlightRecord,
@@ -82,7 +83,7 @@ import { getPublishedSettlementIdentity, publishSemanticTransaction } from "../s
 import { getWake } from "../wake/ledger.js";
 import { admitOwnerSuppliedClaim } from "../memory/admission.js";
 import { hasStructuredCurrentnessEntitlement } from "../authority/check.js";
-import { recordDiagnostic } from "./diagnostics.js";
+import { recordDiagnostic, recordThoughtCycleMetrics } from "./diagnostics.js";
 import { metadataFromError } from "../../model-fabric/receipts.js";
 import { fidelityCheck } from "../speech/fidelity.js";
 import { emitInfrastructureNotice } from "../speech/infrastructure-notice.js";
@@ -113,7 +114,43 @@ export type ThoughtInvocation = {
   deferred?: boolean;
   nextEligibleAtMs?: number;
   kernelEnvelope?: KernelEnvelope;
+  /** Provider prompt input tokens, or the shared structural estimate for a fixture. */
+  inputTokens?: number;
 };
+
+export type ThoughtCycleTokenMetrics = {
+  first_pass_total_input_tokens: number;
+  total_cycle_input_tokens_including_retries: number;
+  retry_amplification_ratio: number;
+  request_count: number;
+};
+
+export function createThoughtCycleTokenMetrics(): ThoughtCycleTokenMetrics {
+  return {
+    first_pass_total_input_tokens: 0,
+    total_cycle_input_tokens_including_retries: 0,
+    retry_amplification_ratio: 0,
+    request_count: 0,
+  };
+}
+
+/** Pure accumulator so retry accounting cannot mutate an allocation receipt. */
+export function observeThoughtCycleInput(
+  metrics: ThoughtCycleTokenMetrics,
+  inputTokens: number,
+): ThoughtCycleTokenMetrics {
+  if (!Number.isFinite(inputTokens) || inputTokens < 0) return metrics;
+  const first = metrics.request_count === 0
+    ? inputTokens
+    : metrics.first_pass_total_input_tokens;
+  const total = metrics.total_cycle_input_tokens_including_retries + inputTokens;
+  return {
+    first_pass_total_input_tokens: first,
+    total_cycle_input_tokens_including_retries: total,
+    retry_amplification_ratio: first > 0 ? total / first : 0,
+    request_count: metrics.request_count + 1,
+  };
+}
 
 export type ThoughtCompleteInvoker = (
   messages: ChatMessage[],
@@ -430,6 +467,7 @@ export async function runThoughtModel(
     }
     semanticProjectionHash ??= dispatchMessagesHash ?? "sha256:unavailable";
     dispatchMessagesHash ??= "sha256:unavailable";
+    const estimatedInputTokens = estimateRequestTokens(messages ?? []).estimatedInputTokens;
     const authorityCurrentness = hasAuthorityBarrier(deps.attentionDb)
       ? captureAuthorityCurrentness(deps.attentionDb)
       : undefined;
@@ -473,6 +511,7 @@ export async function runThoughtModel(
         attempts: 1,
         requestId,
         cancelled: true,
+        inputTokens: completion.usage?.promptTokens ?? estimatedInputTokens,
       };
     }
     const semanticResult = parseThoughtSemanticOutput(
@@ -508,6 +547,7 @@ export async function runThoughtModel(
         requestId,
         malformed: true,
         structuralFeedback,
+        inputTokens: completion.usage?.promptTokens ?? estimatedInputTokens,
       };
     }
     const semantic = semanticResult.value;
@@ -530,6 +570,7 @@ export async function runThoughtModel(
         attempts: 1,
         requestId,
         correctionScopeViolation: correctionValidation.violation,
+        inputTokens: completion.usage?.promptTokens ?? estimatedInputTokens,
       };
     }
     const kernelEnvelope = completion.capturedAttemptIdentity
@@ -637,6 +678,7 @@ export async function runThoughtModel(
       attempts: 1,
       requestId,
       malformed: false,
+      inputTokens: completion.usage?.promptTokens ?? estimatedInputTokens,
       ...(kernelEnvelope ? { kernelEnvelope } : {}),
     };
   } catch (error) {
@@ -1100,8 +1142,13 @@ export async function runCognitiveCycle(
   const thoughtDeadlineAtMs = deps.nowMs() + ORDINARY_THOUGHT_BUDGET_MS;
   let structuralFeedback: ThoughtStructuralFeedback | null = null;
   const projectionCache = new ProjectionCache<AllocatedThoughtProjection>();
+  let cycleTokenMetrics = createThoughtCycleTokenMetrics();
+  let lastThoughtRequestId: string = randomUUID();
+  let lastThoughtPass = pass;
+  let lastDispatchTruth: "sent" | "unknown" = "unknown";
 
-  for (;;) {
+  try {
+    for (;;) {
     counters = getThoughtAttemptCounters(sidecar, cycle.cycleId, cycle.generation);
     structuralRetriesForPass = persistedMalformedRetries(sidecar, cycle.cycleId, cycle.generation, pass);
     if (!currentGenerationIs(sidecar, cycle)) return resultWithCounters(cycle.cycleId, cycle.generation, null, counters);
@@ -1195,6 +1242,12 @@ export async function runCognitiveCycle(
       nowMs: deps.nowMs(),
       privateBudgetBinding: options.privateBudgetBinding,
     });
+    lastThoughtRequestId = invocation.requestId;
+    lastThoughtPass = pass;
+    if (typeof invocation.inputTokens === "number") {
+      cycleTokenMetrics = observeThoughtCycleInput(cycleTokenMetrics, invocation.inputTokens);
+      lastDispatchTruth = "sent";
+    }
     const cancellationReason = activeThought.cancellationReason;
     activeThought.unregister();
     storeThoughtStep(sidecar, invocation.output, deps.nowMs());
@@ -1547,5 +1600,22 @@ export async function runCognitiveCycle(
       composeCancelledAttempts: counters.composeCancelledAttempts,
       acceptedSettlements: publication.replayed ? 0 : 1,
     };
+    }
+  } finally {
+    if (deps.observabilityDb && cycleTokenMetrics.request_count > 0) {
+      try {
+        recordThoughtCycleMetrics(deps.observabilityDb, {
+          cycleId: cycle.cycleId,
+          generation: cycle.generation,
+          requestId: lastThoughtRequestId,
+          pass: lastThoughtPass,
+          metrics: cycleTokenMetrics,
+          dispatchTruth: lastDispatchTruth,
+          nowMs: deps.nowMs(),
+        });
+      } catch {
+        // Cycle diagnostics are best-effort and must not change settlement truth.
+      }
+    }
   }
 }

@@ -40,6 +40,34 @@ export type AllocationCandidate = {
   data: unknown;
 };
 
+export type AllocationTokenComponent =
+  | "conversation_tokens"
+  | "working_context_tokens"
+  | "identity_kernel_tokens"
+  | "domain_pointer_tokens"
+  | "learned_self_tokens"
+  | "retrieval_tokens"
+  | "observations_tokens"
+  | "in_flight_effect_tokens"
+  | "authority_revision_feedback_tokens";
+
+/** Maps allocator sections to the receipt's stable token-economy vocabulary. */
+export function allocationTokenComponent(
+  section: AllocationSectionId,
+): AllocationTokenComponent {
+  if (section === "trigger_evidence" || section === "recent_raw" || section === "remember_directive") {
+    return "conversation_tokens";
+  }
+  if (section.startsWith("working_context")) return "working_context_tokens";
+  if (section === "constitution" || section === "capability") return "identity_kernel_tokens";
+  if (section === "occupancy_compact") return "domain_pointer_tokens";
+  if (section === "learned_self") return "learned_self_tokens";
+  if (section === "retrieval_compact") return "retrieval_tokens";
+  if (section === "observations") return "observations_tokens";
+  if (section === "in_flight_receipt") return "in_flight_effect_tokens";
+  return "authority_revision_feedback_tokens";
+}
+
 export function buildAllocationCandidates(
   input: ThoughtInput,
   compactRetrievalHits: CompactRetrievalEvidence[],

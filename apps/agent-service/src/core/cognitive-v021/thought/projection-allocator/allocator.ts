@@ -14,9 +14,18 @@ import {
   type ProjectedThoughtInput,
 } from "../projection.js";
 import { thoughtOutputCompatibilityInstruction } from "../output-contract.js";
-import { deriveThoughtBudget, estimateRequestTokens } from "./budget.js";
-import { buildAllocationCandidates, type AllocationCandidate } from "./sections.js";
-import type { AllocationReceipt } from "./receipt.js";
+import {
+  BYTES_PER_TOKEN,
+  deriveThoughtBudget,
+  estimateRequestTokens,
+  type SemanticProjectionEnvelope,
+} from "./budget.js";
+import {
+  allocationTokenComponent,
+  buildAllocationCandidates,
+  type AllocationCandidate,
+} from "./sections.js";
+import type { AllocationReceipt, AllocationTokenBreakdown } from "./receipt.js";
 import { recordAllocationReceipt, recordDiagnostic } from "../diagnostics.js";
 import { mintEffectRef } from "../../effect/effect-ref.js";
 import {
@@ -26,8 +35,23 @@ import {
 } from "../structural-feedback.js";
 
 export class RequiredOverflowError extends AppError {
-  constructor(message: string) {
+  readonly requiredOverflowCount = 1;
+  readonly section: string;
+  readonly estimatedInputTokens: number;
+  readonly semanticBudgetTokens: number;
+
+  constructor(
+    message: string,
+    details: {
+      section?: string;
+      estimatedInputTokens?: number;
+      semanticBudgetTokens?: number;
+    } = {},
+  ) {
     super("context_allocation_required_overflow", message, 422);
+    this.section = details.section ?? "unknown";
+    this.estimatedInputTokens = details.estimatedInputTokens ?? 0;
+    this.semanticBudgetTokens = details.semanticBudgetTokens ?? 0;
   }
 }
 
@@ -57,6 +81,12 @@ export function thoughtMessagesForProjection(
 export type AllocateThoughtProjectionOptions = {
   sidecar?: DatabaseSync;
   thoughtInput: ThoughtInput;
+  semanticProjectionEnvelope?: SemanticProjectionEnvelope;
+  /** Short alias for callers that already hold the named envelope. */
+  semanticEnvelope?: SemanticProjectionEnvelope;
+  /** Qualification/test shorthand for a logical input ceiling. */
+  semanticBudgetTokens?: number;
+  /** @deprecated Provider capacity is owned by Attention. */
   quotaBucket?: string;
   maxOutputTokens?: number;
   requestId: string;
@@ -82,6 +112,9 @@ export function allocateThoughtProjection(
   const budget = deriveThoughtBudget({
     quotaBucket: opts.quotaBucket,
     maxOutputTokens: opts.maxOutputTokens,
+    semanticProjectionEnvelope: opts.semanticProjectionEnvelope,
+    semanticEnvelope: opts.semanticEnvelope,
+    semanticBudgetTokens: opts.semanticBudgetTokens,
   });
 
   // Prepare full provenance and compact retrieval hits
@@ -97,6 +130,7 @@ export function allocateThoughtProjection(
 
   const includedCandidates: AllocationCandidate[] = [];
   const omittedCandidates: AllocationReceipt["decision"]["omitted"] = [];
+  const omittedCandidateData: AllocationCandidate[] = [];
   const workingContextIncluded: WorkingContextItem[] = [];
   const retrievalHitsIncluded: CompactRetrievalEvidence[] = [];
   let compression = false;
@@ -160,7 +194,7 @@ export function allocateThoughtProjection(
     });
     const totalDemand = estimate.estimatedInputTokens + estimate.estimatedOutputTokens;
 
-    if (totalDemand <= budget.hardTpm) {
+    if (estimate.estimatedInputTokens <= budget.semanticBudgetTokens) {
       // Accepted!
       includedCandidates.push(candidate);
       if (candidate.section.startsWith("working_context")) {
@@ -172,11 +206,17 @@ export function allocateThoughtProjection(
       // Exceeds TPM budget
       if (candidate.required) {
         throw new RequiredOverflowError(
-          `Context allocation overflow on required section '${candidate.section}' (demand: ${totalDemand}, hardTpm: ${budget.hardTpm})`,
+          `Context allocation overflow on required section '${candidate.section}' (input: ${estimate.estimatedInputTokens}, semanticBudgetTokens: ${budget.semanticBudgetTokens})`,
+          {
+            section: candidate.section,
+            estimatedInputTokens: estimate.estimatedInputTokens,
+            semanticBudgetTokens: budget.semanticBudgetTokens,
+          },
         );
       }
       // Omit optional candidate
       compression = true;
+      omittedCandidateData.push(candidate);
       omittedCandidates.push({
         id: candidate.id,
         section: candidate.section,
@@ -192,6 +232,38 @@ export function allocateThoughtProjection(
     maxTokens: budget.maxOutputTokens,
   });
 
+  const structuralTokens = (value: unknown): number => {
+    const serialized = typeof value === "string" ? value : JSON.stringify(value ?? null);
+    return Math.ceil(Buffer.byteLength(serialized, "utf8") / BYTES_PER_TOKEN);
+  };
+  const componentTokens: Partial<Record<ReturnType<typeof allocationTokenComponent>, number>> = {};
+  for (const candidate of includedCandidates) {
+    const component = allocationTokenComponent(candidate.section);
+    componentTokens[component] = (componentTokens[component] ?? 0) + structuralTokens(candidate.data);
+  }
+  if (finalMessages.length > 2) {
+    componentTokens.authority_revision_feedback_tokens =
+      (componentTokens.authority_revision_feedback_tokens ?? 0) + structuralTokens(finalMessages.slice(2));
+  }
+  const tokenBreakdown: AllocationTokenBreakdown = {
+    static_contract_tokens: structuralTokens(finalMessages[0]?.content ?? ""),
+    conversation_tokens: componentTokens.conversation_tokens ?? 0,
+    working_context_tokens: componentTokens.working_context_tokens ?? 0,
+    identity_kernel_tokens: componentTokens.identity_kernel_tokens ?? 0,
+    domain_pointer_tokens: componentTokens.domain_pointer_tokens ?? 0,
+    learned_self_tokens: componentTokens.learned_self_tokens ?? 0,
+    retrieval_tokens: componentTokens.retrieval_tokens ?? 0,
+    observations_tokens: componentTokens.observations_tokens ?? 0,
+    in_flight_effect_tokens: componentTokens.in_flight_effect_tokens ?? 0,
+    authority_revision_feedback_tokens: componentTokens.authority_revision_feedback_tokens ?? 0,
+    omitted_for_budget_tokens: omittedCandidateData.reduce(
+      (total, candidate) => total + structuralTokens(candidate.data),
+      0,
+    ),
+    omitted_for_budget_count: omittedCandidates.length,
+    required_overflow_count: 0,
+  };
+
   const semanticProjectionHash = computeSemanticProjectionHash(finalProjected);
   const dispatchMessagesHash = computeDispatchMessagesHash(finalMessages);
 
@@ -201,14 +273,15 @@ export function allocateThoughtProjection(
     requestId: opts.requestId,
     policyId: "thought-projection-v1",
     policyVersion: 1,
+    semanticProjectionEnvelope: budget.semanticProjectionEnvelope,
+    tokenBreakdown,
     quotaBucket: budget.quotaBucket,
     hardTpm: budget.hardTpm,
     maxOutputTokens: budget.maxOutputTokens,
     estimatedInputTokens: finalEstimate.estimatedInputTokens,
     estimatedOutputTokens: finalEstimate.estimatedOutputTokens,
     totalDemandTokens: finalEstimate.estimatedInputTokens + finalEstimate.estimatedOutputTokens,
-    headroomTokens:
-      budget.hardTpm - (finalEstimate.estimatedInputTokens + finalEstimate.estimatedOutputTokens),
+    headroomTokens: budget.semanticBudgetTokens - finalEstimate.estimatedInputTokens,
     compression,
     requiredOverflow: false,
     decision: {

@@ -7,6 +7,7 @@ import {
 import { openDerivedStore } from "../../retrieval/derived-store.js";
 import { admitTestCycle, openTestSidecar, makeSemanticSettlement } from "../../test-support.js";
 import type { AllocationReceipt } from "../projection-allocator/receipt.js";
+import { DEFAULT_SEMANTIC_PROJECTION_ENVELOPE } from "../projection-allocator/budget.js";
 import { DatabaseSync } from "node:sqlite";
 import { appendInboxEvent } from "../../cycle/inbox.js";
 import { appendOwnerUtterance } from "../../evidence/conversation-log.js";
@@ -24,6 +25,14 @@ describe("Thought Diagnostics & Observability DB", () => {
         requestId: "req-diag-1",
         policyId: "thought-projection-v1",
         policyVersion: 1,
+        semanticProjectionEnvelope: DEFAULT_SEMANTIC_PROJECTION_ENVELOPE,
+        tokenBreakdown: {
+          static_contract_tokens: 0, conversation_tokens: 0, working_context_tokens: 0,
+          identity_kernel_tokens: 0, domain_pointer_tokens: 0, learned_self_tokens: 0,
+          retrieval_tokens: 0, observations_tokens: 0, in_flight_effect_tokens: 0,
+          authority_revision_feedback_tokens: 0, omitted_for_budget_tokens: 0,
+          omitted_for_budget_count: 0, required_overflow_count: 0,
+        },
         quotaBucket: "groq:openai/gpt-oss-20b",
         hardTpm: 8000,
         maxOutputTokens: 4096,
@@ -102,6 +111,14 @@ describe("Thought Diagnostics & Observability DB", () => {
         requestId: "req-diag-2",
         policyId: "thought-projection-v1",
         policyVersion: 1,
+        semanticProjectionEnvelope: DEFAULT_SEMANTIC_PROJECTION_ENVELOPE,
+        tokenBreakdown: {
+          static_contract_tokens: 0, conversation_tokens: 0, working_context_tokens: 0,
+          identity_kernel_tokens: 0, domain_pointer_tokens: 0, learned_self_tokens: 0,
+          retrieval_tokens: 0, observations_tokens: 0, in_flight_effect_tokens: 0,
+          authority_revision_feedback_tokens: 0, omitted_for_budget_tokens: 0,
+          omitted_for_budget_count: 0, required_overflow_count: 0,
+        },
         quotaBucket: "nim:openai/gpt-oss-20b",
         hardTpm: 16000,
         maxOutputTokens: 4096,
@@ -245,6 +262,12 @@ describe("Thought Diagnostics & Observability DB", () => {
       expect(diagnostics.length).toBe(1);
       expect(diagnostics[0].code).toBe("parser_malformed");
       expect(diagnostics[0].cycleId).toBe("cycle-obs-real");
+      expect(diagnostics[0].cycleMetrics).toMatchObject({
+        first_pass_total_input_tokens: expect.any(Number),
+        total_cycle_input_tokens_including_retries: expect.any(Number),
+        retry_amplification_ratio: expect.any(Number),
+        request_count: 2,
+      });
     } finally {
       obsDb.close();
       sidecar.close();
