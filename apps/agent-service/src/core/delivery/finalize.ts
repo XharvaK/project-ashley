@@ -45,6 +45,10 @@ export type FinalizeDeliveryResult = {
   plannedCount: number;
 };
 
+export function isLegacyConsolidationProducerAllowed(mode: unknown): boolean {
+  return mode === "legacy" || mode === "shadow";
+}
+
 function reasonFor(
   cause: FinalizeCause,
   receiptCount: number,
@@ -194,7 +198,10 @@ export function finalizeDelivery(
         text: deliveredText,
         channel: reservation.channel === "discord" ? "discord" : "discord",
       });
-      if (assistantMessageId > 0) {
+      if (
+        assistantMessageId > 0 &&
+        isLegacyConsolidationProducerAllowed(env.cognitiveKernel)
+      ) {
         enqueueCognitiveJob(db, {
           ownerId: input.ownerId,
           kind: "consolidate_thread",
