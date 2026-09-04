@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import type { KernelDeps, OutboxDeliveryProjector } from "../types.js";
 import { getCycle, updateCycleState } from "../cycle/inbox.js";
+import { finishWakeInTransaction, getWake } from "../wake/ledger.js";
 import { runLiveCognitiveTurn } from "../dispatch/live.js";
 import type { InboxEvent } from "../types.js";
 import {
@@ -89,6 +90,24 @@ export function startFrontierCoordinator(
           const resched = rescheduleDeferredFrontier(sidecar, due.frontierId, result.nextEligibleAtMs, getNowMs());
           if (resched.outcome === "exhausted") {
             updateCycleState(sidecar, due.cycleId, "silent", getNowMs());
+            // Campaign-1 exhaustion terminalization: only the mechanically proven
+            // capacity-deadline expiry path terminalizes the wake as expired.
+            // Other exhaustion reasons (e.g. non_forward_scheduling_hint) keep
+            // their existing truthful transition and must not invent expiry.
+            if (resched.reason === "capacity_wait_max_duration_exceeded") {
+              try {
+                const cycle = getCycle(sidecar, due.cycleId);
+                if (cycle?.wakeId) {
+                  const wake = getWake(sidecar, cycle.wakeId);
+                  if (wake && wake.state !== "terminal") {
+                    finishWakeInTransaction(sidecar, cycle.wakeId, wake.leaseToken, "expired", getNowMs());
+                  }
+                }
+              } catch {
+                // Preserve frontier exhaustion + cycle silence. Terminal
+                // immutability and lease laws win over expiry terminalization.
+              }
+            }
           }
         } else if (!result.deferred) {
           exhaustDeferredFrontier(sidecar, due.frontierId, getNowMs());
