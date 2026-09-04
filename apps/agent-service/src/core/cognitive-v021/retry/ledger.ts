@@ -24,7 +24,7 @@ import {
 } from "../wake/ledger.js";
 import { occurrenceIdFor } from "../wake/identity.js";
 import { sha256 } from "../../model-fabric/hash.js";
-import { updateCycleState } from "../cycle/inbox.js";
+import { getCycle, hasValidDurableContinuationOwner, updateCycleState } from "../cycle/inbox.js";
 import {
   getActiveDeferredFrontier,
   insertDeferredFrontierRecord,
@@ -324,6 +324,44 @@ function quarantineEvent(db: DatabaseSync, current: EventRow, reason: string, no
   if (current.wake_id && getWake(db, current.wake_id)) {
     wakeToTerminal(db, current.wake_id, "quarantined", nowMs);
   }
+  retireOwnerlessCycleForTerminalEvent(db, current.wake_id, nowMs);
+}
+
+/**
+ * Campaign-1 terminal-lifecycle completion (normal-path producer of truth).
+ *
+ * Frozen law: a cognitive obligation remains active until its durable owner
+ * performs a terminal transition. Corollary: when the final durable
+ * continuation owner terminalizes and ownership is not transferred, the
+ * cycle must cease claiming active cognitive occupancy.
+ *
+ * This helper completes terminal durable-work lifecycle by retiring the
+ * wake-bound cycle to the canonical non-occupying state (`silent`) if and
+ * only if the canonical ownership predicate
+ * (`hasValidDurableContinuationOwner`) reports no valid durable
+ * continuation owner. Ownership transfers are preserved:
+ * - `capacity_wait` + active frontier (incl. `deferred_to_frontier`) stays;
+ * - `sending` + undelivered outbox stays;
+ * - any normal phase with a non-terminal wake stays.
+ *
+ * Callers: every durable-work path that terminalizes owner work WITHOUT
+ * transferring ownership (quarantineEvent + settle terminal-failure
+ * branches + reconcileOutcomeUnknown terminal branches). Never called for
+ * `deferred_to_frontier` (ownership moves to the unresolved frontier),
+ * `completed` (ownership already moved to settlement/outbox by publish),
+ * or any non-terminal (`pending`/`retry_wait`/`reconciling`) outcome.
+ */
+function retireOwnerlessCycleForTerminalEvent(db: DatabaseSync, wakeId: string | null, nowMs: number): void {
+  if (!wakeId) return;
+  const cycleRow = row(db.prepare(
+    "SELECT cycle_id FROM cycle_records WHERE wake_id = ? LIMIT 1",
+  ).get(wakeId));
+  const cycleId = cycleRow ? text(cycleRow.cycle_id) : "";
+  if (!cycleId) return;
+  const cycle = getCycle(db, cycleId);
+  if (!cycle || cycle.state === "silent" || cycle.state === "idle") return;
+  if (hasValidDurableContinuationOwner(db, cycle)) return;
+  updateCycleState(db, cycleId, "silent", nowMs);
 }
 
 function ensureWakeLineage(db: DatabaseSync, current: EventRow): string {
@@ -769,6 +807,7 @@ export function settleDurableAttempt(
       input.claimToken,
     );
     finishWakeForEvent(db, current, terminal.wakeReason, input.nowMs);
+    retireOwnerlessCycleForTerminalEvent(db, current.wake_id, input.nowMs);
     return { kind: "terminal", reason: terminal.reason };
   });
 }
@@ -835,6 +874,7 @@ export function reconcileOutcomeUnknown(
             WHERE id = ? AND state = 'reconciling'`,
         ).run(input.nowMs, input.eventId);
         wakeToTerminal(db, current.wake_id, "completed", input.nowMs);
+        retireOwnerlessCycleForTerminalEvent(db, current.wake_id, input.nowMs);
         return { kind: "terminal", reason: "completed", eventId: input.eventId };
       }
 
@@ -847,6 +887,7 @@ export function reconcileOutcomeUnknown(
             WHERE id = ? AND state = 'reconciling'`,
         ).run(input.eventId);
         wakeToTerminal(db, current.wake_id, "refused", input.nowMs);
+        retireOwnerlessCycleForTerminalEvent(db, current.wake_id, input.nowMs);
         return { kind: "terminal", reason: "permanent_failure", eventId: input.eventId };
       }
 
