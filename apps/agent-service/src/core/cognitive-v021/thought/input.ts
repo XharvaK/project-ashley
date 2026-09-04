@@ -42,6 +42,10 @@ import {
   adaptC3Experiences,
   type C3ExperienceAdapterResult,
 } from "./c3-adapter.js";
+import {
+  adaptOwnTimeSession,
+  type OwnTimeSessionCandidate,
+} from "../curiosity/own-time-adapter.js";
 
 export type BuildThoughtInputOptions = {
   sidecar: DatabaseSync;
@@ -221,6 +225,47 @@ function emptyRuntimeCondition(partial?: Partial<RuntimeCondition>): RuntimeCond
   };
 }
 
+function hasTable(db: DatabaseSync, name: string): boolean {
+  try {
+    const row = db.prepare(
+      "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = ?",
+    ).get(name) as { present?: number } | undefined;
+    return Number(row?.present ?? 0) === 1;
+  } catch {
+    return false;
+  }
+}
+
+function canReadNuclearOwnTime(db: DatabaseSync): boolean {
+  // The live serve path supplies nuclear.db as authorityDb. The second
+  // marker keeps older sidecar-only test/recovery seams optional while still
+  // allowing a missing own_time_sessions table to surface as UNREACHABLE on a
+  // recognizably nuclear database.
+  return hasTable(db, "own_time_sessions") || hasTable(db, "internal_state");
+}
+
+function appendOwnTimePointer(
+  section: DomainPointersSection,
+  candidate: OwnTimeSessionCandidate,
+): DomainPointersSection {
+  if (section.pointers.some((pointer) => pointer.domain === candidate.domain)) return section;
+  const augmented = {
+    version: section.version,
+    conversationId: section.conversationId,
+    cycleId: section.cycleId,
+    pointers: Object.freeze([...section.pointers, candidate]),
+  } as DomainPointersSection & {
+    coverageManifest: DomainPointersSection["coverageManifest"];
+  };
+  Object.defineProperty(augmented, "coverageManifest", {
+    value: section.coverageManifest,
+    enumerable: false,
+    writable: false,
+    configurable: false,
+  });
+  return Object.freeze(augmented);
+}
+
 /** Assemble the fixed Thought input set. Workspace notes are intentionally absent. */
 export function buildThoughtInput(options: BuildThoughtInputOptions): ThoughtInputWithC2 {
   const lastNTurns = Math.max(1, Math.min(100, options.lastNTurns ?? DEFAULT_LAST_N_TURNS));
@@ -254,11 +299,17 @@ export function buildThoughtInput(options: BuildThoughtInputOptions): ThoughtInp
     stableSelfBound: options.stableSelfBound,
     learnedSelf: learnedSelfSlice,
   });
-  const domainPointers = options.domainPointers ?? buildDomainPointers(
+  const baseDomainPointers = options.domainPointers ?? buildDomainPointers(
     options.sidecar,
     options.cycle.conversationId,
     options.cycle.cycleId,
   );
+  const domainPointers = options.authorityDb && canReadNuclearOwnTime(options.authorityDb)
+    ? appendOwnTimePointer(
+      baseDomainPointers,
+      adaptOwnTimeSession(options.authorityDb, options.cycle.occupantId),
+    )
+    : baseDomainPointers;
   const c3Experiences = options.c3Experiences ?? adaptC3Experiences(
     options.sidecar,
     options.cycle.conversationId,

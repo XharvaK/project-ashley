@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   FETCH_TIMEOUT_MS,
+  MAX_REDIRECTS,
   fetchValidatedResource,
   isPublicAddress,
   validatePublicUrl,
@@ -52,6 +53,19 @@ describe("curiosity network boundary", () => {
       resolve: async () => [{ address: "93.184.216.34", family: 4 }],
     });
     expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it("stops after the bounded redirect budget", async () => {
+    const fetcher = vi.fn(async () => new Response(null, {
+      status: 302,
+      headers: { location: "https://next.test/article" },
+    }));
+    await expect(fetchValidatedResource("https://public.test/start", {
+      accept: "text/html",
+      fetcher,
+      resolve: async () => [{ address: "93.184.216.34", family: 4 }],
+    })).rejects.toThrow("too_many_redirects");
+    expect(fetcher).toHaveBeenCalledTimes(MAX_REDIRECTS + 1);
   });
 
   it("enforces the two-megabyte response boundary", async () => {
