@@ -265,9 +265,8 @@ echo "============================="
 maybe_fail stop
 T_STOP_START="$(ms_now)"
 if [[ -n "$STOP_SERVICES" ]]; then
-  # shellcheck disable=SC2086
-  sys stop $STOP_SERVICES
   for unit in $STOP_SERVICES; do
+    sys stop "$unit"
     assert_inactive "$unit"
   done
   timing "stop_ms=$(( $(ms_now) - T_STOP_START ))"
@@ -314,27 +313,43 @@ maybe_fail policy
 verify_loaded_unit ashley-agent.service
 verify_loaded_unit ashley-discord.service
 
-# (Re)start affected services in dependency order. An inactive unit is
-# started; an active one that must pick up changes is restarted.
+# (Re)start affected services in dependency order.
+# When agent restart is required, Discord was stopped as an ingress fence:
+# agent starts, satisfies the ready-health gate, and only then Discord starts.
 T_START_START="$(ms_now)"
-for unit in ashley-agent.service ashley-discord.service; do
-  if ! in_list "$RESTART_SERVICES" "$unit"; then
-    timing "$unit restart=skipped"
-    continue
-  fi
-  case "$unit" in
-    ashley-agent.service) maybe_fail start-agent ;;
-    ashley-discord.service) maybe_fail start-discord ;;
-  esac
+if in_list "$RESTART_SERVICES" "ashley-agent.service"; then
+  maybe_fail start-agent
   T_ONE_START="$(ms_now)"
-  if sys is-active --quiet "$unit"; then
-    sys restart "$unit"
+  if sys is-active --quiet "ashley-agent.service"; then
+    sys restart "ashley-agent.service"
   else
-    sys start "$unit"
+    sys start "ashley-agent.service"
   fi
-  assert_active "$unit"
-  timing "$unit start_ms=$(( $(ms_now) - T_ONE_START ))"
-done
+  assert_active "ashley-agent.service"
+  timing "ashley-agent.service start_ms=$(( $(ms_now) - T_ONE_START ))"
+
+  # Ingress fence: agent must be fully ready before discord starts.
+  T_HEALTH_START="$(ms_now)"
+  maybe_fail health
+  wait_agent_ready >/dev/null
+  timing "agent_health_ms=$(( $(ms_now) - T_HEALTH_START ))"
+else
+  timing "ashley-agent.service restart=skipped"
+fi
+
+if in_list "$RESTART_SERVICES" "ashley-discord.service"; then
+  maybe_fail start-discord
+  T_ONE_START="$(ms_now)"
+  if sys is-active --quiet "ashley-discord.service"; then
+    sys restart "ashley-discord.service"
+  else
+    sys start "ashley-discord.service"
+  fi
+  assert_active "ashley-discord.service"
+  timing "ashley-discord.service start_ms=$(( $(ms_now) - T_ONE_START ))"
+else
+  timing "ashley-discord.service restart=skipped"
+fi
 timing "start_phase_ms=$(( $(ms_now) - T_START_START ))"
 
 # Final production health is global: an unaffected service that is
@@ -347,10 +362,12 @@ for unit in ashley-agent.service ashley-discord.service; do
   fi
 done
 
-T_HEALTH_START="$(ms_now)"
-maybe_fail health
-wait_agent_ready >/dev/null
-timing "agent_health_ms=$(( $(ms_now) - T_HEALTH_START ))"
+if ! in_list "$RESTART_SERVICES" "ashley-agent.service"; then
+  T_HEALTH_START="$(ms_now)"
+  maybe_fail health
+  wait_agent_ready >/dev/null
+  timing "agent_health_ms=$(( $(ms_now) - T_HEALTH_START ))"
+fi
 
 END_SHA="$(git rev-parse HEAD)"
 if [[ "$END_SHA" != "$CHECKOUT_SHA" ]]; then

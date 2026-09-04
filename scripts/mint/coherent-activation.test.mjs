@@ -40,11 +40,17 @@ function createFixture() {
   mkdirSync(fakeBin, { recursive: true });
   mkdirSync(state, { recursive: true });
   for (const app of ["sandbox-policy", "sandbox-m1", "sandbox-tree", "sandbox-broker", "sandbox-v2", "agent-service", "discord-bot"]) {
-    mkdirSync(path.join(repo, "apps", app), { recursive: true });
+    mkdirSync(path.join(repo, "apps", app, "src"), { recursive: true });
     // Steady-state Mint always has installed node_modules from the last
     // successful activation; impact-aware plans skip npm ci on that basis.
     mkdirSync(path.join(repo, "apps", app, "node_modules"), { recursive: true });
+    copyFileSync(
+      path.join(ROOT, "apps", app, "package.json"),
+      path.join(repo, "apps", app, "package.json"),
+    );
+    writeFileSync(path.join(repo, "apps", app, "src", "index.ts"), "export const ok = true;\n");
   }
+  mkdirSync(path.join(repo, "deploy", "linux-mint"), { recursive: true });
   copyFileSync(
     path.join(ROOT, "deploy", "linux-mint", "update.sh"),
     path.join(repo, "deploy", "linux-mint", "update.sh"),
@@ -52,6 +58,10 @@ function createFixture() {
   copyFileSync(
     path.join(ROOT, "deploy", "linux-mint", "plan-update.sh"),
     path.join(repo, "deploy", "linux-mint", "plan-update.sh"),
+  );
+  copyFileSync(
+    path.join(ROOT, "deploy", "linux-mint", "derive-graph.mjs"),
+    path.join(repo, "deploy", "linux-mint", "derive-graph.mjs"),
   );
   copyFileSync(
     path.join(ROOT, "deploy", "linux-mint", "sync-user-units.sh"),
@@ -66,6 +76,8 @@ function createFixture() {
     path.join(unitSrc, "ashley-discord.service"),
   );
   chmodSync(path.join(repo, "deploy", "linux-mint", "update.sh"), 0o755);
+  chmodSync(path.join(repo, "deploy", "linux-mint", "plan-update.sh"), 0o755);
+  chmodSync(path.join(repo, "deploy", "linux-mint", "derive-graph.mjs"), 0o755);
   chmodSync(path.join(repo, "deploy", "linux-mint", "sync-user-units.sh"), 0o755);
   writeFileSync(path.join(state, "ashley-agent.service"), "active\n");
   writeFileSync(path.join(state, "ashley-discord.service"), "active\n");
@@ -75,6 +87,13 @@ function createFixture() {
   const pState = posix(state);
   const pUnitDir = posix(unitDir);
   const pHome = posix(home);
+
+  writeExec(
+    path.join(fakeBin, "node"),
+    `#!/bin/sh
+exec "${posix(process.execPath)}" "$@"
+`,
+  );
 
   writeExec(
     path.join(fakeBin, "git"),
@@ -284,6 +303,7 @@ function firstIndex(lines, prefix) {
 const SHA_A = "a".repeat(40);
 const SHA_B = "b".repeat(40);
 const TREE_B = "c".repeat(40);
+const CANONICAL_ORDER = "sandbox-policy sandbox-m1 sandbox-tree sandbox-broker sandbox-v2 agent-service discord-bot";
 
 function parsePlan(stdout) {
   const plan = {};
@@ -295,7 +315,7 @@ function parsePlan(stdout) {
 }
 
 function runPlanner(fixture, base, target, extra = {}) {
-  const script = posix(path.join(ROOT, "deploy", "linux-mint", "plan-update.sh"));
+  const script = posix(path.join(fixture.repo, "deploy", "linux-mint", "plan-update.sh"));
   const result = spawnSync(
     BASH,
     ["-c", `export PATH="${posix(fixture.fakeBin)}:/usr/bin:/bin"; exec bash "${script}" "${base}" "${target}"`],
@@ -521,8 +541,8 @@ test("T1 planner: agent-service source builds only agent-service", () => {
   assert.equal(plan.MODE, "impact_aware");
   assert.equal(plan.BUILD, "agent-service");
   assert.equal(plan.NPMCI, "");
-  assert.equal(plan.STOP, "ashley-agent.service");
-  assert.equal(plan.RESTART, "ashley-agent.service");
+  assert.equal(plan.STOP, "ashley-discord.service ashley-agent.service");
+  assert.equal(plan.RESTART, "ashley-agent.service ashley-discord.service");
 });
 
 test("T1 agent-only deploy stops/restarts agent only and records activation", () => {
@@ -531,10 +551,20 @@ test("T1 agent-only deploy stops/restarts agent only and records activation", ()
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
   assert.deepEqual(buildPackages(fixture), ["agent-service"]);
   assert.deepEqual(ciPackages(fixture), []);
+  assert.ok(hasServiceOp(fixture, "stop", "ashley-discord.service"), "discord must fence ingress");
   assert.ok(hasServiceOp(fixture, "stop", "ashley-agent.service"));
-  assert.ok(!hasServiceOp(fixture, "stop", "ashley-discord.service"), "discord must keep running");
-  assert.ok(!hasServiceOp(fixture, "start", "ashley-discord.service"));
-  assert.ok(!hasServiceOp(fixture, "restart", "ashley-discord.service"));
+  assert.ok(hasServiceOp(fixture, "start", "ashley-agent.service"));
+  assert.ok(hasServiceOp(fixture, "start", "ashley-discord.service"));
+  const lines = commands(fixture);
+  const stopDiscordAt = firstIndex(lines, "stop ashley-discord.service");
+  const stopAgentAt = firstIndex(lines, "stop ashley-agent.service");
+  const startAgentAt = firstIndex(lines, "start ashley-agent.service");
+  const readyAt = firstIndex(lines, "curl ");
+  const startDiscordAt = firstIndex(lines, "start ashley-discord.service");
+  assert.ok(stopDiscordAt >= 0 && stopAgentAt > stopDiscordAt, "stop discord before agent");
+  assert.ok(startAgentAt > stopAgentAt, "start agent after stop");
+  assert.ok(readyAt > startAgentAt, "agent ready before discord start");
+  assert.ok(startDiscordAt > readyAt, "start discord after agent ready");
   assert.match(result.stdout, /mode: impact_aware/);
   assert.equal(readMarker(markerPath), SHA_B);
 });
@@ -558,12 +588,13 @@ test("T3 sandbox-v2 change builds v2 then agent, restarts agent only", () => {
   const fixture = createFixture();
   const plan = runPlanner(fixture, SHA_A, SHA_B, impactEnv(fixture, "M\tapps/sandbox-v2/src/dispatch.ts"));
   assert.equal(plan.BUILD, "sandbox-v2 agent-service");
-  assert.equal(plan.RESTART, "ashley-agent.service");
+  assert.equal(plan.STOP, "ashley-discord.service ashley-agent.service");
+  assert.equal(plan.RESTART, "ashley-agent.service ashley-discord.service");
   const { result, markerPath } = runImpactedUpdate(fixture, SHA_A, "M\tapps/sandbox-v2/src/dispatch.ts");
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
   assert.deepEqual(buildPackages(fixture), ["sandbox-v2", "agent-service"]);
+  assert.ok(hasServiceOp(fixture, "stop", "ashley-discord.service"), "discord fences ingress");
   assert.ok(hasServiceOp(fixture, "stop", "ashley-agent.service"));
-  assert.ok(!hasServiceOp(fixture, "stop", "ashley-discord.service"));
   assert.equal(readMarker(markerPath), SHA_B);
 });
 
@@ -571,7 +602,8 @@ test("T4 sandbox-policy change builds canonical closure without sandbox-m1", () 
   const fixture = createFixture();
   const plan = runPlanner(fixture, SHA_A, SHA_B, impactEnv(fixture, "M\tapps/sandbox-policy/src/policy.ts"));
   assert.equal(plan.BUILD, "sandbox-policy sandbox-tree sandbox-broker sandbox-v2 agent-service");
-  assert.equal(plan.RESTART, "ashley-agent.service");
+  assert.equal(plan.STOP, "ashley-discord.service ashley-agent.service");
+  assert.equal(plan.RESTART, "ashley-agent.service ashley-discord.service");
   const { result } = runImpactedUpdate(fixture, SHA_A, "M\tapps/sandbox-policy/src/policy.ts");
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
   assert.deepEqual(buildPackages(fixture), [
@@ -581,7 +613,8 @@ test("T4 sandbox-policy change builds canonical closure without sandbox-m1", () 
     "sandbox-v2",
     "agent-service",
   ]);
-  assert.ok(!hasServiceOp(fixture, "stop", "ashley-discord.service"));
+  assert.ok(hasServiceOp(fixture, "stop", "ashley-discord.service"), "discord fences ingress");
+  assert.ok(hasServiceOp(fixture, "stop", "ashley-agent.service"));
 });
 
 test("T5 test-only change is a noop deploy with health still verified", () => {
@@ -858,11 +891,157 @@ test("privacy-core and runtime config changes restart agent without a build", ()
   const fixture = createFixture();
   const priv = runPlanner(fixture, SHA_A, SHA_B, impactEnv(fixture, "M\tpackages/privacy-core/index.js"));
   assert.equal(priv.BUILD, "");
-  assert.equal(priv.RESTART, "ashley-agent.service");
+  assert.equal(priv.STOP, "ashley-discord.service ashley-agent.service");
+  assert.equal(priv.RESTART, "ashley-agent.service ashley-discord.service");
   const cfg = runPlanner(fixture, SHA_A, SHA_B, impactEnv(fixture, "M\tconfig/models.json"));
   assert.equal(cfg.BUILD, "");
-  assert.equal(cfg.RESTART, "ashley-agent.service");
+  assert.equal(cfg.STOP, "ashley-discord.service ashley-agent.service");
+  assert.equal(cfg.RESTART, "ashley-agent.service ashley-discord.service");
   const games = runPlanner(fixture, SHA_A, SHA_B, impactEnv(fixture, "M\tconfig/games.json"));
   assert.equal(games.BUILD, "");
+  assert.equal(games.STOP, "");
   assert.equal(games.RESTART, "");
 });
+
+// ---- Release-critical witnesses for Blocker 1 (Graph Drift) and Blocker 2 (Ingress Fence) ----
+
+test("W1 graph drift: target metadata introducing Y -> X builds Y when only X changes", () => {
+  const fixture = createFixture();
+  // Release B: discord-bot introduces local dependency on agent-service
+  const discordPkgPath = path.join(fixture.repo, "apps", "discord-bot", "package.json");
+  const discordPkg = JSON.parse(readFileSync(discordPkgPath, "utf8"));
+  discordPkg.dependencies = {
+    ...(discordPkg.dependencies || {}),
+    "@composer-assistant/agent-service": "file:../agent-service",
+  };
+  writeFileSync(discordPkgPath, JSON.stringify(discordPkg, null, 2));
+
+  // Also declare the import in discord-bot src so metadata completeness holds
+  writeFileSync(
+    path.join(fixture.repo, "apps", "discord-bot", "src", "index.ts"),
+    'import "@composer-assistant/agent-service";\nexport const ok = true;\n',
+  );
+
+  // Release C: only X (apps/agent-service/src/core/foo.ts) changes
+  const plan = runPlanner(fixture, SHA_A, SHA_B, impactEnv(fixture, "M\tapps/agent-service/src/core/foo.ts"));
+  assert.equal(plan.MODE, "impact_aware");
+  // Closure must include both agent-service and its dependent discord-bot
+  assert.equal(plan.BUILD, "agent-service discord-bot");
+  assert.equal(plan.STOP, "ashley-discord.service ashley-agent.service");
+  assert.equal(plan.RESTART, "ashley-agent.service ashley-discord.service");
+});
+
+test("W2 undeclared cross-package dependency falls back to full_fallback", () => {
+  const fixture = createFixture();
+  // Target source introduces cross-package runtime dependency not in package.json
+  writeFileSync(
+    path.join(fixture.repo, "apps", "sandbox-m1", "src", "undeclared.ts"),
+    'import { WorkspaceManager } from "@composer-assistant/sandbox-v2";\n',
+  );
+
+  const plan = runPlanner(fixture, SHA_A, SHA_B, impactEnv(fixture, "M\tapps/sandbox-m1/src/sandbox-m1.ts"));
+  assert.equal(plan.MODE, "full_fallback");
+  assert.match(plan.FALLBACK_REASON, /undeclared_cross_package_dependency/);
+  assert.equal(plan.BUILD, CANONICAL_ORDER);
+});
+
+test("W3 malformed JSON in package metadata falls back to full_fallback", () => {
+  const fixture = createFixture();
+  writeFileSync(path.join(fixture.repo, "apps", "agent-service", "package.json"), "NOT_JSON{{{");
+  const plan = runPlanner(fixture, SHA_A, SHA_B, impactEnv(fixture, "M\tapps/agent-service/src/core/foo.ts"));
+  assert.equal(plan.MODE, "full_fallback");
+  assert.match(plan.FALLBACK_REASON, /malformed_package_metadata/);
+  assert.equal(plan.BUILD, CANONICAL_ORDER);
+});
+
+test("W4 unknown local package target falls back to full_fallback", () => {
+  const fixture = createFixture();
+  const pkgPath = path.join(fixture.repo, "apps", "sandbox-v2", "package.json");
+  const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
+  pkg.dependencies["@composer-assistant/unknown-dep"] = "file:../unknown-dep";
+  writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
+
+  const plan = runPlanner(fixture, SHA_A, SHA_B, impactEnv(fixture, "M\tapps/sandbox-v2/src/dispatch.ts"));
+  assert.equal(plan.MODE, "full_fallback");
+  assert.match(plan.FALLBACK_REASON, /unknown_local_package_target/);
+  assert.equal(plan.BUILD, CANONICAL_ORDER);
+});
+
+test("W5 escaping local dependency path falls back to full_fallback", () => {
+  const fixture = createFixture();
+  const pkgPath = path.join(fixture.repo, "apps", "sandbox-v2", "package.json");
+  const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
+  pkg.dependencies["@composer-assistant/escaping"] = "file:../../../../etc/passwd";
+  writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
+
+  const plan = runPlanner(fixture, SHA_A, SHA_B, impactEnv(fixture, "M\tapps/sandbox-v2/src/dispatch.ts"));
+  assert.equal(plan.MODE, "full_fallback");
+  assert.match(plan.FALLBACK_REASON, /escaping_or_ambiguous_dependency_path/);
+  assert.equal(plan.BUILD, CANONICAL_ORDER);
+});
+
+test("W6 dependency cycle or topology violation falls back to full_fallback", () => {
+  const fixture = createFixture();
+  // sandbox-policy is earlier than sandbox-v2; introducing policy -> v2 is backward/cycle
+  const pkgPath = path.join(fixture.repo, "apps", "sandbox-policy", "package.json");
+  const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
+  pkg.dependencies = {
+    ...(pkg.dependencies || {}),
+    "@composer-assistant/sandbox-v2": "file:../sandbox-v2",
+  };
+  writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
+
+  const plan = runPlanner(fixture, SHA_A, SHA_B, impactEnv(fixture, "M\tapps/sandbox-policy/src/policy.ts"));
+  assert.equal(plan.MODE, "full_fallback");
+  assert.match(plan.FALLBACK_REASON, /dependency_cycle_or_topology_violation/);
+  assert.equal(plan.BUILD, CANONICAL_ORDER);
+});
+
+test("W7 agent deploy fences Discord ingress: strict stop/start/ready order verified", () => {
+  const fixture = createFixture();
+  const { result, markerPath } = runImpactedUpdate(fixture, SHA_A, "M\tapps/agent-service/src/core/foo.ts");
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+
+  // Build/ci counts: only agent-service built, 0 npm ci, discord NOT rebuilt
+  assert.deepEqual(buildPackages(fixture), ["agent-service"]);
+  assert.deepEqual(ciPackages(fixture), []);
+
+  const lines = commands(fixture);
+  const stopDiscordAt = firstIndex(lines, "stop ashley-discord.service");
+  const stopAgentAt = firstIndex(lines, "stop ashley-agent.service");
+  const buildAgentAt = lines.findIndex((line) => line.includes("npm run build") && line.includes("agent-service"));
+  const startAgentAt = firstIndex(lines, "start ashley-agent.service");
+  const readyHealthAt = firstIndex(lines, "curl ");
+  const startDiscordAt = firstIndex(lines, "start ashley-discord.service");
+
+  // Strict ordering assertions
+  assert.ok(stopDiscordAt >= 0, "discord stop executed");
+  assert.ok(stopAgentAt > stopDiscordAt, "discord stopped before agent");
+  assert.ok(buildAgentAt > stopAgentAt, "agent built while stopped");
+  assert.ok(startAgentAt > buildAgentAt, "agent started after build");
+  assert.ok(readyHealthAt > startAgentAt, "agent health checked after agent start");
+  assert.ok(startDiscordAt > readyHealthAt, "discord started only after agent ready");
+
+  assert.equal(readMarker(markerPath), SHA_B);
+});
+
+test("W8 discord-only deploy leaves agent running undisturbed", () => {
+  const fixture = createFixture();
+  const { result, markerPath } = runImpactedUpdate(fixture, SHA_A, "M\tapps/discord-bot/src/client.ts");
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+
+  // Discord built, agent NOT built
+  assert.deepEqual(buildPackages(fixture), ["discord-bot"]);
+
+  // Agent was NEVER stopped, started, or restarted
+  assert.equal(hasServiceOp(fixture, "stop", "ashley-agent.service"), false, "agent must not stop");
+  assert.equal(hasServiceOp(fixture, "start", "ashley-agent.service"), false, "agent must not start");
+  assert.equal(hasServiceOp(fixture, "restart", "ashley-agent.service"), false, "agent must not restart");
+
+  // Discord stopped and started
+  assert.equal(hasServiceOp(fixture, "stop", "ashley-discord.service"), true);
+  assert.equal(hasServiceOp(fixture, "start", "ashley-discord.service"), true);
+
+  assert.equal(readMarker(markerPath), SHA_B);
+});
+

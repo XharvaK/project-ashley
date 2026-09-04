@@ -46,27 +46,25 @@ set -euo pipefail
 
 CANONICAL_ORDER="sandbox-policy sandbox-m1 sandbox-tree sandbox-broker sandbox-v2 agent-service discord-bot"
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+NODE_BIN="${NODE_BIN:-node}"
+
 # Every fallback preserves the historical broad behavior exactly: all seven
 # packages with fresh installs (metadata unprovable), both services stopped
 # before the in-place build and restarted after. UNKNOWN != SAFE_TO_SKIP.
+# STOP order is discord before agent (ingress fence).
 print_fallback() {
   local reason="$1" base="$2" target="$3"
-  printf 'MODE=full_fallback\nFALLBACK_REASON=%s\nBASE=%s\nTARGET=%s\nCHANGED_COUNT=unknown\nBUILD=%s\nNPMCI=%s\nSTOP=ashley-agent.service ashley-discord.service\nRESTART=ashley-agent.service ashley-discord.service\n' \
+  printf 'MODE=full_fallback\nFALLBACK_REASON=%s\nBASE=%s\nTARGET=%s\nCHANGED_COUNT=unknown\nBUILD=%s\nNPMCI=%s\nSTOP=ashley-discord.service ashley-agent.service\nRESTART=ashley-agent.service ashley-discord.service\n' \
     "$reason" "$base" "$target" "$CANONICAL_ORDER" "$CANONICAL_ORDER"
 }
 
-# Reverse build dependents (transitive closure seeds): which packages must also
-# rebuild when the key package's dist changes.
+# Reverse build dependents dynamically derived from target package metadata.
 reverse_deps() {
-  case "$1" in
-    sandbox-policy) printf 'sandbox-tree sandbox-broker sandbox-v2 agent-service' ;;
-    sandbox-m1) printf 'sandbox-v2 agent-service' ;;
-    sandbox-tree) printf 'sandbox-broker sandbox-v2 agent-service' ;;
-    sandbox-broker) printf 'agent-service' ;;
-    sandbox-v2) printf 'agent-service' ;;
-    agent-service) printf '' ;;
-    discord-bot) printf '' ;;
-  esac
+  local p="$1"
+  local var="REV_${p//-/_}"
+  printf '%s' "${!var:-}"
 }
 
 is_test_path() {
@@ -199,6 +197,20 @@ main() {
     return 0
   fi
 
+  # Dynamically derive reverse dependencies and mechanically audit metadata completeness.
+  local graph_out graph_status=0
+  graph_out="$("$NODE_BIN" "${SCRIPT_DIR}/derive-graph.mjs" "$ROOT" 2>&1)" || graph_status=$?
+  if [[ "$graph_status" -ne 0 ]]; then
+    local reason
+    reason="$(printf '%s\n' "$graph_out" | grep '^FALLBACK_REASON=' | head -n1 | cut -d= -f2-)"
+    if [[ -z "$reason" ]]; then
+      reason="graph_derivation_failed:$(printf '%s\n' "$graph_out" | head -n1)"
+    fi
+    print_fallback "$reason" "$base" "$target"
+    return 0
+  fi
+  eval "$graph_out"
+
   # Transitive build closure over reverse dependents.
   local closure="$seeds" prev="" dep r
   while [[ "$closure" != "$prev" ]]; do
@@ -240,12 +252,19 @@ main() {
   if [[ "$discord_in_closure" == "1" ]]; then need_discord_restart=1; fi
 
   local stop="" restart=""
-  if [[ "$agent_in_closure" == "1" ]]; then stop="$stop ashley-agent.service"; fi
-  if [[ "$discord_in_closure" == "1" ]]; then stop="$stop ashley-discord.service"; fi
-  if [[ "$need_agent_restart" == "1" ]]; then restart="$restart ashley-agent.service"; fi
-  if [[ "$need_discord_restart" == "1" ]]; then restart="$restart ashley-discord.service"; fi
-  stop="${stop# }"
-  restart="${restart# }"
+  if [[ "$need_agent_restart" == "1" ]]; then
+    # Whenever agent restart is required, ashley-discord.service acts as the ingress fence.
+    # STOP order: discord before agent.
+    # RESTART order: agent before discord.
+    stop="ashley-discord.service ashley-agent.service"
+    restart="ashley-agent.service ashley-discord.service"
+  elif [[ "$need_discord_restart" == "1" ]]; then
+    # Discord-only change leaves agent live.
+    if [[ "$discord_in_closure" == "1" ]]; then
+      stop="ashley-discord.service"
+    fi
+    restart="ashley-discord.service"
+  fi
 
   printf 'MODE=impact_aware\nFALLBACK_REASON=none\nBASE=%s\nTARGET=%s\nCHANGED_COUNT=%s\nBUILD=%s\nNPMCI=%s\nSTOP=%s\nRESTART=%s\n' \
     "$base" "$target" "$changed_count" "$build" "$npmci" "$stop" "$restart"
