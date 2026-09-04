@@ -38,6 +38,10 @@ import {
   buildDomainPointers,
   type DomainPointersSection,
 } from "./domain-pointers.js";
+import {
+  adaptC3Experiences,
+  type C3ExperienceAdapterResult,
+} from "./c3-adapter.js";
 
 export type BuildThoughtInputOptions = {
   sidecar: DatabaseSync;
@@ -62,6 +66,8 @@ export type BuildThoughtInputOptions = {
   /** Optional precomputed C2 sections for deterministic recovery/test seams. */
   orientationKernel?: IdentityOrientationKernel;
   domainPointers?: DomainPointersSection;
+  c3Experiences?: C3ExperienceAdapterResult;
+  c3AdapterEnabled?: boolean;
   staticOperatingContract?: string;
   stableSelfBound?: number;
 };
@@ -69,6 +75,7 @@ export type BuildThoughtInputOptions = {
 export type ThoughtInputWithC2 = ThoughtInput & {
   orientationKernel: IdentityOrientationKernel;
   domainPointers: DomainPointersSection;
+  c3Experiences: C3ExperienceAdapterResult;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -252,6 +259,16 @@ export function buildThoughtInput(options: BuildThoughtInputOptions): ThoughtInp
     options.cycle.conversationId,
     options.cycle.cycleId,
   );
+  const c3Experiences = options.c3Experiences ?? adaptC3Experiences(
+    options.sidecar,
+    options.cycle.conversationId,
+    {
+      cycleId: options.cycle.cycleId,
+      generation: options.cycle.generation,
+      obligationFrontierId: activeFrontier?.frontierId,
+      enabled: options.c3AdapterEnabled,
+    },
+  );
   const triggerText = options.triggerText ?? options.cycle.triggerRef;
   const query = buildRetrievalQuery({
     triggerText,
@@ -307,5 +324,6 @@ export function buildThoughtInput(options: BuildThoughtInputOptions): ThoughtInp
     rememberDirective: options.rememberDirective ?? null,
     orientationKernel,
     domainPointers,
+    c3Experiences,
   };
 }

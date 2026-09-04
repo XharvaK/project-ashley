@@ -13,6 +13,7 @@ import type {
 } from "../../types.js";
 import type { DomainPointersSection } from "../domain-pointers.js";
 import type { IdentityOrientationKernel } from "../orientation-kernel.js";
+import type { C3ExperienceAdapterResult } from "../c3-adapter.js";
 import {
   createContinuityCandidate,
   type ContinuityCandidate,
@@ -36,6 +37,7 @@ export type AllocationSectionId =
   | "capability"
   | "observations"
   | "retrieval_compact"
+  | "c3_terminal_experiences"
   | "in_flight_receipt"
   | "authority_objections"
   | "remember_directive";
@@ -81,6 +83,7 @@ export function allocationTokenComponent(
   if (section === "occupancy_compact") return "domain_pointer_tokens";
   if (section === "learned_self") return "learned_self_tokens";
   if (section === "retrieval_compact") return "retrieval_tokens";
+  if (section === "c3_terminal_experiences") return "domain_pointer_tokens";
   if (section === "observations") return "observations_tokens";
   if (section === "in_flight_receipt") return "in_flight_effect_tokens";
   return "authority_revision_feedback_tokens";
@@ -95,6 +98,7 @@ export function buildAllocationCandidates(
   const c2Input = input as ThoughtInput & {
     orientationKernel?: IdentityOrientationKernel;
     domainPointers?: DomainPointersSection;
+    c3Experiences?: C3ExperienceAdapterResult;
   };
 
   // The orientation kernel is the first required C2 section. It contains the
@@ -187,6 +191,20 @@ export function buildAllocationCandidates(
       required: true,
       priority: 8,
       data: c2Input.domainPointers,
+    });
+  }
+
+  if (c2Input.c3Experiences && c2Input.c3Experiences.candidates.length > 0) {
+    candidates.push({
+      id: "c3_terminal_experiences",
+      section: "c3_terminal_experiences",
+      required: false,
+      priority: 18,
+      data: {
+        version: 1 as const,
+        candidates: c2Input.c3Experiences.candidates,
+      },
+      evidenceRefs: c2Input.c3Experiences.coverage.evidence_refs,
     });
   }
 
@@ -312,7 +330,7 @@ export function buildAllocationCandidates(
 
   return candidates.map((candidate) => {
     const canonicalStore = canonicalStoreFor(candidate.section);
-    const evidenceRefs = evidenceRefsFor(candidate.data);
+    const evidenceRefs = candidate.evidenceRefs ?? evidenceRefsFor(candidate.data);
     const sourceLineageId = sourceLineageFor(candidate.data) ??
       input.rawConversation[0]?.lineageId ?? `unbound:${input.cycleId}`;
     const entityId = candidate.ref ?? candidate.id;
@@ -350,6 +368,7 @@ function canonicalStoreFor(section: AllocationSectionId): string {
     return "sidecar_memory_assertions";
   }
   if (section === "observations") return "observation_artifacts";
+  if (section === "c3_terminal_experiences") return "cognitive-v021.db:c3_terminal_experiences";
   if (section === "in_flight_receipt") return "effect_receipts";
   return "authority_revision_feedback";
 }
@@ -364,7 +383,7 @@ function sourceLineageFor(value: unknown): string | undefined {
   }
   if (typeof value !== "object" || value === null) return undefined;
   const record = value as Record<string, unknown>;
-  for (const key of ["sourceLineageId", "lineageId", "evidenceLineageId"]) {
+  for (const key of ["sourceLineageId", "lineageId", "evidenceLineageId", "sourceCurrentnessRef"]) {
     if (typeof record[key] === "string" && record[key].trim() !== "") return record[key];
   }
   return undefined;
@@ -381,6 +400,27 @@ function evidenceRefsFor(value: unknown): readonly string[] {
     const record = item as Record<string, unknown>;
     for (const key of ["rowId", "id", "ref", "effectRef"]) {
       if (typeof record[key] === "string" && record[key].trim() !== "") refs.add(record[key]);
+    }
+    if (Array.isArray(record.evidenceRefs)) {
+      for (const ref of record.evidenceRefs) {
+        if (typeof ref === "string" && ref.trim() !== "") refs.add(ref);
+      }
+    }
+    if (typeof record.rawEvidenceRefsJson === "string") {
+      try {
+        const raw = JSON.parse(record.rawEvidenceRefsJson) as unknown;
+        if (Array.isArray(raw)) {
+          for (const ref of raw) {
+            if (typeof ref !== "object" || ref === null) continue;
+            const item = ref as Record<string, unknown>;
+            if (typeof item.kind === "string" && typeof item.id === "string") {
+              refs.add(`${item.kind}:${item.id}`);
+            }
+          }
+        }
+      } catch {
+        // The C3 adapter validates this field before it reaches allocation.
+      }
     }
     if (Array.isArray(record.sourceTurnIds)) {
       for (const ref of record.sourceTurnIds) {

@@ -26,9 +26,17 @@ import {
   type AllocationCandidate,
 } from "./sections.js";
 import type { AllocationReceipt, AllocationTokenBreakdown } from "./receipt.js";
-import { buildAllocationCoverageManifest } from "../coverage-manifest.js";
+import {
+  buildAllocationCoverageManifest,
+  COVERAGE_DISPOSITIONS,
+  type CoverageManifest,
+} from "../coverage-manifest.js";
 import { recordAllocationReceipt, recordDiagnostic } from "../diagnostics.js";
 import { mintEffectRef } from "../../effect/effect-ref.js";
+import type {
+  C3ExperienceAdapterResult,
+  C3ExperienceCandidate,
+} from "../c3-adapter.js";
 import {
   formatThoughtStructuralCorrectionData,
   formatThoughtStructuralFeedback,
@@ -97,7 +105,12 @@ export type AllocateThoughtProjectionOptions = {
 
 export type AllocatedThoughtProjection = {
   messages: ChatMessage[];
-  projected: ProjectedThoughtInput;
+  projected: ProjectedThoughtInput & {
+    c3Experiences?: {
+      version: 1;
+      candidates: readonly C3ExperienceCandidate[];
+    };
+  };
   provenance: Map<string, RetrievalHit>;
   receipt: AllocationReceipt;
   hashes: {
@@ -105,6 +118,24 @@ export type AllocatedThoughtProjection = {
     dispatchMessagesHash: string;
   };
 };
+
+function mergeCoverageManifests(
+  base: CoverageManifest,
+  additional: CoverageManifest | undefined,
+): CoverageManifest {
+  if (!additional) return base;
+  const domains = Object.freeze([...base.domains, ...additional.domains]);
+  const dispositionCounts = Object.fromEntries(
+    COVERAGE_DISPOSITIONS.map((disposition) => [disposition, 0]),
+  ) as Record<(typeof COVERAGE_DISPOSITIONS)[number], number>;
+  for (const domain of domains) dispositionCounts[domain.disposition] += 1;
+  return Object.freeze({
+    version: 1 as const,
+    domains,
+    entries: domains,
+    dispositionCounts: Object.freeze(dispositionCounts),
+  });
+}
 
 export function allocateThoughtProjection(
   opts: AllocateThoughtProjectionOptions,
@@ -136,11 +167,13 @@ export function allocateThoughtProjection(
   const retrievalHitsIncluded: CompactRetrievalEvidence[] = [];
   let orientationKernelIncluded = false;
   let domainPointersIncluded = false;
+  let c3ExperiencesIncluded = false;
   let compression = false;
 
   const c2Input = input as ThoughtInput & {
     orientationKernel?: ProjectedThoughtInput["orientationKernel"];
     domainPointers?: ProjectedThoughtInput["domainPointers"];
+    c3Experiences?: C3ExperienceAdapterResult;
   };
 
   function renderTentative(
@@ -148,7 +181,13 @@ export function allocateThoughtProjection(
     retrieval: CompactRetrievalEvidence[],
     includeOrientationKernel = orientationKernelIncluded,
     includeDomainPointers = domainPointersIncluded,
-  ): ProjectedThoughtInput {
+    includeC3Experiences = c3ExperiencesIncluded,
+  ): ProjectedThoughtInput & {
+    c3Experiences?: {
+      version: 1;
+      candidates: readonly C3ExperienceCandidate[];
+    };
+  } {
     const isMiss = input.retrieval.state === "ready" && retrieval.length === 0;
     return {
       cycleId: input.cycleId,
@@ -185,6 +224,14 @@ export function allocateThoughtProjection(
       ...(includeDomainPointers && c2Input.domainPointers !== undefined
         ? { domainPointers: c2Input.domainPointers }
         : {}),
+      ...(includeC3Experiences && c2Input.c3Experiences !== undefined
+        ? {
+            c3Experiences: {
+              version: 1 as const,
+              candidates: c2Input.c3Experiences.candidates,
+            },
+          }
+        : {}),
     };
   }
 
@@ -194,6 +241,7 @@ export function allocateThoughtProjection(
     let tentativeRetrieval = retrievalHitsIncluded;
     let tentativeOrientationKernel = orientationKernelIncluded;
     let tentativeDomainPointers = domainPointersIncluded;
+    let tentativeC3Experiences = c3ExperiencesIncluded;
 
     if (candidate.section.startsWith("working_context")) {
       tentativeWc = [...workingContextIncluded, candidate.data as WorkingContextItem];
@@ -203,6 +251,8 @@ export function allocateThoughtProjection(
       tentativeOrientationKernel = true;
     } else if (candidate.section === "domain_pointers") {
       tentativeDomainPointers = true;
+    } else if (candidate.section === "c3_terminal_experiences") {
+      tentativeC3Experiences = true;
     }
 
     const tentativeProjected = renderTentative(
@@ -210,6 +260,7 @@ export function allocateThoughtProjection(
       tentativeRetrieval,
       tentativeOrientationKernel,
       tentativeDomainPointers,
+      tentativeC3Experiences,
     );
     const tentativeMessages = thoughtMessagesForProjection(
       tentativeProjected,
@@ -232,6 +283,8 @@ export function allocateThoughtProjection(
         orientationKernelIncluded = true;
       } else if (candidate.section === "domain_pointers") {
         domainPointersIncluded = true;
+      } else if (candidate.section === "c3_terminal_experiences") {
+        c3ExperiencesIncluded = true;
       }
     } else {
       // Exceeds TPM budget
@@ -262,6 +315,7 @@ export function allocateThoughtProjection(
     retrievalHitsIncluded,
     orientationKernelIncluded,
     domainPointersIncluded,
+    c3ExperiencesIncluded,
   );
   const finalMessages = thoughtMessagesForProjection(finalProjected, opts.structuralFeedback);
   const finalEstimate = estimateRequestTokens(finalMessages, {
@@ -300,10 +354,10 @@ export function allocateThoughtProjection(
     required_overflow_count: 0,
   };
 
-  const coverageManifest = buildAllocationCoverageManifest({
+  const coverageManifest = mergeCoverageManifests(buildAllocationCoverageManifest({
     included: includedCandidates,
     omitted: omittedCandidateData,
-  });
+  }), c2Input.c3Experiences?.coverageManifest);
 
   const semanticProjectionHash = computeSemanticProjectionHash(finalProjected);
   const dispatchMessagesHash = computeDispatchMessagesHash(finalMessages);
