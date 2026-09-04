@@ -18,6 +18,7 @@ import { appendMemorySupport } from "./supports.js";
 import { REDACTED_MEMORY_STATEMENT, upsertMemoryAssertion } from "./assertions.js";
 import { notifySidecarPostCommit } from "../retrieval/derived-store.js";
 import { hasStructuredCurrentnessEntitlement } from "../authority/check.js";
+import { FROZEN_AUTOMATIC_ADMISSION_ALLOWLIST } from "./admission-allowlist.js";
 
 type DbRow = Record<string, unknown>;
 
@@ -47,9 +48,14 @@ export type AdmissionTickResult = {
   results: AdmissionResult[];
 };
 
-type AdmissionOptions = {
+export type AdmissionOptions = {
   nowMs?: number;
   nominationIds?: string[];
+  limit?: number;
+  /** Restrict a worker scan to explicitly governed MemoryKinds. */
+  allowedKinds?: readonly import("../types.js").MemoryKind[];
+  /** Alias for callers that use the retrieval vocabulary. */
+  memoryKinds?: readonly import("../types.js").MemoryKind[];
 };
 
 function text(value: unknown, fallback = ""): string {
@@ -308,7 +314,12 @@ export function tickAdmission(
   options: AdmissionOptions = {},
 ): AdmissionTickResult {
   const nowMs = options.nowMs ?? Date.now();
-  const selected = listDurableNominations(db, { admitted: false })
+  const selected = listDurableNominations(db, {
+    admitted: false,
+    limit: options.limit,
+    allowedKinds: options.allowedKinds,
+    memoryKinds: options.memoryKinds,
+  })
     .filter((nomination) => options.nominationIds == null || options.nominationIds.includes(nomination.nominationId));
   const result: AdmissionTickResult = {
     considered: selected.length,
@@ -358,6 +369,27 @@ export function tickAdmission(
     // Derived sync failures must never disturb authoritative sidecar commit
   }
   return result;
+}
+
+export type GovernedAdmissionCatchupOptions = {
+  nowMs?: number;
+  nominationIds?: string[];
+  limit?: number;
+};
+
+/**
+ * Bounded lifecycle/startup catch-up. The allowlist is fixed in source and is
+ * always supplied to the admission selector, so unrelated durable kinds stay
+ * pending instead of being repeatedly scanned or minted as assertions.
+ */
+export function runGovernedAdmissionCatchup(
+  db: DatabaseSync,
+  options: GovernedAdmissionCatchupOptions = {},
+): AdmissionTickResult {
+  return tickAdmission(db, {
+    ...options,
+    allowedKinds: FROZEN_AUTOMATIC_ADMISSION_ALLOWLIST,
+  });
 }
 
 export type AdmitOwnerSuppliedClaimInput = {

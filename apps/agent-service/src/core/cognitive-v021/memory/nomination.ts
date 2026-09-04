@@ -183,12 +183,33 @@ export function getDurableNomination(
 
 export function listDurableNominations(
   db: DatabaseSync,
-  options: { admitted?: boolean; limit?: number } = {},
+  options: {
+    admitted?: boolean;
+    limit?: number;
+    allowedKinds?: readonly MemoryKind[];
+    /** Alias for callers that use the retrieval vocabulary. */
+    memoryKinds?: readonly MemoryKind[];
+  } = {},
 ): DurableNominationRecord[] {
   const limit = Math.max(1, Math.min(10_000, options.limit ?? 10_000));
-  const rows = options.admitted == null
-    ? db.prepare("SELECT * FROM durable_nominations ORDER BY generation ASC, nomination_id ASC LIMIT ?").all(limit)
-    : db.prepare("SELECT * FROM durable_nominations WHERE admitted = ? ORDER BY generation ASC, nomination_id ASC LIMIT ?").all(options.admitted ? 1 : 0, limit);
+  const allowedKinds = options.allowedKinds ?? options.memoryKinds;
+  const conditions: string[] = [];
+  const args: Array<string | number> = [];
+  if (options.admitted != null) {
+    conditions.push("admitted = ?");
+    args.push(options.admitted ? 1 : 0);
+  }
+  if (allowedKinds !== undefined) {
+    if (allowedKinds.length === 0) return [];
+    conditions.push(`memory_kind IN (${allowedKinds.map(() => "?").join(",")})`);
+    args.push(...allowedKinds);
+  }
+  args.push(limit);
+  const rows = db.prepare(
+    `SELECT * FROM durable_nominations
+      ${conditions.length ? `WHERE ${conditions.join(" AND ")}` : ""}
+     ORDER BY generation ASC, nomination_id ASC LIMIT ?`,
+  ).all(...args);
   return rows.map(mapNomination).filter((row): row is DurableNominationRecord => row !== null);
 }
 

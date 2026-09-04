@@ -81,7 +81,7 @@ import {
 import { validateThoughtSettlementDraft } from "../settlement/validate.js";
 import { getPublishedSettlementIdentity, publishSemanticTransaction } from "../settlement/publish.js";
 import { getWake } from "../wake/ledger.js";
-import { admitOwnerSuppliedClaim } from "../memory/admission.js";
+import { admitOwnerSuppliedClaim, runGovernedAdmissionCatchup } from "../memory/admission.js";
 import { hasStructuredCurrentnessEntitlement } from "../authority/check.js";
 import { recordDiagnostic, recordThoughtCycleMetrics } from "./diagnostics.js";
 import { metadataFromError } from "../../model-fabric/receipts.js";
@@ -1058,6 +1058,15 @@ export async function runCognitiveCycle(
 ): Promise<KernelRunResult> {
   const payload = payloadRecord(event);
   const directive = rememberDirective(payload);
+  // Recovery/turn preflight is bounded and allowlist-gated. Admission errors
+  // remain fail-soft: the durable nomination is retried on the next cycle.
+  if (deps.origin !== "shadow") {
+    try {
+      runGovernedAdmissionCatchup(sidecar, { nowMs: deps.nowMs(), limit: 64 });
+    } catch {
+      // The authoritative nomination remains durable and unadmitted.
+    }
+  }
   const requestedCycleId = typeof payload.cycleId === "string" ? payload.cycleId : null;
   const wake = getWake(sidecar, event.wakeId);
   if (!wake) throw new Error("wake_missing");
@@ -1564,6 +1573,18 @@ export async function runCognitiveCycle(
     if (!publication.published) {
       counters = getThoughtAttemptCounters(sidecar, cycle.cycleId, cycle.generation);
       return resultWithCounters(cycle.cycleId, cycle.generation, null, counters);
+    }
+    if (deps.origin !== "shadow" && settlement.durableNominations.length > 0) {
+      try {
+        runGovernedAdmissionCatchup(sidecar, {
+          nowMs: deps.nowMs(),
+          nominationIds: settlement.durableNominations.map((nomination) => nomination.nominationId),
+          limit: settlement.durableNominations.length,
+        });
+      } catch {
+        // Publication is authoritative. A transient admission failure is
+        // recovered by the next bounded lifecycle catch-up.
+      }
     }
     if (publication.outboxId !== null) await deps.projectOutbox(publication.outboxId);
     if (directive && deps.origin !== "shadow") {
