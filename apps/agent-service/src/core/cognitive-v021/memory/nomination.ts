@@ -22,6 +22,7 @@ import type {
   EpistemicDimensions,
   RememberDirective,
 } from "../types.js";
+import { isMemoryKind } from "./kinds.js";
 
 type DbRow = Record<string, unknown>;
 
@@ -51,19 +52,8 @@ function json(value: unknown, fallback: unknown): unknown {
   }
 }
 
-const MEMORY_KINDS = new Set<MemoryKind>([
-  "owner_preference",
-  "owner_self_description",
-  "owner_goal",
-  "owner_world_claim",
-  "project_knowledge",
-  "commitment",
-  "relational_boundary",
-  "shared_episode",
-  "open_question",
-  "ashley_interpretation",
-  "learned_self_evidence",
-]);
+// Canonical 11-member set lives in ./kinds.ts. This module keeps the final
+// publication fence but must not duplicate or alias the value set.
 
 function dimensions(value: unknown): EpistemicDimensions {
   const parsed = typeof value === "string" ? json(value, null) : value;
@@ -81,7 +71,7 @@ function classification(value: unknown): DataClassification {
 function mapNomination(value: unknown): DurableNominationRecord | null {
   if (!isRow(value)) return null;
   const memoryKind = text(value.memory_kind) as MemoryKind;
-  if (!MEMORY_KINDS.has(memoryKind)) return null;
+  if (!isMemoryKind(memoryKind)) return null;
   let parsedDimensions: EpistemicDimensions;
   try {
     parsedDimensions = dimensions(value.dimensions_json);
@@ -116,7 +106,7 @@ function assertSafeNomination(nomination: DurableNomination): void {
   if (!nomination.cycleId.trim()) throw new Error("nomination_cycle_id_required");
   if (!nomination.assertionKey.trim()) throw new Error("nomination_assertion_key_required");
   if (!nomination.statement.trim()) throw new Error("nomination_statement_required");
-  if (!MEMORY_KINDS.has(nomination.memoryKind)) throw new Error("nomination_memory_kind_invalid");
+  if (!isMemoryKind(nomination.memoryKind)) throw new Error("nomination_memory_kind_invalid");
   if (nomination.dataClassification === "secret" || detectCredentialShape(nomination.statement).hit) {
     throw new Error("secret_nomination_forbidden");
   }

@@ -12,6 +12,7 @@ import type {
   MemoryAssertion,
   MemoryKind,
 } from "../types.js";
+import { isMemoryKind } from "./kinds.js";
 import { CREDENTIAL_OMITTED_PLACEHOLDER } from "../../privacy/secrets.js";
 import { notifySidecarPostCommit } from "../retrieval/derived-store.js";
 
@@ -19,19 +20,8 @@ type DbRow = Record<string, unknown>;
 
 export const REDACTED_MEMORY_STATEMENT = "[redacted]" as const;
 
-const MEMORY_KINDS = new Set<MemoryKind>([
-  "owner_preference",
-  "owner_self_description",
-  "owner_goal",
-  "owner_world_claim",
-  "project_knowledge",
-  "commitment",
-  "relational_boundary",
-  "shared_episode",
-  "open_question",
-  "ashley_interpretation",
-  "learned_self_evidence",
-]);
+// Canonical 11-member set lives in ./kinds.ts. This module keeps the
+// assertion fence but must not duplicate or alias the value set.
 
 function isRow(value: unknown): value is DbRow {
   return typeof value === "object" && value !== null;
@@ -61,7 +51,7 @@ function mapAssertion(value: unknown): MemoryAssertion | null {
   if (!isRow(value)) return null;
   const kind = text(value.memory_kind) as MemoryKind;
   const dimensions = json(value.dimensions_json);
-  if (!MEMORY_KINDS.has(kind) || !dimensions || typeof value.assertion_key !== "string") return null;
+  if (!isMemoryKind(kind) || !dimensions || typeof value.assertion_key !== "string") return null;
   return {
     assertionKey: text(value.assertion_key),
     statement: text(value.statement),
@@ -103,7 +93,7 @@ export type UpsertMemoryAssertionInput = {
 function assertWritable(input: UpsertMemoryAssertionInput): void {
   if (!input.assertionKey.trim()) throw new Error("memory_assertion_key_required");
   if (!input.statement.trim()) throw new Error("memory_assertion_statement_required");
-  if (!MEMORY_KINDS.has(input.memoryKind)) throw new Error("memory_assertion_kind_invalid");
+  if (!isMemoryKind(input.memoryKind)) throw new Error("memory_assertion_kind_invalid");
   if (input.dataClassification === "secret" &&
       input.statement !== CREDENTIAL_OMITTED_PLACEHOLDER &&
       input.statement !== REDACTED_MEMORY_STATEMENT) {

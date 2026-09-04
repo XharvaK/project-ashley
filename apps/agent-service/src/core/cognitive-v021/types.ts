@@ -684,7 +684,7 @@ export type SubscriptionSemanticDelta =
 export type ThoughtDurableNomination = {
   alias: LocalAlias;
   statement: string;
-  memoryKind: string;
+  memoryKind: MemoryKind;
   dimensions: EpistemicDimensions;
   dataClassification: DataClassification;
   sourceRefs: readonly ExistingRef[];

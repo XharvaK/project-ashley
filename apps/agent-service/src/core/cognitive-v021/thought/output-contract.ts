@@ -3,6 +3,7 @@ import {
   THOUGHT_OUTPUT_SCHEMA_ID,
 } from "../../model-fabric/dispatch-contract.js";
 import { sha256 } from "../../model-fabric/hash.js";
+import { MEMORY_KINDS } from "../memory/kinds.js";
 import type {
   StructuredOutputRequest,
   StructuredOutputSchemaFingerprint,
@@ -112,7 +113,7 @@ const subscriptionDeltaSchema = { oneOf: [
   strictObject({ op: { const: "cancel" }, target: existingRefSchema }, ["op", "target"]),
 ] };
 const nominationSchema = strictObject({
-  alias: localAliasSchema, statement: { type: "string" }, memoryKind: { type: "string" }, dimensions: dimensionsSchema,
+  alias: localAliasSchema, statement: { type: "string" }, memoryKind: { enum: [...MEMORY_KINDS] }, dimensions: dimensionsSchema,
   dataClassification: { enum: ["ordinary", "sensitive", "never_public", "secret"] }, sourceRefs: stringArraySchema,
   supersedesRef: { oneOf: [existingRefSchema, { type: "null" }] }, concernRef: nullableSemanticRefSchema,
 }, ["alias", "statement", "memoryKind", "dimensions", "dataClassification", "sourceRefs", "supersedesRef", "concernRef"]);

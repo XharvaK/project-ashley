@@ -21,6 +21,7 @@ import type {
   WorkingContextItemSemantic,
   WorkingContextSemanticDelta,
 } from "../types.js";
+import { isMemoryKind } from "../memory/kinds.js";
 
 export type ThoughtSemanticParseFailureCode =
   | "invalid_json"
@@ -265,7 +266,11 @@ function validSubscriptionDelta(value: unknown, allowlist: ReadonlySet<string>):
 
 function validNomination(value: unknown, allowlist: ReadonlySet<string>): value is ThoughtDurableNomination {
   const record = exactRecord(value, ["alias", "statement", "memoryKind", "dimensions", "dataClassification", "sourceRefs", "supersedesRef", "concernRef"]);
-  return !!record && localAlias(record.alias) && typeof record.statement === "string" && typeof record.memoryKind === "string"
+  // Structural Thought boundary: MemoryKind is Thought-authored semantic output
+  // but host-constrained to the canonical enum. Non-members (e.g.
+  // "self_reflection") are rejected here so the existing bounded structural
+  // retry receives the failure. No host aliasing, mapping, or filtering.
+  return !!record && localAlias(record.alias) && typeof record.statement === "string" && isMemoryKind(record.memoryKind)
     && validEpistemicDimensions(record.dimensions) && ["ordinary", "sensitive", "never_public", "secret"].includes(record.dataClassification as string)
     && refArray(record.sourceRefs, allowlist) && (record.supersedesRef === null || existingRef(record.supersedesRef, allowlist))
     && validSemanticRefField(record.concernRef, allowlist);

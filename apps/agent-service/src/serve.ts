@@ -31,6 +31,7 @@ import { runPerceptionBeforeThought } from "./core/cognitive-v021/perception/ada
 import { createOutboxProjector } from "./core/cognitive-v021/delivery/outbox-projector.js";
 import { startInboxConsumer, type InboxConsumerHandle, type InboxConsumerHandler } from "./core/cognitive-v021/cycle/inbox-consumer.js";
 import { reconcileStartupOwnership } from "./core/cognitive-v021/cycle/reconcile.js";
+import { reconcileStrandedOutcomeUnknownAtStartup } from "./core/cognitive-v021/retry/startup-outcome-recovery.js";
 import { startFrontierCoordinator, type FrontierCoordinatorHandle } from "./core/cognitive-v021/frontier/index.js";
 import {
   classifyInitiativeClass,
@@ -133,6 +134,12 @@ export async function serveAgent(manager: AgentManager): Promise<void> {
     };
     manager.configureCognitiveDispatch({ deps, projector });
     reconcileStartupOwnership(cognitiveSidecar);
+    // Durable-work outcome reconciliation owns stranded outcome-unknown work.
+    // It runs after cycle ownership reconciliation and before the inbox
+    // consumer begins, so Gen15-like reconciling work can become pending only
+    // through proof-gated durable-work authority. cycle/reconcile never calls
+    // reconcileOutcomeUnknown.
+    reconcileStrandedOutcomeUnknownAtStartup(cognitiveSidecar, { nowMs: Date.now() });
     cognitiveConsumer = startInboxConsumer(cognitiveSidecar, {
       workerId: `agent-service:${process.pid}`,
       handler: createAgentInboxConsumerHandler(manager),
