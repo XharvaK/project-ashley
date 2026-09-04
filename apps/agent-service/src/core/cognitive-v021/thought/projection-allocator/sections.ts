@@ -11,6 +11,8 @@ import type {
   ThoughtInput,
   WorkingContextItem,
 } from "../../types.js";
+import type { DomainPointersSection } from "../domain-pointers.js";
+import type { IdentityOrientationKernel } from "../orientation-kernel.js";
 import {
   createContinuityCandidate,
   type ContinuityCandidate,
@@ -18,6 +20,8 @@ import {
 } from "../continuity-candidate.js";
 
 export type AllocationSectionId =
+  | "orientation_kernel"
+  | "domain_pointers"
   | "trigger_evidence"
   | "recent_raw"
   | "working_context_correction"
@@ -67,6 +71,8 @@ export type AllocationTokenComponent =
 export function allocationTokenComponent(
   section: AllocationSectionId,
 ): AllocationTokenComponent {
+  if (section === "orientation_kernel") return "identity_kernel_tokens";
+  if (section === "domain_pointers") return "domain_pointer_tokens";
   if (section === "trigger_evidence" || section === "recent_raw" || section === "remember_directive") {
     return "conversation_tokens";
   }
@@ -86,12 +92,30 @@ export function buildAllocationCandidates(
 ): AllocationCandidate[] {
   const candidates: AllocationCandidate[] = [];
 
+  const c2Input = input as ThoughtInput & {
+    orientationKernel?: IdentityOrientationKernel;
+    domainPointers?: DomainPointersSection;
+  };
+
+  // The orientation kernel is the first required C2 section. It contains the
+  // bounded canonical identity and full static contract, not a Host-authored
+  // personality or biography.
+  if (c2Input.orientationKernel) {
+    candidates.push({
+      id: "orientation_kernel",
+      section: "orientation_kernel",
+      required: true,
+      priority: 1,
+      data: c2Input.orientationKernel,
+    });
+  }
+
   // 1. Trigger Evidence (required)
   candidates.push({
     id: "trigger_evidence",
     section: "trigger_evidence",
     required: true,
-    priority: 1,
+    priority: 2,
     data: input.trigger,
   });
 
@@ -100,7 +124,7 @@ export function buildAllocationCandidates(
     id: "constitution",
     section: "constitution",
     required: true,
-    priority: 2,
+    priority: 3,
     data: input.constitution,
   });
 
@@ -109,7 +133,7 @@ export function buildAllocationCandidates(
     id: "capability",
     section: "capability",
     required: true,
-    priority: 3,
+    priority: 4,
     data: input.capabilityReality,
   });
 
@@ -118,7 +142,7 @@ export function buildAllocationCandidates(
     id: "recent_raw",
     section: "recent_raw",
     required: true,
-    priority: 4,
+    priority: 5,
     data: input.rawConversation,
   });
 
@@ -127,7 +151,7 @@ export function buildAllocationCandidates(
     id: "learned_self",
     section: "learned_self",
     required: true,
-    priority: 5,
+    priority: 6,
     data: input.learnedSelfSlice,
   });
 
@@ -156,13 +180,23 @@ export function buildAllocationCandidates(
     });
   }
 
+  if (c2Input.domainPointers) {
+    candidates.push({
+      id: "domain_pointers",
+      section: "domain_pointers",
+      required: true,
+      priority: 8,
+      data: c2Input.domainPointers,
+    });
+  }
+
   // 8. Authority Objections (required if non-empty)
   if (input.authorityObjections && input.authorityObjections.length > 0) {
     candidates.push({
       id: "authority_objections",
       section: "authority_objections",
       required: true,
-      priority: 8,
+      priority: 9,
       data: input.authorityObjections,
     });
   }
@@ -173,7 +207,7 @@ export function buildAllocationCandidates(
       id: "remember_directive",
       section: "remember_directive",
       required: true,
-      priority: 9,
+      priority: 10,
       data: input.rememberDirective,
     });
   }
@@ -184,7 +218,7 @@ export function buildAllocationCandidates(
       id: "occupancy_compact",
       section: "occupancy_compact",
       required: true,
-      priority: 10,
+      priority: 11,
       data: input.occupancy,
     });
   }
@@ -197,7 +231,7 @@ export function buildAllocationCandidates(
         id: `wc:${item.id}`,
         section: "working_context_correction",
         required: true,
-        priority: 11,
+        priority: 12,
         ref: item.id,
         data: item,
       });
@@ -206,7 +240,7 @@ export function buildAllocationCandidates(
         id: `wc:${item.id}`,
         section: "working_context_referent",
         required: true,
-        priority: 12,
+        priority: 13,
         ref: item.id,
         data: item,
       });
@@ -215,7 +249,7 @@ export function buildAllocationCandidates(
         id: `wc:${item.id}`,
         section: "working_context_repair",
         required: true,
-        priority: 13,
+        priority: 14,
         ref: item.id,
         data: item,
       });
@@ -224,7 +258,7 @@ export function buildAllocationCandidates(
         id: `wc:${item.id}`,
         section: "working_context_commitment",
         required: true,
-        priority: 14,
+        priority: 15,
         ref: item.id,
         data: item,
       });
@@ -247,7 +281,7 @@ export function buildAllocationCandidates(
         id: `wc:${item.id}`,
         section: "working_context_topic",
         required: false,
-        priority: 15,
+        priority: 16,
         ref: item.id,
         data: item,
       });
@@ -256,7 +290,7 @@ export function buildAllocationCandidates(
         id: `wc:${item.id}`,
         section: "working_context_other",
         required: false,
-        priority: 16,
+        priority: 17,
         ref: item.id,
         data: item,
       });
@@ -270,7 +304,7 @@ export function buildAllocationCandidates(
       id: `retrieval:${hit.ref}:${idx}`,
       section: "retrieval_compact",
       required: false,
-      priority: 17,
+      priority: 18,
       ref: hit.ref,
       data: hit,
     });
@@ -303,6 +337,8 @@ export function buildAllocationCandidates(
 }
 
 function canonicalStoreFor(section: AllocationSectionId): string {
+  if (section === "orientation_kernel") return "nuclear.db:identity_entries+static_operating_contract";
+  if (section === "domain_pointers") return "cognitive-v021.db:domain_pointers";
   if (section === "trigger_evidence" || section === "recent_raw" || section === "remember_directive") {
     return "conversation_evidence_log";
   }

@@ -134,11 +134,20 @@ export function allocateThoughtProjection(
   const omittedCandidateData: AllocationCandidate[] = [];
   const workingContextIncluded: WorkingContextItem[] = [];
   const retrievalHitsIncluded: CompactRetrievalEvidence[] = [];
+  let orientationKernelIncluded = false;
+  let domainPointersIncluded = false;
   let compression = false;
+
+  const c2Input = input as ThoughtInput & {
+    orientationKernel?: ProjectedThoughtInput["orientationKernel"];
+    domainPointers?: ProjectedThoughtInput["domainPointers"];
+  };
 
   function renderTentative(
     wc: WorkingContextItem[],
     retrieval: CompactRetrievalEvidence[],
+    includeOrientationKernel = orientationKernelIncluded,
+    includeDomainPointers = domainPointersIncluded,
   ): ProjectedThoughtInput {
     const isMiss = input.retrieval.state === "ready" && retrieval.length === 0;
     return {
@@ -170,6 +179,12 @@ export function allocateThoughtProjection(
         compression: compression || input.runtimeCondition.compression,
       },
       rememberDirective: input.rememberDirective,
+      ...(includeOrientationKernel && c2Input.orientationKernel !== undefined
+        ? { orientationKernel: c2Input.orientationKernel }
+        : {}),
+      ...(includeDomainPointers && c2Input.domainPointers !== undefined
+        ? { domainPointers: c2Input.domainPointers }
+        : {}),
     };
   }
 
@@ -177,14 +192,25 @@ export function allocateThoughtProjection(
   for (const candidate of candidates) {
     let tentativeWc = workingContextIncluded;
     let tentativeRetrieval = retrievalHitsIncluded;
+    let tentativeOrientationKernel = orientationKernelIncluded;
+    let tentativeDomainPointers = domainPointersIncluded;
 
     if (candidate.section.startsWith("working_context")) {
       tentativeWc = [...workingContextIncluded, candidate.data as WorkingContextItem];
     } else if (candidate.section === "retrieval_compact") {
       tentativeRetrieval = [...retrievalHitsIncluded, candidate.data as CompactRetrievalEvidence];
+    } else if (candidate.section === "orientation_kernel") {
+      tentativeOrientationKernel = true;
+    } else if (candidate.section === "domain_pointers") {
+      tentativeDomainPointers = true;
     }
 
-    const tentativeProjected = renderTentative(tentativeWc, tentativeRetrieval);
+    const tentativeProjected = renderTentative(
+      tentativeWc,
+      tentativeRetrieval,
+      tentativeOrientationKernel,
+      tentativeDomainPointers,
+    );
     const tentativeMessages = thoughtMessagesForProjection(
       tentativeProjected,
       opts.structuralFeedback,
@@ -202,6 +228,10 @@ export function allocateThoughtProjection(
         workingContextIncluded.push(candidate.data as WorkingContextItem);
       } else if (candidate.section === "retrieval_compact") {
         retrievalHitsIncluded.push(candidate.data as CompactRetrievalEvidence);
+      } else if (candidate.section === "orientation_kernel") {
+        orientationKernelIncluded = true;
+      } else if (candidate.section === "domain_pointers") {
+        domainPointersIncluded = true;
       }
     } else {
       // Exceeds TPM budget
@@ -227,7 +257,12 @@ export function allocateThoughtProjection(
     }
   }
 
-  const finalProjected = renderTentative(workingContextIncluded, retrievalHitsIncluded);
+  const finalProjected = renderTentative(
+    workingContextIncluded,
+    retrievalHitsIncluded,
+    orientationKernelIncluded,
+    domainPointersIncluded,
+  );
   const finalMessages = thoughtMessagesForProjection(finalProjected, opts.structuralFeedback);
   const finalEstimate = estimateRequestTokens(finalMessages, {
     maxTokens: budget.maxOutputTokens,

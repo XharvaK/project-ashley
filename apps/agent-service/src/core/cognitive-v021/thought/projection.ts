@@ -25,6 +25,8 @@ import type {
   WorkingContextItem,
 } from "../types.js";
 import type { ChatMessage } from "../../model-routing/types.js";
+import type { DomainPointersSection } from "./domain-pointers.js";
+import type { IdentityOrientationKernel } from "./orientation-kernel.js";
 
 export type CompactMemoryEvidence = {
   kind: "key" | "lex";
@@ -84,6 +86,8 @@ export type ProjectedThoughtInput = {
   authorityObjections: AuthorityCode[];
   runtimeCondition: RuntimeCondition;
   rememberDirective: RememberDirective | null;
+  orientationKernel?: IdentityOrientationKernel;
+  domainPointers?: DomainPointersSection;
 };
 
 export type ThoughtModelProjection = {
@@ -139,6 +143,10 @@ export function projectThoughtInput(
   provenance: Map<string, RetrievalHit>;
   semanticProjectionHash: string;
 } {
+  const c2Input = fullInput as ThoughtInput & {
+    orientationKernel?: IdentityOrientationKernel;
+    domainPointers?: DomainPointersSection;
+  };
   const provenance = new Map<string, RetrievalHit>();
   const compactHits: CompactRetrievalEvidence[] = [];
 
@@ -175,6 +183,8 @@ export function projectThoughtInput(
     authorityObjections: fullInput.authorityObjections,
     runtimeCondition: fullInput.runtimeCondition,
     rememberDirective: fullInput.rememberDirective,
+    ...(c2Input.orientationKernel === undefined ? {} : { orientationKernel: c2Input.orientationKernel }),
+    ...(c2Input.domainPointers === undefined ? {} : { domainPointers: c2Input.domainPointers }),
   };
 
   const semanticProjectionHash = computeSemanticProjectionHash(projected);

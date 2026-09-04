@@ -29,6 +29,15 @@ import { retrieveCandidates } from "../retrieval/discover.js";
 import { buildRetrievalQuery, tokenizeForQuery } from "../retrieval/query.js";
 import type { DerivedStore } from "../retrieval/derived-store.js";
 import { buildLearnedSelfSlice } from "../identity/learned-self.js";
+import {
+  buildOrientationKernel,
+  type IdentityOrientationKernel,
+  type IdentityOrientationSource,
+} from "./orientation-kernel.js";
+import {
+  buildDomainPointers,
+  type DomainPointersSection,
+} from "./domain-pointers.js";
 
 export type BuildThoughtInputOptions = {
   sidecar: DatabaseSync;
@@ -50,6 +59,16 @@ export type BuildThoughtInputOptions = {
   occupancyK?: number;
   derivedStore?: DerivedStore;
   authorityDb?: DatabaseSync;
+  /** Optional precomputed C2 sections for deterministic recovery/test seams. */
+  orientationKernel?: IdentityOrientationKernel;
+  domainPointers?: DomainPointersSection;
+  staticOperatingContract?: string;
+  stableSelfBound?: number;
+};
+
+export type ThoughtInputWithC2 = ThoughtInput & {
+  orientationKernel: IdentityOrientationKernel;
+  domainPointers: DomainPointersSection;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -196,7 +215,7 @@ function emptyRuntimeCondition(partial?: Partial<RuntimeCondition>): RuntimeCond
 }
 
 /** Assemble the fixed Thought input set. Workspace notes are intentionally absent. */
-export function buildThoughtInput(options: BuildThoughtInputOptions): ThoughtInput {
+export function buildThoughtInput(options: BuildThoughtInputOptions): ThoughtInputWithC2 {
   const lastNTurns = Math.max(1, Math.min(100, options.lastNTurns ?? DEFAULT_LAST_N_TURNS));
   const occupancyK = Math.max(1, Math.min(100, options.occupancyK ?? DEFAULT_OCCUPANCY_COMPACT_K));
   const activeFrontier = getActiveDeferredFrontier(
@@ -219,6 +238,20 @@ export function buildThoughtInput(options: BuildThoughtInputOptions): ThoughtInp
     .slice()
     .sort((left, right) => right.priority - left.priority || right.updatedGeneration - left.updatedGeneration)
     .slice(0, occupancyK);
+  const learnedSelfSlice = options.learnedSelfSlice ?? buildLearnedSelfSlice(options.sidecar);
+  const identity = options.constitution as IdentitySlice & Partial<IdentityOrientationSource>;
+  const orientationKernel = options.orientationKernel ?? buildOrientationKernel({
+    constitution: identity,
+    capabilityReality: options.capabilityReality,
+    staticOperatingContract: options.staticOperatingContract,
+    stableSelfBound: options.stableSelfBound,
+    learnedSelf: learnedSelfSlice,
+  });
+  const domainPointers = options.domainPointers ?? buildDomainPointers(
+    options.sidecar,
+    options.cycle.conversationId,
+    options.cycle.cycleId,
+  );
   const triggerText = options.triggerText ?? options.cycle.triggerRef;
   const query = buildRetrievalQuery({
     triggerText,
@@ -257,8 +290,14 @@ export function buildThoughtInput(options: BuildThoughtInputOptions): ThoughtInp
     rawConversation,
     workingContext,
     occupancy,
-    constitution: options.constitution,
-    learnedSelfSlice: options.learnedSelfSlice ?? buildLearnedSelfSlice(options.sidecar),
+    // Keep the legacy IdentitySlice wire shape compact. The richer
+    // category-separated fields have already been captured by the orientation
+    // kernel and must not be duplicated in the old compatibility field.
+    constitution: {
+      constitutional: [...options.constitution.constitutional],
+      stableSelf: [...options.constitution.stableSelf],
+    },
+    learnedSelfSlice,
     capabilityReality: options.capabilityReality,
     observations: options.observations ?? [],
     retrieval,
@@ -266,5 +305,7 @@ export function buildThoughtInput(options: BuildThoughtInputOptions): ThoughtInp
     authorityObjections: options.authorityObjections ?? [],
     runtimeCondition: emptyRuntimeCondition(options.runtimeCondition),
     rememberDirective: options.rememberDirective ?? null,
+    orientationKernel,
+    domainPointers,
   };
 }
