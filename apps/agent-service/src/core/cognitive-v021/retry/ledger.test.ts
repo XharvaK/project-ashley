@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { openCognitiveSidecarDb } from "../sidecar/db.js";
 import { admitWake } from "../wake/ledger.js";
 import { claimNextDurableWork, startDurableAttempt, settleDurableAttempt } from "./ledger.js";
@@ -181,5 +181,32 @@ describe("durable attempt ledger", () => {
     })).toEqual({ kind: "terminal", reason: "age_exhausted" });
     expect(sidecar.prepare("SELECT state, terminal_reason, quarantine_reason FROM inbox_events WHERE id = 'event:retry'").get()).toMatchObject({ state: "quarantined", terminal_reason: "age_exhausted", quarantine_reason: "age_exhausted" });
     sidecar.close();
+  });
+
+  it("commits the primary retry terminal state before a failed C3 derived write", () => {
+    const sidecar = db();
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      seedEvent(sidecar);
+      const first = startDurableAttempt(sidecar, { eventId: "event:retry", workerId: "worker", nowMs: 1_000 });
+      sidecar.exec(
+        `CREATE TRIGGER c3_retry_write_failure
+           BEFORE INSERT ON c3_terminal_experiences
+           BEGIN SELECT RAISE(ABORT, 'c3_retry_write_failure'); END`,
+      );
+      expect(settleDurableAttempt(sidecar, {
+        eventId: "event:retry",
+        attemptId: first.attemptId,
+        claimToken: first.claimToken,
+        result: { kind: "failed", failureClass: "transient_retryable", errorCode: "provider_unavailable", dispatchTruth: "not_started" },
+        nowMs: 901_000,
+      })).toEqual({ kind: "terminal", reason: "age_exhausted" });
+      expect(sidecar.prepare("SELECT state, terminal_reason FROM inbox_events WHERE id = 'event:retry'").get()).toMatchObject({ state: "quarantined", terminal_reason: "age_exhausted" });
+      expect(sidecar.prepare("SELECT COUNT(*) AS count FROM c3_terminal_experiences").get()).toMatchObject({ count: 0 });
+      expect(warning).toHaveBeenCalledWith(expect.stringContaining("c3_write_deferred_for_forward_repair"), expect.anything());
+    } finally {
+      warning.mockRestore();
+      sidecar.close();
+    }
   });
 });

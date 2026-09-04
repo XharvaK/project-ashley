@@ -299,7 +299,7 @@ CREATE TABLE IF NOT EXISTS thought_attempt_counters (
 
 export const COGNITIVE_SIDECAR_SCHEMA = COGNITIVE_SIDECAR_SCHEMA_V1;
 
-export const COGNITIVE_SIDECAR_SCHEMA_VERSION = 5 as const;
+export const COGNITIVE_SIDECAR_SCHEMA_VERSION = 8 as const;
 export const COGNITIVE_SIDECAR_SCHEMA_V2 = String.raw`
 ALTER TABLE cognitive_sidecar_meta ADD COLUMN projection_barrier_revision INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE cognitive_sidecar_meta ADD COLUMN projection_vector_json TEXT NOT NULL DEFAULT '{"nuclear":0,"continuity":0,"cognitive_sidecar":0}';
@@ -514,4 +514,63 @@ ON deferred_reactive_frontiers (state, next_eligible_at_ms)
 WHERE state = 'waiting';
 
 UPDATE cognitive_sidecar_meta SET schema_version = 7, projection_state = 'reconciling' WHERE id = 1;
+`;
+
+export const COGNITIVE_SIDECAR_SCHEMA_V8 = String.raw`
+ALTER TABLE deferred_reactive_frontiers ADD COLUMN terminal_reason TEXT;
+
+CREATE TABLE IF NOT EXISTS c3_terminal_experiences (
+  experience_id TEXT PRIMARY KEY,
+  obligation_frontier_id TEXT,
+  cycle_id TEXT NOT NULL,
+  generation INTEGER NOT NULL,
+  attempt_id TEXT,
+  attempt_lineage_json TEXT,
+  terminal_phase TEXT NOT NULL,
+  failure_class TEXT NOT NULL,
+  terminal_disposition TEXT NOT NULL,
+  publication_state TEXT NOT NULL,
+  external_effect_truth TEXT NOT NULL,
+  receipt_ref TEXT,
+  unresolved_state INTEGER NOT NULL DEFAULT 0,
+  raw_evidence_refs_json TEXT NOT NULL,
+  notice_id TEXT,
+  occurred_at_ms INTEGER NOT NULL,
+  source_domain_owner TEXT NOT NULL,
+  source_currentness_ref TEXT,
+  redacted INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_c3_exp_cycle
+  ON c3_terminal_experiences (cycle_id, generation);
+CREATE INDEX IF NOT EXISTS idx_c3_exp_unresolved
+  ON c3_terminal_experiences (unresolved_state, occurred_at_ms DESC);
+
+CREATE TABLE IF NOT EXISTS c3_activation_cutover (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  activated_at_ms INTEGER NOT NULL,
+  max_pre_v8_notice_id INTEGER,
+  max_pre_v8_frontier_updated_at_ms INTEGER,
+  max_pre_v8_attempt_finished_at_ms INTEGER,
+  max_pre_v8_delivery_reservation_id INTEGER
+);
+
+INSERT OR IGNORE INTO c3_activation_cutover (
+ id, activated_at_ms,
+ max_pre_v8_notice_id,
+ max_pre_v8_frontier_updated_at_ms,
+ max_pre_v8_attempt_finished_at_ms,
+ max_pre_v8_delivery_reservation_id
+) VALUES (
+  1,
+  CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER),
+  (SELECT MAX(notice_id) FROM system_notice_outbox),
+  (SELECT MAX(updated_at_ms) FROM deferred_reactive_frontiers),
+  (SELECT MAX(finished_at_ms) FROM durable_work_attempts),
+  NULL
+);
+
+UPDATE cognitive_sidecar_meta
+SET schema_version = 8,
+    projection_state = 'reconciling'
+WHERE id = 1;
 `;

@@ -136,6 +136,53 @@ describe("v0.2.1 Thought run", () => {
     attentionDb.close();
   });
 
+  it("records an allowlisted provider-unavailable failure without turning C3 into a speech authority", async () => {
+    const sidecar = openTestSidecar();
+    const attentionDb = openTestSidecar();
+    const cycle = admitTestCycle(sidecar, {
+      cycleId: "cycle-c3-thought",
+      conversationId: "thread-c3-thought",
+      triggerKind: "owner_message",
+      triggerRef: "owner-c3-thought",
+      occupantId: "doc",
+      authorityEpoch: 1,
+      nowMs: 1,
+    });
+    const evidence = appendOwnerUtterance(sidecar, {
+      conversationId: cycle.conversationId,
+      text: "Please answer this after the provider becomes available.",
+      discordMessageIds: ["c3-thought-message"],
+      nowMs: 2,
+    });
+    const event = appendInboxEvent(sidecar, {
+      wakeId: cycle.wakeId,
+      conversationId: cycle.conversationId,
+      kind: "owner_message",
+      payload: {
+        cycleId: cycle.cycleId,
+        evidenceRowId: evidence.rowId,
+        ownerMessage: evidence.text,
+      },
+      createdAtMs: 2,
+    });
+    try {
+      const result = await runCognitiveCycle(sidecar, attentionDb, event, deps({
+        attentionDb,
+        completeChat: vi.fn(async () => {
+          throw new Error("provider_unavailable");
+        }),
+      }));
+      expect(result).toMatchObject({ published: false, infrastructureNotice: "[system] Thought did not complete. Please send the message again." });
+      expect(sidecar.prepare(
+        "SELECT failure_class, terminal_phase, notice_id FROM c3_terminal_experiences",
+      ).get()).toMatchObject({ failure_class: "unavailable", terminal_phase: "thought" });
+      expect(sidecar.prepare("SELECT COUNT(*) AS count FROM settlements").get()).toMatchObject({ count: 0 });
+    } finally {
+      sidecar.close();
+      attentionDb.close();
+    }
+  });
+
   it("reuses one absolute deadline and gives a bounded corrective structural retry", async () => {
     const sidecar = openTestSidecar();
     const attentionDb = openTestSidecar();

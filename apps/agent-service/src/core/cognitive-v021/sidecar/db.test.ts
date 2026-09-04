@@ -15,7 +15,7 @@ function fakeDatabaseWithMainFile(file: string): DatabaseSync {
 }
 
 describe("cognitive v0.2.1 sidecar database", () => {
-  it("creates the complete v7 schema on an isolated in-memory database", () => {
+  it("creates the complete v8 schema on an isolated in-memory database", () => {
     const db = openCognitiveSidecarDb(new DatabaseSync(":memory:"), {
       dataPlane: { kind: "isolated" },
     });
@@ -23,7 +23,7 @@ describe("cognitive v0.2.1 sidecar database", () => {
     expect(
       (db.prepare("PRAGMA user_version").get() as { user_version: number })
         .user_version,
-    ).toBe(7);
+    ).toBe(8);
     expect(
       (
         db
@@ -33,7 +33,7 @@ describe("cognitive v0.2.1 sidecar database", () => {
           .get() as Record<string, unknown>
       ),
     ).toEqual({
-      schema_version: 7,
+      schema_version: 8,
       architecture_epoch: "v0.2.1",
       implementation_spec_version: "0.2.1.r5",
       thought_contract_version: 2,
@@ -47,7 +47,7 @@ describe("cognitive v0.2.1 sidecar database", () => {
         )
         .all() as Array<{ name: string }>
     ).map((row) => row.name);
-    expect(tables).toHaveLength(31);
+    expect(tables).toHaveLength(33);
     expect(tables).toContain("speech_outbox");
     expect(tables).toContain("thought_attempt_counters");
     expect(tables).toContain("wakes");
@@ -118,7 +118,7 @@ describe("cognitive v0.2.1 sidecar database", () => {
         ownerVersions: { nuclear: 0, continuity: 0, cognitive_sidecar: 0 },
         state: "reconciling",
       });
-      expect((db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(7);
+      expect((db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(8);
     } finally {
       db.close();
     }
@@ -278,7 +278,7 @@ describe("cognitive v0.2.1 sidecar database", () => {
 
     try {
       openCognitiveSidecarDb(db, { dataPlane: { kind: "isolated" } });
-      expect((db.prepare("SELECT schema_version FROM cognitive_sidecar_meta WHERE id = 1").get() as { schema_version: number }).schema_version).toBe(7);
+      expect((db.prepare("SELECT schema_version FROM cognitive_sidecar_meta WHERE id = 1").get() as { schema_version: number }).schema_version).toBe(8);
       expect((db.prepare("SELECT COUNT(*) AS count FROM private_budget_policy_clock").get() as { count: number }).count).toBe(0);
       expect((db.prepare("SELECT COUNT(*) AS count FROM private_budget_reservations").get() as { count: number }).count).toBe(0);
 
@@ -308,9 +308,9 @@ describe("cognitive v0.2.1 sidecar database", () => {
   it("rejects newer sidecar content and rolls back a failed v2 upgrade", () => {
     const newer = new DatabaseSync(":memory:");
     try {
-      newer.exec("PRAGMA user_version = 8");
+      newer.exec("PRAGMA user_version = 9");
       expect(() => openCognitiveSidecarDb(newer, { dataPlane: { kind: "isolated" } }))
-        .toThrow("unsupported_cognitive_sidecar_schema:8>7");
+        .toThrow("unsupported_cognitive_sidecar_schema:9>8");
     } finally {
       newer.close();
     }
@@ -343,7 +343,7 @@ describe("cognitive v0.2.1 sidecar database", () => {
     const db = new DatabaseSync(":memory:");
     // Set up up to V5
     openCognitiveSidecarDb(db, { dataPlane: { kind: "isolated" } });
-    expect((db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(7);
+    expect((db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(8);
 
     // Verify columns on in_flight_effects
     const columns = (db.prepare("PRAGMA table_info(in_flight_effects)").all() as Array<{ name: string }>).map((c) => c.name);

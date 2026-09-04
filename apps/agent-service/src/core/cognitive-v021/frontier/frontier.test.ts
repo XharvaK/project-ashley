@@ -44,10 +44,10 @@ function openMigratedDb(): DatabaseSync {
 }
 
 describe("Wave 1B: Durable Frontier Lifecycle & Migration 007", () => {
-  it("migrates from v006 fixture to v007 and establishes schema_version = 7", () => {
+  it("migrates from v006 fixture to v008 and establishes schema_version = 8", () => {
     const db = openMigratedDb();
     const meta = db.prepare("SELECT schema_version FROM cognitive_sidecar_meta WHERE id = 1").get() as { schema_version: number };
-    expect(meta.schema_version).toBe(7);
+    expect(meta.schema_version).toBe(8);
 
     const tableInfo = db.prepare("PRAGMA table_info(deferred_reactive_frontiers)").all() as Array<{ name: string }>;
     expect(tableInfo.map((col) => col.name)).toEqual([
@@ -64,6 +64,7 @@ describe("Wave 1B: Durable Frontier Lifecycle & Migration 007", () => {
       "attempt_count",
       "created_at_ms",
       "updated_at_ms",
+      "terminal_reason",
     ]);
     db.close();
   });

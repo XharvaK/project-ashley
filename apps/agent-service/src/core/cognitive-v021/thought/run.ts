@@ -87,6 +87,7 @@ import { recordDiagnostic, recordThoughtCycleMetrics } from "./diagnostics.js";
 import { metadataFromError } from "../../model-fabric/receipts.js";
 import { fidelityCheck } from "../speech/fidelity.js";
 import { emitInfrastructureNotice } from "../speech/infrastructure-notice.js";
+import { recordThoughtC3TerminalFailure } from "../failure/c3-recorder.js";
 import { renderForTransport } from "../../conversation/rendering.js";
 import {
   getThoughtAttemptCounters,
@@ -1120,6 +1121,17 @@ export async function runCognitiveCycle(
       origin: deps.origin,
       trigger: deliveryIntentFor(admittedCycle, payload, "system_notice").trigger,
       deliveryLane: deliveryIntentFor(admittedCycle, payload, "system_notice").deliveryLane,
+    });
+    // The infrastructure notice is primary terminal output. C3 is a bounded,
+    // fail-soft derived projection and never changes the terminal result.
+    recordThoughtC3TerminalFailure(sidecar, {
+      noticeKey: notice.noticeKey,
+      noticeId: notice.noticeId,
+      cycleId: admittedCycle.cycleId,
+      generation: admittedCycle.generation,
+      occurredAtMs: deps.nowMs(),
+      failureClass: reason,
+      attemptId: lastThoughtRequestId,
     });
     if (deps.projectSystemNotice) await deps.projectSystemNotice(notice.noticeId);
     updateCycleState(sidecar, admittedCycle.cycleId, "silent", deps.nowMs());

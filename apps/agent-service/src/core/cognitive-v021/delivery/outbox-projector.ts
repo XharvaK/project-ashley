@@ -16,6 +16,7 @@ import {
   getSystemNotice,
   updateSystemNoticeStatus,
 } from "../speech/infrastructure-notice.js";
+import { recordDeliveryC3TerminalFailure } from "../failure/c3-recorder.js";
 import type {
   DeliveryIntent,
   OutboxDeliveryProjector as OutboxDeliveryProjectorContract,
@@ -176,6 +177,29 @@ export function reconcileProjectedDelivery(
   ).get(reservationId) as Row | undefined;
   if (!destination) return false;
   markTerminalFromDestination(sidecar, nuclear, row, destination);
+  const destinationState = text(destination.state);
+  if (destinationState === "aborted" || destinationState === "expired" || destinationState === "partially_delivered") {
+    const cycle = row.cycleId
+      ? sidecar.prepare("SELECT generation FROM cycle_records WHERE cycle_id = ? LIMIT 1").get(row.cycleId) as Row | undefined
+      : undefined;
+    const generation = "outboxId" in row
+      ? row.generation
+      : cycle ? number(cycle.generation) : null;
+    if (row.cycleId && generation != null) {
+      const deliveredBubbleCount = listDeliveryBubbles(nuclear, reservationId)
+        .filter((bubble) => bubble.discordMessageId).length;
+      const finalizedAt = text(destination.finalized_at);
+      const parsedFinalizedAt = Date.parse(finalizedAt);
+      recordDeliveryC3TerminalFailure(sidecar, {
+        reservationId,
+        cycleId: row.cycleId,
+        generation,
+        state: destinationState,
+        occurredAtMs: Number.isFinite(parsedFinalizedAt) ? parsedFinalizedAt : Date.now(),
+        deliveredBubbleCount,
+      });
+    }
+  }
   markDeliveredEvidence(sidecar, nuclear, reservationId, row);
   return true;
 }

@@ -13,6 +13,7 @@ import {
   rescheduleDeferredFrontier,
   resolveDeferredFrontier,
 } from "./ledger.js";
+import { recordFrontierC3TerminalFailure } from "../failure/c3-recorder.js";
 
 export type FrontierCoordinatorOptions = {
   workerId?: string;
@@ -107,6 +108,12 @@ export function startFrontierCoordinator(
                 // Preserve frontier exhaustion + cycle silence. Terminal
                 // immutability and lease laws win over expiry terminalization.
               }
+              recordFrontierC3TerminalFailure(sidecar, {
+                frontierId: due.frontierId,
+                cycleId: due.cycleId,
+                generation: due.generation,
+                occurredAtMs: getNowMs(),
+              });
             }
           }
         } else if (!result.deferred) {

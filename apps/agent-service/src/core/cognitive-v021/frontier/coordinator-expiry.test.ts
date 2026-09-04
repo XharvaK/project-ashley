@@ -134,6 +134,11 @@ describe("Campaign-1 exhaustion terminalization (capacity deadline expiry)", () 
 
     const frontier = getDeferredFrontier(sidecar, frontierBefore!.frontierId);
     expect(frontier?.state).toBe("exhausted");
+    expect(frontier?.terminalReason).toBe("capacity_wait_max_duration_exceeded");
+    expect(sidecar.prepare("SELECT failure_class, obligation_frontier_id FROM c3_terminal_experiences").get()).toMatchObject({
+      failure_class: "capacity_wait_max_duration_exceeded",
+      obligation_frontier_id: frontierBefore!.frontierId,
+    });
     expect(getActiveDeferredFrontier(sidecar, ingressA.conversationId)).toBeNull();
 
     const cycle = getCycle(sidecar, ingressA.cycleId);
@@ -213,6 +218,7 @@ describe("Campaign-1 exhaustion terminalization (capacity deadline expiry)", () 
 
     const frontier = getDeferredFrontier(sidecar, frontierBefore!.frontierId);
     expect(frontier?.state).toBe("exhausted");
+    expect(sidecar.prepare("SELECT COUNT(*) AS count FROM c3_terminal_experiences").get()).toMatchObject({ count: 0 });
     const cycle = getCycle(sidecar, ingress.cycleId);
     expect(cycle?.state).toBe("silent");
     const wake = cycle?.wakeId ? getWake(sidecar, cycle.wakeId) : null;

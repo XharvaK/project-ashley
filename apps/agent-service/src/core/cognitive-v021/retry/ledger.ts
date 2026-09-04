@@ -30,6 +30,10 @@ import {
   insertDeferredFrontierRecord,
   rescheduleDeferredFrontier,
 } from "../frontier/ledger.js";
+import {
+  recordRetryC3TerminalFailure,
+  type RetryC3TerminalFailureInput,
+} from "../failure/c3-recorder.js";
 
 type DbRow = Record<string, unknown>;
 
@@ -691,7 +695,8 @@ export function settleDurableAttempt(
   db: DatabaseSync,
   input: { eventId: string; attemptId: string; claimToken: string; result: DurableSettlement; nowMs: number },
 ): DurableSettlementOutcome {
-  return beginAndRollbackOnError(db, () => {
+  let c3Terminal: RetryC3TerminalFailureInput | null = null;
+  const outcome = beginAndRollbackOnError<DurableSettlementOutcome>(db, () => {
     const current = event(db, input.eventId);
     const value = attempt(db, input.attemptId, input.eventId);
     if (!value) throw new Error("durable_attempt_missing");
@@ -781,7 +786,12 @@ export function settleDurableAttempt(
       return decision;
     }
 
-    const terminal = normalized.failureClass === "permanent_terminal"
+    const terminal: {
+      state: "terminal" | "quarantined";
+      reason: string;
+      wakeReason: "completed" | "no_action" | "refused" | "cancelled" | "expired" | "quarantined";
+      quarantineReason: string | null;
+    } = normalized.failureClass === "permanent_terminal"
       ? { state: "terminal", reason: "permanent_failure", wakeReason: "refused" as const, quarantineReason: null }
       : normalized.failureClass === "stale_or_cancelled"
         ? {
@@ -806,10 +816,35 @@ export function settleDurableAttempt(
       input.eventId,
       input.claimToken,
     );
+    const c3FailureClass = normalized.failureClass === "permanent_terminal"
+      ? "permanent_terminal"
+      : terminal.reason === "age_exhausted" || terminal.reason === "attempts_exhausted"
+        ? terminal.reason
+        : null;
+    if (c3FailureClass && current.wake_id) {
+      const wake = getWake(db, current.wake_id);
+      const cycle = wake ? getCycle(db, wake.cycleId) : null;
+      if (cycle) {
+        c3Terminal = {
+          eventId: input.eventId,
+          attemptId: input.attemptId,
+          wakeId: current.wake_id,
+          cycleId: cycle.cycleId,
+          generation: cycle.generation,
+          ordinal: value.ordinal,
+          dispatchTruth: normalized.dispatchTruth,
+          failureClass: c3FailureClass,
+          errorCode: input.result.errorCode,
+          occurredAtMs: input.nowMs,
+        };
+      }
+    }
     finishWakeForEvent(db, current, terminal.wakeReason, input.nowMs);
     retireOwnerlessCycleForTerminalEvent(db, current.wake_id, input.nowMs);
     return { kind: "terminal", reason: terminal.reason };
   });
+  if (c3Terminal) recordRetryC3TerminalFailure(db, c3Terminal);
+  return outcome;
 }
 
 export function reconcileOutcomeUnknown(

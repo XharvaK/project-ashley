@@ -32,6 +32,7 @@ import { createOutboxProjector } from "./core/cognitive-v021/delivery/outbox-pro
 import { startInboxConsumer, type InboxConsumerHandle, type InboxConsumerHandler } from "./core/cognitive-v021/cycle/inbox-consumer.js";
 import { reconcileStartupOwnership } from "./core/cognitive-v021/cycle/reconcile.js";
 import { reconcileStrandedOutcomeUnknownAtStartup } from "./core/cognitive-v021/retry/startup-outcome-recovery.js";
+import { repairMissingC3Experiences } from "./core/cognitive-v021/failure/c3-recovery.js";
 import { startFrontierCoordinator, type FrontierCoordinatorHandle } from "./core/cognitive-v021/frontier/index.js";
 import {
   classifyInitiativeClass,
@@ -140,6 +141,11 @@ export async function serveAgent(manager: AgentManager): Promise<void> {
     // through proof-gated durable-work authority. cycle/reconcile never calls
     // reconcileOutcomeUnknown.
     reconcileStrandedOutcomeUnknownAtStartup(cognitiveSidecar, { nowMs: Date.now() });
+    try {
+      await repairMissingC3Experiences(cognitiveSidecar, nuclear, { nowMs: Date.now(), limit: 50 });
+    } catch (error) {
+      console.warn("[cognitive-v021] c3_recovery_deferred_for_forward_repair", error);
+    }
     cognitiveConsumer = startInboxConsumer(cognitiveSidecar, {
       workerId: `agent-service:${process.pid}`,
       handler: createAgentInboxConsumerHandler(manager),

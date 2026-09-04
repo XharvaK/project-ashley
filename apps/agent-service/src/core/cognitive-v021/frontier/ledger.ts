@@ -42,6 +42,7 @@ function mapFrontier(row: unknown): DeferredReactiveFrontierRecord | null {
     attemptCount: numberValue(row.attempt_count),
     createdAtMs: numberValue(row.created_at_ms),
     updatedAtMs: numberValue(row.updated_at_ms),
+    terminalReason: row.terminal_reason == null ? null : stringValue(row.terminal_reason),
   };
 }
 
@@ -165,13 +166,13 @@ export function rescheduleDeferredFrontier(
   }
 
   if (nowMs >= current.capacityDeadlineAtMs || nextEligibleAtMs > current.capacityDeadlineAtMs) {
-    exhaustDeferredFrontier(db, frontierId, nowMs);
+    exhaustDeferredFrontier(db, frontierId, nowMs, "capacity_wait_max_duration_exceeded");
     const updated = getDeferredFrontier(db, frontierId);
     return { outcome: "exhausted", frontier: updated ?? undefined, reason: "capacity_wait_max_duration_exceeded" };
   }
 
   if (nextEligibleAtMs <= nowMs) {
-    exhaustDeferredFrontier(db, frontierId, nowMs);
+    exhaustDeferredFrontier(db, frontierId, nowMs, "non_forward_scheduling_hint");
     const updated = getDeferredFrontier(db, frontierId);
     return { outcome: "exhausted", frontier: updated ?? undefined, reason: "non_forward_scheduling_hint" };
   }
@@ -215,17 +216,19 @@ export function exhaustDeferredFrontier(
   db: DatabaseSync,
   frontierId: string,
   nowMs = Date.now(),
+  terminalReason: string | null = null,
 ): boolean {
   const result = db
     .prepare(
       `UPDATE deferred_reactive_frontiers
-       SET state = 'exhausted',
-           claim_token = NULL,
-           lease_expires_at_ms = NULL,
-           updated_at_ms = ?
-       WHERE frontier_id = ? AND state IN ('waiting', 'running')`,
+        SET state = 'exhausted',
+            terminal_reason = ?,
+            claim_token = NULL,
+            lease_expires_at_ms = NULL,
+            updated_at_ms = ?
+        WHERE frontier_id = ? AND state IN ('waiting', 'running')`,
     )
-    .run(nowMs, frontierId);
+    .run(terminalReason, nowMs, frontierId);
   return Number(result.changes) === 1;
 }
 

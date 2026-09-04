@@ -115,6 +115,38 @@ describe("v0.2.1 delivery reconciliation", () => {
       expect(sidecar.prepare(
         "SELECT send_status FROM speech_outbox WHERE outbox_id = ?",
       ).get(outbox.outboxId)).toMatchObject({ send_status: "partially_delivered" });
+      expect(sidecar.prepare(
+        "SELECT failure_class, external_effect_truth FROM c3_terminal_experiences WHERE source_domain_owner = 'delivery'",
+      ).get()).toMatchObject({
+        failure_class: "delivery_partially_delivered",
+        external_effect_truth: "effect_indeterminate",
+      });
+    } finally {
+      sidecar.close();
+      nuclear.close();
+    }
+  });
+
+  it("does not mint a C3 terminal experience for a cancelled reservation", async () => {
+    const sidecar = openTestSidecar();
+    const nuclear = openNuclearDb(new DatabaseSync(":memory:"));
+    try {
+      const outbox = insertOutboxPending(sidecar, {
+        settlementId: "settlement-cancel-reconcile",
+        cycleId: "cycle-cancel-reconcile",
+        generation: 1,
+        conversationId: "thread-cancel-reconcile",
+        licensedText: "cancelled text",
+      });
+      const { OutboxDeliveryProjector } = await import("./outbox-projector.js");
+      await new OutboxDeliveryProjector(sidecar, nuclear, { nowMs: () => 1_000 }).project(outbox.outboxId);
+      const reservationId = Number((sidecar.prepare(
+        "SELECT nuclear_reservation_id FROM speech_outbox WHERE outbox_id = ?",
+      ).get(outbox.outboxId) as { nuclear_reservation_id: number }).nuclear_reservation_id);
+      finalizeDelivery(nuclear, { reservationId, ownerId: "unknown", cause: "cancel" });
+      reconcileProjectedDelivery(sidecar, nuclear, reservationId);
+      expect(sidecar.prepare("SELECT send_status FROM speech_outbox WHERE outbox_id = ?").get(outbox.outboxId)).toMatchObject({ send_status: "suppressed" });
+      expect(sidecar.prepare("SELECT COUNT(*) AS count FROM c3_terminal_experiences").get()).toMatchObject({ count: 0 });
     } finally {
       sidecar.close();
       nuclear.close();
