@@ -1,5 +1,6 @@
 import type { AllocationSectionId } from "./sections.js";
 import type { SemanticProjectionEnvelope } from "./budget.js";
+import type { CoverageManifest } from "../coverage-manifest.js";
 
 export type AllocationTokenBreakdown = {
   static_contract_tokens: number;
@@ -41,6 +42,8 @@ export type AllocationReceipt = {
   policyId: string;
   policyVersion: number;
   semanticProjectionEnvelope: SemanticProjectionEnvelope;
+  /** Honest domain coverage evidence; it never grants semantic authority. */
+  coverageManifest?: CoverageManifest;
   tokenBreakdown: AllocationTokenBreakdown;
   /** @deprecated Provider capacity is owned by Attention, not this receipt. */
   quotaBucket: string;

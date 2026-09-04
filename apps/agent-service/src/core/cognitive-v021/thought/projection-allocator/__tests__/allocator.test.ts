@@ -309,4 +309,16 @@ describe("Whole-Thought Projection Allocator", () => {
     expect(allocated.receipt.tokenBreakdown.omitted_for_budget_count).toBe(0);
     expect(allocated.receipt.tokenBreakdown.required_overflow_count).toBe(0);
   });
+
+  it("attaches a structured coverage manifest to the allocation receipt", () => {
+    const allocated = allocateThoughtProjection({
+      thoughtInput: makeThoughtInput(),
+      requestId: "req-coverage-manifest",
+    });
+
+    expect(allocated.receipt.coverageManifest).toBeDefined();
+    expect(allocated.receipt.coverageManifest?.version).toBe(1);
+    expect(allocated.receipt.coverageManifest?.domains.length).toBeGreaterThan(0);
+    expect(allocated.receipt.coverageManifest?.dispositionCounts.INCLUDED).toBeGreaterThan(0);
+  });
 });

@@ -11,6 +11,11 @@ import type {
   ThoughtInput,
   WorkingContextItem,
 } from "../../types.js";
+import {
+  createContinuityCandidate,
+  type ContinuityCandidate,
+  type CoverageDisposition,
+} from "../continuity-candidate.js";
 
 export type AllocationSectionId =
   | "trigger_evidence"
@@ -38,6 +43,13 @@ export type AllocationCandidate = {
   priority: number;
   ref?: string;
   data: unknown;
+  /** Formal MAT-II transport metadata attached without changing section ownership. */
+  canonicalStore?: string;
+  entityId?: string;
+  sourceLineageId?: string;
+  evidenceRefs?: readonly string[];
+  coverageDisposition?: CoverageDisposition;
+  continuityCandidate?: ContinuityCandidate<unknown>;
 };
 
 export type AllocationTokenComponent =
@@ -264,5 +276,82 @@ export function buildAllocationCandidates(
     });
   }
 
-  return candidates;
+  return candidates.map((candidate) => {
+    const canonicalStore = canonicalStoreFor(candidate.section);
+    const evidenceRefs = evidenceRefsFor(candidate.data);
+    const sourceLineageId = sourceLineageFor(candidate.data) ??
+      input.rawConversation[0]?.lineageId ?? `unbound:${input.cycleId}`;
+    const entityId = candidate.ref ?? candidate.id;
+    const continuityCandidate = createContinuityCandidate({
+      id: candidate.id,
+      payload: candidate.data,
+      canonicalStore,
+      entityId,
+      sourceLineageId,
+      evidenceRefs,
+      required: candidate.required,
+    });
+    return {
+      ...candidate,
+      canonicalStore,
+      entityId,
+      sourceLineageId,
+      evidenceRefs,
+      continuityCandidate,
+    };
+  });
+}
+
+function canonicalStoreFor(section: AllocationSectionId): string {
+  if (section === "trigger_evidence" || section === "recent_raw" || section === "remember_directive") {
+    return "conversation_evidence_log";
+  }
+  if (section.startsWith("working_context")) return "working_context_items";
+  if (section === "occupancy_compact") return "mind_occupancy";
+  if (section === "constitution") return "identity_entries";
+  if (section === "capability") return "capability_reality";
+  if (section === "learned_self" || section === "retrieval_compact") {
+    return "sidecar_memory_assertions";
+  }
+  if (section === "observations") return "observation_artifacts";
+  if (section === "in_flight_receipt") return "effect_receipts";
+  return "authority_revision_feedback";
+}
+
+function sourceLineageFor(value: unknown): string | undefined {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const lineage = sourceLineageFor(item);
+      if (lineage) return lineage;
+    }
+    return undefined;
+  }
+  if (typeof value !== "object" || value === null) return undefined;
+  const record = value as Record<string, unknown>;
+  for (const key of ["sourceLineageId", "lineageId", "evidenceLineageId"]) {
+    if (typeof record[key] === "string" && record[key].trim() !== "") return record[key];
+  }
+  return undefined;
+}
+
+function evidenceRefsFor(value: unknown): readonly string[] {
+  const refs = new Set<string>();
+  const collect = (item: unknown): void => {
+    if (Array.isArray(item)) {
+      item.forEach(collect);
+      return;
+    }
+    if (typeof item !== "object" || item === null) return;
+    const record = item as Record<string, unknown>;
+    for (const key of ["rowId", "id", "ref", "effectRef"]) {
+      if (typeof record[key] === "string" && record[key].trim() !== "") refs.add(record[key]);
+    }
+    if (Array.isArray(record.sourceTurnIds)) {
+      for (const ref of record.sourceTurnIds) {
+        if (typeof ref === "string" && ref.trim() !== "") refs.add(ref);
+      }
+    }
+  };
+  collect(value);
+  return Object.freeze([...refs]);
 }

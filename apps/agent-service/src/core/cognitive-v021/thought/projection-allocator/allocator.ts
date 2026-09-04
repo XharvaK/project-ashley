@@ -26,6 +26,7 @@ import {
   type AllocationCandidate,
 } from "./sections.js";
 import type { AllocationReceipt, AllocationTokenBreakdown } from "./receipt.js";
+import { buildAllocationCoverageManifest } from "../coverage-manifest.js";
 import { recordAllocationReceipt, recordDiagnostic } from "../diagnostics.js";
 import { mintEffectRef } from "../../effect/effect-ref.js";
 import {
@@ -264,6 +265,11 @@ export function allocateThoughtProjection(
     required_overflow_count: 0,
   };
 
+  const coverageManifest = buildAllocationCoverageManifest({
+    included: includedCandidates,
+    omitted: omittedCandidateData,
+  });
+
   const semanticProjectionHash = computeSemanticProjectionHash(finalProjected);
   const dispatchMessagesHash = computeDispatchMessagesHash(finalMessages);
 
@@ -274,6 +280,7 @@ export function allocateThoughtProjection(
     policyId: "thought-projection-v1",
     policyVersion: 1,
     semanticProjectionEnvelope: budget.semanticProjectionEnvelope,
+    coverageManifest,
     tokenBreakdown,
     quotaBucket: budget.quotaBucket,
     hardTpm: budget.hardTpm,
