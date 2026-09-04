@@ -107,12 +107,13 @@ export function proveNoExternalDispatch(db: DatabaseSync, eventId: string): NoDi
   if (outbox) return { ok: false, eventId, reason: "speech_outbox_present" };
 
   // 4. System-notice outbox for this cycle proves owner-visible dispatch.
+  // UNKNOWN != ABSENT: a query/inspection failure is PROOF_UNAVAILABLE and
+  // must fail closed, never fall through as proven absent.
   try {
     const notice = row(db.prepare("SELECT notice_id FROM system_notice_outbox WHERE cycle_id = ? LIMIT 1").get(cycleId));
     if (notice) return { ok: false, eventId, reason: "system_notice_present" };
   } catch {
-    // A missing notice table fails closed only if the query itself is unavailable;
-    // absence of a row is proof-positive and falls through.
+    return { ok: false, eventId, reason: "proof_unavailable" };
   }
 
   // 5. A lineage attempt that already records attempted/responded dispatch truth

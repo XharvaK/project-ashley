@@ -152,4 +152,118 @@ describe("durable-work startup outcome-unknown recovery", () => {
       db.close();
     }
   });
+
+  it("fails closed when a mandatory proof-surface inspection throws (UNKNOWN != ABSENT)", () => {
+    const db = openTestSidecar();
+    try {
+      const { eventId, wakeId, cycleId } = seedStrandedFixture(db, "gen15-proof-fault");
+      // Sanity: this fixture would otherwise qualify for safe retry.
+      expect(proveNoExternalDispatch(db, eventId).ok).toBe(true);
+      const cycleBefore = getCycle(db, cycleId);
+      const attemptsBefore = (db.prepare("SELECT COUNT(*) AS count FROM durable_work_attempts WHERE event_id = ?").get(eventId) as { count: number }).count;
+      // Smallest deterministic fault injection: fail one mandatory proof-surface
+      // inspection only. No database corruption; the prepared-statement seam
+      // throws for the system-notice surface.
+      const originalPrepare = db.prepare.bind(db);
+      (db as unknown as { prepare: unknown }).prepare = (sql: string, ...rest: unknown[]) => {
+        if (typeof sql === "string" && sql.includes("system_notice_outbox")) {
+          throw new Error("proof_surface_unavailable");
+        }
+        return (originalPrepare as (...args: unknown[]) => unknown)(sql, ...rest);
+      };
+      let proof: ReturnType<typeof proveNoExternalDispatch>;
+      let recovered: ReturnType<typeof reconcileStrandedOutcomeUnknownAtStartup>;
+      try {
+        proof = proveNoExternalDispatch(db, eventId);
+        recovered = reconcileStrandedOutcomeUnknownAtStartup(db, { nowMs: 1_200 });
+      } finally {
+        (db as unknown as { prepare: unknown }).prepare = originalPrepare;
+      }
+      // Inspection failure must never license safe retry.
+      expect(proof!.ok).toBe(false);
+      expect(recovered!.recoveredToPending).toBe(0);
+      expect(recovered!.leftReconciling).toBe(1);
+      expect(db.prepare("SELECT state FROM inbox_events WHERE id = ?").get(eventId)).toMatchObject({
+        state: "reconciling",
+      });
+      expect(db.prepare("SELECT state FROM wakes WHERE wake_id = ?").get(wakeId)).toMatchObject({
+        state: "reconciling",
+      });
+      expect(getCycle(db, cycleId)?.state).toBe("thinking");
+      expect(getCycle(db, cycleId)?.generation).toBe(cycleBefore?.generation);
+      expect(getCycle(db, cycleId)?.cycleId).toBe(cycleId);
+      expect(
+        (db.prepare("SELECT COUNT(*) AS count FROM durable_work_attempts WHERE event_id = ?").get(eventId) as { count: number }).count,
+      ).toBe(attemptsBefore);
+      expect(db.prepare("SELECT COUNT(*) AS count FROM settlements").get()).toMatchObject({ count: 0 });
+      expect(db.prepare("SELECT COUNT(*) AS count FROM speech_outbox").get()).toMatchObject({ count: 0 });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("is idempotent across repeated startup invocations", () => {
+    const db = openTestSidecar();
+    try {
+      const { eventId, wakeId, cycleId, generation, conversationId } = seedStrandedFixture(db, "gen15-idempotent");
+
+      const first = reconcileStrandedOutcomeUnknownAtStartup(db, { nowMs: 1_200 });
+      expect(first.recoveredToPending).toBe(1);
+      expect(first.recoveredEventIds).toEqual([eventId]);
+      expect(db.prepare("SELECT state, status FROM inbox_events WHERE id = ?").get(eventId)).toMatchObject({
+        state: "pending",
+        status: "pending",
+      });
+      expect(db.prepare("SELECT state FROM wakes WHERE wake_id = ?").get(wakeId)).toMatchObject({ state: "pending" });
+      expect(getCycle(db, cycleId)?.cycleId).toBe(cycleId);
+      expect(getCycle(db, cycleId)?.generation).toBe(generation);
+      expect(getInboxEvent(db, eventId)?.conversationId).toBe(conversationId);
+
+      const countsAfterFirst = {
+        inbox: (db.prepare("SELECT COUNT(*) AS count FROM inbox_events").get() as { count: number }).count,
+        wakes: (db.prepare("SELECT COUNT(*) AS count FROM wakes").get() as { count: number }).count,
+        cycles: (db.prepare("SELECT COUNT(*) AS count FROM cycle_records").get() as { count: number }).count,
+        attempts: (db.prepare("SELECT COUNT(*) AS count FROM durable_work_attempts").get() as { count: number }).count,
+        settlements: (db.prepare("SELECT COUNT(*) AS count FROM settlements").get() as { count: number }).count,
+        outbox: (db.prepare("SELECT COUNT(*) AS count FROM speech_outbox").get() as { count: number }).count,
+      };
+
+      // Second startup pass must be a no-op for this obligation: recovery
+      // creates no attempt and the consumer (not recovery) owns the next claim.
+      const second = reconcileStrandedOutcomeUnknownAtStartup(db, { nowMs: 1_300 });
+      expect(second.scanned).toBe(0);
+      expect(second.recoveredToPending).toBe(0);
+      expect(second.leftReconciling).toBe(0);
+      expect(second.recoveredEventIds).toEqual([]);
+
+      expect(getInboxEvent(db, eventId)?.id).toBe(eventId);
+      expect(getWake(db, wakeId)?.wakeId).toBe(wakeId);
+      expect(getCycle(db, cycleId)?.cycleId).toBe(cycleId);
+      expect(getCycle(db, cycleId)?.generation).toBe(generation);
+      expect(db.prepare("SELECT state FROM inbox_events WHERE id = ?").get(eventId)).toMatchObject({
+        state: "pending",
+      });
+      expect(db.prepare("SELECT state FROM wakes WHERE wake_id = ?").get(wakeId)).toMatchObject({ state: "pending" });
+      expect((db.prepare("SELECT COUNT(*) AS count FROM inbox_events").get() as { count: number }).count).toBe(
+        countsAfterFirst.inbox,
+      );
+      expect((db.prepare("SELECT COUNT(*) AS count FROM wakes").get() as { count: number }).count).toBe(
+        countsAfterFirst.wakes,
+      );
+      expect((db.prepare("SELECT COUNT(*) AS count FROM cycle_records").get() as { count: number }).count).toBe(
+        countsAfterFirst.cycles,
+      );
+      expect((db.prepare("SELECT COUNT(*) AS count FROM durable_work_attempts").get() as { count: number }).count).toBe(
+        countsAfterFirst.attempts,
+      );
+      expect(db.prepare("SELECT COUNT(*) AS count FROM settlements").get()).toMatchObject({
+        count: countsAfterFirst.settlements,
+      });
+      expect(db.prepare("SELECT COUNT(*) AS count FROM speech_outbox").get()).toMatchObject({
+        count: countsAfterFirst.outbox,
+      });
+    } finally {
+      db.close();
+    }
+  });
 });
