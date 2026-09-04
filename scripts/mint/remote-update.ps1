@@ -49,6 +49,20 @@ if ($PushFirst) {
 
 $target = "${User}@${HostName}"
 
+# Exact-candidate truth: pin the intended Windows HEAD (SHA + tree) and require
+# Mint to activate exactly that commit. PowerShell single quotes pass the
+# revision through to git literally (unquoted HEAD^{tree} is a quoting hazard).
+Push-Location $RepoRoot
+$localSha = (git rev-parse HEAD).Trim()
+$localTree = (git rev-parse 'HEAD^{tree}').Trim()
+Pop-Location
+if ([string]::IsNullOrWhiteSpace($localSha) -or [string]::IsNullOrWhiteSpace($localTree)) {
+  Write-Host "Cannot determine local candidate SHA/tree."
+  exit 1
+}
+Write-Host "LOCAL_EXPECTED_SHA=$localSha"
+Write-Host "LOCAL_EXPECTED_TREE=$localTree"
+
 # LF-only remote script (CRLF breaks bash on Mint). Pull, then exec the
 # checked-out activator so the first Slice C deploy cannot keep running
 # old update.sh semantics after the files change on disk.
@@ -61,6 +75,8 @@ $activate = @(
   'CANDIDATE_SHA=$(git rev-parse HEAD)',
   'if [ -z "$CANDIDATE_SHA" ]; then echo empty candidate SHA >&2; exit 1; fi',
   'echo "CANDIDATE_SHA=$CANDIDATE_SHA"',
+  "export ASHLEY_EXPECTED_SHA=$localSha",
+  "export ASHLEY_EXPECTED_TREE=$localTree",
   'exec bash deploy/linux-mint/update.sh'
 )
 

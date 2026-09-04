@@ -39,12 +39,19 @@ function createFixture() {
   mkdirSync(unitDir, { recursive: true });
   mkdirSync(fakeBin, { recursive: true });
   mkdirSync(state, { recursive: true });
-  for (const app of ["sandbox-tree", "sandbox-broker", "sandbox-v2", "agent-service", "discord-bot"]) {
+  for (const app of ["sandbox-policy", "sandbox-m1", "sandbox-tree", "sandbox-broker", "sandbox-v2", "agent-service", "discord-bot"]) {
     mkdirSync(path.join(repo, "apps", app), { recursive: true });
+    // Steady-state Mint always has installed node_modules from the last
+    // successful activation; impact-aware plans skip npm ci on that basis.
+    mkdirSync(path.join(repo, "apps", app, "node_modules"), { recursive: true });
   }
   copyFileSync(
     path.join(ROOT, "deploy", "linux-mint", "update.sh"),
     path.join(repo, "deploy", "linux-mint", "update.sh"),
+  );
+  copyFileSync(
+    path.join(ROOT, "deploy", "linux-mint", "plan-update.sh"),
+    path.join(repo, "deploy", "linux-mint", "plan-update.sh"),
   );
   copyFileSync(
     path.join(ROOT, "deploy", "linux-mint", "sync-user-units.sh"),
@@ -74,7 +81,37 @@ function createFixture() {
     `#!/bin/sh
 echo "git $*" >> "${pLog}"
 case "$1" in
-  rev-parse) printf '%s\\n' "\${ASHLEY_FAKE_SHA:-cafef00d}" ;;
+  rev-parse)
+    case "\${2:-}" in
+      *tree*) printf '%s\\n' "\${ASHLEY_FAKE_TREE:-tree0000000000000000000000000000000000000}" ;;
+      *) printf '%s\\n' "\${ASHLEY_FAKE_SHA:-cafef00d}" ;;
+    esac
+    ;;
+  diff)
+    if [ "\${2:-}" = "--name-only" ]; then
+      printf '%s\\n' "\${ASHLEY_FAKE_NAMES:-}"
+    else
+      printf '%s\\n' "\${ASHLEY_FAKE_DIFF:-}"
+    fi
+    ;;
+  cat-file)
+    # invoked as: git cat-file -e "<sha>^{commit}"
+    sha="\${3%\\^{commit\\}}"
+    case " \${ASHLEY_FAKE_COMMITS:-} " in
+      *" $sha "*) exit 0 ;;
+      *) exit 1 ;;
+    esac
+    ;;
+  merge-base)
+    [ "\${ASHLEY_FAKE_ANCESTOR:-1}" = "1" ]
+    exit $?
+    ;;
+  status)
+    if [ "\${ASHLEY_FAKE_DIRTY:-}" = "1" ]; then
+      printf ' M apps/agent-service/src/dirty.ts\\n'
+    fi
+    exit 0
+    ;;
   pull) echo "git pull is not allowed in update.sh" >&2; exit 2 ;;
   *) exit 0 ;;
 esac
@@ -91,9 +128,14 @@ for arg in "$@"; do
   prev="$arg"
 done
 if [ "\${ASHLEY_NPM_FAIL:-}" = "1" ]; then exit 1; fi
-if [ -n "$prefix" ]; then
+if [ -n "$prefix" ] && [ "\${ASHLEY_NPM_SKIP_DIST:-}" != "1" ]; then
+  base="\$(basename "$prefix")"
   mkdir -p "$prefix/dist"
-  printf 'export {}\\n' > "$prefix/dist/index.js"
+  if [ "$base" = "sandbox-m1" ]; then
+    printf 'export {}\\n' > "$prefix/dist/sandbox-m1.js"
+  else
+    printf 'export {}\\n' > "$prefix/dist/index.js"
+  fi
 fi
 exit 0
 `,
@@ -124,7 +166,7 @@ while [ "$#" -gt 0 ]; do
     --quiet) quiet=1; shift; continue ;;
     --value) value_only=1; shift; continue ;;
     -p) props="$props $2"; shift 2; continue ;;
-    stop|start|is-active|daemon-reload|show|status)
+    stop|start|is-active|daemon-reload|show|status|restart)
       cmd="$1"; shift; break ;;
     *) shift; continue ;;
   esac
@@ -159,6 +201,11 @@ case "\$cmd" in
     exit 0
     ;;
   start)
+    if [ "\${ASHLEY_FAKE_START_FAIL:-}" = "1" ]; then exit 1; fi
+    for unit in \$units; do write_state "\$unit" active; done
+    exit 0
+    ;;
+  restart)
     if [ "\${ASHLEY_FAKE_START_FAIL:-}" = "1" ]; then exit 1; fi
     for unit in \$units; do write_state "\$unit" active; done
     exit 0
@@ -232,9 +279,85 @@ function firstIndex(lines, prefix) {
   return lines.findIndex((line) => line.startsWith(prefix) || line.includes(prefix));
 }
 
-test("update.sh does not fetch or merge", () => {
-  const source = readFileSync(path.join(ROOT, "deploy", "linux-mint", "update.sh"), "utf8");
-  assert.equal(/\bgit\s+pull\b/.test(source), false);
+// ---- Surgery A impact-aware helpers ----
+
+const SHA_A = "a".repeat(40);
+const SHA_B = "b".repeat(40);
+const TREE_B = "c".repeat(40);
+
+function parsePlan(stdout) {
+  const plan = {};
+  for (const line of stdout.split(/\r?\n/)) {
+    const eq = line.indexOf("=");
+    if (eq > 0) plan[line.slice(0, eq)] = line.slice(eq + 1);
+  }
+  return plan;
+}
+
+function runPlanner(fixture, base, target, extra = {}) {
+  const script = posix(path.join(ROOT, "deploy", "linux-mint", "plan-update.sh"));
+  const result = spawnSync(
+    BASH,
+    ["-c", `export PATH="${posix(fixture.fakeBin)}:/usr/bin:/bin"; exec bash "${script}" "${base}" "${target}"`],
+    { encoding: "utf8", env: bashEnv(fixture, extra) },
+  );
+  assert.equal(result.status, 0, `planner failed: ${result.stderr}`);
+  return parsePlan(result.stdout);
+}
+
+function impactEnv(fixture, diff, extra = {}) {
+  return {
+    ASHLEY_FAKE_SHA: SHA_B,
+    ASHLEY_FAKE_TREE: TREE_B,
+    ASHLEY_FAKE_COMMITS: `${SHA_A} ${SHA_B}`,
+    ASHLEY_FAKE_ANCESTOR: "1",
+    ASHLEY_FAKE_DIFF: diff,
+    ...extra,
+  };
+}
+
+function runImpactedUpdate(fixture, markerSha, diff, extra = {}) {
+  const markerPath = path.join(fixture.root, "activated-sha");
+  if (markerSha !== null) writeFileSync(markerPath, `${markerSha}\n`);
+  const result = runUpdate(fixture, {
+    ...impactEnv(fixture, diff, extra),
+    ASHLEY_ACTIVATED_SHA_FILE: posix(markerPath),
+  });
+  return { result, markerPath };
+}
+
+function readMarker(markerPath) {
+  try {
+    return readFileSync(markerPath, "utf8").trim();
+  } catch {
+    return null;
+  }
+}
+
+function buildPackages(fixture) {
+  return commands(fixture)
+    .filter((line) => line.startsWith("npm run build --prefix "))
+    .map((line) => path.basename(line.slice("npm run build --prefix ".length)));
+}
+
+function ciPackages(fixture) {
+  return commands(fixture)
+    .filter((line) => line.startsWith("npm ci --prefix "))
+    .map((line) => path.basename(line.slice("npm ci --prefix ".length)));
+}
+
+function hasServiceOp(fixture, verb, unit) {
+  return commands(fixture).some((line) => line.includes(`${verb} `) && line.includes(unit));
+}
+
+test("update.sh and plan-update.sh do not fetch or merge", () => {
+  for (const rel of ["deploy/linux-mint/update.sh", "deploy/linux-mint/plan-update.sh"]) {
+    const source = readFileSync(path.join(ROOT, rel), "utf8");
+    assert.equal(/\bgit\s+pull(\s|$)/.test(source), false, `${rel} must not pull`);
+    assert.equal(/\bgit\s+fetch(\s|$)/.test(source), false, `${rel} must not fetch`);
+    assert.equal(/\bgit\s+merge(\s|$)/.test(source), false, `${rel} must not merge`);
+    assert.equal(/\bgit\s+checkout(\s|$)/.test(source), false, `${rel} must not checkout`);
+  }
 });
 
 test("remote-update.ps1 checks out then execs the candidate activator", () => {
@@ -362,4 +485,384 @@ test("probe qualifier refuses production Ashley unit names", () => {
   );
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /refusing to use production Ashley unit/);
+});
+
+test("probe qualifier refuses production Ashley unit names", () => {
+  const result = spawnSync(
+    BASH,
+    [posix(path.join(ROOT, "deploy", "linux-mint", "qualify-coherent-activation.sh"))],
+    {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        ASHLEY_SLICE_C_PROBE: "ashley-agent.service",
+      },
+    },
+  );
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /refusing to use production Ashley unit/);
+});
+
+// ---- Surgery A: impact-aware planning and activation ----
+
+test("remote-update.ps1 pins exact candidate SHA/tree for Mint to enforce", () => {
+  const source = readFileSync(path.join(ROOT, "scripts", "mint", "remote-update.ps1"), "utf8");
+  assert.ok(source.includes("git rev-parse 'HEAD^{tree}'"), "tree revision must be single-quoted");
+  assert.ok(source.includes("export ASHLEY_EXPECTED_SHA=$localSha"));
+  assert.ok(source.includes("export ASHLEY_EXPECTED_TREE=$localTree"));
+  const shaAt = source.indexOf("ASHLEY_EXPECTED_SHA=$localSha");
+  const execAt = source.indexOf("exec bash deploy/linux-mint/update.sh");
+  assert.ok(shaAt > 0 && shaAt < execAt, "expectation must precede the exec'd activator");
+});
+
+test("T1 planner: agent-service source builds only agent-service", () => {
+  const fixture = createFixture();
+  const plan = runPlanner(fixture, SHA_A, SHA_B, impactEnv(fixture, "M\tapps/agent-service/src/core/foo.ts"));
+  assert.equal(plan.MODE, "impact_aware");
+  assert.equal(plan.BUILD, "agent-service");
+  assert.equal(plan.NPMCI, "");
+  assert.equal(plan.STOP, "ashley-agent.service");
+  assert.equal(plan.RESTART, "ashley-agent.service");
+});
+
+test("T1 agent-only deploy stops/restarts agent only and records activation", () => {
+  const fixture = createFixture();
+  const { result, markerPath } = runImpactedUpdate(fixture, SHA_A, "M\tapps/agent-service/src/core/foo.ts");
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.deepEqual(buildPackages(fixture), ["agent-service"]);
+  assert.deepEqual(ciPackages(fixture), []);
+  assert.ok(hasServiceOp(fixture, "stop", "ashley-agent.service"));
+  assert.ok(!hasServiceOp(fixture, "stop", "ashley-discord.service"), "discord must keep running");
+  assert.ok(!hasServiceOp(fixture, "start", "ashley-discord.service"));
+  assert.ok(!hasServiceOp(fixture, "restart", "ashley-discord.service"));
+  assert.match(result.stdout, /mode: impact_aware/);
+  assert.equal(readMarker(markerPath), SHA_B);
+});
+
+test("T2 discord-only deploy builds/restarts discord only", () => {
+  const fixture = createFixture();
+  const plan = runPlanner(fixture, SHA_A, SHA_B, impactEnv(fixture, "M\tapps/discord-bot/src/client.ts"));
+  assert.equal(plan.BUILD, "discord-bot");
+  assert.equal(plan.STOP, "ashley-discord.service");
+  assert.equal(plan.RESTART, "ashley-discord.service");
+  const { result, markerPath } = runImpactedUpdate(fixture, SHA_A, "M\tapps/discord-bot/src/client.ts");
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.deepEqual(buildPackages(fixture), ["discord-bot"]);
+  assert.ok(!hasServiceOp(fixture, "stop", "ashley-agent.service"), "agent must keep running");
+  assert.ok(!hasServiceOp(fixture, "start", "ashley-agent.service"));
+  assert.ok(!hasServiceOp(fixture, "restart", "ashley-agent.service"));
+  assert.equal(readMarker(markerPath), SHA_B);
+});
+
+test("T3 sandbox-v2 change builds v2 then agent, restarts agent only", () => {
+  const fixture = createFixture();
+  const plan = runPlanner(fixture, SHA_A, SHA_B, impactEnv(fixture, "M\tapps/sandbox-v2/src/dispatch.ts"));
+  assert.equal(plan.BUILD, "sandbox-v2 agent-service");
+  assert.equal(plan.RESTART, "ashley-agent.service");
+  const { result, markerPath } = runImpactedUpdate(fixture, SHA_A, "M\tapps/sandbox-v2/src/dispatch.ts");
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.deepEqual(buildPackages(fixture), ["sandbox-v2", "agent-service"]);
+  assert.ok(hasServiceOp(fixture, "stop", "ashley-agent.service"));
+  assert.ok(!hasServiceOp(fixture, "stop", "ashley-discord.service"));
+  assert.equal(readMarker(markerPath), SHA_B);
+});
+
+test("T4 sandbox-policy change builds canonical closure without sandbox-m1", () => {
+  const fixture = createFixture();
+  const plan = runPlanner(fixture, SHA_A, SHA_B, impactEnv(fixture, "M\tapps/sandbox-policy/src/policy.ts"));
+  assert.equal(plan.BUILD, "sandbox-policy sandbox-tree sandbox-broker sandbox-v2 agent-service");
+  assert.equal(plan.RESTART, "ashley-agent.service");
+  const { result } = runImpactedUpdate(fixture, SHA_A, "M\tapps/sandbox-policy/src/policy.ts");
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.deepEqual(buildPackages(fixture), [
+    "sandbox-policy",
+    "sandbox-tree",
+    "sandbox-broker",
+    "sandbox-v2",
+    "agent-service",
+  ]);
+  assert.ok(!hasServiceOp(fixture, "stop", "ashley-discord.service"));
+});
+
+test("T5 test-only change is a noop deploy with health still verified", () => {
+  const fixture = createFixture();
+  const plan = runPlanner(
+    fixture,
+    SHA_A,
+    SHA_B,
+    impactEnv(fixture, "M\tapps/agent-service/src/core/foo.test.ts"),
+  );
+  assert.equal(plan.MODE, "impact_aware");
+  assert.equal(plan.BUILD, "");
+  assert.equal(plan.NPMCI, "");
+  assert.equal(plan.STOP, "");
+  assert.equal(plan.RESTART, "");
+  const { result, markerPath } = runImpactedUpdate(
+    fixture,
+    SHA_A,
+    "M\tapps/agent-service/src/core/foo.test.ts",
+  );
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.equal(commands(fixture).some((line) => line.startsWith("npm ")), false);
+  assert.equal(commands(fixture).some((line) => / (stop|start|restart) ashley-/.test(line)), false);
+  assert.ok(commands(fixture).some((line) => line.startsWith("curl ")), "health must still be verified");
+  assert.equal(readMarker(markerPath), SHA_B);
+});
+
+test("T6 docs-only change is a noop deploy", () => {
+  const fixture = createFixture();
+  const plan = runPlanner(fixture, SHA_A, SHA_B, impactEnv(fixture, "M\tdocs/guide.md"));
+  assert.equal(plan.MODE, "impact_aware");
+  assert.equal(plan.BUILD, "");
+  const { result, markerPath } = runImpactedUpdate(fixture, SHA_A, "M\tdocs/guide.md");
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.equal(commands(fixture).some((line) => line.startsWith("npm ")), false);
+  assert.equal(readMarker(markerPath), SHA_B);
+});
+
+test("T7 lockfile change installs only the affected package plus closure build", () => {
+  const fixture = createFixture();
+  const plan = runPlanner(
+    fixture,
+    SHA_A,
+    SHA_B,
+    impactEnv(fixture, "M\tapps/sandbox-v2/package-lock.json"),
+  );
+  assert.equal(plan.BUILD, "sandbox-v2 agent-service");
+  assert.equal(plan.NPMCI, "sandbox-v2");
+  const { result } = runImpactedUpdate(fixture, SHA_A, "M\tapps/sandbox-v2/package-lock.json");
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.deepEqual(ciPackages(fixture), ["sandbox-v2"]);
+  assert.deepEqual(buildPackages(fixture), ["sandbox-v2", "agent-service"]);
+});
+
+test("T8 unknown path falls back to the full broad deploy including npm ci x7", () => {
+  const fixture = createFixture();
+  const plan = runPlanner(fixture, SHA_A, SHA_B, impactEnv(fixture, "M\tsome/new/tool.bin"));
+  assert.equal(plan.MODE, "full_fallback");
+  assert.match(plan.FALLBACK_REASON, /unknown_path/);
+  assert.equal(
+    plan.BUILD,
+    "sandbox-policy sandbox-m1 sandbox-tree sandbox-broker sandbox-v2 agent-service discord-bot",
+  );
+  const { result, markerPath } = runImpactedUpdate(fixture, SHA_A, "M\tsome/new/tool.bin");
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stdout, /mode: full_fallback/);
+  assert.deepEqual(buildPackages(fixture), [
+    "sandbox-policy",
+    "sandbox-m1",
+    "sandbox-tree",
+    "sandbox-broker",
+    "sandbox-v2",
+    "agent-service",
+    "discord-bot",
+  ]);
+  assert.equal(ciPackages(fixture).length, 7);
+  assert.ok(hasServiceOp(fixture, "stop", "ashley-agent.service"));
+  assert.ok(hasServiceOp(fixture, "stop", "ashley-discord.service"));
+  assert.equal(readMarker(markerPath), SHA_B);
+});
+
+test("T9 missing marker falls back once, then records activation on success", () => {
+  const fixture = createFixture();
+  const before = runPlanner(fixture, "", SHA_B, impactEnv(fixture, ""));
+  assert.equal(before.MODE, "full_fallback");
+  assert.equal(before.FALLBACK_REASON, "marker_missing");
+  // Default marker path (no override): $HOME/.composer-assistant/deploy/activated-sha.
+  const result = runUpdate(fixture, impactEnv(fixture, ""));
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.deepEqual(buildPackages(fixture), [
+    "sandbox-policy",
+    "sandbox-m1",
+    "sandbox-tree",
+    "sandbox-broker",
+    "sandbox-v2",
+    "agent-service",
+    "discord-bot",
+  ]);
+  const markerPath = path.join(fixture.home, ".composer-assistant", "deploy", "activated-sha");
+  assert.equal(readMarker(markerPath), SHA_B);
+});
+
+test("T10 malformed, unknown, and non-ancestor markers all fall back safely", () => {
+  const fixture = createFixture();
+  assert.equal(
+    runPlanner(fixture, "not-a-sha", SHA_B, impactEnv(fixture, "")).FALLBACK_REASON,
+    "marker_malformed",
+  );
+  assert.equal(
+    runPlanner(fixture, SHA_A, SHA_B, { ...impactEnv(fixture, ""), ASHLEY_FAKE_COMMITS: SHA_B })
+      .FALLBACK_REASON,
+    "marker_unknown_commit",
+  );
+  assert.equal(
+    runPlanner(fixture, SHA_A, SHA_B, { ...impactEnv(fixture, ""), ASHLEY_FAKE_ANCESTOR: "0" })
+      .FALLBACK_REASON,
+    "marker_not_ancestor",
+  );
+  // A rerun with a non-ancestor marker still preserves the old marker value.
+  const { result, markerPath } = runImpactedUpdate(fixture, SHA_A, "", { ASHLEY_FAKE_ANCESTOR: "0" });
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stdout, /mode: full_fallback/);
+  assert.equal(readMarker(markerPath), SHA_B);
+});
+
+test("T11 interrupted deploy preserves marker A, rerun rebuilds full closure", () => {
+  const fixture = createFixture();
+  const diff = "M\tapps/sandbox-v2/src/dispatch.ts";
+  const first = runImpactedUpdate(fixture, SHA_A, diff, { ASHLEY_FAIL_AT: "build" });
+  assert.notEqual(first.result.status, 0);
+  assert.equal(commands(fixture).some((line) => line.startsWith("npm ")), false);
+  assert.equal(readMarker(first.markerPath), SHA_A);
+  assert.equal(readFileSync(path.join(fixture.state, "ashley-agent.service"), "utf8").trim(), "inactive");
+  const second = runImpactedUpdate(fixture, SHA_A, diff);
+  assert.equal(second.result.status, 0, `${second.result.stdout}\n${second.result.stderr}`);
+  assert.deepEqual(buildPackages(fixture), ["sandbox-v2", "agent-service"]);
+  assert.equal(readMarker(second.markerPath), SHA_B);
+});
+
+test("T12 agent health failure preserves marker A", () => {
+  const fixture = createFixture();
+  const { result, markerPath } = runImpactedUpdate(fixture, SHA_A, "M\tapps/agent-service/src/core/foo.ts", {
+    ASHLEY_CURL_FAIL: "1",
+  });
+  assert.notEqual(result.status, 0);
+  assert.ok(buildPackages(fixture).length > 0, "builds ran before the health gate");
+  assert.equal(readMarker(markerPath), SHA_A);
+});
+
+test("T13 service start failure preserves marker A", () => {
+  const fixture = createFixture();
+  const { result, markerPath } = runImpactedUpdate(fixture, SHA_A, "M\tapps/agent-service/src/core/foo.ts", {
+    ASHLEY_FAKE_START_FAIL: "1",
+  });
+  assert.notEqual(result.status, 0);
+  assert.equal(readMarker(markerPath), SHA_A);
+});
+
+test("T14 expected SHA/tree mismatch fails before any activation mutation", () => {
+  const fixture = createFixture();
+  const mismatch = runImpactedUpdate(fixture, null, "", {
+    ASHLEY_EXPECTED_SHA: "d".repeat(40),
+  });
+  assert.notEqual(mismatch.result.status, 0);
+  assert.match(mismatch.result.stderr, /expected SHA mismatch/);
+  assert.equal(commands(fixture).some((line) => line.includes("stop ")), false);
+  assert.equal(readMarker(mismatch.markerPath), null);
+  const treeMismatch = runImpactedUpdate(fixture, null, "", {
+    ASHLEY_EXPECTED_SHA: SHA_B,
+    ASHLEY_EXPECTED_TREE: "e".repeat(40),
+  });
+  assert.notEqual(treeMismatch.result.status, 0);
+  assert.match(treeMismatch.result.stderr, /expected tree mismatch/);
+  // Matching expectation proceeds (fallback: no marker yet).
+  const ok = runImpactedUpdate(fixture, null, "", {
+    ASHLEY_EXPECTED_SHA: SHA_B,
+    ASHLEY_EXPECTED_TREE: TREE_B,
+  });
+  assert.equal(ok.result.status, 0, `${ok.result.stdout}\n${ok.result.stderr}`);
+});
+
+test("T15/T16 already-activated target is a noop with health still verified", () => {
+  const fixture = createFixture();
+  const plan = runPlanner(fixture, SHA_B, SHA_B, impactEnv(fixture, ""));
+  assert.equal(plan.MODE, "impact_aware");
+  assert.equal(plan.BUILD, "");
+  assert.equal(plan.NPMCI, "");
+  assert.equal(plan.STOP, "");
+  assert.equal(plan.RESTART, "");
+  const { result, markerPath } = runImpactedUpdate(fixture, SHA_B, "");
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.equal(commands(fixture).some((line) => line.startsWith("npm ")), false);
+  assert.equal(commands(fixture).some((line) => / (stop|start|restart) ashley-/.test(line)), false);
+  assert.ok(commands(fixture).some((line) => line.startsWith("curl ")), "health must still be verified");
+  assert.match(result.stdout, /TARGET_SHA=/);
+  assert.equal(readMarker(markerPath), SHA_B);
+});
+
+test("T17 every subset closure preserves canonical topological order", () => {
+  const fixture = createFixture();
+  const cases = [
+    ["M\tapps/sandbox-m1/src/sandbox-m1.ts", "sandbox-m1 sandbox-v2 agent-service"],
+    ["M\tapps/sandbox-tree/src/index.ts", "sandbox-tree sandbox-broker sandbox-v2 agent-service"],
+    ["M\tapps/sandbox-broker/src/index.ts", "sandbox-broker agent-service"],
+    ["M\tapps/discord-bot/src/index.ts", "discord-bot"],
+  ];
+  for (const [diff, want] of cases) {
+    const plan = runPlanner(fixture, SHA_A, SHA_B, impactEnv(fixture, diff));
+    assert.equal(plan.BUILD, want, diff);
+  }
+});
+
+test("T18 unit-only change restarts only the affected service with no build", () => {
+  const fixture = createFixture();
+  const plan = runPlanner(
+    fixture,
+    SHA_A,
+    SHA_B,
+    impactEnv(fixture, "M\tdeploy/linux-mint/systemd/ashley-discord.service"),
+  );
+  assert.equal(plan.MODE, "impact_aware");
+  assert.equal(plan.BUILD, "");
+  assert.equal(plan.STOP, "");
+  assert.equal(plan.RESTART, "ashley-discord.service");
+  const { result, markerPath } = runImpactedUpdate(
+    fixture,
+    SHA_A,
+    "M\tdeploy/linux-mint/systemd/ashley-discord.service",
+  );
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.equal(commands(fixture).some((line) => line.startsWith("npm ")), false);
+  assert.ok(hasServiceOp(fixture, "restart", "ashley-discord.service"));
+  assert.ok(!hasServiceOp(fixture, "stop", "ashley-agent.service"));
+  assert.ok(!hasServiceOp(fixture, "start", "ashley-agent.service"));
+  assert.ok(!hasServiceOp(fixture, "restart", "ashley-agent.service"));
+  assert.equal(readMarker(markerPath), SHA_B);
+});
+
+test("T19 deletion and rename classify to the owning package closure", () => {
+  const fixture = createFixture();
+  const del = runPlanner(fixture, SHA_A, SHA_B, impactEnv(fixture, "D\tapps/sandbox-tree/src/old.ts"));
+  assert.equal(del.BUILD, "sandbox-tree sandbox-broker sandbox-v2 agent-service");
+  const ren = runPlanner(
+    fixture,
+    SHA_A,
+    SHA_B,
+    impactEnv(fixture, "R100\tapps/agent-service/src/a.ts\tapps/agent-service/src/b.ts"),
+  );
+  assert.equal(ren.BUILD, "agent-service");
+});
+
+test("T20 missing build output fails activation and preserves marker", () => {
+  const fixture = createFixture();
+  const { result, markerPath } = runImpactedUpdate(fixture, SHA_A, "M\tapps/agent-service/src/core/foo.ts", {
+    ASHLEY_NPM_SKIP_DIST: "1",
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /missing runtime artifact/);
+  assert.equal(readMarker(markerPath), SHA_A);
+});
+
+test("T10b dirty tracked worktree fails closed before mutation", () => {
+  const fixture = createFixture();
+  const { result, markerPath } = runImpactedUpdate(fixture, SHA_A, "M\tapps/agent-service/src/core/foo.ts", {
+    ASHLEY_FAKE_DIRTY: "1",
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /tracked worktree dirty/);
+  assert.equal(commands(fixture).some((line) => line.includes("stop ")), false);
+  assert.equal(readMarker(markerPath), SHA_A);
+});
+
+test("privacy-core and runtime config changes restart agent without a build", () => {
+  const fixture = createFixture();
+  const priv = runPlanner(fixture, SHA_A, SHA_B, impactEnv(fixture, "M\tpackages/privacy-core/index.js"));
+  assert.equal(priv.BUILD, "");
+  assert.equal(priv.RESTART, "ashley-agent.service");
+  const cfg = runPlanner(fixture, SHA_A, SHA_B, impactEnv(fixture, "M\tconfig/models.json"));
+  assert.equal(cfg.BUILD, "");
+  assert.equal(cfg.RESTART, "ashley-agent.service");
+  const games = runPlanner(fixture, SHA_A, SHA_B, impactEnv(fixture, "M\tconfig/games.json"));
+  assert.equal(games.BUILD, "");
+  assert.equal(games.RESTART, "");
 });
