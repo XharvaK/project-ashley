@@ -12,6 +12,7 @@ import { ensureAuthoritativeLineage, openContinuityDb } from "../../../../contin
 import { buildOrientationKernel } from "../../orientation-kernel.js";
 import type { DomainPointersSection } from "../../domain-pointers.js";
 import { buildCoverageManifest } from "../../coverage-manifest.js";
+import { modelVisibleThoughtProjection } from "../../projection.js";
 
 function makeThoughtInput(overrides: Partial<ThoughtInput> = {}): ThoughtInput {
   return {
@@ -631,7 +632,7 @@ describe("Whole-Thought Projection Allocator", () => {
       system_prefix_estimated_tokens: allocated.receipt.tokenBreakdown.static_contract_tokens,
       candidate_S0_S1_prefix_bytes: expect.any(Number),
       candidate_S0_S1_prefix_estimated_tokens: expect.any(Number),
-      first_volatile_field: "cycleId",
+      first_volatile_field: "rawConversation",
       first_volatile_byte_offset: expect.any(Number),
       allocation_candidate_count: candidateCount,
       renderTentative_call_count: candidateCount + 1,
@@ -645,6 +646,95 @@ describe("Whole-Thought Projection Allocator", () => {
     expect(diagnostics?.candidate_S0_S1_prefix_bytes).toBeGreaterThan(systemMessageBytes);
     expect(diagnostics?.allocation_elapsed_ms).toBeGreaterThanOrEqual(0);
     expect(JSON.stringify(diagnostics)).not.toContain("Hello Ashley");
+  });
+
+  it("uses stable-first visible key ordering without changing projected keys or values", () => {
+    const allocated = allocateThoughtProjection({
+      thoughtInput: withSyntheticC2(makeThoughtInput()),
+      requestId: "req-w1-key-order",
+    });
+    const visible = modelVisibleThoughtProjection(allocated.projected);
+    const serialized = JSON.parse(allocated.messages[1]?.content ?? "{}") as Record<string, unknown>;
+
+    expect(Object.keys(serialized)).toEqual([
+      "orientationKernel",
+      "learnedSelfSlice",
+      "occupantId",
+      "authorityEpoch",
+      "workingContext",
+      "occupancy",
+      "domainPointers",
+      "rawConversation",
+      "retrieval",
+      "cycleId",
+      "generation",
+      "trigger",
+      "observations",
+      "inFlight",
+      "authorityObjections",
+      "runtimeCondition",
+      "rememberDirective",
+    ]);
+    expect(Object.keys(serialized).sort()).toEqual(Object.keys(visible).sort());
+    expect(serialized).toEqual(visible);
+  });
+
+  it("keeps the stable prefix byte-identical when only cycle and trigger data change", () => {
+    const first = allocateThoughtProjection({
+      thoughtInput: withSyntheticC2(makeThoughtInput({
+        cycleId: "cycle-w1-first",
+        generation: 1,
+        trigger: { kind: "owner_message", ref: "trigger-w1-first" },
+      })),
+      requestId: "req-w1-prefix-first",
+    });
+    const second = allocateThoughtProjection({
+      thoughtInput: withSyntheticC2(makeThoughtInput({
+        cycleId: "cycle-w1-second",
+        generation: 2,
+        trigger: { kind: "owner_message", ref: "trigger-w1-second" },
+      })),
+      requestId: "req-w1-prefix-second",
+    });
+
+    const firstJson = first.messages[1]?.content ?? "";
+    const secondJson = second.messages[1]?.content ?? "";
+    const firstS1End = firstJson.indexOf(',"workingContext":');
+    const secondS1End = secondJson.indexOf(',"workingContext":');
+
+    expect(firstS1End).toBeGreaterThan(0);
+    expect(secondS1End).toBeGreaterThan(0);
+    expect(firstJson.slice(0, firstS1End)).toBe(secondJson.slice(0, secondS1End));
+    expect(JSON.parse(firstJson).cycleId).not.toBe(JSON.parse(secondJson).cycleId);
+    expect(JSON.parse(firstJson).trigger).not.toEqual(JSON.parse(secondJson).trigger);
+    expect(first.receipt.diagnostics?.first_volatile_field).toBe("rawConversation");
+    expect(second.receipt.diagnostics?.first_volatile_field).toBe("rawConversation");
+  });
+
+  it("invalidates the stable prefix when canonical identity changes", () => {
+    const unchanged = allocateThoughtProjection({
+      thoughtInput: withSyntheticC2(makeThoughtInput()),
+      requestId: "req-w1-identity-unchanged",
+    });
+    const changedInput = withSyntheticC2(makeThoughtInput());
+    changedInput.orientationKernel = {
+      ...changedInput.orientationKernel,
+      values: ["changed canonical identity"],
+    };
+    const changed = allocateThoughtProjection({
+      thoughtInput: changedInput,
+      requestId: "req-w1-identity-changed",
+    });
+
+    const unchangedJson = unchanged.messages[1]?.content ?? "";
+    const changedJson = changed.messages[1]?.content ?? "";
+    const unchangedS1End = unchangedJson.indexOf(',"workingContext":');
+    const changedS1End = changedJson.indexOf(',"workingContext":');
+
+    expect(unchangedS1End).toBeGreaterThan(0);
+    expect(changedS1End).toBeGreaterThan(0);
+    expect(unchangedJson.slice(0, unchangedS1End))
+      .not.toBe(changedJson.slice(0, changedS1End));
   });
 
   it("attaches a structured coverage manifest to the allocation receipt", () => {

@@ -247,24 +247,30 @@ export function allocateThoughtProjection(
     const hasConversationSelection =
       c2Input.conversationSelection !== undefined || conversationOmittedIds.size > 0;
     const projected = {
-      cycleId: input.cycleId,
-      generation: input.generation,
+      ...(includeOrientationKernel && c2Input.orientationKernel !== undefined
+        ? { orientationKernel: c2Input.orientationKernel }
+        : {}),
+      learnedSelfSlice: input.learnedSelfSlice,
       occupantId: input.occupantId,
       authorityEpoch: input.authorityEpoch,
-      trigger: input.trigger,
-      rawConversation: orderedConversation(conversation),
+      constitution: input.constitution,
+      capabilityReality: input.capabilityReality,
       workingContext: wc,
       occupancy: input.occupancy,
-      constitution: input.constitution,
-      learnedSelfSlice: input.learnedSelfSlice,
-      capabilityReality: input.capabilityReality,
-      observations: input.observations,
+      ...(includeDomainPointers && c2Input.domainPointers !== undefined
+        ? { domainPointers: c2Input.domainPointers }
+        : {}),
+      rawConversation: orderedConversation(conversation),
       retrieval: {
         request: input.retrieval.request,
         hits: retrieval,
         state: input.retrieval.state,
         miss: isMiss,
       },
+      cycleId: input.cycleId,
+      generation: input.generation,
+      trigger: input.trigger,
+      observations: input.observations,
       inFlight: input.inFlight.map((item) => ({
         effectRef: mintEffectRef(input.cycleId, input.generation, item.effectId),
         status: item.status,
@@ -285,12 +291,6 @@ export function allocateThoughtProjection(
                 : { currentTriggerRowId: c2Input.conversationSelection.currentTriggerRowId }),
             },
           }
-        : {}),
-      ...(includeOrientationKernel && c2Input.orientationKernel !== undefined
-        ? { orientationKernel: c2Input.orientationKernel }
-        : {}),
-      ...(includeDomainPointers && c2Input.domainPointers !== undefined
-        ? { domainPointers: c2Input.domainPointers }
         : {}),
       ...(includeC3Experiences && c2Input.c3Experiences !== undefined
         ? {
