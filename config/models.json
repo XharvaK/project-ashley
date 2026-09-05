@@ -27,10 +27,10 @@
     },
     "thought": {
       "provider": "nim",
-      "configured_model_id": "openai/gpt-oss-20b",
+      "configured_model_id": "nvidia/nemotron-3-super-120b-a12b",
       "context_profile": "thought_summary",
       "enabled": true,
-      "quota_contract": { "rps": 30, "rpm": 600, "rpd": 600, "tpm": 16000, "tpd": 120000 }
+      "quota_contract": { "rps": 30, "rpm": 600, "rpd": 600, "tpm": 65536, "tpd": 120000 }
     },
     "utility_bulk": {
       "provider": "groq",

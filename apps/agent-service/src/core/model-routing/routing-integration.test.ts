@@ -46,11 +46,11 @@ describe("route-to-provider mapping", () => {
     expect(b.configuredModelId).toBe("nvidia/nemotron-3.5-lightning-30b-a3b");
   });
 
-  it("thought routes to the Mistral Small primary", () => {
+  it("thought routes to the NIM Nemotron 3 Super primary", () => {
     const b = resolveRoute("thought");
     expect(b.route).toBe("thought");
-    expect(b.provider).toBe("mistral");
-    expect(b.configuredModelId).toBe("mistral-small-2603");
+    expect(b.provider).toBe("nim");
+    expect(b.configuredModelId).toBe("nvidia/nemotron-3-super-120b-a12b");
   });
 
   it.each([
@@ -65,12 +65,12 @@ describe("route-to-provider mapping", () => {
   });
 
   it.each(["thought_observation", "reflection_initiative"])(
-    "Thought-owned purpose %s routes to Mistral Small rather than utility Lightning",
+    "Thought-owned purpose %s routes to NIM Super rather than utility Lightning",
     (purpose) => {
       const b = resolveRoute(purpose);
       expect(b.route).toBe("thought");
-      expect(b.provider).toBe("mistral");
-      expect(b.configuredModelId).toBe("mistral-small-2603");
+      expect(b.provider).toBe("nim");
+      expect(b.configuredModelId).toBe("nvidia/nemotron-3-super-120b-a12b");
     },
   );
 
@@ -83,8 +83,8 @@ describe("route-to-provider mapping", () => {
     expect(new Set(buckets)).toEqual(
       new Set(["nim:nvidia/nemotron-3.5-lightning-30b-a3b"]),
     );
-    expect(quotaBucketFor("mistral", "mistral-small-2603")).toBe(
-      "mistral:mistral-small-2603",
+    expect(quotaBucketFor("nim", "nvidia/nemotron-3-super-120b-a12b")).toBe(
+      "nim:nvidia/nemotron-3-super-120b-a12b",
     );
   });
 });
@@ -238,21 +238,27 @@ describe("shared NIM Lightning quota bucket at the dispatch layer", () => {
       env.groqApiKey = "";
       env.nimApiKey = "test";
       const db = freshDb();
-      // Mistral gate closed -> Thought fails before any reservation/dispatch.
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        headers: new Headers(),
+        json: async () => ({ error: { message: "unavailable" } }),
+      } as Response);
       await expect(
         withOfflineAppGateDisabled(() => completeChat(
           [{ role: "user", content: "x" }],
           { route: "thought", attentionDb: db },
         )),
-      ).rejects.toMatchObject({ code: "agent_not_ready" });
-      const thoughtRows = Number(
+      ).rejects.toMatchObject({ code: "provider_unavailable" });
+      fetchSpy.mockRestore();
+      const thoughtCompletedRows = Number(
         (
           db.prepare(
-            `SELECT COUNT(*) AS c FROM attention_requests WHERE quota_bucket = 'mistral:mistral-small-2603'`,
+            `SELECT COUNT(*) AS c FROM attention_requests WHERE quota_bucket = 'nim:nvidia/nemotron-3-super-120b-a12b' AND outcome = 'completed'`,
           ).get() as { c: number }
         ).c,
       );
-      expect(thoughtRows).toBe(0);
+      expect(thoughtCompletedRows).toBe(0);
 
       // Expression (NIM Lightning lane) is untouched and still dispatches.
       const b = resolveRoute("expression");

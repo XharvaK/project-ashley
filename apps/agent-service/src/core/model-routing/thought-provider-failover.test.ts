@@ -35,7 +35,7 @@ describe("Thought same-model Mistral credential failover", () => {
     { role: "user", content: "Make a decision." },
   ];
 
-  it("dispatches primary Mistral on route thought and makes no second attempt on success", async () => {
+  it("dispatches primary Mistral and makes no second attempt on success", async () => {
     const dispatch = vi.fn().mockResolvedValue({
       text: '{"kind":"speak","reason":"mistral primary"}',
       usage: { promptTokens: 100, completionTokens: 20 },
@@ -50,11 +50,10 @@ describe("Thought same-model Mistral credential failover", () => {
 
     const result = await withOfflineAppGateDisabled(() => completeChat(messages, {
       attentionDb: db,
-      purpose: "thought",
-      logicalRole: "thought",
-      lane: "interactive",
-      route: "thought",
-      maxTokens: 1000,
+      purpose: "thought_observation",
+      logicalRole: "thought_observation",
+      model: MISTRAL_MODEL,
+      maxTokens: 400,
       deadlineAtMs: Date.now() + 6000,
     }));
 
@@ -91,11 +90,10 @@ describe("Thought same-model Mistral credential failover", () => {
 
     const result = await withOfflineAppGateDisabled(() => completeChat(messages, {
       attentionDb: db,
-      purpose: "thought",
-      logicalRole: "thought",
-      lane: "interactive",
-      route: "thought",
-      maxTokens: 1000,
+      purpose: "thought_observation",
+      logicalRole: "thought_observation",
+      model: MISTRAL_MODEL,
+      maxTokens: 400,
       deadlineAtMs: Date.now() + 6000,
     }));
 
@@ -137,11 +135,10 @@ describe("Thought same-model Mistral credential failover", () => {
     await expect(
       withOfflineAppGateDisabled(() => completeChat(messages, {
         attentionDb: db,
-        purpose: "thought",
-        logicalRole: "thought",
-        lane: "interactive",
-        route: "thought",
-        maxTokens: 1000,
+        purpose: "thought_observation",
+        logicalRole: "thought_observation",
+        model: MISTRAL_MODEL,
+        maxTokens: 400,
         deadlineAtMs: Date.now() + 6000,
       })),
     ).rejects.toMatchObject({ code: "mistral_unavailable" });
@@ -170,11 +167,10 @@ describe("Thought same-model Mistral credential failover", () => {
     await expect(
       withOfflineAppGateDisabled(() => completeChat(messages, {
         attentionDb: db,
-        purpose: "thought",
-        logicalRole: "thought",
-        lane: "interactive",
-        route: "thought",
-        maxTokens: 1000,
+        purpose: "thought_observation",
+        logicalRole: "thought_observation",
+        model: MISTRAL_MODEL,
+        maxTokens: 400,
         deadlineAtMs: Date.now() + 1000,
       })),
     ).rejects.toMatchObject({ code: "rate_limited" });
@@ -204,11 +200,10 @@ describe("Thought same-model Mistral credential failover", () => {
     await expect(
       withOfflineAppGateDisabled(() => completeChat(messages, {
         attentionDb: db,
-        purpose: "thought",
-        logicalRole: "thought",
-        lane: "interactive",
-        route: "thought",
-        maxTokens: 1000,
+        purpose: "thought_observation",
+        logicalRole: "thought_observation",
+        model: MISTRAL_MODEL,
+        maxTokens: 400,
         deadlineAtMs: Date.now() + 6000,
       })),
     ).rejects.toMatchObject({ code: "credential_invalid" });
@@ -234,11 +229,10 @@ describe("Thought same-model Mistral credential failover", () => {
     await expect(
       withOfflineAppGateDisabled(() => completeChat(messages, {
         attentionDb: db,
-        purpose: "thought",
-        logicalRole: "thought",
-        lane: "interactive",
-        route: "thought",
-        maxTokens: 1000,
+        purpose: "thought_observation",
+        logicalRole: "thought_observation",
+        model: MISTRAL_MODEL,
+        maxTokens: 400,
         deadlineAtMs: Date.now() + 6000,
       })),
     ).rejects.toMatchObject({ code: "capability_mismatch" });

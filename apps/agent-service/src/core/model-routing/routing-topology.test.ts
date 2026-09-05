@@ -16,6 +16,7 @@ import { routeBinding } from "./registry.js";
 
 const LIGHTNING = "nvidia/nemotron-3.5-lightning-30b-a3b";
 const ULTRA = "nvidia/nemotron-3-ultra-550b-a55b";
+const SUPER = "nvidia/nemotron-3-super-120b-a12b";
 const MISTRAL_SMALL = "mistral-small-2603";
 
 afterEach(() => {
@@ -62,8 +63,8 @@ describe("Phase 5 successor routing topology", () => {
     for (const purpose of ["thought_observation", "reflection_initiative"]) {
       expect(resolveRoute(purpose)).toMatchObject({
         route: "thought",
-        provider: "mistral",
-        configuredModelId: MISTRAL_SMALL,
+        provider: "nim",
+        configuredModelId: SUPER,
       });
     }
 
@@ -81,16 +82,16 @@ describe("Phase 5 successor routing topology", () => {
     expect(observation).toMatchObject({
       configuredRouteId: "utility_bulk",
       dispatchedRouteId: "thought",
-      occupant: { provider: "mistral", configuredModelId: MISTRAL_SMALL },
+      occupant: { provider: "nim", configuredModelId: SUPER },
     });
     expect(reflection).toMatchObject({
       configuredRouteId: "utility_bulk",
       dispatchedRouteId: "thought",
-      occupant: { provider: "mistral", configuredModelId: MISTRAL_SMALL },
+      occupant: { provider: "nim", configuredModelId: SUPER },
     });
   });
 
-  it("binds every Mistral Thought row to native schema enforcement", () => {
+  it("binds every NIM Thought row to native schema enforcement", () => {
     const thoughtRows = currentPortfolio().rows.filter((row) =>
       ["thought", "thought_observation", "reflection_initiative"].includes(
         row.logicalRole,
@@ -100,13 +101,13 @@ describe("Phase 5 successor routing topology", () => {
     for (const row of thoughtRows) {
       expect(row.structuredOutput).toBe("json_schema");
       expect(row.occupants[0]).toMatchObject({
-        provider: "mistral",
-        configuredModelId: MISTRAL_SMALL,
+        provider: "nim",
+        configuredModelId: SUPER,
         reasoningPolicy: "high",
         effectiveReasoning: "high",
         structuredOutputBinding: {
           mode: "native_json_schema",
-          wireFormat: "mistral_response_format_json_schema",
+          wireFormat: "nim_response_format_json_schema",
         },
       });
     }

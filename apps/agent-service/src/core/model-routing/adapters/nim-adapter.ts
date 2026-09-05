@@ -112,6 +112,9 @@ function buildRequestBody(
     const effort = nimReasoningEffortForModel(model, options.reasoningEffort);
     if (effort !== undefined) {
       body.reasoning_effort = effort;
+      if (model === "nvidia/nemotron-3-super-120b-a12b" && effort === "high") {
+        body.reasoning_budget = 2048;
+      }
     }
   }
   if (fabricStructuredOutput) {

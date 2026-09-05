@@ -38,13 +38,13 @@ describe("model-routing router", () => {
   it("resolves Thought-owned observation and reflection to the Thought route", () => {
     expect(resolveRoute("thought_observation")).toMatchObject({
       route: "thought",
-      provider: "mistral",
-      configuredModelId: "mistral-small-2603",
+      provider: "nim",
+      configuredModelId: "nvidia/nemotron-3-super-120b-a12b",
     });
     expect(resolveRoute("reflection_initiative")).toMatchObject({
       route: "thought",
-      provider: "mistral",
-      configuredModelId: "mistral-small-2603",
+      provider: "nim",
+      configuredModelId: "nvidia/nemotron-3-super-120b-a12b",
     });
   });
 
@@ -98,8 +98,8 @@ describe("model-routing router", () => {
     expect(cols).toEqual(
       expect.arrayContaining(["provider_id", "route_alias", "quota_bucket"]),
     );
-    expect(routeBinding("thought").provider).toBe("mistral");
-    expect(routeBinding("thought").configuredModelId).toBe("mistral-small-2603");
+    expect(routeBinding("thought").provider).toBe("nim");
+    expect(routeBinding("thought").configuredModelId).toBe("nvidia/nemotron-3-super-120b-a12b");
     db.close();
     continuity.close();
   });

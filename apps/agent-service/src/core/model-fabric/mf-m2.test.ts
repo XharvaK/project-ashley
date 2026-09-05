@@ -109,10 +109,12 @@ describe("MF-M2 CURRENT portfolio", () => {
   it("projects route enablement and quota contracts from CURRENT rather than models.json", () => {
     const records = routeRecordsFromCurrentPortfolio();
     expect(records.find((record) => record.route === "thought")).toMatchObject({
-      provider: "mistral",
-      configuredModelId: "mistral-small-2603",
+      provider: "nim",
+      configuredModelId: "nvidia/nemotron-3-super-120b-a12b",
       enabled: true,
-      quotaContract: "env",
+      quotaContract: {
+        tpm: 65536,
+      },
     });
     expect(records.find((record) => record.route === "sandbox_operator_light")).toMatchObject({
       enabled: false,
@@ -120,12 +122,12 @@ describe("MF-M2 CURRENT portfolio", () => {
   });
 
   it("uses the CURRENT resolver in completeChat and records the snapshot identity", async () => {
-    env.mistralApiKey = "test";
-    vi.spyOn(mistralAdapterModule, "createMistralAdapter").mockReturnValue({
-      provider: "mistral",
+    env.nimApiKey = "test";
+    vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
+      provider: "nim",
       dispatch: vi.fn().mockResolvedValue({
         text: "{\"kind\":\"speak\"}",
-        providerModel: "mistral-small-2603",
+        providerModel: "nvidia/nemotron-3-super-120b-a12b",
         usage: { promptTokens: 1, completionTokens: 1 },
         finishReason: "stop",
       }),
@@ -140,21 +142,21 @@ describe("MF-M2 CURRENT portfolio", () => {
     expect(result.modelFabric?.resolvedRoute).toMatchObject({
       registryVersion: currentPortfolio().registryVersion,
       policyRowId: "mfr_thought_interactive_compat_v1",
-      occupantId: "mfo_mistral_small_2603_high",
+      occupantId: "mfo_nim_nemotron_3_super_high",
     });
     database.close();
   });
 
   it("uses the CURRENT Thought policy ceiling when the caller omits maxTokens", async () => {
-    env.mistralApiKey = "test";
+    env.nimApiKey = "test";
     const dispatch = vi.fn().mockResolvedValue({
       text: "{}",
-      providerModel: "mistral-small-2603",
+      providerModel: "nvidia/nemotron-3-super-120b-a12b",
       usage: { promptTokens: 1, completionTokens: 1 },
       finishReason: "stop",
     });
-    vi.spyOn(mistralAdapterModule, "createMistralAdapter").mockReturnValue({
-      provider: "mistral",
+    vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
+      provider: "nim",
       dispatch,
     });
     const database = openNuclearDb(new DatabaseSync(":memory:"));
@@ -165,21 +167,21 @@ describe("MF-M2 CURRENT portfolio", () => {
       responseFormat: "json_object",
     }));
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
-      options: expect.objectContaining({ maxTokens: 4096 }),
+      options: expect.objectContaining({ maxTokens: 8192 }),
     }));
     database.close();
   });
 
   it("uses the resolved Thought ceiling for structured-output admission and provider dispatch", async () => {
-    env.mistralApiKey = "test";
+    env.nimApiKey = "test";
     const dispatch = vi.fn().mockResolvedValue({
       text: "{}",
-      providerModel: "mistral-small-2603",
+      providerModel: "nvidia/nemotron-3-super-120b-a12b",
       usage: { promptTokens: 1, completionTokens: 1 },
       finishReason: "stop",
     });
-    vi.spyOn(mistralAdapterModule, "createMistralAdapter").mockReturnValue({
-      provider: "mistral",
+    vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
+      provider: "nim",
       dispatch,
     });
     const database = openNuclearDb(new DatabaseSync(":memory:"));
@@ -194,7 +196,7 @@ describe("MF-M2 CURRENT portfolio", () => {
     }));
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
       options: expect.objectContaining({
-        maxTokens: 4096,
+        maxTokens: 8192,
         responseFormat: "json_schema",
         structuredOutput,
       }),
@@ -211,7 +213,7 @@ describe("MF-M2 CURRENT portfolio", () => {
     });
     expect(database.prepare(
       "SELECT estimated_output_tokens AS estimatedOutputTokens FROM attention_requests ORDER BY id DESC LIMIT 1",
-    ).get()).toMatchObject({ estimatedOutputTokens: 4096 });
+    ).get()).toMatchObject({ estimatedOutputTokens: 8192 });
     database.close();
   });
 
@@ -227,9 +229,9 @@ describe("MF-M2 CURRENT portfolio", () => {
       lane: "interactive",
     });
 
-    expect(interactive.policyRow.maxOutputTokens).toBe(4096);
-    expect(interactive.policyRow.deadlineMs).toBe(10000);
-    expect(durable.policyRow.maxOutputTokens).toBe(4096);
+    expect(interactive.policyRow.maxOutputTokens).toBe(8192);
+    expect(interactive.policyRow.deadlineMs).toBe(60000);
+    expect(durable.policyRow.maxOutputTokens).toBe(8192);
     expect(durable.policyRow.deadlineMs).toBeNull();
   });
 
@@ -247,7 +249,7 @@ describe("MF-M2 CURRENT portfolio", () => {
         purpose: "thought",
         lane: "interactive",
         responseFormat: "json_object",
-        maxTokens: 6000,
+        maxTokens: 10000,
       }),
     ).rejects.toMatchObject({ code: "model_fabric_output_budget_exceeded" });
     expect(dispatch).not.toHaveBeenCalled();
@@ -268,12 +270,12 @@ describe("MF-M2 CURRENT portfolio", () => {
     expect(resolveDispatchContract({
       policy: interactive,
       provider: "nim",
-      configuredModelId: "openai/gpt-oss-20b",
-    }).maxTokens).toBe(4096);
+      configuredModelId: "nvidia/nemotron-3-super-120b-a12b",
+    }).maxTokens).toBe(8192);
 
     const policyAboveProfile = {
       ...interactive,
-      policyRow: { ...interactive.policyRow, maxOutputTokens: 4096 },
+      policyRow: { ...interactive.policyRow, maxOutputTokens: 8192 },
     };
     expect(() => resolveDispatchContract({
       policy: policyAboveProfile,
@@ -297,7 +299,7 @@ describe("MF-M2 CURRENT portfolio", () => {
       expect.arrayContaining([
         expect.objectContaining({
           policyRowId: "mfr_thought_interactive_compat_v1",
-          occupantId: "mfo_mistral_small_2603_high",
+          occupantId: "mfo_nim_nemotron_3_super_high",
           admissionBasis: expect.objectContaining({ kind: "existing_compatibility" }),
           activeActivationRefId: "compatibility_default",
           health: expect.objectContaining({

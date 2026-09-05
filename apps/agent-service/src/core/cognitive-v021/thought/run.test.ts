@@ -309,12 +309,14 @@ describe("v0.2.1 Thought run", () => {
     const systemMessages: string[] = [];
     const structuredContractIds: string[] = [];
     const maxTokens: Array<number | undefined> = [];
+    const temperatures: Array<number | undefined> = [];
     let calls = 0;
     const completeChat = vi.fn(async (
       messages: Array<{ role: string; content: string }>,
       options: {
         deadlineAtMs?: number | null;
         maxTokens?: number;
+        temperature?: number;
         responseFormat?: string;
         structuredOutput?: { contractId?: string };
       },
@@ -322,6 +324,7 @@ describe("v0.2.1 Thought run", () => {
       calls += 1;
       deadlines.push(options.deadlineAtMs ?? -1);
       maxTokens.push(options.maxTokens);
+      temperatures.push(options.temperature);
       expect(options.responseFormat).toBe("json_schema");
       structuredContractIds.push(options.structuredOutput?.contractId ?? "");
       systemMessages.push(messages[0]?.content ?? "");
@@ -344,8 +347,9 @@ describe("v0.2.1 Thought run", () => {
       nowMs: () => now,
     }));
     expect(result.published).toBe(true);
-    expect(deadlines).toEqual([31_000, 31_000]);
-    expect(maxTokens).toEqual([undefined, 2_048]);
+    expect(deadlines).toEqual([61_000, 61_000]);
+    expect(maxTokens).toEqual([undefined, 8_192]);
+    expect(temperatures).toEqual([1.0, 1.0]);
     expect(structuredContractIds).toEqual(["ashley.thought.semantic.v1", "ashley.thought.semantic.v1"]);
     expect(userInputs[1]).toBe(userInputs[0]);
     expect(systemMessages[0]).toContain("schemaId=ashley.thought.semantic.v1.schema");

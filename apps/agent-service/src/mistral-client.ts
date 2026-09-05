@@ -517,7 +517,10 @@ export async function completeChat(
   });
   fabric.resolve(configuredBinding.route);
 
-  const provider: ProviderId = binding.provider;
+  const provider: ProviderId =
+    currentPolicy.source !== "activated" && options.model?.startsWith("mistral")
+      ? "mistral"
+      : (currentPolicy.occupant.provider as ProviderId) ?? binding.provider;
   const modelAlias = currentPolicy.configuredModelId;
   const quotaBucket = quotaBucketFor(provider, modelAlias);
 

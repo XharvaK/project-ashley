@@ -164,7 +164,7 @@ export type ThoughtCompleteInvoker = (
  * authoritative at 4096 for the primary Thought request; this bound only
  * keeps a corrective retry admissible under the shared rolling TPM contract.
  */
-export const STRUCTURAL_RETRY_MAX_OUTPUT_TOKENS = 2_048;
+export const STRUCTURAL_RETRY_MAX_OUTPUT_TOKENS = 8_192;
 
 /** The single adapter boundary for Thought dispatch. attentionDb is mandatory. */
 export async function invokeThoughtComplete(
@@ -431,7 +431,7 @@ export async function runThoughtModel(
     maxTokens: options.maxTokens,
     disableThoughtTransportFailover: options.disableThoughtTransportFailover || Boolean(options.privateBudgetBinding),
     privateBudgetBinding: options.privateBudgetBinding,
-    temperature: 0.15,
+    temperature: 1.0,
     signal: options.signal,
     requestId,
   };

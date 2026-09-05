@@ -36,16 +36,16 @@ describe("TARGET portfolio + token envelope reconciliation", () => {
     const durable = current.rows.find((row) => row.policyRowId === "mfr_thought_durable_proactive_compat_v1")!;
     const expression = current.rows.find((row) => row.policyRowId === "mfr_expression_compat_v1")!;
     expect(thought.occupants[0]).toMatchObject({
-      provider: "mistral",
-      configuredModelId: "mistral-small-2603",
+      provider: "nim",
+      configuredModelId: "nvidia/nemotron-3-super-120b-a12b",
       reasoningPolicy: "high",
       effectiveReasoning: "high",
     });
-    expect(thought.deadlineMs).toBe(10000);
-    expect(thought.maxOutputTokens).toBe(4096);
-    expect(durable.maxOutputTokens).toBe(4096);
+    expect(thought.deadlineMs).toBe(60000);
+    expect(thought.maxOutputTokens).toBe(8192);
+    expect(durable.maxOutputTokens).toBe(8192);
     expect(THOUGHT_MAX_OUTPUT_TOKENS).toBe(2048);
-    expect(THOUGHT_MAX_OUTPUT_TOKENS).toBeLessThanOrEqual(4096);
+    expect(THOUGHT_MAX_OUTPUT_TOKENS).toBeLessThanOrEqual(8192);
     expect(expression.occupants[0]).toMatchObject({
       provider: "nim",
       configuredModelId: "nvidia/nemotron-3.5-lightning-30b-a3b",
@@ -59,8 +59,8 @@ describe("TARGET portfolio + token envelope reconciliation", () => {
     expect(EXPRESSION_MAX_OUTPUT_TOKENS).toBe(2048);
     expect(EXPRESSION_PROACTIVE_MAX_OUTPUT_TOKENS).toBe(500);
     expect(current.routeBindings.thought).toMatchObject({
-      provider: "mistral",
-      configuredModelId: "mistral-small-2603",
+      provider: "nim",
+      configuredModelId: "nvidia/nemotron-3-super-120b-a12b",
     });
     expect(current.routeBindings.ashley_expression).toMatchObject({
       provider: "nim",
@@ -71,7 +71,7 @@ describe("TARGET portfolio + token envelope reconciliation", () => {
   it("keeps the target envelope separate from the owner-approved CURRENT deadline", () => {
     const observation = current.rows.find((row) => row.policyRowId === "mfr_thought_observation_compat_v1")!;
     expect(observation.maxOutputTokens).toBe(450);
-    expect(current.rows.find((row) => row.policyRowId === "mfr_thought_interactive_compat_v1")!.deadlineMs).toBe(10000);
+    expect(current.rows.find((row) => row.policyRowId === "mfr_thought_interactive_compat_v1")!.deadlineMs).toBe(60000);
     expect(target.rows.find((row) => row.policyRowId === "mfr_thought_interactive_target_v1")!.deadlineMs).toBe(6000);
     expect(target.rows.find((row) => row.policyRowId === "mfr_thought_observation_target_v1")!.deadlineMs).toBeNull();
   });

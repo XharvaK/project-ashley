@@ -355,4 +355,7 @@ export function applyTranslatedControlToNimBody(
     throw new Error("lightning_rejects_reasoning_effort");
   }
   body.reasoning_effort = control.value;
+  if (configuredModelId === SUPER_ID && control.value === "high") {
+    body.reasoning_budget = 2048;
+  }
 }

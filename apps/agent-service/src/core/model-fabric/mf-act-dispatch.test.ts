@@ -268,8 +268,8 @@ describe("MF-ACT dispatch authority", () => {
     expect(resolved.policyRow.policyRowId).toBe(
       "mfr_thought_interactive_compat_v1",
     );
-    expect(resolved.occupant.configuredModelId).toBe("mistral-small-2603");
-    expect(resolved.occupant.provider).toBe("mistral");
+    expect(resolved.occupant.configuredModelId).toBe("nvidia/nemotron-3-super-120b-a12b");
+    expect(resolved.occupant.provider).toBe("nim");
     expect(resolved.occupant.effectiveReasoning).toBe("high");
     expect(resolved.activationRefId).toBeNull();
   });
@@ -339,7 +339,7 @@ describe("MF-ACT dispatch authority", () => {
       controlRootMode: "production",
     });
     expect(resolved.source).toBe("current_compatibility");
-    expect(resolved.occupant.configuredModelId).toBe("mistral-small-2603");
+    expect(resolved.occupant.configuredModelId).toBe("nvidia/nemotron-3-super-120b-a12b");
   });
 
   it("E/F: caller model and reasoning pins lose to an activated occupant", async () => {
@@ -394,48 +394,23 @@ describe("MF-ACT dispatch authority", () => {
 
   it("G: no activation keeps CURRENT thought failover and Expression fallback pins", async () => {
     const root = controlRoot();
-    env.mistralApiKey = "test";
-    const mistralDispatch = vi.fn(async (args: {
-      modelId: string;
-      fabricReasoning?: { kind: string; value?: string };
-    }) => {
-      expect(args.modelId).toBe("mistral-small-2603");
-      expect(args.fabricReasoning).toEqual({
-        kind: "reasoning_effort",
-        value: "high",
-      });
-      return {
-        text: "{\"kind\":\"speak\"}",
-        providerModel: "mistral-small-2603",
-        usage: { promptTokens: 1, completionTokens: 1 },
-        finishReason: "stop",
-      };
-    });
-    vi.spyOn(mistralAdapterModule, "createMistralAdapter").mockReturnValue({
-      provider: "mistral",
-      dispatch: mistralDispatch,
-    });
-    const thoughtDb = db();
-    const thought = await withOfflineAppGateDisabled(() => completeChat([{ role: "user", content: "think" }], {
-      attentionDb: thoughtDb,
-      purpose: "thought",
-      logicalRole: "thought",
-      lane: "interactive",
-      route: "thought",
-      modelFabricControlDir: root,
-      modelFabricControlRootMode: "fixture",
-    }));
-    expect(thought.modelAlias).toBe("mistral-small-2603");
-    expect(thought.modelFabric?.resolvedRoute).toMatchObject({
-      policyRowId: "mfr_thought_interactive_compat_v1",
-      occupantId: "mfo_mistral_small_2603_high",
-      provider: "mistral",
-      effectiveReasoning: "reasoning_effort=high",
-    });
-    thoughtDb.close();
-
     env.nimApiKey = "test";
-    const nimDispatch = vi.fn(async (args: { modelId: string }) => {
+    const nimDispatch = vi.fn(async (args: {
+      modelId: string;
+      fabricReasoning?: unknown;
+    }) => {
+      if (args.modelId === "nvidia/nemotron-3-super-120b-a12b") {
+        expect(args.fabricReasoning).toEqual({
+          kind: "reasoning_effort",
+          value: "high",
+        });
+        return {
+          text: "{\"kind\":\"speak\"}",
+          providerModel: "nvidia/nemotron-3-super-120b-a12b",
+          usage: { promptTokens: 1, completionTokens: 1 },
+          finishReason: "stop",
+        };
+      }
       expect(args.modelId).toBe("nvidia/nemotron-3.5-lightning-30b-a3b");
       return {
         text: "hi",
@@ -448,6 +423,24 @@ describe("MF-ACT dispatch authority", () => {
       provider: "nim",
       dispatch: nimDispatch,
     });
+    const thoughtDb = db();
+    const thought = await withOfflineAppGateDisabled(() => completeChat([{ role: "user", content: "think" }], {
+      attentionDb: thoughtDb,
+      purpose: "thought",
+      logicalRole: "thought",
+      lane: "interactive",
+      route: "thought",
+      modelFabricControlDir: root,
+      modelFabricControlRootMode: "fixture",
+    }));
+    expect(thought.modelAlias).toBe("nvidia/nemotron-3-super-120b-a12b");
+    expect(thought.modelFabric?.resolvedRoute).toMatchObject({
+      policyRowId: "mfr_thought_interactive_compat_v1",
+      occupantId: "mfo_nim_nemotron_3_super_high",
+      provider: "nim",
+      effectiveReasoning: "reasoning_effort=high",
+    });
+    thoughtDb.close();
     const expressionDb = db();
     const expression = await withOfflineAppGateDisabled(() => completeChat([{ role: "user", content: "hi" }], {
       attentionDb: expressionDb,
@@ -540,12 +533,12 @@ describe("MF-ACT dispatch authority", () => {
 
     const result = await withOfflineAppGateDisabled(() => completeChat(testMessages, {
       attentionDb: thoughtDb,
-      purpose: "thought",
-      logicalRole: "thought",
+      purpose: "thought_observation",
+      logicalRole: "thought_observation",
       lane: "interactive",
       route: "thought",
       model: "mistral-small-2603",
-      maxTokens: 2048,
+      maxTokens: 400,
       modelFabricControlDir: root,
       modelFabricControlRootMode: "fixture",
     }));
@@ -585,12 +578,12 @@ describe("MF-ACT dispatch authority", () => {
     try {
       await withOfflineAppGateDisabled(() => completeChat([{ role: "user", content: "think" }], {
         attentionDb: thoughtDb,
-        purpose: "thought",
-        logicalRole: "thought",
+        purpose: "thought_observation",
+        logicalRole: "thought_observation",
         lane: "interactive",
         route: "thought",
         model: "mistral-small-2603",
-        maxTokens: 4096,
+        maxTokens: 400,
         modelFabricControlDir: root,
         modelFabricControlRootMode: "fixture",
       }));

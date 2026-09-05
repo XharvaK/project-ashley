@@ -1,18 +1,18 @@
 import { vi } from "vitest";
 
-const mistralState = vi.hoisted(() => ({
+const nimState = vi.hoisted(() => ({
   dispatch: vi.fn(),
 }));
 
-vi.mock("../../model-routing/adapters/mistral-adapter.js", async (importOriginal) => {
+vi.mock("../../model-routing/adapters/nim-adapter.js", async (importOriginal) => {
   const actual = await importOriginal<
-    typeof import("../../model-routing/adapters/mistral-adapter.js")
+    typeof import("../../model-routing/adapters/nim-adapter.js")
   >();
   return {
     ...actual,
-    createMistralAdapter: () => ({
-      provider: "mistral" as const,
-      dispatch: mistralState.dispatch,
+    createNimAdapter: () => ({
+      provider: "nim" as const,
+      dispatch: nimState.dispatch,
     }),
   };
 });
@@ -64,13 +64,12 @@ const capabilityReality: CapabilityReality = {
   approvedProjectIds: [],
 };
 
-const MISTRAL_MODEL = "mistral-small-2603";
-const MISTRAL_BUCKET = `mistral:${MISTRAL_MODEL}`;
+const NIM_MODEL = "nvidia/nemotron-3-super-120b-a12b";
+const NIM_BUCKET = `nim:${NIM_MODEL}`;
 const SEEDED_CURRENT_TPM_USAGE = 14_000;
-const TPM_LIMIT = 25_000;
+const TPM_LIMIT = 65_536;
 const EXPECTED_RETRY_OUTPUT = STRUCTURAL_RETRY_MAX_OUTPUT_TOKENS;
-const savedMistralKey = env.mistralApiKey;
-const savedTpm = env.mistralTokensPerMinute;
+const savedNimKey = env.nimApiKey;
 
 function deps(attentionDb: DatabaseSync): KernelDeps {
   return {
@@ -132,7 +131,7 @@ function helloInput(): { sidecar: DatabaseSync; input: ThoughtInput } {
   // estimator near the live failure's high-context admission boundary.
   input.rawConversation = input.rawConversation.map((row) => ({
     ...row,
-    text: `${row.text} ${"hello ".repeat(1_775)}`,
+    text: `${row.text} ${"hello ".repeat(600)}`,
   }));
   return { sidecar, input };
 }
@@ -140,10 +139,9 @@ function helloInput(): { sidecar: DatabaseSync; input: ThoughtInput } {
 const savedOfflineEnv = process.env.ASHLEY_PHASE0_OFFLINE;
 
 afterEach(() => {
-  mistralState.dispatch.mockReset();
+  nimState.dispatch.mockReset();
   resetAdapterCache();
-  env.mistralApiKey = savedMistralKey;
-  env.mistralTokensPerMinute = savedTpm;
+  env.nimApiKey = savedNimKey;
   if (savedOfflineEnv === undefined) {
     delete process.env.ASHLEY_PHASE0_OFFLINE;
   } else {
@@ -152,10 +150,9 @@ afterEach(() => {
 });
 
 describe("v0.2.1 structural Thought retry admission", () => {
-  it("keeps the primary at 4096 and admits a corrective retry at 2048 under real rolling TPM accounting", async () => {
+  it("keeps the primary at 8192 and admits a corrective retry at 8192 under real rolling TPM accounting", async () => {
     delete process.env.ASHLEY_PHASE0_OFFLINE;
-    env.mistralApiKey = "test-mistral-key";
-    env.mistralTokensPerMinute = TPM_LIMIT;
+    env.nimApiKey = "test-nim-key";
     resetAdapterCache();
     const { sidecar, input } = helloInput();
     const primaryDb = openNuclearDb(new DatabaseSync(":memory:"));
@@ -166,7 +163,7 @@ describe("v0.2.1 structural Thought retry admission", () => {
     }> = [];
     let captureAdmission: Record<string, unknown> | null = null;
 
-    mistralState.dispatch.mockImplementation(async (args: {
+    nimState.dispatch.mockImplementation(async (args: {
       messages: Array<{ role: string; content: string }>;
       options: { maxTokens?: number; responseFormat?: string };
     }) => {
@@ -179,18 +176,18 @@ describe("v0.2.1 structural Thought retry admission", () => {
              FROM attention_requests
             WHERE quota_bucket = ?
             ORDER BY id DESC LIMIT 1`,
-        ).get(MISTRAL_BUCKET) as Record<string, unknown>;
+        ).get(NIM_BUCKET) as Record<string, unknown>;
       }
       const parsed = JSON.parse(args.messages[1]?.content ?? "{}") as ThoughtInput;
       const response = captured.length === 1
         ? {
             text: "not json",
-            providerModel: MISTRAL_MODEL,
+            providerModel: NIM_MODEL,
             usage: { promptTokens: 4_772, completionTokens: 55 },
           }
         : {
             text: JSON.stringify(makeSemanticSettlement()),
-            providerModel: MISTRAL_MODEL,
+            providerModel: NIM_MODEL,
             usage: { promptTokens: 1, completionTokens: 1 },
           };
       return response;
@@ -202,11 +199,11 @@ describe("v0.2.1 structural Thought retry admission", () => {
       lane: "urgent_grounded",
       routeId: "thought",
     });
-    expect(currentPolicy.policyRow.maxOutputTokens).toBe(4_096);
-    expect(quotaContractFor(MISTRAL_BUCKET).tpm).toBe(TPM_LIMIT);
+    expect(currentPolicy.policyRow.maxOutputTokens).toBe(8_192);
+    expect(quotaContractFor(NIM_BUCKET).tpm).toBe(TPM_LIMIT);
 
     const primary = await runThoughtModel(input, deps(primaryDb), {
-      deadlineAtMs: Date.now() + 10_000,
+      deadlineAtMs: Date.now() + 60_000,
     });
     expect(primary.malformed).toBe(true);
     const primaryRow = primaryDb.prepare(
@@ -215,9 +212,9 @@ describe("v0.2.1 structural Thought retry admission", () => {
          FROM attention_requests
         WHERE quota_bucket = ?
         ORDER BY id DESC LIMIT 1`,
-    ).get(MISTRAL_BUCKET) as Record<string, unknown>;
+    ).get(NIM_BUCKET) as Record<string, unknown>;
     const currentPrimaryEstimatedInput = Number(primaryRow.estimated_input_tokens);
-    expect(Number(primaryRow.estimated_output_tokens)).toBe(4_096);
+    expect(Number(primaryRow.estimated_output_tokens)).toBe(8_192);
     expect(Number(primaryRow.actual_input_tokens)).toBe(4_772);
     expect(Number(primaryRow.actual_output_tokens)).toBe(55);
 
@@ -225,29 +222,29 @@ describe("v0.2.1 structural Thought retry admission", () => {
       messages: [{ role: "user", content: "seeded primary" }],
       purpose: "thought",
       lane: "urgent_grounded",
-      providerId: "mistral",
-      quotaBucket: MISTRAL_BUCKET,
-      modelAlias: MISTRAL_MODEL,
-      maxTokens: 4_096,
-      deadlineAtMs: Date.now() + 10_000,
+      providerId: "nim",
+      quotaBucket: NIM_BUCKET,
+      modelAlias: NIM_MODEL,
+      maxTokens: 8_192,
+      deadlineAtMs: Date.now() + 60_000,
       ownerId: "doc",
       dispatch: async () => ({
-        providerModel: MISTRAL_MODEL,
+        providerModel: NIM_MODEL,
         usage: { promptTokens: 12_000, completionTokens: 2_000 },
         result: { text: "seeded" },
       }),
     });
-    expect(currentTpmUsage(retryDb, realClock, MISTRAL_BUCKET)).toBe(SEEDED_CURRENT_TPM_USAGE);
+    expect(currentTpmUsage(retryDb, realClock, NIM_BUCKET)).toBe(SEEDED_CURRENT_TPM_USAGE);
 
     captureAdmission = {};
     const retry = await runThoughtModel(input, deps(retryDb), {
-      deadlineAtMs: Date.now() + 10_000,
+      deadlineAtMs: Date.now() + 60_000,
       structuralFeedback: "invalid_json",
       maxTokens: EXPECTED_RETRY_OUTPUT,
     } as Parameters<typeof runThoughtModel>[2] & { maxTokens: number });
     expect(retry.output.kind).toBe("settlement");
     expect(captured).toHaveLength(2);
-    expect(captured[0]?.options.maxTokens).toBe(4_096);
+    expect(captured[0]?.options.maxTokens).toBe(8_192);
     expect(captured[1]?.options.maxTokens).toBe(EXPECTED_RETRY_OUTPUT);
     expect(captured[1]?.options.responseFormat).toBe("json_schema");
     expect(captured[1]?.messages[1]?.content).toBe(captured[0]?.messages[1]?.content);
@@ -271,10 +268,11 @@ describe("v0.2.1 structural Thought retry admission", () => {
     expect(combinedDemand).toBeLessThanOrEqual(TPM_LIMIT);
     expect(captureAdmission?.state).toBe("running");
     expect(dispatchStartedAt).toBeLessThan(retryDeadline);
-    expect(retryInput + 4_096 + SEEDED_CURRENT_TPM_USAGE).toBeGreaterThan(TPM_LIMIT);
+    expect(retryInput + 8_192 + SEEDED_CURRENT_TPM_USAGE).toBeLessThanOrEqual(TPM_LIMIT);
+    expect(retryInput + 50_000 + SEEDED_CURRENT_TPM_USAGE).toBeGreaterThan(TPM_LIMIT);
     expect(headroom).toBeGreaterThanOrEqual(0);
     expect(currentPrimaryEstimatedInput).toBeGreaterThan(0);
-    expect(currentPrimaryEstimatedInput + 4_096 + SEEDED_CURRENT_TPM_USAGE).toBeGreaterThan(TPM_LIMIT);
+    expect(currentPrimaryEstimatedInput + 8_192 + SEEDED_CURRENT_TPM_USAGE).toBeLessThanOrEqual(TPM_LIMIT);
 
     console.info([
       `CURRENT_HELLO_RETRY_ESTIMATED_INPUT=${retryInput}`,
@@ -286,9 +284,9 @@ describe("v0.2.1 structural Thought retry admission", () => {
       `TPM_LIMIT=${TPM_LIMIT}`,
       `HEADROOM=${headroom}`,
       "RETRY_ADMISSION=PASS",
-      `MISTRAL_THOUGHT_TPM=${quotaContractFor(MISTRAL_BUCKET).tpm}`,
-      `PRIMARY_4096_TOTAL=${currentPrimaryEstimatedInput + 4_096}`,
-      `MISTRAL_SINGLE_REQUEST_ADMISSIBLE=${currentPrimaryEstimatedInput + 4_096 <= quotaContractFor(MISTRAL_BUCKET).tpm ? "yes" : "no"}`,
+      `NIM_THOUGHT_TPM=${quotaContractFor(NIM_BUCKET).tpm}`,
+      `PRIMARY_8192_TOTAL=${currentPrimaryEstimatedInput + 8_192}`,
+      `NIM_SINGLE_REQUEST_ADMISSIBLE=${currentPrimaryEstimatedInput + 8_192 <= quotaContractFor(NIM_BUCKET).tpm ? "yes" : "no"}`,
     ].join("\n"));
 
     sidecar.close();

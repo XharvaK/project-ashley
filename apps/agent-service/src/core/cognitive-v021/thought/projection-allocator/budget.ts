@@ -38,9 +38,9 @@ export type SemanticProjectionEnvelope = Readonly<{
   maxInputTokens: number;
 }>;
 
-export const ORDINARY_THOUGHT_BUDGET_MS = 30_000;
-export const INTERACTIVE_THOUGHT_MAX_OUTPUT = 4_096;
-export const STRUCTURAL_RETRY_MAX_OUTPUT = 2_048;
+export const ORDINARY_THOUGHT_BUDGET_MS = 60_000;
+export const INTERACTIVE_THOUGHT_MAX_OUTPUT = 8_192;
+export const STRUCTURAL_RETRY_MAX_OUTPUT = 8_192;
 export const STABLE_RESERVE_TOKENS = 0;
 export const TEMPORARY_QUALIFICATION_CEILING_TOKENS = 9_500;
 export const DEFAULT_SEMANTIC_PROJECTION_ENVELOPE: SemanticProjectionEnvelope = Object.freeze({

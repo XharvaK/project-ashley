@@ -221,16 +221,16 @@ describe("MF-M1 completeChat receipts", () => {
     database.close();
   });
 
-  it("records the current Thought route as a single Mistral attempt", async () => {
-    env.mistralApiKey = "test";
+  it("records the current Thought route as a single NIM attempt", async () => {
+    env.nimApiKey = "test";
     const dispatch = vi.fn().mockResolvedValue({
       text: "thought",
-      providerModel: "mistral-small-2603",
+      providerModel: "nvidia/nemotron-3-super-120b-a12b",
       usage: { promptTokens: 4, completionTokens: 5 },
       finishReason: "stop",
     });
-    vi.spyOn(mistralAdapterModule, "createMistralAdapter").mockReturnValue({
-      provider: "mistral",
+    vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
+      provider: "nim",
       dispatch,
     });
     const database = db();
@@ -243,7 +243,7 @@ describe("MF-M1 completeChat receipts", () => {
         route: "thought",
         logicalRole: "thought",
         reasoningEffort: "high",
-        deadlineAtMs: Date.now() + 10_000,
+        deadlineAtMs: Date.now() + 60_000,
       },
     ));
     const receipt = fabricMetadata(result).receipt;
@@ -252,9 +252,9 @@ describe("MF-M1 completeChat receipts", () => {
     expect(receipt.finalDispatchedRouteId).toBe("thought");
     expect(receipt.fallbackClass).toBe("none");
     expect(receipt.attempts[0]).toMatchObject({
-      provider: "mistral",
-      backend: "mistral_direct",
-      configuredModelId: "mistral-small-2603",
+      provider: "nim",
+      backend: "nim",
+      configuredModelId: "nvidia/nemotron-3-super-120b-a12b",
       fallbackClass: "none",
       providerRequestCount: 1,
     });
@@ -264,16 +264,16 @@ describe("MF-M1 completeChat receipts", () => {
   });
 
   it("records configured utility route versus forced Thought dispatch for observation", async () => {
-    env.mistralApiKey = "test";
-    const mistralDispatch = vi.fn().mockResolvedValue({
+    env.nimApiKey = "test";
+    const nimDispatch = vi.fn().mockResolvedValue({
       text: "observation",
-      providerModel: "mistral-small-2603",
+      providerModel: "nvidia/nemotron-3-super-120b-a12b",
       usage: { promptTokens: 1, completionTokens: 1 },
       finishReason: "stop",
     });
-    vi.spyOn(mistralAdapterModule, "createMistralAdapter").mockReturnValue({
-      provider: "mistral",
-      dispatch: mistralDispatch,
+    vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
+      provider: "nim",
+      dispatch: nimDispatch,
     });
     const database = db();
 
@@ -295,8 +295,8 @@ describe("MF-M1 completeChat receipts", () => {
     expect(receipt.finalDispatchedRouteId).toBe("thought");
     expect(receipt.attempts[0]).toMatchObject({
       dispatchedRouteId: "thought",
-      provider: "mistral",
-      configuredModelId: "mistral-small-2603",
+      provider: "nim",
+      configuredModelId: "nvidia/nemotron-3-super-120b-a12b",
     });
     database.close();
   });

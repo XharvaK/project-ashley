@@ -23,9 +23,9 @@ describe("Shared Estimator Authority", () => {
     expect(FRAMING_TOKEN_OVERHEAD).toBe(ATTENTION_FRAMING_OVERHEAD);
     expect(FRAMING_TOKEN_OVERHEAD).toBe(64);
     expect(STABLE_RESERVE_TOKENS).toBe(0);
-    expect(INTERACTIVE_THOUGHT_MAX_OUTPUT).toBe(4096);
-    expect(STRUCTURAL_RETRY_MAX_OUTPUT).toBe(2048);
-    expect(ORDINARY_THOUGHT_BUDGET_MS).toBe(30000);
+    expect(INTERACTIVE_THOUGHT_MAX_OUTPUT).toBe(8192);
+    expect(STRUCTURAL_RETRY_MAX_OUTPUT).toBe(8192);
+    expect(ORDINARY_THOUGHT_BUDGET_MS).toBe(60000);
   });
 
   it("proves identical calculation between allocator and attention estimator", () => {
@@ -34,8 +34,8 @@ describe("Shared Estimator Authority", () => {
       { role: "user", content: JSON.stringify({ trigger: "hello", data: "x".repeat(500) }) },
     ];
 
-    const attEst = attentionEstimate(messages, { maxTokens: 4096 });
-    const budEst = budgetEstimate(messages, { maxTokens: 4096 });
+    const attEst = attentionEstimate(messages, { maxTokens: INTERACTIVE_THOUGHT_MAX_OUTPUT });
+    const budEst = budgetEstimate(messages, { maxTokens: INTERACTIVE_THOUGHT_MAX_OUTPUT });
 
     expect(budEst.estimatedInputTokens).toBe(attEst.estimatedInputTokens);
     expect(budEst.estimatedOutputTokens).toBe(attEst.estimatedOutputTokens);
@@ -44,8 +44,8 @@ describe("Shared Estimator Authority", () => {
     const admission = checkThoughtAdmission(messages, budget);
 
     expect(admission.estimate.estimatedInputTokens).toBe(attEst.estimatedInputTokens);
-    expect(admission.estimate.estimatedOutputTokens).toBe(4096);
-    expect(admission.totalDemand).toBe(attEst.estimatedInputTokens + 4096);
+    expect(admission.estimate.estimatedOutputTokens).toBe(INTERACTIVE_THOUGHT_MAX_OUTPUT);
+    expect(admission.totalDemand).toBe(attEst.estimatedInputTokens + INTERACTIVE_THOUGHT_MAX_OUTPUT);
     expect(admission.hardTpm).toBe(16000);
     expect(admission.admitted).toBe(admission.totalDemand <= 16000);
   });

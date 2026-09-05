@@ -121,8 +121,8 @@ describe("Structural Retry Projection Invariants (§14, §17.8)", () => {
       // Invariant 2: dispatchMessagesHash differs ONLY by the corrective feedback prefix
       expect(retryDispatchHash).not.toBe(primary.hashes.dispatchMessagesHash);
 
-      // Invariant 3: Structural retry output ceiling is 2048
-      expect(STRUCTURAL_RETRY_MAX_OUTPUT_TOKENS).toBe(2048);
+      // Invariant 3: Structural retry output ceiling is 8192
+      expect(STRUCTURAL_RETRY_MAX_OUTPUT_TOKENS).toBe(8192);
 
       // Invariant 4: Evidence was not dropped to fit retry
       expect(retryCached.projected.rawConversation.length).toBe(thoughtInput.rawConversation.length);

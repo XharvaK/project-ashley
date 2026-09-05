@@ -76,8 +76,10 @@ describe("SLICE 0 receipt truth", () => {
     try {
       await withOfflineAppGateDisabled(() => completeChat([{ role: "user", content: "think" }], {
         attentionDb: database,
-        purpose: "thought",
-        route: "thought",
+        purpose: "thought_observation",
+        logicalRole: "thought_observation",
+        model: "mistral-small-2603",
+        maxTokens: 400,
         deadlineAtMs: Date.now() + 10_000,
       }));
     } catch (error) {
@@ -110,8 +112,10 @@ describe("SLICE 0 receipt truth", () => {
     try {
       await withOfflineAppGateDisabled(() => completeChat([{ role: "user", content: "think" }], {
         attentionDb: database,
-        purpose: "thought",
-        route: "thought",
+        purpose: "thought_observation",
+        logicalRole: "thought_observation",
+        model: "mistral-small-2603",
+        maxTokens: 400,
         deadlineAtMs: Date.now() + 10_000,
       }));
     } catch (error) {
@@ -147,8 +151,10 @@ describe("SLICE 0 receipt truth", () => {
     try {
       await withOfflineAppGateDisabled(() => completeChat([{ role: "user", content: "think" }], {
         attentionDb: database,
-        purpose: "thought",
-        route: "thought",
+        purpose: "thought_observation",
+        logicalRole: "thought_observation",
+        model: "mistral-small-2603",
+        maxTokens: 400,
         deadlineAtMs: Date.now() + 1_000,
       }));
     } catch (error) {
