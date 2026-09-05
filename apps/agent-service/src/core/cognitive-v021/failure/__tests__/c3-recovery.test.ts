@@ -111,6 +111,8 @@ describe("C3 bounded forward recovery", () => {
       ]);
       const second = await repairMissingC3Experiences(sidecar, nuclear, { nowMs: 301, limit: 50 });
       expect(second.recorded).toBe(0);
+      expect(second.scanned).toBe(0);
+      expect(second.skipped).toBe(0);
       expect(sidecar.prepare("SELECT COUNT(*) AS count FROM c3_terminal_experiences").get()).toEqual({ count: 3 });
       expect(sidecar.prepare("SELECT max_pre_v8_delivery_reservation_id FROM c3_activation_cutover WHERE id = 1").get()).toEqual({ max_pre_v8_delivery_reservation_id: 0 });
 

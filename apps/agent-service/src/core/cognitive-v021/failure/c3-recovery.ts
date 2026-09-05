@@ -208,6 +208,22 @@ function retryCandidates(
   });
 }
 
+function recordedDeliveryReservationIds(sidecar: DatabaseSync): number[] {
+  const rows = sidecar.prepare(
+    `SELECT experience_id
+       FROM c3_terminal_experiences
+      WHERE source_domain_owner = 'delivery'
+        AND experience_id LIKE 'c3:delivery:%'`,
+  ).all() as Row[];
+  return [...new Set(rows.flatMap((value) => {
+    const experienceId = text(row(value)?.experience_id);
+    const match = /^c3:delivery:(\d+):delivery_(?:aborted|expired|partially_delivered)$/.exec(experienceId);
+    if (!match) return [];
+    const reservationId = Number(match[1]);
+    return Number.isSafeInteger(reservationId) ? [reservationId] : [];
+  }))];
+}
+
 function deliveryCandidates(
   sidecar: DatabaseSync,
   nuclear: DatabaseSync,
@@ -216,8 +232,22 @@ function deliveryCandidates(
   limit: number,
   fallbackNowMs: number,
 ): C3TerminalExperienceRecord[] {
+  const recordedReservationIds = recordedDeliveryReservationIds(sidecar);
+  const recordedCte = recordedReservationIds.length > 0
+    ? `WITH recorded_delivery_reservations(reservation_id) AS (
+         VALUES ${recordedReservationIds.map(() => "(?)").join(", ")}
+       )`
+    : "";
+  const recordedExclusion = recordedReservationIds.length > 0
+    ? `AND NOT EXISTS (
+           SELECT 1
+             FROM recorded_delivery_reservations recorded
+            WHERE recorded.reservation_id = delivery_reservations.id
+         )`
+    : "";
   const rows = nuclear.prepare(
-    `SELECT id, state, created_at, finalized_at, cognitive_v021_projection_key
+    `${recordedCte}
+     SELECT id, state, created_at, finalized_at, cognitive_v021_projection_key
        FROM delivery_reservations
        WHERE (
            id > COALESCE(?, 0)
@@ -226,9 +256,10 @@ function deliveryCandidates(
          AND finalized_at IS NOT NULL
         AND state IN ('aborted', 'expired', 'partially_delivered')
         AND cognitive_v021_projection_key IS NOT NULL
+        ${recordedExclusion}
       ORDER BY id ASC
       LIMIT ?`,
-  ).all(watermark, activatedAtMs, limit) as Row[];
+  ).all(...recordedReservationIds, watermark, activatedAtMs, limit) as Row[];
   return rows.flatMap((value) => {
     const reservation = row(value);
     if (!reservation) return [];
