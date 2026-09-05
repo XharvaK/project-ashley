@@ -6,6 +6,10 @@ import { admitTestCycle, openTestSidecar } from "../test-support.js";
 import type { CapabilityReality, IdentitySlice, KernelDeps, Observation, ThoughtInput } from "../types.js";
 import { makeSemanticSettlement } from "../test-support.js";
 import { DatabaseSync } from "node:sqlite";
+import { validateThoughtSettlementDraft } from "../settlement/validate.js";
+import { parseThoughtSemanticOutput } from "./parse.js";
+import { getThoughtAttemptCounters } from "./counters.js";
+import { computeDispatchMessagesHash } from "./projection.js";
 import { initObservabilitySchema, openObservabilityStore } from "./diagnostics.js";
 import {
   createThoughtCycleTokenMetrics,
@@ -46,6 +50,92 @@ function deps(overrides: Partial<KernelDeps> = {}): KernelDeps {
 }
 
 describe("v0.2.1 Thought run", () => {
+  it.each(["corrected", "still_invalid", "deadline"] as const)(
+    "revises the live operational effectRef incident with one shared deadline: %s",
+    async (outcome) => {
+      const sidecar = openTestSidecar();
+      const attentionDb = openTestSidecar();
+      const cycle = admitTestCycle(sidecar, {
+        conversationId: "effect-ref-incident", triggerKind: "owner_message",
+        triggerRef: "owner-incident", occupantId: "doc", authorityEpoch: 1, nowMs: 1,
+      });
+      const evidence = appendOwnerUtterance(sidecar, {
+        conversationId: cycle.conversationId, text: "How are you?",
+        discordMessageIds: ["incident-message"], nowMs: 2,
+      });
+      const event = appendInboxEvent(sidecar, {
+        wakeId: cycle.wakeId, conversationId: cycle.conversationId, kind: "owner_message",
+        payload: { cycleId: cycle.cycleId, evidenceRowId: evidence.rowId, ownerMessage: evidence.text },
+        createdAtMs: 2,
+      });
+      const bad = makeSemanticSettlement();
+      bad.commitments.operational = [{ effectRef: "none", claimedState: "not_attempted" }];
+      const corrected = makeSemanticSettlement({
+        speech: { ...bad.speech, surfaceDraft: "model-authored correction", mustSay: [], acceptableRealizations: [] },
+      });
+      expect(parseThoughtSemanticOutput(JSON.stringify(bad), new Set()).ok).toBe(true);
+      expect(parseThoughtSemanticOutput(JSON.stringify(corrected), new Set()).ok).toBe(true);
+      let now = 1_000;
+      const requests: Array<{ messages: Array<{ role: string; content: string }>; deadline: unknown }> = [];
+      const completeChat: KernelDeps["completeChat"] = async (messages, options) => {
+        expect(options.projectionIdentity?.dispatchMessagesHash).toBe(computeDispatchMessagesHash(messages));
+        expect(options.thoughtInvocationContext?.structuralAttemptOrdinal).toBe(0);
+        expect(options.temperature).toBe(1.0);
+        expect(options.structuredOutput?.contractId).toBe("ashley.thought.semantic.v1");
+        requests.push({ messages, deadline: options.deadlineAtMs });
+        now = outcome === "deadline" ? 61_000 : now + 10_000;
+        return {
+          text: JSON.stringify(requests.length === 1 || outcome !== "corrected" ? bad : corrected),
+          model: "fake", modelAlias: "thought", resolvedModelId: null,
+        };
+      };
+      try {
+        const result = await runCognitiveCycle(sidecar, attentionDb, event, deps({
+          attentionDb, completeChat, nowMs: () => now,
+        }));
+        const steps = sidecar.prepare("SELECT payload_json FROM thought_steps ORDER BY pass").all()
+          .map((row) => JSON.parse(String(row.payload_json)));
+        const active = { cycleId: cycle.cycleId, generation: cycle.generation,
+          occupantId: cycle.occupantId, authorityEpoch: 1, effectAllowlist: new Set<string>() };
+        expect(validateThoughtSettlementDraft(steps[0].settlement, active)).toMatchObject({
+          ok: false, codes: ["OPERATIONAL_CLAIM_EFFECTREF_UNKNOWN"],
+        });
+        expect(steps[0].settlement.commitments.operational).toEqual(bad.commitments.operational);
+        const counters = getThoughtAttemptCounters(sidecar, cycle.cycleId, cycle.generation);
+        expect(counters.structuralRetries).toBe(0);
+        expect(counters.authorityRevisions).toBe(outcome === "still_invalid" ? 2 : 1);
+        expect(requests.map((r) => r.deadline)).toEqual(
+          Array(outcome === "corrected" ? 2 : outcome === "still_invalid" ? 3 : 1).fill(61_000),
+        );
+        if (outcome !== "deadline") {
+          expect(JSON.parse(requests[1].messages[1].content).authorityObjections)
+            .toEqual(["OPERATIONAL_CLAIM_EFFECTREF_UNKNOWN"]);
+          const feedback = requests[1].messages.map((m) => {
+            try { return JSON.parse(m.content).settlementRevision; } catch { return undefined; }
+          }).find(Boolean);
+          expect(feedback).toMatchObject({
+            failureCode: "OPERATIONAL_CLAIM_EFFECTREF_UNKNOWN",
+            invalidEffectRefs: ["none"], allowedEffectRefs: [],
+          });
+        }
+        expect(result.published).toBe(outcome === "corrected");
+        if (outcome === "corrected") {
+          expect(validateThoughtSettlementDraft(steps[1].settlement, active).ok).toBe(true);
+          expect(steps[1].settlement.commitments.operational).toEqual([]);
+          expect(steps[1].settlement.speech.surfaceDraft).toBe("model-authored correction");
+          expect(sidecar.prepare("SELECT COUNT(*) AS n FROM system_notice_outbox").get()).toMatchObject({ n: 0 });
+        } else {
+          expect(sidecar.prepare("SELECT COUNT(*) AS n FROM settlements").get()).toMatchObject({ n: 0 });
+          expect(sidecar.prepare("SELECT notice_key FROM system_notice_outbox").get()?.notice_key)
+            .toContain(outcome === "deadline" ? "thought_deadline" : "revision_exhausted");
+        }
+      } finally {
+        sidecar.close();
+        attentionDb.close();
+      }
+    },
+  );
+
   it("tracks first-pass and cumulative retry input without changing per-pass receipts", () => {
     const first = createThoughtCycleTokenMetrics();
     const second = observeThoughtCycleInput(first, 1_000);

@@ -120,6 +120,12 @@ export type ThoughtInvocation = {
   inputTokens?: number;
 };
 
+type SettlementRevisionFeedback = {
+  failureCode: "OPERATIONAL_CLAIM_EFFECTREF_UNKNOWN";
+  invalidEffectRefs: string[];
+  allowedEffectRefs: string[];
+};
+
 export type ThoughtCycleTokenMetrics = {
   first_pass_total_input_tokens: number;
   total_cycle_input_tokens_including_retries: number;
@@ -408,6 +414,7 @@ export async function runThoughtModel(
     signal?: AbortSignal;
     deadlineAtMs: number;
     structuralFeedback?: StructuralFeedbackInput;
+    settlementRevisionFeedback?: SettlementRevisionFeedback;
     /** Optional caller narrowing; it may never widen the Model Fabric policy. */
     maxTokens?: number;
     /** Qualification-only seam for the exact NIM candidate; no fallback is allowed. */
@@ -461,6 +468,20 @@ export async function runThoughtModel(
       dispatchMessagesHash = computeDispatchMessagesHash(messages);
     }
 
+    if (options.settlementRevisionFeedback) {
+      // Authority revision data, not a structural retry or a host-authored settlement.
+      // Include it before dispatch hashing and Attention token estimation.
+      messages.push({
+        role: "user",
+        content: JSON.stringify({
+          settlementRevision: {
+            ...options.settlementRevisionFeedback,
+            constraint: "Use only allowed operational effect references; do not fabricate references. If no operational effect applies, do not emit an operational commitment. Thought must author the replacement settlement; all validation still applies.",
+          },
+        }),
+      });
+      dispatchMessagesHash = computeDispatchMessagesHash(messages);
+    }
     if (semanticProjectionHash && dispatchMessagesHash) {
       dispatchOptions.projectionIdentity = {
         semanticProjectionHash,
@@ -1022,6 +1043,7 @@ const REVISABLE_AUTHORITY_CODES = new Set<AuthorityCode>([
   "STALE_STATE",
   "DRAFT_COMMITMENT_CONFLICT",
   "EMPTY_COMMITMENTS_WITH_DRAFT",
+  "OPERATIONAL_CLAIM_EFFECTREF_UNKNOWN",
 ]);
 
 function revisable(codes: readonly string[]): boolean {
@@ -1165,6 +1187,7 @@ export async function runCognitiveCycle(
   let pass = counters.acceptedThoughtPasses + 1;
   let structuralRetriesForPass = persistedMalformedRetries(sidecar, cycle.cycleId, cycle.generation, pass);
   let authorityObjections: AuthorityCode[] = [];
+  let settlementRevisionFeedback: SettlementRevisionFeedback | undefined;
   const thoughtDeadlineAtMs = deps.nowMs() + ORDINARY_THOUGHT_BUDGET_MS;
   let structuralFeedback: ThoughtStructuralFeedback | null = null;
   const projectionCache = new ProjectionCache<AllocatedThoughtProjection>();
@@ -1267,6 +1290,7 @@ export async function runCognitiveCycle(
       signal: activeThought.signal,
       deadlineAtMs: thoughtDeadlineAtMs,
       structuralFeedback: structuralFeedback ?? undefined,
+      settlementRevisionFeedback,
       maxTokens: structuralFeedback
         ? STRUCTURAL_RETRY_MAX_OUTPUT_TOKENS
         : undefined,
@@ -1293,6 +1317,7 @@ export async function runCognitiveCycle(
         observationsForThought = await perceive();
         inFlight = listInFlight(sidecar, cycle.cycleId);
         authorityObjections = [];
+        settlementRevisionFeedback = undefined;
         structuralFeedback = null;
         counters = getThoughtAttemptCounters(sidecar, cycle.cycleId, cycle.generation);
         pass = counters.acceptedThoughtPasses + 1;
@@ -1362,6 +1387,7 @@ export async function runCognitiveCycle(
     if (invocation.unavailable) return emitFailure("unavailable");
 
     structuralFeedback = null;
+    settlementRevisionFeedback = undefined;
 
     incrementThoughtAttemptCounter(sidecar, cycle.cycleId, cycle.generation, "acceptedThoughtPasses");
     counters = getThoughtAttemptCounters(sidecar, cycle.cycleId, cycle.generation);
@@ -1478,13 +1504,14 @@ export async function runCognitiveCycle(
     if (invocation.output.kind !== "settlement") {
       return emitFailure(invocation.output.reason);
     }
+    const effectAllowlist = new Set(inFlight.map((item) => mintEffectRef(cycle.cycleId, cycle.generation, item.effectId)));
     const validation = validateThoughtSettlementDraft(invocation.output.settlement, {
       cycleId: cycle.cycleId,
       generation: cycle.generation,
       occupantId: cycle.occupantId,
       authorityEpoch: cycle.authorityEpoch,
       consumedEffectIds: inFlight.filter((item) => item.status === "receipted").map((item) => item.effectId),
-      effectAllowlist: new Set(inFlight.map((item) => mintEffectRef(cycle.cycleId, cycle.generation, item.effectId))),
+      effectAllowlist,
     });
     if (!validation.ok) {
       if (validation.kind === "stale") {
@@ -1494,6 +1521,14 @@ export async function runCognitiveCycle(
       if (validation.kind === "conflict" && revisable(validation.codes)) {
         if (counters.authorityRevisions >= MAX_AUTHORITY_REVISIONS) return emitFailure("revision_exhausted");
         authorityObjections = uniqueAuthorityCodes(validation.codes);
+        if (validation.codes.includes("OPERATIONAL_CLAIM_EFFECTREF_UNKNOWN")) {
+          settlementRevisionFeedback = {
+            failureCode: "OPERATIONAL_CLAIM_EFFECTREF_UNKNOWN",
+            invalidEffectRefs: [...new Set((invocation.output.settlement.commitments.operational ?? [])
+              .map((item) => item.effectRef).filter((ref) => !effectAllowlist.has(ref)))],
+            allowedEffectRefs: [...effectAllowlist].sort(),
+          };
+        }
         incrementThoughtAttemptCounter(sidecar, cycle.cycleId, cycle.generation, "authorityRevisions");
         pass += 1;
         structuralRetriesForPass = persistedMalformedRetries(sidecar, cycle.cycleId, cycle.generation, pass);
