@@ -96,6 +96,7 @@ function thoughtCandidates(
        FROM system_notice_outbox n
        JOIN cycle_records c ON c.cycle_id = n.cycle_id
       WHERE n.notice_id > COALESCE(?, 0)
+        AND COALESCE(n.send_status, '') <> 'suppressed_shadow'
         AND (${clauses})
         AND NOT EXISTS (
           SELECT 1 FROM c3_terminal_experiences x
@@ -211,19 +212,23 @@ function deliveryCandidates(
   sidecar: DatabaseSync,
   nuclear: DatabaseSync,
   watermark: number | null,
+  activatedAtMs: number,
   limit: number,
   fallbackNowMs: number,
 ): C3TerminalExperienceRecord[] {
   const rows = nuclear.prepare(
     `SELECT id, state, created_at, finalized_at, cognitive_v021_projection_key
        FROM delivery_reservations
-      WHERE id > COALESCE(?, 0)
-        AND finalized_at IS NOT NULL
+       WHERE (
+           id > COALESCE(?, 0)
+           OR CAST((julianday(finalized_at) - 2440587.5) * 86400000 AS INTEGER) > ?
+         )
+         AND finalized_at IS NOT NULL
         AND state IN ('aborted', 'expired', 'partially_delivered')
         AND cognitive_v021_projection_key IS NOT NULL
       ORDER BY id ASC
       LIMIT ?`,
-  ).all(watermark, limit) as Row[];
+  ).all(watermark, activatedAtMs, limit) as Row[];
   return rows.flatMap((value) => {
     const reservation = row(value);
     if (!reservation) return [];
@@ -304,7 +309,14 @@ export async function repairMissingC3Experiences(
     ...thoughtCandidates(sidecar, nullableNumber(marker.max_pre_v8_notice_id), sourceLimit),
     ...retryCandidates(sidecar, nullableNumber(marker.max_pre_v8_attempt_finished_at_ms), sourceLimit, nowMs),
     ...frontierCandidates(sidecar, nullableNumber(marker.max_pre_v8_frontier_updated_at_ms), sourceLimit, nowMs),
-    ...deliveryCandidates(sidecar, nuclear, nullableNumber(marker.max_pre_v8_delivery_reservation_id), sourceLimit, nowMs),
+    ...deliveryCandidates(
+      sidecar,
+      nuclear,
+      nullableNumber(marker.max_pre_v8_delivery_reservation_id),
+      number(marker.activated_at_ms),
+      sourceLimit,
+      nowMs,
+    ),
   ].sort((left, right) => left.occurredAtMs - right.occurredAtMs || left.experienceId.localeCompare(right.experienceId));
   const selected = candidates.slice(0, limit);
   const persisted = persistCandidates(sidecar, selected);

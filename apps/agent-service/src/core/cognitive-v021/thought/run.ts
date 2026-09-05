@@ -1125,15 +1125,19 @@ export async function runCognitiveCycle(
     });
     // The infrastructure notice is primary terminal output. C3 is a bounded,
     // fail-soft derived projection and never changes the terminal result.
-    recordThoughtC3TerminalFailure(sidecar, {
-      noticeKey: notice.noticeKey,
-      noticeId: notice.noticeId,
-      cycleId: admittedCycle.cycleId,
-      generation: admittedCycle.generation,
-      occurredAtMs: deps.nowMs(),
-      failureClass: reason,
-      attemptId: lastThoughtRequestId,
-    });
+    // Shadow notices remain suppressed evaluations and must not mint a live
+    // Ashley C3 experience; recovery also excludes any legacy shadow rows.
+    if (deps.origin !== "shadow") {
+      recordThoughtC3TerminalFailure(sidecar, {
+        noticeKey: notice.noticeKey,
+        noticeId: notice.noticeId,
+        cycleId: admittedCycle.cycleId,
+        generation: admittedCycle.generation,
+        occurredAtMs: deps.nowMs(),
+        failureClass: reason,
+        attemptId: lastThoughtRequestId,
+      });
+    }
     if (deps.projectSystemNotice) await deps.projectSystemNotice(notice.noticeId);
     updateCycleState(sidecar, admittedCycle.cycleId, "silent", deps.nowMs());
     return resultWithCounters(admittedCycle.cycleId, admittedCycle.generation, notice.noticeText, counters);

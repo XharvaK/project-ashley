@@ -41,6 +41,39 @@ function seedSidecarSources(sidecar: DatabaseSync): void {
   ).run();
 }
 
+function insertDeliveryReservation(
+  sidecar: DatabaseSync,
+  nuclear: DatabaseSync,
+  key: string,
+  createdAt: string,
+  finalizedAt: string,
+  state: "aborted" | "expired" | "partially_delivered" = "aborted",
+): number {
+  const outbox = insertOutboxPending(sidecar, {
+    settlementId: `settlement:delivery:${key}`,
+    cycleId: `cycle:delivery:${key}`,
+    generation: 1,
+    conversationId: `conversation:delivery:${key}`,
+    licensedText: `licensed text ${key}`,
+  });
+  const result = nuclear.prepare(
+    `INSERT INTO delivery_reservations
+       (owner_id, channel, thread_id, trigger, delivery_lane, state,
+        error_category, finalization_reason, draft_text, created_at,
+        finalized_at, cognitive_v021_projection_key)
+     VALUES ('doc', 'discord', ?, 'reactive', 'reactive', ?, 'send_failure',
+       'send_failure', ?, ?, ?, ?)`,
+  ).run(
+    `conversation:delivery:${key}`,
+    state,
+    `licensed text ${key}`,
+    createdAt,
+    finalizedAt,
+    `speech:${outbox.outboxId}`,
+  );
+  return Number(result.lastInsertRowid);
+}
+
 describe("C3 bounded forward recovery", () => {
   it("recovers post-cutover thought/frontier/delivery terminal rows and is write-once", async () => {
     const sidecar = openTestSidecar();
@@ -130,6 +163,105 @@ describe("C3 bounded forward recovery", () => {
       const result = await repairMissingC3Experiences(sidecar, nuclear, { nowMs: 500 });
       expect(result.recorded).toBe(0);
       expect(sidecar.prepare("SELECT COUNT(*) AS count FROM c3_terminal_experiences").get()).toEqual({ count: 0 });
+    } finally {
+      sidecar.close();
+      nuclear.close();
+    }
+  });
+
+  it("excludes shadow-only notices while recovering one live terminal notice idempotently", async () => {
+    const sidecar = openTestSidecar();
+    const nuclear = openNuclearDb(new DatabaseSync(":memory:"));
+    try {
+      expect((await repairMissingC3Experiences(sidecar, nuclear, { nowMs: 100 })).recorded).toBe(0);
+      const cycleInsert = sidecar.prepare(
+        `INSERT INTO cycle_records
+           (cycle_id, conversation_id, generation, wake_id, state, trigger_kind,
+            trigger_ref, occupant_id, authority_epoch, architecture_epoch,
+            admitted_at_ms, updated_at_ms, compose_log_ids_json, preempted_generation)
+         VALUES (?, ?, 1, NULL, 'silent', 'owner_message', ?, 'doc', 1,
+           'v0.2.1', 1, 100, '[]', NULL)`,
+      );
+      const noticeInsert = sidecar.prepare(
+        `INSERT INTO system_notice_outbox
+           (notice_key, projection_key, cycle_id, conversation_id, notice_text,
+            send_status, origin, delivery_intent_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, '{}')`,
+      );
+      for (const kind of ["shadow", "live"] as const) {
+        const cycleId = `cycle:notice:${kind}`;
+        const conversationId = `conversation:notice:${kind}`;
+        cycleInsert.run(cycleId, conversationId, `trigger:${kind}`);
+        noticeInsert.run(
+          `thought_failure:${conversationId}:${cycleId}:1:unavailable`,
+          `system:${kind}`,
+          cycleId,
+          conversationId,
+          `[system] ${kind} notice`,
+          kind === "shadow" ? "suppressed_shadow" : "pending",
+          kind,
+        );
+      }
+
+      const first = await repairMissingC3Experiences(sidecar, nuclear, { nowMs: 200 });
+      expect(first.recorded).toBe(1);
+      expect(sidecar.prepare("SELECT COUNT(*) AS count FROM c3_terminal_experiences").get()).toEqual({ count: 1 });
+      expect(sidecar.prepare("SELECT experience_id FROM c3_terminal_experiences").all()).toEqual([
+        { experience_id: "c3:thought:thought_failure:conversation:notice:live:cycle:notice:live:1:unavailable" },
+      ]);
+      const second = await repairMissingC3Experiences(sidecar, nuclear, { nowMs: 201 });
+      expect(second.recorded).toBe(0);
+      expect(sidecar.prepare("SELECT COUNT(*) AS count FROM c3_terminal_experiences").get()).toEqual({ count: 1 });
+    } finally {
+      sidecar.close();
+      nuclear.close();
+    }
+  });
+
+  it("repairs post-cutover terminalization for a pre-cutover reservation without historical backfill", async () => {
+    const sidecar = openTestSidecar();
+    const nuclear = openNuclearDb(new DatabaseSync(":memory:"));
+    try {
+      sidecar.prepare("UPDATE c3_activation_cutover SET activated_at_ms = 1000 WHERE id = 1").run();
+      const historicalId = insertDeliveryReservation(
+        sidecar,
+        nuclear,
+        "historical",
+        "1970-01-01T00:00:00.500Z",
+        "1970-01-01T00:00:00.900Z",
+      );
+      const forwardId = insertDeliveryReservation(
+        sidecar,
+        nuclear,
+        "forward",
+        "1970-01-01T00:00:00.500Z",
+        "1970-01-01T00:00:01.100Z",
+      );
+      expect(historicalId).toBe(1);
+      expect(forwardId).toBe(2);
+
+      const first = await repairMissingC3Experiences(sidecar, nuclear, { nowMs: 2_000 });
+      expect(first.recorded).toBe(1);
+      expect(sidecar.prepare("SELECT experience_id FROM c3_terminal_experiences").all()).toEqual([
+        { experience_id: "c3:delivery:2:delivery_aborted" },
+      ]);
+
+      const postCutoverId = insertDeliveryReservation(
+        sidecar,
+        nuclear,
+        "post-cutover",
+        "1970-01-01T00:00:01.200Z",
+        "1970-01-01T00:00:01.300Z",
+        "expired",
+      );
+      expect(postCutoverId).toBe(3);
+      const second = await repairMissingC3Experiences(sidecar, nuclear, { nowMs: 2_001 });
+      expect(second.recorded).toBe(1);
+      expect((await repairMissingC3Experiences(sidecar, nuclear, { nowMs: 2_002 })).recorded).toBe(0);
+      expect(sidecar.prepare("SELECT COUNT(*) AS count FROM c3_terminal_experiences").get()).toEqual({ count: 2 });
+      expect(sidecar.prepare("SELECT max_pre_v8_delivery_reservation_id FROM c3_activation_cutover WHERE id = 1").get()).toEqual({
+        max_pre_v8_delivery_reservation_id: 2,
+      });
     } finally {
       sidecar.close();
       nuclear.close();

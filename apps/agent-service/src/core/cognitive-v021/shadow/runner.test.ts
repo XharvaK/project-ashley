@@ -82,6 +82,7 @@ describe("v0.2.1 shadow runner", () => {
     expect(result.shadow).toBe(true);
     expect(result.published).toBe(false);
     expect(sidecar.prepare("SELECT send_status FROM system_notice_outbox").get()).toMatchObject({ send_status: "suppressed_shadow" });
+    expect(sidecar.prepare("SELECT COUNT(*) AS count FROM c3_terminal_experiences").get()).toEqual({ count: 0 });
     sidecar.close(); attentionDb.close();
   });
 });
