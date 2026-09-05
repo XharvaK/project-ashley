@@ -45,7 +45,10 @@ import {
   listTombstoneTargets,
 } from "../../../continuity/forget-preview.js";
 import { recordAllocationReceipt, recordDiagnostic } from "../diagnostics.js";
-import { mintEffectRef } from "../../effect/effect-ref.js";
+import {
+  buildOperationalEffectNamespace,
+  mintEffectRef,
+} from "../../effect/effect-ref.js";
 import type {
   C3ExperienceAdapterResult,
   C3ExperienceCandidate,
@@ -236,6 +239,11 @@ export function allocateThoughtProjection(
     effectRef: mintEffectRef(input.cycleId, input.generation, item.effectId),
     status: item.status,
   }));
+  const operationalNamespace = buildOperationalEffectNamespace(
+    input.cycleId,
+    input.generation,
+    input.inFlight.map((item) => item.effectId),
+  );
 
   const structuralTokens = (value: unknown): number => {
     const serialized = typeof value === "string" ? value : JSON.stringify(value ?? null);
@@ -293,6 +301,7 @@ export function allocateThoughtProjection(
       trigger: input.trigger,
       observations: input.observations,
       inFlight: projectedInFlight,
+      allowedOperationalEffectRefs: [...operationalNamespace.allowedOperationalEffectRefs],
       authorityObjections: input.authorityObjections,
       runtimeCondition: {
         ...input.runtimeCondition,

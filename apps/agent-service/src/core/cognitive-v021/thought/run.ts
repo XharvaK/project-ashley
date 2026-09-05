@@ -49,7 +49,10 @@ import { getCycle, getCurrentCycle, admitCycle, appendCycleLogIds, updateCycleSt
 import { getConversationEvidence, listConversationEvidence } from "../evidence/conversation-log.js";
 import { listInFlight } from "../effect/in-flight.js";
 import { dispatchEffect } from "../effect/proposal.js";
-import { mintEffectRef } from "../effect/effect-ref.js";
+import {
+  buildOperationalEffectNamespace,
+  buildOperationalEffectNamespaceFromRefs,
+} from "../effect/effect-ref.js";
 import { registerActiveThought } from "../cycle/active.js";
 import { adaptPerception } from "../perception/adapter.js";
 import { buildThoughtInput } from "./input.js";
@@ -186,6 +189,15 @@ function thoughtMessages(
   input: ThoughtInput,
   structuralFeedback?: StructuralFeedbackInput,
 ): ChatMessage[] {
+  const operationalNamespace = buildOperationalEffectNamespace(
+    input.cycleId,
+    input.generation,
+    input.inFlight.map((item) => item.effectId),
+  );
+  const visibleInput = {
+    ...input,
+    allowedOperationalEffectRefs: [...operationalNamespace.allowedOperationalEffectRefs],
+  };
   const feedback = formatThoughtStructuralFeedback(structuralFeedback);
   const correctionData = formatThoughtStructuralCorrectionData(structuralFeedback);
   return [
@@ -200,7 +212,7 @@ function thoughtMessages(
         ...(feedback ? [feedback] : []),
       ].join(" "),
     },
-    { role: "user", content: JSON.stringify(input) },
+    { role: "user", content: JSON.stringify(visibleInput) },
     ...(correctionData ? [{ role: "user" as const, content: correctionData }] : []),
   ];
 }
@@ -389,11 +401,7 @@ function materializeSemanticSettlement(
 }
 
 function semanticReferencesForInput(input: ThoughtInput | ProjectedThoughtInput): string[] {
-  const effectRefs = input.inFlight.map((item) =>
-    "effectRef" in item && typeof (item as any).effectRef === "string"
-      ? (item as any).effectRef
-      : mintEffectRef(input.cycleId, input.generation, (item as any).effectId),
-  );
+  const effectRefs = operationalNamespaceForThoughtInput(input).allowedOperationalEffectRefs;
   return [
     ...input.rawConversation.map((row) => row.rowId),
     ...input.workingContext.map((item) => item.id),
@@ -403,6 +411,22 @@ function semanticReferencesForInput(input: ThoughtInput | ProjectedThoughtInput)
     ...input.retrieval.hits.flatMap((hit) => "supportRefs" in hit ? [hit.ref, ...hit.supportRefs] : [hit.ref]),
     input.trigger.ref,
   ];
+}
+
+function operationalNamespaceForThoughtInput(
+  input: ThoughtInput | ProjectedThoughtInput,
+) {
+  if (
+    "allowedOperationalEffectRefs" in input &&
+    Array.isArray(input.allowedOperationalEffectRefs)
+  ) {
+    return buildOperationalEffectNamespaceFromRefs(input.allowedOperationalEffectRefs);
+  }
+  return buildOperationalEffectNamespace(
+    input.cycleId,
+    input.generation,
+    input.inFlight.map((item) => ("effectId" in item ? item.effectId : item.effectRef)),
+  );
 }
 
 export async function runThoughtModel(
@@ -426,11 +450,12 @@ export async function runThoughtModel(
 ): Promise<ThoughtInvocation> {
   const pass = options.pass ?? 1;
   const requestId = options.requestId ?? randomUUID();
+  const operationalNamespace = operationalNamespaceForThoughtInput(input);
   const dispatchOptions: ThoughtCompleteOptions = {
     attentionDb: deps.attentionDb,
     route: "thought",
     responseFormat: "json_schema",
-    structuredOutput: thoughtOutputStructuredRequest(),
+    structuredOutput: thoughtOutputStructuredRequest(operationalNamespace),
     purpose: "thought",
     lane: "urgent_grounded",
     ownerId: input.occupantId,
@@ -1504,7 +1529,12 @@ export async function runCognitiveCycle(
     if (invocation.output.kind !== "settlement") {
       return emitFailure(invocation.output.reason);
     }
-    const effectAllowlist = new Set(inFlight.map((item) => mintEffectRef(cycle.cycleId, cycle.generation, item.effectId)));
+    const operationalNamespace = buildOperationalEffectNamespace(
+      cycle.cycleId,
+      cycle.generation,
+      inFlight.map((item) => item.effectId),
+    );
+    const effectAllowlist = new Set(operationalNamespace.allowedOperationalEffectRefs);
     const validation = validateThoughtSettlementDraft(invocation.output.settlement, {
       cycleId: cycle.cycleId,
       generation: cycle.generation,
@@ -1526,7 +1556,7 @@ export async function runCognitiveCycle(
             failureCode: "OPERATIONAL_CLAIM_EFFECTREF_UNKNOWN",
             invalidEffectRefs: [...new Set((invocation.output.settlement.commitments.operational ?? [])
               .map((item) => item.effectRef).filter((ref) => !effectAllowlist.has(ref)))],
-            allowedEffectRefs: [...effectAllowlist].sort(),
+            allowedEffectRefs: [...operationalNamespace.allowedOperationalEffectRefs],
           };
         }
         incrementThoughtAttemptCounter(sidecar, cycle.cycleId, cycle.generation, "authorityRevisions");

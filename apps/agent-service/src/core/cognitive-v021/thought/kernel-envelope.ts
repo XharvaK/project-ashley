@@ -87,7 +87,8 @@ export function validateKernelEnvelope(value: unknown): KernelEnvelopeValidation
     || !validNonEmpty(attempt.provider) || !validNonEmpty(attempt.configuredModelId)
     || !validNonEmpty(attempt.occupantId) || !validNonEmpty(attempt.contractId)
     || !validNonEmpty(attempt.buildIdentity) || !validNonEmpty(attempt.logicalStructuredOutputId)
-    || !validNonEmpty(attempt.semanticSchemaFingerprint) || !validNonEmpty(attempt.actualWireBindingId)
+    || !validNonEmpty(attempt.semanticSchemaFingerprint) || !validNonEmpty(attempt.wireSchemaFingerprint)
+    || !validNonEmpty(attempt.actualWireBindingId)
     || !validNonEmpty(attempt.schemaEnforcementMode) || !validNonEmpty(attempt.resourcePolicyFingerprint)) {
     return { ok: false, code: "attempt_identity" };
   }

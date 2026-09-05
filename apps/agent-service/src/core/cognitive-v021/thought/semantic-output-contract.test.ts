@@ -285,6 +285,9 @@ describe("Thought semantic output contract", () => {
     expect(instruction).toContain('semanticClass:"effect" requires effect_intent');
     expect(instruction).toContain("readOnly does not convert an effect-class operation into an observation");
     expect(instruction).toContain("workspace.verify");
+    expect(instruction).toContain("Operational commitments are distinct from conversational continuation");
+    expect(instruction).toContain("Every operational effectRef must refer to one of the complete Host-admitted operational effect references supplied in allowedOperationalEffectRefs");
+    expect(instruction).toContain("If allowedOperationalEffectRefs is empty, commitments.operational must be []");
     expect(instruction).toContain("This contract describes output shape only");
   });
 

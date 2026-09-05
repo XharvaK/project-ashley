@@ -242,6 +242,7 @@ describe("Model-Visible Thought Projection", () => {
     );
     expect(visibleInput.capabilityReality.conversationalRead).toBe(false);
     expect(visibleInput.rawConversation[0]?.text).toBe(ownerTurn.text);
+    expect(visibleInput.allowedOperationalEffectRefs).toEqual([]);
   });
 
   it("projects active effects to opaque effectRef and does NOT expose raw effectId to model", () => {
@@ -303,6 +304,7 @@ describe("Model-Visible Thought Projection", () => {
     expect(userMessageContent).not.toContain(rawEffectId);
 
     // 3. Structured projected inFlight item contains effectRef, not effectId
+    expect(projected.allowedOperationalEffectRefs).toEqual([expectedRef]);
     expect(projected.inFlight[0]).toEqual({
       effectRef: expectedRef,
       status: "in_flight",

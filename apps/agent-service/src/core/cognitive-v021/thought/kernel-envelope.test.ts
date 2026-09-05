@@ -33,6 +33,7 @@ const attempt: CapturedModelAttemptIdentity = {
   buildIdentity: "build-1",
   logicalStructuredOutputId: "ashley.thought.semantic.v1.schema",
   semanticSchemaFingerprint: "sha256:schema",
+  wireSchemaFingerprint: "sha256:wire-schema",
   actualWireBindingId: "nim-guided-json",
   schemaEnforcementMode: "native_json_schema",
   resourcePolicyFingerprint: "sha256:resource",

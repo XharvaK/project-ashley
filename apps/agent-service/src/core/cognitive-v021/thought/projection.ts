@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
-import { mintEffectRef } from "../effect/effect-ref.js";
+import {
+  buildOperationalEffectNamespace,
+  mintEffectRef,
+} from "../effect/effect-ref.js";
 import type {
   AssertionKey,
   AuthorityCode,
@@ -86,6 +89,7 @@ export type ProjectedThoughtInput = {
   observations: Observation[];
   retrieval: ProjectedRetrievalResult;
   inFlight: ProjectedInFlightRecord[];
+  allowedOperationalEffectRefs: readonly string[];
   authorityObjections: AuthorityCode[];
   runtimeCondition: RuntimeCondition;
   rememberDirective: RememberDirective | null;
@@ -207,6 +211,11 @@ export function projectThoughtInput(
   }
 
   const isMiss = infrastructureState === "ready" && compactHits.length === 0;
+  const operationalNamespace = buildOperationalEffectNamespace(
+    fullInput.cycleId,
+    fullInput.generation,
+    fullInput.inFlight.map((item) => item.effectId),
+  );
 
   const projected: ProjectedThoughtInput = {
     cycleId: fullInput.cycleId,
@@ -234,6 +243,7 @@ export function projectThoughtInput(
       effectRef: mintEffectRef(fullInput.cycleId, fullInput.generation, item.effectId),
       status: item.status,
     })),
+    allowedOperationalEffectRefs: [...operationalNamespace.allowedOperationalEffectRefs],
     authorityObjections: fullInput.authorityObjections,
     runtimeCondition: fullInput.runtimeCondition,
     rememberDirective: fullInput.rememberDirective,

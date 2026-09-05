@@ -88,6 +88,7 @@ import {
 import { sha256Text, stableJson } from "./core/model-fabric/hash.js";
 import { THOUGHT_KERNEL_ENVELOPE_VERSION } from "./core/cognitive-v021/thought/kernel-envelope.js";
 import { THOUGHT_SEMANTIC_PARSER_ID } from "./core/cognitive-v021/thought/parse.js";
+import { THOUGHT_SEMANTIC_SCHEMA_FINGERPRINT } from "./core/cognitive-v021/thought/output-contract.js";
 import type { ContextBudgetMode } from "./core/context-budget/types.js";
 export type {
   ChatMessage,
@@ -146,6 +147,7 @@ export type CapturedThoughtAttemptIdentity = {
   buildIdentity: string;
   logicalStructuredOutputId: string;
   semanticSchemaFingerprint: string;
+  wireSchemaFingerprint: string;
   actualWireBindingId: string;
   schemaEnforcementMode: string;
   resourcePolicyFingerprint: string;
@@ -963,7 +965,8 @@ export async function completeChat(
               buildIdentity: result.acceptedDispatchIdentity.buildIdentity,
               logicalStructuredOutputId:
                 dispatchContract.structuredOutputContractId ?? "none",
-              semanticSchemaFingerprint:
+              semanticSchemaFingerprint: THOUGHT_SEMANTIC_SCHEMA_FINGERPRINT,
+              wireSchemaFingerprint:
                 dispatchContract.structuredOutputSchemaFingerprint ?? "none",
               actualWireBindingId:
                 dispatchContract.structuredOutputBindingId ?? "none",

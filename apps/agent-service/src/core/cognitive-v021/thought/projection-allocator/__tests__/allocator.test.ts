@@ -261,7 +261,10 @@ describe("Whole-Thought Projection Allocator", () => {
 
     const allocated = allocateThoughtProjection({
       thoughtInput: input,
-      semanticBudgetTokens: 4_500,
+      // The explicit finite operational namespace and its contract law are
+      // part of the model-visible envelope, so retain the same regression
+      // scenario with its small required headroom.
+      semanticBudgetTokens: 4_600,
       requestId: "req-active-frontier-trigger-regression",
     });
 
@@ -672,6 +675,7 @@ describe("Whole-Thought Projection Allocator", () => {
       "trigger",
       "observations",
       "inFlight",
+      "allowedOperationalEffectRefs",
       "authorityObjections",
       "runtimeCondition",
       "rememberDirective",

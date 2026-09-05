@@ -113,6 +113,7 @@ export type CapturedModelAttemptIdentity = {
   buildIdentity: string;
   logicalStructuredOutputId: string;
   semanticSchemaFingerprint: string;
+  wireSchemaFingerprint: string;
   actualWireBindingId: string;
   schemaEnforcementMode: string;
   resourcePolicyFingerprint: string;

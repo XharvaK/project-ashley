@@ -4,6 +4,7 @@ import {
 } from "../../model-fabric/dispatch-contract.js";
 import { sha256 } from "../../model-fabric/hash.js";
 import { MEMORY_KINDS } from "../memory/kinds.js";
+import type { OperationalEffectNamespace } from "../effect/effect-ref.js";
 import type {
   StructuredOutputRequest,
   StructuredOutputSchemaFingerprint,
@@ -191,9 +192,12 @@ export const THOUGHT_OUTPUT_SCHEMA: Readonly<Record<string, unknown>> = {
   $defs: { semanticRef: semanticRefSchema, existingRef: { type: "string" }, localAlias: localAliasSchema, jsonObject: jsonObjectSchema },
 };
 
-export const THOUGHT_OUTPUT_SCHEMA_FINGERPRINT = `sha256:${sha256(
+export const THOUGHT_SEMANTIC_SCHEMA_FINGERPRINT = `sha256:${sha256(
   THOUGHT_OUTPUT_SCHEMA,
 )}` as StructuredOutputSchemaFingerprint;
+
+/** Backward-compatible name for the stable canonical semantic fingerprint. */
+export const THOUGHT_OUTPUT_SCHEMA_FINGERPRINT = THOUGHT_SEMANTIC_SCHEMA_FINGERPRINT;
 
 type SchemaRecord = Record<string, unknown>;
 
@@ -243,12 +247,67 @@ function speechForms(settlement: SchemaRecord): string[] {
   });
 }
 
+export type ConstrainedThoughtOutputSchema = Readonly<{
+  schema: Readonly<Record<string, unknown>>;
+  namespaceConstraintFingerprint: `sha256:${string}`;
+  wireSchemaFingerprint: StructuredOutputSchemaFingerprint;
+}>;
+
+function cloneSchema(schema: Readonly<Record<string, unknown>>): SchemaRecord {
+  return JSON.parse(JSON.stringify(schema)) as SchemaRecord;
+}
+
+function settlementOperationalSchema(schema: SchemaRecord): SchemaRecord {
+  const branches = Array.isArray(schema.oneOf) ? schema.oneOf : [];
+  const settlement = branches
+    .map((branch) => record(branch))
+    .find((branch) => valueDescription(property(branch, "kind")) === JSON.stringify("settlement"));
+  const operational = property(property(settlement, "commitments"), "operational");
+  if (!settlement || Object.keys(operational).length === 0) {
+    throw new Error("thought_schema_operational_shape_missing");
+  }
+  return operational;
+}
+
+/**
+ * Derive the exact provider wire schema without mutating the stable semantic
+ * schema. Only the Host-owned operational effect reference namespace varies.
+ */
+export function constrainThoughtOutputSchema(
+  namespace: OperationalEffectNamespace,
+): ConstrainedThoughtOutputSchema {
+  const schema = cloneSchema(THOUGHT_OUTPUT_SCHEMA);
+  const operational = settlementOperationalSchema(schema);
+  const refs = [...namespace.allowedOperationalEffectRefs];
+  if (refs.length === 0) {
+    operational.maxItems = 0;
+  } else {
+    delete operational.maxItems;
+    const items = record(operational.items);
+    const properties = record(items.properties);
+    const effectRef = property(items, "effectRef");
+    if (Object.keys(effectRef).length === 0) {
+      throw new Error("thought_schema_effect_ref_shape_missing");
+    }
+    effectRef.enum = refs;
+    properties.effectRef = effectRef;
+    items.properties = properties;
+    operational.items = items;
+  }
+  const wireSchemaFingerprint = `sha256:${sha256(schema)}` as StructuredOutputSchemaFingerprint;
+  return {
+    schema,
+    namespaceConstraintFingerprint: namespace.fingerprint,
+    wireSchemaFingerprint,
+  };
+}
+
 /** Compact compatibility guidance derived from the same code-owned schema. */
 export function thoughtOutputCompatibilityInstruction(): string {
   const settlement = record(THOUGHT_OUTPUT_SCHEMA.oneOf instanceof Array ? THOUGHT_OUTPUT_SCHEMA.oneOf[0] : null);
   const commitments = property(settlement, "commitments");
   return [
-    `Code-owned Thought contract contractId=${THOUGHT_OUTPUT_CONTRACT_ID} schemaId=${THOUGHT_OUTPUT_SCHEMA_ID} schemaFingerprint=${THOUGHT_OUTPUT_SCHEMA_FINGERPRINT}.`,
+    `Code-owned Thought contract contractId=${THOUGHT_OUTPUT_CONTRACT_ID} schemaId=${THOUGHT_OUTPUT_SCHEMA_ID} semanticSchemaFingerprint=${THOUGHT_SEMANTIC_SCHEMA_FINGERPRINT}.`,
     `Return exactly one JSON object in one of these permitted kinds/forms: ${rootForms().join("; ")}.`,
     "Semantic selection rules: choose settlement only when the current supplied evidence and context are sufficient to author the semantic answer without first acquiring additional evidence or performing a governed effect; choose observation_intent when the answer requires additional read-only evidence acquisition through a registered observation capability; choose effect_intent when the requested outcome requires a governed mechanical effect through a registered effect capability; choose abstain when required evidence, capability, or an admissible basis is absent or unresolved.",
     "Do not use settlement as a placeholder for an unperformed observation or effect. If a required observation or effect cannot be truthfully authored from the current admissible context, use abstain rather than claim completion.",
@@ -262,16 +321,20 @@ export function thoughtOutputCompatibilityInstruction(): string {
     `Speech shape: ${speechForms(settlement).join("; ")}.`,
     "Speech mustSay contract: every mustSay entry is a literal required substring and each entry must appear verbatim in surfaceDraft; the host fidelity checker rejects any draft that does not contain them verbatim. Use mustSay: [] when no exact literal wording is required. Behavioral, stylistic, or procedural directives do not belong in mustSay; put those in presentationDirectives.",
     `Commitments required fields: ${requiredFields(commitments).join(", ")}.`,
+    "Operational commitments are distinct from conversational continuation. Every operational effectRef must refer to one of the complete Host-admitted operational effect references supplied in allowedOperationalEffectRefs for this cycle. If allowedOperationalEffectRefs is empty, commitments.operational must be [].",
     `Forbidden publication/delivery fields: ${THOUGHT_FORBIDDEN_OUTPUT_FIELDS.join(", ")}.`,
     "This contract describes output shape only; branch selection is Thought-owned, while Ashley code remains authoritative for identity, authority, licensing, and publication.",
   ].join(" ");
 }
 
-export function thoughtOutputStructuredRequest(): StructuredOutputRequest {
+export function thoughtOutputStructuredRequest(
+  namespace?: OperationalEffectNamespace,
+): StructuredOutputRequest {
+  const constrained = namespace === undefined ? null : constrainThoughtOutputSchema(namespace);
   return {
     contractId: THOUGHT_OUTPUT_CONTRACT_ID,
     schemaId: THOUGHT_OUTPUT_SCHEMA_ID,
-    schemaFingerprint: THOUGHT_OUTPUT_SCHEMA_FINGERPRINT,
-    schema: THOUGHT_OUTPUT_SCHEMA,
+    schemaFingerprint: constrained?.wireSchemaFingerprint ?? THOUGHT_SEMANTIC_SCHEMA_FINGERPRINT,
+    schema: constrained?.schema ?? THOUGHT_OUTPUT_SCHEMA,
   };
 }

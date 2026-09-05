@@ -1688,6 +1688,7 @@ export function fixtureCompletion(
     buildIdentity: preflight.buildIdentity,
     logicalStructuredOutputId: THOUGHT_OUTPUT_CONTRACT_ID,
     semanticSchemaFingerprint: THOUGHT_OUTPUT_SCHEMA_FINGERPRINT,
+    wireSchemaFingerprint: options.structuredOutput?.schemaFingerprint ?? THOUGHT_OUTPUT_SCHEMA_FINGERPRINT,
     actualWireBindingId: preflight.wireBindingId,
     schemaEnforcementMode: preflight.wireMode,
     resourcePolicyFingerprint: thoughtResourcePolicyIdentity().fingerprint,
