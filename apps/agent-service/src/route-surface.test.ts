@@ -115,6 +115,8 @@ describe("route surface registry", () => {
     const originalDiscordOwnerId = env.discordOwnerId;
     const originalMemoryOwnerId = env.memoryOwnerId;
     const legacyTick = vi.fn(async () => ({ shouldSend: false, reason: "legacy" }));
+    const legacyEvaluate = vi.fn(async () => ({ shouldReachOut: false, reason: "legacy" }));
+    const legacyCommit = vi.fn();
     const legacyChat = vi.fn(async () => ({ text: "legacy", threadId: "thread", model: "legacy" }));
     const legacyCuriosity = vi.fn(async () => ({ ok: true }));
     const manager = {
@@ -123,6 +125,8 @@ describe("route surface registry", () => {
       isPaused: () => false,
       core: {
         tickProactive: legacyTick,
+        evaluateProactive: legacyEvaluate,
+        commitProactive: legacyCommit,
         runCuriosityTick: legacyCuriosity,
       },
       handleTextChat: legacyChat,
@@ -143,6 +147,22 @@ describe("route surface registry", () => {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ userId: "doc" }),
         }),
+        fetch(`${url}/initiative/evaluate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: "doc" }),
+        }),
+        fetch(`${url}/initiative/commit`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId: "doc",
+            reservationId: 1,
+            text: "legacy commit",
+            threadId: "thread",
+            discordMessageId: "discord-message",
+          }),
+        }),
       ]);
       for (const response of requests) {
         expect(response.status).toBe(404);
@@ -151,6 +171,8 @@ describe("route surface registry", () => {
       expect(legacyChat).not.toHaveBeenCalled();
       expect(legacyCuriosity).not.toHaveBeenCalled();
       expect(legacyTick).not.toHaveBeenCalled();
+      expect(legacyEvaluate).not.toHaveBeenCalled();
+      expect(legacyCommit).not.toHaveBeenCalled();
     } finally {
       await stopTestServer(server);
       env.discordOwnerId = originalDiscordOwnerId;

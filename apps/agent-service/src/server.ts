@@ -2447,6 +2447,7 @@ export function createServer(
 
   app.post("/initiative/commit", async (req, res) => {
     try {
+      assertLegacyRuntimeRoute("/initiative/commit");
       const body = req.body as {
         userId?: string;
         reservationId?: number;
