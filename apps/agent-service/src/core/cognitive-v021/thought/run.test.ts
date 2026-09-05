@@ -136,6 +136,80 @@ describe("v0.2.1 Thought run", () => {
     },
   );
 
+  it("keeps the post-repair authority revision bounded when the revision provider is unavailable", async () => {
+    const sidecar = openTestSidecar();
+    const attentionDb = openTestSidecar();
+    const cycle = admitTestCycle(sidecar, {
+      conversationId: "nemotron-17-01-incident", triggerKind: "owner_message",
+      triggerRef: "owner-17-01-incident", occupantId: "doc", authorityEpoch: 1, nowMs: 1,
+    });
+    const evidence = appendOwnerUtterance(sidecar, {
+      conversationId: cycle.conversationId, text: "Now probably fixed, how are you feeling?",
+      discordMessageIds: ["17-01-incident-message"], nowMs: 2,
+    });
+    const event = appendInboxEvent(sidecar, {
+      wakeId: cycle.wakeId, conversationId: cycle.conversationId, kind: "owner_message",
+      payload: { cycleId: cycle.cycleId, evidenceRowId: evidence.rowId, ownerMessage: evidence.text },
+      createdAtMs: 2,
+    });
+    const bad = makeSemanticSettlement();
+    bad.commitments.operational = [{ effectRef: "conversationContinuation", claimedState: "in_progress" }];
+    expect(parseThoughtSemanticOutput(JSON.stringify(bad), new Set()).ok).toBe(true);
+
+    let now = 1_000;
+    const requests: Array<{ messages: Array<{ role: string; content: string }>; deadline: number }> = [];
+    const completeChat: KernelDeps["completeChat"] = async (messages, options) => {
+      requests.push({ messages, deadline: options.deadlineAtMs ?? -1 });
+      if (requests.length === 1) {
+        now += 1_000;
+        return { text: JSON.stringify(bad), model: "fake", modelAlias: "thought", resolvedModelId: null };
+      }
+      throw new Error("provider_unavailable");
+    };
+
+    try {
+      const result = await runCognitiveCycle(sidecar, attentionDb, event, deps({
+        attentionDb, completeChat, nowMs: () => now,
+      }));
+      const steps = sidecar.prepare("SELECT pass, payload_json FROM thought_steps ORDER BY pass").all()
+        .map((row) => ({ pass: Number(row.pass), payload: JSON.parse(String(row.payload_json)) }));
+      const counters = getThoughtAttemptCounters(sidecar, cycle.cycleId, cycle.generation);
+
+      expect(result).toMatchObject({
+        published: false,
+        infrastructureNotice: "[system] Thought did not complete. Please send the message again.",
+        thoughtModelAttempts: 2,
+        acceptedThoughtPasses: 1,
+      });
+      expect(requests).toHaveLength(2);
+      expect(requests.map((request) => request.deadline)).toEqual([61_000, 61_000]);
+      expect(JSON.parse(requests[1].messages[1].content).authorityObjections)
+        .toEqual(["OPERATIONAL_CLAIM_EFFECTREF_UNKNOWN"]);
+      const feedback = requests[1].messages.map((message) => {
+        try { return JSON.parse(message.content).settlementRevision; } catch { return undefined; }
+      }).find(Boolean);
+      expect(feedback).toMatchObject({
+        failureCode: "OPERATIONAL_CLAIM_EFFECTREF_UNKNOWN",
+        invalidEffectRefs: ["conversationContinuation"],
+        allowedEffectRefs: [],
+      });
+      expect(steps[0]).toMatchObject({ pass: 1, payload: { kind: "settlement" } });
+      expect(steps[1]).toMatchObject({ pass: 2, payload: { kind: "failure", reason: "unavailable" } });
+      expect(counters).toMatchObject({
+        thoughtModelAttempts: 2,
+        acceptedThoughtPasses: 1,
+        structuralRetries: 0,
+        authorityRevisions: 1,
+      });
+      expect(sidecar.prepare("SELECT COUNT(*) AS count FROM settlements").get()).toMatchObject({ count: 0 });
+      expect(sidecar.prepare("SELECT notice_key FROM system_notice_outbox").get()?.notice_key)
+        .toContain("unavailable");
+    } finally {
+      sidecar.close();
+      attentionDb.close();
+    }
+  });
+
   it("tracks first-pass and cumulative retry input without changing per-pass receipts", () => {
     const first = createThoughtCycleTokenMetrics();
     const second = observeThoughtCycleInput(first, 1_000);
