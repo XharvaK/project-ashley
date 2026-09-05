@@ -152,7 +152,11 @@ export function buildAllocationCandidates(
   // conversationSelection when text does not fit the semantic envelope.
   const conversationSelection = input.conversationSelection;
   const frontierIds = new Set(conversationSelection?.frontierIncludedIds ?? []);
-  const currentTriggerId = input.trigger.kind === "owner_message" ? input.trigger.ref : null;
+  const currentTriggerId = input.trigger.kind !== "owner_message"
+    ? null
+    : conversationSelection?.currentTriggerRowId !== undefined
+      ? conversationSelection.currentTriggerRowId
+      : input.trigger.ref;
   const orderedRawRows = [...input.rawConversation].sort((left, right) =>
     left.createdAtMs - right.createdAtMs || left.rowId.localeCompare(right.rowId),
   );

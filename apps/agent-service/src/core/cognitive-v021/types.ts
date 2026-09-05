@@ -1046,6 +1046,8 @@ export type ThoughtInput = {
   conversationSelection?: {
     frontierIncludedIds: string[];
     omittedEvidenceIds: string[];
+    /** Current row resolved from the cycle trigger's source lineage, when available. */
+    currentTriggerRowId?: string | null;
   };
   workingContext: WorkingContextItem[];
   occupancy: MindOccupancy[];

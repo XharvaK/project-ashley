@@ -204,6 +204,40 @@ describe("v0.2.1 ThoughtInput assembly", () => {
     }
   });
 
+  it("retains the authoritative current row identity for an edited Owner trigger", () => {
+    const db = openTestSidecar();
+    try {
+      const original = appendOwnerUtterance(db, {
+        conversationId: "edited-trigger",
+        text: "original trigger",
+        discordMessageIds: ["edited-trigger-1"],
+        nowMs: 1,
+      });
+      const cycle = admitTestCycle(db, {
+        cycleId: "cycle-edited-trigger",
+        conversationId: "edited-trigger",
+        triggerKind: "owner_message",
+        triggerRef: original.rowId,
+        nowMs: 2,
+      });
+      const edited = appendOwnerUtterance(db, {
+        conversationId: "edited-trigger",
+        text: "authoritative current trigger",
+        discordMessageIds: ["edited-trigger-1"],
+        editOfRowId: original.rowId,
+        nowMs: 3,
+      });
+
+      const input = makeInput(db, cycle, { triggerEvidence: original });
+
+      expect(input.rawConversation.map((row) => row.rowId)).toContain(edited.rowId);
+      expect(input.rawConversation.map((row) => row.rowId)).not.toContain(original.rowId);
+      expect(input.conversationSelection?.currentTriggerRowId).toBe(edited.rowId);
+    } finally {
+      db.close();
+    }
+  });
+
   it("preserves sanitized forgotten evidence rather than inventing replacement text", () => {
     const db = openTestSidecar();
     try {

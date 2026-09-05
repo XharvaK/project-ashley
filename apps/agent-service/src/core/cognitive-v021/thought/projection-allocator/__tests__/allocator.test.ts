@@ -6,6 +6,7 @@ import {
   RequiredOverflowError,
   thoughtMessagesForProjection,
 } from "../allocator.js";
+import { buildAllocationCandidates } from "../sections.js";
 import { createThoughtStructuralFeedback } from "../../structural-feedback.js";
 import { ensureAuthoritativeLineage, openContinuityDb } from "../../../../continuity/db.js";
 import { buildOrientationKernel } from "../../orientation-kernel.js";
@@ -205,6 +206,12 @@ describe("Whole-Thought Projection Allocator", () => {
     expect(includedIds).toContain(rows.at(-1)!.rowId);
     expect(includedIds).toContain(rows.at(-2)!.rowId);
     expect(includedIds).not.toContain(rows[0]!.rowId);
+    expect(allocated.receipt.decision.included).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: `recent_raw:${rows.at(-1)!.rowId}`, required: true }),
+    ]));
+    expect(buildAllocationCandidates(input, [])
+      .filter((candidate) => candidate.section === "recent_raw" && candidate.required)
+      .map((candidate) => candidate.ref)).toEqual([rows.at(-1)!.rowId]);
     expect(omittedRecent.length).toBeGreaterThan(0);
     expect(allocated.receipt.coverageManifest?.domains).toEqual(expect.arrayContaining([
       expect.objectContaining({ domain: "recent_raw", disposition: "OMITTED_FOR_BUDGET" }),
@@ -264,6 +271,108 @@ describe("Whole-Thought Projection Allocator", () => {
     expect(allocated.receipt.coverageManifest?.domains).toEqual(expect.arrayContaining([
       expect.objectContaining({ domain: "recent_raw", disposition: "OMITTED_FOR_BUDGET" }),
     ]));
+  });
+
+  it("requires the authoritative current trigger row rather than its superseded predecessor", () => {
+    const seedRows = makeConversationRows(
+      12,
+      (index) => `synthetic lineage pressure row ${index} `.repeat(50),
+    );
+    const staleTrigger = {
+      ...seedRows[0]!,
+      rowId: "trigger-lineage-v1",
+      lineageId: "trigger-lineage",
+      version: 1,
+      text: "synthetic stale trigger ".repeat(50),
+      createdAtMs: 1,
+    };
+    const currentTrigger = {
+      ...staleTrigger,
+      rowId: "trigger-lineage-v2",
+      version: 2,
+      text: "synthetic authoritative current trigger ".repeat(50),
+      createdAtMs: 2,
+    };
+    const rows = [
+      staleTrigger,
+      currentTrigger,
+      ...seedRows.slice(1).map((row, index) => ({ ...row, createdAtMs: index + 3 })),
+    ];
+    type LineageAwareThoughtInput = ThoughtInput & {
+      conversationSelection: NonNullable<ThoughtInput["conversationSelection"]> & {
+        currentTriggerRowId: string;
+      };
+    };
+    const input = withSyntheticC2({
+      ...makeThoughtInput({
+        rawConversation: rows,
+        trigger: { kind: "owner_message", ref: staleTrigger.rowId },
+      }),
+      conversationSelection: {
+        frontierIncludedIds: [],
+        omittedEvidenceIds: [],
+        currentTriggerRowId: currentTrigger.rowId,
+      },
+    } as LineageAwareThoughtInput);
+
+    const allocated = allocateThoughtProjection({
+      thoughtInput: input,
+      semanticBudgetTokens: 9_500,
+      requestId: "req-trigger-lineage-pressure",
+    });
+    const candidateDefinitions = buildAllocationCandidates(input, []);
+
+    expect(allocated.projected.rawConversation.map((row) => row.rowId)).toContain(currentTrigger.rowId);
+    expect(allocated.projected.rawConversation.map((row) => row.rowId)).not.toContain(staleTrigger.rowId);
+    expect(candidateDefinitions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: `recent_raw:${currentTrigger.rowId}`, required: true }),
+      expect.objectContaining({ id: `recent_raw:${staleTrigger.rowId}`, required: false }),
+    ]));
+    expect(allocated.receipt.decision.omitted).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: `recent_raw:${staleTrigger.rowId}`, reason: "budget_omission" }),
+    ]));
+  });
+
+  it("fails closed when the resolved current trigger itself exceeds the envelope", () => {
+    const currentTrigger = {
+      ...makeConversationRows(1, () => "synthetic current trigger")[0]!,
+      rowId: "trigger-lineage-overflow-v2",
+      lineageId: "trigger-lineage-overflow",
+      version: 2,
+      text: "synthetic current trigger overflow ".repeat(20_000),
+    };
+    const input = withSyntheticC2({
+      ...makeThoughtInput({
+        rawConversation: [currentTrigger],
+        trigger: { kind: "owner_message", ref: "trigger-lineage-overflow-v1" },
+      }),
+      conversationSelection: {
+        frontierIncludedIds: [],
+        omittedEvidenceIds: [],
+        currentTriggerRowId: currentTrigger.rowId,
+      },
+    } as ThoughtInput & {
+      conversationSelection: NonNullable<ThoughtInput["conversationSelection"]> & {
+        currentTriggerRowId: string;
+      };
+    });
+
+    let error: unknown;
+    try {
+      allocateThoughtProjection({
+        thoughtInput: input,
+        semanticBudgetTokens: 9_500,
+        requestId: "req-trigger-lineage-overflow",
+      });
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(RequiredOverflowError);
+    expect(error).toMatchObject({
+      section: "recent_raw",
+      semanticBudgetTokens: 9_500,
+    });
   });
 
   it("does not hide a contextual reference failure behind generic correction guidance", () => {

@@ -265,6 +265,9 @@ export function allocateThoughtProjection(
             conversationSelection: {
               frontierIncludedIds: [...(c2Input.conversationSelection?.frontierIncludedIds ?? [])],
               omittedEvidenceIds: [...conversationOmittedIds],
+              ...(c2Input.conversationSelection?.currentTriggerRowId === undefined
+                ? {}
+                : { currentTriggerRowId: c2Input.conversationSelection.currentTriggerRowId }),
             },
           }
         : {}),

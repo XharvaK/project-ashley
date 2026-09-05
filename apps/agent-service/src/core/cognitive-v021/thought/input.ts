@@ -154,6 +154,7 @@ export type ConversationSelectionResult = {
   selectedEvidence: ConversationEvidenceRecord[];
   frontierIncludedIds: string[];
   omittedEvidenceIds: string[];
+  currentTriggerRowId: string | null;
 };
 
 function orderedEvidence(rows: ConversationEvidenceRecord[]): ConversationEvidenceRecord[] {
@@ -191,7 +192,10 @@ export function frontierAwareEvidenceSelection(
     return current;
   }
 
-  if (options.triggerEvidence) addCurrentEvidence(options.triggerEvidence);
+  let currentTriggerRowId: string | null = null;
+  if (options.triggerEvidence) {
+    currentTriggerRowId = addCurrentEvidence(options.triggerEvidence).rowId;
+  }
 
   // composeLogIds are obligations only while an active deferred frontier owns
   // the conversation. Resolved and exhausted frontiers return to recency.
@@ -225,6 +229,7 @@ export function frontierAwareEvidenceSelection(
   return {
     selectedEvidence,
     frontierIncludedIds,
+    currentTriggerRowId,
     omittedEvidenceIds: ordered
       .filter((row) => !selectedIds.has(row.rowId))
       .map((row) => row.rowId),
@@ -374,11 +379,14 @@ export function buildThoughtInput(options: BuildThoughtInputOptions): ThoughtInp
       ref: options.cycle.triggerRef,
     },
     rawConversation,
-    ...(conversationSelection.frontierIncludedIds.length > 0
+    ...(conversationSelection.frontierIncludedIds.length > 0 || conversationSelection.currentTriggerRowId !== null
       ? {
           conversationSelection: {
             frontierIncludedIds: conversationSelection.frontierIncludedIds,
             omittedEvidenceIds: conversationSelection.omittedEvidenceIds,
+            ...(conversationSelection.currentTriggerRowId === null
+              ? {}
+              : { currentTriggerRowId: conversationSelection.currentTriggerRowId }),
           },
         }
       : {}),
