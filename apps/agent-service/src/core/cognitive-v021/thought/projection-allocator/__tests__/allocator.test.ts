@@ -8,6 +8,9 @@ import {
 } from "../allocator.js";
 import { createThoughtStructuralFeedback } from "../../structural-feedback.js";
 import { ensureAuthoritativeLineage, openContinuityDb } from "../../../../continuity/db.js";
+import { buildOrientationKernel } from "../../orientation-kernel.js";
+import type { DomainPointersSection } from "../../domain-pointers.js";
+import { buildCoverageManifest } from "../../coverage-manifest.js";
 
 function makeThoughtInput(overrides: Partial<ThoughtInput> = {}): ThoughtInput {
   return {
@@ -115,7 +118,154 @@ function makeThoughtInput(overrides: Partial<ThoughtInput> = {}): ThoughtInput {
   };
 }
 
+function makeConversationRows(
+  count: number,
+  textFor: (index: number) => string,
+): ThoughtInput["rawConversation"] {
+  return Array.from({ length: count }, (_, index) => ({
+    rowId: `synthetic-row-${index}`,
+    lineageId: `synthetic-lineage-${index}`,
+    version: 1,
+    conversationId: "conv-1",
+    role: "owner" as const,
+    text: textFor(index),
+    createdAtMs: index + 1,
+    discordMessageIds: [],
+    reservationId: null,
+    producingCycleId: null,
+    architectureEpoch: "v0.2.1" as const,
+    contentHash: `synthetic-hash-${index}`,
+    sourceStatus: "delivered" as const,
+    dataClassification: "ordinary" as const,
+    secretOmitted: false,
+    delivered: true,
+  }));
+}
+
+function withSyntheticC2(input: ThoughtInput): ThoughtInput & {
+  orientationKernel: ReturnType<typeof buildOrientationKernel>;
+  domainPointers: DomainPointersSection;
+} {
+  const orientationKernel = buildOrientationKernel({
+    values: ["synthetic value"],
+    boundaries: ["synthetic boundary"],
+    stableSelf: ["synthetic stable self"],
+    staticOperatingContract: "Synthetic operating contract for allocation pressure tests.",
+    capabilityReality: input.capabilityReality,
+  });
+  const domainPointers: DomainPointersSection = {
+    version: 1,
+    conversationId: input.rawConversation[0]?.conversationId ?? "conv-1",
+    cycleId: input.cycleId,
+    pointers: [{
+      domain: "synthetic_domain",
+      canonicalStore: "synthetic.db:domain",
+      entityIds: ["synthetic-entity"],
+      status: "active",
+      updatedAtMs: 1,
+      disposition: "POINTER_ONLY",
+      pointerOnly: true,
+    }],
+    coverageManifest: buildCoverageManifest([{
+      domain: "synthetic_domain",
+      disposition: "POINTER_ONLY",
+      sourceRecordCount: 1,
+      eligibleRecordCount: 1,
+      candidateIds: ["synthetic-entity"],
+      required: false,
+      pointerOnly: true,
+    }]),
+  };
+  return { ...input, orientationKernel, domainPointers };
+}
+
 describe("Whole-Thought Projection Allocator", () => {
+  it("degrades ordinary recent history while retaining the exact current trigger", () => {
+    const rows = makeConversationRows(
+      12,
+      (index) => `synthetic ordinary recent context row ${index} `.repeat(50),
+    );
+    const input = withSyntheticC2(makeThoughtInput({
+      rawConversation: rows,
+      trigger: { kind: "owner_message", ref: rows.at(-1)!.rowId },
+    }));
+
+    const allocated = allocateThoughtProjection({
+      thoughtInput: input,
+      semanticBudgetTokens: 9_500,
+      requestId: "req-ordinary-required-overflow-regression",
+    });
+
+    const includedIds = allocated.projected.rawConversation.map((row) => row.rowId);
+    const omittedRecent = allocated.receipt.decision.omitted.filter(
+      (candidate) => candidate.section === "recent_raw",
+    );
+
+    expect(allocated.receipt.semanticProjectionEnvelope.maxInputTokens).toBe(9_500);
+    expect(includedIds).toContain(rows.at(-1)!.rowId);
+    expect(includedIds).toContain(rows.at(-2)!.rowId);
+    expect(includedIds).not.toContain(rows[0]!.rowId);
+    expect(omittedRecent.length).toBeGreaterThan(0);
+    expect(allocated.receipt.coverageManifest?.domains).toEqual(expect.arrayContaining([
+      expect.objectContaining({ domain: "recent_raw", disposition: "OMITTED_FOR_BUDGET" }),
+    ]));
+    expect(allocated.projected.conversationSelection?.omittedEvidenceIds).toEqual(
+      expect.arrayContaining(omittedRecent.map((candidate) => candidate.ref)),
+    );
+    expect(allocated.receipt.requiredOverflow).toBe(false);
+    expect(allocated.messages[1]?.content).toContain(rows.at(-1)!.text as string);
+  });
+
+  it("keeps every useful row for a small ordinary conversation", () => {
+    const rows = makeConversationRows(12, (index) => `small synthetic row ${index}`);
+    const allocated = allocateThoughtProjection({
+      thoughtInput: makeThoughtInput({
+        rawConversation: rows,
+        trigger: { kind: "owner_message", ref: rows.at(-1)!.rowId },
+      }),
+      semanticBudgetTokens: 9_500,
+      requestId: "req-small-ordinary-conversation",
+    });
+
+    expect(allocated.projected.rawConversation.map((row) => row.rowId)).toEqual(
+      rows.map((row) => row.rowId),
+    );
+    expect(allocated.receipt.decision.omitted.filter(
+      (candidate) => candidate.section === "recent_raw",
+    )).toHaveLength(0);
+  });
+
+  it("retains the current trigger and frontier ownership while bounding inline frontier text", () => {
+    const rows = makeConversationRows(
+      20,
+      (index) => `synthetic frontier context row ${index} `.repeat(35),
+    );
+    const frontierIds = rows.slice(0, 3).map((row) => row.rowId);
+    const input = makeThoughtInput({
+      rawConversation: rows,
+      trigger: { kind: "owner_message", ref: rows.at(-1)!.rowId },
+      conversationSelection: {
+        frontierIncludedIds: frontierIds,
+        omittedEvidenceIds: [],
+      },
+    });
+
+    const allocated = allocateThoughtProjection({
+      thoughtInput: input,
+      semanticBudgetTokens: 4_500,
+      requestId: "req-active-frontier-trigger-regression",
+    });
+
+    expect(allocated.projected.rawConversation.map((row) => row.rowId)).toContain(rows.at(-1)!.rowId);
+    expect(allocated.projected.conversationSelection?.frontierIncludedIds).toEqual(frontierIds);
+    expect(allocated.projected.conversationSelection?.omittedEvidenceIds).toEqual(
+      expect.arrayContaining(frontierIds),
+    );
+    expect(allocated.receipt.coverageManifest?.domains).toEqual(expect.arrayContaining([
+      expect.objectContaining({ domain: "recent_raw", disposition: "OMITTED_FOR_BUDGET" }),
+    ]));
+  });
+
   it("does not hide a contextual reference failure behind generic correction guidance", () => {
     const input = makeThoughtInput({
       rawConversation: [
@@ -256,38 +406,73 @@ describe("Whole-Thought Projection Allocator", () => {
       .toBe(allocated.receipt.decision.omitted.length);
   });
 
-  it("fails closed on required section overflow with RequiredOverflowError", () => {
-    // Create an impossibly massive required raw conversation
-    const giantRaw = Array.from({ length: 100 }, (_, i) => ({
-      rowId: `row-${i}`,
-      lineageId: `lin-${i}`,
-      version: 1,
-      conversationId: "conv-1",
-      role: "owner" as const,
-      text: "Massive text ".repeat(500),
-      createdAtMs: Date.now() - 1000,
-      discordMessageIds: [],
-      reservationId: null,
-      producingCycleId: null,
-      architectureEpoch: "v0.2.1" as const,
-      contentHash: `hash-${i}`,
-      sourceStatus: "delivered" as const,
-      dataClassification: "ordinary" as const,
-      secretOmitted: false,
-      delivered: true,
-    }));
+  it("fails closed when a genuinely mandatory section exceeds the envelope", () => {
+    const rows = makeConversationRows(1, () => "current synthetic trigger");
+    const input = {
+      ...makeThoughtInput({
+        rawConversation: rows,
+        trigger: { kind: "owner_message", ref: rows[0]!.rowId },
+      }),
+      orientationKernel: buildOrientationKernel({
+        values: ["synthetic value"],
+        boundaries: ["synthetic boundary"],
+        stableSelf: [],
+        staticOperatingContract: "mandatory orientation payload ".repeat(20_000),
+        capabilityReality: makeThoughtInput().capabilityReality,
+      }),
+    };
 
-    const input = makeThoughtInput({
-      rawConversation: giantRaw,
-    });
-
-    expect(() =>
+    let error: unknown;
+    try {
       allocateThoughtProjection({
         thoughtInput: input,
-        quotaBucket: "groq:openai/gpt-oss-20b",
-        requestId: "req-overflow",
+        semanticBudgetTokens: 9_500,
+        requestId: "req-mandatory-overflow",
+      });
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(RequiredOverflowError);
+    expect(error).toMatchObject({
+      section: "orientation_kernel",
+      semanticBudgetTokens: 9_500,
+    });
+    expect((error as RequiredOverflowError).estimatedInputTokens).toBeGreaterThan(9_500);
+  });
+
+  it("uses token pressure rather than a fixed required turn count", () => {
+    const tinyRows = makeConversationRows(18, (index) => `tiny synthetic row ${index}`);
+    const tiny = allocateThoughtProjection({
+      thoughtInput: makeThoughtInput({
+        rawConversation: tinyRows,
+        trigger: { kind: "owner_message", ref: tinyRows.at(-1)!.rowId },
       }),
-    ).toThrowError(RequiredOverflowError);
+      semanticBudgetTokens: 9_500,
+      requestId: "req-token-driven-tiny-rows",
+    });
+
+    const largeRows = makeConversationRows(
+      3,
+      (index) => `large synthetic row ${index} `.repeat(260),
+    );
+    const large = allocateThoughtProjection({
+      thoughtInput: makeThoughtInput({
+        rawConversation: largeRows,
+        trigger: { kind: "owner_message", ref: largeRows.at(-1)!.rowId },
+      }),
+      semanticBudgetTokens: 9_500,
+      requestId: "req-token-driven-large-rows",
+    });
+
+    expect(tiny.projected.rawConversation).toHaveLength(18);
+    expect(tiny.receipt.decision.omitted.filter(
+      (candidate) => candidate.section === "recent_raw",
+    )).toHaveLength(0);
+    expect(large.projected.rawConversation.map((row) => row.rowId)).toContain(largeRows.at(-1)!.rowId);
+    expect(large.receipt.decision.omitted.filter(
+      (candidate) => candidate.section === "recent_raw",
+    ).length).toBeGreaterThan(0);
   });
 
   it("records provider-independent semantic budget and per-pass component token breakdown", () => {

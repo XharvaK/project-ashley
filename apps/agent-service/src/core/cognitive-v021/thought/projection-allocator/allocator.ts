@@ -179,9 +179,16 @@ export function allocateThoughtProjection(
   const excludedCandidates = allCandidates.filter((candidate) =>
     candidate.continuityCandidate?.invalidationReason !== undefined,
   );
-  const candidates = allCandidates.filter((candidate) =>
+  const eligibleCandidates = allCandidates.filter((candidate) =>
     candidate.continuityCandidate?.invalidationReason === undefined,
   );
+  // Pack mandatory sections before budget-sensitive context. This preserves
+  // the existing candidate ownership while preventing optional history from
+  // consuming space needed by a later mandatory section.
+  const candidates = [
+    ...eligibleCandidates.filter((candidate) => candidate.required),
+    ...eligibleCandidates.filter((candidate) => !candidate.required),
+  ];
 
   const includedCandidates: AllocationCandidate[] = [];
   const omittedCandidates: AllocationReceipt["decision"]["omitted"] = [];
@@ -222,6 +229,8 @@ export function allocateThoughtProjection(
     };
   } {
     const isMiss = input.retrieval.state === "ready" && retrieval.length === 0;
+    const hasConversationSelection =
+      c2Input.conversationSelection !== undefined || conversationOmittedIds.size > 0;
     return {
       cycleId: input.cycleId,
       generation: input.generation,
@@ -251,14 +260,14 @@ export function allocateThoughtProjection(
         compression: compression || input.runtimeCondition.compression,
       },
       rememberDirective: input.rememberDirective,
-      ...(c2Input.conversationSelection === undefined
-        ? {}
-        : {
+      ...(hasConversationSelection
+        ? {
             conversationSelection: {
-              frontierIncludedIds: [...c2Input.conversationSelection.frontierIncludedIds],
+              frontierIncludedIds: [...(c2Input.conversationSelection?.frontierIncludedIds ?? [])],
               omittedEvidenceIds: [...conversationOmittedIds],
             },
-          }),
+          }
+        : {}),
       ...(includeOrientationKernel && c2Input.orientationKernel !== undefined
         ? { orientationKernel: c2Input.orientationKernel }
         : {}),

@@ -152,19 +152,24 @@ export function buildAllocationCandidates(
   // conversationSelection when text does not fit the semantic envelope.
   const conversationSelection = input.conversationSelection;
   const frontierIds = new Set(conversationSelection?.frontierIncludedIds ?? []);
-  const frontierActive = frontierIds.size > 0;
-  const rawRows = frontierActive
-    ? [
-        ...input.rawConversation.filter((row) => frontierIds.has(row.rowId)),
-        ...input.rawConversation.filter((row) => !frontierIds.has(row.rowId)),
-      ]
-    : input.rawConversation;
+  const currentTriggerId = input.trigger.kind === "owner_message" ? input.trigger.ref : null;
+  const orderedRawRows = [...input.rawConversation].sort((left, right) =>
+    left.createdAtMs - right.createdAtMs || left.rowId.localeCompare(right.rowId),
+  );
+  const rawRows = [
+    ...orderedRawRows.filter((row) => frontierIds.has(row.rowId)),
+    ...orderedRawRows.filter((row) => row.rowId === currentTriggerId && !frontierIds.has(row.rowId)),
+    ...orderedRawRows
+      .filter((row) => !frontierIds.has(row.rowId) && row.rowId !== currentTriggerId)
+      .reverse(),
+  ];
   for (const row of rawRows) {
+    const isCurrentTrigger = row.rowId === currentTriggerId;
     candidates.push({
       id: `recent_raw:${row.rowId}`,
       section: "recent_raw",
-      required: !frontierActive,
-      priority: frontierIds.has(row.rowId) ? 5 : 6,
+      required: isCurrentTrigger,
+      priority: isCurrentTrigger ? 2 : frontierIds.has(row.rowId) ? 5 : 6,
       ref: row.rowId,
       data: row,
       evidenceRefs: [row.rowId],

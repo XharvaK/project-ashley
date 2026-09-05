@@ -1242,6 +1242,10 @@ export async function runCognitiveCycle(
               code: "context_allocation_required_overflow",
               stage: "allocation",
               dispatchTruth: "not_sent",
+              requiredOverflowSection: err.section,
+              estimatedInputTokens: err.estimatedInputTokens,
+              semanticBudgetTokens: err.semanticBudgetTokens,
+              overflowTokens: Math.max(0, err.estimatedInputTokens - err.semanticBudgetTokens),
               createdAtMs: deps.nowMs(),
             });
           } catch {

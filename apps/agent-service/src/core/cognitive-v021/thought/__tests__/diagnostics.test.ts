@@ -99,6 +99,45 @@ describe("Thought Diagnostics & Observability DB", () => {
     }
   });
 
+  it("round-trips required allocation overflow details through the existing diagnostic payload", () => {
+    const obs = openObservabilityStore(":memory:");
+    try {
+      obs.recordDiagnostic({
+        cycleId: "cycle-overflow-details",
+        generation: 1,
+        requestId: "req-overflow-details",
+        pass: 1,
+        code: "context_allocation_required_overflow",
+        stage: "allocation",
+        dispatchTruth: "not_sent",
+        estimatedInputTokens: 9_709,
+        requiredOverflowSection: "recent_raw",
+        semanticBudgetTokens: 9_500,
+        overflowTokens: 209,
+      });
+
+      const stored = obs.db.prepare(
+        "SELECT cycle_metrics_json FROM thought_dispatch_diagnostics WHERE request_id = ?",
+      ).get("req-overflow-details") as { cycle_metrics_json: string };
+      expect(JSON.parse(stored.cycle_metrics_json)).toMatchObject({
+        required_overflow_section: "recent_raw",
+        estimated_input_tokens: 9_709,
+        semantic_budget_tokens: 9_500,
+        overflow_tokens: 209,
+      });
+
+      expect(obs.listDiagnostics()[0]).toMatchObject({
+        code: "context_allocation_required_overflow",
+        requiredOverflowSection: "recent_raw",
+        estimatedInputTokens: 9_709,
+        semanticBudgetTokens: 9_500,
+        overflowTokens: 209,
+      });
+    } finally {
+      obs.close();
+    }
+  });
+
   it("survives derived index rebuilds without data loss", () => {
     const sidecar = openTestSidecar();
     const derived = openDerivedStore(":memory:");

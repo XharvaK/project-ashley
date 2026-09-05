@@ -52,6 +52,9 @@ export type ThoughtDispatchDiagnostic = {
   fallbackAttemptOrdinal?: number | null;
   fallbackFromAttemptId?: string | null;
   secondaryDispatchTruth?: "not_sent" | null;
+  requiredOverflowSection?: string | null;
+  semanticBudgetTokens?: number | null;
+  overflowTokens?: number | null;
   cycleMetrics?: ThoughtCycleTokenMetrics | null;
   createdAtMs?: number;
 };
@@ -101,6 +104,55 @@ function parseCycleMetrics(value: unknown): ThoughtCycleTokenMetrics | null {
   } catch {
     return null;
   }
+}
+
+type RequiredOverflowDiagnosticDetails = {
+  requiredOverflowSection: string | null;
+  semanticBudgetTokens: number | null;
+  overflowTokens: number | null;
+};
+
+function requiredOverflowPayload(diag: ThoughtDispatchDiagnostic): Record<string, unknown> | null {
+  const hasDetails = diag.requiredOverflowSection !== undefined
+    || diag.semanticBudgetTokens !== undefined
+    || diag.overflowTokens !== undefined;
+  if (!hasDetails) return null;
+  return {
+    required_overflow_section: diag.requiredOverflowSection ?? null,
+    estimated_input_tokens: diag.estimatedInputTokens ?? null,
+    semantic_budget_tokens: diag.semanticBudgetTokens ?? null,
+    overflow_tokens: diag.overflowTokens ?? null,
+  };
+}
+
+function parseRequiredOverflowDetails(value: unknown): RequiredOverflowDiagnosticDetails | null {
+  if (typeof value !== "string" || value.length === 0) return null;
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    const hasDetails = typeof parsed.required_overflow_section === "string"
+      || typeof parsed.semantic_budget_tokens === "number"
+      || typeof parsed.overflow_tokens === "number";
+    if (!hasDetails) return null;
+    return {
+      requiredOverflowSection: typeof parsed.required_overflow_section === "string"
+        ? parsed.required_overflow_section
+        : null,
+      semanticBudgetTokens: typeof parsed.semantic_budget_tokens === "number"
+        ? parsed.semantic_budget_tokens
+        : null,
+      overflowTokens: typeof parsed.overflow_tokens === "number"
+        ? parsed.overflow_tokens
+        : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function diagnosticPayload(diag: ThoughtDispatchDiagnostic): string | null {
+  const overflowPayload = requiredOverflowPayload(diag);
+  if (overflowPayload) return JSON.stringify(overflowPayload);
+  return diag.cycleMetrics ? JSON.stringify(diag.cycleMetrics) : null;
 }
 
 function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string): void {
@@ -294,7 +346,7 @@ export class ObservabilityStore {
       diag.fallbackAttemptOrdinal ?? null,
       diag.fallbackFromAttemptId ?? null,
       diag.secondaryDispatchTruth ?? null,
-      diag.cycleMetrics ? JSON.stringify(diag.cycleMetrics) : null,
+      diagnosticPayload(diag),
       diag.createdAtMs ?? nowMs,
     );
   }
@@ -436,29 +488,33 @@ export class ObservabilityStore {
       created_at_ms: number;
     }>;
 
-    return rows.map((r) => ({
-      cycleId: r.cycle_id,
-      generation: r.generation,
-      requestId: r.request_id,
-      pass: r.pass,
-      code: r.code,
-      stage: r.stage,
-      dispatchTruth: r.dispatch_truth,
-      quotaBucket: r.quota_bucket,
-      estimatedInputTokens: r.estimated_input_tokens,
-      totalDemandTokens: r.total_demand_tokens,
-      semanticProjectionHash: r.semantic_projection_hash,
-      dispatchMessagesHash: r.dispatch_messages_hash,
-      primaryProvider: r.primary_provider,
-      primaryAttemptId: r.primary_attempt_id,
-      primaryDispatchTruth: r.primary_dispatch_truth,
-      suppressedProvider: r.suppressed_provider,
-      fallbackAttemptOrdinal: r.fallback_attempt_ordinal,
-      fallbackFromAttemptId: r.fallback_from_attempt_id,
-      secondaryDispatchTruth: r.secondary_dispatch_truth,
-      cycleMetrics: parseCycleMetrics(r.cycle_metrics_json),
-      createdAtMs: r.created_at_ms,
-    }));
+    return rows.map((r) => {
+      const overflowDetails = parseRequiredOverflowDetails(r.cycle_metrics_json);
+      return {
+        cycleId: r.cycle_id,
+        generation: r.generation,
+        requestId: r.request_id,
+        pass: r.pass,
+        code: r.code,
+        stage: r.stage,
+        dispatchTruth: r.dispatch_truth,
+        quotaBucket: r.quota_bucket,
+        estimatedInputTokens: r.estimated_input_tokens,
+        totalDemandTokens: r.total_demand_tokens,
+        semanticProjectionHash: r.semantic_projection_hash,
+        dispatchMessagesHash: r.dispatch_messages_hash,
+        primaryProvider: r.primary_provider,
+        primaryAttemptId: r.primary_attempt_id,
+        primaryDispatchTruth: r.primary_dispatch_truth,
+        suppressedProvider: r.suppressed_provider,
+        fallbackAttemptOrdinal: r.fallback_attempt_ordinal,
+        fallbackFromAttemptId: r.fallback_from_attempt_id,
+        secondaryDispatchTruth: r.secondary_dispatch_truth,
+        ...(overflowDetails ?? {}),
+        cycleMetrics: parseCycleMetrics(r.cycle_metrics_json),
+        createdAtMs: r.created_at_ms,
+      };
+    });
   }
 
   close(): void {

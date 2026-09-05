@@ -1,9 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { appendInboxEvent } from "../cycle/inbox.js";
 import { appendOwnerUtterance } from "../evidence/conversation-log.js";
+import { applyWorkingContextDelta } from "../evidence/working-context.js";
 import { admitTestCycle, openTestSidecar } from "../test-support.js";
 import type { CapabilityReality, IdentitySlice, KernelDeps, Observation, ThoughtInput } from "../types.js";
 import { makeSemanticSettlement } from "../test-support.js";
+import { DatabaseSync } from "node:sqlite";
+import { initObservabilitySchema, openObservabilityStore } from "./diagnostics.js";
 import {
   createThoughtCycleTokenMetrics,
   materializeEffectsCompleted,
@@ -59,6 +62,94 @@ describe("v0.2.1 Thought run", () => {
     expect(third.total_cycle_input_tokens_including_retries).toBe(1_500);
     expect(third.retry_amplification_ratio).toBe(1.5);
     expect(second).not.toBe(first);
+  });
+
+  it("persists required overflow details without dispatching a provider", async () => {
+    const sidecar = openTestSidecar();
+    const attentionDb = openTestSidecar();
+    const observabilityDb = new DatabaseSync(":memory:");
+    initObservabilitySchema(observabilityDb);
+    const cycle = admitTestCycle(sidecar, {
+      cycleId: "cycle-required-overflow-details",
+      conversationId: "thread-required-overflow-details",
+      triggerKind: "owner_message",
+      triggerRef: "owner-overflow-details",
+      occupantId: "doc",
+      authorityEpoch: 1,
+      nowMs: 1,
+    });
+    const evidence = appendOwnerUtterance(sidecar, {
+      conversationId: cycle.conversationId,
+      text: "trigger for synthetic overflow detail test",
+      discordMessageIds: ["overflow-details-message"],
+      nowMs: 2,
+    });
+    applyWorkingContextDelta(sidecar, {
+      op: "upsert",
+      item: {
+        id: "wc-overflow-details",
+        conversationId: cycle.conversationId,
+        type: "correction",
+        text: "synthetic correction overflow payload ".repeat(20_000),
+        concernId: null,
+        sourceTurnIds: [evidence.rowId],
+        status: "active",
+        supersedesId: null,
+      },
+    }, { cycleId: cycle.cycleId, generation: cycle.generation });
+    const event = appendInboxEvent(sidecar, {
+      wakeId: cycle.wakeId,
+      conversationId: cycle.conversationId,
+      kind: "owner_message",
+      payload: {
+        cycleId: cycle.cycleId,
+        evidenceRowId: evidence.rowId,
+        ownerMessage: evidence.text,
+      },
+      createdAtMs: 2,
+    });
+    const completeChat = vi.fn(async () => ({
+      text: "provider must not be called",
+      model: "fake",
+      modelAlias: "fake",
+      resolvedModelId: null,
+    }));
+
+    try {
+      const result = await runCognitiveCycle(sidecar, attentionDb, event, deps({
+        attentionDb,
+        completeChat,
+        observabilityDb,
+      }));
+      expect(result).toMatchObject({
+        published: false,
+        infrastructureNotice: "[system] Thought did not complete. Please send the message again.",
+      });
+      expect(completeChat).not.toHaveBeenCalled();
+
+      const diagnostic = openObservabilityStore(observabilityDb).listDiagnostics().find(
+        (item) => item.code === "context_allocation_required_overflow",
+      );
+      expect(diagnostic).toMatchObject({
+        stage: "allocation",
+        dispatchTruth: "not_sent",
+        requiredOverflowSection: "working_context_correction",
+        estimatedInputTokens: expect.any(Number),
+        semanticBudgetTokens: 9_500,
+        overflowTokens: expect.any(Number),
+      });
+      expect(diagnostic!.overflowTokens).toBe(
+        diagnostic!.estimatedInputTokens! - diagnostic!.semanticBudgetTokens!,
+      );
+      const storedPayload = observabilityDb.prepare(
+        "SELECT cycle_metrics_json FROM thought_dispatch_diagnostics WHERE code = 'context_allocation_required_overflow'",
+      ).get() as { cycle_metrics_json: string };
+      expect(storedPayload.cycle_metrics_json).not.toContain("synthetic correction overflow payload");
+    } finally {
+      observabilityDb.close();
+      sidecar.close();
+      attentionDb.close();
+    }
   });
 
   it("runs perception before Thought, includes observations, and passes attentionDb", async () => {
