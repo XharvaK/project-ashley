@@ -31,6 +31,13 @@ import {
   COVERAGE_DISPOSITIONS,
   type CoverageManifest,
 } from "../coverage-manifest.js";
+import {
+  getAuthoritativeLineageId,
+} from "../../../continuity/db.js";
+import {
+  listPendingOrAppliedTombstones,
+  listTombstoneTargets,
+} from "../../../continuity/forget-preview.js";
 import { recordAllocationReceipt, recordDiagnostic } from "../diagnostics.js";
 import { mintEffectRef } from "../../effect/effect-ref.js";
 import type {
@@ -89,6 +96,8 @@ export function thoughtMessagesForProjection(
 
 export type AllocateThoughtProjectionOptions = {
   sidecar?: DatabaseSync;
+  /** Authoritative continuity sidecar used by the live allocation path. */
+  continuityDb?: DatabaseSync;
   thoughtInput: ThoughtInput;
   semanticProjectionEnvelope?: SemanticProjectionEnvelope;
   /** Short alias for callers that already hold the named envelope. */
@@ -137,6 +146,13 @@ function mergeCoverageManifests(
   });
 }
 
+function continuityContextFor(db: DatabaseSync) {
+  const authoritativeLineageId = getAuthoritativeLineageId(db);
+  const tombstoneTargets = listPendingOrAppliedTombstones(db, authoritativeLineageId)
+    .flatMap((tombstone) => listTombstoneTargets(db, tombstone.tombstoneId));
+  return { authoritativeLineageId, tombstoneTargets } as const;
+}
+
 export function allocateThoughtProjection(
   opts: AllocateThoughtProjectionOptions,
 ): AllocatedThoughtProjection {
@@ -158,11 +174,19 @@ export function allocateThoughtProjection(
     compactRetrievalHits.push(projectRetrievalHit(hit));
   }
 
-  const candidates = buildAllocationCandidates(input, compactRetrievalHits);
+  const continuityContext = opts.continuityDb ? continuityContextFor(opts.continuityDb) : undefined;
+  const allCandidates = buildAllocationCandidates(input, compactRetrievalHits, continuityContext);
+  const excludedCandidates = allCandidates.filter((candidate) =>
+    candidate.continuityCandidate?.invalidationReason !== undefined,
+  );
+  const candidates = allCandidates.filter((candidate) =>
+    candidate.continuityCandidate?.invalidationReason === undefined,
+  );
 
   const includedCandidates: AllocationCandidate[] = [];
   const omittedCandidates: AllocationReceipt["decision"]["omitted"] = [];
   const omittedCandidateData: AllocationCandidate[] = [];
+  const conversationIncluded: ThoughtInput["rawConversation"] = [];
   const workingContextIncluded: WorkingContextItem[] = [];
   const retrievalHitsIncluded: CompactRetrievalEvidence[] = [];
   let orientationKernelIncluded = false;
@@ -179,6 +203,7 @@ export function allocateThoughtProjection(
   function renderTentative(
     wc: WorkingContextItem[],
     retrieval: CompactRetrievalEvidence[],
+    conversation: ThoughtInput["rawConversation"],
     includeOrientationKernel = orientationKernelIncluded,
     includeDomainPointers = domainPointersIncluded,
     includeC3Experiences = c3ExperiencesIncluded,
@@ -195,7 +220,7 @@ export function allocateThoughtProjection(
       occupantId: input.occupantId,
       authorityEpoch: input.authorityEpoch,
       trigger: input.trigger,
-      rawConversation: input.rawConversation,
+      rawConversation: conversation,
       workingContext: wc,
       occupancy: input.occupancy,
       constitution: input.constitution,
@@ -239,11 +264,14 @@ export function allocateThoughtProjection(
   for (const candidate of candidates) {
     let tentativeWc = workingContextIncluded;
     let tentativeRetrieval = retrievalHitsIncluded;
+    let tentativeConversation = conversationIncluded;
     let tentativeOrientationKernel = orientationKernelIncluded;
     let tentativeDomainPointers = domainPointersIncluded;
     let tentativeC3Experiences = c3ExperiencesIncluded;
 
-    if (candidate.section.startsWith("working_context")) {
+    if (candidate.section === "recent_raw") {
+      tentativeConversation = [...conversationIncluded, candidate.data as ThoughtInput["rawConversation"][number]];
+    } else if (candidate.section.startsWith("working_context")) {
       tentativeWc = [...workingContextIncluded, candidate.data as WorkingContextItem];
     } else if (candidate.section === "retrieval_compact") {
       tentativeRetrieval = [...retrievalHitsIncluded, candidate.data as CompactRetrievalEvidence];
@@ -258,6 +286,7 @@ export function allocateThoughtProjection(
     const tentativeProjected = renderTentative(
       tentativeWc,
       tentativeRetrieval,
+      tentativeConversation,
       tentativeOrientationKernel,
       tentativeDomainPointers,
       tentativeC3Experiences,
@@ -275,7 +304,9 @@ export function allocateThoughtProjection(
     if (estimate.estimatedInputTokens <= budget.semanticBudgetTokens) {
       // Accepted!
       includedCandidates.push(candidate);
-      if (candidate.section.startsWith("working_context")) {
+      if (candidate.section === "recent_raw") {
+        conversationIncluded.push(candidate.data as ThoughtInput["rawConversation"][number]);
+      } else if (candidate.section.startsWith("working_context")) {
         workingContextIncluded.push(candidate.data as WorkingContextItem);
       } else if (candidate.section === "retrieval_compact") {
         retrievalHitsIncluded.push(candidate.data as CompactRetrievalEvidence);
@@ -313,6 +344,7 @@ export function allocateThoughtProjection(
   const finalProjected = renderTentative(
     workingContextIncluded,
     retrievalHitsIncluded,
+    conversationIncluded,
     orientationKernelIncluded,
     domainPointersIncluded,
     c3ExperiencesIncluded,
@@ -357,7 +389,12 @@ export function allocateThoughtProjection(
   const coverageManifest = mergeCoverageManifests(buildAllocationCoverageManifest({
     included: includedCandidates,
     omitted: omittedCandidateData,
-  }), c2Input.c3Experiences?.coverageManifest);
+    excluded: excludedCandidates,
+  }), c2Input.domainPointers?.coverageManifest);
+  const coverageManifestWithC3 = mergeCoverageManifests(
+    coverageManifest,
+    c2Input.c3Experiences?.coverageManifest,
+  );
 
   const semanticProjectionHash = computeSemanticProjectionHash(finalProjected);
   const dispatchMessagesHash = computeDispatchMessagesHash(finalMessages);
@@ -369,7 +406,7 @@ export function allocateThoughtProjection(
     policyId: "thought-projection-v1",
     policyVersion: 1,
     semanticProjectionEnvelope: budget.semanticProjectionEnvelope,
-    coverageManifest,
+    coverageManifest: coverageManifestWithC3,
     tokenBreakdown,
     quotaBucket: budget.quotaBucket,
     hardTpm: budget.hardTpm,

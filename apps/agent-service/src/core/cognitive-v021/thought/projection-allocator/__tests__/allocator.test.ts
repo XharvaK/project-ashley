@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { DatabaseSync } from "node:sqlite";
 import type { ThoughtInput } from "../../../types.js";
 import {
   allocateThoughtProjection,
@@ -6,6 +7,7 @@ import {
   thoughtMessagesForProjection,
 } from "../allocator.js";
 import { createThoughtStructuralFeedback } from "../../structural-feedback.js";
+import { ensureAuthoritativeLineage, openContinuityDb } from "../../../../continuity/db.js";
 
 function makeThoughtInput(overrides: Partial<ThoughtInput> = {}): ThoughtInput {
   return {
@@ -320,5 +322,42 @@ describe("Whole-Thought Projection Allocator", () => {
     expect(allocated.receipt.coverageManifest?.version).toBe(1);
     expect(allocated.receipt.coverageManifest?.domains.length).toBeGreaterThan(0);
     expect(allocated.receipt.coverageManifest?.dispositionCounts.INCLUDED).toBeGreaterThan(0);
+  });
+
+  it("applies the authoritative tombstone on the production allocation path before payload inclusion", () => {
+    const continuity = openContinuityDb(new DatabaseSync(":memory:"));
+    try {
+      const { lineageId } = ensureAuthoritativeLineage(continuity, {
+        nuclearSchemaVersion: 44,
+        buildIdentity: "mat2-test",
+      });
+      continuity.prepare(
+        `INSERT INTO forget_tombstones
+           (tombstone_id, owner_id, lineage_id, status, created_at)
+         VALUES (?, ?, ?, 'applied', ?)`,
+      ).run("tombstone-row-1", "owner-1", lineageId, new Date().toISOString());
+      continuity.prepare(
+        `INSERT INTO forget_tombstone_targets
+           (tombstone_id, entity_type, entity_uuid, action)
+         VALUES (?, ?, ?, 'redact')`,
+      ).run("tombstone-row-1", "conversation_evidence_log", "row-1");
+
+      const allocated = allocateThoughtProjection({
+        thoughtInput: makeThoughtInput(),
+        requestId: "req-tombstone-production-path",
+        continuityDb: continuity,
+      } as Parameters<typeof allocateThoughtProjection>[0]);
+
+      expect(allocated.projected.rawConversation).toEqual([]);
+      expect(allocated.receipt.coverageManifest?.domains).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          domain: "recent_raw",
+          disposition: "INELIGIBLE",
+          candidate_ids: ["recent_raw:row-1"],
+        }),
+      ]));
+    } finally {
+      continuity.close();
+    }
   });
 });

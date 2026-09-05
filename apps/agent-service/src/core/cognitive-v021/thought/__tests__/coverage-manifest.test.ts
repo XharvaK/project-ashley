@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildAllocationCoverageManifest,
   COVERAGE_DISPOSITIONS,
   buildCoverageManifest,
   classifyCoverage,
+  type AllocationCoverageCandidate,
   type CoverageDisposition,
 } from "../coverage-manifest.js";
+import { createContinuityCandidate } from "../continuity-candidate.js";
 
 describe("MAT-II coverage manifest", () => {
   it("keeps all eight dispositions distinct and reachable", () => {
@@ -125,5 +128,42 @@ describe("MAT-II coverage manifest", () => {
       source_record_count: 4,
       eligible_record_count: 2,
     });
+  });
+
+  it("preserves domain-owned dispositions when allocation includes or omits a candidate", () => {
+    const stale = createContinuityCandidate({
+      id: "stale-1",
+      payload: { id: "stale-1" },
+      canonicalStore: "domain-store",
+      entityId: "stale-1",
+      sourceLineageId: "lineage-1",
+      disposition: "STALE",
+    });
+    const pointer = createContinuityCandidate({
+      id: "pointer-1",
+      payload: { id: "pointer-1" },
+      canonicalStore: "domain-store",
+      entityId: "pointer-1",
+      sourceLineageId: "lineage-1",
+      disposition: "POINTER_ONLY",
+    });
+
+    const manifest = buildAllocationCoverageManifest({
+      included: [{
+        id: stale.id,
+        section: "domain_pointers",
+        continuityCandidate: stale,
+      } satisfies AllocationCoverageCandidate],
+      omitted: [{
+        id: pointer.id,
+        section: "domain_pointers",
+        continuityCandidate: pointer,
+      } satisfies AllocationCoverageCandidate],
+    });
+
+    expect(manifest.domains.map((domain) => domain.disposition)).toEqual([
+      "STALE",
+      "POINTER_ONLY",
+    ]);
   });
 });

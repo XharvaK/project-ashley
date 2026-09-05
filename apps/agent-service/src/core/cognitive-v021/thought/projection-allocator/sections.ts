@@ -15,8 +15,11 @@ import type { DomainPointersSection } from "../domain-pointers.js";
 import type { IdentityOrientationKernel } from "../orientation-kernel.js";
 import type { C3ExperienceAdapterResult } from "../c3-adapter.js";
 import {
+  applyAuthoritativeInvalidations,
+  candidatePayload,
   createContinuityCandidate,
   type ContinuityCandidate,
+  type ContinuityLineageContext,
   type CoverageDisposition,
 } from "../continuity-candidate.js";
 
@@ -92,6 +95,7 @@ export function allocationTokenComponent(
 export function buildAllocationCandidates(
   input: ThoughtInput,
   compactRetrievalHits: CompactRetrievalEvidence[],
+  continuityContext?: ContinuityLineageContext,
 ): AllocationCandidate[] {
   const candidates: AllocationCandidate[] = [];
 
@@ -141,14 +145,20 @@ export function buildAllocationCandidates(
     data: input.capabilityReality,
   });
 
-  // 4. Recent Raw Window (required, all 12 turns)
-  candidates.push({
-    id: "recent_raw",
-    section: "recent_raw",
-    required: true,
-    priority: 5,
-    data: input.rawConversation,
-  });
+  // 4. Recent Raw Window. Each row remains an independent candidate so an
+  // authoritative invalidation can remove only the affected payload and
+  // preserve its coverage disposition in the receipt.
+  for (const row of input.rawConversation) {
+    candidates.push({
+      id: `recent_raw:${row.rowId}`,
+      section: "recent_raw",
+      required: true,
+      priority: 5,
+      ref: row.rowId,
+      data: row,
+      evidenceRefs: [row.rowId],
+    });
+  }
 
   // 5. Learned Self Slice (required)
   candidates.push({
@@ -331,10 +341,13 @@ export function buildAllocationCandidates(
   return candidates.map((candidate) => {
     const canonicalStore = canonicalStoreFor(candidate.section);
     const evidenceRefs = candidate.evidenceRefs ?? evidenceRefsFor(candidate.data);
-    const sourceLineageId = sourceLineageFor(candidate.data) ??
-      input.rawConversation[0]?.lineageId ?? `unbound:${input.cycleId}`;
+    const sourceLineageId = continuityContext?.authoritativeLineageId ??
+      sourceLineageFor(candidate.data) ?? input.rawConversation[0]?.lineageId ?? `unbound:${input.cycleId}`;
     const entityId = candidate.ref ?? candidate.id;
-    const continuityCandidate = createContinuityCandidate({
+    const sourceRecord = typeof candidate.data === "object" && candidate.data !== null
+      ? candidate.data as Record<string, unknown>
+      : undefined;
+    const continuityCandidate = applyAuthoritativeInvalidations(createContinuityCandidate({
       id: candidate.id,
       payload: candidate.data,
       canonicalStore,
@@ -342,9 +355,14 @@ export function buildAllocationCandidates(
       sourceLineageId,
       evidenceRefs,
       required: candidate.required,
-    });
+      disposition: candidate.coverageDisposition,
+      redacted: sourceRecord?.redacted === true || sourceRecord?.sourceStatus === "redacted",
+      sourceStatus: typeof sourceRecord?.sourceStatus === "string" ? sourceRecord.sourceStatus : undefined,
+      dataClassification: typeof sourceRecord?.dataClassification === "string" ? sourceRecord.dataClassification : undefined,
+    }), continuityContext);
     return {
       ...candidate,
+      data: candidatePayload(continuityCandidate),
       canonicalStore,
       entityId,
       sourceLineageId,

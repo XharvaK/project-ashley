@@ -101,6 +101,7 @@ import {
   getActiveDeferredFrontier,
   resolveDeferredFrontier,
 } from "../frontier/ledger.js";
+import { getContinuityFor } from "../../continuity/registry.js";
 
 export type ThoughtInvocation = {
   output: ThoughtStepOutput;
@@ -1052,7 +1053,7 @@ export function productionAuthorityObjectionCodes(codes: readonly string[]): Aut
 /** Phase 02 kernel slice: assemble, perceive, run one Thought pass, validate, publish. */
 export async function runCognitiveCycle(
   sidecar: DatabaseSync,
-  _nuclear: DatabaseSync,
+  nuclear: DatabaseSync,
   event: InboxEvent,
   deps: KernelDeps,
   options: { privateBudgetBinding?: PrivateBudgetDispatchBinding } = {},
@@ -1217,6 +1218,7 @@ export async function runCognitiveCycle(
         storeObservations(sidecar, input, deps.nowMs());
         allocated = allocateThoughtProjection({
           sidecar,
+          continuityDb: getContinuityFor(nuclear),
           thoughtInput: input,
           requestId: randomUUID(),
           structuralFeedback: structuralFeedback ?? undefined,

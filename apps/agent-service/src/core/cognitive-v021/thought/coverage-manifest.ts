@@ -200,33 +200,39 @@ export type AllocationCoverageCandidate = {
   section: string;
   required?: boolean;
   ref?: string;
+  coverageDisposition?: CoverageDisposition;
   continuityCandidate?: ContinuityCandidate<unknown>;
   evidenceRefs?: readonly string[];
 };
+
+function allocationCoverageAssessment(
+  candidate: AllocationCoverageCandidate,
+  fallback: CoverageDisposition,
+): CoverageAssessment {
+  const continuity = candidate.continuityCandidate;
+  const disposition = continuity?.disposition ?? candidate.coverageDisposition ?? fallback;
+  return {
+    domain: candidate.section,
+    disposition,
+    sourceRecordCount: 1,
+    candidateIds: [candidate.id],
+    evidenceRefs: candidate.evidenceRefs ?? continuity?.evidenceRefs ?? [],
+    required: candidate.required === true,
+    pointerOnly: continuity?.pointerOnly === true,
+    tombstoned: continuity?.invalidationReason === "tombstoned",
+    redacted: continuity?.invalidationReason === "redacted",
+  };
+}
 
 /** Build the receipt manifest from the allocator's honest include/omit result. */
 export function buildAllocationCoverageManifest(input: {
   included: readonly AllocationCoverageCandidate[];
   omitted?: readonly AllocationCoverageCandidate[];
+  excluded?: readonly AllocationCoverageCandidate[];
 }): CoverageManifest {
   return buildCoverageManifest([
-    ...input.included.map((candidate) => ({
-      domain: candidate.section,
-      disposition: "INCLUDED" as const,
-      sourceRecordCount: 1,
-      eligibleRecordCount: 1,
-      candidateIds: [candidate.id],
-      evidenceRefs: candidate.evidenceRefs ?? candidate.continuityCandidate?.evidenceRefs ?? [],
-      required: candidate.required === true,
-    })),
-    ...(input.omitted ?? []).map((candidate) => ({
-      domain: candidate.section,
-      disposition: "OMITTED_FOR_BUDGET" as const,
-      sourceRecordCount: 1,
-      eligibleRecordCount: 1,
-      candidateIds: [candidate.id],
-      evidenceRefs: candidate.evidenceRefs ?? candidate.continuityCandidate?.evidenceRefs ?? [],
-      required: candidate.required === true,
-    })),
+    ...input.included.map((candidate) => allocationCoverageAssessment(candidate, "INCLUDED")),
+    ...(input.omitted ?? []).map((candidate) => allocationCoverageAssessment(candidate, "OMITTED_FOR_BUDGET")),
+    ...(input.excluded ?? []).map((candidate) => allocationCoverageAssessment(candidate, "INELIGIBLE")),
   ]);
 }
