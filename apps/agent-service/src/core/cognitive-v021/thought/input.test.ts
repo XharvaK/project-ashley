@@ -3,7 +3,7 @@ import { admitTestCycle, openTestSidecar, makeThoughtDraft } from "../test-suppo
 import { openDerivedStore } from "../retrieval/derived-store.js";
 import { appendOwnerUtterance } from "../evidence/conversation-log.js";
 import type { CapabilityReality, IdentitySlice, MindOccupancy, WorkingContextItem } from "../types.js";
-import { buildThoughtInput } from "./input.js";
+import { buildThoughtInput, frontierAwareEvidenceSelection } from "./input.js";
 import { appendCycleLogIds, getCycle } from "../cycle/inbox.js";
 import {
   getActiveDeferredFrontier,
@@ -307,4 +307,42 @@ describe("v0.2.1 ThoughtInput assembly", () => {
       db.close();
     }
   });
+
+  it("does not populate omittedEvidenceIds for historical turns excluded merely by recency", () => {
+    const db = openTestSidecar();
+    try {
+      const rows = Array.from({ length: 25 }, (_, index) =>
+        appendOwnerUtterance(db, {
+          conversationId: "thread-recency",
+          text: `historical turn ${index}`,
+          discordMessageIds: [`recency-msg-${index}`],
+          nowMs: index + 1,
+        }),
+      );
+      const currentTrigger = rows.at(-1)!;
+      const cycle = admitTestCycle(db, {
+        cycleId: "cycle-recency",
+        conversationId: "thread-recency",
+        triggerKind: "owner_message",
+        triggerRef: currentTrigger.rowId,
+        nowMs: 100,
+      });
+
+      const selection = frontierAwareEvidenceSelection(db, "thread-recency", {
+        triggerEvidence: currentTrigger,
+      });
+      expect(selection.selectedEvidence).toHaveLength(12);
+      expect(selection.currentTriggerRowId).toBe(currentTrigger.rowId);
+      // RECENCY_NOT_SELECTED must not be treated as a budget omission
+      expect(selection.omittedEvidenceIds).toEqual([]);
+
+      const input = makeInput(db, cycle, { triggerEvidence: currentTrigger });
+      expect(input.rawConversation).toHaveLength(12);
+      expect(input.conversationSelection?.currentTriggerRowId).toBe(currentTrigger.rowId);
+      expect(input.conversationSelection?.omittedEvidenceIds).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
 });
+

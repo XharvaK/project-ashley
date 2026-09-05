@@ -225,14 +225,11 @@ export function frontierAwareEvidenceSelection(
   }
 
   const selectedEvidence = orderedEvidence([...selectedMap.values()]);
-  const selectedIds = new Set(selectedEvidence.map((row) => row.rowId));
   return {
     selectedEvidence,
     frontierIncludedIds,
     currentTriggerRowId,
-    omittedEvidenceIds: ordered
-      .filter((row) => !selectedIds.has(row.rowId))
-      .map((row) => row.rowId),
+    omittedEvidenceIds: [],
   };
 }
 
