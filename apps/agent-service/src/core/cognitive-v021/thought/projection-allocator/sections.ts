@@ -147,13 +147,24 @@ export function buildAllocationCandidates(
 
   // 4. Recent Raw Window. Each row remains an independent candidate so an
   // authoritative invalidation can remove only the affected payload and
-  // preserve its coverage disposition in the receipt.
-  for (const row of input.rawConversation) {
+  // preserve its coverage disposition in the receipt. Active frontier rows
+  // are highest-priority optional inline material: their identities remain in
+  // conversationSelection when text does not fit the semantic envelope.
+  const conversationSelection = input.conversationSelection;
+  const frontierIds = new Set(conversationSelection?.frontierIncludedIds ?? []);
+  const frontierActive = frontierIds.size > 0;
+  const rawRows = frontierActive
+    ? [
+        ...input.rawConversation.filter((row) => frontierIds.has(row.rowId)),
+        ...input.rawConversation.filter((row) => !frontierIds.has(row.rowId)),
+      ]
+    : input.rawConversation;
+  for (const row of rawRows) {
     candidates.push({
       id: `recent_raw:${row.rowId}`,
       section: "recent_raw",
-      required: true,
-      priority: 5,
+      required: !frontierActive,
+      priority: frontierIds.has(row.rowId) ? 5 : 6,
       ref: row.rowId,
       data: row,
       evidenceRefs: [row.rowId],

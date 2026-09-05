@@ -75,6 +75,7 @@ export type ProjectedThoughtInput = {
     ref: string;
   };
   rawConversation: ThoughtInput["rawConversation"];
+  conversationSelection?: ThoughtInput["conversationSelection"];
   workingContext: WorkingContextItem[];
   occupancy: MindOccupancy[];
   constitution: IdentitySlice;
@@ -164,6 +165,9 @@ export function projectThoughtInput(
     authorityEpoch: fullInput.authorityEpoch,
     trigger: fullInput.trigger,
     rawConversation: fullInput.rawConversation,
+    ...(fullInput.conversationSelection === undefined
+      ? {}
+      : { conversationSelection: fullInput.conversationSelection }),
     workingContext: fullInput.workingContext,
     occupancy: fullInput.occupancy,
     constitution: fullInput.constitution,

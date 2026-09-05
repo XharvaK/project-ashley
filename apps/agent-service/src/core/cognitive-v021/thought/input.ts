@@ -170,7 +170,7 @@ export function frontierAwareEvidenceSelection(
   db: DatabaseSync,
   conversationId: string,
   options: ConversationSelectionOptions = {},
-): ConversationEvidenceRecord[] {
+): ConversationSelectionResult {
   const lastNTurns = Math.max(1, Math.floor(options.lastNTurns ?? DEFAULT_LAST_N_TURNS));
   const all = options.suppliedEvidence ?? listConversationEvidence(db, conversationId, {
     limit: 1000,
@@ -182,12 +182,13 @@ export function frontierAwareEvidenceSelection(
   const selectedMap = new Map<string, ConversationEvidenceRecord>();
   for (const row of ordered.slice(-lastNTurns)) selectedMap.set(row.rowId, row);
 
-  function addCurrentEvidence(row: ConversationEvidenceRecord): void {
+  function addCurrentEvidence(row: ConversationEvidenceRecord): ConversationEvidenceRecord {
     if (row.conversationId !== conversationId) {
       throw new Error(`active_frontier_required_evidence_missing:${row.rowId}`);
     }
     const current = latestByLineage.get(row.lineageId) ?? row;
     selectedMap.set(current.rowId, current);
+    return current;
   }
 
   if (options.triggerEvidence) addCurrentEvidence(options.triggerEvidence);
@@ -204,16 +205,30 @@ export function frontierAwareEvidenceSelection(
     }
   }
 
+  const frontierIncludedIds: string[] = [];
+  const frontierIncludedSet = new Set<string>();
   for (const requiredId of requiredRowIds) {
     const supplied = ordered.find((row) => row.rowId === requiredId);
     const turn = supplied ?? getConversationEvidence(db, requiredId);
     if (!turn || turn.conversationId !== conversationId) {
       throw new Error(`active_frontier_required_evidence_missing:${requiredId}`);
     }
-    addCurrentEvidence(turn);
+    const current = addCurrentEvidence(turn);
+    if (!frontierIncludedSet.has(current.rowId)) {
+      frontierIncludedSet.add(current.rowId);
+      frontierIncludedIds.push(current.rowId);
+    }
   }
 
-  return orderedEvidence([...selectedMap.values()]);
+  const selectedEvidence = orderedEvidence([...selectedMap.values()]);
+  const selectedIds = new Set(selectedEvidence.map((row) => row.rowId));
+  return {
+    selectedEvidence,
+    frontierIncludedIds,
+    omittedEvidenceIds: ordered
+      .filter((row) => !selectedIds.has(row.rowId))
+      .map((row) => row.rowId),
+  };
 }
 
 function emptyRuntimeCondition(partial?: Partial<RuntimeCondition>): RuntimeCondition {
@@ -274,7 +289,7 @@ export function buildThoughtInput(options: BuildThoughtInputOptions): ThoughtInp
     options.sidecar,
     options.cycle.conversationId,
   );
-  const rawConversation = frontierAwareEvidenceSelection(
+  const conversationSelection = frontierAwareEvidenceSelection(
     options.sidecar,
     options.cycle.conversationId,
     {
@@ -285,6 +300,7 @@ export function buildThoughtInput(options: BuildThoughtInputOptions): ThoughtInp
       suppliedEvidence: options.rawConversation,
     },
   );
+  const rawConversation = conversationSelection.selectedEvidence;
   const workingContext = options.workingContext ?? listWorkingContext(options.sidecar, options.cycle.conversationId);
   const occupancy = (options.occupancy ?? loadOccupancy(options.sidecar, options.cycle.conversationId, occupancyK))
     .slice()
@@ -356,6 +372,14 @@ export function buildThoughtInput(options: BuildThoughtInputOptions): ThoughtInp
       ref: options.cycle.triggerRef,
     },
     rawConversation,
+    ...(conversationSelection.frontierIncludedIds.length > 0
+      ? {
+          conversationSelection: {
+            frontierIncludedIds: conversationSelection.frontierIncludedIds,
+            omittedEvidenceIds: conversationSelection.omittedEvidenceIds,
+          },
+        }
+      : {}),
     workingContext,
     occupancy,
     // Keep the legacy IdentitySlice wire shape compact. The richer

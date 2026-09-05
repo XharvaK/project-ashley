@@ -360,4 +360,53 @@ describe("Whole-Thought Projection Allocator", () => {
       continuity.close();
     }
   });
+
+  it("bounds active-frontier inline text while retaining every frontier identity in coverage metadata", () => {
+    const rows = Array.from({ length: 40 }, (_, index) => ({
+      rowId: `frontier-row-${index}`,
+      lineageId: `frontier-lineage-${index}`,
+      version: 1,
+      conversationId: "conv-1",
+      role: "owner" as const,
+      text: `frontier evidence ${index} `.repeat(160),
+      createdAtMs: index + 1,
+      discordMessageIds: [],
+      reservationId: null,
+      producingCycleId: null,
+      architectureEpoch: "v0.2.1" as const,
+      contentHash: `frontier-hash-${index}`,
+      sourceStatus: "delivered" as const,
+      dataClassification: "ordinary" as const,
+      secretOmitted: false,
+      delivered: true,
+    }));
+    const frontierInput = makeThoughtInput({ rawConversation: rows }) as ThoughtInput & {
+      conversationSelection: {
+        frontierIncludedIds: string[];
+        omittedEvidenceIds: string[];
+      };
+    };
+    frontierInput.conversationSelection = {
+      frontierIncludedIds: rows.map((row) => row.rowId),
+      omittedEvidenceIds: [],
+    };
+
+    const allocated = allocateThoughtProjection({
+      thoughtInput: frontierInput,
+      semanticBudgetTokens: 4_500,
+      requestId: "req-frontier-bounded",
+    });
+
+    expect(allocated.projected.rawConversation.length).toBeLessThan(rows.length);
+    expect(allocated.projected.conversationSelection?.frontierIncludedIds).toEqual(
+      rows.map((row) => row.rowId),
+    );
+    expect(allocated.projected.conversationSelection?.omittedEvidenceIds.length).toBeGreaterThan(0);
+    expect(allocated.receipt.coverageManifest?.domains).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        domain: "recent_raw",
+        disposition: "OMITTED_FOR_BUDGET",
+      }),
+    ]));
+  });
 });

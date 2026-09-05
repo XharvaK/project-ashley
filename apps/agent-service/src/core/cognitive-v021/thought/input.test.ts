@@ -173,6 +173,9 @@ describe("v0.2.1 ThoughtInput assembly", () => {
       expect(input.rawConversation).toHaveLength(40);
       expect(new Set(input.rawConversation.map((row) => row.rowId)).size).toBe(40);
       expect(input.rawConversation.map((row) => row.rowId)).toEqual(rows.map((row) => row.rowId));
+      expect(input.conversationSelection?.frontierIncludedIds).toEqual(
+        expect.arrayContaining(required),
+      );
     } finally {
       db.close();
     }

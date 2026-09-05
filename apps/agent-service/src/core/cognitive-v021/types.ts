@@ -1042,6 +1042,11 @@ export type ThoughtInput = {
   authorityEpoch: AuthorityEpoch;
   trigger: { kind: CycleTriggerKind; ref: string };
   rawConversation: ConversationEvidenceRecord[];
+  /** Source-owned frontier identity/coverage metadata; text may be budgeted separately. */
+  conversationSelection?: {
+    frontierIncludedIds: string[];
+    omittedEvidenceIds: string[];
+  };
   workingContext: WorkingContextItem[];
   occupancy: MindOccupancy[];
   constitution: IdentitySlice;

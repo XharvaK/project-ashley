@@ -187,6 +187,7 @@ export function allocateThoughtProjection(
   const omittedCandidates: AllocationReceipt["decision"]["omitted"] = [];
   const omittedCandidateData: AllocationCandidate[] = [];
   const conversationIncluded: ThoughtInput["rawConversation"] = [];
+  const conversationOmittedIds = new Set(input.conversationSelection?.omittedEvidenceIds ?? []);
   const workingContextIncluded: WorkingContextItem[] = [];
   const retrievalHitsIncluded: CompactRetrievalEvidence[] = [];
   let orientationKernelIncluded = false;
@@ -198,7 +199,14 @@ export function allocateThoughtProjection(
     orientationKernel?: ProjectedThoughtInput["orientationKernel"];
     domainPointers?: ProjectedThoughtInput["domainPointers"];
     c3Experiences?: C3ExperienceAdapterResult;
+    conversationSelection?: ThoughtInput["conversationSelection"];
   };
+
+  function orderedConversation(rows: ThoughtInput["rawConversation"]): ThoughtInput["rawConversation"] {
+    return [...rows].sort((left, right) =>
+      left.createdAtMs - right.createdAtMs || left.rowId.localeCompare(right.rowId),
+    );
+  }
 
   function renderTentative(
     wc: WorkingContextItem[],
@@ -220,7 +228,7 @@ export function allocateThoughtProjection(
       occupantId: input.occupantId,
       authorityEpoch: input.authorityEpoch,
       trigger: input.trigger,
-      rawConversation: conversation,
+      rawConversation: orderedConversation(conversation),
       workingContext: wc,
       occupancy: input.occupancy,
       constitution: input.constitution,
@@ -243,6 +251,14 @@ export function allocateThoughtProjection(
         compression: compression || input.runtimeCondition.compression,
       },
       rememberDirective: input.rememberDirective,
+      ...(c2Input.conversationSelection === undefined
+        ? {}
+        : {
+            conversationSelection: {
+              frontierIncludedIds: [...c2Input.conversationSelection.frontierIncludedIds],
+              omittedEvidenceIds: [...conversationOmittedIds],
+            },
+          }),
       ...(includeOrientationKernel && c2Input.orientationKernel !== undefined
         ? { orientationKernel: c2Input.orientationKernel }
         : {}),
@@ -332,6 +348,9 @@ export function allocateThoughtProjection(
       // Omit optional candidate
       compression = true;
       omittedCandidateData.push(candidate);
+      if (candidate.section === "recent_raw" && candidate.ref) {
+        conversationOmittedIds.add(candidate.ref);
+      }
       omittedCandidates.push({
         id: candidate.id,
         section: candidate.section,
