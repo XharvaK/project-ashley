@@ -43,6 +43,11 @@ describe("MAT-II identity orientation kernel", () => {
     expect(kernel.staticOperatingContract).toContain("FULL STATIC OPERATING CONTRACT");
     expect(kernel.staticContractHash).toMatch(/^[a-f0-9]{64}$/);
     expect(kernel.capabilityReality).toEqual(capability);
+    expect(kernel.stableSelf).toBe(kernel.selectedStableSelf);
+    expect(kernel.stableSelfPointers).toBe(kernel.stableSelfRemainder);
+    const visible = JSON.parse(JSON.stringify(kernel)) as Record<string, unknown>;
+    expect(visible).not.toHaveProperty("stableSelf");
+    expect(visible).not.toHaveProperty("stableSelfPointers");
   });
 
   it("uses the implementation bound as a deterministic default and exposes the remainder as pointers", () => {

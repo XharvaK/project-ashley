@@ -201,12 +201,28 @@ export function buildOrientationKernel(
     values: Object.freeze(values),
     boundaries: Object.freeze(boundaries),
     selectedStableSelf: Object.freeze(selectedStableSelf),
-    stableSelf: Object.freeze([...selectedStableSelf]),
     stableSelfRemainder: Object.freeze(remainder),
-    stableSelfPointers: Object.freeze([...remainder]),
     staticOperatingContract: contract,
     staticContractHash: createHash("sha256").update(contract, "utf8").digest("hex"),
     capabilityReality,
-  } satisfies IdentityOrientationKernel;
+  } as IdentityOrientationKernel;
+
+  // These names are retained for in-process compatibility only. They are
+  // aliases for the canonical fields above, not second model-visible
+  // representations of the same identity payload.
+  Object.defineProperties(kernel, {
+    stableSelf: {
+      value: kernel.selectedStableSelf,
+      enumerable: false,
+      writable: false,
+      configurable: false,
+    },
+    stableSelfPointers: {
+      value: kernel.stableSelfRemainder,
+      enumerable: false,
+      writable: false,
+      configurable: false,
+    },
+  });
   return Object.freeze(kernel);
 }

@@ -78,8 +78,10 @@ export type ProjectedThoughtInput = {
   conversationSelection?: ThoughtInput["conversationSelection"];
   workingContext: WorkingContextItem[];
   occupancy: MindOccupancy[];
+  /** Legacy in-process compatibility; C2 wire identity is orientationKernel. */
   constitution: IdentitySlice;
   learnedSelfSlice: LearnedSelfSlice;
+  /** Legacy in-process compatibility; C2 wire capability is orientationKernel. */
   capabilityReality: CapabilityReality;
   observations: Observation[];
   retrieval: ProjectedRetrievalResult;
@@ -98,12 +100,60 @@ export type ThoughtModelProjection = {
   dispatchMessagesHash: string;
 };
 
+/**
+ * Keep legacy C2 fields available to in-process callers without exposing
+ * payload already owned by the orientation kernel on the model wire.
+ */
+export function attachC2CompatibilityFields(
+  projected: object,
+  source: Pick<ThoughtInput, "constitution" | "capabilityReality">,
+): ProjectedThoughtInput {
+  Object.defineProperties(projected, {
+    constitution: {
+      value: source.constitution,
+      enumerable: false,
+      writable: false,
+      configurable: false,
+    },
+    capabilityReality: {
+      value: source.capabilityReality,
+      enumerable: false,
+      writable: false,
+      configurable: false,
+    },
+  });
+  return projected as ProjectedThoughtInput;
+}
+
+/**
+ * Return the exact model-visible projection. C2's legacy identity and
+ * capability fields remain readable in-process but are not serialized beside
+ * their canonical orientation-kernel owners.
+ */
+export function modelVisibleThoughtProjection(
+  projected: ProjectedThoughtInput,
+): Record<string, unknown> {
+  if (projected.orientationKernel === undefined) return projected;
+
+  const visibleProjection = Object.fromEntries(
+    Object.entries(projected).filter(([key]) => key !== "constitution" && key !== "capabilityReality"),
+  );
+  const visibleOrientationKernel = Object.fromEntries(
+    Object.entries(projected.orientationKernel)
+      .filter(([key]) => key !== "stableSelf" && key !== "stableSelfPointers"),
+  );
+  return {
+    ...visibleProjection,
+    orientationKernel: visibleOrientationKernel,
+  };
+}
+
 function sha256(text: string): string {
   return createHash("sha256").update(text, "utf8").digest("hex");
 }
 
 export function computeSemanticProjectionHash(projected: ProjectedThoughtInput): string {
-  return sha256(JSON.stringify(projected));
+  return sha256(JSON.stringify(modelVisibleThoughtProjection(projected)));
 }
 
 export function computeDispatchMessagesHash(messages: ChatMessage[]): string {
@@ -190,6 +240,10 @@ export function projectThoughtInput(
     ...(c2Input.orientationKernel === undefined ? {} : { orientationKernel: c2Input.orientationKernel }),
     ...(c2Input.domainPointers === undefined ? {} : { domainPointers: c2Input.domainPointers }),
   };
+
+  if (c2Input.orientationKernel !== undefined) {
+    attachC2CompatibilityFields(projected, fullInput);
+  }
 
   const semanticProjectionHash = computeSemanticProjectionHash(projected);
 

@@ -9,6 +9,8 @@ import { AppError } from "../../../../errors.js";
 import {
   computeDispatchMessagesHash,
   computeSemanticProjectionHash,
+  attachC2CompatibilityFields,
+  modelVisibleThoughtProjection,
   projectRetrievalHit,
   type CompactRetrievalEvidence,
   type ProjectedThoughtInput,
@@ -89,7 +91,7 @@ export function thoughtMessagesForProjection(
         ...(feedback ? [feedback] : []),
       ].join(" "),
     },
-    { role: "user", content: JSON.stringify(projected) },
+    { role: "user", content: JSON.stringify(modelVisibleThoughtProjection(projected)) },
     ...(correctionData ? [{ role: "user" as const, content: correctionData }] : []),
   ];
 }
@@ -231,7 +233,7 @@ export function allocateThoughtProjection(
     const isMiss = input.retrieval.state === "ready" && retrieval.length === 0;
     const hasConversationSelection =
       c2Input.conversationSelection !== undefined || conversationOmittedIds.size > 0;
-    return {
+    const projected = {
       cycleId: input.cycleId,
       generation: input.generation,
       occupantId: input.occupantId,
@@ -286,6 +288,11 @@ export function allocateThoughtProjection(
           }
         : {}),
     };
+
+    if (includeOrientationKernel && c2Input.orientationKernel !== undefined) {
+      attachC2CompatibilityFields(projected, input);
+    }
+    return projected;
   }
 
   // Exact serialize-then-estimate candidate inclusion loop

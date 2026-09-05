@@ -283,7 +283,7 @@ describe("Whole-Thought Projection Allocator", () => {
       rowId: "trigger-lineage-v1",
       lineageId: "trigger-lineage",
       version: 1,
-      text: "synthetic stale trigger ".repeat(50),
+      text: "synthetic stale trigger ".repeat(100),
       createdAtMs: 1,
     };
     const currentTrigger = {

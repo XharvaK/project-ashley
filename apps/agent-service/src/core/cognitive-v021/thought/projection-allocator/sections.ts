@@ -127,23 +127,29 @@ export function buildAllocationCandidates(
     data: input.trigger,
   });
 
-  // 2. Constitution (required)
-  candidates.push({
-    id: "constitution",
-    section: "constitution",
-    required: true,
-    priority: 3,
-    data: input.constitution,
-  });
+  // The orientation kernel is the canonical C2 wire owner for identity
+  // values/boundaries, bounded stable self, and capability reality. Keep the
+  // legacy candidates only for inputs that do not have the kernel, so the
+  // same source payload is not counted and serialized a second time.
+  if (!c2Input.orientationKernel) {
+    // 2. Constitution (required)
+    candidates.push({
+      id: "constitution",
+      section: "constitution",
+      required: true,
+      priority: 3,
+      data: input.constitution,
+    });
 
-  // 3. Capability Reality (required)
-  candidates.push({
-    id: "capability",
-    section: "capability",
-    required: true,
-    priority: 4,
-    data: input.capabilityReality,
-  });
+    // 3. Capability Reality (required)
+    candidates.push({
+      id: "capability",
+      section: "capability",
+      required: true,
+      priority: 4,
+      data: input.capabilityReality,
+    });
+  }
 
   // 4. Recent Raw Window. Each row remains an independent candidate so an
   // authoritative invalidation can remove only the affected payload and
