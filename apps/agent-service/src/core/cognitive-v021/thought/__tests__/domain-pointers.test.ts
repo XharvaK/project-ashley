@@ -147,6 +147,46 @@ describe("MAT-II domain pointers", () => {
     }
   });
 
+  it("keeps pointerOnly directly accessible while deriving it from disposition on the wire", () => {
+    const db = openTestSidecar();
+    try {
+      db.prepare(
+        `INSERT INTO concerns
+           (concern_id, conversation_id, statement, source_refs_json, dimensions_json, assertion_key, status, snapshot_hash, updated_cycle)
+         VALUES (?, ?, ?, '[]', '{}', NULL, 'active', 'snapshot', ?)`
+      ).run("pointer-only-concern", "conversation-1", "private concern text", "cycle-1");
+
+      const section = buildDomainPointers(db, "conversation-1", "cycle-1");
+      const pointer = section.pointers.find((candidate) => candidate.domain === "concerns");
+      const serialized = JSON.parse(JSON.stringify(section)) as {
+        pointers: Array<Record<string, unknown>>;
+      };
+      const serializedPointer = serialized.pointers.find((candidate) => candidate.domain === "concerns");
+
+      expect(pointer).toMatchObject({
+        canonicalStore: "cognitive-v021.db:concerns",
+        entityIds: ["pointer-only-concern"],
+        status: "active",
+        disposition: "POINTER_ONLY",
+        pointerOnly: true,
+      });
+      expect(serializedPointer).toMatchObject({
+        canonicalStore: "cognitive-v021.db:concerns",
+        entityIds: ["pointer-only-concern"],
+        status: "active",
+        disposition: "POINTER_ONLY",
+      });
+      expect(serializedPointer).not.toHaveProperty("pointerOnly");
+
+      const empty = section.pointers.find((candidate) => candidate.domain === "future_triggers");
+      const serializedEmpty = serialized.pointers.find((candidate) => candidate.domain === "future_triggers");
+      expect(empty).toMatchObject({ disposition: "EMPTY", pointerOnly: false });
+      expect(serializedEmpty).not.toHaveProperty("pointerOnly");
+    } finally {
+      db.close();
+    }
+  });
+
   it("reports source-owner query failure as UNREACHABLE for both domains", () => {
     const sidecar = openTestSidecar();
     const nuclear = openNuclearDb(new DatabaseSync(":memory:"));

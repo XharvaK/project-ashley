@@ -87,7 +87,7 @@ function pointerFromRows(
     (latest, row) => row.updatedAtMs === null ? latest : latest === null ? row.updatedAtMs : Math.max(latest, row.updatedAtMs),
     null,
   );
-  return Object.freeze({
+  const pointer = {
     domain,
     canonicalStore,
     entityIds: Object.freeze(eligibleRows.map((row) => row.id)),
@@ -95,7 +95,14 @@ function pointerFromRows(
     updatedAtMs,
     disposition,
     pointerOnly: disposition === "POINTER_ONLY",
+  };
+  Object.defineProperty(pointer, "pointerOnly", {
+    value: pointer.pointerOnly,
+    enumerable: false,
+    writable: false,
+    configurable: false,
   });
+  return Object.freeze(pointer);
 }
 
 type DomainAssessment = {
@@ -138,7 +145,7 @@ function unreachableDomain(
   required = false,
 ): { pointer: DomainPointer; assessment: DomainAssessment } {
   if (required) throw new Error("mind_occupancy_unreachable");
-  const pointer = Object.freeze({
+  const pointer = {
     domain,
     canonicalStore,
     entityIds: Object.freeze([] as string[]),
@@ -146,7 +153,14 @@ function unreachableDomain(
     updatedAtMs: null,
     disposition: "UNREACHABLE" as const,
     pointerOnly: false,
+  };
+  Object.defineProperty(pointer, "pointerOnly", {
+    value: pointer.pointerOnly,
+    enumerable: false,
+    writable: false,
+    configurable: false,
   });
+  Object.freeze(pointer);
   return {
     pointer,
     assessment: {
