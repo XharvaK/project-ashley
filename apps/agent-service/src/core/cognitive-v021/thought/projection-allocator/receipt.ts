@@ -33,6 +33,11 @@ export type AllocationDiagnostics = {
   allocation_candidate_count: number;
   renderTentative_call_count: number;
   thoughtMessagesForProjection_call_count: number;
+  /** W4 request-local memoization witnesses; absent on pre-W4 receipts. */
+  thoughtOutputCompatibilityInstruction_call_count?: number;
+  formatThoughtStructuralFeedback_call_count?: number;
+  formatThoughtStructuralCorrectionData_call_count?: number;
+  inFlightEffectRefMap_call_count?: number;
   allocation_elapsed_ms: number;
 };
 

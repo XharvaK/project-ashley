@@ -80,24 +80,40 @@ export class RequiredOverflowError extends AppError {
 export function thoughtMessagesForProjection(
   projected: ProjectedThoughtInput,
   structuralFeedback?: StructuralFeedbackInput,
+  messageMemo?: ThoughtProjectionMessageMemo,
 ): ChatMessage[] {
-  const feedback = formatThoughtStructuralFeedback(structuralFeedback);
-  const correctionData = formatThoughtStructuralCorrectionData(structuralFeedback);
+  const memo = messageMemo ?? buildThoughtProjectionMessageMemo(structuralFeedback);
   return [
     {
       role: "system",
-      content: [
-        "You are Ashley's Thought layer.",
-        "Return exactly one JSON semantic Thought output.",
-        thoughtOutputCompatibilityInstruction(),
-        "Code validates identity, authority, speech licensing, and publication.",
-        "Do not return finalLicensedText, settlementId, delivery, outbox, reservation, or workspace state.",
-        ...(feedback ? [feedback] : []),
-      ].join(" "),
+      content: memo.systemContent,
     },
     { role: "user", content: JSON.stringify(modelVisibleThoughtProjection(projected)) },
-    ...(correctionData ? [{ role: "user" as const, content: correctionData }] : []),
+    ...(memo.correctionData ? [{ role: "user" as const, content: memo.correctionData }] : []),
   ];
+}
+
+export type ThoughtProjectionMessageMemo = Readonly<{
+  systemContent: string;
+  correctionData: string | null;
+}>;
+
+function buildThoughtProjectionMessageMemo(
+  structuralFeedback?: StructuralFeedbackInput,
+): ThoughtProjectionMessageMemo {
+  const feedback = formatThoughtStructuralFeedback(structuralFeedback);
+  const correctionData = formatThoughtStructuralCorrectionData(structuralFeedback);
+  return {
+    systemContent: [
+      "You are Ashley's Thought layer.",
+      "Return exactly one JSON semantic Thought output.",
+      thoughtOutputCompatibilityInstruction(),
+      "Code validates identity, authority, speech licensing, and publication.",
+      "Do not return finalLicensedText, settlementId, delivery, outbox, reservation, or workspace state.",
+      ...(feedback ? [feedback] : []),
+    ].join(" "),
+    correctionData,
+  };
 }
 
 export type AllocateThoughtProjectionOptions = {
@@ -215,6 +231,11 @@ export function allocateThoughtProjection(
     c3Experiences?: C3ExperienceAdapterResult;
     conversationSelection?: ThoughtInput["conversationSelection"];
   };
+  const messageMemo = buildThoughtProjectionMessageMemo(opts.structuralFeedback);
+  const projectedInFlight = input.inFlight.map((item) => ({
+    effectRef: mintEffectRef(input.cycleId, input.generation, item.effectId),
+    status: item.status,
+  }));
 
   const structuralTokens = (value: unknown): number => {
     const serialized = typeof value === "string" ? value : JSON.stringify(value ?? null);
@@ -271,10 +292,7 @@ export function allocateThoughtProjection(
       generation: input.generation,
       trigger: input.trigger,
       observations: input.observations,
-      inFlight: input.inFlight.map((item) => ({
-        effectRef: mintEffectRef(input.cycleId, input.generation, item.effectId),
-        status: item.status,
-      })),
+      inFlight: projectedInFlight,
       authorityObjections: input.authorityObjections,
       runtimeCondition: {
         ...input.runtimeCondition,
@@ -342,7 +360,8 @@ export function allocateThoughtProjection(
     thoughtMessagesForProjectionCallCount += 1;
     const tentativeMessages = thoughtMessagesForProjection(
       tentativeProjected,
-      opts.structuralFeedback,
+      undefined,
+      messageMemo,
     );
 
     const estimate = estimateRequestTokens(tentativeMessages, {
@@ -405,7 +424,7 @@ export function allocateThoughtProjection(
     c3ExperiencesIncluded,
   );
   thoughtMessagesForProjectionCallCount += 1;
-  const finalMessages = thoughtMessagesForProjection(finalProjected, opts.structuralFeedback);
+  const finalMessages = thoughtMessagesForProjection(finalProjected, undefined, messageMemo);
   const finalEstimate = estimateRequestTokens(finalMessages, {
     maxTokens: budget.maxOutputTokens,
   });
@@ -496,6 +515,10 @@ export function allocateThoughtProjection(
     allocation_candidate_count: candidates.length,
     renderTentative_call_count: renderTentativeCallCount,
     thoughtMessagesForProjection_call_count: thoughtMessagesForProjectionCallCount,
+    thoughtOutputCompatibilityInstruction_call_count: 1,
+    formatThoughtStructuralFeedback_call_count: 1,
+    formatThoughtStructuralCorrectionData_call_count: 1,
+    inFlightEffectRefMap_call_count: 1,
     allocation_elapsed_ms: Math.max(0, Date.now() - allocationStartedAtMs),
   };
 

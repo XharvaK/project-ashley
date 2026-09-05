@@ -6,6 +6,7 @@ import {
   RequiredOverflowError,
   thoughtMessagesForProjection,
 } from "../allocator.js";
+import { estimateRequestTokens } from "../budget.js";
 import { buildAllocationCandidates } from "../sections.js";
 import { createThoughtStructuralFeedback } from "../../structural-feedback.js";
 import { ensureAuthoritativeLineage, openContinuityDb } from "../../../../continuity/db.js";
@@ -735,6 +736,72 @@ describe("Whole-Thought Projection Allocator", () => {
     expect(changedS1End).toBeGreaterThan(0);
     expect(unchangedJson.slice(0, unchangedS1End))
       .not.toBe(changedJson.slice(0, changedS1End));
+  });
+
+  it("memoizes invariant message construction per allocation without changing output or estimation", () => {
+    const feedback = createThoughtStructuralFeedback({
+      code: "wrong_type",
+      field: "speech.mode",
+      previousCandidate: { kind: "settlement" },
+    });
+    const allocated = allocateThoughtProjection({
+      thoughtInput: makeThoughtInput({
+        inFlight: [{
+          effectId: "effect-w4-memo",
+          cycleId: "cycle-test-1",
+          generation: 1,
+          wakeId: null,
+          correlationId: "correlation-w4-memo",
+          idempotencyKey: "idempotency-w4-memo",
+          status: "in_flight",
+          dispatchedAtMs: 1,
+          originJobId: null,
+          originEventId: null,
+          originAttemptId: null,
+        }],
+      }),
+      structuralFeedback: feedback,
+      requestId: "req-w4-local-memo",
+    });
+    const rebuilt = thoughtMessagesForProjection(allocated.projected, feedback);
+    const rebuiltEstimate = estimateRequestTokens(rebuilt, {
+      maxTokens: allocated.receipt.maxOutputTokens,
+    });
+
+    expect(allocated.messages).toEqual(rebuilt);
+    expect(rebuiltEstimate).toEqual({
+      estimatedInputTokens: allocated.receipt.estimatedInputTokens,
+      estimatedOutputTokens: allocated.receipt.estimatedOutputTokens,
+    });
+    expect(allocated.receipt.diagnostics).toMatchObject({
+      thoughtOutputCompatibilityInstruction_call_count: 1,
+      formatThoughtStructuralFeedback_call_count: 1,
+      formatThoughtStructuralCorrectionData_call_count: 1,
+      inFlightEffectRefMap_call_count: 1,
+    });
+    expect(allocated.projected.inFlight).toEqual([{
+      effectRef: expect.any(String),
+      status: "in_flight",
+    }]);
+  });
+
+  it("does not carry a request-local message memo across allocations", () => {
+    const first = allocateThoughtProjection({
+      thoughtInput: makeThoughtInput(),
+      structuralFeedback: "wrong_type",
+      requestId: "req-w4-first-memo",
+    });
+    const second = allocateThoughtProjection({
+      thoughtInput: makeThoughtInput({ cycleId: "cycle-w4-second" }),
+      structuralFeedback: "invalid_enum",
+      requestId: "req-w4-second-memo",
+    });
+
+    expect(first.messages[0]?.content).toContain("wrong_type");
+    expect(second.messages[0]?.content).toContain("invalid_enum");
+    expect(second.messages[0]?.content).not.toContain("wrong_type");
+    expect(first.receipt.diagnostics?.thoughtOutputCompatibilityInstruction_call_count).toBe(1);
+    expect(second.receipt.diagnostics?.thoughtOutputCompatibilityInstruction_call_count).toBe(1);
   });
 
   it("attaches a structured coverage manifest to the allocation receipt", () => {

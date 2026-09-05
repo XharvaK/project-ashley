@@ -49,4 +49,18 @@ describe("Shared Estimator Authority", () => {
     expect(admission.hardTpm).toBe(16000);
     expect(admission.admitted).toBe(admission.totalDemand <= 16000);
   });
+
+  it("keeps the full estimator authoritative for odd UTF-8 byte totals", () => {
+    const messages = [
+      { role: "s", content: "é" },
+      { role: "u", content: "a" },
+    ];
+
+    const expected = {
+      estimatedInputTokens: 67,
+      estimatedOutputTokens: 7,
+    };
+    expect(attentionEstimate(messages, { maxTokens: 7 })).toEqual(expected);
+    expect(budgetEstimate(messages, { maxTokens: 7 })).toEqual(expected);
+  });
 });
