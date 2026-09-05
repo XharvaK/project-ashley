@@ -1,6 +1,8 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { openTestSidecar } from "../../test-support.js";
+import { openNuclearDb } from "../../../db.js";
+import { currentBuildIdentity, currentContractId } from "../../../rollout/capabilities.js";
 import { buildDomainPointers } from "../domain-pointers.js";
 
 describe("MAT-II domain pointers", () => {
@@ -68,6 +70,98 @@ describe("MAT-II domain pointers", () => {
         .not.toThrowError("empty_house");
     } finally {
       db.close();
+    }
+  });
+
+  it("uses the relationship and open-cognition source owners for EMPTY and POINTER_ONLY", () => {
+    const sidecar = openTestSidecar();
+    const nuclear = openNuclearDb(new DatabaseSync(":memory:"));
+    try {
+      const empty = buildDomainPointers(sidecar, "conversation-1", "cycle-1", nuclear, "owner-1");
+      expect(empty.pointers).toEqual(expect.arrayContaining([
+        expect.objectContaining({ domain: "relationship_state", disposition: "EMPTY" }),
+        expect.objectContaining({ domain: "open_cognition", disposition: "EMPTY" }),
+      ]));
+
+      const now = "2026-09-05T00:00:00.000Z";
+      nuclear.prepare(
+        `INSERT INTO relationship_projections
+           (entity_uuid, owner_id, kind, projection_policy_id,
+            projection_policy_version, source_bindings_json, source_watermark_json,
+            data_classification, provenance, party_subject_scope, effective_from,
+            effective_to, supersedes_projection_id, content_binding, computed_at)
+         VALUES (?, ?, 'current_shared_culture', ?, 1, '{}', '{}', 'ordinary', 'live', ?, ?, NULL, NULL, ?, ?)`,
+      ).run("relationship-entity-1", "owner-1", "policy", "owner + Ashley", now, "binding", now);
+      nuclear.prepare(
+        `INSERT INTO questions
+           (owner_id, subject, text, status, priority, created_at, updated_at,
+            entity_uuid, data_classification)
+         VALUES (?, 'about_self', ?, 'open', 0.8, ?, ?, ?, 'never_public')`,
+      ).run("owner-1", "private source question", now, now, "question-source-1");
+      const question = nuclear.prepare(
+        "SELECT id FROM questions WHERE entity_uuid = ?",
+      ).get("question-source-1") as { id: number };
+      nuclear.prepare(
+        `INSERT INTO open_cognitive_items
+           (owner_id, entity_uuid, kind, status, semantic_summary,
+            source_type, source_id, source_entity_uuid, semantic_key_hash,
+            source_capability, contract_id, provenance, source_revision, origin,
+            build_identity, model_epoch, data_classification, status_reason,
+            created_at, updated_at)
+         VALUES (?, ?, 'question', 'OPEN', ?, 'question', ?, ?, ?, 'reading', ?, 'live', ?, 'manual', ?, 0, 'never_public', 'created', ?, ?)`,
+      ).run(
+        "owner-1",
+        "open-entity-1",
+        "private semantic summary",
+        String(question.id),
+        "question-source-1",
+        "a".repeat(64),
+        currentContractId(),
+        now,
+        currentBuildIdentity(),
+        now,
+        now,
+      );
+
+      const pointed = buildDomainPointers(sidecar, "conversation-1", "cycle-1", nuclear, "owner-1");
+      const relationship = pointed.pointers.find((pointer) => pointer.domain === "relationship_state");
+      const cognition = pointed.pointers.find((pointer) => pointer.domain === "open_cognition");
+      expect(relationship).toMatchObject({
+        disposition: "POINTER_ONLY",
+        pointerOnly: true,
+        entityIds: ["relationship-entity-1"],
+      });
+      expect(cognition).toMatchObject({
+        disposition: "POINTER_ONLY",
+        pointerOnly: true,
+        entityIds: ["open-entity-1"],
+      });
+      const serialized = JSON.stringify(pointed);
+      expect(serialized).not.toContain("private source question");
+      expect(serialized).not.toContain("private semantic summary");
+      expect(pointed.coverageManifest.domains.find((domain) => domain.domain === "open_cognition")?.disposition)
+        .toBe("POINTER_ONLY");
+    } finally {
+      nuclear.close();
+      sidecar.close();
+    }
+  });
+
+  it("reports source-owner query failure as UNREACHABLE for both domains", () => {
+    const sidecar = openTestSidecar();
+    const nuclear = openNuclearDb(new DatabaseSync(":memory:"));
+    try {
+      nuclear.exec("DROP TABLE relationship_projections");
+      nuclear.exec("DROP TABLE open_cognitive_items");
+
+      const section = buildDomainPointers(sidecar, "conversation-1", "cycle-1", nuclear, "owner-1");
+      expect(section.pointers).toEqual(expect.arrayContaining([
+        expect.objectContaining({ domain: "relationship_state", disposition: "UNREACHABLE" }),
+        expect.objectContaining({ domain: "open_cognition", disposition: "UNREACHABLE" }),
+      ]));
+    } finally {
+      nuclear.close();
+      sidecar.close();
     }
   });
 });

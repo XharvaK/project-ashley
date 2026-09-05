@@ -4,6 +4,11 @@ import {
   type CoverageManifest,
 } from "./coverage-manifest.js";
 import type { CoverageDisposition } from "./continuity-candidate.js";
+import { getCurrentSharedCulture } from "../../relationship/projections.js";
+import {
+  listOpenCognitiveItems,
+  openCognitiveItemSourceCurrent,
+} from "../../cognition/open-items.js";
 
 type DbRow = Record<string, unknown>;
 
@@ -43,6 +48,14 @@ function timestamp(value: unknown): number | null {
   if (value === null || value === undefined) return null;
   const parsed = typeof value === "number" ? value : Number(value);
   return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+function dateTimestamp(value: unknown): number | null {
+  const numeric = timestamp(value);
+  if (numeric !== null) return numeric;
+  if (typeof value !== "string" || value.trim() === "") return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function rows(db: DatabaseSync, sql: string, ...params: SQLInputValue[]): DbRow[] {
@@ -250,6 +263,55 @@ function buildFrontiers(db: DatabaseSync, conversationId: string, cycleId: strin
   return makeDomain("frontiers", "cognitive-v021.db:deferred_reactive_frontiers", sourceRows, eligibleRows);
 }
 
+function buildRelationshipState(
+  db: DatabaseSync,
+  ownerId: string,
+): { pointer: DomainPointer; assessment: DomainAssessment } {
+  const current = getCurrentSharedCulture(db, ownerId);
+  const sourceRows: PointerRow[] = current == null
+    ? []
+    : [{
+        id: current.entityUuid,
+        status: current.kind,
+        updatedAtMs: dateTimestamp(current.computedAt),
+      }];
+  return makeDomain(
+    "relationship_state",
+    "nuclear.db:relationship_projections",
+    sourceRows,
+    sourceRows,
+  );
+}
+
+function buildOpenCognition(
+  db: DatabaseSync,
+  ownerId: string,
+): { pointer: DomainPointer; assessment: DomainAssessment } {
+  const source = listOpenCognitiveItems(db, ownerId, {
+    status: "OPEN",
+    limit: 256,
+    order: "id_asc",
+  });
+  const sourceRows: PointerRow[] = source.map((item) => ({
+    id: item.entityUuid,
+    status: item.kind,
+    updatedAtMs: dateTimestamp(item.updatedAt),
+  }));
+  const currentRows = source
+    .filter((item) => openCognitiveItemSourceCurrent(db, item))
+    .map((item) => ({
+      id: item.entityUuid,
+      status: item.kind,
+      updatedAtMs: dateTimestamp(item.updatedAt),
+    }));
+  return makeDomain(
+    "open_cognition",
+    "nuclear.db:open_cognitive_items",
+    sourceRows,
+    currentRows,
+  );
+}
+
 function optional(
   domain: string,
   canonicalStore: string,
@@ -271,13 +333,20 @@ export function buildDomainPointers(
   sidecar: DatabaseSync,
   conversationId: string,
   cycleId: string,
+  authorityDb?: DatabaseSync,
+  ownerId?: string,
 ): DomainPointersSection {
+  const authorityOwner = ownerId?.trim() ? ownerId : null;
   const domains = [
     (() => {
       try { return buildConcerns(sidecar, conversationId); }
       catch { return unreachableDomain("concerns", "cognitive-v021.db:concerns"); }
     })(),
-    unreachableDomain("relationship_state", "nuclear.db:relationship_*"),
+    authorityDb && authorityOwner
+      ? optional("relationship_state", "nuclear.db:relationship_projections", () =>
+        buildRelationshipState(authorityDb, authorityOwner),
+      )
+      : unreachableDomain("relationship_state", "nuclear.db:relationship_*"),
     optional("recent_settlements", "cognitive-v021.db:settlements", () => buildSettlements(sidecar, conversationId)),
     (() => {
       try { return buildMindOccupancy(sidecar, conversationId); }
@@ -285,7 +354,11 @@ export function buildDomainPointers(
     })(),
     optional("future_triggers", "cognitive-v021.db:future_triggers", () => buildFutureTriggers(sidecar, conversationId)),
     optional("observation_subscriptions", "cognitive-v021.db:observation_subscriptions", () => buildSubscriptions(sidecar, conversationId)),
-    unreachableDomain("open_cognition", "nuclear.db:open_cognitive_items"),
+    authorityDb && authorityOwner
+      ? optional("open_cognition", "nuclear.db:open_cognitive_items", () =>
+        buildOpenCognition(authorityDb, authorityOwner),
+      )
+      : unreachableDomain("open_cognition", "nuclear.db:open_cognitive_items"),
     optional("durable_work", "cognitive-v021.db:inbox_events,durable_work_attempts", () => buildDurableWork(sidecar, conversationId)),
     optional("frontiers", "cognitive-v021.db:deferred_reactive_frontiers", () => buildFrontiers(sidecar, conversationId, cycleId)),
   ];

@@ -319,6 +319,8 @@ export function buildThoughtInput(options: BuildThoughtInputOptions): ThoughtInp
     options.sidecar,
     options.cycle.conversationId,
     options.cycle.cycleId,
+    options.authorityDb,
+    options.cycle.occupantId,
   );
   const domainPointers = options.authorityDb && canReadNuclearOwnTime(options.authorityDb)
     ? appendOwnTimePointer(
