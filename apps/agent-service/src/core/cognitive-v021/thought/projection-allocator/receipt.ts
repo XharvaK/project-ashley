@@ -18,17 +18,40 @@ export type AllocationTokenBreakdown = {
   required_overflow_count: number;
 };
 
+/** Mechanical, content-free measurements used to establish the W0 baseline. */
+export type AllocationDiagnostics = {
+  system_message_bytes: number;
+  orientation_kernel_bytes: number;
+  required_base_estimated_tokens: number;
+  optional_context_estimated_tokens: number;
+  system_prefix_bytes: number;
+  system_prefix_estimated_tokens: number;
+  candidate_S0_S1_prefix_bytes: number;
+  candidate_S0_S1_prefix_estimated_tokens: number;
+  first_volatile_field: string | null;
+  first_volatile_byte_offset: number | null;
+  allocation_candidate_count: number;
+  renderTentative_call_count: number;
+  thoughtMessagesForProjection_call_count: number;
+  allocation_elapsed_ms: number;
+};
+
 export type AllocationDecision = {
   included: Array<{
     id: string;
     section: AllocationSectionId;
     ref?: string;
     required: boolean;
+    priority?: number;
+    estimatedTokens?: number;
   }>;
   omitted: Array<{
     id: string;
     section: AllocationSectionId;
     ref?: string;
+    required?: boolean;
+    priority?: number;
+    estimatedTokens?: number;
     reason: "budget_omission" | "duplicate" | "fuse" | "not_eligible";
   }>;
   includedWireBytes: number;
@@ -44,6 +67,8 @@ export type AllocationReceipt = {
   semanticProjectionEnvelope: SemanticProjectionEnvelope;
   /** Honest domain coverage evidence; it never grants semantic authority. */
   coverageManifest?: CoverageManifest;
+  /** W0 mechanical geometry and allocation-cost measurements; no prompt content. */
+  diagnostics?: AllocationDiagnostics;
   tokenBreakdown: AllocationTokenBreakdown;
   /** @deprecated Provider capacity is owned by Attention, not this receipt. */
   quotaBucket: string;

@@ -48,6 +48,22 @@ describe("Thought Diagnostics & Observability DB", () => {
           includedWireBytes: 1500,
           estimatedInputTokens: 2500,
         },
+        diagnostics: {
+          system_message_bytes: 5100,
+          orientation_kernel_bytes: 7200,
+          required_base_estimated_tokens: 5000,
+          optional_context_estimated_tokens: 700,
+          system_prefix_bytes: 5100,
+          system_prefix_estimated_tokens: 2550,
+          candidate_S0_S1_prefix_bytes: 14000,
+          candidate_S0_S1_prefix_estimated_tokens: 7000,
+          first_volatile_field: "cycleId",
+          first_volatile_byte_offset: 1,
+          allocation_candidate_count: 12,
+          renderTentative_call_count: 13,
+          thoughtMessagesForProjection_call_count: 13,
+          allocation_elapsed_ms: 4,
+        },
         semanticProjectionHash: "hash-sem-1",
         dispatchMessagesHash: "hash-msg-1",
       };
@@ -85,6 +101,12 @@ describe("Thought Diagnostics & Observability DB", () => {
       expect(receipts[0].totalDemandTokens).toBe(6596);
       expect(receipts[0].headroomTokens).toBe(1404);
       expect(receipts[0].decision.included.length).toBe(1);
+      expect(receipts[0].diagnostics).toMatchObject({
+        system_message_bytes: 5100,
+        candidate_S0_S1_prefix_bytes: 14000,
+        first_volatile_field: "cycleId",
+        allocation_candidate_count: 12,
+      });
 
       const diagnostics = obs.listDiagnostics();
       expect(diagnostics.length).toBe(1);

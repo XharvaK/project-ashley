@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type {
+  AllocationDiagnostics,
   AllocationReceipt,
   AllocationTokenBreakdown,
 } from "./projection-allocator/receipt.js";
@@ -82,6 +83,7 @@ function receiptDecisionEnvelope(receipt: AllocationReceipt): Record<string, unk
     ...receipt.decision,
     __semanticProjectionEnvelope: receipt.semanticProjectionEnvelope,
     __tokenBreakdown: receipt.tokenBreakdown,
+    ...(receipt.diagnostics ? { __allocationDiagnostics: receipt.diagnostics } : {}),
   };
 }
 
@@ -427,8 +429,10 @@ export class ObservabilityStore {
       const storedDecision = JSON.parse(r.decision_json) as Record<string, unknown>;
       const semanticProjectionEnvelope = storedDecision.__semanticProjectionEnvelope;
       const tokenBreakdown = storedDecision.__tokenBreakdown;
+      const diagnostics = storedDecision.__allocationDiagnostics;
       delete storedDecision.__semanticProjectionEnvelope;
       delete storedDecision.__tokenBreakdown;
+      delete storedDecision.__allocationDiagnostics;
       return {
         requestId: r.request_id,
         cycleId: r.cycle_id,
@@ -443,6 +447,9 @@ export class ObservabilityStore {
           tokenBreakdown && typeof tokenBreakdown === "object"
             ? tokenBreakdown as AllocationTokenBreakdown
             : emptyTokenBreakdown(),
+        ...(diagnostics && typeof diagnostics === "object" && !Array.isArray(diagnostics)
+          ? { diagnostics: diagnostics as AllocationDiagnostics }
+          : {}),
         quotaBucket: r.quota_bucket,
         hardTpm: r.hard_tpm,
         maxOutputTokens: r.max_output_tokens,

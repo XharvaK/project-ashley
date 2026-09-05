@@ -49,6 +49,50 @@ describe("nim-adapter fixtures", () => {
     expect(result.finishReason).toBe("stop");
   });
 
+  it("maps prompt cache usage to cachedTokens", async () => {
+    env.nimApiKey = "test";
+    const adapter = createNimAdapter(async () =>
+      fakeResponse({
+        choices: [{ message: { content: "hi there" }, finish_reason: "stop" }],
+        usage: {
+          prompt_tokens: 10,
+          completion_tokens: 2,
+          prompt_tokens_details: { cached_tokens: 4 },
+        },
+      }),
+    );
+    const result = await adapter.dispatch({
+      messages,
+      modelId: "openai/gpt-oss-20b",
+      options: {},
+    });
+    expect(result.usage).toEqual({
+      promptTokens: 10,
+      completionTokens: 2,
+      cachedTokens: 4,
+    });
+  });
+
+  it("does not report a cached token count for a non-numeric provider field", async () => {
+    env.nimApiKey = "test";
+    const adapter = createNimAdapter(async () =>
+      fakeResponse({
+        choices: [{ message: { content: "hi there" }, finish_reason: "stop" }],
+        usage: {
+          prompt_tokens: 10,
+          completion_tokens: 2,
+          prompt_tokens_details: { cached_tokens: "unknown" as never },
+        },
+      }),
+    );
+    const result = await adapter.dispatch({
+      messages,
+      modelId: "openai/gpt-oss-20b",
+      options: {},
+    });
+    expect(result.usage).toEqual({ promptTokens: 10, completionTokens: 2 });
+  });
+
   it("extracts tool calls", async () => {
     env.nimApiKey = "test";
     const adapter = createNimAdapter(async () =>

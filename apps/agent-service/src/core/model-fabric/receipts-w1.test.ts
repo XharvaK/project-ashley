@@ -79,4 +79,88 @@ describe("W1 attempt attribution", () => {
       },
     });
   });
+
+  it("propagates cached provider input tokens into the model usage receipt", () => {
+    const projection = createContextProjection({
+      purpose: "thought",
+      contextPolicyId: "thought_summary",
+      messages: [{ role: "user", content: "private content" }],
+    });
+    const fabric = createModelFabricInvocation({
+      logicalRole: "thought",
+      requestedPurpose: "thought",
+      specialistRequirement: null,
+      fallbackChain: null,
+      projection,
+    });
+    const attempt = fabric.beginAttempt({
+      invocationId: fabric.invocationId,
+      attemptId: `${fabric.invocationId}:attempt:1`,
+      attemptOrdinal: 1,
+      fallbackFromAttemptId: null,
+      fallbackClass: "none",
+      facts: {} as never,
+      projection,
+      backend: "fixture",
+      requestedReasoningPolicy: null,
+      effectiveReasoningSent: null,
+    });
+
+    attempt.markDispatchAttempted();
+    attempt.markProviderResponse({
+      resolvedModelId: "fixture-model",
+      usage: { promptTokens: 20, completionTokens: 3, cachedTokens: 7 },
+    });
+
+    expect(attempt.receipt()).toMatchObject({
+      usage: {
+        inputTokens: 20,
+        outputTokens: 3,
+        cachedInputTokens: 7,
+        reasoningTokens: null,
+        providerReported: true,
+      },
+    });
+  });
+
+  it("keeps cached provider input tokens null when the provider omits the field", () => {
+    const projection = createContextProjection({
+      purpose: "thought",
+      contextPolicyId: "thought_summary",
+      messages: [{ role: "user", content: "private content" }],
+    });
+    const fabric = createModelFabricInvocation({
+      logicalRole: "thought",
+      requestedPurpose: "thought",
+      specialistRequirement: null,
+      fallbackChain: null,
+      projection,
+    });
+    const attempt = fabric.beginAttempt({
+      invocationId: fabric.invocationId,
+      attemptId: `${fabric.invocationId}:attempt:1`,
+      attemptOrdinal: 1,
+      fallbackFromAttemptId: null,
+      fallbackClass: "none",
+      facts: {} as never,
+      projection,
+      backend: "fixture",
+      requestedReasoningPolicy: null,
+      effectiveReasoningSent: null,
+    });
+
+    attempt.markDispatchAttempted();
+    attempt.markProviderResponse({
+      resolvedModelId: "fixture-model",
+      usage: { promptTokens: 20, completionTokens: 3 },
+    });
+
+    expect(attempt.receipt()).toMatchObject({
+      usage: {
+        inputTokens: 20,
+        outputTokens: 3,
+        cachedInputTokens: null,
+      },
+    });
+  });
 });

@@ -105,7 +105,7 @@ function usageFor(usage?: TokenUsage): ModelUsage {
   return {
     inputTokens: usage?.promptTokens ?? null,
     outputTokens: usage?.completionTokens ?? null,
-    cachedInputTokens: null,
+    cachedInputTokens: usage?.cachedTokens ?? null,
     reasoningTokens: usage?.reasoningTokens ?? null,
     providerReported: usage !== undefined,
   };

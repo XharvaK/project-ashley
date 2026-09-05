@@ -48,6 +48,50 @@ describe("groq-adapter fixtures", () => {
     expect(result.providerModel).toBe("llama-3-70b");
   });
 
+  it("maps prompt cache usage to cachedTokens", async () => {
+    env.groqApiKey = "test";
+    const adapter = createGroqAdapter(async () =>
+      fakeResponse({
+        choices: [{ message: { content: "hi there" } }],
+        usage: {
+          prompt_tokens: 10,
+          completion_tokens: 2,
+          prompt_tokens_details: { cached_tokens: 4 },
+        },
+      }),
+    );
+    const result = await adapter.dispatch({
+      messages,
+      modelId: "qwen/qwen3.6-27b",
+      options: {},
+    });
+    expect(result.usage).toEqual({
+      promptTokens: 10,
+      completionTokens: 2,
+      cachedTokens: 4,
+    });
+  });
+
+  it("does not report a cached token count for a non-numeric provider field", async () => {
+    env.groqApiKey = "test";
+    const adapter = createGroqAdapter(async () =>
+      fakeResponse({
+        choices: [{ message: { content: "hi there" } }],
+        usage: {
+          prompt_tokens: 10,
+          completion_tokens: 2,
+          prompt_tokens_details: { cached_tokens: "unknown" as never },
+        },
+      }),
+    );
+    const result = await adapter.dispatch({
+      messages,
+      modelId: "qwen/qwen3.6-27b",
+      options: {},
+    });
+    expect(result.usage).toEqual({ promptTokens: 10, completionTokens: 2 });
+  });
+
   it("extracts tool calls", async () => {
     env.groqApiKey = "test";
     const adapter = createGroqAdapter(async () =>

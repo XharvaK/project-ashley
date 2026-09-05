@@ -509,6 +509,11 @@ describe("Whole-Thought Projection Allocator", () => {
     expect(allocated.projected.runtimeCondition.compression).toBe(true);
     expect(allocated.receipt.decision.omitted.length).toBeGreaterThan(0);
     expect(allocated.receipt.decision.omitted[0].reason).toBe("budget_omission");
+    expect(allocated.receipt.decision.omitted[0]).toMatchObject({
+      required: false,
+      priority: 18,
+      estimatedTokens: expect.any(Number),
+    });
     expect(allocated.receipt.estimatedInputTokens)
       .toBeLessThanOrEqual(allocated.receipt.semanticProjectionEnvelope.maxInputTokens);
     expect(allocated.receipt.tokenBreakdown.omitted_for_budget_count)
@@ -604,6 +609,42 @@ describe("Whole-Thought Projection Allocator", () => {
     expect(allocated.receipt.tokenBreakdown.retrieval_tokens).toBeGreaterThan(0);
     expect(allocated.receipt.tokenBreakdown.omitted_for_budget_count).toBe(0);
     expect(allocated.receipt.tokenBreakdown.required_overflow_count).toBe(0);
+  });
+
+  it("records mechanical W0 projection geometry and allocation operation counts", () => {
+    const input = withSyntheticC2(makeThoughtInput());
+    const allocated = allocateThoughtProjection({
+      thoughtInput: input,
+      requestId: "req-w0-allocation-diagnostics",
+    });
+    const diagnostics = allocated.receipt.diagnostics;
+    const candidateCount =
+      allocated.receipt.decision.included.length + allocated.receipt.decision.omitted.length;
+    const systemMessageBytes = Buffer.byteLength(allocated.messages[0]?.content ?? "", "utf8");
+
+    expect(diagnostics).toMatchObject({
+      system_message_bytes: systemMessageBytes,
+      orientation_kernel_bytes: expect.any(Number),
+      required_base_estimated_tokens: expect.any(Number),
+      optional_context_estimated_tokens: expect.any(Number),
+      system_prefix_bytes: systemMessageBytes,
+      system_prefix_estimated_tokens: allocated.receipt.tokenBreakdown.static_contract_tokens,
+      candidate_S0_S1_prefix_bytes: expect.any(Number),
+      candidate_S0_S1_prefix_estimated_tokens: expect.any(Number),
+      first_volatile_field: "cycleId",
+      first_volatile_byte_offset: expect.any(Number),
+      allocation_candidate_count: candidateCount,
+      renderTentative_call_count: candidateCount + 1,
+      thoughtMessagesForProjection_call_count: candidateCount + 1,
+      allocation_elapsed_ms: expect.any(Number),
+    });
+    expect(allocated.receipt.tokenBreakdown.static_contract_tokens)
+      .toBe(Math.ceil(systemMessageBytes / 2));
+    expect(allocated.receipt.tokenBreakdown.identity_kernel_tokens).toBeGreaterThan(0);
+    expect(diagnostics?.orientation_kernel_bytes).toBeGreaterThan(0);
+    expect(diagnostics?.candidate_S0_S1_prefix_bytes).toBeGreaterThan(systemMessageBytes);
+    expect(diagnostics?.allocation_elapsed_ms).toBeGreaterThanOrEqual(0);
+    expect(JSON.stringify(diagnostics)).not.toContain("Hello Ashley");
   });
 
   it("attaches a structured coverage manifest to the allocation receipt", () => {

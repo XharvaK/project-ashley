@@ -27,7 +27,11 @@ import {
   buildAllocationCandidates,
   type AllocationCandidate,
 } from "./sections.js";
-import type { AllocationReceipt, AllocationTokenBreakdown } from "./receipt.js";
+import type {
+  AllocationDiagnostics,
+  AllocationReceipt,
+  AllocationTokenBreakdown,
+} from "./receipt.js";
 import {
   buildAllocationCoverageManifest,
   COVERAGE_DISPOSITIONS,
@@ -158,6 +162,7 @@ function continuityContextFor(db: DatabaseSync) {
 export function allocateThoughtProjection(
   opts: AllocateThoughtProjectionOptions,
 ): AllocatedThoughtProjection {
+  const allocationStartedAtMs = Date.now();
   const input = opts.thoughtInput;
   const budget = deriveThoughtBudget({
     quotaBucket: opts.quotaBucket,
@@ -211,6 +216,13 @@ export function allocateThoughtProjection(
     conversationSelection?: ThoughtInput["conversationSelection"];
   };
 
+  const structuralTokens = (value: unknown): number => {
+    const serialized = typeof value === "string" ? value : JSON.stringify(value ?? null);
+    return Math.ceil(Buffer.byteLength(serialized, "utf8") / BYTES_PER_TOKEN);
+  };
+  let renderTentativeCallCount = 0;
+  let thoughtMessagesForProjectionCallCount = 0;
+
   function orderedConversation(rows: ThoughtInput["rawConversation"]): ThoughtInput["rawConversation"] {
     return [...rows].sort((left, right) =>
       left.createdAtMs - right.createdAtMs || left.rowId.localeCompare(right.rowId),
@@ -230,6 +242,7 @@ export function allocateThoughtProjection(
       candidates: readonly C3ExperienceCandidate[];
     };
   } {
+    renderTentativeCallCount += 1;
     const isMiss = input.retrieval.state === "ready" && retrieval.length === 0;
     const hasConversationSelection =
       c2Input.conversationSelection !== undefined || conversationOmittedIds.size > 0;
@@ -326,6 +339,7 @@ export function allocateThoughtProjection(
       tentativeDomainPointers,
       tentativeC3Experiences,
     );
+    thoughtMessagesForProjectionCallCount += 1;
     const tentativeMessages = thoughtMessagesForProjection(
       tentativeProjected,
       opts.structuralFeedback,
@@ -374,6 +388,9 @@ export function allocateThoughtProjection(
         id: candidate.id,
         section: candidate.section,
         ref: candidate.ref,
+        required: candidate.required,
+        priority: candidate.priority,
+        estimatedTokens: structuralTokens(candidate.data),
         reason: "budget_omission",
       });
     }
@@ -387,15 +404,12 @@ export function allocateThoughtProjection(
     domainPointersIncluded,
     c3ExperiencesIncluded,
   );
+  thoughtMessagesForProjectionCallCount += 1;
   const finalMessages = thoughtMessagesForProjection(finalProjected, opts.structuralFeedback);
   const finalEstimate = estimateRequestTokens(finalMessages, {
     maxTokens: budget.maxOutputTokens,
   });
 
-  const structuralTokens = (value: unknown): number => {
-    const serialized = typeof value === "string" ? value : JSON.stringify(value ?? null);
-    return Math.ceil(Buffer.byteLength(serialized, "utf8") / BYTES_PER_TOKEN);
-  };
   const componentTokens: Partial<Record<ReturnType<typeof allocationTokenComponent>, number>> = {};
   for (const candidate of includedCandidates) {
     const component = allocationTokenComponent(candidate.section);
@@ -424,6 +438,67 @@ export function allocateThoughtProjection(
     required_overflow_count: 0,
   };
 
+  const requiredBaseEstimatedTokens = candidates
+    .filter((candidate) => candidate.required)
+    .reduce((total, candidate) => total + structuralTokens(candidate.data), 0);
+  const optionalContextEstimatedTokens = candidates
+    .filter((candidate) => !candidate.required)
+    .reduce((total, candidate) => total + structuralTokens(candidate.data), 0);
+  const systemMessageBytes = Buffer.byteLength(finalMessages[0]?.content ?? "", "utf8");
+  const visibleProjection = modelVisibleThoughtProjection(finalProjected);
+  const visibleProjectionJson = JSON.stringify(visibleProjection);
+  const volatileFields = new Set([
+    "cycleId",
+    "generation",
+    "trigger",
+    "rawConversation",
+    "observations",
+    "retrieval",
+    "inFlight",
+    "authorityObjections",
+    "runtimeCondition",
+    "rememberDirective",
+    "conversationSelection",
+  ]);
+  const firstVolatileField = Object.keys(visibleProjection).find((key) => volatileFields.has(key)) ?? null;
+  const firstVolatileMarker = firstVolatileField === null
+    ? -1
+    : visibleProjectionJson.indexOf(`${JSON.stringify(firstVolatileField)}:`);
+  const firstVolatileByteOffset = firstVolatileMarker < 0
+    ? null
+    : Buffer.byteLength(visibleProjectionJson.slice(0, firstVolatileMarker), "utf8");
+  const stablePrefixFields = [
+    "orientationKernel",
+    "learnedSelfSlice",
+    "occupantId",
+    "authorityEpoch",
+  ] as const;
+  const stablePrefixProjection = Object.fromEntries(
+    stablePrefixFields
+      .filter((field) => Object.prototype.hasOwnProperty.call(visibleProjection, field))
+      .map((field) => [field, visibleProjection[field]]),
+  );
+  const candidateS0S1PrefixBytes = systemMessageBytes
+    + Buffer.byteLength(JSON.stringify(stablePrefixProjection), "utf8");
+  const diagnostics: AllocationDiagnostics = {
+    system_message_bytes: systemMessageBytes,
+    orientation_kernel_bytes: finalProjected.orientationKernel === undefined
+      ? 0
+      : Buffer.byteLength(JSON.stringify(finalProjected.orientationKernel), "utf8"),
+    required_base_estimated_tokens: requiredBaseEstimatedTokens,
+    optional_context_estimated_tokens: optionalContextEstimatedTokens,
+    system_prefix_bytes: systemMessageBytes,
+    system_prefix_estimated_tokens: tokenBreakdown.static_contract_tokens,
+    candidate_S0_S1_prefix_bytes: candidateS0S1PrefixBytes,
+    candidate_S0_S1_prefix_estimated_tokens: Math.ceil(candidateS0S1PrefixBytes / BYTES_PER_TOKEN),
+    first_volatile_field: firstVolatileField,
+    first_volatile_byte_offset: firstVolatileByteOffset,
+    allocation_candidate_count: candidates.length,
+    renderTentative_call_count: renderTentativeCallCount,
+    thoughtMessagesForProjection_call_count: thoughtMessagesForProjectionCallCount,
+    allocation_elapsed_ms: Math.max(0, Date.now() - allocationStartedAtMs),
+  };
+
   const coverageManifest = mergeCoverageManifests(buildAllocationCoverageManifest({
     included: includedCandidates,
     omitted: omittedCandidateData,
@@ -445,6 +520,7 @@ export function allocateThoughtProjection(
     policyVersion: 1,
     semanticProjectionEnvelope: budget.semanticProjectionEnvelope,
     coverageManifest: coverageManifestWithC3,
+    diagnostics,
     tokenBreakdown,
     quotaBucket: budget.quotaBucket,
     hardTpm: budget.hardTpm,
@@ -461,6 +537,8 @@ export function allocateThoughtProjection(
         section: c.section,
         ref: c.ref,
         required: c.required,
+        priority: c.priority,
+        estimatedTokens: structuralTokens(c.data),
       })),
       omitted: omittedCandidates,
       includedWireBytes: Buffer.byteLength(JSON.stringify(finalMessages), "utf8"),

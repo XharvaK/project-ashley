@@ -36,6 +36,7 @@ type NimChoice = { message?: NimMessage; finish_reason?: string | null };
 
 type NimUsage = {
   prompt_tokens?: number;
+  prompt_tokens_details?: { cached_tokens?: number };
   completion_tokens?: number;
   total_tokens?: number;
   completion_tokens_details?: { reasoning_tokens?: number };
@@ -57,6 +58,10 @@ function toTokenUsage(raw: unknown): TokenUsage | undefined {
   }
   const reasoningRaw = Number(r.completion_tokens_details?.reasoning_tokens);
   const usage: TokenUsage = { promptTokens, completionTokens };
+  const cachedRaw = r.prompt_tokens_details?.cached_tokens;
+  if (typeof cachedRaw === "number" && Number.isFinite(cachedRaw) && cachedRaw >= 0) {
+    usage.cachedTokens = cachedRaw;
+  }
   if (Number.isFinite(reasoningRaw) && reasoningRaw >= 0) {
     usage.reasoningTokens = reasoningRaw;
   }

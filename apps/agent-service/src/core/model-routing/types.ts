@@ -63,6 +63,8 @@ export type ChatMessage = {
 export type TokenUsage = {
   promptTokens: number;
   completionTokens: number;
+  /** Provider-reported prompt tokens served from a prefix cache, when available. */
+  cachedTokens?: number;
   /** Hidden reasoning tokens when the provider reports them separately. */
   reasoningTokens?: number;
 };
