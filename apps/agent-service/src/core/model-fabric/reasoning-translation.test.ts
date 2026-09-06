@@ -109,14 +109,14 @@ describe("Ultra translation", () => {
 });
 
 describe("Super translation", () => {
-  it("maps semantic high to reasoning_effort high and sets reasoning_budget 2048", () => {
+  it("maps semantic high to reasoning_effort high and sets reasoning_budget 1024", () => {
     const probe = inspectFabricNimRequest({
       provider: "nim",
       configuredModelId: SUPER,
       reasoningPolicy: "high",
     });
     expect(probe.requestBody?.reasoning_effort).toBe("high");
-    expect(probe.requestBody?.reasoning_budget).toBe(2048);
+    expect(probe.requestBody?.reasoning_budget).toBe(1024);
     expect(JSON.stringify(probe.requestBody)).not.toContain("thinking_on");
   });
 
@@ -134,7 +134,7 @@ describe("Super translation", () => {
       effectiveReasoning: "thinking_on",
     });
     expect(probe.requestBody?.reasoning_effort).toBe("high");
-    expect(probe.requestBody?.reasoning_budget).toBe(2048);
+    expect(probe.requestBody?.reasoning_budget).toBe(1024);
     expect(JSON.stringify(probe.requestBody)).not.toContain("thinking_on");
   });
 

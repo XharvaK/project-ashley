@@ -356,6 +356,6 @@ export function applyTranslatedControlToNimBody(
   }
   body.reasoning_effort = control.value;
   if (configuredModelId === SUPER_ID && control.value === "high") {
-    body.reasoning_budget = 2048;
+    body.reasoning_budget = 1024;
   }
 }

@@ -187,6 +187,121 @@ describe("nim-adapter fixtures", () => {
     expect(JSON.stringify(capturedBody)).not.toContain("max_supported");
   });
 
+  it("applies trusted Super fabric translation as reasoning_effort high and reasoning_budget 1024", async () => {
+    env.nimApiKey = "test";
+    let capturedBody: Record<string, unknown> | undefined;
+    const adapter = createNimAdapter(async (_url, init) => {
+      capturedBody = JSON.parse(init?.body as string);
+      return fakeResponse({
+        choices: [{ message: { content: "ok" } }],
+        usage: { prompt_tokens: 5, completion_tokens: 1 },
+      });
+    });
+    await adapter.dispatch({
+      messages,
+      modelId: "nvidia/nemotron-3-super-120b-a12b",
+      options: {},
+      fabricReasoning: { kind: "reasoning_effort", value: "high" },
+    });
+    expect(capturedBody?.reasoning_effort).toBe("high");
+    expect(capturedBody?.reasoning_budget).toBe(1024);
+  });
+
+  it("serializes reasoning_budget 1024 for direct Super high reasoning effort without fabric", async () => {
+    env.nimApiKey = "test";
+    let capturedBody: Record<string, unknown> | undefined;
+    const adapter = createNimAdapter(async (_url, init) => {
+      capturedBody = JSON.parse(init?.body as string);
+      return fakeResponse({
+        choices: [{ message: { content: "ok" } }],
+        usage: { prompt_tokens: 5, completion_tokens: 1 },
+      });
+    });
+    await adapter.dispatch({
+      messages,
+      modelId: "nvidia/nemotron-3-super-120b-a12b",
+      options: { reasoningEffort: "high" },
+    });
+    expect(capturedBody?.reasoning_effort).toBe("high");
+    expect(capturedBody?.reasoning_budget).toBe(1024);
+  });
+
+  it("builds exact wire request for Super Thought with reasoning_budget 1024 and max_tokens 8192", () => {
+    const schema = {
+      type: "object",
+      properties: { answer: { type: "string" } },
+      required: ["answer"],
+    };
+    const body = buildNimRequestBody(
+      messages,
+      { responseFormat: "json_schema", temperature: 1.0, maxTokens: 8192 },
+      "nvidia/nemotron-3-super-120b-a12b",
+      { kind: "reasoning_effort", value: "high" },
+      {
+        kind: "native_json_schema",
+        contractId: "ashley.thought.semantic.v1",
+        schemaId: "ashley.thought.semantic.v1.schema",
+        schemaFingerprint: `sha256:${"b".repeat(64)}` as StructuredOutputSchemaFingerprint,
+        bindingId: "compat_thought_nim_nemotron_super_native_json_schema_v1",
+        wireFormat: "nim_response_format_json_schema",
+        schema,
+      },
+    );
+    expect(body.model).toBe("nvidia/nemotron-3-super-120b-a12b");
+    expect(body.temperature).toBe(1.0);
+    expect(body.reasoning_effort).toBe("high");
+    expect(body.reasoning_budget).toBe(1024);
+    expect(body.max_tokens).toBe(8192);
+    expect(body.response_format).toEqual({
+      type: "json_schema",
+      json_schema: {
+        name: "ashley.thought.semantic.v1.schema",
+        strict: true,
+        schema,
+      },
+    });
+  });
+
+  it("builds structural retry and authority revision wire requests with reasoning_budget 1024 and max_tokens 8192", () => {
+    const structuralRetryBody = buildNimRequestBody(
+      messages,
+      { responseFormat: "json_schema", temperature: 1.0, maxTokens: 8192 },
+      "nvidia/nemotron-3-super-120b-a12b",
+      { kind: "reasoning_effort", value: "high" },
+      {
+        kind: "native_json_schema",
+        contractId: "ashley.thought.semantic.v1",
+        schemaId: "ashley.thought.semantic.v1.schema",
+        schemaFingerprint: `sha256:${"b".repeat(64)}` as StructuredOutputSchemaFingerprint,
+        bindingId: "compat_thought_nim_nemotron_super_native_json_schema_v1",
+        wireFormat: "nim_response_format_json_schema",
+        schema: { type: "object" },
+      },
+    );
+    expect(structuralRetryBody.reasoning_budget).toBe(1024);
+    expect(structuralRetryBody.reasoning_effort).toBe("high");
+    expect(structuralRetryBody.max_tokens).toBe(8192);
+
+    const revisionBody = buildNimRequestBody(
+      [...messages, { role: "user", content: "settlementRevision" }],
+      { responseFormat: "json_schema", temperature: 1.0, maxTokens: 8192 },
+      "nvidia/nemotron-3-super-120b-a12b",
+      { kind: "reasoning_effort", value: "high" },
+      {
+        kind: "native_json_schema",
+        contractId: "ashley.thought.semantic.v1",
+        schemaId: "ashley.thought.semantic.v1.schema",
+        schemaFingerprint: `sha256:${"b".repeat(64)}` as StructuredOutputSchemaFingerprint,
+        bindingId: "compat_thought_nim_nemotron_super_native_json_schema_v1",
+        wireFormat: "nim_response_format_json_schema",
+        schema: { type: "object" },
+      },
+    );
+    expect(revisionBody.reasoning_budget).toBe(1024);
+    expect(revisionBody.reasoning_effort).toBe("high");
+    expect(revisionBody.max_tokens).toBe(8192);
+  });
+
   it("surfaces NIM 400 provider error message", async () => {
     env.nimApiKey = "test";
     const adapter = createNimAdapter(async () =>
