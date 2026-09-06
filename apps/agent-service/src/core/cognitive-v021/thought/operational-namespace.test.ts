@@ -19,17 +19,9 @@ type SchemaRecord = Record<string, any>;
 function settlement(operational: unknown[]) {
   return {
     kind: "settlement",
-    interpretation: {
-      discourseActs: ["acknowledge"],
-      referentBindings: [],
-      corrections: [],
-      unresolvedAmbiguities: [],
-      topics: [],
-    },
     commitments: {
-      epistemic: [],
-      operational,
       conversational: ["acknowledge"],
+      ...(operational.length > 0 ? { operational } : {}),
       stance: {
         warmth: "medium",
         humorAllowed: false,
@@ -39,22 +31,6 @@ function settlement(operational: unknown[]) {
     },
     speech: {
       mode: "none",
-      mustSay: [],
-      mustNotSay: [],
-      acceptableRealizations: [],
-      presentationDirectives: [],
-    },
-    workingContextDeltas: [],
-    concernDeltas: [],
-    occupancyDeltas: [],
-    futureTriggerDeltas: [],
-    subscriptionDeltas: [],
-    durableNominations: [],
-    evidenceUse: {
-      observationRefsUsed: [],
-      retrievalRefsUsed: [],
-      sourceRefsUsed: [],
-      openIntentRefs: [],
     },
   };
 }
@@ -204,7 +180,7 @@ describe("finite operational effect namespace constraints", () => {
       reasoningEffort: "high",
       maxTokens: 4096,
       responseFormat: "json_schema",
-      structuredOutputContractId: "ashley.thought.semantic.v1",
+      structuredOutputContractId: "ashley.thought.semantic.v2",
       structuredOutputMode: "native_json_schema",
       structuredOutputBindingId: "wire:nim-native-json-schema:v1",
     } as const;

@@ -183,13 +183,13 @@ export function publishSemanticTransaction(
       return { published: false, replayed: false, reason: "stale_generation", settlementId: null, outboxId: null };
     }
 
-    for (const delta of settlement.workingContextDelta) applyWorkingContextDelta(db, delta, settlement);
-    for (const delta of settlement.concernDeltas) applyConcernDelta(db, delta, settlement);
-    for (const delta of settlement.occupancyDelta) applyOccupancyDelta(db, delta, settlement);
-    assertSubscriptionCapacity(db, conversationId, settlement.subscriptions);
-    for (const delta of settlement.futureTriggers) applyFutureTriggerDelta(db, delta);
-    for (const delta of settlement.subscriptions) applySubscriptionDelta(db, delta);
-    for (const nomination of settlement.durableNominations) applyNomination(db, nomination);
+    for (const delta of (settlement.workingContextDelta ?? [])) applyWorkingContextDelta(db, delta, settlement);
+    for (const delta of (settlement.concernDeltas ?? [])) applyConcernDelta(db, delta, settlement);
+    for (const delta of (settlement.occupancyDelta ?? [])) applyOccupancyDelta(db, delta, settlement);
+    if (settlement.subscriptions) assertSubscriptionCapacity(db, conversationId, settlement.subscriptions);
+    for (const delta of (settlement.futureTriggers ?? [])) applyFutureTriggerDelta(db, delta);
+    for (const delta of (settlement.subscriptions ?? [])) applySubscriptionDelta(db, delta);
+    for (const nomination of (settlement.durableNominations ?? [])) applyNomination(db, nomination);
 
     // Second fence: semantic deltas were prepared, but no publication row or
     // speech projection may be written after the cycle/authority changed.
@@ -239,7 +239,7 @@ export function publishSemanticTransaction(
       observationIds: settlement.operations.observationsConsumed,
       effectIds: settlement.operations.effectsCompleted,
       authorityCodes: settlement.authority.objectionsApplied,
-      nominationIds: settlement.durableNominations.map((item) => item.nominationId),
+      nominationIds: (settlement.durableNominations ?? []).map((item) => item.nominationId),
       outboxId,
       fidelity: options.fidelity ?? "skipped",
       thoughtUnavailable: options.thoughtUnavailable ?? false,

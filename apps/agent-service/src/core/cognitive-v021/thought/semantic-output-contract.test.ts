@@ -12,12 +12,9 @@ const settlement = {
   interpretation: {
     discourseActs: ["inform"],
     referentBindings: [{ span: "this", sourceTurnRefs: ["turn-1"] }],
-    corrections: [],
-    unresolvedAmbiguities: [],
     topics: ["testing"],
   },
   commitments: {
-    epistemic: [],
     conversational: ["answer"],
     stance: {
       warmth: "medium",
@@ -29,22 +26,10 @@ const settlement = {
   speech: {
     mode: "draft",
     mustSay: ["I can verify that."],
-    mustNotSay: [],
     surfaceDraft: "I can verify that.",
-    acceptableRealizations: [],
-    presentationDirectives: [],
   },
-  workingContextDeltas: [],
-  concernDeltas: [],
-  occupancyDeltas: [],
-  futureTriggerDeltas: [],
-  subscriptionDeltas: [],
-  durableNominations: [],
   evidenceUse: {
-    observationRefsUsed: [],
-    retrievalRefsUsed: [],
     sourceRefsUsed: ["turn-1"],
-    openIntentRefs: [],
   },
 };
 
@@ -254,9 +239,9 @@ describe("Thought semantic output contract", () => {
       oneOf: Array<{ properties?: Record<string, { const?: string }> }>;
     };
 
-    expect(request.contractId).toBe("ashley.thought.semantic.v1");
-    expect(request.schemaId).toBe("ashley.thought.semantic.v1.schema");
-    expect(schema.$id).toBe("ashley.thought.semantic.v1.schema");
+    expect(request.contractId).toBe("ashley.thought.semantic.v2");
+    expect(request.schemaId).toBe("ashley.thought.semantic.v2.schema");
+    expect(schema.$id).toBe("ashley.thought.semantic.v2.schema");
     expect(schema.oneOf.map((branch) => branch.properties?.kind?.const)).toEqual([
       "settlement",
       "observation_intent",
@@ -287,7 +272,7 @@ describe("Thought semantic output contract", () => {
     expect(instruction).toContain("workspace.verify");
     expect(instruction).toContain("Operational commitments are distinct from conversational continuation");
     expect(instruction).toContain("Every operational effectRef must refer to one of the complete Host-admitted operational effect references supplied in allowedOperationalEffectRefs");
-    expect(instruction).toContain("If allowedOperationalEffectRefs is empty, commitments.operational must be []");
+    expect(instruction).toContain("If allowedOperationalEffectRefs is empty, omit commitments.operational");
     expect(instruction).toContain("This contract describes output shape only");
   });
 
@@ -320,7 +305,6 @@ describe("Thought semantic output contract", () => {
     expect(instruction).toContain('Use time:historical for a claim about a past state or event that does not assert it is still true now');
     // EPISTEMIC_COMMITMENT_MAY_BE_OMITTED_FOR_ACK
     expect(instruction).toContain("omit the epistemic commitment");
-    expect(instruction).toContain("an empty epistemic array is valid");
   });
 
   it("carries semantic branch intent in the native schema without changing branch shape", () => {

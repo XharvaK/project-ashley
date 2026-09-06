@@ -54,17 +54,6 @@ export function assertCausalInvariants(bundle: CausalBundle): void {
   }
 
   const currentSpeech = speech(settlement);
-  const commitments = [
-    ...settlement.commitments.epistemic,
-    ...settlement.commitments.conversational,
-  ];
-  if (
-    currentSpeech.mode === "draft" &&
-    commitments.length === 0 &&
-    (currentSpeech.surfaceDraft?.trim().length ?? 0) > 0
-  ) {
-    fail("empty_commitments_with_draft");
-  }
 
   if (
     bundle.acceptedSettlements === 0 &&

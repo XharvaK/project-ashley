@@ -21,8 +21,8 @@ function unique(codes: AuthorityCode[]): AuthorityCode[] {
 
 function settlementText(settlement: ThoughtSettlementDraft | PublishedCognitiveSettlement): string {
   return [
-    ...settlement.commitments.epistemic.map((item) => item.statement),
-    ...settlement.speech.mustSay,
+    ...(settlement.commitments?.epistemic ?? []).map((item) => item.statement),
+    ...(settlement.speech.mustSay ?? []),
     settlement.speech.surfaceDraft ?? "",
   ].join(" ");
 }
@@ -142,15 +142,8 @@ function checkSettlement(
     codes.push("RELATIONAL_WITHDRAWAL");
   }
   if (
-    settlement.speech.mode === "draft" &&
-    settlement.commitments.epistemic.length === 0 &&
-    settlement.commitments.conversational.length === 0
-  ) {
-    codes.push("EMPTY_COMMITMENTS_WITH_DRAFT", "DRAFT_COMMITMENT_CONFLICT");
-  }
-  if (
     packs.currentness.requireObservationForLatest &&
-    settlement.commitments.epistemic.some((claim) => claim.dimensions.time === "current") &&
+    (settlement.commitments?.epistemic ?? []).some((claim) => claim.dimensions.time === "current") &&
     !settlement.operations.observationsConsumed.some((id) => (new Set(packs.currentness.observedObservationIds ?? [])).has(id))
   ) {
     codes.push("CURRENTNESS_UNVERIFIED");
@@ -169,7 +162,7 @@ function checkSettlement(
   );
 
   // Check structured operational commitments against host truth (25-cell matrix)
-  const operationalClaims = settlement.commitments.operational ?? [];
+  const operationalClaims = settlement.commitments?.operational ?? [];
   const licensedEffectIds = new Set<string>();
 
   for (const claim of operationalClaims) {
@@ -191,7 +184,7 @@ function checkSettlement(
       evaluation.ok &&
       receipt != null &&
       (receipt.outcome === "succeeded" || receipt.outcome === "failed") &&
-      !settlement.operations.effectsCompleted.includes(effectId)
+      !(settlement.operations.effectsCompleted ?? []).includes(effectId)
     ) {
       codes.push("RECEIPT_REQUIRED");
     }
@@ -213,7 +206,7 @@ function checkSettlement(
   }
 
   // Check effectsCompleted: each must have a terminal physical receipt
-  for (const effectId of settlement.operations.effectsCompleted) {
+  for (const effectId of (settlement.operations.effectsCompleted ?? [])) {
     const receipt = packs.receipt.receiptsByEffectId[effectId];
     if (!receipt) {
       codes.push("RECEIPT_REQUIRED");

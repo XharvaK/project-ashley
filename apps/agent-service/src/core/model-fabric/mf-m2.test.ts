@@ -14,7 +14,11 @@ import {
   resolveCurrentPolicy,
   routeRecordsFromCurrentPortfolio,
 } from "./portfolio.js";
-import { resolveDispatchContract } from "./dispatch-contract.js";
+import {
+  resolveDispatchContract,
+  THOUGHT_OUTPUT_CONTRACT_ID,
+  THOUGHT_OUTPUT_SCHEMA_ID,
+} from "./dispatch-contract.js";
 import { capabilityProfileFor } from "./profiles.js";
 
 const originalNimKey = env.nimApiKey;
@@ -202,8 +206,8 @@ describe("MF-M2 CURRENT portfolio", () => {
       }),
       fabricStructuredOutput: expect.objectContaining({
         kind: "native_json_schema",
-        contractId: "ashley.thought.semantic.v1",
-        schemaId: "ashley.thought.semantic.v1.schema",
+        contractId: THOUGHT_OUTPUT_CONTRACT_ID,
+        schemaId: THOUGHT_OUTPUT_SCHEMA_ID,
         schemaFingerprint,
       }),
     }));

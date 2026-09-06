@@ -110,18 +110,40 @@ export function admitTestCycle(
 
 export function makeSemanticSettlement(
   overrides: Record<string, unknown> = {},
-): Extract<ThoughtSemanticOutput, { kind: "settlement" }> {
-  return {
+): Extract<ThoughtSemanticOutput, { kind: "settlement" }> & { commitments: NonNullable<Extract<ThoughtSemanticOutput, { kind: "settlement" }>["commitments"]> } {
+  const base = {
     kind: "settlement",
-    interpretation: { discourseActs: ["inform"], referentBindings: [], corrections: [], unresolvedAmbiguities: [], topics: ["topic"] },
+    interpretation: { discourseActs: ["inform"], topics: ["topic"] },
     commitments: {
       epistemic: [{ dimensions: { source: "owner_utterance", status: "asserted", time: "historical", reliability: "owner_supplied" }, statement: "topic" }],
-      operational: [],
       conversational: ["answer"], stance: { warmth: "medium", humorAllowed: false, disagreement: false, uncertaintyDisplay: true },
     },
-    speech: { mode: "draft", mustSay: ["hello"], mustNotSay: [], surfaceDraft: "hello", acceptableRealizations: ["hello"], presentationDirectives: [] },
-    workingContextDeltas: [], concernDeltas: [], occupancyDeltas: [], futureTriggerDeltas: [], subscriptionDeltas: [], durableNominations: [],
-    evidenceUse: { observationRefsUsed: [], retrievalRefsUsed: [], sourceRefsUsed: [], openIntentRefs: [] },
-    ...overrides,
-  } as Extract<ThoughtSemanticOutput, { kind: "settlement" }>;
+    speech: { mode: "draft", mustSay: ["hello"], surfaceDraft: "hello" },
+  };
+  const merged = { ...base, ...overrides } as Record<string, unknown>;
+  const optionalArrays = [
+    "workingContextDeltas", "concernDeltas", "occupancyDeltas", "futureTriggerDeltas",
+    "subscriptionDeltas", "durableNominations",
+  ];
+  for (const key of optionalArrays) if (Array.isArray(merged[key]) && merged[key].length === 0) delete merged[key];
+  for (const key of ["interpretation", "commitments", "evidenceUse"]) {
+    const child = merged[key];
+    if (!child || typeof child !== "object" || Array.isArray(child)) continue;
+    const normalized = { ...(child as Record<string, unknown>) };
+    for (const childKey of Object.keys(normalized)) {
+      if (Array.isArray(normalized[childKey]) && normalized[childKey].length === 0) delete normalized[childKey];
+    }
+    if (Object.keys(normalized).length === 0) delete merged[key];
+    else merged[key] = normalized;
+  }
+  const speech = merged.speech;
+  if (speech && typeof speech === "object" && !Array.isArray(speech)) {
+    const normalized = { ...(speech as Record<string, unknown>) };
+    delete normalized.acceptableRealizations;
+    for (const key of ["mustSay", "mustNotSay", "presentationDirectives"]) {
+      if (Array.isArray(normalized[key]) && normalized[key].length === 0) delete normalized[key];
+    }
+    merged.speech = normalized;
+  }
+  return merged as Extract<ThoughtSemanticOutput, { kind: "settlement" }> & { commitments: NonNullable<Extract<ThoughtSemanticOutput, { kind: "settlement" }>["commitments"]> };
 }

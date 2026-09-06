@@ -29,7 +29,7 @@ describe("mustSay literal producer contract", () => {
     expect(instruction).toContain("mustSay");
     expect(instruction).toContain("verbatim");
     expect(instruction).toContain("surfaceDraft");
-    expect(instruction).toContain("mustSay: []");
+    expect(instruction).toContain("Omit mustSay when no exact literal wording is required");
     expect(instruction).toContain("presentationDirectives");
     expect(instruction).toContain("Behavioral");
   });

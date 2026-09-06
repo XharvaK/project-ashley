@@ -92,24 +92,20 @@ describe("cognitive v0.2.1 causal acceptance harness", () => {
     ).toThrow(/delivered_text_requires_settlement/);
   });
 
-  it("rejects a non-empty draft with no epistemic or conversational commitments", () => {
+  it("accepts ordinary sparse draft speech without structured commitments", () => {
     const settlement = {
       ...draftSettlement(),
-      commitments: {
-        ...draftSettlement().commitments,
-        epistemic: [],
-        conversational: [],
-      },
+      commitments: undefined,
       speech: {
         ...draftSettlement().speech,
         surfaceDraft: "unsupported draft",
       },
-    } as CausalBundle["settlement"];
+    } as unknown as CausalBundle["settlement"];
     expect(() =>
       assertCausalInvariants(
         bundle({ settlement, acceptedSettlements: 1, outboxText: "unsupported draft" }),
       ),
-    ).toThrow(/empty_commitments_with_draft/);
+    ).not.toThrow();
   });
 
   it("rejects transcript, memory, and capability markers in expression input", () => {

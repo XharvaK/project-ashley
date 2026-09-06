@@ -13,19 +13,23 @@ import {
 import { claimsCurrentness } from "../authority/currentness-detectors.js";
 
 export type FidelityCommitments = {
-  epistemic: readonly EpistemicCommitment[];
+  epistemic?: readonly EpistemicCommitment[];
   operational?: readonly OperationalStateClaim[];
-  conversational: readonly ConversationalCommitment[];
+  conversational?: readonly ConversationalCommitment[];
   stance?: Stance;
 };
 
 export type FidelityInput = {
   mode: SpeechMode;
   draft: string | null;
-  mustSay: readonly string[];
-  mustNot: readonly string[];
-  acceptableRealizations: readonly string[];
-  commitments: FidelityCommitments;
+  mustSay?: readonly string[];
+  mustNot?: readonly string[];
+  /**
+   * Kept as an input-only compatibility field for historical callers. VNext
+   * authoring does not emit or consult acceptable realizations.
+   */
+  acceptableRealizations?: readonly string[];
+  commitments?: FidelityCommitments;
   observations?: readonly { modality: string }[];
 };
 
@@ -66,14 +70,10 @@ export function fidelityCheck(input: FidelityInput): FidelityResult {
     return fail("DRAFT_REQUIRED", "mode=draft requires a non-empty draft");
   }
 
-  if (
-    input.commitments.epistemic.length === 0 &&
-    input.commitments.conversational.length === 0
-  ) {
-    return fail("EMPTY_COMMITMENTS_WITH_DRAFT", "a speaking draft requires commitments");
-  }
-
   const draft = input.draft;
+  const commitments = input.commitments ?? {};
+  const mustSay = input.mustSay ?? [];
+  const mustNot = input.mustNot ?? [];
   const modalities = new Set((input.observations ?? []).map((item) => item.modality));
   if (
     claimsOwnVisionActivity(draft) &&
@@ -87,23 +87,19 @@ export function fidelityCheck(input: FidelityInput): FidelityResult {
   ) {
     return fail("UNWITNESSED_HIGH_RISK_CLAIM", "reading claim has no observation");
   }
-  const acceptable = input.acceptableRealizations;
-  const mustSaySatisfied = input.mustSay.every((required) =>
-    hasText(draft, required) ||
-    acceptable.some((realization) => hasText(realization, required) && realization === draft),
-  );
+  const mustSaySatisfied = mustSay.every((required) => hasText(draft, required));
   if (!mustSaySatisfied) {
     return fail("DRAFT_COMMITMENT_CONFLICT", "mustSay is absent from the licensed draft");
   }
 
-  const forbidden = input.mustNot.find((value) => value.length > 0 && draft.includes(value));
+  const forbidden = mustNot.find((value) => value.length > 0 && draft.includes(value));
   if (forbidden) {
     return fail("DRAFT_COMMITMENT_CONFLICT", `mustNot is present: ${forbidden}`);
   }
 
   const affirmativeEffectClaim = /\b(?:worked|succeeded|successful|completed|sent|created|updated|done)\b/i.test(draft);
   if (affirmativeEffectClaim) {
-    const hasSucceededOperationalClaim = input.commitments.operational?.some(
+    const hasSucceededOperationalClaim = commitments.operational?.some(
       (claim) => claim.claimedState === "succeeded",
     );
     if (!hasSucceededOperationalClaim) {
@@ -112,7 +108,7 @@ export function fidelityCheck(input: FidelityInput): FidelityResult {
   }
 
   if (claimsCurrentness(draft)) {
-    const hasCurrentnessCommitment = input.commitments.epistemic.some(
+    const hasCurrentnessCommitment = commitments.epistemic?.some(
       (c) => c.dimensions.time === "current",
     );
     if (!hasCurrentnessCommitment) {

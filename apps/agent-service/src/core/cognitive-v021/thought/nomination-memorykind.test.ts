@@ -62,7 +62,6 @@ function invalidSettlement() {
     ...base,
     durableNominations: [
       {
-        alias: "nom-one",
         statement: "The owner prefers small tools.",
         memoryKind: "self_reflection",
         dimensions: {
@@ -87,7 +86,6 @@ function validSettlement() {
     ...base,
     durableNominations: [
       {
-        alias: "nom-one",
         statement: "The owner prefers small tools.",
         memoryKind: "owner_preference",
         dimensions: {

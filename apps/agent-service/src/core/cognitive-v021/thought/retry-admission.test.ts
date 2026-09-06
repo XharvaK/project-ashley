@@ -249,7 +249,7 @@ describe("v0.2.1 structural Thought retry admission", () => {
     expect(captured[1]?.options.responseFormat).toBe("json_schema");
     expect(captured[1]?.messages[1]?.content).toBe(captured[0]?.messages[1]?.content);
     expect(captured[1]?.messages[0]?.content).toContain("invalid_json");
-    expect(captured[1]?.messages[0]?.content).toContain("schemaId=ashley.thought.semantic.v1.schema");
+    expect(captured[1]?.messages[0]?.content).toContain("schemaId=ashley.thought.semantic.v2.schema");
     expect(captureAdmission).not.toBeNull();
 
     const retryInput = Number(captureAdmission?.estimated_input_tokens);

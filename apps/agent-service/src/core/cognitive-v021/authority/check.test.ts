@@ -25,18 +25,18 @@ function packs(overrides: Partial<AuthorityPacks> = {}): AuthorityPacks {
 describe("v0.2.1 deterministic Authority", () => {
   it("rejects a latest claim without current observation and does not rewrite it", () => {
     const draft = makeThoughtDraft({ commitments: {
-      ...makeThoughtDraft().commitments,
-      epistemic: [{ ...makeThoughtDraft().commitments.epistemic[0]!, statement: "the latest HY4 shipped today", dimensions: { ...makeThoughtDraft().commitments.epistemic[0]!.dimensions, time: "current" } }],
+      ...makeThoughtDraft().commitments!,
+      epistemic: [{ ...makeThoughtDraft().commitments!.epistemic![0]!, statement: "the latest HY4 shipped today", dimensions: { ...makeThoughtDraft().commitments!.epistemic![0]!.dimensions, time: "current" } }],
     }});
     const result = checkAuthority("settlement", { settlement: draft, packs: packs({ currentness: { requireObservationForLatest: true } }), authorityEpoch: 1 });
     expect(result).toMatchObject({ ok: false, codes: ["CURRENTNESS_UNVERIFIED"] });
-    expect(draft.commitments.epistemic[0]?.statement).toBe("the latest HY4 shipped today");
+    expect(draft.commitments!.epistemic![0]?.statement).toBe("the latest HY4 shipped today");
   });
 
   it("accepts the same claim when a consumed page observation is present", () => {
     const draft = makeThoughtDraft({ commitments: {
-      ...makeThoughtDraft().commitments,
-      epistemic: [{ ...makeThoughtDraft().commitments.epistemic[0]!, statement: "the latest HY4 shipped today" }],
+      ...makeThoughtDraft().commitments!,
+      epistemic: [{ ...makeThoughtDraft().commitments!.epistemic![0]!, statement: "the latest HY4 shipped today" }],
     }, operations: { ...makeThoughtDraft().operations, observationsConsumed: ["obs-1"] }});
     expect(checkAuthority("settlement", {
       settlement: draft,

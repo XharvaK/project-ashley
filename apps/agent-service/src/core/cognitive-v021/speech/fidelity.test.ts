@@ -41,7 +41,7 @@ describe("v0.2.1 speech fidelity", () => {
     })).toMatchObject({ ok: false, code: "DRAFT_COMMITMENT_CONFLICT" });
   });
 
-  it("rejects forbidden text and empty committed draft", () => {
+  it("rejects forbidden text while allowing ordinary sparse draft speech", () => {
     expect(fidelityCheck({
       mode: "draft",
       draft: "HY4 and HY3",
@@ -58,18 +58,18 @@ describe("v0.2.1 speech fidelity", () => {
       mustNot: [],
       acceptableRealizations: [],
       commitments: { ...commitments, epistemic: [], conversational: [] },
-    })).toMatchObject({ ok: false, code: "EMPTY_COMMITMENTS_WITH_DRAFT" });
+    })).toMatchObject({ ok: true });
   });
 
-  it("accepts a declared alternative realization", () => {
+  it("does not use acceptable realizations to satisfy mustSay", () => {
     expect(fidelityCheck({
       mode: "draft",
-      draft: "I selected HY4.",
+      draft: "I selected the item.",
       mustSay: ["HY4"],
       mustNot: [],
-      acceptableRealizations: ["I selected HY4."],
+      acceptableRealizations: ["I selected the item."],
       commitments,
-    })).toMatchObject({ ok: true });
+    })).toMatchObject({ ok: false, code: "DRAFT_COMMITMENT_CONFLICT" });
   });
 
   it("treats private silence as a successful settlement", () => {

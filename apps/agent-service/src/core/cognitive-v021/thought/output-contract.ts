@@ -35,7 +35,8 @@ const strictObject = (
 });
 
 const stringArraySchema = { type: "array", items: { type: "string" } };
-const existingRefSchema = strictObject(
+const existingRefSchema = { type: "string", minLength: 1 };
+const existingSemanticRefSchema = strictObject(
   { kind: { const: "existing" }, ref: { type: "string", minLength: 1 } },
   ["kind", "ref"],
 );
@@ -44,7 +45,7 @@ const localRefSchema = strictObject(
   ["kind", "alias"],
 );
 const localAliasSchema = { type: "string", pattern: "^[A-Za-z][A-Za-z0-9_-]{0,127}$" };
-const semanticRefSchema = { oneOf: [existingRefSchema, localRefSchema] };
+const semanticRefSchema = { oneOf: [existingSemanticRefSchema, localRefSchema] };
 const nullableSemanticRefSchema = { oneOf: [semanticRefSchema, { type: "null" }] };
 const jsonObjectSchema = { type: "object", additionalProperties: true };
 const REGISTERED_OPERATION_KINDS = [
@@ -106,51 +107,56 @@ const occupancyDeltaSchema = strictObject({
   status: { enum: ["active", "investigating", "waiting_for_evidence", "dormant_but_revisitable", "resolved", "quarantined"] }, priority: { type: "integer" },
 }, ["op", "concernRef", "status", "priority"]);
 const futureTriggerDeltaSchema = { oneOf: [
-  strictObject({ op: { const: "create" }, identity: localRefSchema, concernRef: semanticRefSchema, dueAtMs: { type: "integer" }, purpose: { type: "string" }, payload: jsonObjectSchema }, ["op", "identity", "concernRef", "dueAtMs", "purpose", "payload"]),
+  strictObject({ op: { const: "create" }, concernRef: semanticRefSchema, dueAtMs: { type: "integer" }, purpose: { type: "string" }, payload: jsonObjectSchema }, ["op", "concernRef", "dueAtMs", "purpose", "payload"]),
   strictObject({ op: { const: "cancel" }, target: existingRefSchema }, ["op", "target"]),
 ] };
 const subscriptionDeltaSchema = { oneOf: [
-  strictObject({ op: { const: "create" }, subscription: strictObject({ identity: localRefSchema, concernRef: nullableSemanticRefSchema, source: { type: "string" }, scope: { type: "string" }, topicKeys: stringArraySchema, match: { enum: ["equality", "substring"] }, expiresAtMs: { type: ["integer", "null"] } }, ["identity", "concernRef", "source", "scope", "topicKeys", "match", "expiresAtMs"]) }, ["op", "subscription"]),
+  strictObject({ op: { const: "create" }, subscription: strictObject({ concernRef: nullableSemanticRefSchema, source: { type: "string" }, scope: { type: "string" }, topicKeys: stringArraySchema, match: { enum: ["equality", "substring"] }, expiresAtMs: { type: ["integer", "null"] } }, ["concernRef", "source", "scope", "topicKeys", "match", "expiresAtMs"]) }, ["op", "subscription"]),
   strictObject({ op: { const: "cancel" }, target: existingRefSchema }, ["op", "target"]),
 ] };
 const nominationSchema = strictObject({
-  alias: localAliasSchema, statement: { type: "string" }, memoryKind: { enum: [...MEMORY_KINDS] }, dimensions: dimensionsSchema,
+  statement: { type: "string" }, memoryKind: { enum: [...MEMORY_KINDS] }, dimensions: dimensionsSchema,
   dataClassification: { enum: ["ordinary", "sensitive", "never_public", "secret"] }, sourceRefs: stringArraySchema,
   supersedesRef: { oneOf: [existingRefSchema, { type: "null" }] }, concernRef: nullableSemanticRefSchema,
-}, ["alias", "statement", "memoryKind", "dimensions", "dataClassification", "sourceRefs", "supersedesRef", "concernRef"]);
+}, ["statement", "memoryKind", "dimensions", "dataClassification", "sourceRefs", "supersedesRef", "concernRef"]);
+const presentArray = (items: unknown): Record<string, unknown> => ({ type: "array", minItems: 1, items });
+const sparseObject = (properties: Record<string, unknown>): Record<string, unknown> => ({
+  ...strictObject(properties, []), minProperties: 1,
+});
+const nonEmptyStringArraySchema = presentArray({ type: "string" });
 const semanticOutputSettlementSchema = strictObject({
   kind: { const: "settlement" },
-  interpretation: strictObject({
-    discourseActs: { type: "array", items: { enum: ["inform", "ask", "correct", "acknowledge", "disagree", "hold", "silence", "other"] } },
-    referentBindings: { type: "array", items: referentBindingSchema },
-    corrections: { type: "array", items: correctionSchema },
-    unresolvedAmbiguities: stringArraySchema,
-    topics: stringArraySchema,
-  }, ["discourseActs", "referentBindings", "corrections", "unresolvedAmbiguities", "topics"]),
-  commitments: strictObject({
-    epistemic: { type: "array", items: strictObject({ dimensions: dimensionsSchema, statement: { type: "string" } }, ["dimensions", "statement"]) },
-    operational: { type: "array", items: operationalClaimSchema },
-    conversational: { type: "array", items: { enum: ["answer", "ask", "acknowledge", "disagree", "hold", "silence"] } },
+  interpretation: sparseObject({
+    discourseActs: { type: "array", minItems: 1, items: { enum: ["inform", "ask", "correct", "acknowledge", "disagree", "hold", "silence", "other"] } },
+    referentBindings: { type: "array", minItems: 1, items: referentBindingSchema },
+    corrections: { type: "array", minItems: 1, items: correctionSchema },
+    unresolvedAmbiguities: nonEmptyStringArraySchema,
+    topics: nonEmptyStringArraySchema,
+  }),
+  commitments: sparseObject({
+    epistemic: { type: "array", minItems: 1, items: strictObject({ dimensions: dimensionsSchema, statement: { type: "string" } }, ["dimensions", "statement"]) },
+    operational: { type: "array", minItems: 1, items: operationalClaimSchema },
+    conversational: { type: "array", minItems: 1, items: { enum: ["answer", "ask", "acknowledge", "disagree", "hold", "silence"] } },
     stance: strictObject({
       warmth: { enum: ["low", "medium", "high"] },
       humorAllowed: { type: "boolean" }, disagreement: { type: "boolean" }, uncertaintyDisplay: { type: "boolean" },
     }, ["warmth", "humorAllowed", "disagreement", "uncertaintyDisplay"]),
-  }, ["epistemic", "operational", "conversational", "stance"]),
+  }),
   speech: { oneOf: [
-    strictObject({ mode: { const: "none" }, mustSay: { type: "array", maxItems: 0 }, mustNotSay: stringArraySchema, acceptableRealizations: { type: "array", maxItems: 0 }, presentationDirectives: stringArraySchema }, ["mode", "mustSay", "mustNotSay", "acceptableRealizations", "presentationDirectives"]),
-    strictObject({ mode: { const: "draft" }, mustSay: stringArraySchema, mustNotSay: stringArraySchema, surfaceDraft: { type: "string", minLength: 1 }, acceptableRealizations: stringArraySchema, presentationDirectives: stringArraySchema }, ["mode", "mustSay", "mustNotSay", "surfaceDraft", "acceptableRealizations", "presentationDirectives"]),
+    strictObject({ mode: { const: "none" } }, ["mode"]),
+    strictObject({ mode: { const: "draft" }, mustSay: nonEmptyStringArraySchema, mustNotSay: nonEmptyStringArraySchema, surfaceDraft: { type: "string", minLength: 1 }, presentationDirectives: nonEmptyStringArraySchema }, ["mode", "surfaceDraft"]),
   ] },
-  workingContextDeltas: { type: "array", items: workingContextDeltaSchema },
-  concernDeltas: { type: "array", items: concernDeltaSchema },
-  occupancyDeltas: { type: "array", items: occupancyDeltaSchema },
-  futureTriggerDeltas: { type: "array", items: futureTriggerDeltaSchema },
-  subscriptionDeltas: { type: "array", items: subscriptionDeltaSchema },
-  durableNominations: { type: "array", items: nominationSchema },
-  evidenceUse: strictObject({
-    observationRefsUsed: stringArraySchema, retrievalRefsUsed: stringArraySchema,
-    sourceRefsUsed: stringArraySchema, openIntentRefs: stringArraySchema,
-  }, ["observationRefsUsed", "retrievalRefsUsed", "sourceRefsUsed", "openIntentRefs"]),
-  }, ["kind", "interpretation", "commitments", "speech", "workingContextDeltas", "concernDeltas", "occupancyDeltas", "futureTriggerDeltas", "subscriptionDeltas", "durableNominations", "evidenceUse"]);
+  workingContextDeltas: { type: "array", minItems: 1, items: workingContextDeltaSchema },
+  concernDeltas: { type: "array", minItems: 1, items: concernDeltaSchema },
+  occupancyDeltas: { type: "array", minItems: 1, items: occupancyDeltaSchema },
+  futureTriggerDeltas: { type: "array", minItems: 1, items: futureTriggerDeltaSchema },
+  subscriptionDeltas: { type: "array", minItems: 1, items: subscriptionDeltaSchema },
+  durableNominations: { type: "array", minItems: 1, items: nominationSchema },
+  evidenceUse: sparseObject({
+    observationRefsUsed: nonEmptyStringArraySchema, retrievalRefsUsed: nonEmptyStringArraySchema,
+    sourceRefsUsed: nonEmptyStringArraySchema, openIntentRefs: nonEmptyStringArraySchema,
+  }),
+  }, ["kind", "speech"]);
 
 const semanticOutputSettlementForm = {
   ...semanticOutputSettlementSchema,
@@ -173,7 +179,7 @@ const semanticOutputEffectForm = {
 const semanticOutputAbstainForm = {
   ...strictObject({
     kind: { const: "abstain" },
-    reason: { enum: ["insufficient_evidence", "unresolved_ambiguity", "no_responsible_proposal", "no_semantic_change_warranted"] },
+    reason: { enum: ["insufficient_evidence", "unresolved_ambiguity", "no_responsible_proposal"] },
     explanation: { type: "string", minLength: 1 }, evidenceRefs: stringArraySchema,
   }, ["kind", "reason", "explanation", "evidenceRefs"]),
   description: "Use abstain when required evidence, capability, or an admissible basis is absent or unresolved; this is a semantic decision, not a provider, parser, or deadline failure.",
@@ -181,15 +187,15 @@ const semanticOutputAbstainForm = {
 
 export const THOUGHT_OUTPUT_SCHEMA: Readonly<Record<string, unknown>> = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
-  $id: "ashley.thought.semantic.v1.schema",
-  title: "Ashley Thought semantic output v1",
+  $id: THOUGHT_OUTPUT_SCHEMA_ID,
+  title: "Ashley Thought semantic output v2",
   oneOf: [
     semanticOutputSettlementForm,
     semanticOutputObservationForm,
     semanticOutputEffectForm,
     semanticOutputAbstainForm,
   ],
-  $defs: { semanticRef: semanticRefSchema, existingRef: { type: "string" }, localAlias: localAliasSchema, jsonObject: jsonObjectSchema },
+  $defs: { semanticRef: semanticRefSchema, existingRef: existingRefSchema, localAlias: localAliasSchema, jsonObject: jsonObjectSchema },
 };
 
 export const THOUGHT_SEMANTIC_SCHEMA_FINGERPRINT = `sha256:${sha256(
@@ -273,10 +279,39 @@ function settlementOperationalSchema(schema: SchemaRecord): SchemaRecord {
  * Derive the exact provider wire schema without mutating the stable semantic
  * schema. Only the Host-owned operational effect reference namespace varies.
  */
+function applyExperimentalWireBounds(schema: SchemaRecord): void {
+  // EXPERIMENTAL_WIRE_QUALIFICATION_STARTING_POINT: qualification may revise
+  // these limits. They are resource bounds, never canonical semantic law.
+  const settlement = record((schema.oneOf as unknown[])[0]);
+  const interpretation = property(settlement, "interpretation");
+  const commitments = property(settlement, "commitments");
+  const speech = property(settlement, "speech");
+  const draft = (speech.oneOf as unknown[]).map(record).find((form) => property(form, "mode").const === "draft")!;
+  property(draft, "surfaceDraft").maxLength = 6000;
+  for (const [field, max] of [["mustSay", 300], ["mustNotSay", 200], ["presentationDirectives", 200]] as const) record(property(draft, field).items).maxLength = max;
+  for (const [field, max] of [["referentBindings", 12], ["corrections", 6], ["unresolvedAmbiguities", 12], ["topics", 16]] as const) property(interpretation, field).maxItems = max;
+  record(property(interpretation, "topics").items).maxLength = 100;
+  record(property(interpretation, "unresolvedAmbiguities").items).maxLength = 400;
+  property(record(property(interpretation, "referentBindings").items), "span").maxLength = 400;
+  for (const field of ["fromSpan", "toSpan"]) property(record(property(interpretation, "corrections").items), field).maxLength = 400;
+  property(record(property(commitments, "epistemic").items), "statement").maxLength = 500;
+  for (const branch of record(property(settlement, "workingContextDeltas").items).oneOf as unknown[]) {
+    const form = record(branch);
+    for (const field of ["item", "replacement"]) {
+      const item = property(form, field);
+      if (Object.keys(item).length) property(item, "text").maxLength = 500;
+    }
+  }
+  property(property(record((record(property(settlement, "concernDeltas").items).oneOf as unknown[])[0]), "record"), "statement").maxLength = 500;
+  property(record((record(property(settlement, "futureTriggerDeltas").items).oneOf as unknown[])[0]), "purpose").maxLength = 300;
+  property(record(property(settlement, "durableNominations").items), "statement").maxLength = 800;
+}
+
 export function constrainThoughtOutputSchema(
   namespace: OperationalEffectNamespace,
 ): ConstrainedThoughtOutputSchema {
   const schema = cloneSchema(THOUGHT_OUTPUT_SCHEMA);
+  applyExperimentalWireBounds(schema);
   const operational = settlementOperationalSchema(schema);
   const refs = [...namespace.allowedOperationalEffectRefs];
   if (refs.length === 0) {
@@ -305,23 +340,22 @@ export function constrainThoughtOutputSchema(
 /** Compact compatibility guidance derived from the same code-owned schema. */
 export function thoughtOutputCompatibilityInstruction(): string {
   const settlement = record(THOUGHT_OUTPUT_SCHEMA.oneOf instanceof Array ? THOUGHT_OUTPUT_SCHEMA.oneOf[0] : null);
-  const commitments = property(settlement, "commitments");
   return [
     `Code-owned Thought contract contractId=${THOUGHT_OUTPUT_CONTRACT_ID} schemaId=${THOUGHT_OUTPUT_SCHEMA_ID} semanticSchemaFingerprint=${THOUGHT_SEMANTIC_SCHEMA_FINGERPRINT}.`,
     `Return exactly one JSON object in one of these permitted kinds/forms: ${rootForms().join("; ")}.`,
     "Semantic selection rules: choose settlement only when the current supplied evidence and context are sufficient to author the semantic answer without first acquiring additional evidence or performing a governed effect; choose observation_intent when the answer requires additional read-only evidence acquisition through a registered observation capability; choose effect_intent when the requested outcome requires a governed mechanical effect through a registered effect capability; choose abstain when required evidence, capability, or an admissible basis is absent or unresolved.",
     "Do not use settlement as a placeholder for an unperformed observation or effect. If a required observation or effect cannot be truthfully authored from the current admissible context, use abstain rather than claim completion.",
     "Choose observation_intent only when an available observation can actually supply evidence capable of resolving the current semantic need; the availability of an unrelated observation does not justify observation, and when no available observation can supply the needed evidence, abstain takes precedence over observation.",
-    "Epistemic time is a governed evidence status, not ordinary conversational recency. Use time:current only for a factual claim whose present truth is supported by a governed observation supplied in the current Thought input, and nominate the supporting observation in evidenceUse.observationRefsUsed; a source reference, a retrieval reference, or the fact that the owner just sent a message does not by itself license current, and the host may still reject a current claim whose currentness binding is incomplete. Use time:historical for a claim about a past state or event that does not assert it is still true now. Use time:unknown_freshness when evidence supports a claim but its present truth has not been established by governed current observation. If a conversational response such as an acknowledgment does not need to assert an epistemic fact, omit the epistemic commitment (an empty epistemic array is valid) rather than inventing one.",
+    "Epistemic time is a governed evidence status, not ordinary conversational recency. Use time:current only for a factual claim whose present truth is supported by a governed observation supplied in the current Thought input, and nominate the supporting observation in evidenceUse.observationRefsUsed; a source reference, a retrieval reference, or the fact that the owner just sent a message does not by itself license current, and the host may still reject a current claim whose currentness binding is incomplete. Use time:historical for a claim about a past state or event that does not assert it is still true now. Use time:unknown_freshness when evidence supports a claim but its present truth has not been established by governed current observation. If a conversational response such as an acknowledgment does not need to assert an epistemic fact, omit the epistemic commitment (omit unused arrays) rather than inventing one.",
     "Capability reality is host-owned input: operationCapabilities identify available operations, their canonical family, readOnly and requiresProject properties, observation/effect class, request fields, operator-bound fields, and authorized project IDs. Use only available operations and authorized IDs; operation metadata does not choose whether to request an operation, but its semantic class constrains the form that can carry a selected operation.",
     'Semantic class binding: semanticClass:"observation" requires observation_intent; semanticClass:"effect" requires effect_intent. readOnly describes whether the governed operation mutates its bound project or candidate; readOnly does not convert an effect-class operation into an observation. project.read_file is project_inspection evidence acquisition and uses observation_intent. workspace.verify is project_verification governed recipe execution and uses effect_intent even when read-only.',
     "CapabilityReality field semantics: conversationalRead reports only whether an additional authorized user-requested URL/page read may be performed; it does not report whether supplied conversation content is visible. Every rawConversation entry included in this request is directly readable current context regardless of conversationalRead.",
     "Do not emit kernel identity, lifecycle, delivery, or publication fields; Ashley code binds those values.",
     `A settlement must include these required sections: ${requiredFields(settlement).join(", ")}.`,
     `Speech shape: ${speechForms(settlement).join("; ")}.`,
-    "Speech mustSay contract: every mustSay entry is a literal required substring and each entry must appear verbatim in surfaceDraft; the host fidelity checker rejects any draft that does not contain them verbatim. Use mustSay: [] when no exact literal wording is required. Behavioral, stylistic, or procedural directives do not belong in mustSay; put those in presentationDirectives.",
-    `Commitments required fields: ${requiredFields(commitments).join(", ")}.`,
-    "Operational commitments are distinct from conversational continuation. Every operational effectRef must refer to one of the complete Host-admitted operational effect references supplied in allowedOperationalEffectRefs for this cycle. If allowedOperationalEffectRefs is empty, commitments.operational must be [].",
+    "Speech mustSay contract: every mustSay entry is a literal required substring and each entry must appear verbatim in surfaceDraft; the host fidelity checker rejects any draft that does not contain them verbatim. Omit mustSay when no exact literal wording is required. Behavioral, stylistic, or procedural directives do not belong in mustSay; put those in presentationDirectives.",
+    "Optional settlement domains and their children must be omitted when unused. Present event arrays must be non-empty; present composite objects must contain a meaningful child. Ordinary speech requires no commitments. speech.mode:none permits only mode. Absence never clears state.",
+    "Operational commitments are distinct from conversational continuation. Every operational effectRef must refer to one of the complete Host-admitted operational effect references supplied in allowedOperationalEffectRefs for this cycle. If allowedOperationalEffectRefs is empty, omit commitments.operational.",
     `Forbidden publication/delivery fields: ${THOUGHT_FORBIDDEN_OUTPUT_FIELDS.join(", ")}.`,
     "This contract describes output shape only; branch selection is Thought-owned, while Ashley code remains authoritative for identity, authority, licensing, and publication.",
   ].join(" ");

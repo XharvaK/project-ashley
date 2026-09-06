@@ -81,7 +81,7 @@ describe("v0.2.1 Thought run", () => {
         expect(options.projectionIdentity?.dispatchMessagesHash).toBe(computeDispatchMessagesHash(messages));
         expect(options.thoughtInvocationContext?.structuralAttemptOrdinal).toBe(0);
         expect(options.temperature).toBe(1.0);
-        expect(options.structuredOutput?.contractId).toBe("ashley.thought.semantic.v1");
+        expect(options.structuredOutput?.contractId).toBe("ashley.thought.semantic.v2");
         const operationalSchema = (options.structuredOutput?.schema as any)?.oneOf?.find(
           (branch: any) => branch.properties?.kind?.const === "settlement",
         )?.properties?.commitments?.properties?.operational;
@@ -126,7 +126,7 @@ describe("v0.2.1 Thought run", () => {
         expect(result.published).toBe(outcome === "corrected");
         if (outcome === "corrected") {
           expect(validateThoughtSettlementDraft(steps[1].settlement, active).ok).toBe(true);
-          expect(steps[1].settlement.commitments.operational).toEqual([]);
+          expect(steps[1].settlement.commitments.operational).toBeUndefined();
           expect(steps[1].settlement.speech.surfaceDraft).toBe("model-authored correction");
           expect(sidecar.prepare("SELECT COUNT(*) AS n FROM system_notice_outbox").get()).toMatchObject({ n: 0 });
         } else {
@@ -368,6 +368,139 @@ describe("v0.2.1 Thought run", () => {
     attentionDb.close();
   });
 
+  it("materializes and publishes a sparse settlement without manufacturing optional domains", async () => {
+    const sidecar = openTestSidecar();
+    const attentionDb = openTestSidecar();
+    const cycle = admitTestCycle(sidecar, {
+      cycleId: "cycle-sparse-materialization",
+      conversationId: "thread-sparse-materialization",
+      triggerKind: "owner_message",
+      triggerRef: "owner-sparse-materialization",
+      occupantId: "doc",
+      authorityEpoch: 1,
+      nowMs: 1,
+    });
+    const evidence = appendOwnerUtterance(sidecar, {
+      conversationId: cycle.conversationId,
+      text: "goodnight",
+      discordMessageIds: ["sparse-materialization-message"],
+      nowMs: 2,
+    });
+    const event = appendInboxEvent(sidecar, {
+      wakeId: cycle.wakeId,
+      conversationId: cycle.conversationId,
+      kind: "owner_message",
+      payload: { cycleId: cycle.cycleId, evidenceRowId: evidence.rowId, ownerMessage: evidence.text },
+      createdAtMs: 2,
+    });
+
+    try {
+      const result = await runCognitiveCycle(sidecar, attentionDb, event, deps({
+        attentionDb,
+        completeChat: vi.fn(async () => ({
+          text: JSON.stringify({
+            kind: "settlement",
+            speech: { mode: "draft", surfaceDraft: "Goodnight. Sleep well." },
+          }),
+          model: "fake",
+          modelAlias: "thought",
+          resolvedModelId: null,
+        })),
+      }));
+      expect(result.published).toBe(true);
+
+      const row = sidecar.prepare("SELECT payload_json FROM settlements WHERE cycle_id = ?").get(cycle.cycleId) as { payload_json: string };
+      const payload = JSON.parse(row.payload_json) as Record<string, any>;
+      expect(payload.speech).toMatchObject({ mode: "draft", surfaceDraft: "Goodnight. Sleep well." });
+      expect(payload.speech).not.toHaveProperty("mustSay");
+      expect(payload.speech).not.toHaveProperty("mustNot");
+      for (const field of [
+        "interpretation", "commitments", "workingContextDelta", "concernDeltas", "occupancyDelta",
+        "futureTriggers", "subscriptions", "durableNominations",
+      ]) {
+        expect(payload).not.toHaveProperty(field);
+      }
+      expect(payload.operations).toEqual({
+        observationsConsumed: [],
+        effectsCompleted: [],
+        intentsStillInFlight: [],
+      });
+      expect(sidecar.prepare("SELECT COUNT(*) AS count FROM speech_outbox").get()).toMatchObject({ count: 1 });
+    } finally {
+      sidecar.close();
+      attentionDb.close();
+    }
+  });
+
+  it("publishes intentional silence together with an authored internal delta", async () => {
+    const sidecar = openTestSidecar();
+    const attentionDb = openTestSidecar();
+    const cycle = admitTestCycle(sidecar, {
+      cycleId: "cycle-silent-delta",
+      conversationId: "thread-silent-delta",
+      triggerKind: "owner_message",
+      triggerRef: "owner-silent-delta",
+      occupantId: "doc",
+      authorityEpoch: 1,
+      nowMs: 1,
+    });
+    const evidence = appendOwnerUtterance(sidecar, {
+      conversationId: cycle.conversationId,
+      text: "Remember that preference for later.",
+      discordMessageIds: ["silent-delta-message"],
+      nowMs: 2,
+    });
+    const event = appendInboxEvent(sidecar, {
+      wakeId: cycle.wakeId,
+      conversationId: cycle.conversationId,
+      kind: "owner_message",
+      payload: { cycleId: cycle.cycleId, evidenceRowId: evidence.rowId, ownerMessage: evidence.text },
+      createdAtMs: 2,
+    });
+
+    try {
+      const result = await runCognitiveCycle(sidecar, attentionDb, event, deps({
+        attentionDb,
+        completeChat: vi.fn(async () => ({
+          text: JSON.stringify({
+            kind: "settlement",
+            speech: { mode: "none" },
+            workingContextDeltas: [{
+              op: "upsert",
+              item: {
+                identity: { kind: "local", alias: "remember-later" },
+                type: "owner_teaching",
+                text: "Owner prefers this preference to remain available later.",
+                concernRef: null,
+                sourceTurnRefs: [evidence.rowId],
+                status: "active",
+                supersedesRef: null,
+              },
+            }],
+          }),
+          model: "fake",
+          modelAlias: "thought",
+          resolvedModelId: null,
+        })),
+      }));
+      expect(result).toMatchObject({ published: true, outboxId: null, acceptedSettlements: 1 });
+      expect(sidecar.prepare("SELECT COUNT(*) AS count FROM speech_outbox").get()).toMatchObject({ count: 0 });
+      const workingContext = sidecar.prepare("SELECT payload_json, superseded FROM working_context_items").get() as {
+        payload_json: string;
+        superseded: number;
+      };
+      expect(JSON.parse(workingContext.payload_json)).toMatchObject({
+        text: "Owner prefers this preference to remain available later.",
+        status: "active",
+      });
+      expect(workingContext.superseded).toBe(0);
+      expect(sidecar.prepare("SELECT state FROM cycle_records WHERE cycle_id = ?").get(cycle.cycleId)).toMatchObject({ state: "silent" });
+    } finally {
+      sidecar.close();
+      attentionDb.close();
+    }
+  });
+
   it("fails closed on a predecessor Thought output envelope and does not publish speech", async () => {
     const sidecar = openTestSidecar();
     const attentionDb = openTestSidecar();
@@ -519,9 +652,9 @@ describe("v0.2.1 Thought run", () => {
     expect(deadlines).toEqual([61_000, 61_000]);
     expect(maxTokens).toEqual([undefined, 8_192]);
     expect(temperatures).toEqual([1.0, 1.0]);
-    expect(structuredContractIds).toEqual(["ashley.thought.semantic.v1", "ashley.thought.semantic.v1"]);
+    expect(structuredContractIds).toEqual(["ashley.thought.semantic.v2", "ashley.thought.semantic.v2"]);
     expect(userInputs[1]).toBe(userInputs[0]);
-    expect(systemMessages[0]).toContain("schemaId=ashley.thought.semantic.v1.schema");
+    expect(systemMessages[0]).toContain("schemaId=ashley.thought.semantic.v2.schema");
     expect(systemMessages[0]).toContain("permitted kinds");
     expect(systemMessages[0]).toContain("Semantic selection rules");
     expect(systemMessages[0]).toContain("settlement only when the current supplied evidence and context are sufficient");

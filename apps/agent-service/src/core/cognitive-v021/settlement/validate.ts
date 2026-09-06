@@ -112,16 +112,13 @@ function validateIdentity(
 }
 
 function validateSpeech(value: unknown): ThoughtSettlementValidation | null {
-  if (!isRecord(value) || !hasAll(value, ["mode", "mustSay", "mustNot", "surfaceDraft", "acceptableRealizations", "presentationDirectives"])) {
+  if (!isRecord(value) || !hasAll(value, ["mode"])) {
     return failure("malformed", "SPEECH_MISSING");
   }
-  if (
-    !isStringArray(value.mustSay) ||
-    !isStringArray(value.mustNot) ||
-    !isStringArray(value.acceptableRealizations) ||
-    !isStringArray(value.presentationDirectives)
-  ) {
-    return failure("malformed", "SPEECH_ARRAY_INVALID");
+  for (const key of ["mustSay", "mustNot", "acceptableRealizations", "presentationDirectives"]) {
+    if (value[key] !== undefined && !isStringArray(value[key])) {
+      return failure("malformed", "SPEECH_ARRAY_INVALID");
+    }
   }
   if (value.mode === "draft") {
     if (!isString(value.surfaceDraft) || value.surfaceDraft.trim().length === 0) {
@@ -139,14 +136,11 @@ function validateCommitments(
   value: unknown,
   active?: SettlementValidationActiveIdentity,
 ): ThoughtSettlementValidation | null {
-  if (!isRecord(value) || !Array.isArray(value.epistemic) || !isStringArray(value.conversational) || !isRecord(value.stance)) {
-    return failure("malformed", "COMMITMENTS_MISSING");
-  }
-  const operational = value.operational ?? [];
-  if (!Array.isArray(operational)) {
-    return failure("malformed", "OPERATIONAL_COMMITMENT_INVALID");
-  }
-  for (const item of operational) {
+  if (value === undefined) return null;
+  if (!isRecord(value)) return failure("malformed", "COMMITMENTS_MISSING");
+  const operational = value.operational;
+  if (operational !== undefined && !Array.isArray(operational)) return failure("malformed", "OPERATIONAL_COMMITMENT_INVALID");
+  for (const item of (operational ?? [])) {
     if (!isRecord(item) || !isString(item.effectRef) || item.effectRef.trim().length === 0) {
       return failure("malformed", "OPERATIONAL_COMMITMENT_INVALID");
     }
@@ -157,20 +151,28 @@ function validateCommitments(
       return failure("conflict", "OPERATIONAL_CLAIM_EFFECTREF_UNKNOWN");
     }
   }
-  if (!value.epistemic.every((item) => {
-    if (!isRecord(item)) return false;
-    return isString(item.statement) && isRecord(item.dimensions);
-  })) {
-    return failure("malformed", "EPISTEMIC_COMMITMENT_INVALID");
+  if (value.epistemic !== undefined) {
+    if (!Array.isArray(value.epistemic) || !value.epistemic.every((item) => {
+      if (!isRecord(item)) return false;
+      return isString(item.statement) && isRecord(item.dimensions);
+    })) {
+      return failure("malformed", "EPISTEMIC_COMMITMENT_INVALID");
+    }
   }
-  const stance = value.stance;
-  if (
-    !["low", "medium", "high"].includes(String(stance.warmth)) ||
-    typeof stance.humorAllowed !== "boolean" ||
-    typeof stance.disagreement !== "boolean" ||
-    typeof stance.uncertaintyDisplay !== "boolean"
-  ) {
-    return failure("malformed", "STANCE_INVALID");
+  if (value.conversational !== undefined && !isStringArray(value.conversational)) {
+    return failure("malformed", "CONVERSATIONAL_COMMITMENT_INVALID");
+  }
+  if (value.stance !== undefined) {
+    if (!isRecord(value.stance)) return failure("malformed", "STANCE_INVALID");
+    const stance = value.stance;
+    if (
+      !["low", "medium", "high"].includes(String(stance.warmth)) ||
+      typeof stance.humorAllowed !== "boolean" ||
+      typeof stance.disagreement !== "boolean" ||
+      typeof stance.uncertaintyDisplay !== "boolean"
+    ) {
+      return failure("malformed", "STANCE_INVALID");
+    }
   }
   return null;
 }
@@ -212,15 +214,20 @@ export function validateThoughtSettlementDraft(
   if (identityFailure) return identityFailure;
   if (!isString(draft.triggerRef)) return failure("malformed", "TRIGGER_REF_MISSING");
 
-  for (const key of ["interpretation", "commitments", "speech", "operations", "authority"] as const) {
+  for (const key of ["speech", "operations", "authority"] as const) {
     if (!isRecord(draft[key])) return failure("malformed", `${key.toUpperCase()}_MISSING`);
   }
-  for (const key of ["workingContextDelta", "concernDeltas", "occupancyDelta", "futureTriggers", "subscriptions", "durableNominations"] as const) {
-    if (!Array.isArray(draft[key])) return failure("malformed", `${key.toUpperCase()}_MISSING`);
+  if (draft.interpretation !== undefined) {
+    if (!isRecord(draft.interpretation)) return failure("malformed", "INTERPRETATION_INVALID");
+    const interpretation = draft.interpretation as RecordValue;
+    for (const key of ["discourseActs", "referentBindings", "corrections", "unresolvedAmbiguities", "topics"] as const) {
+      if (interpretation[key] !== undefined && !Array.isArray(interpretation[key])) {
+        return failure("malformed", `INTERPRETATION_${key.toUpperCase()}_INVALID`);
+      }
+    }
   }
-  const interpretation = draft.interpretation as RecordValue;
-  for (const key of ["discourseActs", "referentBindings", "corrections", "unresolvedAmbiguities", "topics"] as const) {
-    if (!Array.isArray(interpretation[key])) return failure("malformed", `INTERPRETATION_${key.toUpperCase()}_INVALID`);
+  for (const key of ["workingContextDelta", "concernDeltas", "occupancyDelta", "futureTriggers", "subscriptions", "durableNominations"] as const) {
+    if (draft[key] !== undefined && !Array.isArray(draft[key])) return failure("malformed", `${key.toUpperCase()}_INVALID`);
   }
   const commitments = draft.commitments as RecordValue;
   const speech = draft.speech as RecordValue;
@@ -228,14 +235,6 @@ export function validateThoughtSettlementDraft(
   if (commitmentFailure) return commitmentFailure;
   const speechFailure = validateSpeech(speech);
   if (speechFailure) return speechFailure;
-  if (
-    speech.mode === "draft" &&
-    (commitments.epistemic as unknown[]).length === 0 &&
-    (commitments.conversational as unknown[]).length === 0
-  ) {
-    return failure("conflict", "EMPTY_COMMITMENTS_WITH_DRAFT", "DRAFT_COMMITMENT_CONFLICT");
-  }
-
   const operationsFailure = validateOperations(draft.operations, active);
   if (operationsFailure) return operationsFailure;
   const authority = draft.authority as RecordValue;

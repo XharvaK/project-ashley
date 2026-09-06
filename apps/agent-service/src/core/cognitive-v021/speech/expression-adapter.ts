@@ -6,9 +6,9 @@ import type {
 
 export type ExpressionAdapterInput = {
   draft: string;
-  commitments: ThoughtSettlementDraft["commitments"];
-  stance: Stance;
-  directives: readonly string[];
+  commitments?: ThoughtSettlementDraft["commitments"];
+  stance?: Stance;
+  directives?: readonly string[];
   profile: string;
   medium: "discord";
 };
@@ -41,7 +41,7 @@ function promptParts(input: ExpressionAdapterInput): { system: string; user: str
     draft: input.draft,
     commitments: input.commitments,
     stance: input.stance,
-    directives: [...input.directives],
+    directives: [...(input.directives ?? [])],
     profile: input.profile,
     medium: input.medium,
   });

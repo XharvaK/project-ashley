@@ -306,11 +306,15 @@ export type SpeechMode = "none" | "draft";
 
 export type ThoughtSpeechDraft = {
   mode: SpeechMode;
-  mustSay: string[];
-  mustNot: string[];
+  /** Omitted when Thought authors no literal inclusion constraint. */
+  mustSay?: string[];
+  /** Omitted when Thought authors no forbidden literal constraint. */
+  mustNot?: string[];
   surfaceDraft: string | null;
-  acceptableRealizations: string[];
-  presentationDirectives: string[];
+  /** Historical V1 payload compatibility only; VNext authoring never emits it. */
+  acceptableRealizations?: string[];
+  /** Omitted when Thought authors no presentation guidance. */
+  presentationDirectives?: string[];
 };
 
 export type WorkingContextItemType =
@@ -569,21 +573,21 @@ export type Observation = {
 };
 
 export type ThoughtInterpretation = {
-  discourseActs: readonly DiscourseAct[];
-  referentBindings: readonly {
+  discourseActs?: readonly DiscourseAct[];
+  referentBindings?: readonly {
     span: string;
     concernRef?: ExistingRef;
     entityRef?: ExistingRef;
     sourceTurnRefs: readonly ExistingRef[];
   }[];
-  corrections: readonly {
+  corrections?: readonly {
     correctedTurnRefs: readonly ExistingRef[];
     fromSpan: string;
     toSpan: string;
     concernRef?: ExistingRef;
   }[];
-  unresolvedAmbiguities: readonly string[];
-  topics: readonly string[];
+  unresolvedAmbiguities?: readonly string[];
+  topics?: readonly string[];
 };
 
 export type OperationalClaimState =
@@ -599,27 +603,24 @@ export type OperationalStateClaim = {
 };
 
 export type ThoughtCommitments = {
-  epistemic: readonly { dimensions: EpistemicDimensions; statement: string }[];
-  operational: readonly OperationalStateClaim[];
-  conversational: readonly ConversationalCommitment[];
-  stance: Stance;
+  epistemic?: readonly { dimensions: EpistemicDimensions; statement: string }[];
+  operational?: readonly OperationalStateClaim[];
+  conversational?: readonly ConversationalCommitment[];
+  stance?: Stance;
 };
 
 export type ThoughtSpeechIntent =
   | {
       mode: "none";
-      mustSay: readonly [];
-      mustNotSay: readonly string[];
-      acceptableRealizations: readonly [];
-      presentationDirectives: readonly string[];
+      // VNext silence is intentionally minimal. There are no implicit
+      // constraints or presentation directives for a silent settlement.
     }
   | {
       mode: "draft";
-      mustSay: readonly string[];
-      mustNotSay: readonly string[];
+      mustSay?: readonly string[];
+      mustNotSay?: readonly string[];
       surfaceDraft: string;
-      acceptableRealizations: readonly string[];
-      presentationDirectives: readonly string[];
+      presentationDirectives?: readonly string[];
     };
 
 export type WorkingContextItemSemantic = {
@@ -660,7 +661,6 @@ export type OccupancySemanticDelta = {
 export type FutureTriggerSemanticDelta =
   | {
       op: "create";
-      identity: { kind: "local"; alias: LocalAlias };
       concernRef: SemanticRef;
       dueAtMs: number;
       purpose: string;
@@ -672,7 +672,6 @@ export type SubscriptionSemanticDelta =
   | {
       op: "create";
       subscription: {
-        identity: { kind: "local"; alias: LocalAlias };
         concernRef: SemanticRef | null;
         source: string;
         scope: string;
@@ -684,7 +683,6 @@ export type SubscriptionSemanticDelta =
   | { op: "cancel"; target: ExistingRef };
 
 export type ThoughtDurableNomination = {
-  alias: LocalAlias;
   statement: string;
   memoryKind: MemoryKind;
   dimensions: EpistemicDimensions;
@@ -695,24 +693,24 @@ export type ThoughtDurableNomination = {
 };
 
 export type ThoughtEvidenceUse = {
-  observationRefsUsed: readonly ExistingRef[];
-  retrievalRefsUsed: readonly ExistingRef[];
-  sourceRefsUsed: readonly ExistingRef[];
-  openIntentRefs: readonly ExistingRef[];
+  observationRefsUsed?: readonly ExistingRef[];
+  retrievalRefsUsed?: readonly ExistingRef[];
+  sourceRefsUsed?: readonly ExistingRef[];
+  openIntentRefs?: readonly ExistingRef[];
 };
 
 export type SettlementSemanticOutput = {
   kind: "settlement";
-  interpretation: ThoughtInterpretation;
-  commitments: ThoughtCommitments;
   speech: ThoughtSpeechIntent;
-  workingContextDeltas: readonly WorkingContextSemanticDelta[];
-  concernDeltas: readonly ConcernSemanticDelta[];
-  occupancyDeltas: readonly OccupancySemanticDelta[];
-  futureTriggerDeltas: readonly FutureTriggerSemanticDelta[];
-  subscriptionDeltas: readonly SubscriptionSemanticDelta[];
-  durableNominations: readonly ThoughtDurableNomination[];
-  evidenceUse: ThoughtEvidenceUse;
+  interpretation?: ThoughtInterpretation;
+  commitments?: ThoughtCommitments;
+  workingContextDeltas?: readonly WorkingContextSemanticDelta[];
+  concernDeltas?: readonly ConcernSemanticDelta[];
+  occupancyDeltas?: readonly OccupancySemanticDelta[];
+  futureTriggerDeltas?: readonly FutureTriggerSemanticDelta[];
+  subscriptionDeltas?: readonly SubscriptionSemanticDelta[];
+  durableNominations?: readonly ThoughtDurableNomination[];
+  evidenceUse?: ThoughtEvidenceUse;
 };
 
 export type ObservationIntentSemanticOutput = {
@@ -736,8 +734,7 @@ export type EffectIntentSemanticOutput = {
 export type SemanticAbstainReason =
   | "insufficient_evidence"
   | "unresolved_ambiguity"
-  | "no_responsible_proposal"
-  | "no_semantic_change_warranted";
+  | "no_responsible_proposal";
 
 export type AbstainSemanticOutput = {
   kind: "abstain";
@@ -860,26 +857,26 @@ export type ThoughtSettlementDraft = {
   occupantId: OccupantId;
   architectureEpoch: typeof ARCHITECTURE_EPOCH;
   triggerRef: string;
-  interpretation: {
-    discourseActs: DiscourseAct[];
-    referentBindings: ReferentBinding[];
-    corrections: CorrectionRecord[];
-    unresolvedAmbiguities: string[];
-    topics: string[];
+  interpretation?: {
+    discourseActs?: DiscourseAct[];
+    referentBindings?: ReferentBinding[];
+    corrections?: CorrectionRecord[];
+    unresolvedAmbiguities?: string[];
+    topics?: string[];
   };
-  commitments: {
-    epistemic: EpistemicCommitment[];
-    operational: OperationalStateClaim[];
-    conversational: ConversationalCommitment[];
-    stance: Stance;
+  commitments?: {
+    epistemic?: EpistemicCommitment[];
+    operational?: OperationalStateClaim[];
+    conversational?: ConversationalCommitment[];
+    stance?: Stance;
   };
   speech: ThoughtSpeechDraft;
-  workingContextDelta: WorkingContextDelta[];
-  concernDeltas: ConcernDelta[];
-  occupancyDelta: OccupancyDelta[];
-  futureTriggers: FutureTriggerDelta[];
-  subscriptions: SubscriptionDelta[];
-  durableNominations: DurableNomination[];
+  workingContextDelta?: WorkingContextDelta[];
+  concernDeltas?: ConcernDelta[];
+  occupancyDelta?: OccupancyDelta[];
+  futureTriggers?: FutureTriggerDelta[];
+  subscriptions?: SubscriptionDelta[];
+  durableNominations?: DurableNomination[];
   operations: {
     observationsConsumed: string[];
     effectsCompleted: string[];
@@ -911,11 +908,13 @@ export type ThoughtParserFailureCode =
   | "root_not_object"
   | "wrong_kind"
   | "unknown_field"
+  | "empty_when_present"
   | "required_field_missing"
   | "wrong_type"
   | "invalid_enum"
   | "reference_not_allowlisted"
   | "alias_invalid"
+  | "alias_collides_with_existing_ref"
   | "operation_not_registered"
   | "identity_missing"
   | "identity_mismatch"
@@ -1269,8 +1268,8 @@ export type KernelDeps = {
   adaptExpression?: (input: {
     draft: string;
     commitments: ThoughtSettlementDraft["commitments"];
-    stance: Stance;
-    directives: string[];
+    stance?: Stance;
+    directives?: string[];
     profile: string;
     medium: "discord";
   }) => Promise<string>;

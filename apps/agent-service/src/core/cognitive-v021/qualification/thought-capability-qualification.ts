@@ -356,6 +356,9 @@ const SUPPORTED_SCHEMA_KEYWORDS = new Set([
   "items",
   "oneOf",
   "minLength",
+  "maxLength",
+  "minItems",
+  "minProperties",
   "pattern",
   "maxItems",
 ]);
@@ -523,6 +526,9 @@ function validateSchemaNode(
     if (typeof schema.minLength === "number" && [...value].length < schema.minLength) {
       return oracleFailure("minLength_mismatch:" + path, "minLength", path, `${schemaPath}/minLength`);
     }
+    if (typeof schema.maxLength === "number" && [...value].length > schema.maxLength) {
+      return oracleFailure("maxLength_mismatch:" + path, "maxLength", path, `${schemaPath}/maxLength`);
+    }
     if (typeof schema.pattern === "string") {
       let pattern: RegExp;
       try {
@@ -536,6 +542,9 @@ function validateSchemaNode(
     }
   }
   if (Array.isArray(value)) {
+    if (typeof schema.minItems === "number" && value.length < schema.minItems) {
+      return oracleFailure("minItems_mismatch:" + path, "minItems", path, `${schemaPath}/minItems`);
+    }
     if (typeof schema.maxItems === "number" && value.length > schema.maxItems) {
       return oracleFailure("maxItems_mismatch:" + path, "maxItems", path, `${schemaPath}/maxItems`);
     }
@@ -553,6 +562,9 @@ function validateSchemaNode(
     }
   }
   if (isRecord(value)) {
+    if (typeof schema.minProperties === "number" && Object.keys(value).length < schema.minProperties) {
+      return oracleFailure("minProperties_mismatch:" + path, "minProperties", path, `${schemaPath}/minProperties`);
+    }
     const required = schema.required;
     if (required !== undefined) {
       if (!Array.isArray(required)) {
@@ -1284,13 +1296,9 @@ function fixtureFor(caseId: ThoughtQualificationCaseId): unknown {
       interpretation: {
         discourseActs: ["inform"],
         referentBindings: [{ span: "fixture", sourceTurnRefs: ["turn-1"] }],
-        corrections: [],
-        unresolvedAmbiguities: [],
         topics: ["qualification"],
       },
       commitments: {
-        epistemic: [],
-        operational: [],
         conversational: ["answer"],
         stance: {
           warmth: "medium",
@@ -1302,22 +1310,10 @@ function fixtureFor(caseId: ThoughtQualificationCaseId): unknown {
       speech: {
         mode: "draft",
         mustSay: [SETTLEMENT_FIXTURE_EXPECTATION.expectedSpeech],
-        mustNotSay: [],
         surfaceDraft: SETTLEMENT_FIXTURE_EXPECTATION.expectedSpeech,
-        acceptableRealizations: [],
-        presentationDirectives: [],
       },
-      workingContextDeltas: [],
-      concernDeltas: [],
-      occupancyDeltas: [],
-      futureTriggerDeltas: [],
-      subscriptionDeltas: [],
-      durableNominations: [],
       evidenceUse: {
-        observationRefsUsed: [],
-        retrievalRefsUsed: [],
         sourceRefsUsed: [...SETTLEMENT_FIXTURE_EXPECTATION.sourceRefsUsed],
-        openIntentRefs: [],
       },
     };
   }

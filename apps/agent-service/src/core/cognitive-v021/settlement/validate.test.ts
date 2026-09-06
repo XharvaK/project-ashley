@@ -19,7 +19,7 @@ describe("v0.2.1 ThoughtSettlementDraft validation", () => {
     expect(validateThoughtSettlementDraft(noSurface, active)).toMatchObject({ ok: false, kind: "malformed" });
   });
 
-  it("rejects none mode with text, empty commitments, unknown effects, and excess revisions", () => {
+  it("rejects none mode with text, while allowing sparse draft commitments", () => {
     const noneWithText = makeThoughtDraft({
       speech: { ...makeThoughtDraft().speech, mode: "none", surfaceDraft: "should not speak" },
     });
@@ -28,7 +28,7 @@ describe("v0.2.1 ThoughtSettlementDraft validation", () => {
     const emptyCommitments = makeThoughtDraft({
       commitments: { ...makeThoughtDraft().commitments, epistemic: [], conversational: [] },
     });
-    expect(validateThoughtSettlementDraft(emptyCommitments, active)).toMatchObject({ ok: false, kind: "conflict" });
+    expect(validateThoughtSettlementDraft(emptyCommitments, active)).toMatchObject({ ok: true });
 
     const unknownEffect = makeThoughtDraft({ operations: { ...makeThoughtDraft().operations, effectsCompleted: ["effect-unknown"] } });
     expect(validateThoughtSettlementDraft(unknownEffect, active)).toMatchObject({ ok: false, kind: "malformed" });
