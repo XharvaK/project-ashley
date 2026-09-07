@@ -18,14 +18,13 @@
 #   RESTART=<services to (re)start after activation, possibly empty>
 #
 # Build dependency graph (mechanical, from package.json file: deps + src imports):
-#   sandbox-policy -> sandbox-tree -> sandbox-broker -> agent-service
 #   sandbox-policy -> sandbox-v2 -> agent-service
 #   sandbox-tree   -> sandbox-v2 -> agent-service
 #   sandbox-m1     -> sandbox-v2 -> agent-service
 #   sandbox-m1     -> agent-service
 #   discord-bot    -> no package dependency (HTTP-coupled only)
 # Canonical build order (valid topological order, preserved for subsets):
-#   sandbox-policy sandbox-m1 sandbox-tree sandbox-broker sandbox-v2 agent-service discord-bot
+#   sandbox-policy sandbox-m1 sandbox-tree sandbox-v2 agent-service discord-bot
 #
 # Classifier evidence notes:
 # - file: deps install as directory links (package-lock "link": true), so an
@@ -40,17 +39,17 @@
 #   agent picks it up, no compilation involved.
 # - packages/privacy-core has no build script (plain JS main); agent-service
 #   consumes it live through the file: link, so only an agent restart applies.
-# - spikes/**, apps/desktop/**, apps/observer-exporter/**,
-#   apps/external-broker/** have no importers in the seven deploy packages.
+# - spikes/**, apps/desktop/**, apps/observer-exporter/** have no importers in
+#   the six deploy packages.
 set -euo pipefail
 
-CANONICAL_ORDER="sandbox-policy sandbox-m1 sandbox-tree sandbox-broker sandbox-v2 agent-service discord-bot"
+CANONICAL_ORDER="sandbox-policy sandbox-m1 sandbox-tree sandbox-v2 agent-service discord-bot"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 NODE_BIN="${NODE_BIN:-node}"
 
-# Every fallback preserves the historical broad behavior exactly: all seven
+# Every fallback preserves the current broad behavior exactly: all six
 # packages with fresh installs (metadata unprovable), both services stopped
 # before the in-place build and restarted after. UNKNOWN != SAFE_TO_SKIP.
 # STOP order is discord before agent (ingress fence).
@@ -87,18 +86,16 @@ classify_path() {
     apps/sandbox-policy/src/*) printf 'pkg:sandbox-policy' ;;
     apps/sandbox-m1/src/*) printf 'pkg:sandbox-m1' ;;
     apps/sandbox-tree/src/*) printf 'pkg:sandbox-tree' ;;
-    apps/sandbox-broker/src/*) printf 'pkg:sandbox-broker' ;;
     apps/sandbox-v2/src/*) printf 'pkg:sandbox-v2' ;;
     apps/agent-service/src/*) printf 'pkg:agent-service' ;;
     apps/discord-bot/src/*) printf 'pkg:discord-bot' ;;
     apps/sandbox-policy/package.json|apps/sandbox-policy/package-lock.json|apps/sandbox-policy/tsconfig.json) printf 'meta:sandbox-policy' ;;
     apps/sandbox-m1/package.json|apps/sandbox-m1/package-lock.json|apps/sandbox-m1/tsconfig.json) printf 'meta:sandbox-m1' ;;
     apps/sandbox-tree/package.json|apps/sandbox-tree/package-lock.json|apps/sandbox-tree/tsconfig.json) printf 'meta:sandbox-tree' ;;
-    apps/sandbox-broker/package.json|apps/sandbox-broker/package-lock.json|apps/sandbox-broker/tsconfig.json) printf 'meta:sandbox-broker' ;;
     apps/sandbox-v2/package.json|apps/sandbox-v2/package-lock.json|apps/sandbox-v2/tsconfig.json) printf 'meta:sandbox-v2' ;;
     apps/agent-service/package.json|apps/agent-service/package-lock.json|apps/agent-service/tsconfig.json) printf 'meta:agent-service' ;;
     apps/discord-bot/package.json|apps/discord-bot/package-lock.json|apps/discord-bot/tsconfig.json) printf 'meta:discord-bot' ;;
-    apps/sandbox-policy/*|apps/sandbox-m1/*|apps/sandbox-tree/*|apps/sandbox-broker/*|apps/sandbox-v2/*|apps/agent-service/*|apps/discord-bot/*) printf 'fallback' ;;
+    apps/sandbox-policy/*|apps/sandbox-m1/*|apps/sandbox-tree/*|apps/sandbox-v2/*|apps/agent-service/*|apps/discord-bot/*) printf 'fallback' ;;
     deploy/linux-mint/systemd/ashley-agent.service) printf 'unit-agent' ;;
     deploy/linux-mint/systemd/ashley-discord.service) printf 'unit-discord' ;;
     deploy/*|scripts/*) printf 'deployscript' ;;
@@ -109,7 +106,7 @@ classify_path() {
     workspace/*) printf 'noop' ;;
     docs/*|*.md|*.mdx|VISION.md|AGENTS.md) printf 'docs' ;;
     .github/*) printf 'noop' ;;
-    apps/observer-exporter/*|apps/external-broker/*|apps/desktop/*|spikes/*) printf 'noop' ;;
+    apps/observer-exporter/*|apps/desktop/*|spikes/*) printf 'noop' ;;
     package.json|package-lock.json|tsconfig.json|tsconfig.base.json|.npmrc|.nvmrc) printf 'fallback' ;;
     *) printf 'fallback' ;;
   esac
@@ -244,7 +241,7 @@ main() {
   local agent_in_closure=0 discord_in_closure=0
   for c in $build; do
     case "$c" in
-      agent-service|sandbox-policy|sandbox-m1|sandbox-tree|sandbox-broker|sandbox-v2) agent_in_closure=1 ;;
+      agent-service|sandbox-policy|sandbox-m1|sandbox-tree|sandbox-v2) agent_in_closure=1 ;;
       discord-bot) discord_in_closure=1 ;;
     esac
   done

@@ -12,7 +12,7 @@
 #
 # Does not fetch or merge. Checkout belongs to the SSH wrapper / operator.
 # Unknown change classification falls back to the historical broad behavior
-# (all seven packages, both services). UNKNOWN != SAFE_TO_SKIP.
+# (all six packages, both services). UNKNOWN != SAFE_TO_SKIP.
 #
 # Activation marker (~/.composer-assistant/deploy/activated-sha, override via
 # ASHLEY_ACTIVATED_SHA_FILE) records the most recent candidate that completed
@@ -31,7 +31,7 @@ AGENT_HEALTH_INTERVAL_SECONDS="${AGENT_HEALTH_INTERVAL_SECONDS:-1}"
 SYSTEMCTL=(systemctl --user)
 
 # Canonical package order (valid topological order; subsets keep relative order).
-CANONICAL_ORDER="sandbox-policy sandbox-m1 sandbox-tree sandbox-broker sandbox-v2 agent-service discord-bot"
+CANONICAL_ORDER="sandbox-policy sandbox-m1 sandbox-tree sandbox-v2 agent-service discord-bot"
 
 ms_now() {
   date +%s%3N

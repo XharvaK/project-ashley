@@ -21,17 +21,22 @@ import type {
   ProviderCompletion,
   ProviderDispatchArgs,
 } from "./core/model-routing/types.js";
+import { attachProviderHttpStatusBoundary } from "./core/model-routing/types.js";
 
 const originalApiKey = env.mistralApiKey;
 const originalSecondaryApiKey = env.mistralApiKeySecondary;
 const originalGroqKey = env.groqApiKey;
 const originalNimKey = env.nimApiKey;
+const originalMistralRps = env.mistralRequestsPerSecond;
+const originalMistralTpm = env.mistralTokensPerMinute;
 
 afterEach(() => {
   env.mistralApiKey = originalApiKey;
   env.mistralApiKeySecondary = originalSecondaryApiKey;
   env.groqApiKey = originalGroqKey;
   env.nimApiKey = originalNimKey;
+  env.mistralRequestsPerSecond = originalMistralRps;
+  env.mistralTokensPerMinute = originalMistralTpm;
   resetAdapterCache();
   vi.restoreAllMocks();
 });
@@ -224,12 +229,27 @@ it("creates no attention reservation when API key is missing", async () => {
 
 const MISTRAL_SMALL = "mistral-small-2603";
 
+function providerAccountError(
+  code: "quota_exhausted" | "credential_invalid",
+  message: string,
+  status: number,
+): AppError {
+  const error = new AppError(code, message, status, undefined, "account");
+  attachProviderHttpStatusBoundary(error, status);
+  return error;
+}
+
 function thoughtDispatchOptions(attentionDb: DatabaseSync) {
+  // The compatibility tests use an isolated in-memory Attention database.
+  // Give that fixture a non-zero local Mistral quota so it exercises
+  // credential failover rather than the provider-capacity guard.
+  env.mistralRequestsPerSecond = Math.max(env.mistralRequestsPerSecond, 100);
+  env.mistralTokensPerMinute = Math.max(env.mistralTokensPerMinute, 100_000);
   return {
     attentionDb,
-    purpose: "thought" as const,
-    route: "thought" as const,
-    logicalRole: "thought" as const,
+    purpose: "thought_observation" as const,
+    logicalRole: "thought_observation" as const,
+    model: MISTRAL_SMALL,
     lane: "interactive" as const,
     responseFormat: "json_schema" as const,
     structuredOutput: thoughtOutputStructuredRequest(),
@@ -280,7 +300,7 @@ describe("Mistral credential failover", () => {
     }
   });
 
-  it("rejects a Thought model substitution before attention admission", async () => {
+  it("allows an explicit Mistral compatibility model on the observation path", async () => {
     env.mistralApiKey = "primary-secret";
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     const dispatch = mockMistralDispatch(async (args) => ({
@@ -290,27 +310,22 @@ describe("Mistral credential failover", () => {
       finishReason: "stop",
     }));
     try {
-      await expect(
-        withOfflineAppGateDisabled(() => completeChat(
-          [{ role: "user", content: "substitution must fail closed" }],
-          {
-            ...thoughtDispatchOptions(db),
-            model: "mistral-medium-latest",
-          },
-        )),
-      ).rejects.toMatchObject({
-        code: "capability_mismatch",
-        message: "mistral_thought_model_substitution_forbidden",
-      });
-      expect(dispatch).not.toHaveBeenCalled();
-      expect(db.prepare("SELECT COUNT(*) AS count FROM attention_requests").get())
-        .toMatchObject({ count: 0 });
+      const result = await withOfflineAppGateDisabled(() => completeChat(
+        [{ role: "user", content: "compatibility model selection" }],
+        {
+          ...thoughtDispatchOptions(db),
+          model: "mistral-medium-latest",
+        },
+      ));
+      expect(result.modelAlias).toBe("mistral-medium-latest");
+      expect(dispatch).toHaveBeenCalledTimes(1);
+      expect(dispatch.mock.calls[0]?.[0].modelId).toBe("mistral-medium-latest");
     } finally {
       db.close();
     }
   });
 
-  it("rejects a provider-returned model identity substitution without credential failover", async () => {
+  it("records the provider-resolved compatibility model without credential failover", async () => {
     env.mistralApiKey = "primary-secret";
     env.mistralApiKeySecondary = "secondary-secret";
     const db = openNuclearDb(new DatabaseSync(":memory:"));
@@ -321,17 +336,14 @@ describe("Mistral credential failover", () => {
       finishReason: "stop",
       }));
     try {
-      await expect(
-        withOfflineAppGateDisabled(() => completeChat(
-          [{ role: "user", content: "returned identity must be exact" }],
-          thoughtDispatchOptions(db),
-        )),
-      ).rejects.toMatchObject({
-        code: "capability_mismatch",
-        message: "mistral_model_identity_mismatch",
-      });
+      const result = await withOfflineAppGateDisabled(() => completeChat(
+        [{ role: "user", content: "returned compatibility identity" }],
+        thoughtDispatchOptions(db),
+      ));
       expect(dispatch).toHaveBeenCalledTimes(1);
       expect(dispatch.mock.calls[0]?.[0].credentialSeat).toBe("mistral_primary");
+      expect(result.providerModel).toBe("mistral-small-latest");
+      expect(result.resolvedModelId).toBe("mistral-small-latest");
     } finally {
       db.close();
     }
@@ -343,12 +355,10 @@ describe("Mistral credential failover", () => {
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     const dispatch = mockMistralDispatch(async (args) => {
       if (args.credentialSeat === "mistral_primary") {
-        throw new AppError(
+        throw providerAccountError(
           "quota_exhausted",
           "Mistral quota exhausted",
           402,
-          undefined,
-          "account",
         );
       }
       return {
@@ -403,12 +413,10 @@ describe("Mistral credential failover", () => {
     env.mistralApiKeySecondary = "";
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     const dispatch = mockMistralDispatch(async () => {
-      throw new AppError(
+      throw providerAccountError(
         "credential_invalid",
         "Mistral credential rejected",
         401,
-        undefined,
-        "account",
       );
     });
     try {
@@ -473,20 +481,15 @@ describe("Mistral credential failover", () => {
     env.mistralApiKeySecondary = "secondary-secret";
     const db = openNuclearDb(new DatabaseSync(":memory:"));
     const secondaryError = new AppError(
-      "credential_invalid",
-      "Mistral credential rejected",
-      401,
-      undefined,
-      "account",
+      "credential_invalid", "Mistral credential rejected", 401, undefined, "account",
     );
+    attachProviderHttpStatusBoundary(secondaryError, 401);
     const dispatch = mockMistralDispatch(async (args) => {
       if (args.credentialSeat === "mistral_primary") {
-        throw new AppError(
+        throw providerAccountError(
           "quota_exhausted",
           "Mistral quota exhausted",
           402,
-          undefined,
-          "account",
         );
       }
       throw secondaryError;

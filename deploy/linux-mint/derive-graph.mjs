@@ -7,7 +7,6 @@ const CANONICAL_ORDER = [
   "sandbox-policy",
   "sandbox-m1",
   "sandbox-tree",
-  "sandbox-broker",
   "sandbox-v2",
   "agent-service",
   "discord-bot",

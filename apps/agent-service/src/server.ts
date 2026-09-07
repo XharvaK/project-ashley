@@ -9,12 +9,6 @@ import { listRecentDecisions } from "./core/agency/log.js";
 import { retrieveEpisodes } from "./core/memory/episodes.js";
 import { isAuthorizedOwnerId } from "./owner-auth.js";
 import { assertRegisteredRoutes } from "./route-surface.js";
-import { signSandboxApproval, signSandboxTombstone } from "./core/sandbox/handlers.js";
-import { SandboxApprovalService } from "./core/sandbox/approval-service.js";
-import type { SandboxBrokerClient } from "./core/sandbox/broker-client.js";
-import type { SandboxApprovalPathTarget, SandboxApprovalProposalSource, SandboxApprovalProposalStatus } from "./core/sandbox/approval-proposal.js";
-import type { SandboxCapabilityId, SandboxRiskClass } from "@composer-assistant/sandbox-policy";
-import type { ErrorCode } from "./errors.js";
 import { openCognitiveSidecarDb } from "./core/cognitive-v021/sidecar/db.js";
 import { createCognitiveIngressHandler } from "./core/cognitive-v021/ingress/http.js";
 import { getCognitiveHealthSnapshot } from "./core/cognitive-v021/dispatch/health.js";
@@ -46,7 +40,6 @@ import {
   C1_EVALUATION_DEFINITION_VERSION,
   C1_REQUIRED_EVAL_SEEDS,
 } from "./core/rollout/memory-evidence-qualification-epoch.js";
-import { inspectAllocation } from "./core/context-budget/inspect.js";
 import {
   assertC3ContractCompatible,
   listActiveLearnedInfluences,
@@ -284,7 +277,9 @@ function trustedC1Quiescence(manager: AgentManager, ownerId: string): {
 } {
   return {
     expressionPlanePaused: manager.isPaused(),
-    ownerExpressionActive: !manager.core.isExpressionQuiesced(ownerId),
+    // The current V0.2.1 dispatcher owns turn concurrency in the sidecar.
+    // The retired runtime no longer exposes an in-process expression owner set.
+    ownerExpressionActive: false,
   };
 }
 
@@ -299,7 +294,6 @@ function gone(_req: express.Request, res: express.Response): void {
 export function createServer(
   manager: AgentManager,
   options: {
-    sandboxBrokerClient?: SandboxBrokerClient | null;
     cognitiveSidecar?: DatabaseSync | null;
   } = {},
 ): express.Express {
@@ -321,38 +315,24 @@ export function createServer(
 
   function cognitiveHealth() {
     const managerWithCognitive = manager as AgentManager & {
-      getCognitiveKernel?: () => "legacy" | "shadow" | "v021";
+      getCognitiveKernel?: () => "v021";
       getCognitiveSidecar?: () => DatabaseSync | null;
     };
     return getCognitiveHealthSnapshot({
-      mode: managerWithCognitive.getCognitiveKernel?.() ?? env.cognitiveKernel,
+      mode: managerWithCognitive.getCognitiveKernel?.() ?? "v021",
       sidecar: managerWithCognitive.getCognitiveSidecar?.() ?? cognitiveSidecar,
       sidecarPath: manager.dataPlane?.cognitiveSidecarDbPath ?? null,
     });
   }
 
-  function cognitiveKernel(): "legacy" | "shadow" | "v021" {
+  function cognitiveKernel(): "v021" {
     return manager.getCognitiveKernel();
-  }
-
-  function assertLegacyRuntimeRoute(route: string): void {
-    if (cognitiveKernel() === "v021") {
-      throw new AppError("route_disabled", `${route} is disabled under the v0.2.1 kernel`, 404);
-    }
   }
 
   function cognitiveContinuity(): DatabaseSync {
     const continuity = getContinuityFor(manager.core.getDatabase());
     if (!continuity) throw new AppError("agent_not_ready", "Cognitive continuity unavailable", 503);
     return continuity;
-  }
-
-  function approvalService(ownerId: string): SandboxApprovalService {
-    return new SandboxApprovalService({
-      db: manager.core.getDatabase(),
-      ownerId,
-      brokerClient: options.sandboxBrokerClient ?? null,
-    });
   }
 
   app.get("/health", (_req, res) => {
@@ -720,92 +700,10 @@ export function createServer(
     }
   });
 
-  app.get("/nuclear/jobs", (req, res) => {
-    try {
-      const ownerId = String(req.query.owner_id ?? "");
-      const jobId = String(req.query.job_id ?? "");
-      requireOwner(ownerId || undefined);
-      if (!jobId) {
-        res.json({ jobs: manager.core.listDurableOperationalJobs(ownerId) });
-        return;
-      }
-      res.json(manager.core.getDurableOperationalJobStatus(ownerId, jobId));
-    } catch (err) {
-      const { status, body } = toErrorResponse(err);
-      res.status(status).json(body);
-    }
-  });
-
-  app.post("/nuclear/jobs/cancel", (req, res) => {
-    try {
-      const { userId, jobId } = req.body as { userId?: string; jobId?: string };
-      const ownerId = requireOwner(userId);
-      if (typeof jobId !== "string" || !jobId.trim()) {
-        throw new AppError("message_required", "job_id required", 400);
-      }
-      res.json(manager.core.cancelDurableOperationalJob(ownerId, jobId.trim()));
-    } catch (err) {
-      const { status, body } = toErrorResponse(err);
-      res.status(status).json(body);
-    }
-  });
-
-  app.get("/nuclear/engineering", (req, res) => {
-    try {
-      const ownerId = String(req.query.owner_id ?? "");
-      requireOwner(ownerId || undefined);
-      res.json(manager.core.getEngineeringStatus(ownerId));
-    } catch (err) {
-      const { status, body } = toErrorResponse(err);
-      res.status(status).json(body);
-    }
-  });
-
-  app.get("/nuclear/context-budget", (req, res) => {
-    try {
-      const ownerId = String(req.query.owner_id ?? "");
-      requireOwner(ownerId || undefined);
-      const db = manager.core.getDatabase();
-      const limit = Math.min(100, Math.max(1, Number(req.query.limit ?? 20) || 20));
-      const policies = db.prepare(
-        `SELECT policy_id, version, total_utf8_bytes, section_json,
-                token_estimate_divisor, created_at
-         FROM context_budget_policies ORDER BY created_at DESC LIMIT ?`,
-      ).all(limit).map((row) => {
-        const value = row as Record<string, unknown>;
-        let sections: unknown = {};
-        try {
-          sections = JSON.parse(String(value.section_json ?? "{}"));
-        } catch {
-          sections = {};
-        }
-        return {
-          policyId: String(value.policy_id),
-          version: Number(value.version),
-          totalUtf8Bytes: Number(value.total_utf8_bytes),
-          sectionBudgets: sections,
-          tokenEstimateDivisor: Number(value.token_estimate_divisor),
-          createdAt: String(value.created_at),
-        };
-      });
-      const receiptRows = db.prepare(
-        `SELECT receipt_id FROM context_allocation_receipts
-         WHERE owner_id = ? ORDER BY created_at DESC LIMIT ?`,
-      ).all(ownerId, limit) as Array<{ receipt_id?: string }>;
-      res.json({
-        nuclear: true,
-        capability: "context_budget",
-        state: "observe",
-        policies,
-        allocations: receiptRows
-          .filter((row): row is { receipt_id: string } => typeof row.receipt_id === "string")
-          .map((row) => inspectAllocation(db, row.receipt_id)),
-      });
-    } catch (err) {
-      const { status, body } = toErrorResponse(err);
-      res.status(status).json(body);
-    }
-  });
+  app.get("/nuclear/jobs", gone);
+  app.post("/nuclear/jobs/cancel", gone);
+  app.get("/nuclear/engineering", gone);
+  app.get("/nuclear/context-budget", gone);
 
   app.get("/nuclear/learned-autonomy", (req, res) => {
     try {
@@ -1573,201 +1471,15 @@ export function createServer(
     }
   });
 
-  app.post("/sandbox/approve", (req, res) => {
-    try {
-      const body = req.body as Record<string, unknown>;
-      const userId = typeof body.userId === "string" ? body.userId : undefined;
-      const ownerId = requireOwner(userId);
-      res.json({ envelope: signSandboxApproval(ownerId, body) });
-    } catch (err) {
-      const { status, body } = toErrorResponse(err);
-      res.status(status).json(body);
-    }
-  });
-
-  app.post("/sandbox/tombstone/sign", (req, res) => {
-    try {
-      const body = req.body as Record<string, unknown>;
-      const userId = typeof body.userId === "string" ? body.userId : undefined;
-      const ownerId = requireOwner(userId);
-      res.json({ envelope: signSandboxTombstone(ownerId, body) });
-    } catch (err) {
-      const { status, body } = toErrorResponse(err);
-      res.status(status).json(body);
-    }
-  });
-
-  function approvalFailure(
-    result: { ok: false; errorCode: string; reason: string },
-  ): never {
-    if (result.errorCode === "unknown_approval_proposal") {
-      throw new AppError("unknown_approval_proposal", result.reason, 404);
-    }
-    throw new AppError(approvalErrorCode(result.errorCode), result.reason, 400);
-  }
-
-  function approvalErrorCode(errorCode: string): ErrorCode {
-    const known: readonly ErrorCode[] = [
-      "approval_owner_mismatch",
-      "approval_capability_missing",
-      "approval_invalid_risk_class",
-      "approval_no_target_paths",
-      "approval_too_many_target_paths",
-      "approval_invalid_path_intent",
-      "approval_invalid_persistence",
-      "approval_network_mode_unsupported",
-      "approval_policy_unbound",
-      "approval_not_approvable",
-      "approval_not_rejectable",
-      "approval_not_withdrawable",
-      "approval_not_staleable",
-      "approval_not_resumable",
-      "approval_update_failed",
-      "approval_session_unbound",
-      "approval_stale_policy",
-      "owner_approval_key_unavailable",
-      "broker_client_unavailable",
-      "policy_unavailable",
-      "unknown_session",
-      "session_not_awaiting_owner",
-    ];
-    return known.includes(errorCode as ErrorCode) ? (errorCode as ErrorCode) : "internal_error";
-  }
-
-  app.get("/sandbox/approvals", (req, res) => {
-    try {
-      const ownerId = requireOwner(String(req.query.owner_id ?? ""));
-      const status =
-        typeof req.query.status === "string" && req.query.status.length > 0
-          ? (req.query.status as SandboxApprovalProposalStatus)
-          : null;
-      res.json({
-        proposals: approvalService(ownerId).listProposals({ status }),
-      });
-    } catch (err) {
-      const { status, body } = toErrorResponse(err);
-      res.status(status).json(body);
-    }
-  });
-
-  app.get("/sandbox/approvals/:proposalId", (req, res) => {
-    try {
-      const ownerId = requireOwner(String(req.query.owner_id ?? ""));
-      const proposal = approvalService(ownerId).getProposal(req.params.proposalId);
-      if (proposal === null) {
-        throw new AppError("unknown_approval_proposal", "proposal not found", 404);
-      }
-      res.json({ proposal });
-    } catch (err) {
-      const { status, body } = toErrorResponse(err);
-      res.status(status).json(body);
-    }
-  });
-
-  app.post("/sandbox/approvals", (req, res) => {
-    try {
-      const body = req.body as Record<string, unknown>;
-      const ownerId = requireOwner(
-        typeof body.userId === "string" ? body.userId : undefined,
-      );
-      const created = approvalService(ownerId).createProposal({
-        ownerId,
-        taskId: typeof body.taskId === "string" ? body.taskId : null,
-        sessionUuid: typeof body.sessionUuid === "string" ? body.sessionUuid : null,
-        capabilityId: String(body.capabilityId ?? "") as SandboxCapabilityId,
-        authoritativeRiskClass: String(body.authoritativeRiskClass ?? "") as SandboxRiskClass,
-        affectedCanonicalPaths: Array.isArray(body.affectedCanonicalPaths)
-          ? (body.affectedCanonicalPaths as SandboxApprovalPathTarget[])
-          : [],
-        policyRuleId: String(body.policyRuleId ?? ""),
-        policyId: String(body.policyId ?? ""),
-        policyVersion: Number(body.policyVersion ?? NaN),
-        policyHash: String(body.policyHash ?? ""),
-        recipeId: typeof body.recipeId === "string" ? body.recipeId : null,
-        executableId: typeof body.executableId === "string" ? body.executableId : null,
-        persistence: String(body.persistence ?? "temporary") as "temporary" | "persistent",
-        requiresNetwork: body.requiresNetwork === true,
-        externalSideEffect: body.externalSideEffect === true,
-        modelSummary: typeof body.modelSummary === "string" ? body.modelSummary : null,
-        source: String(body.source ?? "policy_precheck") as SandboxApprovalProposalSource,
-      });
-      if (!created.ok) {
-        throw new AppError(approvalErrorCode(created.errorCode), created.reason, 400);
-      }
-      res.status(201).json({ proposal: created.value });
-    } catch (err) {
-      const { status, body } = toErrorResponse(err);
-      res.status(status).json(body);
-    }
-  });
-
-  app.post("/sandbox/approvals/:proposalId/approve", (req, res) => {
-    try {
-      const body = req.body as Record<string, unknown>;
-      const ownerId = requireOwner(
-        typeof body.userId === "string" ? body.userId : undefined,
-      );
-      const result = approvalService(ownerId).approveProposal(req.params.proposalId, {
-        reason: typeof body.reason === "string" ? body.reason : null,
-      });
-      if (!result.ok) approvalFailure(result);
-      res.json({ proposal: result.value });
-    } catch (err) {
-      const { status, body } = toErrorResponse(err);
-      res.status(status).json(body);
-    }
-  });
-
-  app.post("/sandbox/approvals/:proposalId/reject", (req, res) => {
-    try {
-      const body = req.body as Record<string, unknown>;
-      const ownerId = requireOwner(
-        typeof body.userId === "string" ? body.userId : undefined,
-      );
-      const result = approvalService(ownerId).rejectProposal(
-        req.params.proposalId,
-        typeof body.reason === "string" ? body.reason : null,
-      );
-      if (!result.ok) approvalFailure(result);
-      res.json({ proposal: result.value });
-    } catch (err) {
-      const { status, body } = toErrorResponse(err);
-      res.status(status).json(body);
-    }
-  });
-
-  app.post("/sandbox/approvals/:proposalId/withdraw", (req, res) => {
-    try {
-      const body = req.body as Record<string, unknown>;
-      const ownerId = requireOwner(
-        typeof body.userId === "string" ? body.userId : undefined,
-      );
-      const result = approvalService(ownerId).withdrawProposal(
-        req.params.proposalId,
-        typeof body.reason === "string" ? body.reason : null,
-      );
-      if (!result.ok) approvalFailure(result);
-      res.json({ proposal: result.value });
-    } catch (err) {
-      const { status, body } = toErrorResponse(err);
-      res.status(status).json(body);
-    }
-  });
-
-  app.post("/sandbox/approvals/:proposalId/resume", async (req, res) => {
-    try {
-      const body = req.body as Record<string, unknown>;
-      const ownerId = requireOwner(
-        typeof body.userId === "string" ? body.userId : undefined,
-      );
-      const result = await approvalService(ownerId).resumeSession(req.params.proposalId);
-      if (!result.ok) approvalFailure(result);
-      res.json({ proposal: result.value.proposal, session: result.value.session });
-    } catch (err) {
-      const { status, body } = toErrorResponse(err);
-      res.status(status).json(body);
-    }
-  });
+  app.post("/sandbox/approve", gone);
+  app.post("/sandbox/tombstone/sign", gone);
+  app.get("/sandbox/approvals", gone);
+  app.get("/sandbox/approvals/:proposalId", gone);
+  app.post("/sandbox/approvals", gone);
+  app.post("/sandbox/approvals/:proposalId/approve", gone);
+  app.post("/sandbox/approvals/:proposalId/reject", gone);
+  app.post("/sandbox/approvals/:proposalId/withdraw", gone);
+  app.post("/sandbox/approvals/:proposalId/resume", gone);
 
   app.get("/sessions", (_req, res) => {
     res.json({ activeSessionId: null });
@@ -1810,79 +1522,7 @@ export function createServer(
     },
   );
 
-  app.post("/chat/text", async (req, res) => {
-    try {
-      assertLegacyRuntimeRoute("/chat/text");
-      const {
-        message,
-        userId,
-        channel,
-        threadId,
-        auditSessionId,
-        discordPresence,
-        inboundDiscordMessageIds,
-        finalFragmentReceivedAtMs,
-        externalTransportHardDeadlineAtMs,
-        attachments,
-      } = req.body as {
-        message?: string;
-        userId?: string;
-        channel?: string;
-        threadId?: string;
-        auditSessionId?: string;
-        discordPresence?: string;
-        inboundDiscordMessageIds?: string[];
-        finalFragmentReceivedAtMs?: number;
-        externalTransportHardDeadlineAtMs?: number;
-        attachments?: Array<{
-          discordAttachmentId: string;
-          declaredMime: string;
-          fileName: string;
-          declaredByteSize?: number;
-          sourceUrl: string;
-        }>;
-      };
-      const owner = requireOwner(userId);
-      if (!message?.trim()) {
-        throw new AppError("message_required", "message required", 400);
-      }
-      if (message.length > MAX_DISCORD_MESSAGE) {
-        throw new AppError("message_too_long", "message too long", 400);
-      }
-      const delivery =
-        Array.isArray(inboundDiscordMessageIds) &&
-        inboundDiscordMessageIds.length > 0 &&
-        typeof finalFragmentReceivedAtMs === "number"
-          ? {
-              inboundDiscordMessageIds,
-              finalFragmentReceivedAtMs,
-              externalTransportHardDeadlineAtMs,
-            }
-          : undefined;
-      const result = await manager.handleTextChat(
-        message.trim(),
-        owner,
-        channel ?? "discord",
-        threadId,
-        auditSessionId,
-        undefined,
-        discordPresence,
-        delivery,
-        attachments,
-      );
-      if (result.duplicate) {
-        res.status(202).json({
-          ...result,
-          statusUrl: result.statusUrl ?? `/delivery/${result.reservationId}`,
-        });
-        return;
-      }
-      res.json(result);
-    } catch (err) {
-      const { status, body } = toErrorResponse(err);
-      res.status(status).json(body);
-    }
-  });
+  app.post("/chat/text", gone);
 
   app.get("/delivery/pending", (req, res) => {
     try {
@@ -1907,7 +1547,7 @@ export function createServer(
       const claimed = manager.core.claimPendingDeliveries(owner, {
         lane,
       });
-      if (lane === "cognitive_v021" && cognitiveKernel() === "v021") {
+      if (lane === "cognitive_v021") {
         const sidecar = getCognitiveSidecar();
         for (const delivery of claimed) {
           markProjectedDeliverySending(
@@ -2152,27 +1792,18 @@ export function createServer(
       if (!text?.trim()) {
         throw new AppError("message_required", "text required", 400);
       }
-      if (cognitiveKernel() !== "legacy") {
-        res.status(202).json(
-          admitV021RememberCommand(
-            getCognitiveSidecar(),
-            manager.core.getDatabase(),
-            {
-              ownerId: owner,
-              text: text.trim(),
-              sensitivity: sensitivity ?? "none",
-              discordMessageId: discordMessageId?.trim() || null,
-            },
-          ),
-        );
-        return;
-      }
-      const fact = manager.core.pinMemory(
-        owner,
-        text.trim(),
-        sensitivity ?? "none",
+      res.status(202).json(
+        admitV021RememberCommand(
+          getCognitiveSidecar(),
+          manager.core.getDatabase(),
+          {
+            ownerId: owner,
+            text: text.trim(),
+            sensitivity: sensitivity ?? "none",
+            discordMessageId: discordMessageId?.trim() || null,
+          },
+        ),
       );
-      res.json({ ok: true, fact });
     } catch (err) {
       const { status, body } = toErrorResponse(err);
       res.status(status).json(body);
@@ -2183,19 +1814,10 @@ export function createServer(
     try {
       const ownerId = String(req.query.owner_id ?? "");
       requireOwner(ownerId || undefined);
-      if (cognitiveKernel() !== "legacy") {
-        res.json(
-          getV021MemorySummary(
-            getCognitiveSidecar(),
-            manager.core.getDatabase(),
-            ownerId,
-            req.query.include_private === "true",
-          ),
-        );
-        return;
-      }
       res.json(
-        manager.core.getMemorySummary(
+        getV021MemorySummary(
+          getCognitiveSidecar(),
+          manager.core.getDatabase(),
           ownerId,
           req.query.include_private === "true",
         ),
@@ -2239,23 +1861,22 @@ export function createServer(
         if (!previewId?.trim()) {
           throw new AppError("message_required", "previewId required", 400);
         }
-        res.json(cognitiveKernel() !== "legacy"
-          ? cancelV021Forget(cognitiveContinuity(), { ownerId: owner, previewId: previewId.trim() })
-          : manager.core.forget(owner, topic?.trim() ?? "", false, {
-              previewId: previewId.trim(),
-              cancel: true,
-            }));
+        res.json(cancelV021Forget(cognitiveContinuity(), {
+          ownerId: owner,
+          previewId: previewId.trim(),
+        }));
         return;
       }
       if (confirmed === true && previewId?.trim()) {
-        res.json(cognitiveKernel() !== "legacy"
-          ? confirmV021Forget(getCognitiveSidecar(), manager.core.getDatabase(), cognitiveContinuity(), {
-              ownerId: owner,
-              previewId: previewId.trim(),
-            })
-          : manager.core.forget(owner, topic?.trim() ?? "", true, {
-              previewId: previewId.trim(),
-            }));
+        res.json(confirmV021Forget(
+          getCognitiveSidecar(),
+          manager.core.getDatabase(),
+          cognitiveContinuity(),
+          {
+            ownerId: owner,
+            previewId: previewId.trim(),
+          },
+        ));
         return;
       }
       if (confirmed === true) {
@@ -2268,19 +1889,12 @@ export function createServer(
       if (!topic?.trim() && !previewId?.trim()) {
         throw new AppError("message_required", "topic required", 400);
       }
-      if (cognitiveKernel() !== "legacy") {
-        res.json(previewV021Forget(
-          getCognitiveSidecar(),
-          manager.core.getDatabase(),
-          cognitiveContinuity(),
-          { ownerId: owner, topic: topic!.trim() },
-        ));
-        return;
-      }
-      res.json(manager.core.forget(owner, topic?.trim() ?? "", false, {
-        previewId: previewId?.trim(),
-        confirmationDiscordMessageId: confirmationDiscordMessageId?.trim() ?? null,
-      }));
+      res.json(previewV021Forget(
+        getCognitiveSidecar(),
+        manager.core.getDatabase(),
+        cognitiveContinuity(),
+        { ownerId: owner, topic: topic!.trim() },
+      ));
     } catch (err) {
       const { status, body } = toErrorResponse(err);
       res.status(status).json(body);
@@ -2377,17 +1991,7 @@ export function createServer(
     }
   });
 
-  app.post("/curiosity/tick", async (_req, res) => {
-    try {
-      assertLegacyRuntimeRoute("/curiosity/tick");
-      const ownerId = env.memoryOwnerId || env.discordOwnerId || "default";
-      const result = await manager.core.runCuriosityTick(ownerId);
-      res.json(result);
-    } catch (err) {
-      const { status, body } = toErrorResponse(err);
-      res.status(status).json(body);
-    }
-  });
+  app.post("/curiosity/tick", gone);
 
   app.get("/curiosity/status", (req, res) => {
     try {
@@ -2402,41 +2006,12 @@ export function createServer(
     }
   });
 
-  app.post("/initiative/tick", async (req, res) => {
-    try {
-      assertLegacyRuntimeRoute("/initiative/tick");
-      const { userId } = req.body as { userId?: string };
-      const owner = requireOwner(userId);
-      if (manager.isPaused()) {
-        throw new AppError("agent_not_ready", "Agent not ready", 503);
-      }
-      res.json(await manager.core.tickProactive(owner));
-    } catch (err) {
-      const { status, body } = toErrorResponse(err);
-      res.status(status).json(body);
-    }
-  });
+  app.post("/initiative/tick", gone);
 
   app.post("/initiative/idle", async (req, res) => {
     try {
       const { userId } = req.body as { userId?: string };
       const owner = requireOwner(userId);
-      if (cognitiveKernel() === "legacy") {
-        res.json({
-          conversationId: null,
-          eligible: false,
-          reason: "empty_house",
-          thoughtModelAttempts: 0,
-          acceptedSettlements: 0,
-          thoughtCalls: 0,
-          cycleId: null,
-          observations: [],
-          firedTriggers: [],
-          suppressedTriggers: [],
-          dormant: false,
-        });
-        return;
-      }
       if (manager.isPaused()) {
         throw new AppError("agent_not_ready", "Agent not ready", 503);
       }
@@ -2447,65 +2022,9 @@ export function createServer(
     }
   });
 
-  app.post("/initiative/commit", async (req, res) => {
-    try {
-      assertLegacyRuntimeRoute("/initiative/commit");
-      const body = req.body as {
-        userId?: string;
-        reservationId?: number;
-        deliveryReservationId?: number;
-        text?: string;
-        threadId?: string;
-        angle?: string;
-        discordMessageId?: string;
-        bubbleReceipts?: Array<{ ordinal: number; discordMessageId: string }>;
-        partial?: boolean;
-      };
-      const owner = requireOwner(body.userId);
-      if (body.reservationId !== undefined || body.deliveryReservationId !== undefined) {
-        manager.core.commitProactive(owner, {
-          reservationId: body.reservationId,
-          deliveryReservationId: body.deliveryReservationId,
-          text: body.text ?? "",
-          threadId: body.threadId ?? "",
-          angle: body.angle ?? "check_in",
-          reason: "commit",
-          discordMessageId: body.discordMessageId ?? "",
-          bubbleReceipts: body.bubbleReceipts,
-          partial: body.partial === true,
-        });
-      } else if (body.text && body.threadId && body.discordMessageId) {
-        manager.core.commitProactive(owner, {
-          text: body.text,
-          threadId: body.threadId,
-          angle: body.angle ?? "check_in",
-          reason: "commit",
-          discordMessageId: body.discordMessageId,
-        });
-      }
-      res.json({ ok: true });
-    } catch (err) {
-      const { status, body } = toErrorResponse(err);
-      res.status(status).json(body);
-    }
-  });
+  app.post("/initiative/commit", gone);
 
-  app.post("/initiative/abort", (req, res) => {
-    try {
-      const { userId, reservationId } = req.body as {
-        userId?: string;
-        reservationId?: number;
-      };
-      const owner = requireOwner(userId);
-      if (typeof reservationId === "number") {
-        manager.core.abortProactive(owner, reservationId);
-      }
-      res.json({ ok: true });
-    } catch (err) {
-      const { status, body } = toErrorResponse(err);
-      res.status(status).json(body);
-    }
-  });
+  app.post("/initiative/abort", gone);
 
   app.post("/initiative/pause", (req, res) => {
     try {
@@ -2531,34 +2050,9 @@ export function createServer(
     }
   });
 
-  app.post("/initiative/evaluate", async (req, res) => {
-    try {
-      assertLegacyRuntimeRoute("/initiative/evaluate");
-      const { userId } = req.body as { userId?: string };
-      const owner = requireOwner(userId);
-      const result = await manager.core.evaluateProactive(owner);
-      res.json(result);
-    } catch (err) {
-      const { status, body } = toErrorResponse(err);
-      res.status(status).json(body);
-    }
-  });
+  app.post("/initiative/evaluate", gone);
 
-  app.post("/initiative/generate", async (req, res) => {
-    try {
-      assertLegacyRuntimeRoute("/initiative/generate");
-      const { userId } = req.body as { userId?: string };
-      const owner = requireOwner(userId);
-      const result = await manager.core.generateProactive(owner);
-      if (!result.shouldSend) {
-        throw new AppError("initiative_skipped", result.reason, 409);
-      }
-      res.json(result);
-    } catch (err) {
-      const { status, body } = toErrorResponse(err);
-      res.status(status).json(body);
-    }
-  });
+  app.post("/initiative/generate", gone);
 
   app.get("/initiative/status", (req, res) => {
     try {

@@ -100,7 +100,7 @@ describe("curiosity read provenance", () => {
        WHERE json_extract(model_metadata_json, '$.selectionLane') = 'exploration'`,
     ).get()).toMatchObject({ count: 2 });
     expect(db.prepare("SELECT COUNT(*) AS count FROM cognitive_jobs").get())
-      .toMatchObject({ count: 12 });
+      .toMatchObject({ count: 0 });
     db.close();
   });
 
@@ -143,8 +143,8 @@ describe("curiosity read provenance", () => {
     const result = await pending;
     expect(result.readsCreated).toBe(1);
     expect(getCurrentActivity()).toEqual({ state: "none" });
-    expect(db.prepare("SELECT status FROM cognitive_jobs").get())
-      .toMatchObject({ status: "pending" });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM cognitive_jobs").get())
+      .toMatchObject({ count: 0 });
     db.close();
   });
 

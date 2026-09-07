@@ -111,25 +111,15 @@ describe("route surface registry", () => {
     }
   });
 
-  it("blocks legacy chat, curiosity, and proactive entry points under v021", async () => {
+  it("keeps retired legacy chat, curiosity, and proactive entry points inert", async () => {
     const originalDiscordOwnerId = env.discordOwnerId;
     const originalMemoryOwnerId = env.memoryOwnerId;
-    const legacyTick = vi.fn(async () => ({ shouldSend: false, reason: "legacy" }));
-    const legacyEvaluate = vi.fn(async () => ({ shouldReachOut: false, reason: "legacy" }));
-    const legacyCommit = vi.fn();
-    const legacyChat = vi.fn(async () => ({ text: "legacy", threadId: "thread", model: "legacy" }));
-    const legacyCuriosity = vi.fn(async () => ({ ok: true }));
     const manager = {
       getCognitiveKernel: () => "v021" as const,
       getState: () => "ready" as const,
       isPaused: () => false,
       core: {
-        tickProactive: legacyTick,
-        evaluateProactive: legacyEvaluate,
-        commitProactive: legacyCommit,
-        runCuriosityTick: legacyCuriosity,
       },
-      handleTextChat: legacyChat,
     } as unknown as AgentManager;
     env.discordOwnerId = "doc";
     env.memoryOwnerId = "doc";
@@ -165,14 +155,9 @@ describe("route surface registry", () => {
         }),
       ]);
       for (const response of requests) {
-        expect(response.status).toBe(404);
-        expect(await response.json()).toMatchObject({ code: "route_disabled" });
+        expect(response.status).toBe(410);
+        expect(await response.json()).toMatchObject({ code: "endpoint_retired" });
       }
-      expect(legacyChat).not.toHaveBeenCalled();
-      expect(legacyCuriosity).not.toHaveBeenCalled();
-      expect(legacyTick).not.toHaveBeenCalled();
-      expect(legacyEvaluate).not.toHaveBeenCalled();
-      expect(legacyCommit).not.toHaveBeenCalled();
     } finally {
       await stopTestServer(server);
       env.discordOwnerId = originalDiscordOwnerId;

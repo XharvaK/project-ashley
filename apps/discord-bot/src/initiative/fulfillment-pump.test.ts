@@ -3,12 +3,11 @@ import { test } from "node:test";
 import type { Client, DMChannel, Message, User } from "discord.js";
 import {
   drainPendingCognitiveDeliveries,
-  drainPendingOperationalDeliveries,
   startFulfillmentPump,
   stopFulfillmentPump,
   type FulfillmentPumpDependencies,
 } from "./fulfillment-pump.js";
-import type { PendingWeeklyReviewDelivery } from "../agent-client.js";
+import type { PendingDelivery } from "../agent-client.js";
 
 function makeFakeClient(
   channel: Partial<DMChannel> & { id: string },
@@ -25,12 +24,12 @@ function makeFakeClient(
   } as unknown as Client;
 }
 
-test("fulfillment pump drains, receipts and finalizes pending operational deliveries", async () => {
+test("fulfillment pump drains, receipts and finalizes pending cognitive deliveries", async () => {
   const receipts: Array<{ reservationId: number; ordinal: number; messageId: string }> = [];
   const finalizations: Array<{ reservationId: number; cause: string }> = [];
   const sends: Array<{ text: string }> = [];
 
-  const pending: PendingWeeklyReviewDelivery[] = [
+  const pending: PendingDelivery[] = [
     {
       reservationId: 101,
       draftText: "Job 1 complete",
@@ -80,8 +79,8 @@ test("fulfillment pump drains, receipts and finalizes pending operational delive
     },
   };
 
-  const fakeClient = makeFakeClient({ id: "dm-op-1" });
-  const count = await drainPendingOperationalDeliveries(fakeClient, fakeDeps);
+  const fakeClient = makeFakeClient({ id: "dm-cognitive-1" });
+  const count = await drainPendingCognitiveDeliveries(fakeClient, fakeDeps);
 
   assert.equal(count, 2);
   assert.equal(sends.length, 2);
@@ -93,7 +92,7 @@ test("fulfillment pump drains, receipts and finalizes pending operational delive
 
 test("fulfillment pump uses the same receipt/finalize flow for cognitive deliveries", async () => {
   const events: string[] = [];
-  const pending: PendingWeeklyReviewDelivery[] = [{
+  const pending: PendingDelivery[] = [{
     reservationId: 151,
     draftText: "cognitive draft",
     bubbles: [{ ordinal: 0, text: "cognitive draft", discordMessageId: null }],
@@ -134,7 +133,7 @@ test("fulfillment pump uses the same receipt/finalize flow for cognitive deliver
 test("fulfillment pump records send_failure when Discord send has no visible content", async () => {
   const finalizations: Array<{ reservationId: number; cause: string }> = [];
 
-  const pending: PendingWeeklyReviewDelivery[] = [
+  const pending: PendingDelivery[] = [
     {
       reservationId: 201,
       draftText: "Job failed send",
@@ -162,8 +161,8 @@ test("fulfillment pump records send_failure when Discord send has no visible con
     },
   };
 
-  const fakeClient = makeFakeClient({ id: "dm-op-1" });
-  const count = await drainPendingOperationalDeliveries(fakeClient, fakeDeps);
+  const fakeClient = makeFakeClient({ id: "dm-cognitive-1" });
+  const count = await drainPendingCognitiveDeliveries(fakeClient, fakeDeps);
 
   assert.equal(count, 0);
   assert.equal(finalizations.length, 1);
@@ -173,7 +172,7 @@ test("fulfillment pump records send_failure when Discord send has no visible con
 test("fulfillment pump never throws or halts on single item error", async () => {
   const finalizations: Array<{ reservationId: number; cause: string }> = [];
 
-  const pending: PendingWeeklyReviewDelivery[] = [
+  const pending: PendingDelivery[] = [
     {
       reservationId: 301,
       draftText: "Job will throw on send",
@@ -212,8 +211,8 @@ test("fulfillment pump never throws or halts on single item error", async () => 
     },
   };
 
-  const fakeClient = makeFakeClient({ id: "dm-op-1" });
-  const count = await drainPendingOperationalDeliveries(fakeClient, fakeDeps);
+  const fakeClient = makeFakeClient({ id: "dm-cognitive-1" });
+  const count = await drainPendingCognitiveDeliveries(fakeClient, fakeDeps);
 
   assert.equal(count, 1);
   assert.equal(finalizations.length, 2);
@@ -222,7 +221,7 @@ test("fulfillment pump never throws or halts on single item error", async () => 
   assert.equal(finalizations[1].cause, "complete");
 });
 
-test("fulfillment pump returns zero when no operational deliveries are pending", async () => {
+test("fulfillment pump returns zero when no cognitive deliveries are pending", async () => {
   const fakeDeps: FulfillmentPumpDependencies = {
     claim: async () => ({ deliveries: [] }),
     receipt: async () => ({ ok: true }),
@@ -237,8 +236,8 @@ test("fulfillment pump returns zero when no operational deliveries are pending",
     }),
   };
 
-  const fakeClient = makeFakeClient({ id: "dm-op-1" });
-  const count = await drainPendingOperationalDeliveries(fakeClient, fakeDeps);
+  const fakeClient = makeFakeClient({ id: "dm-cognitive-1" });
+  const count = await drainPendingCognitiveDeliveries(fakeClient, fakeDeps);
   assert.equal(count, 0);
 });
 
@@ -249,7 +248,7 @@ test("fulfillment pump double-drain protection: send function called exactly onc
   let resolveSend: (() => void) | null = null;
   const sendReleasePromise = new Promise<void>((r) => { resolveSend = r; });
 
-  const pending: PendingWeeklyReviewDelivery[] = [
+  const pending: PendingDelivery[] = [
     {
       reservationId: 401,
       draftText: "Concurrent claim test",
@@ -286,17 +285,17 @@ test("fulfillment pump double-drain protection: send function called exactly onc
     },
   };
 
-  const fakeClient = makeFakeClient({ id: "dm-op-double" });
+  const fakeClient = makeFakeClient({ id: "dm-cognitive-double" });
 
   // Start drain 1
-  const drain1Promise = drainPendingOperationalDeliveries(fakeClient, fakeDeps);
+  const drain1Promise = drainPendingCognitiveDeliveries(fakeClient, fakeDeps);
 
   // Wait until send is in-flight
   await sendEnteredPromise;
   assert.equal(sendCount, 1);
 
   // Attempt drain 2 concurrently while send 1 is in-flight
-  const drain2Promise = drainPendingOperationalDeliveries(fakeClient, fakeDeps);
+  const drain2Promise = drainPendingCognitiveDeliveries(fakeClient, fakeDeps);
 
   // Release held send
   resolveSend?.();
@@ -331,20 +330,21 @@ test("fulfillment pump completion-relative pacing: does not overlap ticks", asyn
   const fakeClient = makeFakeClient({ id: "dm-pacing" });
   startFulfillmentPump(fakeClient, 20, fakeDeps);
 
-  // Immediate tick runs at t=0
+  // Immediate tick runs the current cognitive delivery lane at t=0.
+  await new Promise<void>((resolve) => setImmediate(resolve));
   assert.equal(claimCalls, 1);
 
   // Wait 50ms (exceeds the 20ms interval)
   await new Promise((r) => setTimeout(r, 55));
   stopFulfillmentPump();
 
-  // Next ticks fired sequentially without storming
+  // Next ticks fired sequentially without storming.
   assert.ok(claimCalls >= 2 && claimCalls <= 4);
 });
 
 test("generic Discord rejection after dispatch is UNKNOWN (delivery_lease), not proven not_sent", async () => {
   const finalizations: Array<{ cause: string }> = [];
-  const pending: PendingWeeklyReviewDelivery[] = [
+  const pending: PendingDelivery[] = [
     { reservationId: 501, draftText: "unknown", bubbles: [{ ordinal: 0, text: "unknown", discordMessageId: null }], statusUrl: "/delivery/501" },
   ];
   const { DeliverySendError } = await import("../chat/send-bubbles.js");
@@ -358,13 +358,13 @@ test("generic Discord rejection after dispatch is UNKNOWN (delivery_lease), not 
     },
   };
   const client = makeFakeClient({ id: "dm-unknown" });
-  await drainPendingOperationalDeliveries(client, fakeDeps);
+  await drainPendingCognitiveDeliveries(client, fakeDeps);
   assert.equal(finalizations[0].cause, "delivery_lease");
 });
 
 test("proven pre-dispatch failure (aborted before send) is safe send_failure", async () => {
   const finalizations: Array<{ cause: string }> = [];
-  const pending: PendingWeeklyReviewDelivery[] = [
+  const pending: PendingDelivery[] = [
     { reservationId: 502, draftText: "pre", bubbles: [{ ordinal: 0, text: "pre", discordMessageId: null }], statusUrl: "/delivery/502" },
   ];
   const { DeliverySendError } = await import("../chat/send-bubbles.js");
@@ -378,14 +378,14 @@ test("proven pre-dispatch failure (aborted before send) is safe send_failure", a
     },
   };
   const client = makeFakeClient({ id: "dm-pre" });
-  await drainPendingOperationalDeliveries(client, fakeDeps);
+  await drainPendingCognitiveDeliveries(client, fakeDeps);
   assert.equal(finalizations[0].cause, "send_failure");
 });
 
 test("partial success persists first bubble incrementally and finalizes partially_delivered", async () => {
   const receipts: Array<{ ordinal: number }> = [];
   const finalizations: Array<{ cause: string }> = [];
-  const pending: PendingWeeklyReviewDelivery[] = [
+  const pending: PendingDelivery[] = [
     { reservationId: 503, draftText: "A".repeat(2500), bubbles: [{ ordinal: 0, text: "A".repeat(1800) }, { ordinal: 1, text: "B" }], statusUrl: "/delivery/503" },
   ];
   const { DeliverySendError } = await import("../chat/send-bubbles.js");
@@ -401,7 +401,7 @@ test("partial success persists first bubble incrementally and finalizes partiall
     },
   };
   const client = makeFakeClient({ id: "dm-partial" });
-  await drainPendingOperationalDeliveries(client, fakeDeps);
+  await drainPendingCognitiveDeliveries(client, fakeDeps);
   assert.equal(receipts.length, 1);
   assert.equal(receipts[0].ordinal, 0);
   assert.equal(finalizations[0].cause, "send_failure");

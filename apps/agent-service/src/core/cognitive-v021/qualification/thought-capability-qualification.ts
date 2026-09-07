@@ -184,13 +184,13 @@ type SchemaMode = ThoughtCapabilityComponents["schemaEnforcementMode"];
 type Digest = ThoughtQualificationCaseResult["rawContentDigest"];
 
 const CANDIDATE = {
-  provider: "mistral" as const,
-  model: "mistral-small-2603" as const,
+  provider: "nim" as const,
+  model: "nvidia/nemotron-3-super-120b-a12b" as const,
 };
 const ROUTE_ID = "thought";
 const MAX_THOUGHT_OUTPUT_TOKENS = 4_096;
 const MAX_STRUCTURAL_ATTEMPTS = 1 + 2;
-const WHOLE_THOUGHT_BUDGET_MS = 30_000;
+const WHOLE_THOUGHT_BUDGET_MS = thoughtResourcePolicyIdentity().ordinaryThoughtBudgetMs;
 const QUALIFICATION_SCHEMA = "ashley.thought.route_qualification.v1" as const;
 const SEMANTIC_CASES = [
   "settlement",
@@ -275,8 +275,8 @@ type CandidatePreflight = Readonly<{
   registryVersion: string;
   policyRowId: string;
   occupantId: string;
-  provider: "mistral";
-  model: "mistral-small-2603";
+  provider: "nim";
+  model: "nvidia/nemotron-3-super-120b-a12b";
   logicalBindingId: string;
   schemaFingerprint: string;
   wireBindingId: string;
@@ -1561,7 +1561,7 @@ function preflightCandidate(buildIdentity = currentBuildIdentity()): CandidatePr
     occupantId: policy.occupant.occupantId,
     wireBindingId: binding.bindingId,
     wireMode,
-    adapterId: "ashley.adapter.mistral.v1",
+    adapterId: "ashley.adapter.nim.v1",
     wireFormat,
   });
   return {
@@ -1578,7 +1578,7 @@ function preflightCandidate(buildIdentity = currentBuildIdentity()): CandidatePr
     wireFormat,
     buildIdentity,
     capability,
-    credentialPresent: Boolean(env.mistralApiKey),
+    credentialPresent: Boolean(env.nimApiKey),
   };
 }
 
@@ -1690,7 +1690,7 @@ export function fixtureCompletion(
     resourcePolicyFingerprint: thoughtResourcePolicyIdentity().fingerprint,
   };
   const wireEvidence: WireDispatchEvidence = {
-    adapterId: "ashley.adapter.mistral.v1",
+    adapterId: "ashley.adapter.nim.v1",
     wireFormat: preflight.wireFormat,
     sanitizedBodyDigest: ("sha256:" + sha256Text("qualification-wire:" + invocationId)) as WireDispatchEvidence["sanitizedBodyDigest"],
     emittedEnforcementMode: preflight.wireMode,

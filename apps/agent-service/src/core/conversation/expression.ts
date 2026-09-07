@@ -30,11 +30,11 @@ import {
   type ModelFabricDispatchMetadata,
 } from "../model-fabric/index.js";
 import type { DatabaseSync } from "node:sqlite";
-import { selectAndRender } from "../context-budget/render.js";
+import { selectAndRender } from "../context-allocation/render.js";
 import type {
   ContextAllocation,
   ContextBudgetMode,
-} from "../context-budget/types.js";
+} from "../context-allocation/types.js";
 import {
   buildExpressionFallbackPolicy,
   minimalExpressionContext,

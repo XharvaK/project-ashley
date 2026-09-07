@@ -47,8 +47,8 @@ const capturedEffectIntent = {
 
 const baseGate: QualificationGateEvidence = {
   transport: "success",
-  provider: "mistral",
-  model: "mistral-small-2603",
+  provider: "nim",
+  model: "nvidia/nemotron-3-super-120b-a12b",
   kernelBinding: "PASS",
   fencing: "PASS",
   authorityReachability: "PASS",
@@ -59,7 +59,7 @@ const baseGate: QualificationGateEvidence = {
   attempts: 1,
   maxOutputTokens: 4096,
   wireMode: "native_json_schema",
-  wireBindingId: "compat_thought_mistral_small_2603_native_json_schema_v2",
+  wireBindingId: "compat_thought_nim_nemotron_super_native_json_schema_v1",
   providerDeclaredEnforcement: "unavailable",
   capabilityFingerprint: "sha256:" + "a".repeat(64),
   responseDiagnostics: {
@@ -81,8 +81,8 @@ describe("successor Thought qualification", () => {
   it("passes every declared semantic branch through the real W0 fixture path", async () => {
     const result = await runThoughtCapabilityQualification({
       environment: "fixture",
-      provider: "mistral",
-      model: "mistral-small-2603",
+      provider: "nim",
+      model: "nvidia/nemotron-3-super-120b-a12b",
       allowlistedReferences: ["turn-1"],
       runId: "w2-test-fixture",
     });
@@ -162,8 +162,8 @@ describe("successor Thought qualification", () => {
     try {
       const result = await runThoughtCapabilityQualification({
         environment: "fixture",
-        provider: "mistral",
-        model: "mistral-small-2603",
+        provider: "nim",
+        model: "nvidia/nemotron-3-super-120b-a12b",
         allowlistedReferences: ["turn-1"],
         runId: "w2-test-no-network",
       });
@@ -660,8 +660,8 @@ describe("successor Thought qualification", () => {
     try {
       const result = await runThoughtCapabilityQualification({
         environment: "isolated_live",
-        provider: "mistral",
-        model: "mistral-small-2603",
+        provider: "nim",
+        model: "nvidia/nemotron-3-super-120b-a12b",
         candidateSha: checkoutIdentity,
         allowlistedReferences: [],
         noFallback: true,
@@ -717,9 +717,9 @@ function createPacingHarness() {
   };
   const fakeCompletion = {
     text: validAbstain,
-    model: "mistral-small-2603",
-    modelAlias: "mistral-small-2603",
-    resolvedModelId: "mistral-small-2603",
+    model: "nvidia/nemotron-3-super-120b-a12b",
+    modelAlias: "nvidia/nemotron-3-super-120b-a12b",
+    resolvedModelId: "nvidia/nemotron-3-super-120b-a12b",
     usage: { promptTokens: 128, completionTokens: 64 },
     finishReason: "stop",
     responseDiagnostics: null,
@@ -746,15 +746,15 @@ async function runIsolatedLiveForPacing(input: {
   const harness = input.harness ?? createPacingHarness();
   const checkoutIdentity = qualificationCheckoutIdentity();
   const savedRelease = env.ashleyReleaseId;
-  const savedKey = env.mistralApiKey;
+  const savedKey = env.nimApiKey;
   env.ashleyReleaseId = checkoutIdentity;
-  env.mistralApiKey = "pacing-test-key";
+  env.nimApiKey = "pacing-test-key";
   const outputDir = join(tmpdir(), `w2-pacing-${randomUUID()}`);
   try {
     const result = await runThoughtCapabilityQualification({
       environment: "isolated_live",
-      provider: "mistral",
-      model: "mistral-small-2603",
+      provider: "nim",
+      model: "nvidia/nemotron-3-super-120b-a12b",
       candidateSha: checkoutIdentity,
       allowlistedReferences: ["turn-1"],
       noFallback: true,
@@ -770,7 +770,7 @@ async function runIsolatedLiveForPacing(input: {
     return { result, harness };
   } finally {
     env.ashleyReleaseId = savedRelease;
-    env.mistralApiKey = savedKey;
+    env.nimApiKey = savedKey;
     rmSync(outputDir, { recursive: true, force: true });
   }
 }
@@ -798,8 +798,8 @@ describe("w2 campaign pacing repair", () => {
     let completeChatCalls = 0;
     const result = await runThoughtCapabilityQualification({
       environment: "isolated_live",
-      provider: "mistral",
-      model: "mistral-small-2603",
+      provider: "nim",
+      model: "nvidia/nemotron-3-super-120b-a12b",
       allowlistedReferences: [],
       noFallback: true,
       interLiveCaseDelayMs: -1,
@@ -907,8 +907,8 @@ describe("w2 campaign pacing repair", () => {
     const harness = createPacingHarness();
     const result = await runThoughtCapabilityQualification({
       environment: "fixture",
-      provider: "mistral",
-      model: "mistral-small-2603",
+      provider: "nim",
+      model: "nvidia/nemotron-3-super-120b-a12b",
       allowlistedReferences: ["turn-1"],
       runId: "w2-test-pacing-fixture",
       interLiveCaseDelayMs: 65000,

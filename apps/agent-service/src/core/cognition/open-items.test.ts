@@ -19,7 +19,6 @@ import {
   currentContractId,
   currentReleaseId,
 } from "../rollout/capabilities.js";
-import { enqueueCognitiveJob } from "./jobs.js";
 
 const HASH = "a".repeat(64);
 
@@ -363,11 +362,18 @@ describe("open cognitive item store", () => {
     const source = db
       .prepare("SELECT id, entity_uuid FROM questions WHERE entity_uuid = ?")
       .get("question-source-model") as { id: number; entity_uuid: string };
-    const jobId = enqueueCognitiveJob(db, {
-      ownerId: "owner-1",
-      kind: "consolidate_thread",
-      sourceKey: "open-items-model-continuity-test",
-    });
+    const jobId = Number(db.prepare(
+      `INSERT INTO cognitive_jobs
+         (owner_id, kind, source_key, payload_json, status, attempts,
+          available_at, last_error, created_at, updated_at)
+       VALUES (?, 'consolidate_thread', ?, '{}', 'pending', 0, ?, NULL, ?, ?)`
+    ).run(
+      "owner-1",
+      "open-items-model-continuity-test",
+      now,
+      now,
+      now,
+    ).lastInsertRowid);
     try {
       const dispatch = await runAttentiveDispatch<{ text: string }>(db, {
         messages: [{ role: "user", content: "model continuity fixture" }],

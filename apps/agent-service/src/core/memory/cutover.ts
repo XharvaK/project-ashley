@@ -34,11 +34,6 @@ export const C1_WRITER_INVENTORY: readonly C1WriterInventoryEntry[] = [
     assertionFirst: true,
   },
   {
-    name: "processNextCognitiveJob",
-    sourcePath: "apps/agent-service/src/core/cognition/worker.ts",
-    assertionFirst: true,
-  },
-  {
     name: "forgetByTopic",
     sourcePath: "apps/agent-service/src/core/memory/facts.ts",
     assertionFirst: true,

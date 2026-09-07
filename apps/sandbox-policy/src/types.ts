@@ -2,8 +2,8 @@
  * Core vocabulary for the shared deterministic sandbox-policy module.
  *
  * This module is the policy-decision foundation shared by agent-service
- * (preliminary validation / policy precheck) and sandbox-broker (final
- * authorization). It is deterministic, pure, dependency-free, free of model
+ * (current projection) and sandbox-v2 (final execution). It is deterministic,
+ * pure, dependency-free, free of model
  * or provider clients, free of command execution, free of filesystem
  * mutation, and free of secret access.
  *

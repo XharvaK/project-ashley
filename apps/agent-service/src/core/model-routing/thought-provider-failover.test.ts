@@ -7,8 +7,19 @@ import { completeChat, resetAdapterCache } from "../../mistral-client.js";
 import { withOfflineAppGateDisabled } from "../qualification/offline-test-helpers.js";
 import * as mistralAdapterModule from "./adapters/mistral-adapter.js";
 import type { ChatMessage } from "./types.js";
+import { attachProviderHttpStatusBoundary } from "./types.js";
 
 const MISTRAL_MODEL = "mistral-small-2603";
+
+function providerAccountError(
+  code: "rate_limited" | "credential_invalid",
+  message: string,
+  status: number,
+): AppError {
+  const error = new AppError(code, message, status, undefined, "account");
+  attachProviderHttpStatusBoundary(error, status);
+  return error;
+}
 
 describe("Thought same-model Mistral credential failover", () => {
   let db: DatabaseSync;
@@ -67,12 +78,10 @@ describe("Thought same-model Mistral credential failover", () => {
     env.mistralApiKeySecondary = "test-mistral-secondary-key";
     const dispatch = vi.fn().mockImplementation(async (args: { credentialSeat?: string }) => {
       if (args.credentialSeat === "mistral_primary") {
-        throw new AppError(
+        throw providerAccountError(
           "rate_limited",
           "Mistral account rate limited",
           429,
-          undefined,
-          "account",
         );
       }
       return {
@@ -181,14 +190,12 @@ describe("Thought same-model Mistral credential failover", () => {
   it("does not create a third attempt when both Mistral credentials fail", async () => {
     env.mistralApiKeySecondary = "test-mistral-secondary-key";
     const dispatch = vi.fn().mockImplementation(async (args: { credentialSeat?: string }) => {
-      throw new AppError(
+      throw providerAccountError(
         "credential_invalid",
         args.credentialSeat === "mistral_primary"
           ? "Mistral primary credential rejected"
           : "Mistral secondary credential rejected",
         401,
-        undefined,
-        "account",
       );
     });
 

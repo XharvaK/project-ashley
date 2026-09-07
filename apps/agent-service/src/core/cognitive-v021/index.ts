@@ -88,8 +88,6 @@ export * from "./private-budget/recovery.js";
 export * from "./observation/subscriptions.js";
 export * from "./dispatch/live.js";
 export * from "./dispatch/health.js";
-export * from "./shadow/runner.js";
-export * from "./shadow/replicator.js";
 export * from "./evidence/compatibility-projector.js";
 export * from "./delivery/pending.js";
 

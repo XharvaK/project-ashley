@@ -33,7 +33,6 @@ describe("sandbox-policy package purity", () => {
       "openai",
       "nvidia",
       "nim",
-      "@composer-assistant/sandbox-broker",
       "@composer-assistant/agent-service",
     ]) {
       expect(combined).not.toContain(forbidden);

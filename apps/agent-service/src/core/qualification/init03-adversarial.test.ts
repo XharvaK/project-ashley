@@ -37,7 +37,6 @@ import {
   listRelationshipMotivationProjections,
 } from "../relationship/projections.js";
 import type { Decision, Motivation } from "../types.js";
-import { enqueueCognitiveJob } from "../cognition/jobs.js";
 
 const OWNER_ID = "doc";
 const OTHER_OWNER_ID = "other-owner";
@@ -619,11 +618,19 @@ describe("INIT-03 adversarial self-audit", () => {
 
       const alias = env.mistralModel;
       env.groqApiKey = "test-key";
-      const jobId = enqueueCognitiveJob(db, {
-        ownerId: OWNER_ID,
-        kind: "consolidate_thread",
-        sourceKey: "qualification-model-continuity-test",
-      });
+      const now = NOW.toISOString();
+      const jobId = Number(db.prepare(
+        `INSERT INTO cognitive_jobs
+           (owner_id, kind, source_key, payload_json, status, attempts,
+            available_at, last_error, created_at, updated_at)
+         VALUES (?, 'consolidate_thread', ?, '{}', 'pending', 0, ?, NULL, ?, ?)`
+      ).run(
+        OWNER_ID,
+        "qualification-model-continuity-test",
+        now,
+        now,
+        now,
+      ).lastInsertRowid);
       const dispatch = await runAttentiveDispatch<{ text: string }>(db, {
         messages: [{ role: "user", content: "qualification model fixture" }],
         purpose: "maintenance",

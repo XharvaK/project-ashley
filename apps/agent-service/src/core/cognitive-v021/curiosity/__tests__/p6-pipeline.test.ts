@@ -58,13 +58,14 @@ function count(db: DatabaseSync, sql: string): number {
 }
 
 describe("MAT-P6 governed curiosity pipeline", () => {
-  it("keeps the curiosity admission class closed and the legacy loop gated", () => {
+  it("keeps the curiosity admission class closed and the current loop authoritative", () => {
     expect(FROZEN_AUTOMATIC_ADMISSION_ALLOWLIST).toEqual(["learned_self_evidence"]);
     expect(MEMORY_KINDS).not.toContain("curiosity" as never);
 
     const serveSource = readFileSync(new URL("../../../../serve.ts", import.meta.url), "utf8");
-    expect(serveSource).toContain("const legacyRuntimeAllowed = env.cognitiveKernel !== \"v021\";");
-    expect(serveSource).toMatch(/if \(legacyRuntimeAllowed\) \{\s*startNuclearCuriosityLoop/);
+    expect(serveSource).toContain("startInboxConsumer");
+    expect(serveSource).not.toContain("legacyRuntimeAllowed");
+    expect(serveSource).not.toContain("startNuclearCuriosityLoop");
 
     const adapterSource = readFileSync(new URL("../own-time-adapter.ts", import.meta.url), "utf8");
     const inputSource = readFileSync(new URL("../../thought/input.ts", import.meta.url), "utf8");

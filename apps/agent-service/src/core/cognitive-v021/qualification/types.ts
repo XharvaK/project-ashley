@@ -197,8 +197,8 @@ export type ThoughtQualificationNegativeWitness = ThoughtQualificationCaseResult
 export type ThoughtRouteQualification = Readonly<{
   schema: "ashley.thought.route_qualification.v1";
   candidate: {
-    provider: "mistral";
-    model: "mistral-small-2603";
+    provider: "nim";
+    model: "nvidia/nemotron-3-super-120b-a12b";
     occupantId: string;
   };
   capabilityFingerprint: string;

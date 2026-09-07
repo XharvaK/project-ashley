@@ -4,7 +4,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import { openNuclearDb } from "../db.js";
 import { insertItem, insertTake, upsertSource } from "../curiosity/feed.js";
 import { recordSuccessfulRead } from "../curiosity/reads.js";
-import { enqueueCognitiveJob } from "../cognition/jobs.js";
 import { env } from "../../env.js";
 import { logDecision, setDecisionOutcome } from "./log.js";
 import {
@@ -104,6 +103,32 @@ function hashFor(slug: string): string {
   return createHash("sha256").update(slug).digest("hex");
 }
 
+function insertCognitiveJob(
+  db: DatabaseSync,
+  input: {
+    ownerId: string;
+    kind: "consolidate_thread" | "consolidate_curiosity";
+    sourceKey: string;
+    payload?: Record<string, unknown>;
+  },
+): number {
+  const now = new Date().toISOString();
+  return Number(db.prepare(
+    `INSERT INTO cognitive_jobs
+       (owner_id, kind, source_key, payload_json, status, attempts,
+        available_at, last_error, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'pending', 0, ?, NULL, ?, ?)`,
+  ).run(
+    input.ownerId,
+    input.kind,
+    input.sourceKey,
+    JSON.stringify(input.payload ?? {}),
+    now,
+    now,
+    now,
+  ).lastInsertRowid);
+}
+
 function seedReadTake(input: {
   db: DatabaseSync;
   ownerId: string;
@@ -147,7 +172,7 @@ function seedReadTake(input: {
     provenance,
   });
   if (!input.skipJob) {
-    const jobId = enqueueCognitiveJob(input.db, {
+    const jobId = insertCognitiveJob(input.db, {
       ownerId: input.ownerId,
       kind: "consolidate_curiosity",
       sourceKey: `curiosity:read:${readId}:${input.slug}`,
@@ -353,7 +378,7 @@ describe("own-time report assessment and finalizer", () => {
       cleanedChars: 300,
       provenance: "live",
     });
-    enqueueCognitiveJob(db, {
+    insertCognitiveJob(db, {
       ownerId: ownerA,
       kind: "consolidate_curiosity",
       sourceKey: `curiosity:read:${readId}`,
@@ -433,7 +458,7 @@ describe("own-time report assessment and finalizer", () => {
       ownerLinkedReadCount: 0,
     });
 
-    enqueueCognitiveJob(db, {
+    insertCognitiveJob(db, {
       ownerId: ownerA,
       kind: "consolidate_curiosity",
       sourceKey: `curiosity:read:${readId}:good`,

@@ -1,1 +1,0 @@
-Agent Plugins v1 assigns no component semantics to this directory.

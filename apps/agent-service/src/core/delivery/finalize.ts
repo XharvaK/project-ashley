@@ -1,8 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
-import { env } from "../../env.js";
 import { setDecisionOutcome } from "../agency/log.js";
 import { applyRelationshipDeliveryOutcome } from "../relationship/delivery-outcomes.js";
-import { enqueueCognitiveJob } from "../cognition/jobs.js";
 import { insertMessage } from "../memory/threads.js";
 import { patchState } from "../state/store.js";
 import {
@@ -44,10 +42,6 @@ export type FinalizeDeliveryResult = {
   receiptCount: number;
   plannedCount: number;
 };
-
-export function isLegacyConsolidationProducerAllowed(mode: unknown): boolean {
-  return mode === "legacy" || mode === "shadow";
-}
 
 function reasonFor(
   cause: FinalizeCause,
@@ -198,25 +192,6 @@ export function finalizeDelivery(
         text: deliveredText,
         channel: reservation.channel === "discord" ? "discord" : "discord",
       });
-      if (
-        assistantMessageId > 0 &&
-        isLegacyConsolidationProducerAllowed(env.cognitiveKernel)
-      ) {
-        enqueueCognitiveJob(db, {
-          ownerId: input.ownerId,
-          kind: "consolidate_thread",
-          sourceKey: `thread:${reservation.threadId}:message:${assistantMessageId}`,
-          payload: {
-            threadId: reservation.threadId,
-            throughMessageId: assistantMessageId,
-            deliveryReservationId: input.reservationId,
-            partial: state === "partially_delivered",
-          },
-          availableAt: new Date(
-            Date.now() + env.cognitionIdleConsolidationMin * 60_000,
-          ).toISOString(),
-        });
-      }
     }
 
     if (reservation.decisionId != null) {

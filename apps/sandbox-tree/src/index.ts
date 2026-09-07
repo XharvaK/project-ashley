@@ -7,8 +7,8 @@
  *
  * This package is deliberately dependency-light: it depends only on
  * `@composer-assistant/sandbox-policy` (pure path/exclusion policy). It is
- * used by both the legacy sandbox-broker (workspace materialization) and the
- * Sandbox V2 capability kernel (sanitized read-only project source views).
+ * used by the Sandbox V2 capability kernel (sanitized read-only project source
+ * views).
  */
 
 export * from "./workspace-exclusions.js";

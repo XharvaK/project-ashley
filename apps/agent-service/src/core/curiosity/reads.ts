@@ -1,7 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { createHash } from "node:crypto";
 import { htmlToText, logProvenance } from "./feed.js";
-import { enqueueCognitiveJob } from "../cognition/jobs.js";
 import { recordLiveShadowEvent } from "../rollout/capabilities.js";
 import { capabilityCanInfluence } from "../rollout/capabilities.js";
 import { listOpenQuestions } from "../state/questions.js";
@@ -334,12 +333,6 @@ export async function performGroundedReads(
       }
       db.prepare("UPDATE cur_items SET status = 'read' WHERE id = ?").run(item.id);
       logProvenance(db, "read", `${ownerId}:read:${readId}:${resource.finalUrl}`, item.id);
-      enqueueCognitiveJob(db, {
-        ownerId,
-        kind: "consolidate_curiosity",
-        sourceKey: `curiosity:read:${readId}`,
-        payload: { readId },
-      });
       recordLiveShadowEvent(db, "reading", `read:${readId}`);
       readsCreated++;
       if (lane === "interest") interestBudget--;

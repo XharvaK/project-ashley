@@ -18,7 +18,6 @@ import {
   currentBuildIdentity,
   currentContractId,
 } from "../rollout/capabilities.js";
-import { enqueueCognitiveJob } from "../cognition/jobs.js";
 
 const OWNER_ID = "doc";
 
@@ -144,12 +143,19 @@ describe("OCI forget and provenance boundaries", () => {
       env.cognitionMode = "apply";
       env.groqApiKey = "test-key";
       activate(db, "reading");
-      const jobId = enqueueCognitiveJob(db, {
-        ownerId: OWNER_ID,
-        kind: "consolidate_thread",
-        sourceKey: "forget-model-continuity-test",
-      });
       const now = "2026-08-09T00:00:00.000Z";
+      const jobId = Number(db.prepare(
+        `INSERT INTO cognitive_jobs
+           (owner_id, kind, source_key, payload_json, status, attempts,
+            available_at, last_error, created_at, updated_at)
+         VALUES (?, 'consolidate_thread', ?, '{}', 'pending', 0, ?, NULL, ?, ?)`
+      ).run(
+        OWNER_ID,
+        "forget-model-continuity-test",
+        now,
+        now,
+        now,
+      ).lastInsertRowid);
       db.prepare(
         `INSERT INTO questions
            (owner_id, subject, text, status, priority, created_at, updated_at,

@@ -44,11 +44,15 @@ function makeManager(
 ): AgentManager {
   const core = new AshleyCore(db);
   return {
-    getCognitiveKernel: () => env.cognitiveKernel,
+    getCognitiveKernel: () => "v021" as const,
     getState: () => options.state ?? "ready",
     isPaused: () => (options.state ?? "ready") === "paused",
     getUptimeSec: () => 0,
     getProviderState: () => "unavailable",
+    tickCognitiveIdle: options.tick ?? vi.fn(async () => ({
+      processed: 0,
+      reason: "test",
+    })),
     core: {
       getDatabase: () => db,
       promoteCapability: (input: { capability: string; authorizedBy: string }) =>
@@ -80,7 +84,6 @@ function makeManager(
       ) =>
         core.executeMemoryEvidenceCutover(input),
       isExpressionQuiesced: () => options.expressionQuiesced ?? true,
-      tickProactive: options.tick ?? vi.fn(async () => ({ shouldSend: false, reason: "test" })),
     },
   } as unknown as AgentManager;
 }
@@ -729,13 +732,13 @@ describe("C1 memory-evidence control-plane routes", () => {
           "SELECT currentness_authority FROM memory_contract_state WHERE id = 1",
         ).get()).toMatchObject({ currentness_authority: "mem_facts" });
 
-        const paused = await post(app, "/initiative/tick", { userId: OWNER });
+        const paused = await post(app, "/initiative/idle", { userId: OWNER });
         expect(paused.status).toBe(200);
       }, { state: "ready", expressionQuiesced: true });
 
       const tick = vi.fn(async () => ({ shouldSend: true }));
       await withServer(db, async (app) => {
-        const paused = await post(app, "/initiative/tick", { userId: OWNER });
+        const paused = await post(app, "/initiative/idle", { userId: OWNER });
         expect(paused.status).toBe(503);
         expect(paused.body).toMatchObject({ code: "agent_not_ready" });
         expect(tick).not.toHaveBeenCalled();

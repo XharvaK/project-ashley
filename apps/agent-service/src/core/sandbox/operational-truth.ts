@@ -6,7 +6,6 @@ import {
   isVerifiedPatchExportClaimEffect,
   isVerifiedWorkspaceClaimEffect,
   type OperationalClaimLicense,
-  type SandboxTaskProfile,
 } from "./engineering-types.js";
 
 export type OperationalTruthState =
@@ -21,7 +20,7 @@ export type OperationalTruthState =
 export type OperationalTruth = {
   state: OperationalTruthState;
   locked: boolean;
-  profile?: SandboxTaskProfile | string | null;
+  profile?: string | null;
   taskId?: string | null;
   error?: string | null;
   refusalReason?: string | null;

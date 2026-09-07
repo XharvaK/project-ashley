@@ -27,9 +27,6 @@ const REJECTED_CURRENTNESS_SETTLEMENT = `{
   "kind": "settlement",
   "interpretation": {
     "discourseActs": ["acknowledge"],
-    "referentBindings": [],
-    "corrections": [],
-    "unresolvedAmbiguities": [],
     "topics": ["acknowledgment"]
   },
   "commitments": {
@@ -44,7 +41,6 @@ const REJECTED_CURRENTNESS_SETTLEMENT = `{
         "statement": "Owner sent a message requesting acknowledgment."
       }
     ],
-    "operational": [],
     "conversational": ["answer"],
     "stance": {
       "warmth": "medium",
@@ -56,89 +52,8 @@ const REJECTED_CURRENTNESS_SETTLEMENT = `{
   "speech": {
     "mode": "draft",
     "mustSay": ["Understood. I have received your message."],
-    "mustNotSay": [],
     "surfaceDraft": "Understood. I have received your message.",
-    "acceptableRealizations": ["Understood. I have received your message.", "Message received.", "Acknowledged."],
     "presentationDirectives": ["concise", "direct"]
-  },
-  "workingContextDeltas": [
-    {
-      "op": "upsert",
-      "item": {
-        "identity": {
-          "kind": "local",
-          "alias": "acknowledgment_received"
-        },
-        "type": "referent",
-        "text": "Owner's message requesting acknowledgment has been received",
-        "concernRef": {
-          "kind": "local",
-          "alias": "acknowledgment_concern"
-        },
-        "sourceTurnRefs": ["turn-1"],
-        "status": "active",
-        "supersedesRef": null
-      }
-    }
-  ],
-  "concernDeltas": [
-    {
-      "op": "upsert",
-      "record": {
-        "identity": {
-          "kind": "local",
-          "alias": "acknowledgment_concern"
-        },
-        "statement": "Acknowledge receipt of owner's message requesting acknowledgment",
-        "sourceTurnRefs": ["turn-1"],
-        "dimensions": {
-          "source": "owner_utterance",
-          "status": "asserted",
-          "time": "current",
-          "reliability": "owner_supplied"
-        },
-        "status": "resolved"
-      }
-    }
-  ],
-  "occupancyDeltas": [
-    {
-      "op": "set",
-      "concernRef": {
-        "kind": "local",
-        "alias": "acknowledgment_concern"
-      },
-      "status": "resolved",
-      "priority": 1
-    }
-  ],
-  "futureTriggerDeltas": [],
-  "subscriptionDeltas": [],
-  "durableNominations": [
-    {
-      "alias": "acknowledgment_received",
-      "statement": "Owner's message requesting acknowledgment has been received",
-      "memoryKind": "episodic",
-      "dimensions": {
-        "source": "owner_utterance",
-        "status": "asserted",
-        "time": "current",
-        "reliability": "owner_supplied"
-      },
-      "dataClassification": "ordinary",
-      "sourceRefs": ["turn-1"],
-      "supersedesRef": null,
-      "concernRef": {
-        "kind": "local",
-        "alias": "acknowledgment_concern"
-      }
-    }
-  ],
-  "evidenceUse": {
-    "observationRefsUsed": ["turn-1"],
-    "retrievalRefsUsed": [],
-    "sourceRefsUsed": ["turn-1"],
-    "openIntentRefs": []
   }
 }`;
 
@@ -179,11 +94,11 @@ function createScriptedModel(script: readonly string[]) {
     registryVersion: "revision-test",
     policyRowId: "revision-test",
     occupantId: "revision-test-occupant",
-    provider: "mistral",
-    model: "mistral-small-2603",
+    provider: "nim",
+    model: "nvidia/nemotron-3-super-120b-a12b",
     logicalBindingId: "revision-test",
     schemaFingerprint: "revision-test",
-    wireBindingId: "compat_thought_mistral_small_2603_native_json_schema_v2",
+    wireBindingId: "compat_thought_nim_nemotron_super_native_json_schema_v1",
     wireMode: "native_json_schema",
     wireFormat: "json",
     buildIdentity: "revision-test-build",
@@ -216,16 +131,16 @@ async function runSingleSettlementSample(script: readonly string[]) {
   const now = 1_700_000_000_000;
   const checkoutIdentity = qualificationCheckoutIdentity();
   const savedRelease = env.ashleyReleaseId;
-  const savedKey = env.mistralApiKey;
+  const savedKey = env.nimApiKey;
   env.ashleyReleaseId = checkoutIdentity;
-  env.mistralApiKey = "revision-test-key";
+  env.nimApiKey = "revision-test-key";
   const runId = `w2-test-authority-revision-${randomUUID()}`;
   const outputDir = join(tmpdir(), `w2-revision-${randomUUID()}`);
   try {
     const result = await runThoughtCapabilityQualification({
       environment: "isolated_live",
-      provider: "mistral",
-      model: "mistral-small-2603",
+      provider: "nim",
+      model: "nvidia/nemotron-3-super-120b-a12b",
       candidateSha: checkoutIdentity,
       allowlistedReferences: ["turn-1"],
       noFallback: true,
@@ -242,7 +157,7 @@ async function runSingleSettlementSample(script: readonly string[]) {
     return { result, model, sleepCalls, runId };
   } finally {
     env.ashleyReleaseId = savedRelease;
-    env.mistralApiKey = savedKey;
+    env.nimApiKey = savedKey;
     rmSync(outputDir, { recursive: true, force: true });
   }
 }

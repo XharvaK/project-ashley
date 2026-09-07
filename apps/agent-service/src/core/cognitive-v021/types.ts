@@ -56,7 +56,7 @@ export const ORDINARY_THOUGHT_BUDGET_MS = 60_000 as const;
 export const THOUGHT_UNAVAILABLE_NOTICE =
   "[system] Thought did not complete. Please send the message again." as const;
 
-export type KernelMode = "legacy" | "shadow" | "v021";
+export type KernelMode = "v021";
 export type CycleId = string;
 export type ConversationId = string;
 export type Generation = number;

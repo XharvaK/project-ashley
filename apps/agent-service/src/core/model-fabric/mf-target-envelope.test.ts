@@ -2,7 +2,6 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { THOUGHT_MAX_OUTPUT_TOKENS } from "../agency/thought.js";
 import {
   EXPRESSION_MAX_OUTPUT_TOKENS,
   EXPRESSION_PROACTIVE_MAX_OUTPUT_TOKENS,
@@ -44,8 +43,6 @@ describe("TARGET portfolio + token envelope reconciliation", () => {
     expect(thought.deadlineMs).toBe(60000);
     expect(thought.maxOutputTokens).toBe(8192);
     expect(durable.maxOutputTokens).toBe(8192);
-    expect(THOUGHT_MAX_OUTPUT_TOKENS).toBe(2048);
-    expect(THOUGHT_MAX_OUTPUT_TOKENS).toBeLessThanOrEqual(8192);
     expect(expression.occupants[0]).toMatchObject({
       provider: "nim",
       configuredModelId: "nvidia/nemotron-3.5-lightning-30b-a3b",

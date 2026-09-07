@@ -15,11 +15,3 @@ declare module "*m3-qualification-contract.mjs" {
   export function assertSafePath(targetPath: string, description: string): void;
   export function verifyCanonicalWitnessHash(): { length: number; sha256: string };
 }
-
-declare module "*m3-inprocess-qualification.mjs" {
-  export const CANONICAL_WITNESS_BYTES: string;
-  export const CANONICAL_WITNESS_LENGTH: number;
-  export const CANONICAL_WITNESS_SHA256: string;
-  export function assertSafePath(targetPath: string, description: string): void;
-  export function runInProcessQualification(options?: any): Promise<any>;
-}

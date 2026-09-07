@@ -68,27 +68,25 @@ git pull --ff-only && bash deploy/linux-mint/update.sh
 
 `update.sh` activates the current checkout only. It does not fetch.
 
-## Sandbox boundary (implemented locally, not deployed)
+## Sandbox boundary
 
-The repository now contains the real Unix-socket broker daemon, durable broker
-state, SO_PEERCRED helper, and agent IPC transport. Mint still has none of the
-`ashley-sandbox` user, socket, systemd unit, or broker state until the explicit
-install action is run. The safe operator path is scripted and read-only by
-default:
+Production uses the direct, unprivileged Sandbox V2 path. There is no broker
+daemon, broker socket, delegated key installation, or Sandbox V1 systemd unit.
+The V2 project registry is operator-owned and read-only to Ashley. Physical V2
+qualification uses isolated disposable fixtures and does not touch production
+databases, registries, or workspaces:
 
-```powershell
-# from Windows; pushes the current branch, then performs a read-only Mint check
-powershell -File scripts\mint\sandbox.ps1 -Action Preflight -PushFirst
-
-# view current sandbox service state without changing anything
-powershell -File scripts\mint\sandbox.ps1 -Action Status
+```bash
+cd ~/project-ashley
+npm run build --prefix apps/sandbox-policy
+npm run build --prefix apps/sandbox-m1
+npm run build --prefix apps/sandbox-tree
+npm run build --prefix apps/sandbox-v2
+node scripts/mint/m3-m4-physical-qualification.mjs
 ```
 
-Do not run installation until the local broker gate has been reviewed. The same
-wrapper then uses `-Action Install -Apply` and requires explicit public-key
-paths. The default broker recipe enables only a harmless smoke check; source
-verification remains unsupported until its toolchain is provisioned. See
-[`sandbox/README.md`](sandbox/README.md) for the complete process and rollback.
+The qualification runner refuses to execute on Windows and never performs
+capability promotion.
 
 ### Without opening the laptop (SSH)
 

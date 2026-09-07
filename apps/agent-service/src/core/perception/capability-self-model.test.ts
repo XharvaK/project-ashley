@@ -68,13 +68,13 @@ describe("describeSandboxV2Availability", () => {
   });
 });
 
-describe("composeSelfCapabilityContext coexistence", () => {
-  it("correctly includes both V2 available and V1 legacy broker disabled without conflation", () => {
+describe("composeSelfCapabilityContext current Sandbox V2", () => {
+  it("describes the current V2 capability without retaining the retired V1 broker", () => {
     const db = makeDb();
     const context = composeSelfCapabilityContext(db);
 
     expect(context).toContain("Perception capabilities (honest self-model):");
-    expect(context).toContain("Legacy sandbox broker (V1):");
+    expect(context).not.toContain("Legacy sandbox broker (V1):");
     expect(context).toContain("Sandbox V2:");
     expect(context).not.toMatch(/^Sandboxed execution: broker IPC disabled/m);
     db.close();

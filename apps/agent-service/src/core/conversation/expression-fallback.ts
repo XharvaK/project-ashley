@@ -19,7 +19,7 @@ import {
   type ModelFabricDispatchMetadata,
   type ModelFallbackChain,
 } from "../model-fabric/index.js";
-import type { ContextBudgetMode } from "../context-budget/types.js";
+import type { ContextBudgetMode } from "../context-allocation/types.js";
 import type { ContextProjection } from "../model-fabric/projection.js";
 
 export type ExpressionFallbackPolicy = "minimal_identity_allowed" | "mistral_only";

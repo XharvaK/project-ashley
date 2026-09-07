@@ -95,7 +95,7 @@ import {
 import {
   ensureNuclearV37Schema,
   MIGRATION_37_CONTEXT_BUDGET_DDL,
-} from "./context-budget/migration-36.js";
+} from "./context-allocation/migration-36.js";
 import {
   ensureNuclearV36Schema,
   MIGRATION_36_MEMORY_EVIDENCE_DDL,
@@ -135,7 +135,6 @@ import {
   durableSemanticKeyHash,
   semanticIdentityHash,
 } from "./cognition/identity.js";
-import { reconcileSandboxApprovals } from "./sandbox/approval-store.js";
 import { currentBuildIdentity } from "./rollout/capabilities.js";
 
 export { reservedProductionNuclearDbPath as NUCLEAR_DB_PATH };
@@ -3341,7 +3340,6 @@ export function openNuclearDb(
   if (userVersion(existing) >= 36) {
     repairMemoryProjectionOnStartup(existing);
   }
-  reconcileSandboxApprovals(existing);
   if (continuity) registerContinuityFor(existing, continuity, mainFile);
   if (userVersion(existing) >= 44) reconcileAuthorityBarrierOnStartup(existing);
   return existing;

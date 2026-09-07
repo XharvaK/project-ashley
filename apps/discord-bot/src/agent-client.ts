@@ -1,7 +1,6 @@
 import { config } from "./config.js";
 
-/** Source-current synchronous agent transport ceiling. Not production-qualified. */
-export const AGENT_TRANSPORT_HARD_MS = 120_000;
+const AGENT_TRANSPORT_HARD_MS = 30_000;
 
 export type AgentError = {
   error: string;
@@ -56,24 +55,6 @@ async function agentFetch<T>(
   return { ...body, __httpStatus: res.status } as T;
 }
 
-export type ChatTextResult = {
-  text: string;
-  threadId: string;
-  model: string;
-  silenced?: boolean;
-  decisionKind?: string;
-  decisionId?: number;
-  reservationId?: number;
-  deliveryState?: string;
-  plannedBubbles?: Array<{ ordinal: number; text: string }>;
-  media?: { react: string | null; gifQuery: string | null };
-  firstBubbleDeadlineAt?: string | null;
-  finalDeliveryDeadlineAt?: string | null;
-  statusUrl?: string;
-  duplicate?: boolean;
-  __httpStatus?: number;
-};
-
 export type CognitiveIngressResult = {
   accepted: true;
   evidenceRowId: string;
@@ -122,50 +103,7 @@ export async function ingressChat(
   );
 }
 
-export async function chatText(
-  message: string,
-  options?: {
-    threadId?: string;
-    attachments?: Array<{
-      discordAttachmentId: string;
-      declaredMime: string;
-      fileName: string;
-      declaredByteSize?: number;
-      sourceUrl: string;
-    }>;
-    discordPresence?: DiscordPresencePayload;
-    inboundDiscordMessageIds?: string[];
-    finalFragmentReceivedAtMs?: number;
-    externalTransportHardDeadlineAtMs?: number;
-  },
-) {
-  const deadlineMs = options?.externalTransportHardDeadlineAtMs;
-  const timeoutMs =
-    deadlineMs != null
-      ? Math.max(1_000, deadlineMs - Date.now())
-      : AGENT_TRANSPORT_HARD_MS;
-  return agentFetch<ChatTextResult>(
-    "/chat/text",
-    {
-      method: "POST",
-      body: JSON.stringify({
-        message,
-        channel: "discord",
-        userId: config.ownerId,
-        threadId: options?.threadId,
-        attachments: options?.attachments?.length ? options.attachments : undefined,
-        discordPresence: options?.discordPresence,
-        inboundDiscordMessageIds: options?.inboundDiscordMessageIds,
-        finalFragmentReceivedAtMs: options?.finalFragmentReceivedAtMs,
-        externalTransportHardDeadlineAtMs:
-          options?.externalTransportHardDeadlineAtMs,
-      }),
-    },
-    timeoutMs,
-  );
-}
-
-export type PendingWeeklyReviewDelivery = {
+export type PendingDelivery = {
   reservationId: number;
   draftText: string;
   bubbles: Array<{
@@ -176,27 +114,10 @@ export type PendingWeeklyReviewDelivery = {
   statusUrl: string;
 };
 
-export async function listPendingWeeklyReviewDeliveries() {
-  const q = new URLSearchParams({ owner_id: config.ownerId, lane: "weekly_review" });
-  return agentFetch<{ deliveries: PendingWeeklyReviewDelivery[] }>(
-    `/delivery/pending?${q}`,
-  );
-}
-
-export async function listPendingOperationalDeliveries() {
-  const q = new URLSearchParams({
-    owner_id: config.ownerId,
-    lane: "operational_fulfillment",
-  });
-  return agentFetch<{ deliveries: PendingWeeklyReviewDelivery[] }>(
-    `/delivery/pending?${q}`,
-  );
-}
-
 export async function claimPendingDeliveries(options?: {
-  lane?: "operational_fulfillment" | "weekly_review" | "cognitive_v021";
+  lane?: "cognitive_v021";
 }) {
-  return agentFetch<{ deliveries: PendingWeeklyReviewDelivery[] }>(
+  return agentFetch<{ deliveries: PendingDelivery[] }>(
     `/delivery/claim`,
     {
       method: "POST",
@@ -208,87 +129,8 @@ export async function claimPendingDeliveries(options?: {
   );
 }
 
-export async function claimPendingWeeklyReviewDeliveries() {
-  return claimPendingDeliveries({
-    lane: "weekly_review",
-  });
-}
-
-export async function claimPendingOperationalDeliveries() {
-  return claimPendingDeliveries({
-    lane: "operational_fulfillment",
-  });
-}
-
 export async function claimPendingCognitiveDeliveries() {
   return claimPendingDeliveries({ lane: "cognitive_v021" });
-}
-
-export async function getDeliveryStatus(reservationId: number) {  const q = new URLSearchParams({ owner_id: config.ownerId });
-  return agentFetch<{
-    reservation: {
-      id: number;
-      state: string;
-      draftText: string | null;
-      firstBubbleDeadlineAt: string | null;
-      deliveryLeaseExpiresAt: string | null;
-    };
-    bubbles: Array<{
-      ordinal: number;
-      text: string;
-      discordMessageId: string | null;
-    }>;
-    statusUrl: string;
-  }>(`/delivery/${reservationId}?${q}`);
-}
-
-export async function pollDeliveryUntilReady(
-  reservationId: number,
-  deadlineMs: number,
-): Promise<ChatTextResult> {
-  while (Date.now() < deadlineMs) {
-    const status = await getDeliveryStatus(reservationId);
-    const state = status.reservation.state;
-    if (state === "reserved" || state === "sending" || state === "committed") {
-      return {
-        text: status.reservation.draftText ?? "",
-        threadId: "",
-        model: "none",
-        reservationId,
-        deliveryState: state,
-        plannedBubbles: status.bubbles.map((b) => ({
-          ordinal: b.ordinal,
-          text: b.text,
-        })),
-        firstBubbleDeadlineAt: status.reservation.firstBubbleDeadlineAt,
-        finalDeliveryDeadlineAt:
-          status.reservation.deliveryLeaseExpiresAt,
-        statusUrl: status.statusUrl,
-      };
-    }
-    if (
-      state === "aborted" ||
-      state === "cancelled" ||
-      state === "expired" ||
-      state === "partially_delivered"
-    ) {
-      return {
-        text: "",
-        threadId: "",
-        model: "none",
-        reservationId,
-        deliveryState: state,
-        plannedBubbles: [],
-        statusUrl: status.statusUrl,
-      };
-    }
-    await new Promise((r) => setTimeout(r, 250));
-  }
-  const e = new Error("delivery status poll timed out") as Error & {
-    code?: string;
-  };
-  e.code = "agent_timeout";
-  throw e;
 }
 
 export async function receiptDeliveryBubble(
@@ -602,27 +444,6 @@ export async function checkHealth(): Promise<boolean> {
   }
 }
 
-export async function tickInitiative() {
-  return agentFetch<
-    | { shouldSend: false; reason: string; cooldownRemainingSec?: number }
-    | {
-        shouldSend: true;
-        text: string;
-        threadId: string;
-        angle: string;
-        reason: string;
-        candidateKind?: string;
-        materialKey?: string;
-        reservationId?: number;
-        deliveryReservationId?: number;
-        plannedBubbles?: Array<{ ordinal: number; text: string }>;
-      }
-  >("/initiative/tick", {
-    method: "POST",
-    body: JSON.stringify({ userId: config.ownerId }),
-  });
-}
-
 export async function tickCognitiveIdle() {
   return agentFetch<{
     conversationId: string | null;
@@ -639,32 +460,6 @@ export async function tickCognitiveIdle() {
   });
 }
 
-export async function commitInitiative(body: {
-  text: string;
-  threadId: string;
-  angle: string;
-  reason: string;
-  discordMessageId: string;
-  candidateKind?: string;
-  materialKey?: string;
-  reservationId?: number;
-  deliveryReservationId?: number;
-  bubbleReceipts?: Array<{ ordinal: number; discordMessageId: string }>;
-  partial?: boolean;
-}) {
-  return agentFetch<{ ok: boolean }>("/initiative/commit", {
-    method: "POST",
-    body: JSON.stringify({ userId: config.ownerId, ...body }),
-  });
-}
-
-export async function abortInitiative(reservationId: number) {
-  return agentFetch<{ ok: boolean }>("/initiative/abort", {
-    method: "POST",
-    body: JSON.stringify({ userId: config.ownerId, reservationId }),
-  });
-}
-
 export async function pauseProactiveRemote() {
   return agentFetch<{ ok: boolean; paused: boolean }>("/initiative/pause", {
     method: "POST",
@@ -676,37 +471,6 @@ export async function resumeProactiveRemote() {
   return agentFetch<{ ok: boolean; paused: boolean }>("/initiative/resume", {
     method: "POST",
     body: JSON.stringify({ userId: config.ownerId }),
-  });
-}
-
-export async function evaluateInitiative() {
-  return agentFetch<{
-    shouldReachOut: boolean;
-    reason: string;
-    angle?: string;
-    cooldownRemainingSec: number;
-  }>("/initiative/evaluate", {
-    method: "POST",
-    body: JSON.stringify({ userId: config.ownerId }),
-  });
-}
-
-export async function generateInitiative(
-  angle: string,
-  reason: string,
-) {
-  return agentFetch<{
-    text: string;
-    threadId: string;
-    angle: string;
-    reason: string;
-  }>("/initiative/generate", {
-    method: "POST",
-    body: JSON.stringify({
-      userId: config.ownerId,
-      angle,
-      reason,
-    }),
   });
 }
 
@@ -728,34 +492,6 @@ export async function initiativeStatus() {
       code: string;
     } | null;
   }>(`/initiative/status?${q}`);
-}
-
-export type InitiativeOperationalStatus = {
-  enabled: boolean;
-  paused: boolean;
-  sentToday: number;
-  maxPerDay: number;
-  lastSentAt: string | null;
-  lastUserMessageAt: string | null;
-  minIdleHours: number;
-  lastDiagnostic: {
-    at: string;
-    stage: string;
-    code: string;
-  } | null;
-};
-
-/** Bounded scheduler preflight. Rich OCI diagnostics stay on initiativeStatus. */
-export async function initiativeOperationalStatus() {
-  const q = new URLSearchParams({ owner_id: config.ownerId });
-  return agentFetch<InitiativeOperationalStatus>(
-    `/initiative/operational-status?${q}`,
-  );
-}
-
-export async function urgentInitiativeStatus() {
-  const q = new URLSearchParams({ owner_id: config.ownerId });
-  return agentFetch<{ urgent: boolean }>(`/initiative/urgent?${q.toString()}`);
 }
 
 export type IdentityReview = {

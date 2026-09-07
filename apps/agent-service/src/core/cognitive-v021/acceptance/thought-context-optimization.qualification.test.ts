@@ -146,7 +146,7 @@ describe("Thought Context Optimization — Coherent Candidate Qualification", ()
       expect(retrievalResult.miss).toBe(false);
       expect(retrievalResult.hits.length).toBeGreaterThan(0);
 
-      // 4. Build Thought Input & Allocate for NIM 16k TPM
+      // 4. Build Thought Input & allocate for the current NIM Super route.
       const thoughtInput = buildThoughtInput({
         sidecar,
         cycle,
@@ -165,24 +165,26 @@ describe("Thought Context Optimization — Coherent Candidate Qualification", ()
       const nimAllocation = allocateThoughtProjection({
         sidecar,
         thoughtInput,
-        quotaBucket: "nim:openai/gpt-oss-20b",
+        quotaBucket: "nim:nvidia/nemotron-3-super-120b-a12b",
         requestId: "req-nim-qual",
       });
 
-      expect(nimAllocation.receipt.hardTpm).toBe(16000);
-      expect(nimAllocation.receipt.totalDemandTokens).toBeLessThanOrEqual(16000);
+      expect(nimAllocation.receipt.hardTpm).toBe(65536);
+      expect(nimAllocation.receipt.estimatedInputTokens)
+        .toBeLessThanOrEqual(nimAllocation.receipt.semanticProjectionEnvelope.maxInputTokens);
       expect(nimAllocation.receipt.headroomTokens).toBeGreaterThan(0);
 
-      // 5. Allocate for Groq 8k TPM
+      // 5. Allocate for the current Groq expression fallback route.
       const groqAllocation = allocateThoughtProjection({
         sidecar,
         thoughtInput,
-        quotaBucket: "groq:openai/gpt-oss-20b",
+        quotaBucket: "groq:qwen/qwen3.6-27b",
         requestId: "req-groq-qual",
       });
 
-      expect(groqAllocation.receipt.hardTpm).toBe(8000);
-      expect(groqAllocation.receipt.totalDemandTokens).toBeLessThanOrEqual(8000);
+      expect(groqAllocation.receipt.hardTpm).toBe(6100);
+      expect(groqAllocation.receipt.estimatedInputTokens)
+        .toBeLessThanOrEqual(groqAllocation.receipt.semanticProjectionEnvelope.maxInputTokens);
       expect(groqAllocation.receipt.headroomTokens).toBeGreaterThan(0);
 
       // 6. Verify significant wire reduction vs naive dump of all synthetic items

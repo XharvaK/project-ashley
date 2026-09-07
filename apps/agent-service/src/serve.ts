@@ -1,27 +1,6 @@
 import type { AgentManager } from "./agent.js";
 import { env } from "./env.js";
 import { createServer, listen } from "./server.js";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import {
-  startNuclearCuriosityLoop,
-  stopNuclearCuriosityLoop,
-} from "./core/curiosity/tick.js";
-import {
-  startCognitionLoop,
-  stopCognitionLoop,
-} from "./core/cognition/worker.js";
-import { createConfiguredUnixSandboxClient } from "./core/sandbox/unix-broker-client.js";
-import {
-  startEngineeringAutonomyLoops,
-  stopEngineeringAutonomyLoops,
-} from "./core/sandbox/engineering-runtime.js";
-import {
-  startDurableOperationalJobRunner,
-  stopDurableOperationalJobRunner,
-} from "./core/sandbox/durable-job-runner.js";
-import { runProductionDurableThought } from "./core/sandbox/durable-thought-production.js";
-import { claimWeeklyReviewDelivery } from "./core/sandbox/weekly-review-delivery.js";
 import { completeChat } from "./mistral-client.js";
 import { checkAuthority } from "./core/cognitive-v021/authority/check.js";
 import { loadAuthorityPacks } from "./core/cognitive-v021/authority/packs.js";
@@ -37,7 +16,7 @@ import { startFrontierCoordinator, type FrontierCoordinatorHandle } from "./core
 import {
   classifyInitiativeClass,
   evaluateProactiveEligibility,
-} from "./core/agency/proactive-eligibility.js";
+} from "./core/cognitive-v021/initiative/eligibility.js";
 import type { KernelDeps, Observation } from "./core/cognitive-v021/types.js";
 import { createV021LiveOperationExecutors } from "./core/cognitive-v021/dispatch/live-operations.js";
 import {
@@ -63,10 +42,7 @@ export function createAgentInboxConsumerHandler(
 
 export async function serveAgent(manager: AgentManager): Promise<void> {
   await manager.init();
-  const sandboxBrokerClient = createConfiguredUnixSandboxClient();
-  const cognitiveSidecar = env.cognitiveKernel === "legacy"
-    ? null
-    : manager.openCognitiveSidecar();
+  const cognitiveSidecar = manager.openCognitiveSidecar();
   let cognitiveConsumer: InboxConsumerHandle | null = null;
   let frontierCoordinator: FrontierCoordinatorHandle | null = null;
   let derivedStore: DerivedStore | null = null;
@@ -171,70 +147,8 @@ export async function serveAgent(manager: AgentManager): Promise<void> {
       },
     );
   }
-  const app = createServer(manager, { sandboxBrokerClient, cognitiveSidecar });
+  const app = createServer(manager, { cognitiveSidecar });
   const server = listen(app);
-
-  const legacyRuntimeAllowed = env.cognitiveKernel !== "v021";
-  if (legacyRuntimeAllowed) {
-    startNuclearCuriosityLoop(
-      manager.core.getDatabase(),
-      env.memoryOwnerId || env.discordOwnerId || "default",
-    );
-    startCognitionLoop(
-      manager.core.getDatabase(),
-      env.memoryOwnerId || env.discordOwnerId || "default",
-    );
-  }
-  if (legacyRuntimeAllowed) startEngineeringAutonomyLoops({
-    db: manager.core.getDatabase(),
-    ownerId: env.memoryOwnerId || env.discordOwnerId || "default",
-    brokerClient: sandboxBrokerClient,
-    onCompleted: (info) =>
-      console.log(
-        `[engineering] completed task=${info.taskId} admission=${info.admissionId} summary=${info.summary ?? ""}`,
-      ),
-    onWeeklyReviewDue: (review) => {
-      const outDir = join(manager.dataPlane.dataDir, "engineering-weekly-reviews");
-      try {
-        mkdirSync(outDir, { recursive: true });
-        writeFileSync(
-          join(outDir, `${review.reportRef}.json`),
-          JSON.stringify(review, null, 2),
-          "utf8",
-        );
-      } catch (err) {
-        console.error("[engineering-self-improvement] failed to persist review", err);
-      }
-      const ownerId = env.memoryOwnerId || env.discordOwnerId || "default";
-      try {
-        const claim = claimWeeklyReviewDelivery(
-          manager.core.getDatabase(),
-          { ownerId, reportRef: review.reportRef, candidate: review.candidate },
-        );
-        if (claim) {
-          console.log(
-            `[engineering-self-improvement] weekly review queued for delivery ref=${review.reportRef} deliveryReservation=${claim.deliveryReservationId}`,
-          );
-        } else {
-          console.log(
-            `[engineering-self-improvement] weekly review already claimed: ${review.reportRef}`,
-          );
-        }
-      } catch (err) {
-        console.error("[engineering-self-improvement] failed to claim weekly review delivery", err);
-      }
-    },
-    onRefused: (reason) => console.log(`[engineering] refused: ${reason}`),
-  });
-  if (legacyRuntimeAllowed && env.durableBoundedOperationEnabled) {
-    startDurableOperationalJobRunner({
-      db: manager.core.getDatabase(),
-      nowMs: () => Date.now(),
-      runDurableThought: env.durableOperationalThoughtEnabled
-        ? runProductionDurableThought
-      : undefined,
-    });
-  }
   manager.markStartupComplete();
   console.log(
     `[agent-service] nuclear core enabled db=${manager.core.getHealth().dbPath} plane=${manager.dataPlane.kind}`,
@@ -242,16 +156,11 @@ export async function serveAgent(manager: AgentManager): Promise<void> {
 
   const shutdown = async (signal: string) => {
     console.log(`[agent-service] ${signal}`);
-    stopNuclearCuriosityLoop();
-    stopCognitionLoop();
-    stopEngineeringAutonomyLoops();
     cognitiveConsumer?.stop();
     frontierCoordinator?.stop();
     if (cognitiveConsumer) await cognitiveConsumer.done;
     derivedStore?.close();
     try { observabilityDb?.close(); } catch { /* ignore */ }
-    await stopDurableOperationalJobRunner();
-    sandboxBrokerClient?.close();
     await manager.shutdown();
     server.close();
     process.exit(0);

@@ -1,6 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
 import { env } from "../../env.js";
-import { describeSandboxAvailability } from "../sandbox/availability.js";
 import { isSandboxV2Available } from "../sandbox/v2-execution.js";
 import { contractMismatch } from "../attention/ledger.js";
 import {
@@ -329,7 +328,6 @@ export function composeSelfCapabilityContext(
     `- ${describeCandidateAuthorshipAvailability({ db, masterMode: options?.masterMode })}`,
     `- ${describeBoundedOperationAvailability({ db, masterMode: options?.masterMode })}`,
     `- ${describePatchExportAvailability({ db, masterMode: options?.masterMode })}`,
-    `- ${describeSandboxAvailability()}`,
   ];
   return lines.join("\n");
 }

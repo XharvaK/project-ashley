@@ -2,10 +2,9 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { openNuclearDb } from "../db.js";
 import type { ChatMessage } from "../model-routing/types.js";
-import type { Decision, Motivation } from "../types.js";
+import type { Decision } from "../types.js";
 import { selectMotivationCandidates } from "../agency/candidate-selection.js";
 import { resolveEvidenceRefs } from "../agency/resolve-evidence.js";
-import { composeInitialThoughtMessages } from "../agency/thought.js";
 import { composeTurnContext, mindStateBlock } from "../context-composer.js";
 import { expressSpeak } from "../conversation/expression.js";
 import type { ExpressionComplete } from "../conversation/expression-fallback.js";
@@ -362,39 +361,4 @@ describe("C1 reader cutover", () => {
     }
   });
 
-  it("preserves memory roles and correction ids in Thought candidate JSON", () => {
-    const base = baseDecision();
-    const motivation: Motivation = {
-      id: 7,
-      ownerId: OWNER_ID,
-      kind: "fact",
-      score: 80,
-      refType: "fact",
-      refId: 4,
-      summary: "coffee: corrected",
-      memoryContextRole: "corrected_source_evidence",
-      memoryAssertionIds: [11],
-      memoryCorrectionIds: [13],
-    };
-    const messages = composeInitialThoughtMessages({
-      base,
-      motivations: [motivation],
-      trigger: "reactive",
-      canOffer: false,
-      canOfferWorkspace: false,
-      canOfferVerification: false,
-      canOfferAuthorship: false,
-      canOfferOperation: false,
-      canOfferExport: false,
-      approvedProjectIds: [],
-    });
-    const payload = JSON.parse(String(messages[1]?.content)) as {
-      candidates?: Array<Record<string, unknown>>;
-    };
-    expect(payload.candidates?.[0]).toMatchObject({
-      memory_context_role: "corrected_source_evidence",
-      memory_assertion_ids: [11],
-      memory_correction_ids: [13],
-    });
-  });
 });

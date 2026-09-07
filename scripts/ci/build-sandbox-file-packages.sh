@@ -10,7 +10,6 @@ packages=(
   sandbox-policy
   sandbox-tree
   sandbox-m1
-  sandbox-broker
   sandbox-v2
 )
 

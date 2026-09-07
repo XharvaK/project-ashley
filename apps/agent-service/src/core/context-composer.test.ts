@@ -11,7 +11,6 @@ import {
   operationalWorkBlock,
   stableIdentityBlock,
 } from "./context-composer.js";
-import { persistCoordinatorTasks } from "./sandbox/engineering-runs.js";
 import type { WorkspaceExperimentObservation } from "./types.js";
 import type { OperationalClaimLicense } from "./sandbox/engineering-types.js";
 
@@ -154,57 +153,6 @@ describe("operationalWorkBlock", () => {
     expect(block).toContain("Status: succeeded");
     expect(block).toContain("Effect evidence: unverified (state is succeeded; verified effect evidence is unavailable; no completion licensed).");
     expect(block).not.toContain("roundtrip verified (temporary file created");
-    db.close();
-  });
-
-  it("preserves legacy V1 coordinator task rendering when task exists in engineering_runs", () => {
-    const db = makeDb();
-    const now = Date.now();
-    persistCoordinatorTasks(db, [
-      {
-        taskId: "eng-task-100",
-        owner: OWNER,
-        projectId: null,
-        sourceBaseCommit: null,
-        admissionCause: "user_request",
-        groundingRefs: [],
-        profile: "sandbox_workspace_file_roundtrip",
-        status: "completed",
-        workspaceId: "ws-100",
-        modelCallsUsed: 1,
-        toolCallsUsed: 2,
-        startedAtMs: now - 1000,
-        deadlineMs: now + 5000,
-        completedAtMs: now,
-        error: null,
-        refusal: null,
-        candidatePatchRef: null,
-        candidateCommitRef: null,
-        artifactRefs: [],
-        effectEvidence: {
-          verified: true,
-          workspaceId: "ws-100",
-          relativePath: "test.txt",
-          bytesWritten: 10,
-          contentHash: "hash-100",
-          readMatches: true,
-          deleted: true,
-          verifiedAbsent: true,
-          completedAtMs: now,
-        },
-      },
-    ]);
-
-    const block = operationalWorkBlock(db, OWNER, {
-      operationalLicense: {
-        state: "succeeded",
-        taskId: "eng-task-100",
-        profile: "sandbox_workspace_file_roundtrip",
-      },
-    });
-    expect(block).toContain("Status: completed");
-    expect(block).toContain("Task ID: eng-task-100");
-    expect(block).toContain("Effect evidence: roundtrip verified");
     db.close();
   });
 

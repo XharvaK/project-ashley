@@ -8,10 +8,10 @@ import { quotaBucketFor } from "./types.js";
 import { AppError } from "../../errors.js";
 
 /**
- * Static route registry (Wave 1). Model IDs and lifecycle values will be
- * loaded from the versioned config in Wave 1 commit 3; this table is the
- * fallback source of truth until then and must stay in sync with
- * config/models.json.
+ * Compatibility route registry for the current Model Fabric portfolio. Model
+ * IDs and lifecycle values are resolved from the validated current portfolio;
+ * this table retains the stable route vocabulary and quota defaults used by
+ * the routing compatibility surface.
  */
 export const ROUTE_BINDINGS: readonly RouteBinding[] = [
   {

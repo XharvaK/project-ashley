@@ -1,21 +1,6 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import {
-  CAPABILITY_SIGNING_KEY_ID,
-  DELEGATED_RUNTIME_KEY_ID,
-} from "@composer-assistant/sandbox-broker";
-import { SANDBOX_AUTONOMY_LIFECYCLE_VALUES } from "./core/sandbox/lifecycle.js";
-import type { KernelMode } from "./core/cognitive-v021/types.js";
-
-export function parseCognitiveKernel(raw: string | undefined): KernelMode {
-  const value = raw?.trim() ?? "";
-  if (value === "" || value === "legacy") return "legacy";
-  if (value === "shadow") return "shadow";
-  if (value === "v021") return "v021";
-  throw new Error("invalid_ASHLEY_COGNITIVE_KERNEL");
-}
-
 function applyDotEnvFile(envPath: string): void {
   if (!existsSync(envPath)) return;
   const content = readFileSync(envPath, "utf-8");
@@ -83,20 +68,6 @@ function strictBoolean(name: string, fallback: boolean): boolean {
   return fallback;
 }
 
-function strictEnum<T extends readonly string[]>(
-  name: string,
-  values: T,
-  fallback: T[number],
-): T[number] {
-  const raw = process.env[name];
-  if (raw === undefined || raw.trim() === "") return fallback;
-  if ((values as readonly string[]).includes(raw.trim())) {
-    return raw.trim() as T[number];
-  }
-  bootErrors.push(`${name} must be one of: ${values.join(", ")}`);
-  return fallback;
-}
-
 function strictTrimmed(name: string, fallback: string): string {
   const raw = process.env[name];
   if (raw === undefined) return fallback;
@@ -111,19 +82,6 @@ function strictTrimmed(name: string, fallback: string): string {
 function createEnv() {
   bootErrors = [];
   numericWarnings = [];
-  const sandboxKeysDir = strictTrimmed(
-    "ASHLEY_SANDBOX_KEYS_DIR",
-    join(homedir(), ".composer-assistant", "keys"),
-  );
-  const sandboxOwnerKeyId = strictTrimmed(
-    "ASHLEY_SANDBOX_OWNER_KEY_ID",
-    "owner-ed25519-v1",
-  );
-  const sandboxContinuityKeyId = strictTrimmed(
-    "ASHLEY_SANDBOX_CONTINUITY_KEY_ID",
-    "continuity-tombstone-ed25519-v1",
-  );
-
   return {
   ashleyReleaseId: process.env.ASHLEY_RELEASE_ID ?? "",
   mistralApiKey: process.env.MISTRAL_API_KEY ?? "",
@@ -168,7 +126,6 @@ function createEnv() {
     process.env.ASHLEY_COGNITION_MODE === "apply"
       ? ("apply" as const)
       : ("observe" as const),
-  cognitiveKernel: parseCognitiveKernel(process.env.ASHLEY_COGNITIVE_KERNEL),
   cognitionDispatchIntervalSec: numericEnv(
     "COGNITION_DISPATCH_INTERVAL_SEC",
     30,
@@ -243,148 +200,17 @@ function createEnv() {
     1440,
   ),
   curiosityEnabled: process.env.CURIOSITY_ENABLED !== "false",
-  curiosityTickMinutes: numericEnv("CURIOSITY_TICK_MINUTES", 45, 1, 1440),
-  curiosityItemsPerSource: numericEnv(
-    "CURIOSITY_ITEMS_PER_SOURCE",
-    12,
-    1,
-    100,
-    true,
-  ),
-  sandboxBrokerEnabled: strictBoolean(
-    "ASHLEY_SANDBOX_BROKER_ENABLED",
-    false,
-  ),
-  // Opt-in flag for the delegated `sandbox.*` IPC surface. The agent wires a
-  // production Unix-socket broker client only when this is true AND the broker
-  // host has started the delegated runtime; otherwise it stays on the in-process
-  // fake. Not release-qualified (Wave 07c, see Sandbox_Design.md).
-  sandboxDelegatedEnabled: strictBoolean(
-    "ASHLEY_SANDBOX_DELEGATED_ENABLED",
-    false,
-  ),
-  sandboxBrokerSocket: strictTrimmed(
-    "ASHLEY_SANDBOX_BROKER_SOCKET",
-    "/run/ashley/broker.sock",
-  ),
-  sandboxBrokerTimeoutMs: numericEnv(
-    "ASHLEY_SANDBOX_BROKER_TIMEOUT_MS",
-    5_000,
-    100,
-    30_000,
-    true,
-  ),
-  sandboxKeysDir,
-  sandboxKeyPassphrasePath:
-    process.env.ASHLEY_SANDBOX_KEY_PASSPHRASE_PATH ??
-    join(homedir(), ".composer-assistant", "keys", "master.pass"),
-  sandboxOwnerApprovalKeyEncPath:
-    process.env.ASHLEY_SANDBOX_OWNER_KEY_ENC_PATH ??
-    join(homedir(), ".composer-assistant", "keys", "owner-approval.key.enc"),
-  sandboxContinuityKeyEncPath:
-    process.env.ASHLEY_SANDBOX_CONTINUITY_KEY_ENC_PATH ??
-    join(homedir(), ".composer-assistant", "keys", "continuity-tombstone.key.enc"),
-  sandboxOwnerKeyId,
-  sandboxContinuityKeyId,
-  // Sandbox autonomy lifecycle. Mirrors SANDBOX_AUTONOMY_LIFECYCLE_VALUES;
-  // the runtime loop stays constructor-injected and defaults to disabled, so
-  // this value is configuration surface and readiness gating only.
-  sandboxLifecycle: strictEnum(
-    "ASHLEY_SANDBOX_LIFECYCLE",
-    SANDBOX_AUTONOMY_LIFECYCLE_VALUES,
-    "disabled",
-  ),
-  // Network isolation provider for fixed-recipe execution. `unavailable`
-  // (default) is the fail-closed provider: no provider, no execution. `none`
-  // is the Mint network-namespace enforcement the broker injects.
-  sandboxNetworkProvider: strictEnum(
-    "ASHLEY_SANDBOX_NETWORK_PROVIDER",
-    ["unavailable", "none"],
-    "unavailable",
-  ),
-  // Engineering autonomy lifecycle master switch. Fail-closed: the supervisor
-  // loops only start when this is explicitly true (owner action). Mirrors the
-  // broader sandbox lifecycle but is the precise gate for the engineering
-  // workstation supervisor + weekly self-improvement trigger.
+  // Sandbox V2 direct execution lifecycle master switch. It is fail-closed by
+  // default and gates only the current V2 execution path.
   sandboxEngineeringLifecycleEnabled: strictBoolean(
     "ASHLEY_SANDBOX_ENGINEERING_LIFECYCLE_ENABLED",
     false,
   ),
-  /** Slice-1 durable M6: admit then detach. Default off. */
-  durableBoundedOperationEnabled: strictBoolean(
-    "ASHLEY_DURABLE_BOUNDED_OPERATION_ENABLED",
-    false,
-  ),
-  /** Slice-2 durable Initial Thought. Requires slice-1 flag. Default off. */
-  durableOperationalThoughtEnabled: strictBoolean(
-    "ASHLEY_DURABLE_OPERATIONAL_THOUGHT_ENABLED",
-    false,
-  ),
-  // Host-provided allowlisted project-root registry (operator config, never
-  // model-writable). Empty/unset => no roots => envelope precheck refuses writes.
+  // Host-provided allowlisted V2 project registry (operator config, never
+  // model-writable). Empty/unset => no project authority.
   sandboxProjectRegistryPath: strictTrimmed(
     "ASHLEY_SANDBOX_PROJECT_REGISTRY",
-    join(sandboxKeysDir, "project-roots.json"),
-  ),
-  // Engineering supervisor polling interval (minutes).
-  sandboxEngineeringSupervisorMinutes: numericEnv(
-    "ASHLEY_SANDBOX_ENGINEERING_SUPERVISOR_MINUTES",
-    5,
-    1,
-    120,
-    true,
-  ),
-  // Host-owned activation marker written by the owner's activation runbook
-  // (scripts/mint/activate-engineering.sh). The agent ingests its epoch into
-  // the durable activation epoch on startup; absence => no dispatch (fail-closed).
-  sandboxActivationMarkerPath: strictTrimmed(
-    "ASHLEY_SANDBOX_ACTIVATION_MARKER",
-    join(homedir(), ".composer-assistant", "engineering-activation.json"),
-  ),
-  // Broker trust anchors and policy artifacts (paths only; never keys).
-  sandboxPolicyArtifactPath: strictTrimmed(
-    "ASHLEY_SANDBOX_POLICY_ARTIFACT",
-    "",
-  ),
-  sandboxPolicySignaturePath: strictTrimmed(
-    "ASHLEY_SANDBOX_POLICY_SIGNATURE",
-    "",
-  ),
-  sandboxOwnerPublicKeyPath: strictTrimmed(
-    "ASHLEY_SANDBOX_OWNER_PUBLIC_KEY",
-    join(sandboxKeysDir, `${sandboxOwnerKeyId}.pub`),
-  ),
-  sandboxContinuityPublicKeyPath: strictTrimmed(
-    "ASHLEY_SANDBOX_CONTINUITY_PUBLIC_KEY",
-    join(sandboxKeysDir, `${sandboxContinuityKeyId}.pub`),
-  ),
-  // Delegated runtime signing key custody material; the signer is injected
-  // with material, never reading these paths itself.
-  sandboxDelegatedKeyEncPath: strictTrimmed(
-    "ASHLEY_SANDBOX_DELEGATED_KEY_ENC_PATH",
-    join(sandboxKeysDir, "delegated-runtime.key.enc"),
-  ),
-  sandboxDelegatedKeyId: strictTrimmed(
-    "ASHLEY_SANDBOX_DELEGATED_KEY_ID",
-    DELEGATED_RUNTIME_KEY_ID,
-  ),
-  // Broker-side session capability signing key. The broker owns generation;
-  // the agent only pins the expected key id and custody location.
-  sandboxCapabilityKeyEncPath: strictTrimmed(
-    "ASHLEY_SANDBOX_CAPABILITY_KEY_ENC_PATH",
-    join(sandboxKeysDir, "broker-session-capability.key.enc"),
-  ),
-  sandboxCapabilityKeyId: strictTrimmed(
-    "ASHLEY_SANDBOX_CAPABILITY_KEY_ID",
-    CAPABILITY_SIGNING_KEY_ID,
-  ),
-  sandboxStateRoot: strictTrimmed(
-    "ASHLEY_SANDBOX_STATE_ROOT",
-    join(homedir(), ".composer-assistant", "sandbox", "state"),
-  ),
-  sandboxWorkspaceRoot: strictTrimmed(
-    "ASHLEY_SANDBOX_WORKSPACE_ROOT",
-    join(homedir(), ".composer-assistant", "sandbox", "workspace"),
+    join(homedir(), ".composer-assistant", "sandbox", "project-roots.json"),
   ),
   };
 }
@@ -400,63 +226,6 @@ export function refreshEnvFromProcess(): void {
   Object.assign(env, createEnv());
 }
 
-function sandboxIsActive(): boolean {
-  return env.sandboxBrokerEnabled || env.sandboxLifecycle !== "disabled";
-}
-
-function sandboxReadinessErrors(): string[] {
-  const errors: string[] = [];
-  if (env.sandboxBrokerSocket.length === 0) {
-    errors.push("ASHLEY_SANDBOX_BROKER_SOCKET must be set when the sandbox is enabled");
-  }
-  const missingKeys: string[] = [];
-  const owner = env.sandboxOwnerApprovalKeyEncPath;
-  const continuity = env.sandboxContinuityKeyEncPath;
-  const passphrase = env.sandboxKeyPassphrasePath;
-  if (!existsSync(owner)) missingKeys.push(`owner approval key (${owner})`);
-  if (!existsSync(join(env.sandboxKeysDir, `${env.sandboxOwnerKeyId}.pub`))) {
-    missingKeys.push(
-      `owner approval public key (${join(env.sandboxKeysDir, `${env.sandboxOwnerKeyId}.pub`)})`,
-    );
-  }
-  if (!existsSync(continuity)) {
-    missingKeys.push(`continuity tombstone key (${continuity})`);
-  }
-  if (!existsSync(join(env.sandboxKeysDir, `${env.sandboxContinuityKeyId}.pub`))) {
-    missingKeys.push(
-      `continuity tombstone public key (${join(env.sandboxKeysDir, `${env.sandboxContinuityKeyId}.pub`)})`,
-    );
-  }
-  if (!existsSync(passphrase)) missingKeys.push(`master passphrase (${passphrase})`);
-  if (missingKeys.length > 0) {
-    errors.push(`sandbox signing keys incomplete: ${missingKeys.join(", ")}`);
-  }
-  if (env.sandboxPolicyArtifactPath === "") {
-    errors.push("ASHLEY_SANDBOX_POLICY_ARTIFACT must be set when the sandbox is enabled");
-  } else if (!existsSync(env.sandboxPolicyArtifactPath)) {
-    errors.push(`sandbox policy artifact not found (${env.sandboxPolicyArtifactPath})`);
-  }
-  if (env.sandboxPolicySignaturePath === "") {
-    errors.push("ASHLEY_SANDBOX_POLICY_SIGNATURE must be set when the sandbox is enabled");
-  } else if (!existsSync(env.sandboxPolicySignaturePath)) {
-    errors.push(`sandbox policy signature not found (${env.sandboxPolicySignaturePath})`);
-  }
-  if (!existsSync(env.sandboxOwnerPublicKeyPath)) {
-    errors.push(`sandbox owner public key not found (${env.sandboxOwnerPublicKeyPath})`);
-  }
-  if (!existsSync(env.sandboxContinuityPublicKeyPath)) {
-    errors.push(
-      `sandbox continuity public key not found (${env.sandboxContinuityPublicKeyPath})`,
-    );
-  }
-  if (!existsSync(env.sandboxDelegatedKeyEncPath)) {
-    errors.push(
-      `delegated runtime key not found (${env.sandboxDelegatedKeyEncPath})`,
-    );
-  }
-  return errors;
-}
-
 export function validateBoot(): {
   ok: boolean;
   errors: string[];
@@ -464,39 +233,9 @@ export function validateBoot(): {
 } {
   const errors = [...bootErrors];
   const warnings = [...numericWarnings];
-  if (sandboxIsActive()) {
-    errors.push(...sandboxReadinessErrors());
-  }
-  if (env.sandboxDelegatedEnabled && env.sandboxBrokerSocket.trim().length === 0) {
-    errors.push(
-      "ASHLEY_SANDBOX_BROKER_SOCKET must be set when ASHLEY_SANDBOX_DELEGATED_ENABLED is true",
-    );
-  }
-  if (
-    env.sandboxLifecycle !== "disabled" &&
-    !env.sandboxBrokerEnabled
-  ) {
-    warnings.push(
-      `ASHLEY_SANDBOX_LIFECYCLE is ${env.sandboxLifecycle} but ASHLEY_SANDBOX_BROKER_ENABLED is not true — broker IPC stays off`,
-    );
-  }
-  if (
-    !env.mistralApiKey &&
-    (env.cognitiveKernel === "legacy" || env.cognitiveKernel === "shadow")
-  ) {
-    warnings.push("MISTRAL_API_KEY missing — agent will run offline");
-  }
   if (!env.memoryOwnerId) {
     warnings.push(
       "MEMORY_OWNER_ID / DISCORD_OWNER_ID missing — set owner for nuclear memory",
-    );
-  }
-  if (
-    env.durableOperationalThoughtEnabled &&
-    !env.durableBoundedOperationEnabled
-  ) {
-    errors.push(
-      "ASHLEY_DURABLE_OPERATIONAL_THOUGHT_ENABLED requires ASHLEY_DURABLE_BOUNDED_OPERATION_ENABLED",
     );
   }
   return { ok: errors.length === 0, errors, warnings };

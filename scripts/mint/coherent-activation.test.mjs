@@ -39,7 +39,7 @@ function createFixture() {
   mkdirSync(unitDir, { recursive: true });
   mkdirSync(fakeBin, { recursive: true });
   mkdirSync(state, { recursive: true });
-  for (const app of ["sandbox-policy", "sandbox-m1", "sandbox-tree", "sandbox-broker", "sandbox-v2", "agent-service", "discord-bot"]) {
+  for (const app of ["sandbox-policy", "sandbox-m1", "sandbox-tree", "sandbox-v2", "agent-service", "discord-bot"]) {
     mkdirSync(path.join(repo, "apps", app, "src"), { recursive: true });
     // Steady-state Mint always has installed node_modules from the last
     // successful activation; impact-aware plans skip npm ci on that basis.
@@ -303,7 +303,7 @@ function firstIndex(lines, prefix) {
 const SHA_A = "a".repeat(40);
 const SHA_B = "b".repeat(40);
 const TREE_B = "c".repeat(40);
-const CANONICAL_ORDER = "sandbox-policy sandbox-m1 sandbox-tree sandbox-broker sandbox-v2 agent-service discord-bot";
+const CANONICAL_ORDER = "sandbox-policy sandbox-m1 sandbox-tree sandbox-v2 agent-service discord-bot";
 
 function parsePlan(stdout) {
   const plan = {};
@@ -438,7 +438,6 @@ test("canonical activation builds local packages in dependency order", () => {
     "sandbox-policy",
     "sandbox-m1",
     "sandbox-tree",
-    "sandbox-broker",
     "sandbox-v2",
     "agent-service",
     "discord-bot",
@@ -601,7 +600,7 @@ test("T3 sandbox-v2 change builds v2 then agent, restarts agent only", () => {
 test("T4 sandbox-policy change builds canonical closure without sandbox-m1", () => {
   const fixture = createFixture();
   const plan = runPlanner(fixture, SHA_A, SHA_B, impactEnv(fixture, "M\tapps/sandbox-policy/src/policy.ts"));
-  assert.equal(plan.BUILD, "sandbox-policy sandbox-tree sandbox-broker sandbox-v2 agent-service");
+  assert.equal(plan.BUILD, "sandbox-policy sandbox-tree sandbox-v2 agent-service");
   assert.equal(plan.STOP, "ashley-discord.service ashley-agent.service");
   assert.equal(plan.RESTART, "ashley-agent.service ashley-discord.service");
   const { result } = runImpactedUpdate(fixture, SHA_A, "M\tapps/sandbox-policy/src/policy.ts");
@@ -609,7 +608,6 @@ test("T4 sandbox-policy change builds canonical closure without sandbox-m1", () 
   assert.deepEqual(buildPackages(fixture), [
     "sandbox-policy",
     "sandbox-tree",
-    "sandbox-broker",
     "sandbox-v2",
     "agent-service",
   ]);
@@ -669,14 +667,14 @@ test("T7 lockfile change installs only the affected package plus closure build",
   assert.deepEqual(buildPackages(fixture), ["sandbox-v2", "agent-service"]);
 });
 
-test("T8 unknown path falls back to the full broad deploy including npm ci x7", () => {
+test("T8 unknown path falls back to the full broad deploy including npm ci x6", () => {
   const fixture = createFixture();
   const plan = runPlanner(fixture, SHA_A, SHA_B, impactEnv(fixture, "M\tsome/new/tool.bin"));
   assert.equal(plan.MODE, "full_fallback");
   assert.match(plan.FALLBACK_REASON, /unknown_path/);
   assert.equal(
     plan.BUILD,
-    "sandbox-policy sandbox-m1 sandbox-tree sandbox-broker sandbox-v2 agent-service discord-bot",
+    "sandbox-policy sandbox-m1 sandbox-tree sandbox-v2 agent-service discord-bot",
   );
   const { result, markerPath } = runImpactedUpdate(fixture, SHA_A, "M\tsome/new/tool.bin");
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
@@ -685,12 +683,11 @@ test("T8 unknown path falls back to the full broad deploy including npm ci x7", 
     "sandbox-policy",
     "sandbox-m1",
     "sandbox-tree",
-    "sandbox-broker",
     "sandbox-v2",
     "agent-service",
     "discord-bot",
   ]);
-  assert.equal(ciPackages(fixture).length, 7);
+  assert.equal(ciPackages(fixture).length, 6);
   assert.ok(hasServiceOp(fixture, "stop", "ashley-agent.service"));
   assert.ok(hasServiceOp(fixture, "stop", "ashley-discord.service"));
   assert.equal(readMarker(markerPath), SHA_B);
@@ -708,7 +705,6 @@ test("T9 missing marker falls back once, then records activation on success", ()
     "sandbox-policy",
     "sandbox-m1",
     "sandbox-tree",
-    "sandbox-broker",
     "sandbox-v2",
     "agent-service",
     "discord-bot",
@@ -817,8 +813,8 @@ test("T17 every subset closure preserves canonical topological order", () => {
   const fixture = createFixture();
   const cases = [
     ["M\tapps/sandbox-m1/src/sandbox-m1.ts", "sandbox-m1 sandbox-v2 agent-service"],
-    ["M\tapps/sandbox-tree/src/index.ts", "sandbox-tree sandbox-broker sandbox-v2 agent-service"],
-    ["M\tapps/sandbox-broker/src/index.ts", "sandbox-broker agent-service"],
+    ["M\tapps/sandbox-tree/src/index.ts", "sandbox-tree sandbox-v2 agent-service"],
+    ["M\tapps/sandbox-v2/src/index.ts", "sandbox-v2 agent-service"],
     ["M\tapps/discord-bot/src/index.ts", "discord-bot"],
   ];
   for (const [diff, want] of cases) {
@@ -856,7 +852,7 @@ test("T18 unit-only change restarts only the affected service with no build", ()
 test("T19 deletion and rename classify to the owning package closure", () => {
   const fixture = createFixture();
   const del = runPlanner(fixture, SHA_A, SHA_B, impactEnv(fixture, "D\tapps/sandbox-tree/src/old.ts"));
-  assert.equal(del.BUILD, "sandbox-tree sandbox-broker sandbox-v2 agent-service");
+  assert.equal(del.BUILD, "sandbox-tree sandbox-v2 agent-service");
   const ren = runPlanner(
     fixture,
     SHA_A,
@@ -893,7 +889,7 @@ test("privacy-core and runtime config changes restart agent without a build", ()
   assert.equal(priv.BUILD, "");
   assert.equal(priv.STOP, "ashley-discord.service ashley-agent.service");
   assert.equal(priv.RESTART, "ashley-agent.service ashley-discord.service");
-  const cfg = runPlanner(fixture, SHA_A, SHA_B, impactEnv(fixture, "M\tconfig/models.json"));
+  const cfg = runPlanner(fixture, SHA_A, SHA_B, impactEnv(fixture, "M\tconfig/curiosity-sources.json"));
   assert.equal(cfg.BUILD, "");
   assert.equal(cfg.STOP, "ashley-discord.service ashley-agent.service");
   assert.equal(cfg.RESTART, "ashley-agent.service ashley-discord.service");

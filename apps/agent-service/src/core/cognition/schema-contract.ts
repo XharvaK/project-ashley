@@ -9,7 +9,7 @@ import {
   C2_INDEXES,
   C2_TABLES,
   validateNuclearV37Schema,
-} from "../context-budget/migration-36.js";
+} from "../context-allocation/migration-36.js";
 import {
   C3_INDEXES,
   C3_TABLES,

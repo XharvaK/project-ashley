@@ -147,8 +147,11 @@ describe("Thought Context Scale Qualification Harness (1K, 10K, 100K)", () => {
 
         const receipt = allocated.receipt;
 
-        // HARD INVARIANTS: Bounded model-visible Thought demand within bucket hard TPM
-        expect(receipt.totalDemandTokens).toBeLessThanOrEqual(receipt.hardTpm);
+        // HARD INVARIANTS: Bounded model-visible Thought input within the
+        // provider-independent semantic projection envelope. Provider quota
+        // metadata is owned by Attention and is intentionally absent here.
+        expect(receipt.estimatedInputTokens).toBeLessThanOrEqual(receipt.semanticProjectionEnvelope.maxInputTokens);
+        expect(receipt.hardTpm).toBe(0);
         expect(receipt.headroomTokens).toBeGreaterThanOrEqual(0);
         expect(receipt.requiredOverflow).toBe(false);
         expect(fullSourceScans).toBe(0);

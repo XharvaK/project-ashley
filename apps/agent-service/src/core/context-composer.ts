@@ -14,14 +14,7 @@ import { getState } from "./state/store.js";
 import { getAffectiveState } from "./state/affect.js";
 import { listActiveMindStateItems } from "./state/mind-items.js";
 import { mindStateItemInfluenceEligibleAt } from "./memory/eligibility.js";
-import {
-  ensureEngineeringTables,
-  loadCoordinatorTasks,
-} from "./sandbox/engineering-runs.js";
-import {
-  isVerifiedRoundtripEffectEvidence,
-  type OperationalClaimLicense,
-} from "./sandbox/engineering-types.js";
+import type { OperationalClaimLicense } from "./sandbox/engineering-types.js";
 import { deriveOperationalTruth } from "./sandbox/operational-truth.js";
 import type {
   Decision,
@@ -156,42 +149,6 @@ export function operationalWorkBlock(
   if (!license) return "";
 
   const truth = deriveOperationalTruth(license);
-
-  ensureEngineeringTables(db);
-  const tasks = loadCoordinatorTasks(db);
-  const task = license.taskId
-    ? tasks.find((t) => t.owner === ownerId && t.taskId === license.taskId)
-    : undefined;
-
-  if (task) {
-    const lines = [
-      `Status: ${task.status}`,
-      `Profile: ${task.profile}`,
-      `Task ID: ${task.taskId}`,
-      task.startedAtMs ? `Started: ${new Date(task.startedAtMs).toISOString()}` : "",
-      task.completedAtMs ? `Completed: ${new Date(task.completedAtMs).toISOString()}` : "",
-      task.error ? `Error: ${task.error}` : "",
-      task.refusal ? `Refusal: ${task.refusal}` : "",
-    ].filter(Boolean);
-
-    if (task.profile === "sandbox_workspace_file_roundtrip" && task.status === "completed") {
-      if (isVerifiedRoundtripEffectEvidence(task.effectEvidence)) {
-        lines.push(
-          "Effect evidence: roundtrip verified (temporary file created, exact bytes verified on read, file deleted, verified absent).",
-          "Current operational truth: verified_success (authoritative current-turn result; overrides generic capability self-model).",
-        );
-      } else {
-        lines.push(
-          "Effect evidence: unverified (task record is completed; verified effect evidence is unavailable).",
-        );
-      }
-    }
-
-    return [
-      "## Operational work state (cognitive attention only)",
-      ...lines,
-    ].join("\n");
-  }
 
   // Handle project_investigation (M2 project inspection operational metadata)
   if (license.profile === "project_investigation") {

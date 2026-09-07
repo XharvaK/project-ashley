@@ -92,7 +92,7 @@ import { sha256Text, stableJson } from "./core/model-fabric/hash.js";
 import { THOUGHT_KERNEL_ENVELOPE_VERSION } from "./core/cognitive-v021/thought/kernel-envelope.js";
 import { THOUGHT_SEMANTIC_PARSER_ID } from "./core/cognitive-v021/thought/parse.js";
 import { THOUGHT_SEMANTIC_SCHEMA_FINGERPRINT } from "./core/cognitive-v021/thought/output-contract.js";
-import type { ContextBudgetMode } from "./core/context-budget/types.js";
+import type { ContextBudgetMode } from "./core/context-allocation/types.js";
 export type {
   ChatMessage,
   TokenUsage,

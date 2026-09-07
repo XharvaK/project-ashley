@@ -71,16 +71,6 @@ export class ConfigError extends Error {
   }
 }
 
-export type CognitiveKernelMode = "legacy" | "shadow" | "v021";
-
-export function parseCognitiveKernel(raw: string | undefined): CognitiveKernelMode {
-  const value = raw?.trim() ?? "";
-  if (value === "" || value === "legacy") return "legacy";
-  if (value === "shadow") return "shadow";
-  if (value === "v021") return "v021";
-  throw new ConfigError("invalid_ASHLEY_COGNITIVE_KERNEL");
-}
-
 function numericEnv(
   name: string,
   fallback: number,
@@ -106,7 +96,6 @@ export const config = {
     .filter(Boolean),
   guildId: process.env.DISCORD_GUILD_ID ?? "",
   agentUrl: process.env.AGENT_SERVICE_URL ?? "http://127.0.0.1:3710",
-  cognitiveKernel: parseCognitiveKernel(process.env.ASHLEY_COGNITIVE_KERNEL),
   proactiveEnabled: process.env.PROACTIVE_ENABLED !== "false",
   proactiveCheckIntervalMin: numericEnv(
     "PROACTIVE_CHECK_INTERVAL_MIN",

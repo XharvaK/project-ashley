@@ -7,12 +7,12 @@ describe("cognitive health projection", () => {
   it("reports the kernel and schema while reducing the sidecar path to its basename", () => {
     const sidecar = openTestSidecar();
     const health = getCognitiveHealthSnapshot({
-      mode: "shadow",
+      mode: "v021",
       sidecar,
       sidecarPath: "C:/Users/doc/.composer-assistant/cognitive-v021.db",
     });
     expect(health).toEqual({
-      cognitiveKernel: "shadow",
+      cognitiveKernel: "v021",
       cognitiveSidecar: { open: true, schemaVersion: COGNITIVE_SIDECAR_SCHEMA_VERSION, path: "cognitive-v021.db" },
       cognitiveSidecarSchemaVersion: COGNITIVE_SIDECAR_SCHEMA_VERSION,
       cognitiveSidecarPath: "cognitive-v021.db",
@@ -22,8 +22,8 @@ describe("cognitive health projection", () => {
   });
 
   it("does not claim an unopened sidecar", () => {
-    expect(getCognitiveHealthSnapshot({ mode: "legacy" })).toMatchObject({
-      cognitiveKernel: "legacy",
+    expect(getCognitiveHealthSnapshot({ mode: "v021" })).toMatchObject({
+      cognitiveKernel: "v021",
       cognitiveSidecar: { open: false, schemaVersion: null, path: null },
       cognitiveSidecarSchemaVersion: null,
       cognitiveSidecarPath: null,
