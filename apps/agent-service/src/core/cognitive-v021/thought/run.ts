@@ -1315,10 +1315,12 @@ export async function runThoughtModel(
           : {}),
       };
     }
-    if (!cancelled && deps.observabilityDb) {
+    const providerCapture = !cancelled
+      ? providerFailureCaptureForError(error, dispatchOptions)
+      : undefined;
+    if (!cancelled && providerCapture && deps.observabilityDb) {
       try {
         const mfMeta = metadataFromError(error);
-        const providerCapture = providerFailureCaptureForError(error, dispatchOptions);
         if (mfMeta && mfMeta.failoverSuppressed === "transport_failover_unavailable_for_projection") {
           const receipt = mfMeta.receipt;
           const resolvedReceipt = receipt && receipt.receiptStage === "resolved" ? receipt : null;
@@ -1418,6 +1420,7 @@ export async function runThoughtModel(
       requestId,
       unavailable: !cancelled,
       cancelled,
+      ...(providerCapture ? { providerFailureCapture: providerCapture } : {}),
     };
   }
 }
@@ -1754,7 +1757,7 @@ export async function runCognitiveCycle(
       acceptedSettlements: 0,
     };
   }
-  const emitFailure = async (reason: string): Promise<KernelRunResult> => {
+  const emitFailure = async (reason: string, failureCode?: string | null): Promise<KernelRunResult> => {
     const counters = getThoughtAttemptCounters(sidecar, admittedCycle.cycleId, admittedCycle.generation);
     if (!currentGenerationIs(sidecar, admittedCycle)) return resultWithCounters(admittedCycle.cycleId, admittedCycle.generation, null, counters);
     const notice = emitInfrastructureNotice(sidecar, {
@@ -1765,6 +1768,7 @@ export async function runCognitiveCycle(
       cycleId: admittedCycle.cycleId,
       generation: admittedCycle.generation,
       reason,
+      failureCode,
       origin: deps.origin,
       trigger: deliveryIntentFor(admittedCycle, payload, "system_notice").trigger,
       deliveryLane: deliveryIntentFor(admittedCycle, payload, "system_notice").deliveryLane,
@@ -2036,7 +2040,9 @@ export async function runCognitiveCycle(
         latestEvidenceRowId: latestRowId,
       };
     }
-    if (invocation.unavailable) return emitFailure("unavailable");
+    if (invocation.unavailable) {
+      return emitFailure("unavailable", invocation.providerFailureCapture?.failureClass);
+    }
 
     structuralFeedback = null;
     settlementRevisionFeedback = undefined;

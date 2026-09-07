@@ -11,6 +11,8 @@ import type { CapabilityReality, KernelDeps, Observation, ThoughtInput } from ".
 import { checkAuthority as deterministicCheckAuthority } from "../authority/check.js";
 import { getThoughtAttemptCounters } from "./counters.js";
 import { runCognitiveCycle } from "./run.js";
+import { AppError } from "../../../errors.js";
+import { THOUGHT_UNAVAILABLE_NOTICE } from "../speech/infrastructure-notice.js";
 
 const capabilityReality: CapabilityReality = {
   vision: false,
@@ -150,7 +152,7 @@ describe("v0.2.1 durable Thought accounting", () => {
     const { sidecar, cycle, event } = setup();
     const completeChat = vi.fn(async () => ({ text: "not json", model: "fake", modelAlias: "thought", resolvedModelId: null }));
     const result = await runCognitiveCycle(sidecar, sidecar, event, deps(sidecar, completeChat));
-    expect(result).toMatchObject({ published: false, infrastructureNotice: "[system] Thought did not complete. Please send the message again." });
+    expect(result).toMatchObject({ published: false, infrastructureNotice: `${THOUGHT_UNAVAILABLE_NOTICE} Error code: STRUCTURAL_RETRY_EXHAUSTED` });
     expect(getThoughtAttemptCounters(sidecar, cycle.cycleId, cycle.generation)).toMatchObject({
       thoughtModelAttempts: 3,
       acceptedThoughtPasses: 0,
@@ -160,11 +162,49 @@ describe("v0.2.1 durable Thought accounting", () => {
     sidecar.close();
   });
 
+  it("carries a provider-unavailable classification into the system notice without provider prose", async () => {
+    const { sidecar, cycle, event } = setup();
+    const completeChat = vi.fn(async () => {
+      throw new AppError("provider_unavailable", "provider body contains a secret", 503);
+    });
+    const result = await runCognitiveCycle(sidecar, sidecar, event, deps(sidecar, completeChat));
+    expect(result).toMatchObject({
+      published: false,
+      infrastructureNotice: `${THOUGHT_UNAVAILABLE_NOTICE} Error code: PROVIDER_UNAVAILABLE`,
+    });
+    expect(result.infrastructureNotice).not.toContain("provider body contains a secret");
+    expect(result.infrastructureNotice).not.toContain("503");
+    expect(getThoughtAttemptCounters(sidecar, cycle.cycleId, cycle.generation)).toMatchObject({
+      thoughtModelAttempts: 1,
+      structuralRetries: 0,
+    });
+    sidecar.close();
+  });
+
+  it("carries a known rate-limit classification without exposing a synthetic HTTP status", async () => {
+    const { sidecar, cycle, event } = setup();
+    const completeChat = vi.fn(async () => {
+      throw new AppError("rate_limited", "provider body contains a secret", 429);
+    });
+    const result = await runCognitiveCycle(sidecar, sidecar, event, deps(sidecar, completeChat));
+    expect(result).toMatchObject({
+      published: false,
+      infrastructureNotice: `${THOUGHT_UNAVAILABLE_NOTICE} Error code: RATE_LIMITED`,
+    });
+    expect(result.infrastructureNotice).not.toContain("provider body contains a secret");
+    expect(result.infrastructureNotice).not.toContain("429");
+    expect(getThoughtAttemptCounters(sidecar, cycle.cycleId, cycle.generation)).toMatchObject({
+      thoughtModelAttempts: 1,
+      structuralRetries: 0,
+    });
+    sidecar.close();
+  });
+
   it("records provider unavailability separately from malformed structural retries", async () => {
     const { sidecar, cycle, event } = setup();
     const completeChat = vi.fn(async () => { throw new Error("provider_down"); });
     const result = await runCognitiveCycle(sidecar, sidecar, event, deps(sidecar, completeChat));
-    expect(result).toMatchObject({ published: false, infrastructureNotice: "[system] Thought did not complete. Please send the message again." });
+    expect(result).toMatchObject({ published: false, infrastructureNotice: `${THOUGHT_UNAVAILABLE_NOTICE} Error code: UNKNOWN` });
     expect(getThoughtAttemptCounters(sidecar, cycle.cycleId, cycle.generation)).toMatchObject({
       thoughtModelAttempts: 1,
       acceptedThoughtPasses: 0,

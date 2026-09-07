@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { openNuclearDb, nuclearSchemaVersion, NUCLEAR_SUPPORTED_VERSION } from "../../db.js";
 import { admitTestCycle, openTestSidecar } from "../test-support.js";
 import { insertOutboxPending } from "../speech/outbox.js";
-import { emitInfrastructureNotice, updateSystemNoticeStatus } from "../speech/infrastructure-notice.js";
+import { emitInfrastructureNotice, THOUGHT_UNAVAILABLE_NOTICE, updateSystemNoticeStatus } from "../speech/infrastructure-notice.js";
 import { OutboxDeliveryProjector } from "./outbox-projector.js";
 
 type PlannedBubbleFixture = {
@@ -44,7 +44,7 @@ function seedSystemReservation(
     "discord",
     threadId,
     options.state ?? "committed",
-    "[system] Thought did not complete. Please send the message again.",
+    notice.noticeText,
     "1970-01-01T00:00:01.000Z",
     notice.projectionKey,
   );
@@ -81,7 +81,7 @@ describe("v0.2.1 cross-database outbox projection", () => {
       await projector.projectSystem(notice.noticeId);
       expect(nuclear.prepare("SELECT cognitive_v021_projection_key, draft_text FROM delivery_reservations ORDER BY id").all()).toEqual([
         expect.objectContaining({ cognitive_v021_projection_key: "speech:1", draft_text: "hello" }),
-        expect.objectContaining({ cognitive_v021_projection_key: "system:1", draft_text: "[system] Thought did not complete. Please send the message again." }),
+        expect.objectContaining({ cognitive_v021_projection_key: "system:1", draft_text: `${THOUGHT_UNAVAILABLE_NOTICE} Error code: UNKNOWN` }),
       ]);
       await projector.project(speech.outboxId);
       expect(nuclear.prepare("SELECT COUNT(*) AS count FROM delivery_reservations").get()).toMatchObject({ count: 2 });

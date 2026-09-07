@@ -1,8 +1,44 @@
 import { describe, expect, it } from "vitest";
 import { admitTestCycle, openTestSidecar } from "../test-support.js";
-import { emitInfrastructureNotice, getSystemNotice, listSystemNotices, THOUGHT_UNAVAILABLE_NOTICE } from "./infrastructure-notice.js";
+import { emitInfrastructureNotice, formatThoughtFailureNotice, getSystemNotice, listSystemNotices, THOUGHT_UNAVAILABLE_NOTICE } from "./infrastructure-notice.js";
 
 describe("v0.2.1 Thought outage notices", () => {
+  it.each([
+    ["rate_limited", "RATE_LIMITED"],
+    ["provider_unavailable", "PROVIDER_UNAVAILABLE"],
+    ["structured_output_untrusted", "STRUCTURED_OUTPUT_INVALID"],
+  ])("projects %s into the bounded user-facing code %s", (failureCode, expectedCode) => {
+    expect(formatThoughtFailureNotice({ reason: "unavailable", failureCode }))
+      .toBe(`${THOUGHT_UNAVAILABLE_NOTICE} Error code: ${expectedCode}`);
+  });
+
+  it("projects deadline and unknown causes without parsing prose or status-looking text", () => {
+    expect(formatThoughtFailureNotice({ reason: "thought_deadline" }))
+      .toBe(`${THOUGHT_UNAVAILABLE_NOTICE} Error code: THOUGHT_DEADLINE_EXCEEDED`);
+    expect(formatThoughtFailureNotice({ reason: "unavailable", failureCode: "provider prose 503 sk-live-secret" }))
+      .toBe(`${THOUGHT_UNAVAILABLE_NOTICE} Error code: UNKNOWN`);
+  });
+
+  it("projects an existing provider failure class into a bounded user-facing code", () => {
+    const db = openTestSidecar();
+    try {
+      admitTestCycle(db, { cycleId: "cycle-provider-unavailable", conversationId: "thread-provider-unavailable", triggerKind: "owner_message", occupantId: "doc", nowMs: 1 });
+      const notice = emitInfrastructureNotice(db, {
+        ownerId: "doc",
+        channel: "discord",
+        threadId: "thread-provider-unavailable",
+        conversationId: "thread-provider-unavailable",
+        cycleId: "cycle-provider-unavailable",
+        generation: 1,
+        reason: "unavailable",
+        failureCode: "provider_unavailable",
+      });
+      expect(notice.noticeText).toBe(`${THOUGHT_UNAVAILABLE_NOTICE} Error code: PROVIDER_UNAVAILABLE`);
+    } finally {
+      db.close();
+    }
+  });
+
   it("persists routing, ledger unavailability, and one notice per failure key", () => {
     const db = openTestSidecar();
     try {
@@ -10,10 +46,10 @@ describe("v0.2.1 Thought outage notices", () => {
       const first = emitInfrastructureNotice(db, { ownerId: "doc", channel: "discord", threadId: "thread-notice", conversationId: "thread-notice", cycleId: "cycle-notice", generation: 1, reason: "unavailable" });
       const second = emitInfrastructureNotice(db, { ownerId: "doc", channel: "discord", threadId: "thread-notice", conversationId: "thread-notice", cycleId: "cycle-notice", generation: 1, reason: "unavailable" });
       expect(second.noticeId).toBe(first.noticeId);
-      expect(first.noticeText).toBe(THOUGHT_UNAVAILABLE_NOTICE);
+      expect(first.noticeText).toBe(`${THOUGHT_UNAVAILABLE_NOTICE} Error code: UNKNOWN`);
       expect(first.deliveryIntent).toMatchObject({ ownerId: "doc", channel: "discord", threadId: "thread-notice", purpose: "system_notice" });
       expect(listSystemNotices(db)).toHaveLength(1);
-      expect(getSystemNotice(db, first.noticeId)?.noticeText).toBe(THOUGHT_UNAVAILABLE_NOTICE);
+      expect(getSystemNotice(db, first.noticeId)?.noticeText).toBe(`${THOUGHT_UNAVAILABLE_NOTICE} Error code: UNKNOWN`);
       expect(db.prepare("SELECT thought_unavailable FROM causal_ledger WHERE cycle_id = ? AND generation = ?").get("cycle-notice", 1)).toMatchObject({ thought_unavailable: 1 });
     } finally {
       db.close();

@@ -10,6 +10,96 @@ import {
 
 export { THOUGHT_UNAVAILABLE_NOTICE };
 
+export const USER_FACING_THOUGHT_FAILURE_CODES = [
+  "RATE_LIMITED",
+  "PROVIDER_UNAVAILABLE",
+  "PROVIDER_AUTHENTICATION_FAILED",
+  "PROVIDER_REQUEST_INVALID",
+  "PROVIDER_TRANSPORT_FAILURE",
+  "PROVIDER_TIMEOUT",
+  "PROVIDER_INTERNAL",
+  "THOUGHT_DEADLINE_EXCEEDED",
+  "STRUCTURED_OUTPUT_INVALID",
+  "STRUCTURAL_RETRY_EXHAUSTED",
+  "LOCAL_DISPATCH_FAILURE",
+  "CANCELLED",
+  "UNKNOWN",
+] as const;
+
+export type UserFacingThoughtFailureCode = typeof USER_FACING_THOUGHT_FAILURE_CODES[number];
+
+export function classifyThoughtFailureCode(input: {
+  reason: string;
+  failureCode?: string | null;
+}): UserFacingThoughtFailureCode {
+  const failureCode = input.failureCode?.trim().toLowerCase();
+  switch (failureCode) {
+    case "rate_limited":
+    case "quota_exhausted":
+    case "provider_quota":
+      return "RATE_LIMITED";
+    case "provider_unavailable":
+    case "mistral_unavailable":
+    case "provider_model_unavailable":
+      return "PROVIDER_UNAVAILABLE";
+    case "credential_invalid":
+    case "authentication_failed":
+    case "unauthorized":
+      return "PROVIDER_AUTHENTICATION_FAILED";
+    case "bad_request":
+    case "invalid_request":
+      return "PROVIDER_REQUEST_INVALID";
+    case "network_error":
+    case "provider_transport_failure":
+      return "PROVIDER_TRANSPORT_FAILURE";
+    case "timeout":
+    case "provider_timeout":
+      return "PROVIDER_TIMEOUT";
+    case "provider_internal":
+      return "PROVIDER_INTERNAL";
+    case "structured_output_untrusted":
+    case "structured_output_native_unsupported":
+    case "malformed_output":
+    case "malformed_json":
+    case "schema_violation":
+      return "STRUCTURED_OUTPUT_INVALID";
+    case "aborterror":
+    case "cancelled":
+      return "CANCELLED";
+    case "route_disabled":
+    case "operator_disabled":
+    case "capability_mismatch":
+    case "configuration_error":
+    case "agent_not_ready":
+    case "local_quota_exceeded":
+    case "request_exceeds_tpm_budget":
+    case "dispatch_data_plane_missing":
+      return "LOCAL_DISPATCH_FAILURE";
+    default:
+      break;
+  }
+
+  switch (input.reason) {
+    case "thought_deadline":
+      return "THOUGHT_DEADLINE_EXCEEDED";
+    case "malformed":
+      return "STRUCTURAL_RETRY_EXHAUSTED";
+    case "cancelled":
+      return "CANCELLED";
+    case "context_allocation_required_overflow":
+      return "LOCAL_DISPATCH_FAILURE";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+export function formatThoughtFailureNotice(input: {
+  reason: string;
+  failureCode?: string | null;
+}): string {
+  return `${THOUGHT_UNAVAILABLE_NOTICE} Error code: ${classifyThoughtFailureCode(input)}`;
+}
+
 export type EmitInfrastructureNoticeInput = {
   ownerId: string;
   channel: string;
@@ -18,6 +108,7 @@ export type EmitInfrastructureNoticeInput = {
   cycleId?: string | null;
   generation?: Generation | null;
   reason: string;
+  failureCode?: string | null;
   origin?: OutboxOrigin;
   trigger?: DeliveryIntent["trigger"];
   deliveryLane?: DeliveryIntent["deliveryLane"];
@@ -144,6 +235,7 @@ export function emitInfrastructureNotice(
   };
   const status = origin === "shadow" ? "suppressed_shadow" : "pending";
   const provisionalKey = `system:pending:${randomUUID()}`;
+  const noticeText = formatThoughtFailureNotice({ reason, failureCode: input.failureCode });
   const inserted = db.prepare(
     `INSERT INTO system_notice_outbox
        (notice_key, projection_key, cycle_id, conversation_id, notice_text,
@@ -154,7 +246,7 @@ export function emitInfrastructureNotice(
     provisionalKey,
     input.cycleId ?? null,
     input.conversationId,
-    THOUGHT_UNAVAILABLE_NOTICE,
+    noticeText,
     status,
     origin,
     JSON.stringify(intent),
