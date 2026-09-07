@@ -1,5 +1,4 @@
 import type { DatabaseSync } from "node:sqlite";
-import { env } from "../../env.js";
 import { completeChat } from "../../mistral-client.js";
 import type {
   Decision,
@@ -200,58 +199,50 @@ export function parseReflectionReviewResponse(
   };
 }
 
-function safeReflectionFallback(): OpenCognitiveReviewProposal {
-  return {
-    action: "keep_open",
-    reason: "reflection_model_failure_keep_open",
-  };
-}
-
 async function modelReflectionAdjudicator(
   db: DatabaseSync,
   item: OpenCognitiveItemRecord,
 ): Promise<OpenCognitiveReviewProposal | null> {
-  if (!env.mistralApiKey) return safeReflectionFallback();
   const response = await completeChat(
-      [
-        {
-          role: "system",
-          content: [
-            "You are Ashley Reflection, an advisory cognitive reviewer.",
-            "Use only the bounded grounded state supplied below.",
-            "Return strict JSON with action KEEP, WITHDRAW, SUPERSEDE, or RESOLVE.",
-            "RESOLVE requires grounded evidenceRefs.",
-            "SUPERSEDE requires replacementEntityUuid.",
-            "Do not speak, send messages, alter relationship truth, identity, Recall, or capability state.",
-          ].join(" "),
-        },
-        {
-          role: "user",
-          content: JSON.stringify({
-            kind: item.kind,
-            status: item.status,
-            semanticSummary: item.semanticSummary,
-            sourceType: item.sourceType,
-            sourceId: item.sourceId,
-            sourceRevision: item.sourceRevision,
-            attention: {
-              considerationCount: item.attention?.considerationCount ?? 0,
-              reviewRequestedAt: item.attention?.reviewRequestedAt ?? null,
-              lastOutcomeCode: item.attention?.lastOutcomeCode ?? null,
-            },
-          }),
-        },
-      ],
+    [
       {
-        route: "thought",
-        purpose: "thought_observation",
-        logicalRole: "reflection_initiative",
-        lane: "exchange_cognition",
-        maxTokens: 300,
-        temperature: 0,
-        ownerId: item.ownerId,
-        attentionDb: db,
+        role: "system",
+        content: [
+          "You are Ashley Reflection, an advisory cognitive reviewer.",
+          "Use only the bounded grounded state supplied below.",
+          "Return strict JSON with action KEEP, WITHDRAW, SUPERSEDE, or RESOLVE.",
+          "RESOLVE requires grounded evidenceRefs.",
+          "SUPERSEDE requires replacementEntityUuid.",
+          "Do not speak, send messages, alter relationship truth, identity, Recall, or capability state.",
+        ].join(" "),
       },
+      {
+        role: "user",
+        content: JSON.stringify({
+          kind: item.kind,
+          status: item.status,
+          semanticSummary: item.semanticSummary,
+          sourceType: item.sourceType,
+          sourceId: item.sourceId,
+          sourceRevision: item.sourceRevision,
+          attention: {
+            considerationCount: item.attention?.considerationCount ?? 0,
+            reviewRequestedAt: item.attention?.reviewRequestedAt ?? null,
+            lastOutcomeCode: item.attention?.lastOutcomeCode ?? null,
+          },
+        }),
+      },
+    ],
+    {
+      route: "thought",
+      purpose: "thought_observation",
+      logicalRole: "reflection_initiative",
+      lane: "exchange_cognition",
+      maxTokens: 300,
+      temperature: 0,
+      ownerId: item.ownerId,
+      attentionDb: db,
+    },
   );
   return parseReflectionReviewResponse(response.text);
 }

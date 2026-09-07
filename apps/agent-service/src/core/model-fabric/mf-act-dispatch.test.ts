@@ -12,6 +12,7 @@ import * as groqAdapterModule from "../model-routing/adapters/groq-adapter.js";
 import * as nimAdapterModule from "../model-routing/adapters/nim-adapter.js";
 import * as mistralAdapterModule from "../model-routing/adapters/mistral-adapter.js";
 import { metadataFromError } from "./receipts.js";
+import { attachProviderHttpStatusBoundary } from "../model-routing/types.js";
 import { currentPortfolio } from "./portfolio.js";
 import {
   createCouplingPreflight,
@@ -126,8 +127,8 @@ function qualification(overrides: Record<string, unknown> = {}) {
       bindingId: fixtureCapability.components.wireBindingId,
     },
     resourceEvidence: {
-      deadlineMs: 30_000,
-      maxOutputTokens: 4_096,
+      deadlineMs: 60_000,
+      maxOutputTokens: 8_192,
       attempts: 1,
     },
     ...overrides,
@@ -500,13 +501,15 @@ describe("MF-ACT dispatch authority", () => {
         reasoning: args.fabricReasoning,
       };
       if (args.credentialSeat === "mistral_primary") {
-        throw new AppError(
+        const error = new AppError(
           "rate_limited",
           "Mistral account rate limited",
           429,
           undefined,
           "account",
         );
+        attachProviderHttpStatusBoundary(error, 429);
+        throw error;
       }
       secondaryMessages = args.messages;
       secondaryContract = {
@@ -560,13 +563,15 @@ describe("MF-ACT dispatch authority", () => {
     const thoughtDb = db();
 
     const mistralDispatch = vi.fn(async () => {
-      throw new AppError(
+      const error = new AppError(
         "credential_invalid",
         "Mistral credential rejected",
         401,
         undefined,
         "account",
       );
+      attachProviderHttpStatusBoundary(error, 401);
+      throw error;
     });
 
     vi.spyOn(mistralAdapterModule, "createMistralAdapter").mockReturnValue({

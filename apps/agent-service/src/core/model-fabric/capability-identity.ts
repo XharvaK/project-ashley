@@ -24,14 +24,21 @@ export type ThoughtCapabilityIdentity = Readonly<{
   fingerprint: `sha256:${string}`;
 }>;
 
-export type ThoughtResourcePolicyIdentity = Readonly<{
-  ordinaryThoughtBudgetMs: 30000;
-  interactiveMaxOutput: 4096;
-  durableProactiveMaxOutput: 4096;
-  structuralRetryMaxOutput: 2048;
-  structuralRetriesMaxPerSemanticPass: 2;
-  fingerprint: `sha256:${string}`;
-}>;
+const THOUGHT_RESOURCE_POLICY_COMPONENTS = Object.freeze({
+  ordinaryThoughtBudgetMs: 60_000 as const,
+  interactiveMaxOutput: 8_192 as const,
+  durableProactiveMaxOutput: 8_192 as const,
+  structuralRetryMaxOutput: 8_192 as const,
+  structuralRetriesMaxPerSemanticPass: 2 as const,
+});
+
+type ThoughtResourcePolicyComponents = typeof THOUGHT_RESOURCE_POLICY_COMPONENTS;
+
+export type ThoughtResourcePolicyIdentity = Readonly<
+  ThoughtResourcePolicyComponents & {
+    fingerprint: `sha256:${string}`;
+  }
+>;
 
 export type ThoughtCapabilityEvidence = Readonly<{
   capability: ThoughtCapabilityIdentity;
@@ -89,13 +96,7 @@ export function buildThoughtCapabilityIdentity(input: ThoughtCapabilityComponent
 }
 
 export function thoughtResourcePolicyIdentity(): ThoughtResourcePolicyIdentity {
-  const components = {
-    ordinaryThoughtBudgetMs: 30_000 as const,
-    interactiveMaxOutput: 4_096 as const,
-    durableProactiveMaxOutput: 4_096 as const,
-    structuralRetryMaxOutput: 2_048 as const,
-    structuralRetriesMaxPerSemanticPass: 2 as const,
-  };
+  const components = THOUGHT_RESOURCE_POLICY_COMPONENTS;
   return freezeDeep({
     ...components,
     fingerprint: `sha256:${sha256(components)}` as `sha256:${string}`,

@@ -57,6 +57,25 @@ function projectionReservation(db: DatabaseSync, key: string): Row | undefined {
   return db.prepare("SELECT * FROM delivery_reservations WHERE cognitive_v021_projection_key = ? LIMIT 1").get(key) as Row | undefined;
 }
 
+function expectedSystemNoticeMessageId(
+  nuclear: DatabaseSync,
+  reservationId: number,
+): string | null {
+  const bubbles = nuclear.prepare(
+    `SELECT discord_message_id, sent_at
+     FROM delivery_bubbles
+     WHERE reservation_id = ?
+     ORDER BY ordinal ASC`,
+  ).all(reservationId) as Array<{
+    discord_message_id?: string | null;
+    sent_at?: string | null;
+  }>;
+  const receiptComplete = bubbles.length === 1
+    && Boolean(bubbles[0]?.discord_message_id?.trim())
+    && Boolean(bubbles[0]?.sent_at?.trim());
+  return receiptComplete ? bubbles[0]!.discord_message_id!.trim() : null;
+}
+
 function markTerminalFromDestination(
   sidecar: DatabaseSync,
   nuclear: DatabaseSync,
@@ -65,29 +84,31 @@ function markTerminalFromDestination(
 ): void {
   const state = text(destination.state);
   const reservationId = number(destination.id);
+  const expectedId = "noticeId" in row
+    ? expectedSystemNoticeMessageId(nuclear, reservationId)
+    : null;
   if (state === "committed") {
     if ("outboxId" in row) {
       const ids = nuclear.prepare("SELECT discord_message_id FROM delivery_bubbles WHERE reservation_id = ? AND discord_message_id IS NOT NULL ORDER BY ordinal").all(reservationId)
         .map((item) => text((item as Row).discord_message_id));
       updateOutboxStatus(sidecar, row.outboxId, "delivered", { discordMessageIds: ids, nuclearReservationId: reservationId });
     } else {
-      const id = destination.discord_message_id == null ? null : text(destination.discord_message_id);
-      updateSystemNoticeStatus(sidecar, row.noticeId, "delivered", { discordMessageId: id, nuclearReservationId: reservationId });
+      updateSystemNoticeStatus(sidecar, row.noticeId, "delivered", { discordMessageId: expectedId, nuclearReservationId: reservationId });
     }
   } else if (["aborted", "cancelled", "expired"].includes(state)) {
     const status: OutboxSendStatus = state === "cancelled" ? "suppressed" : "send_failure";
     if ("outboxId" in row) updateOutboxStatus(sidecar, row.outboxId, status, { nuclearReservationId: reservationId, finalizationReason: text(destination.finalization_reason) || null });
-    else updateSystemNoticeStatus(sidecar, row.noticeId, status, { nuclearReservationId: reservationId });
+    else updateSystemNoticeStatus(sidecar, row.noticeId, status, { discordMessageId: expectedId, nuclearReservationId: reservationId });
   } else if (state === "partially_delivered") {
     if ("outboxId" in row) updateOutboxStatus(sidecar, row.outboxId, "partially_delivered", { nuclearReservationId: reservationId, finalizationReason: text(destination.finalization_reason) || null });
-    else updateSystemNoticeStatus(sidecar, row.noticeId, "partially_delivered", { nuclearReservationId: reservationId });
+    else updateSystemNoticeStatus(sidecar, row.noticeId, "partially_delivered", { discordMessageId: expectedId, nuclearReservationId: reservationId });
   } else if (state === "sending") {
     if ("outboxId" in row) updateOutboxStatus(sidecar, row.outboxId, "sending", { nuclearReservationId: reservationId });
-    else updateSystemNoticeStatus(sidecar, row.noticeId, "sending", { nuclearReservationId: reservationId });
+    else updateSystemNoticeStatus(sidecar, row.noticeId, "sending", { discordMessageId: expectedId, nuclearReservationId: reservationId });
   } else if ("outboxId" in row) {
     updateOutboxStatus(sidecar, row.outboxId, "projected", { nuclearReservationId: reservationId, finalizationReason: null });
   } else {
-    updateSystemNoticeStatus(sidecar, row.noticeId, "projected", { nuclearReservationId: reservationId });
+    updateSystemNoticeStatus(sidecar, row.noticeId, "projected", { discordMessageId: expectedId, nuclearReservationId: reservationId });
   }
 }
 

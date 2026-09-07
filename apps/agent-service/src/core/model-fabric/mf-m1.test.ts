@@ -10,6 +10,7 @@ import {
 } from "../../mistral-client.js";
 import * as mistralAdapterModule from "../model-routing/adapters/mistral-adapter.js";
 import * as nimAdapterModule from "../model-routing/adapters/nim-adapter.js";
+import { attachProviderHttpStatusBoundary } from "../model-routing/types.js";
 import {
   capabilityProfileFor,
   createContextProjection,
@@ -355,8 +356,10 @@ describe("MF-M1 completeChat receipts", () => {
 
   it("records a definitive provider HTTP failure as response_received", async () => {
     env.nimApiKey = "test";
+    const providerError = new AppError("rate_limited", "NVIDIA NIM rate limited", 429, 30);
+    attachProviderHttpStatusBoundary(providerError, 429);
     const dispatch = vi.fn(async () => {
-      throw new AppError("rate_limited", "NVIDIA NIM rate limited", 429, 30);
+      throw providerError;
     });
     vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
       provider: "nim",

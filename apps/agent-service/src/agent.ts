@@ -32,6 +32,9 @@ import type {
   OutboxDeliveryProjector,
 } from "./core/cognitive-v021/types.js";
 import { replicateLegacyDeliveredAshley } from "./core/cognitive-v021/shadow/replicator.js";
+import { resolveDispatchPolicy } from "./core/model-fabric/activation.js";
+import type { CurrentPolicyResolutionInput } from "./core/model-fabric/portfolio.js";
+import { routeReady } from "./core/model-routing/router.js";
 
 export type { CognitiveDispatchResult };
 
@@ -48,6 +51,18 @@ export class BootValidationError extends Error {
 export type AgentState = "booting" | "ready" | "paused" | "busy" | "offline";
 
 export type ProviderState = "configured" | "degraded" | "unavailable";
+
+export type ReadinessSnapshot = Readonly<{
+  bootValidationSucceeded: boolean;
+  kernelInitialized: boolean;
+  activeConversationConfigured: boolean;
+  shadowFabricConfigured: boolean | "NOT_APPLICABLE";
+  utilityRoleConfiguration: Readonly<{
+    exchangeCognition: boolean;
+    curiosityConsolidation: boolean;
+  }>;
+  providerRemoteAvailability: "UNKNOWN";
+}>;
 
 export type SseClient = {
   write: (data: object) => void;
@@ -68,6 +83,9 @@ export class AgentManager {
   private cognitiveShadowDispatch: ((event: InboxEvent) => Promise<KernelRunResult>) | null = null;
   private sseClients = new Set<SseClient>();
   private readonly bootedAt = Date.now();
+  private bootValidationSucceeded = false;
+  private startupComplete = false;
+  private expressionEnabled = false;
 
   constructor(dataPlane: DataPlaneContext, existingNuclear?: DatabaseSync) {
     this.dataPlane = dataPlane;
@@ -113,6 +131,7 @@ export class AgentManager {
     shadowDispatch?: (event: InboxEvent) => Promise<KernelRunResult>;
   }): void {
     this.cognitiveDeps = input.deps;
+    this.expressionEnabled = input.deps.expressionEnabled === true;
     this.cognitiveProjector = input.projector;
     this.cognitiveShadowDispatch = input.shadowDispatch ?? (async (event) => {
       const sidecar = this.openCognitiveSidecar();
@@ -232,13 +251,23 @@ export class AgentManager {
   }
 
   getProviderState(): ProviderState {
-    if (!this.isMistralConfigured() || this.state === "offline") {
-      return "unavailable";
-    }
-    if (this.state === "ready" || this.state === "busy") {
-      return "configured";
-    }
-    return "degraded";
+    return this.activeConversationPathConfigured() ? "configured" : "unavailable";
+  }
+
+  getReadinessSnapshot(): ReadinessSnapshot {
+    return {
+      bootValidationSucceeded: this.bootValidationSucceeded,
+      kernelInitialized: this.startupComplete,
+      activeConversationConfigured: this.activeConversationPathConfigured(),
+      shadowFabricConfigured: env.cognitiveKernel === "shadow"
+        ? this.thoughtFabricConfigured()
+        : "NOT_APPLICABLE",
+      utilityRoleConfiguration: {
+        exchangeCognition: routeReady("utility_bulk"),
+        curiosityConsolidation: routeReady("utility_bulk"),
+      },
+      providerRemoteAvailability: "UNKNOWN",
+    };
   }
 
   addSseClient(client: SseClient): void {
@@ -269,22 +298,78 @@ export class AgentManager {
     writeFileSync(this.dataPlane.statePath, JSON.stringify({ ...prev, ...patch }, null, 2));
   }
 
+  private providerCredentialPresent(provider: string): boolean {
+    switch (provider) {
+      case "mistral":
+        return Boolean(env.mistralApiKey);
+      case "groq":
+        return Boolean(env.groqApiKey);
+      case "nim":
+        return Boolean(env.nimApiKey);
+      case "opencode_zen":
+        return Boolean(env.opencodeZenApiKey);
+      default:
+        return false;
+    }
+  }
+
+  private thoughtFabricConfigured(): boolean {
+    const policyInput: CurrentPolicyResolutionInput = {
+      logicalRole: "thought",
+      purpose: "thought",
+      lane: "urgent_grounded",
+      deadlineAtMs: Date.now() + 60_000,
+      routeId: "thought",
+    };
+    try {
+      const currentPolicy = resolveDispatchPolicy(policyInput);
+      if (currentPolicy.source === "fail_closed") return false;
+      if (currentPolicy.source === "current_compatibility") {
+        return routeReady("thought");
+      }
+      return this.providerCredentialPresent(currentPolicy.occupant.provider);
+    } catch {
+      return false;
+    }
+  }
+
+  private activeConversationPathConfigured(): boolean {
+    if (env.cognitiveKernel === "legacy" || env.cognitiveKernel === "shadow") {
+      return this.isMistralConfigured();
+    }
+    if (!this.thoughtFabricConfigured()) return false;
+    return !this.expressionEnabled || routeReady("ashley_expression");
+  }
+
+  private readinessSatisfied(): boolean {
+    return this.bootValidationSucceeded && this.startupComplete && this.activeConversationPathConfigured();
+  }
+
   async init(): Promise<void> {
+    this.startupComplete = false;
     const { ok, errors, warnings } = validateBoot();
     for (const w of warnings) console.warn(`[agent-service] ${w}`);
     if (!ok) {
+      this.bootValidationSucceeded = false;
       for (const e of errors) console.error(`[agent-service] FATAL ${e}`);
       this.state = "offline";
       this.broadcast({ type: "offline", reason: "invalid_configuration" });
       throw new BootValidationError(errors);
     }
-    if (!env.mistralApiKey) {
+    this.bootValidationSucceeded = true;
+    if (!this.activeConversationPathConfigured()) {
       this.state = "offline";
-      this.broadcast({ type: "offline", reason: "missing_api_key" });
+      this.broadcast({ type: "offline", reason: "missing_provider_configuration" });
       return;
     }
-    this.state = "ready";
-    this.broadcast({ type: "status", status: "ready" });
+    this.state = "booting";
+    this.broadcast({ type: "status", status: "booting" });
+  }
+
+  markStartupComplete(): void {
+    this.startupComplete = true;
+    this.state = this.readinessSatisfied() ? "ready" : "offline";
+    this.broadcast({ type: "status", status: this.state });
   }
 
   async pause(): Promise<void> {
@@ -293,11 +378,12 @@ export class AgentManager {
   }
 
   async resume(): Promise<void> {
-    this.state = env.mistralApiKey ? "ready" : "offline";
+    this.state = this.readinessSatisfied() ? "ready" : "offline";
     this.broadcast({ type: "status", status: this.state });
   }
 
   async shutdown(): Promise<void> {
+    this.startupComplete = false;
     this.state = "offline";
     this.broadcast({ type: "status", status: "offline" });
   }
@@ -412,7 +498,10 @@ export class AgentManager {
     if (this.state === "paused" || this.state === "booting") {
       throw new AppError("agent_not_ready", "Agent not ready", 503);
     }
-    if (this.state === "offline" || !env.mistralApiKey) {
+    if (
+      this.state === "offline" ||
+      ((env.cognitiveKernel === "legacy" || env.cognitiveKernel === "shadow") && !env.mistralApiKey)
+    ) {
       throw new AppError("agent_not_ready", "Mistral not configured", 503);
     }
     if (!isAuthorizedOwnerId(userId)) {
@@ -481,7 +570,7 @@ export class AgentManager {
         duplicate: result.duplicate,
       };
     } finally {
-      this.state = env.mistralApiKey ? "ready" : "offline";
+      this.state = this.readinessSatisfied() ? "ready" : "offline";
       this.broadcast({ type: "status", status: this.state });
     }
   }

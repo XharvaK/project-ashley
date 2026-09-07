@@ -72,6 +72,7 @@ type AttemptBuilder = AttemptInput & {
   observedReasoning: ObservedReasoning;
   errorClass: string | null;
   outcome: string | null;
+  providerHttpStatus?: number;
   capabilityIdentity?: ThoughtCapabilityIdentity;
   wireEvidence?: WireDispatchEvidence;
 };
@@ -94,6 +95,7 @@ export type AttemptHandle = {
     providerRequestId?: string | null;
     finishReason?: string | null;
     usage?: TokenUsage;
+    providerHttpStatus?: number;
   }): void;
   setCapabilityIdentity(identity: ThoughtCapabilityIdentity): void;
   setWireEvidence(evidence: WireDispatchEvidence): void;
@@ -178,6 +180,9 @@ function attemptReceipt(builder: AttemptBuilder): ModelAttemptReceipt {
     projectionTelemetryFingerprint: builder.projection.telemetryFingerprint,
     resolvedModelId: builder.resolvedModelId,
     providerRequestId: builder.providerRequestId,
+    ...(builder.providerHttpStatus !== undefined
+      ? { providerHttpStatus: builder.providerHttpStatus }
+      : {}),
     finishReason: builder.finishReason,
     usage: builder.usage,
   };
@@ -312,6 +317,7 @@ export function createModelFabricInvocation(input: {
           builder.dispatchTruth = "response_received";
           builder.resolvedModelId = response.resolvedModelId;
           builder.providerRequestId = response.providerRequestId ?? null;
+          builder.providerHttpStatus = response.providerHttpStatus;
           builder.finishReason = response.finishReason ?? null;
           builder.usage = usageFor(response.usage);
           builder.observedReasoning = observedReasoningFromUsage(response.usage);

@@ -192,9 +192,10 @@ export type ThoughtCompleteInvoker = (
 ) => ReturnType<typeof completeChat>;
 
 /**
- * Caller-owned structural retry narrowing. The Model Fabric policy remains
- * authoritative at 4096 for the primary Thought request; this bound only
- * keeps a corrective retry admissible under the shared rolling TPM contract.
+ * Caller-owned structural retry output bound. Effective dispatch ceilings and
+ * the active route policy remain authoritative in Model Fabric; this bound
+ * only keeps a corrective retry admissible under the shared rolling TPM
+ * contract.
  */
 export const STRUCTURAL_RETRY_MAX_OUTPUT_TOKENS = 8_192;
 
@@ -260,6 +261,12 @@ function providerFailureCapture(input: {
 }): ThoughtProviderFailureCapture {
   const metadata = input.metadata ?? input.completion?.modelFabric ?? null;
   const attempt = terminalModelAttempt(metadata);
+  const providerHttpStatus = attempt?.receiptStage === "provider_response"
+    ? attempt.providerHttpStatus
+    : undefined;
+  const canonicalUsage = attempt?.receiptStage === "provider_response"
+    ? attempt.usage
+    : undefined;
   const completion = input.completion;
   const controls = input.controls
     ?? completion?.providerBoundaryControls
@@ -360,6 +367,15 @@ function providerFailureCapture(input: {
       : {}),
     ...(finiteNonNegative(completion?.usage?.completionTokens) !== undefined
       ? { completionTokens: finiteNonNegative(completion?.usage?.completionTokens) }
+      : {}),
+    ...(providerHttpStatus !== undefined ? { providerHttpStatus } : {}),
+    ...(canonicalUsage?.reasoningTokens !== null
+      && canonicalUsage?.reasoningTokens !== undefined
+      ? { reasoningTokens: canonicalUsage.reasoningTokens }
+      : {}),
+    ...(canonicalUsage?.cachedInputTokens !== null
+      && canonicalUsage?.cachedInputTokens !== undefined
+      ? { cachedInputTokens: canonicalUsage.cachedInputTokens }
       : {}),
     ...(responseDiagnostics?.finalTextBytes !== undefined
       ? { contentBytes: responseDiagnostics.finalTextBytes }

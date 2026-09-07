@@ -3,8 +3,68 @@ import { describe, expect, it } from "vitest";
 import { openNuclearDb, nuclearSchemaVersion, NUCLEAR_SUPPORTED_VERSION } from "../../db.js";
 import { admitTestCycle, openTestSidecar } from "../test-support.js";
 import { insertOutboxPending } from "../speech/outbox.js";
-import { emitInfrastructureNotice } from "../speech/infrastructure-notice.js";
+import { emitInfrastructureNotice, updateSystemNoticeStatus } from "../speech/infrastructure-notice.js";
 import { OutboxDeliveryProjector } from "./outbox-projector.js";
+
+type PlannedBubbleFixture = {
+  discordMessageId?: string | null;
+  sentAt?: string | null;
+};
+
+function seedSystemReservation(
+  sidecar: DatabaseSync,
+  nuclear: DatabaseSync,
+  suffix: string,
+  options: {
+    state?: string;
+    bubbles?: PlannedBubbleFixture[];
+    existingId?: string | null;
+  } = {},
+) {
+  const threadId = `thread-correlation-${suffix}`;
+  const notice = emitInfrastructureNotice(sidecar, {
+    ownerId: "doc",
+    channel: "discord",
+    threadId,
+    conversationId: threadId,
+    reason: `correlation-${suffix}`,
+  });
+  if (options.existingId !== undefined) {
+    sidecar.prepare(
+      "UPDATE system_notice_outbox SET discord_message_id = ? WHERE notice_id = ?",
+    ).run(options.existingId, notice.noticeId);
+  }
+  const reservation = nuclear.prepare(
+    `INSERT INTO delivery_reservations
+       (owner_id, channel, thread_id, trigger, delivery_lane, state,
+        draft_text, created_at, cognitive_v021_projection_key)
+     VALUES (?, ?, ?, 'reactive', 'reactive', ?, ?, ?, ?)`,
+  ).run(
+    "doc",
+    "discord",
+    threadId,
+    options.state ?? "committed",
+    "[system] Thought did not complete. Please send the message again.",
+    "1970-01-01T00:00:01.000Z",
+    notice.projectionKey,
+  );
+  const reservationId = Number(reservation.lastInsertRowid);
+  const insertBubble = nuclear.prepare(
+    `INSERT INTO delivery_bubbles
+       (reservation_id, ordinal, text, discord_message_id, sent_at)
+     VALUES (?, ?, ?, ?, ?)`,
+  );
+  for (const [ordinal, bubble] of (options.bubbles ?? []).entries()) {
+    insertBubble.run(
+      reservationId,
+      ordinal,
+      `bubble-${suffix}-${ordinal}`,
+      bubble.discordMessageId ?? null,
+      bubble.sentAt ?? null,
+    );
+  }
+  return { notice, reservationId };
+}
 
 describe("v0.2.1 cross-database outbox projection", () => {
   it("uses a versioned nuclear key and keeps speech/system namespaces distinct", async () => {
@@ -110,6 +170,94 @@ describe("v0.2.1 cross-database outbox projection", () => {
       await projector.project(row.outboxId);
       expect(sidecar.prepare("SELECT send_status, nuclear_finalization_reason FROM speech_outbox WHERE outbox_id = ?").get(row.outboxId)).toMatchObject({ send_status: "suppressed", nuclear_finalization_reason: "superseded_generation" });
       expect(nuclear.prepare("SELECT COUNT(*) AS count FROM delivery_reservations").get()).toMatchObject({ count: 0 });
+    } finally {
+      sidecar.close();
+      nuclear.close();
+    }
+  });
+
+  it("projects only a complete singular receipt and preserves lifecycle truth", async () => {
+    const sidecar = openTestSidecar();
+    const nuclear = openNuclearDb(new DatabaseSync(":memory:"));
+    const projector = new OutboxDeliveryProjector(sidecar, nuclear, { nowMs: () => 1_000 });
+    const sentAt = "2026-09-07T12:00:00.000Z";
+    const matrix: Array<{
+      suffix: string;
+      bubbles: PlannedBubbleFixture[];
+      expectedId: string | null;
+    }> = [
+      { suffix: "zero", bubbles: [], expectedId: null },
+      { suffix: "missing-id", bubbles: [{ sentAt }], expectedId: null },
+      { suffix: "missing-sent-at", bubbles: [{ discordMessageId: "msg-2" }], expectedId: null },
+      { suffix: "empty-sent-at", bubbles: [{ discordMessageId: "msg-3", sentAt: " " }], expectedId: null },
+      { suffix: "empty-id", bubbles: [{ discordMessageId: " ", sentAt }], expectedId: null },
+      { suffix: "valid", bubbles: [{ discordMessageId: "msg-valid", sentAt }], expectedId: "msg-valid" },
+      {
+        suffix: "multiple",
+        bubbles: [
+          { discordMessageId: "msg-first", sentAt },
+          { discordMessageId: "msg-second", sentAt },
+        ],
+        expectedId: null,
+      },
+    ];
+    try {
+      for (const entry of matrix) {
+        const seeded = seedSystemReservation(sidecar, nuclear, entry.suffix, {
+          bubbles: entry.bubbles,
+          existingId: "stale-id",
+        });
+        await projector.projectSystem(seeded.notice.noticeId);
+        const projected = sidecar.prepare(
+          "SELECT send_status, discord_message_id FROM system_notice_outbox WHERE notice_id = ?",
+        ).get(seeded.notice.noticeId) as { send_status: string; discord_message_id: string | null };
+        expect(projected).toEqual({ send_status: "delivered", discord_message_id: entry.expectedId });
+        expect(nuclear.prepare("SELECT COUNT(*) AS count FROM delivery_reservations WHERE id = ?").get(seeded.reservationId)).toMatchObject({ count: 1 });
+      }
+
+      const sending = seedSystemReservation(sidecar, nuclear, "sending", {
+        state: "sending",
+        bubbles: [{ discordMessageId: "msg-sending", sentAt }],
+      });
+      await projector.projectSystem(sending.notice.noticeId);
+      expect(sidecar.prepare(
+        "SELECT send_status, discord_message_id FROM system_notice_outbox WHERE notice_id = ?",
+      ).get(sending.notice.noticeId)).toEqual({ send_status: "sending", discord_message_id: "msg-sending" });
+
+      const partial = seedSystemReservation(sidecar, nuclear, "partial", {
+        state: "partially_delivered",
+        bubbles: [
+          { discordMessageId: "msg-partial-first", sentAt },
+          { discordMessageId: "msg-partial-second", sentAt },
+        ],
+      });
+      await projector.projectSystem(partial.notice.noticeId);
+      expect(sidecar.prepare(
+        "SELECT send_status, discord_message_id FROM system_notice_outbox WHERE notice_id = ?",
+      ).get(partial.notice.noticeId)).toEqual({ send_status: "partially_delivered", discord_message_id: null });
+
+      const repeated = seedSystemReservation(sidecar, nuclear, "repeated", {
+        bubbles: [{ discordMessageId: "msg-repeated", sentAt }],
+      });
+      await projector.projectSystem(repeated.notice.noticeId);
+      await projector.projectSystem(repeated.notice.noticeId);
+      expect(nuclear.prepare("SELECT COUNT(*) AS count FROM delivery_reservations WHERE cognitive_v021_projection_key = ?").get(repeated.notice.projectionKey)).toMatchObject({ count: 1 });
+      expect(sidecar.prepare(
+        "SELECT send_status, discord_message_id FROM system_notice_outbox WHERE notice_id = ?",
+      ).get(repeated.notice.noticeId)).toEqual({ send_status: "delivered", discord_message_id: "msg-repeated" });
+
+      const direct = emitInfrastructureNotice(sidecar, {
+        ownerId: "doc",
+        channel: "discord",
+        threadId: "thread-tristate",
+        conversationId: "thread-tristate",
+        reason: "tristate",
+      });
+      updateSystemNoticeStatus(sidecar, direct.noticeId, "projected", { discordMessageId: "keep-id" });
+      updateSystemNoticeStatus(sidecar, direct.noticeId, "projected");
+      expect(sidecar.prepare("SELECT discord_message_id FROM system_notice_outbox WHERE notice_id = ?").get(direct.noticeId)).toMatchObject({ discord_message_id: "keep-id" });
+      updateSystemNoticeStatus(sidecar, direct.noticeId, "projected", { discordMessageId: null });
+      expect(sidecar.prepare("SELECT discord_message_id FROM system_notice_outbox WHERE notice_id = ?").get(direct.noticeId)).toMatchObject({ discord_message_id: null });
     } finally {
       sidecar.close();
       nuclear.close();

@@ -163,4 +163,44 @@ describe("W1 attempt attribution", () => {
       },
     });
   });
+
+  it("records provider HTTP status only on provider response receipts", () => {
+    const projection = createContextProjection({
+      purpose: "thought",
+      contextPolicyId: "thought_summary",
+      messages: [{ role: "user", content: "status fixture" }],
+    });
+    const fabric = createModelFabricInvocation({
+      logicalRole: "thought",
+      requestedPurpose: "thought",
+      specialistRequirement: null,
+      fallbackChain: null,
+      projection,
+    });
+    const attempt = fabric.beginAttempt({
+      invocationId: fabric.invocationId,
+      attemptId: `${fabric.invocationId}:attempt:1`,
+      attemptOrdinal: 1,
+      fallbackFromAttemptId: null,
+      fallbackClass: "none",
+      facts: {} as never,
+      projection,
+      backend: "nim",
+      requestedReasoningPolicy: null,
+      effectiveReasoningSent: null,
+    });
+
+    expect(attempt.receipt()).not.toHaveProperty("providerHttpStatus");
+    attempt.markDispatchAttempted();
+    expect(attempt.receipt()).not.toHaveProperty("providerHttpStatus");
+    attempt.markProviderResponse({
+      resolvedModelId: "fixture-model",
+      providerHttpStatus: 503,
+    });
+    expect(attempt.receipt()).toMatchObject({
+      receiptStage: "provider_response",
+      dispatchTruth: "response_received",
+      providerHttpStatus: 503,
+    });
+  });
 });

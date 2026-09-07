@@ -44,6 +44,7 @@ import {
   type ProviderResponseDiagnostics,
   type ProviderBoundaryControls,
   type ProviderBoundaryTiming,
+  providerHttpStatusFromBoundary,
 } from "./core/model-routing/types.js";
 import {
   attachModelFabricMetadata,
@@ -334,38 +335,6 @@ function errorClassFor(error: unknown): string {
   }
   if (error instanceof Error && error.name) return error.name;
   return "error";
-}
-
-function isDefinitiveProviderError(error: unknown): boolean {
-  if (!(error instanceof AppError)) return false;
-  if (error.code === "agent_not_ready") return false;
-  return error.httpStatus >= 400;
-}
-
-function observedHttpStatus(error: unknown): number | null {
-  if (!error || typeof error !== "object") return null;
-  const value = error as {
-    status?: unknown;
-    statusCode?: unknown;
-    response?: { status?: unknown; statusCode?: unknown };
-  };
-  const candidates = [
-    value.status,
-    value.statusCode,
-    value.response?.status,
-    value.response?.statusCode,
-  ];
-  for (const candidate of candidates) {
-    if (
-      typeof candidate === "number" &&
-      Number.isInteger(candidate) &&
-      candidate >= 400 &&
-      candidate <= 599
-    ) {
-      return candidate;
-    }
-  }
-  return null;
 }
 
 function attachProviderBoundaryFact(
@@ -828,6 +797,7 @@ export async function completeChat(
         usage?: TokenUsage;
         providerModel?: string | null;
         finishReason?: string | null;
+        providerHttpStatus?: number;
         responseDiagnostics?: ProviderResponseDiagnostics;
         wireEvidence?: WireDispatchEvidence;
         providerBoundaryControls?: ProviderBoundaryControls;
@@ -923,6 +893,7 @@ export async function completeChat(
               resolvedModelId: completion.providerModel ?? null,
               finishReason: completion.finishReason ?? null,
               usage: completion.usage,
+              providerHttpStatus: completion.providerHttpStatus,
             });
             if (privateBudgetBinding && privateBudgetCommitted) {
               recordPrivateProviderResponse(privateBudgetBinding.sidecar, {
@@ -960,25 +931,21 @@ export async function completeChat(
             });
             attachProviderBoundaryFact(err, "providerBoundaryControls", providerBoundaryControls);
             attachProviderBoundaryFact(err, "providerBoundaryTiming", providerBoundaryTiming);
+            const providerHttpStatus = providerHttpStatusFromBoundary(err);
+            if (providerHttpStatus !== undefined) {
+              attempt.markProviderResponse({
+                resolvedModelId: null,
+                usage: undefined,
+                providerHttpStatus,
+              });
+            }
             if (err instanceof Error && err.name === "AbortError") {
               attempt.markFailure("AbortError");
               throw err;
             }
             if (err instanceof AppError) {
-              if (isDefinitiveProviderError(err)) {
-                attempt.markProviderResponse({
-                  resolvedModelId: null,
-                  usage: undefined,
-                });
-              }
               attempt.markFailure(err.code);
               throw err;
-            }
-            if (observedHttpStatus(err) !== null) {
-              attempt.markProviderResponse({
-                resolvedModelId: null,
-                usage: undefined,
-              });
             }
             try {
               const mappedError =

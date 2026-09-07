@@ -447,6 +447,8 @@ export type ModelProviderResponseReceipt = ModelAttemptReceiptBase &
     projectionTelemetryFingerprint: ProjectionTelemetryFingerprint;
     resolvedModelId: string | null;
     providerRequestId: string | null;
+    /** Actual HTTP status observed at the provider response boundary. */
+    providerHttpStatus?: number;
     finishReason: string | null;
     usage: ModelUsage;
   };

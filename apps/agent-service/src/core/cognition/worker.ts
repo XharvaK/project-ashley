@@ -274,7 +274,6 @@ async function analyzeWithMistral(
   ], {
     maxTokens: 1100,
     temperature: 0.2,
-    reasoningEffort: "medium",
     purpose: "exchange_cognition",
     logicalRole: "exchange_cognition",
     route: "utility_bulk",

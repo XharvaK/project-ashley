@@ -193,8 +193,9 @@ function createEnv() {
   groqBaseUrl:
     process.env.GROQ_BASE_URL ?? "https://api.groq.com/openai/v1",
   groqDefaultModel: process.env.GROQ_DEFAULT_MODEL ?? "openai/gpt-oss-20b",
-  // NVIDIA NIM: represented in config/models.json but never routed. These
-  // keys are optional and unused at boot.
+  // NVIDIA NIM: these settings configure the adapter when an active resolved
+  // route selects NIM. Provider/model selection belongs to Model Fabric and
+  // the control root; missing keys remain optional at boot.
   nimApiKey: process.env.NIM_API_KEY ?? "",
   nimBaseUrl:
     process.env.NIM_BASE_URL ?? "https://integrate.api.nvidia.com/v1",
@@ -203,10 +204,10 @@ function createEnv() {
   opencodeZenApiKey: process.env.OPENCODE_ZEN_API_KEY ?? "",
   opencodeZenBaseUrl:
     process.env.OPENCODE_ZEN_BASE_URL ?? "https://opencode.ai/zen/v1",
-  // Visible Expression fallback (Wave 3): when the primary Mistral dispatch
-  // fails on an eligible turn, retry once over the minimal profile via the
-  // ashley_expression_fallback (Groq) route. ON by default; opt out with
-  // ASHLEY_EXPRESSION_FALLBACK=false.
+  // Visible Expression fallback (Wave 3): composition owns whether fallback
+  // may run on an eligible turn; Model Fabric owns the provider/model selected
+  // for the resolved ashley_expression_fallback route. ON by default; opt out
+  // with ASHLEY_EXPRESSION_FALLBACK=false.
   expressionFallbackEnabled:
     process.env.ASHLEY_EXPRESSION_FALLBACK !== "false",
   expressionFallbackRecentTurns: numericEnv(
@@ -221,13 +222,6 @@ function createEnv() {
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean),
-  thoughtExpressionGuardMs: numericEnv(
-    "THOUGHT_EXPRESSION_GUARD_MS",
-    4_000,
-    1,
-    9_999,
-    true,
-  ),
   perceptionDispatchSafetyMs: numericEnv(
     "PERCEPTION_DISPATCH_SAFETY_MS",
     300,
@@ -392,13 +386,6 @@ function createEnv() {
     "ASHLEY_SANDBOX_WORKSPACE_ROOT",
     join(homedir(), ".composer-assistant", "sandbox", "workspace"),
   ),
-  sandboxMaxConcurrentTasks: numericEnv(
-    "ASHLEY_SANDBOX_MAX_CONCURRENT_TASKS",
-    1,
-    1,
-    16,
-    true,
-  ),
   };
 }
 
@@ -493,7 +480,10 @@ export function validateBoot(): {
       `ASHLEY_SANDBOX_LIFECYCLE is ${env.sandboxLifecycle} but ASHLEY_SANDBOX_BROKER_ENABLED is not true — broker IPC stays off`,
     );
   }
-  if (!env.mistralApiKey) {
+  if (
+    !env.mistralApiKey &&
+    (env.cognitiveKernel === "legacy" || env.cognitiveKernel === "shadow")
+  ) {
     warnings.push("MISTRAL_API_KEY missing — agent will run offline");
   }
   if (!env.memoryOwnerId) {

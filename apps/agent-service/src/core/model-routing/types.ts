@@ -197,6 +197,8 @@ export type ProviderCompletion = {
   toolCalls?: ToolCallResult[];
   usage?: TokenUsage;
   providerModel?: string | null;
+  /** Actual HTTP response status observed at the provider boundary. */
+  providerHttpStatus?: number;
   /** Provider finish_reason when supplied (stop, length, …). Never a secret. */
   finishReason?: string | null;
   /** Bounded provider response shape and accounting diagnostics. */
@@ -204,6 +206,38 @@ export type ProviderCompletion = {
   /** Sanitized evidence of the request emitted by the provider adapter. */
   wireEvidence?: WireDispatchEvidence;
 };
+
+export const PROVIDER_HTTP_STATUS_BOUNDARY = "__ashley_provider_http_status" as const;
+
+export function validateProviderHttpStatus(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value >= 100 && value <= 599
+    ? value
+    : undefined;
+}
+
+export function attachProviderHttpStatusBoundary(
+  error: unknown,
+  status: unknown,
+): void {
+  if (!error || (typeof error !== "object" && typeof error !== "function")) return;
+  const providerHttpStatus = validateProviderHttpStatus(status);
+  if (providerHttpStatus === undefined) return;
+  Object.defineProperty(error, PROVIDER_HTTP_STATUS_BOUNDARY, {
+    configurable: true,
+    enumerable: false,
+    value: providerHttpStatus,
+    writable: true,
+  });
+}
+
+export function providerHttpStatusFromBoundary(
+  error: unknown,
+): number | undefined {
+  if (!error || typeof error !== "object") return undefined;
+  return validateProviderHttpStatus(
+    (error as Record<string, unknown>)[PROVIDER_HTTP_STATUS_BOUNDARY],
+  );
+}
 
 export type WireDispatchEvidence = Readonly<{
   adapterId: string;

@@ -174,13 +174,23 @@ export function updateSystemNoticeStatus(
   status: SystemNoticeOutbox["sendStatus"],
   options: { nuclearReservationId?: number | null; discordMessageId?: string | null } = {},
 ): SystemNoticeOutbox {
+  const discordMessageIdClause = options.discordMessageId === undefined
+    ? ""
+    : ", discord_message_id = ?";
+  const parameters: Array<string | number | null> = [
+    status,
+    options.nuclearReservationId ?? null,
+  ];
+  if (options.discordMessageId !== undefined) {
+    parameters.push(options.discordMessageId);
+  }
+  parameters.push(noticeId);
   db.prepare(
     `UPDATE system_notice_outbox
      SET send_status = ?,
-         nuclear_reservation_id = COALESCE(?, nuclear_reservation_id),
-         discord_message_id = COALESCE(?, discord_message_id)
+         nuclear_reservation_id = COALESCE(?, nuclear_reservation_id)${discordMessageIdClause}
      WHERE notice_id = ?`,
-  ).run(status, options.nuclearReservationId ?? null, options.discordMessageId ?? null, noticeId);
+  ).run(...parameters);
   const notice = getSystemNotice(db, noticeId);
   if (!notice) throw new Error("system_notice_missing");
   return notice;

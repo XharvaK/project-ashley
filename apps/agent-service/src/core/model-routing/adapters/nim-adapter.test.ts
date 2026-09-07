@@ -3,6 +3,7 @@ import { env } from "../../../env.js";
 import { AppError } from "../../../errors.js";
 import { buildNimRequestBody, createNimAdapter, mapNimError } from "./nim-adapter.js";
 import type { ChatMessage } from "../types.js";
+import { providerHttpStatusFromBoundary } from "../types.js";
 import type { StructuredOutputSchemaFingerprint } from "../../model-fabric/types.js";
 
 const originalKey = env.nimApiKey;
@@ -14,13 +15,17 @@ afterEach(() => {
 
 function fakeResponse(
   body: unknown,
-  init: { status?: number; headers?: Record<string, string> } = {},
+  init: {
+    status?: number;
+    headers?: Record<string, string>;
+    json?: () => Promise<unknown>;
+  } = {},
 ) {
   return {
     ok: (init.status ?? 200) >= 200 && (init.status ?? 200) < 300,
     status: init.status ?? 200,
     headers: new Headers(init.headers ?? {}),
-    json: async () => body,
+    json: init.json ?? (async () => body),
   };
 }
 
@@ -47,6 +52,52 @@ describe("nim-adapter fixtures", () => {
     expect(result.usage).toEqual({ promptTokens: 10, completionTokens: 2 });
     expect(result.providerModel).toBe("openai/gpt-oss-20b");
     expect(result.finishReason).toBe("stop");
+    expect(result.providerHttpStatus).toBe(200);
+  });
+
+  it("preserves observed status across provider errors and post-header body failures", async () => {
+    env.nimApiKey = "test";
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const providerMessage = "provider body must never enter logs";
+    const errorAdapter = createNimAdapter(async () =>
+      fakeResponse({ error: { message: providerMessage } }, { status: 503 }),
+    );
+    let providerError: unknown;
+    try {
+      await errorAdapter.dispatch({ messages, modelId: "openai/gpt-oss-20b", options: {} });
+    } catch (error) {
+      providerError = error;
+    }
+    expect(providerError).toMatchObject({ code: "provider_unavailable" });
+    expect(providerHttpStatusFromBoundary(providerError)).toBe(503);
+    expect(Object.keys(providerError as object)).not.toContain("__ashley_provider_http_status");
+    expect(log.mock.calls.flat().join(" ")).not.toContain(providerMessage);
+
+    const bodyError = new Error("body read failed");
+    const bodyAdapter = createNimAdapter(async () =>
+      fakeResponse({}, { status: 200, json: async () => { throw bodyError; } }),
+    );
+    await expect(
+      bodyAdapter.dispatch({ messages, modelId: "openai/gpt-oss-20b", options: {} }),
+    ).rejects.toBe(bodyError);
+    expect(providerHttpStatusFromBoundary(bodyError)).toBe(200);
+
+    const abortError = new Error("aborted after headers");
+    abortError.name = "AbortError";
+    const abortAdapter = createNimAdapter(async () =>
+      fakeResponse({}, { status: 200, json: async () => { throw abortError; } }),
+    );
+    await expect(
+      abortAdapter.dispatch({ messages, modelId: "openai/gpt-oss-20b", options: {} }),
+    ).rejects.toBe(abortError);
+    expect(providerHttpStatusFromBoundary(abortError)).toBe(200);
+
+    const networkError = new Error("network failed");
+    const networkAdapter = createNimAdapter(async () => { throw networkError; });
+    await expect(
+      networkAdapter.dispatch({ messages, modelId: "openai/gpt-oss-20b", options: {} }),
+    ).rejects.toBe(networkError);
+    expect(providerHttpStatusFromBoundary(networkError)).toBeUndefined();
   });
 
   it("maps prompt cache usage to cachedTokens", async () => {
@@ -71,6 +122,40 @@ describe("nim-adapter fixtures", () => {
       completionTokens: 2,
       cachedTokens: 4,
     });
+  });
+
+  it("keeps only strict nonnegative integer reasoning and cached token observations", async () => {
+    env.nimApiKey = "test";
+    const adapter = createNimAdapter(async () =>
+      fakeResponse({
+        choices: [{ message: { content: "ok" } }],
+        usage: {
+          prompt_tokens: 10,
+          completion_tokens: 2,
+          prompt_tokens_details: { cached_tokens: 0 },
+          completion_tokens_details: { reasoning_tokens: 0 },
+        },
+      }),
+    );
+    const zero = await adapter.dispatch({ messages, modelId: "openai/gpt-oss-20b", options: {} });
+    expect(zero.usage).toMatchObject({ cachedTokens: 0, reasoningTokens: 0 });
+
+    const invalidValues = [null, undefined, Number.NaN, Number.POSITIVE_INFINITY, -1, 1.5, "100"];
+    for (const invalid of invalidValues) {
+      const invalidAdapter = createNimAdapter(async () =>
+        fakeResponse({
+          choices: [{ message: { content: "ok" } }],
+          usage: {
+            prompt_tokens: 10,
+            completion_tokens: 2,
+            prompt_tokens_details: { cached_tokens: invalid as never },
+            completion_tokens_details: { reasoning_tokens: invalid as never },
+          },
+        }),
+      );
+      const result = await invalidAdapter.dispatch({ messages, modelId: "openai/gpt-oss-20b", options: {} });
+      expect(result.usage).toEqual({ promptTokens: 10, completionTokens: 2 });
+    }
   });
 
   it("does not report a cached token count for a non-numeric provider field", async () => {

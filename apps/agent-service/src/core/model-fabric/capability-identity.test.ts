@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  assertThoughtCapabilityEvidence,
   buildThoughtCapabilityIdentity,
   thoughtResourcePolicyIdentity,
   type ThoughtCapabilityComponents,
 } from "./capability-identity.js";
+import { sha256, sha256Text } from "./hash.js";
+import { THOUGHT_KERNEL_ENVELOPE_VERSION } from "../cognitive-v021/thought/kernel-envelope.js";
+import { THOUGHT_SEMANTIC_PARSER_ID } from "../cognitive-v021/thought/parse.js";
+import { THOUGHT_OUTPUT_SCHEMA_FINGERPRINT } from "../cognitive-v021/thought/output-contract.js";
 
 const base: ThoughtCapabilityComponents = {
   executableBuildIdentity: "build:fixture",
@@ -32,14 +37,56 @@ describe("Thought capability identity", () => {
   it("binds the frozen resource policy and rejects malformed fingerprints", () => {
     const policy = thoughtResourcePolicyIdentity();
     expect(policy).toMatchObject({
-      ordinaryThoughtBudgetMs: 30000,
-      interactiveMaxOutput: 4096,
-      durableProactiveMaxOutput: 4096,
-      structuralRetryMaxOutput: 2048,
+      ordinaryThoughtBudgetMs: 60000,
+      interactiveMaxOutput: 8192,
+      durableProactiveMaxOutput: 8192,
+      structuralRetryMaxOutput: 8192,
       structuralRetriesMaxPerSemanticPass: 2,
     });
     expect(policy.fingerprint).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(policy.fingerprint).not.toBe(`sha256:${sha256({
+      ordinaryThoughtBudgetMs: 30_000,
+      interactiveMaxOutput: 4_096,
+      durableProactiveMaxOutput: 4_096,
+      structuralRetryMaxOutput: 2_048,
+      structuralRetriesMaxPerSemanticPass: 2,
+    })}`);
     expect(() => buildThoughtCapabilityIdentity({ ...base, semanticContractFingerprint: "not-a-fingerprint" })).toThrow("capability_component_invalid");
+  });
+
+  it("keeps the resource evidence ceiling narrowable but not exceedable", () => {
+    const makeEvidence = (resourceEvidence: { deadlineMs: number; maxOutputTokens: number; attempts: number }) => {
+      const capability = buildThoughtCapabilityIdentity({
+        ...base,
+        semanticContractFingerprint: THOUGHT_OUTPUT_SCHEMA_FINGERPRINT,
+        kernelEnvelopeContractVersion: THOUGHT_KERNEL_ENVELOPE_VERSION,
+        parserValidatorFingerprint: `sha256:${sha256Text(THOUGHT_SEMANTIC_PARSER_ID)}`,
+        logicalBindingId: "ashley.thought.semantic.v1",
+        resourcePolicyFingerprint: thoughtResourcePolicyIdentity().fingerprint,
+      });
+      return {
+        capability,
+        logicalEvidence: {
+          contractId: capability.components.logicalBindingId,
+          schemaFingerprint: THOUGHT_OUTPUT_SCHEMA_FINGERPRINT,
+          bindingId: capability.components.logicalBindingId,
+        },
+        wireEvidence: {
+          adapterId: "test-adapter",
+          wireFormat: "test-wire",
+          sanitizedBodyDigest: `sha256:${"e".repeat(64)}`,
+          emittedEnforcementMode: capability.components.schemaEnforcementMode,
+          providerDeclaredEnforcement: "unavailable" as const,
+          bindingId: capability.components.wireBindingId,
+        },
+        resourceEvidence,
+      };
+    };
+
+    expect(() => assertThoughtCapabilityEvidence(makeEvidence({ deadlineMs: 60000, maxOutputTokens: 8192, attempts: 3 }))).not.toThrow();
+    expect(() => assertThoughtCapabilityEvidence(makeEvidence({ deadlineMs: 60000, maxOutputTokens: 4096, attempts: 3 }))).not.toThrow();
+    expect(() => assertThoughtCapabilityEvidence(makeEvidence({ deadlineMs: 60000, maxOutputTokens: 8193, attempts: 3 }))).toThrow("qualification_resource_evidence_mismatch");
+    expect(() => assertThoughtCapabilityEvidence(makeEvidence({ deadlineMs: 60000, maxOutputTokens: 8192, attempts: 4 }))).toThrow("qualification_resource_evidence_mismatch");
   });
 
   it("changes the aggregate fingerprint when any component changes", () => {

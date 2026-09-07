@@ -110,7 +110,7 @@ function qualification(overrides: Record<string, unknown> = {}) {
       bindingId: fixtureCapability.components.wireBindingId,
     },
     resourceEvidence: {
-      deadlineMs: 30_000,
+      deadlineMs: 60_000,
       maxOutputTokens: 4_096,
       attempts: 1,
     },

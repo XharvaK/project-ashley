@@ -62,6 +62,9 @@ export type ThoughtProviderFailureCapture = Readonly<{
   finishReason?: string;
   inputTokens?: number;
   completionTokens?: number;
+  providerHttpStatus?: number;
+  reasoningTokens?: number;
+  cachedInputTokens?: number;
   contentBytes?: number;
   reasoningContentBytes?: number;
   contentHash?: string;
@@ -263,6 +266,9 @@ function providerFailurePayload(
     ["remainingDeadlineMs", "finite"],
     ["inputTokens", "finite"],
     ["completionTokens", "finite"],
+    ["providerHttpStatus", "integer"],
+    ["reasoningTokens", "integer"],
+    ["cachedInputTokens", "integer"],
     ["contentBytes", "finite"],
     ["reasoningContentBytes", "finite"],
   ];
@@ -336,6 +342,8 @@ function parseProviderFailureCapture(value: unknown): ThoughtProviderFailureCapt
       ["requestStartedAtMs", "integer"], ["responseAtMs", "integer"],
       ["elapsedMs", "finite"], ["remainingDeadlineMs", "finite"],
       ["inputTokens", "finite"], ["completionTokens", "finite"],
+      ["providerHttpStatus", "integer"],
+      ["reasoningTokens", "integer"], ["cachedInputTokens", "integer"],
       ["contentBytes", "finite"], ["reasoningContentBytes", "finite"],
     ];
     for (const [key, kind] of numbers) {

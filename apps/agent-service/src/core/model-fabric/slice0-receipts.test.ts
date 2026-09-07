@@ -7,6 +7,7 @@ import { completeChat, resetAdapterCache } from "../../mistral-client.js";
 import * as mistralAdapterModule from "../model-routing/adapters/mistral-adapter.js";
 import * as groqAdapterModule from "../model-routing/adapters/groq-adapter.js";
 import * as nimAdapterModule from "../model-routing/adapters/nim-adapter.js";
+import { attachProviderHttpStatusBoundary } from "../model-routing/types.js";
 import { createGroqAdapter } from "../model-routing/adapters/groq-adapter.js";
 import { createNimAdapter } from "../model-routing/adapters/nim-adapter.js";
 import { withOfflineAppGateDisabled } from "../qualification/offline-test-helpers.js";
@@ -57,15 +58,15 @@ describe("SLICE 0 receipt truth", () => {
   it("keeps credential_failover on a failed two-attempt Thought invocation", async () => {
     env.mistralApiKey = "test-primary";
     env.mistralApiKeySecondary = "test-secondary";
-    const dispatch = vi.fn().mockRejectedValue(
-      new AppError(
-        "credential_invalid",
-        "Mistral credential rejected",
-        401,
-        undefined,
-        "account",
-      ),
+    const providerError = new AppError(
+      "credential_invalid",
+      "Mistral credential rejected",
+      401,
+      undefined,
+      "account",
     );
+    attachProviderHttpStatusBoundary(providerError, 401);
+    const dispatch = vi.fn().mockRejectedValue(providerError);
     vi.spyOn(mistralAdapterModule, "createMistralAdapter").mockReturnValue({
       provider: "mistral",
       dispatch,
@@ -132,15 +133,15 @@ describe("SLICE 0 receipt truth", () => {
   it("does not classify a deadline-blocked Thought credential hop as credential failover", async () => {
     env.mistralApiKey = "test-primary";
     env.mistralApiKeySecondary = "test-secondary";
-    const dispatch = vi.fn().mockRejectedValue(
-      new AppError(
-        "rate_limited",
-        "Mistral account rate limited",
-        429,
-        undefined,
-        "account",
-      ),
+    const providerError = new AppError(
+      "rate_limited",
+      "Mistral account rate limited",
+      429,
+      undefined,
+      "account",
     );
+    attachProviderHttpStatusBoundary(providerError, 429);
+    const dispatch = vi.fn().mockRejectedValue(providerError);
     vi.spyOn(mistralAdapterModule, "createMistralAdapter").mockReturnValue({
       provider: "mistral",
       dispatch,
@@ -170,9 +171,9 @@ describe("SLICE 0 receipt truth", () => {
 
   it("does not classify Expression failure as Thought credential failover", async () => {
     env.nimApiKey = "test-nim";
-    const dispatch = vi.fn().mockRejectedValue(
-      new AppError("rate_limited", "NIM rate limited", 429),
-    );
+    const providerError = new AppError("rate_limited", "NIM rate limited", 429);
+    attachProviderHttpStatusBoundary(providerError, 429);
+    const dispatch = vi.fn().mockRejectedValue(providerError);
     vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
       provider: "nim",
       dispatch,
@@ -195,7 +196,7 @@ describe("SLICE 0 receipt truth", () => {
     database.close();
   });
 
-  it("records an SDK-shaped HTTP status as response_received", async () => {
+  it("does not treat an SDK-shaped HTTP status as response_received", async () => {
     env.nimApiKey = "test-nim";
     const sdkError = Object.assign(new Error("429 from SDK"), { status: 429 });
     vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
@@ -216,10 +217,11 @@ describe("SLICE 0 receipt truth", () => {
     }
 
     expect(metadata(thrown).receipt.attempts[0]).toMatchObject({
-      receiptStage: "provider_response",
-      dispatchTruth: "response_received",
+      receiptStage: "dispatch_attempted",
+      dispatchTruth: "sent_outcome_unknown",
       providerRequestCount: 1,
     });
+    expect(metadata(thrown).receipt.attempts[0]).not.toHaveProperty("providerHttpStatus");
     database.close();
   });
 

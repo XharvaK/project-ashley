@@ -722,4 +722,53 @@ describe("Thought Diagnostics & Observability DB", () => {
       obs.close();
     }
   });
+
+  it("round-trips provider HTTP status through the bounded failure allowlist", () => {
+    const obs = openObservabilityStore(":memory:");
+    try {
+      obs.recordDiagnostic({
+        cycleId: "cycle-status-provider",
+        generation: 1,
+        requestId: "req-status-provider",
+        pass: 1,
+        code: "provider_unavailable",
+        stage: "provider_dispatch",
+        dispatchTruth: "sent",
+        providerFailure: {
+          provider: "nim",
+          providerHttpStatus: 503,
+          reasoningTokens: 150,
+          cachedInputTokens: 200,
+          dispatchTruth: "sent",
+          parserStatus: "not_run",
+          validatorStatus: "not_run",
+          structuralRetryStatus: "not_applicable",
+        },
+      });
+      obs.recordDiagnostic({
+        cycleId: "cycle-legacy-provider",
+        generation: 1,
+        requestId: "req-legacy-provider",
+        pass: 1,
+        code: "provider_unavailable",
+        stage: "provider_dispatch",
+        dispatchTruth: "sent",
+        providerFailure: {
+          provider: "nim",
+          dispatchTruth: "sent",
+          parserStatus: "not_run",
+          validatorStatus: "not_run",
+          structuralRetryStatus: "not_applicable",
+        },
+      });
+
+      const diagnostics = obs.listDiagnostics();
+      expect(diagnostics.find((item) => item.requestId === "req-status-provider")?.providerFailure)
+        .toMatchObject({ providerHttpStatus: 503, reasoningTokens: 150, cachedInputTokens: 200 });
+      expect(diagnostics.find((item) => item.requestId === "req-legacy-provider")?.providerFailure)
+        .not.toHaveProperty("providerHttpStatus");
+    } finally {
+      obs.close();
+    }
+  });
 });

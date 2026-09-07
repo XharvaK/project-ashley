@@ -232,9 +232,10 @@ export async function serveAgent(manager: AgentManager): Promise<void> {
       nowMs: () => Date.now(),
       runDurableThought: env.durableOperationalThoughtEnabled
         ? runProductionDurableThought
-        : undefined,
+      : undefined,
     });
   }
+  manager.markStartupComplete();
   console.log(
     `[agent-service] nuclear core enabled db=${manager.core.getHealth().dbPath} plane=${manager.dataPlane.kind}`,
   );

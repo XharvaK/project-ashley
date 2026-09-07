@@ -2,6 +2,11 @@ import { env } from "../../../env.js";
 import { AppError } from "../../../errors.js";
 import { applyTranslatedControlToNimBody } from "../../model-fabric/reasoning-translation.js";
 import { sha256Text } from "../../model-fabric/hash.js";
+import {
+  attachProviderHttpStatusBoundary,
+  providerHttpStatusFromBoundary,
+  validateProviderHttpStatus,
+} from "../types.js";
 import type {
   ChatMessage,
   CompletionOptions,
@@ -16,12 +21,6 @@ import type {
 } from "../types.js";
 import type { TrustedStructuredOutputControl } from "../../model-fabric/types.js";
 import { wireEvidenceFor } from "../../model-fabric/wire-evidence.js";
-
-type NimErrorResponse = {
-  error?: { type?: string; message?: string; code?: string | number };
-  detail?: string | Array<{ msg?: string }>;
-  message?: string;
-};
 
 type NimMessage = {
   content?: string | Array<unknown> | null;
@@ -51,6 +50,12 @@ type NimResponse = {
   model?: string;
 };
 
+function parseNonNegativeInteger(raw: unknown): number | undefined {
+  return typeof raw === "number" && Number.isInteger(raw) && raw >= 0
+    ? raw
+    : undefined;
+}
+
 function toTokenUsage(raw: unknown): TokenUsage | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const r = raw as NimUsage;
@@ -59,15 +64,13 @@ function toTokenUsage(raw: unknown): TokenUsage | undefined {
   if (!Number.isFinite(promptTokens) || !Number.isFinite(completionTokens)) {
     return undefined;
   }
-  const reasoningRaw = Number(r.completion_tokens_details?.reasoning_tokens);
   const usage: TokenUsage = { promptTokens, completionTokens };
-  const cachedRaw = r.prompt_tokens_details?.cached_tokens;
-  if (typeof cachedRaw === "number" && Number.isFinite(cachedRaw) && cachedRaw >= 0) {
-    usage.cachedTokens = cachedRaw;
-  }
-  if (Number.isFinite(reasoningRaw) && reasoningRaw >= 0) {
-    usage.reasoningTokens = reasoningRaw;
-  }
+  const cachedTokens = parseNonNegativeInteger(r.prompt_tokens_details?.cached_tokens);
+  if (cachedTokens !== undefined) usage.cachedTokens = cachedTokens;
+  const reasoningTokens = parseNonNegativeInteger(
+    r.completion_tokens_details?.reasoning_tokens,
+  );
+  if (reasoningTokens !== undefined) usage.reasoningTokens = reasoningTokens;
   return usage;
 }
 
@@ -327,28 +330,43 @@ export function mapNimError(err: unknown): AppError {
         : String(err);
   const msg = rawMessage;
   const status = statusCode(err);
-  console.error("[nim]", status ?? "no-status", msg.slice(0, 500));
-
+  const providerHttpStatus = providerHttpStatusFromBoundary(err);
+  let mapped: AppError;
   if (status === 429 || /429|rate.?limit/i.test(msg)) {
-    return new AppError(
+    mapped = new AppError(
       "rate_limited",
       "NVIDIA NIM rate limited",
       429,
       parseRetryAfterSec(err) ?? 30,
     );
-  }
-  if (
+  } else if (
     (status !== undefined && status >= 500) ||
     /5\d{2}|unavailable|timeout|ECONNREFUSED|ECONNRESET|ETIMEDOUT/i.test(msg)
   ) {
-    return new AppError(
+    mapped = new AppError(
       "provider_unavailable",
       "NVIDIA NIM unavailable",
       503,
       parseRetryAfterSec(err),
     );
+  } else {
+    mapped = new AppError("internal_error", "NVIDIA NIM request failed", 500);
   }
-  return new AppError("internal_error", "NVIDIA NIM request failed", 500);
+  attachProviderHttpStatusBoundary(mapped, providerHttpStatus);
+  const configuredModelId = err && typeof err === "object"
+    && typeof (err as { configuredModelId?: unknown }).configuredModelId === "string"
+    ? (err as { configuredModelId: string }).configuredModelId
+    : undefined;
+  console.error("[nim]", {
+    provider: "nim",
+    ...(configuredModelId ? { model: configuredModelId } : {}),
+    ...(providerHttpStatus !== undefined ? { providerHttpStatus } : {}),
+    code: mapped.code,
+    ...(mapped.retryAfterSec !== undefined
+      ? { retryAfterSec: mapped.retryAfterSec }
+      : {}),
+  });
+  return mapped;
 }
 
 function extractText(content: unknown): string {
@@ -432,27 +450,23 @@ export function createNimAdapter(
         body: JSON.stringify(body),
         signal: args.signal,
       });
+      const providerHttpStatus = validateProviderHttpStatus(res.status);
       if (!res.ok) {
-        let detail = `nim_error:${res.status}`;
-        try {
-          const errJson = (await res.json()) as NimErrorResponse;
-          const providerMessage =
-            errJson.error?.message ??
-            errJson.message ??
-            (typeof errJson.detail === "string" ? errJson.detail : undefined);
-          if (typeof providerMessage === "string" && providerMessage.length > 0) {
-            detail = providerMessage.slice(0, 300);
-          }
-        } catch {
-          /* body not JSON */
-        }
-        throw mapNimError({
-          statusCode: res.status,
+        const boundaryError: Record<string, unknown> = {
+          statusCode: providerHttpStatus,
           headers: res.headers,
-          message: detail,
-        });
+          configuredModelId: args.modelId,
+        };
+        attachProviderHttpStatusBoundary(boundaryError, providerHttpStatus);
+        throw mapNimError(boundaryError);
       }
-      const json = (await res.json()) as NimResponse;
+      let json: NimResponse;
+      try {
+        json = (await res.json()) as NimResponse;
+      } catch (error) {
+        attachProviderHttpStatusBoundary(error, providerHttpStatus);
+        throw error;
+      }
       const choice = json.choices?.[0];
       const msg = choice?.message;
       const text = msg?.content ? extractText(msg.content) : "";
@@ -465,6 +479,7 @@ export function createNimAdapter(
         text,
         toolCalls: parseToolCalls(msg),
         usage,
+        ...(providerHttpStatus !== undefined ? { providerHttpStatus } : {}),
         providerModel:
           typeof json.model === "string" ? json.model : null,
         finishReason,

@@ -363,6 +363,7 @@ export function createServer(
       state: manager.getState(),
       uptimeSec: manager.getUptimeSec(),
       providerState: manager.getProviderState(),
+      ...manager.getReadinessSnapshot(),
       ...cognitive,
     });
   });
@@ -376,6 +377,7 @@ export function createServer(
         ready: manager.getState() === "ready" || manager.getState() === "busy",
         providerState: manager.getProviderState(),
         }),
+        ...manager.getReadinessSnapshot(),
         ...cognitiveHealth(),
       });
     } catch (err) {

@@ -150,7 +150,6 @@ export async function consolidateCuriosityRead(
   ], {
     maxTokens: 900,
     temperature: 0.35,
-    reasoningEffort: "medium",
     purpose: "curiosity_consolidation",
     logicalRole: "curiosity_consolidation",
     route: "utility_bulk",
