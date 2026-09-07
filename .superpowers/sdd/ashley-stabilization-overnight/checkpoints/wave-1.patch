@@ -1,0 +1,3314 @@
+diff --git a/.superpowers/sdd/ashley-stabilization-overnight/task-1-fix1-report.md b/.superpowers/sdd/ashley-stabilization-overnight/task-1-fix1-report.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..4ce33d9483174e176299c711d167aebd73846583
+--- /dev/null
++++ b/.superpowers/sdd/ashley-stabilization-overnight/task-1-fix1-report.md
+@@ -0,0 +1,81 @@
++# Task 1 Fix 1 — Sparse materialization boundary report
++
++## Candidate
++
++- Worktree: `C:\Users\Xharv\Projects\composer-assistant-stabilization-overnight-20260906`
++- Branch: `codex/stabilization-sparse-vnext-overnight-20260906`
++- Reviewed parent: `c055642b5f9e3c72bb45c55304b6a390cd7235e4`
++- Fix commit: `cf3613b1b36adccd97fb37c5355abf0f7ae65f08`
++- Design authority: `docs/architecture/cognitive/ASHLEY_SPARSE_THOUGHT_CONTRACT_VNEXT_DESIGN.md`
++- No external provider calls were made.
++
++## Reviewed fixes implemented
++
++1. Known materialization failures for `alias_duplicate`,
++   `dangling_local_reference`, and `reference_target_type_mismatch` now use a
++   typed internal boundary. `runThoughtModel` maps only those known failures
++   to `ThoughtStepOutput` with `reason: "malformed"`, the exact diagnostic code,
++   and the exact field path. `runCognitiveCycle` therefore uses its existing
++   bounded structural retry and terminal malformed notice path. Unknown errors
++   retain the existing unavailable behavior.
++2. Existing references are checked against target domains represented by the
++   current Thought input. Known Working Context, Concern, and Observation IDs
++   are tracked. Concern-bearing fields reject known Working Context or
++   Observation IDs, Working Context fields reject known non-Working-Context
++   IDs, and `evidenceUse.observationRefsUsed` rejects known non-Observation IDs.
++   References without a positively known target domain remain opaque
++   allowlisted strings. No Host-authored semantic fallback was added.
++
++## Exact changed files
++
++- `apps/agent-service/src/core/cognitive-v021/thought/run.ts`
++- `apps/agent-service/src/core/cognitive-v021/thought/run.test.ts`
++- `apps/agent-service/src/core/cognitive-v021/thought/reference-allowlist.ts`
++- `apps/agent-service/src/core/cognitive-v021/thought/reference-allowlist.test.ts`
++- `apps/agent-service/src/core/cognitive-v021/thought/structural-feedback.ts`
++- `apps/agent-service/src/core/cognitive-v021/thought/structural-feedback.test.ts`
++- `apps/agent-service/src/core/cognitive-v021/types.ts`
++
++## Verification
++
++Focused reviewed witnesses:
++
++```text
++npm test --prefix apps/agent-service -- --run src/core/cognitive-v021/thought/run.test.ts -t "routes" --reporter=verbose
++Result: 3 passed.
++```
++
++Allowlist, materialization, and structural-boundary tests:
++
++```text
++npm test --prefix apps/agent-service -- --run src/core/cognitive-v021/thought/run.test.ts src/core/cognitive-v021/thought/reference-allowlist.test.ts src/core/cognitive-v021/thought/structural-feedback.test.ts --reporter=dot
++Result: 3 files passed, 28 tests passed.
++```
++
++The existing Task 1 sparse/core focused set was rerun with the new witnesses:
++
++```text
++npm test --prefix apps/agent-service -- --run src/core/cognitive-v021/thought/semantic-output-contract.test.ts src/core/cognitive-v021/thought/sparse-vnext.test.ts src/core/cognitive-v021/settlement/validate.test.ts src/core/cognitive-v021/speech/fidelity.test.ts src/core/cognitive-v021/speech/expression-adapter.test.ts src/core/cognitive-v021/thought/run.test.ts src/core/cognitive-v021/thought/structural-feedback.test.ts src/core/cognitive-v021/authority/check.test.ts src/core/cognitive-v021/settlement/publish.test.ts src/core/cognitive-v021/thought/operational-namespace.test.ts src/core/cognitive-v021/thought/nomination-memorykind.test.ts src/core/cognitive-v021/thought/retry-admission.test.ts src/core/cognitive-v021/thought/mustsay-contract.test.ts src/core/cognitive-v021/acceptance/causal-harness.test.ts --reporter=dot
++Result: 14 files passed, 133 tests passed.
++```
++
++Service build:
++
++```text
++npm run build --prefix apps/agent-service
++Result: passed (`tsc`).
++```
++
++The wider cognitive suite completed with 132/137 files passing and 608/628
++tests passing. The 20 failures remain outside this fix: existing scale/context
++budget assumptions, the committed Sandbox Broker build-dependent ingress
++setup, and qualification fixtures that stop at the current route/candidate
++preflight or stale candidate-SHA boundary. No Sandbox or qualification source
++was changed.
++
++## Scope boundary
++
++This fix does not implement provider failure capture, NVIDIA diagnostics,
++other P1 repairs, provider routing, release/version transition, deployment,
++production mutation, or Sandbox changes. Only the seven listed source/test
++files were staged in `cf3613b1b36adccd97fb37c5355abf0f7ae65f08`.
+diff --git a/.superpowers/sdd/ashley-stabilization-overnight/task-1-report.md b/.superpowers/sdd/ashley-stabilization-overnight/task-1-report.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..fc4ac151a7d041dff9b7cfba9f6d981e652b9965
+--- /dev/null
++++ b/.superpowers/sdd/ashley-stabilization-overnight/task-1-report.md
+@@ -0,0 +1,125 @@
++# Task 1 — S1 Sparse VNext Core Report
++
++## Candidate
++
++- Worktree: `C:\Users\Xharv\Projects\composer-assistant-stabilization-overnight-20260906`
++- Branch: `codex/stabilization-sparse-vnext-overnight-20260906`
++- Base: `7bae7eaafedc2e7e859218d340920ea3958b1515`
++- Implementation commit: `c055642b5f9e3c72bb45c55304b6a390cd7235e4`
++- Design authority: `docs/architecture/cognitive/ASHLEY_SPARSE_THOUGHT_CONTRACT_VNEXT_DESIGN.md`
++- No external provider calls were made.
++
++## Implemented behavior
++
++- Settlement fresh authoring requires only `kind` and `speech`.
++- Optional interpretation, commitment, delta, nomination, and evidence domains preserve omission as absence. Present arrays require at least one item. Present composite objects require a meaningful child. Malformed and unknown fields fail closed.
++- Draft speech requires non-empty `surfaceDraft`. Silent speech accepts exactly `{ "mode": "none" }`. Draft speech may omit commitments and literal/presentation constraints. New authoring no longer emits or accepts `acceptableRealizations`.
++- Fresh abstention accepts only `insufficient_evidence`, `unresolved_ambiguity`, and `no_responsible_proposal`. `no_semantic_change_warranted` is rejected.
++- Existing references use opaque allowlisted non-empty strings. Same-settlement local references are restricted to real Working Context and Concern creation paths, with alias collision, duplicate, dangling, and local target-type checks. Dead trigger, subscription, and nomination creation aliases were removed. The seven corrected reference surfaces use the unified shapes.
++- Canonical semantic schema and per-cycle wire schema are separated. Wire-only experimental bounds and the operational namespace are applied to a deep clone. Source-owned Thought contract/schema IDs are `ashley.thought.semantic.v2` and `ashley.thought.semantic.v2.schema`.
++- Materialization and publication preserve absent domains and intentional silence with internal deltas. No Host-authored semantic defaults are added. Retrieval/source evidence carry-through remains outside this task.
++- Validator, authority, publication, expression, structural feedback, causal acceptance, and fidelity composition handle sparse shapes. Operational receipt truth and high-risk vision/reading/currentness/success detectors remain active.
++
++## Files changed
++
++Core source:
++
++- `apps/agent-service/src/core/cognitive-v021/thought/output-contract.ts`
++- `apps/agent-service/src/core/cognitive-v021/thought/parse.ts`
++- `apps/agent-service/src/core/cognitive-v021/thought/run.ts`
++- `apps/agent-service/src/core/cognitive-v021/thought/structural-feedback.ts`
++- `apps/agent-service/src/core/cognitive-v021/settlement/validate.ts`
++- `apps/agent-service/src/core/cognitive-v021/settlement/publish.ts`
++- `apps/agent-service/src/core/cognitive-v021/authority/check.ts`
++- `apps/agent-service/src/core/cognitive-v021/speech/expression-adapter.ts`
++- `apps/agent-service/src/core/cognitive-v021/speech/fidelity.ts`
++- `apps/agent-service/src/core/cognitive-v021/types.ts`
++- `apps/agent-service/src/core/model-fabric/dispatch-contract.ts`
++
++Focused/supporting tests and fixtures:
++
++- `apps/agent-service/src/core/cognitive-v021/thought/sparse-vnext.test.ts`
++- `apps/agent-service/src/core/cognitive-v021/thought/semantic-output-contract.test.ts`
++- `apps/agent-service/src/core/cognitive-v021/thought/run.test.ts`
++- `apps/agent-service/src/core/cognitive-v021/thought/operational-namespace.test.ts`
++- `apps/agent-service/src/core/cognitive-v021/thought/mustsay-contract.test.ts`
++- `apps/agent-service/src/core/cognitive-v021/thought/nomination-memorykind.test.ts`
++- `apps/agent-service/src/core/cognitive-v021/thought/retry-admission.test.ts`
++- `apps/agent-service/src/core/cognitive-v021/settlement/validate.test.ts`
++- `apps/agent-service/src/core/cognitive-v021/authority/check.test.ts`
++- `apps/agent-service/src/core/cognitive-v021/speech/fidelity.test.ts`
++- `apps/agent-service/src/core/cognitive-v021/acceptance/causal-harness.test.ts`
++- `apps/agent-service/src/core/cognitive-v021/acceptance/causal-harness.ts`
++- `apps/agent-service/src/core/cognitive-v021/qualification/thought-capability-qualification.test.ts`
++- `apps/agent-service/src/core/cognitive-v021/qualification/thought-capability-qualification.ts`
++- `apps/agent-service/src/core/cognitive-v021/test-support.ts`
++- `apps/agent-service/src/core/model-fabric/mf-m2.test.ts`
++
++## Verification
++
++Focused sparse/core command:
++
++```text
++npm test --prefix apps/agent-service -- --run \
++  src/core/cognitive-v021/thought/semantic-output-contract.test.ts \
++  src/core/cognitive-v021/thought/sparse-vnext.test.ts \
++  src/core/cognitive-v021/settlement/validate.test.ts \
++  src/core/cognitive-v021/speech/fidelity.test.ts \
++  src/core/cognitive-v021/speech/expression-adapter.test.ts \
++  src/core/cognitive-v021/thought/run.test.ts \
++  src/core/cognitive-v021/thought/structural-feedback.test.ts \
++  src/core/cognitive-v021/authority/check.test.ts \
++  src/core/cognitive-v021/settlement/publish.test.ts \
++  src/core/cognitive-v021/thought/operational-namespace.test.ts \
++  src/core/cognitive-v021/thought/nomination-memorykind.test.ts \
++  src/core/cognitive-v021/thought/retry-admission.test.ts \
++  src/core/cognitive-v021/thought/mustsay-contract.test.ts \
++  src/core/cognitive-v021/acceptance/causal-harness.test.ts --reporter=dot
++```
++
++Result: 14 files passed, 129 tests passed.
++
++Additional Model Fabric/adapters command:
++
++```text
++npm test --prefix apps/agent-service -- --run src/core/model-fabric src/core/model-routing/adapters --reporter=dot
++```
++
++Result: 20 files passed, 181 tests passed.
++
++Parser regression after final alias guard: 1 file passed, 18 tests passed.
++
++Build/typecheck:
++
++```text
++npm run build --prefix apps/agent-service
++```
++
++Result: passed (`tsc`).
++
++The wider cognitive suite completed with 133/137 files passing and 605/624
++tests passing. The 19 failures are outside the S1 implementation: four
++scale/context-budget assertions exceed the current budget assumptions, and
++the qualification/authority-revision cases stop before their cases because the
++current route is NIM Nemotron while their fixture expects the older Mistral
++candidate. One stale-release assertion also observes the current
++`qualification_candidate_sha_invalid` boundary instead of its older expected
++release-identity code. No S1 core test failed in that run.
++
++## Known pre-existing failure
++
++The locked baseline recorded the committed `apps/sandbox-broker` build defect:
++missing/invalid workspace exports and entrypoint symbols including
++`RESERVED_BROKER_METADATA_NAME`, `copySanitizedTree`,
++`buildWorkspaceExclusionSet`, and the local sandbox-tree entrypoint. Dependent
++agent-service collection failures from that setup are pre-existing. No Sandbox
++file was changed. Sandbox remains outside S1.
++
++## Scope exclusions
++
++This commit does not implement provider failure capture, NVIDIA diagnostics,
++independent P1 repairs (including retrieval/source evidence carry-through),
++future-trigger snapshot binding, pending speech-outbox recovery, release
++`r5`→`r6` mechanics, deployment, production acceptance, or Sandbox changes.
++`SETTLEMENT_SCHEMA_VERSION` and `IMPLEMENTATION_SPEC_VERSION` remain at their
++current source values; release transition is a later task.
+diff --git a/apps/agent-service/src/core/cognitive-v021/acceptance/causal-harness.test.ts b/apps/agent-service/src/core/cognitive-v021/acceptance/causal-harness.test.ts
+index 6fb4d38203d1f6cd86a92626b740908c78b7d209..e4e0fca2c2e44191c50fa8f0558f71b9caf8de57 100644
+--- a/apps/agent-service/src/core/cognitive-v021/acceptance/causal-harness.test.ts
++++ b/apps/agent-service/src/core/cognitive-v021/acceptance/causal-harness.test.ts
+@@ -92,24 +92,20 @@ describe("cognitive v0.2.1 causal acceptance harness", () => {
+     ).toThrow(/delivered_text_requires_settlement/);
+   });
+ 
+-  it("rejects a non-empty draft with no epistemic or conversational commitments", () => {
++  it("accepts ordinary sparse draft speech without structured commitments", () => {
+     const settlement = {
+       ...draftSettlement(),
+-      commitments: {
+-        ...draftSettlement().commitments,
+-        epistemic: [],
+-        conversational: [],
+-      },
++      commitments: undefined,
+       speech: {
+         ...draftSettlement().speech,
+         surfaceDraft: "unsupported draft",
+       },
+-    } as CausalBundle["settlement"];
++    } as unknown as CausalBundle["settlement"];
+     expect(() =>
+       assertCausalInvariants(
+         bundle({ settlement, acceptedSettlements: 1, outboxText: "unsupported draft" }),
+       ),
+-    ).toThrow(/empty_commitments_with_draft/);
++    ).not.toThrow();
+   });
+ 
+   it("rejects transcript, memory, and capability markers in expression input", () => {
+diff --git a/apps/agent-service/src/core/cognitive-v021/acceptance/causal-harness.ts b/apps/agent-service/src/core/cognitive-v021/acceptance/causal-harness.ts
+index bbff05ab0b66e6d452439944a7a72f3c08d119da..25caf5b60dca0de3394a71ec0a1f720fe40ac368 100644
+--- a/apps/agent-service/src/core/cognitive-v021/acceptance/causal-harness.ts
++++ b/apps/agent-service/src/core/cognitive-v021/acceptance/causal-harness.ts
+@@ -54,17 +54,6 @@ export function assertCausalInvariants(bundle: CausalBundle): void {
+   }
+ 
+   const currentSpeech = speech(settlement);
+-  const commitments = [
+-    ...settlement.commitments.epistemic,
+-    ...settlement.commitments.conversational,
+-  ];
+-  if (
+-    currentSpeech.mode === "draft" &&
+-    commitments.length === 0 &&
+-    (currentSpeech.surfaceDraft?.trim().length ?? 0) > 0
+-  ) {
+-    fail("empty_commitments_with_draft");
+-  }
+ 
+   if (
+     bundle.acceptedSettlements === 0 &&
+diff --git a/apps/agent-service/src/core/cognitive-v021/authority/check.test.ts b/apps/agent-service/src/core/cognitive-v021/authority/check.test.ts
+index 2c2e292529499b9f7e06f403bdfc94d01152ee42..1eb26bf18880d13ebfe65faba8e5610aac07d422 100644
+--- a/apps/agent-service/src/core/cognitive-v021/authority/check.test.ts
++++ b/apps/agent-service/src/core/cognitive-v021/authority/check.test.ts
+@@ -25,18 +25,18 @@ function packs(overrides: Partial<AuthorityPacks> = {}): AuthorityPacks {
+ describe("v0.2.1 deterministic Authority", () => {
+   it("rejects a latest claim without current observation and does not rewrite it", () => {
+     const draft = makeThoughtDraft({ commitments: {
+-      ...makeThoughtDraft().commitments,
+-      epistemic: [{ ...makeThoughtDraft().commitments.epistemic[0]!, statement: "the latest HY4 shipped today", dimensions: { ...makeThoughtDraft().commitments.epistemic[0]!.dimensions, time: "current" } }],
++      ...makeThoughtDraft().commitments!,
++      epistemic: [{ ...makeThoughtDraft().commitments!.epistemic![0]!, statement: "the latest HY4 shipped today", dimensions: { ...makeThoughtDraft().commitments!.epistemic![0]!.dimensions, time: "current" } }],
+     }});
+     const result = checkAuthority("settlement", { settlement: draft, packs: packs({ currentness: { requireObservationForLatest: true } }), authorityEpoch: 1 });
+     expect(result).toMatchObject({ ok: false, codes: ["CURRENTNESS_UNVERIFIED"] });
+-    expect(draft.commitments.epistemic[0]?.statement).toBe("the latest HY4 shipped today");
++    expect(draft.commitments!.epistemic![0]?.statement).toBe("the latest HY4 shipped today");
+   });
+ 
+   it("accepts the same claim when a consumed page observation is present", () => {
+     const draft = makeThoughtDraft({ commitments: {
+-      ...makeThoughtDraft().commitments,
+-      epistemic: [{ ...makeThoughtDraft().commitments.epistemic[0]!, statement: "the latest HY4 shipped today" }],
++      ...makeThoughtDraft().commitments!,
++      epistemic: [{ ...makeThoughtDraft().commitments!.epistemic![0]!, statement: "the latest HY4 shipped today" }],
+     }, operations: { ...makeThoughtDraft().operations, observationsConsumed: ["obs-1"] }});
+     expect(checkAuthority("settlement", {
+       settlement: draft,
+diff --git a/apps/agent-service/src/core/cognitive-v021/authority/check.ts b/apps/agent-service/src/core/cognitive-v021/authority/check.ts
+index 5a1ee7a76df45f74d7e88b239050a19fb05107f0..3308678c378c6f3b4af1735151d745827fee434c 100644
+--- a/apps/agent-service/src/core/cognitive-v021/authority/check.ts
++++ b/apps/agent-service/src/core/cognitive-v021/authority/check.ts
+@@ -21,8 +21,8 @@ function unique(codes: AuthorityCode[]): AuthorityCode[] {
+ 
+ function settlementText(settlement: ThoughtSettlementDraft | PublishedCognitiveSettlement): string {
+   return [
+-    ...settlement.commitments.epistemic.map((item) => item.statement),
+-    ...settlement.speech.mustSay,
++    ...(settlement.commitments?.epistemic ?? []).map((item) => item.statement),
++    ...(settlement.speech.mustSay ?? []),
+     settlement.speech.surfaceDraft ?? "",
+   ].join(" ");
+ }
+@@ -141,16 +141,9 @@ function checkSettlement(
+   if (settlement.speech.mode === "draft" && packs.relational.withdrawalActive) {
+     codes.push("RELATIONAL_WITHDRAWAL");
+   }
+-  if (
+-    settlement.speech.mode === "draft" &&
+-    settlement.commitments.epistemic.length === 0 &&
+-    settlement.commitments.conversational.length === 0
+-  ) {
+-    codes.push("EMPTY_COMMITMENTS_WITH_DRAFT", "DRAFT_COMMITMENT_CONFLICT");
+-  }
+   if (
+     packs.currentness.requireObservationForLatest &&
+-    settlement.commitments.epistemic.some((claim) => claim.dimensions.time === "current") &&
++    (settlement.commitments?.epistemic ?? []).some((claim) => claim.dimensions.time === "current") &&
+     !settlement.operations.observationsConsumed.some((id) => (new Set(packs.currentness.observedObservationIds ?? [])).has(id))
+   ) {
+     codes.push("CURRENTNESS_UNVERIFIED");
+@@ -169,7 +162,7 @@ function checkSettlement(
+   );
+ 
+   // Check structured operational commitments against host truth (25-cell matrix)
+-  const operationalClaims = settlement.commitments.operational ?? [];
++  const operationalClaims = settlement.commitments?.operational ?? [];
+   const licensedEffectIds = new Set<string>();
+ 
+   for (const claim of operationalClaims) {
+@@ -191,7 +184,7 @@ function checkSettlement(
+       evaluation.ok &&
+       receipt != null &&
+       (receipt.outcome === "succeeded" || receipt.outcome === "failed") &&
+-      !settlement.operations.effectsCompleted.includes(effectId)
++      !(settlement.operations.effectsCompleted ?? []).includes(effectId)
+     ) {
+       codes.push("RECEIPT_REQUIRED");
+     }
+@@ -213,7 +206,7 @@ function checkSettlement(
+   }
+ 
+   // Check effectsCompleted: each must have a terminal physical receipt
+-  for (const effectId of settlement.operations.effectsCompleted) {
++  for (const effectId of (settlement.operations.effectsCompleted ?? [])) {
+     const receipt = packs.receipt.receiptsByEffectId[effectId];
+     if (!receipt) {
+       codes.push("RECEIPT_REQUIRED");
+diff --git a/apps/agent-service/src/core/cognitive-v021/qualification/thought-capability-qualification.test.ts b/apps/agent-service/src/core/cognitive-v021/qualification/thought-capability-qualification.test.ts
+index 1e472fc18408fcaf9180385d54d27fafbd6ead40..9fef1607197d7fa755df70c475c4c5cb85da68f3 100644
+--- a/apps/agent-service/src/core/cognitive-v021/qualification/thought-capability-qualification.test.ts
++++ b/apps/agent-service/src/core/cognitive-v021/qualification/thought-capability-qualification.test.ts
+@@ -181,8 +181,9 @@ describe("successor Thought qualification", () => {
+       "const",
+       "enum",
+       "items",
+-      "maxItems",
++      "minItems",
+       "minLength",
++      "minProperties",
+       "oneOf",
+       "pattern",
+       "properties",
+diff --git a/apps/agent-service/src/core/cognitive-v021/qualification/thought-capability-qualification.ts b/apps/agent-service/src/core/cognitive-v021/qualification/thought-capability-qualification.ts
+index 084ca7b9c12eeea77a67662c05c49ff5e52609ec..c201493cae03d8f893bf1e5d28da1c7a9e13259d 100644
+--- a/apps/agent-service/src/core/cognitive-v021/qualification/thought-capability-qualification.ts
++++ b/apps/agent-service/src/core/cognitive-v021/qualification/thought-capability-qualification.ts
+@@ -356,6 +356,9 @@ const SUPPORTED_SCHEMA_KEYWORDS = new Set([
+   "items",
+   "oneOf",
+   "minLength",
++  "maxLength",
++  "minItems",
++  "minProperties",
+   "pattern",
+   "maxItems",
+ ]);
+@@ -523,6 +526,9 @@ function validateSchemaNode(
+     if (typeof schema.minLength === "number" && [...value].length < schema.minLength) {
+       return oracleFailure("minLength_mismatch:" + path, "minLength", path, `${schemaPath}/minLength`);
+     }
++    if (typeof schema.maxLength === "number" && [...value].length > schema.maxLength) {
++      return oracleFailure("maxLength_mismatch:" + path, "maxLength", path, `${schemaPath}/maxLength`);
++    }
+     if (typeof schema.pattern === "string") {
+       let pattern: RegExp;
+       try {
+@@ -536,6 +542,9 @@ function validateSchemaNode(
+     }
+   }
+   if (Array.isArray(value)) {
++    if (typeof schema.minItems === "number" && value.length < schema.minItems) {
++      return oracleFailure("minItems_mismatch:" + path, "minItems", path, `${schemaPath}/minItems`);
++    }
+     if (typeof schema.maxItems === "number" && value.length > schema.maxItems) {
+       return oracleFailure("maxItems_mismatch:" + path, "maxItems", path, `${schemaPath}/maxItems`);
+     }
+@@ -553,6 +562,9 @@ function validateSchemaNode(
+     }
+   }
+   if (isRecord(value)) {
++    if (typeof schema.minProperties === "number" && Object.keys(value).length < schema.minProperties) {
++      return oracleFailure("minProperties_mismatch:" + path, "minProperties", path, `${schemaPath}/minProperties`);
++    }
+     const required = schema.required;
+     if (required !== undefined) {
+       if (!Array.isArray(required)) {
+@@ -1284,13 +1296,9 @@ function fixtureFor(caseId: ThoughtQualificationCaseId): unknown {
+       interpretation: {
+         discourseActs: ["inform"],
+         referentBindings: [{ span: "fixture", sourceTurnRefs: ["turn-1"] }],
+-        corrections: [],
+-        unresolvedAmbiguities: [],
+         topics: ["qualification"],
+       },
+       commitments: {
+-        epistemic: [],
+-        operational: [],
+         conversational: ["answer"],
+         stance: {
+           warmth: "medium",
+@@ -1302,22 +1310,10 @@ function fixtureFor(caseId: ThoughtQualificationCaseId): unknown {
+       speech: {
+         mode: "draft",
+         mustSay: [SETTLEMENT_FIXTURE_EXPECTATION.expectedSpeech],
+-        mustNotSay: [],
+         surfaceDraft: SETTLEMENT_FIXTURE_EXPECTATION.expectedSpeech,
+-        acceptableRealizations: [],
+-        presentationDirectives: [],
+       },
+-      workingContextDeltas: [],
+-      concernDeltas: [],
+-      occupancyDeltas: [],
+-      futureTriggerDeltas: [],
+-      subscriptionDeltas: [],
+-      durableNominations: [],
+       evidenceUse: {
+-        observationRefsUsed: [],
+-        retrievalRefsUsed: [],
+         sourceRefsUsed: [...SETTLEMENT_FIXTURE_EXPECTATION.sourceRefsUsed],
+-        openIntentRefs: [],
+       },
+     };
+   }
+diff --git a/apps/agent-service/src/core/cognitive-v021/settlement/publish.ts b/apps/agent-service/src/core/cognitive-v021/settlement/publish.ts
+index 34a8ee18894d3dd4267717acb47c93f52f2ec383..49ed8f2bb4b15a01528676a4e08e24c6380148f8 100644
+--- a/apps/agent-service/src/core/cognitive-v021/settlement/publish.ts
++++ b/apps/agent-service/src/core/cognitive-v021/settlement/publish.ts
+@@ -183,13 +183,13 @@ export function publishSemanticTransaction(
+       return { published: false, replayed: false, reason: "stale_generation", settlementId: null, outboxId: null };
+     }
+ 
+-    for (const delta of settlement.workingContextDelta) applyWorkingContextDelta(db, delta, settlement);
+-    for (const delta of settlement.concernDeltas) applyConcernDelta(db, delta, settlement);
+-    for (const delta of settlement.occupancyDelta) applyOccupancyDelta(db, delta, settlement);
+-    assertSubscriptionCapacity(db, conversationId, settlement.subscriptions);
+-    for (const delta of settlement.futureTriggers) applyFutureTriggerDelta(db, delta);
+-    for (const delta of settlement.subscriptions) applySubscriptionDelta(db, delta);
+-    for (const nomination of settlement.durableNominations) applyNomination(db, nomination);
++    for (const delta of (settlement.workingContextDelta ?? [])) applyWorkingContextDelta(db, delta, settlement);
++    for (const delta of (settlement.concernDeltas ?? [])) applyConcernDelta(db, delta, settlement);
++    for (const delta of (settlement.occupancyDelta ?? [])) applyOccupancyDelta(db, delta, settlement);
++    if (settlement.subscriptions) assertSubscriptionCapacity(db, conversationId, settlement.subscriptions);
++    for (const delta of (settlement.futureTriggers ?? [])) applyFutureTriggerDelta(db, delta);
++    for (const delta of (settlement.subscriptions ?? [])) applySubscriptionDelta(db, delta);
++    for (const nomination of (settlement.durableNominations ?? [])) applyNomination(db, nomination);
+ 
+     // Second fence: semantic deltas were prepared, but no publication row or
+     // speech projection may be written after the cycle/authority changed.
+@@ -239,7 +239,7 @@ export function publishSemanticTransaction(
+       observationIds: settlement.operations.observationsConsumed,
+       effectIds: settlement.operations.effectsCompleted,
+       authorityCodes: settlement.authority.objectionsApplied,
+-      nominationIds: settlement.durableNominations.map((item) => item.nominationId),
++      nominationIds: (settlement.durableNominations ?? []).map((item) => item.nominationId),
+       outboxId,
+       fidelity: options.fidelity ?? "skipped",
+       thoughtUnavailable: options.thoughtUnavailable ?? false,
+diff --git a/apps/agent-service/src/core/cognitive-v021/settlement/validate.test.ts b/apps/agent-service/src/core/cognitive-v021/settlement/validate.test.ts
+index a81c5772ae4fb6cffcad12892c570827f243f3d7..7c13b23a1c8cfc01be7db653f318ca289ffcfdcb 100644
+--- a/apps/agent-service/src/core/cognitive-v021/settlement/validate.test.ts
++++ b/apps/agent-service/src/core/cognitive-v021/settlement/validate.test.ts
+@@ -19,7 +19,7 @@ describe("v0.2.1 ThoughtSettlementDraft validation", () => {
+     expect(validateThoughtSettlementDraft(noSurface, active)).toMatchObject({ ok: false, kind: "malformed" });
+   });
+ 
+-  it("rejects none mode with text, empty commitments, unknown effects, and excess revisions", () => {
++  it("rejects none mode with text, while allowing sparse draft commitments", () => {
+     const noneWithText = makeThoughtDraft({
+       speech: { ...makeThoughtDraft().speech, mode: "none", surfaceDraft: "should not speak" },
+     });
+@@ -28,7 +28,7 @@ describe("v0.2.1 ThoughtSettlementDraft validation", () => {
+     const emptyCommitments = makeThoughtDraft({
+       commitments: { ...makeThoughtDraft().commitments, epistemic: [], conversational: [] },
+     });
+-    expect(validateThoughtSettlementDraft(emptyCommitments, active)).toMatchObject({ ok: false, kind: "conflict" });
++    expect(validateThoughtSettlementDraft(emptyCommitments, active)).toMatchObject({ ok: true });
+ 
+     const unknownEffect = makeThoughtDraft({ operations: { ...makeThoughtDraft().operations, effectsCompleted: ["effect-unknown"] } });
+     expect(validateThoughtSettlementDraft(unknownEffect, active)).toMatchObject({ ok: false, kind: "malformed" });
+diff --git a/apps/agent-service/src/core/cognitive-v021/settlement/validate.ts b/apps/agent-service/src/core/cognitive-v021/settlement/validate.ts
+index 9fb41c3158d20c5760245980c75005f430820ded..400d7efaa8a2c90400b848bd60393a7aa580e98a 100644
+--- a/apps/agent-service/src/core/cognitive-v021/settlement/validate.ts
++++ b/apps/agent-service/src/core/cognitive-v021/settlement/validate.ts
+@@ -112,16 +112,13 @@ function validateIdentity(
+ }
+ 
+ function validateSpeech(value: unknown): ThoughtSettlementValidation | null {
+-  if (!isRecord(value) || !hasAll(value, ["mode", "mustSay", "mustNot", "surfaceDraft", "acceptableRealizations", "presentationDirectives"])) {
++  if (!isRecord(value) || !hasAll(value, ["mode"])) {
+     return failure("malformed", "SPEECH_MISSING");
+   }
+-  if (
+-    !isStringArray(value.mustSay) ||
+-    !isStringArray(value.mustNot) ||
+-    !isStringArray(value.acceptableRealizations) ||
+-    !isStringArray(value.presentationDirectives)
+-  ) {
+-    return failure("malformed", "SPEECH_ARRAY_INVALID");
++  for (const key of ["mustSay", "mustNot", "acceptableRealizations", "presentationDirectives"]) {
++    if (value[key] !== undefined && !isStringArray(value[key])) {
++      return failure("malformed", "SPEECH_ARRAY_INVALID");
++    }
+   }
+   if (value.mode === "draft") {
+     if (!isString(value.surfaceDraft) || value.surfaceDraft.trim().length === 0) {
+@@ -139,14 +136,11 @@ function validateCommitments(
+   value: unknown,
+   active?: SettlementValidationActiveIdentity,
+ ): ThoughtSettlementValidation | null {
+-  if (!isRecord(value) || !Array.isArray(value.epistemic) || !isStringArray(value.conversational) || !isRecord(value.stance)) {
+-    return failure("malformed", "COMMITMENTS_MISSING");
+-  }
+-  const operational = value.operational ?? [];
+-  if (!Array.isArray(operational)) {
+-    return failure("malformed", "OPERATIONAL_COMMITMENT_INVALID");
+-  }
+-  for (const item of operational) {
++  if (value === undefined) return null;
++  if (!isRecord(value)) return failure("malformed", "COMMITMENTS_MISSING");
++  const operational = value.operational;
++  if (operational !== undefined && !Array.isArray(operational)) return failure("malformed", "OPERATIONAL_COMMITMENT_INVALID");
++  for (const item of (operational ?? [])) {
+     if (!isRecord(item) || !isString(item.effectRef) || item.effectRef.trim().length === 0) {
+       return failure("malformed", "OPERATIONAL_COMMITMENT_INVALID");
+     }
+@@ -157,20 +151,28 @@ function validateCommitments(
+       return failure("conflict", "OPERATIONAL_CLAIM_EFFECTREF_UNKNOWN");
+     }
+   }
+-  if (!value.epistemic.every((item) => {
+-    if (!isRecord(item)) return false;
+-    return isString(item.statement) && isRecord(item.dimensions);
+-  })) {
+-    return failure("malformed", "EPISTEMIC_COMMITMENT_INVALID");
++  if (value.epistemic !== undefined) {
++    if (!Array.isArray(value.epistemic) || !value.epistemic.every((item) => {
++      if (!isRecord(item)) return false;
++      return isString(item.statement) && isRecord(item.dimensions);
++    })) {
++      return failure("malformed", "EPISTEMIC_COMMITMENT_INVALID");
++    }
+   }
+-  const stance = value.stance;
+-  if (
+-    !["low", "medium", "high"].includes(String(stance.warmth)) ||
+-    typeof stance.humorAllowed !== "boolean" ||
+-    typeof stance.disagreement !== "boolean" ||
+-    typeof stance.uncertaintyDisplay !== "boolean"
+-  ) {
+-    return failure("malformed", "STANCE_INVALID");
++  if (value.conversational !== undefined && !isStringArray(value.conversational)) {
++    return failure("malformed", "CONVERSATIONAL_COMMITMENT_INVALID");
++  }
++  if (value.stance !== undefined) {
++    if (!isRecord(value.stance)) return failure("malformed", "STANCE_INVALID");
++    const stance = value.stance;
++    if (
++      !["low", "medium", "high"].includes(String(stance.warmth)) ||
++      typeof stance.humorAllowed !== "boolean" ||
++      typeof stance.disagreement !== "boolean" ||
++      typeof stance.uncertaintyDisplay !== "boolean"
++    ) {
++      return failure("malformed", "STANCE_INVALID");
++    }
+   }
+   return null;
+ }
+@@ -212,15 +214,20 @@ export function validateThoughtSettlementDraft(
+   if (identityFailure) return identityFailure;
+   if (!isString(draft.triggerRef)) return failure("malformed", "TRIGGER_REF_MISSING");
+ 
+-  for (const key of ["interpretation", "commitments", "speech", "operations", "authority"] as const) {
++  for (const key of ["speech", "operations", "authority"] as const) {
+     if (!isRecord(draft[key])) return failure("malformed", `${key.toUpperCase()}_MISSING`);
+   }
+-  for (const key of ["workingContextDelta", "concernDeltas", "occupancyDelta", "futureTriggers", "subscriptions", "durableNominations"] as const) {
+-    if (!Array.isArray(draft[key])) return failure("malformed", `${key.toUpperCase()}_MISSING`);
++  if (draft.interpretation !== undefined) {
++    if (!isRecord(draft.interpretation)) return failure("malformed", "INTERPRETATION_INVALID");
++    const interpretation = draft.interpretation as RecordValue;
++    for (const key of ["discourseActs", "referentBindings", "corrections", "unresolvedAmbiguities", "topics"] as const) {
++      if (interpretation[key] !== undefined && !Array.isArray(interpretation[key])) {
++        return failure("malformed", `INTERPRETATION_${key.toUpperCase()}_INVALID`);
++      }
++    }
+   }
+-  const interpretation = draft.interpretation as RecordValue;
+-  for (const key of ["discourseActs", "referentBindings", "corrections", "unresolvedAmbiguities", "topics"] as const) {
+-    if (!Array.isArray(interpretation[key])) return failure("malformed", `INTERPRETATION_${key.toUpperCase()}_INVALID`);
++  for (const key of ["workingContextDelta", "concernDeltas", "occupancyDelta", "futureTriggers", "subscriptions", "durableNominations"] as const) {
++    if (draft[key] !== undefined && !Array.isArray(draft[key])) return failure("malformed", `${key.toUpperCase()}_INVALID`);
+   }
+   const commitments = draft.commitments as RecordValue;
+   const speech = draft.speech as RecordValue;
+@@ -228,14 +235,6 @@ export function validateThoughtSettlementDraft(
+   if (commitmentFailure) return commitmentFailure;
+   const speechFailure = validateSpeech(speech);
+   if (speechFailure) return speechFailure;
+-  if (
+-    speech.mode === "draft" &&
+-    (commitments.epistemic as unknown[]).length === 0 &&
+-    (commitments.conversational as unknown[]).length === 0
+-  ) {
+-    return failure("conflict", "EMPTY_COMMITMENTS_WITH_DRAFT", "DRAFT_COMMITMENT_CONFLICT");
+-  }
+-
+   const operationsFailure = validateOperations(draft.operations, active);
+   if (operationsFailure) return operationsFailure;
+   const authority = draft.authority as RecordValue;
+diff --git a/apps/agent-service/src/core/cognitive-v021/speech/expression-adapter.ts b/apps/agent-service/src/core/cognitive-v021/speech/expression-adapter.ts
+index cc75806bd6cc1b6fef202eb68b25d686a6655054..8c3f128fa23515063ae27fda881acdd7b99237d9 100644
+--- a/apps/agent-service/src/core/cognitive-v021/speech/expression-adapter.ts
++++ b/apps/agent-service/src/core/cognitive-v021/speech/expression-adapter.ts
+@@ -6,9 +6,9 @@ import type {
+ 
+ export type ExpressionAdapterInput = {
+   draft: string;
+-  commitments: ThoughtSettlementDraft["commitments"];
+-  stance: Stance;
+-  directives: readonly string[];
++  commitments?: ThoughtSettlementDraft["commitments"];
++  stance?: Stance;
++  directives?: readonly string[];
+   profile: string;
+   medium: "discord";
+ };
+@@ -41,7 +41,7 @@ function promptParts(input: ExpressionAdapterInput): { system: string; user: str
+     draft: input.draft,
+     commitments: input.commitments,
+     stance: input.stance,
+-    directives: [...input.directives],
++    directives: [...(input.directives ?? [])],
+     profile: input.profile,
+     medium: input.medium,
+   });
+diff --git a/apps/agent-service/src/core/cognitive-v021/speech/fidelity.test.ts b/apps/agent-service/src/core/cognitive-v021/speech/fidelity.test.ts
+index 4ae5cf49b3ca48a1fee91edf89df09decb43286d..f5230eb3b6c3dd543b38553c98b980848c9eed80 100644
+--- a/apps/agent-service/src/core/cognitive-v021/speech/fidelity.test.ts
++++ b/apps/agent-service/src/core/cognitive-v021/speech/fidelity.test.ts
+@@ -41,7 +41,7 @@ describe("v0.2.1 speech fidelity", () => {
+     })).toMatchObject({ ok: false, code: "DRAFT_COMMITMENT_CONFLICT" });
+   });
+ 
+-  it("rejects forbidden text and empty committed draft", () => {
++  it("rejects forbidden text while allowing ordinary sparse draft speech", () => {
+     expect(fidelityCheck({
+       mode: "draft",
+       draft: "HY4 and HY3",
+@@ -58,18 +58,18 @@ describe("v0.2.1 speech fidelity", () => {
+       mustNot: [],
+       acceptableRealizations: [],
+       commitments: { ...commitments, epistemic: [], conversational: [] },
+-    })).toMatchObject({ ok: false, code: "EMPTY_COMMITMENTS_WITH_DRAFT" });
++    })).toMatchObject({ ok: true });
+   });
+ 
+-  it("accepts a declared alternative realization", () => {
++  it("does not use acceptable realizations to satisfy mustSay", () => {
+     expect(fidelityCheck({
+       mode: "draft",
+-      draft: "I selected HY4.",
++      draft: "I selected the item.",
+       mustSay: ["HY4"],
+       mustNot: [],
+-      acceptableRealizations: ["I selected HY4."],
++      acceptableRealizations: ["I selected the item."],
+       commitments,
+-    })).toMatchObject({ ok: true });
++    })).toMatchObject({ ok: false, code: "DRAFT_COMMITMENT_CONFLICT" });
+   });
+ 
+   it("treats private silence as a successful settlement", () => {
+diff --git a/apps/agent-service/src/core/cognitive-v021/speech/fidelity.ts b/apps/agent-service/src/core/cognitive-v021/speech/fidelity.ts
+index 74e7e331804e6ce858947f94a0b3762e5651c866..283491fcf2704a8ada33e4991f26f4ba987df164 100644
+--- a/apps/agent-service/src/core/cognitive-v021/speech/fidelity.ts
++++ b/apps/agent-service/src/core/cognitive-v021/speech/fidelity.ts
+@@ -13,19 +13,23 @@ import {
+ import { claimsCurrentness } from "../authority/currentness-detectors.js";
+ 
+ export type FidelityCommitments = {
+-  epistemic: readonly EpistemicCommitment[];
++  epistemic?: readonly EpistemicCommitment[];
+   operational?: readonly OperationalStateClaim[];
+-  conversational: readonly ConversationalCommitment[];
++  conversational?: readonly ConversationalCommitment[];
+   stance?: Stance;
+ };
+ 
+ export type FidelityInput = {
+   mode: SpeechMode;
+   draft: string | null;
+-  mustSay: readonly string[];
+-  mustNot: readonly string[];
+-  acceptableRealizations: readonly string[];
+-  commitments: FidelityCommitments;
++  mustSay?: readonly string[];
++  mustNot?: readonly string[];
++  /**
++   * Kept as an input-only compatibility field for historical callers. VNext
++   * authoring does not emit or consult acceptable realizations.
++   */
++  acceptableRealizations?: readonly string[];
++  commitments?: FidelityCommitments;
+   observations?: readonly { modality: string }[];
+ };
+ 
+@@ -66,14 +70,10 @@ export function fidelityCheck(input: FidelityInput): FidelityResult {
+     return fail("DRAFT_REQUIRED", "mode=draft requires a non-empty draft");
+   }
+ 
+-  if (
+-    input.commitments.epistemic.length === 0 &&
+-    input.commitments.conversational.length === 0
+-  ) {
+-    return fail("EMPTY_COMMITMENTS_WITH_DRAFT", "a speaking draft requires commitments");
+-  }
+-
+   const draft = input.draft;
++  const commitments = input.commitments ?? {};
++  const mustSay = input.mustSay ?? [];
++  const mustNot = input.mustNot ?? [];
+   const modalities = new Set((input.observations ?? []).map((item) => item.modality));
+   if (
+     claimsOwnVisionActivity(draft) &&
+@@ -87,23 +87,19 @@ export function fidelityCheck(input: FidelityInput): FidelityResult {
+   ) {
+     return fail("UNWITNESSED_HIGH_RISK_CLAIM", "reading claim has no observation");
+   }
+-  const acceptable = input.acceptableRealizations;
+-  const mustSaySatisfied = input.mustSay.every((required) =>
+-    hasText(draft, required) ||
+-    acceptable.some((realization) => hasText(realization, required) && realization === draft),
+-  );
++  const mustSaySatisfied = mustSay.every((required) => hasText(draft, required));
+   if (!mustSaySatisfied) {
+     return fail("DRAFT_COMMITMENT_CONFLICT", "mustSay is absent from the licensed draft");
+   }
+ 
+-  const forbidden = input.mustNot.find((value) => value.length > 0 && draft.includes(value));
++  const forbidden = mustNot.find((value) => value.length > 0 && draft.includes(value));
+   if (forbidden) {
+     return fail("DRAFT_COMMITMENT_CONFLICT", `mustNot is present: ${forbidden}`);
+   }
+ 
+   const affirmativeEffectClaim = /\b(?:worked|succeeded|successful|completed|sent|created|updated|done)\b/i.test(draft);
+   if (affirmativeEffectClaim) {
+-    const hasSucceededOperationalClaim = input.commitments.operational?.some(
++    const hasSucceededOperationalClaim = commitments.operational?.some(
+       (claim) => claim.claimedState === "succeeded",
+     );
+     if (!hasSucceededOperationalClaim) {
+@@ -112,7 +108,7 @@ export function fidelityCheck(input: FidelityInput): FidelityResult {
+   }
+ 
+   if (claimsCurrentness(draft)) {
+-    const hasCurrentnessCommitment = input.commitments.epistemic.some(
++    const hasCurrentnessCommitment = commitments.epistemic?.some(
+       (c) => c.dimensions.time === "current",
+     );
+     if (!hasCurrentnessCommitment) {
+diff --git a/apps/agent-service/src/core/cognitive-v021/test-support.ts b/apps/agent-service/src/core/cognitive-v021/test-support.ts
+index 3dc5b526f8ce0b6f650722608cdd4ebb7971be44..293ac188f7f162c894c36204cf18143badab1f84 100644
+--- a/apps/agent-service/src/core/cognitive-v021/test-support.ts
++++ b/apps/agent-service/src/core/cognitive-v021/test-support.ts
+@@ -110,18 +110,40 @@ export function admitTestCycle(
+ 
+ export function makeSemanticSettlement(
+   overrides: Record<string, unknown> = {},
+-): Extract<ThoughtSemanticOutput, { kind: "settlement" }> {
+-  return {
++): Extract<ThoughtSemanticOutput, { kind: "settlement" }> & { commitments: NonNullable<Extract<ThoughtSemanticOutput, { kind: "settlement" }>["commitments"]> } {
++  const base = {
+     kind: "settlement",
+-    interpretation: { discourseActs: ["inform"], referentBindings: [], corrections: [], unresolvedAmbiguities: [], topics: ["topic"] },
++    interpretation: { discourseActs: ["inform"], topics: ["topic"] },
+     commitments: {
+       epistemic: [{ dimensions: { source: "owner_utterance", status: "asserted", time: "historical", reliability: "owner_supplied" }, statement: "topic" }],
+-      operational: [],
+       conversational: ["answer"], stance: { warmth: "medium", humorAllowed: false, disagreement: false, uncertaintyDisplay: true },
+     },
+-    speech: { mode: "draft", mustSay: ["hello"], mustNotSay: [], surfaceDraft: "hello", acceptableRealizations: ["hello"], presentationDirectives: [] },
+-    workingContextDeltas: [], concernDeltas: [], occupancyDeltas: [], futureTriggerDeltas: [], subscriptionDeltas: [], durableNominations: [],
+-    evidenceUse: { observationRefsUsed: [], retrievalRefsUsed: [], sourceRefsUsed: [], openIntentRefs: [] },
+-    ...overrides,
+-  } as Extract<ThoughtSemanticOutput, { kind: "settlement" }>;
++    speech: { mode: "draft", mustSay: ["hello"], surfaceDraft: "hello" },
++  };
++  const merged = { ...base, ...overrides } as Record<string, unknown>;
++  const optionalArrays = [
++    "workingContextDeltas", "concernDeltas", "occupancyDeltas", "futureTriggerDeltas",
++    "subscriptionDeltas", "durableNominations",
++  ];
++  for (const key of optionalArrays) if (Array.isArray(merged[key]) && merged[key].length === 0) delete merged[key];
++  for (const key of ["interpretation", "commitments", "evidenceUse"]) {
++    const child = merged[key];
++    if (!child || typeof child !== "object" || Array.isArray(child)) continue;
++    const normalized = { ...(child as Record<string, unknown>) };
++    for (const childKey of Object.keys(normalized)) {
++      if (Array.isArray(normalized[childKey]) && normalized[childKey].length === 0) delete normalized[childKey];
++    }
++    if (Object.keys(normalized).length === 0) delete merged[key];
++    else merged[key] = normalized;
++  }
++  const speech = merged.speech;
++  if (speech && typeof speech === "object" && !Array.isArray(speech)) {
++    const normalized = { ...(speech as Record<string, unknown>) };
++    delete normalized.acceptableRealizations;
++    for (const key of ["mustSay", "mustNotSay", "presentationDirectives"]) {
++      if (Array.isArray(normalized[key]) && normalized[key].length === 0) delete normalized[key];
++    }
++    merged.speech = normalized;
++  }
++  return merged as Extract<ThoughtSemanticOutput, { kind: "settlement" }> & { commitments: NonNullable<Extract<ThoughtSemanticOutput, { kind: "settlement" }>["commitments"]> };
+ }
+diff --git a/apps/agent-service/src/core/cognitive-v021/thought/mustsay-contract.test.ts b/apps/agent-service/src/core/cognitive-v021/thought/mustsay-contract.test.ts
+index 3b728e7a63a8a6283949455d15165d8674122746..d7f52eb236ea41e8b367f8e96d0e3d475891b793 100644
+--- a/apps/agent-service/src/core/cognitive-v021/thought/mustsay-contract.test.ts
++++ b/apps/agent-service/src/core/cognitive-v021/thought/mustsay-contract.test.ts
+@@ -29,7 +29,7 @@ describe("mustSay literal producer contract", () => {
+     expect(instruction).toContain("mustSay");
+     expect(instruction).toContain("verbatim");
+     expect(instruction).toContain("surfaceDraft");
+-    expect(instruction).toContain("mustSay: []");
++    expect(instruction).toContain("Omit mustSay when no exact literal wording is required");
+     expect(instruction).toContain("presentationDirectives");
+     expect(instruction).toContain("Behavioral");
+   });
+diff --git a/apps/agent-service/src/core/cognitive-v021/thought/nomination-memorykind.test.ts b/apps/agent-service/src/core/cognitive-v021/thought/nomination-memorykind.test.ts
+index 0e85da434973446cda87dfe6f53b371aa4682517..2d4cde70680dc5f61c5811faf3b013f48e63c6d7 100644
+--- a/apps/agent-service/src/core/cognitive-v021/thought/nomination-memorykind.test.ts
++++ b/apps/agent-service/src/core/cognitive-v021/thought/nomination-memorykind.test.ts
+@@ -62,7 +62,6 @@ function invalidSettlement() {
+     ...base,
+     durableNominations: [
+       {
+-        alias: "nom-one",
+         statement: "The owner prefers small tools.",
+         memoryKind: "self_reflection",
+         dimensions: {
+@@ -87,7 +86,6 @@ function validSettlement() {
+     ...base,
+     durableNominations: [
+       {
+-        alias: "nom-one",
+         statement: "The owner prefers small tools.",
+         memoryKind: "owner_preference",
+         dimensions: {
+diff --git a/apps/agent-service/src/core/cognitive-v021/thought/operational-namespace.test.ts b/apps/agent-service/src/core/cognitive-v021/thought/operational-namespace.test.ts
+index 2c7a877729c1bccce52f05ec94df6b55291e3287..7b694a8026b4c5464cae4c2287353205ebcff53f 100644
+--- a/apps/agent-service/src/core/cognitive-v021/thought/operational-namespace.test.ts
++++ b/apps/agent-service/src/core/cognitive-v021/thought/operational-namespace.test.ts
+@@ -19,17 +19,9 @@ type SchemaRecord = Record<string, any>;
+ function settlement(operational: unknown[]) {
+   return {
+     kind: "settlement",
+-    interpretation: {
+-      discourseActs: ["acknowledge"],
+-      referentBindings: [],
+-      corrections: [],
+-      unresolvedAmbiguities: [],
+-      topics: [],
+-    },
+     commitments: {
+-      epistemic: [],
+-      operational,
+       conversational: ["acknowledge"],
++      ...(operational.length > 0 ? { operational } : {}),
+       stance: {
+         warmth: "medium",
+         humorAllowed: false,
+@@ -39,22 +31,6 @@ function settlement(operational: unknown[]) {
+     },
+     speech: {
+       mode: "none",
+-      mustSay: [],
+-      mustNotSay: [],
+-      acceptableRealizations: [],
+-      presentationDirectives: [],
+-    },
+-    workingContextDeltas: [],
+-    concernDeltas: [],
+-    occupancyDeltas: [],
+-    futureTriggerDeltas: [],
+-    subscriptionDeltas: [],
+-    durableNominations: [],
+-    evidenceUse: {
+-      observationRefsUsed: [],
+-      retrievalRefsUsed: [],
+-      sourceRefsUsed: [],
+-      openIntentRefs: [],
+     },
+   };
+ }
+@@ -204,7 +180,7 @@ describe("finite operational effect namespace constraints", () => {
+       reasoningEffort: "high",
+       maxTokens: 4096,
+       responseFormat: "json_schema",
+-      structuredOutputContractId: "ashley.thought.semantic.v1",
++      structuredOutputContractId: "ashley.thought.semantic.v2",
+       structuredOutputMode: "native_json_schema",
+       structuredOutputBindingId: "wire:nim-native-json-schema:v1",
+     } as const;
+diff --git a/apps/agent-service/src/core/cognitive-v021/thought/output-contract.ts b/apps/agent-service/src/core/cognitive-v021/thought/output-contract.ts
+index abd400f8707fee7da95a7e722a792c4b14082bc4..39ca1a4f35687fe04f7457107026219821591e2f 100644
+--- a/apps/agent-service/src/core/cognitive-v021/thought/output-contract.ts
++++ b/apps/agent-service/src/core/cognitive-v021/thought/output-contract.ts
+@@ -35,7 +35,8 @@ const strictObject = (
+ });
+ 
+ const stringArraySchema = { type: "array", items: { type: "string" } };
+-const existingRefSchema = strictObject(
++const existingRefSchema = { type: "string", minLength: 1 };
++const existingSemanticRefSchema = strictObject(
+   { kind: { const: "existing" }, ref: { type: "string", minLength: 1 } },
+   ["kind", "ref"],
+ );
+@@ -44,7 +45,7 @@ const localRefSchema = strictObject(
+   ["kind", "alias"],
+ );
+ const localAliasSchema = { type: "string", pattern: "^[A-Za-z][A-Za-z0-9_-]{0,127}$" };
+-const semanticRefSchema = { oneOf: [existingRefSchema, localRefSchema] };
++const semanticRefSchema = { oneOf: [existingSemanticRefSchema, localRefSchema] };
+ const nullableSemanticRefSchema = { oneOf: [semanticRefSchema, { type: "null" }] };
+ const jsonObjectSchema = { type: "object", additionalProperties: true };
+ const REGISTERED_OPERATION_KINDS = [
+@@ -106,51 +107,56 @@ const occupancyDeltaSchema = strictObject({
+   status: { enum: ["active", "investigating", "waiting_for_evidence", "dormant_but_revisitable", "resolved", "quarantined"] }, priority: { type: "integer" },
+ }, ["op", "concernRef", "status", "priority"]);
+ const futureTriggerDeltaSchema = { oneOf: [
+-  strictObject({ op: { const: "create" }, identity: localRefSchema, concernRef: semanticRefSchema, dueAtMs: { type: "integer" }, purpose: { type: "string" }, payload: jsonObjectSchema }, ["op", "identity", "concernRef", "dueAtMs", "purpose", "payload"]),
++  strictObject({ op: { const: "create" }, concernRef: semanticRefSchema, dueAtMs: { type: "integer" }, purpose: { type: "string" }, payload: jsonObjectSchema }, ["op", "concernRef", "dueAtMs", "purpose", "payload"]),
+   strictObject({ op: { const: "cancel" }, target: existingRefSchema }, ["op", "target"]),
+ ] };
+ const subscriptionDeltaSchema = { oneOf: [
+-  strictObject({ op: { const: "create" }, subscription: strictObject({ identity: localRefSchema, concernRef: nullableSemanticRefSchema, source: { type: "string" }, scope: { type: "string" }, topicKeys: stringArraySchema, match: { enum: ["equality", "substring"] }, expiresAtMs: { type: ["integer", "null"] } }, ["identity", "concernRef", "source", "scope", "topicKeys", "match", "expiresAtMs"]) }, ["op", "subscription"]),
++  strictObject({ op: { const: "create" }, subscription: strictObject({ concernRef: nullableSemanticRefSchema, source: { type: "string" }, scope: { type: "string" }, topicKeys: stringArraySchema, match: { enum: ["equality", "substring"] }, expiresAtMs: { type: ["integer", "null"] } }, ["concernRef", "source", "scope", "topicKeys", "match", "expiresAtMs"]) }, ["op", "subscription"]),
+   strictObject({ op: { const: "cancel" }, target: existingRefSchema }, ["op", "target"]),
+ ] };
+ const nominationSchema = strictObject({
+-  alias: localAliasSchema, statement: { type: "string" }, memoryKind: { enum: [...MEMORY_KINDS] }, dimensions: dimensionsSchema,
++  statement: { type: "string" }, memoryKind: { enum: [...MEMORY_KINDS] }, dimensions: dimensionsSchema,
+   dataClassification: { enum: ["ordinary", "sensitive", "never_public", "secret"] }, sourceRefs: stringArraySchema,
+   supersedesRef: { oneOf: [existingRefSchema, { type: "null" }] }, concernRef: nullableSemanticRefSchema,
+-}, ["alias", "statement", "memoryKind", "dimensions", "dataClassification", "sourceRefs", "supersedesRef", "concernRef"]);
++}, ["statement", "memoryKind", "dimensions", "dataClassification", "sourceRefs", "supersedesRef", "concernRef"]);
++const presentArray = (items: unknown): Record<string, unknown> => ({ type: "array", minItems: 1, items });
++const sparseObject = (properties: Record<string, unknown>): Record<string, unknown> => ({
++  ...strictObject(properties, []), minProperties: 1,
++});
++const nonEmptyStringArraySchema = presentArray({ type: "string" });
+ const semanticOutputSettlementSchema = strictObject({
+   kind: { const: "settlement" },
+-  interpretation: strictObject({
+-    discourseActs: { type: "array", items: { enum: ["inform", "ask", "correct", "acknowledge", "disagree", "hold", "silence", "other"] } },
+-    referentBindings: { type: "array", items: referentBindingSchema },
+-    corrections: { type: "array", items: correctionSchema },
+-    unresolvedAmbiguities: stringArraySchema,
+-    topics: stringArraySchema,
+-  }, ["discourseActs", "referentBindings", "corrections", "unresolvedAmbiguities", "topics"]),
+-  commitments: strictObject({
+-    epistemic: { type: "array", items: strictObject({ dimensions: dimensionsSchema, statement: { type: "string" } }, ["dimensions", "statement"]) },
+-    operational: { type: "array", items: operationalClaimSchema },
+-    conversational: { type: "array", items: { enum: ["answer", "ask", "acknowledge", "disagree", "hold", "silence"] } },
++  interpretation: sparseObject({
++    discourseActs: { type: "array", minItems: 1, items: { enum: ["inform", "ask", "correct", "acknowledge", "disagree", "hold", "silence", "other"] } },
++    referentBindings: { type: "array", minItems: 1, items: referentBindingSchema },
++    corrections: { type: "array", minItems: 1, items: correctionSchema },
++    unresolvedAmbiguities: nonEmptyStringArraySchema,
++    topics: nonEmptyStringArraySchema,
++  }),
++  commitments: sparseObject({
++    epistemic: { type: "array", minItems: 1, items: strictObject({ dimensions: dimensionsSchema, statement: { type: "string" } }, ["dimensions", "statement"]) },
++    operational: { type: "array", minItems: 1, items: operationalClaimSchema },
++    conversational: { type: "array", minItems: 1, items: { enum: ["answer", "ask", "acknowledge", "disagree", "hold", "silence"] } },
+     stance: strictObject({
+       warmth: { enum: ["low", "medium", "high"] },
+       humorAllowed: { type: "boolean" }, disagreement: { type: "boolean" }, uncertaintyDisplay: { type: "boolean" },
+     }, ["warmth", "humorAllowed", "disagreement", "uncertaintyDisplay"]),
+-  }, ["epistemic", "operational", "conversational", "stance"]),
++  }),
+   speech: { oneOf: [
+-    strictObject({ mode: { const: "none" }, mustSay: { type: "array", maxItems: 0 }, mustNotSay: stringArraySchema, acceptableRealizations: { type: "array", maxItems: 0 }, presentationDirectives: stringArraySchema }, ["mode", "mustSay", "mustNotSay", "acceptableRealizations", "presentationDirectives"]),
+-    strictObject({ mode: { const: "draft" }, mustSay: stringArraySchema, mustNotSay: stringArraySchema, surfaceDraft: { type: "string", minLength: 1 }, acceptableRealizations: stringArraySchema, presentationDirectives: stringArraySchema }, ["mode", "mustSay", "mustNotSay", "surfaceDraft", "acceptableRealizations", "presentationDirectives"]),
++    strictObject({ mode: { const: "none" } }, ["mode"]),
++    strictObject({ mode: { const: "draft" }, mustSay: nonEmptyStringArraySchema, mustNotSay: nonEmptyStringArraySchema, surfaceDraft: { type: "string", minLength: 1 }, presentationDirectives: nonEmptyStringArraySchema }, ["mode", "surfaceDraft"]),
+   ] },
+-  workingContextDeltas: { type: "array", items: workingContextDeltaSchema },
+-  concernDeltas: { type: "array", items: concernDeltaSchema },
+-  occupancyDeltas: { type: "array", items: occupancyDeltaSchema },
+-  futureTriggerDeltas: { type: "array", items: futureTriggerDeltaSchema },
+-  subscriptionDeltas: { type: "array", items: subscriptionDeltaSchema },
+-  durableNominations: { type: "array", items: nominationSchema },
+-  evidenceUse: strictObject({
+-    observationRefsUsed: stringArraySchema, retrievalRefsUsed: stringArraySchema,
+-    sourceRefsUsed: stringArraySchema, openIntentRefs: stringArraySchema,
+-  }, ["observationRefsUsed", "retrievalRefsUsed", "sourceRefsUsed", "openIntentRefs"]),
+-  }, ["kind", "interpretation", "commitments", "speech", "workingContextDeltas", "concernDeltas", "occupancyDeltas", "futureTriggerDeltas", "subscriptionDeltas", "durableNominations", "evidenceUse"]);
++  workingContextDeltas: { type: "array", minItems: 1, items: workingContextDeltaSchema },
++  concernDeltas: { type: "array", minItems: 1, items: concernDeltaSchema },
++  occupancyDeltas: { type: "array", minItems: 1, items: occupancyDeltaSchema },
++  futureTriggerDeltas: { type: "array", minItems: 1, items: futureTriggerDeltaSchema },
++  subscriptionDeltas: { type: "array", minItems: 1, items: subscriptionDeltaSchema },
++  durableNominations: { type: "array", minItems: 1, items: nominationSchema },
++  evidenceUse: sparseObject({
++    observationRefsUsed: nonEmptyStringArraySchema, retrievalRefsUsed: nonEmptyStringArraySchema,
++    sourceRefsUsed: nonEmptyStringArraySchema, openIntentRefs: nonEmptyStringArraySchema,
++  }),
++  }, ["kind", "speech"]);
+ 
+ const semanticOutputSettlementForm = {
+   ...semanticOutputSettlementSchema,
+@@ -173,7 +179,7 @@ const semanticOutputEffectForm = {
+ const semanticOutputAbstainForm = {
+   ...strictObject({
+     kind: { const: "abstain" },
+-    reason: { enum: ["insufficient_evidence", "unresolved_ambiguity", "no_responsible_proposal", "no_semantic_change_warranted"] },
++    reason: { enum: ["insufficient_evidence", "unresolved_ambiguity", "no_responsible_proposal"] },
+     explanation: { type: "string", minLength: 1 }, evidenceRefs: stringArraySchema,
+   }, ["kind", "reason", "explanation", "evidenceRefs"]),
+   description: "Use abstain when required evidence, capability, or an admissible basis is absent or unresolved; this is a semantic decision, not a provider, parser, or deadline failure.",
+@@ -181,15 +187,15 @@ const semanticOutputAbstainForm = {
+ 
+ export const THOUGHT_OUTPUT_SCHEMA: Readonly<Record<string, unknown>> = {
+   $schema: "https://json-schema.org/draft/2020-12/schema",
+-  $id: "ashley.thought.semantic.v1.schema",
+-  title: "Ashley Thought semantic output v1",
++  $id: THOUGHT_OUTPUT_SCHEMA_ID,
++  title: "Ashley Thought semantic output v2",
+   oneOf: [
+     semanticOutputSettlementForm,
+     semanticOutputObservationForm,
+     semanticOutputEffectForm,
+     semanticOutputAbstainForm,
+   ],
+-  $defs: { semanticRef: semanticRefSchema, existingRef: { type: "string" }, localAlias: localAliasSchema, jsonObject: jsonObjectSchema },
++  $defs: { semanticRef: semanticRefSchema, existingRef: existingRefSchema, localAlias: localAliasSchema, jsonObject: jsonObjectSchema },
+ };
+ 
+ export const THOUGHT_SEMANTIC_SCHEMA_FINGERPRINT = `sha256:${sha256(
+@@ -273,10 +279,39 @@ function settlementOperationalSchema(schema: SchemaRecord): SchemaRecord {
+  * Derive the exact provider wire schema without mutating the stable semantic
+  * schema. Only the Host-owned operational effect reference namespace varies.
+  */
++function applyExperimentalWireBounds(schema: SchemaRecord): void {
++  // EXPERIMENTAL_WIRE_QUALIFICATION_STARTING_POINT: qualification may revise
++  // these limits. They are resource bounds, never canonical semantic law.
++  const settlement = record((schema.oneOf as unknown[])[0]);
++  const interpretation = property(settlement, "interpretation");
++  const commitments = property(settlement, "commitments");
++  const speech = property(settlement, "speech");
++  const draft = (speech.oneOf as unknown[]).map(record).find((form) => property(form, "mode").const === "draft")!;
++  property(draft, "surfaceDraft").maxLength = 6000;
++  for (const [field, max] of [["mustSay", 300], ["mustNotSay", 200], ["presentationDirectives", 200]] as const) record(property(draft, field).items).maxLength = max;
++  for (const [field, max] of [["referentBindings", 12], ["corrections", 6], ["unresolvedAmbiguities", 12], ["topics", 16]] as const) property(interpretation, field).maxItems = max;
++  record(property(interpretation, "topics").items).maxLength = 100;
++  record(property(interpretation, "unresolvedAmbiguities").items).maxLength = 400;
++  property(record(property(interpretation, "referentBindings").items), "span").maxLength = 400;
++  for (const field of ["fromSpan", "toSpan"]) property(record(property(interpretation, "corrections").items), field).maxLength = 400;
++  property(record(property(commitments, "epistemic").items), "statement").maxLength = 500;
++  for (const branch of record(property(settlement, "workingContextDeltas").items).oneOf as unknown[]) {
++    const form = record(branch);
++    for (const field of ["item", "replacement"]) {
++      const item = property(form, field);
++      if (Object.keys(item).length) property(item, "text").maxLength = 500;
++    }
++  }
++  property(property(record((record(property(settlement, "concernDeltas").items).oneOf as unknown[])[0]), "record"), "statement").maxLength = 500;
++  property(record((record(property(settlement, "futureTriggerDeltas").items).oneOf as unknown[])[0]), "purpose").maxLength = 300;
++  property(record(property(settlement, "durableNominations").items), "statement").maxLength = 800;
++}
++
+ export function constrainThoughtOutputSchema(
+   namespace: OperationalEffectNamespace,
+ ): ConstrainedThoughtOutputSchema {
+   const schema = cloneSchema(THOUGHT_OUTPUT_SCHEMA);
++  applyExperimentalWireBounds(schema);
+   const operational = settlementOperationalSchema(schema);
+   const refs = [...namespace.allowedOperationalEffectRefs];
+   if (refs.length === 0) {
+@@ -305,23 +340,22 @@ export function constrainThoughtOutputSchema(
+ /** Compact compatibility guidance derived from the same code-owned schema. */
+ export function thoughtOutputCompatibilityInstruction(): string {
+   const settlement = record(THOUGHT_OUTPUT_SCHEMA.oneOf instanceof Array ? THOUGHT_OUTPUT_SCHEMA.oneOf[0] : null);
+-  const commitments = property(settlement, "commitments");
+   return [
+     `Code-owned Thought contract contractId=${THOUGHT_OUTPUT_CONTRACT_ID} schemaId=${THOUGHT_OUTPUT_SCHEMA_ID} semanticSchemaFingerprint=${THOUGHT_SEMANTIC_SCHEMA_FINGERPRINT}.`,
+     `Return exactly one JSON object in one of these permitted kinds/forms: ${rootForms().join("; ")}.`,
+     "Semantic selection rules: choose settlement only when the current supplied evidence and context are sufficient to author the semantic answer without first acquiring additional evidence or performing a governed effect; choose observation_intent when the answer requires additional read-only evidence acquisition through a registered observation capability; choose effect_intent when the requested outcome requires a governed mechanical effect through a registered effect capability; choose abstain when required evidence, capability, or an admissible basis is absent or unresolved.",
+     "Do not use settlement as a placeholder for an unperformed observation or effect. If a required observation or effect cannot be truthfully authored from the current admissible context, use abstain rather than claim completion.",
+     "Choose observation_intent only when an available observation can actually supply evidence capable of resolving the current semantic need; the availability of an unrelated observation does not justify observation, and when no available observation can supply the needed evidence, abstain takes precedence over observation.",
+-    "Epistemic time is a governed evidence status, not ordinary conversational recency. Use time:current only for a factual claim whose present truth is supported by a governed observation supplied in the current Thought input, and nominate the supporting observation in evidenceUse.observationRefsUsed; a source reference, a retrieval reference, or the fact that the owner just sent a message does not by itself license current, and the host may still reject a current claim whose currentness binding is incomplete. Use time:historical for a claim about a past state or event that does not assert it is still true now. Use time:unknown_freshness when evidence supports a claim but its present truth has not been established by governed current observation. If a conversational response such as an acknowledgment does not need to assert an epistemic fact, omit the epistemic commitment (an empty epistemic array is valid) rather than inventing one.",
++    "Epistemic time is a governed evidence status, not ordinary conversational recency. Use time:current only for a factual claim whose present truth is supported by a governed observation supplied in the current Thought input, and nominate the supporting observation in evidenceUse.observationRefsUsed; a source reference, a retrieval reference, or the fact that the owner just sent a message does not by itself license current, and the host may still reject a current claim whose currentness binding is incomplete. Use time:historical for a claim about a past state or event that does not assert it is still true now. Use time:unknown_freshness when evidence supports a claim but its present truth has not been established by governed current observation. If a conversational response such as an acknowledgment does not need to assert an epistemic fact, omit the epistemic commitment (omit unused arrays) rather than inventing one.",
+     "Capability reality is host-owned input: operationCapabilities identify available operations, their canonical family, readOnly and requiresProject properties, observation/effect class, request fields, operator-bound fields, and authorized project IDs. Use only available operations and authorized IDs; operation metadata does not choose whether to request an operation, but its semantic class constrains the form that can carry a selected operation.",
+     'Semantic class binding: semanticClass:"observation" requires observation_intent; semanticClass:"effect" requires effect_intent. readOnly describes whether the governed operation mutates its bound project or candidate; readOnly does not convert an effect-class operation into an observation. project.read_file is project_inspection evidence acquisition and uses observation_intent. workspace.verify is project_verification governed recipe execution and uses effect_intent even when read-only.',
+     "CapabilityReality field semantics: conversationalRead reports only whether an additional authorized user-requested URL/page read may be performed; it does not report whether supplied conversation content is visible. Every rawConversation entry included in this request is directly readable current context regardless of conversationalRead.",
+     "Do not emit kernel identity, lifecycle, delivery, or publication fields; Ashley code binds those values.",
+     `A settlement must include these required sections: ${requiredFields(settlement).join(", ")}.`,
+     `Speech shape: ${speechForms(settlement).join("; ")}.`,
+-    "Speech mustSay contract: every mustSay entry is a literal required substring and each entry must appear verbatim in surfaceDraft; the host fidelity checker rejects any draft that does not contain them verbatim. Use mustSay: [] when no exact literal wording is required. Behavioral, stylistic, or procedural directives do not belong in mustSay; put those in presentationDirectives.",
+-    `Commitments required fields: ${requiredFields(commitments).join(", ")}.`,
+-    "Operational commitments are distinct from conversational continuation. Every operational effectRef must refer to one of the complete Host-admitted operational effect references supplied in allowedOperationalEffectRefs for this cycle. If allowedOperationalEffectRefs is empty, commitments.operational must be [].",
++    "Speech mustSay contract: every mustSay entry is a literal required substring and each entry must appear verbatim in surfaceDraft; the host fidelity checker rejects any draft that does not contain them verbatim. Omit mustSay when no exact literal wording is required. Behavioral, stylistic, or procedural directives do not belong in mustSay; put those in presentationDirectives.",
++    "Optional settlement domains and their children must be omitted when unused. Present event arrays must be non-empty; present composite objects must contain a meaningful child. Ordinary speech requires no commitments. speech.mode:none permits only mode. Absence never clears state.",
++    "Operational commitments are distinct from conversational continuation. Every operational effectRef must refer to one of the complete Host-admitted operational effect references supplied in allowedOperationalEffectRefs for this cycle. If allowedOperationalEffectRefs is empty, omit commitments.operational.",
+     `Forbidden publication/delivery fields: ${THOUGHT_FORBIDDEN_OUTPUT_FIELDS.join(", ")}.`,
+     "This contract describes output shape only; branch selection is Thought-owned, while Ashley code remains authoritative for identity, authority, licensing, and publication.",
+   ].join(" ");
+diff --git a/apps/agent-service/src/core/cognitive-v021/thought/parse.ts b/apps/agent-service/src/core/cognitive-v021/thought/parse.ts
+index 87a397e1ae24816c62b162960014694818b7aa13..13ee819af12d5b87884b33994b2723c3a39e0255 100644
+--- a/apps/agent-service/src/core/cognitive-v021/thought/parse.ts
++++ b/apps/agent-service/src/core/cognitive-v021/thought/parse.ts
+@@ -28,13 +28,18 @@ export type ThoughtSemanticParseFailureCode =
+   | "root_not_object"
+   | "wrong_kind"
+   | "unknown_field"
++  | "empty_when_present"
+   | "required_field_missing"
+   | "wrong_type"
+   | "invalid_enum"
+   | "reference_not_allowlisted"
+   | "alias_invalid"
++  | "alias_collides_with_existing_ref"
+   | "operation_not_registered";
+ 
++// The parser identity is deliberately stable. Contract/schema selection is
++// owned by Model Fabric (the dispatch contract), not by this implementation
++// identity.
+ export const THOUGHT_SEMANTIC_PARSER_ID = "ashley.thought.semantic-parser.v1" as const;
+ 
+ export type ThoughtSemanticParseResult =
+@@ -42,6 +47,8 @@ export type ThoughtSemanticParseResult =
+   | { ok: false; code: ThoughtSemanticParseFailureCode; field?: string };
+ 
+ type SemanticRecord = Record<string, unknown>;
++type ValidationResult = { ok: true } | { ok: false; code: ThoughtSemanticParseFailureCode; field?: string };
++
+ const REGISTERED_OPERATION_KINDS = new Set([
+   "conversation.read",
+   "memory.lookup",
+@@ -62,13 +69,29 @@ const REGISTERED_OPERATION_KINDS = new Set([
+   "objective.operate",
+ ]);
+ 
++const OK: ValidationResult = { ok: true };
++
++function prefixFailure(result: ValidationResult, prefix: string): ValidationResult {
++  return result.ok
++    ? result
++    : { ...result, field: result.field ? `${prefix}.${result.field}` : prefix };
++}
++
+ function semanticRecord(value: unknown): SemanticRecord | null {
+   return typeof value === "object" && value !== null && !Array.isArray(value)
+     ? value as SemanticRecord
+     : null;
+ }
+ 
+-function exactRecord(
++function own(record: SemanticRecord, key: string): boolean {
++  return Object.prototype.hasOwnProperty.call(record, key);
++}
++
++function failure(code: ThoughtSemanticParseFailureCode, field?: string): ValidationResult {
++  return { ok: false, code, ...(field ? { field } : {}) };
++}
++
++function recordShape(
+   value: unknown,
+   required: readonly string[],
+   optional: readonly string[] = [],
+@@ -77,14 +100,10 @@ function exactRecord(
+   if (!record) return null;
+   const allowed = new Set([...required, ...optional]);
+   if (Object.keys(record).some((key) => !allowed.has(key))) return null;
+-  if (required.some((key) => !Object.prototype.hasOwnProperty.call(record, key))) return null;
++  if (required.some((key) => !own(record, key))) return null;
+   return record;
+ }
+ 
+-function stringField(record: SemanticRecord, key: string): string | null {
+-  return typeof record[key] === "string" ? record[key] as string : null;
+-}
+-
+ function nonEmptyString(value: unknown): value is string {
+   return typeof value === "string" && value.length > 0;
+ }
+@@ -114,24 +133,49 @@ function localAlias(value: unknown): value is LocalAlias {
+ }
+ 
+ function semanticRef(value: unknown, allowlist: ReadonlySet<string>): value is SemanticRef {
+-  const record = exactRecord(value, ["kind"], ["ref", "alias"]);
+-  if (!record || (record.kind !== "existing" && record.kind !== "local")) return false;
+-  if (record.kind === "existing") {
+-    return Object.keys(record).length === 2 && existingRef(record.ref, allowlist);
+-  }
+-  return Object.keys(record).length === 2 && localAlias(record.alias);
++  const record = semanticRecord(value);
++  if (!record || Object.keys(record).length !== 2 || record.kind === undefined) return false;
++  if (record.kind === "existing") return own(record, "ref") && existingRef(record.ref, allowlist);
++  if (record.kind === "local") return own(record, "alias") && localAlias(record.alias);
++  return false;
++}
++
++function refArray(value: unknown, allowlist: ReadonlySet<string>, allowEmpty = true): value is ExistingRef[] {
++  return Array.isArray(value)
++    && (allowEmpty || value.length > 0)
++    && value.every((item) => existingRef(item, allowlist));
+ }
+ 
+-function refArray(value: unknown, allowlist: ReadonlySet<string>): value is ExistingRef[] {
+-  return Array.isArray(value) && value.every((item) => existingRef(item, allowlist));
++function optionalArray(
++  record: SemanticRecord,
++  key: string,
++  itemValidator: (item: unknown) => boolean,
++  nonEmpty = true,
++): ValidationResult {
++  if (!own(record, key)) return OK;
++  if (!Array.isArray(record[key])) return failure("wrong_type", key);
++  if (nonEmpty && record[key].length === 0) return failure("empty_when_present", key);
++  if (!record[key].every(itemValidator)) return failure("wrong_type", key);
++  return OK;
+ }
+ 
+-function dimensions(value: unknown): value is ThoughtInterpretation["referentBindings"][number] {
+-  return semanticRecord(value) !== null;
++function optionalObject(
++  parent: SemanticRecord,
++  key: string,
++  allowed: readonly string[],
++): { record: SemanticRecord } | { failure: ValidationResult } | null {
++  if (!own(parent, key)) return null;
++  const value = parent[key];
++  const child = semanticRecord(value);
++  if (!child) return { failure: failure("wrong_type", key) };
++  const unknown = Object.keys(child).find((childKey) => !allowed.includes(childKey));
++  if (unknown) return { failure: failure("unknown_field", `${key}.${unknown}`) };
++  if (Object.keys(child).length === 0) return { failure: failure("empty_when_present", key) };
++  return { record: child };
+ }
+ 
+ function validEpistemicDimensions(value: unknown): boolean {
+-  const record = exactRecord(value, ["source", "status", "time", "reliability"]);
++  const record = recordShape(value, ["source", "status", "time", "reliability"]);
+   return !!record && [
+     ["owner_utterance", "ashley_interpretation", "tool", "perception", "receipt", "prior_settlement"],
+     ["asserted", "interpreted", "unverified", "contradicted", "superseded", "unresolved"],
+@@ -144,73 +188,113 @@ function validSemanticRefField(value: unknown, allowlist: ReadonlySet<string>):
+   return value === null || semanticRef(value, allowlist);
+ }
+ 
+-function validInterpretation(value: unknown, allowlist: ReadonlySet<string>): value is ThoughtInterpretation {
+-  const record = exactRecord(value, ["discourseActs", "referentBindings", "corrections", "unresolvedAmbiguities", "topics"]);
+-  if (!record || !stringArray(record.unresolvedAmbiguities) || !stringArray(record.topics)) return false;
++function validEpistemicCommitment(value: unknown): boolean {
++  const record = recordShape(value, ["dimensions", "statement"]);
++  return !!record && validEpistemicDimensions(record.dimensions) && nonEmptyString(record.statement);
++}
++
++function validReferentBinding(value: unknown, allowlist: ReadonlySet<string>): boolean {
++  const record = recordShape(value, ["span", "sourceTurnRefs"], ["concernRef", "entityRef"]);
++  return !!record
++    && nonEmptyString(record.span)
++    && refArray(record.sourceTurnRefs, allowlist)
++    && (record.concernRef === undefined || existingRef(record.concernRef, allowlist))
++    && (record.entityRef === undefined || existingRef(record.entityRef, allowlist));
++}
++
++function validCorrection(value: unknown, allowlist: ReadonlySet<string>): boolean {
++  const record = recordShape(value, ["correctedTurnRefs", "fromSpan", "toSpan"], ["concernRef"]);
++  return !!record
++    && refArray(record.correctedTurnRefs, allowlist)
++    && nonEmptyString(record.fromSpan)
++    && nonEmptyString(record.toSpan)
++    && (record.concernRef === undefined || existingRef(record.concernRef, allowlist));
++}
++
++function validateInterpretation(parent: SemanticRecord, allowlist: ReadonlySet<string>): ValidationResult {
++  const optional = optionalObject(parent, "interpretation", [
++    "discourseActs", "referentBindings", "corrections", "unresolvedAmbiguities", "topics",
++  ]);
++  if (!optional) return OK;
++  if ("failure" in optional) return optional.failure;
++  const record = optional.record;
+   const acts = ["inform", "ask", "correct", "acknowledge", "disagree", "hold", "silence", "other"];
+-  if (!Array.isArray(record.discourseActs) || !record.discourseActs.every((item) => typeof item === "string" && acts.includes(item))) return false;
+-  if (!Array.isArray(record.referentBindings) || !record.referentBindings.every((item) => {
+-    const binding = exactRecord(item, ["span", "sourceTurnRefs"], ["concernRef", "entityRef"]);
+-    return !!binding && typeof binding.span === "string" && refArray(binding.sourceTurnRefs, allowlist)
+-      && (binding.concernRef === undefined || existingRef(binding.concernRef, allowlist))
+-      && (binding.entityRef === undefined || existingRef(binding.entityRef, allowlist));
+-  })) return false;
+-  return Array.isArray(record.corrections) && record.corrections.every((item) => {
+-    const correction = exactRecord(item, ["correctedTurnRefs", "fromSpan", "toSpan"], ["concernRef"]);
+-    return !!correction && refArray(correction.correctedTurnRefs, allowlist)
+-      && typeof correction.fromSpan === "string" && typeof correction.toSpan === "string"
+-      && (correction.concernRef === undefined || existingRef(correction.concernRef, allowlist));
+-  });
++  let result = prefixFailure(optionalArray(record, "discourseActs", (item) => typeof item === "string" && acts.includes(item)), "interpretation");
++  if (!result.ok) return result;
++  result = prefixFailure(optionalArray(record, "referentBindings", (item) => validReferentBinding(item, allowlist)), "interpretation");
++  if (!result.ok) return result;
++  result = prefixFailure(optionalArray(record, "corrections", (item) => validCorrection(item, allowlist)), "interpretation");
++  if (!result.ok) return result;
++  result = prefixFailure(optionalArray(record, "unresolvedAmbiguities", nonEmptyString), "interpretation");
++  if (!result.ok) return result;
++  return prefixFailure(optionalArray(record, "topics", nonEmptyString), "interpretation");
+ }
+ 
+ function validOperationalClaim(value: unknown): boolean {
+-  const record = exactRecord(value, ["effectRef", "claimedState"]);
+-  if (!record || typeof record.effectRef !== "string" || record.effectRef.trim().length === 0) return false;
+-  return ["not_attempted", "in_progress", "outcome_unknown", "failed", "succeeded"].includes(record.claimedState as string);
++  const record = recordShape(value, ["effectRef", "claimedState"]);
++  return !!record && nonEmptyString(record.effectRef)
++    && ["not_attempted", "in_progress", "outcome_unknown", "failed", "succeeded"].includes(record.claimedState as string);
+ }
+ 
+-function validCommitments(value: unknown): value is ThoughtCommitments {
+-  const record = exactRecord(value, ["epistemic", "conversational", "stance"], ["operational"]);
+-  if (!record || !Array.isArray(record.epistemic) || !Array.isArray(record.conversational)) return false;
+-  if (record.operational !== undefined) {
+-    if (!Array.isArray(record.operational) || !record.operational.every(validOperationalClaim)) return false;
+-  }
++function validStance(value: unknown): boolean {
++  const stance = recordShape(value, ["warmth", "humorAllowed", "disagreement", "uncertaintyDisplay"]);
++  return !!stance
++    && ["low", "medium", "high"].includes(stance.warmth as string)
++    && typeof stance.humorAllowed === "boolean"
++    && typeof stance.disagreement === "boolean"
++    && typeof stance.uncertaintyDisplay === "boolean";
++}
++
++function validateCommitments(parent: SemanticRecord): ValidationResult {
++  const optional = optionalObject(parent, "commitments", ["epistemic", "operational", "conversational", "stance"]);
++  if (!optional) return OK;
++  if ("failure" in optional) return optional.failure;
++  const record = optional.record;
+   const conversational = ["answer", "ask", "acknowledge", "disagree", "hold", "silence"];
+-  if (!record.conversational.every((item) => typeof item === "string" && conversational.includes(item))) return false;
+-  const stance = exactRecord(record.stance, ["warmth", "humorAllowed", "disagreement", "uncertaintyDisplay"]);
+-  if (!stance || !["low", "medium", "high"].includes(stance.warmth as string)
+-    || typeof stance.humorAllowed !== "boolean" || typeof stance.disagreement !== "boolean"
+-    || typeof stance.uncertaintyDisplay !== "boolean") return false;
+-  return record.epistemic.every((item) => {
+-    const commitment = exactRecord(item, ["dimensions", "statement"]);
+-    return !!commitment && validEpistemicDimensions(commitment.dimensions) && typeof commitment.statement === "string";
+-  });
+-}
+-
+-function validSpeech(value: unknown): value is ThoughtSpeechIntent {
++  let result = prefixFailure(optionalArray(record, "epistemic", validEpistemicCommitment), "commitments");
++  if (!result.ok) return result;
++  result = prefixFailure(optionalArray(record, "operational", validOperationalClaim), "commitments");
++  if (!result.ok) return result;
++  result = prefixFailure(optionalArray(record, "conversational", (item) => typeof item === "string" && conversational.includes(item)), "commitments");
++  if (!result.ok) return result;
++  if (own(record, "stance") && !validStance(record.stance)) return failure("wrong_type", "commitments.stance");
++  return OK;
++}
++
++function validateSpeech(value: unknown): ValidationResult {
+   const record = semanticRecord(value);
+-  if (!record || (record.mode !== "none" && record.mode !== "draft")) return false;
+-  const required = record.mode === "draft"
+-    ? ["mode", "mustSay", "mustNotSay", "surfaceDraft", "acceptableRealizations", "presentationDirectives"]
+-    : ["mode", "mustSay", "mustNotSay", "acceptableRealizations", "presentationDirectives"];
+-  const shape = exactRecord(record, required);
+-  if (!shape || !stringArray(shape.mustSay) || !stringArray(shape.mustNotSay)
+-    || !stringArray(shape.acceptableRealizations) || !stringArray(shape.presentationDirectives)) return false;
+-  if (record.mode === "none") return shape.mustSay.length === 0 && shape.acceptableRealizations.length === 0;
+-  return nonEmptyString(shape.surfaceDraft);
+-}
+-
+-function validWorkingContextItem(value: unknown, allowlist: ReadonlySet<string>): value is WorkingContextItemSemantic {
+-  const record = exactRecord(value, ["identity", "type", "text", "concernRef", "sourceTurnRefs", "status", "supersedesRef"]);
++  if (!record) return failure("wrong_type", "speech");
++  const unknown = Object.keys(record).find((key) => ![
++    "mode", "surfaceDraft", "mustSay", "mustNotSay", "presentationDirectives",
++  ].includes(key));
++  if (unknown) return failure("unknown_field", `speech.${unknown}`);
++  if (!own(record, "mode")) return failure("required_field_missing", "speech.mode");
++  if (record.mode !== "none" && record.mode !== "draft") return failure("invalid_enum", "speech.mode");
++  if (record.mode === "none") {
++    return Object.keys(record).length === 1
++      ? OK
++      : failure("unknown_field", `speech.${Object.keys(record).find((key) => key !== "mode") ?? "field"}`);
++  }
++  if (!own(record, "surfaceDraft")) return failure("required_field_missing", "speech.surfaceDraft");
++  if (!nonEmptyString(record.surfaceDraft)) return failure("wrong_type", "speech.surfaceDraft");
++  let result = prefixFailure(optionalArray(record, "mustSay", nonEmptyString), "speech");
++  if (!result.ok) return result;
++  result = prefixFailure(optionalArray(record, "mustNotSay", nonEmptyString), "speech");
++  if (!result.ok) return result;
++  return prefixFailure(optionalArray(record, "presentationDirectives", nonEmptyString), "speech");
++}
++
++function validWorkingContextItem(value: unknown, allowlist: ReadonlySet<string>): boolean {
++  const record = recordShape(value, ["identity", "type", "text", "concernRef", "sourceTurnRefs", "status", "supersedesRef"]);
+   const types = ["topic", "referent", "correction", "owner_teaching", "question", "commitment_temp", "repair"];
+   const statuses = ["active", "superseded", "abandoned"];
+   return !!record && semanticRef(record.identity, allowlist) && types.includes(record.type as string)
+-    && typeof record.text === "string" && validSemanticRefField(record.concernRef, allowlist)
++    && nonEmptyString(record.text) && validSemanticRefField(record.concernRef, allowlist)
+     && refArray(record.sourceTurnRefs, allowlist) && statuses.includes(record.status as string)
+     && validSemanticRefField(record.supersedesRef, allowlist);
+ }
+ 
+-function validWorkingContextDelta(value: unknown, allowlist: ReadonlySet<string>): value is WorkingContextSemanticDelta {
++function validWorkingContextDelta(value: unknown, allowlist: ReadonlySet<string>): boolean {
+   const record = semanticRecord(value);
+   if (!record || typeof record.op !== "string") return false;
+   if (record.op === "upsert") return Object.keys(record).length === 2 && validWorkingContextItem(record.item, allowlist);
+@@ -220,91 +304,185 @@ function validWorkingContextDelta(value: unknown, allowlist: ReadonlySet<string>
+   return false;
+ }
+ 
+-function validConcernDelta(value: unknown, allowlist: ReadonlySet<string>): value is ConcernSemanticDelta {
++function validConcernDelta(value: unknown, allowlist: ReadonlySet<string>): boolean {
+   const record = semanticRecord(value);
+   if (!record || typeof record.op !== "string") return false;
+   if (record.op === "resolve") return Object.keys(record).length === 2 && existingRef(record.target, allowlist);
+   if (record.op !== "upsert" || Object.keys(record).length !== 2) return false;
+-  const item = exactRecord(record.record, ["identity", "statement", "sourceTurnRefs", "dimensions", "status"]);
+-  return !!item && semanticRef(item.identity, allowlist) && typeof item.statement === "string"
++  const item = recordShape(record.record, ["identity", "statement", "sourceTurnRefs", "dimensions", "status"]);
++  return !!item && semanticRef(item.identity, allowlist) && nonEmptyString(item.statement)
+     && refArray(item.sourceTurnRefs, allowlist) && validEpistemicDimensions(item.dimensions)
+     && ["active", "investigating", "waiting_for_evidence", "dormant_but_revisitable", "resolved", "quarantined"].includes(item.status as string);
+ }
+ 
+-function validOccupancyDelta(value: unknown, allowlist: ReadonlySet<string>): value is OccupancySemanticDelta {
+-  const record = exactRecord(value, ["op", "concernRef", "status", "priority"]);
++function validOccupancyDelta(value: unknown, allowlist: ReadonlySet<string>): boolean {
++  const record = recordShape(value, ["op", "concernRef", "status", "priority"]);
+   return !!record && record.op === "set" && semanticRef(record.concernRef, allowlist)
+     && ["active", "investigating", "waiting_for_evidence", "dormant_but_revisitable", "resolved", "quarantined"].includes(record.status as string)
+     && typeof record.priority === "number" && Number.isInteger(record.priority);
+ }
+ 
+-function validFutureTriggerDelta(value: unknown, allowlist: ReadonlySet<string>): value is FutureTriggerSemanticDelta {
++function validFutureTriggerDelta(value: unknown, allowlist: ReadonlySet<string>): boolean {
+   const record = semanticRecord(value);
+   if (!record || typeof record.op !== "string") return false;
+   if (record.op === "cancel") return Object.keys(record).length === 2 && existingRef(record.target, allowlist);
+-  const item = exactRecord(record, ["op", "identity", "concernRef", "dueAtMs", "purpose", "payload"]);
+-  return !!item && item.op === "create" && exactRecord(item.identity, ["kind", "alias"])?.kind === "local"
+-    && localAlias((item.identity as SemanticRecord).alias) && semanticRef(item.concernRef, allowlist)
++  const item = recordShape(record, ["op", "concernRef", "dueAtMs", "purpose", "payload"]);
++  return !!item && item.op === "create" && semanticRef(item.concernRef, allowlist)
+     && typeof item.dueAtMs === "number" && Number.isInteger(item.dueAtMs)
+     && nonEmptyString(item.purpose) && jsonObject(item.payload);
+ }
+ 
+-function validSubscriptionDelta(value: unknown, allowlist: ReadonlySet<string>): value is SubscriptionSemanticDelta {
++function validSubscriptionDelta(value: unknown, allowlist: ReadonlySet<string>): boolean {
+   const record = semanticRecord(value);
+   if (!record || typeof record.op !== "string") return false;
+   if (record.op === "cancel") return Object.keys(record).length === 2 && existingRef(record.target, allowlist);
+-  const item = exactRecord(record, ["op", "subscription"]);
+-  const subscription = item && exactRecord(item.subscription, ["identity", "concernRef", "source", "scope", "topicKeys", "match", "expiresAtMs"]);
++  const item = recordShape(record, ["op", "subscription"]);
++  const subscription = item && recordShape(item.subscription, ["concernRef", "source", "scope", "topicKeys", "match", "expiresAtMs"]);
+   return !!item && !!subscription && item.op === "create"
+-    && exactRecord(subscription.identity, ["kind", "alias"])?.kind === "local"
+-    && localAlias((subscription.identity as SemanticRecord).alias)
+-    && validSemanticRefField(subscription.concernRef, allowlist) && typeof subscription.source === "string"
+-    && typeof subscription.scope === "string" && stringArray(subscription.topicKeys)
++    && validSemanticRefField(subscription.concernRef, allowlist)
++    && nonEmptyString(subscription.source) && nonEmptyString(subscription.scope)
++    && stringArray(subscription.topicKeys)
+     && (subscription.match === "equality" || subscription.match === "substring")
+     && (subscription.expiresAtMs === null || (typeof subscription.expiresAtMs === "number" && Number.isInteger(subscription.expiresAtMs)));
+ }
+ 
+ function validNomination(value: unknown, allowlist: ReadonlySet<string>): value is ThoughtDurableNomination {
+-  const record = exactRecord(value, ["alias", "statement", "memoryKind", "dimensions", "dataClassification", "sourceRefs", "supersedesRef", "concernRef"]);
+-  // Structural Thought boundary: MemoryKind is Thought-authored semantic output
+-  // but host-constrained to the canonical enum. Non-members (e.g.
+-  // "self_reflection") are rejected here so the existing bounded structural
+-  // retry receives the failure. No host aliasing, mapping, or filtering.
+-  return !!record && localAlias(record.alias) && typeof record.statement === "string" && isMemoryKind(record.memoryKind)
+-    && validEpistemicDimensions(record.dimensions) && ["ordinary", "sensitive", "never_public", "secret"].includes(record.dataClassification as string)
+-    && refArray(record.sourceRefs, allowlist) && (record.supersedesRef === null || existingRef(record.supersedesRef, allowlist))
++  const record = recordShape(value, ["statement", "memoryKind", "dimensions", "dataClassification", "sourceRefs", "supersedesRef", "concernRef"]);
++  return !!record && nonEmptyString(record.statement) && isMemoryKind(record.memoryKind)
++    && validEpistemicDimensions(record.dimensions)
++    && ["ordinary", "sensitive", "never_public", "secret"].includes(record.dataClassification as string)
++    && refArray(record.sourceRefs, allowlist)
++    && (record.supersedesRef === null || existingRef(record.supersedesRef, allowlist))
+     && validSemanticRefField(record.concernRef, allowlist);
+ }
+ 
+-function validEvidenceUse(value: unknown, allowlist: ReadonlySet<string>): value is ThoughtEvidenceUse {
+-  const record = exactRecord(value, ["observationRefsUsed", "retrievalRefsUsed", "sourceRefsUsed", "openIntentRefs"]);
+-  return !!record && refArray(record.observationRefsUsed, allowlist) && refArray(record.retrievalRefsUsed, allowlist)
+-    && refArray(record.sourceRefsUsed, allowlist) && refArray(record.openIntentRefs, allowlist);
++function validateEvidenceUse(parent: SemanticRecord, allowlist: ReadonlySet<string>): ValidationResult {
++  const optional = optionalObject(parent, "evidenceUse", [
++    "observationRefsUsed", "retrievalRefsUsed", "sourceRefsUsed", "openIntentRefs",
++  ]);
++  if (!optional) return OK;
++  if ("failure" in optional) return optional.failure;
++  const record = optional.record;
++  const check = (key: string) => prefixFailure(optionalArray(record, key, (item) => existingRef(item, allowlist)), "evidenceUse");
++  let result = check("observationRefsUsed");
++  if (!result.ok) return result;
++  result = check("retrievalRefsUsed");
++  if (!result.ok) return result;
++  result = check("sourceRefsUsed");
++  if (!result.ok) return result;
++  return check("openIntentRefs");
+ }
+ 
+ function parseSemanticJson(raw: string | unknown): { ok: true; value: unknown } | { ok: false } {
+   if (typeof raw !== "string") return { ok: true, value: raw };
+-  try { return { ok: true, value: JSON.parse(raw) }; } catch { return { ok: false }; }
++  try {
++    return { ok: true, value: JSON.parse(raw) };
++  } catch {
++    return { ok: false };
++  }
+ }
+ 
+ function semanticFailure(code: ThoughtSemanticParseFailureCode, field?: string): ThoughtSemanticParseResult {
+   return { ok: false, code, ...(field ? { field } : {}) };
+ }
+ 
++function validateSettlementLocalAliases(
++  record: SemanticRecord,
++  allowlist: ReadonlySet<string>,
++): ValidationResult {
++  const checkReference = (value: unknown, field: string): ValidationResult => {
++    const ref = semanticRecord(value);
++    if (!ref || ref.kind !== "local") return OK;
++    if (!localAlias(ref.alias)) return failure("alias_invalid", field);
++    if (allowlist.has(ref.alias)) return failure("alias_collides_with_existing_ref", field);
++    return OK;
++  };
++  const check = (value: unknown, field: string): ValidationResult => checkReference(value, field);
++  const working = Array.isArray(record.workingContextDeltas) ? record.workingContextDeltas : [];
++  const concerns = Array.isArray(record.concernDeltas) ? record.concernDeltas : [];
++  const interpretation = semanticRecord(record.interpretation);
++  for (const binding of (interpretation && Array.isArray(interpretation.referentBindings)
++    ? interpretation.referentBindings : [])) {
++    const bindingRecord = semanticRecord(binding);
++    for (const [key, value] of [["concernRef", bindingRecord?.concernRef], ["entityRef", bindingRecord?.entityRef]] as const) {
++      const result = check(value, `interpretation.${key}`);
++      if (!result.ok) return result;
++    }
++  }
++  for (const correction of (interpretation && Array.isArray(interpretation.corrections)
++    ? interpretation.corrections : [])) {
++    const result = check(semanticRecord(correction)?.concernRef, "interpretation.concernRef");
++    if (!result.ok) return result;
++  }
++  for (const delta of working) {
++    const deltaRecord = semanticRecord(delta);
++    const item = deltaRecord?.item ?? deltaRecord?.replacement;
++    const itemRecord = semanticRecord(item);
++    for (const [key, value] of [["identity", itemRecord?.identity], ["concernRef", itemRecord?.concernRef], ["supersedesRef", itemRecord?.supersedesRef]] as const) {
++      const result = check(value, `workingContextDeltas.${key}`);
++      if (!result.ok) return result;
++    }
++  }
++  for (const delta of concerns) {
++    const result = check(semanticRecord(semanticRecord(delta)?.record)?.identity, "concernDeltas.identity");
++    if (!result.ok) return result;
++  }
++  const occupancy = Array.isArray(record.occupancyDeltas) ? record.occupancyDeltas : [];
++  for (const delta of occupancy) {
++    const result = check(semanticRecord(delta)?.concernRef, "occupancyDeltas.concernRef");
++    if (!result.ok) return result;
++  }
++  const future = Array.isArray(record.futureTriggerDeltas) ? record.futureTriggerDeltas : [];
++  for (const delta of future) {
++    const result = check(semanticRecord(delta)?.concernRef, "futureTriggerDeltas.concernRef");
++    if (!result.ok) return result;
++  }
++  const subscriptions = Array.isArray(record.subscriptionDeltas) ? record.subscriptionDeltas : [];
++  for (const delta of subscriptions) {
++    const result = check(semanticRecord(semanticRecord(delta)?.subscription)?.concernRef, "subscriptionDeltas.concernRef");
++    if (!result.ok) return result;
++  }
++  const nominations = Array.isArray(record.durableNominations) ? record.durableNominations : [];
++  for (const nomination of nominations) {
++    const result = check(semanticRecord(nomination)?.concernRef, "durableNominations.concernRef");
++    if (!result.ok) return result;
++  }
++  return OK;
++}
++
+ function parseSettlementSemantic(value: SemanticRecord, allowlist: ReadonlySet<string>): ThoughtSemanticParseResult {
+-  const record = exactRecord(value, ["kind", "interpretation", "commitments", "speech", "workingContextDeltas", "concernDeltas", "occupancyDeltas", "futureTriggerDeltas", "subscriptionDeltas", "durableNominations", "evidenceUse"]);
+-  if (!record || record.kind !== "settlement") return semanticFailure("unknown_field");
+-  if (!validInterpretation(record.interpretation, allowlist)) return semanticFailure("wrong_type", "interpretation");
+-  if (!validCommitments(record.commitments)) return semanticFailure("wrong_type", "commitments");
+-  if (!validSpeech(record.speech)) return semanticFailure("wrong_type", "speech");
+-  if (!Array.isArray(record.workingContextDeltas) || !record.workingContextDeltas.every((item) => validWorkingContextDelta(item, allowlist))) return semanticFailure("wrong_type", "workingContextDeltas");
+-  if (!Array.isArray(record.concernDeltas) || !record.concernDeltas.every((item) => validConcernDelta(item, allowlist))) return semanticFailure("wrong_type", "concernDeltas");
+-  if (!Array.isArray(record.occupancyDeltas) || !record.occupancyDeltas.every((item) => validOccupancyDelta(item, allowlist))) return semanticFailure("wrong_type", "occupancyDeltas");
+-  if (!Array.isArray(record.futureTriggerDeltas) || !record.futureTriggerDeltas.every((item) => validFutureTriggerDelta(item, allowlist))) return semanticFailure("wrong_type", "futureTriggerDeltas");
+-  if (!Array.isArray(record.subscriptionDeltas) || !record.subscriptionDeltas.every((item) => validSubscriptionDelta(item, allowlist))) return semanticFailure("wrong_type", "subscriptionDeltas");
+-  if (!Array.isArray(record.durableNominations) || !record.durableNominations.every((item) => validNomination(item, allowlist))) return semanticFailure("wrong_type", "durableNominations");
+-  if (!validEvidenceUse(record.evidenceUse, allowlist)) return semanticFailure("wrong_type", "evidenceUse");
+-  return { ok: true, value: record as unknown as SettlementSemanticOutput };
++  const unknown = Object.keys(value).find((key) => ![
++    "kind", "speech", "interpretation", "commitments", "workingContextDeltas", "concernDeltas",
++    "occupancyDeltas", "futureTriggerDeltas", "subscriptionDeltas", "durableNominations", "evidenceUse",
++  ].includes(key));
++  if (unknown) return semanticFailure("unknown_field", unknown);
++  if (value.kind !== "settlement") return semanticFailure("wrong_kind", "kind");
++  if (!own(value, "speech")) return semanticFailure("required_field_missing", "speech");
++
++  let result = validateSpeech(value.speech);
++  if (!result.ok) return semanticFailure(result.code, result.field);
++  result = validateInterpretation(value, allowlist);
++  if (!result.ok) return semanticFailure(result.code, result.field);
++  result = validateCommitments(value);
++  if (!result.ok) return semanticFailure(result.code, result.field);
++
++  const arrays: Array<[string, (item: unknown) => boolean]> = [
++    ["workingContextDeltas", (item) => validWorkingContextDelta(item, allowlist)],
++    ["concernDeltas", (item) => validConcernDelta(item, allowlist)],
++    ["occupancyDeltas", (item) => validOccupancyDelta(item, allowlist)],
++    ["futureTriggerDeltas", (item) => validFutureTriggerDelta(item, allowlist)],
++    ["subscriptionDeltas", (item) => validSubscriptionDelta(item, allowlist)],
++    ["durableNominations", (item) => validNomination(item, allowlist)],
++  ];
++  for (const [key, validator] of arrays) {
++    result = optionalArray(value, key, validator);
++    if (!result.ok) return semanticFailure(result.code, result.field);
++  }
++  result = validateEvidenceUse(value, allowlist);
++  if (!result.ok) return semanticFailure(result.code, result.field);
++  result = validateSettlementLocalAliases(value, allowlist);
++  if (!result.ok) return semanticFailure(result.code, result.field);
++  return { ok: true, value: value as unknown as SettlementSemanticOutput };
+ }
+ 
+ function parseOperationSemantic(
+@@ -315,13 +493,14 @@ function parseOperationSemantic(
+   const required = kind === "observation_intent"
+     ? ["kind", "operationKind", "request", "purpose", "evidenceNeed", "existingRefs"]
+     : ["kind", "operationKind", "request", "purpose", "expectedOutcome", "existingRefs"];
+-  const record = exactRecord(value, required);
+-  if (!record || record.kind !== kind) return semanticFailure("unknown_field");
+-  if (typeof record.operationKind !== "string" || !REGISTERED_OPERATION_KINDS.has(record.operationKind)) return semanticFailure("operation_not_registered", "operationKind");
++  const record = recordShape(value, required);
++  if (!record || record.kind !== kind) return semanticFailure("wrong_kind", "kind");
++  if (typeof record.operationKind !== "string" || !REGISTERED_OPERATION_KINDS.has(record.operationKind)) {
++    return semanticFailure("operation_not_registered", "operationKind");
++  }
+   if (!jsonObject(record.request)) return semanticFailure("wrong_type", "request");
+   if (!nonEmptyString(record.purpose)) return semanticFailure("wrong_type", "purpose");
+   if (!stringArray(record.existingRefs)) return semanticFailure("wrong_type", "existingRefs");
+-  if (record.existingRefs.some((ref) => ref.length === 0)) return semanticFailure("wrong_type", "existingRefs");
+   if (!refArray(record.existingRefs, allowlist)) return semanticFailure("reference_not_allowlisted", "existingRefs");
+   if (kind === "observation_intent") {
+     if (!nonEmptyString(record.evidenceNeed)) return semanticFailure("wrong_type", "evidenceNeed");
+@@ -343,16 +522,18 @@ export function parseThoughtSemanticOutput(
+   if (record.kind === "observation_intent") return parseOperationSemantic(record, allowlistedReferences, "observation_intent");
+   if (record.kind === "effect_intent") return parseOperationSemantic(record, allowlistedReferences, "effect_intent");
+   if (record.kind === "abstain") {
+-    const abstain = exactRecord(record, ["kind", "reason", "explanation", "evidenceRefs"]);
+-    if (!abstain) return semanticFailure("unknown_field");
+-    if (!["insufficient_evidence", "unresolved_ambiguity", "no_responsible_proposal", "no_semantic_change_warranted"].includes(abstain.reason as string)) {
+-      return semanticFailure("invalid_enum", "reason");
++    const unknown = Object.keys(record).find((key) => !["kind", "reason", "explanation", "evidenceRefs"].includes(key));
++    if (unknown) return semanticFailure("unknown_field", unknown);
++    if (!["kind", "reason", "explanation", "evidenceRefs"].every((key) => own(record, key))) {
++      const missing = ["kind", "reason", "explanation", "evidenceRefs"].find((key) => !own(record, key));
++      return semanticFailure("required_field_missing", missing);
+     }
+-    if (!nonEmptyString(abstain.explanation)) return semanticFailure("wrong_type", "explanation");
+-    if (!refArray(abstain.evidenceRefs, allowlistedReferences)) {
+-      return semanticFailure("reference_not_allowlisted", "evidenceRefs");
++    if (!["insufficient_evidence", "unresolved_ambiguity", "no_responsible_proposal"].includes(record.reason as string)) {
++      return semanticFailure("invalid_enum", "reason");
+     }
+-    return { ok: true, value: abstain as unknown as AbstainSemanticOutput };
++    if (!nonEmptyString(record.explanation)) return semanticFailure("wrong_type", "explanation");
++    if (!refArray(record.evidenceRefs, allowlistedReferences)) return semanticFailure("reference_not_allowlisted", "evidenceRefs");
++    return { ok: true, value: record as unknown as AbstainSemanticOutput };
+   }
+-  return semanticFailure(record.kind === undefined ? "required_field_missing" : "wrong_kind");
++  return semanticFailure(record.kind === undefined ? "required_field_missing" : "wrong_kind", "kind");
+ }
+diff --git a/apps/agent-service/src/core/cognitive-v021/thought/reference-allowlist.test.ts b/apps/agent-service/src/core/cognitive-v021/thought/reference-allowlist.test.ts
+index 0877d3876b3dedccb96dc5c25b8258d4c7ed10d3..9fc2805a4af6172f62b68dac318678687c1569f7 100644
+--- a/apps/agent-service/src/core/cognitive-v021/thought/reference-allowlist.test.ts
++++ b/apps/agent-service/src/core/cognitive-v021/thought/reference-allowlist.test.ts
+@@ -1,5 +1,10 @@
+ import { describe, expect, it } from "vitest";
+-import { buildReferenceAllowlist, registerLocalAlias, resolveReference } from "./reference-allowlist.js";
++import {
++  buildReferenceAllowlist,
++  hasReferenceTarget,
++  registerLocalAlias,
++  resolveReference,
++} from "./reference-allowlist.js";
+ 
+ describe("Thought reference allowlist", () => {
+   it("fingerprints supplied references and rejects stale references", () => {
+@@ -15,4 +20,17 @@ describe("Thought reference allowlist", () => {
+     expect(() => registerLocalAlias(allowlist, "new_concern")).toThrow("alias_duplicate");
+     expect(() => registerLocalAlias(allowlist, "turn-1")).toThrow("alias_collides_with_existing_ref");
+   });
++
++  it("rejects only a positively known target mismatch and preserves opaque refs", () => {
++    const allowlist = buildReferenceAllowlist(
++      ["concern-1", "observation-1", "opaque-1"],
++      new Map([
++        ["concern-1", ["concern"]],
++        ["observation-1", ["observation"]],
++      ]),
++    );
++    expect(hasReferenceTarget(allowlist, "concern-1", "concern")).toBe(true);
++    expect(hasReferenceTarget(allowlist, "observation-1", "concern")).toBe(false);
++    expect(hasReferenceTarget(allowlist, "opaque-1", "concern")).toBe(true);
++  });
+ });
+diff --git a/apps/agent-service/src/core/cognitive-v021/thought/reference-allowlist.ts b/apps/agent-service/src/core/cognitive-v021/thought/reference-allowlist.ts
+index cb78577c144458efb4b4b4a52fd30772a63edfa0..b6b796be8b37ce7fac772fda5b4891987963993d 100644
+--- a/apps/agent-service/src/core/cognitive-v021/thought/reference-allowlist.ts
++++ b/apps/agent-service/src/core/cognitive-v021/thought/reference-allowlist.ts
+@@ -1,21 +1,58 @@
+ import { sha256 } from "../../model-fabric/hash.js";
+ import type { ExistingRef, LocalAlias, SemanticRef } from "../types.js";
+ 
++/**
++ * Target domains whose identities are present in the current Thought input.
++ * Other opaque references remain allowlist-only because this input does not
++ * carry enough state to prove their target domain.
++ */
++export type ThoughtReferenceTarget = "working_context" | "concern" | "observation";
++
++export type ThoughtReferenceTargetMap = ReadonlyMap<
++  string,
++  readonly ThoughtReferenceTarget[]
++>;
++
+ export type ThoughtReferenceAllowlist = {
+   readonly existing: ReadonlySet<string>;
+   readonly fingerprint: string;
++  readonly targetDomains: ReadonlyMap<string, ReadonlySet<ThoughtReferenceTarget>>;
+   readonly aliases: Set<string>;
+ };
+ 
+-export function buildReferenceAllowlist(references: readonly string[]): ThoughtReferenceAllowlist {
++export function buildReferenceAllowlist(
++  references: readonly string[],
++  targetDomains: ThoughtReferenceTargetMap = new Map(),
++): ThoughtReferenceAllowlist {
+   const existing = new Set(references.filter((ref) => typeof ref === "string" && ref.length > 0));
++  const knownTargetDomains = new Map<string, ReadonlySet<ThoughtReferenceTarget>>();
++  for (const [ref, targets] of targetDomains) {
++    if (!existing.has(ref)) continue;
++    const known = new Set<ThoughtReferenceTarget>(targets);
++    if (known.size > 0) knownTargetDomains.set(ref, known);
++  }
+   return {
+     existing,
+     fingerprint: `sha256:${sha256([...existing].sort())}`,
++    targetDomains: knownTargetDomains,
+     aliases: new Set(),
+   };
+ }
+ 
++/**
++ * Return false only when the allowlist has positively identified a different
++ * target domain. A missing domain entry means the reference remains opaque and
++ * is therefore accepted by the existing allowlist law.
++ */
++export function hasReferenceTarget(
++  allowlist: ThoughtReferenceAllowlist,
++  ref: string,
++  expectedTarget: ThoughtReferenceTarget,
++): boolean {
++  const known = allowlist.targetDomains.get(ref);
++  return known === undefined || known.has(expectedTarget);
++}
++
+ export function registerLocalAlias(
+   allowlist: ThoughtReferenceAllowlist,
+   alias: string,
+diff --git a/apps/agent-service/src/core/cognitive-v021/thought/retry-admission.test.ts b/apps/agent-service/src/core/cognitive-v021/thought/retry-admission.test.ts
+index 4f6f18ac352d217ddc78edd8017966875bd0e89e..a0f930c9ed22914b970f4c5d0db61a147b321eab 100644
+--- a/apps/agent-service/src/core/cognitive-v021/thought/retry-admission.test.ts
++++ b/apps/agent-service/src/core/cognitive-v021/thought/retry-admission.test.ts
+@@ -249,7 +249,7 @@ describe("v0.2.1 structural Thought retry admission", () => {
+     expect(captured[1]?.options.responseFormat).toBe("json_schema");
+     expect(captured[1]?.messages[1]?.content).toBe(captured[0]?.messages[1]?.content);
+     expect(captured[1]?.messages[0]?.content).toContain("invalid_json");
+-    expect(captured[1]?.messages[0]?.content).toContain("schemaId=ashley.thought.semantic.v1.schema");
++    expect(captured[1]?.messages[0]?.content).toContain("schemaId=ashley.thought.semantic.v2.schema");
+     expect(captureAdmission).not.toBeNull();
+ 
+     const retryInput = Number(captureAdmission?.estimated_input_tokens);
+diff --git a/apps/agent-service/src/core/cognitive-v021/thought/run.test.ts b/apps/agent-service/src/core/cognitive-v021/thought/run.test.ts
+index 24aef7c748efd744921f92207ffa991fd13a9318..64510f530d814f0790cbfb8239dbcdfbf78bbd5f 100644
+--- a/apps/agent-service/src/core/cognitive-v021/thought/run.test.ts
++++ b/apps/agent-service/src/core/cognitive-v021/thought/run.test.ts
+@@ -81,7 +81,7 @@ describe("v0.2.1 Thought run", () => {
+         expect(options.projectionIdentity?.dispatchMessagesHash).toBe(computeDispatchMessagesHash(messages));
+         expect(options.thoughtInvocationContext?.structuralAttemptOrdinal).toBe(0);
+         expect(options.temperature).toBe(1.0);
+-        expect(options.structuredOutput?.contractId).toBe("ashley.thought.semantic.v1");
++        expect(options.structuredOutput?.contractId).toBe("ashley.thought.semantic.v2");
+         const operationalSchema = (options.structuredOutput?.schema as any)?.oneOf?.find(
+           (branch: any) => branch.properties?.kind?.const === "settlement",
+         )?.properties?.commitments?.properties?.operational;
+@@ -126,7 +126,7 @@ describe("v0.2.1 Thought run", () => {
+         expect(result.published).toBe(outcome === "corrected");
+         if (outcome === "corrected") {
+           expect(validateThoughtSettlementDraft(steps[1].settlement, active).ok).toBe(true);
+-          expect(steps[1].settlement.commitments.operational).toEqual([]);
++          expect(steps[1].settlement.commitments.operational).toBeUndefined();
+           expect(steps[1].settlement.speech.surfaceDraft).toBe("model-authored correction");
+           expect(sidecar.prepare("SELECT COUNT(*) AS n FROM system_notice_outbox").get()).toMatchObject({ n: 0 });
+         } else {
+@@ -368,6 +368,300 @@ describe("v0.2.1 Thought run", () => {
+     attentionDb.close();
+   });
+ 
++  it("materializes and publishes a sparse settlement without manufacturing optional domains", async () => {
++    const sidecar = openTestSidecar();
++    const attentionDb = openTestSidecar();
++    const cycle = admitTestCycle(sidecar, {
++      cycleId: "cycle-sparse-materialization",
++      conversationId: "thread-sparse-materialization",
++      triggerKind: "owner_message",
++      triggerRef: "owner-sparse-materialization",
++      occupantId: "doc",
++      authorityEpoch: 1,
++      nowMs: 1,
++    });
++    const evidence = appendOwnerUtterance(sidecar, {
++      conversationId: cycle.conversationId,
++      text: "goodnight",
++      discordMessageIds: ["sparse-materialization-message"],
++      nowMs: 2,
++    });
++    const event = appendInboxEvent(sidecar, {
++      wakeId: cycle.wakeId,
++      conversationId: cycle.conversationId,
++      kind: "owner_message",
++      payload: { cycleId: cycle.cycleId, evidenceRowId: evidence.rowId, ownerMessage: evidence.text },
++      createdAtMs: 2,
++    });
++
++    try {
++      const result = await runCognitiveCycle(sidecar, attentionDb, event, deps({
++        attentionDb,
++        completeChat: vi.fn(async () => ({
++          text: JSON.stringify({
++            kind: "settlement",
++            speech: { mode: "draft", surfaceDraft: "Goodnight. Sleep well." },
++          }),
++          model: "fake",
++          modelAlias: "thought",
++          resolvedModelId: null,
++        })),
++      }));
++      expect(result.published).toBe(true);
++
++      const row = sidecar.prepare("SELECT payload_json FROM settlements WHERE cycle_id = ?").get(cycle.cycleId) as { payload_json: string };
++      const payload = JSON.parse(row.payload_json) as Record<string, any>;
++      expect(payload.speech).toMatchObject({ mode: "draft", surfaceDraft: "Goodnight. Sleep well." });
++      expect(payload.speech).not.toHaveProperty("mustSay");
++      expect(payload.speech).not.toHaveProperty("mustNot");
++      for (const field of [
++        "interpretation", "commitments", "workingContextDelta", "concernDeltas", "occupancyDelta",
++        "futureTriggers", "subscriptions", "durableNominations",
++      ]) {
++        expect(payload).not.toHaveProperty(field);
++      }
++      expect(payload.operations).toEqual({
++        observationsConsumed: [],
++        effectsCompleted: [],
++        intentsStillInFlight: [],
++      });
++      expect(sidecar.prepare("SELECT COUNT(*) AS count FROM speech_outbox").get()).toMatchObject({ count: 1 });
++    } finally {
++      sidecar.close();
++      attentionDb.close();
++    }
++  });
++
++  it("publishes intentional silence together with an authored internal delta", async () => {
++    const sidecar = openTestSidecar();
++    const attentionDb = openTestSidecar();
++    const cycle = admitTestCycle(sidecar, {
++      cycleId: "cycle-silent-delta",
++      conversationId: "thread-silent-delta",
++      triggerKind: "owner_message",
++      triggerRef: "owner-silent-delta",
++      occupantId: "doc",
++      authorityEpoch: 1,
++      nowMs: 1,
++    });
++    const evidence = appendOwnerUtterance(sidecar, {
++      conversationId: cycle.conversationId,
++      text: "Remember that preference for later.",
++      discordMessageIds: ["silent-delta-message"],
++      nowMs: 2,
++    });
++    const event = appendInboxEvent(sidecar, {
++      wakeId: cycle.wakeId,
++      conversationId: cycle.conversationId,
++      kind: "owner_message",
++      payload: { cycleId: cycle.cycleId, evidenceRowId: evidence.rowId, ownerMessage: evidence.text },
++      createdAtMs: 2,
++    });
++
++    try {
++      const result = await runCognitiveCycle(sidecar, attentionDb, event, deps({
++        attentionDb,
++        completeChat: vi.fn(async () => ({
++          text: JSON.stringify({
++            kind: "settlement",
++            speech: { mode: "none" },
++            workingContextDeltas: [{
++              op: "upsert",
++              item: {
++                identity: { kind: "local", alias: "remember-later" },
++                type: "owner_teaching",
++                text: "Owner prefers this preference to remain available later.",
++                concernRef: null,
++                sourceTurnRefs: [evidence.rowId],
++                status: "active",
++                supersedesRef: null,
++              },
++            }],
++          }),
++          model: "fake",
++          modelAlias: "thought",
++          resolvedModelId: null,
++        })),
++      }));
++      expect(result).toMatchObject({ published: true, outboxId: null, acceptedSettlements: 1 });
++      expect(sidecar.prepare("SELECT COUNT(*) AS count FROM speech_outbox").get()).toMatchObject({ count: 0 });
++      const workingContext = sidecar.prepare("SELECT payload_json, superseded FROM working_context_items").get() as {
++        payload_json: string;
++        superseded: number;
++      };
++      expect(JSON.parse(workingContext.payload_json)).toMatchObject({
++        text: "Owner prefers this preference to remain available later.",
++        status: "active",
++      });
++      expect(workingContext.superseded).toBe(0);
++      expect(sidecar.prepare("SELECT state FROM cycle_records WHERE cycle_id = ?").get(cycle.cycleId)).toMatchObject({ state: "silent" });
++    } finally {
++      sidecar.close();
++      attentionDb.close();
++    }
++  });
++
++  it.each([
++    {
++      label: "dangling local references",
++      diagnosticCode: "dangling_local_reference",
++      diagnosticField: "workingContextDeltas[0].item.concernRef",
++      settlement: (observationId: string) => makeSemanticSettlement({
++        speech: { mode: "none" },
++        workingContextDeltas: [{
++          op: "upsert",
++          item: {
++            identity: { kind: "local", alias: "working-item" },
++            type: "topic",
++            text: "A topic with a missing concern alias.",
++            concernRef: { kind: "local", alias: "missing-concern" },
++            sourceTurnRefs: [],
++            status: "active",
++            supersedesRef: null,
++          },
++        }],
++      }),
++    },
++    {
++      label: "duplicate local aliases",
++      diagnosticCode: "alias_duplicate",
++      diagnosticField: "workingContextDeltas[1].item.identity",
++      settlement: (observationId: string) => makeSemanticSettlement({
++        speech: { mode: "none" },
++        workingContextDeltas: [
++          {
++            op: "upsert",
++            item: {
++              identity: { kind: "local", alias: "same-item" },
++              type: "topic",
++              text: "The first item.",
++              concernRef: null,
++              sourceTurnRefs: [],
++              status: "active",
++              supersedesRef: null,
++            },
++          },
++          {
++            op: "upsert",
++            item: {
++              identity: { kind: "local", alias: "same-item" },
++              type: "topic",
++              text: "The second item.",
++              concernRef: null,
++              sourceTurnRefs: [],
++              status: "active",
++              supersedesRef: null,
++            },
++          },
++        ],
++      }),
++    },
++    {
++      label: "existing references with the wrong target domain",
++      diagnosticCode: "reference_target_type_mismatch",
++      diagnosticField: "workingContextDeltas[0].item.concernRef",
++      settlement: (observationId: string) => makeSemanticSettlement({
++        speech: { mode: "none" },
++        workingContextDeltas: [{
++          op: "upsert",
++          item: {
++            identity: { kind: "local", alias: "working-item" },
++            type: "topic",
++            text: "A topic pointing at an observation as its concern.",
++            concernRef: { kind: "existing", ref: observationId },
++            sourceTurnRefs: [],
++            status: "active",
++            supersedesRef: null,
++          },
++        }],
++      }),
++    },
++  ])("routes $label through the bounded malformed Thought failure path", async ({
++    label,
++    diagnosticCode,
++    diagnosticField,
++    settlement,
++  }) => {
++    const sidecar = openTestSidecar();
++    const attentionDb = openTestSidecar();
++    const suffix = label.replace(/[^a-z0-9]+/gi, "-").toLowerCase();
++    const cycle = admitTestCycle(sidecar, {
++      cycleId: `cycle-materialization-${suffix}`,
++      conversationId: `thread-materialization-${suffix}`,
++      triggerKind: "owner_message",
++      triggerRef: `owner-materialization-${suffix}`,
++      occupantId: "doc",
++      authorityEpoch: 1,
++      nowMs: 1,
++    });
++    const evidence = appendOwnerUtterance(sidecar, {
++      conversationId: cycle.conversationId,
++      text: "Please handle this semantic settlement.",
++      discordMessageIds: [`materialization-${suffix}-message`],
++      nowMs: 2,
++    });
++    const observationId = `observation-materialization-${suffix}`;
++    const event = appendInboxEvent(sidecar, {
++      wakeId: cycle.wakeId,
++      conversationId: cycle.conversationId,
++      kind: "owner_message",
++      payload: {
++        cycleId: cycle.cycleId,
++        evidenceRowId: evidence.rowId,
++        ownerMessage: evidence.text,
++        observations: [{
++          observationId,
++          provenance: "test-materialization",
++          modality: "text",
++          dataClassification: "ordinary",
++          payload: { text: "observation" },
++          derived: false,
++          replaySafe: true,
++          secretOmitted: false,
++        }],
++      },
++      createdAtMs: 2,
++    });
++
++    try {
++      const completeChat = vi.fn(async () => ({
++        text: JSON.stringify(settlement(observationId)),
++        model: "fake",
++        modelAlias: "thought",
++        resolvedModelId: null,
++      }));
++      const result = await runCognitiveCycle(sidecar, attentionDb, event, deps({
++        attentionDb,
++        completeChat,
++      }));
++      const steps = sidecar.prepare(
++        "SELECT payload_json FROM thought_steps ORDER BY pass",
++      ).all().map((row) => JSON.parse(String((row as { payload_json: string }).payload_json)));
++
++      expect(result).toMatchObject({
++        published: false,
++        infrastructureNotice: "[system] Thought did not complete. Please send the message again.",
++        thoughtModelAttempts: 3,
++        acceptedThoughtPasses: 0,
++      });
++      expect(completeChat).toHaveBeenCalledTimes(3);
++      expect(steps).toHaveLength(3);
++      expect(steps.at(-1)).toMatchObject({
++        kind: "failure",
++        reason: "malformed",
++        diagnosticCode,
++        diagnosticField,
++      });
++      expect(steps).not.toContainEqual(expect.objectContaining({ reason: "unavailable" }));
++      expect(sidecar.prepare("SELECT COUNT(*) AS count FROM settlements").get()).toMatchObject({ count: 0 });
++      expect(sidecar.prepare("SELECT notice_key FROM system_notice_outbox").get()?.notice_key)
++        .toContain(":malformed");
++    } finally {
++      sidecar.close();
++      attentionDb.close();
++    }
++  });
++
+   it("fails closed on a predecessor Thought output envelope and does not publish speech", async () => {
+     const sidecar = openTestSidecar();
+     const attentionDb = openTestSidecar();
+@@ -519,9 +813,9 @@ describe("v0.2.1 Thought run", () => {
+     expect(deadlines).toEqual([61_000, 61_000]);
+     expect(maxTokens).toEqual([undefined, 8_192]);
+     expect(temperatures).toEqual([1.0, 1.0]);
+-    expect(structuredContractIds).toEqual(["ashley.thought.semantic.v1", "ashley.thought.semantic.v1"]);
++    expect(structuredContractIds).toEqual(["ashley.thought.semantic.v2", "ashley.thought.semantic.v2"]);
+     expect(userInputs[1]).toBe(userInputs[0]);
+-    expect(systemMessages[0]).toContain("schemaId=ashley.thought.semantic.v1.schema");
++    expect(systemMessages[0]).toContain("schemaId=ashley.thought.semantic.v2.schema");
+     expect(systemMessages[0]).toContain("permitted kinds");
+     expect(systemMessages[0]).toContain("Semantic selection rules");
+     expect(systemMessages[0]).toContain("settlement only when the current supplied evidence and context are sufficient");
+diff --git a/apps/agent-service/src/core/cognitive-v021/thought/run.ts b/apps/agent-service/src/core/cognitive-v021/thought/run.ts
+index fea3f4c9a6ddc7cc44d4f9e5e99b6a50829d20d0..878c4e77e0c07c8c7eb7989db6de3e6fd7be63d6 100644
+--- a/apps/agent-service/src/core/cognitive-v021/thought/run.ts
++++ b/apps/agent-service/src/core/cognitive-v021/thought/run.ts
+@@ -57,7 +57,14 @@ import { registerActiveThought } from "../cycle/active.js";
+ import { adaptPerception } from "../perception/adapter.js";
+ import { buildThoughtInput } from "./input.js";
+ import { parseThoughtSemanticOutput, THOUGHT_SEMANTIC_PARSER_ID } from "./parse.js";
+-import { buildReferenceAllowlist } from "./reference-allowlist.js";
++import {
++  buildReferenceAllowlist,
++  hasReferenceTarget,
++  registerLocalAlias,
++  type ThoughtReferenceAllowlist,
++  type ThoughtReferenceTarget,
++  type ThoughtReferenceTargetMap,
++} from "./reference-allowlist.js";
+ import { bindEffectIntent, bindObservationIntent } from "./operation-binding.js";
+ import {
+   thoughtOutputCompatibilityInstruction,
+@@ -217,18 +224,69 @@ function thoughtMessages(
+   ];
+ }
+ 
++type LocalAliasTarget = "working_context" | "concern";
++type LocalAliasBinding = { id: string; target: LocalAliasTarget };
++
++type ThoughtMaterializationFailureCode = Extract<
++  ThoughtParserFailureCode,
++  "alias_duplicate" | "dangling_local_reference" | "reference_target_type_mismatch"
++>;
++
++class ThoughtMaterializationError extends Error {
++  readonly code: ThoughtMaterializationFailureCode;
++  readonly field: string;
++
++  constructor(code: ThoughtMaterializationFailureCode, field: string) {
++    super(code);
++    this.name = "ThoughtMaterializationError";
++    this.code = code;
++    this.field = field;
++  }
++}
++
++function materializationFailure(
++  code: ThoughtMaterializationFailureCode,
++  field: string,
++): never {
++  throw new ThoughtMaterializationError(code, field);
++}
++
++function materializeExistingReference(
++  value: string,
++  referenceAllowlist: ThoughtReferenceAllowlist,
++  expectedTarget: ThoughtReferenceTarget,
++  field: string,
++): string {
++  if (!hasReferenceTarget(referenceAllowlist, value, expectedTarget)) {
++    return materializationFailure("reference_target_type_mismatch", field);
++  }
++  return value;
++}
++
+ function semanticReferenceValue(
+   value: SemanticRef | string | null,
+-  localAliases: Map<string, string>,
++  localAliases: Map<string, LocalAliasBinding>,
++  referenceAllowlist: ThoughtReferenceAllowlist,
++  expectedTarget?: ThoughtReferenceTarget,
++  field = "reference",
+ ): string | null {
+   if (!value) return null;
+-  if (typeof value === "string") return value;
+-  if (value.kind === "existing") return value.ref;
+-  const existing = localAliases.get(value.alias);
+-  if (existing) return existing;
+-  const allocated = randomUUID();
+-  localAliases.set(value.alias, allocated);
+-  return allocated;
++  if (typeof value === "string") {
++    return expectedTarget
++      ? materializeExistingReference(value, referenceAllowlist, expectedTarget, field)
++      : value;
++  }
++  if (value.kind === "existing") {
++    return expectedTarget
++      ? materializeExistingReference(value.ref, referenceAllowlist, expectedTarget, field)
++      : value.ref;
++  }
++  const binding = localAliases.get(value.alias);
++  if (!binding) return materializationFailure("dangling_local_reference", field);
++  if (expectedTarget && binding.target !== expectedTarget) {
++    return materializationFailure("reference_target_type_mismatch", field);
++  }
++  return binding.id;
+ }
+ 
+ export function materializeEffectsCompleted(
+@@ -261,11 +319,43 @@ function materializeSemanticSettlement(
+ ): ThoughtSettlementDraft {
+   // Local semantic aliases are resolved to ordinary durable IDs in this
+   // kernel projection. The aliases themselves never become a lookup namespace.
+-  const localAliases = new Map<string, string>();
++  const localAliases = new Map<string, LocalAliasBinding>();
+   const conversationId = input.rawConversation[0]?.conversationId
+     ?? input.occupancy[0]?.conversationId
+     ?? input.cycleId;
+-  return {
++  // Register declaration identities before resolving cross-domain references.
++  // The parser rejects aliases colliding with existing references. This
++  // materializer pass owns duplicate registration and Host-minted IDs.
++  const referenceAllowlist = buildReferenceAllowlist(
++    semanticReferencesForInput(input),
++    semanticReferenceTargetsForInput(input),
++  );
++  const register = (alias: string, target: LocalAliasTarget, field: string): void => {
++    try {
++      registerLocalAlias(referenceAllowlist, alias);
++    } catch (error) {
++      if (error instanceof Error && error.message === "alias_duplicate") {
++        return materializationFailure("alias_duplicate", field);
++      }
++      throw error;
++    }
++    localAliases.set(alias, { id: randomUUID(), target });
++  };
++  for (const [index, delta] of (semantic.workingContextDeltas ?? []).entries()) {
++    if (delta.op === "upsert" && delta.item.identity.kind === "local") {
++      register(delta.item.identity.alias, "working_context", `workingContextDeltas[${index}].item.identity`);
++    }
++    if (delta.op === "supersede" && delta.replacement.identity.kind === "local") {
++      register(delta.replacement.identity.alias, "working_context", `workingContextDeltas[${index}].replacement.identity`);
++    }
++  }
++  for (const [index, delta] of (semantic.concernDeltas ?? []).entries()) {
++    if (delta.op === "upsert" && delta.record.identity.kind === "local") {
++      register(delta.record.identity.alias, "concern", `concernDeltas[${index}].record.identity`);
++    }
++  }
++
++  const result: Record<string, unknown> = {
+     schemaVersion: 1,
+     cycleId: input.cycleId,
+     generation: input.generation,
+@@ -273,63 +363,164 @@ function materializeSemanticSettlement(
+     occupantId: input.occupantId,
+     architectureEpoch: "v0.2.1",
+     triggerRef: input.trigger.ref,
+-    interpretation: {
+-      discourseActs: [...semantic.interpretation.discourseActs],
+-      referentBindings: semantic.interpretation.referentBindings.map((binding) => ({
++    speech: {
++      mode: semantic.speech.mode,
++      surfaceDraft: semantic.speech.mode === "draft" ? semantic.speech.surfaceDraft : null,
++      ...(semantic.speech.mode === "draft" && semantic.speech.mustSay ? { mustSay: [...semantic.speech.mustSay] } : {}),
++      ...(semantic.speech.mode === "draft" && semantic.speech.mustNotSay ? { mustNot: [...semantic.speech.mustNotSay] } : {}),
++      ...(semantic.speech.mode === "draft" && semantic.speech.presentationDirectives
++        ? { presentationDirectives: [...semantic.speech.presentationDirectives] }
++        : {}),
++    },
++    // These fields are internal mechanical bookkeeping. They remain present
++    // even when the semantic evidenceUse domain is absent.
++    operations: {
++      observationsConsumed: semantic.evidenceUse?.observationRefsUsed?.map((ref, index) =>
++        materializeExistingReference(
++          ref,
++          referenceAllowlist,
++          "observation",
++          `evidenceUse.observationRefsUsed[${index}]`,
++        ),
++      ) ?? [],
++      effectsCompleted: materializeEffectsCompleted(input.inFlight, receiptsByEffectId),
++      intentsStillInFlight: [...(semantic.evidenceUse?.openIntentRefs ?? [])],
++    },
++    authority: { objectionsApplied: [], revisionCount: 0 },
++  };
++
++  if (semantic.interpretation) {
++    const interpretation = semantic.interpretation;
++    result.interpretation = {
++      ...(interpretation.discourseActs ? { discourseActs: [...interpretation.discourseActs] } : {}),
++      ...(interpretation.referentBindings ? { referentBindings: interpretation.referentBindings.map((binding, index) => ({
+         span: binding.span,
+-        ...(binding.concernRef ? { concernId: semanticReferenceValue(binding.concernRef, localAliases) } : {}),
+-        ...(binding.entityRef ? { entityKey: semanticReferenceValue(binding.entityRef, localAliases) } : {}),
++        ...(binding.concernRef ? {
++          concernId: semanticReferenceValue(
++            binding.concernRef,
++            localAliases,
++            referenceAllowlist,
++            "concern",
++            `interpretation.referentBindings[${index}].concernRef`,
++          ),
++        } : {}),
++        ...(binding.entityRef ? {
++          entityKey: semanticReferenceValue(
++            binding.entityRef,
++            localAliases,
++            referenceAllowlist,
++            undefined,
++            `interpretation.referentBindings[${index}].entityRef`,
++          ),
++        } : {}),
+         sourceTurnIds: [...binding.sourceTurnRefs],
+-      })),
+-      corrections: semantic.interpretation.corrections.map((correction) => ({
++      })) } : {}),
++      ...(interpretation.corrections ? { corrections: interpretation.corrections.map((correction, index) => ({
+         correctedTurnIds: [...correction.correctedTurnRefs],
+         fromSpan: correction.fromSpan,
+         toSpan: correction.toSpan,
+-        ...(correction.concernRef ? { concernId: semanticReferenceValue(correction.concernRef, localAliases) } : {}),
+-      })),
+-      unresolvedAmbiguities: [...semantic.interpretation.unresolvedAmbiguities],
+-      topics: [...semantic.interpretation.topics],
+-    },
+-    commitments: {
+-      epistemic: semantic.commitments.epistemic.map((item) => ({ ...item })),
+-      operational: (semantic.commitments.operational ?? []).map((item) => ({
++        ...(correction.concernRef ? {
++          concernId: semanticReferenceValue(
++            correction.concernRef,
++            localAliases,
++            referenceAllowlist,
++            "concern",
++            `interpretation.corrections[${index}].concernRef`,
++          ),
++        } : {}),
++      })) } : {}),
++      ...(interpretation.unresolvedAmbiguities ? { unresolvedAmbiguities: [...interpretation.unresolvedAmbiguities] } : {}),
++      ...(interpretation.topics ? { topics: [...interpretation.topics] } : {}),
++    };
++  }
++
++  if (semantic.commitments) {
++    const commitments = semantic.commitments;
++    result.commitments = {
++      ...(commitments.epistemic ? { epistemic: commitments.epistemic.map((item) => ({ ...item })) } : {}),
++      ...(commitments.operational ? { operational: commitments.operational.map((item) => ({
+         effectRef: String(item.effectRef),
+         claimedState: item.claimedState,
+-      })),
+-      conversational: [...semantic.commitments.conversational],
+-      stance: { ...semantic.commitments.stance },
+-    },
+-    speech: {
+-      mode: semantic.speech.mode,
+-      mustSay: [...semantic.speech.mustSay],
+-      mustNot: [...semantic.speech.mustNotSay],
+-      surfaceDraft: semantic.speech.mode === "draft" ? semantic.speech.surfaceDraft : null,
+-      acceptableRealizations: [...semantic.speech.acceptableRealizations],
+-      presentationDirectives: [...semantic.speech.presentationDirectives],
+-    },
+-    workingContextDelta: semantic.workingContextDeltas.map((delta) => {
+-      if (delta.op === "abandon") return { op: "abandon", id: delta.target };
++      })) } : {}),
++      ...(commitments.conversational ? { conversational: [...commitments.conversational] } : {}),
++      ...(commitments.stance ? { stance: { ...commitments.stance } } : {}),
++    };
++  }
++
++  if (semantic.workingContextDeltas) result.workingContextDelta = semantic.workingContextDeltas.map((delta, index) => {
++      if (delta.op === "abandon") {
++        return {
++          op: "abandon",
++          id: materializeExistingReference(
++            delta.target,
++            referenceAllowlist,
++            "working_context",
++            `workingContextDeltas[${index}].target`,
++          ),
++        };
++      }
+       const item = delta.op === "upsert" ? delta.item : delta.replacement;
+       const legacyItem = {
+-        id: semanticReferenceValue(item.identity, localAliases) ?? randomUUID(),
++        id: semanticReferenceValue(
++          item.identity,
++          localAliases,
++          referenceAllowlist,
++          "working_context",
++          `workingContextDeltas[${index}].${delta.op === "upsert" ? "item" : "replacement"}.identity`,
++        ) ?? randomUUID(),
+         conversationId,
+         type: item.type,
+         text: item.text,
+-        concernId: semanticReferenceValue(item.concernRef, localAliases),
++        concernId: semanticReferenceValue(
++          item.concernRef,
++          localAliases,
++          referenceAllowlist,
++          "concern",
++          `workingContextDeltas[${index}].${delta.op === "upsert" ? "item" : "replacement"}.concernRef`,
++        ),
+         sourceTurnIds: [...item.sourceTurnRefs],
+         status: item.status,
+-        supersedesId: semanticReferenceValue(item.supersedesRef, localAliases),
++        supersedesId: semanticReferenceValue(
++          item.supersedesRef,
++          localAliases,
++          referenceAllowlist,
++          "working_context",
++          `workingContextDeltas[${index}].${delta.op === "upsert" ? "item" : "replacement"}.supersedesRef`,
++        ),
+       };
+       return delta.op === "upsert"
+         ? { op: "upsert", item: legacyItem }
+-        : { op: "supersede", id: delta.target, replacement: legacyItem };
+-    }),
+-    concernDeltas: semantic.concernDeltas.map((delta) => delta.op === "resolve"
+-      ? { op: "resolve", concernId: delta.target }
++        : {
++            op: "supersede",
++            id: materializeExistingReference(
++              delta.target,
++              referenceAllowlist,
++              "working_context",
++              `workingContextDeltas[${index}].target`,
++            ),
++            replacement: legacyItem,
++          };
++    });
++  if (semantic.concernDeltas) result.concernDeltas = semantic.concernDeltas.map((delta, index) => delta.op === "resolve"
++      ? {
++          op: "resolve",
++          concernId: materializeExistingReference(
++            delta.target,
++            referenceAllowlist,
++            "concern",
++            `concernDeltas[${index}].target`,
++          ),
++        }
+       : {
+           op: "upsert",
+           record: {
+-          concernId: semanticReferenceValue(delta.record.identity, localAliases) ?? randomUUID(),
++          concernId: semanticReferenceValue(
++            delta.record.identity,
++            localAliases,
++            referenceAllowlist,
++            "concern",
++            `concernDeltas[${index}].record.identity`,
++          ) ?? randomUUID(),
+             conversationId,
+             statement: delta.record.statement,
+             sourceTurnIds: [...delta.record.sourceTurnRefs],
+@@ -337,46 +528,64 @@ function materializeSemanticSettlement(
+             assertionKey: null,
+             status: delta.record.status,
+           },
+-        }),
+-    occupancyDelta: semantic.occupancyDeltas.map((delta) => ({
++        });
++  if (semantic.occupancyDeltas) result.occupancyDelta = semantic.occupancyDeltas.map((delta, index) => ({
+       op: "set",
+       occupancy: {
+         conversationId,
+-        concernId: semanticReferenceValue(delta.concernRef, localAliases) ?? randomUUID(),
++        concernId: semanticReferenceValue(
++          delta.concernRef,
++          localAliases,
++          referenceAllowlist,
++          "concern",
++          `occupancyDeltas[${index}].concernRef`,
++        ) ?? randomUUID(),
+         status: delta.status,
+         priority: delta.priority,
+         updatedGeneration: input.generation,
+       },
+-    })),
+-    futureTriggers: semantic.futureTriggerDeltas.map((delta) => delta.op === "cancel"
++    }));
++  if (semantic.futureTriggerDeltas) result.futureTriggers = semantic.futureTriggerDeltas.map((delta, index) => delta.op === "cancel"
+       ? { op: "cancel", triggerId: delta.target }
+       : {
+           op: "create",
+           trigger: {
+             triggerId: randomUUID(),
+             conversationId,
+-            concernId: semanticReferenceValue(delta.concernRef, localAliases) ?? randomUUID(),
++            concernId: semanticReferenceValue(
++              delta.concernRef,
++              localAliases,
++              referenceAllowlist,
++              "concern",
++              `futureTriggerDeltas[${index}].concernRef`,
++            ) ?? randomUUID(),
+             snapshotHash: "semantic-proposal",
+             dueAtMs: delta.dueAtMs,
+             payload: { purpose: delta.purpose, ...delta.payload },
+           },
+-        }),
+-    subscriptions: semantic.subscriptionDeltas.map((delta) => delta.op === "cancel"
++        });
++  if (semantic.subscriptionDeltas) result.subscriptions = semantic.subscriptionDeltas.map((delta, index) => delta.op === "cancel"
+       ? { op: "cancel", subscriptionId: delta.target }
+       : {
+           op: "create",
+           subscription: {
+             subscriptionId: randomUUID(),
+             conversationId,
+-            concernId: semanticReferenceValue(delta.subscription.concernRef, localAliases),
++            concernId: semanticReferenceValue(
++              delta.subscription.concernRef,
++              localAliases,
++              referenceAllowlist,
++              "concern",
++              `subscriptionDeltas[${index}].subscription.concernRef`,
++            ),
+             source: delta.subscription.source,
+             scope: delta.subscription.scope,
+             topicKeys: [...delta.subscription.topicKeys],
+             match: delta.subscription.match,
+             expiresAtMs: delta.subscription.expiresAtMs,
+           },
+-        }),
+-    durableNominations: semantic.durableNominations.map((nomination) => ({
++        });
++  if (semantic.durableNominations) result.durableNominations = semantic.durableNominations.map((nomination, index) => ({
+       nominationId: randomUUID(),
+       cycleId: input.cycleId,
+       generation: input.generation,
+@@ -386,18 +595,16 @@ function materializeSemanticSettlement(
+       dimensions: { ...nomination.dimensions },
+       dataClassification: nomination.dataClassification,
+       supersedesAssertionKey: nomination.supersedesRef,
+-      concernId: semanticReferenceValue(nomination.concernRef, localAliases),
++      concernId: semanticReferenceValue(
++        nomination.concernRef,
++        localAliases,
++        referenceAllowlist,
++        "concern",
++        `durableNominations[${index}].concernRef`,
++      ),
+       sourceRefs: [...nomination.sourceRefs],
+-    })),
+-    operations: {
+-      observationsConsumed: [...semantic.evidenceUse.observationRefsUsed],
+-      // Effect completion is receipt/Authority truth. The model cannot emit a
+-      // completion list or turn an in-flight effect into a success claim.
+-      effectsCompleted: materializeEffectsCompleted(input.inFlight, receiptsByEffectId),
+-      intentsStillInFlight: [...semantic.evidenceUse.openIntentRefs],
+-    },
+-    authority: { objectionsApplied: [], revisionCount: 0 },
+-  } as ThoughtSettlementDraft;
++    }));
++  return result as ThoughtSettlementDraft;
+ }
+ 
+ function semanticReferencesForInput(input: ThoughtInput | ProjectedThoughtInput): string[] {
+@@ -413,6 +620,29 @@ function semanticReferencesForInput(input: ThoughtInput | ProjectedThoughtInput)
+   ];
+ }
+ 
++function semanticReferenceTargetsForInput(
++  input: ThoughtInput | ProjectedThoughtInput,
++): ThoughtReferenceTargetMap {
++  const targets = new Map<string, ThoughtReferenceTarget[]>();
++  const recordTarget = (value: unknown, target: ThoughtReferenceTarget): void => {
++    if (typeof value !== "string" || value.length === 0) return;
++    const known = targets.get(value);
++    if (known) {
++      if (!known.includes(target)) known.push(target);
++      return;
++    }
++    targets.set(value, [target]);
++  };
++
++  for (const item of input.workingContext) {
++    recordTarget(item.id, "working_context");
++    recordTarget(item.concernId, "concern");
++  }
++  for (const item of input.occupancy) recordTarget(item.concernId, "concern");
++  for (const item of input.observations) recordTarget(item.observationId, "observation");
++  return targets;
++}
++
+ function operationalNamespaceForThoughtInput(
+   input: ThoughtInput | ProjectedThoughtInput,
+ ) {
+@@ -470,6 +700,7 @@ export async function runThoughtModel(
+   let messages: ChatMessage[] | undefined;
+   let semanticProjectionHash: string | undefined;
+   let dispatchMessagesHash: string | undefined;
++  let completionInputTokens: number | undefined;
+ 
+   try {
+     if ("rawConversation" in input && input.retrieval && Array.isArray(input.retrieval.hits)) {
+@@ -535,7 +766,10 @@ export async function runThoughtModel(
+       triggerRef: input.trigger.ref,
+       semanticProjectionHash,
+       dispatchMessagesHash,
+-      allowlistFingerprint: buildReferenceAllowlist(semanticReferencesForInput(input)).fingerprint,
++      allowlistFingerprint: buildReferenceAllowlist(
++        semanticReferencesForInput(input),
++        semanticReferenceTargetsForInput(input),
++      ).fingerprint,
+       absoluteDeadlineAtMs: options.deadlineAtMs,
+     };
+     dispatchOptions.thoughtInvocationContext = thoughtInvocationContext;
+@@ -545,6 +779,7 @@ export async function runThoughtModel(
+       dispatchOptions,
+       deps.completeChat,
+     );
++    completionInputTokens = completion.usage?.promptTokens ?? estimatedInputTokens;
+     if (options.signal?.aborted) {
+       return {
+         output: {
+@@ -732,6 +967,25 @@ export async function runThoughtModel(
+   } catch (error) {
+     const cancelled = options.signal?.aborted === true
+       || (error instanceof Error && error.name === "AbortError");
++    if (error instanceof ThoughtMaterializationError) {
++      return {
++        output: {
++          kind: "failure",
++          cycleId: input.cycleId,
++          generation: input.generation,
++          pass,
++          requestId,
++          occupantId: input.occupantId,
++          reason: "malformed",
++          diagnosticCode: error.code,
++          diagnosticField: error.field,
++        },
++        attempts: 1,
++        requestId,
++        malformed: true,
++        inputTokens: completionInputTokens,
++      };
++    }
+     if (!cancelled && deps.observabilityDb) {
+       try {
+         const mfMeta = metadataFromError(error);
+@@ -1554,7 +1808,7 @@ export async function runCognitiveCycle(
+         if (validation.codes.includes("OPERATIONAL_CLAIM_EFFECTREF_UNKNOWN")) {
+           settlementRevisionFeedback = {
+             failureCode: "OPERATIONAL_CLAIM_EFFECTREF_UNKNOWN",
+-            invalidEffectRefs: [...new Set((invocation.output.settlement.commitments.operational ?? [])
++            invalidEffectRefs: [...new Set((invocation.output.settlement.commitments?.operational ?? [])
+               .map((item) => item.effectRef).filter((ref) => !effectAllowlist.has(ref)))],
+             allowedEffectRefs: [...operationalNamespace.allowedOperationalEffectRefs],
+           };
+@@ -1605,8 +1859,8 @@ export async function runCognitiveCycle(
+         speechText = await deps.adaptExpression({
+           draft: speechText,
+           commitments: validation.draft.commitments,
+-          stance: validation.draft.commitments.stance,
+-          directives: validation.draft.speech.presentationDirectives,
++          stance: validation.draft.commitments?.stance,
++          directives: validation.draft.speech.presentationDirectives ?? [],
+           profile: "default",
+           medium: "discord",
+         });
+@@ -1617,9 +1871,8 @@ export async function runCognitiveCycle(
+     const fidelity = fidelityCheck({
+       mode: validation.draft.speech.mode,
+       draft: speechText,
+-      mustSay: validation.draft.speech.mustSay,
+-      mustNot: validation.draft.speech.mustNot,
+-      acceptableRealizations: validation.draft.speech.acceptableRealizations,
++      mustSay: validation.draft.speech.mustSay ?? [],
++      mustNot: validation.draft.speech.mustNot ?? [],
+       commitments: validation.draft.commitments,
+       observations: observationsForThought,
+     });
+@@ -1661,12 +1914,12 @@ export async function runCognitiveCycle(
+       counters = getThoughtAttemptCounters(sidecar, cycle.cycleId, cycle.generation);
+       return resultWithCounters(cycle.cycleId, cycle.generation, null, counters);
+     }
+-    if (deps.origin !== "shadow" && settlement.durableNominations.length > 0) {
++    if (deps.origin !== "shadow" && (settlement.durableNominations ?? []).length > 0) {
+       try {
+         runGovernedAdmissionCatchup(sidecar, {
+           nowMs: deps.nowMs(),
+-          nominationIds: settlement.durableNominations.map((nomination) => nomination.nominationId),
+-          limit: settlement.durableNominations.length,
++          nominationIds: (settlement.durableNominations ?? []).map((nomination) => nomination.nominationId),
++          limit: (settlement.durableNominations ?? []).length,
+         });
+       } catch {
+         // Publication is authoritative. A transient admission failure is
+@@ -1681,7 +1934,7 @@ export async function runCognitiveCycle(
+       );
+       const evidence = getConversationEvidence(sidecar, directive.evidenceRowId);
+       if (evidence && evidence.lineageId === directive.evidenceLineageId) {
+-        for (const nomination of settlement.durableNominations) {
++        for (const nomination of (settlement.durableNominations ?? [])) {
+           admitOwnerSuppliedClaim(sidecar, {
+             settlementId: settlement.settlementId,
+             nominationId: nomination.nominationId,
+diff --git a/apps/agent-service/src/core/cognitive-v021/thought/semantic-output-contract.test.ts b/apps/agent-service/src/core/cognitive-v021/thought/semantic-output-contract.test.ts
+index 31ac08f085044299b69e9091a86efd4a2fd2be40..a0999733a565713eb1b040d469a05eb674fa1e5e 100644
+--- a/apps/agent-service/src/core/cognitive-v021/thought/semantic-output-contract.test.ts
++++ b/apps/agent-service/src/core/cognitive-v021/thought/semantic-output-contract.test.ts
+@@ -12,12 +12,9 @@ const settlement = {
+   interpretation: {
+     discourseActs: ["inform"],
+     referentBindings: [{ span: "this", sourceTurnRefs: ["turn-1"] }],
+-    corrections: [],
+-    unresolvedAmbiguities: [],
+     topics: ["testing"],
+   },
+   commitments: {
+-    epistemic: [],
+     conversational: ["answer"],
+     stance: {
+       warmth: "medium",
+@@ -29,22 +26,10 @@ const settlement = {
+   speech: {
+     mode: "draft",
+     mustSay: ["I can verify that."],
+-    mustNotSay: [],
+     surfaceDraft: "I can verify that.",
+-    acceptableRealizations: [],
+-    presentationDirectives: [],
+   },
+-  workingContextDeltas: [],
+-  concernDeltas: [],
+-  occupancyDeltas: [],
+-  futureTriggerDeltas: [],
+-  subscriptionDeltas: [],
+-  durableNominations: [],
+   evidenceUse: {
+-    observationRefsUsed: [],
+-    retrievalRefsUsed: [],
+     sourceRefsUsed: ["turn-1"],
+-    openIntentRefs: [],
+   },
+ };
+ 
+@@ -254,9 +239,9 @@ describe("Thought semantic output contract", () => {
+       oneOf: Array<{ properties?: Record<string, { const?: string }> }>;
+     };
+ 
+-    expect(request.contractId).toBe("ashley.thought.semantic.v1");
+-    expect(request.schemaId).toBe("ashley.thought.semantic.v1.schema");
+-    expect(schema.$id).toBe("ashley.thought.semantic.v1.schema");
++    expect(request.contractId).toBe("ashley.thought.semantic.v2");
++    expect(request.schemaId).toBe("ashley.thought.semantic.v2.schema");
++    expect(schema.$id).toBe("ashley.thought.semantic.v2.schema");
+     expect(schema.oneOf.map((branch) => branch.properties?.kind?.const)).toEqual([
+       "settlement",
+       "observation_intent",
+@@ -287,7 +272,7 @@ describe("Thought semantic output contract", () => {
+     expect(instruction).toContain("workspace.verify");
+     expect(instruction).toContain("Operational commitments are distinct from conversational continuation");
+     expect(instruction).toContain("Every operational effectRef must refer to one of the complete Host-admitted operational effect references supplied in allowedOperationalEffectRefs");
+-    expect(instruction).toContain("If allowedOperationalEffectRefs is empty, commitments.operational must be []");
++    expect(instruction).toContain("If allowedOperationalEffectRefs is empty, omit commitments.operational");
+     expect(instruction).toContain("This contract describes output shape only");
+   });
+ 
+@@ -320,7 +305,6 @@ describe("Thought semantic output contract", () => {
+     expect(instruction).toContain('Use time:historical for a claim about a past state or event that does not assert it is still true now');
+     // EPISTEMIC_COMMITMENT_MAY_BE_OMITTED_FOR_ACK
+     expect(instruction).toContain("omit the epistemic commitment");
+-    expect(instruction).toContain("an empty epistemic array is valid");
+   });
+ 
+   it("carries semantic branch intent in the native schema without changing branch shape", () => {
+diff --git a/apps/agent-service/src/core/cognitive-v021/thought/sparse-vnext.test.ts b/apps/agent-service/src/core/cognitive-v021/thought/sparse-vnext.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..f95f2be3334e646a8ae469ff2e6e3165df32f36b
+--- /dev/null
++++ b/apps/agent-service/src/core/cognitive-v021/thought/sparse-vnext.test.ts
+@@ -0,0 +1,134 @@
++import { describe, expect, it } from "vitest";
++import { parseThoughtSemanticOutput } from "./parse.js";
++import { THOUGHT_OUTPUT_SCHEMA, constrainThoughtOutputSchema } from "./output-contract.js";
++import { fidelityCheck } from "../speech/fidelity.js";
++import { validateThoughtSettlementDraft } from "../settlement/validate.js";
++import { makeThoughtDraft } from "../test-support.js";
++
++const refs = new Set(["turn-1", "concern-1", "entity-1", "trigger-1", "subscription-1", "assertion-1"]);
++const minimal = { kind: "settlement", speech: { mode: "draft", surfaceDraft: "Goodnight. Sleep well." } };
++const dimensions = { source: "owner_utterance", status: "asserted", time: "historical", reliability: "owner_supplied" };
++const parse = (value: unknown) => parseThoughtSemanticOutput(value, refs);
++
++describe("Sparse VNext fresh authoring", () => {
++  it("preserves exact absence for ordinary speech and intentional silence", () => {
++    for (const value of [minimal, { kind: "settlement", speech: { mode: "none" } }]) {
++      expect(parse(value)).toEqual({ ok: true, value });
++      expect(Object.keys((parse(value) as any).value)).toEqual(["kind", "speech"]);
++    }
++  });
++
++  it.each(["workingContextDeltas", "concernDeltas", "occupancyDeltas", "futureTriggerDeltas", "subscriptionDeltas", "durableNominations"])("rejects empty or malformed present %s", (field) => {
++    expect(parse({ ...minimal, [field]: [] })).toMatchObject({ ok: false, code: "empty_when_present", field });
++    for (const value of [null, {}, "", false]) expect(parse({ ...minimal, [field]: value }).ok).toBe(false);
++  });
++
++  it.each(["interpretation", "commitments", "evidenceUse"])("requires a meaningful child in %s", (field) => {
++    expect(parse({ ...minimal, [field]: {} })).toMatchObject({ ok: false, code: "empty_when_present", field });
++    expect(parse({ ...minimal, [field]: null }).ok).toBe(false);
++    expect(parse({ ...minimal, [field]: undefined }).ok).toBe(false);
++    expect(parse({ ...minimal, [field]: { unknown: ["x"] } }).ok).toBe(false);
++  });
++
++  it("accepts partial composite acts and rejects empty present children", () => {
++    for (const [domain, field, value] of [
++      ["interpretation", "topics", ["rest"]],
++      ["interpretation", "discourseActs", ["acknowledge"]],
++      ["commitments", "conversational", ["acknowledge"]],
++      ["commitments", "epistemic", [{ statement: "A past fact", dimensions }]],
++      ["evidenceUse", "sourceRefsUsed", ["turn-1"]],
++    ] as const) {
++      const candidate = { ...minimal, [domain]: { [field]: value } };
++      expect(parse(candidate)).toEqual({ ok: true, value: candidate });
++      expect(parse({ ...minimal, [domain]: { [field]: [] } })).toMatchObject({ ok: false, code: "empty_when_present", field: `${domain}.${field}` });
++    }
++  });
++
++  it("enforces speech branches and removed fields", () => {
++    for (const speech of [{}, { mode: "draft" }, { mode: "draft", surfaceDraft: "" },
++      { mode: "none", surfaceDraft: null }, { mode: "none", mustSay: [] },
++      { ...minimal.speech, acceptableRealizations: ["Goodnight"] }, { ...minimal.speech, mustSay: [] }]) {
++      expect(parse({ ...minimal, speech }).ok).toBe(false);
++    }
++    expect(parse({ kind: "settlement" })).toMatchObject({ ok: false, code: "required_field_missing" });
++    expect(parse({ ...minimal, unknown: true })).toMatchObject({ ok: false, code: "unknown_field" });
++  });
++
++  it("uses opaque existing refs at the seven corrected schema surfaces", () => {
++    const value = { ...minimal,
++      interpretation: { referentBindings: [{ span: "it", sourceTurnRefs: ["turn-1"], concernRef: "concern-1", entityRef: "entity-1" }], corrections: [{ correctedTurnRefs: ["turn-1"], fromSpan: "a", toSpan: "b", concernRef: "concern-1" }] },
++      workingContextDeltas: [{ op: "abandon", target: "entity-1" }], concernDeltas: [{ op: "resolve", target: "concern-1" }],
++      futureTriggerDeltas: [{ op: "cancel", target: "trigger-1" }], subscriptionDeltas: [{ op: "cancel", target: "subscription-1" }],
++      durableNominations: [{ statement: "A past fact", memoryKind: "owner_world_claim", dimensions, dataClassification: "ordinary", sourceRefs: ["turn-1"], supersedesRef: "assertion-1", concernRef: null }],
++    };
++    expect(parse(value)).toEqual({ ok: true, value });
++    expect(parse({ ...minimal, concernDeltas: [{ op: "resolve", target: { kind: "existing", ref: "concern-1" } }] }).ok).toBe(false);
++    expect(parse({ ...minimal, concernDeltas: [{ op: "resolve", target: "invented" }] }).ok).toBe(false);
++  });
++
++  it("creates triggers, subscriptions and nominations without dead aliases", () => {
++    const trigger = { op: "create", concernRef: { kind: "existing", ref: "concern-1" }, dueAtMs: 100, purpose: "revisit", payload: {} };
++    const subscription = { concernRef: null, source: "feed", scope: "public", topicKeys: ["topic"], match: "equality", expiresAtMs: null };
++    expect(parse({ ...minimal, futureTriggerDeltas: [trigger], subscriptionDeltas: [{ op: "create", subscription }] }).ok).toBe(true);
++    expect(parse({ ...minimal, futureTriggerDeltas: [{ ...trigger, identity: { kind: "local", alias: "dead" } }] }).ok).toBe(false);
++    expect(parse({ ...minimal, subscriptionDeltas: [{ op: "create", subscription: { ...subscription, identity: { kind: "local", alias: "dead" } } }] }).ok).toBe(false);
++  });
++
++  it("rejects a creation alias that collides with an existing reference", () => {
++    const item = {
++      identity: { kind: "local", alias: "turn-1" },
++      type: "topic",
++      text: "same-settlement topic",
++      concernRef: null,
++      sourceTurnRefs: ["turn-1"],
++      status: "active",
++      supersedesRef: null,
++    };
++    expect(parse({ ...minimal, workingContextDeltas: [{ op: "upsert", item }]})).toMatchObject({
++      ok: false,
++      code: "alias_collides_with_existing_ref",
++      field: "workingContextDeltas.identity",
++    });
++    expect(parse({
++      ...minimal,
++      occupancyDeltas: [{
++        op: "set",
++        concernRef: { kind: "local", alias: "concern-1" },
++        status: "active",
++        priority: 1,
++      }],
++    })).toMatchObject({
++      ok: false,
++      code: "alias_collides_with_existing_ref",
++      field: "occupancyDeltas.concernRef",
++    });
++  });
++
++  it("reserves abstain for the three responsible-inability reasons", () => {
++    for (const reason of ["insufficient_evidence", "unresolved_ambiguity", "no_responsible_proposal"]) {
++      expect(parse({ kind: "abstain", reason, explanation: "Insufficient basis", evidenceRefs: [] }).ok).toBe(true);
++    }
++    expect(parse({ kind: "abstain", reason: "no_semantic_change_warranted", explanation: "No change", evidenceRefs: [] }).ok).toBe(false);
++  });
++
++  it("keeps sparse schema law distinct from wire qualification bounds", () => {
++    const canonical = THOUGHT_OUTPUT_SCHEMA as any;
++    expect(canonical.oneOf[0].required).toEqual(["kind", "speech"]);
++    expect(canonical.oneOf[0].properties.concernDeltas.items.oneOf[1].properties.target).toEqual({ type: "string", minLength: 1 });
++    const wire = constrainThoughtOutputSchema({ allowedOperationalEffectRefs: [], fingerprint: "sha256:test" } as any).schema as any;
++    expect(wire.oneOf[0].properties.speech.oneOf.find((b: any) => b.properties.mode.const === "draft").properties.surfaceDraft.maxLength).toBe(6000);
++    expect(canonical.oneOf[0].properties.speech.oneOf.find((b: any) => b.properties.mode.const === "draft").properties.surfaceDraft.maxLength).toBeUndefined();
++    expect(wire.oneOf[0].properties.commitments.properties.operational).toMatchObject({ minItems: 1, maxItems: 0 });
++  });
++
++  it("validates and licenses ordinary sparse speech while retaining high-risk guards", () => {
++    const draft = makeThoughtDraft();
++    for (const field of ["interpretation", "commitments", "workingContextDelta", "concernDeltas", "occupancyDelta", "futureTriggers", "subscriptions", "durableNominations"]) delete (draft as any)[field];
++    draft.speech = { mode: "draft", surfaceDraft: minimal.speech.surfaceDraft } as any;
++    expect(validateThoughtSettlementDraft(draft).ok).toBe(true);
++    const input = { mode: "draft", draft: minimal.speech.surfaceDraft } as any;
++    expect(fidelityCheck(input).ok).toBe(true);
++    expect(fidelityCheck({ ...input, draft: "I completed it." }).ok).toBe(false);
++    expect(fidelityCheck({ ...input, draft: "The latest state is ready." }).ok).toBe(false);
++  });
++});
+diff --git a/apps/agent-service/src/core/cognitive-v021/thought/structural-feedback.test.ts b/apps/agent-service/src/core/cognitive-v021/thought/structural-feedback.test.ts
+index 5515ebdaec2aeff40508758b293c380f33961498..08edaf3b7e9bc0adfbbafb4f2cc76776b91bc309 100644
+--- a/apps/agent-service/src/core/cognitive-v021/thought/structural-feedback.test.ts
++++ b/apps/agent-service/src/core/cognitive-v021/thought/structural-feedback.test.ts
+@@ -130,4 +130,22 @@ describe("Thought structural correction scope", () => {
+       }), code).toEqual({ ok: true });
+     }
+   });
++
++  it("keeps post-parse materialization failures on global regeneration", () => {
++    for (const code of [
++      "alias_duplicate",
++      "dangling_local_reference",
++      "reference_target_type_mismatch",
++    ] as const) {
++      const feedback = createThoughtStructuralFeedback({
++        code,
++        field: "workingContextDeltas[0].item.concernRef",
++        previousCandidate: abstainCandidate,
++      });
++      expect(feedback.correctionScope, code).toBe("global");
++      expect(feedback.previousCandidate, code).toBeNull();
++      expect(formatThoughtStructuralCorrectionData(feedback), code).toBeNull();
++      expect(formatThoughtStructuralFeedback(feedback), code).toContain(code);
++    }
++  });
+ });
+diff --git a/apps/agent-service/src/core/cognitive-v021/thought/structural-feedback.ts b/apps/agent-service/src/core/cognitive-v021/thought/structural-feedback.ts
+index 3c7f3214cb5f92883ba3fa9afb7edf1fbb8ecf72..57cb3b984bea9969fe12bf9539a306b09a726367 100644
+--- a/apps/agent-service/src/core/cognitive-v021/thought/structural-feedback.ts
++++ b/apps/agent-service/src/core/cognitive-v021/thought/structural-feedback.ts
+@@ -45,9 +45,11 @@ const STRUCTURAL_FEEDBACK: Readonly<Record<ThoughtParserFailureCode, string>> =
+   unknown_field: "Remove fields not defined by the active semantic Thought contract.",
+   required_field_missing: "Include every required semantic Thought field.",
+   wrong_type: "Use the required semantic field types without coercion.",
++  empty_when_present: "Omit unused optional domains; present arrays must contain at least one item and composites a meaningful child.",
+   invalid_enum: "Use one permitted value for the reported enum field.",
+   reference_not_allowlisted: "Use only host allowlisted reference IDs for the reported reference field; do not invent, transform, or namespace references.",
+   alias_invalid: "Use a valid output-local alias shape.",
++  alias_collides_with_existing_ref: "Use an output-local alias that does not match an existing reference.",
+   operation_not_registered: "Use one registered operation kind.",
+   identity_missing: "Include every required Thought identity field.",
+   identity_mismatch: "Preserve the active Thought identity fields.",
+@@ -60,6 +62,9 @@ const STRUCTURAL_FEEDBACK: Readonly<Record<ThoughtParserFailureCode, string>> =
+   effect_contract_failure: "Emit the required effect proposal shape.",
+   forbidden_fields: "Omit publication and delivery fields.",
+   schema_version_mismatch: "Use the active Thought schema version.",
++  alias_duplicate: "Use a distinct output-local alias for each same-settlement entity.",
++  dangling_local_reference: "Use only local aliases declared by a same-settlement entity or an allowlisted existing reference.",
++  reference_target_type_mismatch: "Use a local or existing reference whose target domain matches the reported field.",
+   other: "Match the semantic Thought contract exactly.",
+ };
+ 
+diff --git a/apps/agent-service/src/core/cognitive-v021/types.ts b/apps/agent-service/src/core/cognitive-v021/types.ts
+index bc11ff69703bdb7ecf470726ed37706af4900f28..afaf0de07a9990fa6be86093a4f314b9e1b07fbf 100644
+--- a/apps/agent-service/src/core/cognitive-v021/types.ts
++++ b/apps/agent-service/src/core/cognitive-v021/types.ts
+@@ -306,11 +306,15 @@ export type SpeechMode = "none" | "draft";
+ 
+ export type ThoughtSpeechDraft = {
+   mode: SpeechMode;
+-  mustSay: string[];
+-  mustNot: string[];
++  /** Omitted when Thought authors no literal inclusion constraint. */
++  mustSay?: string[];
++  /** Omitted when Thought authors no forbidden literal constraint. */
++  mustNot?: string[];
+   surfaceDraft: string | null;
+-  acceptableRealizations: string[];
+-  presentationDirectives: string[];
++  /** Historical V1 payload compatibility only; VNext authoring never emits it. */
++  acceptableRealizations?: string[];
++  /** Omitted when Thought authors no presentation guidance. */
++  presentationDirectives?: string[];
+ };
+ 
+ export type WorkingContextItemType =
+@@ -569,21 +573,21 @@ export type Observation = {
+ };
+ 
+ export type ThoughtInterpretation = {
+-  discourseActs: readonly DiscourseAct[];
+-  referentBindings: readonly {
++  discourseActs?: readonly DiscourseAct[];
++  referentBindings?: readonly {
+     span: string;
+     concernRef?: ExistingRef;
+     entityRef?: ExistingRef;
+     sourceTurnRefs: readonly ExistingRef[];
+   }[];
+-  corrections: readonly {
++  corrections?: readonly {
+     correctedTurnRefs: readonly ExistingRef[];
+     fromSpan: string;
+     toSpan: string;
+     concernRef?: ExistingRef;
+   }[];
+-  unresolvedAmbiguities: readonly string[];
+-  topics: readonly string[];
++  unresolvedAmbiguities?: readonly string[];
++  topics?: readonly string[];
+ };
+ 
+ export type OperationalClaimState =
+@@ -599,27 +603,24 @@ export type OperationalStateClaim = {
+ };
+ 
+ export type ThoughtCommitments = {
+-  epistemic: readonly { dimensions: EpistemicDimensions; statement: string }[];
+-  operational: readonly OperationalStateClaim[];
+-  conversational: readonly ConversationalCommitment[];
+-  stance: Stance;
++  epistemic?: readonly { dimensions: EpistemicDimensions; statement: string }[];
++  operational?: readonly OperationalStateClaim[];
++  conversational?: readonly ConversationalCommitment[];
++  stance?: Stance;
+ };
+ 
+ export type ThoughtSpeechIntent =
+   | {
+       mode: "none";
+-      mustSay: readonly [];
+-      mustNotSay: readonly string[];
+-      acceptableRealizations: readonly [];
+-      presentationDirectives: readonly string[];
++      // VNext silence is intentionally minimal. There are no implicit
++      // constraints or presentation directives for a silent settlement.
+     }
+   | {
+       mode: "draft";
+-      mustSay: readonly string[];
+-      mustNotSay: readonly string[];
++      mustSay?: readonly string[];
++      mustNotSay?: readonly string[];
+       surfaceDraft: string;
+-      acceptableRealizations: readonly string[];
+-      presentationDirectives: readonly string[];
++      presentationDirectives?: readonly string[];
+     };
+ 
+ export type WorkingContextItemSemantic = {
+@@ -660,7 +661,6 @@ export type OccupancySemanticDelta = {
+ export type FutureTriggerSemanticDelta =
+   | {
+       op: "create";
+-      identity: { kind: "local"; alias: LocalAlias };
+       concernRef: SemanticRef;
+       dueAtMs: number;
+       purpose: string;
+@@ -672,7 +672,6 @@ export type SubscriptionSemanticDelta =
+   | {
+       op: "create";
+       subscription: {
+-        identity: { kind: "local"; alias: LocalAlias };
+         concernRef: SemanticRef | null;
+         source: string;
+         scope: string;
+@@ -684,7 +683,6 @@ export type SubscriptionSemanticDelta =
+   | { op: "cancel"; target: ExistingRef };
+ 
+ export type ThoughtDurableNomination = {
+-  alias: LocalAlias;
+   statement: string;
+   memoryKind: MemoryKind;
+   dimensions: EpistemicDimensions;
+@@ -695,24 +693,24 @@ export type ThoughtDurableNomination = {
+ };
+ 
+ export type ThoughtEvidenceUse = {
+-  observationRefsUsed: readonly ExistingRef[];
+-  retrievalRefsUsed: readonly ExistingRef[];
+-  sourceRefsUsed: readonly ExistingRef[];
+-  openIntentRefs: readonly ExistingRef[];
++  observationRefsUsed?: readonly ExistingRef[];
++  retrievalRefsUsed?: readonly ExistingRef[];
++  sourceRefsUsed?: readonly ExistingRef[];
++  openIntentRefs?: readonly ExistingRef[];
+ };
+ 
+ export type SettlementSemanticOutput = {
+   kind: "settlement";
+-  interpretation: ThoughtInterpretation;
+-  commitments: ThoughtCommitments;
+   speech: ThoughtSpeechIntent;
+-  workingContextDeltas: readonly WorkingContextSemanticDelta[];
+-  concernDeltas: readonly ConcernSemanticDelta[];
+-  occupancyDeltas: readonly OccupancySemanticDelta[];
+-  futureTriggerDeltas: readonly FutureTriggerSemanticDelta[];
+-  subscriptionDeltas: readonly SubscriptionSemanticDelta[];
+-  durableNominations: readonly ThoughtDurableNomination[];
+-  evidenceUse: ThoughtEvidenceUse;
++  interpretation?: ThoughtInterpretation;
++  commitments?: ThoughtCommitments;
++  workingContextDeltas?: readonly WorkingContextSemanticDelta[];
++  concernDeltas?: readonly ConcernSemanticDelta[];
++  occupancyDeltas?: readonly OccupancySemanticDelta[];
++  futureTriggerDeltas?: readonly FutureTriggerSemanticDelta[];
++  subscriptionDeltas?: readonly SubscriptionSemanticDelta[];
++  durableNominations?: readonly ThoughtDurableNomination[];
++  evidenceUse?: ThoughtEvidenceUse;
+ };
+ 
+ export type ObservationIntentSemanticOutput = {
+@@ -736,8 +734,7 @@ export type EffectIntentSemanticOutput = {
+ export type SemanticAbstainReason =
+   | "insufficient_evidence"
+   | "unresolved_ambiguity"
+-  | "no_responsible_proposal"
+-  | "no_semantic_change_warranted";
++  | "no_responsible_proposal";
+ 
+ export type AbstainSemanticOutput = {
+   kind: "abstain";
+@@ -860,26 +857,26 @@ export type ThoughtSettlementDraft = {
+   occupantId: OccupantId;
+   architectureEpoch: typeof ARCHITECTURE_EPOCH;
+   triggerRef: string;
+-  interpretation: {
+-    discourseActs: DiscourseAct[];
+-    referentBindings: ReferentBinding[];
+-    corrections: CorrectionRecord[];
+-    unresolvedAmbiguities: string[];
+-    topics: string[];
++  interpretation?: {
++    discourseActs?: DiscourseAct[];
++    referentBindings?: ReferentBinding[];
++    corrections?: CorrectionRecord[];
++    unresolvedAmbiguities?: string[];
++    topics?: string[];
+   };
+-  commitments: {
+-    epistemic: EpistemicCommitment[];
+-    operational: OperationalStateClaim[];
+-    conversational: ConversationalCommitment[];
+-    stance: Stance;
++  commitments?: {
++    epistemic?: EpistemicCommitment[];
++    operational?: OperationalStateClaim[];
++    conversational?: ConversationalCommitment[];
++    stance?: Stance;
+   };
+   speech: ThoughtSpeechDraft;
+-  workingContextDelta: WorkingContextDelta[];
+-  concernDeltas: ConcernDelta[];
+-  occupancyDelta: OccupancyDelta[];
+-  futureTriggers: FutureTriggerDelta[];
+-  subscriptions: SubscriptionDelta[];
+-  durableNominations: DurableNomination[];
++  workingContextDelta?: WorkingContextDelta[];
++  concernDeltas?: ConcernDelta[];
++  occupancyDelta?: OccupancyDelta[];
++  futureTriggers?: FutureTriggerDelta[];
++  subscriptions?: SubscriptionDelta[];
++  durableNominations?: DurableNomination[];
+   operations: {
+     observationsConsumed: string[];
+     effectsCompleted: string[];
+@@ -911,11 +908,13 @@ export type ThoughtParserFailureCode =
+   | "root_not_object"
+   | "wrong_kind"
+   | "unknown_field"
++  | "empty_when_present"
+   | "required_field_missing"
+   | "wrong_type"
+   | "invalid_enum"
+   | "reference_not_allowlisted"
+   | "alias_invalid"
++  | "alias_collides_with_existing_ref"
+   | "operation_not_registered"
+   | "identity_missing"
+   | "identity_mismatch"
+@@ -928,6 +927,9 @@ export type ThoughtParserFailureCode =
+   | "effect_contract_failure"
+   | "forbidden_fields"
+   | "schema_version_mismatch"
++  | "alias_duplicate"
++  | "dangling_local_reference"
++  | "reference_target_type_mismatch"
+   | "other";
+ export type ThoughtCorrectionFailureCode = "structural_correction_scope_violation";
+ export type ThoughtPassIndex = number;
+@@ -966,7 +968,7 @@ export type ThoughtFailureStep = ThoughtStepBase & {
+     | "pass_exhausted"
+     | "capacity_deferred"
+     | "cancelled";
+-  /** Bounded parser category. Raw provider output is never persisted. */
++  /** Bounded structural category. Raw provider output is never persisted. */
+   diagnosticCode?: ThoughtParserFailureCode;
+   /** Parser-owned field/path metadata; raw provider output is never persisted. */
+   diagnosticField?: string;
+@@ -1269,8 +1271,8 @@ export type KernelDeps = {
+   adaptExpression?: (input: {
+     draft: string;
+     commitments: ThoughtSettlementDraft["commitments"];
+-    stance: Stance;
+-    directives: string[];
++    stance?: Stance;
++    directives?: string[];
+     profile: string;
+     medium: "discord";
+   }) => Promise<string>;
+diff --git a/apps/agent-service/src/core/model-fabric/dispatch-contract.ts b/apps/agent-service/src/core/model-fabric/dispatch-contract.ts
+index 5d5e48a54217e8d0860f3c543eafcd768dbf671f..c36f365e2a9d48aba81ffd20028da097b0e6329a 100644
+--- a/apps/agent-service/src/core/model-fabric/dispatch-contract.ts
++++ b/apps/agent-service/src/core/model-fabric/dispatch-contract.ts
+@@ -10,8 +10,8 @@ import type {
+ import { sha256 } from "./hash.js";
+ import { capabilityProfileFor } from "./profiles.js";
+ 
+-export const THOUGHT_OUTPUT_CONTRACT_ID = "ashley.thought.semantic.v1";
+-export const THOUGHT_OUTPUT_SCHEMA_ID = "ashley.thought.semantic.v1.schema";
++export const THOUGHT_OUTPUT_CONTRACT_ID = "ashley.thought.semantic.v2";
++export const THOUGHT_OUTPUT_SCHEMA_ID = "ashley.thought.semantic.v2.schema";
+ 
+ export type ResolvedDispatchContract = Readonly<{
+   maxTokens: number;
+diff --git a/apps/agent-service/src/core/model-fabric/mf-m2.test.ts b/apps/agent-service/src/core/model-fabric/mf-m2.test.ts
+index 919929831b021084e0e34d59b83aa41816fa58c6..4af1b14107bc2c4d8e2fbc57bd17a42d2f0ea1bb 100644
+--- a/apps/agent-service/src/core/model-fabric/mf-m2.test.ts
++++ b/apps/agent-service/src/core/model-fabric/mf-m2.test.ts
+@@ -14,7 +14,11 @@ import {
+   resolveCurrentPolicy,
+   routeRecordsFromCurrentPortfolio,
+ } from "./portfolio.js";
+-import { resolveDispatchContract } from "./dispatch-contract.js";
++import {
++  resolveDispatchContract,
++  THOUGHT_OUTPUT_CONTRACT_ID,
++  THOUGHT_OUTPUT_SCHEMA_ID,
++} from "./dispatch-contract.js";
+ import { capabilityProfileFor } from "./profiles.js";
+ 
+ const originalNimKey = env.nimApiKey;
+@@ -202,8 +206,8 @@ describe("MF-M2 CURRENT portfolio", () => {
+       }),
+       fabricStructuredOutput: expect.objectContaining({
+         kind: "native_json_schema",
+-        contractId: "ashley.thought.semantic.v1",
+-        schemaId: "ashley.thought.semantic.v1.schema",
++        contractId: THOUGHT_OUTPUT_CONTRACT_ID,
++        schemaId: THOUGHT_OUTPUT_SCHEMA_ID,
+         schemaFingerprint,
+       }),
+     }));
+

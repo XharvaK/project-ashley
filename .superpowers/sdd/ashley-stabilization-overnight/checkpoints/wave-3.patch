@@ -1,0 +1,1425 @@
+diff --git a/apps/agent-service/src/core/cognitive-v021/thought/__tests__/diagnostics.test.ts b/apps/agent-service/src/core/cognitive-v021/thought/__tests__/diagnostics.test.ts
+index 5660d286bd6de30d2057c44d5af8d5d0a8e03a73..5b983f488158995037928a1987ef77336ed6071c 100644
+--- a/apps/agent-service/src/core/cognitive-v021/thought/__tests__/diagnostics.test.ts
++++ b/apps/agent-service/src/core/cognitive-v021/thought/__tests__/diagnostics.test.ts
+@@ -252,7 +252,71 @@ describe("Thought Diagnostics & Observability DB", () => {
+     const completeChat = vi.fn(async (_messages) => {
+       calls++;
+       if (calls === 1) {
+-        return { text: "malformed", model: "fake", modelAlias: "thought", resolvedModelId: null };
++        return {
++          text: "malformed provider payload",
++          model: "fake",
++          modelAlias: "thought",
++          providerModel: "nvidia/nemotron-test",
++          resolvedModelId: "nvidia/nemotron-test",
++          usage: { promptTokens: 17, completionTokens: 9, reasoningTokens: 4 },
++          finishReason: "length",
++          responseDiagnostics: {
++            contentContainerType: "string" as const,
++            contentChunkTypes: [],
++            textChunkCount: 0,
++            thinkingChunkCount: 0,
++            finalTextBytes: Buffer.byteLength("malformed provider payload", "utf8"),
++            finishReason: "length",
++            finishReasonClass: "LENGTH" as const,
++            outputTokenLimit: 128,
++            outputTokens: 9,
++            reasoningTokens: 4,
++            reasoningContentBytes: 31,
++            reasoningHash: "sha256:reasoning-hash",
++            extractionFailure: "none" as const,
++          },
++          providerBoundaryControls: {
++            maxTokens: 128,
++            reasoningConfiguration: "reasoning_effort:high",
++            temperature: 1,
++            deadlineAtMs: 4_000,
++          },
++          providerBoundaryTiming: {
++            requestStartedAtMs: 100,
++            responseAtMs: 140,
++            elapsedMs: 40,
++            remainingDeadlineMs: 3_860,
++            outcome: "response_received" as const,
++          },
++          capturedAttemptIdentity: {
++            allocationId: 9,
++            modelFabricInvocationId: "mf-inv-1",
++            modelFabricAttemptId: "mf-att-1",
++            attemptOrdinal: 1,
++            dispatchSequence: 2,
++            routeAlias: "thought",
++            provider: "nim",
++            configuredModelId: "nvidia/nemotron-test",
++            occupantId: "doc",
++            modelEpoch: 1,
++            contractId: "contract-v2",
++            buildIdentity: "build-test",
++            logicalStructuredOutputId: "ashley.thought.semantic.v2",
++            semanticSchemaFingerprint: "sha256:canonical",
++            wireSchemaFingerprint: "sha256:wire",
++            actualWireBindingId: "binding-test",
++            schemaEnforcementMode: "guided_json",
++            resourcePolicyFingerprint: "sha256:resource",
++          },
++          wireEvidence: {
++            adapterId: "ashley.adapter.nim.v1",
++            wireFormat: "nim_guided_json",
++            sanitizedBodyDigest: "sha256:wire-body",
++            emittedEnforcementMode: "guided_json",
++            providerDeclaredEnforcement: "unavailable",
++            bindingId: "binding-test",
++          },
++        };
+       }
+       return {
+         text: JSON.stringify(makeSemanticSettlement()),
+@@ -323,6 +387,43 @@ describe("Thought Diagnostics & Observability DB", () => {
+       expect(diagnostics.length).toBe(1);
+       expect(diagnostics[0].code).toBe("parser_malformed");
+       expect(diagnostics[0].cycleId).toBe("cycle-obs-real");
++      expect(diagnostics[0].dispatchTruth).toBe("sent");
++      expect(diagnostics[0].providerFailure).toMatchObject({
++        provider: "nim",
++        model: "nvidia/nemotron-test",
++        providerModel: "nvidia/nemotron-test",
++        modelFabricInvocationId: "mf-inv-1",
++        modelFabricAttemptId: "mf-att-1",
++        attemptOrdinal: 1,
++        dispatchSequence: 2,
++        canonicalSchemaFingerprint: "sha256:canonical",
++        wireSchemaFingerprint: "sha256:wire",
++        wireBindingId: "binding-test",
++        wireFormat: "nim_guided_json",
++        wireBodyDigest: "sha256:wire-body",
++        maxTokens: 128,
++        reasoningConfiguration: "reasoning_effort:high",
++        temperature: 1,
++        deadlineAtMs: 4_000,
++        requestStartedAtMs: 100,
++        responseAtMs: 140,
++        elapsedMs: 40,
++        remainingDeadlineMs: 3_860,
++        finishReason: "length",
++        inputTokens: 17,
++        completionTokens: 9,
++        contentBytes: Buffer.byteLength("malformed provider payload", "utf8"),
++        reasoningContentBytes: 31,
++        reasoningHash: "sha256:reasoning-hash",
++        parserStatus: "failed",
++        validatorStatus: "not_run",
++        failureClass: "invalid_json",
++        structuralRetryStatus: "scheduled",
++      });
++      const storedProviderFailure = obsDb.prepare(
++        "SELECT provider_failure_json FROM thought_dispatch_diagnostics WHERE code = 'parser_malformed'",
++      ).get() as { provider_failure_json: string };
++      expect(storedProviderFailure.provider_failure_json).not.toContain("malformed provider payload");
+       expect(diagnostics[0].cycleMetrics).toMatchObject({
+         first_pass_total_input_tokens: expect.any(Number),
+         total_cycle_input_tokens_including_retries: expect.any(Number),
+@@ -498,6 +599,21 @@ describe("Thought Diagnostics & Observability DB", () => {
+       expect(suppressedDiag?.quotaBucket).toBe("groq:openai/gpt-oss-20b");
+       expect(suppressedDiag?.semanticProjectionHash).toBe("test-sem-hash-123");
+       expect(suppressedDiag?.dispatchMessagesHash).toBe("test-msg-hash-123");
++      expect(suppressedDiag?.providerFailure).toMatchObject({
++        provider: "nim",
++        model: "meta/llama-3.3-70b-instruct",
++        modelFabricInvocationId: "inv-suppress-1",
++        modelFabricAttemptId: "att-primary-123",
++        dispatchTruth: "sent",
++        parserStatus: "not_run",
++        validatorStatus: "not_run",
++        failureClass: "transport_error",
++        structuralRetryStatus: "not_applicable",
++      });
++      expect(suppressedDiag?.providerFailure).not.toHaveProperty("inputTokens");
++      expect(suppressedDiag?.providerFailure).not.toHaveProperty("completionTokens");
++      expect(suppressedDiag?.providerFailure).not.toHaveProperty("finishReason");
++      expect(suppressedDiag?.providerFailure).not.toHaveProperty("requestStartedAtMs");
+     } finally {
+       obsDb.close();
+       sidecar.close();
+@@ -584,4 +700,26 @@ describe("Thought Diagnostics & Observability DB", () => {
+       attentionDb.close();
+     }
+   });
++
++  it("does not create a provider forensic payload for a healthy return", () => {
++    const obs = openObservabilityStore(":memory:");
++    try {
++      obs.recordDiagnostic({
++        cycleId: "cycle-healthy-provider",
++        generation: 1,
++        requestId: "req-healthy-provider",
++        pass: 1,
++        code: "provider_returned",
++        stage: "provider_dispatch",
++        dispatchTruth: "sent",
++      });
++      const raw = obs.db.prepare(
++        "SELECT provider_failure_json FROM thought_dispatch_diagnostics WHERE request_id = ?",
++      ).get("req-healthy-provider") as { provider_failure_json: string | null };
++      expect(raw.provider_failure_json).toBeNull();
++      expect(obs.listDiagnostics()[0].providerFailure).toBeNull();
++    } finally {
++      obs.close();
++    }
++  });
+ });
+diff --git a/apps/agent-service/src/core/cognitive-v021/thought/diagnostics.ts b/apps/agent-service/src/core/cognitive-v021/thought/diagnostics.ts
+index 8aea3cb360c80859c9d6025ede7744e9ba8accb8..1b4840a1c117d03760e199fd77632d68e8c904a8 100644
+--- a/apps/agent-service/src/core/cognitive-v021/thought/diagnostics.ts
++++ b/apps/agent-service/src/core/cognitive-v021/thought/diagnostics.ts
+@@ -33,6 +33,46 @@ export type ThoughtCycleTokenMetrics = {
+   request_count: number;
+ };
+ 
++export type ThoughtProviderFailureCapture = Readonly<{
++  /** Provider identity from the resolved Model Fabric attempt. */
++  provider?: string;
++  /** Configured model identity; provider-reported identity is separate. */
++  model?: string;
++  providerModel?: string;
++  modelFabricInvocationId?: string;
++  modelFabricAttemptId?: string;
++  attemptOrdinal?: number;
++  dispatchSequence?: number;
++  attentionRequestId?: number;
++  canonicalSchemaFingerprint?: string;
++  wireSchemaFingerprint?: string;
++  wireBindingId?: string;
++  wireFormat?: string;
++  wireBodyDigest?: string;
++  maxTokens?: number;
++  reasoningConfiguration?: string;
++  reasoningBudgetTokens?: number;
++  temperature?: number;
++  topP?: number;
++  deadlineAtMs?: number;
++  requestStartedAtMs?: number;
++  responseAtMs?: number;
++  elapsedMs?: number;
++  remainingDeadlineMs?: number;
++  finishReason?: string;
++  inputTokens?: number;
++  completionTokens?: number;
++  contentBytes?: number;
++  reasoningContentBytes?: number;
++  contentHash?: string;
++  reasoningHash?: string;
++  dispatchTruth: "not_sent" | "sent" | "unknown";
++  parserStatus: "not_run" | "passed" | "failed";
++  validatorStatus: "not_run" | "passed" | "failed";
++  failureClass?: string;
++  structuralRetryStatus: "not_applicable" | "not_scheduled" | "scheduled" | "exhausted";
++}>;
++
+ export type ThoughtDispatchDiagnostic = {
+   cycleId: string;
+   generation: number;
+@@ -57,6 +97,8 @@ export type ThoughtDispatchDiagnostic = {
+   semanticBudgetTokens?: number | null;
+   overflowTokens?: number | null;
+   cycleMetrics?: ThoughtCycleTokenMetrics | null;
++  /** Failure-oriented provider boundary evidence; raw content is prohibited. */
++  providerFailure?: ThoughtProviderFailureCapture | null;
+   createdAtMs?: number;
+ };
+ 
+@@ -157,6 +199,157 @@ function diagnosticPayload(diag: ThoughtDispatchDiagnostic): string | null {
+   return diag.cycleMetrics ? JSON.stringify(diag.cycleMetrics) : null;
+ }
+ 
++function boundedCaptureString(value: unknown, maxLength = 256): string | undefined {
++  if (typeof value !== "string") return undefined;
++  const trimmed = value.trim();
++  return trimmed.length > 0 ? trimmed.slice(0, maxLength) : undefined;
++}
++
++function finiteCaptureNumber(value: unknown): number | undefined {
++  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
++}
++
++function integerCaptureNumber(value: unknown): number | undefined {
++  return typeof value === "number" && Number.isInteger(value) ? value : undefined;
++}
++
++/**
++ * Serialize an explicit allowlist only. This keeps accidental raw provider
++ * payloads or hidden reasoning out of the diagnostic sidecar.
++ */
++function providerFailurePayload(
++  capture: ThoughtProviderFailureCapture | null | undefined,
++): string | null {
++  if (!capture) return null;
++  const value: Record<string, unknown> = {
++    dispatchTruth: capture.dispatchTruth,
++    parserStatus: capture.parserStatus,
++    validatorStatus: capture.validatorStatus,
++    structuralRetryStatus: capture.structuralRetryStatus,
++  };
++  const strings: Array<[keyof ThoughtProviderFailureCapture, number]> = [
++    ["provider", 64],
++    ["model", 160],
++    ["providerModel", 160],
++    ["modelFabricInvocationId", 128],
++    ["modelFabricAttemptId", 128],
++    ["canonicalSchemaFingerprint", 128],
++    ["wireSchemaFingerprint", 128],
++    ["wireBindingId", 160],
++    ["wireFormat", 96],
++    ["wireBodyDigest", 128],
++    ["reasoningConfiguration", 128],
++    ["finishReason", 64],
++    ["contentHash", 128],
++    ["reasoningHash", 128],
++    ["failureClass", 128],
++  ];
++  for (const [key, maxLength] of strings) {
++    const safe = boundedCaptureString(capture[key], maxLength);
++    if (safe !== undefined) value[key] = safe;
++  }
++  const numbers: Array<[keyof ThoughtProviderFailureCapture, "finite" | "integer"]> = [
++    ["attemptOrdinal", "integer"],
++    ["dispatchSequence", "integer"],
++    ["attentionRequestId", "integer"],
++    ["maxTokens", "integer"],
++    ["reasoningBudgetTokens", "integer"],
++    ["temperature", "finite"],
++    ["topP", "finite"],
++    ["deadlineAtMs", "integer"],
++    ["requestStartedAtMs", "integer"],
++    ["responseAtMs", "integer"],
++    ["elapsedMs", "finite"],
++    ["remainingDeadlineMs", "finite"],
++    ["inputTokens", "finite"],
++    ["completionTokens", "finite"],
++    ["contentBytes", "finite"],
++    ["reasoningContentBytes", "finite"],
++  ];
++  for (const [key, kind] of numbers) {
++    const number = kind === "integer"
++      ? integerCaptureNumber(capture[key])
++      : finiteCaptureNumber(capture[key]);
++    if (number !== undefined) value[key] = number;
++  }
++  return JSON.stringify(value);
++}
++
++function captureStatus<T extends string>(
++  value: unknown,
++  allowed: readonly T[],
++  fallback: T,
++): T {
++  return typeof value === "string" && (allowed as readonly string[]).includes(value)
++    ? value as T
++    : fallback;
++}
++
++function parseProviderFailureCapture(value: unknown): ThoughtProviderFailureCapture | null {
++  if (typeof value !== "string" || value.length === 0) return null;
++  try {
++    const parsed = JSON.parse(value) as Record<string, unknown>;
++    if (!parsed || typeof parsed !== "object") return null;
++    const dispatchTruth = captureStatus(
++      parsed.dispatchTruth,
++      ["not_sent", "sent", "unknown"] as const,
++      "unknown",
++    );
++    const parserStatus = captureStatus(
++      parsed.parserStatus,
++      ["not_run", "passed", "failed"] as const,
++      "not_run",
++    );
++    const validatorStatus = captureStatus(
++      parsed.validatorStatus,
++      ["not_run", "passed", "failed"] as const,
++      "not_run",
++    );
++    const structuralRetryStatus = captureStatus(
++      parsed.structuralRetryStatus,
++      ["not_applicable", "not_scheduled", "scheduled", "exhausted"] as const,
++      "not_applicable",
++    );
++    const capture: ThoughtProviderFailureCapture = {
++      dispatchTruth,
++      parserStatus,
++      validatorStatus,
++      structuralRetryStatus,
++    };
++    const strings: Array<[keyof ThoughtProviderFailureCapture, number]> = [
++      ["provider", 64], ["model", 160], ["providerModel", 160],
++      ["modelFabricInvocationId", 128], ["modelFabricAttemptId", 128],
++      ["canonicalSchemaFingerprint", 128], ["wireSchemaFingerprint", 128],
++      ["wireBindingId", 160], ["wireFormat", 96], ["wireBodyDigest", 128],
++      ["reasoningConfiguration", 128], ["finishReason", 64],
++      ["contentHash", 128], ["reasoningHash", 128], ["failureClass", 128],
++    ];
++    for (const [key, maxLength] of strings) {
++      const safe = boundedCaptureString(parsed[key], maxLength);
++      if (safe !== undefined) (capture as Record<string, unknown>)[key] = safe;
++    }
++    const numbers: Array<[keyof ThoughtProviderFailureCapture, "finite" | "integer"]> = [
++      ["attemptOrdinal", "integer"], ["dispatchSequence", "integer"],
++      ["attentionRequestId", "integer"], ["maxTokens", "integer"],
++      ["reasoningBudgetTokens", "integer"], ["temperature", "finite"],
++      ["topP", "finite"], ["deadlineAtMs", "integer"],
++      ["requestStartedAtMs", "integer"], ["responseAtMs", "integer"],
++      ["elapsedMs", "finite"], ["remainingDeadlineMs", "finite"],
++      ["inputTokens", "finite"], ["completionTokens", "finite"],
++      ["contentBytes", "finite"], ["reasoningContentBytes", "finite"],
++    ];
++    for (const [key, kind] of numbers) {
++      const number = kind === "integer"
++        ? integerCaptureNumber(parsed[key])
++        : finiteCaptureNumber(parsed[key]);
++      if (number !== undefined) (capture as Record<string, unknown>)[key] = number;
++    }
++    return capture;
++  } catch {
++    return null;
++  }
++}
++
+ function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string): void {
+   const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name?: string }>;
+   if (!columns.some((item) => item.name === column)) {
+@@ -227,6 +420,7 @@ export function initObservabilitySchema(db: DatabaseSync): void {
+       fallback_from_attempt_id TEXT,
+       secondary_dispatch_truth TEXT CHECK(secondary_dispatch_truth IS NULL OR secondary_dispatch_truth IN ('not_sent')),
+       cycle_metrics_json TEXT,
++      provider_failure_json TEXT,
+       created_at_ms INTEGER NOT NULL
+     );
+ 
+@@ -242,6 +436,7 @@ export function initObservabilitySchema(db: DatabaseSync): void {
+   // This is an additive column on the dedicated diagnostic sidecar. It does
+   // not alter nuclear.db or any production schema migration contract.
+   ensureColumn(db, "thought_dispatch_diagnostics", "cycle_metrics_json", "TEXT");
++  ensureColumn(db, "thought_dispatch_diagnostics", "provider_failure_json", "TEXT");
+ }
+ 
+ export class ObservabilityStore {
+@@ -317,14 +512,14 @@ export class ObservabilityStore {
+         total_demand_tokens, semantic_projection_hash, dispatch_messages_hash,
+         primary_provider, primary_attempt_id, primary_dispatch_truth,
+         suppressed_provider, fallback_attempt_ordinal, fallback_from_attempt_id,
+-        secondary_dispatch_truth, cycle_metrics_json, created_at_ms
++        secondary_dispatch_truth, cycle_metrics_json, provider_failure_json, created_at_ms
+       ) VALUES (
+         ?, ?, ?, ?, ?, ?,
+         ?, ?, ?,
+         ?, ?, ?,
+         ?, ?, ?,
+         ?, ?, ?,
+-        ?, ?, ?
++        ?, ?, ?, ?
+       )
+     `);
+ 
+@@ -349,6 +544,7 @@ export class ObservabilityStore {
+       diag.fallbackFromAttemptId ?? null,
+       diag.secondaryDispatchTruth ?? null,
+       diagnosticPayload(diag),
++      providerFailurePayload(diag.providerFailure),
+       diag.createdAtMs ?? nowMs,
+     );
+   }
+@@ -492,6 +688,7 @@ export class ObservabilityStore {
+       fallback_from_attempt_id: string | null;
+       secondary_dispatch_truth: "not_sent" | null;
+       cycle_metrics_json: string | null;
++      provider_failure_json: string | null;
+       created_at_ms: number;
+     }>;
+ 
+@@ -519,6 +716,7 @@ export class ObservabilityStore {
+         secondaryDispatchTruth: r.secondary_dispatch_truth,
+         ...(overflowDetails ?? {}),
+         cycleMetrics: parseCycleMetrics(r.cycle_metrics_json),
++        providerFailure: parseProviderFailureCapture(r.provider_failure_json),
+         createdAtMs: r.created_at_ms,
+       };
+     });
+diff --git a/apps/agent-service/src/core/cognitive-v021/thought/run.ts b/apps/agent-service/src/core/cognitive-v021/thought/run.ts
+index 878c4e77e0c07c8c7eb7989db6de3e6fd7be63d6..8ed5995183acddf1f427d64b005286c525b37f8a 100644
+--- a/apps/agent-service/src/core/cognitive-v021/thought/run.ts
++++ b/apps/agent-service/src/core/cognitive-v021/thought/run.ts
+@@ -94,7 +94,19 @@ import { getWake } from "../wake/ledger.js";
+ import { admitOwnerSuppliedClaim, runGovernedAdmissionCatchup } from "../memory/admission.js";
+ import { hasStructuredCurrentnessEntitlement } from "../authority/check.js";
+ import { recordDiagnostic, recordThoughtCycleMetrics } from "./diagnostics.js";
++import type { ThoughtProviderFailureCapture } from "./diagnostics.js";
+ import { metadataFromError } from "../../model-fabric/receipts.js";
++import type {
++  ModelAttemptReceipt,
++  ModelFabricDispatchMetadata,
++} from "../../model-fabric/types.js";
++import { sha256Text } from "../../model-fabric/hash.js";
++import type {
++  ProviderBoundaryControls,
++  ProviderBoundaryTiming,
++  ProviderResponseDiagnostics,
++  WireDispatchEvidence,
++} from "../../model-routing/types.js";
+ import { fidelityCheck } from "../speech/fidelity.js";
+ import { emitInfrastructureNotice } from "../speech/infrastructure-notice.js";
+ import { recordThoughtC3TerminalFailure } from "../failure/c3-recorder.js";
+@@ -128,6 +140,8 @@ export type ThoughtInvocation = {
+   kernelEnvelope?: KernelEnvelope;
+   /** Provider prompt input tokens, or the shared structural estimate for a fixture. */
+   inputTokens?: number;
++  /** Bounded provider-boundary evidence for a failed Thought attempt. */
++  providerFailureCapture?: ThoughtProviderFailureCapture;
+ };
+ 
+ type SettlementRevisionFeedback = {
+@@ -192,6 +206,219 @@ export async function invokeThoughtComplete(
+   return invoker(messages, options);
+ }
+ 
++type ThoughtProviderCaptureStatus = {
++  parserStatus: ThoughtProviderFailureCapture["parserStatus"];
++  validatorStatus: ThoughtProviderFailureCapture["validatorStatus"];
++  failureClass?: string;
++  structuralRetryStatus: ThoughtProviderFailureCapture["structuralRetryStatus"];
++};
++
++function terminalModelAttempt(
++  metadata: ModelFabricDispatchMetadata | null | undefined,
++): ModelAttemptReceipt | null {
++  const receipt = metadata?.receipt;
++  if (!receipt || receipt.receiptStage !== "resolved") return null;
++  return receipt.attempts.at(-1) ?? null;
++}
++
++function safeFailureClass(value: unknown): string | undefined {
++  const raw = typeof value === "string"
++    ? value
++    : value && typeof value === "object" && typeof (value as { code?: unknown }).code === "string"
++      ? (value as { code: string }).code
++      : value instanceof Error && value.name
++        ? value.name
++        : undefined;
++  if (!raw) return undefined;
++  const bounded = raw.trim().slice(0, 128);
++  return bounded.length > 0 && /^[A-Za-z0-9_.:-]+$/.test(bounded)
++    ? bounded
++    : "sanitized_failure";
++}
++
++function finiteNonNegative(value: unknown): number | undefined {
++  return typeof value === "number" && Number.isFinite(value) && value >= 0
++    ? value
++    : undefined;
++}
++
++function providerFailureCapture(input: {
++  metadata?: ModelFabricDispatchMetadata | null;
++  completion?: Awaited<ReturnType<typeof completeChat>>;
++  controls?: ProviderBoundaryControls;
++  timing?: ProviderBoundaryTiming;
++  options: {
++    deadlineAtMs?: number | null;
++    maxTokens?: number;
++    temperature?: number;
++    structuredOutput?: { schemaFingerprint?: string };
++  };
++  dispatchTruth: ThoughtProviderFailureCapture["dispatchTruth"];
++  status: ThoughtProviderCaptureStatus;
++}): ThoughtProviderFailureCapture {
++  const metadata = input.metadata ?? input.completion?.modelFabric ?? null;
++  const attempt = terminalModelAttempt(metadata);
++  const completion = input.completion;
++  const controls = input.controls
++    ?? completion?.providerBoundaryControls
++    ?? metadata?.providerBoundaryControls;
++  const timing = input.timing
++    ?? completion?.providerBoundaryTiming
++    ?? metadata?.providerBoundaryTiming;
++  const wireEvidence: WireDispatchEvidence | undefined = completion?.wireEvidence
++    ?? metadata?.wireEvidence
++    ?? attempt?.wireEvidence
++    ?? undefined;
++  const responseDiagnostics: ProviderResponseDiagnostics | undefined =
++    completion?.responseDiagnostics;
++  const capturedAttempt = completion?.capturedAttemptIdentity;
++  const provider = attempt?.provider
++    ?? metadata?.resolvedRoute?.provider
++    ?? capturedAttempt?.provider;
++  const model = attempt?.configuredModelId
++    ?? capturedAttempt?.configuredModelId
++    ?? completion?.modelAlias;
++  const providerModel = completion?.providerModel ?? undefined;
++  const receipt = metadata?.receipt;
++  const attentionRequestId = completion?.attentionRequestId
++    ?? (receipt && receipt.attentionRequestId !== null ? receipt.attentionRequestId : undefined);
++  const canonicalSchemaFingerprint = capturedAttempt?.semanticSchemaFingerprint
++    ?? THOUGHT_OUTPUT_SCHEMA_FINGERPRINT;
++  const wireSchemaFingerprint = capturedAttempt?.wireSchemaFingerprint
++    ?? attempt?.structuredOutputSchemaFingerprint
++    ?? input.options.structuredOutput?.schemaFingerprint;
++  const reasoningConfiguration = controls?.reasoningConfiguration
++    ?? attempt?.effectiveReasoningSent
++    ?? attempt?.translatedWireControl
++    ?? attempt?.effectiveReasoning
++    ?? undefined;
++  const maxTokens = controls?.maxTokens
++    ?? responseDiagnostics?.outputTokenLimit
++    ?? input.options.maxTokens;
++  const deadlineAtMs = controls?.deadlineAtMs ?? input.options.deadlineAtMs;
++  const capture: ThoughtProviderFailureCapture = {
++    dispatchTruth: input.dispatchTruth,
++    parserStatus: input.status.parserStatus,
++    validatorStatus: input.status.validatorStatus,
++    structuralRetryStatus: input.status.structuralRetryStatus,
++    ...(provider ? { provider: String(provider) } : {}),
++    ...(model ? { model: String(model) } : {}),
++    ...(providerModel ? { providerModel: String(providerModel) } : {}),
++    ...(attempt?.invocationId
++      ? { modelFabricInvocationId: attempt.invocationId }
++      : capturedAttempt?.modelFabricInvocationId
++        ? { modelFabricInvocationId: capturedAttempt.modelFabricInvocationId }
++      : receipt?.invocationId
++        ? { modelFabricInvocationId: receipt.invocationId }
++        : {}),
++    ...(attempt?.attemptId
++      ? { modelFabricAttemptId: attempt.attemptId }
++      : capturedAttempt?.modelFabricAttemptId
++        ? { modelFabricAttemptId: capturedAttempt.modelFabricAttemptId }
++        : {}),
++    ...(attempt?.attemptOrdinal !== undefined
++      ? { attemptOrdinal: attempt.attemptOrdinal }
++      : capturedAttempt?.attemptOrdinal !== undefined
++        ? { attemptOrdinal: capturedAttempt.attemptOrdinal }
++        : {}),
++    ...(capturedAttempt?.dispatchSequence !== undefined
++      ? { dispatchSequence: capturedAttempt.dispatchSequence }
++      : {}),
++    ...(typeof attentionRequestId === "number" ? { attentionRequestId } : {}),
++    ...(canonicalSchemaFingerprint ? { canonicalSchemaFingerprint } : {}),
++    ...(wireSchemaFingerprint ? { wireSchemaFingerprint } : {}),
++    ...(wireEvidence?.bindingId ? { wireBindingId: wireEvidence.bindingId } : {}),
++    ...(wireEvidence?.wireFormat ? { wireFormat: wireEvidence.wireFormat } : {}),
++    ...(wireEvidence?.sanitizedBodyDigest
++      ? { wireBodyDigest: wireEvidence.sanitizedBodyDigest }
++      : {}),
++    ...(typeof maxTokens === "number" ? { maxTokens } : {}),
++    ...(reasoningConfiguration ? { reasoningConfiguration } : {}),
++    ...(typeof controls?.reasoningBudgetTokens === "number"
++      ? { reasoningBudgetTokens: controls.reasoningBudgetTokens }
++      : {}),
++    ...(typeof (controls?.temperature ?? input.options.temperature) === "number"
++      ? { temperature: controls?.temperature ?? input.options.temperature }
++      : {}),
++    ...(typeof controls?.topP === "number" ? { topP: controls.topP } : {}),
++    ...(typeof deadlineAtMs === "number" ? { deadlineAtMs } : {}),
++    ...(timing?.requestStartedAtMs !== undefined
++      ? { requestStartedAtMs: timing.requestStartedAtMs }
++      : {}),
++    ...(timing?.responseAtMs !== undefined ? { responseAtMs: timing.responseAtMs } : {}),
++    ...(timing?.elapsedMs !== undefined ? { elapsedMs: timing.elapsedMs } : {}),
++    ...(timing?.remainingDeadlineMs !== undefined
++      ? { remainingDeadlineMs: timing.remainingDeadlineMs }
++      : {}),
++    ...(responseDiagnostics?.finishReason ?? completion?.finishReason
++      ? { finishReason: responseDiagnostics?.finishReason ?? completion?.finishReason! }
++      : {}),
++    ...(finiteNonNegative(completion?.usage?.promptTokens) !== undefined
++      ? { inputTokens: finiteNonNegative(completion?.usage?.promptTokens) }
++      : {}),
++    ...(finiteNonNegative(completion?.usage?.completionTokens) !== undefined
++      ? { completionTokens: finiteNonNegative(completion?.usage?.completionTokens) }
++      : {}),
++    ...(responseDiagnostics?.finalTextBytes !== undefined
++      ? { contentBytes: responseDiagnostics.finalTextBytes }
++      : completion && typeof completion.text === "string"
++        ? { contentBytes: Buffer.byteLength(completion.text, "utf8") }
++        : {}),
++    ...(responseDiagnostics?.reasoningContentBytes !== undefined
++      ? { reasoningContentBytes: responseDiagnostics.reasoningContentBytes }
++      : {}),
++    ...(responseDiagnostics?.reasoningHash
++      ? { reasoningHash: responseDiagnostics.reasoningHash }
++      : {}),
++    ...(completion && typeof completion.text === "string"
++      ? { contentHash: `sha256:${sha256Text(completion.text)}` }
++      : {}),
++    ...(input.status.failureClass ? { failureClass: input.status.failureClass } : {}),
++  };
++  return capture;
++}
++
++function providerFailureCaptureForCompletion(
++  completion: Awaited<ReturnType<typeof completeChat>>,
++  options: ThoughtCompleteOptions,
++  status: ThoughtProviderCaptureStatus,
++): ThoughtProviderFailureCapture {
++  const attempt = terminalModelAttempt(completion.modelFabric);
++  const dispatchTruth: ThoughtProviderFailureCapture["dispatchTruth"] =
++    attempt?.dispatchTruth === "not_sent" ? "not_sent" : "sent";
++  return providerFailureCapture({
++    completion,
++    options,
++    dispatchTruth,
++    status,
++  });
++}
++
++function providerFailureCaptureForError(
++  error: unknown,
++  options: ThoughtCompleteOptions,
++): ThoughtProviderFailureCapture {
++  const metadata = metadataFromError(error);
++  const attempt = terminalModelAttempt(metadata);
++  const dispatchTruth: ThoughtProviderFailureCapture["dispatchTruth"] =
++    attempt?.dispatchTruth === "not_sent"
++      ? "not_sent"
++      : attempt?.dispatchTruth === "sent_outcome_unknown" || attempt?.dispatchTruth === "response_received"
++        ? "sent"
++        : "unknown";
++  return providerFailureCapture({
++    metadata,
++    options,
++    dispatchTruth,
++    status: {
++      parserStatus: "not_run",
++      validatorStatus: "not_run",
++      failureClass: metadata?.failure?.sanitizedCauseClass ?? safeFailureClass(error),
++      structuralRetryStatus: "not_applicable",
++    },
++  });
++}
++
+ function thoughtMessages(
+   input: ThoughtInput,
+   structuralFeedback?: StructuralFeedbackInput,
+@@ -701,6 +928,7 @@ export async function runThoughtModel(
+   let semanticProjectionHash: string | undefined;
+   let dispatchMessagesHash: string | undefined;
+   let completionInputTokens: number | undefined;
++  let lastCompletion: Awaited<ReturnType<typeof completeChat>> | undefined;
+ 
+   try {
+     if ("rawConversation" in input && input.retrieval && Array.isArray(input.retrieval.hits)) {
+@@ -779,6 +1007,7 @@ export async function runThoughtModel(
+       dispatchOptions,
+       deps.completeChat,
+     );
++    lastCompletion = completion;
+     completionInputTokens = completion.usage?.promptTokens ?? estimatedInputTokens;
+     if (options.signal?.aborted) {
+       return {
+@@ -831,6 +1060,16 @@ export async function runThoughtModel(
+         malformed: true,
+         structuralFeedback,
+         inputTokens: completion.usage?.promptTokens ?? estimatedInputTokens,
++        providerFailureCapture: providerFailureCaptureForCompletion(
++          completion,
++          dispatchOptions,
++          {
++            parserStatus: "failed",
++            validatorStatus: "not_run",
++            failureClass: semanticResult.code,
++            structuralRetryStatus: "not_scheduled",
++          },
++        ),
+       };
+     }
+     const semantic = semanticResult.value;
+@@ -854,6 +1093,16 @@ export async function runThoughtModel(
+         requestId,
+         correctionScopeViolation: correctionValidation.violation,
+         inputTokens: completion.usage?.promptTokens ?? estimatedInputTokens,
++        providerFailureCapture: providerFailureCaptureForCompletion(
++          completion,
++          dispatchOptions,
++          {
++            parserStatus: "passed",
++            validatorStatus: "failed",
++            failureClass: correctionValidation.violation.code,
++            structuralRetryStatus: "not_scheduled",
++          },
++        ),
+       };
+     }
+     const kernelEnvelope = completion.capturedAttemptIdentity
+@@ -984,11 +1233,26 @@ export async function runThoughtModel(
+         requestId,
+         malformed: true,
+         inputTokens: completionInputTokens,
++        ...(lastCompletion
++          ? {
++              providerFailureCapture: providerFailureCaptureForCompletion(
++                lastCompletion,
++                dispatchOptions,
++                {
++                  parserStatus: "passed",
++                  validatorStatus: "failed",
++                  failureClass: error.code,
++                  structuralRetryStatus: "not_scheduled",
++                },
++              ),
++            }
++          : {}),
+       };
+     }
+     if (!cancelled && deps.observabilityDb) {
+       try {
+         const mfMeta = metadataFromError(error);
++        const providerCapture = providerFailureCaptureForError(error, dispatchOptions);
+         if (mfMeta && mfMeta.failoverSuppressed === "transport_failover_unavailable_for_projection") {
+           const receipt = mfMeta.receipt;
+           const resolvedReceipt = receipt && receipt.receiptStage === "resolved" ? receipt : null;
+@@ -1013,6 +1277,7 @@ export async function runThoughtModel(
+             fallbackAttemptOrdinal: 2,
+             fallbackFromAttemptId: primaryAttemptId,
+             secondaryDispatchTruth: "not_sent",
++            providerFailure: providerCapture,
+             createdAtMs: deps.nowMs(),
+           });
+         } else if ((error as { code?: string })?.code === "request_exceeds_tpm_budget") {
+@@ -1028,6 +1293,20 @@ export async function runThoughtModel(
+             dispatchMessagesHash,
+             createdAtMs: deps.nowMs(),
+           });
++        } else if (providerCapture.dispatchTruth !== "not_sent") {
++          recordDiagnostic(deps.observabilityDb, {
++            cycleId: input.cycleId,
++            generation: input.generation,
++            requestId,
++            pass,
++            code: "provider_unavailable",
++            stage: "provider_dispatch",
++            dispatchTruth: providerCapture.dispatchTruth,
++            semanticProjectionHash,
++            dispatchMessagesHash,
++            providerFailure: providerCapture,
++            createdAtMs: deps.nowMs(),
++          });
+         }
+       } catch {
+         // Observability DB persistence failures must not block thought execution
+@@ -1608,6 +1887,25 @@ export async function runCognitiveCycle(
+     }
+ 
+     if (invocation.correctionScopeViolation) {
++      if (deps.observabilityDb && invocation.providerFailureCapture) {
++        try {
++          recordDiagnostic(deps.observabilityDb, {
++            cycleId: cycle.cycleId,
++            generation: cycle.generation,
++            requestId: invocation.output.requestId,
++            pass,
++            code: "parser_malformed",
++            stage: "parser",
++            dispatchTruth: invocation.providerFailureCapture.dispatchTruth,
++            semanticProjectionHash: allocated.hashes.semanticProjectionHash,
++            dispatchMessagesHash: allocated.hashes.dispatchMessagesHash,
++            providerFailure: invocation.providerFailureCapture,
++            createdAtMs: deps.nowMs(),
++          });
++        } catch {
++          // Observability persistence must not change the terminal outcome.
++        }
++      }
+       return emitFailure(invocation.correctionScopeViolation.code);
+     }
+ 
+@@ -1620,6 +1918,14 @@ export async function runCognitiveCycle(
+           field: invocation.output.kind === "failure" ? invocation.output.diagnosticField : undefined,
+           allowlistedReferences: semanticReferencesForInput(allocated.projected),
+         });
++      const retryScheduled =
++        structuralRetriesForPass < 2 && counters.thoughtModelAttempts < MAX_THOUGHT_MODEL_ATTEMPTS;
++      const providerFailure = invocation.providerFailureCapture
++        ? {
++            ...invocation.providerFailureCapture,
++            structuralRetryStatus: retryScheduled ? "scheduled" as const : "exhausted" as const,
++          }
++        : undefined;
+       if (deps.observabilityDb) {
+         try {
+           recordDiagnostic(deps.observabilityDb, {
+@@ -1629,16 +1935,17 @@ export async function runCognitiveCycle(
+             pass,
+             code: "parser_malformed",
+             stage: "parser",
+-            dispatchTruth: "not_sent",
++            dispatchTruth: providerFailure?.dispatchTruth ?? "unknown",
+             semanticProjectionHash: allocated.hashes.semanticProjectionHash,
+             dispatchMessagesHash: allocated.hashes.dispatchMessagesHash,
++            providerFailure,
+             createdAtMs: deps.nowMs(),
+           });
+         } catch {
+           // ignore
+         }
+       }
+-      if (structuralRetriesForPass < 2 && counters.thoughtModelAttempts < MAX_THOUGHT_MODEL_ATTEMPTS) {
++      if (retryScheduled) {
+         structuralRetriesForPass += 1;
+         incrementThoughtAttemptCounter(sidecar, cycle.cycleId, cycle.generation, "structuralRetries");
+         continue;
+diff --git a/apps/agent-service/src/core/model-fabric/mf-m1.test.ts b/apps/agent-service/src/core/model-fabric/mf-m1.test.ts
+index 8ce6a67b0628d4ce0ec67fe10f6961c423e87966..06d8bf3fdd97123a5e89492ab0c1ea34ed221907 100644
+--- a/apps/agent-service/src/core/model-fabric/mf-m1.test.ts
++++ b/apps/agent-service/src/core/model-fabric/mf-m1.test.ts
+@@ -246,7 +246,8 @@ describe("MF-M1 completeChat receipts", () => {
+         deadlineAtMs: Date.now() + 60_000,
+       },
+     ));
+-    const receipt = fabricMetadata(result).receipt;
++    const metadata = fabricMetadata(result);
++    const receipt = metadata.receipt;
+ 
+     expect(receipt.attempts).toHaveLength(1);
+     expect(receipt.finalDispatchedRouteId).toBe("thought");
+@@ -259,6 +260,19 @@ describe("MF-M1 completeChat receipts", () => {
+       providerRequestCount: 1,
+     });
+     expect(receipt.attempts[0]?.dispatchTruth).toBe("response_received");
++    expect(result.providerBoundaryControls).toMatchObject({
++      maxTokens: expect.any(Number),
++      reasoningConfiguration: expect.any(String),
++      deadlineAtMs: expect.any(Number),
++    });
++    expect(result.providerBoundaryTiming).toMatchObject({
++      requestStartedAtMs: expect.any(Number),
++      responseAtMs: expect.any(Number),
++      elapsedMs: expect.any(Number),
++      outcome: "response_received",
++    });
++    expect(metadata.providerBoundaryControls).toEqual(result.providerBoundaryControls);
++    expect(metadata.providerBoundaryTiming).toEqual(result.providerBoundaryTiming);
+     expect(dispatch).toHaveBeenCalledTimes(1);
+     database.close();
+   });
+@@ -376,6 +390,15 @@ describe("MF-M1 completeChat receipts", () => {
+       code: "provider_quota",
+       dispatchTruth: "response_received",
+     });
++    expect(metadata.providerBoundaryControls).toMatchObject({
++      maxTokens: expect.any(Number),
++    });
++    expect(metadata.providerBoundaryTiming).toMatchObject({
++      requestStartedAtMs: expect.any(Number),
++      responseAtMs: expect.any(Number),
++      elapsedMs: expect.any(Number),
++      outcome: "error",
++    });
+     expect(dispatch).toHaveBeenCalledTimes(1);
+     database.close();
+   });
+diff --git a/apps/agent-service/src/core/model-fabric/types.ts b/apps/agent-service/src/core/model-fabric/types.ts
+index 3131a15b82ba0257369ae64636b2bf2ded90eddd..bca6dd4388b3160405c7d61617e64d282f310d24 100644
+--- a/apps/agent-service/src/core/model-fabric/types.ts
++++ b/apps/agent-service/src/core/model-fabric/types.ts
+@@ -510,5 +510,9 @@ export type ModelFabricDispatchMetadata = {
+   suppressedProvider?: string;
+   suppressedBucket?: string;
+   wireEvidence?: import("../model-routing/types.js").WireDispatchEvidence;
++  /** Bounded controls resolved immediately before the adapter call. */
++  providerBoundaryControls?: import("../model-routing/types.js").ProviderBoundaryControls;
++  /** Timing measured around the adapter call. */
++  providerBoundaryTiming?: import("../model-routing/types.js").ProviderBoundaryTiming;
+   capabilityIdentity?: import("./capability-identity.js").ThoughtCapabilityIdentity;
+ };
+diff --git a/apps/agent-service/src/core/model-routing/adapters/nim-adapter.test.ts b/apps/agent-service/src/core/model-routing/adapters/nim-adapter.test.ts
+index d81490a35569df72af2860f13e7661b32a576ded..644f377d01d3ff252cab45714b31caf2af41485d 100644
+--- a/apps/agent-service/src/core/model-routing/adapters/nim-adapter.test.ts
++++ b/apps/agent-service/src/core/model-routing/adapters/nim-adapter.test.ts
+@@ -439,6 +439,51 @@ describe("nim-adapter fixtures", () => {
+       reasoningTokens: 30,
+     });
+     expect(result.finishReason).toBe("stop");
++    expect(result.responseDiagnostics).toMatchObject({
++      contentContainerType: "string",
++      finalTextBytes: Buffer.byteLength('{"kind":"speak","reason":"hello"}', "utf8"),
++      finishReason: "stop",
++      finishReasonClass: "STOP",
++      outputTokenLimit: 1000,
++      outputTokens: 50,
++      reasoningTokens: 30,
++      reasoningContentBytes: Buffer.byteLength("hidden chain of thought", "utf8"),
++      reasoningHash: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
++      extractionFailure: "none",
++    });
++    expect(JSON.stringify(result.responseDiagnostics)).not.toContain("hidden chain of thought");
++  });
++
++  it("keeps thinking chunks out of semantic text while preserving their shape", async () => {
++    env.nimApiKey = "test";
++    const adapter = createNimAdapter(async () =>
++      fakeResponse({
++        choices: [
++          {
++            message: {
++              content: [
++                { type: "thinking", thinking: [{ type: "text", text: "private reasoning" }] },
++                { type: "text", text: '{"kind":"speak"}' },
++              ],
++            },
++            finish_reason: "stop",
++          },
++        ],
++      }),
++    );
++
++    const result = await adapter.dispatch({ messages, modelId: "openai/gpt-oss-20b", options: {} });
++
++    expect(result.text).toBe('{"kind":"speak"}');
++    expect(result.text).not.toContain("private reasoning");
++    expect(result.responseDiagnostics).toMatchObject({
++      contentContainerType: "array",
++      contentChunkTypes: ["thinking", "text"],
++      textChunkCount: 1,
++      thinkingChunkCount: 1,
++      extractionFailure: "none",
++    });
++    expect(JSON.stringify(result.responseDiagnostics)).not.toContain("private reasoning");
+   });
+ 
+   it("throws agent_not_ready when the API key is missing", async () => {
+diff --git a/apps/agent-service/src/core/model-routing/adapters/nim-adapter.ts b/apps/agent-service/src/core/model-routing/adapters/nim-adapter.ts
+index 0414377e4bd6635c272785aa5c2e53c02749758e..64a66c04a68b94d33eef783b95b4212bb0d63465 100644
+--- a/apps/agent-service/src/core/model-routing/adapters/nim-adapter.ts
++++ b/apps/agent-service/src/core/model-routing/adapters/nim-adapter.ts
+@@ -1,6 +1,7 @@
+ import { env } from "../../../env.js";
+ import { AppError } from "../../../errors.js";
+ import { applyTranslatedControlToNimBody } from "../../model-fabric/reasoning-translation.js";
++import { sha256Text } from "../../model-fabric/hash.js";
+ import type {
+   ChatMessage,
+   CompletionOptions,
+@@ -10,6 +11,8 @@ import type {
+   ToolCallResult,
+   ProviderDispatchArgs,
+   TrustedReasoningControl,
++  ProviderFinishReasonClass,
++  ProviderResponseDiagnostics,
+ } from "../types.js";
+ import type { TrustedStructuredOutputControl } from "../../model-fabric/types.js";
+ import { wireEvidenceFor } from "../../model-fabric/wire-evidence.js";
+@@ -76,6 +79,115 @@ function toFinishReason(raw: unknown): string | null {
+   return FINISH_REASONS.has(value) ? value : "other";
+ }
+ 
++function finishReasonClass(
++  finishReason: string | null,
++): ProviderFinishReasonClass {
++  if (!finishReason) return "UNKNOWN";
++  switch (finishReason) {
++    case "stop":
++      return "STOP";
++    case "length":
++      return "LENGTH";
++    case "content_filter":
++      return "CONTENT_FILTER";
++    case "tool_calls":
++      return "TOOL";
++    default:
++      return "OTHER";
++  }
++}
++
++function boundedChunkType(value: unknown): string {
++  return typeof value === "string" && value.length > 0
++    ? value.slice(0, 64)
++    : "<invalid>";
++}
++
++function contentDiagnostics(
++  content: unknown,
++): Pick<
++  ProviderResponseDiagnostics,
++  "contentContainerType" | "contentChunkTypes" | "textChunkCount" | "thinkingChunkCount" | "extractionFailure"
++> {
++  if (typeof content === "string") {
++    return {
++      contentContainerType: "string",
++      contentChunkTypes: [],
++      textChunkCount: 0,
++      thinkingChunkCount: 0,
++      extractionFailure: "none",
++    };
++  }
++  if (content === null) {
++    return {
++      contentContainerType: "null",
++      contentChunkTypes: [],
++      textChunkCount: 0,
++      thinkingChunkCount: 0,
++      extractionFailure: "missing_content",
++    };
++  }
++  if (content === undefined) {
++    return {
++      contentContainerType: "unknown",
++      contentChunkTypes: [],
++      textChunkCount: 0,
++      thinkingChunkCount: 0,
++      extractionFailure: "missing_content",
++    };
++  }
++  if (!Array.isArray(content)) {
++    return {
++      contentContainerType: "unknown",
++      contentChunkTypes: [],
++      textChunkCount: 0,
++      thinkingChunkCount: 0,
++      extractionFailure: "unsupported_container",
++    };
++  }
++  const contentChunkTypes: string[] = [];
++  let textChunkCount = 0;
++  let thinkingChunkCount = 0;
++  let extractionFailure: ProviderResponseDiagnostics["extractionFailure"] = "none";
++  for (const chunk of content) {
++    if (typeof chunk !== "object" || chunk === null) {
++      contentChunkTypes.push("<invalid>");
++      if (extractionFailure === "none") extractionFailure = "malformed_chunk";
++      continue;
++    }
++    const record = chunk as { type?: unknown; text?: unknown; thinking?: unknown };
++    const type = record.type;
++    contentChunkTypes.push(boundedChunkType(type));
++    if (type === "text" || type === undefined) {
++      textChunkCount += 1;
++      if (typeof record.text !== "string" && extractionFailure === "none") {
++        extractionFailure = "malformed_chunk";
++      }
++    } else if (type === "thinking") {
++      thinkingChunkCount += 1;
++    } else if (extractionFailure === "none") {
++      extractionFailure = "unknown_chunk_type";
++    }
++  }
++  return {
++    contentContainerType: "array",
++    contentChunkTypes,
++    textChunkCount,
++    thinkingChunkCount,
++    extractionFailure,
++  };
++}
++
++function reasoningContentBytes(message: NimMessage | undefined): number | undefined {
++  const value = message?.reasoning_content ?? message?.reasoning;
++  return typeof value === "string" ? Buffer.byteLength(value, "utf8") : undefined;
++}
++
++function reasoningContentHash(message: NimMessage | undefined): `sha256:${string}` | undefined {
++  const value = message?.reasoning_content ?? message?.reasoning;
++  return typeof value === "string" ? `sha256:${sha256Text(value)}` : undefined;
++}
++
+ function buildRequestBody(
+   messages: ChatMessage[],
+   options: CompletionOptions,
+@@ -344,13 +456,31 @@ export function createNimAdapter(
+       const choice = json.choices?.[0];
+       const msg = choice?.message;
+       const text = msg?.content ? extractText(msg.content) : "";
++      const finishReason = toFinishReason(choice?.finish_reason);
++      const usage = toTokenUsage(json.usage);
++      const shape = contentDiagnostics(msg?.content);
++      const reasoningBytes = reasoningContentBytes(msg);
++      const reasoningHash = reasoningContentHash(msg);
+       const completion: ProviderCompletion = {
+         text,
+         toolCalls: parseToolCalls(msg),
+-        usage: toTokenUsage(json.usage),
++        usage,
+         providerModel:
+           typeof json.model === "string" ? json.model : null,
+-        finishReason: toFinishReason(choice?.finish_reason),
++        finishReason,
++        responseDiagnostics: {
++          ...shape,
++          finalTextBytes: Buffer.byteLength(text, "utf8"),
++          finishReason,
++          finishReasonClass: finishReasonClass(finishReason),
++          outputTokenLimit: args.options.maxTokens ?? 2048,
++          outputTokens: usage?.completionTokens ?? null,
++          reasoningTokens: usage?.reasoningTokens ?? null,
++          ...(reasoningBytes !== undefined
++            ? { reasoningContentBytes: reasoningBytes }
++            : {}),
++          ...(reasoningHash ? { reasoningHash } : {}),
++        },
+         wireEvidence,
+       };
+       return completion;
+diff --git a/apps/agent-service/src/core/model-routing/types.ts b/apps/agent-service/src/core/model-routing/types.ts
+index 86db338f95d98ca262c524207689ab992de0c1a4..9330ae8ab72051b17e3cd5a4c3c0fffa05f5072b 100644
+--- a/apps/agent-service/src/core/model-routing/types.ts
++++ b/apps/agent-service/src/core/model-routing/types.ts
+@@ -90,6 +90,10 @@ export type ProviderResponseDiagnostics = Readonly<{
+   outputTokenLimit: number | null;
+   outputTokens: number | null;
+   reasoningTokens: number | null;
++  /** Bounded UTF-8 byte length of provider-hidden reasoning, when exposed. */
++  reasoningContentBytes?: number;
++  /** Hash of provider-hidden reasoning, when exposed; reasoning text is never retained. */
++  reasoningHash?: `sha256:${string}`;
+   extractionFailure:
+     | "none"
+     | "unknown_chunk_type"
+@@ -98,6 +102,31 @@ export type ProviderResponseDiagnostics = Readonly<{
+     | "missing_content";
+ }>;
+ 
++/**
++ * Exact timing measured around one provider-adapter invocation. These facts
++ * are diagnostic only and never influence Thought semantics or retry policy.
++ */
++export type ProviderBoundaryTiming = Readonly<{
++  requestStartedAtMs: number;
++  responseAtMs: number;
++  elapsedMs: number;
++  remainingDeadlineMs?: number;
++  outcome: "response_received" | "error";
++}>;
++
++/**
++ * Controls resolved immediately before the provider adapter call. Optional
++ * fields stay absent when the current route does not expose them.
++ */
++export type ProviderBoundaryControls = Readonly<{
++  maxTokens?: number;
++  reasoningConfiguration?: string;
++  reasoningBudgetTokens?: number;
++  temperature?: number;
++  topP?: number;
++  deadlineAtMs?: number;
++}>;
++
+ export type ToolDefinition = {
+   type: "function";
+   function: {
+diff --git a/apps/agent-service/src/mistral-client.ts b/apps/agent-service/src/mistral-client.ts
+index 358d07f02a34c456bb3fc44e92e2f84e7f8a08fc..6358cea24b43aba06ce15203d3b01f3f1143e4f4 100644
+--- a/apps/agent-service/src/mistral-client.ts
++++ b/apps/agent-service/src/mistral-client.ts
+@@ -42,6 +42,8 @@ import {
+   type CompletionOptions,
+   type MistralCredentialSeat,
+   type ProviderResponseDiagnostics,
++  type ProviderBoundaryControls,
++  type ProviderBoundaryTiming,
+ } from "./core/model-routing/types.js";
+ import {
+   attachModelFabricMetadata,
+@@ -366,6 +368,29 @@ function observedHttpStatus(error: unknown): number | null {
+   return null;
+ }
+ 
++function attachProviderBoundaryFact(
++  error: unknown,
++  key: "providerBoundaryControls" | "providerBoundaryTiming",
++  value: ProviderBoundaryControls | ProviderBoundaryTiming,
++): void {
++  if (!error || (typeof error !== "object" && typeof error !== "function")) return;
++  Object.defineProperty(error, key, {
++    configurable: true,
++    enumerable: false,
++    value,
++    writable: true,
++  });
++}
++
++function providerBoundaryFactFromError<T>(
++  error: unknown,
++  key: "providerBoundaryControls" | "providerBoundaryTiming",
++): T | undefined {
++  if (!error || typeof error !== "object") return undefined;
++  const value = (error as Record<string, unknown>)[key];
++  return value && typeof value === "object" ? value as T : undefined;
++}
++
+ function combineSignals(
+   signal: AbortSignal | undefined,
+   deadlineAtMs: number | null | undefined,
+@@ -390,10 +415,13 @@ export async function completeChat(
+   model: string;
+   modelAlias: string;
+   resolvedModelId: string | null;
++  providerModel?: string | null;
+   toolCalls?: ToolCallResult[];
+   usage?: TokenUsage;
+   finishReason?: string | null;
+   responseDiagnostics?: ProviderResponseDiagnostics;
++  providerBoundaryControls?: ProviderBoundaryControls;
++  providerBoundaryTiming?: ProviderBoundaryTiming;
+   attentionRequestId?: number;
+   acceptedDispatchIdentity?: AcceptedDispatchIdentity;
+   /** Exact Thought attempt identity returned by the Attention/Model Fabric bind. */
+@@ -760,6 +788,20 @@ export async function completeChat(
+       credentialSeat,
+     );
+     const attempt = attemptContext.attempt;
++    const providerBoundaryControls: ProviderBoundaryControls = {
++      maxTokens: dispatchContract.maxTokens,
++      ...(attemptContext.effectiveReasoning
++        ? { reasoningConfiguration: attemptContext.effectiveReasoning }
++        : attemptContext.requestedWireReasoning
++          ? { reasoningConfiguration: attemptContext.requestedWireReasoning }
++          : {}),
++      ...(options.temperature !== undefined
++        ? { temperature: options.temperature }
++        : {}),
++      ...(options.deadlineAtMs != null
++        ? { deadlineAtMs: options.deadlineAtMs }
++        : {}),
++    };
+     if (privateBudgetBinding && !privateBudgetBound) {
+       bindPrivateReservationInvocation(privateBudgetBinding.sidecar, {
+         reservationId: privateBudgetBinding.reservationId,
+@@ -778,6 +820,7 @@ export async function completeChat(
+         400,
+       );
+     }
++    let providerBoundaryTiming: ProviderBoundaryTiming | undefined;
+     try {
+       const result = await runAttentiveDispatch<{
+         text: string;
+@@ -787,6 +830,8 @@ export async function completeChat(
+         finishReason?: string | null;
+         responseDiagnostics?: ProviderResponseDiagnostics;
+         wireEvidence?: WireDispatchEvidence;
++        providerBoundaryControls?: ProviderBoundaryControls;
++        providerBoundaryTiming?: ProviderBoundaryTiming;
+       }>(attentionDb, {
+         messages,
+         purpose: mapped.purpose,
+@@ -831,6 +876,7 @@ export async function completeChat(
+           : {}),
+         dispatch: async ({ modelAlias: alias, signal }) => {
+           const merged = combineSignals(signal, options.deadlineAtMs);
++          const requestStartedAtMs = Date.now();
+           const adapter = adapterFor(targetProvider);
+           attempt.markDispatchAttempted();
+           if (privateBudgetBinding && !privateBudgetCommitted) {
+@@ -863,6 +909,16 @@ export async function completeChat(
+               credentialSeat,
+               signal: merged,
+             });
++            const responseAtMs = Date.now();
++            providerBoundaryTiming = Object.freeze({
++              requestStartedAtMs,
++              responseAtMs,
++              elapsedMs: Math.max(0, responseAtMs - requestStartedAtMs),
++              ...(options.deadlineAtMs != null
++                ? { remainingDeadlineMs: Math.max(0, options.deadlineAtMs - responseAtMs) }
++                : {}),
++              outcome: "response_received" as const,
++            });
+             attempt.markProviderResponse({
+               resolvedModelId: completion.providerModel ?? null,
+               finishReason: completion.finishReason ?? null,
+@@ -887,9 +943,23 @@ export async function completeChat(
+                 finishReason: completion.finishReason ?? null,
+                 responseDiagnostics: completion.responseDiagnostics,
+                 wireEvidence: completion.wireEvidence,
++                providerBoundaryControls,
++                providerBoundaryTiming,
+               },
+             };
+           } catch (err) {
++            const responseAtMs = Date.now();
++            providerBoundaryTiming = Object.freeze({
++              requestStartedAtMs,
++              responseAtMs,
++              elapsedMs: Math.max(0, responseAtMs - requestStartedAtMs),
++              ...(options.deadlineAtMs != null
++                ? { remainingDeadlineMs: Math.max(0, options.deadlineAtMs - responseAtMs) }
++                : {}),
++              outcome: "error" as const,
++            });
++            attachProviderBoundaryFact(err, "providerBoundaryControls", providerBoundaryControls);
++            attachProviderBoundaryFact(err, "providerBoundaryTiming", providerBoundaryTiming);
+             if (err instanceof Error && err.name === "AbortError") {
+               attempt.markFailure("AbortError");
+               throw err;
+@@ -921,6 +991,8 @@ export async function completeChat(
+                       : targetProvider === "opencode_zen"
+                         ? mapZenError(err)
+                       : err;
++              attachProviderBoundaryFact(mappedError, "providerBoundaryControls", providerBoundaryControls);
++              attachProviderBoundaryFact(mappedError, "providerBoundaryTiming", providerBoundaryTiming);
+               attempt.markFailure(errorClassFor(mappedError));
+               throw mappedError;
+             } catch (mappedError) {
+@@ -944,6 +1016,10 @@ export async function completeChat(
+           "mistral_model_identity_mismatch",
+           502,
+         );
++        if (providerBoundaryTiming) {
++          attachProviderBoundaryFact(identityError, "providerBoundaryControls", providerBoundaryControls);
++          attachProviderBoundaryFact(identityError, "providerBoundaryTiming", providerBoundaryTiming);
++        }
+         attempt.markFailure(identityError.code);
+         throw identityError;
+       }
+@@ -1015,6 +1091,10 @@ export async function completeChat(
+         ...(capabilityIdentity ? { capabilityIdentity } : {}),
+       };
+     } catch (error) {
++      if (providerBoundaryTiming) {
++        attachProviderBoundaryFact(error, "providerBoundaryControls", providerBoundaryControls);
++        attachProviderBoundaryFact(error, "providerBoundaryTiming", providerBoundaryTiming);
++      }
+       attempt.markFailure(errorClassFor(error));
+       throw error;
+     }
+@@ -1101,6 +1181,12 @@ export async function completeChat(
+           : options.modelFallbackChain?.fallbackClass ?? "none",
+       ),
+       ...(inner.wireEvidence ? { wireEvidence: inner.wireEvidence } : {}),
++      ...(inner.providerBoundaryControls
++        ? { providerBoundaryControls: inner.providerBoundaryControls }
++        : {}),
++      ...(inner.providerBoundaryTiming
++        ? { providerBoundaryTiming: inner.providerBoundaryTiming }
++        : {}),
+       ...(capabilityIdentity ? { capabilityIdentity } : {}),
+     };
+     return {
+@@ -1108,10 +1194,13 @@ export async function completeChat(
+       model: attentive.modelAlias,
+       modelAlias: attentive.modelAlias,
+       resolvedModelId: attentive.resolvedModelId,
++      providerModel: inner.providerModel,
+       toolCalls: inner.toolCalls,
+       usage: attentive.usage ?? inner.usage,
+       finishReason: inner.finishReason ?? null,
+       responseDiagnostics: inner.responseDiagnostics,
++      providerBoundaryControls: inner.providerBoundaryControls,
++      providerBoundaryTiming: inner.providerBoundaryTiming,
+       attentionRequestId: attentive.requestId,
+       acceptedDispatchIdentity: attentive.acceptedDispatchIdentity,
+       capturedAttemptIdentity,
+@@ -1139,9 +1228,19 @@ export async function completeChat(
+       dispatchTruth,
+     );
+     const existingMeta = metadataFromError(error);
++    const providerBoundaryControls = providerBoundaryFactFromError<ProviderBoundaryControls>(
++      error,
++      "providerBoundaryControls",
++    );
++    const providerBoundaryTiming = providerBoundaryFactFromError<ProviderBoundaryTiming>(
++      error,
++      "providerBoundaryTiming",
++    );
+     const metadata: ModelFabricDispatchMetadata = {
+       ...last,
+       ...existingMeta,
++      ...(providerBoundaryControls ? { providerBoundaryControls } : {}),
++      ...(providerBoundaryTiming ? { providerBoundaryTiming } : {}),
+       failure: existingMeta?.failure ?? failure,
+     };
+     if (privateBudgetBinding) {

@@ -1,0 +1,1932 @@
+{
+  "diagnostic": "controlled_nvidia_current_vs_sparse",
+  "generatedAtMs": 1788748636254,
+  "provider": "nim",
+  "model": "nvidia/nemotron-3-super-120b-a12b",
+  "controls": {
+    "maxTokens": 8192,
+    "temperature": 1,
+    "reasoningPolicy": "high",
+    "reasoningBudgetTokens": 1024,
+    "deadlineMs": 60000,
+    "retryPolicy": "single_attempt"
+  },
+  "scenarioCount": 15,
+  "invocationCount": 30,
+  "privacy": {
+    "rawTextRetained": false,
+    "hiddenReasoningRetained": false,
+    "onlyContentHashAndBoundedLengths": true
+  },
+  "results": [
+    {
+      "scenario": "Q1",
+      "family": "ordinary_speech",
+      "coverage": "ordinary speech (13 varied cases)",
+      "contractMode": "current_v1",
+      "provider": "nim",
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "schemaId": "ashley.thought.semantic.v1.schema",
+      "contractId": "ashley.thought.semantic.v1",
+      "schemaFingerprint": "sha256:023e90c3d4a5dbcf597068d276b1a4b4a78e97289885dc501cf594bd0ddfe243",
+      "wireFingerprint": "sha256:7ba0c68294122bb7749e75f2e19a9b2f55974ac0fdd12ebace751c484419a080",
+      "wireFormat": "nim_response_format_json_schema",
+      "bindingId": "compat_thought_nim_nemotron_super_native_json_schema_v1",
+      "controls": {
+        "maxTokens": 8192,
+        "temperature": 1,
+        "reasoningPolicy": "high",
+        "reasoningWireControl": {
+          "kind": "reasoning_effort",
+          "value": "high"
+        },
+        "reasoningBudgetTokens": 1024,
+        "deadlineMs": 60000,
+        "retryPolicy": "single_attempt"
+      },
+      "startedAtMs": 1788748144508,
+      "result": "response_received",
+      "responseAtMs": 1788748159942,
+      "elapsedMs": 15434,
+      "remainingDeadlineMs": 44566,
+      "finishReason": "stop",
+      "finishReasonClass": "STOP",
+      "inputTokens": 1268,
+      "outputTokens": 1352,
+      "reasoningTokens": null,
+      "contentLengthBytes": 1023,
+      "contentHash": "sha256:d1d8fdb66891ec4bce0796ab7667b3c53af42b1b84f54387bd09e475e4e36fae",
+      "reasoningLengthBytes": 4676,
+      "reasoningHash": "sha256:dbc751947e1665aea7334ab627ee7eedbf7e99e81f8773fd965db78f1adf3d3a",
+      "parse": {
+        "status": "ok"
+      },
+      "structure": {
+        "json": "valid",
+        "root": "settlement",
+        "rootKeys": [
+          "commitments",
+          "concernDeltas",
+          "durableNominations",
+          "evidenceUse",
+          "futureTriggerDeltas",
+          "interpretation",
+          "kind",
+          "occupancyDeltas",
+          "speech",
+          "subscriptionDeltas",
+          "workingContextDeltas"
+        ],
+        "presentDomains": [
+          "interpretation",
+          "commitments",
+          "workingContextDeltas",
+          "concernDeltas",
+          "occupancyDeltas",
+          "futureTriggerDeltas",
+          "subscriptionDeltas",
+          "durableNominations",
+          "evidenceUse"
+        ],
+        "emptyPresentDomains": [
+          "workingContextDeltas",
+          "concernDeltas",
+          "occupancyDeltas",
+          "futureTriggerDeltas",
+          "subscriptionDeltas",
+          "durableNominations"
+        ],
+        "optionalDomainCount": 9,
+        "nonEmptyDomainCount": 3,
+        "contentBytes": 1023
+      },
+      "responseDiagnostics": {
+        "contentContainerType": "string",
+        "contentChunkTypes": [],
+        "textChunkCount": 0,
+        "thinkingChunkCount": 0,
+        "finalTextBytes": 1023,
+        "finishReason": "stop",
+        "finishReasonClass": "STOP",
+        "outputTokenLimit": 8192,
+        "outputTokens": 1352,
+        "reasoningTokens": null,
+        "reasoningContentBytes": 4676,
+        "reasoningHash": "sha256:dbc751947e1665aea7334ab627ee7eedbf7e99e81f8773fd965db78f1adf3d3a",
+        "extractionFailure": "none"
+      },
+      "runaway": false,
+      "wireEvidence": {
+        "sanitizedBodyDigest": "sha256:7ba0c68294122bb7749e75f2e19a9b2f55974ac0fdd12ebace751c484419a080",
+        "emittedEnforcementMode": "native_json_schema",
+        "providerDeclaredEnforcement": "unavailable"
+      }
+    },
+    {
+      "scenario": "Q1",
+      "family": "ordinary_speech",
+      "coverage": "ordinary speech (13 varied cases)",
+      "contractMode": "sparse_v2",
+      "provider": "nim",
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "schemaId": "ashley.thought.semantic.v2.schema",
+      "contractId": "ashley.thought.semantic.v2",
+      "schemaFingerprint": "sha256:5b81b3dfe4878107c42c31af151421efb7d3670d35962067b04a5fb75d2b524b",
+      "wireFingerprint": "sha256:3a9ecb4326c766afb18b4367f687f621c0b7829b9f951c1ec8a3bc2df67254ae",
+      "wireFormat": "nim_response_format_json_schema",
+      "bindingId": "compat_thought_nim_nemotron_super_native_json_schema_v1",
+      "controls": {
+        "maxTokens": 8192,
+        "temperature": 1,
+        "reasoningPolicy": "high",
+        "reasoningWireControl": {
+          "kind": "reasoning_effort",
+          "value": "high"
+        },
+        "reasoningBudgetTokens": 1024,
+        "deadlineMs": 60000,
+        "retryPolicy": "single_attempt"
+      },
+      "startedAtMs": 1788748159945,
+      "result": "error",
+      "responseAtMs": 1788748160560,
+      "elapsedMs": 615,
+      "remainingDeadlineMs": 59385,
+      "error": {
+        "name": "AppError",
+        "code": "provider_unavailable",
+        "status": null
+      },
+      "failureClass": "provider_failure"
+    },
+    {
+      "scenario": "Q2",
+      "family": "longer_ordinary_speech",
+      "coverage": "longer ordinary speech (13 varied cases)",
+      "contractMode": "current_v1",
+      "provider": "nim",
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "schemaId": "ashley.thought.semantic.v1.schema",
+      "contractId": "ashley.thought.semantic.v1",
+      "schemaFingerprint": "sha256:023e90c3d4a5dbcf597068d276b1a4b4a78e97289885dc501cf594bd0ddfe243",
+      "wireFingerprint": "sha256:7ba0c68294122bb7749e75f2e19a9b2f55974ac0fdd12ebace751c484419a080",
+      "wireFormat": "nim_response_format_json_schema",
+      "bindingId": "compat_thought_nim_nemotron_super_native_json_schema_v1",
+      "controls": {
+        "maxTokens": 8192,
+        "temperature": 1,
+        "reasoningPolicy": "high",
+        "reasoningWireControl": {
+          "kind": "reasoning_effort",
+          "value": "high"
+        },
+        "reasoningBudgetTokens": 1024,
+        "deadlineMs": 60000,
+        "retryPolicy": "single_attempt"
+      },
+      "startedAtMs": 1788748160562,
+      "result": "response_received",
+      "responseAtMs": 1788748183002,
+      "elapsedMs": 22440,
+      "remainingDeadlineMs": 37560,
+      "finishReason": "stop",
+      "finishReasonClass": "STOP",
+      "inputTokens": 1274,
+      "outputTokens": 1168,
+      "reasoningTokens": null,
+      "contentLengthBytes": 1524,
+      "contentHash": "sha256:99bb5eb1009fdaef553ee00cd3a2c6851e252de4a804171fa7106e899c998f99",
+      "reasoningLengthBytes": 3304,
+      "reasoningHash": "sha256:4105c884d323091a068816746e82f8a61503dcef4e6150513930b7b976b8f00e",
+      "parse": {
+        "status": "ok"
+      },
+      "structure": {
+        "json": "valid",
+        "root": "settlement",
+        "rootKeys": [
+          "commitments",
+          "concernDeltas",
+          "durableNominations",
+          "evidenceUse",
+          "futureTriggerDeltas",
+          "interpretation",
+          "kind",
+          "occupancyDeltas",
+          "speech",
+          "subscriptionDeltas",
+          "workingContextDeltas"
+        ],
+        "presentDomains": [
+          "interpretation",
+          "commitments",
+          "workingContextDeltas",
+          "concernDeltas",
+          "occupancyDeltas",
+          "futureTriggerDeltas",
+          "subscriptionDeltas",
+          "durableNominations",
+          "evidenceUse"
+        ],
+        "emptyPresentDomains": [
+          "workingContextDeltas",
+          "concernDeltas",
+          "occupancyDeltas",
+          "futureTriggerDeltas",
+          "subscriptionDeltas",
+          "durableNominations"
+        ],
+        "optionalDomainCount": 9,
+        "nonEmptyDomainCount": 3,
+        "contentBytes": 1524
+      },
+      "responseDiagnostics": {
+        "contentContainerType": "string",
+        "contentChunkTypes": [],
+        "textChunkCount": 0,
+        "thinkingChunkCount": 0,
+        "finalTextBytes": 1524,
+        "finishReason": "stop",
+        "finishReasonClass": "STOP",
+        "outputTokenLimit": 8192,
+        "outputTokens": 1168,
+        "reasoningTokens": null,
+        "reasoningContentBytes": 3304,
+        "reasoningHash": "sha256:4105c884d323091a068816746e82f8a61503dcef4e6150513930b7b976b8f00e",
+        "extractionFailure": "none"
+      },
+      "runaway": false,
+      "wireEvidence": {
+        "sanitizedBodyDigest": "sha256:7ba0c68294122bb7749e75f2e19a9b2f55974ac0fdd12ebace751c484419a080",
+        "emittedEnforcementMode": "native_json_schema",
+        "providerDeclaredEnforcement": "unavailable"
+      }
+    },
+    {
+      "scenario": "Q2",
+      "family": "longer_ordinary_speech",
+      "coverage": "longer ordinary speech (13 varied cases)",
+      "contractMode": "sparse_v2",
+      "provider": "nim",
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "schemaId": "ashley.thought.semantic.v2.schema",
+      "contractId": "ashley.thought.semantic.v2",
+      "schemaFingerprint": "sha256:5b81b3dfe4878107c42c31af151421efb7d3670d35962067b04a5fb75d2b524b",
+      "wireFingerprint": "sha256:3a9ecb4326c766afb18b4367f687f621c0b7829b9f951c1ec8a3bc2df67254ae",
+      "wireFormat": "nim_response_format_json_schema",
+      "bindingId": "compat_thought_nim_nemotron_super_native_json_schema_v1",
+      "controls": {
+        "maxTokens": 8192,
+        "temperature": 1,
+        "reasoningPolicy": "high",
+        "reasoningWireControl": {
+          "kind": "reasoning_effort",
+          "value": "high"
+        },
+        "reasoningBudgetTokens": 1024,
+        "deadlineMs": 60000,
+        "retryPolicy": "single_attempt"
+      },
+      "startedAtMs": 1788748183003,
+      "result": "error",
+      "responseAtMs": 1788748189696,
+      "elapsedMs": 6693,
+      "remainingDeadlineMs": 53307,
+      "error": {
+        "name": "AppError",
+        "code": "provider_unavailable",
+        "status": null
+      },
+      "failureClass": "provider_failure"
+    },
+    {
+      "scenario": "Q3",
+      "family": "intentional_silence",
+      "coverage": "silent settlement (5 cases)",
+      "contractMode": "current_v1",
+      "provider": "nim",
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "schemaId": "ashley.thought.semantic.v1.schema",
+      "contractId": "ashley.thought.semantic.v1",
+      "schemaFingerprint": "sha256:023e90c3d4a5dbcf597068d276b1a4b4a78e97289885dc501cf594bd0ddfe243",
+      "wireFingerprint": "sha256:7ba0c68294122bb7749e75f2e19a9b2f55974ac0fdd12ebace751c484419a080",
+      "wireFormat": "nim_response_format_json_schema",
+      "bindingId": "compat_thought_nim_nemotron_super_native_json_schema_v1",
+      "controls": {
+        "maxTokens": 8192,
+        "temperature": 1,
+        "reasoningPolicy": "high",
+        "reasoningWireControl": {
+          "kind": "reasoning_effort",
+          "value": "high"
+        },
+        "reasoningBudgetTokens": 1024,
+        "deadlineMs": 60000,
+        "retryPolicy": "single_attempt"
+      },
+      "startedAtMs": 1788748189698,
+      "result": "error",
+      "responseAtMs": 1788748249700,
+      "elapsedMs": 60002,
+      "remainingDeadlineMs": 0,
+      "error": {
+        "name": "AbortError",
+        "code": null,
+        "status": null
+      },
+      "failureClass": "deadline_or_abort"
+    },
+    {
+      "scenario": "Q3",
+      "family": "intentional_silence",
+      "coverage": "silent settlement (5 cases)",
+      "contractMode": "sparse_v2",
+      "provider": "nim",
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "schemaId": "ashley.thought.semantic.v2.schema",
+      "contractId": "ashley.thought.semantic.v2",
+      "schemaFingerprint": "sha256:5b81b3dfe4878107c42c31af151421efb7d3670d35962067b04a5fb75d2b524b",
+      "wireFingerprint": "sha256:3a9ecb4326c766afb18b4367f687f621c0b7829b9f951c1ec8a3bc2df67254ae",
+      "wireFormat": "nim_response_format_json_schema",
+      "bindingId": "compat_thought_nim_nemotron_super_native_json_schema_v1",
+      "controls": {
+        "maxTokens": 8192,
+        "temperature": 1,
+        "reasoningPolicy": "high",
+        "reasoningWireControl": {
+          "kind": "reasoning_effort",
+          "value": "high"
+        },
+        "reasoningBudgetTokens": 1024,
+        "deadlineMs": 60000,
+        "retryPolicy": "single_attempt"
+      },
+      "startedAtMs": 1788748249701,
+      "result": "error",
+      "responseAtMs": 1788748250254,
+      "elapsedMs": 553,
+      "remainingDeadlineMs": 59447,
+      "error": {
+        "name": "AppError",
+        "code": "provider_unavailable",
+        "status": null
+      },
+      "failureClass": "provider_failure"
+    },
+    {
+      "scenario": "Q4",
+      "family": "silence_with_delta",
+      "coverage": "silence with internal delta (5 cases)",
+      "contractMode": "current_v1",
+      "provider": "nim",
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "schemaId": "ashley.thought.semantic.v1.schema",
+      "contractId": "ashley.thought.semantic.v1",
+      "schemaFingerprint": "sha256:023e90c3d4a5dbcf597068d276b1a4b4a78e97289885dc501cf594bd0ddfe243",
+      "wireFingerprint": "sha256:7ba0c68294122bb7749e75f2e19a9b2f55974ac0fdd12ebace751c484419a080",
+      "wireFormat": "nim_response_format_json_schema",
+      "bindingId": "compat_thought_nim_nemotron_super_native_json_schema_v1",
+      "controls": {
+        "maxTokens": 8192,
+        "temperature": 1,
+        "reasoningPolicy": "high",
+        "reasoningWireControl": {
+          "kind": "reasoning_effort",
+          "value": "high"
+        },
+        "reasoningBudgetTokens": 1024,
+        "deadlineMs": 60000,
+        "retryPolicy": "single_attempt"
+      },
+      "startedAtMs": 1788748250256,
+      "result": "error",
+      "responseAtMs": 1788748310258,
+      "elapsedMs": 60002,
+      "remainingDeadlineMs": 0,
+      "error": {
+        "name": "AbortError",
+        "code": null,
+        "status": null
+      },
+      "failureClass": "deadline_or_abort"
+    },
+    {
+      "scenario": "Q4",
+      "family": "silence_with_delta",
+      "coverage": "silence with internal delta (5 cases)",
+      "contractMode": "sparse_v2",
+      "provider": "nim",
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "schemaId": "ashley.thought.semantic.v2.schema",
+      "contractId": "ashley.thought.semantic.v2",
+      "schemaFingerprint": "sha256:5b81b3dfe4878107c42c31af151421efb7d3670d35962067b04a5fb75d2b524b",
+      "wireFingerprint": "sha256:3a9ecb4326c766afb18b4367f687f621c0b7829b9f951c1ec8a3bc2df67254ae",
+      "wireFormat": "nim_response_format_json_schema",
+      "bindingId": "compat_thought_nim_nemotron_super_native_json_schema_v1",
+      "controls": {
+        "maxTokens": 8192,
+        "temperature": 1,
+        "reasoningPolicy": "high",
+        "reasoningWireControl": {
+          "kind": "reasoning_effort",
+          "value": "high"
+        },
+        "reasoningBudgetTokens": 1024,
+        "deadlineMs": 60000,
+        "retryPolicy": "single_attempt"
+      },
+      "startedAtMs": 1788748310260,
+      "result": "error",
+      "responseAtMs": 1788748311152,
+      "elapsedMs": 892,
+      "remainingDeadlineMs": 59108,
+      "error": {
+        "name": "AppError",
+        "code": "provider_unavailable",
+        "status": null
+      },
+      "failureClass": "provider_failure"
+    },
+    {
+      "scenario": "Q5",
+      "family": "working_context",
+      "coverage": "working-context operations (10 cases)",
+      "contractMode": "current_v1",
+      "provider": "nim",
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "schemaId": "ashley.thought.semantic.v1.schema",
+      "contractId": "ashley.thought.semantic.v1",
+      "schemaFingerprint": "sha256:023e90c3d4a5dbcf597068d276b1a4b4a78e97289885dc501cf594bd0ddfe243",
+      "wireFingerprint": "sha256:7ba0c68294122bb7749e75f2e19a9b2f55974ac0fdd12ebace751c484419a080",
+      "wireFormat": "nim_response_format_json_schema",
+      "bindingId": "compat_thought_nim_nemotron_super_native_json_schema_v1",
+      "controls": {
+        "maxTokens": 8192,
+        "temperature": 1,
+        "reasoningPolicy": "high",
+        "reasoningWireControl": {
+          "kind": "reasoning_effort",
+          "value": "high"
+        },
+        "reasoningBudgetTokens": 1024,
+        "deadlineMs": 60000,
+        "retryPolicy": "single_attempt"
+      },
+      "startedAtMs": 1788748311153,
+      "result": "response_received",
+      "responseAtMs": 1788748334503,
+      "elapsedMs": 23350,
+      "remainingDeadlineMs": 36650,
+      "finishReason": "stop",
+      "finishReasonClass": "STOP",
+      "inputTokens": 1265,
+      "outputTokens": 1731,
+      "reasoningTokens": null,
+      "contentLengthBytes": 2341,
+      "contentHash": "sha256:d68600e2eebdb839f5f753f02a8672110677a305444a42dd7cfc64e819d39eed",
+      "reasoningLengthBytes": 4579,
+      "reasoningHash": "sha256:e640f10fda1791b73b74d09fd11881274f64240604ad9d1b586ac75c0b56b8f5",
+      "parse": {
+        "status": "failure",
+        "code": "wrong_type",
+        "field": "interpretation"
+      },
+      "structure": {
+        "json": "valid",
+        "root": "settlement",
+        "rootKeys": [
+          "commitments",
+          "concernDeltas",
+          "durableNominations",
+          "evidenceUse",
+          "futureTriggerDeltas",
+          "interpretation",
+          "kind",
+          "occupancyDeltas",
+          "speech",
+          "subscriptionDeltas",
+          "workingContextDeltas"
+        ],
+        "presentDomains": [
+          "interpretation",
+          "commitments",
+          "workingContextDeltas",
+          "concernDeltas",
+          "occupancyDeltas",
+          "futureTriggerDeltas",
+          "subscriptionDeltas",
+          "durableNominations",
+          "evidenceUse"
+        ],
+        "emptyPresentDomains": [
+          "concernDeltas",
+          "occupancyDeltas",
+          "futureTriggerDeltas",
+          "subscriptionDeltas",
+          "durableNominations"
+        ],
+        "optionalDomainCount": 9,
+        "nonEmptyDomainCount": 4,
+        "contentBytes": 2341
+      },
+      "responseDiagnostics": {
+        "contentContainerType": "string",
+        "contentChunkTypes": [],
+        "textChunkCount": 0,
+        "thinkingChunkCount": 0,
+        "finalTextBytes": 2341,
+        "finishReason": "stop",
+        "finishReasonClass": "STOP",
+        "outputTokenLimit": 8192,
+        "outputTokens": 1731,
+        "reasoningTokens": null,
+        "reasoningContentBytes": 4579,
+        "reasoningHash": "sha256:e640f10fda1791b73b74d09fd11881274f64240604ad9d1b586ac75c0b56b8f5",
+        "extractionFailure": "none"
+      },
+      "runaway": false,
+      "wireEvidence": {
+        "sanitizedBodyDigest": "sha256:7ba0c68294122bb7749e75f2e19a9b2f55974ac0fdd12ebace751c484419a080",
+        "emittedEnforcementMode": "native_json_schema",
+        "providerDeclaredEnforcement": "unavailable"
+      }
+    },
+    {
+      "scenario": "Q5",
+      "family": "working_context",
+      "coverage": "working-context operations (10 cases)",
+      "contractMode": "sparse_v2",
+      "provider": "nim",
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "schemaId": "ashley.thought.semantic.v2.schema",
+      "contractId": "ashley.thought.semantic.v2",
+      "schemaFingerprint": "sha256:5b81b3dfe4878107c42c31af151421efb7d3670d35962067b04a5fb75d2b524b",
+      "wireFingerprint": "sha256:3a9ecb4326c766afb18b4367f687f621c0b7829b9f951c1ec8a3bc2df67254ae",
+      "wireFormat": "nim_response_format_json_schema",
+      "bindingId": "compat_thought_nim_nemotron_super_native_json_schema_v1",
+      "controls": {
+        "maxTokens": 8192,
+        "temperature": 1,
+        "reasoningPolicy": "high",
+        "reasoningWireControl": {
+          "kind": "reasoning_effort",
+          "value": "high"
+        },
+        "reasoningBudgetTokens": 1024,
+        "deadlineMs": 60000,
+        "retryPolicy": "single_attempt"
+      },
+      "startedAtMs": 1788748334505,
+      "result": "error",
+      "responseAtMs": 1788748335132,
+      "elapsedMs": 627,
+      "remainingDeadlineMs": 59373,
+      "error": {
+        "name": "AppError",
+        "code": "provider_unavailable",
+        "status": null
+      },
+      "failureClass": "provider_failure"
+    },
+    {
+      "scenario": "Q6",
+      "family": "concern",
+      "coverage": "concern operations (10 cases)",
+      "contractMode": "current_v1",
+      "provider": "nim",
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "schemaId": "ashley.thought.semantic.v1.schema",
+      "contractId": "ashley.thought.semantic.v1",
+      "schemaFingerprint": "sha256:023e90c3d4a5dbcf597068d276b1a4b4a78e97289885dc501cf594bd0ddfe243",
+      "wireFingerprint": "sha256:7ba0c68294122bb7749e75f2e19a9b2f55974ac0fdd12ebace751c484419a080",
+      "wireFormat": "nim_response_format_json_schema",
+      "bindingId": "compat_thought_nim_nemotron_super_native_json_schema_v1",
+      "controls": {
+        "maxTokens": 8192,
+        "temperature": 1,
+        "reasoningPolicy": "high",
+        "reasoningWireControl": {
+          "kind": "reasoning_effort",
+          "value": "high"
+        },
+        "reasoningBudgetTokens": 1024,
+        "deadlineMs": 60000,
+        "retryPolicy": "single_attempt"
+      },
+      "startedAtMs": 1788748335133,
+      "result": "error",
+      "responseAtMs": 1788748395143,
+      "elapsedMs": 60010,
+      "remainingDeadlineMs": 0,
+      "error": {
+        "name": "AbortError",
+        "code": null,
+        "status": null
+      },
+      "failureClass": "deadline_or_abort"
+    },
+    {
+      "scenario": "Q6",
+      "family": "concern",
+      "coverage": "concern operations (10 cases)",
+      "contractMode": "sparse_v2",
+      "provider": "nim",
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "schemaId": "ashley.thought.semantic.v2.schema",
+      "contractId": "ashley.thought.semantic.v2",
+      "schemaFingerprint": "sha256:5b81b3dfe4878107c42c31af151421efb7d3670d35962067b04a5fb75d2b524b",
+      "wireFingerprint": "sha256:3a9ecb4326c766afb18b4367f687f621c0b7829b9f951c1ec8a3bc2df67254ae",
+      "wireFormat": "nim_response_format_json_schema",
+      "bindingId": "compat_thought_nim_nemotron_super_native_json_schema_v1",
+      "controls": {
+        "maxTokens": 8192,
+        "temperature": 1,
+        "reasoningPolicy": "high",
+        "reasoningWireControl": {
+          "kind": "reasoning_effort",
+          "value": "high"
+        },
+        "reasoningBudgetTokens": 1024,
+        "deadlineMs": 60000,
+        "retryPolicy": "single_attempt"
+      },
+      "startedAtMs": 1788748395144,
+      "result": "error",
+      "responseAtMs": 1788748395791,
+      "elapsedMs": 647,
+      "remainingDeadlineMs": 59353,
+      "error": {
+        "name": "AppError",
+        "code": "provider_unavailable",
+        "status": null
+      },
+      "failureClass": "provider_failure"
+    },
+    {
+      "scenario": "Q7",
+      "family": "future_trigger",
+      "coverage": "future-trigger operations (10 cases)",
+      "contractMode": "current_v1",
+      "provider": "nim",
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "schemaId": "ashley.thought.semantic.v1.schema",
+      "contractId": "ashley.thought.semantic.v1",
+      "schemaFingerprint": "sha256:023e90c3d4a5dbcf597068d276b1a4b4a78e97289885dc501cf594bd0ddfe243",
+      "wireFingerprint": "sha256:7ba0c68294122bb7749e75f2e19a9b2f55974ac0fdd12ebace751c484419a080",
+      "wireFormat": "nim_response_format_json_schema",
+      "bindingId": "compat_thought_nim_nemotron_super_native_json_schema_v1",
+      "controls": {
+        "maxTokens": 8192,
+        "temperature": 1,
+        "reasoningPolicy": "high",
+        "reasoningWireControl": {
+          "kind": "reasoning_effort",
+          "value": "high"
+        },
+        "reasoningBudgetTokens": 1024,
+        "deadlineMs": 60000,
+        "retryPolicy": "single_attempt"
+      },
+      "startedAtMs": 1788748395793,
+      "result": "response_received",
+      "responseAtMs": 1788748449437,
+      "elapsedMs": 53644,
+      "remainingDeadlineMs": 6356,
+      "finishReason": "length",
+      "finishReasonClass": "LENGTH",
+      "inputTokens": 1293,
+      "outputTokens": 8192,
+      "reasoningTokens": null,
+      "contentLengthBytes": 7244,
+      "contentHash": "sha256:6b206707b1239eb3498968bbdc8274219fa5961d1416c3b97dc88fafdc112c62",
+      "reasoningLengthBytes": 5083,
+      "reasoningHash": "sha256:141555b07c04726a74d8f185f3bb74e8cf9902021a235d957c285c2bd27a58c6",
+      "parse": {
+        "status": "failure",
+        "code": "invalid_json",
+        "field": null
+      },
+      "structure": {
+        "json": "invalid",
+        "root": "invalid_json",
+        "rootKeys": [],
+        "presentDomains": [],
+        "emptyPresentDomains": [],
+        "optionalDomainCount": 0,
+        "contentBytes": 7244
+      },
+      "responseDiagnostics": {
+        "contentContainerType": "string",
+        "contentChunkTypes": [],
+        "textChunkCount": 0,
+        "thinkingChunkCount": 0,
+        "finalTextBytes": 7244,
+        "finishReason": "length",
+        "finishReasonClass": "LENGTH",
+        "outputTokenLimit": 8192,
+        "outputTokens": 8192,
+        "reasoningTokens": null,
+        "reasoningContentBytes": 5083,
+        "reasoningHash": "sha256:141555b07c04726a74d8f185f3bb74e8cf9902021a235d957c285c2bd27a58c6",
+        "extractionFailure": "none"
+      },
+      "runaway": true,
+      "wireEvidence": {
+        "sanitizedBodyDigest": "sha256:7ba0c68294122bb7749e75f2e19a9b2f55974ac0fdd12ebace751c484419a080",
+        "emittedEnforcementMode": "native_json_schema",
+        "providerDeclaredEnforcement": "unavailable"
+      }
+    },
+    {
+      "scenario": "Q7",
+      "family": "future_trigger",
+      "coverage": "future-trigger operations (10 cases)",
+      "contractMode": "sparse_v2",
+      "provider": "nim",
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "schemaId": "ashley.thought.semantic.v2.schema",
+      "contractId": "ashley.thought.semantic.v2",
+      "schemaFingerprint": "sha256:5b81b3dfe4878107c42c31af151421efb7d3670d35962067b04a5fb75d2b524b",
+      "wireFingerprint": "sha256:3a9ecb4326c766afb18b4367f687f621c0b7829b9f951c1ec8a3bc2df67254ae",
+      "wireFormat": "nim_response_format_json_schema",
+      "bindingId": "compat_thought_nim_nemotron_super_native_json_schema_v1",
+      "controls": {
+        "maxTokens": 8192,
+        "temperature": 1,
+        "reasoningPolicy": "high",
+        "reasoningWireControl": {
+          "kind": "reasoning_effort",
+          "value": "high"
+        },
+        "reasoningBudgetTokens": 1024,
+        "deadlineMs": 60000,
+        "retryPolicy": "single_attempt"
+      },
+      "startedAtMs": 1788748449439,
+      "result": "error",
+      "responseAtMs": 1788748450009,
+      "elapsedMs": 570,
+      "remainingDeadlineMs": 59430,
+      "error": {
+        "name": "AppError",
+        "code": "provider_unavailable",
+        "status": null
+      },
+      "failureClass": "provider_failure"
+    },
+    {
+      "scenario": "Q8",
+      "family": "durable_nomination",
+      "coverage": "durable nominations (10 cases)",
+      "contractMode": "current_v1",
+      "provider": "nim",
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "schemaId": "ashley.thought.semantic.v1.schema",
+      "contractId": "ashley.thought.semantic.v1",
+      "schemaFingerprint": "sha256:023e90c3d4a5dbcf597068d276b1a4b4a78e97289885dc501cf594bd0ddfe243",
+      "wireFingerprint": "sha256:7ba0c68294122bb7749e75f2e19a9b2f55974ac0fdd12ebace751c484419a080",
+      "wireFormat": "nim_response_format_json_schema",
+      "bindingId": "compat_thought_nim_nemotron_super_native_json_schema_v1",
+      "controls": {
+        "maxTokens": 8192,
+        "temperature": 1,
+        "reasoningPolicy": "high",
+        "reasoningWireControl": {
+          "kind": "reasoning_effort",
+          "value": "high"
+        },
+        "reasoningBudgetTokens": 1024,
+        "deadlineMs": 60000,
+        "retryPolicy": "single_attempt"
+      },
+      "startedAtMs": 1788748450010,
+      "result": "error",
+      "responseAtMs": 1788748510013,
+      "elapsedMs": 60003,
+      "remainingDeadlineMs": 0,
+      "error": {
+        "name": "AbortError",
+        "code": null,
+        "status": null
+      },
+      "failureClass": "deadline_or_abort"
+    },
+    {
+      "scenario": "Q8",
+      "family": "durable_nomination",
+      "coverage": "durable nominations (10 cases)",
+      "contractMode": "sparse_v2",
+      "provider": "nim",
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "schemaId": "ashley.thought.semantic.v2.schema",
+      "contractId": "ashley.thought.semantic.v2",
+      "schemaFingerprint": "sha256:5b81b3dfe4878107c42c31af151421efb7d3670d35962067b04a5fb75d2b524b",
+      "wireFingerprint": "sha256:3a9ecb4326c766afb18b4367f687f621c0b7829b9f951c1ec8a3bc2df67254ae",
+      "wireFormat": "nim_response_format_json_schema",
+      "bindingId": "compat_thought_nim_nemotron_super_native_json_schema_v1",
+      "controls": {
+        "maxTokens": 8192,
+        "temperature": 1,
+        "reasoningPolicy": "high",
+        "reasoningWireControl": {
+          "kind": "reasoning_effort",
+          "value": "high"
+        },
+        "reasoningBudgetTokens": 1024,
+        "deadlineMs": 60000,
+        "retryPolicy": "single_attempt"
+      },
+      "startedAtMs": 1788748510014,
+      "result": "error",
+      "responseAtMs": 1788748510676,
+      "elapsedMs": 662,
+      "remainingDeadlineMs": 59338,
+      "error": {
+        "name": "AppError",
+        "code": "provider_unavailable",
+        "status": null
+      },
+      "failureClass": "provider_failure"
+    },
+    {
+      "scenario": "Q9",
+      "family": "evidence_reliance",
+      "coverage": "evidence reliance (4 cases)",
+      "contractMode": "current_v1",
+      "provider": "nim",
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "schemaId": "ashley.thought.semantic.v1.schema",
+      "contractId": "ashley.thought.semantic.v1",
+      "schemaFingerprint": "sha256:796cd71eccb1303bebb4be4a0c49902c18b50d665f4881c698ac80335a4de02a",
+      "wireFingerprint": "sha256:fbddef69244b41a9f7f2eb0d76d44ec52ff77b31949064abf3f2ce35a76f60ac",
+      "wireFormat": "nim_response_format_json_schema",
+      "bindingId": "compat_thought_nim_nemotron_super_native_json_schema_v1",
+      "controls": {
+        "maxTokens": 8192,
+        "temperature": 1,
+        "reasoningPolicy": "high",
+        "reasoningWireControl": {
+          "kind": "reasoning_effort",
+          "value": "high"
+        },
+        "reasoningBudgetTokens": 1024,
+        "deadlineMs": 60000,
+        "retryPolicy": "single_attempt"
+      },
+      "startedAtMs": 1788748510678,
+      "result": "response_received",
+      "responseAtMs": 1788748524203,
+      "elapsedMs": 13525,
+      "remainingDeadlineMs": 46475,
+      "finishReason": "stop",
+      "finishReasonClass": "STOP",
+      "inputTokens": 1288,
+      "outputTokens": 982,
+      "reasoningTokens": null,
+      "contentLengthBytes": 926,
+      "contentHash": "sha256:af1c6b6514540c38459b1138d9feb9a267bfe679ad0fef97de49a70f7ef32f6d",
+      "reasoningLengthBytes": 2834,
+      "reasoningHash": "sha256:f093233b9fcaa54c264dfb906e7d30b7cdf79216aa50ff859b92261b50382dfe",
+      "parse": {
+        "status": "ok"
+      },
+      "structure": {
+        "json": "valid",
+        "root": "settlement",
+        "rootKeys": [
+          "commitments",
+          "concernDeltas",
+          "durableNominations",
+          "evidenceUse",
+          "futureTriggerDeltas",
+          "interpretation",
+          "kind",
+          "occupancyDeltas",
+          "speech",
+          "subscriptionDeltas",
+          "workingContextDeltas"
+        ],
+        "presentDomains": [
+          "interpretation",
+          "commitments",
+          "workingContextDeltas",
+          "concernDeltas",
+          "occupancyDeltas",
+          "futureTriggerDeltas",
+          "subscriptionDeltas",
+          "durableNominations",
+          "evidenceUse"
+        ],
+        "emptyPresentDomains": [
+          "workingContextDeltas",
+          "concernDeltas",
+          "occupancyDeltas",
+          "futureTriggerDeltas",
+          "subscriptionDeltas",
+          "durableNominations"
+        ],
+        "optionalDomainCount": 9,
+        "nonEmptyDomainCount": 3,
+        "contentBytes": 926
+      },
+      "responseDiagnostics": {
+        "contentContainerType": "string",
+        "contentChunkTypes": [],
+        "textChunkCount": 0,
+        "thinkingChunkCount": 0,
+        "finalTextBytes": 926,
+        "finishReason": "stop",
+        "finishReasonClass": "STOP",
+        "outputTokenLimit": 8192,
+        "outputTokens": 982,
+        "reasoningTokens": null,
+        "reasoningContentBytes": 2834,
+        "reasoningHash": "sha256:f093233b9fcaa54c264dfb906e7d30b7cdf79216aa50ff859b92261b50382dfe",
+        "extractionFailure": "none"
+      },
+      "runaway": false,
+      "wireEvidence": {
+        "sanitizedBodyDigest": "sha256:fbddef69244b41a9f7f2eb0d76d44ec52ff77b31949064abf3f2ce35a76f60ac",
+        "emittedEnforcementMode": "native_json_schema",
+        "providerDeclaredEnforcement": "unavailable"
+      }
+    },
+    {
+      "scenario": "Q9",
+      "family": "evidence_reliance",
+      "coverage": "evidence reliance (4 cases)",
+      "contractMode": "sparse_v2",
+      "provider": "nim",
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "schemaId": "ashley.thought.semantic.v2.schema",
+      "contractId": "ashley.thought.semantic.v2",
+      "schemaFingerprint": "sha256:17a43066c68bbe91beca87d2bfebde0c6fa979ea83b6c1c1251f01cc4a10e6cc",
+      "wireFingerprint": "sha256:eae87c00960e4f5c102bd43d5dd65b00e32e13a7b8c95406cf6631537544ee57",
+      "wireFormat": "nim_response_format_json_schema",
+      "bindingId": "compat_thought_nim_nemotron_super_native_json_schema_v1",
+      "controls": {
+        "maxTokens": 8192,
+        "temperature": 1,
+        "reasoningPolicy": "high",
+        "reasoningWireControl": {
+          "kind": "reasoning_effort",
+          "value": "high"
+        },
+        "reasoningBudgetTokens": 1024,
+        "deadlineMs": 60000,
+        "retryPolicy": "single_attempt"
+      },
+      "startedAtMs": 1788748524205,
+      "result": "response_received",
+      "responseAtMs": 1788748530435,
+      "elapsedMs": 6230,
+      "remainingDeadlineMs": 53770,
+      "finishReason": "stop",
+      "finishReasonClass": "STOP",
+      "inputTokens": 1210,
+      "outputTokens": 428,
+      "reasoningTokens": null,
+      "contentLengthBytes": 137,
+      "contentHash": "sha256:995c3e2a03bbcbd9602ae7e27439221f1ff8840e9a37e209470112ded72e4e9b",
+      "reasoningLengthBytes": 1674,
+      "reasoningHash": "sha256:37a39c81576048fbeab129eee17511fcac6de8bf25a969d6c13ddce801edff7a",
+      "parse": {
+        "status": "ok"
+      },
+      "structure": {
+        "json": "valid",
+        "root": "settlement",
+        "rootKeys": [
+          "evidenceUse",
+          "kind",
+          "speech"
+        ],
+        "presentDomains": [
+          "evidenceUse"
+        ],
+        "emptyPresentDomains": [],
+        "optionalDomainCount": 1,
+        "nonEmptyDomainCount": 1,
+        "contentBytes": 137
+      },
+      "responseDiagnostics": {
+        "contentContainerType": "string",
+        "contentChunkTypes": [],
+        "textChunkCount": 0,
+        "thinkingChunkCount": 0,
+        "finalTextBytes": 137,
+        "finishReason": "stop",
+        "finishReasonClass": "STOP",
+        "outputTokenLimit": 8192,
+        "outputTokens": 428,
+        "reasoningTokens": null,
+        "reasoningContentBytes": 1674,
+        "reasoningHash": "sha256:37a39c81576048fbeab129eee17511fcac6de8bf25a969d6c13ddce801edff7a",
+        "extractionFailure": "none"
+      },
+      "runaway": false,
+      "wireEvidence": {
+        "sanitizedBodyDigest": "sha256:eae87c00960e4f5c102bd43d5dd65b00e32e13a7b8c95406cf6631537544ee57",
+        "emittedEnforcementMode": "native_json_schema",
+        "providerDeclaredEnforcement": "unavailable"
+      }
+    },
+    {
+      "scenario": "Q10",
+      "family": "currentness",
+      "coverage": "evidence and currentness (4 cases)",
+      "contractMode": "current_v1",
+      "provider": "nim",
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "schemaId": "ashley.thought.semantic.v1.schema",
+      "contractId": "ashley.thought.semantic.v1",
+      "schemaFingerprint": "sha256:7debd655f8b83f176cda40cf317fc965567bc315da1a4afb8f17fa13b0d91707",
+      "wireFingerprint": "sha256:4f23db2909a78f708350ea286f94410db5c37884c272c2a9f0e6df8b8b6a36b8",
+      "wireFormat": "nim_response_format_json_schema",
+      "bindingId": "compat_thought_nim_nemotron_super_native_json_schema_v1",
+      "controls": {
+        "maxTokens": 8192,
+        "temperature": 1,
+        "reasoningPolicy": "high",
+        "reasoningWireControl": {
+          "kind": "reasoning_effort",
+          "value": "high"
+        },
+        "reasoningBudgetTokens": 1024,
+        "deadlineMs": 60000,
+        "retryPolicy": "single_attempt"
+      },
+      "startedAtMs": 1788748530437,
+      "result": "response_received",
+      "responseAtMs": 1788748546626,
+      "elapsedMs": 16189,
+      "remainingDeadlineMs": 43811,
+      "finishReason": "stop",
+      "finishReasonClass": "STOP",
+      "inputTokens": 1289,
+      "outputTokens": 1086,
+      "reasoningTokens": null,
+      "contentLengthBytes": 1332,
+      "contentHash": "sha256:9a929fa9a6ec27f0794d3d15c5e1ef9e126a31b72e743ae91629f43af2011efb",
+      "reasoningLengthBytes": 2952,
+      "reasoningHash": "sha256:4defab164cf88bf01083041ee29f34a6385bfb64e5afa9bd8256878c55433e03",
+      "parse": {
+        "status": "ok"
+      },
+      "structure": {
+        "json": "valid",
+        "root": "settlement",
+        "rootKeys": [
+          "commitments",
+          "concernDeltas",
+          "durableNominations",
+          "evidenceUse",
+          "futureTriggerDeltas",
+          "interpretation",
+          "kind",
+          "occupancyDeltas",
+          "speech",
+          "subscriptionDeltas",
+          "workingContextDeltas"
+        ],
+        "presentDomains": [
+          "interpretation",
+          "commitments",
+          "workingContextDeltas",
+          "concernDeltas",
+          "occupancyDeltas",
+          "futureTriggerDeltas",
+          "subscriptionDeltas",
+          "durableNominations",
+          "evidenceUse"
+        ],
+        "emptyPresentDomains": [
+          "workingContextDeltas",
+          "concernDeltas",
+          "occupancyDeltas",
+          "futureTriggerDeltas",
+          "subscriptionDeltas",
+          "durableNominations"
+        ],
+        "optionalDomainCount": 9,
+        "nonEmptyDomainCount": 3,
+        "contentBytes": 1332
+      },
+      "responseDiagnostics": {
+        "contentContainerType": "string",
+        "contentChunkTypes": [],
+        "textChunkCount": 0,
+        "thinkingChunkCount": 0,
+        "finalTextBytes": 1332,
+        "finishReason": "stop",
+        "finishReasonClass": "STOP",
+        "outputTokenLimit": 8192,
+        "outputTokens": 1086,
+        "reasoningTokens": null,
+        "reasoningContentBytes": 2952,
+        "reasoningHash": "sha256:4defab164cf88bf01083041ee29f34a6385bfb64e5afa9bd8256878c55433e03",
+        "extractionFailure": "none"
+      },
+      "runaway": false,
+      "wireEvidence": {
+        "sanitizedBodyDigest": "sha256:4f23db2909a78f708350ea286f94410db5c37884c272c2a9f0e6df8b8b6a36b8",
+        "emittedEnforcementMode": "native_json_schema",
+        "providerDeclaredEnforcement": "unavailable"
+      }
+    },
+    {
+      "scenario": "Q10",
+      "family": "currentness",
+      "coverage": "evidence and currentness (4 cases)",
+      "contractMode": "sparse_v2",
+      "provider": "nim",
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "schemaId": "ashley.thought.semantic.v2.schema",
+      "contractId": "ashley.thought.semantic.v2",
+      "schemaFingerprint": "sha256:5c826ca7ca2d655786507817eda0eafec3585f06a8fe9b6cb52df13d9c102fe2",
+      "wireFingerprint": "sha256:187518f8ba3efd389aefbdccb0ab0fcb454a2d84dab958d33733811a214a9526",
+      "wireFormat": "nim_response_format_json_schema",
+      "bindingId": "compat_thought_nim_nemotron_super_native_json_schema_v1",
+      "controls": {
+        "maxTokens": 8192,
+        "temperature": 1,
+        "reasoningPolicy": "high",
+        "reasoningWireControl": {
+          "kind": "reasoning_effort",
+          "value": "high"
+        },
+        "reasoningBudgetTokens": 1024,
+        "deadlineMs": 60000,
+        "retryPolicy": "single_attempt"
+      },
+      "startedAtMs": 1788748546627,
+      "result": "response_received",
+      "responseAtMs": 1788748561880,
+      "elapsedMs": 15253,
+      "remainingDeadlineMs": 44747,
+      "finishReason": "stop",
+      "finishReasonClass": "STOP",
+      "inputTokens": 1211,
+      "outputTokens": 522,
+      "reasoningTokens": null,
+      "contentLengthBytes": 139,
+      "contentHash": "sha256:d2412e87008552c1134885f5bb43e6313d4d688bacf83b94d58183c06bd3890a",
+      "reasoningLengthBytes": 2142,
+      "reasoningHash": "sha256:9d7451ba5d1effa734fa53e87fdf165d508f627bfe178f7eecf4fcbff1d8d2ca",
+      "parse": {
+        "status": "ok"
+      },
+      "structure": {
+        "json": "valid",
+        "root": "settlement",
+        "rootKeys": [
+          "evidenceUse",
+          "kind",
+          "speech"
+        ],
+        "presentDomains": [
+          "evidenceUse"
+        ],
+        "emptyPresentDomains": [],
+        "optionalDomainCount": 1,
+        "nonEmptyDomainCount": 1,
+        "contentBytes": 139
+      },
+      "responseDiagnostics": {
+        "contentContainerType": "string",
+        "contentChunkTypes": [],
+        "textChunkCount": 0,
+        "thinkingChunkCount": 0,
+        "finalTextBytes": 139,
+        "finishReason": "stop",
+        "finishReasonClass": "STOP",
+        "outputTokenLimit": 8192,
+        "outputTokens": 522,
+        "reasoningTokens": null,
+        "reasoningContentBytes": 2142,
+        "reasoningHash": "sha256:9d7451ba5d1effa734fa53e87fdf165d508f627bfe178f7eecf4fcbff1d8d2ca",
+        "extractionFailure": "none"
+      },
+      "runaway": false,
+      "wireEvidence": {
+        "sanitizedBodyDigest": "sha256:187518f8ba3efd389aefbdccb0ab0fcb454a2d84dab958d33733811a214a9526",
+        "emittedEnforcementMode": "native_json_schema",
+        "providerDeclaredEnforcement": "unavailable"
+      }
+    },
+    {
+      "scenario": "Q11",
+      "family": "operational_truth",
+      "coverage": "operational claim (3 cases)",
+      "contractMode": "current_v1",
+      "provider": "nim",
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "schemaId": "ashley.thought.semantic.v1.schema",
+      "contractId": "ashley.thought.semantic.v1",
+      "schemaFingerprint": "sha256:97ff71dbb3eba9c972e9b103a24aa6b680d1c4b609a751f9cb96094d138ebc34",
+      "wireFingerprint": "sha256:811b8fcc104e97510d281a6afc4adde13ed45e0ec068e0766f9994adc81e5167",
+      "wireFormat": "nim_response_format_json_schema",
+      "bindingId": "compat_thought_nim_nemotron_super_native_json_schema_v1",
+      "controls": {
+        "maxTokens": 8192,
+        "temperature": 1,
+        "reasoningPolicy": "high",
+        "reasoningWireControl": {
+          "kind": "reasoning_effort",
+          "value": "high"
+        },
+        "reasoningBudgetTokens": 1024,
+        "deadlineMs": 60000,
+        "retryPolicy": "single_attempt"
+      },
+      "startedAtMs": 1788748561881,
+      "result": "response_received",
+      "responseAtMs": 1788748573183,
+      "elapsedMs": 11302,
+      "remainingDeadlineMs": 48698,
+      "finishReason": "stop",
+      "finishReasonClass": "STOP",
+      "inputTokens": 1449,
+      "outputTokens": 1457,
+      "reasoningTokens": null,
+      "contentLengthBytes": 1371,
+      "contentHash": "sha256:ad67079d287c62932d2f98a63482f646c60d07a7930615da565afc1a95232016",
+      "reasoningLengthBytes": 3503,
+      "reasoningHash": "sha256:f70aa72ddf7984403c2271048aa7d7a07fcb2d0360dc27bdd28a95071e64af29",
+      "parse": {
+        "status": "ok"
+      },
+      "structure": {
+        "json": "valid",
+        "root": "settlement",
+        "rootKeys": [
+          "commitments",
+          "concernDeltas",
+          "durableNominations",
+          "evidenceUse",
+          "futureTriggerDeltas",
+          "interpretation",
+          "kind",
+          "occupancyDeltas",
+          "speech",
+          "subscriptionDeltas",
+          "workingContextDeltas"
+        ],
+        "presentDomains": [
+          "interpretation",
+          "commitments",
+          "workingContextDeltas",
+          "concernDeltas",
+          "occupancyDeltas",
+          "futureTriggerDeltas",
+          "subscriptionDeltas",
+          "durableNominations",
+          "evidenceUse"
+        ],
+        "emptyPresentDomains": [
+          "workingContextDeltas",
+          "concernDeltas",
+          "occupancyDeltas",
+          "futureTriggerDeltas",
+          "subscriptionDeltas",
+          "durableNominations"
+        ],
+        "optionalDomainCount": 9,
+        "nonEmptyDomainCount": 3,
+        "contentBytes": 1371
+      },
+      "responseDiagnostics": {
+        "contentContainerType": "string",
+        "contentChunkTypes": [],
+        "textChunkCount": 0,
+        "thinkingChunkCount": 0,
+        "finalTextBytes": 1371,
+        "finishReason": "stop",
+        "finishReasonClass": "STOP",
+        "outputTokenLimit": 8192,
+        "outputTokens": 1457,
+        "reasoningTokens": null,
+        "reasoningContentBytes": 3503,
+        "reasoningHash": "sha256:f70aa72ddf7984403c2271048aa7d7a07fcb2d0360dc27bdd28a95071e64af29",
+        "extractionFailure": "none"
+      },
+      "runaway": false,
+      "wireEvidence": {
+        "sanitizedBodyDigest": "sha256:811b8fcc104e97510d281a6afc4adde13ed45e0ec068e0766f9994adc81e5167",
+        "emittedEnforcementMode": "native_json_schema",
+        "providerDeclaredEnforcement": "unavailable"
+      }
+    },
+    {
+      "scenario": "Q11",
+      "family": "operational_truth",
+      "coverage": "operational claim (3 cases)",
+      "contractMode": "sparse_v2",
+      "provider": "nim",
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "schemaId": "ashley.thought.semantic.v2.schema",
+      "contractId": "ashley.thought.semantic.v2",
+      "schemaFingerprint": "sha256:0fb6e572862e2a01e9538f9ad089a730c8b141b8427a844586158da312343e25",
+      "wireFingerprint": "sha256:07914ae8f80e555002d59f13be2e263a2ab53c96b812b41ae0d3fdea8711ff2f",
+      "wireFormat": "nim_response_format_json_schema",
+      "bindingId": "compat_thought_nim_nemotron_super_native_json_schema_v1",
+      "controls": {
+        "maxTokens": 8192,
+        "temperature": 1,
+        "reasoningPolicy": "high",
+        "reasoningWireControl": {
+          "kind": "reasoning_effort",
+          "value": "high"
+        },
+        "reasoningBudgetTokens": 1024,
+        "deadlineMs": 60000,
+        "retryPolicy": "single_attempt"
+      },
+      "startedAtMs": 1788748573185,
+      "result": "response_received",
+      "responseAtMs": 1788748582880,
+      "elapsedMs": 9695,
+      "remainingDeadlineMs": 50305,
+      "finishReason": "stop",
+      "finishReasonClass": "STOP",
+      "inputTokens": 1371,
+      "outputTokens": 412,
+      "reasoningTokens": null,
+      "contentLengthBytes": 201,
+      "contentHash": "sha256:d1c3584e0f4bfbb1dfc42ac55ca604874c4866bd8ac6775e4bec2770f209aa7a",
+      "reasoningLengthBytes": 1176,
+      "reasoningHash": "sha256:0e8cb630f2b87a25c6fe0c28163215eb716fc8308ccbb70a7371e4f481d5c0de",
+      "parse": {
+        "status": "ok"
+      },
+      "structure": {
+        "json": "valid",
+        "root": "settlement",
+        "rootKeys": [
+          "kind",
+          "speech"
+        ],
+        "presentDomains": [],
+        "emptyPresentDomains": [],
+        "optionalDomainCount": 0,
+        "nonEmptyDomainCount": 0,
+        "contentBytes": 201
+      },
+      "responseDiagnostics": {
+        "contentContainerType": "string",
+        "contentChunkTypes": [],
+        "textChunkCount": 0,
+        "thinkingChunkCount": 0,
+        "finalTextBytes": 201,
+        "finishReason": "stop",
+        "finishReasonClass": "STOP",
+        "outputTokenLimit": 8192,
+        "outputTokens": 412,
+        "reasoningTokens": null,
+        "reasoningContentBytes": 1176,
+        "reasoningHash": "sha256:0e8cb630f2b87a25c6fe0c28163215eb716fc8308ccbb70a7371e4f481d5c0de",
+        "extractionFailure": "none"
+      },
+      "runaway": false,
+      "wireEvidence": {
+        "sanitizedBodyDigest": "sha256:07914ae8f80e555002d59f13be2e263a2ab53c96b812b41ae0d3fdea8711ff2f",
+        "emittedEnforcementMode": "native_json_schema",
+        "providerDeclaredEnforcement": "unavailable"
+      }
+    },
+    {
+      "scenario": "Q12",
+      "family": "correction_revision",
+      "coverage": "correction and revision (3 cases)",
+      "contractMode": "current_v1",
+      "provider": "nim",
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "schemaId": "ashley.thought.semantic.v1.schema",
+      "contractId": "ashley.thought.semantic.v1",
+      "schemaFingerprint": "sha256:e937082fe22fae9a492b7a6359d2a80831e303c537ed0581759eac063e72b349",
+      "wireFingerprint": "sha256:4981b1c03e44119b1fae9b12526875cb7ba542334fd5a178705dd82b5c27392e",
+      "wireFormat": "nim_response_format_json_schema",
+      "bindingId": "compat_thought_nim_nemotron_super_native_json_schema_v1",
+      "controls": {
+        "maxTokens": 8192,
+        "temperature": 1,
+        "reasoningPolicy": "high",
+        "reasoningWireControl": {
+          "kind": "reasoning_effort",
+          "value": "high"
+        },
+        "reasoningBudgetTokens": 1024,
+        "deadlineMs": 60000,
+        "retryPolicy": "single_attempt"
+      },
+      "startedAtMs": 1788748582881,
+      "result": "response_received",
+      "responseAtMs": 1788748593617,
+      "elapsedMs": 10736,
+      "remainingDeadlineMs": 49264,
+      "finishReason": "stop",
+      "finishReasonClass": "STOP",
+      "inputTokens": 1279,
+      "outputTokens": 1420,
+      "reasoningTokens": null,
+      "contentLengthBytes": 1525,
+      "contentHash": "sha256:c26764be4910c2bd4d098ab444e969ad9c80085127e70618461de5b429818a7d",
+      "reasoningLengthBytes": 4194,
+      "reasoningHash": "sha256:998c6ac56a8ae67fe2796bc61a8b10c5bf02d09ebb9b5915f33466ace58ecc72",
+      "parse": {
+        "status": "failure",
+        "code": "wrong_type",
+        "field": "interpretation"
+      },
+      "structure": {
+        "json": "valid",
+        "root": "settlement",
+        "rootKeys": [
+          "commitments",
+          "concernDeltas",
+          "durableNominations",
+          "evidenceUse",
+          "futureTriggerDeltas",
+          "interpretation",
+          "kind",
+          "occupancyDeltas",
+          "speech",
+          "subscriptionDeltas",
+          "workingContextDeltas"
+        ],
+        "presentDomains": [
+          "interpretation",
+          "commitments",
+          "workingContextDeltas",
+          "concernDeltas",
+          "occupancyDeltas",
+          "futureTriggerDeltas",
+          "subscriptionDeltas",
+          "durableNominations",
+          "evidenceUse"
+        ],
+        "emptyPresentDomains": [
+          "workingContextDeltas",
+          "concernDeltas",
+          "occupancyDeltas",
+          "futureTriggerDeltas",
+          "subscriptionDeltas",
+          "durableNominations"
+        ],
+        "optionalDomainCount": 9,
+        "nonEmptyDomainCount": 3,
+        "contentBytes": 1525
+      },
+      "responseDiagnostics": {
+        "contentContainerType": "string",
+        "contentChunkTypes": [],
+        "textChunkCount": 0,
+        "thinkingChunkCount": 0,
+        "finalTextBytes": 1525,
+        "finishReason": "stop",
+        "finishReasonClass": "STOP",
+        "outputTokenLimit": 8192,
+        "outputTokens": 1420,
+        "reasoningTokens": null,
+        "reasoningContentBytes": 4194,
+        "reasoningHash": "sha256:998c6ac56a8ae67fe2796bc61a8b10c5bf02d09ebb9b5915f33466ace58ecc72",
+        "extractionFailure": "none"
+      },
+      "runaway": false,
+      "wireEvidence": {
+        "sanitizedBodyDigest": "sha256:4981b1c03e44119b1fae9b12526875cb7ba542334fd5a178705dd82b5c27392e",
+        "emittedEnforcementMode": "native_json_schema",
+        "providerDeclaredEnforcement": "unavailable"
+      }
+    },
+    {
+      "scenario": "Q12",
+      "family": "correction_revision",
+      "coverage": "correction and revision (3 cases)",
+      "contractMode": "sparse_v2",
+      "provider": "nim",
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "schemaId": "ashley.thought.semantic.v2.schema",
+      "contractId": "ashley.thought.semantic.v2",
+      "schemaFingerprint": "sha256:5dec57158916b8cc1762dd85c07389da016948e027c551109d9eea64958887e8",
+      "wireFingerprint": "sha256:fa0cc024d4027fdec0d8964163efd45fbdc7c1fe10c94351ba6b1e64ddcbb512",
+      "wireFormat": "nim_response_format_json_schema",
+      "bindingId": "compat_thought_nim_nemotron_super_native_json_schema_v1",
+      "controls": {
+        "maxTokens": 8192,
+        "temperature": 1,
+        "reasoningPolicy": "high",
+        "reasoningWireControl": {
+          "kind": "reasoning_effort",
+          "value": "high"
+        },
+        "reasoningBudgetTokens": 1024,
+        "deadlineMs": 60000,
+        "retryPolicy": "single_attempt"
+      },
+      "startedAtMs": 1788748593618,
+      "result": "response_received",
+      "responseAtMs": 1788748617139,
+      "elapsedMs": 23521,
+      "remainingDeadlineMs": 36479,
+      "finishReason": "stop",
+      "finishReasonClass": "STOP",
+      "inputTokens": 1201,
+      "outputTokens": 543,
+      "reasoningTokens": null,
+      "contentLengthBytes": 206,
+      "contentHash": "sha256:433dc5cc52f112fa1607b060814ee76fd664846611001825ba6b92b31d1b7b09",
+      "reasoningLengthBytes": 2342,
+      "reasoningHash": "sha256:2efbceae04c37e257bbe31fda83c996c98ebe2c2a8ac345549f2c8eb1221b794",
+      "parse": {
+        "status": "ok"
+      },
+      "structure": {
+        "json": "valid",
+        "root": "settlement",
+        "rootKeys": [
+          "kind",
+          "speech"
+        ],
+        "presentDomains": [],
+        "emptyPresentDomains": [],
+        "optionalDomainCount": 0,
+        "nonEmptyDomainCount": 0,
+        "contentBytes": 206
+      },
+      "responseDiagnostics": {
+        "contentContainerType": "string",
+        "contentChunkTypes": [],
+        "textChunkCount": 0,
+        "thinkingChunkCount": 0,
+        "finalTextBytes": 206,
+        "finishReason": "stop",
+        "finishReasonClass": "STOP",
+        "outputTokenLimit": 8192,
+        "outputTokens": 543,
+        "reasoningTokens": null,
+        "reasoningContentBytes": 2342,
+        "reasoningHash": "sha256:2efbceae04c37e257bbe31fda83c996c98ebe2c2a8ac345549f2c8eb1221b794",
+        "extractionFailure": "none"
+      },
+      "runaway": false,
+      "wireEvidence": {
+        "sanitizedBodyDigest": "sha256:fa0cc024d4027fdec0d8964163efd45fbdc7c1fe10c94351ba6b1e64ddcbb512",
+        "emittedEnforcementMode": "native_json_schema",
+        "providerDeclaredEnforcement": "unavailable"
+      }
+    },
+    {
+      "scenario": "Q13",
+      "family": "observation_intent",
+      "coverage": "intent branches (5 cases)",
+      "contractMode": "current_v1",
+      "provider": "nim",
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "schemaId": "ashley.thought.semantic.v1.schema",
+      "contractId": "ashley.thought.semantic.v1",
+      "schemaFingerprint": "sha256:023e90c3d4a5dbcf597068d276b1a4b4a78e97289885dc501cf594bd0ddfe243",
+      "wireFingerprint": "sha256:7ba0c68294122bb7749e75f2e19a9b2f55974ac0fdd12ebace751c484419a080",
+      "wireFormat": "nim_response_format_json_schema",
+      "bindingId": "compat_thought_nim_nemotron_super_native_json_schema_v1",
+      "controls": {
+        "maxTokens": 8192,
+        "temperature": 1,
+        "reasoningPolicy": "high",
+        "reasoningWireControl": {
+          "kind": "reasoning_effort",
+          "value": "high"
+        },
+        "reasoningBudgetTokens": 1024,
+        "deadlineMs": 60000,
+        "retryPolicy": "single_attempt"
+      },
+      "startedAtMs": 1788748617141,
+      "result": "response_received",
+      "responseAtMs": 1788748621509,
+      "elapsedMs": 4368,
+      "remainingDeadlineMs": 55632,
+      "finishReason": "stop",
+      "finishReasonClass": "STOP",
+      "inputTokens": 1278,
+      "outputTokens": 389,
+      "reasoningTokens": null,
+      "contentLengthBytes": 267,
+      "contentHash": "sha256:0e8850be5a3c8052c75bb0c051e6eef13ee286793374361560de7b648c4f0e0d",
+      "reasoningLengthBytes": 1517,
+      "reasoningHash": "sha256:edb28864d2319dd6bf4f0a25bd0924c853c2947937ee66889a93682ea1eaceb2",
+      "parse": {
+        "status": "ok"
+      },
+      "structure": {
+        "json": "valid",
+        "root": "observation_intent",
+        "rootKeys": [
+          "evidenceNeed",
+          "existingRefs",
+          "kind",
+          "operationKind",
+          "purpose",
+          "request"
+        ],
+        "presentDomains": [],
+        "emptyPresentDomains": [],
+        "optionalDomainCount": 0,
+        "nonEmptyDomainCount": 0,
+        "contentBytes": 267
+      },
+      "responseDiagnostics": {
+        "contentContainerType": "string",
+        "contentChunkTypes": [],
+        "textChunkCount": 0,
+        "thinkingChunkCount": 0,
+        "finalTextBytes": 267,
+        "finishReason": "stop",
+        "finishReasonClass": "STOP",
+        "outputTokenLimit": 8192,
+        "outputTokens": 389,
+        "reasoningTokens": null,
+        "reasoningContentBytes": 1517,
+        "reasoningHash": "sha256:edb28864d2319dd6bf4f0a25bd0924c853c2947937ee66889a93682ea1eaceb2",
+        "extractionFailure": "none"
+      },
+      "runaway": false,
+      "wireEvidence": {
+        "sanitizedBodyDigest": "sha256:7ba0c68294122bb7749e75f2e19a9b2f55974ac0fdd12ebace751c484419a080",
+        "emittedEnforcementMode": "native_json_schema",
+        "providerDeclaredEnforcement": "unavailable"
+      }
+    },
+    {
+      "scenario": "Q13",
+      "family": "observation_intent",
+      "coverage": "intent branches (5 cases)",
+      "contractMode": "sparse_v2",
+      "provider": "nim",
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "schemaId": "ashley.thought.semantic.v2.schema",
+      "contractId": "ashley.thought.semantic.v2",
+      "schemaFingerprint": "sha256:5b81b3dfe4878107c42c31af151421efb7d3670d35962067b04a5fb75d2b524b",
+      "wireFingerprint": "sha256:3a9ecb4326c766afb18b4367f687f621c0b7829b9f951c1ec8a3bc2df67254ae",
+      "wireFormat": "nim_response_format_json_schema",
+      "bindingId": "compat_thought_nim_nemotron_super_native_json_schema_v1",
+      "controls": {
+        "maxTokens": 8192,
+        "temperature": 1,
+        "reasoningPolicy": "high",
+        "reasoningWireControl": {
+          "kind": "reasoning_effort",
+          "value": "high"
+        },
+        "reasoningBudgetTokens": 1024,
+        "deadlineMs": 60000,
+        "retryPolicy": "single_attempt"
+      },
+      "startedAtMs": 1788748621511,
+      "result": "error",
+      "responseAtMs": 1788748622158,
+      "elapsedMs": 647,
+      "remainingDeadlineMs": 59353,
+      "error": {
+        "name": "AppError",
+        "code": "provider_unavailable",
+        "status": null
+      },
+      "failureClass": "provider_failure"
+    },
+    {
+      "scenario": "Q14",
+      "family": "effect_intent",
+      "coverage": "intent branches (5 cases)",
+      "contractMode": "current_v1",
+      "provider": "nim",
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "schemaId": "ashley.thought.semantic.v1.schema",
+      "contractId": "ashley.thought.semantic.v1",
+      "schemaFingerprint": "sha256:023e90c3d4a5dbcf597068d276b1a4b4a78e97289885dc501cf594bd0ddfe243",
+      "wireFingerprint": "sha256:7ba0c68294122bb7749e75f2e19a9b2f55974ac0fdd12ebace751c484419a080",
+      "wireFormat": "nim_response_format_json_schema",
+      "bindingId": "compat_thought_nim_nemotron_super_native_json_schema_v1",
+      "controls": {
+        "maxTokens": 8192,
+        "temperature": 1,
+        "reasoningPolicy": "high",
+        "reasoningWireControl": {
+          "kind": "reasoning_effort",
+          "value": "high"
+        },
+        "reasoningBudgetTokens": 1024,
+        "deadlineMs": 60000,
+        "retryPolicy": "single_attempt"
+      },
+      "startedAtMs": 1788748622159,
+      "result": "response_received",
+      "responseAtMs": 1788748631695,
+      "elapsedMs": 9536,
+      "remainingDeadlineMs": 50464,
+      "finishReason": "stop",
+      "finishReasonClass": "STOP",
+      "inputTokens": 1273,
+      "outputTokens": 474,
+      "reasoningTokens": null,
+      "contentLengthBytes": 324,
+      "contentHash": "sha256:aefe22fba99ec1831e82e2e0408593dcd0cd33ef0f719c65d36c1f61f6a24a5f",
+      "reasoningLengthBytes": 1896,
+      "reasoningHash": "sha256:3f056769a3ce22b71fd08188a83899ec41982d7c1cd73e238204568637388cf1",
+      "parse": {
+        "status": "ok"
+      },
+      "structure": {
+        "json": "valid",
+        "root": "effect_intent",
+        "rootKeys": [
+          "existingRefs",
+          "expectedOutcome",
+          "kind",
+          "operationKind",
+          "purpose",
+          "request"
+        ],
+        "presentDomains": [],
+        "emptyPresentDomains": [],
+        "optionalDomainCount": 0,
+        "nonEmptyDomainCount": 0,
+        "contentBytes": 324
+      },
+      "responseDiagnostics": {
+        "contentContainerType": "string",
+        "contentChunkTypes": [],
+        "textChunkCount": 0,
+        "thinkingChunkCount": 0,
+        "finalTextBytes": 324,
+        "finishReason": "stop",
+        "finishReasonClass": "STOP",
+        "outputTokenLimit": 8192,
+        "outputTokens": 474,
+        "reasoningTokens": null,
+        "reasoningContentBytes": 1896,
+        "reasoningHash": "sha256:3f056769a3ce22b71fd08188a83899ec41982d7c1cd73e238204568637388cf1",
+        "extractionFailure": "none"
+      },
+      "runaway": false,
+      "wireEvidence": {
+        "sanitizedBodyDigest": "sha256:7ba0c68294122bb7749e75f2e19a9b2f55974ac0fdd12ebace751c484419a080",
+        "emittedEnforcementMode": "native_json_schema",
+        "providerDeclaredEnforcement": "unavailable"
+      }
+    },
+    {
+      "scenario": "Q14",
+      "family": "effect_intent",
+      "coverage": "intent branches (5 cases)",
+      "contractMode": "sparse_v2",
+      "provider": "nim",
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "schemaId": "ashley.thought.semantic.v2.schema",
+      "contractId": "ashley.thought.semantic.v2",
+      "schemaFingerprint": "sha256:5b81b3dfe4878107c42c31af151421efb7d3670d35962067b04a5fb75d2b524b",
+      "wireFingerprint": "sha256:3a9ecb4326c766afb18b4367f687f621c0b7829b9f951c1ec8a3bc2df67254ae",
+      "wireFormat": "nim_response_format_json_schema",
+      "bindingId": "compat_thought_nim_nemotron_super_native_json_schema_v1",
+      "controls": {
+        "maxTokens": 8192,
+        "temperature": 1,
+        "reasoningPolicy": "high",
+        "reasoningWireControl": {
+          "kind": "reasoning_effort",
+          "value": "high"
+        },
+        "reasoningBudgetTokens": 1024,
+        "deadlineMs": 60000,
+        "retryPolicy": "single_attempt"
+      },
+      "startedAtMs": 1788748631697,
+      "result": "error",
+      "responseAtMs": 1788748632385,
+      "elapsedMs": 688,
+      "remainingDeadlineMs": 59312,
+      "error": {
+        "name": "AppError",
+        "code": "provider_unavailable",
+        "status": null
+      },
+      "failureClass": "provider_failure"
+    },
+    {
+      "scenario": "Q15",
+      "family": "abstain",
+      "coverage": "abstain branches (5 cases)",
+      "contractMode": "current_v1",
+      "provider": "nim",
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "schemaId": "ashley.thought.semantic.v1.schema",
+      "contractId": "ashley.thought.semantic.v1",
+      "schemaFingerprint": "sha256:023e90c3d4a5dbcf597068d276b1a4b4a78e97289885dc501cf594bd0ddfe243",
+      "wireFingerprint": "sha256:7ba0c68294122bb7749e75f2e19a9b2f55974ac0fdd12ebace751c484419a080",
+      "wireFormat": "nim_response_format_json_schema",
+      "bindingId": "compat_thought_nim_nemotron_super_native_json_schema_v1",
+      "controls": {
+        "maxTokens": 8192,
+        "temperature": 1,
+        "reasoningPolicy": "high",
+        "reasoningWireControl": {
+          "kind": "reasoning_effort",
+          "value": "high"
+        },
+        "reasoningBudgetTokens": 1024,
+        "deadlineMs": 60000,
+        "retryPolicy": "single_attempt"
+      },
+      "startedAtMs": 1788748632386,
+      "result": "response_received",
+      "responseAtMs": 1788748635680,
+      "elapsedMs": 3294,
+      "remainingDeadlineMs": 56706,
+      "finishReason": "stop",
+      "finishReasonClass": "STOP",
+      "inputTokens": 1268,
+      "outputTokens": 186,
+      "reasoningTokens": null,
+      "contentLengthBytes": 222,
+      "contentHash": "sha256:a136115f71ae255f9670d66710f4c39effef7dd744d90bee838b4bc80ae1b25c",
+      "reasoningLengthBytes": 531,
+      "reasoningHash": "sha256:26bdd5f534b4e81b8d569a5bade13a4e0ee7bd97fb265c810e8d5ae6c5694875",
+      "parse": {
+        "status": "ok"
+      },
+      "structure": {
+        "json": "valid",
+        "root": "abstain",
+        "rootKeys": [
+          "evidenceRefs",
+          "explanation",
+          "kind",
+          "reason"
+        ],
+        "presentDomains": [],
+        "emptyPresentDomains": [],
+        "optionalDomainCount": 0,
+        "nonEmptyDomainCount": 0,
+        "contentBytes": 222
+      },
+      "responseDiagnostics": {
+        "contentContainerType": "string",
+        "contentChunkTypes": [],
+        "textChunkCount": 0,
+        "thinkingChunkCount": 0,
+        "finalTextBytes": 222,
+        "finishReason": "stop",
+        "finishReasonClass": "STOP",
+        "outputTokenLimit": 8192,
+        "outputTokens": 186,
+        "reasoningTokens": null,
+        "reasoningContentBytes": 531,
+        "reasoningHash": "sha256:26bdd5f534b4e81b8d569a5bade13a4e0ee7bd97fb265c810e8d5ae6c5694875",
+        "extractionFailure": "none"
+      },
+      "runaway": false,
+      "wireEvidence": {
+        "sanitizedBodyDigest": "sha256:7ba0c68294122bb7749e75f2e19a9b2f55974ac0fdd12ebace751c484419a080",
+        "emittedEnforcementMode": "native_json_schema",
+        "providerDeclaredEnforcement": "unavailable"
+      }
+    },
+    {
+      "scenario": "Q15",
+      "family": "abstain",
+      "coverage": "abstain branches (5 cases)",
+      "contractMode": "sparse_v2",
+      "provider": "nim",
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "schemaId": "ashley.thought.semantic.v2.schema",
+      "contractId": "ashley.thought.semantic.v2",
+      "schemaFingerprint": "sha256:5b81b3dfe4878107c42c31af151421efb7d3670d35962067b04a5fb75d2b524b",
+      "wireFingerprint": "sha256:3a9ecb4326c766afb18b4367f687f621c0b7829b9f951c1ec8a3bc2df67254ae",
+      "wireFormat": "nim_response_format_json_schema",
+      "bindingId": "compat_thought_nim_nemotron_super_native_json_schema_v1",
+      "controls": {
+        "maxTokens": 8192,
+        "temperature": 1,
+        "reasoningPolicy": "high",
+        "reasoningWireControl": {
+          "kind": "reasoning_effort",
+          "value": "high"
+        },
+        "reasoningBudgetTokens": 1024,
+        "deadlineMs": 60000,
+        "retryPolicy": "single_attempt"
+      },
+      "startedAtMs": 1788748635682,
+      "result": "error",
+      "responseAtMs": 1788748636254,
+      "elapsedMs": 572,
+      "remainingDeadlineMs": 59428,
+      "error": {
+        "name": "AppError",
+        "code": "provider_unavailable",
+        "status": null
+      },
+      "failureClass": "provider_failure"
+    }
+  ]
+}
