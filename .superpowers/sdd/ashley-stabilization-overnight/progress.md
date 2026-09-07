@@ -446,4 +446,8 @@ REPORT=.superpowers/sdd/ashley-stabilization-overnight/wave-results/production-d
 CHECKPOINT=.superpowers/sdd/ashley-stabilization-overnight/checkpoints/wave-8.patch
 REPORT_SHA256=0AF2B5FC74DFDE4FB29716840B821C0C607C27C5B30BFF0EEA9DCE0B13CCC4D5
 CHECKPOINT_SHA256=14533B7B963DC784299E90DB713B6841AB7C52F58CDDEA877095DDDBE2AED6E5
+EVIDENCE_COMMIT=7693e3d1b8ebaac9c1c17afeb7a7f797b88231ee
+EVIDENCE_PUSH_PRE_SHA=7693e3d1b8ebaac9c1c17afeb7a7f797b88231ee
+EVIDENCE_PUSH_REMOTE_SHA=7693e3d1b8ebaac9c1c17afeb7a7f797b88231ee
+FINAL_PRODUCTION_RECHECK=agent_active_ready; discord_active; health_ready; sidecar_schema=8; systemd_nrestarts=2
 NEXT_GATE=Owner adjudication of provider reliability and pre-existing system-notice ID projection gap; stable-use acceptance remains closed
