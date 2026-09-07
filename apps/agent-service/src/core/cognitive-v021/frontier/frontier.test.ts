@@ -27,7 +27,7 @@ function createV6Database(): DatabaseSync {
   db.exec(
     `INSERT INTO cognitive_sidecar_meta
        (id, schema_version, architecture_epoch, implementation_spec_version, thought_contract_version, authority_epoch)
-     VALUES (1, 1, 'v0.2.1', '0.2.1.r5', 1, 1)`,
+     VALUES (1, 1, 'v0.2.1', '0.2.1.r6', 1, 1)`,
   );
   db.exec(COGNITIVE_SIDECAR_SCHEMA_V2);
   db.exec(COGNITIVE_SIDECAR_SCHEMA_V3);

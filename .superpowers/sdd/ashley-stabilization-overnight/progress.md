@@ -348,3 +348,24 @@ CHECKPOINT=.superpowers/sdd/ashley-stabilization-overnight/checkpoints/wave-5.pa
 CHECKPOINT_SHA256=91C582AE672C1EEACBD3B389C39688D84A24A99EA8A9D15DCCF52CC270BB6054
 REPORT=.superpowers/sdd/ashley-stabilization-overnight/wave-results/p1-stabilization.md
 NEXT_WAVE=Wave6 release/version mechanics
+
+## Wave 6 — release/version mechanics
+
+WAVE=6
+STATUS=COMPLETE_LOCAL_ONLY
+START_HEAD=83b94ab7074bdcdbe039f801f618045215f7d244
+IDENTITIES=SETTLEMENT_SCHEMA_VERSION=2; IMPLEMENTATION_SPEC_VERSION=0.2.1.r6; THOUGHT_OUTPUT_CONTRACT_ID=ashley.thought.semantic.v2; THOUGHT_OUTPUT_SCHEMA_ID=ashley.thought.semantic.v2.schema
+TRANSITION_UTILITY=scripts/stabilization/sidecar-meta-transition.mjs
+TRANSITION_CONTRACT=BEGIN IMMEDIATE; verify id=1/schema=8/epoch=v0.2.1/spec=r5-or-r6/contract=2; update only implementation_spec_version with expected-old WHERE; changes()==1; read-back; COMMIT or ROLLBACK fail-closed
+SW_5_SW_6_WITNESS=node --test scripts/stabilization/sidecar-meta-transition.test.mjs => 5/5 passed
+TARGETED_VERIFICATION=7 cognitive files / 75 tests passed; agent-service build passed; git diff --check passed
+FULL_COGNITIVE_SWEEP=134 files; 641 passed; 19 failed in four known pre-existing qualification/scale files (current-route/fixture or TPM-baseline conditions); no Wave6 transition failure
+PROVIDER_ACTION=NONE_DURING_WAVE_6
+PRODUCTION_MUTATION=NONE_DURING_WAVE_6
+SIDECAR_META_TRANSITION_EXECUTED=NO_PRODUCTION; temporary in-memory witnesses only
+NEW_FAILURES=NONE_IN_WAVE_6_SURFACES
+PREEXISTING_FAILURES=Known qualification/scale failures above; committed Sandbox Broker build defect remains outside scope
+SHUTDOWN_AUTHORITY=NO
+SHUTDOWN_ACTION=PROHIBITED
+REPORT=.superpowers/sdd/ashley-stabilization-overnight/wave-results/release-version-mechanics.md
+NEXT_WAVE=Wave7 exact immutable candidate qualification

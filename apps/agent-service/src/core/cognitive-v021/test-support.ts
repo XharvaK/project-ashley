@@ -3,6 +3,7 @@ import { openCognitiveSidecarDb } from "./sidecar/db.js";
 import { admitCycle, type AdmitCycleInput } from "./cycle/inbox.js";
 import { admitWake } from "./wake/ledger.js";
 import { occurrenceIdFor } from "./wake/identity.js";
+import { SETTLEMENT_SCHEMA_VERSION } from "./types.js";
 import type { ThoughtSemanticOutput, ThoughtSettlementDraft, CycleRecord } from "./types.js";
 
 export function openTestSidecar(): DatabaseSync {
@@ -15,7 +16,7 @@ export function makeThoughtDraft(
   overrides: Partial<ThoughtSettlementDraft> = {},
 ): ThoughtSettlementDraft {
   return {
-    schemaVersion: 1,
+    schemaVersion: SETTLEMENT_SCHEMA_VERSION,
     cycleId: "cycle-1",
     generation: 1,
     authorityEpoch: 1,

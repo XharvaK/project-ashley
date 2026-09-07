@@ -11,6 +11,7 @@ import {
   MAX_OBSERVATION_ROUNDS,
   MAX_THOUGHT_PASSES,
   MAX_THOUGHT_MODEL_ATTEMPTS,
+  SETTLEMENT_SCHEMA_VERSION,
   type CycleTriggerKind,
   type InboxEvent,
   type KernelDeps,
@@ -609,7 +610,7 @@ function materializeSemanticSettlement(
   }
 
   const result: Record<string, unknown> = {
-    schemaVersion: 1,
+    schemaVersion: SETTLEMENT_SCHEMA_VERSION,
     cycleId: input.cycleId,
     generation: input.generation,
     authorityEpoch: input.authorityEpoch,

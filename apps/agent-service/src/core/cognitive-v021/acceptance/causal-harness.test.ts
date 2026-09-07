@@ -3,6 +3,7 @@ import {
   assertCausalInvariants,
   type CausalBundle,
 } from "./causal-harness.js";
+import { SETTLEMENT_SCHEMA_VERSION } from "../types.js";
 
 function bundle(overrides: Partial<CausalBundle> = {}): CausalBundle {
   return {
@@ -26,7 +27,7 @@ function bundle(overrides: Partial<CausalBundle> = {}): CausalBundle {
 function draftSettlement(): NonNullable<CausalBundle["settlement"]> {
   return {
     settlementId: "settlement-1",
-    schemaVersion: 1,
+    schemaVersion: SETTLEMENT_SCHEMA_VERSION,
     cycleId: "cycle-1",
     generation: 1,
     authorityEpoch: 1,

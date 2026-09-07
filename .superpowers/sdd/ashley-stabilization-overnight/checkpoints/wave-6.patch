@@ -1,0 +1,597 @@
+diff --git a/.superpowers/sdd/ashley-stabilization-overnight/progress.md b/.superpowers/sdd/ashley-stabilization-overnight/progress.md
+index fe50283..c84bfce 100644
+--- a/.superpowers/sdd/ashley-stabilization-overnight/progress.md
++++ b/.superpowers/sdd/ashley-stabilization-overnight/progress.md
+@@ -348,3 +348,24 @@ CHECKPOINT=.superpowers/sdd/ashley-stabilization-overnight/checkpoints/wave-5.pa
+ CHECKPOINT_SHA256=91C582AE672C1EEACBD3B389C39688D84A24A99EA8A9D15DCCF52CC270BB6054
+ REPORT=.superpowers/sdd/ashley-stabilization-overnight/wave-results/p1-stabilization.md
+ NEXT_WAVE=Wave6 release/version mechanics
++
++## Wave 6 — release/version mechanics
++
++WAVE=6
++STATUS=COMPLETE_LOCAL_ONLY
++START_HEAD=83b94ab7074bdcdbe039f801f618045215f7d244
++IDENTITIES=SETTLEMENT_SCHEMA_VERSION=2; IMPLEMENTATION_SPEC_VERSION=0.2.1.r6; THOUGHT_OUTPUT_CONTRACT_ID=ashley.thought.semantic.v2; THOUGHT_OUTPUT_SCHEMA_ID=ashley.thought.semantic.v2.schema
++TRANSITION_UTILITY=scripts/stabilization/sidecar-meta-transition.mjs
++TRANSITION_CONTRACT=BEGIN IMMEDIATE; verify id=1/schema=8/epoch=v0.2.1/spec=r5-or-r6/contract=2; update only implementation_spec_version with expected-old WHERE; changes()==1; read-back; COMMIT or ROLLBACK fail-closed
++SW_5_SW_6_WITNESS=node --test scripts/stabilization/sidecar-meta-transition.test.mjs => 5/5 passed
++TARGETED_VERIFICATION=7 cognitive files / 75 tests passed; agent-service build passed; git diff --check passed
++FULL_COGNITIVE_SWEEP=134 files; 641 passed; 19 failed in four known pre-existing qualification/scale files (current-route/fixture or TPM-baseline conditions); no Wave6 transition failure
++PROVIDER_ACTION=NONE_DURING_WAVE_6
++PRODUCTION_MUTATION=NONE_DURING_WAVE_6
++SIDECAR_META_TRANSITION_EXECUTED=NO_PRODUCTION; temporary in-memory witnesses only
++NEW_FAILURES=NONE_IN_WAVE_6_SURFACES
++PREEXISTING_FAILURES=Known qualification/scale failures above; committed Sandbox Broker build defect remains outside scope
++SHUTDOWN_AUTHORITY=NO
++SHUTDOWN_ACTION=PROHIBITED
++REPORT=.superpowers/sdd/ashley-stabilization-overnight/wave-results/release-version-mechanics.md
++NEXT_WAVE=Wave7 exact immutable candidate qualification
+diff --git a/.superpowers/sdd/ashley-stabilization-overnight/wave-results/release-version-mechanics.md b/.superpowers/sdd/ashley-stabilization-overnight/wave-results/release-version-mechanics.md
+new file mode 100644
+index 0000000..ffcb801
+--- /dev/null
++++ b/.superpowers/sdd/ashley-stabilization-overnight/wave-results/release-version-mechanics.md
+@@ -0,0 +1,65 @@
++# Project Ashley Sparse VNext — Wave6 Release/Version Mechanics
++
++## Exact identities
++
++The current source owners now expose:
++
++- `SETTLEMENT_SCHEMA_VERSION = 2` in
++  `apps/agent-service/src/core/cognitive-v021/types.ts`;
++- `IMPLEMENTATION_SPEC_VERSION = "0.2.1.r6"` in the same source owner;
++- `THOUGHT_OUTPUT_CONTRACT_ID = "ashley.thought.semantic.v2"` and
++  `THOUGHT_OUTPUT_SCHEMA_ID = "ashley.thought.semantic.v2.schema"` in the
++  current Model Fabric dispatch-contract owner.
++
++Thought materialization writes the settlement schema marker from the constant.
++Current test fixtures use the current release identity. Historical r5 values
++remain represented only in the bounded transition witness and historical
++documentation.
++
++## Bounded sidecar transition
++
++`scripts/stabilization/sidecar-meta-transition.mjs` is deployment-only. It is
++not called by application startup and does not add a runtime migration path.
++For both `forward` (`r5 → r6`) and `rollback` (`r6 → r5`) it:
++
++1. begins `BEGIN IMMEDIATE`;
++2. verifies the singleton row and all four expected identity fields;
++3. updates only `implementation_spec_version` with an exact old-value `WHERE`;
++4. requires `changes() === 1`;
++5. reads back the requested new value; and
++6. commits only after every assertion passes, otherwise rolling back and
++   failing closed.
++
++The caller remains responsible for quiescing writers and proving rollback
++compatibility before invoking the utility.
++
++## SW-5/SW-6 witnesses
++
++`scripts/stabilization/sidecar-meta-transition.test.mjs` passed 5/5:
++
++- exact forward transition changes one row and preserves every other meta
++  field;
++- exact reverse rollback succeeds;
++- unexpected identity fails closed without mutation;
++- a zero-row conditional update fails closed and rolls back; and
++- a read-back mismatch fails closed and rolls back.
++
++## Verification
++
++- `node --test scripts/stabilization/sidecar-meta-transition.test.mjs`: 5 passed.
++- Release-identity and sidecar/migration/Thought targeted suites: 7 files,
++  75 tests passed.
++- `npm run build --prefix apps/agent-service`: passed.
++- Full cognitive sweep: 134 files, 641 passed, 19 failed. The failures are
++  confined to four pre-existing qualification/scale files and report the
++  known current-route/fixture or TPM-baseline conditions; no Wave6 transition
++  test failed.
++- `git diff --check`: passed.
++
++## Gate result
++
++`BEFORE_PRODUCTION_DEPLOYMENT=PASS_LOCAL_MECHANICS`
++
++No sidecar transition was run against production. No deployment, restart,
++production database mutation, or production acceptance is claimed by this
++wave. The exact immutable candidate gate remains outstanding.
+diff --git a/apps/agent-service/src/core/cognitive-v021/acceptance/causal-harness.test.ts b/apps/agent-service/src/core/cognitive-v021/acceptance/causal-harness.test.ts
+index e4e0fca..bf1805b 100644
+--- a/apps/agent-service/src/core/cognitive-v021/acceptance/causal-harness.test.ts
++++ b/apps/agent-service/src/core/cognitive-v021/acceptance/causal-harness.test.ts
+@@ -3,6 +3,7 @@ import {
+   assertCausalInvariants,
+   type CausalBundle,
+ } from "./causal-harness.js";
++import { SETTLEMENT_SCHEMA_VERSION } from "../types.js";
+ 
+ function bundle(overrides: Partial<CausalBundle> = {}): CausalBundle {
+   return {
+@@ -26,7 +27,7 @@ function bundle(overrides: Partial<CausalBundle> = {}): CausalBundle {
+ function draftSettlement(): NonNullable<CausalBundle["settlement"]> {
+   return {
+     settlementId: "settlement-1",
+-    schemaVersion: 1,
++    schemaVersion: SETTLEMENT_SCHEMA_VERSION,
+     cycleId: "cycle-1",
+     generation: 1,
+     authorityEpoch: 1,
+diff --git a/apps/agent-service/src/core/cognitive-v021/acceptance/continuity-fixtures.ts b/apps/agent-service/src/core/cognitive-v021/acceptance/continuity-fixtures.ts
+index aba3ab8..363685a 100644
+--- a/apps/agent-service/src/core/cognitive-v021/acceptance/continuity-fixtures.ts
++++ b/apps/agent-service/src/core/cognitive-v021/acceptance/continuity-fixtures.ts
+@@ -1,3 +1,4 @@
++import { SETTLEMENT_SCHEMA_VERSION } from "../types.js";
+ import type { PublishedCognitiveSettlement } from "../types.js";
+ 
+ export function continuitySettlement(
+@@ -5,7 +6,7 @@ export function continuitySettlement(
+ ): PublishedCognitiveSettlement {
+   return {
+     settlementId: "settlement-continuity-1",
+-    schemaVersion: 1,
++    schemaVersion: SETTLEMENT_SCHEMA_VERSION,
+     cycleId: "cycle-1",
+     generation: 1,
+     authorityEpoch: 1,
+diff --git a/apps/agent-service/src/core/cognitive-v021/frontier/frontier.test.ts b/apps/agent-service/src/core/cognitive-v021/frontier/frontier.test.ts
+index 56e9dbe..ba7acfa 100644
+--- a/apps/agent-service/src/core/cognitive-v021/frontier/frontier.test.ts
++++ b/apps/agent-service/src/core/cognitive-v021/frontier/frontier.test.ts
+@@ -27,7 +27,7 @@ function createV6Database(): DatabaseSync {
+   db.exec(
+     `INSERT INTO cognitive_sidecar_meta
+        (id, schema_version, architecture_epoch, implementation_spec_version, thought_contract_version, authority_epoch)
+-     VALUES (1, 1, 'v0.2.1', '0.2.1.r5', 1, 1)`,
++     VALUES (1, 1, 'v0.2.1', '0.2.1.r6', 1, 1)`,
+   );
+   db.exec(COGNITIVE_SIDECAR_SCHEMA_V2);
+   db.exec(COGNITIVE_SIDECAR_SCHEMA_V3);
+diff --git a/apps/agent-service/src/core/cognitive-v021/settlement/publish.test.ts b/apps/agent-service/src/core/cognitive-v021/settlement/publish.test.ts
+index 4d1a478..e3412e0 100644
+--- a/apps/agent-service/src/core/cognitive-v021/settlement/publish.test.ts
++++ b/apps/agent-service/src/core/cognitive-v021/settlement/publish.test.ts
+@@ -4,13 +4,14 @@ import { updateCycleState } from "../cycle/inbox.js";
+ import { admitTestCycle, openTestSidecar } from "../test-support.js";
+ import { publishSemanticTransaction } from "./publish.js";
+ import { applyConcernDelta } from "../concerns/lineage.js";
++import { SETTLEMENT_SCHEMA_VERSION } from "../types.js";
+ import type { PublishedCognitiveSettlement } from "../types.js";
+ import { openNuclearDb } from "../../db.js";
+ import { beginAuthorityTransition, captureAuthorityCurrentness, stabilizeAuthorityBarrier } from "../authority/barrier.js";
+ 
+ function settlement(overrides: Partial<PublishedCognitiveSettlement> = {}): PublishedCognitiveSettlement {
+   return {
+-    settlementId: "settlement-1", schemaVersion: 1, cycleId: "cycle-1", generation: 1,
++    settlementId: "settlement-1", schemaVersion: SETTLEMENT_SCHEMA_VERSION, cycleId: "cycle-1", generation: 1,
+     authorityEpoch: 1, occupantId: "doc", architectureEpoch: "v0.2.1", triggerRef: "owner-1",
+     interpretation: { discourseActs: ["inform"], referentBindings: [], corrections: [], unresolvedAmbiguities: [], topics: ["topic"] },
+     commitments: { epistemic: [{ dimensions: { source: "owner_utterance", status: "asserted", time: "current", reliability: "owner_supplied" }, statement: "topic" }], operational: [], conversational: ["answer"], stance: { warmth: "medium", humorAllowed: false, disagreement: false, uncertaintyDisplay: true } },
+diff --git a/apps/agent-service/src/core/cognitive-v021/sidecar/__tests__/schema-v8-migration.test.ts b/apps/agent-service/src/core/cognitive-v021/sidecar/__tests__/schema-v8-migration.test.ts
+index 3af9f02..ccb7033 100644
+--- a/apps/agent-service/src/core/cognitive-v021/sidecar/__tests__/schema-v8-migration.test.ts
++++ b/apps/agent-service/src/core/cognitive-v021/sidecar/__tests__/schema-v8-migration.test.ts
+@@ -19,7 +19,7 @@ function createV7Fixture(): DatabaseSync {
+     `INSERT INTO cognitive_sidecar_meta
+        (id, schema_version, architecture_epoch, implementation_spec_version,
+         thought_contract_version, authority_epoch)
+-     VALUES (1, 1, 'v0.2.1', '0.2.1.r5', 2, 1)`,
++     VALUES (1, 1, 'v0.2.1', '0.2.1.r6', 2, 1)`,
+   ).run();
+   db.exec(COGNITIVE_SIDECAR_SCHEMA_V2);
+   db.exec(COGNITIVE_SIDECAR_SCHEMA_V3);
+diff --git a/apps/agent-service/src/core/cognitive-v021/sidecar/db.test.ts b/apps/agent-service/src/core/cognitive-v021/sidecar/db.test.ts
+index e5d4a1c..d7e5bfe 100644
+--- a/apps/agent-service/src/core/cognitive-v021/sidecar/db.test.ts
++++ b/apps/agent-service/src/core/cognitive-v021/sidecar/db.test.ts
+@@ -35,7 +35,7 @@ describe("cognitive v0.2.1 sidecar database", () => {
+     ).toEqual({
+       schema_version: 8,
+       architecture_epoch: "v0.2.1",
+-      implementation_spec_version: "0.2.1.r5",
++      implementation_spec_version: "0.2.1.r6",
+       thought_contract_version: 2,
+       authority_epoch: 1,
+     });
+@@ -81,7 +81,7 @@ describe("cognitive v0.2.1 sidecar database", () => {
+     expect(() =>
+       db
+         .prepare(
+-          "INSERT INTO cognitive_sidecar_meta (id, schema_version, architecture_epoch, implementation_spec_version, thought_contract_version) VALUES (1, 1, 'v0.2.1', '0.2.1.r5', 1)",
++          "INSERT INTO cognitive_sidecar_meta (id, schema_version, architecture_epoch, implementation_spec_version, thought_contract_version) VALUES (1, 1, 'v0.2.1', '0.2.1.r6', 1)",
+         )
+         .run(),
+     ).toThrow();
+@@ -107,7 +107,7 @@ describe("cognitive v0.2.1 sidecar database", () => {
+     db.prepare(
+       `INSERT INTO cognitive_sidecar_meta
+          (id, schema_version, architecture_epoch, implementation_spec_version, thought_contract_version, authority_epoch)
+-       VALUES (1, 1, 'v0.2.1', '0.2.1.r5', 1, 1)`,
++       VALUES (1, 1, 'v0.2.1', '0.2.1.r6', 1, 1)`,
+     ).run();
+     db.exec("PRAGMA user_version = 1");
+ 
+@@ -130,7 +130,7 @@ describe("cognitive v0.2.1 sidecar database", () => {
+     db.prepare(
+       `INSERT INTO cognitive_sidecar_meta
+          (id, schema_version, architecture_epoch, implementation_spec_version, thought_contract_version, authority_epoch)
+-       VALUES (1, 1, 'v0.2.1', '0.2.1.r5', 1, 1)`,
++       VALUES (1, 1, 'v0.2.1', '0.2.1.r6', 1, 1)`,
+     ).run();
+     db.prepare(
+       `INSERT INTO cycle_records
+@@ -203,7 +203,7 @@ describe("cognitive v0.2.1 sidecar database", () => {
+     db.prepare(
+       `INSERT INTO cognitive_sidecar_meta
+          (id, schema_version, architecture_epoch, implementation_spec_version, thought_contract_version, authority_epoch)
+-       VALUES (1, 1, 'v0.2.1', '0.2.1.r5', 1, 1)`,
++       VALUES (1, 1, 'v0.2.1', '0.2.1.r6', 1, 1)`,
+     ).run();
+     db.prepare(
+       `INSERT INTO cycle_records
+@@ -269,7 +269,7 @@ describe("cognitive v0.2.1 sidecar database", () => {
+     db.prepare(
+       `INSERT INTO cognitive_sidecar_meta
+          (id, schema_version, architecture_epoch, implementation_spec_version, thought_contract_version, authority_epoch)
+-       VALUES (1, 1, 'v0.2.1', '0.2.1.r5', 1, 1)`,
++       VALUES (1, 1, 'v0.2.1', '0.2.1.r6', 1, 1)`,
+     ).run();
+     db.exec(COGNITIVE_SIDECAR_SCHEMA_V2);
+     db.exec(COGNITIVE_SIDECAR_SCHEMA_V3);
+@@ -320,7 +320,7 @@ describe("cognitive v0.2.1 sidecar database", () => {
+     db.prepare(
+       `INSERT INTO cognitive_sidecar_meta
+          (id, schema_version, architecture_epoch, implementation_spec_version, thought_contract_version, authority_epoch)
+-       VALUES (1, 1, 'v0.2.1', '0.2.1.r5', 1, 1)`,
++       VALUES (1, 1, 'v0.2.1', '0.2.1.r6', 1, 1)`,
+     ).run();
+     db.exec(`
+       PRAGMA user_version = 1;
+diff --git a/apps/agent-service/src/core/cognitive-v021/test-support.ts b/apps/agent-service/src/core/cognitive-v021/test-support.ts
+index 293ac18..0208552 100644
+--- a/apps/agent-service/src/core/cognitive-v021/test-support.ts
++++ b/apps/agent-service/src/core/cognitive-v021/test-support.ts
+@@ -3,6 +3,7 @@ import { openCognitiveSidecarDb } from "./sidecar/db.js";
+ import { admitCycle, type AdmitCycleInput } from "./cycle/inbox.js";
+ import { admitWake } from "./wake/ledger.js";
+ import { occurrenceIdFor } from "./wake/identity.js";
++import { SETTLEMENT_SCHEMA_VERSION } from "./types.js";
+ import type { ThoughtSemanticOutput, ThoughtSettlementDraft, CycleRecord } from "./types.js";
+ 
+ export function openTestSidecar(): DatabaseSync {
+@@ -15,7 +16,7 @@ export function makeThoughtDraft(
+   overrides: Partial<ThoughtSettlementDraft> = {},
+ ): ThoughtSettlementDraft {
+   return {
+-    schemaVersion: 1,
++    schemaVersion: SETTLEMENT_SCHEMA_VERSION,
+     cycleId: "cycle-1",
+     generation: 1,
+     authorityEpoch: 1,
+diff --git a/apps/agent-service/src/core/cognitive-v021/thought/run.ts b/apps/agent-service/src/core/cognitive-v021/thought/run.ts
+index 91a3543..bd80ec0 100644
+--- a/apps/agent-service/src/core/cognitive-v021/thought/run.ts
++++ b/apps/agent-service/src/core/cognitive-v021/thought/run.ts
+@@ -11,6 +11,7 @@ import {
+   MAX_OBSERVATION_ROUNDS,
+   MAX_THOUGHT_PASSES,
+   MAX_THOUGHT_MODEL_ATTEMPTS,
++  SETTLEMENT_SCHEMA_VERSION,
+   type CycleTriggerKind,
+   type InboxEvent,
+   type KernelDeps,
+@@ -609,7 +610,7 @@ function materializeSemanticSettlement(
+   }
+ 
+   const result: Record<string, unknown> = {
+-    schemaVersion: 1,
++    schemaVersion: SETTLEMENT_SCHEMA_VERSION,
+     cycleId: input.cycleId,
+     generation: input.generation,
+     authorityEpoch: input.authorityEpoch,
+diff --git a/apps/agent-service/src/core/cognitive-v021/thought/semantic-output-contract.test.ts b/apps/agent-service/src/core/cognitive-v021/thought/semantic-output-contract.test.ts
+index a099973..5a5eef5 100644
+--- a/apps/agent-service/src/core/cognitive-v021/thought/semantic-output-contract.test.ts
++++ b/apps/agent-service/src/core/cognitive-v021/thought/semantic-output-contract.test.ts
+@@ -4,6 +4,8 @@ import {
+   thoughtOutputStructuredRequest,
+ } from "./output-contract.js";
+ import { parseThoughtSemanticOutput } from "./parse.js";
++import { THOUGHT_OUTPUT_CONTRACT_ID, THOUGHT_OUTPUT_SCHEMA_ID } from "../../model-fabric/dispatch-contract.js";
++import { IMPLEMENTATION_SPEC_VERSION, SETTLEMENT_SCHEMA_VERSION } from "../types.js";
+ 
+ const refs = new Set(["turn-1", "observation-1"]);
+ 
+@@ -34,6 +36,13 @@ const settlement = {
+ };
+ 
+ describe("Thought semantic output contract", () => {
++  it("exposes the exact Sparse VNext release identities", () => {
++    expect(SETTLEMENT_SCHEMA_VERSION).toBe(2);
++    expect(IMPLEMENTATION_SPEC_VERSION).toBe("0.2.1.r6");
++    expect(THOUGHT_OUTPUT_CONTRACT_ID).toBe("ashley.thought.semantic.v2");
++    expect(THOUGHT_OUTPUT_SCHEMA_ID).toBe("ashley.thought.semantic.v2.schema");
++  });
++
+   it("accepts each of the four semantic branches", () => {
+     expect(parseThoughtSemanticOutput(settlement, refs)).toMatchObject({ ok: true, value: { kind: "settlement" } });
+     expect(parseThoughtSemanticOutput({
+diff --git a/apps/agent-service/src/core/cognitive-v021/types.ts b/apps/agent-service/src/core/cognitive-v021/types.ts
+index 25e5ec4..0461a52 100644
+--- a/apps/agent-service/src/core/cognitive-v021/types.ts
++++ b/apps/agent-service/src/core/cognitive-v021/types.ts
+@@ -11,7 +11,7 @@ import type { SandboxV2CapabilitySpec } from "@composer-assistant/sandbox-v2";
+ export type { DataClassification } from "../privacy/classification.js";
+ 
+ export const ARCHITECTURE_EPOCH = "v0.2.1" as const;
+-export const IMPLEMENTATION_SPEC_VERSION = "0.2.1.r5" as const;
++export const IMPLEMENTATION_SPEC_VERSION = "0.2.1.r6" as const;
+ export const THOUGHT_CONTRACT_VERSION = 2 as const;
+ export const COGNITIVE_SIDECAR_SCHEMA_VERSION = 8 as const;
+ export const CAPACITY_WAIT_MAX_DURATION_MS = 120_000 as const;
+@@ -35,7 +35,7 @@ export type DeferredReactiveFrontierRecord = {
+   updatedAtMs: number;
+   terminalReason?: string | null;
+ };
+-export const SETTLEMENT_SCHEMA_VERSION = 1 as const;
++export const SETTLEMENT_SCHEMA_VERSION = 2 as const;
+ export const OUTBOX_BRIDGE_VERSION = 1 as const;
+ export const LEGACY_IMPORT_TOOL_VERSION = 1 as const;
+ export const MAX_AUTHORITY_REVISIONS = 2 as const;
+diff --git a/scripts/stabilization/sidecar-meta-transition.mjs b/scripts/stabilization/sidecar-meta-transition.mjs
+new file mode 100644
+index 0000000..eb322e0
+--- /dev/null
++++ b/scripts/stabilization/sidecar-meta-transition.mjs
+@@ -0,0 +1,114 @@
++#!/usr/bin/env node
++
++import { DatabaseSync } from "node:sqlite";
++import { pathToFileURL } from "node:url";
++
++export const SIDECAR_META_EXPECTED = Object.freeze({
++  schemaVersion: 8,
++  architectureEpoch: "v0.2.1",
++  thoughtContractVersion: 2,
++});
++
++export const SIDECAR_META_TRANSITIONS = Object.freeze({
++  forward: Object.freeze({ from: "0.2.1.r5", to: "0.2.1.r6" }),
++  rollback: Object.freeze({ from: "0.2.1.r6", to: "0.2.1.r5" }),
++});
++
++function readMeta(db) {
++  return db.prepare(
++    `SELECT id, schema_version, architecture_epoch,
++            implementation_spec_version, thought_contract_version
++       FROM cognitive_sidecar_meta
++      WHERE id = 1`,
++  ).get();
++}
++
++function assertExpectedMeta(row, expectedImplementationSpecVersion) {
++  if (
++    !row ||
++    Number(row.id) !== 1 ||
++    Number(row.schema_version) !== SIDECAR_META_EXPECTED.schemaVersion ||
++    row.architecture_epoch !== SIDECAR_META_EXPECTED.architectureEpoch ||
++    row.implementation_spec_version !== expectedImplementationSpecVersion ||
++    Number(row.thought_contract_version) !== SIDECAR_META_EXPECTED.thoughtContractVersion
++  ) {
++    throw new Error("sidecar_meta_identity_mismatch");
++  }
++}
++
++/**
++ * Execute the bounded deployment-only implementation-spec transition.
++ *
++ * This is deliberately not called by application startup. It verifies the
++ * complete singleton identity, changes only implementation_spec_version, and
++ * fails closed unless exactly one row changes and the read-back matches.
++ */
++export function transitionSidecarImplementationVersion(db, direction) {
++  const transition = SIDECAR_META_TRANSITIONS[direction];
++  if (!transition) throw new Error("sidecar_meta_transition_direction_invalid");
++
++  let transactionStarted = false;
++  try {
++    db.exec("BEGIN IMMEDIATE");
++    transactionStarted = true;
++
++    assertExpectedMeta(readMeta(db), transition.from);
++    const result = db.prepare(
++      `UPDATE cognitive_sidecar_meta
++          SET implementation_spec_version = ?
++        WHERE id = 1 AND implementation_spec_version = ?`,
++    ).run(transition.to, transition.from);
++    const changedRows = Number(result.changes);
++    if (changedRows !== 1) {
++      throw new Error(`sidecar_meta_transition_changes:${changedRows}`);
++    }
++
++    const after = readMeta(db);
++    if (!after || after.implementation_spec_version !== transition.to) {
++      throw new Error("sidecar_meta_transition_readback_mismatch");
++    }
++
++    db.exec("COMMIT");
++    transactionStarted = false;
++    return {
++      direction,
++      from: transition.from,
++      to: transition.to,
++      changedRows,
++      schemaVersion: SIDECAR_META_EXPECTED.schemaVersion,
++      architectureEpoch: SIDECAR_META_EXPECTED.architectureEpoch,
++      thoughtContractVersion: SIDECAR_META_EXPECTED.thoughtContractVersion,
++    };
++  } catch (error) {
++    if (transactionStarted) {
++      try { db.exec("ROLLBACK"); } catch { /* preserve the transition failure */ }
++    }
++    throw error;
++  }
++}
++
++function parseArguments(argv) {
++  if (argv.length !== 4 || argv[0] !== "--direction" || argv[2] !== "--db") {
++    throw new Error("usage: node scripts/stabilization/sidecar-meta-transition.mjs --direction <forward|rollback> --db <path>");
++  }
++  return { direction: argv[1], databasePath: argv[3] };
++}
++
++function isMain() {
++  return process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url;
++}
++
++if (isMain()) {
++  let db;
++  try {
++    const { direction, databasePath } = parseArguments(process.argv.slice(2));
++    db = new DatabaseSync(databasePath);
++    const result = transitionSidecarImplementationVersion(db, direction);
++    console.log(JSON.stringify(result));
++  } catch (error) {
++    console.error(`sidecar meta transition failed: ${error instanceof Error ? error.message : String(error)}`);
++    process.exitCode = 1;
++  } finally {
++    try { db?.close(); } catch { /* preserve the original result */ }
++  }
++}
+diff --git a/scripts/stabilization/sidecar-meta-transition.test.mjs b/scripts/stabilization/sidecar-meta-transition.test.mjs
+new file mode 100644
+index 0000000..b965461
+--- /dev/null
++++ b/scripts/stabilization/sidecar-meta-transition.test.mjs
+@@ -0,0 +1,128 @@
++import assert from "node:assert/strict";
++import { DatabaseSync } from "node:sqlite";
++import { test } from "node:test";
++import {
++  SIDECAR_META_EXPECTED,
++  transitionSidecarImplementationVersion,
++} from "./sidecar-meta-transition.mjs";
++
++function openMeta(spec = "0.2.1.r5", overrides = {}) {
++  const db = new DatabaseSync(":memory:");
++  db.exec(`
++    CREATE TABLE cognitive_sidecar_meta (
++      id INTEGER PRIMARY KEY CHECK (id = 1),
++      schema_version INTEGER NOT NULL,
++      architecture_epoch TEXT NOT NULL,
++      implementation_spec_version TEXT NOT NULL,
++      thought_contract_version INTEGER NOT NULL,
++      authority_epoch INTEGER NOT NULL DEFAULT 1
++    );
++  `);
++  db.prepare(
++    `INSERT INTO cognitive_sidecar_meta
++       (id, schema_version, architecture_epoch, implementation_spec_version,
++        thought_contract_version, authority_epoch)
++     VALUES (1, ?, ?, ?, ?, ?)`,
++  ).run(
++    overrides.schemaVersion ?? SIDECAR_META_EXPECTED.schemaVersion,
++    overrides.architectureEpoch ?? SIDECAR_META_EXPECTED.architectureEpoch,
++    spec,
++    overrides.thoughtContractVersion ?? SIDECAR_META_EXPECTED.thoughtContractVersion,
++    overrides.authorityEpoch ?? 7,
++  );
++  return db;
++}
++
++function snapshot(db) {
++  return db.prepare("SELECT * FROM cognitive_sidecar_meta WHERE id = 1").get();
++}
++
++test("SW-5 performs the exact r5 to r6 transition and changes one column", () => {
++  const db = openMeta("0.2.1.r5");
++  try {
++    const before = snapshot(db);
++    const result = transitionSidecarImplementationVersion(db, "forward");
++    const after = snapshot(db);
++    assert.deepEqual(result, {
++      direction: "forward",
++      from: "0.2.1.r5",
++      to: "0.2.1.r6",
++      changedRows: 1,
++      schemaVersion: 8,
++      architectureEpoch: "v0.2.1",
++      thoughtContractVersion: 2,
++    });
++    assert.equal(after.implementation_spec_version, "0.2.1.r6");
++    assert.equal(after.authority_epoch, before.authority_epoch);
++    assert.equal(after.schema_version, before.schema_version);
++    assert.equal(after.architecture_epoch, before.architecture_epoch);
++    assert.equal(after.thought_contract_version, before.thought_contract_version);
++  } finally {
++    db.close();
++  }
++});
++
++test("SW-6 performs the exact r6 to r5 rollback transition", () => {
++  const db = openMeta("0.2.1.r6");
++  try {
++    const result = transitionSidecarImplementationVersion(db, "rollback");
++    assert.equal(result.from, "0.2.1.r6");
++    assert.equal(result.to, "0.2.1.r5");
++    assert.equal(result.changedRows, 1);
++    assert.equal(snapshot(db).implementation_spec_version, "0.2.1.r5");
++  } finally {
++    db.close();
++  }
++});
++
++test("SW-5 fails closed on any unexpected singleton identity", () => {
++  const db = openMeta("0.2.1.r5", { schemaVersion: 7 });
++  try {
++    const before = snapshot(db);
++    assert.throws(
++      () => transitionSidecarImplementationVersion(db, "forward"),
++      /sidecar_meta_identity_mismatch/,
++    );
++    assert.deepEqual(snapshot(db), before);
++  } finally {
++    db.close();
++  }
++});
++
++test("SW-5 rolls back when the conditional update does not change exactly one row", () => {
++  const db = openMeta("0.2.1.r5");
++  try {
++    db.exec(`
++      CREATE TRIGGER skip_meta_update
++      BEFORE UPDATE OF implementation_spec_version ON cognitive_sidecar_meta
++      BEGIN SELECT RAISE(IGNORE); END;
++    `);
++    assert.throws(
++      () => transitionSidecarImplementationVersion(db, "forward"),
++      /sidecar_meta_transition_changes:0/,
++    );
++    assert.equal(snapshot(db).implementation_spec_version, "0.2.1.r5");
++  } finally {
++    db.close();
++  }
++});
++
++test("SW-6 rolls back when read-back differs from the requested version", () => {
++  const db = openMeta("0.2.1.r6");
++  try {
++    db.exec(`
++      CREATE TRIGGER tamper_meta_readback
++      AFTER UPDATE OF implementation_spec_version ON cognitive_sidecar_meta
++      BEGIN
++        UPDATE cognitive_sidecar_meta SET implementation_spec_version = 'tampered' WHERE id = 1;
++      END;
++    `);
++    assert.throws(
++      () => transitionSidecarImplementationVersion(db, "rollback"),
++      /sidecar_meta_transition_readback_mismatch/,
++    );
++    assert.equal(snapshot(db).implementation_spec_version, "0.2.1.r6");
++  } finally {
++    db.close();
++  }
++});

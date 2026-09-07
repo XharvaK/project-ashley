@@ -4,13 +4,14 @@ import { updateCycleState } from "../cycle/inbox.js";
 import { admitTestCycle, openTestSidecar } from "../test-support.js";
 import { publishSemanticTransaction } from "./publish.js";
 import { applyConcernDelta } from "../concerns/lineage.js";
+import { SETTLEMENT_SCHEMA_VERSION } from "../types.js";
 import type { PublishedCognitiveSettlement } from "../types.js";
 import { openNuclearDb } from "../../db.js";
 import { beginAuthorityTransition, captureAuthorityCurrentness, stabilizeAuthorityBarrier } from "../authority/barrier.js";
 
 function settlement(overrides: Partial<PublishedCognitiveSettlement> = {}): PublishedCognitiveSettlement {
   return {
-    settlementId: "settlement-1", schemaVersion: 1, cycleId: "cycle-1", generation: 1,
+    settlementId: "settlement-1", schemaVersion: SETTLEMENT_SCHEMA_VERSION, cycleId: "cycle-1", generation: 1,
     authorityEpoch: 1, occupantId: "doc", architectureEpoch: "v0.2.1", triggerRef: "owner-1",
     interpretation: { discourseActs: ["inform"], referentBindings: [], corrections: [], unresolvedAmbiguities: [], topics: ["topic"] },
     commitments: { epistemic: [{ dimensions: { source: "owner_utterance", status: "asserted", time: "current", reliability: "owner_supplied" }, statement: "topic" }], operational: [], conversational: ["answer"], stance: { warmth: "medium", humorAllowed: false, disagreement: false, uncertaintyDisplay: true } },

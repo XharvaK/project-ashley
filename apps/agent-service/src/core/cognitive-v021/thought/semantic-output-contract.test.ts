@@ -4,6 +4,8 @@ import {
   thoughtOutputStructuredRequest,
 } from "./output-contract.js";
 import { parseThoughtSemanticOutput } from "./parse.js";
+import { THOUGHT_OUTPUT_CONTRACT_ID, THOUGHT_OUTPUT_SCHEMA_ID } from "../../model-fabric/dispatch-contract.js";
+import { IMPLEMENTATION_SPEC_VERSION, SETTLEMENT_SCHEMA_VERSION } from "../types.js";
 
 const refs = new Set(["turn-1", "observation-1"]);
 
@@ -34,6 +36,13 @@ const settlement = {
 };
 
 describe("Thought semantic output contract", () => {
+  it("exposes the exact Sparse VNext release identities", () => {
+    expect(SETTLEMENT_SCHEMA_VERSION).toBe(2);
+    expect(IMPLEMENTATION_SPEC_VERSION).toBe("0.2.1.r6");
+    expect(THOUGHT_OUTPUT_CONTRACT_ID).toBe("ashley.thought.semantic.v2");
+    expect(THOUGHT_OUTPUT_SCHEMA_ID).toBe("ashley.thought.semantic.v2.schema");
+  });
+
   it("accepts each of the four semantic branches", () => {
     expect(parseThoughtSemanticOutput(settlement, refs)).toMatchObject({ ok: true, value: { kind: "settlement" } });
     expect(parseThoughtSemanticOutput({

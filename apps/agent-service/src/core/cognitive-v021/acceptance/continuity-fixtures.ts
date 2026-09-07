@@ -1,3 +1,4 @@
+import { SETTLEMENT_SCHEMA_VERSION } from "../types.js";
 import type { PublishedCognitiveSettlement } from "../types.js";
 
 export function continuitySettlement(
@@ -5,7 +6,7 @@ export function continuitySettlement(
 ): PublishedCognitiveSettlement {
   return {
     settlementId: "settlement-continuity-1",
-    schemaVersion: 1,
+    schemaVersion: SETTLEMENT_SCHEMA_VERSION,
     cycleId: "cycle-1",
     generation: 1,
     authorityEpoch: 1,
