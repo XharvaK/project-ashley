@@ -369,3 +369,26 @@ SHUTDOWN_AUTHORITY=NO
 SHUTDOWN_ACTION=PROHIBITED
 REPORT=.superpowers/sdd/ashley-stabilization-overnight/wave-results/release-version-mechanics.md
 NEXT_WAVE=Wave7 exact immutable candidate qualification
+
+## Wave 7 — exact immutable candidate qualification
+
+WAVE=7
+STATUS=PASS_LOCAL_EXACT_CANDIDATE
+CANDIDATE_SHA=bbd3657eb0f590f30ddb582b3d73b51fa2f5f20e
+CANDIDATE_TREE=c1adc90c107941b87784fa5c9aa747bab67c325b
+CANDIDATE_PARENT=5ad74718be5827cfb9471eb7aa05540f548c4f7c
+BRANCH=codex/stabilization-sparse-vnext-overnight-20260906
+WORKTREE_BEFORE_QUALIFICATION=CLEAN
+INTEGRATED_VITEST=27_FILES_245_TESTS_PASS
+FORWARD_ROLLBACK_WITNESS=node --test scripts/stabilization/sidecar-meta-transition.test.mjs => 5/5 passed
+BUILD=npm run build --prefix apps/agent-service => PASS
+DIFF_CHECK=git diff --check => PASS
+PROVIDER_ACTION=NONE_DURING_WAVE_7
+PRODUCTION_MUTATION=NONE_DURING_WAVE_7
+RELEASE_QUALIFIED=LOCAL_EXACT_CANDIDATE
+PUSH_PENDING=YES
+SHUTDOWN_AUTHORITY=NO
+SHUTDOWN_ACTION=PROHIBITED
+REPORT=.superpowers/sdd/ashley-stabilization-overnight/wave-results/exact-candidate-qualification.md
+CHECKPOINT=.superpowers/sdd/ashley-stabilization-overnight/checkpoints/wave-7.patch
+NEXT_WAVE=Wave8 push then production preflight/deployment and bounded acceptance
