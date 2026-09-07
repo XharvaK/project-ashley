@@ -1,19 +1,56 @@
 import { sha256 } from "../../model-fabric/hash.js";
 import type { ExistingRef, LocalAlias, SemanticRef } from "../types.js";
 
+/**
+ * Target domains whose identities are present in the current Thought input.
+ * Other opaque references remain allowlist-only because this input does not
+ * carry enough state to prove their target domain.
+ */
+export type ThoughtReferenceTarget = "working_context" | "concern" | "observation";
+
+export type ThoughtReferenceTargetMap = ReadonlyMap<
+  string,
+  readonly ThoughtReferenceTarget[]
+>;
+
 export type ThoughtReferenceAllowlist = {
   readonly existing: ReadonlySet<string>;
   readonly fingerprint: string;
+  readonly targetDomains: ReadonlyMap<string, ReadonlySet<ThoughtReferenceTarget>>;
   readonly aliases: Set<string>;
 };
 
-export function buildReferenceAllowlist(references: readonly string[]): ThoughtReferenceAllowlist {
+export function buildReferenceAllowlist(
+  references: readonly string[],
+  targetDomains: ThoughtReferenceTargetMap = new Map(),
+): ThoughtReferenceAllowlist {
   const existing = new Set(references.filter((ref) => typeof ref === "string" && ref.length > 0));
+  const knownTargetDomains = new Map<string, ReadonlySet<ThoughtReferenceTarget>>();
+  for (const [ref, targets] of targetDomains) {
+    if (!existing.has(ref)) continue;
+    const known = new Set<ThoughtReferenceTarget>(targets);
+    if (known.size > 0) knownTargetDomains.set(ref, known);
+  }
   return {
     existing,
     fingerprint: `sha256:${sha256([...existing].sort())}`,
+    targetDomains: knownTargetDomains,
     aliases: new Set(),
   };
+}
+
+/**
+ * Return false only when the allowlist has positively identified a different
+ * target domain. A missing domain entry means the reference remains opaque and
+ * is therefore accepted by the existing allowlist law.
+ */
+export function hasReferenceTarget(
+  allowlist: ThoughtReferenceAllowlist,
+  ref: string,
+  expectedTarget: ThoughtReferenceTarget,
+): boolean {
+  const known = allowlist.targetDomains.get(ref);
+  return known === undefined || known.has(expectedTarget);
 }
 
 export function registerLocalAlias(

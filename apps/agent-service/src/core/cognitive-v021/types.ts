@@ -927,6 +927,9 @@ export type ThoughtParserFailureCode =
   | "effect_contract_failure"
   | "forbidden_fields"
   | "schema_version_mismatch"
+  | "alias_duplicate"
+  | "dangling_local_reference"
+  | "reference_target_type_mismatch"
   | "other";
 export type ThoughtCorrectionFailureCode = "structural_correction_scope_violation";
 export type ThoughtPassIndex = number;
@@ -965,7 +968,7 @@ export type ThoughtFailureStep = ThoughtStepBase & {
     | "pass_exhausted"
     | "capacity_deferred"
     | "cancelled";
-  /** Bounded parser category. Raw provider output is never persisted. */
+  /** Bounded structural category. Raw provider output is never persisted. */
   diagnosticCode?: ThoughtParserFailureCode;
   /** Parser-owned field/path metadata; raw provider output is never persisted. */
   diagnosticField?: string;

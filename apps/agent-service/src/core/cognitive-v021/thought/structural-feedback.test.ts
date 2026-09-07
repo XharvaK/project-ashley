@@ -130,4 +130,22 @@ describe("Thought structural correction scope", () => {
       }), code).toEqual({ ok: true });
     }
   });
+
+  it("keeps post-parse materialization failures on global regeneration", () => {
+    for (const code of [
+      "alias_duplicate",
+      "dangling_local_reference",
+      "reference_target_type_mismatch",
+    ] as const) {
+      const feedback = createThoughtStructuralFeedback({
+        code,
+        field: "workingContextDeltas[0].item.concernRef",
+        previousCandidate: abstainCandidate,
+      });
+      expect(feedback.correctionScope, code).toBe("global");
+      expect(feedback.previousCandidate, code).toBeNull();
+      expect(formatThoughtStructuralCorrectionData(feedback), code).toBeNull();
+      expect(formatThoughtStructuralFeedback(feedback), code).toContain(code);
+    }
+  });
 });

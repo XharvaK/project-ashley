@@ -57,7 +57,14 @@ import { registerActiveThought } from "../cycle/active.js";
 import { adaptPerception } from "../perception/adapter.js";
 import { buildThoughtInput } from "./input.js";
 import { parseThoughtSemanticOutput, THOUGHT_SEMANTIC_PARSER_ID } from "./parse.js";
-import { buildReferenceAllowlist, registerLocalAlias } from "./reference-allowlist.js";
+import {
+  buildReferenceAllowlist,
+  hasReferenceTarget,
+  registerLocalAlias,
+  type ThoughtReferenceAllowlist,
+  type ThoughtReferenceTarget,
+  type ThoughtReferenceTargetMap,
+} from "./reference-allowlist.js";
 import { bindEffectIntent, bindObservationIntent } from "./operation-binding.js";
 import {
   thoughtOutputCompatibilityInstruction,
@@ -220,18 +227,64 @@ function thoughtMessages(
 type LocalAliasTarget = "working_context" | "concern";
 type LocalAliasBinding = { id: string; target: LocalAliasTarget };
 
+type ThoughtMaterializationFailureCode = Extract<
+  ThoughtParserFailureCode,
+  "alias_duplicate" | "dangling_local_reference" | "reference_target_type_mismatch"
+>;
+
+class ThoughtMaterializationError extends Error {
+  readonly code: ThoughtMaterializationFailureCode;
+  readonly field: string;
+
+  constructor(code: ThoughtMaterializationFailureCode, field: string) {
+    super(code);
+    this.name = "ThoughtMaterializationError";
+    this.code = code;
+    this.field = field;
+  }
+}
+
+function materializationFailure(
+  code: ThoughtMaterializationFailureCode,
+  field: string,
+): never {
+  throw new ThoughtMaterializationError(code, field);
+}
+
+function materializeExistingReference(
+  value: string,
+  referenceAllowlist: ThoughtReferenceAllowlist,
+  expectedTarget: ThoughtReferenceTarget,
+  field: string,
+): string {
+  if (!hasReferenceTarget(referenceAllowlist, value, expectedTarget)) {
+    return materializationFailure("reference_target_type_mismatch", field);
+  }
+  return value;
+}
+
 function semanticReferenceValue(
   value: SemanticRef | string | null,
   localAliases: Map<string, LocalAliasBinding>,
-  expectedTarget?: LocalAliasTarget,
+  referenceAllowlist: ThoughtReferenceAllowlist,
+  expectedTarget?: ThoughtReferenceTarget,
+  field = "reference",
 ): string | null {
   if (!value) return null;
-  if (typeof value === "string") return value;
-  if (value.kind === "existing") return value.ref;
+  if (typeof value === "string") {
+    return expectedTarget
+      ? materializeExistingReference(value, referenceAllowlist, expectedTarget, field)
+      : value;
+  }
+  if (value.kind === "existing") {
+    return expectedTarget
+      ? materializeExistingReference(value.ref, referenceAllowlist, expectedTarget, field)
+      : value.ref;
+  }
   const binding = localAliases.get(value.alias);
-  if (!binding) throw new Error(`dangling_local_reference:${value.alias}`);
+  if (!binding) return materializationFailure("dangling_local_reference", field);
   if (expectedTarget && binding.target !== expectedTarget) {
-    throw new Error(`reference_target_type_mismatch:${value.alias}`);
+    return materializationFailure("reference_target_type_mismatch", field);
   }
   return binding.id;
 }
@@ -273,18 +326,32 @@ function materializeSemanticSettlement(
   // Register declaration identities before resolving cross-domain references.
   // The parser rejects aliases colliding with existing references. This
   // materializer pass owns duplicate registration and Host-minted IDs.
-  const referenceAllowlist = buildReferenceAllowlist(semanticReferencesForInput(input));
-  const register = (alias: string, target: LocalAliasTarget): void => {
-    registerLocalAlias(referenceAllowlist, alias);
+  const referenceAllowlist = buildReferenceAllowlist(
+    semanticReferencesForInput(input),
+    semanticReferenceTargetsForInput(input),
+  );
+  const register = (alias: string, target: LocalAliasTarget, field: string): void => {
+    try {
+      registerLocalAlias(referenceAllowlist, alias);
+    } catch (error) {
+      if (error instanceof Error && error.message === "alias_duplicate") {
+        return materializationFailure("alias_duplicate", field);
+      }
+      throw error;
+    }
     localAliases.set(alias, { id: randomUUID(), target });
   };
-  for (const delta of semantic.workingContextDeltas ?? []) {
-    if (delta.op === "upsert" && delta.item.identity.kind === "local") register(delta.item.identity.alias, "working_context");
-    if (delta.op === "supersede" && delta.replacement.identity.kind === "local") register(delta.replacement.identity.alias, "working_context");
+  for (const [index, delta] of (semantic.workingContextDeltas ?? []).entries()) {
+    if (delta.op === "upsert" && delta.item.identity.kind === "local") {
+      register(delta.item.identity.alias, "working_context", `workingContextDeltas[${index}].item.identity`);
+    }
+    if (delta.op === "supersede" && delta.replacement.identity.kind === "local") {
+      register(delta.replacement.identity.alias, "working_context", `workingContextDeltas[${index}].replacement.identity`);
+    }
   }
-  for (const delta of semantic.concernDeltas ?? []) {
+  for (const [index, delta] of (semantic.concernDeltas ?? []).entries()) {
     if (delta.op === "upsert" && delta.record.identity.kind === "local") {
-      register(delta.record.identity.alias, "concern");
+      register(delta.record.identity.alias, "concern", `concernDeltas[${index}].record.identity`);
     }
   }
 
@@ -308,7 +375,14 @@ function materializeSemanticSettlement(
     // These fields are internal mechanical bookkeeping. They remain present
     // even when the semantic evidenceUse domain is absent.
     operations: {
-      observationsConsumed: [...(semantic.evidenceUse?.observationRefsUsed ?? [])],
+      observationsConsumed: semantic.evidenceUse?.observationRefsUsed?.map((ref, index) =>
+        materializeExistingReference(
+          ref,
+          referenceAllowlist,
+          "observation",
+          `evidenceUse.observationRefsUsed[${index}]`,
+        ),
+      ) ?? [],
       effectsCompleted: materializeEffectsCompleted(input.inFlight, receiptsByEffectId),
       intentsStillInFlight: [...(semantic.evidenceUse?.openIntentRefs ?? [])],
     },
@@ -319,17 +393,41 @@ function materializeSemanticSettlement(
     const interpretation = semantic.interpretation;
     result.interpretation = {
       ...(interpretation.discourseActs ? { discourseActs: [...interpretation.discourseActs] } : {}),
-      ...(interpretation.referentBindings ? { referentBindings: interpretation.referentBindings.map((binding) => ({
+      ...(interpretation.referentBindings ? { referentBindings: interpretation.referentBindings.map((binding, index) => ({
         span: binding.span,
-        ...(binding.concernRef ? { concernId: semanticReferenceValue(binding.concernRef, localAliases, "concern") } : {}),
-        ...(binding.entityRef ? { entityKey: semanticReferenceValue(binding.entityRef, localAliases) } : {}),
+        ...(binding.concernRef ? {
+          concernId: semanticReferenceValue(
+            binding.concernRef,
+            localAliases,
+            referenceAllowlist,
+            "concern",
+            `interpretation.referentBindings[${index}].concernRef`,
+          ),
+        } : {}),
+        ...(binding.entityRef ? {
+          entityKey: semanticReferenceValue(
+            binding.entityRef,
+            localAliases,
+            referenceAllowlist,
+            undefined,
+            `interpretation.referentBindings[${index}].entityRef`,
+          ),
+        } : {}),
         sourceTurnIds: [...binding.sourceTurnRefs],
       })) } : {}),
-      ...(interpretation.corrections ? { corrections: interpretation.corrections.map((correction) => ({
+      ...(interpretation.corrections ? { corrections: interpretation.corrections.map((correction, index) => ({
         correctedTurnIds: [...correction.correctedTurnRefs],
         fromSpan: correction.fromSpan,
         toSpan: correction.toSpan,
-        ...(correction.concernRef ? { concernId: semanticReferenceValue(correction.concernRef, localAliases, "concern") } : {}),
+        ...(correction.concernRef ? {
+          concernId: semanticReferenceValue(
+            correction.concernRef,
+            localAliases,
+            referenceAllowlist,
+            "concern",
+            `interpretation.corrections[${index}].concernRef`,
+          ),
+        } : {}),
       })) } : {}),
       ...(interpretation.unresolvedAmbiguities ? { unresolvedAmbiguities: [...interpretation.unresolvedAmbiguities] } : {}),
       ...(interpretation.topics ? { topics: [...interpretation.topics] } : {}),
@@ -349,29 +447,80 @@ function materializeSemanticSettlement(
     };
   }
 
-  if (semantic.workingContextDeltas) result.workingContextDelta = semantic.workingContextDeltas.map((delta) => {
-      if (delta.op === "abandon") return { op: "abandon", id: delta.target };
+  if (semantic.workingContextDeltas) result.workingContextDelta = semantic.workingContextDeltas.map((delta, index) => {
+      if (delta.op === "abandon") {
+        return {
+          op: "abandon",
+          id: materializeExistingReference(
+            delta.target,
+            referenceAllowlist,
+            "working_context",
+            `workingContextDeltas[${index}].target`,
+          ),
+        };
+      }
       const item = delta.op === "upsert" ? delta.item : delta.replacement;
       const legacyItem = {
-        id: semanticReferenceValue(item.identity, localAliases, "working_context") ?? randomUUID(),
+        id: semanticReferenceValue(
+          item.identity,
+          localAliases,
+          referenceAllowlist,
+          "working_context",
+          `workingContextDeltas[${index}].${delta.op === "upsert" ? "item" : "replacement"}.identity`,
+        ) ?? randomUUID(),
         conversationId,
         type: item.type,
         text: item.text,
-        concernId: semanticReferenceValue(item.concernRef, localAliases, "concern"),
+        concernId: semanticReferenceValue(
+          item.concernRef,
+          localAliases,
+          referenceAllowlist,
+          "concern",
+          `workingContextDeltas[${index}].${delta.op === "upsert" ? "item" : "replacement"}.concernRef`,
+        ),
         sourceTurnIds: [...item.sourceTurnRefs],
         status: item.status,
-        supersedesId: semanticReferenceValue(item.supersedesRef, localAliases, "working_context"),
+        supersedesId: semanticReferenceValue(
+          item.supersedesRef,
+          localAliases,
+          referenceAllowlist,
+          "working_context",
+          `workingContextDeltas[${index}].${delta.op === "upsert" ? "item" : "replacement"}.supersedesRef`,
+        ),
       };
       return delta.op === "upsert"
         ? { op: "upsert", item: legacyItem }
-        : { op: "supersede", id: delta.target, replacement: legacyItem };
+        : {
+            op: "supersede",
+            id: materializeExistingReference(
+              delta.target,
+              referenceAllowlist,
+              "working_context",
+              `workingContextDeltas[${index}].target`,
+            ),
+            replacement: legacyItem,
+          };
     });
-  if (semantic.concernDeltas) result.concernDeltas = semantic.concernDeltas.map((delta) => delta.op === "resolve"
-      ? { op: "resolve", concernId: delta.target }
+  if (semantic.concernDeltas) result.concernDeltas = semantic.concernDeltas.map((delta, index) => delta.op === "resolve"
+      ? {
+          op: "resolve",
+          concernId: materializeExistingReference(
+            delta.target,
+            referenceAllowlist,
+            "concern",
+            `concernDeltas[${index}].target`,
+          ),
+        }
       : {
           op: "upsert",
           record: {
-          concernId: semanticReferenceValue(delta.record.identity, localAliases, "concern") ?? randomUUID(),
+          concernId: semanticReferenceValue(
+            delta.record.identity,
+            localAliases,
+            referenceAllowlist,
+            "concern",
+            `concernDeltas[${index}].record.identity`,
+          ) ?? randomUUID(),
             conversationId,
             statement: delta.record.statement,
             sourceTurnIds: [...delta.record.sourceTurnRefs],
@@ -380,37 +529,55 @@ function materializeSemanticSettlement(
             status: delta.record.status,
           },
         });
-  if (semantic.occupancyDeltas) result.occupancyDelta = semantic.occupancyDeltas.map((delta) => ({
+  if (semantic.occupancyDeltas) result.occupancyDelta = semantic.occupancyDeltas.map((delta, index) => ({
       op: "set",
       occupancy: {
         conversationId,
-        concernId: semanticReferenceValue(delta.concernRef, localAliases, "concern") ?? randomUUID(),
+        concernId: semanticReferenceValue(
+          delta.concernRef,
+          localAliases,
+          referenceAllowlist,
+          "concern",
+          `occupancyDeltas[${index}].concernRef`,
+        ) ?? randomUUID(),
         status: delta.status,
         priority: delta.priority,
         updatedGeneration: input.generation,
       },
     }));
-  if (semantic.futureTriggerDeltas) result.futureTriggers = semantic.futureTriggerDeltas.map((delta) => delta.op === "cancel"
+  if (semantic.futureTriggerDeltas) result.futureTriggers = semantic.futureTriggerDeltas.map((delta, index) => delta.op === "cancel"
       ? { op: "cancel", triggerId: delta.target }
       : {
           op: "create",
           trigger: {
             triggerId: randomUUID(),
             conversationId,
-            concernId: semanticReferenceValue(delta.concernRef, localAliases, "concern") ?? randomUUID(),
+            concernId: semanticReferenceValue(
+              delta.concernRef,
+              localAliases,
+              referenceAllowlist,
+              "concern",
+              `futureTriggerDeltas[${index}].concernRef`,
+            ) ?? randomUUID(),
             snapshotHash: "semantic-proposal",
             dueAtMs: delta.dueAtMs,
             payload: { purpose: delta.purpose, ...delta.payload },
           },
         });
-  if (semantic.subscriptionDeltas) result.subscriptions = semantic.subscriptionDeltas.map((delta) => delta.op === "cancel"
+  if (semantic.subscriptionDeltas) result.subscriptions = semantic.subscriptionDeltas.map((delta, index) => delta.op === "cancel"
       ? { op: "cancel", subscriptionId: delta.target }
       : {
           op: "create",
           subscription: {
             subscriptionId: randomUUID(),
             conversationId,
-            concernId: semanticReferenceValue(delta.subscription.concernRef, localAliases, "concern"),
+            concernId: semanticReferenceValue(
+              delta.subscription.concernRef,
+              localAliases,
+              referenceAllowlist,
+              "concern",
+              `subscriptionDeltas[${index}].subscription.concernRef`,
+            ),
             source: delta.subscription.source,
             scope: delta.subscription.scope,
             topicKeys: [...delta.subscription.topicKeys],
@@ -418,7 +585,7 @@ function materializeSemanticSettlement(
             expiresAtMs: delta.subscription.expiresAtMs,
           },
         });
-  if (semantic.durableNominations) result.durableNominations = semantic.durableNominations.map((nomination) => ({
+  if (semantic.durableNominations) result.durableNominations = semantic.durableNominations.map((nomination, index) => ({
       nominationId: randomUUID(),
       cycleId: input.cycleId,
       generation: input.generation,
@@ -428,7 +595,13 @@ function materializeSemanticSettlement(
       dimensions: { ...nomination.dimensions },
       dataClassification: nomination.dataClassification,
       supersedesAssertionKey: nomination.supersedesRef,
-      concernId: semanticReferenceValue(nomination.concernRef, localAliases, "concern"),
+      concernId: semanticReferenceValue(
+        nomination.concernRef,
+        localAliases,
+        referenceAllowlist,
+        "concern",
+        `durableNominations[${index}].concernRef`,
+      ),
       sourceRefs: [...nomination.sourceRefs],
     }));
   return result as ThoughtSettlementDraft;
@@ -445,6 +618,29 @@ function semanticReferencesForInput(input: ThoughtInput | ProjectedThoughtInput)
     ...input.retrieval.hits.flatMap((hit) => "supportRefs" in hit ? [hit.ref, ...hit.supportRefs] : [hit.ref]),
     input.trigger.ref,
   ];
+}
+
+function semanticReferenceTargetsForInput(
+  input: ThoughtInput | ProjectedThoughtInput,
+): ThoughtReferenceTargetMap {
+  const targets = new Map<string, ThoughtReferenceTarget[]>();
+  const recordTarget = (value: unknown, target: ThoughtReferenceTarget): void => {
+    if (typeof value !== "string" || value.length === 0) return;
+    const known = targets.get(value);
+    if (known) {
+      if (!known.includes(target)) known.push(target);
+      return;
+    }
+    targets.set(value, [target]);
+  };
+
+  for (const item of input.workingContext) {
+    recordTarget(item.id, "working_context");
+    recordTarget(item.concernId, "concern");
+  }
+  for (const item of input.occupancy) recordTarget(item.concernId, "concern");
+  for (const item of input.observations) recordTarget(item.observationId, "observation");
+  return targets;
 }
 
 function operationalNamespaceForThoughtInput(
@@ -504,6 +700,7 @@ export async function runThoughtModel(
   let messages: ChatMessage[] | undefined;
   let semanticProjectionHash: string | undefined;
   let dispatchMessagesHash: string | undefined;
+  let completionInputTokens: number | undefined;
 
   try {
     if ("rawConversation" in input && input.retrieval && Array.isArray(input.retrieval.hits)) {
@@ -569,7 +766,10 @@ export async function runThoughtModel(
       triggerRef: input.trigger.ref,
       semanticProjectionHash,
       dispatchMessagesHash,
-      allowlistFingerprint: buildReferenceAllowlist(semanticReferencesForInput(input)).fingerprint,
+      allowlistFingerprint: buildReferenceAllowlist(
+        semanticReferencesForInput(input),
+        semanticReferenceTargetsForInput(input),
+      ).fingerprint,
       absoluteDeadlineAtMs: options.deadlineAtMs,
     };
     dispatchOptions.thoughtInvocationContext = thoughtInvocationContext;
@@ -579,6 +779,7 @@ export async function runThoughtModel(
       dispatchOptions,
       deps.completeChat,
     );
+    completionInputTokens = completion.usage?.promptTokens ?? estimatedInputTokens;
     if (options.signal?.aborted) {
       return {
         output: {
@@ -766,6 +967,25 @@ export async function runThoughtModel(
   } catch (error) {
     const cancelled = options.signal?.aborted === true
       || (error instanceof Error && error.name === "AbortError");
+    if (error instanceof ThoughtMaterializationError) {
+      return {
+        output: {
+          kind: "failure",
+          cycleId: input.cycleId,
+          generation: input.generation,
+          pass,
+          requestId,
+          occupantId: input.occupantId,
+          reason: "malformed",
+          diagnosticCode: error.code,
+          diagnosticField: error.field,
+        },
+        attempts: 1,
+        requestId,
+        malformed: true,
+        inputTokens: completionInputTokens,
+      };
+    }
     if (!cancelled && deps.observabilityDb) {
       try {
         const mfMeta = metadataFromError(error);

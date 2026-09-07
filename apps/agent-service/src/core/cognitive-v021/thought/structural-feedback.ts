@@ -62,6 +62,9 @@ const STRUCTURAL_FEEDBACK: Readonly<Record<ThoughtParserFailureCode, string>> = 
   effect_contract_failure: "Emit the required effect proposal shape.",
   forbidden_fields: "Omit publication and delivery fields.",
   schema_version_mismatch: "Use the active Thought schema version.",
+  alias_duplicate: "Use a distinct output-local alias for each same-settlement entity.",
+  dangling_local_reference: "Use only local aliases declared by a same-settlement entity or an allowlisted existing reference.",
+  reference_target_type_mismatch: "Use a local or existing reference whose target domain matches the reported field.",
   other: "Match the semantic Thought contract exactly.",
 };
 

@@ -501,6 +501,167 @@ describe("v0.2.1 Thought run", () => {
     }
   });
 
+  it.each([
+    {
+      label: "dangling local references",
+      diagnosticCode: "dangling_local_reference",
+      diagnosticField: "workingContextDeltas[0].item.concernRef",
+      settlement: (observationId: string) => makeSemanticSettlement({
+        speech: { mode: "none" },
+        workingContextDeltas: [{
+          op: "upsert",
+          item: {
+            identity: { kind: "local", alias: "working-item" },
+            type: "topic",
+            text: "A topic with a missing concern alias.",
+            concernRef: { kind: "local", alias: "missing-concern" },
+            sourceTurnRefs: [],
+            status: "active",
+            supersedesRef: null,
+          },
+        }],
+      }),
+    },
+    {
+      label: "duplicate local aliases",
+      diagnosticCode: "alias_duplicate",
+      diagnosticField: "workingContextDeltas[1].item.identity",
+      settlement: (observationId: string) => makeSemanticSettlement({
+        speech: { mode: "none" },
+        workingContextDeltas: [
+          {
+            op: "upsert",
+            item: {
+              identity: { kind: "local", alias: "same-item" },
+              type: "topic",
+              text: "The first item.",
+              concernRef: null,
+              sourceTurnRefs: [],
+              status: "active",
+              supersedesRef: null,
+            },
+          },
+          {
+            op: "upsert",
+            item: {
+              identity: { kind: "local", alias: "same-item" },
+              type: "topic",
+              text: "The second item.",
+              concernRef: null,
+              sourceTurnRefs: [],
+              status: "active",
+              supersedesRef: null,
+            },
+          },
+        ],
+      }),
+    },
+    {
+      label: "existing references with the wrong target domain",
+      diagnosticCode: "reference_target_type_mismatch",
+      diagnosticField: "workingContextDeltas[0].item.concernRef",
+      settlement: (observationId: string) => makeSemanticSettlement({
+        speech: { mode: "none" },
+        workingContextDeltas: [{
+          op: "upsert",
+          item: {
+            identity: { kind: "local", alias: "working-item" },
+            type: "topic",
+            text: "A topic pointing at an observation as its concern.",
+            concernRef: { kind: "existing", ref: observationId },
+            sourceTurnRefs: [],
+            status: "active",
+            supersedesRef: null,
+          },
+        }],
+      }),
+    },
+  ])("routes $label through the bounded malformed Thought failure path", async ({
+    label,
+    diagnosticCode,
+    diagnosticField,
+    settlement,
+  }) => {
+    const sidecar = openTestSidecar();
+    const attentionDb = openTestSidecar();
+    const suffix = label.replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+    const cycle = admitTestCycle(sidecar, {
+      cycleId: `cycle-materialization-${suffix}`,
+      conversationId: `thread-materialization-${suffix}`,
+      triggerKind: "owner_message",
+      triggerRef: `owner-materialization-${suffix}`,
+      occupantId: "doc",
+      authorityEpoch: 1,
+      nowMs: 1,
+    });
+    const evidence = appendOwnerUtterance(sidecar, {
+      conversationId: cycle.conversationId,
+      text: "Please handle this semantic settlement.",
+      discordMessageIds: [`materialization-${suffix}-message`],
+      nowMs: 2,
+    });
+    const observationId = `observation-materialization-${suffix}`;
+    const event = appendInboxEvent(sidecar, {
+      wakeId: cycle.wakeId,
+      conversationId: cycle.conversationId,
+      kind: "owner_message",
+      payload: {
+        cycleId: cycle.cycleId,
+        evidenceRowId: evidence.rowId,
+        ownerMessage: evidence.text,
+        observations: [{
+          observationId,
+          provenance: "test-materialization",
+          modality: "text",
+          dataClassification: "ordinary",
+          payload: { text: "observation" },
+          derived: false,
+          replaySafe: true,
+          secretOmitted: false,
+        }],
+      },
+      createdAtMs: 2,
+    });
+
+    try {
+      const completeChat = vi.fn(async () => ({
+        text: JSON.stringify(settlement(observationId)),
+        model: "fake",
+        modelAlias: "thought",
+        resolvedModelId: null,
+      }));
+      const result = await runCognitiveCycle(sidecar, attentionDb, event, deps({
+        attentionDb,
+        completeChat,
+      }));
+      const steps = sidecar.prepare(
+        "SELECT payload_json FROM thought_steps ORDER BY pass",
+      ).all().map((row) => JSON.parse(String((row as { payload_json: string }).payload_json)));
+
+      expect(result).toMatchObject({
+        published: false,
+        infrastructureNotice: "[system] Thought did not complete. Please send the message again.",
+        thoughtModelAttempts: 3,
+        acceptedThoughtPasses: 0,
+      });
+      expect(completeChat).toHaveBeenCalledTimes(3);
+      expect(steps).toHaveLength(3);
+      expect(steps.at(-1)).toMatchObject({
+        kind: "failure",
+        reason: "malformed",
+        diagnosticCode,
+        diagnosticField,
+      });
+      expect(steps).not.toContainEqual(expect.objectContaining({ reason: "unavailable" }));
+      expect(sidecar.prepare("SELECT COUNT(*) AS count FROM settlements").get()).toMatchObject({ count: 0 });
+      expect(sidecar.prepare("SELECT notice_key FROM system_notice_outbox").get()?.notice_key)
+        .toContain(":malformed");
+    } finally {
+      sidecar.close();
+      attentionDb.close();
+    }
+  });
+
   it("fails closed on a predecessor Thought output envelope and does not publish speech", async () => {
     const sidecar = openTestSidecar();
     const attentionDb = openTestSidecar();
