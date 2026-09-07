@@ -415,3 +415,35 @@ PRODUCTION_MUTATION=NONE_DURING_PREFLIGHT
 SHUTDOWN_AUTHORITY=NO
 SHUTDOWN_ACTION=PROHIBITED
 NEXT_WAVE=Wave8 exact-candidate deployment with bounded r5-to-r6 sidecar transition
+
+## Wave 8/9 — production deployment and bounded acceptance
+
+WAVE=8_9
+STATUS=DEPLOYMENT_PASS_ACCEPTANCE_DEGRADED_NOT_ACCEPTED
+SOURCE_CANDIDATE_SHA=bbd3657eb0f590f30ddb582b3d73b51fa2f5f20e
+SOURCE_CANDIDATE_TREE=c1adc90c107941b87784fa5c9aa747bab67c325b
+PRODUCTION_HOST=XQX; SSH_ALIAS=mint; PATH=/home/xarvak/project-ashley
+PRE_DEPLOY_SHA=7bae7eaafedc2e7e859218d340920ea3958b1515
+PRE_DEPLOY_TREE=5a1fd8c04ced30f1fd0764ea7b7b667285ce4170
+DEPLOYED_SHA=bbd3657eb0f590f30ddb582b3d73b51fa2f5f20e
+DEPLOYED_TREE=c1adc90c107941b87784fa5c9aa747bab67c325b
+PRODUCTION_DEPLOYMENT=PASS; tracked_worktree=CLEAN; activated_marker=bbd3657eb0f590f30ddb582b3d73b51fa2f5f20e
+SIDECAR_META_BEFORE=0.2.1.r5; SIDECAR_META_AFTER=0.2.1.r6; schema=8; transition_changed_rows=1; transition_readback=PASS
+DEPLOYED_IDENTITIES=implementation_spec=0.2.1.r6; settlement_schema=2; architecture_epoch=v0.2.1; thought_contract=ashley.thought.semantic.v2; thought_schema=ashley.thought.semantic.v2.schema; semantic_fingerprint=sha256:e96d2a20feea442da2fbfacfa02bc9b0383836e0e531af3c089c67c436a35ace
+READINESS=agent_active_ready; discord_active; sidecar_quick_check=ok; nuclear_quick_check=ok; continuity_available
+LIVE_WITNESS=one owner ingress; cycle=cycle:24f1049c62f932c179f2e005e8dc8a8583938d8f223429490ea9dc5a9e7d1895; generation=31; attention_id=2111; provider=nim; error=provider_unavailable; retry=none; fallback=none
+LIVE_WITNESS_RESULT=inbox_consumed; cycle_silent; causal_ledger_thought_unavailable=1; settlement=none; speech_outbox=none; system_notice=delivered; reservation=234_committed; discord_receipt=1546367398016327720
+WITNESS_REMEDIATION=transactionally corrected synthetic thread linkage for reservation 234/notice 19; existing receipt finalized; no resend
+PRODUCTION_ACCEPTANCE=DEGRADED_NOT_ACCEPTED; ordinary_sparse_settlement=NOT_PROVEN; thought_route=DEGRADED
+LOCAL_EXACT_CANDIDATE_WITNESSES=PASS; production_outbox_recovery=NOT_PROVEN; future_trigger_production=NOT_PROVEN; evidence_reliance_production=NOT_PROVEN
+SYSTEM_NOTICE_DISCORD_ID_PROJECTION_GAP=PREEXISTING_CURRENT_SOURCE_GAP; authoritative bubble/evidence retain real ID; no candidate expansion
+OPERATOR_EFFECT=two read-only inspection passes induced SQLite lock/restart path; agent auto-restarted twice and returned active/ready; recorded separately from candidate failure
+NO_ROLLBACK=provider failure also present in Wave4; rollback would not repair provider availability
+STABILITY_WINDOW=NOT_STARTED; do not claim complete
+SHUTDOWN_AUTHORITY=NO
+SHUTDOWN_ACTION=PROHIBITED
+REPORT=.superpowers/sdd/ashley-stabilization-overnight/wave-results/production-deployment-acceptance.md
+CHECKPOINT=.superpowers/sdd/ashley-stabilization-overnight/checkpoints/wave-8.patch
+REPORT_SHA256=0AF2B5FC74DFDE4FB29716840B821C0C607C27C5B30BFF0EEA9DCE0B13CCC4D5
+CHECKPOINT_SHA256=14533B7B963DC784299E90DB713B6841AB7C52F58CDDEA877095DDDBE2AED6E5
+NEXT_GATE=Owner adjudication of provider reliability and pre-existing system-notice ID projection gap; stable-use acceptance remains closed
