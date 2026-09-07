@@ -53,6 +53,7 @@ import {
 } from "./core/cognitive-v021/thought/diagnostics.js";
 import { DatabaseSync } from "node:sqlite";
 import { reconcileAuthorityBarrierOnStartup } from "./core/cognitive-v021/authority/barrier.js";
+import { reconsiderPendingSpeechOutbox } from "./core/cognitive-v021/sidecar/recovery.js";
 
 export function createAgentInboxConsumerHandler(
   manager: Pick<AgentManager, "dispatchCognitiveEvent">,
@@ -135,6 +136,15 @@ export async function serveAgent(manager: AgentManager): Promise<void> {
     };
     manager.configureCognitiveDispatch({ deps, projector });
     reconcileStartupOwnership(cognitiveSidecar);
+    const speechRecovery = await reconsiderPendingSpeechOutbox(
+      cognitiveSidecar,
+      (outboxId) => projector.project(outboxId),
+    );
+    if (speechRecovery.failures > 0) {
+      console.warn(
+        `[cognitive-v021] pending speech recovery deferred rows=${speechRecovery.failures}`,
+      );
+    }
     // Durable-work outcome reconciliation owns stranded outcome-unknown work.
     // It runs after cycle ownership reconciliation and before the inbox
     // consumer begins, so Gen15-like reconciling work can become pending only

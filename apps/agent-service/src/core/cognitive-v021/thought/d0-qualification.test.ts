@@ -9,6 +9,8 @@ import { checkAuthority } from "../authority/check.js";
 import { appendInboxEvent } from "../cycle/inbox.js";
 import { appendOwnerUtterance } from "../evidence/conversation-log.js";
 import { buildOperationalEffectNamespaceFromRefs, mintEffectRef } from "../effect/effect-ref.js";
+import { applyConcernDelta } from "../concerns/lineage.js";
+import { applyOccupancyDelta } from "../concerns/occupancy.js";
 import { bindEffectIntent, bindObservationIntent } from "./operation-binding.js";
 import {
   THOUGHT_OUTPUT_SCHEMA,
@@ -87,6 +89,7 @@ function fixtureDeps(
 async function runSettlementFixture(
   response: unknown,
   label: string,
+  seed?: (sidecar: DatabaseSync, cycle: ReturnType<typeof admitTestCycle>) => void,
 ): Promise<{ sidecar: DatabaseSync; attentionDb: DatabaseSync; result: Awaited<ReturnType<typeof runCognitiveCycle>>; cycleId: string }> {
   const sidecar = openTestSidecar();
   const attentionDb = openTestSidecar();
@@ -101,6 +104,7 @@ async function runSettlementFixture(
     authorityEpoch: 1,
     nowMs: 1,
   });
+  seed?.(sidecar, cycle);
   const evidence = appendOwnerUtterance(sidecar, {
     conversationId,
     text: `D0 fixture ${label}`,
@@ -318,11 +322,58 @@ describe("Core D0 local Sparse VNext qualification", () => {
       }],
     }, "08");
     try {
-      const concern = fixture.sidecar.prepare("SELECT concern_id FROM concerns").get() as { concern_id: string };
-      const trigger = fixture.sidecar.prepare("SELECT concern_id, status FROM future_triggers").get() as { concern_id: string; status: string };
+      const concern = fixture.sidecar.prepare("SELECT concern_id, snapshot_hash FROM concerns").get() as { concern_id: string; snapshot_hash: string };
+      const trigger = fixture.sidecar.prepare("SELECT concern_id, snapshot_hash, status FROM future_triggers").get() as { concern_id: string; snapshot_hash: string; status: string };
       expect(fixture.result.published).toBe(true);
       expect(trigger.concern_id).toBe(concern.concern_id);
       expect(trigger.concern_id).not.toBe("focus");
+      expect(trigger.snapshot_hash).toBe(concern.snapshot_hash);
+      expect(trigger.snapshot_hash).not.toBe("semantic-proposal");
+      expect(trigger.status).toBe("scheduled");
+    } finally { closeFixture(fixture); }
+  });
+
+  it("SW-3 binds an existing concern future trigger to the Host-captured snapshot", async () => {
+    const fixture = await runSettlementFixture({
+      kind: "settlement",
+      speech: { mode: "none" },
+      futureTriggerDeltas: [{
+        op: "create",
+        concernRef: { kind: "existing", ref: "existing-concern" },
+        dueAtMs: 2_000,
+        purpose: "revisit",
+        payload: { bounded: true },
+      }],
+    }, "08-existing", (sidecar, cycle) => {
+      applyConcernDelta(sidecar, {
+        op: "upsert",
+        record: {
+          concernId: "existing-concern",
+          conversationId: cycle.conversationId,
+          statement: "An existing concern to revisit.",
+          sourceTurnIds: [],
+          dimensions: { source: "owner_utterance", status: "asserted", time: "historical", reliability: "owner_supplied" },
+          assertionKey: null,
+          status: "active",
+        },
+      }, { cycleId: cycle.cycleId, generation: cycle.generation });
+      applyOccupancyDelta(sidecar, {
+        op: "set",
+        occupancy: {
+          conversationId: cycle.conversationId,
+          concernId: "existing-concern",
+          status: "active",
+          priority: 10,
+          updatedGeneration: cycle.generation,
+        },
+      }, { cycleId: cycle.cycleId, generation: cycle.generation });
+    });
+    try {
+      const concern = fixture.sidecar.prepare("SELECT concern_id, snapshot_hash FROM concerns WHERE concern_id = 'existing-concern'").get() as { concern_id: string; snapshot_hash: string };
+      const trigger = fixture.sidecar.prepare("SELECT concern_id, snapshot_hash, status FROM future_triggers").get() as { concern_id: string; snapshot_hash: string; status: string };
+      expect(fixture.result).toMatchObject({ published: true, outboxId: null });
+      expect(trigger.concern_id).toBe(concern.concern_id);
+      expect(trigger.snapshot_hash).toBe(concern.snapshot_hash);
       expect(trigger.status).toBe("scheduled");
     } finally { closeFixture(fixture); }
   });

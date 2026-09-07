@@ -1,0 +1,1076 @@
+diff --git a/apps/agent-service/src/core/cognitive-v021/authority/currentness-detectors.ts b/apps/agent-service/src/core/cognitive-v021/authority/currentness-detectors.ts
+index ab22ef9..c515f6a 100644
+--- a/apps/agent-service/src/core/cognitive-v021/authority/currentness-detectors.ts
++++ b/apps/agent-service/src/core/cognitive-v021/authority/currentness-detectors.ts
+@@ -1,19 +1,25 @@
+ import {
+   claimsOwnConversationalReadActivity,
+   claimsOwnReadingActivity,
++  stripQuotedHypotheticals,
+ } from "../../honesty/claims.js";
+ 
+ const CURRENTNESS_PATTERNS = [
+-  /\blatest\b/i,
+-  /\btoday\b/i,
+-  /\bcurrently\b/i,
+-  /\bright now\b/i,
+-  /\bthis (?:morning|week|month)\b/i,
+-  /\bmost recent\b/i,
++  /\b(?:currently|right now|as of now)\s*,?\s*(?:the|this|that|it|our|your|status|state|version|update|result|build|deployment|service|system|task|test|check)\b[^.!?]{0,120}\b(?:is|are|remains|stands|shows|says|has|have)\b/i,
++  /\b(?:the|this|that|our|your)\s+(?:latest|most recent|current)\s+(?:status|state|version|update|result|build|deployment|file|message|release|report|data|service|system|task|test|check)\b[^.!?]{0,120}\b(?:is|are|was|were|shows|says|looks|remains|stands|has|have)\b/i,
++  /\b(?:the|this|that|our|your)\s+(?:status|state|version|update|result|build|deployment|file|message|release|report|data|service|system|task|test|check)\b[^.!?]{0,120}\b(?:currently|right now|as of now)\b/i,
++  /\b(?:today|this morning|this week|this month)\b\s*,?\s*(?:the|this|that|our|your)\s+(?:status|state|version|update|result|build|deployment|service|system|task|test|check)\b[^.!?]{0,100}\b(?:is|are|was|were|shows|says|remains|stands)\b/i,
+ ];
+ 
+ export function claimsCurrentness(text: string): boolean {
+-  return CURRENTNESS_PATTERNS.some((pattern) => pattern.test(text));
++  const clean = stripQuotedHypotheticals(text)
++    .replace(/\b(?:they|he|she|you|someone|the user)\s+(?:said|says|mentioned|reported|claimed|asked|wrote)\b[^.!?]*(?:[.!?]|$)/gi, " ")
++    .replace(/\b(?:i|we)\s+(?:do not|don't|cannot|can't|can not|never)\s+(?:claim|say|pretend|mean|have|know)\b[^.!?]*(?:[.!?]|$)/gi, " ");
++  return clean
++    .split(/[.!?]+/)
++    .map((segment) => segment.trim())
++    .filter((segment) => segment.length > 0)
++    .some((segment) => CURRENTNESS_PATTERNS.some((pattern) => pattern.test(segment)));
+ }
+ 
+ export function claimsUnwitnessedReading(text: string): boolean {
+diff --git a/apps/agent-service/src/core/cognitive-v021/concerns/lineage.ts b/apps/agent-service/src/core/cognitive-v021/concerns/lineage.ts
+index 88112dc..3aa4d9c 100644
+--- a/apps/agent-service/src/core/cognitive-v021/concerns/lineage.ts
++++ b/apps/agent-service/src/core/cognitive-v021/concerns/lineage.ts
+@@ -36,7 +36,7 @@ export function listConcerns(db: DatabaseSync, conversationId: string): ConcernR
+     .filter((row): row is ConcernRecord => row !== null);
+ }
+ 
+-function snapshot(record: Omit<ConcernRecord, "snapshotHash">): string {
++export function concernSnapshotHash(record: Omit<ConcernRecord, "snapshotHash">): string {
+   return createHash("sha256").update(JSON.stringify(record), "utf8").digest("hex");
+ }
+ 
+@@ -68,7 +68,7 @@ export function applyConcernDelta(
+     JSON.stringify(record.dimensions),
+     record.assertionKey,
+     record.status,
+-    snapshot(record),
++    concernSnapshotHash(record),
+     publication.cycleId,
+   );
+ }
+diff --git a/apps/agent-service/src/core/cognitive-v021/settlement/publish.test.ts b/apps/agent-service/src/core/cognitive-v021/settlement/publish.test.ts
+index 024122c..4d1a478 100644
+--- a/apps/agent-service/src/core/cognitive-v021/settlement/publish.test.ts
++++ b/apps/agent-service/src/core/cognitive-v021/settlement/publish.test.ts
+@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
+ import { updateCycleState } from "../cycle/inbox.js";
+ import { admitTestCycle, openTestSidecar } from "../test-support.js";
+ import { publishSemanticTransaction } from "./publish.js";
++import { applyConcernDelta } from "../concerns/lineage.js";
+ import type { PublishedCognitiveSettlement } from "../types.js";
+ import { openNuclearDb } from "../../db.js";
+ import { beginAuthorityTransition, captureAuthorityCurrentness, stabilizeAuthorityBarrier } from "../authority/barrier.js";
+@@ -50,6 +51,46 @@ describe("v0.2.1 semantic publication transaction", () => {
+     }
+   });
+ 
++  it("fails and rolls back when a future trigger snapshot no longer matches its concern", () => {
++    const db = openTestSidecar();
++    try {
++      admitTestCycle(db, { cycleId: "cycle-trigger-fence", conversationId: "thread-trigger-fence", triggerKind: "owner_message", triggerRef: "one", occupantId: "doc", authorityEpoch: 1, nowMs: 1 });
++      applyConcernDelta(db, {
++        op: "upsert",
++        record: {
++          concernId: "concern-trigger-fence",
++          conversationId: "thread-trigger-fence",
++          statement: "The current concern state.",
++          sourceTurnIds: [],
++          dimensions: { source: "owner_utterance", status: "asserted", time: "historical", reliability: "owner_supplied" },
++          assertionKey: null,
++          status: "active",
++        },
++      }, { cycleId: "cycle-trigger-fence", generation: 1 });
++
++      expect(() => publishSemanticTransaction(db, settlement({
++        cycleId: "cycle-trigger-fence",
++        triggerRef: "thread-trigger-fence",
++        futureTriggers: [{
++          op: "create",
++          trigger: {
++            triggerId: "trigger-fence",
++            conversationId: "thread-trigger-fence",
++            concernId: "concern-trigger-fence",
++            snapshotHash: "snapshot-seen-before-publication",
++            dueAtMs: 2_000,
++            payload: { purpose: "revisit" },
++          },
++        }],
++      }))).toThrow("future_trigger_snapshot_conflict");
++      expect(db.prepare("SELECT COUNT(*) AS count FROM future_triggers").get()).toMatchObject({ count: 0 });
++      expect(db.prepare("SELECT COUNT(*) AS count FROM settlements").get()).toMatchObject({ count: 0 });
++      expect(db.prepare("SELECT COUNT(*) AS count FROM working_context_items").get()).toMatchObject({ count: 0 });
++    } finally {
++      db.close();
++    }
++  });
++
+   it("rolls back provisional deltas when the second publication fence becomes stale", () => {
+     const db = openTestSidecar();
+     try {
+diff --git a/apps/agent-service/src/core/cognitive-v021/settlement/publish.ts b/apps/agent-service/src/core/cognitive-v021/settlement/publish.ts
+index 49ed8f2..e909bba 100644
+--- a/apps/agent-service/src/core/cognitive-v021/settlement/publish.ts
++++ b/apps/agent-service/src/core/cognitive-v021/settlement/publish.ts
+@@ -11,7 +11,7 @@ import type {
+   SubscriptionDelta,
+ } from "../types.js";
+ import { applyWorkingContextDelta } from "../evidence/working-context.js";
+-import { applyConcernDelta } from "../concerns/lineage.js";
++import { applyConcernDelta, getConcern } from "../concerns/lineage.js";
+ import { applyOccupancyDelta } from "../concerns/occupancy.js";
+ import { enqueueDurableNomination } from "../memory/nomination.js";
+ import { assertSubscriptionCapacity } from "../observation/subscriptions.js";
+@@ -92,6 +92,9 @@ function applyFutureTriggerDelta(db: DatabaseSync, delta: FutureTriggerDelta): v
+     return;
+   }
+   const trigger = delta.trigger;
++  const concern = getConcern(db, trigger.concernId);
++  if (!concern) throw new Error("future_trigger_concern_missing");
++  if (concern.snapshotHash !== trigger.snapshotHash) throw new Error("future_trigger_snapshot_conflict");
+   db.prepare(
+     `INSERT INTO future_triggers
+        (trigger_id, conversation_id, concern_id, due_at_ms, snapshot_hash, status, payload_json)
+@@ -237,6 +240,12 @@ export function publishSemanticTransaction(
+       authorityEpoch: settlement.authorityEpoch,
+       settlementId: settlement.settlementId,
+       observationIds: settlement.operations.observationsConsumed,
++      ...(settlement.operations.retrievalRefsUsed
++        ? { retrievalRefsUsed: settlement.operations.retrievalRefsUsed }
++        : {}),
++      ...(settlement.operations.sourceRefsUsed
++        ? { sourceRefsUsed: settlement.operations.sourceRefsUsed }
++        : {}),
+       effectIds: settlement.operations.effectsCompleted,
+       authorityCodes: settlement.authority.objectionsApplied,
+       nominationIds: (settlement.durableNominations ?? []).map((item) => item.nominationId),
+diff --git a/apps/agent-service/src/core/cognitive-v021/settlement/validate.ts b/apps/agent-service/src/core/cognitive-v021/settlement/validate.ts
+index 400d7ef..ac890a9 100644
+--- a/apps/agent-service/src/core/cognitive-v021/settlement/validate.ts
++++ b/apps/agent-service/src/core/cognitive-v021/settlement/validate.ts
+@@ -184,6 +184,12 @@ function validateOperations(
+   if (!isRecord(value) || !isStringArray(value.observationsConsumed) || !isStringArray(value.effectsCompleted) || !isStringArray(value.intentsStillInFlight)) {
+     return failure("malformed", "OPERATIONS_MISSING");
+   }
++  if (value.retrievalRefsUsed !== undefined && !isStringArray(value.retrievalRefsUsed)) {
++    return failure("malformed", "OPERATIONS_RETRIEVAL_REFS_INVALID");
++  }
++  if (value.sourceRefsUsed !== undefined && !isStringArray(value.sourceRefsUsed)) {
++    return failure("malformed", "OPERATIONS_SOURCE_REFS_INVALID");
++  }
+   const receipts = new Set([
+     ...(active?.consumedEffectIds ?? []),
+     ...(active?.effectReceiptIds ?? []),
+diff --git a/apps/agent-service/src/core/cognitive-v021/sidecar/recovery.test.ts b/apps/agent-service/src/core/cognitive-v021/sidecar/recovery.test.ts
+index 85ff18f..b668d14 100644
+--- a/apps/agent-service/src/core/cognitive-v021/sidecar/recovery.test.ts
++++ b/apps/agent-service/src/core/cognitive-v021/sidecar/recovery.test.ts
+@@ -6,8 +6,11 @@ import { describe, expect, it } from "vitest";
+ import { appendInboxEvent, claimInboxEvent } from "../cycle/inbox.js";
+ import { admitTestCycle, openTestSidecar } from "../test-support.js";
+ import { openCognitiveSidecarDb } from "./db.js";
+-import { recoverCognitiveSidecar } from "./recovery.js";
++import { recoverCognitiveSidecar, reconsiderPendingSpeechOutbox } from "./recovery.js";
+ import { putInFlight } from "../effect/in-flight.js";
++import { openNuclearDb } from "../../db.js";
++import { OutboxDeliveryProjector } from "../delivery/outbox-projector.js";
++import { insertOutboxPending } from "../speech/outbox.js";
+ 
+ describe("cognitive sidecar reopen recovery", () => {
+   it("returns expired inbox claims and orphaned live projections to retryable states", () => {
+@@ -80,4 +83,169 @@ describe("cognitive sidecar reopen recovery", () => {
+       rmSync(directory, { recursive: true, force: true });
+     }
+   });
++
++  it("SW-2 reconsiders a committed pending speech row after restart exactly once", async () => {
++    const directory = mkdtempSync(join(tmpdir(), "ashley-v021-speech-recovery-"));
++    const databasePath = join(directory, "sidecar.db");
++    let sidecar = openCognitiveSidecarDb(new DatabaseSync(databasePath), {
++      dataPlane: { kind: "isolated" },
++    });
++    const nuclear = openNuclearDb(new DatabaseSync(":memory:"));
++
++    try {
++      admitTestCycle(sidecar, {
++        cycleId: "cycle-speech-restart",
++        conversationId: "conversation-speech-restart",
++        generation: 1,
++        triggerKind: "owner_message",
++        triggerRef: "event-speech-restart",
++        occupantId: "doc",
++        nowMs: 1,
++      });
++
++      // Model the publication commit that durably wrote the settlement and
++      // speech outbox before the process crashed before projectOutbox.
++      sidecar.exec("BEGIN IMMEDIATE");
++      sidecar.prepare(
++        `INSERT INTO settlements (settlement_id, cycle_id, generation, payload_json)
++         VALUES ('settlement-speech-restart', 'cycle-speech-restart', 1, '{}')`,
++      ).run();
++      const committed = insertOutboxPending(sidecar, {
++        settlementId: "settlement-speech-restart",
++        cycleId: "cycle-speech-restart",
++        generation: 1,
++        conversationId: "conversation-speech-restart",
++        licensedText: "committed before the crash",
++      });
++      sidecar.exec("COMMIT");
++      sidecar.close();
++
++      // Reopen the sidecar as a new process would. The pending row must remain
++      // the same durable speech, not trigger a new Thought run.
++      sidecar = openCognitiveSidecarDb(new DatabaseSync(databasePath), {
++        dataPlane: { kind: "isolated" },
++      });
++      const projector = new OutboxDeliveryProjector(sidecar, nuclear, { nowMs: () => 1_000 });
++      const first = await reconsiderPendingSpeechOutbox(
++        sidecar,
++        (outboxId) => projector.project(outboxId),
++      );
++      const second = await reconsiderPendingSpeechOutbox(
++        sidecar,
++        (outboxId) => projector.project(outboxId),
++      );
++
++      expect(first).toEqual({ reconsidered: 1, failures: 0 });
++      expect(second).toEqual({ reconsidered: 0, failures: 0 });
++      expect(sidecar.prepare(
++        "SELECT send_status, licensed_text, nuclear_reservation_id FROM speech_outbox WHERE outbox_id = ?",
++      ).get(committed.outboxId)).toMatchObject({
++        send_status: "projected",
++        licensed_text: "committed before the crash",
++        nuclear_reservation_id: 1,
++      });
++      expect(nuclear.prepare(
++        "SELECT COUNT(*) AS count, MIN(cognitive_v021_projection_key) AS projection_key FROM delivery_reservations",
++      ).get()).toMatchObject({ count: 1, projection_key: `speech:${committed.outboxId}` });
++    } finally {
++      try { sidecar.close(); } catch { /* already closed */ }
++      nuclear.close();
++      rmSync(directory, { recursive: true, force: true });
++    }
++  });
++
++  it("SW-2 delegates gate decisions and excludes shadow or suppressed rows", async () => {
++    const sidecar = openTestSidecar();
++    const nuclear = openNuclearDb(new DatabaseSync(":memory:"));
++    try {
++      const reactive = insertOutboxPending(sidecar, {
++        settlementId: "settlement-recovery-reactive",
++        cycleId: "cycle-recovery-reactive",
++        generation: 1,
++        conversationId: "conversation-recovery-reactive",
++        licensedText: "reactive recovery",
++      });
++      const proactive = insertOutboxPending(sidecar, {
++        settlementId: "settlement-recovery-proactive",
++        cycleId: "cycle-recovery-proactive",
++        generation: 1,
++        conversationId: "conversation-recovery-proactive",
++        licensedText: "proactive recovery",
++        deliveryIntent: {
++          ownerId: "doc",
++          channel: "discord",
++          threadId: "conversation-recovery-proactive",
++          conversationId: "conversation-recovery-proactive",
++          trigger: "idle",
++          deliveryLane: "proactive",
++          purpose: "licensed_speech",
++        },
++      });
++      const shadow = insertOutboxPending(sidecar, {
++        settlementId: "settlement-recovery-shadow",
++        cycleId: "cycle-recovery-shadow",
++        generation: 1,
++        conversationId: "conversation-recovery-shadow",
++        licensedText: "shadow recovery",
++        origin: "shadow",
++      });
++      const suppressed = insertOutboxPending(sidecar, {
++        settlementId: "settlement-recovery-suppressed",
++        cycleId: "cycle-recovery-suppressed",
++        generation: 1,
++        conversationId: "conversation-recovery-suppressed",
++        licensedText: "suppressed recovery",
++      });
++      sidecar.prepare(
++        "UPDATE speech_outbox SET send_status = 'pending', suppressed = 1 WHERE outbox_id = ?",
++      ).run(suppressed.outboxId);
++
++      const projector = new OutboxDeliveryProjector(sidecar, nuclear, {
++        gate: (intent) => intent.deliveryLane === "proactive"
++          ? { ok: false, reason: "daily_cap" }
++          : { ok: true },
++      });
++      const result = await reconsiderPendingSpeechOutbox(
++        sidecar,
++        (outboxId) => projector.project(outboxId),
++      );
++
++      expect(result).toEqual({ reconsidered: 2, failures: 0 });
++      expect(sidecar.prepare(
++        "SELECT outbox_id, send_status, suppressed FROM speech_outbox ORDER BY outbox_id",
++      ).all()).toEqual([
++        { outbox_id: reactive.outboxId, send_status: "projected", suppressed: 0 },
++        { outbox_id: proactive.outboxId, send_status: "pending", suppressed: 0 },
++        { outbox_id: shadow.outboxId, send_status: "suppressed_shadow", suppressed: 1 },
++        { outbox_id: suppressed.outboxId, send_status: "pending", suppressed: 1 },
++      ]);
++      expect(nuclear.prepare("SELECT COUNT(*) AS count FROM delivery_reservations").get())
++        .toMatchObject({ count: 1 });
++    } finally {
++      nuclear.close();
++      sidecar.close();
++    }
++  });
++
++  it("SW-2 leaves a pending row retryable when the projector fails", async () => {
++    const sidecar = openTestSidecar();
++    try {
++      const row = insertOutboxPending(sidecar, {
++        settlementId: "settlement-recovery-failure",
++        cycleId: "cycle-recovery-failure",
++        generation: 1,
++        conversationId: "conversation-recovery-failure",
++        licensedText: "retry me",
++      });
++      const result = await reconsiderPendingSpeechOutbox(sidecar, async () => {
++        throw new Error("temporary_projection_failure");
++      });
++      expect(result).toEqual({ reconsidered: 1, failures: 1 });
++      expect(sidecar.prepare(
++        "SELECT send_status, nuclear_reservation_id FROM speech_outbox WHERE outbox_id = ?",
++      ).get(row.outboxId)).toMatchObject({ send_status: "pending", nuclear_reservation_id: null });
++    } finally {
++      sidecar.close();
++    }
++  });
+ });
+diff --git a/apps/agent-service/src/core/cognitive-v021/sidecar/recovery.ts b/apps/agent-service/src/core/cognitive-v021/sidecar/recovery.ts
+index 24f176b..edd06f3 100644
+--- a/apps/agent-service/src/core/cognitive-v021/sidecar/recovery.ts
++++ b/apps/agent-service/src/core/cognitive-v021/sidecar/recovery.ts
+@@ -4,6 +4,7 @@ import { recoverInFlight } from "../effect/recovery.js";
+ import { recoverDurableWork } from "../retry/ledger.js";
+ import { recoverWakes } from "../wake/ledger.js";
+ import { recoverPrivateBudget } from "../private-budget/recovery.js";
++import { listEligiblePendingSpeechOutbox } from "../speech/outbox.js";
+ 
+ export type CognitiveSidecarRecoveryResult = {
+   inboxClaimsRecovered: number;
+@@ -11,6 +12,40 @@ export type CognitiveSidecarRecoveryResult = {
+   noticeProjectionsRequeued: number;
+ };
+ 
++export type PendingSpeechOutboxRecoveryResult = {
++  reconsidered: number;
++  failures: number;
++};
++
++export type SpeechOutboxRecoveryProjector = (outboxId: number) => Promise<void> | void;
++
++/**
++ * Reconsider committed live speech that was still pending when a process
++ * stopped between publication commit and its projectOutbox callback.
++ *
++ * This function only dispatches durable outbox IDs to the existing projector.
++ * It never runs Thought again, manufactures a new settlement, or bypasses
++ * projector gates. A projector failure leaves the source row recoverable for
++ * the next bounded startup pass (pending rows remain pending; orphaned
++ * projecting rows are requeued by recoverCognitiveSidecar).
++ */
++export async function reconsiderPendingSpeechOutbox(
++  db: DatabaseSync,
++  project: SpeechOutboxRecoveryProjector,
++  options: { limit?: number } = {},
++): Promise<PendingSpeechOutboxRecoveryResult> {
++  const rows = listEligiblePendingSpeechOutbox(db, options);
++  let failures = 0;
++  for (const row of rows) {
++    try {
++      await project(row.outboxId);
++    } catch {
++      failures += 1;
++    }
++  }
++  return { reconsidered: rows.length, failures };
++}
++
+ /** Reopen-time recovery preserves dispatch truth before any work can be claimed again. */
+ export function recoverCognitiveSidecar(
+   db: DatabaseSync,
+diff --git a/apps/agent-service/src/core/cognitive-v021/speech/fidelity.test.ts b/apps/agent-service/src/core/cognitive-v021/speech/fidelity.test.ts
+index f5230eb..79aec6a 100644
+--- a/apps/agent-service/src/core/cognitive-v021/speech/fidelity.test.ts
++++ b/apps/agent-service/src/core/cognitive-v021/speech/fidelity.test.ts
+@@ -130,4 +130,95 @@ describe("v0.2.1 speech fidelity", () => {
+       },
+     })).toMatchObject({ ok: false, code: "DRAFT_COMMITMENT_CONFLICT" });
+   });
++
++  it("SW-4 does not mistake questions, reported speech, or self-reference for success claims", () => {
++    const ordinary = (draft: string) => fidelityCheck({
++      mode: "draft",
++      draft,
++      mustSay: [],
++      mustNot: [],
++      acceptableRealizations: [],
++      commitments: { ...commitments, operational: [] },
++    });
++
++    expect(ordinary("Are you done for tonight?")).toMatchObject({ ok: true });
++    expect(ordinary("They said, \"I completed the task.\"")).toMatchObject({ ok: true });
++    expect(ordinary("I haven't completed the task yet.")).toMatchObject({ ok: true });
++    expect(ordinary("I will complete the task tomorrow.")).toMatchObject({ ok: true });
++    expect(ordinary("I completed my thought and finished speaking.")).toMatchObject({ ok: true });
++    expect(ordinary("I completed the task.")).toMatchObject({ ok: false, code: "DRAFT_COMMITMENT_CONFLICT" });
++    expect(ordinary("I completed the project.")).toMatchObject({ ok: false, code: "DRAFT_COMMITMENT_CONFLICT" });
++
++    expect(fidelityCheck({
++      mode: "draft",
++      draft: "The task completed successfully.",
++      mustSay: [],
++      mustNot: [],
++      acceptableRealizations: [],
++      commitments: { ...commitments, operational: [{ effectRef: "effect:test", claimedState: "succeeded" }] },
++    })).toMatchObject({ ok: true });
++  });
++
++  it("SW-4 does not mistake reported or interrogative currentness for a claim", () => {
++    const ordinary = (draft: string) => fidelityCheck({
++      mode: "draft",
++      draft,
++      mustSay: [],
++      mustNot: [],
++      acceptableRealizations: [],
++      commitments: { ...commitments, epistemic: [] },
++    });
++
++    expect(ordinary("That's the latest I heard.")).toMatchObject({ ok: true });
++    expect(ordinary("What's the latest status?")).toMatchObject({ ok: true });
++    expect(ordinary("They mentioned that the latest status was healthy.")).toMatchObject({ ok: true });
++    expect(ordinary("The latest status is healthy.")).toMatchObject({ ok: false, code: "DRAFT_COMMITMENT_CONFLICT" });
++
++    expect(fidelityCheck({
++      mode: "draft",
++      draft: "The latest status is healthy.",
++      mustSay: [],
++      mustNot: [],
++      acceptableRealizations: [],
++      commitments,
++    })).toMatchObject({ ok: true });
++  });
++
++  it("SW-4 keeps vision and reading honesty checks for direct claims only", () => {
++    const ordinary = (draft: string) => fidelityCheck({
++      mode: "draft",
++      draft,
++      mustSay: [],
++      mustNot: [],
++      acceptableRealizations: [],
++      commitments: { ...commitments, operational: [] },
++    });
++
++    expect(ordinary("Can you see the image?")).toMatchObject({ ok: true });
++    expect(ordinary("They said, \"I can see the image.\"")).toMatchObject({ ok: true });
++    expect(ordinary("I can't claim I can see the image.")).toMatchObject({ ok: true });
++    expect(ordinary("I can see the image.")).toMatchObject({ ok: false, code: "UNWITNESSED_HIGH_RISK_CLAIM" });
++    expect(fidelityCheck({
++      mode: "draft",
++      draft: "I can see the image.",
++      mustSay: [],
++      mustNot: [],
++      acceptableRealizations: [],
++      commitments: { ...commitments, operational: [] },
++      observations: [{ modality: "vision" }],
++    })).toMatchObject({ ok: true });
++    expect(ordinary("Did you read the page?")).toMatchObject({ ok: true });
++    expect(ordinary("They reported, \"I read the page.\"")).toMatchObject({ ok: true });
++    expect(ordinary("I can't claim I read the page.")).toMatchObject({ ok: true });
++    expect(ordinary("I read the page.")).toMatchObject({ ok: false, code: "UNWITNESSED_HIGH_RISK_CLAIM" });
++    expect(fidelityCheck({
++      mode: "draft",
++      draft: "I read the page.",
++      mustSay: [],
++      mustNot: [],
++      acceptableRealizations: [],
++      commitments: { ...commitments, operational: [] },
++      observations: [{ modality: "page" }],
++    })).toMatchObject({ ok: true });
++  });
+ });
+diff --git a/apps/agent-service/src/core/cognitive-v021/speech/fidelity.ts b/apps/agent-service/src/core/cognitive-v021/speech/fidelity.ts
+index 283491f..816de48 100644
+--- a/apps/agent-service/src/core/cognitive-v021/speech/fidelity.ts
++++ b/apps/agent-service/src/core/cognitive-v021/speech/fidelity.ts
+@@ -9,6 +9,7 @@ import {
+   claimsOwnConversationalReadActivity,
+   claimsOwnReadingActivity,
+   claimsOwnVisionActivity,
++  stripQuotedHypotheticals,
+ } from "../../honesty/claims.js";
+ import { claimsCurrentness } from "../authority/currentness-detectors.js";
+ 
+@@ -54,6 +55,41 @@ function hasText(value: string, required: string): boolean {
+   return required.length === 0 || value.includes(required);
+ }
+ 
++const OPERATIONAL_SUBJECT = "(?:task|request|job|operation|effect|file|message|change|update|test|check|command|deployment|build|roundtrip|sandbox|reservation|trigger|subscription|project|document|directory|folder|config|configuration|patch|release|result|it)";
++
++const AFFIRMATIVE_OPERATIONAL_PATTERNS = [
++  new RegExp(`\\b(?:i|we)\\s+(?:just\\s+|already\\s+|successfully\\s+)?(?:worked|succeeded|completed|finished|sent|created|updated|deleted|verified|ran|executed)\\s+(?:(?:the|this|that|my|your)\\s+)?${OPERATIONAL_SUBJECT}\\b`, "i"),
++  new RegExp(`\\b(?:i|we)\\s+(?:did|got|made)\\s+(?:it|(?:(?:the|this|that)\\s+)?(?:task|request|job|operation|effect))\\b`, "i"),
++  new RegExp(`\\b(?:the|this|that|our|your)\\s+${OPERATIONAL_SUBJECT}\\s+(?:worked|succeeded|passed|completed|finished)\\b`, "i"),
++  new RegExp(`\\b(?:the|this|that|our|your)\\s+${OPERATIONAL_SUBJECT}\\s+(?:is|was|has been|have been)\\s+(?:complete|completed|done|successful|sent|created|updated|deleted|verified)\\b`, "i"),
++  new RegExp(`\\b(?:done|completed|finished)\\s*[-—:]\\s+(?:(?:the|this|that)\\s+)?${OPERATIONAL_SUBJECT}\\b`, "i"),
++];
++
++/**
++ * Keep lexical high-risk checks focused on direct assertive clauses. Quoted,
++ * reported, hypothetical, and explicitly disclaimed prose is not Ashley's
++ * own operational assertion.
++ */
++function directAssertiveSegments(text: string): string[] {
++  const clean = stripQuotedHypotheticals(text)
++    .replace(/\b(?:they|he|she|you|someone|the user)\s+(?:said|says|mentioned|reported|claimed|asked|wrote)\b[^.!?]*(?:[.!?]|$)/gi, " ")
++    .replace(/\b(?:i|we)\s+(?:do not|don't|cannot|can't|can not|never)\s+(?:claim|say|pretend|mean|have|know)\b[^.!?]*(?:[.!?]|$)/gi, " ");
++  return clean
++    .split(/[.!?]+/)
++    .map((segment) => segment.trim())
++    .filter((segment) => segment.length > 0);
++}
++
++function claimsAffirmativeOperationalEffect(text: string): boolean {
++  return directAssertiveSegments(text).some((segment) =>
++    AFFIRMATIVE_OPERATIONAL_PATTERNS.some((pattern) => pattern.test(segment)),
++  );
++}
++
++function directAssertiveProse(text: string): string {
++  return directAssertiveSegments(text).join(". ");
++}
++
+ /**
+  * Structural speech licensing. This is intentionally not an entailment model.
+  * Thought commitments and explicit speech constraints remain authoritative;
+@@ -75,14 +111,15 @@ export function fidelityCheck(input: FidelityInput): FidelityResult {
+   const mustSay = input.mustSay ?? [];
+   const mustNot = input.mustNot ?? [];
+   const modalities = new Set((input.observations ?? []).map((item) => item.modality));
++  const directSpeech = directAssertiveProse(draft);
+   if (
+-    claimsOwnVisionActivity(draft) &&
++    claimsOwnVisionActivity(directSpeech) &&
+     !["vision", "image", "screenshot"].some((modality) => modalities.has(modality))
+   ) {
+     return fail("UNWITNESSED_HIGH_RISK_CLAIM", "vision claim has no observation");
+   }
+   if (
+-    (claimsOwnConversationalReadActivity(draft) || claimsOwnReadingActivity(draft)) &&
++    (claimsOwnConversationalReadActivity(directSpeech) || claimsOwnReadingActivity(directSpeech)) &&
+     !["page", "url", "web", "text"].some((modality) => modalities.has(modality))
+   ) {
+     return fail("UNWITNESSED_HIGH_RISK_CLAIM", "reading claim has no observation");
+@@ -97,7 +134,7 @@ export function fidelityCheck(input: FidelityInput): FidelityResult {
+     return fail("DRAFT_COMMITMENT_CONFLICT", `mustNot is present: ${forbidden}`);
+   }
+ 
+-  const affirmativeEffectClaim = /\b(?:worked|succeeded|successful|completed|sent|created|updated|done)\b/i.test(draft);
++  const affirmativeEffectClaim = claimsAffirmativeOperationalEffect(draft);
+   if (affirmativeEffectClaim) {
+     const hasSucceededOperationalClaim = commitments.operational?.some(
+       (claim) => claim.claimedState === "succeeded",
+diff --git a/apps/agent-service/src/core/cognitive-v021/speech/outbox.ts b/apps/agent-service/src/core/cognitive-v021/speech/outbox.ts
+index 51080ce..92d17e2 100644
+--- a/apps/agent-service/src/core/cognitive-v021/speech/outbox.ts
++++ b/apps/agent-service/src/core/cognitive-v021/speech/outbox.ts
+@@ -121,6 +121,21 @@ export function listSpeechOutbox(
+   return rows.map(mapOutbox).filter((row): row is SpeechOutboxRow => row !== null);
+ }
+ 
++/**
++ * Return live speech rows whose durable projection has not started yet.
++ *
++ * A pending row is the committed semantic speech itself. Recovery may
++ * reconsider it through the existing projector, but must never revive shadow,
++ * suppressed, terminal, or already-reserved rows.
++ */
++export function listEligiblePendingSpeechOutbox(
++  db: DatabaseSync,
++  options: { limit?: number } = {},
++): SpeechOutboxRow[] {
++  return listSpeechOutbox(db, { statuses: ["pending"], limit: options.limit ?? 1000 })
++    .filter((row) => row.origin === "live" && !row.suppressed && row.nuclearReservationId === null);
++}
++
+ export function updateOutboxStatus(
+   db: DatabaseSync,
+   outboxId: number,
+diff --git a/apps/agent-service/src/core/cognitive-v021/thought/d0-qualification.test.ts b/apps/agent-service/src/core/cognitive-v021/thought/d0-qualification.test.ts
+index 880de20..eca9dbe 100644
+--- a/apps/agent-service/src/core/cognitive-v021/thought/d0-qualification.test.ts
++++ b/apps/agent-service/src/core/cognitive-v021/thought/d0-qualification.test.ts
+@@ -9,6 +9,8 @@ import { checkAuthority } from "../authority/check.js";
+ import { appendInboxEvent } from "../cycle/inbox.js";
+ import { appendOwnerUtterance } from "../evidence/conversation-log.js";
+ import { buildOperationalEffectNamespaceFromRefs, mintEffectRef } from "../effect/effect-ref.js";
++import { applyConcernDelta } from "../concerns/lineage.js";
++import { applyOccupancyDelta } from "../concerns/occupancy.js";
+ import { bindEffectIntent, bindObservationIntent } from "./operation-binding.js";
+ import {
+   THOUGHT_OUTPUT_SCHEMA,
+@@ -87,6 +89,7 @@ function fixtureDeps(
+ async function runSettlementFixture(
+   response: unknown,
+   label: string,
++  seed?: (sidecar: DatabaseSync, cycle: ReturnType<typeof admitTestCycle>) => void,
+ ): Promise<{ sidecar: DatabaseSync; attentionDb: DatabaseSync; result: Awaited<ReturnType<typeof runCognitiveCycle>>; cycleId: string }> {
+   const sidecar = openTestSidecar();
+   const attentionDb = openTestSidecar();
+@@ -101,6 +104,7 @@ async function runSettlementFixture(
+     authorityEpoch: 1,
+     nowMs: 1,
+   });
++  seed?.(sidecar, cycle);
+   const evidence = appendOwnerUtterance(sidecar, {
+     conversationId,
+     text: `D0 fixture ${label}`,
+@@ -318,11 +322,58 @@ describe("Core D0 local Sparse VNext qualification", () => {
+       }],
+     }, "08");
+     try {
+-      const concern = fixture.sidecar.prepare("SELECT concern_id FROM concerns").get() as { concern_id: string };
+-      const trigger = fixture.sidecar.prepare("SELECT concern_id, status FROM future_triggers").get() as { concern_id: string; status: string };
++      const concern = fixture.sidecar.prepare("SELECT concern_id, snapshot_hash FROM concerns").get() as { concern_id: string; snapshot_hash: string };
++      const trigger = fixture.sidecar.prepare("SELECT concern_id, snapshot_hash, status FROM future_triggers").get() as { concern_id: string; snapshot_hash: string; status: string };
+       expect(fixture.result.published).toBe(true);
+       expect(trigger.concern_id).toBe(concern.concern_id);
+       expect(trigger.concern_id).not.toBe("focus");
++      expect(trigger.snapshot_hash).toBe(concern.snapshot_hash);
++      expect(trigger.snapshot_hash).not.toBe("semantic-proposal");
++      expect(trigger.status).toBe("scheduled");
++    } finally { closeFixture(fixture); }
++  });
++
++  it("SW-3 binds an existing concern future trigger to the Host-captured snapshot", async () => {
++    const fixture = await runSettlementFixture({
++      kind: "settlement",
++      speech: { mode: "none" },
++      futureTriggerDeltas: [{
++        op: "create",
++        concernRef: { kind: "existing", ref: "existing-concern" },
++        dueAtMs: 2_000,
++        purpose: "revisit",
++        payload: { bounded: true },
++      }],
++    }, "08-existing", (sidecar, cycle) => {
++      applyConcernDelta(sidecar, {
++        op: "upsert",
++        record: {
++          concernId: "existing-concern",
++          conversationId: cycle.conversationId,
++          statement: "An existing concern to revisit.",
++          sourceTurnIds: [],
++          dimensions: { source: "owner_utterance", status: "asserted", time: "historical", reliability: "owner_supplied" },
++          assertionKey: null,
++          status: "active",
++        },
++      }, { cycleId: cycle.cycleId, generation: cycle.generation });
++      applyOccupancyDelta(sidecar, {
++        op: "set",
++        occupancy: {
++          conversationId: cycle.conversationId,
++          concernId: "existing-concern",
++          status: "active",
++          priority: 10,
++          updatedGeneration: cycle.generation,
++        },
++      }, { cycleId: cycle.cycleId, generation: cycle.generation });
++    });
++    try {
++      const concern = fixture.sidecar.prepare("SELECT concern_id, snapshot_hash FROM concerns WHERE concern_id = 'existing-concern'").get() as { concern_id: string; snapshot_hash: string };
++      const trigger = fixture.sidecar.prepare("SELECT concern_id, snapshot_hash, status FROM future_triggers").get() as { concern_id: string; snapshot_hash: string; status: string };
++      expect(fixture.result).toMatchObject({ published: true, outboxId: null });
++      expect(trigger.concern_id).toBe(concern.concern_id);
++      expect(trigger.snapshot_hash).toBe(concern.snapshot_hash);
+       expect(trigger.status).toBe("scheduled");
+     } finally { closeFixture(fixture); }
+   });
+diff --git a/apps/agent-service/src/core/cognitive-v021/thought/input.ts b/apps/agent-service/src/core/cognitive-v021/thought/input.ts
+index f1533ce..291300f 100644
+--- a/apps/agent-service/src/core/cognitive-v021/thought/input.ts
++++ b/apps/agent-service/src/core/cognitive-v021/thought/input.ts
+@@ -23,6 +23,7 @@ import {
+ } from "../evidence/conversation-log.js";
+ import { listInFlight } from "../effect/in-flight.js";
+ import { listWorkingContext } from "../evidence/working-context.js";
++import { listConcerns } from "../concerns/lineage.js";
+ import { getActiveDeferredFrontier } from "../frontier/ledger.js";
+ import type { DeferredReactiveFrontierRecord } from "../frontier/types.js";
+ import { retrieveCandidates } from "../retrieval/discover.js";
+@@ -308,6 +309,10 @@ export function buildThoughtInput(options: BuildThoughtInputOptions): ThoughtInp
+     .slice()
+     .sort((left, right) => right.priority - left.priority || right.updatedGeneration - left.updatedGeneration)
+     .slice(0, occupancyK);
++  const concernSnapshots = Object.freeze(Object.fromEntries(
++    listConcerns(options.sidecar, options.cycle.conversationId)
++      .map((concern) => [concern.concernId, concern.snapshotHash]),
++  ));
+   const learnedSelfSlice = options.learnedSelfSlice ?? buildLearnedSelfSlice(options.sidecar);
+   const identity = options.constitution as IdentitySlice & Partial<IdentityOrientationSource>;
+   const orientationKernel = options.orientationKernel ?? buildOrientationKernel({
+@@ -389,6 +394,7 @@ export function buildThoughtInput(options: BuildThoughtInputOptions): ThoughtInp
+       : {}),
+     workingContext,
+     occupancy,
++    concernSnapshots,
+     // Keep the legacy IdentitySlice wire shape compact. The richer
+     // category-separated fields have already been captured by the orientation
+     // kernel and must not be duplicated in the old compatibility field.
+diff --git a/apps/agent-service/src/core/cognitive-v021/thought/projection-allocator/__tests__/allocator-c2.test.ts b/apps/agent-service/src/core/cognitive-v021/thought/projection-allocator/__tests__/allocator-c2.test.ts
+index 5c92717..2c27ebe 100644
+--- a/apps/agent-service/src/core/cognitive-v021/thought/projection-allocator/__tests__/allocator-c2.test.ts
++++ b/apps/agent-service/src/core/cognitive-v021/thought/projection-allocator/__tests__/allocator-c2.test.ts
+@@ -124,6 +124,9 @@ describe("MAT-II C2 allocator integration", () => {
+       expect(directVisible).not.toHaveProperty("capabilityReality");
+       expect(directProjection.constitution).toBe(input.constitution);
+       expect(directProjection.capabilityReality).toBe(input.capabilityReality);
++      expect(directProjection.concernSnapshots).toEqual({});
++      expect(JSON.stringify(directProjection)).not.toContain("concernSnapshots");
++      expect(JSON.stringify(allocated.projected)).not.toContain("concernSnapshots");
+ 
+       const messages = thoughtMessagesForProjection(allocated.projected);
+       expect(estimateRequestTokens(messages, { maxTokens: 4_096 }).estimatedInputTokens)
+diff --git a/apps/agent-service/src/core/cognitive-v021/thought/projection-allocator/allocator.ts b/apps/agent-service/src/core/cognitive-v021/thought/projection-allocator/allocator.ts
+index e9e4e1e..8ce196d 100644
+--- a/apps/agent-service/src/core/cognitive-v021/thought/projection-allocator/allocator.ts
++++ b/apps/agent-service/src/core/cognitive-v021/thought/projection-allocator/allocator.ts
+@@ -329,6 +329,15 @@ export function allocateThoughtProjection(
+         : {}),
+     };
+ 
++    if (input.concernSnapshots !== undefined) {
++      Object.defineProperty(projected, "concernSnapshots", {
++        value: input.concernSnapshots,
++        enumerable: false,
++        writable: false,
++        configurable: false,
++      });
++    }
++
+     if (includeOrientationKernel && c2Input.orientationKernel !== undefined) {
+       attachC2CompatibilityFields(projected, input);
+     }
+diff --git a/apps/agent-service/src/core/cognitive-v021/thought/projection.ts b/apps/agent-service/src/core/cognitive-v021/thought/projection.ts
+index e473bf2..79ae97c 100644
+--- a/apps/agent-service/src/core/cognitive-v021/thought/projection.ts
++++ b/apps/agent-service/src/core/cognitive-v021/thought/projection.ts
+@@ -81,6 +81,8 @@ export type ProjectedThoughtInput = {
+   conversationSelection?: ThoughtInput["conversationSelection"];
+   workingContext: WorkingContextItem[];
+   occupancy: MindOccupancy[];
++  /** Host-captured concern snapshots; non-enumerable and excluded from model wire. */
++  concernSnapshots?: Readonly<Record<string, string>>;
+   /** Legacy in-process compatibility; C2 wire identity is orientationKernel. */
+   constitution: IdentitySlice;
+   learnedSelfSlice: LearnedSelfSlice;
+@@ -251,6 +253,15 @@ export function projectThoughtInput(
+     ...(c2Input.domainPointers === undefined ? {} : { domainPointers: c2Input.domainPointers }),
+   };
+ 
++  if (fullInput.concernSnapshots !== undefined) {
++    Object.defineProperty(projected, "concernSnapshots", {
++      value: fullInput.concernSnapshots,
++      enumerable: false,
++      writable: false,
++      configurable: false,
++    });
++  }
++
+   if (c2Input.orientationKernel !== undefined) {
+     attachC2CompatibilityFields(projected, fullInput);
+   }
+diff --git a/apps/agent-service/src/core/cognitive-v021/thought/run.test.ts b/apps/agent-service/src/core/cognitive-v021/thought/run.test.ts
+index 64510f5..0e9170e 100644
+--- a/apps/agent-service/src/core/cognitive-v021/thought/run.test.ts
++++ b/apps/agent-service/src/core/cognitive-v021/thought/run.test.ts
+@@ -432,6 +432,74 @@ describe("v0.2.1 Thought run", () => {
+     }
+   });
+ 
++  it("carries authored retrieval and source reliance into published operations", async () => {
++    const sidecar = openTestSidecar();
++    const attentionDb = openTestSidecar();
++    const cycle = admitTestCycle(sidecar, {
++      cycleId: "cycle-evidence-reliance",
++      conversationId: "thread-evidence-reliance",
++      triggerKind: "owner_message",
++      triggerRef: "owner-evidence-reliance",
++      occupantId: "doc",
++      authorityEpoch: 1,
++      nowMs: 1,
++    });
++    const evidence = appendOwnerUtterance(sidecar, {
++      conversationId: cycle.conversationId,
++      text: "Use the evidence trail for this answer.",
++      discordMessageIds: ["evidence-reliance-message"],
++      nowMs: 2,
++    });
++    const event = appendInboxEvent(sidecar, {
++      wakeId: cycle.wakeId,
++      conversationId: cycle.conversationId,
++      kind: "owner_message",
++      payload: { cycleId: cycle.cycleId, evidenceRowId: evidence.rowId, ownerMessage: evidence.text },
++      createdAtMs: 2,
++    });
++
++    try {
++      const result = await runCognitiveCycle(sidecar, attentionDb, event, deps({
++        attentionDb,
++        completeChat: vi.fn(async () => ({
++          text: JSON.stringify({
++            kind: "settlement",
++            speech: { mode: "draft", surfaceDraft: "I used the evidence trail." },
++            evidenceUse: {
++              retrievalRefsUsed: [evidence.rowId],
++              sourceRefsUsed: [evidence.rowId],
++            },
++          }),
++          model: "fake",
++          modelAlias: "thought",
++          resolvedModelId: null,
++        })),
++      }));
++      expect(result.published).toBe(true);
++
++      const settlementRow = sidecar.prepare(
++        "SELECT payload_json FROM settlements WHERE cycle_id = ?",
++      ).get(cycle.cycleId) as { payload_json: string };
++      const settlementPayload = JSON.parse(settlementRow.payload_json) as Record<string, any>;
++      expect(settlementPayload.operations).toMatchObject({
++        retrievalRefsUsed: [evidence.rowId],
++        sourceRefsUsed: [evidence.rowId],
++      });
++
++      const ledgerRow = sidecar.prepare(
++        "SELECT payload_json FROM causal_ledger WHERE cycle_id = ?",
++      ).get(cycle.cycleId) as { payload_json: string };
++      const ledgerPayload = JSON.parse(ledgerRow.payload_json) as Record<string, any>;
++      expect(ledgerPayload).toMatchObject({
++        retrievalRefsUsed: [evidence.rowId],
++        sourceRefsUsed: [evidence.rowId],
++      });
++    } finally {
++      sidecar.close();
++      attentionDb.close();
++    }
++  });
++
+   it("publishes intentional silence together with an authored internal delta", async () => {
+     const sidecar = openTestSidecar();
+     const attentionDb = openTestSidecar();
+diff --git a/apps/agent-service/src/core/cognitive-v021/thought/run.ts b/apps/agent-service/src/core/cognitive-v021/thought/run.ts
+index 8ed5995..91a3543 100644
+--- a/apps/agent-service/src/core/cognitive-v021/thought/run.ts
++++ b/apps/agent-service/src/core/cognitive-v021/thought/run.ts
+@@ -124,6 +124,7 @@ import {
+   resolveDeferredFrontier,
+ } from "../frontier/ledger.js";
+ import { getContinuityFor } from "../../continuity/registry.js";
++import { concernSnapshotHash } from "../concerns/lineage.js";
+ 
+ export type ThoughtInvocation = {
+   output: ThoughtStepOutput;
+@@ -456,7 +457,7 @@ type LocalAliasBinding = { id: string; target: LocalAliasTarget };
+ 
+ type ThoughtMaterializationFailureCode = Extract<
+   ThoughtParserFailureCode,
+-  "alias_duplicate" | "dangling_local_reference" | "reference_target_type_mismatch"
++  "alias_duplicate" | "dangling_local_reference" | "reference_target_type_mismatch" | "future_trigger_snapshot_unavailable"
+ >;
+ 
+ class ThoughtMaterializationError extends Error {
+@@ -582,6 +583,31 @@ function materializeSemanticSettlement(
+     }
+   }
+ 
++  // Concern snapshots are Host-owned lineage evidence. For a concern changed
++  // in this same settlement, compute the resulting hash from the exact
++  // materialized record so a co-authored future trigger can bind atomically.
++  const authoredConcernSnapshots = new Map<string, string>();
++  for (const [index, delta] of (semantic.concernDeltas ?? []).entries()) {
++    if (delta.op !== "upsert") continue;
++    const concernId = semanticReferenceValue(
++      delta.record.identity,
++      localAliases,
++      referenceAllowlist,
++      "concern",
++      `concernDeltas[${index}].record.identity`,
++    );
++    if (!concernId) continue;
++    authoredConcernSnapshots.set(concernId, concernSnapshotHash({
++      concernId,
++      conversationId,
++      statement: delta.record.statement,
++      sourceTurnIds: [...delta.record.sourceTurnRefs],
++      dimensions: { ...delta.record.dimensions },
++      assertionKey: null,
++      status: delta.record.status,
++    }));
++  }
++
+   const result: Record<string, unknown> = {
+     schemaVersion: 1,
+     cycleId: input.cycleId,
+@@ -610,6 +636,12 @@ function materializeSemanticSettlement(
+           `evidenceUse.observationRefsUsed[${index}]`,
+         ),
+       ) ?? [],
++      ...(semantic.evidenceUse?.retrievalRefsUsed
++        ? { retrievalRefsUsed: [...semantic.evidenceUse.retrievalRefsUsed] }
++        : {}),
++      ...(semantic.evidenceUse?.sourceRefsUsed
++        ? { sourceRefsUsed: [...semantic.evidenceUse.sourceRefsUsed] }
++        : {}),
+       effectsCompleted: materializeEffectsCompleted(input.inFlight, receiptsByEffectId),
+       intentsStillInFlight: [...(semantic.evidenceUse?.openIntentRefs ?? [])],
+     },
+@@ -774,23 +806,40 @@ function materializeSemanticSettlement(
+     }));
+   if (semantic.futureTriggerDeltas) result.futureTriggers = semantic.futureTriggerDeltas.map((delta, index) => delta.op === "cancel"
+       ? { op: "cancel", triggerId: delta.target }
+-      : {
+-          op: "create",
+-          trigger: {
+-            triggerId: randomUUID(),
+-            conversationId,
+-            concernId: semanticReferenceValue(
+-              delta.concernRef,
+-              localAliases,
+-              referenceAllowlist,
+-              "concern",
++      : (() => {
++          const concernId = semanticReferenceValue(
++            delta.concernRef,
++            localAliases,
++            referenceAllowlist,
++            "concern",
++            `futureTriggerDeltas[${index}].concernRef`,
++          );
++          if (!concernId) {
++            return materializationFailure(
++              "future_trigger_snapshot_unavailable",
+               `futureTriggerDeltas[${index}].concernRef`,
+-            ) ?? randomUUID(),
+-            snapshotHash: "semantic-proposal",
+-            dueAtMs: delta.dueAtMs,
+-            payload: { purpose: delta.purpose, ...delta.payload },
+-          },
+-        });
++            );
++          }
++          const snapshotHash = authoredConcernSnapshots.get(concernId)
++            ?? input.concernSnapshots?.[concernId];
++          if (!snapshotHash) {
++            return materializationFailure(
++              "future_trigger_snapshot_unavailable",
++              `futureTriggerDeltas[${index}].concernRef`,
++            );
++          }
++          return {
++            op: "create" as const,
++            trigger: {
++              triggerId: randomUUID(),
++              conversationId,
++              concernId,
++              snapshotHash,
++              dueAtMs: delta.dueAtMs,
++              payload: { purpose: delta.purpose, ...delta.payload },
++            },
++          };
++        })());
+   if (semantic.subscriptionDeltas) result.subscriptions = semantic.subscriptionDeltas.map((delta, index) => delta.op === "cancel"
+       ? { op: "cancel", subscriptionId: delta.target }
+       : {
+diff --git a/apps/agent-service/src/core/cognitive-v021/thought/structural-feedback.ts b/apps/agent-service/src/core/cognitive-v021/thought/structural-feedback.ts
+index 57cb3b9..799137c 100644
+--- a/apps/agent-service/src/core/cognitive-v021/thought/structural-feedback.ts
++++ b/apps/agent-service/src/core/cognitive-v021/thought/structural-feedback.ts
+@@ -65,6 +65,7 @@ const STRUCTURAL_FEEDBACK: Readonly<Record<ThoughtParserFailureCode, string>> =
+   alias_duplicate: "Use a distinct output-local alias for each same-settlement entity.",
+   dangling_local_reference: "Use only local aliases declared by a same-settlement entity or an allowlisted existing reference.",
+   reference_target_type_mismatch: "Use a local or existing reference whose target domain matches the reported field.",
++  future_trigger_snapshot_unavailable: "Create a future trigger only for a concern whose Host-captured snapshot is available.",
+   other: "Match the semantic Thought contract exactly.",
+ };
+ 
+diff --git a/apps/agent-service/src/core/cognitive-v021/types.ts b/apps/agent-service/src/core/cognitive-v021/types.ts
+index afaf0de..25e5ec4 100644
+--- a/apps/agent-service/src/core/cognitive-v021/types.ts
++++ b/apps/agent-service/src/core/cognitive-v021/types.ts
+@@ -879,6 +879,10 @@ export type ThoughtSettlementDraft = {
+   durableNominations?: DurableNomination[];
+   operations: {
+     observationsConsumed: string[];
++    /** Authored retrieval reliance preserved for post-publication audit. */
++    retrievalRefsUsed?: string[];
++    /** Authored source reliance preserved for post-publication audit. */
++    sourceRefsUsed?: string[];
+     effectsCompleted: string[];
+     intentsStillInFlight: string[];
+   };
+@@ -930,6 +934,7 @@ export type ThoughtParserFailureCode =
+   | "alias_duplicate"
+   | "dangling_local_reference"
+   | "reference_target_type_mismatch"
++  | "future_trigger_snapshot_unavailable"
+   | "other";
+ export type ThoughtCorrectionFailureCode = "structural_correction_scope_violation";
+ export type ThoughtPassIndex = number;
+@@ -1054,6 +1059,8 @@ export type ThoughtInput = {
+   };
+   workingContext: WorkingContextItem[];
+   occupancy: MindOccupancy[];
++  /** Host-captured concern snapshots seen while assembling this Thought input. */
++  concernSnapshots?: Readonly<Record<string, string>>;
+   constitution: IdentitySlice;
+   learnedSelfSlice: LearnedSelfSlice;
+   capabilityReality: CapabilityReality;
+diff --git a/apps/agent-service/src/serve.ts b/apps/agent-service/src/serve.ts
+index 72066d0..9eacb07 100644
+--- a/apps/agent-service/src/serve.ts
++++ b/apps/agent-service/src/serve.ts
+@@ -53,6 +53,7 @@ import {
+ } from "./core/cognitive-v021/thought/diagnostics.js";
+ import { DatabaseSync } from "node:sqlite";
+ import { reconcileAuthorityBarrierOnStartup } from "./core/cognitive-v021/authority/barrier.js";
++import { reconsiderPendingSpeechOutbox } from "./core/cognitive-v021/sidecar/recovery.js";
+ 
+ export function createAgentInboxConsumerHandler(
+   manager: Pick<AgentManager, "dispatchCognitiveEvent">,
+@@ -135,6 +136,15 @@ export async function serveAgent(manager: AgentManager): Promise<void> {
+     };
+     manager.configureCognitiveDispatch({ deps, projector });
+     reconcileStartupOwnership(cognitiveSidecar);
++    const speechRecovery = await reconsiderPendingSpeechOutbox(
++      cognitiveSidecar,
++      (outboxId) => projector.project(outboxId),
++    );
++    if (speechRecovery.failures > 0) {
++      console.warn(
++        `[cognitive-v021] pending speech recovery deferred rows=${speechRecovery.failures}`,
++      );
++    }
+     // Durable-work outcome reconciliation owns stranded outcome-unknown work.
+     // It runs after cycle ownership reconciliation and before the inbox
+     // consumer begins, so Gen15-like reconciling work can become pending only

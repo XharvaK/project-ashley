@@ -432,6 +432,74 @@ describe("v0.2.1 Thought run", () => {
     }
   });
 
+  it("carries authored retrieval and source reliance into published operations", async () => {
+    const sidecar = openTestSidecar();
+    const attentionDb = openTestSidecar();
+    const cycle = admitTestCycle(sidecar, {
+      cycleId: "cycle-evidence-reliance",
+      conversationId: "thread-evidence-reliance",
+      triggerKind: "owner_message",
+      triggerRef: "owner-evidence-reliance",
+      occupantId: "doc",
+      authorityEpoch: 1,
+      nowMs: 1,
+    });
+    const evidence = appendOwnerUtterance(sidecar, {
+      conversationId: cycle.conversationId,
+      text: "Use the evidence trail for this answer.",
+      discordMessageIds: ["evidence-reliance-message"],
+      nowMs: 2,
+    });
+    const event = appendInboxEvent(sidecar, {
+      wakeId: cycle.wakeId,
+      conversationId: cycle.conversationId,
+      kind: "owner_message",
+      payload: { cycleId: cycle.cycleId, evidenceRowId: evidence.rowId, ownerMessage: evidence.text },
+      createdAtMs: 2,
+    });
+
+    try {
+      const result = await runCognitiveCycle(sidecar, attentionDb, event, deps({
+        attentionDb,
+        completeChat: vi.fn(async () => ({
+          text: JSON.stringify({
+            kind: "settlement",
+            speech: { mode: "draft", surfaceDraft: "I used the evidence trail." },
+            evidenceUse: {
+              retrievalRefsUsed: [evidence.rowId],
+              sourceRefsUsed: [evidence.rowId],
+            },
+          }),
+          model: "fake",
+          modelAlias: "thought",
+          resolvedModelId: null,
+        })),
+      }));
+      expect(result.published).toBe(true);
+
+      const settlementRow = sidecar.prepare(
+        "SELECT payload_json FROM settlements WHERE cycle_id = ?",
+      ).get(cycle.cycleId) as { payload_json: string };
+      const settlementPayload = JSON.parse(settlementRow.payload_json) as Record<string, any>;
+      expect(settlementPayload.operations).toMatchObject({
+        retrievalRefsUsed: [evidence.rowId],
+        sourceRefsUsed: [evidence.rowId],
+      });
+
+      const ledgerRow = sidecar.prepare(
+        "SELECT payload_json FROM causal_ledger WHERE cycle_id = ?",
+      ).get(cycle.cycleId) as { payload_json: string };
+      const ledgerPayload = JSON.parse(ledgerRow.payload_json) as Record<string, any>;
+      expect(ledgerPayload).toMatchObject({
+        retrievalRefsUsed: [evidence.rowId],
+        sourceRefsUsed: [evidence.rowId],
+      });
+    } finally {
+      sidecar.close();
+      attentionDb.close();
+    }
+  });
+
   it("publishes intentional silence together with an authored internal delta", async () => {
     const sidecar = openTestSidecar();
     const attentionDb = openTestSidecar();

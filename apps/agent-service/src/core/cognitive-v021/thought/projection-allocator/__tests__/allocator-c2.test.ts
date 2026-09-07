@@ -124,6 +124,9 @@ describe("MAT-II C2 allocator integration", () => {
       expect(directVisible).not.toHaveProperty("capabilityReality");
       expect(directProjection.constitution).toBe(input.constitution);
       expect(directProjection.capabilityReality).toBe(input.capabilityReality);
+      expect(directProjection.concernSnapshots).toEqual({});
+      expect(JSON.stringify(directProjection)).not.toContain("concernSnapshots");
+      expect(JSON.stringify(allocated.projected)).not.toContain("concernSnapshots");
 
       const messages = thoughtMessagesForProjection(allocated.projected);
       expect(estimateRequestTokens(messages, { maxTokens: 4_096 }).estimatedInputTokens)

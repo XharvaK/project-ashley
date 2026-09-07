@@ -11,7 +11,7 @@ import type {
   SubscriptionDelta,
 } from "../types.js";
 import { applyWorkingContextDelta } from "../evidence/working-context.js";
-import { applyConcernDelta } from "../concerns/lineage.js";
+import { applyConcernDelta, getConcern } from "../concerns/lineage.js";
 import { applyOccupancyDelta } from "../concerns/occupancy.js";
 import { enqueueDurableNomination } from "../memory/nomination.js";
 import { assertSubscriptionCapacity } from "../observation/subscriptions.js";
@@ -92,6 +92,9 @@ function applyFutureTriggerDelta(db: DatabaseSync, delta: FutureTriggerDelta): v
     return;
   }
   const trigger = delta.trigger;
+  const concern = getConcern(db, trigger.concernId);
+  if (!concern) throw new Error("future_trigger_concern_missing");
+  if (concern.snapshotHash !== trigger.snapshotHash) throw new Error("future_trigger_snapshot_conflict");
   db.prepare(
     `INSERT INTO future_triggers
        (trigger_id, conversation_id, concern_id, due_at_ms, snapshot_hash, status, payload_json)
@@ -237,6 +240,12 @@ export function publishSemanticTransaction(
       authorityEpoch: settlement.authorityEpoch,
       settlementId: settlement.settlementId,
       observationIds: settlement.operations.observationsConsumed,
+      ...(settlement.operations.retrievalRefsUsed
+        ? { retrievalRefsUsed: settlement.operations.retrievalRefsUsed }
+        : {}),
+      ...(settlement.operations.sourceRefsUsed
+        ? { sourceRefsUsed: settlement.operations.sourceRefsUsed }
+        : {}),
       effectIds: settlement.operations.effectsCompleted,
       authorityCodes: settlement.authority.objectionsApplied,
       nominationIds: (settlement.durableNominations ?? []).map((item) => item.nominationId),

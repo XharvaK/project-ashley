@@ -81,6 +81,8 @@ export type ProjectedThoughtInput = {
   conversationSelection?: ThoughtInput["conversationSelection"];
   workingContext: WorkingContextItem[];
   occupancy: MindOccupancy[];
+  /** Host-captured concern snapshots; non-enumerable and excluded from model wire. */
+  concernSnapshots?: Readonly<Record<string, string>>;
   /** Legacy in-process compatibility; C2 wire identity is orientationKernel. */
   constitution: IdentitySlice;
   learnedSelfSlice: LearnedSelfSlice;
@@ -250,6 +252,15 @@ export function projectThoughtInput(
     ...(c2Input.orientationKernel === undefined ? {} : { orientationKernel: c2Input.orientationKernel }),
     ...(c2Input.domainPointers === undefined ? {} : { domainPointers: c2Input.domainPointers }),
   };
+
+  if (fullInput.concernSnapshots !== undefined) {
+    Object.defineProperty(projected, "concernSnapshots", {
+      value: fullInput.concernSnapshots,
+      enumerable: false,
+      writable: false,
+      configurable: false,
+    });
+  }
 
   if (c2Input.orientationKernel !== undefined) {
     attachC2CompatibilityFields(projected, fullInput);

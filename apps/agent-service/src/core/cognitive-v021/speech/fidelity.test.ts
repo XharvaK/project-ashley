@@ -130,4 +130,95 @@ describe("v0.2.1 speech fidelity", () => {
       },
     })).toMatchObject({ ok: false, code: "DRAFT_COMMITMENT_CONFLICT" });
   });
+
+  it("SW-4 does not mistake questions, reported speech, or self-reference for success claims", () => {
+    const ordinary = (draft: string) => fidelityCheck({
+      mode: "draft",
+      draft,
+      mustSay: [],
+      mustNot: [],
+      acceptableRealizations: [],
+      commitments: { ...commitments, operational: [] },
+    });
+
+    expect(ordinary("Are you done for tonight?")).toMatchObject({ ok: true });
+    expect(ordinary("They said, \"I completed the task.\"")).toMatchObject({ ok: true });
+    expect(ordinary("I haven't completed the task yet.")).toMatchObject({ ok: true });
+    expect(ordinary("I will complete the task tomorrow.")).toMatchObject({ ok: true });
+    expect(ordinary("I completed my thought and finished speaking.")).toMatchObject({ ok: true });
+    expect(ordinary("I completed the task.")).toMatchObject({ ok: false, code: "DRAFT_COMMITMENT_CONFLICT" });
+    expect(ordinary("I completed the project.")).toMatchObject({ ok: false, code: "DRAFT_COMMITMENT_CONFLICT" });
+
+    expect(fidelityCheck({
+      mode: "draft",
+      draft: "The task completed successfully.",
+      mustSay: [],
+      mustNot: [],
+      acceptableRealizations: [],
+      commitments: { ...commitments, operational: [{ effectRef: "effect:test", claimedState: "succeeded" }] },
+    })).toMatchObject({ ok: true });
+  });
+
+  it("SW-4 does not mistake reported or interrogative currentness for a claim", () => {
+    const ordinary = (draft: string) => fidelityCheck({
+      mode: "draft",
+      draft,
+      mustSay: [],
+      mustNot: [],
+      acceptableRealizations: [],
+      commitments: { ...commitments, epistemic: [] },
+    });
+
+    expect(ordinary("That's the latest I heard.")).toMatchObject({ ok: true });
+    expect(ordinary("What's the latest status?")).toMatchObject({ ok: true });
+    expect(ordinary("They mentioned that the latest status was healthy.")).toMatchObject({ ok: true });
+    expect(ordinary("The latest status is healthy.")).toMatchObject({ ok: false, code: "DRAFT_COMMITMENT_CONFLICT" });
+
+    expect(fidelityCheck({
+      mode: "draft",
+      draft: "The latest status is healthy.",
+      mustSay: [],
+      mustNot: [],
+      acceptableRealizations: [],
+      commitments,
+    })).toMatchObject({ ok: true });
+  });
+
+  it("SW-4 keeps vision and reading honesty checks for direct claims only", () => {
+    const ordinary = (draft: string) => fidelityCheck({
+      mode: "draft",
+      draft,
+      mustSay: [],
+      mustNot: [],
+      acceptableRealizations: [],
+      commitments: { ...commitments, operational: [] },
+    });
+
+    expect(ordinary("Can you see the image?")).toMatchObject({ ok: true });
+    expect(ordinary("They said, \"I can see the image.\"")).toMatchObject({ ok: true });
+    expect(ordinary("I can't claim I can see the image.")).toMatchObject({ ok: true });
+    expect(ordinary("I can see the image.")).toMatchObject({ ok: false, code: "UNWITNESSED_HIGH_RISK_CLAIM" });
+    expect(fidelityCheck({
+      mode: "draft",
+      draft: "I can see the image.",
+      mustSay: [],
+      mustNot: [],
+      acceptableRealizations: [],
+      commitments: { ...commitments, operational: [] },
+      observations: [{ modality: "vision" }],
+    })).toMatchObject({ ok: true });
+    expect(ordinary("Did you read the page?")).toMatchObject({ ok: true });
+    expect(ordinary("They reported, \"I read the page.\"")).toMatchObject({ ok: true });
+    expect(ordinary("I can't claim I read the page.")).toMatchObject({ ok: true });
+    expect(ordinary("I read the page.")).toMatchObject({ ok: false, code: "UNWITNESSED_HIGH_RISK_CLAIM" });
+    expect(fidelityCheck({
+      mode: "draft",
+      draft: "I read the page.",
+      mustSay: [],
+      mustNot: [],
+      acceptableRealizations: [],
+      commitments: { ...commitments, operational: [] },
+      observations: [{ modality: "page" }],
+    })).toMatchObject({ ok: true });
+  });
 });

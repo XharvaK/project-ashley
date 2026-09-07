@@ -4,12 +4,47 @@ import { recoverInFlight } from "../effect/recovery.js";
 import { recoverDurableWork } from "../retry/ledger.js";
 import { recoverWakes } from "../wake/ledger.js";
 import { recoverPrivateBudget } from "../private-budget/recovery.js";
+import { listEligiblePendingSpeechOutbox } from "../speech/outbox.js";
 
 export type CognitiveSidecarRecoveryResult = {
   inboxClaimsRecovered: number;
   speechProjectionsRequeued: number;
   noticeProjectionsRequeued: number;
 };
+
+export type PendingSpeechOutboxRecoveryResult = {
+  reconsidered: number;
+  failures: number;
+};
+
+export type SpeechOutboxRecoveryProjector = (outboxId: number) => Promise<void> | void;
+
+/**
+ * Reconsider committed live speech that was still pending when a process
+ * stopped between publication commit and its projectOutbox callback.
+ *
+ * This function only dispatches durable outbox IDs to the existing projector.
+ * It never runs Thought again, manufactures a new settlement, or bypasses
+ * projector gates. A projector failure leaves the source row recoverable for
+ * the next bounded startup pass (pending rows remain pending; orphaned
+ * projecting rows are requeued by recoverCognitiveSidecar).
+ */
+export async function reconsiderPendingSpeechOutbox(
+  db: DatabaseSync,
+  project: SpeechOutboxRecoveryProjector,
+  options: { limit?: number } = {},
+): Promise<PendingSpeechOutboxRecoveryResult> {
+  const rows = listEligiblePendingSpeechOutbox(db, options);
+  let failures = 0;
+  for (const row of rows) {
+    try {
+      await project(row.outboxId);
+    } catch {
+      failures += 1;
+    }
+  }
+  return { reconsidered: rows.length, failures };
+}
 
 /** Reopen-time recovery preserves dispatch truth before any work can be claimed again. */
 export function recoverCognitiveSidecar(

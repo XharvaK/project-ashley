@@ -36,7 +36,7 @@ export function listConcerns(db: DatabaseSync, conversationId: string): ConcernR
     .filter((row): row is ConcernRecord => row !== null);
 }
 
-function snapshot(record: Omit<ConcernRecord, "snapshotHash">): string {
+export function concernSnapshotHash(record: Omit<ConcernRecord, "snapshotHash">): string {
   return createHash("sha256").update(JSON.stringify(record), "utf8").digest("hex");
 }
 
@@ -68,7 +68,7 @@ export function applyConcernDelta(
     JSON.stringify(record.dimensions),
     record.assertionKey,
     record.status,
-    snapshot(record),
+    concernSnapshotHash(record),
     publication.cycleId,
   );
 }

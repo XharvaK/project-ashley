@@ -124,6 +124,7 @@ import {
   resolveDeferredFrontier,
 } from "../frontier/ledger.js";
 import { getContinuityFor } from "../../continuity/registry.js";
+import { concernSnapshotHash } from "../concerns/lineage.js";
 
 export type ThoughtInvocation = {
   output: ThoughtStepOutput;
@@ -456,7 +457,7 @@ type LocalAliasBinding = { id: string; target: LocalAliasTarget };
 
 type ThoughtMaterializationFailureCode = Extract<
   ThoughtParserFailureCode,
-  "alias_duplicate" | "dangling_local_reference" | "reference_target_type_mismatch"
+  "alias_duplicate" | "dangling_local_reference" | "reference_target_type_mismatch" | "future_trigger_snapshot_unavailable"
 >;
 
 class ThoughtMaterializationError extends Error {
@@ -582,6 +583,31 @@ function materializeSemanticSettlement(
     }
   }
 
+  // Concern snapshots are Host-owned lineage evidence. For a concern changed
+  // in this same settlement, compute the resulting hash from the exact
+  // materialized record so a co-authored future trigger can bind atomically.
+  const authoredConcernSnapshots = new Map<string, string>();
+  for (const [index, delta] of (semantic.concernDeltas ?? []).entries()) {
+    if (delta.op !== "upsert") continue;
+    const concernId = semanticReferenceValue(
+      delta.record.identity,
+      localAliases,
+      referenceAllowlist,
+      "concern",
+      `concernDeltas[${index}].record.identity`,
+    );
+    if (!concernId) continue;
+    authoredConcernSnapshots.set(concernId, concernSnapshotHash({
+      concernId,
+      conversationId,
+      statement: delta.record.statement,
+      sourceTurnIds: [...delta.record.sourceTurnRefs],
+      dimensions: { ...delta.record.dimensions },
+      assertionKey: null,
+      status: delta.record.status,
+    }));
+  }
+
   const result: Record<string, unknown> = {
     schemaVersion: 1,
     cycleId: input.cycleId,
@@ -610,6 +636,12 @@ function materializeSemanticSettlement(
           `evidenceUse.observationRefsUsed[${index}]`,
         ),
       ) ?? [],
+      ...(semantic.evidenceUse?.retrievalRefsUsed
+        ? { retrievalRefsUsed: [...semantic.evidenceUse.retrievalRefsUsed] }
+        : {}),
+      ...(semantic.evidenceUse?.sourceRefsUsed
+        ? { sourceRefsUsed: [...semantic.evidenceUse.sourceRefsUsed] }
+        : {}),
       effectsCompleted: materializeEffectsCompleted(input.inFlight, receiptsByEffectId),
       intentsStillInFlight: [...(semantic.evidenceUse?.openIntentRefs ?? [])],
     },
@@ -774,23 +806,40 @@ function materializeSemanticSettlement(
     }));
   if (semantic.futureTriggerDeltas) result.futureTriggers = semantic.futureTriggerDeltas.map((delta, index) => delta.op === "cancel"
       ? { op: "cancel", triggerId: delta.target }
-      : {
-          op: "create",
-          trigger: {
-            triggerId: randomUUID(),
-            conversationId,
-            concernId: semanticReferenceValue(
-              delta.concernRef,
-              localAliases,
-              referenceAllowlist,
-              "concern",
+      : (() => {
+          const concernId = semanticReferenceValue(
+            delta.concernRef,
+            localAliases,
+            referenceAllowlist,
+            "concern",
+            `futureTriggerDeltas[${index}].concernRef`,
+          );
+          if (!concernId) {
+            return materializationFailure(
+              "future_trigger_snapshot_unavailable",
               `futureTriggerDeltas[${index}].concernRef`,
-            ) ?? randomUUID(),
-            snapshotHash: "semantic-proposal",
-            dueAtMs: delta.dueAtMs,
-            payload: { purpose: delta.purpose, ...delta.payload },
-          },
-        });
+            );
+          }
+          const snapshotHash = authoredConcernSnapshots.get(concernId)
+            ?? input.concernSnapshots?.[concernId];
+          if (!snapshotHash) {
+            return materializationFailure(
+              "future_trigger_snapshot_unavailable",
+              `futureTriggerDeltas[${index}].concernRef`,
+            );
+          }
+          return {
+            op: "create" as const,
+            trigger: {
+              triggerId: randomUUID(),
+              conversationId,
+              concernId,
+              snapshotHash,
+              dueAtMs: delta.dueAtMs,
+              payload: { purpose: delta.purpose, ...delta.payload },
+            },
+          };
+        })());
   if (semantic.subscriptionDeltas) result.subscriptions = semantic.subscriptionDeltas.map((delta, index) => delta.op === "cancel"
       ? { op: "cancel", subscriptionId: delta.target }
       : {

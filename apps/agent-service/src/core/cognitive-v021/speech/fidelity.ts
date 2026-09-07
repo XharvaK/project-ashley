@@ -9,6 +9,7 @@ import {
   claimsOwnConversationalReadActivity,
   claimsOwnReadingActivity,
   claimsOwnVisionActivity,
+  stripQuotedHypotheticals,
 } from "../../honesty/claims.js";
 import { claimsCurrentness } from "../authority/currentness-detectors.js";
 
@@ -54,6 +55,41 @@ function hasText(value: string, required: string): boolean {
   return required.length === 0 || value.includes(required);
 }
 
+const OPERATIONAL_SUBJECT = "(?:task|request|job|operation|effect|file|message|change|update|test|check|command|deployment|build|roundtrip|sandbox|reservation|trigger|subscription|project|document|directory|folder|config|configuration|patch|release|result|it)";
+
+const AFFIRMATIVE_OPERATIONAL_PATTERNS = [
+  new RegExp(`\\b(?:i|we)\\s+(?:just\\s+|already\\s+|successfully\\s+)?(?:worked|succeeded|completed|finished|sent|created|updated|deleted|verified|ran|executed)\\s+(?:(?:the|this|that|my|your)\\s+)?${OPERATIONAL_SUBJECT}\\b`, "i"),
+  new RegExp(`\\b(?:i|we)\\s+(?:did|got|made)\\s+(?:it|(?:(?:the|this|that)\\s+)?(?:task|request|job|operation|effect))\\b`, "i"),
+  new RegExp(`\\b(?:the|this|that|our|your)\\s+${OPERATIONAL_SUBJECT}\\s+(?:worked|succeeded|passed|completed|finished)\\b`, "i"),
+  new RegExp(`\\b(?:the|this|that|our|your)\\s+${OPERATIONAL_SUBJECT}\\s+(?:is|was|has been|have been)\\s+(?:complete|completed|done|successful|sent|created|updated|deleted|verified)\\b`, "i"),
+  new RegExp(`\\b(?:done|completed|finished)\\s*[-—:]\\s+(?:(?:the|this|that)\\s+)?${OPERATIONAL_SUBJECT}\\b`, "i"),
+];
+
+/**
+ * Keep lexical high-risk checks focused on direct assertive clauses. Quoted,
+ * reported, hypothetical, and explicitly disclaimed prose is not Ashley's
+ * own operational assertion.
+ */
+function directAssertiveSegments(text: string): string[] {
+  const clean = stripQuotedHypotheticals(text)
+    .replace(/\b(?:they|he|she|you|someone|the user)\s+(?:said|says|mentioned|reported|claimed|asked|wrote)\b[^.!?]*(?:[.!?]|$)/gi, " ")
+    .replace(/\b(?:i|we)\s+(?:do not|don't|cannot|can't|can not|never)\s+(?:claim|say|pretend|mean|have|know)\b[^.!?]*(?:[.!?]|$)/gi, " ");
+  return clean
+    .split(/[.!?]+/)
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0);
+}
+
+function claimsAffirmativeOperationalEffect(text: string): boolean {
+  return directAssertiveSegments(text).some((segment) =>
+    AFFIRMATIVE_OPERATIONAL_PATTERNS.some((pattern) => pattern.test(segment)),
+  );
+}
+
+function directAssertiveProse(text: string): string {
+  return directAssertiveSegments(text).join(". ");
+}
+
 /**
  * Structural speech licensing. This is intentionally not an entailment model.
  * Thought commitments and explicit speech constraints remain authoritative;
@@ -75,14 +111,15 @@ export function fidelityCheck(input: FidelityInput): FidelityResult {
   const mustSay = input.mustSay ?? [];
   const mustNot = input.mustNot ?? [];
   const modalities = new Set((input.observations ?? []).map((item) => item.modality));
+  const directSpeech = directAssertiveProse(draft);
   if (
-    claimsOwnVisionActivity(draft) &&
+    claimsOwnVisionActivity(directSpeech) &&
     !["vision", "image", "screenshot"].some((modality) => modalities.has(modality))
   ) {
     return fail("UNWITNESSED_HIGH_RISK_CLAIM", "vision claim has no observation");
   }
   if (
-    (claimsOwnConversationalReadActivity(draft) || claimsOwnReadingActivity(draft)) &&
+    (claimsOwnConversationalReadActivity(directSpeech) || claimsOwnReadingActivity(directSpeech)) &&
     !["page", "url", "web", "text"].some((modality) => modalities.has(modality))
   ) {
     return fail("UNWITNESSED_HIGH_RISK_CLAIM", "reading claim has no observation");
@@ -97,7 +134,7 @@ export function fidelityCheck(input: FidelityInput): FidelityResult {
     return fail("DRAFT_COMMITMENT_CONFLICT", `mustNot is present: ${forbidden}`);
   }
 
-  const affirmativeEffectClaim = /\b(?:worked|succeeded|successful|completed|sent|created|updated|done)\b/i.test(draft);
+  const affirmativeEffectClaim = claimsAffirmativeOperationalEffect(draft);
   if (affirmativeEffectClaim) {
     const hasSucceededOperationalClaim = commitments.operational?.some(
       (claim) => claim.claimedState === "succeeded",

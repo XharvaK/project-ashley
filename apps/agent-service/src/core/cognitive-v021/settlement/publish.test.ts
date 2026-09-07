@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { updateCycleState } from "../cycle/inbox.js";
 import { admitTestCycle, openTestSidecar } from "../test-support.js";
 import { publishSemanticTransaction } from "./publish.js";
+import { applyConcernDelta } from "../concerns/lineage.js";
 import type { PublishedCognitiveSettlement } from "../types.js";
 import { openNuclearDb } from "../../db.js";
 import { beginAuthorityTransition, captureAuthorityCurrentness, stabilizeAuthorityBarrier } from "../authority/barrier.js";
@@ -45,6 +46,46 @@ describe("v0.2.1 semantic publication transaction", () => {
       expect(db.prepare("SELECT COUNT(*) AS count FROM working_context_items").get()).toMatchObject({ count: 0 });
       expect(db.prepare("SELECT COUNT(*) AS count FROM settlements").get()).toMatchObject({ count: 0 });
       expect(db.prepare("SELECT COUNT(*) AS count FROM speech_outbox").get()).toMatchObject({ count: 0 });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("fails and rolls back when a future trigger snapshot no longer matches its concern", () => {
+    const db = openTestSidecar();
+    try {
+      admitTestCycle(db, { cycleId: "cycle-trigger-fence", conversationId: "thread-trigger-fence", triggerKind: "owner_message", triggerRef: "one", occupantId: "doc", authorityEpoch: 1, nowMs: 1 });
+      applyConcernDelta(db, {
+        op: "upsert",
+        record: {
+          concernId: "concern-trigger-fence",
+          conversationId: "thread-trigger-fence",
+          statement: "The current concern state.",
+          sourceTurnIds: [],
+          dimensions: { source: "owner_utterance", status: "asserted", time: "historical", reliability: "owner_supplied" },
+          assertionKey: null,
+          status: "active",
+        },
+      }, { cycleId: "cycle-trigger-fence", generation: 1 });
+
+      expect(() => publishSemanticTransaction(db, settlement({
+        cycleId: "cycle-trigger-fence",
+        triggerRef: "thread-trigger-fence",
+        futureTriggers: [{
+          op: "create",
+          trigger: {
+            triggerId: "trigger-fence",
+            conversationId: "thread-trigger-fence",
+            concernId: "concern-trigger-fence",
+            snapshotHash: "snapshot-seen-before-publication",
+            dueAtMs: 2_000,
+            payload: { purpose: "revisit" },
+          },
+        }],
+      }))).toThrow("future_trigger_snapshot_conflict");
+      expect(db.prepare("SELECT COUNT(*) AS count FROM future_triggers").get()).toMatchObject({ count: 0 });
+      expect(db.prepare("SELECT COUNT(*) AS count FROM settlements").get()).toMatchObject({ count: 0 });
+      expect(db.prepare("SELECT COUNT(*) AS count FROM working_context_items").get()).toMatchObject({ count: 0 });
     } finally {
       db.close();
     }

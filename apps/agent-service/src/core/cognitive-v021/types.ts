@@ -879,6 +879,10 @@ export type ThoughtSettlementDraft = {
   durableNominations?: DurableNomination[];
   operations: {
     observationsConsumed: string[];
+    /** Authored retrieval reliance preserved for post-publication audit. */
+    retrievalRefsUsed?: string[];
+    /** Authored source reliance preserved for post-publication audit. */
+    sourceRefsUsed?: string[];
     effectsCompleted: string[];
     intentsStillInFlight: string[];
   };
@@ -930,6 +934,7 @@ export type ThoughtParserFailureCode =
   | "alias_duplicate"
   | "dangling_local_reference"
   | "reference_target_type_mismatch"
+  | "future_trigger_snapshot_unavailable"
   | "other";
 export type ThoughtCorrectionFailureCode = "structural_correction_scope_violation";
 export type ThoughtPassIndex = number;
@@ -1054,6 +1059,8 @@ export type ThoughtInput = {
   };
   workingContext: WorkingContextItem[];
   occupancy: MindOccupancy[];
+  /** Host-captured concern snapshots seen while assembling this Thought input. */
+  concernSnapshots?: Readonly<Record<string, string>>;
   constitution: IdentitySlice;
   learnedSelfSlice: LearnedSelfSlice;
   capabilityReality: CapabilityReality;

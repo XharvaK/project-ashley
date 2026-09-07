@@ -121,6 +121,21 @@ export function listSpeechOutbox(
   return rows.map(mapOutbox).filter((row): row is SpeechOutboxRow => row !== null);
 }
 
+/**
+ * Return live speech rows whose durable projection has not started yet.
+ *
+ * A pending row is the committed semantic speech itself. Recovery may
+ * reconsider it through the existing projector, but must never revive shadow,
+ * suppressed, terminal, or already-reserved rows.
+ */
+export function listEligiblePendingSpeechOutbox(
+  db: DatabaseSync,
+  options: { limit?: number } = {},
+): SpeechOutboxRow[] {
+  return listSpeechOutbox(db, { statuses: ["pending"], limit: options.limit ?? 1000 })
+    .filter((row) => row.origin === "live" && !row.suppressed && row.nuclearReservationId === null);
+}
+
 export function updateOutboxStatus(
   db: DatabaseSync,
   outboxId: number,

@@ -184,6 +184,12 @@ function validateOperations(
   if (!isRecord(value) || !isStringArray(value.observationsConsumed) || !isStringArray(value.effectsCompleted) || !isStringArray(value.intentsStillInFlight)) {
     return failure("malformed", "OPERATIONS_MISSING");
   }
+  if (value.retrievalRefsUsed !== undefined && !isStringArray(value.retrievalRefsUsed)) {
+    return failure("malformed", "OPERATIONS_RETRIEVAL_REFS_INVALID");
+  }
+  if (value.sourceRefsUsed !== undefined && !isStringArray(value.sourceRefsUsed)) {
+    return failure("malformed", "OPERATIONS_SOURCE_REFS_INVALID");
+  }
   const receipts = new Set([
     ...(active?.consumedEffectIds ?? []),
     ...(active?.effectReceiptIds ?? []),

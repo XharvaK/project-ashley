@@ -23,6 +23,7 @@ import {
 } from "../evidence/conversation-log.js";
 import { listInFlight } from "../effect/in-flight.js";
 import { listWorkingContext } from "../evidence/working-context.js";
+import { listConcerns } from "../concerns/lineage.js";
 import { getActiveDeferredFrontier } from "../frontier/ledger.js";
 import type { DeferredReactiveFrontierRecord } from "../frontier/types.js";
 import { retrieveCandidates } from "../retrieval/discover.js";
@@ -308,6 +309,10 @@ export function buildThoughtInput(options: BuildThoughtInputOptions): ThoughtInp
     .slice()
     .sort((left, right) => right.priority - left.priority || right.updatedGeneration - left.updatedGeneration)
     .slice(0, occupancyK);
+  const concernSnapshots = Object.freeze(Object.fromEntries(
+    listConcerns(options.sidecar, options.cycle.conversationId)
+      .map((concern) => [concern.concernId, concern.snapshotHash]),
+  ));
   const learnedSelfSlice = options.learnedSelfSlice ?? buildLearnedSelfSlice(options.sidecar);
   const identity = options.constitution as IdentitySlice & Partial<IdentityOrientationSource>;
   const orientationKernel = options.orientationKernel ?? buildOrientationKernel({
@@ -389,6 +394,7 @@ export function buildThoughtInput(options: BuildThoughtInputOptions): ThoughtInp
       : {}),
     workingContext,
     occupancy,
+    concernSnapshots,
     // Keep the legacy IdentitySlice wire shape compact. The richer
     // category-separated fields have already been captured by the orientation
     // kernel and must not be duplicated in the old compatibility field.

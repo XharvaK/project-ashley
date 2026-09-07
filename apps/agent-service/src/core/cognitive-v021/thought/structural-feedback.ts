@@ -65,6 +65,7 @@ const STRUCTURAL_FEEDBACK: Readonly<Record<ThoughtParserFailureCode, string>> = 
   alias_duplicate: "Use a distinct output-local alias for each same-settlement entity.",
   dangling_local_reference: "Use only local aliases declared by a same-settlement entity or an allowlisted existing reference.",
   reference_target_type_mismatch: "Use a local or existing reference whose target domain matches the reported field.",
+  future_trigger_snapshot_unavailable: "Create a future trigger only for a concern whose Host-captured snapshot is available.",
   other: "Match the semantic Thought contract exactly.",
 };
 

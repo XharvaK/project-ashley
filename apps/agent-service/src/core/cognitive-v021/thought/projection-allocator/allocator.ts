@@ -329,6 +329,15 @@ export function allocateThoughtProjection(
         : {}),
     };
 
+    if (input.concernSnapshots !== undefined) {
+      Object.defineProperty(projected, "concernSnapshots", {
+        value: input.concernSnapshots,
+        enumerable: false,
+        writable: false,
+        configurable: false,
+      });
+    }
+
     if (includeOrientationKernel && c2Input.orientationKernel !== undefined) {
       attachC2CompatibilityFields(projected, input);
     }
