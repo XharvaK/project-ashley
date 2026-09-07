@@ -392,3 +392,26 @@ SHUTDOWN_ACTION=PROHIBITED
 REPORT=.superpowers/sdd/ashley-stabilization-overnight/wave-results/exact-candidate-qualification.md
 CHECKPOINT=.superpowers/sdd/ashley-stabilization-overnight/checkpoints/wave-7.patch
 NEXT_WAVE=Wave8 push then production preflight/deployment and bounded acceptance
+
+## Wave 7 push and Wave 8 production preflight
+
+PUSH_PRE_SHA=18008cf649c74e0a4080c30736b6d88737fb0108
+PUSH_REMOTE_SHA=18008cf649c74e0a4080c30736b6d88737fb0108
+REMOTE_BRANCH=refs/heads/codex/stabilization-sparse-vnext-overnight-20260906
+PUSH_RESULT=PASS
+PRODUCTION_HOST=XQX (SSH alias mint)
+PRODUCTION_CHECKOUT_SHA=7bae7eaafedc2e7e859218d340920ea3958b1515
+PRODUCTION_CHECKOUT_TREE=5a1fd8c04ced30f1fd0764ea7b7b667285ce4170
+PRODUCTION_CHECKOUT_BRANCH=master
+PRODUCTION_TRACKED_WORKTREE=CLEAN
+PRODUCTION_AGENT_SERVICE=active/running
+PRODUCTION_DISCORD_SERVICE=active/running
+PRODUCTION_HEALTH={"ok":true,"ready":true,"state":"ready","cognitiveKernel":"v021","cognitiveSidecarSchemaVersion":8}
+PRODUCTION_ACTIVATED_SHA=7bae7eaafedc2e7e859218d340920ea3958b1515
+PRODUCTION_SIDECAR_PATH=/home/xarvak/.composer-assistant/cognitive-v021.db
+PRODUCTION_SIDECAR_META=id=1;schema_version=8;architecture_epoch=v0.2.1;implementation_spec_version=0.2.1.r5;thought_contract_version=2;authority_epoch=1;projection_state=current
+PRODUCTION_SIDECAR_USER_VERSION=8
+PRODUCTION_MUTATION=NONE_DURING_PREFLIGHT
+SHUTDOWN_AUTHORITY=NO
+SHUTDOWN_ACTION=PROHIBITED
+NEXT_WAVE=Wave8 exact-candidate deployment with bounded r5-to-r6 sidecar transition
