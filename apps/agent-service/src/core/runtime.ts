@@ -22,6 +22,11 @@ import {
 } from "./agency/turn-complexity.js";
 import { relevantBoundaryIdSet } from "./agency/boundary-relevance.js";
 import { logDecision, setDecisionOutcome } from "./agency/log.js";
+import {
+  deriveCommunicationEffectIntent,
+  evaluateAndAuditAuthority,
+  prepareCommitAndAudit,
+} from "./authority/index.js";
 import { observeSandboxEffectIntentAdmission } from "./sandbox/task-admission.js";
 import {
   composeTurnContext,
@@ -445,6 +450,7 @@ export type ProactiveDiagnosticStage =
   | "eligibility"
   | "thought"
   | "agency"
+  | "authority"
   | "expression"
   | "reservation"
   | "delivery";
@@ -824,7 +830,39 @@ export class AshleyCore {
         const notice =
           "I did not store or send that credential-shaped value to the model. " +
           "The original Discord message remains under Discord's retention and control.";
-        const bubbles = [{ ordinal: 0, text: notice }];
+        const secretIntent = deriveCommunicationEffectIntent({
+          decision: null,
+          ownerId: input.ownerId,
+          trigger: "reactive",
+          producer: "secret_omission_notice",
+        });
+        const secretAuth = evaluateAndAuditAuthority(this.db, secretIntent);
+        const secretCommit = prepareCommitAndAudit({
+          db: this.db,
+          evaluation: secretAuth,
+          payloadText: notice,
+        });
+        if (secretCommit.outcome !== "commit") {
+          const finalized = finalizeDelivery(this.db, {
+            reservationId: claim.reservation.id,
+            ownerId: input.ownerId,
+            cause: "authority_refused",
+            errorCategory: secretCommit.code,
+          });
+          clearDeliveryAbort(claim.reservation.id);
+          return {
+            text: "",
+            threadId: claim.reservation.threadId,
+            model: "none",
+            decisionId: 0,
+            decisionKind: "speak",
+            reservationId: claim.reservation.id,
+            deliveryState: finalized.state,
+            secretOmitted: true,
+            silenced: true,
+          };
+        }
+        const bubbles = [{ ordinal: 0, text: secretCommit.prepared.payloadText }];
         const reserved = attachDraftAndBubbles(
           this.db,
           claim.reservation.id,
@@ -1990,6 +2028,37 @@ export class AshleyCore {
         };
       }
 
+      const communicationIntent = deriveCommunicationEffectIntent({
+        decision: { ...decision, id: decisionId },
+        ownerId: input.ownerId,
+        trigger: "reactive",
+        producer: "agency_runtime",
+      });
+      const communicationAuth = evaluateAndAuditAuthority(
+        this.db,
+        communicationIntent,
+      );
+      if (communicationAuth.outcome !== "granted") {
+        const finalized = finalizeDelivery(this.db, {
+          reservationId: reservation.id,
+          ownerId: input.ownerId,
+          cause: "authority_refused",
+          errorCategory: communicationAuth.code,
+          ownTimeOpen,
+        });
+        clearDeliveryAbort(reservation.id);
+        return {
+          text: "",
+          threadId: turn.threadId,
+          model: "none",
+          decisionId,
+          decisionKind: decision.kind,
+          reservationId: reservation.id,
+          deliveryState: finalized.state,
+          silenced: true,
+        };
+      }
+
       let rendered;
       try {
         recordPhaseLifecycle(this.db, {
@@ -2151,10 +2220,39 @@ export class AshleyCore {
         };
       }
 
+      const commit = prepareCommitAndAudit({
+        db: this.db,
+        evaluation: communicationAuth,
+        payloadText: media.text,
+        preHonestyText: extractMediaMarkers(rendered.preHonestyText).text,
+        honestyMutated: rendered.honestyMutated,
+      });
+      if (commit.outcome !== "commit") {
+        const finalized = finalizeDelivery(this.db, {
+          reservationId: reservation.id,
+          ownerId: input.ownerId,
+          cause: "authority_refused",
+          errorCategory: commit.code,
+          ownTimeOpen,
+        });
+        clearDeliveryAbort(reservation.id);
+        return {
+          text: "",
+          threadId: turn.threadId,
+          model: rendered.model,
+          decisionId,
+          decisionKind: decision.kind,
+          reservationId: reservation.id,
+          deliveryState: finalized.state,
+          media: { react: media.react, gifQuery: media.gifQuery },
+          silenced: true,
+        };
+      }
+
       const reserved = attachDraftAndBubbles(
         this.db,
         reservation.id,
-        media.text,
+        commit.prepared.payloadText,
         bubbles,
         {
           deliveryLeaseExpiresAt: new Date(
@@ -2712,6 +2810,23 @@ export class AshleyCore {
       });
       this.activeOwners.add(ownerId);
       try {
+        const proactiveIntent = deriveCommunicationEffectIntent({
+          decision: { ...decision, id: decisionId },
+          ownerId,
+          trigger: "proactive",
+          producer: "agency_runtime",
+        });
+        const proactiveAuth = evaluateAndAuditAuthority(this.db, proactiveIntent);
+        if (proactiveAuth.outcome !== "granted") {
+          recordProactiveDiagnostic(
+            this.db,
+            ownerId,
+            "authority",
+            `authority_refused:${proactiveAuth.code}`,
+          );
+          setDecisionOutcome(this.db, decisionId, "");
+          return { shouldSend: false, reason: "authority_refused" };
+        }
         let rendered: Awaited<ReturnType<typeof expressSpeak>>;
         try {
           this.recordC1ShadowWitnessAtExpression(c1ShadowAttemptInput(
@@ -2772,6 +2887,23 @@ export class AshleyCore {
           setDecisionOutcome(this.db, decisionId, "");
           return { shouldSend: false, reason: "empty_draft" };
         }
+        const proactiveCommit = prepareCommitAndAudit({
+          db: this.db,
+          evaluation: proactiveAuth,
+          payloadText: media.text,
+          preHonestyText: extractMediaMarkers(rendered.preHonestyText).text,
+          honestyMutated: rendered.honestyMutated,
+        });
+        if (proactiveCommit.outcome !== "commit") {
+          recordProactiveDiagnostic(
+            this.db,
+            ownerId,
+            "authority",
+            `authority_refused:${proactiveCommit.code}`,
+          );
+          setDecisionOutcome(this.db, decisionId, "");
+          return { shouldSend: false, reason: "authority_refused" };
+        }
         const angle = decisionAngle(decision.kind);
         this.db.exec("BEGIN IMMEDIATE");
         let reservationId: number;
@@ -2798,7 +2930,7 @@ export class AshleyCore {
             .run(
               ownerId,
               decisionId,
-              media.text,
+              proactiveCommit.prepared.payloadText,
               turn.threadId,
               angle,
               decision.reason,

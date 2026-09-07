@@ -139,20 +139,20 @@ Legacy `index.db` is archival for chat memory (nuclear does not read it). Conver
 ## Architecture
 
 ```
-Discord DM → POST /chat/text → Identity + Mind State + Recall → Thought → Agency / Expression → delivery
-Proactive tick → Agency.decide → draft → reserve → send → receipt / reconcile → commit / finalize
+Discord DM → POST /chat/text → Identity + Mind State + Recall → Thought → Agency → Authority Kernel / Communication Policy → Expression → Honesty → REVALIDATE → delivery
+Proactive tick → Agency.decide → EffectIntent → Authority Kernel → draft → reserve → send → receipt / reconcile → commit / finalize
 Curiosity feed → nuclear.db takes → Agency motivations
 Committed proactive reaction → Reflection → bounded future Thought calibration
 Completed exchange → cognitive job → grounded episode → Mind State / affect / bounded growth
-Urgent grounded concern → immediate Agency evaluation → reserve → send → receipt / reconcile → commit / finalize
-Grounded engineering intent → admission → direct unprivileged Bubblewrap → receipt / reconcile
+Urgent grounded concern → immediate Agency evaluation → Authority Kernel → reserve → send → receipt / reconcile → commit / finalize
+Grounded engineering intent → admission → Authority Kernel → direct unprivileged Bubblewrap → receipt / reconcile
 ```
 
 Conceptual stack (Identity and Mind State are joint inputs to Thought — neither produces the other):
 
 ```
 Identity (stable) ──┐
-                    ├──→ Thought → Expression → Rendering
+                    ├──→ Thought → Agency → Authority Kernel → Expression → Rendering
 Mind State (dynamic)┘
 ```
 
@@ -161,8 +161,11 @@ Mind State (dynamic)┘
 | Identity | Stable who she is (values, boundaries, tastes, opinions) |
 | Mind State | Dynamic condition, active goals/concerns/commitments, and grounded digital affect |
 | Thought | Effort allocation, evidence selection, prioritization, reasoning, completion, and intended-outcome formation |
+| Agency | Initiative admission; does not execute and does not grant effect authority |
+| Authority Kernel | Current exact-external-effect grant or typed refusal |
 | Reflection | Post-outcome interpretation and bounded future Thought calibration; no current-turn authority |
-| Expression | Intentional language (`workspace/prompts/nuclear/`) |
+| Honesty | Negative truth control on prepared wording; never authorizes |
+| Expression | Intentional language (`workspace/prompts/nuclear/`) inside an existing grant |
 | Rendering | Platform mechanics only (typography, bubbles, pacing) |
 
 ### Architectural ownership
@@ -174,8 +177,9 @@ When adding a behavior, ask these questions in order:
 1. Is this part of Ashley's stable identity?
 2. Is this part of her current mind state?
 3. Is this a reasoning or effort-allocation decision?
-4. Is this merely an expression choice?
-5. Is this only a rendering concern?
+4. Is this an external-effect permission question? If so, it belongs to the Authority Kernel, not Thought, Agency, Expression, or Honesty.
+5. Is this merely an expression choice?
+6. Is this only a rendering concern?
 
 Implement it at the first layer that answers yes.
 

@@ -673,9 +673,15 @@ identity-change authority.
 
 The [External Effect and Authority Architecture](External_Effect_and_Authority_Architecture.md)
 is cross-cutting. It is consumed by connectors, direct APIs, procedures,
-Computer Use, Sandbox engineering effects, and future mechanisms. It owns
-effect meaning, admission, credential references, approvals, prepare,
-revalidation, commit, receipts, witnesses, reconciliation, and human handoff.
+Computer Use, Sandbox engineering effects, Discord communication, and future
+mechanisms. It owns effect meaning, admission, credential references, approvals,
+prepare, revalidation, commit, receipts, witnesses, reconciliation, and human
+handoff.
+
+Runtime evaluation of that contract is the
+[Authority Kernel](Ashley_Authority_Kernel_Architecture.md). The kernel does
+not replace External Effect law. Communication Policy is the first consumer.
+There is no separate Speech Authorization System.
 
 Computer Use is one mechanism consumer. Sandbox M7 is an engineering-specific
 authority domain. When an engineering effect also represents Doc externally,
