@@ -439,6 +439,51 @@ describe("nim-adapter fixtures", () => {
       reasoningTokens: 30,
     });
     expect(result.finishReason).toBe("stop");
+    expect(result.responseDiagnostics).toMatchObject({
+      contentContainerType: "string",
+      finalTextBytes: Buffer.byteLength('{"kind":"speak","reason":"hello"}', "utf8"),
+      finishReason: "stop",
+      finishReasonClass: "STOP",
+      outputTokenLimit: 1000,
+      outputTokens: 50,
+      reasoningTokens: 30,
+      reasoningContentBytes: Buffer.byteLength("hidden chain of thought", "utf8"),
+      reasoningHash: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
+      extractionFailure: "none",
+    });
+    expect(JSON.stringify(result.responseDiagnostics)).not.toContain("hidden chain of thought");
+  });
+
+  it("keeps thinking chunks out of semantic text while preserving their shape", async () => {
+    env.nimApiKey = "test";
+    const adapter = createNimAdapter(async () =>
+      fakeResponse({
+        choices: [
+          {
+            message: {
+              content: [
+                { type: "thinking", thinking: [{ type: "text", text: "private reasoning" }] },
+                { type: "text", text: '{"kind":"speak"}' },
+              ],
+            },
+            finish_reason: "stop",
+          },
+        ],
+      }),
+    );
+
+    const result = await adapter.dispatch({ messages, modelId: "openai/gpt-oss-20b", options: {} });
+
+    expect(result.text).toBe('{"kind":"speak"}');
+    expect(result.text).not.toContain("private reasoning");
+    expect(result.responseDiagnostics).toMatchObject({
+      contentContainerType: "array",
+      contentChunkTypes: ["thinking", "text"],
+      textChunkCount: 1,
+      thinkingChunkCount: 1,
+      extractionFailure: "none",
+    });
+    expect(JSON.stringify(result.responseDiagnostics)).not.toContain("private reasoning");
   });
 
   it("throws agent_not_ready when the API key is missing", async () => {

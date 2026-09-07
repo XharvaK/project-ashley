@@ -1,6 +1,7 @@
 import { env } from "../../../env.js";
 import { AppError } from "../../../errors.js";
 import { applyTranslatedControlToNimBody } from "../../model-fabric/reasoning-translation.js";
+import { sha256Text } from "../../model-fabric/hash.js";
 import type {
   ChatMessage,
   CompletionOptions,
@@ -10,6 +11,8 @@ import type {
   ToolCallResult,
   ProviderDispatchArgs,
   TrustedReasoningControl,
+  ProviderFinishReasonClass,
+  ProviderResponseDiagnostics,
 } from "../types.js";
 import type { TrustedStructuredOutputControl } from "../../model-fabric/types.js";
 import { wireEvidenceFor } from "../../model-fabric/wire-evidence.js";
@@ -74,6 +77,115 @@ function toFinishReason(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
   const value = raw.trim().slice(0, 32);
   return FINISH_REASONS.has(value) ? value : "other";
+}
+
+function finishReasonClass(
+  finishReason: string | null,
+): ProviderFinishReasonClass {
+  if (!finishReason) return "UNKNOWN";
+  switch (finishReason) {
+    case "stop":
+      return "STOP";
+    case "length":
+      return "LENGTH";
+    case "content_filter":
+      return "CONTENT_FILTER";
+    case "tool_calls":
+      return "TOOL";
+    default:
+      return "OTHER";
+  }
+}
+
+function boundedChunkType(value: unknown): string {
+  return typeof value === "string" && value.length > 0
+    ? value.slice(0, 64)
+    : "<invalid>";
+}
+
+function contentDiagnostics(
+  content: unknown,
+): Pick<
+  ProviderResponseDiagnostics,
+  "contentContainerType" | "contentChunkTypes" | "textChunkCount" | "thinkingChunkCount" | "extractionFailure"
+> {
+  if (typeof content === "string") {
+    return {
+      contentContainerType: "string",
+      contentChunkTypes: [],
+      textChunkCount: 0,
+      thinkingChunkCount: 0,
+      extractionFailure: "none",
+    };
+  }
+  if (content === null) {
+    return {
+      contentContainerType: "null",
+      contentChunkTypes: [],
+      textChunkCount: 0,
+      thinkingChunkCount: 0,
+      extractionFailure: "missing_content",
+    };
+  }
+  if (content === undefined) {
+    return {
+      contentContainerType: "unknown",
+      contentChunkTypes: [],
+      textChunkCount: 0,
+      thinkingChunkCount: 0,
+      extractionFailure: "missing_content",
+    };
+  }
+  if (!Array.isArray(content)) {
+    return {
+      contentContainerType: "unknown",
+      contentChunkTypes: [],
+      textChunkCount: 0,
+      thinkingChunkCount: 0,
+      extractionFailure: "unsupported_container",
+    };
+  }
+  const contentChunkTypes: string[] = [];
+  let textChunkCount = 0;
+  let thinkingChunkCount = 0;
+  let extractionFailure: ProviderResponseDiagnostics["extractionFailure"] = "none";
+  for (const chunk of content) {
+    if (typeof chunk !== "object" || chunk === null) {
+      contentChunkTypes.push("<invalid>");
+      if (extractionFailure === "none") extractionFailure = "malformed_chunk";
+      continue;
+    }
+    const record = chunk as { type?: unknown; text?: unknown; thinking?: unknown };
+    const type = record.type;
+    contentChunkTypes.push(boundedChunkType(type));
+    if (type === "text" || type === undefined) {
+      textChunkCount += 1;
+      if (typeof record.text !== "string" && extractionFailure === "none") {
+        extractionFailure = "malformed_chunk";
+      }
+    } else if (type === "thinking") {
+      thinkingChunkCount += 1;
+    } else if (extractionFailure === "none") {
+      extractionFailure = "unknown_chunk_type";
+    }
+  }
+  return {
+    contentContainerType: "array",
+    contentChunkTypes,
+    textChunkCount,
+    thinkingChunkCount,
+    extractionFailure,
+  };
+}
+
+function reasoningContentBytes(message: NimMessage | undefined): number | undefined {
+  const value = message?.reasoning_content ?? message?.reasoning;
+  return typeof value === "string" ? Buffer.byteLength(value, "utf8") : undefined;
+}
+
+function reasoningContentHash(message: NimMessage | undefined): `sha256:${string}` | undefined {
+  const value = message?.reasoning_content ?? message?.reasoning;
+  return typeof value === "string" ? `sha256:${sha256Text(value)}` : undefined;
 }
 
 function buildRequestBody(
@@ -344,13 +456,31 @@ export function createNimAdapter(
       const choice = json.choices?.[0];
       const msg = choice?.message;
       const text = msg?.content ? extractText(msg.content) : "";
+      const finishReason = toFinishReason(choice?.finish_reason);
+      const usage = toTokenUsage(json.usage);
+      const shape = contentDiagnostics(msg?.content);
+      const reasoningBytes = reasoningContentBytes(msg);
+      const reasoningHash = reasoningContentHash(msg);
       const completion: ProviderCompletion = {
         text,
         toolCalls: parseToolCalls(msg),
-        usage: toTokenUsage(json.usage),
+        usage,
         providerModel:
           typeof json.model === "string" ? json.model : null,
-        finishReason: toFinishReason(choice?.finish_reason),
+        finishReason,
+        responseDiagnostics: {
+          ...shape,
+          finalTextBytes: Buffer.byteLength(text, "utf8"),
+          finishReason,
+          finishReasonClass: finishReasonClass(finishReason),
+          outputTokenLimit: args.options.maxTokens ?? 2048,
+          outputTokens: usage?.completionTokens ?? null,
+          reasoningTokens: usage?.reasoningTokens ?? null,
+          ...(reasoningBytes !== undefined
+            ? { reasoningContentBytes: reasoningBytes }
+            : {}),
+          ...(reasoningHash ? { reasoningHash } : {}),
+        },
         wireEvidence,
       };
       return completion;

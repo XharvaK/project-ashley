@@ -33,6 +33,46 @@ export type ThoughtCycleTokenMetrics = {
   request_count: number;
 };
 
+export type ThoughtProviderFailureCapture = Readonly<{
+  /** Provider identity from the resolved Model Fabric attempt. */
+  provider?: string;
+  /** Configured model identity; provider-reported identity is separate. */
+  model?: string;
+  providerModel?: string;
+  modelFabricInvocationId?: string;
+  modelFabricAttemptId?: string;
+  attemptOrdinal?: number;
+  dispatchSequence?: number;
+  attentionRequestId?: number;
+  canonicalSchemaFingerprint?: string;
+  wireSchemaFingerprint?: string;
+  wireBindingId?: string;
+  wireFormat?: string;
+  wireBodyDigest?: string;
+  maxTokens?: number;
+  reasoningConfiguration?: string;
+  reasoningBudgetTokens?: number;
+  temperature?: number;
+  topP?: number;
+  deadlineAtMs?: number;
+  requestStartedAtMs?: number;
+  responseAtMs?: number;
+  elapsedMs?: number;
+  remainingDeadlineMs?: number;
+  finishReason?: string;
+  inputTokens?: number;
+  completionTokens?: number;
+  contentBytes?: number;
+  reasoningContentBytes?: number;
+  contentHash?: string;
+  reasoningHash?: string;
+  dispatchTruth: "not_sent" | "sent" | "unknown";
+  parserStatus: "not_run" | "passed" | "failed";
+  validatorStatus: "not_run" | "passed" | "failed";
+  failureClass?: string;
+  structuralRetryStatus: "not_applicable" | "not_scheduled" | "scheduled" | "exhausted";
+}>;
+
 export type ThoughtDispatchDiagnostic = {
   cycleId: string;
   generation: number;
@@ -57,6 +97,8 @@ export type ThoughtDispatchDiagnostic = {
   semanticBudgetTokens?: number | null;
   overflowTokens?: number | null;
   cycleMetrics?: ThoughtCycleTokenMetrics | null;
+  /** Failure-oriented provider boundary evidence; raw content is prohibited. */
+  providerFailure?: ThoughtProviderFailureCapture | null;
   createdAtMs?: number;
 };
 
@@ -157,6 +199,157 @@ function diagnosticPayload(diag: ThoughtDispatchDiagnostic): string | null {
   return diag.cycleMetrics ? JSON.stringify(diag.cycleMetrics) : null;
 }
 
+function boundedCaptureString(value: unknown, maxLength = 256): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed.slice(0, maxLength) : undefined;
+}
+
+function finiteCaptureNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function integerCaptureNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) ? value : undefined;
+}
+
+/**
+ * Serialize an explicit allowlist only. This keeps accidental raw provider
+ * payloads or hidden reasoning out of the diagnostic sidecar.
+ */
+function providerFailurePayload(
+  capture: ThoughtProviderFailureCapture | null | undefined,
+): string | null {
+  if (!capture) return null;
+  const value: Record<string, unknown> = {
+    dispatchTruth: capture.dispatchTruth,
+    parserStatus: capture.parserStatus,
+    validatorStatus: capture.validatorStatus,
+    structuralRetryStatus: capture.structuralRetryStatus,
+  };
+  const strings: Array<[keyof ThoughtProviderFailureCapture, number]> = [
+    ["provider", 64],
+    ["model", 160],
+    ["providerModel", 160],
+    ["modelFabricInvocationId", 128],
+    ["modelFabricAttemptId", 128],
+    ["canonicalSchemaFingerprint", 128],
+    ["wireSchemaFingerprint", 128],
+    ["wireBindingId", 160],
+    ["wireFormat", 96],
+    ["wireBodyDigest", 128],
+    ["reasoningConfiguration", 128],
+    ["finishReason", 64],
+    ["contentHash", 128],
+    ["reasoningHash", 128],
+    ["failureClass", 128],
+  ];
+  for (const [key, maxLength] of strings) {
+    const safe = boundedCaptureString(capture[key], maxLength);
+    if (safe !== undefined) value[key] = safe;
+  }
+  const numbers: Array<[keyof ThoughtProviderFailureCapture, "finite" | "integer"]> = [
+    ["attemptOrdinal", "integer"],
+    ["dispatchSequence", "integer"],
+    ["attentionRequestId", "integer"],
+    ["maxTokens", "integer"],
+    ["reasoningBudgetTokens", "integer"],
+    ["temperature", "finite"],
+    ["topP", "finite"],
+    ["deadlineAtMs", "integer"],
+    ["requestStartedAtMs", "integer"],
+    ["responseAtMs", "integer"],
+    ["elapsedMs", "finite"],
+    ["remainingDeadlineMs", "finite"],
+    ["inputTokens", "finite"],
+    ["completionTokens", "finite"],
+    ["contentBytes", "finite"],
+    ["reasoningContentBytes", "finite"],
+  ];
+  for (const [key, kind] of numbers) {
+    const number = kind === "integer"
+      ? integerCaptureNumber(capture[key])
+      : finiteCaptureNumber(capture[key]);
+    if (number !== undefined) value[key] = number;
+  }
+  return JSON.stringify(value);
+}
+
+function captureStatus<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+  fallback: T,
+): T {
+  return typeof value === "string" && (allowed as readonly string[]).includes(value)
+    ? value as T
+    : fallback;
+}
+
+function parseProviderFailureCapture(value: unknown): ThoughtProviderFailureCapture | null {
+  if (typeof value !== "string" || value.length === 0) return null;
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== "object") return null;
+    const dispatchTruth = captureStatus(
+      parsed.dispatchTruth,
+      ["not_sent", "sent", "unknown"] as const,
+      "unknown",
+    );
+    const parserStatus = captureStatus(
+      parsed.parserStatus,
+      ["not_run", "passed", "failed"] as const,
+      "not_run",
+    );
+    const validatorStatus = captureStatus(
+      parsed.validatorStatus,
+      ["not_run", "passed", "failed"] as const,
+      "not_run",
+    );
+    const structuralRetryStatus = captureStatus(
+      parsed.structuralRetryStatus,
+      ["not_applicable", "not_scheduled", "scheduled", "exhausted"] as const,
+      "not_applicable",
+    );
+    const capture: ThoughtProviderFailureCapture = {
+      dispatchTruth,
+      parserStatus,
+      validatorStatus,
+      structuralRetryStatus,
+    };
+    const strings: Array<[keyof ThoughtProviderFailureCapture, number]> = [
+      ["provider", 64], ["model", 160], ["providerModel", 160],
+      ["modelFabricInvocationId", 128], ["modelFabricAttemptId", 128],
+      ["canonicalSchemaFingerprint", 128], ["wireSchemaFingerprint", 128],
+      ["wireBindingId", 160], ["wireFormat", 96], ["wireBodyDigest", 128],
+      ["reasoningConfiguration", 128], ["finishReason", 64],
+      ["contentHash", 128], ["reasoningHash", 128], ["failureClass", 128],
+    ];
+    for (const [key, maxLength] of strings) {
+      const safe = boundedCaptureString(parsed[key], maxLength);
+      if (safe !== undefined) (capture as Record<string, unknown>)[key] = safe;
+    }
+    const numbers: Array<[keyof ThoughtProviderFailureCapture, "finite" | "integer"]> = [
+      ["attemptOrdinal", "integer"], ["dispatchSequence", "integer"],
+      ["attentionRequestId", "integer"], ["maxTokens", "integer"],
+      ["reasoningBudgetTokens", "integer"], ["temperature", "finite"],
+      ["topP", "finite"], ["deadlineAtMs", "integer"],
+      ["requestStartedAtMs", "integer"], ["responseAtMs", "integer"],
+      ["elapsedMs", "finite"], ["remainingDeadlineMs", "finite"],
+      ["inputTokens", "finite"], ["completionTokens", "finite"],
+      ["contentBytes", "finite"], ["reasoningContentBytes", "finite"],
+    ];
+    for (const [key, kind] of numbers) {
+      const number = kind === "integer"
+        ? integerCaptureNumber(parsed[key])
+        : finiteCaptureNumber(parsed[key]);
+      if (number !== undefined) (capture as Record<string, unknown>)[key] = number;
+    }
+    return capture;
+  } catch {
+    return null;
+  }
+}
+
 function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string): void {
   const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name?: string }>;
   if (!columns.some((item) => item.name === column)) {
@@ -227,6 +420,7 @@ export function initObservabilitySchema(db: DatabaseSync): void {
       fallback_from_attempt_id TEXT,
       secondary_dispatch_truth TEXT CHECK(secondary_dispatch_truth IS NULL OR secondary_dispatch_truth IN ('not_sent')),
       cycle_metrics_json TEXT,
+      provider_failure_json TEXT,
       created_at_ms INTEGER NOT NULL
     );
 
@@ -242,6 +436,7 @@ export function initObservabilitySchema(db: DatabaseSync): void {
   // This is an additive column on the dedicated diagnostic sidecar. It does
   // not alter nuclear.db or any production schema migration contract.
   ensureColumn(db, "thought_dispatch_diagnostics", "cycle_metrics_json", "TEXT");
+  ensureColumn(db, "thought_dispatch_diagnostics", "provider_failure_json", "TEXT");
 }
 
 export class ObservabilityStore {
@@ -317,14 +512,14 @@ export class ObservabilityStore {
         total_demand_tokens, semantic_projection_hash, dispatch_messages_hash,
         primary_provider, primary_attempt_id, primary_dispatch_truth,
         suppressed_provider, fallback_attempt_ordinal, fallback_from_attempt_id,
-        secondary_dispatch_truth, cycle_metrics_json, created_at_ms
+        secondary_dispatch_truth, cycle_metrics_json, provider_failure_json, created_at_ms
       ) VALUES (
         ?, ?, ?, ?, ?, ?,
         ?, ?, ?,
         ?, ?, ?,
         ?, ?, ?,
         ?, ?, ?,
-        ?, ?, ?
+        ?, ?, ?, ?
       )
     `);
 
@@ -349,6 +544,7 @@ export class ObservabilityStore {
       diag.fallbackFromAttemptId ?? null,
       diag.secondaryDispatchTruth ?? null,
       diagnosticPayload(diag),
+      providerFailurePayload(diag.providerFailure),
       diag.createdAtMs ?? nowMs,
     );
   }
@@ -492,6 +688,7 @@ export class ObservabilityStore {
       fallback_from_attempt_id: string | null;
       secondary_dispatch_truth: "not_sent" | null;
       cycle_metrics_json: string | null;
+      provider_failure_json: string | null;
       created_at_ms: number;
     }>;
 
@@ -519,6 +716,7 @@ export class ObservabilityStore {
         secondaryDispatchTruth: r.secondary_dispatch_truth,
         ...(overflowDetails ?? {}),
         cycleMetrics: parseCycleMetrics(r.cycle_metrics_json),
+        providerFailure: parseProviderFailureCapture(r.provider_failure_json),
         createdAtMs: r.created_at_ms,
       };
     });

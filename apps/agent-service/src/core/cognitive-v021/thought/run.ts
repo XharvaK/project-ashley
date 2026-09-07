@@ -94,7 +94,19 @@ import { getWake } from "../wake/ledger.js";
 import { admitOwnerSuppliedClaim, runGovernedAdmissionCatchup } from "../memory/admission.js";
 import { hasStructuredCurrentnessEntitlement } from "../authority/check.js";
 import { recordDiagnostic, recordThoughtCycleMetrics } from "./diagnostics.js";
+import type { ThoughtProviderFailureCapture } from "./diagnostics.js";
 import { metadataFromError } from "../../model-fabric/receipts.js";
+import type {
+  ModelAttemptReceipt,
+  ModelFabricDispatchMetadata,
+} from "../../model-fabric/types.js";
+import { sha256Text } from "../../model-fabric/hash.js";
+import type {
+  ProviderBoundaryControls,
+  ProviderBoundaryTiming,
+  ProviderResponseDiagnostics,
+  WireDispatchEvidence,
+} from "../../model-routing/types.js";
 import { fidelityCheck } from "../speech/fidelity.js";
 import { emitInfrastructureNotice } from "../speech/infrastructure-notice.js";
 import { recordThoughtC3TerminalFailure } from "../failure/c3-recorder.js";
@@ -128,6 +140,8 @@ export type ThoughtInvocation = {
   kernelEnvelope?: KernelEnvelope;
   /** Provider prompt input tokens, or the shared structural estimate for a fixture. */
   inputTokens?: number;
+  /** Bounded provider-boundary evidence for a failed Thought attempt. */
+  providerFailureCapture?: ThoughtProviderFailureCapture;
 };
 
 type SettlementRevisionFeedback = {
@@ -190,6 +204,219 @@ export async function invokeThoughtComplete(
 ): ReturnType<typeof completeChat> {
   if (!options.attentionDb) throw new Error("dispatch_data_plane_missing");
   return invoker(messages, options);
+}
+
+type ThoughtProviderCaptureStatus = {
+  parserStatus: ThoughtProviderFailureCapture["parserStatus"];
+  validatorStatus: ThoughtProviderFailureCapture["validatorStatus"];
+  failureClass?: string;
+  structuralRetryStatus: ThoughtProviderFailureCapture["structuralRetryStatus"];
+};
+
+function terminalModelAttempt(
+  metadata: ModelFabricDispatchMetadata | null | undefined,
+): ModelAttemptReceipt | null {
+  const receipt = metadata?.receipt;
+  if (!receipt || receipt.receiptStage !== "resolved") return null;
+  return receipt.attempts.at(-1) ?? null;
+}
+
+function safeFailureClass(value: unknown): string | undefined {
+  const raw = typeof value === "string"
+    ? value
+    : value && typeof value === "object" && typeof (value as { code?: unknown }).code === "string"
+      ? (value as { code: string }).code
+      : value instanceof Error && value.name
+        ? value.name
+        : undefined;
+  if (!raw) return undefined;
+  const bounded = raw.trim().slice(0, 128);
+  return bounded.length > 0 && /^[A-Za-z0-9_.:-]+$/.test(bounded)
+    ? bounded
+    : "sanitized_failure";
+}
+
+function finiteNonNegative(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : undefined;
+}
+
+function providerFailureCapture(input: {
+  metadata?: ModelFabricDispatchMetadata | null;
+  completion?: Awaited<ReturnType<typeof completeChat>>;
+  controls?: ProviderBoundaryControls;
+  timing?: ProviderBoundaryTiming;
+  options: {
+    deadlineAtMs?: number | null;
+    maxTokens?: number;
+    temperature?: number;
+    structuredOutput?: { schemaFingerprint?: string };
+  };
+  dispatchTruth: ThoughtProviderFailureCapture["dispatchTruth"];
+  status: ThoughtProviderCaptureStatus;
+}): ThoughtProviderFailureCapture {
+  const metadata = input.metadata ?? input.completion?.modelFabric ?? null;
+  const attempt = terminalModelAttempt(metadata);
+  const completion = input.completion;
+  const controls = input.controls
+    ?? completion?.providerBoundaryControls
+    ?? metadata?.providerBoundaryControls;
+  const timing = input.timing
+    ?? completion?.providerBoundaryTiming
+    ?? metadata?.providerBoundaryTiming;
+  const wireEvidence: WireDispatchEvidence | undefined = completion?.wireEvidence
+    ?? metadata?.wireEvidence
+    ?? attempt?.wireEvidence
+    ?? undefined;
+  const responseDiagnostics: ProviderResponseDiagnostics | undefined =
+    completion?.responseDiagnostics;
+  const capturedAttempt = completion?.capturedAttemptIdentity;
+  const provider = attempt?.provider
+    ?? metadata?.resolvedRoute?.provider
+    ?? capturedAttempt?.provider;
+  const model = attempt?.configuredModelId
+    ?? capturedAttempt?.configuredModelId
+    ?? completion?.modelAlias;
+  const providerModel = completion?.providerModel ?? undefined;
+  const receipt = metadata?.receipt;
+  const attentionRequestId = completion?.attentionRequestId
+    ?? (receipt && receipt.attentionRequestId !== null ? receipt.attentionRequestId : undefined);
+  const canonicalSchemaFingerprint = capturedAttempt?.semanticSchemaFingerprint
+    ?? THOUGHT_OUTPUT_SCHEMA_FINGERPRINT;
+  const wireSchemaFingerprint = capturedAttempt?.wireSchemaFingerprint
+    ?? attempt?.structuredOutputSchemaFingerprint
+    ?? input.options.structuredOutput?.schemaFingerprint;
+  const reasoningConfiguration = controls?.reasoningConfiguration
+    ?? attempt?.effectiveReasoningSent
+    ?? attempt?.translatedWireControl
+    ?? attempt?.effectiveReasoning
+    ?? undefined;
+  const maxTokens = controls?.maxTokens
+    ?? responseDiagnostics?.outputTokenLimit
+    ?? input.options.maxTokens;
+  const deadlineAtMs = controls?.deadlineAtMs ?? input.options.deadlineAtMs;
+  const capture: ThoughtProviderFailureCapture = {
+    dispatchTruth: input.dispatchTruth,
+    parserStatus: input.status.parserStatus,
+    validatorStatus: input.status.validatorStatus,
+    structuralRetryStatus: input.status.structuralRetryStatus,
+    ...(provider ? { provider: String(provider) } : {}),
+    ...(model ? { model: String(model) } : {}),
+    ...(providerModel ? { providerModel: String(providerModel) } : {}),
+    ...(attempt?.invocationId
+      ? { modelFabricInvocationId: attempt.invocationId }
+      : capturedAttempt?.modelFabricInvocationId
+        ? { modelFabricInvocationId: capturedAttempt.modelFabricInvocationId }
+      : receipt?.invocationId
+        ? { modelFabricInvocationId: receipt.invocationId }
+        : {}),
+    ...(attempt?.attemptId
+      ? { modelFabricAttemptId: attempt.attemptId }
+      : capturedAttempt?.modelFabricAttemptId
+        ? { modelFabricAttemptId: capturedAttempt.modelFabricAttemptId }
+        : {}),
+    ...(attempt?.attemptOrdinal !== undefined
+      ? { attemptOrdinal: attempt.attemptOrdinal }
+      : capturedAttempt?.attemptOrdinal !== undefined
+        ? { attemptOrdinal: capturedAttempt.attemptOrdinal }
+        : {}),
+    ...(capturedAttempt?.dispatchSequence !== undefined
+      ? { dispatchSequence: capturedAttempt.dispatchSequence }
+      : {}),
+    ...(typeof attentionRequestId === "number" ? { attentionRequestId } : {}),
+    ...(canonicalSchemaFingerprint ? { canonicalSchemaFingerprint } : {}),
+    ...(wireSchemaFingerprint ? { wireSchemaFingerprint } : {}),
+    ...(wireEvidence?.bindingId ? { wireBindingId: wireEvidence.bindingId } : {}),
+    ...(wireEvidence?.wireFormat ? { wireFormat: wireEvidence.wireFormat } : {}),
+    ...(wireEvidence?.sanitizedBodyDigest
+      ? { wireBodyDigest: wireEvidence.sanitizedBodyDigest }
+      : {}),
+    ...(typeof maxTokens === "number" ? { maxTokens } : {}),
+    ...(reasoningConfiguration ? { reasoningConfiguration } : {}),
+    ...(typeof controls?.reasoningBudgetTokens === "number"
+      ? { reasoningBudgetTokens: controls.reasoningBudgetTokens }
+      : {}),
+    ...(typeof (controls?.temperature ?? input.options.temperature) === "number"
+      ? { temperature: controls?.temperature ?? input.options.temperature }
+      : {}),
+    ...(typeof controls?.topP === "number" ? { topP: controls.topP } : {}),
+    ...(typeof deadlineAtMs === "number" ? { deadlineAtMs } : {}),
+    ...(timing?.requestStartedAtMs !== undefined
+      ? { requestStartedAtMs: timing.requestStartedAtMs }
+      : {}),
+    ...(timing?.responseAtMs !== undefined ? { responseAtMs: timing.responseAtMs } : {}),
+    ...(timing?.elapsedMs !== undefined ? { elapsedMs: timing.elapsedMs } : {}),
+    ...(timing?.remainingDeadlineMs !== undefined
+      ? { remainingDeadlineMs: timing.remainingDeadlineMs }
+      : {}),
+    ...(responseDiagnostics?.finishReason ?? completion?.finishReason
+      ? { finishReason: responseDiagnostics?.finishReason ?? completion?.finishReason! }
+      : {}),
+    ...(finiteNonNegative(completion?.usage?.promptTokens) !== undefined
+      ? { inputTokens: finiteNonNegative(completion?.usage?.promptTokens) }
+      : {}),
+    ...(finiteNonNegative(completion?.usage?.completionTokens) !== undefined
+      ? { completionTokens: finiteNonNegative(completion?.usage?.completionTokens) }
+      : {}),
+    ...(responseDiagnostics?.finalTextBytes !== undefined
+      ? { contentBytes: responseDiagnostics.finalTextBytes }
+      : completion && typeof completion.text === "string"
+        ? { contentBytes: Buffer.byteLength(completion.text, "utf8") }
+        : {}),
+    ...(responseDiagnostics?.reasoningContentBytes !== undefined
+      ? { reasoningContentBytes: responseDiagnostics.reasoningContentBytes }
+      : {}),
+    ...(responseDiagnostics?.reasoningHash
+      ? { reasoningHash: responseDiagnostics.reasoningHash }
+      : {}),
+    ...(completion && typeof completion.text === "string"
+      ? { contentHash: `sha256:${sha256Text(completion.text)}` }
+      : {}),
+    ...(input.status.failureClass ? { failureClass: input.status.failureClass } : {}),
+  };
+  return capture;
+}
+
+function providerFailureCaptureForCompletion(
+  completion: Awaited<ReturnType<typeof completeChat>>,
+  options: ThoughtCompleteOptions,
+  status: ThoughtProviderCaptureStatus,
+): ThoughtProviderFailureCapture {
+  const attempt = terminalModelAttempt(completion.modelFabric);
+  const dispatchTruth: ThoughtProviderFailureCapture["dispatchTruth"] =
+    attempt?.dispatchTruth === "not_sent" ? "not_sent" : "sent";
+  return providerFailureCapture({
+    completion,
+    options,
+    dispatchTruth,
+    status,
+  });
+}
+
+function providerFailureCaptureForError(
+  error: unknown,
+  options: ThoughtCompleteOptions,
+): ThoughtProviderFailureCapture {
+  const metadata = metadataFromError(error);
+  const attempt = terminalModelAttempt(metadata);
+  const dispatchTruth: ThoughtProviderFailureCapture["dispatchTruth"] =
+    attempt?.dispatchTruth === "not_sent"
+      ? "not_sent"
+      : attempt?.dispatchTruth === "sent_outcome_unknown" || attempt?.dispatchTruth === "response_received"
+        ? "sent"
+        : "unknown";
+  return providerFailureCapture({
+    metadata,
+    options,
+    dispatchTruth,
+    status: {
+      parserStatus: "not_run",
+      validatorStatus: "not_run",
+      failureClass: metadata?.failure?.sanitizedCauseClass ?? safeFailureClass(error),
+      structuralRetryStatus: "not_applicable",
+    },
+  });
 }
 
 function thoughtMessages(
@@ -701,6 +928,7 @@ export async function runThoughtModel(
   let semanticProjectionHash: string | undefined;
   let dispatchMessagesHash: string | undefined;
   let completionInputTokens: number | undefined;
+  let lastCompletion: Awaited<ReturnType<typeof completeChat>> | undefined;
 
   try {
     if ("rawConversation" in input && input.retrieval && Array.isArray(input.retrieval.hits)) {
@@ -779,6 +1007,7 @@ export async function runThoughtModel(
       dispatchOptions,
       deps.completeChat,
     );
+    lastCompletion = completion;
     completionInputTokens = completion.usage?.promptTokens ?? estimatedInputTokens;
     if (options.signal?.aborted) {
       return {
@@ -831,6 +1060,16 @@ export async function runThoughtModel(
         malformed: true,
         structuralFeedback,
         inputTokens: completion.usage?.promptTokens ?? estimatedInputTokens,
+        providerFailureCapture: providerFailureCaptureForCompletion(
+          completion,
+          dispatchOptions,
+          {
+            parserStatus: "failed",
+            validatorStatus: "not_run",
+            failureClass: semanticResult.code,
+            structuralRetryStatus: "not_scheduled",
+          },
+        ),
       };
     }
     const semantic = semanticResult.value;
@@ -854,6 +1093,16 @@ export async function runThoughtModel(
         requestId,
         correctionScopeViolation: correctionValidation.violation,
         inputTokens: completion.usage?.promptTokens ?? estimatedInputTokens,
+        providerFailureCapture: providerFailureCaptureForCompletion(
+          completion,
+          dispatchOptions,
+          {
+            parserStatus: "passed",
+            validatorStatus: "failed",
+            failureClass: correctionValidation.violation.code,
+            structuralRetryStatus: "not_scheduled",
+          },
+        ),
       };
     }
     const kernelEnvelope = completion.capturedAttemptIdentity
@@ -984,11 +1233,26 @@ export async function runThoughtModel(
         requestId,
         malformed: true,
         inputTokens: completionInputTokens,
+        ...(lastCompletion
+          ? {
+              providerFailureCapture: providerFailureCaptureForCompletion(
+                lastCompletion,
+                dispatchOptions,
+                {
+                  parserStatus: "passed",
+                  validatorStatus: "failed",
+                  failureClass: error.code,
+                  structuralRetryStatus: "not_scheduled",
+                },
+              ),
+            }
+          : {}),
       };
     }
     if (!cancelled && deps.observabilityDb) {
       try {
         const mfMeta = metadataFromError(error);
+        const providerCapture = providerFailureCaptureForError(error, dispatchOptions);
         if (mfMeta && mfMeta.failoverSuppressed === "transport_failover_unavailable_for_projection") {
           const receipt = mfMeta.receipt;
           const resolvedReceipt = receipt && receipt.receiptStage === "resolved" ? receipt : null;
@@ -1013,6 +1277,7 @@ export async function runThoughtModel(
             fallbackAttemptOrdinal: 2,
             fallbackFromAttemptId: primaryAttemptId,
             secondaryDispatchTruth: "not_sent",
+            providerFailure: providerCapture,
             createdAtMs: deps.nowMs(),
           });
         } else if ((error as { code?: string })?.code === "request_exceeds_tpm_budget") {
@@ -1026,6 +1291,20 @@ export async function runThoughtModel(
             dispatchTruth: "not_sent",
             semanticProjectionHash,
             dispatchMessagesHash,
+            createdAtMs: deps.nowMs(),
+          });
+        } else if (providerCapture.dispatchTruth !== "not_sent") {
+          recordDiagnostic(deps.observabilityDb, {
+            cycleId: input.cycleId,
+            generation: input.generation,
+            requestId,
+            pass,
+            code: "provider_unavailable",
+            stage: "provider_dispatch",
+            dispatchTruth: providerCapture.dispatchTruth,
+            semanticProjectionHash,
+            dispatchMessagesHash,
+            providerFailure: providerCapture,
             createdAtMs: deps.nowMs(),
           });
         }
@@ -1608,6 +1887,25 @@ export async function runCognitiveCycle(
     }
 
     if (invocation.correctionScopeViolation) {
+      if (deps.observabilityDb && invocation.providerFailureCapture) {
+        try {
+          recordDiagnostic(deps.observabilityDb, {
+            cycleId: cycle.cycleId,
+            generation: cycle.generation,
+            requestId: invocation.output.requestId,
+            pass,
+            code: "parser_malformed",
+            stage: "parser",
+            dispatchTruth: invocation.providerFailureCapture.dispatchTruth,
+            semanticProjectionHash: allocated.hashes.semanticProjectionHash,
+            dispatchMessagesHash: allocated.hashes.dispatchMessagesHash,
+            providerFailure: invocation.providerFailureCapture,
+            createdAtMs: deps.nowMs(),
+          });
+        } catch {
+          // Observability persistence must not change the terminal outcome.
+        }
+      }
       return emitFailure(invocation.correctionScopeViolation.code);
     }
 
@@ -1620,6 +1918,14 @@ export async function runCognitiveCycle(
           field: invocation.output.kind === "failure" ? invocation.output.diagnosticField : undefined,
           allowlistedReferences: semanticReferencesForInput(allocated.projected),
         });
+      const retryScheduled =
+        structuralRetriesForPass < 2 && counters.thoughtModelAttempts < MAX_THOUGHT_MODEL_ATTEMPTS;
+      const providerFailure = invocation.providerFailureCapture
+        ? {
+            ...invocation.providerFailureCapture,
+            structuralRetryStatus: retryScheduled ? "scheduled" as const : "exhausted" as const,
+          }
+        : undefined;
       if (deps.observabilityDb) {
         try {
           recordDiagnostic(deps.observabilityDb, {
@@ -1629,16 +1935,17 @@ export async function runCognitiveCycle(
             pass,
             code: "parser_malformed",
             stage: "parser",
-            dispatchTruth: "not_sent",
+            dispatchTruth: providerFailure?.dispatchTruth ?? "unknown",
             semanticProjectionHash: allocated.hashes.semanticProjectionHash,
             dispatchMessagesHash: allocated.hashes.dispatchMessagesHash,
+            providerFailure,
             createdAtMs: deps.nowMs(),
           });
         } catch {
           // ignore
         }
       }
-      if (structuralRetriesForPass < 2 && counters.thoughtModelAttempts < MAX_THOUGHT_MODEL_ATTEMPTS) {
+      if (retryScheduled) {
         structuralRetriesForPass += 1;
         incrementThoughtAttemptCounter(sidecar, cycle.cycleId, cycle.generation, "structuralRetries");
         continue;

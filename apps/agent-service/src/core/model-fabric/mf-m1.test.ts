@@ -246,7 +246,8 @@ describe("MF-M1 completeChat receipts", () => {
         deadlineAtMs: Date.now() + 60_000,
       },
     ));
-    const receipt = fabricMetadata(result).receipt;
+    const metadata = fabricMetadata(result);
+    const receipt = metadata.receipt;
 
     expect(receipt.attempts).toHaveLength(1);
     expect(receipt.finalDispatchedRouteId).toBe("thought");
@@ -259,6 +260,19 @@ describe("MF-M1 completeChat receipts", () => {
       providerRequestCount: 1,
     });
     expect(receipt.attempts[0]?.dispatchTruth).toBe("response_received");
+    expect(result.providerBoundaryControls).toMatchObject({
+      maxTokens: expect.any(Number),
+      reasoningConfiguration: expect.any(String),
+      deadlineAtMs: expect.any(Number),
+    });
+    expect(result.providerBoundaryTiming).toMatchObject({
+      requestStartedAtMs: expect.any(Number),
+      responseAtMs: expect.any(Number),
+      elapsedMs: expect.any(Number),
+      outcome: "response_received",
+    });
+    expect(metadata.providerBoundaryControls).toEqual(result.providerBoundaryControls);
+    expect(metadata.providerBoundaryTiming).toEqual(result.providerBoundaryTiming);
     expect(dispatch).toHaveBeenCalledTimes(1);
     database.close();
   });
@@ -375,6 +389,15 @@ describe("MF-M1 completeChat receipts", () => {
     expect(metadata.failure).toMatchObject({
       code: "provider_quota",
       dispatchTruth: "response_received",
+    });
+    expect(metadata.providerBoundaryControls).toMatchObject({
+      maxTokens: expect.any(Number),
+    });
+    expect(metadata.providerBoundaryTiming).toMatchObject({
+      requestStartedAtMs: expect.any(Number),
+      responseAtMs: expect.any(Number),
+      elapsedMs: expect.any(Number),
+      outcome: "error",
     });
     expect(dispatch).toHaveBeenCalledTimes(1);
     database.close();

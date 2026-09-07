@@ -42,6 +42,8 @@ import {
   type CompletionOptions,
   type MistralCredentialSeat,
   type ProviderResponseDiagnostics,
+  type ProviderBoundaryControls,
+  type ProviderBoundaryTiming,
 } from "./core/model-routing/types.js";
 import {
   attachModelFabricMetadata,
@@ -366,6 +368,29 @@ function observedHttpStatus(error: unknown): number | null {
   return null;
 }
 
+function attachProviderBoundaryFact(
+  error: unknown,
+  key: "providerBoundaryControls" | "providerBoundaryTiming",
+  value: ProviderBoundaryControls | ProviderBoundaryTiming,
+): void {
+  if (!error || (typeof error !== "object" && typeof error !== "function")) return;
+  Object.defineProperty(error, key, {
+    configurable: true,
+    enumerable: false,
+    value,
+    writable: true,
+  });
+}
+
+function providerBoundaryFactFromError<T>(
+  error: unknown,
+  key: "providerBoundaryControls" | "providerBoundaryTiming",
+): T | undefined {
+  if (!error || typeof error !== "object") return undefined;
+  const value = (error as Record<string, unknown>)[key];
+  return value && typeof value === "object" ? value as T : undefined;
+}
+
 function combineSignals(
   signal: AbortSignal | undefined,
   deadlineAtMs: number | null | undefined,
@@ -390,10 +415,13 @@ export async function completeChat(
   model: string;
   modelAlias: string;
   resolvedModelId: string | null;
+  providerModel?: string | null;
   toolCalls?: ToolCallResult[];
   usage?: TokenUsage;
   finishReason?: string | null;
   responseDiagnostics?: ProviderResponseDiagnostics;
+  providerBoundaryControls?: ProviderBoundaryControls;
+  providerBoundaryTiming?: ProviderBoundaryTiming;
   attentionRequestId?: number;
   acceptedDispatchIdentity?: AcceptedDispatchIdentity;
   /** Exact Thought attempt identity returned by the Attention/Model Fabric bind. */
@@ -760,6 +788,20 @@ export async function completeChat(
       credentialSeat,
     );
     const attempt = attemptContext.attempt;
+    const providerBoundaryControls: ProviderBoundaryControls = {
+      maxTokens: dispatchContract.maxTokens,
+      ...(attemptContext.effectiveReasoning
+        ? { reasoningConfiguration: attemptContext.effectiveReasoning }
+        : attemptContext.requestedWireReasoning
+          ? { reasoningConfiguration: attemptContext.requestedWireReasoning }
+          : {}),
+      ...(options.temperature !== undefined
+        ? { temperature: options.temperature }
+        : {}),
+      ...(options.deadlineAtMs != null
+        ? { deadlineAtMs: options.deadlineAtMs }
+        : {}),
+    };
     if (privateBudgetBinding && !privateBudgetBound) {
       bindPrivateReservationInvocation(privateBudgetBinding.sidecar, {
         reservationId: privateBudgetBinding.reservationId,
@@ -778,6 +820,7 @@ export async function completeChat(
         400,
       );
     }
+    let providerBoundaryTiming: ProviderBoundaryTiming | undefined;
     try {
       const result = await runAttentiveDispatch<{
         text: string;
@@ -787,6 +830,8 @@ export async function completeChat(
         finishReason?: string | null;
         responseDiagnostics?: ProviderResponseDiagnostics;
         wireEvidence?: WireDispatchEvidence;
+        providerBoundaryControls?: ProviderBoundaryControls;
+        providerBoundaryTiming?: ProviderBoundaryTiming;
       }>(attentionDb, {
         messages,
         purpose: mapped.purpose,
@@ -831,6 +876,7 @@ export async function completeChat(
           : {}),
         dispatch: async ({ modelAlias: alias, signal }) => {
           const merged = combineSignals(signal, options.deadlineAtMs);
+          const requestStartedAtMs = Date.now();
           const adapter = adapterFor(targetProvider);
           attempt.markDispatchAttempted();
           if (privateBudgetBinding && !privateBudgetCommitted) {
@@ -863,6 +909,16 @@ export async function completeChat(
               credentialSeat,
               signal: merged,
             });
+            const responseAtMs = Date.now();
+            providerBoundaryTiming = Object.freeze({
+              requestStartedAtMs,
+              responseAtMs,
+              elapsedMs: Math.max(0, responseAtMs - requestStartedAtMs),
+              ...(options.deadlineAtMs != null
+                ? { remainingDeadlineMs: Math.max(0, options.deadlineAtMs - responseAtMs) }
+                : {}),
+              outcome: "response_received" as const,
+            });
             attempt.markProviderResponse({
               resolvedModelId: completion.providerModel ?? null,
               finishReason: completion.finishReason ?? null,
@@ -887,9 +943,23 @@ export async function completeChat(
                 finishReason: completion.finishReason ?? null,
                 responseDiagnostics: completion.responseDiagnostics,
                 wireEvidence: completion.wireEvidence,
+                providerBoundaryControls,
+                providerBoundaryTiming,
               },
             };
           } catch (err) {
+            const responseAtMs = Date.now();
+            providerBoundaryTiming = Object.freeze({
+              requestStartedAtMs,
+              responseAtMs,
+              elapsedMs: Math.max(0, responseAtMs - requestStartedAtMs),
+              ...(options.deadlineAtMs != null
+                ? { remainingDeadlineMs: Math.max(0, options.deadlineAtMs - responseAtMs) }
+                : {}),
+              outcome: "error" as const,
+            });
+            attachProviderBoundaryFact(err, "providerBoundaryControls", providerBoundaryControls);
+            attachProviderBoundaryFact(err, "providerBoundaryTiming", providerBoundaryTiming);
             if (err instanceof Error && err.name === "AbortError") {
               attempt.markFailure("AbortError");
               throw err;
@@ -921,6 +991,8 @@ export async function completeChat(
                       : targetProvider === "opencode_zen"
                         ? mapZenError(err)
                       : err;
+              attachProviderBoundaryFact(mappedError, "providerBoundaryControls", providerBoundaryControls);
+              attachProviderBoundaryFact(mappedError, "providerBoundaryTiming", providerBoundaryTiming);
               attempt.markFailure(errorClassFor(mappedError));
               throw mappedError;
             } catch (mappedError) {
@@ -944,6 +1016,10 @@ export async function completeChat(
           "mistral_model_identity_mismatch",
           502,
         );
+        if (providerBoundaryTiming) {
+          attachProviderBoundaryFact(identityError, "providerBoundaryControls", providerBoundaryControls);
+          attachProviderBoundaryFact(identityError, "providerBoundaryTiming", providerBoundaryTiming);
+        }
         attempt.markFailure(identityError.code);
         throw identityError;
       }
@@ -1015,6 +1091,10 @@ export async function completeChat(
         ...(capabilityIdentity ? { capabilityIdentity } : {}),
       };
     } catch (error) {
+      if (providerBoundaryTiming) {
+        attachProviderBoundaryFact(error, "providerBoundaryControls", providerBoundaryControls);
+        attachProviderBoundaryFact(error, "providerBoundaryTiming", providerBoundaryTiming);
+      }
       attempt.markFailure(errorClassFor(error));
       throw error;
     }
@@ -1101,6 +1181,12 @@ export async function completeChat(
           : options.modelFallbackChain?.fallbackClass ?? "none",
       ),
       ...(inner.wireEvidence ? { wireEvidence: inner.wireEvidence } : {}),
+      ...(inner.providerBoundaryControls
+        ? { providerBoundaryControls: inner.providerBoundaryControls }
+        : {}),
+      ...(inner.providerBoundaryTiming
+        ? { providerBoundaryTiming: inner.providerBoundaryTiming }
+        : {}),
       ...(capabilityIdentity ? { capabilityIdentity } : {}),
     };
     return {
@@ -1108,10 +1194,13 @@ export async function completeChat(
       model: attentive.modelAlias,
       modelAlias: attentive.modelAlias,
       resolvedModelId: attentive.resolvedModelId,
+      providerModel: inner.providerModel,
       toolCalls: inner.toolCalls,
       usage: attentive.usage ?? inner.usage,
       finishReason: inner.finishReason ?? null,
       responseDiagnostics: inner.responseDiagnostics,
+      providerBoundaryControls: inner.providerBoundaryControls,
+      providerBoundaryTiming: inner.providerBoundaryTiming,
       attentionRequestId: attentive.requestId,
       acceptedDispatchIdentity: attentive.acceptedDispatchIdentity,
       capturedAttemptIdentity,
@@ -1139,9 +1228,19 @@ export async function completeChat(
       dispatchTruth,
     );
     const existingMeta = metadataFromError(error);
+    const providerBoundaryControls = providerBoundaryFactFromError<ProviderBoundaryControls>(
+      error,
+      "providerBoundaryControls",
+    );
+    const providerBoundaryTiming = providerBoundaryFactFromError<ProviderBoundaryTiming>(
+      error,
+      "providerBoundaryTiming",
+    );
     const metadata: ModelFabricDispatchMetadata = {
       ...last,
       ...existingMeta,
+      ...(providerBoundaryControls ? { providerBoundaryControls } : {}),
+      ...(providerBoundaryTiming ? { providerBoundaryTiming } : {}),
       failure: existingMeta?.failure ?? failure,
     };
     if (privateBudgetBinding) {

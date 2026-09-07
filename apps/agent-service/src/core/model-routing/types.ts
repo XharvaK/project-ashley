@@ -90,12 +90,41 @@ export type ProviderResponseDiagnostics = Readonly<{
   outputTokenLimit: number | null;
   outputTokens: number | null;
   reasoningTokens: number | null;
+  /** Bounded UTF-8 byte length of provider-hidden reasoning, when exposed. */
+  reasoningContentBytes?: number;
+  /** Hash of provider-hidden reasoning, when exposed; reasoning text is never retained. */
+  reasoningHash?: `sha256:${string}`;
   extractionFailure:
     | "none"
     | "unknown_chunk_type"
     | "malformed_chunk"
     | "unsupported_container"
     | "missing_content";
+}>;
+
+/**
+ * Exact timing measured around one provider-adapter invocation. These facts
+ * are diagnostic only and never influence Thought semantics or retry policy.
+ */
+export type ProviderBoundaryTiming = Readonly<{
+  requestStartedAtMs: number;
+  responseAtMs: number;
+  elapsedMs: number;
+  remainingDeadlineMs?: number;
+  outcome: "response_received" | "error";
+}>;
+
+/**
+ * Controls resolved immediately before the provider adapter call. Optional
+ * fields stay absent when the current route does not expose them.
+ */
+export type ProviderBoundaryControls = Readonly<{
+  maxTokens?: number;
+  reasoningConfiguration?: string;
+  reasoningBudgetTokens?: number;
+  temperature?: number;
+  topP?: number;
+  deadlineAtMs?: number;
 }>;
 
 export type ToolDefinition = {

@@ -252,7 +252,71 @@ describe("Thought Diagnostics & Observability DB", () => {
     const completeChat = vi.fn(async (_messages) => {
       calls++;
       if (calls === 1) {
-        return { text: "malformed", model: "fake", modelAlias: "thought", resolvedModelId: null };
+        return {
+          text: "malformed provider payload",
+          model: "fake",
+          modelAlias: "thought",
+          providerModel: "nvidia/nemotron-test",
+          resolvedModelId: "nvidia/nemotron-test",
+          usage: { promptTokens: 17, completionTokens: 9, reasoningTokens: 4 },
+          finishReason: "length",
+          responseDiagnostics: {
+            contentContainerType: "string" as const,
+            contentChunkTypes: [],
+            textChunkCount: 0,
+            thinkingChunkCount: 0,
+            finalTextBytes: Buffer.byteLength("malformed provider payload", "utf8"),
+            finishReason: "length",
+            finishReasonClass: "LENGTH" as const,
+            outputTokenLimit: 128,
+            outputTokens: 9,
+            reasoningTokens: 4,
+            reasoningContentBytes: 31,
+            reasoningHash: "sha256:reasoning-hash",
+            extractionFailure: "none" as const,
+          },
+          providerBoundaryControls: {
+            maxTokens: 128,
+            reasoningConfiguration: "reasoning_effort:high",
+            temperature: 1,
+            deadlineAtMs: 4_000,
+          },
+          providerBoundaryTiming: {
+            requestStartedAtMs: 100,
+            responseAtMs: 140,
+            elapsedMs: 40,
+            remainingDeadlineMs: 3_860,
+            outcome: "response_received" as const,
+          },
+          capturedAttemptIdentity: {
+            allocationId: 9,
+            modelFabricInvocationId: "mf-inv-1",
+            modelFabricAttemptId: "mf-att-1",
+            attemptOrdinal: 1,
+            dispatchSequence: 2,
+            routeAlias: "thought",
+            provider: "nim",
+            configuredModelId: "nvidia/nemotron-test",
+            occupantId: "doc",
+            modelEpoch: 1,
+            contractId: "contract-v2",
+            buildIdentity: "build-test",
+            logicalStructuredOutputId: "ashley.thought.semantic.v2",
+            semanticSchemaFingerprint: "sha256:canonical",
+            wireSchemaFingerprint: "sha256:wire",
+            actualWireBindingId: "binding-test",
+            schemaEnforcementMode: "guided_json",
+            resourcePolicyFingerprint: "sha256:resource",
+          },
+          wireEvidence: {
+            adapterId: "ashley.adapter.nim.v1",
+            wireFormat: "nim_guided_json",
+            sanitizedBodyDigest: "sha256:wire-body",
+            emittedEnforcementMode: "guided_json",
+            providerDeclaredEnforcement: "unavailable",
+            bindingId: "binding-test",
+          },
+        };
       }
       return {
         text: JSON.stringify(makeSemanticSettlement()),
@@ -323,6 +387,43 @@ describe("Thought Diagnostics & Observability DB", () => {
       expect(diagnostics.length).toBe(1);
       expect(diagnostics[0].code).toBe("parser_malformed");
       expect(diagnostics[0].cycleId).toBe("cycle-obs-real");
+      expect(diagnostics[0].dispatchTruth).toBe("sent");
+      expect(diagnostics[0].providerFailure).toMatchObject({
+        provider: "nim",
+        model: "nvidia/nemotron-test",
+        providerModel: "nvidia/nemotron-test",
+        modelFabricInvocationId: "mf-inv-1",
+        modelFabricAttemptId: "mf-att-1",
+        attemptOrdinal: 1,
+        dispatchSequence: 2,
+        canonicalSchemaFingerprint: "sha256:canonical",
+        wireSchemaFingerprint: "sha256:wire",
+        wireBindingId: "binding-test",
+        wireFormat: "nim_guided_json",
+        wireBodyDigest: "sha256:wire-body",
+        maxTokens: 128,
+        reasoningConfiguration: "reasoning_effort:high",
+        temperature: 1,
+        deadlineAtMs: 4_000,
+        requestStartedAtMs: 100,
+        responseAtMs: 140,
+        elapsedMs: 40,
+        remainingDeadlineMs: 3_860,
+        finishReason: "length",
+        inputTokens: 17,
+        completionTokens: 9,
+        contentBytes: Buffer.byteLength("malformed provider payload", "utf8"),
+        reasoningContentBytes: 31,
+        reasoningHash: "sha256:reasoning-hash",
+        parserStatus: "failed",
+        validatorStatus: "not_run",
+        failureClass: "invalid_json",
+        structuralRetryStatus: "scheduled",
+      });
+      const storedProviderFailure = obsDb.prepare(
+        "SELECT provider_failure_json FROM thought_dispatch_diagnostics WHERE code = 'parser_malformed'",
+      ).get() as { provider_failure_json: string };
+      expect(storedProviderFailure.provider_failure_json).not.toContain("malformed provider payload");
       expect(diagnostics[0].cycleMetrics).toMatchObject({
         first_pass_total_input_tokens: expect.any(Number),
         total_cycle_input_tokens_including_retries: expect.any(Number),
@@ -498,6 +599,21 @@ describe("Thought Diagnostics & Observability DB", () => {
       expect(suppressedDiag?.quotaBucket).toBe("groq:openai/gpt-oss-20b");
       expect(suppressedDiag?.semanticProjectionHash).toBe("test-sem-hash-123");
       expect(suppressedDiag?.dispatchMessagesHash).toBe("test-msg-hash-123");
+      expect(suppressedDiag?.providerFailure).toMatchObject({
+        provider: "nim",
+        model: "meta/llama-3.3-70b-instruct",
+        modelFabricInvocationId: "inv-suppress-1",
+        modelFabricAttemptId: "att-primary-123",
+        dispatchTruth: "sent",
+        parserStatus: "not_run",
+        validatorStatus: "not_run",
+        failureClass: "transport_error",
+        structuralRetryStatus: "not_applicable",
+      });
+      expect(suppressedDiag?.providerFailure).not.toHaveProperty("inputTokens");
+      expect(suppressedDiag?.providerFailure).not.toHaveProperty("completionTokens");
+      expect(suppressedDiag?.providerFailure).not.toHaveProperty("finishReason");
+      expect(suppressedDiag?.providerFailure).not.toHaveProperty("requestStartedAtMs");
     } finally {
       obsDb.close();
       sidecar.close();
@@ -582,6 +698,28 @@ describe("Thought Diagnostics & Observability DB", () => {
     } finally {
       sidecar.close();
       attentionDb.close();
+    }
+  });
+
+  it("does not create a provider forensic payload for a healthy return", () => {
+    const obs = openObservabilityStore(":memory:");
+    try {
+      obs.recordDiagnostic({
+        cycleId: "cycle-healthy-provider",
+        generation: 1,
+        requestId: "req-healthy-provider",
+        pass: 1,
+        code: "provider_returned",
+        stage: "provider_dispatch",
+        dispatchTruth: "sent",
+      });
+      const raw = obs.db.prepare(
+        "SELECT provider_failure_json FROM thought_dispatch_diagnostics WHERE request_id = ?",
+      ).get("req-healthy-provider") as { provider_failure_json: string | null };
+      expect(raw.provider_failure_json).toBeNull();
+      expect(obs.listDiagnostics()[0].providerFailure).toBeNull();
+    } finally {
+      obs.close();
     }
   });
 });

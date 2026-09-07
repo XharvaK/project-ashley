@@ -510,5 +510,9 @@ export type ModelFabricDispatchMetadata = {
   suppressedProvider?: string;
   suppressedBucket?: string;
   wireEvidence?: import("../model-routing/types.js").WireDispatchEvidence;
+  /** Bounded controls resolved immediately before the adapter call. */
+  providerBoundaryControls?: import("../model-routing/types.js").ProviderBoundaryControls;
+  /** Timing measured around the adapter call. */
+  providerBoundaryTiming?: import("../model-routing/types.js").ProviderBoundaryTiming;
   capabilityIdentity?: import("./capability-identity.js").ThoughtCapabilityIdentity;
 };
