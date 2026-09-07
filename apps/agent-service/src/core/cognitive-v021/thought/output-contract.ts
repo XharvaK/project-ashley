@@ -263,16 +263,16 @@ function cloneSchema(schema: Readonly<Record<string, unknown>>): SchemaRecord {
   return JSON.parse(JSON.stringify(schema)) as SchemaRecord;
 }
 
-function settlementOperationalSchema(schema: SchemaRecord): SchemaRecord {
+function settlementCommitmentsSchema(schema: SchemaRecord): SchemaRecord {
   const branches = Array.isArray(schema.oneOf) ? schema.oneOf : [];
   const settlement = branches
     .map((branch) => record(branch))
     .find((branch) => valueDescription(property(branch, "kind")) === JSON.stringify("settlement"));
-  const operational = property(property(settlement, "commitments"), "operational");
-  if (!settlement || Object.keys(operational).length === 0) {
-    throw new Error("thought_schema_operational_shape_missing");
+  const commitments = property(settlement, "commitments");
+  if (!settlement || Object.keys(commitments).length === 0) {
+    throw new Error("thought_schema_commitments_shape_missing");
   }
-  return operational;
+  return commitments;
 }
 
 /**
@@ -312,10 +312,16 @@ export function constrainThoughtOutputSchema(
 ): ConstrainedThoughtOutputSchema {
   const schema = cloneSchema(THOUGHT_OUTPUT_SCHEMA);
   applyExperimentalWireBounds(schema);
-  const operational = settlementOperationalSchema(schema);
+  const commitments = settlementCommitmentsSchema(schema);
+  const operational = property(commitments, "operational");
+  if (Object.keys(operational).length === 0) {
+    throw new Error("thought_schema_operational_shape_missing");
+  }
   const refs = [...namespace.allowedOperationalEffectRefs];
   if (refs.length === 0) {
-    operational.maxItems = 0;
+    // NIM rejects the otherwise truthful zero-cardinality operational array.
+    // Strict commitments still reject the property if a model attempts it.
+    delete record(commitments.properties).operational;
   } else {
     delete operational.maxItems;
     const items = record(operational.items);

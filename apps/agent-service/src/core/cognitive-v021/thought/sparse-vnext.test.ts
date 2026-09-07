@@ -118,7 +118,7 @@ describe("Sparse VNext fresh authoring", () => {
     const wire = constrainThoughtOutputSchema({ allowedOperationalEffectRefs: [], fingerprint: "sha256:test" } as any).schema as any;
     expect(wire.oneOf[0].properties.speech.oneOf.find((b: any) => b.properties.mode.const === "draft").properties.surfaceDraft.maxLength).toBe(6000);
     expect(canonical.oneOf[0].properties.speech.oneOf.find((b: any) => b.properties.mode.const === "draft").properties.surfaceDraft.maxLength).toBeUndefined();
-    expect(wire.oneOf[0].properties.commitments.properties.operational).toMatchObject({ minItems: 1, maxItems: 0 });
+    expect(wire.oneOf[0].properties.commitments.properties.operational).toBeUndefined();
   });
 
   it("validates and licenses ordinary sparse speech while retaining high-risk guards", () => {

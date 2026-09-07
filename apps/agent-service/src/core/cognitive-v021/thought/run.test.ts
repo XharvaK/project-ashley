@@ -86,7 +86,7 @@ describe("v0.2.1 Thought run", () => {
         const operationalSchema = (options.structuredOutput?.schema as any)?.oneOf?.find(
           (branch: any) => branch.properties?.kind?.const === "settlement",
         )?.properties?.commitments?.properties?.operational;
-        expect(operationalSchema?.maxItems).toBe(0);
+        expect(operationalSchema).toBeUndefined();
         expect(JSON.parse(messages[1]?.content ?? "{}").allowedOperationalEffectRefs).toEqual([]);
         requests.push({ messages, deadline: options.deadlineAtMs });
         now = outcome === "deadline" ? 61_000 : now + 10_000;

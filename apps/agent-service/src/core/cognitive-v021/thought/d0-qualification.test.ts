@@ -495,7 +495,7 @@ describe("Core D0 local Sparse VNext qualification", () => {
     const constrained = constrainThoughtOutputSchema(buildOperationalEffectNamespaceFromRefs([]));
     const settlementBranch = (constrained.schema.oneOf as Array<Record<string, any>>).find((branch) => branch.properties?.kind?.const === "settlement")!;
     const operational = settlementBranch.properties.commitments.properties.operational;
-    expect(operational.maxItems).toBe(0);
+    expect(operational).toBeUndefined();
     expect(validateQualificationSchema({ kind: "settlement", speech: { mode: "none" }, commitments: { conversational: ["acknowledge"] } }, constrained.schema)).toMatchObject({ ok: true });
     expect(validateQualificationSchema({ kind: "settlement", speech: { mode: "none" }, commitments: { operational: [{ effectRef: "effect:invented", claimedState: "succeeded" }] } }, constrained.schema)).toMatchObject({ ok: false });
     const materialized = makeThoughtDraft({ commitments: { conversational: ["acknowledge"] }, operations: { observationsConsumed: [], effectsCompleted: [], intentsStillInFlight: [] } });

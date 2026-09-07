@@ -51,7 +51,10 @@ describe("finite operational effect namespace constraints", () => {
 
     expect(JSON.stringify(THOUGHT_OUTPUT_SCHEMA)).toBe(canonicalBefore);
     expect(THOUGHT_OUTPUT_SCHEMA_FINGERPRINT).toMatch(/^sha256:[0-9a-f]{64}$/);
-    expect(operationalSchema(constrained.schema)).toMatchObject({ maxItems: 0 });
+    const settlementBranch = (constrained.schema.oneOf as SchemaRecord[]).find(
+      (branch) => branch.properties?.kind?.const === "settlement",
+    );
+    expect(settlementBranch?.properties?.commitments?.properties?.operational).toBeUndefined();
     expect(constrained.namespaceConstraintFingerprint).toBe(namespace.fingerprint);
     expect(constrained.wireSchemaFingerprint).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(constrained.wireSchemaFingerprint).not.toBe(THOUGHT_OUTPUT_SCHEMA_FINGERPRINT);
@@ -142,7 +145,7 @@ describe("finite operational effect namespace constraints", () => {
 
     expect(body.response_format.json_schema.schema).toEqual(request.schema);
     expect(body.response_format.json_schema.schema.oneOf[0].properties.commitments.properties.operational)
-      .toMatchObject({ maxItems: 0 });
+      .toBeUndefined();
 
     const nonEmptyRequest = thoughtOutputStructuredRequest(
       buildOperationalEffectNamespaceFromRefs(["effect:A", "effect:B"]),

@@ -71,6 +71,13 @@ describe("v0.2.1 ThoughtSettlementDraft validation", () => {
     const activeWithAllowlist = { ...active, effectAllowlist: new Set(["effect:valid"]) };
     expect(validateThoughtSettlementDraft(validDraft, activeWithAllowlist)).toMatchObject({ ok: true });
 
+    // An empty Host-owned namespace rejects every operational claim.
+    expect(validateThoughtSettlementDraft(validDraft, { ...active, effectAllowlist: new Set<string>() })).toMatchObject({
+      ok: false,
+      kind: "conflict",
+      error: "OPERATIONAL_CLAIM_EFFECTREF_UNKNOWN",
+    });
+
     // Unknown effectRef outside allowlist fails closed
     const unknownDraft = makeThoughtDraft({
       commitments: {
