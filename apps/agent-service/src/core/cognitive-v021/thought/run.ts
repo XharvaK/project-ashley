@@ -94,6 +94,7 @@ import {
 import { validateThoughtSettlementDraft } from "../settlement/validate.js";
 import { getPublishedSettlementIdentity, publishSemanticTransaction } from "../settlement/publish.js";
 import { getWake } from "../wake/ledger.js";
+import { resolveOriginProfile } from "../cycle/origin-profile.js";
 import { admitOwnerSuppliedClaim, runGovernedAdmissionCatchup } from "../memory/admission.js";
 import { hasStructuredCurrentnessEntitlement } from "../authority/check.js";
 import { recordDiagnostic, recordThoughtCycleMetrics } from "./diagnostics.js";
@@ -1500,13 +1501,14 @@ function deliveryIntentFor(
   cycle: { conversationId: string; triggerKind: CycleTriggerKind },
   payload: Record<string, unknown>,
   purpose: DeliveryIntent["purpose"],
+  triggerKind = cycle.triggerKind,
 ): DeliveryIntent {
   const trigger: DeliveryIntent["trigger"] =
-    cycle.triggerKind === "idle_opportunity" ? "idle" :
-      cycle.triggerKind === "subscription_item" ? "subscription" :
-        cycle.triggerKind === "future_trigger_due" ? "future_trigger" :
-          cycle.triggerKind === "recovery" ? "recovery" :
-            cycle.triggerKind === "observation_or_receipt" ? "operation_completion" :
+    triggerKind === "idle_opportunity" ? "idle" :
+      triggerKind === "subscription_item" ? "subscription" :
+        triggerKind === "future_trigger_due" ? "future_trigger" :
+          triggerKind === "recovery" ? "recovery" :
+            triggerKind === "observation_or_receipt" ? "operation_completion" :
               "owner_message_reactive";
   const ownerId = typeof payload.ownerId === "string" && payload.ownerId.trim()
     ? payload.ownerId
@@ -1722,6 +1724,8 @@ export async function runCognitiveCycle(
       authorityEpoch: typeof payload.authorityEpoch === "number" ? payload.authorityEpoch : 1,
       nowMs: deps.nowMs(),
     });
+  const originProfile = resolveOriginProfile(sidecar, event, cycle);
+  if (!originProfile) throw new Error("origin_profile_unavailable");
   let triggerEvidence = typeof payload.evidenceRowId === "string"
     ? getConversationEvidence(sidecar, payload.evidenceRowId)
     : null;
@@ -1760,8 +1764,8 @@ export async function runCognitiveCycle(
       reason,
       failureCode,
       origin: deps.origin,
-      trigger: deliveryIntentFor(admittedCycle, payload, "system_notice").trigger,
-      deliveryLane: deliveryIntentFor(admittedCycle, payload, "system_notice").deliveryLane,
+      trigger: deliveryIntentFor(admittedCycle, payload, "system_notice", originProfile.triggerKind).trigger,
+      deliveryLane: deliveryIntentFor(admittedCycle, payload, "system_notice", originProfile.triggerKind).deliveryLane,
     });
     // The infrastructure notice is primary terminal output. C3 is a bounded,
     // fail-soft derived projection and never changes the terminal result.
@@ -1848,6 +1852,7 @@ export async function runCognitiveCycle(
         const input = buildThoughtInput({
           sidecar,
           cycle,
+          triggerKindOverride: originProfile.triggerKind,
           triggerText: ownerMessage,
           triggerEvidence,
           constitution: deps.constitution,
@@ -2271,7 +2276,7 @@ export async function runCognitiveCycle(
       triggerKind: cycle.triggerKind,
       fidelity: validation.draft.speech.mode === "draft" ? "passed" : "skipped",
       origin: deps.origin,
-      deliveryIntent: deliveryIntentFor(cycle, payload, "licensed_speech"),
+      deliveryIntent: deliveryIntentFor(cycle, payload, "licensed_speech", originProfile.triggerKind),
       authorityDb: authorityDbForPacks(deps, packs),
       expectedCurrentness: invocation.kernelEnvelope?.authorityCurrentness ?? packs.currentness.binding,
       currentness: currentnessPack,

@@ -80,7 +80,8 @@ function triggerKindForInbox(kind: string): CycleTriggerKind {
   if (kind === "future_trigger_due") return "future_trigger_due";
   if (kind === "idle_opportunity") return "idle_opportunity";
   if (kind === "subscription_item") return "subscription_item";
-  if (kind === "recovery" || kind === "observation_or_receipt") return "recovery";
+  if (kind === "observation_or_receipt") return "observation_or_receipt";
+  if (kind === "recovery") return "recovery";
   return "owner_message";
 }
 

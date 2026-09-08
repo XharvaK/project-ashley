@@ -83,4 +83,22 @@ describe("v0.2.1 cycle and inbox admission", () => {
       db.close();
     }
   });
+
+  it("keeps observation or receipt events in the Profile B trigger class", () => {
+    const db = openTestSidecar();
+    try {
+      const event = appendInboxEvent(db, {
+        conversationId: "thread-observation",
+        kind: "observation_or_receipt",
+        payload: { observationId: "observation-1" },
+        id: "inbox-observation-1",
+        createdAtMs: 10,
+      });
+      expect(event).toMatchObject({ id: "inbox-observation-1", status: "pending" });
+      expect(db.prepare("SELECT trigger_kind FROM cycle_records WHERE cycle_id = (SELECT cycle_id FROM wakes WHERE wake_id = ?)").get(event.wakeId))
+        .toMatchObject({ trigger_kind: "observation_or_receipt" });
+    } finally {
+      db.close();
+    }
+  });
 });

@@ -76,6 +76,8 @@ export type BuildThoughtInputOptions = {
   c3AdapterEnabled?: boolean;
   staticOperatingContract?: string;
   stableSelfBound?: number;
+  /** Host-derived recovery/profile trigger. It is not a new persisted authority. */
+  triggerKindOverride?: CycleTriggerKind;
 };
 
 export type ThoughtInputWithC2 = ThoughtInput & {
@@ -378,7 +380,7 @@ export function buildThoughtInput(options: BuildThoughtInputOptions): ThoughtInp
     occupantId: options.cycle.occupantId,
     authorityEpoch: options.cycle.authorityEpoch,
     trigger: {
-      kind: options.cycle.triggerKind as CycleTriggerKind,
+      kind: options.triggerKindOverride ?? options.cycle.triggerKind as CycleTriggerKind,
       ref: options.cycle.triggerRef,
     },
     rawConversation,
