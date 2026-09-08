@@ -98,6 +98,10 @@ export type ProviderResponseDiagnostics = Readonly<{
   reasoningContentBytes?: number;
   /** Hash of provider-hidden reasoning, when exposed; reasoning text is never retained. */
   reasoningHash?: `sha256:${string}`;
+  /** UTF-8 bytes of the exact serialized provider request body, when measured. */
+  requestWireBytes?: number;
+  /** Provider-wire bytes outside the logical message text, when measured. */
+  requestWireAdditionalBytes?: number;
   extractionFailure:
     | "none"
     | "unknown_chunk_type"

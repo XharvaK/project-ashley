@@ -72,7 +72,9 @@ import {
   ProjectionCache,
   semanticPassKey,
   hashAuthorityObjections,
+  hashThoughtSourceCurrentness,
 } from "./projection-allocator/cache.js";
+import { captureThoughtSourceCurrentnessFromDb } from "./source-currentness.js";
 import {
   allocateThoughtProjection,
   RequiredOverflowError,
@@ -370,6 +372,12 @@ function providerFailureCapture(input: {
       : {}),
     ...(finiteNonNegative(completion?.usage?.completionTokens) !== undefined
       ? { completionTokens: finiteNonNegative(completion?.usage?.completionTokens) }
+      : {}),
+    ...(finiteNonNegative(responseDiagnostics?.requestWireBytes) !== undefined
+      ? { requestWireBytes: finiteNonNegative(responseDiagnostics?.requestWireBytes) }
+      : {}),
+    ...(finiteNonNegative(responseDiagnostics?.requestWireAdditionalBytes) !== undefined
+      ? { requestWireAdditionalBytes: finiteNonNegative(responseDiagnostics?.requestWireAdditionalBytes) }
       : {}),
     ...(providerHttpStatus !== undefined ? { providerHttpStatus } : {}),
     ...(canonicalUsage?.reasoningTokens !== null
@@ -1828,6 +1836,12 @@ export async function runCognitiveCycle(
       return emitFailure("pass_exhausted");
     }
     const rawConversationIds = listConversationEvidence(sidecar, cycle.conversationId, { limit: 12 }).map((r) => r.rowId);
+    const sourceCurrentness = captureThoughtSourceCurrentnessFromDb(
+      sidecar,
+      deps.attentionDb,
+      cycle.occupantId,
+      cycle.conversationId,
+    );
     const passKey = semanticPassKey({
       cycleId: cycle.cycleId,
       generation: cycle.generation,
@@ -1837,6 +1851,7 @@ export async function runCognitiveCycle(
       authorityObjectionsHash: hashAuthorityObjections(authorityObjections),
       composeLogIds: rawConversationIds,
       rememberDirectivePresent: Boolean(directive),
+      sourceCurrentnessKey: hashThoughtSourceCurrentness(sourceCurrentness),
     });
 
     let allocated: AllocatedThoughtProjection;

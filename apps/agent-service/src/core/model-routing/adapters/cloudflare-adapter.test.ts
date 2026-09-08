@@ -3,6 +3,7 @@ import { env } from "../../../env.js";
 import { AppError } from "../../../errors.js";
 import {
   buildCloudflareRequestBody,
+  cloudflareRequestWireAdditionalBytes,
   cloudflareErrorClassFromBoundary,
   createCloudflareAdapter,
   mapCloudflareError,
@@ -132,6 +133,12 @@ describe("cloudflare-adapter", () => {
     });
     expect(result.text).not.toContain("provider reasoning");
     expect(result.responseDiagnostics?.reasoningContentBytes).toBeGreaterThan(0);
+    expect(result.responseDiagnostics?.requestWireBytes).toBe(
+      Buffer.byteLength(JSON.stringify(body), "utf8"),
+    );
+    expect(result.responseDiagnostics?.requestWireAdditionalBytes).toBe(
+      cloudflareRequestWireAdditionalBytes({ body }),
+    );
   });
 
   it("fails closed for untrusted schema requests", async () => {
@@ -214,5 +221,6 @@ describe("cloudflare-adapter", () => {
     expect(body.max_completion_tokens).toBe(8192);
     expect((body.response_format as { json_schema?: { schema?: unknown } }).json_schema?.schema)
       .toEqual(structuredOutput.schema);
+    expect(cloudflareRequestWireAdditionalBytes({ body })).toBeGreaterThan(0);
   });
 });

@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import type { AuthorityCode } from "../../types.js";
+import type { ThoughtSourceCurrentness } from "../source-currentness.js";
+import { stableJson } from "../../../model-fabric/hash.js";
 
 export type SemanticPassKeyInput = {
   cycleId: string;
@@ -10,6 +12,7 @@ export type SemanticPassKeyInput = {
   authorityObjectionsHash: string;
   composeLogIds: string[];
   rememberDirectivePresent: boolean;
+  sourceCurrentnessKey?: string;
 };
 
 function sha256(text: string): string {
@@ -19,6 +22,12 @@ function sha256(text: string): string {
 export function hashAuthorityObjections(objections: AuthorityCode[]): string {
   if (!objections || objections.length === 0) return "none";
   return sha256([...objections].sort().join(","));
+}
+
+export function hashThoughtSourceCurrentness(
+  currentness: ThoughtSourceCurrentness | undefined,
+): string {
+  return sha256(stableJson(currentness ?? null));
 }
 
 export function semanticPassKey(input: SemanticPassKeyInput): string {
@@ -32,6 +41,7 @@ export function semanticPassKey(input: SemanticPassKeyInput): string {
     input.authorityObjectionsHash,
     sortedLogIds,
     input.rememberDirectivePresent ? "1" : "0",
+    input.sourceCurrentnessKey ?? "none",
   ].join(":");
 }
 

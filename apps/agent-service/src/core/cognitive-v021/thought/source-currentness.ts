@@ -1,6 +1,7 @@
 import { sha256, stableJson } from "../../model-fabric/hash.js";
 import type { DatabaseSync } from "node:sqlite";
 import type { WorkingContextDelta, WorkingContextItem } from "../types.js";
+import { listWorkingContext } from "../evidence/working-context.js";
 
 export type WorkingContextCurrentnessEntry = Readonly<{
   conversationId: string;
@@ -134,6 +135,20 @@ export function captureThoughtSourceCurrentness(
     relationshipOwnerId: ownerId,
     relationshipRevisionHead: relationshipRevisionHead(authorityDb, ownerId),
   });
+}
+
+export function captureThoughtSourceCurrentnessFromDb(
+  sidecar: DatabaseSync,
+  authorityDb: DatabaseSync | undefined,
+  ownerId: string | null,
+  conversationId: string,
+): ThoughtSourceCurrentness {
+  return captureThoughtSourceCurrentness(
+    sidecar,
+    authorityDb,
+    ownerId,
+    listWorkingContext(sidecar, conversationId),
+  );
 }
 
 function currentWorkingContextEntry(

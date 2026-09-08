@@ -62,6 +62,8 @@ export type ThoughtProviderFailureCapture = Readonly<{
   finishReason?: string;
   inputTokens?: number;
   completionTokens?: number;
+  requestWireBytes?: number;
+  requestWireAdditionalBytes?: number;
   providerHttpStatus?: number;
   reasoningTokens?: number;
   cachedInputTokens?: number;
@@ -266,6 +268,8 @@ function providerFailurePayload(
     ["remainingDeadlineMs", "finite"],
     ["inputTokens", "finite"],
     ["completionTokens", "finite"],
+    ["requestWireBytes", "finite"],
+    ["requestWireAdditionalBytes", "finite"],
     ["providerHttpStatus", "integer"],
     ["reasoningTokens", "integer"],
     ["cachedInputTokens", "integer"],
@@ -342,6 +346,7 @@ function parseProviderFailureCapture(value: unknown): ThoughtProviderFailureCapt
       ["requestStartedAtMs", "integer"], ["responseAtMs", "integer"],
       ["elapsedMs", "finite"], ["remainingDeadlineMs", "finite"],
       ["inputTokens", "finite"], ["completionTokens", "finite"],
+      ["requestWireBytes", "finite"], ["requestWireAdditionalBytes", "finite"],
       ["providerHttpStatus", "integer"],
       ["reasoningTokens", "integer"], ["cachedInputTokens", "integer"],
       ["contentBytes", "finite"], ["reasoningContentBytes", "finite"],

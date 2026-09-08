@@ -355,6 +355,24 @@ function buildRequestBody(
   return body;
 }
 
+/**
+ * Count the current Cloudflare request bytes that are not represented by the
+ * logical role/content text or the separately-accounted tools JSON. The
+ * Attention estimator adds its conservative framing overhead exactly once.
+ */
+export function cloudflareRequestWireAdditionalBytes(input: {
+  body: Record<string, unknown>;
+  toolsJson?: string;
+}): number {
+  const bodyWithoutMessages = { ...input.body };
+  delete bodyWithoutMessages.messages;
+  let bytes = Buffer.byteLength(JSON.stringify(bodyWithoutMessages), "utf8");
+  if (input.toolsJson) {
+    bytes = Math.max(0, bytes - Buffer.byteLength(input.toolsJson, "utf8"));
+  }
+  return bytes;
+}
+
 export function buildCloudflareRequestBody(
   messages: ChatMessage[],
   options: CompletionOptions,
@@ -538,6 +556,11 @@ export function createCloudflareAdapter(
         args.fabricReasoning,
         args.fabricStructuredOutput,
       );
+      const requestWireBytes = Buffer.byteLength(JSON.stringify(body), "utf8");
+      const requestWireAdditionalBytes = cloudflareRequestWireAdditionalBytes({
+        body,
+        toolsJson: args.options.tools ? JSON.stringify(args.options.tools) : undefined,
+      });
       const wireEvidence = wireEvidenceFor({
         adapterId: "ashley.adapter.cloudflare.v1",
         body,
@@ -588,6 +611,8 @@ export function createCloudflareAdapter(
           outputTokenLimit: args.options.maxTokens ?? 2048,
           outputTokens: usage?.completionTokens ?? null,
           reasoningTokens: usage?.reasoningTokens ?? null,
+          requestWireBytes,
+          requestWireAdditionalBytes,
           ...(reasoningBytes !== undefined ? { reasoningContentBytes: reasoningBytes } : {}),
           ...(reasoningHash ? { reasoningHash } : {}),
         },

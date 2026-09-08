@@ -25,6 +25,8 @@ import {
 } from "./core/model-routing/adapters/nim-adapter.js";
 import {
   createCloudflareAdapter,
+  buildCloudflareRequestBody,
+  cloudflareRequestWireAdditionalBytes,
   mapCloudflareError,
 } from "./core/model-routing/adapters/cloudflare-adapter.js";
 import {
@@ -817,6 +819,29 @@ export async function completeChat(
       );
     }
     let providerBoundaryTiming: ProviderBoundaryTiming | undefined;
+    const wireAdditionalBytes = targetProvider === "cloudflare"
+      ? cloudflareRequestWireAdditionalBytes({
+          body: buildCloudflareRequestBody(
+            messages,
+            {
+              ...options,
+              model: targetModel,
+              maxTokens: dispatchContract.maxTokens,
+              responseFormat: dispatchContract.responseFormat,
+              reasoningEffort: attemptContext.fabricReasoning
+                ? undefined
+                : completionReasoning(
+                    attemptContext.effectiveReasoning ??
+                      attemptContext.requestedWireReasoning,
+                  ),
+            },
+            targetModel,
+            attemptContext.fabricReasoning,
+            dispatchContract.structuredOutput ?? undefined,
+          ),
+          toolsJson,
+        })
+      : undefined;
     try {
       const result = await runAttentiveDispatch<{
         text: string;
@@ -840,6 +865,7 @@ export async function completeChat(
         modelAlias: targetModel,
         maxTokens: dispatchContract.maxTokens,
         toolsJson,
+        wireAdditionalBytes,
         signal: options.signal,
         deadlineAtMs: options.deadlineAtMs,
         decisionId: options.decisionId,

@@ -28,8 +28,13 @@ import {
   runAttentiveDispatch,
 } from "../../attention/index.js";
 import { estimateRequestTokens } from "../../attention/estimate.js";
+import {
+  buildCloudflareRequestBody,
+  cloudflareRequestWireAdditionalBytes,
+} from "../../model-routing/adapters/cloudflare-adapter.js";
 import { resolveCurrentPolicy } from "../../model-fabric/portfolio.js";
 import { quotaContractFor } from "../../model-routing/router.js";
+import type { ChatMessage } from "../../model-routing/types.js";
 import type {
   CapabilityReality,
   IdentitySlice,
@@ -38,9 +43,11 @@ import type {
   ThoughtInput,
 } from "../types.js";
 import { appendInboxEvent } from "../cycle/inbox.js";
+import { buildOperationalEffectNamespace } from "../effect/effect-ref.js";
 import { appendOwnerUtterance } from "../evidence/conversation-log.js";
 import { buildThoughtInput } from "./input.js";
 import { admitTestCycle, makeSemanticSettlement, openTestSidecar } from "../test-support.js";
+import { thoughtOutputStructuredRequest } from "./output-contract.js";
 import {
   runThoughtModel,
   STRUCTURAL_RETRY_MAX_OUTPUT_TOKENS,
@@ -161,13 +168,13 @@ describe("v0.2.1 structural Thought retry admission", () => {
     const primaryDb = openNuclearDb(new DatabaseSync(":memory:"));
     const retryDb = openNuclearDb(new DatabaseSync(":memory:"));
     const captured: Array<{
-      messages: Array<{ role: string; content: string }>;
+      messages: ChatMessage[];
       options: { maxTokens?: number; responseFormat?: string };
     }> = [];
     let captureAdmission: Record<string, unknown> | null = null;
 
     cloudflareState.dispatch.mockImplementation(async (args: {
-      messages: Array<{ role: string; content: string }>;
+      messages: ChatMessage[];
       options: { maxTokens?: number; responseFormat?: string };
     }) => {
       captured.push({ messages: args.messages, options: args.options });
@@ -260,8 +267,27 @@ describe("v0.2.1 structural Thought retry admission", () => {
     const retryTotal = retryInput + retryReservedOutput;
     const combinedDemand = SEEDED_CURRENT_TPM_USAGE + retryTotal;
     const headroom = TPM_LIMIT - combinedDemand;
+    const operationalNamespace = buildOperationalEffectNamespace(
+      input.cycleId,
+      input.generation,
+      input.inFlight.map((item) => item.effectId),
+    );
+    const structuredOutput = thoughtOutputStructuredRequest(operationalNamespace);
+    const retryBody = buildCloudflareRequestBody(
+      captured[1]!.messages,
+      { maxTokens: EXPECTED_RETRY_OUTPUT, responseFormat: "json_schema", temperature: 1.0 },
+      CLOUDFLARE_MODEL,
+      { kind: "reasoning_effort", value: "high" },
+      {
+        kind: "native_json_schema",
+        ...structuredOutput,
+        bindingId: "compat_thought_cloudflare_nemotron_super_native_json_schema_v1",
+        wireFormat: "cloudflare_response_format_json_schema",
+      },
+    );
     const estimatedRetry = estimateRequestTokens(captured[1]!.messages, {
       maxTokens: EXPECTED_RETRY_OUTPUT,
+      wireAdditionalBytes: cloudflareRequestWireAdditionalBytes({ body: retryBody }),
     });
     const dispatchStartedAt = Date.parse(String(captureAdmission?.dispatch_started_at));
     const retryDeadline = Date.parse(String(captureAdmission?.deadline_at));

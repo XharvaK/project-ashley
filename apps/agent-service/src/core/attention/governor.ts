@@ -49,6 +49,8 @@ export type AttentionDispatchInput = {
   quotaBucket?: string;
   maxTokens?: number;
   toolsJson?: string;
+  /** Provider-wire bytes not represented by the logical messages. */
+  wireAdditionalBytes?: number;
   signal?: AbortSignal;
   deadlineAtMs?: number | null;
   ageOriginAtMs?: number;
@@ -153,6 +155,7 @@ export async function runAttentiveDispatch<T>(
   const estimate = estimateRequestTokens(input.messages, {
     maxTokens: input.maxTokens,
     toolsJson: input.toolsJson,
+    wireAdditionalBytes: input.wireAdditionalBytes,
   });
   const totalDemand =
     estimate.estimatedInputTokens + estimate.estimatedOutputTokens;

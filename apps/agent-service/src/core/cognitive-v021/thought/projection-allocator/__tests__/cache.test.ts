@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
   semanticPassKey,
   hashAuthorityObjections,
+  hashThoughtSourceCurrentness,
   ProjectionCache,
 } from "../cache.js";
 import { appendInboxEvent } from "../../../cycle/inbox.js";
@@ -58,6 +59,34 @@ describe("Projection Cache & Semantic Pass Keys", () => {
     expect(keyNewObs).not.toBe(keyBase);
     expect(keyNewGen).not.toBe(keyBase);
     expect(keyNewDirective).not.toBe(keyBase);
+  });
+
+  it("invalidates a structural retry key when host-captured source currentness changes", () => {
+    const base = {
+      cycleId: "cycle-1",
+      generation: 1,
+      pass: 1,
+      observationsCount: 0,
+      inFlightCount: 0,
+      authorityObjectionsHash: "none",
+      composeLogIds: ["log-1"],
+      rememberDirectivePresent: false,
+    };
+    const first = hashThoughtSourceCurrentness({
+      workingContext: {},
+      learnedSelfRevisionHead: "self-a",
+      relationshipOwnerId: "doc",
+      relationshipRevisionHead: "relationship-a",
+    });
+    const second = hashThoughtSourceCurrentness({
+      workingContext: {},
+      learnedSelfRevisionHead: "self-b",
+      relationshipOwnerId: "doc",
+      relationshipRevisionHead: "relationship-a",
+    });
+
+    expect(semanticPassKey({ ...base, sourceCurrentnessKey: first }))
+      .not.toBe(semanticPassKey({ ...base, sourceCurrentnessKey: second }));
   });
 
   it("manages cache store entries correctly", () => {
