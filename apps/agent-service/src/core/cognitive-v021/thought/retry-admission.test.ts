@@ -1,18 +1,18 @@
 import { vi } from "vitest";
 
-const nimState = vi.hoisted(() => ({
+const cloudflareState = vi.hoisted(() => ({
   dispatch: vi.fn(),
 }));
 
-vi.mock("../../model-routing/adapters/nim-adapter.js", async (importOriginal) => {
+vi.mock("../../model-routing/adapters/cloudflare-adapter.js", async (importOriginal) => {
   const actual = await importOriginal<
-    typeof import("../../model-routing/adapters/nim-adapter.js")
+    typeof import("../../model-routing/adapters/cloudflare-adapter.js")
   >();
   return {
     ...actual,
-    createNimAdapter: () => ({
-      provider: "nim" as const,
-      dispatch: nimState.dispatch,
+    createCloudflareAdapter: () => ({
+      provider: "cloudflare" as const,
+      dispatch: cloudflareState.dispatch,
     }),
   };
 });
@@ -64,12 +64,13 @@ const capabilityReality: CapabilityReality = {
   approvedProjectIds: [],
 };
 
-const NIM_MODEL = "nvidia/nemotron-3-super-120b-a12b";
-const NIM_BUCKET = `nim:${NIM_MODEL}`;
+const CLOUDFLARE_MODEL = "@cf/nvidia/nemotron-3-120b-a12b";
+const CLOUDFLARE_BUCKET = `cloudflare:${CLOUDFLARE_MODEL}`;
 const SEEDED_CURRENT_TPM_USAGE = 14_000;
 const TPM_LIMIT = 65_536;
 const EXPECTED_RETRY_OUTPUT = STRUCTURAL_RETRY_MAX_OUTPUT_TOKENS;
-const savedNimKey = env.nimApiKey;
+const savedCloudflareToken = env.cloudflareApiToken;
+const savedCloudflareAccount = env.cloudflareAccountId;
 
 function deps(attentionDb: DatabaseSync): KernelDeps {
   return {
@@ -139,9 +140,10 @@ function helloInput(): { sidecar: DatabaseSync; input: ThoughtInput } {
 const savedOfflineEnv = process.env.ASHLEY_PHASE0_OFFLINE;
 
 afterEach(() => {
-  nimState.dispatch.mockReset();
+  cloudflareState.dispatch.mockReset();
   resetAdapterCache();
-  env.nimApiKey = savedNimKey;
+  env.cloudflareApiToken = savedCloudflareToken;
+  env.cloudflareAccountId = savedCloudflareAccount;
   if (savedOfflineEnv === undefined) {
     delete process.env.ASHLEY_PHASE0_OFFLINE;
   } else {
@@ -152,7 +154,8 @@ afterEach(() => {
 describe("v0.2.1 structural Thought retry admission", () => {
   it("keeps the primary at 8192 and admits a corrective retry at 8192 under real rolling TPM accounting", async () => {
     delete process.env.ASHLEY_PHASE0_OFFLINE;
-    env.nimApiKey = "test-nim-key";
+    env.cloudflareApiToken = "test-cloudflare-token";
+    env.cloudflareAccountId = "test-account";
     resetAdapterCache();
     const { sidecar, input } = helloInput();
     const primaryDb = openNuclearDb(new DatabaseSync(":memory:"));
@@ -163,7 +166,7 @@ describe("v0.2.1 structural Thought retry admission", () => {
     }> = [];
     let captureAdmission: Record<string, unknown> | null = null;
 
-    nimState.dispatch.mockImplementation(async (args: {
+    cloudflareState.dispatch.mockImplementation(async (args: {
       messages: Array<{ role: string; content: string }>;
       options: { maxTokens?: number; responseFormat?: string };
     }) => {
@@ -176,18 +179,18 @@ describe("v0.2.1 structural Thought retry admission", () => {
              FROM attention_requests
             WHERE quota_bucket = ?
             ORDER BY id DESC LIMIT 1`,
-        ).get(NIM_BUCKET) as Record<string, unknown>;
+        ).get(CLOUDFLARE_BUCKET) as Record<string, unknown>;
       }
       const parsed = JSON.parse(args.messages[1]?.content ?? "{}") as ThoughtInput;
       const response = captured.length === 1
         ? {
             text: "not json",
-            providerModel: NIM_MODEL,
+            providerModel: CLOUDFLARE_MODEL,
             usage: { promptTokens: 4_772, completionTokens: 55 },
           }
         : {
             text: JSON.stringify(makeSemanticSettlement()),
-            providerModel: NIM_MODEL,
+            providerModel: CLOUDFLARE_MODEL,
             usage: { promptTokens: 1, completionTokens: 1 },
           };
       return response;
@@ -200,7 +203,7 @@ describe("v0.2.1 structural Thought retry admission", () => {
       routeId: "thought",
     });
     expect(currentPolicy.policyRow.maxOutputTokens).toBe(8_192);
-    expect(quotaContractFor(NIM_BUCKET).tpm).toBe(TPM_LIMIT);
+    expect(quotaContractFor(CLOUDFLARE_BUCKET).tpm).toBe(TPM_LIMIT);
 
     const primary = await runThoughtModel(input, deps(primaryDb), {
       deadlineAtMs: Date.now() + 60_000,
@@ -212,7 +215,7 @@ describe("v0.2.1 structural Thought retry admission", () => {
          FROM attention_requests
         WHERE quota_bucket = ?
         ORDER BY id DESC LIMIT 1`,
-    ).get(NIM_BUCKET) as Record<string, unknown>;
+     ).get(CLOUDFLARE_BUCKET) as Record<string, unknown>;
     const currentPrimaryEstimatedInput = Number(primaryRow.estimated_input_tokens);
     expect(Number(primaryRow.estimated_output_tokens)).toBe(8_192);
     expect(Number(primaryRow.actual_input_tokens)).toBe(4_772);
@@ -222,19 +225,19 @@ describe("v0.2.1 structural Thought retry admission", () => {
       messages: [{ role: "user", content: "seeded primary" }],
       purpose: "thought",
       lane: "urgent_grounded",
-      providerId: "nim",
-      quotaBucket: NIM_BUCKET,
-      modelAlias: NIM_MODEL,
+       providerId: "cloudflare",
+       quotaBucket: CLOUDFLARE_BUCKET,
+       modelAlias: CLOUDFLARE_MODEL,
       maxTokens: 8_192,
       deadlineAtMs: Date.now() + 60_000,
       ownerId: "doc",
       dispatch: async () => ({
-        providerModel: NIM_MODEL,
+         providerModel: CLOUDFLARE_MODEL,
         usage: { promptTokens: 12_000, completionTokens: 2_000 },
         result: { text: "seeded" },
       }),
     });
-    expect(currentTpmUsage(retryDb, realClock, NIM_BUCKET)).toBe(SEEDED_CURRENT_TPM_USAGE);
+     expect(currentTpmUsage(retryDb, realClock, CLOUDFLARE_BUCKET)).toBe(SEEDED_CURRENT_TPM_USAGE);
 
     captureAdmission = {};
     const retry = await runThoughtModel(input, deps(retryDb), {
@@ -284,9 +287,9 @@ describe("v0.2.1 structural Thought retry admission", () => {
       `TPM_LIMIT=${TPM_LIMIT}`,
       `HEADROOM=${headroom}`,
       "RETRY_ADMISSION=PASS",
-      `NIM_THOUGHT_TPM=${quotaContractFor(NIM_BUCKET).tpm}`,
+       `CLOUDFLARE_THOUGHT_TPM=${quotaContractFor(CLOUDFLARE_BUCKET).tpm}`,
       `PRIMARY_8192_TOTAL=${currentPrimaryEstimatedInput + 8_192}`,
-      `NIM_SINGLE_REQUEST_ADMISSIBLE=${currentPrimaryEstimatedInput + 8_192 <= quotaContractFor(NIM_BUCKET).tpm ? "yes" : "no"}`,
+       `CLOUDFLARE_SINGLE_REQUEST_ADMISSIBLE=${currentPrimaryEstimatedInput + 8_192 <= quotaContractFor(CLOUDFLARE_BUCKET).tpm ? "yes" : "no"}`,
     ].join("\n"));
 
     sidecar.close();

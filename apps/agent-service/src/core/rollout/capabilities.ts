@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { env } from "../../env.js";
 import { REPO_CONFIG_PATH } from "../../paths.js";
@@ -235,17 +235,36 @@ function readGitRelease(): string {
     } catch {
       // A normal checkout stores .git as a directory.
     }
+    const gitDirs = [gitDir];
+    try {
+      const commonDirMarker = readFileSync(join(gitDir, "commondir"), "utf8").trim();
+      if (commonDirMarker) {
+        const commonDir = isAbsolute(commonDirMarker)
+          ? commonDirMarker
+          : resolve(gitDir, commonDirMarker);
+        if (commonDir !== gitDir) gitDirs.push(commonDir);
+      }
+    } catch {
+      // A normal checkout has no separate worktree common directory.
+    }
     const head = readFileSync(join(gitDir, "HEAD"), "utf8").trim();
     if (!head.startsWith("ref: ")) return head.slice(0, 40);
     const ref = head.slice(5);
-    try {
-      return readFileSync(join(gitDir, ref), "utf8").trim().slice(0, 40);
-    } catch {
-      const packed = readFileSync(join(gitDir, "packed-refs"), "utf8")
-        .split(/\r?\n/)
-        .find((line) => !line.startsWith("#") && !line.startsWith("^") && line.endsWith(` ${ref}`));
-      return packed?.split(" ")[0]?.slice(0, 40) || "unversioned";
+    for (const candidateGitDir of gitDirs) {
+      try {
+        return readFileSync(join(candidateGitDir, ref), "utf8").trim().slice(0, 40);
+      } catch {
+        try {
+          const packed = readFileSync(join(candidateGitDir, "packed-refs"), "utf8")
+            .split(/\r?\n/)
+            .find((line) => !line.startsWith("#") && !line.startsWith("^") && line.endsWith(` ${ref}`));
+          if (packed) return packed.split(" ")[0]?.slice(0, 40) || "unversioned";
+        } catch {
+          // Try the next Git directory in a linked worktree.
+        }
+      }
     }
+    return "unversioned";
   } catch {
     return "unversioned";
   }

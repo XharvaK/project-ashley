@@ -268,6 +268,8 @@ export class AgentManager {
         return Boolean(env.groqApiKey);
       case "nim":
         return Boolean(env.nimApiKey);
+      case "cloudflare":
+        return Boolean(env.cloudflareApiToken && env.cloudflareAccountId);
       case "opencode_zen":
         return Boolean(env.opencodeZenApiKey);
       default:

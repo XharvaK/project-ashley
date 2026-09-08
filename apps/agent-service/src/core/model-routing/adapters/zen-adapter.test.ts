@@ -174,8 +174,8 @@ describe("MF-M4 OpenCode Zen adapter", () => {
     const thought = Object.entries(currentPortfolio().routeBindings).find(
       ([route]) => route === "thought",
     );
-    expect(thought?.[1].provider).toBe("nim");
-    expect(thought?.[1].configuredModelId).toBe("nvidia/nemotron-3-super-120b-a12b");
+    expect(thought?.[1].provider).toBe("cloudflare");
+    expect(thought?.[1].configuredModelId).toBe("@cf/nvidia/nemotron-3-120b-a12b");
     expect(Object.values(currentPortfolio().routeBindings)).not.toContainEqual(
       expect.objectContaining({ provider: "opencode_zen" }),
     );

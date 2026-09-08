@@ -98,7 +98,8 @@ export type StructuredOutputCapabilityBinding = Readonly<
       wireFormat:
         | "nim_guided_json"
         | "nim_response_format_json_schema"
-        | "mistral_response_format_json_schema";
+        | "mistral_response_format_json_schema"
+        | "cloudflare_response_format_json_schema";
     }
 >;
 
@@ -120,7 +121,8 @@ export type TrustedStructuredOutputControl = Readonly<
       wireFormat:
         | "nim_guided_json"
         | "nim_response_format_json_schema"
-        | "mistral_response_format_json_schema";
+        | "mistral_response_format_json_schema"
+        | "cloudflare_response_format_json_schema";
       schema: Readonly<Record<string, unknown>>;
     }
 >;
@@ -329,8 +331,10 @@ export type ContextProjection = Readonly<{
 export type ModelUsage = {
   inputTokens: number | null;
   outputTokens: number | null;
+  totalTokens?: number | null;
   cachedInputTokens: number | null;
   reasoningTokens: number | null;
+  neuronUsage?: number | null;
   providerReported: boolean;
 };
 

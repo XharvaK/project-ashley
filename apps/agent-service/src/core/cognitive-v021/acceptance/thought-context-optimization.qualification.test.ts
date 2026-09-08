@@ -146,7 +146,7 @@ describe("Thought Context Optimization — Coherent Candidate Qualification", ()
       expect(retrievalResult.miss).toBe(false);
       expect(retrievalResult.hits.length).toBeGreaterThan(0);
 
-      // 4. Build Thought Input & allocate for the current NIM Super route.
+      // 4. Build Thought Input & allocate for the current Cloudflare Super route.
       const thoughtInput = buildThoughtInput({
         sidecar,
         cycle,
@@ -162,17 +162,17 @@ describe("Thought Context Optimization — Coherent Candidate Qualification", ()
         derivedStore: derived,
       });
 
-      const nimAllocation = allocateThoughtProjection({
+      const cloudflareAllocation = allocateThoughtProjection({
         sidecar,
         thoughtInput,
-        quotaBucket: "nim:nvidia/nemotron-3-super-120b-a12b",
-        requestId: "req-nim-qual",
+        quotaBucket: "cloudflare:@cf/nvidia/nemotron-3-120b-a12b",
+        requestId: "req-cloudflare-qual",
       });
 
-      expect(nimAllocation.receipt.hardTpm).toBe(65536);
-      expect(nimAllocation.receipt.estimatedInputTokens)
-        .toBeLessThanOrEqual(nimAllocation.receipt.semanticProjectionEnvelope.maxInputTokens);
-      expect(nimAllocation.receipt.headroomTokens).toBeGreaterThan(0);
+      expect(cloudflareAllocation.receipt.hardTpm).toBe(65536);
+      expect(cloudflareAllocation.receipt.estimatedInputTokens)
+        .toBeLessThanOrEqual(cloudflareAllocation.receipt.semanticProjectionEnvelope.maxInputTokens);
+      expect(cloudflareAllocation.receipt.headroomTokens).toBeGreaterThan(0);
 
       // 5. Allocate for the current Groq expression fallback route.
       const groqAllocation = allocateThoughtProjection({

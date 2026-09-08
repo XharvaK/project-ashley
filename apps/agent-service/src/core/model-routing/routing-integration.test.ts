@@ -21,11 +21,15 @@ import { withOfflineAppGateDisabled } from "../qualification/offline-test-helper
 const ORIGINAL_MISTRAL_KEY = env.mistralApiKey;
 const ORIGINAL_GROQ_KEY = env.groqApiKey;
 const ORIGINAL_NIM_KEY = env.nimApiKey;
+const ORIGINAL_CLOUDFLARE_TOKEN = env.cloudflareApiToken;
+const ORIGINAL_CLOUDFLARE_ACCOUNT = env.cloudflareAccountId;
 
 afterEach(() => {
   env.mistralApiKey = ORIGINAL_MISTRAL_KEY;
   env.groqApiKey = ORIGINAL_GROQ_KEY;
   env.nimApiKey = ORIGINAL_NIM_KEY;
+  env.cloudflareApiToken = ORIGINAL_CLOUDFLARE_TOKEN;
+  env.cloudflareAccountId = ORIGINAL_CLOUDFLARE_ACCOUNT;
 });
 
 function freshDb(): DatabaseSync {
@@ -46,11 +50,11 @@ describe("route-to-provider mapping", () => {
     expect(b.configuredModelId).toBe("nvidia/nemotron-3.5-lightning-30b-a3b");
   });
 
-  it("thought routes to the NIM Nemotron 3 Super primary", () => {
+  it("thought routes to the Cloudflare Nemotron 3 Super primary", () => {
     const b = resolveRoute("thought");
     expect(b.route).toBe("thought");
-    expect(b.provider).toBe("nim");
-    expect(b.configuredModelId).toBe("nvidia/nemotron-3-super-120b-a12b");
+    expect(b.provider).toBe("cloudflare");
+    expect(b.configuredModelId).toBe("@cf/nvidia/nemotron-3-120b-a12b");
   });
 
   it.each([
@@ -65,12 +69,12 @@ describe("route-to-provider mapping", () => {
   });
 
   it.each(["thought_observation", "reflection_initiative"])(
-    "Thought-owned purpose %s routes to NIM Super rather than utility Lightning",
+    "Thought-owned purpose %s routes to Cloudflare Super rather than utility Lightning",
     (purpose) => {
       const b = resolveRoute(purpose);
       expect(b.route).toBe("thought");
-      expect(b.provider).toBe("nim");
-      expect(b.configuredModelId).toBe("nvidia/nemotron-3-super-120b-a12b");
+      expect(b.provider).toBe("cloudflare");
+      expect(b.configuredModelId).toBe("@cf/nvidia/nemotron-3-120b-a12b");
     },
   );
 
@@ -83,8 +87,8 @@ describe("route-to-provider mapping", () => {
     expect(new Set(buckets)).toEqual(
       new Set(["nim:nvidia/nemotron-3.5-lightning-30b-a3b"]),
     );
-    expect(quotaBucketFor("nim", "nvidia/nemotron-3-super-120b-a12b")).toBe(
-      "nim:nvidia/nemotron-3-super-120b-a12b",
+    expect(quotaBucketFor("cloudflare", "@cf/nvidia/nemotron-3-120b-a12b")).toBe(
+      "cloudflare:@cf/nvidia/nemotron-3-120b-a12b",
     );
   });
 });
@@ -172,10 +176,12 @@ describe("provider-aware missing key gating", () => {
     db.close();
   });
 
-  it("Thought route fails before reservation when MISTRAL_API_KEY is absent", async () => {
+  it("Thought route fails before reservation when Cloudflare credentials are absent", async () => {
     env.mistralApiKey = "";
     env.groqApiKey = "";
     env.nimApiKey = "";
+    env.cloudflareApiToken = "";
+    env.cloudflareAccountId = "";
     const db = freshDb();
     await expect(
       withOfflineAppGateDisabled(() => completeChat(
@@ -232,11 +238,13 @@ describe("shared NIM Lightning quota bucket at the dispatch layer", () => {
     db.close();
   });
 
-  describe("Wave 2: Thought failure isolates the NIM Expression lane", () => {
+  describe("Wave 2: Cloudflare Thought failure isolates the NIM Expression lane", () => {
     it("Thought failure leaves Expression independently dispatchable in its own bucket", async () => {
       env.mistralApiKey = "";
       env.groqApiKey = "";
       env.nimApiKey = "test";
+      env.cloudflareApiToken = "test-cloudflare-token";
+      env.cloudflareAccountId = "test-account";
       const db = freshDb();
       const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
         ok: false,
@@ -254,7 +262,7 @@ describe("shared NIM Lightning quota bucket at the dispatch layer", () => {
       const thoughtCompletedRows = Number(
         (
           db.prepare(
-            `SELECT COUNT(*) AS c FROM attention_requests WHERE quota_bucket = 'nim:nvidia/nemotron-3-super-120b-a12b' AND outcome = 'completed'`,
+            `SELECT COUNT(*) AS c FROM attention_requests WHERE quota_bucket = 'cloudflare:@cf/nvidia/nemotron-3-120b-a12b' AND outcome = 'completed'`,
           ).get() as { c: number }
         ).c,
       );

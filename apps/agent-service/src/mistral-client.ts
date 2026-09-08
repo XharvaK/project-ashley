@@ -24,6 +24,10 @@ import {
   mapNimError,
 } from "./core/model-routing/adapters/nim-adapter.js";
 import {
+  createCloudflareAdapter,
+  mapCloudflareError,
+} from "./core/model-routing/adapters/cloudflare-adapter.js";
+import {
   createZenAdapter,
   mapZenError,
 } from "./core/model-routing/adapters/zen-adapter.js";
@@ -192,6 +196,15 @@ function adapterFor(provider: ProviderId): ModelProviderAdapter {
     adapter = createGroqAdapter();
   } else if (provider === "nim") {
     adapter = createNimAdapter();
+  } else if (provider === "cloudflare") {
+    if (!env.cloudflareApiToken || !env.cloudflareAccountId) {
+      throw new AppError(
+        "agent_not_ready",
+        "Cloudflare Workers AI credentials not configured",
+        503,
+      );
+    }
+    adapter = createCloudflareAdapter();
   } else if (provider === "opencode_zen") {
     adapter = createZenAdapter();
   } else {
@@ -211,7 +224,14 @@ export function resetAdapterCache(): void {
   clients.clear();
 }
 
-export { mapMistralError, mapGroqError, mapNimError, mapZenError, adapterFor };
+export {
+  mapMistralError,
+  mapGroqError,
+  mapNimError,
+  mapCloudflareError,
+  mapZenError,
+  adapterFor,
+};
 
 const ELIGIBLE_MISTRAL_CREDENTIAL_FAILURE_CODES = new Set([
   "credential_invalid",
@@ -309,7 +329,7 @@ function fallbackTopologyFor(
     return "expression_mistral_to_qwen_caller_fallback";
   }
   if (purpose === "thought" || routeId === "thought") {
-    return "thought_mistral_primary_to_secondary_credential_failover";
+    return "thought_single_attempt";
   }
   return "none";
 }
@@ -385,6 +405,7 @@ export async function completeChat(
   modelAlias: string;
   resolvedModelId: string | null;
   providerModel?: string | null;
+  providerRequestId?: string | null;
   toolCalls?: ToolCallResult[];
   usage?: TokenUsage;
   finishReason?: string | null;
@@ -764,6 +785,12 @@ export async function completeChat(
         : attemptContext.requestedWireReasoning
           ? { reasoningConfiguration: attemptContext.requestedWireReasoning }
           : {}),
+      ...(targetProvider === "cloudflare" &&
+        targetModel === "@cf/nvidia/nemotron-3-120b-a12b" &&
+        attemptContext.fabricReasoning?.kind === "reasoning_effort" &&
+        attemptContext.fabricReasoning.value === "high"
+        ? { reasoningBudgetTokens: 1024 }
+        : {}),
       ...(options.temperature !== undefined
         ? { temperature: options.temperature }
         : {}),
@@ -796,6 +823,7 @@ export async function completeChat(
         toolCalls?: ToolCallResult[];
         usage?: TokenUsage;
         providerModel?: string | null;
+        providerRequestId?: string | null;
         finishReason?: string | null;
         providerHttpStatus?: number;
         responseDiagnostics?: ProviderResponseDiagnostics;
@@ -891,6 +919,7 @@ export async function completeChat(
             });
             attempt.markProviderResponse({
               resolvedModelId: completion.providerModel ?? null,
+              providerRequestId: completion.providerRequestId,
               finishReason: completion.finishReason ?? null,
               usage: completion.usage,
               providerHttpStatus: completion.providerHttpStatus,
@@ -905,12 +934,14 @@ export async function completeChat(
             }
             return {
               providerModel: completion.providerModel,
+              providerRequestId: completion.providerRequestId,
               usage: completion.usage,
               result: {
                 text: completion.text,
                 toolCalls: completion.toolCalls,
                 usage: completion.usage,
                 providerModel: completion.providerModel,
+                providerRequestId: completion.providerRequestId,
                 finishReason: completion.finishReason ?? null,
                 responseDiagnostics: completion.responseDiagnostics,
                 wireEvidence: completion.wireEvidence,
@@ -955,6 +986,8 @@ export async function completeChat(
                     ? mapGroqError(err)
                   : targetProvider === "nim"
                       ? mapNimError(err)
+                      : targetProvider === "cloudflare"
+                        ? mapCloudflareError(err)
                       : targetProvider === "opencode_zen"
                         ? mapZenError(err)
                       : err;
@@ -972,7 +1005,7 @@ export async function completeChat(
       const returnedModel = result.result.providerModel?.trim() || null;
       if (
         currentPolicy.source !== "activated" &&
-        targetProvider === "mistral" &&
+        (targetProvider === "mistral" || targetProvider === "cloudflare") &&
         isThoughtOwnedPurpose(purpose, logicalRole) &&
         targetModel === currentPolicy.occupant.configuredModelId &&
         returnedModel !== null &&
@@ -980,7 +1013,7 @@ export async function completeChat(
       ) {
         const identityError = new AppError(
           "capability_mismatch",
-          "mistral_model_identity_mismatch",
+          `${targetProvider}_model_identity_mismatch`,
           502,
         );
         if (providerBoundaryTiming) {
@@ -1162,6 +1195,7 @@ export async function completeChat(
       modelAlias: attentive.modelAlias,
       resolvedModelId: attentive.resolvedModelId,
       providerModel: inner.providerModel,
+      providerRequestId: inner.providerRequestId,
       toolCalls: inner.toolCalls,
       usage: attentive.usage ?? inner.usage,
       finishReason: inner.finishReason ?? null,

@@ -107,8 +107,10 @@ function usageFor(usage?: TokenUsage): ModelUsage {
   return {
     inputTokens: usage?.promptTokens ?? null,
     outputTokens: usage?.completionTokens ?? null,
+    ...(usage?.totalTokens !== undefined ? { totalTokens: usage.totalTokens } : {}),
     cachedInputTokens: usage?.cachedTokens ?? null,
     reasoningTokens: usage?.reasoningTokens ?? null,
+    ...(usage?.neuronUsage !== undefined ? { neuronUsage: usage.neuronUsage } : {}),
     providerReported: usage !== undefined,
   };
 }

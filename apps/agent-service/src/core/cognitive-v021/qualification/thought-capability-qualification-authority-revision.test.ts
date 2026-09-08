@@ -94,11 +94,11 @@ function createScriptedModel(script: readonly string[]) {
     registryVersion: "revision-test",
     policyRowId: "revision-test",
     occupantId: "revision-test-occupant",
-    provider: "nim",
-    model: "nvidia/nemotron-3-super-120b-a12b",
+    provider: "cloudflare",
+    model: "@cf/nvidia/nemotron-3-120b-a12b",
     logicalBindingId: "revision-test",
     schemaFingerprint: "revision-test",
-    wireBindingId: "compat_thought_nim_nemotron_super_native_json_schema_v1",
+    wireBindingId: "compat_thought_cloudflare_nemotron_super_native_json_schema_v1",
     wireMode: "native_json_schema",
     wireFormat: "json",
     buildIdentity: "revision-test-build",
@@ -131,16 +131,18 @@ async function runSingleSettlementSample(script: readonly string[]) {
   const now = 1_700_000_000_000;
   const checkoutIdentity = qualificationCheckoutIdentity();
   const savedRelease = env.ashleyReleaseId;
-  const savedKey = env.nimApiKey;
+  const savedCloudflareToken = env.cloudflareApiToken;
+  const savedCloudflareAccount = env.cloudflareAccountId;
   env.ashleyReleaseId = checkoutIdentity;
-  env.nimApiKey = "revision-test-key";
+  env.cloudflareApiToken = "revision-test-token";
+  env.cloudflareAccountId = "revision-test-account";
   const runId = `w2-test-authority-revision-${randomUUID()}`;
   const outputDir = join(tmpdir(), `w2-revision-${randomUUID()}`);
   try {
     const result = await runThoughtCapabilityQualification({
       environment: "isolated_live",
-      provider: "nim",
-      model: "nvidia/nemotron-3-super-120b-a12b",
+      provider: "cloudflare",
+      model: "@cf/nvidia/nemotron-3-120b-a12b",
       candidateSha: checkoutIdentity,
       allowlistedReferences: ["turn-1"],
       noFallback: true,
@@ -157,7 +159,8 @@ async function runSingleSettlementSample(script: readonly string[]) {
     return { result, model, sleepCalls, runId };
   } finally {
     env.ashleyReleaseId = savedRelease;
-    env.nimApiKey = savedKey;
+    env.cloudflareApiToken = savedCloudflareToken;
+    env.cloudflareAccountId = savedCloudflareAccount;
     rmSync(outputDir, { recursive: true, force: true });
   }
 }

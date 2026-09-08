@@ -184,8 +184,8 @@ type SchemaMode = ThoughtCapabilityComponents["schemaEnforcementMode"];
 type Digest = ThoughtQualificationCaseResult["rawContentDigest"];
 
 const CANDIDATE = {
-  provider: "nim" as const,
-  model: "nvidia/nemotron-3-super-120b-a12b" as const,
+  provider: "cloudflare" as const,
+  model: "@cf/nvidia/nemotron-3-120b-a12b" as const,
 };
 const ROUTE_ID = "thought";
 const MAX_THOUGHT_OUTPUT_TOKENS = 4_096;
@@ -275,8 +275,8 @@ type CandidatePreflight = Readonly<{
   registryVersion: string;
   policyRowId: string;
   occupantId: string;
-  provider: "nim";
-  model: "nvidia/nemotron-3-super-120b-a12b";
+  provider: "cloudflare";
+  model: "@cf/nvidia/nemotron-3-120b-a12b";
   logicalBindingId: string;
   schemaFingerprint: string;
   wireBindingId: string;
@@ -1561,7 +1561,7 @@ function preflightCandidate(buildIdentity = currentBuildIdentity()): CandidatePr
     occupantId: policy.occupant.occupantId,
     wireBindingId: binding.bindingId,
     wireMode,
-    adapterId: "ashley.adapter.nim.v1",
+    adapterId: "ashley.adapter.cloudflare.v1",
     wireFormat,
   });
   return {
@@ -1578,7 +1578,7 @@ function preflightCandidate(buildIdentity = currentBuildIdentity()): CandidatePr
     wireFormat,
     buildIdentity,
     capability,
-    credentialPresent: Boolean(env.nimApiKey),
+    credentialPresent: Boolean(env.cloudflareApiToken && env.cloudflareAccountId),
   };
 }
 
@@ -1690,7 +1690,7 @@ export function fixtureCompletion(
     resourcePolicyFingerprint: thoughtResourcePolicyIdentity().fingerprint,
   };
   const wireEvidence: WireDispatchEvidence = {
-    adapterId: "ashley.adapter.nim.v1",
+    adapterId: "ashley.adapter.cloudflare.v1",
     wireFormat: preflight.wireFormat,
     sanitizedBodyDigest: ("sha256:" + sha256Text("qualification-wire:" + invocationId)) as WireDispatchEvidence["sanitizedBodyDigest"],
     emittedEnforcementMode: preflight.wireMode,
@@ -2609,7 +2609,7 @@ function writeQualificationResult(
   cases: readonly ThoughtQualificationCaseResult[],
 ): string {
   const wireEvidence: WireDispatchEvidence = {
-    adapterId: "ashley.adapter.nim.v1",
+    adapterId: "ashley.adapter.cloudflare.v1",
     wireFormat: preflight.wireFormat,
     sanitizedBodyDigest: ("sha256:" + sha256Text("qualification-artifact:" + preflight.capability.fingerprint)) as WireDispatchEvidence["sanitizedBodyDigest"],
     emittedEnforcementMode: preflight.wireMode,
@@ -2846,7 +2846,7 @@ async function runFixtureQualification(
       negativeWitness(withIds(authorityRevision, settlementSequence), "authority revision changed before settlement acceptance"),
       negativeWitness(parserRejected, "provider-accepted structural value rejected by the W0 semantic parser"),
       negativeWitness(withIds(semanticUnsupported, settlementSequence), "schema-valid output with unsupported or fabricated semantic claim"),
-      negativeWitness(fallback, "a non-Mistral provider cannot answer the Mistral qualification candidate"),
+      negativeWitness(fallback, "a non-Cloudflare provider cannot answer the Cloudflare qualification candidate"),
     ];
     const verdict = cases.every((item) => item.verdict === "PASS")
       ? "PASS"

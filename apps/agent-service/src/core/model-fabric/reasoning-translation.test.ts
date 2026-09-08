@@ -15,6 +15,7 @@ import type { ChatMessage } from "../model-routing/types.js";
 
 const ULTRA = "nvidia/nemotron-3-ultra-550b-a55b";
 const SUPER = "nvidia/nemotron-3-super-120b-a12b";
+const CLOUDFLARE_SUPER = "@cf/nvidia/nemotron-3-120b-a12b";
 const LIGHTNING = "nvidia/nemotron-3.5-lightning-30b-a3b";
 const GPT_OSS = "openai/gpt-oss-20b";
 const MISTRAL_SMALL = "mistral-small-2603";
@@ -27,6 +28,7 @@ describe("Nemotron reasoning maps", () => {
       "nim_nemotron_lightning",
       "nim_nemotron_super",
       "nim_nemotron_ultra",
+      "cloudflare_nemotron_super",
       "mistral_small",
     ].sort());
   });
@@ -145,6 +147,31 @@ describe("Super translation", () => {
       semanticPolicy: "standard",
     });
     expect(translated).toEqual({
+      status: "unsupported",
+      code: "unsupported_reasoning_mapping",
+    });
+  });
+});
+
+describe("Cloudflare Nemotron translation", () => {
+  it("maps semantic high to reasoning_effort high for the exact hosted model", () => {
+    expect(translateReasoningPolicy({
+      provider: "cloudflare",
+      configuredModelId: CLOUDFLARE_SUPER,
+      semanticPolicy: "high",
+    })).toEqual({
+      status: "translated",
+      familyId: "cloudflare_nemotron_super",
+      control: { kind: "reasoning_effort", value: "high" },
+    });
+  });
+
+  it("does not invent a standard reasoning mapping", () => {
+    expect(translateReasoningPolicy({
+      provider: "cloudflare",
+      configuredModelId: CLOUDFLARE_SUPER,
+      semanticPolicy: "standard",
+    })).toEqual({
       status: "unsupported",
       code: "unsupported_reasoning_mapping",
     });

@@ -27,6 +27,7 @@ const MODEL_OUTPUT_CEILINGS: Readonly<Record<string, number>> = {
   "groq:openai/gpt-oss-20b": 4096,
   "mistral:mistral-small-2603": 4096,
   "nim:nvidia/nemotron-3-super-120b-a12b": 8192,
+  "cloudflare:@cf/nvidia/nemotron-3-120b-a12b": 8192,
 };
 
 const MISTRAL_SMALL = "mistral-small-2603";
@@ -49,7 +50,8 @@ function mechanicalDefinition(
       ? configuredModelId === "mistral-small-2603"
         ? "json_schema"
         : "none"
-      : (provider === "nim" && configuredModelId === "nvidia/nemotron-3-super-120b-a12b")
+      : ((provider === "nim" && configuredModelId === "nvidia/nemotron-3-super-120b-a12b") ||
+        (provider === "cloudflare" && configuredModelId === "@cf/nvidia/nemotron-3-120b-a12b"))
         ? "json_schema"
         : "json";
   return {
@@ -233,6 +235,8 @@ export function backendFor(provider: string): string {
       return "groq";
     case "nim":
       return "nim";
+    case "cloudflare":
+      return "cloudflare";
     default:
       return provider;
   }

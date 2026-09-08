@@ -16,7 +16,7 @@ import { routeBinding } from "./registry.js";
 
 const LIGHTNING = "nvidia/nemotron-3.5-lightning-30b-a3b";
 const ULTRA = "nvidia/nemotron-3-ultra-550b-a55b";
-const SUPER = "nvidia/nemotron-3-super-120b-a12b";
+const THOUGHT_MODEL = "@cf/nvidia/nemotron-3-120b-a12b";
 const MISTRAL_SMALL = "mistral-small-2603";
 
 afterEach(() => {
@@ -27,15 +27,15 @@ describe("Phase 5 successor routing topology", () => {
   it("loads a new current revision while preserving the v1 snapshot", () => {
     const portfolio = currentPortfolio();
 
-    expect(portfolio.portfolioRevisionId).toBe("mfp_current_compatibility_v2");
+    expect(portfolio.portfolioRevisionId).toBe("mfp_current_compatibility_v3");
     expect(portfolio.replacesPortfolioRevisionId).toBe(
-      "mfp_current_compatibility_v1",
+      "mfp_current_compatibility_v2",
     );
     expect(portfolio.sourcePath.replaceAll("\\", "/")).toMatch(
-      /current-compatibility\.v2\.json$/,
+      /current-compatibility\.v3\.json$/,
     );
     expect(
-      existsSync(join(portfolio.sourcePath, "..", "current-compatibility.v1.json")),
+      existsSync(join(portfolio.sourcePath, "..", "current-compatibility.v2.json")),
     ).toBe(true);
   });
 
@@ -63,8 +63,8 @@ describe("Phase 5 successor routing topology", () => {
     for (const purpose of ["thought_observation", "reflection_initiative"]) {
       expect(resolveRoute(purpose)).toMatchObject({
         route: "thought",
-        provider: "nim",
-        configuredModelId: SUPER,
+        provider: "cloudflare",
+        configuredModelId: THOUGHT_MODEL,
       });
     }
 
@@ -82,16 +82,16 @@ describe("Phase 5 successor routing topology", () => {
     expect(observation).toMatchObject({
       configuredRouteId: "utility_bulk",
       dispatchedRouteId: "thought",
-      occupant: { provider: "nim", configuredModelId: SUPER },
+      occupant: { provider: "cloudflare", configuredModelId: THOUGHT_MODEL },
     });
     expect(reflection).toMatchObject({
       configuredRouteId: "utility_bulk",
       dispatchedRouteId: "thought",
-      occupant: { provider: "nim", configuredModelId: SUPER },
+      occupant: { provider: "cloudflare", configuredModelId: THOUGHT_MODEL },
     });
   });
 
-  it("binds every NIM Thought row to native schema enforcement", () => {
+  it("binds every Cloudflare Thought row to native schema enforcement", () => {
     const thoughtRows = currentPortfolio().rows.filter((row) =>
       ["thought", "thought_observation", "reflection_initiative"].includes(
         row.logicalRole,
@@ -101,13 +101,13 @@ describe("Phase 5 successor routing topology", () => {
     for (const row of thoughtRows) {
       expect(row.structuredOutput).toBe("json_schema");
       expect(row.occupants[0]).toMatchObject({
-        provider: "nim",
-        configuredModelId: SUPER,
+        provider: "cloudflare",
+        configuredModelId: THOUGHT_MODEL,
         reasoningPolicy: "high",
         effectiveReasoning: "high",
         structuredOutputBinding: {
           mode: "native_json_schema",
-          wireFormat: "nim_response_format_json_schema",
+          wireFormat: "cloudflare_response_format_json_schema",
         },
       });
     }

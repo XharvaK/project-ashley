@@ -11,6 +11,7 @@ import { withOfflineAppGateDisabled } from "../qualification/offline-test-helper
 import * as groqAdapterModule from "../model-routing/adapters/groq-adapter.js";
 import * as nimAdapterModule from "../model-routing/adapters/nim-adapter.js";
 import * as mistralAdapterModule from "../model-routing/adapters/mistral-adapter.js";
+import * as cloudflareAdapterModule from "../model-routing/adapters/cloudflare-adapter.js";
 import { metadataFromError } from "./receipts.js";
 import { attachProviderHttpStatusBoundary } from "../model-routing/types.js";
 import { currentPortfolio } from "./portfolio.js";
@@ -64,6 +65,8 @@ const saved = {
   mistralSecondary: env.mistralApiKeySecondary,
   groq: env.groqApiKey,
   nim: env.nimApiKey,
+  cloudflareToken: env.cloudflareApiToken,
+  cloudflareAccount: env.cloudflareAccountId,
 };
 
 afterEach(() => {
@@ -71,6 +74,8 @@ afterEach(() => {
   env.mistralApiKeySecondary = saved.mistralSecondary;
   env.groqApiKey = saved.groq;
   env.nimApiKey = saved.nim;
+  env.cloudflareApiToken = saved.cloudflareToken;
+  env.cloudflareAccountId = saved.cloudflareAccount;
   resetAdapterCache();
   vi.restoreAllMocks();
   for (const root of roots.splice(0)) {
@@ -269,8 +274,8 @@ describe("MF-ACT dispatch authority", () => {
     expect(resolved.policyRow.policyRowId).toBe(
       "mfr_thought_interactive_compat_v1",
     );
-    expect(resolved.occupant.configuredModelId).toBe("nvidia/nemotron-3-super-120b-a12b");
-    expect(resolved.occupant.provider).toBe("nim");
+    expect(resolved.occupant.configuredModelId).toBe("@cf/nvidia/nemotron-3-120b-a12b");
+    expect(resolved.occupant.provider).toBe("cloudflare");
     expect(resolved.occupant.effectiveReasoning).toBe("high");
     expect(resolved.activationRefId).toBeNull();
   });
@@ -340,7 +345,7 @@ describe("MF-ACT dispatch authority", () => {
       controlRootMode: "production",
     });
     expect(resolved.source).toBe("current_compatibility");
-    expect(resolved.occupant.configuredModelId).toBe("nvidia/nemotron-3-super-120b-a12b");
+    expect(resolved.occupant.configuredModelId).toBe("@cf/nvidia/nemotron-3-120b-a12b");
   });
 
   it("E/F: caller model and reasoning pins lose to an activated occupant", async () => {
@@ -393,25 +398,30 @@ describe("MF-ACT dispatch authority", () => {
     database.close();
   });
 
-  it("G: no activation keeps CURRENT thought failover and Expression fallback pins", async () => {
+  it("G: no activation keeps CURRENT Cloudflare Thought and Expression fallback pins", async () => {
     const root = controlRoot();
+    env.cloudflareApiToken = "test-cloudflare-token";
+    env.cloudflareAccountId = "test-account";
     env.nimApiKey = "test";
-    const nimDispatch = vi.fn(async (args: {
+    const cloudflareDispatch = vi.fn(async (args: {
       modelId: string;
       fabricReasoning?: unknown;
     }) => {
-      if (args.modelId === "nvidia/nemotron-3-super-120b-a12b") {
+      if (args.modelId === "@cf/nvidia/nemotron-3-120b-a12b") {
         expect(args.fabricReasoning).toEqual({
           kind: "reasoning_effort",
           value: "high",
         });
         return {
           text: "{\"kind\":\"speak\"}",
-          providerModel: "nvidia/nemotron-3-super-120b-a12b",
+          providerModel: "@cf/nvidia/nemotron-3-120b-a12b",
           usage: { promptTokens: 1, completionTokens: 1 },
           finishReason: "stop",
         };
       }
+      throw new Error(`unexpected Cloudflare model ${args.modelId}`);
+    });
+    const nimDispatch = vi.fn(async (args: { modelId: string }) => {
       expect(args.modelId).toBe("nvidia/nemotron-3.5-lightning-30b-a3b");
       return {
         text: "hi",
@@ -419,6 +429,10 @@ describe("MF-ACT dispatch authority", () => {
         usage: { promptTokens: 1, completionTokens: 1 },
         finishReason: "stop",
       };
+    });
+    vi.spyOn(cloudflareAdapterModule, "createCloudflareAdapter").mockReturnValue({
+      provider: "cloudflare",
+      dispatch: cloudflareDispatch,
     });
     vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
       provider: "nim",
@@ -434,11 +448,11 @@ describe("MF-ACT dispatch authority", () => {
       modelFabricControlDir: root,
       modelFabricControlRootMode: "fixture",
     }));
-    expect(thought.modelAlias).toBe("nvidia/nemotron-3-super-120b-a12b");
+    expect(thought.modelAlias).toBe("@cf/nvidia/nemotron-3-120b-a12b");
     expect(thought.modelFabric?.resolvedRoute).toMatchObject({
       policyRowId: "mfr_thought_interactive_compat_v1",
-      occupantId: "mfo_nim_nemotron_3_super_high",
-      provider: "nim",
+      occupantId: "mfo_cloudflare_nemotron_3_super_high",
+      provider: "cloudflare",
       effectiveReasoning: "reasoning_effort=high",
     });
     thoughtDb.close();

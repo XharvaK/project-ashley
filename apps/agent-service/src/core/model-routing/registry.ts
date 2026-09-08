@@ -30,8 +30,8 @@ export const ROUTE_BINDINGS: readonly RouteBinding[] = [
   },
   {
     route: "thought",
-    provider: "nim",
-    configuredModelId: "nvidia/nemotron-3-super-120b-a12b",
+    provider: "cloudflare",
+    configuredModelId: "@cf/nvidia/nemotron-3-120b-a12b",
     contextProfile: "thought_summary",
     enabled: true,
   },

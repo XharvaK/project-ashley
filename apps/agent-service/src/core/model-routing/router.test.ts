@@ -38,13 +38,13 @@ describe("model-routing router", () => {
   it("resolves Thought-owned observation and reflection to the Thought route", () => {
     expect(resolveRoute("thought_observation")).toMatchObject({
       route: "thought",
-      provider: "nim",
-      configuredModelId: "nvidia/nemotron-3-super-120b-a12b",
+      provider: "cloudflare",
+      configuredModelId: "@cf/nvidia/nemotron-3-120b-a12b",
     });
     expect(resolveRoute("reflection_initiative")).toMatchObject({
       route: "thought",
-      provider: "nim",
-      configuredModelId: "nvidia/nemotron-3-super-120b-a12b",
+      provider: "cloudflare",
+      configuredModelId: "@cf/nvidia/nemotron-3-120b-a12b",
     });
   });
 
@@ -98,8 +98,8 @@ describe("model-routing router", () => {
     expect(cols).toEqual(
       expect.arrayContaining(["provider_id", "route_alias", "quota_bucket"]),
     );
-    expect(routeBinding("thought").provider).toBe("nim");
-    expect(routeBinding("thought").configuredModelId).toBe("nvidia/nemotron-3-super-120b-a12b");
+    expect(routeBinding("thought").provider).toBe("cloudflare");
+    expect(routeBinding("thought").configuredModelId).toBe("@cf/nvidia/nemotron-3-120b-a12b");
     db.close();
     continuity.close();
   });

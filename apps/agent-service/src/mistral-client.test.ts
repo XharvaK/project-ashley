@@ -15,6 +15,7 @@ import { admitWake } from "./core/cognitive-v021/wake/ledger.js";
 import { reconcilePolicyClock } from "./core/cognitive-v021/private-budget/policy-time-ledger.js";
 import { reservePrivateThought } from "./core/cognitive-v021/private-budget/ledger.js";
 import * as nimAdapterModule from "./core/model-routing/adapters/nim-adapter.js";
+import * as cloudflareAdapterModule from "./core/model-routing/adapters/cloudflare-adapter.js";
 import * as mistralAdapterModule from "./core/model-routing/adapters/mistral-adapter.js";
 import { thoughtOutputStructuredRequest } from "./core/cognitive-v021/thought/output-contract.js";
 import type {
@@ -27,6 +28,8 @@ const originalApiKey = env.mistralApiKey;
 const originalSecondaryApiKey = env.mistralApiKeySecondary;
 const originalGroqKey = env.groqApiKey;
 const originalNimKey = env.nimApiKey;
+const originalCloudflareToken = env.cloudflareApiToken;
+const originalCloudflareAccount = env.cloudflareAccountId;
 const originalMistralRps = env.mistralRequestsPerSecond;
 const originalMistralTpm = env.mistralTokensPerMinute;
 
@@ -35,6 +38,8 @@ afterEach(() => {
   env.mistralApiKeySecondary = originalSecondaryApiKey;
   env.groqApiKey = originalGroqKey;
   env.nimApiKey = originalNimKey;
+  env.cloudflareApiToken = originalCloudflareToken;
+  env.cloudflareAccountId = originalCloudflareAccount;
   env.mistralRequestsPerSecond = originalMistralRps;
   env.mistralTokensPerMinute = originalMistralTpm;
   resetAdapterCache();
@@ -156,7 +161,7 @@ describe("mapMistralError", () => {
     ).toBe(false);
   });
 
-it("creates no attention reservation when API key is missing", async () => {
+  it("creates no attention reservation when API key is missing", async () => {
     env.mistralApiKey = "";
     env.groqApiKey = "";
     const db = openNuclearDb(new DatabaseSync(":memory:"));
@@ -171,9 +176,68 @@ it("creates no attention reservation when API key is missing", async () => {
     db.close();
   });
 
+  it("dispatches the current Thought route once through Cloudflare without NIM fallback", async () => {
+    env.cloudflareApiToken = "test-cloudflare-token";
+    env.cloudflareAccountId = "test-cloudflare-account";
+    env.nimApiKey = "";
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const dispatch = vi.fn(async (args: ProviderDispatchArgs): Promise<ProviderCompletion> => ({
+      text: "{}",
+      providerModel: args.modelId,
+      providerRequestId: "cloudflare-request-1",
+      usage: { promptTokens: 2, completionTokens: 1, totalTokens: 3, neuronUsage: 17 },
+      finishReason: "stop",
+    }));
+    const createCloudflare = vi.spyOn(cloudflareAdapterModule, "createCloudflareAdapter").mockReturnValue({
+      provider: "cloudflare",
+      dispatch,
+    });
+    const createNim = vi.spyOn(nimAdapterModule, "createNimAdapter");
+    try {
+      const result = await withOfflineAppGateDisabled(() => completeChat(
+        [{ role: "user", content: "synthetic current Thought" }],
+        {
+          attentionDb: db,
+          purpose: "thought",
+          logicalRole: "thought",
+          route: "thought",
+          responseFormat: "json_schema",
+          structuredOutput: thoughtOutputStructuredRequest(),
+          reasoningEffort: "high",
+          deadlineAtMs: Date.now() + 30_000,
+        },
+      ));
+      expect(createCloudflare).toHaveBeenCalledTimes(1);
+      expect(createNim).not.toHaveBeenCalled();
+      expect(dispatch).toHaveBeenCalledTimes(1);
+      expect(dispatch.mock.calls[0]?.[0]).toMatchObject({
+        modelId: "@cf/nvidia/nemotron-3-120b-a12b",
+        fabricReasoning: { kind: "reasoning_effort", value: "high" },
+        fabricStructuredOutput: {
+          kind: "native_json_schema",
+          wireFormat: "cloudflare_response_format_json_schema",
+        },
+      });
+      expect(result).toMatchObject({
+        providerModel: "@cf/nvidia/nemotron-3-120b-a12b",
+        providerRequestId: "cloudflare-request-1",
+        modelFabric: {
+          receipt: { fallbackClass: "none", attempts: [{ provider: "cloudflare" }] },
+          providerBoundaryControls: {
+            maxTokens: 8192,
+            reasoningBudgetTokens: 1024,
+          },
+        },
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   it("binds and commits the durable private reservation at the exact W0 attempt boundary", async () => {
     env.mistralApiKey = "test-mistral-key";
-    env.nimApiKey = "test-nim-key";
+    env.cloudflareApiToken = "test-cloudflare-token";
+    env.cloudflareAccountId = "test-cloudflare-account";
     const attentionDb = openNuclearDb(new DatabaseSync(":memory:"));
     const sidecar = openCognitiveSidecarDb(new DatabaseSync(":memory:"), { dataPlane: { kind: "isolated" } });
     const nowMs = 4_000_000;
@@ -197,11 +261,11 @@ it("creates no attention reservation when API key is missing", async () => {
     if (reserved.kind !== "reserved") throw new Error("w7_test_reservation_missing");
     const dispatch = vi.fn().mockResolvedValue({
       text: "{}",
-      providerModel: "mistral-small-2603",
+      providerModel: "@cf/nvidia/nemotron-3-120b-a12b",
       usage: { promptTokens: 2, completionTokens: 1 },
       finishReason: "stop",
     });
-    vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({ provider: "nim", dispatch });
+    vi.spyOn(cloudflareAdapterModule, "createCloudflareAdapter").mockReturnValue({ provider: "cloudflare", dispatch });
     vi.spyOn(mistralAdapterModule, "createMistralAdapter").mockReturnValue({
       provider: "mistral",
       dispatch,

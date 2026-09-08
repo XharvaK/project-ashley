@@ -10,6 +10,7 @@ import {
 } from "../../mistral-client.js";
 import * as mistralAdapterModule from "../model-routing/adapters/mistral-adapter.js";
 import * as nimAdapterModule from "../model-routing/adapters/nim-adapter.js";
+import * as cloudflareAdapterModule from "../model-routing/adapters/cloudflare-adapter.js";
 import { attachProviderHttpStatusBoundary } from "../model-routing/types.js";
 import {
   capabilityProfileFor,
@@ -26,12 +27,16 @@ const savedKeys = {
   mistral: env.mistralApiKey,
   groq: env.groqApiKey,
   nim: env.nimApiKey,
+  cloudflareToken: env.cloudflareApiToken,
+  cloudflareAccount: env.cloudflareAccountId,
 };
 
 afterEach(() => {
   env.mistralApiKey = savedKeys.mistral;
   env.groqApiKey = savedKeys.groq;
   env.nimApiKey = savedKeys.nim;
+  env.cloudflareApiToken = savedKeys.cloudflareToken;
+  env.cloudflareAccountId = savedKeys.cloudflareAccount;
   resetAdapterCache();
   vi.restoreAllMocks();
 });
@@ -222,16 +227,17 @@ describe("MF-M1 completeChat receipts", () => {
     database.close();
   });
 
-  it("records the current Thought route as a single NIM attempt", async () => {
-    env.nimApiKey = "test";
+  it("records the current Thought route as a single Cloudflare attempt", async () => {
+    env.cloudflareApiToken = "test-cloudflare-token";
+    env.cloudflareAccountId = "test-account";
     const dispatch = vi.fn().mockResolvedValue({
       text: "thought",
-      providerModel: "nvidia/nemotron-3-super-120b-a12b",
+      providerModel: "@cf/nvidia/nemotron-3-120b-a12b",
       usage: { promptTokens: 4, completionTokens: 5 },
       finishReason: "stop",
     });
-    vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
-      provider: "nim",
+    vi.spyOn(cloudflareAdapterModule, "createCloudflareAdapter").mockReturnValue({
+      provider: "cloudflare",
       dispatch,
     });
     const database = db();
@@ -254,9 +260,9 @@ describe("MF-M1 completeChat receipts", () => {
     expect(receipt.finalDispatchedRouteId).toBe("thought");
     expect(receipt.fallbackClass).toBe("none");
     expect(receipt.attempts[0]).toMatchObject({
-      provider: "nim",
-      backend: "nim",
-      configuredModelId: "nvidia/nemotron-3-super-120b-a12b",
+      provider: "cloudflare",
+      backend: "cloudflare",
+      configuredModelId: "@cf/nvidia/nemotron-3-120b-a12b",
       fallbackClass: "none",
       providerRequestCount: 1,
     });
@@ -278,17 +284,18 @@ describe("MF-M1 completeChat receipts", () => {
     database.close();
   });
 
-  it("records configured utility route versus forced Thought dispatch for observation", async () => {
-    env.nimApiKey = "test";
-    const nimDispatch = vi.fn().mockResolvedValue({
+  it("records configured utility route versus forced Cloudflare Thought dispatch for observation", async () => {
+    env.cloudflareApiToken = "test-cloudflare-token";
+    env.cloudflareAccountId = "test-account";
+    const cloudflareDispatch = vi.fn().mockResolvedValue({
       text: "observation",
-      providerModel: "nvidia/nemotron-3-super-120b-a12b",
+      providerModel: "@cf/nvidia/nemotron-3-120b-a12b",
       usage: { promptTokens: 1, completionTokens: 1 },
       finishReason: "stop",
     });
-    vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
-      provider: "nim",
-      dispatch: nimDispatch,
+    vi.spyOn(cloudflareAdapterModule, "createCloudflareAdapter").mockReturnValue({
+      provider: "cloudflare",
+      dispatch: cloudflareDispatch,
     });
     const database = db();
 
@@ -310,8 +317,8 @@ describe("MF-M1 completeChat receipts", () => {
     expect(receipt.finalDispatchedRouteId).toBe("thought");
     expect(receipt.attempts[0]).toMatchObject({
       dispatchedRouteId: "thought",
-      provider: "nim",
-      configuredModelId: "nvidia/nemotron-3-super-120b-a12b",
+      provider: "cloudflare",
+      configuredModelId: "@cf/nvidia/nemotron-3-120b-a12b",
     });
     database.close();
   });

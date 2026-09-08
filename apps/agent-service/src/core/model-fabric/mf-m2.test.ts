@@ -6,6 +6,7 @@ import { completeChat, resetAdapterCache, MISTRAL_RETRY_CONFIG } from "../../mis
 import { withOfflineAppGateDisabled } from "../qualification/offline-test-helpers.js";
 import * as nimAdapterModule from "../model-routing/adapters/nim-adapter.js";
 import * as mistralAdapterModule from "../model-routing/adapters/mistral-adapter.js";
+import * as cloudflareAdapterModule from "../model-routing/adapters/cloudflare-adapter.js";
 import { routingStatus } from "../model-routing/status.js";
 import { thoughtOutputStructuredRequest } from "../cognitive-v021/thought/output-contract.js";
 import {
@@ -23,10 +24,14 @@ import { capabilityProfileFor } from "./profiles.js";
 
 const originalNimKey = env.nimApiKey;
 const originalMistralKey = env.mistralApiKey;
+const originalCloudflareToken = env.cloudflareApiToken;
+const originalCloudflareAccount = env.cloudflareAccountId;
 
 afterEach(() => {
   env.nimApiKey = originalNimKey;
   env.mistralApiKey = originalMistralKey;
+  env.cloudflareApiToken = originalCloudflareToken;
+  env.cloudflareAccountId = originalCloudflareAccount;
   resetAdapterCache();
   resetCurrentPortfolioForTests();
   vi.restoreAllMocks();
@@ -54,7 +59,7 @@ describe("MF-M2 CURRENT portfolio", () => {
     );
   });
 
-  it("keeps both CURRENT Thought occupants on high Mistral reasoning", () => {
+  it("keeps both CURRENT Thought occupants on high Cloudflare reasoning", () => {
     const interactive = resolveCurrentPolicy({
       logicalRole: "thought",
       purpose: "thought",
@@ -113,8 +118,8 @@ describe("MF-M2 CURRENT portfolio", () => {
   it("projects route enablement and quota contracts from CURRENT rather than models.json", () => {
     const records = routeRecordsFromCurrentPortfolio();
     expect(records.find((record) => record.route === "thought")).toMatchObject({
-      provider: "nim",
-      configuredModelId: "nvidia/nemotron-3-super-120b-a12b",
+      provider: "cloudflare",
+      configuredModelId: "@cf/nvidia/nemotron-3-120b-a12b",
       enabled: true,
       quotaContract: {
         tpm: 65536,
@@ -126,12 +131,13 @@ describe("MF-M2 CURRENT portfolio", () => {
   });
 
   it("uses the CURRENT resolver in completeChat and records the snapshot identity", async () => {
-    env.nimApiKey = "test";
-    vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
-      provider: "nim",
+    env.cloudflareApiToken = "test-cloudflare-token";
+    env.cloudflareAccountId = "test-account";
+    vi.spyOn(cloudflareAdapterModule, "createCloudflareAdapter").mockReturnValue({
+      provider: "cloudflare",
       dispatch: vi.fn().mockResolvedValue({
         text: "{\"kind\":\"speak\"}",
-        providerModel: "nvidia/nemotron-3-super-120b-a12b",
+        providerModel: "@cf/nvidia/nemotron-3-120b-a12b",
         usage: { promptTokens: 1, completionTokens: 1 },
         finishReason: "stop",
       }),
@@ -146,21 +152,24 @@ describe("MF-M2 CURRENT portfolio", () => {
     expect(result.modelFabric?.resolvedRoute).toMatchObject({
       registryVersion: currentPortfolio().registryVersion,
       policyRowId: "mfr_thought_interactive_compat_v1",
-      occupantId: "mfo_nim_nemotron_3_super_high",
+      occupantId: "mfo_cloudflare_nemotron_3_super_high",
+      provider: "cloudflare",
+      configuredModelId: "@cf/nvidia/nemotron-3-120b-a12b",
     });
     database.close();
   });
 
   it("uses the CURRENT Thought policy ceiling when the caller omits maxTokens", async () => {
-    env.nimApiKey = "test";
+    env.cloudflareApiToken = "test-cloudflare-token";
+    env.cloudflareAccountId = "test-account";
     const dispatch = vi.fn().mockResolvedValue({
       text: "{}",
-      providerModel: "nvidia/nemotron-3-super-120b-a12b",
+      providerModel: "@cf/nvidia/nemotron-3-120b-a12b",
       usage: { promptTokens: 1, completionTokens: 1 },
       finishReason: "stop",
     });
-    vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
-      provider: "nim",
+    vi.spyOn(cloudflareAdapterModule, "createCloudflareAdapter").mockReturnValue({
+      provider: "cloudflare",
       dispatch,
     });
     const database = openNuclearDb(new DatabaseSync(":memory:"));
@@ -177,15 +186,16 @@ describe("MF-M2 CURRENT portfolio", () => {
   });
 
   it("uses the resolved Thought ceiling for structured-output admission and provider dispatch", async () => {
-    env.nimApiKey = "test";
+    env.cloudflareApiToken = "test-cloudflare-token";
+    env.cloudflareAccountId = "test-account";
     const dispatch = vi.fn().mockResolvedValue({
       text: "{}",
-      providerModel: "nvidia/nemotron-3-super-120b-a12b",
+      providerModel: "@cf/nvidia/nemotron-3-120b-a12b",
       usage: { promptTokens: 1, completionTokens: 1 },
       finishReason: "stop",
     });
-    vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
-      provider: "nim",
+    vi.spyOn(cloudflareAdapterModule, "createCloudflareAdapter").mockReturnValue({
+      provider: "cloudflare",
       dispatch,
     });
     const database = openNuclearDb(new DatabaseSync(":memory:"));
@@ -240,10 +250,11 @@ describe("MF-M2 CURRENT portfolio", () => {
   });
 
   it("rejects a Thought caller ceiling above policy before attention/provider dispatch", async () => {
-    env.nimApiKey = "test";
+    env.cloudflareApiToken = "test-cloudflare-token";
+    env.cloudflareAccountId = "test-account";
     const dispatch = vi.fn();
-    vi.spyOn(nimAdapterModule, "createNimAdapter").mockReturnValue({
-      provider: "nim",
+    vi.spyOn(cloudflareAdapterModule, "createCloudflareAdapter").mockReturnValue({
+      provider: "cloudflare",
       dispatch,
     });
     const database = openNuclearDb(new DatabaseSync(":memory:"));
@@ -273,8 +284,8 @@ describe("MF-M2 CURRENT portfolio", () => {
     });
     expect(resolveDispatchContract({
       policy: interactive,
-      provider: "nim",
-      configuredModelId: "nvidia/nemotron-3-super-120b-a12b",
+      provider: "cloudflare",
+      configuredModelId: "@cf/nvidia/nemotron-3-120b-a12b",
     }).maxTokens).toBe(8192);
 
     const policyAboveProfile = {
@@ -296,14 +307,14 @@ describe("MF-M2 CURRENT portfolio", () => {
     const database = openNuclearDb(new DatabaseSync(":memory:"));
     const thought = routingStatus(database).find((route) => route.route === "thought");
     expect(thought?.fabric).toMatchObject({
-      portfolioRevisionId: "mfp_current_compatibility_v2",
+      portfolioRevisionId: "mfp_current_compatibility_v3",
       registryVersion: currentPortfolio().registryVersion,
     });
     expect(thought?.fabric.policyRows).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           policyRowId: "mfr_thought_interactive_compat_v1",
-          occupantId: "mfo_nim_nemotron_3_super_high",
+          occupantId: "mfo_cloudflare_nemotron_3_super_high",
           admissionBasis: expect.objectContaining({ kind: "existing_compatibility" }),
           activeActivationRefId: "compatibility_default",
           health: expect.objectContaining({

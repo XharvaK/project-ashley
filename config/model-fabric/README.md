@@ -3,8 +3,9 @@
 These files are versioned policy snapshots. They are not owner approval,
 qualification, activation, deployment, or production evidence.
 
-- `portfolios/current-compatibility.v1.json` is the only dispatchable
-  portfolio in the autonomous MF-M2 through MF-ACT candidate.
+- `portfolios/current-compatibility.v3.json` is the current dispatchable
+  portfolio. `current-compatibility.v2.json` and v1 are preserved historical
+  compatibility snapshots.
 - `portfolios/target-12-9.v2.json` is the current declared candidate TARGET
   (`mfp_target_12_9_v2`). It remains dark until later qualification, owner
   approval, activation, and production acceptance.

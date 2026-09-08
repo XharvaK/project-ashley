@@ -156,6 +156,10 @@ function createEnv() {
   nimApiKey: process.env.NIM_API_KEY ?? "",
   nimBaseUrl:
     process.env.NIM_BASE_URL ?? "https://integrate.api.nvidia.com/v1",
+  // Cloudflare Workers AI Thought host. The account id is used only to form
+  // the direct account endpoint; neither value is logged or sent to Thought.
+  cloudflareApiToken: process.env.CLOUDFLARE_API_TOKEN ?? "",
+  cloudflareAccountId: process.env.CLOUDFLARE_ACCOUNT_ID ?? "",
   // OpenCode Zen is a dark, utility-only Track A substrate. Missing key does
   // not affect boot or current compatibility routing.
   opencodeZenApiKey: process.env.OPENCODE_ZEN_API_KEY ?? "",

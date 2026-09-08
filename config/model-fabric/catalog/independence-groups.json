@@ -3,7 +3,7 @@
   "notes": "Training-lineage groups. Different providers of the same family are not independent.",
   "groups": [
     { "independenceGroupId": "openai_gpt_oss", "includes": ["openai/gpt-oss-20b", "openai/gpt-oss-120b"] },
-    { "independenceGroupId": "nvidia_nemotron", "includes": ["nvidia/nemotron-3-ultra-550b-a55b", "nvidia/nemotron-3-super-120b-a12b", "nvidia/nemotron-3.5-lightning-30b-a3b"] },
+    { "independenceGroupId": "nvidia_nemotron", "includes": ["nvidia/nemotron-3-ultra-550b-a55b", "nvidia/nemotron-3-super-120b-a12b", "@cf/nvidia/nemotron-3-120b-a12b", "nvidia/nemotron-3.5-lightning-30b-a3b"] },
     { "independenceGroupId": "alibaba_qwen", "includes": ["qwen/qwen3.6-27b"] },
     { "independenceGroupId": "mistral", "includes": ["mistral-medium-latest"] },
     { "independenceGroupId": "thinkingmachines_inkling", "includes": ["thinkingmachines/inkling"] },

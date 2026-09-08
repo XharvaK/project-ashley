@@ -62,6 +62,7 @@ export type AttentionDispatchInput = {
     signal?: AbortSignal;
   }) => Promise<{
     providerModel?: string | null;
+    providerRequestId?: string | null;
     usage?: TokenUsage;
     result: unknown;
   }>;
@@ -76,6 +77,7 @@ export type AttentionDispatchResult<T> = {
   resolvedModelId: string | null;
   acceptedDispatchIdentity: AcceptedDispatchIdentity;
   result: T;
+  providerRequestId?: string | null;
   usage?: TokenUsage;
 };
 
@@ -332,6 +334,7 @@ export async function runAttentiveDispatch<T>(
             resolvedModelId: resolved.resolvedModelId,
             acceptedDispatchIdentity,
             result: dispatched.result as T,
+            providerRequestId: dispatched.providerRequestId,
             usage: dispatched.usage,
           };
         } catch (error) {

@@ -117,7 +117,7 @@ export type CurrentPolicyResolutionInput = {
   specialistRequirement?: SpecialistRequirement | null;
 };
 
-const CURRENT_FILENAME = "current-compatibility.v2.json";
+const CURRENT_FILENAME = "current-compatibility.v3.json";
 let cachedCurrent: ModelFabricPortfolio | null = null;
 
 function candidatePortfolioPaths(): string[] {

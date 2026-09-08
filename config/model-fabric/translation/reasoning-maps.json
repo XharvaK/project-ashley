@@ -49,6 +49,23 @@
       }
     },
     {
+      "familyId": "cloudflare_nemotron_super",
+      "match": {
+        "provider": "cloudflare",
+        "configuredModelId": "@cf/nvidia/nemotron-3-120b-a12b"
+      },
+      "staleAliases": {
+        "thinking_on": "high"
+      },
+      "policies": {
+        "disabled": { "kind": "reasoning_effort", "value": "none" },
+        "economical": { "kind": "reasoning_effort", "value": "low" },
+        "standard": { "kind": "unsupported", "code": "unsupported_reasoning_mapping" },
+        "high": { "kind": "reasoning_effort", "value": "high" },
+        "max_supported": { "kind": "reasoning_effort", "value": "high" }
+      }
+    },
+    {
       "familyId": "nim_nemotron_lightning",
       "match": {
         "provider": "nim",

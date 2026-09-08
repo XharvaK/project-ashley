@@ -17,7 +17,7 @@ import type { ThoughtInvocationContext } from "../cognitive-v021/types.js";
  * `provider:configuredApiModelId`; `resolved_model_id` stays continuity-only.
  */
 
-export type ProviderId = "mistral" | "groq" | "nim" | "opencode_zen";
+export type ProviderId = "mistral" | "groq" | "nim" | "cloudflare" | "opencode_zen";
 
 /** Non-secret Mistral account seat used only for bounded credential failover. */
 export type MistralCredentialSeat = "mistral_primary" | "mistral_secondary";
@@ -63,10 +63,14 @@ export type ChatMessage = {
 export type TokenUsage = {
   promptTokens: number;
   completionTokens: number;
+  /** Provider-reported total tokens, when supplied. */
+  totalTokens?: number;
   /** Provider-reported prompt tokens served from a prefix cache, when available. */
   cachedTokens?: number;
   /** Hidden reasoning tokens when the provider reports them separately. */
   reasoningTokens?: number;
+  /** Provider-reported Cloudflare neuron usage, when supplied. */
+  neuronUsage?: number;
 };
 
 export type ProviderFinishReasonClass =
@@ -197,6 +201,8 @@ export type ProviderCompletion = {
   toolCalls?: ToolCallResult[];
   usage?: TokenUsage;
   providerModel?: string | null;
+  /** Provider request identifier, when the provider returns one. */
+  providerRequestId?: string | null;
   /** Actual HTTP response status observed at the provider boundary. */
   providerHttpStatus?: number;
   /** Provider finish_reason when supplied (stop, length, …). Never a secret. */
