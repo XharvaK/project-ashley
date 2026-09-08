@@ -450,7 +450,8 @@ export function collectMotivations(
         .filter(
           (candidate) =>
             candidate.evidenceKind === "read_record" &&
-            candidate.provenance === "live",
+            candidate.provenance === "live" &&
+            candidate.readProvenance === "live",
         )
         .slice(0, 6)
     : []) {
@@ -462,8 +463,7 @@ export function collectMotivations(
       continue;
     }
     const score = Math.max(20, 55 - ageHours(take.createdAt) * 3);
-    motivations.push(
-      persistMotivation(
+    const motivation = persistMotivation(
         db,
         ownerId,
         "take",
@@ -472,8 +472,11 @@ export function collectMotivations(
         "take",
         take.id,
         write,
-      ),
-    );
+      );
+    motivations.push({
+      ...motivation,
+      sourceAuthorityClass: take.authorityClass,
+    });
   }
 
   motivations.push(

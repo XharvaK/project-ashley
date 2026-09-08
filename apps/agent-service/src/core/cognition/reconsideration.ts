@@ -4,6 +4,7 @@ import type {
   DecisionDelayClass,
   EvidenceRef,
 } from "../types.js";
+import { requireStableAuthorityBarrier } from "../cognitive-v021/authority/barrier.js";
 import {
   getOpenCognitiveItem,
   listOpenCognitiveItems,
@@ -86,10 +87,16 @@ function withTransaction<T>(
   inTransaction: boolean,
   callback: () => T,
 ): T {
-  if (inTransaction) return callback();
+  const fenced = (): T => {
+    requireStableAuthorityBarrier(db);
+    const result = callback();
+    requireStableAuthorityBarrier(db);
+    return result;
+  };
+  if (inTransaction) return fenced();
   db.exec("BEGIN IMMEDIATE");
   try {
-    const result = callback();
+    const result = fenced();
     db.exec("COMMIT");
     return result;
   } catch (error) {

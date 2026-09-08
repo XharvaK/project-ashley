@@ -176,9 +176,12 @@ function sourceIsCurrentlyEligible(
         capabilityCanInfluence(db, "curiosity_consolidation") &&
         rowExists(
           db,
-          `SELECT 1 FROM cur_takes
-           WHERE id = ? AND provenance = 'live'
-             AND evidence_kind = 'read_record'`,
+          `SELECT 1
+             FROM cur_takes t
+             JOIN cur_reads r ON r.id = t.read_id AND r.item_id = t.item_id
+            WHERE t.id = ? AND t.provenance = 'live'
+              AND t.evidence_kind = 'read_record'
+              AND r.provenance = 'live'`,
           numericId,
         )
       );

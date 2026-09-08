@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { MotivationKind } from "../types.js";
+import { requireStableAuthorityBarrier } from "../cognitive-v021/authority/barrier.js";
 
 export type ClassifiedSignal = "positive" | "negative" | "neutral";
 export type ReflectionEventStatus = "pending" | "applied" | "ignored";
@@ -235,6 +236,7 @@ export function saveInitiativeLearning(
   db: DatabaseSync,
   learning: InitiativeLearning,
 ): void {
+  requireStableAuthorityBarrier(db);
   db.prepare(
     `INSERT INTO initiative_learning
        (owner_id, motivation_kind, positive_count, negative_count,
@@ -257,6 +259,7 @@ export function saveInitiativeLearning(
     learning.lastEventId,
     learning.updatedAt,
   );
+  requireStableAuthorityBarrier(db);
 }
 
 export function markPendingSubjectApplied(

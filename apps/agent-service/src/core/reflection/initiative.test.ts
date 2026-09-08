@@ -3,6 +3,10 @@ import { describe, expect, it } from "vitest";
 import { logDecision } from "../agency/log.js";
 import { decide } from "../agency/decide.js";
 import { openNuclearDb } from "../db.js";
+import {
+  beginAuthorityTransition,
+  stabilizeAuthorityBarrier,
+} from "../cognitive-v021/authority/barrier.js";
 import type { Motivation, MotivationKind } from "../types.js";
 import {
   applyInitiativeLearning,
@@ -210,6 +214,7 @@ describe("Reflection v1 initiative learning", () => {
       baseScore: 24,
       score: 26,
       learningAdjustment: 2,
+      learningAuthorityClass: "MECHANICAL_CALIBRATION",
     });
     const decision = attachLearningSnapshot(
       decide(applied, "proactive"),
@@ -219,8 +224,47 @@ describe("Reflection v1 initiative learning", () => {
     expect(decision.learning).toMatchObject({
       subjectKind: "question",
       adjustment: 2,
+      authorityClass: "MECHANICAL_CALIBRATION",
     });
 
+    db.close();
+  });
+
+  it("fences initiative calibration while the authority barrier is transitioning", () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    insertReflectionEvent(db, {
+      ownerId: "doc",
+      kind: "initiative_reaction",
+      sourceKey: "fenced-pending-event",
+      decisionId: 1,
+      reservationId: 1,
+      discordMessageId: "fenced-message",
+      subjectKind: "question",
+      rawSignal: "\u{1F44D}",
+      classifiedSignal: "positive",
+      classifierVersion: 1,
+      status: "pending",
+      reason: "eligible",
+      detailJson: "{}",
+      createdAt: new Date().toISOString(),
+      processedAt: null,
+    });
+    const transition = beginAuthorityTransition(
+      db,
+      "p5_reflection_fence_test",
+      Date.now(),
+    );
+    expect(() => processPendingReflectionEvents(db)).toThrow(
+      "authority_barrier_not_stable",
+    );
+    expect(listInitiativeLearning(db, "doc")).toEqual([]);
+    expect(listReflectionEvents(db, "doc")[0]?.status).toBe("pending");
+    stabilizeAuthorityBarrier(db, transition.vector, Date.now(), transition.transitionId);
+    processPendingReflectionEvents(db);
+    expect(listInitiativeLearning(db, "doc")[0]).toMatchObject({
+      adjustment: 0,
+      lastEventId: expect.any(Number),
+    });
     db.close();
   });
 

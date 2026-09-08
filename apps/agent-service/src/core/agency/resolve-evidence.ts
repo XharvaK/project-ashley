@@ -1,5 +1,8 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { EvidenceRef } from "../types.js";
+import type {
+  EvidenceRef,
+  NonAuthoritativeContentClass,
+} from "../types.js";
 import {
   getOpenCognitiveItem,
   openCognitiveItemEligibleForInfluence,
@@ -19,6 +22,7 @@ export type ResolvedEvidenceLine = {
   ref: EvidenceRef;
   label: string;
   text: string;
+  authorityClass?: NonAuthoritativeContentClass;
   memory_context_role?:
     | "current_source_evidence"
     | "historical_source_evidence"
@@ -287,10 +291,12 @@ export function resolveEvidenceRefs(
             `SELECT t.id, t.take, i.title AS title
              FROM cur_takes t
              JOIN cur_items i ON i.id = t.item_id
+             JOIN cur_reads r ON r.id = t.read_id AND r.item_id = t.item_id
              WHERE t.id = ?
                AND t.evidence_kind = 'read_record'
                AND t.read_id IS NOT NULL
                AND t.provenance = 'live'
+               AND r.provenance = 'live'
              LIMIT 1`,
           )
           .get(id);
@@ -299,6 +305,7 @@ export function resolveEvidenceRefs(
           ref,
           label: `take:${id}`,
           text: `${text(row.title)}: ${text(row.take)}`.slice(0, 800),
+          authorityClass: "NON_AUTHORITATIVE_DERIVED_CONTENT",
         });
         break;
       }

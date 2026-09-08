@@ -269,10 +269,26 @@ export type AffectLicense = {
   source?: EvidenceRef;
 };
 
+/**
+ * Classification for Reflection and initiative-learning write paths.
+ * These labels describe authority; they do not grant semantic authorship.
+ */
+export type ReflectionWriteClassification =
+  | "MECHANICAL_CALIBRATION"
+  | "NON_AUTHORITATIVE_ADVISORY_OUTPUT"
+  | "THOUGHT_AUTHORED_SEMANTIC_STATE"
+  | "DISALLOWED_UNDER_FROZEN_AUTHORITY";
+
+/** Content that may be carried as provenance, but is not Ashley-authored meaning. */
+export type NonAuthoritativeContentClass =
+  | "NON_AUTHORITATIVE_BOOKKEEPING"
+  | "NON_AUTHORITATIVE_DERIVED_CONTENT";
+
 export type LearningSnapshot = {
   subjectKind: MotivationKind;
   adjustment: number;
   throughEventId: number;
+  authorityClass?: "MECHANICAL_CALIBRATION";
 };
 
 /** v1 payload: transient decisions already implied by Decision.kind. Not the definition of Thought. */
@@ -518,10 +534,12 @@ export type Motivation = {
   baseScore?: number;
   learningAdjustment?: number;
   learningThroughEventId?: number;
+  learningAuthorityClass?: "MECHANICAL_CALIBRATION";
   refType?: string | null;
   refId?: string | number | null;
   summary: string;
   createdAt?: string;
+  sourceAuthorityClass?: NonAuthoritativeContentClass;
   memoryContextRole?:
     | "current_source_evidence"
     | "historical_source_evidence"

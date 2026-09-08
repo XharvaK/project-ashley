@@ -7,6 +7,7 @@ import type {
   MotivationKind,
   ReflectionMode,
 } from "../types.js";
+import { requireStableAuthorityBarrier } from "../cognitive-v021/authority/barrier.js";
 import {
   claimOpenCognitiveItemReviewRequests,
   recordOpenCognitiveReviewDisposition,
@@ -29,6 +30,10 @@ import {
   type ClassifiedSignal,
   type ReflectionEvent,
 } from "./store.js";
+import {
+  REFLECTION_AUTHORITY_CLASSES,
+  REFLECTION_WRITE_PATH_CLASSIFICATION,
+} from "./authority.js";
 
 const CLASSIFIER_VERSION = 1;
 const EVIDENCE_WINDOW = 20;
@@ -98,6 +103,7 @@ export function processPendingReflectionEvents(
   for (const subject of listPendingSubjects(db, ownerId)) {
     db.exec("BEGIN IMMEDIATE");
     try {
+      requireStableAuthorityBarrier(db);
       const events = listEvidenceWindow(
         db,
         subject.ownerId,
@@ -130,6 +136,7 @@ export function processPendingReflectionEvents(
         subject.motivationKind,
         processedAt,
       );
+      requireStableAuthorityBarrier(db);
       db.exec("COMMIT");
     } catch (error) {
       db.exec("ROLLBACK");
@@ -144,6 +151,8 @@ export type OpenCognitiveReviewProposal = {
   evidenceRefs?: EvidenceRef[];
   replacementEntityUuid?: string;
   now?: Date;
+  /** Advisory provenance; never semantic authorship. */
+  authorityClass?: "NON_AUTHORITATIVE_ADVISORY_OUTPUT";
 };
 
 export type OpenCognitiveReviewProposalFactory = (
@@ -192,6 +201,7 @@ export function parseReflectionReviewResponse(
   return {
     action: normalizedAction,
     reason: `reflection_model_${normalizedAction}`,
+    authorityClass: REFLECTION_AUTHORITY_CLASSES.advisoryOutput,
     ...(evidenceRefs ? { evidenceRefs } : {}),
     ...(typeof parsed.replacementEntityUuid === "string"
       ? { replacementEntityUuid: parsed.replacementEntityUuid.trim() }
@@ -302,8 +312,10 @@ export function processPendingOpenCognitiveReviews(
         continue;
       }
       try {
+        const { authorityClass: _authorityClass, ...transition } = requested;
+        void _authorityClass;
         transitionOpenCognitiveItem(db, {
-          ...requested,
+          ...transition,
           ownerId: item.ownerId,
           entityUuid: item.entityUuid,
         });
@@ -365,8 +377,10 @@ export async function processPendingOpenCognitiveReviewsAsync(
         continue;
       }
       try {
+        const { authorityClass: _authorityClass, ...transition } = requested;
+        void _authorityClass;
         transitionOpenCognitiveItem(db, {
-          ...requested,
+          ...transition,
           ownerId: item.ownerId,
           entityUuid: item.entityUuid,
         });
@@ -443,6 +457,7 @@ export function recordInitiativeReaction(
   else if (!subjectKind) reason = "missing_or_ineligible_motivation";
 
   const eligible = reason === "eligible";
+  requireStableAuthorityBarrier(db);
   const createdAt = new Date().toISOString();
   const event = insertReflectionEvent(db, {
     ownerId,
@@ -498,6 +513,8 @@ export function applyInitiativeLearning(
       score: Math.max(0, motivation.score + adjustment),
       learningAdjustment: adjustment,
       learningThroughEventId: learned.lastEventId,
+      learningAuthorityClass:
+        REFLECTION_WRITE_PATH_CLASSIFICATION.applyInitiativeLearning,
     };
   });
 }
@@ -525,6 +542,7 @@ export function attachLearningSnapshot(
       subjectKind: selected.kind,
       adjustment: selected.learningAdjustment,
       throughEventId: selected.learningThroughEventId,
+      authorityClass: "MECHANICAL_CALIBRATION",
     },
   };
 }

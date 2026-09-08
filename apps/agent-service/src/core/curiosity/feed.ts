@@ -6,7 +6,10 @@ import {
   urlKey,
   type FeedItem,
 } from "../../lib/feed-parse.js";
-import type { EvidenceProvenance } from "../types.js";
+import type {
+  EvidenceProvenance,
+  NonAuthoritativeContentClass,
+} from "../types.js";
 
 export { decodeEntities, htmlToText, parseFeed, urlKey };
 export type { FeedItem };
@@ -49,7 +52,18 @@ export type NuclearTake = {
   evidenceKind: "scan_excerpt" | "read_record";
   readId: number | null;
   provenance: EvidenceProvenance;
+  readProvenance?: EvidenceProvenance | null;
+  /** A take is source-derived/bookkeeping content, never Ashley semantic authorship. */
+  authorityClass: NonAuthoritativeContentClass;
 };
+
+export function curiosityTakeAuthority(
+  evidenceKind: NuclearTake["evidenceKind"],
+): NonAuthoritativeContentClass {
+  return evidenceKind === "read_record"
+    ? "NON_AUTHORITATIVE_DERIVED_CONTENT"
+    : "NON_AUTHORITATIVE_BOOKKEEPING";
+}
 
 export type NuclearProvenanceKind =
   | "scan"
@@ -132,6 +146,9 @@ function mapItem(row: unknown): NuclearItem | null {
 
 function mapTake(row: unknown): NuclearTake | null {
   if (!isRow(row)) return null;
+  const evidenceKind = row.evidence_kind === "read_record"
+    ? "read_record"
+    : "scan_excerpt";
   return {
     id: numberValue(row.id),
     itemId: numberValue(row.item_id),
@@ -140,11 +157,14 @@ function mapTake(row: unknown): NuclearTake | null {
     createdAt: stringValue(row.created_at),
     title: stringValue(row.title),
     url: stringValue(row.url),
-    evidenceKind: row.evidence_kind === "read_record"
-      ? "read_record"
-      : "scan_excerpt",
+    evidenceKind,
     readId: row.read_id == null ? null : numberValue(row.read_id),
     provenance: row.provenance === "live" ? "live" : "shadow",
+    readProvenance:
+      row.read_provenance === "live" || row.read_provenance === "shadow"
+        ? row.read_provenance
+        : null,
+    authorityClass: curiosityTakeAuthority(evidenceKind),
   };
 }
 
@@ -315,9 +335,11 @@ export function listRecentTakes(
   const rows = db
     .prepare(
       `SELECT t.id, t.item_id, t.interest, t.take, t.created_at,
-              i.title, i.url, t.evidence_kind, t.read_id, t.provenance
+              i.title, i.url, t.evidence_kind, t.read_id, t.provenance,
+              r.provenance AS read_provenance
        FROM cur_takes t
        JOIN cur_items i ON i.id = t.item_id
+       LEFT JOIN cur_reads r ON r.id = t.read_id
        ORDER BY t.created_at DESC
        LIMIT ?`,
     )

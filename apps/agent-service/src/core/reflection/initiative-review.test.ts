@@ -5,6 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { openNuclearDb } from "../db.js";
+import {
+  beginAuthorityTransition,
+  stabilizeAuthorityBarrier,
+} from "../cognitive-v021/authority/barrier.js";
 import { openContinuityDb } from "../continuity/db.js";
 import {
   currentBuildIdentity,
@@ -79,6 +83,7 @@ describe("Reflection OCI adjudication", () => {
     expect(parseReflectionReviewResponse('{"action":"KEEP"}')).toMatchObject({
       action: "keep_open",
       reason: "reflection_model_keep_open",
+      authorityClass: "NON_AUTHORITATIVE_ADVISORY_OUTPUT",
     });
     expect(parseReflectionReviewResponse('{"action":"WITHDRAW"}')).toMatchObject({
       action: "withdraw",
@@ -91,6 +96,40 @@ describe("Reflection OCI adjudication", () => {
       replacementEntityUuid: "replacement",
     });
     expect(parseReflectionReviewResponse('{"action":"speak"}')).toBeNull();
+    const hostile = parseReflectionReviewResponse(
+      '{"action":"WITHDRAW","speech":"send","identityMeaning":"changed","salience":99}',
+    );
+    expect(hostile).toMatchObject({
+      action: "withdraw",
+      authorityClass: "NON_AUTHORITATIVE_ADVISORY_OUTPUT",
+    });
+    expect(hostile).not.toHaveProperty("speech");
+    expect(hostile).not.toHaveProperty("identityMeaning");
+    expect(hostile).not.toHaveProperty("salience");
+  });
+
+  it("does not let advisory Reflection mutate an OCI during an authority transition", async () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    activateReading(db);
+    const item = seedReviewItem(db, "transition-fence");
+    const transition = beginAuthorityTransition(
+      db,
+      "p5_advisory_fence_test",
+      Date.now(),
+    );
+    try {
+      await expect(
+        processPendingOpenCognitiveReviewsAsync(
+          db,
+          OWNER_ID,
+          async () => ({ action: "withdraw", reason: "advisory_fixture" }),
+        ),
+      ).resolves.toEqual({ processed: 0, skipped: 1 });
+      expect(getOpenCognitiveItem(db, OWNER_ID, item.entityUuid)?.status).toBe("OPEN");
+    } finally {
+      stabilizeAuthorityBarrier(db, transition.vector, Date.now(), transition.transitionId);
+      db.close();
+    }
   });
 
   it("uses an injected Reflection decision to withdraw and supersede", async () => {

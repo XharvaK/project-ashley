@@ -4,6 +4,7 @@ import type {
   EvidenceRef,
   Motivation,
   MotivationKind,
+  NonAuthoritativeContentClass,
   Trigger,
 } from "../types.js";
 import type { OwnTimeReportConstraint } from "./own-time-constraint.js";
@@ -294,6 +295,8 @@ export function attachAuthorizedClaims(
     evidenceKind: "scan_excerpt" | "read_record";
     readId: number | null;
     provenance: "shadow" | "live";
+    readProvenance?: "shadow" | "live" | null;
+    authorityClass?: NonAuthoritativeContentClass;
   }>,
 ): Decision {
   if (decision.authorizedClaims.readingClaims.length > 0) {
@@ -313,7 +316,10 @@ export function attachAuthorizedClaims(
         licensedTakeIds.has(take.id) &&
         take.evidenceKind === "read_record" &&
         take.readId !== null &&
-        take.provenance === "live",
+        take.provenance === "live" &&
+        (take.readProvenance ?? "live") === "live" &&
+        (take.authorityClass ?? "NON_AUTHORITATIVE_DERIVED_CONTENT") ===
+          "NON_AUTHORITATIVE_DERIVED_CONTENT",
     )
     .slice(0, 2);
   return {
