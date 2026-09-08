@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_SEMANTIC_PROJECTION_ENVELOPE,
+  CURRENT_SOURCE_DEFAULT_SEMANTIC_ENVELOPE,
   INTERACTIVE_THOUGHT_MAX_OUTPUT,
+  MAX_LOGICAL_SERIALIZED_INPUT_BYTES,
+  MAX_SUPPORTED_COMPOSITION_BYTES,
+  MAX_SUPPORTED_COMPOSITION_ESTIMATED_INPUT_TOKENS,
+  OWNER_APPROVED_TARGET_SEMANTIC_ENVELOPE,
   STRUCTURAL_RETRY_MAX_OUTPUT,
+  TARGET_SEMANTIC_INPUT_ENVELOPE,
   TEMPORARY_QUALIFICATION_CEILING_TOKENS,
   checkThoughtAdmission,
   deriveThoughtBudget,
@@ -14,10 +20,18 @@ describe("Thought semantic projection budget", () => {
     const groq = deriveThoughtBudget({ quotaBucket: "groq:openai/gpt-oss-20b" });
 
     expect(DEFAULT_SEMANTIC_PROJECTION_ENVELOPE.maxInputTokens).toBe(
-      TEMPORARY_QUALIFICATION_CEILING_TOKENS,
+      TARGET_SEMANTIC_INPUT_ENVELOPE,
     );
     expect(nim.semanticProjectionEnvelope).toEqual(groq.semanticProjectionEnvelope);
-    expect(nim.semanticProjectionEnvelope.maxInputTokens).toBe(9500);
+    expect(CURRENT_SOURCE_DEFAULT_SEMANTIC_ENVELOPE).toBe(9_500);
+    expect(TEMPORARY_QUALIFICATION_CEILING_TOKENS)
+      .toBe(CURRENT_SOURCE_DEFAULT_SEMANTIC_ENVELOPE);
+    expect(OWNER_APPROVED_TARGET_SEMANTIC_ENVELOPE).toBe(32_768);
+    expect(nim.semanticProjectionEnvelope.maxInputTokens)
+      .toBe(OWNER_APPROVED_TARGET_SEMANTIC_ENVELOPE);
+    expect(MAX_LOGICAL_SERIALIZED_INPUT_BYTES).toBe(65_408);
+    expect(MAX_SUPPORTED_COMPOSITION_BYTES).toBe(65_356);
+    expect(MAX_SUPPORTED_COMPOSITION_ESTIMATED_INPUT_TOKENS).toBe(32_742);
     expect(nim.maxOutputTokens).toBe(INTERACTIVE_THOUGHT_MAX_OUTPUT);
     expect(deriveThoughtBudget({ maxOutputTokens: STRUCTURAL_RETRY_MAX_OUTPUT }).maxOutputTokens)
       .toBe(STRUCTURAL_RETRY_MAX_OUTPUT);

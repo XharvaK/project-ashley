@@ -47,6 +47,16 @@ describe("conservative token estimator", () => {
     expect(withTools.estimatedOutputTokens).toBe(100);
   });
 
+  it("counts provider wire material without duplicating logical messages", () => {
+    const withoutSchema = estimateRequestTokens([{ role: "user", content: "x" }]);
+    const withSchema = estimateRequestTokens([{ role: "user", content: "x" }], {
+      wireAdditionalBytes: 100,
+    });
+
+    expect(withSchema.estimatedInputTokens - withoutSchema.estimatedInputTokens)
+      .toBe(Math.ceil(100 / BYTES_PER_TOKEN));
+  });
+
   it("reserves conservative tokens per image", () => {
     const estimate = estimateRequestTokens([
       {

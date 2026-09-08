@@ -20,6 +20,18 @@ export type TokenEstimate = {
   estimatedOutputTokens: number;
 };
 
+export type RequestEstimateOptions = {
+  maxTokens?: number;
+  toolsJson?: string;
+  /**
+   * UTF-8 bytes in the provider request that are not represented by the
+   * logical chat messages above. This is for response schemas, provider
+   * wrappers, and other wire material only; callers must not pass the full
+   * serialized message array or count it twice.
+   */
+  wireAdditionalBytes?: number;
+};
+
 function utf8Bytes(text: string): number {
   return Buffer.byteLength(text, "utf8");
 }
@@ -39,30 +51,40 @@ function inlineImageTokens(
 }
 
 /**
+ * Return the logical textual bytes used by the conservative estimator before
+ * the fixed framing and image reservations are applied.
+ */
+export function estimateRequestInputBytes(
+  messages: EstimateMessage[],
+  options: Pick<RequestEstimateOptions, "toolsJson" | "wireAdditionalBytes"> = {},
+): number {
+  let bytes = 0;
+  for (const message of messages) {
+    bytes += utf8Bytes(message.role);
+    bytes += utf8Bytes(message.content ?? "");
+  }
+  if (options.toolsJson) bytes += utf8Bytes(options.toolsJson);
+  bytes += Math.max(0, Math.floor(options.wireAdditionalBytes ?? 0));
+  return bytes;
+}
+
+/**
  * Conservative token estimator. Prefers UTF-8 byte length of the complete
  * serialized textual request — never characters/4.
  */
 export function estimateRequestTokens(
   messages: EstimateMessage[],
-  options: {
-    maxTokens?: number;
-    toolsJson?: string;
-  } = {},
+  options: RequestEstimateOptions = {},
 ): TokenEstimate {
-  let bytes = 0;
   let legacyImageCount = 0;
   let inlineImages: Array<{ base64Bytes: number; mime: string }> = [];
   for (const message of messages) {
-    bytes += utf8Bytes(message.role);
-    bytes += utf8Bytes(message.content ?? "");
     legacyImageCount += message.imageUrls?.length ?? 0;
     if (message.inlineImages?.length) {
       inlineImages = inlineImages.concat(message.inlineImages);
     }
   }
-  if (options.toolsJson) {
-    bytes += utf8Bytes(options.toolsJson);
-  }
+  const bytes = estimateRequestInputBytes(messages, options);
   const textTokens = Math.ceil(bytes / BYTES_PER_TOKEN) + FRAMING_TOKEN_OVERHEAD;
   const imageTokens =
     inlineImages.length > 0

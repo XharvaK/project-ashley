@@ -3,7 +3,9 @@ import {
   BYTES_PER_TOKEN,
   FRAMING_TOKEN_OVERHEAD,
   estimateRequestTokens,
+  estimateRequestInputBytes,
   type EstimateMessage,
+  type RequestEstimateOptions,
   type TokenEstimate,
 } from "../../../attention/estimate.js";
 
@@ -11,7 +13,9 @@ export {
   BYTES_PER_TOKEN,
   FRAMING_TOKEN_OVERHEAD,
   estimateRequestTokens,
+  estimateRequestInputBytes,
   type EstimateMessage,
+  type RequestEstimateOptions,
   type TokenEstimate,
 };
 
@@ -42,11 +46,26 @@ export const ORDINARY_THOUGHT_BUDGET_MS = 60_000;
 export const INTERACTIVE_THOUGHT_MAX_OUTPUT = 8_192;
 export const STRUCTURAL_RETRY_MAX_OUTPUT = 8_192;
 export const STABLE_RESERVE_TOKENS = 0;
-export const TEMPORARY_QUALIFICATION_CEILING_TOKENS = 9_500;
+/** Exact source-baseline default at 440cc0. It is retained for comparison. */
+export const CURRENT_SOURCE_DEFAULT_SEMANTIC_ENVELOPE = 9_500;
+/** Owner-approved restoration target. It is provider-independent. */
+export const OWNER_APPROVED_TARGET_SEMANTIC_ENVELOPE = 32_768;
+export const TARGET_SEMANTIC_INPUT_ENVELOPE = OWNER_APPROVED_TARGET_SEMANTIC_ENVELOPE;
+/** Historical source name retained so baseline readers remain exact. */
+export const TEMPORARY_QUALIFICATION_CEILING_TOKENS =
+  CURRENT_SOURCE_DEFAULT_SEMANTIC_ENVELOPE;
+/** Maximum logical serialized input bytes under the frozen estimator. */
+export const MAX_LOGICAL_SERIALIZED_INPUT_BYTES =
+  (TARGET_SEMANTIC_INPUT_ENVELOPE - FRAMING_TOKEN_OVERHEAD) * BYTES_PER_TOKEN;
+/** Current maximal supported composition, including one structural retry. */
+export const MAX_SUPPORTED_COMPOSITION_BYTES = 65_356;
+export const MAX_SUPPORTED_COMPOSITION_ESTIMATED_INPUT_TOKENS = 32_742;
+export const COMPOSITION_UNALLOCATED_BYTES =
+  MAX_LOGICAL_SERIALIZED_INPUT_BYTES - MAX_SUPPORTED_COMPOSITION_BYTES;
 export const DEFAULT_SEMANTIC_PROJECTION_ENVELOPE: SemanticProjectionEnvelope = Object.freeze({
   id: "thought-semantic-projection",
   version: 1,
-  maxInputTokens: TEMPORARY_QUALIFICATION_CEILING_TOKENS,
+  maxInputTokens: TARGET_SEMANTIC_INPUT_ENVELOPE,
 });
 
 /** Alias used by qualification readers; the value remains the same contract. */
@@ -113,7 +132,7 @@ export function deriveThoughtBudget(opts: {
 export function checkThoughtAdmission(
   messages: EstimateMessage[],
   budget: Budget,
-  options: { toolsJson?: string } = {},
+  options: Pick<RequestEstimateOptions, "toolsJson" | "wireAdditionalBytes"> = {},
 ): {
   admitted: boolean;
   estimate: TokenEstimate;
@@ -125,6 +144,7 @@ export function checkThoughtAdmission(
   const estimate = estimateRequestTokens(messages, {
     maxTokens: budget.maxOutputTokens,
     toolsJson: options.toolsJson,
+    wireAdditionalBytes: options.wireAdditionalBytes,
   });
   const totalDemand = estimate.estimatedInputTokens + estimate.estimatedOutputTokens;
   return {

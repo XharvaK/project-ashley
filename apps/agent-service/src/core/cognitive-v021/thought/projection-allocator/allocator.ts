@@ -19,6 +19,9 @@ import { thoughtOutputCompatibilityInstruction } from "../output-contract.js";
 import {
   BYTES_PER_TOKEN,
   deriveThoughtBudget,
+  MAX_LOGICAL_SERIALIZED_INPUT_BYTES,
+  MAX_SUPPORTED_COMPOSITION_BYTES,
+  estimateRequestInputBytes,
   estimateRequestTokens,
   type SemanticProjectionEnvelope,
 } from "./budget.js";
@@ -446,6 +449,17 @@ export function allocateThoughtProjection(
   const finalEstimate = estimateRequestTokens(finalMessages, {
     maxTokens: budget.maxOutputTokens,
   });
+  const finalLogicalInputBytes = estimateRequestInputBytes(finalMessages);
+  if (finalLogicalInputBytes > MAX_LOGICAL_SERIALIZED_INPUT_BYTES) {
+    throw new RequiredOverflowError(
+      `Logical input composition exceeds the frozen byte envelope (bytes: ${finalLogicalInputBytes}, limit: ${MAX_LOGICAL_SERIALIZED_INPUT_BYTES})`,
+      {
+        section: "logical_input_envelope",
+        estimatedInputTokens: finalEstimate.estimatedInputTokens,
+        semanticBudgetTokens: budget.semanticBudgetTokens,
+      },
+    );
+  }
 
   const componentTokens: Partial<Record<ReturnType<typeof allocationTokenComponent>, number>> = {};
   for (const candidate of includedCandidates) {
@@ -519,6 +533,9 @@ export function allocateThoughtProjection(
     + Buffer.byteLength(JSON.stringify(stablePrefixProjection), "utf8");
   const diagnostics: AllocationDiagnostics = {
     system_message_bytes: systemMessageBytes,
+    logical_input_bytes: finalLogicalInputBytes,
+    logical_input_byte_limit: MAX_LOGICAL_SERIALIZED_INPUT_BYTES,
+    max_supported_composition_bytes: MAX_SUPPORTED_COMPOSITION_BYTES,
     orientation_kernel_bytes: finalProjected.orientationKernel === undefined
       ? 0
       : Buffer.byteLength(JSON.stringify(finalProjected.orientationKernel), "utf8"),

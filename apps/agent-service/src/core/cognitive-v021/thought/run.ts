@@ -37,8 +37,6 @@ import {
 } from "../types.js";
 import {
   createThoughtStructuralFeedback,
-  formatThoughtStructuralCorrectionData,
-  formatThoughtStructuralFeedback,
   validateThoughtStructuralCorrectionScope,
   parseThoughtStructuralCandidate,
   type StructuralFeedbackInput,
@@ -68,7 +66,6 @@ import {
 } from "./reference-allowlist.js";
 import { bindEffectIntent, bindObservationIntent } from "./operation-binding.js";
 import {
-  thoughtOutputCompatibilityInstruction,
   thoughtOutputStructuredRequest,
 } from "./output-contract.js";
 import {
@@ -82,7 +79,12 @@ import {
   thoughtMessagesForProjection,
   type AllocatedThoughtProjection,
 } from "./projection-allocator/allocator.js";
-import { estimateRequestTokens } from "./projection-allocator/budget.js";
+import {
+  MAX_LOGICAL_SERIALIZED_INPUT_BYTES,
+  TARGET_SEMANTIC_INPUT_ENVELOPE,
+  estimateRequestInputBytes,
+  estimateRequestTokens,
+} from "./projection-allocator/budget.js";
 import {
   type ProjectedThoughtInput,
   type ProjectedInFlightRecord,
@@ -435,38 +437,6 @@ function providerFailureCaptureForError(
       structuralRetryStatus: "not_applicable",
     },
   });
-}
-
-function thoughtMessages(
-  input: ThoughtInput,
-  structuralFeedback?: StructuralFeedbackInput,
-): ChatMessage[] {
-  const operationalNamespace = buildOperationalEffectNamespace(
-    input.cycleId,
-    input.generation,
-    input.inFlight.map((item) => item.effectId),
-  );
-  const visibleInput = {
-    ...input,
-    allowedOperationalEffectRefs: [...operationalNamespace.allowedOperationalEffectRefs],
-  };
-  const feedback = formatThoughtStructuralFeedback(structuralFeedback);
-  const correctionData = formatThoughtStructuralCorrectionData(structuralFeedback);
-  return [
-    {
-      role: "system",
-      content: [
-        "You are Ashley's Thought layer.",
-        "Return exactly one JSON semantic Thought output.",
-        thoughtOutputCompatibilityInstruction(),
-        "Code validates identity, authority, speech licensing, and publication.",
-        "Do not return finalLicensedText, settlementId, delivery, outbox, reservation, or workspace state.",
-        ...(feedback ? [feedback] : []),
-      ].join(" "),
-    },
-    { role: "user", content: JSON.stringify(visibleInput) },
-    ...(correctionData ? [{ role: "user" as const, content: correctionData }] : []),
-  ];
 }
 
 type LocalAliasTarget = "working_context" | "concern";
@@ -997,25 +967,25 @@ export async function runThoughtModel(
   let lastCompletion: Awaited<ReturnType<typeof completeChat>> | undefined;
 
   try {
-    if ("rawConversation" in input && input.retrieval && Array.isArray(input.retrieval.hits)) {
-      const firstHit = input.retrieval.hits[0];
-      if (!firstHit || !("supportRefs" in (firstHit as object))) {
-        messages = thoughtMessagesForProjection(input as ProjectedThoughtInput, options.structuralFeedback);
-        semanticProjectionHash = computeSemanticProjectionHash(input as ProjectedThoughtInput);
-        dispatchMessagesHash = computeDispatchMessagesHash(messages);
-      } else {
-        const allocated = allocateThoughtProjection({
-          thoughtInput: input as ThoughtInput,
-          requestId,
-          structuralFeedback: options.structuralFeedback,
-        });
-        messages = allocated.messages;
-        semanticProjectionHash = allocated.hashes.semanticProjectionHash;
-        dispatchMessagesHash = allocated.hashes.dispatchMessagesHash;
-      }
-    } else {
-      messages = thoughtMessages(input as ThoughtInput, options.structuralFeedback);
+    if (
+      "allowedOperationalEffectRefs" in input &&
+      Array.isArray(input.allowedOperationalEffectRefs)
+    ) {
+      messages = thoughtMessagesForProjection(
+        input as ProjectedThoughtInput,
+        options.structuralFeedback,
+      );
+      semanticProjectionHash = computeSemanticProjectionHash(input as ProjectedThoughtInput);
       dispatchMessagesHash = computeDispatchMessagesHash(messages);
+    } else {
+      const allocated = allocateThoughtProjection({
+        thoughtInput: input as ThoughtInput,
+        requestId,
+        structuralFeedback: options.structuralFeedback,
+      });
+      messages = allocated.messages;
+      semanticProjectionHash = allocated.hashes.semanticProjectionHash;
+      dispatchMessagesHash = allocated.hashes.dispatchMessagesHash;
     }
 
     if (options.settlementRevisionFeedback) {
@@ -1041,6 +1011,26 @@ export async function runThoughtModel(
     semanticProjectionHash ??= dispatchMessagesHash ?? "sha256:unavailable";
     dispatchMessagesHash ??= "sha256:unavailable";
     const estimatedInputTokens = estimateRequestTokens(messages ?? []).estimatedInputTokens;
+    const logicalInputBytes = estimateRequestInputBytes(messages ?? []);
+    if (
+      estimatedInputTokens > TARGET_SEMANTIC_INPUT_ENVELOPE ||
+      logicalInputBytes > MAX_LOGICAL_SERIALIZED_INPUT_BYTES
+    ) {
+      return {
+        output: {
+          kind: "failure",
+          cycleId: input.cycleId,
+          generation: input.generation,
+          pass,
+          requestId,
+          occupantId: input.occupantId,
+          reason: "capacity_deferred",
+        },
+        attempts: 0,
+        requestId,
+        inputTokens: estimatedInputTokens,
+      };
+    }
     const authorityCurrentness = hasAuthorityBarrier(deps.attentionDb)
       ? captureAuthorityCurrentness(deps.attentionDb)
       : undefined;
