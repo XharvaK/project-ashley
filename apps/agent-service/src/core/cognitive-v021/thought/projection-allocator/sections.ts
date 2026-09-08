@@ -15,6 +15,10 @@ import type { DomainPointersSection } from "../domain-pointers.js";
 import type { IdentityOrientationKernel } from "../orientation-kernel.js";
 import type { C3ExperienceAdapterResult } from "../c3-adapter.js";
 import {
+  PROTECTED_PRIOR_DIALOGUE_COUNT,
+  type DialogueProtection,
+} from "./composition-contract.js";
+import {
   applyAuthoritativeInvalidations,
   candidatePayload,
   createContinuityCandidate,
@@ -59,6 +63,8 @@ export type AllocationCandidate = {
   evidenceRefs?: readonly string[];
   coverageDisposition?: CoverageDisposition;
   continuityCandidate?: ContinuityCandidate<unknown>;
+  /** Host-side protection classification; it is not model-visible. */
+  dialogueProtection?: DialogueProtection;
 };
 
 export type AllocationTokenComponent =
@@ -166,23 +172,55 @@ export function buildAllocationCandidates(
   const orderedRawRows = [...input.rawConversation].sort((left, right) =>
     left.createdAtMs - right.createdAtMs || left.rowId.localeCompare(right.rowId),
   );
+  const currentTrigger = currentTriggerId === null
+    ? undefined
+    : orderedRawRows.find((row) => row.rowId === currentTriggerId);
+  const protectedPriorIds = new Set(
+    orderedRawRows
+      .filter((row) => {
+        if (row.rowId === currentTriggerId) return false;
+        if (row.role !== "owner" && row.role !== "ashley") return false;
+        if (!currentTrigger) return true;
+        // A superseded version of the current trigger is not prior dialogue.
+        return row.lineageId !== currentTrigger.lineageId;
+      })
+      .slice(-PROTECTED_PRIOR_DIALOGUE_COUNT)
+      .map((row) => row.rowId),
+  );
+  const seenRawRowIds = new Set<string>();
   const rawRows = [
     ...orderedRawRows.filter((row) => frontierIds.has(row.rowId)),
     ...orderedRawRows.filter((row) => row.rowId === currentTriggerId && !frontierIds.has(row.rowId)),
     ...orderedRawRows
       .filter((row) => !frontierIds.has(row.rowId) && row.rowId !== currentTriggerId)
       .reverse(),
-  ];
+  ].filter((row) => {
+    if (seenRawRowIds.has(row.rowId)) return false;
+    seenRawRowIds.add(row.rowId);
+    return true;
+  });
   for (const row of rawRows) {
     const isCurrentTrigger = row.rowId === currentTriggerId;
+    const isProtectedPrior = protectedPriorIds.has(row.rowId);
     candidates.push({
       id: `recent_raw:${row.rowId}`,
       section: "recent_raw",
-      required: isCurrentTrigger,
-      priority: isCurrentTrigger ? 2 : frontierIds.has(row.rowId) ? 5 : 6,
+      required: isCurrentTrigger || isProtectedPrior,
+      priority: isCurrentTrigger
+        ? 2
+        : isProtectedPrior
+          ? 3
+          : frontierIds.has(row.rowId)
+            ? 5
+            : 6,
       ref: row.rowId,
       data: row,
       evidenceRefs: [row.rowId],
+      dialogueProtection: isCurrentTrigger
+        ? "current_trigger"
+        : isProtectedPrior
+          ? "protected_prior_dialogue"
+          : "ordinary",
     });
   }
 

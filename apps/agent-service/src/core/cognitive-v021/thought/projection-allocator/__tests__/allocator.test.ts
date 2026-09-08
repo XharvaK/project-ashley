@@ -186,7 +186,7 @@ describe("Whole-Thought Projection Allocator", () => {
   it("degrades ordinary recent history while retaining the exact current trigger", () => {
     const rows = makeConversationRows(
       12,
-      (index) => `synthetic ordinary recent context row ${index} `.repeat(50),
+      (index) => `synthetic ordinary recent context row ${index} `.repeat(150),
     );
     const input = withSyntheticC2(makeThoughtInput({
       rawConversation: rows,
@@ -195,7 +195,7 @@ describe("Whole-Thought Projection Allocator", () => {
 
     const allocated = allocateThoughtProjection({
       thoughtInput: input,
-      semanticBudgetTokens: 9_500,
+      semanticBudgetTokens: 32_768,
       requestId: "req-ordinary-required-overflow-regression",
     });
 
@@ -204,7 +204,7 @@ describe("Whole-Thought Projection Allocator", () => {
       (candidate) => candidate.section === "recent_raw",
     );
 
-    expect(allocated.receipt.semanticProjectionEnvelope.maxInputTokens).toBe(9_500);
+    expect(allocated.receipt.semanticProjectionEnvelope.maxInputTokens).toBe(32_768);
     expect(includedIds).toContain(rows.at(-1)!.rowId);
     expect(includedIds).toContain(rows.at(-2)!.rowId);
     expect(includedIds).not.toContain(rows[0]!.rowId);
@@ -213,7 +213,9 @@ describe("Whole-Thought Projection Allocator", () => {
     ]));
     expect(buildAllocationCandidates(input, [])
       .filter((candidate) => candidate.section === "recent_raw" && candidate.required)
-      .map((candidate) => candidate.ref)).toEqual([rows.at(-1)!.rowId]);
+      .map((candidate) => candidate.ref)).toEqual(expect.arrayContaining(
+        rows.slice(-4).map((row) => row.rowId),
+      ));
     expect(omittedRecent.length).toBeGreaterThan(0);
     expect(allocated.receipt.coverageManifest?.domains).toEqual(expect.arrayContaining([
       expect.objectContaining({ domain: "recent_raw", disposition: "OMITTED_FOR_BUDGET" }),
@@ -244,10 +246,91 @@ describe("Whole-Thought Projection Allocator", () => {
     )).toHaveLength(0);
   });
 
+  it("fails before Thought when a required Working Context item exceeds its item bound", () => {
+    const input = makeThoughtInput({
+      workingContext: [{
+        id: "wc-required-too-large",
+        conversationId: "conv-1",
+        type: "correction",
+        text: "required correction ".repeat(80),
+        concernId: null,
+        sourceTurnIds: ["row-1"],
+        status: "active",
+        supersedesId: null,
+        updatedGeneration: 1,
+      }],
+    });
+
+    expect(() => allocateThoughtProjection({
+      thoughtInput: input,
+      requestId: "req-required-wc-item-overflow",
+    })).toThrowError(expect.objectContaining({
+      section: "working_context_pool",
+    }));
+  });
+
+  it("fuses an oversized optional Working Context item without semantic summarization", () => {
+    const input = makeThoughtInput({
+      workingContext: [{
+        id: "wc-optional-too-large",
+        conversationId: "conv-1",
+        type: "topic",
+        text: "optional topic ".repeat(80),
+        concernId: null,
+        sourceTurnIds: ["row-1"],
+        status: "active",
+        supersedesId: null,
+        updatedGeneration: 1,
+      }],
+    });
+
+    const allocated = allocateThoughtProjection({
+      thoughtInput: input,
+      requestId: "req-optional-wc-fuse",
+    });
+
+    expect(allocated.projected.workingContext).toEqual([]);
+    expect(allocated.receipt.decision.omitted).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: "wc:wc-optional-too-large",
+        reason: "fuse",
+      }),
+    ]));
+  });
+
+  it("keeps attachment association and truthful availability metadata with required observations", () => {
+    const observation = {
+      observationId: "observation-attachment-1",
+      cycleId: "cycle-test-1",
+      generation: 1,
+      derived: false,
+      replaySafe: true,
+      modality: "image" as const,
+      payload: {
+        attachmentRef: "attachment-1",
+        sourceTurnRef: "row-1",
+        availability: "PARTIALLY_AVAILABLE",
+        representation: "inline_text_excerpt",
+      },
+      provenance: "perception:attachment-1",
+      dataClassification: "ordinary" as const,
+      secretOmitted: false,
+    };
+    const allocated = allocateThoughtProjection({
+      thoughtInput: makeThoughtInput({ observations: [observation] }),
+      requestId: "req-observation-attachment-preservation",
+    });
+    const visible = JSON.parse(allocated.messages[1]?.content ?? "{}") as {
+      observations?: unknown[];
+    };
+
+    expect(visible.observations).toEqual([observation]);
+  });
+
   it("retains the current trigger and frontier ownership while bounding inline frontier text", () => {
     const rows = makeConversationRows(
       20,
-      (index) => `synthetic frontier context row ${index} `.repeat(35),
+      (index) => `synthetic frontier context row ${index} `.repeat(150),
     );
     const frontierIds = rows.slice(0, 3).map((row) => row.rowId);
     const input = makeThoughtInput({
@@ -265,14 +348,14 @@ describe("Whole-Thought Projection Allocator", () => {
       // frozen speech.none intentional-silence sentence are part of the
       // model-visible envelope, so retain the same regression scenario with
       // its small required headroom.
-      semanticBudgetTokens: 5_100,
+      semanticBudgetTokens: 32_768,
       requestId: "req-active-frontier-trigger-regression",
     });
 
     expect(allocated.projected.rawConversation.map((row) => row.rowId)).toContain(rows.at(-1)!.rowId);
     expect(allocated.projected.conversationSelection?.frontierIncludedIds).toEqual(frontierIds);
     expect(allocated.projected.conversationSelection?.omittedEvidenceIds).toEqual(
-      expect.arrayContaining(frontierIds),
+      expect.arrayContaining(rows.slice(3, 4).map((row) => row.rowId)),
     );
     expect(allocated.receipt.coverageManifest?.domains).toEqual(expect.arrayContaining([
       expect.objectContaining({ domain: "recent_raw", disposition: "OMITTED_FOR_BUDGET" }),
@@ -323,7 +406,7 @@ describe("Whole-Thought Projection Allocator", () => {
 
     const allocated = allocateThoughtProjection({
       thoughtInput: input,
-      semanticBudgetTokens: 9_500,
+      semanticBudgetTokens: 16_384,
       requestId: "req-trigger-lineage-pressure",
     });
     const candidateDefinitions = buildAllocationCandidates(input, []);
@@ -573,15 +656,15 @@ describe("Whole-Thought Projection Allocator", () => {
     });
 
     const largeRows = makeConversationRows(
-      3,
-      (index) => `large synthetic row ${index} `.repeat(260),
+      10,
+      (index) => `large synthetic row ${index} `.repeat(300),
     );
     const large = allocateThoughtProjection({
       thoughtInput: makeThoughtInput({
         rawConversation: largeRows,
         trigger: { kind: "owner_message", ref: largeRows.at(-1)!.rowId },
       }),
-      semanticBudgetTokens: 9_500,
+      semanticBudgetTokens: 32_768,
       requestId: "req-token-driven-large-rows",
     });
 
@@ -890,7 +973,7 @@ describe("Whole-Thought Projection Allocator", () => {
 
     const allocated = allocateThoughtProjection({
       thoughtInput: frontierInput,
-      semanticBudgetTokens: 4_500,
+      semanticBudgetTokens: 32_768,
       requestId: "req-frontier-bounded",
     });
 

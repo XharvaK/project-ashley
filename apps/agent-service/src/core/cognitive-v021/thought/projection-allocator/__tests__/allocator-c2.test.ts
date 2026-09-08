@@ -136,7 +136,7 @@ describe("MAT-II C2 allocator integration", () => {
     }
   });
 
-  it("fits the production-shaped required prefix before spending remaining budget on ordinary history", () => {
+  it("preserves the protected recent suffix before optional ordinary history", () => {
     const db = openTestSidecar();
     try {
       const conversationId = "c2-budget-conversation";
@@ -243,19 +243,12 @@ describe("MAT-II C2 allocator integration", () => {
 
       const allocated = allocateThoughtProjection({
         thoughtInput: input,
-        // Ordering scenario only: keep the required-prefix production mirror
-        // above at 9_500 and re-center this second envelope by the frozen
-        // speech.none instruction growth so ordinary history straddles again.
-        semanticBudgetTokens: 10_000,
+        // This comparison envelope is intentionally below the restoration
+        // target but large enough to retain the four-message protected suffix.
+        semanticBudgetTokens: 16_384,
         requestId: "c2-budget-request",
       });
-      const includedHistory = allocated.receipt.decision.included.filter(
-        (candidate) => candidate.section === "recent_raw" && candidate.required === false,
-      );
-      const omittedHistory = allocated.receipt.decision.omitted.filter(
-        (candidate) => candidate.section === "recent_raw",
-      );
-      expect(allocated.receipt.estimatedInputTokens).toBeLessThanOrEqual(10_000);
+      expect(allocated.receipt.estimatedInputTokens).toBeLessThanOrEqual(16_384);
       expect(allocated.receipt.requiredOverflow).toBe(false);
       expect(allocated.projected.rawConversation.map((row) => row.rowId)).toContain(current.rowId);
       expect(allocated.receipt.decision.included).toEqual(expect.arrayContaining([
@@ -264,8 +257,12 @@ describe("MAT-II C2 allocator integration", () => {
         expect.objectContaining({ id: "learned_self", required: true }),
         expect.objectContaining({ id: "domain_pointers", required: true }),
       ]));
-      expect(includedHistory.length).toBeGreaterThan(0);
-      expect(omittedHistory.length).toBeGreaterThan(0);
+      expect(allocated.receipt.decision.included.filter(
+        (candidate) => candidate.section === "recent_raw" && candidate.required,
+      )).toHaveLength(5);
+      expect(allocated.receipt.decision.omitted.filter(
+        (candidate) => candidate.section === "recent_raw",
+      )).toHaveLength(0);
       expect(allocated.projected.orientationKernel?.values).toEqual(canonicalValues);
       expect(allocated.projected.orientationKernel?.boundaries).toEqual(canonicalBoundaries);
       expect(allocated.projected.orientationKernel?.capabilityReality).toEqual(capabilityReality);

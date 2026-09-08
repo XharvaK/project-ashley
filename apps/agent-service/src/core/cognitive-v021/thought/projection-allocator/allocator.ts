@@ -41,6 +41,11 @@ import {
   type CoverageManifest,
 } from "../coverage-manifest.js";
 import {
+  REQUIRED_WC_ITEM_BYTES,
+  REQUIRED_WC_PROJECTED_POOL_BYTES,
+  utf8JsonBytes,
+} from "./composition-contract.js";
+import {
   getAuthoritativeLineageId,
 } from "../../../continuity/db.js";
 import {
@@ -214,6 +219,32 @@ export function allocateThoughtProjection(
   // Pack mandatory sections before budget-sensitive context. This preserves
   // the existing candidate ownership while preventing optional history from
   // consuming space needed by a later mandatory section.
+  const requiredWorkingContext = eligibleCandidates.filter((candidate) =>
+    candidate.section.startsWith("working_context") && candidate.required,
+  );
+  const requiredWorkingContextBytes = requiredWorkingContext.reduce(
+    (total, candidate) => total + utf8JsonBytes(candidate.data),
+    0,
+  );
+  const oversizedRequiredWorkingContext = requiredWorkingContext.find((candidate) =>
+    utf8JsonBytes(candidate.data) > REQUIRED_WC_ITEM_BYTES,
+  );
+  if (
+    oversizedRequiredWorkingContext ||
+    requiredWorkingContextBytes > REQUIRED_WC_PROJECTED_POOL_BYTES
+  ) {
+    const offendingBytes = oversizedRequiredWorkingContext
+      ? utf8JsonBytes(oversizedRequiredWorkingContext.data)
+      : requiredWorkingContextBytes;
+    throw new RequiredOverflowError(
+      `Required Working Context exceeds the bounded projected pool (bytes: ${offendingBytes}, itemLimit: ${REQUIRED_WC_ITEM_BYTES}, poolLimit: ${REQUIRED_WC_PROJECTED_POOL_BYTES})`,
+      {
+        section: "working_context_pool",
+        estimatedInputTokens: Math.ceil(offendingBytes / BYTES_PER_TOKEN),
+        semanticBudgetTokens: budget.semanticBudgetTokens,
+      },
+    );
+  }
   const candidates = [
     ...eligibleCandidates.filter((candidate) => candidate.required),
     ...eligibleCandidates.filter((candidate) => !candidate.required),
@@ -349,6 +380,24 @@ export function allocateThoughtProjection(
 
   // Exact serialize-then-estimate candidate inclusion loop
   for (const candidate of candidates) {
+    if (
+      candidate.section.startsWith("working_context") &&
+      !candidate.required &&
+      utf8JsonBytes(candidate.data) > REQUIRED_WC_ITEM_BYTES
+    ) {
+      compression = true;
+      omittedCandidateData.push(candidate);
+      omittedCandidates.push({
+        id: candidate.id,
+        section: candidate.section,
+        ref: candidate.ref,
+        required: candidate.required,
+        priority: candidate.priority,
+        estimatedTokens: structuralTokens(candidate.data),
+        reason: "fuse",
+      });
+      continue;
+    }
     let tentativeWc = workingContextIncluded;
     let tentativeRetrieval = retrievalHitsIncluded;
     let tentativeConversation = conversationIncluded;
