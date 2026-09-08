@@ -45,6 +45,7 @@ VISION.md
 | [`Sandbox_Design.md`](Sandbox_Design.md) | Historical V1 broker threat model, IPC, and hardening; topology superseded for V2 |
 | [`Self_Modification_Design.md`](Self_Modification_Design.md) | Historical V1 workflow; selected change-set semantics are reference input for V2 M5/M7 |
 | [`architecture/External_Effect_and_Authority_Architecture.md`](architecture/External_Effect_and_Authority_Architecture.md) | Current cross-cutting owner for observation and external effects |
+| [`architecture/Ashley_Authority_Kernel_Architecture.md`](architecture/Ashley_Authority_Kernel_Architecture.md) | Runtime Authority Kernel and Communication Policy; instantiates External Effect |
 | [`External_Agency_Design.md`](External_Agency_Design.md) | Historical Wave 09 broker design; salvageable semantics only |
 | [`architecture/Ashley_Observability_Plane.md`](architecture/Ashley_Observability_Plane.md) | Telemetry, correlation, redaction, and diagnostic-versus-control boundaries |
 | [`Stabilization_Design.md`](Stabilization_Design.md) | Wave 10 pre-release traceability, deterministic evaluation, health, resource, and backup assurance (**10c Wave_accepted; not release-qualified**) |
@@ -77,13 +78,13 @@ an explicitly audited Routing Status snapshot, not in this implementation map.
 Two processes: `agent-service` (:3710) + `discord-bot` (gateway).
 
 ```
-Discord DM → /chat/text → Identity + Mind State + Recall → Thought → Agency / Expression → delivery
-Proactive tick → Agency.decide → draft → reserve → send → receipt / reconcile → commit / finalize
+Discord DM → POST /chat/text → Identity + Mind State + Recall → Thought → Agency → Authority Kernel / Communication Policy → Expression → Honesty → REVALIDATE → delivery
+Proactive tick → Agency.decide → EffectIntent → Authority Kernel → draft → reserve → send → receipt / reconcile → commit / finalize
 Curiosity feed → nuclear.db takes → Agency motivations
 Committed proactive reaction → Reflection → bounded future Thought calibration
 Completed exchange → durable cognition job → episode → Mind State / affect / learning proposal
 Urgent concern or commitment → Discord wake poll → normal Agency send pipeline
-Grounded engineering intent → admission → direct unprivileged Bubblewrap → receipt / reconcile
+Grounded engineering intent → admission → Authority Kernel → direct unprivileged Bubblewrap → receipt / reconcile
 ```
 
 SQLite: `~/.composer-assistant/conversations/nuclear.db`.
