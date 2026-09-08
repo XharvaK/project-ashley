@@ -4,6 +4,7 @@ import {
   COVERAGE_DISPOSITIONS,
   buildCoverageManifest,
   classifyCoverage,
+  groundingStatusFor,
   type AllocationCoverageCandidate,
   type CoverageDisposition,
 } from "../coverage-manifest.js";
@@ -41,6 +42,16 @@ describe("MAT-II coverage manifest", () => {
       sourceRecordCount: 3,
       eligibleRecordCount: 0,
     })).toBe("INELIGIBLE");
+  });
+
+  it("keeps grounding absence, infrastructure, reachability, and conflict distinct", () => {
+    expect(groundingStatusFor({ sourceRecordCount: 0, eligibleRecordCount: 0 })).toBe("EMPTY");
+    expect(groundingStatusFor({ infrastructureState: "unknown" })).toBe("UNKNOWN");
+    expect(groundingStatusFor({ infrastructureState: "unavailable" })).toBe("UNAVAILABLE");
+    expect(groundingStatusFor({ queryStatus: "failed" })).toBe("UNREACHABLE");
+    expect(groundingStatusFor({ conflict: true, sourceRecordCount: 1, eligibleRecordCount: 0 }))
+      .toBe("UNRESOLVED_CONFLICT");
+    expect(groundingStatusFor({ sourceRecordCount: 1, eligibleRecordCount: 1 })).toBe("SUBSTANTIVE");
   });
 
   it("does not conflate dormant or stale rows with an empty store", () => {
@@ -105,6 +116,7 @@ describe("MAT-II coverage manifest", () => {
       source_record_count: 1,
       eligible_record_count: 1,
       candidate_ids: ["identity-1"],
+      grounding_status: "SUBSTANTIVE",
     });
     expect(manifest.dispositionCounts).toMatchObject({
       INCLUDED: 1,

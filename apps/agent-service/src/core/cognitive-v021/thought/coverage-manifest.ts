@@ -7,6 +7,42 @@ import {
 export { COVERAGE_DISPOSITIONS } from "./continuity-candidate.js";
 export type { CoverageDisposition } from "./continuity-candidate.js";
 
+export const GROUNDING_STATUSES = [
+  "SUBSTANTIVE",
+  "EMPTY",
+  "UNKNOWN",
+  "UNAVAILABLE",
+  "UNREACHABLE",
+  "UNRESOLVED_CONFLICT",
+] as const;
+
+export type GroundingStatus = (typeof GROUNDING_STATUSES)[number];
+
+export type GroundingAssessment = Readonly<{
+  disposition?: CoverageDisposition;
+  sourceRecordCount?: number;
+  eligibleRecordCount?: number;
+  queryStatus?: "success" | "failed";
+  infrastructureState?: "ready" | "unavailable" | "unknown";
+  conflict?: boolean;
+}>;
+
+/**
+ * Preserve absence, infrastructure state, and unresolved conflict as distinct
+ * grounding states. No state is collapsed into a generic failure or EMPTY.
+ */
+export function groundingStatusFor(input: GroundingAssessment): GroundingStatus {
+  if (input.queryStatus === "failed" || input.disposition === "UNREACHABLE") return "UNREACHABLE";
+  if (input.infrastructureState === "unavailable") return "UNAVAILABLE";
+  if (input.infrastructureState === "unknown") return "UNKNOWN";
+  if (input.conflict === true) return "UNRESOLVED_CONFLICT";
+  if (input.disposition === "EMPTY" || (input.sourceRecordCount ?? 0) === 0) return "EMPTY";
+  if (input.disposition === "INELIGIBLE" || (input.sourceRecordCount ?? 0) > 0 && (input.eligibleRecordCount ?? 0) === 0) {
+    return "UNRESOLVED_CONFLICT";
+  }
+  return "SUBSTANTIVE";
+}
+
 export type CoverageAssessment = {
   domain: string;
   disposition?: CoverageDisposition;
@@ -29,6 +65,7 @@ export type CoverageAssessment = {
   omittedForBudget?: boolean;
   tombstoned?: boolean;
   redacted?: boolean;
+  groundingStatus?: GroundingStatus;
 };
 
 export type CoverageManifestDomain = {
@@ -46,6 +83,7 @@ export type CoverageManifestDomain = {
   eligibleRecordCount: number;
   ineligibleRecordCount: number;
   staleRecordCount: number;
+  grounding_status: GroundingStatus;
 };
 
 export type CoverageManifest = {
@@ -175,6 +213,13 @@ function makeDomainEntry(input: CoverageAssessment): CoverageManifestDomain {
     eligibleRecordCount: eligible,
     ineligibleRecordCount: ineligible,
     staleRecordCount: stale,
+    grounding_status: input.groundingStatus ?? groundingStatusFor({
+      disposition,
+      sourceRecordCount: source,
+      eligibleRecordCount: eligible,
+      queryStatus: input.queryStatus,
+      conflict: input.tombstoned === true || input.redacted === true,
+    }),
   };
 }
 

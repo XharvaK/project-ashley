@@ -65,7 +65,75 @@ export type AllocationCandidate = {
   continuityCandidate?: ContinuityCandidate<unknown>;
   /** Host-side protection classification; it is not model-visible. */
   dialogueProtection?: DialogueProtection;
+  requiredness?: RequirednessContract;
 };
+
+export type RequirednessContract = Readonly<{
+  owner: string;
+  predicate: string;
+  overflow: "fail_closed" | "shed_optional";
+}>;
+
+/**
+ * Every projection adapter names the owner and predicate that produced its
+ * requiredness. The composer consumes this decision; it does not derive
+ * semantic requiredness from token pressure, recency, or provider metadata.
+ */
+export function requirednessContractFor(
+  candidate: Pick<AllocationCandidate, "section" | "required" | "dialogueProtection">,
+): RequirednessContract {
+  if (candidate.dialogueProtection === "current_trigger") {
+    return {
+      owner: "continuity_adapter",
+      predicate: "current_trigger_row_resolved",
+      overflow: "fail_closed",
+    };
+  }
+  if (candidate.dialogueProtection === "protected_prior_dialogue") {
+    return {
+      owner: "continuity_adapter",
+      predicate: "protected_prior_participant_suffix",
+      overflow: "fail_closed",
+    };
+  }
+  switch (candidate.section) {
+    case "orientation_kernel":
+      return { owner: "orientation_kernel_adapter", predicate: "canonical_kernel_available", overflow: "fail_closed" };
+    case "trigger_evidence":
+      return { owner: "continuity_adapter", predicate: "trigger_reference_available", overflow: "fail_closed" };
+    case "domain_pointers":
+      return { owner: "grounding_adapter", predicate: "bounded_domain_pointer_section_available", overflow: "fail_closed" };
+    case "learned_self":
+      return { owner: "learned_self_adapter", predicate: "learned_self_slice_available", overflow: "fail_closed" };
+    case "observations":
+      return { owner: "perception_adapter", predicate: "observation_set_nonempty", overflow: "fail_closed" };
+    case "in_flight_receipt":
+      return { owner: "outcome_adapter", predicate: "in_flight_effects_nonempty", overflow: "fail_closed" };
+    case "authority_objections":
+      return { owner: "authority_adapter", predicate: "authority_objections_nonempty", overflow: "fail_closed" };
+    case "remember_directive":
+      return { owner: "memory_directive_adapter", predicate: "owner_directive_present", overflow: "fail_closed" };
+    case "occupancy_compact":
+      return { owner: "mind_state_adapter", predicate: "occupancy_nonempty", overflow: "fail_closed" };
+    case "constitution":
+      return { owner: "identity_adapter", predicate: "orientation_kernel_unavailable", overflow: "fail_closed" };
+    case "capability":
+      return { owner: "capability_adapter", predicate: "orientation_kernel_unavailable", overflow: "fail_closed" };
+    case "retrieval_compact":
+      return { owner: "retrieval_adapter", predicate: "bounded_hit_eligible", overflow: "shed_optional" };
+    case "c3_terminal_experiences":
+      return { owner: "c3_experience_adapter", predicate: "terminal_experience_candidate_eligible", overflow: "shed_optional" };
+    default:
+      if (candidate.section.startsWith("working_context")) {
+        return candidate.required
+          ? { owner: "working_context_adapter", predicate: "required_item_type_present", overflow: "fail_closed" }
+          : { owner: "working_context_adapter", predicate: "optional_item_type_present", overflow: "shed_optional" };
+      }
+      return candidate.required
+        ? { owner: "projection_adapter", predicate: "adapter_declared_required", overflow: "fail_closed" }
+        : { owner: "projection_adapter", predicate: "adapter_declared_optional", overflow: "shed_optional" };
+  }
+}
 
 export type AllocationTokenComponent =
   | "conversation_tokens"
@@ -424,6 +492,7 @@ export function buildAllocationCandidates(
       sourceStatus: typeof sourceRecord?.sourceStatus === "string" ? sourceRecord.sourceStatus : undefined,
       dataClassification: typeof sourceRecord?.dataClassification === "string" ? sourceRecord.dataClassification : undefined,
     }), continuityContext);
+    const requiredness = requirednessContractFor(candidate);
     return {
       ...candidate,
       data: candidatePayload(continuityCandidate),
@@ -432,6 +501,7 @@ export function buildAllocationCandidates(
       sourceLineageId,
       evidenceRefs,
       continuityCandidate,
+      requiredness,
     };
   });
 }

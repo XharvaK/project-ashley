@@ -395,6 +395,7 @@ export function allocateThoughtProjection(
         priority: candidate.priority,
         estimatedTokens: structuralTokens(candidate.data),
         reason: "fuse",
+        requiredness: candidate.requiredness,
       });
       continue;
     }
@@ -481,6 +482,7 @@ export function allocateThoughtProjection(
         priority: candidate.priority,
         estimatedTokens: structuralTokens(candidate.data),
         reason: "budget_omission",
+        requiredness: candidate.requiredness,
       });
     }
   }
@@ -646,6 +648,7 @@ export function allocateThoughtProjection(
         required: c.required,
         priority: c.priority,
         estimatedTokens: structuralTokens(c.data),
+        requiredness: c.requiredness,
       })),
       omitted: omittedCandidates,
       includedWireBytes: Buffer.byteLength(JSON.stringify(finalMessages), "utf8"),

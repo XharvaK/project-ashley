@@ -216,6 +216,20 @@ describe("Whole-Thought Projection Allocator", () => {
       .map((candidate) => candidate.ref)).toEqual(expect.arrayContaining(
         rows.slice(-4).map((row) => row.rowId),
       ));
+    expect(buildAllocationCandidates(input, [])
+      .find((candidate) => candidate.dialogueProtection === "current_trigger")?.requiredness)
+      .toEqual({
+        owner: "continuity_adapter",
+        predicate: "current_trigger_row_resolved",
+        overflow: "fail_closed",
+      });
+    expect(allocated.receipt.decision.included.find(
+      (candidate) => candidate.id === `recent_raw:${rows.at(-1)!.rowId}`,
+    )?.requiredness).toEqual({
+      owner: "continuity_adapter",
+      predicate: "current_trigger_row_resolved",
+      overflow: "fail_closed",
+    });
     expect(omittedRecent.length).toBeGreaterThan(0);
     expect(allocated.receipt.coverageManifest?.domains).toEqual(expect.arrayContaining([
       expect.objectContaining({ domain: "recent_raw", disposition: "OMITTED_FOR_BUDGET" }),

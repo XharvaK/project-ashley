@@ -1,4 +1,5 @@
 import type { AllocationSectionId } from "./sections.js";
+import type { RequirednessContract } from "./sections.js";
 import type { SemanticProjectionEnvelope } from "./budget.js";
 import type { CoverageManifest } from "../coverage-manifest.js";
 
@@ -52,6 +53,7 @@ export type AllocationDecision = {
     required: boolean;
     priority?: number;
     estimatedTokens?: number;
+    requiredness?: RequirednessContract;
   }>;
   omitted: Array<{
     id: string;
@@ -61,6 +63,7 @@ export type AllocationDecision = {
     priority?: number;
     estimatedTokens?: number;
     reason: "budget_omission" | "duplicate" | "fuse" | "not_eligible";
+    requiredness?: RequirednessContract;
   }>;
   includedWireBytes: number;
   estimatedInputTokens: number;
