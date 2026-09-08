@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  THOUGHT_SEMANTIC_SCHEMA_FINGERPRINT,
+  constrainThoughtOutputSchema,
   thoughtOutputCompatibilityInstruction,
   thoughtOutputStructuredRequest,
 } from "./output-contract.js";
+import { buildOperationalEffectNamespaceFromRefs } from "../effect/effect-ref.js";
 import { parseThoughtSemanticOutput } from "./parse.js";
 import { THOUGHT_OUTPUT_CONTRACT_ID, THOUGHT_OUTPUT_SCHEMA_ID } from "../../model-fabric/dispatch-contract.js";
 import { IMPLEMENTATION_SPEC_VERSION, SETTLEMENT_SCHEMA_VERSION } from "../types.js";
@@ -285,6 +288,35 @@ describe("Thought semantic output contract", () => {
     expect(instruction).toContain("This contract describes output shape only");
   });
 
+  it("teaches Thought the speech.none intentional-silence boundary without Host forcing", () => {
+    const instruction = thoughtOutputCompatibilityInstruction();
+
+    // SPEECH_NONE_IS_INTENTIONAL_SILENCE
+    expect(instruction).toContain("speech.mode:none means Ashley intentionally chooses not to communicate in this cycle");
+    // NONE_IS_NOT_GENERIC_NOOP
+    expect(instruction).toContain("it is not the generic no-op for a turn with no other work");
+    // NO_STRUCTURED_UPDATE_DOES_NOT_IMPLY_SILENCE
+    expect(instruction).toContain("does not by itself imply silence");
+    // DRAFT_MAY_STAND_ALONE
+    expect(instruction).toContain("a settlement may carry speech.mode:draft alone");
+    // ORDINARY_CONVERSATION_IS_VALID_SPEECH_PURPOSE
+    expect(instruction).toContain("ordinary conversation is itself a valid purpose for speech");
+    // OWNER_BID_ORDINARILY_INVITES_PARTICIPATION
+    expect(instruction).toContain("When the Owner directly addresses Ashley or makes a conversational bid");
+    expect(instruction).toContain("participating is ordinarily a legitimate reason to speak even when no other update is required");
+    // INTENTIONAL_SILENCE_REMAINS_VALID
+    expect(instruction).toContain("silence remains fully valid when silence itself is the intended act");
+
+    // NO_HOST_SIDE_SPEECH_FORCING: Thought stays sole semantic author.
+    for (const forcing of ["must speak", "always reply", "never remain silent", "greetings require speech"]) {
+      expect(instruction).not.toContain(forcing);
+    }
+    // PROVIDER_INDEPENDENT: no provider or model names in Thought semantics.
+    for (const provider of ["cloudflare", "nemotron", "mistral", "groq"]) {
+      expect(instruction.toLowerCase()).not.toContain(provider);
+    }
+  });
+
   it("teaches Thought that observation requires need-resolving relevance and abstain takes precedence", () => {
     const instruction = thoughtOutputCompatibilityInstruction();
 
@@ -314,6 +346,19 @@ describe("Thought semantic output contract", () => {
     expect(instruction).toContain('Use time:historical for a claim about a past state or event that does not assert it is still true now');
     // EPISTEMIC_COMMITMENT_MAY_BE_OMITTED_FOR_ACK
     expect(instruction).toContain("omit the epistemic commitment");
+  });
+
+  it("keeps protected semantic, wire, and capability fingerprints exact", () => {
+    expect(THOUGHT_SEMANTIC_SCHEMA_FINGERPRINT).toBe(
+      "sha256:e96d2a20feea442da2fbfacfa02bc9b0383836e0e531af3c089c67c436a35ace",
+    );
+    const zeroOp = constrainThoughtOutputSchema(buildOperationalEffectNamespaceFromRefs([]));
+    expect(zeroOp.wireSchemaFingerprint).toBe(
+      "sha256:efb47dc81e598a66ca48df51bde64b74c0273f2fdd0bfc450d9ba200114f2c01",
+    );
+    expect(zeroOp.namespaceConstraintFingerprint).toBe(
+      "sha256:d277b3804b25361994107886d1f33f779a7501298b01fe483ebe7c795b6e19c6",
+    );
   });
 
   it("carries semantic branch intent in the native schema without changing branch shape", () => {

@@ -243,7 +243,10 @@ describe("MAT-II C2 allocator integration", () => {
 
       const allocated = allocateThoughtProjection({
         thoughtInput: input,
-        semanticBudgetTokens: 9_500,
+        // Ordering scenario only: keep the required-prefix production mirror
+        // above at 9_500 and re-center this second envelope by the frozen
+        // speech.none instruction growth so ordinary history straddles again.
+        semanticBudgetTokens: 10_000,
         requestId: "c2-budget-request",
       });
       const includedHistory = allocated.receipt.decision.included.filter(
@@ -252,7 +255,7 @@ describe("MAT-II C2 allocator integration", () => {
       const omittedHistory = allocated.receipt.decision.omitted.filter(
         (candidate) => candidate.section === "recent_raw",
       );
-      expect(allocated.receipt.estimatedInputTokens).toBeLessThanOrEqual(9_500);
+      expect(allocated.receipt.estimatedInputTokens).toBeLessThanOrEqual(10_000);
       expect(allocated.receipt.requiredOverflow).toBe(false);
       expect(allocated.projected.rawConversation.map((row) => row.rowId)).toContain(current.rowId);
       expect(allocated.receipt.decision.included).toEqual(expect.arrayContaining([
