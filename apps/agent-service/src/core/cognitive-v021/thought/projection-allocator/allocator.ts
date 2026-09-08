@@ -10,6 +10,7 @@ import {
   computeDispatchMessagesHash,
   computeSemanticProjectionHash,
   attachC2CompatibilityFields,
+  attachSourceCurrentness,
   modelVisibleThoughtProjection,
   projectRetrievalHit,
   type CompactRetrievalEvidence,
@@ -371,6 +372,8 @@ export function allocateThoughtProjection(
         configurable: false,
       });
     }
+
+    attachSourceCurrentness(projected, input.sourceCurrentness);
 
     if (includeOrientationKernel && c2Input.orientationKernel !== undefined) {
       attachC2CompatibilityFields(projected, input);

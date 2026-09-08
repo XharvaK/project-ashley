@@ -2275,6 +2275,7 @@ export async function runCognitiveCycle(
       authorityDb: authorityDbForPacks(deps, packs),
       expectedCurrentness: invocation.kernelEnvelope?.authorityCurrentness ?? packs.currentness.binding,
       currentness: currentnessPack,
+      sourceCurrentness: allocated.projected.sourceCurrentness,
       wakeId: cycle.wakeId,
       wakeLeaseToken: event.claimToken,
       semanticPass: pass,

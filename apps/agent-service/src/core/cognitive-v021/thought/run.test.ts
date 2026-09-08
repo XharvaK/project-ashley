@@ -305,9 +305,9 @@ describe("v0.2.1 Thought run", () => {
       expect(diagnostic).toMatchObject({
         stage: "allocation",
         dispatchTruth: "not_sent",
-        requiredOverflowSection: "working_context_correction",
+        requiredOverflowSection: "working_context_pool",
         estimatedInputTokens: expect.any(Number),
-        semanticBudgetTokens: 9_500,
+        semanticBudgetTokens: 32_768,
         overflowTokens: expect.any(Number),
       });
       expect(diagnostic!.overflowTokens).toBe(

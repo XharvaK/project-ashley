@@ -7,6 +7,7 @@ import type {
 } from "../../mistral-client.js";
 import type { DataClassification } from "../privacy/classification.js";
 import type { SandboxV2CapabilitySpec } from "@composer-assistant/sandbox-v2";
+import type { ThoughtSourceCurrentness } from "./thought/source-currentness.js";
 
 export type { DataClassification } from "../privacy/classification.js";
 
@@ -1061,6 +1062,8 @@ export type ThoughtInput = {
   occupancy: MindOccupancy[];
   /** Host-captured concern snapshots seen while assembling this Thought input. */
   concernSnapshots?: Readonly<Record<string, string>>;
+  /** Host-only source witness; attached non-enumerably and never sent to Thought. */
+  sourceCurrentness?: ThoughtSourceCurrentness;
   constitution: IdentitySlice;
   learnedSelfSlice: LearnedSelfSlice;
   capabilityReality: CapabilityReality;

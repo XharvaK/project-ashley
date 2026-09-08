@@ -47,6 +47,7 @@ import {
   adaptOwnTimeSession,
   type OwnTimeSessionCandidate,
 } from "../curiosity/own-time-adapter.js";
+import { captureThoughtSourceCurrentness } from "./source-currentness.js";
 
 export type BuildThoughtInputOptions = {
   sidecar: DatabaseSync;
@@ -371,7 +372,7 @@ export function buildThoughtInput(options: BuildThoughtInputOptions): ThoughtInp
     { authorityDb: options.authorityDb },
   );
 
-  return {
+  const thoughtInput: ThoughtInputWithC2 = {
     cycleId: options.cycle.cycleId,
     generation: options.cycle.generation,
     occupantId: options.cycle.occupantId,
@@ -414,4 +415,18 @@ export function buildThoughtInput(options: BuildThoughtInputOptions): ThoughtInp
     domainPointers,
     c3Experiences,
   };
+
+  Object.defineProperty(thoughtInput, "sourceCurrentness", {
+    value: captureThoughtSourceCurrentness(
+      options.sidecar,
+      options.authorityDb,
+      options.cycle.occupantId,
+      workingContext,
+    ),
+    enumerable: false,
+    writable: false,
+    configurable: false,
+  });
+
+  return thoughtInput;
 }

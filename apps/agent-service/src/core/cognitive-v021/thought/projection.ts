@@ -30,6 +30,7 @@ import type {
 import type { ChatMessage } from "../../model-routing/types.js";
 import type { DomainPointersSection } from "./domain-pointers.js";
 import type { IdentityOrientationKernel } from "./orientation-kernel.js";
+import type { ThoughtSourceCurrentness } from "./source-currentness.js";
 
 export type CompactMemoryEvidence = {
   kind: "key" | "lex";
@@ -83,6 +84,8 @@ export type ProjectedThoughtInput = {
   occupancy: MindOccupancy[];
   /** Host-captured concern snapshots; non-enumerable and excluded from model wire. */
   concernSnapshots?: Readonly<Record<string, string>>;
+  /** Host-only source witness; non-enumerable and excluded from model wire. */
+  sourceCurrentness?: ThoughtSourceCurrentness;
   /** Legacy in-process compatibility; C2 wire identity is orientationKernel. */
   constitution: IdentitySlice;
   learnedSelfSlice: LearnedSelfSlice;
@@ -128,6 +131,21 @@ export function attachC2CompatibilityFields(
       configurable: false,
     },
   });
+  return projected as ProjectedThoughtInput;
+}
+
+export function attachSourceCurrentness(
+  projected: object,
+  sourceCurrentness: ThoughtSourceCurrentness | undefined,
+): ProjectedThoughtInput {
+  if (sourceCurrentness !== undefined) {
+    Object.defineProperty(projected, "sourceCurrentness", {
+      value: sourceCurrentness,
+      enumerable: false,
+      writable: false,
+      configurable: false,
+    });
+  }
   return projected as ProjectedThoughtInput;
 }
 
@@ -261,6 +279,8 @@ export function projectThoughtInput(
       configurable: false,
     });
   }
+
+  attachSourceCurrentness(projected, fullInput.sourceCurrentness);
 
   if (c2Input.orientationKernel !== undefined) {
     attachC2CompatibilityFields(projected, fullInput);

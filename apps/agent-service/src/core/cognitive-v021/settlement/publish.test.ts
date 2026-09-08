@@ -8,6 +8,10 @@ import { SETTLEMENT_SCHEMA_VERSION } from "../types.js";
 import type { PublishedCognitiveSettlement } from "../types.js";
 import { openNuclearDb } from "../../db.js";
 import { beginAuthorityTransition, captureAuthorityCurrentness, stabilizeAuthorityBarrier } from "../authority/barrier.js";
+import { applyWorkingContextDelta } from "../evidence/working-context.js";
+import { listWorkingContext } from "../evidence/working-context.js";
+import { upsertMemoryAssertion } from "../memory/assertions.js";
+import { captureThoughtSourceCurrentness } from "../thought/source-currentness.js";
 
 function settlement(overrides: Partial<PublishedCognitiveSettlement> = {}): PublishedCognitiveSettlement {
   return {
@@ -160,6 +164,110 @@ describe("v0.2.1 semantic publication transaction", () => {
         authorityDb: nuclear,
         expectedCurrentness: binding,
       })).toMatchObject({ published: false, reason: "authority_vector_stale" });
+      expect(sidecar.prepare("SELECT COUNT(*) AS count FROM settlements").get()).toMatchObject({ count: 0 });
+    } finally {
+      nuclear.close();
+      sidecar.close();
+    }
+  });
+
+  it("rejects a stale Working Context snapshot before any semantic write", () => {
+    const db = openTestSidecar();
+    try {
+      admitTestCycle(db, { cycleId: "cycle-wc-currentness", conversationId: "thread-1", triggerKind: "owner_message", triggerRef: "one", occupantId: "doc", authorityEpoch: 1, nowMs: 1 });
+      applyWorkingContextDelta(db, {
+        op: "upsert",
+        item: { id: "wc-current", conversationId: "thread-1", type: "topic", text: "old", concernId: null, sourceTurnIds: [], status: "active", supersedesId: null },
+      }, { cycleId: "seed", generation: 1 });
+      const captured = listWorkingContext(db, "thread-1");
+      const sourceCurrentness = captureThoughtSourceCurrentness(db, undefined, null, captured);
+      applyWorkingContextDelta(db, {
+        op: "upsert",
+        item: { id: "wc-current", conversationId: "thread-1", type: "topic", text: "changed", concernId: null, sourceTurnIds: [], status: "active", supersedesId: null },
+      }, { cycleId: "intervening", generation: 2 });
+
+      expect(publishSemanticTransaction(db, settlement({
+        cycleId: "cycle-wc-currentness",
+        workingContextDelta: [],
+      }), { sourceCurrentness })).toMatchObject({
+        published: false,
+        reason: "source_currentness_stale",
+      });
+      expect(db.prepare("SELECT COUNT(*) AS count FROM settlements").get()).toMatchObject({ count: 0 });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rejects a stale learned-self revision head atomically", () => {
+    const sidecar = openTestSidecar();
+    const nuclear = openNuclearDb(new DatabaseSync(":memory:"));
+    try {
+      admitTestCycle(sidecar, { cycleId: "cycle-self-currentness", conversationId: "thread-self-currentness", triggerKind: "owner_message", triggerRef: "one", occupantId: "doc", authorityEpoch: 1, nowMs: 1 });
+      const dimensions = { source: "ashley_interpretation" as const, status: "asserted" as const, time: "historical" as const, reliability: "inferred" as const };
+      upsertMemoryAssertion(sidecar, {
+        assertionKey: "self:currentness",
+        statement: "Disposition: careful",
+        memoryKind: "learned_self_evidence",
+        dimensions,
+        dataClassification: "never_public",
+        lineageParentKey: null,
+        admittedGeneration: 1,
+        live: true,
+      });
+      const sourceCurrentness = captureThoughtSourceCurrentness(sidecar, nuclear, "doc", []);
+      upsertMemoryAssertion(sidecar, {
+        assertionKey: "self:currentness",
+        statement: "Disposition: changed",
+        memoryKind: "learned_self_evidence",
+        dimensions,
+        dataClassification: "never_public",
+        lineageParentKey: null,
+        admittedGeneration: 2,
+        live: true,
+      });
+
+      expect(publishSemanticTransaction(sidecar, settlement({
+        cycleId: "cycle-self-currentness",
+        triggerRef: "thread-self-currentness",
+        workingContextDelta: [],
+      }), {
+        authorityDb: nuclear,
+        expectedCurrentness: captureAuthorityCurrentness(nuclear),
+        sourceCurrentness,
+      })).toMatchObject({ published: false, reason: "source_currentness_stale" });
+      expect(sidecar.prepare("SELECT COUNT(*) AS count FROM settlements").get()).toMatchObject({ count: 0 });
+    } finally {
+      nuclear.close();
+      sidecar.close();
+    }
+  });
+
+  it("rejects a stale relationship projection head under the authority fence", () => {
+    const sidecar = openTestSidecar();
+    const nuclear = openNuclearDb(new DatabaseSync(":memory:"));
+    try {
+      admitTestCycle(sidecar, { cycleId: "cycle-rel-currentness", conversationId: "thread-rel-currentness", triggerKind: "owner_message", triggerRef: "one", occupantId: "doc", authorityEpoch: 1, nowMs: 1 });
+      nuclear.prepare(
+        `INSERT INTO relationship_projections
+          (entity_uuid, owner_id, kind, projection_policy_id,
+           projection_policy_version, source_bindings_json, source_watermark_json,
+           data_classification, provenance, party_subject_scope, effective_from,
+           effective_to, supersedes_projection_id, content_binding, computed_at)
+         VALUES (?, ?, 'current_shared_culture', ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)` ,
+      ).run("relationship-currentness", "doc", "test", 1, "{}", "{}", "ordinary", "shadow", "owner", "2026-01-01T00:00:00.000Z", "binding-a", "2026-01-01T00:00:00.000Z");
+      const sourceCurrentness = captureThoughtSourceCurrentness(sidecar, nuclear, "doc", []);
+      nuclear.prepare("UPDATE relationship_projections SET content_binding = 'binding-b' WHERE owner_id = 'doc' AND effective_to IS NULL").run();
+
+      expect(publishSemanticTransaction(sidecar, settlement({
+        cycleId: "cycle-rel-currentness",
+        triggerRef: "thread-rel-currentness",
+        workingContextDelta: [],
+      }), {
+        authorityDb: nuclear,
+        expectedCurrentness: captureAuthorityCurrentness(nuclear),
+        sourceCurrentness,
+      })).toMatchObject({ published: false, reason: "source_currentness_stale" });
       expect(sidecar.prepare("SELECT COUNT(*) AS count FROM settlements").get()).toMatchObject({ count: 0 });
     } finally {
       nuclear.close();

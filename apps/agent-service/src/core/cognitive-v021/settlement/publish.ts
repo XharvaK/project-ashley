@@ -17,6 +17,11 @@ import { enqueueDurableNomination } from "../memory/nomination.js";
 import { assertSubscriptionCapacity } from "../observation/subscriptions.js";
 import { sanitizeFutureTriggerPayload } from "../initiative/future-triggers.js";
 import { beginConsequenceInTransaction, getWakeForCycle, getWake } from "../wake/ledger.js";
+import {
+  assertThoughtSourceCurrentness,
+  isThoughtSourceCurrentnessError,
+  type ThoughtSourceCurrentness,
+} from "../thought/source-currentness.js";
 
 export type PublicationOptions = {
   origin?: OutboxOrigin;
@@ -28,6 +33,7 @@ export type PublicationOptions = {
   authorityDb?: DatabaseSync;
   expectedCurrentness?: import("../types.js").AuthorityCurrentnessBinding;
   currentness?: import("../types.js").AuthorityPacks["currentness"];
+  sourceCurrentness?: ThoughtSourceCurrentness;
   wakeId?: string;
   wakeLeaseToken?: string | null;
   semanticPass?: number;
@@ -36,7 +42,7 @@ export type PublicationOptions = {
 export type PublicationResult = {
   published: boolean;
   replayed: boolean;
-  reason?: "stale_generation" | "authority_transition" | "authority_vector_stale" | "wake_missing" | "wake_terminal" | "wake_reconciliation_required" | "consequence_exists";
+  reason?: "stale_generation" | "authority_transition" | "authority_vector_stale" | "source_currentness_stale" | "wake_missing" | "wake_terminal" | "wake_reconciliation_required" | "consequence_exists";
   settlementId: string | null;
   outboxId: number | null;
 };
@@ -147,12 +153,36 @@ export function publishSemanticTransaction(
   if (!wake || wake.wakeId !== wakeId) return { published: false, replayed: false, reason: "wake_missing", settlementId: null, outboxId: null };
   if (wake.state === "terminal") return { published: false, replayed: false, reason: "wake_terminal", settlementId: null, outboxId: null };
   if (wake.state === "reconciling") return { published: false, replayed: false, reason: "wake_reconciliation_required", settlementId: null, outboxId: null };
-  const initialAuthorityFailure = authorityFenceReason(options);
-  if (initialAuthorityFailure) {
-    return { published: false, replayed: false, reason: initialAuthorityFailure, settlementId: null, outboxId: null };
-  }
-  db.exec("BEGIN IMMEDIATE");
+  const authorityDb = options.authorityDb;
+  const authorityTransaction = authorityDb !== undefined && authorityDb !== db;
+  let authorityTransactionOpen = false;
+  let sidecarTransactionOpen = false;
+  const rollbackAuthority = (): void => {
+    if (!authorityTransactionOpen || !authorityDb) return;
+    try { authorityDb.exec("ROLLBACK"); } catch { /* preserve the original result */ }
+    authorityTransactionOpen = false;
+  };
+  const commitAuthority = (): void => {
+    if (!authorityTransactionOpen || !authorityDb) return;
+    authorityDb.exec("COMMIT");
+    authorityTransactionOpen = false;
+  };
   try {
+    // Hold the canonical authority database write lock for the complete
+    // sidecar compare-and-accept window. Without this lock an authority
+    // transition could begin after the second read but before publication
+    // commit, leaving a durable settlement bound to stale semantic state.
+    if (authorityTransaction && authorityDb) {
+      authorityDb.exec("BEGIN IMMEDIATE");
+      authorityTransactionOpen = true;
+    }
+    const initialAuthorityFailure = authorityFenceReason(options);
+    if (initialAuthorityFailure) {
+      rollbackAuthority();
+      return { published: false, replayed: false, reason: initialAuthorityFailure, settlementId: null, outboxId: null };
+    }
+    db.exec("BEGIN IMMEDIATE");
+    sidecarTransactionOpen = true;
     const existing = existingSettlementForCycleGeneration(
       db,
       settlement.cycleId,
@@ -162,28 +192,55 @@ export function publishSemanticTransaction(
       const existingSettlementId = stringValue(existing.settlement_id, settlement.settlementId);
       const outbox = getSpeechOutboxBySettlementUnsafe(db, existingSettlementId);
       db.exec("COMMIT");
+      sidecarTransactionOpen = false;
+      commitAuthority();
       return { published: true, replayed: true, settlementId: existingSettlementId, outboxId: outbox };
     }
     const semanticPass = options.semanticPass ?? 1;
     if (!Number.isInteger(semanticPass) || semanticPass < 1) {
       db.exec("ROLLBACK");
+      sidecarTransactionOpen = false;
+      rollbackAuthority();
       return { published: false, replayed: false, reason: "consequence_exists", settlementId: null, outboxId: null };
     }
     const currentWake = getWake(db, wakeId);
     if (!currentWake || currentWake.state === "terminal") {
       db.exec("ROLLBACK");
+      sidecarTransactionOpen = false;
+      rollbackAuthority();
       return { published: false, replayed: false, reason: "wake_terminal", settlementId: null, outboxId: null };
     }
     if (options.wakeLeaseToken && (currentWake.state === "authorized" || currentWake.state === "consequence_pending")) {
       beginConsequenceInTransaction(db, wakeId, options.wakeLeaseToken, semanticPass, nowMs);
     } else if (currentWake.state === "consequence_pending") {
       db.exec("ROLLBACK");
+      sidecarTransactionOpen = false;
+      rollbackAuthority();
       return { published: false, replayed: false, reason: "consequence_exists", settlementId: null, outboxId: null };
     }
     const conversationId = awaitlessConversation(settlement, db);
     if (!publicationFence(db, settlement, conversationId)) {
       db.exec("COMMIT");
+      sidecarTransactionOpen = false;
+      commitAuthority();
       return { published: false, replayed: false, reason: "stale_generation", settlementId: null, outboxId: null };
+    }
+
+    if (options.sourceCurrentness) {
+      try {
+        assertThoughtSourceCurrentness(
+          db,
+          authorityDb,
+          options.sourceCurrentness,
+          settlement.workingContextDelta ?? [],
+        );
+      } catch (error) {
+        if (!isThoughtSourceCurrentnessError(error)) throw error;
+        db.exec("ROLLBACK");
+        sidecarTransactionOpen = false;
+        rollbackAuthority();
+        return { published: false, replayed: false, reason: "source_currentness_stale", settlementId: null, outboxId: null };
+      }
     }
 
     for (const delta of (settlement.workingContextDelta ?? [])) applyWorkingContextDelta(db, delta, settlement);
@@ -199,12 +256,16 @@ export function publishSemanticTransaction(
     const secondAuthorityFailure = authorityFenceReason(options);
     if (secondAuthorityFailure) {
       db.exec("ROLLBACK");
+      sidecarTransactionOpen = false;
+      rollbackAuthority();
       return { published: false, replayed: false, reason: secondAuthorityFailure, settlementId: null, outboxId: null };
     }
     if (!publicationFence(db, settlement, conversationId)) {
       // The semantic deltas above are provisional. A stale second fence must
       // roll back those writes together with the refused publication.
       db.exec("ROLLBACK");
+      sidecarTransactionOpen = false;
+      rollbackAuthority();
       return { published: false, replayed: false, reason: "stale_generation", settlementId: null, outboxId: null };
     }
 
@@ -263,9 +324,17 @@ export function publishSemanticTransaction(
     db.prepare("UPDATE cycle_records SET state = ?, updated_at_ms = ? WHERE cycle_id = ? AND generation = ?")
       .run(outboxId === null ? "silent" : "sending", nowMs, settlement.cycleId, settlement.generation);
     db.exec("COMMIT");
+    sidecarTransactionOpen = false;
+    // Keep the authority lock until the sidecar commit has made the semantic
+    // publication durable, then release the read fence.
+    commitAuthority();
     return { published: true, replayed: false, settlementId: settlement.settlementId, outboxId };
   } catch (error) {
-    try { db.exec("ROLLBACK"); } catch { /* preserve original */ }
+    if (sidecarTransactionOpen) {
+      try { db.exec("ROLLBACK"); } catch { /* preserve original */ }
+      sidecarTransactionOpen = false;
+    }
+    rollbackAuthority();
     throw error;
   }
 }
