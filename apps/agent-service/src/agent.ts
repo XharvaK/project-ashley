@@ -20,8 +20,12 @@ import { appendInboxEvent, claimInboxEvent } from "./core/cognitive-v021/cycle/i
 import { consumeInboxEvent } from "./core/cognitive-v021/cycle/inbox-consumer.js";
 import {
   tickIdleOpportunity,
+  type IdleObservationDraft,
   type IdleTickResult,
 } from "./core/cognitive-v021/initiative/idle.js";
+import { detectCredentialShape, CREDENTIAL_OMITTED_PLACEHOLDER } from "./core/privacy/secrets.js";
+import { scanConfiguredSources } from "./core/curiosity/sources.js";
+import { performGroundedReads, type ReadRecord } from "./core/curiosity/reads.js";
 import { resolveActiveThread } from "./core/memory/threads.js";
 import type {
   CognitiveDispatchResult,
@@ -64,6 +68,33 @@ export type ReadinessSnapshot = Readonly<{
 export type SseClient = {
   write: (data: object) => void;
 };
+
+export function readRecordToObservationDraft(read: ReadRecord): IdleObservationDraft | null {
+  if (read.provenance !== "live") return null;
+  const credential = detectCredentialShape(
+    `${read.finalUrl}\n${read.title}\n${read.evidenceExcerpts.join("\n")}`,
+  ).hit;
+  const identity = `curiosity:read:${read.id}:${read.contentHash.trim().toLowerCase()}`;
+  return {
+    observationId: identity,
+    derived: true,
+    replaySafe: true,
+    modality: "page",
+    payload: {
+      readId: read.id,
+      itemId: read.itemId,
+      finalUrl: credential ? CREDENTIAL_OMITTED_PLACEHOLDER : read.finalUrl,
+      contentHash: read.contentHash,
+      retrievedAt: read.retrievedAt,
+      title: credential ? CREDENTIAL_OMITTED_PLACEHOLDER : read.title,
+      excerpts: credential ? [] : read.evidenceExcerpts.slice(0, 6),
+      inputTrust: "untrusted_evidence",
+    },
+    provenance: identity,
+    dataClassification: credential ? "secret" : "ordinary",
+    secretOmitted: credential,
+  };
+}
 
 type PersistedState = {
   activeSessionId?: string | null;
@@ -156,6 +187,18 @@ export class AgentManager {
       conversationId,
       occupantId: ownerId,
       authorityEpoch,
+      curiosityObservationProvider: async () => {
+        try { await scanConfiguredSources(nuclear); } catch { /* mechanical acquisition must not block Thought */ }
+        try {
+          const result = await performGroundedReads(nuclear, ownerId);
+          return result.reads
+            .filter((read) => read.provenance === "live")
+            .map(readRecordToObservationDraft)
+            .filter((observation): observation is IdleObservationDraft => observation !== null);
+        } catch {
+          return [];
+        }
+      },
       runThought: async (input) => {
         const event = input.event ?? appendInboxEvent(sidecar, {
           id: `idle:${input.wakeId}`,

@@ -75,6 +75,19 @@ function mapRead(value: unknown): ReadRecord | null {
   };
 }
 
+function readById(db: DatabaseSync, readId: number): ReadRecord | null {
+  const row = db.prepare(
+    `SELECT r.id, r.item_id, r.final_url, r.content_hash, r.retrieved_at,
+            r.model, r.model_metadata_json, r.evidence_excerpts_json,
+            r.cleaned_chars, i.title, i.interest, r.provenance
+     FROM cur_reads r
+     JOIN cur_items i ON i.id = r.item_id
+     WHERE r.id = ?
+     LIMIT 1`,
+  ).get(readId);
+  return mapRead(row);
+}
+
 export function recordSuccessfulRead(
   db: DatabaseSync,
   input: {
@@ -217,7 +230,7 @@ export async function performGroundedReads(
     learnedAutonomyMode?: LearnedAutonomyMode;
   } = {},
   now = new Date(),
-): Promise<{ readsCreated: number; errors: string[] }> {
+): Promise<{ readsCreated: number; reads: ReadRecord[]; errors: string[] }> {
   const counts = db.prepare(
     `SELECT
        SUM(CASE WHEN json_extract(model_metadata_json, '$.selectionLane') = 'interest' THEN 1 ELSE 0 END) AS interest_count,
@@ -226,7 +239,7 @@ export async function performGroundedReads(
   ).get(utcDayStart(now)) as { interest_count?: number; exploration_count?: number } | undefined;
   let interestBudget = Math.max(0, 10 - Number(counts?.interest_count ?? 0));
   let explorationBudget = Math.max(0, 2 - Number(counts?.exploration_count ?? 0));
-  if (interestBudget + explorationBudget === 0) return { readsCreated: 0, errors: [] };
+  if (interestBudget + explorationBudget === 0) return { readsCreated: 0, reads: [], errors: [] };
 
   const activeLearned = dependencies.learnedAutonomyMode === "dark_apply"
     ? listActiveLearnedInfluences(db, ownerId, {
@@ -280,6 +293,7 @@ export async function performGroundedReads(
       .map((item) => ({ item, lane: "exploration" as const })),
   ];
   let readsCreated = 0;
+  const reads: ReadRecord[] = [];
   const errors: string[] = [];
   const liveAuthority = capabilityCanInfluence(db, "reading");
   for (const { item, lane } of selected) {
@@ -334,13 +348,20 @@ export async function performGroundedReads(
       db.prepare("UPDATE cur_items SET status = 'read' WHERE id = ?").run(item.id);
       logProvenance(db, "read", `${ownerId}:read:${readId}:${resource.finalUrl}`, item.id);
       recordLiveShadowEvent(db, "reading", `read:${readId}`);
+      const read = readById(db, readId);
+      if (!read) throw new Error("read_record_missing");
+      reads.push(read);
       readsCreated++;
       if (lane === "interest") interestBudget--;
       else explorationBudget--;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       errors.push(`item:${item.id}:${message}`);
+      try {
+        db.prepare("UPDATE cur_items SET status = 'skipped' WHERE id = ? AND status = 'scanned'")
+          .run(item.id);
+      } catch { /* preserve the original mechanical read failure */ }
     }
   }
-  return { readsCreated, errors };
+  return { readsCreated, reads, errors };
 }

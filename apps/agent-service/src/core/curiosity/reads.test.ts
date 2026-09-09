@@ -104,6 +104,69 @@ describe("curiosity read provenance", () => {
     db.close();
   });
 
+  it("returns the successful ReadRecord values without changing shadow provenance", async () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const sourceId = upsertSource(db, {
+      slug: "returned-read", title: "Returned Read", kind: "rss",
+      url: "https://example.com/returned.xml", interest: "systems",
+    });
+    const itemId = insertItem(db, {
+      sourceId,
+      url: "https://example.com/returned-article",
+      title: "Returned article",
+      excerpt: "excerpt",
+      interest: "systems",
+      score: 90,
+    });
+    const result = await performGroundedReads(db, "doc", {
+      resolve: async () => [{ address: "93.184.216.34", family: 4 }],
+      fetcher: async () => new Response(articleHtml, {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      }),
+    }, new Date("2026-08-03T12:00:00.000Z"));
+
+    expect(itemId).not.toBeNull();
+    expect(result.reads).toEqual([
+      expect.objectContaining({ itemId, title: "Returned article", provenance: "shadow" }),
+    ]);
+    db.close();
+  });
+
+  it("marks a failed selected item skipped so a later tick does not retry it", async () => {
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const sourceId = upsertSource(db, {
+      slug: "no-retry", title: "No Retry", kind: "rss",
+      url: "https://example.com/no-retry.xml", interest: "systems",
+    });
+    const itemId = insertItem(db, {
+      sourceId,
+      url: "https://example.com/no-retry-article",
+      title: "Broken article",
+      excerpt: "excerpt",
+      interest: "systems",
+      score: 90,
+    });
+    let attempts = 0;
+    const options = {
+      resolve: async () => [{ address: "93.184.216.34", family: 4 }],
+      fetcher: async () => {
+        attempts += 1;
+        throw new Error("network_down");
+      },
+    };
+
+    const first = await performGroundedReads(db, "doc", options);
+    const second = await performGroundedReads(db, "doc", options);
+
+    expect(first.errors.some((error) => error.includes("network_down"))).toBe(true);
+    expect(second.readsCreated).toBe(0);
+    expect(attempts).toBe(1);
+    expect(db.prepare("SELECT status FROM cur_items WHERE id = ?").get(itemId))
+      .toMatchObject({ status: "skipped" });
+    db.close();
+  });
+
   afterEach(() => {
     clearCurrentActivity();
   });

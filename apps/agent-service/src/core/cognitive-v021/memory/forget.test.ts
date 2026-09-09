@@ -10,8 +10,57 @@ import { retrieveCandidates } from "../retrieval/discover.js";
 import { upsertMemoryAssertion } from "./assertions.js";
 import { buildOwnerKnowledgeView } from "./views.js";
 import { applyV021Forget, applyV021ForgetTargets } from "./forget.js";
+import { publishSemanticTransaction } from "../settlement/publish.js";
+import { admitTestCycle, makeThoughtDraft } from "../test-support.js";
+import type { PublishedCognitiveSettlement } from "../types.js";
 
 describe("v0.2.1 forget matrix", () => {
+  it("prevents a forgotten curiosity observation from supporting later publication", () => {
+    const db = openTestSidecar();
+    try {
+      db.prepare(
+        `INSERT INTO observations
+           (observation_id, cycle_id, generation, derived, replay_safe, modality,
+            payload_json, provenance, data_classification, secret_omitted, created_at_ms)
+         VALUES ('forgotten-curiosity', NULL, NULL, 1, 1, 'page', ?, ?, 'ordinary', 0, 1)`
+      ).run(
+        JSON.stringify({ title: "curiosity target" }),
+        "curiosity:read:1:hash",
+      );
+      applyV021Forget(db, { topic: "curiosity", nowMs: 2 });
+      admitTestCycle(db, {
+        cycleId: "cycle-forgotten-curiosity",
+        conversationId: "thread-forgotten-curiosity",
+        triggerKind: "owner_message",
+        triggerRef: "forgotten",
+        occupantId: "doc",
+        authorityEpoch: 1,
+        nowMs: 3,
+      });
+      const draft = makeThoughtDraft({
+        cycleId: "cycle-forgotten-curiosity",
+        triggerRef: "thread-forgotten-curiosity",
+        operations: {
+          observationsConsumed: ["forgotten-curiosity"],
+          effectsCompleted: [],
+          intentsStillInFlight: [],
+        },
+      });
+      const result = publishSemanticTransaction(db, {
+        ...draft,
+        settlementId: "settlement-forgotten-curiosity",
+        speech: { ...draft.speech, finalLicensedText: null },
+      } as PublishedCognitiveSettlement);
+
+      expect(result).toMatchObject({ published: false, reason: "source_currentness_stale" });
+      expect(db.prepare("SELECT COUNT(*) AS count FROM settlements").get()).toMatchObject({ count: 0 });
+      expect(db.prepare("SELECT json_extract(payload_json, '$.title') AS title FROM observations WHERE observation_id = 'forgotten-curiosity'").get())
+        .toMatchObject({ title: "[redacted]" });
+    } finally {
+      db.close();
+    }
+  });
+
   it("redacts semantic content and suppresses future delivery", () => {
     const db = openTestSidecar();
     try {

@@ -67,6 +67,35 @@ function stringValue(value: unknown, fallback = ""): string { return typeof valu
 function numberValue(value: unknown, fallback = 0): number { const n = typeof value === "number" ? value : Number(value); return Number.isFinite(n) ? n : fallback; }
 function json(value: unknown): string { return JSON.stringify(value ?? null); }
 
+function containsRedactionMarker(value: unknown): boolean {
+  if (value === "[redacted]") return true;
+  if (Array.isArray(value)) return value.some(containsRedactionMarker);
+  if (typeof value === "object" && value !== null) {
+    const record = value as Record<string, unknown>;
+    if (record.redacted === true) return true;
+    return Object.values(record).some(containsRedactionMarker);
+  }
+  return false;
+}
+
+function consumedObservationsAreAvailable(
+  db: DatabaseSync,
+  observationIds: readonly string[],
+): boolean {
+  for (const observationId of observationIds) {
+    const row = db.prepare(
+      "SELECT payload_json FROM observations WHERE observation_id = ? LIMIT 1",
+    ).get(observationId) as DbRow | undefined;
+    if (!row || typeof row.payload_json !== "string") return false;
+    try {
+      if (containsRedactionMarker(JSON.parse(row.payload_json))) return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
 function currentGeneration(db: DatabaseSync, conversationId: string): number | null {
   const row = db.prepare("SELECT MAX(generation) AS generation FROM cycle_records WHERE conversation_id = ?").get(conversationId) as DbRow | undefined;
   if (!row || row.generation == null) return null;
@@ -260,6 +289,13 @@ export function publishSemanticTransaction(
         rollbackAuthority();
         return { published: false, replayed: false, reason: "source_currentness_stale", settlementId: null, outboxId: null };
       }
+    }
+
+    if (!consumedObservationsAreAvailable(db, settlement.operations.observationsConsumed)) {
+      db.exec("ROLLBACK");
+      sidecarTransactionOpen = false;
+      rollbackAuthority();
+      return { published: false, replayed: false, reason: "source_currentness_stale", settlementId: null, outboxId: null };
     }
 
     for (const delta of (settlement.workingContextDelta ?? [])) applyWorkingContextDelta(db, delta, settlement);

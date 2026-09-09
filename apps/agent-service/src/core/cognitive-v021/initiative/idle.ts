@@ -45,6 +45,12 @@ export type IdleThoughtContext = {
 };
 
 export type IdleThoughtRunner = (input: IdleThoughtContext) => Promise<IdleRunnerResult> | IdleRunnerResult;
+export type IdleObservationDraft = Omit<Observation, "cycleId" | "generation">;
+export type IdleObservationProvider = (input: {
+  conversationId: string;
+  nowMs: number;
+  occupancy: MindOccupancy[];
+}) => Promise<IdleObservationDraft[]> | IdleObservationDraft[];
 
 export type IdleTickOptions = {
   conversationId?: string;
@@ -58,6 +64,7 @@ export type IdleTickOptions = {
   runThought?: IdleThoughtRunner;
   thought?: IdleThoughtRunner;
   thoughtRunner?: IdleThoughtRunner;
+  curiosityObservationProvider?: IdleObservationProvider;
   /** Policy identity is configuration; capacity remains ledger-owned. */
   privateBudgetPolicyId?: string;
 };
@@ -190,7 +197,10 @@ function conversationCandidates(
   return [...ids].sort();
 }
 
-function remapObservation(observation: Observation, cycle: CycleRecord): Observation {
+function remapObservation(
+  observation: IdleObservationDraft | Observation,
+  cycle: CycleRecord,
+): Observation {
   return { ...observation, cycleId: cycle.cycleId, generation: cycle.generation };
 }
 
@@ -245,12 +255,28 @@ async function tickConversation(
     logOccupancyUnreachable(conversationId, error);
     return emptyResult(conversationId, "occupancy_unreachable", [], suppressedTriggers.filter((trigger) => trigger.conversationId === conversationId));
   }
+  const nowMs = options.nowMs ?? Date.now();
   const matched = collectSubscriptionObservations(db, conversationId, items, { nowMs: options.nowMs });
-  if (occupancy.length === 0 && dueTriggers.length === 0 && matched.length === 0) {
+  const thought = runner(options);
+  const staleSuppressed = suppressedTriggers.some((trigger) => trigger.conversationId === conversationId);
+  let acquired: IdleObservationDraft[] = [];
+  if (
+    thought &&
+    !activePrivateCalls.has(conversationId) &&
+    dueTriggers.length === 0 &&
+    (!staleSuppressed || occupancy.length > 0 || matched.length > 0) &&
+    options.curiosityObservationProvider
+  ) {
+    try {
+      acquired = (await options.curiosityObservationProvider({ conversationId, nowMs, occupancy })).slice(0, 12);
+    } catch {
+      acquired = [];
+    }
+  }
+  if (occupancy.length === 0 && dueTriggers.length === 0 && matched.length === 0 && acquired.length === 0) {
     return emptyResult(conversationId, "empty_house", [], suppressedTriggers.filter((trigger) => trigger.conversationId === conversationId));
   }
 
-  const thought = runner(options);
   if (!thought) {
     return {
       ...emptyResult(conversationId, "thought_runner_missing", dueTriggers, suppressedTriggers.filter((trigger) => trigger.conversationId === conversationId)),
@@ -261,8 +287,6 @@ async function tickConversation(
     };
   }
   if (activePrivateCalls.has(conversationId)) return emptyResult(conversationId, "private_compute_concurrent", dueTriggers, []);
-
-  const nowMs = options.nowMs ?? Date.now();
 
   const triggerKind = dueTriggers.length > 0
     ? "future_trigger_due" as const
@@ -317,7 +341,7 @@ async function tickConversation(
   if (!cycle) throw new Error("idle_cycle_missing");
   const wakeId = cycle.wakeId;
   const event = dueEvents.find((candidate) => candidate.wakeId === wakeId) ?? null;
-  const observations = matched.map((observation) => remapObservation(observation, cycle));
+  const observations = [...matched, ...acquired].map((observation) => remapObservation(observation, cycle));
   const budget = reservePrivateThought(db, {
     admissionId: `private-thought:${wakeId}`,
     wakeId,

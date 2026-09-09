@@ -29,6 +29,48 @@ function settlement(overrides: Partial<PublishedCognitiveSettlement> = {}): Publ
 }
 
 describe("v0.2.1 semantic publication transaction", () => {
+  it("rejects a settlement that consumes a missing observation before semantic writes", () => {
+    const db = openTestSidecar();
+    try {
+      admitTestCycle(db, { cycleId: "cycle-1", conversationId: "thread-1", triggerKind: "owner_message", triggerRef: "one", occupantId: "doc", authorityEpoch: 1, nowMs: 1 });
+      const result = publishSemanticTransaction(db, settlement({
+        operations: { observationsConsumed: ["missing-observation"], effectsCompleted: [], intentsStillInFlight: [] },
+      }));
+      expect(result).toMatchObject({ published: false, reason: "source_currentness_stale" });
+      expect(db.prepare("SELECT COUNT(*) AS count FROM working_context_items").get()).toMatchObject({ count: 0 });
+      expect(db.prepare("SELECT COUNT(*) AS count FROM settlements").get()).toMatchObject({ count: 0 });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rejects a settlement that consumes a redacted observation before semantic writes", () => {
+    const db = openTestSidecar();
+    try {
+      admitTestCycle(db, { cycleId: "cycle-1", conversationId: "thread-1", triggerKind: "owner_message", triggerRef: "one", occupantId: "doc", authorityEpoch: 1, nowMs: 1 });
+      db.prepare(
+        `INSERT INTO observations
+           (observation_id, cycle_id, generation, derived, replay_safe, modality,
+            payload_json, provenance, data_classification, secret_omitted, created_at_ms)
+         VALUES (?, ?, ?, 1, 1, 'page', ?, ?, 'ordinary', 0, ?)`
+      ).run(
+        "redacted-observation",
+        "cycle-1",
+        1,
+        JSON.stringify({ title: "[redacted]" }),
+        "curiosity:read:1:hash",
+        1,
+      );
+      const result = publishSemanticTransaction(db, settlement({
+        operations: { observationsConsumed: ["redacted-observation"], effectsCompleted: [], intentsStillInFlight: [] },
+      }));
+      expect(result).toMatchObject({ published: false, reason: "source_currentness_stale" });
+      expect(db.prepare("SELECT COUNT(*) AS count FROM settlements").get()).toMatchObject({ count: 0 });
+    } finally {
+      db.close();
+    }
+  });
+
   it("rejects stale generations without writing working context", () => {
     const db = openTestSidecar();
     try {
