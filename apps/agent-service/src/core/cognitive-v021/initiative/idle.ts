@@ -12,6 +12,8 @@ import {
   type LearnedSelfSlice,
   type MindOccupancy,
   type Observation,
+  type ThoughtExecutionDispatchTruth,
+  type ThoughtExecutionProvenance,
 } from "../types.js";
 import { admitWake, getWake } from "../wake/ledger.js";
 import { occurrenceIdFor } from "../wake/identity.js";
@@ -87,10 +89,34 @@ export type IdleTickResult = {
   /** Compatibility additions for the W9 idle truth boundary. */
   idleEligible?: boolean;
   semanticAbsenceClaim?: "yes" | "no";
+  thoughtExecutionProvenance?: ThoughtExecutionProvenance;
 };
 
 /** Scheduler-only overlap guard. It is not a budget counter or capacity source. */
 const activePrivateCalls = new Set<string>();
+const UNKNOWN_EXECUTION_PROVENANCE: ThoughtExecutionProvenance = Object.freeze({
+  dispatchTruth: "unknown",
+  providerAttempts: "unknown",
+});
+
+function mergeExecutionProvenance(
+  current: ThoughtExecutionProvenance | null,
+  next: ThoughtExecutionProvenance | undefined,
+): ThoughtExecutionProvenance | null {
+  if (!next) return current;
+  if (!current) return next;
+  const dispatchTruth: ThoughtExecutionDispatchTruth = current.dispatchTruth === "sent"
+    || next.dispatchTruth === "sent"
+    ? "sent"
+    : current.dispatchTruth === "unknown" || next.dispatchTruth === "unknown"
+      ? "unknown"
+      : "not_sent";
+  const providerAttempts = current.providerAttempts === "unknown"
+    || next.providerAttempts === "unknown"
+    ? "unknown"
+    : current.providerAttempts + next.providerAttempts;
+  return { dispatchTruth, providerAttempts };
+}
 
 function number(value: unknown, fallback = 0): number {
   const parsed = typeof value === "number" ? value : Number(value);
@@ -341,6 +367,7 @@ async function tickConversation(
       dormant,
       idleEligible: true,
       semanticAbsenceClaim: "no",
+      thoughtExecutionProvenance: result.thoughtExecutionProvenance ?? UNKNOWN_EXECUTION_PROVENANCE,
     };
   } catch {
     try { settleUnsettledPrivateReservation(db, budget.reservation.reservationId, nowMs); } catch { /* preserve the idle failure result */ }
@@ -358,6 +385,7 @@ async function tickConversation(
       dormant: false,
       idleEligible: true,
       semanticAbsenceClaim: "no",
+      thoughtExecutionProvenance: UNKNOWN_EXECUTION_PROVENANCE,
     };
   } finally {
     activePrivateCalls.delete(conversationId);
@@ -396,6 +424,10 @@ export async function tickIdleOpportunity(
   for (const conversationId of conversations) {
     results.push(await tickConversation(db, conversationId, { ...options, nowMs }, due.fired, due.suppressedStale, items, due.events));
   }
+  const thoughtExecutionProvenance = results.reduce<ThoughtExecutionProvenance | null>(
+    (current, result) => mergeExecutionProvenance(current, result.thoughtExecutionProvenance),
+    null,
+  );
   return {
     conversationId: options.conversationId ?? (results.length === 1 ? results[0]!.conversationId : null),
     eligible: results.some((result) => result.eligible),
@@ -410,5 +442,6 @@ export async function tickIdleOpportunity(
     dormant: results.some((result) => result.dormant),
     idleEligible: results.some((result) => result.idleEligible === true),
     semanticAbsenceClaim: results.some((result) => result.semanticAbsenceClaim === "no") ? "no" : "yes",
+    ...(thoughtExecutionProvenance ? { thoughtExecutionProvenance } : {}),
   };
 }

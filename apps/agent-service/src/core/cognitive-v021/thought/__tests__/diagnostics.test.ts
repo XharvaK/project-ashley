@@ -389,7 +389,7 @@ describe("Thought Diagnostics & Observability DB", () => {
       expect(diagnostics.length).toBe(1);
       expect(diagnostics[0].code).toBe("parser_malformed");
       expect(diagnostics[0].cycleId).toBe("cycle-obs-real");
-      expect(diagnostics[0].dispatchTruth).toBe("sent");
+      expect(diagnostics[0].dispatchTruth).toBe("unknown");
       expect(diagnostics[0].providerFailure).toMatchObject({
         provider: "nim",
         model: "nvidia/nemotron-test",
@@ -608,7 +608,7 @@ describe("Thought Diagnostics & Observability DB", () => {
         model: "meta/llama-3.3-70b-instruct",
         modelFabricInvocationId: "inv-suppress-1",
         modelFabricAttemptId: "att-primary-123",
-        dispatchTruth: "sent",
+        dispatchTruth: "unknown",
         parserStatus: "not_run",
         validatorStatus: "not_run",
         failureClass: "transport_error",
@@ -773,6 +773,115 @@ describe("Thought Diagnostics & Observability DB", () => {
         .not.toHaveProperty("providerHttpStatus");
     } finally {
       obs.close();
+    }
+  });
+
+  it("persists a bounded publication rejection without implying a committed settlement", () => {
+    const obs = openObservabilityStore(":memory:");
+    try {
+      obs.recordDiagnostic({
+        cycleId: "cycle-publication-rejection",
+        generation: 4,
+        requestId: "request-publication-rejection",
+        pass: 2,
+        code: "publication_rejected",
+        stage: "publication",
+        dispatchTruth: "unknown",
+        semanticProjectionHash: "sha256:projection",
+        dispatchMessagesHash: "sha256:messages",
+        publicationReason: "future_trigger_snapshot_conflict",
+      });
+
+      const diagnostic = obs.listDiagnostics()[0];
+      expect(diagnostic).toMatchObject({
+        code: "publication_rejected",
+        stage: "publication",
+        publicationReason: "future_trigger_snapshot_conflict",
+        dispatchTruth: "unknown",
+      });
+      const columns = (obs.db.prepare(
+        "PRAGMA table_info(thought_dispatch_diagnostics)",
+      ).all() as Array<{ name?: string }>).map((column) => column.name);
+      expect(columns).not.toContain("attempted_settlement_id");
+    } finally {
+      obs.close();
+    }
+  });
+
+  it("migrates the existing diagnostic owner while preserving IDs and old rows", () => {
+    const db = new DatabaseSync(":memory:");
+    try {
+      db.exec(`
+        CREATE TABLE thought_dispatch_diagnostics (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          cycle_id TEXT NOT NULL,
+          generation INTEGER NOT NULL,
+          request_id TEXT NOT NULL,
+          pass INTEGER NOT NULL,
+          code TEXT NOT NULL CHECK(code IN ('provider_returned')),
+          stage TEXT NOT NULL CHECK(stage IN ('provider_dispatch')),
+          dispatch_truth TEXT NOT NULL CHECK(dispatch_truth IN ('not_sent', 'sent', 'unknown')),
+          quota_bucket TEXT,
+          estimated_input_tokens INTEGER,
+          total_demand_tokens INTEGER,
+          semantic_projection_hash TEXT,
+          dispatch_messages_hash TEXT,
+          primary_provider TEXT,
+          primary_attempt_id TEXT,
+          primary_dispatch_truth TEXT,
+          suppressed_provider TEXT,
+          fallback_attempt_ordinal INTEGER,
+          fallback_from_attempt_id TEXT,
+          secondary_dispatch_truth TEXT,
+          cycle_metrics_json TEXT,
+          provider_failure_json TEXT,
+          created_at_ms INTEGER NOT NULL
+        );
+        CREATE INDEX idx_tdd_cycle ON thought_dispatch_diagnostics (cycle_id, generation);
+        CREATE TRIGGER preserve_old_row AFTER INSERT ON thought_dispatch_diagnostics
+          BEGIN SELECT CASE WHEN NEW.id < 1 THEN RAISE(ABORT, 'bad_id') END; END;
+      `);
+      db.prepare(
+        `INSERT INTO thought_dispatch_diagnostics
+          (id, cycle_id, generation, request_id, pass, code, stage, dispatch_truth, created_at_ms)
+         VALUES (41, 'old-cycle', 1, 'old-request', 1, 'provider_returned', 'provider_dispatch', 'sent', 10)`,
+      ).run();
+
+      initObservabilitySchema(db);
+      expect(db.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 1 });
+      expect(db.prepare("SELECT id, request_id FROM thought_dispatch_diagnostics").all())
+        .toEqual([{ id: 41, request_id: "old-request" }]);
+      expect(db.prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name = 'preserve_old_row'",
+      ).get()).toMatchObject({ name: "preserve_old_row" });
+      expect(db.prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_tdd_cycle'",
+      ).get()).toMatchObject({ name: "idx_tdd_cycle" });
+
+      initObservabilitySchema(db);
+      expect(db.prepare("SELECT COUNT(*) AS count FROM thought_dispatch_diagnostics").get())
+        .toMatchObject({ count: 1 });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("fails explicitly for an incompatible declared current schema", () => {
+    const db = new DatabaseSync(":memory:");
+    try {
+      db.exec(`
+        CREATE TABLE thought_dispatch_diagnostics (
+          id INTEGER PRIMARY KEY,
+          code TEXT NOT NULL CHECK(code IN ('provider_returned', 'publication_rejected')),
+          stage TEXT NOT NULL CHECK(stage IN ('provider_dispatch', 'publication')),
+          publication_reason TEXT
+        );
+        PRAGMA user_version = 1;
+      `);
+
+      expect(() => initObservabilitySchema(db)).toThrow("observability_schema_incompatible");
+    } finally {
+      db.close();
     }
   });
 });

@@ -9,7 +9,10 @@ import type {
 } from "./projection-allocator/receipt.js";
 import { DEFAULT_SEMANTIC_PROJECTION_ENVELOPE, type SemanticProjectionEnvelope } from "./projection-allocator/budget.js";
 import type { RetrievalQuery } from "../retrieval/query.js";
-import type { RetrievalInfrastructureState } from "../types.js";
+import type {
+  PublicationRejectionReason,
+  RetrievalInfrastructureState,
+} from "../types.js";
 import { getPrivateBudgetProjection, type PrivateBudgetProjection } from "../private-budget/ledger.js";
 
 export type ThoughtDispatchDiagnosticCode =
@@ -24,7 +27,8 @@ export type ThoughtDispatchDiagnosticCode =
   | "attention_deadline"
   | "cancelled"
   | "provider_unavailable"
-  | "agent_not_ready";
+  | "agent_not_ready"
+  | "publication_rejected";
 
 export type ThoughtCycleTokenMetrics = {
   first_pass_total_input_tokens: number;
@@ -84,7 +88,7 @@ export type ThoughtDispatchDiagnostic = {
   requestId: string;
   pass: number;
   code: ThoughtDispatchDiagnosticCode;
-  stage: "allocation" | "attention_admission" | "provider_dispatch" | "parser";
+  stage: "allocation" | "attention_admission" | "provider_dispatch" | "parser" | "publication";
   dispatchTruth: "not_sent" | "sent" | "unknown";
   quotaBucket?: string | null;
   estimatedInputTokens?: number | null;
@@ -102,6 +106,7 @@ export type ThoughtDispatchDiagnostic = {
   semanticBudgetTokens?: number | null;
   overflowTokens?: number | null;
   cycleMetrics?: ThoughtCycleTokenMetrics | null;
+  publicationReason?: PublicationRejectionReason | null;
   /** Failure-oriented provider boundary evidence; raw content is prohibited. */
   providerFailure?: ThoughtProviderFailureCapture | null;
   createdAtMs?: number;
@@ -202,6 +207,24 @@ function diagnosticPayload(diag: ThoughtDispatchDiagnostic): string | null {
   const overflowPayload = requiredOverflowPayload(diag);
   if (overflowPayload) return JSON.stringify(overflowPayload);
   return diag.cycleMetrics ? JSON.stringify(diag.cycleMetrics) : null;
+}
+
+const PUBLICATION_REJECTION_REASONS = new Set<PublicationRejectionReason>([
+  "stale_generation",
+  "authority_transition",
+  "authority_vector_stale",
+  "source_currentness_stale",
+  "wake_missing",
+  "wake_terminal",
+  "wake_reconciliation_required",
+  "consequence_exists",
+  "future_trigger_snapshot_conflict",
+]);
+
+function boundedPublicationReason(
+  value: PublicationRejectionReason | null | undefined,
+): PublicationRejectionReason | null {
+  return value && PUBLICATION_REJECTION_REASONS.has(value) ? value : null;
 }
 
 function boundedCaptureString(value: unknown, maxLength = 256): string | undefined {
@@ -363,18 +386,52 @@ function parseProviderFailureCapture(value: unknown): ThoughtProviderFailureCapt
   }
 }
 
-function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string): void {
-  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name?: string }>;
-  if (!columns.some((item) => item.name === column)) {
-    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
-  }
-}
-
 export function defaultObservabilityDbPath(): string {
   return join(homedir(), ".composer-assistant", "cognitive-v021-observability.db");
 }
 
-export function initObservabilitySchema(db: DatabaseSync): void {
+const OBSERVABILITY_SCHEMA_VERSION = 1;
+const REQUIRED_DIAGNOSTIC_COLUMNS = [
+  "id", "cycle_id", "generation", "request_id", "pass", "code", "stage",
+  "dispatch_truth", "quota_bucket", "estimated_input_tokens", "total_demand_tokens",
+  "semantic_projection_hash", "dispatch_messages_hash", "primary_provider",
+  "primary_attempt_id", "primary_dispatch_truth", "suppressed_provider",
+  "fallback_attempt_ordinal", "fallback_from_attempt_id", "secondary_dispatch_truth",
+  "cycle_metrics_json", "provider_failure_json", "publication_reason", "created_at_ms",
+] as const;
+const LEGACY_DIAGNOSTIC_COLUMNS = REQUIRED_DIAGNOSTIC_COLUMNS.filter(
+  (column) => column !== "publication_reason",
+);
+
+function tableExists(db: DatabaseSync, table: string): boolean {
+  const row = db.prepare(
+    "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = ?",
+  ).get(table) as { present?: number } | undefined;
+  return Number(row?.present ?? 0) === 1;
+}
+
+function userVersion(db: DatabaseSync): number {
+  const row = db.prepare("PRAGMA user_version").get() as { user_version?: number } | undefined;
+  return Number(row?.user_version ?? 0);
+}
+
+function diagnosticColumns(db: DatabaseSync): string[] {
+  return (db.prepare("PRAGMA table_info(thought_dispatch_diagnostics)").all() as Array<{ name?: string }>)
+    .flatMap((item) => typeof item.name === "string" ? [item.name] : []);
+}
+
+function currentDiagnosticSchema(db: DatabaseSync): boolean {
+  const columns = new Set(diagnosticColumns(db));
+  const sql = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'thought_dispatch_diagnostics'",
+  ).get() as { sql?: string } | undefined;
+  return REQUIRED_DIAGNOSTIC_COLUMNS.every((column) => columns.has(column))
+    && typeof sql?.sql === "string"
+    && sql.sql.includes("publication_rejected")
+    && sql.sql.includes("'publication'");
+}
+
+function createObservabilityTables(db: DatabaseSync): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS allocation_receipts (
       request_id TEXT PRIMARY KEY,
@@ -416,9 +473,10 @@ export function initObservabilitySchema(db: DatabaseSync): void {
         'attention_deadline',
         'cancelled',
         'provider_unavailable',
-        'agent_not_ready'
+        'agent_not_ready',
+        'publication_rejected'
       )),
-      stage TEXT NOT NULL CHECK(stage IN ('allocation', 'attention_admission', 'provider_dispatch', 'parser')),
+      stage TEXT NOT NULL CHECK(stage IN ('allocation', 'attention_admission', 'provider_dispatch', 'parser', 'publication')),
       dispatch_truth TEXT NOT NULL CHECK(dispatch_truth IN ('not_sent', 'sent', 'unknown')),
       quota_bucket TEXT,
       estimated_input_tokens INTEGER,
@@ -434,6 +492,19 @@ export function initObservabilitySchema(db: DatabaseSync): void {
       secondary_dispatch_truth TEXT CHECK(secondary_dispatch_truth IS NULL OR secondary_dispatch_truth IN ('not_sent')),
       cycle_metrics_json TEXT,
       provider_failure_json TEXT,
+      publication_reason TEXT CHECK(
+        publication_reason IS NULL OR publication_reason IN (
+          'stale_generation',
+          'authority_transition',
+          'authority_vector_stale',
+          'source_currentness_stale',
+          'wake_missing',
+          'wake_terminal',
+          'wake_reconciliation_required',
+          'consequence_exists',
+          'future_trigger_snapshot_conflict'
+        )
+      ),
       created_at_ms INTEGER NOT NULL
     );
 
@@ -446,10 +517,142 @@ export function initObservabilitySchema(db: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS idx_tdd_code
       ON thought_dispatch_diagnostics (code, stage);
   `);
-  // This is an additive column on the dedicated diagnostic sidecar. It does
-  // not alter nuclear.db or any production schema migration contract.
-  ensureColumn(db, "thought_dispatch_diagnostics", "cycle_metrics_json", "TEXT");
-  ensureColumn(db, "thought_dispatch_diagnostics", "provider_failure_json", "TEXT");
+}
+
+function migrateDiagnosticTable(db: DatabaseSync): void {
+  const columns = new Set(diagnosticColumns(db));
+  if (LEGACY_DIAGNOSTIC_COLUMNS.some((column) => !columns.has(column))) {
+    throw new Error("observability_schema_incompatible");
+  }
+  const indexes = (db.prepare(
+    `SELECT name, sql FROM sqlite_master
+       WHERE type = 'index' AND tbl_name = 'thought_dispatch_diagnostics'
+         AND sql IS NOT NULL`,
+  ).all() as Array<{ name?: string; sql?: string }>).flatMap((item) =>
+    typeof item.sql === "string" ? [item.sql] : [],
+  );
+  const triggers = (db.prepare(
+    `SELECT sql FROM sqlite_master
+       WHERE type = 'trigger' AND tbl_name = 'thought_dispatch_diagnostics'
+         AND sql IS NOT NULL`,
+  ).all() as Array<{ sql?: string }>).flatMap((item) =>
+    typeof item.sql === "string" ? [item.sql] : [],
+  );
+  const preservedColumns = LEGACY_DIAGNOSTIC_COLUMNS.join(", ");
+  const oldRows = db.prepare(
+    `SELECT ${preservedColumns} FROM thought_dispatch_diagnostics ORDER BY id ASC`,
+  ).all();
+
+  db.exec(`
+    CREATE TABLE thought_dispatch_diagnostics_v1 (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      cycle_id TEXT NOT NULL,
+      generation INTEGER NOT NULL,
+      request_id TEXT NOT NULL,
+      pass INTEGER NOT NULL,
+      code TEXT NOT NULL CHECK(code IN (
+        'request_exceeds_tpm_budget',
+        'context_allocation_required_overflow',
+        'context_allocation_optional_degradation',
+        'transport_failover_unavailable_for_projection',
+        'provider_not_sent',
+        'provider_sent',
+        'provider_returned',
+        'parser_malformed',
+        'attention_deadline',
+        'cancelled',
+        'provider_unavailable',
+        'agent_not_ready',
+        'publication_rejected'
+      )),
+      stage TEXT NOT NULL CHECK(stage IN ('allocation', 'attention_admission', 'provider_dispatch', 'parser', 'publication')),
+      dispatch_truth TEXT NOT NULL CHECK(dispatch_truth IN ('not_sent', 'sent', 'unknown')),
+      quota_bucket TEXT,
+      estimated_input_tokens INTEGER,
+      total_demand_tokens INTEGER,
+      semantic_projection_hash TEXT,
+      dispatch_messages_hash TEXT,
+      primary_provider TEXT,
+      primary_attempt_id TEXT,
+      primary_dispatch_truth TEXT CHECK(primary_dispatch_truth IS NULL OR primary_dispatch_truth IN ('sent', 'not_sent', 'unknown')),
+      suppressed_provider TEXT,
+      fallback_attempt_ordinal INTEGER,
+      fallback_from_attempt_id TEXT,
+      secondary_dispatch_truth TEXT CHECK(secondary_dispatch_truth IS NULL OR secondary_dispatch_truth IN ('not_sent')),
+      cycle_metrics_json TEXT,
+      provider_failure_json TEXT,
+      publication_reason TEXT CHECK(
+        publication_reason IS NULL OR publication_reason IN (
+          'stale_generation',
+          'authority_transition',
+          'authority_vector_stale',
+          'source_currentness_stale',
+          'wake_missing',
+          'wake_terminal',
+          'wake_reconciliation_required',
+          'consequence_exists',
+          'future_trigger_snapshot_conflict'
+        )
+      ),
+      created_at_ms INTEGER NOT NULL
+    );
+    INSERT INTO thought_dispatch_diagnostics_v1 (
+      id, cycle_id, generation, request_id, pass, code, stage,
+      dispatch_truth, quota_bucket, estimated_input_tokens, total_demand_tokens,
+      semantic_projection_hash, dispatch_messages_hash, primary_provider,
+      primary_attempt_id, primary_dispatch_truth, suppressed_provider,
+      fallback_attempt_ordinal, fallback_from_attempt_id, secondary_dispatch_truth,
+      cycle_metrics_json, provider_failure_json, publication_reason, created_at_ms
+    )
+    SELECT id, cycle_id, generation, request_id, pass, code, stage,
+      dispatch_truth, quota_bucket, estimated_input_tokens, total_demand_tokens,
+      semantic_projection_hash, dispatch_messages_hash, primary_provider,
+      primary_attempt_id, primary_dispatch_truth, suppressed_provider,
+      fallback_attempt_ordinal, fallback_from_attempt_id, secondary_dispatch_truth,
+      cycle_metrics_json, provider_failure_json, NULL, created_at_ms
+    FROM thought_dispatch_diagnostics;
+    DROP TABLE thought_dispatch_diagnostics;
+    ALTER TABLE thought_dispatch_diagnostics_v1 RENAME TO thought_dispatch_diagnostics;
+  `);
+  for (const sql of indexes) db.exec(sql);
+  for (const sql of triggers) db.exec(sql);
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_tdd_cycle
+      ON thought_dispatch_diagnostics (cycle_id, generation);
+    CREATE INDEX IF NOT EXISTS idx_tdd_code
+      ON thought_dispatch_diagnostics (code, stage);
+  `);
+  const newRows = db.prepare(
+    `SELECT ${preservedColumns} FROM thought_dispatch_diagnostics ORDER BY id ASC`,
+  ).all();
+  if (JSON.stringify(oldRows) !== JSON.stringify(newRows)) {
+    throw new Error("observability_row_preservation_failed");
+  }
+  db.exec("UPDATE sqlite_sequence SET seq = (SELECT COALESCE(MAX(id), 0) FROM thought_dispatch_diagnostics) WHERE name = 'thought_dispatch_diagnostics'");
+}
+
+export function initObservabilitySchema(db: DatabaseSync): void {
+  db.exec("PRAGMA busy_timeout = 5000");
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const version = userVersion(db);
+    if (version > OBSERVABILITY_SCHEMA_VERSION) throw new Error("observability_schema_unsupported");
+    if (version === OBSERVABILITY_SCHEMA_VERSION) {
+      if (!tableExists(db, "thought_dispatch_diagnostics") || !currentDiagnosticSchema(db)) {
+        throw new Error("observability_schema_incompatible");
+      }
+    } else if (tableExists(db, "thought_dispatch_diagnostics")) {
+      migrateDiagnosticTable(db);
+    } else {
+      createObservabilityTables(db);
+    }
+    db.exec(`PRAGMA user_version = ${OBSERVABILITY_SCHEMA_VERSION}`);
+    if (!currentDiagnosticSchema(db)) throw new Error("observability_schema_incompatible");
+    db.exec("COMMIT");
+  } catch (error) {
+    try { db.exec("ROLLBACK"); } catch { /* preserve the schema failure */ }
+    throw error;
+  }
 }
 
 export class ObservabilityStore {
@@ -525,14 +728,15 @@ export class ObservabilityStore {
         total_demand_tokens, semantic_projection_hash, dispatch_messages_hash,
         primary_provider, primary_attempt_id, primary_dispatch_truth,
         suppressed_provider, fallback_attempt_ordinal, fallback_from_attempt_id,
-        secondary_dispatch_truth, cycle_metrics_json, provider_failure_json, created_at_ms
+        secondary_dispatch_truth, cycle_metrics_json, provider_failure_json,
+        publication_reason, created_at_ms
       ) VALUES (
         ?, ?, ?, ?, ?, ?,
         ?, ?, ?,
         ?, ?, ?,
         ?, ?, ?,
         ?, ?, ?,
-        ?, ?, ?, ?
+        ?, ?, ?, ?, ?
       )
     `);
 
@@ -558,6 +762,7 @@ export class ObservabilityStore {
       diag.secondaryDispatchTruth ?? null,
       diagnosticPayload(diag),
       providerFailurePayload(diag.providerFailure),
+      boundedPublicationReason(diag.publicationReason),
       diag.createdAtMs ?? nowMs,
     );
   }
@@ -569,13 +774,14 @@ export class ObservabilityStore {
     requestId: string;
     pass: number;
     metrics: ThoughtCycleTokenMetrics;
-    dispatchTruth?: "sent" | "unknown";
+    dispatchTruth?: "not_sent" | "sent" | "unknown";
     nowMs?: number;
   }): void {
     if (input.metrics.request_count < 1) return;
     const existing = this.db.prepare(
       `SELECT id FROM thought_dispatch_diagnostics
         WHERE cycle_id = ? AND generation = ?
+          AND stage <> 'publication'
         ORDER BY id DESC LIMIT 1`,
     ).get(input.cycleId, input.generation) as { id?: number } | undefined;
     if (existing?.id !== undefined) {
@@ -686,7 +892,7 @@ export class ObservabilityStore {
       request_id: string;
       pass: number;
       code: ThoughtDispatchDiagnosticCode;
-      stage: "allocation" | "attention_admission" | "provider_dispatch" | "parser";
+      stage: "allocation" | "attention_admission" | "provider_dispatch" | "parser" | "publication";
       dispatch_truth: "not_sent" | "sent" | "unknown";
       quota_bucket: string | null;
       estimated_input_tokens: number | null;
@@ -702,6 +908,7 @@ export class ObservabilityStore {
       secondary_dispatch_truth: "not_sent" | null;
       cycle_metrics_json: string | null;
       provider_failure_json: string | null;
+      publication_reason: PublicationRejectionReason | null;
       created_at_ms: number;
     }>;
 
@@ -730,6 +937,7 @@ export class ObservabilityStore {
         ...(overflowDetails ?? {}),
         cycleMetrics: parseCycleMetrics(r.cycle_metrics_json),
         providerFailure: parseProviderFailureCapture(r.provider_failure_json),
+        publicationReason: boundedPublicationReason(r.publication_reason),
         createdAtMs: r.created_at_ms,
       };
     });
@@ -766,7 +974,7 @@ export function recordThoughtCycleMetrics(
     requestId: string;
     pass: number;
     metrics: ThoughtCycleTokenMetrics;
-    dispatchTruth?: "sent" | "unknown";
+    dispatchTruth?: "not_sent" | "sent" | "unknown";
     nowMs?: number;
   },
 ): void {

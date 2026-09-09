@@ -22,16 +22,6 @@ describe("initiative status authorization", () => {
           lastUserMessageAt: null,
           minIdleHours: 2,
           lastDiagnostic: null,
-          cognitiveContinuity: {
-            totalCount: 0,
-            openCount: 0,
-            deferredCount: 0,
-            redactedCount: 0,
-            reviewDueCount: 0,
-            availableBySourceClass: {},
-            lastClosedStageCode: null,
-            unavailableByReason: {},
-          },
         }),
         getProactiveOperationalStatus: () => ({
           enabled: true,
@@ -57,9 +47,7 @@ describe("initiative status authorization", () => {
         `http://127.0.0.1:${address.port}/initiative/status?owner_id=doc`,
       );
       expect(ownerResponse.status).toBe(200);
-      expect(await ownerResponse.json()).toMatchObject({
-        cognitiveContinuity: { openCount: 0 },
-      });
+      expect(await ownerResponse.json()).not.toHaveProperty("cognitiveContinuity");
 
       const operationalResponse = await fetch(
         `http://127.0.0.1:${address.port}/initiative/operational-status?owner_id=doc`,

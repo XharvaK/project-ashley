@@ -1264,6 +1264,25 @@ export type CausalBundle = {
   outboxGeneration?: Generation | null;
 };
 
+export type ThoughtExecutionDispatchTruth = "not_sent" | "sent" | "unknown";
+
+/** Physical Model Fabric execution evidence, separate from Thought control counters. */
+export type ThoughtExecutionProvenance = Readonly<{
+  dispatchTruth: ThoughtExecutionDispatchTruth;
+  providerAttempts: number | "unknown";
+}>;
+
+export type PublicationRejectionReason =
+  | "stale_generation"
+  | "authority_transition"
+  | "authority_vector_stale"
+  | "source_currentness_stale"
+  | "wake_missing"
+  | "wake_terminal"
+  | "wake_reconciliation_required"
+  | "consequence_exists"
+  | "future_trigger_snapshot_conflict";
+
 export type KernelDeps = {
   nowMs: () => number;
   attentionDb: DatabaseSync;
@@ -1305,6 +1324,10 @@ export type KernelRunResult = {
   acceptedThoughtPasses: number;
   composeCancelledAttempts: number;
   acceptedSettlements: number;
+  /** Optional because legacy runner/test seams remain structurally compatible. */
+  thoughtExecutionProvenance?: ThoughtExecutionProvenance;
+  /** Publication rejection is not a committed settlement. */
+  publicationReason?: PublicationRejectionReason;
   deferred?: boolean;
   nextEligibleAtMs?: number;
   conversationId?: string;

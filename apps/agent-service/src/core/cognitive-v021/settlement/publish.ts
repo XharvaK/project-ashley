@@ -8,6 +8,7 @@ import type {
   FutureTriggerDelta,
   OutboxOrigin,
   PublishedCognitiveSettlement,
+  PublicationRejectionReason,
   SubscriptionDelta,
 } from "../types.js";
 import { applyWorkingContextDelta } from "../evidence/working-context.js";
@@ -42,10 +43,19 @@ export type PublicationOptions = {
 export type PublicationResult = {
   published: boolean;
   replayed: boolean;
-  reason?: "stale_generation" | "authority_transition" | "authority_vector_stale" | "source_currentness_stale" | "wake_missing" | "wake_terminal" | "wake_reconciliation_required" | "consequence_exists";
+  reason?: PublicationRejectionReason;
   settlementId: string | null;
   outboxId: number | null;
 };
+
+export class FutureTriggerSnapshotConflictError extends Error {
+  readonly code = "future_trigger_snapshot_conflict" as const;
+
+  constructor() {
+    super("future_trigger_snapshot_conflict");
+    this.name = "FutureTriggerSnapshotConflictError";
+  }
+}
 
 export type PublishedSettlementIdentity = {
   settlementId: string;
@@ -100,7 +110,11 @@ function applyFutureTriggerDelta(db: DatabaseSync, delta: FutureTriggerDelta): v
   const trigger = delta.trigger;
   const concern = getConcern(db, trigger.concernId);
   if (!concern) throw new Error("future_trigger_concern_missing");
-  if (concern.snapshotHash !== trigger.snapshotHash) throw new Error("future_trigger_snapshot_conflict");
+  if (concern.snapshotHash !== trigger.snapshotHash) throw new FutureTriggerSnapshotConflictError();
+  const existing = db.prepare(
+    "SELECT status FROM future_triggers WHERE trigger_id = ? LIMIT 1",
+  ).get(trigger.triggerId) as { status?: unknown } | undefined;
+  if (existing && existing.status !== "scheduled") throw new Error("future_trigger_terminal");
   db.prepare(
     `INSERT INTO future_triggers
        (trigger_id, conversation_id, concern_id, due_at_ms, snapshot_hash, status, payload_json)
@@ -159,7 +173,7 @@ export function publishSemanticTransaction(
   let sidecarTransactionOpen = false;
   const rollbackAuthority = (): void => {
     if (!authorityTransactionOpen || !authorityDb) return;
-    try { authorityDb.exec("ROLLBACK"); } catch { /* preserve the original result */ }
+    authorityDb.exec("ROLLBACK");
     authorityTransactionOpen = false;
   };
   const commitAuthority = (): void => {
@@ -233,6 +247,11 @@ export function publishSemanticTransaction(
           authorityDb,
           options.sourceCurrentness,
           settlement.workingContextDelta ?? [],
+          {
+            concernDeltas: settlement.concernDeltas ?? [],
+            occupancyDeltas: settlement.occupancyDelta ?? [],
+            futureTriggers: settlement.futureTriggers ?? [],
+          },
         );
       } catch (error) {
         if (!isThoughtSourceCurrentnessError(error)) throw error;
@@ -330,11 +349,32 @@ export function publishSemanticTransaction(
     commitAuthority();
     return { published: true, replayed: false, settlementId: settlement.settlementId, outboxId };
   } catch (error) {
+    const rollbackFailures: unknown[] = [];
     if (sidecarTransactionOpen) {
-      try { db.exec("ROLLBACK"); } catch { /* preserve original */ }
+      try { db.exec("ROLLBACK"); } catch (rollbackError) { rollbackFailures.push(rollbackError); }
       sidecarTransactionOpen = false;
     }
-    rollbackAuthority();
+    if (authorityTransactionOpen && authorityDb) {
+      try { rollbackAuthority(); } catch (rollbackError) { rollbackFailures.push(rollbackError); }
+    }
+    if (error instanceof FutureTriggerSnapshotConflictError) {
+      if (rollbackFailures.length > 0) {
+        throw new AggregateError(
+          [error, ...rollbackFailures],
+          "future_trigger_snapshot_conflict_rollback_failed",
+        );
+      }
+      return {
+        published: false,
+        replayed: false,
+        reason: "future_trigger_snapshot_conflict",
+        settlementId: null,
+        outboxId: null,
+      };
+    }
+    if (rollbackFailures.length > 0) {
+      throw new AggregateError([error, ...rollbackFailures], "publication_rollback_failed");
+    }
     throw error;
   }
 }

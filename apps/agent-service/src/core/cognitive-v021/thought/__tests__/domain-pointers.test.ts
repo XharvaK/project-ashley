@@ -60,6 +60,45 @@ describe("MAT-II domain pointers", () => {
     }
   });
 
+  it("separates terminal stale-trigger evidence from actionable scheduled IDs", () => {
+    const db = openTestSidecar();
+    try {
+      db.prepare(
+        `INSERT INTO future_triggers
+           (trigger_id, conversation_id, concern_id, due_at_ms, snapshot_hash, status, payload_json)
+         VALUES ('suppressed-trigger', 'conversation-1', 'concern-1', 1234, 'snapshot', 'suppressed_stale', '{}')`,
+      ).run();
+      db.prepare(
+        `INSERT INTO causal_ledger
+           (cycle_id, generation, payload_json, thought_unavailable)
+         VALUES ('future-trigger:suppressed-trigger', 7, ?, 0)`,
+      ).run(JSON.stringify({
+        triggerKind: "future_trigger_due",
+        triggerId: "suppressed-trigger",
+        concernId: "concern-1",
+        result: "suppressed_stale",
+        reason: "snapshot_mismatch",
+        atMs: 9876,
+      }));
+
+      const pointer = buildDomainPointers(db, "conversation-1", "cycle-1").pointers
+        .find((candidate) => candidate.domain === "future_triggers");
+      expect(pointer).toMatchObject({ entityIds: [], status: "empty" });
+      expect(pointer?.terminalEvidence).toEqual([expect.objectContaining({
+        triggerId: "suppressed-trigger",
+        concernId: "concern-1",
+        status: "suppressed_stale",
+        reason: "snapshot_mismatch",
+        eventCycleId: "future-trigger:suppressed-trigger",
+        eventGeneration: 7,
+        suppressedAtMs: 9876,
+      })]);
+      expect(JSON.stringify(pointer)).not.toContain("payload_json");
+    } finally {
+      db.close();
+    }
+  });
+
   it("fails closed on Mind Occupancy store failure without claiming an empty house", () => {
     const db = openTestSidecar();
     try {
@@ -73,15 +112,15 @@ describe("MAT-II domain pointers", () => {
     }
   });
 
-  it("uses the relationship and open-cognition source owners for EMPTY and POINTER_ONLY", () => {
+  it("uses the relationship source owner without presenting OCI as a live domain", () => {
     const sidecar = openTestSidecar();
     const nuclear = openNuclearDb(new DatabaseSync(":memory:"));
     try {
       const empty = buildDomainPointers(sidecar, "conversation-1", "cycle-1", nuclear, "owner-1");
       expect(empty.pointers).toEqual(expect.arrayContaining([
         expect.objectContaining({ domain: "relationship_state", disposition: "EMPTY" }),
-        expect.objectContaining({ domain: "open_cognition", disposition: "EMPTY" }),
       ]));
+      expect(empty.pointers.some((pointer) => pointer.domain === "open_cognition")).toBe(false);
 
       const now = "2026-09-05T00:00:00.000Z";
       nuclear.prepare(
@@ -131,16 +170,11 @@ describe("MAT-II domain pointers", () => {
         pointerOnly: true,
         entityIds: ["relationship-entity-1"],
       });
-      expect(cognition).toMatchObject({
-        disposition: "POINTER_ONLY",
-        pointerOnly: true,
-        entityIds: ["open-entity-1"],
-      });
+      expect(cognition).toBeUndefined();
       const serialized = JSON.stringify(pointed);
       expect(serialized).not.toContain("private source question");
       expect(serialized).not.toContain("private semantic summary");
-      expect(pointed.coverageManifest.domains.find((domain) => domain.domain === "open_cognition")?.disposition)
-        .toBe("POINTER_ONLY");
+      expect(pointed.coverageManifest.domains.find((domain) => domain.domain === "open_cognition")).toBeUndefined();
     } finally {
       nuclear.close();
       sidecar.close();
@@ -197,8 +231,8 @@ describe("MAT-II domain pointers", () => {
       const section = buildDomainPointers(sidecar, "conversation-1", "cycle-1", nuclear, "owner-1");
       expect(section.pointers).toEqual(expect.arrayContaining([
         expect.objectContaining({ domain: "relationship_state", disposition: "UNREACHABLE" }),
-        expect.objectContaining({ domain: "open_cognition", disposition: "UNREACHABLE" }),
       ]));
+      expect(section.pointers.some((pointer) => pointer.domain === "open_cognition")).toBe(false);
     } finally {
       nuclear.close();
       sidecar.close();

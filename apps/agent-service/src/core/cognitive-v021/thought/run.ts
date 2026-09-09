@@ -34,6 +34,9 @@ import {
   type AuthorityCode,
   type InFlightRecord,
   type EffectReceipt,
+  type ThoughtExecutionDispatchTruth,
+  type ThoughtExecutionProvenance,
+  type PublicationRejectionReason,
 } from "../types.js";
 import {
   createThoughtStructuralFeedback,
@@ -54,7 +57,7 @@ import {
 } from "../effect/effect-ref.js";
 import { registerActiveThought } from "../cycle/active.js";
 import { adaptPerception } from "../perception/adapter.js";
-import { buildThoughtInput } from "./input.js";
+import { buildThoughtInput, captureThoughtSourcePackage } from "./input.js";
 import { parseThoughtSemanticOutput, THOUGHT_SEMANTIC_PARSER_ID } from "./parse.js";
 import {
   buildReferenceAllowlist,
@@ -74,7 +77,6 @@ import {
   hashAuthorityObjections,
   hashThoughtSourceCurrentness,
 } from "./projection-allocator/cache.js";
-import { captureThoughtSourceCurrentnessFromDb } from "./source-currentness.js";
 import {
   allocateThoughtProjection,
   RequiredOverflowError,
@@ -149,6 +151,8 @@ export type ThoughtInvocation = {
   inputTokens?: number;
   /** Bounded provider-boundary evidence for a failed Thought attempt. */
   providerFailureCapture?: ThoughtProviderFailureCapture;
+  /** Physical execution evidence projected from the canonical Model Fabric receipt. */
+  thoughtExecutionProvenance?: ThoughtExecutionProvenance;
 };
 
 type SettlementRevisionFeedback = {
@@ -227,6 +231,80 @@ function terminalModelAttempt(
   const receipt = metadata?.receipt;
   if (!receipt || receipt.receiptStage !== "resolved") return null;
   return receipt.attempts.at(-1) ?? null;
+}
+
+const UNKNOWN_EXECUTION_PROVENANCE: ThoughtExecutionProvenance = Object.freeze({
+  dispatchTruth: "unknown",
+  providerAttempts: "unknown",
+});
+
+const NOT_SENT_EXECUTION_PROVENANCE: ThoughtExecutionProvenance = Object.freeze({
+  dispatchTruth: "not_sent",
+  providerAttempts: 0,
+});
+
+export function executionProvenanceFromMetadata(
+  metadata: ModelFabricDispatchMetadata | null | undefined,
+): ThoughtExecutionProvenance {
+  const receipt = metadata?.receipt;
+  if (!receipt || receipt.receiptStage !== "resolved" || receipt.attempts.length === 0) {
+    return UNKNOWN_EXECUTION_PROVENANCE;
+  }
+  let providerAttempts = 0;
+  let providerAttemptsKnown = true;
+  let responseReceived = false;
+  let dispatchOutcomeUnknown = false;
+  let allNotSent = true;
+  for (const attempt of receipt.attempts) {
+    if (attempt.providerRequestCount === 0 || attempt.providerRequestCount === 1) {
+      providerAttempts += attempt.providerRequestCount;
+    } else {
+      providerAttemptsKnown = false;
+    }
+    if (attempt.dispatchTruth === "response_received") responseReceived = true;
+    if (attempt.dispatchTruth === "sent_outcome_unknown") dispatchOutcomeUnknown = true;
+    if (attempt.dispatchTruth !== "not_sent") allNotSent = false;
+  }
+  return Object.freeze({
+    dispatchTruth: responseReceived
+      ? "sent"
+      : dispatchOutcomeUnknown
+        ? "unknown"
+        : allNotSent
+          ? "not_sent"
+          : "unknown",
+    providerAttempts: providerAttemptsKnown ? providerAttempts : "unknown",
+  });
+}
+
+function mergeExecutionProvenance(
+  current: ThoughtExecutionProvenance | null,
+  next: ThoughtExecutionProvenance,
+): ThoughtExecutionProvenance {
+  if (!current) return next;
+  const dispatchTruth: ThoughtExecutionDispatchTruth = current.dispatchTruth === "sent"
+    || next.dispatchTruth === "sent"
+    ? "sent"
+    : current.dispatchTruth === "unknown" || next.dispatchTruth === "unknown"
+      ? "unknown"
+      : "not_sent";
+  const providerAttempts = current.providerAttempts === "unknown"
+    || next.providerAttempts === "unknown"
+    ? "unknown"
+    : current.providerAttempts + next.providerAttempts;
+  return Object.freeze({ dispatchTruth, providerAttempts });
+}
+
+function establishedExecutionMetadata(
+  errorMetadata: ModelFabricDispatchMetadata | null,
+  completion?: Awaited<ReturnType<typeof completeChat>>,
+): ModelFabricDispatchMetadata | null {
+  const completionMetadata = completion?.modelFabric;
+  if (
+    completionMetadata?.receipt.receiptStage === "resolved" &&
+    completionMetadata.receipt.attempts.length > 0
+  ) return completionMetadata;
+  return errorMetadata ?? completionMetadata ?? null;
 }
 
 function safeFailureClass(value: unknown): string | undefined {
@@ -412,9 +490,8 @@ function providerFailureCaptureForCompletion(
   options: ThoughtCompleteOptions,
   status: ThoughtProviderCaptureStatus,
 ): ThoughtProviderFailureCapture {
-  const attempt = terminalModelAttempt(completion.modelFabric);
   const dispatchTruth: ThoughtProviderFailureCapture["dispatchTruth"] =
-    attempt?.dispatchTruth === "not_sent" ? "not_sent" : "sent";
+    executionProvenanceFromMetadata(completion.modelFabric).dispatchTruth;
   return providerFailureCapture({
     completion,
     options,
@@ -426,17 +503,17 @@ function providerFailureCaptureForCompletion(
 function providerFailureCaptureForError(
   error: unknown,
   options: ThoughtCompleteOptions,
+  completion?: Awaited<ReturnType<typeof completeChat>>,
+  dispatchStarted = true,
 ): ThoughtProviderFailureCapture {
-  const metadata = metadataFromError(error);
-  const attempt = terminalModelAttempt(metadata);
-  const dispatchTruth: ThoughtProviderFailureCapture["dispatchTruth"] =
-    attempt?.dispatchTruth === "not_sent"
-      ? "not_sent"
-      : attempt?.dispatchTruth === "sent_outcome_unknown" || attempt?.dispatchTruth === "response_received"
-        ? "sent"
-        : "unknown";
+  const errorMetadata = metadataFromError(error);
+  const metadata = establishedExecutionMetadata(errorMetadata, completion);
+  const dispatchTruth = !dispatchStarted && !completion
+    ? NOT_SENT_EXECUTION_PROVENANCE.dispatchTruth
+    : executionProvenanceFromMetadata(metadata).dispatchTruth;
   return providerFailureCapture({
     metadata,
+    completion,
     options,
     dispatchTruth,
     status: {
@@ -974,6 +1051,7 @@ export async function runThoughtModel(
   let dispatchMessagesHash: string | undefined;
   let completionInputTokens: number | undefined;
   let lastCompletion: Awaited<ReturnType<typeof completeChat>> | undefined;
+  let dispatchStarted = false;
 
   try {
     if (
@@ -1038,6 +1116,7 @@ export async function runThoughtModel(
         attempts: 0,
         requestId,
         inputTokens: estimatedInputTokens,
+        thoughtExecutionProvenance: NOT_SENT_EXECUTION_PROVENANCE,
       };
     }
     const authorityCurrentness = hasAuthorityBarrier(deps.attentionDb)
@@ -1067,6 +1146,7 @@ export async function runThoughtModel(
     };
     dispatchOptions.thoughtInvocationContext = thoughtInvocationContext;
 
+    dispatchStarted = true;
     const completion = await invokeThoughtComplete(
       messages,
       dispatchOptions,
@@ -1089,6 +1169,7 @@ export async function runThoughtModel(
         requestId,
         cancelled: true,
         inputTokens: completion.usage?.promptTokens ?? estimatedInputTokens,
+        thoughtExecutionProvenance: executionProvenanceFromMetadata(completion.modelFabric),
       };
     }
     const semanticResult = parseThoughtSemanticOutput(
@@ -1133,8 +1214,9 @@ export async function runThoughtModel(
             validatorStatus: "not_run",
             failureClass: semanticResult.code,
             structuralRetryStatus: "not_scheduled",
-          },
-        ),
+            },
+          ),
+        thoughtExecutionProvenance: executionProvenanceFromMetadata(completion.modelFabric),
       };
     }
     const semantic = semanticResult.value;
@@ -1166,8 +1248,9 @@ export async function runThoughtModel(
             validatorStatus: "failed",
             failureClass: correctionValidation.violation.code,
             structuralRetryStatus: "not_scheduled",
-          },
-        ),
+            },
+          ),
+        thoughtExecutionProvenance: executionProvenanceFromMetadata(completion.modelFabric),
       };
     }
     const kernelEnvelope = completion.capturedAttemptIdentity
@@ -1277,6 +1360,7 @@ export async function runThoughtModel(
       malformed: false,
       inputTokens: completion.usage?.promptTokens ?? estimatedInputTokens,
       ...(kernelEnvelope ? { kernelEnvelope } : {}),
+      thoughtExecutionProvenance: executionProvenanceFromMetadata(completion.modelFabric),
     };
   } catch (error) {
     const cancelled = options.signal?.aborted === true
@@ -1312,10 +1396,18 @@ export async function runThoughtModel(
               ),
             }
           : {}),
+        thoughtExecutionProvenance: lastCompletion
+          ? executionProvenanceFromMetadata(lastCompletion.modelFabric)
+          : UNKNOWN_EXECUTION_PROVENANCE,
       };
     }
+    const executionProvenance = !dispatchStarted && !lastCompletion
+      ? NOT_SENT_EXECUTION_PROVENANCE
+      : executionProvenanceFromMetadata(
+        establishedExecutionMetadata(metadataFromError(error), lastCompletion),
+      );
     const providerCapture = !cancelled
-      ? providerFailureCaptureForError(error, dispatchOptions)
+      ? providerFailureCaptureForError(error, dispatchOptions, lastCompletion, dispatchStarted)
       : undefined;
     if (!cancelled && providerCapture && deps.observabilityDb) {
       try {
@@ -1402,6 +1494,7 @@ export async function runThoughtModel(
         cancelled: false,
         deferred: true,
         nextEligibleAtMs: attentionErr.nextEligibleAtMs,
+        thoughtExecutionProvenance: executionProvenance,
       };
     }
 
@@ -1420,6 +1513,7 @@ export async function runThoughtModel(
       unavailable: !cancelled,
       cancelled,
       ...(providerCapture ? { providerFailureCapture: providerCapture } : {}),
+      thoughtExecutionProvenance: executionProvenance,
     };
   }
 }
@@ -1633,6 +1727,10 @@ function resultWithCounters(
   generation: number,
   notice: string | null,
   counters: ThoughtAttemptCounters,
+  options: {
+    thoughtExecutionProvenance?: ThoughtExecutionProvenance;
+    publicationReason?: PublicationRejectionReason;
+  } = {},
 ): KernelRunResult {
   return {
     cycleId,
@@ -1644,6 +1742,10 @@ function resultWithCounters(
     acceptedThoughtPasses: counters.acceptedThoughtPasses,
     composeCancelledAttempts: counters.composeCancelledAttempts,
     acceptedSettlements: 0,
+    ...(options.thoughtExecutionProvenance
+      ? { thoughtExecutionProvenance: options.thoughtExecutionProvenance }
+      : {}),
+    ...(options.publicationReason ? { publicationReason: options.publicationReason } : {}),
   };
 }
 
@@ -1757,11 +1859,19 @@ export async function runCognitiveCycle(
       acceptedThoughtPasses: counters.acceptedThoughtPasses,
       composeCancelledAttempts: counters.composeCancelledAttempts,
       acceptedSettlements: 0,
+      thoughtExecutionProvenance: UNKNOWN_EXECUTION_PROVENANCE,
     };
   }
+  let cycleExecutionProvenance: ThoughtExecutionProvenance | null = null;
+  const currentExecutionProvenance = (): ThoughtExecutionProvenance =>
+    cycleExecutionProvenance ?? UNKNOWN_EXECUTION_PROVENANCE;
   const emitFailure = async (reason: string, failureCode?: string | null): Promise<KernelRunResult> => {
     const counters = getThoughtAttemptCounters(sidecar, admittedCycle.cycleId, admittedCycle.generation);
-    if (!currentGenerationIs(sidecar, admittedCycle)) return resultWithCounters(admittedCycle.cycleId, admittedCycle.generation, null, counters);
+    if (!currentGenerationIs(sidecar, admittedCycle)) {
+      return resultWithCounters(admittedCycle.cycleId, admittedCycle.generation, null, counters, {
+        thoughtExecutionProvenance: currentExecutionProvenance(),
+      });
+    }
     const notice = emitInfrastructureNotice(sidecar, {
       ownerId: typeof payload.ownerId === "string" ? payload.ownerId : admittedCycle.occupantId,
       channel: typeof payload.channel === "string" ? payload.channel : "discord",
@@ -1792,7 +1902,9 @@ export async function runCognitiveCycle(
     }
     if (deps.projectSystemNotice) await deps.projectSystemNotice(notice.noticeId);
     updateCycleState(sidecar, admittedCycle.cycleId, "silent", deps.nowMs());
-    return resultWithCounters(admittedCycle.cycleId, admittedCycle.generation, notice.noticeText, counters);
+    return resultWithCounters(admittedCycle.cycleId, admittedCycle.generation, notice.noticeText, counters, {
+      thoughtExecutionProvenance: currentExecutionProvenance(),
+    });
   };
 
   let ownerMessage = typeof payload.ownerMessage === "string"
@@ -1824,24 +1936,40 @@ export async function runCognitiveCycle(
   let cycleTokenMetrics = createThoughtCycleTokenMetrics();
   let lastThoughtRequestId: string = randomUUID();
   let lastThoughtPass = pass;
-  let lastDispatchTruth: "sent" | "unknown" = "unknown";
+  let lastDispatchTruth: ThoughtExecutionDispatchTruth = "unknown";
 
   try {
     for (;;) {
     counters = getThoughtAttemptCounters(sidecar, cycle.cycleId, cycle.generation);
     structuralRetriesForPass = persistedMalformedRetries(sidecar, cycle.cycleId, cycle.generation, pass);
-    if (!currentGenerationIs(sidecar, cycle)) return resultWithCounters(cycle.cycleId, cycle.generation, null, counters);
+    if (!currentGenerationIs(sidecar, cycle)) {
+      return resultWithCounters(cycle.cycleId, cycle.generation, null, counters, {
+        thoughtExecutionProvenance: currentExecutionProvenance(),
+      });
+    }
     if (deps.nowMs() >= thoughtDeadlineAtMs) return emitFailure("thought_deadline");
     if (counters.acceptedThoughtPasses >= MAX_THOUGHT_PASSES || counters.thoughtModelAttempts >= MAX_THOUGHT_MODEL_ATTEMPTS) {
       return emitFailure("pass_exhausted");
     }
     const rawConversationIds = listConversationEvidence(sidecar, cycle.conversationId, { limit: 12 }).map((r) => r.rowId);
-    const sourceCurrentness = captureThoughtSourceCurrentnessFromDb(
+    const thoughtInputOptions = {
       sidecar,
-      deps.attentionDb,
-      cycle.occupantId,
-      cycle.conversationId,
-    );
+      cycle,
+      triggerKindOverride: originProfile.triggerKind,
+      triggerText: ownerMessage,
+      triggerEvidence,
+      constitution: deps.constitution,
+      capabilityReality: deps.capabilityReality,
+      observations: observationsForThought,
+      inFlight,
+      runtimeCondition: { thoughtUnavailable: false },
+      rememberDirective: directive,
+      authorityObjections,
+      derivedStore: deps.derivedStore,
+      authorityDb: deps.attentionDb,
+    };
+    const sourceCapture = captureThoughtSourcePackage(thoughtInputOptions);
+    const sourceCurrentness = sourceCapture.sourceCurrentness;
     const passKey = semanticPassKey({
       cycleId: cycle.cycleId,
       generation: cycle.generation,
@@ -1864,22 +1992,7 @@ export async function runCognitiveCycle(
           messages,
         };
       } else {
-        const input = buildThoughtInput({
-          sidecar,
-          cycle,
-          triggerKindOverride: originProfile.triggerKind,
-          triggerText: ownerMessage,
-          triggerEvidence,
-          constitution: deps.constitution,
-          capabilityReality: deps.capabilityReality,
-          observations: observationsForThought,
-          inFlight,
-          runtimeCondition: { thoughtUnavailable: false },
-          rememberDirective: directive,
-          authorityObjections,
-          derivedStore: deps.derivedStore,
-          authorityDb: deps.attentionDb,
-        });
+        const input = buildThoughtInput({ ...thoughtInputOptions, sourceCapture });
         storeObservations(sidecar, input, deps.nowMs());
         allocated = allocateThoughtProjection({
           sidecar,
@@ -1913,6 +2026,11 @@ export async function runCognitiveCycle(
             // ignore
           }
         }
+        cycleExecutionProvenance = mergeExecutionProvenance(
+          cycleExecutionProvenance,
+          NOT_SENT_EXECUTION_PROVENANCE,
+        );
+        lastDispatchTruth = cycleExecutionProvenance.dispatchTruth;
         return emitFailure("context_allocation_required_overflow");
       }
       throw err;
@@ -1937,9 +2055,13 @@ export async function runCognitiveCycle(
     });
     lastThoughtRequestId = invocation.requestId;
     lastThoughtPass = pass;
+    cycleExecutionProvenance = mergeExecutionProvenance(
+      cycleExecutionProvenance,
+      invocation.thoughtExecutionProvenance ?? UNKNOWN_EXECUTION_PROVENANCE,
+    );
+    lastDispatchTruth = cycleExecutionProvenance.dispatchTruth;
     if (typeof invocation.inputTokens === "number") {
       cycleTokenMetrics = observeThoughtCycleInput(cycleTokenMetrics, invocation.inputTokens);
-      lastDispatchTruth = "sent";
     }
     const cancellationReason = activeThought.cancellationReason;
     activeThought.unregister();
@@ -1963,7 +2085,9 @@ export async function runCognitiveCycle(
         continue;
       }
       counters = getThoughtAttemptCounters(sidecar, cycle.cycleId, cycle.generation);
-      return resultWithCounters(cycle.cycleId, cycle.generation, null, counters);
+      return resultWithCounters(cycle.cycleId, cycle.generation, null, counters, {
+        thoughtExecutionProvenance: currentExecutionProvenance(),
+      });
     }
 
     if (invocation.correctionScopeViolation) {
@@ -2048,6 +2172,7 @@ export async function runCognitiveCycle(
         nextEligibleAtMs: invocation.nextEligibleAtMs,
         conversationId: cycle.conversationId,
         latestEvidenceRowId: latestRowId,
+        thoughtExecutionProvenance: currentExecutionProvenance(),
       };
     }
     if (invocation.unavailable) {
@@ -2155,7 +2280,9 @@ export async function runCognitiveCycle(
       if (!dispatch.dispatched) {
         if (dispatch.codes.includes("STALE_GENERATION")) {
           counters = getThoughtAttemptCounters(sidecar, cycle.cycleId, cycle.generation);
-          return resultWithCounters(cycle.cycleId, cycle.generation, null, counters);
+          return resultWithCounters(cycle.cycleId, cycle.generation, null, counters, {
+            thoughtExecutionProvenance: currentExecutionProvenance(),
+          });
         }
         return emitFailure(dispatch.codes.join(",") || "effect_unavailable");
       }
@@ -2167,7 +2294,9 @@ export async function runCognitiveCycle(
 
     if (invocation.output.kind === "abstain") {
       updateCycleState(sidecar, cycle.cycleId, "silent", deps.nowMs());
-      return resultWithCounters(cycle.cycleId, cycle.generation, null, counters);
+      return resultWithCounters(cycle.cycleId, cycle.generation, null, counters, {
+        thoughtExecutionProvenance: currentExecutionProvenance(),
+      });
     }
     if (invocation.output.kind !== "settlement") {
       return emitFailure(invocation.output.reason);
@@ -2189,7 +2318,9 @@ export async function runCognitiveCycle(
     if (!validation.ok) {
       if (validation.kind === "stale") {
         counters = getThoughtAttemptCounters(sidecar, cycle.cycleId, cycle.generation);
-        return resultWithCounters(cycle.cycleId, cycle.generation, null, counters);
+        return resultWithCounters(cycle.cycleId, cycle.generation, null, counters, {
+          thoughtExecutionProvenance: currentExecutionProvenance(),
+        });
       }
       if (validation.kind === "conflict" && revisable(validation.codes)) {
         if (counters.authorityRevisions >= MAX_AUTHORITY_REVISIONS) return emitFailure("revision_exhausted");
@@ -2277,7 +2408,9 @@ export async function runCognitiveCycle(
     }
     if (!currentGenerationIs(sidecar, cycle)) {
       counters = getThoughtAttemptCounters(sidecar, cycle.cycleId, cycle.generation);
-      return resultWithCounters(cycle.cycleId, cycle.generation, null, counters);
+      return resultWithCounters(cycle.cycleId, cycle.generation, null, counters, {
+        thoughtExecutionProvenance: currentExecutionProvenance(),
+      });
     }
     const finalText = validation.draft.speech.mode === "draft"
       ? renderForTransport(speechText ?? "")
@@ -2302,7 +2435,39 @@ export async function runCognitiveCycle(
     });
     if (!publication.published) {
       counters = getThoughtAttemptCounters(sidecar, cycle.cycleId, cycle.generation);
-      return resultWithCounters(cycle.cycleId, cycle.generation, null, counters);
+      const thoughtExecutionProvenance = currentExecutionProvenance();
+      const publicationReason = publication.reason;
+      if (deps.observabilityDb && publicationReason) {
+        try {
+          recordDiagnostic(deps.observabilityDb, {
+            cycleId: cycle.cycleId,
+            generation: cycle.generation,
+            requestId: invocation.output.requestId,
+            pass,
+            code: "publication_rejected",
+            stage: "publication",
+            dispatchTruth: thoughtExecutionProvenance.dispatchTruth,
+            semanticProjectionHash: allocated.hashes.semanticProjectionHash,
+            dispatchMessagesHash: allocated.hashes.dispatchMessagesHash,
+            publicationReason,
+            createdAtMs: deps.nowMs(),
+          });
+        } catch {
+          const diagnosticFailure = await emitFailure(
+            "publication_rejected_diagnostic_persistence_failed",
+            "diagnostic_persistence_failed",
+          );
+          return {
+            ...diagnosticFailure,
+            publicationReason,
+            thoughtExecutionProvenance,
+          };
+        }
+      }
+      return resultWithCounters(cycle.cycleId, cycle.generation, null, counters, {
+        thoughtExecutionProvenance,
+        ...(publicationReason ? { publicationReason } : {}),
+      });
     }
     if (deps.origin !== "shadow" && (settlement.durableNominations ?? []).length > 0) {
       try {
@@ -2350,6 +2515,7 @@ export async function runCognitiveCycle(
       acceptedThoughtPasses: counters.acceptedThoughtPasses,
       composeCancelledAttempts: counters.composeCancelledAttempts,
       acceptedSettlements: publication.replayed ? 0 : 1,
+      thoughtExecutionProvenance: currentExecutionProvenance(),
     };
     }
   } finally {

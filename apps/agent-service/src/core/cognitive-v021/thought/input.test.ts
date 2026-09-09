@@ -52,6 +52,62 @@ function openFrontier(
 }
 
 describe("v0.2.1 ThoughtInput assembly", () => {
+  it("uses one coherent selected-source package for input and currentness", () => {
+    const db = openTestSidecar();
+    try {
+      const cycle = admitTestCycle(db, {
+        cycleId: "cycle-coherent-sources",
+        conversationId: "thread-coherent-sources",
+        triggerKind: "owner_message",
+        triggerRef: "owner-ref",
+        occupantId: "doc",
+        nowMs: 1,
+      });
+      db.prepare(
+        `INSERT INTO concerns
+           (concern_id, conversation_id, statement, source_refs_json, dimensions_json,
+            assertion_key, status, snapshot_hash, updated_cycle)
+         VALUES ('concern-selected', ?, 'selected', '[]', '{}', NULL, 'active', 'selected-v1', 'seed')`,
+      ).run(cycle.conversationId);
+      db.prepare(
+        `INSERT INTO concerns
+           (concern_id, conversation_id, statement, source_refs_json, dimensions_json,
+            assertion_key, status, snapshot_hash, updated_cycle)
+         VALUES ('concern-unrelated', ?, 'unrelated', '[]', '{}', NULL, 'resolved', 'unrelated-v1', 'seed')`,
+      ).run(cycle.conversationId);
+      db.prepare(
+        `INSERT INTO mind_occupancy
+           (conversation_id, concern_id, status, priority, updated_cycle, updated_generation)
+         VALUES (?, 'concern-selected', 'active', 10, 'seed', 2)`,
+      ).run(cycle.conversationId);
+
+      const input = buildThoughtInput({
+        sidecar: db,
+        cycle,
+        constitution: identity,
+        capabilityReality: capability,
+        learnedSelfSlice: { dispositions: [], interests: [] },
+      });
+      const source = (input as any).sourceCurrentness;
+
+      expect(input.occupancy).toEqual([
+        expect.objectContaining({ concernId: "concern-selected", priority: 10 }),
+      ]);
+      expect(input.concernSnapshots).toEqual({ "concern-selected": "selected-v1" });
+      expect(source.workingContextOrder).toEqual([]);
+      expect(source.occupancySelection).toMatchObject({
+        limit: 8,
+        selected: [expect.objectContaining({ concernId: "concern-selected" })],
+      });
+      expect(source.concernDependencies).toMatchObject({
+        "concern-selected": expect.objectContaining({ snapshotHash: "selected-v1" }),
+      });
+      expect(source.concernDependencies).not.toHaveProperty("concern-unrelated");
+    } finally {
+      db.close();
+    }
+  });
+
   it("keeps the always-on last twelve turns, compact occupancy, and trigger terms", () => {
     const db = openTestSidecar();
     try {
@@ -90,7 +146,7 @@ describe("v0.2.1 ThoughtInput assembly", () => {
       expect(input.rawConversation.at(-1)?.text).toBe("turn 19 HY19");
       expect(input.workingContext).toHaveLength(100);
       expect(input.occupancy).toHaveLength(8);
-      expect(input.occupancy[0]?.concernId).toBe("concern-11");
+      expect(input.occupancy[0]?.concernId).toBe("concern-0");
       expect(input.retrieval.request.triggerTerms).toEqual(expect.arrayContaining(["explain", "hy19", "carefully"]));
       expect(input.retrieval.hits).toEqual(expect.arrayContaining([
         expect.objectContaining({ sourceStore: "conversation_log" }),

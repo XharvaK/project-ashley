@@ -47,7 +47,11 @@ import {
   adaptOwnTimeSession,
   type OwnTimeSessionCandidate,
 } from "../curiosity/own-time-adapter.js";
-import { captureThoughtSourceCurrentness } from "./source-currentness.js";
+import {
+  captureThoughtSourceCurrentness,
+  type ConcernCurrentnessEntry,
+  type ThoughtSourceCapture,
+} from "./source-currentness.js";
 
 export type BuildThoughtInputOptions = {
   sidecar: DatabaseSync;
@@ -78,6 +82,8 @@ export type BuildThoughtInputOptions = {
   stableSelfBound?: number;
   /** Host-derived recovery/profile trigger. It is not a new persisted authority. */
   triggerKindOverride?: CycleTriggerKind;
+  /** One coherent source package for the current semantic pass. */
+  sourceCapture?: ThoughtSourceCapture;
 };
 
 export type ThoughtInputWithC2 = ThoughtInput & {
@@ -85,6 +91,15 @@ export type ThoughtInputWithC2 = ThoughtInput & {
   domainPointers: DomainPointersSection;
   c3Experiences: C3ExperienceAdapterResult;
 };
+
+function currentConcernDependency(
+  concern: ReturnType<typeof listConcerns>[number],
+): ConcernCurrentnessEntry {
+  return {
+    snapshotHash: concern.snapshotHash,
+    status: concern.status,
+  };
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -287,10 +302,113 @@ function appendOwnTimePointer(
   return Object.freeze(augmented);
 }
 
+function occupancySelection(
+  db: DatabaseSync,
+  conversationId: string,
+  limit: number,
+  supplied?: MindOccupancy[],
+): { selected: MindOccupancy[]; boundary: MindOccupancy | null } {
+  if (supplied) return { selected: supplied.slice(0, limit), boundary: null };
+  const rows = loadOccupancy(db, conversationId, limit + 1);
+  return { selected: rows.slice(0, limit), boundary: rows[limit] ?? null };
+}
+
+/**
+ * Capture every mechanically relevant source used by one semantic pass.
+ * Callers pass this package back to buildThoughtInput so no second source read
+ * can silently diverge from the currentness witness.
+ */
+export function captureThoughtSourcePackage(
+  options: BuildThoughtInputOptions,
+  occupancyK = Math.max(1, Math.min(100, options.occupancyK ?? DEFAULT_OCCUPANCY_COMPACT_K)),
+): ThoughtSourceCapture {
+  const workingContext = options.workingContext
+    ?? listWorkingContext(options.sidecar, options.cycle.conversationId);
+  const selectedOccupancy = occupancySelection(
+    options.sidecar,
+    options.cycle.conversationId,
+    occupancyK,
+    options.occupancy,
+  );
+  const baseDomainPointers = options.domainPointers ?? buildDomainPointers(
+    options.sidecar,
+    options.cycle.conversationId,
+    options.cycle.cycleId,
+    options.authorityDb,
+    options.cycle.occupantId,
+  );
+  const domainPointers = options.authorityDb && canReadNuclearOwnTime(options.authorityDb)
+    ? appendOwnTimePointer(
+      baseDomainPointers,
+      adaptOwnTimeSession(options.authorityDb, options.cycle.occupantId),
+    )
+    : baseDomainPointers;
+
+  const relevantConcernIds = new Set<string>();
+  for (const item of workingContext) if (item.concernId) relevantConcernIds.add(item.concernId);
+  for (const item of selectedOccupancy.selected) relevantConcernIds.add(item.concernId);
+  for (const pointer of domainPointers.pointers) {
+    for (const evidence of pointer.terminalEvidence ?? []) relevantConcernIds.add(evidence.concernId);
+  }
+
+  let futureRows: Array<Record<string, unknown>> = [];
+  try {
+    futureRows = options.sidecar.prepare(
+      `SELECT concern_id FROM future_triggers
+        WHERE conversation_id = ? AND status IN ('scheduled', 'suppressed_stale')
+        ORDER BY due_at_ms ASC, trigger_id ASC`,
+    ).all(options.cycle.conversationId) as Array<Record<string, unknown>>;
+  } catch {
+    futureRows = [];
+  }
+  for (const row of futureRows) {
+    if (typeof row.concern_id === "string" && row.concern_id.trim()) relevantConcernIds.add(row.concern_id);
+  }
+
+  const concernDependencies: Record<string, ConcernCurrentnessEntry | null> = {};
+  const concernSnapshots: Record<string, string> = {};
+  const concernsById = new Map(
+    listConcerns(options.sidecar, options.cycle.conversationId)
+      .map((concern) => [concern.concernId, concern] as const),
+  );
+  for (const concernId of [...relevantConcernIds].sort()) {
+    const concern = concernsById.get(concernId);
+    concernDependencies[concernId] = concern ? currentConcernDependency(concern) : null;
+    if (concern) concernSnapshots[concernId] = concern.snapshotHash;
+  }
+
+  const futurePointer = domainPointers.pointers.find((pointer) => pointer.domain === "future_triggers");
+  const sourceCurrentness = captureThoughtSourceCurrentness(
+    options.sidecar,
+    options.authorityDb,
+    options.cycle.occupantId,
+    workingContext,
+    {
+      conversationId: options.cycle.conversationId,
+      workingContext,
+      occupancy: selectedOccupancy.selected,
+      occupancyLimit: occupancyK,
+      occupancyBoundary: selectedOccupancy.boundary,
+      concernMembership: domainPointers.pointers.find((pointer) => pointer.domain === "concerns")?.entityIds ?? [],
+      concernDependencies,
+      scheduledFutureTriggerIds: futurePointer?.entityIds ?? [],
+      terminalEvidence: futurePointer?.terminalEvidence ?? [],
+    },
+  );
+  return Object.freeze({
+    workingContext: Object.freeze([...workingContext]),
+    occupancy: Object.freeze([...selectedOccupancy.selected]),
+    concernSnapshots: Object.freeze({ ...concernSnapshots }),
+    domainPointers,
+    sourceCurrentness,
+  });
+}
+
 /** Assemble the fixed Thought input set. Workspace notes are intentionally absent. */
 export function buildThoughtInput(options: BuildThoughtInputOptions): ThoughtInputWithC2 {
   const lastNTurns = Math.max(1, Math.min(100, options.lastNTurns ?? DEFAULT_LAST_N_TURNS));
   const occupancyK = Math.max(1, Math.min(100, options.occupancyK ?? DEFAULT_OCCUPANCY_COMPACT_K));
+  const sourceCapture = options.sourceCapture ?? captureThoughtSourcePackage(options, occupancyK);
   const activeFrontier = getActiveDeferredFrontier(
     options.sidecar,
     options.cycle.conversationId,
@@ -307,15 +425,9 @@ export function buildThoughtInput(options: BuildThoughtInputOptions): ThoughtInp
     },
   );
   const rawConversation = conversationSelection.selectedEvidence;
-  const workingContext = options.workingContext ?? listWorkingContext(options.sidecar, options.cycle.conversationId);
-  const occupancy = (options.occupancy ?? loadOccupancy(options.sidecar, options.cycle.conversationId, occupancyK))
-    .slice()
-    .sort((left, right) => right.priority - left.priority || right.updatedGeneration - left.updatedGeneration)
-    .slice(0, occupancyK);
-  const concernSnapshots = Object.freeze(Object.fromEntries(
-    listConcerns(options.sidecar, options.cycle.conversationId)
-      .map((concern) => [concern.concernId, concern.snapshotHash]),
-  ));
+  const workingContext = [...sourceCapture.workingContext];
+  const occupancy = [...sourceCapture.occupancy];
+  const concernSnapshots = sourceCapture.concernSnapshots;
   const learnedSelfSlice = options.learnedSelfSlice ?? buildLearnedSelfSlice(options.sidecar);
   const identity = options.constitution as IdentitySlice & Partial<IdentityOrientationSource>;
   const orientationKernel = options.orientationKernel ?? buildOrientationKernel({
@@ -325,19 +437,7 @@ export function buildThoughtInput(options: BuildThoughtInputOptions): ThoughtInp
     stableSelfBound: options.stableSelfBound,
     learnedSelf: learnedSelfSlice,
   });
-  const baseDomainPointers = options.domainPointers ?? buildDomainPointers(
-    options.sidecar,
-    options.cycle.conversationId,
-    options.cycle.cycleId,
-    options.authorityDb,
-    options.cycle.occupantId,
-  );
-  const domainPointers = options.authorityDb && canReadNuclearOwnTime(options.authorityDb)
-    ? appendOwnTimePointer(
-      baseDomainPointers,
-      adaptOwnTimeSession(options.authorityDb, options.cycle.occupantId),
-    )
-    : baseDomainPointers;
+  const domainPointers = sourceCapture.domainPointers;
   const c3Experiences = options.c3Experiences ?? adaptC3Experiences(
     options.sidecar,
     options.cycle.conversationId,
@@ -419,12 +519,7 @@ export function buildThoughtInput(options: BuildThoughtInputOptions): ThoughtInp
   };
 
   Object.defineProperty(thoughtInput, "sourceCurrentness", {
-    value: captureThoughtSourceCurrentness(
-      options.sidecar,
-      options.authorityDb,
-      options.cycle.occupantId,
-      workingContext,
-    ),
+    value: sourceCapture.sourceCurrentness,
     enumerable: false,
     writable: false,
     configurable: false,

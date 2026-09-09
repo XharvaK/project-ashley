@@ -5,12 +5,18 @@ import {
 } from "./coverage-manifest.js";
 import type { CoverageDisposition } from "./continuity-candidate.js";
 import { getCurrentSharedCulture } from "../../relationship/projections.js";
-import {
-  listOpenCognitiveItems,
-  openCognitiveItemSourceCurrent,
-} from "../../cognition/open-items.js";
 
 type DbRow = Record<string, unknown>;
+
+export type TerminalSuppressionEvidence = Readonly<{
+  triggerId: string;
+  concernId: string;
+  status: "suppressed_stale";
+  reason: string;
+  eventCycleId: string;
+  eventGeneration: number;
+  suppressedAtMs: number | null;
+}>;
 
 export type DomainPointer = Readonly<{
   domain: string;
@@ -20,6 +26,7 @@ export type DomainPointer = Readonly<{
   updatedAtMs: number | null;
   disposition: CoverageDisposition;
   pointerOnly: boolean;
+  terminalEvidence?: readonly TerminalSuppressionEvidence[];
 }>;
 
 export type DomainPointersSection = Readonly<{
@@ -62,6 +69,67 @@ function rows(db: DatabaseSync, sql: string, ...params: SQLInputValue[]): DbRow[
   return db.prepare(sql).all(...params).filter(isRow);
 }
 
+function jsonValue(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  try { return JSON.parse(value); } catch { return null; }
+}
+
+function boundedReason(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const reason = value.trim().slice(0, 64);
+  return reason && /^[A-Za-z0-9_.:-]+$/.test(reason) ? reason : null;
+}
+
+function safeGeneration(value: unknown): number {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : 0;
+}
+
+function safeTimestamp(value: unknown): number | null {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+/** Read only the bounded causal evidence emitted by stale-trigger suppression. */
+export function listTerminalSuppressionEvidence(
+  db: DatabaseSync,
+  conversationId: string,
+): readonly TerminalSuppressionEvidence[] {
+  const source = rows(db, `
+    SELECT ft.trigger_id, ft.concern_id, ft.status,
+           cl.cycle_id AS event_cycle_id, cl.generation AS event_generation,
+           cl.payload_json
+      FROM future_triggers ft
+      LEFT JOIN causal_ledger cl
+        ON cl.cycle_id = ('future-trigger:' || ft.trigger_id)
+     WHERE ft.conversation_id = ? AND ft.status = 'suppressed_stale'
+     ORDER BY ft.trigger_id ASC, cl.generation DESC, cl.cycle_id ASC
+  `, conversationId);
+  const seen = new Set<string>();
+  const evidence: TerminalSuppressionEvidence[] = [];
+  for (const item of source) {
+    const triggerId = text(item.trigger_id).trim();
+    const concernId = text(item.concern_id).trim();
+    const eventCycleId = text(item.event_cycle_id).trim();
+    if (!triggerId || !concernId || !eventCycleId || seen.has(triggerId)) continue;
+    const payload = jsonValue(item.payload_json);
+    if (!isRow(payload) || payload.result !== "suppressed_stale") continue;
+    const reason = boundedReason(payload.reason);
+    if (!reason) continue;
+    seen.add(triggerId);
+    evidence.push(Object.freeze({
+      triggerId,
+      concernId,
+      status: "suppressed_stale",
+      reason,
+      eventCycleId,
+      eventGeneration: safeGeneration(item.event_generation),
+      suppressedAtMs: safeTimestamp(payload.atMs),
+    }));
+  }
+  return Object.freeze(evidence);
+}
+
 function pointerStatus(values: readonly PointerRow[]): string {
   const statuses = [...new Set(values.map((value) => value.status).filter(Boolean))];
   if (statuses.length === 0) return "empty";
@@ -75,6 +143,7 @@ function pointerFromRows(
   sourceRecordCount: number,
   eligibleRows: readonly PointerRow[],
   queryFailed = false,
+  terminalEvidence?: readonly TerminalSuppressionEvidence[],
 ): DomainPointer {
   const disposition: CoverageDisposition = queryFailed
     ? "UNREACHABLE"
@@ -95,6 +164,7 @@ function pointerFromRows(
     updatedAtMs,
     disposition,
     pointerOnly: disposition === "POINTER_ONLY",
+    ...(terminalEvidence ? { terminalEvidence: Object.freeze([...terminalEvidence]) } : {}),
   };
   Object.defineProperty(pointer, "pointerOnly", {
     value: pointer.pointerOnly,
@@ -122,8 +192,9 @@ function makeDomain(
   sourceRows: readonly PointerRow[],
   eligibleRows: readonly PointerRow[],
   required = false,
+  terminalEvidence?: readonly TerminalSuppressionEvidence[],
 ): { pointer: DomainPointer; assessment: DomainAssessment } {
-  const pointer = pointerFromRows(domain, canonicalStore, sourceRows.length, eligibleRows);
+  const pointer = pointerFromRows(domain, canonicalStore, sourceRows.length, eligibleRows, false, terminalEvidence);
   return {
     pointer,
     assessment: {
@@ -224,7 +295,14 @@ function buildFutureTriggers(db: DatabaseSync, conversationId: string): { pointe
   `, conversationId);
   const sourceRows = mapRows(source, "trigger_id", "status", "due_at_ms");
   const eligibleRows = sourceRows.filter((row) => row.status === "scheduled");
-  return makeDomain("future_triggers", "cognitive-v021.db:future_triggers", sourceRows, eligibleRows);
+  return makeDomain(
+    "future_triggers",
+    "cognitive-v021.db:future_triggers",
+    sourceRows,
+    eligibleRows,
+    false,
+    listTerminalSuppressionEvidence(db, conversationId),
+  );
 }
 
 function buildSubscriptions(db: DatabaseSync, conversationId: string): { pointer: DomainPointer; assessment: DomainAssessment } {
@@ -297,35 +375,6 @@ function buildRelationshipState(
   );
 }
 
-function buildOpenCognition(
-  db: DatabaseSync,
-  ownerId: string,
-): { pointer: DomainPointer; assessment: DomainAssessment } {
-  const source = listOpenCognitiveItems(db, ownerId, {
-    status: "OPEN",
-    limit: 256,
-    order: "id_asc",
-  });
-  const sourceRows: PointerRow[] = source.map((item) => ({
-    id: item.entityUuid,
-    status: item.kind,
-    updatedAtMs: dateTimestamp(item.updatedAt),
-  }));
-  const currentRows = source
-    .filter((item) => openCognitiveItemSourceCurrent(db, item))
-    .map((item) => ({
-      id: item.entityUuid,
-      status: item.kind,
-      updatedAtMs: dateTimestamp(item.updatedAt),
-    }));
-  return makeDomain(
-    "open_cognition",
-    "nuclear.db:open_cognitive_items",
-    sourceRows,
-    currentRows,
-  );
-}
-
 function optional(
   domain: string,
   canonicalStore: string,
@@ -368,11 +417,6 @@ export function buildDomainPointers(
     })(),
     optional("future_triggers", "cognitive-v021.db:future_triggers", () => buildFutureTriggers(sidecar, conversationId)),
     optional("observation_subscriptions", "cognitive-v021.db:observation_subscriptions", () => buildSubscriptions(sidecar, conversationId)),
-    authorityDb && authorityOwner
-      ? optional("open_cognition", "nuclear.db:open_cognitive_items", () =>
-        buildOpenCognition(authorityDb, authorityOwner),
-      )
-      : unreachableDomain("open_cognition", "nuclear.db:open_cognitive_items"),
     optional("durable_work", "cognitive-v021.db:inbox_events,durable_work_attempts", () => buildDurableWork(sidecar, conversationId)),
     optional("frontiers", "cognitive-v021.db:deferred_reactive_frontiers", () => buildFrontiers(sidecar, conversationId, cycleId)),
   ];

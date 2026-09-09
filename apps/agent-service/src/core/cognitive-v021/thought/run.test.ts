@@ -14,6 +14,7 @@ import { initObservabilitySchema, openObservabilityStore } from "./diagnostics.j
 import { THOUGHT_UNAVAILABLE_NOTICE } from "../speech/infrastructure-notice.js";
 import {
   createThoughtCycleTokenMetrics,
+  executionProvenanceFromMetadata,
   materializeEffectsCompleted,
   observeThoughtCycleInput,
   runCognitiveCycle,
@@ -51,6 +52,111 @@ function deps(overrides: Partial<KernelDeps> = {}): KernelDeps {
 }
 
 describe("v0.2.1 Thought run", () => {
+  it("projects physical execution truth only from the canonical Model Fabric receipt", () => {
+    const attempted = executionProvenanceFromMetadata({
+      receipt: {
+        receiptStage: "resolved",
+        attempts: [{ dispatchTruth: "sent_outcome_unknown", providerRequestCount: 1 }],
+      } as any,
+    } as any);
+    const responded = executionProvenanceFromMetadata({
+      receipt: {
+        receiptStage: "resolved",
+        attempts: [{ dispatchTruth: "response_received", providerRequestCount: 1 }],
+      } as any,
+    } as any);
+    const notSent = executionProvenanceFromMetadata({
+      receipt: {
+        receiptStage: "resolved",
+        attempts: [{ dispatchTruth: "not_sent", providerRequestCount: 0 }],
+      } as any,
+    } as any);
+    const multipleAttempts = executionProvenanceFromMetadata({
+      receipt: {
+        receiptStage: "resolved",
+        attempts: [
+          { dispatchTruth: "not_sent", providerRequestCount: 0 },
+          { dispatchTruth: "response_received", providerRequestCount: 1 },
+        ],
+      } as any,
+    } as any);
+    const mixedUnknown = executionProvenanceFromMetadata({
+      receipt: {
+        receiptStage: "resolved",
+        attempts: [
+          { dispatchTruth: "sent_outcome_unknown", providerRequestCount: 1 },
+          { dispatchTruth: "not_sent", providerRequestCount: 0 },
+        ],
+      } as any,
+    } as any);
+
+    expect(attempted).toEqual({ dispatchTruth: "unknown", providerAttempts: 1 });
+    expect(responded).toEqual({ dispatchTruth: "sent", providerAttempts: 1 });
+    expect(notSent).toEqual({ dispatchTruth: "not_sent", providerAttempts: 0 });
+    expect(multipleAttempts).toEqual({ dispatchTruth: "sent", providerAttempts: 1 });
+    expect(mixedUnknown).toEqual({ dispatchTruth: "unknown", providerAttempts: 1 });
+  });
+
+  it("preserves a known response receipt across a later internal exception", async () => {
+    const sidecar = openTestSidecar();
+    const attentionDb = openTestSidecar();
+    const cycle = admitTestCycle(sidecar, {
+      cycleId: "cycle-known-response-internal-error",
+      conversationId: "thread-known-response-internal-error",
+      triggerKind: "owner_message",
+      triggerRef: "owner-known-response-internal-error",
+      occupantId: "doc",
+      authorityEpoch: 1,
+      nowMs: 1,
+    });
+    const evidence = appendOwnerUtterance(sidecar, {
+      conversationId: cycle.conversationId,
+      text: "preserve the response receipt",
+      discordMessageIds: ["known-response-internal-error-message"],
+      nowMs: 2,
+    });
+    const event = appendInboxEvent(sidecar, {
+      wakeId: cycle.wakeId,
+      conversationId: cycle.conversationId,
+      kind: "owner_message",
+      payload: {
+        cycleId: cycle.cycleId,
+        evidenceRowId: evidence.rowId,
+        ownerMessage: evidence.text,
+      },
+      createdAtMs: 2,
+    });
+    const completeChat = vi.fn(async () => ({
+      text: JSON.stringify(makeSemanticSettlement()),
+      model: "fake",
+      modelAlias: "thought",
+      resolvedModelId: null,
+      capturedAttemptIdentity: { allocationId: -1 },
+      modelFabric: {
+        receipt: {
+          receiptStage: "resolved",
+          attempts: [{ dispatchTruth: "response_received", providerRequestCount: 1 }],
+        },
+      },
+    } as any));
+
+    try {
+      const result = await runCognitiveCycle(sidecar, attentionDb, event, deps({
+        attentionDb,
+        completeChat,
+      }));
+
+      expect(result).toMatchObject({
+        published: false,
+        thoughtExecutionProvenance: { dispatchTruth: "sent", providerAttempts: 1 },
+      });
+      expect(completeChat).toHaveBeenCalledTimes(1);
+    } finally {
+      sidecar.close();
+      attentionDb.close();
+    }
+  });
+
   it.each(["corrected", "still_invalid", "deadline"] as const)(
     "revises the live operational effectRef incident with one shared deadline: %s",
     async (outcome) => {
@@ -296,6 +402,7 @@ describe("v0.2.1 Thought run", () => {
       expect(result).toMatchObject({
         published: false,
         infrastructureNotice: `${THOUGHT_UNAVAILABLE_NOTICE} Error code: LOCAL_DISPATCH_FAILURE`,
+        thoughtExecutionProvenance: { dispatchTruth: "not_sent", providerAttempts: 0 },
       });
       expect(completeChat).not.toHaveBeenCalled();
 

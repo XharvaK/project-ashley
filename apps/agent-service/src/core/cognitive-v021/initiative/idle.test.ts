@@ -150,4 +150,32 @@ describe("v0.2.1 idle executive", () => {
       db.close();
     }
   });
+
+  it("preserves unknown physical execution provenance without changing legacy counters", async () => {
+    const db = openTestSidecar();
+    try {
+      seedActiveOccupancy(db, "idle-provenance");
+      establishEpoch(db, 10);
+      const result = await tickIdleOpportunity(db, {
+        conversationId: "idle-provenance",
+        nowMs: 10,
+        runThought: async () => ({
+          published: false,
+          thoughtModelAttempts: 0,
+          thoughtExecutionProvenance: {
+            dispatchTruth: "unknown" as const,
+            providerAttempts: "unknown" as const,
+          },
+        }),
+      });
+
+      expect(result).toMatchObject({
+        thoughtModelAttempts: 0,
+        thoughtCalls: 1,
+        thoughtExecutionProvenance: { dispatchTruth: "unknown", providerAttempts: "unknown" },
+      });
+    } finally {
+      db.close();
+    }
+  });
 });

@@ -63,9 +63,6 @@ import type { OpenCognitiveReviewAdjudicator } from "./reflection/initiative.js"
 import type { ReflectionMode } from "./types.js";
 import { getAffectiveState } from "./state/affect.js";
 import {
-  getOpenCognitiveContinuityStatus,
-} from "./cognition/open-items.js";
-import {
   listActiveMindStateItems,
 } from "./state/mind-items.js";
 import {
@@ -544,22 +541,8 @@ export class AshleyCore {
     lastUserMessageAt: string | null;
     minIdleHours: number;
     lastDiagnostic: ProactiveDiagnostic | null;
-    cognitiveContinuity: ReturnType<typeof getOpenCognitiveContinuityStatus> & {
-      lastClosedStageCode: string | null;
-    };
   } {
-    const operational = this.getProactiveOperationalStatus(ownerId);
-    const cognitiveContinuity = getOpenCognitiveContinuityStatus(
-      this.db,
-      ownerId,
-    );
-    return {
-      ...operational,
-      cognitiveContinuity: {
-        ...cognitiveContinuity,
-        lastClosedStageCode: operational.lastDiagnostic?.code ?? null,
-      },
-    };
+    return this.getProactiveOperationalStatus(ownerId);
   }
 
   pause(ownerId: string): void {
