@@ -626,6 +626,8 @@ describe("Thought deadline TimeoutError truth", () => {
       )).catch((value: unknown) => value);
       expect(error).toBeInstanceOf(AppError);
       expect(error).toMatchObject({ code: "timeout", httpStatus: 408 });
+      expect((error as { modelFabric?: { receipt?: { fallbackClass?: string } } }).modelFabric?.receipt?.fallbackClass)
+        .toBe("none");
       expect(dispatch).toHaveBeenCalledTimes(1);
     } finally {
       db.close();

@@ -42,7 +42,7 @@ export type SemanticProjectionEnvelope = Readonly<{
   maxInputTokens: number;
 }>;
 
-export const ORDINARY_THOUGHT_BUDGET_MS = 60_000;
+export const ORDINARY_THOUGHT_BUDGET_MS = 180_000;
 export const INTERACTIVE_THOUGHT_MAX_OUTPUT = 8_192;
 export const STRUCTURAL_RETRY_MAX_OUTPUT = 8_192;
 export const STABLE_RESERVE_TOKENS = 0;

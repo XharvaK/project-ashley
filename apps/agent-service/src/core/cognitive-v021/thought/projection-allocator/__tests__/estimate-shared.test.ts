@@ -15,6 +15,7 @@ import {
   checkThoughtAdmission,
   estimateRequestTokens as budgetEstimate,
 } from "../budget.js";
+import { ORDINARY_THOUGHT_BUDGET_MS as KERNEL_ORDINARY_THOUGHT_BUDGET_MS } from "../../../types.js";
 
 describe("Shared Estimator Authority", () => {
   it("proves single source of truth for constants", () => {
@@ -25,7 +26,8 @@ describe("Shared Estimator Authority", () => {
     expect(STABLE_RESERVE_TOKENS).toBe(0);
     expect(INTERACTIVE_THOUGHT_MAX_OUTPUT).toBe(8192);
     expect(STRUCTURAL_RETRY_MAX_OUTPUT).toBe(8192);
-    expect(ORDINARY_THOUGHT_BUDGET_MS).toBe(60000);
+    expect(ORDINARY_THOUGHT_BUDGET_MS).toBe(180000);
+    expect(ORDINARY_THOUGHT_BUDGET_MS).toBe(KERNEL_ORDINARY_THOUGHT_BUDGET_MS);
   });
 
   it("proves identical calculation between allocator and attention estimator", () => {
