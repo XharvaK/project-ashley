@@ -56,6 +56,7 @@ const STRUCTURAL_FEEDBACK: Readonly<Record<ThoughtParserFailureCode, string>> = 
   missing_settlement_fields: "Include all required settlement sections.",
   speech_contract_failure: "Emit the required speech object shape.",
   commitment_contract_failure: "Emit the required commitments object shape.",
+  commitment_binding_invalid: "Bind each epistemic surfaceSpan exactly once to the authored surfaceDraft without overlap, and declare every claim observationRef in evidenceUse.observationRefsUsed.",
   operations_contract_failure: "Use the semantic evidenceUse object shape.",
   authority_contract_failure: "Do not emit kernel-owned authority fields.",
   observation_contract_failure: "Emit the required observation request shape.",

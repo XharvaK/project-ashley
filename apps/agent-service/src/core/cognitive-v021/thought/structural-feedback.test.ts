@@ -136,6 +136,7 @@ describe("Thought structural correction scope", () => {
       "alias_duplicate",
       "dangling_local_reference",
       "reference_target_type_mismatch",
+      "commitment_binding_invalid",
     ] as const) {
       const feedback = createThoughtStructuralFeedback({
         code,

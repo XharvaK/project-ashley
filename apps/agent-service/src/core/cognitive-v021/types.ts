@@ -286,6 +286,11 @@ export type EpistemicDimensions = {
 export type EpistemicCommitment = {
   dimensions: EpistemicDimensions;
   statement: string;
+  /** Exact literal portion of Thought's surfaceDraft that realizes this
+   * commitment for final-surface fidelity binding. */
+  surfaceSpan?: string;
+  /** Thought-authored governed observations warranting this claim. */
+  observationRefs?: readonly ExistingRef[];
 };
 
 export type ConversationalCommitment =
@@ -604,7 +609,7 @@ export type OperationalStateClaim = {
 };
 
 export type ThoughtCommitments = {
-  epistemic?: readonly { dimensions: EpistemicDimensions; statement: string }[];
+  epistemic?: readonly EpistemicCommitment[];
   operational?: readonly OperationalStateClaim[];
   conversational?: readonly ConversationalCommitment[];
   stance?: Stance;
@@ -926,6 +931,7 @@ export type ThoughtParserFailureCode =
   | "missing_settlement_fields"
   | "speech_contract_failure"
   | "commitment_contract_failure"
+  | "commitment_binding_invalid"
   | "operations_contract_failure"
   | "authority_contract_failure"
   | "observation_contract_failure"

@@ -1,6 +1,7 @@
 import type {
   ConversationalCommitment,
   EpistemicCommitment,
+  Observation,
   OperationalStateClaim,
   SpeechMode,
   Stance,
@@ -31,7 +32,12 @@ export type FidelityInput = {
    */
   acceptableRealizations?: readonly string[];
   commitments?: FidelityCommitments;
-  observations?: readonly { modality: string }[];
+  /**
+   * Bounded identity view: fidelity resolves Thought-authored observation
+   * refs by exact ID and checks production modality compatibility. Payloads
+   * never enter fidelity (evidence starvation preserved).
+   */
+  observations?: readonly Pick<Observation, "observationId" | "modality">[];
 };
 
 export type FidelityFailureCode =
@@ -47,7 +53,9 @@ export type FidelityResult =
   | { ok: true; code: "ok"; draft: string | null }
   | { ok: false; code: FidelityFailureCode; detail: string };
 
-function fail(code: FidelityFailureCode, detail: string): FidelityResult {
+type FidelityFailure = Extract<FidelityResult, { ok: false }>;
+
+function fail(code: FidelityFailureCode, detail: string): FidelityFailure {
   return { ok: false, code, detail };
 }
 
@@ -91,6 +99,129 @@ function directAssertiveProse(text: string): string {
 }
 
 /**
+ * Production observation modalities that can truthfully warrant each
+ * high-risk detector class. Enum-domain policy only; observation payloads
+ * are never read. Legacy strings (url/web/vision/screenshot) are not
+ * producible Observation modalities and are not accepted here.
+ */
+const READING_DISCOVERY_MODALITIES: ReadonlySet<string> = new Set(["page", "tool", "text"]);
+const VISION_MODALITIES: ReadonlySet<string> = new Set(["image"]);
+
+const EXTERNAL_EVIDENCE_SOURCES: ReadonlySet<string> = new Set(["tool", "perception"]);
+
+function countSpanOccurrences(haystack: string, needle: string): number {
+  let count = 0;
+  let from = 0;
+  for (;;) {
+    const at = haystack.indexOf(needle, from);
+    if (at < 0) return count;
+    count += 1;
+    from = at + 1;
+  }
+}
+
+function spanDetectorClasses(span: string): { reading: boolean; vision: boolean } {
+  return {
+    reading: claimsOwnConversationalReadActivity(span) || claimsOwnReadingActivity(span),
+    vision: claimsOwnVisionActivity(span),
+  };
+}
+
+function isInterpretiveBinding(commitment: EpistemicCommitment): boolean {
+  return commitment.dimensions.source === "ashley_interpretation"
+    && commitment.dimensions.status === "interpreted"
+    && commitment.observationRefs === undefined;
+}
+
+type MaskOutcome =
+  | { ok: true; text: string }
+  | { ok: false; failure: FidelityFailure };
+
+/**
+ * Mechanical span licensing. Thought-authored surfaceSpans that validate are
+ * removed so the remainder backstop sees only unbound surface. The Host never
+ * decides which commitment a sentence probably corresponds to: every license
+ * flows from an exact literal span Thought itself authored.
+ */
+function maskLicensedSpans(
+  draft: string,
+  epistemic: readonly EpistemicCommitment[],
+  modalityById: ReadonlyMap<string, string>,
+): MaskOutcome {
+  const ranges: Array<{ start: number; end: number }> = [];
+  for (const commitment of epistemic) {
+    const refs = commitment.observationRefs;
+    // A present observation ref is binding evidence even when its span is
+    // detector-vacuous, so resolve every ref before any early exit.
+    if (refs !== undefined) {
+      for (const ref of refs) {
+        if (!modalityById.has(ref)) {
+          return { ok: false, failure: fail("UNWITNESSED_HIGH_RISK_CLAIM", "evidence-bound surface claim cites an unknown observation") };
+        }
+      }
+    }
+    if (typeof commitment.surfaceSpan !== "string" || commitment.surfaceSpan.length === 0) {
+      continue;
+    }
+    const span = commitment.surfaceSpan;
+    const occurrences = countSpanOccurrences(draft, span);
+    if (EXTERNAL_EVIDENCE_SOURCES.has(commitment.dimensions.source)) {
+      // Evidence-bound spans must survive exactly once: Expression may not
+      // drop, rewrite, or duplicate a guarded surface claim.
+      if (occurrences !== 1) {
+        return { ok: false, failure: fail("DRAFT_COMMITMENT_CONFLICT", "evidence-bound surface span is not preserved exactly once") };
+      }
+      const fired = spanDetectorClasses(span);
+      if (!fired.reading && !fired.vision) {
+        continue; // vacuous span: licenses and masks nothing
+      }
+      const boundRefs = refs ?? [];
+      if (boundRefs.length === 0) {
+        return { ok: false, failure: fail("UNWITNESSED_HIGH_RISK_CLAIM", "evidence-bound surface claim cites no observation") };
+      }
+      const modalities = boundRefs
+        .map((ref) => modalityById.get(ref))
+        .filter((modality): modality is string => modality !== undefined);
+      if (fired.reading && !modalities.some((modality) => READING_DISCOVERY_MODALITIES.has(modality))) {
+        return { ok: false, failure: fail("UNWITNESSED_HIGH_RISK_CLAIM", "evidence-bound reading claim has no compatible observation") };
+      }
+      if (fired.vision && !modalities.some((modality) => VISION_MODALITIES.has(modality))) {
+        return { ok: false, failure: fail("UNWITNESSED_HIGH_RISK_CLAIM", "evidence-bound vision claim has no compatible observation") };
+      }
+      const start = draft.indexOf(span);
+      ranges.push({ start, end: start + span.length });
+      continue;
+    }
+    if (isInterpretiveBinding(commitment)) {
+      // Expression may naturally rephrase ordinary interpretive prose; a
+      // rephrased surface that still trips the backstop is unbound and
+      // rejects in the remainder phase.
+      if (occurrences === 0) continue;
+      if (occurrences > 1) {
+        return { ok: false, failure: fail("DRAFT_COMMITMENT_CONFLICT", "interpretive surface span is ambiguous") };
+      }
+      const fired = spanDetectorClasses(span);
+      if (!fired.reading && !fired.vision) continue;
+      const start = draft.indexOf(span);
+      ranges.push({ start, end: start + span.length });
+      continue;
+    }
+    // Other semantic sources suppress nothing in this packet.
+  }
+  ranges.sort((a, b) => a.start - b.start);
+  for (let index = 1; index < ranges.length; index += 1) {
+    if (ranges[index].start < ranges[index - 1].end) {
+      return { ok: false, failure: fail("DRAFT_COMMITMENT_CONFLICT", "licensed surface spans overlap") };
+    }
+  }
+  let text = draft;
+  for (let index = ranges.length - 1; index >= 0; index -= 1) {
+    text = text.slice(0, ranges[index].start) + text.slice(ranges[index].end);
+  }
+  return { ok: true, text };
+}
+
+/**
  * Structural speech licensing. This is intentionally not an entailment model.
  * Thought commitments and explicit speech constraints remain authoritative;
  * this function only rejects an incompatible surface.
@@ -110,19 +241,22 @@ export function fidelityCheck(input: FidelityInput): FidelityResult {
   const commitments = input.commitments ?? {};
   const mustSay = input.mustSay ?? [];
   const mustNot = input.mustNot ?? [];
-  const modalities = new Set((input.observations ?? []).map((item) => item.modality));
-  const directSpeech = directAssertiveProse(draft);
-  if (
-    claimsOwnVisionActivity(directSpeech) &&
-    !["vision", "image", "screenshot"].some((modality) => modalities.has(modality))
-  ) {
-    return fail("UNWITNESSED_HIGH_RISK_CLAIM", "vision claim has no observation");
+  const observations = input.observations ?? [];
+  const modalityById = new Map(observations.map((item) => [item.observationId, item.modality]));
+  const masked = maskLicensedSpans(draft, commitments.epistemic ?? [], modalityById);
+  if (!masked.ok) {
+    return masked.failure;
+  }
+  const directSpeech = directAssertiveProse(masked.text);
+  // Remainder backstop: ambient observations are inert. A high-risk surface
+  // claim is licensed only inside a mechanically bound span (masked above).
+  if (claimsOwnVisionActivity(directSpeech)) {
+    return fail("UNWITNESSED_HIGH_RISK_CLAIM", "vision claim has no licensed evidence");
   }
   if (
-    (claimsOwnConversationalReadActivity(directSpeech) || claimsOwnReadingActivity(directSpeech)) &&
-    !["page", "url", "web", "text"].some((modality) => modalities.has(modality))
+    claimsOwnConversationalReadActivity(directSpeech) || claimsOwnReadingActivity(directSpeech)
   ) {
-    return fail("UNWITNESSED_HIGH_RISK_CLAIM", "reading claim has no observation");
+    return fail("UNWITNESSED_HIGH_RISK_CLAIM", "reading claim has no licensed evidence");
   }
   const mustSaySatisfied = mustSay.every((required) => hasText(draft, required));
   if (!mustSaySatisfied) {

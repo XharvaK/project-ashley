@@ -134,7 +134,7 @@ const semanticOutputSettlementSchema = strictObject({
     topics: nonEmptyStringArraySchema,
   }),
   commitments: sparseObject({
-    epistemic: { type: "array", minItems: 1, items: strictObject({ dimensions: dimensionsSchema, statement: { type: "string" } }, ["dimensions", "statement"]) },
+    epistemic: { type: "array", minItems: 1, items: strictObject({ dimensions: dimensionsSchema, statement: { type: "string" }, surfaceSpan: { type: "string", minLength: 1 }, observationRefs: nonEmptyStringArraySchema }, ["dimensions", "statement"]) },
     operational: { type: "array", minItems: 1, items: operationalClaimSchema },
     conversational: { type: "array", minItems: 1, items: { enum: ["answer", "ask", "acknowledge", "disagree", "hold", "silence"] } },
     stance: strictObject({
@@ -334,6 +334,7 @@ function applyExperimentalWireBounds(schema: SchemaRecord): void {
   property(record(property(interpretation, "referentBindings").items), "span").maxLength = 400;
   for (const field of ["fromSpan", "toSpan"]) property(record(property(interpretation, "corrections").items), field).maxLength = 400;
   property(record(property(commitments, "epistemic").items), "statement").maxLength = 500;
+  property(record(property(commitments, "epistemic").items), "surfaceSpan").maxLength = 500;
   for (const branch of record(property(settlement, "workingContextDeltas").items).oneOf as unknown[]) {
     const form = record(branch);
     for (const field of ["item", "replacement"]) {
@@ -400,6 +401,7 @@ export function thoughtOutputCompatibilityInstruction(): string {
     `Speech shape: ${speechForms(settlement).join("; ")}.`,
     "Speech mustSay contract: every mustSay entry is a literal required substring and each entry must appear verbatim in surfaceDraft; the host fidelity checker rejects any draft that does not contain them verbatim. Omit mustSay when no exact literal wording is required. Behavioral, stylistic, or procedural directives do not belong in mustSay; put those in presentationDirectives.",
     "Optional settlement domains and their children must be omitted when unused. Present event arrays must be non-empty; present composite objects must contain a meaningful child. Ordinary speech requires no commitments. speech.mode:none permits only mode. Absence never clears state.",
+    "Ordinary speech still requires no commitments. When Ashley's own surface wording makes a governed external read, discovery, or vision claim, author an epistemic commitment with the exact literal surfaceSpan quoted from surfaceDraft and the exact supporting observationRefs chosen from the supplied Thought input observations; every claim observationRef must also appear in evidenceUse.observationRefsUsed, and the host licenses each surface claim only against its own commitment's refs. When detector-prone wording is purely Ashley's conversational interpretation, use source:ashley_interpretation with status:interpreted plus the exact surfaceSpan and do not fabricate observationRefs. Omit surfaceSpan and observationRefs when unused; a surfaceSpan must occur exactly once in surfaceDraft and bound spans must not overlap.",
     "speech.mode:none means Ashley intentionally chooses not to communicate in this cycle; it is not the generic no-op for a turn with no other work. The absence of a new belief, commitment, state change, concern update, operation, or other structured act does not by itself imply silence: a settlement may carry speech.mode:draft alone, and ordinary conversation is itself a valid purpose for speech. When the Owner directly addresses Ashley or makes a conversational bid — such as a greeting, question, presence check, or remark directed at Ashley — participating is ordinarily a legitimate reason to speak even when no other update is required; silence remains fully valid when silence itself is the intended act, such as deliberate withdrawal, refusal, choosing not to interrupt, or a tick with nothing Ashley wants to say.",
     "Operational commitments are distinct from conversational continuation. Every operational effectRef must refer to one of the complete Host-admitted operational effect references supplied in allowedOperationalEffectRefs for this cycle. If allowedOperationalEffectRefs is empty, omit commitments.operational.",
     `Forbidden publication/delivery fields: ${THOUGHT_FORBIDDEN_OUTPUT_FIELDS.join(", ")}.`,

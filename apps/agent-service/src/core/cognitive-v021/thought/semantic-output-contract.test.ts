@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  THOUGHT_OUTPUT_SCHEMA,
   THOUGHT_SEMANTIC_SCHEMA_FINGERPRINT,
   constrainThoughtOutputSchema,
   thoughtOutputCompatibilityInstruction,
@@ -350,15 +351,40 @@ describe("Thought semantic output contract", () => {
 
   it("keeps protected semantic, wire, and capability fingerprints exact", () => {
     expect(THOUGHT_SEMANTIC_SCHEMA_FINGERPRINT).toBe(
-      "sha256:e96d2a20feea442da2fbfacfa02bc9b0383836e0e531af3c089c67c436a35ace",
+      "sha256:aae9ef734867d90fbc47dd5bdb78e06ca98912a01e7418347535fb8c6189390c",
     );
     const zeroOp = constrainThoughtOutputSchema(buildOperationalEffectNamespaceFromRefs([]));
     expect(zeroOp.wireSchemaFingerprint).toBe(
-      "sha256:efb47dc81e598a66ca48df51bde64b74c0273f2fdd0bfc450d9ba200114f2c01",
+      "sha256:38c214779933925482d17d2041f237ef8cfc78b9c1106a10652d95beaf9341b6",
     );
     expect(zeroOp.namespaceConstraintFingerprint).toBe(
       "sha256:d277b3804b25361994107886d1f33f779a7501298b01fe483ebe7c795b6e19c6",
     );
+  });
+
+  it("binds per-claim surfaceSpan and observationRefs on epistemic commitments (F2)", () => {
+    const schema = THOUGHT_OUTPUT_SCHEMA as {
+      oneOf: Array<{ properties: { commitments: { properties: { epistemic: { items: {
+        properties: Record<string, unknown>;
+        required: string[];
+      } } } } } }>;
+    };
+    const epistemicItems = schema.oneOf[0].properties.commitments.properties.epistemic.items;
+    // Rotation is earned by the new optional binding fields, not a blind re-pin.
+    expect(Object.keys(epistemicItems.properties).sort()).toEqual(
+      ["dimensions", "observationRefs", "statement", "surfaceSpan"],
+    );
+    expect(epistemicItems.required).toEqual(["dimensions", "statement"]);
+    expect(epistemicItems.properties.surfaceSpan).toMatchObject({ type: "string", minLength: 1 });
+    expect(epistemicItems.properties.observationRefs).toMatchObject({
+      type: "array",
+      minItems: 1,
+      items: { type: "string" },
+    });
+    const instruction = thoughtOutputCompatibilityInstruction();
+    expect(instruction).toContain("surfaceSpan");
+    expect(instruction).toContain("evidenceUse.observationRefsUsed");
+    expect(instruction).toContain("source:ashley_interpretation");
   });
 
   it("carries semantic branch intent in the native schema without changing branch shape", () => {

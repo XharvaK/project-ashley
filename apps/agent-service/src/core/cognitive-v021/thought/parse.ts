@@ -33,6 +33,7 @@ export type ThoughtSemanticParseFailureCode =
   | "wrong_type"
   | "invalid_enum"
   | "reference_not_allowlisted"
+  | "commitment_binding_invalid"
   | "alias_invalid"
   | "alias_collides_with_existing_ref"
   | "operation_not_registered";
@@ -188,9 +189,47 @@ function validSemanticRefField(value: unknown, allowlist: ReadonlySet<string>): 
   return value === null || semanticRef(value, allowlist);
 }
 
-function validEpistemicCommitment(value: unknown): boolean {
-  const record = recordShape(value, ["dimensions", "statement"]);
-  return !!record && validEpistemicDimensions(record.dimensions) && nonEmptyString(record.statement);
+function validEpistemicObservationRefs(
+  value: unknown,
+  allowlist: ReadonlySet<string>,
+  field: string,
+): ValidationResult {
+  if (!Array.isArray(value)) return failure("wrong_type", field);
+  if (value.length === 0) return failure("empty_when_present", field);
+  for (const [index, item] of value.entries()) {
+    if (!nonEmptyString(item)) return failure("wrong_type", `${field}[${index}]`);
+    if (!allowlist.has(item)) return failure("reference_not_allowlisted", `${field}[${index}]`);
+  }
+  return OK;
+}
+
+function validEpistemicCommitment(
+  value: unknown,
+  allowlist: ReadonlySet<string>,
+  field: string,
+): ValidationResult {
+  const record = recordShape(value, ["dimensions", "statement"], ["surfaceSpan", "observationRefs"]);
+  if (!record || !validEpistemicDimensions(record.dimensions) || !nonEmptyString(record.statement)) {
+    return failure("wrong_type", field);
+  }
+  if (record.surfaceSpan !== undefined && !nonEmptyString(record.surfaceSpan)) {
+    return failure("wrong_type", `${field}.surfaceSpan`);
+  }
+  if (record.observationRefs !== undefined) {
+    const refs = validEpistemicObservationRefs(record.observationRefs, allowlist, `${field}.observationRefs`);
+    if (!refs.ok) return refs;
+  }
+  const dimensions = semanticRecord(record.dimensions);
+  const external = dimensions?.source === "tool" || dimensions?.source === "perception";
+  const hasSurfaceSpan = record.surfaceSpan !== undefined;
+  const hasObservationRefs = record.observationRefs !== undefined;
+  if (external && hasSurfaceSpan !== hasObservationRefs) {
+    return failure(
+      "commitment_binding_invalid",
+      hasSurfaceSpan ? `${field}.observationRefs` : `${field}.surfaceSpan`,
+    );
+  }
+  return OK;
 }
 
 function validReferentBinding(value: unknown, allowlist: ReadonlySet<string>): boolean {
@@ -245,15 +284,21 @@ function validStance(value: unknown): boolean {
     && typeof stance.uncertaintyDisplay === "boolean";
 }
 
-function validateCommitments(parent: SemanticRecord): ValidationResult {
+function validateCommitments(parent: SemanticRecord, allowlist: ReadonlySet<string>): ValidationResult {
   const optional = optionalObject(parent, "commitments", ["epistemic", "operational", "conversational", "stance"]);
   if (!optional) return OK;
   if ("failure" in optional) return optional.failure;
   const record = optional.record;
   const conversational = ["answer", "ask", "acknowledge", "disagree", "hold", "silence"];
-  let result = prefixFailure(optionalArray(record, "epistemic", validEpistemicCommitment), "commitments");
-  if (!result.ok) return result;
-  result = prefixFailure(optionalArray(record, "operational", validOperationalClaim), "commitments");
+  if (own(record, "epistemic")) {
+    if (!Array.isArray(record.epistemic)) return failure("wrong_type", "commitments.epistemic");
+    if (record.epistemic.length === 0) return failure("empty_when_present", "commitments.epistemic");
+    for (const [index, item] of (record.epistemic as unknown[]).entries()) {
+      const result = validEpistemicCommitment(item, allowlist, `commitments.epistemic[${index}]`);
+      if (!result.ok) return result;
+    }
+  }
+  let result = prefixFailure(optionalArray(record, "operational", validOperationalClaim), "commitments");
   if (!result.ok) return result;
   result = prefixFailure(optionalArray(record, "conversational", (item) => typeof item === "string" && conversational.includes(item)), "commitments");
   if (!result.ok) return result;
@@ -373,6 +418,69 @@ function validateEvidenceUse(parent: SemanticRecord, allowlist: ReadonlySet<stri
   return check("openIntentRefs");
 }
 
+function countOccurrences(haystack: string, needle: string): number {
+  let count = 0;
+  let from = 0;
+  for (;;) {
+    const at = haystack.indexOf(needle, from);
+    if (at < 0) return count;
+    count += 1;
+    from = at + 1;
+  }
+}
+
+/**
+ * Cross-field claim binding: every per-claim observation ref must also be
+ * declared in settlement-level evidenceUse, and every authored surfaceSpan
+ * must occur exactly once in Thought's own surfaceDraft with all bound spans
+ * pairwise non-overlapping. Semantic correspondence between statement and
+ * span is Thought's authorship and is never judged here.
+ */
+function validateCommitmentBindings(record: SemanticRecord): ValidationResult {
+  const commitments = semanticRecord(record.commitments);
+  const epistemic: unknown[] = commitments && Array.isArray(commitments.epistemic)
+    ? commitments.epistemic
+    : [];
+  const evidenceUse = semanticRecord(record.evidenceUse);
+  const declared = new Set(
+    evidenceUse && Array.isArray(evidenceUse.observationRefsUsed)
+      ? (evidenceUse.observationRefsUsed as unknown[]).filter((ref): ref is string => typeof ref === "string")
+      : [],
+  );
+  const speech = semanticRecord(record.speech);
+  const draft = speech && speech.mode === "draft" && typeof speech.surfaceDraft === "string"
+    ? speech.surfaceDraft
+    : null;
+  const ranges: Array<{ start: number; end: number }> = [];
+  for (const [index, item] of epistemic.entries()) {
+    const itemRecord = semanticRecord(item);
+    if (!itemRecord) continue;
+    const base = `commitments.epistemic[${index}]`;
+    if (Array.isArray(itemRecord.observationRefs)) {
+      for (const [refIndex, ref] of (itemRecord.observationRefs as unknown[]).entries()) {
+        if (typeof ref === "string" && !declared.has(ref)) {
+          return failure("commitment_binding_invalid", `${base}.observationRefs[${refIndex}]`);
+        }
+      }
+    }
+    if (typeof itemRecord.surfaceSpan === "string") {
+      const span = itemRecord.surfaceSpan;
+      if (draft === null || countOccurrences(draft, span) !== 1) {
+        return failure("commitment_binding_invalid", `${base}.surfaceSpan`);
+      }
+      const start = draft.indexOf(span);
+      const end = start + span.length;
+      for (const existing of ranges) {
+        if (start < existing.end && existing.start < end) {
+          return failure("commitment_binding_invalid", `${base}.surfaceSpan`);
+        }
+      }
+      ranges.push({ start, end });
+    }
+  }
+  return OK;
+}
+
 function parseSemanticJson(raw: string | unknown): { ok: true; value: unknown } | { ok: false } {
   if (typeof raw !== "string") return { ok: true, value: raw };
   try {
@@ -463,7 +571,7 @@ function parseSettlementSemantic(value: SemanticRecord, allowlist: ReadonlySet<s
   if (!result.ok) return semanticFailure(result.code, result.field);
   result = validateInterpretation(value, allowlist);
   if (!result.ok) return semanticFailure(result.code, result.field);
-  result = validateCommitments(value);
+  result = validateCommitments(value, allowlist);
   if (!result.ok) return semanticFailure(result.code, result.field);
 
   const arrays: Array<[string, (item: unknown) => boolean]> = [
@@ -479,6 +587,8 @@ function parseSettlementSemantic(value: SemanticRecord, allowlist: ReadonlySet<s
     if (!result.ok) return semanticFailure(result.code, result.field);
   }
   result = validateEvidenceUse(value, allowlist);
+  if (!result.ok) return semanticFailure(result.code, result.field);
+  result = validateCommitmentBindings(value);
   if (!result.ok) return semanticFailure(result.code, result.field);
   result = validateSettlementLocalAliases(value, allowlist);
   if (!result.ok) return semanticFailure(result.code, result.field);
