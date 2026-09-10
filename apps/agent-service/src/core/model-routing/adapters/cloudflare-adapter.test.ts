@@ -68,6 +68,22 @@ const deepseekStructuredOutput = {
   bindingId: "compat_thought_cloudflare_deepseek_v4_flash_json_object_v1",
 };
 
+const deepseekObservationStructuredOutput = {
+  kind: "json_object_compatibility" as const,
+  contractId: "ashley.thought.semantic.v2",
+  schemaId: "ashley.thought.semantic.v2.schema",
+  schemaFingerprint: THOUGHT_OUTPUT_SCHEMA_FINGERPRINT,
+  bindingId: "compat_thought_observation_cloudflare_deepseek_v4_flash_json_object_v1",
+};
+
+const deepseekReflectionStructuredOutput = {
+  kind: "json_object_compatibility" as const,
+  contractId: "ashley.thought.semantic.v2",
+  schemaId: "ashley.thought.semantic.v2.schema",
+  schemaFingerprint: THOUGHT_OUTPUT_SCHEMA_FINGERPRINT,
+  bindingId: "compat_reflection_cloudflare_deepseek_v4_flash_json_object_v1",
+};
+
 describe("cloudflare-adapter", () => {
   it("sends the direct Workers AI request with the frozen Thought controls", async () => {
     env.cloudflareApiToken = "test-token";
@@ -406,9 +422,12 @@ describe("cloudflare-adapter thought route session affinity", () => {
     });
   }
 
-  it("resolves eligibility only for the exact DeepSeek Thought binding", () => {
+  it("resolves eligibility only for the exact DeepSeek Thought-route bindings", () => {
     env.cloudflareThoughtAffinityId = AFFINITY_ID;
+    // All three currently qualified Thought-route bindings are eligible.
     expect(isThoughtRouteAffinityEligible(DEEPSEEK_MODEL, deepseekStructuredOutput)).toBe(true);
+    expect(isThoughtRouteAffinityEligible(DEEPSEEK_MODEL, deepseekObservationStructuredOutput)).toBe(true);
+    expect(isThoughtRouteAffinityEligible(DEEPSEEK_MODEL, deepseekReflectionStructuredOutput)).toBe(true);
     // Same model, wrong binding facts: not eligible.
     expect(isThoughtRouteAffinityEligible(DEEPSEEK_MODEL, {
       ...deepseekStructuredOutput,
@@ -416,18 +435,26 @@ describe("cloudflare-adapter thought route session affinity", () => {
     })).toBe(false);
     expect(isThoughtRouteAffinityEligible(DEEPSEEK_MODEL, structuredOutput)).toBe(false);
     expect(isThoughtRouteAffinityEligible(DEEPSEEK_MODEL, undefined)).toBe(false);
-    // Different Cloudflare model with the Thought binding: not eligible.
+    // Allowlisted binding on a different Cloudflare model: not eligible.
     expect(isThoughtRouteAffinityEligible(MODEL, deepseekStructuredOutput)).toBe(false);
+    expect(isThoughtRouteAffinityEligible(MODEL, deepseekObservationStructuredOutput)).toBe(false);
+    expect(isThoughtRouteAffinityEligible(MODEL, deepseekReflectionStructuredOutput)).toBe(false);
     expect(isThoughtRouteAffinityEligible("mistral-small-2603", deepseekStructuredOutput)).toBe(false);
-    // Resolver honors configuration on top of eligibility.
-    expect(resolveThoughtRouteAffinity(DEEPSEEK_MODEL, deepseekStructuredOutput)).toMatchObject({
-      applied: true,
-      transport: {
-        sessionAffinityApplied: true,
-        affinityPolicy: "cloudflare_thought_route_affinity_v1",
-      },
-      value: AFFINITY_ID,
-    });
+    // Resolver honors configuration on top of eligibility, per binding.
+    for (const control of [
+      deepseekStructuredOutput,
+      deepseekObservationStructuredOutput,
+      deepseekReflectionStructuredOutput,
+    ]) {
+      expect(resolveThoughtRouteAffinity(DEEPSEEK_MODEL, control)).toMatchObject({
+        applied: true,
+        transport: {
+          sessionAffinityApplied: true,
+          affinityPolicy: "cloudflare_thought_route_affinity_v1",
+        },
+        value: AFFINITY_ID,
+      });
+    }
     env.cloudflareThoughtAffinityId = "";
     expect(resolveThoughtRouteAffinity(DEEPSEEK_MODEL, deepseekStructuredOutput)).toMatchObject({
       applied: false,
@@ -457,6 +484,34 @@ describe("cloudflare-adapter thought route session affinity", () => {
     expect(result.providerRequestId).toBe("cf-deepseek-affinity-1");
   });
 
+  it.each([
+    ["Thought Observation", deepseekObservationStructuredOutput],
+    ["Reflection", deepseekReflectionStructuredOutput],
+  ])("attaches the same affinity header for the eligible %s binding", async (_label, fabricStructuredOutput) => {
+    env.cloudflareApiToken = "test-token";
+    env.cloudflareAccountId = "account-test";
+    env.cloudflareThoughtAffinityId = AFFINITY_ID;
+    let capturedInit: RequestInit | undefined;
+    const adapter = createCloudflareAdapter(async (_url, init) => {
+      capturedInit = init;
+      return deepseekOkResponse();
+    });
+
+    const result = await adapter.dispatch({
+      messages,
+      modelId: DEEPSEEK_MODEL,
+      options: { maxTokens: 450, temperature: 1 },
+      fabricReasoning: { kind: "reasoning_effort", value: "high" },
+      fabricStructuredOutput,
+    });
+
+    expect((capturedInit?.headers as Record<string, string>)["x-session-affinity"]).toBe(AFFINITY_ID);
+    expect(result.providerBoundaryTransport).toEqual({
+      sessionAffinityApplied: true,
+      affinityPolicy: "cloudflare_thought_route_affinity_v1",
+    });
+  });
+
   it("omits the header and reports absent truth when affinity is not configured", async () => {
     env.cloudflareApiToken = "test-token";
     env.cloudflareAccountId = "account-test";
@@ -478,6 +533,7 @@ describe("cloudflare-adapter thought route session affinity", () => {
 
   it.each([
     ["different model", MODEL, deepseekStructuredOutput],
+    ["observation binding on different model", MODEL, deepseekObservationStructuredOutput],
     ["wrong binding", DEEPSEEK_MODEL, { ...deepseekStructuredOutput, bindingId: "compat_other_binding_v1" }],
     ["native binding", DEEPSEEK_MODEL, structuredOutput],
     ["no structured output", DEEPSEEK_MODEL, undefined],

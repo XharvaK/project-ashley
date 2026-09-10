@@ -29,9 +29,20 @@ const CLOUDFLARE_MODEL = "@cf/nvidia/nemotron-3-120b-a12b";
 const DEEPSEEK_THOUGHT_MODEL = "@cf/deepseek-ai/deepseek-v4-flash-0731";
 const THOUGHT_SEMANTIC_CONTRACT_ID = "ashley.thought.semantic.v2";
 const THOUGHT_SEMANTIC_SCHEMA_ID = "ashley.thought.semantic.v2.schema";
-const THOUGHT_AFFINITY_BINDING_ID = "compat_thought_cloudflare_deepseek_v4_flash_json_object_v1";
 const THOUGHT_AFFINITY_POLICY = "cloudflare_thought_route_affinity_v1" as const;
 const SESSION_AFFINITY_HEADER = "x-session-affinity";
+/**
+ * Exact finite allowlist of the currently qualified Cloudflare DeepSeek
+ * Thought-route bindings whose authoritative dispatched ownership is the
+ * Thought route (portfolio current-compatibility.v3.json):
+ * main interactive/durable Thought, Thought Observation, Reflection.
+ * No other binding is eligible, including any invented future binding.
+ */
+const THOUGHT_ROUTE_AFFINITY_BINDINGS: ReadonlySet<string> = new Set([
+  "compat_thought_cloudflare_deepseek_v4_flash_json_object_v1",
+  "compat_thought_observation_cloudflare_deepseek_v4_flash_json_object_v1",
+  "compat_reflection_cloudflare_deepseek_v4_flash_json_object_v1",
+]);
 const CLOUDFLARE_ERROR_CODE_BOUNDARY = "__ashley_cloudflare_error_code" as const;
 const CLOUDFLARE_ERROR_CLASS_BOUNDARY = "__ashley_cloudflare_error_class" as const;
 const CLOUDFLARE_ERROR_MESSAGE_BOUNDARY = "__ashley_cloudflare_error_message" as const;
@@ -80,16 +91,21 @@ function isDeepSeekThoughtJsonObject(
 
 /**
  * True only for the exact current Cloudflare DeepSeek Thought wire: the
- * configured DeepSeek model plus the trusted json_object_compatibility
- * Thought binding. Grounded in Model Fabric translation facts available at
- * the adapter boundary — never in message contents or caller claims.
+ * configured DeepSeek model plus a trusted json_object_compatibility Thought
+ * control whose binding belongs to the finite allowlist of currently
+ * qualified Thought-route bindings (main, observation, reflection).
+ * Grounded in Model Fabric translation facts available at the adapter
+ * boundary — never in message contents or caller claims. Model alone is
+ * never sufficient, and no binding outside the allowlist is accepted.
  */
 export function isThoughtRouteAffinityEligible(
   model: string,
   structuredOutput?: TrustedStructuredOutputControl,
 ): boolean {
+  const bindingId = structuredOutput?.bindingId;
   return isDeepSeekThoughtJsonObject(model, structuredOutput)
-    && structuredOutput?.bindingId === THOUGHT_AFFINITY_BINDING_ID;
+    && typeof bindingId === "string"
+    && THOUGHT_ROUTE_AFFINITY_BINDINGS.has(bindingId);
 }
 
 export type ThoughtRouteAffinityResolution = Readonly<{
