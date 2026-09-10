@@ -507,7 +507,7 @@ function mapFailureClass(
 
 export function mapCloudflareError(error: unknown): AppError {
   if (error instanceof AppError) return error;
-  if (error instanceof Error && error.name === "AbortError") throw error;
+  if (error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError")) throw error;
   const status = statusCode(error);
   const providerHttpStatus = providerHttpStatusFromBoundary(error);
   const providerCode = cloudflareErrorCodeFromBoundary(error);

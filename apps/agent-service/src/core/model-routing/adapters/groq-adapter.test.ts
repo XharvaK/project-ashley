@@ -283,6 +283,12 @@ describe("groq-adapter fixtures", () => {
     err.name = "AbortError";
     expect(() => mapGroqError(err)).toThrow(err);
   });
+
+  it("rethrows deadline TimeoutError without inventing provider_unavailable", () => {
+    const err = new Error("The operation was aborted due to timeout");
+    err.name = "TimeoutError";
+    expect(() => mapGroqError(err)).toThrow(err);
+  });
 });
 
 describe("mapGroqError", () => {

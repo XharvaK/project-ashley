@@ -144,6 +144,8 @@ export type ThoughtInvocation = {
   malformed?: boolean;
   unavailable?: boolean;
   cancelled?: boolean;
+  /** True when the dispatch's own absolute deadline fired before any provider response. */
+  thoughtDeadline?: boolean;
   deferred?: boolean;
   nextEligibleAtMs?: number;
   kernelEnvelope?: KernelEnvelope;
@@ -151,6 +153,8 @@ export type ThoughtInvocation = {
   inputTokens?: number;
   /** Bounded provider-boundary evidence for a failed Thought attempt. */
   providerFailureCapture?: ThoughtProviderFailureCapture;
+  /** Bounded provider usage for a successful Thought attempt; diagnostic only. */
+  providerUsageCapture?: ThoughtProviderFailureCapture;
   /** Physical execution evidence projected from the canonical Model Fabric receipt. */
   thoughtExecutionProvenance?: ThoughtExecutionProvenance;
 };
@@ -328,11 +332,34 @@ function finiteNonNegative(value: unknown): number | undefined {
     : undefined;
 }
 
+/**
+ * Session affinity is not enabled on any provider route. The constant policy
+ * identity keeps cross-turn affinity comparison stable for the future
+ * cache-measurement programme without persisting any session identifier.
+ */
+const PROVIDER_SESSION_AFFINITY_POLICY = "none" as const;
+
+/**
+ * Bounded abort reason for the failure capture. AppError code "timeout" is
+ * minted only by the dispatch deadline branch, so it carries TimeoutError
+ * provenance without retaining exception prose.
+ */
+function abortReasonNameFor(error: unknown): "TimeoutError" | "AbortError" | "none" {
+  const code = (error as { code?: unknown } | null)?.code;
+  if (code === "timeout") return "TimeoutError";
+  if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
+    return error.name;
+  }
+  return "none";
+}
+
 function providerFailureCapture(input: {
   metadata?: ModelFabricDispatchMetadata | null;
   completion?: Awaited<ReturnType<typeof completeChat>>;
   controls?: ProviderBoundaryControls;
   timing?: ProviderBoundaryTiming;
+  /** Raw dispatch error; only its bounded abort class is retained, never prose. */
+  error?: unknown;
   options: {
     deadlineAtMs?: number | null;
     maxTokens?: number;
@@ -466,6 +493,10 @@ function providerFailureCapture(input: {
       && canonicalUsage?.cachedInputTokens !== undefined
       ? { cachedInputTokens: canonicalUsage.cachedInputTokens }
       : {}),
+    ...(canonicalUsage?.neuronUsage !== null
+      && canonicalUsage?.neuronUsage !== undefined
+      ? { neuronUsage: canonicalUsage.neuronUsage }
+      : {}),
     ...(responseDiagnostics?.finalTextBytes !== undefined
       ? { contentBytes: responseDiagnostics.finalTextBytes }
       : completion && typeof completion.text === "string"
@@ -481,6 +512,18 @@ function providerFailureCapture(input: {
       ? { contentHash: `sha256:${sha256Text(completion.text)}` }
       : {}),
     ...(input.status.failureClass ? { failureClass: input.status.failureClass } : {}),
+    // Completion-built captures answered, so they never lack a response.
+    // Error-built captures record whether any provider HTTP response arrived.
+    ...(input.error !== undefined
+      ? {
+          abortReasonName: abortReasonNameFor(input.error),
+          noHttpResponse: providerHttpStatus === undefined,
+        }
+      : { abortReasonName: "none" as const, noHttpResponse: false }),
+    ...{
+      sessionAffinityApplied: false,
+      affinityPolicy: PROVIDER_SESSION_AFFINITY_POLICY,
+    },
   };
   return capture;
 }
@@ -516,6 +559,7 @@ function providerFailureCaptureForError(
     completion,
     options,
     dispatchTruth,
+    error,
     status: {
       parserStatus: "not_run",
       validatorStatus: "not_run",
@@ -1360,6 +1404,17 @@ export async function runThoughtModel(
       malformed: false,
       inputTokens: completion.usage?.promptTokens ?? estimatedInputTokens,
       ...(kernelEnvelope ? { kernelEnvelope } : {}),
+      providerUsageCapture: providerFailureCaptureForCompletion(
+        completion,
+        dispatchOptions,
+        {
+          // The model answered in-contract: parse passed and correction scope
+          // passed or was vacuous, so no failure class applies.
+          parserStatus: "passed",
+          validatorStatus: "passed",
+          structuralRetryStatus: "not_applicable",
+        },
+      ),
       thoughtExecutionProvenance: executionProvenanceFromMetadata(completion.modelFabric),
     };
   } catch (error) {
@@ -1406,6 +1461,14 @@ export async function runThoughtModel(
       : executionProvenanceFromMetadata(
         establishedExecutionMetadata(metadataFromError(error), lastCompletion),
       );
+    // AppError code "timeout" is minted only by the dispatch deadline branch;
+    // the shared Model Fabric classifier maps it (and raw deadline
+    // TimeoutErrors) to the internal timeout code. A received provider
+    // response excludes deadline truth.
+    const thoughtDeadline = (
+      metadataFromError(error)?.failure?.code === "timeout"
+      || (error as { code?: unknown } | null)?.code === "timeout"
+    ) && executionProvenance.dispatchTruth !== "sent";
     const providerCapture = !cancelled
       ? providerFailureCaptureForError(error, dispatchOptions, lastCompletion, dispatchStarted)
       : undefined;
@@ -1458,7 +1521,7 @@ export async function runThoughtModel(
             generation: input.generation,
             requestId,
             pass,
-            code: "provider_unavailable",
+            code: thoughtDeadline ? "attention_deadline" : "provider_unavailable",
             stage: "provider_dispatch",
             dispatchTruth: providerCapture.dispatchTruth,
             semanticProjectionHash,
@@ -1512,6 +1575,7 @@ export async function runThoughtModel(
       requestId,
       unavailable: !cancelled,
       cancelled,
+      thoughtDeadline,
       ...(providerCapture ? { providerFailureCapture: providerCapture } : {}),
       thoughtExecutionProvenance: executionProvenance,
     };
@@ -2174,6 +2238,29 @@ export async function runCognitiveCycle(
         latestEvidenceRowId: latestRowId,
         thoughtExecutionProvenance: currentExecutionProvenance(),
       };
+    }
+    if (invocation.providerUsageCapture && invocation.output.kind !== "failure" && deps.observabilityDb) {
+      try {
+        recordDiagnostic(deps.observabilityDb, {
+          cycleId: cycle.cycleId,
+          generation: cycle.generation,
+          requestId: invocation.output.requestId,
+          pass,
+          code: "provider_returned",
+          stage: "provider_dispatch",
+          dispatchTruth: invocation.providerUsageCapture.dispatchTruth,
+          semanticProjectionHash: allocated.hashes.semanticProjectionHash,
+          dispatchMessagesHash: allocated.hashes.dispatchMessagesHash,
+          estimatedInputTokens: invocation.inputTokens,
+          providerFailure: invocation.providerUsageCapture,
+          createdAtMs: deps.nowMs(),
+        });
+      } catch {
+        // Observability persistence must not change the terminal outcome.
+      }
+    }
+    if (invocation.thoughtDeadline) {
+      return emitFailure("thought_deadline");
     }
     if (invocation.unavailable) {
       return emitFailure("unavailable", invocation.providerFailureCapture?.failureClass);

@@ -199,4 +199,10 @@ describe("MF-M4 OpenCode Zen adapter", () => {
     abort.name = "AbortError";
     expect(() => mapZenError(abort)).toThrow(abort);
   });
+
+  it("rethrows deadline TimeoutError without converting transport truth", () => {
+    const timeout = new Error("The operation was aborted due to timeout");
+    timeout.name = "TimeoutError";
+    expect(() => mapZenError(timeout)).toThrow(timeout);
+  });
 });

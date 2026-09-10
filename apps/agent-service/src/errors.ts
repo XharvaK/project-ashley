@@ -11,6 +11,7 @@ export type ErrorCode =
   | "credential_invalid"
   | "mistral_unavailable"
   | "provider_unavailable"
+  | "timeout"
   | "capability_mismatch"
    | "agent_not_ready"
   | "route_disabled"

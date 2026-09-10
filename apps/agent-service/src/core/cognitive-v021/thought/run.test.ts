@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { AppError } from "../../../errors.js";
 import { appendInboxEvent } from "../cycle/inbox.js";
 import { appendOwnerUtterance } from "../evidence/conversation-log.js";
 import { applyWorkingContextDelta } from "../evidence/working-context.js";
@@ -1253,5 +1254,163 @@ describe("v0.2.1 Thought run", () => {
     const completed = materializeEffectsCompleted(inFlight, receiptsByEffectId);
     expect(completed).toEqual(["e-succ", "e-fail"]);
     expect(materializeEffectsCompleted(inFlight, undefined)).toEqual([]);
+  });
+});
+
+describe("Thought provider deadline truth and bounded usage telemetry", () => {
+  function admitDeadlineCycle(sidecar: DatabaseSync, conversationId: string) {
+    const cycle = admitTestCycle(sidecar, {
+      conversationId, triggerKind: "owner_message",
+      triggerRef: `owner-${conversationId}`, occupantId: "doc", authorityEpoch: 1, nowMs: 1,
+    });
+    const evidence = appendOwnerUtterance(sidecar, {
+      conversationId: cycle.conversationId, text: "deadline truth probe",
+      discordMessageIds: [`${conversationId}-message`], nowMs: 2,
+    });
+    const event = appendInboxEvent(sidecar, {
+      wakeId: cycle.wakeId, conversationId: cycle.conversationId, kind: "owner_message",
+      payload: { cycleId: cycle.cycleId, evidenceRowId: evidence.rowId, ownerMessage: evidence.text },
+      createdAtMs: 2,
+    });
+    return { cycle, event };
+  }
+
+  it("reports a dispatch deadline timeout as thought_deadline with unknown dispatch truth", async () => {
+    const sidecar = openTestSidecar();
+    const attentionDb = openTestSidecar();
+    const obsDb = new DatabaseSync(":memory:");
+    initObservabilitySchema(obsDb);
+    const { event } = admitDeadlineCycle(sidecar, "thread-deadline-truth");
+    const completeChat: KernelDeps["completeChat"] = async () => {
+      throw new AppError("timeout", "Thought provider deadline exceeded", 408);
+    };
+    try {
+      const result = await runCognitiveCycle(sidecar, attentionDb, event, deps({
+        attentionDb, completeChat, observabilityDb: obsDb,
+      }));
+      expect(result).toMatchObject({
+        published: false,
+        thoughtModelAttempts: 1,
+        infrastructureNotice: `${THOUGHT_UNAVAILABLE_NOTICE} Error code: THOUGHT_DEADLINE_EXCEEDED`,
+      });
+      const store = openObservabilityStore(obsDb);
+      const diagnostics = store.listDiagnostics();
+      expect(diagnostics).toHaveLength(1);
+      expect(diagnostics[0]).toMatchObject({
+        code: "attention_deadline",
+        stage: "provider_dispatch",
+        dispatchTruth: "unknown",
+      });
+      expect(diagnostics[0].providerFailure).toMatchObject({
+        abortReasonName: "TimeoutError",
+        noHttpResponse: true,
+        failureClass: "timeout",
+        sessionAffinityApplied: false,
+        affinityPolicy: "none",
+      });
+      const stored = obsDb.prepare(
+        "SELECT provider_failure_json FROM thought_dispatch_diagnostics",
+      ).get() as { provider_failure_json: string };
+      expect(stored.provider_failure_json).not.toContain("deadline exceeded");
+    } finally {
+      obsDb.close();
+      sidecar.close();
+      attentionDb.close();
+    }
+  });
+
+  it("records bounded provider usage on successful Thought without influencing semantics", async () => {
+    const runOnce = async (usage: Record<string, number> | undefined) => {
+      const sidecar = openTestSidecar();
+      const attentionDb = openTestSidecar();
+      const obsDb = new DatabaseSync(":memory:");
+      initObservabilitySchema(obsDb);
+      const { event } = admitDeadlineCycle(sidecar, "thread-usage-truth");
+      const completeChat: KernelDeps["completeChat"] = async () => ({
+        text: JSON.stringify(makeSemanticSettlement()),
+        model: "fake",
+        modelAlias: "thought",
+        resolvedModelId: null,
+        ...(usage ? { usage: { promptTokens: 0, completionTokens: 0, ...usage } } : {}),
+        providerBoundaryTiming: {
+          requestStartedAtMs: 100,
+          responseAtMs: 140,
+          elapsedMs: 40,
+          remainingDeadlineMs: 3_860,
+          outcome: "response_received" as const,
+        },
+        modelFabric: {
+          receipt: {
+            receiptStage: "resolved",
+            attempts: [{
+              receiptStage: "provider_response",
+              dispatchTruth: "response_received",
+              providerRequestCount: 1,
+              usage: {
+                inputTokens: usage?.promptTokens ?? null,
+                outputTokens: usage?.completionTokens ?? null,
+                cachedInputTokens: usage?.cachedTokens ?? null,
+                reasoningTokens: usage?.reasoningTokens ?? null,
+                ...(usage?.neuronUsage !== undefined ? { neuronUsage: usage.neuronUsage } : {}),
+                providerReported: usage !== undefined,
+              },
+            }],
+          },
+        } as any,
+      });
+      try {
+        const result = await runCognitiveCycle(sidecar, attentionDb, event, deps({
+          attentionDb, completeChat, observabilityDb: obsDb,
+        }));
+        const store = openObservabilityStore(obsDb);
+        return { result, diagnostics: store.listDiagnostics() };
+      } finally {
+        obsDb.close();
+        sidecar.close();
+        attentionDb.close();
+      }
+    };
+
+    const fullUsage = { promptTokens: 111, completionTokens: 22, cachedTokens: 33, reasoningTokens: 44, neuronUsage: 55 };
+    const withUsage = await runOnce(fullUsage);
+    expect(withUsage.result.published).toBe(true);
+    const returned = withUsage.diagnostics.filter((row) => row.code === "provider_returned");
+    expect(returned).toHaveLength(1);
+    expect(returned[0]).toMatchObject({ stage: "provider_dispatch", dispatchTruth: "sent" });
+    expect(returned[0].providerFailure).toMatchObject({
+      inputTokens: 111,
+      completionTokens: 22,
+      cachedInputTokens: 33,
+      reasoningTokens: 44,
+      neuronUsage: 55,
+      elapsedMs: 40,
+      remainingDeadlineMs: 3_860,
+      noHttpResponse: false,
+      abortReasonName: "none",
+      sessionAffinityApplied: false,
+      affinityPolicy: "none",
+    });
+
+    const withoutUsage = await runOnce(undefined);
+    expect(withoutUsage.result.published).toBe(true);
+    const returnedEmpty = withoutUsage.diagnostics.filter((row) => row.code === "provider_returned");
+    expect(returnedEmpty).toHaveLength(1);
+    expect(returnedEmpty[0].providerFailure).not.toMatchObject({
+      inputTokens: expect.anything(),
+      completionTokens: expect.anything(),
+      cachedInputTokens: expect.anything(),
+      reasoningTokens: expect.anything(),
+      neuronUsage: expect.anything(),
+    });
+    expect(returnedEmpty[0].providerFailure).toMatchObject({
+      noHttpResponse: false,
+      abortReasonName: "none",
+      sessionAffinityApplied: false,
+      affinityPolicy: "none",
+    });
+
+    // Numeric telemetry cannot influence the terminal semantic outcome.
+    expect(withoutUsage.result.published).toBe(withUsage.result.published);
+    expect(withoutUsage.result.infrastructureNotice).toBe(withUsage.result.infrastructureNotice);
   });
 });

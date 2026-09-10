@@ -214,7 +214,7 @@ function modelFailureCode(
   if (code === "provider_unavailable" || code === "mistral_unavailable") {
     return "provider_unavailable";
   }
-  if (code === "attention_deadline" || code === "timeout") return "timeout";
+  if (code === "attention_deadline" || code === "timeout" || code === "TimeoutError") return "timeout";
   if (code === "AbortError") return "cancelled";
   if (dispatchTruth === "response_received") return "provider_internal";
   return "configuration_error";

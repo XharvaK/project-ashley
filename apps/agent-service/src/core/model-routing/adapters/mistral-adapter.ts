@@ -401,7 +401,7 @@ export function mapMistralError(
   knownSecrets: readonly string[] = [],
 ): AppError {
   if (err instanceof AppError) return err;
-  if (err instanceof Error && err.name === "AbortError") {
+  if (err instanceof Error && (err.name === "AbortError" || err.name === "TimeoutError")) {
     throw err;
   }
   const msg = redactKnownSecrets(errorMessage(err), knownSecrets);

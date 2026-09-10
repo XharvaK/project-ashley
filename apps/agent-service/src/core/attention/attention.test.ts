@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { AppError } from "../../errors.js";
 import { env } from "../../env.js";
 import { openNuclearDb } from "../db.js";
 import {
@@ -124,6 +125,36 @@ describe("accepted dispatch provenance", () => {
 function openDb(): DatabaseSync {
   return openNuclearDb(new DatabaseSync(":memory:"));
 }
+
+describe("attentive dispatch timeout truth", () => {
+  it("records a deadline AppError timeout as a timeout outcome, not a generic error", async () => {
+    env.groqApiKey = "test-key";
+    const db = openDb();
+    try {
+      const error = await runAttentiveDispatch<{ text: string }>(db, {
+        messages: [{ role: "user", content: "synthetic timeout fixture" }],
+        purpose: "maintenance",
+        lane: "curiosity_maintenance",
+        modelAlias: "timeout-fixture-model",
+        providerId: "groq",
+        quotaBucket: "groq:timeout-truth-fixture",
+        dispatch: async () => {
+          throw new AppError("timeout", "Thought provider deadline exceeded", 408);
+        },
+      }).then(
+        () => null,
+        (caught: unknown) => caught,
+      );
+      expect(error).toBeInstanceOf(AppError);
+      const row = db.prepare(
+        `SELECT state, outcome, error_class FROM attention_requests ORDER BY id DESC LIMIT 1`,
+      ).get() as { state: string; outcome: string; error_class: string };
+      expect(row).toMatchObject({ state: "terminal", outcome: "timeout", error_class: "timeout" });
+    } finally {
+      db.close();
+    }
+  });
+});
 
 describe("attention state/outcome invariant", () => {
   it("rejects non-null outcome on non-terminal and null outcome on terminal", () => {

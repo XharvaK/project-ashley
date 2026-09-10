@@ -249,6 +249,51 @@ export function providerHttpStatusFromBoundary(
   );
 }
 
+/**
+ * Causal provenance for a provider-dispatch abort. Node v22
+ * `AbortSignal.timeout()` rejects with `TimeoutError`, but the Thought
+ * dispatch nests two such signals (attention admission + dispatch), so the
+ * dispatcher must consult the dedicated signals — not error prose — to tell
+ * a fired Thought deadline from any other abort.
+ */
+export type DeadlineTimeoutProvenance = {
+  /** Outer/caller signal passed into dispatch (may nest the attention deadline). */
+  signal?: AbortSignal | null;
+  /** Dedicated `AbortSignal.timeout(deadlineAtMs)` owned by the dispatcher, when created. */
+  deadlineSignal?: AbortSignal | null;
+  /** Absolute dispatch deadline; exact-boundary backstop only. */
+  deadlineAtMs?: number | null;
+};
+
+function abortReasonName(value: unknown): string | undefined {
+  if (!value || (typeof value !== "object" && typeof value !== "function")) return undefined;
+  const name = (value as { name?: unknown }).name;
+  return typeof name === "string" ? name : undefined;
+}
+
+/**
+ * True only for a `TimeoutError` with no provider HTTP response whose
+ * deadline provenance is mechanically established: the dispatcher's
+ * dedicated deadline signal fired, the outer chain aborted with a timeout
+ * reason, or the absolute deadline fact is already exhausted. Timeout prose
+ * in a message alone never qualifies.
+ */
+export function isDeadlineTimeoutError(
+  error: unknown,
+  provenance?: DeadlineTimeoutProvenance | null,
+): boolean {
+  if (!(error instanceof Error) || error.name !== "TimeoutError") return false;
+  if (providerHttpStatusFromBoundary(error) !== undefined) return false;
+  if (provenance?.deadlineSignal?.aborted === true) return true;
+  const signal = provenance?.signal ?? null;
+  if (signal?.aborted === true && abortReasonName(signal.reason) === "TimeoutError") return true;
+  const deadlineAtMs = provenance?.deadlineAtMs;
+  if (typeof deadlineAtMs === "number" && Number.isFinite(deadlineAtMs) && Date.now() >= deadlineAtMs) {
+    return true;
+  }
+  return false;
+}
+
 export type WireDispatchEvidence = Readonly<{
   adapterId: string;
   wireFormat: string;

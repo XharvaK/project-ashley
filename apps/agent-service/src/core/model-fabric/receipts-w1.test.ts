@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createContextProjection } from "./projection.js";
-import { createModelFabricInvocation } from "./receipts.js";
+import { createModelFabricInvocation, modelFailureFor } from "./receipts.js";
 import { buildThoughtCapabilityIdentity } from "./capability-identity.js";
 
 describe("W1 attempt attribution", () => {
@@ -201,6 +201,25 @@ describe("W1 attempt attribution", () => {
       receiptStage: "provider_response",
       dispatchTruth: "response_received",
       providerHttpStatus: 503,
+    });
+  });
+
+  it("classifies a raw deadline TimeoutError as timeout, never configuration_error", () => {
+    const error = new Error("The operation was aborted due to timeout");
+    error.name = "TimeoutError";
+    expect(modelFailureFor(error, "provider_dispatch", "sent_outcome_unknown")).toMatchObject({
+      code: "timeout",
+      dispatchTruth: "sent_outcome_unknown",
+      retryability: "caller_may_retry",
+    });
+  });
+
+  it("keeps external AbortError as cancelled", () => {
+    const error = new Error("aborted");
+    error.name = "AbortError";
+    expect(modelFailureFor(error, "provider_dispatch", "sent_outcome_unknown")).toMatchObject({
+      code: "cancelled",
+      retryability: "caller_may_retry",
     });
   });
 });

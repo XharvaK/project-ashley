@@ -71,10 +71,20 @@ export type ThoughtProviderFailureCapture = Readonly<{
   providerHttpStatus?: number;
   reasoningTokens?: number;
   cachedInputTokens?: number;
+  /** Provider-reported Cloudflare neuron usage, when supplied. */
+  neuronUsage?: number;
   contentBytes?: number;
   reasoningContentBytes?: number;
   contentHash?: string;
   reasoningHash?: string;
+  /** Bounded abort reason observed at the provider boundary; never prose. */
+  abortReasonName?: "TimeoutError" | "AbortError" | "none";
+  /** True when the attempt ended with no provider HTTP response observed. */
+  noHttpResponse?: boolean;
+  /** True only when an affinity header was intentionally sent (currently never). */
+  sessionAffinityApplied?: boolean;
+  /** Non-secret stable affinity policy identity for cross-turn comparison. */
+  affinityPolicy?: string;
   dispatchTruth: "not_sent" | "sent" | "unknown";
   parserStatus: "not_run" | "passed" | "failed";
   validatorStatus: "not_run" | "passed" | "failed";
@@ -270,11 +280,23 @@ function providerFailurePayload(
     ["finishReason", 64],
     ["contentHash", 128],
     ["reasoningHash", 128],
+    ["affinityPolicy", 64],
     ["failureClass", 128],
   ];
   for (const [key, maxLength] of strings) {
     const safe = boundedCaptureString(capture[key], maxLength);
     if (safe !== undefined) value[key] = safe;
+  }
+  const abortReasonName = capture.abortReasonName;
+  if (abortReasonName === "TimeoutError" || abortReasonName === "AbortError" || abortReasonName === "none") {
+    value.abortReasonName = abortReasonName;
+  }
+  const booleans: Array<keyof ThoughtProviderFailureCapture> = [
+    "noHttpResponse",
+    "sessionAffinityApplied",
+  ];
+  for (const key of booleans) {
+    if (typeof capture[key] === "boolean") value[key] = capture[key];
   }
   const numbers: Array<[keyof ThoughtProviderFailureCapture, "finite" | "integer"]> = [
     ["attemptOrdinal", "integer"],
@@ -296,6 +318,7 @@ function providerFailurePayload(
     ["providerHttpStatus", "integer"],
     ["reasoningTokens", "integer"],
     ["cachedInputTokens", "integer"],
+    ["neuronUsage", "integer"],
     ["contentBytes", "finite"],
     ["reasoningContentBytes", "finite"],
   ];
@@ -355,11 +378,23 @@ function parseProviderFailureCapture(value: unknown): ThoughtProviderFailureCapt
       ["canonicalSchemaFingerprint", 128], ["wireSchemaFingerprint", 128],
       ["wireBindingId", 160], ["wireFormat", 96], ["wireBodyDigest", 128],
       ["reasoningConfiguration", 128], ["finishReason", 64],
-      ["contentHash", 128], ["reasoningHash", 128], ["failureClass", 128],
+      ["contentHash", 128], ["reasoningHash", 128], ["affinityPolicy", 64],
+      ["failureClass", 128],
     ];
     for (const [key, maxLength] of strings) {
       const safe = boundedCaptureString(parsed[key], maxLength);
       if (safe !== undefined) (capture as Record<string, unknown>)[key] = safe;
+    }
+    const abortReasonName = captureStatus(
+      parsed.abortReasonName,
+      ["TimeoutError", "AbortError", "none"] as const,
+      "none",
+    );
+    if (parsed.abortReasonName !== undefined) {
+      (capture as Record<string, unknown>).abortReasonName = abortReasonName;
+    }
+    for (const key of ["noHttpResponse", "sessionAffinityApplied"] as const) {
+      if (typeof parsed[key] === "boolean") (capture as Record<string, unknown>)[key] = parsed[key];
     }
     const numbers: Array<[keyof ThoughtProviderFailureCapture, "finite" | "integer"]> = [
       ["attemptOrdinal", "integer"], ["dispatchSequence", "integer"],
@@ -372,6 +407,7 @@ function parseProviderFailureCapture(value: unknown): ThoughtProviderFailureCapt
       ["requestWireBytes", "finite"], ["requestWireAdditionalBytes", "finite"],
       ["providerHttpStatus", "integer"],
       ["reasoningTokens", "integer"], ["cachedInputTokens", "integer"],
+      ["neuronUsage", "integer"],
       ["contentBytes", "finite"], ["reasoningContentBytes", "finite"],
     ];
     for (const [key, kind] of numbers) {

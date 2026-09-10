@@ -106,6 +106,12 @@ describe("mapMistralError", () => {
     expect(() => mapMistralError(err)).toThrow(err);
   });
 
+  it("re-throws deadline TimeoutError without remapping", () => {
+    const err = new Error("The operation was aborted due to timeout");
+    err.name = "TimeoutError";
+    expect(() => mapMistralError(err)).toThrow(err);
+  });
+
   it("classifies account credential failures separately from provider-wide failures", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const invalid = mapMistralError(
@@ -566,6 +572,103 @@ describe("Mistral credential failover", () => {
       ).rejects.toBe(secondaryError);
       expect(dispatch).toHaveBeenCalledTimes(2);
       expect(dispatch.mock.calls.every(([args]) => args.modelId === MISTRAL_SMALL)).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("Thought deadline TimeoutError truth", () => {
+  function thoughtOptions(attentionDb: DatabaseSync, deadlineAtMs: number) {
+    return {
+      attentionDb,
+      purpose: "thought" as const,
+      logicalRole: "thought" as const,
+      route: "thought" as const,
+      responseFormat: "json_schema" as const,
+      structuredOutput: thoughtOutputStructuredRequest(),
+      reasoningEffort: "high" as const,
+      deadlineAtMs,
+    };
+  }
+
+  function mockCloudflareDispatch(
+    implementation: (args: ProviderDispatchArgs) => Promise<ProviderCompletion>,
+  ) {
+    const dispatch = vi.fn(implementation);
+    vi.spyOn(cloudflareAdapterModule, "createCloudflareAdapter").mockReturnValue({
+      provider: "cloudflare",
+      dispatch,
+    });
+    return dispatch;
+  }
+
+  it("maps a deadline-generated TimeoutError to timeout, never provider_unavailable", async () => {
+    env.cloudflareApiToken = "test-cloudflare-token";
+    env.cloudflareAccountId = "test-cloudflare-account";
+    env.nimApiKey = "";
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const controller = new AbortController();
+    const dispatch = mockCloudflareDispatch(async () => {
+      // Mirror Undici: the outer deadline chain fires with a TimeoutError
+      // reason, then the in-flight fetch rejects with TimeoutError.
+      const reason = new Error("The operation was aborted due to timeout");
+      reason.name = "TimeoutError";
+      controller.abort(reason);
+      const error = new Error("The operation was aborted due to timeout");
+      error.name = "TimeoutError";
+      throw error;
+    });
+    try {
+      const error = await withOfflineAppGateDisabled(() => completeChat(
+        [{ role: "user", content: "synthetic deadline thought" }],
+        { ...thoughtOptions(db, Date.now() + 30_000), signal: controller.signal },
+      )).catch((value: unknown) => value);
+      expect(error).toBeInstanceOf(AppError);
+      expect(error).toMatchObject({ code: "timeout", httpStatus: 408 });
+      expect(dispatch).toHaveBeenCalledTimes(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps external AbortError cancellation behavior unchanged", async () => {
+    env.cloudflareApiToken = "test-cloudflare-token";
+    env.cloudflareAccountId = "test-cloudflare-account";
+    env.nimApiKey = "";
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const abort = new Error("aborted by caller");
+    abort.name = "AbortError";
+    const dispatch = mockCloudflareDispatch(async () => {
+      throw abort;
+    });
+    try {
+      const error = await withOfflineAppGateDisabled(() => completeChat(
+        [{ role: "user", content: "synthetic cancelled thought" }],
+        thoughtOptions(db, Date.now() + 30_000),
+      )).catch((value: unknown) => value);
+      expect(error).toBe(abort);
+      expect(dispatch).toHaveBeenCalledTimes(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps fetch-failed network classification while the deadline remains", async () => {
+    env.cloudflareApiToken = "test-cloudflare-token";
+    env.cloudflareAccountId = "test-cloudflare-account";
+    env.nimApiKey = "";
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const dispatch = mockCloudflareDispatch(async () => {
+      throw new TypeError("fetch failed");
+    });
+    try {
+      const error = await withOfflineAppGateDisabled(() => completeChat(
+        [{ role: "user", content: "synthetic network failure thought" }],
+        thoughtOptions(db, Date.now() + 30_000),
+      )).catch((value: unknown) => value);
+      expect(error).toMatchObject({ code: "provider_unavailable" });
+      expect(dispatch).toHaveBeenCalledTimes(1);
     } finally {
       db.close();
     }

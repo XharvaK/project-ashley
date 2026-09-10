@@ -221,6 +221,28 @@ describe("cloudflare-adapter", () => {
     expect(log.mock.calls.flat().join(" ")).not.toContain("fetch failed");
   });
 
+  it("rethrows deadline TimeoutError without inventing provider_unavailable", () => {
+    const err = new Error("The operation was aborted due to timeout");
+    err.name = "TimeoutError";
+    expect(() => mapCloudflareError(err)).toThrow(err);
+  });
+
+  it("keeps genuine HTTP 503 and 429 classifications unchanged", () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect(mapCloudflareError({ statusCode: 503 })).toMatchObject({
+        code: "provider_unavailable",
+        httpStatus: 503,
+      });
+      expect(mapCloudflareError({ statusCode: 429 })).toMatchObject({
+        code: "rate_limited",
+        httpStatus: 429,
+      });
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   it("keeps the Cloudflare wire body separate from the canonical schema request", () => {
     const body = buildCloudflareRequestBody(
       messages,

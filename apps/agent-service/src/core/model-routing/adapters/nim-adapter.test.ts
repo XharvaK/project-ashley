@@ -584,6 +584,12 @@ describe("nim-adapter fixtures", () => {
     err.name = "AbortError";
     expect(() => mapNimError(err)).toThrow(err);
   });
+
+  it("rethrows deadline TimeoutError without inventing provider_unavailable", () => {
+    const err = new Error("The operation was aborted due to timeout");
+    err.name = "TimeoutError";
+    expect(() => mapNimError(err)).toThrow(err);
+  });
 });
 
 describe("mapNimError", () => {

@@ -367,7 +367,7 @@ export async function runAttentiveDispatch<T>(
               outcome:
                 code === "rate_limited"
                   ? "rate_limited"
-                  : code === "attention_deadline"
+                  : code === "attention_deadline" || code === "timeout"
                     ? "timeout"
                     : "error",
               errorClass: code,

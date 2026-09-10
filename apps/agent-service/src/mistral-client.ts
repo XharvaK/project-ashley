@@ -36,6 +36,7 @@ import {
 import { requireRouteEnabled } from "./core/model-routing/router.js";
 import {
   quotaBucketFor,
+  isDeadlineTimeoutError,
   type ProviderId,
   type RouteId,
   type ContextProfile,
@@ -385,16 +386,16 @@ function providerBoundaryFactFromError<T>(
 function combineSignals(
   signal: AbortSignal | undefined,
   deadlineAtMs: number | null | undefined,
-): AbortSignal | undefined {
-  if (!deadlineAtMs && !signal) return undefined;
-  if (!deadlineAtMs) return signal;
+): { merged: AbortSignal | undefined; deadline: AbortSignal | undefined } {
+  if (!deadlineAtMs && !signal) return { merged: undefined, deadline: undefined };
+  if (!deadlineAtMs) return { merged: signal, deadline: undefined };
   const timeoutMs = Math.max(0, deadlineAtMs - Date.now());
   const deadline = AbortSignal.timeout(timeoutMs);
-  if (!signal) return deadline;
+  if (!signal) return { merged: deadline, deadline };
   if (typeof AbortSignal.any === "function") {
-    return AbortSignal.any([signal, deadline]);
+    return { merged: AbortSignal.any([signal, deadline]), deadline };
   }
-  return deadline;
+  return { merged: deadline, deadline };
 }
 
 export async function completeChat(
@@ -899,7 +900,7 @@ export async function completeChat(
             }
           : {}),
         dispatch: async ({ modelAlias: alias, signal }) => {
-          const merged = combineSignals(signal, options.deadlineAtMs);
+          const { merged, deadline } = combineSignals(signal, options.deadlineAtMs);
           const requestStartedAtMs = Date.now();
           const adapter = adapterFor(targetProvider);
           attempt.markDispatchAttempted();
@@ -999,6 +1000,25 @@ export async function completeChat(
             if (err instanceof Error && err.name === "AbortError") {
               attempt.markFailure("AbortError");
               throw err;
+            }
+            if (
+              isDeadlineTimeoutError(err, {
+                signal,
+                deadlineSignal: deadline,
+                deadlineAtMs: options.deadlineAtMs,
+              })
+            ) {
+              // The dispatch's own absolute deadline fired before any provider
+              // response. Report deadline truth, never provider_unavailable.
+              const timeoutError = new AppError(
+                "timeout",
+                "Thought provider deadline exceeded",
+                408,
+              );
+              attachProviderBoundaryFact(timeoutError, "providerBoundaryControls", providerBoundaryControls);
+              attachProviderBoundaryFact(timeoutError, "providerBoundaryTiming", providerBoundaryTiming);
+              attempt.markFailure("timeout");
+              throw timeoutError;
             }
             if (err instanceof AppError) {
               attempt.markFailure(err.code);

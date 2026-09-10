@@ -319,7 +319,7 @@ export function nimReasoningEffortForModel(
 
 export function mapNimError(err: unknown): AppError {
   if (err instanceof AppError) return err;
-  if (err instanceof Error && err.name === "AbortError") {
+  if (err instanceof Error && (err.name === "AbortError" || err.name === "TimeoutError")) {
     throw err;
   }
   const rawMessage =

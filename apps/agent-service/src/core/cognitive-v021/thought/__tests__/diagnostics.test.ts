@@ -160,6 +160,94 @@ describe("Thought Diagnostics & Observability DB", () => {
     }
   });
 
+  it("round-trips bounded abort and affinity telemetry without prose", () => {
+    const obs = openObservabilityStore(":memory:");
+    try {
+      obs.recordDiagnostic({
+        cycleId: "cycle-abort-truth",
+        generation: 1,
+        requestId: "req-abort-truth",
+        pass: 1,
+        code: "attention_deadline",
+        stage: "provider_dispatch",
+        dispatchTruth: "unknown",
+        providerFailure: {
+          dispatchTruth: "unknown",
+          parserStatus: "not_run",
+          validatorStatus: "not_run",
+          structuralRetryStatus: "not_applicable",
+          provider: "cloudflare",
+          elapsedMs: 59_789,
+          remainingDeadlineMs: 0,
+          failureClass: "timeout",
+          abortReasonName: "TimeoutError",
+          noHttpResponse: true,
+          sessionAffinityApplied: false,
+          affinityPolicy: "none",
+        },
+      });
+      obs.recordDiagnostic({
+        cycleId: "cycle-usage-truth",
+        generation: 1,
+        requestId: "req-usage-truth",
+        pass: 1,
+        code: "provider_returned",
+        stage: "provider_dispatch",
+        dispatchTruth: "sent",
+        providerFailure: {
+          dispatchTruth: "sent",
+          parserStatus: "passed",
+          validatorStatus: "passed",
+          structuralRetryStatus: "not_applicable",
+          provider: "cloudflare",
+          elapsedMs: 14_037,
+          remainingDeadlineMs: 45_849,
+          inputTokens: 11_233,
+          completionTokens: 872,
+          reasoningTokens: 1_900,
+          cachedInputTokens: 9_100,
+          neuronUsage: 4_200,
+          noHttpResponse: false,
+          abortReasonName: "none",
+          sessionAffinityApplied: false,
+          affinityPolicy: "none",
+        },
+      });
+
+      const stored = obs.db.prepare(
+        "SELECT provider_failure_json FROM thought_dispatch_diagnostics WHERE request_id = ?",
+      ).get("req-abort-truth") as { provider_failure_json: string };
+      expect(stored.provider_failure_json).toContain('"abortReasonName":"TimeoutError"');
+      expect(stored.provider_failure_json).toContain('"noHttpResponse":true');
+
+      const rows = obs.listDiagnostics();
+      expect(rows).toHaveLength(2);
+      const aborted = rows.filter((row) => row.code === "attention_deadline");
+      const returned = rows.filter((row) => row.code === "provider_returned");
+      expect(aborted).toHaveLength(1);
+      expect(returned).toHaveLength(1);
+      expect(aborted[0].providerFailure).toMatchObject({
+        abortReasonName: "TimeoutError",
+        noHttpResponse: true,
+        sessionAffinityApplied: false,
+        affinityPolicy: "none",
+      });
+      expect(returned[0].providerFailure).toMatchObject({
+        inputTokens: 11_233,
+        completionTokens: 872,
+        reasoningTokens: 1_900,
+        cachedInputTokens: 9_100,
+        neuronUsage: 4_200,
+        noHttpResponse: false,
+        abortReasonName: "none",
+        sessionAffinityApplied: false,
+        affinityPolicy: "none",
+      });
+    } finally {
+      obs.close();
+    }
+  });
+
   it("survives derived index rebuilds without data loss", () => {
     const sidecar = openTestSidecar();
     const derived = openDerivedStore(":memory:");
@@ -386,11 +474,11 @@ describe("Thought Diagnostics & Observability DB", () => {
       expect(receipts[0].cycleId).toBe("cycle-obs-real");
 
       const diagnostics = store.listDiagnostics();
-      expect(diagnostics.length).toBe(1);
-      expect(diagnostics[0].code).toBe("parser_malformed");
-      expect(diagnostics[0].cycleId).toBe("cycle-obs-real");
-      expect(diagnostics[0].dispatchTruth).toBe("unknown");
-      expect(diagnostics[0].providerFailure).toMatchObject({
+      const malformed = diagnostics.filter((row) => row.code === "parser_malformed");
+      expect(malformed).toHaveLength(1);
+      expect(malformed[0].cycleId).toBe("cycle-obs-real");
+      expect(malformed[0].dispatchTruth).toBe("unknown");
+      expect(malformed[0].providerFailure).toMatchObject({
         provider: "nim",
         model: "nvidia/nemotron-test",
         providerModel: "nvidia/nemotron-test",
@@ -428,7 +516,18 @@ describe("Thought Diagnostics & Observability DB", () => {
         "SELECT provider_failure_json FROM thought_dispatch_diagnostics WHERE code = 'parser_malformed'",
       ).get() as { provider_failure_json: string };
       expect(storedProviderFailure.provider_failure_json).not.toContain("malformed provider payload");
-      expect(diagnostics[0].cycleMetrics).toMatchObject({
+      // The successful corrective retry records bounded provider usage telemetry.
+      const returned = diagnostics.filter((row) => row.code === "provider_returned");
+      expect(returned).toHaveLength(1);
+      expect(returned[0]).toMatchObject({ stage: "provider_dispatch", dispatchTruth: "unknown" });
+      expect(returned[0].providerFailure).toMatchObject({
+        noHttpResponse: false,
+        abortReasonName: "none",
+        sessionAffinityApplied: false,
+        affinityPolicy: "none",
+      });
+      // Cycle aggregates attach to the latest non-publication row.
+      expect(returned[0].cycleMetrics).toMatchObject({
         first_pass_total_input_tokens: expect.any(Number),
         total_cycle_input_tokens_including_retries: expect.any(Number),
         retry_amplification_ratio: expect.any(Number),
