@@ -29,6 +29,7 @@ describe("Nemotron reasoning maps", () => {
       "nim_nemotron_super",
       "nim_nemotron_ultra",
       "cloudflare_nemotron_super",
+      "cloudflare_deepseek_v4_flash",
       "mistral_small",
     ].sort());
   });

@@ -232,7 +232,7 @@ describe("MF-M1 completeChat receipts", () => {
     env.cloudflareAccountId = "test-account";
     const dispatch = vi.fn().mockResolvedValue({
       text: "thought",
-      providerModel: "@cf/nvidia/nemotron-3-120b-a12b",
+      providerModel: "@cf/deepseek-ai/deepseek-v4-flash-0731",
       usage: { promptTokens: 4, completionTokens: 5 },
       finishReason: "stop",
     });
@@ -262,7 +262,7 @@ describe("MF-M1 completeChat receipts", () => {
     expect(receipt.attempts[0]).toMatchObject({
       provider: "cloudflare",
       backend: "cloudflare",
-      configuredModelId: "@cf/nvidia/nemotron-3-120b-a12b",
+      configuredModelId: "@cf/deepseek-ai/deepseek-v4-flash-0731",
       fallbackClass: "none",
       providerRequestCount: 1,
     });
@@ -289,7 +289,7 @@ describe("MF-M1 completeChat receipts", () => {
     env.cloudflareAccountId = "test-account";
     const cloudflareDispatch = vi.fn().mockResolvedValue({
       text: "observation",
-      providerModel: "@cf/nvidia/nemotron-3-120b-a12b",
+      providerModel: "@cf/deepseek-ai/deepseek-v4-flash-0731",
       usage: { promptTokens: 1, completionTokens: 1 },
       finishReason: "stop",
     });
@@ -318,7 +318,7 @@ describe("MF-M1 completeChat receipts", () => {
     expect(receipt.attempts[0]).toMatchObject({
       dispatchedRouteId: "thought",
       provider: "cloudflare",
-      configuredModelId: "@cf/nvidia/nemotron-3-120b-a12b",
+      configuredModelId: "@cf/deepseek-ai/deepseek-v4-flash-0731",
     });
     database.close();
   });

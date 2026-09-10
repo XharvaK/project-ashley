@@ -119,7 +119,7 @@ describe("MF-M2 CURRENT portfolio", () => {
     const records = routeRecordsFromCurrentPortfolio();
     expect(records.find((record) => record.route === "thought")).toMatchObject({
       provider: "cloudflare",
-      configuredModelId: "@cf/nvidia/nemotron-3-120b-a12b",
+      configuredModelId: "@cf/deepseek-ai/deepseek-v4-flash-0731",
       enabled: true,
       quotaContract: {
         tpm: 65536,
@@ -137,7 +137,7 @@ describe("MF-M2 CURRENT portfolio", () => {
       provider: "cloudflare",
       dispatch: vi.fn().mockResolvedValue({
         text: "{\"kind\":\"speak\"}",
-        providerModel: "@cf/nvidia/nemotron-3-120b-a12b",
+        providerModel: "@cf/deepseek-ai/deepseek-v4-flash-0731",
         usage: { promptTokens: 1, completionTokens: 1 },
         finishReason: "stop",
       }),
@@ -152,9 +152,9 @@ describe("MF-M2 CURRENT portfolio", () => {
     expect(result.modelFabric?.resolvedRoute).toMatchObject({
       registryVersion: currentPortfolio().registryVersion,
       policyRowId: "mfr_thought_interactive_compat_v1",
-      occupantId: "mfo_cloudflare_nemotron_3_super_high",
+      occupantId: "mfo_cloudflare_deepseek_v4_flash_high",
       provider: "cloudflare",
-      configuredModelId: "@cf/nvidia/nemotron-3-120b-a12b",
+      configuredModelId: "@cf/deepseek-ai/deepseek-v4-flash-0731",
     });
     database.close();
   });
@@ -164,7 +164,7 @@ describe("MF-M2 CURRENT portfolio", () => {
     env.cloudflareAccountId = "test-account";
     const dispatch = vi.fn().mockResolvedValue({
       text: "{}",
-      providerModel: "@cf/nvidia/nemotron-3-120b-a12b",
+      providerModel: "@cf/deepseek-ai/deepseek-v4-flash-0731",
       usage: { promptTokens: 1, completionTokens: 1 },
       finishReason: "stop",
     });
@@ -190,7 +190,7 @@ describe("MF-M2 CURRENT portfolio", () => {
     env.cloudflareAccountId = "test-account";
     const dispatch = vi.fn().mockResolvedValue({
       text: "{}",
-      providerModel: "@cf/nvidia/nemotron-3-120b-a12b",
+      providerModel: "@cf/deepseek-ai/deepseek-v4-flash-0731",
       usage: { promptTokens: 1, completionTokens: 1 },
       finishReason: "stop",
     });
@@ -211,11 +211,11 @@ describe("MF-M2 CURRENT portfolio", () => {
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
       options: expect.objectContaining({
         maxTokens: 8192,
-        responseFormat: "json_schema",
+        responseFormat: "json_object",
         structuredOutput,
       }),
       fabricStructuredOutput: expect.objectContaining({
-        kind: "native_json_schema",
+        kind: "json_object_compatibility",
         contractId: THOUGHT_OUTPUT_CONTRACT_ID,
         schemaId: THOUGHT_OUTPUT_SCHEMA_ID,
         schemaFingerprint,
@@ -285,7 +285,7 @@ describe("MF-M2 CURRENT portfolio", () => {
     expect(resolveDispatchContract({
       policy: interactive,
       provider: "cloudflare",
-      configuredModelId: "@cf/nvidia/nemotron-3-120b-a12b",
+      configuredModelId: "@cf/deepseek-ai/deepseek-v4-flash-0731",
     }).maxTokens).toBe(8192);
 
     const policyAboveProfile = {
@@ -314,7 +314,7 @@ describe("MF-M2 CURRENT portfolio", () => {
       expect.arrayContaining([
         expect.objectContaining({
           policyRowId: "mfr_thought_interactive_compat_v1",
-          occupantId: "mfo_cloudflare_nemotron_3_super_high",
+          occupantId: "mfo_cloudflare_deepseek_v4_flash_high",
           admissionBasis: expect.objectContaining({ kind: "existing_compatibility" }),
           activeActivationRefId: "compatibility_default",
           health: expect.objectContaining({

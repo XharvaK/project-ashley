@@ -274,7 +274,7 @@ describe("MF-ACT dispatch authority", () => {
     expect(resolved.policyRow.policyRowId).toBe(
       "mfr_thought_interactive_compat_v1",
     );
-    expect(resolved.occupant.configuredModelId).toBe("@cf/nvidia/nemotron-3-120b-a12b");
+    expect(resolved.occupant.configuredModelId).toBe("@cf/deepseek-ai/deepseek-v4-flash-0731");
     expect(resolved.occupant.provider).toBe("cloudflare");
     expect(resolved.occupant.effectiveReasoning).toBe("high");
     expect(resolved.activationRefId).toBeNull();
@@ -345,7 +345,7 @@ describe("MF-ACT dispatch authority", () => {
       controlRootMode: "production",
     });
     expect(resolved.source).toBe("current_compatibility");
-    expect(resolved.occupant.configuredModelId).toBe("@cf/nvidia/nemotron-3-120b-a12b");
+    expect(resolved.occupant.configuredModelId).toBe("@cf/deepseek-ai/deepseek-v4-flash-0731");
   });
 
   it("E/F: caller model and reasoning pins lose to an activated occupant", async () => {
@@ -407,14 +407,14 @@ describe("MF-ACT dispatch authority", () => {
       modelId: string;
       fabricReasoning?: unknown;
     }) => {
-      if (args.modelId === "@cf/nvidia/nemotron-3-120b-a12b") {
+      if (args.modelId === "@cf/deepseek-ai/deepseek-v4-flash-0731") {
         expect(args.fabricReasoning).toEqual({
           kind: "reasoning_effort",
           value: "high",
         });
         return {
           text: "{\"kind\":\"speak\"}",
-          providerModel: "@cf/nvidia/nemotron-3-120b-a12b",
+          providerModel: "@cf/deepseek-ai/deepseek-v4-flash-0731",
           usage: { promptTokens: 1, completionTokens: 1 },
           finishReason: "stop",
         };
@@ -448,10 +448,10 @@ describe("MF-ACT dispatch authority", () => {
       modelFabricControlDir: root,
       modelFabricControlRootMode: "fixture",
     }));
-    expect(thought.modelAlias).toBe("@cf/nvidia/nemotron-3-120b-a12b");
+    expect(thought.modelAlias).toBe("@cf/deepseek-ai/deepseek-v4-flash-0731");
     expect(thought.modelFabric?.resolvedRoute).toMatchObject({
       policyRowId: "mfr_thought_interactive_compat_v1",
-      occupantId: "mfo_cloudflare_nemotron_3_super_high",
+      occupantId: "mfo_cloudflare_deepseek_v4_flash_high",
       provider: "cloudflare",
       effectiveReasoning: "reasoning_effort=high",
     });

@@ -28,12 +28,21 @@ const MODEL_OUTPUT_CEILINGS: Readonly<Record<string, number>> = {
   "mistral:mistral-small-2603": 4096,
   "nim:nvidia/nemotron-3-super-120b-a12b": 8192,
   "cloudflare:@cf/nvidia/nemotron-3-120b-a12b": 8192,
+  "cloudflare:@cf/deepseek-ai/deepseek-v4-flash-0731": 8192,
+};
+
+const MODEL_CONTEXT_LIMITS: Readonly<Record<string, number>> = {
+  "cloudflare:@cf/deepseek-ai/deepseek-v4-flash-0731": 32768,
 };
 
 const MISTRAL_SMALL = "mistral-small-2603";
 
 function maxOutputTokensFor(provider: string, configuredModelId: string): number {
   return MODEL_OUTPUT_CEILINGS[`${provider}:${configuredModelId}`] ?? 2048;
+}
+
+function contextTokensFor(provider: string, configuredModelId: string): number {
+  return MODEL_CONTEXT_LIMITS[`${provider}:${configuredModelId}`] ?? 0;
 }
 
 function profileIdFor(provider: string, model: string): ModelProfileId {
@@ -51,7 +60,10 @@ function mechanicalDefinition(
         ? "json_schema"
         : "none"
       : ((provider === "nim" && configuredModelId === "nvidia/nemotron-3-super-120b-a12b") ||
-        (provider === "cloudflare" && configuredModelId === "@cf/nvidia/nemotron-3-120b-a12b"))
+        (provider === "cloudflare" && (
+          configuredModelId === "@cf/nvidia/nemotron-3-120b-a12b" ||
+          configuredModelId === "@cf/deepseek-ai/deepseek-v4-flash-0731"
+        )))
         ? "json_schema"
         : "json";
   return {
@@ -82,7 +94,7 @@ function mechanicalDefinition(
     limits: {
       // These are the current adapter's bounded request defaults, not a
       // provider entitlement or qualification claim.
-      contextTokens: 0,
+      contextTokens: contextTokensFor(provider, configuredModelId),
       maxOutputTokens: maxOutputTokensFor(provider, configuredModelId),
       maxMediaBytes: null,
       maxMediaParts: null,

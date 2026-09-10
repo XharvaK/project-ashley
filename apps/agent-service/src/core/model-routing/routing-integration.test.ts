@@ -50,11 +50,11 @@ describe("route-to-provider mapping", () => {
     expect(b.configuredModelId).toBe("nvidia/nemotron-3.5-lightning-30b-a3b");
   });
 
-  it("thought routes to the Cloudflare Nemotron 3 Super primary", () => {
+  it("thought routes to the Cloudflare DeepSeek V4 Flash primary", () => {
     const b = resolveRoute("thought");
     expect(b.route).toBe("thought");
     expect(b.provider).toBe("cloudflare");
-    expect(b.configuredModelId).toBe("@cf/nvidia/nemotron-3-120b-a12b");
+    expect(b.configuredModelId).toBe("@cf/deepseek-ai/deepseek-v4-flash-0731");
   });
 
   it.each([
@@ -69,12 +69,12 @@ describe("route-to-provider mapping", () => {
   });
 
   it.each(["thought_observation", "reflection_initiative"])(
-    "Thought-owned purpose %s routes to Cloudflare Super rather than utility Lightning",
+    "Thought-owned purpose %s routes to Cloudflare DeepSeek rather than utility Lightning",
     (purpose) => {
       const b = resolveRoute(purpose);
       expect(b.route).toBe("thought");
       expect(b.provider).toBe("cloudflare");
-      expect(b.configuredModelId).toBe("@cf/nvidia/nemotron-3-120b-a12b");
+      expect(b.configuredModelId).toBe("@cf/deepseek-ai/deepseek-v4-flash-0731");
     },
   );
 
@@ -87,8 +87,8 @@ describe("route-to-provider mapping", () => {
     expect(new Set(buckets)).toEqual(
       new Set(["nim:nvidia/nemotron-3.5-lightning-30b-a3b"]),
     );
-    expect(quotaBucketFor("cloudflare", "@cf/nvidia/nemotron-3-120b-a12b")).toBe(
-      "cloudflare:@cf/nvidia/nemotron-3-120b-a12b",
+    expect(quotaBucketFor("cloudflare", "@cf/deepseek-ai/deepseek-v4-flash-0731")).toBe(
+      "cloudflare:@cf/deepseek-ai/deepseek-v4-flash-0731",
     );
   });
 });
@@ -262,7 +262,7 @@ describe("shared NIM Lightning quota bucket at the dispatch layer", () => {
       const thoughtCompletedRows = Number(
         (
           db.prepare(
-            `SELECT COUNT(*) AS c FROM attention_requests WHERE quota_bucket = 'cloudflare:@cf/nvidia/nemotron-3-120b-a12b' AND outcome = 'completed'`,
+            `SELECT COUNT(*) AS c FROM attention_requests WHERE quota_bucket = 'cloudflare:@cf/deepseek-ai/deepseek-v4-flash-0731' AND outcome = 'completed'`,
           ).get() as { c: number }
         ).c,
       );

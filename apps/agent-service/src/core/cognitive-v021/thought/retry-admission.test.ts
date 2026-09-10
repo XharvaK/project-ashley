@@ -71,7 +71,7 @@ const capabilityReality: CapabilityReality = {
   approvedProjectIds: [],
 };
 
-const CLOUDFLARE_MODEL = "@cf/nvidia/nemotron-3-120b-a12b";
+const CLOUDFLARE_MODEL = "@cf/deepseek-ai/deepseek-v4-flash-0731";
 const CLOUDFLARE_BUCKET = `cloudflare:${CLOUDFLARE_MODEL}`;
 const SEEDED_CURRENT_TPM_USAGE = 14_000;
 const TPM_LIMIT = 65_536;
@@ -256,7 +256,7 @@ describe("v0.2.1 structural Thought retry admission", () => {
     expect(captured).toHaveLength(2);
     expect(captured[0]?.options.maxTokens).toBe(8_192);
     expect(captured[1]?.options.maxTokens).toBe(EXPECTED_RETRY_OUTPUT);
-    expect(captured[1]?.options.responseFormat).toBe("json_schema");
+    expect(captured[1]?.options.responseFormat).toBe("json_object");
     expect(captured[1]?.messages[1]?.content).toBe(captured[0]?.messages[1]?.content);
     expect(captured[1]?.messages[0]?.content).toContain("invalid_json");
     expect(captured[1]?.messages[0]?.content).toContain("schemaId=ashley.thought.semantic.v2.schema");
@@ -279,10 +279,11 @@ describe("v0.2.1 structural Thought retry admission", () => {
       CLOUDFLARE_MODEL,
       { kind: "reasoning_effort", value: "high" },
       {
-        kind: "native_json_schema",
-        ...structuredOutput,
-        bindingId: "compat_thought_cloudflare_nemotron_super_native_json_schema_v1",
-        wireFormat: "cloudflare_response_format_json_schema",
+        kind: "json_object_compatibility",
+        contractId: structuredOutput.contractId,
+        schemaId: structuredOutput.schemaId,
+        schemaFingerprint: structuredOutput.schemaFingerprint,
+        bindingId: "compat_thought_cloudflare_deepseek_v4_flash_json_object_v1",
       },
     );
     const estimatedRetry = estimateRequestTokens(captured[1]!.messages, {

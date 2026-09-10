@@ -198,7 +198,7 @@ export type ThoughtRouteQualification = Readonly<{
   schema: "ashley.thought.route_qualification.v1";
   candidate: {
     provider: "cloudflare";
-    model: "@cf/nvidia/nemotron-3-120b-a12b";
+    model: "@cf/deepseek-ai/deepseek-v4-flash-0731";
     occupantId: string;
   };
   capabilityFingerprint: string;

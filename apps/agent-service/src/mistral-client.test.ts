@@ -211,7 +211,7 @@ describe("mapMistralError", () => {
       expect(createNim).not.toHaveBeenCalled();
       expect(dispatch).toHaveBeenCalledTimes(1);
       expect(dispatch.mock.calls[0]?.[0]).toMatchObject({
-        modelId: "@cf/nvidia/nemotron-3-120b-a12b",
+        modelId: "@cf/deepseek-ai/deepseek-v4-flash-0731",
         fabricReasoning: { kind: "reasoning_effort", value: "high" },
         fabricStructuredOutput: {
           kind: "native_json_schema",
@@ -219,13 +219,12 @@ describe("mapMistralError", () => {
         },
       });
       expect(result).toMatchObject({
-        providerModel: "@cf/nvidia/nemotron-3-120b-a12b",
+        providerModel: "@cf/deepseek-ai/deepseek-v4-flash-0731",
         providerRequestId: "cloudflare-request-1",
         modelFabric: {
           receipt: { fallbackClass: "none", attempts: [{ provider: "cloudflare" }] },
           providerBoundaryControls: {
             maxTokens: 8192,
-            reasoningBudgetTokens: 1024,
           },
         },
       });
@@ -261,7 +260,7 @@ describe("mapMistralError", () => {
     if (reserved.kind !== "reserved") throw new Error("w7_test_reservation_missing");
     const dispatch = vi.fn().mockResolvedValue({
       text: "{}",
-      providerModel: "@cf/nvidia/nemotron-3-120b-a12b",
+      providerModel: "@cf/deepseek-ai/deepseek-v4-flash-0731",
       usage: { promptTokens: 2, completionTokens: 1 },
       finishReason: "stop",
     });

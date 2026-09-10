@@ -185,10 +185,10 @@ type Digest = ThoughtQualificationCaseResult["rawContentDigest"];
 
 const CANDIDATE = {
   provider: "cloudflare" as const,
-  model: "@cf/nvidia/nemotron-3-120b-a12b" as const,
+  model: "@cf/deepseek-ai/deepseek-v4-flash-0731" as const,
 };
 const ROUTE_ID = "thought";
-const MAX_THOUGHT_OUTPUT_TOKENS = 4_096;
+const MAX_THOUGHT_OUTPUT_TOKENS = 8_192;
 const MAX_STRUCTURAL_ATTEMPTS = 1 + 2;
 const WHOLE_THOUGHT_BUDGET_MS = thoughtResourcePolicyIdentity().ordinaryThoughtBudgetMs;
 const QUALIFICATION_SCHEMA = "ashley.thought.route_qualification.v1" as const;
@@ -276,7 +276,7 @@ type CandidatePreflight = Readonly<{
   policyRowId: string;
   occupantId: string;
   provider: "cloudflare";
-  model: "@cf/nvidia/nemotron-3-120b-a12b";
+  model: "@cf/deepseek-ai/deepseek-v4-flash-0731";
   logicalBindingId: string;
   schemaFingerprint: string;
   wireBindingId: string;

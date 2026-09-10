@@ -48,7 +48,7 @@ const capturedEffectIntent = {
 const baseGate: QualificationGateEvidence = {
   transport: "success",
   provider: "cloudflare",
-  model: "@cf/nvidia/nemotron-3-120b-a12b",
+  model: "@cf/deepseek-ai/deepseek-v4-flash-0731",
   kernelBinding: "PASS",
   fencing: "PASS",
   authorityReachability: "PASS",
@@ -57,9 +57,9 @@ const baseGate: QualificationGateEvidence = {
   elapsedMs: 1,
   outputTokens: 64,
   attempts: 1,
-  maxOutputTokens: 4096,
-  wireMode: "native_json_schema",
-  wireBindingId: "compat_thought_cloudflare_nemotron_super_native_json_schema_v1",
+  maxOutputTokens: 8192,
+  wireMode: "json_object_compatibility",
+  wireBindingId: "compat_thought_cloudflare_deepseek_v4_flash_json_object_v1",
   providerDeclaredEnforcement: "unavailable",
   capabilityFingerprint: "sha256:" + "a".repeat(64),
   responseDiagnostics: {
@@ -70,7 +70,7 @@ const baseGate: QualificationGateEvidence = {
     finalTextBytes: Buffer.byteLength(validAbstain, "utf8"),
     finishReason: "stop",
     finishReasonClass: "STOP",
-    outputTokenLimit: 4096,
+    outputTokenLimit: 8192,
     outputTokens: 64,
     reasoningTokens: null,
     extractionFailure: "none",
@@ -82,7 +82,7 @@ describe("successor Thought qualification", () => {
     const result = await runThoughtCapabilityQualification({
       environment: "fixture",
       provider: "cloudflare",
-      model: "@cf/nvidia/nemotron-3-120b-a12b",
+      model: "@cf/deepseek-ai/deepseek-v4-flash-0731",
       allowlistedReferences: ["turn-1"],
       runId: "w2-test-fixture",
     });
@@ -163,7 +163,7 @@ describe("successor Thought qualification", () => {
       const result = await runThoughtCapabilityQualification({
         environment: "fixture",
         provider: "cloudflare",
-        model: "@cf/nvidia/nemotron-3-120b-a12b",
+        model: "@cf/deepseek-ai/deepseek-v4-flash-0731",
         allowlistedReferences: ["turn-1"],
         runId: "w2-test-no-network",
       });
@@ -661,7 +661,7 @@ describe("successor Thought qualification", () => {
       const result = await runThoughtCapabilityQualification({
         environment: "isolated_live",
         provider: "cloudflare",
-        model: "@cf/nvidia/nemotron-3-120b-a12b",
+        model: "@cf/deepseek-ai/deepseek-v4-flash-0731",
         candidateSha: checkoutIdentity,
         allowlistedReferences: [],
         noFallback: true,
@@ -717,9 +717,9 @@ function createPacingHarness() {
   };
   const fakeCompletion = {
     text: validAbstain,
-    model: "@cf/nvidia/nemotron-3-120b-a12b",
-    modelAlias: "@cf/nvidia/nemotron-3-120b-a12b",
-    resolvedModelId: "@cf/nvidia/nemotron-3-120b-a12b",
+        model: "@cf/deepseek-ai/deepseek-v4-flash-0731",
+        modelAlias: "@cf/deepseek-ai/deepseek-v4-flash-0731",
+        resolvedModelId: "@cf/deepseek-ai/deepseek-v4-flash-0731",
     usage: { promptTokens: 128, completionTokens: 64 },
     finishReason: "stop",
     responseDiagnostics: null,
@@ -756,7 +756,7 @@ async function runIsolatedLiveForPacing(input: {
     const result = await runThoughtCapabilityQualification({
       environment: "isolated_live",
       provider: "cloudflare",
-      model: "@cf/nvidia/nemotron-3-120b-a12b",
+      model: "@cf/deepseek-ai/deepseek-v4-flash-0731",
       candidateSha: checkoutIdentity,
       allowlistedReferences: ["turn-1"],
       noFallback: true,
@@ -802,7 +802,7 @@ describe("w2 campaign pacing repair", () => {
     const result = await runThoughtCapabilityQualification({
       environment: "isolated_live",
       provider: "cloudflare",
-      model: "@cf/nvidia/nemotron-3-120b-a12b",
+      model: "@cf/deepseek-ai/deepseek-v4-flash-0731",
       allowlistedReferences: [],
       noFallback: true,
       interLiveCaseDelayMs: -1,
@@ -911,7 +911,7 @@ describe("w2 campaign pacing repair", () => {
     const result = await runThoughtCapabilityQualification({
       environment: "fixture",
       provider: "cloudflare",
-      model: "@cf/nvidia/nemotron-3-120b-a12b",
+      model: "@cf/deepseek-ai/deepseek-v4-flash-0731",
       allowlistedReferences: ["turn-1"],
       runId: "w2-test-pacing-fixture",
       interLiveCaseDelayMs: 65000,

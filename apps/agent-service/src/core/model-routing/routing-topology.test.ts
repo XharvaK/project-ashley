@@ -16,7 +16,7 @@ import { routeBinding } from "./registry.js";
 
 const LIGHTNING = "nvidia/nemotron-3.5-lightning-30b-a3b";
 const ULTRA = "nvidia/nemotron-3-ultra-550b-a55b";
-const THOUGHT_MODEL = "@cf/nvidia/nemotron-3-120b-a12b";
+const THOUGHT_MODEL = "@cf/deepseek-ai/deepseek-v4-flash-0731";
 const MISTRAL_SMALL = "mistral-small-2603";
 
 afterEach(() => {
@@ -91,7 +91,7 @@ describe("Phase 5 successor routing topology", () => {
     });
   });
 
-  it("binds every Cloudflare Thought row to native schema enforcement", () => {
+  it("binds every Cloudflare Thought row to JSON_OBJECT compatibility enforcement", () => {
     const thoughtRows = currentPortfolio().rows.filter((row) =>
       ["thought", "thought_observation", "reflection_initiative"].includes(
         row.logicalRole,
@@ -106,8 +106,7 @@ describe("Phase 5 successor routing topology", () => {
         reasoningPolicy: "high",
         effectiveReasoning: "high",
         structuredOutputBinding: {
-          mode: "native_json_schema",
-          wireFormat: "cloudflare_response_format_json_schema",
+          mode: "json_object_compatibility",
         },
       });
     }

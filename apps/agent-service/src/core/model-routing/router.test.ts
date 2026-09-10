@@ -39,12 +39,12 @@ describe("model-routing router", () => {
     expect(resolveRoute("thought_observation")).toMatchObject({
       route: "thought",
       provider: "cloudflare",
-      configuredModelId: "@cf/nvidia/nemotron-3-120b-a12b",
+      configuredModelId: "@cf/deepseek-ai/deepseek-v4-flash-0731",
     });
     expect(resolveRoute("reflection_initiative")).toMatchObject({
       route: "thought",
       provider: "cloudflare",
-      configuredModelId: "@cf/nvidia/nemotron-3-120b-a12b",
+      configuredModelId: "@cf/deepseek-ai/deepseek-v4-flash-0731",
     });
   });
 
@@ -99,7 +99,7 @@ describe("model-routing router", () => {
       expect.arrayContaining(["provider_id", "route_alias", "quota_bucket"]),
     );
     expect(routeBinding("thought").provider).toBe("cloudflare");
-    expect(routeBinding("thought").configuredModelId).toBe("@cf/nvidia/nemotron-3-120b-a12b");
+    expect(routeBinding("thought").configuredModelId).toBe("@cf/deepseek-ai/deepseek-v4-flash-0731");
     db.close();
     continuity.close();
   });

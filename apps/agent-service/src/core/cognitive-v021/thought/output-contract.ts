@@ -253,6 +253,45 @@ function speechForms(settlement: SchemaRecord): string[] {
   });
 }
 
+function rootBranchKind(branch: unknown): string {
+  const kind = property(record(branch), "kind").const;
+  if (typeof kind !== "string") throw new Error("thought_schema_branch_kind_missing");
+  return kind;
+}
+
+function rootFieldForms(): string[] {
+  const branches = record(THOUGHT_OUTPUT_SCHEMA).oneOf;
+  if (!Array.isArray(branches)) return [];
+  return branches.map((branch) => {
+    const shape = record(branch);
+    return `${rootBranchKind(shape)} fields=${JSON.stringify(Object.keys(record(shape.properties)))} required=${JSON.stringify(requiredFields(shape))}`;
+  });
+}
+
+const DEEPSEEK_JSON_OBJECT_PROTOCOL = [
+  "DeepSeek JSON_OBJECT compatibility protocol for Ashley Thought.",
+  "Return exactly one JSON object and no Markdown, prose, code fence, or second object.",
+  "Choose exactly one canonical semantic branch: settlement, observation_intent, effect_intent, or abstain.",
+  "The branch field kind is mandatory and must be one of those four exact strings.",
+  "Branch exclusivity is mandatory: emit only fields belonging to the selected branch; omit every field belonging exclusively to every other branch.",
+  "Canonical branch fields and required fields, derived from the current Ashley semantic schema:",
+  ...rootFieldForms(),
+  "If kind=settlement, emit only the settlement fields listed above.",
+  "If kind=observation_intent, emit only the observation_intent fields listed above.",
+  "If kind=effect_intent, emit only the effect_intent fields listed above.",
+  "If kind=abstain, emit only the abstain fields listed above.",
+  "The following examples are synthetic, generic, fixture-independent, owner-independent, and shape-only. They do not answer the supplied situation and must not be copied as its semantic content:",
+  'settlement example: {"kind":"settlement","speech":{"mode":"none"}}',
+  'observation_intent example: {"kind":"observation_intent","operationKind":"project.read_file","request":{"projectId":"example-project","path":"example.txt"},"purpose":"obtain an example read-only observation","evidenceNeed":"example evidence","existingRefs":[]}',
+  'effect_intent example: {"kind":"effect_intent","operationKind":"workspace.verify","request":{"projectId":"example-project"},"purpose":"obtain an example governed verification","expectedOutcome":"an example verification result","existingRefs":[]}',
+  'abstain example: {"kind":"abstain","reason":"insufficient_evidence","explanation":"an example required source is unavailable","evidenceRefs":[]}',
+  "These examples teach output shape only. Decide the branch and every field value from the supplied Ashley Thought context.",
+].join("\n");
+
+export function thoughtOutputDeepSeekJsonObjectInstruction(): string {
+  return DEEPSEEK_JSON_OBJECT_PROTOCOL;
+}
+
 export type ConstrainedThoughtOutputSchema = Readonly<{
   schema: Readonly<Record<string, unknown>>;
   namespaceConstraintFingerprint: `sha256:${string}`;

@@ -36,7 +36,7 @@ describe("TARGET portfolio + token envelope reconciliation", () => {
     const expression = current.rows.find((row) => row.policyRowId === "mfr_expression_compat_v1")!;
     expect(thought.occupants[0]).toMatchObject({
       provider: "cloudflare",
-      configuredModelId: "@cf/nvidia/nemotron-3-120b-a12b",
+      configuredModelId: "@cf/deepseek-ai/deepseek-v4-flash-0731",
       reasoningPolicy: "high",
       effectiveReasoning: "high",
     });
@@ -57,7 +57,7 @@ describe("TARGET portfolio + token envelope reconciliation", () => {
     expect(EXPRESSION_PROACTIVE_MAX_OUTPUT_TOKENS).toBe(500);
     expect(current.routeBindings.thought).toMatchObject({
       provider: "cloudflare",
-      configuredModelId: "@cf/nvidia/nemotron-3-120b-a12b",
+      configuredModelId: "@cf/deepseek-ai/deepseek-v4-flash-0731",
     });
     expect(current.routeBindings.ashley_expression).toMatchObject({
       provider: "nim",

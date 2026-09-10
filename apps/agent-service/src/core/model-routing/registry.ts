@@ -31,7 +31,7 @@ export const ROUTE_BINDINGS: readonly RouteBinding[] = [
   {
     route: "thought",
     provider: "cloudflare",
-    configuredModelId: "@cf/nvidia/nemotron-3-120b-a12b",
+    configuredModelId: "@cf/deepseek-ai/deepseek-v4-flash-0731",
     contextProfile: "thought_summary",
     enabled: true,
   },

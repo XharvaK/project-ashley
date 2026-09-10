@@ -20,8 +20,12 @@ import type {
 } from "../types.js";
 import type { TrustedStructuredOutputControl } from "../../model-fabric/types.js";
 import { wireEvidenceFor } from "../../model-fabric/wire-evidence.js";
+import { thoughtOutputDeepSeekJsonObjectInstruction } from "../../cognitive-v021/thought/output-contract.js";
 
 const CLOUDFLARE_MODEL = "@cf/nvidia/nemotron-3-120b-a12b";
+const DEEPSEEK_THOUGHT_MODEL = "@cf/deepseek-ai/deepseek-v4-flash-0731";
+const THOUGHT_SEMANTIC_CONTRACT_ID = "ashley.thought.semantic.v2";
+const THOUGHT_SEMANTIC_SCHEMA_ID = "ashley.thought.semantic.v2.schema";
 const CLOUDFLARE_ERROR_CODE_BOUNDARY = "__ashley_cloudflare_error_code" as const;
 const CLOUDFLARE_ERROR_CLASS_BOUNDARY = "__ashley_cloudflare_error_class" as const;
 const CLOUDFLARE_ERROR_MESSAGE_BOUNDARY = "__ashley_cloudflare_error_message" as const;
@@ -57,6 +61,32 @@ type CloudflareResponse = {
   usage?: CloudflareUsage;
   model?: unknown;
 };
+
+function isDeepSeekThoughtJsonObject(
+  model: string,
+  structuredOutput?: TrustedStructuredOutputControl,
+): boolean {
+  return model === DEEPSEEK_THOUGHT_MODEL
+    && structuredOutput?.kind === "json_object_compatibility"
+    && structuredOutput.contractId === THOUGHT_SEMANTIC_CONTRACT_ID
+    && structuredOutput.schemaId === THOUGHT_SEMANTIC_SCHEMA_ID;
+}
+
+function messagesForCloudflareWire(
+  messages: ChatMessage[],
+  model: string,
+  structuredOutput?: TrustedStructuredOutputControl,
+): ChatMessage[] {
+  if (!isDeepSeekThoughtJsonObject(model, structuredOutput)) return messages;
+  const protocol = thoughtOutputDeepSeekJsonObjectInstruction();
+  const systemIndex = messages.findIndex((message) => message.role === "system");
+  if (systemIndex < 0) {
+    return [{ role: "system", content: protocol }, ...messages];
+  }
+  return messages.map((message, index) => index === systemIndex
+    ? { ...message, content: `${protocol}\n\n${message.content}` }
+    : message);
+}
 
 export type CloudflareFetch = (
   input: RequestInfo | URL,
@@ -290,9 +320,11 @@ function buildRequestBody(
   fabricReasoning?: TrustedReasoningControl,
   fabricStructuredOutput?: TrustedStructuredOutputControl,
 ): Record<string, unknown> {
+  const wireMessages = messagesForCloudflareWire(messages, model, fabricStructuredOutput);
+  const deepSeekThoughtJsonObject = isDeepSeekThoughtJsonObject(model, fabricStructuredOutput);
   const body: Record<string, unknown> = {
     model,
-    messages: messages.map((message) => ({
+    messages: wireMessages.map((message) => ({
       role: message.role,
       content: message.imageUrls?.length
         ? [
@@ -327,7 +359,7 @@ function buildRequestBody(
     }
   }
 
-  if (fabricStructuredOutput?.kind === "json_object_compatibility") {
+  if (deepSeekThoughtJsonObject || fabricStructuredOutput?.kind === "json_object_compatibility") {
     body.response_format = { type: "json_object" };
   } else if (fabricStructuredOutput?.kind === "native_json_schema") {
     if (fabricStructuredOutput.wireFormat !== "cloudflare_response_format_json_schema") {

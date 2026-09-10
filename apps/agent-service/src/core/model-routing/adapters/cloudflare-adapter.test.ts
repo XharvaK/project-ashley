@@ -13,11 +13,15 @@ import { providerHttpStatusFromBoundary } from "../types.js";
 import {
   THOUGHT_OUTPUT_SCHEMA,
   THOUGHT_OUTPUT_SCHEMA_FINGERPRINT,
+  thoughtOutputDeepSeekJsonObjectInstruction,
 } from "../../cognitive-v021/thought/output-contract.js";
+import { parseThoughtSemanticOutput } from "../../cognitive-v021/thought/parse.js";
+import { validateThoughtOutputSchema } from "../../cognitive-v021/qualification/thought-capability-qualification.js";
 
 const originalToken = env.cloudflareApiToken;
 const originalAccount = env.cloudflareAccountId;
 const MODEL = "@cf/nvidia/nemotron-3-120b-a12b";
+const DEEPSEEK_MODEL = "@cf/deepseek-ai/deepseek-v4-flash-0731";
 const messages: ChatMessage[] = [{ role: "user", content: "synthetic qualification input" }];
 
 afterEach(() => {
@@ -47,6 +51,14 @@ const structuredOutput = {
   bindingId: "compat_thought_cloudflare_nemotron_super_native_json_schema_v1",
   wireFormat: "cloudflare_response_format_json_schema" as const,
   schema: THOUGHT_OUTPUT_SCHEMA,
+};
+
+const deepseekStructuredOutput = {
+  kind: "json_object_compatibility" as const,
+  contractId: "ashley.thought.semantic.v2",
+  schemaId: "ashley.thought.semantic.v2.schema",
+  schemaFingerprint: THOUGHT_OUTPUT_SCHEMA_FINGERPRINT,
+  bindingId: "compat_thought_cloudflare_deepseek_v4_flash_json_object_v1",
 };
 
 describe("cloudflare-adapter", () => {
@@ -222,5 +234,123 @@ describe("cloudflare-adapter", () => {
     expect((body.response_format as { json_schema?: { schema?: unknown } }).json_schema?.schema)
       .toEqual(structuredOutput.schema);
     expect(cloudflareRequestWireAdditionalBytes({ body })).toBeGreaterThan(0);
+  });
+
+  it("uses JSON_OBJECT with a static schema-derived canonical protocol", () => {
+    const body = buildCloudflareRequestBody(
+      messages,
+      { maxTokens: 8192, temperature: 1 },
+      DEEPSEEK_MODEL,
+      { kind: "reasoning_effort", value: "high" },
+      deepseekStructuredOutput,
+    );
+    expect(body.response_format).toEqual({ type: "json_object" });
+    const wireMessages = body.messages as Array<{ role: string; content: string }>;
+    const protocol = thoughtOutputDeepSeekJsonObjectInstruction();
+    expect(wireMessages[0]).toMatchObject({
+      role: "system",
+      content: expect.stringContaining(protocol),
+    });
+    expect(wireMessages[0]?.content).toContain("settlement");
+    expect(wireMessages[0]?.content).toContain("observation_intent");
+    expect(wireMessages[0]?.content).toContain("effect_intent");
+    expect(wireMessages[0]?.content).toContain("abstain");
+    expect(wireMessages[0]?.content).toContain("settlement example:");
+    expect(wireMessages[0]?.content).not.toContain("qualification-fixture");
+    expect(wireMessages[0]?.content).not.toContain("README.md");
+    expect(thoughtOutputDeepSeekJsonObjectInstruction()).toBe(
+      thoughtOutputDeepSeekJsonObjectInstruction(),
+    );
+    for (const branchValue of THOUGHT_OUTPUT_SCHEMA.oneOf as Array<Record<string, unknown>>) {
+      const properties = branchValue.properties as Record<string, unknown>;
+      const kind = (properties.kind as { const: string }).const;
+      const required = branchValue.required as string[];
+      expect(protocol).toContain(
+        `${kind} fields=${JSON.stringify(Object.keys(properties))} required=${JSON.stringify(required)}`,
+      );
+    }
+    expect(THOUGHT_OUTPUT_SCHEMA).toHaveProperty("oneOf");
+    expect(body).not.toHaveProperty("response_format.json_schema");
+  });
+
+  it("returns DeepSeek semantic content unchanged and records JSON_OBJECT compatibility", async () => {
+    env.cloudflareApiToken = "test-token";
+    env.cloudflareAccountId = "account-test";
+    const semantic = JSON.stringify({
+      kind: "effect_intent",
+      operationKind: "workspace.verify",
+      request: { version: 2, operation: "workspace.verify" },
+      purpose: "run the approved verification",
+      expectedOutcome: "the verification result is reported",
+      existingRefs: ["turn-1"],
+    });
+    const adapter = createCloudflareAdapter(async () => fakeResponse({
+      id: "cf-deepseek-request-1",
+      model: DEEPSEEK_MODEL,
+      choices: [{ message: { content: semantic }, finish_reason: "stop" }],
+    }));
+
+    const result = await adapter.dispatch({
+      messages,
+      modelId: DEEPSEEK_MODEL,
+      options: { maxTokens: 8192, temperature: 1 },
+      fabricReasoning: { kind: "reasoning_effort", value: "high" },
+      fabricStructuredOutput: deepseekStructuredOutput,
+    });
+
+    expect(result.text).toBe(semantic);
+    expect(parseThoughtSemanticOutput(result.text, new Set(["turn-1"]))).toMatchObject({ ok: true });
+    expect(result.wireEvidence).toMatchObject({
+      wireFormat: "json_object",
+      emittedEnforcementMode: "json_object_compatibility",
+      bindingId: deepseekStructuredOutput.bindingId,
+    });
+  });
+
+  it("keeps canonical parser and validator rejection behavior for JSON_OBJECT content", () => {
+    const valid = {
+      kind: "abstain",
+      reason: "insufficient_evidence",
+      explanation: "The required source is unavailable.",
+      evidenceRefs: [],
+    };
+    const polluted = {
+      kind: "observation_intent",
+      operationKind: "project.read_file",
+      request: { projectId: "example-project", path: "example.txt" },
+      purpose: "obtain an observation",
+      evidenceNeed: "the requested evidence",
+      existingRefs: [],
+      subscriptionDeltas: [{ op: "cancel", target: "turn-1" }],
+    };
+    const missing = {
+      kind: "observation_intent",
+      operationKind: "project.read_file",
+      request: { projectId: "example-project", path: "example.txt" },
+      purpose: "obtain an observation",
+      existingRefs: [],
+    };
+    const unknown = { ...valid, unexpected: true };
+
+    const validParsed = parseThoughtSemanticOutput(JSON.stringify(valid), new Set());
+    expect(validParsed).toMatchObject({ ok: true });
+    expect(validateThoughtOutputSchema(validParsed.ok ? validParsed.value : null)).toMatchObject({ ok: true });
+
+    const pollutedParsed = parseThoughtSemanticOutput(JSON.stringify(polluted), new Set());
+    expect(pollutedParsed).toMatchObject({ ok: false });
+    expect(validateThoughtOutputSchema(polluted)).toMatchObject({ ok: false });
+
+    const missingParsed = parseThoughtSemanticOutput(JSON.stringify(missing), new Set());
+    expect(missingParsed).toMatchObject({ ok: false });
+    expect(validateThoughtOutputSchema(missing)).toMatchObject({ ok: false });
+
+    const unknownParsed = parseThoughtSemanticOutput(JSON.stringify(unknown), new Set());
+    expect(unknownParsed).toMatchObject({ ok: false, code: "unknown_field" });
+    expect(validateThoughtOutputSchema(unknown)).toMatchObject({ ok: false });
+
+    expect(parseThoughtSemanticOutput("{malformed", new Set())).toMatchObject({
+      ok: false,
+      code: "invalid_json",
+    });
   });
 });
