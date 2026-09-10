@@ -23,16 +23,109 @@ export const USER_FACING_THOUGHT_FAILURE_CODES = [
   "STRUCTURAL_RETRY_EXHAUSTED",
   "LOCAL_DISPATCH_FAILURE",
   "CANCELLED",
+  "SPEECH_FIDELITY_REJECTED",
+  "AUTHORITY_REJECTED",
+  "THOUGHT_BUDGET_EXHAUSTED",
+  "OPERATION_DISPATCH_FAILED",
+  "PUBLICATION_PERSISTENCE_FAILED",
   "UNKNOWN",
 ] as const;
 
 export type UserFacingThoughtFailureCode = typeof USER_FACING_THOUGHT_FAILURE_CODES[number];
 
-export function classifyThoughtFailureCode(input: {
-  reason: string;
-  failureCode?: string | null;
-}): UserFacingThoughtFailureCode {
-  const failureCode = input.failureCode?.trim().toLowerCase();
+/**
+ * FAILURE-TRUTH-COMPLETENESS-01: typed terminal families.
+ *
+ * Mechanical infrastructure classification only. Thought remains the sole
+ * semantic author. Each supported reachable notice-emitting family maps to
+ * exactly one Owner-facing presentation code. Provider dispatch/outcome
+ * truth and publication/delivery truth remain independent dimensions and
+ * are never derived from (or into) the local terminal cause.
+ */
+export const THOUGHT_TERMINAL_FAMILIES = [
+  "thought_deadline",
+  "provider",
+  "allocation",
+  "structural_exhausted",
+  "structural_invalid",
+  "authority",
+  "budget_exhausted",
+  "operation_dispatch",
+  "fidelity",
+  "publication_persistence",
+  "cancelled",
+  "foreign",
+] as const;
+
+export type ThoughtTerminalFamily = typeof THOUGHT_TERMINAL_FAMILIES[number];
+
+export const MAX_TERMINAL_CODES = 8 as const;
+const MAX_TERMINAL_CODE_LENGTH = 128 as const;
+const MAX_TERMINAL_STAGE_LENGTH = 64 as const;
+
+function sanitizeTerminalCode(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return trimmed.slice(0, MAX_TERMINAL_CODE_LENGTH);
+}
+
+function sanitizeTerminalCodes(values: readonly unknown[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values) {
+    const code = sanitizeTerminalCode(value);
+    if (!code || seen.has(code)) continue;
+    seen.add(code);
+    out.push(code);
+    if (out.length >= MAX_TERMINAL_CODES) break;
+  }
+  return out;
+}
+
+function sanitizeTerminalStage(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim().slice(0, MAX_TERMINAL_STAGE_LENGTH);
+  return trimmed ? trimmed : undefined;
+}
+
+export type ThoughtTerminalDescriptor = Readonly<{
+  /** Proven local terminal family. Determines Owner presentation. */
+  family: ThoughtTerminalFamily;
+  /** Exact bounded child reasons/codes. Retained diagnostically; never parsed for classification. */
+  codes: readonly string[];
+  /** Terminal stage (e.g. provider_dispatch, parser, allocation). Diagnostic only. */
+  stage?: string;
+  /**
+   * Normalized provider failure class. Only the provider family reads this
+   * for classification. All other families ignore incidental provider detail
+   * (retained diagnostically, never overriding the proven local family).
+   */
+  providerFailureClass?: string | null;
+}>;
+
+export function makeThoughtTerminal(
+  family: ThoughtTerminalFamily,
+  options: {
+    codes?: readonly unknown[];
+    stage?: unknown;
+    providerFailureClass?: string | null;
+  } = {},
+): ThoughtTerminalDescriptor {
+  return {
+    family,
+    codes: sanitizeTerminalCodes(options.codes ?? []),
+    ...(sanitizeTerminalStage(options.stage) !== undefined
+      ? { stage: sanitizeTerminalStage(options.stage)! }
+      : {}),
+    ...(options.providerFailureClass !== undefined
+      ? { providerFailureClass: sanitizeTerminalCode(options.providerFailureClass) }
+      : {}),
+  };
+}
+
+function classifyProviderFailureClass(failureClass?: string | null): UserFacingThoughtFailureCode {
+  const failureCode = typeof failureClass === "string" ? failureClass.trim().toLowerCase() : "";
   switch (failureCode) {
     case "rate_limited":
     case "quota_exhausted":
@@ -76,28 +169,162 @@ export function classifyThoughtFailureCode(input: {
     case "dispatch_data_plane_missing":
       return "LOCAL_DISPATCH_FAILURE";
     default:
-      break;
-  }
-
-  switch (input.reason) {
-    case "thought_deadline":
-      return "THOUGHT_DEADLINE_EXCEEDED";
-    case "malformed":
-      return "STRUCTURAL_RETRY_EXHAUSTED";
-    case "cancelled":
-      return "CANCELLED";
-    case "context_allocation_required_overflow":
-      return "LOCAL_DISPATCH_FAILURE";
-    default:
       return "UNKNOWN";
   }
+}
+
+/**
+ * Total mechanical presentation policy over the typed terminal domain.
+ * Supported known family -> bounded Owner code. Foreign -> UNKNOWN.
+ * Incidental provider detail never overrides a proven local family.
+ */
+export function classifyThoughtTerminal(
+  descriptor: ThoughtTerminalDescriptor,
+): UserFacingThoughtFailureCode {
+  switch (descriptor.family) {
+    case "thought_deadline":
+      return "THOUGHT_DEADLINE_EXCEEDED";
+    case "provider":
+      return classifyProviderFailureClass(descriptor.providerFailureClass);
+    case "allocation":
+      return "LOCAL_DISPATCH_FAILURE";
+    case "structural_exhausted":
+      return "STRUCTURAL_RETRY_EXHAUSTED";
+    case "structural_invalid":
+      return "STRUCTURED_OUTPUT_INVALID";
+    case "authority":
+      return "AUTHORITY_REJECTED";
+    case "budget_exhausted":
+      return "THOUGHT_BUDGET_EXHAUSTED";
+    case "operation_dispatch":
+      return "OPERATION_DISPATCH_FAILED";
+    case "fidelity":
+      return "SPEECH_FIDELITY_REJECTED";
+    case "publication_persistence":
+      return "PUBLICATION_PERSISTENCE_FAILED";
+    case "cancelled":
+      return "CANCELLED";
+    case "foreign":
+      return "UNKNOWN";
+    default: {
+      const exhaustive: never = descriptor.family;
+      return exhaustive;
+    }
+  }
+}
+
+// Bounded legacy-string recognition for the pre-typed seam. The typed
+// descriptor path above is primary; this keeps old string callers total
+// without requiring comma-permutation keys.
+const FIDELITY_FAILURE_STRINGS = new Set([
+  "DRAFT_COMMITMENT_CONFLICT",
+  "EMPTY_COMMITMENTS_WITH_DRAFT",
+  "DRAFT_REQUIRED",
+  "NONE_SURFACE_FORBIDDEN",
+  "MUST_SAY_MISSING",
+  "MUST_NOT_PRESENT",
+  "UNWITNESSED_HIGH_RISK_CLAIM",
+]);
+
+const AUTHORITY_FAILURE_STRINGS = new Set([
+  "CURRENTNESS_UNVERIFIED",
+  "RECEIPT_REQUIRED",
+  "RECEIPT_CONTRADICTS_CLAIM",
+  "IN_FLIGHT_UNKNOWN",
+  "CAPABILITY_UNAVAILABLE",
+  "EFFECT_NOT_AUTHORIZED",
+  "RELATIONAL_BOUNDARY",
+  "RELATIONAL_WITHDRAWAL",
+  "SOURCE_CLASS_INSUFFICIENT",
+  "STALE_STATE",
+  "IDENTITY_MUTATION_FORBIDDEN",
+  "SECRET_OR_CREDENTIAL",
+  "REVISION_BUDGET_EXHAUSTED",
+  "DISPATCH_EPOCH_CHANGED",
+  "STALE_GENERATION",
+  "DRAFT_COMMITMENT_CONFLICT",
+  "EMPTY_COMMITMENTS_WITH_DRAFT",
+  "AUTHORITY_TRANSITION_ACTIVE",
+  "AUTHORITY_PACK_INCOMPLETE",
+  "AUTHORITY_VECTOR_STALE",
+  "DERIVED_SCOPE_INVALIDATED",
+  "DERIVED_SCOPE_UNAVAILABLE",
+  "OPERATIONAL_CLAIM_STATE_MISMATCH",
+  "OPERATIONAL_CLAIM_EFFECTREF_UNKNOWN",
+]);
+
+function classifyLegacyReason(reason: string): UserFacingThoughtFailureCode | null {
+  const trimmed = reason.trim();
+  if (!trimmed) return null;
+  // Comma-joined authority/dispatch sets: a known parent family stays known
+  // even when an unfamiliar child is retained. Split is only for legacy
+  // recognition; the typed path never parses joined strings.
+  if (trimmed.includes(",")) {
+    const parts = trimmed.split(",").map((part) => part.trim()).filter((part) => part.length > 0);
+    if (parts.length > 0 && parts.some((part) => AUTHORITY_FAILURE_STRINGS.has(part))) {
+      return "AUTHORITY_REJECTED";
+    }
+    return null;
+  }
+  switch (trimmed) {
+    case "thought_deadline":
+      return "THOUGHT_DEADLINE_EXCEEDED";
+    case "context_allocation_required_overflow":
+    case "capacity_deferred":
+      return "LOCAL_DISPATCH_FAILURE";
+    case "pass_exhausted":
+    case "revision_exhausted":
+      return "THOUGHT_BUDGET_EXHAUSTED";
+    case "observation_unavailable":
+    case "effect_unavailable":
+      return "OPERATION_DISPATCH_FAILED";
+    case "authority_rejected":
+    case "effect_not_authorized":
+      return "AUTHORITY_REJECTED";
+    case "publication_rejected_diagnostic_persistence_failed":
+      return "PUBLICATION_PERSISTENCE_FAILED";
+    case "structural_correction_scope_violation":
+    case "malformed":
+      // Single malformed output without independently proven exhaustion is
+      // structured-output-invalid, not retry-exhausted. Proven exhaustion
+      // uses the typed structural_exhausted family.
+      return "STRUCTURED_OUTPUT_INVALID";
+    case "cancelled":
+      return "CANCELLED";
+    default:
+      break;
+  }
+  if (FIDELITY_FAILURE_STRINGS.has(trimmed)) return "SPEECH_FIDELITY_REJECTED";
+  if (AUTHORITY_FAILURE_STRINGS.has(trimmed)) return "AUTHORITY_REJECTED";
+  return null;
+}
+
+export function classifyThoughtFailureCode(input: {
+  reason: string;
+  failureCode?: string | null;
+}): UserFacingThoughtFailureCode {
+  // Local terminal family takes precedence over incidental provider detail.
+  // A proven local deadline/authority/fidelity/budget family must not become
+  // provider-unavailable (or UNKNOWN) because of accompanying metadata.
+  const legacy = classifyLegacyReason(input.reason);
+  if (legacy !== null) return legacy;
+
+  return classifyProviderFailureClass(input.failureCode);
 }
 
 export function formatThoughtFailureNotice(input: {
   reason: string;
   failureCode?: string | null;
+  terminal?: ThoughtTerminalDescriptor;
 }): string {
-  return `${THOUGHT_UNAVAILABLE_NOTICE} Error code: ${classifyThoughtFailureCode(input)}`;
+  const code = input.terminal
+    ? classifyThoughtTerminal(input.terminal)
+    : classifyThoughtFailureCode(input);
+  return `${THOUGHT_UNAVAILABLE_NOTICE} Error code: ${code}`;
+}
+
+export function formatThoughtTerminalNotice(terminal: ThoughtTerminalDescriptor): string {
+  return `${THOUGHT_UNAVAILABLE_NOTICE} Error code: ${classifyThoughtTerminal(terminal)}`;
 }
 
 export type EmitInfrastructureNoticeInput = {
@@ -109,6 +336,13 @@ export type EmitInfrastructureNoticeInput = {
   generation?: Generation | null;
   reason: string;
   failureCode?: string | null;
+  /**
+   * Typed terminal descriptor for presentation. When present, Owner-facing
+   * classification uses the proven family (never comma-string parsing).
+   * `reason` remains the exact legacy marker for the notice key and C3
+   * behavior preservation.
+   */
+  terminal?: ThoughtTerminalDescriptor;
   origin?: OutboxOrigin;
   trigger?: DeliveryIntent["trigger"];
   deliveryLane?: DeliveryIntent["deliveryLane"];
@@ -217,7 +451,14 @@ export function emitInfrastructureNotice(
   const cycle = input.cycleId ?? "none";
   const generation = input.generation == null ? "none" : String(input.generation);
   const reason = input.reason.trim() || "unavailable";
-  const noticeKey = `thought_failure:${input.conversationId}:${cycle}:${generation}:${reason}`;
+  // Preserve the exact legacy reason in the key for C3/key behavior, plus a
+  // deterministic bounded suffix of the structured child codes when a typed
+  // terminal is present. Sorting makes the key permutation-insensitive;
+  // classification never parses this string.
+  const terminalSuffix = input.terminal && input.terminal.codes.length > 0
+    ? `:${[...new Set(input.terminal.codes)].sort().join("+").slice(0, 256)}`
+    : "";
+  const noticeKey = `thought_failure:${input.conversationId}:${cycle}:${generation}:${reason}${terminalSuffix}`;
   const existing = getSystemNoticeByKey(db, noticeKey);
   if (existing) return existing;
 
@@ -235,7 +476,7 @@ export function emitInfrastructureNotice(
   };
   const status = origin === "shadow" ? "suppressed_shadow" : "pending";
   const provisionalKey = `system:pending:${randomUUID()}`;
-  const noticeText = formatThoughtFailureNotice({ reason, failureCode: input.failureCode });
+  const noticeText = formatThoughtFailureNotice({ reason, failureCode: input.failureCode, terminal: input.terminal });
   const inserted = db.prepare(
     `INSERT INTO system_notice_outbox
        (notice_key, projection_key, cycle_id, conversation_id, notice_text,

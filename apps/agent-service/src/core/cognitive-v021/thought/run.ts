@@ -116,7 +116,11 @@ import type {
   WireDispatchEvidence,
 } from "../../model-routing/types.js";
 import { fidelityCheck } from "../speech/fidelity.js";
-import { emitInfrastructureNotice } from "../speech/infrastructure-notice.js";
+import {
+  emitInfrastructureNotice,
+  makeThoughtTerminal,
+  type ThoughtTerminalDescriptor,
+} from "../speech/infrastructure-notice.js";
 import { recordThoughtC3TerminalFailure } from "../failure/c3-recorder.js";
 import { renderForTransport } from "../../conversation/rendering.js";
 import {
@@ -1929,7 +1933,11 @@ export async function runCognitiveCycle(
   let cycleExecutionProvenance: ThoughtExecutionProvenance | null = null;
   const currentExecutionProvenance = (): ThoughtExecutionProvenance =>
     cycleExecutionProvenance ?? UNKNOWN_EXECUTION_PROVENANCE;
-  const emitFailure = async (reason: string, failureCode?: string | null): Promise<KernelRunResult> => {
+  const emitFailure = async (
+    reason: string,
+    failureCode?: string | null,
+    terminal?: ThoughtTerminalDescriptor,
+  ): Promise<KernelRunResult> => {
     const counters = getThoughtAttemptCounters(sidecar, admittedCycle.cycleId, admittedCycle.generation);
     if (!currentGenerationIs(sidecar, admittedCycle)) {
       return resultWithCounters(admittedCycle.cycleId, admittedCycle.generation, null, counters, {
@@ -1945,6 +1953,10 @@ export async function runCognitiveCycle(
       generation: admittedCycle.generation,
       reason,
       failureCode,
+      // Typed terminal drives Owner presentation; reason preserves exact
+      // legacy C3/key behavior. C3 input below intentionally stays on the
+      // pre-existing reason string: no C3 admission expansion.
+      ...(terminal ? { terminal } : {}),
       origin: deps.origin,
       trigger: deliveryIntentFor(admittedCycle, payload, "system_notice", originProfile.triggerKind).trigger,
       deliveryLane: deliveryIntentFor(admittedCycle, payload, "system_notice", originProfile.triggerKind).deliveryLane,
@@ -2011,9 +2023,19 @@ export async function runCognitiveCycle(
         thoughtExecutionProvenance: currentExecutionProvenance(),
       });
     }
-    if (deps.nowMs() >= thoughtDeadlineAtMs) return emitFailure("thought_deadline");
+    if (deps.nowMs() >= thoughtDeadlineAtMs) {
+      return emitFailure(
+        "thought_deadline",
+        undefined,
+        makeThoughtTerminal("thought_deadline", { codes: ["thought_deadline"], stage: "cycle_deadline" }),
+      );
+    }
     if (counters.acceptedThoughtPasses >= MAX_THOUGHT_PASSES || counters.thoughtModelAttempts >= MAX_THOUGHT_MODEL_ATTEMPTS) {
-      return emitFailure("pass_exhausted");
+      return emitFailure(
+        "pass_exhausted",
+        undefined,
+        makeThoughtTerminal("budget_exhausted", { codes: ["pass_exhausted"], stage: "cycle_budget" }),
+      );
     }
     const rawConversationIds = listConversationEvidence(sidecar, cycle.conversationId, { limit: 12 }).map((r) => r.rowId);
     const thoughtInputOptions = {
@@ -2095,13 +2117,26 @@ export async function runCognitiveCycle(
           NOT_SENT_EXECUTION_PROVENANCE,
         );
         lastDispatchTruth = cycleExecutionProvenance.dispatchTruth;
-        return emitFailure("context_allocation_required_overflow");
+        return emitFailure(
+          "context_allocation_required_overflow",
+          undefined,
+          makeThoughtTerminal("allocation", {
+            codes: ["context_allocation_required_overflow"],
+            stage: "allocation",
+          }),
+        );
       }
       throw err;
     }
 
     cycle = updateCycleState(sidecar, cycle.cycleId, "thinking", deps.nowMs());
-    if (counters.thoughtModelAttempts >= MAX_THOUGHT_MODEL_ATTEMPTS) return emitFailure("pass_exhausted");
+    if (counters.thoughtModelAttempts >= MAX_THOUGHT_MODEL_ATTEMPTS) {
+      return emitFailure(
+        "pass_exhausted",
+        undefined,
+        makeThoughtTerminal("budget_exhausted", { codes: ["pass_exhausted"], stage: "cycle_budget" }),
+      );
+    }
     const controller = new AbortController();
     const activeThought = registerActiveThought(cycle.conversationId, cycle.cycleId, cycle.generation, controller);
     incrementThoughtAttemptCounter(sidecar, cycle.cycleId, cycle.generation, "thoughtModelAttempts");
@@ -2174,7 +2209,14 @@ export async function runCognitiveCycle(
           // Observability persistence must not change the terminal outcome.
         }
       }
-      return emitFailure(invocation.correctionScopeViolation.code);
+      return emitFailure(
+        invocation.correctionScopeViolation.code,
+        undefined,
+        makeThoughtTerminal("structural_invalid", {
+          codes: [invocation.correctionScopeViolation.code],
+          stage: "parser",
+        }),
+      );
     }
 
     if (invocation.malformed) {
@@ -2218,7 +2260,22 @@ export async function runCognitiveCycle(
         incrementThoughtAttemptCounter(sidecar, cycle.cycleId, cycle.generation, "structuralRetries");
         continue;
       }
-      return emitFailure("malformed");
+      // Proven structural exhaustion: bounded retries were scheduled and are
+      // now exhausted (persisted count + attempt budget). This is the only
+      // malformed path that may truthfully claim retry exhaustion.
+      return emitFailure(
+        "malformed",
+        undefined,
+        makeThoughtTerminal("structural_exhausted", {
+          codes: [
+            "malformed",
+            ...(invocation.output.kind === "failure" && invocation.output.diagnosticCode
+              ? [invocation.output.diagnosticCode]
+              : []),
+          ],
+          stage: "parser",
+        }),
+      );
     }
     if (invocation.deferred && typeof invocation.nextEligibleAtMs === "number") {
       const latestRowId = triggerEvidence?.rowId ?? cycle.composeLogIds.at(-1) ?? "unknown";
@@ -2260,10 +2317,27 @@ export async function runCognitiveCycle(
       }
     }
     if (invocation.thoughtDeadline) {
-      return emitFailure("thought_deadline");
+      // Local absolute deadline with no provider response observed
+      // (dispatchTruth !== "sent" proven by the invocation flag). Provider
+      // dispatch/outcome truth stays independent; never PROVIDER_UNAVAILABLE.
+      return emitFailure(
+        "thought_deadline",
+        undefined,
+        makeThoughtTerminal("thought_deadline", { codes: ["thought_deadline"], stage: "provider_dispatch" }),
+      );
     }
     if (invocation.unavailable) {
-      return emitFailure("unavailable", invocation.providerFailureCapture?.failureClass);
+      return emitFailure(
+        "unavailable",
+        invocation.providerFailureCapture?.failureClass,
+        makeThoughtTerminal("provider", {
+          codes: invocation.providerFailureCapture?.failureClass
+            ? [invocation.providerFailureCapture.failureClass]
+            : [],
+          stage: "provider_dispatch",
+          providerFailureClass: invocation.providerFailureCapture?.failureClass,
+        }),
+      );
     }
 
     structuralFeedback = null;
@@ -2283,16 +2357,35 @@ export async function runCognitiveCycle(
       });
       if (!verdict.ok) {
         if (revisable(verdict.codes)) {
-          if (counters.authorityRevisions >= MAX_AUTHORITY_REVISIONS) return emitFailure("revision_exhausted");
+          if (counters.authorityRevisions >= MAX_AUTHORITY_REVISIONS) {
+            return emitFailure(
+              "revision_exhausted",
+              undefined,
+              makeThoughtTerminal("budget_exhausted", {
+                codes: ["revision_exhausted", ...verdict.codes],
+                stage: "authority_proposal",
+              }),
+            );
+          }
           authorityObjections = uniqueAuthorityCodes(verdict.codes);
           incrementThoughtAttemptCounter(sidecar, cycle.cycleId, cycle.generation, "authorityRevisions");
           pass += 1;
           structuralRetriesForPass = persistedMalformedRetries(sidecar, cycle.cycleId, cycle.generation, pass);
           continue;
         }
-        return emitFailure(verdict.codes.join(",") || "authority_rejected");
+        return emitFailure(
+          verdict.codes.join(",") || "authority_rejected",
+          undefined,
+          makeThoughtTerminal("authority", { codes: verdict.codes, stage: "authority_proposal" }),
+        );
       }
-      if (counters.observationRounds >= MAX_OBSERVATION_ROUNDS) return emitFailure("pass_exhausted");
+      if (counters.observationRounds >= MAX_OBSERVATION_ROUNDS) {
+        return emitFailure(
+          "pass_exhausted",
+          undefined,
+          makeThoughtTerminal("budget_exhausted", { codes: ["pass_exhausted"], stage: "observation_rounds" }),
+        );
+      }
       incrementThoughtAttemptCounter(sidecar, cycle.cycleId, cycle.generation, "observationRounds");
       updateCycleState(sidecar, cycle.cycleId, "awaiting_operation", deps.nowMs());
       try {
@@ -2313,7 +2406,11 @@ export async function runCognitiveCycle(
           observations: [normalized],
         }, deps.nowMs());
       } catch {
-        return emitFailure("observation_unavailable");
+        return emitFailure(
+          "observation_unavailable",
+          undefined,
+          makeThoughtTerminal("operation_dispatch", { codes: ["observation_unavailable"], stage: "observation_dispatch" }),
+        );
       }
       pass += 1;
       structuralRetriesForPass = persistedMalformedRetries(sidecar, cycle.cycleId, cycle.generation, pass);
@@ -2331,16 +2428,35 @@ export async function runCognitiveCycle(
       });
       if (!verdict.ok) {
         if (revisable(verdict.codes)) {
-          if (counters.authorityRevisions >= MAX_AUTHORITY_REVISIONS) return emitFailure("revision_exhausted");
+          if (counters.authorityRevisions >= MAX_AUTHORITY_REVISIONS) {
+            return emitFailure(
+              "revision_exhausted",
+              undefined,
+              makeThoughtTerminal("budget_exhausted", {
+                codes: ["revision_exhausted", ...verdict.codes],
+                stage: "authority_proposal",
+              }),
+            );
+          }
           authorityObjections = uniqueAuthorityCodes(verdict.codes);
           incrementThoughtAttemptCounter(sidecar, cycle.cycleId, cycle.generation, "authorityRevisions");
           pass += 1;
           structuralRetriesForPass = persistedMalformedRetries(sidecar, cycle.cycleId, cycle.generation, pass);
           continue;
         }
-        return emitFailure(verdict.codes.join(",") || "effect_not_authorized");
+        return emitFailure(
+          verdict.codes.join(",") || "effect_not_authorized",
+          undefined,
+          makeThoughtTerminal("authority", { codes: verdict.codes, stage: "authority_proposal" }),
+        );
       }
-      if (counters.effectRounds >= MAX_EFFECT_ROUNDS) return emitFailure("pass_exhausted");
+      if (counters.effectRounds >= MAX_EFFECT_ROUNDS) {
+        return emitFailure(
+          "pass_exhausted",
+          undefined,
+          makeThoughtTerminal("budget_exhausted", { codes: ["pass_exhausted"], stage: "effect_rounds" }),
+        );
+      }
       incrementThoughtAttemptCounter(sidecar, cycle.cycleId, cycle.generation, "effectRounds");
       updateCycleState(sidecar, cycle.cycleId, "awaiting_operation", deps.nowMs());
       const proposal = {
@@ -2371,7 +2487,11 @@ export async function runCognitiveCycle(
             thoughtExecutionProvenance: currentExecutionProvenance(),
           });
         }
-        return emitFailure(dispatch.codes.join(",") || "effect_unavailable");
+        return emitFailure(
+          dispatch.codes.join(",") || "effect_unavailable",
+          undefined,
+          makeThoughtTerminal("authority", { codes: dispatch.codes, stage: "effect_dispatch" }),
+        );
       }
       inFlight = listInFlight(sidecar, cycle.cycleId);
       pass += 1;
@@ -2386,7 +2506,23 @@ export async function runCognitiveCycle(
       });
     }
     if (invocation.output.kind !== "settlement") {
-      return emitFailure(invocation.output.reason);
+      const leftover = invocation.output.reason;
+      // Leftover ThoughtFailureStep passthrough. Inner revision/pass are
+      // never produced here (dead for reachability), but stay total.
+      // capacity_deferred without nextEligible is envelope overflow (local
+      // allocation), not a silent deferral (deferred with nextEligible
+      // returned earlier). unavailable without provider detail is genuinely
+      // insufficient evidence -> foreign/UNKNOWN.
+      const leftoverTerminal = leftover === "malformed"
+        ? makeThoughtTerminal("structural_invalid", { codes: ["malformed"], stage: "settlement" })
+        : leftover === "revision_exhausted" || leftover === "pass_exhausted"
+          ? makeThoughtTerminal("budget_exhausted", { codes: [leftover], stage: "settlement" })
+          : leftover === "capacity_deferred"
+            ? makeThoughtTerminal("allocation", { codes: ["capacity_deferred"], stage: "allocation" })
+            : leftover === "cancelled"
+              ? makeThoughtTerminal("cancelled", { codes: ["cancelled"], stage: "settlement" })
+              : makeThoughtTerminal("foreign", { codes: [leftover], stage: "settlement" });
+      return emitFailure(invocation.output.reason, undefined, leftoverTerminal);
     }
     const operationalNamespace = buildOperationalEffectNamespace(
       cycle.cycleId,
@@ -2410,7 +2546,16 @@ export async function runCognitiveCycle(
         });
       }
       if (validation.kind === "conflict" && revisable(validation.codes)) {
-        if (counters.authorityRevisions >= MAX_AUTHORITY_REVISIONS) return emitFailure("revision_exhausted");
+        if (counters.authorityRevisions >= MAX_AUTHORITY_REVISIONS) {
+          return emitFailure(
+            "revision_exhausted",
+            undefined,
+            makeThoughtTerminal("budget_exhausted", {
+              codes: ["revision_exhausted", ...validation.codes],
+              stage: "settlement_validation",
+            }),
+          );
+        }
         authorityObjections = uniqueAuthorityCodes(validation.codes);
         if (validation.codes.includes("OPERATIONAL_CLAIM_EFFECTREF_UNKNOWN")) {
           settlementRevisionFeedback = {
@@ -2425,7 +2570,15 @@ export async function runCognitiveCycle(
         structuralRetriesForPass = persistedMalformedRetries(sidecar, cycle.cycleId, cycle.generation, pass);
         continue;
       }
-      return emitFailure("malformed");
+      // Validation malformed without independently proven retry exhaustion is
+      // structured-output-invalid, not retry-exhausted. Exact validation
+      // codes are retained in the terminal descriptor; C3 still sees the
+      // legacy "malformed" marker (behavior preserved).
+      return emitFailure(
+        "malformed",
+        undefined,
+        makeThoughtTerminal("structural_invalid", { codes: validation.codes, stage: "settlement_validation" }),
+      );
     }
     const packs = deps.loadAuthorityPacks();
     const currentnessPack = {
@@ -2445,14 +2598,27 @@ export async function runCognitiveCycle(
     });
     if (!authority.ok) {
       if (revisable(authority.codes)) {
-        if (counters.authorityRevisions >= MAX_AUTHORITY_REVISIONS) return emitFailure("revision_exhausted");
+        if (counters.authorityRevisions >= MAX_AUTHORITY_REVISIONS) {
+          return emitFailure(
+            "revision_exhausted",
+            undefined,
+            makeThoughtTerminal("budget_exhausted", {
+              codes: ["revision_exhausted", ...authority.codes],
+              stage: "authority_settlement",
+            }),
+          );
+        }
         authorityObjections = uniqueAuthorityCodes(authority.codes);
         incrementThoughtAttemptCounter(sidecar, cycle.cycleId, cycle.generation, "authorityRevisions");
         pass += 1;
         structuralRetriesForPass = persistedMalformedRetries(sidecar, cycle.cycleId, cycle.generation, pass);
         continue;
       }
-      return emitFailure(authority.codes.join(",") || "authority_rejected");
+      return emitFailure(
+        authority.codes.join(",") || "authority_rejected",
+        undefined,
+        makeThoughtTerminal("authority", { codes: authority.codes, stage: "authority_settlement" }),
+      );
     }
 
     let speechText = validation.draft.speech.surfaceDraft;
@@ -2485,13 +2651,29 @@ export async function runCognitiveCycle(
     });
     if (!fidelity.ok) {
       if (REVISABLE_AUTHORITY_CODES.has(fidelity.code as AuthorityCode)) {
-        if (counters.authorityRevisions >= MAX_AUTHORITY_REVISIONS) return emitFailure("revision_exhausted");
+        if (counters.authorityRevisions >= MAX_AUTHORITY_REVISIONS) {
+          return emitFailure(
+            "revision_exhausted",
+            undefined,
+            makeThoughtTerminal("budget_exhausted", {
+              codes: ["revision_exhausted", fidelity.code],
+              stage: "fidelity",
+            }),
+          );
+        }
         authorityObjections = uniqueAuthorityCodes([fidelity.code]);
         incrementThoughtAttemptCounter(sidecar, cycle.cycleId, cycle.generation, "authorityRevisions");
         pass += 1;
         continue;
       }
-      return emitFailure(fidelity.code);
+      // All final speech-fidelity rejections map publicly to
+      // SPEECH_FIDELITY_REJECTED. Exact internal fidelity code is retained
+      // in the terminal descriptor (and legacy reason for C3/key).
+      return emitFailure(
+        fidelity.code,
+        undefined,
+        makeThoughtTerminal("fidelity", { codes: [fidelity.code], stage: "fidelity" }),
+      );
     }
     if (!currentGenerationIs(sidecar, cycle)) {
       counters = getThoughtAttemptCounters(sidecar, cycle.cycleId, cycle.generation);
@@ -2543,6 +2725,10 @@ export async function runCognitiveCycle(
           const diagnosticFailure = await emitFailure(
             "publication_rejected_diagnostic_persistence_failed",
             "diagnostic_persistence_failed",
+            makeThoughtTerminal("publication_persistence", {
+              codes: ["publication_rejected_diagnostic_persistence_failed"],
+              stage: "publication",
+            }),
           );
           return {
             ...diagnosticFailure,

@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { admitTestCycle, openTestSidecar } from "../test-support.js";
-import { emitInfrastructureNotice, formatThoughtFailureNotice, getSystemNotice, listSystemNotices, THOUGHT_UNAVAILABLE_NOTICE } from "./infrastructure-notice.js";
+import {
+  classifyThoughtFailureCode,
+  classifyThoughtTerminal,
+  emitInfrastructureNotice,
+  formatThoughtFailureNotice,
+  getSystemNotice,
+  listSystemNotices,
+  makeThoughtTerminal,
+  THOUGHT_UNAVAILABLE_NOTICE,
+} from "./infrastructure-notice.js";
 
 describe("v0.2.1 Thought outage notices", () => {
   it.each([
@@ -66,6 +75,156 @@ describe("v0.2.1 Thought outage notices", () => {
       const row = db.prepare("SELECT payload_json, thought_unavailable FROM causal_ledger WHERE cycle_id = ? AND generation = ?").get("cycle-ledger", 1) as { payload_json: string; thought_unavailable: number };
       expect(JSON.parse(row.payload_json)).toMatchObject({ settlementId: "settlement-existing", authorityCodes: ["authority_kept"], thoughtUnavailable: true });
       expect(row.thought_unavailable).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("FAILURE-TRUTH-COMPLETENESS-01 terminal classification", () => {
+  it.each([
+    ["UNWITNESSED_HIGH_RISK_CLAIM", "SPEECH_FIDELITY_REJECTED"],
+    ["DRAFT_COMMITMENT_CONFLICT", "SPEECH_FIDELITY_REJECTED"],
+    ["DRAFT_REQUIRED", "SPEECH_FIDELITY_REJECTED"],
+    ["NONE_SURFACE_FORBIDDEN", "SPEECH_FIDELITY_REJECTED"],
+    ["MUST_SAY_MISSING", "SPEECH_FIDELITY_REJECTED"],
+    ["MUST_NOT_PRESENT", "SPEECH_FIDELITY_REJECTED"],
+    ["EMPTY_COMMITMENTS_WITH_DRAFT", "SPEECH_FIDELITY_REJECTED"],
+    ["pass_exhausted", "THOUGHT_BUDGET_EXHAUSTED"],
+    ["revision_exhausted", "THOUGHT_BUDGET_EXHAUSTED"],
+    ["observation_unavailable", "OPERATION_DISPATCH_FAILED"],
+    ["effect_unavailable", "OPERATION_DISPATCH_FAILED"],
+    ["authority_rejected", "AUTHORITY_REJECTED"],
+    ["effect_not_authorized", "AUTHORITY_REJECTED"],
+    ["publication_rejected_diagnostic_persistence_failed", "PUBLICATION_PERSISTENCE_FAILED"],
+    ["structural_correction_scope_violation", "STRUCTURED_OUTPUT_INVALID"],
+  ])("legacy reason %s maps to %s (never silent UNKNOWN)", (reason, expected) => {
+    expect(classifyThoughtFailureCode({ reason })).toBe(expected);
+    expect(formatThoughtFailureNotice({ reason }))
+      .toBe(`${THOUGHT_UNAVAILABLE_NOTICE} Error code: ${expected}`);
+  });
+
+  it("maps single malformed without proven exhaustion to invalid, not retry-exhausted", () => {
+    expect(classifyThoughtFailureCode({ reason: "malformed" })).toBe("STRUCTURED_OUTPUT_INVALID");
+  });
+
+  it("maps proven structural exhaustion via the typed family to retry-exhausted", () => {
+    expect(classifyThoughtTerminal(
+      makeThoughtTerminal("structural_exhausted", { codes: ["malformed", "alias_duplicate"], stage: "parser" }),
+    )).toBe("STRUCTURAL_RETRY_EXHAUSTED");
+    expect(classifyThoughtTerminal(
+      makeThoughtTerminal("structural_invalid", { codes: ["malformed"], stage: "settlement_validation" }),
+    )).toBe("STRUCTURED_OUTPUT_INVALID");
+  });
+
+  it("gives the proven local deadline precedence over incidental provider detail", () => {
+    expect(classifyThoughtTerminal(
+      makeThoughtTerminal("thought_deadline", {
+        codes: ["thought_deadline"],
+        stage: "provider_dispatch",
+        providerFailureClass: "provider_unavailable",
+      }),
+    )).toBe("THOUGHT_DEADLINE_EXCEEDED");
+    expect(classifyThoughtFailureCode({ reason: "thought_deadline", failureCode: "provider_unavailable" }))
+      .toBe("THOUGHT_DEADLINE_EXCEEDED");
+  });
+
+  it("keeps genuine provider unavailable distinct from the local deadline", () => {
+    expect(classifyThoughtTerminal(
+      makeThoughtTerminal("provider", {
+        codes: ["provider_unavailable"],
+        stage: "provider_dispatch",
+        providerFailureClass: "provider_unavailable",
+      }),
+    )).toBe("PROVIDER_UNAVAILABLE");
+  });
+
+  it("maps multi-code authority joins to authority without comma-permutation dependence", () => {
+    const forward = classifyThoughtFailureCode({ reason: "RECEIPT_REQUIRED,IN_FLIGHT_UNKNOWN" });
+    const reversed = classifyThoughtFailureCode({ reason: "IN_FLIGHT_UNKNOWN,RECEIPT_REQUIRED" });
+    expect(forward).toBe("AUTHORITY_REJECTED");
+    expect(reversed).toBe("AUTHORITY_REJECTED");
+    expect(classifyThoughtTerminal(
+      makeThoughtTerminal("authority", { codes: ["RECEIPT_REQUIRED", "IN_FLIGHT_UNKNOWN"], stage: "authority_proposal" }),
+    )).toBe("AUTHORITY_REJECTED");
+    expect(classifyThoughtTerminal(
+      makeThoughtTerminal("authority", { codes: ["IN_FLIGHT_UNKNOWN", "RECEIPT_REQUIRED"], stage: "authority_proposal" }),
+    )).toBe("AUTHORITY_REJECTED");
+  });
+
+  it("keeps a known authority family known with an unfamiliar child retained", () => {
+    expect(classifyThoughtTerminal(
+      makeThoughtTerminal("authority", {
+        codes: ["RECEIPT_REQUIRED", "FUTURE_CODE_WE_HAVE_NEVER_SEEN"],
+        stage: "authority_settlement",
+      }),
+    )).toBe("AUTHORITY_REJECTED");
+  });
+
+  it("maps empty child lists with a proven parent family to the parent code", () => {
+    expect(classifyThoughtTerminal(makeThoughtTerminal("authority", { stage: "authority_proposal" })))
+      .toBe("AUTHORITY_REJECTED");
+    expect(classifyThoughtTerminal(makeThoughtTerminal("budget_exhausted", { stage: "cycle_budget" })))
+      .toBe("THOUGHT_BUDGET_EXHAUSTED");
+  });
+
+  it("reserves UNKNOWN for foreign failures and missing causes", () => {
+    expect(classifyThoughtFailureCode({ reason: "some_future_weird_failure_xyz" })).toBe("UNKNOWN");
+    expect(classifyThoughtFailureCode({ reason: "unavailable" })).toBe("UNKNOWN");
+    expect(classifyThoughtTerminal(makeThoughtTerminal("foreign", { codes: ["weird"], stage: "unknown" })))
+      .toBe("UNKNOWN");
+    expect(classifyThoughtTerminal(
+      makeThoughtTerminal("provider", { stage: "provider_dispatch" }),
+    )).toBe("UNKNOWN");
+  });
+
+  it("does not parse foreign provider prose into trusted classification", () => {
+    expect(classifyThoughtFailureCode({ reason: "unavailable", failureCode: "provider prose 503 sk-live-secret" }))
+      .toBe("UNKNOWN");
+  });
+
+  it("emits typed terminals with exact codes preserved in the notice key", () => {
+    const db = openTestSidecar();
+    try {
+      admitTestCycle(db, { cycleId: "cycle-terminal", conversationId: "thread-terminal", triggerKind: "owner_message", occupantId: "doc", nowMs: 1 });
+      const notice = emitInfrastructureNotice(db, {
+        ownerId: "doc",
+        channel: "discord",
+        threadId: "thread-terminal",
+        conversationId: "thread-terminal",
+        cycleId: "cycle-terminal",
+        generation: 1,
+        reason: "RECEIPT_REQUIRED,IN_FLIGHT_UNKNOWN",
+        terminal: makeThoughtTerminal("authority", {
+          codes: ["IN_FLIGHT_UNKNOWN", "RECEIPT_REQUIRED"],
+          stage: "authority_proposal",
+        }),
+      });
+      expect(notice.noticeText).toBe(`${THOUGHT_UNAVAILABLE_NOTICE} Error code: AUTHORITY_REJECTED`);
+      expect(notice.noticeKey).toContain("RECEIPT_REQUIRED");
+      expect(notice.noticeKey).toContain("IN_FLIGHT_UNKNOWN");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("emits fidelity terminals under the single public umbrella", () => {
+    const db = openTestSidecar();
+    try {
+      admitTestCycle(db, { cycleId: "cycle-fidelity", conversationId: "thread-fidelity", triggerKind: "owner_message", occupantId: "doc", nowMs: 1 });
+      for (const code of ["UNWITNESSED_HIGH_RISK_CLAIM", "DRAFT_COMMITMENT_CONFLICT"] as const) {
+        const notice = emitInfrastructureNotice(db, {
+          ownerId: "doc",
+          channel: "discord",
+          threadId: "thread-fidelity",
+          conversationId: "thread-fidelity",
+          cycleId: `cycle-fidelity-${code}`,
+          generation: 1,
+          reason: code,
+          terminal: makeThoughtTerminal("fidelity", { codes: [code], stage: "fidelity" }),
+        });
+        expect(notice.noticeText).toBe(`${THOUGHT_UNAVAILABLE_NOTICE} Error code: SPEECH_FIDELITY_REJECTED`);
+      }
     } finally {
       db.close();
     }
