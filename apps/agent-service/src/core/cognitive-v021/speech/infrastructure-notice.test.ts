@@ -225,6 +225,55 @@ describe("FAILURE-TRUTH-COMPLETENESS-01 terminal classification", () => {
     }
   });
 
+  it("mirrors the bounded typed terminal diagnostic in the causal ledger without touching notice identity", () => {
+    const db = openTestSidecar();
+    try {
+      admitTestCycle(db, { cycleId: "cycle-diagnostic", conversationId: "thread-diagnostic", triggerKind: "owner_message", occupantId: "doc", nowMs: 1 });
+      const notice = emitInfrastructureNotice(db, {
+        ownerId: "doc",
+        channel: "discord",
+        threadId: "thread-diagnostic",
+        conversationId: "thread-diagnostic",
+        cycleId: "cycle-diagnostic",
+        generation: 1,
+        reason: "thought_deadline",
+        terminal: makeThoughtTerminal("thought_deadline", {
+          codes: ["thought_deadline"],
+          stage: "provider_dispatch",
+          providerFailureClass: "provider_unavailable",
+        }),
+      });
+      expect(notice.noticeKey).toBe("thought_failure:thread-diagnostic:cycle-diagnostic:1:thought_deadline");
+      expect(notice.noticeText).toBe(`${THOUGHT_UNAVAILABLE_NOTICE} Error code: THOUGHT_DEADLINE_EXCEEDED`);
+      const payload = JSON.parse(
+        (db.prepare("SELECT payload_json FROM causal_ledger WHERE cycle_id = ? AND generation = ?").get("cycle-diagnostic", 1) as { payload_json: string }).payload_json,
+      ) as Record<string, unknown>;
+      expect(payload).toMatchObject({
+        thoughtUnavailable: true,
+        thoughtTerminal: {
+          family: "thought_deadline",
+          codes: ["thought_deadline"],
+          stage: "provider_dispatch",
+          providerFailureClass: "provider_unavailable",
+        },
+      });
+      // A repeat for the same key deduplicates to the same notice.
+      const again = emitInfrastructureNotice(db, {
+        ownerId: "doc",
+        channel: "discord",
+        threadId: "thread-diagnostic",
+        conversationId: "thread-diagnostic",
+        cycleId: "cycle-diagnostic",
+        generation: 1,
+        reason: "thought_deadline",
+      });
+      expect(again.noticeId).toBe(notice.noticeId);
+      expect(listSystemNotices(db)).toHaveLength(1);
+    } finally {
+      db.close();
+    }
+  });
+
   it("emits fidelity terminals under the single public umbrella", () => {
     const db = openTestSidecar();
     try {

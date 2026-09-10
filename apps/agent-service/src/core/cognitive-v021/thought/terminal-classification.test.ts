@@ -103,6 +103,27 @@ describe("FAILURE-TRUTH-COMPLETENESS-01 producer-to-notice", () => {
       expect(key).toBe(
         `thought_failure:thread-fidelity-conflict:${cycle.cycleId}:${cycle.generation}:revision_exhausted`,
       );
+      // Durable terminal diagnostic: parent family, both parent and exact
+      // child cause codes, and stage survive in the causal ledger even
+      // though the notice key carries only the legacy reason.
+      const ledger = JSON.parse(
+        (sidecar.prepare("SELECT payload_json FROM causal_ledger WHERE cycle_id = ? AND generation = ?").get(cycle.cycleId, cycle.generation) as { payload_json: string }).payload_json,
+      ) as { thoughtUnavailable?: unknown; thoughtTerminal?: { family?: unknown; codes?: unknown; stage?: unknown } };
+      expect(ledger.thoughtUnavailable).toBe(true);
+      expect(ledger.thoughtTerminal?.family).toBe("budget_exhausted");
+      expect(ledger.thoughtTerminal?.stage).toBe("fidelity");
+      expect(ledger.thoughtTerminal?.codes).toEqual(
+        expect.arrayContaining(["revision_exhausted", "DRAFT_COMMITMENT_CONFLICT"]),
+      );
+      // No second notice is minted, and C3 admits exactly the legacy
+      // reason under the pre-packet key (revision_exhausted is allowlisted;
+      // typed child codes never reach C3 input) — no admission change.
+      expect(sidecar.prepare("SELECT COUNT(*) AS count FROM system_notice_outbox").get()).toMatchObject({ count: 1 });
+      const c3 = sidecar.prepare("SELECT experience_id, failure_class FROM c3_terminal_experiences WHERE cycle_id = ?").get(cycle.cycleId) as { experience_id: string; failure_class: string };
+      expect(c3.failure_class).toBe("revision_exhausted");
+      expect(c3.experience_id).toBe(
+        `c3:thought:thought_failure:thread-fidelity-conflict:${cycle.cycleId}:${cycle.generation}:revision_exhausted`,
+      );
     } finally {
       sidecar.close();
       attentionDb.close();
@@ -133,6 +154,19 @@ describe("FAILURE-TRUTH-COMPLETENESS-01 producer-to-notice", () => {
       const key = (sidecar.prepare("SELECT notice_key FROM system_notice_outbox").get() as { notice_key: string }).notice_key;
       expect(key).toBe(
         `thought_failure:thread-authority-join:${cycle.cycleId}:${cycle.generation}:CAPABILITY_UNAVAILABLE,EFFECT_NOT_AUTHORIZED`,
+      );
+      // The diagnostic mirror is generic, not exhaustion-specific: the
+      // authority parent family with its exact child codes and stage is
+      // durably retained while the key stays the pre-packet formula.
+      const ledger = JSON.parse(
+        (sidecar.prepare("SELECT payload_json FROM causal_ledger WHERE cycle_id = ? AND generation = ?").get(cycle.cycleId, cycle.generation) as { payload_json: string }).payload_json,
+      ) as { thoughtTerminal?: { family?: unknown; codes?: unknown; stage?: unknown } };
+      expect(ledger.thoughtTerminal?.family).toBe("authority");
+      // Producer is the settlement-stage authority check (run.ts emits the
+      // mocked non-revisable verdict there with stage authority_settlement).
+      expect(ledger.thoughtTerminal?.stage).toBe("authority_settlement");
+      expect(ledger.thoughtTerminal?.codes).toEqual(
+        expect.arrayContaining(["CAPABILITY_UNAVAILABLE", "EFFECT_NOT_AUTHORIZED"]),
       );
     } finally {
       sidecar.close();
@@ -303,6 +337,14 @@ describe("FAILURE-TRUTH-COMPLETENESS-01 producer-to-notice", () => {
       expect(key).toBe(
         `thought_failure:thread-effect-inflight:${cycle.cycleId}:${cycle.generation}:IN_FLIGHT_UNKNOWN`,
       );
+      // The dispatch-mechanics diagnostic is durably retained with its
+      // truthful operation_dispatch parent (not authority).
+      const ledger = JSON.parse(
+        (sidecar.prepare("SELECT payload_json FROM causal_ledger WHERE cycle_id = ? AND generation = ?").get(cycle.cycleId, cycle.generation) as { payload_json: string }).payload_json,
+      ) as { thoughtTerminal?: { family?: unknown; codes?: unknown; stage?: unknown } };
+      expect(ledger.thoughtTerminal?.family).toBe("operation_dispatch");
+      expect(ledger.thoughtTerminal?.stage).toBe("effect_dispatch");
+      expect(ledger.thoughtTerminal?.codes).toEqual(["IN_FLIGHT_UNKNOWN"]);
     } finally {
       sidecar.close();
       attentionDb.close();

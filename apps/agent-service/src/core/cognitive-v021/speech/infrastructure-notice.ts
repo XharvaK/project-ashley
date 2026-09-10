@@ -327,6 +327,31 @@ export function formatThoughtTerminalNotice(terminal: ThoughtTerminalDescriptor)
   return `${THOUGHT_UNAVAILABLE_NOTICE} Error code: ${classifyThoughtTerminal(terminal)}`;
 }
 
+/**
+ * Durable terminal diagnostic mirror for the causal ledger. Only the
+ * already-bounded/sanitized descriptor fields are retained (family, codes,
+ * optional stage, optional provider class). No prose, no provider payload.
+ * Notice key, projection key, notice text, legacy reason, and C3 input are
+ * never derived from this structure.
+ */
+export type ThoughtTerminalDiagnostic = {
+  family: ThoughtTerminalFamily;
+  codes: string[];
+  stage?: string;
+  providerFailureClass?: string;
+};
+
+function toTerminalDiagnostic(terminal: ThoughtTerminalDescriptor): ThoughtTerminalDiagnostic {
+  return {
+    family: terminal.family,
+    codes: [...terminal.codes],
+    ...(terminal.stage !== undefined ? { stage: terminal.stage } : {}),
+    ...(typeof terminal.providerFailureClass === "string" && terminal.providerFailureClass.length > 0
+      ? { providerFailureClass: terminal.providerFailureClass }
+      : {}),
+  };
+}
+
 export type EmitInfrastructureNoticeInput = {
   ownerId: string;
   channel: string;
@@ -433,7 +458,15 @@ function markLedgerUnavailable(db: DatabaseSync, input: EmitInfrastructureNotice
       // Preserve the typed unavailable marker even if an older payload is malformed.
     }
   }
-  const payload = { ...defaults, ...prior, thoughtUnavailable: true };
+  const payload = {
+    ...defaults,
+    ...prior,
+    thoughtUnavailable: true,
+    // Durable terminal diagnostic mirror. Merges with (never replaces)
+    // unrelated payload fields; latest terminal wins per (cycle, generation).
+    // Absent terminal preserves any prior diagnostic rather than erasing it.
+    ...(input.terminal ? { thoughtTerminal: toTerminalDiagnostic(input.terminal) } : {}),
+  };
   const update = db.prepare(
     "UPDATE causal_ledger SET thought_unavailable = 1, payload_json = ? WHERE cycle_id = ? AND generation = ?",
   ).run(JSON.stringify(payload), input.cycleId, input.generation);
