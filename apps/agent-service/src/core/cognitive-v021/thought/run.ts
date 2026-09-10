@@ -112,9 +112,11 @@ import { sha256Text } from "../../model-fabric/hash.js";
 import type {
   ProviderBoundaryControls,
   ProviderBoundaryTiming,
+  ProviderBoundaryTransport,
   ProviderResponseDiagnostics,
   WireDispatchEvidence,
 } from "../../model-routing/types.js";
+import { PROVIDER_BOUNDARY_TRANSPORT_ABSENT } from "../../model-routing/types.js";
 import { fidelityCheck } from "../speech/fidelity.js";
 import {
   emitInfrastructureNotice,
@@ -337,11 +339,14 @@ function finiteNonNegative(value: unknown): number | undefined {
 }
 
 /**
- * Session affinity is not enabled on any provider route. The constant policy
- * identity keeps cross-turn affinity comparison stable for the future
- * cache-measurement programme without persisting any session identifier.
+ * Default affinity-transport truth when no provider-boundary observation is
+ * available: affinity was not applied on this attempt. The observed fact —
+ * minted by the Cloudflare adapter when it constructs the provider fetch —
+ * overrides this via completion or Model Fabric metadata. The raw affinity
+ * identifier never reaches this layer; only the applied/policy truth does.
+ * Cache state stays infrastructure: these fields never influence Thought
+ * semantics, retry policy, or fallback policy.
  */
-const PROVIDER_SESSION_AFFINITY_POLICY = "none" as const;
 
 /**
  * Bounded abort reason for the failure capture. AppError code "timeout" is
@@ -362,6 +367,8 @@ function providerFailureCapture(input: {
   completion?: Awaited<ReturnType<typeof completeChat>>;
   controls?: ProviderBoundaryControls;
   timing?: ProviderBoundaryTiming;
+  /** Observed affinity-transport truth override; completion/metadata win when set. */
+  transport?: ProviderBoundaryTransport;
   /** Raw dispatch error; only its bounded abort class is retained, never prose. */
   error?: unknown;
   options: {
@@ -388,6 +395,10 @@ function providerFailureCapture(input: {
   const timing = input.timing
     ?? completion?.providerBoundaryTiming
     ?? metadata?.providerBoundaryTiming;
+  const transport = input.transport
+    ?? completion?.providerBoundaryTransport
+    ?? metadata?.providerBoundaryTransport
+    ?? PROVIDER_BOUNDARY_TRANSPORT_ABSENT;
   const wireEvidence: WireDispatchEvidence | undefined = completion?.wireEvidence
     ?? metadata?.wireEvidence
     ?? attempt?.wireEvidence
@@ -525,8 +536,8 @@ function providerFailureCapture(input: {
         }
       : { abortReasonName: "none" as const, noHttpResponse: false }),
     ...{
-      sessionAffinityApplied: false,
-      affinityPolicy: PROVIDER_SESSION_AFFINITY_POLICY,
+      sessionAffinityApplied: transport.sessionAffinityApplied,
+      affinityPolicy: transport.affinityPolicy,
     },
   };
   return capture;

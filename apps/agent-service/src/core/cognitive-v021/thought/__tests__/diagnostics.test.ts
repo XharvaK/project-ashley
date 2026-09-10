@@ -248,6 +248,57 @@ describe("Thought Diagnostics & Observability DB", () => {
     }
   });
 
+  it("round-trips applied affinity-transport truth without the raw identifier", () => {
+    const obs = openObservabilityStore(":memory:");
+    try {
+      obs.recordDiagnostic({
+        cycleId: "cycle-affinity-truth",
+        generation: 1,
+        requestId: "req-affinity-truth",
+        pass: 1,
+        code: "provider_returned",
+        stage: "provider_dispatch",
+        dispatchTruth: "sent",
+        providerFailure: {
+          dispatchTruth: "sent",
+          parserStatus: "passed",
+          validatorStatus: "passed",
+          structuralRetryStatus: "not_applicable",
+          provider: "cloudflare",
+          model: "@cf/deepseek-ai/deepseek-v4-flash-0731",
+          elapsedMs: 12_345,
+          remainingDeadlineMs: 45_000,
+          inputTokens: 7_100,
+          completionTokens: 64,
+          cachedInputTokens: 6_900,
+          neuronUsage: 3_100,
+          noHttpResponse: false,
+          abortReasonName: "none",
+          sessionAffinityApplied: true,
+          affinityPolicy: "cloudflare_thought_route_affinity_v1",
+        },
+      });
+
+      const stored = obs.db.prepare(
+        "SELECT provider_failure_json FROM thought_dispatch_diagnostics WHERE request_id = ?",
+      ).get("req-affinity-truth") as { provider_failure_json: string };
+      expect(stored.provider_failure_json).toContain(
+        '"affinityPolicy":"cloudflare_thought_route_affinity_v1"',
+      );
+      expect(stored.provider_failure_json).toContain('"sessionAffinityApplied":true');
+
+      const rows = obs.listDiagnostics();
+      expect(rows).toHaveLength(1);
+      expect(rows[0].providerFailure).toMatchObject({
+        cachedInputTokens: 6_900,
+        sessionAffinityApplied: true,
+        affinityPolicy: "cloudflare_thought_route_affinity_v1",
+      });
+    } finally {
+      obs.close();
+    }
+  });
+
   it("survives derived index rebuilds without data loss", () => {
     const sidecar = openTestSidecar();
     const derived = openDerivedStore(":memory:");

@@ -51,6 +51,9 @@ import {
   type ProviderResponseDiagnostics,
   type ProviderBoundaryControls,
   type ProviderBoundaryTiming,
+  type ProviderBoundaryTransport,
+  PROVIDER_BOUNDARY_TRANSPORT_ABSENT,
+  providerBoundaryTransportFromError,
   providerHttpStatusFromBoundary,
 } from "./core/model-routing/types.js";
 import {
@@ -360,10 +363,15 @@ function errorClassFor(error: unknown): string {
   return "error";
 }
 
+type ProviderBoundaryFactKey =
+  | "providerBoundaryControls"
+  | "providerBoundaryTiming"
+  | "providerBoundaryTransport";
+
 function attachProviderBoundaryFact(
   error: unknown,
-  key: "providerBoundaryControls" | "providerBoundaryTiming",
-  value: ProviderBoundaryControls | ProviderBoundaryTiming,
+  key: ProviderBoundaryFactKey,
+  value: ProviderBoundaryControls | ProviderBoundaryTiming | ProviderBoundaryTransport,
 ): void {
   if (!error || (typeof error !== "object" && typeof error !== "function")) return;
   Object.defineProperty(error, key, {
@@ -376,7 +384,7 @@ function attachProviderBoundaryFact(
 
 function providerBoundaryFactFromError<T>(
   error: unknown,
-  key: "providerBoundaryControls" | "providerBoundaryTiming",
+  key: ProviderBoundaryFactKey,
 ): T | undefined {
   if (!error || typeof error !== "object") return undefined;
   const value = (error as Record<string, unknown>)[key];
@@ -415,6 +423,7 @@ export async function completeChat(
   responseDiagnostics?: ProviderResponseDiagnostics;
   providerBoundaryControls?: ProviderBoundaryControls;
   providerBoundaryTiming?: ProviderBoundaryTiming;
+  providerBoundaryTransport?: ProviderBoundaryTransport;
   attentionRequestId?: number;
   acceptedDispatchIdentity?: AcceptedDispatchIdentity;
   /** Exact Thought attempt identity returned by the Attention/Model Fabric bind. */
@@ -820,6 +829,11 @@ export async function completeChat(
       );
     }
     let providerBoundaryTiming: ProviderBoundaryTiming | undefined;
+    // Observed affinity-transport truth for this attempt. Defaults to absent
+    // (not applicable / not configured); the adapter overwrites it on every
+    // path where the provider fetch was constructed.
+    let providerBoundaryTransport: ProviderBoundaryTransport =
+      PROVIDER_BOUNDARY_TRANSPORT_ABSENT;
     const wireAdditionalBytes = targetProvider === "cloudflare"
       ? cloudflareRequestWireAdditionalBytes({
           body: buildCloudflareRequestBody(
@@ -856,6 +870,7 @@ export async function completeChat(
         wireEvidence?: WireDispatchEvidence;
         providerBoundaryControls?: ProviderBoundaryControls;
         providerBoundaryTiming?: ProviderBoundaryTiming;
+        providerBoundaryTransport?: ProviderBoundaryTransport;
       }>(attentionDb, {
         messages,
         purpose: mapped.purpose,
@@ -944,6 +959,8 @@ export async function completeChat(
                 : {}),
               outcome: "response_received" as const,
             });
+            providerBoundaryTransport = completion.providerBoundaryTransport
+              ?? PROVIDER_BOUNDARY_TRANSPORT_ABSENT;
             attempt.markProviderResponse({
               resolvedModelId: completion.providerModel ?? null,
               providerRequestId: completion.providerRequestId,
@@ -974,6 +991,7 @@ export async function completeChat(
                 wireEvidence: completion.wireEvidence,
                 providerBoundaryControls,
                 providerBoundaryTiming,
+                providerBoundaryTransport,
               },
             };
           } catch (err) {
@@ -989,6 +1007,14 @@ export async function completeChat(
             });
             attachProviderBoundaryFact(err, "providerBoundaryControls", providerBoundaryControls);
             attachProviderBoundaryFact(err, "providerBoundaryTiming", providerBoundaryTiming);
+            // Recover the adapter-observed transport truth (attached by the
+            // adapter when the provider fetch was constructed); absent means
+            // no fetch was attempted with affinity on this path.
+            providerBoundaryTransport = providerBoundaryFactFromError<ProviderBoundaryTransport>(
+              err,
+              "providerBoundaryTransport",
+            ) ?? PROVIDER_BOUNDARY_TRANSPORT_ABSENT;
+            attachProviderBoundaryFact(err, "providerBoundaryTransport", providerBoundaryTransport);
             const providerHttpStatus = providerHttpStatusFromBoundary(err);
             if (providerHttpStatus !== undefined) {
               attempt.markProviderResponse({
@@ -1017,6 +1043,7 @@ export async function completeChat(
               );
               attachProviderBoundaryFact(timeoutError, "providerBoundaryControls", providerBoundaryControls);
               attachProviderBoundaryFact(timeoutError, "providerBoundaryTiming", providerBoundaryTiming);
+              attachProviderBoundaryFact(timeoutError, "providerBoundaryTransport", providerBoundaryTransport);
               attempt.markFailure("timeout");
               throw timeoutError;
             }
@@ -1039,6 +1066,7 @@ export async function completeChat(
                       : err;
               attachProviderBoundaryFact(mappedError, "providerBoundaryControls", providerBoundaryControls);
               attachProviderBoundaryFact(mappedError, "providerBoundaryTiming", providerBoundaryTiming);
+              attachProviderBoundaryFact(mappedError, "providerBoundaryTransport", providerBoundaryTransport);
               attempt.markFailure(errorClassFor(mappedError));
               throw mappedError;
             } catch (mappedError) {
@@ -1065,6 +1093,7 @@ export async function completeChat(
         if (providerBoundaryTiming) {
           attachProviderBoundaryFact(identityError, "providerBoundaryControls", providerBoundaryControls);
           attachProviderBoundaryFact(identityError, "providerBoundaryTiming", providerBoundaryTiming);
+          attachProviderBoundaryFact(identityError, "providerBoundaryTransport", providerBoundaryTransport);
         }
         attempt.markFailure(identityError.code);
         throw identityError;
@@ -1140,6 +1169,7 @@ export async function completeChat(
       if (providerBoundaryTiming) {
         attachProviderBoundaryFact(error, "providerBoundaryControls", providerBoundaryControls);
         attachProviderBoundaryFact(error, "providerBoundaryTiming", providerBoundaryTiming);
+        attachProviderBoundaryFact(error, "providerBoundaryTransport", providerBoundaryTransport);
       }
       attempt.markFailure(errorClassFor(error));
       throw error;
@@ -1233,6 +1263,9 @@ export async function completeChat(
       ...(inner.providerBoundaryTiming
         ? { providerBoundaryTiming: inner.providerBoundaryTiming }
         : {}),
+      ...(inner.providerBoundaryTransport
+        ? { providerBoundaryTransport: inner.providerBoundaryTransport }
+        : {}),
       ...(capabilityIdentity ? { capabilityIdentity } : {}),
     };
     return {
@@ -1248,6 +1281,7 @@ export async function completeChat(
       responseDiagnostics: inner.responseDiagnostics,
       providerBoundaryControls: inner.providerBoundaryControls,
       providerBoundaryTiming: inner.providerBoundaryTiming,
+      providerBoundaryTransport: inner.providerBoundaryTransport,
       attentionRequestId: attentive.requestId,
       acceptedDispatchIdentity: attentive.acceptedDispatchIdentity,
       capturedAttemptIdentity,
@@ -1283,11 +1317,16 @@ export async function completeChat(
       error,
       "providerBoundaryTiming",
     );
+    const providerBoundaryTransport = providerBoundaryFactFromError<ProviderBoundaryTransport>(
+      error,
+      "providerBoundaryTransport",
+    );
     const metadata: ModelFabricDispatchMetadata = {
       ...last,
       ...existingMeta,
       ...(providerBoundaryControls ? { providerBoundaryControls } : {}),
       ...(providerBoundaryTiming ? { providerBoundaryTiming } : {}),
+      ...(providerBoundaryTransport ? { providerBoundaryTransport } : {}),
       failure: existingMeta?.failure ?? failure,
     };
     if (privateBudgetBinding) {

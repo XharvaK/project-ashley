@@ -1413,4 +1413,99 @@ describe("Thought provider deadline truth and bounded usage telemetry", () => {
     expect(withoutUsage.result.published).toBe(withUsage.result.published);
     expect(withoutUsage.result.infrastructureNotice).toBe(withUsage.result.infrastructureNotice);
   });
+
+  it("reports the observed affinity-transport truth on successful Thought", async () => {
+    const sidecar = openTestSidecar();
+    const attentionDb = openTestSidecar();
+    const obsDb = new DatabaseSync(":memory:");
+    initObservabilitySchema(obsDb);
+    const { event } = admitDeadlineCycle(sidecar, "thread-affinity-truth");
+    const completeChat: KernelDeps["completeChat"] = async () => ({
+      text: JSON.stringify(makeSemanticSettlement()),
+      model: "fake",
+      modelAlias: "thought",
+      resolvedModelId: null,
+      providerBoundaryTransport: {
+        sessionAffinityApplied: true,
+        affinityPolicy: "cloudflare_thought_route_affinity_v1",
+      },
+      modelFabric: {
+        receipt: {
+          receiptStage: "resolved",
+          attempts: [{
+            receiptStage: "provider_response",
+            dispatchTruth: "response_received",
+            providerRequestCount: 1,
+            usage: { inputTokens: 7, outputTokens: 1, cachedInputTokens: null, reasoningTokens: null, providerReported: true },
+          }],
+        },
+        providerBoundaryTransport: {
+          sessionAffinityApplied: true,
+          affinityPolicy: "cloudflare_thought_route_affinity_v1",
+        },
+      } as any,
+    });
+    try {
+      const result = await runCognitiveCycle(sidecar, attentionDb, event, deps({
+        attentionDb, completeChat, observabilityDb: obsDb,
+      }));
+      expect(result.published).toBe(true);
+      const store = openObservabilityStore(obsDb);
+      const returned = store.listDiagnostics().filter((row) => row.code === "provider_returned");
+      expect(returned).toHaveLength(1);
+      expect(returned[0].providerFailure).toMatchObject({
+        sessionAffinityApplied: true,
+        affinityPolicy: "cloudflare_thought_route_affinity_v1",
+      });
+      const stored = obsDb.prepare(
+        "SELECT provider_failure_json FROM thought_dispatch_diagnostics",
+      ).get() as { provider_failure_json: string };
+      expect(stored.provider_failure_json).toContain("cloudflare_thought_route_affinity_v1");
+    } finally {
+      obsDb.close();
+      sidecar.close();
+      attentionDb.close();
+    }
+  });
+
+  it("preserves applied affinity truth on a failed Thought attempt without changing classification", async () => {
+    const sidecar = openTestSidecar();
+    const attentionDb = openTestSidecar();
+    const obsDb = new DatabaseSync(":memory:");
+    initObservabilitySchema(obsDb);
+    const { event } = admitDeadlineCycle(sidecar, "thread-affinity-failure-truth");
+    const completeChat: KernelDeps["completeChat"] = async () => {
+      const error = new AppError("provider_unavailable", "Cloudflare Workers AI unavailable", 503);
+      (error as unknown as Record<string, unknown>).modelFabric = {
+        receipt: {
+          receiptStage: "resolved",
+          attempts: [{ dispatchTruth: "response_received", providerRequestCount: 1 }],
+        },
+        failure: { sanitizedCauseClass: "provider_unavailable" },
+        providerBoundaryTransport: {
+          sessionAffinityApplied: true,
+          affinityPolicy: "cloudflare_thought_route_affinity_v1",
+        },
+      };
+      throw error;
+    };
+    try {
+      const result = await runCognitiveCycle(sidecar, attentionDb, event, deps({
+        attentionDb, completeChat, observabilityDb: obsDb,
+      }));
+      expect(result.published).toBe(false);
+      const store = openObservabilityStore(obsDb);
+      const diagnostics = store.listDiagnostics();
+      expect(diagnostics).toHaveLength(1);
+      expect(diagnostics[0].providerFailure).toMatchObject({
+        failureClass: "provider_unavailable",
+        sessionAffinityApplied: true,
+        affinityPolicy: "cloudflare_thought_route_affinity_v1",
+      });
+    } finally {
+      obsDb.close();
+      sidecar.close();
+      attentionDb.close();
+    }
+  });
 });

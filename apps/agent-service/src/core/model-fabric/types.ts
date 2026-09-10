@@ -520,5 +520,10 @@ export type ModelFabricDispatchMetadata = {
   providerBoundaryControls?: import("../model-routing/types.js").ProviderBoundaryControls;
   /** Timing measured around the adapter call. */
   providerBoundaryTiming?: import("../model-routing/types.js").ProviderBoundaryTiming;
+  /**
+   * Adapter-observed affinity-transport truth preserved through metadata.
+   * Model Fabric never selects affinity; it only carries the observation.
+   */
+  providerBoundaryTransport?: import("../model-routing/types.js").ProviderBoundaryTransport;
   capabilityIdentity?: import("./capability-identity.js").ThoughtCapabilityIdentity;
 };

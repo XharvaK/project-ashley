@@ -2,7 +2,9 @@ import { env } from "../../../env.js";
 import { AppError } from "../../../errors.js";
 import { sha256Text } from "../../model-fabric/hash.js";
 import {
+  attachProviderBoundaryTransport,
   attachProviderHttpStatusBoundary,
+  PROVIDER_BOUNDARY_TRANSPORT_ABSENT,
   providerHttpStatusFromBoundary,
   validateProviderHttpStatus,
 } from "../types.js";
@@ -10,6 +12,7 @@ import type {
   ChatMessage,
   CompletionOptions,
   ModelProviderAdapter,
+  ProviderBoundaryTransport,
   ProviderCompletion,
   ProviderDispatchArgs,
   ProviderFinishReasonClass,
@@ -26,6 +29,9 @@ const CLOUDFLARE_MODEL = "@cf/nvidia/nemotron-3-120b-a12b";
 const DEEPSEEK_THOUGHT_MODEL = "@cf/deepseek-ai/deepseek-v4-flash-0731";
 const THOUGHT_SEMANTIC_CONTRACT_ID = "ashley.thought.semantic.v2";
 const THOUGHT_SEMANTIC_SCHEMA_ID = "ashley.thought.semantic.v2.schema";
+const THOUGHT_AFFINITY_BINDING_ID = "compat_thought_cloudflare_deepseek_v4_flash_json_object_v1";
+const THOUGHT_AFFINITY_POLICY = "cloudflare_thought_route_affinity_v1" as const;
+const SESSION_AFFINITY_HEADER = "x-session-affinity";
 const CLOUDFLARE_ERROR_CODE_BOUNDARY = "__ashley_cloudflare_error_code" as const;
 const CLOUDFLARE_ERROR_CLASS_BOUNDARY = "__ashley_cloudflare_error_class" as const;
 const CLOUDFLARE_ERROR_MESSAGE_BOUNDARY = "__ashley_cloudflare_error_message" as const;
@@ -70,6 +76,56 @@ function isDeepSeekThoughtJsonObject(
     && structuredOutput?.kind === "json_object_compatibility"
     && structuredOutput.contractId === THOUGHT_SEMANTIC_CONTRACT_ID
     && structuredOutput.schemaId === THOUGHT_SEMANTIC_SCHEMA_ID;
+}
+
+/**
+ * True only for the exact current Cloudflare DeepSeek Thought wire: the
+ * configured DeepSeek model plus the trusted json_object_compatibility
+ * Thought binding. Grounded in Model Fabric translation facts available at
+ * the adapter boundary — never in message contents or caller claims.
+ */
+export function isThoughtRouteAffinityEligible(
+  model: string,
+  structuredOutput?: TrustedStructuredOutputControl,
+): boolean {
+  return isDeepSeekThoughtJsonObject(model, structuredOutput)
+    && structuredOutput?.bindingId === THOUGHT_AFFINITY_BINDING_ID;
+}
+
+export type ThoughtRouteAffinityResolution = Readonly<{
+  /** True only when the outgoing fetch will carry the affinity header. */
+  applied: boolean;
+  /** Observed transport truth for this attempt; never the raw identifier. */
+  transport: ProviderBoundaryTransport;
+  /** Configured opaque identifier; header use only, never persisted. */
+  value: string | null;
+}>;
+
+/**
+ * Resolve affinity for one dispatch. The identifier is Host/operator
+ * configuration read at dispatch time; eligibility is trusted translation
+ * state. Anything other than eligible-plus-configured resolves to absent.
+ */
+export function resolveThoughtRouteAffinity(
+  model: string,
+  structuredOutput?: TrustedStructuredOutputControl,
+): ThoughtRouteAffinityResolution {
+  const configured = env.cloudflareThoughtAffinityId;
+  if (!isThoughtRouteAffinityEligible(model, structuredOutput) || !configured) {
+    return {
+      applied: false,
+      transport: PROVIDER_BOUNDARY_TRANSPORT_ABSENT,
+      value: null,
+    };
+  }
+  return {
+    applied: true,
+    transport: Object.freeze({
+      sessionAffinityApplied: true,
+      affinityPolicy: THOUGHT_AFFINITY_POLICY,
+    }),
+    value: configured,
+  };
 }
 
 function messagesForCloudflareWire(
@@ -599,16 +655,24 @@ export function createCloudflareAdapter(
         structuredOutput: args.fabricStructuredOutput,
       });
       const url = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(env.cloudflareAccountId)}/ai/v1/chat/completions`;
-      const response = await fetchFn(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${env.cloudflareApiToken}`,
-        },
-        body: JSON.stringify(body),
-        signal: args.signal,
-      });
-      const providerHttpStatus = validateProviderHttpStatus(response.status);
+      // Affinity is transport metadata only: the body above is already final
+      // and byte-identical whether or not the header below is attached.
+      const affinity = resolveThoughtRouteAffinity(args.modelId, args.fabricStructuredOutput);
+      const transport = affinity.transport;
+      try {
+        const response = await fetchFn(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${env.cloudflareApiToken}`,
+            ...(affinity.applied && affinity.value !== null
+              ? { [SESSION_AFFINITY_HEADER]: affinity.value }
+              : {}),
+          },
+          body: JSON.stringify(body),
+          signal: args.signal,
+        });
+        const providerHttpStatus = validateProviderHttpStatus(response.status);
       if (!response.ok) {
         await providerFailure(response, args.modelId);
       }
@@ -649,7 +713,16 @@ export function createCloudflareAdapter(
           ...(reasoningHash ? { reasoningHash } : {}),
         },
         wireEvidence,
+        providerBoundaryTransport: transport,
       } satisfies ProviderCompletion;
+      } catch (error) {
+        // The fetch above was constructed/invoked with the resolved
+        // transport, so the observed applied/policy truth survives HTTP
+        // failures, transport errors, and deadline/cancellation paths.
+        // The raw affinity identifier is never attached to the error.
+        attachProviderBoundaryTransport(error, transport);
+        throw error;
+      }
     },
   };
 }

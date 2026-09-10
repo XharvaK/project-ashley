@@ -123,6 +123,61 @@ export type ProviderBoundaryTiming = Readonly<{
 }>;
 
 /**
+ * Observed provider-transport fact minted at the adapter boundary. Records
+ * ONLY whether Ashley attached the intended session-affinity routing header
+ * on one provider attempt. It is never semantic state: it proves nothing
+ * about provider receipt, routing, cache existence, or cache hits.
+ */
+export type ProviderBoundaryTransport = Readonly<{
+  sessionAffinityApplied: boolean;
+  affinityPolicy: "none" | "cloudflare_thought_route_affinity_v1";
+}>;
+
+/** Default transport fact when affinity is not applicable or not configured. */
+export const PROVIDER_BOUNDARY_TRANSPORT_ABSENT: ProviderBoundaryTransport =
+  Object.freeze({ sessionAffinityApplied: false, affinityPolicy: "none" });
+
+const PROVIDER_BOUNDARY_TRANSPORT_KEY = "providerBoundaryTransport" as const;
+
+function isAffinityPolicy(value: unknown): value is ProviderBoundaryTransport["affinityPolicy"] {
+  return value === "none" || value === "cloudflare_thought_route_affinity_v1";
+}
+
+/**
+ * Attach an observed transport fact to a thrown provider error. The fact is
+ * non-enumerable so it never leaks into logs or serialized diagnostics; the
+ * raw affinity identifier is never attached, only the applied/policy truth.
+ */
+export function attachProviderBoundaryTransport(
+  error: unknown,
+  transport: ProviderBoundaryTransport,
+): void {
+  if (!error || (typeof error !== "object" && typeof error !== "function")) return;
+  Object.defineProperty(error, PROVIDER_BOUNDARY_TRANSPORT_KEY, {
+    configurable: true,
+    enumerable: false,
+    value: transport,
+    writable: true,
+  });
+}
+
+/** Recover a validated transport fact from a provider error, if present. */
+export function providerBoundaryTransportFromError(
+  error: unknown,
+): ProviderBoundaryTransport | undefined {
+  if (!error || typeof error !== "object") return undefined;
+  const value = (error as Record<string, unknown>)[PROVIDER_BOUNDARY_TRANSPORT_KEY];
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  if (typeof record.sessionAffinityApplied !== "boolean") return undefined;
+  if (!isAffinityPolicy(record.affinityPolicy)) return undefined;
+  return {
+    sessionAffinityApplied: record.sessionAffinityApplied,
+    affinityPolicy: record.affinityPolicy,
+  };
+}
+
+/**
  * Controls resolved immediately before the provider adapter call. Optional
  * fields stay absent when the current route does not expose them.
  */
@@ -215,6 +270,12 @@ export type ProviderCompletion = {
   responseDiagnostics?: ProviderResponseDiagnostics;
   /** Sanitized evidence of the request emitted by the provider adapter. */
   wireEvidence?: WireDispatchEvidence;
+  /**
+   * Observed transport fact minted by the adapter on the success path
+   * (whether the affinity routing header was attached). Absent when the
+   * adapter does not report one; never carries the raw identifier.
+   */
+  providerBoundaryTransport?: ProviderBoundaryTransport;
 };
 
 export const PROVIDER_HTTP_STATUS_BOUNDARY = "__ashley_provider_http_status" as const;

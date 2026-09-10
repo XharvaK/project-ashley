@@ -6,10 +6,15 @@ import {
   cloudflareRequestWireAdditionalBytes,
   cloudflareErrorClassFromBoundary,
   createCloudflareAdapter,
+  isThoughtRouteAffinityEligible,
   mapCloudflareError,
+  resolveThoughtRouteAffinity,
 } from "./cloudflare-adapter.js";
 import type { ChatMessage } from "../types.js";
-import { providerHttpStatusFromBoundary } from "../types.js";
+import {
+  providerBoundaryTransportFromError,
+  providerHttpStatusFromBoundary,
+} from "../types.js";
 import {
   THOUGHT_OUTPUT_SCHEMA,
   THOUGHT_OUTPUT_SCHEMA_FINGERPRINT,
@@ -20,6 +25,7 @@ import { validateThoughtOutputSchema } from "../../cognitive-v021/qualification/
 
 const originalToken = env.cloudflareApiToken;
 const originalAccount = env.cloudflareAccountId;
+const originalAffinity = env.cloudflareThoughtAffinityId;
 const MODEL = "@cf/nvidia/nemotron-3-120b-a12b";
 const DEEPSEEK_MODEL = "@cf/deepseek-ai/deepseek-v4-flash-0731";
 const messages: ChatMessage[] = [{ role: "user", content: "synthetic qualification input" }];
@@ -27,6 +33,7 @@ const messages: ChatMessage[] = [{ role: "user", content: "synthetic qualificati
 afterEach(() => {
   env.cloudflareApiToken = originalToken;
   env.cloudflareAccountId = originalAccount;
+  env.cloudflareThoughtAffinityId = originalAffinity;
   vi.restoreAllMocks();
 });
 
@@ -374,5 +381,242 @@ describe("cloudflare-adapter", () => {
       ok: false,
       code: "invalid_json",
     });
+  });
+});
+
+describe("cloudflare-adapter thought route session affinity", () => {
+  const AFFINITY_ID = "qual-synthetic-affinity-01";
+
+  function eligibleDispatch() {
+    return {
+      messages,
+      modelId: DEEPSEEK_MODEL,
+      options: { maxTokens: 8192, temperature: 1 },
+      fabricReasoning: { kind: "reasoning_effort", value: "high" } as const,
+      fabricStructuredOutput: deepseekStructuredOutput,
+    };
+  }
+
+  function deepseekOkResponse() {
+    return fakeResponse({
+      id: "cf-deepseek-affinity-1",
+      model: DEEPSEEK_MODEL,
+      choices: [{ message: { content: '{"kind":"abstain"}' }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 100, completion_tokens: 5, total_tokens: 105, cached_tokens: 0 },
+    });
+  }
+
+  it("resolves eligibility only for the exact DeepSeek Thought binding", () => {
+    env.cloudflareThoughtAffinityId = AFFINITY_ID;
+    expect(isThoughtRouteAffinityEligible(DEEPSEEK_MODEL, deepseekStructuredOutput)).toBe(true);
+    // Same model, wrong binding facts: not eligible.
+    expect(isThoughtRouteAffinityEligible(DEEPSEEK_MODEL, {
+      ...deepseekStructuredOutput,
+      bindingId: "compat_thought_cloudflare_deepseek_v4_flash_json_object_v9",
+    })).toBe(false);
+    expect(isThoughtRouteAffinityEligible(DEEPSEEK_MODEL, structuredOutput)).toBe(false);
+    expect(isThoughtRouteAffinityEligible(DEEPSEEK_MODEL, undefined)).toBe(false);
+    // Different Cloudflare model with the Thought binding: not eligible.
+    expect(isThoughtRouteAffinityEligible(MODEL, deepseekStructuredOutput)).toBe(false);
+    expect(isThoughtRouteAffinityEligible("mistral-small-2603", deepseekStructuredOutput)).toBe(false);
+    // Resolver honors configuration on top of eligibility.
+    expect(resolveThoughtRouteAffinity(DEEPSEEK_MODEL, deepseekStructuredOutput)).toMatchObject({
+      applied: true,
+      transport: {
+        sessionAffinityApplied: true,
+        affinityPolicy: "cloudflare_thought_route_affinity_v1",
+      },
+      value: AFFINITY_ID,
+    });
+    env.cloudflareThoughtAffinityId = "";
+    expect(resolveThoughtRouteAffinity(DEEPSEEK_MODEL, deepseekStructuredOutput)).toMatchObject({
+      applied: false,
+      transport: { sessionAffinityApplied: false, affinityPolicy: "none" },
+      value: null,
+    });
+  });
+
+  it("attaches the affinity header and reports applied truth on the eligible route", async () => {
+    env.cloudflareApiToken = "test-token";
+    env.cloudflareAccountId = "account-test";
+    env.cloudflareThoughtAffinityId = AFFINITY_ID;
+    let capturedInit: RequestInit | undefined;
+    const adapter = createCloudflareAdapter(async (_url, init) => {
+      capturedInit = init;
+      return deepseekOkResponse();
+    });
+
+    const result = await adapter.dispatch(eligibleDispatch());
+
+    expect((capturedInit?.headers as Record<string, string>)["x-session-affinity"]).toBe(AFFINITY_ID);
+    expect((capturedInit?.headers as Record<string, string>).Authorization).toBe("Bearer test-token");
+    expect(result.providerBoundaryTransport).toEqual({
+      sessionAffinityApplied: true,
+      affinityPolicy: "cloudflare_thought_route_affinity_v1",
+    });
+    expect(result.providerRequestId).toBe("cf-deepseek-affinity-1");
+  });
+
+  it("omits the header and reports absent truth when affinity is not configured", async () => {
+    env.cloudflareApiToken = "test-token";
+    env.cloudflareAccountId = "account-test";
+    env.cloudflareThoughtAffinityId = "";
+    let capturedInit: RequestInit | undefined;
+    const adapter = createCloudflareAdapter(async (_url, init) => {
+      capturedInit = init;
+      return deepseekOkResponse();
+    });
+
+    const result = await adapter.dispatch(eligibleDispatch());
+
+    expect((capturedInit?.headers as Record<string, string>)["x-session-affinity"]).toBeUndefined();
+    expect(result.providerBoundaryTransport).toEqual({
+      sessionAffinityApplied: false,
+      affinityPolicy: "none",
+    });
+  });
+
+  it.each([
+    ["different model", MODEL, deepseekStructuredOutput],
+    ["wrong binding", DEEPSEEK_MODEL, { ...deepseekStructuredOutput, bindingId: "compat_other_binding_v1" }],
+    ["native binding", DEEPSEEK_MODEL, structuredOutput],
+    ["no structured output", DEEPSEEK_MODEL, undefined],
+  ])("omits the header for ineligible dispatch: %s", async (_label, modelId, fabricStructuredOutput) => {
+    env.cloudflareApiToken = "test-token";
+    env.cloudflareAccountId = "account-test";
+    env.cloudflareThoughtAffinityId = AFFINITY_ID;
+    let capturedInit: RequestInit | undefined;
+    const adapter = createCloudflareAdapter(async (_url, init) => {
+      capturedInit = init;
+      return fakeResponse({
+        id: "cf-ineligible-1",
+        model: modelId,
+        choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 3, completion_tokens: 1 },
+      });
+    });
+
+    const result = await adapter.dispatch({
+      messages,
+      modelId,
+      options: { maxTokens: 64 },
+      ...(fabricStructuredOutput ? { fabricStructuredOutput } : {}),
+    });
+
+    expect((capturedInit?.headers as Record<string, string>)["x-session-affinity"]).toBeUndefined();
+    expect(result.providerBoundaryTransport).toEqual({
+      sessionAffinityApplied: false,
+      affinityPolicy: "none",
+    });
+  });
+
+  it("keeps the request body byte-identical with affinity on versus off", async () => {
+    env.cloudflareApiToken = "test-token";
+    env.cloudflareAccountId = "account-test";
+    const bodies: string[] = [];
+    const digests: Array<string | undefined> = [];
+    const headerKeys: string[][] = [];
+    for (const affinityId of [AFFINITY_ID, ""]) {
+      env.cloudflareThoughtAffinityId = affinityId;
+      let capturedInit: RequestInit | undefined;
+      const adapter = createCloudflareAdapter(async (_url, init) => {
+        capturedInit = init;
+        return deepseekOkResponse();
+      });
+      const result = await adapter.dispatch(eligibleDispatch());
+      bodies.push(capturedInit?.body as string);
+      digests.push(result.wireEvidence?.sanitizedBodyDigest);
+      headerKeys.push(Object.keys((capturedInit?.headers as Record<string, string>) ?? {}).sort());
+    }
+
+    expect(bodies[0]).toBe(bodies[1]);
+    expect(digests[0]).toBe(digests[1]);
+    expect(headerKeys[0]).toEqual([...headerKeys[1], "x-session-affinity"].sort());
+  });
+
+  it("preserves applied truth and failure classification on HTTP failure after dispatch", async () => {
+    env.cloudflareApiToken = "test-token";
+    env.cloudflareAccountId = "account-test";
+    env.cloudflareThoughtAffinityId = AFFINITY_ID;
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const adapter = createCloudflareAdapter(async () =>
+      fakeResponse({ error: { message: "busy" } }, { status: 429 }),
+    );
+
+    let error: unknown;
+    try {
+      await adapter.dispatch(eligibleDispatch());
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toMatchObject({ code: "rate_limited" });
+    expect(providerHttpStatusFromBoundary(error)).toBe(429);
+    expect(providerBoundaryTransportFromError(error)).toEqual({
+      sessionAffinityApplied: true,
+      affinityPolicy: "cloudflare_thought_route_affinity_v1",
+    });
+  });
+
+  it("preserves applied truth when the provider fetch itself throws", async () => {
+    env.cloudflareApiToken = "test-token";
+    env.cloudflareAccountId = "account-test";
+    env.cloudflareThoughtAffinityId = AFFINITY_ID;
+    const adapter = createCloudflareAdapter(async () => {
+      throw new TypeError("fetch failed");
+    });
+
+    let error: unknown;
+    try {
+      await adapter.dispatch(eligibleDispatch());
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(TypeError);
+    expect(providerBoundaryTransportFromError(error)).toEqual({
+      sessionAffinityApplied: true,
+      affinityPolicy: "cloudflare_thought_route_affinity_v1",
+    });
+  });
+
+  it("reports absent truth on failure when affinity is not configured", async () => {
+    env.cloudflareApiToken = "test-token";
+    env.cloudflareAccountId = "account-test";
+    env.cloudflareThoughtAffinityId = "";
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const adapter = createCloudflareAdapter(async () =>
+      fakeResponse({ error: { message: "busy" } }, { status: 429 }),
+    );
+
+    let error: unknown;
+    try {
+      await adapter.dispatch(eligibleDispatch());
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toMatchObject({ code: "rate_limited" });
+    expect(providerBoundaryTransportFromError(error)).toEqual({
+      sessionAffinityApplied: false,
+      affinityPolicy: "none",
+    });
+  });
+
+  it("never exposes the raw affinity id outside the outbound header", async () => {
+    env.cloudflareApiToken = "test-token";
+    env.cloudflareAccountId = "account-test";
+    env.cloudflareThoughtAffinityId = AFFINITY_ID;
+    let capturedInit: RequestInit | undefined;
+    const adapter = createCloudflareAdapter(async (_url, init) => {
+      capturedInit = init;
+      return deepseekOkResponse();
+    });
+
+    const result = await adapter.dispatch(eligibleDispatch());
+
+    expect(capturedInit?.body as string).not.toContain(AFFINITY_ID);
+    expect(JSON.stringify(result)).not.toContain(AFFINITY_ID);
+    expect(JSON.stringify(messages)).not.toContain(AFFINITY_ID);
   });
 });

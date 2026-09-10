@@ -23,6 +23,11 @@ import type {
   ProviderDispatchArgs,
 } from "./core/model-routing/types.js";
 import { attachProviderHttpStatusBoundary } from "./core/model-routing/types.js";
+import {
+  attachProviderBoundaryTransport,
+  providerBoundaryTransportFromError,
+} from "./core/model-routing/types.js";
+import { metadataFromError } from "./core/model-fabric/receipts.js";
 
 const originalApiKey = env.mistralApiKey;
 const originalSecondaryApiKey = env.mistralApiKeySecondary;
@@ -233,6 +238,104 @@ describe("mapMistralError", () => {
             maxTokens: 8192,
           },
         },
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("preserves adapter-observed affinity transport on Thought success", async () => {
+    env.cloudflareApiToken = "test-cloudflare-token";
+    env.cloudflareAccountId = "test-cloudflare-account";
+    env.nimApiKey = "";
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const dispatch = vi.fn(async (): Promise<ProviderCompletion> => ({
+      text: "{}",
+      providerModel: "@cf/deepseek-ai/deepseek-v4-flash-0731",
+      providerRequestId: "cloudflare-request-2",
+      usage: { promptTokens: 2, completionTokens: 1 },
+      finishReason: "stop",
+      providerBoundaryTransport: {
+        sessionAffinityApplied: true,
+        affinityPolicy: "cloudflare_thought_route_affinity_v1",
+      },
+    }));
+    vi.spyOn(cloudflareAdapterModule, "createCloudflareAdapter").mockReturnValue({
+      provider: "cloudflare",
+      dispatch,
+    });
+    try {
+      const result = await withOfflineAppGateDisabled(() => completeChat(
+        [{ role: "user", content: "synthetic current Thought" }],
+        {
+          attentionDb: db,
+          purpose: "thought",
+          logicalRole: "thought",
+          route: "thought",
+          responseFormat: "json_schema",
+          structuredOutput: thoughtOutputStructuredRequest(),
+          reasoningEffort: "high",
+          deadlineAtMs: Date.now() + 30_000,
+        },
+      ));
+      expect(result.providerBoundaryTransport).toEqual({
+        sessionAffinityApplied: true,
+        affinityPolicy: "cloudflare_thought_route_affinity_v1",
+      });
+      expect(result.modelFabric?.providerBoundaryTransport).toEqual({
+        sessionAffinityApplied: true,
+        affinityPolicy: "cloudflare_thought_route_affinity_v1",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("preserves adapter-observed affinity transport on Thought failure without reclassification", async () => {
+    env.cloudflareApiToken = "test-cloudflare-token";
+    env.cloudflareAccountId = "test-cloudflare-account";
+    env.nimApiKey = "";
+    const db = openNuclearDb(new DatabaseSync(":memory:"));
+    const failure = new AppError("provider_unavailable", "Cloudflare Workers AI unavailable", 503);
+    attachProviderHttpStatusBoundary(failure, 503);
+    attachProviderBoundaryTransport(failure, {
+      sessionAffinityApplied: true,
+      affinityPolicy: "cloudflare_thought_route_affinity_v1",
+    });
+    const dispatch = vi.fn(async (): Promise<ProviderCompletion> => {
+      throw failure;
+    });
+    vi.spyOn(cloudflareAdapterModule, "createCloudflareAdapter").mockReturnValue({
+      provider: "cloudflare",
+      dispatch,
+    });
+    try {
+      let error: unknown;
+      try {
+        await withOfflineAppGateDisabled(() => completeChat(
+          [{ role: "user", content: "synthetic current Thought" }],
+          {
+            attentionDb: db,
+            purpose: "thought",
+            logicalRole: "thought",
+            route: "thought",
+            responseFormat: "json_schema",
+            structuredOutput: thoughtOutputStructuredRequest(),
+            reasoningEffort: "high",
+            deadlineAtMs: Date.now() + 30_000,
+          },
+        ));
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error).toMatchObject({ code: "provider_unavailable" });
+      expect(providerBoundaryTransportFromError(error)).toEqual({
+        sessionAffinityApplied: true,
+        affinityPolicy: "cloudflare_thought_route_affinity_v1",
+      });
+      expect(metadataFromError(error)?.providerBoundaryTransport).toEqual({
+        sessionAffinityApplied: true,
+        affinityPolicy: "cloudflare_thought_route_affinity_v1",
       });
     } finally {
       db.close();

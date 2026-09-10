@@ -8,6 +8,7 @@ const TOUCHED_VARS = [
   "MISTRAL_MODEL",
   "MISTRAL_REQUESTS_PER_SECOND",
   "NIM_API_KEY",
+  "ASHLEY_CLOUDFLARE_THOUGHT_AFFINITY_ID",
   "ASHLEY_SANDBOX_ENGINEERING_LIFECYCLE_ENABLED",
   "ASHLEY_SANDBOX_PROJECT_REGISTRY",
 ];
@@ -100,5 +101,40 @@ describe("NVIDIA configuration", () => {
     expect(env.nimApiKey).toBe("");
     expect(env.nimBaseUrl).toBe("https://integrate.api.nvidia.com/v1");
     expect(validateBoot().ok).toBe(true);
+  });
+});
+
+describe("Cloudflare Thought session affinity", () => {
+  it("stays disabled and boots normally when the affinity id is unset", async () => {
+    const { env, validateBoot } = await loadEnv();
+
+    expect(env.cloudflareThoughtAffinityId).toBe("");
+    expect(validateBoot().ok).toBe(true);
+  });
+
+  it("accepts a valid opaque affinity id", async () => {
+    process.env.ASHLEY_CLOUDFLARE_THOUGHT_AFFINITY_ID = "qual-synthetic-affinity-01";
+    const { env, validateBoot } = await loadEnv();
+
+    expect(env.cloudflareThoughtAffinityId).toBe("qual-synthetic-affinity-01");
+    expect(validateBoot().ok).toBe(true);
+  });
+
+  it.each([
+    ["too-short", "abc"],
+    ["empty", ""],
+    ["whitespace", "   "],
+    ["spaces", "has spaces in it 123456"],
+    ["punctuation", "12345678901234567890123456789012!"],
+    ["content-derived", "user hello world, affinity please?"],
+  ])("fails boot validation for a %s configured value", async (_label, value) => {
+    process.env.ASHLEY_CLOUDFLARE_THOUGHT_AFFINITY_ID = value;
+    const { env, validateBoot } = await loadEnv();
+
+    expect(env.cloudflareThoughtAffinityId).toBe("");
+    expect(validateBoot().ok).toBe(false);
+    expect(validateBoot().errors).toContain(
+      "ASHLEY_CLOUDFLARE_THOUGHT_AFFINITY_ID must be 16-128 chars of [A-Za-z0-9_-]",
+    );
   });
 });

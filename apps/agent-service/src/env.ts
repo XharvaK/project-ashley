@@ -79,6 +79,26 @@ function strictTrimmed(name: string, fallback: string): string {
   return trimmed;
 }
 
+/**
+ * Host-owned Cloudflare Thought session-affinity identifier. Undefined means
+ * affinity is intentionally disabled and boots normally. A defined value must
+ * be opaque operator configuration (16–128 chars of [A-Za-z0-9_-]); anything
+ * else is a boot/config validation failure, never silently disabled. This is
+ * Ashley's Host validation policy, not a Cloudflare syntax requirement.
+ */
+function cloudflareThoughtAffinityId(): string {
+  const raw = process.env.ASHLEY_CLOUDFLARE_THOUGHT_AFFINITY_ID;
+  if (raw === undefined) return "";
+  const trimmed = raw.trim();
+  if (!/^[A-Za-z0-9_-]{16,128}$/.test(trimmed)) {
+    bootErrors.push(
+      "ASHLEY_CLOUDFLARE_THOUGHT_AFFINITY_ID must be 16-128 chars of [A-Za-z0-9_-]",
+    );
+    return "";
+  }
+  return trimmed;
+}
+
 function createEnv() {
   bootErrors = [];
   numericWarnings = [];
@@ -160,6 +180,10 @@ function createEnv() {
   // the direct account endpoint; neither value is logged or sent to Thought.
   cloudflareApiToken: process.env.CLOUDFLARE_API_TOKEN ?? "",
   cloudflareAccountId: process.env.CLOUDFLARE_ACCOUNT_ID ?? "",
+  // Stable Host-owned routing-locality identifier for the exact Cloudflare
+  // DeepSeek Thought route. Non-secret, opaque, never model-visible, never
+  // logged raw. Empty/unset means affinity is intentionally disabled.
+  cloudflareThoughtAffinityId: cloudflareThoughtAffinityId(),
   // OpenCode Zen is a dark, utility-only Track A substrate. Missing key does
   // not affect boot or current compatibility routing.
   opencodeZenApiKey: process.env.OPENCODE_ZEN_API_KEY ?? "",
