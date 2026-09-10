@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { admitTestCycle, openTestSidecar } from "../test-support.js";
-import { getInFlight, getEffectReceipt } from "./in-flight.js";
+import { getInFlight, getEffectReceipt, putInFlight } from "./in-flight.js";
 import { createEffectProposal, dispatchEffect } from "./proposal.js";
 
 describe("v0.2.1 effect proposal", () => {
@@ -98,6 +98,24 @@ describe("v0.2.1 effect proposal", () => {
       expect(record1).toMatchObject({ originEventId: "event-A", originAttemptId: "attempt-1" });
       expect(record2).toMatchObject({ originEventId: "event-B", originAttemptId: null });
       expect(record1?.originEventId).not.toBe(record2?.originEventId);
+    } finally { db.close(); }
+  });
+
+  it("labels false dispatch results with authority or dispatch origin", async () => {
+    // Provenance for terminal classification: an Authority verdict rejects
+    // with origin "authority", while dispatch-mechanics refusal (occupied
+    // idempotency key) carries origin "dispatch" even though its code
+    // IN_FLIGHT_UNKNOWN is also a genuine AuthorityCode elsewhere.
+    const db = openTestSidecar();
+    try {
+      admitTestCycle(db, { cycleId: "c-origin", conversationId: "thread-1", generation: 1, triggerKind: "owner_message", triggerRef: "c-origin", occupantId: "doc", nowMs: 1 });
+      const epochMismatch = createEffectProposal({ cycleId: "c-origin", generation: 1, authorityEpoch: 1, kind: "workspace.read_file", request: { path: "x" }, originEventId: "c-origin" });
+      const authorityResult = await dispatchEffect(db, epochMismatch, { authorityEpoch: 2 }, async () => ({ ok: true }));
+      expect(authorityResult).toMatchObject({ dispatched: false, codes: ["DISPATCH_EPOCH_CHANGED"], origin: "authority" });
+      const occupant = createEffectProposal({ cycleId: "c-origin", generation: 1, authorityEpoch: 1, idempotencyKey: "idem-origin", kind: "workspace.read_file", request: { path: "x" }, originEventId: "c-origin" });
+      putInFlight(db, { effectId: "effect-occupant", cycleId: "c-origin", generation: 1, correlationId: "corr-origin", idempotencyKey: "idem-origin", payload: {}, originEventId: "c-origin", originAttemptId: null });
+      const dispatchResult = await dispatchEffect(db, occupant, { authorityEpoch: 1, generation: 1 }, async () => ({ ok: true }));
+      expect(dispatchResult).toMatchObject({ dispatched: false, codes: ["IN_FLIGHT_UNKNOWN"], origin: "dispatch" });
     } finally { db.close(); }
   });
 });

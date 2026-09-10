@@ -2487,10 +2487,18 @@ export async function runCognitiveCycle(
             thoughtExecutionProvenance: currentExecutionProvenance(),
           });
         }
+        // Classify from the producer-proven origin, never from child
+        // strings: IN_FLIGHT_UNKNOWN is polysemous (also a genuine
+        // AuthorityCode), so only an authority-originated dispatch verdict
+        // is AUTHORITY_REJECTED. Dispatch-mechanics refusal (e.g. an
+        // occupied idempotency key) is an operation-dispatch failure.
+        const dispatchTerminal = dispatch.origin === "authority"
+          ? makeThoughtTerminal("authority", { codes: dispatch.codes, stage: "effect_dispatch" })
+          : makeThoughtTerminal("operation_dispatch", { codes: dispatch.codes, stage: "effect_dispatch" });
         return emitFailure(
           dispatch.codes.join(",") || "effect_unavailable",
           undefined,
-          makeThoughtTerminal("authority", { codes: dispatch.codes, stage: "effect_dispatch" }),
+          dispatchTerminal,
         );
       }
       inFlight = listInFlight(sidecar, cycle.cycleId);

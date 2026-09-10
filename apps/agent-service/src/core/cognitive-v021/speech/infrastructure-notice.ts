@@ -340,7 +340,8 @@ export type EmitInfrastructureNoticeInput = {
    * Typed terminal descriptor for presentation. When present, Owner-facing
    * classification uses the proven family (never comma-string parsing).
    * `reason` remains the exact legacy marker for the notice key and C3
-   * behavior preservation.
+   * behavior preservation. Typed detail never participates in notice
+   * identity: the notice key is exactly the pre-packet formula.
    */
   terminal?: ThoughtTerminalDescriptor;
   origin?: OutboxOrigin;
@@ -451,14 +452,13 @@ export function emitInfrastructureNotice(
   const cycle = input.cycleId ?? "none";
   const generation = input.generation == null ? "none" : String(input.generation);
   const reason = input.reason.trim() || "unavailable";
-  // Preserve the exact legacy reason in the key for C3/key behavior, plus a
-  // deterministic bounded suffix of the structured child codes when a typed
-  // terminal is present. Sorting makes the key permutation-insensitive;
-  // classification never parses this string.
-  const terminalSuffix = input.terminal && input.terminal.codes.length > 0
-    ? `:${[...new Set(input.terminal.codes)].sort().join("+").slice(0, 256)}`
-    : "";
-  const noticeKey = `thought_failure:${input.conversationId}:${cycle}:${generation}:${reason}${terminalSuffix}`;
+  // FAILURE-TRUTH-COMPLETENESS-01 correction: notice identity is exactly the
+  // pre-packet formula. Typed terminal detail classifies presentation only
+  // and must never split one logical notice into multiple notices. C3 also
+  // infers the legacy reason from the final key segment, so any suffix would
+  // corrupt that inference as well as idempotence.
+  const noticeKey =
+    `thought_failure:${input.conversationId}:${cycle}:${generation}:${reason}`;
   const existing = getSystemNoticeByKey(db, noticeKey);
   if (existing) return existing;
 

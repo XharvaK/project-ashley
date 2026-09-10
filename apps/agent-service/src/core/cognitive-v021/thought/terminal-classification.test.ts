@@ -83,7 +83,7 @@ describe("FAILURE-TRUTH-COMPLETENESS-01 producer-to-notice", () => {
     // DRAFT_COMMITMENT_CONFLICT is revisable, so a persistent conflict revises
     // twice and then exhausts. Terminal cause is exhaustion; the last fidelity
     // objection is retained as its cause rather than replacing exhaustion.
-    const { sidecar, attentionDb, event } = setupThread("thread-fidelity-conflict");
+    const { sidecar, attentionDb, cycle, event } = setupThread("thread-fidelity-conflict");
     const completeChat = vi.fn(async () => ({
       text: JSON.stringify(makeSemanticSettlement({
         speech: { mode: "draft", mustSay: ["required phrase never written"], surfaceDraft: "hello" },
@@ -97,8 +97,12 @@ describe("FAILURE-TRUTH-COMPLETENESS-01 producer-to-notice", () => {
         `${THOUGHT_UNAVAILABLE_NOTICE} Error code: THOUGHT_BUDGET_EXHAUSTED`,
       );
       const key = (sidecar.prepare("SELECT notice_key FROM system_notice_outbox").get() as { notice_key: string }).notice_key;
-      expect(key).toContain("revision_exhausted");
-      expect(key).toContain("DRAFT_COMMITMENT_CONFLICT");
+      // Notice identity is exactly the pre-packet formula: conversation,
+      // cycle, generation, legacy reason. Typed child codes (retained for
+      // presentation/diagnostics) never participate in identity.
+      expect(key).toBe(
+        `thought_failure:thread-fidelity-conflict:${cycle.cycleId}:${cycle.generation}:revision_exhausted`,
+      );
     } finally {
       sidecar.close();
       attentionDb.close();
@@ -106,7 +110,7 @@ describe("FAILURE-TRUTH-COMPLETENESS-01 producer-to-notice", () => {
   });
 
   it("maps multi-code authority rejection to AUTHORITY_REJECTED", async () => {
-    const { sidecar, attentionDb, event } = setupThread("thread-authority-join");
+    const { sidecar, attentionDb, cycle, event } = setupThread("thread-authority-join");
     const completeChat = vi.fn(async () => ({
       text: JSON.stringify(makeSemanticSettlement()),
       model: "fake", modelAlias: "thought", resolvedModelId: null,
@@ -127,8 +131,9 @@ describe("FAILURE-TRUTH-COMPLETENESS-01 producer-to-notice", () => {
         `${THOUGHT_UNAVAILABLE_NOTICE} Error code: AUTHORITY_REJECTED`,
       );
       const key = (sidecar.prepare("SELECT notice_key FROM system_notice_outbox").get() as { notice_key: string }).notice_key;
-      expect(key).toContain("CAPABILITY_UNAVAILABLE");
-      expect(key).toContain("EFFECT_NOT_AUTHORIZED");
+      expect(key).toBe(
+        `thought_failure:thread-authority-join:${cycle.cycleId}:${cycle.generation}:CAPABILITY_UNAVAILABLE,EFFECT_NOT_AUTHORIZED`,
+      );
     } finally {
       sidecar.close();
       attentionDb.close();
@@ -244,9 +249,109 @@ describe("FAILURE-TRUTH-COMPLETENESS-01 producer-to-notice", () => {
       expect(notice.noticeText).toBe(
         `${THOUGHT_UNAVAILABLE_NOTICE} Error code: STRUCTURED_OUTPUT_INVALID`,
       );
-      expect(notice.noticeKey).toContain(validation.codes[0]);
+      expect(notice.noticeKey).toBe("thought_failure:thread-validation:cycle-validation:1:malformed");
     } finally {
       db.close();
+    }
+  });
+
+  it("maps occupied-idempotency effect dispatch to OPERATION_DISPATCH_FAILED, never AUTHORITY_REJECTED", async () => {
+    // Real producer path: the model emits effect_intent, the bound proposal's
+    // idempotency key is already occupied by an in-flight record, so the real
+    // dispatchEffect returns IN_FLIGHT_UNKNOWN with dispatch (non-authority)
+    // origin. That must not surface as AUTHORITY_REJECTED even though
+    // IN_FLIGHT_UNKNOWN is also a genuine AuthorityCode elsewhere.
+    const { sidecar, attentionDb, cycle, event } = setupThread("thread-effect-inflight");
+    const { sha256 } = await import("../../model-fabric/hash.js");
+    const { putInFlight } = await import("../effect/in-flight.js");
+    const intent = {
+      kind: "effect_intent",
+      operationKind: "workspace.write_file",
+      request: { projectId: "project-ashley", path: "src/inflight.ts" },
+      purpose: "try the operation",
+      expectedOutcome: "the file is written",
+      existingRefs: ["owner-1"],
+    };
+    // The binding hash is stable (sorted keys), so the pre-computed key is
+    // exactly the key the producer will bind for this intent.
+    const identity = sha256({ cycleId: cycle.cycleId, generation: cycle.generation, intent });
+    putInFlight(sidecar, {
+      effectId: "effect-occupant",
+      cycleId: cycle.cycleId,
+      generation: cycle.generation,
+      correlationId: "corr-occupant",
+      idempotencyKey: `thought-effect:${cycle.cycleId}:${cycle.generation}:${identity}`,
+      payload: {},
+      originEventId: event.id,
+      originAttemptId: null,
+    });
+    const completeChat = vi.fn(async () => ({
+      text: JSON.stringify(intent),
+      model: "fake", modelAlias: "thought", resolvedModelId: null,
+    }));
+    const executeEffect = vi.fn();
+    try {
+      const result = await runCognitiveCycle(
+        sidecar, attentionDb, event, deps({ attentionDb, completeChat, executeEffect }),
+      );
+      expect(result.published).toBe(false);
+      expect(executeEffect).not.toHaveBeenCalled();
+      expect(result.infrastructureNotice).toBe(
+        `${THOUGHT_UNAVAILABLE_NOTICE} Error code: OPERATION_DISPATCH_FAILED`,
+      );
+      const key = (sidecar.prepare("SELECT notice_key FROM system_notice_outbox").get() as { notice_key: string }).notice_key;
+      expect(key).toBe(
+        `thought_failure:thread-effect-inflight:${cycle.cycleId}:${cycle.generation}:IN_FLIGHT_UNKNOWN`,
+      );
+    } finally {
+      sidecar.close();
+      attentionDb.close();
+    }
+  });
+
+  it("keeps genuine dispatch-stage authority rejection as AUTHORITY_REJECTED", async () => {
+    // Same real producer path, but the dispatch-time Authority verdict
+    // itself rejects (relational withdrawal against a write-kind proposal),
+    // so the authority family must still surface as AUTHORITY_REJECTED.
+    const { sidecar, attentionDb, event } = setupThread("thread-effect-withdrawal");
+    const intent = {
+      kind: "effect_intent",
+      operationKind: "workspace.write_file",
+      request: { projectId: "project-ashley", path: "src/withdrawn.ts" },
+      purpose: "try the operation",
+      expectedOutcome: "the file is written",
+      existingRefs: ["owner-1"],
+    };
+    const completeChat = vi.fn(async () => ({
+      text: JSON.stringify(intent),
+      model: "fake", modelAlias: "thought", resolvedModelId: null,
+    }));
+    const executeEffect = vi.fn();
+    try {
+      const result = await runCognitiveCycle(
+        sidecar,
+        attentionDb,
+        event,
+        deps({
+          attentionDb,
+          completeChat,
+          executeEffect,
+          loadAuthorityPacks: () => ({
+            epistemic: { allowInferredWorldClaims: false }, currentness: { requireObservationForLatest: true },
+            receipt: { receiptsByEffectId: {} }, capability: capabilityReality,
+            operational: { sandboxAvailable: false }, relational: { withdrawalActive: true, neverMention: [] },
+            stateEpoch: { authorityEpoch: 1 },
+          }),
+        }),
+      );
+      expect(result.published).toBe(false);
+      expect(executeEffect).not.toHaveBeenCalled();
+      expect(result.infrastructureNotice).toBe(
+        `${THOUGHT_UNAVAILABLE_NOTICE} Error code: AUTHORITY_REJECTED`,
+      );
+    } finally {
+      sidecar.close();
+      attentionDb.close();
     }
   });
 

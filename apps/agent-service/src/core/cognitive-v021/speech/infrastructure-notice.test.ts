@@ -183,26 +183,43 @@ describe("FAILURE-TRUTH-COMPLETENESS-01 terminal classification", () => {
       .toBe("UNKNOWN");
   });
 
-  it("emits typed terminals with exact codes preserved in the notice key", () => {
+  it("keeps notice identity independent of typed diagnostic child codes", () => {
+    // Same conversation/cycle/generation/reason but meaningfully different
+    // child-code sets (and stages) must deduplicate to the SAME notice.
+    // Typed diagnostic detail classifies presentation only and must never
+    // split one logical notice into multiple notices.
     const db = openTestSidecar();
     try {
-      admitTestCycle(db, { cycleId: "cycle-terminal", conversationId: "thread-terminal", triggerKind: "owner_message", occupantId: "doc", nowMs: 1 });
-      const notice = emitInfrastructureNotice(db, {
+      admitTestCycle(db, { cycleId: "cycle-dedup", conversationId: "thread-dedup", triggerKind: "owner_message", occupantId: "doc", nowMs: 1 });
+      const base = {
         ownerId: "doc",
         channel: "discord",
-        threadId: "thread-terminal",
-        conversationId: "thread-terminal",
-        cycleId: "cycle-terminal",
+        threadId: "thread-dedup",
+        conversationId: "thread-dedup",
+        cycleId: "cycle-dedup",
         generation: 1,
-        reason: "RECEIPT_REQUIRED,IN_FLIGHT_UNKNOWN",
+        reason: "authority_rejected",
+      } as const;
+      const first = emitInfrastructureNotice(db, {
+        ...base,
         terminal: makeThoughtTerminal("authority", {
-          codes: ["IN_FLIGHT_UNKNOWN", "RECEIPT_REQUIRED"],
+          codes: ["RECEIPT_REQUIRED"],
           stage: "authority_proposal",
         }),
       });
-      expect(notice.noticeText).toBe(`${THOUGHT_UNAVAILABLE_NOTICE} Error code: AUTHORITY_REJECTED`);
-      expect(notice.noticeKey).toContain("RECEIPT_REQUIRED");
-      expect(notice.noticeKey).toContain("IN_FLIGHT_UNKNOWN");
+      const second = emitInfrastructureNotice(db, {
+        ...base,
+        terminal: makeThoughtTerminal("authority", {
+          codes: ["EFFECT_NOT_AUTHORIZED", "FUTURE_CODE_WE_HAVE_NEVER_SEEN"],
+          stage: "authority_settlement",
+        }),
+      });
+      expect(first.noticeKey).toBe("thought_failure:thread-dedup:cycle-dedup:1:authority_rejected");
+      expect(second.noticeId).toBe(first.noticeId);
+      expect(second.noticeKey).toBe(first.noticeKey);
+      expect(first.noticeText).toBe(`${THOUGHT_UNAVAILABLE_NOTICE} Error code: AUTHORITY_REJECTED`);
+      expect(second.noticeText).toBe(`${THOUGHT_UNAVAILABLE_NOTICE} Error code: AUTHORITY_REJECTED`);
+      expect(listSystemNotices(db)).toHaveLength(1);
     } finally {
       db.close();
     }

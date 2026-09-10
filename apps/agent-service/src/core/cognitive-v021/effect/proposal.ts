@@ -36,7 +36,20 @@ export function createEffectProposal(input: {
 }
 
 export type DispatchEffectResult =
-  | { dispatched: false; codes: string[] }
+  | {
+      dispatched: false;
+      codes: string[];
+      /**
+       * Provenance of the false result, preserved at the producer.
+       * "authority" = checkAuthority rejected (initial or pre-execute
+       * re-verdict). "dispatch" = dispatch mechanics refused without an
+       * Authority rejection (stale generation, idempotency occupied).
+       * Required because IN_FLIGHT_UNKNOWN is polysemous: it is also a
+       * genuine AuthorityCode from claim/receipt evaluation, so callers
+       * must not infer the parent category from child strings.
+       */
+      origin: "authority" | "dispatch";
+    }
   | { dispatched: true; receipt: EffectReceipt; replayed: boolean };
 
 type DispatchSnapshot = {
@@ -88,15 +101,15 @@ export async function dispatchEffect(
     authorityEpoch: initial.authorityEpoch,
     authorityDb: initial.authorityDb,
   });
-  if (!verdict.ok) return { dispatched: false, codes: verdict.codes };
+  if (!verdict.ok) return { dispatched: false, codes: verdict.codes, origin: "authority" };
   if (initial.generation !== undefined && proposal.generation !== initial.generation) {
-    return { dispatched: false, codes: ["STALE_GENERATION"] };
+    return { dispatched: false, codes: ["STALE_GENERATION"], origin: "dispatch" };
   }
   const existing = getEffectReceipt(db, proposal.effectId)
     ?? getEffectReceiptByIdempotencyKey(db, proposal.idempotencyKey);
   if (existing) return { dispatched: true, receipt: existing, replayed: true };
   const existingInFlight = getInFlight(db, proposal.idempotencyKey);
-  if (existingInFlight) return { dispatched: false, codes: ["IN_FLIGHT_UNKNOWN"] };
+  if (existingInFlight) return { dispatched: false, codes: ["IN_FLIGHT_UNKNOWN"], origin: "dispatch" };
   const originEventId = proposal.originEventId;
   if (!originEventId || typeof originEventId !== "string" || !originEventId.trim()) {
     throw new Error("origin_event_id_required");
@@ -125,11 +138,11 @@ export async function dispatchEffect(
   });
   if (!dispatchVerdict.ok) {
     markInFlightUnknown(db, inFlight.effectId);
-    return { dispatched: false, codes: dispatchVerdict.codes };
+    return { dispatched: false, codes: dispatchVerdict.codes, origin: "authority" };
   }
   if (beforeExecute.generation !== undefined && proposal.generation !== beforeExecute.generation) {
     markInFlightUnknown(db, inFlight.effectId);
-    return { dispatched: false, codes: ["STALE_GENERATION"] };
+    return { dispatched: false, codes: ["STALE_GENERATION"], origin: "dispatch" };
   }
   let output: unknown;
   try { output = await execute(proposal); }
