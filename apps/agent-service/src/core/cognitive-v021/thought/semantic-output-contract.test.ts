@@ -349,6 +349,133 @@ describe("Thought semantic output contract", () => {
     expect(instruction).toContain("omit the epistemic commitment");
   });
 
+  it("makes the canonical epistemic item shape explicit for json_object providers", () => {
+    const instruction = thoughtOutputCompatibilityInstruction();
+
+    expect(instruction).toContain("Every commitments.epistemic item must contain a dimensions object and a statement string");
+    expect(instruction).toContain("dimensions must contain source, status, time, and reliability");
+    expect(instruction).toContain("source, status, time, and reliability belong only inside dimensions");
+    expect(instruction).toContain("MUST NOT place source, status, time, or reliability directly on the epistemic item");
+    expect(instruction).toContain("surfaceSpan is optional");
+    expect(instruction).toContain("observationRefs is optional");
+    expect(instruction).toContain("Use only observation IDs actually supplied in the current Thought input");
+  });
+
+  it("rejects the exact malformed live B epistemic item shape", () => {
+    const malformedLiveB = {
+      kind: "settlement",
+      speech: {
+        mode: "draft",
+        surfaceDraft: "I read 'online' as 'reachable again'.",
+        mustSay: ["I read 'online' as 'reachable again'."],
+      },
+      commitments: {
+        epistemic: [{
+          surfaceSpan: "I read 'online' as 'reachable again'.",
+          source: "ashley_interpretation",
+          status: "interpreted",
+        }],
+      },
+    };
+
+    expect(parseThoughtSemanticOutput(malformedLiveB, new Set())).toEqual({
+      ok: false,
+      code: "wrong_type",
+      field: "commitments.epistemic[0]",
+    });
+  });
+
+  it("rejects the exact malformed live C epistemic item shape", () => {
+    const observationId = "f2-synthetic-observation-page-1";
+    const malformedLiveC = {
+      kind: "settlement",
+      speech: {
+        mode: "draft",
+        surfaceDraft: "I read the page: the F2 qualification fixture marker is amber.",
+        mustSay: ["I read the page: the F2 qualification fixture marker is amber."],
+      },
+      commitments: {
+        epistemic: [{
+          surfaceSpan: "I read the page: the F2 qualification fixture marker is amber.",
+          source: "tool",
+          status: "asserted",
+          observationRefs: [observationId],
+          time: "current",
+        }],
+      },
+      evidenceUse: {
+        observationRefsUsed: [observationId],
+      },
+    };
+
+    expect(parseThoughtSemanticOutput(malformedLiveC, new Set([observationId]))).toEqual({
+      ok: false,
+      code: "wrong_type",
+      field: "commitments.epistemic[0]",
+    });
+  });
+
+  it("accepts the canonical B interpretation equivalent", () => {
+    const canonicalB = {
+      kind: "settlement",
+      speech: {
+        mode: "draft",
+        surfaceDraft: "I read 'online' as 'reachable again'.",
+        mustSay: ["I read 'online' as 'reachable again'."],
+      },
+      commitments: {
+        epistemic: [{
+          dimensions: {
+            source: "ashley_interpretation",
+            status: "interpreted",
+            time: "unknown_freshness",
+            reliability: "inferred",
+          },
+          statement: "Ashley interprets the phrase as meaning reachable again.",
+          surfaceSpan: "I read 'online' as 'reachable again'.",
+        }],
+      },
+    };
+
+    expect(parseThoughtSemanticOutput(canonicalB, new Set())).toEqual({
+      ok: true,
+      value: canonicalB,
+    });
+  });
+
+  it("accepts the canonical C page-backed equivalent", () => {
+    const observationId = "f2-synthetic-observation-page-1";
+    const canonicalC = {
+      kind: "settlement",
+      speech: {
+        mode: "draft",
+        surfaceDraft: "I read the page: the F2 qualification fixture marker is amber.",
+        mustSay: ["I read the page: the F2 qualification fixture marker is amber."],
+      },
+      commitments: {
+        epistemic: [{
+          dimensions: {
+            source: "tool",
+            status: "asserted",
+            time: "current",
+            reliability: "fallible_observation",
+          },
+          statement: "The page says the fixture marker is amber.",
+          surfaceSpan: "I read the page: the F2 qualification fixture marker is amber.",
+          observationRefs: [observationId],
+        }],
+      },
+      evidenceUse: {
+        observationRefsUsed: [observationId],
+      },
+    };
+
+    expect(parseThoughtSemanticOutput(canonicalC, new Set([observationId]))).toEqual({
+      ok: true,
+      value: canonicalC,
+    });
+  });
+
   it("keeps protected semantic, wire, and capability fingerprints exact", () => {
     expect(THOUGHT_SEMANTIC_SCHEMA_FINGERPRINT).toBe(
       "sha256:aae9ef734867d90fbc47dd5bdb78e06ca98912a01e7418347535fb8c6189390c",
