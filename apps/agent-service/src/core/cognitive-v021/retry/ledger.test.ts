@@ -2,7 +2,8 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
 import { openCognitiveSidecarDb } from "../sidecar/db.js";
 import { admitWake } from "../wake/ledger.js";
-import { claimNextDurableWork, startDurableAttempt, settleDurableAttempt } from "./ledger.js";
+import { claimNextDurableWork, startDurableAttempt, settleDurableAttempt, DURABLE_WORK_COORDINATION_LEASE_MS } from "./ledger.js";
+import { DEFAULT_TOOL_CYCLE_LEASE_MS, ORDINARY_THOUGHT_BUDGET_MS } from "../types.js";
 import type { HandlerResult } from "../types.js";
 
 function db(): DatabaseSync {
@@ -183,8 +184,7 @@ describe("durable attempt ledger", () => {
     sidecar.close();
   });
 
-  it("commits the primary retry terminal state before a failed C3 derived write", () => {
-    const sidecar = db();
+  it("commits the primary retry terminal state before a failed C3 derived write", () => {    const sidecar = db();
     const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     try {
       seedEvent(sidecar);
@@ -206,6 +206,124 @@ describe("durable attempt ledger", () => {
       expect(warning).toHaveBeenCalledWith(expect.stringContaining("c3_write_deferred_for_forward_repair"), expect.anything());
     } finally {
       warning.mockRestore();
+      sidecar.close();
+    }
+  });
+});
+
+describe("P0 coordination-lease coverage (R7 §22)", () => {
+  it("P0_LEASE_POLICY_APPLIES_TO_OWNER_AND_PRIVATE_CLAIM_PATHS", () => {
+    expect(DURABLE_WORK_COORDINATION_LEASE_MS).toBe(360_000);
+    // Exclusion constants are unchanged by P0 (no global 120 s replacement).
+    expect(DEFAULT_TOOL_CYCLE_LEASE_MS).toBe(120_000);
+    expect(ORDINARY_THOUGHT_BUDGET_MS).toBe(180_000);
+
+    const sidecar = db();
+    try {
+      seedEvent(sidecar);
+      // Owner/interactive path: startDurableAttempt default (no leaseMs).
+      const owner = startDurableAttempt(sidecar, { eventId: "event:retry", workerId: "worker-owner", nowMs: 1_000 });
+      expect(owner.ordinal).toBe(1);
+      const ownerRow = sidecar.prepare(
+        "SELECT lease_expires_at_ms, claimed_at_ms FROM inbox_events WHERE id = 'event:retry'",
+      ).get() as { lease_expires_at_ms: number; claimed_at_ms: number };
+      expect(ownerRow.lease_expires_at_ms - ownerRow.claimed_at_ms).toBe(360_000);
+      // Coupled wake lease inherits the same 360 s value (no separate edit).
+      const wakeRow = sidecar.prepare("SELECT lease_expires_at_ms FROM wakes WHERE wake_id = ?").get(owner.wakeId) as { lease_expires_at_ms: number };
+      expect(wakeRow.lease_expires_at_ms).toBe(ownerRow.lease_expires_at_ms);
+
+      // Private/periodic path: claimNextDurableWork default (inbox passthrough
+      // threads no leaseMs, exactly like cycle/inbox.ts claimInboxEvent).
+      sidecar.prepare(
+        `INSERT INTO wakes
+           (wake_id, occurrence_id, trigger_ref, source_kind, conversation_id, cycle_id,
+            state, terminal_reason, captured_authority_revision, created_at_ms, updated_at_ms)
+         VALUES ('wake:private', 'occurrence:private', 'trigger:private', 'inbox',
+            'conversation:private', 'cycle:private', 'pending', NULL, 1, 1, 1)`,
+      ).run();
+      sidecar.prepare(
+        `INSERT INTO inbox_events (id, conversation_id, kind, payload_json, created_at_ms, status, wake_id)
+         VALUES ('event:private', 'conversation:private', 'test', '{}', 2, 'pending', 'wake:private')`,
+      ).run();
+      sidecar.prepare(
+        `INSERT INTO cycle_records
+           (cycle_id, conversation_id, generation, wake_id, state, trigger_kind, trigger_ref,
+            authority_epoch, architecture_epoch, admitted_at_ms, updated_at_ms, compose_log_ids_json)
+         VALUES ('cycle:private', 'conversation:private', 1, 'wake:private', 'admitted',
+            'owner_message', 'trigger:private', 1, 'v0.2.1', 1, 1, '[]')`,
+      ).run();
+      const priv = claimNextDurableWork(sidecar, { workerId: "worker-private", nowMs: 2_000 });
+      expect(priv?.eventId).toBe("event:private");
+      const privRow = sidecar.prepare(
+        "SELECT lease_expires_at_ms, claimed_at_ms FROM inbox_events WHERE id = 'event:private'",
+      ).get() as { lease_expires_at_ms: number; claimed_at_ms: number };
+      expect(privRow.lease_expires_at_ms - privRow.claimed_at_ms).toBe(360_000);
+    } finally {
+      sidecar.close();
+    }
+  });
+
+  it("P0_360S_SLOW_VALID_EXECUTION_PUBLISHES", () => {
+    const sidecar = db();
+    try {
+      seedEvent(sidecar);
+      // Gen74 shape: ≈143 s admit→publication. Under the 360 s V1 target the
+      // original claim is still valid — settlement publishes normally.
+      const started = startDurableAttempt(sidecar, { eventId: "event:retry", workerId: "worker-slow", nowMs: 1_000 });
+      const settled = settleDurableAttempt(sidecar, {
+        eventId: "event:retry",
+        attemptId: started.attemptId,
+        claimToken: started.claimToken,
+        result: { kind: "completed" },
+        nowMs: 144_000,
+      });
+      expect(settled).toEqual({ kind: "completed" });
+      expect(sidecar.prepare("SELECT state FROM inbox_events WHERE id = 'event:retry'").get()).toMatchObject({ state: "terminal" });
+    } finally {
+      sidecar.close();
+    }
+  });
+
+  it("GEN74_120S_CONTROL_REPRODUCES_LEASE_STRAND", () => {
+    const sidecar = db();
+    try {
+      seedEvent(sidecar);
+      // Control: the old 120 s lease given explicitly. After ≈143 s the
+      // original claim is lost — a second worker reclaims the obligation and
+      // the original worker can no longer settle (lease_expired strand).
+      const started = startDurableAttempt(sidecar, { eventId: "event:retry", workerId: "worker-old", nowMs: 1_000, leaseMs: 120_000 });
+      const reclaimed = claimNextDurableWork(sidecar, { workerId: "worker-new", eventId: "event:retry", nowMs: 144_000 });
+      expect(reclaimed?.workerId).toBe("worker-new");
+      expect(() => settleDurableAttempt(sidecar, {
+        eventId: "event:retry",
+        attemptId: started.attemptId,
+        claimToken: started.claimToken,
+        result: { kind: "completed" },
+        nowMs: 144_001,
+      })).toThrow("durable_work_claim_lost");
+    } finally {
+      sidecar.close();
+    }
+  });
+
+  it("RECONCILING_WAKE_NEVER_BLINDLY_REDISPATCHES", () => {
+    const sidecar = db();
+    try {
+      seedEvent(sidecar);
+      const started = startDurableAttempt(sidecar, { eventId: "event:retry", workerId: "worker", nowMs: 1_000 });
+      expect(settleDurableAttempt(sidecar, {
+        eventId: "event:retry",
+        attemptId: started.attemptId,
+        claimToken: started.claimToken,
+        result: { kind: "outcome_unknown", operationId: "operation:reconciling", errorCode: "worker_crash" },
+        nowMs: 1_100,
+      })).toEqual({ kind: "reconciling" });
+      // The ordinary claim path refuses reconciling wakes until proof-gated
+      // return to pending — no blind redispatch.
+      expect(claimNextDurableWork(sidecar, { workerId: "worker-2", eventId: "event:retry", nowMs: 1_200 })).toBeNull();
+      expect(() => startDurableAttempt(sidecar, { eventId: "event:retry", workerId: "worker-2", nowMs: 1_200 })).toThrow();
+      expect(sidecar.prepare("SELECT state FROM inbox_events WHERE id = 'event:retry'").get()).toMatchObject({ state: "reconciling" });
+    } finally {
       sidecar.close();
     }
   });

@@ -12,6 +12,16 @@ export type StartupOutcomeRecoveryResult = {
   recoveredEventIds: string[];
 };
 
+/**
+ * Advisory rotation cursor for the P0 steady-state pass. Loop-local,
+ * in-memory performance state only: crash/restart loses it and the scan
+ * restarts oldest-first with identical correctness (proof-gating is
+ * idempotent). A permanently proof-failed oldest row is therefore attempted
+ * once per rotation, not once per pass, so it cannot starve later
+ * proof-resolvable rows forever under a bounded batch.
+ */
+export type OutcomeUnknownScanCursor = { createdAtMs: number; id: string } | null;
+
 type DbRow = Record<string, unknown>;
 
 function text(value: unknown, fallback = ""): string {
@@ -144,23 +154,34 @@ export function proveNoExternalDispatch(db: DatabaseSync, eventId: string): NoDi
  */
 export function reconcileStrandedOutcomeUnknownAtStartup(
   db: DatabaseSync,
-  options: { nowMs?: number; limit?: number } = {},
-): StartupOutcomeRecoveryResult {
+  options: { nowMs?: number; limit?: number; cursor?: OutcomeUnknownScanCursor } = {},
+): StartupOutcomeRecoveryResult & { nextCursor: OutcomeUnknownScanCursor } {
   const nowMs = options.nowMs ?? Date.now();
   const limit = Math.max(1, Math.min(500, options.limit ?? 100));
-  const rows = db
-    .prepare(
-      `SELECT id FROM inbox_events
-        WHERE state = 'reconciling' AND last_failure_class = 'outcome_unknown_reconcile'
-        ORDER BY created_at_ms ASC, id ASC LIMIT ?`,
-    )
-    .all(limit) as Array<{ id?: unknown }>;
+  const cursor = options.cursor ?? null;
+  const rows = (cursor
+    ? db
+      .prepare(
+        `SELECT id, created_at_ms FROM inbox_events
+          WHERE state = 'reconciling' AND last_failure_class = 'outcome_unknown_reconcile'
+            AND (created_at_ms > ? OR (created_at_ms = ? AND id > ?))
+          ORDER BY created_at_ms ASC, id ASC LIMIT ?`,
+      )
+      .all(cursor.createdAtMs, cursor.createdAtMs, cursor.id, limit)
+    : db
+      .prepare(
+        `SELECT id, created_at_ms FROM inbox_events
+          WHERE state = 'reconciling' AND last_failure_class = 'outcome_unknown_reconcile'
+          ORDER BY created_at_ms ASC, id ASC LIMIT ?`,
+      )
+      .all(limit)) as Array<{ id?: unknown; created_at_ms?: unknown }>;
 
-  const result: StartupOutcomeRecoveryResult = {
+  const result: StartupOutcomeRecoveryResult & { nextCursor: OutcomeUnknownScanCursor } = {
     scanned: 0,
     recoveredToPending: 0,
     leftReconciling: 0,
     recoveredEventIds: [],
+    nextCursor: null,
   };
 
   for (const value of rows) {
@@ -189,6 +210,16 @@ export function reconcileStrandedOutcomeUnknownAtStartup(
       // Fail closed: leave the event reconciling for operator/receipt truth.
       result.leftReconciling += 1;
     }
+  }
+
+  // Rotation accounting: a full page means more rows may remain — the next
+  // pass resumes AFTER the last row attempted here. A short page ends the
+  // rotation (the next pass restarts oldest-first with identical correctness).
+  if (rows.length >= limit) {
+    const last = rows[rows.length - 1]!;
+    const createdAtMs = typeof last.created_at_ms === "number" ? last.created_at_ms : Number(last.created_at_ms);
+    const id = typeof last.id === "string" ? last.id : "";
+    result.nextCursor = id && Number.isFinite(createdAtMs) ? { createdAtMs, id } : null;
   }
 
   return result;

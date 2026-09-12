@@ -18,6 +18,7 @@ import { reconcileProjectedDelivery } from "./core/cognitive-v021/delivery/outbo
 import { readCognitiveSidecarMeta } from "./core/cognitive-v021/sidecar/db.js";
 import { appendInboxEvent, claimInboxEvent } from "./core/cognitive-v021/cycle/inbox.js";
 import { consumeInboxEvent } from "./core/cognitive-v021/cycle/inbox-consumer.js";
+import { DURABLE_WORK_COORDINATION_LEASE_MS } from "./core/cognitive-v021/retry/ledger.js";
 import {
   tickIdleOpportunity,
   type IdleObservationDraft,
@@ -223,7 +224,7 @@ export class AgentManager {
           eventId: event.id,
           workerId: `idle:${process.pid}:${ownerId}`,
           nowMs: Date.now(),
-          leaseMs: 120_000,
+          leaseMs: DURABLE_WORK_COORDINATION_LEASE_MS,
         });
         if (!claimed) throw new Error("idle_inbox_claim_failed");
         let result: CognitiveDispatchResult = null;

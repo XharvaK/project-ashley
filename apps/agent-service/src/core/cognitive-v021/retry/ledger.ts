@@ -34,6 +34,23 @@ import {
   recordRetryC3TerminalFailure,
   type RetryC3TerminalFailureInput,
 } from "../failure/c3-recorder.js";
+import {
+  getPrivateReservation,
+  getPrivateReservationForWake,
+  listPrivateAttemptHistory,
+} from "../private-budget/ledger.js";
+
+/**
+ * P0 coordination-lease coverage (R7 §22): a coordination lease must outlive
+ * the maximum legitimate execution interval for which it owns publication
+ * authority, including the 180 s Thought execution budget and the
+ * lease-checked post-Thought publication/consequence boundary, with explicit
+ * margin. Gen74 (≈143 s admit→publication vs 120 s lease → `lease_expired` →
+ * ROLLBACK with zero settlement/outbox) proves 120 s insufficient. 360 s is
+ * the frozen V1 target, applied at BOTH covered durable-work claim defaults;
+ * the coupled wake lease inherits the caller value (no separate edit).
+ */
+export const DURABLE_WORK_COORDINATION_LEASE_MS = 360_000 as const;
 
 type DbRow = Record<string, unknown>;
 
@@ -663,7 +680,7 @@ export function startDurableAttempt(
   db: DatabaseSync,
   input: { eventId: string; workerId: string; nowMs: number; leaseMs?: number },
 ): DurableAttempt {
-  const leaseMs = Math.max(1, Math.min(15 * 60_000, Math.floor(input.leaseMs ?? 120_000)));
+  const leaseMs = Math.max(1, Math.min(15 * 60_000, Math.floor(input.leaseMs ?? DURABLE_WORK_COORDINATION_LEASE_MS)));
   return beginAndRollbackOnError(db, () => {
     recoverExpiredDurableWorkInTransaction(db, input.nowMs, input.eventId);
     normalizeEligibleRetryWait(db, input.nowMs, input.eventId);
@@ -676,7 +693,7 @@ export function startDurableAttempt(
 
 export function claimNextDurableWork(db: DatabaseSync, input: ClaimDurableWorkInput): DurableAttempt | null {
   const nowMs = input.nowMs ?? Date.now();
-  const leaseMs = Math.max(1, Math.min(15 * 60_000, Math.floor(input.leaseMs ?? 120_000)));
+  const leaseMs = Math.max(1, Math.min(15 * 60_000, Math.floor(input.leaseMs ?? DURABLE_WORK_COORDINATION_LEASE_MS)));
   return beginAndRollbackOnError(db, () => {
     recoverExpiredDurableWorkInTransaction(db, nowMs);
     normalizeEligibleRetryWait(db, nowMs);
@@ -847,6 +864,92 @@ export function settleDurableAttempt(
   return outcome;
 }
 
+type OutcomeUnknownSpendPartition =
+  | { kind: "owner_no_reservation" }
+  | { kind: "private_not_spent"; reservationId: string }
+  | { kind: "private_spent"; reservationId: string; signal: string }
+  | { kind: "private_uncertain"; detail: string };
+
+function explicitPrivateReservationId(db: DatabaseSync, eventId: string): string | null {
+  try {
+    const found = db.prepare("SELECT payload_json FROM inbox_events WHERE id = ?").get(eventId) as { payload_json?: unknown } | undefined;
+    const raw = found?.payload_json;
+    if (typeof raw !== "string" || !raw) return null;
+    const payload = JSON.parse(raw) as Record<string, unknown>;
+    const value = payload["privateBudgetReservationId"];
+    return typeof value === "string" && value.trim() ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * P0 spend-aware outcome-unknown partition (R7 §22.2). Applies ONLY to
+ * proof-PASS rows (mechanical no-external-dispatch proof already complete).
+ * The distinction is mechanical (payload reservation presence + ledger
+ * state/dispatch_truth), never semantic content.
+ *
+ * - A. Owner/non-private, no private reservation: existing safe_to_retry.
+ * - B. Private/periodic, provider NOT spent (held + parent/children all
+ *      undispatched): same bound lineage may become retryable — no new
+ *      conversation, no new reservation. Continuation additionally requires
+ *      the periodic dispatch gate (dispatch/live.ts) and held-only
+ *      reservation authorization at dispatch time.
+ * - C. Private/periodic, provider SPENT (committed, or attempted/responded
+ *      dispatch truth on parent/child): preserve committed/spent truth. NO
+ *      fresh Thought, NO second reservation, NO replay, NO promotion of
+ *      attempt residue, NO replacement lineage.
+ * - D. Private/periodic, dispatch/spend truth uncertain: remain fenced.
+ */
+function classifyOutcomeUnknownSpend(
+  db: DatabaseSync,
+  eventId: string,
+  wakeId: string | null,
+): OutcomeUnknownSpendPartition {
+  const explicitId = explicitPrivateReservationId(db, eventId);
+  let state: string | null = null;
+  let dispatchTruth: string | null = null;
+  let reservationId: string | null = null;
+  try {
+    const found = explicitId
+      ? getPrivateReservation(db, explicitId)
+      : wakeId ? getPrivateReservationForWake(db, wakeId) : null;
+    if (found) {
+      state = found.state;
+      dispatchTruth = found.dispatchTruth;
+      reservationId = found.reservationId;
+    }
+  } catch {
+    return {
+      kind: "private_uncertain",
+      detail: explicitId ? `reservation_lookup_failed:${explicitId}` : "wake_reservation_ambiguous",
+    };
+  }
+  if (!reservationId || !state) {
+    // Owner ingress writes no reservationId (owner cycles carry no binding).
+    if (explicitId) return { kind: "private_uncertain", detail: `reservation_missing:${explicitId}` };
+    return { kind: "owner_no_reservation" };
+  }
+  const history = listPrivateAttemptHistory(db, reservationId);
+  const parentSpent = state === "committed" || dispatchTruth === "attempted" || dispatchTruth === "responded";
+  const spentChild = history.some((record) => record.ordinal >= 2
+    && (record.dispatchTruth === "attempted" || record.dispatchTruth === "responded"));
+  if (parentSpent || spentChild) {
+    const signal = state === "committed"
+      ? "committed"
+      : dispatchTruth === "attempted" || dispatchTruth === "responded"
+        ? `parent_${dispatchTruth}`
+        : "child_dispatched";
+    return { kind: "private_spent", reservationId, signal };
+  }
+  const parentUndispatched = dispatchTruth === "not_bound" || dispatchTruth === "not_started";
+  const childrenUndispatched = history.every((record) => record.ordinal === 1 || record.dispatchTruth === "not_started");
+  if (state === "held" && parentUndispatched && childrenUndispatched) {
+    return { kind: "private_not_spent", reservationId };
+  }
+  return { kind: "private_uncertain", detail: `state_${state}_${dispatchTruth ?? "missing"}` };
+}
+
 export function reconcileOutcomeUnknown(
   db: DatabaseSync,
   input: { eventId: string; nowMs: number; noExternalDispatchProof?: boolean; proofRef?: string },
@@ -932,6 +1035,35 @@ export function reconcileOutcomeUnknown(
 
     // No bound effects found: check noExternalDispatchProof
     if (input.noExternalDispatchProof === true && input.proofRef?.trim()) {
+      const partition = classifyOutcomeUnknownSpend(db, input.eventId, current.wake_id);
+      if (partition.kind === "private_spent") {
+        // P0 case C: provider is SPENT. Preserve committed/spent truth and
+        // converge through the existing terminal Failure Truth (same
+        // statements as the effect-failure branch above). No fresh Thought,
+        // no second reservation, no replay, no residue promotion. The
+        // periodic schedule observes this terminal execution truth later
+        // (P1 T4 records admitted_failure) — the schedule write is
+        // observation of execution truth, never fabrication.
+        db.prepare(
+          `UPDATE inbox_events SET state = 'terminal', status = 'failed_terminal',
+              terminal_reason = 'permanent_failure', quarantine_reason = NULL,
+              last_error = ?
+            WHERE id = ? AND state = 'reconciling'`,
+        ).run(`private_spent_no_rethought:${partition.signal}`, input.eventId);
+        wakeToTerminal(db, current.wake_id, "refused", input.nowMs);
+        retireOwnerlessCycleForTerminalEvent(db, current.wake_id, input.nowMs);
+        return { kind: "terminal", reason: "permanent_failure", eventId: input.eventId };
+      }
+      if (partition.kind === "private_uncertain") {
+        // P0 case D: dispatch/spend truth uncertain — remain fenced, fail
+        // closed. No provider redispatch.
+        return { kind: "pending", reason: "outcome_still_unknown", eventId: input.eventId };
+      }
+      // Cases A (owner/non-private) and B (private NOT-SPENT, same-lineage
+      // continuation): existing safe_to_retry behavior below. Case B
+      // continuation additionally requires the periodic dispatch gate
+      // (dispatch/live.ts) and mechanically valid reservation authorization
+      // (held-only precondition) at dispatch time.
       db.prepare(
         `UPDATE inbox_events SET state = 'pending', status = 'pending',
             last_error = ?, next_eligible_at_ms = NULL, claim_token = NULL,

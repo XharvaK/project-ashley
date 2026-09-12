@@ -266,4 +266,95 @@ describe("durable-work startup outcome-unknown recovery", () => {
       db.close();
     }
   });
+
+  it("PROOF_FAILED_OLD_ROW_DOES_NOT_STARVE_LATER_PROOF_PASS_ROW", () => {
+    const db = openTestSidecar();
+    try {
+      // Old row is permanently proof-failed (bound in-flight effect = possible
+      // dispatch). Newer row is proof-resolvable.
+      const old = seedStrandedFixture(db, "rotation-old");
+      const young = seedStrandedFixture(db, "rotation-young");
+      db.prepare("UPDATE inbox_events SET created_at_ms = 1 WHERE id = ?").run(old.eventId);
+      db.prepare("UPDATE inbox_events SET created_at_ms = 2 WHERE id = ?").run(young.eventId);
+      putInFlight(db, {
+        effectId: "effect:rotation-old",
+        cycleId: old.cycleId,
+        generation: old.generation,
+        wakeId: old.wakeId,
+        correlationId: "corr:rotation-old",
+        idempotencyKey: "idem:rotation-old",
+        dispatchedAtMs: 1_050,
+        originEventId: old.eventId,
+      });
+
+      // Pass 1 (bounded batch of 1) attempts only the oldest row and fails
+      // closed — but records a rotation cursor past it.
+      const first = reconcileStrandedOutcomeUnknownAtStartup(db, { nowMs: 1_200, limit: 1 });
+      expect(first.scanned).toBe(1);
+      expect(first.recoveredToPending).toBe(0);
+      expect(first.leftReconciling).toBe(1);
+      expect(first.nextCursor).toEqual({ createdAtMs: 1, id: old.eventId });
+
+      // Pass 2 resumes AFTER the proof-failed row: the younger
+      // proof-resolvable row converges within a bounded number of passes.
+      const second = reconcileStrandedOutcomeUnknownAtStartup(db, { nowMs: 1_300, limit: 1, cursor: first.nextCursor });
+      expect(second.scanned).toBe(1);
+      expect(second.recoveredToPending).toBe(1);
+      expect(second.recoveredEventIds).toEqual([young.eventId]);
+      expect(db.prepare("SELECT state FROM inbox_events WHERE id = ?").get(young.eventId)).toMatchObject({ state: "pending" });
+      // The old row is untouched by the rotation (still fenced, never promoted).
+      expect(db.prepare("SELECT state FROM inbox_events WHERE id = ?").get(old.eventId)).toMatchObject({ state: "reconciling" });
+
+      // A short final page ends the rotation (cursor resets to oldest-first).
+      const third = reconcileStrandedOutcomeUnknownAtStartup(db, { nowMs: 1_400, limit: 1, cursor: second.nextCursor });
+      expect(third.scanned).toBe(0);
+      expect(third.nextCursor).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("OUTCOME_UNKNOWN_PROOF_PASS_CONVERGES_WITHOUT_RESTART", () => {
+    const db = openTestSidecar();
+    try {
+      const { eventId, wakeId } = seedStrandedFixture(db, "no-restart");
+      // One steady-state invocation — no restart, no boot scan — converges a
+      // proof-resolvable row.
+      const pass = reconcileStrandedOutcomeUnknownAtStartup(db, { nowMs: 1_200, limit: 5 });
+      expect(pass.recoveredToPending).toBe(1);
+      expect(pass.recoveredEventIds).toEqual([eventId]);
+      expect(pass.nextCursor).toBeNull();
+      expect(db.prepare("SELECT state FROM inbox_events WHERE id = ?").get(eventId)).toMatchObject({ state: "pending" });
+      expect(db.prepare("SELECT state FROM wakes WHERE wake_id = ?").get(wakeId)).toMatchObject({ state: "pending" });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("OUTCOME_UNKNOWN_PROOF_FAIL_STAYS_FENCED", () => {
+    const db = openTestSidecar();
+    try {
+      const { eventId, wakeId } = seedStrandedFixture(db, "stay-fenced");
+      putInFlight(db, {
+        effectId: "effect:stay-fenced",
+        cycleId: "cycle:stay-fenced",
+        generation: 1,
+        wakeId,
+        correlationId: "corr:stay-fenced",
+        idempotencyKey: "idem:stay-fenced",
+        dispatchedAtMs: 1_050,
+        originEventId: eventId,
+      });
+      for (const nowMs of [1_200, 1_300]) {
+        const pass = reconcileStrandedOutcomeUnknownAtStartup(db, { nowMs, limit: 5 });
+        expect(pass.recoveredToPending).toBe(0);
+        expect(pass.leftReconciling).toBe(1);
+      }
+      expect(db.prepare("SELECT state FROM inbox_events WHERE id = ?").get(eventId)).toMatchObject({ state: "reconciling" });
+      // The fenced row is not reclaimable through the normal claim path.
+      expect(claimNextDurableWork(db, { workerId: "worker-fenced", eventId, nowMs: 1_400 })).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
 });

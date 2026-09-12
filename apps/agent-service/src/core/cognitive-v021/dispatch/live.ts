@@ -27,6 +27,65 @@ export type LiveCognitiveTurnInput = {
 };
 
 /**
+ * P0 periodic recovery dispatch fence (R7 §§22.2–22.3). Canonical periodic
+ * trigger_ref identity: `periodic:<scheduleOccurrenceId>:<eligibleAtMs>`
+ * (opaque to all consumers — hashed/stored/prefix-filtered, never parsed).
+ * Periodic origin is determined mechanically from the bound wake's
+ * trigger_ref via this prefix — never by semantic interpretation.
+ */
+export const PERIODIC_TRIGGER_REF_PREFIX = "periodic:" as const;
+/** Kill-switch refusal code: retained/deferred, never dispatched, never fabricated terminal. */
+export const PERIODIC_RECOVERY_DISPATCH_BLOCKED = "periodic_recovery_dispatch_blocked" as const;
+/**
+ * Retain/defer horizon for a refused recovered periodic lineage (one nominal
+ * opportunity). The durable age boundary (15 min) clamps the effective wait;
+ * the row is preserved durably throughout — never dispatched, never unbound.
+ */
+export const PERIODIC_RECOVERY_DEFER_MS = 21_600_000 as const;
+
+export function isPeriodicCognitionEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const raw = env.PERIODIC_COGNITION_ENABLED;
+  if (typeof raw !== "string") return false;
+  const normalized = raw.trim().toLowerCase();
+  return normalized === "true" || normalized === "1";
+}
+
+export function isPeriodicLineageTriggerRef(triggerRef: unknown): boolean {
+  return typeof triggerRef === "string" && triggerRef.startsWith(PERIODIC_TRIGGER_REF_PREFIX);
+}
+
+export function explicitEventReservationId(payload: unknown): string | null {
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return null;
+  const value = (payload as Record<string, unknown>)["privateBudgetReservationId"];
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+/**
+ * P0 PERIODIC_RECOVERY_DISPATCH_GATE. The switch blocks authorization or
+ * progression into NEW periodic provider work; it does NOT fabricate
+ * terminal failure and never blocks truthful recovery/bookkeeping.
+ *
+ * - Switch != explicit true/1 + periodic bound-wake lineage + NOT
+ *   committed ⇒ blocked: retain the same binding; never unbind, reselect,
+ *   or mint replacement lineage; zero new periodic provider dispatch.
+ * - Already COMMITTED/running ⇒ not blocked: existing
+ *   execution/recovery/publication/Failure Truth/terminal bookkeeping may
+ *   complete; no replacement dispatch is authorized downstream.
+ * - Non-periodic authored work (incl. due future triggers) ⇒ not blocked.
+ */
+export function isPeriodicRecoveryDispatchBlocked(
+  sidecar: DatabaseSync,
+  event: InboxEvent,
+  reservation: PrivateBudgetReservation | null,
+): boolean {
+  if (isPeriodicCognitionEnabled()) return false;
+  const wake = event.wakeId ? getWake(sidecar, event.wakeId) : null;
+  if (!wake || !isPeriodicLineageTriggerRef(wake.triggerRef)) return false;
+  if (reservation?.state === "committed") return false;
+  return true;
+}
+
+/**
  * Sol R2.1 Amendment C (exact-lineage): Authorize continuation provider dispatch for deferred reactive frontiers.
  * Execution requires ALL of:
  * 1. event kind is frontier_wake
@@ -147,6 +206,16 @@ export async function runLiveCognitiveTurn(
   const reservation = explicitReservationId
     ? getPrivateReservation(input.sidecar, explicitReservationId)
     : getPrivateReservationForWake(input.sidecar, wake.wakeId);
+
+  // P0 PERIODIC_RECOVERY_DISPATCH_GATE (execution-boundary layer): a
+  // recovered periodic durable obligation may not cross into NEW provider
+  // work merely because generic durable-work reconciliation returned it to
+  // pending. Blocked lineages retain their binding and defer (the generic
+  // consumer settles retry_wait without invoking dispatch); committed work
+  // finishes through existing truth below.
+  if (isPeriodicRecoveryDispatchBlocked(input.sidecar, input.event, reservation)) {
+    throw new Error(PERIODIC_RECOVERY_DISPATCH_BLOCKED);
+  }
 
   const isPrivateTrigger = cycle.triggerKind === "idle_opportunity" ||
     cycle.triggerKind === "subscription_item" ||

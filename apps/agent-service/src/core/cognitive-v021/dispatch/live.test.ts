@@ -2,7 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 import { appendInboxEvent, updateCycleState } from "../cycle/inbox.js";
 import { appendOwnerUtterance } from "../evidence/conversation-log.js";
 import { admitTestCycle, openTestSidecar, makeSemanticSettlement } from "../test-support.js";
-import { runLiveCognitiveTurn, isAuthorizedDeferredFrontierContinuation } from "./live.js";
+import {
+  runLiveCognitiveTurn,
+  isAuthorizedDeferredFrontierContinuation,
+  isPeriodicCognitionEnabled,
+  isPeriodicLineageTriggerRef,
+  isPeriodicRecoveryDispatchBlocked,
+  PERIODIC_RECOVERY_DISPATCH_BLOCKED,
+} from "./live.js";
 import type { CapabilityReality, IdentitySlice, KernelDeps, Observation, InboxEvent } from "../types.js";
 import { getWake } from "../wake/ledger.js";
 import {
@@ -813,6 +820,298 @@ describe("F1 Frontier & Dispatch Continuation Witnesses", () => {
       sidecar.close();
       nuclear.close();
       attentionDb.close();
+    }
+  });
+});
+
+describe("P0 periodic recovery dispatch fence (R7 §§22.2–22.3)", () => {
+  const BASE_TIME = 2_000_000;
+
+  function setupPeriodicScenario(tag: string) {
+    const sidecar = openTestSidecar();
+    const nuclear = openTestSidecar();
+    const attentionDb = openTestSidecar();
+    reconcilePolicyClock(sidecar, { policyId: "private-v1", wallClockNowMs: BASE_TIME, authorizationRef: `owner:${tag}` });
+    const cycle = admitTestCycle(sidecar, {
+      cycleId: `cycle:gate:${tag}`,
+      conversationId: `thread:gate:${tag}`,
+      triggerKind: "idle_opportunity",
+      occupantId: "doc",
+      nowMs: BASE_TIME,
+    });
+    // P1 will mint `periodic:` trigger_refs through the schedule ledger; P0
+    // stamps the same mechanical lineage identity directly (the gate reads
+    // the bound wake's trigger_ref prefix — never semantic content).
+    sidecar.prepare("UPDATE wakes SET trigger_ref = ? WHERE wake_id = ?").run(
+      `periodic:occurrence:${tag}:${BASE_TIME}`,
+      cycle.wakeId,
+    );
+    return { sidecar, nuclear, attentionDb, cycle };
+  }
+
+  function reserveHeld(
+    sidecar: ReturnType<typeof openTestSidecar>,
+    cycle: { wakeId: string; conversationId: string },
+    tag: string,
+  ) {
+    const result = reservePrivateThought(sidecar, {
+      admissionId: `adm:gate:${tag}`,
+      wakeId: cycle.wakeId,
+      conversationId: cycle.conversationId,
+      policyId: "private-v1",
+      wallClockNowMs: BASE_TIME,
+    });
+    if (result.kind !== "reserved") throw new Error("reserve_failed");
+    return result.reservation;
+  }
+
+  it("KILL_SWITCH_MISSING_ENV_FAILS_CLOSED", () => {
+    expect(isPeriodicCognitionEnabled({})).toBe(false);
+    expect(isPeriodicCognitionEnabled({ PERIODIC_COGNITION_ENABLED: undefined })).toBe(false);
+    expect(isPeriodicCognitionEnabled({ PERIODIC_COGNITION_ENABLED: "" })).toBe(false);
+    expect(isPeriodicCognitionEnabled({ PERIODIC_COGNITION_ENABLED: "0" })).toBe(false);
+    expect(isPeriodicCognitionEnabled({ PERIODIC_COGNITION_ENABLED: "yes" })).toBe(false);
+    expect(isPeriodicCognitionEnabled({ PERIODIC_COGNITION_ENABLED: "true" })).toBe(true);
+    expect(isPeriodicCognitionEnabled({ PERIODIC_COGNITION_ENABLED: "1" })).toBe(true);
+    expect(isPeriodicCognitionEnabled({ PERIODIC_COGNITION_ENABLED: " True " })).toBe(true);
+    expect(isPeriodicLineageTriggerRef("periodic:occurrence:abc:123")).toBe(true);
+    expect(isPeriodicLineageTriggerRef("trigger:owner")).toBe(false);
+    expect(isPeriodicLineageTriggerRef(null)).toBe(false);
+  });
+
+  it("KILL_SWITCH_BOUND_PREDISPATCH_NO_NEW_DISPATCH", async () => {
+    vi.stubEnv("PERIODIC_COGNITION_ENABLED", "0");
+    const { sidecar, nuclear, attentionDb, cycle } = setupPeriodicScenario("blocked");
+    try {
+      const reservation = reserveHeld(sidecar, cycle, "blocked");
+      const completeChat = vi.fn(async () => ({
+        text: JSON.stringify(makeSemanticSettlement()),
+        model: "fake",
+        modelAlias: "fake",
+        resolvedModelId: null,
+      }));
+      const event: InboxEvent = {
+        id: "ev:gate:blocked",
+        conversationId: cycle.conversationId,
+        wakeId: cycle.wakeId,
+        kind: "idle_opportunity",
+        payload: { cycleId: cycle.cycleId, privateBudgetReservationId: reservation.reservationId },
+        createdAtMs: BASE_TIME,
+        status: "claimed",
+        claimToken: null,
+        workerId: null,
+        leaseExpiresAtMs: null,
+        attemptCount: 0,
+        claimedAtMs: null,
+        consumedAtMs: null,
+        lastError: null,
+      };
+      await expect(
+        runLiveCognitiveTurn({ sidecar, nuclear, event, deps: deps({ attentionDb, completeChat }) }),
+      ).rejects.toThrow(PERIODIC_RECOVERY_DISPATCH_BLOCKED);
+      // Zero new periodic provider dispatch.
+      expect(completeChat).not.toHaveBeenCalled();
+      // Binding retained, never unbound; no terminal fabrication.
+      expect(getPrivateReservation(sidecar, reservation.reservationId)).toMatchObject({ state: "held" });
+      expect(getWake(sidecar, cycle.wakeId)?.state).toBe("pending");
+    } finally {
+      sidecar.close();
+      nuclear.close();
+      attentionDb.close();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("KILL_SWITCH_COMMITTED_CAN_FINISH", async () => {
+    vi.stubEnv("PERIODIC_COGNITION_ENABLED", "");
+    const { sidecar, nuclear, attentionDb, cycle } = setupPeriodicScenario("committed");
+    try {
+      const reservation = reserveHeld(sidecar, cycle, "committed");
+      bindPrivateReservationInvocation(sidecar, {
+        reservationId: reservation.reservationId,
+        invocationId: "inv:gate:committed",
+        attemptId: "att:gate:committed",
+        nowMs: BASE_TIME,
+      });
+      commitPrivateDispatch(sidecar, {
+        reservationId: reservation.reservationId,
+        invocationId: "inv:gate:committed",
+        attemptId: "att:gate:committed",
+        nowMs: BASE_TIME,
+      });
+      const committed = getPrivateReservation(sidecar, reservation.reservationId);
+      const event: InboxEvent = {
+        id: "ev:gate:committed",
+        conversationId: cycle.conversationId,
+        wakeId: cycle.wakeId,
+        kind: "idle_opportunity",
+        payload: { cycleId: cycle.cycleId, privateBudgetReservationId: reservation.reservationId },
+        createdAtMs: BASE_TIME,
+        status: "claimed",
+        claimToken: null,
+        workerId: null,
+        leaseExpiresAtMs: null,
+        attemptCount: 0,
+        claimedAtMs: null,
+        consumedAtMs: null,
+        lastError: null,
+      };
+      // The gate does not stop committed/running work: it falls through to
+      // existing execution truth (held-only refuses a second dispatch here;
+      // the authorized frontier-continuation path is unchanged behavior).
+      expect(isPeriodicRecoveryDispatchBlocked(sidecar, event, committed)).toBe(false);
+      await expect(
+        runLiveCognitiveTurn({ sidecar, nuclear, event, deps: deps({ attentionDb }) }),
+      ).rejects.toThrow("private_budget_reservation_not_dispatchable");
+    } finally {
+      sidecar.close();
+      nuclear.close();
+      attentionDb.close();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("COMMITTED_PRIVATE_RESERVATION_NEVER_REENTERS_HELD_ONLY_DISPATCH", async () => {
+    vi.stubEnv("PERIODIC_COGNITION_ENABLED", "0");
+    const sidecar = openTestSidecar();
+    const nuclear = openTestSidecar();
+    const attentionDb = openTestSidecar();
+    try {
+      reconcilePolicyClock(sidecar, { policyId: "private-v1", wallClockNowMs: BASE_TIME, authorizationRef: "owner:held-only" });
+      const cycle = admitTestCycle(sidecar, {
+        cycleId: "cycle:gate:held-only",
+        conversationId: "thread:gate:held-only",
+        triggerKind: "idle_opportunity",
+        occupantId: "doc",
+        nowMs: BASE_TIME,
+      });
+      const reservation = reserveHeld(sidecar, cycle, "held-only");
+      bindPrivateReservationInvocation(sidecar, {
+        reservationId: reservation.reservationId,
+        invocationId: "inv:gate:held-only",
+        attemptId: "att:gate:held-only",
+        nowMs: BASE_TIME,
+      });
+      commitPrivateDispatch(sidecar, {
+        reservationId: reservation.reservationId,
+        invocationId: "inv:gate:held-only",
+        attemptId: "att:gate:held-only",
+        nowMs: BASE_TIME,
+      });
+      const event: InboxEvent = {
+        id: "ev:gate:held-only",
+        conversationId: cycle.conversationId,
+        wakeId: cycle.wakeId,
+        kind: "idle_opportunity",
+        payload: { cycleId: cycle.cycleId, privateBudgetReservationId: reservation.reservationId },
+        createdAtMs: BASE_TIME,
+        status: "claimed",
+        claimToken: null,
+        workerId: null,
+        leaseExpiresAtMs: null,
+        attemptCount: 0,
+        claimedAtMs: null,
+        consumedAtMs: null,
+        lastError: null,
+      };
+      // Non-periodic committed work never re-enters held-only dispatch: no
+      // committed → fresh-Thought loop.
+      await expect(
+        runLiveCognitiveTurn({ sidecar, nuclear, event, deps: deps({ attentionDb }) }),
+      ).rejects.toThrow("private_budget_reservation_not_dispatchable");
+    } finally {
+      sidecar.close();
+      nuclear.close();
+      attentionDb.close();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("KILL_SWITCH_DUE_TRIGGERS_UNAFFECTED", async () => {
+    vi.stubEnv("PERIODIC_COGNITION_ENABLED", "0");
+    const sidecar = openTestSidecar();
+    const nuclear = openTestSidecar();
+    const attentionDb = openTestSidecar();
+    try {
+      const cycle = admitTestCycle(sidecar, {
+        cycleId: "cycle:gate:owner",
+        conversationId: "thread:gate:owner",
+        triggerKind: "owner_message",
+        occupantId: "doc",
+        nowMs: BASE_TIME,
+      });
+      const evidence = appendOwnerUtterance(sidecar, {
+        conversationId: cycle.conversationId,
+        text: "owner message while periodic is disabled",
+        discordMessageIds: ["discord:gate:owner"],
+        nowMs: BASE_TIME,
+      });
+      const completeChat = vi.fn(async () => ({
+        text: JSON.stringify(makeSemanticSettlement()),
+        model: "fake",
+        modelAlias: "fake",
+        resolvedModelId: null,
+      }));
+      const projectOutbox = vi.fn(async () => undefined);
+      const result = await runLiveCognitiveTurn({
+        sidecar,
+        nuclear,
+        event: {
+          id: "ev:gate:owner",
+          conversationId: cycle.conversationId,
+          wakeId: cycle.wakeId,
+          kind: "owner_message",
+          payload: { cycleId: cycle.cycleId, evidenceRowId: evidence.rowId },
+          createdAtMs: BASE_TIME,
+          status: "claimed",
+          claimToken: null,
+          workerId: null,
+          leaseExpiresAtMs: null,
+          attemptCount: 0,
+          claimedAtMs: null,
+          consumedAtMs: null,
+          lastError: null,
+        },
+        deps: deps({ attentionDb, completeChat, projectOutbox }),
+        projector: { project: projectOutbox, projectSystem: vi.fn(async () => undefined) },
+      });
+      expect(result.published).toBe(true);
+      expect(completeChat).toHaveBeenCalled();
+    } finally {
+      sidecar.close();
+      nuclear.close();
+      attentionDb.close();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("PERIODIC_ENABLED_GATE_PASSES_SAME_LINEAGE", () => {
+    vi.stubEnv("PERIODIC_COGNITION_ENABLED", "1");
+    const { sidecar, nuclear, attentionDb, cycle } = setupPeriodicScenario("enabled");
+    try {
+      const reservation = reserveHeld(sidecar, cycle, "enabled");
+      const event: InboxEvent = {
+        id: "ev:gate:enabled",
+        conversationId: cycle.conversationId,
+        wakeId: cycle.wakeId,
+        kind: "idle_opportunity",
+        payload: { cycleId: cycle.cycleId, privateBudgetReservationId: reservation.reservationId },
+        createdAtMs: BASE_TIME,
+        status: "claimed",
+        claimToken: null,
+        workerId: null,
+        leaseExpiresAtMs: null,
+        attemptCount: 0,
+        claimedAtMs: null,
+        consumedAtMs: null,
+        lastError: null,
+      };
+      expect(isPeriodicRecoveryDispatchBlocked(sidecar, event, reservation)).toBe(false);
+    } finally {
+      sidecar.close();
+      nuclear.close();
+      attentionDb.close();
+      vi.unstubAllEnvs();
     }
   });
 });

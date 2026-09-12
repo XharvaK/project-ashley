@@ -1,9 +1,21 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { recordEffectReceipt, putInFlight } from "../effect/in-flight.js";
 import { admitWake } from "../wake/ledger.js";
 import type { EffectReceipt } from "../types.js";
 import { openTestSidecar } from "../test-support.js";
-import { createRepairEvent, reconcileOutcomeUnknown, startDurableAttempt, settleDurableAttempt } from "./ledger.js";
+import { createRepairEvent, reconcileOutcomeUnknown, startDurableAttempt, settleDurableAttempt, claimNextDurableWork } from "./ledger.js";
+import {
+  reservePrivateThought,
+  bindPrivateReservationInvocation,
+  recordPrivateReservationNoDispatchProof,
+  commitPrivateDispatch,
+  bindPrivateRepairAttempt,
+  commitPrivateRepairDispatch,
+  markPrivateReservationUnknown,
+  releasePrivateReservation,
+  getPrivateReservation,
+} from "../private-budget/ledger.js";
+import { reconcilePolicyClock } from "../private-budget/policy-time-ledger.js";
 
 function seedEvent(db: ReturnType<typeof openTestSidecar>, id: string): string {
   const admitted = admitWake(db, {
@@ -284,6 +296,352 @@ describe("durable retry reconciliation", () => {
       });
     } finally {
       db.close();
+    }
+  });
+});
+
+describe("P0 spend-aware outcome-unknown partition (R7 §22.2)", () => {
+  const POLICY = "private-v1";
+  const BASE = 2_000_000;
+
+  function seedPrivateStranded(
+    db: ReturnType<typeof openTestSidecar>,
+    tag: string,
+    options: { periodic?: boolean; payload?: Record<string, unknown> } = {},
+  ): { eventId: string; wakeId: string; conversationId: string } {
+    const conversationId = `conversation:part:${tag}`;
+    const triggerRef = options.periodic ? `periodic:occurrence:${tag}:${BASE}` : `trigger:part:${tag}`;
+    const admitted = admitWake(db, {
+      occurrenceId: `occurrence:part:${tag}`,
+      triggerRef,
+      sourceKind: "inbox",
+      conversationId,
+      cycleId: `cycle:part:${tag}`,
+      capturedAuthorityRevision: 1,
+      nowMs: 1,
+    });
+    const wakeId = admitted.wake.wakeId;
+    const eventId = `event:part:${tag}`;
+    db.prepare(
+      `INSERT INTO inbox_events
+         (id, conversation_id, kind, payload_json, created_at_ms, status, wake_id)
+       VALUES (?, ?, 'test', ?, 1, 'pending', ?)`,
+    ).run(eventId, conversationId, JSON.stringify(options.payload ?? {}), wakeId);
+    return { eventId, wakeId, conversationId };
+  }
+
+  function strand(db: ReturnType<typeof openTestSidecar>, eventId: string): void {
+    const started = startDurableAttempt(db, { eventId, workerId: "worker", nowMs: BASE });
+    settleDurableAttempt(db, {
+      eventId,
+      attemptId: started.attemptId,
+      claimToken: started.claimToken,
+      result: { kind: "outcome_unknown", operationId: `operation:${eventId}`, errorCode: "worker_crash" },
+      nowMs: BASE + 100,
+    });
+  }
+
+  function reserve(db: ReturnType<typeof openTestSidecar>, wakeId: string, conversationId: string, tag: string) {
+    const result = reservePrivateThought(db, {
+      admissionId: `adm:part:${tag}`,
+      wakeId,
+      conversationId,
+      policyId: POLICY,
+      wallClockNowMs: BASE,
+    });
+    if (result.kind !== "reserved") throw new Error(`reserve_failed:${tag}`);
+    return result.reservation;
+  }
+
+  it("OWNER_OUTCOME_UNKNOWN_PROOF_PASS_SAFE_TO_RETRY_UNCHANGED", () => {
+    const db = openTestSidecar();
+    try {
+      const { eventId, wakeId } = seedPrivateStranded(db, "owner");
+      strand(db, eventId);
+      expect(reconcileOutcomeUnknown(db, {
+        eventId,
+        nowMs: BASE + 200,
+        noExternalDispatchProof: true,
+        proofRef: "proof:owner",
+      })).toEqual({ kind: "pending", reason: "safe_to_retry", eventId });
+      expect(db.prepare("SELECT state FROM inbox_events WHERE id = ?").get(eventId)).toMatchObject({ state: "pending" });
+      expect(db.prepare("SELECT state FROM wakes WHERE wake_id = ?").get(wakeId)).toMatchObject({ state: "pending" });
+      // Fresh Owner Thought retry remains legal on the same lineage.
+      const retry = startDurableAttempt(db, { eventId, workerId: "worker-2", nowMs: BASE + 201 });
+      expect(retry.ordinal).toBe(2);
+      expect(retry.wakeId).toBe(wakeId);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("PRIVATE_NOT_SPENT_SAME_LINEAGE_CONTINUES", () => {
+    const db = openTestSidecar();
+    try {
+      reconcilePolicyClock(db, { policyId: POLICY, wallClockNowMs: BASE, authorizationRef: "owner:part-b" });
+      const { wakeId, conversationId } = seedPrivateStranded(db, "b");
+      const reservation = reserve(db, wakeId, conversationId, "b");
+      const eventId = "event:part:b";
+      db.prepare("UPDATE inbox_events SET payload_json = ? WHERE id = ?").run(
+        JSON.stringify({ privateBudgetReservationId: reservation.reservationId }),
+        eventId,
+      );
+      const reservationsBefore = (db.prepare("SELECT COUNT(*) AS count FROM private_budget_reservations").get() as { count: number }).count;
+      strand(db, eventId);
+      expect(reconcileOutcomeUnknown(db, {
+        eventId,
+        nowMs: BASE + 200,
+        noExternalDispatchProof: true,
+        proofRef: "proof:part-b",
+      })).toEqual({ kind: "pending", reason: "safe_to_retry", eventId });
+      // Same lineage, no new reservation, binding intact.
+      expect(getPrivateReservation(db, reservation.reservationId)).toMatchObject({ state: "held", dispatchTruth: "not_bound" });
+      expect((db.prepare("SELECT COUNT(*) AS count FROM private_budget_reservations").get() as { count: number }).count).toBe(reservationsBefore);
+      const retry = startDurableAttempt(db, { eventId, workerId: "worker-2", nowMs: BASE + 201 });
+      expect(retry.wakeId).toBe(wakeId);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("PERIODIC_COMMITTED_PUBLICATION_FAILURE_NO_RETHOUGHT", () => {
+    const db = openTestSidecar();
+    try {
+      reconcilePolicyClock(db, { policyId: POLICY, wallClockNowMs: BASE, authorizationRef: "owner:part-c" });
+      const { wakeId, conversationId } = seedPrivateStranded(db, "c", { periodic: true });
+      const reservation = reserve(db, wakeId, conversationId, "c");
+      bindPrivateReservationInvocation(db, {
+        reservationId: reservation.reservationId,
+        invocationId: "invocation:part:c",
+        attemptId: "attempt:part:c",
+        nowMs: BASE,
+      });
+      commitPrivateDispatch(db, {
+        reservationId: reservation.reservationId,
+        invocationId: "invocation:part:c",
+        attemptId: "attempt:part:c",
+        nowMs: BASE,
+      });
+      const eventId = "event:part:c";
+      db.prepare("UPDATE inbox_events SET payload_json = ? WHERE id = ?").run(
+        JSON.stringify({ privateBudgetReservationId: reservation.reservationId }),
+        eventId,
+      );
+      const inboxBefore = (db.prepare("SELECT COUNT(*) AS count FROM inbox_events").get() as { count: number }).count;
+      strand(db, eventId);
+      // Semantic publication proven absent, provider SPENT: terminal Failure
+      // Truth, never a second Thought/reservation/replay.
+      expect(reconcileOutcomeUnknown(db, {
+        eventId,
+        nowMs: BASE + 200,
+        noExternalDispatchProof: true,
+        proofRef: "proof:part-c",
+      })).toEqual({ kind: "terminal", reason: "permanent_failure", eventId });
+      expect(db.prepare("SELECT state, status, terminal_reason, last_error FROM inbox_events WHERE id = ?").get(eventId)).toMatchObject({
+        state: "terminal",
+        status: "failed_terminal",
+        terminal_reason: "permanent_failure",
+        last_error: "private_spent_no_rethought:committed",
+      });
+      expect(db.prepare("SELECT state FROM wakes WHERE wake_id = ?").get(wakeId)).toMatchObject({ state: "terminal" });
+      expect(getPrivateReservation(db, reservation.reservationId)).toMatchObject({ state: "committed" });
+      expect((db.prepare("SELECT COUNT(*) AS count FROM inbox_events").get() as { count: number }).count).toBe(inboxBefore);
+      expect((db.prepare("SELECT COUNT(*) AS count FROM private_budget_reservations").get() as { count: number }).count).toBe(1);
+      expect((db.prepare("SELECT COUNT(*) AS count FROM settlements").get() as { count: number }).count).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("PRIVATE_SPENT_CHILD_ATTEMPT_NEVER_RETHOUGHT", () => {
+    const db = openTestSidecar();
+    try {
+      reconcilePolicyClock(db, { policyId: POLICY, wallClockNowMs: BASE, authorizationRef: "owner:part-child" });
+      const { wakeId, conversationId } = seedPrivateStranded(db, "child");
+      const reservation = reserve(db, wakeId, conversationId, "child");
+      bindPrivateReservationInvocation(db, {
+        reservationId: reservation.reservationId,
+        invocationId: "invocation:part:child:1",
+        attemptId: "attempt:part:child:1",
+        nowMs: BASE,
+      });
+      recordPrivateReservationNoDispatchProof(db, {
+        reservationId: reservation.reservationId,
+        invocationId: "invocation:part:child:1",
+        attemptId: "attempt:part:child:1",
+        proofRef: "proof:part:child:no-dispatch",
+        nowMs: BASE,
+      });
+      bindPrivateRepairAttempt(db, {
+        reservationId: reservation.reservationId,
+        invocationId: "invocation:part:child:2",
+        attemptId: "attempt:part:child:2",
+        wakeId,
+        conversationId,
+        ordinal: 2,
+        reason: "structural_repair",
+        nowMs: BASE,
+      });
+      commitPrivateRepairDispatch(db, {
+        reservationId: reservation.reservationId,
+        invocationId: "invocation:part:child:2",
+        nowMs: BASE,
+      });
+      const eventId = "event:part:child";
+      db.prepare("UPDATE inbox_events SET payload_json = ? WHERE id = ?").run(
+        JSON.stringify({ privateBudgetReservationId: reservation.reservationId }),
+        eventId,
+      );
+      strand(db, eventId);
+      expect(reconcileOutcomeUnknown(db, {
+        eventId,
+        nowMs: BASE + 200,
+        noExternalDispatchProof: true,
+        proofRef: "proof:part-child",
+      })).toEqual({ kind: "terminal", reason: "permanent_failure", eventId });
+      expect(db.prepare("SELECT last_error FROM inbox_events WHERE id = ?").get(eventId)).toMatchObject({
+        last_error: expect.stringContaining("private_spent_no_rethought"),
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("PRIVATE_UNCERTAIN_STAYS_FENCED", () => {
+    for (const tag of ["unknown", "released"] as const) {
+      const db = openTestSidecar();
+      try {
+        reconcilePolicyClock(db, { policyId: POLICY, wallClockNowMs: BASE, authorizationRef: `owner:part-d:${tag}` });
+        const { wakeId, conversationId } = seedPrivateStranded(db, `d-${tag}`);
+        const reservation = reserve(db, wakeId, conversationId, `d-${tag}`);
+        bindPrivateReservationInvocation(db, {
+          reservationId: reservation.reservationId,
+          invocationId: `invocation:part:d:${tag}`,
+          attemptId: `attempt:part:d:${tag}`,
+          nowMs: BASE,
+        });
+        if (tag === "unknown") {
+          markPrivateReservationUnknown(db, reservation.reservationId, { nowMs: BASE });
+        } else {
+          releasePrivateReservation(db, {
+            reservationId: reservation.reservationId,
+            proofRef: `proof:part:d:${tag}`,
+            dispatchTruth: "not_started",
+            nowMs: BASE,
+          });
+        }
+        const eventId = `event:part:d-${tag}`;
+        db.prepare("UPDATE inbox_events SET payload_json = ? WHERE id = ?").run(
+          JSON.stringify({ privateBudgetReservationId: reservation.reservationId }),
+          eventId,
+        );
+        strand(db, eventId);
+        expect(reconcileOutcomeUnknown(db, {
+          eventId,
+          nowMs: BASE + 200,
+          noExternalDispatchProof: true,
+          proofRef: `proof:part-d:${tag}`,
+        })).toEqual({ kind: "pending", reason: "outcome_still_unknown", eventId });
+        expect(db.prepare("SELECT state FROM inbox_events WHERE id = ?").get(eventId)).toMatchObject({ state: "reconciling" });
+      } finally {
+        db.close();
+      }
+    }
+  });
+
+  it("PERIODIC_RECOVERED_PREDISPATCH_ENABLED_CONTINUES_SAME_LINEAGE", () => {
+    vi.stubEnv("PERIODIC_COGNITION_ENABLED", "true");
+    const db = openTestSidecar();
+    try {
+      reconcilePolicyClock(db, { policyId: POLICY, wallClockNowMs: BASE, authorizationRef: "owner:part-enabled" });
+      const { eventId, wakeId, conversationId } = seedPrivateStranded(db, "enabled", { periodic: true });
+      const reservation = reserve(db, wakeId, conversationId, "enabled");
+      db.prepare("UPDATE inbox_events SET payload_json = ? WHERE id = ?").run(
+        JSON.stringify({ privateBudgetReservationId: reservation.reservationId }),
+        eventId,
+      );
+      strand(db, eventId);
+      expect(reconcileOutcomeUnknown(db, {
+        eventId,
+        nowMs: BASE + 200,
+        noExternalDispatchProof: true,
+        proofRef: "proof:part-enabled",
+      })).toEqual({ kind: "pending", reason: "safe_to_retry", eventId });
+      expect(getPrivateReservation(db, reservation.reservationId)).toMatchObject({ state: "held" });
+      expect(db.prepare("SELECT wake_id FROM inbox_events WHERE id = ?").get(eventId)).toMatchObject({ wake_id: wakeId });
+    } finally {
+      db.close();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("PERIODIC_BOUND_OUTCOME_UNKNOWN_CONVERGES_WITHOUT_ORPHAN", () => {
+    vi.stubEnv("PERIODIC_COGNITION_ENABLED", "0");
+    const db = openTestSidecar();
+    try {
+      reconcilePolicyClock(db, { policyId: POLICY, wallClockNowMs: BASE, authorizationRef: "owner:part-orphan" });
+      const { eventId, wakeId, conversationId } = seedPrivateStranded(db, "orphan", { periodic: true });
+      const reservation = reserve(db, wakeId, conversationId, "orphan");
+      db.prepare("UPDATE inbox_events SET payload_json = ? WHERE id = ?").run(
+        JSON.stringify({ privateBudgetReservationId: reservation.reservationId }),
+        eventId,
+      );
+      strand(db, eventId);
+      expect(reconcileOutcomeUnknown(db, {
+        eventId,
+        nowMs: BASE + 200,
+        noExternalDispatchProof: true,
+        proofRef: "proof:part-orphan",
+      })).toEqual({ kind: "pending", reason: "safe_to_retry", eventId });
+      // Same lineage adopted: no repair/orphan rows minted, binding intact.
+      expect((db.prepare("SELECT COUNT(*) AS count FROM durable_work_repairs").get() as { count: number }).count).toBe(0);
+      expect(getPrivateReservation(db, reservation.reservationId)).toMatchObject({ state: "held" });
+      const retry = claimNextDurableWork(db, { workerId: "worker-2", eventId, nowMs: BASE + 201 });
+      expect(retry?.wakeId).toBe(wakeId);
+    } finally {
+      db.close();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("KILL_SWITCH_TERMINAL_NO_DISPATCH_CAN_CLOSE", () => {
+    vi.stubEnv("PERIODIC_COGNITION_ENABLED", "");
+    const db = openTestSidecar();
+    try {
+      reconcilePolicyClock(db, { policyId: POLICY, wallClockNowMs: BASE, authorizationRef: "owner:part-term" });
+      const { eventId, wakeId, conversationId } = seedPrivateStranded(db, "term", { periodic: true });
+      const reservation = reserve(db, wakeId, conversationId, "term");
+      bindPrivateReservationInvocation(db, {
+        reservationId: reservation.reservationId,
+        invocationId: "invocation:part:term",
+        attemptId: "attempt:part:term",
+        nowMs: BASE,
+      });
+      commitPrivateDispatch(db, {
+        reservationId: reservation.reservationId,
+        invocationId: "invocation:part:term",
+        attemptId: "attempt:part:term",
+        nowMs: BASE,
+      });
+      db.prepare("UPDATE inbox_events SET payload_json = ? WHERE id = ?").run(
+        JSON.stringify({ privateBudgetReservationId: reservation.reservationId }),
+        eventId,
+      );
+      strand(db, eventId);
+      // Terminal truth closes while disabled: receipt/bookkeeping completes,
+      // zero new provider dispatch (no settlement/outbox fabricated here).
+      expect(reconcileOutcomeUnknown(db, {
+        eventId,
+        nowMs: BASE + 200,
+        noExternalDispatchProof: true,
+        proofRef: "proof:part-term",
+      })).toEqual({ kind: "terminal", reason: "permanent_failure", eventId });
+      expect((db.prepare("SELECT COUNT(*) AS count FROM settlements").get() as { count: number }).count).toBe(0);
+      expect((db.prepare("SELECT COUNT(*) AS count FROM speech_outbox").get() as { count: number }).count).toBe(0);
+      expect(db.prepare("SELECT state FROM wakes WHERE wake_id = ?").get(wakeId)).toMatchObject({ state: "terminal" });
+    } finally {
+      db.close();
+      vi.unstubAllEnvs();
     }
   });
 });
