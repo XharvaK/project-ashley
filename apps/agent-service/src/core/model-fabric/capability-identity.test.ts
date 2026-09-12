@@ -37,10 +37,10 @@ describe("Thought capability identity", () => {
   it("binds the frozen resource policy and rejects malformed fingerprints", () => {
     const policy = thoughtResourcePolicyIdentity();
     expect(policy).toMatchObject({
-      ordinaryThoughtBudgetMs: 60000,
-      interactiveMaxOutput: 8192,
-      durableProactiveMaxOutput: 8192,
-      structuralRetryMaxOutput: 8192,
+      ordinaryThoughtBudgetMs: 180000,
+      interactiveMaxOutput: 16384,
+      durableProactiveMaxOutput: 16384,
+      structuralRetryMaxOutput: 16384,
       structuralRetriesMaxPerSemanticPass: 2,
     });
     expect(policy.fingerprint).toMatch(/^sha256:[0-9a-f]{64}$/);
@@ -83,14 +83,14 @@ describe("Thought capability identity", () => {
       };
     };
 
-    expect(() => assertThoughtCapabilityEvidence(makeEvidence({ deadlineMs: 60000, maxOutputTokens: 8192, attempts: 3 }))).not.toThrow();
-    expect(() => assertThoughtCapabilityEvidence(makeEvidence({ deadlineMs: 60000, maxOutputTokens: 4096, attempts: 3 }))).not.toThrow();
-    expect(() => assertThoughtCapabilityEvidence(makeEvidence({ deadlineMs: 60000, maxOutputTokens: 8193, attempts: 3 }))).toThrow("qualification_resource_evidence_mismatch");
-    expect(() => assertThoughtCapabilityEvidence(makeEvidence({ deadlineMs: 60000, maxOutputTokens: 8192, attempts: 4 }))).toThrow("qualification_resource_evidence_mismatch");
+    expect(() => assertThoughtCapabilityEvidence(makeEvidence({ deadlineMs: 180000, maxOutputTokens: 16384, attempts: 3 }))).not.toThrow();
+    expect(() => assertThoughtCapabilityEvidence(makeEvidence({ deadlineMs: 180000, maxOutputTokens: 4096, attempts: 3 }))).not.toThrow();
+    expect(() => assertThoughtCapabilityEvidence(makeEvidence({ deadlineMs: 180000, maxOutputTokens: 16385, attempts: 3 }))).toThrow("qualification_resource_evidence_mismatch");
+    expect(() => assertThoughtCapabilityEvidence(makeEvidence({ deadlineMs: 180000, maxOutputTokens: 16384, attempts: 4 }))).toThrow("qualification_resource_evidence_mismatch");
+    expect(() => assertThoughtCapabilityEvidence(makeEvidence({ deadlineMs: 60000, maxOutputTokens: 16384, attempts: 3 }))).toThrow("qualification_resource_evidence_mismatch");
   });
 
-  it("changes the aggregate fingerprint when any component changes", () => {
-    const original = buildThoughtCapabilityIdentity(base);
+  it("changes the aggregate fingerprint when any component changes", () => {    const original = buildThoughtCapabilityIdentity(base);
     const variants: ThoughtCapabilityComponents[] = [
       { ...base, executableBuildIdentity: "build:fixture-2" },
       { ...base, semanticContractFingerprint: "sha256:" + "e".repeat(64) },
@@ -111,5 +111,19 @@ describe("Thought capability identity", () => {
         original.fingerprint,
       );
     }
+  });
+
+  it("rotates the resource-policy fingerprint across the 8K to 16K era", () => {
+    const policy = thoughtResourcePolicyIdentity();
+    // Era separation: the 16K rotation must differ from the superseded 8K
+    // components (stale ordinaryThoughtBudgetMs metadata now truthful).
+    expect(policy.fingerprint).not.toBe(`sha256:${sha256({
+      ordinaryThoughtBudgetMs: 60_000,
+      interactiveMaxOutput: 8_192,
+      durableProactiveMaxOutput: 8_192,
+      structuralRetryMaxOutput: 8_192,
+      structuralRetriesMaxPerSemanticPass: 2,
+    })}`);
+    expect(policy.ordinaryThoughtBudgetMs).toBe(180_000);
   });
 });

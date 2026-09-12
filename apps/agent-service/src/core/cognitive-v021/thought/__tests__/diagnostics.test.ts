@@ -121,6 +121,49 @@ describe("Thought Diagnostics & Observability DB", () => {
     }
   });
 
+  it("P2 era: persists the 16K output reserve on allocation receipts", () => {
+    const obs = openObservabilityStore(":memory:");
+    try {
+      obs.recordReceipt({
+        cycleId: "cycle-diag-16k",
+        generation: 1,
+        requestId: "req-diag-16k",
+        policyId: "thought-projection-v1",
+        policyVersion: 1,
+        semanticProjectionEnvelope: DEFAULT_SEMANTIC_PROJECTION_ENVELOPE,
+        tokenBreakdown: {
+          static_contract_tokens: 0, conversation_tokens: 0, working_context_tokens: 0,
+          identity_kernel_tokens: 0, domain_pointer_tokens: 0, learned_self_tokens: 0,
+          retrieval_tokens: 0, observations_tokens: 0, in_flight_effect_tokens: 0,
+          authority_revision_feedback_tokens: 0, omitted_for_budget_tokens: 0,
+          omitted_for_budget_count: 0, required_overflow_count: 0,
+        },
+        quotaBucket: "cloudflare:@cf/deepseek-ai/deepseek-v4-flash-0731",
+        hardTpm: 65536,
+        maxOutputTokens: 16384,
+        estimatedInputTokens: 2500,
+        estimatedOutputTokens: 16384,
+        totalDemandTokens: 18884,
+        headroomTokens: 46652,
+        compression: false,
+        requiredOverflow: false,
+        decision: {
+          included: [{ id: "trigger_evidence", section: "trigger_evidence", required: true }],
+          omitted: [],
+          includedWireBytes: 1500,
+          estimatedInputTokens: 2500,
+        },
+        semanticProjectionHash: "hash-sem-16k",
+        dispatchMessagesHash: "hash-msg-16k",
+      });
+      const receipts = obs.listReceipts();
+      expect(receipts).toHaveLength(1);
+      expect(receipts[0]).toMatchObject({ maxOutputTokens: 16384, estimatedOutputTokens: 16384 });
+    } finally {
+      obs.close();
+    }
+  });
+
   it("round-trips required allocation overflow details through the existing diagnostic payload", () => {
     const obs = openObservabilityStore(":memory:");
     try {

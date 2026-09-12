@@ -990,7 +990,7 @@ describe("v0.2.1 Thought run", () => {
     }));
     expect(result.published).toBe(true);
     expect(deadlines).toEqual([181_000, 181_000]);
-    expect(maxTokens).toEqual([undefined, 8_192]);
+    expect(maxTokens).toEqual([undefined, 16_384]);
     expect(temperatures).toEqual([1.0, 1.0]);
     expect(structuredContractIds).toEqual(["ashley.thought.semantic.v2", "ashley.thought.semantic.v2"]);
     expect(userInputs[1]).toBe(userInputs[0]);

@@ -26,7 +26,7 @@ describe("TARGET portfolio + token envelope reconciliation", () => {
     expect(target.kind).toBe("candidate_target");
     expect(target.sourcePath.replaceAll("\\", "/")).toMatch(/target-12-9\.v2\.json$/);
     expect(existsSync(join(target.sourcePath, "..", "target-12-9.v1.json"))).toBe(true);
-    expect(current.portfolioRevisionId).toBe("mfp_current_compatibility_v3");
+    expect(current.portfolioRevisionId).toBe("mfp_current_compatibility_v4");
     expect(current.kind).toBe("current_compatibility");
   });
 
@@ -41,8 +41,8 @@ describe("TARGET portfolio + token envelope reconciliation", () => {
       effectiveReasoning: "high",
     });
     expect(thought.deadlineMs).toBe(60000);
-    expect(thought.maxOutputTokens).toBe(8192);
-    expect(durable.maxOutputTokens).toBe(8192);
+    expect(thought.maxOutputTokens).toBe(16384);
+    expect(durable.maxOutputTokens).toBe(16384);
     expect(expression.occupants[0]).toMatchObject({
       provider: "nim",
       configuredModelId: "nvidia/nemotron-3.5-lightning-30b-a3b",
@@ -68,6 +68,11 @@ describe("TARGET portfolio + token envelope reconciliation", () => {
   it("keeps the target envelope separate from the owner-approved CURRENT deadline", () => {
     const observation = current.rows.find((row) => row.policyRowId === "mfr_thought_observation_compat_v1")!;
     expect(observation.maxOutputTokens).toBe(450);
+    // P2 unrelated-8192 guard: non-Thought CURRENT rows are byte-identical.
+    expect(current.rows.find((row) => row.policyRowId === "mfr_reflection_initiative_compat_v1")!.maxOutputTokens).toBe(300);
+    expect(current.rows.find((row) => row.policyRowId === "mfr_exchange_cognition_compat_v1")!.maxOutputTokens).toBe(1100);
+    expect(current.rows.find((row) => row.policyRowId === "mfr_curiosity_consolidation_compat_v1")!.maxOutputTokens).toBe(900);
+    expect(current.rows.find((row) => row.policyRowId === "mfr_maintenance_compat_v1")!.maxOutputTokens).toBe(2048);
     expect(current.rows.find((row) => row.policyRowId === "mfr_thought_interactive_compat_v1")!.deadlineMs).toBe(60000);
     expect(target.rows.find((row) => row.policyRowId === "mfr_thought_interactive_target_v1")!.deadlineMs).toBe(6000);
     expect(target.rows.find((row) => row.policyRowId === "mfr_thought_observation_target_v1")!.deadlineMs).toBeNull();

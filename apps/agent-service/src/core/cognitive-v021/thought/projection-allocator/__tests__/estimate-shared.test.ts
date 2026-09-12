@@ -24,8 +24,8 @@ describe("Shared Estimator Authority", () => {
     expect(FRAMING_TOKEN_OVERHEAD).toBe(ATTENTION_FRAMING_OVERHEAD);
     expect(FRAMING_TOKEN_OVERHEAD).toBe(64);
     expect(STABLE_RESERVE_TOKENS).toBe(0);
-    expect(INTERACTIVE_THOUGHT_MAX_OUTPUT).toBe(8192);
-    expect(STRUCTURAL_RETRY_MAX_OUTPUT).toBe(8192);
+    expect(INTERACTIVE_THOUGHT_MAX_OUTPUT).toBe(16384);
+    expect(STRUCTURAL_RETRY_MAX_OUTPUT).toBe(16384);
     expect(ORDINARY_THOUGHT_BUDGET_MS).toBe(180000);
     expect(ORDINARY_THOUGHT_BUDGET_MS).toBe(KERNEL_ORDINARY_THOUGHT_BUDGET_MS);
   });
@@ -49,7 +49,11 @@ describe("Shared Estimator Authority", () => {
     expect(admission.estimate.estimatedOutputTokens).toBe(INTERACTIVE_THOUGHT_MAX_OUTPUT);
     expect(admission.totalDemand).toBe(attEst.estimatedInputTokens + INTERACTIVE_THOUGHT_MAX_OUTPUT);
     expect(admission.hardTpm).toBe(16000);
-    expect(admission.admitted).toBe(admission.totalDemand <= 16000);
+    // P2: input-only admission — worst-case demand (input + 16K reserve)
+    // admits even above bucket TPM metadata (no request_exceeds_tpm_budget;
+    // the governor paces, the allocator never starves input).
+    expect(admission.totalDemand).toBeGreaterThan(16000);
+    expect(admission.admitted).toBe(true);
   });
 
   it("keeps the full estimator authoritative for odd UTF-8 byte totals", () => {

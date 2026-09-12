@@ -180,7 +180,7 @@ describe("MF-M2 CURRENT portfolio", () => {
       responseFormat: "json_object",
     }));
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
-      options: expect.objectContaining({ maxTokens: 8192 }),
+      options: expect.objectContaining({ maxTokens: 16384 }),
     }));
     database.close();
   });
@@ -210,7 +210,7 @@ describe("MF-M2 CURRENT portfolio", () => {
     }));
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
       options: expect.objectContaining({
-        maxTokens: 8192,
+        maxTokens: 16384,
         responseFormat: "json_object",
         structuredOutput,
       }),
@@ -227,7 +227,7 @@ describe("MF-M2 CURRENT portfolio", () => {
     });
     expect(database.prepare(
       "SELECT estimated_output_tokens AS estimatedOutputTokens FROM attention_requests ORDER BY id DESC LIMIT 1",
-    ).get()).toMatchObject({ estimatedOutputTokens: 8192 });
+    ).get()).toMatchObject({ estimatedOutputTokens: 16384 });
     database.close();
   });
 
@@ -243,9 +243,9 @@ describe("MF-M2 CURRENT portfolio", () => {
       lane: "interactive",
     });
 
-    expect(interactive.policyRow.maxOutputTokens).toBe(8192);
+    expect(interactive.policyRow.maxOutputTokens).toBe(16384);
     expect(interactive.policyRow.deadlineMs).toBe(60000);
-    expect(durable.policyRow.maxOutputTokens).toBe(8192);
+    expect(durable.policyRow.maxOutputTokens).toBe(16384);
     expect(durable.policyRow.deadlineMs).toBeNull();
   });
 
@@ -264,7 +264,7 @@ describe("MF-M2 CURRENT portfolio", () => {
         purpose: "thought",
         lane: "interactive",
         responseFormat: "json_object",
-        maxTokens: 10000,
+        maxTokens: 17000,
       }),
     ).rejects.toMatchObject({ code: "model_fabric_output_budget_exceeded" });
     expect(dispatch).not.toHaveBeenCalled();
@@ -286,7 +286,7 @@ describe("MF-M2 CURRENT portfolio", () => {
       policy: interactive,
       provider: "cloudflare",
       configuredModelId: "@cf/deepseek-ai/deepseek-v4-flash-0731",
-    }).maxTokens).toBe(8192);
+    }).maxTokens).toBe(16384);
 
     const policyAboveProfile = {
       ...interactive,
@@ -307,7 +307,7 @@ describe("MF-M2 CURRENT portfolio", () => {
     const database = openNuclearDb(new DatabaseSync(":memory:"));
     const thought = routingStatus(database).find((route) => route.route === "thought");
     expect(thought?.fabric).toMatchObject({
-      portfolioRevisionId: "mfp_current_compatibility_v3",
+      portfolioRevisionId: "mfp_current_compatibility_v4",
       registryVersion: currentPortfolio().registryVersion,
     });
     expect(thought?.fabric.policyRows).toEqual(

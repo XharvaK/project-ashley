@@ -35,10 +35,12 @@ describe("Thought semantic projection budget", () => {
     expect(nim.maxOutputTokens).toBe(INTERACTIVE_THOUGHT_MAX_OUTPUT);
     expect(deriveThoughtBudget({ maxOutputTokens: STRUCTURAL_RETRY_MAX_OUTPUT }).maxOutputTokens)
       .toBe(STRUCTURAL_RETRY_MAX_OUTPUT);
+    // P2 16K era: ordinary and structural-retry output share one ceiling.
+    expect(INTERACTIVE_THOUGHT_MAX_OUTPUT).toBe(16_384);
+    expect(STRUCTURAL_RETRY_MAX_OUTPUT).toBe(16_384);
   });
 
-  it("admits against logical input capacity, independently of provider TPM metadata", () => {
-    const budget = deriveThoughtBudget({
+  it("admits against logical input capacity, independently of provider TPM metadata", () => {    const budget = deriveThoughtBudget({
       quotaBucket: "groq:openai/gpt-oss-20b",
       semanticProjectionEnvelope: {
         id: "test-envelope",
@@ -56,5 +58,19 @@ describe("Thought semantic projection budget", () => {
     expect(admission.semanticBudgetTokens).toBe(100);
     expect(admission.headroom).toBeLessThan(0);
     expect(admission.hardTpm).toBe(8000);
+  });
+
+  it("admits the full 32K input envelope with the 16K output reserve (no input starvation)", () => {
+    const budget = deriveThoughtBudget({});
+    expect(budget.semanticBudgetTokens).toBe(32_768);
+    expect(budget.maxOutputTokens).toBe(16_384);
+    // Worst-case demand: full envelope input + 16K reserve admits; the
+    // governor (tpm 65536, worst case ≈32742 + 16384 = 49126) paces.
+    const admission = checkThoughtAdmission(
+      [{ role: "user", content: "x".repeat(60_000) }],
+      budget,
+    );
+    expect(admission.estimate.estimatedInputTokens).toBeLessThanOrEqual(32_768);
+    expect(admission.admitted).toBe(true);
   });
 });

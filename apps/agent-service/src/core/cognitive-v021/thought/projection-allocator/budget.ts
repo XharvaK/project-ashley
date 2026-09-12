@@ -43,8 +43,8 @@ export type SemanticProjectionEnvelope = Readonly<{
 }>;
 
 export const ORDINARY_THOUGHT_BUDGET_MS = 180_000;
-export const INTERACTIVE_THOUGHT_MAX_OUTPUT = 8_192;
-export const STRUCTURAL_RETRY_MAX_OUTPUT = 8_192;
+export const INTERACTIVE_THOUGHT_MAX_OUTPUT = 16_384;
+export const STRUCTURAL_RETRY_MAX_OUTPUT = 16_384;
 export const STABLE_RESERVE_TOKENS = 0;
 /** Exact source-baseline default at 440cc0. It is retained for comparison. */
 export const CURRENT_SOURCE_DEFAULT_SEMANTIC_ENVELOPE = 9_500;

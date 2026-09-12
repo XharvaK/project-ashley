@@ -28,7 +28,7 @@ const MODEL_OUTPUT_CEILINGS: Readonly<Record<string, number>> = {
   "mistral:mistral-small-2603": 4096,
   "nim:nvidia/nemotron-3-super-120b-a12b": 8192,
   "cloudflare:@cf/nvidia/nemotron-3-120b-a12b": 8192,
-  "cloudflare:@cf/deepseek-ai/deepseek-v4-flash-0731": 8192,
+  "cloudflare:@cf/deepseek-ai/deepseek-v4-flash-0731": 16384,
 };
 
 const MODEL_CONTEXT_LIMITS: Readonly<Record<string, number>> = {

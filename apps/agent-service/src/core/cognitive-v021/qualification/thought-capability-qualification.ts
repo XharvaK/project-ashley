@@ -188,7 +188,7 @@ const CANDIDATE = {
   model: "@cf/deepseek-ai/deepseek-v4-flash-0731" as const,
 };
 const ROUTE_ID = "thought";
-const MAX_THOUGHT_OUTPUT_TOKENS = 8_192;
+const MAX_THOUGHT_OUTPUT_TOKENS = 16_384;
 const MAX_STRUCTURAL_ATTEMPTS = 1 + 2;
 const WHOLE_THOUGHT_BUDGET_MS = thoughtResourcePolicyIdentity().ordinaryThoughtBudgetMs;
 const QUALIFICATION_SCHEMA = "ashley.thought.route_qualification.v1" as const;

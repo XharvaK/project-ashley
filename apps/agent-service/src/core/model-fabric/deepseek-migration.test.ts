@@ -69,7 +69,7 @@ describe("DeepSeek V4 Flash Model Fabric migration witnesses", () => {
       },
       limits: {
         contextTokens: 32768,
-        maxOutputTokens: 8192,
+        maxOutputTokens: 16384,
       },
     });
     expect(profile.limits.maxOutputTokens).not.toBe(2048);
@@ -101,13 +101,13 @@ describe("DeepSeek V4 Flash Model Fabric migration witnesses", () => {
       policy,
       provider: "cloudflare",
       configuredModelId: DEEPSEEK,
-      requestedMaxTokens: 8192,
+      requestedMaxTokens: 16384,
       responseFormat: "json_schema",
       structuredOutput: structuredRequest,
     });
 
     expect(dispatch).toMatchObject({
-      maxTokens: 8192,
+      maxTokens: 16384,
       responseFormat: "json_object",
       structuredOutputMode: "json_object_compatibility",
     });
@@ -139,7 +139,7 @@ describe("DeepSeek V4 Flash Model Fabric migration witnesses", () => {
 
     expect(body).toMatchObject({
       model: DEEPSEEK,
-      max_completion_tokens: 8192,
+      max_completion_tokens: 16384,
       temperature: 1,
       reasoning_effort: "high",
       response_format: {

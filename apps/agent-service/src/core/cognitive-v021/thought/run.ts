@@ -216,7 +216,7 @@ export type ThoughtCompleteInvoker = (
  * only keeps a corrective retry admissible under the shared rolling TPM
  * contract.
  */
-export const STRUCTURAL_RETRY_MAX_OUTPUT_TOKENS = 8_192;
+export const STRUCTURAL_RETRY_MAX_OUTPUT_TOKENS = 16_384;
 
 /** The single adapter boundary for Thought dispatch. attentionDb is mandatory. */
 export async function invokeThoughtComplete(
