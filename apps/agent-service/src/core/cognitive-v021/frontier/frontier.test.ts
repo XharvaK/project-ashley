@@ -8,6 +8,7 @@ import {
   COGNITIVE_SIDECAR_SCHEMA_V5,
   COGNITIVE_SIDECAR_SCHEMA_V6,
 } from "../sidecar/schema.js";
+import { COGNITIVE_SIDECAR_SCHEMA_VERSION } from "../types.js";
 import { openCognitiveSidecarDb } from "../sidecar/db.js";
 import {
   advanceDeferredFrontierEvidence,
@@ -44,10 +45,10 @@ function openMigratedDb(): DatabaseSync {
 }
 
 describe("Wave 1B: Durable Frontier Lifecycle & Migration 007", () => {
-  it("migrates from v006 fixture to v008 and establishes schema_version = 8", () => {
+  it("migrates from v006 fixture through the current migration chain and establishes exact schema_version", () => {
     const db = openMigratedDb();
     const meta = db.prepare("SELECT schema_version FROM cognitive_sidecar_meta WHERE id = 1").get() as { schema_version: number };
-    expect(meta.schema_version).toBe(8);
+    expect(meta.schema_version).toBe(COGNITIVE_SIDECAR_SCHEMA_VERSION);
 
     const tableInfo = db.prepare("PRAGMA table_info(deferred_reactive_frontiers)").all() as Array<{ name: string }>;
     expect(tableInfo.map((col) => col.name)).toEqual([

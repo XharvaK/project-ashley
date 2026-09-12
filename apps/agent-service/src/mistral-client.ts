@@ -91,11 +91,18 @@ import {
   type ThoughtCapabilityIdentity,
 } from "./core/model-fabric/capability-identity.js";
 import {
-  bindPrivateReservationInvocation,
+  bindPrivateReservationOrRepairAttempt,
   commitPrivateDispatch,
+  commitPrivateRepairDispatch,
+  getPrivateReservation,
+  markPrivateRepairAttemptUnknown,
   markPrivateReservationUnknown,
   recordPrivateProviderResponse,
+  recordPrivateRepairResponse,
+  recordPrivateReservationNoDispatchProof,
+  releasePrivateRepairAttempt,
   releasePrivateReservation,
+  type PrivateBudgetChildReason,
   type PrivateBudgetDispatchBinding,
 } from "./core/cognitive-v021/private-budget/ledger.js";
 import { sha256Text, stableJson } from "./core/model-fabric/hash.js";
@@ -564,6 +571,8 @@ export async function completeChat(
   const privateBudgetBinding = options.privateBudgetBinding;
   let privateBudgetBound = false;
   let privateBudgetCommitted = false;
+  /** F1: child ordinal when this call bound a structural-repair attempt; null for the initial parent bind. */
+  let privateBudgetRepairOrdinal: number | null = null;
 
   const beginAttempt = (
     targetProvider: ProviderId,
@@ -811,12 +820,25 @@ export async function completeChat(
         : {}),
     };
     if (privateBudgetBinding && !privateBudgetBound) {
-      bindPrivateReservationInvocation(privateBudgetBinding.sidecar, {
+      // F1 (R7 §15.5): the initial attempt binds the parent reservation.
+      // Child attempts (structural repair or cycle continuation) bind an
+      // append-only child row instead of overwriting attempt-1 provenance.
+      let childReason: PrivateBudgetChildReason | undefined;
+      if (options.thoughtInvocationContext) {
+        childReason = options.thoughtInvocationContext.structuralAttemptOrdinal > 0
+          ? "structural_repair"
+          : "cycle_continuation";
+      }
+      const bound = bindPrivateReservationOrRepairAttempt(privateBudgetBinding.sidecar, {
         reservationId: privateBudgetBinding.reservationId,
         invocationId: attempt.receipt().invocationId,
         attemptId: attempt.receipt().attemptId,
+        wakeId: privateBudgetBinding.wakeId,
+        conversationId: privateBudgetBinding.conversationId,
+        childReason,
         nowMs: Date.now(),
       });
+      privateBudgetRepairOrdinal = bound.kind === "child" ? bound.ordinal : null;
       privateBudgetBound = true;
     }
     assertOutboundAllowed(targetProvider);
@@ -920,12 +942,24 @@ export async function completeChat(
           const adapter = adapterFor(targetProvider);
           attempt.markDispatchAttempted();
           if (privateBudgetBinding && !privateBudgetCommitted) {
-            commitPrivateDispatch(privateBudgetBinding.sidecar, {
-              reservationId: privateBudgetBinding.reservationId,
-              invocationId: attempt.receipt().invocationId,
-              attemptId: attempt.receipt().attemptId,
-              nowMs: Date.now(),
-            });
+            // F1: commit the row this call bound — parent for the initial
+            // attempt, child for structural repair. The parent unit is
+            // consumed exactly once per cycle regardless of attempt count.
+            if (privateBudgetRepairOrdinal == null) {
+              commitPrivateDispatch(privateBudgetBinding.sidecar, {
+                reservationId: privateBudgetBinding.reservationId,
+                invocationId: attempt.receipt().invocationId,
+                attemptId: attempt.receipt().attemptId,
+                nowMs: Date.now(),
+              });
+            } else {
+              commitPrivateRepairDispatch(privateBudgetBinding.sidecar, {
+                reservationId: privateBudgetBinding.reservationId,
+                invocationId: attempt.receipt().invocationId,
+                attemptId: attempt.receipt().attemptId,
+                nowMs: Date.now(),
+              });
+            }
             privateBudgetCommitted = true;
           }
           try {
@@ -969,12 +1003,23 @@ export async function completeChat(
               providerHttpStatus: completion.providerHttpStatus,
             });
             if (privateBudgetBinding && privateBudgetCommitted) {
-              recordPrivateProviderResponse(privateBudgetBinding.sidecar, {
-                reservationId: privateBudgetBinding.reservationId,
-                invocationId: attempt.receipt().invocationId,
-                attemptId: attempt.receipt().attemptId,
-                nowMs: Date.now(),
-              });
+              // F1: record the response against the row this call bound.
+              if (privateBudgetRepairOrdinal == null) {
+                recordPrivateProviderResponse(privateBudgetBinding.sidecar, {
+                  reservationId: privateBudgetBinding.reservationId,
+                  invocationId: attempt.receipt().invocationId,
+                  attemptId: attempt.receipt().attemptId,
+                  nowMs: Date.now(),
+                });
+              } else {
+                recordPrivateRepairResponse(privateBudgetBinding.sidecar, {
+                  reservationId: privateBudgetBinding.reservationId,
+                  invocationId: attempt.receipt().invocationId,
+                  attemptId: attempt.receipt().attemptId,
+                  providerRequestId: completion.providerRequestId ?? undefined,
+                  nowMs: Date.now(),
+                });
+              }
             }
             return {
               providerModel: completion.providerModel,
@@ -1336,17 +1381,52 @@ export async function completeChat(
             ? last.receipt.attempts[last.receipt.attempts.length - 1]
             : null;
         const dispatchTruth = terminalAttempt?.dispatchTruth ?? "not_sent";
-        if (dispatchTruth === "not_sent" && (privateBudgetBound || !terminalAttempt)) {
-          releasePrivateReservation(privateBudgetBinding.sidecar, {
-            reservationId: privateBudgetBinding.reservationId,
-            proofRef: `model-fabric:${fabric.invocationId}:${terminalAttempt?.attemptId ?? "pre-resolution"}:not-sent`,
-            dispatchTruth: "not_started",
-            invocationId: fabric.invocationId,
-            attemptId: terminalAttempt?.attemptId,
-            nowMs: Date.now(),
-          });
+        const currentReservation = getPrivateReservation(privateBudgetBinding.sidecar, privateBudgetBinding.reservationId);
+        if (dispatchTruth === "not_sent") {
+          if (privateBudgetRepairOrdinal != null) {
+            if (privateBudgetBound) {
+              releasePrivateRepairAttempt(privateBudgetBinding.sidecar, {
+                reservationId: privateBudgetBinding.reservationId,
+                invocationId: fabric.invocationId,
+                proofRef: `model-fabric:${fabric.invocationId}:${terminalAttempt?.attemptId ?? "pre-resolution"}:not-sent`,
+                nowMs: Date.now(),
+              });
+            }
+          } else if (currentReservation && (currentReservation.state === "held" || currentReservation.state === "reconcile_required")) {
+            const isContinuableNoSend =
+              currentReservation.state === "held" &&
+              privateBudgetBound &&
+              ((options.signal as { reason?: unknown } | undefined)?.reason === "compose" ||
+               (error as { code?: unknown } | undefined)?.code === "attention_deadline");
+            if (isContinuableNoSend) {
+              recordPrivateReservationNoDispatchProof(privateBudgetBinding.sidecar, {
+                reservationId: privateBudgetBinding.reservationId,
+                invocationId: currentReservation.invocationId ?? fabric.invocationId,
+                attemptId: currentReservation.attemptId ?? terminalAttempt?.attemptId ?? "pre-resolution",
+                proofRef: `model-fabric:${fabric.invocationId}:${terminalAttempt?.attemptId ?? "pre-resolution"}:not-sent`,
+                nowMs: Date.now(),
+              });
+            } else {
+              releasePrivateReservation(privateBudgetBinding.sidecar, {
+                reservationId: privateBudgetBinding.reservationId,
+                proofRef: `model-fabric:${fabric.invocationId}:${terminalAttempt?.attemptId ?? "pre-resolution"}:not-sent`,
+                dispatchTruth: "not_started",
+                invocationId: currentReservation.invocationId ?? fabric.invocationId,
+                attemptId: terminalAttempt?.attemptId,
+                nowMs: Date.now(),
+              });
+            }
+          }
         } else if (!privateBudgetCommitted && privateBudgetBound) {
-          markPrivateReservationUnknown(privateBudgetBinding.sidecar, privateBudgetBinding.reservationId, { nowMs: Date.now() });
+          if (privateBudgetRepairOrdinal == null) {
+            markPrivateReservationUnknown(privateBudgetBinding.sidecar, privateBudgetBinding.reservationId, { nowMs: Date.now() });
+          } else {
+            markPrivateRepairAttemptUnknown(privateBudgetBinding.sidecar, {
+              reservationId: privateBudgetBinding.reservationId,
+              invocationId: fabric.invocationId,
+              nowMs: Date.now(),
+            });
+          }
         }
       } catch {
         // Preserve the original provider/model error. Startup recovery will

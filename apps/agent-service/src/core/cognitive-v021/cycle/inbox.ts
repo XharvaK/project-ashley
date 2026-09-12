@@ -8,6 +8,7 @@ import {
   type CycleTriggerKind,
   type InboxConsumerStatus,
   type InboxEvent,
+  type WakeRecord,
 } from "../types.js";
 import {
   admitWakeInTransaction,
@@ -237,6 +238,39 @@ export function hasValidDurableContinuationOwner(db: DatabaseSync, cycle: CycleR
   if (!cycle.wakeId) return false;
   const wake = getWake(db, cycle.wakeId);
   return Boolean(wake && wake.state !== "terminal");
+}
+
+export type DurableContinuationOwnerResolution =
+  | { status: "valid_owner"; cycle: CycleRecord; wake: WakeRecord }
+  | { status: "proven_no_owner"; cycle: CycleRecord; wake: WakeRecord }
+  | { status: "indeterminate_identity" };
+
+/**
+ * Mechanical tri-state continuation-owner resolution (Sol R2.1 Amendment B).
+ * Resolves strictly from reservation -> exact wake -> exact cycle.
+ * Contradictory, missing, or mismatched identities report indeterminate_identity.
+ */
+export function resolveDurableContinuationOwner(
+  db: DatabaseSync,
+  reservation: { wakeId: string; conversationId: string },
+): DurableContinuationOwnerResolution {
+  if (!reservation.wakeId || !reservation.conversationId) return { status: "indeterminate_identity" };
+  const wake = getWake(db, reservation.wakeId);
+  if (!wake || wake.wakeId !== reservation.wakeId) return { status: "indeterminate_identity" };
+  if (!wake.cycleId) return { status: "indeterminate_identity" };
+  const cycle = getCycle(db, wake.cycleId);
+  if (
+    !cycle ||
+    cycle.cycleId !== wake.cycleId ||
+    cycle.conversationId !== reservation.conversationId ||
+    cycle.wakeId !== reservation.wakeId
+  ) {
+    return { status: "indeterminate_identity" };
+  }
+  if (hasValidDurableContinuationOwner(db, cycle)) {
+    return { status: "valid_owner", cycle, wake };
+  }
+  return { status: "proven_no_owner", cycle, wake };
 }
 
 export function getCurrentCycle(db: DatabaseSync, conversationId: string, options: { includeIdle?: boolean } = {}): CycleRecord | null {

@@ -54,18 +54,22 @@ function reserve(sidecar: DatabaseSync, suffix: string, nowMs = BASE, policyId =
 }
 
 describe("durable private budget ledger", () => {
-  it("requires a policy epoch and then atomically reserves one admission", () => {
+  it("bootstraps a stable clock on genuinely fresh history and then atomically reserves one admission", () => {
     const sidecar = db();
     try {
       const wakeId = wake(sidecar, "epoch");
-      expect(reservePrivateThought(sidecar, {
+      // No clock row, zero policy reservations: bootstrap-and-admit (F0).
+      const first = reservePrivateThought(sidecar, {
         admissionId: "admission:budget:epoch",
         wakeId,
         conversationId: "conversation:budget",
         policyId: "private-v1",
         wallClockNowMs: BASE,
-      })).toEqual({ kind: "refused", reason: "clock_reconciliation", remaining: 0 });
-      establishEpoch(sidecar);
+      });
+      expect(first.kind).toBe("reserved");
+      if (first.kind !== "reserved") throw new Error("test_reservation_missing");
+      expect(first.remaining).toBe(DEFAULT_PRIVATE_THOUGHT_POLICY.limit - 1);
+      expect(sidecar.prepare("SELECT last_policy_now_ms, clock_state FROM private_budget_policy_clock WHERE policy_id = 'private-v1'").get()).toMatchObject({ last_policy_now_ms: BASE, clock_state: "stable" });
       const reserved = reservePrivateThought(sidecar, {
         admissionId: "admission:budget:epoch",
         wakeId,
@@ -73,27 +77,61 @@ describe("durable private budget ledger", () => {
         policyId: "private-v1",
         wallClockNowMs: BASE,
       });
-      expect(reserved.kind).toBe("reserved");
-      if (reserved.kind !== "reserved") throw new Error("test_reservation_missing");
-      expect(reserved.remaining).toBe(11);
+      expect(reserved.kind).toBe("existing");
+      if (reserved.kind !== "existing") throw new Error("test_reservation_missing");
+      expect(reserved.remaining).toBe(DEFAULT_PRIVATE_THOUGHT_POLICY.limit - 1);
       expect(reservePrivateThought(sidecar, {
         admissionId: "admission:budget:epoch",
         wakeId,
         conversationId: "conversation:budget",
         policyId: "private-v1",
         wallClockNowMs: BASE + 1,
-      })).toMatchObject({ kind: "existing", remaining: 11 });
+      })).toMatchObject({ kind: "existing", remaining: DEFAULT_PRIVATE_THOUGHT_POLICY.limit - 1 });
       expect(getPrivateBudgetProjection(sidecar, {
         conversationId: "conversation:budget",
         policyId: "private-v1",
         wallClockNowMs: BASE + 1,
-      })).toMatchObject({ source: "private_budget_ledger", clockState: "stable", consumingCount: 1, remaining: 11 });
+      })).toMatchObject({ source: "private_budget_ledger", clockState: "stable", consumingCount: 1, remaining: DEFAULT_PRIVATE_THOUGHT_POLICY.limit - 1 });
     } finally {
       sidecar.close();
     }
   });
 
-  it("enforces twelve reservations, refuses the thirteenth, and expires at the rolling boundary", () => {
+  it("fails closed when reservation rows exist without a clock row (inconsistent history)", () => {
+    const sidecar = db();
+    try {
+      const wakeId = wake(sidecar, "rows-without-clock");
+      // Every genuine reservation is preceded, in the same transaction, by the
+      // clock insert — so rows without a clock prove restore/clone/partial
+      // loss. Seed that state directly (no clock row) and require refusal.
+      sidecar.prepare(
+        `INSERT INTO private_budget_reservations
+          (reservation_id, admission_id, wake_id, conversation_id, policy_id, state,
+           policy_time_ms, dispatch_truth, created_at_ms, updated_at_ms)
+         VALUES ('reservation:seeded', 'admission:seeded', ?, 'conversation:budget',
+                 'private-v1', 'held', ?, 'not_bound', ?, ?)`,
+      ).run(wakeId, BASE, BASE, BASE);
+      expect(reservePrivateThought(sidecar, {
+        admissionId: "admission:budget:inconsistent",
+        wakeId,
+        conversationId: "conversation:budget",
+        policyId: "private-v1",
+        wallClockNowMs: BASE + 1,
+      })).toEqual({ kind: "refused", reason: "clock_reconciliation", remaining: 0 });
+      // Fail closed without writing state: no clock row is created, no new
+      // reservation is minted, capacity is conserved.
+      expect((sidecar.prepare("SELECT COUNT(*) AS count FROM private_budget_policy_clock WHERE policy_id = 'private-v1'").get() as { count: number }).count).toBe(0);
+      expect((sidecar.prepare("SELECT COUNT(*) AS count FROM private_budget_reservations WHERE policy_id = 'private-v1'").get() as { count: number }).count).toBe(1);
+      expect(getPrivateBudgetProjection(sidecar, {
+        policyId: "private-v1",
+        wallClockNowMs: BASE + 1,
+      })).toMatchObject({ clockState: "clock_reconciliation", remaining: 0 });
+    } finally {
+      sidecar.close();
+    }
+  });
+
+  it("enforces four reservations, refuses the fifth, and expires at the rolling boundary", () => {
     const sidecar = db();
     try {
       establishEpoch(sidecar);
@@ -118,22 +156,30 @@ describe("durable private budget ledger", () => {
       expect(reserve(sidecar, "race-final-a").kind).toBe("reserved");
       expect(reserve(sidecar, "race-final-b").kind).toBe("refused");
       expect(reserve(sidecar, "separate-policy", BASE, "private-v2").kind).toBe("reserved");
-      expect((sidecar.prepare("SELECT COUNT(*) AS count FROM private_budget_reservations WHERE policy_id = 'private-v1'").get() as { count: number }).count).toBe(12);
+      expect((sidecar.prepare("SELECT COUNT(*) AS count FROM private_budget_reservations WHERE policy_id = 'private-v1'").get() as { count: number }).count).toBe(DEFAULT_PRIVATE_THOUGHT_POLICY.limit);
     } finally {
       sidecar.close();
     }
   });
 
-  it("blocks large clock discontinuities until explicit reconciliation and never rewinds high-water", () => {
+  it("blocks backward jumps beyond tolerance, then auto-exits on safe re-entry without lowering high-water", () => {
     const sidecar = db();
     try {
       establishEpoch(sidecar);
       expect(reserve(sidecar, "clock-stable", BASE + 100).kind).toBe("reserved");
       expect(reserve(sidecar, "clock-backward", BASE - DEFAULT_PRIVATE_THOUGHT_POLICY.clockDiscontinuityMs - 1)).toEqual({ kind: "refused", reason: "clock_reconciliation", remaining: 0 });
       expect((sidecar.prepare("SELECT last_policy_now_ms, clock_state FROM private_budget_policy_clock WHERE policy_id = 'private-v1'").get() as Record<string, unknown>)).toMatchObject({ last_policy_now_ms: BASE + 100, clock_state: "clock_reconciliation" });
+      // Automatic exit: a later poll observes the wall clock back inside the
+      // safe region (forward of high-water minus tolerance) and proceeds with
+      // no operator action, keeping the high-water mark.
+      expect(reserve(sidecar, "clock-auto-exit", BASE + 200).kind).toBe("reserved");
+      expect((sidecar.prepare("SELECT last_policy_now_ms, clock_state FROM private_budget_policy_clock WHERE policy_id = 'private-v1'").get() as Record<string, unknown>)).toMatchObject({ last_policy_now_ms: BASE + 200, clock_state: "stable" });
+      // Hourly polls never re-poison a stable clock: forward gaps stay stable.
+      expect(reserve(sidecar, "clock-hourly", BASE + 200 + 3_600_000).kind).toBe("reserved");
+      expect((sidecar.prepare("SELECT clock_state FROM private_budget_policy_clock WHERE policy_id = 'private-v1'").get() as Record<string, unknown>)).toMatchObject({ clock_state: "stable" });
       reconcilePolicyClock(sidecar, { policyId: "private-v1", wallClockNowMs: BASE - 10_000, authorizationRef: "owner:clock-review" });
-      expect((sidecar.prepare("SELECT last_policy_now_ms, clock_state FROM private_budget_policy_clock WHERE policy_id = 'private-v1'").get() as Record<string, unknown>)).toMatchObject({ last_policy_now_ms: BASE + 100, clock_state: "stable" });
-      expect(reserve(sidecar, "clock-after-review", BASE + 101).kind).toBe("reserved");
+      expect((sidecar.prepare("SELECT last_policy_now_ms, clock_state FROM private_budget_policy_clock WHERE policy_id = 'private-v1'").get() as Record<string, unknown>)).toMatchObject({ last_policy_now_ms: BASE + 200 + 3_600_000, clock_state: "stable" });
+      expect(reserve(sidecar, "clock-after-review", BASE + 201 + 3_600_000).kind).toBe("reserved");
     } finally {
       sidecar.close();
     }
@@ -166,6 +212,67 @@ describe("durable private budget ledger", () => {
       releasePrivateReservation(sidecar, { reservationId: first.reservation.reservationId, proofRef: "receipt:not-started", dispatchTruth: "not_started", invocationId: "invocation:release", attemptId: "attempt:release", nowMs: BASE });
       expect(getPrivateReservation(sidecar, first.reservation.reservationId)?.state).toBe("released");
       expect(reserve(sidecar, "after-release").kind).toBe("reserved");
+    } finally {
+      sidecar.close();
+    }
+  });
+
+  it("counts the 4/hour ceiling globally across conversations (no thread-switch bypass)", () => {
+    const sidecar = db();
+    try {
+      const reserveOn = (suffix: string, conversationId: string, nowMs = BASE) => reservePrivateThought(sidecar, {
+        admissionId: `admission:budget:global:${suffix}`,
+        wakeId: wake(sidecar, `global:${suffix}`, conversationId),
+        conversationId,
+        policyId: "private-v1",
+        wallClockNowMs: nowMs,
+      });
+      expect(reserveOn("a-1", "conversation:alpha").kind).toBe("reserved");
+      expect(reserveOn("a-2", "conversation:alpha").kind).toBe("reserved");
+      expect(reserveOn("b-1", "conversation:beta").kind).toBe("reserved");
+      expect(reserveOn("b-2", "conversation:beta").kind).toBe("reserved");
+      // Four admissions across two threads exhaust the ONE global allowance:
+      // the fifth is refused on either conversation.
+      expect(reserveOn("a-3", "conversation:alpha")).toEqual({ kind: "refused", reason: "capacity_exhausted", remaining: 0 });
+      expect(reserveOn("b-3", "conversation:beta")).toEqual({ kind: "refused", reason: "capacity_exhausted", remaining: 0 });
+      // The projection is policy-scoped: conversationId is accepted for
+      // diagnostic continuity but does not change the global count.
+      expect(getPrivateBudgetProjection(sidecar, { policyId: "private-v1", wallClockNowMs: BASE })).toMatchObject({ consumingCount: 4, remaining: 0 });
+      expect(getPrivateBudgetProjection(sidecar, { conversationId: "conversation:alpha", policyId: "private-v1", wallClockNowMs: BASE })).toMatchObject({ consumingCount: 4, remaining: 0 });
+      expect(getPrivateBudgetProjection(sidecar, { conversationId: "conversation:unseen", policyId: "private-v1", wallClockNowMs: BASE })).toMatchObject({ consumingCount: 4, remaining: 0 });
+    } finally {
+      sidecar.close();
+    }
+  });
+
+  it("admits across sparse polling gaps without ever entering reconciliation", () => {
+    const sidecar = db();
+    try {
+      // T0 bootstrap admits on genuinely fresh history.
+      expect(reserve(sidecar, "sparse-t0", BASE).kind).toBe("reserved");
+      // T+60m / T+6h / T+24h forward gaps are normal inactivity: admit, age
+      // the window, never reconcile.
+      expect(reserve(sidecar, "sparse-60m", BASE + 3_600_000).kind).toBe("reserved");
+      expect(reserve(sidecar, "sparse-6h", BASE + 21_600_000).kind).toBe("reserved");
+      expect(reserve(sidecar, "sparse-24h", BASE + 86_400_000).kind).toBe("reserved");
+      expect((sidecar.prepare("SELECT COUNT(*) AS count FROM private_budget_policy_clock WHERE clock_state = 'clock_reconciliation'").get() as { count: number }).count).toBe(0);
+      expect(getPrivateBudgetProjection(sidecar, { policyId: "private-v1", wallClockNowMs: BASE + 86_400_000 })).toMatchObject({ clockState: "stable" });
+    } finally {
+      sidecar.close();
+    }
+  });
+
+  it("treats a restored old sidecar with a current wall clock as ordinary forward time (threat-model-A honesty)", () => {
+    const sidecar = db();
+    try {
+      establishEpoch(sidecar);
+      expect(reserve(sidecar, "restore-before", BASE).kind).toBe("reserved");
+      // Snapshot restore is undetectable from inside the sidecar (no
+      // cross-database anchor exists by design): old high-water + old rows +
+      // current wall clock appears as ordinary forward time. This must admit
+      // (aging the window), never falsely reconcile.
+      expect(reserve(sidecar, "restore-after", BASE + 30 * 86_400_000).kind).toBe("reserved");
+      expect((sidecar.prepare("SELECT COUNT(*) AS count FROM private_budget_policy_clock WHERE clock_state = 'clock_reconciliation'").get() as { count: number }).count).toBe(0);
     } finally {
       sidecar.close();
     }

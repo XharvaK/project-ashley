@@ -13,6 +13,8 @@ import { openCognitiveSidecarDb } from "./core/cognitive-v021/sidecar/db.js";
 import { createCognitiveIngressHandler } from "./core/cognitive-v021/ingress/http.js";
 import { getCognitiveHealthSnapshot } from "./core/cognitive-v021/dispatch/health.js";
 import { markProjectedDeliverySending } from "./core/cognitive-v021/delivery/outbox-projector.js";
+import { reconcilePolicyClock } from "./core/cognitive-v021/private-budget/policy-time-ledger.js";
+import { PRIVATE_THOUGHT_POLICY_ID } from "./core/cognitive-v021/private-budget/ledger.js";
 import { getContinuityFor } from "./core/continuity/registry.js";
 import {
   admitV021RememberCommand,
@@ -2085,6 +2087,36 @@ export function createServer(
       const ownerId = String(req.query.owner_id ?? "");
       requireOwner(ownerId || undefined);
       res.json({ urgent: manager.core.hasUrgentCognition(ownerId) });
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.post("/initiative/clock/reconcile", (req, res) => {
+    try {
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const ownerId = requireOwner(
+        typeof body.userId === "string" ? body.userId : undefined,
+      );
+      const authorizationRef = typeof body.authorizationRef === "string" && body.authorizationRef.trim()
+        ? body.authorizationRef.trim()
+        : "";
+      if (!authorizationRef) {
+        throw new AppError("message_required", "authorizationRef is required", 400);
+      }
+      const wallClockNowMs = typeof body.wallClockNowMs === "number" && Number.isFinite(body.wallClockNowMs) && body.wallClockNowMs >= 0
+        ? Math.floor(body.wallClockNowMs)
+        : Date.now();
+      const policyId = typeof body.policyId === "string" && body.policyId.trim()
+        ? body.policyId.trim()
+        : PRIVATE_THOUGHT_POLICY_ID;
+      const outcome = reconcilePolicyClock(getCognitiveSidecar(), {
+        policyId,
+        wallClockNowMs,
+        authorizationRef,
+      });
+      res.json({ ok: true, policyId, policyTimeMs: outcome.policyTimeMs });
     } catch (err) {
       const { status, body } = toErrorResponse(err);
       res.status(status).json(body);

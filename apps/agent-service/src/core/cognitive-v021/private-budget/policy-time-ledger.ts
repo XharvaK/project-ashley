@@ -28,9 +28,12 @@ export function advancePolicyClock(db: DatabaseSync, policyId: string, wallClock
   const row = db.prepare("SELECT last_policy_now_ms, clock_state FROM private_budget_policy_clock WHERE policy_id = ?").get(policyId) as { last_policy_now_ms: number; clock_state: string } | undefined;
   if (!row) throw new Error("policy_clock_missing");
   const result = computePolicyTime({ lastPolicyNowMs: Number(row.last_policy_now_ms), wallClockNowMs, discrepancyThresholdMs: thresholdMs });
-  const state = row.clock_state === "clock_reconciliation" || result.state === "clock_reconciliation"
-    ? "clock_reconciliation"
-    : "stable";
+  // F0 (R7 §15.4): no sticky latch. The persisted state always reflects the
+  // CURRENT observation: a stored reconciliation exits automatically once the
+  // wall clock is back inside the safe region, and forward gaps can never
+  // write reconciliation. result.policyTimeMs is max(high-water, wall), so
+  // the high-water mark is never lowered here.
+  const state = result.state;
   db.prepare("UPDATE private_budget_policy_clock SET last_policy_now_ms = ?, clock_state = ?, discrepancy_ms = ? WHERE policy_id = ?").run(result.policyTimeMs, state, result.discrepancyMs, policyId);
   return { ...result, state };
 }

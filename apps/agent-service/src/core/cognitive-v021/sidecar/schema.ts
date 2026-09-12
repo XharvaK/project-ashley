@@ -299,7 +299,7 @@ CREATE TABLE IF NOT EXISTS thought_attempt_counters (
 
 export const COGNITIVE_SIDECAR_SCHEMA = COGNITIVE_SIDECAR_SCHEMA_V1;
 
-export const COGNITIVE_SIDECAR_SCHEMA_VERSION = 8 as const;
+export const COGNITIVE_SIDECAR_SCHEMA_VERSION = 10 as const;
 export const COGNITIVE_SIDECAR_SCHEMA_V2 = String.raw`
 ALTER TABLE cognitive_sidecar_meta ADD COLUMN projection_barrier_revision INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE cognitive_sidecar_meta ADD COLUMN projection_vector_json TEXT NOT NULL DEFAULT '{"nuclear":0,"continuity":0,"cognitive_sidecar":0}';
@@ -573,4 +573,43 @@ UPDATE cognitive_sidecar_meta
 SET schema_version = 8,
     projection_state = 'reconciling'
 WHERE id = 1;
+`;
+
+export const COGNITIVE_SIDECAR_SCHEMA_V9 = String.raw`
+-- F0 (periodic-autonomous-cognition R7 §15.1/S3): the 4/hour ceiling is global
+-- per policy (ONE_ASHLEY). Replace the per-conversation consuming index with
+-- the policy-scoped shape. No column changes; existing rows remain
+-- interpretable (their timestamps and states already mean what the global
+-- count needs). Idempotent: safe to apply regardless of which foundation
+-- packet lands first.
+DROP INDEX IF EXISTS idx_private_budget_consuming;
+CREATE INDEX IF NOT EXISTS idx_private_budget_consuming
+  ON private_budget_reservations (policy_id, policy_time_ms, state);
+UPDATE cognitive_sidecar_meta SET schema_version = 9, projection_state = 'reconciling' WHERE id = 1;
+`;
+
+export const COGNITIVE_SIDECAR_SCHEMA_V10 = String.raw`
+-- F1 (periodic-autonomous-cognition R7 §15.5/S2): append-only per-attempt
+-- authorization for structural repair. The parent reservation row keeps the
+-- single attempt-1 binding (immutable); attempts 2..N live ONLY here.
+-- release_proof_ref records a child-level no-dispatch release proof (recovery
+-- treats a bound-but-never-dispatched child exactly like a held parent).
+-- Idempotent: safe to apply regardless of which foundation packet lands first.
+CREATE TABLE IF NOT EXISTS private_budget_attempt_bindings (
+  binding_id TEXT PRIMARY KEY,
+  reservation_id TEXT NOT NULL REFERENCES private_budget_reservations(reservation_id),
+  invocation_id TEXT NOT NULL UNIQUE,
+  attempt_id TEXT NOT NULL,
+  ordinal INTEGER NOT NULL CHECK(ordinal >= 2 AND ordinal <= 12),
+  reason TEXT NOT NULL CHECK(reason IN ('structural_repair', 'cycle_continuation')),
+  dispatch_truth TEXT NOT NULL CHECK(dispatch_truth IN ('not_started','attempted','responded','unknown')),
+  provider_request_id TEXT,
+  release_proof_ref TEXT,
+  created_at_ms INTEGER NOT NULL,
+  updated_at_ms INTEGER NOT NULL,
+  UNIQUE(reservation_id, ordinal)
+);
+CREATE INDEX IF NOT EXISTS idx_attempt_bindings_reservation
+  ON private_budget_attempt_bindings (reservation_id, ordinal);
+UPDATE cognitive_sidecar_meta SET schema_version = 10, projection_state = 'reconciling' WHERE id = 1;
 `;

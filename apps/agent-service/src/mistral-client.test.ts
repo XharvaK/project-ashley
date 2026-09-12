@@ -225,8 +225,7 @@ describe("mapMistralError", () => {
         modelId: "@cf/deepseek-ai/deepseek-v4-flash-0731",
         fabricReasoning: { kind: "reasoning_effort", value: "high" },
         fabricStructuredOutput: {
-          kind: "native_json_schema",
-          wireFormat: "cloudflare_response_format_json_schema",
+          kind: "json_object_compatibility",
         },
       });
       expect(result).toMatchObject({
@@ -392,6 +391,216 @@ describe("mapMistralError", () => {
       const row = sidecar.prepare("SELECT state, dispatch_truth, invocation_id, attempt_id FROM private_budget_reservations WHERE reservation_id = ?").get(reserved.reservation.reservationId) as Record<string, unknown>;
       expect(row).toMatchObject({ state: "committed", dispatch_truth: "responded", invocation_id: result.capturedAttemptIdentity?.modelFabricInvocationId, attempt_id: result.capturedAttemptIdentity?.modelFabricAttemptId });
       expect(dispatch).toHaveBeenCalledTimes(1);
+    } finally {
+      attentionDb.close();
+      sidecar.close();
+    }
+  });
+
+  it("persists provider_request_id on child repair attempt response where supplied by provider", async () => {
+    env.mistralApiKey = "test-mistral-key";
+    env.cloudflareApiToken = "test-cloudflare-token";
+    env.cloudflareAccountId = "test-cloudflare-account";
+    const attentionDb = openNuclearDb(new DatabaseSync(":memory:"));
+    const sidecar = openCognitiveSidecarDb(new DatabaseSync(":memory:"), { dataPlane: { kind: "isolated" } });
+    const nowMs = 4_000_000;
+    reconcilePolicyClock(sidecar, { policyId: "private-v1", wallClockNowMs: nowMs, authorizationRef: "owner:child-provider-req-test" });
+    const wake = admitWake(sidecar, {
+      occurrenceId: "occurrence:child-req",
+      triggerRef: "trigger:child-req",
+      sourceKind: "idle",
+      conversationId: "conversation:child-req",
+      cycleId: "cycle:child-req",
+      capturedAuthorityRevision: 1,
+      nowMs,
+    });
+    const reserved = reservePrivateThought(sidecar, {
+      admissionId: "admission:child-req",
+      wakeId: wake.wake.wakeId,
+      conversationId: "conversation:child-req",
+      policyId: "private-v1",
+      wallClockNowMs: nowMs,
+    });
+    if (reserved.kind !== "reserved") throw new Error("test_reservation_missing");
+
+    // Attempt 1: completes normally
+    const dispatch1 = vi.fn().mockResolvedValue({
+      text: "{}",
+      providerModel: "@cf/deepseek-ai/deepseek-v4-flash-0731",
+      usage: { promptTokens: 2, completionTokens: 1 },
+      finishReason: "stop",
+    });
+    vi.spyOn(cloudflareAdapterModule, "createCloudflareAdapter").mockReturnValue({ provider: "cloudflare", dispatch: dispatch1 });
+    vi.spyOn(mistralAdapterModule, "createMistralAdapter").mockReturnValue({ provider: "mistral", dispatch: dispatch1 });
+
+    try {
+      await withOfflineAppGateDisabled(() => completeChat([{ role: "user", content: "attempt 1" }], {
+        attentionDb,
+        purpose: "thought",
+        route: "thought",
+        logicalRole: "thought",
+        reasoningEffort: "low",
+        deadlineAtMs: Date.now() + 6_000,
+        privateBudgetBinding: {
+          sidecar,
+          reservationId: reserved.reservation.reservationId,
+          wakeId: wake.wake.wakeId,
+          conversationId: "conversation:child-req",
+        },
+      }));
+
+      // Parent attempt 1 is committed and responded
+      const parentRow = sidecar.prepare("SELECT state, dispatch_truth FROM private_budget_reservations WHERE reservation_id = ?").get(reserved.reservation.reservationId) as Record<string, unknown>;
+      expect(parentRow).toMatchObject({ state: "committed", dispatch_truth: "responded" });
+
+      // Attempt 2: structural repair child attempt with providerRequestId supplied
+      resetAdapterCache();
+      const expectedProviderRequestId = "provider-req-child-xyz-987";
+      const dispatch2 = vi.fn().mockResolvedValue({
+        text: "{}",
+        providerModel: "@cf/deepseek-ai/deepseek-v4-flash-0731",
+        providerRequestId: expectedProviderRequestId,
+        usage: { promptTokens: 2, completionTokens: 1 },
+        finishReason: "stop",
+      });
+      vi.spyOn(cloudflareAdapterModule, "createCloudflareAdapter").mockReturnValue({ provider: "cloudflare", dispatch: dispatch2 });
+      vi.spyOn(mistralAdapterModule, "createMistralAdapter").mockReturnValue({ provider: "mistral", dispatch: dispatch2 });
+
+      await withOfflineAppGateDisabled(() => completeChat([{ role: "user", content: "attempt 2 repair" }], {
+        attentionDb,
+        purpose: "thought",
+        route: "thought",
+        logicalRole: "thought",
+        reasoningEffort: "low",
+        deadlineAtMs: Date.now() + 6_000,
+        thoughtInvocationContext: {
+          invocationId: "inv-child-2",
+          cycleId: "cycle:child-req",
+          generation: 1,
+          semanticPass: 1,
+          structuralAttemptOrdinal: 1,
+          authorityEpoch: 1,
+          authorityVersionVector: { authorityEpoch: 1 },
+          triggerRef: "trigger:child-req",
+          semanticProjectionHash: "sha256:test",
+          dispatchMessagesHash: "sha256:test",
+          allowlistFingerprint: "sha256:test",
+          absoluteDeadlineAtMs: Date.now() + 6_000,
+        },
+        privateBudgetBinding: {
+          sidecar,
+          reservationId: reserved.reservation.reservationId,
+          wakeId: wake.wake.wakeId,
+          conversationId: "conversation:child-req",
+        },
+      }));
+
+      // Child binding row exists in private_budget_attempt_bindings with provider_request_id persisted!
+      const childRow = sidecar.prepare("SELECT reservation_id, ordinal, reason, dispatch_truth, provider_request_id FROM private_budget_attempt_bindings WHERE reservation_id = ? AND ordinal = 2").get(reserved.reservation.reservationId) as Record<string, unknown>;
+      expect(childRow).toMatchObject({
+        reservation_id: reserved.reservation.reservationId,
+        ordinal: 2,
+        reason: "structural_repair",
+        dispatch_truth: "responded",
+        provider_request_id: expectedProviderRequestId,
+      });
+    } finally {
+      attentionDb.close();
+      sidecar.close();
+    }
+  });
+
+  it("fails closed with private_budget_child_reason_unavailable when a second call lacks thoughtInvocationContext", async () => {
+    env.mistralApiKey = "test-mistral-key";
+    env.cloudflareApiToken = "test-cloudflare-token";
+    env.cloudflareAccountId = "test-cloudflare-account";
+    const attentionDb = openNuclearDb(new DatabaseSync(":memory:"));
+    const sidecar = openCognitiveSidecarDb(new DatabaseSync(":memory:"), { dataPlane: { kind: "isolated" } });
+    const nowMs = 5_000_000;
+    reconcilePolicyClock(sidecar, { policyId: "private-v1", wallClockNowMs: nowMs, authorizationRef: "owner:fail-closed-test" });
+    const wake = admitWake(sidecar, {
+      occurrenceId: "occurrence:fail-closed",
+      triggerRef: "trigger:fail-closed",
+      sourceKind: "idle",
+      conversationId: "conversation:fail-closed",
+      cycleId: "cycle:fail-closed",
+      capturedAuthorityRevision: 1,
+      nowMs,
+    });
+    const reserved = reservePrivateThought(sidecar, {
+      admissionId: "admission:fail-closed",
+      wakeId: wake.wake.wakeId,
+      conversationId: "conversation:fail-closed",
+      policyId: "private-v1",
+      wallClockNowMs: nowMs,
+    });
+    if (reserved.kind !== "reserved") throw new Error("test_reservation_missing");
+
+    const dispatch1 = vi.fn().mockResolvedValue({
+      text: "{}",
+      providerModel: "@cf/deepseek-ai/deepseek-v4-flash-0731",
+      usage: { promptTokens: 2, completionTokens: 1 },
+      finishReason: "stop",
+    });
+    vi.spyOn(cloudflareAdapterModule, "createCloudflareAdapter").mockReturnValue({ provider: "cloudflare", dispatch: dispatch1 });
+    vi.spyOn(mistralAdapterModule, "createMistralAdapter").mockReturnValue({ provider: "mistral", dispatch: dispatch1 });
+
+    try {
+      await withOfflineAppGateDisabled(() => completeChat([{ role: "user", content: "attempt 1" }], {
+        attentionDb,
+        purpose: "thought",
+        route: "thought",
+        logicalRole: "thought",
+        reasoningEffort: "low",
+        deadlineAtMs: Date.now() + 6_000,
+        privateBudgetBinding: {
+          sidecar,
+          reservationId: reserved.reservation.reservationId,
+          wakeId: wake.wake.wakeId,
+          conversationId: "conversation:fail-closed",
+        },
+      }));
+
+      // Parent attempt 1 is committed and responded
+      const parentRow = sidecar.prepare("SELECT state, dispatch_truth FROM private_budget_reservations WHERE reservation_id = ?").get(reserved.reservation.reservationId) as Record<string, unknown>;
+      expect(parentRow).toMatchObject({ state: "committed", dispatch_truth: "responded" });
+
+      // Generic second completeChat call without thoughtInvocationContext MUST fail closed
+      resetAdapterCache();
+      const dispatch2 = vi.fn().mockResolvedValue({
+        text: "{}",
+        providerModel: "@cf/deepseek-ai/deepseek-v4-flash-0731",
+        usage: { promptTokens: 2, completionTokens: 1 },
+        finishReason: "stop",
+      });
+      vi.spyOn(cloudflareAdapterModule, "createCloudflareAdapter").mockReturnValue({ provider: "cloudflare", dispatch: dispatch2 });
+      vi.spyOn(mistralAdapterModule, "createMistralAdapter").mockReturnValue({ provider: "mistral", dispatch: dispatch2 });
+
+      await expect(
+        withOfflineAppGateDisabled(() => completeChat([{ role: "user", content: "attempt 2 generic" }], {
+          attentionDb,
+          purpose: "thought",
+          route: "thought",
+          logicalRole: "thought",
+          reasoningEffort: "low",
+          deadlineAtMs: Date.now() + 6_000,
+          // NO thoughtInvocationContext!
+          privateBudgetBinding: {
+            sidecar,
+            reservationId: reserved.reservation.reservationId,
+            wakeId: wake.wake.wakeId,
+            conversationId: "conversation:fail-closed",
+          },
+        }))
+      ).rejects.toThrow("private_budget_child_reason_unavailable");
+
+      // No child attempt was bound
+      const childCount = (sidecar.prepare("SELECT COUNT(*) AS count FROM private_budget_attempt_bindings WHERE reservation_id = ?").get(reserved.reservation.reservationId) as { count: number }).count;
+      expect(childCount).toBe(0);
+
+      // Parent reservation remains committed and untouched (NOT released)
+      const parentAfter = sidecar.prepare("SELECT state, dispatch_truth FROM private_budget_reservations WHERE reservation_id = ?").get(reserved.reservation.reservationId) as Record<string, unknown>;
+      expect(parentAfter).toMatchObject({ state: "committed", dispatch_truth: "responded" });
     } finally {
       attentionDb.close();
       sidecar.close();

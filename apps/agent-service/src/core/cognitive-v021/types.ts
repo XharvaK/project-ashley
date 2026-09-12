@@ -14,7 +14,7 @@ export type { DataClassification } from "../privacy/classification.js";
 export const ARCHITECTURE_EPOCH = "v0.2.1" as const;
 export const IMPLEMENTATION_SPEC_VERSION = "0.2.1.r6" as const;
 export const THOUGHT_CONTRACT_VERSION = 2 as const;
-export const COGNITIVE_SIDECAR_SCHEMA_VERSION = 8 as const;
+export const COGNITIVE_SIDECAR_SCHEMA_VERSION = 10 as const;
 export const CAPACITY_WAIT_MAX_DURATION_MS = 120_000 as const;
 export const MECHANICAL_SPIN_GUARD_LIMIT = 12 as const;
 
@@ -42,7 +42,7 @@ export const LEGACY_IMPORT_TOOL_VERSION = 1 as const;
 export const MAX_AUTHORITY_REVISIONS = 2 as const;
 export const MAX_THOUGHT_PASSES = 6 as const;
 export const MAX_THOUGHT_MODEL_ATTEMPTS = 12 as const;
-export const PRIVATE_THOUGHT_MAX_CALLS_PER_HOUR = 12 as const;
+export const PRIVATE_THOUGHT_MAX_CALLS_PER_HOUR = 4 as const;
 export const PRIVATE_THOUGHT_MAX_CONCURRENT = 1 as const;
 export const PRIVATE_SUBSCRIPTION_ITEMS_PER_IDLE = 4 as const;
 export const MAX_OBSERVATION_ROUNDS = 4 as const;
@@ -172,7 +172,7 @@ export type WakeRecord = Readonly<{
 export type PrivateBudgetReservationState = "held" | "committed" | "released" | "reconcile_required" | "expired";
 export type PrivateBudgetPolicy = Readonly<{
   policyId: string;
-  limit: 12;
+  limit: 4;
   windowMs: 3_600_000;
   clockDiscontinuityMs: 300_000;
 }>;

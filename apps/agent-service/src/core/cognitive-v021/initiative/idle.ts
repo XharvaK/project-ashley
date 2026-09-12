@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import { getCycle } from "../cycle/inbox.js";
+import { getCycle, resolveDurableContinuationOwner } from "../cycle/inbox.js";
 import { listOccupancy } from "../concerns/occupancy.js";
 import { fireDueTriggers } from "./future-triggers.js";
 import { collectSubscriptionObservations, listObservationSubscriptions, type SubscriptionItem } from "../observation/subscriptions.js";
@@ -22,6 +22,7 @@ import {
   getPrivateReservation,
   getPrivateBudgetProjection,
   markPrivateReservationUnknown,
+  releasePrivateReservation,
   reservePrivateThought,
 } from "../private-budget/ledger.js";
 
@@ -229,7 +230,36 @@ function emptyResult(
 
 function settleUnsettledPrivateReservation(db: DatabaseSync, reservationId: string, nowMs: number): void {
   const current = getPrivateReservation(db, reservationId);
-  if (current?.state === "held") markPrivateReservationUnknown(db, reservationId, { nowMs });
+  if (!current || current.state !== "held") return;
+
+  if (current.dispatchTruth === "not_started" && current.releaseProofRef != null) {
+    const owner = resolveDurableContinuationOwner(db, {
+      wakeId: current.wakeId,
+      conversationId: current.conversationId,
+    });
+    if (owner.status === "valid_owner" || owner.status === "indeterminate_identity") {
+      // Conserve held + proof; do not mark unknown and do not release.
+      return;
+    }
+    if (owner.status === "proven_no_owner") {
+      // Safely release using the persisted proof.
+      try {
+        releasePrivateReservation(db, {
+          reservationId: current.reservationId,
+          proofRef: current.releaseProofRef,
+          dispatchTruth: "not_started",
+          invocationId: current.invocationId ?? undefined,
+          attemptId: current.attemptId ?? undefined,
+          nowMs,
+        });
+      } catch {
+        // Leave for recovery.
+      }
+      return;
+    }
+  }
+
+  markPrivateReservationUnknown(db, reservationId, { nowMs });
 }
 
 async function tickConversation(
@@ -328,7 +358,7 @@ async function tickConversation(
     ? { kind: "existing" as const, wake: dueWake }
     : existingWake
       ? admitWake(db, admissionInput)
-      : budgetProjection.clockState !== "stable"
+      : budgetProjection.clockState === "clock_reconciliation"
         ? { kind: "clock_reconciliation" as const }
         : budgetProjection.remaining <= 0
           ? { kind: "budget_exhausted" as const }

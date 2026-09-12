@@ -1,9 +1,11 @@
 import express from "express";
 import { describe, expect, it, vi } from "vitest";
+import { DatabaseSync } from "node:sqlite";
 import { AgentManager } from "./agent.js";
 import { assertRegisteredRoutes, routeSurface } from "./route-surface.js";
 import { createServer } from "./server.js";
 import { env } from "./env.js";
+import { openCognitiveSidecarDb } from "./core/cognitive-v021/sidecar/db.js";
 import type { Server } from "node:http";
 
 async function startTestServer(app: express.Express): Promise<{ server: Server; url: string }> {
@@ -162,6 +164,66 @@ describe("route surface registry", () => {
       await stopTestServer(server);
       env.discordOwnerId = originalDiscordOwnerId;
       env.memoryOwnerId = originalMemoryOwnerId;
+    }
+  });
+
+  it("routes owner clock reconciliation through the owner-authenticated route seam", async () => {
+    const originalDiscordOwnerId = env.discordOwnerId;
+    const ownerId = "route-test-owner";
+    env.discordOwnerId = ownerId;
+    const sidecar = openCognitiveSidecarDb(new DatabaseSync(":memory:"), { dataPlane: { kind: "isolated" } });
+    const manager = {
+      dataPlane: { kind: "isolated", cognitiveSidecarDbPath: ":memory:" },
+      getCognitiveSidecar: () => sidecar,
+    } as unknown as AgentManager;
+    const { server, url } = await startTestServer(createServer(manager, { cognitiveSidecar: sidecar }));
+    try {
+      // 1. Unauthenticated / non-owner denied with 403
+      const denied = await fetch(`${url}/initiative/clock/reconcile`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ userId: "impostor", authorizationRef: "owner:test" }),
+      });
+      expect(denied.status).toBe(403);
+
+      // 2. Missing authorizationRef rejected with 400
+      const missingAuth = await fetch(`${url}/initiative/clock/reconcile`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ userId: ownerId }),
+      });
+      expect(missingAuth.status).toBe(400);
+      expect(await missingAuth.json()).toMatchObject({ code: "message_required" });
+
+      // 3. Authenticated owner with authorizationRef reconciles clock and persists evidence
+      const response = await fetch(`${url}/initiative/clock/reconcile`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          userId: ownerId,
+          wallClockNowMs: 5_000_000,
+          authorizationRef: "owner:forced-clock-recovery-witness",
+        }),
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        ok: true,
+        policyId: "ashley.private_thought.v1",
+        policyTimeMs: 5_000_000,
+      });
+
+      // Verify sidecar persisted the exact reconciliation reference and timestamp
+      const row = sidecar.prepare("SELECT * FROM private_budget_policy_clock WHERE policy_id = 'ashley.private_thought.v1'").get() as Record<string, unknown>;
+      expect(row).toMatchObject({
+        clock_state: "stable",
+        last_policy_now_ms: 5_000_000,
+        reconciled_at_ms: 5_000_000,
+        reconciliation_ref: "owner:forced-clock-recovery-witness",
+      });
+    } finally {
+      await stopTestServer(server);
+      sidecar.close();
+      env.discordOwnerId = originalDiscordOwnerId;
     }
   });
 });

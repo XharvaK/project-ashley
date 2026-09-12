@@ -103,6 +103,7 @@
     { "method": "GET", "path": "/initiative/status", "ownerScope": "owner_required", "lifecycle": "active" },
     { "method": "GET", "path": "/initiative/operational-status", "ownerScope": "owner_required", "lifecycle": "active" },
     { "method": "GET", "path": "/initiative/urgent", "ownerScope": "owner_required", "lifecycle": "active" },
+    { "method": "POST", "path": "/initiative/clock/reconcile", "ownerScope": "owner_required", "lifecycle": "active" },
     { "method": "POST", "path": "/habits/upsert", "ownerScope": "internal", "lifecycle": "retired" },
     { "method": "GET", "path": "/habits/list", "ownerScope": "internal", "lifecycle": "retired" },
     { "method": "POST", "path": "/habits/pause", "ownerScope": "internal", "lifecycle": "retired" },
