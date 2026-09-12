@@ -99,7 +99,7 @@ export const config = {
   proactiveEnabled: process.env.PROACTIVE_ENABLED !== "false",
   proactiveCheckIntervalMin: numericEnv(
     "PROACTIVE_CHECK_INTERVAL_MIN",
-    20,
+    60,
     1,
     1440,
   ),

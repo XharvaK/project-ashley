@@ -69,12 +69,12 @@ describe("cognitive sidecar Schema V8 migration", () => {
       expect(
         (db.prepare("PRAGMA user_version").get() as { user_version: number })
           .user_version,
-      ).toBe(10);
+      ).toBe(11);
       expect(
         db.prepare(
           "SELECT schema_version FROM cognitive_sidecar_meta WHERE id = 1",
         ).get(),
-      ).toEqual({ schema_version: 10 });
+      ).toEqual({ schema_version: 11 });
       expect(
         (db.prepare("PRAGMA table_info(deferred_reactive_frontiers)").all() as Array<{ name: string }>)
           .map((column) => column.name),

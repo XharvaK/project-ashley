@@ -613,3 +613,32 @@ CREATE INDEX IF NOT EXISTS idx_attempt_bindings_reservation
   ON private_budget_attempt_bindings (reservation_id, ordinal);
 UPDATE cognitive_sidecar_meta SET schema_version = 10, projection_state = 'reconciling' WHERE id = 1;
 `;
+
+export const COGNITIVE_SIDECAR_SCHEMA_V11 = String.raw`
+-- P1 (periodic-autonomous-cognition R7 §§5-14/S1+S1b): singleton periodic
+-- schedule + append-only occurrence receipts. The migration creates tables,
+-- NOT the schedule row (lazy first-activation seed on first enabled poll).
+-- Additive only: no backfill, no non-nullable columns on existing tables,
+-- no secondary index. Downgrade invariant: old code ignores both tables and
+-- all existing rows remain valid under it.
+CREATE TABLE IF NOT EXISTS periodic_cognition_schedule (
+  id TEXT PRIMARY KEY CHECK(id = 'ashley-periodic-v1'),
+  authority_epoch INTEGER NOT NULL,
+  next_eligible_at_ms INTEGER NOT NULL,
+  pending_occurrence_id TEXT NULL,
+  pending_wake_id TEXT NULL,
+  pending_due_at_ms INTEGER NULL,
+  pending_expires_at_ms INTEGER NULL,
+  updated_at_ms INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS periodic_cognition_occurrence_receipts (
+  schedule_occurrence_id TEXT PRIMARY KEY,
+  disposition TEXT NOT NULL CHECK(disposition IN ('admitted','admitted_failure','skipped_empty','expired','admitted_stale_suppressed','authority_epoch_abandoned')),
+  wake_id TEXT NULL,
+  authority_epoch INTEGER NOT NULL,
+  eligible_at_ms INTEGER NOT NULL,
+  closed_at_ms INTEGER NOT NULL,
+  detail TEXT NULL
+);
+UPDATE cognitive_sidecar_meta SET schema_version = 11, projection_state = 'reconciling' WHERE id = 1;
+`;

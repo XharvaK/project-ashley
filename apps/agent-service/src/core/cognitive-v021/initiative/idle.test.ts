@@ -298,7 +298,6 @@ describe("v0.2.1 idle executive", () => {
       db.close();
     }
   });
-
   it("preserves unknown physical execution provenance without changing legacy counters", async () => {
     const db = openTestSidecar();
     try {
@@ -322,6 +321,300 @@ describe("v0.2.1 idle executive", () => {
         thoughtCalls: 1,
         thoughtExecutionProvenance: { dispatchTruth: "unknown", providerAttempts: "unknown" },
       });
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("P1 periodic scheduling through the idle tick (R7 §§5–14)", () => {
+  const DUE = 100_000_000;
+
+  function enableSchedule(db: ReturnType<typeof openTestSidecar>, nowMs: number): void {
+    db.prepare(
+      `INSERT INTO periodic_cognition_schedule
+         (id, authority_epoch, next_eligible_at_ms, updated_at_ms)
+       VALUES ('ashley-periodic-v1', 1, ?, ?)`,
+    ).run(nowMs, nowMs);
+  }
+
+  it("FIRST_OWNER_AUTHORIZED_ACTIVATION_CREATES_SCHEDULE_ONLY", async () => {
+    const db = openTestSidecar();
+    try {
+      let calls = 0;
+      const result = await tickIdleOpportunity(db, {
+        conversationId: "thread-first",
+        nowMs: DUE,
+        periodicCognitionEnabled: true,
+        runThought: async () => {
+          calls += 1;
+          return { published: true, outboxId: null, thoughtModelAttempts: 1, speechMode: "none" as const };
+        },
+      });
+      const schedule = db.prepare("SELECT * FROM periodic_cognition_schedule WHERE id = 'ashley-periodic-v1'").get() as Record<string, unknown>;
+      expect(schedule.next_eligible_at_ms).toBe(DUE + 21_600_000);
+      expect(schedule.pending_occurrence_id).toBeNull();
+      expect(calls).toBe(0);
+      expect(result.thoughtCalls).toBe(0);
+      expect(result.reason).toBe("periodic_not_due");
+      expect((db.prepare("SELECT COUNT(*) AS count FROM wakes").get() as { count: number }).count).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("DISABLED_STAGING_DOES_NOT_ADMIT_PERIODIC_THOUGHT", async () => {
+    const db = openTestSidecar();
+    try {
+      seedActiveOccupancy(db, "thread-disabled");
+      establishEpoch(db, DUE);
+      enableSchedule(db, DUE - 1);
+      const triggerRefs: string[] = [];
+      const result = await tickIdleOpportunity(db, {
+        conversationId: "thread-disabled",
+        nowMs: DUE,
+        periodicCognitionEnabled: false,
+        runThought: async (input) => {
+          triggerRefs.push(input.trigger.ref);
+          return { published: true, outboxId: null, thoughtModelAttempts: 1, speechMode: "none" as const };
+        },
+      });
+      // No periodic Thought, no periodic wake, no periodic reservation, no
+      // pending occurrence — while ordinary idle Thought still serves.
+      expect(result.thoughtCalls).toBe(1);
+      expect(triggerRefs).toHaveLength(1);
+      expect(triggerRefs.every((ref) => !ref.startsWith("periodic:"))).toBe(true);
+      expect((db.prepare("SELECT COUNT(*) AS count FROM wakes WHERE trigger_ref LIKE 'periodic:%'").get() as { count: number }).count).toBe(0);
+      expect((db.prepare("SELECT COUNT(*) AS count FROM inbox_events WHERE id LIKE 'periodic:%'").get() as { count: number }).count).toBe(0);
+      expect(db.prepare("SELECT pending_occurrence_id FROM periodic_cognition_schedule WHERE id = 'ashley-periodic-v1'").get()).toMatchObject({
+        pending_occurrence_id: null,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("KILL_SWITCH_MISSING_ENV_FAILS_CLOSED at the tick level", async () => {
+    const db = openTestSidecar();
+    try {
+      seedActiveOccupancy(db, "thread-noenv");
+      establishEpoch(db, DUE);
+      enableSchedule(db, DUE - 1);
+      const triggerRefs: string[] = [];
+      await tickIdleOpportunity(db, {
+        conversationId: "thread-noenv",
+        nowMs: DUE,
+        runThought: async (input) => {
+          triggerRefs.push(input.trigger.ref);
+          return { published: true, outboxId: null, thoughtModelAttempts: 1, speechMode: "none" as const };
+        },
+      });
+      // No explicit option and no env: treated as disabled — ordinary Thought
+      // serves, periodic admits nothing.
+      expect(triggerRefs).toHaveLength(1);
+      expect(triggerRefs.every((ref) => !ref.startsWith("periodic:"))).toBe(true);
+      expect((db.prepare("SELECT COUNT(*) AS count FROM wakes WHERE trigger_ref LIKE 'periodic:%'").get() as { count: number }).count).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("DISABLED_STAGING_PRESERVES_EXISTING_DUE_TRIGGER_SERVICE", async () => {
+    const db = openTestSidecar();
+    try {
+      db.prepare(
+        `INSERT INTO concerns
+           (concern_id, conversation_id, statement, source_refs_json, dimensions_json,
+            assertion_key, status, snapshot_hash, updated_cycle)
+         VALUES ('concern-due', 'thread-due', 'due concern', '[]', '{}', NULL, 'active', 'snapshot-due', NULL)`,
+      ).run();
+      db.prepare(
+        `INSERT INTO mind_occupancy
+           (conversation_id, concern_id, status, priority, updated_cycle, updated_generation)
+         VALUES ('thread-due', 'concern-due', 'active', 20, 'cycle-due', 1)`,
+      ).run();
+      scheduleFutureTrigger(db, {
+        triggerId: "due-trigger-service",
+        conversationId: "thread-due",
+        concernId: "concern-due",
+        snapshotHash: "snapshot-due",
+        dueAtMs: DUE - 10,
+      });
+      const result = await tickIdleOpportunity(db, {
+        conversationId: "thread-due",
+        nowMs: DUE,
+        periodicCognitionEnabled: false,
+        runThought: async () => ({ published: true, outboxId: null, thoughtModelAttempts: 1, speechMode: "none" as const }),
+      });
+      expect(result.firedTriggers.map((trigger) => trigger.triggerId)).toContain("due-trigger-service");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("T8 precedence: both-due services the trigger first, periodic stays pending", async () => {
+    const db = openTestSidecar();
+    try {
+      seedActiveOccupancy(db, "thread-bothdue");
+      establishEpoch(db, DUE);
+      enableSchedule(db, DUE - 1);
+      db.prepare(
+        `INSERT INTO concerns
+           (concern_id, conversation_id, statement, source_refs_json, dimensions_json,
+            assertion_key, status, snapshot_hash, updated_cycle)
+         VALUES ('concern-bothdue', 'thread-bothdue', 'due concern', '[]', '{}', NULL, 'active', 'snapshot-bothdue', NULL)`,
+      ).run();
+      db.prepare(
+        `INSERT INTO mind_occupancy
+           (conversation_id, concern_id, status, priority, updated_cycle, updated_generation)
+         VALUES ('thread-bothdue', 'concern-bothdue', 'active', 20, 'cycle-bothdue', 1)`,
+      ).run();
+      scheduleFutureTrigger(db, {
+        triggerId: "bothdue-trigger",
+        conversationId: "thread-bothdue",
+        concernId: "concern-bothdue",
+        snapshotHash: "snapshot-bothdue",
+        dueAtMs: DUE - 10,
+      });
+      const triggerRefs: string[] = [];
+      const result = await tickIdleOpportunity(db, {
+        conversationId: "thread-bothdue",
+        nowMs: DUE,
+        periodicCognitionEnabled: true,
+        runThought: async (input) => {
+          triggerRefs.push(input.trigger.ref);
+          return { published: true, outboxId: null, thoughtModelAttempts: 1, speechMode: "none" as const };
+        },
+      });
+      expect(result.firedTriggers.map((trigger) => trigger.triggerId)).toContain("bothdue-trigger");
+      expect(triggerRefs.every((ref) => !ref.startsWith("periodic:"))).toBe(true);
+      // The periodic occurrence is minted but stays PENDING in its window:
+      // the trigger is serviced first, no periodic Thought runs.
+      const schedule = db.prepare("SELECT pending_occurrence_id, pending_wake_id FROM periodic_cognition_schedule WHERE id = 'ashley-periodic-v1'").get() as Record<string, unknown>;
+      expect(typeof schedule.pending_occurrence_id).toBe("string");
+      expect(schedule.pending_wake_id).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("enabled full path admits on the frozen binding and runs Thought once", async () => {
+    const db = openTestSidecar();
+    try {
+      seedActiveOccupancy(db, "thread-full");
+      establishEpoch(db, DUE);
+      enableSchedule(db, DUE - 1);
+      const seen: Array<{ ref: string; conversationId: string }> = [];
+      const result = await tickIdleOpportunity(db, {
+        conversationId: "thread-full",
+        nowMs: DUE,
+        periodicCognitionEnabled: true,
+        curiosityObservationProvider: async () => [],
+        runThought: async (input) => {
+          seen.push({ ref: input.trigger.ref, conversationId: input.cycle.conversationId });
+          return { published: true, outboxId: null, thoughtModelAttempts: 1, speechMode: "none" as const };
+        },
+      });
+      expect(result.thoughtCalls).toBe(1);
+      expect(seen).toHaveLength(1);
+      expect(seen[0]!.ref.startsWith("periodic:")).toBe(true);
+      expect(seen[0]!.conversationId).toBe("thread-full");
+      // Frozen binding: one wake, one reservation, one deterministic event.
+      // (The mock runner never dispatches, so the existing post-Thought
+      // settle marks the reservation unknown — admission-time held truth is
+      // pinned at the evaluation level; here the binding identity matters.)
+      const schedule = db.prepare("SELECT pending_occurrence_id, pending_wake_id FROM periodic_cognition_schedule WHERE id = 'ashley-periodic-v1'").get() as Record<string, unknown>;
+      expect(typeof schedule.pending_occurrence_id).toBe("string");
+      expect(typeof schedule.pending_wake_id).toBe("string");
+      expect((db.prepare("SELECT COUNT(*) AS count FROM wakes WHERE trigger_ref LIKE 'periodic:%'").get() as { count: number }).count).toBe(1);
+      const eventRow = db.prepare("SELECT payload_json FROM inbox_events WHERE id = ?").get(`periodic:${String(schedule.pending_occurrence_id)}`) as { payload_json: string };
+      const eventReservationId = (JSON.parse(eventRow.payload_json) as Record<string, unknown>).privateBudgetReservationId;
+      expect(typeof eventReservationId).toBe("string");
+      expect(db.prepare("SELECT wake_id FROM private_budget_reservations WHERE reservation_id = ?").get(String(eventReservationId))).toMatchObject({
+        wake_id: schedule.pending_wake_id,
+      });
+      expect(
+        db.prepare("SELECT COUNT(*) AS count FROM inbox_events WHERE id = ?").get(`periodic:${String(schedule.pending_occurrence_id)}`) as { count: number },
+      ).toMatchObject({ count: 1 });
+
+      // Second tick: the live event owns the occurrence — no second
+      // periodic Thought (ordinary idle Thought may still serve).
+      const secondRefs: string[] = [];
+      await tickIdleOpportunity(db, {
+        conversationId: "thread-full",
+        nowMs: DUE + 1_000,
+        periodicCognitionEnabled: true,
+        curiosityObservationProvider: async () => [],
+        runThought: async (input) => {
+          secondRefs.push(input.trigger.ref);
+          return { published: true, outboxId: null, thoughtModelAttempts: 1, speechMode: "none" as const };
+        },
+      });
+      expect(secondRefs.every((ref) => !ref.startsWith("periodic:"))).toBe(true);
+      expect((db.prepare("SELECT COUNT(*) AS count FROM wakes WHERE trigger_ref LIKE 'periodic:%'").get() as { count: number }).count).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("bound delegation ignores thread change (frozen-after-admission)", async () => {
+    const db = openTestSidecar();
+    try {
+      seedActiveOccupancy(db, "thread-home");
+      establishEpoch(db, DUE);
+      enableSchedule(db, DUE - 1);
+      // First tick admits and freezes but runs no Thought (no runner): the
+      // occurrence stays bound pre-reservation... actually reservation-first:
+      // evaluation reserves, delegation finds no runner and retains.
+      await tickIdleOpportunity(db, {
+        conversationId: "thread-home",
+        nowMs: DUE,
+        periodicCognitionEnabled: true,
+        curiosityObservationProvider: async () => [],
+      });
+      const schedule = db.prepare("SELECT pending_occurrence_id, pending_wake_id FROM periodic_cognition_schedule WHERE id = 'ashley-periodic-v1'").get() as Record<string, unknown>;
+      expect(typeof schedule.pending_occurrence_id).toBe("string");
+      expect(typeof schedule.pending_wake_id).toBe("string");
+      expect((db.prepare("SELECT COUNT(*) AS count FROM inbox_events WHERE id LIKE 'periodic:%'").get() as { count: number }).count).toBe(0);
+      // Owner switched threads: the bound occurrence still runs on its
+      // frozen conversation, ignoring the scope change.
+      const seen: string[] = [];
+      await tickIdleOpportunity(db, {
+        conversationId: "thread-elsewhere",
+        nowMs: DUE + 1_000,
+        periodicCognitionEnabled: true,
+        curiosityObservationProvider: async () => [],
+        runThought: async (input) => {
+          seen.push(input.cycle.conversationId);
+          return { published: true, outboxId: null, thoughtModelAttempts: 1, speechMode: "none" as const };
+        },
+      });
+      expect(seen).toEqual(["thread-home"]);
+      expect((db.prepare("SELECT COUNT(*) AS count FROM wakes WHERE trigger_ref LIKE 'periodic:%'").get() as { count: number }).count).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("zero curiosity network on non-due polls", async () => {
+    const db = openTestSidecar();
+    try {
+      seedActiveOccupancy(db, "thread-nodue");
+      establishEpoch(db, DUE);
+      enableSchedule(db, DUE + 1_000_000);
+      let acquisitions = 0;
+      await tickIdleOpportunity(db, {
+        conversationId: "thread-nodue",
+        nowMs: DUE,
+        periodicCognitionEnabled: true,
+        curiosityObservationProvider: async () => {
+          acquisitions += 1;
+          return [];
+        },
+        runThought: async () => ({ published: true, outboxId: null, thoughtModelAttempts: 1, speechMode: "none" as const }),
+      });
+      // Only the ordinary idle path may acquire (once); periodic adds none.
+      expect(acquisitions).toBe(1);
     } finally {
       db.close();
     }

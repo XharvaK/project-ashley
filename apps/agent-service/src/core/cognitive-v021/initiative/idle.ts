@@ -25,6 +25,15 @@ import {
   releasePrivateReservation,
   reservePrivateThought,
 } from "../private-budget/ledger.js";
+import {
+  PERIODIC_CURIOSITY_MAX_ITEMS,
+  evaluatePeriodicPoll,
+  periodicEventId,
+  readSchedule,
+  type PeriodicPollDecision,
+  type PeriodicRunnable,
+} from "./periodic-schedule.js";
+import { appendInboxEvent } from "../cycle/inbox.js";
 
 const GROUNDED_STATUSES = new Set(["active", "investigating", "waiting_for_evidence"]);
 type IdleRunnerResult = Partial<KernelRunResult> & {
@@ -68,6 +77,23 @@ export type IdleTickOptions = {
   curiosityObservationProvider?: IdleObservationProvider;
   /** Policy identity is configuration; capacity remains ledger-owned. */
   privateBudgetPolicyId?: string;
+  /**
+   * P1 periodic enablement input (agent passes env resolution). Absent ⇒
+   * env read inside the schedule evaluation (default OFF, fail closed).
+   */
+  periodicCognitionEnabled?: boolean;
+  /**
+   * P1 pre-resolved periodic admission for this conversation (set only by
+   * tickIdleOpportunity from a bound_runnable/admit_runnable decision).
+   * Verified against the schedule before any admission or Thought.
+   */
+  periodic?: {
+    occurrenceId: string;
+    triggerRef: string;
+    boundWakeId: string;
+    reservationId: string;
+    observations: IdleObservationDraft[];
+  };
 };
 
 export type IdleTickReason =
@@ -80,7 +106,13 @@ export type IdleTickReason =
   | "private_compute_clock_reconciliation"
   | "private_compute_concurrent"
   | "thought_runner_missing"
-  | "thought_failed";
+  | "thought_failed"
+  | "periodic_not_due"
+  | "periodic_disabled"
+  | "periodic_pending_retained"
+  | "periodic_skipped_empty"
+  | "periodic_expired"
+  | "periodic_terminal_observed";
 
 export type IdleTickResult = {
   conversationId: string | null;
@@ -262,6 +294,105 @@ function settleUnsettledPrivateReservation(db: DatabaseSync, reservationId: stri
   markPrivateReservationUnknown(db, reservationId, { nowMs });
 }
 
+async function tickPeriodicConversation(
+  db: DatabaseSync,
+  conversationId: string,
+  options: IdleTickOptions,
+  periodic: NonNullable<IdleTickOptions["periodic"]>,
+  ctx: {
+    occupancy: MindOccupancy[];
+    thought: IdleThoughtRunner | undefined;
+    firedTriggers: FutureTrigger[];
+    suppressedTriggers: FutureTrigger[];
+    items: Array<SubscriptionItem | string>;
+    nowMs: number;
+  },
+): Promise<IdleTickResult> {
+  const { nowMs } = ctx;
+  const suppressed = ctx.suppressedTriggers.filter((trigger) => trigger.conversationId === conversationId);
+  const conversationTriggers = ctx.firedTriggers.filter((trigger) => trigger.conversationId === conversationId);
+  if (conversationTriggers.length > 0) {
+    // A due authored trigger owns this poll (T8 precedence): the periodic
+    // occurrence stays pending in its window.
+    return emptyResult(conversationId, "periodic_pending_retained", [], suppressed);
+  }
+  if (!ctx.thought) {
+    return {
+      ...emptyResult(conversationId, "thought_runner_missing", [], suppressed),
+      eligible: true,
+      idleEligible: true,
+      semanticAbsenceClaim: "no",
+      observations: [],
+    };
+  }
+  // Fail closed: the delegation must still be the schedule's pending
+  // occurrence on the frozen binding.
+  const schedule = readSchedule(db);
+  if (!schedule || schedule.pendingOccurrenceId !== periodic.occurrenceId || schedule.pendingWakeId !== periodic.boundWakeId) {
+    return emptyResult(conversationId, "periodic_pending_retained", [], suppressed);
+  }
+  const wake = getWake(db, periodic.boundWakeId);
+  if (!wake || wake.conversationId !== conversationId) return emptyResult(conversationId, "wake_cancelled", [], suppressed);
+  const cycle = getCycle(db, wake.cycleId);
+  if (!cycle || cycle.wakeId !== wake.wakeId) return emptyResult(conversationId, "wake_cancelled", [], suppressed);
+  // Exactly-once Thought per occurrence: a live event row means durable work
+  // owns the occurrence now (in-flight, deferred, or finished → observed).
+  const eventId = periodicEventId(periodic.occurrenceId);
+  if (db.prepare("SELECT id FROM inbox_events WHERE id = ?").get(eventId)) {
+    return emptyResult(conversationId, "periodic_pending_retained", [], suppressed);
+  }
+  const policyId = options.privateBudgetPolicyId ?? PRIVATE_THOUGHT_POLICY_ID;
+  const budget = reservePrivateThought(db, {
+    admissionId: `private-thought:${wake.wakeId}`,
+    wakeId: wake.wakeId,
+    conversationId,
+    policyId,
+    wallClockNowMs: nowMs,
+  });
+  if (budget.kind === "refused") {
+    return emptyResult(
+      conversationId,
+      budget.reason === "clock_reconciliation" ? "private_compute_clock_reconciliation" : "private_compute_budget",
+      [],
+      [],
+    );
+  }
+  if (budget.reservation.state !== "held" || budget.reservation.reservationId !== periodic.reservationId) {
+    // Foreign or non-held reservation: never run on it (fail closed — the
+    // next poll retries or observes terminal truth).
+    return emptyResult(conversationId, "private_compute_budget", [], []);
+  }
+  const matched = collectSubscriptionObservations(db, conversationId, ctx.items, { nowMs: options.nowMs });
+  const appended = appendInboxEvent(db, {
+    id: eventId,
+    wakeId: wake.wakeId,
+    conversationId,
+    kind: "idle_opportunity",
+    payload: {
+      cycleId: cycle.cycleId,
+      periodicScheduleOccurrenceId: periodic.occurrenceId,
+      privateBudgetReservationId: budget.reservation.reservationId,
+      occupantId: options.occupantId ?? "private",
+    },
+    createdAtMs: nowMs,
+  });
+  const observations = [...matched, ...periodic.observations].map((observation) => remapObservation(observation, cycle));
+  return executeAdmittedThought(db, {
+    conversationId,
+    cycle,
+    wakeId: wake.wakeId,
+    event: appended,
+    trigger: { kind: "idle_opportunity", ref: periodic.triggerRef },
+    occupancy: ctx.occupancy,
+    observations,
+    dueTriggers: [],
+    suppressedTriggers: suppressed,
+    reservation: budget.reservation,
+    nowMs,
+    thought: ctx.thought,
+  });
+}
+
 async function tickConversation(
   db: DatabaseSync,
   conversationId: string,
@@ -289,6 +420,21 @@ async function tickConversation(
   const matched = collectSubscriptionObservations(db, conversationId, items, { nowMs: options.nowMs });
   const thought = runner(options);
   const staleSuppressed = suppressedTriggers.some((trigger) => trigger.conversationId === conversationId);
+
+  // P1 periodic delegation: a pre-resolved bound/admitted occurrence runs on
+  // its frozen binding (no re-selection, no re-acquisition, no re-admission,
+  // and no empty-house short-circuit — bound work outlives occupancy).
+  if (options.periodic) {
+    return tickPeriodicConversation(db, conversationId, options, options.periodic, {
+      occupancy,
+      thought,
+      firedTriggers,
+      suppressedTriggers,
+      items,
+      nowMs,
+    });
+  }
+
   let acquired: IdleObservationDraft[] = [];
   if (
     thought &&
@@ -388,6 +534,41 @@ async function tickConversation(
     );
   }
   if (budget.reservation.state !== "held") return emptyResult(conversationId, "private_compute_budget", dueTriggers, []);
+  return executeAdmittedThought(db, {
+    conversationId,
+    cycle,
+    wakeId,
+    event,
+    trigger: { kind: triggerKind, ref: triggerRef },
+    occupancy,
+    observations,
+    dueTriggers,
+    suppressedTriggers: suppressedTriggers.filter((trigger) => trigger.conversationId === conversationId),
+    reservation: budget.reservation,
+    nowMs,
+    thought,
+  });
+}
+
+/** Shared Thought-execution tail: settle, provenance, and result mapping. */
+async function executeAdmittedThought(
+  db: DatabaseSync,
+  input: {
+    conversationId: string;
+    cycle: CycleRecord;
+    wakeId: string;
+    event: InboxEvent | null;
+    trigger: { kind: "idle_opportunity" | "subscription_item" | "future_trigger_due"; ref: string };
+    occupancy: MindOccupancy[];
+    observations: Observation[];
+    dueTriggers: FutureTrigger[];
+    suppressedTriggers: FutureTrigger[];
+    reservation: import("../types.js").PrivateBudgetReservation;
+    nowMs: number;
+    thought: IdleThoughtRunner;
+  },
+): Promise<IdleTickResult> {
+  const { conversationId, cycle, wakeId, event, trigger, occupancy, observations, dueTriggers, suppressedTriggers, reservation, nowMs, thought } = input;
   activePrivateCalls.add(conversationId);
   try {
     const result = await thought({
@@ -395,13 +576,13 @@ async function tickConversation(
       cycle,
       wakeId,
       event,
-      trigger: { kind: triggerKind, ref: triggerRef },
+      trigger,
       occupancy,
       observations,
       dueTriggers,
-      privateBudgetReservation: budget.reservation,
+      privateBudgetReservation: reservation,
     });
-    settleUnsettledPrivateReservation(db, budget.reservation.reservationId, nowMs);
+    settleUnsettledPrivateReservation(db, reservation.reservationId, nowMs);
     const thoughtModelAttempts = number(result.thoughtModelAttempts, 1);
     const acceptedSettlements = number(result.acceptedSettlements, result.published === true ? 1 : 0);
     // Dormancy is semantic state. Only the Thought settlement may publish it;
@@ -424,7 +605,7 @@ async function tickConversation(
       thoughtExecutionProvenance: result.thoughtExecutionProvenance ?? UNKNOWN_EXECUTION_PROVENANCE,
     };
   } catch {
-    try { settleUnsettledPrivateReservation(db, budget.reservation.reservationId, nowMs); } catch { /* preserve the idle failure result */ }
+    try { settleUnsettledPrivateReservation(db, reservation.reservationId, nowMs); } catch { /* preserve the idle failure result */ }
     return {
       conversationId,
       eligible: true,
@@ -443,6 +624,38 @@ async function tickConversation(
     };
   } finally {
     activePrivateCalls.delete(conversationId);
+  }
+}
+
+/**
+ * Maps a periodic poll decision to the tick reason surfaced only when the
+ * conversations loop found nothing (empty_house). Null preserves the
+ * pre-P1 reason exactly (schedule-less or thought-carrying ticks).
+ */
+function periodicReasonFor(decision: PeriodicPollDecision): IdleTickReason | null {
+  switch (decision.kind) {
+    case "no_schedule_disabled":
+    case "bound_runnable":
+    case "admit_runnable":
+    case "admission_unavailable":
+      return null;
+    case "schedule_created":
+    case "not_due":
+      return "periodic_not_due";
+    case "disabled_retained":
+      return "periodic_disabled";
+    case "trigger_deferred":
+    case "epoch_blocked":
+    case "pending_retained":
+      return "periodic_pending_retained";
+    case "terminal_observed":
+    case "stale_closed":
+      return "periodic_terminal_observed";
+    case "skipped_empty":
+      return "periodic_skipped_empty";
+    case "expired":
+    case "epoch_abandoned":
+      return "periodic_expired";
   }
 }
 
@@ -465,6 +678,49 @@ export async function tickIdleOpportunity(
     return emptyResult(options.conversationId ?? null, "occupancy_unreachable", [], []);
   }
   const items = inputItems(options);
+  // P1 periodic evaluation (R7 §9.2 order): T8 already fired above and never
+  // touches the schedule row. The schedule never gates a trigger.
+  const periodicDecision = await evaluatePeriodicPoll(db, {
+    scopeConversationId: options.conversationId,
+    occupantId: options.occupantId,
+    authorityEpoch: options.authorityEpoch,
+    nowMs,
+    enabled: options.periodicCognitionEnabled,
+    policyId: options.privateBudgetPolicyId,
+    subscriptionItems: items,
+    dueTriggerFired: due.fired.length > 0,
+    acquireObservations: options.curiosityObservationProvider
+      ? async ({ conversationId, nowMs: acquireNowMs, occupancy }) => {
+        try {
+          const acquired = await options.curiosityObservationProvider!({ conversationId, nowMs: acquireNowMs, occupancy });
+          return (Array.isArray(acquired) ? acquired : []).slice(0, PERIODIC_CURIOSITY_MAX_ITEMS);
+        } catch {
+          return [];
+        }
+      }
+      : undefined,
+  });
+  let delegated: IdleTickResult | null = null;
+  let delegatedConversation: string | null = null;
+  if (periodicDecision.kind === "bound_runnable" || periodicDecision.kind === "admit_runnable") {
+    // The occurrence's Thought runs through the same per-conversation path
+    // on its frozen binding; the conversation is skipped in the normal loop
+    // below so the obligation executes exactly once.
+    const runnable = periodicDecision.runnable;
+    delegatedConversation = runnable.conversationId;
+    delegated = await tickConversation(db, runnable.conversationId, {
+      ...options,
+      nowMs,
+      periodic: {
+        occurrenceId: runnable.occurrenceId,
+        triggerRef: runnable.triggerRef,
+        boundWakeId: runnable.wakeId,
+        reservationId: runnable.reservationId,
+        observations: runnable.observations,
+      },
+    }, due.fired, due.suppressedStale, items, due.events);
+  }
+  const periodicReason = periodicReasonFor(periodicDecision);
   let conversations: string[];
   try {
     conversations = conversationCandidates(db, options, due.fired, items);
@@ -473,19 +729,30 @@ export async function tickIdleOpportunity(
     logOccupancyUnreachable(options.conversationId ?? null, error);
     return emptyResult(options.conversationId ?? null, "occupancy_unreachable", due.fired, due.suppressedStale);
   }
-  if (conversations.length === 0) return emptyResult(options.conversationId ?? null, "empty_house", due.fired, due.suppressedStale);
+  if (conversations.length === 0 && !delegated) {
+    return emptyResult(options.conversationId ?? null, periodicReason ?? "empty_house", due.fired, due.suppressedStale);
+  }
   const results: IdleTickResult[] = [];
+  if (delegated) results.push(delegated);
   for (const conversationId of conversations) {
+    if (conversationId === delegatedConversation) continue;
     results.push(await tickConversation(db, conversationId, { ...options, nowMs }, due.fired, due.suppressedStale, items, due.events));
   }
   const thoughtExecutionProvenance = results.reduce<ThoughtExecutionProvenance | null>(
     (current, result) => mergeExecutionProvenance(current, result.thoughtExecutionProvenance),
     null,
   );
+  const baseReason: IdleTickReason | null = results.every((result) => result.reason === "empty_house")
+    ? "empty_house"
+    : results.find((result) => result.reason !== null)?.reason ?? null;
+  // Periodic reasons surface only when the conversations loop found nothing:
+  // no existing reason semantics change (any non-empty conversation result
+  // dominates, exactly as before P1).
+  const reason = baseReason === "empty_house" ? (periodicReason ?? baseReason) : baseReason;
   return {
     conversationId: options.conversationId ?? (results.length === 1 ? results[0]!.conversationId : null),
     eligible: results.some((result) => result.eligible),
-    reason: results.every((result) => result.reason === "empty_house") ? "empty_house" : results.find((result) => result.reason !== null)?.reason ?? null,
+    reason,
     thoughtModelAttempts: results.reduce((total, result) => total + result.thoughtModelAttempts, 0),
     acceptedSettlements: results.reduce((total, result) => total + result.acceptedSettlements, 0),
     thoughtCalls: results.reduce((total, result) => total + result.thoughtCalls, 0),

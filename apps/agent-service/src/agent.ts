@@ -12,6 +12,7 @@ import {
   openCognitiveSidecarDb,
 } from "./core/cognitive-v021/sidecar/db.js";
 import {
+  isPeriodicCognitionEnabled,
   runLiveCognitiveTurn,
 } from "./core/cognitive-v021/dispatch/live.js";
 import { reconcileProjectedDelivery } from "./core/cognitive-v021/delivery/outbox-projector.js";
@@ -188,6 +189,7 @@ export class AgentManager {
       conversationId,
       occupantId: ownerId,
       authorityEpoch,
+      periodicCognitionEnabled: isPeriodicCognitionEnabled(),
       curiosityObservationProvider: async () => {
         try { await scanConfiguredSources(nuclear); } catch { /* mechanical acquisition must not block Thought */ }
         try {
