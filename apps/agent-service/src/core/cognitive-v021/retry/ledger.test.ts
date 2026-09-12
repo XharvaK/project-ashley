@@ -83,6 +83,70 @@ describe("durable attempt ledger", () => {
     sidecar.close();
   });
 
+  it("releases a shared wake when the fifth exhausted predecessor settles so a sibling can proceed", () => {
+    const sidecar = db();
+    try {
+      seedEvent(sidecar);
+      const wake = sidecar.prepare("SELECT wake_id FROM inbox_events WHERE id = ?").get("event:retry") as { wake_id: string };
+      sidecar.prepare(
+        `INSERT INTO inbox_events
+           (id, conversation_id, kind, payload_json, created_at_ms, status, wake_id)
+         VALUES ('event:retry-sibling', 'conversation:retry', 'test', ?, 2, 'pending', ?)`,
+      ).run(JSON.stringify({ cycleId: "cycle:retry", wakeId: wake.wake_id }), wake.wake_id);
+
+      let nowMs = 1_000;
+      for (let ordinal = 1; ordinal <= 5; ordinal += 1) {
+        const started = startDurableAttempt(sidecar, {
+          eventId: "event:retry",
+          workerId: `attempt-worker-${ordinal}`,
+          nowMs,
+        });
+        const result = settleDurableAttempt(sidecar, {
+          eventId: "event:retry",
+          attemptId: started.attemptId,
+          claimToken: started.claimToken,
+          result: {
+            kind: "failed",
+            failureClass: "transient_retryable",
+            errorCode: "provider_unavailable",
+            dispatchTruth: "not_started",
+          },
+          nowMs,
+        });
+        if (ordinal < 5) {
+          expect(result.kind).toBe("retry_wait");
+          nowMs = (result as { nextEligibleAtMs: number }).nextEligibleAtMs;
+        } else {
+          expect(result).toEqual({ kind: "terminal", reason: "attempts_exhausted" });
+        }
+      }
+
+      expect(sidecar.prepare("SELECT state, status, attempt_count, terminal_reason FROM inbox_events WHERE id = ?").get("event:retry")).toMatchObject({
+        state: "quarantined",
+        status: "failed_terminal",
+        attempt_count: 5,
+        terminal_reason: "attempts_exhausted",
+      });
+
+      const sibling = claimNextDurableWork(sidecar, {
+        workerId: "sibling-worker",
+        nowMs: nowMs + 1,
+      });
+      expect(sibling?.eventId).toBe("event:retry-sibling");
+      expect(sibling?.ordinal).toBe(1);
+      expect(sidecar.prepare("SELECT state, status, attempt_count FROM inbox_events WHERE id = ?").get("event:retry-sibling")).toMatchObject({
+        state: "leased",
+        status: "claimed",
+        attempt_count: 1,
+      });
+      expect(sidecar.prepare("SELECT state FROM wakes WHERE wake_id = ?").get(wake.wake_id)).toMatchObject({ state: "authorized" });
+      expect(sidecar.prepare("SELECT COUNT(*) AS count FROM durable_work_attempts").get()).toMatchObject({ count: 6 });
+      expect(sidecar.prepare("SELECT COUNT(*) AS count FROM durable_work_attempts WHERE dispatch_truth != 'not_started'").get()).toMatchObject({ count: 0 });
+    } finally {
+      sidecar.close();
+    }
+  });
+
   it("makes a duplicate attempt settlement idempotent and quarantines a contradictory result", () => {
     const sidecar = db();
     seedEvent(sidecar);

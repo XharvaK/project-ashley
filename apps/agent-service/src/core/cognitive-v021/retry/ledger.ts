@@ -322,6 +322,12 @@ function finishWakeForEvent(
   if (!current.wake_id) throw new Error("wake_required");
   const wake = getWake(db, current.wake_id);
   if (!wake) throw new Error("wake_missing");
+  // Exhaustion of one durable continuation must not close a wake that still
+  // has another same-wake continuation eligible for ordinary claim.
+  if (reason === "quarantined" && hasOtherDurableContinuationForWake(db, current.wake_id, current.id)) {
+    wakeToPending(db, current.wake_id, nowMs);
+    return;
+  }
   if (wake.state === "terminal") {
     if (wake.terminalReason !== reason) throw new Error("wake_terminal_conflict");
     return;
@@ -333,6 +339,19 @@ function finishWakeForEvent(
   finishWakeInTransaction(db, current.wake_id, current.claim_token ?? wake.leaseToken, reason, nowMs);
 }
 
+function hasOtherDurableContinuationForWake(
+  db: DatabaseSync,
+  wakeId: string,
+  eventId: string,
+): boolean {
+  return Boolean(db.prepare(
+    `SELECT 1 FROM inbox_events
+      WHERE wake_id = ? AND id != ?
+        AND state IN ('pending', 'retry_wait', 'leased', 'reconciling')
+      LIMIT 1`,
+  ).get(wakeId, eventId));
+}
+
 function quarantineEvent(db: DatabaseSync, current: EventRow, reason: string, nowMs: number): void {
   db.prepare(
     `UPDATE inbox_events
@@ -342,7 +361,11 @@ function quarantineEvent(db: DatabaseSync, current: EventRow, reason: string, no
             next_eligible_at_ms = NULL
       WHERE id = ?`,
   ).run(reason, reason, reason, current.id);
-  if (current.wake_id && getWake(db, current.wake_id)) {
+  if (
+    current.wake_id
+    && getWake(db, current.wake_id)
+    && !hasOtherDurableContinuationForWake(db, current.wake_id, current.id)
+  ) {
     wakeToTerminal(db, current.wake_id, "quarantined", nowMs);
   }
   retireOwnerlessCycleForTerminalEvent(db, current.wake_id, nowMs);

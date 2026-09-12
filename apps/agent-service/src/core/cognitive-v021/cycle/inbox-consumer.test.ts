@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { appendInboxEvent, getCycle, updateCycleState } from "./inbox.js";
 import { admitWake } from "../wake/ledger.js";
 import { putInFlight } from "../effect/in-flight.js";
+import { appendAshleyEvidence, appendOwnerUtterance } from "../evidence/conversation-log.js";
+import { frontierAwareEvidenceSelection } from "../thought/input.js";
 import {
   claimNextInboxEvent,
   consumeNextInboxEvent,
@@ -93,6 +95,113 @@ async function waitForConvergence(
 }
 
 describe("durable cognitive inbox consumer", () => {
+  it("recovers a shared-wake backlog without losing pre-provider Owner context", () => {
+    const db = openTestSidecar();
+    try {
+      const conversationId = "conversation:shared-wake-backlog";
+      const cycleId = "cycle:shared-wake-backlog";
+      const admitted = admitWake(db, {
+        occurrenceId: "occurrence:shared-wake-backlog",
+        triggerRef: "trigger:shared-wake-backlog",
+        sourceKind: "inbox",
+        conversationId,
+        cycleId,
+        capturedAuthorityRevision: 1,
+        nowMs: 1,
+      });
+      const wakeId = admitted.wake.wakeId;
+      updateCycleState(db, cycleId, "thinking", 2);
+
+      const response = appendAshleyEvidence(db, {
+        conversationId,
+        text: "R0",
+        discordMessageIds: ["discord:r0"],
+        delivered: true,
+        nowMs: 50,
+      });
+      const ownerA = appendOwnerUtterance(db, {
+        conversationId,
+        text: "Owner A substantive question",
+        discordMessageIds: ["discord:a"],
+        nowMs: 100,
+      });
+      const ownerB = appendOwnerUtterance(db, {
+        conversationId,
+        text: "ash you there?",
+        discordMessageIds: ["discord:b"],
+        nowMs: 200,
+      });
+      const ownerC = appendOwnerUtterance(db, {
+        conversationId,
+        text: "Hello?",
+        discordMessageIds: ["discord:c"],
+        nowMs: 300,
+      });
+
+      const appendEvent = (id: string, evidenceRowId: string, createdAtMs: number) => appendInboxEvent(db, {
+        id,
+        conversationId,
+        kind: "owner_utterance",
+        payload: { cycleId, wakeId, evidenceRowId },
+        createdAtMs,
+        wakeId,
+      });
+      appendEvent("event:shared-wake-a", ownerA.rowId, 100);
+      appendEvent("event:shared-wake-b", ownerB.rowId, 200);
+      appendEvent("event:shared-wake-c", ownerC.rowId, 300);
+
+      const started = startDurableAttempt(db, {
+        eventId: "event:shared-wake-a",
+        workerId: "seed-worker",
+        nowMs: 1_000,
+      });
+      expect(settleDurableAttempt(db, {
+        eventId: "event:shared-wake-a",
+        attemptId: started.attemptId,
+        claimToken: started.claimToken,
+        result: {
+          kind: "failed",
+          failureClass: "transient_retryable",
+          errorCode: "provider_unavailable",
+          dispatchTruth: "not_started",
+        },
+        nowMs: 1_100,
+      }).kind).toBe("retry_wait");
+
+      const claimed = claimNextInboxEvent(db, {
+        workerId: "recovery-worker",
+        nowMs: 1_000 + (15 * 60 * 1_000) + 1,
+      });
+      expect(claimed?.id).toBe("event:shared-wake-b");
+
+      expect(db.prepare(
+        "SELECT state, status, attempt_count, terminal_reason, quarantine_reason FROM inbox_events WHERE id = ?",
+      ).get("event:shared-wake-a")).toMatchObject({
+        state: "quarantined",
+        status: "failed_terminal",
+        attempt_count: 1,
+        terminal_reason: "age_exhausted",
+        quarantine_reason: "age_exhausted",
+      });
+      expect(db.prepare(
+        "SELECT state, status, attempt_count FROM inbox_events WHERE id = ?",
+      ).get("event:shared-wake-b")).toMatchObject({ state: "leased", status: "claimed", attempt_count: 1 });
+      expect(db.prepare(
+        "SELECT state, status, attempt_count FROM inbox_events WHERE id = ?",
+      ).get("event:shared-wake-c")).toMatchObject({ state: "pending", status: "pending", attempt_count: 0 });
+      expect(db.prepare("SELECT state FROM wakes WHERE wake_id = ?").get(wakeId)).toMatchObject({ state: "authorized" });
+      expect(db.prepare("SELECT COUNT(*) AS count FROM durable_work_attempts").get()).toMatchObject({ count: 2 });
+
+      const selected = frontierAwareEvidenceSelection(db, conversationId, { lastNTurns: 12 }).selectedEvidence;
+      expect(selected.map((row) => row.text)).toEqual(["R0", ownerA.text, ownerB.text, ownerC.text]);
+      expect(selected.map((row) => row.rowId)).toEqual([response.rowId, ownerA.rowId, ownerB.rowId, ownerC.rowId]);
+      expect(selected.filter((row) => row.role === "ashley").map((row) => row.text)).toEqual(["R0"]);
+      expect(selected.filter((row) => row.role === "owner").every((row) => row.delivered === false)).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
+
   it("reclaims a 202-admitted event after a worker lease expires", async () => {
     const db = openTestSidecar();
     appendInboxEvent(db, { conversationId: "thread-restart", kind: "owner_message", payload: {}, createdAtMs: 1 });
