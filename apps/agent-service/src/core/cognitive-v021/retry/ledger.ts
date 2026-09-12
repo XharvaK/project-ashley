@@ -328,6 +328,12 @@ function finishWakeForEvent(
     wakeToPending(db, current.wake_id, nowMs);
     return;
   }
+  // A successful cognition must not close a wake while a same-wake sibling
+  // that was not covered by that cognition remains claimable.
+  if (reason === "completed" && hasOtherClaimableContinuationForWake(db, current.wake_id, current.id)) {
+    wakeToPending(db, current.wake_id, nowMs);
+    return;
+  }
   if (wake.state === "terminal") {
     if (wake.terminalReason !== reason) throw new Error("wake_terminal_conflict");
     return;
@@ -350,6 +356,42 @@ function hasOtherDurableContinuationForWake(
         AND state IN ('pending', 'retry_wait', 'leased', 'reconciling')
       LIMIT 1`,
   ).get(wakeId, eventId));
+}
+
+function hasOtherClaimableContinuationForWake(
+  db: DatabaseSync,
+  wakeId: string,
+  eventId: string,
+): boolean {
+  return Boolean(db.prepare(
+    `SELECT 1 FROM inbox_events
+      WHERE wake_id = ? AND id != ?
+        AND state IN ('pending', 'retry_wait')
+      LIMIT 1`,
+  ).get(wakeId, eventId));
+}
+
+function convergeCoveredSiblingEvents(
+  db: DatabaseSync,
+  current: EventRow,
+  coveredSiblingEventIds: readonly string[],
+  nowMs: number,
+): void {
+  if (!current.wake_id) return;
+  for (const siblingId of [...new Set(coveredSiblingEventIds)]) {
+    if (!siblingId || siblingId === current.id) continue;
+    db.prepare(
+      `UPDATE inbox_events
+          SET state = 'terminal', status = 'consumed',
+              terminal_reason = 'completed', quarantine_reason = NULL,
+              consumed_at_ms = ?, next_eligible_at_ms = NULL,
+              claim_token = NULL, worker_id = NULL,
+              lease_expires_at_ms = NULL,
+              last_error = NULL, last_failure_class = NULL
+        WHERE id = ? AND wake_id = ?
+          AND state IN ('pending', 'retry_wait')`,
+    ).run(nowMs, siblingId, current.wake_id);
+  }
 }
 
 function quarantineEvent(db: DatabaseSync, current: EventRow, reason: string, nowMs: number): void {
@@ -733,7 +775,14 @@ export function recoverDurableWork(db: DatabaseSync, nowMs = Date.now()): Durabl
 
 export function settleDurableAttempt(
   db: DatabaseSync,
-  input: { eventId: string; attemptId: string; claimToken: string; result: DurableSettlement; nowMs: number },
+  input: {
+    eventId: string;
+    attemptId: string;
+    claimToken: string;
+    result: DurableSettlement;
+    nowMs: number;
+    coveredSiblingEventIds?: readonly string[];
+  },
 ): DurableSettlementOutcome {
   let c3Terminal: RetryC3TerminalFailureInput | null = null;
   const outcome = beginAndRollbackOnError<DurableSettlementOutcome>(db, () => {
@@ -766,6 +815,7 @@ export function settleDurableAttempt(
           WHERE id = ? AND state = 'leased' AND claim_token = ?`,
       ).run(terminalReason, input.nowMs, input.eventId, input.claimToken);
       if (input.result.kind === "completed") {
+        convergeCoveredSiblingEvents(db, current, input.coveredSiblingEventIds ?? [], input.nowMs);
         finishWakeForEvent(db, current, "completed", input.nowMs);
       } else {
         if (current.wake_id) {

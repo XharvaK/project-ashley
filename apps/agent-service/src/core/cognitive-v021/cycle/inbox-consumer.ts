@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import {
   claimInboxEvent,
+  getCycle,
   getInboxEvent,
 } from "./inbox.js";
 import {
@@ -54,6 +55,60 @@ function errorCode(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function evidenceRowId(value: unknown): string | null {
+  if (!isRecord(value)) return null;
+  return typeof value.evidenceRowId === "string" && value.evidenceRowId.trim()
+    ? value.evidenceRowId
+    : null;
+}
+
+/**
+ * Snapshot the existing composition provenance before Thought runs. The
+ * snapshot is deliberately converted to event ids now so a later Owner
+ * sibling cannot be mistaken for input that the successful cognition saw.
+ */
+function coveredSiblingEventIdsAtDispatch(db: DatabaseSync, event: InboxEvent): string[] {
+  const payload = isRecord(event.payload) ? event.payload : {};
+  const cycleId = typeof payload.cycleId === "string" ? payload.cycleId : null;
+  const cycle = cycleId ? getCycle(db, cycleId) : null;
+  const coveredEvidenceIds = new Set(cycle?.composeLogIds ?? []);
+  const triggerEvidenceId = evidenceRowId(payload);
+  if (triggerEvidenceId) coveredEvidenceIds.add(triggerEvidenceId);
+  if (coveredEvidenceIds.size === 0) return [];
+
+  const rows = db.prepare(
+    `SELECT id, payload_json
+       FROM inbox_events
+      WHERE wake_id = ? AND id != ?
+        AND kind IN ('owner_utterance', 'owner_message')
+        AND state IN ('pending', 'retry_wait')
+      ORDER BY created_at_ms ASC, id ASC`,
+  ).all(event.wakeId, event.id) as Array<{ id?: unknown; payload_json?: unknown }>;
+  return rows.flatMap((row) => {
+    const id = typeof row.id === "string" ? row.id : "";
+    if (!id || typeof row.payload_json !== "string") return [];
+    try {
+      const siblingPayload = JSON.parse(row.payload_json);
+      return evidenceRowId(siblingPayload) && coveredEvidenceIds.has(evidenceRowId(siblingPayload)!)
+        ? [id]
+        : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
+function isSuccessfulCognitiveDispatch(result: InboxConsumerHandlerResult): boolean {
+  return result !== null
+    && !(("kind" in result))
+    && result.published === true
+    && result.acceptedSettlements > 0;
+}
+
 function toHandlerResult(result: InboxConsumerHandlerResult, event: InboxEvent): HandlerResult {
   if (result == null) {
     return { kind: "completed" };
@@ -79,6 +134,7 @@ function settledOutcomeOrThrow(
   event: InboxEvent,
   result: HandlerResult,
   nowMs: number,
+  coveredSiblingEventIds: readonly string[] = [],
 ): DurableSettlementOutcome {
   const attempt = event.durableAttemptId
     ? getOpenDurableAttempt(db, event.id)
@@ -92,6 +148,7 @@ function settledOutcomeOrThrow(
     claimToken: event.claimToken ?? attempt.claimToken,
     result,
     nowMs,
+    coveredSiblingEventIds,
   });
 }
 
@@ -106,10 +163,17 @@ export async function consumeInboxEvent(
   if (!attempt || (event.durableAttemptId && attempt.attemptId !== event.durableAttemptId)) {
     throw new Error("inbox_durable_attempt_missing");
   }
+  const dispatchCoverage = coveredSiblingEventIdsAtDispatch(db, event);
   try {
     const result = await handler(event);
     const settlementResult = toHandlerResult(result, event);
-    return settledOutcomeOrThrow(db, event, settlementResult, nowMs);
+    return settledOutcomeOrThrow(
+      db,
+      event,
+      settlementResult,
+      nowMs,
+      isSuccessfulCognitiveDispatch(result) ? dispatchCoverage : [],
+    );
   } catch (error) {
     const currentAttempt = getOpenDurableAttempt(db, event.id);
     if (currentAttempt) {

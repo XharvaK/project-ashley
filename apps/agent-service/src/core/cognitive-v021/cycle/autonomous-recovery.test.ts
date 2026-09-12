@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { appendAshleyEvidence, appendOwnerUtterance, listConversationEvidence } from "../evidence/conversation-log.js";
 import { admitWake } from "../wake/ledger.js";
-import { appendInboxEvent, updateCycleState } from "./inbox.js";
+import { appendCycleLogIds, appendInboxEvent, updateCycleState } from "./inbox.js";
 import { consumeNextInboxEvent, startInboxConsumer } from "./inbox-consumer.js";
 import { startDurableAttempt, settleDurableAttempt } from "../retry/ledger.js";
 import { frontierAwareEvidenceSelection } from "../thought/input.js";
 import { openTestSidecar } from "../test-support.js";
+import type { KernelRunResult } from "../types.js";
 
 const RETRY_AGE_MS = 15 * 60 * 1_000;
 
@@ -27,18 +28,23 @@ function waitFor(predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
   });
 }
 
-function seedSharedWakeBacklog(): {
+function seedSharedWakeBacklog(options: { includeC?: boolean } = {}): {
   db: ReturnType<typeof openTestSidecar>;
   conversationId: string;
+  cycleId: string;
   wakeId: string;
   eventA: string;
   eventB: string;
   eventC: string;
+  ownerAEvidenceId: string;
+  ownerBEvidenceId: string;
+  ownerCEvidenceId: string;
   ownerA: string;
   ownerB: string;
   ownerC: string;
 } {
   const db = openTestSidecar();
+  const includeC = options.includeC ?? true;
   const conversationId = "conversation:autonomous-recovery";
   const cycleId = "cycle:autonomous-recovery";
   const admitted = admitWake(db, {
@@ -72,12 +78,14 @@ function seedSharedWakeBacklog(): {
     discordMessageIds: ["discord:autonomous-b"],
     nowMs: 200,
   });
-  const ownerC = appendOwnerUtterance(db, {
-    conversationId,
-    text: "Hello?",
-    discordMessageIds: ["discord:autonomous-c"],
-    nowMs: 300,
-  });
+  const ownerC = includeC
+    ? appendOwnerUtterance(db, {
+        conversationId,
+        text: "Hello?",
+        discordMessageIds: ["discord:autonomous-c"],
+        nowMs: 300,
+      })
+    : null;
 
   const appendEvent = (id: string, evidenceRowId: string, createdAtMs: number): void => {
     appendInboxEvent(db, {
@@ -94,7 +102,8 @@ function seedSharedWakeBacklog(): {
   const eventC = "event:autonomous-c";
   appendEvent(eventA, ownerA.rowId, 100);
   appendEvent(eventB, ownerB.rowId, 200);
-  appendEvent(eventC, ownerC.rowId, 300);
+  if (ownerC) appendEvent(eventC, ownerC.rowId, 300);
+  appendCycleLogIds(db, cycleId, [ownerA.rowId, ownerB.rowId, ...(ownerC ? [ownerC.rowId] : [])], 350);
 
   const started = startDurableAttempt(db, { eventId: eventA, workerId: "seed-worker", nowMs: 1_000 });
   settleDurableAttempt(db, {
@@ -113,13 +122,31 @@ function seedSharedWakeBacklog(): {
   return {
     db,
     conversationId,
+    cycleId,
     wakeId,
     eventA,
     eventB,
     eventC,
+    ownerAEvidenceId: ownerA.rowId,
+    ownerBEvidenceId: ownerB.rowId,
+    ownerCEvidenceId: ownerC?.rowId ?? "",
     ownerA: ownerA.text ?? "",
     ownerB: ownerB.text ?? "",
-    ownerC: ownerC.text ?? "",
+    ownerC: ownerC?.text ?? "",
+  };
+}
+
+function successfulCognitiveDispatch(fixture: ReturnType<typeof seedSharedWakeBacklog>): KernelRunResult {
+  return {
+    cycleId: fixture.cycleId,
+    generation: 1,
+    published: true,
+    outboxId: 1,
+    infrastructureNotice: null,
+    thoughtModelAttempts: 1,
+    acceptedThoughtPasses: 1,
+    composeCancelledAttempts: 0,
+    acceptedSettlements: 1,
   };
 }
 
@@ -140,7 +167,7 @@ describe("autonomous unanswered conversation recovery", () => {
             .selectedEvidence
             .map((row) => row.text ?? ""),
         );
-        return { kind: "completed" as const };
+        return successfulCognitiveDispatch(fixture);
       },
     });
     const duplicateRecoveryLoop = startInboxConsumer(fixture.db, {
@@ -154,7 +181,7 @@ describe("autonomous unanswered conversation recovery", () => {
             .selectedEvidence
             .map((row) => row.text ?? ""),
         );
-        return { kind: "completed" as const };
+        return successfulCognitiveDispatch(fixture);
       },
     });
 
@@ -177,10 +204,11 @@ describe("autonomous unanswered conversation recovery", () => {
         status: "consumed",
         attempt_count: 1,
       });
-      expect(fixture.db.prepare("SELECT state, status, attempt_count FROM inbox_events WHERE id = ?").get(fixture.eventC)).toMatchObject({
-        state: "pending",
-        status: "pending",
+      expect(fixture.db.prepare("SELECT state, status, attempt_count, terminal_reason FROM inbox_events WHERE id = ?").get(fixture.eventC)).toMatchObject({
+        state: "terminal",
+        status: "consumed",
         attempt_count: 0,
+        terminal_reason: "completed",
       });
       expect(fixture.db.prepare("SELECT COUNT(*) AS count FROM durable_work_attempts").get()).toMatchObject({ count: 2 });
       expect(fixture.db.prepare("SELECT COUNT(*) AS count FROM speech_outbox").get()).toMatchObject({ count: 0 });
@@ -192,6 +220,154 @@ describe("autonomous unanswered conversation recovery", () => {
       duplicateRecoveryLoop.stop();
       await loop.done;
       await duplicateRecoveryLoop.done;
+      fixture.db.close();
+    }
+  });
+
+  it("converges covered sibling residue and does not let it block a fresh Owner message", async () => {
+    const fixture = seedSharedWakeBacklog();
+    const handledEventIds: string[] = [];
+    const loop = startInboxConsumer(fixture.db, {
+      workerId: "covered-sibling-worker",
+      pollMs: 1,
+      nowMs: () => 1_000 + RETRY_AGE_MS + 1,
+      handler: async (event) => {
+        handledEventIds.push(event.id);
+        if (event.id === fixture.eventB) {
+          return successfulCognitiveDispatch(fixture);
+        }
+        return { kind: "completed" as const };
+      },
+    });
+
+    try {
+      await waitFor(() => {
+        const row = fixture.db.prepare("SELECT state FROM inbox_events WHERE id = ?").get(fixture.eventB) as { state?: string } | undefined;
+        return row?.state === "terminal";
+      });
+      loop.stop();
+      await loop.done;
+
+      const residueBeforeContinuation = fixture.db.prepare(
+        "SELECT state, status, attempt_count FROM inbox_events WHERE id = ?",
+      ).get(fixture.eventC) as { state?: string; status?: string; attempt_count?: number };
+      const wakeBeforeContinuation = fixture.db.prepare(
+        "SELECT state, terminal_reason FROM wakes WHERE wake_id = ?",
+      ).get(fixture.wakeId) as { state?: string; terminal_reason?: string | null };
+      const firstIdle = await consumeNextInboxEvent(fixture.db, {
+        workerId: "covered-sibling-worker",
+        nowMs: () => 1_000 + RETRY_AGE_MS + 1,
+        handler: async (event) => {
+          handledEventIds.push(event.id);
+          return { kind: "completed" as const };
+        },
+      });
+      const secondIdle = await consumeNextInboxEvent(fixture.db, {
+        workerId: "covered-sibling-worker",
+        nowMs: () => 1_000 + RETRY_AGE_MS + 1,
+        handler: async (event) => {
+          handledEventIds.push(event.id);
+          return { kind: "completed" as const };
+        },
+      });
+      const ownerD = appendOwnerUtterance(fixture.db, {
+        conversationId: fixture.conversationId,
+        text: "A fresh Owner message after the recovery turn",
+        discordMessageIds: ["discord:autonomous-d"],
+        nowMs: 400,
+      });
+      const eventD = appendInboxEvent(fixture.db, {
+        conversationId: fixture.conversationId,
+        kind: "owner_utterance",
+        payload: { evidenceRowId: ownerD.rowId },
+        createdAtMs: 400,
+      });
+      const dTick = await consumeNextInboxEvent(fixture.db, {
+        workerId: "covered-sibling-worker",
+        nowMs: () => 401,
+        handler: async (event) => {
+          handledEventIds.push(event.id);
+          return { kind: "completed" as const };
+        },
+      });
+
+      expect({
+        DOES_C_CONVERGE_WITHOUT_NEW_INPUT: residueBeforeContinuation.state !== "pending",
+        DOES_CONSUMER_REPEAT_IDLE_ON_C: residueBeforeContinuation.state === "pending"
+          && firstIdle.outcome === "idle"
+          && secondIdle.outcome === "idle",
+        CAN_NEW_OWNER_MESSAGE_D_PROGRESS: dTick.outcome === "consumed" && handledEventIds.includes(eventD.id),
+      }).toEqual({
+        DOES_C_CONVERGE_WITHOUT_NEW_INPUT: true,
+        DOES_CONSUMER_REPEAT_IDLE_ON_C: false,
+        CAN_NEW_OWNER_MESSAGE_D_PROGRESS: true,
+      });
+      expect(residueBeforeContinuation).toMatchObject({ state: "terminal", status: "consumed", attempt_count: 0 });
+      expect(wakeBeforeContinuation).toMatchObject({ state: "terminal", terminal_reason: "completed" });
+      expect(fixture.db.prepare("SELECT state, status, attempt_count FROM inbox_events WHERE id = ?").get(eventD.id)).toMatchObject({
+        state: "terminal",
+        status: "consumed",
+        attempt_count: 1,
+      });
+      expect(handledEventIds).toEqual([fixture.eventB, eventD.id]);
+    } finally {
+      loop.stop();
+      await loop.done;
+      fixture.db.close();
+    }
+  });
+
+  it("keeps a same-wake sibling that arrives after the cognition snapshot claimable", async () => {
+    const fixture = seedSharedWakeBacklog({ includeC: false });
+    const lateEventId = "event:autonomous-late-c";
+    const handledEventIds: string[] = [];
+    let snapshot: string[] = [];
+    const loop = startInboxConsumer(fixture.db, {
+      workerId: "late-sibling-worker",
+      pollMs: 1,
+      nowMs: () => 1_000 + RETRY_AGE_MS + 1,
+      handler: async (event) => {
+        handledEventIds.push(event.id);
+        if (event.id === fixture.eventB) {
+          snapshot = frontierAwareEvidenceSelection(fixture.db, fixture.conversationId, { lastNTurns: 12 })
+            .selectedEvidence
+            .map((row) => row.text ?? "");
+          const ownerC = appendOwnerUtterance(fixture.db, {
+            conversationId: fixture.conversationId,
+            text: "Hello after the cognition snapshot",
+            discordMessageIds: ["discord:autonomous-late-c"],
+            nowMs: 300,
+          });
+          appendInboxEvent(fixture.db, {
+            id: lateEventId,
+            wakeId: fixture.wakeId,
+            conversationId: fixture.conversationId,
+            kind: "owner_utterance",
+            payload: { cycleId: fixture.cycleId, wakeId: fixture.wakeId, evidenceRowId: ownerC.rowId },
+            createdAtMs: 300,
+          });
+          return successfulCognitiveDispatch(fixture);
+        }
+        return { kind: "completed" as const };
+      },
+    });
+
+    try {
+      await waitFor(() => {
+        const row = fixture.db.prepare("SELECT state FROM inbox_events WHERE id = ?").get(lateEventId) as { state?: string } | undefined;
+        return row?.state === "terminal";
+      });
+      expect(snapshot).toEqual(["R0", fixture.ownerA, fixture.ownerB]);
+      expect(handledEventIds).toEqual([fixture.eventB, lateEventId]);
+      expect(fixture.db.prepare("SELECT state, status, attempt_count, terminal_reason FROM inbox_events WHERE id = ?").get(lateEventId)).toMatchObject({
+        state: "terminal",
+        status: "consumed",
+        attempt_count: 1,
+        terminal_reason: "completed",
+      });
+    } finally {
+      loop.stop();
+      await loop.done;
       fixture.db.close();
     }
   });
