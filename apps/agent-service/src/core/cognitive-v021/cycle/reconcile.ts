@@ -7,6 +7,7 @@ import { getCycle, hasValidDurableContinuationOwner } from "./inbox.js";
 export type ReconcileStartupResult = {
   retiredCycleIds: string[];
   recoveredOrphanEvidenceRowIds: string[];
+  coveredSiblingEventIds: string[];
 };
 
 type EvidenceCandidateRow = {
@@ -24,6 +25,13 @@ type CycleCandidateRow = {
   compose_log_ids_json: string;
 };
 
+type CoveredSiblingCandidateRow = {
+  id: string;
+  wake_id: string;
+  payload_json: string;
+  compose_log_ids_json: string;
+};
+
 function parseJsonArray(value: unknown): string[] {
   try {
     const parsed = JSON.parse(typeof value === "string" ? value : "[]");
@@ -31,6 +39,57 @@ function parseJsonArray(value: unknown): string[] {
   } catch {
     return [];
   }
+}
+
+function payloadEvidenceRowId(value: unknown): string | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const evidenceRowId = (value as Record<string, unknown>).evidenceRowId;
+  return typeof evidenceRowId === "string" && evidenceRowId.trim() ? evidenceRowId : null;
+}
+
+function convergedCoveredSiblingEvents(sidecar: DatabaseSync, nowMs: number): string[] {
+  const candidates = sidecar.prepare(
+    `SELECT ie.id, ie.wake_id, ie.payload_json, cr.compose_log_ids_json
+       FROM inbox_events ie
+       JOIN wakes w ON w.wake_id = ie.wake_id
+       JOIN cycle_records cr ON cr.wake_id = ie.wake_id
+      WHERE ie.kind IN ('owner_utterance', 'owner_message')
+        AND ie.state IN ('pending', 'retry_wait')
+        AND w.state = 'terminal'
+        AND w.terminal_reason = 'completed'
+        AND EXISTS (
+          SELECT 1
+            FROM settlements s
+           WHERE s.cycle_id = cr.cycle_id
+             AND s.generation = cr.generation
+             AND (s.wake_id IS NULL OR s.wake_id = ie.wake_id)
+        )
+      ORDER BY ie.created_at_ms ASC, ie.id ASC`,
+  ).all() as CoveredSiblingCandidateRow[];
+  const converged: string[] = [];
+  for (const candidate of candidates) {
+    let payload: unknown;
+    try {
+      payload = JSON.parse(candidate.payload_json);
+    } catch {
+      continue;
+    }
+    const evidenceRowId = payloadEvidenceRowId(payload);
+    if (!evidenceRowId || !parseJsonArray(candidate.compose_log_ids_json).includes(evidenceRowId)) continue;
+    const result = sidecar.prepare(
+      `UPDATE inbox_events
+          SET state = 'terminal', status = 'consumed',
+              terminal_reason = 'completed', quarantine_reason = NULL,
+              consumed_at_ms = ?, next_eligible_at_ms = NULL,
+              claim_token = NULL, worker_id = NULL,
+              lease_expires_at_ms = NULL,
+              last_error = NULL, last_failure_class = NULL
+        WHERE id = ? AND wake_id = ?
+          AND state IN ('pending', 'retry_wait')`,
+    ).run(nowMs, candidate.id, candidate.wake_id);
+    if (result.changes === 1) converged.push(candidate.id);
+  }
+  return converged;
 }
 
 /**
@@ -52,6 +111,7 @@ export function reconcileStartupOwnership(
   const nowMs = options?.nowMs ?? Date.now();
   const retiredCycleIds: string[] = [];
   const recoveredOrphanEvidenceRowIds: string[] = [];
+  const coveredSiblingEventIds: string[] = [];
 
   sidecar.exec("BEGIN IMMEDIATE");
   try {
@@ -146,8 +206,16 @@ export function reconcileStartupOwnership(
       }
     }
 
+    // A previous successful cognition can leave a same-wake Owner event
+    // pending when the process stops between semantic completion and the
+    // lifecycle convergence repair. Close only rows whose evidence is in the
+    // cycle's existing composition provenance and whose cycle has a durable
+    // successful settlement. This is mechanical lifecycle reconciliation, not
+    // a semantic judgment about the Owner message.
+    coveredSiblingEventIds.push(...convergedCoveredSiblingEvents(sidecar, nowMs));
+
     sidecar.exec("COMMIT");
-    return { retiredCycleIds, recoveredOrphanEvidenceRowIds };
+    return { retiredCycleIds, recoveredOrphanEvidenceRowIds, coveredSiblingEventIds };
   } catch (error) {
     try { sidecar.exec("ROLLBACK"); } catch {}
     throw error;

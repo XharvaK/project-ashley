@@ -2,11 +2,93 @@ import { describe, expect, it } from "vitest";
 import { DatabaseSync } from "node:sqlite";
 import { openNuclearDb } from "../../db.js";
 import { admitTestCycle, openTestSidecar } from "../test-support.js";
-import { updateCycleState, getCycle, appendCycleLogIds } from "./inbox.js";
+import { appendCycleLogIds, appendInboxEvent, updateCycleState, getCycle } from "./inbox.js";
 import { insertDeferredFrontierRecord, getDeferredFrontier } from "../frontier/ledger.js";
 import { appendOwnerUtterance } from "../evidence/conversation-log.js";
 import { admitCognitiveIngress } from "../ingress/http.js";
+import { settleDurableAttempt, startDurableAttempt } from "../retry/ledger.js";
 import { reconcileStartupOwnership } from "./reconcile.js";
+
+function seedCompletedWakeSiblingResidue(includeSiblingInCompose: boolean): {
+  db: ReturnType<typeof openTestSidecar>;
+  cycleId: string;
+  wakeId: string;
+  eventC: string;
+} {
+  const db = openTestSidecar();
+  const conversationId = includeSiblingInCompose ? "thread-covered-residue" : "thread-uncovered-residue";
+  const cycle = admitTestCycle(db, {
+    conversationId,
+    triggerKind: "owner_message",
+    occupantId: "doc",
+    authorityEpoch: 1,
+    nowMs: 1,
+  });
+  updateCycleState(db, cycle.cycleId, "thinking", 2);
+
+  const ownerA = appendOwnerUtterance(db, {
+    conversationId,
+    text: "Owner A substantive question",
+    discordMessageIds: [`${conversationId}:a`],
+    nowMs: 10,
+  });
+  const ownerB = appendOwnerUtterance(db, {
+    conversationId,
+    text: "ash you there?",
+    discordMessageIds: [`${conversationId}:b`],
+    nowMs: 20,
+  });
+  const ownerC = appendOwnerUtterance(db, {
+    conversationId,
+    text: "Hello?",
+    discordMessageIds: [`${conversationId}:c`],
+    nowMs: 30,
+  });
+  const appendEvent = (id: string, evidenceRowId: string, createdAtMs: number): void => {
+    appendInboxEvent(db, {
+      id,
+      conversationId,
+      wakeId: cycle.wakeId,
+      kind: "owner_utterance",
+      payload: { cycleId: cycle.cycleId, evidenceRowId },
+      createdAtMs,
+    });
+  };
+  appendEvent(`${conversationId}:a`, ownerA.rowId, 10);
+  appendEvent(`${conversationId}:b`, ownerB.rowId, 20);
+  const eventC = `${conversationId}:c`;
+  appendEvent(eventC, ownerC.rowId, 30);
+  appendCycleLogIds(
+    db,
+    cycle.cycleId,
+    [ownerA.rowId, ownerB.rowId, ...(includeSiblingInCompose ? [ownerC.rowId] : [])],
+    40,
+  );
+
+  const attemptB = startDurableAttempt(db, { eventId: `${conversationId}:b`, workerId: "seed-worker", nowMs: 50 });
+  settleDurableAttempt(db, {
+    eventId: `${conversationId}:b`,
+    attemptId: attemptB.attemptId,
+    claimToken: attemptB.claimToken,
+    result: { kind: "completed" },
+    nowMs: 60,
+  });
+  db.prepare(
+    "INSERT INTO settlements (settlement_id, cycle_id, generation, payload_json) VALUES (?, ?, ?, '{}')",
+  ).run(`${conversationId}:settlement`, cycle.cycleId, cycle.generation);
+  db.prepare(
+    `UPDATE inbox_events
+        SET state = 'quarantined', status = 'failed_terminal',
+            terminal_reason = 'age_exhausted', quarantine_reason = 'age_exhausted',
+            attempt_count = 1, next_eligible_at_ms = NULL
+      WHERE id = ?`,
+  ).run(`${conversationId}:a`);
+  db.prepare(
+    "UPDATE wakes SET state = 'terminal', terminal_reason = 'completed', updated_at_ms = 70 WHERE wake_id = ?",
+  ).run(cycle.wakeId);
+
+  return { db, cycleId: cycle.cycleId, wakeId: cycle.wakeId, eventC };
+}
 
 describe("v0.2.1 startup ownership reconciliation", () => {
   it("discovers and retires true zombie cycle (thinking with terminal wake) to silent", () => {
@@ -163,6 +245,47 @@ describe("v0.2.1 startup ownership reconciliation", () => {
     } finally {
       nuclear.close();
       sidecar.close();
+    }
+  });
+
+  it("converges a persisted covered sibling after restart without redispatch", () => {
+    const fixture = seedCompletedWakeSiblingResidue(true);
+    try {
+      const result = reconcileStartupOwnership(fixture.db, { nowMs: 80 });
+      expect(result.coveredSiblingEventIds).toEqual([fixture.eventC]);
+      expect(fixture.db.prepare("SELECT state, status, attempt_count, terminal_reason FROM inbox_events WHERE id = ?").get(fixture.eventC)).toMatchObject({
+        state: "terminal",
+        status: "consumed",
+        attempt_count: 0,
+        terminal_reason: "completed",
+      });
+      expect(fixture.db.prepare("SELECT state, terminal_reason FROM wakes WHERE wake_id = ?").get(fixture.wakeId)).toMatchObject({
+        state: "terminal",
+        terminal_reason: "completed",
+      });
+      expect(fixture.db.prepare("SELECT COUNT(*) AS count FROM durable_work_attempts WHERE event_id = ?").get(fixture.eventC)).toMatchObject({ count: 0 });
+
+      const second = reconcileStartupOwnership(fixture.db, { nowMs: 90 });
+      expect(second.coveredSiblingEventIds).toEqual([]);
+      expect(fixture.db.prepare("SELECT COUNT(*) AS count FROM settlements").get()).toMatchObject({ count: 1 });
+    } finally {
+      fixture.db.close();
+    }
+  });
+
+  it("leaves a persisted sibling unresolved when compose provenance does not cover it", () => {
+    const fixture = seedCompletedWakeSiblingResidue(false);
+    try {
+      const result = reconcileStartupOwnership(fixture.db, { nowMs: 80 });
+      expect(result.coveredSiblingEventIds).toEqual([]);
+      expect(fixture.db.prepare("SELECT state, status, attempt_count, terminal_reason FROM inbox_events WHERE id = ?").get(fixture.eventC)).toMatchObject({
+        state: "pending",
+        status: "pending",
+        attempt_count: 0,
+        terminal_reason: null,
+      });
+    } finally {
+      fixture.db.close();
     }
   });
 
