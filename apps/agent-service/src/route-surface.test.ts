@@ -6,6 +6,7 @@ import { assertRegisteredRoutes, routeSurface } from "./route-surface.js";
 import { createServer } from "./server.js";
 import { env } from "./env.js";
 import { openCognitiveSidecarDb } from "./core/cognitive-v021/sidecar/db.js";
+import { openObservabilityStore, RAW_DEBUG_RETENTION_MAX_MS } from "./core/cognitive-v021/thought/diagnostics.js";
 import type { Server } from "node:http";
 
 async function startTestServer(app: express.Express): Promise<{ server: Server; url: string }> {
@@ -34,6 +35,8 @@ describe("route surface registry", () => {
       "POST /nuclear/capabilities/memory-evidence/evaluation",
       "GET /nuclear/capabilities/memory-evidence/readiness",
       "POST /nuclear/capabilities/memory-evidence/cutover",
+      "POST /initiative/periodic/debug/enable",
+      "GET /initiative/periodic/diagnostics",
     ]));
     expect(keys.some((key) => key.includes("memory-evidence/witness"))).toBe(false);
   });
@@ -224,6 +227,74 @@ describe("route surface registry", () => {
       await stopTestServer(server);
       sidecar.close();
       env.discordOwnerId = originalDiscordOwnerId;
+    }
+  });
+
+  it("keeps periodic debug enablement and diagnostics owner-authenticated", async () => {
+    const originalDiscordOwnerId = env.discordOwnerId;
+    const originalMode = process.env.ASHLEY_OBSERVABILITY_MODE;
+    const ownerId = "route-test-owner";
+    env.discordOwnerId = ownerId;
+    process.env.ASHLEY_OBSERVABILITY_MODE = "rich";
+    const sidecar = openCognitiveSidecarDb(new DatabaseSync(":memory:"), { dataPlane: { kind: "isolated" } });
+    const observability = openObservabilityStore(":memory:");
+    const manager = {
+      dataPlane: { kind: "isolated", cognitiveSidecarDbPath: ":memory:" },
+      getCognitiveSidecar: () => sidecar,
+    } as unknown as AgentManager;
+    const { server, url } = await startTestServer(createServer(manager, {
+      cognitiveSidecar: sidecar,
+      observabilityDb: observability.db,
+    }));
+    try {
+      const denied = await fetch(`${url}/initiative/periodic/debug/enable`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ userId: "impostor", occurrence_id: "occ-route" }),
+      });
+      expect(denied.status).toBe(403);
+
+      const missingOccurrence = await fetch(`${url}/initiative/periodic/debug/enable`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ userId: ownerId }),
+      });
+      expect(missingOccurrence.status).toBe(400);
+
+      const enabled = await fetch(`${url}/initiative/periodic/debug/enable`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          userId: ownerId,
+          occurrence_id: "occ-route",
+          ttl_ms: RAW_DEBUG_RETENTION_MAX_MS * 2,
+        }),
+      });
+      expect(enabled.status).toBe(200);
+      expect(await enabled.json()).toMatchObject({
+        ok: true,
+        occurrenceId: "occ-route",
+        captureMode: "rich",
+      });
+      const captureRow = observability.db.prepare(
+        "SELECT enabled_at_ms, expires_at_ms, enabled_by, capture_mode FROM thought_debug_captures WHERE occurrence_id = ?",
+      ).get("occ-route") as Record<string, unknown>;
+      expect(captureRow.enabled_by).toBe(ownerId);
+      expect(captureRow.capture_mode).toBe("rich");
+      expect(Number(captureRow.expires_at_ms) - Number(captureRow.enabled_at_ms)).toBe(RAW_DEBUG_RETENTION_MAX_MS);
+
+      const readDenied = await fetch(`${url}/initiative/periodic/diagnostics?owner_id=impostor`);
+      expect(readDenied.status).toBe(403);
+      const read = await fetch(`${url}/initiative/periodic/diagnostics?owner_id=${encodeURIComponent(ownerId)}`);
+      expect(read.status).toBe(200);
+      expect(await read.json()).toMatchObject({ ok: true, diagnostics: [] });
+    } finally {
+      await stopTestServer(server);
+      observability.close();
+      sidecar.close();
+      env.discordOwnerId = originalDiscordOwnerId;
+      if (originalMode === undefined) delete process.env.ASHLEY_OBSERVABILITY_MODE;
+      else process.env.ASHLEY_OBSERVABILITY_MODE = originalMode;
     }
   });
 });

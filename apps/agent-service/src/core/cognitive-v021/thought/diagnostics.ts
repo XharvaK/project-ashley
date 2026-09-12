@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import type {
   AllocationDiagnostics,
   AllocationReceipt,
@@ -14,6 +14,9 @@ import type {
   RetrievalInfrastructureState,
 } from "../types.js";
 import { getPrivateBudgetProjection, type PrivateBudgetProjection } from "../private-budget/ledger.js";
+import { sha256, stableJson } from "../../model-fabric/hash.js";
+import { thoughtResourcePolicyIdentity } from "../../model-fabric/capability-identity.js";
+import { CREDENTIAL_OMITTED_PLACEHOLDER, detectCredentialShape } from "../../privacy/secrets.js";
 
 export type ThoughtDispatchDiagnosticCode =
   | "request_exceeds_tpm_budget"
@@ -73,6 +76,17 @@ export type ThoughtProviderFailureCapture = Readonly<{
   cachedInputTokens?: number;
   /** Provider-reported Cloudflare neuron usage, when supplied. */
   neuronUsage?: number;
+  /** Provider request identifier, when the provider returns one (P3 S5). */
+  providerRequestId?: string;
+  /** Cloudflare cf-ray response identifier, when returned (P3 S5, new read). */
+  cfRay?: string;
+  /** Provider-reported total tokens, when supplied (P3 S5). */
+  totalTokens?: number;
+  /**
+   * Where the cached-token count was observed (P3 S5). 'provider_usage'
+   * when cachedInputTokens came from provider usage; absent = UNKNOWN.
+   */
+  cachedSource?: string;
   contentBytes?: number;
   reasoningContentBytes?: number;
   contentHash?: string;
@@ -120,7 +134,226 @@ export type ThoughtDispatchDiagnostic = {
   /** Failure-oriented provider boundary evidence; raw content is prohibited. */
   providerFailure?: ThoughtProviderFailureCapture | null;
   createdAtMs?: number;
+  /**
+   * P3 S5 provider-diagnostic detail (additive, nullable). Attached by
+   * capture sites; Gate B (developmental_observability mode) decides at
+   * record time whether it persists. Missing = UNKNOWN, never zero.
+   */
+  providerDiagnostics?: ThoughtProviderS5Diagnostics | null;
 };
+
+/**
+ * P3 S5 provider-diagnostic persistence (R7 §19). Every field is nullable:
+ * missing numeric provider evidence is UNKNOWN, never coerced to 0.
+ */
+export type ThoughtProviderS5Diagnostics = Readonly<{
+  providerRequestId?: string | null;
+  cfRay?: string | null;
+  totalTokens?: number | null;
+  cachedSource?: string | null;
+  cachedTokens?: number | null;
+  messagesFingerprint?: string | null;
+  paramsFingerprint?: string | null;
+  affinityFingerprint?: string | null;
+  affinityApplied?: boolean | null;
+  estimatorInputTokens?: number | null;
+  estimatorOutputTokens?: number | null;
+  estimatorTotalTokens?: number | null;
+  /** No estimator version exists in source; always UNKNOWN (null). */
+  estimatorVersion?: string | null;
+  policyId?: string | null;
+  policyVersion?: number | null;
+  outputTokenLimit?: number | null;
+  resourcePolicyFingerprint?: string | null;
+  modelId?: string | null;
+  attemptOrdinal?: number | null;
+  latencyMs?: number | null;
+  finishReason?: string | null;
+  errorCode?: string | null;
+}>;
+
+function finiteS5Number(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function integerS5Number(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
+}
+
+function textS5String(value: unknown, maxLength: number): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return trimmed.slice(0, maxLength);
+}
+
+/**
+ * Builds the S5 detail from a provider-boundary capture plus site evidence.
+ * Returns undefined when no capture exists (columns stay NULL = UNKNOWN).
+ * Never throws: telemetry construction failure yields undefined, never a
+ * cognition block (existing swallow discipline at call sites).
+ */
+export function buildProviderS5(
+  capture: ThoughtProviderFailureCapture | null | undefined,
+  extras?: {
+    dispatchMessagesHash?: string | null;
+    estimate?: { input?: number | null; output?: number | null; total?: number | null } | null;
+    policy?: { id?: string | null; version?: number | null } | null;
+  },
+): ThoughtProviderS5Diagnostics | undefined {
+  if (!capture) return undefined;
+  try {
+    const params = {
+      maxTokens: capture.maxTokens ?? null,
+      temperature: capture.temperature ?? null,
+      topP: capture.topP ?? null,
+      reasoningConfiguration: capture.reasoningConfiguration ?? null,
+      reasoningBudgetTokens: capture.reasoningBudgetTokens ?? null,
+    };
+    const hasObservedParams = Object.values(params).some((value) => value !== null);
+    const paramsFingerprint = hasObservedParams
+      ? `sha256:${sha256(stableJson(params))}`
+      : null;
+    const estimateInput = extras?.estimate?.input ?? capture.inputTokens ?? null;
+    const estimateOutput = extras?.estimate?.output ?? capture.completionTokens ?? null;
+    const estimateTotal = extras?.estimate?.total ?? null;
+    let resourcePolicyFingerprint: string | null = null;
+    try {
+      resourcePolicyFingerprint = thoughtResourcePolicyIdentity().fingerprint;
+    } catch {
+      resourcePolicyFingerprint = null;
+    }
+    return {
+      providerRequestId: textS5String(capture.providerRequestId, 128),
+      cfRay: textS5String(capture.cfRay, 64),
+      totalTokens: integerS5Number(capture.totalTokens),
+      cachedSource: textS5String(capture.cachedSource, 32),
+      // Strict guard: 0 = observed zero, missing/non-numeric = UNKNOWN.
+      cachedTokens: integerS5Number(capture.cachedInputTokens),
+      messagesFingerprint: textS5String(extras?.dispatchMessagesHash, 128),
+      paramsFingerprint,
+      affinityFingerprint: textS5String(capture.affinityPolicy, 64)
+        ? `sha256:${sha256(stableJson({ affinityPolicy: capture.affinityPolicy }))}`
+        : null,
+      affinityApplied: typeof capture.sessionAffinityApplied === "boolean" ? capture.sessionAffinityApplied : null,
+      estimatorInputTokens: finiteS5Number(estimateInput),
+      estimatorOutputTokens: finiteS5Number(estimateOutput),
+      estimatorTotalTokens: finiteS5Number(estimateTotal),
+      estimatorVersion: null,
+      policyId: textS5String(extras?.policy?.id, 96),
+      policyVersion: integerS5Number(extras?.policy?.version),
+      outputTokenLimit: integerS5Number(capture.maxTokens),
+      resourcePolicyFingerprint,
+      modelId: textS5String(capture.model, 160),
+      attemptOrdinal: integerS5Number(capture.attemptOrdinal),
+      latencyMs: finiteS5Number(capture.elapsedMs),
+      finishReason: textS5String(capture.finishReason, 64),
+      errorCode: textS5String(capture.failureClass, 128)
+        ?? (capture.abortReasonName === "TimeoutError" || capture.abortReasonName === "AbortError"
+          ? capture.abortReasonName
+          : null),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Attaches S5 detail to a diagnostic under construction (capture-point
+ * check ONLY — no dispatch/projection behavior change). Gate B enforcement
+ * happens centrally at record time.
+ */
+export function attachProviderS5(
+  diag: ThoughtDispatchDiagnostic,
+  input: {
+    capture?: ThoughtProviderFailureCapture | null;
+    dispatchMessagesHash?: string | null;
+    estimate?: { input?: number | null; output?: number | null; total?: number | null } | null;
+    policy?: { id?: string | null; version?: number | null } | null;
+  } = {},
+): ThoughtDispatchDiagnostic {
+  return {
+    ...diag,
+    providerDiagnostics: buildProviderS5(input.capture, {
+      dispatchMessagesHash: input.dispatchMessagesHash ?? diag.dispatchMessagesHash ?? null,
+      estimate: input.estimate ?? {
+        input: diag.estimatedInputTokens ?? null,
+        output: null,
+        total: diag.totalDemandTokens ?? null,
+      },
+      policy: input.policy ?? null,
+    }),
+  };
+}
+
+/** P3 Gate B source: developmental_observability collection mode. */
+export type ObservabilityCollectionMode = "rich" | "sampled" | "off";
+
+/**
+ * Fail-closed mode resolution (frozen): absent/malformed/read-failure ⇒
+ * off. Read fresh at each capture point (mode changes need no restart).
+ * Raw debug additionally requires Gate A per occurrence — rich NEVER
+ * globally enables raw debug.
+ */
+export function readObservabilityMode(env: NodeJS.ProcessEnv = process.env): ObservabilityCollectionMode {
+  try {
+    const raw = env.ASHLEY_OBSERVABILITY_MODE;
+    if (typeof raw !== "string") return "off";
+    const normalized = raw.trim().toLowerCase();
+    if (normalized === "rich") return "rich";
+    if (normalized === "sampled") return "sampled";
+    return "off";
+  } catch {
+    return "off";
+  }
+}
+
+/**
+ * Success-path diagnostic codes: everything else in the frozen CHECK
+ * vocabulary is incident truth. No new failure vocabulary is invented.
+ */
+const NON_INCIDENT_DIAGNOSTIC_CODES: ReadonlySet<string> = new Set([
+  "provider_sent",
+  "provider_returned",
+  "context_allocation_optional_degradation",
+]);
+
+/**
+ * Middle-mode mechanic (frozen, no percentage): INCIDENT_TRUTH = existing
+ * NON-SUCCESS execution truth — failure_class present and/or terminal-
+ * failure disposition, evaluated at the capture point. An ordinary
+ * successful terminal/completed occurrence is NOT an incident.
+ */
+export function isIncidentDiagnostic(
+  code: ThoughtDispatchDiagnosticCode | string,
+  providerFailure?: ThoughtProviderFailureCapture | null,
+): boolean {
+  if (!NON_INCIDENT_DIAGNOSTIC_CODES.has(code)) return true;
+  if (!providerFailure) return false;
+  if (providerFailure.failureClass) return true;
+  if (providerFailure.noHttpResponse === true) return true;
+  if (providerFailure.abortReasonName === "TimeoutError" || providerFailure.abortReasonName === "AbortError") return true;
+  if (typeof providerFailure.providerHttpStatus === "number" && providerFailure.providerHttpStatus >= 400) return true;
+  return false;
+}
+
+/**
+ * Gate B over the reducible semantic-diagnostic tier (evidence detail,
+ * settlement deltas, per-attempt usage/fingerprints/provider detail, raw
+ * debug): rich ⇒ collect; middle (sampled) ⇒ incident-truth occurrences
+ * only; off ⇒ collect nothing reducible. Accountability-tier persistence
+ * (identities/truth/failure-class via the v1 columns incl. code) is never
+ * gated by this mode.
+ */
+export function resolveReducibleCollection(input: {
+  mode: ObservabilityCollectionMode;
+  code: ThoughtDispatchDiagnosticCode | string;
+  providerFailure?: ThoughtProviderFailureCapture | null;
+}): boolean {
+  if (input.mode === "rich") return true;
+  if (input.mode === "sampled") return isIncidentDiagnostic(input.code, input.providerFailure);
+  return false;
+}
 
 function emptyTokenBreakdown(): AllocationTokenBreakdown {
   return {
@@ -426,7 +659,7 @@ export function defaultObservabilityDbPath(): string {
   return join(homedir(), ".composer-assistant", "cognitive-v021-observability.db");
 }
 
-const OBSERVABILITY_SCHEMA_VERSION = 1;
+const OBSERVABILITY_SCHEMA_VERSION = 2;
 const REQUIRED_DIAGNOSTIC_COLUMNS = [
   "id", "cycle_id", "generation", "request_id", "pass", "code", "stage",
   "dispatch_truth", "quota_bucket", "estimated_input_tokens", "total_demand_tokens",
@@ -435,6 +668,35 @@ const REQUIRED_DIAGNOSTIC_COLUMNS = [
   "fallback_attempt_ordinal", "fallback_from_attempt_id", "secondary_dispatch_truth",
   "cycle_metrics_json", "provider_failure_json", "publication_reason", "created_at_ms",
 ] as const;
+/**
+ * P3 S5 additive columns (v2): all nullable, missing = UNKNOWN, no backfill.
+ * Row-preserving discipline: legacy rows keep every v1 value byte-identical.
+ */
+const S5_DIAGNOSTIC_COLUMN_TYPES: Readonly<Record<string, "TEXT" | "INTEGER">> = {
+  provider_request_id: "TEXT",
+  cf_ray: "TEXT",
+  total_tokens: "INTEGER",
+  cached_source: "TEXT",
+  cached_tokens: "INTEGER",
+  messages_fingerprint: "TEXT",
+  params_fingerprint: "TEXT",
+  affinity_fingerprint: "TEXT",
+  affinity_applied: "INTEGER",
+  estimator_input_tokens: "INTEGER",
+  estimator_output_tokens: "INTEGER",
+  estimator_total_tokens: "INTEGER",
+  estimator_version: "TEXT",
+  policy_id: "TEXT",
+  policy_version: "INTEGER",
+  output_token_limit: "INTEGER",
+  resource_policy_fingerprint: "TEXT",
+  model_id: "TEXT",
+  attempt_ordinal: "INTEGER",
+  latency_ms: "INTEGER",
+  finish_reason: "TEXT",
+  error_code: "TEXT",
+};
+const S5_DIAGNOSTIC_COLUMNS = Object.keys(S5_DIAGNOSTIC_COLUMN_TYPES);
 const LEGACY_DIAGNOSTIC_COLUMNS = REQUIRED_DIAGNOSTIC_COLUMNS.filter(
   (column) => column !== "publication_reason",
 );
@@ -462,9 +724,26 @@ function currentDiagnosticSchema(db: DatabaseSync): boolean {
     "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'thought_dispatch_diagnostics'",
   ).get() as { sql?: string } | undefined;
   return REQUIRED_DIAGNOSTIC_COLUMNS.every((column) => columns.has(column))
+    && S5_DIAGNOSTIC_COLUMNS.every((column) => columns.has(column))
+    && tableExists(db, "thought_debug_captures")
+    && REQUIRED_DEBUG_CAPTURE_COLUMNS.every((column) => tableColumns(db, "thought_debug_captures").has(column))
     && typeof sql?.sql === "string"
     && sql.sql.includes("publication_rejected")
     && sql.sql.includes("'publication'");
+}
+
+const REQUIRED_DEBUG_CAPTURE_COLUMNS = [
+  "occurrence_id",
+  "enabled_at_ms",
+  "expires_at_ms",
+  "enabled_by",
+  "capture_mode",
+  "projected_debug_json",
+] as const;
+
+function tableColumns(db: DatabaseSync, table: string): Set<string> {
+  return new Set((db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name?: string }>)
+    .flatMap((item) => typeof item.name === "string" ? [item.name] : []));
 }
 
 function createObservabilityTables(db: DatabaseSync): void {
@@ -541,7 +820,38 @@ function createObservabilityTables(db: DatabaseSync): void {
           'future_trigger_snapshot_conflict'
         )
       ),
+      provider_request_id TEXT,
+      cf_ray TEXT,
+      total_tokens INTEGER,
+      cached_source TEXT,
+      cached_tokens INTEGER,
+      messages_fingerprint TEXT,
+      params_fingerprint TEXT,
+      affinity_fingerprint TEXT,
+      affinity_applied INTEGER,
+      estimator_input_tokens INTEGER,
+      estimator_output_tokens INTEGER,
+      estimator_total_tokens INTEGER,
+      estimator_version TEXT,
+      policy_id TEXT,
+      policy_version INTEGER,
+      output_token_limit INTEGER,
+      resource_policy_fingerprint TEXT,
+      model_id TEXT,
+      attempt_ordinal INTEGER,
+      latency_ms INTEGER,
+      finish_reason TEXT,
+      error_code TEXT,
       created_at_ms INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS thought_debug_captures (
+      occurrence_id TEXT PRIMARY KEY,
+      enabled_at_ms INTEGER NOT NULL,
+      expires_at_ms INTEGER NOT NULL,
+      enabled_by TEXT NOT NULL,
+      capture_mode TEXT NOT NULL,
+      projected_debug_json TEXT NULL
     );
 
     CREATE INDEX IF NOT EXISTS idx_alloc_receipts_cycle
@@ -552,6 +862,9 @@ function createObservabilityTables(db: DatabaseSync): void {
 
     CREATE INDEX IF NOT EXISTS idx_tdd_code
       ON thought_dispatch_diagnostics (code, stage);
+
+    CREATE INDEX IF NOT EXISTS idx_thought_debug_expires
+      ON thought_debug_captures (expires_at_ms);
   `);
 }
 
@@ -667,6 +980,48 @@ function migrateDiagnosticTable(db: DatabaseSync): void {
   db.exec("UPDATE sqlite_sequence SET seq = (SELECT COALESCE(MAX(id), 0) FROM thought_dispatch_diagnostics) WHERE name = 'thought_dispatch_diagnostics'");
 }
 
+/**
+ * P3 v1→v2 migration (ONE version bump carries BOTH payloads): additive
+ * nullable S5 columns (missing = UNKNOWN, no backfill) AND the new
+ * thought_debug_captures table + expiry index. Row-preserving discipline
+ * reuses the oldRows/newRows preservation assert on the v1 column set.
+ */
+function migrateObservabilityV1ToV2(db: DatabaseSync): void {
+  const columns = new Set(diagnosticColumns(db));
+  if (REQUIRED_DIAGNOSTIC_COLUMNS.some((column) => !columns.has(column))) {
+    throw new Error("observability_schema_incompatible");
+  }
+  const oldRows = db.prepare(
+    `SELECT ${REQUIRED_DIAGNOSTIC_COLUMNS.join(", ")} FROM thought_dispatch_diagnostics ORDER BY id ASC`,
+  ).all();
+  const oldCount = (db.prepare("SELECT COUNT(*) AS count FROM thought_dispatch_diagnostics").get() as { count?: number }).count;
+  for (const column of S5_DIAGNOSTIC_COLUMNS) {
+    if (!columns.has(column)) {
+      db.exec(`ALTER TABLE thought_dispatch_diagnostics ADD COLUMN ${column} ${S5_DIAGNOSTIC_COLUMN_TYPES[column] ?? "TEXT"}`);
+    }
+  }
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS thought_debug_captures (
+      occurrence_id TEXT PRIMARY KEY,
+      enabled_at_ms INTEGER NOT NULL,
+      expires_at_ms INTEGER NOT NULL,
+      enabled_by TEXT NOT NULL,
+      capture_mode TEXT NOT NULL,
+      projected_debug_json TEXT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_thought_debug_expires
+      ON thought_debug_captures (expires_at_ms);
+  `);
+  const newRows = db.prepare(
+    `SELECT ${REQUIRED_DIAGNOSTIC_COLUMNS.join(", ")} FROM thought_dispatch_diagnostics ORDER BY id ASC`,
+  ).all();
+  if (JSON.stringify(oldRows) !== JSON.stringify(newRows)) {
+    throw new Error("observability_row_preservation_failed");
+  }
+  const newCount = (db.prepare("SELECT COUNT(*) AS count FROM thought_dispatch_diagnostics").get() as { count?: number }).count;
+  if (newCount !== oldCount) throw new Error("observability_row_preservation_failed");
+}
+
 export function initObservabilitySchema(db: DatabaseSync): void {
   db.exec("PRAGMA busy_timeout = 5000");
   db.exec("BEGIN IMMEDIATE");
@@ -678,7 +1033,13 @@ export function initObservabilitySchema(db: DatabaseSync): void {
         throw new Error("observability_schema_incompatible");
       }
     } else if (tableExists(db, "thought_dispatch_diagnostics")) {
-      migrateDiagnosticTable(db);
+      // Stepwise: legacy (no publication_reason) → v1 shape, then v1 → v2.
+      const columns = new Set(diagnosticColumns(db));
+      if (LEGACY_DIAGNOSTIC_COLUMNS.some((column) => !columns.has(column))) {
+        throw new Error("observability_schema_incompatible");
+      }
+      if (!columns.has("publication_reason")) migrateDiagnosticTable(db);
+      migrateObservabilityV1ToV2(db);
     } else {
       createObservabilityTables(db);
     }
@@ -757,6 +1118,20 @@ export class ObservabilityStore {
   }
 
   recordDiagnostic(diag: ThoughtDispatchDiagnostic, nowMs = Date.now()): void {
+    // Gate B is enforced centrally here (single choke point): the
+    // reducible S5 tier persists only when the collection mode allows it.
+    // Accountability-tier columns persist untouched in every mode.
+    const mode = readObservabilityMode();
+    const s5 = resolveReducibleCollection({ mode, code: diag.code, providerFailure: diag.providerFailure })
+      ? diag.providerDiagnostics ?? buildProviderS5(diag.providerFailure, {
+          dispatchMessagesHash: diag.dispatchMessagesHash,
+          estimate: {
+            input: diag.providerFailure?.inputTokens ?? diag.estimatedInputTokens ?? null,
+            output: diag.providerFailure?.completionTokens ?? null,
+            total: diag.providerFailure?.totalTokens ?? null,
+          },
+        }) ?? null
+      : null;
     const stmt = this.db.prepare(`
       INSERT INTO thought_dispatch_diagnostics (
         cycle_id, generation, request_id, pass, code, stage,
@@ -765,14 +1140,27 @@ export class ObservabilityStore {
         primary_provider, primary_attempt_id, primary_dispatch_truth,
         suppressed_provider, fallback_attempt_ordinal, fallback_from_attempt_id,
         secondary_dispatch_truth, cycle_metrics_json, provider_failure_json,
-        publication_reason, created_at_ms
+        publication_reason,
+        provider_request_id, cf_ray, total_tokens, cached_source, cached_tokens,
+        messages_fingerprint, params_fingerprint, affinity_fingerprint, affinity_applied,
+        estimator_input_tokens, estimator_output_tokens, estimator_total_tokens,
+        estimator_version, policy_id, policy_version, output_token_limit,
+        resource_policy_fingerprint, model_id, attempt_ordinal, latency_ms,
+        finish_reason, error_code,
+        created_at_ms
       ) VALUES (
         ?, ?, ?, ?, ?, ?,
         ?, ?, ?,
         ?, ?, ?,
         ?, ?, ?,
         ?, ?, ?,
-        ?, ?, ?, ?, ?
+        ?, ?, ?, ?,
+        ?, ?, ?, ?, ?,
+        ?, ?, ?, ?,
+        ?, ?, ?, ?,
+        ?, ?, ?, ?,
+        ?, ?, ?,
+        ?, ?, ?
       )
     `);
 
@@ -799,6 +1187,28 @@ export class ObservabilityStore {
       diagnosticPayload(diag),
       providerFailurePayload(diag.providerFailure),
       boundedPublicationReason(diag.publicationReason),
+      s5?.providerRequestId ?? null,
+      s5?.cfRay ?? null,
+      s5?.totalTokens ?? null,
+      s5?.cachedSource ?? null,
+      s5?.cachedTokens ?? null,
+      s5?.messagesFingerprint ?? null,
+      s5?.paramsFingerprint ?? null,
+      s5?.affinityFingerprint ?? null,
+      s5?.affinityApplied === true ? 1 : s5?.affinityApplied === false ? 0 : null,
+      s5?.estimatorInputTokens ?? null,
+      s5?.estimatorOutputTokens ?? null,
+      s5?.estimatorTotalTokens ?? null,
+      s5?.estimatorVersion ?? null,
+      s5?.policyId ?? null,
+      s5?.policyVersion ?? null,
+      s5?.outputTokenLimit ?? null,
+      s5?.resourcePolicyFingerprint ?? null,
+      s5?.modelId ?? null,
+      s5?.attemptOrdinal ?? null,
+      s5?.latencyMs ?? null,
+      s5?.finishReason ?? null,
+      s5?.errorCode ?? null,
       diag.createdAtMs ?? nowMs,
     );
   }
@@ -917,12 +1327,20 @@ export class ObservabilityStore {
     });
   }
 
-  listDiagnostics(limit = 100): ThoughtDispatchDiagnostic[] {
+  listDiagnostics(
+    limit = 100,
+    filter?: { cycleId?: string; generation?: number },
+  ): ThoughtDispatchDiagnostic[] {
+    const scoped = filter?.cycleId !== undefined && filter.generation !== undefined;
+    const params: SQLInputValue[] = scoped
+      ? [filter!.cycleId!, filter!.generation!, limit]
+      : [limit];
     const rows = this.db.prepare(`
       SELECT * FROM thought_dispatch_diagnostics
+      ${scoped ? "WHERE cycle_id = ? AND generation = ?" : ""}
       ORDER BY created_at_ms DESC
       LIMIT ?
-    `).all(limit) as Array<{
+    `).all(...params) as Array<{
       cycle_id: string;
       generation: number;
       request_id: string;
@@ -945,11 +1363,34 @@ export class ObservabilityStore {
       cycle_metrics_json: string | null;
       provider_failure_json: string | null;
       publication_reason: PublicationRejectionReason | null;
+      provider_request_id: string | null;
+      cf_ray: string | null;
+      total_tokens: number | null;
+      cached_source: string | null;
+      cached_tokens: number | null;
+      messages_fingerprint: string | null;
+      params_fingerprint: string | null;
+      affinity_fingerprint: string | null;
+      affinity_applied: number | null;
+      estimator_input_tokens: number | null;
+      estimator_output_tokens: number | null;
+      estimator_total_tokens: number | null;
+      estimator_version: string | null;
+      policy_id: string | null;
+      policy_version: number | null;
+      output_token_limit: number | null;
+      resource_policy_fingerprint: string | null;
+      model_id: string | null;
+      attempt_ordinal: number | null;
+      latency_ms: number | null;
+      finish_reason: string | null;
+      error_code: string | null;
       created_at_ms: number;
     }>;
 
     return rows.map((r) => {
       const overflowDetails = parseRequiredOverflowDetails(r.cycle_metrics_json);
+      const hasS5 = S5_DIAGNOSTIC_COLUMNS.some((column) => (r as Record<string, unknown>)[column] !== null && (r as Record<string, unknown>)[column] !== undefined);
       return {
         cycleId: r.cycle_id,
         generation: r.generation,
@@ -974,6 +1415,30 @@ export class ObservabilityStore {
         cycleMetrics: parseCycleMetrics(r.cycle_metrics_json),
         providerFailure: parseProviderFailureCapture(r.provider_failure_json),
         publicationReason: boundedPublicationReason(r.publication_reason),
+        providerDiagnostics: hasS5 ? {
+          providerRequestId: r.provider_request_id ?? null,
+          cfRay: r.cf_ray ?? null,
+          totalTokens: r.total_tokens ?? null,
+          cachedSource: r.cached_source ?? null,
+          cachedTokens: r.cached_tokens ?? null,
+          messagesFingerprint: r.messages_fingerprint ?? null,
+          paramsFingerprint: r.params_fingerprint ?? null,
+          affinityFingerprint: r.affinity_fingerprint ?? null,
+          affinityApplied: r.affinity_applied === 1 ? true : r.affinity_applied === 0 ? false : null,
+          estimatorInputTokens: r.estimator_input_tokens ?? null,
+          estimatorOutputTokens: r.estimator_output_tokens ?? null,
+          estimatorTotalTokens: r.estimator_total_tokens ?? null,
+          estimatorVersion: r.estimator_version ?? null,
+          policyId: r.policy_id ?? null,
+          policyVersion: r.policy_version ?? null,
+          outputTokenLimit: r.output_token_limit ?? null,
+          resourcePolicyFingerprint: r.resource_policy_fingerprint ?? null,
+          modelId: r.model_id ?? null,
+          attemptOrdinal: r.attempt_ordinal ?? null,
+          latencyMs: r.latency_ms ?? null,
+          finishReason: r.finish_reason ?? null,
+          errorCode: r.error_code ?? null,
+        } : null,
         createdAtMs: r.created_at_ms,
       };
     });
@@ -986,10 +1451,171 @@ export class ObservabilityStore {
       // Ignore close error
     }
   }
+
+  /**
+   * P3 Gate A: explicit per-occurrence raw-debug enablement.
+   * Enablement = row present AND nowMs < expires_at_ms.
+   * TTL clamped at write to <= 28 days (RAW_DEBUG_RETENTION_MAX_MS).
+   * Raw projected content only; secret-redacted via detectCredentialShape.
+   */
+  enableThoughtDebugCapture(input: {
+    occurrenceId: string;
+    ttlMs?: number;
+    enabledBy: string;
+    captureMode: string;
+    nowMs?: number;
+  }): void {
+    const nowMs = input.nowMs ?? Date.now();
+    const requestedTtlMs = typeof input.ttlMs === "number" && Number.isFinite(input.ttlMs)
+      ? Math.floor(input.ttlMs)
+      : RAW_DEBUG_RETENTION_MAX_MS;
+    const ttlMs = Math.max(0, Math.min(requestedTtlMs, RAW_DEBUG_RETENTION_MAX_MS));
+    this.db.prepare(`
+      INSERT INTO thought_debug_captures
+        (occurrence_id, enabled_at_ms, expires_at_ms, enabled_by, capture_mode, projected_debug_json)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(occurrence_id) DO UPDATE SET
+        enabled_at_ms = excluded.enabled_at_ms,
+        expires_at_ms = excluded.expires_at_ms,
+        enabled_by = excluded.enabled_by,
+        capture_mode = excluded.capture_mode,
+        projected_debug_json = NULL
+    `).run(
+      input.occurrenceId,
+      nowMs,
+      nowMs + ttlMs,
+      input.enabledBy,
+      input.captureMode,
+      null,
+    );
+  }
+
+  /**
+   * Reads a debug capture for a specific occurrence.
+   * Returns null if row is absent or expired (guard denies at/after expires_at_ms).
+   */
+  getThoughtDebugCapture(occurrenceId: string, nowMs = Date.now()): {
+    occurrenceId: string;
+    enabledAtMs: number;
+    expiresAtMs: number;
+    enabledBy: string;
+    captureMode: string;
+    projectedDebugJson: string | null;
+  } | null {
+    const row = this.db.prepare(`
+      SELECT occurrence_id, enabled_at_ms, expires_at_ms, enabled_by, capture_mode, projected_debug_json
+      FROM thought_debug_captures WHERE occurrence_id = ?
+    `).get(occurrenceId) as {
+      occurrence_id: string;
+      enabled_at_ms: number;
+      expires_at_ms: number;
+      enabled_by: string;
+      capture_mode: string;
+      projected_debug_json: string | null;
+    } | undefined;
+
+    if (!row) return null;
+    if (nowMs >= row.expires_at_ms) return null; // Guard denies immediately.
+    return {
+      occurrenceId: row.occurrence_id,
+      enabledAtMs: row.enabled_at_ms,
+      expiresAtMs: row.expires_at_ms,
+      enabledBy: row.enabled_by,
+      captureMode: row.capture_mode,
+      projectedDebugJson: row.projected_debug_json,
+    };
+  }
+
+  /**
+   * P3 hard-expiry purge (conservative early delete): deletes ALL rows with
+   * expires_at_ms <= nowMs + MAX_SWEEP_INTERVAL_MS (60_000).
+   * No row-count LIMIT — a fixed LIMIT cannot prove a hard retention maximum
+   * without a matching enablement cardinality bound, and R7 fixes none.
+   * While healthy/running, the steady-state purge removes ALL rows satisfying
+   * the predicate on every opportunity (post-tick AND in-flight deadline via
+   * the injected callback).
+   * Called on: startup (before first read), capture path (before write),
+   * and EVERY P0 steady-state reconciliation opportunity (post-tick AND
+   * in-flight deadline). The same helper implementation is used throughout.
+   */
+  purgeThoughtDebugCaptures(nowMs: number): number {
+    const deleted = this.db.prepare(`
+      DELETE FROM thought_debug_captures
+      WHERE expires_at_ms <= ?
+    `).run(nowMs + 60_000);
+    return Number(deleted.changes ?? 0);
+  }
+
 }
+
+/**
+ * P3 Owner Amendment A1: raw-debug retention maximum changed from 7d to 28d.
+ * Applied as pure constant substitution — no mechanism depends on the day count.
+ */
+export const RAW_DEBUG_RETENTION_MAX_MS = 2_419_200_000 as const; // 28 days
+export const RAW_DEBUG_RETENTION_MAX_DAYS = 28 as const;
 
 export function openObservabilityStore(dbOrPath?: string | DatabaseSync): ObservabilityStore {
   return new ObservabilityStore(dbOrPath);
+}
+
+/** P3 Gate A read: returns null if absent or expired (guard denies immediately). */
+export function getThoughtDebugCapture(db: DatabaseSync, occurrenceId: string, nowMs = Date.now()): {
+  occurrenceId: string;
+  enabledAtMs: number;
+  expiresAtMs: number;
+  enabledBy: string;
+  captureMode: string;
+  projectedDebugJson: string | null;
+} | null {
+  const store = new ObservabilityStore(db);
+  return store.getThoughtDebugCapture(occurrenceId, nowMs);
+}
+
+/** P3 hard-expiry purge: single helper called by all sweep paths. */
+export function purgeThoughtDebugCaptures(db: DatabaseSync, nowMs = Date.now()): number {
+  const store = new ObservabilityStore(db);
+  return store.purgeThoughtDebugCaptures(nowMs);
+}
+
+/**
+ * P3 Gate A/B capture seam. The call is post-projection and stores only the
+ * bounded projected representation. Missing enablement, an expired row, or a
+ * mode that does not permit reducible collection produces no write.
+ */
+export function captureThoughtDebug(
+  db: DatabaseSync,
+  input: {
+    occurrenceId: string;
+    projectedDebugJson: string;
+    code: ThoughtDispatchDiagnosticCode | string;
+    providerFailure?: ThoughtProviderFailureCapture | null;
+    nowMs?: number;
+    env?: NodeJS.ProcessEnv;
+  },
+): boolean {
+  try {
+    const nowMs = input.nowMs ?? Date.now();
+    const store = new ObservabilityStore(db);
+    store.purgeThoughtDebugCaptures(nowMs);
+    const mode = readObservabilityMode(input.env);
+    if (!resolveReducibleCollection({ mode, code: input.code, providerFailure: input.providerFailure })) return false;
+    if (typeof input.projectedDebugJson !== "string" || input.projectedDebugJson.length === 0) return false;
+    const enabled = store.getThoughtDebugCapture(input.occurrenceId, nowMs);
+    if (!enabled) return false;
+    const projectedDebugJson = detectCredentialShape(input.projectedDebugJson).hit
+      ? CREDENTIAL_OMITTED_PLACEHOLDER
+      : input.projectedDebugJson;
+    const updated = db.prepare(`
+      UPDATE thought_debug_captures
+         SET projected_debug_json = ?
+       WHERE occurrence_id = ? AND expires_at_ms > ?
+    `).run(projectedDebugJson, input.occurrenceId, nowMs);
+    return Number(updated.changes ?? 0) === 1;
+  } catch {
+    // Debug capture is diagnostic-only and must never affect cognition.
+    return false;
+  }
 }
 
 export function recordAllocationReceipt(db: DatabaseSync, receipt: AllocationReceipt, nowMs = Date.now()): void {

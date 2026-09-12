@@ -424,6 +424,7 @@ export async function completeChat(
   resolvedModelId: string | null;
   providerModel?: string | null;
   providerRequestId?: string | null;
+  cfRay?: string | null;
   toolCalls?: ToolCallResult[];
   usage?: TokenUsage;
   finishReason?: string | null;
@@ -886,6 +887,7 @@ export async function completeChat(
         usage?: TokenUsage;
         providerModel?: string | null;
         providerRequestId?: string | null;
+        cfRay?: string | null;
         finishReason?: string | null;
         providerHttpStatus?: number;
         responseDiagnostics?: ProviderResponseDiagnostics;
@@ -1024,6 +1026,7 @@ export async function completeChat(
             return {
               providerModel: completion.providerModel,
               providerRequestId: completion.providerRequestId,
+              cfRay: completion.cfRay ?? null,
               usage: completion.usage,
               result: {
                 text: completion.text,
@@ -1031,6 +1034,7 @@ export async function completeChat(
                 usage: completion.usage,
                 providerModel: completion.providerModel,
                 providerRequestId: completion.providerRequestId,
+                cfRay: completion.cfRay ?? null,
                 finishReason: completion.finishReason ?? null,
                 responseDiagnostics: completion.responseDiagnostics,
                 wireEvidence: completion.wireEvidence,
@@ -1320,6 +1324,7 @@ export async function completeChat(
       resolvedModelId: attentive.resolvedModelId,
       providerModel: inner.providerModel,
       providerRequestId: inner.providerRequestId,
+      cfRay: inner.cfRay ?? null,
       toolCalls: inner.toolCalls,
       usage: attentive.usage ?? inner.usage,
       finishReason: inner.finishReason ?? null,

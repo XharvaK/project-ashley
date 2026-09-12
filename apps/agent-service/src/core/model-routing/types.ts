@@ -262,6 +262,11 @@ export type ProviderCompletion = {
   providerModel?: string | null;
   /** Provider request identifier, when the provider returns one. */
   providerRequestId?: string | null;
+  /**
+   * Cloudflare cf-ray response identifier, when the provider returns one
+   * (P3 S5 provider diagnostic; read-only header surfacing, never sent).
+   */
+  cfRay?: string | null;
   /** Actual HTTP response status observed at the provider boundary. */
   providerHttpStatus?: number;
   /** Provider finish_reason when supplied (stop, length, …). Never a secret. */

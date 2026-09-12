@@ -29,6 +29,7 @@ import { reconcileDerivedInvalidationJournal } from "./core/cognitive-v021/retri
 import {
   defaultObservabilityDbPath,
   initObservabilitySchema,
+  purgeThoughtDebugCaptures,
 } from "./core/cognitive-v021/thought/diagnostics.js";
 import { DatabaseSync } from "node:sqlite";
 import { reconcileAuthorityBarrierOnStartup } from "./core/cognitive-v021/authority/barrier.js";
@@ -76,6 +77,11 @@ export async function serveAgent(manager: AgentManager): Promise<void> {
     derivedStore = openDerivedStore(defaultDerivedIndexDbPath());
     observabilityDb = new DatabaseSync(defaultObservabilityDbPath());
     initObservabilitySchema(observabilityDb);
+    try {
+      purgeThoughtDebugCaptures(observabilityDb, Date.now());
+    } catch (error) {
+      console.warn("[cognitive-v021] thought_debug_startup_purge_deferred", error);
+    }
     registerDerivedStoreForSidecar(cognitiveSidecar, derivedStore, nuclear);
     let derivedReady = false;
     try {
@@ -135,6 +141,10 @@ export async function serveAgent(manager: AgentManager): Promise<void> {
     cognitiveConsumer = startInboxConsumer(cognitiveSidecar, {
       workerId: `agent-service:${process.pid}`,
       handler: createAgentInboxConsumerHandler(manager),
+      onReconciliationMaintenance: (nowMs) => {
+        if (!observabilityDb) return;
+        purgeThoughtDebugCaptures(observabilityDb, nowMs);
+      },
       onError: (error, event) => console.error(`[cognitive-v021] event failed id=${event?.id ?? "?"}`, error),
     });
     frontierCoordinator = startFrontierCoordinator(
@@ -147,7 +157,7 @@ export async function serveAgent(manager: AgentManager): Promise<void> {
       },
     );
   }
-  const app = createServer(manager, { cognitiveSidecar });
+  const app = createServer(manager, { cognitiveSidecar, observabilityDb });
   const server = listen(app);
   manager.markStartupComplete();
   console.log(

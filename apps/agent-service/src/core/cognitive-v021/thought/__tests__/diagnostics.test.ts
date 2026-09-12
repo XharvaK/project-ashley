@@ -1,9 +1,16 @@
 import { describe, it, expect, vi } from "vitest";
 import {
+  RAW_DEBUG_RETENTION_MAX_MS,
+  RAW_DEBUG_RETENTION_MAX_DAYS,
+  buildProviderS5,
+  captureThoughtDebug,
   openObservabilityStore,
   initObservabilitySchema,
+  readObservabilityMode,
+  resolveReducibleCollection,
   type ThoughtDispatchDiagnostic,
 } from "../diagnostics.js";
+import { CREDENTIAL_OMITTED_PLACEHOLDER } from "../../../privacy/secrets.js";
 import { openDerivedStore } from "../../retrieval/derived-store.js";
 import { admitTestCycle, openTestSidecar, makeSemanticSettlement } from "../../test-support.js";
 import type { AllocationReceipt } from "../projection-allocator/receipt.js";
@@ -1041,7 +1048,7 @@ describe("Thought Diagnostics & Observability DB", () => {
       ).run();
 
       initObservabilitySchema(db);
-      expect(db.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 1 });
+      expect(db.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 2 });
       expect(db.prepare("SELECT id, request_id FROM thought_dispatch_diagnostics").all())
         .toEqual([{ id: 41, request_id: "old-request" }]);
       expect(db.prepare(
@@ -1075,6 +1082,301 @@ describe("Thought Diagnostics & Observability DB", () => {
       expect(() => initObservabilitySchema(db)).toThrow("observability_schema_incompatible");
     } finally {
       db.close();
+    }
+  });
+
+  it("persists nullable S5 columns and the debug table in observability schema v2", () => {
+    const obs = openObservabilityStore(":memory:");
+    try {
+      expect(obs.db.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 2 });
+      const columns = (obs.db.prepare("PRAGMA table_info(thought_dispatch_diagnostics)").all() as Array<{ name?: string }>)
+        .map((column) => column.name);
+      expect(columns).toEqual(expect.arrayContaining([
+        "provider_request_id",
+        "cf_ray",
+        "total_tokens",
+        "cached_source",
+        "cached_tokens",
+        "messages_fingerprint",
+        "params_fingerprint",
+        "affinity_fingerprint",
+        "affinity_applied",
+        "estimator_input_tokens",
+        "estimator_output_tokens",
+        "estimator_total_tokens",
+        "estimator_version",
+        "policy_id",
+        "policy_version",
+        "output_token_limit",
+        "resource_policy_fingerprint",
+        "model_id",
+        "attempt_ordinal",
+        "latency_ms",
+        "finish_reason",
+        "error_code",
+      ]));
+      expect(obs.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'thought_debug_captures'").get())
+        .toMatchObject({ name: "thought_debug_captures" });
+      expect(obs.db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_thought_debug_expires'").get())
+        .toMatchObject({ name: "idx_thought_debug_expires" });
+    } finally {
+      obs.close();
+    }
+  });
+
+  it("builds S5 provider detail without laundering missing numbers or affinity identity", () => {
+    const detail = buildProviderS5({
+      dispatchTruth: "sent",
+      parserStatus: "passed",
+      validatorStatus: "passed",
+      structuralRetryStatus: "not_applicable",
+      provider: "cloudflare",
+      model: "@cf/deepseek-ai/deepseek-v4-flash-0731",
+      providerRequestId: "provider-request",
+      cfRay: "ray-1",
+      totalTokens: 0,
+      cachedInputTokens: 0,
+      maxTokens: 16_384,
+      affinityPolicy: "cloudflare_thought_route_affinity_v1",
+      sessionAffinityApplied: true,
+      elapsedMs: 123,
+      attemptOrdinal: 2,
+      finishReason: "stop",
+    }, {
+      dispatchMessagesHash: "sha256:messages",
+      estimate: { input: 0, output: 0, total: 0 },
+      policy: { id: "thought-projection-v1", version: 1 },
+    });
+    expect(detail).toMatchObject({
+      providerRequestId: "provider-request",
+      cfRay: "ray-1",
+      totalTokens: 0,
+      cachedTokens: 0,
+      messagesFingerprint: "sha256:messages",
+      affinityApplied: true,
+      estimatorInputTokens: 0,
+      estimatorOutputTokens: 0,
+      estimatorTotalTokens: 0,
+      policyId: "thought-projection-v1",
+      policyVersion: 1,
+      outputTokenLimit: 16_384,
+      attemptOrdinal: 2,
+      latencyMs: 123,
+    });
+    expect(detail?.affinityFingerprint).toMatch(/^sha256:/);
+    expect(detail?.paramsFingerprint).toMatch(/^sha256:/);
+    expect(detail?.resourcePolicyFingerprint).toMatch(/^sha256:/);
+    expect(detail?.estimatorVersion).toBeNull();
+
+    const unknowns = buildProviderS5({
+      dispatchTruth: "sent",
+      parserStatus: "passed",
+      validatorStatus: "passed",
+      structuralRetryStatus: "not_applicable",
+    });
+    expect(unknowns).toMatchObject({
+      totalTokens: null,
+      cachedTokens: null,
+      affinityApplied: null,
+      policyId: null,
+      policyVersion: null,
+    });
+  });
+
+  it("fails closed for collection mode and keeps middle mode incident-only", () => {
+    expect(readObservabilityMode({} as NodeJS.ProcessEnv)).toBe("off");
+    expect(readObservabilityMode({ ASHLEY_OBSERVABILITY_MODE: "rich" } as NodeJS.ProcessEnv)).toBe("rich");
+    expect(readObservabilityMode({ ASHLEY_OBSERVABILITY_MODE: "sampled" } as NodeJS.ProcessEnv)).toBe("sampled");
+    expect(readObservabilityMode({ ASHLEY_OBSERVABILITY_MODE: "50%" } as NodeJS.ProcessEnv)).toBe("off");
+    expect(resolveReducibleCollection({ mode: "off", code: "provider_returned" })).toBe(false);
+    expect(resolveReducibleCollection({ mode: "rich", code: "provider_returned" })).toBe(true);
+    expect(resolveReducibleCollection({ mode: "sampled", code: "provider_returned" })).toBe(false);
+    expect(resolveReducibleCollection({
+      mode: "sampled",
+      code: "provider_returned",
+      providerFailure: {
+        dispatchTruth: "sent",
+        parserStatus: "passed",
+        validatorStatus: "passed",
+        structuralRetryStatus: "not_applicable",
+        failureClass: "provider_internal",
+      },
+    })).toBe(true);
+  });
+
+  it("gates S5 detail centrally while preserving accountability in every mode", () => {
+    const providerFailure = {
+      dispatchTruth: "sent" as const,
+      parserStatus: "passed" as const,
+      validatorStatus: "passed" as const,
+      structuralRetryStatus: "not_applicable" as const,
+      provider: "cloudflare",
+      model: "model:test",
+      providerRequestId: "provider-request:test",
+      cfRay: "ray:test",
+      totalTokens: 20,
+      cachedInputTokens: 0,
+      inputTokens: 12,
+      completionTokens: 8,
+      failureClass: "provider_internal",
+    };
+    const s5 = {
+      providerRequestId: "provider-request:test",
+      cfRay: "ray:test",
+      totalTokens: 20,
+      cachedTokens: 0,
+      messagesFingerprint: "sha256:messages",
+      estimatorInputTokens: 12,
+      estimatorOutputTokens: 8,
+      estimatorTotalTokens: 20,
+      modelId: "model:test",
+    };
+    const obs = openObservabilityStore(":memory:");
+    try {
+      vi.stubEnv("ASHLEY_OBSERVABILITY_MODE", "rich");
+      obs.recordDiagnostic({
+        cycleId: "cycle-mode-rich",
+        generation: 1,
+        requestId: "request-mode-rich",
+        pass: 1,
+        code: "provider_returned",
+        stage: "provider_dispatch",
+        dispatchTruth: "sent",
+        providerFailure,
+        providerDiagnostics: s5,
+      });
+
+      vi.stubEnv("ASHLEY_OBSERVABILITY_MODE", "off");
+      obs.recordDiagnostic({
+        cycleId: "cycle-mode-off",
+        generation: 1,
+        requestId: "request-mode-off",
+        pass: 1,
+        code: "provider_unavailable",
+        stage: "provider_dispatch",
+        dispatchTruth: "sent",
+        providerFailure,
+        providerDiagnostics: s5,
+      });
+
+      vi.stubEnv("ASHLEY_OBSERVABILITY_MODE", "sampled");
+      obs.recordDiagnostic({
+        cycleId: "cycle-mode-sampled-success",
+        generation: 1,
+        requestId: "request-mode-sampled-success",
+        pass: 1,
+        code: "provider_returned",
+        stage: "provider_dispatch",
+        dispatchTruth: "sent",
+        providerFailure: { ...providerFailure, failureClass: undefined },
+        providerDiagnostics: s5,
+      });
+      obs.recordDiagnostic({
+        cycleId: "cycle-mode-sampled-incident",
+        generation: 1,
+        requestId: "request-mode-sampled-incident",
+        pass: 1,
+        code: "provider_returned",
+        stage: "provider_dispatch",
+        dispatchTruth: "sent",
+        providerFailure,
+        providerDiagnostics: s5,
+      });
+
+      const rows = obs.listDiagnostics();
+      expect(rows.find((row) => row.requestId === "request-mode-rich")?.providerDiagnostics)
+        .toMatchObject({ providerRequestId: "provider-request:test", cachedTokens: 0 });
+      expect(rows.find((row) => row.requestId === "request-mode-off")?.providerDiagnostics).toBeNull();
+      expect(rows.find((row) => row.requestId === "request-mode-off")?.providerFailure)
+        .toMatchObject({ failureClass: "provider_internal", dispatchTruth: "sent" });
+      expect(rows.find((row) => row.requestId === "request-mode-sampled-success")?.providerDiagnostics).toBeNull();
+      expect(rows.find((row) => row.requestId === "request-mode-sampled-incident")?.providerDiagnostics)
+        .toMatchObject({ providerRequestId: "provider-request:test" });
+      expect(obs.db.prepare(
+        "SELECT provider_request_id, cf_ray, total_tokens FROM thought_dispatch_diagnostics WHERE request_id = ?",
+      ).get("request-mode-off")).toMatchObject({ provider_request_id: null, cf_ray: null, total_tokens: null });
+    } finally {
+      obs.close();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("captures only an explicitly enabled occurrence under both gates and clamps TTL", () => {
+    vi.stubEnv("ASHLEY_OBSERVABILITY_MODE", "rich");
+    const obs = openObservabilityStore(":memory:");
+    try {
+      expect(RAW_DEBUG_RETENTION_MAX_DAYS).toBe(28);
+      expect(RAW_DEBUG_RETENTION_MAX_MS).toBe(2_419_200_000);
+      obs.enableThoughtDebugCapture({
+        occurrenceId: "periodic-occurrence:debug",
+        ttlMs: RAW_DEBUG_RETENTION_MAX_MS * 2,
+        enabledBy: "owner",
+        captureMode: "rich",
+        nowMs: 1_000,
+      });
+      expect(captureThoughtDebug(obs.db, {
+        occurrenceId: "periodic-occurrence:debug",
+        projectedDebugJson: JSON.stringify({ Authorization: "Bearer eyJheader.eyJpayload.signature" }),
+        code: "provider_returned",
+        nowMs: 1_001,
+      })).toBe(true);
+      const row = obs.getThoughtDebugCapture("periodic-occurrence:debug", 1_001);
+      expect(row).toMatchObject({
+        expiresAtMs: 1_000 + RAW_DEBUG_RETENTION_MAX_MS,
+        projectedDebugJson: CREDENTIAL_OMITTED_PLACEHOLDER,
+      });
+      expect(captureThoughtDebug(obs.db, {
+        occurrenceId: "periodic-occurrence:other",
+        projectedDebugJson: "ordinary projected bytes",
+        code: "provider_returned",
+        nowMs: 1_001,
+      })).toBe(false);
+
+      vi.stubEnv("ASHLEY_OBSERVABILITY_MODE", "off");
+      expect(captureThoughtDebug(obs.db, {
+        occurrenceId: "periodic-occurrence:debug",
+        projectedDebugJson: "must not replace capture",
+        code: "provider_returned",
+        nowMs: 1_002,
+      })).toBe(false);
+      expect(obs.getThoughtDebugCapture("periodic-occurrence:debug", 1_002)?.projectedDebugJson)
+        .toBe(CREDENTIAL_OMITTED_PLACEHOLDER);
+    } finally {
+      obs.close();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("purges every qualifying debug row without touching accountability tables", () => {
+    vi.stubEnv("ASHLEY_OBSERVABILITY_MODE", "rich");
+    const obs = openObservabilityStore(":memory:");
+    try {
+      for (let i = 0; i < 60; i += 1) {
+        obs.enableThoughtDebugCapture({
+          occurrenceId: `periodic-occurrence:expiry:${i}`,
+          ttlMs: 1,
+          enabledBy: "owner",
+          captureMode: "rich",
+          nowMs: 10_000,
+        });
+      }
+      expect(obs.db.prepare("SELECT COUNT(*) AS count FROM thought_debug_captures").get()).toMatchObject({ count: 60 });
+      obs.recordDiagnostic({
+        cycleId: "cycle-expiry-accountability",
+        generation: 1,
+        requestId: "request-expiry-accountability",
+        pass: 1,
+        code: "provider_returned",
+        stage: "provider_dispatch",
+        dispatchTruth: "sent",
+      }, 10_000);
+      expect(obs.purgeThoughtDebugCaptures(10_061)).toBe(60);
+      expect(obs.db.prepare("SELECT COUNT(*) AS count FROM thought_debug_captures").get()).toMatchObject({ count: 0 });
+      expect(obs.db.prepare("SELECT COUNT(*) AS count FROM thought_dispatch_diagnostics").get()).toMatchObject({ count: 1 });
+      expect(obs.getThoughtDebugCapture("periodic-occurrence:expiry:0", 10_000)).toBeNull();
+    } finally {
+      obs.close();
+      vi.unstubAllEnvs();
     }
   });
 });

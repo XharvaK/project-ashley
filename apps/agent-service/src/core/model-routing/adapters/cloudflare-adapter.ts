@@ -704,6 +704,12 @@ export function createCloudflareAdapter(
       const text = extractText(message?.content);
       const finishReason = toFinishReason(choice?.finish_reason);
       const usage = toTokenUsage(json.usage, response.headers);
+      // P3 S5: read-only cf-ray surfacing for attempt diagnostics. The raw
+      // header value is bounded and never sent anywhere; absent ⇒ null.
+      const cfRayRaw = response.headers.get("cf-ray");
+      const cfRay = typeof cfRayRaw === "string" && cfRayRaw.trim()
+        ? cfRayRaw.trim().slice(0, 64)
+        : null;
       const shape = contentDiagnostics(message?.content);
       const reasoningBytes = reasoningContentBytes(message);
       const reasoningHash = reasoningContentHash(message);
@@ -714,6 +720,7 @@ export function createCloudflareAdapter(
         ...(providerHttpStatus !== undefined ? { providerHttpStatus } : {}),
         providerModel: typeof json.model === "string" ? json.model : null,
         providerRequestId: typeof json.id === "string" ? json.id : null,
+        cfRay,
         finishReason,
         responseDiagnostics: {
           ...shape,

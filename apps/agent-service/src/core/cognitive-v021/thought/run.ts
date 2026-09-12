@@ -101,7 +101,12 @@ import { getWake } from "../wake/ledger.js";
 import { resolveOriginProfile } from "../cycle/origin-profile.js";
 import { admitOwnerSuppliedClaim, runGovernedAdmissionCatchup } from "../memory/admission.js";
 import { hasStructuredCurrentnessEntitlement } from "../authority/check.js";
-import { recordDiagnostic, recordThoughtCycleMetrics } from "./diagnostics.js";
+import {
+  buildProviderS5,
+  captureThoughtDebug,
+  recordDiagnostic,
+  recordThoughtCycleMetrics,
+} from "./diagnostics.js";
 import type { ThoughtProviderFailureCapture } from "./diagnostics.js";
 import { metadataFromError } from "../../model-fabric/receipts.js";
 import type {
@@ -413,6 +418,27 @@ function providerFailureCapture(input: {
     ?? capturedAttempt?.configuredModelId
     ?? completion?.modelAlias;
   const providerModel = completion?.providerModel ?? undefined;
+  // P3 S5: provider request identity + cache/usage truth. Missing numeric
+  // evidence stays absent (UNKNOWN downstream) — never coerced (no Number()
+  // wrapping: Number(null) === 0 would launder missingness into observed
+  // zero). cachedSource marks WHERE the cached count was observed.
+  const providerRequestId = typeof completion?.providerRequestId === "string" && completion.providerRequestId
+    ? completion.providerRequestId
+    : typeof (attempt as { providerRequestId?: unknown } | undefined)?.providerRequestId === "string"
+      && (attempt as { providerRequestId: string }).providerRequestId
+      ? (attempt as { providerRequestId: string }).providerRequestId
+    : undefined;
+  const cfRay = typeof completion?.cfRay === "string" && completion.cfRay.trim()
+    ? completion.cfRay.trim().slice(0, 64)
+    : undefined;
+  const observedTotalTokens = completion?.usage?.totalTokens
+    ?? canonicalUsage?.totalTokens;
+  const totalTokens = typeof observedTotalTokens === "number" && Number.isFinite(observedTotalTokens)
+    ? observedTotalTokens
+    : undefined;
+  const cachedSource = canonicalUsage?.cachedInputTokens !== null && canonicalUsage?.cachedInputTokens !== undefined
+    ? "provider_usage"
+    : undefined;
   const receipt = metadata?.receipt;
   const attentionRequestId = completion?.attentionRequestId
     ?? (receipt && receipt.attentionRequestId !== null ? receipt.attentionRequestId : undefined);
@@ -438,6 +464,10 @@ function providerFailureCapture(input: {
     ...(provider ? { provider: String(provider) } : {}),
     ...(model ? { model: String(model) } : {}),
     ...(providerModel ? { providerModel: String(providerModel) } : {}),
+    ...(providerRequestId ? { providerRequestId } : {}),
+    ...(cfRay ? { cfRay } : {}),
+    ...(totalTokens !== undefined ? { totalTokens } : {}),
+    ...(cachedSource ? { cachedSource } : {}),
     ...(attempt?.invocationId
       ? { modelFabricInvocationId: attempt.invocationId }
       : capturedAttempt?.modelFabricInvocationId
@@ -1763,6 +1793,30 @@ function storeThoughtStep(
   );
 }
 
+function captureProjectedThoughtDebug(input: {
+  db?: DatabaseSync;
+  occurrenceId: string;
+  projected: unknown;
+  code: string;
+  providerFailure?: ThoughtProviderFailureCapture | null;
+  nowMs: number;
+}): void {
+  if (!input.db) return;
+  try {
+    const projectedDebugJson = JSON.stringify(input.projected);
+    if (typeof projectedDebugJson !== "string") return;
+    captureThoughtDebug(input.db, {
+      occurrenceId: input.occurrenceId,
+      projectedDebugJson,
+      code: input.code,
+      providerFailure: input.providerFailure,
+      nowMs: input.nowMs,
+    });
+  } catch {
+    // Debug capture is diagnostic-only and must never affect cognition.
+  }
+}
+
 function persistedMalformedRetries(
   db: DatabaseSync,
   cycleId: string,
@@ -1902,6 +1956,12 @@ export async function runCognitiveCycle(
   const requestedCycleId = typeof payload.cycleId === "string" ? payload.cycleId : null;
   const wake = getWake(sidecar, event.wakeId);
   if (!wake) throw new Error("wake_missing");
+  // Periodic events carry the schedule occurrence explicitly. Other cycles
+  // use the existing wake occurrence as the opaque Gate-A key.
+  const debugOccurrenceId = typeof payload.periodicScheduleOccurrenceId === "string"
+    && payload.periodicScheduleOccurrenceId.trim()
+    ? payload.periodicScheduleOccurrenceId.trim()
+    : wake.occurrenceId;
   const existingCycle = requestedCycleId ? getCycle(sidecar, requestedCycleId) : getCycle(sidecar, wake.cycleId) ?? getCurrentCycle(sidecar, event.conversationId);
   if (existingCycle && existingCycle.wakeId !== wake.wakeId) throw new Error("wake_cycle_conflict");
   let cycle = existingCycle ?? admitCycle(sidecar, {
@@ -2175,7 +2235,30 @@ export async function runCognitiveCycle(
     }
     const cancellationReason = activeThought.cancellationReason;
     activeThought.unregister();
-    storeThoughtStep(sidecar, invocation.output, deps.nowMs());
+    const nowAfterThoughtMs = deps.nowMs();
+    storeThoughtStep(sidecar, invocation.output, nowAfterThoughtMs);
+    const providerCapture = invocation.providerFailureCapture ?? invocation.providerUsageCapture;
+    const debugCode = cancellationReason || invocation.cancelled
+      ? "cancelled"
+      : invocation.correctionScopeViolation || invocation.malformed
+        ? "parser_malformed"
+        : invocation.thoughtDeadline
+          ? "attention_deadline"
+          : invocation.unavailable
+            ? "provider_unavailable"
+            : invocation.providerUsageCapture && invocation.output.kind !== "failure"
+              ? "provider_returned"
+              : null;
+    if (debugCode) {
+      captureProjectedThoughtDebug({
+        db: deps.observabilityDb,
+        occurrenceId: debugOccurrenceId,
+        projected: allocated.projected,
+        code: debugCode,
+        providerFailure: providerCapture,
+        nowMs: nowAfterThoughtMs,
+      });
+    }
 
     if (cancellationReason || invocation.cancelled) {
       if (cancellationReason === "compose" && currentGenerationIs(sidecar, cycle)) {
@@ -2214,6 +2297,11 @@ export async function runCognitiveCycle(
             semanticProjectionHash: allocated.hashes.semanticProjectionHash,
             dispatchMessagesHash: allocated.hashes.dispatchMessagesHash,
             providerFailure: invocation.providerFailureCapture,
+            providerDiagnostics: buildProviderS5(invocation.providerFailureCapture, {
+              dispatchMessagesHash: allocated.hashes.dispatchMessagesHash,
+              estimate: { input: invocation.inputTokens ?? null },
+              policy: { id: allocated.receipt.policyId, version: allocated.receipt.policyVersion },
+            }),
             createdAtMs: deps.nowMs(),
           });
         } catch {
@@ -2260,6 +2348,11 @@ export async function runCognitiveCycle(
             semanticProjectionHash: allocated.hashes.semanticProjectionHash,
             dispatchMessagesHash: allocated.hashes.dispatchMessagesHash,
             providerFailure,
+            providerDiagnostics: buildProviderS5(providerFailure, {
+              dispatchMessagesHash: allocated.hashes.dispatchMessagesHash,
+              estimate: { input: invocation.inputTokens ?? null },
+              policy: { id: allocated.receipt.policyId, version: allocated.receipt.policyVersion },
+            }),
             createdAtMs: deps.nowMs(),
           });
         } catch {
@@ -2321,6 +2414,11 @@ export async function runCognitiveCycle(
           dispatchMessagesHash: allocated.hashes.dispatchMessagesHash,
           estimatedInputTokens: invocation.inputTokens,
           providerFailure: invocation.providerUsageCapture,
+          providerDiagnostics: buildProviderS5(invocation.providerUsageCapture, {
+            dispatchMessagesHash: allocated.hashes.dispatchMessagesHash,
+            estimate: { input: invocation.inputTokens ?? null },
+            policy: { id: allocated.receipt.policyId, version: allocated.receipt.policyVersion },
+          }),
           createdAtMs: deps.nowMs(),
         });
       } catch {

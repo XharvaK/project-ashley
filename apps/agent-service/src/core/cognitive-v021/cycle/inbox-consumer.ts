@@ -138,6 +138,12 @@ export type InboxConsumerOptions = {
   pollMs?: number;
   onError?: (error: unknown, event: InboxEvent | null) => void;
   /**
+   * Host-composed maintenance after each bounded reconciliation opportunity.
+   * The consumer owns no observability semantics; this callback is an
+   * optional servicing seam for the existing reconciliation host.
+   */
+  onReconciliationMaintenance?: (nowMs: number) => void;
+  /**
    * Test-only compression seam for the steady-state cadence. Production
    * always uses the frozen defaults above; tests override to prove the
    * mechanism without real 60 s waits, and pin the defaults separately.
@@ -276,6 +282,18 @@ export function startInboxConsumer(
       // the entry for row-level faults).
       options.onError?.(error, null);
     } finally {
+      try {
+        options.onReconciliationMaintenance?.(nowMs);
+      } catch (error) {
+        // Maintenance failure must not change reconciliation or cognition
+        // truth. Report it through the existing loop error seam only.
+        try {
+          options.onError?.(error, null);
+        } catch {
+          // Error reporting is best-effort and must not rethrow maintenance
+          // failure into the consumer loop.
+        }
+      }
       lastReconciliationAtMs = nowMs;
     }
   }

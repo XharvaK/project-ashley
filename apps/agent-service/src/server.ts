@@ -47,6 +47,12 @@ import {
   listActiveLearnedInfluences,
 } from "./core/learned-autonomy/index.js";
 import { getCognitiveGraduationDiagnostics } from "./core/cognitive-graduation/diagnostics.js";
+import {
+  ObservabilityStore,
+  RAW_DEBUG_RETENTION_MAX_MS,
+  readObservabilityMode,
+} from "./core/cognitive-v021/thought/diagnostics.js";
+import { listPeriodicDiagnostics } from "./core/cognitive-v021/initiative/periodic-diagnostics.js";
 import type { DataClassification } from "./core/privacy/classification.js";
 import type {
   ConsentEventKind,
@@ -223,6 +229,18 @@ function c1RequiredString(
   return clean;
 }
 
+function c1OptionalInteger(
+  body: Record<string, unknown>,
+  key: string,
+): number | undefined {
+  if (!(key in body) || body[key] === undefined) return undefined;
+  const value = body[key];
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    throw new AppError("message_required", `${key} must be an integer`, 400);
+  }
+  return value;
+}
+
 function c1RequiredNullableString(
   body: Record<string, unknown>,
   key: string,
@@ -297,6 +315,7 @@ export function createServer(
   manager: AgentManager,
   options: {
     cognitiveSidecar?: DatabaseSync | null;
+    observabilityDb?: DatabaseSync | null;
   } = {},
 ): express.Express {
   const app = express();
@@ -313,6 +332,12 @@ export function createServer(
       { dataPlane },
     );
     return cognitiveSidecar;
+  }
+
+  let observabilityDb = options.observabilityDb ?? null;
+  function getObservabilityDb(): DatabaseSync {
+    if (observabilityDb) return observabilityDb;
+    throw new AppError("agent_not_ready", "Observability store unavailable", 503);
   }
 
   function cognitiveHealth() {
@@ -2055,6 +2080,65 @@ export function createServer(
   app.post("/initiative/evaluate", gone);
 
   app.post("/initiative/generate", gone);
+
+  app.post("/initiative/periodic/debug/enable", (req, res) => {
+    try {
+      const body = c1Body(req);
+      const ownerId = requireOwner(
+        typeof body.userId === "string" ? body.userId : undefined,
+      );
+      const occurrenceId = c1RequiredString(body, "occurrence_id", 300);
+      const ttlMs = body.ttl_ms === undefined
+        ? undefined
+        : c1OptionalInteger(body, "ttl_ms");
+      if (ttlMs !== undefined && ttlMs < 0) {
+        throw new AppError("message_required", "ttl_ms must be non-negative", 400);
+      }
+      const nowMs = Date.now();
+      const captureMode = readObservabilityMode();
+      const store = new ObservabilityStore(getObservabilityDb());
+      store.enableThoughtDebugCapture({
+        occurrenceId,
+        ttlMs,
+        enabledBy: ownerId,
+        captureMode,
+        nowMs,
+      });
+      const capture = store.getThoughtDebugCapture(occurrenceId, nowMs);
+      res.json({
+        ok: true,
+        occurrenceId,
+        captureMode,
+        expiresAtMs: capture?.expiresAtMs ?? nowMs + Math.max(0, Math.min(ttlMs ?? RAW_DEBUG_RETENTION_MAX_MS, RAW_DEBUG_RETENTION_MAX_MS)),
+      });
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
+
+  app.get("/initiative/periodic/diagnostics", (req, res) => {
+    try {
+      const ownerId = String(req.query.owner_id ?? "");
+      requireOwner(ownerId || undefined);
+      const rawLimit = req.query.limit;
+      const parsedLimit = rawLimit === undefined ? 100 : Number(rawLimit);
+      if (!Number.isInteger(parsedLimit) || parsedLimit < 1) {
+        throw new AppError("message_required", "limit must be a positive integer", 400);
+      }
+      res.json({
+        ok: true,
+        diagnostics: listPeriodicDiagnostics(
+          getCognitiveSidecar(),
+          getObservabilityDb(),
+          { limit: Math.min(100, parsedLimit), nowMs: Date.now() },
+        ),
+      });
+    } catch (err) {
+      const { status, body } = toErrorResponse(err);
+      res.status(status).json(body);
+    }
+  });
 
   app.get("/initiative/status", (req, res) => {
     try {

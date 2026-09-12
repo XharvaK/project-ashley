@@ -15,6 +15,7 @@ import { startDurableAttempt, settleDurableAttempt } from "../retry/ledger.js";
 import { reconcileStrandedOutcomeUnknownAtStartup } from "../retry/startup-outcome-recovery.js";
 import { reservePrivateThought, releasePrivateReservation } from "../private-budget/ledger.js";
 import { reconcilePolicyClock } from "../private-budget/policy-time-ledger.js";
+import { openObservabilityStore, purgeThoughtDebugCaptures, RAW_DEBUG_RETENTION_MAX_MS } from "../thought/diagnostics.js";
 import { openTestSidecar } from "../test-support.js";
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -225,8 +226,26 @@ describe("P0 steady-state reconciliation (R7 §22.2)", () => {
 
   it("LONG_HANDLER_RECONCILIATION_OPPORTUNITY", async () => {
     const db = openTestSidecar();
+    const observability = openObservabilityStore(":memory:");
     try {
       const stranded = seedStranded(db, "long-handler", 1);
+      const expiredDebugNowMs = Date.now() - 120_000;
+      for (let i = 0; i < 60; i += 1) {
+        observability.enableThoughtDebugCapture({
+          occurrenceId: `debug-expired-${i}`,
+          ttlMs: 0,
+          enabledBy: "owner",
+          captureMode: "rich",
+          nowMs: expiredDebugNowMs,
+        });
+      }
+      observability.enableThoughtDebugCapture({
+        occurrenceId: "debug-leased-row",
+        ttlMs: RAW_DEBUG_RETENTION_MAX_MS,
+        enabledBy: "owner",
+        captureMode: "rich",
+        nowMs: Date.now(),
+      });
       appendInboxEvent(db, {
         id: "event:long-handler",
         conversationId: "thread-long",
@@ -239,6 +258,7 @@ describe("P0 steady-state reconciliation (R7 §22.2)", () => {
         releaseHandler = resolve;
       });
       let handlerSettled = false;
+      const maintenanceCalls: number[] = [];
       const loop = startInboxConsumer(db, {
         workerId: "worker-long",
         handler: async (event) => {
@@ -251,13 +271,20 @@ describe("P0 steady-state reconciliation (R7 §22.2)", () => {
         reconciliationGapMs: 40,
         reconciliationOpportunisticFloorMs: 5,
         reconciliationBatchLimit: 5,
+        onReconciliationMaintenance: (nowMs) => {
+          maintenanceCalls.push(nowMs);
+          purgeThoughtDebugCaptures(observability.db, nowMs);
+        },
       });
       try {
         // The in-flight deadline converges the proof-resolvable row BEFORE
         // the held handler is released, with zero provider calls.
         expect(await waitForState(db, stranded.eventId, "pending")).toBe(true);
         expect(handlerSettled).toBe(false);
+        expect(maintenanceCalls.length).toBeGreaterThan(0);
         expect(db.prepare("SELECT state FROM inbox_events WHERE id = 'event:long-handler'").get()).toMatchObject({ state: "leased" });
+        expect(observability.db.prepare("SELECT COUNT(*) AS count FROM thought_debug_captures WHERE occurrence_id LIKE 'debug-expired-%'").get()).toMatchObject({ count: 0 });
+        expect(observability.db.prepare("SELECT COUNT(*) AS count FROM thought_debug_captures WHERE occurrence_id = 'debug-leased-row'").get()).toMatchObject({ count: 1 });
       } finally {
         releaseHandler();
         await waitForState(db, "event:long-handler", "terminal");
@@ -270,6 +297,68 @@ describe("P0 steady-state reconciliation (R7 §22.2)", () => {
         status: "consumed",
       });
       expect(handlerSettled).toBe(true);
+    } finally {
+      db.close();
+      observability.close();
+    }
+  });
+
+  it("runs observability maintenance after an idle post-tick opportunity", async () => {
+    const db = openTestSidecar();
+    try {
+      const maintenanceCalls: number[] = [];
+      const loop = startInboxConsumer(db, {
+        workerId: "worker-maintenance-idle",
+        handler: async () => ({ kind: "completed" as const }),
+        pollMs: 5,
+        reconciliationGapMs: 40,
+        reconciliationOpportunisticFloorMs: 5,
+        reconciliationBatchLimit: 5,
+        onReconciliationMaintenance: (nowMs) => maintenanceCalls.push(nowMs),
+      });
+      try {
+        await sleep(100);
+        expect(maintenanceCalls.length).toBeGreaterThan(0);
+      } finally {
+        loop.stop();
+        await loop.done;
+      }
+    } finally {
+      db.close();
+    }
+  });
+
+  it("isolates maintenance failure from reconciliation and cognition truth", async () => {
+    const db = openTestSidecar();
+    try {
+      const seedNow = Date.now();
+      const stranded = seedStranded(db, "maintenance-throw", seedNow, seedNow);
+      const errors: unknown[] = [];
+      const handler = vi.fn(async () => ({ kind: "completed" as const }));
+      const loop = startInboxConsumer(db, {
+        workerId: "worker-maintenance-throw",
+        handler,
+        pollMs: 5,
+        reconciliationGapMs: 40,
+        reconciliationOpportunisticFloorMs: 5,
+        reconciliationBatchLimit: 5,
+        onReconciliationMaintenance: () => {
+          throw new Error("observability_purge_failed");
+        },
+        onError: (error) => errors.push(error),
+      });
+      try {
+        expect(await waitForState(db, stranded.eventId, "terminal")).toBe(true);
+        expect(db.prepare("SELECT state, status FROM inbox_events WHERE id = ?").get(stranded.eventId)).toMatchObject({
+          state: "terminal",
+          status: "consumed",
+        });
+        expect(handler).toHaveBeenCalled();
+        expect(errors.some((error) => error instanceof Error && error.message === "observability_purge_failed")).toBe(true);
+      } finally {
+        loop.stop();
+        await loop.done;
+      }
     } finally {
       db.close();
     }

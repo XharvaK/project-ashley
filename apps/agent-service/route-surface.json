@@ -100,6 +100,8 @@
     { "method": "POST", "path": "/initiative/resume", "ownerScope": "owner_required", "lifecycle": "active" },
     { "method": "POST", "path": "/initiative/evaluate", "ownerScope": "owner_required", "lifecycle": "retired" },
     { "method": "POST", "path": "/initiative/generate", "ownerScope": "owner_required", "lifecycle": "retired" },
+    { "method": "POST", "path": "/initiative/periodic/debug/enable", "ownerScope": "owner_required", "lifecycle": "active" },
+    { "method": "GET", "path": "/initiative/periodic/diagnostics", "ownerScope": "owner_required", "lifecycle": "active" },
     { "method": "GET", "path": "/initiative/status", "ownerScope": "owner_required", "lifecycle": "active" },
     { "method": "GET", "path": "/initiative/operational-status", "ownerScope": "owner_required", "lifecycle": "active" },
     { "method": "GET", "path": "/initiative/urgent", "ownerScope": "owner_required", "lifecycle": "active" },
