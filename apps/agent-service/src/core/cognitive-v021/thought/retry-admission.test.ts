@@ -159,7 +159,7 @@ afterEach(() => {
 });
 
 describe("v0.2.1 structural Thought retry admission", () => {
-  it("keeps the primary at 8192 and admits a corrective retry at 8192 under real rolling TPM accounting", async () => {
+  it("keeps the primary at 16_384 and admits a corrective retry at 16_384 under real rolling TPM accounting", async () => {
     delete process.env.ASHLEY_PHASE0_OFFLINE;
     env.cloudflareApiToken = "test-cloudflare-token";
     env.cloudflareAccountId = "test-account";
@@ -209,7 +209,7 @@ describe("v0.2.1 structural Thought retry admission", () => {
       lane: "urgent_grounded",
       routeId: "thought",
     });
-    expect(currentPolicy.policyRow.maxOutputTokens).toBe(8_192);
+    expect(currentPolicy.policyRow.maxOutputTokens).toBe(16_384);
     expect(quotaContractFor(CLOUDFLARE_BUCKET).tpm).toBe(TPM_LIMIT);
 
     const primary = await runThoughtModel(input, deps(primaryDb), {
@@ -224,7 +224,7 @@ describe("v0.2.1 structural Thought retry admission", () => {
         ORDER BY id DESC LIMIT 1`,
      ).get(CLOUDFLARE_BUCKET) as Record<string, unknown>;
     const currentPrimaryEstimatedInput = Number(primaryRow.estimated_input_tokens);
-    expect(Number(primaryRow.estimated_output_tokens)).toBe(8_192);
+    expect(Number(primaryRow.estimated_output_tokens)).toBe(16_384);
     expect(Number(primaryRow.actual_input_tokens)).toBe(4_772);
     expect(Number(primaryRow.actual_output_tokens)).toBe(55);
 
@@ -235,7 +235,7 @@ describe("v0.2.1 structural Thought retry admission", () => {
        providerId: "cloudflare",
        quotaBucket: CLOUDFLARE_BUCKET,
        modelAlias: CLOUDFLARE_MODEL,
-      maxTokens: 8_192,
+       maxTokens: 16_384,
       deadlineAtMs: Date.now() + 60_000,
       ownerId: "doc",
       dispatch: async () => ({
@@ -254,7 +254,7 @@ describe("v0.2.1 structural Thought retry admission", () => {
     } as Parameters<typeof runThoughtModel>[2] & { maxTokens: number });
     expect(retry.output.kind).toBe("settlement");
     expect(captured).toHaveLength(2);
-    expect(captured[0]?.options.maxTokens).toBe(8_192);
+    expect(captured[0]?.options.maxTokens).toBe(16_384);
     expect(captured[1]?.options.maxTokens).toBe(EXPECTED_RETRY_OUTPUT);
     expect(captured[1]?.options.responseFormat).toBe("json_object");
     expect(captured[1]?.messages[1]?.content).toBe(captured[0]?.messages[1]?.content);
@@ -298,11 +298,11 @@ describe("v0.2.1 structural Thought retry admission", () => {
     expect(combinedDemand).toBeLessThanOrEqual(TPM_LIMIT);
     expect(captureAdmission?.state).toBe("running");
     expect(dispatchStartedAt).toBeLessThan(retryDeadline);
-    expect(retryInput + 8_192 + SEEDED_CURRENT_TPM_USAGE).toBeLessThanOrEqual(TPM_LIMIT);
+    expect(retryInput + 16_384 + SEEDED_CURRENT_TPM_USAGE).toBeLessThanOrEqual(TPM_LIMIT);
     expect(retryInput + 50_000 + SEEDED_CURRENT_TPM_USAGE).toBeGreaterThan(TPM_LIMIT);
     expect(headroom).toBeGreaterThanOrEqual(0);
     expect(currentPrimaryEstimatedInput).toBeGreaterThan(0);
-    expect(currentPrimaryEstimatedInput + 8_192 + SEEDED_CURRENT_TPM_USAGE).toBeLessThanOrEqual(TPM_LIMIT);
+    expect(currentPrimaryEstimatedInput + 16_384 + SEEDED_CURRENT_TPM_USAGE).toBeLessThanOrEqual(TPM_LIMIT);
 
     console.info([
       `CURRENT_HELLO_RETRY_ESTIMATED_INPUT=${retryInput}`,
@@ -315,8 +315,8 @@ describe("v0.2.1 structural Thought retry admission", () => {
       `HEADROOM=${headroom}`,
       "RETRY_ADMISSION=PASS",
        `CLOUDFLARE_THOUGHT_TPM=${quotaContractFor(CLOUDFLARE_BUCKET).tpm}`,
-      `PRIMARY_8192_TOTAL=${currentPrimaryEstimatedInput + 8_192}`,
-       `CLOUDFLARE_SINGLE_REQUEST_ADMISSIBLE=${currentPrimaryEstimatedInput + 8_192 <= quotaContractFor(CLOUDFLARE_BUCKET).tpm ? "yes" : "no"}`,
+       `PRIMARY_16384_TOTAL=${currentPrimaryEstimatedInput + 16_384}`,
+       `CLOUDFLARE_SINGLE_REQUEST_ADMISSIBLE=${currentPrimaryEstimatedInput + 16_384 <= quotaContractFor(CLOUDFLARE_BUCKET).tpm ? "yes" : "no"}`,
     ].join("\n"));
 
     sidecar.close();

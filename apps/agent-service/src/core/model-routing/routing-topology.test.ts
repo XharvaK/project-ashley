@@ -24,12 +24,12 @@ afterEach(() => {
 });
 
 describe("Phase 5 successor routing topology", () => {
-  it("loads a new current revision while preserving the v1 snapshot", () => {
+  it("loads a new current revision while preserving the v2 snapshot", () => {
     const portfolio = currentPortfolio();
 
-    expect(portfolio.portfolioRevisionId).toBe("mfp_current_compatibility_v3");
+    expect(portfolio.portfolioRevisionId).toBe("mfp_current_compatibility_v4");
     expect(portfolio.replacesPortfolioRevisionId).toBe(
-      "mfp_current_compatibility_v2",
+      "mfp_current_compatibility_v3",
     );
     expect(portfolio.sourcePath.replaceAll("\\", "/")).toMatch(
       /current-compatibility\.v3\.json$/,

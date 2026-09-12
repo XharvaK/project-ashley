@@ -234,7 +234,7 @@ describe("mapMistralError", () => {
         modelFabric: {
           receipt: { fallbackClass: "none", attempts: [{ provider: "cloudflare" }] },
           providerBoundaryControls: {
-            maxTokens: 8192,
+            maxTokens: 16_384,
           },
         },
       });

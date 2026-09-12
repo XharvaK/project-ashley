@@ -29,6 +29,27 @@ function nomination(overrides: Partial<DurableNomination> = {}): DurableNominati
   };
 }
 
+function insertConsumedObservations(
+  db: Parameters<typeof tickAdmission>[0],
+  cycleId: string,
+  generation: number,
+  observationIds: readonly string[],
+): void {
+  for (const observationId of new Set(observationIds)) {
+    db.prepare(
+      `INSERT OR IGNORE INTO observations
+         (observation_id, cycle_id, generation, derived, replay_safe, modality,
+          payload_json, provenance, data_classification, secret_omitted, created_at_ms)
+       VALUES (?, ?, ?, 0, 1, 'text', ?, 'test:memory-admission', 'ordinary', 0, 0)`,
+    ).run(
+      observationId,
+      cycleId,
+      generation,
+      JSON.stringify({ fixture: "memory-admission" }),
+    );
+  }
+}
+
 function publishNomination(
   db: Parameters<typeof tickAdmission>[0],
   input: DurableNomination,
@@ -56,6 +77,12 @@ function publishNomination(
     },
     durableNominations: [input],
   });
+  insertConsumedObservations(
+    db,
+    input.cycleId,
+    input.generation,
+    draft.operations.observationsConsumed,
+  );
   publishSemanticTransaction(db, {
     ...draft,
     settlementId,
